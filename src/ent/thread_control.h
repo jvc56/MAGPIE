@@ -52,7 +52,8 @@ void thread_control_print(ThreadControl *thread_control, const char *content);
 void thread_control_wait_for_mode_stopped(ThreadControl *thread_control);
 bool thread_control_get_next_iter_output(ThreadControl *thread_control,
                                          ThreadControlIterOutput *iter_output);
-void thread_control_prng_seed(ThreadControl *thread_control, uint64_t seed);
+void thread_control_set_seed(ThreadControl *thread_control, uint64_t seed);
+uint64_t thread_control_get_seed(ThreadControl *thread_control);
 uint64_t thread_control_get_iter_count(const ThreadControl *thread_control);
 void thread_control_reset(ThreadControl *thread_control,
                           uint64_t max_iter_count);

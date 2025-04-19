@@ -28,6 +28,7 @@
 #include "../ent/validated_move.h"
 
 #include "autoplay.h"
+#include "bai.h"
 #include "cgp.h"
 #include "convert.h"
 #include "gameplay.h"
@@ -91,6 +92,7 @@ typedef enum {
   ARG_TOKEN_OUTFILE,
   ARG_TOKEN_EXEC_MODE,
   ARG_TOKEN_TT_FRACTION_OF_MEM,
+  ARG_TOKEN_TIME_LIMIT,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -127,6 +129,7 @@ struct Config {
   bool use_small_plays;
   char *record_filepath;
   double tt_fraction_of_mem;
+  int time_limit_seconds;
   game_variant_t game_variant;
   WinPct *win_pcts;
   BoardLayout *board_layout;
@@ -248,6 +251,10 @@ double config_get_stop_cond_pct(const Config *config) {
 
 double config_get_equity_margin(const Config *config) {
   return config->equity_margin;
+}
+
+int config_get_time_limit_seconds(const Config *config) {
+  return config->time_limit_seconds;
 }
 
 double config_get_tt_fraction_of_mem(const Config *config) {
@@ -724,14 +731,17 @@ char *status_move_gen(Config __attribute__((unused)) * config) {
 
 void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
                           SimArgs *sim_args) {
-  sim_args->max_iterations = config->max_iterations;
   sim_args->num_plies = config_get_plies(config);
-  sim_args->stop_cond_pct = config_get_stop_cond_pct(config);
-  sim_args->game = config_get_game(config);
   sim_args->move_list = config_get_move_list(config);
   sim_args->known_opp_rack = known_opp_rack;
   sim_args->win_pcts = config_get_win_pcts(config);
   sim_args->thread_control = config->thread_control;
+  bai_set_default_options(&sim_args->bai_options);
+  sim_args->bai_options.sample_limit = config_get_max_iterations(config);
+  sim_args->bai_options.delta =
+      1.0 - (config_get_stop_cond_pct(config) / 100.0);
+  sim_args->bai_options.time_limit_seconds =
+      config_get_time_limit_seconds(config);
 }
 
 sim_status_t config_simulate(const Config *config, Rack *known_opp_rack,
@@ -1516,6 +1526,13 @@ config_load_status_t config_load_data(Config *config) {
                                            check_stop_interval);
   }
 
+  config_load_status = config_load_int(config, ARG_TOKEN_TIME_LIMIT, 0, INT_MAX,
+                                       &config->time_limit_seconds);
+
+  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+    return config_load_status;
+  }
+
   // Double values
 
   const char *new_stop_cond_str =
@@ -1597,7 +1614,7 @@ config_load_status_t config_load_data(Config *config) {
   if (!config_get_parg_value(config, ARG_TOKEN_RANDOM_SEED, 0)) {
     seed = time(NULL);
   }
-  thread_control_prng_seed(config->thread_control, seed);
+  thread_control_set_seed(config->thread_control, seed);
   // Board layout
 
   const char *new_board_layout_name =
@@ -1825,7 +1842,8 @@ Config *config_create_default(void) {
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_TT_FRACTION_OF_MEM, "ttfraction", 1, 1,
                     execute_fatal, status_fatal);
-
+  parsed_arg_create(config, ARG_TOKEN_TIME_LIMIT, "tlim", 1, 1, execute_fatal,
+                    status_fatal);
   config->data_paths = string_duplicate(DEFAULT_DATA_PATHS);
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
@@ -1837,6 +1855,7 @@ Config *config_create_default(void) {
   config->max_iterations = 0;
   config->stop_cond_pct = 99;
   config->equity_margin = 0;
+  config->time_limit_seconds = 0;
   config->use_game_pairs = true;
   config->use_small_plays = false;
   config->human_readable = false;

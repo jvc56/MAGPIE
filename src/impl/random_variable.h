@@ -3,6 +3,13 @@
 
 #include <stdint.h>
 
+#include "../def/bai_defs.h"
+
+#include "../ent/game.h"
+#include "../ent/rack.h"
+#include "../ent/sim_results.h"
+#include "../ent/thread_control.h"
+
 #include "bai_logger.h"
 
 typedef struct RandomVariables RandomVariables;
@@ -15,6 +22,16 @@ typedef enum {
   RANDOM_VARIABLES_SIMMED_PLAYS,
 } random_variables_t;
 
+typedef struct SimArgs {
+  int num_plies;
+  const Game *game;
+  const MoveList *move_list;
+  Rack *known_opp_rack;
+  WinPct *win_pcts;
+  ThreadControl *thread_control;
+  BAIOptions bai_options;
+} SimArgs;
+
 typedef struct RandomVariablesArgs {
   random_variables_t type;
   uint64_t num_rvs;
@@ -22,11 +39,14 @@ typedef struct RandomVariablesArgs {
   uint64_t num_samples;
   const double *samples;
   const double *means_and_vars;
+  const SimArgs *sim_args;
+  SimResults *sim_results;
 } RandomVariablesArgs;
 
 RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args);
 void rvs_destroy(RandomVariables *rvs);
-double rvs_sample(RandomVariables *rvs, uint64_t k, BAILogger *bai_logger);
+double rvs_sample(RandomVariables *rvs, uint64_t k, int thread_index,
+                  BAILogger *bai_logger);
 void rvs_reset(RandomVariables *rvs);
 bool rvs_mark_as_epigon_if_similar(RandomVariables *rvs, int leader, int i);
 bool rvs_is_epigon(const RandomVariables *rvs, int i);

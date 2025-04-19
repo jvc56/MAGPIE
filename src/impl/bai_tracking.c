@@ -5,7 +5,7 @@
 
 #include "../def/bai_defs.h"
 
-#include "../ent/bai_logger.h"
+#include "bai_logger.h"
 
 #include "../util/util.h"
 

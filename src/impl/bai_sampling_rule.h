@@ -3,8 +3,9 @@
 
 #include "../def/bai_defs.h"
 
-#include "../ent/bai_logger.h"
-#include "../ent/random_variable.h"
+#include "bai_logger.h"
+
+#include "random_variable.h"
 
 typedef struct BAISamplingRule BAISamplingRule;
 

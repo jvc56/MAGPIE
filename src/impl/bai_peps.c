@@ -6,7 +6,7 @@
 
 #include "../def/bai_defs.h"
 
-#include "../ent/bai_logger.h"
+#include "bai_logger.h"
 
 #include <complex.h>
 #include <float.h>

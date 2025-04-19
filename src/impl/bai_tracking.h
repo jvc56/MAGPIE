@@ -3,7 +3,7 @@
 
 #include "../def/bai_defs.h"
 
-#include "../ent/bai_logger.h"
+#include "bai_logger.h"
 
 typedef struct BAITracking BAITracking;
 

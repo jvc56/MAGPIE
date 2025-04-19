@@ -23,6 +23,7 @@ struct ThreadControl {
   uint64_t iter_count_completed;
   uint64_t max_iter_count;
   double time_elapsed;
+  uint64_t seed;
   XoshiroPRNG *prng;
   check_stop_status_t check_stop_status;
   mode_search_status_t current_mode;
@@ -61,7 +62,8 @@ ThreadControl *thread_control_create(void) {
   thread_control->infile =
       file_handler_create_from_filename(STDIN_FILENAME, FILE_HANDLER_MODE_READ);
   thread_control->timer = mtimer_create();
-  thread_control->prng = prng_create(time(NULL));
+  thread_control->seed = time(NULL);
+  thread_control->prng = prng_create(thread_control->seed);
   return thread_control;
 }
 
@@ -302,8 +304,16 @@ double thread_control_get_seconds_elapsed(const ThreadControl *thread_control) {
 // NOT THREAD SAFE: This function is meant to be called
 // before or after a multithreaded operation. Do not call this in a
 // multithreaded context as it is intentionally not thread safe.
-void thread_control_prng_seed(ThreadControl *thread_control, uint64_t seed) {
-  prng_seed(thread_control->prng, seed);
+void thread_control_set_seed(ThreadControl *thread_control, uint64_t seed) {
+  thread_control->seed = seed;
+  prng_seed(thread_control->prng, thread_control->seed);
+}
+
+// NOT THREAD SAFE: This function is meant to be called
+// before or after a multithreaded operation. Do not call this in a
+// multithreaded context as it is intentionally not thread safe.
+uint64_t thread_control_get_seed(ThreadControl *thread_control) {
+  return thread_control->seed;
 }
 
 // Copies the thread control PRNG to the other PRNG and performs a PRNG

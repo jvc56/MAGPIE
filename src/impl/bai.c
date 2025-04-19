@@ -6,9 +6,8 @@
 #include "../def/bai_defs.h"
 #include "../def/thread_control_defs.h"
 
-#include "../ent/bai_logger.h"
-#include "../ent/random_variable.h"
 #include "../ent/thread_control.h"
+#include "bai_logger.h"
 
 #include "../util/log.h"
 #include "../util/util.h"
@@ -16,6 +15,7 @@
 #include "bai_helper.h"
 #include "bai_peps.h"
 #include "bai_sampling_rule.h"
+#include "random_variable.h"
 
 #define MINIMUM_VARIANCE 1e-10
 
@@ -125,7 +125,7 @@ typedef struct BAI {
   int K;
   int total_samples_received;
   int total_samples_requested;
-  int similar_play_cutoff;
+  int epigon_cutoff;
   bool threshold_reached;
   bool is_multithreaded;
   int *N_received;
@@ -146,13 +146,13 @@ typedef struct BAI {
 } BAI;
 
 BAI *bai_create(ThreadControl *thread_control, RandomVariables *rvs,
-                const int similar_play_cutoff, BAILogger *bai_logger) {
+                const int epigon_cutoff, BAILogger *bai_logger) {
   BAI *bai = malloc_or_die(sizeof(BAI));
   bai->initial_K = rvs_get_num_rvs(rvs);
   bai->K = bai->initial_K;
   bai->total_samples_received = 0;
   bai->total_samples_requested = 0;
-  bai->similar_play_cutoff = similar_play_cutoff;
+  bai->epigon_cutoff = epigon_cutoff;
   bai->threshold_reached = false;
   bai->N_received = calloc_or_die(bai->initial_K, sizeof(int));
   bai->N_requested = calloc_or_die(bai->initial_K, sizeof(int));
@@ -228,6 +228,8 @@ typedef struct SampleWorkerArgs {
   ProdConQueue *request_queue;
   ProdConQueue *response_queue;
   RandomVariables *rvs;
+  pthread_mutex_t *thread_index_counter_mutex;
+  int *thread_index_counter;
   BAILogger *bai_logger;
 } SampleWorkerArgs;
 
@@ -237,6 +239,14 @@ void *bai_sample_worker(void *args) {
   ProdConQueue *response_queue = bai_worker_args->response_queue;
   RandomVariables *rvs = bai_worker_args->rvs;
   BAILogger *bai_logger = bai_worker_args->bai_logger;
+  pthread_mutex_t *thread_index_counter_mutex =
+      bai_worker_args->thread_index_counter_mutex;
+  int *thread_index_counter = bai_worker_args->thread_index_counter;
+  int thread_index;
+  pthread_mutex_lock(thread_index_counter_mutex);
+  thread_index = *thread_index_counter;
+  (*thread_index_counter)++;
+  pthread_mutex_unlock(thread_index_counter_mutex);
   ProdConQueueMessage req;
   ProdConQueueMessage resp;
   while (true) {
@@ -244,7 +254,8 @@ void *bai_sample_worker(void *args) {
     if (req.queue_closed) {
       break;
     }
-    resp.sample = rvs_sample(rvs, req.arm_datum->rvs_index, bai_logger);
+    resp.sample =
+        rvs_sample(rvs, req.arm_datum->rvs_index, thread_index, bai_logger);
     resp.arm_datum = req.arm_datum;
     prod_con_queue_produce(response_queue, resp);
   }
@@ -282,7 +293,7 @@ void bai_sample_receive(BAI *bai) {
 
 void bai_sample_singlethreaded(BAI *bai, const int k) {
   const double sample =
-      rvs_sample(bai->rvs, bai_get_rvs_index(bai, k), bai->bai_logger);
+      rvs_sample(bai->rvs, bai_get_rvs_index(bai, k), 0, bai->bai_logger);
   bai->N_requested[k]++;
   bai->total_samples_requested++;
   bai_update_arm_data_with_sample(bai, k, sample);
@@ -326,8 +337,8 @@ void bai_swap(BAI *bai, const int i, const int j) {
 // If epigons are evaluated, astar will be 0
 // Otherwise, astar will remained unchanged.
 int bai_potentially_mark_epigons(BAI *bai, const int astar) {
-  if (bai->similar_play_cutoff == 0 ||
-      bai->total_samples_received < bai->similar_play_cutoff ||
+  if (bai->epigon_cutoff == 0 ||
+      bai->total_samples_received < bai->epigon_cutoff ||
       bai->arm_data[astar]->is_similarity_evaluated) {
     return astar;
   }
@@ -423,7 +434,6 @@ bool bai_is_finished(BAIIsFinishedArgs *args, const exit_status_t exit_status,
   bool finished = false;
   switch (exit_status) {
   case EXIT_STATUS_NONE:
-  case EXIT_STATUS_PROBABILISTIC:
   case EXIT_STATUS_MAX_ITERATIONS:
     log_fatal("invalid BAI finished exit condition: ", exit_status);
     break;
@@ -468,8 +478,8 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   thread_control_reset(thread_control, 0);
   rvs_reset(rvs);
 
-  BAI *bai = bai_create(thread_control, rvs, bai_options->similar_play_cutoff,
-                        bai_logger);
+  BAI *bai =
+      bai_create(thread_control, rvs, bai_options->epigon_cutoff, bai_logger);
 
   bai_set_result(bai, EXIT_STATUS_NONE, 0, bai_result);
 
@@ -481,11 +491,16 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   const int number_of_threads = thread_control_get_threads(thread_control);
 
   pthread_t *worker_ids = NULL;
+  int thread_index_counter = 0;
+  pthread_mutex_t thread_index_counter_mutex;
+  pthread_mutex_init(&thread_index_counter_mutex, NULL);
 
   SampleWorkerArgs bai_worker_args = {
       .request_queue = bai->request_queue,
       .response_queue = bai->response_queue,
       .rvs = rvs,
+      .thread_index_counter_mutex = &thread_index_counter_mutex,
+      .thread_index_counter = &thread_index_counter,
       .bai_logger = bai_logger,
   };
 
@@ -612,4 +627,14 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   bai_glrt_results_destroy(glrt_results);
   bai_destroy_threshold(Sβ);
   bai_destroy(bai);
+}
+
+void bai_set_default_options(BAIOptions *bai_options) {
+  bai_options->threshold = BAI_THRESHOLD_HT;
+  bai_options->delta = 0.01;
+  bai_options->is_EV = true;
+  bai_options->sampling_rule = BAI_SAMPLING_RULE_TRACK_AND_STOP;
+  bai_options->epigon_cutoff = 1000;
+  bai_options->time_limit_seconds = 0;
+  bai_options->sample_limit = 0;
 }

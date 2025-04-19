@@ -13,8 +13,6 @@ typedef enum {
 
 typedef enum {
   EXIT_STATUS_NONE,
-  // FIXME: remove probabilistic enum
-  EXIT_STATUS_PROBABILISTIC,
   EXIT_STATUS_MAX_ITERATIONS,
   EXIT_STATUS_USER_INTERRUPT,
   EXIT_STATUS_THRESHOLD,

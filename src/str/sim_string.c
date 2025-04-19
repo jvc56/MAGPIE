@@ -42,38 +42,29 @@ char *ucgi_sim_stats(Game *game, SimResults *sim_results, double nps,
   Board *board = game_get_board(game);
   StringBuilder *sim_stats_string_builder = string_builder_create();
   int number_of_simmed_plays = sim_results_get_number_of_plays(sim_results);
-  double zval = sim_results_get_zval(sim_results);
-  bool z_valid = is_z_valid(zval);
   for (int i = 0; i < number_of_simmed_plays; i++) {
     const SimmedPlay *play = sim_results_get_simmed_play(sim_results, i);
     Stat *win_pct_stat = simmed_play_get_win_pct_stat(play);
     double wp_mean = stat_get_mean(win_pct_stat) * 100.0;
-    double wp_margin_of_error = 0.0;
-    if (z_valid) {
-      wp_margin_of_error = stat_get_margin_of_error(win_pct_stat, zval) * 100.0;
-    }
+    double wp_stdev = stat_get_stdev(win_pct_stat) * 100.0;
 
     Stat *equity_stat = simmed_play_get_equity_stat(play);
     double eq_mean = stat_get_mean(equity_stat);
-    double eq_se = 0;
-    if (z_valid) {
-      eq_se = stat_get_margin_of_error(equity_stat, zval);
-    }
+    double eq_se = stat_get_stdev(equity_stat);
 
     uint64_t niters = stat_get_num_unique_samples(equity_stat);
 
     Move *move = simmed_play_get_move(play);
     string_builder_add_string(sim_stats_string_builder, "info currmove ");
     string_builder_add_ucgi_move(sim_stats_string_builder, move, board, ld);
-    bool ignore = simmed_play_get_ignore(play);
+    bool is_epigon = simmed_play_get_is_epigon(play);
     string_builder_add_formatted_string(
         sim_stats_string_builder,
-        " sc %d wp %.3f wpe %.3f eq %.3f eqe %.3f it %llu "
+        " sc %d wp %.3f stdev %.3f eq %.3f eqe %.3f it %llu "
         "ig %d ",
-        equity_to_int(move_get_score(move)), wp_mean, wp_margin_of_error,
-        eq_mean, eq_se,
+        equity_to_int(move_get_score(move)), wp_mean, wp_stdev, eq_mean, eq_se,
         // need cast for WASM:
-        (long long unsigned int)niters, ignore);
+        (long long unsigned int)niters, is_epigon);
     for (int j = 0; j < sim_results_get_max_plies(sim_results); j++) {
       string_builder_add_formatted_string(
           sim_stats_string_builder,

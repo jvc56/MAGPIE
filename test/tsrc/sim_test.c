@@ -37,8 +37,6 @@ void print_sim_stats(Game *game, SimResults *sim_results) {
   const LetterDistribution *ld = game_get_ld(game);
   printf("%-20s%-9s%-16s%-16s\n", "Play", "Score", "Win%", "Equity");
   StringBuilder *move_description = string_builder_create();
-  double zval = sim_results_get_zval(sim_results);
-  bool z_valid = is_z_valid(zval);
   for (int i = 0; i < sim_results_get_number_of_plays(sim_results); i++) {
     const SimmedPlay *play = sim_results_get_simmed_play(sim_results, i);
     Stat *win_pct_stat = simmed_play_get_win_pct_stat(play);
@@ -50,22 +48,16 @@ void print_sim_stats(Game *game, SimResults *sim_results) {
     char *wp_str = NULL;
     char *eq_str = NULL;
 
-    if (z_valid) {
-      double wp_margin_of_error =
-          stat_get_margin_of_error(win_pct_stat, zval) * 100.0;
-      double eq_margin_or_error = stat_get_margin_of_error(equity_stat, zval);
-      wp_str = get_formatted_string("%.3f±%.3f", wp_mean, wp_margin_of_error);
-      eq_str = get_formatted_string("%.3f±%.3f", eq_mean, eq_margin_or_error);
-    } else {
-      wp_str = get_formatted_string("%.3f", wp_mean);
-      eq_str = get_formatted_string("%.3f", eq_mean);
-    }
+    double wp_stdev = stat_get_stdev(win_pct_stat) * 100.0;
+    double eq_stdev = stat_get_stdev(equity_stat);
+    wp_str = get_formatted_string("%.3f %.3f", wp_mean, wp_stdev);
+    eq_str = get_formatted_string("%.3f %.3f", eq_mean, eq_stdev);
 
-    const char *ignore = simmed_play_get_ignore(play) ? "❌" : "";
+    const char *is_epigon = simmed_play_get_is_epigon(play) ? "❌" : "";
     Move *move = simmed_play_get_move(play);
     string_builder_add_move_description(move_description, move, ld);
     printf("%-20s%-9d%-16s%-16s%s\n", string_builder_peek(move_description),
-           move_get_score(move), wp_str, eq_str, ignore);
+           move_get_score(move), wp_str, eq_str, is_epigon);
     string_builder_clear(move_description);
     free(wp_str);
     free(eq_str);
@@ -226,7 +218,7 @@ void test_play_similarity(void) {
   // is NONE.
 
   StringBuilder *p1_string_builder = string_builder_create();
-  bool found_ignored_play = false;
+  bool found_epigon = false;
   for (int i = 0; i < 4; i++) {
     SimmedPlay *play_i = sim_results_get_simmed_play(sim_results, i);
     Move *move_i = simmed_play_get_move(play_i);
@@ -235,11 +227,11 @@ void test_play_similarity(void) {
                                         config_get_ld(config));
 
     const char *p1 = string_builder_peek(p1_string_builder);
-    if (simmed_play_get_ignore(play_i)) {
+    if (simmed_play_get_is_epigon(play_i)) {
       assert(strings_equal(p1, "8F ATRESIC") ||
              strings_equal(p1, "8F STEARIC"));
-      assert(!found_ignored_play);
-      found_ignored_play = true;
+      assert(!found_epigon);
+      found_epigon = true;
     }
   }
 

@@ -5,11 +5,10 @@
 
 #include "../def/bai_defs.h"
 
-#include "../ent/bai_logger.h"
-#include "../ent/random_variable.h"
-
+#include "bai_logger.h"
 #include "bai_peps.h"
 #include "bai_tracking.h"
+#include "random_variable.h"
 
 #include "../util/log.h"
 #include "../util/util.h"
@@ -111,7 +110,9 @@ int top_two_next_sample(const void *data,
                         const double *Zs, const int size, RandomVariables *rng,
                         BAILogger *bai_logger) {
   TopTwo *top_two = (TopTwo *)data;
-  const double u = rvs_sample(rng, 0, bai_logger);
+  // In this case, rng is just a simple uniform random variable between 0 and 1
+  // and does not need an arm index or thread index.
+  const double u = rvs_sample(rng, 0, 0, bai_logger);
   int k = 0;
   bai_logger_log_title(bai_logger, "TOP_TWO");
   bai_logger_log_int(bai_logger, "astar", astar + 1);

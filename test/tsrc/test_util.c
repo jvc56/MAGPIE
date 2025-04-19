@@ -661,7 +661,7 @@ void assert_moves_are_equal(const Move *m1, const Move *m2) {
 void assert_simmed_plays_are_equal(const SimmedPlay *sp1, const SimmedPlay *sp2,
                                    int max_plies) {
   assert(simmed_play_get_id(sp1) == simmed_play_get_id(sp2));
-  assert(simmed_play_get_ignore(sp1) == simmed_play_get_ignore(sp2));
+  assert(simmed_play_get_is_epigon(sp1) == simmed_play_get_is_epigon(sp2));
   assert_moves_are_equal(simmed_play_get_move(sp1), simmed_play_get_move(sp2));
 
   for (int i = 0; i < max_plies; i++) {
@@ -686,7 +686,6 @@ void assert_sim_results_equal(SimResults *sr1, SimResults *sr2) {
          sim_results_get_number_of_plays(sr2));
   assert(sim_results_get_iteration_count(sr1) ==
          sim_results_get_iteration_count(sr2));
-  assert(within_epsilon(sim_results_get_zval(sr1), sim_results_get_zval(sr2)));
   assert(sim_results_get_node_count(sr1) == sim_results_get_node_count(sr2));
   for (int i = 0; i < sim_results_get_number_of_plays(sr1); i++) {
     assert_simmed_plays_are_equal(sim_results_get_simmed_play(sr1, i),
@@ -773,7 +772,7 @@ void assert_move_equity_exact(const Move *move, Equity expected_equity) {
   assert(move_get_equity(move) == expected_equity);
 }
 
-void assert_rack_score(const LetterDistribution *ld, const Rack *rack, 
+void assert_rack_score(const LetterDistribution *ld, const Rack *rack,
                        int expected_score) {
   assert(rack_get_score(ld, rack) == int_to_equity(expected_score));
 }

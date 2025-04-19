@@ -7,8 +7,8 @@
 
 #include "../../src/def/bai_defs.h"
 
-#include "../../src/ent/bai_logger.h"
-#include "../../src/ent/random_variable.h"
+#include "../../src/impl/bai_logger.h"
+#include "../../src/impl/random_variable.h"
 
 #include "../../src/impl/bai.h"
 #include "../../src/impl/bai_sampling_rule.h"
@@ -72,7 +72,7 @@ void test_bai_track_and_stop(int num_threads) {
       .delta = 0.05,
       .is_EV = true,
       .sample_limit = 1000,
-      .similar_play_cutoff = 0,
+      .epigon_cutoff = 0,
       .time_limit_seconds = 0,
   };
 
@@ -110,7 +110,7 @@ void test_bai_sample_limit(int num_threads) {
       .delta = 0.05,
       .is_EV = true,
       .sample_limit = 100,
-      .similar_play_cutoff = 10,
+      .epigon_cutoff = 10,
       .time_limit_seconds = 0,
   };
   ThreadControl *thread_control = thread_control_create();
@@ -182,7 +182,7 @@ void test_bai_time_limit(int num_threads) {
       .delta = 0.01,
       .is_EV = true,
       .sample_limit = 100000000,
-      .similar_play_cutoff = 100000,
+      .epigon_cutoff = 100000,
       .time_limit_seconds = 5,
   };
 
@@ -249,7 +249,7 @@ void write_bai_input(const double delta, const RandomVariablesArgs *rv_args,
   }
   RandomVariables *rng = rvs_create(rng_args);
   for (uint64_t i = 0; i < rv_args->num_samples; i++) {
-    fprintf(file, "%0.20f\n", rvs_sample(rng, 0, NULL));
+    fprintf(file, "%0.20f\n", rvs_sample(rng, 0, 0, NULL));
   }
   rvs_destroy(rng);
   fclose(file);
@@ -273,7 +273,7 @@ void test_bai_epigons(int num_threads) {
   BAIOptions bai_options = {
       .delta = 0.01,
       .sample_limit = num_samples,
-      .similar_play_cutoff = 100,
+      .epigon_cutoff = 100,
       .time_limit_seconds = 0,
   };
 
@@ -412,7 +412,7 @@ void test_bai_input_from_file(const char *bai_input_filename,
       .threshold = strategies[pi][2],
       .delta = delta,
       .sample_limit = num_samples,
-      .similar_play_cutoff = 0,
+      .epigon_cutoff = 0,
       .time_limit_seconds = 0,
   };
   ThreadControl *thread_control = thread_control_create();
