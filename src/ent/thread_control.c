@@ -18,17 +18,14 @@
 struct ThreadControl {
   int number_of_threads;
   int print_info_interval;
-  int check_stopping_condition_interval;
   uint64_t iter_count;
   uint64_t iter_count_completed;
   uint64_t max_iter_count;
   double time_elapsed;
   uint64_t seed;
   XoshiroPRNG *prng;
-  check_stop_status_t check_stop_status;
   mode_search_status_t current_mode;
   exit_status_t exit_status;
-  pthread_mutex_t check_stopping_condition_mutex;
   pthread_mutex_t current_mode_mutex;
   pthread_mutex_t exit_status_mutex;
   pthread_mutex_t searching_mode_mutex;
@@ -43,16 +40,13 @@ ThreadControl *thread_control_create(void) {
   ThreadControl *thread_control = malloc_or_die(sizeof(ThreadControl));
   thread_control->exit_status = EXIT_STATUS_NONE;
   thread_control->current_mode = MODE_STOPPED;
-  thread_control->check_stop_status = CHECK_STOP_INACTIVE;
   thread_control->number_of_threads = 1;
-  thread_control->check_stopping_condition_interval = 0;
   thread_control->print_info_interval = 0;
   thread_control->iter_count = 0;
   thread_control->iter_count_completed = 0;
   thread_control->time_elapsed = 0;
   thread_control->max_iter_count = 0;
   pthread_mutex_init(&thread_control->current_mode_mutex, NULL);
-  pthread_mutex_init(&thread_control->check_stopping_condition_mutex, NULL);
   pthread_mutex_init(&thread_control->exit_status_mutex, NULL);
   pthread_mutex_init(&thread_control->searching_mode_mutex, NULL);
   pthread_mutex_init(&thread_control->iter_mutex, NULL);
@@ -126,17 +120,6 @@ void thread_control_increment_max_iter_count(ThreadControl *thread_control,
   thread_control->max_iter_count += inc;
 }
 
-int thread_control_get_check_stop_interval(
-    const ThreadControl *thread_control) {
-  return thread_control->check_stopping_condition_interval;
-}
-
-void thread_control_set_check_stop_interval(
-    ThreadControl *thread_control, int check_stopping_condition_interval) {
-  thread_control->check_stopping_condition_interval =
-      check_stopping_condition_interval;
-}
-
 exit_status_t thread_control_get_exit_status(ThreadControl *thread_control) {
   exit_status_t exit_status;
   pthread_mutex_lock(&thread_control->exit_status_mutex);
@@ -196,28 +179,6 @@ mode_search_status_t thread_control_get_mode(ThreadControl *thread_control) {
   mode = thread_control->current_mode;
   pthread_mutex_unlock(&thread_control->current_mode_mutex);
   return mode;
-}
-
-bool thread_control_set_check_stop_active(ThreadControl *thread_control) {
-  bool success = false;
-  pthread_mutex_lock(&thread_control->check_stopping_condition_mutex);
-  if (thread_control->check_stop_status == CHECK_STOP_INACTIVE) {
-    thread_control->check_stop_status = CHECK_STOP_ACTIVE;
-    success = true;
-  }
-  pthread_mutex_unlock(&thread_control->check_stopping_condition_mutex);
-  return success;
-}
-
-bool thread_control_set_check_stop_inactive(ThreadControl *thread_control) {
-  bool success = false;
-  pthread_mutex_lock(&thread_control->check_stopping_condition_mutex);
-  if (thread_control->check_stop_status == CHECK_STOP_ACTIVE) {
-    thread_control->check_stop_status = CHECK_STOP_INACTIVE;
-    success = true;
-  }
-  pthread_mutex_unlock(&thread_control->check_stopping_condition_mutex);
-  return success;
 }
 
 // NOT THREAD SAFE: This does not require locking since it is

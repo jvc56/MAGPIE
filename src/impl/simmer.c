@@ -5,6 +5,8 @@
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 
+#include "../str/sim_string.h"
+
 #include "bai.h"
 #include "move_gen.h"
 #include "random_variable.h"
@@ -41,6 +43,12 @@ sim_status_t simulate(const SimArgs *sim_args, SimResults *sim_results) {
 
   bai(&sim_args->bai_options, rvs, rng, sim_args->thread_control, NULL,
       &bai_result);
+
+  print_ucgi_sim_stats(
+      sim_args->game, sim_results, sim_args->thread_control,
+      (double)sim_results_get_node_count(sim_results) /
+          thread_control_get_seconds_elapsed(sim_args->thread_control),
+      true);
 
   rvs_destroy(rvs);
   rvs_destroy(rng);

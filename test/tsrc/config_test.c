@@ -124,10 +124,6 @@ void test_config_load_error_cases(void) {
                          CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
   test_config_load_error(config, "sim -pfreq -40",
                          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
-  test_config_load_error(config, "sim -cfreq z",
-                         CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
-  test_config_load_error(config, "sim -cfreq -90",
-                         CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
   test_config_load_error(config, "sim -l1 CSW21",
                          CONFIG_LOAD_STATUS_LEXICON_MISSING);
   test_config_load_error(config, "sim -l1 CSW21 -l2 DISC2",
@@ -171,7 +167,6 @@ void test_config_load_success(void) {
   int seed = 101;
   int number_of_threads = 6;
   int print_info = 200;
-  int check_stop = 700;
 
   StringBuilder *test_string_builder = string_builder_create();
   string_builder_add_formatted_string(
@@ -179,13 +174,13 @@ void test_config_load_success(void) {
       "set -ld %s -bb %d -var %s -l1 %s -l2 %s -s1 %s -r1 "
       "%s -s2 %s -r2 %s -eq %0.2f -numplays %d "
       "-plies %d -it "
-      "%d -scond %d -seed %d -threads %d -pfreq %d -cfreq %d -gp true -hr true "
+      "%d -scond %d -seed %d -threads %d -pfreq %d -gp true -hr true "
       "-p1 %s "
       "-p2 "
       "%s",
       ld_name, bingo_bonus, game_variant, l1, l2, s1, r1, s2, r2, equity_margin,
       num_plays, plies, max_iterations, stopping_cond, seed, number_of_threads,
-      print_info, check_stop, p1, p2);
+      print_info, p1, p2);
 
   load_and_exec_config_or_die(config, string_builder_peek(test_string_builder));
 
@@ -208,8 +203,6 @@ void test_config_load_success(void) {
          number_of_threads);
   assert(thread_control_get_print_info_interval(
              config_get_thread_control(config)) == print_info);
-  assert(thread_control_get_check_stop_interval(
-             config_get_thread_control(config)) == check_stop);
   assert(config_get_use_game_pairs(config));
   assert(config_get_human_readable(config));
 
@@ -259,8 +252,6 @@ void test_config_load_success(void) {
          number_of_threads);
   assert(thread_control_get_print_info_interval(
              config_get_thread_control(config)) == print_info);
-  assert(thread_control_get_check_stop_interval(
-             config_get_thread_control(config)) == check_stop);
   assert(!config_get_use_game_pairs(config));
   assert(!config_get_human_readable(config));
 

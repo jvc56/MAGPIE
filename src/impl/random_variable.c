@@ -1,6 +1,7 @@
 #include "random_variable.h"
 
 #include <math.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 
 #include "../ent/game.h"
@@ -11,6 +12,8 @@
 #include "bai_logger.h"
 #include "gameplay.h"
 
+#include "../str/sim_string.h"
+
 #include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
@@ -18,14 +21,14 @@
 #define SIMILARITY_EPSILON 1e-6
 
 typedef double (*rvs_sample_func_t)(RandomVariables *, const uint64_t,
-                                    const int, BAILogger *);
+                                    const int, const uint64_t, BAILogger *);
 typedef bool (*rvs_similar_func_t)(RandomVariables *, const int, const int);
 typedef bool (*rvs_is_epigon_func_t)(const RandomVariables *, const int);
 typedef void (*rvs_destroy_data_func_t)(RandomVariables *);
 
 struct RandomVariables {
   int num_rvs;
-  uint64_t total_samples;
+  atomic_uint_fast64_t total_samples;
   rvs_sample_func_t sample_func;
   rvs_similar_func_t similar_func;
   rvs_is_epigon_func_t is_epigon_func;
@@ -44,6 +47,7 @@ typedef struct RVUniform {
 double rv_uniform_sample(RandomVariables *rvs,
                          const uint64_t __attribute__((unused)) k,
                          const int __attribute__((unused)) thread_index,
+                         const uint64_t __attribute__((unused)) sample_count,
                          BAILogger __attribute__((unused)) * bai_logger) {
   RVUniform *rv_uniform = (RVUniform *)rvs->data;
   return uniform_sample(rv_uniform->xoshiro_prng);
@@ -84,12 +88,11 @@ typedef struct RVUniformPredetermined {
   double *samples;
 } RVUniformPredetermined;
 
-double rv_uniform_predetermined_sample(RandomVariables *rvs,
-                                       const uint64_t __attribute__((unused)) k,
-                                       const int
-                                       __attribute__((unused)) thread_index,
-                                       BAILogger __attribute__((unused)) *
-                                           bai_logger) {
+double rv_uniform_predetermined_sample(
+    RandomVariables *rvs, const uint64_t __attribute__((unused)) k,
+    const int __attribute__((unused)) thread_index,
+    const uint64_t __attribute__((unused)) sample_count,
+    BAILogger __attribute__((unused)) * bai_logger) {
   RVUniformPredetermined *rv_uniform_predetermined =
       (RVUniformPredetermined *)rvs->data;
   if (rv_uniform_predetermined->index >=
@@ -147,6 +150,7 @@ typedef struct RVNormal {
 
 double rv_normal_sample(RandomVariables *rvs, const uint64_t k,
                         const int __attribute__((unused)) thread_index,
+                        const uint64_t __attribute__((unused)) sample_count,
                         BAILogger __attribute__((unused)) * bai_logger) {
   // Implements the Box-Muller transform
   RVNormal *rv_normal = (RVNormal *)rvs->data;
@@ -215,6 +219,8 @@ typedef struct RVNormalPredetermined {
 double rv_normal_predetermined_sample(RandomVariables *rvs, const uint64_t k,
                                       const int
                                       __attribute__((unused)) thread_index,
+                                      const uint64_t
+                                      __attribute__((unused)) sample_count,
                                       BAILogger *bai_logger) {
   RVNormalPredetermined *rv_normal_predetermined =
       (RVNormalPredetermined *)rvs->data;
@@ -390,7 +396,7 @@ bool simmer_plays_are_similar(const Simmer *simmer,
 }
 
 double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
-                     const int thread_index,
+                     const int thread_index, const uint64_t sample_count,
                      BAILogger __attribute__((unused)) * bai_logger) {
   Simmer *simmer = (Simmer *)rvs->data;
   SimResults *sim_results = simmer->sim_results;
@@ -463,6 +469,17 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   // reset to first state. we only need to restore one backup.
   game_unplay_last_move(game);
   return_rack_to_bag(game, player_off_turn_index);
+
+  const int print_interval =
+      thread_control_get_print_info_interval(simmer->thread_control);
+  if (print_interval > 0 && sample_count % print_interval == 0) {
+    print_ucgi_sim_stats(
+        simmer_worker->game, simmer->sim_results, simmer->thread_control,
+        (double)sim_results_get_node_count(simmer->sim_results) /
+            thread_control_get_seconds_elapsed(simmer->thread_control),
+        false);
+  }
+
   return wpct;
 }
 
@@ -545,7 +562,7 @@ RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {
   // since it is cumbersome and unnecessary for the caller to set
   // rvs_args->num_rvs for simmed plays.
   rvs->num_rvs = rvs_args->num_rvs;
-  rvs->total_samples = 0;
+  atomic_store(&rvs->total_samples, 0);
   switch (rvs_args->type) {
   case RANDOM_VARIABLES_UNIFORM:
     rv_uniform_create(rvs, rvs_args->seed);
@@ -576,8 +593,9 @@ void rvs_destroy(RandomVariables *rvs) {
 
 double rvs_sample(RandomVariables *rvs, const uint64_t k,
                   const int thread_index, BAILogger *bai_logger) {
-  rvs->total_samples++;
-  return rvs->sample_func(rvs, k, thread_index, bai_logger);
+  uint64_t prev_total_samples = atomic_fetch_add(&rvs->total_samples, 1);
+  return rvs->sample_func(rvs, k, thread_index, prev_total_samples + 1,
+                          bai_logger);
 }
 
 void rvs_reset(RandomVariables *rvs) { rvs->total_samples = 0; }

@@ -86,7 +86,6 @@ typedef enum {
   ARG_TOKEN_RANDOM_SEED,
   ARG_TOKEN_NUMBER_OF_THREADS,
   ARG_TOKEN_PRINT_INFO_INTERVAL,
-  ARG_TOKEN_CHECK_STOP_INTERVAL,
   ARG_TOKEN_RECORD_FILEPATH,
   ARG_TOKEN_INFILE,
   ARG_TOKEN_OUTFILE,
@@ -736,6 +735,8 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->known_opp_rack = known_opp_rack;
   sim_args->win_pcts = config_get_win_pcts(config);
   sim_args->thread_control = config->thread_control;
+  sim_args->game = config_get_game(config);
+  sim_args->move_list = config_get_move_list(config);
   bai_set_default_options(&sim_args->bai_options);
   sim_args->bai_options.sample_limit = config_get_max_iterations(config);
   sim_args->bai_options.delta =
@@ -1515,17 +1516,6 @@ config_load_status_t config_load_data(Config *config) {
                                            print_info_interval);
   }
 
-  int check_stop_interval = -1;
-  config_load_status = config_load_int(config, ARG_TOKEN_CHECK_STOP_INTERVAL, 0,
-                                       INT_MAX, &check_stop_interval);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
-  }
-  if (check_stop_interval > 0) {
-    thread_control_set_check_stop_interval(config->thread_control,
-                                           check_stop_interval);
-  }
-
   config_load_status = config_load_int(config, ARG_TOKEN_TIME_LIMIT, 0, INT_MAX,
                                        &config->time_limit_seconds);
 
@@ -1829,8 +1819,6 @@ Config *config_create_default(void) {
   parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_THREADS, "threads", 1, 1,
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_PRINT_INFO_INTERVAL, "pfrequency", 1, 1,
-                    execute_fatal, status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_CHECK_STOP_INTERVAL, "cfrequency", 1, 1,
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_RECORD_FILEPATH, "recfile", 1, 1,
                     execute_fatal, status_fatal);

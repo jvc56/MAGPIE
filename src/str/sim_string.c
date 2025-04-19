@@ -19,7 +19,7 @@
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 
-char *ucgi_sim_stats(Game *game, SimResults *sim_results, double nps,
+char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
                      bool best_known_play) {
   sim_results_lock_simmed_plays(sim_results);
   bool success = sim_results_sort_plays_by_win_rate(sim_results);
@@ -91,7 +91,7 @@ char *ucgi_sim_stats(Game *game, SimResults *sim_results, double nps,
   return sim_stats_string;
 }
 
-void print_ucgi_sim_stats(Game *game, SimResults *sim_results,
+void print_ucgi_sim_stats(const Game *game, SimResults *sim_results,
                           ThreadControl *thread_control, double nps,
                           bool print_best_play) {
   char *sim_stats_string =
