@@ -1438,9 +1438,11 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
 
 // Assumes all args are parsed and correctly set in pargs.
 config_load_status_t config_load_data(Config *config) {
+  printf("Loading data...\n");
   config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
 
   const char *new_path = config_get_parg_value(config, ARG_TOKEN_DATA_PATH, 0);
+  printf("new_path: %s\n", new_path);
   if (new_path) {
     free(config->data_paths);
     config->data_paths = string_duplicate(new_path);
@@ -1683,6 +1685,7 @@ config_load_status_t config_load_data(Config *config) {
 // Parses the arguments given by the cmd string and updates the state of
 // the config data values, but does not execute the command.
 config_load_status_t config_load_command(Config *config, const char *cmd) {
+  printf("Loading command: %s\n", cmd);
   // If the command is empty, consider this a set options
   // command where zero options are set and return without error.
   if (is_string_empty_or_whitespace(cmd)) {
@@ -1721,7 +1724,7 @@ char *config_get_execute_status(Config *config) {
   return status;
 }
 
-Config *config_create_default(void) {
+Config *config_create_with_data_paths(const char *data_paths) {
   Config *config = malloc_or_die(sizeof(Config));
   parsed_arg_create(config, ARG_TOKEN_SET, "setoptions", 0, 0, execute_noop,
                     status_fatal);
@@ -1826,7 +1829,7 @@ Config *config_create_default(void) {
   parsed_arg_create(config, ARG_TOKEN_TT_FRACTION_OF_MEM, "ttfraction", 1, 1,
                     execute_fatal, status_fatal);
 
-  config->data_paths = string_duplicate(DEFAULT_DATA_PATHS);
+  config->data_paths = string_duplicate(data_paths);
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
   config->exec_mode = EXEC_MODE_CONSOLE;
@@ -1855,6 +1858,10 @@ Config *config_create_default(void) {
   config->error_status = error_status_create();
   config->tt_fraction_of_mem = 0.25;
   return config;
+}
+
+Config *config_create_default(void) {
+  return config_create_with_data_paths(DEFAULT_DATA_PATHS);
 }
 
 void config_destroy(Config *config) {

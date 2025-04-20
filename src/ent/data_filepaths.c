@@ -156,6 +156,7 @@ char *data_filepaths_get_data_path_name(const char *data_paths,
 char *data_filepaths_get_readable_filename(const char *data_paths,
                                            const char *data_name,
                                            data_filepath_t type) {
+  printf("data_paths: %s\n", data_paths);                                                                                        
   if (!data_name) {
     log_fatal("data name is null for filepath type %d\n", type);
   }
@@ -172,7 +173,7 @@ char *data_filepaths_get_readable_filename(const char *data_paths,
     full_filename = data_filepaths_get_first_valid_filename(
         data_paths, data_name, type, false);
   }
-
+  printf("returning full_filename: %s\n", full_filename);
   return full_filename;
 }
 

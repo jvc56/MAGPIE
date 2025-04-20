@@ -21,39 +21,46 @@ extern "C" {
 class MainWidget : public QWidget {
 public:
     MainWidget(QWidget* parent = nullptr) : QWidget(parent) {
-        Config *config = config_create_or_die(
-            "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
-        Game *game = config_game_create(config);
-        draw_starting_racks(game);
-      
-        MoveList *move_list = move_list_create(10000);
-        Move *move = get_top_equity_move(game, 0, move_list);
-        StringBuilder *sb = string_builder_create();
-        string_builder_add_game(sb, game, move_list);
-        printf("%s\n", string_builder_peek(sb));
-        string_builder_destroy(sb);
+      QString appDir = QCoreApplication::applicationDirPath();
+      QString dataPath = appDir + "/data";
+      //   QString configString = "-lex CSW21 -ld english -l1 CSW21 -l2 NWL20";
+      printf("dataPath: %s\n", dataPath.toStdString().c_str());
+      Config *config =
+          config_create_with_data_paths(dataPath.toStdString().c_str());
+      load_and_exec_config_or_die(
+          config,
+          "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+      Game *game = config_game_create(config);
+      draw_starting_racks(game);
 
-        contentWidget = new QWidget;
+      MoveList *move_list = move_list_create(10000);
+      Move *move = get_top_equity_move(game, 0, move_list);
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_game(sb, game, move_list);
+      printf("%s\n", string_builder_peek(sb));
+      string_builder_destroy(sb);
 
-        boardPanelView = new BoardPanelView(this);
-        boardPanelView->setGame(game);
-        history = createWidget("History");
-        analysis = createWidget("Analysis");
+      contentWidget = new QWidget;
 
-        scrollArea = new QScrollArea(this);
-        scrollArea->setWidget(contentWidget);
-        scrollArea->setWidgetResizable(true);
-        scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+      boardPanelView = new BoardPanelView(this);
+      boardPanelView->setGame(game);
+      history = createWidget("History");
+      analysis = createWidget("Analysis");
 
-        layout = new ResponsiveLayout(contentWidget, scrollArea, boardPanelView,
-                                      history, analysis, 10, 50);
-        boardPanelView->setParent(contentWidget);
-        history->setParent(contentWidget);
-        analysis->setParent(contentWidget);
+      scrollArea = new QScrollArea(this);
+      scrollArea->setWidget(contentWidget);
+      scrollArea->setWidgetResizable(true);
+      scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
-        QVBoxLayout* mainLayout = new QVBoxLayout(this);
-        mainLayout->setContentsMargins(0, 0, 0, 0);
-        mainLayout->addWidget(scrollArea);
+      layout = new ResponsiveLayout(contentWidget, scrollArea, boardPanelView,
+                                    history, analysis, 10, 50);
+      boardPanelView->setParent(contentWidget);
+      history->setParent(contentWidget);
+      analysis->setParent(contentWidget);
+
+      QVBoxLayout *mainLayout = new QVBoxLayout(this);
+      mainLayout->setContentsMargins(0, 0, 0, 0);
+      mainLayout->addWidget(scrollArea);
     }
 
 protected:
