@@ -44,6 +44,8 @@ sim_status_t simulate(const SimArgs *sim_args, SimResults *sim_results) {
   bai(&sim_args->bai_options, rvs, rng, sim_args->thread_control, NULL,
       &bai_result);
 
+  sim_results_set_iteration_count(sim_results, rvs_get_total_samples(rvs));
+
   print_ucgi_sim_stats(
       sim_args->game, sim_results, sim_args->thread_control,
       (double)sim_results_get_node_count(sim_results) /

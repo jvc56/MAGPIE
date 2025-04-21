@@ -38,7 +38,7 @@ void print_sim_stats(Game *game, SimResults *sim_results) {
   printf("%-20s%-9s%-16s%-16s\n", "Play", "Score", "Win%", "Equity");
   StringBuilder *move_description = string_builder_create();
   for (int i = 0; i < sim_results_get_number_of_plays(sim_results); i++) {
-    const SimmedPlay *play = sim_results_get_simmed_play(sim_results, i);
+    const SimmedPlay *play = sim_results_get_sorted_simmed_play(sim_results, i);
     Stat *win_pct_stat = simmed_play_get_win_pct_stat(play);
     double wp_mean = stat_get_mean(win_pct_stat) * 100.0;
 
@@ -97,7 +97,7 @@ void test_sim_single_iteration(void) {
       config_simulate(config, NULL, config_get_sim_results(config));
   assert(status == SIM_STATUS_SUCCESS);
   assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
-         EXIT_STATUS_MAX_ITERATIONS);
+         EXIT_STATUS_SAMPLE_LIMIT);
   config_destroy(config);
 }
 
@@ -112,10 +112,10 @@ void test_more_iterations(void) {
   sim_status_t status = config_simulate(config, NULL, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
-         EXIT_STATUS_MAX_ITERATIONS);
+         EXIT_STATUS_SAMPLE_LIMIT);
   sim_results_sort_plays_by_win_rate(sim_results);
 
-  SimmedPlay *play = sim_results_get_simmed_play(sim_results, 0);
+  SimmedPlay *play = sim_results_get_sorted_simmed_play(sim_results, 0);
   StringBuilder *move_string_builder = string_builder_create();
   string_builder_add_move_description(
       move_string_builder, simmed_play_get_move(play), config_get_ld(config));
@@ -129,7 +129,7 @@ void test_more_iterations(void) {
 void test_sim_consistency(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 15 -plies "
-      "2 -threads 1 -iter 30 -scond none");
+      "2 -threads 1 -iter 30 -scond none -sr rr");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 AEIQRST");
   load_and_exec_config_or_die(config, "gen");
@@ -154,7 +154,7 @@ void test_sim_consistency(void) {
     sim_status_t status = config_simulate(config, NULL, sim_results);
     assert(status == SIM_STATUS_SUCCESS);
     assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
-           EXIT_STATUS_MAX_ITERATIONS);
+           EXIT_STATUS_SAMPLE_LIMIT);
 
     if (i != 0) {
       assert_sim_results_equal(sim_results_single_threaded, sim_results);
@@ -168,7 +168,7 @@ void test_sim_consistency(void) {
 void perf_test_multithread_sim(void) {
   Config *config = config_create_or_die(
       "set -s1 score -s2 score -r1 all -r2 all "
-      "-threads 4 -plies 2 -it 1000 -numplays 15 -scond 99");
+      "-threads 4 -plies 2 -it 1000 -numplays 15 -scond none -pfreq 100");
   load_and_exec_config_or_die(
       config,
       "cgp "
@@ -181,13 +181,14 @@ void perf_test_multithread_sim(void) {
   sim_status_t status = config_simulate(config, NULL, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
-         EXIT_STATUS_MAX_ITERATIONS);
+         EXIT_STATUS_SAMPLE_LIMIT);
+  printf("iter count: %d\n", sim_results_get_iteration_count(sim_results));
   assert(sim_results_get_iteration_count(sim_results) == 1000);
 
   print_sim_stats(config_get_game(config), sim_results);
   sim_results_sort_plays_by_win_rate(sim_results);
 
-  SimmedPlay *play = sim_results_get_simmed_play(sim_results, 0);
+  SimmedPlay *play = sim_results_get_sorted_simmed_play(sim_results, 0);
   StringBuilder *move_string_builder = string_builder_create();
   string_builder_add_move_description(
       move_string_builder, simmed_play_get_move(play), config_get_ld(config));
@@ -201,7 +202,7 @@ void perf_test_multithread_sim(void) {
 void test_play_similarity(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all "
-      "-plies 2 -threads 1 -it 1200 -scond none -cfreq 50");
+      "-plies 2 -threads 1 -it 1200 -scond none -pfreq 100");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 ACEIRST");
   load_and_exec_config_or_die(config, "gen");
@@ -209,34 +210,25 @@ void test_play_similarity(void) {
   sim_status_t status = config_simulate(config, NULL, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
-         EXIT_STATUS_MAX_ITERATIONS);
+         EXIT_STATUS_SAMPLE_LIMIT);
 
-  // The first four plays all score 74. Only
-  // 8F ATRESIC and 8F STEARIC should show up as similar, though.
-  // Only one of these plays should be marked as ignored and all
-  // others should not be ignored, since the stopping condition
-  // is NONE.
-
-  StringBuilder *p1_string_builder = string_builder_create();
-  bool found_epigon = false;
-  for (int i = 0; i < 4; i++) {
-    SimmedPlay *play_i = sim_results_get_simmed_play(sim_results, i);
+  // The BAI should have marked inferior plays in the same position as the best
+  // play as epigons.
+  const Move *best_play =
+      simmed_play_get_move(sim_results_get_sorted_simmed_play(sim_results, 0));
+  const int best_play_col = move_get_col_start(best_play);
+  const int best_play_row = move_get_row_start(best_play);
+  const int num_plays = sim_results_get_number_of_plays(sim_results);
+  for (int i = 1; i < num_plays; i++) {
+    SimmedPlay *play_i = sim_results_get_sorted_simmed_play(sim_results, i);
     Move *move_i = simmed_play_get_move(play_i);
-    string_builder_clear(p1_string_builder);
-    string_builder_add_move_description(p1_string_builder, move_i,
-                                        config_get_ld(config));
-
-    const char *p1 = string_builder_peek(p1_string_builder);
-    if (simmed_play_get_is_epigon(play_i)) {
-      assert(strings_equal(p1, "8F ATRESIC") ||
-             strings_equal(p1, "8F STEARIC"));
-      assert(!found_epigon);
-      found_epigon = true;
+    if (move_get_col_start(move_i) == best_play_col &&
+        move_get_row_start(move_i) == best_play_row) {
+      assert(simmed_play_get_is_epigon(play_i));
     }
   }
 
   config_destroy(config);
-  string_builder_destroy(p1_string_builder);
 }
 
 void test_sim(void) {

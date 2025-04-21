@@ -391,6 +391,9 @@ bool stopping_criterion(const int K, const double *Zs, const BAIThreshold *Sβ,
 }
 
 bool bai_sample_limit_reached(const BAIOptions *bai_options, const BAI *bai) {
+  if (bai_options->sample_limit == 0) {
+    return false;
+  }
   if (bai_options->sampling_rule != BAI_SAMPLING_RULE_ROUND_ROBIN) {
     return bai->total_samples_requested >= bai_options->sample_limit;
   }

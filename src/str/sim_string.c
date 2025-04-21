@@ -43,7 +43,7 @@ char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
   StringBuilder *sim_stats_string_builder = string_builder_create();
   int number_of_simmed_plays = sim_results_get_number_of_plays(sim_results);
   for (int i = 0; i < number_of_simmed_plays; i++) {
-    const SimmedPlay *play = sim_results_get_simmed_play(sim_results, i);
+    const SimmedPlay *play = sim_results_get_sorted_simmed_play(sim_results, i);
     Stat *win_pct_stat = simmed_play_get_win_pct_stat(play);
     double wp_mean = stat_get_mean(win_pct_stat) * 100.0;
     double wp_stdev = stat_get_stdev(win_pct_stat) * 100.0;
@@ -81,7 +81,7 @@ char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
   } else {
     string_builder_add_string(sim_stats_string_builder, "bestsofar ");
   }
-  const SimmedPlay *play = sim_results_get_simmed_play(sim_results, 0);
+  const SimmedPlay *play = sim_results_get_sorted_simmed_play(sim_results, 0);
   string_builder_add_ucgi_move(sim_stats_string_builder,
                                simmed_play_get_move(play), board, ld);
   string_builder_add_formatted_string(sim_stats_string_builder,

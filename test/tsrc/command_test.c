@@ -225,9 +225,8 @@ void test_command_execution(void) {
   assert(move_list_get_count(ml) == 3);
 
   assert_command_status_and_output(
-      config,
-      "sim -plies 2 -scond 95 -threads 8 -it 100000 -cfreq 300 -pfreq 500",
-      false, 60, 5, 0);
+      config, "sim -plies 2 -scond 95 -threads 8 -it 100000 -pfreq 500", false,
+      60, 5, 0);
 
   assert(move_list_get_count(ml) == 3);
 
@@ -255,8 +254,8 @@ void test_command_execution(void) {
   assert_command_status_and_output(
       config, "addmoves 8f.NIL,8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 0, 0);
   assert_command_status_and_output(
-      config, "sim -plies 2 -scond 95 -threads 8 -it 1 -cfreq 300 -pfreq 70",
-      false, 60, 22, 0);
+      config, "sim -plies 2 -scond 95 -threads 8 -it 1 -pfreq 70", false, 60,
+      22, 0);
 
   // Sim finishes with max iterations
   // Add user input moves that will be

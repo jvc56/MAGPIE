@@ -92,6 +92,7 @@ typedef enum {
   ARG_TOKEN_EXEC_MODE,
   ARG_TOKEN_TT_FRACTION_OF_MEM,
   ARG_TOKEN_TIME_LIMIT,
+  ARG_TOKEN_SAMPLING_RULE,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -129,6 +130,7 @@ struct Config {
   char *record_filepath;
   double tt_fraction_of_mem;
   int time_limit_seconds;
+  bai_sampling_rule_t sampling_rule;
   game_variant_t game_variant;
   WinPct *win_pcts;
   BoardLayout *board_layout;
@@ -739,10 +741,16 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->move_list = config_get_move_list(config);
   bai_set_default_options(&sim_args->bai_options);
   sim_args->bai_options.sample_limit = config_get_max_iterations(config);
-  sim_args->bai_options.delta =
-      1.0 - (config_get_stop_cond_pct(config) / 100.0);
+  const double percentile = config_get_stop_cond_pct(config);
+  if (percentile > PERCENTILE_MAX) {
+    sim_args->bai_options.threshold = BAI_THRESHOLD_NONE;
+  } else {
+    sim_args->bai_options.delta =
+        1.0 - (config_get_stop_cond_pct(config) / 100.0);
+  }
   sim_args->bai_options.time_limit_seconds =
       config_get_time_limit_seconds(config);
+  sim_args->bai_options.sampling_rule = config->sampling_rule;
 }
 
 sim_status_t config_simulate(const Config *config, Rack *known_opp_rack,
@@ -1210,6 +1218,21 @@ config_load_status_t config_load_record_type(Config *config,
   return config_load_status;
 }
 
+config_load_status_t config_load_sampling_rule(Config *config,
+                                               const char *sampling_rule_str) {
+  config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
+  if (strings_iequal(sampling_rule_str, "rr")) {
+    config->sampling_rule = BAI_SAMPLING_RULE_ROUND_ROBIN;
+  } else if (strings_iequal(sampling_rule_str, "tas")) {
+    config->sampling_rule = BAI_SAMPLING_RULE_TRACK_AND_STOP;
+  } else if (strings_iequal(sampling_rule_str, "tt")) {
+    config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO;
+  } else {
+    config_load_status = CONFIG_LOAD_STATUS_MALFORMED_SAMPLING_RULE;
+  }
+  return config_load_status;
+}
+
 bool is_lexicon_required(const char *new_p1_leaves_name,
                          const char *new_p2_leaves_name,
                          const char *new_ld_name) {
@@ -1619,6 +1642,15 @@ config_load_status_t config_load_data(Config *config) {
     }
   }
 
+  const char *sampling_rule =
+      config_get_parg_value(config, ARG_TOKEN_SAMPLING_RULE, 0);
+  if (sampling_rule) {
+    config_load_status = config_load_sampling_rule(config, sampling_rule);
+    if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+      return config_load_status;
+    }
+  }
+
   // Non-lexical player data
 
   const arg_token_t sort_type_args[2] = {ARG_TOKEN_P1_MOVE_SORT_TYPE,
@@ -1832,6 +1864,8 @@ Config *config_create_default(void) {
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_TIME_LIMIT, "tlim", 1, 1, execute_fatal,
                     status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_SAMPLING_RULE, "sr", 1, 1, execute_fatal,
+                    status_fatal);
   config->data_paths = string_duplicate(DEFAULT_DATA_PATHS);
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
@@ -1844,6 +1878,7 @@ Config *config_create_default(void) {
   config->stop_cond_pct = 99;
   config->equity_margin = 0;
   config->time_limit_seconds = 0;
+  config->sampling_rule = BAI_SAMPLING_RULE_TRACK_AND_STOP;
   config->use_game_pairs = true;
   config->use_small_plays = false;
   config->human_readable = false;

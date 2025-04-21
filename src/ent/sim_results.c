@@ -34,6 +34,7 @@ struct SimResults {
   pthread_mutex_t simmed_plays_mutex;
   atomic_int node_count;
   SimmedPlay **simmed_plays;
+  SimmedPlay **sorted_simmed_plays;
 };
 
 SimmedPlay **simmed_plays_create(const MoveList *move_list,
@@ -95,6 +96,8 @@ void sim_results_destroy_internal(SimResults *sim_results) {
   simmed_plays_destroy(sim_results->simmed_plays, sim_results->num_simmed_plays,
                        sim_results->max_plies);
   sim_results->simmed_plays = NULL;
+  free(sim_results->sorted_simmed_plays);
+  sim_results->sorted_simmed_plays = NULL;
 }
 
 void sim_results_destroy(SimResults *sim_results) {
@@ -114,6 +117,13 @@ void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
   sim_results->simmed_plays =
       simmed_plays_create(move_list, num_simmed_plays, max_plies, seed);
 
+  // Copy simmed_plays to sorted_simmed_plays
+  sim_results->sorted_simmed_plays =
+      malloc_or_die(sizeof(SimmedPlay *) * num_simmed_plays);
+  for (int i = 0; i < num_simmed_plays; i++) {
+    sim_results->sorted_simmed_plays[i] = sim_results->simmed_plays[i];
+  }
+
   sim_results->num_simmed_plays = num_simmed_plays;
   sim_results->max_plies = max_plies;
   sim_results->iteration_count = 0;
@@ -128,6 +138,7 @@ SimResults *sim_results_create(void) {
   atomic_init(&sim_results->node_count, 0);
   pthread_mutex_init(&sim_results->simmed_plays_mutex, NULL);
   sim_results->simmed_plays = NULL;
+  sim_results->sorted_simmed_plays = NULL;
   return sim_results;
 }
 
@@ -202,6 +213,11 @@ void sim_results_set_iteration_count(SimResults *sim_results, int count) {
 
 SimmedPlay *sim_results_get_simmed_play(SimResults *sim_results, int index) {
   return sim_results->simmed_plays[index];
+}
+
+SimmedPlay *sim_results_get_sorted_simmed_play(SimResults *sim_results,
+                                               int index) {
+  return sim_results->sorted_simmed_plays[index];
 }
 
 void sim_results_increment_node_count(SimResults *sim_results) {
@@ -305,15 +321,16 @@ int compare_simmed_plays(const void *a, const void *b) {
   }
 }
 
-// Returns true if the simmed plays were successfully sorted.
-// Returns false if the simmed plays have not been created yet.
+// Sorts the sorted_simmed_plays and leaves the simmed_plays unchanged.
+// Returns true if the plays were successfully sorted.
+// Returns false if the plays have not been created yet.
 // Not thread safe. Must be called with a lock on the simmed plays mutex
 // during multithreaded simming.
 bool sim_results_sort_plays_by_win_rate(SimResults *sim_results) {
-  if (!sim_results->simmed_plays) {
+  if (!sim_results->simmed_plays || !sim_results->sorted_simmed_plays) {
     return false;
   }
-  qsort(sim_results->simmed_plays, sim_results->num_simmed_plays,
+  qsort(sim_results->sorted_simmed_plays, sim_results->num_simmed_plays,
         sizeof(SimmedPlay *), compare_simmed_plays);
   return true;
 }

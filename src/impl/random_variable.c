@@ -613,6 +613,7 @@ bool rvs_is_epigon(const RandomVariables *rvs, const int i) {
 
 int rvs_get_num_rvs(const RandomVariables *rvs) { return rvs->num_rvs; }
 
+// NOT THREAD SAFE: caller is responsible for ensuring thread safety.
 uint64_t rvs_get_total_samples(const RandomVariables *rvs) {
   return rvs->total_samples;
 }
