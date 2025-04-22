@@ -24,7 +24,6 @@ TEST_SUBDIRS := $(shell find $(TEST_DIR) -type d)
 TEST_OBJ_SUBDIRS := $(patsubst $(TEST_DIR)/%,$(OBJ_DIR)/$(TEST_DIR)/%,$(TEST_SUBDIRS))
 
 BUILD := dev
-libmagpie.a: BUILD := release
 
 FSAN_ARG := -fsanitize=address,undefined,pointer-compare,pointer-subtract
 ifeq ($(shell echo "int main() { return 0; }" | $(CC) -x c - -fsanitize=leak -o /dev/null >/dev/null 2>&1; echo $$?),0)
@@ -44,7 +43,9 @@ ldflags.release := -Llib -pthread
 ldflags.cov := -Llib -pthread 
 
 CFLAGS := ${cflags.${BUILD}}
+libmagpie.a: CFLAGS := ${cflags.release}
 LDFLAGS  := ${ldflags.${BUILD}}
+libmagpie.a: LDFLAGS := ${ldflags.release}
 LFLAGS := ${lflags.${BUILD}}
 LDLIBS := -lm
 
