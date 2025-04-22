@@ -134,7 +134,7 @@ void test_bai_sample_limit(int num_threads) {
   rvs_destroy(rvs);
 }
 
-typedef struct BaiArgs {
+typedef struct BAITestArgs {
   const BAIOptions *options;
   RandomVariables *rvs;
   RandomVariables *rng;
@@ -143,10 +143,10 @@ typedef struct BaiArgs {
   pthread_mutex_t *mutex;
   pthread_cond_t *cond;
   int *done;
-} BaiArgs;
+} BAITestArgs;
 
 void *bai_thread_func(void *arg) {
-  BaiArgs *args = (BaiArgs *)arg;
+  BAITestArgs *args = (BAITestArgs *)arg;
   bai(args->options, args->rvs, args->rng, args->thread_control, NULL,
       args->result);
 
@@ -194,14 +194,14 @@ void test_bai_time_limit(int num_threads) {
   pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
   pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 
-  BaiArgs args = {.options = &bai_options,
-                  .rvs = rvs,
-                  .rng = rng,
-                  .thread_control = thread_control,
-                  .result = &bai_result,
-                  .mutex = &mutex,
-                  .cond = &cond,
-                  .done = &done};
+  BAITestArgs args = {.options = &bai_options,
+                      .rvs = rvs,
+                      .rng = rng,
+                      .thread_control = thread_control,
+                      .result = &bai_result,
+                      .mutex = &mutex,
+                      .cond = &cond,
+                      .done = &done};
 
   pthread_t thread;
   pthread_create(&thread, NULL, bai_thread_func, &args);

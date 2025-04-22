@@ -526,7 +526,11 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
         bai_sample_request(bai, k);
       }
     }
-    for (int i = 0; i < number_of_threads; i++) {
+    int num_to_receive = number_of_threads;
+    if (num_to_receive > bai->total_samples_requested) {
+      num_to_receive = bai->total_samples_requested;
+    }
+    for (int i = 0; i < num_to_receive; i++) {
       // At this point we have requested 2*initial_K samples and have only
       // received 2*initial_K - number_of_threads samples, so we need to receive
       // the remaining number_of_threads samples samples.

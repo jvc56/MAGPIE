@@ -684,8 +684,6 @@ void assert_sim_results_equal(SimResults *sr1, SimResults *sr2) {
   assert(sim_results_get_max_plies(sr1) == sim_results_get_max_plies(sr2));
   assert(sim_results_get_number_of_plays(sr1) ==
          sim_results_get_number_of_plays(sr2));
-  printf("%d == %d\n", sim_results_get_iteration_count(sr1),
-         sim_results_get_iteration_count(sr2));
   assert(sim_results_get_iteration_count(sr1) ==
          sim_results_get_iteration_count(sr2));
   assert(sim_results_get_node_count(sr1) == sim_results_get_node_count(sr2));
