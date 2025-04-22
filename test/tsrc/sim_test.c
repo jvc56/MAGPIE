@@ -153,7 +153,6 @@ void test_sim_threshold(void) {
       "set -lex NWL20 -plies 2 -threads 8 -iter 100000000 -scond 95");
   load_and_exec_config_or_die(config, "cgp " ZILLION_OPENING_CGP);
   load_and_exec_config_or_die(config, "addmoves 8F.LIN,8D.ZILLION,8F.ZILLION");
-  load_and_exec_config_or_die(config, "gen");
 
   SimResults *sim_results = config_get_sim_results(config);
   sim_status_t status;
@@ -205,6 +204,107 @@ void test_sim_threshold(void) {
 
   config_destroy(config);
   string_builder_destroy(move_string_builder);
+}
+
+void test_sim_time_limit(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all "
+      "-plies 2 -threads 1 -it 1000000000 -scond none -tlim 5");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack 1 ACEIRST");
+  load_and_exec_config_or_die(config, "gen");
+
+  SimResults *sim_results = config_get_sim_results(config);
+  sim_status_t status;
+  int done = 0;
+
+  pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+  pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+  SimTestArgs args = {.config = config,
+                      .sim_results = sim_results,
+                      .status = &status,
+                      .mutex = &mutex,
+                      .cond = &cond,
+                      .done = &done};
+
+  pthread_t thread;
+  pthread_create(&thread, NULL, sim_thread_func, &args);
+
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  const int timeout_seconds = 10;
+  ts.tv_sec += timeout_seconds;
+
+  pthread_mutex_lock(&mutex);
+  while (!done) {
+    int ret = pthread_cond_timedwait(&cond, &mutex, &ts);
+    if (ret == ETIMEDOUT) {
+      printf("sim did not complete within %d seconds.\n", timeout_seconds);
+      pthread_cancel(thread);
+      pthread_mutex_unlock(&mutex);
+      assert(0);
+    }
+  }
+  pthread_mutex_unlock(&mutex);
+
+  pthread_join(thread, NULL);
+
+  assert(status == SIM_STATUS_SUCCESS);
+  assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
+         EXIT_STATUS_TIME_LIMIT);
+  config_destroy(config);
+}
+
+void test_sim_one_arm_remaining(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all "
+      "-plies 2 -numplays 4 -threads 1 -it 1100 -scond none");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack 1 ACEIRST");
+  load_and_exec_config_or_die(
+      config, "addmoves 8D.CRISTAE,8D.ATRESIC,8D.STEARIC,8D.RACIEST");
+
+  SimResults *sim_results = config_get_sim_results(config);
+  sim_status_t status;
+  int done = 0;
+
+  pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+  pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+  SimTestArgs args = {.config = config,
+                      .sim_results = sim_results,
+                      .status = &status,
+                      .mutex = &mutex,
+                      .cond = &cond,
+                      .done = &done};
+
+  pthread_t thread;
+  pthread_create(&thread, NULL, sim_thread_func, &args);
+
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  const int timeout_seconds = 10;
+  ts.tv_sec += timeout_seconds;
+
+  pthread_mutex_lock(&mutex);
+  while (!done) {
+    int ret = pthread_cond_timedwait(&cond, &mutex, &ts);
+    if (ret == ETIMEDOUT) {
+      printf("sim did not complete within %d seconds.\n", timeout_seconds);
+      pthread_cancel(thread);
+      pthread_mutex_unlock(&mutex);
+      assert(0);
+    }
+  }
+  pthread_mutex_unlock(&mutex);
+
+  pthread_join(thread, NULL);
+
+  assert(status == SIM_STATUS_SUCCESS);
+  assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
+         EXIT_STATUS_ONE_ARM_REMAINING);
+  config_destroy(config);
 }
 
 void test_sim_consistency(void) {
@@ -317,6 +417,8 @@ void test_sim(void) {
   test_sim_error_cases();
   test_sim_single_iteration();
   test_sim_threshold();
+  test_sim_time_limit();
+  test_sim_one_arm_remaining();
   test_more_iterations();
   test_play_similarity();
   perf_test_multithread_sim();
