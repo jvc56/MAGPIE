@@ -22,6 +22,7 @@
 #include "../../src/impl/config.h"
 
 #include "../../src/impl/cgp.h"
+#include "../../src/impl/gameplay.h"
 #include "../../src/impl/move_gen.h"
 #include "../../src/impl/simmer.h"
 
@@ -412,15 +413,143 @@ void test_play_similarity(void) {
   config_destroy(config);
 }
 
+void test_sim_perf(const char *sim_perf_iters, const char *sim_perf_threads) {
+  const int num_iters = atoi(sim_perf_iters);
+  if (num_iters < 0) {
+    log_fatal("Invalid number of iterations: %s\n", sim_perf_iters);
+  }
+  int num_threads = 8;
+  if (sim_perf_threads) {
+    num_threads = atoi(sim_perf_threads);
+    if (num_threads < 0 || num_threads >= MAX_THREADS) {
+      log_fatal("Invalid number of threads: %s\n", sim_perf_iters);
+    }
+  }
+  Config *config =
+      config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
+                           "all -numplays 15 -plies 2 -iter 5000 -scond 99");
+  char *set_threads_cmd = get_formatted_string("set -threads %d", num_threads);
+  load_and_exec_config_or_die(config, set_threads_cmd);
+  free(set_threads_cmd);
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  Game *game = config_get_game(config);
+  Bag *bag = game_get_bag(game);
+  MoveList *move_list = config_get_move_list(config);
+  const char *strategies[] = {
+      "-sr tas -ev false -threshold ht",
+      "-sr tas -ev true -threshold ht",
+      "-sr tt -ev false -threshold ht"
+      "-sr tt -ev true -threshold ht",
+      "-sr tas -ev true -threshold ht",
+      "-sr rr -ev false -threshold ht",
+      "-sr tas -ev true -threshold gk16",
+  };
+  const int num_strategies = sizeof(strategies) / sizeof(strategies[0]);
+  const int stats_per_strat = 6;
+  const int num_stats = num_strategies * stats_per_strat;
+
+  Stat **stats = malloc_or_die(num_stats * sizeof(Stat *));
+  for (int i = 0; i < num_stats; i++) {
+    stats[i] = stat_create(true);
+  }
+  SimResults *sim_results = config_get_sim_results(config);
+  BAIResult *bai_result = sim_results_get_bai_result(sim_results);
+  ThreadControl *thread_control = config_get_thread_control(config);
+  const char *output_filename = "sim_perf_stats.txt";
+  for (int i = 0; i < num_iters; i++) {
+    if (bag_get_tiles(bag) < RACK_SIZE) {
+      game_reset(game);
+      draw_starting_racks(game);
+    }
+    load_and_exec_config_or_die(config, "gen");
+    for (int j = 0; j < num_strategies; j++) {
+      char *set_strategies_cmd = get_formatted_string("set %s", strategies[j]);
+      load_and_exec_config_or_die(config, set_strategies_cmd);
+      free(set_strategies_cmd);
+
+      const sim_status_t status = config_simulate(config, NULL, sim_results);
+      assert(status == SIM_STATUS_SUCCESS);
+      const double total_time = bai_result_get_total_time(bai_result);
+      const double sample_time = bai_result_get_sample_time(bai_result);
+      const double bai_time = total_time - sample_time;
+      const exit_status_t exit_status =
+          thread_control_get_exit_status(thread_control);
+      int exit_status_offset = 0;
+      if (exit_status == EXIT_STATUS_SAMPLE_LIMIT ||
+          exit_status == EXIT_STATUS_ONE_ARM_REMAINING) {
+        exit_status_offset = stats_per_strat / 2;
+      } else if (exit_status != EXIT_STATUS_THRESHOLD) {
+        log_fatal("unexpected sim performance test exit status: %d\n",
+                  exit_status);
+      }
+      const int base_index = j * stats_per_strat + exit_status_offset;
+      stat_push(stats[base_index], total_time, 1);
+      stat_push(stats[base_index + 1], sample_time, 1);
+      stat_push(stats[base_index + 2], bai_time, 1);
+    }
+
+    FILE *output_file = fopen(output_filename, "w");
+    if (!output_file) {
+      log_fatal("failed to open output file '%s'\n", output_filename);
+    }
+
+    // Write header row
+    fprintf(output_file, "Strategy | Threshold Exit | Sample Limit Exit\n");
+    fprintf(output_file,
+            "          | Total Time      | Sample Time    | BAI Time    | "
+            "Total Time      | Sample Time    | BAI Time    |\n");
+
+    // Write stats for each strategy
+    for (int j = 0; j < num_strategies; j++) {
+      const int base_index = j * stats_per_strat;
+      fprintf(output_file, "%s | ", strategies[j]);
+
+      // Threshold exit
+      fprintf(output_file, "             | ");
+      fprintf(output_file, "%f %f | ", stat_get_mean(stats[base_index]),
+              stat_get_stdev(stats[base_index]));
+      fprintf(output_file, "%f %f | ", stat_get_mean(stats[base_index + 1]),
+              stat_get_stdev(stats[base_index + 1]));
+      fprintf(output_file, "%f %f | ", stat_get_mean(stats[base_index + 2]),
+              stat_get_stdev(stats[base_index + 2]));
+
+      // Sample limit exit
+      fprintf(output_file, "             | ");
+      fprintf(output_file, "%f %f | ", stat_get_mean(stats[base_index + 3]),
+              stat_get_stdev(stats[base_index + 3]));
+      fprintf(output_file, "%f %f | ", stat_get_mean(stats[base_index + 4]),
+              stat_get_stdev(stats[base_index + 4]));
+      fprintf(output_file, "%f %f |\n", stat_get_mean(stats[base_index + 5]),
+              stat_get_stdev(stats[base_index + 5]));
+    }
+
+    fclose(output_file);
+
+    const Move *best_play = get_top_equity_move(game, 0, move_list);
+    play_move(best_play, game, NULL, NULL);
+  }
+  for (int i = 0; i < num_stats; i++) {
+    stat_destroy(stats[i]);
+  }
+  free(stats);
+  config_destroy(config);
+}
+
 void test_sim(void) {
-  test_win_pct();
-  test_sim_error_cases();
-  test_sim_single_iteration();
-  test_sim_threshold();
-  test_sim_time_limit();
-  test_sim_one_arm_remaining();
-  test_more_iterations();
-  test_play_similarity();
-  perf_test_multithread_sim();
-  test_sim_consistency();
+  const char *sim_perf_iters = getenv("SIM_PERF_ITERS");
+  const char *sim_perf_threads = getenv("SIM_PERF_THREADS");
+  if (sim_perf_iters) {
+    test_sim_perf(sim_perf_iters, sim_perf_threads);
+  } else {
+    test_win_pct();
+    test_sim_error_cases();
+    test_sim_single_iteration();
+    test_sim_threshold();
+    test_sim_time_limit();
+    test_sim_one_arm_remaining();
+    test_more_iterations();
+    test_play_similarity();
+    perf_test_multithread_sim();
+    test_sim_consistency();
+  }
 }

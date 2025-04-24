@@ -93,6 +93,9 @@ typedef enum {
   ARG_TOKEN_TT_FRACTION_OF_MEM,
   ARG_TOKEN_TIME_LIMIT,
   ARG_TOKEN_SAMPLING_RULE,
+  ARG_TOKEN_THRESHOLD,
+  ARG_TOKEN_BAI_IS_EV,
+  ARG_TOKEN_EPIGON_CUTOFF,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -131,6 +134,9 @@ struct Config {
   double tt_fraction_of_mem;
   int time_limit_seconds;
   bai_sampling_rule_t sampling_rule;
+  bai_threshold_t threshold;
+  bool is_ev;
+  int epigon_cutoff;
   game_variant_t game_variant;
   WinPct *win_pcts;
   BoardLayout *board_layout;
@@ -739,7 +745,6 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->thread_control = config->thread_control;
   sim_args->game = config_get_game(config);
   sim_args->move_list = config_get_move_list(config);
-  bai_set_default_options(&sim_args->bai_options);
   sim_args->bai_options.sample_limit = config_get_max_iterations(config);
   const double percentile = config_get_stop_cond_pct(config);
   if (percentile > PERCENTILE_MAX) {
@@ -747,10 +752,13 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   } else {
     sim_args->bai_options.delta =
         1.0 - (config_get_stop_cond_pct(config) / 100.0);
+    sim_args->bai_options.threshold = config->threshold;
   }
   sim_args->bai_options.time_limit_seconds =
       config_get_time_limit_seconds(config);
   sim_args->bai_options.sampling_rule = config->sampling_rule;
+  sim_args->bai_options.is_EV = config->is_ev;
+  sim_args->bai_options.epigon_cutoff = config->epigon_cutoff;
 }
 
 sim_status_t config_simulate(const Config *config, Rack *known_opp_rack,
@@ -1221,14 +1229,29 @@ config_load_status_t config_load_record_type(Config *config,
 config_load_status_t config_load_sampling_rule(Config *config,
                                                const char *sampling_rule_str) {
   config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
-  if (strings_iequal(sampling_rule_str, "rr")) {
+  if (has_iprefix(sampling_rule_str, "rr")) {
     config->sampling_rule = BAI_SAMPLING_RULE_ROUND_ROBIN;
-  } else if (strings_iequal(sampling_rule_str, "tas")) {
+  } else if (has_iprefix(sampling_rule_str, "tas")) {
     config->sampling_rule = BAI_SAMPLING_RULE_TRACK_AND_STOP;
-  } else if (strings_iequal(sampling_rule_str, "tt")) {
+  } else if (has_iprefix(sampling_rule_str, "tt")) {
     config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO;
   } else {
     config_load_status = CONFIG_LOAD_STATUS_MALFORMED_SAMPLING_RULE;
+  }
+  return config_load_status;
+}
+
+config_load_status_t config_load_threshold(Config *config,
+                                           const char *threshold_str) {
+  config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
+  if (has_iprefix(threshold_str, "none")) {
+    config->threshold = BAI_THRESHOLD_NONE;
+  } else if (has_iprefix(threshold_str, "gk16")) {
+    config->threshold = BAI_THRESHOLD_GK16;
+  } else if (has_iprefix(threshold_str, "ht")) {
+    config->threshold = BAI_THRESHOLD_HT;
+  } else {
+    config_load_status = CONFIG_LOAD_STATUS_MALFORMED_THRESHOLD;
   }
   return config_load_status;
 }
@@ -1546,6 +1569,12 @@ config_load_status_t config_load_data(Config *config) {
     return config_load_status;
   }
 
+  config_load_status = config_load_int(config, ARG_TOKEN_EPIGON_CUTOFF, 0,
+                                       INT_MAX, &config->epigon_cutoff);
+  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+    return config_load_status;
+  }
+
   // Double values
 
   const char *new_stop_cond_str =
@@ -1601,6 +1630,12 @@ config_load_status_t config_load_data(Config *config) {
     return config_load_status;
   }
 
+  config_load_status =
+      config_load_bool(config, ARG_TOKEN_BAI_IS_EV, &config->is_ev);
+  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+    return config_load_status;
+  }
+
   // Human readable
 
   config_load_status = config_load_bool(config, ARG_TOKEN_HUMAN_READABLE,
@@ -1646,6 +1681,14 @@ config_load_status_t config_load_data(Config *config) {
       config_get_parg_value(config, ARG_TOKEN_SAMPLING_RULE, 0);
   if (sampling_rule) {
     config_load_status = config_load_sampling_rule(config, sampling_rule);
+    if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+      return config_load_status;
+    }
+  }
+
+  const char *threshold = config_get_parg_value(config, ARG_TOKEN_THRESHOLD, 0);
+  if (threshold) {
+    config_load_status = config_load_threshold(config, threshold);
     if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
       return config_load_status;
     }
@@ -1866,6 +1909,12 @@ Config *config_create_default(void) {
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_SAMPLING_RULE, "sr", 1, 1, execute_fatal,
                     status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_THRESHOLD, "threshold", 1, 1,
+                    execute_fatal, status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_BAI_IS_EV, "ev", 1, 1, execute_fatal,
+                    status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_EPIGON_CUTOFF, "epigon_cutoff", 1, 1,
+                    execute_fatal, status_fatal);
   config->data_paths = string_duplicate(DEFAULT_DATA_PATHS);
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
@@ -1874,11 +1923,14 @@ Config *config_create_default(void) {
   config->num_plays = DEFAULT_MOVE_LIST_CAPACITY;
   config->num_small_plays = DEFAULT_SMALL_MOVE_LIST_CAPACITY;
   config->plies = 2;
-  config->max_iterations = 0;
-  config->stop_cond_pct = 99;
   config->equity_margin = 0;
+  config->max_iterations = 5000;
+  config->stop_cond_pct = 99;
   config->time_limit_seconds = 0;
   config->sampling_rule = BAI_SAMPLING_RULE_TRACK_AND_STOP;
+  config->threshold = BAI_THRESHOLD_HT;
+  config->is_ev = true;
+  config->epigon_cutoff = 1000;
   config->use_game_pairs = true;
   config->use_small_plays = false;
   config->human_readable = false;

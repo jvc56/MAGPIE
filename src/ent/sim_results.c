@@ -5,8 +5,10 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
+#include "../def/bai_defs.h"
 #include "../def/game_defs.h"
 
+#include "bai_result.h"
 #include "move.h"
 #include "stats.h"
 #include "win_pct.h"
@@ -35,6 +37,7 @@ struct SimResults {
   atomic_int node_count;
   SimmedPlay **simmed_plays;
   SimmedPlay **sorted_simmed_plays;
+  BAIResult *bai_result;
 };
 
 SimmedPlay **simmed_plays_create(const MoveList *move_list,
@@ -105,6 +108,7 @@ void sim_results_destroy(SimResults *sim_results) {
     return;
   }
   sim_results_destroy_internal(sim_results);
+  bai_result_destroy(sim_results->bai_result);
   free(sim_results);
 }
 
@@ -139,6 +143,7 @@ SimResults *sim_results_create(void) {
   pthread_mutex_init(&sim_results->simmed_plays_mutex, NULL);
   sim_results->simmed_plays = NULL;
   sim_results->sorted_simmed_plays = NULL;
+  sim_results->bai_result = bai_result_create();
   return sim_results;
 }
 
@@ -218,6 +223,10 @@ SimmedPlay *sim_results_get_simmed_play(SimResults *sim_results, int index) {
 SimmedPlay *sim_results_get_sorted_simmed_play(SimResults *sim_results,
                                                int index) {
   return sim_results->sorted_simmed_plays[index];
+}
+
+BAIResult *sim_results_get_bai_result(SimResults *sim_results) {
+  return sim_results->bai_result;
 }
 
 void sim_results_increment_node_count(SimResults *sim_results) {

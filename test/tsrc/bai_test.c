@@ -78,11 +78,12 @@ void test_bai_track_and_stop(int num_threads) {
 
   ThreadControl *thread_control = thread_control_create();
   thread_control_set_threads(thread_control, num_threads);
-  BAIResult bai_result;
-  bai(&bai_options, rvs, rng, thread_control, NULL, &bai_result);
-  assert(bai_result.exit_status == EXIT_STATUS_THRESHOLD);
-  assert(bai_result.best_arm == 1);
+  BAIResult *bai_result = bai_result_create();
+  bai(&bai_options, rvs, rng, thread_control, NULL, bai_result);
+  assert(bai_result_get_exit_status(bai_result) == EXIT_STATUS_THRESHOLD);
+  assert(bai_result_get_best_arm(bai_result) == 1);
   thread_control_destroy(thread_control);
+  bai_result_destroy(bai_result);
   rvs_destroy(rng);
   rvs_destroy(rvs);
 }
@@ -115,21 +116,22 @@ void test_bai_sample_limit(int num_threads) {
   };
   ThreadControl *thread_control = thread_control_create();
   thread_control_set_threads(thread_control, num_threads);
-  BAIResult bai_result;
+  BAIResult *bai_result = bai_result_create();
   for (int i = 0; i < num_sampling_rules; i++) {
     bai_options.sampling_rule = sampling_rules[i];
-    bai(&bai_options, rvs, rng, thread_control, NULL, &bai_result);
-    assert(bai_result.exit_status == EXIT_STATUS_SAMPLE_LIMIT);
-    assert(bai_result.best_arm == 2);
+    bai(&bai_options, rvs, rng, thread_control, NULL, bai_result);
+    assert(bai_result_get_exit_status(bai_result) == EXIT_STATUS_SAMPLE_LIMIT);
+    assert(bai_result_get_best_arm(bai_result) == 2);
     int expected_num_samples = bai_options.sample_limit;
     if (bai_options.sampling_rule == BAI_SAMPLING_RULE_ROUND_ROBIN) {
       expected_num_samples *= num_rvs;
     }
     assert(rvs_get_total_samples(rvs) == (uint64_t)expected_num_samples);
-    assert(bai_result.total_samples == expected_num_samples);
+    assert(bai_result_get_total_samples(bai_result) == expected_num_samples);
     assert_num_epigons(rvs, 0);
   }
   thread_control_destroy(thread_control);
+  bai_result_destroy(bai_result);
   rvs_destroy(rng);
   rvs_destroy(rvs);
 }
@@ -188,7 +190,7 @@ void test_bai_time_limit(int num_threads) {
 
   ThreadControl *thread_control = thread_control_create();
   thread_control_set_threads(thread_control, num_threads);
-  BAIResult bai_result;
+  BAIResult *bai_result = bai_result_create();
   int done = 0;
 
   pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -198,7 +200,7 @@ void test_bai_time_limit(int num_threads) {
                       .rvs = rvs,
                       .rng = rng,
                       .thread_control = thread_control,
-                      .result = &bai_result,
+                      .result = bai_result,
                       .mutex = &mutex,
                       .cond = &cond,
                       .done = &done};
@@ -225,8 +227,9 @@ void test_bai_time_limit(int num_threads) {
 
   pthread_join(thread, NULL);
 
-  assert(bai_result.exit_status == EXIT_STATUS_TIME_LIMIT);
+  assert(bai_result_get_exit_status(bai_result) == EXIT_STATUS_TIME_LIMIT);
 
+  bai_result_destroy(bai_result);
   thread_control_destroy(thread_control);
   rvs_destroy(rng);
   rvs_destroy(rvs);
@@ -279,7 +282,7 @@ void test_bai_epigons(int num_threads) {
 
   ThreadControl *thread_control = thread_control_create();
   thread_control_set_threads(thread_control, num_threads);
-  BAIResult bai_result;
+  BAIResult *bai_result = bai_result_create();
 
   for (int max_classes = 1; max_classes <= 3; max_classes++) {
     exit_status_t expected_exit_status = EXIT_STATUS_THRESHOLD;
@@ -308,11 +311,11 @@ void test_bai_epigons(int num_threads) {
         bai_options.sampling_rule = strategies[i][0];
         bai_options.is_EV = strategies[i][1];
         bai_options.threshold = strategies[i][2];
-        bai(&bai_options, rvs, rng, thread_control, bai_logger, &bai_result);
+        bai(&bai_options, rvs, rng, thread_control, bai_logger, bai_result);
         bai_logger_flush(bai_logger);
         bai_logger_destroy(bai_logger);
-        assert(bai_result.best_arm % max_classes == 0);
-        assert(bai_result.exit_status == expected_exit_status);
+        assert(bai_result_get_best_arm(bai_result) % max_classes == 0);
+        assert(bai_result_get_exit_status(bai_result) == expected_exit_status);
         assert_num_epigons(rvs, expected_epigons);
         rvs_destroy(rvs);
         rvs_destroy(rng);
@@ -320,6 +323,7 @@ void test_bai_epigons(int num_threads) {
       free(means_and_vars);
     }
   }
+  bai_result_destroy(bai_result);
   free(samples);
   thread_control_destroy(thread_control);
 }
@@ -416,13 +420,15 @@ void test_bai_input_from_file(const char *bai_input_filename,
       .time_limit_seconds = 0,
   };
   ThreadControl *thread_control = thread_control_create();
-  BAIResult bai_result;
+  BAIResult *bai_result = bai_result_create();
 
-  bai(&bai_options, rvs, rng, thread_control, bai_logger, &bai_result);
+  bai(&bai_options, rvs, rng, thread_control, bai_logger, bai_result);
 
-  bai_logger_log_int(bai_logger, "result", bai_result.best_arm + 1);
+  bai_logger_log_int(bai_logger, "result",
+                     bai_result_get_best_arm(bai_result) + 1);
   bai_logger_flush(bai_logger);
 
+  bai_result_destroy(bai_result);
   bai_logger_destroy(bai_logger);
   thread_control_destroy(thread_control);
   rvs_destroy(rvs);

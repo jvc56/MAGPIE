@@ -39,10 +39,8 @@ sim_status_t simulate(const SimArgs *sim_args, SimResults *sim_results) {
 
   RandomVariables *rng = rvs_create(&rng_args);
 
-  BAIResult bai_result;
-
   bai(&sim_args->bai_options, rvs, rng, sim_args->thread_control, NULL,
-      &bai_result);
+      sim_results_get_bai_result(sim_results));
 
   sim_results_set_iteration_count(sim_results, rvs_get_total_samples(rvs));
 

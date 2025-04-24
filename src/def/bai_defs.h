@@ -1,7 +1,6 @@
 #ifndef BAI_DEFS_H
 #define BAI_DEFS_H
 
-#include "thread_control_defs.h"
 #include <stdbool.h>
 
 #define BAI_EPSILON 1e-10
@@ -23,7 +22,6 @@ typedef enum { BAI_CTRACKING, BAI_DTRACKING } bai_tracking_t;
 typedef struct BAIOptions {
   bai_sampling_rule_t sampling_rule;
   bai_threshold_t threshold;
-  bai_tracking_t tracking;
   double delta;
   bool is_EV;
   // If the sampling rule is round robin complete, this limit
@@ -33,11 +31,5 @@ typedef struct BAIOptions {
   int epigon_cutoff;
   int time_limit_seconds;
 } BAIOptions;
-
-typedef struct BAIResult {
-  exit_status_t exit_status;
-  int best_arm;
-  int total_samples;
-} BAIResult;
 
 #endif

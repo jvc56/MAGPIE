@@ -6,13 +6,14 @@
 #include "../def/bai_defs.h"
 #include "../def/thread_control_defs.h"
 
+#include "../ent/bai_result.h"
 #include "../ent/thread_control.h"
-#include "bai_logger.h"
 
 #include "../util/log.h"
 #include "../util/util.h"
 
 #include "bai_helper.h"
+#include "bai_logger.h"
 #include "bai_peps.h"
 #include "bai_sampling_rule.h"
 #include "random_variable.h"
@@ -231,6 +232,7 @@ typedef struct SampleWorkerArgs {
   pthread_mutex_t *thread_index_counter_mutex;
   int *thread_index_counter;
   BAILogger *bai_logger;
+  BAIResult *bai_result;
 } SampleWorkerArgs;
 
 void *bai_sample_worker(void *args) {
@@ -247,6 +249,7 @@ void *bai_sample_worker(void *args) {
   thread_index = *thread_index_counter;
   (*thread_index_counter)++;
   pthread_mutex_unlock(thread_index_counter_mutex);
+  Timer *timer = mtimer_create();
   ProdConQueueMessage req;
   ProdConQueueMessage resp;
   while (true) {
@@ -254,11 +257,16 @@ void *bai_sample_worker(void *args) {
     if (req.queue_closed) {
       break;
     }
+    mtimer_start(timer);
     resp.sample =
         rvs_sample(rvs, req.arm_datum->rvs_index, thread_index, bai_logger);
+    mtimer_stop(timer);
+    bai_result_increment_sample_time(bai_worker_args->bai_result,
+                                     mtimer_elapsed_seconds(timer));
     resp.arm_datum = req.arm_datum;
     prod_con_queue_produce(response_queue, resp);
   }
+  mtimer_destroy(timer);
   return NULL;
 }
 
@@ -416,14 +424,16 @@ bool bai_round_robin_is_complete(const BAI *bai) {
 }
 
 void bai_set_result(const BAI *bai, const exit_status_t exit_status,
-                    const int astar, BAIResult *bai_result) {
-  bai_result->exit_status = exit_status;
-  bai_result->best_arm = bai_get_rvs_index(bai, astar);
-  bai_result->total_samples = bai->total_samples_requested;
+                    const int astar, double total_time, BAIResult *bai_result) {
+  bai_result_set_exit_status(bai_result, exit_status);
+  bai_result_set_best_arm(bai_result, bai_get_rvs_index(bai, astar));
+  bai_result_set_total_samples(bai_result, bai->total_samples_requested);
+  bai_result_set_total_time(bai_result, total_time);
 }
 
 typedef struct BAIIsFinishedArgs {
   const BAIOptions *bai_options;
+  const ThreadControl *thread_control;
   BAI *bai;
   const double *Zs;
   const BAIThreshold *Sβ;
@@ -467,7 +477,9 @@ bool bai_is_finished(BAIIsFinishedArgs *args, const exit_status_t exit_status,
     break;
   }
   if (finished) {
-    bai_set_result(args->bai, exit_status, astar, args->bai_result);
+    bai_set_result(args->bai, exit_status, astar,
+                   thread_control_get_seconds_elapsed(args->thread_control),
+                   args->bai_result);
     thread_control_exit(args->bai->thread_control, exit_status);
   }
   return finished;
@@ -484,7 +496,7 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   BAI *bai =
       bai_create(thread_control, rvs, bai_options->epigon_cutoff, bai_logger);
 
-  bai_set_result(bai, EXIT_STATUS_NONE, 0, bai_result);
+  bai_set_result(bai, EXIT_STATUS_NONE, 0, 0.0, bai_result);
 
   BAIThreshold *Sβ =
       bai_create_threshold(bai_options->threshold, bai_options->is_EV,
@@ -505,6 +517,7 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
       .thread_index_counter_mutex = &thread_index_counter_mutex,
       .thread_index_counter = &thread_index_counter,
       .bai_logger = bai_logger,
+      .bai_result = bai_result,
   };
 
   if (bai->is_multithreaded) {
@@ -571,6 +584,7 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
 
   BAIIsFinishedArgs is_finished_args = {
       .bai_options = bai_options,
+      .thread_control = thread_control,
       .bai = bai,
       .Zs = glrt_results->vals,
       .Sβ = Sβ,
@@ -634,14 +648,4 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   bai_glrt_results_destroy(glrt_results);
   bai_destroy_threshold(Sβ);
   bai_destroy(bai);
-}
-
-void bai_set_default_options(BAIOptions *bai_options) {
-  bai_options->threshold = BAI_THRESHOLD_HT;
-  bai_options->delta = 0.01;
-  bai_options->is_EV = true;
-  bai_options->sampling_rule = BAI_SAMPLING_RULE_TRACK_AND_STOP;
-  bai_options->epigon_cutoff = 1000;
-  bai_options->time_limit_seconds = 0;
-  bai_options->sample_limit = 0;
 }
