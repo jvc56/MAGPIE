@@ -413,6 +413,49 @@ void test_play_similarity(void) {
   config_destroy(config);
 }
 
+void test_seed_consistency(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all "
+      "-plies 2 -threads 10 -it 1000 -epigon 10000 -scond none -numplays 2 -sr "
+      "rr");
+  load_and_exec_config_or_die(config, "cgp " CACHEXIC_CGP);
+  load_and_exec_config_or_die(config, "gen");
+
+  // The two top plays are:
+  //
+  // A1 cACHEXI(C)
+  // A1 CAcHEXI(C)
+  //
+  // which only differ in which C is the blank. There are no words in the
+  // lexicon which fit the following patterns:
+  //
+  // C.OES
+  // C.GOO
+  //
+  // and since all plays start with the same seed and are sampled the exact
+  // same number of times by the round robin sampling method, the sim results
+  // for these plays should be identical.
+  SimResults *sim_results = config_get_sim_results(config);
+  sim_status_t status = config_simulate(config, NULL, sim_results);
+  assert(status == SIM_STATUS_SUCCESS);
+  assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
+         EXIT_STATUS_SAMPLE_LIMIT);
+  SimmedPlay *p1 = sim_results_get_simmed_play(sim_results, 0);
+  const Move *m1 = simmed_play_get_move(p1);
+  SimmedPlay *p2 = sim_results_get_simmed_play(sim_results, 1);
+  const Move *m2 = simmed_play_get_move(p2);
+
+  assert(move_get_score(m1) == move_get_score(m2));
+  assert(move_get_col_start(m1) == move_get_col_start(m2));
+  assert(move_get_row_start(m1) == move_get_row_start(m2));
+  assert(move_get_dir(m1) == move_get_dir(m2));
+  assert(move_get_tiles_length(m1) == move_get_tiles_length(m2));
+  assert(move_get_tiles_played(m1) == move_get_tiles_played(m2));
+  assert_simmed_plays_stats_are_equal(p1, p2, 2);
+
+  config_destroy(config);
+}
+
 void test_sim_perf(const char *sim_perf_iters, const char *sim_perf_threads) {
   const int num_iters = atoi(sim_perf_iters);
   if (num_iters < 0) {
@@ -436,6 +479,7 @@ void test_sim_perf(const char *sim_perf_iters, const char *sim_perf_threads) {
   Bag *bag = game_get_bag(game);
   MoveList *move_list = config_get_move_list(config);
   const char *strategies[] = {
+      "-sr rr -ev false -threshold none",
       "-sr tas -ev false -threshold ht",
       "-sr tas -ev true -threshold ht",
       "-sr tt -ev false -threshold ht"
@@ -551,5 +595,6 @@ void test_sim(void) {
     test_play_similarity();
     perf_test_multithread_sim();
     test_sim_consistency();
+    test_seed_consistency();
   }
 }

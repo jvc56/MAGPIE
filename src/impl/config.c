@@ -747,7 +747,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->move_list = config_get_move_list(config);
   sim_args->bai_options.sample_limit = config_get_max_iterations(config);
   const double percentile = config_get_stop_cond_pct(config);
-  if (percentile > PERCENTILE_MAX) {
+  if (percentile > PERCENTILE_MAX || config->threshold == BAI_THRESHOLD_NONE) {
     sim_args->bai_options.threshold = BAI_THRESHOLD_NONE;
   } else {
     sim_args->bai_options.delta =

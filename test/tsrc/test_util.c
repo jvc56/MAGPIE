@@ -209,7 +209,7 @@ void print_move_list(const Board *board, const LetterDistribution *ld,
   string_builder_destroy(move_list_string);
 }
 
-void print_game(Game *game, MoveList *move_list) {
+void print_game(const Game *game, const MoveList *move_list) {
   StringBuilder *game_string = string_builder_create();
   string_builder_add_game(game_string, game, move_list);
   printf("%s\n", string_builder_peek(game_string));
@@ -658,12 +658,8 @@ void assert_moves_are_equal(const Move *m1, const Move *m2) {
   }
 }
 
-void assert_simmed_plays_are_equal(const SimmedPlay *sp1, const SimmedPlay *sp2,
-                                   int max_plies) {
-  assert(simmed_play_get_id(sp1) == simmed_play_get_id(sp2));
-  assert(simmed_play_get_is_epigon(sp1) == simmed_play_get_is_epigon(sp2));
-  assert_moves_are_equal(simmed_play_get_move(sp1), simmed_play_get_move(sp2));
-
+void assert_simmed_plays_stats_are_equal(const SimmedPlay *sp1,
+                                         const SimmedPlay *sp2, int max_plies) {
   for (int i = 0; i < max_plies; i++) {
     assert_stats_are_equal(simmed_play_get_score_stat(sp1, i),
                            simmed_play_get_score_stat(sp2, i));
@@ -675,6 +671,14 @@ void assert_simmed_plays_are_equal(const SimmedPlay *sp1, const SimmedPlay *sp2,
                          simmed_play_get_equity_stat(sp2));
   assert_stats_are_equal(simmed_play_get_win_pct_stat(sp1),
                          simmed_play_get_win_pct_stat(sp2));
+}
+
+void assert_simmed_plays_are_equal(const SimmedPlay *sp1, const SimmedPlay *sp2,
+                                   int max_plies) {
+  assert(simmed_play_get_id(sp1) == simmed_play_get_id(sp2));
+  assert(simmed_play_get_is_epigon(sp1) == simmed_play_get_is_epigon(sp2));
+  assert_moves_are_equal(simmed_play_get_move(sp1), simmed_play_get_move(sp2));
+  assert_simmed_plays_stats_are_equal(sp1, sp2, max_plies);
 }
 
 // NOT THREAD SAFE
