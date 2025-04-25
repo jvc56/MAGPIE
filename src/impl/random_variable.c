@@ -345,54 +345,7 @@ bool simmer_plays_are_similar(const Simmer *simmer,
   Move *m1_move = simmed_play_get_move(m1);
   Move *m2_move = simmed_play_get_move(m2);
 
-  // Otherwise, we must compute play similarity and fill in the cache.
-  // two plays are "similar" if they use the same tiles, and they start at
-  // the same square.
-  if (!(move_get_dir(m1_move) == move_get_dir(m2_move) &&
-        move_get_col_start(m1_move) == move_get_col_start(m2_move) &&
-        move_get_row_start(m1_move) == move_get_row_start(m2_move))) {
-    return false;
-  }
-  if (!(move_get_tiles_played(m1_move) == move_get_tiles_played(m2_move) &&
-        move_get_tiles_length(m1_move) == move_get_tiles_length(m2_move))) {
-    return false;
-  }
-
-  // Create a rack from m1, then subtract the rack from m2. The final
-  // rack should have all zeroes.
-  Rack similar_plays_rack;
-  const int dist_size = 0;
-  rack_set_dist_size(&similar_plays_rack, dist_size);
-  for (int i = 0; i < move_get_tiles_length(m1_move); i++) {
-    uint8_t tile = move_get_tile(m1_move, i);
-    if (tile == PLAYED_THROUGH_MARKER) {
-      continue;
-    }
-    int ml = tile;
-    if (get_is_blanked(ml)) {
-      ml = 0;
-    }
-    rack_add_letter(&similar_plays_rack, ml);
-  }
-
-  for (int i = 0; i < move_get_tiles_length(m2_move); i++) {
-    uint8_t tile = move_get_tile(m1_move, i);
-    if (tile == PLAYED_THROUGH_MARKER) {
-      continue;
-    }
-    int ml = tile;
-    if (get_is_blanked(ml)) {
-      ml = 0;
-    }
-    rack_take_letter(&similar_plays_rack, ml);
-  }
-
-  for (int i = 0; i < dist_size; i++) {
-    if (rack_get_letter(&similar_plays_rack, i) != 0) {
-      return false;
-    }
-  }
-  return true;
+  return moves_are_similar(m1_move, m2_move);
 }
 
 double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,

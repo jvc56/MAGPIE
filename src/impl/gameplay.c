@@ -401,3 +401,51 @@ void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter,
   bag_draw_letter(bag, letter, player_draw_index);
   rack_add_letter(rack, letter);
 }
+
+bool moves_are_similar(const Move *m1, const Move *m2) {
+  if (!(move_get_dir(m1) == move_get_dir(m2) &&
+        move_get_col_start(m1) == move_get_col_start(m2) &&
+        move_get_row_start(m1) == move_get_row_start(m2))) {
+    return false;
+  }
+  if (!(move_get_tiles_played(m1) == move_get_tiles_played(m2) &&
+        move_get_tiles_length(m1) == move_get_tiles_length(m2))) {
+    return false;
+  }
+
+  // Create a rack from m1, then subtract the rack from m2. The final
+  // rack should have all zeroes.
+  Rack similar_plays_rack;
+  const int dist_size = 0;
+  rack_set_dist_size(&similar_plays_rack, dist_size);
+  for (int i = 0; i < move_get_tiles_length(m1); i++) {
+    uint8_t tile = move_get_tile(m1, i);
+    if (tile == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    int ml = tile;
+    if (get_is_blanked(ml)) {
+      ml = 0;
+    }
+    rack_add_letter(&similar_plays_rack, ml);
+  }
+
+  for (int i = 0; i < move_get_tiles_length(m2); i++) {
+    uint8_t tile = move_get_tile(m1, i);
+    if (tile == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    int ml = tile;
+    if (get_is_blanked(ml)) {
+      ml = 0;
+    }
+    rack_take_letter(&similar_plays_rack, ml);
+  }
+
+  for (int i = 0; i < dist_size; i++) {
+    if (rack_get_letter(&similar_plays_rack, i) != 0) {
+      return false;
+    }
+  }
+  return true;
+}

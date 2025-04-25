@@ -26,7 +26,9 @@
 #include "../../src/impl/move_gen.h"
 #include "../../src/impl/simmer.h"
 
+#include "../../src/str/game_string.h"
 #include "../../src/str/move_string.h"
+#include "../../src/str/sim_string.h"
 
 #include "../../src/util/math_util.h"
 #include "../../src/util/string_util.h"
@@ -456,6 +458,137 @@ void test_seed_consistency(void) {
   config_destroy(config);
 }
 
+typedef struct SimTimeStats {
+  Stat *total_time;
+  Stat *bai_time;
+  Stat *sample_tile;
+} SimTimeStats;
+
+SimTimeStats *sim_time_stats_create(void) {
+  SimTimeStats *stats = malloc(sizeof(SimTimeStats));
+  stats->total_time = stat_create(true);
+  stats->bai_time = stat_create(true);
+  stats->sample_tile = stat_create(true);
+  return stats;
+}
+
+void sim_time_stats_destroy(SimTimeStats *stats) {
+  stat_destroy(stats->total_time);
+  stat_destroy(stats->bai_time);
+  stat_destroy(stats->sample_tile);
+  free(stats);
+}
+
+void sim_time_stats_increment(SimTimeStats *stats, double total_time,
+                              double bai_time, double sample_tile) {
+  stat_push(stats->total_time, total_time, 1);
+  stat_push(stats->bai_time, bai_time, 1);
+  stat_push(stats->sample_tile, sample_tile, 1);
+}
+
+typedef struct SimStrategyStats {
+  int num_best_play_identical_to_rr;
+  SimTimeStats *sim_time_total;
+  SimTimeStats *sim_time_threshold;
+  SimTimeStats *sim_time_other;
+} SimStrategyStats;
+
+SimStrategyStats *sim_strategy_stats_create(void) {
+  SimStrategyStats *stats = malloc(sizeof(SimStrategyStats));
+  stats->num_best_play_identical_to_rr = 0;
+  stats->sim_time_total = sim_time_stats_create();
+  stats->sim_time_threshold = sim_time_stats_create();
+  stats->sim_time_other = sim_time_stats_create();
+  return stats;
+}
+
+void sim_strategy_stats_destroy(SimStrategyStats *stats) {
+  sim_time_stats_destroy(stats->sim_time_total);
+  sim_time_stats_destroy(stats->sim_time_threshold);
+  sim_time_stats_destroy(stats->sim_time_other);
+  free(stats);
+}
+
+void sim_strategy_stats_increment(SimStrategyStats *stats, double total_time,
+                                  double bai_time, double sample_time,
+                                  exit_status_t exit_status, int matches_rr) {
+  SimTimeStats *sts_total = stats->sim_time_total;
+  SimTimeStats *sts_to_increment = stats->sim_time_threshold;
+  if (exit_status == EXIT_STATUS_SAMPLE_LIMIT ||
+      exit_status == EXIT_STATUS_ONE_ARM_REMAINING) {
+    sts_to_increment = stats->sim_time_other;
+  } else if (exit_status != EXIT_STATUS_THRESHOLD) {
+    log_fatal("unexpected sim performance test exit status: %d\n", exit_status);
+  }
+  sim_time_stats_increment(sts_total, total_time, bai_time, sample_time);
+  sim_time_stats_increment(sts_to_increment, total_time, bai_time, sample_time);
+  stats->num_best_play_identical_to_rr += matches_rr;
+}
+
+// Overwrites the existing file with the new updated stats
+void write_stats_to_file(const char *filename, const char *strategies[],
+                         SimStrategyStats **stats, int num_strategies) {
+
+  FILE *output_file = fopen(filename, "w");
+  if (!output_file) {
+    log_fatal("failed to open output file '%s'\n", filename);
+  }
+
+  // Write header row
+  fprintf(
+      output_file,
+      "Strategy | Matches to RR | Total Time | Threshold Exit | Other Exit \n");
+
+  // Write stats for each strategy
+  for (int j = 0; j < num_strategies; j++) {
+    fprintf(output_file, "%s ", strategies[j]);
+
+    const SimStrategyStats *stats_j = stats[j];
+    // Threshold exit
+    fprintf(output_file, "%d ", stats_j->num_best_play_identical_to_rr);
+    for (int k = 0; k < 3; k++) {
+      SimTimeStats *sts = stats_j->sim_time_total;
+      if (k == 1) {
+        sts = stats_j->sim_time_threshold;
+      } else if (k == 2) {
+        sts = stats_j->sim_time_other;
+      }
+      // FIXME: fix timing issues
+      fprintf(output_file, "%0.3f ", stat_get_mean(sts->total_time));
+      fprintf(output_file, "%0.3f ", stat_get_mean(sts->sample_tile));
+      fprintf(output_file, "%0.3f ", stat_get_mean(sts->bai_time));
+    }
+    fprintf(output_file, "\n");
+  }
+
+  fclose(output_file);
+}
+
+void append_game_with_moves_to_file(const char *filename, const Game *game,
+                                    const MoveList *move_list) {
+  FILE *output_file = fopen(filename, "a");
+  if (!output_file) {
+    log_fatal("failed to open output file '%s'\n", filename);
+  }
+  StringBuilder *game_string = string_builder_create();
+  string_builder_add_game(game_string, game, move_list);
+  fprintf(output_file, "%s\n", string_builder_peek(game_string));
+  string_builder_destroy(game_string);
+  fclose(output_file);
+}
+
+void append_ucgi_sim_stats_to_file(const char *filename,
+                                   const char *strategy_str,
+                                   const char *sim_stats_str) {
+  FILE *output_file = fopen(filename, "a");
+  if (!output_file) {
+    log_fatal("failed to open output file '%s'\n", filename);
+  }
+  fprintf(output_file, "%s\n", strategy_str);
+  fprintf(output_file, "%s\n", sim_stats_str);
+  fclose(output_file);
+}
+
 void test_sim_perf(const char *sim_perf_iters, const char *sim_perf_threads) {
   const int num_iters = atoi(sim_perf_iters);
   if (num_iters < 0) {
@@ -477,103 +610,90 @@ void test_sim_perf(const char *sim_perf_iters, const char *sim_perf_threads) {
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   Game *game = config_get_game(config);
   Bag *bag = game_get_bag(game);
-  MoveList *move_list = config_get_move_list(config);
   const char *strategies[] = {
-      "-sr rr -ev false -threshold none",
-      "-sr tas -ev false -threshold ht",
-      "-sr tas -ev true -threshold ht",
-      "-sr tt -ev false -threshold ht"
-      "-sr tt -ev true -threshold ht",
-      "-sr tas -ev true -threshold ht",
-      "-sr rr -ev false -threshold ht",
-      "-sr tas -ev true -threshold gk16",
+      "-sr rr -ev false -threshold none -epigon 100000",
+      "-sr tas -ev false -threshold ht -epigon 1000",
+      "-sr tas -ev true -threshold ht -epigon 1000",
+      "-sr tt -ev false -threshold ht -epigon 1000",
+      "-sr tt -ev true -threshold ht -epigon 1000",
+      "-sr tas -ev true -threshold ht -epigon 1000",
+      "-sr rr -ev false -threshold ht -epigon 1000",
+      "-sr tas -ev true -threshold gk16 -epigon 1000",
   };
   const int num_strategies = sizeof(strategies) / sizeof(strategies[0]);
-  const int stats_per_strat = 6;
-  const int num_stats = num_strategies * stats_per_strat;
-
-  Stat **stats = malloc_or_die(num_stats * sizeof(Stat *));
-  for (int i = 0; i < num_stats; i++) {
-    stats[i] = stat_create(true);
+  SimStrategyStats **stats =
+      malloc_or_die(num_strategies * sizeof(SimStrategyStats *));
+  for (int i = 0; i < num_strategies; i++) {
+    stats[i] = sim_strategy_stats_create();
   }
   SimResults *sim_results = config_get_sim_results(config);
   BAIResult *bai_result = sim_results_get_bai_result(sim_results);
   ThreadControl *thread_control = config_get_thread_control(config);
-  const char *output_filename = "sim_perf_stats.txt";
+  Move best_rr_play;
+  const char *sim_perf_filename = "sim_perf_stats.txt";
+  const char *sim_perf_game_details_filename = "sim_perf_game_details.txt";
+  if (remove(sim_perf_game_details_filename) != 0 && errno != ENOENT) {
+    log_fatal("error deleting %s: %s", sim_perf_game_details_filename);
+  }
+  draw_starting_racks(game);
   for (int i = 0; i < num_iters; i++) {
     if (bag_get_tiles(bag) < RACK_SIZE) {
       game_reset(game);
       draw_starting_racks(game);
     }
     load_and_exec_config_or_die(config, "gen");
+    append_game_with_moves_to_file(sim_perf_game_details_filename, game,
+                                   config_get_move_list(config));
     for (int j = 0; j < num_strategies; j++) {
+      // FIXME: set game seed
       char *set_strategies_cmd = get_formatted_string("set %s", strategies[j]);
       load_and_exec_config_or_die(config, set_strategies_cmd);
       free(set_strategies_cmd);
 
       const sim_status_t status = config_simulate(config, NULL, sim_results);
       assert(status == SIM_STATUS_SUCCESS);
+
+      sim_results_sort_plays_by_win_rate(sim_results);
+      const SimmedPlay *best_play =
+          sim_results_get_sorted_simmed_play(sim_results, 0);
+      const Move *best_move = simmed_play_get_move(best_play);
+      int matches_rr = 0;
+      if (j == 0) {
+        const int num_simmed_plays =
+            sim_results_get_number_of_plays(sim_results);
+        for (int k = 1; k < num_simmed_plays; k++) {
+          SimmedPlay *play_k =
+              sim_results_get_sorted_simmed_play(sim_results, k);
+          const Stat *eq_stat = simmed_play_get_equity_stat(play_k);
+          assert(stat_get_num_samples(eq_stat) == 5000);
+        }
+        move_copy(&best_rr_play, best_move);
+        matches_rr = 1;
+      } else if (moves_are_similar(best_move, &best_rr_play)) {
+        matches_rr = 1;
+      }
+      char *sim_stats_str =
+          ucgi_sim_stats(game, sim_results,
+                         (double)sim_results_get_node_count(sim_results) /
+                             thread_control_get_seconds_elapsed(thread_control),
+                         false);
+      append_ucgi_sim_stats_to_file(sim_perf_game_details_filename,
+                                    strategies[j], sim_stats_str);
+      free(sim_stats_str);
       const double total_time = bai_result_get_total_time(bai_result);
       const double sample_time = bai_result_get_sample_time(bai_result);
       const double bai_time = total_time - sample_time;
-      const exit_status_t exit_status =
-          thread_control_get_exit_status(thread_control);
-      int exit_status_offset = 0;
-      if (exit_status == EXIT_STATUS_SAMPLE_LIMIT ||
-          exit_status == EXIT_STATUS_ONE_ARM_REMAINING) {
-        exit_status_offset = stats_per_strat / 2;
-      } else if (exit_status != EXIT_STATUS_THRESHOLD) {
-        log_fatal("unexpected sim performance test exit status: %d\n",
-                  exit_status);
-      }
-      const int base_index = j * stats_per_strat + exit_status_offset;
-      stat_push(stats[base_index], total_time, 1);
-      stat_push(stats[base_index + 1], sample_time, 1);
-      stat_push(stats[base_index + 2], bai_time, 1);
+      sim_strategy_stats_increment(
+          stats[j], total_time, bai_time, sample_time,
+          thread_control_get_exit_status(thread_control), matches_rr);
     }
-
-    FILE *output_file = fopen(output_filename, "w");
-    if (!output_file) {
-      log_fatal("failed to open output file '%s'\n", output_filename);
-    }
-
-    // Write header row
-    fprintf(output_file, "Strategy | Threshold Exit | Sample Limit Exit\n");
-    fprintf(output_file,
-            "          | Total Time      | Sample Time    | BAI Time    | "
-            "Total Time      | Sample Time    | BAI Time    |\n");
-
-    // Write stats for each strategy
-    for (int j = 0; j < num_strategies; j++) {
-      const int base_index = j * stats_per_strat;
-      fprintf(output_file, "%s | ", strategies[j]);
-
-      // Threshold exit
-      fprintf(output_file, "             | ");
-      fprintf(output_file, "%f %f | ", stat_get_mean(stats[base_index]),
-              stat_get_stdev(stats[base_index]));
-      fprintf(output_file, "%f %f | ", stat_get_mean(stats[base_index + 1]),
-              stat_get_stdev(stats[base_index + 1]));
-      fprintf(output_file, "%f %f | ", stat_get_mean(stats[base_index + 2]),
-              stat_get_stdev(stats[base_index + 2]));
-
-      // Sample limit exit
-      fprintf(output_file, "             | ");
-      fprintf(output_file, "%f %f | ", stat_get_mean(stats[base_index + 3]),
-              stat_get_stdev(stats[base_index + 3]));
-      fprintf(output_file, "%f %f | ", stat_get_mean(stats[base_index + 4]),
-              stat_get_stdev(stats[base_index + 4]));
-      fprintf(output_file, "%f %f |\n", stat_get_mean(stats[base_index + 5]),
-              stat_get_stdev(stats[base_index + 5]));
-    }
-
-    fclose(output_file);
-
-    const Move *best_play = get_top_equity_move(game, 0, move_list);
+    write_stats_to_file(sim_perf_filename, strategies, stats, num_strategies);
+    const Move *best_play =
+        get_top_equity_move(game, 0, config_get_move_list(config));
     play_move(best_play, game, NULL, NULL);
   }
-  for (int i = 0; i < num_stats; i++) {
-    stat_destroy(stats[i]);
+  for (int i = 0; i < num_strategies; i++) {
+    sim_strategy_stats_destroy(stats[i]);
   }
   free(stats);
   config_destroy(config);

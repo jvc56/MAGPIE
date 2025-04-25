@@ -64,9 +64,9 @@ void string_builder_add_player_row(StringBuilder *game_string,
       game_string, "%s%s%*s", player_marker, display_player_name,
       25 - string_length(display_player_name), "");
   string_builder_add_rack(game_string, player_rack, ld, false);
-  string_builder_add_formatted_string(game_string, "%*s%d",
-                                      10 - rack_get_total_letters(player_rack),
-                                      "", equity_to_int(player_get_score(player)));
+  string_builder_add_formatted_string(
+      game_string, "%*s%d", 10 - rack_get_total_letters(player_rack), "",
+      equity_to_int(player_get_score(player)));
   free(display_player_name);
 }
 
@@ -98,7 +98,7 @@ void string_builder_add_move_with_rank_and_equity(StringBuilder *game_string,
   string_builder_add_formatted_string(game_string, " %d ", move_index + 1);
   string_builder_add_move(game_string, board, move, ld);
   string_builder_add_string(game_string, " ");
-    const Equity eq = move_get_equity(move);
+  const Equity eq = move_get_equity(move);
   string_builder_add_equity(game_string, eq, "%0.2f");
 }
 
@@ -179,11 +179,13 @@ char *ucgi_static_moves(const Game *game, const MoveList *move_list) {
     Move *move = move_list_get_move(sorted_move_list, i);
     string_builder_add_string(moves_string_builder, "info currmove ");
     string_builder_add_ucgi_move(moves_string_builder, move, board, ld);
-
+    double move_equity = -100000.0;
+    if (move_get_type(move) != GAME_EVENT_PASS) {
+      move_equity = equity_to_double(move_get_equity(move));
+    }
     string_builder_add_formatted_string(
         moves_string_builder, " sc %d eq %.3f it 0\n",
-        equity_to_int(move_get_score(move)),
-        equity_to_double(move_get_equity(move)));
+        equity_to_int(move_get_score(move)), move_equity);
   }
   string_builder_add_string(moves_string_builder, "bestmove ");
   string_builder_add_ucgi_move(
