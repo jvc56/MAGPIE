@@ -1913,7 +1913,7 @@ Config *config_create_default(void) {
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_BAI_IS_EV, "ev", 1, 1, execute_fatal,
                     status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_EPIGON_CUTOFF, "epigon_cutoff", 1, 1,
+  parsed_arg_create(config, ARG_TOKEN_EPIGON_CUTOFF, "epigoncutoff", 1, 1,
                     execute_fatal, status_fatal);
   config->data_paths = string_duplicate(DEFAULT_DATA_PATHS);
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;

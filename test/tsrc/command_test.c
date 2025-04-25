@@ -434,6 +434,7 @@ void test_process_command(const char *arg_string,
   if (newlines_in_outerror != expected_outerror_line_count) {
     printf("error counts do not match %d != %d\n", newlines_in_outerror,
            expected_outerror_line_count);
+    printf("got:\n%s\n", test_outerror);
     assert(0);
   }
 
@@ -618,7 +619,7 @@ void test_exec_console_command(void) {
 
   file_handler_write(
       input_writer, "infer 1 DGINR 18 -numplays 7 -threads 4 -pfreq 1000000\n");
-  file_handler_write(input_writer, "set -r1 best -r2 b -nump 1 -thr 4\n");
+  file_handler_write(input_writer, "set -r1 best -r2 b -nump 1 -threads 4\n");
   file_handler_write(
       input_writer,
       "autoplay game 10 -lex CSW21 -s1 equity -s2 equity -gp true \n");
