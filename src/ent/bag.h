@@ -11,7 +11,7 @@
 
 typedef struct Bag Bag;
 
-Bag *bag_create(const LetterDistribution *ld);
+Bag *bag_create(const LetterDistribution *ld, uint64_t seed);
 void bag_destroy(Bag *bag);
 void bag_copy(Bag *dst, const Bag *src);
 Bag *bag_duplicate(const Bag *bag);

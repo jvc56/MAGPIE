@@ -256,7 +256,7 @@ void test_leave_list_normal_leaves(void) {
   assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves);
 
-  Bag *bag = bag_create(ld);
+  Bag *bag = bag_create(ld, 0);
   Rack *expected_rack = rack_create(ld_get_size(ld));
   Rack *player_rack = rack_create(ld_get_size(ld));
   clear_bag(bag);
@@ -475,7 +475,7 @@ void test_leave_list_small_leaves(void) {
   const LetterDistribution *ld = config_get_ld(config);
   KLV *klv = players_data_get_data(config_get_players_data(config),
                                    PLAYERS_DATA_TYPE_KLV, 0);
-  Bag *bag = bag_create(ld);
+  Bag *bag = bag_create(ld, 0);
   Rack *sl = rack_create(ld_get_size(ld));
   Rack *player_rack = rack_create(ld_get_size(ld));
   Rack *rare_leave = rack_create(ld_get_size(ld));

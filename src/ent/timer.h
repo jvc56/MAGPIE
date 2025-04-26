@@ -11,6 +11,7 @@
 
 // Not thread safe
 typedef struct Timer {
+  int clock_type;
   struct timespec start_time;
   struct timespec end_time;
   bool is_running;
@@ -18,8 +19,9 @@ typedef struct Timer {
 
 static inline void mtimer_reset(Timer *timer) { timer->is_running = false; }
 
-static inline Timer *mtimer_create(void) {
+static inline Timer *mtimer_create(int clock_type) {
   Timer *timer = (Timer *)malloc_or_die(sizeof(Timer));
+  timer->clock_type = clock_type;
   mtimer_reset(timer);
   return timer;
 }
@@ -32,19 +34,19 @@ static inline void mtimer_destroy(Timer *timer) {
 }
 
 static inline void mtimer_start(Timer *timer) {
-  clock_gettime(CLOCK_MONOTONIC, &timer->start_time);
+  clock_gettime(timer->clock_type, &timer->start_time);
   timer->is_running = true;
 }
 
 static inline void mtimer_stop(Timer *timer) {
-  clock_gettime(CLOCK_MONOTONIC, &timer->end_time);
+  clock_gettime(timer->clock_type, &timer->end_time);
   timer->is_running = false;
 }
 
 static inline double mtimer_elapsed_seconds(const Timer *timer) {
   struct timespec finish_time;
   if (timer->is_running) {
-    clock_gettime(CLOCK_MONOTONIC, &finish_time);
+    clock_gettime(timer->clock_type, &finish_time);
   } else {
     finish_time.tv_sec = timer->end_time.tv_sec;
     finish_time.tv_nsec = timer->end_time.tv_nsec;

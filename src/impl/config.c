@@ -344,6 +344,7 @@ void config_fill_game_args(const Config *config, GameArgs *game_args) {
   game_args->ld = config->ld;
   game_args->bingo_bonus = config->bingo_bonus;
   game_args->game_variant = config->game_variant;
+  game_args->seed = thread_control_get_seed(config->thread_control);
 }
 
 Game *config_game_create(const Config *config) {

@@ -55,7 +55,7 @@ ThreadControl *thread_control_create(void) {
       STDOUT_FILENAME, FILE_HANDLER_MODE_WRITE);
   thread_control->infile =
       file_handler_create_from_filename(STDIN_FILENAME, FILE_HANDLER_MODE_READ);
-  thread_control->timer = mtimer_create();
+  thread_control->timer = mtimer_create(CLOCK_MONOTONIC);
   thread_control->seed = time(NULL);
   thread_control->prng = prng_create(thread_control->seed);
   return thread_control;

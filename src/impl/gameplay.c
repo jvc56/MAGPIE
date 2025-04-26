@@ -402,7 +402,7 @@ void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter,
   rack_add_letter(rack, letter);
 }
 
-bool moves_are_similar(const Move *m1, const Move *m2) {
+bool moves_are_similar(const Move *m1, const Move *m2, int dist_size) {
   if (!(move_get_dir(m1) == move_get_dir(m2) &&
         move_get_col_start(m1) == move_get_col_start(m2) &&
         move_get_row_start(m1) == move_get_row_start(m2))) {
@@ -416,8 +416,8 @@ bool moves_are_similar(const Move *m1, const Move *m2) {
   // Create a rack from m1, then subtract the rack from m2. The final
   // rack should have all zeroes.
   Rack similar_plays_rack;
-  const int dist_size = 0;
   rack_set_dist_size(&similar_plays_rack, dist_size);
+  rack_reset(&similar_plays_rack);
   for (int i = 0; i < move_get_tiles_length(m1); i++) {
     uint8_t tile = move_get_tile(m1, i);
     if (tile == PLAYED_THROUGH_MARKER) {

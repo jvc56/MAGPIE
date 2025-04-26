@@ -249,7 +249,7 @@ void *bai_sample_worker(void *args) {
   thread_index = *thread_index_counter;
   (*thread_index_counter)++;
   pthread_mutex_unlock(thread_index_counter_mutex);
-  Timer *timer = mtimer_create();
+  Timer *timer = mtimer_create(CLOCK_MONOTONIC);
   ProdConQueueMessage req;
   ProdConQueueMessage resp;
   while (true) {
@@ -490,6 +490,8 @@ bool bai_is_finished(BAIIsFinishedArgs *args, const exit_status_t exit_status,
 void bai(const BAIOptions *bai_options, RandomVariables *rvs,
          RandomVariables *rng, ThreadControl *thread_control,
          BAILogger *bai_logger, BAIResult *bai_result) {
+  Timer *bai_thread_timer = mtimer_create(CLOCK_THREAD_CPUTIME_ID);
+  mtimer_start(bai_thread_timer);
   thread_control_reset(thread_control, 0);
   rvs_reset(rvs);
 
@@ -648,4 +650,7 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   bai_glrt_results_destroy(glrt_results);
   bai_destroy_threshold(Sβ);
   bai_destroy(bai);
+  mtimer_stop(bai_thread_timer);
+  bai_result_set_bai_time(bai_result, mtimer_elapsed_seconds(bai_thread_timer));
+  mtimer_destroy(bai_thread_timer);
 }

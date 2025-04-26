@@ -309,6 +309,7 @@ typedef struct SimmerWorker {
 typedef struct Simmer {
   Equity initial_spread;
   int initial_player;
+  int dist_size;
   Rack *known_opp_rack;
   SimmerWorker **workers;
   // Owned by the caller
@@ -345,7 +346,7 @@ bool simmer_plays_are_similar(const Simmer *simmer,
   Move *m1_move = simmed_play_get_move(m1);
   Move *m2_move = simmed_play_get_move(m2);
 
-  return moves_are_similar(m1_move, m2_move);
+  return moves_are_similar(m1_move, m2_move, simmer->dist_size);
 }
 
 double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
@@ -490,6 +491,8 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   } else {
     simmer->known_opp_rack = NULL;
   }
+
+  simmer->dist_size = ld_get_size(game_get_ld(sim_args->game));
 
   const int num_threads = thread_control_get_threads(thread_control);
   simmer->workers = malloc_or_die((sizeof(SimmerWorker *)) * (num_threads));

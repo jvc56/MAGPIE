@@ -33,7 +33,7 @@ void test_bag(void) {
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   const LetterDistribution *ld = config_get_ld(config);
   int ld_size = ld_get_size(ld);
-  Bag *bag = bag_create(ld);
+  Bag *bag = bag_create(ld, 0);
   Rack *rack = rack_create(ld_size);
 
   for (int i = 0; i < ld_size; i++) {

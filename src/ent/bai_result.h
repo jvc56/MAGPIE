@@ -19,4 +19,6 @@ void bai_result_increment_sample_time(BAIResult *bai_result,
 double bai_result_get_sample_time(BAIResult *bai_result);
 void bai_result_set_total_time(BAIResult *bai_result, const double total_time);
 double bai_result_get_total_time(BAIResult *bai_result);
+void bai_result_set_bai_time(BAIResult *bai_result, const double bai_time);
+double bai_result_get_bai_time(BAIResult *bai_result);
 #endif
