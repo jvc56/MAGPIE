@@ -10,6 +10,7 @@ struct BAIResult {
   int total_samples;
   double sample_time;
   double bai_time;
+  double wait_time;
   double total_time;
   pthread_mutex_t mutex;
 };
@@ -21,6 +22,7 @@ BAIResult *bai_result_create(void) {
   bai_result->total_samples = 0;
   bai_result->sample_time = 0;
   bai_result->bai_time = 0;
+  bai_result->wait_time = 0;
   bai_result->total_time = 0;
   pthread_mutex_init(&bai_result->mutex, NULL);
   return bai_result;
@@ -78,4 +80,13 @@ void bai_result_set_bai_time(BAIResult *bai_result, const double bai_time) {
 
 double bai_result_get_bai_time(BAIResult *bai_result) {
   return bai_result->bai_time;
+}
+
+void bai_result_increment_wait_time(BAIResult *bai_result,
+                                    const double wait_time) {
+  bai_result->wait_time += wait_time;
+}
+
+double bai_result_get_wait_time(BAIResult *bai_result) {
+  return bai_result->wait_time;
 }

@@ -21,4 +21,8 @@ void bai_result_set_total_time(BAIResult *bai_result, const double total_time);
 double bai_result_get_total_time(BAIResult *bai_result);
 void bai_result_set_bai_time(BAIResult *bai_result, const double bai_time);
 double bai_result_get_bai_time(BAIResult *bai_result);
+void bai_result_increment_wait_time(BAIResult *bai_result,
+                                    const double wait_time);
+double bai_result_get_wait_time(BAIResult *bai_result);
+
 #endif

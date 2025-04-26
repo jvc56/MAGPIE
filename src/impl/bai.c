@@ -139,6 +139,8 @@ typedef struct BAI {
   BAIArmDatum **arm_data;
   ProdConQueue *request_queue;
   ProdConQueue *response_queue;
+  Timer *thread_timer;
+  Timer *wait_timer;
   // These fields are not owned by the BAI struct and are
   // added for convenience.
   ThreadControl *thread_control;
@@ -181,6 +183,9 @@ BAI *bai_create(ThreadControl *thread_control, RandomVariables *rvs,
     bai->request_queue = prod_con_queue_create(number_of_threads);
     bai->response_queue = prod_con_queue_create(number_of_threads);
   }
+  bai->thread_timer = mtimer_create(CLOCK_THREAD_CPUTIME_ID);
+  bai->wait_timer = mtimer_create(CLOCK_MONOTONIC);
+  mtimer_start(bai->thread_timer);
   bai->thread_control = thread_control;
   bai->rvs = rvs;
   bai->bai_logger = bai_logger;
@@ -201,6 +206,8 @@ void bai_destroy(BAI *bai) {
   free(bai->arm_data);
   prod_con_queue_destroy(bai->request_queue);
   prod_con_queue_destroy(bai->response_queue);
+  mtimer_destroy(bai->thread_timer);
+  mtimer_destroy(bai->wait_timer);
   free(bai);
 }
 
@@ -291,8 +298,12 @@ void bai_sample_request(BAI *bai, const int k) {
   bai->total_samples_requested++;
 }
 
-void bai_sample_receive(BAI *bai) {
+void bai_sample_receive(BAI *bai, BAIResult *bai_result) {
+  mtimer_start(bai->wait_timer);
   const ProdConQueueMessage resp = prod_con_queue_consume(bai->response_queue);
+  mtimer_stop(bai->wait_timer);
+  bai_result_increment_wait_time(bai_result,
+                                 mtimer_elapsed_seconds(bai->wait_timer));
   if (resp.arm_datum->is_epigon) {
     return;
   }
@@ -425,6 +436,9 @@ bool bai_round_robin_is_complete(const BAI *bai) {
 
 void bai_set_result(const BAI *bai, const exit_status_t exit_status,
                     const int astar, double total_time, BAIResult *bai_result) {
+  mtimer_stop(bai->thread_timer);
+  bai_result_set_bai_time(bai_result,
+                          mtimer_elapsed_seconds(bai->thread_timer));
   bai_result_set_exit_status(bai_result, exit_status);
   bai_result_set_best_arm(bai_result, bai_get_rvs_index(bai, astar));
   bai_result_set_total_samples(bai_result, bai->total_samples_requested);
@@ -490,8 +504,6 @@ bool bai_is_finished(BAIIsFinishedArgs *args, const exit_status_t exit_status,
 void bai(const BAIOptions *bai_options, RandomVariables *rvs,
          RandomVariables *rng, ThreadControl *thread_control,
          BAILogger *bai_logger, BAIResult *bai_result) {
-  Timer *bai_thread_timer = mtimer_create(CLOCK_THREAD_CPUTIME_ID);
-  mtimer_start(bai_thread_timer);
   thread_control_reset(thread_control, 0);
   rvs_reset(rvs);
 
@@ -536,7 +548,7 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
     for (int k = 0; k < bai->initial_K; k++) {
       for (int i = 0; i < 2; i++) {
         if (bai->total_samples_requested >= number_of_threads) {
-          bai_sample_receive(bai);
+          bai_sample_receive(bai, bai_result);
         }
         bai_sample_request(bai, k);
       }
@@ -549,7 +561,7 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
       // At this point we have requested 2*initial_K samples and have only
       // received 2*initial_K - number_of_threads samples, so we need to receive
       // the remaining number_of_threads samples samples.
-      bai_sample_receive(bai);
+      bai_sample_receive(bai, bai_result);
     }
   } else {
     for (int k = 0; k < bai->initial_K; k++) {
@@ -629,7 +641,7 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
                                                 bai->K, rng, bai_logger);
 
     if (bai->is_multithreaded) {
-      bai_sample_receive(bai);
+      bai_sample_receive(bai, bai_result);
       bai_sample_request(bai, k);
     } else {
       bai_sample_singlethreaded(bai, k);
@@ -650,7 +662,4 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   bai_glrt_results_destroy(glrt_results);
   bai_destroy_threshold(Sβ);
   bai_destroy(bai);
-  mtimer_stop(bai_thread_timer);
-  bai_result_set_bai_time(bai_result, mtimer_elapsed_seconds(bai_thread_timer));
-  mtimer_destroy(bai_thread_timer);
 }
