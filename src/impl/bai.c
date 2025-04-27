@@ -184,7 +184,7 @@ BAI *bai_create(ThreadControl *thread_control, RandomVariables *rvs,
     bai->response_queue = prod_con_queue_create(number_of_threads);
   }
   bai->thread_timer = mtimer_create(CLOCK_THREAD_CPUTIME_ID);
-  bai->wait_timer = mtimer_create(CLOCK_MONOTONIC);
+  bai->wait_timer = mtimer_create(CLOCK_THREAD_CPUTIME_ID);
   mtimer_start(bai->thread_timer);
   bai->thread_control = thread_control;
   bai->rvs = rvs;
