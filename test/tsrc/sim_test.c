@@ -657,8 +657,6 @@ void test_sim_perf(const char *sim_perf_iters, const char *sim_perf_threads) {
   Game *game = config_get_game(config);
   Bag *bag = game_get_bag(game);
   const char *strategies[] = {
-      "-sr tas -ev true -threshold gk16 -epigon 1000",
-      "-sr tas -ev false -threshold gk16 -epigon 1000",
       "-sr tt -ev true -threshold gk16 -epigon 1000",
       "-sr tt -ev false -threshold gk16 -epigon 1000",
   };
