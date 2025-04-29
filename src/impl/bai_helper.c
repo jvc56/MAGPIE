@@ -56,9 +56,7 @@ struct BAIThreshold {
   threshold_func_t threshold_func;
 };
 
-BAIThreshold *bai_create_threshold(const bai_threshold_t type,
-                                   const bool __attribute__((unused)) is_EV,
-                                   const double δ,
+BAIThreshold *bai_create_threshold(const bai_threshold_t type, const double δ,
                                    const int __attribute__((unused)) r,
                                    const int __attribute__((unused)) s,
                                    const double __attribute__((unused)) γ) {

@@ -65,7 +65,6 @@ void test_bai_track_and_stop(int num_threads) {
       .sampling_rule = BAI_SAMPLING_RULE_TRACK_AND_STOP,
       .threshold = BAI_THRESHOLD_GK16,
       .delta = 0.05,
-      .is_EV = true,
       .sample_limit = 1000,
       .epigon_cutoff = 0,
       .time_limit_seconds = 0,
@@ -104,7 +103,6 @@ void test_bai_sample_limit(int num_threads) {
   BAIOptions bai_options = {
       .threshold = BAI_THRESHOLD_NONE,
       .delta = 0.05,
-      .is_EV = true,
       .sample_limit = 100,
       .epigon_cutoff = 10,
       .time_limit_seconds = 0,
@@ -177,7 +175,6 @@ void test_bai_time_limit(int num_threads) {
       .sampling_rule = BAI_SAMPLING_RULE_TRACK_AND_STOP,
       .threshold = BAI_THRESHOLD_NONE,
       .delta = 0.01,
-      .is_EV = true,
       .sample_limit = 100000000,
       .epigon_cutoff = 100000,
       .time_limit_seconds = 5,
@@ -304,7 +301,6 @@ void test_bai_epigons(int num_threads) {
         assert_num_epigons(rvs, 0);
         BAILogger *bai_logger = NULL;
         bai_options.sampling_rule = strategies[i][0];
-        bai_options.is_EV = strategies[i][1];
         bai_options.threshold = strategies[i][2];
         bai(&bai_options, rvs, rng, thread_control, bai_logger, bai_result);
         bai_logger_flush(bai_logger);
@@ -407,7 +403,6 @@ void test_bai_input_from_file(const char *bai_input_filename,
 
   BAIOptions bai_options = {
       .sampling_rule = strategies[pi][0],
-      .is_EV = strategies[pi][1],
       .threshold = strategies[pi][2],
       .delta = delta,
       .sample_limit = num_samples,

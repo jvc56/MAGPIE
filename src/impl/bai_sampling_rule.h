@@ -10,8 +10,7 @@
 typedef struct BAISamplingRule BAISamplingRule;
 
 BAISamplingRule *bai_sampling_rule_create(const bai_sampling_rule_t type,
-                                          const bool is_EV, const int *N,
-                                          const int size);
+                                          const int *N, const int size);
 void bai_sampling_rule_destroy(BAISamplingRule *bai_sampling_rule);
 int bai_sampling_rule_next_sample(const BAISamplingRule *bai_sampling_rule,
                                   const int astar, const int aalt,

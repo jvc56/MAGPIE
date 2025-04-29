@@ -22,7 +22,6 @@ typedef struct BAIOptions {
   bai_sampling_rule_t sampling_rule;
   bai_threshold_t threshold;
   double delta;
-  bool is_EV;
   // If the sampling rule is round robin complete, this limit
   // refers to the total number of complete round robins instead
   // of the total number of samples.

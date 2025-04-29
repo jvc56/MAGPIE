@@ -512,9 +512,8 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
 
   bai_set_result(bai, EXIT_STATUS_NONE, 0, 0.0, bai_result);
 
-  BAIThreshold *Sβ =
-      bai_create_threshold(bai_options->threshold, bai_options->is_EV,
-                           bai_options->delta, 2, 2, 1.2);
+  BAIThreshold *Sβ = bai_create_threshold(bai_options->threshold,
+                                          bai_options->delta, 2, 2, 1.2);
   BAIGLRTResults *glrt_results = bai_glrt_results_create(bai->initial_K);
 
   const int number_of_threads = thread_control_get_threads(thread_control);
@@ -574,9 +573,8 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   assert(bai->total_samples_requested == bai->total_samples_received);
 
   // The sampling rule must be initialized after the initial sampling.
-  bai->bai_sampling_rule =
-      bai_sampling_rule_create(bai_options->sampling_rule, bai_options->is_EV,
-                               bai->N_received, bai->initial_K);
+  bai->bai_sampling_rule = bai_sampling_rule_create(
+      bai_options->sampling_rule, bai->N_received, bai->initial_K);
 
   int astar = 0;
   if (bai->is_multithreaded) {
@@ -610,8 +608,8 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
       !bai_is_finished(&is_finished_args, EXIT_STATUS_ONE_ARM_REMAINING,
                        astar)) {
     bai_logger_log_int(bai_logger, "t", bai->total_samples_received);
-    bai_glrt(bai->K, bai->N_received, bai->hμ, bai->hσ2, bai_options->is_EV,
-             glrt_results, bai_logger);
+    bai_glrt(bai->K, bai->N_received, bai->hμ, bai->hσ2, glrt_results,
+             bai_logger);
     const double *Zs = glrt_results->vals;
     const int aalt = glrt_results->k;
     astar = glrt_results->astar;

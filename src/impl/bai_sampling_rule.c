@@ -38,15 +38,13 @@ int round_robin_next_sample(const void __attribute__((unused)) * data,
 }
 
 typedef struct TrackAndStop {
-  bool is_EV;
   BAITracking *tracking_rule;
   BAIOracleResult *oracle_result;
 } TrackAndStop;
 
-void *track_and_stop_create(const bool is_EV, bai_tracking_t tracking_type,
-                            const int *N, const int size) {
+void *track_and_stop_create(bai_tracking_t tracking_type, const int *N,
+                            const int size) {
   TrackAndStop *track_and_stop = malloc_or_die(sizeof(TrackAndStop));
-  track_and_stop->is_EV = is_EV;
   track_and_stop->tracking_rule = bai_tracking_create(tracking_type, N, size);
   track_and_stop->oracle_result = bai_oracle_result_create(size);
   return track_and_stop;
@@ -65,8 +63,7 @@ int track_and_stop_next_sample(
     const double __attribute__((unused)) * Zs, const int size,
     RandomVariables __attribute__((unused)) * rng, BAILogger *bai_logger) {
   TrackAndStop *track_and_stop = (TrackAndStop *)data;
-  bai_oracle(ξ, ϕ2, size, track_and_stop->is_EV, track_and_stop->oracle_result,
-             bai_logger);
+  bai_oracle(ξ, ϕ2, size, track_and_stop->oracle_result, bai_logger);
   int sample = bai_tracking_track(track_and_stop->tracking_rule, N,
                                   track_and_stop->oracle_result->ws_over_Σ,
                                   size, bai_logger);
@@ -85,15 +82,12 @@ typedef enum {
 } bai_top_two_challenger_t;
 
 typedef struct TopTwo {
-  bool is_EV;
   double β;
   bai_top_two_challenger_t challenger;
 } TopTwo;
 
-void *top_two_create(const bool is_EV, const double β,
-                     bai_top_two_challenger_t challenger) {
+void *top_two_create(const double β, bai_top_two_challenger_t challenger) {
   TopTwo *top_two = malloc_or_die(sizeof(TopTwo));
-  top_two->is_EV = is_EV;
   top_two->β = β;
   top_two->challenger = challenger;
   return top_two;
@@ -168,8 +162,7 @@ struct BAISamplingRule {
 };
 
 BAISamplingRule *bai_sampling_rule_create(const bai_sampling_rule_t type,
-                                          const bool is_EV, const int *N,
-                                          const int size) {
+                                          const int *N, const int size) {
   BAISamplingRule *bai_sampling_rule = malloc_or_die(sizeof(BAISamplingRule));
   bai_sampling_rule->type = type;
   switch (type) {
@@ -178,14 +171,12 @@ BAISamplingRule *bai_sampling_rule_create(const bai_sampling_rule_t type,
     bai_sampling_rule->swap_indexes_func = bai_sampling_swap_indexes_noop;
     break;
   case BAI_SAMPLING_RULE_TRACK_AND_STOP:
-    bai_sampling_rule->data =
-        track_and_stop_create(is_EV, BAI_CTRACKING, N, size);
+    bai_sampling_rule->data = track_and_stop_create(BAI_CTRACKING, N, size);
     bai_sampling_rule->next_sample_func = track_and_stop_next_sample;
     bai_sampling_rule->swap_indexes_func = track_and_stop_swap_indexes;
     break;
   case BAI_SAMPLING_RULE_TOP_TWO:
-    bai_sampling_rule->data =
-        top_two_create(is_EV, 0.5, BAI_TOP_TWO_CHALLENGER_TCI);
+    bai_sampling_rule->data = top_two_create(0.5, BAI_TOP_TWO_CHALLENGER_TCI);
     bai_sampling_rule->next_sample_func = top_two_next_sample;
     bai_sampling_rule->swap_indexes_func = bai_sampling_swap_indexes_noop;
     break;

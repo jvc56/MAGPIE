@@ -94,7 +94,6 @@ typedef enum {
   ARG_TOKEN_TIME_LIMIT,
   ARG_TOKEN_SAMPLING_RULE,
   ARG_TOKEN_THRESHOLD,
-  ARG_TOKEN_BAI_IS_EV,
   ARG_TOKEN_EPIGON_CUTOFF,
   // This must always be the last
   // token for the count to be accurate
@@ -135,7 +134,6 @@ struct Config {
   int time_limit_seconds;
   bai_sampling_rule_t sampling_rule;
   bai_threshold_t threshold;
-  bool is_ev;
   int epigon_cutoff;
   game_variant_t game_variant;
   WinPct *win_pcts;
@@ -758,7 +756,6 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->bai_options.time_limit_seconds =
       config_get_time_limit_seconds(config);
   sim_args->bai_options.sampling_rule = config->sampling_rule;
-  sim_args->bai_options.is_EV = config->is_ev;
   sim_args->bai_options.epigon_cutoff = config->epigon_cutoff;
 }
 
@@ -1629,12 +1626,6 @@ config_load_status_t config_load_data(Config *config) {
     return config_load_status;
   }
 
-  config_load_status =
-      config_load_bool(config, ARG_TOKEN_BAI_IS_EV, &config->is_ev);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
-  }
-
   // Human readable
 
   config_load_status = config_load_bool(config, ARG_TOKEN_HUMAN_READABLE,
@@ -1910,8 +1901,6 @@ Config *config_create_default(void) {
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_THRESHOLD, "threshold", 1, 1,
                     execute_fatal, status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_BAI_IS_EV, "ev", 1, 1, execute_fatal,
-                    status_fatal);
   parsed_arg_create(config, ARG_TOKEN_EPIGON_CUTOFF, "epigoncutoff", 1, 1,
                     execute_fatal, status_fatal);
   config->data_paths = string_duplicate(DEFAULT_DATA_PATHS);
@@ -1928,7 +1917,6 @@ Config *config_create_default(void) {
   config->time_limit_seconds = 0;
   config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO;
   config->threshold = BAI_THRESHOLD_GK16;
-  config->is_ev = true;
   config->epigon_cutoff = 1000;
   config->use_game_pairs = true;
   config->use_small_plays = false;
