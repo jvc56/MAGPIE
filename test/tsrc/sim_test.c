@@ -581,12 +581,9 @@ void write_stats_to_file(const char *filename, const char *strategies[],
   // Write header row
   fprintf(output_file,
           "%-50s | %-7s | %-7s | %-7s | %-7s | %-7s | %-7s | %-10s | %-10s "
-          "| %-10s "
-          "| %-10s "
-          "| %-10s "
           "| %-10s \n",
           "Strategy", "Total", "Valid", "%", "Eval", "Match", "%", "Samples",
-          "Samples/Sec", "Total Time", "BAI Time", "Wait Time", "Sample Time");
+          "Samples/Sec", "Time");
 
   // Write stats for each strategy
   for (int j = 0; j < num_strategies; j++) {
@@ -599,17 +596,14 @@ void write_stats_to_file(const char *filename, const char *strategies[],
     char *matches_pct_str = get_formatted_string("%.2f%%", matches_pct);
     fprintf(output_file,
             "%-50s | %-7d | %-7d | %-7s | %-7d | %-7d | %-7s | %-10.2f | "
-            "%-10.2f | "
-            "%-10.2f | %-10.2f  | %-10.2f | %-10.2f \n",
+            "%-11.2f | "
+            "%-10.2f\n",
             strategies[j], stats_j->total, stats_j->num_threshold_exits,
             thres_exit_pct_str, stats_j->num_matches_evaluated,
             stats_j->num_matches_with_best, matches_pct_str,
             stat_get_mean(stats_j->num_samples),
             stat_get_mean(stats_j->samples_per_second),
-            stat_get_mean(stats_j->sim_time->total_time),
-            stat_get_mean(stats_j->sim_time->bai_time),
-            stat_get_mean(stats_j->sim_time->wait_time),
-            stat_get_mean(stats_j->sim_time->sample_tile));
+            stat_get_mean(stats_j->sim_time->total_time));
     free(thres_exit_pct_str);
     free(matches_pct_str);
   }
@@ -663,14 +657,10 @@ void test_sim_perf(const char *sim_perf_iters, const char *sim_perf_threads) {
   Game *game = config_get_game(config);
   Bag *bag = game_get_bag(game);
   const char *strategies[] = {
-      "-sr tas -ev false -threshold ht -epigon 1000",
-      "-sr tas -ev true -threshold ht -epigon 1000",
-      "-sr tt -ev false -threshold ht -epigon 1000",
-      "-sr tt -ev true -threshold ht -epigon 1000",
-      "-sr tas -ev true -threshold ht -epigon 1000",
-      "-sr rr -ev false -threshold ht -epigon 1000",
       "-sr tas -ev true -threshold gk16 -epigon 1000",
+      "-sr tas -ev false -threshold gk16 -epigon 1000",
       "-sr tt -ev true -threshold gk16 -epigon 1000",
+      "-sr tt -ev false -threshold gk16 -epigon 1000",
   };
   const int num_strategies = sizeof(strategies) / sizeof(strategies[0]);
   SimStrategyStats **stats =
