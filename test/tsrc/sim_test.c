@@ -647,7 +647,7 @@ void test_sim_perf(const char *sim_perf_iters, const char *sim_perf_threads) {
   }
   Config *config =
       config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
-                           "all -numplays 10 -plies 2 -scond 95");
+                           "all -numplays 10 -plies 2");
   const uint64_t max_samples = 20000;
   char *set_threads_cmd = get_formatted_string("set -threads %d -iter %d",
                                                num_threads, max_samples);
@@ -657,8 +657,13 @@ void test_sim_perf(const char *sim_perf_iters, const char *sim_perf_threads) {
   Game *game = config_get_game(config);
   Bag *bag = game_get_bag(game);
   const char *strategies[] = {
-      "-sr tt -ev true -threshold gk16 -epigon 1000",
-      "-sr tt -ev false -threshold gk16 -epigon 1000",
+      "-sr tt -ev true -threshold gk16 -epigon 1000 -scond 99",
+      "-sr tt -ev true -threshold gk16 -epigon 1000 -scond 95",
+      "-sr tt -ev true -threshold gk16 -epigon 1000 -scond 90",
+      "-sr tt -ev true -threshold gk16 -epigon 1000 -scond 80",
+      "-sr tt -ev true -threshold gk16 -epigon 1000 -scond 60",
+      "-sr tt -ev true -threshold gk16 -epigon 1000 -scond 40",
+      "-sr tt -ev true -threshold gk16 -epigon 1000 -scond 20",
   };
   const int num_strategies = sizeof(strategies) / sizeof(strategies[0]);
   SimStrategyStats **stats =
