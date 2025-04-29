@@ -647,7 +647,7 @@ void test_sim_perf(const char *sim_perf_iters, const char *sim_perf_threads) {
   }
   Config *config =
       config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
-                           "all -numplays 10 -plies 2");
+                           "all -numplays 10 -plies 2 -wmp true");
   const uint64_t max_samples = 20000;
   char *set_threads_cmd = get_formatted_string("set -threads %d -iter %d",
                                                num_threads, max_samples);

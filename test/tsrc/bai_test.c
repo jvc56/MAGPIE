@@ -27,11 +27,6 @@ static const int strategies[][3] = {
     {BAI_SAMPLING_RULE_TOP_TWO, false, BAI_THRESHOLD_GK16},
     {BAI_SAMPLING_RULE_TOP_TWO, true, BAI_THRESHOLD_GK16},
     {BAI_SAMPLING_RULE_ROUND_ROBIN, false, BAI_THRESHOLD_GK16},
-    {BAI_SAMPLING_RULE_TRACK_AND_STOP, false, BAI_THRESHOLD_HT},
-    {BAI_SAMPLING_RULE_TRACK_AND_STOP, true, BAI_THRESHOLD_HT},
-    {BAI_SAMPLING_RULE_TOP_TWO, false, BAI_THRESHOLD_HT},
-    {BAI_SAMPLING_RULE_TOP_TWO, true, BAI_THRESHOLD_HT},
-    {BAI_SAMPLING_RULE_ROUND_ROBIN, false, BAI_THRESHOLD_HT},
 };
 static const int num_strategies_entries =
     sizeof(strategies) / sizeof(strategies[0]);
@@ -68,7 +63,7 @@ void test_bai_track_and_stop(int num_threads) {
 
   BAIOptions bai_options = {
       .sampling_rule = BAI_SAMPLING_RULE_TRACK_AND_STOP,
-      .threshold = BAI_THRESHOLD_HT,
+      .threshold = BAI_THRESHOLD_GK16,
       .delta = 0.05,
       .is_EV = true,
       .sample_limit = 1000,

@@ -1249,8 +1249,6 @@ config_load_status_t config_load_threshold(Config *config,
     config->threshold = BAI_THRESHOLD_NONE;
   } else if (has_iprefix(threshold_str, "gk16")) {
     config->threshold = BAI_THRESHOLD_GK16;
-  } else if (has_iprefix(threshold_str, "ht")) {
-    config->threshold = BAI_THRESHOLD_HT;
   } else {
     config_load_status = CONFIG_LOAD_STATUS_MALFORMED_THRESHOLD;
   }
@@ -1928,8 +1926,8 @@ Config *config_create_default(void) {
   config->max_iterations = 5000;
   config->stop_cond_pct = 99;
   config->time_limit_seconds = 0;
-  config->sampling_rule = BAI_SAMPLING_RULE_TRACK_AND_STOP;
-  config->threshold = BAI_THRESHOLD_HT;
+  config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO;
+  config->threshold = BAI_THRESHOLD_GK16;
   config->is_ev = true;
   config->epigon_cutoff = 1000;
   config->use_game_pairs = true;
