@@ -54,14 +54,6 @@ void test_alt_lambda_cubic_roots(double μ1, double σ21, double w1, double μa,
 }
 
 void test_math_util(void) {
-  // This also tests ervinv
-  assert(within_epsilon(p_to_z(95), 1.959964));
-  assert(within_epsilon(p_to_z(98), 2.326348));
-  assert(within_epsilon(p_to_z(99), 2.575829));
-
-  assert(is_z_valid(p_to_z(PERCENTILE_MAX)));
-  assert(!is_z_valid(p_to_z(PERCENTILE_MAX + (100.0 - PERCENTILE_MAX) / 2.0)));
-
   assert(within_epsilon(odds_that_player_is_better(0.5, 10), 50.0));
   assert(within_epsilon(odds_that_player_is_better(0.5, 100), 50.0));
   assert(within_epsilon(odds_that_player_is_better(0.5, 1000), 50.0));

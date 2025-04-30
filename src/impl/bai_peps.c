@@ -313,11 +313,16 @@ void bai_oracle(const double *μs, const double *σ2s, const int size,
 
   double hi = INFINITY;
 
+  bai_logger_log_double(bai_logger, "us[astar]", μs[astar]);
+  bai_logger_log_double(bai_logger, "sigma2s[astar]", σ2s[astar]);
   for (int k = 0; k < size; ++k) {
     if (k == astar) {
       continue;
     }
     double result = bai_d(μs[astar], σ2s[astar], μs[k]);
+    bai_logger_log_int(bai_logger, "k", k + 1);
+    bai_logger_log_double(bai_logger, "us[k]", μs[k]);
+    bai_logger_log_double(bai_logger, "result", result);
     if (result < hi) {
       hi = result;
     }
