@@ -22,11 +22,8 @@ static const int sampling_rules[3] = {
 static const int num_sampling_rules = sizeof(sampling_rules) / sizeof(int);
 
 static const int strategies[][3] = {
-    {BAI_SAMPLING_RULE_TRACK_AND_STOP, false, BAI_THRESHOLD_GK16},
-    {BAI_SAMPLING_RULE_TRACK_AND_STOP, true, BAI_THRESHOLD_GK16},
-    {BAI_SAMPLING_RULE_TOP_TWO, false, BAI_THRESHOLD_GK16},
-    {BAI_SAMPLING_RULE_TOP_TWO, true, BAI_THRESHOLD_GK16},
-    {BAI_SAMPLING_RULE_ROUND_ROBIN, false, BAI_THRESHOLD_GK16},
+    {BAI_SAMPLING_RULE_TRACK_AND_STOP, BAI_THRESHOLD_GK16},
+    {BAI_SAMPLING_RULE_TOP_TWO, BAI_THRESHOLD_GK16},
 };
 static const int num_strategies_entries =
     sizeof(strategies) / sizeof(strategies[0]);
@@ -301,7 +298,7 @@ void test_bai_epigons(int num_threads) {
         assert_num_epigons(rvs, 0);
         BAILogger *bai_logger = NULL;
         bai_options.sampling_rule = strategies[i][0];
-        bai_options.threshold = strategies[i][2];
+        bai_options.threshold = strategies[i][1];
         bai(&bai_options, rvs, rng, thread_control, bai_logger, bai_result);
         bai_logger_flush(bai_logger);
         bai_logger_destroy(bai_logger);
@@ -403,7 +400,7 @@ void test_bai_input_from_file(const char *bai_input_filename,
 
   BAIOptions bai_options = {
       .sampling_rule = strategies[pi][0],
-      .threshold = strategies[pi][2],
+      .threshold = strategies[pi][1],
       .delta = delta,
       .sample_limit = num_samples,
       .epigon_cutoff = 0,

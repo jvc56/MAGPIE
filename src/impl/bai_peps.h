@@ -6,7 +6,6 @@
 #include "bai_logger.h"
 
 typedef struct BAIOracleResult {
-  double Σ_over_val;
   double *ws_over_Σ;
 } BAIOracleResult;
 

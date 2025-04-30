@@ -67,9 +67,8 @@ double bai_binary_search(bai_binary_search_value_func_t vf, const void *args,
     }
   }
 
-  // Log fatal error if tolerance is not reached
-  // log_fatal("binary_search did not reach tolerance %0.20f in %d
-  // iterations.\n"
+  // log_fatal("binary_search did not reach tolerance %0.20f in %d iterations.\n
+  // "
   //           "f(%0.20f) = %0.20f\n"
   //           "f(%0.20f) = %0.20f\n"
   //           "mid would be %0.20f",
@@ -121,10 +120,10 @@ void bai_glrt(const int K, const int *w, const double *μ, const double *σ2,
     }
   }
 
-  // bai_logger_log_title(bai_logger, "GLRT");
-  // bai_logger_log_int(bai_logger, "K", K);
-  // bai_logger_log_int(bai_logger, "astar", astar + 1);
-  // bai_logger_flush(bai_logger);
+  bai_logger_log_title(bai_logger, "GLRT");
+  bai_logger_log_int(bai_logger, "K", K);
+  bai_logger_log_int(bai_logger, "astar", astar + 1);
+  bai_logger_flush(bai_logger);
 
   double *vals = glrt_results->vals;
   for (int k = 0; k < K; k++) {
@@ -140,14 +139,14 @@ void bai_glrt(const int K, const int *w, const double *μ, const double *σ2,
     const double d_astar = bai_d(μ[astar], σ2[astar], θs[a]);
     const double d_a = bai_d(μ[a], σ2[a], θs[a]);
     vals[a] = w[astar] * d_astar + w[a] * d_a;
-    // bai_logger_log_int(bai_logger, "a", a + 1);
-    // bai_logger_log_double(bai_logger, "theta", θs[a]);
-    // bai_logger_log_int(bai_logger, "w_astar", w[astar]);
-    // bai_logger_log_double(bai_logger, "d_astar", d_astar);
-    // bai_logger_log_int(bai_logger, "w_a", w[a]);
-    // bai_logger_log_double(bai_logger, "d_a", d_a);
-    // bai_logger_log_double(bai_logger, "vals[a]", vals[a]);
-    // bai_logger_flush(bai_logger);
+    bai_logger_log_int(bai_logger, "a", a + 1);
+    bai_logger_log_double(bai_logger, "theta", θs[a]);
+    bai_logger_log_int(bai_logger, "w_astar", w[astar]);
+    bai_logger_log_double(bai_logger, "d_astar", d_astar);
+    bai_logger_log_int(bai_logger, "w_a", w[a]);
+    bai_logger_log_double(bai_logger, "d_a", d_a);
+    bai_logger_log_double(bai_logger, "vals[a]", vals[a]);
+    bai_logger_flush(bai_logger);
   }
   int k = 0;
   for (int i = 1; i < K; i++) {
@@ -156,9 +155,9 @@ void bai_glrt(const int K, const int *w, const double *μ, const double *σ2,
     }
   }
 
-  // bai_logger_log_int(bai_logger, "k", k + 1);
-  // bai_logger_log_double(bai_logger, "vals[k]", vals[k]);
-  // bai_logger_flush(bai_logger);
+  bai_logger_log_int(bai_logger, "k", k + 1);
+  bai_logger_log_double(bai_logger, "vals[k]", vals[k]);
+  bai_logger_flush(bai_logger);
   glrt_results->k = k;
   glrt_results->astar = astar;
 }
@@ -294,24 +293,23 @@ void bai_oracle(const double *μs, const double *σ2s, const int size,
     }
   }
 
-  // bai_logger_log_title(bai_logger, "ORACLE");
-  // bai_logger_log_double(bai_logger, "ustar", μstar);
-  // bai_logger_log_double_array(bai_logger, "us", μs, size);
-  // bai_logger_log_int(bai_logger, "size", size);
-  // bai_logger_flush(bai_logger);
+  bai_logger_log_title(bai_logger, "ORACLE");
+  bai_logger_log_double(bai_logger, "ustar", μstar);
+  bai_logger_log_double_array(bai_logger, "us", μs, size);
+  bai_logger_log_int(bai_logger, "size", size);
+  bai_logger_flush(bai_logger);
 
   if (all_equal) {
-    oracle_result->Σ_over_val = INFINITY;
     for (int i = 0; i < size; i++) {
       oracle_result->ws_over_Σ[i] = 1 / (double)size;
     }
-    // bai_logger_log_title(bai_logger, "ALL_EQUAL");
-    // bai_logger_flush(bai_logger);
+    bai_logger_log_title(bai_logger, "ALL_EQUAL");
+    bai_logger_flush(bai_logger);
     return;
   }
 
-  // bai_logger_log_int(bai_logger, "astar", astar + 1);
-  // bai_logger_flush(bai_logger);
+  bai_logger_log_int(bai_logger, "astar", astar + 1);
+  bai_logger_flush(bai_logger);
 
   double hi = INFINITY;
 
@@ -325,8 +323,8 @@ void bai_oracle(const double *μs, const double *σ2s, const int size,
     }
   }
 
-  // bai_logger_log_double(bai_logger, "hi", hi);
-  // bai_logger_flush(bai_logger);
+  bai_logger_log_double(bai_logger, "hi", hi);
+  bai_logger_flush(bai_logger);
 
   BAIOracleBinarySearchArgs obs_args = {
       .astar = astar,
@@ -339,8 +337,8 @@ void bai_oracle(const double *μs, const double *σ2s, const int size,
   double val = bai_binary_search(bai_oracle_binary_search_func, &obs_args, 0,
                                  hi, BAI_EPSILON, bai_logger);
 
-  // bai_logger_log_double(bai_logger, "val", val);
-  // bai_logger_flush(bai_logger);
+  bai_logger_log_double(bai_logger, "val", val);
+  bai_logger_flush(bai_logger);
 
   BAIXResults bai_X_results;
   double Σ = 0;
@@ -355,12 +353,10 @@ void bai_oracle(const double *μs, const double *σ2s, const int size,
     Σ += oracle_result->ws_over_Σ[k];
   }
 
-  // bai_logger_log_double_array(bai_logger, "ws", oracle_result->ws_over_Σ,
-  // size); bai_logger_log_double(bai_logger, "sum", Σ);
-  // bai_logger_log_double(bai_logger, "sum/val", Σ / val);
-  // bai_logger_flush(bai_logger);
+  bai_logger_log_double_array(bai_logger, "ws", oracle_result->ws_over_Σ, size);
+  bai_logger_log_double(bai_logger, "sum", Σ);
+  bai_logger_flush(bai_logger);
 
-  oracle_result->Σ_over_val = Σ / val;
   for (int k = 0; k < size; ++k) {
     oracle_result->ws_over_Σ[k] /= Σ;
   }
