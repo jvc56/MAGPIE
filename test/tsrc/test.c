@@ -28,7 +28,6 @@
 #include "klv_test.h"
 #include "kwg_alpha_test.h"
 #include "kwg_maker_test.h"
-#include "leave_list_test.h"
 #include "leave_map_test.h"
 #include "leaves_test.h"
 #include "letter_distribution_test.h"
@@ -36,6 +35,7 @@
 #include "move_gen_test.h"
 #include "move_test.h"
 #include "players_data_test.h"
+#include "rack_list_test.h"
 #include "rack_test.h"
 #include "random_variable_test.h"
 #include "shadow_test.h"
@@ -97,7 +97,7 @@ static TestEntry test_table[] = {
     {"kwgmaker", test_kwg_maker},
     {"fh", test_file_handler},
     {"cgp", test_cgp},
-    {"ll", test_leave_list},
+    {"rl", test_rack_list},
     {"ch", test_checkpoint},
     {"klv", test_klv},
     {"cv", test_convert},
