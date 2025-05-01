@@ -1,3 +1,11 @@
+/*
+ * Implements algorithms described in
+ *
+ * Dealing with Unknown Variances in Best-Arm Identification
+ * (https://arxiv.org/pdf/2210.00974)
+ *
+ * with Julia source code kindly provided by Marc Jourdan.
+ */
 #ifndef BAI_TRACKING_H
 #define BAI_TRACKING_H
 
