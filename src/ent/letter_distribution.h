@@ -23,6 +23,7 @@ typedef enum {
   LD_TYPE_NORWEGIAN,
   LD_TYPE_CATALAN,
   LD_TYPE_POLISH,
+  LD_TYPE_DUTCH,
   LD_TYPE_FRENCH,
 } ld_t;
 
@@ -185,7 +186,7 @@ static inline int ld_get_dist(const LetterDistribution *ld,
 }
 
 static inline Equity ld_get_score(const LetterDistribution *ld,
-                               uint8_t machine_letter) {
+                                  uint8_t machine_letter) {
   return ld->scores[machine_letter];
 }
 
@@ -410,6 +411,8 @@ static inline ld_t ld_get_type_from_lex_name(const char *full_lexicon_name) {
     ld_type = LD_TYPE_FRENCH;
   } else if (has_iprefix("OSPS", lexicon_name)) {
     ld_type = LD_TYPE_POLISH;
+  } else if (has_iprefix("DSW", lexicon_name)) {
+    ld_type = LD_TYPE_DUTCH;
   } else {
     log_fatal("default letter distribution not found for lexicon '%s'\n",
               lexicon_name);
@@ -477,6 +480,10 @@ static inline char *ld_get_default_name_from_type(ld_t ld_type) {
     break;
   case LD_TYPE_POLISH:
     ld_name = get_formatted_string("%s%s", POLISH_LETTER_DISTRIBUTION_NAME,
+                                   ld_name_extension);
+    break;
+  case LD_TYPE_DUTCH:
+    ld_name = get_formatted_string("%s%s", DUTCH_LETTER_DISTRIBUTION_NAME,
                                    ld_name_extension);
     break;
   }
