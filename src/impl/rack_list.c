@@ -48,6 +48,35 @@ typedef enum {
   RACK_GEN_MODE_SET_RACK_LIST_ITEMS,
 } rack_gen_mode_t;
 
+// Smaller, mutable version of the LetterDistribution struct.
+typedef struct RackListLetterDistribution {
+  int size;
+  uint8_t distribution[MACHINE_LETTER_MAX_VALUE];
+} RackListLetterDistribution;
+
+void rack_list_ld_init(RackListLetterDistribution *rl_ld,
+                       const LetterDistribution *ld) {
+  rl_ld->size = ld_get_size(ld);
+  for (int i = 0; i < ld->size; i++) {
+    rl_ld->distribution[i] = ld_get_dist(ld, i);
+  }
+}
+
+void rack_list_ld_increment(RackListLetterDistribution *rl_ld, int index,
+                            int amount) {
+  rl_ld->distribution[index] += amount;
+}
+
+void rack_list_ld_decrement(RackListLetterDistribution *rl_ld, int index,
+                            int amount) {
+  rl_ld->distribution[index] -= amount;
+}
+
+uint8_t rack_list_ld_get_dist(const RackListLetterDistribution *rl_ld,
+                              int index) {
+  return rl_ld->distribution[index];
+}
+
 int convert_klv_index_to_rack_list_index(int klv_index) {
   return klv_index - (RACK_SIZE);
 }
@@ -66,28 +95,30 @@ RackListItem *rack_list_item_create(int count_index) {
   return item;
 }
 
-uint64_t get_total_combos_for_rack(const LetterDistribution *ld,
+uint64_t get_total_combos_for_rack(const RackListLetterDistribution *rl_ld,
                                    const Rack *rack) {
   uint64_t total_combos = 1;
-  const int ld_size = ld_get_size(ld);
+  const int ld_size = rack_list_ld_get_size(rl_ld);
   for (int ml = 0; ml < ld_size; ml++) {
     const int num_ml = rack_get_letter(rack, ml);
     if (num_ml == 0) {
       continue;
     }
-    total_combos *= choose(ld_get_dist(ld, ml), num_ml);
+    total_combos *= choose(rack_list_ld_get_dist(rl_ld, ml), num_ml);
   }
   return total_combos;
 }
 
 int rack_list_generate_all_racks(rack_gen_mode_t mode,
-                                 const LetterDistribution *ld, Rack *rack,
-                                 uint8_t ml, DictionaryWordList *dwl,
-                                 uint8_t *rack_array, RackList *rack_list,
-                                 uint32_t node_index, uint32_t klv_index) {
+                                 const RackListLetterDistribution *rl_ld,
+                                 Rack *rack, uint8_t ml,
+                                 DictionaryWordList *dwl, uint8_t *rack_array,
+                                 RackList *rack_list, uint32_t node_index,
+                                 uint32_t klv_index) {
   int number_of_set_racks = 0;
-  const uint32_t ld_size = ld_get_size(ld);
-  while (ml < ld_size && ld_get_dist(ld, ml) - rack_get_letter(rack, ml) == 0) {
+  const uint32_t ld_size = rack_list_ld_get_size(rl_ld);
+  while (ml < ld_size &&
+         rack_list_ld_get_dist(rl_ld, ml) - rack_get_letter(rack, ml) == 0) {
     ml++;
   }
   const int number_of_letters_in_rack = rack_get_total_letters(rack);
@@ -107,7 +138,7 @@ int rack_list_generate_all_racks(rack_gen_mode_t mode,
         rack_encode(
             rack,
             &rack_list->racks_ordered_by_index[rack_list_index]->encoded_rack);
-        const uint64_t total_combos = get_total_combos_for_rack(ld, rack);
+        const uint64_t total_combos = get_total_combos_for_rack(rl_ld, rack);
         rack_list->racks_ordered_by_index[rack_list_index]->total_combos =
             total_combos;
         rack_list->total_combos_sum += total_combos;
@@ -116,9 +147,10 @@ int rack_list_generate_all_racks(rack_gen_mode_t mode,
     }
   } else {
     number_of_set_racks +=
-        rack_list_generate_all_racks(mode, ld, rack, ml + 1, dwl, rack_array,
+        rack_list_generate_all_racks(mode, rl_ld, rack, ml + 1, dwl, rack_array,
                                      rack_list, node_index, klv_index);
-    int num_ml_to_add = ld_get_dist(ld, ml) - rack_get_letter(rack, ml);
+    int num_ml_to_add =
+        rack_list_ld_get_dist(rl_ld, ml) - rack_get_letter(rack, ml);
     if (number_of_letters_in_rack + num_ml_to_add > (RACK_SIZE)) {
       num_ml_to_add = (RACK_SIZE)-number_of_letters_in_rack;
     }
@@ -141,9 +173,9 @@ int rack_list_generate_all_racks(rack_gen_mode_t mode,
         klv_index = child_klv_index;
         break;
       }
-      number_of_set_racks +=
-          rack_list_generate_all_racks(mode, ld, rack, ml + 1, dwl, rack_array,
-                                       rack_list, node_index, klv_index);
+      number_of_set_racks += rack_list_generate_all_racks(
+          mode, rl_ld, rack, ml + 1, dwl, rack_array, rack_list, node_index,
+          klv_index);
     }
     rack_take_letters(rack, ml, num_ml_to_add);
   }
@@ -167,9 +199,11 @@ RackList *rack_list_create(const LetterDistribution *ld,
   DictionaryWordList *dwl = dictionary_word_list_create();
 
   uint8_t rack_array[RACK_SIZE];
+  RackListLetterDistribution rl_ld;
+  rack_list_ld_init(&rl_ld, ld);
 
   rack_list->number_of_racks = rack_list_generate_all_racks(
-      RACK_GEN_MODE_CREATE_DWL, ld, &rack, 0, dwl, rack_array, NULL, 0, 0);
+      RACK_GEN_MODE_CREATE_DWL, &rl_ld, &rack, 0, dwl, rack_array, NULL, 0, 0);
 
   KWG *kwg =
       make_kwg_from_words(dwl, KWG_MAKER_OUTPUT_DAWG, KWG_MAKER_MERGE_EXACT);
@@ -312,9 +346,9 @@ typedef struct RackListLeave {
 } RackListLeave;
 
 void generate_leaves(RackListLeave *leave_list, const KLV *klv,
-                     double rack_equity, uint64_t rack_count, Rack *full_rack,
-                     Rack *leave, uint32_t node_index, uint32_t word_index,
-                     uint8_t ml) {
+                     double rack_equity, Rack *full_rack,
+                     RackListLetterDistribution *rl_ld, Rack *leave,
+                     uint32_t node_index, uint32_t word_index, uint8_t ml) {
   const uint16_t ld_size = rack_get_dist_size(full_rack);
   while (ml < ld_size && rack_get_letter(full_rack, ml) == 0) {
     ml++;
@@ -323,16 +357,20 @@ void generate_leaves(RackListLeave *leave_list, const KLV *klv,
     const int number_of_letters_in_leave = rack_get_total_letters(leave);
     if (number_of_letters_in_leave > 0 &&
         number_of_letters_in_leave < (RACK_SIZE)) {
-      leave_list[word_index - 1].count_sum += rack_count;
-      leave_list[word_index - 1].equity_sum += rack_equity * rack_count;
+      // Count the number of ways we can draw the remaining letters for this
+      // rack after the leave is subtracted from the letter distribution.
+      const uint64_t count = get_total_combos_for_rack(rl_ld, full_rack);
+      leave_list[word_index - 1].count_sum += count;
+      leave_list[word_index - 1].equity_sum += rack_equity * count;
     }
   } else {
-    generate_leaves(leave_list, klv, rack_equity, rack_count, full_rack, leave,
+    generate_leaves(leave_list, klv, rack_equity, full_rack, rl_ld, leave,
                     node_index, word_index, ml + 1);
     const int num_this = rack_get_letter(full_rack, ml);
     for (int i = 0; i < num_this; i++) {
       rack_add_letter(leave, ml);
       rack_take_letter(full_rack, ml);
+      rack_list_ld_decrement(rl_ld, ml, 1);
       uint32_t sibling_word_index;
       node_index = increment_node_to_ml(klv, node_index, word_index,
                                         &sibling_word_index, ml);
@@ -340,11 +378,12 @@ void generate_leaves(RackListLeave *leave_list, const KLV *klv,
       uint32_t child_word_index;
       node_index = follow_arc(klv, node_index, word_index, &child_word_index);
       word_index = child_word_index;
-      generate_leaves(leave_list, klv, rack_equity, rack_count, full_rack,
-                      leave, node_index, word_index, ml + 1);
+      generate_leaves(leave_list, klv, rack_equity, full_rack, rl_ld, leave,
+                      node_index, word_index, ml + 1);
     }
     rack_take_letters(leave, ml, num_this);
     rack_add_letters(full_rack, ml, num_this);
+    rack_list_ld_increment(rl_ld, ml, num_this);
   }
 }
 
@@ -370,12 +409,14 @@ void rack_list_write_to_klv(RackList *rack_list, const LetterDistribution *ld,
 
   Rack leave;
   rack_set_dist_size(&leave, ld_size);
+  RackListLetterDistribution rl_ld;
+  rack_list_ld_init(&rl_ld, ld);
   for (int i = 0; i < rack_list->number_of_racks; i++) {
     const RackListItem *rli = rack_list->racks_ordered_by_index[i];
     rack_decode(&rli->encoded_rack, &rack);
     rack_reset(&leave);
-    generate_leaves(leave_list, klv, rli->mean, rli->total_combos, &rack,
-                    &leave, kwg_get_dawg_root_node_index(klv->kwg), 0, 0);
+    generate_leaves(leave_list, klv, rli->mean, &rack, &rl_ld, &leave,
+                    kwg_get_dawg_root_node_index(klv->kwg), 0, 0);
   }
   for (int i = 0; i < klv_number_of_leaves; i++) {
     if (leave_list[i].count_sum > 0) {
