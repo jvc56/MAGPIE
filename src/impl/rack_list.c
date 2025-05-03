@@ -77,6 +77,10 @@ uint8_t rack_list_ld_get_dist(const RackListLetterDistribution *rl_ld,
   return rl_ld->distribution[index];
 }
 
+int rack_list_ld_get_size(const RackListLetterDistribution *rl_ld) {
+  return rl_ld->size;
+}
+
 int convert_klv_index_to_rack_list_index(int klv_index) {
   return klv_index - (RACK_SIZE);
 }
@@ -220,8 +224,8 @@ RackList *rack_list_create(const LetterDistribution *ld,
     rack_list->racks_ordered_by_index[i] = rack_list_item_create(i);
   }
 
-  rack_list_generate_all_racks(RACK_GEN_MODE_SET_RACK_LIST_ITEMS, ld, &rack, 0,
-                               NULL, NULL, rack_list,
+  rack_list_generate_all_racks(RACK_GEN_MODE_SET_RACK_LIST_ITEMS, &rl_ld, &rack,
+                               0, NULL, NULL, rack_list,
                                kwg_get_dawg_root_node_index(kwg), 0);
 
   rack_list->racks_partitioned_by_target_count =
