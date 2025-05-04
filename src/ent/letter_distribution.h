@@ -434,6 +434,8 @@ static inline ld_t ld_get_type_from_ld_name(const char *ld_name) {
     ld_type = LD_TYPE_FRENCH;
   } else if (has_iprefix(POLISH_LETTER_DISTRIBUTION_NAME, ld_name)) {
     ld_type = LD_TYPE_POLISH;
+  } else if (has_iprefix(DUTCH_LETTER_DISTRIBUTION_NAME, ld_name)) {
+    ld_type = LD_TYPE_DUTCH;
   } else {
     log_fatal(
         "default letter distribution not found for letter distribution '%s'\n",
