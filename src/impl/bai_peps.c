@@ -121,15 +121,17 @@ double alt_λ(const double μ1, const double σ21, const double w1,
 
 void bai_glrt(const int K, const int *w, const double *μ, const double *σ2,
               BAIGLRTResults *glrt_results, BAILogger *bai_logger) {
+  bai_logger_log_title(bai_logger, "GLRT");
+  bai_logger_log_int(bai_logger, "K", K);
+
   int astar = 0;
   for (int i = 1; i < K; i++) {
+    bai_logger_log_double(bai_logger, "u", μ[i]);
     if (μ[i] > μ[astar]) {
       astar = i;
     }
   }
 
-  bai_logger_log_title(bai_logger, "GLRT");
-  bai_logger_log_int(bai_logger, "K", K);
   bai_logger_log_int(bai_logger, "astar", astar + 1);
   bai_logger_flush(bai_logger);
 

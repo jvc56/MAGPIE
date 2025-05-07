@@ -171,6 +171,8 @@
 #define CACHEXIC_CGP                                                           \
   "2OES10/2OUT10/2GOO10/2AIA10/2M1T10/2I1S10/2E12/CASTEISM7/15/15/15/15/15/"   \
   "15/15 ACEHIX?/ 169/58 0 -lex CSW21;"
+#define PARRODQ_CGP                                                            \
+  "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 PARRODQ/ 0/0 0 -lex CSW21;"
 
 // 21 x 21 boards
 

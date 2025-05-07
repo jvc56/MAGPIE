@@ -310,7 +310,7 @@ void test_sim_one_arm_remaining(void) {
   config_destroy(config);
 }
 
-void test_sim_consistency(void) {
+void test_sim_round_robin_consistency(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 15 -plies "
       "2 -threads 1 -iter 30 -scond none -sr rr");
@@ -346,6 +346,34 @@ void test_sim_consistency(void) {
   }
 
   sim_results_destroy(sim_results_multithreaded);
+  config_destroy(config);
+}
+
+void test_sim_top_two_consistency(void) {
+  Config *config =
+      config_create_or_die("set -lex CSW21 -numplays 15 -plies 5 -threads 1 "
+                           "-iter 50 -scond 99 -seed 33 -sr tt");
+  load_and_exec_config_or_die(config, "cgp " PARRODQ_CGP);
+  load_and_exec_config_or_die(config, "gen");
+
+  // Get the initial reference results.
+  SimResults *expected_sim_results = config_get_sim_results(config);
+  assert(config_simulate(config, NULL, expected_sim_results) ==
+         SIM_STATUS_SUCCESS);
+  exit_status_t expected_exit_status = bai_result_get_exit_status(
+      sim_results_get_bai_result(expected_sim_results));
+
+  SimResults *actual_sim_results = sim_results_create();
+  for (int i = 0; i < 10; i++) {
+    assert(config_simulate(config, NULL, actual_sim_results) ==
+           SIM_STATUS_SUCCESS);
+    exit_status_t actual_exit_status = bai_result_get_exit_status(
+        sim_results_get_bai_result(actual_sim_results));
+    assert(actual_exit_status == expected_exit_status);
+    assert_sim_results_equal(expected_sim_results, actual_sim_results);
+  }
+
+  sim_results_destroy(actual_sim_results);
   config_destroy(config);
 }
 
@@ -415,11 +443,14 @@ void test_play_similarity(void) {
   config_destroy(config);
 }
 
-void test_seed_consistency(void) {
+void test_similar_play_consistency(const int num_threads) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all "
-      "-plies 2 -threads 10 -it 1000 -epigon 10000 -scond none -numplays 2 -sr "
+      "-plies 2 -it 1000 -epigon 10000 -scond none -numplays 2 -sr "
       "rr");
+  char *set_threads_cmd = get_formatted_string("set -threads %d", num_threads);
+  load_and_exec_config_or_die(config, set_threads_cmd);
+  free(set_threads_cmd);
   load_and_exec_config_or_die(config, "cgp " CACHEXIC_CGP);
   load_and_exec_config_or_die(config, "gen");
 
@@ -766,7 +797,9 @@ void test_sim(void) {
     test_more_iterations();
     test_play_similarity();
     perf_test_multithread_sim();
-    test_sim_consistency();
-    test_seed_consistency();
+    test_sim_round_robin_consistency();
+    test_sim_top_two_consistency();
+    test_similar_play_consistency(1);
+    test_similar_play_consistency(10);
   }
 }
