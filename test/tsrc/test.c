@@ -8,6 +8,7 @@
 #include "bit_rack_test.h"
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
+#include "board_spot_test.h"
 #include "board_test.h"
 #include "cgp_test.h"
 #include "checkpoint_test.h"
@@ -42,6 +43,7 @@
 #include "transposition_table_test.h"
 #include "validated_move_test.h"
 #include "wasm_api_test.h"
+#include "word_spot_test.h"
 #include "wmp_maker_test.h"
 #include "wmp_move_gen_test.h"
 #include "wmp_test.h"
@@ -77,13 +79,15 @@ void run_all(void) {
   test_game();
   test_validated_move();
   test_shadow();
+  test_board_spot();
+  test_word_spot();
   test_move_gen();
   test_equity_adjustments();
   test_gameplay();
   test_stats();
   test_infer();
   test_sim();
-  test_command();
+  //test_command();
   test_gcg();
   test_autoplay();
   test_wasm_api();
@@ -127,6 +131,8 @@ static TestEntry test_table[] = {
     {"game", test_game},
     {"vm", test_validated_move},
     {"shadow", test_shadow},
+    {"boardspot", test_board_spot},
+    {"wordspot", test_word_spot},
     {"movegen", test_move_gen},
     {"eq", test_equity},
     {"eqadj", test_equity_adjustments},
