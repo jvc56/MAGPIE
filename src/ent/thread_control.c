@@ -273,6 +273,14 @@ void thread_control_set_seed(ThreadControl *thread_control, uint64_t seed) {
 // NOT THREAD SAFE: This function is meant to be called
 // before or after a multithreaded operation. Do not call this in a
 // multithreaded context as it is intentionally not thread safe.
+void thread_control_increment_seed(ThreadControl *thread_control) {
+  thread_control->seed++;
+  prng_seed(thread_control->prng, thread_control->seed);
+}
+
+// NOT THREAD SAFE: This function is meant to be called
+// before or after a multithreaded operation. Do not call this in a
+// multithreaded context as it is intentionally not thread safe.
 uint64_t thread_control_get_seed(ThreadControl *thread_control) {
   return thread_control->seed;
 }

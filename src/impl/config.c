@@ -1649,11 +1649,12 @@ config_load_status_t config_load_data(Config *config) {
     return config_load_status;
   }
   if (!config_get_parg_value(config, ARG_TOKEN_RANDOM_SEED, 0)) {
-    seed = time(NULL);
+    thread_control_increment_seed(config->thread_control);
+  } else {
+    thread_control_set_seed(config->thread_control, seed);
   }
-  thread_control_set_seed(config->thread_control, seed);
-  // Board layout
 
+  // Board layout
   const char *new_board_layout_name =
       config_get_parg_value(config, ARG_TOKEN_BOARD_LAYOUT, 0);
   if (new_board_layout_name &&
