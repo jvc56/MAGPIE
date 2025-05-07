@@ -11,8 +11,6 @@
 #include "move_gen.h"
 #include "random_variable.h"
 
-static int bai_logger_file_suffix = 1;
-
 sim_status_t simulate(const SimArgs *sim_args, SimResults *sim_results) {
   // The BAI call will reset the thread control.
 
@@ -41,16 +39,8 @@ sim_status_t simulate(const SimArgs *sim_args, SimResults *sim_results) {
 
   RandomVariables *rng = rvs_create(&rng_args);
 
-  char *bai_logger_filename =
-      get_formatted_string("bai_%d.log", bai_logger_file_suffix++);
-
-  BAILogger *bai_logger = bai_logger_create(bai_logger_filename);
-  free(bai_logger_filename);
-
-  bai(&sim_args->bai_options, rvs, rng, sim_args->thread_control, bai_logger,
+  bai(&sim_args->bai_options, rvs, rng, sim_args->thread_control, NULL,
       sim_results_get_bai_result(sim_results));
-
-  bai_logger_destroy(bai_logger);
 
   sim_results_set_iteration_count(sim_results, rvs_get_total_samples(rvs));
 

@@ -147,7 +147,6 @@ typedef struct BAI {
   BAIArmDatum **arm_data;
   ProdConQueue *request_queue;
   ProdConQueue *response_queue;
-  Timer *thread_timer;
   Timer *wait_timer;
   // These fields are not owned by the BAI struct and are
   // added for convenience.
@@ -191,9 +190,7 @@ BAI *bai_create(ThreadControl *thread_control, RandomVariables *rvs,
     bai->request_queue = prod_con_queue_create(number_of_threads);
     bai->response_queue = prod_con_queue_create(number_of_threads);
   }
-  bai->thread_timer = mtimer_create(CLOCK_THREAD_CPUTIME_ID);
-  bai->wait_timer = mtimer_create(CLOCK_THREAD_CPUTIME_ID);
-  mtimer_start(bai->thread_timer);
+  bai->wait_timer = mtimer_create(CLOCK_MONOTONIC);
   bai->thread_control = thread_control;
   bai->rvs = rvs;
   bai->bai_logger = bai_logger;
@@ -214,7 +211,6 @@ void bai_destroy(BAI *bai) {
   free(bai->arm_data);
   prod_con_queue_destroy(bai->request_queue);
   prod_con_queue_destroy(bai->response_queue);
-  mtimer_destroy(bai->thread_timer);
   mtimer_destroy(bai->wait_timer);
   free(bai);
 }
@@ -268,7 +264,11 @@ void *bai_sample_worker(void *args) {
   ProdConQueueMessage req;
   ProdConQueueMessage resp;
   while (true) {
+    mtimer_start(timer);
     req = prod_con_queue_consume(request_queue);
+    mtimer_stop(timer);
+    bai_result_increment_sample_wait_time(bai_worker_args->bai_result,
+                                          mtimer_elapsed_seconds(timer));
     if (req.queue_closed) {
       break;
     }
@@ -310,8 +310,8 @@ void bai_sample_receive(BAI *bai, BAIResult *bai_result) {
   mtimer_start(bai->wait_timer);
   const ProdConQueueMessage resp = prod_con_queue_consume(bai->response_queue);
   mtimer_stop(bai->wait_timer);
-  bai_result_increment_wait_time(bai_result,
-                                 mtimer_elapsed_seconds(bai->wait_timer));
+  bai_result_increment_bai_wait_time(bai_result,
+                                     mtimer_elapsed_seconds(bai->wait_timer));
   if (resp.arm_datum->is_epigon) {
     return;
   }
@@ -444,9 +444,6 @@ bool bai_round_robin_is_complete(const BAI *bai) {
 
 void bai_set_result(const BAI *bai, const exit_status_t exit_status,
                     const int astar, double total_time, BAIResult *bai_result) {
-  mtimer_stop(bai->thread_timer);
-  bai_result_set_bai_time(bai_result,
-                          mtimer_elapsed_seconds(bai->thread_timer));
   bai_result_set_exit_status(bai_result, exit_status);
   bai_result_set_best_arm(bai_result, bai_get_rvs_index(bai, astar));
   bai_result_set_total_samples(bai_result, bai->total_samples_requested);
@@ -514,11 +511,10 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
          BAILogger *bai_logger, BAIResult *bai_result) {
   thread_control_reset(thread_control, 0);
   rvs_reset(rvs);
+  bai_result_reset(bai_result);
 
   BAI *bai =
       bai_create(thread_control, rvs, bai_options->epigon_cutoff, bai_logger);
-
-  bai_set_result(bai, EXIT_STATUS_NONE, 0, 0.0, bai_result);
 
   BAIThreshold *Sβ = bai_create_threshold(bai_options->threshold,
                                           bai_options->delta, 2, 2, 1.2);

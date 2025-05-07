@@ -489,46 +489,13 @@ void test_similar_play_consistency(const int num_threads) {
   config_destroy(config);
 }
 
-typedef struct SimTimeStats {
-  Stat *total_time;
-  Stat *bai_time;
-  Stat *wait_time;
-  Stat *sample_tile;
-} SimTimeStats;
-
-SimTimeStats *sim_time_stats_create(void) {
-  SimTimeStats *stats = malloc(sizeof(SimTimeStats));
-  stats->total_time = stat_create(true);
-  stats->bai_time = stat_create(true);
-  stats->wait_time = stat_create(true);
-  stats->sample_tile = stat_create(true);
-  return stats;
-}
-
-void sim_time_stats_destroy(SimTimeStats *stats) {
-  stat_destroy(stats->total_time);
-  stat_destroy(stats->bai_time);
-  stat_destroy(stats->wait_time);
-  stat_destroy(stats->sample_tile);
-  free(stats);
-}
-
-void sim_time_stats_increment(SimTimeStats *stats, double total_time,
-                              double bai_time, double wait_time,
-                              double sample_tile) {
-  stat_push(stats->total_time, total_time, 1);
-  stat_push(stats->bai_time, bai_time, 1);
-  stat_push(stats->wait_time, wait_time, 1);
-  stat_push(stats->sample_tile, sample_tile, 1);
-}
-
 typedef struct SimStrategyStats {
   // ** Staged values ** //
   int staged_num_samples;
   double staged_total_time;
-  double staged_bai_time;
-  double staged_wait_time;
+  double staged_bai_wait_time;
   double staged_sample_time;
+  double staged_sample_wait_time;
   bool staged_is_threshold_exit;
   // ******************* //
   int total;
@@ -537,7 +504,10 @@ typedef struct SimStrategyStats {
   int num_matches_with_best;
   Stat *num_samples;
   Stat *samples_per_second;
-  SimTimeStats *sim_time;
+  Stat *total_time;
+  Stat *bai_wait_time;
+  Stat *sample_time;
+  Stat *sample_wait_time;
 } SimStrategyStats;
 
 SimStrategyStats *sim_strategy_stats_create(void) {
@@ -548,14 +518,20 @@ SimStrategyStats *sim_strategy_stats_create(void) {
   stats->num_matches_with_best = 0;
   stats->num_samples = stat_create(true);
   stats->samples_per_second = stat_create(true);
-  stats->sim_time = sim_time_stats_create();
+  stats->total_time = stat_create(true);
+  stats->bai_wait_time = stat_create(true);
+  stats->sample_time = stat_create(true);
+  stats->sample_wait_time = stat_create(true);
   return stats;
 }
 
 void sim_strategy_stats_destroy(SimStrategyStats *stats) {
-  sim_time_stats_destroy(stats->sim_time);
   stat_destroy(stats->num_samples);
   stat_destroy(stats->samples_per_second);
+  stat_destroy(stats->total_time);
+  stat_destroy(stats->bai_wait_time);
+  stat_destroy(stats->sample_time);
+  stat_destroy(stats->sample_wait_time);
   free(stats);
 }
 
@@ -564,15 +540,15 @@ bool exit_status_is_threshold_exit(exit_status_t exit_status) {
 }
 
 void sim_strategy_stats_stage(SimStrategyStats **stats, int j, int num_samples,
-                              double total_time, double bai_time,
-                              double wait_time, double sample_time,
+                              double total_time, double bai_wait_time,
+                              double sample_time, double sample_wait_time,
                               exit_status_t exit_status) {
   SimStrategyStats *sss = stats[j];
   sss->staged_num_samples = num_samples;
   sss->staged_total_time = total_time;
-  sss->staged_bai_time = bai_time;
-  sss->staged_wait_time = wait_time;
+  sss->staged_bai_wait_time = bai_wait_time;
   sss->staged_sample_time = sample_time;
+  sss->staged_sample_wait_time = sample_wait_time;
   sss->staged_is_threshold_exit = exit_status_is_threshold_exit(exit_status);
 }
 
@@ -582,16 +558,17 @@ void sim_strategy_stats_commit(SimStrategyStats **stats, Move **best_moves,
                                int dist_size) {
   SimStrategyStats *sss = stats[j];
   sss->total++;
+  stat_push(sss->num_samples, sss->staged_num_samples, 1);
+  stat_push(sss->samples_per_second,
+            (double)sss->staged_num_samples / sss->staged_total_time, 1);
+  stat_push(sss->total_time, sss->staged_total_time, 1);
+  stat_push(sss->bai_wait_time, sss->staged_bai_wait_time, 1);
+  stat_push(sss->sample_time, sss->staged_sample_time, 1);
+  stat_push(sss->sample_wait_time, sss->staged_sample_wait_time, 1);
   if (sss->staged_is_threshold_exit) {
     sss->num_threshold_exits++;
     if (are_all_strategies_threshold_exit) {
       sss->num_matches_evaluated++;
-      sim_time_stats_increment(sss->sim_time, sss->staged_total_time,
-                               sss->staged_bai_time, sss->staged_wait_time,
-                               sss->staged_sample_time);
-      stat_push(sss->num_samples, sss->staged_num_samples, 1);
-      stat_push(sss->samples_per_second,
-                (double)sss->staged_num_samples / sss->staged_total_time, 1);
       if (moves_are_similar(best_moves[j], highest_sample_best_move,
                             dist_size)) {
         sss->num_matches_with_best++;
@@ -611,10 +588,9 @@ void write_stats_to_file(const char *filename, const char *strategies[],
 
   // Write header row
   fprintf(output_file,
-          "%-50s | %-7s | %-7s | %-7s | %-7s | %-7s | %-7s | %-10s | %-10s "
-          "| %-10s \n",
-          "Strategy", "Total", "Valid", "%", "Eval", "Match", "%", "Samples",
-          "Samples/Sec", "Time");
+          "%-60s | %-11s | %-11s | %-11s | %-11s | %-11s | %-11s\n", "Strategy",
+          "Samples", "Samples/Sec", "Total Time", "BAI Wait", "Sample Time",
+          "Sample Wait");
 
   // Write stats for each strategy
   for (int j = 0; j < num_strategies; j++) {
@@ -625,16 +601,15 @@ void write_stats_to_file(const char *filename, const char *strategies[],
                                (double)stats_j->num_matches_evaluated * 100.0;
     char *thres_exit_pct_str = get_formatted_string("%.2f%%", thres_exit_pct);
     char *matches_pct_str = get_formatted_string("%.2f%%", matches_pct);
-    fprintf(output_file,
-            "%-50s | %-7d | %-7d | %-7s | %-7d | %-7d | %-7s | %-10.2f | "
-            "%-11.2f | "
-            "%-10.2f\n",
-            strategies[j], stats_j->total, stats_j->num_threshold_exits,
-            thres_exit_pct_str, stats_j->num_matches_evaluated,
-            stats_j->num_matches_with_best, matches_pct_str,
-            stat_get_mean(stats_j->num_samples),
-            stat_get_mean(stats_j->samples_per_second),
-            stat_get_mean(stats_j->sim_time->total_time));
+    fprintf(
+        output_file,
+        "%-60s | %-11.2f | %-11.2f | %-11.2f | %-11.2f | %-11.2f | %-11.2f\n",
+        strategies[j], stat_get_mean(stats_j->num_samples),
+        stat_get_mean(stats_j->samples_per_second),
+        stat_get_mean(stats_j->total_time),
+        stat_get_mean(stats_j->bai_wait_time),
+        stat_get_mean(stats_j->sample_time),
+        stat_get_mean(stats_j->sample_wait_time));
     free(thres_exit_pct_str);
     free(matches_pct_str);
   }
@@ -664,37 +639,27 @@ void append_content_to_file(const char *filename, const char *sim_stats_str) {
   fclose(output_file);
 }
 
-void test_sim_perf(const char *sim_perf_iters, const char *sim_perf_threads) {
+void test_sim_perf(const char *sim_perf_iters) {
   const int num_iters = atoi(sim_perf_iters);
   if (num_iters < 0) {
     log_fatal("Invalid number of iterations: %s\n", sim_perf_iters);
   }
-  int num_threads = 8;
-  if (sim_perf_threads) {
-    num_threads = atoi(sim_perf_threads);
-    if (num_threads < 0 || num_threads >= MAX_THREADS) {
-      log_fatal("Invalid number of threads: %s\n", sim_perf_iters);
-    }
-  }
   Config *config =
       config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
-                           "all -numplays 10 -plies 2 -wmp true");
+                           "all -numplays 10 -plies 2 -scond none");
   const uint64_t max_samples = 20000;
-  char *set_threads_cmd = get_formatted_string("set -threads %d -iter %d",
-                                               num_threads, max_samples);
+  char *set_threads_cmd =
+      get_formatted_string("set -threads 1 -iter %lu", max_samples);
   load_and_exec_config_or_die(config, set_threads_cmd);
   free(set_threads_cmd);
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   Game *game = config_get_game(config);
   Bag *bag = game_get_bag(game);
   const char *strategies[] = {
-      "-sr tt -ev true -threshold gk16 -epigon 1000 -scond 99",
-      "-sr tt -ev true -threshold gk16 -epigon 1000 -scond 95",
-      "-sr tt -ev true -threshold gk16 -epigon 1000 -scond 90",
-      "-sr tt -ev true -threshold gk16 -epigon 1000 -scond 80",
-      "-sr tt -ev true -threshold gk16 -epigon 1000 -scond 60",
-      "-sr tt -ev true -threshold gk16 -epigon 1000 -scond 40",
-      "-sr tt -ev true -threshold gk16 -epigon 1000 -scond 20",
+      "-sr tt -threads 1 ",  "-sr tt -threads 2 ",  "-sr tt -threads 3 ",
+      "-sr tt -threads 4 ",  "-sr tt -threads 5 ",  "-sr tt -threads 6 ",
+      "-sr tt -threads 7 ",  "-sr tt -threads 8 ",  "-sr tt -threads 9 ",
+      "-sr tt -threads 10 ", "-sr tt -threads 11 ", "-sr tt -threads 12 ",
   };
   const int num_strategies = sizeof(strategies) / sizeof(strategies[0]);
   SimStrategyStats **stats =
@@ -720,13 +685,14 @@ void test_sim_perf(const char *sim_perf_iters, const char *sim_perf_threads) {
       game_reset(game);
       draw_starting_racks(game);
     }
-    load_and_exec_config_or_die(config, "gen");
+    load_and_exec_config_or_die(config, "gen -wmp true");
     append_game_with_moves_to_file(sim_perf_game_details_filename, game,
                                    config_get_move_list(config));
     int reference_best_move_sample_count = 0;
     bool all_strategies_threshold_exit = true;
     for (int j = 0; j < num_strategies; j++) {
-      char *set_strategies_cmd = get_formatted_string("set %s", strategies[j]);
+      char *set_strategies_cmd =
+          get_formatted_string("set %s -wmp true", strategies[j]);
       load_and_exec_config_or_die(config, set_strategies_cmd);
       free(set_strategies_cmd);
       thread_control_set_seed(thread_control, i);
@@ -753,13 +719,14 @@ void test_sim_perf(const char *sim_perf_iters, const char *sim_perf_threads) {
       free(sim_stats_str);
       const exit_status_t exit_status = bai_result_get_exit_status(bai_result);
       const double total_time = bai_result_get_total_time(bai_result);
+      const double bai_wait_time = bai_result_get_bai_wait_time(bai_result);
       const double sample_time = bai_result_get_sample_time(bai_result);
-      const double bai_time = bai_result_get_bai_time(bai_result);
-      const double wait_time = bai_result_get_wait_time(bai_result);
-      sim_strategy_stats_stage(stats, j,
-                               sim_results_get_iteration_count(sim_results),
-                               total_time, bai_time, wait_time, sample_time,
-                               thread_control_get_exit_status(thread_control));
+      const double sample_wait_time =
+          bai_result_get_sample_wait_time(bai_result);
+      sim_strategy_stats_stage(
+          stats, j, sim_results_get_iteration_count(sim_results), total_time,
+          bai_wait_time, sample_time, sample_wait_time,
+          thread_control_get_exit_status(thread_control));
       all_strategies_threshold_exit &=
           exit_status_is_threshold_exit(exit_status);
     }
@@ -784,9 +751,8 @@ void test_sim_perf(const char *sim_perf_iters, const char *sim_perf_threads) {
 
 void test_sim(void) {
   const char *sim_perf_iters = getenv("SIM_PERF_ITERS");
-  const char *sim_perf_threads = getenv("SIM_PERF_THREADS");
   if (sim_perf_iters) {
-    test_sim_perf(sim_perf_iters, sim_perf_threads);
+    test_sim_perf(sim_perf_iters);
   } else {
     test_win_pct();
     test_sim_error_cases();
