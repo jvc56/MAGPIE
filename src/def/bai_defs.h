@@ -4,6 +4,7 @@
 #include <stdbool.h>
 
 #define BAI_EPSILON 1e-10
+#define BAI_ARM_SAMPLE_MINIMUM 50
 
 typedef enum {
   BAI_THRESHOLD_NONE,

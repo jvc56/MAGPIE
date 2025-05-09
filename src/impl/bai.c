@@ -549,7 +549,7 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
     // new samples on a 1-for-1 basis so the request queue does not
     // overflow.
     for (int k = 0; k < bai->initial_K; k++) {
-      for (int i = 0; i < 2; i++) {
+      for (int i = 0; i < (BAI_ARM_SAMPLE_MINIMUM); i++) {
         if (bai->total_samples_requested >= number_of_threads) {
           bai_sample_receive(bai, bai_result);
         }
@@ -561,14 +561,14 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
       num_to_receive = bai->total_samples_requested;
     }
     for (int i = 0; i < num_to_receive; i++) {
-      // At this point we have requested 2*initial_K samples and have only
-      // received 2*initial_K - number_of_threads samples, so we need to receive
-      // the remaining number_of_threads samples samples.
+      // At this point we have requested some X samples and have only
+      // received X - number_of_threads samples, so we need to receive
+      // the remaining number_of_threads samples.
       bai_sample_receive(bai, bai_result);
     }
   } else {
     for (int k = 0; k < bai->initial_K; k++) {
-      for (int i = 0; i < 2; i++) {
+      for (int i = 0; i < (BAI_ARM_SAMPLE_MINIMUM); i++) {
         bai_sample_singlethreaded(bai, k);
       }
     }
@@ -580,7 +580,6 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   bai->bai_sampling_rule = bai_sampling_rule_create(
       bai_options->sampling_rule, bai->N_received, bai->initial_K);
 
-  int astar = 0;
   if (bai->is_multithreaded) {
     // Ensure all threads are saturated by starting number_of_threads requests
     // before the main algorithm starts. Once started, the main algorithm will
@@ -588,13 +587,23 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
     // saturated. Here, we just request a sample for the current best arm
     // number_of_threads times since it's likely we will need to sample the
     // the best arm number_of_threads times anyway.
-    for (int i = 1; i < bai->initial_K; i++) {
-      if (bai->hμ[i] > bai->hμ[astar]) {
-        astar = i;
+    int non_rr_sample_index = -1;
+    if (bai_options->sampling_rule != BAI_SAMPLING_RULE_ROUND_ROBIN) {
+      non_rr_sample_index = 0;
+      for (int i = 1; i < bai->initial_K; i++) {
+        if (bai->hμ[i] > bai->hμ[non_rr_sample_index]) {
+          non_rr_sample_index = i;
+        }
       }
     }
-    for (int i = 0; i < number_of_threads; i++) {
-      bai_sample_request(bai, astar);
+    for (int i = 0;
+         i < number_of_threads && !bai_sample_limit_reached(bai_options, bai);
+         i++) {
+      int next_sample = non_rr_sample_index;
+      if (next_sample == -1) {
+        next_sample = i % bai->initial_K;
+      }
+      bai_sample_request(bai, next_sample);
     }
   }
 
@@ -606,7 +615,9 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
       .Sβ = Sβ,
       .bai_result = bai_result,
   };
+  int astar = 0;
   while (
+      !bai_is_finished(&is_finished_args, EXIT_STATUS_SAMPLE_LIMIT, astar) &&
       !bai_is_finished(&is_finished_args, EXIT_STATUS_TIME_LIMIT, astar) &&
       !bai_is_finished(&is_finished_args, EXIT_STATUS_USER_INTERRUPT, astar) &&
       !bai_is_finished(&is_finished_args, EXIT_STATUS_ONE_ARM_REMAINING,
@@ -647,9 +658,6 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
       bai_sample_request(bai, k);
     } else {
       bai_sample_singlethreaded(bai, k);
-    }
-    if (bai_is_finished(&is_finished_args, EXIT_STATUS_SAMPLE_LIMIT, astar)) {
-      break;
     }
     astar = bai_potentially_mark_epigons(bai, astar);
   }

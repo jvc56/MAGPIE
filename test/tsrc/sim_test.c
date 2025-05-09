@@ -108,7 +108,7 @@ void test_sim_single_iteration(void) {
 void test_more_iterations(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 15 -plies "
-      "2 -threads 1 -iter 500 -scond none");
+      "2 -threads 1 -iter 500 -scond none -seed 10");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 AEIQRST");
   load_and_exec_config_or_die(config, "gen");
@@ -312,8 +312,8 @@ void test_sim_one_arm_remaining(void) {
 
 void test_sim_round_robin_consistency(void) {
   Config *config = config_create_or_die(
-      "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 15 -plies "
-      "2 -threads 1 -iter 30 -scond none -sr rr");
+      "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 3 -plies "
+      "2 -threads 1 -iter 52 -scond none -sr rr");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 AEIQRST");
   load_and_exec_config_or_die(config, "gen");
@@ -335,12 +335,14 @@ void test_sim_round_robin_consistency(void) {
       sim_results = sim_results_multithreaded;
     }
 
+    printf("testing with %d threads\n", i + 1);
     sim_status_t status = config_simulate(config, NULL, sim_results);
     assert(status == SIM_STATUS_SUCCESS);
     assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
            EXIT_STATUS_SAMPLE_LIMIT);
 
     if (i != 0) {
+      printf("comparing with %d threads\n", i + 1);
       assert_sim_results_equal(sim_results_single_threaded, sim_results);
     }
   }

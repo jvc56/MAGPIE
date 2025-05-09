@@ -100,13 +100,15 @@ void test_bai_sample_limit(int num_threads) {
   BAIOptions bai_options = {
       .threshold = BAI_THRESHOLD_NONE,
       .delta = 0.05,
-      .sample_limit = 100,
+      .sample_limit = 500,
       .epigon_cutoff = 10,
       .time_limit_seconds = 0,
   };
   ThreadControl *thread_control = thread_control_create();
   thread_control_set_threads(thread_control, num_threads);
   BAIResult *bai_result = bai_result_create();
+  // This needs to align with the ARM_SAMPLE_MINIMUM in bai.c
+  const int arm_sample_minimum = 50;
   for (int i = 0; i < num_sampling_rules; i++) {
     bai_options.sampling_rule = sampling_rules[i];
     bai(&bai_options, rvs, rng, thread_control, NULL, bai_result);
@@ -115,6 +117,9 @@ void test_bai_sample_limit(int num_threads) {
     int expected_num_samples = bai_options.sample_limit;
     if (bai_options.sampling_rule == BAI_SAMPLING_RULE_ROUND_ROBIN) {
       expected_num_samples *= num_rvs;
+    }
+    if (expected_num_samples < num_rvs * arm_sample_minimum) {
+      expected_num_samples = num_rvs * arm_sample_minimum;
     }
     assert(rvs_get_total_samples(rvs) == (uint64_t)expected_num_samples);
     assert(bai_result_get_total_samples(bai_result) == expected_num_samples);

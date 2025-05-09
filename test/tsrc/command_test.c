@@ -255,7 +255,7 @@ void test_command_execution(void) {
       config, "addmoves 8f.NIL,8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 0, 0);
   assert_command_status_and_output(
       config, "sim -plies 2 -scond 95 -threads 8 -it 1 -pfreq 70", false, 60,
-      22, 0);
+      330, 0);
 
   // Sim finishes with max iterations
   // Add user input moves that will be
@@ -268,7 +268,7 @@ void test_command_execution(void) {
   assert_command_status_and_output(config, "gen -numplays 15", false, 5, 16, 0);
   assert_command_status_and_output(
       config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ", false,
-      60, 68, 0);
+      60, 221, 0);
 
   assert_command_status_and_output(config, "cgp " DELDAR_VS_HARSHAN_CGP, false,
                                    5, 0, 0);
@@ -328,7 +328,7 @@ void test_command_execution(void) {
                                      false, 5, 16, 0);
     assert_command_status_and_output(
         config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ",
-        false, 60, 68, 0);
+        false, 60, 221, 0);
     assert_command_status_and_output(config, "cgp " EMPTY_CATALAN_CGP, false, 5,
                                      0, 0);
     assert_command_status_and_output(
@@ -347,7 +347,7 @@ void test_command_execution(void) {
                                      false, 5, 16, 0);
     assert_command_status_and_output(
         config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ",
-        false, 60, 68, 0);
+        false, 60, 221, 0);
 
     assert_command_status_and_output(config, "cgp " EMPTY_CGP, false, 5, 0, 0);
     assert_command_status_and_output(
@@ -365,7 +365,7 @@ void test_command_execution(void) {
                                      false, 5, 16, 0);
     assert_command_status_and_output(
         config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ",
-        false, 60, 68, 0);
+        false, 60, 221, 0);
 
     assert_command_status_and_output(config, "cgp " EMPTY_POLISH_CGP, false, 5,
                                      0, 0);
@@ -460,12 +460,12 @@ void test_exec_single_command(void) {
 
 void test_exec_file_commands(void) {
   // Generate moves for the position (16 output)
-  // Run a sim in CSW, then (68 output)
-  // run the same sim with no parameters, then (68 output)
+  // Run a sim in CSW, then (221 output)
+  // run the same sim with no parameters, then (221 output)
   // run a sim that exits with a warning, then (1 warning)
   // run an inference in Polish, then (58 output)
   // run autoplay in CSW (1 output)
-  // total output = 211
+  // total output = 517
   // total error = 1
 
   // Separate into distinct lines to prove
@@ -492,7 +492,7 @@ void test_exec_file_commands(void) {
   char *iter_error_substr =
       get_formatted_string("code %d", CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
 
-  test_process_command(commands_file_invocation, 211,
+  test_process_command(commands_file_invocation, 517,
                        "info infertotalracks 6145", 1, iter_error_substr);
 
   delete_file(commands_filename);
