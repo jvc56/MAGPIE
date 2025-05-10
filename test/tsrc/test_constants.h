@@ -152,23 +152,27 @@
   "15/15/10LAZED/6EPITAXES1/7R7/7o7/7T7/7E7/7G7/7E7/2SNIFTER6/15/15/15/15 "    \
   "IJLNOPS/ 149/154 0 -lex CSW21;"
 #define CATALAN_CGP                                                            \
-  "15/15/15/11HUNS/4E5JO3/4n2CE[L·L]A4/2RECELAT6/3XAMIS2D4/4R1BO[NY]1E1P1E/"  \
+  "15/15/15/11HUNS/4E5JO3/4n2CE[L·L]A4/2RECELAT6/3XAMIS2D4/4R1BO[NY]1E1P1E/"   \
   "1ZELAM4S1E1N/4R5A1V1C/BUS[QU]IN4FRENA/U3A2MODI1T1U/R6ERINOSIS/"             \
   "LITIGAnT2O3E AAIPRRS/AADEGLT 388/446 0 -lex DISC2;"
-#define POLISH_CGP                                                                 \
+#define POLISH_CGP                                                             \
   "15/15/11FiŚ1/11LI2/9CŁA3/9Z1N3/8HOI4/6STĘPIĆ3/5AUR1Y5/4SAMY2G4/2CLE4JA1K2/" \
-  "2LARWO1SAMBIE1/2I1WENTO1O1IW1/E6END3Y1/ZDZIAŁaJ1Y5 ACNNPRW/AHIKPZŻ "          \
+  "2LARWO1SAMBIE1/2I1WENTO1O1IW1/E6END3Y1/ZDZIAŁaJ1Y5 ACNNPRW/AHIKPZŻ "        \
   "240/200 0 -lex OSPS49;"
 #define FRAWZEY_CGP                                                            \
   "15/15/15/14Q/14U/14I/14N/7FRAWZEYS/7O7/7A7/7M7/7L7/7I7/7K7/7E7 /  150/224 " \
   "0 -lex CSW21;"
 #define THERMOS_CGP                                                            \
   "15/15/3THERMOS2A2/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 -lex CSW21;"
-
 #define WORMROOT_CGP                                                           \
   "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/6AE1TOWIES/6I4O2E/"     \
   "1EnGUARD3R2D/NAOI2W4M3/6AT3R3/5PYE3O3/5L1L3O3/2COVE1L3T3/5X1E7/7N7 "        \
   "BFQRTTV/EEEIIIN 1000/1000 0 lex CSW21;"
+#define CACHEXIC_CGP                                                           \
+  "2OES10/2OUT10/2GOO10/2AIA10/2M1T10/2I1S10/2E12/CASTEISM7/15/15/15/15/15/"   \
+  "15/15 ACEHIX?/ 169/58 0 -lex CSW21;"
+#define PARRODQ_CGP                                                            \
+  "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 PARRODQ/ 0/0 0 -lex CSW21;"
 
 // 21 x 21 boards
 

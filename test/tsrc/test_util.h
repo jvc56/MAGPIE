@@ -49,7 +49,7 @@ void clear_bag(Bag *bag);
 void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size);
 void assert_boards_are_equal(Board *b1, Board *b2);
 void assert_games_are_equal(Game *g1, Game *g2, bool check_scores);
-void print_game(Game *game, MoveList *move_list);
+void print_game(const Game *game, const MoveList *move_list);
 void print_cgp(const Game *game);
 void print_english_rack(const Rack *rack);
 void print_rack(const Rack *rack, const LetterDistribution *ld);
@@ -86,18 +86,22 @@ ValidatedMoves *assert_validated_move_success(Game *game, const char *cgp_str,
 void assert_game_matches_cgp(const Game *game, const char *expected_cgp,
                              bool write_player_on_turn_first);
 void assert_stats_are_equal(const Stat *s1, const Stat *s2);
+void assert_simmed_plays_stats_are_equal(const SimmedPlay *sp1,
+                                         const SimmedPlay *sp2, int max_plies);
 void assert_sim_results_equal(SimResults *sr1, SimResults *sr2);
 void assert_klvs_equal(const KLV *klv1, const KLV *klv2);
-void assert_word_count(const LetterDistribution *ld, const DictionaryWordList *words,
+void assert_word_count(const LetterDistribution *ld,
+                       const DictionaryWordList *words,
                        const char *human_readable_word, int expected_count);
 
 BitRack string_to_bit_rack(const LetterDistribution *ld,
                            const char *rack_string);
 
 void assert_word_in_buffer(uint8_t *buffer, const char *expected_word,
-                           const LetterDistribution *ld, int word_idx, int length);
+                           const LetterDistribution *ld, int word_idx,
+                           int length);
 
-void assert_move_score(const Move *move, int expected_score);       
+void assert_move_score(const Move *move, int expected_score);
 void assert_move_equity_int(const Move *move, int expected_equity);
 void assert_move_equity_exact(const Move *move, Equity expected_equity);
 void assert_rack_score(const LetterDistribution *ld, const Rack *rack,

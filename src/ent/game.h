@@ -19,6 +19,7 @@ typedef struct GameArgs {
   const LetterDistribution *ld;
   game_variant_t game_variant;
   int bingo_bonus;
+  uint64_t seed;
 } GameArgs;
 
 Game *game_create(const GameArgs *game_args);

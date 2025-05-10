@@ -137,7 +137,7 @@ void block_for_process_command(ProcessArgs *process_args, int max_seconds) {
 
 void assert_command_status_and_output(Config *config,
                                       const char *command_without_io,
-                                      bool should_halt, int seconds_to_wait,
+                                      bool should_exit, int seconds_to_wait,
                                       int expected_output_line_count,
                                       int expected_outerror_line_count) {
   char *test_output_filename = get_test_filename("output");
@@ -158,10 +158,10 @@ void assert_command_status_and_output(Config *config,
   // Let the async command start up
   sleep(1);
 
-  if (should_halt) {
+  if (should_exit) {
     char *status_string = command_search_status(config, true);
     // For now, we do not care about the contents of of the status,
-    // we just want to thread_control_halt the command.
+    // we just want to thread_control_exit the command.
     free(status_string);
   }
   block_for_search(config, seconds_to_wait);
@@ -225,8 +225,7 @@ void test_command_execution(void) {
   assert(move_list_get_count(ml) == 3);
 
   assert_command_status_and_output(
-      config,
-      "sim -plies 2 -scond 95 -threads 8 -it 100000 -cfreq 300 -pfreq 500",
+      config, "sim -plies 2 -scond 95 -threads 8 -it 100000 -pfreq 5000000",
       false, 60, 5, 0);
 
   assert(move_list_get_count(ml) == 3);
@@ -255,8 +254,8 @@ void test_command_execution(void) {
   assert_command_status_and_output(
       config, "addmoves 8f.NIL,8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 0, 0);
   assert_command_status_and_output(
-      config, "sim -plies 2 -scond 95 -threads 8 -it 1 -cfreq 300 -pfreq 70",
-      false, 60, 22, 0);
+      config, "sim -plies 2 -scond 95 -threads 8 -it 1 -pfreq 70", false, 60,
+      330, 0);
 
   // Sim finishes with max iterations
   // Add user input moves that will be
@@ -269,7 +268,7 @@ void test_command_execution(void) {
   assert_command_status_and_output(config, "gen -numplays 15", false, 5, 16, 0);
   assert_command_status_and_output(
       config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ", false,
-      60, 68, 0);
+      60, 221, 0);
 
   assert_command_status_and_output(config, "cgp " DELDAR_VS_HARSHAN_CGP, false,
                                    5, 0, 0);
@@ -329,7 +328,7 @@ void test_command_execution(void) {
                                      false, 5, 16, 0);
     assert_command_status_and_output(
         config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ",
-        false, 60, 68, 0);
+        false, 60, 221, 0);
     assert_command_status_and_output(config, "cgp " EMPTY_CATALAN_CGP, false, 5,
                                      0, 0);
     assert_command_status_and_output(
@@ -348,7 +347,7 @@ void test_command_execution(void) {
                                      false, 5, 16, 0);
     assert_command_status_and_output(
         config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ",
-        false, 60, 68, 0);
+        false, 60, 221, 0);
 
     assert_command_status_and_output(config, "cgp " EMPTY_CGP, false, 5, 0, 0);
     assert_command_status_and_output(
@@ -366,7 +365,7 @@ void test_command_execution(void) {
                                      false, 5, 16, 0);
     assert_command_status_and_output(
         config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ",
-        false, 60, 68, 0);
+        false, 60, 221, 0);
 
     assert_command_status_and_output(config, "cgp " EMPTY_POLISH_CGP, false, 5,
                                      0, 0);
@@ -435,6 +434,7 @@ void test_process_command(const char *arg_string,
   if (newlines_in_outerror != expected_outerror_line_count) {
     printf("error counts do not match %d != %d\n", newlines_in_outerror,
            expected_outerror_line_count);
+    printf("got:\n%s\n", test_outerror);
     assert(0);
   }
 
@@ -460,12 +460,12 @@ void test_exec_single_command(void) {
 
 void test_exec_file_commands(void) {
   // Generate moves for the position (16 output)
-  // Run a sim in CSW, then (68 output)
-  // run the same sim with no parameters, then (68 output)
+  // Run a sim in CSW, then (221 output)
+  // run the same sim with no parameters, then (221 output)
   // run a sim that exits with a warning, then (1 warning)
   // run an inference in Polish, then (58 output)
   // run autoplay in CSW (1 output)
-  // total output = 211
+  // total output = 517
   // total error = 1
 
   // Separate into distinct lines to prove
@@ -492,7 +492,7 @@ void test_exec_file_commands(void) {
   char *iter_error_substr =
       get_formatted_string("code %d", CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
 
-  test_process_command(commands_file_invocation, 211,
+  test_process_command(commands_file_invocation, 517,
                        "info infertotalracks 6145", 1, iter_error_substr);
 
   delete_file(commands_filename);
@@ -619,7 +619,7 @@ void test_exec_console_command(void) {
 
   file_handler_write(
       input_writer, "infer 1 DGINR 18 -numplays 7 -threads 4 -pfreq 1000000\n");
-  file_handler_write(input_writer, "set -r1 best -r2 b -nump 1 -thr 4\n");
+  file_handler_write(input_writer, "set -r1 best -r2 b -nump 1 -threads 4\n");
   file_handler_write(
       input_writer,
       "autoplay game 10 -lex CSW21 -s1 equity -s2 equity -gp true \n");

@@ -5,6 +5,7 @@
 #include "alphabet_test.h"
 #include "autoplay_test.h"
 #include "bag_test.h"
+#include "bai_test.h"
 #include "bit_rack_test.h"
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
@@ -30,11 +31,13 @@
 #include "leave_map_test.h"
 #include "leaves_test.h"
 #include "letter_distribution_test.h"
+#include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
 #include "players_data_test.h"
 #include "rack_list_test.h"
 #include "rack_test.h"
+#include "random_variable_test.h"
 #include "shadow_test.h"
 #include "sim_test.h"
 #include "stats_test.h"
@@ -48,58 +51,6 @@
 #include "word_prune_test.h"
 #include "word_test.h"
 #include "zobrist_test.h"
-
-void run_all(void) {
-  // Test the loading of the config
-  test_players_data();
-  test_config();
-
-  // Test the readonly data first
-  test_string_util();
-  test_alphabet();
-  test_ld();
-  test_leaves();
-  test_leave_map();
-  test_kwg_alpha();
-  test_checkpoint();
-
-  // Now test the rest
-  test_bag();
-  test_rack();
-  test_bit_rack();
-  test_board();
-  test_board_layout_default();
-  test_cross_set();
-  test_equity();
-  test_move();
-  test_cgp();
-  test_klv();
-  test_game();
-  test_validated_move();
-  test_shadow();
-  test_move_gen();
-  test_equity_adjustments();
-  test_gameplay();
-  test_stats();
-  test_infer();
-  test_sim();
-  test_command();
-  test_gcg();
-  test_autoplay();
-  test_wasm_api();
-  test_words();
-  test_word_prune();
-  test_kwg_maker();
-  test_wmp_maker();
-  test_wmp_move_gen();
-  test_wmp();
-  test_file_handler();
-  test_convert();
-  test_create_data();
-  test_endgame();
-  test_zobrist();
-  test_transposition_table();
-}
 
 typedef void (*TestFunc)(void);
 
@@ -133,7 +84,10 @@ static TestEntry test_table[] = {
     {"gameplay", test_gameplay},
     {"stats", test_stats},
     {"infer", test_infer},
+    {"rv", test_random_variable},
     {"sim", test_sim},
+    {"math", test_math_util},
+    {"bai", test_bai},
     {"command", test_command},
     {"gcg", test_gcg},
     {"autoplay", test_autoplay},
@@ -156,6 +110,12 @@ static TestEntry test_table[] = {
     {"tt", test_transposition_table},
     {NULL, NULL} // Sentinel value to mark end of array
 };
+
+void run_all(void) {
+  for (int i = 0; test_table[i].name != NULL; ++i) {
+    test_table[i].func();
+  }
+}
 
 void run_test(const char *subtest) {
   for (int i = 0; test_table[i].name != NULL; ++i) {

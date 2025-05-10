@@ -56,8 +56,7 @@ static inline Equity klv_get_indexed_leave_value(const KLV *klv,
 
 // Assumes the index is valid
 static inline Equity klv_set_indexed_leave_value(const KLV *klv, uint32_t index,
-                                                 Equity value)
-{
+                                                 Equity value) {
   return klv->leave_values[index] = value;
 }
 

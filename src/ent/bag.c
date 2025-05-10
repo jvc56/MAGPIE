@@ -94,9 +94,9 @@ void bag_seed(Bag *bag, uint64_t seed) {
   bag_shuffle(bag);
 }
 
-Bag *bag_create(const LetterDistribution *ld) {
+Bag *bag_create(const LetterDistribution *ld, uint64_t seed) {
   Bag *bag = malloc_or_die(sizeof(Bag));
-  bag->prng = prng_create(42);
+  bag->prng = prng_create(seed);
   bag->size = ld_get_total_tiles(ld);
   bag->tiles = malloc_or_die(sizeof(uint8_t) * bag->size);
   bag_reset(ld, bag);
@@ -114,7 +114,7 @@ void bag_copy(Bag *dst, const Bag *src) {
 
 Bag *bag_duplicate(const Bag *bag) {
   Bag *new_bag = malloc_or_die(sizeof(Bag));
-  new_bag->prng = prng_create(42);
+  new_bag->prng = prng_create(0);
   new_bag->size = bag->size;
   new_bag->tiles = malloc_or_die(sizeof(uint8_t) * new_bag->size);
   bag_copy(new_bag, bag);

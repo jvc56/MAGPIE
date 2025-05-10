@@ -444,8 +444,8 @@ void autoplay_single_generation(AutoplayWorker *autoplay_worker,
   ThreadControl *thread_control = autoplay_worker->args->thread_control;
   ThreadControlIterOutput iter_output;
   while (
-      // Check if autoplay was halted by the user.
-      !thread_control_get_is_halted(thread_control) &&
+      // Check if autoplay was exited by the user.
+      !thread_control_get_is_exited(thread_control) &&
       // Check if the maximum iteration has been reached.
       !thread_control_get_next_iter_output(thread_control, &iter_output) &&
       // Check if the target minimum leave count has been reached.
@@ -464,7 +464,7 @@ void autoplay_leave_gen(AutoplayWorker *autoplay_worker,
   for (int i = 0; i < lg_shared_data->num_gens; i++) {
     autoplay_single_generation(autoplay_worker, game_runner, NULL);
     checkpoint_wait(lg_shared_data->postgen_checkpoint, shared_data);
-    if (thread_control_get_is_halted(args->thread_control)) {
+    if (thread_control_get_is_exited(args->thread_control)) {
       break;
     }
   }
@@ -582,7 +582,7 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
 
   // If autoplay was interrupted by the user,
   // this will not change the status.
-  thread_control_halt(thread_control, HALT_STATUS_MAX_ITERATIONS);
+  thread_control_exit(thread_control, EXIT_STATUS_MAX_ITERATIONS);
 
   // The stats have already been combined in leavegen mode
   if (!is_leavegen_mode) {

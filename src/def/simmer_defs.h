@@ -8,11 +8,4 @@ typedef enum {
   SIM_STATUS_NO_MOVES,
 } sim_status_t;
 
-typedef enum {
-  PLAYS_NOT_SIMILAR,
-  PLAYS_SIMILAR,
-  UNINITIALIZED_SIMILARITY,
-  PLAYS_IDENTICAL,
-} similar_plays_t;
-
 #endif

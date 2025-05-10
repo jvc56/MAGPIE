@@ -209,7 +209,7 @@ void print_move_list(const Board *board, const LetterDistribution *ld,
   string_builder_destroy(move_list_string);
 }
 
-void print_game(Game *game, MoveList *move_list) {
+void print_game(const Game *game, const MoveList *move_list) {
   StringBuilder *game_string = string_builder_create();
   string_builder_add_game(game_string, game, move_list);
   printf("%s\n", string_builder_peek(game_string));
@@ -658,12 +658,8 @@ void assert_moves_are_equal(const Move *m1, const Move *m2) {
   }
 }
 
-void assert_simmed_plays_are_equal(const SimmedPlay *sp1, const SimmedPlay *sp2,
-                                   int max_plies) {
-  assert(simmed_play_get_id(sp1) == simmed_play_get_id(sp2));
-  assert(simmed_play_get_ignore(sp1) == simmed_play_get_ignore(sp2));
-  assert_moves_are_equal(simmed_play_get_move(sp1), simmed_play_get_move(sp2));
-
+void assert_simmed_plays_stats_are_equal(const SimmedPlay *sp1,
+                                         const SimmedPlay *sp2, int max_plies) {
   for (int i = 0; i < max_plies; i++) {
     assert_stats_are_equal(simmed_play_get_score_stat(sp1, i),
                            simmed_play_get_score_stat(sp2, i));
@@ -677,6 +673,14 @@ void assert_simmed_plays_are_equal(const SimmedPlay *sp1, const SimmedPlay *sp2,
                          simmed_play_get_win_pct_stat(sp2));
 }
 
+void assert_simmed_plays_are_equal(const SimmedPlay *sp1, const SimmedPlay *sp2,
+                                   int max_plies) {
+  assert(simmed_play_get_id(sp1) == simmed_play_get_id(sp2));
+  assert(simmed_play_get_is_epigon(sp1) == simmed_play_get_is_epigon(sp2));
+  assert_moves_are_equal(simmed_play_get_move(sp1), simmed_play_get_move(sp2));
+  assert_simmed_plays_stats_are_equal(sp1, sp2, max_plies);
+}
+
 // NOT THREAD SAFE
 void assert_sim_results_equal(SimResults *sr1, SimResults *sr2) {
   sim_results_sort_plays_by_win_rate(sr1);
@@ -684,13 +688,14 @@ void assert_sim_results_equal(SimResults *sr1, SimResults *sr2) {
   assert(sim_results_get_max_plies(sr1) == sim_results_get_max_plies(sr2));
   assert(sim_results_get_number_of_plays(sr1) ==
          sim_results_get_number_of_plays(sr2));
+  printf("%d %d\n", sim_results_get_iteration_count(sr1),
+         sim_results_get_iteration_count(sr2));
   assert(sim_results_get_iteration_count(sr1) ==
          sim_results_get_iteration_count(sr2));
-  assert(within_epsilon(sim_results_get_zval(sr1), sim_results_get_zval(sr2)));
   assert(sim_results_get_node_count(sr1) == sim_results_get_node_count(sr2));
   for (int i = 0; i < sim_results_get_number_of_plays(sr1); i++) {
-    assert_simmed_plays_are_equal(sim_results_get_simmed_play(sr1, i),
-                                  sim_results_get_simmed_play(sr2, i),
+    assert_simmed_plays_are_equal(sim_results_get_sorted_simmed_play(sr1, i),
+                                  sim_results_get_sorted_simmed_play(sr2, i),
                                   sim_results_get_max_plies(sr1));
   }
 }
@@ -773,7 +778,7 @@ void assert_move_equity_exact(const Move *move, Equity expected_equity) {
   assert(move_get_equity(move) == expected_equity);
 }
 
-void assert_rack_score(const LetterDistribution *ld, const Rack *rack, 
+void assert_rack_score(const LetterDistribution *ld, const Rack *rack,
                        int expected_score) {
   assert(rack_get_score(ld, rack) == int_to_equity(expected_score));
 }
