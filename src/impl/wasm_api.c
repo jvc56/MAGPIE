@@ -44,7 +44,7 @@ void load_cgp_into_iso_config(const char *cgp, int num_plays) {
 char *wasm_score_move(const char *cgpstr, const char *ucgi_move_str) {
   load_cgp_into_iso_config(cgpstr, 1);
 
-  ErrorStatus *error_status = config_get_error_status(iso_config);
+  ErrorStack *error_stack = config_get_error_status(iso_config);
   if (!error_status_get_success(error_status)) {
     return get_formatted_string("wasm cgp load failed with type %d, code %d",
                                 error_status_get_type(error_status),

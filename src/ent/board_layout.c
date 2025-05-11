@@ -7,6 +7,7 @@
 #include "../def/board_layout_defs.h"
 
 #include "data_filepaths.h"
+#include "error_stack.h"
 
 #include "../util/log.h"
 #include "../util/string_util.h"
@@ -133,9 +134,8 @@ board_layout_parse_split_file(BoardLayout *bl,
   return BOARD_LAYOUT_LOAD_STATUS_SUCCESS;
 }
 
-board_layout_load_status_t board_layout_load(BoardLayout *bl,
-                                             const char *data_paths,
-                                             const char *board_layout_name) {
+void board_layout_load(BoardLayout *bl, const char *data_paths,
+                       const char *board_layout_name, ErrorStack *error_stack) {
   char *layout_filename = data_filepaths_get_readable_filename(
       data_paths, board_layout_name, DATA_FILEPATH_TYPE_LAYOUT);
   StringSplitter *layout_rows = split_file_by_newline(layout_filename);
@@ -164,15 +164,12 @@ bool board_layout_is_name_default(const char *board_layout_name) {
   return is_default;
 }
 
-BoardLayout *board_layout_create_default(const char *data_paths) {
+BoardLayout *board_layout_create_default(const char *data_paths,
+                                         ErrorStack *error_stack) {
   BoardLayout *bl = board_layout_create();
   char *default_layout_name = board_layout_get_default_name();
-  board_layout_load_status_t status =
-      board_layout_load(bl, data_paths, default_layout_name);
+  board_layout_load(bl, data_paths, default_layout_name, error_stack);
   free(default_layout_name);
-  if (status != BOARD_LAYOUT_LOAD_STATUS_SUCCESS) {
-    log_fatal("standard board with dim %d failed to load", BOARD_DIM);
-  }
   return bl;
 }
 

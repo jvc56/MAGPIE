@@ -6,6 +6,7 @@
 #include "../def/autoplay_defs.h"
 
 #include "../ent/autoplay_results.h"
+#include "../ent/error_stack.h"
 #include "../ent/game.h"
 #include "../ent/thread_control.h"
 
@@ -21,6 +22,7 @@ typedef struct AutoplayArgs {
 } AutoplayArgs;
 
 autoplay_status_t autoplay(const AutoplayArgs *args,
-                           AutoplayResults *autoplay_results);
+                           AutoplayResults *autoplay_results,
+                           ErrorStack *error_stack);
 
 #endif

@@ -2,6 +2,7 @@
 
 #include "../def/simmer_defs.h"
 
+#include "../ent/error_stack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 
@@ -11,7 +12,8 @@
 #include "move_gen.h"
 #include "random_variable.h"
 
-sim_status_t simulate(const SimArgs *sim_args, SimResults *sim_results) {
+sim_status_t simulate(const SimArgs *sim_args, SimResults *sim_results,
+                      ErrorStack *error_stack) {
   // The BAI call will reset the thread control.
 
   if (!sim_args->move_list) {

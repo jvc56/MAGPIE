@@ -509,8 +509,8 @@ bool parse_min_rack_targets(StringSplitter *split_min_rack_targets,
   return true;
 }
 
-autoplay_status_t autoplay(const AutoplayArgs *args,
-                           AutoplayResults *autoplay_results) {
+void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
+              ErrorStack *error_stack) {
   const bool is_leavegen_mode = args->type == AUTOPLAY_TYPE_LEAVE_GEN;
   uint64_t num_gens = 1;
   int *min_rack_targets = NULL;

@@ -12,6 +12,7 @@
 #include "../def/thread_control_defs.h"
 
 #include "../ent/bag.h"
+#include "../ent/error_stack.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
 #include "../ent/klv.h"
@@ -546,7 +547,8 @@ inference_status_t verify_inference(const Inference *inference) {
   return INFERENCE_STATUS_SUCCESS;
 }
 
-inference_status_t infer(InferenceArgs *args, InferenceResults *results) {
+void infer(InferenceArgs *args, InferenceResults *results,
+           ErrorStack *error_stack) {
   thread_control_reset(args->thread_control, 0);
 
   if (!args->target_played_tiles) {

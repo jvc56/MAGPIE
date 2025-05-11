@@ -4,7 +4,7 @@
 
 #include "../def/autoplay_defs.h"
 #include "../def/config_defs.h"
-#include "../def/error_status_defs.h"
+#include "../def/error_stack_defs.h"
 #include "../def/exec_defs.h"
 #include "../def/file_handler_defs.h"
 #include "../def/game_defs.h"
@@ -14,7 +14,7 @@
 #include "../def/thread_control_defs.h"
 #include "../def/validated_move_defs.h"
 
-#include "../ent/error_status.h"
+#include "../ent/error_stack.h"
 #include "../ent/file_handler.h"
 #include "../ent/game.h"
 #include "../ent/sim_results.h"
@@ -43,6 +43,12 @@
 #define STOP_COMMAND_STRING "stop"
 #define FILE_COMMAND_STRING "file"
 
+// This struct is used to easily pass arguments to an asynchronous command
+typedef struct CommandArgs {
+  Config *config;
+  ErrorStack *error_stack;
+} CommandArgs;
+
 // Returns NULL and prints a warning if a search is ongoing or some other error
 // occurred
 char *command_search_status(Config *config, bool should_exit) {
@@ -67,20 +73,23 @@ char *command_search_status(Config *config, bool should_exit) {
   return config_get_execute_status(config);
 }
 
-void execute_command_and_set_mode_stopped(Config *config) {
-  config_execute_command(config);
-  error_status_log_warn_if_failed(config_get_error_status(config));
-  thread_control_set_mode_stopped(config_get_thread_control(config));
+void execute_command_and_set_mode_stopped(CommandArgs *command_args) {
+  config_execute_command(command_args->config, command_args->error_stack);
+  error_stack_print(command_args->error_stack);
+  thread_control_set_mode_stopped(
+      config_get_thread_control(command_args->config));
 }
 
-void *execute_command_thread_worker(void *uncasted_config) {
-  Config *config = (Config *)uncasted_config;
-  execute_command_and_set_mode_stopped(config);
+void *execute_command_thread_worker(void *uncasted_args) {
+  CommandArgs *args = (CommandArgs *)uncasted_args;
+  execute_command_and_set_mode_stopped(args);
   return NULL;
 }
 
-void execute_command_sync_or_async(Config *config, const char *command,
-                                   bool sync) {
+void execute_command_sync_or_async(CommandArgs *command_args,
+                                   const char *command, bool sync) {
+  Config *config = command_args->config;
+  ErrorStack *error_stack = command_args->error_stack;
   ThreadControl *thread_control = config_get_thread_control(config);
   if (!thread_control_set_mode_searching(thread_control)) {
     log_warn("still searching");
@@ -96,38 +105,36 @@ void execute_command_sync_or_async(Config *config, const char *command,
   // also locks the in FileHandler
   // Loading the config is relatively
   // fast so humans shouldn't notice anything
-  config_load_status_t config_load_status =
-      config_load_command(config, command);
-  set_or_clear_error_status(config_get_error_status(config),
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            (int)config_load_status);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    error_status_log_warn_if_failed(config_get_error_status(config));
+  error_stack_reset(error_stack);
+  config_load_command(config, command, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print(error_stack);
     thread_control_set_mode_stopped(thread_control);
     return;
   }
 
   if (sync) {
-    execute_command_and_set_mode_stopped(config);
+    execute_command_and_set_mode_stopped(command_args);
   } else {
     pthread_t cmd_execution_thread;
     pthread_create(&cmd_execution_thread, NULL, execute_command_thread_worker,
-                   config);
+                   command_args);
     pthread_detach(cmd_execution_thread);
   }
 }
 
-void execute_command_sync(Config *config, const char *command) {
-  execute_command_sync_or_async(config, command, true);
+void execute_command_sync(CommandArgs *command_args, const char *command) {
+  execute_command_sync_or_async(command_args, command, true);
 }
 
-void execute_command_async(Config *config, const char *command) {
-  execute_command_sync_or_async(config, command, false);
+void execute_command_async(CommandArgs *command_args, const char *command) {
+  execute_command_sync_or_async(command_args, command, false);
 }
 
-void process_ucgi_command(Config *config, const char *command) {
+void process_ucgi_command(CommandArgs *command_args, const char *command) {
   // Assume cmd is already trimmed of whitespace
-  ThreadControl *thread_control = config_get_thread_control(config);
+  ThreadControl *thread_control =
+      config_get_thread_control(command_args->config);
   if (strings_equal(command, UCGI_COMMAND_STRING)) {
     // More of a formality to align with UCI
     thread_control_print(thread_control, "id name MAGPIE 0.1\nucgiok\n");
@@ -140,12 +147,14 @@ void process_ucgi_command(Config *config, const char *command) {
       log_warn("There is no search to stop.");
     }
   } else {
-    execute_command_async(config, command);
+    execute_command_async(command_args, command);
   }
 }
 
-void command_scan_loop(Config *config, const char *initial_command_string) {
-  execute_command_sync(config, initial_command_string);
+void command_scan_loop(CommandArgs *command_args,
+                       const char *initial_command_string) {
+  Config *config = command_args->config;
+  execute_command_sync(command_args, initial_command_string);
   if (!config_continue_on_coldstart(config)) {
     return;
   }
@@ -171,7 +180,7 @@ void command_scan_loop(Config *config, const char *initial_command_string) {
 
     trim_whitespace(input);
 
-    if (strings_equal(input, QUIT_COMMAND_STRING)) {
+    if (strings_iequal(input, QUIT_COMMAND_STRING)) {
       break;
     }
 
@@ -181,10 +190,10 @@ void command_scan_loop(Config *config, const char *initial_command_string) {
 
     switch (exec_mode) {
     case EXEC_MODE_CONSOLE:
-      execute_command_sync(config, input);
+      execute_command_sync(command_args, input);
       break;
     case EXEC_MODE_UCGI:
-      process_ucgi_command(config, input);
+      process_ucgi_command(command_args, input);
       break;
     case EXEC_MODE_UNKNOWN:
       log_fatal("attempted to execute command in unknown mode");
@@ -211,10 +220,20 @@ void caches_destroy(void) {
 
 void process_command(int argc, char *argv[]) {
   log_set_level(LOG_WARN);
-  Config *config = config_create_default();
-  char *initial_command_string = create_command_from_args(argc, argv);
-  command_scan_loop(config, initial_command_string);
-  free(initial_command_string);
+  ErrorStack *error_stack = error_stack_create();
+  Config *config = config_create_default(error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    CommandArgs command_args = {
+        .config = config,
+        .error_stack = error_stack,
+    };
+    char *initial_command_string = create_command_from_args(argc, argv);
+    command_scan_loop(&command_args, initial_command_string);
+    free(initial_command_string);
+    caches_destroy();
+  } else {
+    error_stack_print(error_stack);
+  }
   config_destroy(config);
-  caches_destroy();
+  error_stack_destroy(error_stack);
 }

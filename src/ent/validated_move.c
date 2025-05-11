@@ -6,6 +6,7 @@
 #include "../def/rack_defs.h"
 #include "../def/validated_move_defs.h"
 
+#include "error_stack.h"
 #include "game.h"
 #include "move.h"
 #include "static_eval.h"
@@ -539,7 +540,8 @@ ValidatedMoves *validated_moves_create(const Game *game, int player_index,
                                        const char *ucgi_moves_string,
                                        bool allow_phonies,
                                        bool allow_unknown_exchanges,
-                                       bool allow_playthrough) {
+                                       bool allow_playthrough,
+                                       ErrorStack *error_stack) {
   ValidatedMoves *vms = malloc_or_die(sizeof(ValidatedMoves));
   vms->moves = NULL;
   vms->number_of_moves = 0;

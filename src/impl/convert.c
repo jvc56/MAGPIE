@@ -2,6 +2,7 @@
 
 #include "../ent/conversion_results.h"
 #include "../ent/dictionary_word.h"
+#include "../ent/error_stack.h"
 #include "../ent/kwg.h"
 
 #include "klv_csv.h"
@@ -218,8 +219,8 @@ get_conversion_type_from_string(const char *conversion_type_string) {
   return conversion_type;
 }
 
-conversion_status_t convert(ConversionArgs *args,
-                            ConversionResults *conversion_results) {
+void convert(ConversionArgs *args, ConversionResults *conversion_results,
+             ErrorStack *error_stack) {
   const char *conversion_type_string = args->conversion_type_string;
   conversion_type_t conversion_type =
       get_conversion_type_from_string(conversion_type_string);

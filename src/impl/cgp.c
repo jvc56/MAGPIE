@@ -5,6 +5,7 @@
 
 #include "../ent/bag.h"
 #include "../ent/equity.h"
+#include "../ent/error_stack.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
 
@@ -214,7 +215,7 @@ cgp_parse_status_t parse_cgp(Game *game, const char *cgp) {
   return cgp_parse_status;
 }
 
-cgp_parse_status_t game_load_cgp(Game *game, const char *cgp) {
+void game_load_cgp(Game *game, const char *cgp, ErrorStack *error_stack) {
   game_reset(game);
   cgp_parse_status_t cgp_parse_status = parse_cgp(game, cgp);
   if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {

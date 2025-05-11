@@ -12,7 +12,7 @@
 #include "../ent/autoplay_results.h"
 #include "../ent/board_layout.h"
 #include "../ent/conversion_results.h"
-#include "../ent/error_status.h"
+#include "../ent/error_stack.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
 #include "../ent/letter_distribution.h"
@@ -25,12 +25,13 @@
 typedef struct Config Config;
 
 // Constructors and Destructors
-Config *config_create_default(void);
+Config *config_create_default(ErrorStack *error_stack);
 void config_destroy(Config *config);
 
 // Loading commands and execution
-config_load_status_t config_load_command(Config *config, const char *cmd);
-void config_execute_command(Config *config);
+void config_load_command(Config *config, const char *cmd,
+                         ErrorStack *error_stack);
+void config_execute_command(Config *config, ErrorStack *error_stack);
 char *config_get_execute_status(Config *config);
 bool config_continue_on_coldstart(const Config *config);
 
@@ -53,7 +54,7 @@ double config_get_tt_fraction_of_mem(const Config *config);
 PlayersData *config_get_players_data(const Config *config);
 LetterDistribution *config_get_ld(const Config *config);
 ThreadControl *config_get_thread_control(const Config *config);
-ErrorStatus *config_get_error_status(const Config *config);
+ErrorStack *config_get_error_stack(const Config *config);
 exec_mode_t config_get_exec_mode(const Config *config);
 Game *config_get_game(const Config *config);
 MoveList *config_get_move_list(const Config *config);

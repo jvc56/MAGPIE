@@ -3,6 +3,7 @@
 
 #include "../def/inference_defs.h"
 
+#include "../ent/error_stack.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
 #include "../ent/rack.h"
@@ -19,6 +20,7 @@ typedef struct InferenceArgs {
   ThreadControl *thread_control;
 } InferenceArgs;
 
-inference_status_t infer(InferenceArgs *args, InferenceResults *results);
+inference_status_t infer(InferenceArgs *args, InferenceResults *results,
+                         ErrorStack *error_stack);
 
 #endif

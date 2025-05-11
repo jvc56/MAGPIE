@@ -98,7 +98,7 @@ void load_and_exec_config_or_die(Config *config, const char *cmd) {
     log_fatal("load config failed with status %d: %s\n", status, cmd);
   }
   config_execute_command(config);
-  ErrorStatus *error_status = config_get_error_status(config);
+  ErrorStack *error_stack = config_get_error_status(config);
   if (!error_status_get_success(error_status)) {
     error_status_log_warn_if_failed(error_status);
     abort();

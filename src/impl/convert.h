@@ -4,6 +4,7 @@
 #include "../def/convert_defs.h"
 
 #include "../ent/conversion_results.h"
+#include "../ent/error_stack.h"
 #include "../ent/letter_distribution.h"
 
 typedef struct ConversionArgs {
@@ -14,6 +15,6 @@ typedef struct ConversionArgs {
   const LetterDistribution *ld;
 } ConversionArgs;
 
-conversion_status_t convert(ConversionArgs *args,
-                            ConversionResults *conversion_results);
+void convert(ConversionArgs *args, ConversionResults *conversion_results,
+             ErrorStack *error_stack);
 #endif

@@ -5,6 +5,7 @@
 
 #include "../def/autoplay_defs.h"
 
+#include "error_stack.h"
 #include "game.h"
 #include "move.h"
 #include "stats.h"
@@ -762,9 +763,9 @@ autoplay_status_t autoplay_results_set_options_with_splitter(
   return status;
 }
 
-autoplay_status_t
-autoplay_results_set_options(AutoplayResults *autoplay_results,
-                             const char *options_str) {
+void autoplay_results_set_options(AutoplayResults *autoplay_results,
+                                  const char *options_str,
+                                  ErrorStack *error_stack) {
   if (is_string_empty_or_null(options_str)) {
     return AUTOPLAY_STATUS_EMPTY_OPTIONS;
   }
