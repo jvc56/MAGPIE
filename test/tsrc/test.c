@@ -113,6 +113,7 @@ static TestEntry test_table[] = {
 
 void run_all(void) {
   for (int i = 0; test_table[i].name != NULL; ++i) {
+    printf("Running test %s\n", test_table[i].name);
     test_table[i].func();
   }
 }
