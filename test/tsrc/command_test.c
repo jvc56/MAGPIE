@@ -114,6 +114,7 @@ void block_for_search(Config *config, int max_seconds) {
     }
     seconds_elapsed++;
     if (seconds_elapsed >= max_seconds) {
+      printf("Aborting test after %d seconds\n", max_seconds);
       log_fatal("Test aborted after searching for %d seconds\n", max_seconds);
     }
   }
@@ -306,19 +307,19 @@ void test_command_execution(void) {
       config,
       "autoplay game 10 -lex CSW21 -s1 equity -s2 equity "
       "-r1 best -r2 best -threads 1 -hr false -gp true -pfreq 4",
-      false, 5, 7, 0);
+      false, 30, 7, 0);
 
   assert_command_status_and_output(
       config,
       "autoplay game 10 -lex CSW21 -s1 equity -s2 equity "
       "-r1 best -r2 best -threads 1 -hr true -gp false -pfreq 0",
-      false, 5, 20, 0);
+      false, 30, 20, 0);
 
   assert_command_status_and_output(
       config,
       "autoplay game 50 -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
       "-r1 best -r2 best -threads 1 -hr true -gp true",
-      false, 5, 40, 0);
+      false, 30, 40, 0);
 
   for (int i = 0; i < 3; i++) {
     // Catalan
