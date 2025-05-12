@@ -103,6 +103,9 @@ void load_and_exec_config_or_die(Config *config, const char *cmd) {
     error_status_log_warn_if_failed(error_status);
     abort();
   }
+  printf("loaded config with command: %s\n", cmd);
+  printf("seed: %lu\n",
+         thread_control_get_seed(config_get_thread_control(config)));
 }
 
 void timeout_handler(int __attribute__((unused)) signum) {
