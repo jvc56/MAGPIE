@@ -5,7 +5,6 @@
 #include <stdlib.h>
 
 #include "../../src/def/config_defs.h"
-#include "../../src/def/simmer_defs.h"
 #include "../../src/def/thread_control_defs.h"
 
 #include "../../src/ent/bag.h"

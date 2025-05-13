@@ -449,8 +449,8 @@ void test_process_command(const char *arg_string,
 }
 
 void test_exec_single_command(void) {
-  char *plies_error_substr =
-      get_formatted_string("code %d", CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  char *plies_error_substr = get_formatted_string(
+      "code %d", ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
   test_process_command("sim -lex CSW21 -it 1000 -plies 2h3", 0, NULL, 1,
                        plies_error_substr);
   free(plies_error_substr);
@@ -490,8 +490,8 @@ void test_exec_file_commands(void) {
   char *commands_file_invocation =
       get_formatted_string("infile %s", commands_filename);
 
-  char *iter_error_substr =
-      get_formatted_string("code %d", CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  char *iter_error_substr = get_formatted_string(
+      "code %d", ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
 
   test_process_command(commands_file_invocation, 517,
                        "info infertotalracks 6145", 1, iter_error_substr);
@@ -604,8 +604,8 @@ void test_exec_console_command(void) {
   char *initial_command =
       get_formatted_string("cgp %s -infile %s", EMPTY_CGP, test_input_filename);
 
-  char *config_load_error_substr =
-      get_formatted_string("code %d", CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG);
+  char *config_load_error_substr = get_formatted_string(
+      "code %d", ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
 
   ProcessArgs *process_args = process_args_create(
       initial_command, 41, "autoplay games 20", 1, config_load_error_substr);

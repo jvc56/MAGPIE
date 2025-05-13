@@ -20,7 +20,7 @@ typedef struct InferenceArgs {
   ThreadControl *thread_control;
 } InferenceArgs;
 
-inference_status_t infer(InferenceArgs *args, InferenceResults *results,
-                         ErrorStack *error_stack);
+void infer(InferenceArgs *args, InferenceResults *results,
+           ErrorStack *error_stack);
 
 #endif

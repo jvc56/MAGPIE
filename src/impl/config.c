@@ -11,10 +11,8 @@
 #include "../def/exec_defs.h"
 #include "../def/file_handler_defs.h"
 #include "../def/game_defs.h"
-#include "../def/gen_defs.h"
 #include "../def/inference_defs.h"
 #include "../def/math_util_defs.h"
-#include "../def/simmer_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../def/validated_move_defs.h"
 
@@ -520,7 +518,6 @@ void config_load_bool(Config *config, arg_token_t arg_token, bool *value,
                      get_formatted_string(
                          "failed to parse bool value for %s: %s",
                          config_get_parg_name(config, arg_token), bool_str));
-    return ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG;
   }
 }
 
@@ -549,13 +546,17 @@ void config_load_uint64(Config *config, arg_token_t arg_token, uint64_t *value,
 // Generic execution and status functions
 
 // Used for pargs that are not commands.
-void execute_fatal(Config *config) {
+void execute_fatal(Config *config,
+                   ErrorStack __attribute__((unused)) * error_stack) {
   log_fatal("attempted to execute nonexecutable argument (arg token %d)",
             config->exec_parg_token);
 }
 
 // Used for commands that only update the config state
-void execute_noop(Config __attribute__((unused)) * config) { return; }
+void execute_noop(Config __attribute__((unused)) * config,
+                  ErrorStack __attribute__((unused)) * error_stack) {
+  return;
+}
 
 // Used for pargs that are not commands.
 char *status_fatal(Config *config) {
@@ -787,8 +788,6 @@ void execute_sim(Config *config, ErrorStack *error_stack) {
 
   config_init_game(config);
 
-  ErrorStack *error_stack = error_stack;
-
   const char *known_opp_rack_str =
       config_get_parg_value(config, ARG_TOKEN_SIM, 0);
   Rack *known_opp_rack = NULL;
@@ -943,17 +942,18 @@ void config_fill_autoplay_args(const Config *config,
   config_fill_game_args(config, autoplay_args->game_args);
 }
 
-config_autoplay(const Config *config, AutoplayResults *autoplay_results,
-                autoplay_t autoplay_type,
-                const char *num_games_or_min_rack_targets,
-                int games_before_force_draw_start, ErrorStack *error_stack) {
+void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
+                     autoplay_t autoplay_type,
+                     const char *num_games_or_min_rack_targets,
+                     int games_before_force_draw_start,
+                     ErrorStack *error_stack) {
   AutoplayArgs args;
   GameArgs game_args;
   args.game_args = &game_args;
   config_fill_autoplay_args(config, &args, autoplay_type,
                             num_games_or_min_rack_targets,
                             games_before_force_draw_start);
-  return autoplay(&args, autoplay_results, error_stack);
+  autoplay(&args, autoplay_results, error_stack);
 }
 
 void execute_autoplay(Config *config, ErrorStack *error_stack) {
@@ -1368,9 +1368,15 @@ void config_load_lexicon_dependent_data(Config *config,
   }
 
   // Both or neither players must have lexical data
-  if ((updated_p1_lexicon_name && !updated_p2_lexicon_name) ||
-      (!updated_p1_lexicon_name && updated_p2_lexicon_name)) {
-    return ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING;
+  if ((!updated_p1_lexicon_name && updated_p2_lexicon_name)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING,
+                     string_duplicate("missing lexicon for player 1"));
+    return;
+  }
+  if ((updated_p1_lexicon_name && !updated_p2_lexicon_name)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING,
+                     string_duplicate("missing lexicon for player 2"));
+    return;
   }
 
   // Both lexicons are not specified, so we don't

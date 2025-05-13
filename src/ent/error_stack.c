@@ -6,6 +6,7 @@
 #include "../def/error_stack_defs.h"
 
 #include "../util/log.h"
+#include "../util/string_util.h"
 #include "../util/util.h"
 
 #define ERROR_STACK_CAPACITY 10
@@ -64,12 +65,26 @@ error_code_t error_stack_top(ErrorStack *error_stack) {
   return error_stack->error_codes[error_stack->size - 1];
 }
 
-void error_stack_print(ErrorStack *error_stack) {
+char *error_stack_string(ErrorStack *error_stack) {
   if (error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  StringBuilder *string_builder = string_builder_create();
+  for (int i = error_stack->size - 1; i >= 0; i--) {
+    string_builder_add_formatted_string(string_builder, "(error %d) %s\n",
+                                        error_stack->error_codes[i],
+                                        error_stack->msgs[i]);
+  }
+  char *error_string = string_builder_dump(string_builder, NULL);
+  string_builder_destroy(string_builder);
+  return error_string;
+}
+
+void error_stack_print(ErrorStack *error_stack) {
+  char *error_string = error_stack_string(error_stack);
+  if (!error_string) {
     return;
   }
-  for (int i = error_stack->size - 1; i >= 0; i--) {
-    fprintf(stderr, "(error %d) %s\n", error_stack->error_codes[i],
-            error_stack->msgs[i]);
-  }
+  fprintf(stderr, error_string);
+  free(error_string);
 }

@@ -28,8 +28,7 @@ const Rack *validated_moves_get_rack(const ValidatedMoves *vms, int i);
 const Rack *validated_moves_get_leave(const ValidatedMoves *vms, int i);
 bool validated_moves_get_unknown_exchange(const ValidatedMoves *vms, int i);
 
-move_validation_status_t
-validated_moves_get_validation_status(const ValidatedMoves *vms);
+error_code_t validated_moves_get_validation_status(const ValidatedMoves *vms);
 
 char *validated_moves_get_phonies_string(const LetterDistribution *ld,
                                          ValidatedMoves *vms, int i);

@@ -12,18 +12,24 @@
 #include "../util/log.h"
 #include "../util/string_util.h"
 
-conversion_status_t convert_from_text_with_dwl(
-    const LetterDistribution *ld, conversion_type_t conversion_type,
-    const char *input_filename, const char *output_filename,
-    DictionaryWordList *strings, ConversionResults *conversion_results) {
+void convert_from_text_with_dwl(const LetterDistribution *ld,
+                                conversion_type_t conversion_type,
+                                const char *input_filename,
+                                const char *output_filename,
+                                DictionaryWordList *strings,
+                                ConversionResults *conversion_results,
+                                ErrorStack *error_stack) {
   FILE *input_file = fopen(input_filename, "r");
   if (!input_file) {
-    return CONVERT_STATUS_INPUT_FILE_ERROR;
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONVERT_INPUT_FILE_ERROR,
+        get_formatted_string("failed to open input file for conversion: %s",
+                             input_filename));
+    return;
   }
   char *line = NULL;
   size_t len = 0;
   ssize_t read;
-  conversion_status_t status = CONVERT_STATUS_SUCCESS;
   while ((read = getline(&line, &len, input_file)) != -1) {
     if (read > 0 && line[read - 1] == '\n') {
       line[read - 1] = '\0';
@@ -32,27 +38,36 @@ conversion_status_t convert_from_text_with_dwl(
     uint8_t *mls = malloc_or_die(line_length);
     const int mls_length = ld_str_to_mls(ld, line, false, mls, line_length);
     if (mls_length > BOARD_DIM) {
-      log_error("word too long: %s", line);
+      error_stack_push(error_stack,
+                       ERROR_STATUS_CONVERT_TEXT_CONTAINS_WORD_TOO_LONG,
+                       get_formatted_string(
+                           "could not convert word greater than length %d: %s",
+                           mls_length, line));
       free(mls);
-      status = CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_LONG;
       break;
     }
     if (mls_length < 0) {
-      log_error("text contains invalid letter: %s", line);
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONVERT_TEXT_CONTAINS_INVALID_LETTER,
+          get_formatted_string("could not convert word with invalid letter: %s",
+                               line));
       free(mls);
-      status = CONVERT_STATUS_TEXT_CONTAINS_INVALID_LETTER;
       break;
     }
     if (!unblank_machine_letters(mls, mls_length)) {
-      log_error("text contains invalid letter: %s", line);
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONVERT_TEXT_CONTAINS_INVALID_LETTER,
+          get_formatted_string("could not convert word with invalid letter: %s",
+                               line));
       free(mls);
-      status = CONVERT_STATUS_TEXT_CONTAINS_INVALID_LETTER;
       break;
     }
     if (mls_length < 2) {
-      log_error("word too short: %s", line);
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONVERT_TEXT_CONTAINS_WORD_TOO_SHORT,
+          get_formatted_string("could not convert word less than length 2: %s",
+                               line));
       free(mls);
-      status = CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_SHORT;
       break;
     }
     dictionary_word_list_add_word(strings, mls, mls_length);
@@ -61,18 +76,21 @@ conversion_status_t convert_from_text_with_dwl(
   if (line != NULL) {
     free(line);
   }
-  if (status != CONVERT_STATUS_SUCCESS) {
+  if (!error_stack_is_empty(error_stack)) {
     fclose(input_file);
-    return status;
+    return;
   }
 
   if (conversion_type == CONVERT_TEXT2WORDMAP) {
     WMP *wmp = make_wmp_from_words(strings, ld);
     if (!wmp_write_to_file(wmp, output_filename)) {
-      return CONVERT_STATUS_OUTPUT_FILE_NOT_WRITABLE;
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONVERT_OUTPUT_FILE_NOT_WRITABLE,
+          get_formatted_string("could not write wordmap to output file: %s",
+                               output_filename));
     }
     wmp_destroy(wmp);
-    return CONVERT_STATUS_SUCCESS;
+    return;
   }
   kwg_maker_output_t output_type = KWG_MAKER_OUTPUT_DAWG_AND_GADDAG;
   if (conversion_type == CONVERT_TEXT2DAWG) {
@@ -82,28 +100,31 @@ conversion_status_t convert_from_text_with_dwl(
   }
   KWG *kwg = make_kwg_from_words(strings, output_type, KWG_MAKER_MERGE_EXACT);
   if (!kwg_write_to_file(kwg, output_filename)) {
-    status = CONVERT_STATUS_OUTPUT_FILE_NOT_WRITABLE;
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONVERT_OUTPUT_FILE_NOT_WRITABLE,
+        get_formatted_string("could not write kwg to output file: %s",
+                             output_filename));
   } else {
     conversion_results_set_number_of_strings(
         conversion_results, dictionary_word_list_get_count(strings));
   }
   kwg_destroy(kwg);
-  return status;
 }
 
-conversion_status_t convert_with_filenames(
-    const LetterDistribution *ld, conversion_type_t conversion_type,
-    const char *data_paths, const char *input_filename,
-    const char *output_filename, ConversionResults *conversion_results) {
-  conversion_status_t status = CONVERT_STATUS_SUCCESS;
+void convert_with_filenames(const LetterDistribution *ld,
+                            conversion_type_t conversion_type,
+                            const char *data_paths, const char *input_filename,
+                            const char *output_filename,
+                            ConversionResults *conversion_results,
+                            ErrorStack *error_stack) {
   if ((conversion_type == CONVERT_TEXT2DAWG) ||
       (conversion_type == CONVERT_TEXT2GADDAG) ||
       (conversion_type == CONVERT_TEXT2KWG) ||
       (conversion_type == CONVERT_TEXT2WORDMAP)) {
     DictionaryWordList *strings = dictionary_word_list_create();
-    status = convert_from_text_with_dwl(ld, conversion_type, input_filename,
-                                        output_filename, strings,
-                                        conversion_results);
+    convert_from_text_with_dwl(ld, conversion_type, input_filename,
+                               output_filename, strings, conversion_results,
+                               error_stack);
     dictionary_word_list_destroy(strings);
   } else if (conversion_type == CONVERT_DAWG2TEXT) {
     KWG *kwg = kwg_create(data_paths, input_filename);
@@ -121,9 +142,10 @@ conversion_status_t convert_with_filenames(
     klv_write_to_csv(klv, ld, output_filename);
     klv_destroy(klv);
   } else {
-    status = CONVERT_STATUS_UNIMPLEMENTED_CONVERSION_TYPE;
+    error_stack_push(error_stack,
+                     ERROR_STATUS_CONVERT_UNIMPLEMENTED_CONVERSION_TYPE,
+                     string_duplicate("unimplemented conversion type"));
   }
-  return status;
 }
 
 data_filepath_t
@@ -226,19 +248,31 @@ void convert(ConversionArgs *args, ConversionResults *conversion_results,
       get_conversion_type_from_string(conversion_type_string);
 
   if (conversion_type == CONVERT_UNKNOWN) {
-    return CONVERT_STATUS_UNRECOGNIZED_CONVERSION_TYPE;
+    error_stack_push(error_stack,
+                     ERROR_STATUS_CONVERT_UNRECOGNIZED_CONVERSION_TYPE,
+                     get_formatted_string("unrecognized conversion type: %s",
+                                          conversion_type_string));
+    return;
   }
 
   if (args->input_name == NULL) {
-    return CONVERT_STATUS_INPUT_FILE_ERROR;
+    error_stack_push(error_stack, ERROR_STATUS_CONVERT_INPUT_FILE_ERROR,
+                     get_formatted_string("input file name is missing"));
+    return;
   }
 
   if (args->output_name == NULL) {
-    return CONVERT_STATUS_OUTPUT_FILE_NOT_WRITABLE;
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONVERT_OUTPUT_FILE_NOT_WRITABLE,
+        get_formatted_string("output file name is missing or not writable"));
+    return;
   }
 
   if (args->ld == NULL) {
-    return CONVERT_STATUS_MISSING_LETTER_DISTRIBUTION;
+    error_stack_push(error_stack,
+                     ERROR_STATUS_CONVERT_MISSING_LETTER_DISTRIBUTION,
+                     get_formatted_string("missing letter distribution"));
+    return;
   }
 
   data_filepath_t input_filepath_type =
@@ -254,13 +288,11 @@ void convert(ConversionArgs *args, ConversionResults *conversion_results,
       data_path, args->output_name,
       get_output_filepath_type_from_conv_type(conversion_type));
 
-  conversion_status_t status = convert_with_filenames(
-      args->ld, conversion_type, args->data_paths, input_filename,
-      output_filename, conversion_results);
+  convert_with_filenames(args->ld, conversion_type, args->data_paths,
+                         input_filename, output_filename, conversion_results,
+                         error_stack);
 
   free(data_path);
   free(input_filename);
   free(output_filename);
-
-  return status;
 }

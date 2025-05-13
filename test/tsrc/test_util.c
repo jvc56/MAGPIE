@@ -93,8 +93,8 @@ uint64_t string_to_cross_set(const LetterDistribution *ld,
 }
 
 void load_and_exec_config_or_die(Config *config, const char *cmd) {
-  config_load_status_t status = config_load_command(config, cmd);
-  if (status != CONFIG_LOAD_STATUS_SUCCESS) {
+  error_code_t status = config_load_command(config, cmd);
+  if (status != ERROR_STATUS_CONFIG_LOAD_SUCCESS) {
     log_fatal("load config failed with status %d: %s\n", status, cmd);
   }
   config_execute_command(config);
@@ -278,7 +278,7 @@ void play_top_n_equity_move(Game *game, int n) {
 
 void load_cgp_or_die(Game *game, const char *cgp) {
   cgp_parse_status_t cgp_parse_status = game_load_cgp(game, cgp);
-  if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+  if (cgp_parse_status != ERROR_STATUS_CGP_PARSE_SUCCESS) {
     log_fatal("cgp load failed with %d\n", cgp_parse_status);
   }
 }

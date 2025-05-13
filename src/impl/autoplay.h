@@ -21,8 +21,7 @@ typedef struct AutoplayArgs {
   ThreadControl *thread_control;
 } AutoplayArgs;
 
-autoplay_status_t autoplay(const AutoplayArgs *args,
-                           AutoplayResults *autoplay_results,
-                           ErrorStack *error_stack);
+void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
+              ErrorStack *error_stack);
 
 #endif

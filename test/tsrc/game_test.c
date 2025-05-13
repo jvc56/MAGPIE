@@ -17,7 +17,7 @@
 
 void reset_and_load_game_success(Game *game, const char *cgp) {
   cgp_parse_status_t cgp_parse_status = game_load_cgp(game, cgp);
-  assert(cgp_parse_status == CGP_PARSE_STATUS_SUCCESS);
+  assert(cgp_parse_status == ERROR_STATUS_CGP_PARSE_SUCCESS);
 }
 
 void reset_and_load_game_failure(Game *game, const char *cgp,
@@ -57,115 +57,115 @@ void test_load_cgp(void) {
 
   // Empty string
   reset_and_load_game_failure(game, "",
-                              CGP_PARSE_STATUS_MISSING_REQUIRED_FIELDS);
+                              ERROR_STATUS_CGP_PARSE_MISSING_REQUIRED_FIELDS);
   reset_and_load_game_failure(game, "           ",
-                              CGP_PARSE_STATUS_MISSING_REQUIRED_FIELDS);
+                              ERROR_STATUS_CGP_PARSE_MISSING_REQUIRED_FIELDS);
   reset_and_load_game_failure(game, "\n\r\t\v\f  ",
-                              CGP_PARSE_STATUS_MISSING_REQUIRED_FIELDS);
+                              ERROR_STATUS_CGP_PARSE_MISSING_REQUIRED_FIELDS);
   // Missing board
   reset_and_load_game_failure(game, "/ 0/0 0",
-                              CGP_PARSE_STATUS_MISSING_REQUIRED_FIELDS);
+                              ERROR_STATUS_CGP_PARSE_MISSING_REQUIRED_FIELDS);
   // Missing racks
   reset_and_load_game_failure(
       game, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 0/0 0",
-      CGP_PARSE_STATUS_MISSING_REQUIRED_FIELDS);
+      ERROR_STATUS_CGP_PARSE_MISSING_REQUIRED_FIELDS);
   // Missing scores
   reset_and_load_game_failure(
       game, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0",
-      CGP_PARSE_STATUS_MISSING_REQUIRED_FIELDS);
+      ERROR_STATUS_CGP_PARSE_MISSING_REQUIRED_FIELDS);
 
   // Missing consecutive zeros
   reset_and_load_game_failure(
       game, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0",
-      CGP_PARSE_STATUS_MISSING_REQUIRED_FIELDS);
+      ERROR_STATUS_CGP_PARSE_MISSING_REQUIRED_FIELDS);
 
   // Too many board rows
   reset_and_load_game_failure(
       game, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0",
-      CGP_PARSE_STATUS_INVALID_NUMBER_OF_BOARD_ROWS);
+      ERROR_STATUS_CGP_PARSE_INVALID_NUMBER_OF_BOARD_ROWS);
 
   // Not enough columns
   reset_and_load_game_failure(
       game, "15/15/15/15/15/15/15/15/AB3E4F3/15/15/15/15/15/15 / 0/0 0",
-      CGP_PARSE_STATUS_INVALID_NUMBER_OF_BOARD_COLUMNS);
+      ERROR_STATUS_CGP_PARSE_INVALID_NUMBER_OF_BOARD_COLUMNS);
 
   // Not enough columns
   reset_and_load_game_failure(
       game, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/14 / 0/0 0",
-      CGP_PARSE_STATUS_INVALID_NUMBER_OF_BOARD_COLUMNS);
+      ERROR_STATUS_CGP_PARSE_INVALID_NUMBER_OF_BOARD_COLUMNS);
 
   // Too many columns
   reset_and_load_game_failure(
       game, "15/15/15/15/15/15/15/15/AB3CDE4F3/15/15/15/15/15/15 / 0/0 0",
-      CGP_PARSE_STATUS_INVALID_NUMBER_OF_BOARD_COLUMNS);
+      ERROR_STATUS_CGP_PARSE_INVALID_NUMBER_OF_BOARD_COLUMNS);
 
   // Too many columns
   reset_and_load_game_failure(
       game, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/16 / 0/0 0",
-      CGP_PARSE_STATUS_INVALID_NUMBER_OF_BOARD_COLUMNS);
+      ERROR_STATUS_CGP_PARSE_INVALID_NUMBER_OF_BOARD_COLUMNS);
 
   // Too many racks
   reset_and_load_game_failure(
       game, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 ABC/DEF/GHI 0/0 0",
-      CGP_PARSE_STATUS_INVALID_NUMBER_OF_PLAYER_RACKS);
+      ERROR_STATUS_CGP_PARSE_INVALID_NUMBER_OF_PLAYER_RACKS);
 
   // Too few racks
   reset_and_load_game_failure(
       game, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 ABC 0/0 0",
-      CGP_PARSE_STATUS_INVALID_NUMBER_OF_PLAYER_RACKS);
+      ERROR_STATUS_CGP_PARSE_INVALID_NUMBER_OF_PLAYER_RACKS);
 
   // Too many scores
   reset_and_load_game_failure(
       game, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 ABC/DEF 123/456/78 0",
-      CGP_PARSE_STATUS_INVALID_NUMBER_OF_PLAYER_SCORES);
+      ERROR_STATUS_CGP_PARSE_INVALID_NUMBER_OF_PLAYER_SCORES);
 
   // Too few scores
   reset_and_load_game_failure(
       game, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 ABC/DEF 9000 0",
-      CGP_PARSE_STATUS_INVALID_NUMBER_OF_PLAYER_SCORES);
+      ERROR_STATUS_CGP_PARSE_INVALID_NUMBER_OF_PLAYER_SCORES);
 
   // Invalid board letters
   reset_and_load_game_failure(
       game, "15/15/15/15/15/15/15/15/ABCD.EFG7/15/15/15/15/15/15 ABC/DEF 0/0 0",
-      CGP_PARSE_STATUS_MALFORMED_BOARD_LETTERS);
+      ERROR_STATUS_CGP_PARSE_MALFORMED_BOARD_LETTERS);
 
   // Invalid rack letters
   reset_and_load_game_failure(
       game,
       "15/15/15/15/15/15/15/15/3ABCDEFG5/15/15/15/15/15/15 ABC5DF/YXZ 0/0 0",
-      CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS);
+      ERROR_STATUS_CGP_PARSE_MALFORMED_RACK_LETTERS);
 
   reset_and_load_game_failure(
       game,
       "15/15/15/15/15/15/15/15/3ABCDEFG5/15/15/15/15/15/15 ABCDF/YX;Z 0/0 0",
-      CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS);
+      ERROR_STATUS_CGP_PARSE_MALFORMED_RACK_LETTERS);
 
   // Invalid scores
   reset_and_load_game_failure(game,
                               "15/15/15/15/15/15/15/15/5ABCDEFG3/15/15/15/15/"
                               "15/15 ABCDF/YXZ 234R3/34 0",
-                              CGP_PARSE_STATUS_MALFORMED_SCORES);
+                              ERROR_STATUS_CGP_PARSE_MALFORMED_SCORES);
 
   // Invalid consecutive zeros
   reset_and_load_game_failure(
       game, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 ABCDF/YXZ 0/0 H",
-      CGP_PARSE_STATUS_MALFORMED_CONSECUTIVE_ZEROS);
+      ERROR_STATUS_CGP_PARSE_MALFORMED_CONSECUTIVE_ZEROS);
 
   // Board letters not in bag
   reset_and_load_game_failure(
       game, "15/15/15/15/15/15/15/15/6ZZZ6/15/15/15/15/15/15 / 0/0 0",
-      CGP_PARSE_STATUS_BOARD_LETTERS_NOT_IN_BAG);
+      ERROR_STATUS_CGP_PARSE_BOARD_LETTERS_NOT_IN_BAG);
 
   // Rack letters not in bag
   reset_and_load_game_failure(
       game, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 Z/ZZ 0/0 0",
-      CGP_PARSE_STATUS_RACK_LETTERS_NOT_IN_BAG);
+      ERROR_STATUS_CGP_PARSE_RACK_LETTERS_NOT_IN_BAG);
 
   load_and_exec_config_or_die(config, "cgp " VS_FRENTZ_CGP);
 
-  config_load_status_t status = config_load_command(
+  error_code_t status = config_load_command(
       config, "cgp 15/15/15/15/15/15/15/15/6ZZZ6/15/15/15/15/15/15 / 0/0 0");
-  if (status != CONFIG_LOAD_STATUS_SUCCESS) {
+  if (status != ERROR_STATUS_CONFIG_LOAD_SUCCESS) {
     log_fatal("failed to load cgp in game test\n");
   }
   config_execute_command(config);
@@ -196,7 +196,7 @@ void test_game_main(void) {
 
   // Test opening racks
   cgp_parse_status = game_load_cgp(game, OPENING_CGP);
-  assert(cgp_parse_status == CGP_PARSE_STATUS_SUCCESS);
+  assert(cgp_parse_status == ERROR_STATUS_CGP_PARSE_SUCCESS);
   rack_set_to_string(ld, rack, "ABCDEFG");
   assert(equal_rack(rack, player0_rack));
   rack_set_to_string(ld, rack, "HIJKLM?");
@@ -204,7 +204,7 @@ void test_game_main(void) {
 
   // Test CGP with excessive whitespace
   cgp_parse_status = game_load_cgp(game, EXCESSIVE_WHITESPACE_CGP);
-  assert(cgp_parse_status == CGP_PARSE_STATUS_SUCCESS);
+  assert(cgp_parse_status == ERROR_STATUS_CGP_PARSE_SUCCESS);
   rack_set_to_string(ld, rack, "ABCDEFG");
   assert(equal_rack(rack, player0_rack));
   rack_set_to_string(ld, rack, "HIJKLM?");
@@ -213,7 +213,7 @@ void test_game_main(void) {
 
   // Test CGP with one consecutive zero
   cgp_parse_status = game_load_cgp(game, ONE_CONSECUTIVE_ZERO_CGP);
-  assert(cgp_parse_status == CGP_PARSE_STATUS_SUCCESS);
+  assert(cgp_parse_status == ERROR_STATUS_CGP_PARSE_SUCCESS);
   assert(game_get_consecutive_scoreless_turns(game) == 1);
   game_reset(game);
 

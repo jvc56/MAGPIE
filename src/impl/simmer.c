@@ -1,7 +1,5 @@
 #include "simmer.h"
 
-#include "../def/simmer_defs.h"
-
 #include "../ent/error_stack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"

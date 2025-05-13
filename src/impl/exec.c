@@ -1,3 +1,5 @@
+#include "exec.h"
+
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -8,9 +10,7 @@
 #include "../def/exec_defs.h"
 #include "../def/file_handler_defs.h"
 #include "../def/game_defs.h"
-#include "../def/gen_defs.h"
 #include "../def/inference_defs.h"
-#include "../def/simmer_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../def/validated_move_defs.h"
 
@@ -44,10 +44,6 @@
 #define FILE_COMMAND_STRING "file"
 
 // This struct is used to easily pass arguments to an asynchronous command
-typedef struct CommandArgs {
-  Config *config;
-  ErrorStack *error_stack;
-} CommandArgs;
 
 // Returns NULL and prints a warning if a search is ongoing or some other error
 // occurred

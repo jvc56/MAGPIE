@@ -448,8 +448,8 @@ void finalize_note(GCGParser *gcg_parser) {
   string_builder_clear(gcg_parser->note_builder);
 }
 
-config_load_status_t
-load_config_with_game_history(const GameHistory *game_history, Config *config) {
+error_code_t load_config_with_game_history(const GameHistory *game_history,
+                                           Config *config) {
   StringBuilder *cfg_load_cmd_builder = string_builder_create();
   const char *lexicon = game_history_get_lexicon_name(game_history);
   const char *ld_name = game_history_get_ld_name(game_history);
@@ -508,7 +508,7 @@ load_config_with_game_history(const GameHistory *game_history, Config *config) {
 
   char *cfg_load_cmd = string_builder_dump(cfg_load_cmd_builder, NULL);
   string_builder_destroy(cfg_load_cmd_builder);
-  config_load_status_t status = config_load_command(config, cfg_load_cmd);
+  error_code_t status = config_load_command(config, cfg_load_cmd);
   free(cfg_load_cmd);
   return status;
 }
@@ -840,9 +840,9 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
         game_history_set_board_layout_name(game_history, default_layout);
         free(default_layout);
       }
-      config_load_status_t config_load_status =
+      error_code_t config_load_status =
           load_config_with_game_history(game_history, gcg_parser->config);
-      if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+      if (config_load_status != ERROR_STATUS_CONFIG_LOAD_SUCCESS) {
         return GCG_PARSE_STATUS_CONFIG_LOAD_ERROR;
       }
 
