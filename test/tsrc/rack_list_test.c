@@ -72,7 +72,7 @@ void test_rack_list(void) {
   rack_set_dist_size(&rack, ld_size);
   rack_reset(&rack);
 
-  char *rack_strs[] = {"AEINRT", "BCDFGH"};
+  char *rack_strs[] = {"AEINRT", "BCCGHI"};
   const int num_racks = sizeof(rack_strs) / sizeof(rack_strs[0]);
   double total_equities[] = {0.0, 0.0};
   uint64_t total_combos[] = {0, 0};
@@ -81,24 +81,25 @@ void test_rack_list(void) {
   for (int rack_index = 0; rack_index < num_racks; rack_index++) {
     rack_set_to_string(ld, &rack, rack_strs[rack_index]);
     for (int ml = 0; ml < ld_size; ml++) {
+      const int num_ml_already_in_rack = rack_get_letter(&rack, ml);
+      if (num_ml_already_in_rack == ld_get_dist(ld, ml)) {
+        continue;
+      }
       rack_add_letter(&rack, ml);
-
       double rack_equity = (double)ml;
       rack_list_add_rack(rack_list, &rack, rack_equity);
-
+      const uint64_t draw_combos = ld_get_dist(ld, ml) - num_ml_already_in_rack;
+      total_equities[rack_index] += rack_equity * draw_combos;
+      total_combos[rack_index] += draw_combos;
       uint64_t rack_combos = 1;
-      for (int i = 0; i < ld_size; i++) {
-        const int num_i = rack_get_letter(&rack, i);
-        if (num_i == 0) {
+      for (int j = 0; j < ld_size; j++) {
+        const int num_ml = rack_get_letter(&rack, j);
+        if (num_ml == 0) {
           continue;
         }
-        rack_combos *= choose(ld_get_dist(ld, i), num_i);
+        rack_combos *= choose(ld_get_dist(ld, j), num_ml);
       }
-
-      total_equities[rack_index] += rack_equity * rack_combos;
-      total_combos[rack_index] += rack_combos;
       all_comb_equities += rack_equity * rack_combos;
-
       rack_take_letter(&rack, ml);
     }
   }
