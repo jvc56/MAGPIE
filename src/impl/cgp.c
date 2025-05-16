@@ -119,8 +119,8 @@ void parse_cgp_board(Game *game, const char *cgp_board,
   string_splitter_destroy(board_rows);
 }
 
-parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
-                                     Game *game, ErrorStack *error_stack) {
+void parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
+                                          Game *game, ErrorStack *error_stack) {
   for (int player_index = 0; player_index < 2; player_index++) {
     int number_of_letters_added = draw_rack_string_from_bag(
         game, player_index,
@@ -139,7 +139,7 @@ parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
           get_formatted_string(
               "rack not available in the bag for player %d: %s", player_index,
               string_splitter_get_item(player_racks, player_index)));
-      return ERROR_STATUS_CGP_PARSE_RACK_LETTERS_NOT_IN_BAG;
+      return;
     }
   }
 }
@@ -235,7 +235,7 @@ void parse_cgp(Game *game, const char *cgp, ErrorStack *error_stack) {
 
 void game_load_cgp(Game *game, const char *cgp, ErrorStack *error_stack) {
   game_reset(game);
-  (game, cgp, error_stack);
+  parse_cgp(game, cgp, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }

@@ -538,11 +538,11 @@ BoardLayout *board_layout_create_for_test(const char *data_paths,
   BoardLayout *bl = board_layout_create();
   board_layout_load_status_t actual_status =
       board_layout_load(bl, data_paths, board_layout_name);
-  if (actual_status != BOARD_LAYOUT_LOAD_STATUS_SUCCESS) {
+  if (actual_status != ERROR_STATUS_BOARD_LAYOUT_LOAD_SUCCESS) {
     printf("board layout load failure for %s: %d\n", board_layout_name,
            actual_status);
   }
-  assert(actual_status == BOARD_LAYOUT_LOAD_STATUS_SUCCESS);
+  assert(actual_status == ERROR_STATUS_BOARD_LAYOUT_LOAD_SUCCESS);
   return bl;
 }
 
@@ -603,7 +603,7 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
       validated_moves_create(game, 0, vm_move_string, false, true, false);
   free(vm_move_string);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
+         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
 
   if (play_move_on_board) {
     play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
@@ -622,7 +622,7 @@ ValidatedMoves *assert_validated_move_success(Game *game, const char *cgp_str,
   ValidatedMoves *vms = validated_moves_create(
       game, player_index, move_str, allow_phonies, true, allow_playthrough);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
+         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
   return vms;
 }
 

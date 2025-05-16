@@ -27,7 +27,7 @@ void test_hash_after_making_play(void) {
   ValidatedMoves *vms =
       validated_moves_create(game, 0, "15J.END", false, false, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
+         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
 
   const LetterDistribution *ld = game_get_ld(game);
   uint32_t ld_size = ld_get_size(ld);
@@ -75,7 +75,7 @@ void test_hash_after_making_blank_play(void) {
   ValidatedMoves *vms =
       validated_moves_create(game, 0, "6m.xu", false, false, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
+         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
 
   const LetterDistribution *ld = game_get_ld(game);
   uint32_t ld_size = ld_get_size(ld);
@@ -122,7 +122,7 @@ void test_hash_after_passing(void) {
   ValidatedMoves *vms =
       validated_moves_create(game, 0, "pass", false, false, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
+         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
 
   const LetterDistribution *ld = game_get_ld(game);
   uint32_t ld_size = ld_get_size(ld);

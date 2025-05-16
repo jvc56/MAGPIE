@@ -86,19 +86,24 @@ void test_board_layout_success(void) {
 }
 
 void test_board_layout_error(void) {
-  assert_board_layout_error(DEFAULT_TEST_DATA_PATH, "malformed_start_coords15",
-                            BOARD_LAYOUT_LOAD_STATUS_MALFORMED_START_COORDS);
+  assert_board_layout_error(
+      DEFAULT_TEST_DATA_PATH, "malformed_start_coords15",
+      ERROR_STATUS_BOARD_LAYOUT_LOAD_MALFORMED_START_COORDS);
   assert_board_layout_error(
       DEFAULT_TEST_DATA_PATH, "out_of_bounds_start_coords15",
-      BOARD_LAYOUT_LOAD_STATUS_OUT_OF_BOUNDS_START_COORDS);
-  assert_board_layout_error(DEFAULT_TEST_DATA_PATH, "invalid_number_of_rows15",
-                            BOARD_LAYOUT_LOAD_STATUS_INVALID_NUMBER_OF_ROWS);
-  assert_board_layout_error(DEFAULT_TEST_DATA_PATH, "standard21",
-                            BOARD_LAYOUT_LOAD_STATUS_INVALID_NUMBER_OF_ROWS);
-  assert_board_layout_error(DEFAULT_TEST_DATA_PATH, "invalid_number_of_cols15",
-                            BOARD_LAYOUT_LOAD_STATUS_INVALID_NUMBER_OF_COLS);
-  assert_board_layout_error(DEFAULT_TEST_DATA_PATH, "invalid_bonus_square15",
-                            BOARD_LAYOUT_LOAD_STATUS_INVALID_BONUS_SQUARE);
+      ERROR_STATUS_BOARD_LAYOUT_LOAD_OUT_OF_BOUNDS_START_COORDS);
+  assert_board_layout_error(
+      DEFAULT_TEST_DATA_PATH, "invalid_number_of_rows15",
+      ERROR_STATUS_BOARD_LAYOUT_LOAD_INVALID_NUMBER_OF_ROWS);
+  assert_board_layout_error(
+      DEFAULT_TEST_DATA_PATH, "standard21",
+      ERROR_STATUS_BOARD_LAYOUT_LOAD_INVALID_NUMBER_OF_ROWS);
+  assert_board_layout_error(
+      DEFAULT_TEST_DATA_PATH, "invalid_number_of_cols15",
+      ERROR_STATUS_BOARD_LAYOUT_LOAD_INVALID_NUMBER_OF_COLS);
+  assert_board_layout_error(
+      DEFAULT_TEST_DATA_PATH, "invalid_bonus_square15",
+      ERROR_STATUS_BOARD_LAYOUT_LOAD_INVALID_BONUS_SQUARE);
 }
 
 void assert_opening_penalties(Game *game, const char *data_paths,
@@ -271,7 +276,8 @@ void test_board_layout_correctness(void) {
       validated_moves_create(game, 0, "7J.FRAWZEY", false, false, false);
   move_validation_status_t vms_error_status =
       validated_moves_get_validation_status(vms);
-  assert(vms_error_status == MOVE_VALIDATION_STATUS_TILES_PLAYED_OUT_OF_BOUNDS);
+  assert(vms_error_status ==
+         ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_OUT_OF_BOUNDS);
   validated_moves_destroy(vms);
 
   // Validate play over block
@@ -279,7 +285,8 @@ void test_board_layout_correctness(void) {
 
   vms = validated_moves_create(game, 0, "8H.FRAWZEY", false, false, false);
   vms_error_status = validated_moves_get_validation_status(vms);
-  assert(vms_error_status == MOVE_VALIDATION_STATUS_TILES_PLAYED_OVER_BRICK);
+  assert(vms_error_status ==
+         ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_OVER_BRICK);
   validated_moves_destroy(vms);
 
   game_destroy(game);

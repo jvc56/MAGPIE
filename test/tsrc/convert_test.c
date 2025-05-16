@@ -94,7 +94,7 @@ void test_convert_success(void) {
   game = config_get_game(config);
   vms = validated_moves_create(game, 0, "H8.BRAVO", false, false, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
+         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
   validated_moves_destroy(vms);
 
   load_and_exec_config_or_die(
@@ -104,7 +104,7 @@ void test_convert_success(void) {
   game = config_get_game(config);
   vms = validated_moves_create(game, 0, "H8.CHARLIE", false, false, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
+         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
   validated_moves_destroy(vms);
 
   load_and_exec_config_or_die(
@@ -114,7 +114,7 @@ void test_convert_success(void) {
   game = config_get_game(config);
   vms = validated_moves_create(game, 0, "H8.QUEBEC", false, false, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
+         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
   validated_moves_destroy(vms);
 
   load_and_exec_config_or_die(config,

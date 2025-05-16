@@ -687,7 +687,7 @@ void test_leave_record(void) {
   rack_set_to_string(ld, player0_rack, "DEKNRTY");
   vms = validated_moves_create(game, 0, "8G.KY", false, false, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
+         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
   move = validated_moves_get_move(vms, 0);
   play_move(move, game, NULL, actual_leave);
   rack_set_to_string(ld, expected_leave, "DENRT");
@@ -698,7 +698,7 @@ void test_leave_record(void) {
   rack_set_to_string(ld, player0_rack, "DEKNRTY");
   vms = validated_moves_create(game, 0, "ex.DKY", false, false, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
+         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
   move = validated_moves_get_move(vms, 0);
   play_move(move, game, NULL, actual_leave);
   rack_set_to_string(ld, expected_leave, "ENRT");
@@ -709,7 +709,7 @@ void test_leave_record(void) {
   rack_set_to_string(ld, player0_rack, "DEKNRTY");
   vms = validated_moves_create(game, 0, "pass", false, false, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
+         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
   move = validated_moves_get_move(vms, 0);
   play_move(move, game, NULL, actual_leave);
   rack_set_to_string(ld, expected_leave, "DEKNRTY");

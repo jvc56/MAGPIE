@@ -140,7 +140,7 @@ void test_autoplay_divergent_games(void) {
   AutoplayResults *ar = autoplay_results_create();
 
   autoplay_status_t status = autoplay_results_set_options(ar, "games");
-  assert(status == AUTOPLAY_STATUS_SUCCESS);
+  assert(status == ERROR_STATUS_AUTOPLAY_SUCCESS);
 
   load_and_exec_config_or_die(csw_config, "cgp " VS_ANDY_CGP);
   game = config_get_game(csw_config);

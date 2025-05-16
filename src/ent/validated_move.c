@@ -16,6 +16,8 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
+#define MOVE_MAX_FIELDS 5
+
 typedef struct ValidatedMove {
   Move *move;
   FormedWords *formed_words;
@@ -25,13 +27,11 @@ typedef struct ValidatedMove {
   bool challenge_turn_loss;
   bool unknown_exchange;
   Equity leave_value;
-  move_validation_status_t status;
 } ValidatedMove;
 
 struct ValidatedMoves {
   ValidatedMove **moves;
   int number_of_moves;
-  move_validation_status_t final_status;
 };
 
 int get_letter_coords(const char c) {
@@ -45,8 +45,8 @@ bool is_exchange_allowed(const Bag *bag) {
   return bag_get_tiles(bag) >= RACK_SIZE;
 }
 
-move_validation_status_t validate_coordinates(Move *move,
-                                              const char *coords_string) {
+void validate_coordinates(Move *move, const char *coords_string,
+                          ErrorStack *error_stack) {
   int row_start = 0;
   int col_start = 0;
   int coords_string_length = string_length(coords_string);
@@ -60,7 +60,12 @@ move_validation_status_t validate_coordinates(Move *move,
         started_row_parse = true;
       } else if (isalpha(coords_string[i - 1])) {
         if (started_row_parse) {
-          return MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION;
+          error_stack_push(
+              error_stack,
+              ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION,
+              get_formatted_string("failed to parse move coordinates: %s",
+                                   coords_string));
+          return;
         }
         started_row_parse = true;
       }
@@ -72,13 +77,23 @@ move_validation_status_t validate_coordinates(Move *move,
         started_col_parse = true;
       } else if (isdigit(coords_string[i - 1])) {
         if (started_col_parse) {
-          return MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION;
+          error_stack_push(
+              error_stack,
+              ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION,
+              get_formatted_string("failed to parse move coordinates: %s",
+                                   coords_string));
+          return;
         }
         started_col_parse = true;
       }
       col_start = get_letter_coords(position_char);
     } else {
-      return MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION;
+      error_stack_push(
+          error_stack,
+          ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION,
+          get_formatted_string("failed to parse move coordinates: %s",
+                               coords_string));
+      return;
     }
   }
   // Convert the 1-index row start into 0-indexed row start
@@ -86,13 +101,16 @@ move_validation_status_t validate_coordinates(Move *move,
 
   if (col_start < 0 || col_start >= BOARD_DIM || row_start < 0 ||
       row_start >= BOARD_DIM || !started_row_parse || !started_col_parse) {
-    return MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION;
+    error_stack_push(
+        error_stack,
+        ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION,
+        get_formatted_string("failed to parse move coordinates: %s",
+                             coords_string));
+    return;
   }
 
   move_set_row_start(move, row_start);
   move_set_col_start(move, col_start);
-
-  return MOVE_VALIDATION_STATUS_SUCCESS;
 }
 
 bool play_connects(const Board *board, int row, int col) {
@@ -102,13 +120,12 @@ bool play_connects(const Board *board, int row, int col) {
            board_get_anchor(board, row, col, BOARD_VERTICAL_DIRECTION)));
 }
 
-move_validation_status_t validate_tiles_played_with_mls(
-    const Board *board, const uint8_t *machine_letters,
-    int number_of_machine_letters, Move *move, Rack *tiles_played_rack,
-    bool allow_playthrough) {
-
-  move_validation_status_t status = MOVE_VALIDATION_STATUS_SUCCESS;
-
+void validate_tiles_played_with_mls(const Board *board,
+                                    const uint8_t *machine_letters,
+                                    int number_of_machine_letters, Move *move,
+                                    Rack *tiles_played_rack,
+                                    bool allow_playthrough,
+                                    ErrorStack *error_stack) {
   // Set all the tiles and later overwrite them with
   // playthrough markers if it was a tile placement move
   for (int i = 0; i < number_of_machine_letters; i++) {
@@ -135,10 +152,17 @@ move_validation_status_t validate_tiles_played_with_mls(
     bool connected = false;
     for (int i = 0; i < number_of_machine_letters; i++) {
       if (!board_is_position_in_bounds(current_row, current_col)) {
-        return MOVE_VALIDATION_STATUS_TILES_PLAYED_OUT_OF_BOUNDS;
+        error_stack_push(
+            error_stack,
+            ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_OUT_OF_BOUNDS,
+            string_duplicate("move is out of bounds"));
+        return;
       }
       if (board_get_is_brick(board, current_row, current_col)) {
-        return MOVE_VALIDATION_STATUS_TILES_PLAYED_OVER_BRICK;
+        error_stack_push(
+            error_stack, ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_OVER_BRICK,
+            string_duplicate("move is played over a bricked square"));
+        return;
       }
       uint8_t board_letter = board_get_letter(board, current_row, current_col);
       uint8_t ml = machine_letters[i];
@@ -158,57 +182,67 @@ move_validation_status_t validate_tiles_played_with_mls(
           }
         }
       } else {
-        return MOVE_VALIDATION_STATUS_TILES_PLAYED_BOARD_MISMATCH;
+        error_stack_push(
+            error_stack,
+            ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_BOARD_MISMATCH,
+            string_duplicate("move tiles do not match existing board tiles"));
+        return;
       }
       current_row += move_dir;
       current_col += 1 - move_dir;
     }
-    if (status == MOVE_VALIDATION_STATUS_SUCCESS && !connected) {
-      return MOVE_VALIDATION_STATUS_TILES_PLAYED_DISCONNECTED;
+    if (!connected) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_DISCONNECTED,
+          string_duplicate("move tiles are not connected to existing board "
+                           "tiles or do not occupy the start square"));
+      return;
     } else if (tiles_played > (RACK_SIZE)) {
-      return MOVE_VALIDATION_STATUS_TILES_PLAYED_OVERFLOW;
+      error_stack_push(
+          error_stack, ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_OVERFLOW,
+          get_formatted_string(
+              "more tiles played (%d) than can fit in the rack (%d)",
+              tiles_played, RACK_SIZE));
+      return;
     } else {
       move_set_tiles_played(move, tiles_played);
     }
   }
-  return status;
 }
 
 // Sets the tiles_played_rack
-move_validation_status_t validate_tiles_played(const LetterDistribution *ld,
-                                               const Board *board, Move *move,
-                                               const char *tiles_played,
-                                               Rack *tiles_played_rack,
-                                               bool allow_playthrough) {
+void validate_tiles_played(const LetterDistribution *ld, const Board *board,
+                           Move *move, const char *tiles_played,
+                           Rack *tiles_played_rack, bool allow_playthrough,
+                           ErrorStack *error_stack) {
   int machine_letters_size = string_length(tiles_played) + 1;
   uint8_t *machine_letters =
       malloc_or_die(sizeof(uint8_t) * machine_letters_size);
   int number_of_machine_letters =
       ld_str_to_mls(ld, tiles_played, allow_playthrough, machine_letters,
                     machine_letters_size);
-
-  move_validation_status_t status = MOVE_VALIDATION_STATUS_SUCCESS;
-
   if (number_of_machine_letters < 1) {
-    status = MOVE_VALIDATION_STATUS_INVALID_TILES_PLAYED;
+    error_stack_push(
+        error_stack, ERROR_STATUS_MOVE_VALIDATION_INVALID_TILES_PLAYED,
+        get_formatted_string("failed to parse played tiles: %s", tiles_played));
   } else if (number_of_machine_letters > BOARD_DIM) {
-    status = MOVE_VALIDATION_STATUS_TILES_PLAYED_OUT_OF_BOUNDS;
+    error_stack_push(
+        error_stack, ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_OUT_OF_BOUNDS,
+        get_formatted_string(
+            "played more tiles (%d) than can fit on the board (%d)",
+            tiles_played, BOARD_DIM));
   } else {
-    status = validate_tiles_played_with_mls(
+    validate_tiles_played_with_mls(
         board, machine_letters, number_of_machine_letters, move,
-        tiles_played_rack, allow_playthrough);
+        tiles_played_rack, allow_playthrough, error_stack);
   }
-
   free(machine_letters);
-
-  return status;
 }
 
-move_validation_status_t
-validate_split_move(const StringSplitter *split_move, const Game *game,
-                    ValidatedMove *vm, int player_index,
-                    Rack *tiles_played_rack, bool allow_unknown_exchanges,
-                    bool allow_playthrough) {
+void validate_split_move(const StringSplitter *split_move, const Game *game,
+                         ValidatedMove *vm, int player_index,
+                         Rack *tiles_played_rack, bool allow_unknown_exchanges,
+                         bool allow_playthrough, ErrorStack *error_stack) {
   // This function handles the following UCGI move string types.
   // Any strings not conforming to the UCGI standard will result
   // in an error status.
@@ -243,25 +277,36 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
   const LetterDistribution *ld = game_get_ld(game);
   const Board *board = game_get_board(game);
   const Bag *bag = game_get_bag(game);
-  move_validation_status_t status = MOVE_VALIDATION_STATUS_SUCCESS;
   int number_of_fields = string_splitter_get_number_of_items(split_move);
 
-  if (number_of_fields > 5) {
-    return MOVE_VALIDATION_STATUS_EXCESS_FIELDS;
+  if (number_of_fields > MOVE_MAX_FIELDS) {
+    error_stack_push(error_stack, ERROR_STATUS_MOVE_VALIDATION_EXCESS_FIELDS,
+                     get_formatted_string(
+                         "move has too %d fields but expected a maxmimum of %d",
+                         number_of_fields, MOVE_MAX_FIELDS));
+    return;
   }
 
   // Validate move position
   const char *move_type_or_coords = string_splitter_get_item(split_move, 0);
 
   if (is_string_empty_or_whitespace(move_type_or_coords)) {
-    return MOVE_VALIDATION_STATUS_EMPTY_MOVE_TYPE_OR_POSITION;
+    error_stack_push(error_stack,
+                     ERROR_STATUS_MOVE_VALIDATION_EMPTY_MOVE_TYPE_OR_POSITION,
+                     string_duplicate("missing move type or position"));
+    return;
   }
 
   if (strings_equal(move_type_or_coords, UCGI_PASS_MOVE)) {
     move_set_as_pass(vm->move);
   } else if (strings_equal(move_type_or_coords, UCGI_EXCHANGE_MOVE)) {
     if (!is_exchange_allowed(bag)) {
-      return MOVE_VALIDATION_STATUS_EXCHANGE_INSUFFICIENT_TILES;
+      error_stack_push(
+          error_stack, ERROR_STATUS_MOVE_VALIDATION_EXCHANGE_INSUFFICIENT_TILES,
+          get_formatted_string(
+              "cannot exchange with fewer than %d tiles in the bag",
+              RACK_SIZE));
+      return;
     }
     // Equity is set later for tile placement moves
     move_set_type(vm->move, GAME_EVENT_EXCHANGE);
@@ -269,21 +314,21 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
   } else {
     // Score and equity are set later for tile placement moves
     move_set_type(vm->move, GAME_EVENT_TILE_PLACEMENT_MOVE);
-    status = validate_coordinates(vm->move, move_type_or_coords);
+    validate_coordinates(vm->move, move_type_or_coords, error_stack);
   }
 
-  if (status != MOVE_VALIDATION_STATUS_SUCCESS) {
-    return status;
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
 
   game_event_t move_type = move_get_type(vm->move);
 
   if (number_of_fields == 1) {
-    if (move_type == GAME_EVENT_PASS) {
-      return MOVE_VALIDATION_STATUS_SUCCESS;
-    } else {
-      return MOVE_VALIDATION_STATUS_MISSING_FIELDS;
+    if (move_type != GAME_EVENT_PASS) {
+      error_stack_push(error_stack, ERROR_STATUS_MOVE_VALIDATION_MISSING_FIELDS,
+                       string_duplicate("move is missing required fields"));
     }
+    return;
   }
 
   // Validate tiles played or number exchanged
@@ -291,33 +336,51 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
       string_splitter_get_item(split_move, 1);
 
   if (is_string_empty_or_whitespace(tiles_or_exchange_or_pass_rack)) {
-    return MOVE_VALIDATION_STATUS_EMPTY_TILES_PLAYED_OR_NUMBER_EXCHANGED;
+    error_stack_push(
+        error_stack,
+        ERROR_STATUS_MOVE_VALIDATION_EMPTY_TILES_PLAYED_OR_NUMBER_EXCHANGED,
+        string_duplicate("move is missing tiles played or number exchanged"));
+    return;
   }
 
   if (is_all_digits_or_empty(tiles_or_exchange_or_pass_rack)) {
     if (move_type != GAME_EVENT_EXCHANGE) {
-      return MOVE_VALIDATION_STATUS_NONEXCHANGE_NUMERIC_TILES;
+      error_stack_push(
+          error_stack, ERROR_STATUS_MOVE_VALIDATION_NONEXCHANGE_NUMERIC_TILES,
+          get_formatted_string("got a numeric value for non-exchange move: %s",
+                               tiles_or_exchange_or_pass_rack));
+      return;
     }
     int number_exchanged = string_to_int(tiles_or_exchange_or_pass_rack);
     if (number_exchanged < 1 || number_exchanged > (RACK_SIZE)) {
-      return MOVE_VALIDATION_STATUS_INVALID_NUMBER_EXCHANGED;
+      error_stack_push(
+          error_stack, ERROR_STATUS_MOVE_VALIDATION_INVALID_NUMBER_EXCHANGED,
+          get_formatted_string("exchanged an invalid number of tiles: %d",
+                               number_exchanged));
+      return;
     }
     if (!allow_unknown_exchanges) {
-      return MOVE_VALIDATION_STATUS_UNKNOWN_EXCHANGE_DISALLOWED;
+      error_stack_push(error_stack,
+                       ERROR_STATUS_MOVE_VALIDATION_UNKNOWN_EXCHANGE_DISALLOWED,
+                       string_duplicate("got an numberic value for exchange "
+                                        "when the exact tiles were expected"));
+      return;
     }
     move_set_tiles_played(vm->move, number_exchanged);
     move_set_tiles_length(vm->move, number_exchanged);
     vm->unknown_exchange = true;
   } else if (move_type != GAME_EVENT_PASS) {
-    status = validate_tiles_played(ld, board, vm->move,
-                                   tiles_or_exchange_or_pass_rack,
-                                   tiles_played_rack, allow_playthrough);
+    validate_tiles_played(ld, board, vm->move, tiles_or_exchange_or_pass_rack,
+                          tiles_played_rack, allow_playthrough, error_stack);
   } else if (number_of_fields > 2) {
-    return MOVE_VALIDATION_STATUS_EXCESS_PASS_FIELDS;
+    error_stack_push(error_stack,
+                     ERROR_STATUS_MOVE_VALIDATION_EXCESS_PASS_FIELDS,
+                     string_duplicate("pass move contains too many fields"));
+    return;
   }
 
-  if (status != MOVE_VALIDATION_STATUS_SUCCESS) {
-    return status;
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
 
   // Validate rack
@@ -327,14 +390,16 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
   }
 
   if (rack_string_index > number_of_fields - 1) {
-    return status;
+    return;
   }
 
   const char *rack_string =
       string_splitter_get_item(split_move, rack_string_index);
 
   if (is_string_empty_or_whitespace(rack_string)) {
-    return MOVE_VALIDATION_STATUS_EMPTY_RACK;
+    error_stack_push(error_stack, ERROR_STATUS_MOVE_VALIDATION_EMPTY_RACK,
+                     string_duplicate("expected rack to be nonempty"));
+    return;
   }
 
   int dist_size = ld_get_size(ld);
@@ -348,7 +413,9 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
 
   if (number_of_rack_letters_set < 0 ||
       number_of_rack_letters_set > (RACK_SIZE)) {
-    return MOVE_VALIDATION_STATUS_INVALID_RACK;
+    error_stack_push(error_stack, ERROR_STATUS_MOVE_VALIDATION_INVALID_RACK,
+                     get_formatted_string("invalid rack: %s", rack_string));
+    return;
   }
 
   // Check if the rack is in the bag
@@ -356,7 +423,10 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
   for (int i = 0; i < dist_size; i++) {
     if (rack_get_letter(vm->rack, i) >
         bag_get_letter(bag, i) + rack_get_letter(game_player_rack, i)) {
-      return MOVE_VALIDATION_STATUS_RACK_NOT_IN_BAG;
+      error_stack_push(
+          error_stack, ERROR_STATUS_MOVE_VALIDATION_RACK_NOT_IN_BAG,
+          get_formatted_string("rack not available in bag: %s", rack_string));
+      return;
     }
   }
 
@@ -365,29 +435,41 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
   // Check if the play is in the rack and
   // set the leave value if it is.
   if (!rack_subtract(vm->leave, tiles_played_rack)) {
-    status = MOVE_VALIDATION_STATUS_TILES_PLAYED_NOT_IN_RACK;
+    error_stack_push(error_stack,
+                     ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_NOT_IN_RACK,
+                     get_formatted_string("tiles played not in bag: %s",
+                                          tiles_or_exchange_or_pass_rack));
   } else {
     vm->leave_value = klv_get_leave_value(
         player_get_klv(game_get_player(game, player_index)), vm->leave);
   }
 
-  if (status != MOVE_VALIDATION_STATUS_SUCCESS || number_of_fields <= 3) {
-    return status;
+  if (!error_stack_is_empty(error_stack) || number_of_fields <= 3) {
+    return;
   }
 
   if (move_type != GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    return MOVE_VALIDATION_STATUS_EXCESS_EXCHANGE_FIELDS;
+    error_stack_push(error_stack,
+                     ERROR_STATUS_MOVE_VALIDATION_EXCESS_EXCHANGE_FIELDS,
+                     string_duplicate("exchange move has too many fields"));
+    return;
   }
 
   // Validate challenge points
   const char *challenge_points = string_splitter_get_item(split_move, 3);
 
   if (is_string_empty_or_whitespace(challenge_points)) {
-    return MOVE_VALIDATION_STATUS_EMPTY_CHALLENGE_POINTS;
+    error_stack_push(
+        error_stack, ERROR_STATUS_MOVE_VALIDATION_EMPTY_CHALLENGE_POINTS,
+        string_duplicate("expected challenge points to be nonempty"));
+    return;
   }
 
   if (!is_all_digits_or_empty(challenge_points)) {
-    return MOVE_VALIDATION_STATUS_INVALID_CHALLENGE_POINTS;
+    error_stack_push(
+        error_stack, ERROR_STATUS_MOVE_VALIDATION_INVALID_CHALLENGE_POINTS,
+        get_formatted_string("invalid challenge points: %s", challenge_points));
+    return;
   }
 
   vm->challenge_points = int_to_equity(string_to_int(challenge_points));
@@ -397,7 +479,10 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
   const char *challenge_turn_loss = string_splitter_get_item(split_move, 4);
 
   if (is_string_empty_or_whitespace(challenge_turn_loss)) {
-    return MOVE_VALIDATION_STATUS_EMPTY_CHALLENGE_TURN_LOSS;
+    error_stack_push(
+        error_stack, ERROR_STATUS_MOVE_VALIDATION_EMPTY_CHALLENGE_TURN_LOSS,
+        string_duplicate("expected challenge turn loss to be nonempty"));
+    return;
   }
 
   if (strings_equal(challenge_turn_loss, "0")) {
@@ -405,48 +490,48 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
   } else if (strings_equal(challenge_turn_loss, "1")) {
     vm->challenge_turn_loss = true;
   } else {
-    return MOVE_VALIDATION_STATUS_INVALID_CHALLENGE_TURN_LOSS;
+    error_stack_push(
+        error_stack, ERROR_STATUS_MOVE_VALIDATION_INVALID_CHALLENGE_TURN_LOSS,
+        get_formatted_string(
+            "invalid challenge turn loss (value must be either 0 or 1): %s",
+            challenge_turn_loss));
+    return;
   }
-
-  return status;
 }
 
-move_validation_status_t validate_move(ValidatedMove *vm, const Game *game,
-                                       int player_index,
-                                       const char *ucgi_move_string,
-                                       bool allow_unknown_exchanges,
-                                       bool allow_playthrough) {
+void validate_move(ValidatedMove *vm, const Game *game, int player_index,
+                   const char *ucgi_move_string, bool allow_unknown_exchanges,
+                   bool allow_playthrough, ErrorStack *error_stack) {
   StringSplitter *split_move = split_string(ucgi_move_string, '.', false);
   Rack *tiles_played_rack = rack_create(ld_get_size(game_get_ld(game)));
-
-  move_validation_status_t status =
-      validate_split_move(split_move, game, vm, player_index, tiles_played_rack,
-                          allow_unknown_exchanges, allow_playthrough);
-
+  validate_split_move(split_move, game, vm, player_index, tiles_played_rack,
+                      allow_unknown_exchanges, allow_playthrough, error_stack);
   string_splitter_destroy(split_move);
   rack_destroy(tiles_played_rack);
-
-  return status;
 }
 
-move_validation_status_t
-validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
-                    const char *ucgi_move_string, bool allow_phonies,
-                    bool allow_unknown_exchanges, bool allow_playthrough) {
+void validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
+                         const char *ucgi_move_string, bool allow_phonies,
+                         bool allow_unknown_exchanges, bool allow_playthrough,
+                         ErrorStack *error_stack) {
 
   if (is_string_empty_or_whitespace(ucgi_move_string)) {
-    return MOVE_VALIDATION_STATUS_EMPTY_MOVE;
+    error_stack_push(error_stack, ERROR_STATUS_MOVE_VALIDATION_EMPTY_MOVE,
+                     string_duplicate("expected move to be nonempty"));
+    return;
   }
   if (player_index != 0 && player_index != 1) {
-    return MOVE_VALIDATION_STATUS_INVALID_PLAYER_INDEX;
+    error_stack_push(
+        error_stack, ERROR_STATUS_MOVE_VALIDATION_INVALID_PLAYER_INDEX,
+        get_formatted_string("invalid player index: %d", player_index + 1));
+    return;
   }
 
-  move_validation_status_t status =
-      validate_move(vm, game, player_index, ucgi_move_string,
-                    allow_unknown_exchanges, allow_playthrough);
+  validate_move(vm, game, player_index, ucgi_move_string,
+                allow_unknown_exchanges, allow_playthrough, error_stack);
 
-  if (status != MOVE_VALIDATION_STATUS_SUCCESS) {
-    return status;
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
 
   game_event_t move_type = move_get_type(vm->move);
@@ -474,7 +559,11 @@ validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
     if (!allow_phonies) {
       for (int i = 0; i < formed_words_get_num_words(vm->formed_words); i++) {
         if (!formed_words_get_word_valid(vm->formed_words, i)) {
-          return MOVE_VALIDATION_STATUS_PHONY_WORD_FORMED;
+          error_stack_push(
+              error_stack, ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED,
+              get_formatted_string("expected valid play be got phony: %s",
+                                   ucgi_move_string));
+          return;
         }
       }
     }
@@ -496,15 +585,14 @@ validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
   } else {
     move_set_equity(vm->move, EQUITY_PASS_VALUE);
   }
-
-  return MOVE_VALIDATION_STATUS_SUCCESS;
 }
 
 ValidatedMove *validated_move_create(const Game *game, int player_index,
                                      const char *ucgi_move_string,
                                      bool allow_phonies,
                                      bool allow_unknown_exchanges,
-                                     bool allow_playthrough) {
+                                     bool allow_playthrough,
+                                     ErrorStack *error_stack) {
   ValidatedMove *vm = malloc_or_die(sizeof(ValidatedMove));
   vm->formed_words = NULL;
   vm->rack = NULL;
@@ -518,9 +606,10 @@ ValidatedMove *validated_move_create(const Game *game, int player_index,
   char *trimmed_ucgi_move_string = string_duplicate(ucgi_move_string);
   trim_whitespace(trimmed_ucgi_move_string);
 
-  vm->status = validated_move_load(vm, game, player_index,
-                                   trimmed_ucgi_move_string, allow_phonies,
-                                   allow_unknown_exchanges, allow_playthrough);
+  validated_move_load(vm, game, player_index, trimmed_ucgi_move_string,
+                      allow_phonies, allow_unknown_exchanges, allow_playthrough,
+                      error_stack);
+
   free(trimmed_ucgi_move_string);
   return vm;
 }
@@ -545,10 +634,10 @@ ValidatedMoves *validated_moves_create(const Game *game, int player_index,
   ValidatedMoves *vms = malloc_or_die(sizeof(ValidatedMoves));
   vms->moves = NULL;
   vms->number_of_moves = 0;
-  vms->final_status = MOVE_VALIDATION_STATUS_SUCCESS;
 
   if (is_string_empty_or_whitespace(ucgi_moves_string)) {
-    vms->final_status = MOVE_VALIDATION_STATUS_EMPTY_MOVE;
+    error_stack_push(error_stack, ERROR_STATUS_MOVE_VALIDATION_EMPTY_MOVE,
+                     string_duplicate("expected move to be nonempty"));
   } else {
     StringSplitter *split_moves = split_string(ucgi_moves_string, ',', true);
     vms->number_of_moves = string_splitter_get_number_of_items(split_moves);
@@ -558,15 +647,8 @@ ValidatedMoves *validated_moves_create(const Game *game, int player_index,
     for (int i = 0; i < vms->number_of_moves; i++) {
       vms->moves[i] = validated_move_create(
           game, player_index, string_splitter_get_item(split_moves, i),
-          allow_phonies, allow_unknown_exchanges, allow_playthrough);
-
-      // For now, just set the final status to the first nonsuccess
-      // status of the moves. Later we can implement more thorough
-      // error reporting.
-      if (vms->final_status == MOVE_VALIDATION_STATUS_SUCCESS &&
-          vms->moves[i]->status != MOVE_VALIDATION_STATUS_SUCCESS) {
-        vms->final_status = vms->moves[i]->status;
-      }
+          allow_phonies, allow_unknown_exchanges, allow_playthrough,
+          error_stack);
     }
 
     string_splitter_destroy(split_moves);
@@ -617,13 +699,6 @@ Equity validated_moves_get_challenge_points(const ValidatedMoves *vms, int i) {
 
 bool validated_moves_get_challenge_turn_loss(const ValidatedMoves *vms, int i) {
   return vms->moves[i]->challenge_turn_loss;
-}
-
-// Returns success if all moves are valid or
-// the first occurrence of a nonsuccess status if not.
-move_validation_status_t
-validated_moves_get_validation_status(const ValidatedMoves *vms) {
-  return vms->final_status;
 }
 
 // Adds moves in vms to ml that do not already exist in ml

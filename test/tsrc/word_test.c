@@ -28,7 +28,7 @@ void test_words_played(void) {
       validated_moves_create(game, 0, "N11.PeNT", false, true, false);
 
   assert(validated_moves_get_validation_status(vms_pent) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
+         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
 
   const FormedWords *fw = validated_moves_get_formed_words(vms_pent, 0);
 
@@ -57,7 +57,7 @@ void test_words_played(void) {
       validated_moves_create(game, 0, "6G.DIPETAZ", true, true, false);
 
   assert(validated_moves_get_validation_status(vms_dipetaz) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
+         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
 
   fw = validated_moves_get_formed_words(vms_dipetaz, 0);
 
@@ -92,7 +92,7 @@ void test_words_played(void) {
       validated_moves_create(game, 0, "9F.BOYS", false, true, false);
 
   assert(validated_moves_get_validation_status(vms_boys) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
+         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
 
   fw = validated_moves_get_formed_words(vms_boys, 0);
 
@@ -114,7 +114,7 @@ void test_words_played(void) {
       validated_moves_create(game, 0, "I5.SPAYS", false, true, false);
 
   assert(validated_moves_get_validation_status(vms_spays) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
+         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
 
   fw = validated_moves_get_formed_words(vms_spays, 0);
 

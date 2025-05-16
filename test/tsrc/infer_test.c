@@ -97,12 +97,12 @@ void test_infer_rack_overflow(void) {
 
   inference_status_t status =
       infer_for_test(config, 0, 0, 0, "ABCDEFGH", inference_results);
-  assert(status == INFERENCE_STATUS_RACK_OVERFLOW);
+  assert(status == ERROR_STATUS_INFERENCE_RACK_OVERFLOW);
   game_reset(game);
 
   rack_set_to_string(ld, player_get_rack(game_get_player(game, 0)), "ABC");
   status = infer_for_test(config, 0, 0, 0, "DEFGH", inference_results);
-  assert(status == INFERENCE_STATUS_RACK_OVERFLOW);
+  assert(status == ERROR_STATUS_INFERENCE_RACK_OVERFLOW);
 
   inference_results_destroy(inference_results);
   config_destroy(config);
@@ -116,7 +116,7 @@ void test_infer_no_tiles_played_rack_empty(void) {
   InferenceResults *inference_results = inference_results_create();
   inference_status_t status =
       infer_for_test(config, 0, 0, 0, "", inference_results);
-  assert(status == INFERENCE_STATUS_NO_TILES_PLAYED);
+  assert(status == ERROR_STATUS_INFERENCE_NO_TILES_PLAYED);
 
   inference_results_destroy(inference_results);
   config_destroy(config);
@@ -130,7 +130,7 @@ void test_infer_both_play_and_exchange(void) {
   InferenceResults *inference_results = inference_results_create();
   inference_status_t status =
       infer_for_test(config, 0, 0, 1, "DEFGH", inference_results);
-  assert(status == INFERENCE_STATUS_BOTH_PLAY_AND_EXCHANGE);
+  assert(status == ERROR_STATUS_INFERENCE_BOTH_PLAY_AND_EXCHANGE);
 
   inference_results_destroy(inference_results);
   config_destroy(config);
@@ -144,7 +144,7 @@ void test_infer_exchange_score_not_zero(void) {
   InferenceResults *inference_results = inference_results_create();
   inference_status_t status =
       infer_for_test(config, 0, 3, 1, "", inference_results);
-  assert(status == INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO);
+  assert(status == ERROR_STATUS_INFERENCE_EXCHANGE_SCORE_NOT_ZERO);
 
   inference_results_destroy(inference_results);
   config_destroy(config);
@@ -162,12 +162,12 @@ void test_infer_exchange_not_board_is_letter_allowed_in_cross_set(void) {
   InferenceResults *inference_results = inference_results_create();
   inference_status_t status =
       infer_for_test(config, 0, 3, 1, "", inference_results);
-  assert(status == INFERENCE_STATUS_EXCHANGE_NOT_ALLOWED);
+  assert(status == ERROR_STATUS_INFERENCE_EXCHANGE_NOT_ALLOWED);
 
   bag_add_letter(bag, BLANK_MACHINE_LETTER, 0);
   // There should now be 14 tiles in the bag
   status = infer_for_test(config, 0, 3, 1, "", inference_results);
-  assert(status == INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO);
+  assert(status == ERROR_STATUS_INFERENCE_EXCHANGE_SCORE_NOT_ZERO);
 
   inference_results_destroy(inference_results);
   config_destroy(config);
@@ -182,7 +182,7 @@ void test_infer_tiles_played_not_in_bag(void) {
   load_and_exec_config_or_die(config, "set -eq 0 -threads 1");
   inference_status_t status =
       infer_for_test(config, 0, 0, 1, "ACBYEYY", inference_results);
-  assert(status == INFERENCE_STATUS_TILES_PLAYED_NOT_IN_BAG);
+  assert(status == ERROR_STATUS_INFERENCE_TILES_PLAYED_NOT_IN_BAG);
 
   inference_results_destroy(inference_results);
   config_destroy(config);
@@ -217,7 +217,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
 
   load_and_exec_config_or_die(config, "set -numplays 20");
   status = infer_for_test(config, 0, 52, 0, "MUZAKS", inference_results);
-  assert(status == INFERENCE_STATUS_SUCCESS);
+  assert(status == ERROR_STATUS_INFERENCE_SUCCESS);
   // With this rack, only keeping an S is possible, and
   // there are 3 S remaining.
 
@@ -266,7 +266,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   assert(rack_get_total_letters(player1_rack) == 0);
 
   status = infer_for_test(config, 0, 58, 0, "MUZAKY", inference_results);
-  assert(status == INFERENCE_STATUS_SUCCESS);
+  assert(status == ERROR_STATUS_INFERENCE_SUCCESS);
   // Letters not possible:
   // A - YAKUZA
   // B - ZAMBUK
@@ -326,7 +326,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   assert(rack_get_total_letters(player1_rack) == 0);
 
   status = infer_for_test(config, 0, 50, 0, "MUZAK", inference_results);
-  assert(status == INFERENCE_STATUS_SUCCESS);
+  assert(status == ERROR_STATUS_INFERENCE_SUCCESS);
   // Can't have B or Y because of ZAMBUK and MUZAKY
   // Can't have K or Z because there are none in the bag
   for (int i = 0; i < ld_size; i++) {
@@ -359,7 +359,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // contain an E.
   load_and_exec_config_or_die(config, "set -eq 0");
   status = infer_for_test(config, 0, 22, 0, "E", inference_results);
-  assert(status == INFERENCE_STATUS_SUCCESS);
+  assert(status == ERROR_STATUS_INFERENCE_SUCCESS);
   // Refetch equity values because the underlying
   // inference_results results were recreated
   equity_values = inference_results_get_equity_values(inference_results,
@@ -394,7 +394,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
 
   load_and_exec_config_or_die(config, "set -numplays 100");
   status = infer_for_test(config, 0, 8, 0, "ENRT", inference_results);
-  assert(status == INFERENCE_STATUS_SUCCESS);
+  assert(status == ERROR_STATUS_INFERENCE_SUCCESS);
   // There are only 3 racks for which playing RENT for 8 on the opening is
   // top equity:
   // 1) ?ENNRRT keeping ?NR = 2 * 5 * 5  = 50 possible draws
@@ -523,7 +523,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // for plays scoring 50.
   load_and_exec_config_or_die(config, "set -eq 0");
   status = infer_for_test(config, 0, 50, 0, "IIII", inference_results);
-  assert(status == INFERENCE_STATUS_SUCCESS);
+  assert(status == ERROR_STATUS_INFERENCE_SUCCESS);
   // There are only 4 racks for which not playing Z(OOPSYCHOLOGY) is
   // correct:
   // EEEIIII = 4 possible draws for E = 4 total
@@ -644,7 +644,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // Check that the equity margin works
   load_and_exec_config_or_die(config, "set -eq 5");
   status = infer_for_test(config, 0, 58, 0, "MUZAKY", inference_results);
-  assert(status == INFERENCE_STATUS_SUCCESS);
+  assert(status == ERROR_STATUS_INFERENCE_SUCCESS);
   // Letters not possible with equity margin of 5:
   // B - ZAMBUK
   // K - none in bag
@@ -682,7 +682,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   bag_draw_letter(bag, ld_hl_to_ml(ld, "?"), 0);
   load_and_exec_config_or_die(config, "set -eq 0");
   status = infer_for_test(config, 0, 18, 0, "GRIND", inference_results);
-  assert(status == INFERENCE_STATUS_SUCCESS);
+  assert(status == ERROR_STATUS_INFERENCE_SUCCESS);
   // If GRIND is played keeping ?, the only
   // possible other tile is an X
   // Refetch equity values because the underlying
@@ -720,7 +720,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // 2) ?HINNRR keeping ?HNR = 2 * 2 * 5 * 5 = 100
   // 3) HIINNRR keeping HINR = 2 * 8 * 5 * 5 = 400
   // For a total of 660 possible draws
-  assert(status == INFERENCE_STATUS_SUCCESS);
+  assert(status == ERROR_STATUS_INFERENCE_SUCCESS);
   // Refetch equity values because the underlying
   // inference_results results were recreated
   equity_values = inference_results_get_equity_values(inference_results,
@@ -760,7 +760,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   load_and_exec_config_or_die(config, "set -eq 0");
   status = infer_for_test(config, 0, 0, 6, "", inference_results);
 
-  assert(status == INFERENCE_STATUS_SUCCESS);
+  assert(status == ERROR_STATUS_INFERENCE_SUCCESS);
   // Keeping any one of D, H, R, or S is valid
   assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE,
                                         ld_hl_to_ml(ld, "D"), 1,

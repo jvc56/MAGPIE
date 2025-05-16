@@ -419,9 +419,9 @@ void test_config_exec_parse_args(void) {
   // Adding moves
   assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_TYPE_NONE,
                             0);
-  assert_config_exec_status(config, "add 8A.HADJI -lex CSW21",
-                            ERROR_STATUS_TYPE_MOVE_VALIDATION,
-                            MOVE_VALIDATION_STATUS_TILES_PLAYED_DISCONNECTED);
+  assert_config_exec_status(
+      config, "add 8A.HADJI -lex CSW21", ERROR_STATUS_TYPE_MOVE_VALIDATION,
+      ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_DISCONNECTED);
   assert_config_exec_status(config, "add 8D.HADJI -lex CSW21",
                             ERROR_STATUS_TYPE_NONE, 0);
 
@@ -486,19 +486,19 @@ void test_config_exec_parse_args(void) {
   // Autoplay
   assert_config_exec_status(
       config, "autoplay move 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
-      ERROR_STATUS_TYPE_AUTOPLAY, AUTOPLAY_STATUS_INVALID_OPTIONS);
+      ERROR_STATUS_TYPE_AUTOPLAY, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS);
   assert_config_exec_status(
       config, "autoplay ,,, 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
-      ERROR_STATUS_TYPE_AUTOPLAY, AUTOPLAY_STATUS_EMPTY_OPTIONS);
+      ERROR_STATUS_TYPE_AUTOPLAY, ERROR_STATUS_AUTOPLAY_EMPTY_OPTIONS);
   assert_config_exec_status(
       config, "autoplay game -10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
-      ERROR_STATUS_TYPE_AUTOPLAY, AUTOPLAY_STATUS_MALFORMED_NUM_GAMES);
+      ERROR_STATUS_TYPE_AUTOPLAY, ERROR_STATUS_AUTOPLAY_MALFORMED_NUM_GAMES);
   assert_config_exec_status(
       config, "autoplay game 10a -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
-      ERROR_STATUS_TYPE_AUTOPLAY, AUTOPLAY_STATUS_MALFORMED_NUM_GAMES);
+      ERROR_STATUS_TYPE_AUTOPLAY, ERROR_STATUS_AUTOPLAY_MALFORMED_NUM_GAMES);
   assert_config_exec_status(
       config, "autoplay game h -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
-      ERROR_STATUS_TYPE_AUTOPLAY, AUTOPLAY_STATUS_MALFORMED_NUM_GAMES);
+      ERROR_STATUS_TYPE_AUTOPLAY, ERROR_STATUS_AUTOPLAY_MALFORMED_NUM_GAMES);
   assert_config_exec_status(config,
                             "autoplay game 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
                             ERROR_STATUS_TYPE_NONE, 0);
@@ -533,15 +533,15 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(config, "leavegen 1 -1",
                             ERROR_STATUS_TYPE_CONFIG_LOAD,
                             ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS);
-  assert_config_exec_status(config, "leavegen 1,,1 0",
-                            ERROR_STATUS_TYPE_AUTOPLAY,
-                            AUTOPLAY_STATUS_MALFORMED_MINIMUM_LEAVE_TARGETS);
-  assert_config_exec_status(config, "leavegen 1,2,3,h 0",
-                            ERROR_STATUS_TYPE_AUTOPLAY,
-                            AUTOPLAY_STATUS_MALFORMED_MINIMUM_LEAVE_TARGETS);
-  assert_config_exec_status(config, "leavegen 1,2,3,-4 0",
-                            ERROR_STATUS_TYPE_AUTOPLAY,
-                            AUTOPLAY_STATUS_MALFORMED_MINIMUM_LEAVE_TARGETS);
+  assert_config_exec_status(
+      config, "leavegen 1,,1 0", ERROR_STATUS_TYPE_AUTOPLAY,
+      ERROR_STATUS_AUTOPLAY_MALFORMED_MINIMUM_LEAVE_TARGETS);
+  assert_config_exec_status(
+      config, "leavegen 1,2,3,h 0", ERROR_STATUS_TYPE_AUTOPLAY,
+      ERROR_STATUS_AUTOPLAY_MALFORMED_MINIMUM_LEAVE_TARGETS);
+  assert_config_exec_status(
+      config, "leavegen 1,2,3,-4 0", ERROR_STATUS_TYPE_AUTOPLAY,
+      ERROR_STATUS_AUTOPLAY_MALFORMED_MINIMUM_LEAVE_TARGETS);
   config_destroy(config);
 }
 

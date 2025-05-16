@@ -739,11 +739,11 @@ autoplay_status_t autoplay_results_set_options_with_splitter(
   int number_of_options = string_splitter_get_number_of_items(split_options);
 
   if (number_of_options == 0) {
-    return AUTOPLAY_STATUS_EMPTY_OPTIONS;
+    return ERROR_STATUS_AUTOPLAY_EMPTY_OPTIONS;
   }
 
   uint64_t options = 0;
-  autoplay_status_t status = AUTOPLAY_STATUS_SUCCESS;
+  autoplay_status_t status = ERROR_STATUS_AUTOPLAY_SUCCESS;
   for (int i = 0; i < number_of_options; i++) {
     const char *option_str = string_splitter_get_item(split_options, i);
     if (has_iprefix(option_str, "games")) {
@@ -751,12 +751,12 @@ autoplay_status_t autoplay_results_set_options_with_splitter(
     } else if (has_iprefix(option_str, "fj")) {
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_FJ);
     } else {
-      status = AUTOPLAY_STATUS_INVALID_OPTIONS;
+      status = ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS;
       break;
     }
   }
 
-  if (status == AUTOPLAY_STATUS_SUCCESS) {
+  if (status == ERROR_STATUS_AUTOPLAY_SUCCESS) {
     autoplay_results_set_options_int(autoplay_results, options, NULL);
   }
 
@@ -767,7 +767,7 @@ void autoplay_results_set_options(AutoplayResults *autoplay_results,
                                   const char *options_str,
                                   ErrorStack *error_stack) {
   if (is_string_empty_or_null(options_str)) {
-    return AUTOPLAY_STATUS_EMPTY_OPTIONS;
+    return ERROR_STATUS_AUTOPLAY_EMPTY_OPTIONS;
   }
   StringSplitter *split_options = split_string(options_str, ',', true);
   autoplay_status_t status = autoplay_results_set_options_with_splitter(

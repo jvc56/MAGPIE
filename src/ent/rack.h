@@ -14,7 +14,7 @@
 
 typedef struct Rack {
   // counts must be signed for the sake of inference code checking that
-  // these are nonnegative (INFERENCE_STATUS_TILES_PLAYED_NOT_IN_BAG)
+  // these are nonnegative (ERROR_STATUS_INFERENCE_TILES_PLAYED_NOT_IN_BAG)
   uint16_t number_of_letters;
   uint16_t dist_size;
   int8_t array[MAX_ALPHABET_SIZE];

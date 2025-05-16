@@ -525,7 +525,11 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
     string_splitter_destroy(split_min_rack_targets);
     if (!success) {
       free(min_rack_targets);
-      return AUTOPLAY_STATUS_MALFORMED_MINIMUM_LEAVE_TARGETS;
+      error_stack_push(
+          error_stack, ERROR_STATUS_AUTOPLAY_MALFORMED_MINIMUM_LEAVE_TARGETS,
+          get_formatted_string("failed to parse minimum rack targets: %s",
+                               args->num_games_or_min_rack_targets));
+      return;
     }
     first_gen_num_games = UINT64_MAX;
   } else {
@@ -533,7 +537,11 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
     first_gen_num_games = string_to_uint64_or_set_error(
         args->num_games_or_min_rack_targets, &success);
     if (!success) {
-      return AUTOPLAY_STATUS_MALFORMED_NUM_GAMES;
+      error_stack_push(error_stack, ERROR_STATUS_AUTOPLAY_MALFORMED_NUM_GAMES,
+                       get_formatted_string(
+                           "failed to parse the specified number of games: %s",
+                           args->num_games_or_min_rack_targets));
+      return;
     }
   }
 
@@ -609,6 +617,4 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
   thread_control_print(thread_control, autoplay_results_string);
   free(autoplay_results_string);
   gen_destroy_cache();
-
-  return AUTOPLAY_STATUS_SUCCESS;
 }

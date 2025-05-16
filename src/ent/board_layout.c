@@ -5,6 +5,7 @@
 
 #include "../def/board_defs.h"
 #include "../def/board_layout_defs.h"
+#include "../def/error_stack_defs.h"
 
 #include "data_filepaths.h"
 #include "error_stack.h"
@@ -67,23 +68,29 @@ BoardLayout *board_layout_create(void) {
   return bl;
 }
 
-board_layout_load_status_t
-board_layout_parse_split_start_coords(BoardLayout *bl,
-                                      const StringSplitter *starting_coords) {
+void board_layout_parse_split_start_coords(
+    BoardLayout *bl, const StringSplitter *starting_coords,
+    ErrorStack *error_stack) {
 
   if (string_splitter_get_number_of_items(starting_coords) != 2) {
-    return BOARD_LAYOUT_LOAD_STATUS_MALFORMED_START_COORDS;
+    error_stack_push(error_stack,
+                     ERROR_STATUS_BOARD_LAYOUT_MALFORMED_START_COORDS,
+                     string_duplicate("invalid starting coordinates"));
+    return;
   }
 
   for (int i = 0; i < 2; i++) {
     const int lane_start_value =
         string_to_int(string_splitter_get_item(starting_coords, i));
     if (lane_start_value < 0 || lane_start_value >= BOARD_DIM) {
-      return BOARD_LAYOUT_LOAD_STATUS_OUT_OF_BOUNDS_START_COORDS;
+      error_stack_push(
+          error_stack, ERROR_STATUS_BOARD_LAYOUT_OUT_OF_BOUNDS_START_COORDS,
+          get_formatted_string("starting coordinate out of bounds: %d",
+                               lane_start_value));
+      return;
     }
     bl->start_coords[i] = lane_start_value;
   }
-  return BOARD_LAYOUT_LOAD_STATUS_SUCCESS;
 }
 
 char bonus_square_value_to_char(uint8_t bonus_square_value) {
@@ -94,13 +101,13 @@ uint8_t bonus_square_char_to_value(char bonus_square_char) {
   return bonus_square_chars_to_values_map[(int)bonus_square_char];
 }
 
-board_layout_load_status_t
-board_layout_parse_split_file(BoardLayout *bl,
-                              const StringSplitter *file_lines) {
+void board_layout_parse_split_file(BoardLayout *bl,
+                                   const StringSplitter *file_lines,
+                                   ErrorStack *error_stack) {
   const int number_of_rows = string_splitter_get_number_of_items(file_lines);
 
   if (number_of_rows != BOARD_DIM + 1) {
-    return BOARD_LAYOUT_LOAD_STATUS_INVALID_NUMBER_OF_ROWS;
+    return ERROR_STATUS_BOARD_LAYOUT_INVALID_NUMBER_OF_ROWS;
   }
 
   StringSplitter *starting_coords =
@@ -111,14 +118,14 @@ board_layout_parse_split_file(BoardLayout *bl,
 
   string_splitter_destroy(starting_coords);
 
-  if (status != BOARD_LAYOUT_LOAD_STATUS_SUCCESS) {
+  if (status != ERROR_STATUS_BOARD_LAYOUT_SUCCESS) {
     return status;
   }
 
   for (int row = 0; row < BOARD_DIM; row++) {
     const char *layout_row = string_splitter_get_item(file_lines, row + 1);
     if (string_length(layout_row) != BOARD_DIM) {
-      return BOARD_LAYOUT_LOAD_STATUS_INVALID_NUMBER_OF_COLS;
+      return ERROR_STATUS_BOARD_LAYOUT_INVALID_NUMBER_OF_COLS;
     }
     for (int col = 0; col < BOARD_DIM; col++) {
       const char bonus_square_char = layout_row[col];
@@ -126,12 +133,12 @@ board_layout_parse_split_file(BoardLayout *bl,
       const uint8_t bonus_square_value =
           bonus_square_char_to_value(bonus_square_char);
       if (bonus_square_value == 0) {
-        return BOARD_LAYOUT_LOAD_STATUS_INVALID_BONUS_SQUARE;
+        return ERROR_STATUS_BOARD_LAYOUT_INVALID_BONUS_SQUARE;
       }
       bl->bonus_squares[index] = bonus_square_value;
     }
   }
-  return BOARD_LAYOUT_LOAD_STATUS_SUCCESS;
+  return ERROR_STATUS_BOARD_LAYOUT_SUCCESS;
 }
 
 void board_layout_load(BoardLayout *bl, const char *data_paths,

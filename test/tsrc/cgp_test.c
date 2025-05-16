@@ -50,7 +50,7 @@ void play_move_and_validate_cgp(Game *game, const char *move_string,
       validated_moves_create(game, game_get_player_on_turn_index(game),
                              move_string, false, false, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
+         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
   assert(validated_moves_get_number_of_moves(vms) == 1);
   const Move *move = validated_moves_get_move(vms, 0);
   int player_on_turn_index = game_get_player_on_turn_index(game);

@@ -9,7 +9,7 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
-#define ERROR_STACK_CAPACITY 10
+#define ERROR_STACK_CAPACITY 100
 
 struct ErrorStack {
   int size;

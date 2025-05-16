@@ -34,166 +34,173 @@ void test_validated_move_errors(void) {
   Game *game = config_game_create(config);
 
   assert_validated_move_error(game, EMPTY_CGP, "", 0, false, true, false,
-                              MOVE_VALIDATION_STATUS_EMPTY_MOVE);
+                              ERROR_STATUS_MOVE_VALIDATION_EMPTY_MOVE);
   assert_validated_move_error(game, EMPTY_CGP, "          \n  ", 0, false, true,
-                              false, MOVE_VALIDATION_STATUS_EMPTY_MOVE);
-  assert_validated_move_error(game, EMPTY_CGP, "ex.ABC", 2, false, true, false,
-                              MOVE_VALIDATION_STATUS_INVALID_PLAYER_INDEX);
-  assert_validated_move_error(game, EMPTY_CGP, "ex.ABC", -1, false, true, false,
-                              MOVE_VALIDATION_STATUS_INVALID_PLAYER_INDEX);
+                              false, ERROR_STATUS_MOVE_VALIDATION_EMPTY_MOVE);
+  assert_validated_move_error(
+      game, EMPTY_CGP, "ex.ABC", 2, false, true, false,
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_PLAYER_INDEX);
+  assert_validated_move_error(
+      game, EMPTY_CGP, "ex.ABC", -1, false, true, false,
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_PLAYER_INDEX);
   assert_validated_move_error(
       game, EMPTY_CGP, ".ABC", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_EMPTY_MOVE_TYPE_OR_POSITION);
+      ERROR_STATUS_MOVE_VALIDATION_EMPTY_MOVE_TYPE_OR_POSITION);
   assert_validated_move_error(
       game, EMPTY_CGP, "  .ABC.ABCDEF", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_EMPTY_MOVE_TYPE_OR_POSITION);
+      ERROR_STATUS_MOVE_VALIDATION_EMPTY_MOVE_TYPE_OR_POSITION);
   assert_validated_move_error(
       game, EMPTY_CGP, "  \n  .HADJI.ADHIJ.0.0", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_EMPTY_MOVE_TYPE_OR_POSITION);
+      ERROR_STATUS_MOVE_VALIDATION_EMPTY_MOVE_TYPE_OR_POSITION);
   assert_validated_move_error(
       game, EMPTY_CGP, "      .4", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_EMPTY_MOVE_TYPE_OR_POSITION);
+      ERROR_STATUS_MOVE_VALIDATION_EMPTY_MOVE_TYPE_OR_POSITION);
   assert_validated_move_error(
       game, EMPTY_CGP, "ex.", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_EMPTY_TILES_PLAYED_OR_NUMBER_EXCHANGED);
+      ERROR_STATUS_MOVE_VALIDATION_EMPTY_TILES_PLAYED_OR_NUMBER_EXCHANGED);
   assert_validated_move_error(
       game, EMPTY_CGP, "ex.  .ABCDEF", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_EMPTY_TILES_PLAYED_OR_NUMBER_EXCHANGED);
+      ERROR_STATUS_MOVE_VALIDATION_EMPTY_TILES_PLAYED_OR_NUMBER_EXCHANGED);
   assert_validated_move_error(
       game, EMPTY_CGP, "h7..ADHIJ.0.0", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_EMPTY_TILES_PLAYED_OR_NUMBER_EXCHANGED);
+      ERROR_STATUS_MOVE_VALIDATION_EMPTY_TILES_PLAYED_OR_NUMBER_EXCHANGED);
   assert_validated_move_error(game, EMPTY_CGP, "ex.ABC.", 0, false, true, false,
-                              MOVE_VALIDATION_STATUS_EMPTY_RACK);
+                              ERROR_STATUS_MOVE_VALIDATION_EMPTY_RACK);
   assert_validated_move_error(game, EMPTY_CGP, "h8.HADJI.   .0.0", 0, false,
-                              true, false, MOVE_VALIDATION_STATUS_EMPTY_RACK);
+                              true, false,
+                              ERROR_STATUS_MOVE_VALIDATION_EMPTY_RACK);
   assert_validated_move_error(game, EMPTY_CGP, "ex.4. ", 0, false, true, false,
-                              MOVE_VALIDATION_STATUS_EMPTY_RACK);
-  assert_validated_move_error(game, EMPTY_CGP, "h8.HADJI.ADHIJ..0", 0, false,
-                              true, false,
-                              MOVE_VALIDATION_STATUS_EMPTY_CHALLENGE_POINTS);
-  assert_validated_move_error(game, EMPTY_CGP, "h8.HADJI.ADHIJ.0.  ", 0, false,
-                              true, false,
-                              MOVE_VALIDATION_STATUS_EMPTY_CHALLENGE_TURN_LOSS);
-  assert_validated_move_error(game, EMPTY_CGP, "h8.12345", 0, false, true,
-                              false,
-                              MOVE_VALIDATION_STATUS_NONEXCHANGE_NUMERIC_TILES);
-  assert_validated_move_error(game, EMPTY_CGP, "ex.8", 0, false, true, false,
-                              MOVE_VALIDATION_STATUS_INVALID_NUMBER_EXCHANGED);
-  assert_validated_move_error(game, EMPTY_CGP, "h8.HA#DJI", 0, false, true,
-                              false,
-                              MOVE_VALIDATION_STATUS_INVALID_TILES_PLAYED);
-  assert_validated_move_error(game, EMPTY_CGP, "h8.HA#DJI", 0, false, true,
-                              false,
-                              MOVE_VALIDATION_STATUS_INVALID_TILES_PLAYED);
+                              ERROR_STATUS_MOVE_VALIDATION_EMPTY_RACK);
+  assert_validated_move_error(
+      game, EMPTY_CGP, "h8.HADJI.ADHIJ..0", 0, false, true, false,
+      ERROR_STATUS_MOVE_VALIDATION_EMPTY_CHALLENGE_POINTS);
+  assert_validated_move_error(
+      game, EMPTY_CGP, "h8.HADJI.ADHIJ.0.  ", 0, false, true, false,
+      ERROR_STATUS_MOVE_VALIDATION_EMPTY_CHALLENGE_TURN_LOSS);
+  assert_validated_move_error(
+      game, EMPTY_CGP, "h8.12345", 0, false, true, false,
+      ERROR_STATUS_MOVE_VALIDATION_NONEXCHANGE_NUMERIC_TILES);
+  assert_validated_move_error(
+      game, EMPTY_CGP, "ex.8", 0, false, true, false,
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_NUMBER_EXCHANGED);
+  assert_validated_move_error(
+      game, EMPTY_CGP, "h8.HA#DJI", 0, false, true, false,
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_TILES_PLAYED);
+  assert_validated_move_error(
+      game, EMPTY_CGP, "h8.HA#DJI", 0, false, true, false,
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_TILES_PLAYED);
   assert_validated_move_error(game, EMPTY_CGP, "h8.HADJI.ADH3JI ", 0, false,
-                              true, false, MOVE_VALIDATION_STATUS_INVALID_RACK);
-  assert_validated_move_error(game, EMPTY_CGP, "h8.HADJI.ADHIJ.-1.0", 0, false,
-                              false, false,
-                              MOVE_VALIDATION_STATUS_INVALID_CHALLENGE_POINTS);
-  assert_validated_move_error(game, EMPTY_CGP, "h8.HADJI.ADHIJ.h.0", 0, false,
-                              false, false,
-                              MOVE_VALIDATION_STATUS_INVALID_CHALLENGE_POINTS);
+                              true, false,
+                              ERROR_STATUS_MOVE_VALIDATION_INVALID_RACK);
+  assert_validated_move_error(
+      game, EMPTY_CGP, "h8.HADJI.ADHIJ.-1.0", 0, false, false, false,
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_CHALLENGE_POINTS);
+  assert_validated_move_error(
+      game, EMPTY_CGP, "h8.HADJI.ADHIJ.h.0", 0, false, false, false,
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_CHALLENGE_POINTS);
   assert_validated_move_error(
       game, EMPTY_CGP, "h8.HADJI.ADHIJ.0.-1", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_INVALID_CHALLENGE_TURN_LOSS);
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_CHALLENGE_TURN_LOSS);
   assert_validated_move_error(
       game, EMPTY_CGP, "h8.HADJI.ADHIJ.0.2", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_INVALID_CHALLENGE_TURN_LOSS);
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_CHALLENGE_TURN_LOSS);
   assert_validated_move_error(
       game, EMPTY_CGP, "h8.HADJI.ADHIJ.0.B", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_INVALID_CHALLENGE_TURN_LOSS);
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_CHALLENGE_TURN_LOSS);
   assert_validated_move_error(game, EMPTY_CGP, "8H.PIZAZZ.AIPZZZ", 0, false,
                               true, false,
-                              MOVE_VALIDATION_STATUS_RACK_NOT_IN_BAG);
+                              ERROR_STATUS_MOVE_VALIDATION_RACK_NOT_IN_BAG);
   assert_validated_move_error(game, EMPTY_CGP, "8H.BIBB.ABBBIII", 0, false,
                               true, false,
-                              MOVE_VALIDATION_STATUS_RACK_NOT_IN_BAG);
-  assert_validated_move_error(game, EMPTY_CGP, "h8.HADJI.BHAJI", 0, false, true,
-                              false,
-                              MOVE_VALIDATION_STATUS_TILES_PLAYED_NOT_IN_RACK);
-  assert_validated_move_error(game, ION_OPENING_CGP, "h1.AERATIONS", 0, false,
-                              false, false,
-                              MOVE_VALIDATION_STATUS_TILES_PLAYED_OVERFLOW);
+                              ERROR_STATUS_MOVE_VALIDATION_RACK_NOT_IN_BAG);
+  assert_validated_move_error(
+      game, EMPTY_CGP, "h8.HADJI.BHAJI", 0, false, true, false,
+      ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_NOT_IN_RACK);
+  assert_validated_move_error(
+      game, ION_OPENING_CGP, "h1.AERATIONS", 0, false, false, false,
+      ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_OVERFLOW);
   assert_validated_move_error(
       game, ION_OPENING_CGP, "8A.AERATINGS", 0, false, false, false,
-      MOVE_VALIDATION_STATUS_TILES_PLAYED_BOARD_MISMATCH);
+      ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_BOARD_MISMATCH);
   assert_validated_move_error(
       game, ION_OPENING_CGP, "h8.QAT", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_TILES_PLAYED_BOARD_MISMATCH);
-  assert_validated_move_error(game, EMPTY_CGP, "1A.QAT", 0, false, true, false,
-                              MOVE_VALIDATION_STATUS_TILES_PLAYED_DISCONNECTED);
-  assert_validated_move_error(game, ION_OPENING_CGP, "1A.QAT", 0, false, true,
-                              false,
-                              MOVE_VALIDATION_STATUS_TILES_PLAYED_DISCONNECTED);
+      ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_BOARD_MISMATCH);
+  assert_validated_move_error(
+      game, EMPTY_CGP, "1A.QAT", 0, false, true, false,
+      ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_DISCONNECTED);
+  assert_validated_move_error(
+      game, ION_OPENING_CGP, "1A.QAT", 0, false, true, false,
+      ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_DISCONNECTED);
   assert_validated_move_error(
       game, EMPTY_CGP, "*.QAT", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION);
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION);
   assert_validated_move_error(
       game, EMPTY_CGP, "8.QAT", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION);
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION);
   assert_validated_move_error(
       game, EMPTY_CGP, "H.QAT", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION);
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION);
   assert_validated_move_error(
       game, EMPTY_CGP, "8H1.QAT", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION);
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION);
   assert_validated_move_error(
       game, EMPTY_CGP, "H16.QAT", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION);
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION);
   assert_validated_move_error(
       game, EMPTY_CGP, "8P.QAT", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION);
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION);
   assert_validated_move_error(
       game, EMPTY_CGP, "P8.QAT", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION);
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION);
   assert_validated_move_error(
       game, EMPTY_CGP, "H8H.QAT", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION);
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION);
   assert_validated_move_error(
       game, EMPTY_CGP, "H0H.QAT", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION);
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION);
   assert_validated_move_error(
       game, EMPTY_CGP, "0H0.QAT", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION);
-  assert_validated_move_error(game, EMPTY_CGP, "ex.ABC.ABCDEF.4", 0, false,
-                              true, false,
-                              MOVE_VALIDATION_STATUS_EXCESS_EXCHANGE_FIELDS);
-  assert_validated_move_error(game, EMPTY_CGP, "ex.ABC.ABCDEF.3.0", 0, false,
-                              true, false,
-                              MOVE_VALIDATION_STATUS_EXCESS_EXCHANGE_FIELDS);
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION);
+  assert_validated_move_error(
+      game, EMPTY_CGP, "ex.ABC.ABCDEF.4", 0, false, true, false,
+      ERROR_STATUS_MOVE_VALIDATION_EXCESS_EXCHANGE_FIELDS);
+  assert_validated_move_error(
+      game, EMPTY_CGP, "ex.ABC.ABCDEF.3.0", 0, false, true, false,
+      ERROR_STATUS_MOVE_VALIDATION_EXCESS_EXCHANGE_FIELDS);
   assert_validated_move_error(game, EMPTY_CGP, "h8.HADJI.ADHIJ.0.0.1", 0, false,
                               true, false,
-                              MOVE_VALIDATION_STATUS_EXCESS_FIELDS);
+                              ERROR_STATUS_MOVE_VALIDATION_EXCESS_FIELDS);
   assert_validated_move_error(game, EMPTY_CGP, "ex", 0, false, true, false,
-                              MOVE_VALIDATION_STATUS_MISSING_FIELDS);
+                              ERROR_STATUS_MOVE_VALIDATION_MISSING_FIELDS);
   assert_validated_move_error(game, EMPTY_CGP, "h8", 0, false, true, false,
-                              MOVE_VALIDATION_STATUS_MISSING_FIELDS);
+                              ERROR_STATUS_MOVE_VALIDATION_MISSING_FIELDS);
   assert_validated_move_error(game, EMPTY_CGP, "pass.ABC.AB", 0, false, true,
-                              false, MOVE_VALIDATION_STATUS_EXCESS_PASS_FIELDS);
+                              false,
+                              ERROR_STATUS_MOVE_VALIDATION_EXCESS_PASS_FIELDS);
   assert_validated_move_error(game, EMPTY_CGP, "h8.WECH", 0, false, true, false,
-                              MOVE_VALIDATION_STATUS_PHONY_WORD_FORMED);
+                              ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED);
   // Forms AION*
   assert_validated_move_error(game, ION_OPENING_CGP, "E5.RETAILS", 0, false,
                               true, false,
-                              MOVE_VALIDATION_STATUS_PHONY_WORD_FORMED);
+                              ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED);
   // Forms 7 valid words and 1 phony word:
   // valid: REALISE, RE, EN, AT, LA, IS, SI
   // phony: TS*
   assert_validated_move_error(game, ENTASIS_OPENING_CGP, "7C.REALIST", 0, false,
                               true, false,
-                              MOVE_VALIDATION_STATUS_PHONY_WORD_FORMED);
+                              ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED);
 
   assert_validated_move_error(
       game, EMPTY_CGP, "ex.4", 0, false, false, false,
-      MOVE_VALIDATION_STATUS_UNKNOWN_EXCHANGE_DISALLOWED);
+      ERROR_STATUS_MOVE_VALIDATION_UNKNOWN_EXCHANGE_DISALLOWED);
 
   assert_validated_move_error(
       game, WORMROOT_CGP, "ex.BFQR.BFQRTTV", 0, false, false, false,
-      MOVE_VALIDATION_STATUS_EXCHANGE_INSUFFICIENT_TILES);
+      ERROR_STATUS_MOVE_VALIDATION_EXCHANGE_INSUFFICIENT_TILES);
 
   assert_validated_move_error(
       game, WORMROOT_CGP, "ex.4", 0, false, true, false,
-      MOVE_VALIDATION_STATUS_EXCHANGE_INSUFFICIENT_TILES);
+      ERROR_STATUS_MOVE_VALIDATION_EXCHANGE_INSUFFICIENT_TILES);
 
   game_destroy(game);
   config_destroy(config);
@@ -599,7 +606,7 @@ void test_validated_move_distinct_kwg(void) {
   ValidatedMoves *vms =
       validated_moves_create(game, 0, "8H.SPORK", false, true, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
+         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
   validated_moves_destroy(vms);
 
   rack_set_to_string(ld, player0_rack, "KOPRRSS");
@@ -610,13 +617,13 @@ void test_validated_move_distinct_kwg(void) {
   // Play SCHIZIER, better than best CSW word of SCHERZI
   vms = validated_moves_create(game, 1, "H8.SCHIZIER", false, true, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
+         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
   assert_move_score(validated_moves_get_move(vms, 0), 146);
   validated_moves_destroy(vms);
 
   vms = validated_moves_create(game, 1, "M8.SCHERZI", false, true, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_PHONY_WORD_FORMED);
+         ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED);
   validated_moves_destroy(vms);
 
   rack_set_to_string(ld, player1_rack, "CEHIIRZ");
@@ -627,12 +634,12 @@ void test_validated_move_distinct_kwg(void) {
   // Play WIGGLY, not GOLLYWOG because that's NWL only
   vms = validated_moves_create(game, 0, "11G.WIGGLY", false, true, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
+         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
   validated_moves_destroy(vms);
 
   vms = validated_moves_create(game, 0, "J2.GOLLYWOG", false, true, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_PHONY_WORD_FORMED);
+         ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED);
   validated_moves_destroy(vms);
 
   // print_board(game_get_board(game));
@@ -644,12 +651,12 @@ void test_validated_move_distinct_kwg(void) {
   // Play 13C QUEAS(I)ER, not L3 SQUEA(K)ER(Y) because that's CSW only
   vms = validated_moves_create(game, 1, "13C.QUEASIER", false, true, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
+         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
   validated_moves_destroy(vms);
 
   vms = validated_moves_create(game, 1, "L3.SQUEAKERY", false, true, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_PHONY_WORD_FORMED);
+         ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED);
   validated_moves_destroy(vms);
 
   rack_set_to_string(ld, player1_rack, "AEEQRSU");
@@ -670,19 +677,19 @@ void test_validated_move_wordsmog_phonies(void) {
   ValidatedMoves *vms =
       validated_moves_create(game, 0, "8H.TRONGLE", false, true, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_PHONY_WORD_FORMED);
+         ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED);
   validated_moves_destroy(vms);
 
   load_cgp_or_die(game, ENTASIS_OPENING_CGP);
 
   vms = validated_moves_create(game, 0, "7C.DUOGRNA", false, true, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_PHONY_WORD_FORMED);
+         ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED);
   validated_moves_destroy(vms);
 
   vms = validated_moves_create(game, 0, "7C.DUORENA", false, true, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
+         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
   validated_moves_destroy(vms);
 
   game_destroy(game);
@@ -712,19 +719,19 @@ void test_validated_move_many(void) {
   vms = validated_moves_create(game, 0, "pass.ABC.AB,ex.4,ex.ABC.DEF,8h.VVU",
                                false, true, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_EXCESS_PASS_FIELDS);
+         ERROR_STATUS_MOVE_VALIDATION_EXCESS_PASS_FIELDS);
   validated_moves_destroy(vms);
 
   vms = validated_moves_create(game, 0, "pass,ex.4,ex.ABC.DEF,8h.VVU", false,
                                true, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_TILES_PLAYED_NOT_IN_RACK);
+         ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_NOT_IN_RACK);
   validated_moves_destroy(vms);
 
   vms = validated_moves_create(game, 0, "pass,ex.4,ex.ABC.ABCDEF,8h.VVU", false,
                                true, false);
   assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_PHONY_WORD_FORMED);
+         ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED);
   validated_moves_destroy(vms);
 
   game_destroy(game);
