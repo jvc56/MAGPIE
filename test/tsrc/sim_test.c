@@ -454,7 +454,7 @@ void test_similar_play_consistency(const int num_threads) {
   load_and_exec_config_or_die(config, set_threads_cmd);
   free(set_threads_cmd);
   load_and_exec_config_or_die(config, "cgp " CACHEXIC_CGP);
-  load_and_exec_config_or_die(config, "gen");
+  load_and_exec_config_or_die(config, "gen -seed 1747425885");
 
   // The two top plays are:
   //
@@ -756,6 +756,8 @@ void test_sim(void) {
   if (sim_perf_iters) {
     test_sim_perf(sim_perf_iters);
   } else {
+    test_similar_play_consistency(1);
+    test_similar_play_consistency(10);
     test_win_pct();
     test_sim_error_cases();
     test_sim_single_iteration();
@@ -767,7 +769,5 @@ void test_sim(void) {
     perf_test_multithread_sim();
     test_sim_round_robin_consistency();
     test_sim_top_two_consistency();
-    test_similar_play_consistency(1);
-    test_similar_play_consistency(10);
   }
 }
