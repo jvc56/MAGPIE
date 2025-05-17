@@ -454,7 +454,7 @@ void test_similar_play_consistency(const int num_threads) {
   load_and_exec_config_or_die(config, set_threads_cmd);
   free(set_threads_cmd);
   load_and_exec_config_or_die(config, "cgp " CACHEXIC_CGP);
-  load_and_exec_config_or_die(config, "gen -seed 1747425885");
+  load_and_exec_config_or_die(config, "gen");
 
   // The two top plays are:
   //
