@@ -9,6 +9,7 @@
 #include "../../src/ent/board.h"
 #include "../../src/ent/dictionary_word.h"
 #include "../../src/ent/game.h"
+#include "../../src/ent/game_history.h"
 #include "../../src/ent/inference_results.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/move.h"
@@ -70,9 +71,15 @@ Config *config_create_default_test(void);
 void set_row(Game *game, int row, const char *row_content);
 void assert_board_layout_error(const char *data_paths,
                                const char *board_layout_filename,
-                               board_layout_load_status_t expected_status);
+                               error_code_t expected_status);
 void load_game_with_test_board(Game *game, const char *data_paths,
                                const char *board_layout_name);
+ValidatedMoves *validated_moves_create_or_die(
+    const Game *game, int player_index, const char *ucgi_moves_string,
+    bool allow_phonies, bool allow_unknown_exchanges, bool allow_playthrough);
+void game_play_to_turn_or_die(GameHistory *game_history, Game *game,
+                              int turn_index);
+void game_play_to_end_or_die(GameHistory *game_history, Game *game);
 void assert_validated_and_generated_moves(Game *game, const char *rack_string,
                                           const char *move_position,
                                           const char *move_tiles,

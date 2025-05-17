@@ -139,8 +139,9 @@ void test_autoplay_divergent_games(void) {
 
   AutoplayResults *ar = autoplay_results_create();
 
-  autoplay_status_t status = autoplay_results_set_options(ar, "games");
-  assert(status == ERROR_STATUS_AUTOPLAY_SUCCESS);
+  ErrorStack *error_stack = error_stack_create();
+  autoplay_results_set_options(ar, "games", error_stack);
+  assert(error_stack_is_empty(error_stack));
 
   load_and_exec_config_or_die(csw_config, "cgp " VS_ANDY_CGP);
   game = config_get_game(csw_config);
@@ -217,6 +218,7 @@ void test_autoplay_divergent_games(void) {
 
   free(small_diff_str);
 
+  error_stack_destroy(error_stack);
   config_destroy(csw_config);
 }
 

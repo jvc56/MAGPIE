@@ -23,20 +23,22 @@
 #include "test_constants.h"
 #include "test_util.h"
 
-inference_status_t infer_for_test(const Config *config, int target_index,
-                                  int target_score, int target_num_exch,
-                                  const char *target_played_tiles_str,
-                                  InferenceResults *inference_results) {
+error_code_t infer_for_test(const Config *config, int target_index,
+                            int target_score, int target_num_exch,
+                            const char *target_played_tiles_str,
+                            InferenceResults *inference_results) {
   Game *game = config_get_game(config);
   const LetterDistribution *ld = game_get_ld(game);
   Rack *target_played_tiles = rack_create(ld_get_size(ld));
   if (target_played_tiles_str != NULL) {
     rack_set_to_string(ld, target_played_tiles, target_played_tiles_str);
   }
-  inference_status_t status =
-      config_infer(config, target_index, target_score, target_num_exch,
-                   target_played_tiles, inference_results);
+  ErrorStack *error_stack = error_stack_create();
+  config_infer(config, target_index, target_score, target_num_exch,
+               target_played_tiles, inference_results, error_stack);
+  error_code_t status = error_stack_top(error_stack);
   rack_destroy(target_played_tiles);
+  error_stack_destroy(error_stack);
   return status;
 }
 
@@ -95,7 +97,7 @@ void test_infer_rack_overflow(void) {
   const LetterDistribution *ld = config_get_ld(config);
   InferenceResults *inference_results = inference_results_create();
 
-  inference_status_t status =
+  error_code_t status =
       infer_for_test(config, 0, 0, 0, "ABCDEFGH", inference_results);
   assert(status == ERROR_STATUS_INFERENCE_RACK_OVERFLOW);
   game_reset(game);
@@ -114,8 +116,7 @@ void test_infer_no_tiles_played_rack_empty(void) {
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
   InferenceResults *inference_results = inference_results_create();
-  inference_status_t status =
-      infer_for_test(config, 0, 0, 0, "", inference_results);
+  error_code_t status = infer_for_test(config, 0, 0, 0, "", inference_results);
   assert(status == ERROR_STATUS_INFERENCE_NO_TILES_PLAYED);
 
   inference_results_destroy(inference_results);
@@ -128,7 +129,7 @@ void test_infer_both_play_and_exchange(void) {
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
   InferenceResults *inference_results = inference_results_create();
-  inference_status_t status =
+  error_code_t status =
       infer_for_test(config, 0, 0, 1, "DEFGH", inference_results);
   assert(status == ERROR_STATUS_INFERENCE_BOTH_PLAY_AND_EXCHANGE);
 
@@ -142,8 +143,7 @@ void test_infer_exchange_score_not_zero(void) {
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
   InferenceResults *inference_results = inference_results_create();
-  inference_status_t status =
-      infer_for_test(config, 0, 3, 1, "", inference_results);
+  error_code_t status = infer_for_test(config, 0, 3, 1, "", inference_results);
   assert(status == ERROR_STATUS_INFERENCE_EXCHANGE_SCORE_NOT_ZERO);
 
   inference_results_destroy(inference_results);
@@ -158,10 +158,9 @@ void test_infer_exchange_not_board_is_letter_allowed_in_cross_set(void) {
   Bag *bag = game_get_bag(game);
 
   // There are 13 tiles in the bag
-  game_load_cgp(game, VS_JEREMY);
+  load_cgp_or_die(game, VS_JEREMY);
   InferenceResults *inference_results = inference_results_create();
-  inference_status_t status =
-      infer_for_test(config, 0, 3, 1, "", inference_results);
+  error_code_t status = infer_for_test(config, 0, 3, 1, "", inference_results);
   assert(status == ERROR_STATUS_INFERENCE_EXCHANGE_NOT_ALLOWED);
 
   bag_add_letter(bag, BLANK_MACHINE_LETTER, 0);
@@ -180,7 +179,7 @@ void test_infer_tiles_played_not_in_bag(void) {
 
   InferenceResults *inference_results = inference_results_create();
   load_and_exec_config_or_die(config, "set -eq 0 -threads 1");
-  inference_status_t status =
+  error_code_t status =
       infer_for_test(config, 0, 0, 1, "ACBYEYY", inference_results);
   assert(status == ERROR_STATUS_INFERENCE_TILES_PLAYED_NOT_IN_BAG);
 
@@ -212,12 +211,12 @@ void test_infer_nonerror_cases(int number_of_threads) {
 
   InferenceResults *inference_results = inference_results_create();
   Stat *letter_stat = stat_create(false);
-  inference_status_t status;
+  error_code_t status;
   LeaveRackList *lrl;
 
   load_and_exec_config_or_die(config, "set -numplays 20");
   status = infer_for_test(config, 0, 52, 0, "MUZAKS", inference_results);
-  assert(status == ERROR_STATUS_INFERENCE_SUCCESS);
+  assert(status == ERROR_STATUS_SUCCESS);
   // With this rack, only keeping an S is possible, and
   // there are 3 S remaining.
 
@@ -266,7 +265,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   assert(rack_get_total_letters(player1_rack) == 0);
 
   status = infer_for_test(config, 0, 58, 0, "MUZAKY", inference_results);
-  assert(status == ERROR_STATUS_INFERENCE_SUCCESS);
+  assert(status == ERROR_STATUS_SUCCESS);
   // Letters not possible:
   // A - YAKUZA
   // B - ZAMBUK
@@ -326,7 +325,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   assert(rack_get_total_letters(player1_rack) == 0);
 
   status = infer_for_test(config, 0, 50, 0, "MUZAK", inference_results);
-  assert(status == ERROR_STATUS_INFERENCE_SUCCESS);
+  assert(status == ERROR_STATUS_SUCCESS);
   // Can't have B or Y because of ZAMBUK and MUZAKY
   // Can't have K or Z because there are none in the bag
   for (int i = 0; i < ld_size; i++) {
@@ -351,7 +350,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   assert(rack_get_total_letters(player0_rack) == 0);
   assert(rack_get_total_letters(player1_rack) == 0);
 
-  game_load_cgp(game, VS_JEREMY_WITH_P2_RACK);
+  load_cgp_or_die(game, VS_JEREMY_WITH_P2_RACK);
   // Score doesn't matter since the bag
   // is empty and the inference_results should just be
   // the remaining tiles exactly. Since the played
@@ -359,7 +358,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // contain an E.
   load_and_exec_config_or_die(config, "set -eq 0");
   status = infer_for_test(config, 0, 22, 0, "E", inference_results);
-  assert(status == ERROR_STATUS_INFERENCE_SUCCESS);
+  assert(status == ERROR_STATUS_SUCCESS);
   // Refetch equity values because the underlying
   // inference_results results were recreated
   equity_values = inference_results_get_equity_values(inference_results,
@@ -394,7 +393,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
 
   load_and_exec_config_or_die(config, "set -numplays 100");
   status = infer_for_test(config, 0, 8, 0, "ENRT", inference_results);
-  assert(status == ERROR_STATUS_INFERENCE_SUCCESS);
+  assert(status == ERROR_STATUS_SUCCESS);
   // There are only 3 racks for which playing RENT for 8 on the opening is
   // top equity:
   // 1) ?ENNRRT keeping ?NR = 2 * 5 * 5  = 50 possible draws
@@ -498,7 +497,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
 
   // Contrive an impossible situation to easily test
   // more combinatorics
-  game_load_cgp(game, OOPSYCHOLOGY_CGP);
+  load_cgp_or_die(game, OOPSYCHOLOGY_CGP);
 
   // Empty the bag
   while (!bag_is_empty(bag)) {
@@ -523,7 +522,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // for plays scoring 50.
   load_and_exec_config_or_die(config, "set -eq 0");
   status = infer_for_test(config, 0, 50, 0, "IIII", inference_results);
-  assert(status == ERROR_STATUS_INFERENCE_SUCCESS);
+  assert(status == ERROR_STATUS_SUCCESS);
   // There are only 4 racks for which not playing Z(OOPSYCHOLOGY) is
   // correct:
   // EEEIIII = 4 possible draws for E = 4 total
@@ -644,7 +643,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // Check that the equity margin works
   load_and_exec_config_or_die(config, "set -eq 5");
   status = infer_for_test(config, 0, 58, 0, "MUZAKY", inference_results);
-  assert(status == ERROR_STATUS_INFERENCE_SUCCESS);
+  assert(status == ERROR_STATUS_SUCCESS);
   // Letters not possible with equity margin of 5:
   // B - ZAMBUK
   // K - none in bag
@@ -682,7 +681,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   bag_draw_letter(bag, ld_hl_to_ml(ld, "?"), 0);
   load_and_exec_config_or_die(config, "set -eq 0");
   status = infer_for_test(config, 0, 18, 0, "GRIND", inference_results);
-  assert(status == ERROR_STATUS_INFERENCE_SUCCESS);
+  assert(status == ERROR_STATUS_SUCCESS);
   // If GRIND is played keeping ?, the only
   // possible other tile is an X
   // Refetch equity values because the underlying
@@ -720,7 +719,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // 2) ?HINNRR keeping ?HNR = 2 * 2 * 5 * 5 = 100
   // 3) HIINNRR keeping HINR = 2 * 8 * 5 * 5 = 400
   // For a total of 660 possible draws
-  assert(status == ERROR_STATUS_INFERENCE_SUCCESS);
+  assert(status == ERROR_STATUS_SUCCESS);
   // Refetch equity values because the underlying
   // inference_results results were recreated
   equity_values = inference_results_get_equity_values(inference_results,
@@ -742,7 +741,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
                                     mean_rin_leave_value);
 
   // Test exchanges
-  game_load_cgp(game, VS_JEREMY);
+  load_cgp_or_die(game, VS_JEREMY);
   // Take out good letters and throw in bad ones to force certain
   // racks to have exchange as the best play
   bag_draw_letter(bag, ld_hl_to_ml(ld, "?"), 0);
@@ -760,7 +759,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   load_and_exec_config_or_die(config, "set -eq 0");
   status = infer_for_test(config, 0, 0, 6, "", inference_results);
 
-  assert(status == ERROR_STATUS_INFERENCE_SUCCESS);
+  assert(status == ERROR_STATUS_SUCCESS);
   // Keeping any one of D, H, R, or S is valid
   assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE,
                                         ld_hl_to_ml(ld, "D"), 1,

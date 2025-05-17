@@ -61,7 +61,7 @@ void test_classic_cross_set(void) {
   Board *board = game_get_board(game);
 
   // TestGencross_setLoadedGame
-  game_load_cgp(game, VS_MATT);
+  load_cgp_or_die(game, VS_MATT);
   test_gen_cross_set(game, 10, 10, "?E", 11);
   test_gen_cross_set(game, 2, 4, "?DHKLRSV", 9);
   test_gen_cross_set(game, 8, 7, "?S", 11);
@@ -113,7 +113,7 @@ void test_classic_cross_set(void) {
   test_gen_cross_set_row(game, 4, 1, "S OBCONIc", "", 11);
 
   // TestGenAllcross_sets
-  game_load_cgp(game, VS_ED);
+  load_cgp_or_die(game, VS_ED);
   test_gen_cross_set(game, 8, 8, "?OS", 8);
   board_transpose(board);
   test_gen_cross_set(game, 8, 8, "?S", 9);
@@ -140,7 +140,7 @@ void test_classic_cross_set(void) {
   board_transpose(board);
 
   // TestUpdateSinglecross_set
-  game_load_cgp(game, VS_MATT);
+  load_cgp_or_die(game, VS_MATT);
   board_set_letter(board, 8, 10, 19);
   board_set_letter(board, 9, 10, 0);
   board_set_letter(board, 10, 10, 4);
@@ -214,7 +214,7 @@ void test_alpha_cross_set(void) {
   test_gen_cross_set_row(game, 4, 14, "        ZYZZVY ", "?A", 42);
 
   // TestGencross_setLoadedGame
-  game_load_cgp(game, VS_MATT);
+  load_cgp_or_die(game, VS_MATT);
   test_gen_cross_set(game, 10, 10, "?EO", 11);
   test_gen_cross_set(game, 2, 4, "?ADHKLORSTVWYZ", 9);
   test_gen_cross_set(game, 8, 7, "?NS", 11);

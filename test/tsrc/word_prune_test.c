@@ -28,7 +28,7 @@ void test_possible_words(void) {
   char zonule[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
                      "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
                      "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
-  game_load_cgp(game, zonule);
+  load_cgp_or_die(game, zonule);
 
   dictionary_word_list_clear(possible_word_list);
   generate_possible_words(game, NULL, possible_word_list);
@@ -44,7 +44,7 @@ void test_possible_words(void) {
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/WE3R1V7/"
       "AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 lex NWL20;";
 
-  game_load_cgp(game, taurine);
+  load_cgp_or_die(game, taurine);
   dictionary_word_list_clear(possible_word_list);
   generate_possible_words(game, NULL, possible_word_list);
 
@@ -57,7 +57,7 @@ void test_possible_words(void) {
       "6FEAL1IT2/2NEGATES2D3/3DOH2KEEFS2/WITH7UN2/I10LO2/LABOUR6B2/Y6POTTOS2 "
       "?AENORW/EIIIRUV 332/384 0 lex NWL20;";
 
-  game_load_cgp(game, anoretic);
+  load_cgp_or_die(game, anoretic);
   dictionary_word_list_clear(possible_word_list);
   generate_possible_words(game, NULL, possible_word_list);
 

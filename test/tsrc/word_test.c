@@ -22,13 +22,10 @@ void test_words_played(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
-  game_load_cgp(game, VS_ED);
+  load_cgp_or_die(game, VS_ED);
 
   ValidatedMoves *vms_pent =
-      validated_moves_create(game, 0, "N11.PeNT", false, true, false);
-
-  assert(validated_moves_get_validation_status(vms_pent) ==
-         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
+      validated_moves_create_or_die(game, 0, "N11.PeNT", false, true, false);
 
   const FormedWords *fw = validated_moves_get_formed_words(vms_pent, 0);
 
@@ -54,10 +51,7 @@ void test_words_played(void) {
 
   // Play some random phoney making a lot of words 6G DI(PET)AZ
   ValidatedMoves *vms_dipetaz =
-      validated_moves_create(game, 0, "6G.DIPETAZ", true, true, false);
-
-  assert(validated_moves_get_validation_status(vms_dipetaz) ==
-         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
+      validated_moves_create_or_die(game, 0, "6G.DIPETAZ", true, true, false);
 
   fw = validated_moves_get_formed_words(vms_dipetaz, 0);
 
@@ -89,10 +83,7 @@ void test_words_played(void) {
 
   // play a single tile that makes two words. 9F (BOY)S
   ValidatedMoves *vms_boys =
-      validated_moves_create(game, 0, "9F.BOYS", false, true, false);
-
-  assert(validated_moves_get_validation_status(vms_boys) ==
-         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
+      validated_moves_create_or_die(game, 0, "9F.BOYS", false, true, false);
 
   fw = validated_moves_get_formed_words(vms_boys, 0);
 
@@ -111,10 +102,7 @@ void test_words_played(void) {
 
   // same as above but dir - I5 SPAY(S)
   ValidatedMoves *vms_spays =
-      validated_moves_create(game, 0, "I5.SPAYS", false, true, false);
-
-  assert(validated_moves_get_validation_status(vms_spays) ==
-         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
+      validated_moves_create_or_die(game, 0, "I5.SPAYS", false, true, false);
 
   fw = validated_moves_get_formed_words(vms_spays, 0);
 
@@ -132,7 +120,8 @@ void test_words_played(void) {
 
   // N1 ZA making ZE# and AN, testing crosswords at board edge
   ValidatedMoves *vms_za =
-      validated_moves_create(game, 0, "N1.ZA", false, true, false);
+      validated_moves_create_or_die(game, 0, "N1.ZA", false, true, false);
+
   fw = validated_moves_get_formed_words(vms_za, 0);
   assert(formed_words_get_num_words(fw) == 3);
 

@@ -21,20 +21,21 @@
 
 #include "test_util.h"
 
-gcg_parse_status_t test_parse_gcg(const char *gcg_filename, Config *config,
-                                  GameHistory *game_history) {
+error_code_t test_parse_gcg(const char *gcg_filename, Config *config,
+                            GameHistory *game_history) {
   char *gcg_filepath = data_filepaths_get_readable_filename(
       config_get_data_paths(config), gcg_filename, DATA_FILEPATH_TYPE_GCG);
-  gcg_parse_status_t gcg_parse_status =
-      parse_gcg(gcg_filepath, config, game_history);
+  ErrorStack *error_stack = error_stack_create();
+  parse_gcg(gcg_filepath, config, game_history, error_stack);
+  error_code_t gcg_parse_status = error_stack_top(error_stack);
   free(gcg_filepath);
   return gcg_parse_status;
 }
 
 void test_single_error_case(const char *gcg_filename, Config *config,
-                            gcg_parse_status_t expected_gcg_parse_status) {
+                            error_code_t expected_gcg_parse_status) {
   GameHistory *game_history = game_history_create();
-  gcg_parse_status_t gcg_parse_status =
+  error_code_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
   game_history_destroy(game_history);
   assert(gcg_parse_status == expected_gcg_parse_status);
@@ -145,9 +146,9 @@ void test_parse_special_char(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "name_iso8859-1";
   GameHistory *game_history = game_history_create();
-  gcg_parse_status_t gcg_parse_status =
+  error_code_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == ERROR_STATUS_GCG_PARSE_SUCCESS);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
   assert_strings_equal(game_history_player_get_name(game_history, 0), "césar");
   assert_strings_equal(game_history_player_get_name(game_history, 1),
                        "hércules");
@@ -160,9 +161,9 @@ void test_parse_special_utf8_no_header(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "name_utf8_noheader";
   GameHistory *game_history = game_history_create();
-  gcg_parse_status_t gcg_parse_status =
+  error_code_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == ERROR_STATUS_GCG_PARSE_SUCCESS);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
   assert(
       strings_equal(game_history_player_get_name(game_history, 0), "cÃ©sar"));
   game_history_destroy(game_history);
@@ -174,9 +175,9 @@ void test_parse_special_utf8_with_header(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "name_utf8_with_header";
   GameHistory *game_history = game_history_create();
-  gcg_parse_status_t gcg_parse_status =
+  error_code_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == ERROR_STATUS_GCG_PARSE_SUCCESS);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
   assert(strings_equal(game_history_player_get_name(game_history, 0), "césar"));
   game_history_destroy(game_history);
   config_destroy(config);
@@ -187,9 +188,9 @@ void test_parse_dos_mode(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "utf8_dos";
   GameHistory *game_history = game_history_create();
-  gcg_parse_status_t gcg_parse_status =
+  error_code_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == ERROR_STATUS_GCG_PARSE_SUCCESS);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
   assert(strings_equal(game_history_player_get_nickname(game_history, 0),
                        "angwantibo"));
   assert(strings_equal(game_history_player_get_nickname(game_history, 1),
@@ -273,7 +274,7 @@ void assert_game_play_to_turn(GameHistory *game_history, Game *game1,
   int i = 0;
   const char *cgp = cgps[i];
   while (cgp) {
-    game_play_to_turn(game_history, game1, i);
+    game_play_to_turn_or_die(game_history, game1, i);
     load_cgp_or_die(game2, cgp);
     assert_games_are_equal(game1, game2, true);
     i++;
@@ -286,9 +287,9 @@ void test_success_standard(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "success_standard";
   GameHistory *game_history = game_history_create();
-  gcg_parse_status_t gcg_parse_status =
+  error_code_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == ERROR_STATUS_GCG_PARSE_SUCCESS);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
 
   Game *game1 = config_game_create(config);
   Game *game2 = config_game_create(config);
@@ -449,9 +450,9 @@ void test_success_five_point_challenge(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "success_five_point_challenge";
   GameHistory *game_history = game_history_create();
-  gcg_parse_status_t gcg_parse_status =
+  error_code_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == ERROR_STATUS_GCG_PARSE_SUCCESS);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
 
   Game *game1 = config_game_create(config);
   Game *game2 = config_game_create(config);
@@ -525,9 +526,9 @@ void test_success_six_pass(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "success_six_pass";
   GameHistory *game_history = game_history_create();
-  gcg_parse_status_t gcg_parse_status =
+  error_code_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == ERROR_STATUS_GCG_PARSE_SUCCESS);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
 
   Game *game1 = config_game_create(config);
   Game *game2 = config_game_create(config);
@@ -624,13 +625,13 @@ void test_success_incomplete(void) {
   Rack *rack = rack_create(ld_get_size(ld));
   const char *gcg_filename;
   GameHistory *game_history;
-  gcg_parse_status_t gcg_parse_status;
+  error_code_t gcg_parse_status;
 
   gcg_filename = "oops_all_pragmas";
   game_history = game_history_create();
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == ERROR_STATUS_GCG_PARSE_SUCCESS);
-  game_play_to_end(game_history, game1);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game1);
   load_cgp_or_die(game2,
                   "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
   assert_games_are_equal(game1, game2, true);
@@ -643,8 +644,8 @@ void test_success_incomplete(void) {
   gcg_filename = "success_just_last_rack";
   game_history = game_history_create();
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == ERROR_STATUS_GCG_PARSE_SUCCESS);
-  game_play_to_end(game_history, game1);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game1);
   load_cgp_or_die(
       game2, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 DIIIILU/ 0/0 0");
   assert_games_are_equal(game1, game2, true);
@@ -658,8 +659,8 @@ void test_success_incomplete(void) {
   gcg_filename = "incomplete_after_tile_placement";
   game_history = game_history_create();
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == ERROR_STATUS_GCG_PARSE_SUCCESS);
-  game_play_to_end(game_history, game1);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game1);
   load_cgp_or_die(game2,
                   "15/15/15/15/15/15/15/6ZA7/4CRoWDIE4/15/15/15/15/15/15 / "
                   "22/79 0");
@@ -673,8 +674,8 @@ void test_success_incomplete(void) {
   gcg_filename = "incomplete_with_last_rack_after_tile_placement";
   game_history = game_history_create();
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == ERROR_STATUS_GCG_PARSE_SUCCESS);
-  game_play_to_end(game_history, game1);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game1);
   load_cgp_or_die(
       game2, "15/15/15/15/15/15/15/6ZA7/4CRoWDIE4/15/15/15/15/15/15 AENNRST/ "
              "22/79 0");
@@ -689,8 +690,8 @@ void test_success_incomplete(void) {
   gcg_filename = "incomplete_after_phony_returned";
   game_history = game_history_create();
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == ERROR_STATUS_GCG_PARSE_SUCCESS);
-  game_play_to_end(game_history, game1);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game1);
   load_cgp_or_die(
       game2,
       "11T3/10NA3/10EN3/10UG3/10MO3/11i3/5TANNERS3/6ZA3T3/4CRoWDIE4/9FEEB2/"
@@ -706,8 +707,8 @@ void test_success_incomplete(void) {
   gcg_filename = "incomplete_after_pass";
   game_history = game_history_create();
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == ERROR_STATUS_GCG_PARSE_SUCCESS);
-  game_play_to_end(game_history, game1);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game1);
   load_cgp_or_die(
       game2, "11T3/10NAE2/10END2/2A7UG1G1/2B7MO1L1/1VODKA5i1O1/2R2TANNERS1R1/"
              "2T3ZA3T1I1/2I1CRoWDIE2A1/2V6FEEBS1/1NEWISHLY1LEA2/15/15/15/15 "
@@ -723,8 +724,8 @@ void test_success_incomplete(void) {
   gcg_filename = "incomplete_after_five_point_challenge";
   game_history = game_history_create();
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == ERROR_STATUS_GCG_PARSE_SUCCESS);
-  game_play_to_end(game_history, game1);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game1);
   load_cgp_or_die(
       game2,
       "15/15/8GENITAL/12AY1/4B4MINX2/2GRIZ2ION4/4N4WARP2/3BA1SUQ1N4/"
@@ -741,8 +742,8 @@ void test_success_incomplete(void) {
   gcg_filename = "incomplete_after_exchange";
   game_history = game_history_create();
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == ERROR_STATUS_GCG_PARSE_SUCCESS);
-  game_play_to_end(game_history, game1);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game1);
   load_cgp_or_die(
       game2, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AAENRSZ/ 0/0 1");
   assert_games_are_equal(game1, game2, true);

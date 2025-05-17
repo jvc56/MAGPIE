@@ -154,7 +154,13 @@ void assert_command_status_and_output(Config *config,
 
   log_set_error_out(errorout_fh);
 
-  execute_command_async(config, command);
+  ErrorStack *error_stack = error_stack_create();
+  CommandArgs command_args = {
+      .config = config,
+      .error_stack = error_stack,
+  };
+
+  execute_command_async(&command_args, command);
 
   // Let the async command start up
   sleep(1);

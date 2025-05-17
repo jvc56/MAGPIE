@@ -75,7 +75,7 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
       player1_final_score = player_get_score(player1);
     }
 
-    game_load_cgp(expected_game, cgps[i]);
+    load_cgp_or_die(expected_game, cgps[i]);
     // If the game is still ongoing,
     // return the racks to the bag so that
     // the bag from the expected game and
@@ -534,7 +534,7 @@ void test_playmove(void) {
   assert(rack_get_letter(player0_rack, ld_hl_to_ml(ld, "U")) < 2);
 
   // Test pass
-  game_load_cgp(
+  load_cgp_or_die(
       game, "15/15/12F2/11TROW/4V3EWE1A2/2iNAURATE1TIP1/4L1AAH2EM1B/"
             "3PAIGLE2X1TO/2JANN4FAQIR/4C2MOKES1ZO/4EBIoNISE2U/2ODDITY1R1S2G/"
             "1DUI1EALE3YEH/CODGER2LOTIONS/9RIN3 / 517/349 5 lex CSW21;");
@@ -685,9 +685,7 @@ void test_leave_record(void) {
   const Move *move;
 
   rack_set_to_string(ld, player0_rack, "DEKNRTY");
-  vms = validated_moves_create(game, 0, "8G.KY", false, false, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
+  vms = validated_moves_create_or_die(game, 0, "8G.KY", false, false, false);
   move = validated_moves_get_move(vms, 0);
   play_move(move, game, NULL, actual_leave);
   rack_set_to_string(ld, expected_leave, "DENRT");
@@ -696,9 +694,7 @@ void test_leave_record(void) {
   game_reset(game);
 
   rack_set_to_string(ld, player0_rack, "DEKNRTY");
-  vms = validated_moves_create(game, 0, "ex.DKY", false, false, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
+  vms = validated_moves_create_or_die(game, 0, "ex.DKY", false, false, false);
   move = validated_moves_get_move(vms, 0);
   play_move(move, game, NULL, actual_leave);
   rack_set_to_string(ld, expected_leave, "ENRT");
@@ -707,9 +703,7 @@ void test_leave_record(void) {
   game_reset(game);
 
   rack_set_to_string(ld, player0_rack, "DEKNRTY");
-  vms = validated_moves_create(game, 0, "pass", false, false, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
+  vms = validated_moves_create_or_die(game, 0, "pass", false, false, false);
   move = validated_moves_get_move(vms, 0);
   play_move(move, game, NULL, actual_leave);
   rack_set_to_string(ld, expected_leave, "DEKNRTY");

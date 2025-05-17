@@ -33,6 +33,7 @@
 
 #include "../../src/impl/cgp.h"
 #include "../../src/impl/gameplay.h"
+#include "../../src/impl/gcg.h"
 #include "../../src/impl/move_gen.h"
 
 #include "../../src/str/game_string.h"
@@ -93,16 +94,18 @@ uint64_t string_to_cross_set(const LetterDistribution *ld,
 }
 
 void load_and_exec_config_or_die(Config *config, const char *cmd) {
-  error_code_t status = config_load_command(config, cmd);
-  if (status != ERROR_STATUS_CONFIG_LOAD_SUCCESS) {
+  ErrorStack *error_stack = error_stack_create();
+  config_load_command(config, cmd, error_stack);
+  error_code_t status = error_stack_top(error_stack);
+  if (status != ERROR_STATUS_SUCCESS) {
     log_fatal("load config failed with status %d: %s\n", status, cmd);
   }
-  config_execute_command(config);
-  ErrorStack *error_stack = config_get_error_status(config);
-  if (!error_status_get_success(error_status)) {
-    error_status_log_warn_if_failed(error_status);
+  config_execute_command(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print(error_stack);
     abort();
   }
+  error_stack_destroy(error_stack);
   printf("loaded config with command: %s\n", cmd);
   printf("seed: %lu\n",
          thread_control_get_seed(config_get_thread_control(config)));
@@ -155,15 +158,27 @@ char *cross_set_to_string(const LetterDistribution *ld, uint64_t input) {
 // To specify a different path, use load_and_exec_config_or_die
 // after calling this function.
 Config *config_create_or_die(const char *cmd) {
-  Config *config = config_create_default();
+  ErrorStack *error_stack = error_stack_create();
+  Config *config = config_create_default(error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print(error_stack);
+    abort();
+  }
   load_and_exec_config_or_die(config, "set -path " DEFAULT_TEST_DATA_PATH);
   load_and_exec_config_or_die(config, cmd);
+  error_stack_destroy(error_stack);
   return config;
 }
 
 Config *config_create_default_test(void) {
-  Config *config = config_create_default();
+  ErrorStack *error_stack = error_stack_create();
+  Config *config = config_create_default(error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print(error_stack);
+    abort();
+  }
   load_and_exec_config_or_die(config, "set -path " DEFAULT_TEST_DATA_PATH);
+  error_stack_destroy(error_stack);
   return config;
 }
 
@@ -277,10 +292,32 @@ void play_top_n_equity_move(Game *game, int n) {
 }
 
 void load_cgp_or_die(Game *game, const char *cgp) {
-  cgp_parse_status_t cgp_parse_status = game_load_cgp(game, cgp);
-  if (cgp_parse_status != ERROR_STATUS_CGP_PARSE_SUCCESS) {
-    log_fatal("cgp load failed with %d\n", cgp_parse_status);
+  ErrorStack *error_stack = error_stack_create();
+  game_load_cgp(game, cgp, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    log_fatal("cgp load failed with %d\n", error_stack_top(error_stack));
   }
+}
+
+void game_play_to_turn_or_die(GameHistory *game_history, Game *game,
+                              int turn_index) {
+  ErrorStack *error_stack = error_stack_create();
+  game_play_to_turn(game_history, game, turn_index, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print(error_stack);
+    log_fatal("failed to play to turn %d\n", turn_index);
+  }
+  error_stack_destroy(error_stack);
+}
+
+void game_play_to_end_or_die(GameHistory *game_history, Game *game) {
+  ErrorStack *error_stack = error_stack_create();
+  game_play_to_end(game_history, game, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print(error_stack);
+    log_fatal("failed to play to end\n");
+  }
+  error_stack_destroy(error_stack);
 }
 
 int count_newlines(const char *str) {
@@ -521,28 +558,32 @@ void delete_fifo(const char *fifo_name) { unlink(fifo_name); }
 
 void assert_board_layout_error(const char *data_paths,
                                const char *board_layout_name,
-                               board_layout_load_status_t expected_status) {
+                               error_code_t expected_status) {
   BoardLayout *bl = board_layout_create();
-  board_layout_load_status_t actual_status =
-      board_layout_load(bl, data_paths, board_layout_name);
+  ErrorStack *error_stack = error_stack_create();
+  board_layout_load(bl, data_paths, board_layout_name, error_stack);
+  error_code_t actual_status = error_stack_top(error_stack);
   board_layout_destroy(bl);
   if (actual_status != expected_status) {
     printf("board layout load statuses do not match: %d != %d", expected_status,
            actual_status);
   }
   assert(actual_status == expected_status);
+  error_stack_destroy(error_stack);
 }
 
 BoardLayout *board_layout_create_for_test(const char *data_paths,
                                           const char *board_layout_name) {
   BoardLayout *bl = board_layout_create();
-  board_layout_load_status_t actual_status =
-      board_layout_load(bl, data_paths, board_layout_name);
-  if (actual_status != ERROR_STATUS_BOARD_LAYOUT_LOAD_SUCCESS) {
+  ErrorStack *error_stack = error_stack_create();
+  board_layout_load(bl, data_paths, board_layout_name, error_stack);
+  error_code_t actual_status = error_stack_top(error_stack);
+  if (!error_stack_is_empty(error_stack)) {
     printf("board layout load failure for %s: %d\n", board_layout_name,
            actual_status);
   }
-  assert(actual_status == ERROR_STATUS_BOARD_LAYOUT_LOAD_SUCCESS);
+  assert(actual_status == ERROR_STATUS_SUCCESS);
+  error_stack_destroy(error_stack);
   return bl;
 }
 
@@ -599,11 +640,11 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
   }
   free(move_tiles_no_parens);
 
-  ValidatedMoves *vms =
-      validated_moves_create(game, 0, vm_move_string, false, true, false);
+  ErrorStack *error_stack = error_stack_create();
+  ValidatedMoves *vms = validated_moves_create(game, 0, vm_move_string, false,
+                                               true, false, error_stack);
   free(vm_move_string);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_SUCCESS);
 
   if (play_move_on_board) {
     play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
@@ -611,6 +652,22 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
 
   validated_moves_destroy(vms);
   move_list_destroy(move_list);
+  error_stack_destroy(error_stack);
+}
+
+ValidatedMoves *validated_moves_create_or_die(
+    const Game *game, int player_index, const char *ucgi_moves_string,
+    bool allow_phonies, bool allow_unknown_exchanges, bool allow_playthrough) {
+  ErrorStack *error_stack = error_stack_create();
+  ValidatedMoves *vms = validated_moves_create(
+      game, player_index, ucgi_moves_string, allow_phonies,
+      allow_unknown_exchanges, allow_playthrough, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print(error_stack);
+    abort();
+  }
+  error_stack_destroy(error_stack);
+  return vms;
 }
 
 ValidatedMoves *assert_validated_move_success(Game *game, const char *cgp_str,
@@ -619,10 +676,12 @@ ValidatedMoves *assert_validated_move_success(Game *game, const char *cgp_str,
                                               bool allow_phonies,
                                               bool allow_playthrough) {
   load_cgp_or_die(game, cgp_str);
-  ValidatedMoves *vms = validated_moves_create(
-      game, player_index, move_str, allow_phonies, true, allow_playthrough);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
+  ErrorStack *error_stack = error_stack_create();
+  ValidatedMoves *vms =
+      validated_moves_create(game, player_index, move_str, allow_phonies, true,
+                             allow_playthrough, error_stack);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_SUCCESS);
+  error_stack_destroy(error_stack);
   return vms;
 }
 

@@ -85,6 +85,6 @@ void error_stack_print(ErrorStack *error_stack) {
   if (!error_string) {
     return;
   }
-  fprintf(stderr, error_string);
+  fprintf(stderr, "%s", error_string);
   free(error_string);
 }

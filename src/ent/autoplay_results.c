@@ -734,16 +734,19 @@ void autoplay_results_set_options_int(AutoplayResults *autoplay_results,
   autoplay_results->options = options;
 }
 
-autoplay_status_t autoplay_results_set_options_with_splitter(
-    AutoplayResults *autoplay_results, const StringSplitter *split_options) {
+void autoplay_results_set_options_with_splitter(
+    AutoplayResults *autoplay_results, const StringSplitter *split_options,
+    ErrorStack *error_stack) {
   int number_of_options = string_splitter_get_number_of_items(split_options);
 
   if (number_of_options == 0) {
-    return ERROR_STATUS_AUTOPLAY_EMPTY_OPTIONS;
+    error_stack_push(
+        error_stack, ERROR_STATUS_AUTOPLAY_EMPTY_OPTIONS,
+        string_duplicate("expected autoplay options to be nonempty"));
+    return;
   }
 
   uint64_t options = 0;
-  autoplay_status_t status = ERROR_STATUS_AUTOPLAY_SUCCESS;
   for (int i = 0; i < number_of_options; i++) {
     const char *option_str = string_splitter_get_item(split_options, i);
     if (has_iprefix(option_str, "games")) {
@@ -751,29 +754,31 @@ autoplay_status_t autoplay_results_set_options_with_splitter(
     } else if (has_iprefix(option_str, "fj")) {
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_FJ);
     } else {
-      status = ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS;
+      error_stack_push(
+          error_stack, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS,
+          get_formatted_string("invalid autoplay option: %s", option_str));
       break;
     }
   }
 
-  if (status == ERROR_STATUS_AUTOPLAY_SUCCESS) {
+  if (!error_stack_is_empty(error_stack)) {
     autoplay_results_set_options_int(autoplay_results, options, NULL);
   }
-
-  return status;
 }
 
 void autoplay_results_set_options(AutoplayResults *autoplay_results,
                                   const char *options_str,
                                   ErrorStack *error_stack) {
   if (is_string_empty_or_null(options_str)) {
-    return ERROR_STATUS_AUTOPLAY_EMPTY_OPTIONS;
+    error_stack_push(
+        error_stack, ERROR_STATUS_AUTOPLAY_EMPTY_OPTIONS,
+        string_duplicate("expected autoplay options to be nonempty"));
+    return;
   }
   StringSplitter *split_options = split_string(options_str, ',', true);
-  autoplay_status_t status = autoplay_results_set_options_with_splitter(
-      autoplay_results, split_options);
+  autoplay_results_set_options_with_splitter(autoplay_results, split_options,
+                                             error_stack);
   string_splitter_destroy(split_options);
-  return status;
 }
 
 void autoplay_results_reset_options(AutoplayResults *autoplay_results) {

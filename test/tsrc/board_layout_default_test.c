@@ -86,24 +86,19 @@ void test_board_layout_success(void) {
 }
 
 void test_board_layout_error(void) {
-  assert_board_layout_error(
-      DEFAULT_TEST_DATA_PATH, "malformed_start_coords15",
-      ERROR_STATUS_BOARD_LAYOUT_LOAD_MALFORMED_START_COORDS);
+  assert_board_layout_error(DEFAULT_TEST_DATA_PATH, "malformed_start_coords15",
+                            ERROR_STATUS_BOARD_LAYOUT_MALFORMED_START_COORDS);
   assert_board_layout_error(
       DEFAULT_TEST_DATA_PATH, "out_of_bounds_start_coords15",
-      ERROR_STATUS_BOARD_LAYOUT_LOAD_OUT_OF_BOUNDS_START_COORDS);
-  assert_board_layout_error(
-      DEFAULT_TEST_DATA_PATH, "invalid_number_of_rows15",
-      ERROR_STATUS_BOARD_LAYOUT_LOAD_INVALID_NUMBER_OF_ROWS);
-  assert_board_layout_error(
-      DEFAULT_TEST_DATA_PATH, "standard21",
-      ERROR_STATUS_BOARD_LAYOUT_LOAD_INVALID_NUMBER_OF_ROWS);
-  assert_board_layout_error(
-      DEFAULT_TEST_DATA_PATH, "invalid_number_of_cols15",
-      ERROR_STATUS_BOARD_LAYOUT_LOAD_INVALID_NUMBER_OF_COLS);
-  assert_board_layout_error(
-      DEFAULT_TEST_DATA_PATH, "invalid_bonus_square15",
-      ERROR_STATUS_BOARD_LAYOUT_LOAD_INVALID_BONUS_SQUARE);
+      ERROR_STATUS_BOARD_LAYOUT_OUT_OF_BOUNDS_START_COORDS);
+  assert_board_layout_error(DEFAULT_TEST_DATA_PATH, "invalid_number_of_rows15",
+                            ERROR_STATUS_BOARD_LAYOUT_INVALID_NUMBER_OF_ROWS);
+  assert_board_layout_error(DEFAULT_TEST_DATA_PATH, "standard21",
+                            ERROR_STATUS_BOARD_LAYOUT_INVALID_NUMBER_OF_ROWS);
+  assert_board_layout_error(DEFAULT_TEST_DATA_PATH, "invalid_number_of_cols15",
+                            ERROR_STATUS_BOARD_LAYOUT_INVALID_NUMBER_OF_COLS);
+  assert_board_layout_error(DEFAULT_TEST_DATA_PATH, "invalid_bonus_square15",
+                            ERROR_STATUS_BOARD_LAYOUT_INVALID_BONUS_SQUARE);
 }
 
 void assert_opening_penalties(Game *game, const char *data_paths,
@@ -126,6 +121,7 @@ void test_board_layout_correctness(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   Board *board = game_get_board(game);
+  ErrorStack *error_stack = error_stack_create();
   const char *data_paths = config_get_data_paths(config);
 
   assert(board_get_anchor(board, 7, 7, BOARD_HORIZONTAL_DIRECTION));
@@ -272,20 +268,18 @@ void test_board_layout_correctness(void) {
 
   load_cgp_or_die(game, ENTASIS_OPENING_CGP);
 
-  ValidatedMoves *vms =
-      validated_moves_create(game, 0, "7J.FRAWZEY", false, false, false);
-  move_validation_status_t vms_error_status =
-      validated_moves_get_validation_status(vms);
-  assert(vms_error_status ==
+  ValidatedMoves *vms = validated_moves_create(game, 0, "7J.FRAWZEY", false,
+                                               false, false, error_stack);
+  assert(error_stack_top(error_stack) ==
          ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_OUT_OF_BOUNDS);
   validated_moves_destroy(vms);
 
   // Validate play over block
   load_game_with_test_board(game, data_paths, "5_by_5_bricked_box_15");
 
-  vms = validated_moves_create(game, 0, "8H.FRAWZEY", false, false, false);
-  vms_error_status = validated_moves_get_validation_status(vms);
-  assert(vms_error_status ==
+  vms = validated_moves_create(game, 0, "8H.FRAWZEY", false, false, false,
+                               error_stack);
+  assert(error_stack_top(error_stack) ==
          ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_OVER_BRICK);
   validated_moves_destroy(vms);
 

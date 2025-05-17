@@ -2,6 +2,7 @@
 #include <time.h>
 
 #include "../../src/def/autoplay_defs.h"
+#include "../../src/def/error_stack_defs.h"
 
 #include "../../src/ent/autoplay_results.h"
 #include "../../src/ent/board.h"
@@ -20,9 +21,8 @@
 
 void test_board_layout_error_super(void) {
   // Most of the error enums are tested in the 15 version.
-  assert_board_layout_error(
-      DEFAULT_TEST_DATA_PATH, "standard15",
-      ERROR_STATUS_BOARD_LAYOUT_LOAD_INVALID_NUMBER_OF_ROWS);
+  assert_board_layout_error(DEFAULT_TEST_DATA_PATH, "standard15",
+                            ERROR_STATUS_BOARD_LAYOUT_INVALID_NUMBER_OF_ROWS);
 }
 
 void test_board_layout_correctness_super(void) {

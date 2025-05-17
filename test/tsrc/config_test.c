@@ -352,38 +352,22 @@ void test_config_lexical_data(void) {
 }
 
 void assert_config_exec_status(Config *config, const char *cmd,
-                               error_code_t expected_error_code,
-                               int expected_error_status_code) {
-  error_code_t status = config_load_command(config, cmd);
-  if (status != ERROR_STATUS_CONFIG_LOAD_SUCCESS) {
+                               error_code_t expected_error_code) {
+  ErrorStack *error_stack = error_stack_create();
+  config_load_command(config, cmd, error_stack);
+  error_code_t status = error_stack_top(error_stack);
+  if (status != ERROR_STATUS_SUCCESS) {
     log_fatal("load config failed with status %d: %s\n", status, cmd);
   }
 
-  config_execute_command(config);
+  config_execute_command(config, error_stack);
 
-  error_code_t actual_error_code =
-      error_status_get_type(config_get_error_status(config));
-
-  bool mismatch = false;
+  error_code_t actual_error_code = error_stack_top(error_stack);
 
   if (actual_error_code != expected_error_code) {
     printf("config exec error types do not match:\nexpected: %d\nactual: "
            "%d\n>%s<\n",
            expected_error_code, actual_error_code, cmd);
-    mismatch = true;
-  }
-
-  int actual_error_status_code =
-      error_status_get_code(config_get_error_status(config));
-
-  if (actual_error_status_code != expected_error_status_code) {
-    printf("config exec error codes do not match:\nexpected: %d\nactual: "
-           "%d\n>%s<\n",
-           expected_error_status_code, actual_error_status_code, cmd);
-    mismatch = true;
-  }
-
-  if (mismatch) {
     abort();
   }
 }
@@ -394,153 +378,143 @@ void test_config_exec_parse_args(void) {
   // Ensure all commands that require game data fail correctly
   assert_config_exec_status(
       config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0",
-      ERROR_STATUS_TYPE_CONFIG_LOAD,
       ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
-  assert_config_exec_status(config, "addmoves 1", ERROR_STATUS_TYPE_CONFIG_LOAD,
+  assert_config_exec_status(config, "addmoves 1",
                             ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
-  assert_config_exec_status(config, "gen", ERROR_STATUS_TYPE_CONFIG_LOAD,
+  assert_config_exec_status(config, "gen",
                             ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
-  assert_config_exec_status(config, "sim", ERROR_STATUS_TYPE_CONFIG_LOAD,
+  assert_config_exec_status(config, "sim",
                             ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
-  assert_config_exec_status(config, "infer 0 3", ERROR_STATUS_TYPE_CONFIG_LOAD,
+  assert_config_exec_status(config, "infer 0 3",
                             ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
   assert_config_exec_status(config, "autoplay game 10",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
                             ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
 
   // CGP
   assert_config_exec_status(
       config,
       "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 1/2 0/0 0 -lex CSW21",
-      ERROR_STATUS_TYPE_CGP_LOAD,
+
       ERROR_STATUS_CGP_PARSE_MALFORMED_RACK_LETTERS);
-  assert_config_exec_status(config, "cgp " VS_OXY, ERROR_STATUS_TYPE_NONE, 0);
+  assert_config_exec_status(config, "cgp " VS_OXY, ERROR_STATUS_SUCCESS);
 
   // Adding moves
-  assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_TYPE_NONE,
-                            0);
+  assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_SUCCESS);
   assert_config_exec_status(
-      config, "add 8A.HADJI -lex CSW21", ERROR_STATUS_TYPE_MOVE_VALIDATION,
+      config, "add 8A.HADJI -lex CSW21",
       ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_DISCONNECTED);
   assert_config_exec_status(config, "add 8D.HADJI -lex CSW21",
-                            ERROR_STATUS_TYPE_NONE, 0);
+                            ERROR_STATUS_SUCCESS);
 
   // Setting the rack
-  assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_TYPE_NONE,
-                            0);
-  assert_config_exec_status(config, "rack 0 ABC", ERROR_STATUS_TYPE_CONFIG_LOAD,
+  assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack 0 ABC",
                             ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS);
-  assert_config_exec_status(config, "rack 3 ABC", ERROR_STATUS_TYPE_CONFIG_LOAD,
+  assert_config_exec_status(config, "rack 3 ABC",
                             ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS);
   assert_config_exec_status(config, "rack 1 AB3C",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   assert_config_exec_status(config, "rack 1 ABCZZZ",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+
                             ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG);
-  assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_TYPE_NONE,
-                            0);
-  assert_config_exec_status(config, "rack 1 FF", ERROR_STATUS_TYPE_NONE, 0);
-  assert_config_exec_status(config, "rack 1 ZYYABCF", ERROR_STATUS_TYPE_NONE,
-                            0);
-  assert_config_exec_status(config, "rack 2 CC", ERROR_STATUS_TYPE_CONFIG_LOAD,
+  assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack 1 FF", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack 1 ZYYABCF", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack 2 CC",
                             ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG);
 
   // Generating moves
-  assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_TYPE_NONE,
-                            0);
-  assert_config_exec_status(config, "gen", ERROR_STATUS_TYPE_NONE, 0);
+  assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
 
   // Simulation
-  assert_config_exec_status(config, "gen -numplays 2", ERROR_STATUS_TYPE_NONE,
-                            0);
+  assert_config_exec_status(config, "gen -numplays 2", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "sim AEIN3R -it 1",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
-  assert_config_exec_status(config, "sim -it 1", ERROR_STATUS_TYPE_NONE, 0);
-  assert_config_exec_status(config, "sim AEINR -it 1", ERROR_STATUS_TYPE_NONE,
-                            0);
+  assert_config_exec_status(config, "sim -it 1", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "sim AEINR -it 1", ERROR_STATUS_SUCCESS);
 
   // Inference
-  assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_TYPE_NONE,
-                            0);
+  assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "infer 0 ABC 14",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
   assert_config_exec_status(config, "infer 3 ABC 14",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
   assert_config_exec_status(config, "infer 1 AB3C 14",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   assert_config_exec_status(config, "infer 1 ABC 1R4",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
-  assert_config_exec_status(config, "infer 1 -4", ERROR_STATUS_TYPE_CONFIG_LOAD,
+  assert_config_exec_status(config, "infer 1 -4",
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
-  assert_config_exec_status(config, "infer 1 8", ERROR_STATUS_TYPE_CONFIG_LOAD,
+  assert_config_exec_status(config, "infer 1 8",
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
   assert_config_exec_status(config, "infer 1 ABC",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+
                             ERROR_STATUS_CONFIG_LOAD_MISSING_ARG);
   // Autoplay
-  assert_config_exec_status(
-      config, "autoplay move 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
-      ERROR_STATUS_TYPE_AUTOPLAY, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS);
-  assert_config_exec_status(
-      config, "autoplay ,,, 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
-      ERROR_STATUS_TYPE_AUTOPLAY, ERROR_STATUS_AUTOPLAY_EMPTY_OPTIONS);
-  assert_config_exec_status(
-      config, "autoplay game -10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
-      ERROR_STATUS_TYPE_AUTOPLAY, ERROR_STATUS_AUTOPLAY_MALFORMED_NUM_GAMES);
-  assert_config_exec_status(
-      config, "autoplay game 10a -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
-      ERROR_STATUS_TYPE_AUTOPLAY, ERROR_STATUS_AUTOPLAY_MALFORMED_NUM_GAMES);
-  assert_config_exec_status(
-      config, "autoplay game h -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
-      ERROR_STATUS_TYPE_AUTOPLAY, ERROR_STATUS_AUTOPLAY_MALFORMED_NUM_GAMES);
+  assert_config_exec_status(config,
+                            "autoplay move 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
+                            ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS);
+  assert_config_exec_status(config,
+                            "autoplay ,,, 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
+                            ERROR_STATUS_AUTOPLAY_EMPTY_OPTIONS);
+  assert_config_exec_status(config,
+                            "autoplay game -10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
+                            ERROR_STATUS_AUTOPLAY_MALFORMED_NUM_GAMES);
+  assert_config_exec_status(config,
+                            "autoplay game 10a -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
+                            ERROR_STATUS_AUTOPLAY_MALFORMED_NUM_GAMES);
+  assert_config_exec_status(config,
+                            "autoplay game h -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
+                            ERROR_STATUS_AUTOPLAY_MALFORMED_NUM_GAMES);
   assert_config_exec_status(config,
                             "autoplay game 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
-                            ERROR_STATUS_TYPE_NONE, 0);
+                            ERROR_STATUS_SUCCESS);
   // Create
   assert_config_exec_status(
-      config, "create klx CSW50 english", ERROR_STATUS_TYPE_CONFIG_LOAD,
+      config, "create klx CSW50 english",
       ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_CREATE_DATA_TYPE);
   config_destroy(config);
   config = config_create_default_test();
 
   // Leave Gen
   assert_config_exec_status(config, "leavegen 2 0",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+
                             ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
 
   load_and_exec_config_or_die(config, "set -l1 CSW21 -l2 NWL20");
-  assert_config_exec_status(config, "leavegen 2 0", ERROR_STATUS_TYPE_LEAVE_GEN,
-                            LEAVE_GEN_STATUS_DIFFERENT_LEXICA_OR_LEAVES);
+  assert_config_exec_status(config, "leavegen 2 0",
+                            ERROR_STATUS_LEAVE_GEN_DIFFERENT_LEXICA_OR_LEAVES);
 
   load_and_exec_config_or_die(config,
                               "set -l1 CSW21 -l2 CSW21 -k1 CSW21 -k2 NWL20");
-  assert_config_exec_status(config, "leavegen 2 0", ERROR_STATUS_TYPE_LEAVE_GEN,
-                            LEAVE_GEN_STATUS_DIFFERENT_LEXICA_OR_LEAVES);
+  assert_config_exec_status(config, "leavegen 2 0",
+                            ERROR_STATUS_LEAVE_GEN_DIFFERENT_LEXICA_OR_LEAVES);
 
   load_and_exec_config_or_die(config,
                               "set -l1 CSW21 -l2 CSW21 -k1 CSW21 -k2 NWL20");
-  assert_config_exec_status(config, "leavegen 2 0", ERROR_STATUS_TYPE_LEAVE_GEN,
-                            LEAVE_GEN_STATUS_DIFFERENT_LEXICA_OR_LEAVES);
+  assert_config_exec_status(config, "leavegen 2 0",
+                            ERROR_STATUS_LEAVE_GEN_DIFFERENT_LEXICA_OR_LEAVES);
 
   load_and_exec_config_or_die(config,
                               "set -l1 CSW21 -l2 CSW21 -k1 CSW21 -k2 CSW21");
   assert_config_exec_status(config, "leavegen 1 -1",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+
                             ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS);
   assert_config_exec_status(
-      config, "leavegen 1,,1 0", ERROR_STATUS_TYPE_AUTOPLAY,
+      config, "leavegen 1,,1 0",
       ERROR_STATUS_AUTOPLAY_MALFORMED_MINIMUM_LEAVE_TARGETS);
   assert_config_exec_status(
-      config, "leavegen 1,2,3,h 0", ERROR_STATUS_TYPE_AUTOPLAY,
+      config, "leavegen 1,2,3,h 0",
       ERROR_STATUS_AUTOPLAY_MALFORMED_MINIMUM_LEAVE_TARGETS);
   assert_config_exec_status(
-      config, "leavegen 1,2,3,-4 0", ERROR_STATUS_TYPE_AUTOPLAY,
+      config, "leavegen 1,2,3,-4 0",
       ERROR_STATUS_AUTOPLAY_MALFORMED_MINIMUM_LEAVE_TARGETS);
   config_destroy(config);
 }
