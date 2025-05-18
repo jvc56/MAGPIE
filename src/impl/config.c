@@ -9,7 +9,6 @@
 #include "../def/config_defs.h"
 #include "../def/error_stack_defs.h"
 #include "../def/exec_defs.h"
-#include "../def/file_handler_defs.h"
 #include "../def/game_defs.h"
 #include "../def/inference_defs.h"
 #include "../def/math_util_defs.h"
@@ -86,8 +85,6 @@ typedef enum {
   ARG_TOKEN_NUMBER_OF_THREADS,
   ARG_TOKEN_PRINT_INFO_INTERVAL,
   ARG_TOKEN_RECORD_FILEPATH,
-  ARG_TOKEN_INFILE,
-  ARG_TOKEN_OUTFILE,
   ARG_TOKEN_EXEC_MODE,
   ARG_TOKEN_TT_FRACTION_OF_MEM,
   ARG_TOKEN_TIME_LIMIT,
@@ -321,7 +318,6 @@ bool config_exec_parg_is_set(const Config *config) {
 bool config_continue_on_coldstart(const Config *config) {
   return !config_exec_parg_is_set(config) ||
          config->exec_parg_token == ARG_TOKEN_CGP ||
-         config_get_parg_num_set_values(config, ARG_TOKEN_INFILE) > 0 ||
          config_get_parg_num_set_values(config, ARG_TOKEN_EXEC_MODE) > 0;
 }
 
@@ -1798,12 +1794,6 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     autoplay_results_set_record_filepath(config->autoplay_results,
                                          record_filepath);
   }
-
-  // Set IO
-
-  thread_control_set_io(config->thread_control,
-                        config_get_parg_value(config, ARG_TOKEN_INFILE, 0),
-                        config_get_parg_value(config, ARG_TOKEN_OUTFILE, 0));
 }
 
 // Parses the arguments given by the cmd string and updates the state of
@@ -1950,10 +1940,6 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack) {
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_RECORD_FILEPATH, "recfile", 1, 1,
                     execute_fatal, status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_INFILE, "infile", 1, 1, execute_fatal,
-                    status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_OUTFILE, "outfile", 1, 1, execute_fatal,
-                    status_fatal);
   parsed_arg_create(config, ARG_TOKEN_EXEC_MODE, "mode", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_TT_FRACTION_OF_MEM, "ttfraction", 1, 1,

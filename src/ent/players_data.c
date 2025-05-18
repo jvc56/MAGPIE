@@ -9,7 +9,7 @@
 #include "kwg.h"
 #include "wmp.h"
 
-#include "../util/log.h"
+#include "../util/io.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
 
@@ -184,9 +184,9 @@ const char *players_data_get_data_name(const PlayersData *players_data,
     case PLAYERS_DATA_TYPE_KLV:
       data_name = klv_get_name(players_data->data[data_index]);
       break;
-   case PLAYERS_DATA_TYPE_WMP:
+    case PLAYERS_DATA_TYPE_WMP:
       data_name = wmp_get_name(players_data->data[data_index]);
-      break;      
+      break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
       break;

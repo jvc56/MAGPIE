@@ -6,7 +6,7 @@
 
 #include "xoshiro.h"
 
-#include "../util/log.h"
+#include "../util/io.h"
 #include "../util/util.h"
 
 // The bag uses a start and end

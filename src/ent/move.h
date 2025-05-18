@@ -14,7 +14,7 @@
 
 #include "../ent/equity.h"
 
-#include "../util/log.h"
+#include "../util/io.h"
 #include "../util/util.h"
 
 typedef enum {
@@ -264,9 +264,10 @@ static inline void small_move_set_as_pass(SmallMove *move) {
 }
 
 static inline void small_move_set_all(SmallMove *move, const uint8_t strip[],
-                                      int leftstrip, int rightstrip, Equity score,
-                                      int row_start, int col_start,
-                                      int tiles_played, bool dir_is_vertical,
+                                      int leftstrip, int rightstrip,
+                                      Equity score, int row_start,
+                                      int col_start, int tiles_played,
+                                      bool dir_is_vertical,
                                       game_event_t move_type) {
 
   int play_length;
@@ -436,7 +437,8 @@ static inline void move_list_load_with_empty_small_moves(MoveList *ml,
                                                          int capacity) {
   ml->capacity = capacity;
 
-  ml->small_moves = (SmallMove **)malloc_or_die(sizeof(SmallMove *) * ml->capacity);
+  ml->small_moves =
+      (SmallMove **)malloc_or_die(sizeof(SmallMove *) * ml->capacity);
   for (int i = 0; i < ml->capacity; i++) {
     ml->small_moves[i] = (SmallMove *)malloc_or_die(sizeof(SmallMove));
   }
@@ -591,7 +593,8 @@ static inline void move_list_resize(MoveList *ml, int new_capacity) {
   int old_moves_size = ml->moves_size;
   ml->capacity = new_capacity;
   ml->moves_size = new_capacity + 1;
-  ml->moves = (Move **)realloc_or_die(ml->moves, sizeof(Move *) * ml->moves_size);
+  ml->moves =
+      (Move **)realloc_or_die(ml->moves, sizeof(Move *) * ml->moves_size);
   for (int i = old_moves_size; i < ml->moves_size; i++) {
     ml->moves[i] = move_create();
   }

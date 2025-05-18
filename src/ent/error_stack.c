@@ -5,14 +5,13 @@
 
 #include "../def/error_stack_defs.h"
 
-#include "../util/log.h"
+#include "../util/io.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
 
 #define ERROR_STACK_CAPACITY 100
 
 struct ErrorStack {
-  FILE *fh;
   int size;
   error_code_t error_codes[ERROR_STACK_CAPACITY];
   char *msgs[ERROR_STACK_CAPACITY];
@@ -20,7 +19,6 @@ struct ErrorStack {
 
 ErrorStack *error_stack_create(void) {
   ErrorStack *error_stack = malloc_or_die(sizeof(ErrorStack));
-  error_stack->fh = stderr;
   error_stack->size = 0;
   for (int i = 0; i < ERROR_STACK_CAPACITY; i++) {
     error_stack->error_codes[i] = ERROR_STATUS_SUCCESS;
@@ -90,10 +88,7 @@ void error_stack_print(ErrorStack *error_stack) {
   if (!error_string) {
     return;
   }
-  fprintf(error_stack->fh, "%s", error_string);
+  // FIXME: move this to new io module
+  fprintf(stderr, "%s", error_string);
   free(error_string);
-}
-
-void error_stack_set_output(ErrorStack *error_stack, FILE *fh) {
-  error_stack->fh = fh;
 }

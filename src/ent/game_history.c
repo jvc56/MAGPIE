@@ -10,7 +10,7 @@
 #include "rack.h"
 #include "validated_move.h"
 
-#include "../util/log.h"
+#include "../util/io.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
 

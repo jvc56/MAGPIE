@@ -28,7 +28,7 @@
 
 #include "../str/inference_string.h"
 
-#include "../util/log.h"
+#include "../util/io.h"
 #include "../util/util.h"
 
 typedef struct Inference {

@@ -8,7 +8,7 @@
 
 #include "string_util.h"
 
-#include "../util/log.h"
+#include "../util/io.h"
 #include "../util/util.h"
 
 #define STRING_LIST_INITIAL_CAPACITY 10
@@ -835,7 +835,8 @@ struct StringList {
 
 StringList *string_list_create(void) {
   StringList *string_list = malloc_or_die(sizeof(StringList));
-  string_list->strings = malloc_or_die(sizeof(char *) * STRING_LIST_INITIAL_CAPACITY);
+  string_list->strings =
+      malloc_or_die(sizeof(char *) * STRING_LIST_INITIAL_CAPACITY);
   string_list->count = 0;
   string_list->capacity = STRING_LIST_INITIAL_CAPACITY;
   return string_list;
@@ -843,8 +844,8 @@ StringList *string_list_create(void) {
 
 void string_list_add_string(StringList *string_list, const char *str) {
   if (string_list->count == string_list->capacity) {
-    string_list->strings = realloc_or_die(string_list->strings,
-                                          sizeof(char *) * string_list->capacity * 2);
+    string_list->strings = realloc_or_die(
+        string_list->strings, sizeof(char *) * string_list->capacity * 2);
     string_list->capacity *= 2;
   }
 

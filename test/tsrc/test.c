@@ -20,7 +20,6 @@
 #include "endgame_test.h"
 #include "equity_adjustment_test.h"
 #include "equity_test.h"
-#include "file_handler_test.h"
 #include "game_test.h"
 #include "gameplay_test.h"
 #include "gcg_test.h"
@@ -96,7 +95,6 @@ static TestEntry test_table[] = {
     {"words", test_words},
     {"wordprune", test_word_prune},
     {"kwgmaker", test_kwg_maker},
-    {"fh", test_file_handler},
     {"cgp", test_cgp},
     {"rl", test_rack_list},
     {"ch", test_checkpoint},

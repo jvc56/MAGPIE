@@ -9,7 +9,7 @@
 #include "kwg_maker.h"
 #include "wmp_maker.h"
 
-#include "../util/log.h"
+#include "../util/io.h"
 #include "../util/string_util.h"
 
 void convert_from_text_with_dwl(const LetterDistribution *ld,

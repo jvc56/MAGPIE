@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include <time.h>
 
-#include "../util/log.h"
+#include "../util/io.h"
 #include "../util/util.h"
 
 // Not thread safe

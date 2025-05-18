@@ -17,7 +17,7 @@
 #include "../ent/bai_result.h"
 #include "../ent/thread_control.h"
 
-#include "../util/log.h"
+#include "../util/io.h"
 #include "../util/util.h"
 
 #include "bai_helper.h"

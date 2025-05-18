@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#include "../util/log.h"
+#include "../util/io.h"
 #include "../util/string_util.h"
 
 #define KWG_EXTENSION ".kwg"

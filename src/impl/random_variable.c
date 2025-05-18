@@ -14,7 +14,7 @@
 
 #include "../str/sim_string.h"
 
-#include "../util/log.h"
+#include "../util/io.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
 

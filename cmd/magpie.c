@@ -2,4 +2,4 @@
 
 #include <stdio.h>
 
-int main(int argc, char *argv[]) { process_command(argc, argv, stderr); }
+int main(int argc, char *argv[]) { process_command(argc, argv); }

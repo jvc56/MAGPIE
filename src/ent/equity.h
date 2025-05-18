@@ -7,7 +7,7 @@
 
 #include "../def/equity_defs.h"
 
-#include "../util/log.h"
+#include "../util/io.h"
 
 typedef int32_t Equity;
 
@@ -80,8 +80,7 @@ static inline Equity int_to_equity(int x) {
   if (x > EQUITY_MAX_DOUBLE || x < EQUITY_MIN_DOUBLE) {
     log_fatal("equity value out of range: %f", x);
   }
-  return  x * EQUITY_RESOLUTION;
+  return x * EQUITY_RESOLUTION;
 }
-
 
 #endif

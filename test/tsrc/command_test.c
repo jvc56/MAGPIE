@@ -8,9 +8,6 @@
 #include "../../src/def/config_defs.h"
 #include "../../src/def/error_stack_defs.h"
 #include "../../src/def/exec_defs.h"
-#include "../../src/def/file_handler_defs.h"
-
-#include "../../src/ent/file_handler.h"
 
 #include "../../src/impl/exec.h"
 
@@ -408,8 +405,7 @@ void test_process_command(const char *arg_string,
 
   MainArgs *main_args = get_main_args_from_string(arg_string_with_outfile);
 
-  printf("created error out: >%p<\n", errorout_fh);
-  process_command(main_args->argc, main_args->argv, errorout_fh);
+  process_command(main_args->argc, main_args->argv);
   main_args_destroy(main_args);
 
   char *test_output = get_string_from_file(test_output_filename);
@@ -564,9 +560,6 @@ void test_exec_ucgi_command(void) {
                  process_args);
   pthread_detach(cmd_execution_thread);
 
-  FileHandler *input_writer = file_handler_create_from_filename(
-      test_input_filename, FILE_HANDLER_MODE_WRITE);
-
   sleep(1);
   file_handler_write(input_writer,
                      "set -r1 best -r2 best -it 1 -numplays 1 -threads 1\n");
@@ -619,9 +612,6 @@ void test_exec_console_command(void) {
   pthread_create(&cmd_execution_thread, NULL, test_process_command_async,
                  process_args);
   pthread_detach(cmd_execution_thread);
-
-  FileHandler *input_writer = file_handler_create_from_filename(
-      test_input_filename, FILE_HANDLER_MODE_WRITE);
 
   file_handler_write(
       input_writer, "infer 1 DGINR 18 -numplays 7 -threads 4 -pfreq 1000000\n");

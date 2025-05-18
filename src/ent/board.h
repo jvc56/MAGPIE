@@ -15,7 +15,7 @@
 
 #include "letter_distribution.h"
 
-#include "../util/log.h"
+#include "../util/io.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
 
@@ -306,7 +306,7 @@ static inline void board_set_cross_set_letter(Board *b, int row, int col,
 // Board: Cross score
 
 static inline Equity board_get_cross_score(const Board *b, int row, int col,
-                                        int dir, int ci) {
+                                           int dir, int ci) {
   return square_get_cross_score(
       board_get_readonly_square(b, row, col, dir, ci));
 }

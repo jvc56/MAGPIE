@@ -14,7 +14,7 @@
 #include "../ent/bit_rack.h"
 
 #include "../util/fileproxy.h"
-#include "../util/log.h"
+#include "../util/io.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
 
@@ -436,9 +436,7 @@ wfl_get_double_blank_entry(const WMPForLength *wfl, const BitRack *bit_rack) {
   return NULL;
 }
 
-static inline const char* wmp_get_name(const WMP *wmp) {
-  return wmp->name;
-}
+static inline const char *wmp_get_name(const WMP *wmp) { return wmp->name; }
 
 static inline const WMPEntry *
 wmp_get_word_entry(const WMP *wmp, const BitRack *bit_rack, int word_length) {

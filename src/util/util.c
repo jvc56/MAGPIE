@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "log.h"
+#include "io.h"
 
 void *malloc_or_die(size_t size) {
   void *uncasted_pointer = malloc(size);

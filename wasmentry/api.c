@@ -1,4 +1,4 @@
-#include "../util/log.h"
+#include "../util/io.h"
 
 int main(void) {
   log_set_level(LOG_INFO);

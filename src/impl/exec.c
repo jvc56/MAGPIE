@@ -8,14 +8,12 @@
 #include "../def/config_defs.h"
 #include "../def/error_stack_defs.h"
 #include "../def/exec_defs.h"
-#include "../def/file_handler_defs.h"
 #include "../def/game_defs.h"
 #include "../def/inference_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../def/validated_move_defs.h"
 
 #include "../ent/error_stack.h"
-#include "../ent/file_handler.h"
 #include "../ent/game.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
@@ -35,7 +33,7 @@
 #include "../str/sim_string.h"
 
 #include "../util/fileproxy.h"
-#include "../util/log.h"
+#include "../util/io.h"
 #include "../util/string_util.h"
 
 #define UCGI_COMMAND_STRING "ucgi"
@@ -92,15 +90,8 @@ void execute_command_sync_or_async(CommandArgs *command_args,
     return;
   }
 
-  // Loading the config should always be
-  // done synchronously to prevent deadlock
-  // since the config load
-  // needs to lock the infile FileHandler
-  // to potentially change it but the
-  // getline to read the next input
-  // also locks the in FileHandler
-  // Loading the config is relatively
-  // fast so humans shouldn't notice anything
+  // Loading the config should always be done synchronously and then start the
+  // execution asynchronously (if enabled)
   error_stack_reset(error_stack);
   config_load_command(config, command, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -159,16 +150,13 @@ void command_scan_loop(CommandArgs *command_args,
   while (1) {
     exec_mode_t exec_mode = config_get_exec_mode(config);
 
-    FileHandler *infile = thread_control_get_infile(thread_control);
-
-    if (exec_mode == EXEC_MODE_CONSOLE &&
-        strings_equal(STDIN_FILENAME, file_handler_get_filename(infile))) {
+    if (exec_mode == EXEC_MODE_CONSOLE) {
       thread_control_print(thread_control, "magpie>");
     }
 
     free(input);
 
-    input = file_handler_get_line(infile);
+    input = read_line_from_stdin();
     if (!input) {
       // NULL input indicates an EOF
       break;
@@ -214,9 +202,9 @@ void caches_destroy(void) {
   fileproxy_destroy_cache();
 }
 
-void process_command(int argc, char *argv[], FILE *errorout) {
+void process_command(int argc, char *argv[]) {
+  log_set_level(LOG_FATAL);
   ErrorStack *error_stack = error_stack_create();
-  error_stack_set_output(error_stack, errorout);
   Config *config = config_create_default(error_stack);
   if (error_stack_is_empty(error_stack)) {
     CommandArgs command_args = {
@@ -231,9 +219,5 @@ void process_command(int argc, char *argv[], FILE *errorout) {
     error_stack_print(error_stack);
   }
   config_destroy(config);
-  if (errorout != stderr) {
-    fflush(errorout);
-    fclose(errorout);
-  }
   error_stack_destroy(error_stack);
 }

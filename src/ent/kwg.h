@@ -9,7 +9,7 @@
 #include "../def/kwg_defs.h"
 
 #include "../util/fileproxy.h"
-#include "../util/log.h"
+#include "../util/io.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
 
@@ -95,7 +95,7 @@ static inline uint64_t kwg_get_letter_sets(const KWG *kwg, uint32_t node_index,
     const uint32_t t = kwg_node_tile(node);
     const uint64_t bit = ((uint64_t)1 << t) ^ !t;
     es |= bit;
-    ls |= bit & (uint64_t) - (int64_t)kwg_node_accepts(node);
+    ls |= bit & (uint64_t)-(int64_t)kwg_node_accepts(node);
     if (kwg_node_is_end(node)) {
       break;
     }
