@@ -971,15 +971,11 @@ void execute_autoplay(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  printf("setting options with >%s<\n",
-         config_get_parg_value(config, ARG_TOKEN_AUTOPLAY, 0));
-
   autoplay_results_set_options(
       config->autoplay_results,
       config_get_parg_value(config, ARG_TOKEN_AUTOPLAY, 0), error_stack);
 
   if (!error_stack_is_empty(error_stack)) {
-    printf("set options autoplay error\n");
     return;
   }
 

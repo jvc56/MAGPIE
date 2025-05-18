@@ -90,13 +90,10 @@ void error_stack_print(ErrorStack *error_stack) {
   if (!error_string) {
     return;
   }
-  printf("ERROR STACK PRINTING: %s\n", error_string);
-  printf("printing error out to: >%p<\n", error_stack->fh);
   fprintf(error_stack->fh, "%s", error_string);
   free(error_string);
 }
 
 void error_stack_set_output(ErrorStack *error_stack, FILE *fh) {
-  printf("setting error out to: >%p<\n", fh);
   error_stack->fh = fh;
 }
