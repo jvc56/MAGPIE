@@ -593,10 +593,23 @@ void validate_game_event_order_and_index(GameEvent *game_event,
   case GAME_EVENT_TIME_PENALTY:
   case GAME_EVENT_END_RACK_POINTS:
     if (!game_is_over) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_GCG_PARSE_PHONY_TILES_RETURNED_MISMATCH,
-          string_duplicate(
-              "encountered an end of game event before the game ended"));
+      char *err_str;
+      if (game_event_type == GAME_EVENT_END_RACK_PENALTY) {
+        err_str = string_duplicate(
+            "encountered an end rack penalty event before the game "
+            "ended");
+      } else if (game_event_type == GAME_EVENT_END_RACK_POINTS) {
+        err_str = string_duplicate(
+            "encountered an end rack points event before the game "
+            "ended");
+      } else {
+        err_str = string_duplicate(
+            "encountered an end time penalty event before the game "
+            "ended");
+      }
+      error_stack_push(error_stack,
+                       ERROR_STATUS_GCG_PARSE_END_GAME_EVENT_BEFORE_GAME_END,
+                       err_str);
       return;
     }
     break;

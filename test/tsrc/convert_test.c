@@ -9,6 +9,14 @@
 #include "test_constants.h"
 #include "test_util.h"
 
+void convert_and_assert_status(ConversionArgs *args, ConversionResults *results,
+                               error_code_t expected_status) {
+  ErrorStack *error_stack = error_stack_create();
+  convert(args, results, error_stack);
+  assert(error_stack_top(error_stack) == expected_status);
+  error_stack_destroy(error_stack);
+}
+
 void test_convert_error(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
@@ -19,63 +27,63 @@ void test_convert_error(void) {
   args.data_paths = NULL;
   args.input_name = NULL;
   args.output_name = NULL;
-  assert(convert(&args, conversion_results) ==
-         CONVERT_STATUS_UNRECOGNIZED_CONVERSION_TYPE);
+  convert_and_assert_status(&args, conversion_results,
+                            ERROR_STATUS_CONVERT_UNRECOGNIZED_CONVERSION_TYPE);
 
   args.conversion_type_string = "text2dawg";
-  assert(convert(&args, conversion_results) == CONVERT_STATUS_INPUT_FILE_ERROR);
+  convert_and_assert_status(&args, conversion_results,
+                            ERROR_STATUS_CONVERT_INPUT_FILE_ERROR);
 
   args.input_name = "some not null name";
-  assert(convert(&args, conversion_results) ==
-         CONVERT_STATUS_OUTPUT_FILE_NOT_WRITABLE);
+  convert_and_assert_status(&args, conversion_results,
+                            ERROR_STATUS_CONVERT_OUTPUT_FILE_NOT_WRITABLE);
 
   args.conversion_type_string = "text2dawg";
   args.data_paths = DEFAULT_TEST_DATA_PATH;
   args.input_name = "CSW21_too_long";
   args.output_name = "CSW21_too_long";
   args.ld = NULL;
-  assert(convert(&args, conversion_results) ==
-         CONVERT_STATUS_MISSING_LETTER_DISTRIBUTION);
+  convert_and_assert_status(&args, conversion_results,
+                            ERROR_STATUS_CONVERT_MISSING_LETTER_DISTRIBUTION);
 
   args.conversion_type_string = "text2dawg";
   args.data_paths = DEFAULT_TEST_DATA_PATH;
   args.input_name = "CSW21_too_long";
   args.output_name = "CSW21_too_long";
   args.ld = config_get_ld(config);
-  assert(convert(&args, conversion_results) ==
-         CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_LONG);
+  convert_and_assert_status(&args, conversion_results,
+                            ERROR_STATUS_CONVERT_TEXT_CONTAINS_WORD_TOO_LONG);
 
   args.conversion_type_string = "text2dawg";
   args.data_paths = DEFAULT_TEST_DATA_PATH;
   args.input_name = "CSW21_too_long_2";
   args.output_name = "CSW21_too_long_2";
   args.ld = config_get_ld(config);
-  assert(convert(&args, conversion_results) ==
-         CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_LONG);
-
+  convert_and_assert_status(&args, conversion_results,
+                            ERROR_STATUS_CONVERT_TEXT_CONTAINS_WORD_TOO_LONG);
   args.conversion_type_string = "text2dawg";
   args.data_paths = DEFAULT_TEST_DATA_PATH;
   args.input_name = "CSW21_invalid_letter";
   args.output_name = "CSW21_invalid_letter";
   args.ld = config_get_ld(config);
-  assert(convert(&args, conversion_results) ==
-         CONVERT_STATUS_TEXT_CONTAINS_INVALID_LETTER);
+  convert_and_assert_status(&args, conversion_results,
+                            ERROR_STATUS_CONVERT_TEXT_CONTAINS_INVALID_LETTER);
 
   args.conversion_type_string = "text2dawg";
   args.data_paths = DEFAULT_TEST_DATA_PATH;
   args.input_name = "CSW21_invalid_blank_letter";
   args.output_name = "CSW21_invalid_blank_letter";
   args.ld = config_get_ld(config);
-  assert(convert(&args, conversion_results) ==
-         CONVERT_STATUS_TEXT_CONTAINS_INVALID_LETTER);
+  convert_and_assert_status(&args, conversion_results,
+                            ERROR_STATUS_CONVERT_TEXT_CONTAINS_INVALID_LETTER);
 
   args.conversion_type_string = "text2dawg";
   args.data_paths = DEFAULT_TEST_DATA_PATH;
   args.input_name = "CSW21_too_short";
   args.output_name = "CSW21_too_short";
   args.ld = config_get_ld(config);
-  assert(convert(&args, conversion_results) ==
-         CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_SHORT);
+  convert_and_assert_status(&args, conversion_results,
+                            ERROR_STATUS_CONVERT_TEXT_CONTAINS_WORD_TOO_SHORT);
 
   conversion_results_destroy(conversion_results);
   config_destroy(config);
@@ -92,9 +100,8 @@ void test_convert_success(void) {
   load_and_exec_config_or_die(config, "set -lex CSW21_dawg_only");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   game = config_get_game(config);
-  vms = validated_moves_create(game, 0, "H8.BRAVO", false, false, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
+  vms = validated_moves_create_and_assert_status(
+      game, 0, "H8.BRAVO", false, false, false, ERROR_STATUS_SUCCESS);
   validated_moves_destroy(vms);
 
   load_and_exec_config_or_die(
@@ -102,9 +109,8 @@ void test_convert_success(void) {
   load_and_exec_config_or_die(config, "set -lex CSW21_gaddag_only");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   game = config_get_game(config);
-  vms = validated_moves_create(game, 0, "H8.CHARLIE", false, false, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
+  vms = validated_moves_create_and_assert_status(
+      game, 0, "H8.CHARLIE", false, false, false, ERROR_STATUS_SUCCESS);
   validated_moves_destroy(vms);
 
   load_and_exec_config_or_die(
@@ -112,9 +118,8 @@ void test_convert_success(void) {
   load_and_exec_config_or_die(config, "set -lex CSW21_dawg_and_gaddag");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   game = config_get_game(config);
-  vms = validated_moves_create(game, 0, "H8.QUEBEC", false, false, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
+  vms = validated_moves_create_and_assert_status(
+      game, 0, "H8.QUEBEC", false, false, false, ERROR_STATUS_SUCCESS);
   validated_moves_destroy(vms);
 
   load_and_exec_config_or_die(config,

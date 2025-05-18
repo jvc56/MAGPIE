@@ -121,7 +121,6 @@ void test_board_layout_correctness(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   Board *board = game_get_board(game);
-  ErrorStack *error_stack = error_stack_create();
   const char *data_paths = config_get_data_paths(config);
 
   assert(board_get_anchor(board, 7, 7, BOARD_HORIZONTAL_DIRECTION));
@@ -268,19 +267,17 @@ void test_board_layout_correctness(void) {
 
   load_cgp_or_die(game, ENTASIS_OPENING_CGP);
 
-  ValidatedMoves *vms = validated_moves_create(game, 0, "7J.FRAWZEY", false,
-                                               false, false, error_stack);
-  assert(error_stack_top(error_stack) ==
-         ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_OUT_OF_BOUNDS);
+  ValidatedMoves *vms = validated_moves_create_and_assert_status(
+      game, 0, "7J.FRAWZEY", false, false, false,
+      ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_OUT_OF_BOUNDS);
   validated_moves_destroy(vms);
 
   // Validate play over block
   load_game_with_test_board(game, data_paths, "5_by_5_bricked_box_15");
 
-  vms = validated_moves_create(game, 0, "8H.FRAWZEY", false, false, false,
-                               error_stack);
-  assert(error_stack_top(error_stack) ==
-         ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_OVER_BRICK);
+  vms = validated_moves_create_and_assert_status(
+      game, 0, "8H.FRAWZEY", false, false, false,
+      ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_OVER_BRICK);
   validated_moves_destroy(vms);
 
   game_destroy(game);

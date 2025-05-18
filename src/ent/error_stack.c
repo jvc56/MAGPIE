@@ -12,6 +12,7 @@
 #define ERROR_STACK_CAPACITY 100
 
 struct ErrorStack {
+  FILE *fh;
   int size;
   error_code_t error_codes[ERROR_STACK_CAPACITY];
   char *msgs[ERROR_STACK_CAPACITY];
@@ -19,6 +20,7 @@ struct ErrorStack {
 
 ErrorStack *error_stack_create(void) {
   ErrorStack *error_stack = malloc_or_die(sizeof(ErrorStack));
+  error_stack->fh = stderr;
   error_stack->size = 0;
   for (int i = 0; i < ERROR_STACK_CAPACITY; i++) {
     error_stack->error_codes[i] = ERROR_STATUS_SUCCESS;
@@ -37,6 +39,9 @@ void error_stack_reset(ErrorStack *error_stack) {
 }
 
 void error_stack_destroy(ErrorStack *error_stack) {
+  if (!error_stack) {
+    return;
+  }
   for (int i = 0; i < ERROR_STACK_CAPACITY; i++) {
     free(error_stack->msgs[i]);
   }
@@ -85,6 +90,13 @@ void error_stack_print(ErrorStack *error_stack) {
   if (!error_string) {
     return;
   }
-  fprintf(stderr, "%s", error_string);
+  printf("ERROR STACK PRINTING: %s\n", error_string);
+  printf("printing error out to: >%p<\n", error_stack->fh);
+  fprintf(error_stack->fh, "%s", error_string);
   free(error_string);
+}
+
+void error_stack_set_output(ErrorStack *error_stack, FILE *fh) {
+  printf("setting error out to: >%p<\n", fh);
+  error_stack->fh = fh;
 }

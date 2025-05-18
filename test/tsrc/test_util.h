@@ -74,9 +74,13 @@ void assert_board_layout_error(const char *data_paths,
                                error_code_t expected_status);
 void load_game_with_test_board(Game *game, const char *data_paths,
                                const char *board_layout_name);
-ValidatedMoves *validated_moves_create_or_die(
+ValidatedMoves *validated_moves_create_and_assert_status(
     const Game *game, int player_index, const char *ucgi_moves_string,
-    bool allow_phonies, bool allow_unknown_exchanges, bool allow_playthrough);
+    bool allow_phonies, bool allow_unknown_exchanges, bool allow_playthrough,
+    error_code_t expected_status);
+error_code_t config_simulate_and_return_status(const Config *config,
+                                               Rack *known_opp_rack,
+                                               SimResults *sim_results);
 void game_play_to_turn_or_die(GameHistory *game_history, Game *game,
                               int turn_index);
 void game_play_to_end_or_die(GameHistory *game_history, Game *game);

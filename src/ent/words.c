@@ -137,7 +137,7 @@ int formed_words_get_word_length(const FormedWords *fw, int word_index) {
   return fw->words[word_index].word_length;
 }
 
-int formed_words_get_word_valid(const FormedWords *fw, int word_index) {
+bool formed_words_get_word_valid(const FormedWords *fw, int word_index) {
   return fw->words[word_index].valid;
 }
 

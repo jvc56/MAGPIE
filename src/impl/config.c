@@ -423,10 +423,10 @@ void string_to_int_or_push_error(const char *int_str_name, const char *int_str,
   }
 }
 
-void load_rack_or_set_error_stack(const char *rack_str,
-                                  const LetterDistribution *ld,
-                                  error_code_t error_code, Rack *rack,
-                                  ErrorStack *error_stack) {
+void load_rack_or_push_to_error_stack(const char *rack_str,
+                                      const LetterDistribution *ld,
+                                      error_code_t error_code, Rack *rack,
+                                      ErrorStack *error_stack) {
   if (rack_set_to_string(ld, rack, rack_str) < 0) {
     error_stack_push(
         error_stack, error_code,
@@ -596,14 +596,17 @@ void execute_cgp_load(Config *config, ErrorStack *error_stack) {
   Game *game_dupe = game_duplicate(config->game);
   game_load_cgp(game_dupe, cgp, error_stack);
   game_destroy(game_dupe);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
+  if (error_stack_is_empty(error_stack)) {
+    // Now that the duplicate game has been successfully loaded
+    // with the cgp, load the actual game. A cgp parse failure
+    // here should be impossible.
+    game_load_cgp(config->game, cgp, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_print(error_stack);
+      log_fatal("cgp load unexpected failed\n");
+    }
+    config_reset_move_list(config);
   }
-  // Now that the duplicate game has been successfully loaded
-  // with the cgp, load the actual game. A cgp parse failure
-  // here should be impossible.
-  game_load_cgp(config->game, cgp, error_stack);
-  config_reset_move_list(config);
   string_builder_destroy(cgp_builder);
 }
 
@@ -632,6 +635,7 @@ void execute_add_moves(Config *config, ErrorStack *error_stack) {
       validated_moves_create(config->game, player_on_turn_index, moves, true,
                              false, false, error_stack);
 
+  // FIXME: maybe move this into validated_moves_create somewhere
   if (error_stack_is_empty(error_stack)) {
     const LetterDistribution *ld = game_get_ld(config->game);
     const Board *board = game_get_board(config->game);
@@ -692,9 +696,9 @@ void execute_set_rack(Config *config, ErrorStack *error_stack) {
   rack_reset(new_rack);
 
   const char *rack_str = config_get_parg_value(config, ARG_TOKEN_RACK, 1);
-  load_rack_or_set_error_stack(rack_str, config->ld,
-                               ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
-                               new_rack, error_stack);
+  load_rack_or_push_to_error_stack(rack_str, config->ld,
+                                   ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
+                                   new_rack, error_stack);
 
   if (error_stack_is_empty(error_stack)) {
     if (rack_is_drawable(config->game, player_index, new_rack)) {
@@ -794,9 +798,10 @@ void execute_sim(Config *config, ErrorStack *error_stack) {
 
   if (known_opp_rack_str) {
     known_opp_rack = rack_create(ld_get_size(game_get_ld(config->game)));
-    load_rack_or_set_error_stack(known_opp_rack_str, game_get_ld(config->game),
-                                 ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
-                                 known_opp_rack, error_stack);
+    load_rack_or_push_to_error_stack(
+        known_opp_rack_str, game_get_ld(config->game),
+        ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, known_opp_rack,
+        error_stack);
     if (!error_stack_is_empty(error_stack)) {
       rack_destroy(known_opp_rack);
       return;
@@ -874,9 +879,10 @@ void execute_infer_with_rack(Config *config, Rack *target_played_tiles,
     }
   } else {
     const LetterDistribution *ld = game_get_ld(config->game);
-    load_rack_or_set_error_stack(target_played_tiles_or_num_exch_str, ld,
-                                 ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
-                                 target_played_tiles, error_stack);
+    load_rack_or_push_to_error_stack(
+        target_played_tiles_or_num_exch_str, ld,
+        ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, target_played_tiles,
+        error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
@@ -965,11 +971,15 @@ void execute_autoplay(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  printf("setting options with >%s<\n",
+         config_get_parg_value(config, ARG_TOKEN_AUTOPLAY, 0));
+
   autoplay_results_set_options(
       config->autoplay_results,
       config_get_parg_value(config, ARG_TOKEN_AUTOPLAY, 0), error_stack);
 
   if (!error_stack_is_empty(error_stack)) {
+    printf("set options autoplay error\n");
     return;
   }
 
@@ -1172,7 +1182,8 @@ void config_load_parsed_args(Config *config, StringSplitter *cmd_split_string,
 
       if (current_parg->exec_func != execute_fatal) {
         if (i > 0) {
-          error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_DUPLICATE_ARG,
+          error_stack_push(error_stack,
+                           ERROR_STATUS_CONFIG_LOAD_MISPLACED_COMMAND,
                            get_formatted_string(
                                "encountered unexpected command: %s", arg_name));
           return;
@@ -1368,12 +1379,12 @@ void config_load_lexicon_dependent_data(Config *config,
   }
 
   // Both or neither players must have lexical data
-  if ((!updated_p1_lexicon_name && updated_p2_lexicon_name)) {
+  if (!updated_p1_lexicon_name && updated_p2_lexicon_name) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING,
                      string_duplicate("missing lexicon for player 1"));
     return;
   }
-  if ((updated_p1_lexicon_name && !updated_p2_lexicon_name)) {
+  if (updated_p1_lexicon_name && !updated_p2_lexicon_name) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING,
                      string_duplicate("missing lexicon for player 2"));
     return;
@@ -1390,7 +1401,7 @@ void config_load_lexicon_dependent_data(Config *config,
       error_stack_push(
           error_stack, ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING,
           string_duplicate(
-              "cannot set leaves or letter distribition with a lexicon"));
+              "cannot set leaves or letter distribition without a lexicon"));
       return;
     } else {
       return;
@@ -1709,6 +1720,9 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     board_layout_load(config->board_layout, config->data_paths,
                       new_board_layout_name, error_stack);
     if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_BOARD_LAYOUT_ERROR,
+          string_duplicate("encountered an error loading the board layout"));
       return;
     }
   }
@@ -1812,7 +1826,7 @@ void config_load_command(Config *config, const char *cmd,
   string_splitter_trim_char(cmd_split_string, ';');
   config_load_parsed_args(config, cmd_split_string, error_stack);
 
-  if (!error_stack_is_empty(error_stack)) {
+  if (error_stack_is_empty(error_stack)) {
     config_load_data(config, error_stack);
   }
 
@@ -1837,9 +1851,14 @@ char *config_get_execute_status(Config *config) {
 
 void config_create_default_internal(Config *config, ErrorStack *error_stack) {
   // Attempt to load fields that might fail first
+  config->data_paths = string_duplicate(DEFAULT_DATA_PATHS);
   config->board_layout =
       board_layout_create_default(config->data_paths, error_stack);
   if (!error_stack_is_empty(error_stack)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_BOARD_LAYOUT_ERROR,
+        string_duplicate(
+            "encountered an error loading the default board layout"));
     return;
   }
 
@@ -1951,7 +1970,6 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack) {
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_EPIGON_CUTOFF, "epigoncutoff", 1, 1,
                     execute_fatal, status_fatal);
-  config->data_paths = string_duplicate(DEFAULT_DATA_PATHS);
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
   config->exec_mode = EXEC_MODE_CONSOLE;

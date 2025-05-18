@@ -678,6 +678,7 @@ void recorder_add_game(Recorder *recorder, const RecorderArgs *args) {
 
 void recorder_finalize(Recorder **recorder_list, int list_size,
                        Recorder *primary_recorder) {
+  printf("prim rec: %p\n", primary_recorder);
   primary_recorder->finalize_func(recorder_list, list_size, primary_recorder);
 }
 
@@ -750,8 +751,10 @@ void autoplay_results_set_options_with_splitter(
   for (int i = 0; i < number_of_options; i++) {
     const char *option_str = string_splitter_get_item(split_options, i);
     if (has_iprefix(option_str, "games")) {
+      printf("adding games to options\n");
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_GAME);
     } else if (has_iprefix(option_str, "fj")) {
+      printf("adding fj to options\n");
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_FJ);
     } else {
       error_stack_push(
@@ -761,7 +764,7 @@ void autoplay_results_set_options_with_splitter(
     }
   }
 
-  if (!error_stack_is_empty(error_stack)) {
+  if (error_stack_is_empty(error_stack)) {
     autoplay_results_set_options_int(autoplay_results, options, NULL);
   }
 }
@@ -892,6 +895,7 @@ void autoplay_results_finalize(AutoplayResults **autoplay_results_list,
     for (int j = 0; j < list_size; j++) {
       recorder_list[j] = autoplay_results_list[j]->recorders[i];
     }
+    printf("finalizing recorder %d\n", i);
     recorder_finalize(recorder_list, list_size, primary->recorders[i]);
   }
   free(recorder_list);

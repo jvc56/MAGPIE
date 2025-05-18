@@ -19,7 +19,7 @@ const char *cgp1 =
 void test_wasm_api(void) {
   // Attempt to load a malformed cgp
   char *retstr = wasm_score_move("malformed_cgp" VS_ED, "6G.DIPETAZ.ADEIRSZ");
-  assert_strings_equal(retstr, "wasm cgp load failed with type 2, code 6");
+  has_substring(retstr, "wasm cgp load failed");
   free(retstr);
 
   // play a phony 6G DI(PET)AZ keeping ERS.

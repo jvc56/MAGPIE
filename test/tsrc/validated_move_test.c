@@ -14,17 +14,16 @@
 #include "test_constants.h"
 #include "test_util.h"
 
-void assert_validated_move_error(
-    Game *game, const char *cgp_str, const char *move_str, int player_index,
-    bool allow_phonies, bool allow_unknown_exchanges, bool allow_playthrough,
-    move_validation_status_t expected_error_status) {
+void assert_validated_move_error(Game *game, const char *cgp_str,
+                                 const char *move_str, int player_index,
+                                 bool allow_phonies,
+                                 bool allow_unknown_exchanges,
+                                 bool allow_playthrough,
+                                 error_code_t expected_error_status) {
   load_cgp_or_die(game, cgp_str);
-  ValidatedMoves *vms =
-      validated_moves_create(game, player_index, move_str, allow_phonies,
-                             allow_unknown_exchanges, allow_playthrough);
-  move_validation_status_t actual_error_status =
-      validated_moves_get_validation_status(vms);
-  assert(actual_error_status == expected_error_status);
+  ValidatedMoves *vms = validated_moves_create_and_assert_status(
+      game, player_index, move_str, allow_phonies, allow_unknown_exchanges,
+      allow_playthrough, expected_error_status);
   validated_moves_destroy(vms);
 }
 
@@ -603,10 +602,8 @@ void test_validated_move_distinct_kwg(void) {
   Rack *player1_rack = player_get_rack(player1);
 
   // Play SPORK, better than best NWL move of PORKS
-  ValidatedMoves *vms =
-      validated_moves_create(game, 0, "8H.SPORK", false, true, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
+  ValidatedMoves *vms = validated_moves_create_and_assert_status(
+      game, 0, "8H.SPORK", false, true, false, ERROR_STATUS_SUCCESS);
   validated_moves_destroy(vms);
 
   rack_set_to_string(ld, player0_rack, "KOPRRSS");
@@ -615,15 +612,14 @@ void test_validated_move_distinct_kwg(void) {
   play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
 
   // Play SCHIZIER, better than best CSW word of SCHERZI
-  vms = validated_moves_create(game, 1, "H8.SCHIZIER", false, true, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
+  vms = validated_moves_create_and_assert_status(
+      game, 1, "H8.SCHIZIER", false, true, false, ERROR_STATUS_SUCCESS);
   assert_move_score(validated_moves_get_move(vms, 0), 146);
   validated_moves_destroy(vms);
 
-  vms = validated_moves_create(game, 1, "M8.SCHERZI", false, true, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED);
+  vms = validated_moves_create_and_assert_status(
+      game, 1, "M8.SCHERZI", false, true, false,
+      ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED);
   validated_moves_destroy(vms);
 
   rack_set_to_string(ld, player1_rack, "CEHIIRZ");
@@ -632,14 +628,13 @@ void test_validated_move_distinct_kwg(void) {
   play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
 
   // Play WIGGLY, not GOLLYWOG because that's NWL only
-  vms = validated_moves_create(game, 0, "11G.WIGGLY", false, true, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
+  vms = validated_moves_create_and_assert_status(
+      game, 0, "11G.WIGGLY", false, true, false, ERROR_STATUS_SUCCESS);
   validated_moves_destroy(vms);
 
-  vms = validated_moves_create(game, 0, "J2.GOLLYWOG", false, true, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED);
+  vms = validated_moves_create_and_assert_status(
+      game, 0, "J2.GOLLYWOG", false, true, false,
+      ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED);
   validated_moves_destroy(vms);
 
   // print_board(game_get_board(game));
@@ -649,14 +644,13 @@ void test_validated_move_distinct_kwg(void) {
   play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
 
   // Play 13C QUEAS(I)ER, not L3 SQUEA(K)ER(Y) because that's CSW only
-  vms = validated_moves_create(game, 1, "13C.QUEASIER", false, true, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
+  vms = validated_moves_create_and_assert_status(
+      game, 1, "13C.QUEASIER", false, true, false, ERROR_STATUS_SUCCESS);
   validated_moves_destroy(vms);
 
-  vms = validated_moves_create(game, 1, "L3.SQUEAKERY", false, true, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED);
+  vms = validated_moves_create_and_assert_status(
+      game, 1, "L3.SQUEAKERY", false, true, false,
+      ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED);
   validated_moves_destroy(vms);
 
   rack_set_to_string(ld, player1_rack, "AEEQRSU");
@@ -674,22 +668,20 @@ void test_validated_move_wordsmog_phonies(void) {
                            "-r1 best -r2 best -numplays 1 -var wordsmog");
   Game *game = config_game_create(config);
 
-  ValidatedMoves *vms =
-      validated_moves_create(game, 0, "8H.TRONGLE", false, true, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED);
+  ValidatedMoves *vms = validated_moves_create_and_assert_status(
+      game, 0, "8H.TRONGLE", false, true, false,
+      ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED);
   validated_moves_destroy(vms);
 
   load_cgp_or_die(game, ENTASIS_OPENING_CGP);
 
-  vms = validated_moves_create(game, 0, "7C.DUOGRNA", false, true, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED);
+  vms = validated_moves_create_and_assert_status(
+      game, 0, "7C.DUOGRNA", false, true, false,
+      ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED);
   validated_moves_destroy(vms);
 
-  vms = validated_moves_create(game, 0, "7C.DUORENA", false, true, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
+  vms = validated_moves_create_and_assert_status(
+      game, 0, "7C.DUORENA", false, true, false, ERROR_STATUS_SUCCESS);
   validated_moves_destroy(vms);
 
   game_destroy(game);
@@ -716,22 +708,19 @@ void test_validated_move_many(void) {
          GAME_EVENT_TILE_PLACEMENT_MOVE);
   validated_moves_destroy(vms);
 
-  vms = validated_moves_create(game, 0, "pass.ABC.AB,ex.4,ex.ABC.DEF,8h.VVU",
-                               false, true, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_EXCESS_PASS_FIELDS);
+  vms = validated_moves_create_and_assert_status(
+      game, 0, "pass.ABC.AB,ex.4,ex.ABC.DEF,8h.VVU", false, true, false,
+      ERROR_STATUS_MOVE_VALIDATION_EXCESS_PASS_FIELDS);
   validated_moves_destroy(vms);
 
-  vms = validated_moves_create(game, 0, "pass,ex.4,ex.ABC.DEF,8h.VVU", false,
-                               true, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_NOT_IN_RACK);
+  vms = validated_moves_create_and_assert_status(
+      game, 0, "pass,ex.4,ex.ABC.DEF,8h.VVU", false, true, false,
+      ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_NOT_IN_RACK);
   validated_moves_destroy(vms);
 
-  vms = validated_moves_create(game, 0, "pass,ex.4,ex.ABC.ABCDEF,8h.VVU", false,
-                               true, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED);
+  vms = validated_moves_create_and_assert_status(
+      game, 0, "pass,ex.4,ex.ABC.ABCDEF,8h.VVU", false, true, false,
+      ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED);
   validated_moves_destroy(vms);
 
   game_destroy(game);

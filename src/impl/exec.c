@@ -214,9 +214,9 @@ void caches_destroy(void) {
   fileproxy_destroy_cache();
 }
 
-void process_command(int argc, char *argv[]) {
-  log_set_level(LOG_WARN);
+void process_command(int argc, char *argv[], FILE *errorout) {
   ErrorStack *error_stack = error_stack_create();
+  error_stack_set_output(error_stack, errorout);
   Config *config = config_create_default(error_stack);
   if (error_stack_is_empty(error_stack)) {
     CommandArgs command_args = {
@@ -231,5 +231,9 @@ void process_command(int argc, char *argv[]) {
     error_stack_print(error_stack);
   }
   config_destroy(config);
+  if (errorout != stderr) {
+    fflush(errorout);
+    fclose(errorout);
+  }
   error_stack_destroy(error_stack);
 }

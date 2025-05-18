@@ -107,7 +107,7 @@ void test_board_all(void) {
   Board *board = game_get_board(game);
   Board *board2 = board_duplicate(board);
 
-  game_load_cgp(game, VS_OXY);
+  load_cgp_or_die(game, VS_OXY);
 
   assert(board_are_bonus_squares_symmetric_by_transposition(board));
   assert(board_are_bonus_squares_symmetric_by_transposition(board2));
@@ -131,7 +131,7 @@ void test_board_all(void) {
 
   game_reset(game);
 
-  game_load_cgp(game, BOTTOM_LEFT_RE_CGP);
+  load_cgp_or_die(game, BOTTOM_LEFT_RE_CGP);
 
   assert(board_get_is_cross_word(board, 13, 0, 0));
   assert(board_get_is_cross_word(board, 13, 1, 0));
@@ -139,22 +139,19 @@ void test_board_all(void) {
   game_reset(game);
 
   rack_set_to_string(ld, player0_rack, "KOPRRSS");
-  ValidatedMoves *vms =
-      validated_moves_create(game, 0, "8H.SPORK", false, true, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
+  ValidatedMoves *vms = validated_moves_create_and_assert_status(
+      game, 0, "8H.SPORK", false, true, false, ERROR_STATUS_SUCCESS);
   play_move(validated_moves_get_move(vms, 0), game, NULL, NULL);
   validated_moves_destroy(vms);
 
   // Play SCHIZIER, better than best CSW word of SCHERZI
   rack_set_to_string(ld, player1_rack, "CAURING");
-  vms = validated_moves_create(game, 1, "H8.SCAURING", false, true, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
+  vms = validated_moves_create_and_assert_status(
+      game, 1, "H8.SCAURING", false, true, false, ERROR_STATUS_SUCCESS);
   play_move(validated_moves_get_move(vms, 0), game, NULL, NULL);
   validated_moves_destroy(vms);
 
-  game_load_cgp(game, VS_ED);
+  load_cgp_or_die(game, VS_ED);
 
   assert(!board_get_anchor(board, 3, 3, 0) &&
          !board_get_anchor(board, 3, 3, 1));

@@ -152,9 +152,8 @@ void assert_command_status_and_output(Config *config,
 
   FILE *errorout_fh = fopen(test_outerror_filename, "w");
 
-  log_set_error_out(errorout_fh);
-
   ErrorStack *error_stack = error_stack_create();
+  error_stack_set_output(error_stack, errorout_fh);
   CommandArgs command_args = {
       .config = config,
       .error_stack = error_stack,
@@ -407,11 +406,10 @@ void test_process_command(const char *arg_string,
 
   FILE *errorout_fh = fopen(test_outerror_filename, "w");
 
-  log_set_error_out(errorout_fh);
-
   MainArgs *main_args = get_main_args_from_string(arg_string_with_outfile);
 
-  process_command(main_args->argc, main_args->argv);
+  printf("created error out: >%p<\n", errorout_fh);
+  process_command(main_args->argc, main_args->argv, errorout_fh);
   main_args_destroy(main_args);
 
   char *test_output = get_string_from_file(test_output_filename);
@@ -456,7 +454,8 @@ void test_process_command(const char *arg_string,
 
 void test_exec_single_command(void) {
   char *plies_error_substr = get_formatted_string(
-      "code %d", ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
+      "error %d", ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
+  printf("testing single command\n");
   test_process_command("sim -lex CSW21 -it 1000 -plies 2h3", 0, NULL, 1,
                        plies_error_substr);
   free(plies_error_substr);
@@ -497,7 +496,7 @@ void test_exec_file_commands(void) {
       get_formatted_string("infile %s", commands_filename);
 
   char *iter_error_substr = get_formatted_string(
-      "code %d", ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
+      "error %d", ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
 
   test_process_command(commands_file_invocation, 517,
                        "info infertotalracks 6145", 1, iter_error_substr);
@@ -611,7 +610,7 @@ void test_exec_console_command(void) {
       get_formatted_string("cgp %s -infile %s", EMPTY_CGP, test_input_filename);
 
   char *config_load_error_substr = get_formatted_string(
-      "code %d", ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
+      "error %d", ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
 
   ProcessArgs *process_args = process_args_create(
       initial_command, 41, "autoplay games 20", 1, config_load_error_substr);

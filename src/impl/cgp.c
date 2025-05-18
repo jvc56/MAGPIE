@@ -129,7 +129,7 @@ void parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
       error_stack_push(
           error_stack, ERROR_STATUS_CGP_PARSE_MALFORMED_RACK_LETTERS,
           get_formatted_string(
-              "failed to parse rack for player %d: %s", player_index,
+              "failed to parse rack for player %d: %s", player_index + 1,
               string_splitter_get_item(player_racks, player_index)));
       return;
     }
@@ -137,7 +137,8 @@ void parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
       error_stack_push(
           error_stack, ERROR_STATUS_CGP_PARSE_RACK_LETTERS_NOT_IN_BAG,
           get_formatted_string(
-              "rack not available in the bag for player %d: %s", player_index,
+              "rack not available in the bag for player %d: %s",
+              player_index + 1,
               string_splitter_get_item(player_racks, player_index)));
       return;
     }
@@ -175,7 +176,7 @@ void parse_cgp_scores(Game *game, const char *cgp_scores,
         error_stack_push(
             error_stack, ERROR_STATUS_CGP_PARSE_MALFORMED_SCORES,
             get_formatted_string(
-                "cgp has invalid score for player %d: %s", player_index,
+                "cgp has invalid score for player %d: %s", player_index + 1,
                 string_splitter_get_item(player_scores, player_index)));
       }
       player_set_score(game_get_player(game, player_index),

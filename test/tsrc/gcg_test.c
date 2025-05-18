@@ -28,6 +28,7 @@ error_code_t test_parse_gcg(const char *gcg_filename, Config *config,
   ErrorStack *error_stack = error_stack_create();
   parse_gcg(gcg_filepath, config, game_history, error_stack);
   error_code_t gcg_parse_status = error_stack_top(error_stack);
+  error_stack_destroy(error_stack);
   free(gcg_filepath);
   return gcg_parse_status;
 }
@@ -38,7 +39,12 @@ void test_single_error_case(const char *gcg_filename, Config *config,
   error_code_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
   game_history_destroy(game_history);
-  assert(gcg_parse_status == expected_gcg_parse_status);
+  const bool ok = gcg_parse_status == expected_gcg_parse_status;
+  if (!ok) {
+    printf("gcg parse status mismatched:\nexpected: %d\nactual: %d\n>%s<\n",
+           expected_gcg_parse_status, gcg_parse_status, gcg_filename);
+    assert(0);
+  }
 }
 
 void test_error_cases(void) {

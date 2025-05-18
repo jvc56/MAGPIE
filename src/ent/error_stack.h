@@ -2,6 +2,7 @@
 #define ERROR_STACK_H
 
 #include <stdbool.h>
+#include <stdio.h>
 
 #include "../def/error_stack_defs.h"
 
@@ -16,5 +17,6 @@ error_code_t error_stack_top(ErrorStack *error_stack);
 char *error_stack_string(ErrorStack *error_stack);
 void error_stack_print(ErrorStack *error_stack);
 bool error_stack_is_empty(ErrorStack *error_stack);
+void error_stack_set_output(ErrorStack *error_stack, FILE *fh);
 
 #endif

@@ -561,7 +561,8 @@ void validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
         if (!formed_words_get_word_valid(vm->formed_words, i)) {
           error_stack_push(
               error_stack, ERROR_STATUS_MOVE_VALIDATION_PHONY_WORD_FORMED,
-              get_formatted_string("expected valid play be got phony: %s",
+              get_formatted_string("expected valid play but detected at least "
+                                   "one phony for play: %s",
                                    ucgi_move_string));
           return;
         }

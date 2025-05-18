@@ -24,8 +24,8 @@ void test_hash_after_making_play(void) {
       player_get_rack(game_get_player(game, 1)), false, 0);
 
   // play a move on the board.
-  ValidatedMoves *vms =
-      validated_moves_create_or_die(game, 0, "15J.END", false, false, false);
+  ValidatedMoves *vms = validated_moves_create_and_assert_status(
+      game, 0, "15J.END", false, false, false, ERROR_STATUS_SUCCESS);
 
   const LetterDistribution *ld = game_get_ld(game);
   uint32_t ld_size = ld_get_size(ld);
@@ -70,8 +70,8 @@ void test_hash_after_making_blank_play(void) {
       player_get_rack(game_get_player(game, 1)), false, 0);
 
   // play 6m (x)u
-  ValidatedMoves *vms =
-      validated_moves_create_or_die(game, 0, "6m.xu", false, false, false);
+  ValidatedMoves *vms = validated_moves_create_and_assert_status(
+      game, 0, "6m.xu", false, false, false, ERROR_STATUS_SUCCESS);
 
   const LetterDistribution *ld = game_get_ld(game);
   uint32_t ld_size = ld_get_size(ld);
@@ -115,8 +115,8 @@ void test_hash_after_passing(void) {
       player_get_rack(game_get_player(game, 1)), false, 0);
 
   // play a move on the board.
-  ValidatedMoves *vms =
-      validated_moves_create_or_die(game, 0, "pass", false, false, false);
+  ValidatedMoves *vms = validated_moves_create_and_assert_status(
+      game, 0, "pass", false, false, false, ERROR_STATUS_SUCCESS);
 
   const LetterDistribution *ld = game_get_ld(game);
   uint32_t ld_size = ld_get_size(ld);
@@ -140,7 +140,8 @@ void test_hash_after_passing(void) {
 
   // play another pass
   validated_moves_destroy(vms);
-  vms = validated_moves_create_or_die(game, 1, "pass", false, false, false);
+  vms = validated_moves_create_and_assert_status(game, 1, "pass", false, false,
+                                                 false, ERROR_STATUS_SUCCESS);
 
   rack_set_to_string(ld, rack, "AHIILMM");
 

@@ -297,6 +297,7 @@ void load_cgp_or_die(Game *game, const char *cgp) {
   if (!error_stack_is_empty(error_stack)) {
     log_fatal("cgp load failed with %d\n", error_stack_top(error_stack));
   }
+  error_stack_destroy(error_stack);
 }
 
 void game_play_to_turn_or_die(GameHistory *game_history, Game *game,
@@ -655,19 +656,31 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
   error_stack_destroy(error_stack);
 }
 
-ValidatedMoves *validated_moves_create_or_die(
+ValidatedMoves *validated_moves_create_and_assert_status(
     const Game *game, int player_index, const char *ucgi_moves_string,
-    bool allow_phonies, bool allow_unknown_exchanges, bool allow_playthrough) {
+    bool allow_phonies, bool allow_unknown_exchanges, bool allow_playthrough,
+    error_code_t expected_status) {
   ErrorStack *error_stack = error_stack_create();
   ValidatedMoves *vms = validated_moves_create(
       game, player_index, ucgi_moves_string, allow_phonies,
       allow_unknown_exchanges, allow_playthrough, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
+  const bool ok = error_stack_top(error_stack) == expected_status;
+  if (!ok) {
+    printf("validated_moves_create failed for %s\n", ucgi_moves_string);
     error_stack_print(error_stack);
-    abort();
   }
   error_stack_destroy(error_stack);
   return vms;
+}
+
+error_code_t config_simulate_and_return_status(const Config *config,
+                                               Rack *known_opp_rack,
+                                               SimResults *sim_results) {
+  ErrorStack *error_stack = error_stack_create();
+  config_simulate(config, known_opp_rack, sim_results, error_stack);
+  error_code_t status = error_stack_top(error_stack);
+  error_stack_destroy(error_stack);
+  return status;
 }
 
 ValidatedMoves *assert_validated_move_success(Game *game, const char *cgp_str,

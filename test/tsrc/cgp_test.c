@@ -38,7 +38,7 @@ void assert_game_matches_cgp_with_options(const Config *config,
 }
 
 void assert_cgp_load_and_write_are_equal(Game *game, const char *load_cgp) {
-  game_load_cgp(game, load_cgp);
+  load_cgp_or_die(game, load_cgp);
   assert_game_matches_cgp(game, load_cgp, true);
 }
 
@@ -46,11 +46,9 @@ void play_move_and_validate_cgp(Game *game, const char *move_string,
                                 const char *rack_string,
                                 const char *expected_cgp,
                                 bool write_player_on_turn_first) {
-  ValidatedMoves *vms =
-      validated_moves_create(game, game_get_player_on_turn_index(game),
-                             move_string, false, false, false);
-  assert(validated_moves_get_validation_status(vms) ==
-         ERROR_STATUS_MOVE_VALIDATION_SUCCESS);
+  ValidatedMoves *vms = validated_moves_create_and_assert_status(
+      game, game_get_player_on_turn_index(game), move_string, false, false,
+      false, ERROR_STATUS_SUCCESS);
   assert(validated_moves_get_number_of_moves(vms) == 1);
   const Move *move = validated_moves_get_move(vms, 0);
   int player_on_turn_index = game_get_player_on_turn_index(game);
