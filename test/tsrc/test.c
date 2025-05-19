@@ -1,6 +1,6 @@
 #include "../../src/impl/exec.h"
 
-#include "../../src/util/log.h"
+#include "../../src/util/io.h"
 
 #include "alphabet_test.h"
 #include "autoplay_test.h"
@@ -87,8 +87,7 @@ static TestEntry test_table[] = {
     {"sim", test_sim},
     {"math", test_math_util},
     {"bai", test_bai},
-    // FIXME: uncomment once I/O is fixed
-    // {"command", test_command},
+    {"command", test_command},
     {"gcg", test_gcg},
     {"autoplay", test_autoplay},
     {"wasm", test_wasm_api},

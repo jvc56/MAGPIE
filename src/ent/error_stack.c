@@ -88,7 +88,6 @@ void error_stack_print(ErrorStack *error_stack) {
   if (!error_string) {
     return;
   }
-  // FIXME: move this to new io module
-  fprintf(stderr, "%s", error_string);
+  write_to_stream_err(error_string);
   free(error_string);
 }

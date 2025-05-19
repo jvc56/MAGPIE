@@ -11,7 +11,7 @@
 
 #include "../../src/impl/exec.h"
 
-#include "../../src/util/log.h"
+#include "../../src/util/io.h"
 #include "../../src/util/string_util.h"
 #include "../../src/util/util.h"
 
@@ -133,24 +133,23 @@ void block_for_process_command(ProcessArgs *process_args, int max_seconds) {
   }
 }
 
-void assert_command_status_and_output(Config *config,
-                                      const char *command_without_io,
+void assert_command_status_and_output(Config *config, const char *command,
                                       bool should_exit, int seconds_to_wait,
                                       int expected_output_line_count,
                                       int expected_outerror_line_count) {
   char *test_output_filename = get_test_filename("output");
   char *test_outerror_filename = get_test_filename("outerror");
 
-  char *command = get_formatted_string("%s -outfile %s", command_without_io,
-                                       test_output_filename);
-
   // Reset the contents of output
   fclose(fopen(test_output_filename, "w"));
 
+  FILE *output_fh = fopen(test_output_filename, "w");
   FILE *errorout_fh = fopen(test_outerror_filename, "w");
 
+  io_set_stream_out(output_fh);
+  io_set_stream_err(errorout_fh);
+
   ErrorStack *error_stack = error_stack_create();
-  error_stack_set_output(error_stack, errorout_fh);
   CommandArgs command_args = {
       .config = config,
       .error_stack = error_stack,
@@ -175,7 +174,7 @@ void assert_command_status_and_output(Config *config,
   int newlines_in_output = count_newlines(test_output);
   bool fail_test = false;
   if (newlines_in_output != expected_output_line_count) {
-    printf("%s\noutput counts do not match %d != %d\n", command_without_io,
+    printf("%s\noutput counts do not match %d != %d\n", command,
            newlines_in_output, expected_output_line_count);
     printf("got:\n%s", test_output);
     fail_test = true;
@@ -198,7 +197,9 @@ void assert_command_status_and_output(Config *config,
   free(test_outerror);
   free(test_output_filename);
   free(test_outerror_filename);
-  free(command);
+  io_reset_stream_out();
+  io_reset_stream_err();
+  error_stack_destroy(error_stack);
 }
 
 void test_command_execution(void) {
@@ -395,15 +396,19 @@ void test_process_command(const char *arg_string,
   char *test_output_filename = get_test_filename("output");
   char *test_outerror_filename = get_test_filename("outerror");
 
-  char *arg_string_with_outfile = get_formatted_string(
-      "./bin/magpie %s -outfile %s", arg_string, test_output_filename);
+  char *arg_string_with_exec =
+      get_formatted_string("./bin/magpie %s", arg_string);
 
   // Reset the contents of output
   fclose(fopen(test_output_filename, "w"));
 
+  FILE *output_fh = fopen(test_output_filename, "w");
   FILE *errorout_fh = fopen(test_outerror_filename, "w");
 
-  MainArgs *main_args = get_main_args_from_string(arg_string_with_outfile);
+  io_set_stream_out(output_fh);
+  io_set_stream_err(errorout_fh);
+
+  MainArgs *main_args = get_main_args_from_string(arg_string_with_exec);
 
   process_command(main_args->argc, main_args->argv);
   main_args_destroy(main_args);
@@ -445,7 +450,7 @@ void test_process_command(const char *arg_string,
   delete_file(test_outerror_filename);
   free(test_output_filename);
   free(test_outerror_filename);
-  free(arg_string_with_outfile);
+  free(arg_string_with_exec);
 }
 
 void test_exec_single_command(void) {
@@ -547,13 +552,11 @@ void *test_process_command_async(void *uncasted_process_args) {
 void test_exec_ucgi_command(void) {
   char *test_input_filename = get_test_filename("input");
 
-  fifo_create(test_input_filename);
+  FILE *input_writer = fopen(test_input_filename, "w");
+  io_set_stream_in(input_writer);
 
-  char *initial_command =
-      get_formatted_string("set -mode ucgi -infile %s", test_input_filename);
-
-  ProcessArgs *process_args =
-      process_args_create(initial_command, 2, "autoplay", 1, "still searching");
+  ProcessArgs *process_args = process_args_create(
+      "set -mode ucgi", 2, "autoplay", 1, "still searching");
 
   pthread_t cmd_execution_thread;
   pthread_create(&cmd_execution_thread, NULL, test_process_command_async,
@@ -561,46 +564,43 @@ void test_exec_ucgi_command(void) {
   pthread_detach(cmd_execution_thread);
 
   sleep(1);
-  file_handler_write(input_writer,
-                     "set -r1 best -r2 best -it 1 -numplays 1 -threads 1\n");
+  fprintf(input_writer, "set -r1 best -r2 best -it 1 -numplays 1 -threads 1\n");
   sleep(1);
-  file_handler_write(
-      input_writer,
-      "autoplay game 1 -lex CSW21 -s1 equity -s2 equity -gp false\n");
+  fprintf(input_writer,
+          "autoplay game 1 -lex CSW21 -s1 equity -s2 equity -gp false\n");
   sleep(1);
-  file_handler_write(
+  fprintf(
       input_writer,
       "autoplay game 10000000 -lex CSW21 -s1 equity -s2 equity  -gp false\n");
   // Try to immediately start another command while the previous one
   // is still running. This should give a warning.
-  file_handler_write(
-      input_writer,
-      "autoplay game 1 -lex CSW21 -s1 equity -s2 equity  -gp false\n");
+  fprintf(input_writer,
+          "autoplay game 1 -lex CSW21 -s1 equity -s2 equity  -gp false\n");
   sleep(1);
   // Interrupt the autoplay which won't finish in 1 second
-  file_handler_write(input_writer, "stop\n");
+  fprintf(input_writer, "stop\n");
   sleep(1);
-  file_handler_write(input_writer, "quit\n");
+  fprintf(input_writer, "quit\n");
   sleep(1);
 
   // Wait for magpie to quit
   block_for_process_command(process_args, 5);
 
-  file_handler_destroy(input_writer);
+  fclose(input_writer);
   delete_fifo(test_input_filename);
   process_args_destroy(process_args);
   free(test_input_filename);
-  free(initial_command);
+  io_reset_stream_in();
 }
 
 void test_exec_console_command(void) {
   char *test_input_filename = get_test_filename("input");
 
-  fifo_create(test_input_filename);
+  FILE *input_writer = fopen(test_input_filename, "w");
+  io_set_stream_in(input_writer);
 
   // infile other than STDIN
-  char *initial_command =
-      get_formatted_string("cgp %s -infile %s", EMPTY_CGP, test_input_filename);
+  char *initial_command = get_formatted_string("cgp %s", EMPTY_CGP);
 
   char *config_load_error_substr = get_formatted_string(
       "error %d", ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
@@ -613,20 +613,20 @@ void test_exec_console_command(void) {
                  process_args);
   pthread_detach(cmd_execution_thread);
 
-  file_handler_write(
-      input_writer, "infer 1 DGINR 18 -numplays 7 -threads 4 -pfreq 1000000\n");
-  file_handler_write(input_writer, "set -r1 best -r2 b -nump 1 -threads 4\n");
-  file_handler_write(
+  write_to_stream(input_writer,
+                  "infer 1 DGINR 18 -numplays 7 -threads 4 -pfreq 1000000\n");
+  write_to_stream(input_writer, "set -r1 best -r2 b -nump 1 -threads 4\n");
+  write_to_stream(
       input_writer,
       "autoplay game 10 -lex CSW21 -s1 equity -s2 equity -gp true \n");
   // Stop should have no effect and appear as an error
-  file_handler_write(input_writer, "stop\n");
-  file_handler_write(input_writer, "quit\n");
+  write_to_stream(input_writer, "stop\n");
+  write_to_stream(input_writer, "quit\n");
 
   // Wait for magpie to quit
   block_for_process_command(process_args, 30);
 
-  file_handler_destroy(input_writer);
+  fclose(input_writer);
   delete_fifo(test_input_filename);
   process_args_destroy(process_args);
   free(config_load_error_substr);

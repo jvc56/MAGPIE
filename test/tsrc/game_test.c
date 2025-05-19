@@ -9,7 +9,7 @@
 #include "../../src/impl/config.h"
 
 #include "../../src/impl/cgp.h"
-#include "../../src/util/log.h"
+#include "../../src/util/io.h"
 
 #include "game_test.h"
 #include "test_constants.h"

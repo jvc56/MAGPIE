@@ -41,7 +41,7 @@
 #include "../../src/str/move_string.h"
 #include "../../src/str/rack_string.h"
 
-#include "../../src/util/log.h"
+#include "../../src/util/io.h"
 #include "../../src/util/string_util.h"
 #include "../../src/util/util.h"
 

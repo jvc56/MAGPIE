@@ -216,7 +216,7 @@ char *data_filepaths_get_writable_filename(const char *data_paths,
 StringList *data_filepaths_get_all_data_path_names(const char *data_paths,
                                                    data_filepath_t type) {
   if (!data_paths) {
-    log_error("data path is null for filepath type %d\n", type);
+    log_fatal("data path is null for filepath type %d\n", type);
     return NULL;
   }
   StringList *file_path_list = string_list_create();
@@ -236,7 +236,7 @@ StringList *data_filepaths_get_all_data_path_names(const char *data_paths,
                                glob_results.gl_pathv[result_idx]);
       }
     } else {
-      log_error("no files matched pattern %s", glob_pattern);
+      log_fatal("no files matched pattern %s", glob_pattern);
     }
     free(glob_pattern);
     globfree(&glob_results);

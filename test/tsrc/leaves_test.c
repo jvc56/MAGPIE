@@ -10,7 +10,7 @@
 
 #include "../../src/impl/config.h"
 
-#include "../../src/util/log.h"
+#include "../../src/util/io.h"
 #include "../../src/util/string_util.h"
 #include "../../src/util/util.h"
 

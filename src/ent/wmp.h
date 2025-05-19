@@ -603,11 +603,11 @@ static inline bool write_wfl_to_stream(int length, const WMPForLength *wfl,
 static inline bool wmp_write_to_file(const WMP *wmp, const char *filename) {
   FILE *stream = fopen(filename, "wb");
   if (!stream) {
-    log_error("could not open file for writing: %s\n", filename);
+    log_fatal("could not open file for writing: %s\n", filename);
     return false;
   }
   if (!write_byte_to_stream(wmp->version, stream)) {
-    log_error("could not write version to stream\n");
+    log_fatal("could not write version to stream\n");
     return false;
   }
   if (!write_byte_to_stream(wmp->board_dim, stream)) {

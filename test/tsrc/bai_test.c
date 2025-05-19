@@ -12,7 +12,7 @@
 
 #include "../../src/impl/bai.h"
 #include "../../src/impl/bai_sampling_rule.h"
-#include "../../src/util/log.h"
+#include "../../src/util/io.h"
 
 static const int sampling_rules[3] = {
     BAI_SAMPLING_RULE_ROUND_ROBIN,

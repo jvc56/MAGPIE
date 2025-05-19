@@ -162,11 +162,7 @@ void thread_control_set_threads(ThreadControl *thread_control,
 
 void thread_control_print(ThreadControl *thread_control, const char *content) {
   pthread_mutex_lock(&thread_control->print_mutex);
-  // FIXME: move this to new I/O module
-  int fprintf_result = fprintf(stdout, "%s", content);
-  if (fprintf_result < 0) {
-    log_fatal("fprintf failed with error code %d\n", fprintf_result);
-  }
+  write_to_stream_out(content);
   pthread_mutex_unlock(&thread_control->print_mutex);
 }
 
