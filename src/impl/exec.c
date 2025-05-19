@@ -203,7 +203,7 @@ void caches_destroy(void) {
 }
 
 void process_command(int argc, char *argv[]) {
-  log_set_level(LOG_FATAL);
+  log_set_level(LOG_WARN);
   ErrorStack *error_stack = error_stack_create();
   Config *config = config_create_default(error_stack);
   if (error_stack_is_empty(error_stack)) {

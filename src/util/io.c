@@ -46,7 +46,7 @@ void write_to_stream_with_vargs(FILE *stream, const bool flush, const char *fmt,
 }
 
 void log_with_info(log_level_t log_level, const char *caller_filename,
-                   int callerline, const char *format, ...) {
+                   int caller_line, const char *format, ...) {
   if (log_level < current_log_level) {
     return;
   }
@@ -67,7 +67,7 @@ void log_with_info(log_level_t log_level, const char *caller_filename,
     level_string = "INFO";
     break;
   case LOG_WARN:
-    output_fh = get_stream_out();
+    output_fh = get_stream_err();
     level_string = "WARN";
     break;
   case LOG_FATAL:
@@ -82,7 +82,7 @@ void log_with_info(log_level_t log_level, const char *caller_filename,
   time_buf[strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S",
                     localtime(&t))] = '\0';
   fprintf(output_fh, "[%s] %-5s %s:%d: ", time_buf, level_string,
-          caller_filename, callerline);
+          caller_filename, caller_line);
   va_list args;
   va_start(args, format);
   write_to_stream_with_vargs(output_fh, false, format, args);
@@ -126,6 +126,7 @@ char *read_line_from_stdin(void) {
   if (read == -1) {
     int error_number = errno;
     if (error_number) {
+      perror("error");
       log_fatal("failed to read from input stream with error: %d\n",
                 error_number);
     } else {

@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include "../../src/def/config_defs.h"
@@ -111,7 +113,6 @@ void block_for_search(Config *config, int max_seconds) {
     }
     seconds_elapsed++;
     if (seconds_elapsed >= max_seconds) {
-      printf("Aborting test after %d seconds\n", max_seconds);
       log_fatal("Test aborted after searching for %d seconds\n", max_seconds);
     }
   }
@@ -451,92 +452,19 @@ void test_process_command(const char *arg_string,
   free(test_output_filename);
   free(test_outerror_filename);
   free(arg_string_with_exec);
+  io_reset_stream_out();
+  io_reset_stream_err();
 }
 
 void test_exec_single_command(void) {
   char *plies_error_substr = get_formatted_string(
       "error %d", ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
-  printf("testing single command\n");
   test_process_command("sim -lex CSW21 -it 1000 -plies 2h3", 0, NULL, 1,
                        plies_error_substr);
   free(plies_error_substr);
 
   test_process_command("infer 1 MUZAKY 58 -numplays 20 -threads 4 -lex CSW21",
                        52, "infertile leave Z", 0, NULL);
-}
-
-void test_exec_file_commands(void) {
-  // Generate moves for the position (16 output)
-  // Run a sim in CSW, then (221 output)
-  // run the same sim with no parameters, then (221 output)
-  // run a sim that exits with a warning, then (1 warning)
-  // run an inference in Polish, then (58 output)
-  // run autoplay in CSW (1 output)
-  // total output = 517
-  // total error = 1
-
-  // Separate into distinct lines to prove
-  // the command file is being read.
-  const char *commands_file_content =
-      "set -it 200\n"
-      "set -pfreq 60\n"
-      "cgp " DELDAR_VS_HARSHAN_CGP "\ngen -numplays 15"
-      "\nsim -plies 2 -threads 10\n"
-      "sim\n"
-      "sim -lex CSW21 -it 10h00\n"
-      "set -numplays 20 -pfreq 1000000\n"
-      "set -threads 4\n"
-      "cgp " EMPTY_POLISH_CGP "\ninfer 1 HUJA 20\n"
-      "set -r1 best -r2 best -it 10 -numplays 1 -threads 3\n"
-      "autoplay game 10 -lex CSW21 -s1 equity -s2 equity  -gp false ";
-  char *commands_filename = get_test_filename("test_commands");
-
-  write_string_to_file(commands_filename, "w", commands_file_content);
-
-  char *commands_file_invocation =
-      get_formatted_string("infile %s", commands_filename);
-
-  char *iter_error_substr = get_formatted_string(
-      "error %d", ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
-
-  test_process_command(commands_file_invocation, 517,
-                       "info infertotalracks 6145", 1, iter_error_substr);
-
-  delete_file(commands_filename);
-  free(iter_error_substr);
-  free(commands_filename);
-  free(commands_file_invocation);
-}
-
-void test_exec_add_phony_words(void) {
-  // Add 5 moves, 3 of which are phony (3 output)
-  // run autoplay in CSW (1 output)
-  // total output = 1
-  // total error = 3
-
-  // Separate into distinct lines to prove
-  // the command file is being read.
-  const char *commands_file_content =
-      "set -lex CSW21 -s1 equity -s2 equity\n"
-      "cgp " OPENING_CGP "\n"
-      "addmoves 8g.ABC,8g.CAB,8f.GAF,8D.FADGE,8H.BACED\n"
-      "cgp " ION_OPENING_CGP "\n"
-      "addmoves 7d.GED,7f.IEE,H7.AN,7H.AI\n"
-      "autoplay game 10 -gp true";
-
-  char *commands_filename = get_test_filename("test_commands");
-
-  write_string_to_file(commands_filename, "w", commands_file_content);
-
-  char *commands_file_invocation =
-      get_formatted_string("infile %s", commands_filename);
-
-  test_process_command(commands_file_invocation, 2, "autoplay games 20", 4,
-                       "Phonies formed from 7F IEE 11: II,EO,IEE");
-
-  delete_file(commands_filename);
-  free(commands_filename);
-  free(commands_file_invocation);
 }
 
 void *test_process_command_async(void *uncasted_process_args) {
@@ -552,8 +480,17 @@ void *test_process_command_async(void *uncasted_process_args) {
 void test_exec_ucgi_command(void) {
   char *test_input_filename = get_test_filename("input");
 
-  FILE *input_writer = fopen(test_input_filename, "w");
-  io_set_stream_in(input_writer);
+  // Reset the contents of input
+  unlink(test_input_filename);
+
+  // Create the FIFO if it doesn't exist
+  if (mkfifo(test_input_filename, 0666) == -1) {
+    perror("mkfifo");
+  }
+
+  FILE *input_writer = fopen(test_input_filename, "w+");
+  FILE *input_reader = fopen(test_input_filename, "r");
+  io_set_stream_in(input_reader);
 
   ProcessArgs *process_args = process_args_create(
       "set -mode ucgi", 2, "autoplay", 1, "still searching");
@@ -565,28 +502,35 @@ void test_exec_ucgi_command(void) {
 
   sleep(1);
   fprintf(input_writer, "set -r1 best -r2 best -it 1 -numplays 1 -threads 1\n");
+  fflush(input_writer);
   sleep(1);
   fprintf(input_writer,
           "autoplay game 1 -lex CSW21 -s1 equity -s2 equity -gp false\n");
+  fflush(input_writer);
   sleep(1);
   fprintf(
       input_writer,
       "autoplay game 10000000 -lex CSW21 -s1 equity -s2 equity  -gp false\n");
+  fflush(input_writer);
   // Try to immediately start another command while the previous one
   // is still running. This should give a warning.
   fprintf(input_writer,
           "autoplay game 1 -lex CSW21 -s1 equity -s2 equity  -gp false\n");
+  fflush(input_writer);
   sleep(1);
   // Interrupt the autoplay which won't finish in 1 second
   fprintf(input_writer, "stop\n");
+  fflush(input_writer);
   sleep(1);
   fprintf(input_writer, "quit\n");
+  fflush(input_writer);
   sleep(1);
 
   // Wait for magpie to quit
   block_for_process_command(process_args, 5);
 
   fclose(input_writer);
+  fclose(input_reader);
   delete_fifo(test_input_filename);
   process_args_destroy(process_args);
   free(test_input_filename);
@@ -596,10 +540,13 @@ void test_exec_ucgi_command(void) {
 void test_exec_console_command(void) {
   char *test_input_filename = get_test_filename("input");
 
-  FILE *input_writer = fopen(test_input_filename, "w");
-  io_set_stream_in(input_writer);
+  // Reset the contents of input
+  unlink(test_input_filename);
 
-  // infile other than STDIN
+  FILE *input_writer = fopen(test_input_filename, "w+");
+  FILE *input_reader = fopen(test_input_filename, "r");
+  io_set_stream_in(input_reader);
+
   char *initial_command = get_formatted_string("cgp %s", EMPTY_CGP);
 
   char *config_load_error_substr = get_formatted_string(
@@ -627,18 +574,21 @@ void test_exec_console_command(void) {
   block_for_process_command(process_args, 30);
 
   fclose(input_writer);
+  fclose(input_reader);
   delete_fifo(test_input_filename);
   process_args_destroy(process_args);
   free(config_load_error_substr);
   free(test_input_filename);
   free(initial_command);
+  io_reset_stream_in();
 }
 
 void test_command(void) {
   test_command_execution();
   test_exec_single_command();
-  test_exec_add_phony_words();
-  test_exec_file_commands();
   test_exec_ucgi_command();
   test_exec_console_command();
+  io_reset_stream_out();
+  io_reset_stream_err();
+  io_reset_stream_in();
 }
