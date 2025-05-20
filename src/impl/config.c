@@ -598,7 +598,7 @@ void execute_cgp_load(Config *config, ErrorStack *error_stack) {
     // here should be impossible.
     game_load_cgp(config->game, cgp, error_stack);
     if (!error_stack_is_empty(error_stack)) {
-      error_stack_print(error_stack);
+      error_stack_print_and_reset(error_stack);
       log_fatal("cgp load unexpected failed\n");
     }
     config_reset_move_list(config);

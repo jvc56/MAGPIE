@@ -50,7 +50,7 @@ void error_stack_destroy(ErrorStack *error_stack) {
 void error_stack_push(ErrorStack *error_stack, error_code_t error_code,
                       char *msg) {
   if (error_stack->size == ERROR_STACK_CAPACITY) {
-    log_fatal("Error stack is full");
+    log_fatal("error stack is full");
   }
   error_stack->error_codes[error_stack->size] = error_code;
   error_stack->msgs[error_stack->size] = msg;
@@ -68,7 +68,7 @@ error_code_t error_stack_top(ErrorStack *error_stack) {
   return error_stack->error_codes[error_stack->size - 1];
 }
 
-char *error_stack_string(ErrorStack *error_stack) {
+char *error_stack_get_string_and_reset(ErrorStack *error_stack) {
   if (error_stack_is_empty(error_stack)) {
     return NULL;
   }
@@ -80,11 +80,12 @@ char *error_stack_string(ErrorStack *error_stack) {
   }
   char *error_string = string_builder_dump(string_builder, NULL);
   string_builder_destroy(string_builder);
+  error_stack_reset(error_stack);
   return error_string;
 }
 
-void error_stack_print(ErrorStack *error_stack) {
-  char *error_string = error_stack_string(error_stack);
+void error_stack_print_and_reset(ErrorStack *error_stack) {
+  char *error_string = error_stack_get_string_and_reset(error_stack);
   if (!error_string) {
     return;
   }

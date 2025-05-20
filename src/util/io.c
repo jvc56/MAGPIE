@@ -67,7 +67,7 @@ void log_with_info(log_level_t log_level, const char *caller_filename,
     level_string = "INFO";
     break;
   case LOG_WARN:
-    output_fh = get_stream_err();
+    output_fh = get_stream_out();
     level_string = "WARN";
     break;
   case LOG_FATAL:

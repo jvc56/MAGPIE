@@ -102,7 +102,7 @@ void load_and_exec_config_or_die(Config *config, const char *cmd) {
   }
   config_execute_command(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    error_stack_print(error_stack);
+    error_stack_reset(error_stack);
     abort();
   }
   error_stack_destroy(error_stack);
@@ -161,7 +161,7 @@ Config *config_create_or_die(const char *cmd) {
   ErrorStack *error_stack = error_stack_create();
   Config *config = config_create_default(error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    error_stack_print(error_stack);
+    error_stack_reset(error_stack);
     abort();
   }
   load_and_exec_config_or_die(config, "set -path " DEFAULT_TEST_DATA_PATH);
@@ -174,7 +174,7 @@ Config *config_create_default_test(void) {
   ErrorStack *error_stack = error_stack_create();
   Config *config = config_create_default(error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    error_stack_print(error_stack);
+    error_stack_reset(error_stack);
     abort();
   }
   load_and_exec_config_or_die(config, "set -path " DEFAULT_TEST_DATA_PATH);
@@ -305,7 +305,7 @@ void game_play_to_turn_or_die(GameHistory *game_history, Game *game,
   ErrorStack *error_stack = error_stack_create();
   game_play_to_turn(game_history, game, turn_index, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    error_stack_print(error_stack);
+    error_stack_reset(error_stack);
     log_fatal("failed to play to turn %d\n", turn_index);
   }
   error_stack_destroy(error_stack);
@@ -315,7 +315,7 @@ void game_play_to_end_or_die(GameHistory *game_history, Game *game) {
   ErrorStack *error_stack = error_stack_create();
   game_play_to_end(game_history, game, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    error_stack_print(error_stack);
+    error_stack_reset(error_stack);
     log_fatal("failed to play to end\n");
   }
   error_stack_destroy(error_stack);
@@ -667,7 +667,7 @@ ValidatedMoves *validated_moves_create_and_assert_status(
   const bool ok = error_stack_top(error_stack) == expected_status;
   if (!ok) {
     printf("validated_moves_create failed for %s\n", ucgi_moves_string);
-    error_stack_print(error_stack);
+    error_stack_reset(error_stack);
   }
   error_stack_destroy(error_stack);
   return vms;

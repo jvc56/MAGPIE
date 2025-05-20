@@ -34,7 +34,7 @@ void test_config_load_error(Config *config, const char *cmd,
   if (actual_status != expected_status) {
     printf("config status mismatched:\nexpected: %d\nactual: %d\n>%s<\n",
            expected_status, actual_status, cmd);
-    error_stack_print(error_stack);
+    error_stack_print_and_reset(error_stack);
     assert(0);
   }
   error_stack_reset(error_stack);

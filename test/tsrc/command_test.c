@@ -151,12 +151,12 @@ void assert_command_status_and_output(Config *config, const char *command,
   io_set_stream_err(errorout_fh);
 
   ErrorStack *error_stack = error_stack_create();
-  CommandArgs command_args = {
-      .config = config,
-      .error_stack = error_stack,
-  };
 
-  execute_command_async(&command_args, command);
+  execute_command_async(config, error_stack, command);
+
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+  }
 
   // Let the async command start up
   sleep(1);
@@ -175,7 +175,7 @@ void assert_command_status_and_output(Config *config, const char *command,
   int newlines_in_output = count_newlines(test_output);
   bool fail_test = false;
   if (newlines_in_output != expected_output_line_count) {
-    printf("%s\noutput counts do not match %d != %d\n", command,
+    printf("%s\nassert output: output counts do not match %d != %d\n", command,
            newlines_in_output, expected_output_line_count);
     printf("got:\n%s", test_output);
     fail_test = true;
@@ -184,8 +184,9 @@ void assert_command_status_and_output(Config *config, const char *command,
   char *test_outerror = get_string_from_file(test_outerror_filename);
   int newlines_in_outerror = count_newlines(test_outerror);
   if (newlines_in_outerror != expected_outerror_line_count) {
-    printf("error counts do not match %d != %d\n", newlines_in_outerror,
-           expected_outerror_line_count);
+    printf(
+        "assert output: error counts do not match %d != %d\nfor command: %s\n",
+        newlines_in_outerror, expected_outerror_line_count, command);
     printf("got:\n%s", test_outerror);
     fail_test = true;
   }
@@ -425,8 +426,8 @@ void test_process_command(const char *arg_string,
 
   int newlines_in_output = count_newlines(test_output);
   if (newlines_in_output != expected_output_line_count) {
-    printf("counts do not match %d != %d\n", newlines_in_output,
-           expected_output_line_count);
+    printf("test process command: counts do not match %d != %d\n",
+           newlines_in_output, expected_output_line_count);
     printf("got:\n%s\n", test_output);
     assert(0);
   }
@@ -439,8 +440,9 @@ void test_process_command(const char *arg_string,
 
   int newlines_in_outerror = count_newlines(test_outerror);
   if (newlines_in_outerror != expected_outerror_line_count) {
-    printf("error counts do not match %d != %d\n", newlines_in_outerror,
-           expected_outerror_line_count);
+    printf("test process command: error counts do not match %d != %d\nfor "
+           "command: %s\n",
+           newlines_in_outerror, expected_outerror_line_count, arg_string);
     printf("got:\n%s\n", test_outerror);
     assert(0);
   }
@@ -492,8 +494,8 @@ void test_exec_ucgi_command(void) {
   FILE *input_reader = fopen(test_input_filename, "r");
   io_set_stream_in(input_reader);
 
-  ProcessArgs *process_args = process_args_create(
-      "set -mode ucgi", 2, "autoplay", 1, "still searching");
+  ProcessArgs *process_args =
+      process_args_create("set -mode ucgi", 2, "autoplay", 1, "still running");
 
   pthread_t cmd_execution_thread;
   pthread_create(&cmd_execution_thread, NULL, test_process_command_async,

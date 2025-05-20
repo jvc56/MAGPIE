@@ -47,7 +47,7 @@
 // occurred
 char *command_search_status(Config *config, bool should_exit) {
   if (!config) {
-    log_fatal("The command variables struct has not been initialized.");
+    log_fatal("command variables struct is unexpectedly null");
   }
 
   ThreadControl *thread_control = config_get_thread_control(config);
@@ -59,7 +59,7 @@ char *command_search_status(Config *config, bool should_exit) {
 
   if (should_exit) {
     if (!thread_control_exit(thread_control, EXIT_STATUS_USER_INTERRUPT)) {
-      log_warn("Command already exited.");
+      return string_duplicate("command already exited");
     }
     thread_control_wait_for_mode_stopped(thread_control);
   }
@@ -67,81 +67,94 @@ char *command_search_status(Config *config, bool should_exit) {
   return config_get_execute_status(config);
 }
 
-void execute_command_and_set_mode_stopped(CommandArgs *command_args) {
-  config_execute_command(command_args->config, command_args->error_stack);
-  error_stack_print(command_args->error_stack);
-  thread_control_set_mode_stopped(
-      config_get_thread_control(command_args->config));
+void execute_command_and_set_mode_stopped(Config *config,
+                                          ErrorStack *error_stack) {
+  config_execute_command(config, error_stack);
+  thread_control_set_mode_stopped(config_get_thread_control(config));
 }
 
 void *execute_command_thread_worker(void *uncasted_args) {
-  CommandArgs *args = (CommandArgs *)uncasted_args;
-  execute_command_and_set_mode_stopped(args);
+  Config *config = (Config *)uncasted_args;
+  // Create another error stack so this asynchronous command doesn't
+  // interfere with the synchronous error stack on the main thread.
+  ErrorStack *error_stack_async = error_stack_create();
+  execute_command_and_set_mode_stopped(config, error_stack_async);
+  error_stack_print_and_reset(error_stack_async);
+  error_stack_destroy(error_stack_async);
   return NULL;
 }
 
-void execute_command_sync_or_async(CommandArgs *command_args,
+void execute_command_sync_or_async(Config *config, ErrorStack *error_stack,
                                    const char *command, bool sync) {
-  Config *config = command_args->config;
-  ErrorStack *error_stack = command_args->error_stack;
   ThreadControl *thread_control = config_get_thread_control(config);
   if (!thread_control_set_mode_searching(thread_control)) {
-    log_warn("still searching");
+    error_stack_push(
+        error_stack, ERROR_STATUS_COMMAND_STILL_RUNNING,
+        string_duplicate(
+            "cannot execute a new command while the previous command "
+            "is still running"));
     return;
   }
 
   // Loading the config should always be done synchronously and then start the
   // execution asynchronously (if enabled)
-  error_stack_reset(error_stack);
   config_load_command(config, command, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    error_stack_print(error_stack);
     thread_control_set_mode_stopped(thread_control);
     return;
   }
 
   if (sync) {
-    execute_command_and_set_mode_stopped(command_args);
+    execute_command_and_set_mode_stopped(config, error_stack);
   } else {
     pthread_t cmd_execution_thread;
     pthread_create(&cmd_execution_thread, NULL, execute_command_thread_worker,
-                   command_args);
+                   config);
     pthread_detach(cmd_execution_thread);
   }
 }
 
-void execute_command_sync(CommandArgs *command_args, const char *command) {
-  execute_command_sync_or_async(command_args, command, true);
+void execute_command_sync(Config *config, ErrorStack *error_stack,
+                          const char *command) {
+  execute_command_sync_or_async(config, error_stack, command, true);
 }
 
-void execute_command_async(CommandArgs *command_args, const char *command) {
-  execute_command_sync_or_async(command_args, command, false);
+void execute_command_async(Config *config, ErrorStack *error_stack,
+                           const char *command) {
+  execute_command_sync_or_async(config, error_stack, command, false);
 }
 
-void process_ucgi_command(CommandArgs *command_args, const char *command) {
+void process_ucgi_command(Config *config, ErrorStack *error_stack,
+                          const char *command) {
   // Assume cmd is already trimmed of whitespace
-  ThreadControl *thread_control =
-      config_get_thread_control(command_args->config);
+  ThreadControl *thread_control = config_get_thread_control(config);
   if (strings_equal(command, UCGI_COMMAND_STRING)) {
     // More of a formality to align with UCI
     thread_control_print(thread_control, "id name MAGPIE 0.1\nucgiok\n");
   } else if (strings_equal(command, STOP_COMMAND_STRING)) {
     if (thread_control_get_mode(thread_control) == MODE_SEARCHING) {
       if (!thread_control_exit(thread_control, EXIT_STATUS_USER_INTERRUPT)) {
-        log_warn("Search already received stop signal but has not stopped.");
+        error_stack_push(
+            error_stack, ERROR_STATUS_COMMAND_ALREADY_STOPPED,
+            string_duplicate("command already received stop signal"));
       }
     } else {
-      log_warn("There is no search to stop.");
+      error_stack_push(
+          error_stack, ERROR_STATUS_COMMAND_NOTHING_TO_STOP,
+          string_duplicate("no currently running command to stop"));
     }
   } else {
-    execute_command_async(command_args, command);
+    execute_command_async(config, error_stack, command);
   }
 }
 
-void command_scan_loop(CommandArgs *command_args,
+void command_scan_loop(Config *config, ErrorStack *error_stack,
                        const char *initial_command_string) {
-  Config *config = command_args->config;
-  execute_command_sync(command_args, initial_command_string);
+  execute_command_sync(config, error_stack, initial_command_string);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    return;
+  }
   if (!config_continue_on_coldstart(config)) {
     return;
   }
@@ -174,14 +187,17 @@ void command_scan_loop(CommandArgs *command_args,
 
     switch (exec_mode) {
     case EXEC_MODE_CONSOLE:
-      execute_command_sync(command_args, input);
+      execute_command_sync(config, error_stack, input);
       break;
     case EXEC_MODE_UCGI:
-      process_ucgi_command(command_args, input);
+      process_ucgi_command(config, error_stack, input);
       break;
     case EXEC_MODE_UNKNOWN:
       log_fatal("attempted to execute command in unknown mode");
       break;
+    }
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_print_and_reset(error_stack);
     }
   }
   free(input);
@@ -203,20 +219,16 @@ void caches_destroy(void) {
 }
 
 void process_command(int argc, char *argv[]) {
-  log_set_level(LOG_WARN);
+  log_set_level(LOG_FATAL);
   ErrorStack *error_stack = error_stack_create();
   Config *config = config_create_default(error_stack);
   if (error_stack_is_empty(error_stack)) {
-    CommandArgs command_args = {
-        .config = config,
-        .error_stack = error_stack,
-    };
     char *initial_command_string = create_command_from_args(argc, argv);
-    command_scan_loop(&command_args, initial_command_string);
+    command_scan_loop(config, error_stack, initial_command_string);
     free(initial_command_string);
     caches_destroy();
   } else {
-    error_stack_print(error_stack);
+    error_stack_print_and_reset(error_stack);
   }
   config_destroy(config);
   error_stack_destroy(error_stack);

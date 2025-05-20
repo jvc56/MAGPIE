@@ -98,6 +98,8 @@ bool thread_control_get_is_exited(ThreadControl *thread_control) {
   return thread_control_get_exit_status(thread_control) != EXIT_STATUS_NONE;
 }
 
+// Returns true if the exit status was set successfully
+// Returns false if the exit status was already set
 bool thread_control_exit(ThreadControl *thread_control,
                          exit_status_t exit_status) {
   bool success = false;

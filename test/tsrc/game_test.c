@@ -166,9 +166,9 @@ void test_load_cgp(void) {
       error_stack);
   assert(error_stack_is_empty(error_stack));
   config_execute_command(config, error_stack);
-  error_stack_print(error_stack);
   assert(error_stack_top(error_stack) ==
          ERROR_STATUS_CGP_PARSE_BOARD_LETTERS_NOT_IN_BAG);
+  error_stack_reset(error_stack);
 
   assert_game_matches_cgp(config_get_game(config), VS_FRENTZ_CGP, true);
 
