@@ -4,7 +4,7 @@
 #include "../def/game_history_defs.h"
 #include "../def/validated_move_defs.h"
 
-#include "error_stack.h"
+#include "../util/error_stack.h"
 #include "game.h"
 #include "letter_distribution.h"
 #include "move.h"

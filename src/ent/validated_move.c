@@ -6,7 +6,7 @@
 #include "../def/rack_defs.h"
 #include "../def/validated_move_defs.h"
 
-#include "error_stack.h"
+#include "../util/error_stack.h"
 #include "game.h"
 #include "move.h"
 #include "static_eval.h"

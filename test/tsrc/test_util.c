@@ -170,6 +170,17 @@ Config *config_create_or_die(const char *cmd) {
   return config;
 }
 
+WMP *wmp_create_or_die(const char *data_paths, const char *wmp_name) {
+  ErrorStack *error_stack = error_stack_create();
+  WMP *wmp = wmp_create(data_paths, wmp_name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    abort();
+  }
+  error_stack_destroy(error_stack);
+  return wmp;
+}
+
 Config *config_create_default_test(void) {
   ErrorStack *error_stack = error_stack_create();
   Config *config = config_create_default(error_stack);

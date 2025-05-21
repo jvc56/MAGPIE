@@ -127,7 +127,7 @@ char *read_line_from_stdin(void) {
     int error_number = errno;
     if (error_number) {
       perror("error");
-      log_fatal("failed to read from input stream with error: %d\n",
+      log_fatal("failed to read from input stream with error: %d",
                 error_number);
     } else {
       free(line);

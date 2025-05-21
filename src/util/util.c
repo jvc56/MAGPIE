@@ -9,7 +9,7 @@
 void *malloc_or_die(size_t size) {
   void *uncasted_pointer = malloc(size);
   if (!uncasted_pointer) {
-    log_fatal("failed to malloc size of %lu.\n", size);
+    log_fatal("failed to malloc size of %lu", size);
   }
   return uncasted_pointer;
 }
@@ -17,8 +17,8 @@ void *malloc_or_die(size_t size) {
 void *calloc_or_die(size_t number_of_elements, size_t size_of_element) {
   void *uncasted_pointer = calloc(number_of_elements, size_of_element);
   if (!uncasted_pointer) {
-    log_fatal("failed to calloc %lu elements of size %lu.\n",
-              number_of_elements, size_of_element);
+    log_fatal("failed to calloc %lu elements of size %lu", number_of_elements,
+              size_of_element);
   }
   return uncasted_pointer;
 }
@@ -26,7 +26,7 @@ void *calloc_or_die(size_t number_of_elements, size_t size_of_element) {
 void *realloc_or_die(void *realloc_target, size_t size) {
   void *realloc_result = realloc(realloc_target, size);
   if (!realloc_result) {
-    log_fatal("failed to realloc %p with size of %lu.\n", realloc_target, size);
+    log_fatal("failed to realloc %p with size of %lu", realloc_target, size);
   }
   return realloc_result;
 }
@@ -64,7 +64,7 @@ int string_to_int(const char *str) {
   char *endptr;
   long int result = strtol(str, &endptr, 10);
   if (*endptr != '\0') {
-    log_fatal("string to int conversion failed for >%s<\n", str);
+    log_fatal("string to int conversion failed for >%s<", str);
   }
   return (int)result;
 }
@@ -116,21 +116,21 @@ uint64_t string_to_uint64(const char *str) {
   char *endptr;
   uint64_t result = strtoull(str, &endptr, 10);
   if (*endptr != '\0') {
-    log_fatal("string to uint64_t conversion failed for %s\n", str);
+    log_fatal("string to uint64_t conversion failed for %s", str);
   }
   return result;
 }
 
 double string_to_double(const char *str) {
   if (!str) {
-    log_fatal("called string_to_double on NULL string\n");
+    log_fatal("called string_to_double on NULL string");
   }
   return strtod(str, NULL);
 }
 
 float string_to_float(const char *str) {
   if (!str) {
-    log_fatal("called string_to_float on NULL string\n");
+    log_fatal("called string_to_float on NULL string");
   }
   return strtof(str, NULL);
 }

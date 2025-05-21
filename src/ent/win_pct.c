@@ -34,22 +34,20 @@ float win_pct_get(const WinPct *wp, int spread_plus_leftover,
   return wp->win_pcts[wp->max_spread - spread_plus_leftover][game_unseen_tiles];
 };
 
-WinPct *win_pct_create(const char *data_paths, const char *win_pct_name) {
-  WinPct *wp = malloc_or_die(sizeof(WinPct));
-
-  wp->name = string_duplicate(win_pct_name);
-
-  char *win_pct_filename = data_filepaths_get_readable_filename(
-      data_paths, win_pct_name, DATA_FILEPATH_TYPE_WIN_PCT);
-  StringSplitter *win_pct_lines = split_file_by_newline(win_pct_filename);
-  free(win_pct_filename);
-
+void win_pct_create_internal(const char *win_pct_name,
+                             const char *win_pct_filename, WinPct *wp,
+                             StringSplitter *win_pct_lines,
+                             ErrorStack *error_stack) {
   // Use -1 to account for header line
   wp->number_of_spreads =
       string_splitter_get_number_of_items(win_pct_lines) - 1;
 
   if (wp->number_of_spreads < 1) {
-    log_fatal("no data found in win percentage file: %s\n", win_pct_name);
+    error_stack_push(
+        error_stack, ERROR_STATUS_WIN_PCT_NO_DATA_FOUND,
+        get_formatted_string("no data found in win percentage file: %s\n",
+                             win_pct_filename));
+    return;
   }
 
   // Allocate memory for the 2D array
@@ -60,9 +58,10 @@ WinPct *win_pct_create(const char *data_paths, const char *win_pct_name) {
   int row = 0;
   int number_of_columns = 0;
   // Start at 1 to skip header line
+  StringSplitter *win_pct_data = NULL;
   for (int i = 0; i < wp->number_of_spreads; i++) {
     // Use +1 to skip the header line
-    StringSplitter *win_pct_data =
+    win_pct_data =
         split_string(string_splitter_get_item(win_pct_lines, i + 1), ',', true);
     int number_of_items = string_splitter_get_number_of_items(win_pct_data);
 
@@ -72,8 +71,12 @@ WinPct *win_pct_create(const char *data_paths, const char *win_pct_name) {
         array[j] = (float *)malloc_or_die(number_of_columns * sizeof(float));
       }
     } else if (number_of_items != number_of_columns) {
-      log_fatal("inconsistent number of columns in %s at line %d: %d != %d\n",
-                win_pct_name, i, number_of_columns, number_of_items);
+      error_stack_push(
+          error_stack, ERROR_STATUS_WIN_PCT_INVALID_NUMBER_OF_COLUMNS,
+          get_formatted_string(
+              "inconsistent number of columns in %s at line %d: %d != %d\n",
+              win_pct_name, i, number_of_columns, number_of_items));
+      break;
     }
 
     // We assume the spread values are continuous and descending
@@ -91,13 +94,34 @@ WinPct *win_pct_create(const char *data_paths, const char *win_pct_name) {
           string_to_double(string_splitter_get_item(win_pct_data, j));
     }
     string_splitter_destroy(win_pct_data);
+    win_pct_data = NULL;
     row++;
   }
-  string_splitter_destroy(win_pct_lines);
-
+  string_splitter_destroy(win_pct_data);
   wp->win_pcts = array;
   wp->max_tiles_unseen = number_of_columns - 2;
+}
 
+WinPct *win_pct_create(const char *data_paths, const char *win_pct_name,
+                       ErrorStack *error_stack) {
+  char *win_pct_filename = data_filepaths_get_readable_filename(
+      data_paths, win_pct_name, DATA_FILEPATH_TYPE_WIN_PCT, error_stack);
+  StringSplitter *win_pct_lines =
+      split_file_by_newline(win_pct_filename, error_stack);
+  WinPct *wp = NULL;
+  if (error_stack_is_empty(error_stack)) {
+    wp = malloc_or_die(sizeof(WinPct));
+    win_pct_create_internal(win_pct_name, win_pct_filename, wp, win_pct_lines,
+                            error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      free(wp);
+      wp = NULL;
+    } else {
+      wp->name = string_duplicate(win_pct_name);
+    }
+  }
+  string_splitter_destroy(win_pct_lines);
+  free(win_pct_filename);
   return wp;
 }
 

@@ -12,7 +12,13 @@
 #include "test_util.h"
 
 int get_file_size(const char *filename) {
-  FILE *stream = stream_from_filename(filename);
+  ErrorStack *error_stack = error_stack_create();
+  FILE *stream = stream_from_filename(filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("wmp test failed to open wmp file: %s", filename);
+  }
+  error_stack_destroy(error_stack);
   fseek(stream, 0L, SEEK_END);
   const int file_size = ftell(stream);
   fseek(stream, 0L, SEEK_SET);
@@ -25,7 +31,10 @@ void write_words_to_testdata_wmp(const DictionaryWordList *words,
   const clock_t start = clock();
   WMP *wmp = make_wmp_from_words(words, ld);
   const clock_t end = clock();
-  wmp_write_to_file(wmp, wmp_filename);
+  ErrorStack *error_stack = error_stack_create();
+  wmp_write_to_file(wmp, wmp_filename, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
   const int file_size = get_file_size(wmp_filename);
   printf("wrote %d bytes to %s in %f seconds\n", file_size, wmp_filename,
          (double)(end - start) / CLOCKS_PER_SEC);
@@ -69,8 +78,7 @@ void test_short_and_long_words(void) {
   Config *config = config_create_or_die("set -lex CSW21");
   const LetterDistribution *ld = config_get_ld(config);
 
-  WMP *wmp = wmp_create("testdata", "CSW21_3or15");
-  assert(wmp != NULL);
+  WMP *wmp = wmp_create_or_die("testdata", "CSW21_3or15");
 
   uint8_t *buffer = malloc_or_die(wmp->max_word_lookup_bytes);
   BitRack inq = string_to_bit_rack(ld, "INQ");
@@ -107,20 +115,24 @@ void test_short_and_long_words(void) {
 
 void check_all_wmp_result_sizes_fit_in_buffer(void) {
   Config *config = config_create_or_die("");
+  ErrorStack *error_stack = error_stack_create();
   const char *data_paths = config_get_data_paths(config);
   StringList *wmp_files = data_filepaths_get_all_data_path_names(
-      data_paths, DATA_FILEPATH_TYPE_WORDMAP);
+      data_paths, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
+  assert(error_stack_is_empty(error_stack));
   assert(wmp_files != NULL);
 
   const int count = string_list_get_count(wmp_files);
   for (int file_idx = 0; file_idx < count; file_idx++) {
     const char *filename = string_list_get_string(wmp_files, file_idx);
     WMP *wmp = (WMP *)malloc_or_die(sizeof(WMP));
-    wmp_load_from_filename(wmp, /*wmp_name=*/"", filename);
+    wmp_load_from_filename(wmp, /*wmp_name=*/"", filename, error_stack);
+    assert(error_stack_is_empty(error_stack));
     assert(wmp->max_word_lookup_bytes <= WMP_RESULT_BUFFER_SIZE);
     wmp_destroy(wmp);
   }
 
+  error_stack_destroy(error_stack);
   string_list_destroy(wmp_files);
   config_destroy(config);
 }

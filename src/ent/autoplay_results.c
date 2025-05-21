@@ -5,7 +5,7 @@
 
 #include "../def/autoplay_defs.h"
 
-#include "error_stack.h"
+#include "../util/error_stack.h"
 #include "game.h"
 #include "move.h"
 #include "stats.h"
@@ -476,7 +476,7 @@ void fj_data_reset_fh(FJSharedData *shared_data, const char *filename) {
     }
     shared_data->fhs[i] = fopen(filename_num_remaining, "w");
     if (!shared_data->fhs[i]) {
-      log_fatal("Error opening fj file for writing: %s\n",
+      log_fatal("error opening fj file for writing: %s",
                 filename_num_remaining);
     }
     free(filename_num_remaining);
@@ -571,7 +571,7 @@ void fj_write_buffer_to_output(Recorder *recorder, int remaining_tiles,
     if (fputs(string_builder_peek(sb), shared_data->fhs[remaining_tiles]) ==
         EOF) {
       fclose(shared_data->fhs[remaining_tiles]);
-      log_fatal("Error writing to fj file of remaining tiles: %d\n",
+      log_fatal("error writing to fj file of remaining tiles: %d",
                 remaining_tiles);
     }
     fflush(shared_data->fhs[remaining_tiles]);

@@ -1,8 +1,8 @@
 #ifndef SIMMER_H
 #define SIMMER_H
 
-#include "../ent/error_stack.h"
 #include "../ent/sim_results.h"
+#include "../util/error_stack.h"
 
 #include "random_variable.h"
 

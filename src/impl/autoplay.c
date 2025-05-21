@@ -57,14 +57,34 @@ void postgen_prebroadcast_func(void *data) {
   char *label = get_formatted_string("_gen_%d", lg_shared_data->gens_completed);
   char *gen_labeled_klv_name =
       insert_before_dot(lg_shared_data->klv->name, label);
+
+  ErrorStack *error_stack = error_stack_create();
+
   char *gen_labeled_klv_filename = data_filepaths_get_writable_filename(
-      lg_shared_data->data_paths, gen_labeled_klv_name, DATA_FILEPATH_TYPE_KLV);
+      lg_shared_data->data_paths, gen_labeled_klv_name, DATA_FILEPATH_TYPE_KLV,
+      error_stack);
   char *leaves_filename = data_filepaths_get_writable_filename(
       lg_shared_data->data_paths, gen_labeled_klv_name,
-      DATA_FILEPATH_TYPE_LEAVES);
+      DATA_FILEPATH_TYPE_LEAVES, error_stack);
 
-  klv_write(lg_shared_data->klv, gen_labeled_klv_filename);
-  klv_write_to_csv(lg_shared_data->klv, lg_shared_data->ld, leaves_filename);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("leavegen failed to write results to file");
+  }
+
+  klv_write(lg_shared_data->klv, gen_labeled_klv_filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("leavegen failed to write klv to file: %s",
+              gen_labeled_klv_filename);
+  }
+
+  klv_write_to_csv(lg_shared_data->klv, lg_shared_data->ld, leaves_filename,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("leavegen failed to write klv to CSV");
+  }
 
   const int number_of_threads =
       thread_control_get_threads(shared_data->thread_control);
@@ -122,8 +142,15 @@ void postgen_prebroadcast_func(void *data) {
       cut_off_after_last_char(gen_labeled_klv_filename, '.');
   char *report_name = get_formatted_string("%s_report.txt", report_name_prefix);
 
-  write_string_to_file(report_name, "w", string_builder_peek(leave_gen_sb));
+  write_string_to_file(report_name, "w", string_builder_peek(leave_gen_sb),
+                       error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("leavegen failed to write result summary to file");
+  }
+
   string_builder_destroy(leave_gen_sb);
+  error_stack_destroy(error_stack);
 
   free(report_name);
   free(report_name_prefix);
@@ -295,7 +322,7 @@ bool game_runner_is_game_over(GameRunner *game_runner) {
 void game_runner_play_move(AutoplayWorker *autoplay_worker,
                            GameRunner *game_runner, Move **move) {
   if (game_runner_is_game_over(game_runner)) {
-    log_fatal("game runner attempted to play a move when the game is over\n");
+    log_fatal("game runner attempted to play a move when the game is over");
   }
   Game *game = game_runner->game;
   const int player_on_turn_index = game_get_player_on_turn_index(game);

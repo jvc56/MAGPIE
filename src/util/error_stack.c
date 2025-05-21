@@ -3,8 +3,6 @@
 #include <stdbool.h>
 #include <stdio.h>
 
-#include "../def/error_stack_defs.h"
-
 #include "../util/io.h"
 #include "../util/string_util.h"
 #include "../util/util.h"

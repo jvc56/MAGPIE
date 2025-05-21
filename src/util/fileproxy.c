@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "error_stack.h"
 #include "io.h"
 #include "string_util.h"
 #include "util.h"
@@ -21,7 +22,7 @@ typedef struct FileCache {
 
 static FileCache file_cache = {0};
 
-FILE *stream_from_filename(const char *filename) {
+FILE *stream_from_filename(const char *filename, ErrorStack *error_stack) {
   // Look in cache.
   for (int i = 0; i < file_cache.num_items; i++) {
     if (strings_equal(file_cache.entries[i].filename, filename)) {
@@ -34,6 +35,11 @@ FILE *stream_from_filename(const char *filename) {
             file_cache.num_items);
   FILE *stream;
   stream = fopen(filename, "r");
+  if (!stream) {
+    error_stack_push(error_stack,
+                     ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM_FOR_READING,
+                     get_formatted_string("error opening file: %s", filename));
+  }
   return stream;
 }
 

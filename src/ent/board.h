@@ -350,7 +350,7 @@ static inline void update_number_of_row_anchors(Board *b, int row, int col,
 static inline uint8_t board_get_number_of_row_anchors(const Board *board,
                                                       int row_or_col, int dir) {
   if (board->transposed) {
-    log_fatal("cannot get number of row anchors for the transposed board\n");
+    log_fatal("cannot get number of row anchors for the transposed board");
   }
   return board->number_of_row_anchors[board_get_number_of_row_anchors_index(
       board, row_or_col, row_or_col, dir)];
@@ -807,7 +807,7 @@ static inline void board_destroy(Board *board) {
 static inline void board_load_number_of_row_anchors_cache(const Board *b,
                                                           uint8_t *cache) {
   if (b->transposed) {
-    log_fatal("cannot load row anchor cache while board is transposed\n");
+    log_fatal("cannot load row anchor cache while board is transposed");
   }
   memory_copy(cache, b->number_of_row_anchors,
               sizeof(b->number_of_row_anchors));
@@ -832,7 +832,7 @@ static inline const Square *board_get_row_cache(const Square *lanes_cache,
 static inline void board_load_lanes_cache(const Board *b, int ci,
                                           Square *lanes_cache) {
   if (b->transposed) {
-    log_fatal("cannot load row cache while board is transposed\n");
+    log_fatal("cannot load row cache while board is transposed");
   }
   // Use 0 for row, col, and dir to get the "start" of the block
   // of memory representing that cross index.

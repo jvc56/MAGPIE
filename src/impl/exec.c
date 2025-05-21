@@ -6,18 +6,17 @@
 
 #include "../def/autoplay_defs.h"
 #include "../def/config_defs.h"
-#include "../def/error_stack_defs.h"
 #include "../def/exec_defs.h"
 #include "../def/game_defs.h"
 #include "../def/inference_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../def/validated_move_defs.h"
 
-#include "../ent/error_stack.h"
 #include "../ent/game.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "../ent/validated_move.h"
+#include "../util/error_stack.h"
 
 #include "autoplay.h"
 #include "cgp.h"
@@ -47,7 +46,7 @@
 // occurred
 char *command_search_status(Config *config, bool should_exit) {
   if (!config) {
-    log_fatal("command variables struct is unexpectedly null");
+    log_fatal("config is unexpectedly null");
   }
 
   ThreadControl *thread_control = config_get_thread_control(config);

@@ -2,8 +2,8 @@
 
 #include "../ent/conversion_results.h"
 #include "../ent/dictionary_word.h"
-#include "../ent/error_stack.h"
 #include "../ent/kwg.h"
+#include "../util/error_stack.h"
 
 #include "klv_csv.h"
 #include "kwg_maker.h"
@@ -83,7 +83,8 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
 
   if (conversion_type == CONVERT_TEXT2WORDMAP) {
     WMP *wmp = make_wmp_from_words(strings, ld);
-    if (!wmp_write_to_file(wmp, output_filename)) {
+    wmp_write_to_file(wmp, output_filename, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONVERT_OUTPUT_FILE_NOT_WRITABLE,
           get_formatted_string("could not write wordmap to output file: %s",
@@ -127,19 +128,26 @@ void convert_with_filenames(const LetterDistribution *ld,
                                error_stack);
     dictionary_word_list_destroy(strings);
   } else if (conversion_type == CONVERT_DAWG2TEXT) {
-    KWG *kwg = kwg_create(data_paths, input_filename);
-    DictionaryWordList *words = dictionary_word_list_create();
-    kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), words, NULL);
-    dictionary_word_list_write_to_file(words, ld, output_filename);
+    KWG *kwg = kwg_create(data_paths, input_filename, error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      DictionaryWordList *words = dictionary_word_list_create();
+      kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), words, NULL);
+      dictionary_word_list_write_to_file(words, ld, output_filename,
+                                         error_stack);
+      dictionary_word_list_destroy(words);
+    }
     kwg_destroy(kwg);
-    dictionary_word_list_destroy(words);
   } else if (conversion_type == CONVERT_CSV2KLV) {
-    KLV *klv = klv_read_from_csv(ld, data_paths, input_filename);
-    klv_write(klv, output_filename);
+    KLV *klv = klv_read_from_csv(ld, data_paths, input_filename, error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      klv_write(klv, output_filename, error_stack);
+    }
     klv_destroy(klv);
   } else if (conversion_type == CONVERT_KLV2CSV) {
-    KLV *klv = klv_create(data_paths, input_filename);
-    klv_write_to_csv(klv, ld, output_filename);
+    KLV *klv = klv_create(data_paths, input_filename, error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      klv_write_to_csv(klv, ld, output_filename, error_stack);
+    }
     klv_destroy(klv);
   } else {
     error_stack_push(error_stack,
@@ -176,7 +184,7 @@ get_input_filepath_type_from_conv_type(conversion_type_t conversion_type) {
   case CONVERT_KLV2CSV:
     filepath_type = DATA_FILEPATH_TYPE_KLV;
     break;
-  default:
+  case CONVERT_UNKNOWN:
     log_fatal("cannot get input filepath type for unknown conversion type");
     break;
   }
@@ -211,7 +219,7 @@ get_output_filepath_type_from_conv_type(conversion_type_t conversion_type) {
   case CONVERT_KLV2CSV:
     filepath_type = DATA_FILEPATH_TYPE_LEAVES;
     break;
-  default:
+  case CONVERT_UNKNOWN:
     log_fatal("cannot get output filepath type for unknown conversion type");
     break;
   }
@@ -279,14 +287,26 @@ void convert(ConversionArgs *args, ConversionResults *conversion_results,
       get_input_filepath_type_from_conv_type(conversion_type);
 
   char *input_filename = data_filepaths_get_readable_filename(
-      args->data_paths, args->input_name, input_filepath_type);
+      args->data_paths, args->input_name, input_filepath_type, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   char *data_path = data_filepaths_get_data_path_name(
-      args->data_paths, args->output_name, input_filepath_type);
+      args->data_paths, args->output_name, input_filepath_type, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   char *output_filename = data_filepaths_get_writable_filename(
       data_path, args->output_name,
-      get_output_filepath_type_from_conv_type(conversion_type));
+      get_output_filepath_type_from_conv_type(conversion_type), error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   convert_with_filenames(args->ld, conversion_type, args->data_paths,
                          input_filename, output_filename, conversion_results,

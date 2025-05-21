@@ -12,7 +12,6 @@
 #include "../../src/def/move_defs.h"
 #include "../../src/def/players_data_defs.h"
 #include "../../src/def/validated_move_defs.h"
-#include "../../src/ent/error_stack.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/kwg.h"
 #include "../../src/ent/players_data.h"
@@ -20,6 +19,7 @@
 #include "../../src/ent/thread_control.h"
 #include "../../src/impl/cgp.h"
 #include "../../src/str/rack_string.h"
+#include "../../src/util/error_stack.h"
 #include "../../src/util/string_util.h"
 
 #include "config_test.h"

@@ -5,10 +5,9 @@
 
 #include "../def/board_defs.h"
 #include "../def/board_layout_defs.h"
-#include "../def/error_stack_defs.h"
 
+#include "../util/error_stack.h"
 #include "data_filepaths.h"
-#include "error_stack.h"
 
 #include "../util/io.h"
 #include "../util/string_util.h"
@@ -158,13 +157,19 @@ void board_layout_parse_split_file(BoardLayout *bl,
 void board_layout_load(BoardLayout *bl, const char *data_paths,
                        const char *board_layout_name, ErrorStack *error_stack) {
   char *layout_filename = data_filepaths_get_readable_filename(
-      data_paths, board_layout_name, DATA_FILEPATH_TYPE_LAYOUT);
-  StringSplitter *layout_rows = split_file_by_newline(layout_filename);
+      data_paths, board_layout_name, DATA_FILEPATH_TYPE_LAYOUT, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  StringSplitter *layout_rows =
+      split_file_by_newline(layout_filename, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    board_layout_parse_split_file(bl, layout_rows, error_stack);
+    string_splitter_destroy(layout_rows);
+    free(bl->name);
+    bl->name = string_duplicate(board_layout_name);
+  }
   free(layout_filename);
-  board_layout_parse_split_file(bl, layout_rows, error_stack);
-  string_splitter_destroy(layout_rows);
-  free(bl->name);
-  bl->name = string_duplicate(board_layout_name);
 }
 
 char *board_layout_get_default_name(void) {

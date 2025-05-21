@@ -3,8 +3,8 @@
 
 #include "../def/game_defs.h"
 
-#include "../ent/error_stack.h"
 #include "../ent/game.h"
+#include "../util/error_stack.h"
 
 void game_load_cgp(Game *game, const char *cgp, ErrorStack *error_stack);
 char *game_get_cgp(const Game *game, bool write_player_on_turn_first);

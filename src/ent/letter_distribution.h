@@ -18,6 +18,7 @@
 #include "../util/util.h"
 
 typedef enum {
+  LD_TYPE_UNKNOWN,
   LD_TYPE_ENGLISH,
   LD_TYPE_GERMAN,
   LD_TYPE_NORWEGIAN,
@@ -85,22 +86,14 @@ static inline void sort_score_order(LetterDistribution *ld) {
   }
 }
 
-static inline LetterDistribution *ld_create(const char *data_paths,
-                                            const char *ld_name) {
-  LetterDistribution *ld =
-      (LetterDistribution *)malloc_or_die(sizeof(LetterDistribution));
-
-  // This function call opens and closes the file, so
-  // call it before the fopen to prevent a nested file read
-
-  ld->name = string_duplicate(ld_name);
-
-  char *ld_filename = data_filepaths_get_readable_filename(
-      data_paths, ld_name, DATA_FILEPATH_TYPE_LD);
-
-  StringSplitter *ld_lines = split_file_by_newline(ld_filename);
-
-  free(ld_filename);
+static inline void ld_create_internal(const char *ld_name,
+                                      const char *ld_filename,
+                                      LetterDistribution *ld,
+                                      ErrorStack *error_stack) {
+  StringSplitter *ld_lines = split_file_by_newline(ld_filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   int number_of_lines = string_splitter_get_number_of_items(ld_lines);
 
@@ -122,8 +115,11 @@ static inline LetterDistribution *ld_create(const char *data_paths,
     const char *line = string_splitter_get_item(ld_lines, i);
     StringSplitter *single_letter_info = split_string(line, ',', true);
     if (string_splitter_get_number_of_items(single_letter_info) != 5) {
-      log_fatal("invalid letter distribution line in %s:\n>%s<\n", ld_name,
-                line);
+      error_stack_push(
+          error_stack, ERROR_STATUS_LD_INVALID_ROW,
+          get_formatted_string("invalid row in letter distribution file %s: %s",
+                               ld_name, line));
+      break;
     }
     // letter, lower case, dist, score, is_vowel
     const char *letter = string_splitter_get_item(single_letter_info, 0);
@@ -158,11 +154,28 @@ static inline LetterDistribution *ld_create(const char *data_paths,
     machine_letter++;
   }
   string_splitter_destroy(ld_lines);
+  if (error_stack_is_empty(error_stack)) {
+    sort_score_order(ld);
+    ld->max_tile_length = max_tile_length;
+  }
+}
 
-  sort_score_order(ld);
-
-  ld->max_tile_length = max_tile_length;
-
+static inline LetterDistribution *ld_create(const char *data_paths,
+                                            const char *ld_name,
+                                            ErrorStack *error_stack) {
+  LetterDistribution *ld = malloc_or_die(sizeof(LetterDistribution));
+  char *ld_filename = data_filepaths_get_readable_filename(
+      data_paths, ld_name, DATA_FILEPATH_TYPE_LD, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    ld_create_internal(ld_name, ld_filename, ld, error_stack);
+  }
+  if (error_stack_is_empty(error_stack)) {
+    ld->name = string_duplicate(ld_name);
+  } else {
+    free(ld);
+    ld = NULL;
+  }
+  free(ld_filename);
   return ld;
 }
 
@@ -393,7 +406,8 @@ static inline bool ld_types_compat(ld_t ld_type_1, ld_t ld_type_2) {
   return ld_type_1 == ld_type_2;
 }
 
-static inline ld_t ld_get_type_from_lex_name(const char *full_lexicon_name) {
+static inline ld_t ld_get_type_from_lex_name(const char *full_lexicon_name,
+                                             ErrorStack *error_stack) {
   const char *lexicon_name = get_base_filename(full_lexicon_name);
   ld_t ld_type;
   if (has_iprefix("CSW", lexicon_name) || has_iprefix("NWL", lexicon_name) ||
@@ -414,13 +428,18 @@ static inline ld_t ld_get_type_from_lex_name(const char *full_lexicon_name) {
   } else if (has_iprefix("DSW", lexicon_name)) {
     ld_type = LD_TYPE_DUTCH;
   } else {
-    log_fatal("default letter distribution not found for lexicon '%s'\n",
-              lexicon_name);
+    error_stack_push(
+        error_stack, ERROR_STATUS_LD_LEXICON_DEFAULT_NOT_FOUND,
+        get_formatted_string(
+            "default letter distribution not found for lexicon '%s'",
+            lexicon_name));
+    ld_type = LD_TYPE_UNKNOWN;
   }
   return ld_type;
 }
 
-static inline ld_t ld_get_type_from_ld_name(const char *ld_name) {
+static inline ld_t ld_get_type_from_ld_name(const char *ld_name,
+                                            ErrorStack *error_stack) {
   ld_t ld_type;
   if (has_iprefix(ENGLISH_LETTER_DISTRIBUTION_NAME, ld_name)) {
     ld_type = LD_TYPE_ENGLISH;
@@ -437,21 +456,27 @@ static inline ld_t ld_get_type_from_ld_name(const char *ld_name) {
   } else if (has_iprefix(DUTCH_LETTER_DISTRIBUTION_NAME, ld_name)) {
     ld_type = LD_TYPE_DUTCH;
   } else {
-    log_fatal(
-        "default letter distribution not found for letter distribution '%s'\n",
-        ld_name);
+    error_stack_push(error_stack, ERROR_STATUS_LD_NAME_NOT_FOUND,
+                     get_formatted_string(
+                         "letter distribution not found for '%s'", ld_name));
+    ld_type = LD_TYPE_UNKNOWN;
   }
   return ld_type;
 }
 
 // Use the lexicon name in combination with the constant
 // BOARD_DIM to determine a default letter distribution name.
-static inline char *ld_get_default_name_from_type(ld_t ld_type) {
+static inline char *ld_get_default_name_from_type(ld_t ld_type,
+                                                  ErrorStack *error_stack) {
   if (BOARD_DIM != DEFAULT_BOARD_DIM && BOARD_DIM != DEFAULT_SUPER_BOARD_DIM) {
-    log_fatal("Default letter distribution not supported with a board "
-              "dimension of %d. Only %d and %d have "
-              "default values.",
-              BOARD_DIM, DEFAULT_BOARD_DIM, DEFAULT_SUPER_BOARD_DIM);
+    error_stack_push(
+        error_stack, ERROR_STATUS_LD_UNSUPPORTED_BOARD_DIM_DEFAULT,
+        get_formatted_string(
+            "default letter distribution not supported with a board "
+            "dimension of %d (only %d and %d have "
+            "default values)",
+            BOARD_DIM, DEFAULT_BOARD_DIM, DEFAULT_SUPER_BOARD_DIM));
+    return NULL;
   }
   const char *ld_name_extension = "";
   if (BOARD_DIM == DEFAULT_SUPER_BOARD_DIM) {
@@ -488,14 +513,22 @@ static inline char *ld_get_default_name_from_type(ld_t ld_type) {
     ld_name = get_formatted_string("%s%s", DUTCH_LETTER_DISTRIBUTION_NAME,
                                    ld_name_extension);
     break;
+  case LD_TYPE_UNKNOWN:
+    log_fatal("encountered unexpected letter distribution type %d", ld_type);
+    break;
   }
 
   return ld_name;
 }
 
 static inline char *
-ld_get_default_name_from_lexicon_name(const char *lexicon_name) {
-  return ld_get_default_name_from_type(ld_get_type_from_lex_name(lexicon_name));
+ld_get_default_name_from_lexicon_name(const char *lexicon_name,
+                                      ErrorStack *error_stack) {
+  ld_t ld_type = ld_get_type_from_lex_name(lexicon_name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  return ld_get_default_name_from_type(ld_type, error_stack);
 }
 
 #endif

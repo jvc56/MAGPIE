@@ -124,13 +124,17 @@ static inline void kwg_read_nodes_from_stream(KWG *kwg, size_t number_of_nodes,
 static inline uint32_t *kwg_get_mutable_nodes(KWG *kwg) { return kwg->nodes; }
 
 static inline void load_kwg(KWG *kwg, const char *data_paths,
-                            const char *kwg_name) {
+                            const char *kwg_name, ErrorStack *error_stack) {
   char *kwg_filename = data_filepaths_get_readable_filename(
-      data_paths, kwg_name, DATA_FILEPATH_TYPE_KWG);
+      data_paths, kwg_name, DATA_FILEPATH_TYPE_KWG, error_stack);
 
-  FILE *stream = stream_from_filename(kwg_filename);
-  if (!stream) {
-    log_fatal("failed to open stream from filename: %s\n", kwg_filename);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  FILE *stream = stream_from_filename(kwg_filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
   free(kwg_filename);
 
@@ -147,10 +151,11 @@ static inline void load_kwg(KWG *kwg, const char *data_paths,
   fclose(stream);
 }
 
-static inline KWG *kwg_create(const char *data_paths, const char *kwg_name) {
+static inline KWG *kwg_create(const char *data_paths, const char *kwg_name,
+                              ErrorStack *error_stack) {
   KWG *kwg = malloc_or_die(sizeof(KWG));
   kwg->name = NULL;
-  load_kwg(kwg, data_paths, kwg_name);
+  load_kwg(kwg, data_paths, kwg_name, error_stack);
   return kwg;
 }
 

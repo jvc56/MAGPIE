@@ -2,7 +2,7 @@
 #ifndef EXEC_H
 #define EXEC_H
 
-#include "../ent/error_stack.h"
+#include "../util/error_stack.h"
 
 #include "config.h"
 

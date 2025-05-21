@@ -22,9 +22,16 @@ void test_leaves(void) {
   const KLV *klv = players_data_get_klv(config_get_players_data(config), 0);
   const LetterDistribution *ld = config_get_ld(config);
   Rack *rack = rack_create(ld_get_size(ld));
+  ErrorStack *error_stack = error_stack_create();
 
   char *leaves_csv_filename = data_filepaths_get_readable_filename(
-      config_get_data_paths(config), "CSW21", DATA_FILEPATH_TYPE_LEAVES);
+      config_get_data_paths(config), "CSW21", DATA_FILEPATH_TYPE_LEAVES,
+      error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("failed to get leaves csv filepath for test\n");
+  }
 
   FILE *file = fopen(leaves_csv_filename, "r");
   if (!file) {

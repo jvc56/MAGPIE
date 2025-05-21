@@ -2,7 +2,6 @@
 #include <time.h>
 
 #include "../../src/def/autoplay_defs.h"
-#include "../../src/def/error_stack_defs.h"
 
 #include "../../src/ent/autoplay_results.h"
 #include "../../src/ent/board.h"

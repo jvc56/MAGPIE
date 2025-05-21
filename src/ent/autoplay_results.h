@@ -5,7 +5,7 @@
 
 #include "../def/autoplay_defs.h"
 
-#include "error_stack.h"
+#include "../util/error_stack.h"
 #include "game.h"
 #include "move.h"
 

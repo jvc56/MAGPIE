@@ -7,6 +7,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "error_stack.h"
+
 bool has_prefix(const char *pre, const char *str);
 bool has_iprefix(const char *pre, const char *str);
 bool has_suffix(const char *str, const char *suffix);
@@ -27,7 +29,7 @@ void trim_char(char *str, const char c);
 bool has_substring(const char *str, const char *pattern);
 char *get_string_from_file(const char *filename);
 void write_string_to_file(const char *filename, const char *mode,
-                          const char *string);
+                          const char *string, ErrorStack *error_stack);
 char *iso_8859_1_to_utf8(const char *iso_8859_1_string);
 static inline void *memory_copy(void *dest, const void *src, size_t n) {
   return memcpy(dest, src, n);
@@ -52,8 +54,8 @@ StringSplitter *split_string(const char *input_string, const char delimiter,
 void string_splitter_destroy(StringSplitter *string_splitter);
 StringSplitter *split_string_by_newline(const char *input_string,
                                         bool ignore_empty);
-StringSplitter *safe_split_file_by_newline(const char *filename);
-StringSplitter *split_file_by_newline(const char *filename);
+StringSplitter *split_file_by_newline(const char *filename,
+                                      ErrorStack *error_stack);
 
 typedef struct StringBuilder StringBuilder;
 

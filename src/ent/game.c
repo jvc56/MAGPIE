@@ -597,7 +597,7 @@ void game_backup(Game *game) {
 void game_unplay_last_move(Game *game) {
   // restore from backup (pop the last element).
   if (game->backup_cursor == 0) {
-    log_fatal("error: no backup\n");
+    log_fatal("cannot unplay last move without a game backup");
   }
   MinimalGameBackup *state = game->game_backups[game->backup_cursor - 1];
   game->backup_cursor--;

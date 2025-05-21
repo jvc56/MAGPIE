@@ -362,7 +362,7 @@ static inline int compare_moves(const Move *move_1, const Move *move_2,
     }
   }
   if (!allow_duplicates) {
-    log_fatal("duplicate move in move list detected: %d\n", move_1->move_type);
+    log_fatal("duplicate move in move list detected: %d", move_1->move_type);
   }
   return -1;
 }
@@ -404,7 +404,7 @@ static inline int compare_moves_without_equity(const Move *move_1,
     }
   }
   if (!allow_duplicates) {
-    log_fatal("duplicate move in move list detected: %d\n", move_1->move_type);
+    log_fatal("duplicate move in move list detected: %d", move_1->move_type);
   }
   return -1;
 }

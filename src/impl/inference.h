@@ -3,11 +3,11 @@
 
 #include "../def/inference_defs.h"
 
-#include "../ent/error_stack.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
+#include "../util/error_stack.h"
 
 typedef struct InferenceArgs {
   int target_index;

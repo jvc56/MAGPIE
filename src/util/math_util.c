@@ -36,7 +36,7 @@ static double pg_horner(double x, double m, const double *p, int len) {
 double zeta(double s) {
   if (s <= 0.5) {
     log_fatal("zeta function not implemented for values less than or equal to "
-              "0.5: %f\n",
+              "0.5: %f",
               s);
   }
 

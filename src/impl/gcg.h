@@ -2,8 +2,8 @@
 #ifndef GCG_H
 #define GCG_H
 
-#include "../ent/error_stack.h"
 #include "../ent/game_history.h"
+#include "../util/error_stack.h"
 
 #include "config.h"
 

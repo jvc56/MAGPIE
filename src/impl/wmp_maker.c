@@ -996,9 +996,9 @@ resize_mutable_double_blank_map(const MutableDoubleBlankMap *mdbmp,
 WMP *make_wmp_from_words(const DictionaryWordList *words,
                          const LetterDistribution *ld) {
   if (ld->distribution[BLANK_MACHINE_LETTER] > 2) {
-    log_fatal("Cannot create WMP with more than 2 blanks");
+    log_fatal("cannot create WMP with more than 2 blanks");
     return NULL;
-  }                  
+  }
   MutableWordMap *mwmp = make_mwmp_from_words(words);
   MutableBlankMap *mbmp = make_mutable_blank_map_from_mwmp(mwmp);
   MutableDoubleBlankMap *mdbmp = make_mutable_double_blank_map_from_mwmp(mwmp);

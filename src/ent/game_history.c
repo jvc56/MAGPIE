@@ -392,9 +392,14 @@ void game_history_destroy(GameHistory *game_history) {
   free(game_history);
 }
 
-GameEvent *game_history_create_and_add_game_event(GameHistory *game_history) {
+GameEvent *game_history_create_and_add_game_event(GameHistory *game_history,
+                                                  ErrorStack *error_stack) {
   if (game_history->number_of_events == MAX_GAME_EVENTS) {
-    log_fatal("game events overflow");
+    error_stack_push(
+        error_stack, ERROR_STATUS_GCG_PARSE_GAME_EVENT_OVERFLOW,
+        get_formatted_string("exceeded the maximum number of game events: %d",
+                             MAX_GAME_EVENTS));
+    return NULL;
   }
   GameEvent *game_event = game_event_create();
   game_history->events[game_history->number_of_events++] = game_event;

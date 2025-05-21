@@ -75,7 +75,7 @@ double bai_binary_search(bai_binary_search_value_func_t vf, const void *args,
     }
   }
 
-  // log_fatal("binary_search did not reach tolerance %0.20f in %d iterations.\n
+  // log_fatal("binary_search did not reach tolerance %0.20f in %d iterations.
   // "
   //           "f(%0.20f) = %0.20f\n"
   //           "f(%0.20f) = %0.20f\n"

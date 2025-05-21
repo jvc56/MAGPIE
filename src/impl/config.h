@@ -11,7 +11,6 @@
 #include "../ent/autoplay_results.h"
 #include "../ent/board_layout.h"
 #include "../ent/conversion_results.h"
-#include "../ent/error_stack.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
 #include "../ent/letter_distribution.h"
@@ -20,6 +19,7 @@
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "../ent/win_pct.h"
+#include "../util/error_stack.h"
 
 typedef struct Config Config;
 

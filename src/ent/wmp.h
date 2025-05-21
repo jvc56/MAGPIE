@@ -131,7 +131,7 @@ typedef struct WMP {
 static inline void read_byte_from_stream(uint8_t *byte, FILE *stream) {
   const size_t result = fread(byte, sizeof(uint8_t), 1, stream);
   if (result != 1) {
-    log_fatal("could not read byte from stream\n");
+    log_fatal("could not read byte from stream");
   }
 }
 
@@ -139,14 +139,14 @@ static inline void read_bytes_from_stream(uint8_t *bytes, size_t n,
                                           FILE *stream) {
   const size_t result = fread(bytes, sizeof(uint8_t), n, stream);
   if (result != n) {
-    log_fatal("could not read bytes from stream\n");
+    log_fatal("could not read bytes from stream");
   }
 }
 
 static inline void read_uint32_from_stream(uint32_t *i, FILE *stream) {
   const size_t result = fread(i, sizeof(uint32_t), 1, stream);
   if (result != 1) {
-    log_fatal("could not read uint32 from stream\n");
+    log_fatal("could not read uint32 from stream");
   }
   *i = le32toh(*i);
 }
@@ -155,7 +155,7 @@ static inline void read_uint32s_from_stream(uint32_t *i, size_t n,
                                             FILE *stream) {
   const size_t result = fread(i, sizeof(uint32_t), n, stream);
   if (result != n) {
-    log_fatal("could not read uint32s from stream\n");
+    log_fatal("could not read uint32s from stream");
   }
 }
 
@@ -165,7 +165,7 @@ static inline void read_wmp_entries_from_stream(WMPEntry *entries, uint32_t n,
   // Change this to read each field individually.
   const size_t result = fread(entries, sizeof(WMPEntry), n, stream);
   if (result != n) {
-    log_fatal("could not read WMPEntries from stream\n");
+    log_fatal("could not read WMPEntries from stream");
   }
   for (uint32_t i = 0; i < n; i++) {
     for (uint32_t j = 0; j < WMP_QUOTIENT_BYTES; j++) {
@@ -237,21 +237,33 @@ static inline void read_wmp_for_length(WMP *wmp, uint32_t len, FILE *stream) {
   read_wfl_double_blanks(wfl, stream);
 }
 
-static inline void wmp_load_from_filename(WMP *wmp, const char *wmp_name,
-                                          const char *wmp_filename) {
-  FILE *stream = stream_from_filename(wmp_filename);
-  if (!stream) {
-    log_fatal("could not open stream for filename: %s\n", wmp_filename);
+static inline void wmp_load_from_filename(WMP *wmp, const char *wmp_filename,
+                                          ErrorStack *error_stack) {
+  FILE *stream = stream_from_filename(wmp_filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_WMP_FAILED_TO_OPEN_STREAM_FOR_READING,
+        get_formatted_string("failed to open wmp file for reading: %s\n",
+                             wmp_filename));
+    return;
   }
-
-  wmp->name = string_duplicate(wmp_name);
 
   read_header_from_stream(wmp, stream);
   if (wmp->version < WMP_EARLIEST_SUPPORTED_VERSION) {
-    log_fatal("wmp->version < WMP_EARLIEST_SUPPORTED_VERSION\n");
+    error_stack_push(
+        error_stack, ERROR_STATUS_WMP_UNSUPPORTED_VERSION,
+        get_formatted_string(
+            "detected wmp version %d but only %d or greater is supported: %s\n",
+            wmp->version, WMP_EARLIEST_SUPPORTED_VERSION, wmp_filename));
+    return;
   }
   if (wmp->board_dim != BOARD_DIM) {
-    log_fatal("wmp->board_dim != BOARD_DIM\n");
+    error_stack_push(error_stack, ERROR_STATUS_WMP_INCOMPATIBLE_BOARD_DIM,
+                     get_formatted_string(
+                         "detected wmp board dimension of %d which does not "
+                         "match the required board dimension of %d: %s\n",
+                         wmp->board_dim, BOARD_DIM, wmp_filename));
+    return;
   }
 
   for (uint32_t len = 2; len <= BOARD_DIM; len++) {
@@ -260,17 +272,23 @@ static inline void wmp_load_from_filename(WMP *wmp, const char *wmp_name,
 }
 
 static inline void wmp_load(WMP *wmp, const char *data_paths,
-                            const char *wmp_name) {
+                            const char *wmp_name, ErrorStack *error_stack) {
   char *wmp_filename = data_filepaths_get_readable_filename(
-      data_paths, wmp_name, DATA_FILEPATH_TYPE_WORDMAP);
-  wmp_load_from_filename(wmp, wmp_name, wmp_filename);
+      data_paths, wmp_name, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    wmp_load_from_filename(wmp, wmp_filename, error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      wmp->name = string_duplicate(wmp_name);
+    }
+  }
   free(wmp_filename);
 }
 
-static inline WMP *wmp_create(const char *data_paths, const char *wmp_name) {
+static inline WMP *wmp_create(const char *data_paths, const char *wmp_name,
+                              ErrorStack *error_stack) {
   WMP *wmp = (WMP *)malloc_or_die(sizeof(WMP));
   wmp->name = NULL;
-  wmp_load(wmp, data_paths, wmp_name);
+  wmp_load(wmp, data_paths, wmp_name, error_stack);
   return wmp;
 }
 
@@ -600,35 +618,32 @@ static inline bool write_wfl_to_stream(int length, const WMPForLength *wfl,
   return true;
 }
 
-static inline bool wmp_write_to_file(const WMP *wmp, const char *filename) {
+static inline void wmp_write_to_file(const WMP *wmp, const char *filename,
+                                     ErrorStack *error_stack) {
   FILE *stream = fopen(filename, "wb");
   if (!stream) {
-    log_fatal("could not open file for writing: %s\n", filename);
-    return false;
+    error_stack_push(
+        error_stack, ERROR_STATUS_WMP_FAILED_TO_OPEN_STREAM_FOR_WRITING,
+        get_formatted_string("failed to open wmp file for writing: %s\n",
+                             filename));
   }
   if (!write_byte_to_stream(wmp->version, stream)) {
-    log_fatal("could not write version to stream\n");
-    return false;
+    log_fatal("could not write version to stream");
   }
   if (!write_byte_to_stream(wmp->board_dim, stream)) {
-    printf("could not write board_dim to stream\n");
-    return false;
+    log_fatal("could not write board_dim to stream");
   }
   if (!write_uint32_to_stream(wmp->max_word_lookup_bytes, stream)) {
-    printf("could not write max word lookup bytes to stream\n");
-    return false;
+    log_fatal("could not write max word lookup bytes to stream");
   }
   for (int len = 2; len <= BOARD_DIM; len++) {
     if (!write_wfl_to_stream(len, &wmp->wfls[len], stream)) {
-      printf("could not write words of same length map to stream\n");
-      return false;
+      log_fatal("could not write words of same length map to stream");
     }
   }
   if (fclose(stream) != 0) {
-    printf("could not close WMP file after writing\n");
-    return false;
+    log_fatal("could not close WMP file after writing");
   }
-  return true;
 }
 
 #endif

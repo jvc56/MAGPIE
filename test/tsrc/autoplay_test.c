@@ -200,7 +200,9 @@ void test_autoplay_divergent_games(void) {
   }
 
   char *small_diff_klv_filename = data_filepaths_get_writable_filename(
-      DEFAULT_TEST_DATA_PATH, "CSW21_small_diff", DATA_FILEPATH_TYPE_KLV);
+      DEFAULT_TEST_DATA_PATH, "CSW21_small_diff", DATA_FILEPATH_TYPE_KLV,
+      error_stack);
+  assert(error_stack_is_empty(error_stack));
 
   klv_write(small_diff_klv, small_diff_klv_filename);
   free(small_diff_klv_filename);

@@ -68,6 +68,7 @@ void fifo_create(const char *fifo_name);
 void delete_fifo(const char *fifo_name);
 Config *config_create_or_die(const char *cmd);
 Config *config_create_default_test(void);
+WMP *wmp_create_or_die(const char *data_paths, const char *wmp_name);
 void set_row(Game *game, int row, const char *row_content);
 void assert_board_layout_error(const char *data_paths,
                                const char *board_layout_filename,

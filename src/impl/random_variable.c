@@ -97,7 +97,7 @@ double rv_uniform_predetermined_sample(
       (RVUniformPredetermined *)rvs->data;
   if (rv_uniform_predetermined->index >=
       rv_uniform_predetermined->num_samples) {
-    log_fatal("ran out of uniform predetermined samples\n");
+    log_fatal("ran out of uniform predetermined samples");
   }
   const int index = rv_uniform_predetermined->index++;
   const double result = rv_uniform_predetermined->samples[index];
@@ -225,7 +225,7 @@ double rv_normal_predetermined_sample(RandomVariables *rvs, const uint64_t k,
   RVNormalPredetermined *rv_normal_predetermined =
       (RVNormalPredetermined *)rvs->data;
   if (rv_normal_predetermined->index >= rv_normal_predetermined->num_samples) {
-    log_fatal("ran out of normal predetermined samples\n");
+    log_fatal("ran out of normal predetermined samples");
   }
   const double mean = rv_normal_predetermined->means_and_vars[k * 2];
   const double sigma2 = rv_normal_predetermined->means_and_vars[k * 2 + 1];

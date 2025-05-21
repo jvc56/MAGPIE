@@ -1,8 +1,8 @@
 #include "simmer.h"
 
-#include "../ent/error_stack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
+#include "../util/error_stack.h"
 
 #include "../str/sim_string.h"
 

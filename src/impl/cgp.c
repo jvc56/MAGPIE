@@ -5,9 +5,9 @@
 
 #include "../ent/bag.h"
 #include "../ent/equity.h"
-#include "../ent/error_stack.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
+#include "../util/error_stack.h"
 
 #include "../impl/gameplay.h"
 
@@ -367,7 +367,15 @@ void string_builder_add_cgp_options(StringBuilder *cgp_options_builder,
 
   bool write_ld = false;
   if (kwgs_are_shared) {
-    char *default_ld_name = ld_get_default_name_from_lexicon_name(lexicon_name);
+    // Throwing a fatal error here is okay since this function is only called by
+    // tests.
+    ErrorStack *error_stack = error_stack_create();
+    char *default_ld_name =
+        ld_get_default_name_from_lexicon_name(lexicon_name, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_print_and_reset(error_stack);
+      log_fatal("could not get default letter distribution name");
+    }
     if (!strings_equal(ld_name, default_ld_name)) {
       write_ld = true;
     }

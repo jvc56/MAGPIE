@@ -34,10 +34,12 @@ void test_small_klv(void) {
   assert(ld_get_size(ld) == 3);
   const char *data_path = "testdata";
   const char *klv_name = "small";
+  ErrorStack *error_stack = error_stack_create();
   char *leaves_filename = data_filepaths_get_writable_filename(
-      data_path, klv_name, DATA_FILEPATH_TYPE_LEAVES);
+      data_path, klv_name, DATA_FILEPATH_TYPE_LEAVES, error_stack);
   char *klv_filename = data_filepaths_get_writable_filename(
-      data_path, klv_name, DATA_FILEPATH_TYPE_KLV);
+      data_path, klv_name, DATA_FILEPATH_TYPE_KLV, error_stack);
+  assert(error_stack_is_empty(error_stack));
 
   KLV *small_klv = klv_create_empty(ld, klv_name);
   assert(klv_get_number_of_leaves(small_klv) == 11);
@@ -82,10 +84,12 @@ void test_normal_klv(void) {
   assert(ld_get_size(ld) == 27);
   const char *data_path = "testdata";
   const char *klv_name = "normal";
+  ErrorStack *error_stack = error_stack_create();
   char *leaves_filename = data_filepaths_get_writable_filename(
-      data_path, klv_name, DATA_FILEPATH_TYPE_LEAVES);
+      data_path, klv_name, DATA_FILEPATH_TYPE_LEAVES, error_stack);
   char *klv_filename = data_filepaths_get_writable_filename(
-      data_path, klv_name, DATA_FILEPATH_TYPE_KLV);
+      data_path, klv_name, DATA_FILEPATH_TYPE_KLV, error_stack);
+  assert(error_stack_is_empty(error_stack));
 
   KLV *normal_klv = klv_create_empty(ld, "normal");
   assert(klv_get_number_of_leaves(normal_klv) == 914624);

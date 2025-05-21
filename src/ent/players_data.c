@@ -111,17 +111,18 @@ void players_data_set_data(PlayersData *players_data,
 }
 
 void *players_data_create_data(players_data_t players_data_type,
-                               const char *data_paths, const char *data_name) {
+                               const char *data_paths, const char *data_name,
+                               ErrorStack *error_stack) {
   void *data = NULL;
   switch (players_data_type) {
   case PLAYERS_DATA_TYPE_KWG:
-    data = kwg_create(data_paths, data_name);
+    data = kwg_create(data_paths, data_name, error_stack);
     break;
   case PLAYERS_DATA_TYPE_KLV:
-    data = klv_create(data_paths, data_name);
+    data = klv_create(data_paths, data_name, error_stack);
     break;
   case PLAYERS_DATA_TYPE_WMP:
-    data = wmp_create(data_paths, data_name);
+    data = wmp_create(data_paths, data_name, error_stack);
     break;
   case NUMBER_OF_DATA:
     log_fatal("cannot create invalid players data type");

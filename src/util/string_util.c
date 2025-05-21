@@ -1,3 +1,5 @@
+#include "string_util.h"
+
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -6,10 +8,9 @@
 #include <string.h>
 #include <strings.h>
 
-#include "string_util.h"
-
-#include "../util/io.h"
-#include "../util/util.h"
+#include "error_stack.h"
+#include "io.h"
+#include "util.h"
 
 #define STRING_LIST_INITIAL_CAPACITY 10
 
@@ -140,7 +141,7 @@ void remove_first_newline(char *str) { str[strcspn(str, "\n")] = 0; }
 
 size_t string_length(const char *str) {
   if (!str) {
-    log_fatal("called string_length on NULL string\n");
+    log_fatal("called string_length on NULL string");
   }
   return strlen(str);
 }
@@ -197,9 +198,12 @@ bool has_substring(const char *str, const char *pattern) {
   return (ptr != NULL);
 }
 
-char *safe_get_string_from_file(const char *filename) {
+char *get_string_from_file(const char *filename, ErrorStack *error_stack) {
   FILE *file_handle = fopen(filename, "r");
   if (!file_handle) {
+    error_stack_push(error_stack,
+                     ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM_FOR_READING,
+                     get_formatted_string("error opening file: %s", filename));
     return NULL;
   }
 
@@ -212,6 +216,10 @@ char *safe_get_string_from_file(const char *filename) {
       (char *)malloc_or_die(file_size + 1); // +1 for null terminator
   if (!result_string) {
     fclose(file_handle);
+    free(result_string);
+    error_stack_push(error_stack, ERROR_STATUS_RW_MEMORY_ALLOCATION_ERROR,
+                     get_formatted_string(
+                         "memory allocation error reading file: %s", filename));
     return NULL;
   }
 
@@ -219,38 +227,10 @@ char *safe_get_string_from_file(const char *filename) {
   if (bytes_read != (size_t)file_size) {
     fclose(file_handle);
     free(result_string);
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_READ_ERROR,
+        get_formatted_string("error while reading file: %s", filename));
     return NULL;
-  }
-
-  result_string[file_size] = '\0';
-  fclose(file_handle);
-
-  return result_string;
-}
-
-char *get_string_from_file(const char *filename) {
-  FILE *file_handle = fopen(filename, "r");
-  if (!file_handle) {
-    log_fatal("Error opening file: %s\n", filename);
-  }
-
-  // Get the file size by seeking to the end and then back to the beginning
-  fseek(file_handle, 0, SEEK_END);
-  long file_size = ftell(file_handle);
-  fseek(file_handle, 0, SEEK_SET);
-
-  char *result_string =
-      (char *)malloc_or_die(file_size + 1); // +1 for null terminator
-  if (!result_string) {
-    fclose(file_handle);
-    log_fatal("Memory allocation error while reading file: %s\n", filename);
-  }
-
-  size_t bytes_read = fread(result_string, 1, file_size, file_handle);
-  if (bytes_read != (size_t)file_size) {
-    fclose(file_handle);
-    free(result_string);
-    log_fatal("Error reading file: %s\n", filename);
   }
 
   result_string[file_size] = '\0';
@@ -260,16 +240,22 @@ char *get_string_from_file(const char *filename) {
 }
 
 void write_string_to_file(const char *filename, const char *mode,
-                          const char *string) {
+                          const char *string, ErrorStack *error_stack) {
   FILE *file_handle = fopen(filename, mode);
   if (!file_handle) {
-    log_fatal("Error opening file for writing: %s\n", filename);
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM_FOR_WRITING,
+        get_formatted_string("error opening file for writing: %s", filename));
+    return;
   }
 
   // Write string to file
   if (fputs(string, file_handle) == EOF) {
     fclose(file_handle);
-    log_fatal("Error writing to file: %s\n", filename);
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_WRITE_ERROR,
+        get_formatted_string("error writing to file: %s", filename));
+    return;
   }
 
   // Close the file handle
@@ -328,7 +314,7 @@ char *get_formatted_string(const char *format, ...) {
 
 char *get_substring(const char *input_string, int start_index, int end_index) {
   if (!input_string) {
-    log_fatal("cannot get substring of null string\n");
+    log_fatal("cannot get substring of null string");
   }
 
   int input_length = string_length(input_string);
@@ -565,7 +551,7 @@ int string_splitter_get_number_of_items(const StringSplitter *string_splitter) {
 const char *string_splitter_get_item(const StringSplitter *string_splitter,
                                      int item_index) {
   if (item_index >= string_splitter->number_of_items || item_index < 0) {
-    log_fatal("string item out of range (%d): %d\n",
+    log_fatal("string item out of range (%d): %d",
               string_splitter->number_of_items, item_index);
   }
   return string_splitter->items[item_index];
@@ -584,7 +570,7 @@ char *string_splitter_join(const StringSplitter *string_splitter,
   int number_of_items = string_splitter_get_number_of_items(string_splitter);
   if (start_index < 0 || end_index < 0 || start_index > number_of_items ||
       end_index > number_of_items) {
-    log_fatal("invalid bounds for join: %d, %d, %d\n", start_index, end_index,
+    log_fatal("invalid bounds for join: %d, %d, %d", start_index, end_index,
               number_of_items);
   }
   StringBuilder *joined_string_builder = string_builder_create();
@@ -694,19 +680,12 @@ StringSplitter *split_string(const char *input_string, const char delimiter,
                                ignore_empty);
 }
 
-StringSplitter *safe_split_file_by_newline(const char *filename) {
-  char *file_content = safe_get_string_from_file(filename);
-  if (!file_content) {
+StringSplitter *split_file_by_newline(const char *filename,
+                                      ErrorStack *error_stack) {
+  char *file_content = get_string_from_file(filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
-  StringSplitter *file_content_split_by_newline =
-      split_string(file_content, '\n', true);
-  free(file_content);
-  return file_content_split_by_newline;
-}
-
-StringSplitter *split_file_by_newline(const char *filename) {
-  char *file_content = get_string_from_file(filename);
   StringSplitter *file_content_split_by_newline =
       split_string(file_content, '\n', true);
   free(file_content);
@@ -717,7 +696,7 @@ char *get_dirpath_from_filepath(const char *filepath) {
   // Make a copy of the input filepath because strtok modifies the string
   char *filepath_copy = string_duplicate(filepath);
   if (filepath_copy == NULL) {
-    log_fatal("failed to duplicate string: %s\n", filepath);
+    log_fatal("failed to duplicate string: %s", filepath);
   }
 
   // Find the last occurrence of the '/' or '\' character
@@ -732,7 +711,7 @@ char *get_dirpath_from_filepath(const char *filepath) {
   } else {
     // If there's no separator, the input is considered invalid for this
     // function
-    log_fatal("cannot find directory path from filepath: %s\n", filepath);
+    log_fatal("cannot find directory path from filepath: %s", filepath);
   }
 
   // Allocate memory for the directory path to return
@@ -859,7 +838,7 @@ int string_list_get_count(const StringList *string_list) {
 
 const char *string_list_get_string(const StringList *string_list, int index) {
   if (index < 0 || index >= string_list->count) {
-    log_fatal("string index out of range: %d\n", index);
+    log_fatal("string index out of range: %d", index);
   }
   return string_list->strings[index];
 }

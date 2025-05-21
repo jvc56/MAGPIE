@@ -7,7 +7,6 @@
 
 #include "../def/autoplay_defs.h"
 #include "../def/config_defs.h"
-#include "../def/error_stack_defs.h"
 #include "../def/exec_defs.h"
 #include "../def/game_defs.h"
 #include "../def/inference_defs.h"
@@ -16,12 +15,12 @@
 #include "../def/validated_move_defs.h"
 
 #include "../ent/autoplay_results.h"
-#include "../ent/error_stack.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/players_data.h"
 #include "../ent/thread_control.h"
 #include "../ent/validated_move.h"
+#include "../util/error_stack.h"
 
 #include "autoplay.h"
 #include "bai.h"
@@ -206,7 +205,7 @@ const char *config_get_parg_value(const Config *config, arg_token_t arg_token,
                                   int value_index) {
   ParsedArg *parg = config_get_parg(config, arg_token);
   if (value_index >= parg->num_values) {
-    log_fatal("value index exceeds number of values for %d: %d >= %d\n",
+    log_fatal("value index exceeds number of values for %d: %d >= %d",
               arg_token, value_index, parg->num_values);
   }
   const char *ret_val = NULL;
@@ -580,7 +579,7 @@ void execute_cgp_load(Config *config, ErrorStack *error_stack) {
     const char *cgp_component = config_get_parg_value(config, ARG_TOKEN_CGP, i);
     if (!cgp_component) {
       // This should have been caught earlier by the insufficient values error
-      log_fatal("missing cgp component %d\n", i);
+      log_fatal("missing cgp component: %d", i);
     }
     string_builder_add_string(cgp_builder, cgp_component);
     string_builder_add_char(cgp_builder, ' ');
@@ -599,7 +598,7 @@ void execute_cgp_load(Config *config, ErrorStack *error_stack) {
     game_load_cgp(config->game, cgp, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       error_stack_print_and_reset(error_stack);
-      log_fatal("cgp load unexpected failed\n");
+      log_fatal("cgp load unexpected failed");
     }
     config_reset_move_list(config);
   }
@@ -649,7 +648,7 @@ void execute_add_moves(Config *config, ErrorStack *error_stack) {
             ld);
         string_builder_add_string(phonies_sb, ": ");
         string_builder_add_string(phonies_sb, phonies_formed);
-        log_warn(string_builder_peek(phonies_sb));
+        write_to_stream_out(string_builder_peek(phonies_sb));
       }
       free(phonies_formed);
     }
@@ -811,8 +810,7 @@ void execute_sim(Config *config, ErrorStack *error_stack) {
 char *status_sim(Config *config) {
   SimResults *sim_results = config->sim_results;
   if (!sim_results) {
-    log_warn("Simmer has not been initialized.");
-    return NULL;
+    return string_duplicate("simmer has not been initialized");
   }
   return ucgi_sim_stats(
       config->game, sim_results,
@@ -1075,12 +1073,19 @@ void execute_create_data(Config *config, ErrorStack *error_stack) {
     const char *klv_name_str =
         config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 1);
     char *klv_filename = data_filepaths_get_writable_filename(
-        config_get_data_paths(config), klv_name_str, DATA_FILEPATH_TYPE_KLV);
-    LetterDistribution *ld =
-        ld_create(config_get_data_paths(config),
-                  config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 2));
+        config_get_data_paths(config), klv_name_str, DATA_FILEPATH_TYPE_KLV,
+        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    LetterDistribution *ld = ld_create(
+        config_get_data_paths(config),
+        config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 2), error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
     KLV *klv = klv_create_empty(ld, klv_name_str);
-    klv_write(klv, klv_filename);
+    klv_write(klv, klv_filename, error_stack);
     klv_destroy(klv);
     free(klv_filename);
     ld_destroy(ld);
@@ -1277,26 +1282,54 @@ bool is_lexicon_required(const char *new_p1_leaves_name,
   return new_p1_leaves_name || new_p2_leaves_name || new_ld_name;
 }
 
-bool lex_lex_compat(const char *p1_lexicon_name, const char *p2_lexicon_name) {
+bool lex_lex_compat(const char *p1_lexicon_name, const char *p2_lexicon_name,
+                    ErrorStack *error_stack) {
   if (!p1_lexicon_name && !p2_lexicon_name) {
     return true;
   }
   if (!p1_lexicon_name || !p2_lexicon_name) {
     return false;
   }
-  return ld_types_compat(ld_get_type_from_lex_name(p1_lexicon_name),
-                         ld_get_type_from_lex_name(p2_lexicon_name));
+  return ld_types_compat(
+      ld_get_type_from_lex_name(p1_lexicon_name, error_stack),
+      ld_get_type_from_lex_name(p2_lexicon_name, error_stack));
 }
 
-bool lex_ld_compat(const char *lexicon_name, const char *ld_name) {
+bool lex_ld_compat(const char *lexicon_name, const char *ld_name,
+                   ErrorStack *error_stack) {
   if (!lexicon_name && !ld_name) {
     return true;
   }
   if (!lexicon_name || !ld_name) {
     return false;
   }
-  return ld_types_compat(ld_get_type_from_lex_name(lexicon_name),
-                         ld_get_type_from_ld_name(ld_name));
+  return ld_types_compat(ld_get_type_from_lex_name(lexicon_name, error_stack),
+                         ld_get_type_from_ld_name(ld_name, error_stack));
+}
+
+bool lexicons_and_leaves_compat(const char *updated_p1_lexicon_name,
+                                const char *updated_p1_leaves_name,
+                                const char *updated_p2_lexicon_name,
+                                const char *updated_p2_leaves_name,
+                                ErrorStack *error_stack) {
+  const bool leaves_are_compatible = lex_lex_compat(
+      updated_p1_leaves_name, updated_p2_leaves_name, error_stack);
+  if (!error_stack_is_empty(error_stack) || !leaves_are_compatible) {
+    return false;
+  }
+
+  const bool lex1_and_leaves1_are_compatible = lex_lex_compat(
+      updated_p1_lexicon_name, updated_p1_leaves_name, error_stack);
+  if (!error_stack_is_empty(error_stack) || !lex1_and_leaves1_are_compatible) {
+    return false;
+  }
+
+  const bool lex2_and_leaves2_are_compatible = lex_lex_compat(
+      updated_p2_lexicon_name, updated_p2_leaves_name, error_stack);
+  if (!error_stack_is_empty(error_stack) || !lex2_and_leaves2_are_compatible) {
+    return false;
+  }
+  return true;
 }
 
 char *get_default_klv_name(const char *lexicon_name) {
@@ -1400,7 +1433,14 @@ void config_load_lexicon_dependent_data(Config *config,
     }
   }
 
-  if (!lex_lex_compat(updated_p1_lexicon_name, updated_p2_lexicon_name)) {
+  const bool lex_lex_is_compat = lex_lex_compat(
+      updated_p1_lexicon_name, updated_p2_lexicon_name, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  if (!lex_lex_is_compat) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_INCOMPATIBLE_LEXICONS,
         get_formatted_string("lexicons are incompatible: %s, %s",
@@ -1410,8 +1450,12 @@ void config_load_lexicon_dependent_data(Config *config,
 
   // Set the use_default bool here because the 'existing_p1_lexicon_name'
   // variable might be free'd in players_data_set.
-  const bool use_default =
-      !lex_lex_compat(updated_p1_lexicon_name, existing_p1_lexicon_name);
+  const bool use_default = !lex_lex_compat(
+      updated_p1_lexicon_name, existing_p1_lexicon_name, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   // Load lexica
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_KWG,
@@ -1471,25 +1515,31 @@ void config_load_lexicon_dependent_data(Config *config,
     updated_p2_leaves_name = string_duplicate(existing_p2_leaves_name);
   }
 
-  if (!lex_lex_compat(updated_p1_leaves_name, updated_p2_leaves_name) ||
-      !lex_lex_compat(updated_p1_lexicon_name, updated_p1_leaves_name) ||
-      !lex_lex_compat(updated_p2_lexicon_name, updated_p2_leaves_name)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_INCOMPATIBLE_LEXICONS,
-        get_formatted_string("one or more of the leaves are incompatible with "
-                             "the current lexicons or each other: %s, %s",
-                             updated_p1_leaves_name, updated_p2_leaves_name));
-    free(updated_p1_leaves_name);
-    free(updated_p2_leaves_name);
-    return;
-  }
+  const bool leaves_and_lexicons_are_compatible = lexicons_and_leaves_compat(
+      updated_p1_lexicon_name, updated_p1_leaves_name, updated_p2_lexicon_name,
+      updated_p2_leaves_name, error_stack);
 
-  players_data_set(config->players_data, PLAYERS_DATA_TYPE_KLV,
-                   config->data_paths, updated_p1_leaves_name,
-                   updated_p2_leaves_name);
+  if (error_stack_is_empty(error_stack)) {
+    if (!leaves_and_lexicons_are_compatible) {
+      error_stack_push(error_stack,
+                       ERROR_STATUS_CONFIG_LOAD_INCOMPATIBLE_LEXICONS,
+                       get_formatted_string(
+                           "one or more of the leaves are incompatible with "
+                           "the current lexicons or each other: %s, %s",
+                           updated_p1_leaves_name, updated_p2_leaves_name));
+    } else {
+      players_data_set(config->players_data, PLAYERS_DATA_TYPE_KLV,
+                       config->data_paths, updated_p1_leaves_name,
+                       updated_p2_leaves_name);
+    }
+  }
 
   free(updated_p1_leaves_name);
   free(updated_p2_leaves_name);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   // Load letter distribution
 
@@ -1501,30 +1551,38 @@ void config_load_lexicon_dependent_data(Config *config,
   if (new_ld_name) {
     updated_ld_name = string_duplicate(new_ld_name);
   } else if (use_default || !existing_ld_name) {
-    updated_ld_name =
-        ld_get_default_name_from_lexicon_name(updated_p1_lexicon_name);
+    updated_ld_name = ld_get_default_name_from_lexicon_name(
+        updated_p1_lexicon_name, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
   } else {
     updated_ld_name = string_duplicate(existing_ld_name);
   }
 
-  if (!lex_ld_compat(updated_p1_lexicon_name, updated_ld_name)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_INCOMPATIBLE_LETTER_DISTRIBUTION,
-        get_formatted_string(
-            "lexicon %s is incompatible with letter distribution %s",
-            updated_p1_lexicon_name, updated_ld_name));
-    free(updated_ld_name);
-    return;
+  const bool lex_ld_is_compat =
+      lex_ld_compat(updated_p1_lexicon_name, updated_ld_name, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    if (!lex_ld_is_compat) {
+      error_stack_push(
+          error_stack,
+          ERROR_STATUS_CONFIG_LOAD_INCOMPATIBLE_LETTER_DISTRIBUTION,
+          get_formatted_string(
+              "lexicon %s is incompatible with letter distribution %s",
+              updated_p1_lexicon_name, updated_ld_name));
+    } else {
+      // If the letter distribution name has changed, update it
+      config->ld_changed = false;
+      if (!strings_equal(updated_ld_name, existing_ld_name)) {
+        ld_destroy(config->ld);
+        config->ld =
+            ld_create(config->data_paths, updated_ld_name, error_stack);
+        if (error_stack_is_empty(error_stack)) {
+          config->ld_changed = true;
+        }
+      }
+    }
   }
-
-  // If the letter distribution name has changed, update it
-  config->ld_changed = false;
-  if (!strings_equal(updated_ld_name, existing_ld_name)) {
-    ld_destroy(config->ld);
-    config->ld = ld_create(config->data_paths, updated_ld_name);
-    config->ld_changed = true;
-  }
-
   free(updated_ld_name);
 }
 
@@ -1785,7 +1843,11 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   if (new_win_pct_name &&
       !strings_equal(win_pct_get_name(config->win_pcts), new_win_pct_name)) {
     win_pct_destroy(config->win_pcts);
-    config->win_pcts = win_pct_create(config->data_paths, new_win_pct_name);
+    config->win_pcts =
+        win_pct_create(config->data_paths, new_win_pct_name, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
   }
 
   const char *record_filepath =
@@ -1845,6 +1907,16 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack) {
         error_stack, ERROR_STATUS_CONFIG_LOAD_BOARD_LAYOUT_ERROR,
         string_duplicate(
             "encountered an error loading the default board layout"));
+    return;
+  }
+
+  config->win_pcts =
+      win_pct_create(config->data_paths, DEFAULT_WIN_PCT, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_WIN_PCT_ERROR,
+        string_duplicate(
+            "encountered an error loading the default win percentage file"));
     return;
   }
 
@@ -1970,7 +2042,6 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack) {
   config->use_small_plays = false;
   config->human_readable = false;
   config->game_variant = DEFAULT_GAME_VARIANT;
-  config->win_pcts = win_pct_create(config->data_paths, DEFAULT_WIN_PCT);
   config->ld = NULL;
   config->players_data = players_data_create();
   config->thread_control = thread_control_create();
