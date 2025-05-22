@@ -27,13 +27,10 @@ size_t string_length(const char *str);
 void trim_whitespace(char *str);
 void trim_char(char *str, const char c);
 bool has_substring(const char *str, const char *pattern);
-char *get_string_from_file(const char *filename);
+char *get_string_from_file(const char *filename, ErrorStack *error_stack);
 void write_string_to_file(const char *filename, const char *mode,
                           const char *string, ErrorStack *error_stack);
 char *iso_8859_1_to_utf8(const char *iso_8859_1_string);
-static inline void *memory_copy(void *dest, const void *src, size_t n) {
-  return memcpy(dest, src, n);
-}
 int memory_compare(const void *s1, const void *s2, size_t n);
 
 char *get_substring(const char *input_string, int start_index, int end_index);

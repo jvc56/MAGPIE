@@ -155,19 +155,12 @@ static inline void klv_count_words(const KLV *klv, size_t kwg_size) {
   }
 }
 
-static inline void klv_load(KLV *klv, const char *data_paths,
-                            const char *klv_name, ErrorStack *error_stack) {
-  char *klv_filename = data_filepaths_get_readable_filename(
-      data_paths, klv_name, DATA_FILEPATH_TYPE_KLV, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
+static inline void klv_load(const char *klv_name, const char *klv_filename,
+                            KLV *klv, ErrorStack *error_stack) {
   FILE *stream = stream_from_filename(klv_filename, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  free(klv_filename);
 
   klv->name = string_duplicate(klv_name);
 
@@ -216,14 +209,31 @@ static inline void klv_load(KLV *klv, const char *data_paths,
   klv_count_words(klv, kwg_size);
 }
 
+static inline void klv_destroy(KLV *klv) {
+  if (!klv) {
+    return;
+  }
+  kwg_destroy(klv->kwg);
+  free(klv->leave_values);
+  free(klv->word_counts);
+  free(klv->name);
+  free(klv);
+}
+
 static inline KLV *klv_create(const char *data_paths, const char *klv_name,
                               ErrorStack *error_stack) {
-  KLV *klv = malloc_or_die(sizeof(KLV));
-  klv->name = NULL;
-  klv_load(klv, data_paths, klv_name, error_stack);
+
+  char *klv_filename = data_filepaths_get_readable_filename(
+      data_paths, klv_name, DATA_FILEPATH_TYPE_KLV, error_stack);
+  KLV *klv = NULL;
+  if (error_stack_is_empty(error_stack)) {
+    klv = calloc_or_die(1, sizeof(KLV));
+    klv_load(klv_name, klv_filename, klv, error_stack);
+  }
+  free(klv_filename);
   if (!error_stack_is_empty(error_stack)) {
-    free(klv);
-    return NULL;
+    klv_destroy(klv);
+    klv = NULL;
   }
   return klv;
 }
@@ -241,17 +251,6 @@ static inline KLV *klv_create_zeroed_from_kwg(KWG *kwg, int number_of_leaves,
       (uint32_t *)calloc_or_die(number_of_kwg_nodes, sizeof(uint32_t));
   klv_count_words(klv, number_of_kwg_nodes);
   return klv;
-}
-
-static inline void klv_destroy(KLV *klv) {
-  if (!klv) {
-    return;
-  }
-  kwg_destroy(klv->kwg);
-  free(klv->leave_values);
-  free(klv->word_counts);
-  free(klv->name);
-  free(klv);
 }
 
 static inline uint32_t klv_get_word_index_internal(const KLV *klv,

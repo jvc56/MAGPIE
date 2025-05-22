@@ -62,13 +62,12 @@ int board_layout_get_start_coord(const BoardLayout *bl, int index) {
 }
 
 BoardLayout *board_layout_create(void) {
-  BoardLayout *bl = malloc_or_die(sizeof(BoardLayout));
-  bl->name = NULL;
+  BoardLayout *bl = calloc_or_die(1, sizeof(BoardLayout));
   return bl;
 }
 
 void board_layout_parse_split_start_coords(
-    BoardLayout *bl, const StringSplitter *starting_coords,
+    int start_coords[2], const StringSplitter *starting_coords,
     ErrorStack *error_stack) {
 
   if (string_splitter_get_number_of_items(starting_coords) != 2) {
@@ -88,7 +87,7 @@ void board_layout_parse_split_start_coords(
                                lane_start_value));
       return;
     }
-    bl->start_coords[i] = lane_start_value;
+    start_coords[i] = lane_start_value;
   }
 }
 
@@ -101,6 +100,7 @@ uint8_t bonus_square_char_to_value(char bonus_square_char) {
 }
 
 void board_layout_parse_split_file(BoardLayout *bl,
+                                   const char *board_layout_name,
                                    const StringSplitter *file_lines,
                                    ErrorStack *error_stack) {
   const int number_of_rows = string_splitter_get_number_of_items(file_lines);
@@ -119,7 +119,10 @@ void board_layout_parse_split_file(BoardLayout *bl,
   StringSplitter *starting_coords =
       split_string(string_splitter_get_item(file_lines, 0), ',', true);
 
-  board_layout_parse_split_start_coords(bl, starting_coords, error_stack);
+  int tmp_start_coords[2];
+
+  board_layout_parse_split_start_coords(tmp_start_coords, starting_coords,
+                                        error_stack);
 
   string_splitter_destroy(starting_coords);
 
@@ -127,6 +130,7 @@ void board_layout_parse_split_file(BoardLayout *bl,
     return;
   }
 
+  uint8_t tmp_bonus_squares[BOARD_DIM * BOARD_DIM];
   for (int row = 0; row < BOARD_DIM; row++) {
     const char *layout_row = string_splitter_get_item(file_lines, row + 1);
     if (string_length(layout_row) != BOARD_DIM) {
@@ -149,25 +153,27 @@ void board_layout_parse_split_file(BoardLayout *bl,
                                  bonus_square_char));
         return;
       }
-      bl->bonus_squares[index] = bonus_square_value;
+      tmp_bonus_squares[index] = bonus_square_value;
     }
   }
+  memcpy(bl->bonus_squares, tmp_bonus_squares, sizeof(tmp_bonus_squares));
+  memcpy(bl->start_coords, tmp_start_coords, sizeof(tmp_start_coords));
+  free(bl->name);
+  bl->name = string_duplicate(board_layout_name);
 }
 
 void board_layout_load(BoardLayout *bl, const char *data_paths,
                        const char *board_layout_name, ErrorStack *error_stack) {
   char *layout_filename = data_filepaths_get_readable_filename(
       data_paths, board_layout_name, DATA_FILEPATH_TYPE_LAYOUT, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  StringSplitter *layout_rows =
-      split_file_by_newline(layout_filename, error_stack);
   if (error_stack_is_empty(error_stack)) {
-    board_layout_parse_split_file(bl, layout_rows, error_stack);
+    StringSplitter *layout_rows =
+        split_file_by_newline(layout_filename, error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      board_layout_parse_split_file(bl, board_layout_name, layout_rows,
+                                    error_stack);
+    }
     string_splitter_destroy(layout_rows);
-    free(bl->name);
-    bl->name = string_duplicate(board_layout_name);
   }
   free(layout_filename);
 }
@@ -191,6 +197,10 @@ BoardLayout *board_layout_create_default(const char *data_paths,
   char *default_layout_name = board_layout_get_default_name();
   board_layout_load(bl, data_paths, default_layout_name, error_stack);
   free(default_layout_name);
+  if (!error_stack_is_empty(error_stack)) {
+    board_layout_destroy(bl);
+    bl = NULL;
+  }
   return bl;
 }
 

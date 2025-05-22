@@ -788,7 +788,7 @@ static inline Board *board_create(const BoardLayout *bl) {
 }
 
 static inline void board_copy(Board *dst, const Board *src) {
-  memory_copy(dst, src, sizeof(Board));
+  memcpy(dst, src, sizeof(Board));
 }
 
 static inline Board *board_duplicate(const Board *board) {
@@ -809,8 +809,7 @@ static inline void board_load_number_of_row_anchors_cache(const Board *b,
   if (b->transposed) {
     log_fatal("cannot load row anchor cache while board is transposed");
   }
-  memory_copy(cache, b->number_of_row_anchors,
-              sizeof(b->number_of_row_anchors));
+  memcpy(cache, b->number_of_row_anchors, sizeof(b->number_of_row_anchors));
 }
 
 static inline const Square *board_get_row_cache(const Square *lanes_cache,
@@ -836,21 +835,21 @@ static inline void board_load_lanes_cache(const Board *b, int ci,
   }
   // Use 0 for row, col, and dir to get the "start" of the block
   // of memory representing that cross index.
-  memory_copy(lanes_cache, board_get_readonly_square(b, 0, 0, 0, ci),
-              sizeof(Square) * 2 * BOARD_DIM * BOARD_DIM);
+  memcpy(lanes_cache, board_get_readonly_square(b, 0, 0, 0, ci),
+         sizeof(Square) * 2 * BOARD_DIM * BOARD_DIM);
 }
 
 static inline void board_copy_row_cache(const Square *lanes_cache,
                                         Square *row_cache, int row_or_col,
                                         int dir) {
   const Square *source_row = board_get_row_cache(lanes_cache, row_or_col, dir);
-  memory_copy(row_cache, source_row, sizeof(Square) * BOARD_DIM);
+  memcpy(row_cache, source_row, sizeof(Square) * BOARD_DIM);
 }
 
 static inline void board_copy_opening_penalties(const Board *board,
                                                 Equity *opening_penalties) {
-  memory_copy(opening_penalties, board->opening_move_penalties,
-              sizeof(Equity) * 2 * BOARD_DIM);
+  memcpy(opening_penalties, board->opening_move_penalties,
+         sizeof(Equity) * 2 * BOARD_DIM);
 }
 
 static inline int board_toggle_dir(int dir) {

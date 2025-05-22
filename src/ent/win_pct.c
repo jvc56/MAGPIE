@@ -100,29 +100,7 @@ void win_pct_create_internal(const char *win_pct_name,
   string_splitter_destroy(win_pct_data);
   wp->win_pcts = array;
   wp->max_tiles_unseen = number_of_columns - 2;
-}
-
-WinPct *win_pct_create(const char *data_paths, const char *win_pct_name,
-                       ErrorStack *error_stack) {
-  char *win_pct_filename = data_filepaths_get_readable_filename(
-      data_paths, win_pct_name, DATA_FILEPATH_TYPE_WIN_PCT, error_stack);
-  StringSplitter *win_pct_lines =
-      split_file_by_newline(win_pct_filename, error_stack);
-  WinPct *wp = NULL;
-  if (error_stack_is_empty(error_stack)) {
-    wp = malloc_or_die(sizeof(WinPct));
-    win_pct_create_internal(win_pct_name, win_pct_filename, wp, win_pct_lines,
-                            error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      free(wp);
-      wp = NULL;
-    } else {
-      wp->name = string_duplicate(win_pct_name);
-    }
-  }
-  string_splitter_destroy(win_pct_lines);
-  free(win_pct_filename);
-  return wp;
+  wp->name = string_duplicate(win_pct_name);
 }
 
 // Function to free the memory allocated for the 2D array
@@ -136,4 +114,27 @@ void win_pct_destroy(WinPct *wp) {
   free(wp->name);
   free(wp->win_pcts);
   free(wp);
+}
+
+WinPct *win_pct_create(const char *data_paths, const char *win_pct_name,
+                       ErrorStack *error_stack) {
+  char *win_pct_filename = data_filepaths_get_readable_filename(
+      data_paths, win_pct_name, DATA_FILEPATH_TYPE_WIN_PCT, error_stack);
+  WinPct *wp = NULL;
+  if (error_stack_is_empty(error_stack)) {
+    StringSplitter *win_pct_lines =
+        split_file_by_newline(win_pct_filename, error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      wp = calloc_or_die(1, sizeof(WinPct));
+      win_pct_create_internal(win_pct_name, win_pct_filename, wp, win_pct_lines,
+                              error_stack);
+    }
+    string_splitter_destroy(win_pct_lines);
+  }
+  free(win_pct_filename);
+  if (!error_stack_is_empty(error_stack)) {
+    win_pct_destroy(wp);
+    wp = NULL;
+  }
+  return wp;
 }

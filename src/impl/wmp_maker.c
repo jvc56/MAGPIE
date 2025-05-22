@@ -238,7 +238,7 @@ void write_inlined_word_range(const DictionaryWordList *words,
     const DictionaryWord *word = dictionary_word_list_get_word(words, word_idx);
     const uint8_t *word_letters = dictionary_word_get_word(word);
     const int word_length = dictionary_word_get_length(word);
-    memory_copy(bytes + word_idx * word_length, word_letters, word_length);
+    memcpy(bytes + word_idx * word_length, word_letters, word_length);
   }
 }
 
@@ -256,8 +256,8 @@ void write_letters(const MutableWordMapEntry *entry, uint32_t word_start,
     const DictionaryWord *word =
         dictionary_word_list_get_word(entry->letters, word_idx);
     const uint8_t *word_letters = dictionary_word_get_word(word);
-    memory_copy(letters + word_start + word_idx * word_length, word_letters,
-                word_length);
+    memcpy(letters + word_start + word_idx * word_length, word_letters,
+           word_length);
   }
 }
 

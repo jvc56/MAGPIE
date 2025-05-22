@@ -34,6 +34,7 @@
 #include "../../src/impl/cgp.h"
 #include "../../src/impl/gameplay.h"
 #include "../../src/impl/gcg.h"
+#include "../../src/impl/klv_csv.h"
 #include "../../src/impl/move_gen.h"
 
 #include "../../src/str/game_string.h"
@@ -181,6 +182,61 @@ WMP *wmp_create_or_die(const char *data_paths, const char *wmp_name) {
   return wmp;
 }
 
+KLV *klv_create_or_die(const char *data_paths, const char *klv_name) {
+  ErrorStack *error_stack = error_stack_create();
+  KLV *klv = klv_create(data_paths, klv_name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    abort();
+  }
+  error_stack_destroy(error_stack);
+  return klv;
+}
+
+void klv_write_or_die(const KLV *klv, const char *klv_filename) {
+  ErrorStack *error_stack = error_stack_create();
+  klv_write(klv, klv_filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    abort();
+  }
+  error_stack_destroy(error_stack);
+}
+
+KLV *klv_read_from_csv_or_die(const LetterDistribution *ld,
+                              const char *data_paths, const char *leaves_name) {
+  ErrorStack *error_stack = error_stack_create();
+  KLV *klv = klv_read_from_csv(ld, data_paths, leaves_name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    abort();
+  }
+  error_stack_destroy(error_stack);
+  return klv;
+}
+
+void klv_write_to_csv_or_die(KLV *klv, const LetterDistribution *ld,
+                             const char *csv_filename) {
+  ErrorStack *error_stack = error_stack_create();
+  klv_write_to_csv(klv, ld, csv_filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    abort();
+  }
+  error_stack_destroy(error_stack);
+}
+
+char *get_string_from_file_or_die(const char *filename) {
+  ErrorStack *error_stack = error_stack_create();
+  char *result = get_string_from_file(filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    abort();
+  }
+  error_stack_destroy(error_stack);
+  return result;
+}
+
 Config *config_create_default_test(void) {
   ErrorStack *error_stack = error_stack_create();
   Config *config = config_create_default(error_stack);
@@ -306,6 +362,7 @@ void load_cgp_or_die(Game *game, const char *cgp) {
   ErrorStack *error_stack = error_stack_create();
   game_load_cgp(game, cgp, error_stack);
   if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
     log_fatal("cgp load failed with %d\n", error_stack_top(error_stack));
   }
   error_stack_destroy(error_stack);
@@ -316,7 +373,7 @@ void game_play_to_turn_or_die(GameHistory *game_history, Game *game,
   ErrorStack *error_stack = error_stack_create();
   game_play_to_turn(game_history, game, turn_index, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    error_stack_reset(error_stack);
+    error_stack_print_and_reset(error_stack);
     log_fatal("failed to play to turn %d\n", turn_index);
   }
   error_stack_destroy(error_stack);
@@ -326,7 +383,7 @@ void game_play_to_end_or_die(GameHistory *game_history, Game *game) {
   ErrorStack *error_stack = error_stack_create();
   game_play_to_end(game_history, game, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    error_stack_reset(error_stack);
+    error_stack_print_and_reset(error_stack);
     log_fatal("failed to play to end\n");
   }
   error_stack_destroy(error_stack);

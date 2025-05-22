@@ -100,7 +100,8 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
     output_type = KWG_MAKER_OUTPUT_GADDAG;
   }
   KWG *kwg = make_kwg_from_words(strings, output_type, KWG_MAKER_MERGE_EXACT);
-  if (!kwg_write_to_file(kwg, output_filename)) {
+  kwg_write_to_file(kwg, output_filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONVERT_OUTPUT_FILE_NOT_WRITABLE,
         get_formatted_string("could not write kwg to output file: %s",

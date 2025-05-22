@@ -55,9 +55,9 @@ static inline bool anchor_is_better(const Anchor *anchor_a,
 
 static inline void swap_anchors(Anchor *a, Anchor *b) {
   Anchor temp;
-  memory_copy(&temp, a, sizeof(Anchor));
-  memory_copy(a, b, sizeof(Anchor));
-  memory_copy(b, &temp, sizeof(Anchor));
+  memcpy(&temp, a, sizeof(Anchor));
+  memcpy(a, b, sizeof(Anchor));
+  memcpy(b, &temp, sizeof(Anchor));
 }
 
 static inline void anchor_heapify_down(AnchorHeap *heap, int parent_node) {

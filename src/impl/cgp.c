@@ -95,6 +95,7 @@ void parse_cgp_board_row(Game *game, const char *cgp_board_row, int row_index,
     error_stack_push(
         error_stack, ERROR_STATUS_CGP_PARSE_INVALID_NUMBER_OF_BOARD_COLUMNS,
         string_duplicate("cgp board has an invalid number of columns"));
+    return;
   }
 }
 

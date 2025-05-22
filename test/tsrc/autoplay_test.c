@@ -192,7 +192,7 @@ void test_autoplay_divergent_games(void) {
 
   load_and_exec_config_or_die(csw_config, "set -lex CSW21");
 
-  KLV *small_diff_klv = klv_create(DEFAULT_TEST_DATA_PATH, "CSW21");
+  KLV *small_diff_klv = klv_create_or_die(DEFAULT_TEST_DATA_PATH, "CSW21");
   const int num = klv_get_number_of_leaves(small_diff_klv);
 
   for (int i = 0; i < num; i++) {
@@ -204,7 +204,7 @@ void test_autoplay_divergent_games(void) {
       error_stack);
   assert(error_stack_is_empty(error_stack));
 
-  klv_write(small_diff_klv, small_diff_klv_filename);
+  klv_write_or_die(small_diff_klv, small_diff_klv_filename);
   free(small_diff_klv_filename);
   klv_destroy(small_diff_klv);
 

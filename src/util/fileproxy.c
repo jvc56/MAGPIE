@@ -45,7 +45,7 @@ FILE *stream_from_filename(const char *filename, ErrorStack *error_stack) {
 
 void precache_file_data(const char *filename, char *raw_data, int num_bytes) {
   char *data_copy = malloc_or_die(sizeof(char) * num_bytes);
-  memory_copy(data_copy, raw_data, num_bytes);
+  memcpy(data_copy, raw_data, num_bytes);
 
   string_copy(file_cache.entries[file_cache.num_items].filename, filename);
   file_cache.entries[file_cache.num_items].raw_data = data_copy;

@@ -396,7 +396,6 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(
       config,
       "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 1/2 0/0 0 -lex CSW21",
-
       ERROR_STATUS_CGP_PARSE_MALFORMED_RACK_LETTERS);
   assert_config_exec_status(config, "cgp " VS_OXY, ERROR_STATUS_SUCCESS);
 

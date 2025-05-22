@@ -137,8 +137,8 @@ void rv_uniform_predetermined_create(RandomVariables *rvs,
   rv_uniform_predetermined->index = 0;
   rv_uniform_predetermined->samples =
       malloc_or_die(rv_uniform_predetermined->num_samples * sizeof(double));
-  memory_copy(rv_uniform_predetermined->samples, samples,
-              rv_uniform_predetermined->num_samples * sizeof(double));
+  memcpy(rv_uniform_predetermined->samples, samples,
+         rv_uniform_predetermined->num_samples * sizeof(double));
   rvs->data = rv_uniform_predetermined;
 }
 
@@ -202,8 +202,8 @@ void rv_normal_create(RandomVariables *rvs, const uint64_t seed,
   RVNormal *rv_normal = malloc_or_die(sizeof(RVNormal));
   rv_normal->xoshiro_prng = prng_create(seed);
   rv_normal->means_and_vars = malloc_or_die(rvs->num_rvs * 2 * sizeof(double));
-  memory_copy(rv_normal->means_and_vars, means_and_vars,
-              rvs->num_rvs * 2 * sizeof(double));
+  memcpy(rv_normal->means_and_vars, means_and_vars,
+         rvs->num_rvs * 2 * sizeof(double));
   rv_normal->is_epigon = calloc_or_die(rvs->num_rvs, sizeof(bool));
   rvs->data = rv_normal;
 }
@@ -290,12 +290,12 @@ void rv_normal_predetermined_create(RandomVariables *rvs, const double *samples,
   rv_normal_predetermined->index = 0;
   rv_normal_predetermined->samples =
       malloc_or_die(rv_normal_predetermined->num_samples * sizeof(double));
-  memory_copy(rv_normal_predetermined->samples, samples,
-              rv_normal_predetermined->num_samples * sizeof(double));
+  memcpy(rv_normal_predetermined->samples, samples,
+         rv_normal_predetermined->num_samples * sizeof(double));
   rv_normal_predetermined->means_and_vars =
       malloc_or_die(rvs->num_rvs * 2 * sizeof(double));
-  memory_copy(rv_normal_predetermined->means_and_vars, means_and_vars,
-              rvs->num_rvs * 2 * sizeof(double));
+  memcpy(rv_normal_predetermined->means_and_vars, means_and_vars,
+         rvs->num_rvs * 2 * sizeof(double));
   rv_normal_predetermined->is_epigon =
       calloc_or_die(rvs->num_rvs, sizeof(bool));
   rvs->data = rv_normal_predetermined;

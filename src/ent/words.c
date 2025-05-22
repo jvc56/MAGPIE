@@ -109,7 +109,7 @@ FormedWords *formed_words_create(Board *board, Move *move) {
   }
 
   ws->words[formed_words_idx].word_length = main_word_idx;
-  memory_copy(ws->words[formed_words_idx].word, main_word, main_word_idx);
+  memcpy(ws->words[formed_words_idx].word, main_word, main_word_idx);
   formed_words_idx++;
   ws->num_words = formed_words_idx;
 

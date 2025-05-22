@@ -19,6 +19,10 @@
 #define LEAVES_EXTENSION ".csv"
 #define LEXICON_EXTENSION ".txt"
 
+const char *filepath_type_names[] = {
+    "kwg", "klv",    "board layout", "win percentage", "letter distribution",
+    "gcg", "leaves", "lexicon",      "wordmap"};
+
 bool is_filepath(const char *filepath) {
   return string_contains(filepath, '/') || string_contains(filepath, '\\') ||
          has_suffix(filepath, KWG_EXTENSION) ||

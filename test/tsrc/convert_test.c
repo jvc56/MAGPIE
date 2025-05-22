@@ -141,7 +141,7 @@ void test_convert_success(void) {
   load_and_exec_config_or_die(config,
                               "convert klv2csv CSW21_small CSW21_small");
   char *leaves_file_string =
-      get_string_from_file("testdata/leaves/CSW21_small.csv");
+      get_string_from_file_or_die("testdata/leaves/CSW21_small.csv");
   assert_strings_equal(leaves_file_string,
                        "?,1.000000\nA,0.000000\nB,0.000000\n?A,2.000000\n?B,0."
                        "000000\nAA,0.000000\nAB,0.000000\n?AA,0.000000\n?AB,0."

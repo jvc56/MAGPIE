@@ -478,7 +478,7 @@ char *string_builder_dump(const StringBuilder *string_builder, size_t *len) {
     *len = string_builder->len;
   }
   out = malloc_or_die(string_builder->len + 1);
-  memory_copy(out, string_builder->string, string_builder->len + 1);
+  memcpy(out, string_builder->string, string_builder->len + 1);
   return out;
 }
 

@@ -170,7 +170,7 @@ void assert_command_status_and_output(Config *config, const char *command,
 
   fclose(errorout_fh);
 
-  char *test_output = get_string_from_file(test_output_filename);
+  char *test_output = get_string_from_file_or_die(test_output_filename);
   int newlines_in_output = count_newlines(test_output);
   bool fail_test = false;
   if (newlines_in_output != expected_output_line_count) {
@@ -180,7 +180,7 @@ void assert_command_status_and_output(Config *config, const char *command,
     fail_test = true;
   }
 
-  char *test_outerror = get_string_from_file(test_outerror_filename);
+  char *test_outerror = get_string_from_file_or_die(test_outerror_filename);
   int newlines_in_outerror = count_newlines(test_outerror);
   if (newlines_in_outerror != expected_outerror_line_count) {
     printf(
@@ -414,8 +414,8 @@ void test_process_command(const char *arg_string,
   process_command(main_args->argc, main_args->argv);
   main_args_destroy(main_args);
 
-  char *test_output = get_string_from_file(test_output_filename);
-  char *test_outerror = get_string_from_file(test_outerror_filename);
+  char *test_output = get_string_from_file_or_die(test_output_filename);
+  char *test_outerror = get_string_from_file_or_die(test_outerror_filename);
 
   if (!has_substring(test_output, output_substr)) {
     printf("pattern not found in output:\n%s\n***\n%s\n", test_output,

@@ -30,8 +30,8 @@ int unique_rows(BoardRows *board_rows) {
       // copy rows to replace duplicate
       for (int row_to_move = row + 1; row_to_move < board_rows->num_rows;
            row_to_move++) {
-        memory_copy(&board_rows->rows[row_to_move - 1],
-                    &board_rows->rows[row_to_move], sizeof(BoardRow));
+        memcpy(&board_rows->rows[row_to_move - 1],
+               &board_rows->rows[row_to_move], sizeof(BoardRow));
       }
     }
   }

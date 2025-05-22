@@ -152,6 +152,7 @@ GCGParser *gcg_parser_create(Config *config, GameHistory *game_history) {
   gcg_parser->game = NULL;
   gcg_parser->note_builder = string_builder_create();
   // Allocate enough space for all of the tokens
+  // FIXME: this is dumb, create an array of pairs plz
   gcg_parser->token_regex_pairs =
       malloc_or_die(sizeof(TokenRegexPair *) * (NUMBER_OF_GCG_TOKENS));
   gcg_parser->number_of_token_regex_pairs = 0;
@@ -1497,8 +1498,10 @@ void parse_gcg_string(const char *gcg_string, Config *config,
 
 void parse_gcg(const char *gcg_filename, Config *config,
                GameHistory *game_history, ErrorStack *error_stack) {
-  char *gcg_string = get_string_from_file(gcg_filename);
-  parse_gcg_string(gcg_string, config, game_history, error_stack);
+  char *gcg_string = get_string_from_file(gcg_filename, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    parse_gcg_string(gcg_string, config, game_history, error_stack);
+  }
   free(gcg_string);
 }
 

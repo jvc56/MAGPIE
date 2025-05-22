@@ -432,7 +432,7 @@ int get_letters_in_common(const DictionaryWord *word, uint8_t *last_word,
     }
   }
   *last_word_length = length;
-  memory_copy(last_word, dictionary_word_get_word(word), length);
+  memcpy(last_word, dictionary_word_get_word(word), length);
   return letters_in_common;
 }
 

@@ -59,7 +59,7 @@ void dictionary_word_list_add_word(DictionaryWordList *dictionary_word_list,
   }
   DictionaryWord *dictionary_word =
       &dictionary_word_list->dictionary_words[dictionary_word_list->count];
-  memory_copy(dictionary_word->word, word, word_length);
+  memcpy(dictionary_word->word, word, word_length);
   dictionary_word->length = word_length;
   dictionary_word_list->count++;
 }

@@ -193,13 +193,6 @@ double bai_X_binary_search_func(const double z, const void *args) {
   const double bai_d_a_result = bai_d(μa, σ2a, μz);
   const double result =
       (1 - z) * bai_d_1_result + z * bai_d_a_result - (1 - z) * v;
-  // printf("\n\nbai_X\nμ1 = %.30f\nμz = %.30f\nσ21 = %.30f\nμa = %.30f\nσ2a = "
-  //        "%.30f\nv = "
-  //        "%.30f\nz = "
-  //        "result = %.30f = %.30f * %.30f + %.30f * %.30f - %.30f\n",
-  //        μ1, μz, σ21, μa, σ2a, v, z, result, (1 - z),
-  //        bai_d(μ1, σ21, μz), z, bai_d(μa, σ2a, μz),
-  //        (1 - z) * v);
   // bai_logger_log_double(xbs_args->bai_logger, "z", z);
   // bai_logger_log_double(xbs_args->bai_logger, "u1", μ1);
   // bai_logger_log_double(xbs_args->bai_logger, "sigma21", σ21);

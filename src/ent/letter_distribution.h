@@ -87,14 +87,9 @@ static inline void sort_score_order(LetterDistribution *ld) {
 }
 
 static inline void ld_create_internal(const char *ld_name,
-                                      const char *ld_filename,
+                                      const StringSplitter *ld_lines,
                                       LetterDistribution *ld,
                                       ErrorStack *error_stack) {
-  StringSplitter *ld_lines = split_file_by_newline(ld_filename, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
   int number_of_lines = string_splitter_get_number_of_items(ld_lines);
 
   ld->size = number_of_lines;
@@ -111,9 +106,10 @@ static inline void ld_create_internal(const char *ld_name,
   int machine_letter = 0;
   int max_tile_length = 0;
   ld->total_tiles = 0;
+  StringSplitter *single_letter_info = NULL;
   for (int i = 0; i < number_of_lines; i++) {
     const char *line = string_splitter_get_item(ld_lines, i);
-    StringSplitter *single_letter_info = split_string(line, ',', true);
+    single_letter_info = split_string(line, ',', true);
     if (string_splitter_get_number_of_items(single_letter_info) != 5) {
       error_stack_push(
           error_stack, ERROR_STATUS_LD_INVALID_ROW,
@@ -151,32 +147,15 @@ static inline void ld_create_internal(const char *ld_name,
       string_copy(ld->ld_ml_to_hl[blanked_machine_letter], lower_case_letter);
     }
     string_splitter_destroy(single_letter_info);
+    single_letter_info = NULL;
     machine_letter++;
   }
-  string_splitter_destroy(ld_lines);
+  string_splitter_destroy(single_letter_info);
   if (error_stack_is_empty(error_stack)) {
     sort_score_order(ld);
     ld->max_tile_length = max_tile_length;
-  }
-}
-
-static inline LetterDistribution *ld_create(const char *data_paths,
-                                            const char *ld_name,
-                                            ErrorStack *error_stack) {
-  LetterDistribution *ld = malloc_or_die(sizeof(LetterDistribution));
-  char *ld_filename = data_filepaths_get_readable_filename(
-      data_paths, ld_name, DATA_FILEPATH_TYPE_LD, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    ld_create_internal(ld_name, ld_filename, ld, error_stack);
-  }
-  if (error_stack_is_empty(error_stack)) {
     ld->name = string_duplicate(ld_name);
-  } else {
-    free(ld);
-    ld = NULL;
   }
-  free(ld_filename);
-  return ld;
 }
 
 static inline void ld_destroy(LetterDistribution *ld) {
@@ -185,6 +164,28 @@ static inline void ld_destroy(LetterDistribution *ld) {
   }
   free(ld->name);
   free(ld);
+}
+
+static inline LetterDistribution *ld_create(const char *data_paths,
+                                            const char *ld_name,
+                                            ErrorStack *error_stack) {
+  char *ld_filename = data_filepaths_get_readable_filename(
+      data_paths, ld_name, DATA_FILEPATH_TYPE_LD, error_stack);
+  LetterDistribution *ld = NULL;
+  if (error_stack_is_empty(error_stack)) {
+    StringSplitter *ld_lines = split_file_by_newline(ld_filename, error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      ld = calloc_or_die(1, sizeof(LetterDistribution));
+      ld_create_internal(ld_name, ld_lines, ld, error_stack);
+    }
+    string_splitter_destroy(ld_lines);
+  }
+  free(ld_filename);
+  if (!error_stack_is_empty(error_stack)) {
+    ld_destroy(ld);
+    ld = NULL;
+  }
+  return ld;
 }
 
 static inline const char *ld_get_name(const LetterDistribution *ld) {

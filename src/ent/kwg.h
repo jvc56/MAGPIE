@@ -123,20 +123,12 @@ static inline void kwg_read_nodes_from_stream(KWG *kwg, size_t number_of_nodes,
 
 static inline uint32_t *kwg_get_mutable_nodes(KWG *kwg) { return kwg->nodes; }
 
-static inline void load_kwg(KWG *kwg, const char *data_paths,
-                            const char *kwg_name, ErrorStack *error_stack) {
-  char *kwg_filename = data_filepaths_get_readable_filename(
-      data_paths, kwg_name, DATA_FILEPATH_TYPE_KWG, error_stack);
-
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
+static inline void load_kwg(const char *kwg_name, const char *kwg_filename,
+                            KWG *kwg, ErrorStack *error_stack) {
   FILE *stream = stream_from_filename(kwg_filename, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  free(kwg_filename);
 
   kwg->name = string_duplicate(kwg_name);
 
@@ -151,11 +143,29 @@ static inline void load_kwg(KWG *kwg, const char *data_paths,
   fclose(stream);
 }
 
+static inline void kwg_destroy(KWG *kwg) {
+  if (!kwg) {
+    return;
+  }
+  free(kwg->nodes);
+  free(kwg->name);
+  free(kwg);
+}
+
 static inline KWG *kwg_create(const char *data_paths, const char *kwg_name,
                               ErrorStack *error_stack) {
-  KWG *kwg = malloc_or_die(sizeof(KWG));
-  kwg->name = NULL;
-  load_kwg(kwg, data_paths, kwg_name, error_stack);
+  char *kwg_filename = data_filepaths_get_readable_filename(
+      data_paths, kwg_name, DATA_FILEPATH_TYPE_KWG, error_stack);
+  KWG *kwg = NULL;
+  if (error_stack_is_empty(error_stack)) {
+    kwg = calloc_or_die(1, sizeof(KWG));
+    load_kwg(kwg_name, kwg_filename, kwg, error_stack);
+  }
+  free(kwg_filename);
+  if (!error_stack_is_empty(error_stack)) {
+    kwg_destroy(kwg);
+    kwg = NULL;
+  }
   return kwg;
 }
 
@@ -165,34 +175,29 @@ static inline KWG *kwg_create_empty(void) {
   return kwg;
 }
 
-static inline bool kwg_write_to_file(const KWG *kwg, const char *filename) {
+static inline void kwg_write_to_file(const KWG *kwg, const char *filename,
+                                     ErrorStack *error_stack) {
   FILE *stream = fopen(filename, "wb");
   if (!stream) {
-    printf("could not open stream for filename: %s\n", filename);
-    return false;
+    error_stack_push(
+        error_stack, ERROR_STATUS_KWG_FAILED_TO_OPEN_STREAM_FOR_WRITING,
+        get_formatted_string("failed to open kwg file for writing: %s\n",
+                             filename));
+    return;
   }
   for (int i = 0; i < kwg->number_of_nodes; i++) {
     const uint32_t node = htole32(kwg->nodes[i]);
     const size_t result = fwrite(&node, sizeof(uint32_t), 1, stream);
     if (result < 1) {
-      printf("could not write to stream, result: %zu\n", result);
-      return false;
+      error_stack_push(
+          error_stack, ERROR_STATUS_KWG_FAILED_TO_WRITE_TO_STREAM,
+          get_formatted_string("failed to write to kwg: %s", filename));
+      return;
     }
   }
   if (fclose(stream)) {
-    printf("could not close stream\n");
-    return false;
+    log_fatal("failed to close kwg after wriring: %s", filename);
   }
-  return true;
-}
-
-static inline void kwg_destroy(KWG *kwg) {
-  if (!kwg) {
-    return;
-  }
-  free(kwg->nodes);
-  free(kwg->name);
-  free(kwg);
 }
 
 static inline bool kwg_in_letter_set(const KWG *kwg, uint8_t letter,

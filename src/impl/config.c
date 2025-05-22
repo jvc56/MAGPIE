@@ -1460,7 +1460,11 @@ void config_load_lexicon_dependent_data(Config *config,
   // Load lexica
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_KWG,
                    config->data_paths, updated_p1_lexicon_name,
-                   updated_p2_lexicon_name);
+                   updated_p2_lexicon_name, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   // Load lexica (in WMP format)
   const char *p1_wmp_name = NULL;
@@ -1489,7 +1493,11 @@ void config_load_lexicon_dependent_data(Config *config,
   }
 
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_WMP,
-                   config->data_paths, p1_wmp_name, p2_wmp_name);
+                   config->data_paths, p1_wmp_name, p2_wmp_name, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   // Load the leaves
 
@@ -1530,7 +1538,7 @@ void config_load_lexicon_dependent_data(Config *config,
     } else {
       players_data_set(config->players_data, PLAYERS_DATA_TYPE_KLV,
                        config->data_paths, updated_p1_leaves_name,
-                       updated_p2_leaves_name);
+                       updated_p2_leaves_name, error_stack);
     }
   }
 

@@ -17,10 +17,6 @@ typedef enum {
   DATA_FILEPATH_TYPE_WORDMAP,
 } data_filepath_t;
 
-const char *filepath_type_names[] = {
-    "kwg", "klv",    "board layout", "win percentage", "letter distribution",
-    "gcg", "leaves", "lexicon",      "wordmap"};
-
 char *data_filepaths_get_readable_filename(const char *data_paths,
                                            const char *data_name,
                                            data_filepath_t type,
