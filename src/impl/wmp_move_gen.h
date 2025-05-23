@@ -42,7 +42,26 @@ typedef struct WMPMoveGen {
   Equity nonplaythrough_best_leave_values[RACK_SIZE + 1];
   bool nonplaythrough_has_word_of_length[RACK_SIZE + 1];
   uint8_t count_by_size[RACK_SIZE + 1];
+
+  Anchor anchors[RACK_SIZE * MAX_POSSIBLE_PLAYTHROUGH_BLOCKS];
+  int playthrough_blocks;
+  int playthrough_blocks_copy;
 } WMPMoveGen;
+
+static inline void reset_anchors(WMPMoveGen *wmp_move_gen) {
+  Anchor initial_anchor = {
+      .playthrough = bit_rack_create_empty(),
+      .row = 0,
+      .col = 0,
+      .last_anchor_col = 0,
+      .dir = 0,
+      .highest_possible_score = 0,
+      .highest_possible_equity = EQUITY_INITIAL_VALUE,
+  };
+  for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
+    memory_copy(&wmp_move_gen->anchors[i], &initial_anchor, sizeof(Anchor));
+  }
+}
 
 static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
                                      const LetterDistribution *ld,
@@ -179,10 +198,19 @@ static inline void wmp_move_gen_add_playthrough_letter(WMPMoveGen *wmp_move_gen,
 }
 
 static inline void
+wmp_move_gen_increment_playthrough_blocks(WMPMoveGen *wmp_move_gen) {
+  assert(wmp_move_gen->playthrough_blocks < MAX_POSSIBLE_PLAYTHROUGH_BLOCKS);
+  // printf("incrementing playthrough blocks from %d to %d\n",
+  //        wmp_move_gen->playthrough_blocks,
+  //        wmp_move_gen->playthrough_blocks + 1);
+  wmp_move_gen->playthrough_blocks++;
+}
+static inline void
 wmp_move_gen_save_playthrough_state(WMPMoveGen *wmp_move_gen) {
   wmp_move_gen->playthrough_bit_rack_copy = wmp_move_gen->playthrough_bit_rack;
   wmp_move_gen->num_tiles_played_through_copy =
       wmp_move_gen->num_tiles_played_through;
+  wmp_move_gen->playthrough_blocks_copy = wmp_move_gen->playthrough_blocks;
 }
 
 static inline void
@@ -190,6 +218,7 @@ wmp_move_gen_restore_playthrough_state(WMPMoveGen *wmp_move_gen) {
   wmp_move_gen->playthrough_bit_rack = wmp_move_gen->playthrough_bit_rack_copy;
   wmp_move_gen->num_tiles_played_through =
       wmp_move_gen->num_tiles_played_through_copy;
+  wmp_move_gen->playthrough_blocks = wmp_move_gen->playthrough_blocks_copy;      
 }
 
 static inline bool wmp_move_gen_has_playthrough(WMPMoveGen *wmp_move_gen) {
@@ -201,4 +230,40 @@ static inline void wmp_move_gen_reset_playthrough(WMPMoveGen *wmp_move_gen) {
   wmp_move_gen->num_tiles_played_through = 0;
 }
 
+static inline void wmp_move_gen_add_anchors(WMPMoveGen *wmp_move_gen, int row,
+                                            int col, int last_anchor_col,
+                                            int dir, AnchorHeap *anchor_heap) {
+  for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
+    Anchor *anchor = &wmp_move_gen->anchors[i];
+    if (anchor->highest_possible_equity > EQUITY_INITIAL_VALUE) {
+      anchor_heap_add_unheaped_wmp_anchor(
+          anchor_heap, row, col, last_anchor_col, dir,
+          anchor->highest_possible_equity, &anchor->playthrough,
+          anchor->highest_possible_score);
+    }
+  }
+}
+
+static inline int wmp_move_gen_anchor_index(int playthrough_blocks,
+                                            int tiles_played) {
+  return playthrough_blocks * (RACK_SIZE + 1) + (tiles_played - 1);
+}
+
+static inline Anchor *wmp_move_gen_get_anchor(WMPMoveGen *wmp_move_gen,
+                                              int playthrough_blocks,
+                                              int tiles_played) {
+  return &wmp_move_gen->anchors[wmp_move_gen_anchor_index(playthrough_blocks,
+                                                          tiles_played)];
+}
+
+static inline void wmp_move_gen_maybe_update_anchor(WMPMoveGen *wmp_move_gen,
+                                                    int tiles_played,
+                                                    Equity score,
+                                                    Equity equity) {
+  Anchor *anchor = wmp_move_gen_get_anchor(
+      wmp_move_gen, wmp_move_gen->playthrough_blocks, tiles_played);
+  anchor->highest_possible_score = score;
+  anchor->highest_possible_equity = equity;
+  anchor->playthrough = wmp_move_gen->playthrough_bit_rack;
+}
 #endif
