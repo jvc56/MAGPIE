@@ -139,10 +139,10 @@ char *data_filepaths_get_first_valid_filename(const char *data_paths,
   }
   string_splitter_destroy(split_data_paths);
   if (!ret_val) {
-    error_stack_push(error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
-                     get_formatted_string("file %s not found for data type %s",
-                                          data_name,
-                                          filepath_type_names[type]));
+    error_stack_push(
+        error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
+        get_formatted_string("file '%s' not found for data type %s", data_name,
+                             filepath_type_names[type]));
     return NULL;
   }
   return ret_val;

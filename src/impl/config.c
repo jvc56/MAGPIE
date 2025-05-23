@@ -642,7 +642,7 @@ void execute_add_moves(Config *config, ErrorStack *error_stack) {
           game_get_ld(config->game), new_validated_moves, i);
       if (phonies_formed) {
         string_builder_clear(phonies_sb);
-        string_builder_add_string(phonies_sb, "Phonies formed from ");
+        string_builder_add_string(phonies_sb, "invalid words formed from ");
         string_builder_add_move(
             phonies_sb, board, validated_moves_get_move(new_validated_moves, i),
             ld);
@@ -1163,9 +1163,10 @@ void config_load_parsed_args(Config *config, StringSplitter *cmd_split_string,
       }
 
       if (!current_parg) {
-        error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
-                         get_formatted_string(
-                             "unrecognized command or argument: %s", arg_name));
+        error_stack_push(
+            error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
+            get_formatted_string("unrecognized command or argument '%s'",
+                                 arg_name));
         return;
       }
 
@@ -1193,7 +1194,7 @@ void config_load_parsed_args(Config *config, StringSplitter *cmd_split_string,
       if (!current_parg || current_value_index >= current_parg->num_values) {
         error_stack_push(
             error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
-            get_formatted_string("unrecognized command or argument: %s",
+            get_formatted_string("unrecognized command or argument '%s'",
                                  input_str));
         return;
       }
@@ -1207,7 +1208,7 @@ void config_load_parsed_args(Config *config, StringSplitter *cmd_split_string,
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_INSUFFICIENT_NUMBER_OF_VALUES,
         get_formatted_string(
-            "insufficient number of values provided for command: %s",
+            "insufficient number of values provided for the '%s' command",
             current_parg->name));
     return;
   }

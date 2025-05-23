@@ -4,7 +4,6 @@
 #include <stdio.h>
 
 #include "../util/io.h"
-#include "../util/string_util.h"
 #include "../util/util.h"
 
 #define ERROR_STACK_CAPACITY 100
@@ -70,14 +69,24 @@ char *error_stack_get_string_and_reset(ErrorStack *error_stack) {
   if (error_stack_is_empty(error_stack)) {
     return NULL;
   }
-  StringBuilder *string_builder = string_builder_create();
-  for (int i = error_stack->size - 1; i >= 0; i--) {
-    string_builder_add_formatted_string(string_builder, "(error %d) %s\n",
-                                        error_stack->error_codes[i],
-                                        error_stack->msgs[i]);
+
+  const char *error_fmt = "(error %d) %s\n";
+  int total_length = 0;
+  for (int i = 0; i < error_stack->size; i++) {
+    total_length += snprintf(NULL, 0, error_fmt, error_stack->error_codes[i],
+                             error_stack->msgs[i]);
   }
-  char *error_string = string_builder_dump(string_builder, NULL);
-  string_builder_destroy(string_builder);
+
+  // Use +1 for the null terminator
+  char *error_string = malloc_or_die(total_length + 1);
+  int offset = 0;
+  for (int i = error_stack->size - 1; i >= 0; i--) {
+    offset +=
+        snprintf(error_string + offset, total_length + 1 - offset, error_fmt,
+                 error_stack->error_codes[i], error_stack->msgs[i]);
+  }
+  error_string[total_length] = '\0';
+
   error_stack_reset(error_stack);
   return error_string;
 }

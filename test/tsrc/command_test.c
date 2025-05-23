@@ -186,7 +186,7 @@ void assert_command_status_and_output(Config *config, const char *command,
     printf(
         "assert output: error counts do not match %d != %d\nfor command: %s\n",
         newlines_in_outerror, expected_outerror_line_count, command);
-    printf("got:\n%s", test_outerror);
+    printf("got: >%s<\n", test_outerror);
     fail_test = true;
   }
 
