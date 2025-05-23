@@ -49,8 +49,8 @@ libmagpie.a: LDFLAGS := ${ldflags.release}
 LFLAGS := ${lflags.${BUILD}}
 LDLIBS := -lm
 
-CFLAGS += -mmacosx-version-min=14.0
-LDFLAGS += -mmacosx-version-min=14.0
+#CFLAGS += -mmacosx-version-min=14.0
+#LDFLAGS += -mmacosx-version-min=14.0
 
 ifndef BOARD_DIM
 BOARD_DIM = 15

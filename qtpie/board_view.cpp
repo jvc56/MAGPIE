@@ -21,5 +21,5 @@ QSize BoardView::sizeHint() const {
 void BoardView::paintEvent(QPaintEvent *) {
     QPainter painter(this);
     painter.fillRect(rect(), Qt::gray);
-    painter.drawText(rect(), Qt::AlignCenter, "Board");
+    //painter.drawText(rect(), Qt::AlignCenter, "Board");
 }
