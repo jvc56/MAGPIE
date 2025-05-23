@@ -377,6 +377,7 @@ void string_builder_add_cgp_options(StringBuilder *cgp_options_builder,
       error_stack_print_and_reset(error_stack);
       log_fatal("could not get default letter distribution name");
     }
+    error_stack_destroy(error_stack);
     if (!strings_equal(ld_name, default_ld_name)) {
       write_ld = true;
     }

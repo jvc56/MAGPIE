@@ -54,6 +54,7 @@ void test_leaves(void) {
 
   fclose(file);
 
+  error_stack_destroy(error_stack);
   rack_destroy(rack);
   config_destroy(config);
 }

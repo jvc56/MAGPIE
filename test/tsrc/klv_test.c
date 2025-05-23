@@ -76,6 +76,7 @@ void test_small_klv(void) {
   klv_destroy(small_klv_copy);
   klv_destroy(small_klv);
   config_destroy(config);
+  error_stack_destroy(error_stack);
 }
 
 void test_normal_klv(void) {
@@ -118,6 +119,7 @@ void test_normal_klv(void) {
   klv_destroy(normal_klv_copy);
   klv_destroy(normal_klv);
   config_destroy(config);
+  error_stack_destroy(error_stack);
 }
 
 void test_klv(void) {

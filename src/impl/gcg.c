@@ -633,6 +633,9 @@ bool game_event_has_player_rack(const GameEvent *game_event, int player_index) {
   }
 }
 
+// Returns NULL if there is no rack for the player and sets the next rack set
+// boolean
+// FIXME: return the next rack set boolean instead of hiding it here
 const Rack *get_player_next_rack(GameHistory *game_history,
                                  int initial_game_event_index,
                                  int player_index) {
@@ -1520,48 +1523,41 @@ void game_play_to_turn(GameHistory *game_history, Game *game, int turn_index,
     GameEvent *game_event =
         game_history_get_event(game_history, game_event_index);
     current_turn_index += game_event_get_turn_value(game_event);
-    bool game_is_over = game_over(game);
-    if (current_turn_index > turn_index && !game_is_over) {
+    if (current_turn_index > turn_index && !game_over(game)) {
       break;
     }
-
     play_game_history_turn(game_history, game, game_event_index, false,
                            error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
   }
-  bool player_has_last_rack[2];
-  for (int player_index = 0; player_index < 2; player_index++) {
-    Rack *player_last_known_rack =
-        game_history_player_get_last_known_rack(game_history, player_index);
-    if (player_last_known_rack) {
-      player_has_last_rack[player_index] = true;
-      return_rack_to_bag(game, player_index);
-      if (!draw_rack_from_bag(game, player_index, player_last_known_rack)) {
-        error_stack_push(
-            error_stack, ERROR_STATUS_GCG_PARSE_RACK_NOT_IN_BAG,
-            string_duplicate(
-                "last rack for player not in bag when replaying game"));
-        return;
-      }
-    } else {
-      player_has_last_rack[player_index] = false;
-    }
+  if (game_over(game)) {
+    return;
   }
 
-  if (!game_over(game)) {
-    int player_on_turn_index = game_get_player_on_turn_index(game);
-    // Only show the rack for the player on turn
-    int player_off_turn_index = 1 - player_on_turn_index;
-    return_rack_to_bag(game, player_off_turn_index);
-    if (!player_has_last_rack[player_on_turn_index] &&
-        !game_history_player_get_next_rack_set(game_history,
-                                               player_on_turn_index)) {
-      // This rack will be a randomly draw rack by the gameplay module and not
-      // anything specified by the GCG, so we throw it back in the bag;
-      return_rack_to_bag(game, player_on_turn_index);
-    }
+  int player_on_turn_index = game_get_player_on_turn_index(game);
+  // Only show the rack for the player on turn
+  int player_off_turn_index = 1 - player_on_turn_index;
+
+  return_rack_to_bag(game, player_off_turn_index);
+  if (game_history_player_get_next_rack_set(game_history,
+                                            player_on_turn_index)) {
+    return;
+  }
+
+  return_rack_to_bag(game, player_on_turn_index);
+  Rack *player_on_turn_last_known_rack =
+      game_history_player_get_last_known_rack(game_history,
+                                              player_on_turn_index);
+  if (player_on_turn_last_known_rack &&
+      !draw_rack_from_bag(game, player_on_turn_index,
+                          player_on_turn_last_known_rack)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_GCG_PARSE_RACK_NOT_IN_BAG,
+        string_duplicate(
+            "last rack for player not in bag when replaying game"));
+    return;
   }
 }
 

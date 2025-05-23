@@ -698,6 +698,22 @@ void test_success_incomplete(void) {
       rack, game_history_player_get_last_known_rack(game_history, 1)));
   game_history_destroy(game_history);
 
+  gcg_filename = "incomplete_after_five_point_challenge";
+  game_history = game_history_create();
+  gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  game_play_to_turn_or_die(game_history, game1, 2);
+  load_cgp_or_die(
+      game2,
+      "15/15/15/15/15/15/15/6SUQ6/2VETCH8/15/15/15/15/15/15 ?FIOOTY/ 24/30 0");
+  assert_games_are_equal(game1, game2, true);
+  rack_set_to_string(ld, rack, "AEIOOST");
+  assert(racks_are_equal(
+      rack, game_history_player_get_last_known_rack(game_history, 0)));
+  assert(racks_are_equal(
+      NULL, game_history_player_get_last_known_rack(game_history, 1)));
+  game_history_destroy(game_history);
+
   gcg_filename = "incomplete_after_phony_returned";
   game_history = game_history_create();
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
