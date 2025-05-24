@@ -24,12 +24,13 @@ dictionary_word_list_get_word(const DictionaryWordList *dictionary_word_list,
                               int index);
 void dictionary_word_list_sort(DictionaryWordList *dictionary_word_list);
 void dictionary_word_list_unique(DictionaryWordList *sorted,
-                                 DictionaryWordList *unique);     
+                                 DictionaryWordList *unique);
 void dictionary_word_list_copy(const DictionaryWordList *src,
-                               DictionaryWordList **dst);                                                             
+                               DictionaryWordList **dst);
 void dictionary_word_list_destroy(DictionaryWordList *dictionary_word_list);
 
 void dictionary_word_list_write_to_file(
     const DictionaryWordList *dictionary_word_list,
-    const LetterDistribution *ld, const char *filename);
+    const LetterDistribution *ld, const char *filename,
+    ErrorStack *error_stack);
 #endif // DICTIONARY_WORD_H

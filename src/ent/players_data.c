@@ -9,9 +9,8 @@
 #include "kwg.h"
 #include "wmp.h"
 
-#include "../util/log.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 // The PlayersData struct holds all of the
 // information that can be set during configuration.
@@ -111,17 +110,18 @@ void players_data_set_data(PlayersData *players_data,
 }
 
 void *players_data_create_data(players_data_t players_data_type,
-                               const char *data_paths, const char *data_name) {
+                               const char *data_paths, const char *data_name,
+                               ErrorStack *error_stack) {
   void *data = NULL;
   switch (players_data_type) {
   case PLAYERS_DATA_TYPE_KWG:
-    data = kwg_create(data_paths, data_name);
+    data = kwg_create(data_paths, data_name, error_stack);
     break;
   case PLAYERS_DATA_TYPE_KLV:
-    data = klv_create(data_paths, data_name);
+    data = klv_create(data_paths, data_name, error_stack);
     break;
   case PLAYERS_DATA_TYPE_WMP:
-    data = wmp_create(data_paths, data_name);
+    data = wmp_create(data_paths, data_name, error_stack);
     break;
   case NUMBER_OF_DATA:
     log_fatal("cannot create invalid players data type");
@@ -184,9 +184,9 @@ const char *players_data_get_data_name(const PlayersData *players_data,
     case PLAYERS_DATA_TYPE_KLV:
       data_name = klv_get_name(players_data->data[data_index]);
       break;
-   case PLAYERS_DATA_TYPE_WMP:
+    case PLAYERS_DATA_TYPE_WMP:
       data_name = wmp_get_name(players_data->data[data_index]);
-      break;      
+      break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
       break;
@@ -235,7 +235,8 @@ void players_data_destroy(PlayersData *players_data) {
 
 void players_data_set(PlayersData *players_data,
                       players_data_t players_data_type, const char *data_paths,
-                      const char *p1_data_name, const char *p2_data_name) {
+                      const char *p1_data_name, const char *p2_data_name,
+                      ErrorStack *error_stack) {
   // WMP is optional, KWG and KLV are required for every player.
   if (players_data_type != PLAYERS_DATA_TYPE_WMP) {
     if (is_string_empty_or_null(p1_data_name)) {
@@ -272,8 +273,13 @@ void players_data_set(PlayersData *players_data,
       if (player_index == 1 && new_data_is_shared) {
         data_pointers[1] = data_pointers[0];
       } else {
-        data_pointers[player_index] = players_data_create_data(
-            players_data_type, data_paths, input_data_names[player_index]);
+        void *generic_players_data = players_data_create_data(
+            players_data_type, data_paths, input_data_names[player_index],
+            error_stack);
+        if (!error_stack_is_empty(error_stack)) {
+          return;
+        }
+        data_pointers[player_index] = generic_players_data;
       }
     } else {
       data_pointers[player_index] = players_data_get_data(
@@ -301,22 +307,33 @@ void players_data_set(PlayersData *players_data,
 // Destroys and recreates the existing data for both players.
 void players_data_reload(PlayersData *players_data,
                          players_data_t players_data_type,
-                         const char *data_paths) {
+                         const char *data_paths, ErrorStack *error_stack) {
   const bool data_is_shared =
       players_data_get_is_shared(players_data, players_data_type);
+  void *recreated_data[2];
+  for (int player_index = 0; player_index < 2; player_index++) {
+    if (player_index == 0 || !data_is_shared) {
+      recreated_data[player_index] = players_data_create_data(
+          players_data_type, data_paths,
+          players_data_get_data_name(players_data, players_data_type,
+                                     player_index),
+          error_stack);
+    }
+  }
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   for (int player_index = 0; player_index < 2; player_index++) {
     if (player_index == 1 && data_is_shared) {
       players_data_set_data(
           players_data, players_data_type, player_index,
           players_data_get_data(players_data, players_data_type, 0));
     } else {
-      void *recreated_data = players_data_create_data(
-          players_data_type, data_paths,
-          players_data_get_data_name(players_data, players_data_type,
-                                     player_index));
       players_data_destroy_data(players_data, players_data_type, player_index);
       players_data_set_data(players_data, players_data_type, player_index,
-                            recreated_data);
+                            recreated_data[player_index]);
     }
   }
 }

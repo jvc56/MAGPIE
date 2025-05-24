@@ -6,8 +6,7 @@
 
 #include "xoshiro.h"
 
-#include "../util/log.h"
-#include "../util/util.h"
+#include "../util/io_util.h"
 
 // The bag uses a start and end
 // tile index to establish two "sides"

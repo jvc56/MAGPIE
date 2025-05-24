@@ -9,10 +9,8 @@
 #include "../../src/def/autoplay_defs.h"
 #include "../../src/def/config_defs.h"
 #include "../../src/def/game_defs.h"
-#include "../../src/def/leave_gen_defs.h"
 #include "../../src/def/move_defs.h"
 #include "../../src/def/players_data_defs.h"
-#include "../../src/def/simmer_defs.h"
 #include "../../src/def/validated_move_defs.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/kwg.h"
@@ -21,121 +19,175 @@
 #include "../../src/ent/thread_control.h"
 #include "../../src/impl/cgp.h"
 #include "../../src/str/rack_string.h"
+#include "../../src/util/io_util.h"
 #include "../../src/util/string_util.h"
+
 #include "config_test.h"
 #include "test_constants.h"
 #include "test_util.h"
 
 void test_config_load_error(Config *config, const char *cmd,
-                            config_load_status_t expected_status) {
-  config_load_status_t actual_status = config_load_command(config, cmd);
+                            error_code_t expected_status,
+                            ErrorStack *error_stack) {
+  config_load_command(config, cmd, error_stack);
+  error_code_t actual_status = error_stack_top(error_stack);
   if (actual_status != expected_status) {
     printf("config status mismatched:\nexpected: %d\nactual: %d\n>%s<\n",
            expected_status, actual_status, cmd);
+    error_stack_print_and_reset(error_stack);
     assert(0);
   }
+  error_stack_reset(error_stack);
 }
 
 void test_config_load_error_cases(void) {
   Config *config = config_create_default_test();
+  ErrorStack *error_stack = error_stack_create();
   test_config_load_error(config, "endgame",
-                         CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG);
+                         ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
+                         error_stack);
   test_config_load_error(config, "sim -lex CSW21 -iter 1000 -plies 10 1",
-                         CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG);
+                         ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
+                         error_stack);
   test_config_load_error(config, "sim -plies 3 -plies 4",
-                         CONFIG_LOAD_STATUS_DUPLICATE_ARG);
+                         ERROR_STATUS_CONFIG_LOAD_DUPLICATE_ARG, error_stack);
   test_config_load_error(config, "sim -it 1000 -infer",
-                         CONFIG_LOAD_STATUS_MISPLACED_COMMAND);
+                         ERROR_STATUS_CONFIG_LOAD_MISPLACED_COMMAND,
+                         error_stack);
   test_config_load_error(config, "sim -i 1000",
-                         CONFIG_LOAD_STATUS_AMBIGUOUS_COMMAND);
+                         ERROR_STATUS_CONFIG_LOAD_AMBIGUOUS_COMMAND,
+                         error_stack);
   test_config_load_error(config, "sim -it 1000 -l2 CSW21",
-                         CONFIG_LOAD_STATUS_LEXICON_MISSING);
+                         ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING, error_stack);
   test_config_load_error(config, "set -mode uci",
-                         CONFIG_LOAD_STATUS_UNRECOGNIZED_EXEC_MODE);
+                         ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_EXEC_MODE,
+                         error_stack);
   test_config_load_error(config, "set -gp on",
-                         CONFIG_LOAD_STATUS_MALFORMED_BOOL_ARG);
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG,
+                         error_stack);
   test_config_load_error(config, "set -gp off",
-                         CONFIG_LOAD_STATUS_MALFORMED_BOOL_ARG);
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG,
+                         error_stack);
   test_config_load_error(config, "set -hr on",
-                         CONFIG_LOAD_STATUS_MALFORMED_BOOL_ARG);
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG,
+                         error_stack);
   test_config_load_error(config, "set -hr off",
-                         CONFIG_LOAD_STATUS_MALFORMED_BOOL_ARG);
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG,
+                         error_stack);
   test_config_load_error(config, "set -seed -2",
-                         CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+                         error_stack);
   test_config_load_error(config, "sim -lex CSW21 -it 1000 -plies",
-                         CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
+                         ERROR_STATUS_CONFIG_LOAD_INSUFFICIENT_NUMBER_OF_VALUES,
+                         error_stack);
   test_config_load_error(config, "cgp 1 2 3",
-                         CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
+                         ERROR_STATUS_CONFIG_LOAD_INSUFFICIENT_NUMBER_OF_VALUES,
+                         error_stack);
   test_config_load_error(config, "create klv CSW50",
-                         CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
+                         ERROR_STATUS_CONFIG_LOAD_INSUFFICIENT_NUMBER_OF_VALUES,
+                         error_stack);
   test_config_load_error(config, "sim -bdn invalid_number_of_rows15",
-                         CONFIG_LOAD_STATUS_BOARD_LAYOUT_ERROR);
+                         ERROR_STATUS_CONFIG_LOAD_BOARD_LAYOUT_ERROR,
+                         error_stack);
   test_config_load_error(config, "sim -var Lonify",
-                         CONFIG_LOAD_STATUS_UNRECOGNIZED_GAME_VARIANT);
+                         ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_GAME_VARIANT,
+                         error_stack);
   test_config_load_error(config, "sim -bb 3b4",
-                         CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+                         error_stack);
   test_config_load_error(config, "sim -s1 random",
-                         CONFIG_LOAD_STATUS_MALFORMED_MOVE_SORT_TYPE);
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_MOVE_SORT_TYPE,
+                         error_stack);
   test_config_load_error(config, "sim -s2 none",
-                         CONFIG_LOAD_STATUS_MALFORMED_MOVE_SORT_TYPE);
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_MOVE_SORT_TYPE,
+                         error_stack);
   test_config_load_error(config, "sim -r1 top",
-                         CONFIG_LOAD_STATUS_MALFORMED_MOVE_RECORD_TYPE);
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_MOVE_RECORD_TYPE,
+                         error_stack);
   test_config_load_error(config, "sim -r2 3",
-                         CONFIG_LOAD_STATUS_MALFORMED_MOVE_RECORD_TYPE);
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_MOVE_RECORD_TYPE,
+                         error_stack);
   test_config_load_error(config, "sim -numplays three",
-                         CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+                         error_stack);
   test_config_load_error(config, "sim -numplays 123R456",
-                         CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+                         error_stack);
   test_config_load_error(config, "sim -numplays -2",
-                         CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+                         ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+                         error_stack);
   test_config_load_error(config, "sim -plies two",
-                         CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+                         error_stack);
   test_config_load_error(config, "sim -plies -3",
-                         CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+                         ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+                         error_stack);
   test_config_load_error(config, "sim -iter six",
-                         CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+                         error_stack);
   test_config_load_error(config, "sim -it -6",
-                         CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+                         ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+                         error_stack);
   test_config_load_error(config, "sim -it 0",
-                         CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+                         ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+                         error_stack);
   test_config_load_error(config, "sim -scond -95",
-                         CONFIG_LOAD_STATUS_DOUBLE_ARG_OUT_OF_BOUNDS);
+                         ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS,
+                         error_stack);
   test_config_load_error(config, "sim -scond 102",
-                         CONFIG_LOAD_STATUS_DOUBLE_ARG_OUT_OF_BOUNDS);
+                         ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS,
+                         error_stack);
   test_config_load_error(config, "sim -scond F",
-                         CONFIG_LOAD_STATUS_MALFORMED_DOUBLE_ARG);
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
+                         error_stack);
   test_config_load_error(config, "sim -eq 23434.32433.4324",
-                         CONFIG_LOAD_STATUS_MALFORMED_DOUBLE_ARG);
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
+                         error_stack);
   test_config_load_error(config, "sim -eq -3",
-                         CONFIG_LOAD_STATUS_DOUBLE_ARG_OUT_OF_BOUNDS);
+                         ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS,
+                         error_stack);
   test_config_load_error(config, "sim -eq -4.5",
-                         CONFIG_LOAD_STATUS_DOUBLE_ARG_OUT_OF_BOUNDS);
+                         ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS,
+                         error_stack);
   test_config_load_error(config, "sim -eq none",
-                         CONFIG_LOAD_STATUS_MALFORMED_DOUBLE_ARG);
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
+                         error_stack);
   test_config_load_error(config, "sim -seed zero",
-                         CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+                         error_stack);
   test_config_load_error(config, "sim -threads many",
-                         CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+                         error_stack);
   test_config_load_error(config, "sim -threads 0",
-                         CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+                         ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+                         error_stack);
   test_config_load_error(config, "sim -threads -100",
-                         CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+                         ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+                         error_stack);
   test_config_load_error(config, "sim -pfreq x",
-                         CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+                         error_stack);
   test_config_load_error(config, "sim -pfreq -40",
-                         CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+                         ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+                         error_stack);
   test_config_load_error(config, "sim -l1 CSW21",
-                         CONFIG_LOAD_STATUS_LEXICON_MISSING);
+                         ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING, error_stack);
   test_config_load_error(config, "sim -l1 CSW21 -l2 DISC2",
-                         CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
+                         ERROR_STATUS_CONFIG_LOAD_INCOMPATIBLE_LEXICONS,
+                         error_stack);
   test_config_load_error(config, "sim -l1 OSPS49 -l2 DISC2",
-                         CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
+                         ERROR_STATUS_CONFIG_LOAD_INCOMPATIBLE_LEXICONS,
+                         error_stack);
   test_config_load_error(config, "sim -l1 NWL20 -l2 OSPS49",
-                         CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
+                         ERROR_STATUS_CONFIG_LOAD_INCOMPATIBLE_LEXICONS,
+                         error_stack);
   test_config_load_error(config, "sim -l1 NWL20 -l2 NWL20 -k2 DISC2",
-                         CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
-  test_config_load_error(config, "sim -l1 NWL20 -l2 CSW21 -ld german",
-                         CONFIG_LOAD_STATUS_INCOMPATIBLE_LETTER_DISTRIBUTION);
+                         ERROR_STATUS_CONFIG_LOAD_INCOMPATIBLE_LEXICONS,
+                         error_stack);
+  test_config_load_error(
+      config, "sim -l1 NWL20 -l2 CSW21 -ld german",
+      ERROR_STATUS_CONFIG_LOAD_INCOMPATIBLE_LETTER_DISTRIBUTION, error_stack);
+  error_stack_destroy(error_stack);
   config_destroy(config);
 }
 
@@ -301,40 +353,25 @@ void test_config_lexical_data(void) {
 }
 
 void assert_config_exec_status(Config *config, const char *cmd,
-                               error_status_t expected_error_status_type,
-                               int expected_error_status_code) {
-  config_load_status_t status = config_load_command(config, cmd);
-  if (status != CONFIG_LOAD_STATUS_SUCCESS) {
+                               error_code_t expected_error_code) {
+  ErrorStack *error_stack = error_stack_create();
+  config_load_command(config, cmd, error_stack);
+  error_code_t status = error_stack_top(error_stack);
+  if (status != ERROR_STATUS_SUCCESS) {
     log_fatal("load config failed with status %d: %s\n", status, cmd);
   }
 
-  config_execute_command(config);
+  config_execute_command(config, error_stack);
 
-  error_status_t actual_error_status_type =
-      error_status_get_type(config_get_error_status(config));
+  error_code_t actual_error_code = error_stack_top(error_stack);
 
-  bool mismatch = false;
-
-  if (actual_error_status_type != expected_error_status_type) {
+  if (actual_error_code != expected_error_code) {
     printf("config exec error types do not match:\nexpected: %d\nactual: "
            "%d\n>%s<\n",
-           expected_error_status_type, actual_error_status_type, cmd);
-    mismatch = true;
-  }
-
-  int actual_error_status_code =
-      error_status_get_code(config_get_error_status(config));
-
-  if (actual_error_status_code != expected_error_status_code) {
-    printf("config exec error codes do not match:\nexpected: %d\nactual: "
-           "%d\n>%s<\n",
-           expected_error_status_code, actual_error_status_code, cmd);
-    mismatch = true;
-  }
-
-  if (mismatch) {
+           expected_error_code, actual_error_code, cmd);
     abort();
   }
+  error_stack_destroy(error_stack);
 }
 
 void test_config_exec_parse_args(void) {
@@ -343,152 +380,143 @@ void test_config_exec_parse_args(void) {
   // Ensure all commands that require game data fail correctly
   assert_config_exec_status(
       config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0",
-      ERROR_STATUS_TYPE_CONFIG_LOAD, CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
-  assert_config_exec_status(config, "addmoves 1", ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
-  assert_config_exec_status(config, "gen", ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
-  assert_config_exec_status(config, "sim", ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
-  assert_config_exec_status(config, "infer 0 3", ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+      ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
+  assert_config_exec_status(config, "addmoves 1",
+                            ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
+  assert_config_exec_status(config, "gen",
+                            ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
+  assert_config_exec_status(config, "sim",
+                            ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
+  assert_config_exec_status(config, "infer 0 3",
+                            ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
   assert_config_exec_status(config, "autoplay game 10",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+                            ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
 
   // CGP
   assert_config_exec_status(
       config,
       "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 1/2 0/0 0 -lex CSW21",
-      ERROR_STATUS_TYPE_CGP_LOAD, CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS);
-  assert_config_exec_status(config, "cgp " VS_OXY, ERROR_STATUS_TYPE_NONE, 0);
+      ERROR_STATUS_CGP_PARSE_MALFORMED_RACK_LETTERS);
+  assert_config_exec_status(config, "cgp " VS_OXY, ERROR_STATUS_SUCCESS);
 
   // Adding moves
-  assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_TYPE_NONE,
-                            0);
-  assert_config_exec_status(config, "add 8A.HADJI -lex CSW21",
-                            ERROR_STATUS_TYPE_MOVE_VALIDATION,
-                            MOVE_VALIDATION_STATUS_TILES_PLAYED_DISCONNECTED);
+  assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(
+      config, "add 8A.HADJI -lex CSW21",
+      ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_DISCONNECTED);
   assert_config_exec_status(config, "add 8D.HADJI -lex CSW21",
-                            ERROR_STATUS_TYPE_NONE, 0);
+                            ERROR_STATUS_SUCCESS);
 
   // Setting the rack
-  assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_TYPE_NONE,
-                            0);
-  assert_config_exec_status(config, "rack 0 ABC", ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
-  assert_config_exec_status(config, "rack 3 ABC", ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+  assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack 0 ABC",
+                            ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS);
+  assert_config_exec_status(config, "rack 3 ABC",
+                            ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS);
   assert_config_exec_status(config, "rack 1 AB3C",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_MALFORMED_RACK_ARG);
+
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   assert_config_exec_status(config, "rack 1 ABCZZZ",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_RACK_NOT_IN_BAG);
-  assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_TYPE_NONE,
-                            0);
-  assert_config_exec_status(config, "rack 1 FF", ERROR_STATUS_TYPE_NONE, 0);
-  assert_config_exec_status(config, "rack 1 ZYYABCF", ERROR_STATUS_TYPE_NONE,
-                            0);
-  assert_config_exec_status(config, "rack 2 CC", ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_RACK_NOT_IN_BAG);
+
+                            ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG);
+  assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack 1 FF", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack 1 ZYYABCF", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack 2 CC",
+                            ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG);
 
   // Generating moves
-  assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_TYPE_NONE,
-                            0);
-  assert_config_exec_status(config, "gen", ERROR_STATUS_TYPE_NONE, 0);
+  assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
 
   // Simulation
-  assert_config_exec_status(config, "gen -numplays 2", ERROR_STATUS_TYPE_NONE,
-                            0);
+  assert_config_exec_status(config, "gen -numplays 2", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "sim AEIN3R -it 1",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_MALFORMED_RACK_ARG);
-  assert_config_exec_status(config, "sim -it 1", ERROR_STATUS_TYPE_NONE, 0);
-  assert_config_exec_status(config, "sim AEINR -it 1", ERROR_STATUS_TYPE_NONE,
-                            0);
+
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  assert_config_exec_status(config, "sim -it 1", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "sim AEINR -it 1", ERROR_STATUS_SUCCESS);
 
   // Inference
-  assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_TYPE_NONE,
-                            0);
+  assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "infer 0 ABC 14",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
   assert_config_exec_status(config, "infer 3 ABC 14",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
   assert_config_exec_status(config, "infer 1 AB3C 14",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_MALFORMED_RACK_ARG);
+
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   assert_config_exec_status(config, "infer 1 ABC 1R4",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
-  assert_config_exec_status(config, "infer 1 -4", ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_MALFORMED_RACK_ARG);
-  assert_config_exec_status(config, "infer 1 8", ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
+  assert_config_exec_status(config, "infer 1 -4",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  assert_config_exec_status(config, "infer 1 8",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
   assert_config_exec_status(config, "infer 1 ABC",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_MISSING_ARG);
+
+                            ERROR_STATUS_CONFIG_LOAD_MISSING_ARG);
   // Autoplay
-  assert_config_exec_status(
-      config, "autoplay move 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
-      ERROR_STATUS_TYPE_AUTOPLAY, AUTOPLAY_STATUS_INVALID_OPTIONS);
-  assert_config_exec_status(
-      config, "autoplay ,,, 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
-      ERROR_STATUS_TYPE_AUTOPLAY, AUTOPLAY_STATUS_EMPTY_OPTIONS);
-  assert_config_exec_status(
-      config, "autoplay game -10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
-      ERROR_STATUS_TYPE_AUTOPLAY, AUTOPLAY_STATUS_MALFORMED_NUM_GAMES);
-  assert_config_exec_status(
-      config, "autoplay game 10a -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
-      ERROR_STATUS_TYPE_AUTOPLAY, AUTOPLAY_STATUS_MALFORMED_NUM_GAMES);
-  assert_config_exec_status(
-      config, "autoplay game h -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
-      ERROR_STATUS_TYPE_AUTOPLAY, AUTOPLAY_STATUS_MALFORMED_NUM_GAMES);
+  assert_config_exec_status(config,
+                            "autoplay move 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
+                            ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS);
+  assert_config_exec_status(config,
+                            "autoplay ,,, 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
+                            ERROR_STATUS_AUTOPLAY_EMPTY_OPTIONS);
+  assert_config_exec_status(config,
+                            "autoplay game -10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
+                            ERROR_STATUS_AUTOPLAY_MALFORMED_NUM_GAMES);
+  assert_config_exec_status(config,
+                            "autoplay game 10a -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
+                            ERROR_STATUS_AUTOPLAY_MALFORMED_NUM_GAMES);
+  assert_config_exec_status(config,
+                            "autoplay game h -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
+                            ERROR_STATUS_AUTOPLAY_MALFORMED_NUM_GAMES);
   assert_config_exec_status(config,
                             "autoplay game 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
-                            ERROR_STATUS_TYPE_NONE, 0);
+                            ERROR_STATUS_SUCCESS);
   // Create
-  assert_config_exec_status(config, "create klx CSW50 english",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_UNRECOGNIZED_CREATE_DATA_TYPE);
+  assert_config_exec_status(
+      config, "create klx CSW50 english",
+      ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_CREATE_DATA_TYPE);
   config_destroy(config);
   config = config_create_default_test();
 
   // Leave Gen
   assert_config_exec_status(config, "leavegen 2 0",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+
+                            ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
 
   load_and_exec_config_or_die(config, "set -l1 CSW21 -l2 NWL20");
-  assert_config_exec_status(config, "leavegen 2 0", ERROR_STATUS_TYPE_LEAVE_GEN,
-                            LEAVE_GEN_STATUS_DIFFERENT_LEXICA_OR_LEAVES);
+  assert_config_exec_status(config, "leavegen 2 0",
+                            ERROR_STATUS_LEAVE_GEN_DIFFERENT_LEXICA_OR_LEAVES);
 
   load_and_exec_config_or_die(config,
                               "set -l1 CSW21 -l2 CSW21 -k1 CSW21 -k2 NWL20");
-  assert_config_exec_status(config, "leavegen 2 0", ERROR_STATUS_TYPE_LEAVE_GEN,
-                            LEAVE_GEN_STATUS_DIFFERENT_LEXICA_OR_LEAVES);
+  assert_config_exec_status(config, "leavegen 2 0",
+                            ERROR_STATUS_LEAVE_GEN_DIFFERENT_LEXICA_OR_LEAVES);
 
   load_and_exec_config_or_die(config,
                               "set -l1 CSW21 -l2 CSW21 -k1 CSW21 -k2 NWL20");
-  assert_config_exec_status(config, "leavegen 2 0", ERROR_STATUS_TYPE_LEAVE_GEN,
-                            LEAVE_GEN_STATUS_DIFFERENT_LEXICA_OR_LEAVES);
+  assert_config_exec_status(config, "leavegen 2 0",
+                            ERROR_STATUS_LEAVE_GEN_DIFFERENT_LEXICA_OR_LEAVES);
 
   load_and_exec_config_or_die(config,
                               "set -l1 CSW21 -l2 CSW21 -k1 CSW21 -k2 CSW21");
   assert_config_exec_status(config, "leavegen 1 -1",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
-  assert_config_exec_status(config, "leavegen 1,,1 0",
-                            ERROR_STATUS_TYPE_AUTOPLAY,
-                            AUTOPLAY_STATUS_MALFORMED_MINIMUM_LEAVE_TARGETS);
-  assert_config_exec_status(config, "leavegen 1,2,3,h 0",
-                            ERROR_STATUS_TYPE_AUTOPLAY,
-                            AUTOPLAY_STATUS_MALFORMED_MINIMUM_LEAVE_TARGETS);
-  assert_config_exec_status(config, "leavegen 1,2,3,-4 0",
-                            ERROR_STATUS_TYPE_AUTOPLAY,
-                            AUTOPLAY_STATUS_MALFORMED_MINIMUM_LEAVE_TARGETS);
+
+                            ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS);
+  assert_config_exec_status(
+      config, "leavegen 1,,1 0",
+      ERROR_STATUS_AUTOPLAY_MALFORMED_MINIMUM_LEAVE_TARGETS);
+  assert_config_exec_status(
+      config, "leavegen 1,2,3,h 0",
+      ERROR_STATUS_AUTOPLAY_MALFORMED_MINIMUM_LEAVE_TARGETS);
+  assert_config_exec_status(
+      config, "leavegen 1,2,3,-4 0",
+      ERROR_STATUS_AUTOPLAY_MALFORMED_MINIMUM_LEAVE_TARGETS);
   config_destroy(config);
 }
 

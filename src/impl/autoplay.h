@@ -9,6 +9,8 @@
 #include "../ent/game.h"
 #include "../ent/thread_control.h"
 
+#include "../util/io_util.h"
+
 typedef struct AutoplayArgs {
   const char *num_games_or_min_rack_targets;
   int games_before_force_draw_start;
@@ -20,7 +22,7 @@ typedef struct AutoplayArgs {
   ThreadControl *thread_control;
 } AutoplayArgs;
 
-autoplay_status_t autoplay(const AutoplayArgs *args,
-                           AutoplayResults *autoplay_results);
+void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
+              ErrorStack *error_stack);
 
 #endif

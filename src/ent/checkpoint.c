@@ -2,7 +2,7 @@
 
 #include <pthread.h>
 
-#include "../util/util.h"
+#include "../util/io_util.h"
 
 struct Checkpoint {
   pthread_mutex_t mutex;

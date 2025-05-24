@@ -4,9 +4,8 @@
 #include "../ent/dictionary_word.h"
 #include "../ent/kwg.h"
 
-#include "../util/log.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 // The KWG data structure was originally
 // developed in wolges. For more details
@@ -432,7 +431,7 @@ int get_letters_in_common(const DictionaryWord *word, uint8_t *last_word,
     }
   }
   *last_word_length = length;
-  memory_copy(last_word, dictionary_word_get_word(word), length);
+  memcpy(last_word, dictionary_word_get_word(word), length);
   return letters_in_common;
 }
 

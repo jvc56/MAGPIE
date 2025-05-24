@@ -7,7 +7,6 @@
 #include "../../src/def/board_defs.h"
 #include "../../src/def/game_defs.h"
 #include "../../src/def/game_history_defs.h"
-#include "../../src/def/gcg_defs.h"
 
 #include "../../src/ent/data_filepaths.h"
 #include "../../src/ent/game_history.h"
@@ -17,123 +16,138 @@
 
 #include "../../src/impl/gcg.h"
 
+#include "../../src/util/io_util.h"
 #include "../../src/util/string_util.h"
-#include "../../src/util/util.h"
 
 #include "test_util.h"
 
-gcg_parse_status_t test_parse_gcg(const char *gcg_filename, Config *config,
-                                  GameHistory *game_history) {
+error_code_t test_parse_gcg(const char *gcg_filename, Config *config,
+                            GameHistory *game_history) {
+  ErrorStack *error_stack = error_stack_create();
   char *gcg_filepath = data_filepaths_get_readable_filename(
-      config_get_data_paths(config), gcg_filename, DATA_FILEPATH_TYPE_GCG);
-  gcg_parse_status_t gcg_parse_status =
-      parse_gcg(gcg_filepath, config, game_history);
+      config_get_data_paths(config), gcg_filename, DATA_FILEPATH_TYPE_GCG,
+      error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("failed to get gcg filepath for test: %s\n", gcg_filename);
+  }
+  parse_gcg(gcg_filepath, config, game_history, error_stack);
+  error_code_t gcg_parse_status = error_stack_top(error_stack);
+  error_stack_destroy(error_stack);
   free(gcg_filepath);
   return gcg_parse_status;
 }
 
 void test_single_error_case(const char *gcg_filename, Config *config,
-                            gcg_parse_status_t expected_gcg_parse_status) {
+                            error_code_t expected_gcg_parse_status) {
   GameHistory *game_history = game_history_create();
-  gcg_parse_status_t gcg_parse_status =
+  error_code_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
   game_history_destroy(game_history);
-  assert(gcg_parse_status == expected_gcg_parse_status);
+  const bool ok = gcg_parse_status == expected_gcg_parse_status;
+  if (!ok) {
+    printf("gcg parse status mismatched:\nexpected: %d\nactual: %d\n>%s<\n",
+           expected_gcg_parse_status, gcg_parse_status, gcg_filename);
+    assert(0);
+  }
 }
 
 void test_error_cases(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
-  test_single_error_case("empty", config, GCG_PARSE_STATUS_GCG_EMPTY);
+  test_single_error_case("empty", config, ERROR_STATUS_GCG_PARSE_GCG_EMPTY);
   test_single_error_case("unsupported_character_encoding", config,
-                         GCG_PARSE_STATUS_UNSUPPORTED_CHARACTER_ENCODING);
+                         ERROR_STATUS_GCG_PARSE_UNSUPPORTED_CHARACTER_ENCODING);
   test_single_error_case("duplicate_nicknames", config,
-                         GCG_PARSE_STATUS_DUPLICATE_NICKNAMES);
+                         ERROR_STATUS_GCG_PARSE_DUPLICATE_NICKNAMES);
   test_single_error_case("duplicate_names", config,
-                         GCG_PARSE_STATUS_DUPLICATE_NAMES);
+                         ERROR_STATUS_GCG_PARSE_DUPLICATE_NAMES);
   test_single_error_case("description_after_events", config,
-                         GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT);
+                         ERROR_STATUS_GCG_PARSE_PRAGMA_SUCCEEDED_EVENT);
   test_single_error_case("move_before_player", config,
-                         GCG_PARSE_STATUS_MOVE_BEFORE_PLAYER);
+                         ERROR_STATUS_GCG_PARSE_MOVE_BEFORE_PLAYER);
   test_single_error_case("player_number_redundant", config,
-                         GCG_PARSE_STATUS_PLAYER_NUMBER_REDUNDANT);
+                         ERROR_STATUS_GCG_PARSE_PLAYER_NUMBER_REDUNDANT);
   test_single_error_case("encoding_wrong_place", config,
-                         GCG_PARSE_STATUS_MISPLACED_ENCODING);
+                         ERROR_STATUS_GCG_PARSE_MISPLACED_ENCODING);
   test_single_error_case("player_does_not_exist", config,
-                         GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST);
+                         ERROR_STATUS_GCG_PARSE_PLAYER_DOES_NOT_EXIST);
   test_single_error_case("note_before_events", config,
-                         GCG_PARSE_STATUS_NOTE_PRECEDENT_EVENT);
-  test_single_error_case("phony_tiles_returned_with_no_play", config,
-                         GCG_PARSE_STATUS_PHONY_TILES_RETURNED_WITHOUT_PLAY);
+                         ERROR_STATUS_GCG_PARSE_NOTE_PRECEDENT_EVENT);
+  test_single_error_case(
+      "phony_tiles_returned_with_no_play", config,
+      ERROR_STATUS_GCG_PARSE_PHONY_TILES_RETURNED_WITHOUT_PLAY);
   test_single_error_case("no_matching_token", config,
-                         GCG_PARSE_STATUS_NO_MATCHING_TOKEN);
+                         ERROR_STATUS_GCG_PARSE_NO_MATCHING_TOKEN);
   test_single_error_case("invalid_tile_placement", config,
-                         GCG_PARSE_STATUS_MOVE_VALIDATION_ERROR);
+                         ERROR_STATUS_GCG_PARSE_MOVE_VALIDATION_ERROR);
   test_single_error_case("malformed_rack", config,
-                         GCG_PARSE_STATUS_RACK_MALFORMED);
+                         ERROR_STATUS_GCG_PARSE_RACK_MALFORMED);
   test_single_error_case("six_pass_last_rack_malformed", config,
-                         GCG_PARSE_STATUS_PLAYED_LETTERS_NOT_IN_RACK);
+                         ERROR_STATUS_GCG_PARSE_PLAYED_LETTERS_NOT_IN_RACK);
   test_single_error_case("exchange_not_in_rack", config,
-                         GCG_PARSE_STATUS_MOVE_VALIDATION_ERROR);
+                         ERROR_STATUS_GCG_PARSE_MOVE_VALIDATION_ERROR);
   test_single_error_case("exchange_malformed", config,
-                         GCG_PARSE_STATUS_RACK_MALFORMED);
+                         ERROR_STATUS_GCG_PARSE_RACK_MALFORMED);
   test_single_error_case("pass_rack_malformed", config,
-                         GCG_PARSE_STATUS_RACK_MALFORMED);
+                         ERROR_STATUS_GCG_PARSE_RACK_MALFORMED);
   test_single_error_case("challenge_bonus_rack_malformed", config,
-                         GCG_PARSE_STATUS_RACK_MALFORMED);
+                         ERROR_STATUS_GCG_PARSE_RACK_MALFORMED);
   test_single_error_case("end_points_rack_malformed", config,
-                         GCG_PARSE_STATUS_RACK_MALFORMED);
+                         ERROR_STATUS_GCG_PARSE_RACK_MALFORMED);
   test_single_error_case("end_penalty_rack_malformed", config,
-                         GCG_PARSE_STATUS_RACK_MALFORMED);
+                         ERROR_STATUS_GCG_PARSE_RACK_MALFORMED);
   test_single_error_case("malformed_play", config,
-                         GCG_PARSE_STATUS_MOVE_VALIDATION_ERROR);
+                         ERROR_STATUS_GCG_PARSE_MOVE_VALIDATION_ERROR);
   test_single_error_case("played_tile_not_in_rack", config,
-                         GCG_PARSE_STATUS_MOVE_VALIDATION_ERROR);
+                         ERROR_STATUS_GCG_PARSE_MOVE_VALIDATION_ERROR);
   test_single_error_case("play_out_of_bounds", config,
-                         GCG_PARSE_STATUS_MOVE_VALIDATION_ERROR);
+                         ERROR_STATUS_GCG_PARSE_MOVE_VALIDATION_ERROR);
   test_single_error_case("redundant_pragma", config,
-                         GCG_PARSE_STATUS_REDUNDANT_PRAGMA);
+                         ERROR_STATUS_GCG_PARSE_REDUNDANT_PRAGMA);
   test_single_error_case("unrecognized_game_variant", config,
-                         GCG_PARSE_STATUS_UNRECOGNIZED_GAME_VARIANT);
+                         ERROR_STATUS_GCG_PARSE_UNRECOGNIZED_GAME_VARIANT);
   test_single_error_case("last_rack_penalty_incorrect", config,
-                         GCG_PARSE_STATUS_END_RACK_PENALTY_INCORRECT);
+                         ERROR_STATUS_GCG_PARSE_END_RACK_PENALTY_INCORRECT);
   test_single_error_case("end_rack_points_incorrect", config,
-                         GCG_PARSE_STATUS_RACK_END_POINTS_INCORRECT);
+                         ERROR_STATUS_GCG_PARSE_RACK_END_POINTS_INCORRECT);
   test_single_error_case("six_pass_cumulative_scoring_error", config,
-                         GCG_PARSE_STATUS_CUMULATIVE_SCORING_ERROR);
+                         ERROR_STATUS_GCG_PARSE_CUMULATIVE_SCORING_ERROR);
   test_single_error_case("standard_cumulative_scoring_error", config,
-                         GCG_PARSE_STATUS_CUMULATIVE_SCORING_ERROR);
+                         ERROR_STATUS_GCG_PARSE_CUMULATIVE_SCORING_ERROR);
   test_single_error_case("game_event_off_turn", config,
-                         GCG_PARSE_STATUS_GAME_EVENT_OFF_TURN);
+                         ERROR_STATUS_GCG_PARSE_GAME_EVENT_OFF_TURN);
   test_single_error_case("move_event_after_game_end", config,
-                         GCG_PARSE_STATUS_MOVE_EVENT_AFTER_GAME_END);
+                         ERROR_STATUS_GCG_PARSE_MOVE_EVENT_AFTER_GAME_END);
   test_single_error_case("challenge_bonus_without_play", config,
-                         GCG_PARSE_STATUS_CHALLENGE_BONUS_WITHOUT_PLAY);
-  test_single_error_case("invalid_challenge_bonus_player_index", config,
-                         GCG_PARSE_STATUS_INVALID_CHALLENGE_BONUS_PLAYER_INDEX);
-  test_single_error_case("invalid_phony_tiles_player_index", config,
-                         GCG_PARSE_STATUS_INVALID_PHONY_TILES_PLAYER_INDEX);
+                         ERROR_STATUS_GCG_PARSE_CHALLENGE_BONUS_WITHOUT_PLAY);
+  test_single_error_case(
+      "invalid_challenge_bonus_player_index", config,
+      ERROR_STATUS_GCG_PARSE_INVALID_CHALLENGE_BONUS_PLAYER_INDEX);
+  test_single_error_case(
+      "invalid_phony_tiles_player_index", config,
+      ERROR_STATUS_GCG_PARSE_INVALID_PHONY_TILES_PLAYER_INDEX);
   test_single_error_case("phony_tiles_returned_mismatch", config,
-                         GCG_PARSE_STATUS_PHONY_TILES_RETURNED_MISMATCH);
+                         ERROR_STATUS_GCG_PARSE_PHONY_TILES_RETURNED_MISMATCH);
   test_single_error_case("end_game_event_before_game_end", config,
-                         GCG_PARSE_STATUS_END_GAME_EVENT_BEFORE_GAME_END);
+                         ERROR_STATUS_GCG_PARSE_END_GAME_EVENT_BEFORE_GAME_END);
   test_single_error_case("first_rack_not_in_bag", config,
-                         GCG_PARSE_STATUS_RACK_NOT_IN_BAG);
+                         ERROR_STATUS_GCG_PARSE_RACK_NOT_IN_BAG);
   test_single_error_case("midgame_rack_not_in_bag", config,
-                         GCG_PARSE_STATUS_RACK_NOT_IN_BAG);
+                         ERROR_STATUS_GCG_PARSE_RACK_NOT_IN_BAG);
   test_single_error_case("event_after_last_rack", config,
-                         GCG_PARSE_STATUS_EVENT_AFTER_LAST_RACK);
+                         ERROR_STATUS_GCG_PARSE_EVENT_AFTER_LAST_RACK);
   test_single_error_case("last_rack1_not_in_bag", config,
-                         GCG_PARSE_STATUS_RACK_NOT_IN_BAG);
+                         ERROR_STATUS_GCG_PARSE_RACK_NOT_IN_BAG);
   test_single_error_case("last_rack2_not_in_bag", config,
-                         GCG_PARSE_STATUS_RACK_NOT_IN_BAG);
+                         ERROR_STATUS_GCG_PARSE_RACK_NOT_IN_BAG);
   config_destroy(config);
 
   Config *no_lexicon_config = config_create_or_die(
       "set -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
 
   test_single_error_case("lexicon_missing", no_lexicon_config,
-                         GCG_PARSE_STATUS_LEXICON_NOT_SPECIFIED);
+                         ERROR_STATUS_GCG_PARSE_LEXICON_NOT_SPECIFIED);
 
   config_destroy(no_lexicon_config);
 }
@@ -143,9 +157,9 @@ void test_parse_special_char(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "name_iso8859-1";
   GameHistory *game_history = game_history_create();
-  gcg_parse_status_t gcg_parse_status =
+  error_code_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
   assert_strings_equal(game_history_player_get_name(game_history, 0), "césar");
   assert_strings_equal(game_history_player_get_name(game_history, 1),
                        "hércules");
@@ -158,9 +172,9 @@ void test_parse_special_utf8_no_header(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "name_utf8_noheader";
   GameHistory *game_history = game_history_create();
-  gcg_parse_status_t gcg_parse_status =
+  error_code_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
   assert(
       strings_equal(game_history_player_get_name(game_history, 0), "cÃ©sar"));
   game_history_destroy(game_history);
@@ -172,9 +186,9 @@ void test_parse_special_utf8_with_header(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "name_utf8_with_header";
   GameHistory *game_history = game_history_create();
-  gcg_parse_status_t gcg_parse_status =
+  error_code_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
   assert(strings_equal(game_history_player_get_name(game_history, 0), "césar"));
   game_history_destroy(game_history);
   config_destroy(config);
@@ -185,9 +199,9 @@ void test_parse_dos_mode(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "utf8_dos";
   GameHistory *game_history = game_history_create();
-  gcg_parse_status_t gcg_parse_status =
+  error_code_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
   assert(strings_equal(game_history_player_get_nickname(game_history, 0),
                        "angwantibo"));
   assert(strings_equal(game_history_player_get_nickname(game_history, 1),
@@ -271,7 +285,7 @@ void assert_game_play_to_turn(GameHistory *game_history, Game *game1,
   int i = 0;
   const char *cgp = cgps[i];
   while (cgp) {
-    game_play_to_turn(game_history, game1, i);
+    game_play_to_turn_or_die(game_history, game1, i);
     load_cgp_or_die(game2, cgp);
     assert_games_are_equal(game1, game2, true);
     i++;
@@ -284,9 +298,9 @@ void test_success_standard(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "success_standard";
   GameHistory *game_history = game_history_create();
-  gcg_parse_status_t gcg_parse_status =
+  error_code_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
 
   Game *game1 = config_game_create(config);
   Game *game2 = config_game_create(config);
@@ -447,9 +461,9 @@ void test_success_five_point_challenge(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "success_five_point_challenge";
   GameHistory *game_history = game_history_create();
-  gcg_parse_status_t gcg_parse_status =
+  error_code_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
 
   Game *game1 = config_game_create(config);
   Game *game2 = config_game_create(config);
@@ -523,9 +537,9 @@ void test_success_six_pass(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "success_six_pass";
   GameHistory *game_history = game_history_create();
-  gcg_parse_status_t gcg_parse_status =
+  error_code_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
 
   Game *game1 = config_game_create(config);
   Game *game2 = config_game_create(config);
@@ -622,13 +636,13 @@ void test_success_incomplete(void) {
   Rack *rack = rack_create(ld_get_size(ld));
   const char *gcg_filename;
   GameHistory *game_history;
-  gcg_parse_status_t gcg_parse_status;
+  error_code_t gcg_parse_status;
 
   gcg_filename = "oops_all_pragmas";
   game_history = game_history_create();
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
-  game_play_to_end(game_history, game1);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game1);
   load_cgp_or_die(game2,
                   "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
   assert_games_are_equal(game1, game2, true);
@@ -641,8 +655,8 @@ void test_success_incomplete(void) {
   gcg_filename = "success_just_last_rack";
   game_history = game_history_create();
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
-  game_play_to_end(game_history, game1);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game1);
   load_cgp_or_die(
       game2, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 DIIIILU/ 0/0 0");
   assert_games_are_equal(game1, game2, true);
@@ -656,8 +670,8 @@ void test_success_incomplete(void) {
   gcg_filename = "incomplete_after_tile_placement";
   game_history = game_history_create();
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
-  game_play_to_end(game_history, game1);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game1);
   load_cgp_or_die(game2,
                   "15/15/15/15/15/15/15/6ZA7/4CRoWDIE4/15/15/15/15/15/15 / "
                   "22/79 0");
@@ -671,8 +685,8 @@ void test_success_incomplete(void) {
   gcg_filename = "incomplete_with_last_rack_after_tile_placement";
   game_history = game_history_create();
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
-  game_play_to_end(game_history, game1);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game1);
   load_cgp_or_die(
       game2, "15/15/15/15/15/15/15/6ZA7/4CRoWDIE4/15/15/15/15/15/15 AENNRST/ "
              "22/79 0");
@@ -684,11 +698,27 @@ void test_success_incomplete(void) {
       rack, game_history_player_get_last_known_rack(game_history, 1)));
   game_history_destroy(game_history);
 
+  gcg_filename = "incomplete_after_five_point_challenge";
+  game_history = game_history_create();
+  gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  game_play_to_turn_or_die(game_history, game1, 2);
+  load_cgp_or_die(
+      game2,
+      "15/15/15/15/15/15/15/6SUQ6/2VETCH8/15/15/15/15/15/15 ?FIOOTY/ 24/30 0");
+  assert_games_are_equal(game1, game2, true);
+  rack_set_to_string(ld, rack, "AEIOOST");
+  assert(racks_are_equal(
+      rack, game_history_player_get_last_known_rack(game_history, 0)));
+  assert(racks_are_equal(
+      NULL, game_history_player_get_last_known_rack(game_history, 1)));
+  game_history_destroy(game_history);
+
   gcg_filename = "incomplete_after_phony_returned";
   game_history = game_history_create();
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
-  game_play_to_end(game_history, game1);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game1);
   load_cgp_or_die(
       game2,
       "11T3/10NA3/10EN3/10UG3/10MO3/11i3/5TANNERS3/6ZA3T3/4CRoWDIE4/9FEEB2/"
@@ -704,8 +734,8 @@ void test_success_incomplete(void) {
   gcg_filename = "incomplete_after_pass";
   game_history = game_history_create();
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
-  game_play_to_end(game_history, game1);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game1);
   load_cgp_or_die(
       game2, "11T3/10NAE2/10END2/2A7UG1G1/2B7MO1L1/1VODKA5i1O1/2R2TANNERS1R1/"
              "2T3ZA3T1I1/2I1CRoWDIE2A1/2V6FEEBS1/1NEWISHLY1LEA2/15/15/15/15 "
@@ -721,8 +751,8 @@ void test_success_incomplete(void) {
   gcg_filename = "incomplete_after_five_point_challenge";
   game_history = game_history_create();
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
-  game_play_to_end(game_history, game1);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game1);
   load_cgp_or_die(
       game2,
       "15/15/8GENITAL/12AY1/4B4MINX2/2GRIZ2ION4/4N4WARP2/3BA1SUQ1N4/"
@@ -739,8 +769,8 @@ void test_success_incomplete(void) {
   gcg_filename = "incomplete_after_exchange";
   game_history = game_history_create();
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
-  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
-  game_play_to_end(game_history, game1);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game1);
   load_cgp_or_die(
       game2, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AAENRSZ/ 0/0 1");
   assert_games_are_equal(game1, game2, true);

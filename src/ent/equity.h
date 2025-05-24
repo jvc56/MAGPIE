@@ -3,11 +3,12 @@
 
 #include <assert.h>
 #include <math.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "../def/equity_defs.h"
 
-#include "../util/log.h"
+#include "../util/io_util.h"
 
 typedef int32_t Equity;
 
@@ -28,10 +29,10 @@ static inline Equity double_to_equity(double x) {
 // Used for tests and accumulating stats.
 static inline double equity_to_double(Equity eq) {
   if (eq == EQUITY_UNDEFINED_VALUE) {
-    log_fatal("cannot convert undefined equity\n");
+    log_fatal("cannot convert undefined equity");
   }
   if (eq == EQUITY_INITIAL_VALUE) {
-    log_fatal("cannot convert initial equity\n");
+    log_fatal("cannot convert initial equity");
   }
   if (eq == EQUITY_PASS_VALUE) {
     log_fatal("cannot convert pass equity");
@@ -41,13 +42,13 @@ static inline double equity_to_double(Equity eq) {
 
 static inline Equity equity_negate(Equity eq) {
   if (eq == EQUITY_UNDEFINED_VALUE) {
-    log_fatal("cannot negate undefined equity\n");
+    log_fatal("cannot negate undefined equity");
   }
   if (eq == EQUITY_INITIAL_VALUE) {
-    log_fatal("cannot negate initial equity\n");
+    log_fatal("cannot negate initial equity");
   }
   if (eq == EQUITY_PASS_VALUE) {
-    log_fatal("cannot negate pass equity\n");
+    log_fatal("cannot negate pass equity");
   }
   return -eq;
 }
@@ -61,16 +62,16 @@ static inline bool equity_is_integer(Equity eq) {
 // of this to use for that.
 static inline int equity_to_int(Equity eq) {
   if (eq == EQUITY_UNDEFINED_VALUE) {
-    log_fatal("cannot convert undefined equity\n");
+    log_fatal("cannot convert undefined equity");
   }
   if (eq == EQUITY_INITIAL_VALUE) {
-    log_fatal("cannot convert initial equity\n");
+    log_fatal("cannot convert initial equity");
   }
   if (eq == EQUITY_PASS_VALUE) {
-    log_fatal("cannot convert pass equity\n");
+    log_fatal("cannot convert pass equity");
   }
   if (!equity_is_integer(eq)) {
-    log_fatal("equity is not an integer\n");
+    log_fatal("equity is not an integer");
   }
   return eq / EQUITY_RESOLUTION;
 }
@@ -80,8 +81,7 @@ static inline Equity int_to_equity(int x) {
   if (x > EQUITY_MAX_DOUBLE || x < EQUITY_MIN_DOUBLE) {
     log_fatal("equity value out of range: %f", x);
   }
-  return  x * EQUITY_RESOLUTION;
+  return x * EQUITY_RESOLUTION;
 }
-
 
 #endif

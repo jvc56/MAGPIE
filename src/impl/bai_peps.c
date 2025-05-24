@@ -8,18 +8,17 @@
  */
 #include "bai_peps.h"
 
-#include "../util/log.h"
-#include "../util/math_util.h"
-#include "../util/util.h"
-
-#include "../def/bai_defs.h"
-
-#include "bai_logger.h"
-
 #include <complex.h>
 #include <float.h>
 #include <math.h>
 #include <stdbool.h>
+
+#include "../util/io_util.h"
+#include "../util/math_util.h"
+
+#include "../def/bai_defs.h"
+
+#include "bai_logger.h"
 
 #define BAI_BINARY_SEARCH_MAX_ITER 100
 
@@ -75,7 +74,7 @@ double bai_binary_search(bai_binary_search_value_func_t vf, const void *args,
     }
   }
 
-  // log_fatal("binary_search did not reach tolerance %0.20f in %d iterations.\n
+  // log_fatal("binary_search did not reach tolerance %0.20f in %d iterations.
   // "
   //           "f(%0.20f) = %0.20f\n"
   //           "f(%0.20f) = %0.20f\n"
@@ -193,13 +192,6 @@ double bai_X_binary_search_func(const double z, const void *args) {
   const double bai_d_a_result = bai_d(μa, σ2a, μz);
   const double result =
       (1 - z) * bai_d_1_result + z * bai_d_a_result - (1 - z) * v;
-  // printf("\n\nbai_X\nμ1 = %.30f\nμz = %.30f\nσ21 = %.30f\nμa = %.30f\nσ2a = "
-  //        "%.30f\nv = "
-  //        "%.30f\nz = "
-  //        "result = %.30f = %.30f * %.30f + %.30f * %.30f - %.30f\n",
-  //        μ1, μz, σ21, μa, σ2a, v, z, result, (1 - z),
-  //        bai_d(μ1, σ21, μz), z, bai_d(μa, σ2a, μz),
-  //        (1 - z) * v);
   // bai_logger_log_double(xbs_args->bai_logger, "z", z);
   // bai_logger_log_double(xbs_args->bai_logger, "u1", μ1);
   // bai_logger_log_double(xbs_args->bai_logger, "sigma21", σ21);

@@ -8,6 +8,7 @@
 #include "game.h"
 #include "move.h"
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
 
 typedef struct AutoplayResults AutoplayResults;
@@ -15,9 +16,9 @@ typedef struct AutoplayResults AutoplayResults;
 AutoplayResults *autoplay_results_create(void);
 AutoplayResults *
 autoplay_results_create_empty_copy(const AutoplayResults *orig);
-autoplay_status_t
-autoplay_results_set_options(AutoplayResults *autoplay_results,
-                             const char *options_str);
+void autoplay_results_set_options(AutoplayResults *autoplay_results,
+                                  const char *options_str,
+                                  ErrorStack *error_stack);
 void autoplay_results_reset_options(AutoplayResults *autoplay_results);
 void autoplay_results_destroy(AutoplayResults *autoplay_results);
 void autoplay_results_reset(AutoplayResults *autoplay_results);

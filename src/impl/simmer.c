@@ -1,9 +1,9 @@
 #include "simmer.h"
 
-#include "../def/simmer_defs.h"
-
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
+
+#include "../util/io_util.h"
 
 #include "../str/sim_string.h"
 
@@ -11,17 +11,15 @@
 #include "move_gen.h"
 #include "random_variable.h"
 
-sim_status_t simulate(const SimArgs *sim_args, SimResults *sim_results) {
+void simulate(const SimArgs *sim_args, SimResults *sim_results,
+              ErrorStack *error_stack) {
   // The BAI call will reset the thread control.
 
-  if (!sim_args->move_list) {
-    return SIM_STATUS_NO_MOVES;
-  }
-
-  int move_list_count = move_list_get_count(sim_args->move_list);
-
-  if (move_list_count == 0) {
-    return SIM_STATUS_NO_MOVES;
+  if (!sim_args->move_list || move_list_get_count(sim_args->move_list) == 0) {
+    error_stack_push(error_stack, ERROR_STATUS_SIM_NO_MOVES,
+                     string_duplicate("cannot simulate without moves, use the "
+                                      "'generate' command to generate moves"));
+    return;
   }
 
   RandomVariablesArgs rv_sim_args = {
@@ -54,5 +52,5 @@ sim_status_t simulate(const SimArgs *sim_args, SimResults *sim_results) {
   rvs_destroy(rng);
   gen_destroy_cache();
 
-  return SIM_STATUS_SUCCESS;
+  return;
 }

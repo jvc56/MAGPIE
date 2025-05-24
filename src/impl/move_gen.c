@@ -30,7 +30,7 @@
 
 #include "wmp_move_gen.h"
 
-#include "../util/util.h"
+#include "../util/io_util.h"
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
@@ -873,8 +873,8 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
   rack_copy(&gen->player_rack_shadow_right_copy, &gen->player_rack);
   rack_copy(&gen->bingo_alpha_rack_shadow_right_copy, &gen->bingo_alpha_rack);
   const uint64_t orig_rack_cross_set = gen->rack_cross_set;
-  memory_copy(gen->descending_tile_scores_copy, gen->descending_tile_scores,
-              sizeof(gen->descending_tile_scores));
+  memcpy(gen->descending_tile_scores_copy, gen->descending_tile_scores,
+         sizeof(gen->descending_tile_scores));
   // Only recopy the originals if a restriction modified the arrays above.
   bool restricted_any_tiles = false;
 
@@ -884,11 +884,11 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
   // restore them to how they were before looking further left.
   const int orig_num_unrestricted_multipliers =
       gen->num_unrestricted_multipliers;
-  memory_copy(gen->desc_xw_muls_copy, gen->descending_cross_word_multipliers,
-              sizeof(gen->descending_cross_word_multipliers));
-  memory_copy(gen->desc_eff_letter_muls_copy,
-              gen->descending_effective_letter_multipliers,
-              sizeof(gen->descending_effective_letter_multipliers));
+  memcpy(gen->desc_xw_muls_copy, gen->descending_cross_word_multipliers,
+         sizeof(gen->descending_cross_word_multipliers));
+  memcpy(gen->desc_eff_letter_muls_copy,
+         gen->descending_effective_letter_multipliers,
+         sizeof(gen->descending_effective_letter_multipliers));
   bool changed_any_restricted_multipliers = false;
 
   const int original_current_right_col = gen->current_right_col;
@@ -982,18 +982,18 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
   if (restricted_any_tiles) {
     rack_copy(&gen->player_rack, &gen->player_rack_shadow_right_copy);
     gen->rack_cross_set = orig_rack_cross_set;
-    memory_copy(gen->descending_tile_scores, gen->descending_tile_scores_copy,
-                sizeof(gen->descending_tile_scores));
+    memcpy(gen->descending_tile_scores, gen->descending_tile_scores_copy,
+           sizeof(gen->descending_tile_scores));
   }
 
   // Restore state for unrestricted squares
   if (changed_any_restricted_multipliers) {
     gen->num_unrestricted_multipliers = orig_num_unrestricted_multipliers;
-    memory_copy(gen->descending_cross_word_multipliers, gen->desc_xw_muls_copy,
-                sizeof(gen->descending_cross_word_multipliers));
-    memory_copy(gen->descending_effective_letter_multipliers,
-                gen->desc_eff_letter_muls_copy,
-                sizeof(gen->descending_effective_letter_multipliers));
+    memcpy(gen->descending_cross_word_multipliers, gen->desc_xw_muls_copy,
+           sizeof(gen->descending_cross_word_multipliers));
+    memcpy(gen->descending_effective_letter_multipliers,
+           gen->desc_eff_letter_muls_copy,
+           sizeof(gen->descending_effective_letter_multipliers));
   }
 
   // Restore state to undo other shadow progress
@@ -1234,9 +1234,8 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   gen->last_word_multiplier = 1;
 
   // Reset available tile scores
-  memory_copy(gen->descending_tile_scores,
-              gen->full_rack_descending_tile_scores,
-              sizeof(gen->descending_tile_scores));
+  memcpy(gen->descending_tile_scores, gen->full_rack_descending_tile_scores,
+         sizeof(gen->descending_tile_scores));
   // Reset score totals
   gen->shadow_mainword_restricted_score = 0;
   gen->shadow_perpendicular_additional_score = 0;
@@ -1301,8 +1300,8 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
       i++;
     }
   }
-  memory_copy(gen->full_rack_descending_tile_scores,
-              gen->descending_tile_scores, sizeof(gen->descending_tile_scores));
+  memcpy(gen->full_rack_descending_tile_scores, gen->descending_tile_scores,
+         sizeof(gen->descending_tile_scores));
 }
 
 void gen_load_position(MoveGen *gen, Game *game, move_record_t move_record_type,
@@ -1313,7 +1312,7 @@ void gen_load_position(MoveGen *gen, Game *game, move_record_t move_record_type,
   Player *player = game_get_player(game, gen->player_index);
   Player *opponent = game_get_player(game, 1 - gen->player_index);
 
-  memory_copy(&gen->ld, game_get_ld(game), sizeof(LetterDistribution));
+  memcpy(&gen->ld, game_get_ld(game), sizeof(LetterDistribution));
   gen->kwg = player_get_kwg(player);
   gen->kwg = (override_kwg == NULL) ? player_get_kwg(player) : override_kwg;
   gen->klv = player_get_klv(player);

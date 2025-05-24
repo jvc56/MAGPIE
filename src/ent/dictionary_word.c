@@ -8,8 +8,8 @@
 
 #include "../ent/letter_distribution.h"
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 struct DictionaryWord {
   uint8_t word[MAX_KWG_STRING_LENGTH];
@@ -31,7 +31,8 @@ uint8_t dictionary_word_get_length(const DictionaryWord *dictionary_word) {
 }
 
 DictionaryWordList *dictionary_word_list_create(void) {
-  return dictionary_word_list_create_with_capacity(INITIAL_DICTIONARY_WORD_LIST_CAPACITY);
+  return dictionary_word_list_create_with_capacity(
+      INITIAL_DICTIONARY_WORD_LIST_CAPACITY);
 }
 
 DictionaryWordList *dictionary_word_list_create_with_capacity(int capacity) {
@@ -58,7 +59,7 @@ void dictionary_word_list_add_word(DictionaryWordList *dictionary_word_list,
   }
   DictionaryWord *dictionary_word =
       &dictionary_word_list->dictionary_words[dictionary_word_list->count];
-  memory_copy(dictionary_word->word, word, word_length);
+  memcpy(dictionary_word->word, word, word_length);
   dictionary_word->length = word_length;
   dictionary_word_list->count++;
 }
@@ -121,7 +122,7 @@ void dictionary_word_list_unique(DictionaryWordList *sorted,
 
 void dictionary_word_list_copy(const DictionaryWordList *src,
                                DictionaryWordList **dst) {
-  *dst = dictionary_word_list_create_with_capacity(src->count);                                
+  *dst = dictionary_word_list_create_with_capacity(src->count);
   for (int i = 0; i < src->count; i++) {
     dictionary_word_list_add_word(*dst, src->dictionary_words[i].word,
                                   src->dictionary_words[i].length);
@@ -135,7 +136,8 @@ void dictionary_word_list_destroy(DictionaryWordList *dictionary_word_list) {
 
 void dictionary_word_list_write_to_file(
     const DictionaryWordList *dictionary_word_list,
-    const LetterDistribution *ld, const char *filename) {
+    const LetterDistribution *ld, const char *filename,
+    ErrorStack *error_stack) {
   StringBuilder *sb = string_builder_create();
   for (int word_idx = 0; word_idx < dictionary_word_list->count; word_idx++) {
     const DictionaryWord *word =
@@ -147,6 +149,6 @@ void dictionary_word_list_write_to_file(
     }
     string_builder_add_string(sb, "\n");
   }
-  write_string_to_file(filename, "w", string_builder_peek(sb));
+  write_string_to_file(filename, "w", string_builder_peek(sb), error_stack);
   string_builder_destroy(sb);
 }

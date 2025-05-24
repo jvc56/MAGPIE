@@ -10,8 +10,8 @@
 
 #include "../ent/rack.h"
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 #include "board.h"
 #include "kwg_alpha.h"
@@ -109,7 +109,7 @@ FormedWords *formed_words_create(Board *board, Move *move) {
   }
 
   ws->words[formed_words_idx].word_length = main_word_idx;
-  memory_copy(ws->words[formed_words_idx].word, main_word, main_word_idx);
+  memcpy(ws->words[formed_words_idx].word, main_word, main_word_idx);
   formed_words_idx++;
   ws->num_words = formed_words_idx;
 
@@ -137,7 +137,7 @@ int formed_words_get_word_length(const FormedWords *fw, int word_index) {
   return fw->words[word_index].word_length;
 }
 
-int formed_words_get_word_valid(const FormedWords *fw, int word_index) {
+bool formed_words_get_word_valid(const FormedWords *fw, int word_index) {
   return fw->words[word_index].valid;
 }
 

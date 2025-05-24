@@ -19,8 +19,4 @@ typedef enum {
   MOVE_RECORD_ALL_SMALL,
 } move_record_t;
 
-typedef enum {
-  MOVE_GEN_STATUS_SUCCESS,
-} move_gen_status_t;
-
 #endif

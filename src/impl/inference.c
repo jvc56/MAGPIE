@@ -27,8 +27,8 @@
 
 #include "../str/inference_string.h"
 
-#include "../util/log.h"
-#include "../util/util.h"
+#include "../util/io_util.h"
+#include "../util/math_util.h"
 
 typedef struct Inference {
   // The following fields are owned by the caller
@@ -506,11 +506,15 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
   free(worker_ids);
 }
 
-inference_status_t verify_inference(const Inference *inference) {
+void verify_inference(const Inference *inference, ErrorStack *error_stack) {
   Rack *bag_as_rack = inference->bag_as_rack;
   for (int i = 0; i < inference->ld_size; i++) {
     if (rack_get_letter(bag_as_rack, i) < 0) {
-      return INFERENCE_STATUS_TILES_PLAYED_NOT_IN_BAG;
+      error_stack_push(
+          error_stack, ERROR_STATUS_INFERENCE_TILES_PLAYED_NOT_IN_BAG,
+          string_duplicate("inferred player tiles played not available in the "
+                           "bag"));
+      return;
     }
   }
 
@@ -521,36 +525,57 @@ inference_status_t verify_inference(const Inference *inference) {
 
   if (infer_rack_number_of_letters == 0 &&
       inference->target_number_of_tiles_exchanged == 0) {
-    return INFERENCE_STATUS_NO_TILES_PLAYED;
+    error_stack_push(
+        error_stack, ERROR_STATUS_INFERENCE_NO_TILES_PLAYED,
+        string_duplicate("cannot infer when no tiles are played or exchanged"));
+    return;
   }
 
   if (infer_rack_number_of_letters != 0 &&
       inference->target_number_of_tiles_exchanged != 0) {
-    return INFERENCE_STATUS_BOTH_PLAY_AND_EXCHANGE;
+    error_stack_push(error_stack, ERROR_STATUS_INFERENCE_BOTH_PLAY_AND_EXCHANGE,
+                     string_duplicate("cannot infer when both a tile placement "
+                                      "and exchange move are specified"));
+    return;
   }
 
   if (inference->target_number_of_tiles_exchanged != 0 &&
       number_of_letters_in_bag < (RACK_SIZE) * 2) {
-    return INFERENCE_STATUS_EXCHANGE_NOT_ALLOWED;
+    error_stack_push(
+        error_stack, ERROR_STATUS_INFERENCE_EXCHANGE_NOT_ALLOWED,
+        get_formatted_string("cannot infer an exchange where there are fewer "
+                             "than %d tiles in the bag",
+                             (RACK_SIZE)));
+    return;
   }
 
   if (inference->target_number_of_tiles_exchanged != 0 &&
       inference->target_score != 0) {
-    return INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO;
+    error_stack_push(
+        error_stack, ERROR_STATUS_INFERENCE_EXCHANGE_SCORE_NOT_ZERO,
+        string_duplicate("cannot infer an exchange with a nonzero score"));
+    return;
   }
 
   if (infer_rack_number_of_letters > (RACK_SIZE)) {
-    return INFERENCE_STATUS_RACK_OVERFLOW;
+    error_stack_push(
+        error_stack, ERROR_STATUS_INFERENCE_RACK_OVERFLOW,
+        get_formatted_string("inferred player played more tiles (%d) "
+                             "than can fit in a rack (%d)",
+                             infer_rack_number_of_letters, RACK_SIZE));
+    return;
   }
-
-  return INFERENCE_STATUS_SUCCESS;
 }
 
-inference_status_t infer(InferenceArgs *args, InferenceResults *results) {
+void infer(InferenceArgs *args, InferenceResults *results,
+           ErrorStack *error_stack) {
   thread_control_reset(args->thread_control, 0);
 
   if (!args->target_played_tiles) {
-    return INFERENCE_STATUS_NO_TILES_PLAYED;
+    error_stack_push(error_stack, ERROR_STATUS_INFERENCE_NO_TILES_PLAYED,
+                     string_duplicate("no tile placement or exchange move was "
+                                      "specified for the inference"));
+    return;
   }
 
   Game *game = game_duplicate(args->game);
@@ -559,9 +584,9 @@ inference_status_t infer(InferenceArgs *args, InferenceResults *results) {
       args->target_played_tiles, game, args->move_capacity, args->target_index,
       args->target_score, args->target_num_exch, args->equity_margin, results);
 
-  inference_status_t status = verify_inference(inference);
+  verify_inference(inference, error_stack);
 
-  if (status == INFERENCE_STATUS_SUCCESS) {
+  if (error_stack_is_empty(error_stack)) {
     infer_manager(args->thread_control, inference);
 
     inference_results_finalize(
@@ -590,6 +615,4 @@ inference_status_t infer(InferenceArgs *args, InferenceResults *results) {
   game_destroy(game);
   inference_destroy(inference);
   gen_destroy_cache();
-
-  return status;
 }

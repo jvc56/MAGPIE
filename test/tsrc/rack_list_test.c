@@ -1,6 +1,7 @@
 #include "../../src/impl/config.h"
 
 #include "../../src/impl/rack_list.h"
+#include "../../src/util/math_util.h"
 
 #include "test_util.h"
 
@@ -104,7 +105,7 @@ void test_rack_list(void) {
     }
   }
 
-  KLV *leaves_klv = klv_create(DEFAULT_DATA_PATHS, "CSW21");
+  KLV *leaves_klv = klv_create_or_die(DEFAULT_DATA_PATHS, "CSW21");
   rack_list_write_to_klv(rack_list, ld, leaves_klv);
 
   for (int rack_index = 0; rack_index < num_racks; rack_index++) {

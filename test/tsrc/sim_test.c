@@ -5,7 +5,6 @@
 #include <stdlib.h>
 
 #include "../../src/def/config_defs.h"
-#include "../../src/def/simmer_defs.h"
 #include "../../src/def/thread_control_defs.h"
 
 #include "../../src/ent/bag.h"
@@ -84,9 +83,9 @@ void test_sim_error_cases(void) {
       "2 -threads 1 -iter 1 -scond none");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 AAADERW");
-  sim_status_t status =
-      config_simulate(config, NULL, config_get_sim_results(config));
-  assert(status == SIM_STATUS_NO_MOVES);
+  error_code_t status = config_simulate_and_return_status(
+      config, NULL, config_get_sim_results(config));
+  assert(status == ERROR_STATUS_SIM_NO_MOVES);
   config_destroy(config);
 }
 
@@ -97,9 +96,9 @@ void test_sim_single_iteration(void) {
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 AAADERW");
   load_and_exec_config_or_die(config, "gen");
-  sim_status_t status =
-      config_simulate(config, NULL, config_get_sim_results(config));
-  assert(status == SIM_STATUS_SUCCESS);
+  error_code_t status = config_simulate_and_return_status(
+      config, NULL, config_get_sim_results(config));
+  assert(status == ERROR_STATUS_SUCCESS);
   assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
          EXIT_STATUS_SAMPLE_LIMIT);
   config_destroy(config);
@@ -113,8 +112,9 @@ void test_more_iterations(void) {
   load_and_exec_config_or_die(config, "rack 1 AEIQRST");
   load_and_exec_config_or_die(config, "gen");
   SimResults *sim_results = config_get_sim_results(config);
-  sim_status_t status = config_simulate(config, NULL, sim_results);
-  assert(status == SIM_STATUS_SUCCESS);
+  error_code_t status =
+      config_simulate_and_return_status(config, NULL, sim_results);
+  assert(status == ERROR_STATUS_SUCCESS);
   assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
          EXIT_STATUS_SAMPLE_LIMIT);
   sim_results_sort_plays_by_win_rate(sim_results);
@@ -133,7 +133,7 @@ void test_more_iterations(void) {
 typedef struct SimTestArgs {
   Config *config;
   SimResults *sim_results;
-  sim_status_t *status;
+  error_code_t *status;
   pthread_mutex_t *mutex;
   pthread_cond_t *cond;
   int *done;
@@ -141,7 +141,8 @@ typedef struct SimTestArgs {
 
 void *sim_thread_func(void *arg) {
   SimTestArgs *args = (SimTestArgs *)arg;
-  *(args->status) = config_simulate(args->config, NULL, args->sim_results);
+  *(args->status) =
+      config_simulate_and_return_status(args->config, NULL, args->sim_results);
 
   pthread_mutex_lock(args->mutex);
   *(args->done) = 1;
@@ -158,7 +159,7 @@ void test_sim_threshold(void) {
   load_and_exec_config_or_die(config, "addmoves 8F.LIN,8D.ZILLION,8F.ZILLION");
 
   SimResults *sim_results = config_get_sim_results(config);
-  sim_status_t status;
+  error_code_t status;
   int done = 0;
 
   pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -193,7 +194,7 @@ void test_sim_threshold(void) {
 
   pthread_join(thread, NULL);
 
-  assert(status == SIM_STATUS_SUCCESS);
+  assert(status == ERROR_STATUS_SUCCESS);
   assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
          EXIT_STATUS_THRESHOLD);
 
@@ -218,7 +219,7 @@ void test_sim_time_limit(void) {
   load_and_exec_config_or_die(config, "gen");
 
   SimResults *sim_results = config_get_sim_results(config);
-  sim_status_t status;
+  error_code_t status;
   int done = 0;
 
   pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -253,7 +254,7 @@ void test_sim_time_limit(void) {
 
   pthread_join(thread, NULL);
 
-  assert(status == SIM_STATUS_SUCCESS);
+  assert(status == ERROR_STATUS_SUCCESS);
   assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
          EXIT_STATUS_TIME_LIMIT);
   config_destroy(config);
@@ -269,7 +270,7 @@ void test_sim_one_arm_remaining(void) {
       config, "addmoves 8D.CRISTAE,8D.ATRESIC,8D.STEARIC,8D.RACIEST");
 
   SimResults *sim_results = config_get_sim_results(config);
-  sim_status_t status;
+  error_code_t status;
   int done = 0;
 
   pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -304,7 +305,7 @@ void test_sim_one_arm_remaining(void) {
 
   pthread_join(thread, NULL);
 
-  assert(status == SIM_STATUS_SUCCESS);
+  assert(status == ERROR_STATUS_SUCCESS);
   assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
          EXIT_STATUS_ONE_ARM_REMAINING);
   config_destroy(config);
@@ -336,8 +337,9 @@ void test_sim_round_robin_consistency(void) {
     }
 
     printf("testing with %d threads\n", i + 1);
-    sim_status_t status = config_simulate(config, NULL, sim_results);
-    assert(status == SIM_STATUS_SUCCESS);
+    error_code_t status =
+        config_simulate_and_return_status(config, NULL, sim_results);
+    assert(status == ERROR_STATUS_SUCCESS);
     assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
            EXIT_STATUS_SAMPLE_LIMIT);
 
@@ -360,15 +362,15 @@ void test_sim_top_two_consistency(void) {
 
   // Get the initial reference results.
   SimResults *expected_sim_results = config_get_sim_results(config);
-  assert(config_simulate(config, NULL, expected_sim_results) ==
-         SIM_STATUS_SUCCESS);
+  assert(config_simulate_and_return_status(
+             config, NULL, expected_sim_results) == ERROR_STATUS_SUCCESS);
   exit_status_t expected_exit_status = bai_result_get_exit_status(
       sim_results_get_bai_result(expected_sim_results));
 
   SimResults *actual_sim_results = sim_results_create();
   for (int i = 0; i < 10; i++) {
-    assert(config_simulate(config, NULL, actual_sim_results) ==
-           SIM_STATUS_SUCCESS);
+    assert(config_simulate_and_return_status(
+               config, NULL, actual_sim_results) == ERROR_STATUS_SUCCESS);
     exit_status_t actual_exit_status = bai_result_get_exit_status(
         sim_results_get_bai_result(actual_sim_results));
     assert(actual_exit_status == expected_exit_status);
@@ -392,8 +394,9 @@ void perf_test_multithread_sim(void) {
   load_and_exec_config_or_die(config, "gen");
 
   SimResults *sim_results = config_get_sim_results(config);
-  sim_status_t status = config_simulate(config, NULL, sim_results);
-  assert(status == SIM_STATUS_SUCCESS);
+  error_code_t status =
+      config_simulate_and_return_status(config, NULL, sim_results);
+  assert(status == ERROR_STATUS_SUCCESS);
   assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
          EXIT_STATUS_SAMPLE_LIMIT);
   printf("iter count: %d\n", sim_results_get_iteration_count(sim_results));
@@ -421,8 +424,9 @@ void test_play_similarity(void) {
   load_and_exec_config_or_die(config, "rack 1 ACEIRST");
   load_and_exec_config_or_die(config, "gen");
   SimResults *sim_results = config_get_sim_results(config);
-  sim_status_t status = config_simulate(config, NULL, sim_results);
-  assert(status == SIM_STATUS_SUCCESS);
+  error_code_t status =
+      config_simulate_and_return_status(config, NULL, sim_results);
+  assert(status == ERROR_STATUS_SUCCESS);
   assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
          EXIT_STATUS_SAMPLE_LIMIT);
 
@@ -471,8 +475,9 @@ void test_similar_play_consistency(const int num_threads) {
   // same number of times by the round robin sampling method, the sim results
   // for these plays should be identical.
   SimResults *sim_results = config_get_sim_results(config);
-  sim_status_t status = config_simulate(config, NULL, sim_results);
-  assert(status == SIM_STATUS_SUCCESS);
+  error_code_t status =
+      config_simulate_and_return_status(config, NULL, sim_results);
+  assert(status == ERROR_STATUS_SUCCESS);
   assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
          EXIT_STATUS_SAMPLE_LIMIT);
   SimmedPlay *p1 = sim_results_get_simmed_play(sim_results, 0);
@@ -616,7 +621,7 @@ void write_stats_to_file(const char *filename, const char *strategies[],
     free(matches_pct_str);
   }
 
-  fclose(output_file);
+  fclose_or_die(output_file);
 }
 
 void append_game_with_moves_to_file(const char *filename, const Game *game,
@@ -629,7 +634,7 @@ void append_game_with_moves_to_file(const char *filename, const Game *game,
   string_builder_add_game(game_string, game, move_list);
   fprintf(output_file, "%s\n", string_builder_peek(game_string));
   string_builder_destroy(game_string);
-  fclose(output_file);
+  fclose_or_die(output_file);
 }
 
 void append_content_to_file(const char *filename, const char *sim_stats_str) {
@@ -638,7 +643,7 @@ void append_content_to_file(const char *filename, const char *sim_stats_str) {
     log_fatal("failed to open output file '%s'\n", filename);
   }
   fprintf(output_file, "%s\n", sim_stats_str);
-  fclose(output_file);
+  fclose_or_die(output_file);
 }
 
 void test_sim_perf(const char *sim_perf_iters) {
@@ -699,8 +704,9 @@ void test_sim_perf(const char *sim_perf_iters) {
       free(set_strategies_cmd);
       thread_control_set_seed(thread_control, i);
       append_content_to_file(sim_perf_game_details_filename, strategies[j]);
-      const sim_status_t status = config_simulate(config, NULL, sim_results);
-      assert(status == SIM_STATUS_SUCCESS);
+      const error_code_t status =
+          config_simulate_and_return_status(config, NULL, sim_results);
+      assert(status == ERROR_STATUS_SUCCESS);
 
       sim_results_sort_plays_by_win_rate(sim_results);
       const SimmedPlay *best_play =

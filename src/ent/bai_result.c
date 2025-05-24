@@ -2,7 +2,7 @@
 
 #include <pthread.h>
 
-#include "../util/util.h"
+#include "../util/io_util.h"
 
 struct BAIResult {
   exit_status_t exit_status;

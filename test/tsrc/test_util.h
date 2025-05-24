@@ -9,6 +9,7 @@
 #include "../../src/ent/board.h"
 #include "../../src/ent/dictionary_word.h"
 #include "../../src/ent/game.h"
+#include "../../src/ent/game_history.h"
 #include "../../src/ent/inference_results.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/move.h"
@@ -67,12 +68,30 @@ void fifo_create(const char *fifo_name);
 void delete_fifo(const char *fifo_name);
 Config *config_create_or_die(const char *cmd);
 Config *config_create_default_test(void);
+WMP *wmp_create_or_die(const char *data_paths, const char *wmp_name);
+KLV *klv_create_or_die(const char *data_paths, const char *klv_name);
+void klv_write_or_die(const KLV *klv, const char *klv_filename);
+KLV *klv_read_from_csv_or_die(const LetterDistribution *ld,
+                              const char *data_paths, const char *leaves_name);
+void klv_write_to_csv_or_die(KLV *klv, const LetterDistribution *ld,
+                             const char *csv_filename);
+char *get_string_from_file_or_die(const char *filename);
 void set_row(Game *game, int row, const char *row_content);
 void assert_board_layout_error(const char *data_paths,
                                const char *board_layout_filename,
-                               board_layout_load_status_t expected_status);
+                               error_code_t expected_status);
 void load_game_with_test_board(Game *game, const char *data_paths,
                                const char *board_layout_name);
+ValidatedMoves *validated_moves_create_and_assert_status(
+    const Game *game, int player_index, const char *ucgi_moves_string,
+    bool allow_phonies, bool allow_unknown_exchanges, bool allow_playthrough,
+    error_code_t expected_status);
+error_code_t config_simulate_and_return_status(const Config *config,
+                                               Rack *known_opp_rack,
+                                               SimResults *sim_results);
+void game_play_to_turn_or_die(GameHistory *game_history, Game *game,
+                              int turn_index);
+void game_play_to_end_or_die(GameHistory *game_history, Game *game);
 void assert_validated_and_generated_moves(Game *game, const char *rack_string,
                                           const char *move_position,
                                           const char *move_tiles,

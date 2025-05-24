@@ -6,6 +6,8 @@
 #include "../ent/conversion_results.h"
 #include "../ent/letter_distribution.h"
 
+#include "../util/io_util.h"
+
 typedef struct ConversionArgs {
   const char *conversion_type_string;
   const char *data_paths;
@@ -14,6 +16,6 @@ typedef struct ConversionArgs {
   const LetterDistribution *ld;
 } ConversionArgs;
 
-conversion_status_t convert(ConversionArgs *args,
-                            ConversionResults *conversion_results);
+void convert(ConversionArgs *args, ConversionResults *conversion_results,
+             ErrorStack *error_stack);
 #endif

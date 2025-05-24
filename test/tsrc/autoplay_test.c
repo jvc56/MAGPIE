@@ -139,8 +139,9 @@ void test_autoplay_divergent_games(void) {
 
   AutoplayResults *ar = autoplay_results_create();
 
-  autoplay_status_t status = autoplay_results_set_options(ar, "games");
-  assert(status == AUTOPLAY_STATUS_SUCCESS);
+  ErrorStack *error_stack = error_stack_create();
+  autoplay_results_set_options(ar, "games", error_stack);
+  assert(error_stack_is_empty(error_stack));
 
   load_and_exec_config_or_die(csw_config, "cgp " VS_ANDY_CGP);
   game = config_get_game(csw_config);
@@ -191,7 +192,7 @@ void test_autoplay_divergent_games(void) {
 
   load_and_exec_config_or_die(csw_config, "set -lex CSW21");
 
-  KLV *small_diff_klv = klv_create(DEFAULT_TEST_DATA_PATH, "CSW21");
+  KLV *small_diff_klv = klv_create_or_die(DEFAULT_TEST_DATA_PATH, "CSW21");
   const int num = klv_get_number_of_leaves(small_diff_klv);
 
   for (int i = 0; i < num; i++) {
@@ -199,9 +200,11 @@ void test_autoplay_divergent_games(void) {
   }
 
   char *small_diff_klv_filename = data_filepaths_get_writable_filename(
-      DEFAULT_TEST_DATA_PATH, "CSW21_small_diff", DATA_FILEPATH_TYPE_KLV);
+      DEFAULT_TEST_DATA_PATH, "CSW21_small_diff", DATA_FILEPATH_TYPE_KLV,
+      error_stack);
+  assert(error_stack_is_empty(error_stack));
 
-  klv_write(small_diff_klv, small_diff_klv_filename);
+  klv_write_or_die(small_diff_klv, small_diff_klv_filename);
   free(small_diff_klv_filename);
   klv_destroy(small_diff_klv);
 
@@ -217,6 +220,7 @@ void test_autoplay_divergent_games(void) {
 
   free(small_diff_str);
 
+  error_stack_destroy(error_stack);
   config_destroy(csw_config);
 }
 

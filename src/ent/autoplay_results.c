@@ -12,9 +12,9 @@
 #include "../str/move_string.h"
 #include "../str/rack_string.h"
 
+#include "../util/io_util.h"
 #include "../util/math_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 #define DEFAULT_WRITE_BUFFER_SIZE 1024
 
@@ -470,12 +470,12 @@ void fj_data_reset_fh(FJSharedData *shared_data, const char *filename) {
     char *filename_num_remaining = insert_before_dot(filename, ext);
     free(ext);
     if (shared_data->fhs[i]) {
-      fclose(shared_data->fhs[i]);
+      fclose_or_die(shared_data->fhs[i]);
       shared_data->fhs[i] = NULL;
     }
-    shared_data->fhs[i] = fopen(filename_num_remaining, "w");
+    shared_data->fhs[i] = fopen_or_die(filename_num_remaining, "w");
     if (!shared_data->fhs[i]) {
-      log_fatal("Error opening fj file for writing: %s\n",
+      log_fatal("error opening fj file for writing: %s",
                 filename_num_remaining);
     }
     free(filename_num_remaining);
@@ -527,7 +527,7 @@ void fj_data_destroy(Recorder *recorder) {
   if (recorder->owns_thread_shared_data) {
     FJSharedData *shared_data = (FJSharedData *)recorder->thread_shared_data;
     for (int i = 0; i < MAX_NUMBER_OF_TILES; i++) {
-      fclose(shared_data->fhs[i]);
+      fclose_or_die(shared_data->fhs[i]);
     }
     free(shared_data);
   }
@@ -569,8 +569,8 @@ void fj_write_buffer_to_output(Recorder *recorder, int remaining_tiles,
     pthread_mutex_lock(&shared_data->fh_mutexes[remaining_tiles]);
     if (fputs(string_builder_peek(sb), shared_data->fhs[remaining_tiles]) ==
         EOF) {
-      fclose(shared_data->fhs[remaining_tiles]);
-      log_fatal("Error writing to fj file of remaining tiles: %d\n",
+      fclose_or_die(shared_data->fhs[remaining_tiles]);
+      log_fatal("error writing to fj file of remaining tiles: %d",
                 remaining_tiles);
     }
     fflush(shared_data->fhs[remaining_tiles]);
@@ -733,16 +733,19 @@ void autoplay_results_set_options_int(AutoplayResults *autoplay_results,
   autoplay_results->options = options;
 }
 
-autoplay_status_t autoplay_results_set_options_with_splitter(
-    AutoplayResults *autoplay_results, const StringSplitter *split_options) {
+void autoplay_results_set_options_with_splitter(
+    AutoplayResults *autoplay_results, const StringSplitter *split_options,
+    ErrorStack *error_stack) {
   int number_of_options = string_splitter_get_number_of_items(split_options);
 
   if (number_of_options == 0) {
-    return AUTOPLAY_STATUS_EMPTY_OPTIONS;
+    error_stack_push(
+        error_stack, ERROR_STATUS_AUTOPLAY_EMPTY_OPTIONS,
+        string_duplicate("expected autoplay options to be nonempty"));
+    return;
   }
 
   uint64_t options = 0;
-  autoplay_status_t status = AUTOPLAY_STATUS_SUCCESS;
   for (int i = 0; i < number_of_options; i++) {
     const char *option_str = string_splitter_get_item(split_options, i);
     if (has_iprefix(option_str, "games")) {
@@ -750,29 +753,31 @@ autoplay_status_t autoplay_results_set_options_with_splitter(
     } else if (has_iprefix(option_str, "fj")) {
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_FJ);
     } else {
-      status = AUTOPLAY_STATUS_INVALID_OPTIONS;
+      error_stack_push(
+          error_stack, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS,
+          get_formatted_string("invalid autoplay option: %s", option_str));
       break;
     }
   }
 
-  if (status == AUTOPLAY_STATUS_SUCCESS) {
+  if (error_stack_is_empty(error_stack)) {
     autoplay_results_set_options_int(autoplay_results, options, NULL);
   }
-
-  return status;
 }
 
-autoplay_status_t
-autoplay_results_set_options(AutoplayResults *autoplay_results,
-                             const char *options_str) {
+void autoplay_results_set_options(AutoplayResults *autoplay_results,
+                                  const char *options_str,
+                                  ErrorStack *error_stack) {
   if (is_string_empty_or_null(options_str)) {
-    return AUTOPLAY_STATUS_EMPTY_OPTIONS;
+    error_stack_push(
+        error_stack, ERROR_STATUS_AUTOPLAY_EMPTY_OPTIONS,
+        string_duplicate("expected autoplay options to be nonempty"));
+    return;
   }
   StringSplitter *split_options = split_string(options_str, ',', true);
-  autoplay_status_t status = autoplay_results_set_options_with_splitter(
-      autoplay_results, split_options);
+  autoplay_results_set_options_with_splitter(autoplay_results, split_options,
+                                             error_stack);
   string_splitter_destroy(split_options);
-  return status;
 }
 
 void autoplay_results_reset_options(AutoplayResults *autoplay_results) {

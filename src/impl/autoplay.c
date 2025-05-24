@@ -23,8 +23,8 @@
 #include "move_gen.h"
 #include "rack_list.h"
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 typedef struct LeavegenSharedData {
   int num_gens;
@@ -57,14 +57,34 @@ void postgen_prebroadcast_func(void *data) {
   char *label = get_formatted_string("_gen_%d", lg_shared_data->gens_completed);
   char *gen_labeled_klv_name =
       insert_before_dot(lg_shared_data->klv->name, label);
+
+  ErrorStack *error_stack = error_stack_create();
+
   char *gen_labeled_klv_filename = data_filepaths_get_writable_filename(
-      lg_shared_data->data_paths, gen_labeled_klv_name, DATA_FILEPATH_TYPE_KLV);
+      lg_shared_data->data_paths, gen_labeled_klv_name, DATA_FILEPATH_TYPE_KLV,
+      error_stack);
   char *leaves_filename = data_filepaths_get_writable_filename(
       lg_shared_data->data_paths, gen_labeled_klv_name,
-      DATA_FILEPATH_TYPE_LEAVES);
+      DATA_FILEPATH_TYPE_LEAVES, error_stack);
 
-  klv_write(lg_shared_data->klv, gen_labeled_klv_filename);
-  klv_write_to_csv(lg_shared_data->klv, lg_shared_data->ld, leaves_filename);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("leavegen failed to write results to file");
+  }
+
+  klv_write(lg_shared_data->klv, gen_labeled_klv_filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("leavegen failed to write klv to file: %s",
+              gen_labeled_klv_filename);
+  }
+
+  klv_write_to_csv(lg_shared_data->klv, lg_shared_data->ld, leaves_filename,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("leavegen failed to write klv to CSV");
+  }
 
   const int number_of_threads =
       thread_control_get_threads(shared_data->thread_control);
@@ -122,8 +142,15 @@ void postgen_prebroadcast_func(void *data) {
       cut_off_after_last_char(gen_labeled_klv_filename, '.');
   char *report_name = get_formatted_string("%s_report.txt", report_name_prefix);
 
-  write_string_to_file(report_name, "w", string_builder_peek(leave_gen_sb));
+  write_string_to_file(report_name, "w", string_builder_peek(leave_gen_sb),
+                       error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("leavegen failed to write result summary to file");
+  }
+
   string_builder_destroy(leave_gen_sb);
+  error_stack_destroy(error_stack);
 
   free(report_name);
   free(report_name_prefix);
@@ -295,7 +322,7 @@ bool game_runner_is_game_over(GameRunner *game_runner) {
 void game_runner_play_move(AutoplayWorker *autoplay_worker,
                            GameRunner *game_runner, Move **move) {
   if (game_runner_is_game_over(game_runner)) {
-    log_fatal("game runner attempted to play a move when the game is over\n");
+    log_fatal("game runner attempted to play a move when the game is over");
   }
   Game *game = game_runner->game;
   const int player_on_turn_index = game_get_player_on_turn_index(game);
@@ -492,25 +519,33 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
   return NULL;
 }
 
-bool parse_min_rack_targets(StringSplitter *split_min_rack_targets,
-                            int *min_rack_targets) {
+void parse_min_rack_targets(const AutoplayArgs *args,
+                            StringSplitter *split_min_rack_targets,
+                            int *min_rack_targets, ErrorStack *error_stack) {
   int num_gens = string_splitter_get_number_of_items(split_min_rack_targets);
   for (int i = 0; i < num_gens; i++) {
     const char *item = string_splitter_get_item(split_min_rack_targets, i);
     if (is_string_empty_or_whitespace(item)) {
-      return false;
+      error_stack_push(
+          error_stack, ERROR_STATUS_AUTOPLAY_MALFORMED_MINIMUM_LEAVE_TARGETS,
+          get_formatted_string("found an empty value for one or more of the "
+                               "minimum rack targets: %s",
+                               args->num_games_or_min_rack_targets));
+      return;
     }
-    bool success;
-    min_rack_targets[i] = string_to_int_or_set_error(item, &success);
-    if (!success || min_rack_targets[i] < 0) {
-      return false;
+    min_rack_targets[i] = string_to_int(item, error_stack);
+    if (!error_stack_is_empty(error_stack) || min_rack_targets[i] < 0) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_AUTOPLAY_MALFORMED_MINIMUM_LEAVE_TARGETS,
+          get_formatted_string("failed to parse minimum rack targets: %s",
+                               args->num_games_or_min_rack_targets));
+      return;
     }
   }
-  return true;
 }
 
-autoplay_status_t autoplay(const AutoplayArgs *args,
-                           AutoplayResults *autoplay_results) {
+void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
+              ErrorStack *error_stack) {
   const bool is_leavegen_mode = args->type == AUTOPLAY_TYPE_LEAVE_GEN;
   uint64_t num_gens = 1;
   int *min_rack_targets = NULL;
@@ -520,20 +555,27 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
         split_string(args->num_games_or_min_rack_targets, ',', false);
     num_gens = string_splitter_get_number_of_items(split_min_rack_targets);
     min_rack_targets = malloc_or_die((sizeof(int)) * (num_gens));
-    bool success =
-        parse_min_rack_targets(split_min_rack_targets, min_rack_targets);
+    parse_min_rack_targets(args, split_min_rack_targets, min_rack_targets,
+                           error_stack);
     string_splitter_destroy(split_min_rack_targets);
-    if (!success) {
+    if (!error_stack_is_empty(error_stack)) {
       free(min_rack_targets);
-      return AUTOPLAY_STATUS_MALFORMED_MINIMUM_LEAVE_TARGETS;
+      error_stack_push(
+          error_stack, ERROR_STATUS_AUTOPLAY_MALFORMED_MINIMUM_LEAVE_TARGETS,
+          get_formatted_string("failed to parse minimum rack targets: %s",
+                               args->num_games_or_min_rack_targets));
+      return;
     }
     first_gen_num_games = UINT64_MAX;
   } else {
-    bool success;
-    first_gen_num_games = string_to_uint64_or_set_error(
-        args->num_games_or_min_rack_targets, &success);
-    if (!success) {
-      return AUTOPLAY_STATUS_MALFORMED_NUM_GAMES;
+    first_gen_num_games =
+        string_to_uint64(args->num_games_or_min_rack_targets, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(error_stack, ERROR_STATUS_AUTOPLAY_MALFORMED_NUM_GAMES,
+                       get_formatted_string(
+                           "failed to parse the specified number of games: %s",
+                           args->num_games_or_min_rack_targets));
+      return;
     }
   }
 
@@ -602,13 +644,11 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
   free(min_rack_targets);
 
   players_data_reload(args->game_args->players_data, PLAYERS_DATA_TYPE_KLV,
-                      args->data_paths);
+                      args->data_paths, error_stack);
 
   char *autoplay_results_string = autoplay_results_to_string(
       autoplay_results, args->human_readable, show_divergent_results);
   thread_control_print(thread_control, autoplay_results_string);
   free(autoplay_results_string);
   gen_destroy_cache();
-
-  return AUTOPLAY_STATUS_SUCCESS;
 }

@@ -1,6 +1,7 @@
 #ifndef DATA_FILEPATHS_H
 #define DATA_FILEPATHS_H
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
 
 typedef enum {
@@ -17,16 +18,20 @@ typedef enum {
 
 char *data_filepaths_get_readable_filename(const char *data_paths,
                                            const char *data_name,
-                                           data_filepath_t type);
+                                           data_filepath_t type,
+                                           ErrorStack *error_stack);
 char *data_filepaths_get_writable_filename(const char *data_path,
                                            const char *data_name,
-                                           data_filepath_t type);
+                                           data_filepath_t type,
+                                           ErrorStack *error_stack);
 
 char *data_filepaths_get_data_path_name(const char *data_paths,
                                         const char *data_name,
-                                        data_filepath_t type);
+                                        data_filepath_t type,
+                                        ErrorStack *error_stack);
 
 StringList *data_filepaths_get_all_data_path_names(const char *data_paths,
-                                                   data_filepath_t type);
+                                                   data_filepath_t type,
+                                                   ErrorStack *error_stack);
 
 #endif

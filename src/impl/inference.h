@@ -8,6 +8,8 @@
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
 
+#include "../util/io_util.h"
+
 typedef struct InferenceArgs {
   int target_index;
   int target_score;
@@ -19,6 +21,7 @@ typedef struct InferenceArgs {
   ThreadControl *thread_control;
 } InferenceArgs;
 
-inference_status_t infer(InferenceArgs *args, InferenceResults *results);
+void infer(InferenceArgs *args, InferenceResults *results,
+           ErrorStack *error_stack);
 
 #endif

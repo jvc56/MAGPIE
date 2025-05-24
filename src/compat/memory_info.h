@@ -1,6 +1,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "../util/io_util.h"
+
 // Platform-specific includes
 #if defined(_WIN32) || defined(_WIN64)
 #include <windows.h>
@@ -22,7 +24,7 @@ static uint64_t get_total_memory(void) {
   if (GlobalMemoryStatusEx(&statex)) {
     total_memory = statex.ullTotalPhys;
   } else {
-    fprintf(stderr, "Error retrieving memory info on Windows.\n");
+    log_fatal("error retrieving memory info on Windows");
   }
 
 #elif defined(__APPLE__) || defined(__MACH__)
@@ -53,7 +55,7 @@ static uint64_t get_total_memory(void) {
   }
   fclose(file);
 #else
-  fprintf(stderr, "Unsupported platform.\n");
+  log_fatal("unsupported platform");
 #endif
 
   return total_memory;

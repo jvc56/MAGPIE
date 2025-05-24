@@ -9,12 +9,12 @@
 
 #include "letter_distribution.h"
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 typedef struct Rack {
   // counts must be signed for the sake of inference code checking that
-  // these are nonnegative (INFERENCE_STATUS_TILES_PLAYED_NOT_IN_BAG)
+  // these are nonnegative (ERROR_STATUS_INFERENCE_TILES_PLAYED_NOT_IN_BAG)
   uint16_t number_of_letters;
   uint16_t dist_size;
   int8_t array[MAX_ALPHABET_SIZE];
@@ -35,7 +35,7 @@ static inline Rack *rack_create(int dist_size) {
 }
 
 static inline void rack_copy(Rack *dst, const Rack *src) {
-  memory_copy(dst, src, sizeof(Rack));
+  memcpy(dst, src, sizeof(Rack));
 }
 
 static inline void rack_set_dist_size(Rack *rack, int dist_size) {

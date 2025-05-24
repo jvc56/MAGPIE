@@ -7,20 +7,13 @@
 
 #include "../def/autoplay_defs.h"
 #include "../def/config_defs.h"
-#include "../def/error_status_defs.h"
 #include "../def/exec_defs.h"
-#include "../def/file_handler_defs.h"
 #include "../def/game_defs.h"
-#include "../def/gen_defs.h"
 #include "../def/inference_defs.h"
-#include "../def/leave_gen_defs.h"
-#include "../def/math_util_defs.h"
-#include "../def/simmer_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../def/validated_move_defs.h"
 
 #include "../ent/autoplay_results.h"
-#include "../ent/error_status.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/players_data.h"
@@ -39,6 +32,9 @@
 #include "../str/game_string.h"
 #include "../str/move_string.h"
 #include "../str/sim_string.h"
+
+#include "../util/io_util.h"
+#include "../util/string_util.h"
 
 typedef enum {
   ARG_TOKEN_SET,
@@ -87,8 +83,6 @@ typedef enum {
   ARG_TOKEN_NUMBER_OF_THREADS,
   ARG_TOKEN_PRINT_INFO_INTERVAL,
   ARG_TOKEN_RECORD_FILEPATH,
-  ARG_TOKEN_INFILE,
-  ARG_TOKEN_OUTFILE,
   ARG_TOKEN_EXEC_MODE,
   ARG_TOKEN_TT_FRACTION_OF_MEM,
   ARG_TOKEN_TIME_LIMIT,
@@ -100,7 +94,7 @@ typedef enum {
   NUMBER_OF_ARG_TOKENS
 } arg_token_t;
 
-typedef void (*command_exec_func_t)(Config *);
+typedef void (*command_exec_func_t)(Config *, ErrorStack *);
 typedef char *(*command_status_func_t)(Config *);
 
 typedef struct ParsedArg {
@@ -147,7 +141,6 @@ struct Config {
   InferenceResults *inference_results;
   AutoplayResults *autoplay_results;
   ConversionResults *conversion_results;
-  ErrorStatus *error_status;
 };
 
 void parsed_arg_create(Config *config, arg_token_t arg_token, const char *name,
@@ -202,12 +195,16 @@ command_status_func_t config_get_parg_status_func(const Config *config,
   return config_get_parg(config, arg_token)->status_func;
 }
 
+const char *config_get_parg_name(const Config *config, arg_token_t arg_token) {
+  return config_get_parg(config, arg_token)->name;
+}
+
 // Returns NULL if the value was not set in the most recent config load call.
 const char *config_get_parg_value(const Config *config, arg_token_t arg_token,
                                   int value_index) {
   ParsedArg *parg = config_get_parg(config, arg_token);
   if (value_index >= parg->num_values) {
-    log_fatal("value index exceeds number of values for %d: %d >= %d\n",
+    log_fatal("value index exceeds number of values for %d: %d >= %d",
               arg_token, value_index, parg->num_values);
   }
   const char *ret_val = NULL;
@@ -298,10 +295,6 @@ ThreadControl *config_get_thread_control(const Config *config) {
   return config->thread_control;
 }
 
-ErrorStatus *config_get_error_status(const Config *config) {
-  return config->error_status;
-}
-
 Game *config_get_game(const Config *config) { return config->game; }
 
 MoveList *config_get_move_list(const Config *config) {
@@ -323,7 +316,6 @@ bool config_exec_parg_is_set(const Config *config) {
 bool config_continue_on_coldstart(const Config *config) {
   return !config_exec_parg_is_set(config) ||
          config->exec_parg_token == ARG_TOKEN_CGP ||
-         config_get_parg_num_set_values(config, ARG_TOKEN_INFILE) > 0 ||
          config_get_parg_num_set_values(config, ARG_TOKEN_EXEC_MODE) > 0;
 }
 
@@ -406,40 +398,33 @@ void config_recreate_move_list(Config *config, int capacity,
   }
 }
 
-bool game_exists(const Game *game, ErrorStatus *error_status,
-                 error_status_t error_status_type, int status) {
-  bool exists = true;
-  if (!game) {
-    set_or_clear_error_status(error_status, error_status_type, status);
-    exists = false;
+void string_to_int_or_push_error(const char *int_str_name, const char *int_str,
+                                 int min, int max, error_code_t error_code,
+                                 int *dest, ErrorStack *error_stack) {
+  *dest = string_to_int(int_str, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_push(error_stack, error_code,
+                     get_formatted_string("failed to parse value for %s: %s",
+                                          int_str_name, int_str));
   }
-  return exists;
+  if (*dest < min || *dest > max) {
+    error_stack_push(
+        error_stack, error_code,
+        get_formatted_string(
+            "value for %s must be between %d and %d inclusive, but got %s",
+            int_str_name, min, max, int_str));
+  }
 }
 
-bool string_to_int_or_set_error_status(const char *int_str, int min, int max,
-                                       ErrorStatus *error_status,
-                                       error_status_t error_status_type,
-                                       int status, int *dest) {
-  bool success = true;
-  *dest = string_to_int_or_set_error(int_str, &success);
-  if (!success || *dest < min || *dest > max) {
-    set_or_clear_error_status(error_status, error_status_type, status);
-    success = false;
-  }
-  return success;
-}
-
-bool load_rack_or_set_error_status(const char *rack_str,
-                                   const LetterDistribution *ld,
-                                   ErrorStatus *error_status,
-                                   error_status_t error_status_type, int status,
-                                   Rack *rack) {
-  bool success = true;
+void load_rack_or_push_to_error_stack(const char *rack_str,
+                                      const LetterDistribution *ld,
+                                      error_code_t error_code, Rack *rack,
+                                      ErrorStack *error_stack) {
   if (rack_set_to_string(ld, rack, rack_str) < 0) {
-    set_or_clear_error_status(error_status, error_status_type, status);
-    success = false;
+    error_stack_push(
+        error_stack, error_code,
+        get_formatted_string("failed to parse rack: %s", rack_str));
   }
-  return success;
 }
 
 // Returns true if the config has all of the required
@@ -457,82 +442,112 @@ bool config_has_game_data(const Config *config) {
 
 // Config loading for primitive types
 
-config_load_status_t config_load_int(Config *config, arg_token_t arg_token,
-                                     int min, int max, int *value) {
+void config_load_int(Config *config, arg_token_t arg_token, int min, int max,
+                     int *value, ErrorStack *error_stack) {
   const char *int_str = config_get_parg_value(config, arg_token, 0);
-  if (int_str) {
-    bool success = false;
-    int new_value = string_to_int_or_set_error(int_str, &success);
-    if (!success) {
-      return CONFIG_LOAD_STATUS_MALFORMED_INT_ARG;
-    }
-    if (new_value < min || new_value > max) {
-      return CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS;
-    }
-    *value = new_value;
+  if (!int_str) {
+    return;
   }
-  return CONFIG_LOAD_STATUS_SUCCESS;
+  int new_value = string_to_int(int_str, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+        get_formatted_string("failed to parse integer value for %s: %s",
+                             config_get_parg_name(config, arg_token), int_str));
+    return;
+  }
+  if (new_value < min || new_value > max) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+        get_formatted_string("int value for %s must be between %d and %d "
+                             "inclusive, but got %s",
+                             config_get_parg_name(config, arg_token), min, max,
+                             int_str));
+    return;
+  }
+  *value = new_value;
 }
 
-config_load_status_t config_load_double(Config *config, arg_token_t arg_token,
-                                        double min, double max, double *value) {
+void config_load_double(Config *config, arg_token_t arg_token, double min,
+                        double max, double *value, ErrorStack *error_stack) {
   const char *double_str = config_get_parg_value(config, arg_token, 0);
-  if (double_str) {
-    bool success = false;
-    double new_value = string_to_double_or_set_error(double_str, &success);
-    if (!success) {
-      return CONFIG_LOAD_STATUS_MALFORMED_DOUBLE_ARG;
-    }
-    if (new_value < min || new_value > max) {
-      return CONFIG_LOAD_STATUS_DOUBLE_ARG_OUT_OF_BOUNDS;
-    }
-    *value = new_value;
+  if (!double_str) {
+    return;
   }
-  return CONFIG_LOAD_STATUS_SUCCESS;
+  double new_value = string_to_double(double_str, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
+                     get_formatted_string(
+                         "failed to parse decimal value for %s: %s",
+                         config_get_parg_name(config, arg_token), double_str));
+    return;
+  }
+  if (new_value < min || new_value > max) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS,
+        get_formatted_string(
+            "double value for %s must be between %f and %f inclusive, but "
+            "got %s",
+            config_get_parg_name(config, arg_token), min, max, double_str));
+    return;
+  }
+  *value = new_value;
 }
 
-config_load_status_t config_load_bool(Config *config, arg_token_t arg_token,
-                                      bool *value) {
+void config_load_bool(Config *config, arg_token_t arg_token, bool *value,
+                      ErrorStack *error_stack) {
   const char *bool_str = config_get_parg_value(config, arg_token, 0);
-  if (bool_str) {
-    if (has_iprefix(bool_str, "true")) {
-      *value = true;
-    } else if (has_iprefix(bool_str, "false")) {
-      *value = false;
-    } else {
-      return CONFIG_LOAD_STATUS_MALFORMED_BOOL_ARG;
-    }
+  if (!bool_str) {
+    return;
   }
-  return CONFIG_LOAD_STATUS_SUCCESS;
+  if (has_iprefix(bool_str, "true")) {
+    *value = true;
+  } else if (has_iprefix(bool_str, "false")) {
+    *value = false;
+  } else {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG,
+                     get_formatted_string(
+                         "failed to parse bool value for %s: %s",
+                         config_get_parg_name(config, arg_token), bool_str));
+  }
 }
 
-config_load_status_t config_load_uint64(Config *config, arg_token_t arg_token,
-                                        uint64_t *value) {
+void config_load_uint64(Config *config, arg_token_t arg_token, uint64_t *value,
+                        ErrorStack *error_stack) {
   const char *int_str = config_get_parg_value(config, arg_token, 0);
-  if (int_str) {
-    if (!is_all_digits_or_empty(int_str)) {
-      return CONFIG_LOAD_STATUS_MALFORMED_INT_ARG;
-    }
-    bool success = false;
-    uint64_t new_value = string_to_uint64_or_set_error(int_str, &success);
-    if (!success) {
-      return CONFIG_LOAD_STATUS_MALFORMED_INT_ARG;
-    }
-    *value = new_value;
+  if (!int_str) {
+    return;
   }
-  return CONFIG_LOAD_STATUS_SUCCESS;
+  uint64_t new_value;
+  bool success = true;
+  if (!is_all_digits_or_empty(int_str)) {
+    success = false;
+  } else {
+    new_value = string_to_uint64(int_str, error_stack);
+  }
+  if (!success || !error_stack_is_empty(error_stack)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+                     get_formatted_string(
+                         "failed to parse nonnegative integer value for %s: %s",
+                         config_get_parg_name(config, arg_token), int_str));
+  }
+  *value = new_value;
 }
 
 // Generic execution and status functions
 
 // Used for pargs that are not commands.
-void execute_fatal(Config *config) {
+void execute_fatal(Config *config,
+                   ErrorStack __attribute__((unused)) * error_stack) {
   log_fatal("attempted to execute nonexecutable argument (arg token %d)",
             config->exec_parg_token);
 }
 
 // Used for commands that only update the config state
-void execute_noop(Config __attribute__((unused)) * config) { return; }
+void execute_noop(Config __attribute__((unused)) * config,
+                  ErrorStack __attribute__((unused)) * error_stack) {
+  return;
+}
 
 // Used for pargs that are not commands.
 char *status_fatal(Config *config) {
@@ -543,11 +558,12 @@ char *status_fatal(Config *config) {
 
 // Load CGP
 
-void execute_cgp_load(Config *config) {
+void execute_cgp_load(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    set_or_clear_error_status(config->error_status,
-                              ERROR_STATUS_TYPE_CONFIG_LOAD,
-                              CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate(
+            "cannot load cgp without letter distribution and lexicon"));
     return;
   }
 
@@ -559,7 +575,7 @@ void execute_cgp_load(Config *config) {
     const char *cgp_component = config_get_parg_value(config, ARG_TOKEN_CGP, i);
     if (!cgp_component) {
       // This should have been caught earlier by the insufficient values error
-      log_fatal("missing cgp component %d\n", i);
+      log_fatal("missing cgp component: %d", i);
     }
     string_builder_add_string(cgp_builder, cgp_component);
     string_builder_add_char(cgp_builder, ' ');
@@ -569,19 +585,16 @@ void execute_cgp_load(Config *config) {
   // First duplicate the game so that potential
   // cgp parse failures don't corrupt it.
   Game *game_dupe = game_duplicate(config->game);
-  cgp_parse_status_t dupe_cgp_parse_status = game_load_cgp(game_dupe, cgp);
-  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_CGP_LOAD,
-                            (int)dupe_cgp_parse_status);
+  game_load_cgp(game_dupe, cgp, error_stack);
   game_destroy(game_dupe);
-  if (dupe_cgp_parse_status == CGP_PARSE_STATUS_SUCCESS) {
+  if (error_stack_is_empty(error_stack)) {
     // Now that the duplicate game has been successfully loaded
     // with the cgp, load the actual game. A cgp parse failure
-    // here should be impossible (since the duplicated game
-    // was parsed without error) and is treated as a
-    // catastrophic error.
-    cgp_parse_status_t cgp_parse_status = game_load_cgp(config->game, cgp);
-    if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
-      log_fatal("unexpected cgp load failure for: %s", cgp);
+    // here should be impossible.
+    game_load_cgp(config->game, cgp, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_print_and_reset(error_stack);
+      log_fatal("cgp load unexpected failed");
     }
     config_reset_move_list(config);
   }
@@ -594,11 +607,12 @@ char *status_cgp_load(Config __attribute__((unused)) * config) {
 
 // Adding moves
 
-void execute_add_moves(Config *config) {
+void execute_add_moves(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    set_or_clear_error_status(config->error_status,
-                              ERROR_STATUS_TYPE_CONFIG_LOAD,
-                              CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate(
+            "cannot add moves without letter distribution and lexicon"));
     return;
   }
 
@@ -608,13 +622,12 @@ void execute_add_moves(Config *config) {
 
   int player_on_turn_index = game_get_player_on_turn_index(config->game);
 
-  ValidatedMoves *new_validated_moves = validated_moves_create(
-      config->game, player_on_turn_index, moves, true, false, false);
+  ValidatedMoves *new_validated_moves =
+      validated_moves_create(config->game, player_on_turn_index, moves, true,
+                             false, false, error_stack);
 
-  move_validation_status_t move_validation_status =
-      validated_moves_get_validation_status(new_validated_moves);
-
-  if (move_validation_status == MOVE_VALIDATION_STATUS_SUCCESS) {
+  // FIXME: maybe move this into validated_moves_create somewhere
+  if (error_stack_is_empty(error_stack)) {
     const LetterDistribution *ld = game_get_ld(config->game);
     const Board *board = game_get_board(config->game);
     StringBuilder *phonies_sb = string_builder_create();
@@ -625,13 +638,13 @@ void execute_add_moves(Config *config) {
           game_get_ld(config->game), new_validated_moves, i);
       if (phonies_formed) {
         string_builder_clear(phonies_sb);
-        string_builder_add_string(phonies_sb, "Phonies formed from ");
+        string_builder_add_string(phonies_sb, "invalid words formed from ");
         string_builder_add_move(
             phonies_sb, board, validated_moves_get_move(new_validated_moves, i),
             ld);
         string_builder_add_string(phonies_sb, ": ");
         string_builder_add_string(phonies_sb, phonies_formed);
-        log_warn(string_builder_peek(phonies_sb));
+        write_to_stream_out(string_builder_peek(phonies_sb));
       }
       free(phonies_formed);
     }
@@ -641,10 +654,6 @@ void execute_add_moves(Config *config) {
   }
 
   validated_moves_destroy(new_validated_moves);
-
-  set_or_clear_error_status(config->error_status,
-                            ERROR_STATUS_TYPE_MOVE_VALIDATION,
-                            (int)move_validation_status);
 }
 
 char *status_add_moves(Config __attribute__((unused)) * config) {
@@ -653,23 +662,20 @@ char *status_add_moves(Config __attribute__((unused)) * config) {
 
 // Setting player rack
 
-void execute_set_rack(Config *config) {
+void execute_set_rack(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    set_or_clear_error_status(config->error_status,
-                              ERROR_STATUS_TYPE_CONFIG_LOAD,
-                              CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate(
+            "cannot set player rack without letter distribution and lexicon"));
     return;
   }
 
   config_init_game(config);
 
   int player_index;
-  config_load_status_t config_load_status =
-      config_load_int(config, ARG_TOKEN_RACK, 1, 2, &player_index);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    set_or_clear_error_status(config->error_status,
-                              ERROR_STATUS_TYPE_CONFIG_LOAD,
-                              (int)config_load_status);
+  config_load_int(config, ARG_TOKEN_RACK, 1, 2, &player_index, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
     return;
   }
   // Convert from 1-indexed user input to 0-indexed internal use
@@ -680,21 +686,21 @@ void execute_set_rack(Config *config) {
   Rack *new_rack = rack_duplicate(player_rack);
   rack_reset(new_rack);
 
-  load_rack_or_set_error_status(
-      config_get_parg_value(config, ARG_TOKEN_RACK, 1), config->ld,
-      config->error_status, ERROR_STATUS_TYPE_CONFIG_LOAD,
-      CONFIG_LOAD_STATUS_MALFORMED_RACK_ARG, new_rack);
+  const char *rack_str = config_get_parg_value(config, ARG_TOKEN_RACK, 1);
+  load_rack_or_push_to_error_stack(rack_str, config->ld,
+                                   ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
+                                   new_rack, error_stack);
 
-  if (error_status_get_success(config->error_status)) {
+  if (error_stack_is_empty(error_stack)) {
     if (rack_is_drawable(config->game, player_index, new_rack)) {
       return_rack_to_bag(config->game, player_index);
       if (!draw_rack_from_bag(config->game, player_index, new_rack)) {
         log_fatal("failed to draw rack from bag in set rack command");
       }
     } else {
-      set_or_clear_error_status(config->error_status,
-                                ERROR_STATUS_TYPE_CONFIG_LOAD,
-                                CONFIG_LOAD_STATUS_RACK_NOT_IN_BAG);
+      error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG,
+                       get_formatted_string(
+                           "rack %s is not available in the bag", rack_str));
     }
   }
 
@@ -707,11 +713,12 @@ char *status_set_rack(Config __attribute__((unused)) * config) {
 
 // Move generation
 
-void execute_move_gen(Config *config) {
+void execute_move_gen(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    set_or_clear_error_status(config->error_status,
-                              ERROR_STATUS_TYPE_CONFIG_LOAD,
-                              CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate(
+            "cannot generate moves without letter distribution and lexicon"));
     return;
   }
 
@@ -726,7 +733,6 @@ void execute_move_gen(Config *config) {
   MoveList *ml = config->move_list;
   generate_moves_for_game(config->game, 0, ml);
   print_ucgi_static_moves(config->game, ml, config->thread_control);
-  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_NONE, 0);
 }
 
 char *status_move_gen(Config __attribute__((unused)) * config) {
@@ -746,7 +752,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->move_list = config_get_move_list(config);
   sim_args->bai_options.sample_limit = config_get_max_iterations(config);
   const double percentile = config_get_stop_cond_pct(config);
-  if (percentile > PERCENTILE_MAX || config->threshold == BAI_THRESHOLD_NONE) {
+  if (percentile > 100 || config->threshold == BAI_THRESHOLD_NONE) {
     sim_args->bai_options.threshold = BAI_THRESHOLD_NONE;
   } else {
     sim_args->bai_options.delta =
@@ -759,24 +765,23 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->bai_options.epigon_cutoff = config->epigon_cutoff;
 }
 
-sim_status_t config_simulate(const Config *config, Rack *known_opp_rack,
-                             SimResults *sim_results) {
+void config_simulate(const Config *config, Rack *known_opp_rack,
+                     SimResults *sim_results, ErrorStack *error_stack) {
   SimArgs args;
   config_fill_sim_args(config, known_opp_rack, &args);
-  return simulate(&args, sim_results);
+  return simulate(&args, sim_results, error_stack);
 }
 
-void execute_sim(Config *config) {
+void execute_sim(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    set_or_clear_error_status(config->error_status,
-                              ERROR_STATUS_TYPE_CONFIG_LOAD,
-                              CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate(
+            "cannot simulate without letter distribution and lexicon"));
     return;
   }
 
   config_init_game(config);
-
-  ErrorStatus *error_status = config->error_status;
 
   const char *known_opp_rack_str =
       config_get_parg_value(config, ARG_TOKEN_SIM, 0);
@@ -784,27 +789,24 @@ void execute_sim(Config *config) {
 
   if (known_opp_rack_str) {
     known_opp_rack = rack_create(ld_get_size(game_get_ld(config->game)));
-    if (!load_rack_or_set_error_status(
-            known_opp_rack_str, game_get_ld(config->game), error_status,
-            ERROR_STATUS_TYPE_CONFIG_LOAD,
-            CONFIG_LOAD_STATUS_MALFORMED_RACK_ARG, known_opp_rack)) {
+    load_rack_or_push_to_error_stack(
+        known_opp_rack_str, game_get_ld(config->game),
+        ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, known_opp_rack,
+        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
       rack_destroy(known_opp_rack);
       return;
     }
   }
 
-  sim_status_t status =
-      config_simulate(config, known_opp_rack, config->sim_results);
-  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_SIM,
-                            (int)status);
+  config_simulate(config, known_opp_rack, config->sim_results, error_stack);
   rack_destroy(known_opp_rack);
 }
 
 char *status_sim(Config *config) {
   SimResults *sim_results = config->sim_results;
   if (!sim_results) {
-    log_warn("Simmer has not been initialized.");
-    return NULL;
+    return string_duplicate("simmer has not been initialized");
   }
   return ucgi_sim_stats(
       config->game, sim_results,
@@ -828,25 +830,24 @@ void config_fill_infer_args(const Config *config, int target_index,
   args->thread_control = config->thread_control;
 }
 
-inference_status_t config_infer(const Config *config, int target_index,
-                                int target_score, int target_num_exch,
-                                Rack *target_played_tiles,
-                                InferenceResults *results) {
+void config_infer(const Config *config, int target_index, int target_score,
+                  int target_num_exch, Rack *target_played_tiles,
+                  InferenceResults *results, ErrorStack *error_stack) {
   InferenceArgs args;
   config_fill_infer_args(config, target_index, target_score, target_num_exch,
                          target_played_tiles, &args);
-  return infer(&args, results);
+  return infer(&args, results, error_stack);
 }
 
-void execute_infer_with_rack(Config *config, Rack *target_played_tiles) {
-  ErrorStatus *error_status = config->error_status;
-
+void execute_infer_with_rack(Config *config, Rack *target_played_tiles,
+                             ErrorStack *error_stack) {
   const char *target_index_str =
       config_get_parg_value(config, ARG_TOKEN_INFER, 0);
   int target_index;
-  if (!string_to_int_or_set_error_status(
-          target_index_str, 1, 2, error_status, ERROR_STATUS_TYPE_CONFIG_LOAD,
-          CONFIG_LOAD_STATUS_MALFORMED_INT_ARG, &target_index)) {
+  string_to_int_or_push_error("inferred player", target_index_str, 1, 2,
+                              ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+                              &target_index, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
     return;
   }
   // Convert from 1-indexed to 0-indexed
@@ -859,18 +860,20 @@ void execute_infer_with_rack(Config *config, Rack *target_played_tiles) {
   bool is_tile_placement_move = false;
 
   if (is_all_digits_or_empty(target_played_tiles_or_num_exch_str)) {
-    if (!string_to_int_or_set_error_status(
-            target_played_tiles_or_num_exch_str, 0, RACK_SIZE, error_status,
-            ERROR_STATUS_TYPE_CONFIG_LOAD, CONFIG_LOAD_STATUS_MALFORMED_INT_ARG,
-            &target_num_exch)) {
+    string_to_int_or_push_error(
+        "inferred player number exchanged", target_played_tiles_or_num_exch_str,
+        0, RACK_SIZE, ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+        &target_num_exch, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
       return;
     }
   } else {
     const LetterDistribution *ld = game_get_ld(config->game);
-    if (!load_rack_or_set_error_status(
-            target_played_tiles_or_num_exch_str, ld, error_status,
-            ERROR_STATUS_TYPE_CONFIG_LOAD,
-            CONFIG_LOAD_STATUS_MALFORMED_RACK_ARG, target_played_tiles)) {
+    load_rack_or_push_to_error_stack(
+        target_played_tiles_or_num_exch_str, ld,
+        ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, target_played_tiles,
+        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
       return;
     }
     is_tile_placement_move = true;
@@ -881,42 +884,36 @@ void execute_infer_with_rack(Config *config, Rack *target_played_tiles) {
   if (is_tile_placement_move) {
     const char *target_score_str =
         config_get_parg_value(config, ARG_TOKEN_INFER, 2);
-
     if (!target_score_str) {
-      set_or_clear_error_status(config->error_status,
-                                ERROR_STATUS_TYPE_CONFIG_LOAD,
-                                CONFIG_LOAD_STATUS_MISSING_ARG);
+      error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
+                       string_duplicate("missing inferred player score"));
       return;
     }
-
-    if (!string_to_int_or_set_error_status(
-            target_score_str, 0, INT_MAX, error_status,
-            ERROR_STATUS_TYPE_CONFIG_LOAD, CONFIG_LOAD_STATUS_MALFORMED_INT_ARG,
-            &target_score)) {
+    string_to_int_or_push_error(
+        "inferred player score", target_score_str, 0, INT_MAX,
+        ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG, &target_score, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
       return;
     }
   }
 
-  inference_status_t status =
-      config_infer(config, target_index, target_score, target_num_exch,
-                   target_played_tiles, config->inference_results);
-
-  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_INFER,
-                            (int)status);
+  config_infer(config, target_index, target_score, target_num_exch,
+               target_played_tiles, config->inference_results, error_stack);
 }
 
-void execute_infer(Config *config) {
+void execute_infer(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    set_or_clear_error_status(config->error_status,
-                              ERROR_STATUS_TYPE_CONFIG_LOAD,
-                              CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate(
+            "cannot infer without letter distribution and lexicon"));
     return;
   }
 
   config_init_game(config);
   Rack *target_played_tiles =
       rack_create(ld_get_size(game_get_ld(config->game)));
-  execute_infer_with_rack(config, target_played_tiles);
+  execute_infer_with_rack(config, target_played_tiles, error_stack);
   rack_destroy(target_played_tiles);
 }
 
@@ -941,46 +938,42 @@ void config_fill_autoplay_args(const Config *config,
   config_fill_game_args(config, autoplay_args->game_args);
 }
 
-autoplay_status_t config_autoplay(const Config *config,
-                                  AutoplayResults *autoplay_results,
-                                  autoplay_t autoplay_type,
-                                  const char *num_games_or_min_rack_targets,
-                                  int games_before_force_draw_start) {
+void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
+                     autoplay_t autoplay_type,
+                     const char *num_games_or_min_rack_targets,
+                     int games_before_force_draw_start,
+                     ErrorStack *error_stack) {
   AutoplayArgs args;
   GameArgs game_args;
   args.game_args = &game_args;
   config_fill_autoplay_args(config, &args, autoplay_type,
                             num_games_or_min_rack_targets,
                             games_before_force_draw_start);
-  return autoplay(&args, autoplay_results);
+  autoplay(&args, autoplay_results, error_stack);
 }
 
-void execute_autoplay(Config *config) {
+void execute_autoplay(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    set_or_clear_error_status(config->error_status,
-                              ERROR_STATUS_TYPE_CONFIG_LOAD,
-                              CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate(
+            "cannot autoplay without letter distribution and lexicon"));
     return;
   }
 
-  autoplay_status_t status = autoplay_results_set_options(
+  autoplay_results_set_options(
       config->autoplay_results,
-      config_get_parg_value(config, ARG_TOKEN_AUTOPLAY, 0));
+      config_get_parg_value(config, ARG_TOKEN_AUTOPLAY, 0), error_stack);
 
-  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
-                            (int)status);
-
-  if (status != AUTOPLAY_STATUS_SUCCESS) {
+  if (!error_stack_is_empty(error_stack)) {
     return;
   }
 
   const char *num_games_str =
       config_get_parg_value(config, ARG_TOKEN_AUTOPLAY, 1);
 
-  status = config_autoplay(config, config->autoplay_results,
-                           AUTOPLAY_TYPE_DEFAULT, num_games_str, 0);
-  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
-                            (int)status);
+  config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_DEFAULT,
+                  num_games_str, 0, error_stack);
 }
 
 char *status_autoplay(Config __attribute__((unused)) * config) {
@@ -998,18 +991,15 @@ void config_fill_conversion_args(const Config *config, ConversionArgs *args) {
   args->ld = config->ld;
 }
 
-conversion_status_t config_convert(const Config *config,
-                                   ConversionResults *results) {
+void config_convert(const Config *config, ConversionResults *results,
+                    ErrorStack *error_stack) {
   ConversionArgs args;
   config_fill_conversion_args(config, &args);
-  return convert(&args, results);
+  convert(&args, results, error_stack);
 }
 
-void execute_convert(Config *config) {
-  conversion_status_t status =
-      config_convert(config, config->conversion_results);
-  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_CONVERT,
-                            (int)status);
+void execute_convert(Config *config, ErrorStack *error_stack) {
+  config_convert(config, config->conversion_results, error_stack);
 }
 
 char *status_convert(Config __attribute__((unused)) * config) {
@@ -1018,11 +1008,12 @@ char *status_convert(Config __attribute__((unused)) * config) {
 
 // Leave Gen
 
-void execute_leave_gen(Config *config) {
+void execute_leave_gen(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    set_or_clear_error_status(config->error_status,
-                              ERROR_STATUS_TYPE_CONFIG_LOAD,
-                              CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate(
+            "cannot generate leaves without letter distribution and lexicon"));
     return;
   }
 
@@ -1030,18 +1021,16 @@ void execute_leave_gen(Config *config) {
                                   PLAYERS_DATA_TYPE_KWG) ||
       !players_data_get_is_shared(config->players_data,
                                   PLAYERS_DATA_TYPE_KLV)) {
-    set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_LEAVE_GEN,
-                              (int)LEAVE_GEN_STATUS_DIFFERENT_LEXICA_OR_LEAVES);
+    error_stack_push(
+        error_stack, ERROR_STATUS_LEAVE_GEN_DIFFERENT_LEXICA_OR_LEAVES,
+        string_duplicate("cannot generate leaves with different lexica or "
+                         "different leaves for the players"));
     return;
   }
 
-  autoplay_status_t autoplay_status =
-      autoplay_results_set_options(config->autoplay_results, "games");
+  autoplay_results_set_options(config->autoplay_results, "games", error_stack);
 
-  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
-                            (int)autoplay_status);
-
-  if (autoplay_status != AUTOPLAY_STATUS_SUCCESS) {
+  if (!error_stack_is_empty(error_stack)) {
     return;
   }
 
@@ -1051,19 +1040,18 @@ void execute_leave_gen(Config *config) {
   const char *games_before_force_draw_start_str =
       config_get_parg_value(config, ARG_TOKEN_LEAVE_GEN, 1);
   int games_before_force_draw_start;
-  if (!string_to_int_or_set_error_status(
-          games_before_force_draw_start_str, 0, INT_MAX, config->error_status,
-          ERROR_STATUS_TYPE_CONFIG_LOAD,
-          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS,
-          &games_before_force_draw_start)) {
+  string_to_int_or_push_error("games before force draw start",
+                              games_before_force_draw_start_str, 0, INT_MAX,
+                              ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+                              &games_before_force_draw_start, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
     return;
   }
 
-  autoplay_status =
-      config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN,
-                      min_rack_targets_str, games_before_force_draw_start);
-  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
-                            (int)autoplay_status);
+  config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN,
+                  min_rack_targets_str, games_before_force_draw_start,
+                  error_stack);
 }
 
 char *status_leave_gen(Config __attribute__((unused)) * config) {
@@ -1073,30 +1061,36 @@ char *status_leave_gen(Config __attribute__((unused)) * config) {
 // Create
 
 // This only implements creating a klv for now.
-void execute_create_data(Config *config) {
+void execute_create_data(Config *config, ErrorStack *error_stack) {
   const char *create_type_str =
       config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 0);
 
-  config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
   if (has_iprefix(create_type_str, "klv")) {
     const char *klv_name_str =
         config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 1);
     char *klv_filename = data_filepaths_get_writable_filename(
-        config_get_data_paths(config), klv_name_str, DATA_FILEPATH_TYPE_KLV);
-    LetterDistribution *ld =
-        ld_create(config_get_data_paths(config),
-                  config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 2));
+        config_get_data_paths(config), klv_name_str, DATA_FILEPATH_TYPE_KLV,
+        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    LetterDistribution *ld = ld_create(
+        config_get_data_paths(config),
+        config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 2), error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
     KLV *klv = klv_create_empty(ld, klv_name_str);
-    klv_write(klv, klv_filename);
+    klv_write(klv, klv_filename, error_stack);
     klv_destroy(klv);
     free(klv_filename);
     ld_destroy(ld);
   } else {
-    config_load_status = CONFIG_LOAD_STATUS_UNRECOGNIZED_CREATE_DATA_TYPE;
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_CREATE_DATA_TYPE,
+        get_formatted_string("data creation not supported for type %s",
+                             create_type_str));
   }
-
-  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            (int)config_load_status);
 }
 
 char *status_create_data(Config __attribute__((unused)) * config) {
@@ -1105,8 +1099,8 @@ char *status_create_data(Config __attribute__((unused)) * config) {
 
 // Config load helpers
 
-config_load_status_t config_load_parsed_args(Config *config,
-                                             StringSplitter *cmd_split_string) {
+void config_load_parsed_args(Config *config, StringSplitter *cmd_split_string,
+                             ErrorStack *error_stack) {
   int number_of_input_strs =
       string_splitter_get_number_of_items(cmd_split_string);
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
@@ -1129,7 +1123,15 @@ config_load_status_t config_load_parsed_args(Config *config,
     if (is_arg || is_cmd) {
       if (current_parg) {
         if (current_value_index < current_parg->num_req_values) {
-          return CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES;
+          error_stack_push(
+              error_stack,
+              ERROR_STATUS_CONFIG_LOAD_INSUFFICIENT_NUMBER_OF_VALUES,
+              get_formatted_string("insufficient number of values for argument "
+                                   "%s, expected %d, got %d",
+                                   current_parg->name,
+                                   current_parg->num_req_values,
+                                   current_value_index));
+          return;
         }
         current_parg = NULL;
       }
@@ -1144,7 +1146,12 @@ config_load_status_t config_load_parsed_args(Config *config,
       for (int k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
         if (has_prefix(arg_name, config->pargs[k]->name)) {
           if (current_parg) {
-            return CONFIG_LOAD_STATUS_AMBIGUOUS_COMMAND;
+            error_stack_push(
+                error_stack, ERROR_STATUS_CONFIG_LOAD_AMBIGUOUS_COMMAND,
+                get_formatted_string("ambiguous command %s, could be %s or %s",
+                                     arg_name, current_parg->name,
+                                     config->pargs[k]->name));
+            return;
           }
           current_parg = config->pargs[k];
           current_arg_token = k;
@@ -1152,16 +1159,28 @@ config_load_status_t config_load_parsed_args(Config *config,
       }
 
       if (!current_parg) {
-        return CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG;
+        error_stack_push(
+            error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
+            get_formatted_string("unrecognized command or argument '%s'",
+                                 arg_name));
+        return;
       }
 
       if (current_parg->num_set_values > 0) {
-        return CONFIG_LOAD_STATUS_DUPLICATE_ARG;
+        error_stack_push(
+            error_stack, ERROR_STATUS_CONFIG_LOAD_DUPLICATE_ARG,
+            get_formatted_string("command was provided more than once: %s",
+                                 arg_name));
+        return;
       }
 
       if (current_parg->exec_func != execute_fatal) {
         if (i > 0) {
-          return CONFIG_LOAD_STATUS_MISPLACED_COMMAND;
+          error_stack_push(error_stack,
+                           ERROR_STATUS_CONFIG_LOAD_MISPLACED_COMMAND,
+                           get_formatted_string(
+                               "encountered unexpected command: %s", arg_name));
+          return;
         } else {
           config->exec_parg_token = current_arg_token;
         }
@@ -1169,7 +1188,11 @@ config_load_status_t config_load_parsed_args(Config *config,
       current_value_index = 0;
     } else {
       if (!current_parg || current_value_index >= current_parg->num_values) {
-        return CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG;
+        error_stack_push(
+            error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
+            get_formatted_string("unrecognized command or argument '%s'",
+                                 input_str));
+        return;
       }
       free(current_parg->values[current_value_index]);
       current_parg->values[current_value_index] = string_duplicate(input_str);
@@ -1177,21 +1200,18 @@ config_load_status_t config_load_parsed_args(Config *config,
       current_parg->num_set_values = current_value_index;
     }
   }
-
-  if (current_parg) {
-    if (current_value_index < current_parg->num_req_values) {
-      return CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES;
-    }
-    current_parg = NULL;
+  if (current_parg && current_value_index < current_parg->num_req_values) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_INSUFFICIENT_NUMBER_OF_VALUES,
+        get_formatted_string(
+            "insufficient number of values provided for the '%s' command",
+            current_parg->name));
+    return;
   }
-
-  return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t config_load_sort_type(Config *config,
-                                           const char *sort_type_str,
-                                           int player_index) {
-  config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
+void config_load_sort_type(Config *config, const char *sort_type_str,
+                           int player_index, ErrorStack *error_stack) {
   if (has_iprefix(sort_type_str, "equity")) {
     players_data_set_move_sort_type(config->players_data, player_index,
                                     MOVE_SORT_EQUITY);
@@ -1199,15 +1219,14 @@ config_load_status_t config_load_sort_type(Config *config,
     players_data_set_move_sort_type(config->players_data, player_index,
                                     MOVE_SORT_SCORE);
   } else {
-    config_load_status = CONFIG_LOAD_STATUS_MALFORMED_MOVE_SORT_TYPE;
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_MOVE_SORT_TYPE,
+        get_formatted_string("unrecognized move sort type: %s", sort_type_str));
   }
-  return config_load_status;
 }
 
-config_load_status_t config_load_record_type(Config *config,
-                                             const char *record_type_str,
-                                             int player_index) {
-  config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
+void config_load_record_type(Config *config, const char *record_type_str,
+                             int player_index, ErrorStack *error_stack) {
   if (has_iprefix(record_type_str, "best")) {
     players_data_set_move_record_type(config->players_data, player_index,
                                       MOVE_RECORD_BEST);
@@ -1218,14 +1237,15 @@ config_load_status_t config_load_record_type(Config *config,
     players_data_set_move_record_type(config->players_data, player_index,
                                       MOVE_RECORD_ALL_SMALL);
   } else {
-    config_load_status = CONFIG_LOAD_STATUS_MALFORMED_MOVE_RECORD_TYPE;
+    error_stack_push(error_stack,
+                     ERROR_STATUS_CONFIG_LOAD_MALFORMED_MOVE_RECORD_TYPE,
+                     get_formatted_string("unrecognized move record type: %s",
+                                          record_type_str));
   }
-  return config_load_status;
 }
 
-config_load_status_t config_load_sampling_rule(Config *config,
-                                               const char *sampling_rule_str) {
-  config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
+void config_load_sampling_rule(Config *config, const char *sampling_rule_str,
+                               ErrorStack *error_stack) {
   if (has_iprefix(sampling_rule_str, "rr")) {
     config->sampling_rule = BAI_SAMPLING_RULE_ROUND_ROBIN;
   } else if (has_iprefix(sampling_rule_str, "tas")) {
@@ -1233,22 +1253,24 @@ config_load_status_t config_load_sampling_rule(Config *config,
   } else if (has_iprefix(sampling_rule_str, "tt")) {
     config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO;
   } else {
-    config_load_status = CONFIG_LOAD_STATUS_MALFORMED_SAMPLING_RULE;
+    error_stack_push(error_stack,
+                     ERROR_STATUS_CONFIG_LOAD_MALFORMED_SAMPLING_RULE,
+                     get_formatted_string("unrecognized sampling rule: %s",
+                                          sampling_rule_str));
   }
-  return config_load_status;
 }
 
-config_load_status_t config_load_threshold(Config *config,
-                                           const char *threshold_str) {
-  config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
+void config_load_threshold(Config *config, const char *threshold_str,
+                           ErrorStack *error_stack) {
   if (has_iprefix(threshold_str, "none")) {
     config->threshold = BAI_THRESHOLD_NONE;
   } else if (has_iprefix(threshold_str, "gk16")) {
     config->threshold = BAI_THRESHOLD_GK16;
   } else {
-    config_load_status = CONFIG_LOAD_STATUS_MALFORMED_THRESHOLD;
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_THRESHOLD,
+        get_formatted_string("unrecognized threshold type: %s", threshold_str));
   }
-  return config_load_status;
 }
 
 bool is_lexicon_required(const char *new_p1_leaves_name,
@@ -1257,26 +1279,54 @@ bool is_lexicon_required(const char *new_p1_leaves_name,
   return new_p1_leaves_name || new_p2_leaves_name || new_ld_name;
 }
 
-bool lex_lex_compat(const char *p1_lexicon_name, const char *p2_lexicon_name) {
+bool lex_lex_compat(const char *p1_lexicon_name, const char *p2_lexicon_name,
+                    ErrorStack *error_stack) {
   if (!p1_lexicon_name && !p2_lexicon_name) {
     return true;
   }
   if (!p1_lexicon_name || !p2_lexicon_name) {
     return false;
   }
-  return ld_types_compat(ld_get_type_from_lex_name(p1_lexicon_name),
-                         ld_get_type_from_lex_name(p2_lexicon_name));
+  return ld_types_compat(
+      ld_get_type_from_lex_name(p1_lexicon_name, error_stack),
+      ld_get_type_from_lex_name(p2_lexicon_name, error_stack));
 }
 
-bool lex_ld_compat(const char *lexicon_name, const char *ld_name) {
+bool lex_ld_compat(const char *lexicon_name, const char *ld_name,
+                   ErrorStack *error_stack) {
   if (!lexicon_name && !ld_name) {
     return true;
   }
   if (!lexicon_name || !ld_name) {
     return false;
   }
-  return ld_types_compat(ld_get_type_from_lex_name(lexicon_name),
-                         ld_get_type_from_ld_name(ld_name));
+  return ld_types_compat(ld_get_type_from_lex_name(lexicon_name, error_stack),
+                         ld_get_type_from_ld_name(ld_name, error_stack));
+}
+
+bool lexicons_and_leaves_compat(const char *updated_p1_lexicon_name,
+                                const char *updated_p1_leaves_name,
+                                const char *updated_p2_lexicon_name,
+                                const char *updated_p2_leaves_name,
+                                ErrorStack *error_stack) {
+  const bool leaves_are_compatible = lex_lex_compat(
+      updated_p1_leaves_name, updated_p2_leaves_name, error_stack);
+  if (!error_stack_is_empty(error_stack) || !leaves_are_compatible) {
+    return false;
+  }
+
+  const bool lex1_and_leaves1_are_compatible = lex_lex_compat(
+      updated_p1_lexicon_name, updated_p1_leaves_name, error_stack);
+  if (!error_stack_is_empty(error_stack) || !lex1_and_leaves1_are_compatible) {
+    return false;
+  }
+
+  const bool lex2_and_leaves2_are_compatible = lex_lex_compat(
+      updated_p2_lexicon_name, updated_p2_leaves_name, error_stack);
+  if (!error_stack_is_empty(error_stack) || !lex2_and_leaves2_are_compatible) {
+    return false;
+  }
+  return true;
 }
 
 char *get_default_klv_name(const char *lexicon_name) {
@@ -1295,7 +1345,8 @@ exec_mode_t get_exec_mode_type_from_name(const char *exec_mode_str) {
   return exec_mode;
 }
 
-config_load_status_t config_load_lexicon_dependent_data(Config *config) {
+void config_load_lexicon_dependent_data(Config *config,
+                                        ErrorStack *error_stack) {
   // Lexical player data
 
   const char *new_lexicon_name =
@@ -1350,70 +1401,100 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
   }
 
   // Both or neither players must have lexical data
-  if ((updated_p1_lexicon_name && !updated_p2_lexicon_name) ||
-      (!updated_p1_lexicon_name && updated_p2_lexicon_name)) {
-    return CONFIG_LOAD_STATUS_LEXICON_MISSING;
+  if (!updated_p1_lexicon_name && updated_p2_lexicon_name) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING,
+                     string_duplicate("missing lexicon for player 1"));
+    return;
+  }
+  if (updated_p1_lexicon_name && !updated_p2_lexicon_name) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING,
+                     string_duplicate("missing lexicon for player 2"));
+    return;
   }
 
   // Both lexicons are not specified, so we don't
   // load any of the lexicon dependent data
   if (!updated_p1_lexicon_name && !updated_p2_lexicon_name) {
     // We can use the new_* variables here since if lexicons
-    // are null, it is guaranteed that there are no leaves, or ld
+    // are null, it is guaranteed that there are no leaves or ld
     // since they are all set after this if check.
     if (is_lexicon_required(new_p1_leaves_name, new_p2_leaves_name,
                             new_ld_name)) {
-      return CONFIG_LOAD_STATUS_LEXICON_MISSING;
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING,
+          string_duplicate(
+              "cannot set leaves or letter distribition without a lexicon"));
+      return;
     } else {
-      return CONFIG_LOAD_STATUS_SUCCESS;
+      return;
     }
   }
 
-  if (!lex_lex_compat(updated_p1_lexicon_name, updated_p2_lexicon_name)) {
-    return CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS;
+  const bool lex_lex_is_compat = lex_lex_compat(
+      updated_p1_lexicon_name, updated_p2_lexicon_name, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  if (!lex_lex_is_compat) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_INCOMPATIBLE_LEXICONS,
+        get_formatted_string("lexicons are incompatible: %s, %s",
+                             updated_p1_lexicon_name, updated_p2_lexicon_name));
+    return;
   }
 
   // Set the use_default bool here because the 'existing_p1_lexicon_name'
   // variable might be free'd in players_data_set.
-  const bool use_default =
-      !lex_lex_compat(updated_p1_lexicon_name, existing_p1_lexicon_name);
+  const bool use_default = !lex_lex_compat(
+      updated_p1_lexicon_name, existing_p1_lexicon_name, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   // Load lexica
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_KWG,
                    config->data_paths, updated_p1_lexicon_name,
-                   updated_p2_lexicon_name);
+                   updated_p2_lexicon_name, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   // Load lexica (in WMP format)
   const char *p1_wmp_name = NULL;
   const char *p2_wmp_name = NULL;
   bool use_wmp = false;
-  config_load_status_t config_load_status =
-      config_load_bool(config, ARG_TOKEN_USE_WMP, &use_wmp);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
+  config_load_bool(config, ARG_TOKEN_USE_WMP, &use_wmp, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
   // The "w1" and "w2" args override the "use_wmp" arg
   bool p1_use_wmp = use_wmp;
   bool p2_use_wmp = use_wmp;
-  config_load_status =
-      config_load_bool(config, ARG_TOKEN_P1_USE_WMP, &p1_use_wmp);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
+  config_load_bool(config, ARG_TOKEN_P1_USE_WMP, &p1_use_wmp, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
   if (p1_use_wmp) {
     p1_wmp_name = updated_p1_lexicon_name;
   }
-  config_load_status =
-      config_load_bool(config, ARG_TOKEN_P2_USE_WMP, &p2_use_wmp);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
+  config_load_bool(config, ARG_TOKEN_P2_USE_WMP, &p2_use_wmp, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
   if (p2_use_wmp) {
     p2_wmp_name = updated_p2_lexicon_name;
   }
 
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_WMP,
-                   config->data_paths, p1_wmp_name, p2_wmp_name);
+                   config->data_paths, p1_wmp_name, p2_wmp_name, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   // Load the leaves
 
@@ -1439,20 +1520,31 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
     updated_p2_leaves_name = string_duplicate(existing_p2_leaves_name);
   }
 
-  if (!lex_lex_compat(updated_p1_leaves_name, updated_p2_leaves_name) ||
-      !lex_lex_compat(updated_p1_lexicon_name, updated_p1_leaves_name) ||
-      !lex_lex_compat(updated_p2_lexicon_name, updated_p2_leaves_name)) {
-    free(updated_p1_leaves_name);
-    free(updated_p2_leaves_name);
-    return CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS;
-  }
+  const bool leaves_and_lexicons_are_compatible = lexicons_and_leaves_compat(
+      updated_p1_lexicon_name, updated_p1_leaves_name, updated_p2_lexicon_name,
+      updated_p2_leaves_name, error_stack);
 
-  players_data_set(config->players_data, PLAYERS_DATA_TYPE_KLV,
-                   config->data_paths, updated_p1_leaves_name,
-                   updated_p2_leaves_name);
+  if (error_stack_is_empty(error_stack)) {
+    if (!leaves_and_lexicons_are_compatible) {
+      error_stack_push(error_stack,
+                       ERROR_STATUS_CONFIG_LOAD_INCOMPATIBLE_LEXICONS,
+                       get_formatted_string(
+                           "one or more of the leaves are incompatible with "
+                           "the current lexicons or each other: %s, %s",
+                           updated_p1_leaves_name, updated_p2_leaves_name));
+    } else {
+      players_data_set(config->players_data, PLAYERS_DATA_TYPE_KLV,
+                       config->data_paths, updated_p1_leaves_name,
+                       updated_p2_leaves_name, error_stack);
+    }
+  }
 
   free(updated_p1_leaves_name);
   free(updated_p2_leaves_name);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   // Load letter distribution
 
@@ -1464,34 +1556,43 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
   if (new_ld_name) {
     updated_ld_name = string_duplicate(new_ld_name);
   } else if (use_default || !existing_ld_name) {
-    updated_ld_name =
-        ld_get_default_name_from_lexicon_name(updated_p1_lexicon_name);
+    updated_ld_name = ld_get_default_name_from_lexicon_name(
+        updated_p1_lexicon_name, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
   } else {
     updated_ld_name = string_duplicate(existing_ld_name);
   }
 
-  if (!lex_ld_compat(updated_p1_lexicon_name, updated_ld_name)) {
-    free(updated_ld_name);
-    return CONFIG_LOAD_STATUS_INCOMPATIBLE_LETTER_DISTRIBUTION;
+  const bool lex_ld_is_compat =
+      lex_ld_compat(updated_p1_lexicon_name, updated_ld_name, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    if (!lex_ld_is_compat) {
+      error_stack_push(
+          error_stack,
+          ERROR_STATUS_CONFIG_LOAD_INCOMPATIBLE_LETTER_DISTRIBUTION,
+          get_formatted_string(
+              "lexicon %s is incompatible with letter distribution %s",
+              updated_p1_lexicon_name, updated_ld_name));
+    } else {
+      // If the letter distribution name has changed, update it
+      config->ld_changed = false;
+      if (!strings_equal(updated_ld_name, existing_ld_name)) {
+        ld_destroy(config->ld);
+        config->ld =
+            ld_create(config->data_paths, updated_ld_name, error_stack);
+        if (error_stack_is_empty(error_stack)) {
+          config->ld_changed = true;
+        }
+      }
+    }
   }
-
-  // If the letter distribution name has changed, update it
-  config->ld_changed = false;
-  if (!strings_equal(updated_ld_name, existing_ld_name)) {
-    ld_destroy(config->ld);
-    config->ld = ld_create(config->data_paths, updated_ld_name);
-    config->ld_changed = true;
-  }
-
   free(updated_ld_name);
-
-  return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
 // Assumes all args are parsed and correctly set in pargs.
-config_load_status_t config_load_data(Config *config) {
-  config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
-
+void config_load_data(Config *config, ErrorStack *error_stack) {
   const char *new_path = config_get_parg_value(config, ARG_TOKEN_DATA_PATH, 0);
   if (new_path) {
     free(config->data_paths);
@@ -1505,69 +1606,75 @@ config_load_status_t config_load_data(Config *config) {
   if (new_exec_mode_str) {
     exec_mode_t new_exec_mode = get_exec_mode_type_from_name(new_exec_mode_str);
     if (new_exec_mode == EXEC_MODE_UNKNOWN) {
-      return CONFIG_LOAD_STATUS_UNRECOGNIZED_EXEC_MODE;
+      error_stack_push(error_stack,
+                       ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_EXEC_MODE,
+                       get_formatted_string("unrecognized exec mode: %s",
+                                            new_exec_mode_str));
+      return;
     }
     config->exec_mode = new_exec_mode;
   }
 
   // Int values
 
-  config_load_status = config_load_int(config, ARG_TOKEN_BINGO_BONUS, INT_MIN,
-                                       INT_MAX, &config->bingo_bonus);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
+  config_load_int(config, ARG_TOKEN_BINGO_BONUS, INT_MIN, INT_MAX,
+                  &config->bingo_bonus, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
 
-  config_load_status =
-      config_load_int(config, ARG_TOKEN_PLIES, 0, INT_MAX, &config->plies);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
+  config_load_int(config, ARG_TOKEN_PLIES, 0, INT_MAX, &config->plies,
+                  error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
 
-  config_load_status = config_load_int(config, ARG_TOKEN_NUMBER_OF_PLAYS, 0,
-                                       INT_MAX, &config->num_plays);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
+  config_load_int(config, ARG_TOKEN_NUMBER_OF_PLAYS, 0, INT_MAX,
+                  &config->num_plays, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
 
-  config_load_status = config_load_int(config, ARG_TOKEN_MAX_ITERATIONS, 1,
-                                       INT_MAX, &config->max_iterations);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
+  config_load_int(config, ARG_TOKEN_MAX_ITERATIONS, 1, INT_MAX,
+                  &config->max_iterations, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
 
   int number_of_threads = -1;
-  config_load_status = config_load_int(config, ARG_TOKEN_NUMBER_OF_THREADS, 1,
-                                       MAX_THREADS, &number_of_threads);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
+  config_load_int(config, ARG_TOKEN_NUMBER_OF_THREADS, 1, MAX_THREADS,
+                  &number_of_threads, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
+
   if (number_of_threads > 0) {
     thread_control_set_threads(config->thread_control, number_of_threads);
   }
 
   int print_info_interval = -1;
-  config_load_status = config_load_int(config, ARG_TOKEN_PRINT_INFO_INTERVAL, 0,
-                                       INT_MAX, &print_info_interval);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
+  config_load_int(config, ARG_TOKEN_PRINT_INFO_INTERVAL, 0, INT_MAX,
+                  &print_info_interval, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
+
   if (print_info_interval >= 0) {
     thread_control_set_print_info_interval(config->thread_control,
                                            print_info_interval);
   }
 
-  config_load_status = config_load_int(config, ARG_TOKEN_TIME_LIMIT, 0, INT_MAX,
-                                       &config->time_limit_seconds);
+  config_load_int(config, ARG_TOKEN_TIME_LIMIT, 0, INT_MAX,
+                  &config->time_limit_seconds, error_stack);
 
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
 
-  config_load_status = config_load_int(config, ARG_TOKEN_EPIGON_CUTOFF, 0,
-                                       INT_MAX, &config->epigon_cutoff);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
+  config_load_int(config, ARG_TOKEN_EPIGON_CUTOFF, 0, INT_MAX,
+                  &config->epigon_cutoff, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
 
   // Double values
@@ -1575,27 +1682,26 @@ config_load_status_t config_load_data(Config *config) {
   const char *new_stop_cond_str =
       config_get_parg_value(config, ARG_TOKEN_STOP_COND_PCT, 0);
   if (new_stop_cond_str && has_iprefix(new_stop_cond_str, "none")) {
-    config->stop_cond_pct = PERCENTILE_MAX + 10;
+    config->stop_cond_pct = 1000;
   } else {
-    config_load_status =
-        config_load_double(config, ARG_TOKEN_STOP_COND_PCT, PERCENTILE_MIN,
-                           PERCENTILE_MAX, &config->stop_cond_pct);
-    if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-      return config_load_status;
+    config_load_double(config, ARG_TOKEN_STOP_COND_PCT, 1e-10, 100 - 1e-10,
+                       &config->stop_cond_pct, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
     }
   }
 
-  config_load_status = config_load_double(config, ARG_TOKEN_EQUITY_MARGIN, 0,
-                                          1e100, &config->equity_margin);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
+  config_load_double(config, ARG_TOKEN_EQUITY_MARGIN, 0, 1e100,
+                     &config->equity_margin, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
 
-  config_load_status = config_load_double(config, ARG_TOKEN_TT_FRACTION_OF_MEM,
-                                          0, 1, &config->tt_fraction_of_mem);
+  config_load_double(config, ARG_TOKEN_TT_FRACTION_OF_MEM, 0, 1,
+                     &config->tt_fraction_of_mem, error_stack);
 
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
 
   // Game variant
@@ -1606,48 +1712,54 @@ config_load_status_t config_load_data(Config *config) {
     game_variant_t new_game_variant =
         get_game_variant_type_from_name(new_game_variant_str);
     if (new_game_variant == GAME_VARIANT_UNKNOWN) {
-      return CONFIG_LOAD_STATUS_UNRECOGNIZED_GAME_VARIANT;
+      error_stack_push(error_stack,
+                       ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_GAME_VARIANT,
+                       get_formatted_string("unrecognized game variant: %s",
+                                            new_game_variant_str));
+      return;
     }
     config->game_variant = new_game_variant;
   }
 
   // Game pairs
 
-  config_load_status = config_load_bool(config, ARG_TOKEN_USE_GAME_PAIRS,
-                                        &config->use_game_pairs);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
+  config_load_bool(config, ARG_TOKEN_USE_GAME_PAIRS, &config->use_game_pairs,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
 
-  config_load_status = config_load_bool(config, ARG_TOKEN_USE_SMALL_PLAYS,
-                                        &config->use_small_plays);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
+  config_load_bool(config, ARG_TOKEN_USE_SMALL_PLAYS, &config->use_small_plays,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
 
   // Human readable
 
-  config_load_status = config_load_bool(config, ARG_TOKEN_HUMAN_READABLE,
-                                        &config->human_readable);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
+  config_load_bool(config, ARG_TOKEN_HUMAN_READABLE, &config->human_readable,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
 
   int write_buffer_size;
-  config_load_status = config_load_int(config, ARG_TOKEN_WRITE_BUFFER_SIZE, 1,
-                                       INT_MAX, &write_buffer_size);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
+  config_load_int(config, ARG_TOKEN_WRITE_BUFFER_SIZE, 1, INT_MAX,
+                  &write_buffer_size, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
+
   autoplay_results_set_write_buffer_size(config->autoplay_results,
                                          write_buffer_size);
   // Seed
 
   uint64_t seed;
-  config_load_status = config_load_uint64(config, ARG_TOKEN_RANDOM_SEED, &seed);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
+  config_load_uint64(config, ARG_TOKEN_RANDOM_SEED, &seed, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
+
   if (!config_get_parg_value(config, ARG_TOKEN_RANDOM_SEED, 0)) {
     thread_control_increment_seed(config->thread_control);
   } else {
@@ -1660,27 +1772,30 @@ config_load_status_t config_load_data(Config *config) {
   if (new_board_layout_name &&
       !strings_equal(board_layout_get_name(config->board_layout),
                      new_board_layout_name)) {
-    if (board_layout_load(config->board_layout, config->data_paths,
-                          new_board_layout_name) !=
-        BOARD_LAYOUT_LOAD_STATUS_SUCCESS) {
-      return CONFIG_LOAD_STATUS_BOARD_LAYOUT_ERROR;
+    board_layout_load(config->board_layout, config->data_paths,
+                      new_board_layout_name, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_BOARD_LAYOUT_ERROR,
+          string_duplicate("encountered an error loading the board layout"));
+      return;
     }
   }
 
   const char *sampling_rule =
       config_get_parg_value(config, ARG_TOKEN_SAMPLING_RULE, 0);
   if (sampling_rule) {
-    config_load_status = config_load_sampling_rule(config, sampling_rule);
-    if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-      return config_load_status;
+    config_load_sampling_rule(config, sampling_rule, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
     }
   }
 
   const char *threshold = config_get_parg_value(config, ARG_TOKEN_THRESHOLD, 0);
   if (threshold) {
-    config_load_status = config_load_threshold(config, threshold);
-    if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-      return config_load_status;
+    config_load_threshold(config, threshold, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
     }
   }
 
@@ -1696,20 +1811,20 @@ config_load_status_t config_load_data(Config *config) {
     const char *new_player_sort_type_str =
         config_get_parg_value(config, sort_type_args[player_index], 0);
     if (new_player_sort_type_str) {
-      config_load_status =
-          config_load_sort_type(config, new_player_sort_type_str, player_index);
-      if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-        return config_load_status;
+      config_load_sort_type(config, new_player_sort_type_str, player_index,
+                            error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
       }
     }
 
     const char *new_player_record_type_str =
         config_get_parg_value(config, record_type_args[player_index], 0);
     if (new_player_record_type_str) {
-      config_load_status = config_load_record_type(
-          config, new_player_record_type_str, player_index);
-      if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-        return config_load_status;
+      config_load_record_type(config, new_player_record_type_str, player_index,
+                              error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
       }
     }
 
@@ -1721,9 +1836,9 @@ config_load_status_t config_load_data(Config *config) {
     }
   }
 
-  config_load_status = config_load_lexicon_dependent_data(config);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
+  config_load_lexicon_dependent_data(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
 
   // Set win pct
@@ -1733,7 +1848,11 @@ config_load_status_t config_load_data(Config *config) {
   if (new_win_pct_name &&
       !strings_equal(win_pct_get_name(config->win_pcts), new_win_pct_name)) {
     win_pct_destroy(config->win_pcts);
-    config->win_pcts = win_pct_create(config->data_paths, new_win_pct_name);
+    config->win_pcts =
+        win_pct_create(config->data_paths, new_win_pct_name, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
   }
 
   const char *record_filepath =
@@ -1742,45 +1861,35 @@ config_load_status_t config_load_data(Config *config) {
     autoplay_results_set_record_filepath(config->autoplay_results,
                                          record_filepath);
   }
-
-  // Set IO
-
-  thread_control_set_io(config->thread_control,
-                        config_get_parg_value(config, ARG_TOKEN_INFILE, 0),
-                        config_get_parg_value(config, ARG_TOKEN_OUTFILE, 0));
-
-  return config_load_status;
 }
 
 // Parses the arguments given by the cmd string and updates the state of
 // the config data values, but does not execute the command.
-config_load_status_t config_load_command(Config *config, const char *cmd) {
+void config_load_command(Config *config, const char *cmd,
+                         ErrorStack *error_stack) {
   // If the command is empty, consider this a set options
   // command where zero options are set and return without error.
   if (is_string_empty_or_whitespace(cmd)) {
-    return CONFIG_LOAD_STATUS_SUCCESS;
+    return;
   }
 
   StringSplitter *cmd_split_string = split_string_by_whitespace(cmd, true);
   // CGP data can have semicolons at the end, so
   // we trim these off to make loading easier.
   string_splitter_trim_char(cmd_split_string, ';');
-  config_load_status_t config_load_status =
-      config_load_parsed_args(config, cmd_split_string);
+  config_load_parsed_args(config, cmd_split_string, error_stack);
 
-  if (config_load_status == CONFIG_LOAD_STATUS_SUCCESS) {
-    config_load_status = config_load_data(config);
+  if (error_stack_is_empty(error_stack)) {
+    config_load_data(config, error_stack);
   }
 
   string_splitter_destroy(cmd_split_string);
-
-  return config_load_status;
 }
 
-void config_execute_command(Config *config) {
+void config_execute_command(Config *config, ErrorStack *error_stack) {
   if (config_exec_parg_is_set(config)) {
-    set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_NONE, 0);
-    config_get_parg_exec_func(config, config->exec_parg_token)(config);
+    config_get_parg_exec_func(config, config->exec_parg_token)(config,
+                                                               error_stack);
   }
 }
 
@@ -1793,8 +1902,29 @@ char *config_get_execute_status(Config *config) {
   return status;
 }
 
-Config *config_create_default(void) {
-  Config *config = malloc_or_die(sizeof(Config));
+void config_create_default_internal(Config *config, ErrorStack *error_stack) {
+  // Attempt to load fields that might fail first
+  config->data_paths = string_duplicate(DEFAULT_DATA_PATHS);
+  config->board_layout =
+      board_layout_create_default(config->data_paths, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_BOARD_LAYOUT_ERROR,
+        string_duplicate(
+            "encountered an error loading the default board layout"));
+    return;
+  }
+
+  config->win_pcts =
+      win_pct_create(config->data_paths, DEFAULT_WIN_PCT, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_WIN_PCT_ERROR,
+        string_duplicate(
+            "encountered an error loading the default win percentage file"));
+    return;
+  }
+
   parsed_arg_create(config, ARG_TOKEN_SET, "setoptions", 0, 0, execute_noop,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_CGP, "cgp", 4, 4, execute_cgp_load,
@@ -1887,10 +2017,6 @@ Config *config_create_default(void) {
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_RECORD_FILEPATH, "recfile", 1, 1,
                     execute_fatal, status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_INFILE, "infile", 1, 1, execute_fatal,
-                    status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_OUTFILE, "outfile", 1, 1, execute_fatal,
-                    status_fatal);
   parsed_arg_create(config, ARG_TOKEN_EXEC_MODE, "mode", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_TT_FRACTION_OF_MEM, "ttfraction", 1, 1,
@@ -1903,7 +2029,6 @@ Config *config_create_default(void) {
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_EPIGON_CUTOFF, "epigoncutoff", 1, 1,
                     execute_fatal, status_fatal);
-  config->data_paths = string_duplicate(DEFAULT_DATA_PATHS);
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
   config->exec_mode = EXEC_MODE_CONSOLE;
@@ -1922,8 +2047,6 @@ Config *config_create_default(void) {
   config->use_small_plays = false;
   config->human_readable = false;
   config->game_variant = DEFAULT_GAME_VARIANT;
-  config->win_pcts = win_pct_create(config->data_paths, DEFAULT_WIN_PCT);
-  config->board_layout = board_layout_create_default(config->data_paths);
   config->ld = NULL;
   config->players_data = players_data_create();
   config->thread_control = thread_control_create();
@@ -1933,8 +2056,12 @@ Config *config_create_default(void) {
   config->inference_results = inference_results_create();
   config->autoplay_results = autoplay_results_create();
   config->conversion_results = conversion_results_create();
-  config->error_status = error_status_create();
   config->tt_fraction_of_mem = 0.25;
+}
+
+Config *config_create_default(ErrorStack *error_stack) {
+  Config *config = malloc_or_die(sizeof(Config));
+  config_create_default_internal(config, error_stack);
   return config;
 }
 
@@ -1956,7 +2083,6 @@ void config_destroy(Config *config) {
   inference_results_destroy(config->inference_results);
   autoplay_results_destroy(config->autoplay_results);
   conversion_results_destroy(config->conversion_results);
-  error_status_destroy(config->error_status);
   free(config->data_paths);
   free(config);
 }

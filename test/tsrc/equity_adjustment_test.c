@@ -99,7 +99,7 @@ void test_macondo_endgame_equity_adjustments(void) {
   Game *game = config_game_create(config);
   MoveList *move_list = move_list_create(6);
 
-  game_load_cgp(
+  load_cgp_or_die(
       game,
       "4RUMMAGED2C/7A6A/2H1G2T6V/2O1O2I6E/2WAB2PREBENDS/2ER3O3n3/2SI6COW2/"
       "3L2HUE2KANE/3LI3FILII2/J1TANGENT2T1Z1/A2TA5FA1OP/R2EN5Ok1OU/"

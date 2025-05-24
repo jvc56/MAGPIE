@@ -15,7 +15,7 @@
 
 #include "bai_logger.h"
 
-#include "../util/util.h"
+#include "../util/io_util.h"
 
 typedef struct CTracking {
   double *sumw;

@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#include "../util/log.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
 
 #define KWG_EXTENSION ".kwg"
@@ -16,6 +16,10 @@
 #define GCG_EXTENSION ".gcg"
 #define LEAVES_EXTENSION ".csv"
 #define LEXICON_EXTENSION ".txt"
+
+const char *filepath_type_names[] = {
+    "kwg", "klv",    "board layout", "win percentage", "letter distribution",
+    "gcg", "leaves", "lexicon",      "wordmap"};
 
 bool is_filepath(const char *filepath) {
   return string_contains(filepath, '/') || string_contains(filepath, '\\') ||
@@ -103,9 +107,15 @@ char *get_filepath(const char *data_path, const char *data_name,
 char *data_filepaths_get_first_valid_filename(const char *data_paths,
                                               const char *data_name,
                                               data_filepath_t type,
-                                              bool data_path_only) {
+                                              bool data_path_only,
+                                              ErrorStack *error_stack) {
   if (!data_paths) {
-    log_fatal("data paths is null for filepath type %d\n", type);
+    error_stack_push(
+        error_stack, ERROR_STATUS_FILEPATH_NULL_PATH,
+        get_formatted_string("data path is unexpectedly empty when trying to "
+                             "get filepath of type %s",
+                             filepath_type_names[type]));
+    return NULL;
   }
   StringSplitter *split_data_paths = split_string(data_paths, ':', true);
   int number_of_data_paths =
@@ -127,8 +137,11 @@ char *data_filepaths_get_first_valid_filename(const char *data_paths,
   }
   string_splitter_destroy(split_data_paths);
   if (!ret_val) {
-    log_fatal("File for %s not found for the following paths: %s\n", data_name,
-              data_paths);
+    error_stack_push(
+        error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
+        get_formatted_string("file '%s' not found for data type %s", data_name,
+                             filepath_type_names[type]));
+    return NULL;
   }
   return ret_val;
 }
@@ -138,15 +151,20 @@ char *data_filepaths_get_first_valid_filename(const char *data_paths,
 // Assumes the data name is not already a valid filepath.
 char *data_filepaths_get_data_path_name(const char *data_paths,
                                         const char *data_name,
-                                        data_filepath_t type) {
+                                        data_filepath_t type,
+                                        ErrorStack *error_stack) {
   if (!data_name) {
-    log_fatal("data name is null for filepath type %d\n", type);
+    error_stack_push(error_stack, ERROR_STATUS_FILEPATH_NULL_FILENAME,
+                     get_formatted_string("data name is null for data type %s",
+                                          data_name,
+                                          filepath_type_names[type]));
+    return NULL;
   }
   if (is_filepath(data_name)) {
     return NULL;
   }
   return data_filepaths_get_first_valid_filename(data_paths, data_name, type,
-                                                 true);
+                                                 true, error_stack);
 }
 
 // Returns a filename string that exists and is readable.
@@ -155,9 +173,14 @@ char *data_filepaths_get_data_path_name(const char *data_paths,
 // as is.
 char *data_filepaths_get_readable_filename(const char *data_paths,
                                            const char *data_name,
-                                           data_filepath_t type) {
+                                           data_filepath_t type,
+                                           ErrorStack *error_stack) {
   if (!data_name) {
-    log_fatal("data name is null for filepath type %d\n", type);
+    error_stack_push(error_stack, ERROR_STATUS_FILEPATH_NULL_FILENAME,
+                     get_formatted_string("data name is null for data type %s",
+                                          data_name,
+                                          filepath_type_names[type]));
+    return NULL;
   }
 
   char *full_filename = NULL;
@@ -166,11 +189,13 @@ char *data_filepaths_get_readable_filename(const char *data_paths,
     if (access(data_name, F_OK | R_OK) == 0) {
       full_filename = string_duplicate(data_name);
     } else {
-      log_fatal("Full file path %s not found\n", data_name);
+      error_stack_push(error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
+                       get_formatted_string("file %s not found", data_name));
+      return NULL;
     }
   } else {
     full_filename = data_filepaths_get_first_valid_filename(
-        data_paths, data_name, type, false);
+        data_paths, data_name, type, false, error_stack);
   }
 
   return full_filename;
@@ -184,16 +209,26 @@ char *data_filepaths_get_readable_filename(const char *data_paths,
 // first path is used.
 char *data_filepaths_get_writable_filename(const char *data_paths,
                                            const char *data_name,
-                                           data_filepath_t type) {
+                                           data_filepath_t type,
+                                           ErrorStack *error_stack) {
   if (!data_name) {
-    log_fatal("data name is null for filepath type %d\n", type);
+    error_stack_push(error_stack, ERROR_STATUS_FILEPATH_NULL_FILENAME,
+                     get_formatted_string("data name is null for data type %s",
+                                          data_name,
+                                          filepath_type_names[type]));
+    return NULL;
   }
   char *writable_filepath;
   if (is_filepath(data_name)) {
     writable_filepath = string_duplicate(data_name);
   } else {
     if (!data_paths) {
-      log_fatal("data path is null for filepath type %d\n", type);
+      error_stack_push(
+          error_stack, ERROR_STATUS_FILEPATH_NULL_PATH,
+          get_formatted_string("data path is unexpectedly empty when trying to "
+                               "get filepath of type %s",
+                               filepath_type_names[type]));
+      return NULL;
     }
     char *first_data_path = cut_off_after_first_char(data_paths, ':');
     writable_filepath = get_filepath(first_data_path, data_name, type);
@@ -202,21 +237,34 @@ char *data_filepaths_get_writable_filename(const char *data_paths,
   // File already exists and is not writable
   if (access(writable_filepath, F_OK) == 0 &&
       access(writable_filepath, W_OK) != 0) {
-    log_fatal("File %s already exists and is not writable\n",
-              writable_filepath);
+    error_stack_push(
+        error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_WRITABLE,
+        get_formatted_string(
+            "file %s exists but does not have required write permissions",
+            writable_filepath));
+    return NULL;
   }
   char *dir_path = get_dirpath_from_filepath(writable_filepath);
   if (access(dir_path, W_OK) != 0) {
-    log_fatal("Directory %s is not writable\n", dir_path);
+    error_stack_push(
+        error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_WRITABLE,
+        get_formatted_string(
+            "directory %s exists but does not have required write permissions",
+            dir_path));
   }
   free(dir_path);
   return writable_filepath;
 }
 
 StringList *data_filepaths_get_all_data_path_names(const char *data_paths,
-                                                   data_filepath_t type) {
+                                                   data_filepath_t type,
+                                                   ErrorStack *error_stack) {
   if (!data_paths) {
-    log_error("data path is null for filepath type %d\n", type);
+    error_stack_push(
+        error_stack, ERROR_STATUS_FILEPATH_NULL_PATH,
+        get_formatted_string("data path is unexpectedly empty when trying to "
+                             "get filepath of type %s",
+                             filepath_type_names[type]));
     return NULL;
   }
   StringList *file_path_list = string_list_create();
@@ -236,7 +284,10 @@ StringList *data_filepaths_get_all_data_path_names(const char *data_paths,
                                glob_results.gl_pathv[result_idx]);
       }
     } else {
-      log_error("no files matched pattern %s", glob_pattern);
+      error_stack_push(
+          error_stack, ERROR_STATUS_FILEPATH_NO_MATCHING_FILES,
+          get_formatted_string("no files matched pattern %s for type %s",
+                               glob_pattern, filepath_type_names[type]));
     }
     free(glob_pattern);
     globfree(&glob_results);

@@ -21,7 +21,7 @@ void load_and_shadow(Game *game, Player *player, const char *cgp,
   const LetterDistribution *ld = game_get_ld(game);
   Rack *player_rack = player_get_rack(player);
 
-  game_load_cgp(game, cgp);
+  load_cgp_or_die(game, cgp);
   rack_set_to_string(ld, player_rack, rack);
   generate_anchors_for_test(game);
   extract_sorted_anchors_for_test(sorted_anchors);
@@ -39,7 +39,7 @@ void load_and_generate_moves(Game *game, MoveList *move_list, Player *player,
   const LetterDistribution *ld = game_get_ld(game);
   Rack *player_rack = player_get_rack(player);
 
-  game_load_cgp(game, cgp);
+  load_cgp_or_die(game, cgp);
   rack_set_to_string(ld, player_rack, rack);
   generate_moves_for_game(game, 0, move_list);
 }

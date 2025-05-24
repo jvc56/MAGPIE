@@ -21,7 +21,7 @@
 void test_board_layout_error_super(void) {
   // Most of the error enums are tested in the 15 version.
   assert_board_layout_error(DEFAULT_TEST_DATA_PATH, "standard15",
-                            BOARD_LAYOUT_LOAD_STATUS_INVALID_NUMBER_OF_ROWS);
+                            ERROR_STATUS_BOARD_LAYOUT_INVALID_NUMBER_OF_ROWS);
 }
 
 void test_board_layout_correctness_super(void) {

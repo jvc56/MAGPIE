@@ -4,16 +4,13 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
-#include "../def/file_handler_defs.h"
 #include "../def/thread_control_defs.h"
 
-#include "file_handler.h"
 #include "timer.h"
 #include "xoshiro.h"
 
-#include "../util/log.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 struct ThreadControl {
   int number_of_threads;
@@ -31,8 +28,9 @@ struct ThreadControl {
   pthread_mutex_t searching_mode_mutex;
   pthread_mutex_t iter_mutex;
   pthread_mutex_t iter_completed_mutex;
-  FileHandler *outfile;
-  FileHandler *infile;
+  pthread_mutex_t print_mutex;
+  FILE *out_fh;
+  FILE *in_fh;
   Timer *timer;
 };
 
@@ -51,10 +49,7 @@ ThreadControl *thread_control_create(void) {
   pthread_mutex_init(&thread_control->searching_mode_mutex, NULL);
   pthread_mutex_init(&thread_control->iter_mutex, NULL);
   pthread_mutex_init(&thread_control->iter_completed_mutex, NULL);
-  thread_control->outfile = file_handler_create_from_filename(
-      STDOUT_FILENAME, FILE_HANDLER_MODE_WRITE);
-  thread_control->infile =
-      file_handler_create_from_filename(STDIN_FILENAME, FILE_HANDLER_MODE_READ);
+  pthread_mutex_init(&thread_control->print_mutex, NULL);
   thread_control->timer = mtimer_create(CLOCK_MONOTONIC);
   thread_control->seed = time(NULL);
   thread_control->prng = prng_create(thread_control->seed);
@@ -65,39 +60,9 @@ void thread_control_destroy(ThreadControl *thread_control) {
   if (!thread_control) {
     return;
   }
-  file_handler_destroy(thread_control->outfile);
-  file_handler_destroy(thread_control->infile);
   mtimer_destroy(thread_control->timer);
   prng_destroy(thread_control->prng);
   free(thread_control);
-}
-
-void thread_control_set_io(ThreadControl *thread_control,
-                           const char *in_filename, const char *out_filename) {
-  const char *nonnull_in_filename = in_filename;
-  if (!nonnull_in_filename) {
-    nonnull_in_filename = file_handler_get_filename(thread_control->infile);
-  }
-
-  const char *nonnull_out_filename = out_filename;
-  if (!nonnull_out_filename) {
-    nonnull_out_filename = file_handler_get_filename(thread_control->outfile);
-  }
-
-  if (strings_equal(nonnull_in_filename, nonnull_out_filename)) {
-    log_warn("in file and out file cannot be the same\n");
-    return;
-  }
-
-  file_handler_set_filename(thread_control->infile, nonnull_in_filename,
-                            FILE_HANDLER_MODE_READ);
-
-  file_handler_set_filename(thread_control->outfile, nonnull_out_filename,
-                            FILE_HANDLER_MODE_WRITE);
-}
-
-FileHandler *thread_control_get_infile(ThreadControl *thread_control) {
-  return thread_control->infile;
 }
 
 int thread_control_get_print_info_interval(
@@ -132,6 +97,8 @@ bool thread_control_get_is_exited(ThreadControl *thread_control) {
   return thread_control_get_exit_status(thread_control) != EXIT_STATUS_NONE;
 }
 
+// Returns true if the exit status was set successfully
+// Returns false if the exit status was already set
 bool thread_control_exit(ThreadControl *thread_control,
                          exit_status_t exit_status) {
   bool success = false;
@@ -195,7 +162,9 @@ void thread_control_set_threads(ThreadControl *thread_control,
 }
 
 void thread_control_print(ThreadControl *thread_control, const char *content) {
-  file_handler_write(thread_control->outfile, content);
+  pthread_mutex_lock(&thread_control->print_mutex);
+  write_to_stream_out(content);
+  pthread_mutex_unlock(&thread_control->print_mutex);
 }
 
 void thread_control_wait_for_mode_stopped(ThreadControl *thread_control) {

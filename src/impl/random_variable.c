@@ -14,9 +14,8 @@
 
 #include "../str/sim_string.h"
 
-#include "../util/log.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 #define SIMILARITY_EPSILON 1e-6
 
@@ -97,7 +96,7 @@ double rv_uniform_predetermined_sample(
       (RVUniformPredetermined *)rvs->data;
   if (rv_uniform_predetermined->index >=
       rv_uniform_predetermined->num_samples) {
-    log_fatal("ran out of uniform predetermined samples\n");
+    log_fatal("ran out of uniform predetermined samples");
   }
   const int index = rv_uniform_predetermined->index++;
   const double result = rv_uniform_predetermined->samples[index];
@@ -137,8 +136,8 @@ void rv_uniform_predetermined_create(RandomVariables *rvs,
   rv_uniform_predetermined->index = 0;
   rv_uniform_predetermined->samples =
       malloc_or_die(rv_uniform_predetermined->num_samples * sizeof(double));
-  memory_copy(rv_uniform_predetermined->samples, samples,
-              rv_uniform_predetermined->num_samples * sizeof(double));
+  memcpy(rv_uniform_predetermined->samples, samples,
+         rv_uniform_predetermined->num_samples * sizeof(double));
   rvs->data = rv_uniform_predetermined;
 }
 
@@ -202,8 +201,8 @@ void rv_normal_create(RandomVariables *rvs, const uint64_t seed,
   RVNormal *rv_normal = malloc_or_die(sizeof(RVNormal));
   rv_normal->xoshiro_prng = prng_create(seed);
   rv_normal->means_and_vars = malloc_or_die(rvs->num_rvs * 2 * sizeof(double));
-  memory_copy(rv_normal->means_and_vars, means_and_vars,
-              rvs->num_rvs * 2 * sizeof(double));
+  memcpy(rv_normal->means_and_vars, means_and_vars,
+         rvs->num_rvs * 2 * sizeof(double));
   rv_normal->is_epigon = calloc_or_die(rvs->num_rvs, sizeof(bool));
   rvs->data = rv_normal;
 }
@@ -225,7 +224,7 @@ double rv_normal_predetermined_sample(RandomVariables *rvs, const uint64_t k,
   RVNormalPredetermined *rv_normal_predetermined =
       (RVNormalPredetermined *)rvs->data;
   if (rv_normal_predetermined->index >= rv_normal_predetermined->num_samples) {
-    log_fatal("ran out of normal predetermined samples\n");
+    log_fatal("ran out of normal predetermined samples");
   }
   const double mean = rv_normal_predetermined->means_and_vars[k * 2];
   const double sigma2 = rv_normal_predetermined->means_and_vars[k * 2 + 1];
@@ -290,12 +289,12 @@ void rv_normal_predetermined_create(RandomVariables *rvs, const double *samples,
   rv_normal_predetermined->index = 0;
   rv_normal_predetermined->samples =
       malloc_or_die(rv_normal_predetermined->num_samples * sizeof(double));
-  memory_copy(rv_normal_predetermined->samples, samples,
-              rv_normal_predetermined->num_samples * sizeof(double));
+  memcpy(rv_normal_predetermined->samples, samples,
+         rv_normal_predetermined->num_samples * sizeof(double));
   rv_normal_predetermined->means_and_vars =
       malloc_or_die(rvs->num_rvs * 2 * sizeof(double));
-  memory_copy(rv_normal_predetermined->means_and_vars, means_and_vars,
-              rvs->num_rvs * 2 * sizeof(double));
+  memcpy(rv_normal_predetermined->means_and_vars, means_and_vars,
+         rvs->num_rvs * 2 * sizeof(double));
   rv_normal_predetermined->is_epigon =
       calloc_or_die(rvs->num_rvs, sizeof(bool));
   rvs->data = rv_normal_predetermined;

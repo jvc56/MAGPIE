@@ -6,16 +6,18 @@
 
 #include "../def/board_layout_defs.h"
 
+#include "../util/io_util.h"
+
 typedef struct BoardLayout BoardLayout;
 
 BoardLayout *board_layout_create(void);
-board_layout_load_status_t board_layout_load(BoardLayout *bl,
-                                             const char *data_paths,
-                                             const char *board_layout_name);
+void board_layout_load(BoardLayout *bl, const char *data_paths,
+                       const char *board_layout_name, ErrorStack *error_stack);
 char *board_layout_get_default_name(void);
 const char *board_layout_get_name(const BoardLayout *bl);
 bool board_layout_is_name_default(const char *board_layout_name);
-BoardLayout *board_layout_create_default(const char *data_paths);
+BoardLayout *board_layout_create_default(const char *data_paths,
+                                         ErrorStack *error_stack);
 void board_layout_destroy(BoardLayout *bl);
 
 char bonus_square_value_to_char(uint8_t bonus_square_value);

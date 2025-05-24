@@ -20,23 +20,31 @@
 
 #include "../util/string_util.h"
 
-static Config *wasm_config = NULL;
 static Config *iso_config = NULL;
+static ErrorStack *iso_error_stack = NULL;
+static Config *wasm_config = NULL;
+static ErrorStack *wasm_error_stack = NULL;
 
 void wasm_destroy_configs(void) {
   config_destroy(wasm_config);
+  error_stack_destroy(wasm_error_stack);
   config_destroy(iso_config);
+  error_stack_destroy(iso_error_stack);
 }
 
 void load_cgp_into_iso_config(const char *cgp, int num_plays) {
   // Use a separate command vars to get
   // a game for static_eval_get_move_score and static_evaluation
   if (!iso_config) {
-    iso_config = config_create_default();
+    iso_error_stack = error_stack_create();
+    iso_config = config_create_default(iso_error_stack);
+    if (!error_stack_is_empty(iso_error_stack)) {
+      return;
+    }
   }
   char *cgp_command =
       get_formatted_string("cgp %s -numplays %d", cgp, num_plays);
-  execute_command_sync(iso_config, cgp_command);
+  execute_command_sync(iso_config, iso_error_stack, cgp_command);
   free(cgp_command);
 }
 
@@ -44,11 +52,8 @@ void load_cgp_into_iso_config(const char *cgp, int num_plays) {
 char *wasm_score_move(const char *cgpstr, const char *ucgi_move_str) {
   load_cgp_into_iso_config(cgpstr, 1);
 
-  ErrorStatus *error_status = config_get_error_status(iso_config);
-  if (!error_status_get_success(error_status)) {
-    return get_formatted_string("wasm cgp load failed with type %d, code %d",
-                                error_status_get_type(error_status),
-                                error_status_get_code(error_status));
+  if (!error_stack_is_empty(iso_error_stack)) {
+    return error_stack_get_string_and_reset(iso_error_stack);
   }
 
   Game *game = config_get_game(iso_config);
@@ -56,8 +61,9 @@ char *wasm_score_move(const char *cgpstr, const char *ucgi_move_str) {
   const LetterDistribution *ld = game_get_ld(game);
   const int player_on_turn_index = game_get_player_on_turn_index(game);
 
-  ValidatedMoves *vms = validated_moves_create(
-      game, player_on_turn_index, ucgi_move_str, true, false, false);
+  ValidatedMoves *vms =
+      validated_moves_create(game, player_on_turn_index, ucgi_move_str, true,
+                             false, false, iso_error_stack);
 
   if (validated_moves_get_number_of_moves(vms) > 1) {
     validated_moves_destroy(vms);
@@ -68,12 +74,10 @@ char *wasm_score_move(const char *cgpstr, const char *ucgi_move_str) {
   // result <scored|error> valid <true|false> invalid_words FU,BARZ
   // eq 123.45 sc 100 currmove f3.FU etc
 
-  move_validation_status_t status = validated_moves_get_validation_status(vms);
-
-  if (status != MOVE_VALIDATION_STATUS_SUCCESS) {
+  if (!error_stack_is_empty(iso_error_stack)) {
+    char *error_string = error_stack_get_string_and_reset(iso_error_stack);
     validated_moves_destroy(vms);
-    return get_formatted_string(
-        "wasm api move validation failed with code %d\n", status);
+    return error_string;
   }
 
   const Move *move = validated_moves_get_move(vms, 0);
@@ -123,9 +127,14 @@ char *static_evaluation(const char *cgpstr, int num_plays) {
 
 int process_command_wasm(const char *cmd) {
   if (!wasm_config) {
-    wasm_config = config_create_default();
+    wasm_error_stack = error_stack_create();
+    wasm_config = config_create_default(wasm_error_stack);
+    if (!error_stack_is_empty(wasm_error_stack)) {
+      error_stack_print_and_reset(wasm_error_stack);
+      return 1;
+    }
   }
-  execute_command_async(wasm_config, cmd);
+  execute_command_async(wasm_config, wasm_error_stack, cmd);
   return 0;
 }
 

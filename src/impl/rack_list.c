@@ -14,7 +14,8 @@
 
 #include "../str/rack_string.h"
 
-#include "../util/util.h"
+#include "../util/io_util.h"
+#include "../util/math_util.h"
 
 typedef struct RackListItem {
   // Index of this item in the rack list items ordered by count.
@@ -231,8 +232,8 @@ RackList *rack_list_create(const LetterDistribution *ld,
   rack_list->racks_partitioned_by_target_count =
       malloc_or_die(racks_malloc_size);
 
-  memory_copy(rack_list->racks_partitioned_by_target_count,
-              rack_list->racks_ordered_by_index, racks_malloc_size);
+  memcpy(rack_list->racks_partitioned_by_target_count,
+         rack_list->racks_ordered_by_index, racks_malloc_size);
 
   rack_list->partition_index = rack_list->number_of_racks - 1;
   pthread_mutex_init(&rack_list->partition_index_mutex, NULL);

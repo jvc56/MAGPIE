@@ -7,8 +7,8 @@
 
 #include "../../src/impl/kwg_maker.h"
 
+#include "../../src/util/io_util.h"
 #include "../../src/util/string_util.h"
-#include "../../src/util/util.h"
 
 #include "test_util.h"
 
@@ -29,9 +29,9 @@ void assert_word_lists_are_equal(const DictionaryWordList *expected,
     DictionaryWord *actual_word = dictionary_word_list_get_word(actual, i);
     assert(dictionary_word_get_length(expected_word) ==
            dictionary_word_get_length(actual_word));
-    assert(memory_compare(dictionary_word_get_word(expected_word),
-                          dictionary_word_get_word(actual_word),
-                          dictionary_word_get_length(expected_word)) == 0);
+    assert(memcmp(dictionary_word_get_word(expected_word),
+                  dictionary_word_get_word(actual_word),
+                  dictionary_word_get_length(expected_word)) == 0);
   }
 }
 

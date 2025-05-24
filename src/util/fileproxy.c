@@ -1,9 +1,9 @@
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "log.h"
+#include "io_util.h"
 #include "string_util.h"
-#include "util.h"
 
 #define MAX_CACHE_SIZE 32
 #define MAX_DATA_FILENAME_LENGTH 64
@@ -21,7 +21,7 @@ typedef struct FileCache {
 
 static FileCache file_cache = {0};
 
-FILE *stream_from_filename(const char *filename) {
+FILE *stream_from_filename(const char *filename, ErrorStack *error_stack) {
   // Look in cache.
   for (int i = 0; i < file_cache.num_items; i++) {
     if (strings_equal(file_cache.entries[i].filename, filename)) {
@@ -33,13 +33,13 @@ FILE *stream_from_filename(const char *filename) {
   log_debug("%s not found in cache (size %d), opening", filename,
             file_cache.num_items);
   FILE *stream;
-  stream = fopen(filename, "r");
+  stream = fopen_safe(filename, "r", error_stack);
   return stream;
 }
 
 void precache_file_data(const char *filename, char *raw_data, int num_bytes) {
   char *data_copy = malloc_or_die(sizeof(char) * num_bytes);
-  memory_copy(data_copy, raw_data, num_bytes);
+  memcpy(data_copy, raw_data, num_bytes);
 
   string_copy(file_cache.entries[file_cache.num_items].filename, filename);
   file_cache.entries[file_cache.num_items].raw_data = data_copy;

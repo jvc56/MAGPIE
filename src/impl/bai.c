@@ -17,8 +17,7 @@
 #include "../ent/bai_result.h"
 #include "../ent/thread_control.h"
 
-#include "../util/log.h"
-#include "../util/util.h"
+#include "../util/io_util.h"
 
 #include "bai_helper.h"
 #include "bai_logger.h"
@@ -95,10 +94,10 @@ void prod_con_queue_close(ProdConQueue *pcq) {
 void prod_con_queue_produce(ProdConQueue *pcq, ProdConQueueMessage msg) {
   pthread_mutex_lock(&pcq->mutex);
   if (pcq->closed) {
-    log_fatal("attempted to produce to a closed queue\n");
+    log_fatal("attempted to produce to a closed queue");
   }
   if (pcq->count == pcq->size) {
-    log_fatal("queue is unexpectedly full with %d messages\n", pcq->count);
+    log_fatal("queue is unexpectedly full with %d messages", pcq->count);
   }
   pcq->queue[pcq->newest] = msg;
   pcq->newest = (pcq->newest + 1) % pcq->size;

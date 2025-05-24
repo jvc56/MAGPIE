@@ -80,7 +80,8 @@ int game_history_get_number_of_events(const GameHistory *history);
 GameEvent *game_history_get_event(const GameHistory *history, int event_index);
 
 void game_history_set_cumulative_scores(GameHistory *game_history);
-GameEvent *game_history_create_and_add_game_event(GameHistory *game_history);
+GameEvent *game_history_create_and_add_game_event(GameHistory *game_history,
+                                                  ErrorStack *error_stack);
 
 Game *game_history_get_game(const GameHistory *game_history);
 void game_history_set_game(GameHistory *game_history, Game *game);
