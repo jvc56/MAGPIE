@@ -9,14 +9,12 @@
 #include "../def/klv_defs.h"
 
 #include "../ent/kwg.h"
-#include "../util/../util/error_stack.h"
 
 #include "../compat/endian_conv.h"
 
 #include "../util/fileproxy.h"
-#include "../util/io.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 #include "data_filepaths.h"
 #include "kwg.h"
@@ -193,7 +191,7 @@ static inline void klv_load(const char *klv_name, const char *klv_filename,
     log_fatal("edges fread failure: %zd != %d", result, number_of_leaves);
   }
 
-  fclose(stream);
+  fclose_or_die(stream);
 
   for (uint32_t i = 0; i < number_of_leaves; i++) {
     klv->leave_values[i] =
@@ -324,22 +322,15 @@ static inline Equity klv_get_leave_value(const KLV *klv, const Rack *leave) {
 static inline void klv_write(const KLV *klv, const char *klv_filename,
                              ErrorStack *error_stack) {
   // Open the file stream for writing
-  FILE *stream = fopen(klv_filename, "wb");
-  if (!stream) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_KLV_FAILED_TO_OPEN_STREAM_FOR_WRITING,
-        get_formatted_string("failed to create klv file for writing: %s",
-                             klv_filename));
+  FILE *stream = fopen_safe(klv_filename, "wb", error_stack);
+  if (!error_stack_is_empty(error_stack)) {
     return;
   }
 
   const uint32_t kwg_number_of_nodes = kwg_get_number_of_nodes(klv->kwg);
 
   uint32_t kwg_size = htole32(kwg_number_of_nodes);
-  size_t result = fwrite(&kwg_size, sizeof(kwg_size), 1, stream);
-  if (result != 1) {
-    log_fatal("kwg size fwrite failure: %zd != %d", result, 1);
-  }
+  fwrite_or_die(&kwg_size, sizeof(kwg_size), 1, stream, "kwg size");
 
   uint32_t *le_nodes =
       (uint32_t *)malloc_or_die(kwg_number_of_nodes * sizeof(uint32_t));
@@ -348,35 +339,27 @@ static inline void klv_write(const KLV *klv, const char *klv_filename,
   }
 
   // Write the nodes to the stream
-  result = fwrite(le_nodes, sizeof(uint32_t), kwg_number_of_nodes, stream);
-  if (result != kwg_number_of_nodes) {
-    log_fatal("kwg nodes fwrite failure: %zd != %zd", result,
-              kwg_number_of_nodes);
-  }
+  fwrite_or_die(le_nodes, sizeof(uint32_t), kwg_number_of_nodes, stream,
+                "kwg nodes");
 
   // Free the temporary buffer
   free(le_nodes);
 
   uint32_t number_of_leaves = klv->number_of_leaves;
   uint32_t le_number_of_leaves = htole32(number_of_leaves);
-  result = fwrite(&le_number_of_leaves, sizeof(le_number_of_leaves), 1, stream);
-  if (result != 1) {
-    log_fatal("number of leaves fwrite failure: %zd != %d", result, 1);
-  }
+  fwrite_or_die(&le_number_of_leaves, sizeof(le_number_of_leaves), 1, stream,
+                "number of leaves");
 
   float *le_floats = (float *)malloc_or_die(number_of_leaves * sizeof(float));
   for (uint32_t i = 0; i < number_of_leaves; i++) {
     const double leave_double = equity_to_double(klv->leave_values[i]);
     le_floats[i] = convert_float_to_le((float)leave_double);
   }
-  result = fwrite(le_floats, sizeof(float), number_of_leaves, stream);
-  if (result != number_of_leaves) {
-    log_fatal("leave values fwrite failure: %zd != %d", result,
-              number_of_leaves);
-  }
+  fwrite_or_die(le_floats, sizeof(float), number_of_leaves, stream,
+                "leave values");
   free(le_floats);
 
-  fclose(stream);
+  fclose_or_die(stream);
 }
 
 #endif

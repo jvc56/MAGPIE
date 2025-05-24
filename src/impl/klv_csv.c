@@ -157,14 +157,13 @@ void klv_read_from_csv_internal(const LetterDistribution *ld,
                                 ErrorStack *error_stack) {
   Rack leave_rack;
   rack_set_dist_size(&leave_rack, ld_get_size(ld));
-  bool str_to_double_success = false;
   char line[LEAVES_CSV_MAX_LINE_LENGTH];
   while (fgets(line, sizeof(line), leaves_stream)) {
     if (strchr(line, '\n') == NULL && !feof(leaves_stream)) {
       error_stack_push(
           error_stack, ERROR_STATUS_KLV_LINE_EXCEEDS_MAX_LENGTH,
           get_formatted_string(
-              "line in klv csv file %s exceeds max length of %d: %s",
+              "line in klv csv file '%s' exceeds max length of %d: %s",
               leaves_filename, LEAVES_CSV_MAX_LINE_LENGTH, line));
       return;
     }
@@ -182,9 +181,8 @@ void klv_read_from_csv_internal(const LetterDistribution *ld,
                                  leaves_filename, leave_str));
         return;
       }
-      const double value =
-          string_to_double_or_set_error(value_str, &str_to_double_success);
-      if (!str_to_double_success) {
+      const double value = string_to_double(value_str, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
         error_stack_push(
             error_stack, ERROR_STATUS_KLV_INVALID_LEAVE,
             get_formatted_string("invalid leave found in klv csv file %s: %s",
@@ -213,12 +211,7 @@ KLV *klv_read_from_csv(const LetterDistribution *ld, const char *data_paths,
 
   KLV *klv = NULL;
   FILE *stream = stream_from_filename(leaves_filename, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_KLV_FAILED_TO_OPEN_STREAM_FOR_READING,
-        get_formatted_string("failed to open klv file for reading: %s",
-                             leaves_filename));
-  } else {
+  if (error_stack_is_empty(error_stack)) {
     klv = klv_create_empty(ld, leaves_name);
     int number_of_leaves = klv_get_number_of_leaves(klv);
     bool *leave_was_set = (bool *)calloc_or_die(number_of_leaves, sizeof(bool));
@@ -229,7 +222,7 @@ KLV *klv_read_from_csv(const LetterDistribution *ld, const char *data_paths,
       klv = NULL;
     }
     free(leave_was_set);
-    fclose(stream);
+    fclose_or_die(stream);
   }
   free(leaves_filename);
   return klv;

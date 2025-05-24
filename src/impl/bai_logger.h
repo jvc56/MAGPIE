@@ -12,8 +12,8 @@
 #include <math.h>
 #include <stdio.h>
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 #define BAI_LOGGER_NUM_DECIMALS 15
 
@@ -24,7 +24,7 @@ typedef struct BAILogger {
 
 static inline BAILogger *bai_logger_create(const char *log_filename) {
   BAILogger *bai_logger = (BAILogger *)malloc_or_die(sizeof(BAILogger));
-  bai_logger->fh = fopen(log_filename, "w");
+  bai_logger->fh = fopen_or_die(log_filename, "w");
   bai_logger->buffer = string_builder_create();
   return bai_logger;
 }
@@ -33,7 +33,7 @@ static inline void bai_logger_destroy(BAILogger *bai_logger) {
   if (!bai_logger) {
     return;
   }
-  fclose(bai_logger->fh);
+  fclose_or_die(bai_logger->fh);
   string_builder_destroy(bai_logger->buffer);
   free(bai_logger);
 }
@@ -148,8 +148,8 @@ static inline void bai_logger_flush(BAILogger *bai_logger) {
   if (string_builder_length(bai_logger->buffer) == 0) {
     return;
   }
-  fprintf(bai_logger->fh, "%s", string_builder_peek(bai_logger->buffer));
-  fflush(bai_logger->fh);
+  write_to_stream(bai_logger->fh, "%s",
+                  string_builder_peek(bai_logger->buffer));
   string_builder_clear(bai_logger->buffer);
 }
 

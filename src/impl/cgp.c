@@ -7,7 +7,8 @@
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
-#include "../util/error_stack.h"
+
+#include "../util/io_util.h"
 
 #include "../impl/gameplay.h"
 
@@ -65,7 +66,7 @@ void parse_cgp_board_row(Game *game, const char *cgp_board_row, int row_index,
     char current_char = cgp_board_row[i];
     if (isdigit(current_char)) {
       current_row_number_of_spaces =
-          (current_row_number_of_spaces * 10) + char_to_int(current_char);
+          (current_row_number_of_spaces * 10) + (current_char - '0');
       if (string_builder_length(tile_string_builder) > 0) {
         place_letters_on_board(game, string_builder_peek(tile_string_builder),
                                row_index, &current_column_index, error_stack);
@@ -170,15 +171,15 @@ void parse_cgp_scores(Game *game, const char *cgp_scores,
                          "cgp has an invalid number of score: %s", cgp_scores));
   } else {
     for (int player_index = 0; player_index < 2; player_index++) {
-      bool success = false;
-      int player_score = string_to_int_or_set_error(
-          string_splitter_get_item(player_scores, player_index), &success);
-      if (!success) {
+      int player_score = string_to_int(
+          string_splitter_get_item(player_scores, player_index), error_stack);
+      if (!error_stack_is_empty(error_stack)) {
         error_stack_push(
             error_stack, ERROR_STATUS_CGP_PARSE_MALFORMED_SCORES,
             get_formatted_string(
                 "cgp has invalid score for player %d: %s", player_index + 1,
                 string_splitter_get_item(player_scores, player_index)));
+        break;
       }
       player_set_score(game_get_player(game, player_index),
                        int_to_equity(player_score));
@@ -197,8 +198,17 @@ void parse_cgp_consecutive_zeros(Game *game, const char *cgp_consecutive_zeros,
                          cgp_consecutive_zeros));
     return;
   }
-  game_set_consecutive_scoreless_turns(game,
-                                       string_to_int(cgp_consecutive_zeros));
+  const int consecutive_zeros_int =
+      string_to_int(cgp_consecutive_zeros, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_push(error_stack,
+                     ERROR_STATUS_CGP_PARSE_MALFORMED_CONSECUTIVE_ZEROS,
+                     get_formatted_string(
+                         "cgp has an invalid value '%s' for consecutive zeros",
+                         cgp_consecutive_zeros));
+    return;
+  }
+  game_set_consecutive_scoreless_turns(game, consecutive_zeros_int);
 }
 
 void parse_cgp_with_cgp_fields(const StringSplitter *cgp_fields, Game *game,

@@ -10,7 +10,6 @@
 #include "../def/exec_defs.h"
 #include "../def/game_defs.h"
 #include "../def/inference_defs.h"
-#include "../def/math_util_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../def/validated_move_defs.h"
 
@@ -20,7 +19,6 @@
 #include "../ent/players_data.h"
 #include "../ent/thread_control.h"
 #include "../ent/validated_move.h"
-#include "../util/error_stack.h"
 
 #include "autoplay.h"
 #include "bai.h"
@@ -35,6 +33,7 @@
 #include "../str/move_string.h"
 #include "../str/sim_string.h"
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
 
 typedef enum {
@@ -402,9 +401,8 @@ void config_recreate_move_list(Config *config, int capacity,
 void string_to_int_or_push_error(const char *int_str_name, const char *int_str,
                                  int min, int max, error_code_t error_code,
                                  int *dest, ErrorStack *error_stack) {
-  bool success = true;
-  *dest = string_to_int_or_set_error(int_str, &success);
-  if (!success) {
+  *dest = string_to_int(int_str, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
     error_stack_push(error_stack, error_code,
                      get_formatted_string("failed to parse value for %s: %s",
                                           int_str_name, int_str));
@@ -450,9 +448,8 @@ void config_load_int(Config *config, arg_token_t arg_token, int min, int max,
   if (!int_str) {
     return;
   }
-  bool success = false;
-  int new_value = string_to_int_or_set_error(int_str, &success);
-  if (!success) {
+  int new_value = string_to_int(int_str, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
         get_formatted_string("failed to parse integer value for %s: %s",
@@ -477,9 +474,8 @@ void config_load_double(Config *config, arg_token_t arg_token, double min,
   if (!double_str) {
     return;
   }
-  bool success = false;
-  double new_value = string_to_double_or_set_error(double_str, &success);
-  if (!success) {
+  double new_value = string_to_double(double_str, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
                      get_formatted_string(
                          "failed to parse decimal value for %s: %s",
@@ -527,9 +523,9 @@ void config_load_uint64(Config *config, arg_token_t arg_token, uint64_t *value,
   if (!is_all_digits_or_empty(int_str)) {
     success = false;
   } else {
-    new_value = string_to_uint64_or_set_error(int_str, &success);
+    new_value = string_to_uint64(int_str, error_stack);
   }
-  if (!success) {
+  if (!success || !error_stack_is_empty(error_stack)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
                      get_formatted_string(
                          "failed to parse nonnegative integer value for %s: %s",
@@ -756,7 +752,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->move_list = config_get_move_list(config);
   sim_args->bai_options.sample_limit = config_get_max_iterations(config);
   const double percentile = config_get_stop_cond_pct(config);
-  if (percentile > PERCENTILE_MAX || config->threshold == BAI_THRESHOLD_NONE) {
+  if (percentile > 100 || config->threshold == BAI_THRESHOLD_NONE) {
     sim_args->bai_options.threshold = BAI_THRESHOLD_NONE;
   } else {
     sim_args->bai_options.delta =
@@ -1686,10 +1682,10 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   const char *new_stop_cond_str =
       config_get_parg_value(config, ARG_TOKEN_STOP_COND_PCT, 0);
   if (new_stop_cond_str && has_iprefix(new_stop_cond_str, "none")) {
-    config->stop_cond_pct = PERCENTILE_MAX + 10;
+    config->stop_cond_pct = 1000;
   } else {
-    config_load_double(config, ARG_TOKEN_STOP_COND_PCT, PERCENTILE_MIN,
-                       PERCENTILE_MAX, &config->stop_cond_pct, error_stack);
+    config_load_double(config, ARG_TOKEN_STOP_COND_PCT, 1e-10, 100 - 1e-10,
+                       &config->stop_cond_pct, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }

@@ -8,7 +8,7 @@
 
 #include "rack.h"
 
-#include "../util/util.h"
+#include "../util/io_util.h"
 
 #define BITS_TO_REPRESENT(n)                                                   \
   ((n) == 0            ? 1                                                     \

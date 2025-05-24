@@ -7,7 +7,8 @@
 #include "../ent/inference_results.h"
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
-#include "../util/error_stack.h"
+
+#include "../util/io_util.h"
 
 typedef struct InferenceArgs {
   int target_index;

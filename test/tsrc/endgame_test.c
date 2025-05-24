@@ -2,7 +2,7 @@
 
 #include "../../src/impl/config.h"
 #include "../../src/impl/endgame.h"
-#include "../../src/util/io.h"
+#include "../../src/util/io_util.h"
 #include "test_util.h"
 
 void test_vs_joey(void) {

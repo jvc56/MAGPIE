@@ -10,8 +10,8 @@
 
 #include "../ent/rack.h"
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 #include "board.h"
 #include "kwg_alpha.h"

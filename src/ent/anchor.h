@@ -7,8 +7,8 @@
 
 #include "../ent/equity.h"
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 typedef struct Anchor {
   // The highest possibly equity

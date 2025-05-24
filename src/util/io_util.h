@@ -1,8 +1,10 @@
-#ifndef ERROR_STACK_H
-#define ERROR_STACK_H
+#ifndef IO_UTIL_H
+#define IO_UTIL_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 typedef enum {
   ERROR_STATUS_SUCCESS,
@@ -98,6 +100,7 @@ typedef enum {
   ERROR_STATUS_GCG_PARSE_INVALID_PHONY_TILES_PLAYER_INDEX,
   ERROR_STATUS_GCG_PARSE_PLAYED_LETTERS_NOT_IN_RACK,
   ERROR_STATUS_GCG_PARSE_RACK_MALFORMED,
+  ERROR_STATUS_GCG_PARSE_MOVE_SCORE_MALFORMED,
   ERROR_STATUS_GCG_PARSE_RACK_NOT_IN_BAG,
   ERROR_STATUS_GCG_PARSE_RACK_END_POINTS_INCORRECT,
   ERROR_STATUS_GCG_PARSE_END_RACK_PENALTY_INCORRECT,
@@ -163,30 +166,77 @@ typedef enum {
   ERROR_STATUS_LD_NAME_NOT_FOUND,
   ERROR_STATUS_LD_UNSUPPORTED_BOARD_DIM_DEFAULT,
   // Read Write errors
-  ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM_FOR_READING,
-  ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM_FOR_WRITING,
+  ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM,
   ERROR_STATUS_RW_MEMORY_ALLOCATION_ERROR,
   ERROR_STATUS_RW_READ_ERROR,
   ERROR_STATUS_RW_WRITE_ERROR,
   // Win Percentage
   ERROR_STATUS_WIN_PCT_NO_DATA_FOUND,
   ERROR_STATUS_WIN_PCT_INVALID_NUMBER_OF_COLUMNS,
+  ERROR_STATUS_WIN_PCT_INVALID_SPREAD,
+  ERROR_STATUS_WIN_PCT_INVALID_DECIMAL,
   // WMP errors
-  ERROR_STATUS_WMP_FAILED_TO_OPEN_STREAM_FOR_READING,
-  ERROR_STATUS_WMP_FAILED_TO_OPEN_STREAM_FOR_WRITING,
   ERROR_STATUS_WMP_UNSUPPORTED_VERSION,
   ERROR_STATUS_WMP_INCOMPATIBLE_BOARD_DIM,
-  // KWG errors
-  ERROR_STATUS_KWG_FAILED_TO_OPEN_STREAM_FOR_WRITING,
-  ERROR_STATUS_KWG_FAILED_TO_WRITE_TO_STREAM,
   // KLV errors
-  ERROR_STATUS_KLV_FAILED_TO_OPEN_STREAM_FOR_READING,
-  ERROR_STATUS_KLV_FAILED_TO_OPEN_STREAM_FOR_WRITING,
   ERROR_STATUS_KLV_LINE_EXCEEDS_MAX_LENGTH,
   ERROR_STATUS_KLV_DUPLICATE_LEAVE,
   ERROR_STATUS_KLV_INVALID_LEAVE,
   ERROR_STATUS_KLV_INVALID_ROW,
+  // String conversion errors
+  ERROR_STATUS_STRING_TO_INT_CONVERSION_FAILED,
+  ERROR_STATUS_STRING_TO_DOUBLE_CONVERSION_FAILED,
+  ERROR_STATUS_FOUND_SIGN_FOR_UNSIGNED_INT,
 } error_code_t;
+
+typedef enum {
+  LOG_TRACE,
+  LOG_DEBUG,
+  LOG_INFO,
+  LOG_WARN,
+  LOG_FATAL,
+} log_level_t;
+
+#define log_trace(...) log_with_info(LOG_TRACE, __FILE__, __LINE__, __VA_ARGS__)
+#define log_debug(...) log_with_info(LOG_DEBUG, __FILE__, __LINE__, __VA_ARGS__)
+#define log_info(...) log_with_info(LOG_INFO, __FILE__, __LINE__, __VA_ARGS__)
+#define log_warn(...) log_with_info(LOG_WARN, __FILE__, __LINE__, __VA_ARGS__)
+#define log_fatal(...) log_with_info(LOG_FATAL, __FILE__, __LINE__, __VA_ARGS__)
+
+void log_with_info(log_level_t log_level, const char *file, int line,
+                   const char *fmt, ...);
+
+void write_to_stream_out(const char *fmt, ...);
+void write_to_stream_err(const char *fmt, ...);
+void write_to_stream(FILE *stream, const char *fmt, ...);
+char *read_line_from_stdin(void);
+
+// WARNING: This function should only be called once at startup or for testing
+void log_set_level(log_level_t new_log_level);
+
+// WARNING: This function should only be used for testing
+void io_set_stream_out(FILE *stream);
+
+// WARNING: This function should only be used for testing
+void io_reset_stream_out(void);
+
+// WARNING: This function should only be used for testing
+void io_set_stream_err(FILE *stream);
+
+// WARNING: This function should only be used for testing
+void io_reset_stream_err(void);
+
+// WARNING: This function should only be used for testing
+void io_set_stream_in(FILE *stream);
+
+// WARNING: This function should only be used for testing
+void io_reset_stream_in(void);
+
+char *format_string_with_va_list(const char *format, va_list *args);
+char *get_formatted_string(const char *format, ...);
+void *malloc_or_die(size_t size);
+void *calloc_or_die(size_t num, size_t size);
+void *realloc_or_die(void *realloc_target, size_t size);
 
 typedef struct ErrorStack ErrorStack;
 
@@ -203,4 +253,13 @@ bool error_stack_is_empty(ErrorStack *error_stack);
 // printing or retrieving the error string
 void error_stack_reset(ErrorStack *error_stack);
 
+char *get_string_from_file(const char *filename, ErrorStack *error_stack);
+void write_string_to_file(const char *filename, const char *mode,
+                          const char *string, ErrorStack *error_stack);
+FILE *fopen_or_die(const char *filename, const char *mode);
+FILE *fopen_safe(const char *filename, const char *mode,
+                 ErrorStack *error_stack);
+void fclose_or_die(FILE *stream);
+void fwrite_or_die(const void *ptr, size_t size, size_t nmemb, FILE *stream,
+                   const char *description);
 #endif

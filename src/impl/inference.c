@@ -21,15 +21,14 @@
 #include "../ent/rack.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
-#include "../util/error_stack.h"
 
 #include "gameplay.h"
 #include "move_gen.h"
 
 #include "../str/inference_string.h"
 
-#include "../util/io.h"
-#include "../util/util.h"
+#include "../util/io_util.h"
+#include "../util/math_util.h"
 
 typedef struct Inference {
   // The following fields are owned by the caller

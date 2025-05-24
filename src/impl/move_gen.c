@@ -30,7 +30,7 @@
 
 #include "wmp_move_gen.h"
 
-#include "../util/util.h"
+#include "../util/io_util.h"
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 

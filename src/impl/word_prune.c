@@ -4,8 +4,9 @@
 
 #include "../def/cross_set_defs.h"
 #include "../def/letter_distribution_defs.h"
+
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 int compare_board_rows(const void *a, const void *b) {
   const BoardRow *row_a = (const BoardRow *)a;

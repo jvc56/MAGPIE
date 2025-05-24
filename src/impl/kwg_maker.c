@@ -4,9 +4,8 @@
 #include "../ent/dictionary_word.h"
 #include "../ent/kwg.h"
 
-#include "../util/io.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 // The KWG data structure was originally
 // developed in wolges. For more details

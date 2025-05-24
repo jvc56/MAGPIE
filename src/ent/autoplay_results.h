@@ -5,10 +5,10 @@
 
 #include "../def/autoplay_defs.h"
 
-#include "../util/error_stack.h"
 #include "game.h"
 #include "move.h"
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
 
 typedef struct AutoplayResults AutoplayResults;

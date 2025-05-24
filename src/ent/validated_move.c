@@ -6,15 +6,13 @@
 #include "../def/rack_defs.h"
 #include "../def/validated_move_defs.h"
 
-#include "../util/error_stack.h"
 #include "game.h"
 #include "move.h"
 #include "static_eval.h"
 #include "words.h"
 
-#include "../util/io.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 #define MOVE_MAX_FIELDS 5
 
@@ -351,7 +349,15 @@ void validate_split_move(const StringSplitter *split_move, const Game *game,
                                tiles_or_exchange_or_pass_rack));
       return;
     }
-    int number_exchanged = string_to_int(tiles_or_exchange_or_pass_rack);
+    int number_exchanged =
+        string_to_int(tiles_or_exchange_or_pass_rack, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_MOVE_VALIDATION_INVALID_NUMBER_EXCHANGED,
+          get_formatted_string("exchanged an invalid number of tiles: %d",
+                               number_exchanged));
+      return;
+    }
     if (number_exchanged < 1 || number_exchanged > (RACK_SIZE)) {
       error_stack_push(
           error_stack, ERROR_STATUS_MOVE_VALIDATION_INVALID_NUMBER_EXCHANGED,
@@ -466,13 +472,23 @@ void validate_split_move(const StringSplitter *split_move, const Game *game,
   }
 
   if (!is_all_digits_or_empty(challenge_points)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_MOVE_VALIDATION_INVALID_CHALLENGE_POINTS,
-        get_formatted_string("invalid challenge points: %s", challenge_points));
+    error_stack_push(error_stack,
+                     ERROR_STATUS_MOVE_VALIDATION_INVALID_CHALLENGE_POINTS,
+                     get_formatted_string("invalid challenge points '%s'",
+                                          challenge_points));
     return;
   }
 
-  vm->challenge_points = int_to_equity(string_to_int(challenge_points));
+  const int challenge_points_int = string_to_int(challenge_points, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_push(error_stack,
+                     ERROR_STATUS_MOVE_VALIDATION_INVALID_CHALLENGE_POINTS,
+                     get_formatted_string("invalid challenge points '%s'",
+                                          challenge_points));
+    return;
+  }
+
+  vm->challenge_points = int_to_equity(challenge_points_int);
 
   // Validate challenge turn loss
 
@@ -493,7 +509,7 @@ void validate_split_move(const StringSplitter *split_move, const Game *game,
     error_stack_push(
         error_stack, ERROR_STATUS_MOVE_VALIDATION_INVALID_CHALLENGE_TURN_LOSS,
         get_formatted_string(
-            "invalid challenge turn loss (value must be either 0 or 1): %s",
+            "invalid challenge turn loss '%s' (value must be either 0 or 1)",
             challenge_turn_loss));
     return;
   }

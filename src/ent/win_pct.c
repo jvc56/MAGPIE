@@ -5,9 +5,8 @@
 
 #include "data_filepaths.h"
 
-#include "../util/io.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 struct WinPct {
   char *name;
@@ -73,25 +72,41 @@ void win_pct_create_internal(const char *win_pct_name,
     } else if (number_of_items != number_of_columns) {
       error_stack_push(
           error_stack, ERROR_STATUS_WIN_PCT_INVALID_NUMBER_OF_COLUMNS,
-          get_formatted_string(
-              "inconsistent number of columns in %s at line %d: %d != %d\n",
-              win_pct_name, i, number_of_columns, number_of_items));
+          get_formatted_string("inconsistent number of columns in '%s' at line "
+                               "%d (found %d but expected %d)",
+                               win_pct_name, i, number_of_items,
+                               number_of_columns));
       break;
     }
 
     // We assume the spread values are continuous and descending
+    int spread =
+        string_to_int(string_splitter_get_item(win_pct_data, 0), error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_WIN_PCT_INVALID_SPREAD,
+          get_formatted_string("invalid win percentage spread value '%s'",
+                               string_splitter_get_item(win_pct_data, 0)));
+      break;
+    }
     if (i == 0) {
-      int spread = string_to_int(string_splitter_get_item(win_pct_data, 0));
       wp->max_spread = spread;
     } else if (i == wp->number_of_spreads - 1) {
-      int spread = string_to_int(string_splitter_get_item(win_pct_data, 0));
       wp->min_spread = spread;
     }
 
     // Start at 1 to ignore the first column.
     for (int j = 1; j < number_of_items; j++) {
-      array[row][j - 1] =
-          string_to_double(string_splitter_get_item(win_pct_data, j));
+      const double win_fraction = string_to_double(
+          string_splitter_get_item(win_pct_data, j), error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_WIN_PCT_INVALID_DECIMAL,
+            get_formatted_string("invalid win percentage decimal value '%s'",
+                                 string_splitter_get_item(win_pct_data, 0)));
+        break;
+      }
+      array[row][j - 1] = win_fraction;
     }
     string_splitter_destroy(win_pct_data);
     win_pct_data = NULL;

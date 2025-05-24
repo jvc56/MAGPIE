@@ -9,9 +9,8 @@
 #include "timer.h"
 #include "xoshiro.h"
 
-#include "../util/io.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 struct ThreadControl {
   int number_of_threads;

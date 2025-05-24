@@ -23,8 +23,8 @@
 #include "move_gen.h"
 #include "rack_list.h"
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 typedef struct LeavegenSharedData {
   int num_gens;
@@ -519,21 +519,29 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
   return NULL;
 }
 
-bool parse_min_rack_targets(StringSplitter *split_min_rack_targets,
-                            int *min_rack_targets) {
+void parse_min_rack_targets(const AutoplayArgs *args,
+                            StringSplitter *split_min_rack_targets,
+                            int *min_rack_targets, ErrorStack *error_stack) {
   int num_gens = string_splitter_get_number_of_items(split_min_rack_targets);
   for (int i = 0; i < num_gens; i++) {
     const char *item = string_splitter_get_item(split_min_rack_targets, i);
     if (is_string_empty_or_whitespace(item)) {
-      return false;
+      error_stack_push(
+          error_stack, ERROR_STATUS_AUTOPLAY_MALFORMED_MINIMUM_LEAVE_TARGETS,
+          get_formatted_string("found an empty value for one or more of the "
+                               "minimum rack targets: %s",
+                               args->num_games_or_min_rack_targets));
+      return;
     }
-    bool success;
-    min_rack_targets[i] = string_to_int_or_set_error(item, &success);
-    if (!success || min_rack_targets[i] < 0) {
-      return false;
+    min_rack_targets[i] = string_to_int(item, error_stack);
+    if (!error_stack_is_empty(error_stack) || min_rack_targets[i] < 0) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_AUTOPLAY_MALFORMED_MINIMUM_LEAVE_TARGETS,
+          get_formatted_string("failed to parse minimum rack targets: %s",
+                               args->num_games_or_min_rack_targets));
+      return;
     }
   }
-  return true;
 }
 
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
@@ -547,10 +555,10 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
         split_string(args->num_games_or_min_rack_targets, ',', false);
     num_gens = string_splitter_get_number_of_items(split_min_rack_targets);
     min_rack_targets = malloc_or_die((sizeof(int)) * (num_gens));
-    bool success =
-        parse_min_rack_targets(split_min_rack_targets, min_rack_targets);
+    parse_min_rack_targets(args, split_min_rack_targets, min_rack_targets,
+                           error_stack);
     string_splitter_destroy(split_min_rack_targets);
-    if (!success) {
+    if (!error_stack_is_empty(error_stack)) {
       free(min_rack_targets);
       error_stack_push(
           error_stack, ERROR_STATUS_AUTOPLAY_MALFORMED_MINIMUM_LEAVE_TARGETS,
@@ -560,10 +568,9 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
     }
     first_gen_num_games = UINT64_MAX;
   } else {
-    bool success;
-    first_gen_num_games = string_to_uint64_or_set_error(
-        args->num_games_or_min_rack_targets, &success);
-    if (!success) {
+    first_gen_num_games =
+        string_to_uint64(args->num_games_or_min_rack_targets, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
       error_stack_push(error_stack, ERROR_STATUS_AUTOPLAY_MALFORMED_NUM_GAMES,
                        get_formatted_string(
                            "failed to parse the specified number of games: %s",

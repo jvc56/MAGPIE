@@ -9,8 +9,8 @@
 
 #include "letter_distribution.h"
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 typedef struct Rack {
   // counts must be signed for the sake of inference code checking that

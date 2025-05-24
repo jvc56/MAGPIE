@@ -3,7 +3,8 @@
 #define GCG_H
 
 #include "../ent/game_history.h"
-#include "../util/error_stack.h"
+
+#include "../util/io_util.h"
 
 #include "config.h"
 

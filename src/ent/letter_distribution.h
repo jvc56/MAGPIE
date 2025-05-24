@@ -13,9 +13,8 @@
 
 #include "data_filepaths.h"
 
-#include "../util/io.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 typedef enum {
   LD_TYPE_UNKNOWN,
@@ -121,13 +120,40 @@ static inline void ld_create_internal(const char *ld_name,
     const char *letter = string_splitter_get_item(single_letter_info, 0);
     const char *lower_case_letter =
         string_splitter_get_item(single_letter_info, 1);
-    int dist = string_to_int(string_splitter_get_item(single_letter_info, 2));
+    int dist = string_to_int(string_splitter_get_item(single_letter_info, 2),
+                             error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_LD_INVALID_ROW,
+          get_formatted_string("invalid value for the number of '%s' in letter "
+                               "distribution file %s: %s",
+                               letter, ld_name, line));
+      break;
+    }
     ld->total_tiles += dist;
-    const int score_int =
-        string_to_int(string_splitter_get_item(single_letter_info, 3));
+    const int score_int = string_to_int(
+        string_splitter_get_item(single_letter_info, 3), error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_LD_INVALID_ROW,
+          get_formatted_string("invalid value for the score of '%s' in letter "
+                               "distribution file %s: %s",
+                               letter, ld_name, line));
+      break;
+    }
     const Equity score = int_to_equity(score_int);
-    int is_vowel =
-        string_to_int(string_splitter_get_item(single_letter_info, 4));
+    int is_vowel = string_to_int(
+        string_splitter_get_item(single_letter_info, 4), error_stack);
+
+    if (!error_stack_is_empty(error_stack) || is_vowel < 0 || is_vowel > 1) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_LD_INVALID_ROW,
+          get_formatted_string("invalid value for whether '%s' is a vowel "
+                               "(expected 0 or 1) in letter "
+                               "distribution file %s: %s",
+                               letter, ld_name, line));
+      break;
+    }
 
     int tile_length = string_length(letter);
     if (tile_length > max_tile_length) {

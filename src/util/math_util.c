@@ -3,11 +3,9 @@
 #include <complex.h>
 #include <math.h>
 #include <stdbool.h>
-#include <stdio.h>
+#include <stdint.h>
 
-#include "../def/math_util_defs.h"
-
-#include "io.h"
+#include "io_util.h"
 
 double z_to_p_cdf(double z) { return (0.5 * (1 + erf(z / sqrt(2.0)))) * 100; }
 
@@ -151,4 +149,21 @@ bool cubic_roots(double a, double b, double c, double d,
   }
 
   return true;
+}
+
+uint64_t choose(uint64_t n, uint64_t k) {
+  if (n < k) {
+    return 0;
+  }
+  if (k == 0 || n == k) {
+    return 1;
+  }
+  if (k > n - k) {
+    k = n - k;
+  }
+  uint64_t result = 1;
+  for (uint64_t i = 1; i <= k; ++i) {
+    result = result * (n - i + 1) / i;
+  }
+  return result;
 }

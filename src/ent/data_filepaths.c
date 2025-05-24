@@ -4,9 +4,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#include "../util/../util/error_stack.h"
-
-#include "../util/io.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
 
 #define KWG_EXTENSION ".kwg"
@@ -289,8 +287,7 @@ StringList *data_filepaths_get_all_data_path_names(const char *data_paths,
       error_stack_push(
           error_stack, ERROR_STATUS_FILEPATH_NO_MATCHING_FILES,
           get_formatted_string("no files matched pattern %s for type %s",
-                               filepath_type_names[type]));
-      return NULL;
+                               glob_pattern, filepath_type_names[type]));
     }
     free(glob_pattern);
     globfree(&glob_results);

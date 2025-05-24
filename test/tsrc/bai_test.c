@@ -12,7 +12,7 @@
 
 #include "../../src/impl/bai.h"
 #include "../../src/impl/bai_sampling_rule.h"
-#include "../../src/util/io.h"
+#include "../../src/util/io_util.h"
 
 static const int sampling_rules[3] = {
     BAI_SAMPLING_RULE_ROUND_ROBIN,
@@ -249,7 +249,7 @@ void write_bai_input(const double delta, const RandomVariablesArgs *rv_args,
     fprintf(file, "%0.20f\n", rvs_sample(rng, 0, 0, NULL));
   }
   rvs_destroy(rng);
-  fclose(file);
+  fclose_or_die(file);
 }
 
 void test_bai_epigons(int num_threads) {
@@ -369,7 +369,7 @@ void test_bai_input_from_file(const char *bai_input_filename,
     }
   }
 
-  fclose(file);
+  fclose_or_die(file);
 
   BAILogger *bai_logger = bai_logger_create("bai_log_magpie.txt");
 

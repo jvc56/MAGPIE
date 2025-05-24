@@ -6,12 +6,10 @@
 #include "../def/board_defs.h"
 #include "../def/board_layout_defs.h"
 
-#include "../util/error_stack.h"
 #include "data_filepaths.h"
 
-#include "../util/io.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 #define BONUS_SQUARE_MAP_SIZE 256
 
@@ -71,15 +69,23 @@ void board_layout_parse_split_start_coords(
     ErrorStack *error_stack) {
 
   if (string_splitter_get_number_of_items(starting_coords) != 2) {
-    error_stack_push(error_stack,
-                     ERROR_STATUS_BOARD_LAYOUT_MALFORMED_START_COORDS,
-                     string_duplicate("invalid starting coordinates"));
+    error_stack_push(
+        error_stack, ERROR_STATUS_BOARD_LAYOUT_MALFORMED_START_COORDS,
+        string_duplicate(
+            "invalid starting coordinates, expected 2 comma separated values"));
     return;
   }
 
   for (int i = 0; i < 2; i++) {
-    const int lane_start_value =
-        string_to_int(string_splitter_get_item(starting_coords, i));
+    const int lane_start_value = string_to_int(
+        string_splitter_get_item(starting_coords, i), error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(error_stack,
+                       ERROR_STATUS_BOARD_LAYOUT_MALFORMED_START_COORDS,
+                       get_formatted_string("invalid starting coordinate '%d'",
+                                            lane_start_value));
+      return;
+    }
     if (lane_start_value < 0 || lane_start_value >= BOARD_DIM) {
       error_stack_push(
           error_stack, ERROR_STATUS_BOARD_LAYOUT_OUT_OF_BOUNDS_START_COORDS,

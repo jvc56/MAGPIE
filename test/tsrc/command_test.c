@@ -12,9 +12,8 @@
 
 #include "../../src/impl/exec.h"
 
-#include "../../src/util/io.h"
+#include "../../src/util/io_util.h"
 #include "../../src/util/string_util.h"
-#include "../../src/util/util.h"
 
 #include "test_constants.h"
 #include "test_util.h"
@@ -141,7 +140,7 @@ void assert_command_status_and_output(Config *config, const char *command,
   char *test_outerror_filename = get_test_filename("outerror");
 
   // Reset the contents of output
-  fclose(fopen(test_output_filename, "w"));
+  fclose_or_die(fopen(test_output_filename, "w"));
 
   FILE *output_fh = fopen(test_output_filename, "w");
   FILE *errorout_fh = fopen(test_outerror_filename, "w");
@@ -168,7 +167,7 @@ void assert_command_status_and_output(Config *config, const char *command,
   }
   block_for_search(config, seconds_to_wait);
 
-  fclose(errorout_fh);
+  fclose_or_die(errorout_fh);
 
   char *test_output = get_string_from_file_or_die(test_output_filename);
   int newlines_in_output = count_newlines(test_output);
@@ -207,7 +206,7 @@ void test_command_execution(void) {
   Config *config = config_create_default_test();
 
   assert_command_status_and_output(config, "sim -lex CSW21 -it 1000 -plies 2h3",
-                                   false, 5, 0, 1);
+                                   false, 5, 0, 2);
 
   assert_command_status_and_output(
       config,
@@ -401,7 +400,7 @@ void test_process_command(const char *arg_string,
       get_formatted_string("./bin/magpie %s", arg_string);
 
   // Reset the contents of output
-  fclose(fopen(test_output_filename, "w"));
+  fclose_or_die(fopen(test_output_filename, "w"));
 
   FILE *output_fh = fopen(test_output_filename, "w");
   FILE *errorout_fh = fopen(test_outerror_filename, "w");
@@ -460,7 +459,7 @@ void test_process_command(const char *arg_string,
 void test_exec_single_command(void) {
   char *plies_error_substr = get_formatted_string(
       "error %d", ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
-  test_process_command("sim -lex CSW21 -it 1000 -plies 2h3", 0, NULL, 1,
+  test_process_command("sim -lex CSW21 -it 1000 -plies 2h3", 0, NULL, 2,
                        plies_error_substr);
   free(plies_error_substr);
 
@@ -530,8 +529,8 @@ void test_exec_ucgi_command(void) {
   // Wait for magpie to quit
   block_for_process_command(process_args, 5);
 
-  fclose(input_writer);
-  fclose(input_reader);
+  fclose_or_die(input_writer);
+  fclose_or_die(input_reader);
   delete_fifo(test_input_filename);
   process_args_destroy(process_args);
   free(test_input_filename);
@@ -574,8 +573,8 @@ void test_exec_console_command(void) {
   // Wait for magpie to quit
   block_for_process_command(process_args, 30);
 
-  fclose(input_writer);
-  fclose(input_reader);
+  fclose_or_die(input_writer);
+  fclose_or_die(input_reader);
   delete_fifo(test_input_filename);
   process_args_destroy(process_args);
   free(config_load_error_substr);

@@ -1,6 +1,7 @@
 #include "../../src/impl/config.h"
 
 #include "../../src/impl/rack_list.h"
+#include "../../src/util/math_util.h"
 
 #include "test_util.h"
 

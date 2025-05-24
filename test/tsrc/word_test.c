@@ -33,20 +33,17 @@ void test_words_played(void) {
   // Should generate 4 words: PIP, ONE, HEN, and the main word PENT
   assert(formed_words_get_word_length(fw, 0) == 3);
   assert(formed_words_get_word_valid(fw, 0));
-  assert(memory_compare(formed_words_get_word(fw, 0), (uint8_t[]){16, 9, 16},
-                        3) == 0);
+  assert(memcmp(formed_words_get_word(fw, 0), (uint8_t[]){16, 9, 16}, 3) == 0);
   assert(formed_words_get_word_length(fw, 1) == 3);
   assert(formed_words_get_word_valid(fw, 1));
-  assert(memory_compare(formed_words_get_word(fw, 1), (uint8_t[]){15, 14, 5},
-                        3) == 0);
+  assert(memcmp(formed_words_get_word(fw, 1), (uint8_t[]){15, 14, 5}, 3) == 0);
   assert(formed_words_get_word_length(fw, 2) == 3);
   assert(formed_words_get_word_valid(fw, 2));
-  assert(memory_compare(formed_words_get_word(fw, 2), (uint8_t[]){8, 5, 14},
-                        3) == 0);
+  assert(memcmp(formed_words_get_word(fw, 2), (uint8_t[]){8, 5, 14}, 3) == 0);
   assert(formed_words_get_word_length(fw, 3) == 4);
   assert(formed_words_get_word_valid(fw, 3));
-  assert(memory_compare(formed_words_get_word(fw, 3),
-                        (uint8_t[]){16, 5, 14, 20}, 4) == 0);
+  assert(memcmp(formed_words_get_word(fw, 3), (uint8_t[]){16, 5, 14, 20}, 4) ==
+         0);
   validated_moves_destroy(vms_pent);
 
   // Play some random phoney making a lot of words 6G DI(PET)AZ
@@ -60,24 +57,22 @@ void test_words_played(void) {
   // OD, WIFAY*, ANE, ZGENUINE*, and the main word DIPETAZ*
   assert(formed_words_get_word_length(fw, 0) == 2);
   assert(formed_words_get_word_valid(fw, 0));
-  assert(memory_compare(formed_words_get_word(fw, 0), (uint8_t[]){15, 4}, 2) ==
-         0);
+  assert(memcmp(formed_words_get_word(fw, 0), (uint8_t[]){15, 4}, 2) == 0);
   assert(formed_words_get_word_length(fw, 1) == 5);
   assert(!formed_words_get_word_valid(fw, 1));
-  assert(memory_compare(formed_words_get_word(fw, 1),
-                        (uint8_t[]){23, 9, 6, 1, 25}, 5) == 0);
+  assert(memcmp(formed_words_get_word(fw, 1), (uint8_t[]){23, 9, 6, 1, 25},
+                5) == 0);
   assert(formed_words_get_word_length(fw, 2) == 3);
   assert(formed_words_get_word_valid(fw, 2));
-  assert(memory_compare(formed_words_get_word(fw, 2), (uint8_t[]){1, 14, 5},
-                        3) == 0);
+  assert(memcmp(formed_words_get_word(fw, 2), (uint8_t[]){1, 14, 5}, 3) == 0);
   assert(formed_words_get_word_length(fw, 3) == 8);
   assert(!formed_words_get_word_valid(fw, 3));
-  assert(memory_compare(formed_words_get_word(fw, 3),
-                        (uint8_t[]){26, 7, 5, 14, 21, 9, 14, 5}, 8) == 0);
+  assert(memcmp(formed_words_get_word(fw, 3),
+                (uint8_t[]){26, 7, 5, 14, 21, 9, 14, 5}, 8) == 0);
   assert(formed_words_get_word_length(fw, 4) == 7);
   assert(!formed_words_get_word_valid(fw, 4));
-  assert(memory_compare(formed_words_get_word(fw, 4),
-                        (uint8_t[]){4, 9, 16, 5, 20, 1, 26}, 7) == 0);
+  assert(memcmp(formed_words_get_word(fw, 4),
+                (uint8_t[]){4, 9, 16, 5, 20, 1, 26}, 7) == 0);
 
   validated_moves_destroy(vms_dipetaz);
 
@@ -91,12 +86,12 @@ void test_words_played(void) {
   // generates SPAYS and BOYS
   assert(formed_words_get_word_length(fw, 0) == 5);
   assert(formed_words_get_word_valid(fw, 0));
-  assert(memory_compare(formed_words_get_word(fw, 0),
-                        (uint8_t[]){19, 16, 1, 25, 19}, 5) == 0);
+  assert(memcmp(formed_words_get_word(fw, 0), (uint8_t[]){19, 16, 1, 25, 19},
+                5) == 0);
   assert(formed_words_get_word_length(fw, 1) == 4);
   assert(formed_words_get_word_valid(fw, 1));
-  assert(memory_compare(formed_words_get_word(fw, 1),
-                        (uint8_t[]){2, 15, 25, 19}, 4) == 0);
+  assert(memcmp(formed_words_get_word(fw, 1), (uint8_t[]){2, 15, 25, 19}, 4) ==
+         0);
 
   validated_moves_destroy(vms_boys);
 
@@ -109,12 +104,12 @@ void test_words_played(void) {
   // generates BOYS and SPAYS
   assert(formed_words_get_word_length(fw, 0) == 4);
   assert(formed_words_get_word_valid(fw, 0));
-  assert(memory_compare(formed_words_get_word(fw, 0),
-                        (uint8_t[]){2, 15, 25, 19}, 4) == 0);
+  assert(memcmp(formed_words_get_word(fw, 0), (uint8_t[]){2, 15, 25, 19}, 4) ==
+         0);
   assert(formed_words_get_word_length(fw, 1) == 5);
   assert(formed_words_get_word_valid(fw, 1));
-  assert(memory_compare(formed_words_get_word(fw, 1),
-                        (uint8_t[]){19, 16, 1, 25, 19}, 5) == 0);
+  assert(memcmp(formed_words_get_word(fw, 1), (uint8_t[]){19, 16, 1, 25, 19},
+                5) == 0);
 
   validated_moves_destroy(vms_spays);
 
@@ -128,18 +123,15 @@ void test_words_played(void) {
   // ZE# (phony because lexicon is NWL)
   assert(formed_words_get_word_length(fw, 0) == 2);
   assert(!formed_words_get_word_valid(fw, 0));
-  assert(memory_compare(formed_words_get_word(fw, 0), (uint8_t[]){26, 5}, 2) ==
-         0);
+  assert(memcmp(formed_words_get_word(fw, 0), (uint8_t[]){26, 5}, 2) == 0);
   // AN
   assert(formed_words_get_word_length(fw, 1) == 2);
   assert(formed_words_get_word_valid(fw, 1));
-  assert(memory_compare(formed_words_get_word(fw, 1), (uint8_t[]){1, 14}, 2) ==
-         0);
+  assert(memcmp(formed_words_get_word(fw, 1), (uint8_t[]){1, 14}, 2) == 0);
   // ZA
   assert(formed_words_get_word_length(fw, 2) == 2);
   assert(formed_words_get_word_valid(fw, 2));
-  assert(memory_compare(formed_words_get_word(fw, 2), (uint8_t[]){26, 1}, 2) ==
-         0);
+  assert(memcmp(formed_words_get_word(fw, 2), (uint8_t[]){26, 1}, 2) == 0);
 
   validated_moves_destroy(vms_za);
 

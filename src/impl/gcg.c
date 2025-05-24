@@ -21,9 +21,8 @@
 
 #include "../impl/gameplay.h"
 
-#include "../util/io.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 #define MAX_GROUPS 7
 
@@ -237,10 +236,10 @@ char *get_matching_group_as_string(const GCGParser *gcg_parser,
 }
 
 int get_matching_group_as_int(const GCGParser *gcg_parser, const char *gcg_line,
-                              int group_index) {
+                              int group_index, ErrorStack *error_stack) {
   char *matching_group_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
-  int matching_group_int = string_to_int(matching_group_string);
+  int matching_group_int = string_to_int(matching_group_string, error_stack);
   free(matching_group_string);
   return matching_group_int;
 }
@@ -357,23 +356,31 @@ int get_player_index(const GCGParser *gcg_parser, const char *gcg_line,
 
 void copy_cumulative_score_to_game_event(const GCGParser *gcg_parser,
                                          GameEvent *game_event,
-                                         const char *gcg_line,
-                                         int group_index) {
+                                         const char *gcg_line, int group_index,
+                                         ErrorStack *error_stack) {
   char *cumulative_score_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
-  game_event_set_cumulative_score(
-      game_event, int_to_equity(string_to_int(cumulative_score_string)));
+  const int cumulative_score_int =
+      string_to_int(cumulative_score_string, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    game_event_set_cumulative_score(game_event,
+                                    int_to_equity(cumulative_score_int));
+  }
   free(cumulative_score_string);
 }
 
 void copy_score_adjustment_to_game_event(const GCGParser *gcg_parser,
                                          GameEvent *game_event,
-                                         const char *gcg_line,
-                                         int group_index) {
+                                         const char *gcg_line, int group_index,
+                                         ErrorStack *error_stack) {
   char *score_adjustment_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
-  game_event_set_score_adjustment(
-      game_event, int_to_equity(string_to_int(score_adjustment_string)));
+  const int score_adjustment =
+      string_to_int(score_adjustment_string, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    game_event_set_score_adjustment(game_event,
+                                    int_to_equity(score_adjustment));
+  }
   free(score_adjustment_string);
 }
 
@@ -426,12 +433,17 @@ void add_tiles_played_to_string_builder(StringBuilder *sb,
 }
 
 Equity get_move_score_from_gcg_line(const GCGParser *gcg_parser,
-                                    const char *gcg_line, int group_index) {
+                                    const char *gcg_line, int group_index,
+                                    ErrorStack *error_stack) {
   char *move_score_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
-  const Equity move_score = int_to_equity(string_to_int(move_score_string));
+  const int move_score_int = string_to_int(move_score_string, error_stack);
+  Equity move_score_eq = EQUITY_INITIAL_VALUE;
+  if (error_stack_is_empty(error_stack)) {
+    move_score_eq = int_to_equity(move_score_int);
+  }
   free(move_score_string);
-  return move_score;
+  return move_score_eq;
 }
 
 void finalize_note(GCGParser *gcg_parser) {
@@ -974,7 +986,11 @@ void parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
   case GCG_PLAYER_TOKEN:
     // The value of player_index is guaranteed to be either 0 or 1 by regex
     // matching
-    player_index = get_matching_group_as_int(gcg_parser, gcg_line, 1) - 1;
+    player_index =
+        get_matching_group_as_int(gcg_parser, gcg_line, 1, error_stack) - 1;
+    if (!error_stack_is_empty(error_stack)) {
+      log_fatal("encountered unexpected player index: %d", player_index);
+    }
     if (game_history_player_is_set(game_history, player_index)) {
       error_stack_push(
           error_stack, ERROR_STATUS_GCG_PARSE_PLAYER_NUMBER_REDUNDANT,
@@ -1114,10 +1130,24 @@ void parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     string_builder_destroy(move_string_builder);
 
     // Get the GCG score so it can be compared to the validated move score
-    move_score = get_move_score_from_gcg_line(gcg_parser, gcg_line, 5);
+    move_score =
+        get_move_score_from_gcg_line(gcg_parser, gcg_line, 5, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_GCG_PARSE_MOVE_SCORE_MALFORMED,
+          get_formatted_string("invalid move score for move: %s", gcg_line));
+      return;
+    }
 
     // Cumulative score
-    copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 6);
+    copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 6,
+                                        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_MOVE_SCORE_MALFORMED,
+                       get_formatted_string(
+                           "invalid cumulative score for move: %s", gcg_line));
+      return;
+    }
     break;
   case GCG_NOTE_TOKEN:
     if (number_of_events == 0) {
@@ -1183,7 +1213,14 @@ void parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     }
     game_event_set_player_index(game_event, player_index);
     game_event_set_type(game_event, GAME_EVENT_PHONY_TILES_RETURNED);
-    copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 4);
+    copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 4,
+                                        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_MOVE_SCORE_MALFORMED,
+                       get_formatted_string(
+                           "invalid cumulative score for move: %s", gcg_line));
+      return;
+    }
     break;
   case GCG_TIME_PENALTY_TOKEN:
     game_event =
@@ -1207,9 +1244,23 @@ void parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     }
     game_event_set_rack(game_event, game_event_rack);
 
-    copy_score_adjustment_to_game_event(gcg_parser, game_event, gcg_line, 3);
+    copy_score_adjustment_to_game_event(gcg_parser, game_event, gcg_line, 3,
+                                        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_GCG_PARSE_MOVE_SCORE_MALFORMED,
+          get_formatted_string("invalid event score for move: %s", gcg_line));
+      return;
+    }
 
-    copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 4);
+    copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 4,
+                                        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_MOVE_SCORE_MALFORMED,
+                       get_formatted_string(
+                           "invalid cumulative score for move: %s", gcg_line));
+      return;
+    }
     break;
   case GCG_END_RACK_PENALTY_TOKEN:
     game_event =
@@ -1247,7 +1298,14 @@ void parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
       return;
     }
 
-    copy_score_adjustment_to_game_event(gcg_parser, game_event, gcg_line, 4);
+    copy_score_adjustment_to_game_event(gcg_parser, game_event, gcg_line, 4,
+                                        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_MOVE_SCORE_MALFORMED,
+                       get_formatted_string(
+                           "invalid cumulative score for move: %s", gcg_line));
+      return;
+    }
 
     const int rack_score =
         rack_get_score(game_get_ld(gcg_parser->game), penalty_tiles);
@@ -1266,7 +1324,14 @@ void parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
 
     rack_destroy(penalty_tiles);
 
-    copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 5);
+    copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 5,
+                                        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_MOVE_SCORE_MALFORMED,
+                       get_formatted_string(
+                           "invalid cumulative score for move: %s", gcg_line));
+      return;
+    }
 
     break;
   case GCG_PASS_TOKEN:
@@ -1299,7 +1364,14 @@ void parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     cgp_move_string = string_builder_dump(move_string_builder, NULL);
     string_builder_destroy(move_string_builder);
 
-    copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 3);
+    copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 3,
+                                        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_MOVE_SCORE_MALFORMED,
+                       get_formatted_string(
+                           "invalid cumulative score for move: %s", gcg_line));
+      return;
+    }
     break;
   case GCG_CHALLENGE_BONUS_TOKEN:
     game_event =
@@ -1317,8 +1389,22 @@ void parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
           get_formatted_string("could not parse rack: %s", gcg_line));
       return;
     }
-    copy_score_adjustment_to_game_event(gcg_parser, game_event, gcg_line, 3);
-    copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 4);
+    copy_score_adjustment_to_game_event(gcg_parser, game_event, gcg_line, 3,
+                                        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_GCG_PARSE_MOVE_SCORE_MALFORMED,
+          get_formatted_string("invalid event score for move: %s", gcg_line));
+      return;
+    }
+    copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 4,
+                                        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_MOVE_SCORE_MALFORMED,
+                       get_formatted_string(
+                           "invalid cumulative score for move: %s", gcg_line));
+      return;
+    }
     break;
   case GCG_END_RACK_POINTS_TOKEN:
     game_event =
@@ -1337,7 +1423,14 @@ void parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
       return;
     }
 
-    copy_score_adjustment_to_game_event(gcg_parser, game_event, gcg_line, 3);
+    copy_score_adjustment_to_game_event(gcg_parser, game_event, gcg_line, 3,
+                                        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_GCG_PARSE_MOVE_SCORE_MALFORMED,
+          get_formatted_string("invalid event score for move: %s", gcg_line));
+      return;
+    }
 
     const int end_rack_score =
         rack_get_score(game_get_ld(gcg_parser->game), game_event_rack);
@@ -1352,7 +1445,14 @@ void parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
       return;
     }
 
-    copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 4);
+    copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 4,
+                                        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_MOVE_SCORE_MALFORMED,
+                       get_formatted_string(
+                           "invalid cumulative score for move: %s", gcg_line));
+      return;
+    }
     break;
   case GCG_EXCHANGE_TOKEN:
     game_event =
@@ -1389,7 +1489,14 @@ void parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     cgp_move_string = string_builder_dump(move_string_builder, NULL);
     string_builder_destroy(move_string_builder);
 
-    copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 4);
+    copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 4,
+                                        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_MOVE_SCORE_MALFORMED,
+                       get_formatted_string(
+                           "invalid cumulative score for move: %s", gcg_line));
+      return;
+    }
     break;
   case GCG_UNKNOWN_TOKEN:
     if (previous_token == GCG_NOTE_TOKEN) {

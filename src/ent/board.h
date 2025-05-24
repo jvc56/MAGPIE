@@ -15,9 +15,8 @@
 
 #include "letter_distribution.h"
 
-#include "../util/io.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 typedef struct Square {
   uint64_t cross_set;

@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "../util/io.h"
+#include "../util/io_util.h"
 
 // Platform-specific includes
 #if defined(_WIN32) || defined(_WIN64)

@@ -16,7 +16,6 @@
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "../ent/validated_move.h"
-#include "../util/error_stack.h"
 
 #include "autoplay.h"
 #include "cgp.h"
@@ -32,7 +31,7 @@
 #include "../str/sim_string.h"
 
 #include "../util/fileproxy.h"
-#include "../util/io.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
 
 #define UCGI_COMMAND_STRING "ucgi"

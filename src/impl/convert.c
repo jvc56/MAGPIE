@@ -3,13 +3,12 @@
 #include "../ent/conversion_results.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/kwg.h"
-#include "../util/error_stack.h"
 
 #include "klv_csv.h"
 #include "kwg_maker.h"
 #include "wmp_maker.h"
 
-#include "../util/io.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
 
 void convert_from_text_with_dwl(const LetterDistribution *ld,
@@ -19,12 +18,8 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
                                 DictionaryWordList *strings,
                                 ConversionResults *conversion_results,
                                 ErrorStack *error_stack) {
-  FILE *input_file = fopen(input_filename, "r");
-  if (!input_file) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONVERT_INPUT_FILE_ERROR,
-        get_formatted_string("failed to open input file for conversion: %s",
-                             input_filename));
+  FILE *input_file = fopen_safe(input_filename, "r", error_stack);
+  if (!error_stack_is_empty(error_stack)) {
     return;
   }
   char *line = NULL;
@@ -77,7 +72,7 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
     free(line);
   }
   if (!error_stack_is_empty(error_stack)) {
-    fclose(input_file);
+    fclose_or_die(input_file);
     return;
   }
 

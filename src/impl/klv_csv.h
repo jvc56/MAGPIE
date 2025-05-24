@@ -4,7 +4,7 @@
 #include "../ent/klv.h"
 #include "../ent/letter_distribution.h"
 
-#include "../util/error_stack.h"
+#include "../util/io_util.h"
 
 void klv_write_to_csv(KLV *klv, const LetterDistribution *ld,
                       const char *csv_filename, ErrorStack *error_stack);

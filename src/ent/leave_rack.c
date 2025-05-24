@@ -4,7 +4,7 @@
 
 #include "rack.h"
 
-#include "../util/util.h"
+#include "../util/io_util.h"
 
 struct LeaveRack {
   Rack *leave;

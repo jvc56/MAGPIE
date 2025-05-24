@@ -16,12 +16,10 @@
 
 #include "bai_logger.h"
 
-#include "../util/io.h"
+#include "../util/io_util.h"
 #include "../util/math_util.h"
-#include "../util/util.h"
 
 #include "../def/bai_defs.h"
-#include "../def/math_util_defs.h"
 
 typedef struct GK16 {
   double δ;

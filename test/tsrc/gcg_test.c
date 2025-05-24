@@ -16,8 +16,8 @@
 
 #include "../../src/impl/gcg.h"
 
+#include "../../src/util/io_util.h"
 #include "../../src/util/string_util.h"
-#include "../../src/util/util.h"
 
 #include "test_util.h"
 

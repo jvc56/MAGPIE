@@ -1,6 +1,6 @@
 #include "../../src/impl/exec.h"
 
-#include "../../src/util/io.h"
+#include "../../src/util/io_util.h"
 
 #include "alphabet_test.h"
 #include "autoplay_test.h"

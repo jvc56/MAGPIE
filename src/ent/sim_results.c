@@ -14,7 +14,7 @@
 #include "win_pct.h"
 #include "xoshiro.h"
 
-#include "../util/util.h"
+#include "../util/io_util.h"
 
 struct SimmedPlay {
   Move *move;

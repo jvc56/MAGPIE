@@ -14,9 +14,8 @@
 #include "../ent/bit_rack.h"
 
 #include "../util/fileproxy.h"
-#include "../util/io.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 #include "data_filepaths.h"
 // WordMap binary format:
@@ -242,10 +241,6 @@ static inline void wmp_load_from_filename(WMP *wmp, const char *wmp_name,
                                           ErrorStack *error_stack) {
   FILE *stream = stream_from_filename(wmp_filename, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_WMP_FAILED_TO_OPEN_STREAM_FOR_READING,
-        get_formatted_string("failed to open wmp file for reading: %s\n",
-                             wmp_filename));
     return;
   }
 
@@ -539,101 +534,64 @@ static inline bool wmp_has_word(const WMP *wmp, const BitRack *bit_rack,
   return wmp_get_word_entry(wmp, bit_rack, word_length) != NULL;
 }
 
-static inline bool write_byte_to_stream(uint8_t byte, FILE *stream) {
-  const size_t result = fwrite(&byte, sizeof(byte), 1, stream);
-  return result == 1;
+static inline void write_byte_to_stream_or_die(uint8_t byte, FILE *stream,
+                                               const char *description) {
+  fwrite_or_die(&byte, sizeof(byte), 1, stream, description);
 }
 
-static inline bool write_uint32_to_stream(uint32_t i, FILE *stream) {
-  const size_t result = fwrite(&i, sizeof(i), 1, stream);
-  return result == 1;
+static inline void write_uint32_to_stream_or_die(uint32_t i, FILE *stream,
+                                                 const char *description) {
+  fwrite_or_die(&i, sizeof(i), 1, stream, description);
 }
 
 static inline void write_wfl_to_stream(int length, const WMPForLength *wfl,
                                        FILE *stream) {
-  if (!write_uint32_to_stream(wfl->num_word_buckets, stream)) {
-    log_fatal("num word buckets: %d\n", wfl->num_word_buckets);
-  }
-  size_t result = fwrite(wfl->word_bucket_starts, sizeof(uint32_t),
-                         wfl->num_word_buckets + 1, stream);
-  if (result != wfl->num_word_buckets + 1) {
-    log_fatal("word bucket starts: %d\n", wfl->num_word_buckets);
-  }
-  if (!write_uint32_to_stream(wfl->num_word_entries, stream)) {
-    log_fatal("num word entries: %d\n", wfl->num_word_entries);
-  }
-  result = fwrite(wfl->word_map_entries, sizeof(WMPEntry),
-                  wfl->num_word_entries, stream);
-  if (result != wfl->num_word_entries) {
-    log_fatal("word map entries: %d\n", wfl->num_word_entries);
-  }
-  if (!write_uint32_to_stream(wfl->num_uninlined_words, stream)) {
-    log_fatal("num uninlined words: %d\n", wfl->num_uninlined_words);
-  }
-  result = fwrite(wfl->word_letters, sizeof(uint8_t),
-                  wfl->num_uninlined_words * length, stream);
-  if (result != wfl->num_uninlined_words * length) {
-    log_fatal("word letters: %d\n", wfl->num_uninlined_words * length);
-  }
-  if (!write_uint32_to_stream(wfl->num_blank_buckets, stream)) {
-    log_fatal("num blank buckets");
-  }
-  result = fwrite(wfl->blank_bucket_starts, sizeof(uint32_t),
-                  wfl->num_blank_buckets + 1, stream);
-  if (result != wfl->num_blank_buckets + 1) {
-    log_fatal("blank buckets starts: %d\n", wfl->num_blank_buckets);
-  }
-  if (!write_uint32_to_stream(wfl->num_blank_entries, stream)) {
-    log_fatal("num blank entries: %d\n", wfl->num_blank_entries);
-  }
-  result = fwrite(wfl->blank_map_entries, sizeof(WMPEntry),
-                  wfl->num_blank_entries, stream);
-  if (result != wfl->num_blank_entries) {
-    log_fatal("num blank entries: %d\n", wfl->num_blank_entries);
-  }
-  if (!write_uint32_to_stream(wfl->num_double_blank_buckets, stream)) {
-    log_fatal("num double blank buckets: %d\n", wfl->num_double_blank_buckets);
-  }
-  result = fwrite(wfl->double_blank_bucket_starts, sizeof(uint32_t),
-                  wfl->num_double_blank_buckets + 1, stream);
-  if (result != wfl->num_double_blank_buckets + 1) {
-    log_fatal("double blank bucket starts: %d\n",
-              wfl->num_double_blank_buckets);
-  }
-  if (!write_uint32_to_stream(wfl->num_double_blank_entries, stream)) {
-    log_fatal("num double blank entries: %d\n", wfl->num_double_blank_entries);
-  }
-  result = fwrite(wfl->double_blank_map_entries, sizeof(WMPEntry),
-                  wfl->num_double_blank_entries, stream);
-  if (result != wfl->num_double_blank_entries) {
-    log_fatal("double blank entries: %d\n", wfl->num_double_blank_entries);
-  }
+  write_uint32_to_stream_or_die(wfl->num_word_buckets, stream,
+                                "num word buckets");
+  fwrite_or_die(wfl->word_bucket_starts, sizeof(uint32_t),
+                wfl->num_word_buckets + 1, stream, "word bucket starts");
+  write_uint32_to_stream_or_die(wfl->num_word_entries, stream,
+                                "num word entries");
+  fwrite_or_die(wfl->word_map_entries, sizeof(WMPEntry), wfl->num_word_entries,
+                stream, "word map entries");
+  write_uint32_to_stream_or_die(wfl->num_uninlined_words, stream,
+                                "num uninlined words");
+  fwrite_or_die(wfl->word_letters, sizeof(uint8_t),
+                wfl->num_uninlined_words * length, stream, "word letters");
+  write_uint32_to_stream_or_die(wfl->num_blank_buckets, stream,
+                                "num blank buckets");
+  fwrite_or_die(wfl->blank_bucket_starts, sizeof(uint32_t),
+                wfl->num_blank_buckets + 1, stream, "blank bucket starts");
+  write_uint32_to_stream_or_die(wfl->num_blank_entries, stream,
+                                "num blank entries");
+  fwrite_or_die(wfl->blank_map_entries, sizeof(WMPEntry),
+                wfl->num_blank_entries, stream, "blank map entries");
+  write_uint32_to_stream_or_die(wfl->num_double_blank_buckets, stream,
+                                "num double blank buckets");
+  fwrite_or_die(wfl->double_blank_bucket_starts, sizeof(uint32_t),
+                wfl->num_double_blank_buckets + 1, stream,
+                "double blank bucket starts");
+  write_uint32_to_stream_or_die(wfl->num_double_blank_entries, stream,
+                                "num double blank entries");
+  fwrite_or_die(wfl->double_blank_map_entries, sizeof(WMPEntry),
+                wfl->num_double_blank_entries, stream,
+                "double blank map entries");
 }
 
 static inline void wmp_write_to_file(const WMP *wmp, const char *filename,
                                      ErrorStack *error_stack) {
-  FILE *stream = fopen(filename, "wb");
-  if (!stream) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_WMP_FAILED_TO_OPEN_STREAM_FOR_WRITING,
-        get_formatted_string("failed to open wmp file for writing: %s\n",
-                             filename));
+  FILE *stream = fopen_safe(filename, "wb", error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
-  if (!write_byte_to_stream(wmp->version, stream)) {
-    log_fatal("could not write version to stream");
-  }
-  if (!write_byte_to_stream(wmp->board_dim, stream)) {
-    log_fatal("could not write board_dim to stream");
-  }
-  if (!write_uint32_to_stream(wmp->max_word_lookup_bytes, stream)) {
-    log_fatal("could not write max word lookup bytes to stream");
-  }
+  write_byte_to_stream_or_die(wmp->version, stream, "wmp version");
+  write_byte_to_stream_or_die(wmp->board_dim, stream, "wmp board dim");
+  write_uint32_to_stream_or_die(wmp->max_word_lookup_bytes, stream,
+                                "wmp max word lookup bytes");
   for (int len = 2; len <= BOARD_DIM; len++) {
     write_wfl_to_stream(len, &wmp->wfls[len], stream);
   }
-  if (fclose(stream) != 0) {
-    log_fatal("could not close WMP file after writing");
-  }
+  fclose_or_die(stream);
 }
 
 #endif

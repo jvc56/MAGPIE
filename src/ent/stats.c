@@ -4,8 +4,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
-#include "../util/io.h"
-#include "../util/util.h"
+#include "../util/io_util.h"
 
 struct Stat {
   uint64_t num_unique_samples;

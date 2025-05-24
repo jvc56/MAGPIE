@@ -19,7 +19,8 @@
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "../ent/win_pct.h"
-#include "../util/error_stack.h"
+
+#include "../util/io_util.h"
 
 typedef struct Config Config;
 

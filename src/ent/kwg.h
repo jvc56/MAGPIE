@@ -9,9 +9,8 @@
 #include "../def/kwg_defs.h"
 
 #include "../util/fileproxy.h"
-#include "../util/io.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 #include "data_filepaths.h"
 #include "letter_distribution.h"
@@ -140,7 +139,7 @@ static inline void load_kwg(const char *kwg_name, const char *kwg_filename,
 
   kwg_read_nodes_from_stream(kwg, number_of_nodes, stream);
 
-  fclose(stream);
+  fclose_or_die(stream);
 }
 
 static inline void kwg_destroy(KWG *kwg) {
@@ -177,27 +176,15 @@ static inline KWG *kwg_create_empty(void) {
 
 static inline void kwg_write_to_file(const KWG *kwg, const char *filename,
                                      ErrorStack *error_stack) {
-  FILE *stream = fopen(filename, "wb");
-  if (!stream) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_KWG_FAILED_TO_OPEN_STREAM_FOR_WRITING,
-        get_formatted_string("failed to open kwg file for writing: %s\n",
-                             filename));
+  FILE *stream = fopen_safe(filename, "wb", error_stack);
+  if (!error_stack_is_empty(error_stack)) {
     return;
   }
   for (int i = 0; i < kwg->number_of_nodes; i++) {
     const uint32_t node = htole32(kwg->nodes[i]);
-    const size_t result = fwrite(&node, sizeof(uint32_t), 1, stream);
-    if (result < 1) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_KWG_FAILED_TO_WRITE_TO_STREAM,
-          get_formatted_string("failed to write to kwg: %s", filename));
-      return;
-    }
+    fwrite_or_die(&node, sizeof(uint32_t), 1, stream, "kwg node");
   }
-  if (fclose(stream)) {
-    log_fatal("failed to close kwg after wriring: %s", filename);
-  }
+  fclose_or_die(stream);
 }
 
 static inline bool kwg_in_letter_set(const KWG *kwg, uint8_t letter,

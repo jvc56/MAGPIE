@@ -19,7 +19,7 @@
 #include "../../src/ent/thread_control.h"
 #include "../../src/impl/cgp.h"
 #include "../../src/str/rack_string.h"
-#include "../../src/util/error_stack.h"
+#include "../../src/util/io_util.h"
 #include "../../src/util/string_util.h"
 
 #include "config_test.h"

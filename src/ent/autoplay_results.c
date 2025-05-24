@@ -5,7 +5,6 @@
 
 #include "../def/autoplay_defs.h"
 
-#include "../util/error_stack.h"
 #include "game.h"
 #include "move.h"
 #include "stats.h"
@@ -13,9 +12,9 @@
 #include "../str/move_string.h"
 #include "../str/rack_string.h"
 
+#include "../util/io_util.h"
 #include "../util/math_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 #define DEFAULT_WRITE_BUFFER_SIZE 1024
 
@@ -471,10 +470,10 @@ void fj_data_reset_fh(FJSharedData *shared_data, const char *filename) {
     char *filename_num_remaining = insert_before_dot(filename, ext);
     free(ext);
     if (shared_data->fhs[i]) {
-      fclose(shared_data->fhs[i]);
+      fclose_or_die(shared_data->fhs[i]);
       shared_data->fhs[i] = NULL;
     }
-    shared_data->fhs[i] = fopen(filename_num_remaining, "w");
+    shared_data->fhs[i] = fopen_or_die(filename_num_remaining, "w");
     if (!shared_data->fhs[i]) {
       log_fatal("error opening fj file for writing: %s",
                 filename_num_remaining);
@@ -528,7 +527,7 @@ void fj_data_destroy(Recorder *recorder) {
   if (recorder->owns_thread_shared_data) {
     FJSharedData *shared_data = (FJSharedData *)recorder->thread_shared_data;
     for (int i = 0; i < MAX_NUMBER_OF_TILES; i++) {
-      fclose(shared_data->fhs[i]);
+      fclose_or_die(shared_data->fhs[i]);
     }
     free(shared_data);
   }
@@ -570,7 +569,7 @@ void fj_write_buffer_to_output(Recorder *recorder, int remaining_tiles,
     pthread_mutex_lock(&shared_data->fh_mutexes[remaining_tiles]);
     if (fputs(string_builder_peek(sb), shared_data->fhs[remaining_tiles]) ==
         EOF) {
-      fclose(shared_data->fhs[remaining_tiles]);
+      fclose_or_die(shared_data->fhs[remaining_tiles]);
       log_fatal("error writing to fj file of remaining tiles: %d",
                 remaining_tiles);
     }

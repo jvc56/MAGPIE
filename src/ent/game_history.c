@@ -10,9 +10,8 @@
 #include "rack.h"
 #include "validated_move.h"
 
-#include "../util/io.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 struct GameEvent {
   game_event_t event_type;

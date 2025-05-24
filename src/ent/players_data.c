@@ -9,9 +9,8 @@
 #include "kwg.h"
 #include "wmp.h"
 
-#include "../util/io.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 // The PlayersData struct holds all of the
 // information that can be set during configuration.

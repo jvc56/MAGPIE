@@ -6,8 +6,7 @@
 #include <sys/time.h>
 #include <time.h>
 
-#include "../util/io.h"
-#include "../util/util.h"
+#include "../util/io_util.h"
 
 // Not thread safe
 typedef struct Timer {

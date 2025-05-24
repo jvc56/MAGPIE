@@ -8,7 +8,8 @@
 #include "../ent/autoplay_results.h"
 #include "../ent/game.h"
 #include "../ent/thread_control.h"
-#include "../util/error_stack.h"
+
+#include "../util/io_util.h"
 
 typedef struct AutoplayArgs {
   const char *num_games_or_min_rack_targets;

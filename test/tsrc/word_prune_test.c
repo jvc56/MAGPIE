@@ -8,8 +8,8 @@
 #include "../../src/impl/cgp.h"
 #include "../../src/impl/config.h"
 #include "../../src/impl/word_prune.h"
+#include "../../src/util/io_util.h"
 #include "../../src/util/string_util.h"
-#include "../../src/util/util.h"
 
 #include "test_util.h"
 

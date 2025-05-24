@@ -14,8 +14,7 @@
 
 #include "../ent/equity.h"
 
-#include "../util/io.h"
-#include "../util/util.h"
+#include "../util/io_util.h"
 
 typedef enum {
   MOVE_LIST_TYPE_DEFAULT,

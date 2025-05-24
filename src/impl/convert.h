@@ -5,7 +5,8 @@
 
 #include "../ent/conversion_results.h"
 #include "../ent/letter_distribution.h"
-#include "../util/error_stack.h"
+
+#include "../util/io_util.h"
 
 typedef struct ConversionArgs {
   const char *conversion_type_string;

@@ -621,7 +621,7 @@ void write_stats_to_file(const char *filename, const char *strategies[],
     free(matches_pct_str);
   }
 
-  fclose(output_file);
+  fclose_or_die(output_file);
 }
 
 void append_game_with_moves_to_file(const char *filename, const Game *game,
@@ -634,7 +634,7 @@ void append_game_with_moves_to_file(const char *filename, const Game *game,
   string_builder_add_game(game_string, game, move_list);
   fprintf(output_file, "%s\n", string_builder_peek(game_string));
   string_builder_destroy(game_string);
-  fclose(output_file);
+  fclose_or_die(output_file);
 }
 
 void append_content_to_file(const char *filename, const char *sim_stats_str) {
@@ -643,7 +643,7 @@ void append_content_to_file(const char *filename, const char *sim_stats_str) {
     log_fatal("failed to open output file '%s'\n", filename);
   }
   fprintf(output_file, "%s\n", sim_stats_str);
-  fclose(output_file);
+  fclose_or_die(output_file);
 }
 
 void test_sim_perf(const char *sim_perf_iters) {

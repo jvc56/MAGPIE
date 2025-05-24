@@ -8,7 +8,8 @@
 #include "leave_rack.h"
 #include "stats.h"
 
-#include "../util/util.h"
+#include "../util/io_util.h"
+#include "../util/math_util.h"
 
 #define NUMBER_OF_STAT_TYPES 3
 
@@ -224,8 +225,10 @@ double get_probability_for_random_minimum_draw(
   if (minimum_adjusted_for_partial_rack <= 0) {
     return 1;
   }
-  const uint8_t total_number_of_letters_in_bag = rack_get_total_letters(bag_as_rack);
-  const uint8_t total_number_of_letters_on_rack = rack_get_total_letters(target_rack);
+  const uint8_t total_number_of_letters_in_bag =
+      rack_get_total_letters(bag_as_rack);
+  const uint8_t total_number_of_letters_on_rack =
+      rack_get_total_letters(target_rack);
   int number_of_this_letter_in_bag = rack_get_letter(bag_as_rack, this_letter);
 
   // If there are not enough letters to meet the minimum, the probability

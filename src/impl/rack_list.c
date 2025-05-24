@@ -14,7 +14,8 @@
 
 #include "../str/rack_string.h"
 
-#include "../util/util.h"
+#include "../util/io_util.h"
+#include "../util/math_util.h"
 
 typedef struct RackListItem {
   // Index of this item in the rack list items ordered by count.

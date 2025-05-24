@@ -1,9 +1,8 @@
 #ifndef DATA_FILEPATHS_H
 #define DATA_FILEPATHS_H
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-
-#include "../util/../util/error_stack.h"
 
 typedef enum {
   DATA_FILEPATH_TYPE_KWG,

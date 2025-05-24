@@ -2,7 +2,7 @@
 #define ARENA_H
 
 #include "../compat/malloc.h"
-#include "../util/io.h"
+#include "../util/io_util.h"
 
 #include <assert.h>
 #include <stdint.h>

@@ -14,9 +14,8 @@
 
 #include "../str/sim_string.h"
 
-#include "../util/io.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 #define SIMILARITY_EPSILON 1e-6
 

@@ -8,18 +8,17 @@
  */
 #include "bai_peps.h"
 
-#include "../util/io.h"
-#include "../util/math_util.h"
-#include "../util/util.h"
-
-#include "../def/bai_defs.h"
-
-#include "bai_logger.h"
-
 #include <complex.h>
 #include <float.h>
 #include <math.h>
 #include <stdbool.h>
+
+#include "../util/io_util.h"
+#include "../util/math_util.h"
+
+#include "../def/bai_defs.h"
+
+#include "bai_logger.h"
 
 #define BAI_BINARY_SEARCH_MAX_ITER 100
 

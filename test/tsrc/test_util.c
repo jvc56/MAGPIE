@@ -42,9 +42,8 @@
 #include "../../src/str/move_string.h"
 #include "../../src/str/rack_string.h"
 
-#include "../../src/util/io.h"
+#include "../../src/util/io_util.h"
 #include "../../src/util/string_util.h"
-#include "../../src/util/util.h"
 
 #include "test_constants.h"
 #include "test_util.h"
@@ -99,11 +98,12 @@ void load_and_exec_config_or_die(Config *config, const char *cmd) {
   config_load_command(config, cmd, error_stack);
   error_code_t status = error_stack_top(error_stack);
   if (status != ERROR_STATUS_SUCCESS) {
+    error_stack_print_and_reset(error_stack);
     log_fatal("load config failed with status %d: %s\n", status, cmd);
   }
   config_execute_command(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    error_stack_reset(error_stack);
+    error_stack_print_and_reset(error_stack);
     abort();
   }
   error_stack_destroy(error_stack);
@@ -606,7 +606,7 @@ void delete_file(const char *filename) {
   }
 }
 
-void reset_file(const char *filename) { fclose(fopen(filename, "w")); }
+void reset_file(const char *filename) { fclose_or_die(fopen(filename, "w")); }
 
 void fifo_create(const char *fifo_name) {
   int result;
@@ -876,8 +876,8 @@ void assert_word_count(const LetterDistribution *ld,
   for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
     DictionaryWord *word = dictionary_word_list_get_word(words, i);
     if ((dictionary_word_get_length(word) == expected_length) &&
-        (memory_compare(dictionary_word_get_word(word), expected,
-                        expected_length) == 0)) {
+        (memcmp(dictionary_word_get_word(word), expected, expected_length) ==
+         0)) {
       count++;
     }
   }

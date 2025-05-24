@@ -1,10 +1,9 @@
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "error_stack.h"
-#include "io.h"
+#include "io_util.h"
 #include "string_util.h"
-#include "util.h"
 
 #define MAX_CACHE_SIZE 32
 #define MAX_DATA_FILENAME_LENGTH 64
@@ -34,12 +33,7 @@ FILE *stream_from_filename(const char *filename, ErrorStack *error_stack) {
   log_debug("%s not found in cache (size %d), opening", filename,
             file_cache.num_items);
   FILE *stream;
-  stream = fopen(filename, "r");
-  if (!stream) {
-    error_stack_push(error_stack,
-                     ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM_FOR_READING,
-                     get_formatted_string("error opening file: %s", filename));
-  }
+  stream = fopen_safe(filename, "r", error_stack);
   return stream;
 }
 

@@ -8,8 +8,8 @@
 
 #include "../ent/letter_distribution.h"
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 struct DictionaryWord {
   uint8_t word[MAX_KWG_STRING_LENGTH];

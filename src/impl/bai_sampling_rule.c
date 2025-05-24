@@ -18,8 +18,7 @@
 #include "bai_tracking.h"
 #include "random_variable.h"
 
-#include "../util/io.h"
-#include "../util/util.h"
+#include "../util/io_util.h"
 
 int round_robin_next_sample(const void __attribute__((unused)) * data,
                             const int __attribute__((unused)) astar,
