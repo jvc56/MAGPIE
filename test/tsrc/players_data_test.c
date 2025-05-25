@@ -48,7 +48,10 @@ void test_for_data_type(const char **data_names, const char *data_paths,
   for (int i = 0; i < number_of_data_names; i += 2) {
     players_data_set(players_data, players_data_type, data_paths, data_names[i],
                      data_names[i + 1], error_stack);
-    assert(error_stack_is_empty(error_stack));
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_print_and_reset(error_stack);
+      assert(false);
+    }
     assert_players_data(players_data, players_data_type, data_names[i],
                         data_names[i + 1]);
     if (i > 0) {
@@ -118,7 +121,7 @@ void test_reloaded_data(void) {
   players_data_set_move_sort_type(players_data, 1, MOVE_SORT_SCORE);
   players_data_set_move_record_type(players_data, 1, MOVE_RECORD_ALL);
 
-  players_data_set(players_data, PLAYERS_DATA_TYPE_KLV, DEFAULT_DATA_PATHS,
+  players_data_set(players_data, PLAYERS_DATA_TYPE_KLV, DEFAULT_TEST_DATA_PATH,
                    "CSW21", "CSW21", error_stack);
   assert(error_stack_is_empty(error_stack));
 
@@ -134,8 +137,8 @@ void test_reloaded_data(void) {
   assert(within_epsilon(klv_get_indexed_leave_value(klv1, leave_index),
                         new_leave_value));
 
-  players_data_reload(players_data, PLAYERS_DATA_TYPE_KLV, DEFAULT_DATA_PATHS,
-                      error_stack);
+  players_data_reload(players_data, PLAYERS_DATA_TYPE_KLV,
+                      DEFAULT_TEST_DATA_PATH, error_stack);
   assert(error_stack_is_empty(error_stack));
 
   KLV *klv2 = players_data_get_klv(players_data, 0);
@@ -157,9 +160,9 @@ void test_players_data(void) {
       "NWL20", "DISC2", "OSPS49", "CSW21", "DISC2",  "NWL20", "DISC2"};
   int number_of_data_names = sizeof(data_names) / sizeof(data_names[0]);
   assert(number_of_data_names % 2 == 0);
-  test_for_data_type(data_names, DEFAULT_DATA_PATHS, PLAYERS_DATA_TYPE_KWG,
+  test_for_data_type(data_names, DEFAULT_TEST_DATA_PATH, PLAYERS_DATA_TYPE_KWG,
                      number_of_data_names, error_stack);
-  test_for_data_type(data_names, DEFAULT_DATA_PATHS, PLAYERS_DATA_TYPE_KLV,
+  test_for_data_type(data_names, DEFAULT_TEST_DATA_PATH, PLAYERS_DATA_TYPE_KLV,
                      number_of_data_names, error_stack);
   test_unshared_data();
   test_reloaded_data();

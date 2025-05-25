@@ -17,6 +17,7 @@ const char *cgp1 =
     "15/15/15/15/15/15 AHMPRTU/ 177/44 0 -lex CSW21; -ld english;";
 
 void test_wasm_api(void) {
+  wasm_init_configs(DEFAULT_TEST_DATA_PATH);
   // Attempt to load a malformed cgp
   char *retstr = wasm_score_move("malformed_cgp" VS_ED, "6G.DIPETAZ.ADEIRSZ");
   has_substring(retstr, "wasm cgp load failed");
