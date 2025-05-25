@@ -245,12 +245,11 @@ char *data_filepaths_get_writable_filename(const char *data_paths,
     return NULL;
   }
   char *dir_path = get_dirpath_from_filepath(writable_filepath);
-  if (access(dir_path, W_OK) != 0) {
+  if (access(dir_path, F_OK) != 0 || access(dir_path, W_OK) != 0) {
     error_stack_push(
         error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_WRITABLE,
-        get_formatted_string(
-            "directory %s exists but does not have required write permissions",
-            dir_path));
+        get_formatted_string("directory %s does not exist or is not writable",
+                             dir_path));
   }
   free(dir_path);
   return writable_filepath;

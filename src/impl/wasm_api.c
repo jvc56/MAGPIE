@@ -25,11 +25,24 @@ static ErrorStack *iso_error_stack = NULL;
 static Config *wasm_config = NULL;
 static ErrorStack *wasm_error_stack = NULL;
 
+void wasm_load_command(const char *cmd) {
+  config_load_command(iso_config, cmd, iso_error_stack);
+  if (!error_stack_is_empty(iso_error_stack)) {
+    error_stack_print_and_reset(iso_error_stack);
+    return;
+  }
+  config_load_command(wasm_config, cmd, wasm_error_stack);
+  if (!error_stack_is_empty(wasm_error_stack)) {
+    error_stack_print_and_reset(wasm_error_stack);
+    return;
+  }
+}
+
 void wasm_init_configs(const char *paths) {
   iso_error_stack = error_stack_create();
   iso_config = config_create_default(iso_error_stack);
   if (!error_stack_is_empty(iso_error_stack)) {
-    error_stack_print_and_reset(wasm_error_stack);
+    error_stack_print_and_reset(iso_error_stack);
     return;
   }
   wasm_error_stack = error_stack_create();
@@ -39,16 +52,7 @@ void wasm_init_configs(const char *paths) {
     return;
   }
   char *cmd = get_formatted_string("set -path %s", paths);
-  config_load_command(iso_config, cmd, iso_error_stack);
-  if (!error_stack_is_empty(wasm_error_stack)) {
-    error_stack_print_and_reset(wasm_error_stack);
-    return;
-  }
-  config_load_command(wasm_config, cmd, iso_error_stack);
-  if (!error_stack_is_empty(wasm_error_stack)) {
-    error_stack_print_and_reset(wasm_error_stack);
-    return;
-  }
+  wasm_load_command(cmd);
   free(cmd);
 }
 
