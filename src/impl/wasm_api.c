@@ -25,6 +25,37 @@ static ErrorStack *iso_error_stack = NULL;
 static Config *wasm_config = NULL;
 static ErrorStack *wasm_error_stack = NULL;
 
+void wasm_load_command(const char *cmd) {
+  config_load_command(iso_config, cmd, iso_error_stack);
+  if (!error_stack_is_empty(iso_error_stack)) {
+    error_stack_print_and_reset(iso_error_stack);
+    return;
+  }
+  config_load_command(wasm_config, cmd, wasm_error_stack);
+  if (!error_stack_is_empty(wasm_error_stack)) {
+    error_stack_print_and_reset(wasm_error_stack);
+    return;
+  }
+}
+
+void wasm_init_configs(const char *paths) {
+  iso_error_stack = error_stack_create();
+  iso_config = config_create_default(iso_error_stack);
+  if (!error_stack_is_empty(iso_error_stack)) {
+    error_stack_print_and_reset(iso_error_stack);
+    return;
+  }
+  wasm_error_stack = error_stack_create();
+  wasm_config = config_create_default(wasm_error_stack);
+  if (!error_stack_is_empty(wasm_error_stack)) {
+    error_stack_print_and_reset(wasm_error_stack);
+    return;
+  }
+  char *cmd = get_formatted_string("set -path %s", paths);
+  wasm_load_command(cmd);
+  free(cmd);
+}
+
 void wasm_destroy_configs(void) {
   config_destroy(wasm_config);
   error_stack_destroy(wasm_error_stack);
@@ -33,15 +64,8 @@ void wasm_destroy_configs(void) {
 }
 
 void load_cgp_into_iso_config(const char *cgp, int num_plays) {
-  // Use a separate command vars to get
+  // Use a separate config and error stack to get
   // a game for static_eval_get_move_score and static_evaluation
-  if (!iso_config) {
-    iso_error_stack = error_stack_create();
-    iso_config = config_create_default(iso_error_stack);
-    if (!error_stack_is_empty(iso_error_stack)) {
-      return;
-    }
-  }
   char *cgp_command =
       get_formatted_string("cgp %s -numplays %d", cgp, num_plays);
   execute_command_sync(iso_config, iso_error_stack, cgp_command);
@@ -126,14 +150,6 @@ char *static_evaluation(const char *cgpstr, int num_plays) {
 }
 
 int process_command_wasm(const char *cmd) {
-  if (!wasm_config) {
-    wasm_error_stack = error_stack_create();
-    wasm_config = config_create_default(wasm_error_stack);
-    if (!error_stack_is_empty(wasm_error_stack)) {
-      error_stack_print_and_reset(wasm_error_stack);
-      return 1;
-    }
-  }
   execute_command_async(wasm_config, wasm_error_stack, cmd);
   return 0;
 }

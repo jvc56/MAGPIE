@@ -20,7 +20,7 @@
 #include "../../src/impl/config.h"
 
 #define TRIVIAL_CROSS_SET_STRING "*"
-#define DEFAULT_TEST_DATA_PATH "./data:./testdata"
+#define DEFAULT_TEST_DATA_PATH "./testdata:./data"
 
 typedef struct SortedMoveList {
   int count;

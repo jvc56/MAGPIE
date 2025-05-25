@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+void wasm_init_configs(const char *paths);
+
 void wasm_destroy_configs(void);
 
 // Some functions for our WASM API. Not all the WASM-accessible functions are
