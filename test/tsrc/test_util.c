@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <dirent.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <math.h>
 #include <setjmp.h>
 #include <signal.h>
@@ -12,8 +13,6 @@
 #include <unistd.h>
 
 #include "../../src/def/board_defs.h"
-#include "../../src/def/config_defs.h"
-#include "../../src/def/game_defs.h"
 #include "../../src/def/letter_distribution_defs.h"
 #include "../../src/def/move_defs.h"
 
@@ -108,7 +107,7 @@ void load_and_exec_config_or_die(Config *config, const char *cmd) {
   }
   error_stack_destroy(error_stack);
   printf("loaded config with command: %s\n", cmd);
-  printf("seed: %llu\n",
+  printf("seed: %" PRIu64 "\n",
          thread_control_get_seed(config_get_thread_control(config)));
 }
 
