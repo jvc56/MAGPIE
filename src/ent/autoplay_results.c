@@ -767,7 +767,7 @@ void win_pct_data_add_game(Recorder *recorder, const RecorderArgs *args) {
     const int final_score_diff = player_on_turn_final_game_spread - score_diff;
     const int row_index = num_tiles_remaining - 1;
     win_pct_data->total_games[row_index]++;
-    int start_col_index = WIN_PCT_MAX_SPREAD - final_score_diff + 1;
+    int start_col_index = WIN_PCT_MAX_SPREAD - final_score_diff;
     // Increment the wins value for the tie by 1 since ties are worth 1
     if (start_col_index < WIN_PCT_NUM_COLUMNS) {
       win_pct_data->wins[row_index][start_col_index]++;
