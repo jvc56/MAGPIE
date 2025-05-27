@@ -961,9 +961,14 @@ void execute_autoplay(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  AutoplayResultsCreateArgs create_args = {
+      .bag_size = ld_get_total_tiles(config->ld),
+  };
+
   autoplay_results_set_options(
       config->autoplay_results,
-      config_get_parg_value(config, ARG_TOKEN_AUTOPLAY, 0), error_stack);
+      config_get_parg_value(config, ARG_TOKEN_AUTOPLAY, 0), &create_args,
+      error_stack);
 
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -1028,7 +1033,12 @@ void execute_leave_gen(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  autoplay_results_set_options(config->autoplay_results, "games", error_stack);
+  AutoplayResultsCreateArgs create_args = {
+      .bag_size = ld_get_total_tiles(config->ld),
+  };
+
+  autoplay_results_set_options(config->autoplay_results, "games", &create_args,
+                               error_stack);
 
   if (!error_stack_is_empty(error_stack)) {
     return;

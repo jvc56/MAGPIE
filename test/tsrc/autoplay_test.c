@@ -140,7 +140,9 @@ void test_autoplay_divergent_games(void) {
   AutoplayResults *ar = autoplay_results_create();
 
   ErrorStack *error_stack = error_stack_create();
-  autoplay_results_set_options(ar, "games", error_stack);
+  AutoplayResultsCreateArgs ar_create_args = {
+      .bag_size = ld_get_total_tiles(config_get_ld(csw_config))};
+  autoplay_results_set_options(ar, "games", &ar_create_args, error_stack);
   assert(error_stack_is_empty(error_stack));
 
   load_and_exec_config_or_die(csw_config, "cgp " VS_ANDY_CGP);
@@ -234,11 +236,21 @@ void test_autoplay_fj_record(void) {
   config_destroy(csw_config);
 }
 
+void test_autoplay_win_pct_record(void) {
+  Config *csw_config =
+      config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
+                           "all -numplays 1  -gp false -threads 1");
+  load_and_exec_config_or_die(csw_config,
+                              "autoplay winpct 50 -seed 50 -wb 1000000 "
+                              "-recfile ./data/test_record.txt");
+  config_destroy(csw_config);
+}
+
 void test_autoplay(void) {
   test_odds_that_player_is_better();
   test_autoplay_default();
   test_autoplay_leavegen();
   test_autoplay_divergent_games();
-  test_autoplay_fj_record();
+  test_autoplay_win_pct_record();
   return;
 }
