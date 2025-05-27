@@ -1,4 +1,4 @@
-#include "convert.h"
+ #include "convert.h"
 
 #include "../ent/conversion_results.h"
 #include "../ent/dictionary_word.h"
@@ -223,10 +223,13 @@ get_output_filepath_type_from_conv_type(conversion_type_t conversion_type) {
     break;
   case CONVERT_UNKNOWN:
     log_fatal("cannot get output filepath type for unknown conversion type");
-    filepath_type =
-        DATA_FILEPATH_TYPE_LEXICON; // This line will never be reached due to
-                                    // log_fatal, but satisfies compiler
-    break;
+    #if defined(__has_builtin) && __has_builtin(__builtin_unreachable)
+    __builtin_unreachable();
+#else
+    // Unreachable code, suppresses compiler warning
+    filepath_type = DATA_FILEPATH_TYPE_LEXICON;
+#endif
+break;
   }
   return filepath_type;
 }
