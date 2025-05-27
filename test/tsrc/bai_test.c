@@ -235,12 +235,12 @@ void write_bai_input(const double delta, const RandomVariablesArgs *rv_args,
                      const RandomVariablesArgs *rng_args) {
   FILE *file = fopen("normal_data.txt", "w");
   fprintf(file, "%0.20f\n", delta);
-  fprintf(file, "%lu\n", rv_args->num_rvs);
+  fprintf(file, "%llu\n", rv_args->num_rvs);
   for (uint64_t i = 0; i < rv_args->num_rvs; i++) {
     fprintf(file, "%0.20f,%0.20f\n", rv_args->means_and_vars[i * 2],
             rv_args->means_and_vars[i * 2 + 1]);
   }
-  fprintf(file, "%lu\n", rv_args->num_samples);
+  fprintf(file, "%llu\n", rv_args->num_samples);
   for (uint64_t i = 0; i < rv_args->num_samples; i++) {
     fprintf(file, "%0.20f\n", rv_args->samples[i]);
   }

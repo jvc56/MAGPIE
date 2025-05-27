@@ -108,7 +108,7 @@ void load_and_exec_config_or_die(Config *config, const char *cmd) {
   }
   error_stack_destroy(error_stack);
   printf("loaded config with command: %s\n", cmd);
-  printf("seed: %lu\n",
+  printf("seed: %llu\n",
          thread_control_get_seed(config_get_thread_control(config)));
 }
 
