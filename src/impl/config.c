@@ -530,8 +530,9 @@ void config_load_uint64(Config *config, arg_token_t arg_token, uint64_t *value,
                      get_formatted_string(
                          "failed to parse nonnegative integer value for %s: %s",
                          config_get_parg_name(config, arg_token), int_str));
+  } else {
+    *value = new_value;
   }
-  *value = new_value;
 }
 
 // Generic execution and status functions

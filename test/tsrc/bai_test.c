@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,7 +12,6 @@
 #include "../../src/impl/random_variable.h"
 
 #include "../../src/impl/bai.h"
-#include "../../src/impl/bai_sampling_rule.h"
 #include "../../src/util/io_util.h"
 
 static const int sampling_rules[3] = {
@@ -235,12 +235,12 @@ void write_bai_input(const double delta, const RandomVariablesArgs *rv_args,
                      const RandomVariablesArgs *rng_args) {
   FILE *file = fopen("normal_data.txt", "w");
   fprintf(file, "%0.20f\n", delta);
-  fprintf(file, "%lu\n", rv_args->num_rvs);
+  fprintf(file, "%" PRIu64 "\n", rv_args->num_rvs);
   for (uint64_t i = 0; i < rv_args->num_rvs; i++) {
     fprintf(file, "%0.20f,%0.20f\n", rv_args->means_and_vars[i * 2],
             rv_args->means_and_vars[i * 2 + 1]);
   }
-  fprintf(file, "%lu\n", rv_args->num_samples);
+  fprintf(file, "%" PRIu64 "\n", rv_args->num_samples);
   for (uint64_t i = 0; i < rv_args->num_samples; i++) {
     fprintf(file, "%0.20f\n", rv_args->samples[i]);
   }
