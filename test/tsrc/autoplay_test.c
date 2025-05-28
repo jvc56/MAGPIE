@@ -140,9 +140,7 @@ void test_autoplay_divergent_games(void) {
   AutoplayResults *ar = autoplay_results_create();
 
   ErrorStack *error_stack = error_stack_create();
-  AutoplayResultsCreateArgs ar_create_args = {
-      .bag_size = ld_get_total_tiles(config_get_ld(csw_config))};
-  autoplay_results_set_options(ar, "games", &ar_create_args, error_stack);
+  autoplay_results_set_options(ar, "games", error_stack);
   assert(error_stack_is_empty(error_stack));
 
   load_and_exec_config_or_die(csw_config, "cgp " VS_ANDY_CGP);

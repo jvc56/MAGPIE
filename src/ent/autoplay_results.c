@@ -37,16 +37,16 @@ typedef struct RecorderArgs {
 } RecorderArgs;
 
 // Read-only data shared across all recorder types
-typedef struct GenericSharedData {
+typedef struct RecorderContext {
   int write_buffer_size;
   char *output_filepath;
-} GenericSharedData;
+  int ld_total_tiles;
+} RecorderContext;
 
 typedef struct Recorder Recorder;
 
 typedef void (*recorder_reset_func_t)(Recorder *);
-typedef void (*recorder_create_data_func_t)(Recorder *,
-                                            const AutoplayResultsCreateArgs *);
+typedef void (*recorder_create_data_func_t)(Recorder *);
 typedef void (*recorder_destroy_data_func_t)(Recorder *);
 typedef void (*recorder_add_move_func_t)(Recorder *, const RecorderArgs *);
 typedef void (*recorder_add_game_func_t)(Recorder *, const RecorderArgs *);
@@ -54,13 +54,10 @@ typedef void (*recorder_finalize_func_t)(Recorder **, int, Recorder *);
 typedef char *(*recorder_str_func_t)(Recorder *, const RecorderArgs *);
 
 struct Recorder {
-  // FIXME: figure out if all of this is necessary
-  // ***
   void *data;
   void *thread_shared_data;
   bool owns_thread_shared_data;
-  const GenericSharedData *generic_shared_data;
-  // ***
+  const RecorderContext *recorder_context;
   recorder_reset_func_t reset_func;
   recorder_destroy_data_func_t destroy_data_func;
   recorder_add_move_func_t add_move_func;
@@ -71,9 +68,8 @@ struct Recorder {
 
 struct AutoplayResults {
   uint64_t options;
-  AutoplayResultsCreateArgs create_args;
-  bool owns_generic_shared_data;
-  GenericSharedData *generic_shared_data;
+  bool owns_recorder_context;
+  RecorderContext *recorder_context;
   Recorder *recorders[NUMBER_OF_AUTOPLAY_RECORDERS];
 };
 
@@ -350,9 +346,7 @@ void game_data_sets_reset(Recorder *recorder) {
   game_data_reset(sets->divergent_games);
 }
 
-void game_data_sets_create(Recorder *recorder, const AutoplayResultsCreateArgs
-                                                   __attribute__((unused)) *
-                                                   args) {
+void game_data_sets_create(Recorder *recorder) {
   GameDataSets *sets = malloc_or_die(sizeof(GameDataSets));
   sets->all_games = game_data_create();
   sets->divergent_games = game_data_create();
@@ -498,7 +492,7 @@ void fj_data_reset(Recorder *recorder) {
   }
   if (recorder->owns_thread_shared_data) {
     fj_data_reset_fh(recorder->thread_shared_data,
-                     recorder->generic_shared_data->output_filepath);
+                     recorder->recorder_context->output_filepath);
   }
   for (int i = 0; i < MAX_NUMBER_OF_MOVES; i++) {
     for (int j = 0; j < MAX_ALPHABET_SIZE; j++) {
@@ -508,9 +502,7 @@ void fj_data_reset(Recorder *recorder) {
   fj_data->move_count = 0;
 }
 
-void fj_data_create(Recorder *recorder, const AutoplayResultsCreateArgs
-                                            __attribute__((unused)) *
-                                            args) {
+void fj_data_create(Recorder *recorder) {
   FJData *data = malloc_or_die(sizeof(FJData));
   for (int i = 0; i < MAX_NUMBER_OF_TILES; i++) {
     data->sbs[i] = string_builder_create();
@@ -573,11 +565,11 @@ void fj_write_buffer_to_output(Recorder *recorder, int remaining_tiles,
                                bool always_flush) {
   FJData *fj_data = (FJData *)recorder->data;
   FJSharedData *shared_data = (FJSharedData *)recorder->thread_shared_data;
-  const GenericSharedData *generic_shared_data = recorder->generic_shared_data;
+  const RecorderContext *recorder_context = recorder->recorder_context;
   StringBuilder *sb = fj_data->sbs[remaining_tiles];
   int str_len = string_builder_length(sb);
   if (str_len > 0 &&
-      (always_flush || str_len >= generic_shared_data->write_buffer_size)) {
+      (always_flush || str_len >= recorder_context->write_buffer_size)) {
     pthread_mutex_lock(&shared_data->fh_mutexes[remaining_tiles]);
     if (fputs(string_builder_peek(sb), shared_data->fhs[remaining_tiles]) ==
         EOF) {
@@ -681,14 +673,14 @@ void win_pct_data_reset(Recorder *recorder) {
   win_pct_data_reset_total_and_wins(win_pct_data);
 }
 
-void win_pct_data_create(Recorder *recorder,
-                         const AutoplayResultsCreateArgs *args) {
+void win_pct_data_create(Recorder *recorder) {
   WinPctData *win_pct_data = malloc_or_die(sizeof(WinPctData));
-  win_pct_data->num_rows = args->bag_size - RACK_SIZE;
+  const int ld_total_tiles = recorder->recorder_context->ld_total_tiles;
+  win_pct_data->num_rows = ld_total_tiles - RACK_SIZE;
   if (win_pct_data->num_rows < 0) {
     log_fatal("cannot record winning percentages when the rack size (%d) is "
               "greater than the bag size (%d)",
-              RACK_SIZE, args->bag_size);
+              RACK_SIZE, ld_total_tiles);
   }
   win_pct_data->total_games =
       calloc_or_die(win_pct_data->num_rows, sizeof(uint64_t));
@@ -788,7 +780,7 @@ void win_pct_data_finalize(Recorder **recorder_list, int list_size,
   win_pct_data_reset_total_and_wins(primary_win_pct_data);
 
   char *win_pct_filename = insert_before_dot(
-      primary_recorder->generic_shared_data->output_filepath, "_winpct");
+      primary_recorder->recorder_context->output_filepath, "_winpct");
 
   ErrorStack *error_stack = error_stack_create();
   if (access(win_pct_filename, F_OK) == 0) {
@@ -890,7 +882,6 @@ void win_pct_data_finalize(Recorder **recorder_list, int list_size,
 // Generic recorder and autoplay results functions
 
 Recorder *recorder_create(const Recorder *primary_recorder,
-                          const AutoplayResultsCreateArgs *create_args,
                           recorder_reset_func_t reset_func,
                           recorder_create_data_func_t create_data_func,
                           recorder_destroy_data_func_t destroy_data_func,
@@ -898,9 +889,9 @@ Recorder *recorder_create(const Recorder *primary_recorder,
                           recorder_add_game_func_t add_game_func,
                           recorder_finalize_func_t finalize_func,
                           recorder_str_func_t str_func,
-                          const GenericSharedData *generic_shared_data) {
+                          const RecorderContext *recorder_context) {
   Recorder *recorder = malloc_or_die(sizeof(Recorder));
-  recorder->generic_shared_data = generic_shared_data;
+  recorder->recorder_context = recorder_context;
   recorder->reset_func = reset_func;
   recorder->destroy_data_func = destroy_data_func;
   recorder->add_move_func = add_move_func;
@@ -908,7 +899,7 @@ Recorder *recorder_create(const Recorder *primary_recorder,
   recorder->finalize_func = finalize_func;
   recorder->str_func = str_func;
   recorder->owns_thread_shared_data = !primary_recorder;
-  create_data_func(recorder, create_args);
+  create_data_func(recorder);
   // If this recorder owns the shared data, then it was already created
   // in the create_data_func call above. If not, we need to copy the pointer
   // to the shared data from the primary recorder.
@@ -957,7 +948,6 @@ uint64_t autoplay_results_build_option(autoplay_recorder_t recorder_type) {
 void autoplay_results_set_recorder(
     AutoplayResults *autoplay_results, uint64_t options,
     const AutoplayResults *primary_autoplay_results,
-    const AutoplayResultsCreateArgs *create_args,
     autoplay_recorder_t recorder_type, recorder_reset_func_t reset_func,
     recorder_create_data_func_t create_data_func,
     recorder_destroy_data_func_t destroy_data_func,
@@ -971,9 +961,9 @@ void autoplay_results_set_recorder(
         primary_recorder = primary_autoplay_results->recorders[recorder_type];
       }
       autoplay_results->recorders[recorder_type] = recorder_create(
-          primary_recorder, create_args, reset_func, create_data_func,
-          destroy_data_func, add_move_func, add_game_func, finalize_func,
-          str_func, autoplay_results->generic_shared_data);
+          primary_recorder, reset_func, create_data_func, destroy_data_func,
+          add_move_func, add_game_func, finalize_func, str_func,
+          autoplay_results->recorder_context);
     }
   } else {
     recorder_destroy(autoplay_results->recorders[recorder_type]);
@@ -981,32 +971,29 @@ void autoplay_results_set_recorder(
   }
 }
 
-void autoplay_results_set_options_int(
-    AutoplayResults *autoplay_results, uint64_t options,
-    const AutoplayResults *primary,
-    const AutoplayResultsCreateArgs *create_args) {
-  memcpy(&autoplay_results->create_args, create_args,
-         sizeof(AutoplayResultsCreateArgs));
+void autoplay_results_set_options_int(AutoplayResults *autoplay_results,
+                                      uint64_t options,
+                                      const AutoplayResults *primary) {
   autoplay_results_set_recorder(
-      autoplay_results, options, primary, create_args,
-      AUTOPLAY_RECORDER_TYPE_GAME, game_data_sets_reset, game_data_sets_create,
-      game_data_sets_destroy, add_move_noop, game_data_sets_add_game,
-      game_data_sets_finalize, game_data_sets_str);
+      autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_GAME,
+      game_data_sets_reset, game_data_sets_create, game_data_sets_destroy,
+      add_move_noop, game_data_sets_add_game, game_data_sets_finalize,
+      game_data_sets_str);
   autoplay_results_set_recorder(
-      autoplay_results, options, primary, create_args,
-      AUTOPLAY_RECORDER_TYPE_FJ, fj_data_reset, fj_data_create, fj_data_destroy,
-      fj_data_add_move, fj_data_add_game, fj_data_finalize, get_str_noop);
+      autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_FJ,
+      fj_data_reset, fj_data_create, fj_data_destroy, fj_data_add_move,
+      fj_data_add_game, fj_data_finalize, get_str_noop);
   autoplay_results_set_recorder(
-      autoplay_results, options, primary, create_args,
-      AUTOPLAY_RECORDER_TYPE_WIN_PCT, win_pct_data_reset, win_pct_data_create,
-      win_pct_data_destroy, win_pct_data_add_move, win_pct_data_add_game,
-      win_pct_data_finalize, get_str_noop);
+      autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_WIN_PCT,
+      win_pct_data_reset, win_pct_data_create, win_pct_data_destroy,
+      win_pct_data_add_move, win_pct_data_add_game, win_pct_data_finalize,
+      get_str_noop);
   autoplay_results->options = options;
 }
 
 void autoplay_results_set_options_with_splitter(
     AutoplayResults *autoplay_results, const StringSplitter *split_options,
-    const AutoplayResultsCreateArgs *create_args, ErrorStack *error_stack) {
+    ErrorStack *error_stack) {
   int number_of_options = string_splitter_get_number_of_items(split_options);
 
   if (number_of_options == 0) {
@@ -1034,14 +1021,12 @@ void autoplay_results_set_options_with_splitter(
   }
 
   if (error_stack_is_empty(error_stack)) {
-    autoplay_results_set_options_int(autoplay_results, options, NULL,
-                                     create_args);
+    autoplay_results_set_options_int(autoplay_results, options, NULL);
   }
 }
 
 void autoplay_results_set_options(AutoplayResults *autoplay_results,
                                   const char *options_str,
-                                  const AutoplayResultsCreateArgs *create_args,
                                   ErrorStack *error_stack) {
   if (is_string_empty_or_null(options_str)) {
     error_stack_push(
@@ -1051,34 +1036,29 @@ void autoplay_results_set_options(AutoplayResults *autoplay_results,
   }
   StringSplitter *split_options = split_string(options_str, ',', true);
   autoplay_results_set_options_with_splitter(autoplay_results, split_options,
-                                             create_args, error_stack);
+                                             error_stack);
   string_splitter_destroy(split_options);
 }
 
-void autoplay_results_reset_options(
-    AutoplayResults *autoplay_results,
-    const AutoplayResultsCreateArgs *create_args) {
-  autoplay_results_set_options_int(autoplay_results, 0, NULL, create_args);
+void autoplay_results_reset_options(AutoplayResults *autoplay_results) {
+  autoplay_results_set_options_int(autoplay_results, 0, NULL);
 }
 
-GenericSharedData *create_generic_shared_data(void) {
-  GenericSharedData *generic_shared_data =
-      malloc_or_die(sizeof(GenericSharedData));
-  generic_shared_data->write_buffer_size = DEFAULT_WRITE_BUFFER_SIZE;
-  generic_shared_data->output_filepath =
-      string_duplicate("autoplay_output.txt");
-  return generic_shared_data;
+RecorderContext *create_recorder_context(void) {
+  RecorderContext *recorder_context = malloc_or_die(sizeof(RecorderContext));
+  recorder_context->write_buffer_size = DEFAULT_WRITE_BUFFER_SIZE;
+  recorder_context->output_filepath = string_duplicate("autoplay_output.txt");
+  return recorder_context;
 }
 
-void destroy_generic_shared_data(GenericSharedData *generic_shared_data) {
-  free(generic_shared_data->output_filepath);
-  free(generic_shared_data);
+void destroy_recorder_context(RecorderContext *recorder_context) {
+  free(recorder_context->output_filepath);
+  free(recorder_context);
 }
 
-void autoplay_results_add_generic_shared_data(
-    AutoplayResults *autoplay_results) {
-  autoplay_results->generic_shared_data = create_generic_shared_data();
-  autoplay_results->owns_generic_shared_data = true;
+void autoplay_results_add_recorder_context(AutoplayResults *autoplay_results) {
+  autoplay_results->recorder_context = create_recorder_context();
+  autoplay_results->owns_recorder_context = true;
 }
 
 AutoplayResults *autoplay_results_create_internal(void) {
@@ -1089,24 +1069,23 @@ AutoplayResults *autoplay_results_create_internal(void) {
   return autoplay_results;
 }
 
-AutoplayResults *autoplay_results_create_without_generic_shared_data(void) {
+AutoplayResults *autoplay_results_create_without_recorder_context(void) {
   return autoplay_results_create_internal();
 }
 
 AutoplayResults *autoplay_results_create(void) {
   AutoplayResults *autoplay_results = autoplay_results_create_internal();
-  autoplay_results_add_generic_shared_data(autoplay_results);
+  autoplay_results_add_recorder_context(autoplay_results);
   return autoplay_results;
 }
 
 AutoplayResults *
 autoplay_results_create_empty_copy(const AutoplayResults *orig) {
   AutoplayResults *autoplay_results =
-      autoplay_results_create_without_generic_shared_data();
-  autoplay_results->generic_shared_data = orig->generic_shared_data;
-  autoplay_results->owns_generic_shared_data = false;
-  autoplay_results_set_options_int(autoplay_results, orig->options, orig,
-                                   &orig->create_args);
+      autoplay_results_create_without_recorder_context();
+  autoplay_results->recorder_context = orig->recorder_context;
+  autoplay_results->owns_recorder_context = false;
+  autoplay_results_set_options_int(autoplay_results, orig->options, orig);
   return autoplay_results;
 }
 
@@ -1117,8 +1096,8 @@ void autoplay_results_destroy(AutoplayResults *autoplay_results) {
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     recorder_destroy(autoplay_results->recorders[i]);
   }
-  if (autoplay_results->owns_generic_shared_data) {
-    destroy_generic_shared_data(autoplay_results->generic_shared_data);
+  if (autoplay_results->owns_recorder_context) {
+    destroy_recorder_context(autoplay_results->recorder_context);
   }
   free(autoplay_results);
 }
@@ -1196,12 +1175,17 @@ char *autoplay_results_to_string(AutoplayResults *autoplay_results,
 
 void autoplay_results_set_write_buffer_size(AutoplayResults *autoplay_results,
                                             int write_buffer_size) {
-  autoplay_results->generic_shared_data->write_buffer_size = write_buffer_size;
+  autoplay_results->recorder_context->write_buffer_size = write_buffer_size;
 }
 
 void autoplay_results_set_record_filepath(AutoplayResults *autoplay_results,
                                           const char *filepath) {
-  free(autoplay_results->generic_shared_data->output_filepath);
-  autoplay_results->generic_shared_data->output_filepath =
+  free(autoplay_results->recorder_context->output_filepath);
+  autoplay_results->recorder_context->output_filepath =
       string_duplicate(filepath);
+}
+
+void autoplay_results_set_ld_total_tiles(AutoplayResults *autoplay_results,
+                                         const int ld_total_tiles) {
+  autoplay_results->recorder_context->ld_total_tiles = ld_total_tiles;
 }
