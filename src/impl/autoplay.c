@@ -544,6 +544,23 @@ void parse_min_rack_targets(const AutoplayArgs *args,
   }
 }
 
+void valid_autoplay_results_options(const AutoplayResults *autoplay_results,
+                                    const AutoplayArgs *args,
+                                    ErrorStack *error_stack) {
+  const uint64_t options = autoplay_results_get_options(autoplay_results);
+  if (options == 0) {
+    return;
+  }
+  if (options != autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_GAME) &&
+      args->use_game_pairs) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS,
+        string_duplicate(
+            "the game pairs setting can only be used with the games recorder"));
+    return;
+  }
+}
+
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
               ErrorStack *error_stack) {
   const bool is_leavegen_mode = args->type == AUTOPLAY_TYPE_LEAVE_GEN;
@@ -577,6 +594,11 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
                            args->num_games_or_min_rack_targets));
       return;
     }
+  }
+
+  valid_autoplay_results_options(autoplay_results, args, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
 
   ThreadControl *thread_control = args->thread_control;

@@ -2048,7 +2048,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack) {
   config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO;
   config->threshold = BAI_THRESHOLD_GK16;
   config->epigon_cutoff = 1000;
-  config->use_game_pairs = true;
+  config->use_game_pairs = false;
   config->use_small_plays = false;
   config->human_readable = false;
   config->game_variant = DEFAULT_GAME_VARIANT;

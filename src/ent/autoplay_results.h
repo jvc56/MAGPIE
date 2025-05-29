@@ -3,14 +3,20 @@
 
 #include <stdbool.h>
 
-#include "../def/autoplay_defs.h"
-
 #include "game.h"
 #include "klv.h"
 #include "move.h"
 
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+
+typedef enum {
+  AUTOPLAY_RECORDER_TYPE_GAME,
+  AUTOPLAY_RECORDER_TYPE_FJ,
+  AUTOPLAY_RECORDER_TYPE_WIN_PCT,
+  AUTOPLAY_RECORDER_TYPE_LEAVES,
+  NUMBER_OF_AUTOPLAY_RECORDERS,
+} autoplay_recorder_t;
 
 typedef struct AutoplayResults AutoplayResults;
 
@@ -44,5 +50,7 @@ void autoplay_results_set_record_filepath(AutoplayResults *autoplay_results,
 void autoplay_results_set_ld(AutoplayResults *autoplay_results,
                              const LetterDistribution *ld);
 void autoplay_results_set_klv(AutoplayResults *autoplay_results, KLV *klv);
+uint64_t autoplay_results_build_option(autoplay_recorder_t recorder_type);
+uint64_t autoplay_results_get_options(const AutoplayResults *autoplay_results);
 
 #endif

@@ -517,6 +517,13 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(
       config, "leavegen 1,2,3,-4 0",
       ERROR_STATUS_AUTOPLAY_MALFORMED_MINIMUM_LEAVE_TARGETS);
+  assert_config_exec_status(config, "autoplay games,winpct 10000 -gp true",
+                            ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS);
+  assert_config_exec_status(config, "autoplay games,leaves 10000 -gp true",
+                            ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS);
+  assert_config_exec_status(config,
+                            "autoplay winpct,games,leaves 10000 -gp true",
+                            ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS);
   config_destroy(config);
 }
 

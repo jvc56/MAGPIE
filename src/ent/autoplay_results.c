@@ -4,8 +4,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#include "../def/autoplay_defs.h"
-
 #include "game.h"
 #include "klv_csv.h"
 #include "move.h"
@@ -19,14 +17,6 @@
 #include "../util/string_util.h"
 
 #define DEFAULT_WRITE_BUFFER_SIZE 1024
-
-typedef enum {
-  AUTOPLAY_RECORDER_TYPE_GAME,
-  AUTOPLAY_RECORDER_TYPE_FJ,
-  AUTOPLAY_RECORDER_TYPE_WIN_PCT,
-  AUTOPLAY_RECORDER_TYPE_LEAVES,
-  NUMBER_OF_AUTOPLAY_RECORDERS,
-} autoplay_recorder_t;
 
 typedef struct RecorderArgs {
   const Game *game;
@@ -728,6 +718,11 @@ void win_pct_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   const int num_tiles_remaining =
       bag_get_tiles(game_get_bag(game)) +
       rack_get_total_letters(player_get_rack(opponent));
+  if (num_tiles_remaining > win_pct_data->num_rows || num_tiles_remaining < 1) {
+    log_fatal(
+        "invalid number of tiles remaining in win percentage recorder: %d",
+        num_tiles_remaining);
+  }
   WinPctTurnSnapshot *turn_snapshot =
       &win_pct_data->turn_snapshots[win_pct_data->turn_snapshot_index];
   turn_snapshot->score_diff = spread;
@@ -768,6 +763,11 @@ void win_pct_data_add_game(Recorder *recorder, const RecorderArgs *args) {
     const int row_index = num_tiles_remaining - 1;
     win_pct_data->total_games[row_index]++;
     int start_col_index = WIN_PCT_MAX_SPREAD - final_score_diff;
+    // This will happen in the rare cases where the score swings more than
+    // WIN_PCT_MAX_SPREAD points
+    if (start_col_index < 0) {
+      start_col_index = 0;
+    }
     // Increment the wins value for the tie by 1 since ties are worth 1
     if (start_col_index < WIN_PCT_NUM_COLUMNS) {
       win_pct_data->wins[row_index][start_col_index]++;
@@ -1052,6 +1052,16 @@ char *recorder_str(Recorder *recorder, bool human_readable,
 
 uint64_t autoplay_results_build_option(autoplay_recorder_t recorder_type) {
   return (uint64_t)1 << recorder_type;
+}
+
+uint64_t autoplay_results_get_options(const AutoplayResults *autoplay_results) {
+  uint64_t options = 0;
+  for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
+    if (autoplay_results->recorders[i]) {
+      options |= autoplay_results_build_option(i);
+    }
+  }
+  return options;
 }
 
 void autoplay_results_set_recorder(
