@@ -889,7 +889,7 @@ void win_pct_data_finalize(Recorder **recorder_list, int list_size,
 // Leave recorder functions
 
 typedef struct LeavesData {
-  uint64_t num_leaves;
+  int num_leaves;
   uint64_t *leave_counts;
 } LeavesData;
 
@@ -915,13 +915,22 @@ void leaves_data_destroy(Recorder *recorder) {
 }
 
 void leaves_data_add_move(Recorder *recorder, const RecorderArgs *args) {
-  // Don't record the empty rack
-  if (rack_is_empty(args->leave)) {
+  // Don't record the empty or full rack
+  const int num_tiles = rack_get_total_letters(args->leave);
+  if (num_tiles == 0 || num_tiles == (RACK_SIZE)) {
     return;
   }
   LeavesData *leaves_data = (LeavesData *)recorder->data;
   int leave_index =
       klv_get_word_index(recorder->recorder_context->klv, args->leave);
+  if (leave_index < 0 || leave_index >= leaves_data->num_leaves) {
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_rack(sb, args->leave, recorder->recorder_context->ld,
+                            false);
+    log_fatal("invalid leave index '%d' for leave '%s' which has %d tiles",
+              leave_index, string_builder_peek(sb), num_tiles);
+    string_builder_destroy(sb);
+  }
   leaves_data->leave_counts[leave_index]++;
 }
 
@@ -970,7 +979,7 @@ void leaves_data_finalize(Recorder **recorder_list, int list_size,
 
   for (int i = 0; i < list_size; i++) {
     LeavesData *leaves_data = (LeavesData *)recorder_list[i]->data;
-    for (uint64_t j = 0; j < leaves_data->num_leaves; j++) {
+    for (int j = 0; j < leaves_data->num_leaves; j++) {
       primary_leaves_data->leave_counts[j] += leaves_data->leave_counts[j];
     }
   }
