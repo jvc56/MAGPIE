@@ -766,10 +766,9 @@ void win_pct_data_add_game(Recorder *recorder, const RecorderArgs *args) {
     // This will happen in the rare cases where the score swings more than
     // WIN_PCT_MAX_SPREAD points
     if (start_col_index < 0) {
-      start_col_index = 0;
-    }
-    // Increment the wins value for the tie by 1 since ties are worth 1
-    if (start_col_index < WIN_PCT_NUM_COLUMNS) {
+      start_col_index = -1;
+    } else if (start_col_index < WIN_PCT_NUM_COLUMNS) {
+      // Increment the wins value for the tie by 1 since ties are worth 1
       win_pct_data->wins[row_index][start_col_index]++;
     }
     // All score differences greater than player_on_turn_final_game_spread would
