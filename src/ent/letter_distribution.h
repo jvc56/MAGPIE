@@ -328,7 +328,7 @@ static inline int ld_str_to_mls(const LetterDistribution *ld, const char *str,
 
   // While writing to mls, this loop verifies the following:
   // - absence of nested multichar characters
-  // - bijection between the set of start and end multichar delimiters
+  // - every start multichar delimiter has an associated end multichar delimiter
   // - multichar characters are nonempty
   for (size_t i = 0; i < num_bytes; i++) {
     char current_char = str[i];

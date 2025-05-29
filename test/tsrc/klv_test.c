@@ -2,11 +2,11 @@
 
 #include "../../src/ent/dictionary_word.h"
 #include "../../src/ent/klv.h"
+#include "../../src/ent/klv_csv.h"
 #include "../../src/ent/letter_distribution.h"
 
 #include "../../src/impl/config.h"
 #include "../../src/impl/convert.h"
-#include "../../src/impl/klv_csv.h"
 
 #include "../../src/util/string_util.h"
 

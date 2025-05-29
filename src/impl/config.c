@@ -15,6 +15,7 @@
 
 #include "../ent/autoplay_results.h"
 #include "../ent/game.h"
+#include "../ent/klv_csv.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/players_data.h"
 #include "../ent/thread_control.h"
@@ -26,7 +27,6 @@
 #include "convert.h"
 #include "gameplay.h"
 #include "inference.h"
-#include "klv_csv.h"
 #include "simmer.h"
 
 #include "../str/game_string.h"
@@ -1537,6 +1537,9 @@ void config_load_lexicon_dependent_data(Config *config,
       players_data_set(config->players_data, PLAYERS_DATA_TYPE_KLV,
                        config->data_paths, updated_p1_leaves_name,
                        updated_p2_leaves_name, error_stack);
+      autoplay_results_set_klv(config->autoplay_results,
+                               players_data_get_data(config->players_data,
+                                                     PLAYERS_DATA_TYPE_KLV, 0));
     }
   }
 
@@ -1587,6 +1590,7 @@ void config_load_lexicon_dependent_data(Config *config,
           config->ld_changed = true;
         }
       }
+      autoplay_results_set_ld(config->autoplay_results, config->ld);
     }
   }
   free(updated_ld_name);

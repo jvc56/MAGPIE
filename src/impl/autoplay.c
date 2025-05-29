@@ -13,13 +13,13 @@
 #include "../ent/checkpoint.h"
 #include "../ent/game.h"
 #include "../ent/klv.h"
+#include "../ent/klv_csv.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/thread_control.h"
 #include "../ent/xoshiro.h"
 
 #include "gameplay.h"
-#include "klv_csv.h"
 #include "move_gen.h"
 #include "rack_list.h"
 
@@ -80,7 +80,7 @@ void postgen_prebroadcast_func(void *data) {
   }
 
   klv_write_to_csv(lg_shared_data->klv, lg_shared_data->ld, leaves_filename,
-                   error_stack);
+                   NULL, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
     log_fatal("leavegen failed to write klv to CSV");

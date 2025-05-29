@@ -6,6 +6,7 @@
 #include "../def/autoplay_defs.h"
 
 #include "game.h"
+#include "klv.h"
 #include "move.h"
 
 #include "../util/io_util.h"
@@ -40,5 +41,8 @@ void autoplay_results_set_write_buffer_size(AutoplayResults *autoplay_results,
                                             int write_buffer_size);
 void autoplay_results_set_record_filepath(AutoplayResults *autoplay_results,
                                           const char *filepath);
+void autoplay_results_set_ld(AutoplayResults *autoplay_results,
+                             const LetterDistribution *ld);
+void autoplay_results_set_klv(AutoplayResults *autoplay_results, KLV *klv);
 
 #endif

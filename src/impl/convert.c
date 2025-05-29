@@ -2,9 +2,9 @@
 
 #include "../ent/conversion_results.h"
 #include "../ent/dictionary_word.h"
+#include "../ent/klv_csv.h"
 #include "../ent/kwg.h"
 
-#include "klv_csv.h"
 #include "kwg_maker.h"
 #include "wmp_maker.h"
 
@@ -142,7 +142,7 @@ void convert_with_filenames(const LetterDistribution *ld,
   } else if (conversion_type == CONVERT_KLV2CSV) {
     KLV *klv = klv_create(data_paths, input_filename, error_stack);
     if (error_stack_is_empty(error_stack)) {
-      klv_write_to_csv(klv, ld, output_filename, error_stack);
+      klv_write_to_csv(klv, ld, output_filename, NULL, error_stack);
     }
     klv_destroy(klv);
   } else {

@@ -2,10 +2,12 @@
 
 #include <pthread.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include "../def/autoplay_defs.h"
 
 #include "game.h"
+#include "klv_csv.h"
 #include "move.h"
 #include "stats.h"
 
@@ -21,6 +23,8 @@
 typedef enum {
   AUTOPLAY_RECORDER_TYPE_GAME,
   AUTOPLAY_RECORDER_TYPE_FJ,
+  AUTOPLAY_RECORDER_TYPE_WIN_PCT,
+  AUTOPLAY_RECORDER_TYPE_LEAVES,
   NUMBER_OF_AUTOPLAY_RECORDERS,
 } autoplay_recorder_t;
 
@@ -35,10 +39,12 @@ typedef struct RecorderArgs {
 } RecorderArgs;
 
 // Read-only data shared across all recorder types
-typedef struct GenericSharedData {
+typedef struct RecorderContext {
   int write_buffer_size;
   char *output_filepath;
-} GenericSharedData;
+  const LetterDistribution *ld;
+  KLV *klv;
+} RecorderContext;
 
 typedef struct Recorder Recorder;
 
@@ -54,7 +60,7 @@ struct Recorder {
   void *data;
   void *thread_shared_data;
   bool owns_thread_shared_data;
-  const GenericSharedData *generic_shared_data;
+  const RecorderContext *recorder_context;
   recorder_reset_func_t reset_func;
   recorder_destroy_data_func_t destroy_data_func;
   recorder_add_move_func_t add_move_func;
@@ -65,14 +71,19 @@ struct Recorder {
 
 struct AutoplayResults {
   uint64_t options;
-  bool owns_generic_shared_data;
-  GenericSharedData *generic_shared_data;
+  bool owns_recorder_context;
+  RecorderContext *recorder_context;
   Recorder *recorders[NUMBER_OF_AUTOPLAY_RECORDERS];
 };
 
 // Generic recorders
 
 void add_move_noop(Recorder __attribute__((unused)) * recorder,
+                   const RecorderArgs __attribute__((unused)) * args) {
+  return;
+}
+
+void add_game_noop(Recorder __attribute__((unused)) * recorder,
                    const RecorderArgs __attribute__((unused)) * args) {
   return;
 }
@@ -466,7 +477,7 @@ typedef struct FJSharedData {
 
 void fj_data_reset_fh(FJSharedData *shared_data, const char *filename) {
   for (int i = 0; i < MAX_NUMBER_OF_TILES; i++) {
-    char *ext = get_formatted_string("_%d", i);
+    char *ext = get_formatted_string("_fj_%d", i);
     char *filename_num_remaining = insert_before_dot(filename, ext);
     free(ext);
     if (shared_data->fhs[i]) {
@@ -489,7 +500,7 @@ void fj_data_reset(Recorder *recorder) {
   }
   if (recorder->owns_thread_shared_data) {
     fj_data_reset_fh(recorder->thread_shared_data,
-                     recorder->generic_shared_data->output_filepath);
+                     recorder->recorder_context->output_filepath);
   }
   for (int i = 0; i < MAX_NUMBER_OF_MOVES; i++) {
     for (int j = 0; j < MAX_ALPHABET_SIZE; j++) {
@@ -548,7 +559,8 @@ void fj_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   fj_move->player_index = game_get_player_on_turn_index(game);
   const Player *player = game_get_player(game, fj_move->player_index);
   const Player *opponent = game_get_player(game, 1 - fj_move->player_index);
-  fj_move->score_diff = player_get_score(player) - player_get_score(opponent);
+  fj_move->score_diff =
+      equity_to_int(player_get_score(player) - player_get_score(opponent));
   fj_move->unseen_total = bag_get_tiles(bag) + (RACK_SIZE);
   bag_increment_unseen_count(bag, fj_move->unseen_counts);
   rack_increment_unseen_count(player_get_rack(opponent),
@@ -561,11 +573,11 @@ void fj_write_buffer_to_output(Recorder *recorder, int remaining_tiles,
                                bool always_flush) {
   FJData *fj_data = (FJData *)recorder->data;
   FJSharedData *shared_data = (FJSharedData *)recorder->thread_shared_data;
-  const GenericSharedData *generic_shared_data = recorder->generic_shared_data;
+  const RecorderContext *recorder_context = recorder->recorder_context;
   StringBuilder *sb = fj_data->sbs[remaining_tiles];
   int str_len = string_builder_length(sb);
   if (str_len > 0 &&
-      (always_flush || str_len >= generic_shared_data->write_buffer_size)) {
+      (always_flush || str_len >= recorder_context->write_buffer_size)) {
     pthread_mutex_lock(&shared_data->fh_mutexes[remaining_tiles]);
     if (fputs(string_builder_peek(sb), shared_data->fhs[remaining_tiles]) ==
         EOF) {
@@ -584,8 +596,10 @@ void fj_data_add_game(Recorder *recorder, const RecorderArgs *args) {
   const Game *game = args->game;
   const LetterDistribution *ld = game_get_ld(game);
   double player_one_result = 0.5;
-  int player_one_score = player_get_score(game_get_player(game, 0));
-  int player_two_score = player_get_score(game_get_player(game, 1));
+  int player_one_score =
+      equity_to_int(player_get_score(game_get_player(game, 0)));
+  int player_two_score =
+      equity_to_int(player_get_score(game_get_player(game, 1)));
   if (player_one_score < player_two_score) {
     player_one_result = 0;
   } else if (player_one_score > player_two_score) {
@@ -626,6 +640,354 @@ void fj_data_finalize(Recorder **recorders, int num_recorders,
   }
 }
 
+// Win percentage recorder functions
+
+#define WIN_PCT_MAX_SPREAD 500
+// Use x2 the max spread to account for positive and negative spread
+// Use +1 to account for the tie
+#define WIN_PCT_NUM_COLUMNS ((WIN_PCT_MAX_SPREAD * 2) + 1)
+#define WIN_PCT_MAX_NUM_TURNS 100
+
+typedef struct WinPctTurnSnapshot {
+  int score_diff;
+  int num_tiles_remaining;
+  int player_index;
+} WinPctTurnSnapshot;
+
+typedef struct WinPctData {
+  int num_rows;
+  uint64_t *total_games;
+  // Wins are worth 2 and ties are worth 1 to avoid floating point arithmetic
+  uint64_t **wins;
+  int turn_snapshot_index;
+  WinPctTurnSnapshot turn_snapshots[WIN_PCT_MAX_NUM_TURNS];
+} WinPctData;
+
+void win_pct_data_reset_turn_snapshots(WinPctData *win_pct_data) {
+  win_pct_data->turn_snapshot_index = 0;
+}
+
+void win_pct_data_reset_total_and_wins(WinPctData *win_pct_data) {
+  memset(win_pct_data->total_games, 0,
+         sizeof(uint64_t) * win_pct_data->num_rows);
+  for (int i = 0; i < win_pct_data->num_rows; i++) {
+    memset(win_pct_data->wins[i], 0, sizeof(uint64_t) * WIN_PCT_NUM_COLUMNS);
+  }
+}
+
+void win_pct_data_reset(Recorder *recorder) {
+  WinPctData *win_pct_data = (WinPctData *)recorder->data;
+  win_pct_data_reset_turn_snapshots(win_pct_data);
+  win_pct_data_reset_total_and_wins(win_pct_data);
+}
+
+void win_pct_data_create(Recorder *recorder) {
+  WinPctData *win_pct_data = malloc_or_die(sizeof(WinPctData));
+  const int ld_total_tiles = ld_get_total_tiles(recorder->recorder_context->ld);
+  win_pct_data->num_rows = ld_total_tiles - RACK_SIZE;
+  if (win_pct_data->num_rows < 0) {
+    log_fatal("cannot record winning percentages when the rack size (%d) is "
+              "greater than the bag size (%d)",
+              RACK_SIZE, ld_total_tiles);
+  }
+  win_pct_data->total_games =
+      calloc_or_die(win_pct_data->num_rows, sizeof(uint64_t));
+  win_pct_data->wins =
+      malloc_or_die(win_pct_data->num_rows * sizeof(uint64_t *));
+  for (int i = 0; i < win_pct_data->num_rows; i++) {
+    win_pct_data->wins[i] =
+        calloc_or_die(WIN_PCT_NUM_COLUMNS, sizeof(uint64_t));
+  }
+  win_pct_data_reset_turn_snapshots(win_pct_data);
+  recorder->data = win_pct_data;
+}
+
+void win_pct_data_destroy(Recorder *recorder) {
+  WinPctData *win_pct_data = (WinPctData *)recorder->data;
+  free(win_pct_data->total_games);
+  for (int i = 0; i < win_pct_data->num_rows; i++) {
+    free(win_pct_data->wins[i]);
+  }
+  free(win_pct_data->wins);
+  free(win_pct_data);
+}
+
+// When the game is passed to this function it is *before* the move has been
+// played.
+void win_pct_data_add_move(Recorder *recorder, const RecorderArgs *args) {
+  WinPctData *win_pct_data = (WinPctData *)recorder->data;
+  if (win_pct_data->turn_snapshot_index >= WIN_PCT_MAX_NUM_TURNS) {
+    return;
+  }
+  const Game *game = args->game;
+  const int player_index = game_get_player_on_turn_index(game);
+  const Player *player = game_get_player(game, player_index);
+  const Player *opponent = game_get_player(game, 1 - player_index);
+  const int spread =
+      equity_to_int(player_get_score(player) - player_get_score(opponent));
+  const int num_tiles_remaining =
+      bag_get_tiles(game_get_bag(game)) +
+      rack_get_total_letters(player_get_rack(opponent));
+  WinPctTurnSnapshot *turn_snapshot =
+      &win_pct_data->turn_snapshots[win_pct_data->turn_snapshot_index];
+  turn_snapshot->score_diff = spread;
+  turn_snapshot->num_tiles_remaining = num_tiles_remaining;
+  turn_snapshot->player_index = player_index;
+  win_pct_data->turn_snapshot_index++;
+}
+
+void win_pct_data_add_game(Recorder *recorder, const RecorderArgs *args) {
+  WinPctData *win_pct_data = (WinPctData *)recorder->data;
+  const Game *game = args->game;
+  const int end_turn_snapshot_index = win_pct_data->turn_snapshot_index;
+  const int final_game_spread =
+      equity_to_int(player_get_score(game_get_player(game, 0)) -
+                    player_get_score(game_get_player(game, 1)));
+  if (final_game_spread > WIN_PCT_MAX_SPREAD ||
+      final_game_spread < -WIN_PCT_MAX_SPREAD) {
+    return;
+  }
+  for (int current_turn_snapshot_index = 0;
+       current_turn_snapshot_index < end_turn_snapshot_index;
+       current_turn_snapshot_index++) {
+    const WinPctTurnSnapshot *turn_snapshot =
+        &win_pct_data->turn_snapshots[current_turn_snapshot_index];
+    const int score_diff = turn_snapshot->score_diff;
+    const int num_tiles_remaining = turn_snapshot->num_tiles_remaining;
+    const int player_index = turn_snapshot->player_index;
+    int player_on_turn_final_game_spread = final_game_spread;
+    // The final_game_spread is always from the perspective of player 0, but the
+    // snapshot score difference is from the perspective of the player on turn.
+    // So if the snapshot is from player 1, we need to negate the final game
+    // spread so that the final game spread is from the perspective of the
+    // player on turn.
+    if (player_index == 1) {
+      player_on_turn_final_game_spread = -final_game_spread;
+    }
+    const int final_score_diff = player_on_turn_final_game_spread - score_diff;
+    const int row_index = num_tiles_remaining - 1;
+    win_pct_data->total_games[row_index]++;
+    int start_col_index = WIN_PCT_MAX_SPREAD - final_score_diff;
+    // Increment the wins value for the tie by 1 since ties are worth 1
+    if (start_col_index < WIN_PCT_NUM_COLUMNS) {
+      win_pct_data->wins[row_index][start_col_index]++;
+    }
+    // All score differences greater than player_on_turn_final_game_spread would
+    // have resulted in a win for the player on turn, so increment all of these
+    // spreads by the win value of 2
+    for (int i = start_col_index + 1; i < WIN_PCT_NUM_COLUMNS; i++) {
+      win_pct_data->wins[row_index][i] += 2;
+    }
+  }
+  win_pct_data_reset_turn_snapshots(win_pct_data);
+}
+
+void win_pct_data_finalize(Recorder **recorder_list, int list_size,
+                           Recorder *primary_recorder) {
+  WinPctData *primary_win_pct_data = (WinPctData *)primary_recorder->data;
+  win_pct_data_reset_total_and_wins(primary_win_pct_data);
+
+  char *win_pct_filename = insert_before_dot(
+      primary_recorder->recorder_context->output_filepath, "_winpct");
+
+  ErrorStack *error_stack = error_stack_create();
+  if (access(win_pct_filename, F_OK) == 0) {
+    char *win_pct_file_string =
+        get_string_from_file(win_pct_filename, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_print_and_reset(error_stack);
+      log_fatal("error reading win pct file: %s", win_pct_filename);
+    }
+    StringSplitter *win_pct_file_lines =
+        split_string_by_newline(win_pct_file_string, false);
+    const int num_win_pct_file_lines =
+        string_splitter_get_number_of_items(win_pct_file_lines);
+
+    if (num_win_pct_file_lines != primary_win_pct_data->num_rows) {
+      log_fatal(
+          "number of win percentage file lines (%d) does not match the number "
+          "of rows in the win pct data (%d) in file '%s'",
+          num_win_pct_file_lines, primary_win_pct_data->num_rows,
+          win_pct_filename);
+    }
+
+    for (int i = 0; i < num_win_pct_file_lines; i++) {
+      const char *win_pct_line =
+          string_splitter_get_item(win_pct_file_lines, i);
+      StringSplitter *win_pct_columns =
+          split_string_by_whitespace(win_pct_line, true);
+      const int num_win_pct_columns =
+          string_splitter_get_number_of_items(win_pct_columns);
+      if (num_win_pct_columns != WIN_PCT_NUM_COLUMNS + 1) {
+        log_fatal(
+            "number of win percentage file columns (%d) does not match the "
+            "required number of columns (%d) in file '%s'",
+            num_win_pct_columns, WIN_PCT_NUM_COLUMNS + 1, win_pct_filename);
+      }
+      const char *total_game_str = string_splitter_get_item(win_pct_columns, 0);
+      const uint64_t total_games =
+          string_to_uint64(total_game_str, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        log_fatal("failed to convert '%s' to an integer in win percentage "
+                  "file '%s'",
+                  total_game_str, win_pct_filename);
+      }
+      primary_win_pct_data->total_games[i] = total_games;
+      for (int j = 0; j < WIN_PCT_NUM_COLUMNS; j++) {
+        const char *total_win_str =
+            string_splitter_get_item(win_pct_columns, j + 1);
+        const uint64_t total_wins =
+            string_to_uint64(total_win_str, error_stack);
+        if (!error_stack_is_empty(error_stack)) {
+          log_fatal("failed to convert '%s' to an integer in win percentage "
+                    "file '%s'",
+                    total_win_str, win_pct_filename);
+        }
+        primary_win_pct_data->wins[i][j] = total_wins;
+      }
+      string_splitter_destroy(win_pct_columns);
+    }
+    string_splitter_destroy(win_pct_file_lines);
+    free(win_pct_file_string);
+  }
+
+  for (int i = 0; i < list_size; i++) {
+    WinPctData *win_pct_data = (WinPctData *)recorder_list[i]->data;
+    for (int j = 0; j < win_pct_data->num_rows; j++) {
+      primary_win_pct_data->total_games[j] += win_pct_data->total_games[j];
+      for (int k = 0; k < WIN_PCT_NUM_COLUMNS; k++) {
+        primary_win_pct_data->wins[j][k] += win_pct_data->wins[j][k];
+      }
+    }
+  }
+
+  StringBuilder *win_pct_sb = string_builder_create();
+  for (int i = 0; i < primary_win_pct_data->num_rows; i++) {
+    string_builder_add_formatted_string(win_pct_sb, "%lu ",
+                                        primary_win_pct_data->total_games[i]);
+    for (int j = 0; j < WIN_PCT_NUM_COLUMNS; j++) {
+      string_builder_add_formatted_string(win_pct_sb, "%lu ",
+                                          primary_win_pct_data->wins[i][j]);
+    }
+    if (i < primary_win_pct_data->num_rows - 1) {
+      string_builder_add_string(win_pct_sb, "\n");
+    }
+  }
+
+  write_string_to_file(win_pct_filename, "w", string_builder_peek(win_pct_sb),
+                       error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("error writing win percentage file '%s':", win_pct_filename);
+  }
+
+  error_stack_destroy(error_stack);
+  string_builder_destroy(win_pct_sb);
+  free(win_pct_filename);
+}
+
+// Leave recorder functions
+
+typedef struct LeavesData {
+  uint64_t num_leaves;
+  uint64_t *leave_counts;
+} LeavesData;
+
+void leaves_data_reset(Recorder *recorder) {
+  LeavesData *leaves_data = (LeavesData *)recorder->data;
+  memset(leaves_data->leave_counts, 0,
+         sizeof(uint64_t) * leaves_data->num_leaves);
+}
+
+void leaves_data_create(Recorder *recorder) {
+  LeavesData *leaves_data = malloc_or_die(sizeof(LeavesData));
+  leaves_data->num_leaves =
+      klv_get_number_of_leaves(recorder->recorder_context->klv);
+  leaves_data->leave_counts =
+      calloc_or_die(leaves_data->num_leaves, sizeof(uint64_t));
+  recorder->data = leaves_data;
+}
+
+void leaves_data_destroy(Recorder *recorder) {
+  LeavesData *leaves_data = (LeavesData *)recorder->data;
+  free(leaves_data->leave_counts);
+  free(leaves_data);
+}
+
+void leaves_data_add_move(Recorder *recorder, const RecorderArgs *args) {
+  // Don't record the empty rack
+  if (rack_is_empty(args->leave)) {
+    return;
+  }
+  LeavesData *leaves_data = (LeavesData *)recorder->data;
+  int leave_index =
+      klv_get_word_index(recorder->recorder_context->klv, args->leave);
+  leaves_data->leave_counts[leave_index]++;
+}
+
+void leaves_data_finalize(Recorder **recorder_list, int list_size,
+                          Recorder *primary_recorder) {
+  LeavesData *primary_leaves_data = (LeavesData *)primary_recorder->data;
+  char *leaves_filename = insert_before_dot(
+      primary_recorder->recorder_context->output_filepath, "_leaves");
+  ErrorStack *error_stack = error_stack_create();
+  Rack leave_rack;
+  rack_set_dist_size(&leave_rack,
+                     ld_get_size(primary_recorder->recorder_context->ld));
+  if (access(leaves_filename, F_OK) == 0) {
+    FILE *leaves_file = fopen_or_die(leaves_filename, "r");
+    char line[256];
+    while (fgets(line, sizeof(line), leaves_file)) {
+      char *leave_str = strtok(line, ",");
+      char *count_str = strtok(NULL, "\n");
+      if (!leave_str || !count_str) {
+        log_fatal("invalid row in existing autoplay leaves count file '%s': %s",
+                  leaves_filename, line);
+      }
+      const int num_mls = rack_set_to_string(
+          primary_recorder->recorder_context->ld, &leave_rack, leave_str);
+      if (num_mls < 0) {
+        log_fatal("failed to parse leave in existing autoplay leaves count "
+                  "file '%s': %s",
+                  leaves_filename, line);
+      }
+      const int leave_index = klv_get_word_index(
+          primary_recorder->recorder_context->klv, &leave_rack);
+      if ((unsigned int)leave_index == KLV_UNFOUND_INDEX) {
+        log_fatal("klv does not contain leave from file '%s': %s ",
+                  leaves_filename, leave_str);
+      }
+      uint64_t count = string_to_uint64(count_str, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        log_fatal(
+            "invalid count in existing autoplay leaves count file '%s': %s",
+            leaves_filename, line);
+      }
+      primary_leaves_data->leave_counts[leave_index] = count;
+    }
+    fclose(leaves_file);
+  }
+
+  for (int i = 0; i < list_size; i++) {
+    LeavesData *leaves_data = (LeavesData *)recorder_list[i]->data;
+    for (uint64_t j = 0; j < leaves_data->num_leaves; j++) {
+      primary_leaves_data->leave_counts[j] += leaves_data->leave_counts[j];
+    }
+  }
+
+  klv_write_to_csv(primary_recorder->recorder_context->klv,
+                   primary_recorder->recorder_context->ld, leaves_filename,
+                   primary_leaves_data->leave_counts, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("encountered a fatal error writing leave counts to file '%s'",
+              leaves_filename);
+  }
+  error_stack_destroy(error_stack);
+  free(leaves_filename);
+}
+
 // Generic recorder and autoplay results functions
 
 Recorder *recorder_create(const Recorder *primary_recorder,
@@ -636,9 +998,9 @@ Recorder *recorder_create(const Recorder *primary_recorder,
                           recorder_add_game_func_t add_game_func,
                           recorder_finalize_func_t finalize_func,
                           recorder_str_func_t str_func,
-                          const GenericSharedData *generic_shared_data) {
+                          const RecorderContext *recorder_context) {
   Recorder *recorder = malloc_or_die(sizeof(Recorder));
-  recorder->generic_shared_data = generic_shared_data;
+  recorder->recorder_context = recorder_context;
   recorder->reset_func = reset_func;
   recorder->destroy_data_func = destroy_data_func;
   recorder->add_move_func = add_move_func;
@@ -710,7 +1072,7 @@ void autoplay_results_set_recorder(
       autoplay_results->recorders[recorder_type] = recorder_create(
           primary_recorder, reset_func, create_data_func, destroy_data_func,
           add_move_func, add_game_func, finalize_func, str_func,
-          autoplay_results->generic_shared_data);
+          autoplay_results->recorder_context);
     }
   } else {
     recorder_destroy(autoplay_results->recorders[recorder_type]);
@@ -730,6 +1092,15 @@ void autoplay_results_set_options_int(AutoplayResults *autoplay_results,
       autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_FJ,
       fj_data_reset, fj_data_create, fj_data_destroy, fj_data_add_move,
       fj_data_add_game, fj_data_finalize, get_str_noop);
+  autoplay_results_set_recorder(
+      autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_WIN_PCT,
+      win_pct_data_reset, win_pct_data_create, win_pct_data_destroy,
+      win_pct_data_add_move, win_pct_data_add_game, win_pct_data_finalize,
+      get_str_noop);
+  autoplay_results_set_recorder(
+      autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_LEAVES,
+      leaves_data_reset, leaves_data_create, leaves_data_destroy,
+      leaves_data_add_move, add_game_noop, leaves_data_finalize, get_str_noop);
   autoplay_results->options = options;
 }
 
@@ -752,6 +1123,10 @@ void autoplay_results_set_options_with_splitter(
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_GAME);
     } else if (has_iprefix(option_str, "fj")) {
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_FJ);
+    } else if (has_iprefix(option_str, "winpct")) {
+      options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_WIN_PCT);
+    } else if (has_iprefix(option_str, "leaves")) {
+      options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_LEAVES);
     } else {
       error_stack_push(
           error_stack, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS,
@@ -784,23 +1159,23 @@ void autoplay_results_reset_options(AutoplayResults *autoplay_results) {
   autoplay_results_set_options_int(autoplay_results, 0, NULL);
 }
 
-GenericSharedData *create_generic_shared_data(void) {
-  GenericSharedData *generic_shared_data =
-      malloc_or_die(sizeof(GenericSharedData));
-  generic_shared_data->write_buffer_size = DEFAULT_WRITE_BUFFER_SIZE;
-  generic_shared_data->output_filepath = string_duplicate("record_output.txt");
-  return generic_shared_data;
+RecorderContext *create_recorder_context(void) {
+  RecorderContext *recorder_context = malloc_or_die(sizeof(RecorderContext));
+  recorder_context->write_buffer_size = DEFAULT_WRITE_BUFFER_SIZE;
+  recorder_context->output_filepath = string_duplicate("autoplay_output.txt");
+  recorder_context->ld = NULL;
+  recorder_context->klv = NULL;
+  return recorder_context;
 }
 
-void destroy_generic_shared_data(GenericSharedData *generic_shared_data) {
-  free(generic_shared_data->output_filepath);
-  free(generic_shared_data);
+void destroy_recorder_context(RecorderContext *recorder_context) {
+  free(recorder_context->output_filepath);
+  free(recorder_context);
 }
 
-void autoplay_results_add_generic_shared_data(
-    AutoplayResults *autoplay_results) {
-  autoplay_results->generic_shared_data = create_generic_shared_data();
-  autoplay_results->owns_generic_shared_data = true;
+void autoplay_results_add_recorder_context(AutoplayResults *autoplay_results) {
+  autoplay_results->recorder_context = create_recorder_context();
+  autoplay_results->owns_recorder_context = true;
 }
 
 AutoplayResults *autoplay_results_create_internal(void) {
@@ -811,22 +1186,22 @@ AutoplayResults *autoplay_results_create_internal(void) {
   return autoplay_results;
 }
 
-AutoplayResults *autoplay_results_create_without_generic_shared_data(void) {
+AutoplayResults *autoplay_results_create_without_recorder_context(void) {
   return autoplay_results_create_internal();
 }
 
 AutoplayResults *autoplay_results_create(void) {
   AutoplayResults *autoplay_results = autoplay_results_create_internal();
-  autoplay_results_add_generic_shared_data(autoplay_results);
+  autoplay_results_add_recorder_context(autoplay_results);
   return autoplay_results;
 }
 
 AutoplayResults *
 autoplay_results_create_empty_copy(const AutoplayResults *orig) {
   AutoplayResults *autoplay_results =
-      autoplay_results_create_without_generic_shared_data();
-  autoplay_results->generic_shared_data = orig->generic_shared_data;
-  autoplay_results->owns_generic_shared_data = false;
+      autoplay_results_create_without_recorder_context();
+  autoplay_results->recorder_context = orig->recorder_context;
+  autoplay_results->owns_recorder_context = false;
   autoplay_results_set_options_int(autoplay_results, orig->options, orig);
   return autoplay_results;
 }
@@ -838,8 +1213,8 @@ void autoplay_results_destroy(AutoplayResults *autoplay_results) {
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     recorder_destroy(autoplay_results->recorders[i]);
   }
-  if (autoplay_results->owns_generic_shared_data) {
-    destroy_generic_shared_data(autoplay_results->generic_shared_data);
+  if (autoplay_results->owns_recorder_context) {
+    destroy_recorder_context(autoplay_results->recorder_context);
   }
   free(autoplay_results);
 }
@@ -917,12 +1292,21 @@ char *autoplay_results_to_string(AutoplayResults *autoplay_results,
 
 void autoplay_results_set_write_buffer_size(AutoplayResults *autoplay_results,
                                             int write_buffer_size) {
-  autoplay_results->generic_shared_data->write_buffer_size = write_buffer_size;
+  autoplay_results->recorder_context->write_buffer_size = write_buffer_size;
 }
 
 void autoplay_results_set_record_filepath(AutoplayResults *autoplay_results,
                                           const char *filepath) {
-  free(autoplay_results->generic_shared_data->output_filepath);
-  autoplay_results->generic_shared_data->output_filepath =
+  free(autoplay_results->recorder_context->output_filepath);
+  autoplay_results->recorder_context->output_filepath =
       string_duplicate(filepath);
+}
+
+void autoplay_results_set_ld(AutoplayResults *autoplay_results,
+                             const LetterDistribution *ld) {
+  autoplay_results->recorder_context->ld = ld;
+}
+
+void autoplay_results_set_klv(AutoplayResults *autoplay_results, KLV *klv) {
+  autoplay_results->recorder_context->klv = klv;
 }
