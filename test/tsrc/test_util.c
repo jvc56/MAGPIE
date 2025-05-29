@@ -25,16 +25,16 @@
 #include "../../src/ent/equity.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/inference_results.h"
+#include "../../src/ent/klv_csv.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/move.h"
 #include "../../src/ent/rack.h"
 #include "../../src/ent/validated_move.h"
-#include "../../src/impl/config.h"
 
 #include "../../src/impl/cgp.h"
+#include "../../src/impl/config.h"
 #include "../../src/impl/gameplay.h"
 #include "../../src/impl/gcg.h"
-#include "../../src/impl/klv_csv.h"
 #include "../../src/impl/move_gen.h"
 
 #include "../../src/str/game_string.h"
@@ -218,7 +218,7 @@ KLV *klv_read_from_csv_or_die(const LetterDistribution *ld,
 void klv_write_to_csv_or_die(KLV *klv, const LetterDistribution *ld,
                              const char *csv_filename) {
   ErrorStack *error_stack = error_stack_create();
-  klv_write_to_csv(klv, ld, csv_filename, error_stack);
+  klv_write_to_csv(klv, ld, csv_filename, NULL, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
     abort();

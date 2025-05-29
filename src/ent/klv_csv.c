@@ -20,6 +20,7 @@ typedef struct KLVWriteData {
   const KLV *klv;
   const LetterDistribution *ld;
   const Rack *leave;
+  const uint64_t *leave_counts;
   StringBuilder *string_builder;
 } KLVWriteData;
 
@@ -29,11 +30,19 @@ typedef struct KLVCreateData {
 } KLVCreateData;
 
 void klv_write_row(void *data, uint32_t word_index) {
-  KLVWriteData *lasb = (KLVWriteData *)data;
-  string_builder_add_rack(lasb->string_builder, lasb->leave, lasb->ld, true);
-  const double value =
-      equity_to_double(klv_get_indexed_leave_value(lasb->klv, word_index));
-  string_builder_add_formatted_string(lasb->string_builder, ",%f\n", value);
+  KLVWriteData *klv_write_data = (KLVWriteData *)data;
+  string_builder_add_rack(klv_write_data->string_builder, klv_write_data->leave,
+                          klv_write_data->ld, true);
+  if (klv_write_data->leave_counts) {
+    const uint64_t leave_count = klv_write_data->leave_counts[word_index];
+    string_builder_add_formatted_string(klv_write_data->string_builder,
+                                        ",%lu\n", leave_count);
+  } else {
+    const double value = equity_to_double(
+        klv_get_indexed_leave_value(klv_write_data->klv, word_index));
+    string_builder_add_formatted_string(klv_write_data->string_builder, ",%f\n",
+                                        value);
+  }
 }
 
 void klv_add_leave_to_word_list(void *data,
@@ -93,8 +102,12 @@ void klv_iter_for_length(LeaveIter *leave_iter, KLV *klv, Rack *bag_as_rack,
 }
 
 // Writes a CSV file of leave,value for the leaves in the KLV.
+// If leave_counts is NULL, then the value is the equity of the leave as a
+// double. If leave_counts is not NULL, then the value is
+// leave_counts[leave_index] as a uint64_t.
 void klv_write_to_csv(KLV *klv, const LetterDistribution *ld,
-                      const char *csv_filename, ErrorStack *error_stack) {
+                      const char *csv_filename, const uint64_t *leave_counts,
+                      ErrorStack *error_stack) {
   const int dist_size = ld_get_size(ld);
   Rack *leave = rack_create(dist_size);
   Rack *bag_as_rack = get_new_bag_as_rack(ld);
@@ -104,6 +117,7 @@ void klv_write_to_csv(KLV *klv, const LetterDistribution *ld,
   klv_write_data.klv = klv;
   klv_write_data.ld = ld;
   klv_write_data.leave = leave;
+  klv_write_data.leave_counts = leave_counts;
   klv_write_data.string_builder = klv_builder;
 
   LeaveIter leave_iter;

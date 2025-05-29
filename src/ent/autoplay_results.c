@@ -7,6 +7,7 @@
 #include "../def/autoplay_defs.h"
 
 #include "game.h"
+#include "klv_csv.h"
 #include "move.h"
 #include "stats.h"
 
@@ -23,6 +24,7 @@ typedef enum {
   AUTOPLAY_RECORDER_TYPE_GAME,
   AUTOPLAY_RECORDER_TYPE_FJ,
   AUTOPLAY_RECORDER_TYPE_WIN_PCT,
+  AUTOPLAY_RECORDER_TYPE_LEAVES,
   NUMBER_OF_AUTOPLAY_RECORDERS,
 } autoplay_recorder_t;
 
@@ -40,7 +42,8 @@ typedef struct RecorderArgs {
 typedef struct RecorderContext {
   int write_buffer_size;
   char *output_filepath;
-  int ld_total_tiles;
+  const LetterDistribution *ld;
+  KLV *klv;
 } RecorderContext;
 
 typedef struct Recorder Recorder;
@@ -76,6 +79,11 @@ struct AutoplayResults {
 // Generic recorders
 
 void add_move_noop(Recorder __attribute__((unused)) * recorder,
+                   const RecorderArgs __attribute__((unused)) * args) {
+  return;
+}
+
+void add_game_noop(Recorder __attribute__((unused)) * recorder,
                    const RecorderArgs __attribute__((unused)) * args) {
   return;
 }
@@ -675,7 +683,7 @@ void win_pct_data_reset(Recorder *recorder) {
 
 void win_pct_data_create(Recorder *recorder) {
   WinPctData *win_pct_data = malloc_or_die(sizeof(WinPctData));
-  const int ld_total_tiles = recorder->recorder_context->ld_total_tiles;
+  const int ld_total_tiles = ld_get_total_tiles(recorder->recorder_context->ld);
   win_pct_data->num_rows = ld_total_tiles - RACK_SIZE;
   if (win_pct_data->num_rows < 0) {
     log_fatal("cannot record winning percentages when the rack size (%d) is "
@@ -879,6 +887,107 @@ void win_pct_data_finalize(Recorder **recorder_list, int list_size,
   free(win_pct_filename);
 }
 
+// Leave recorder functions
+
+typedef struct LeavesData {
+  uint64_t num_leaves;
+  uint64_t *leave_counts;
+} LeavesData;
+
+void leaves_data_reset(Recorder *recorder) {
+  LeavesData *leaves_data = (LeavesData *)recorder->data;
+  memset(leaves_data->leave_counts, 0,
+         sizeof(uint64_t) * leaves_data->num_leaves);
+}
+
+void leaves_data_create(Recorder *recorder) {
+  LeavesData *leaves_data = malloc_or_die(sizeof(LeavesData));
+  leaves_data->num_leaves =
+      klv_get_number_of_leaves(recorder->recorder_context->klv);
+  leaves_data->leave_counts =
+      calloc_or_die(leaves_data->num_leaves, sizeof(uint64_t));
+  recorder->data = leaves_data;
+}
+
+void leaves_data_destroy(Recorder *recorder) {
+  LeavesData *leaves_data = (LeavesData *)recorder->data;
+  free(leaves_data->leave_counts);
+  free(leaves_data);
+}
+
+void leaves_data_add_move(Recorder *recorder, const RecorderArgs *args) {
+  // Don't record the empty rack
+  if (rack_is_empty(args->leave)) {
+    return;
+  }
+  LeavesData *leaves_data = (LeavesData *)recorder->data;
+  int leave_index =
+      klv_get_word_index(recorder->recorder_context->klv, args->leave);
+  leaves_data->leave_counts[leave_index]++;
+}
+
+void leaves_data_finalize(Recorder **recorder_list, int list_size,
+                          Recorder *primary_recorder) {
+  LeavesData *primary_leaves_data = (LeavesData *)primary_recorder->data;
+  char *leaves_filename = insert_before_dot(
+      primary_recorder->recorder_context->output_filepath, "_leaves");
+  ErrorStack *error_stack = error_stack_create();
+  Rack leave_rack;
+  rack_set_dist_size(&leave_rack,
+                     ld_get_size(primary_recorder->recorder_context->ld));
+  if (access(leaves_filename, F_OK) == 0) {
+    FILE *leaves_file = fopen_or_die(leaves_filename, "r");
+    char line[256];
+    while (fgets(line, sizeof(line), leaves_file)) {
+      char *leave_str = strtok(line, ",");
+      char *count_str = strtok(NULL, "\n");
+      if (!leave_str || !count_str) {
+        log_fatal("invalid row in existing autoplay leaves count file '%s': %s",
+                  leaves_filename, line);
+      }
+      const int num_mls = rack_set_to_string(
+          primary_recorder->recorder_context->ld, &leave_rack, leave_str);
+      if (num_mls < 0) {
+        log_fatal("failed to parse leave in existing autoplay leaves count "
+                  "file '%s': %s",
+                  leaves_filename, line);
+      }
+      const int leave_index = klv_get_word_index(
+          primary_recorder->recorder_context->klv, &leave_rack);
+      if ((unsigned int)leave_index == KLV_UNFOUND_INDEX) {
+        log_fatal("klv does not contain leave from file '%s': %s ",
+                  leaves_filename, leave_str);
+      }
+      uint64_t count = string_to_uint64(count_str, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        log_fatal(
+            "invalid count in existing autoplay leaves count file '%s': %s",
+            leaves_filename, line);
+      }
+      primary_leaves_data->leave_counts[leave_index] = count;
+    }
+    fclose(leaves_file);
+  }
+
+  for (int i = 0; i < list_size; i++) {
+    LeavesData *leaves_data = (LeavesData *)recorder_list[i]->data;
+    for (uint64_t j = 0; j < leaves_data->num_leaves; j++) {
+      primary_leaves_data->leave_counts[j] += leaves_data->leave_counts[j];
+    }
+  }
+
+  klv_write_to_csv(primary_recorder->recorder_context->klv,
+                   primary_recorder->recorder_context->ld, leaves_filename,
+                   primary_leaves_data->leave_counts, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("encountered a fatal error writing leave counts to file '%s'",
+              leaves_filename);
+  }
+  error_stack_destroy(error_stack);
+  free(leaves_filename);
+}
+
 // Generic recorder and autoplay results functions
 
 Recorder *recorder_create(const Recorder *primary_recorder,
@@ -988,6 +1097,10 @@ void autoplay_results_set_options_int(AutoplayResults *autoplay_results,
       win_pct_data_reset, win_pct_data_create, win_pct_data_destroy,
       win_pct_data_add_move, win_pct_data_add_game, win_pct_data_finalize,
       get_str_noop);
+  autoplay_results_set_recorder(
+      autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_LEAVES,
+      leaves_data_reset, leaves_data_create, leaves_data_destroy,
+      leaves_data_add_move, add_game_noop, leaves_data_finalize, get_str_noop);
   autoplay_results->options = options;
 }
 
@@ -1012,6 +1125,8 @@ void autoplay_results_set_options_with_splitter(
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_FJ);
     } else if (has_iprefix(option_str, "winpct")) {
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_WIN_PCT);
+    } else if (has_iprefix(option_str, "leaves")) {
+      options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_LEAVES);
     } else {
       error_stack_push(
           error_stack, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS,
@@ -1048,6 +1163,8 @@ RecorderContext *create_recorder_context(void) {
   RecorderContext *recorder_context = malloc_or_die(sizeof(RecorderContext));
   recorder_context->write_buffer_size = DEFAULT_WRITE_BUFFER_SIZE;
   recorder_context->output_filepath = string_duplicate("autoplay_output.txt");
+  recorder_context->ld = NULL;
+  recorder_context->klv = NULL;
   return recorder_context;
 }
 
@@ -1185,7 +1302,11 @@ void autoplay_results_set_record_filepath(AutoplayResults *autoplay_results,
       string_duplicate(filepath);
 }
 
-void autoplay_results_set_ld_total_tiles(AutoplayResults *autoplay_results,
-                                         const int ld_total_tiles) {
-  autoplay_results->recorder_context->ld_total_tiles = ld_total_tiles;
+void autoplay_results_set_ld(AutoplayResults *autoplay_results,
+                             const LetterDistribution *ld) {
+  autoplay_results->recorder_context->ld = ld;
+}
+
+void autoplay_results_set_klv(AutoplayResults *autoplay_results, KLV *klv) {
+  autoplay_results->recorder_context->klv = klv;
 }

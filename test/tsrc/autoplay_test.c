@@ -244,11 +244,22 @@ void test_autoplay_win_pct_record(void) {
   config_destroy(csw_config);
 }
 
+void test_autoplay_leaves_record(void) {
+  Config *csw_config =
+      config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
+                           "all -numplays 1  -gp false -threads 1");
+  load_and_exec_config_or_die(csw_config,
+                              "autoplay leaves 2 -seed 50 -wb 1000000 "
+                              "-recfile ./data/test_record.txt");
+  config_destroy(csw_config);
+}
+
 void test_autoplay(void) {
   test_odds_that_player_is_better();
   test_autoplay_default();
   test_autoplay_leavegen();
   test_autoplay_divergent_games();
   test_autoplay_win_pct_record();
+  test_autoplay_leaves_record();
   return;
 }
