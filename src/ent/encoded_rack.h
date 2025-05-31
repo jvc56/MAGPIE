@@ -57,16 +57,20 @@ typedef struct EncodedRack {
   ENCODED_RACK_UNIT_TYPE array[ENCODED_RACK_UNITS];
 } EncodedRack;
 
+static inline ENCODED_RACK_UNIT_TYPE encoded_rack_shift_bit(int bit_index) {
+  return (ENCODED_RACK_UNIT_TYPE)1 << (bit_index % BITS_PER_UNIT);
+}
+
 static inline void encoded_rack_set_bit(EncodedRack *encoded_rack,
                                         int bit_index) {
   encoded_rack->array[bit_index / BITS_PER_UNIT] |=
-      (ENCODED_RACK_UNIT_TYPE)1 << (bit_index % BITS_PER_UNIT);
+      encoded_rack_shift_bit(bit_index);
 }
 
 static inline bool encoded_rack_get_bit(const EncodedRack *encoded_rack,
                                         int bit_index) {
   return (encoded_rack->array[bit_index / BITS_PER_UNIT] &
-          (ENCODED_RACK_UNIT_TYPE)1 << bit_index) != 0;
+          encoded_rack_shift_bit(bit_index)) != 0;
 }
 
 static inline void encoded_rack_set_ml(EncodedRack *encoded_rack, uint8_t ml,
