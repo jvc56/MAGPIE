@@ -161,3 +161,50 @@ void string_builder_add_ucgi_move(StringBuilder *move_string_builder,
     string_builder_add_string(move_string_builder, "pass");
   }
 }
+
+// Add the move and the move score to the string builder
+void string_builder_add_gcg_move(StringBuilder *move_string_builder,
+                                 const Move *move,
+                                 const LetterDistribution *ld) {
+  const game_event_t move_type = move_get_type(move);
+  switch (move_type) {
+  case GAME_EVENT_PASS:
+    string_builder_add_char(move_string_builder, '-');
+    break;
+  case GAME_EVENT_EXCHANGE:;
+    string_builder_add_char(move_string_builder, '-');
+    const int num_tiles_played = move_get_tiles_played(move);
+    for (int i = 0; i < num_tiles_played; i++) {
+      string_builder_add_user_visible_letter(move_string_builder, ld,
+                                             move_get_tile(move, i));
+    }
+    break;
+  case GAME_EVENT_TILE_PLACEMENT_MOVE:;
+    if (board_is_dir_vertical(move_get_dir(move))) {
+      string_builder_add_formatted_string(move_string_builder, "%c%d",
+                                          move_get_col_start(move) + 'A',
+                                          move_get_row_start(move) + 1);
+    } else {
+      string_builder_add_formatted_string(move_string_builder, "%d%c",
+                                          move_get_row_start(move) + 1,
+                                          move_get_col_start(move) + 'A');
+    }
+    string_builder_add_char(move_string_builder, ' ');
+    const int tiles_length = move_get_tiles_length(move);
+    for (int i = 0; i < tiles_length; i++) {
+      uint8_t letter = move_get_tile(move, i);
+      if (letter == PLAYED_THROUGH_MARKER) {
+        string_builder_add_char(move_string_builder, ASCII_PLAYED_THROUGH);
+      } else {
+        string_builder_add_user_visible_letter(move_string_builder, ld, letter);
+      }
+    }
+    break;
+  default:
+    log_fatal("encountered unexpected move type while building move string: %d",
+              move_type);
+    break;
+  }
+  string_builder_add_formatted_string(move_string_builder, " +%d",
+                                      equity_to_int(move_get_score(move)));
+}

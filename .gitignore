@@ -13,5 +13,7 @@ perf*
 .env
 data
 testdata
+quackle
+*.gcg
 oprofile_data
 TODO

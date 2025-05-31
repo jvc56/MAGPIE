@@ -113,7 +113,7 @@ static inline game_event_t move_get_type(const Move *move) {
   return move->move_type;
 }
 
-static inline int move_get_score(const Move *move) { return move->score; }
+static inline Equity move_get_score(const Move *move) { return move->score; }
 
 static inline int move_get_row_start(const Move *move) {
   return move->row_start;
