@@ -21,6 +21,10 @@
 
 #include "../impl/gameplay.h"
 
+#include "../str/game_string.h"
+#include "../str/move_string.h"
+#include "../str/rack_string.h"
+
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 
@@ -76,26 +80,40 @@ typedef struct GCGParser {
   Config *config;
 } GCGParser;
 
+#define GCG_TITLE_STRING "title"
+#define GCG_DESCRIPTION_STRING "description"
+#define GCG_ID_STRING "id"
+#define GCG_NOTE_STRING "note"
+#define GCG_LEXICON_STRING "lexicon"
+#define GCG_CHAR_ENCODING_STRING "character-encoding"
+#define GCG_GAME_TYPE_STRING "game-type"
+#define GCG_TILE_SET_STRING "tile-set"
+#define GCG_BOARD_LAYOUT_STRING "board-layout"
+#define GCG_TILE_DISTRIBUTION_STRING "tile-distribution"
+#define GCG_PLAYER_STRING "player"
+#define GCG_RACK_STRING "rack"
+
 const char *player_regex =
-    "#player([1-2])[[:space:]]+([^[:space:]]+)[[:space:]]+(.+)";
-const char *title_regex = "#title[[:space:]]*(.*)";
-const char *description_regex = "#description[[:space:]]*(.*)";
+    "#" GCG_PLAYER_STRING "([1-2])[[:space:]]+([^[:space:]]+)[[:space:]]+(.+)";
+const char *title_regex = "#" GCG_TITLE_STRING "[[:space:]]*(.*)";
+const char *description_regex = "#" GCG_DESCRIPTION_STRING "[[:space:]]*(.*)";
 const char *id_regex =
-    "#id[[:space:]]*([^[:space:]]+)[[:space:]]+([^[:space:]]+)";
-const char *rack1_regex = "#rack1 ([^[:space:]]+)";
-const char *rack2_regex = "#rack2 ([^[:space:]]+)";
+    "#" GCG_ID_STRING "[[:space:]]*([^[:space:]]+)[[:space:]]+([^[:space:]]+)";
+const char *rack1_regex = "#" GCG_RACK_STRING "1 ([^[:space:]]+)";
+const char *rack2_regex = "#" GCG_RACK_STRING "2 ([^[:space:]]+)";
 const char *move_regex =
     ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:"
     "]]+([[:alnum:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+"
     "[+]([[:digit:]]+)[[:space:]]+(-?[[:digit:]]+)";
-const char *note_regex = "#note (.+)";
-const char *lexicon_name_regex = "#lexicon (.+)";
-const char *character_encoding_regex = "#character-encoding ([[:graph:]]+)";
-const char *game_type_regex = "#game-type (.*)";
-const char *tile_set_regex = "#tile-set (.*)";
-const char *game_board_regex = "#game-board (.*)";
-const char *board_layout_regex = "#board-layout (.*)";
-const char *tile_distribution_name_regex = "#tile-distribution (.*)";
+const char *note_regex = "#" GCG_NOTE_STRING " (.+)";
+const char *lexicon_name_regex = "#" GCG_LEXICON_STRING " (.+)";
+const char *character_encoding_regex =
+    "#" GCG_CHAR_ENCODING_STRING " ([[:graph:]]+)";
+const char *game_type_regex = "#" GCG_GAME_TYPE_STRING " (.*)";
+const char *tile_set_regex = "#" GCG_TILE_SET_STRING " (.*)";
+const char *board_layout_regex = "#" GCG_BOARD_LAYOUT_STRING " (.*)";
+const char *tile_distribution_name_regex =
+    "#" GCG_TILE_DISTRIBUTION_STRING " (.*)";
 const char *continuation_regex = "#- (.*)";
 const char *phony_tiles_returned_regex =
     ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:]]+--[[:space:]]+-([["
@@ -245,7 +263,8 @@ int get_matching_group_as_int(const GCGParser *gcg_parser, const char *gcg_line,
 }
 
 StringSplitter *decode_gcg_with_gcg_lines(const StringSplitter *gcg_lines,
-                                          GCGParser *gcg_parser) {
+                                          GCGParser *gcg_parser,
+                                          ErrorStack *error_stack) {
   // Find encoding token
   TokenRegexPair *encoding_token_regex_pair = NULL;
   for (int i = 0; i < gcg_parser->number_of_token_regex_pairs; i++) {
@@ -279,6 +298,11 @@ StringSplitter *decode_gcg_with_gcg_lines(const StringSplitter *gcg_lines,
     if (is_utf8) {
       gcg_encoding = GCG_ENCODING_UTF8;
     } else if (!is_iso_8859_1) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_GCG_PARSE_UNSUPPORTED_CHARACTER_ENCODING,
+          get_formatted_string(
+              "cannot parse GCG with unsupported character encoding: %s",
+              first_gcg_line));
       return NULL;
     }
     // If the first line was the encoding line, we want
@@ -310,10 +334,11 @@ StringSplitter *decode_gcg_with_gcg_lines(const StringSplitter *gcg_lines,
   return utf8_gcg_lines;
 }
 
-StringSplitter *decode_gcg(GCGParser *gcg_parser, const char *gcg_string) {
+StringSplitter *decode_gcg(GCGParser *gcg_parser, const char *gcg_string,
+                           ErrorStack *error_stack) {
   StringSplitter *gcg_lines = split_string_by_newline(gcg_string, true);
   StringSplitter *utf8_gcg_lines =
-      decode_gcg_with_gcg_lines(gcg_lines, gcg_parser);
+      decode_gcg_with_gcg_lines(gcg_lines, gcg_parser, error_stack);
   string_splitter_destroy(gcg_lines);
   return utf8_gcg_lines;
 }
@@ -1157,7 +1182,7 @@ void parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
       return;
     }
     char *note = get_matching_group_as_string(gcg_parser, gcg_line, 1);
-    string_builder_add_formatted_string(gcg_parser->note_builder, "%s ", note);
+    string_builder_add_formatted_string(gcg_parser->note_builder, "%s\n", note);
     free(note);
     break;
   case GCG_LEXICON_TOKEN: {
@@ -1501,7 +1526,7 @@ void parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
   case GCG_UNKNOWN_TOKEN:
     if (previous_token == GCG_NOTE_TOKEN) {
       // Assume this is the continuation of a note
-      string_builder_add_formatted_string(gcg_parser->note_builder, "%s ",
+      string_builder_add_formatted_string(gcg_parser->note_builder, "%s\n",
                                           gcg_line);
 
     } else if (!is_string_empty_or_whitespace(gcg_line)) {
@@ -1548,13 +1573,10 @@ void draw_initial_racks(Game *game, GameHistory *game_history,
 
 void parse_gcg_with_parser(GCGParser *gcg_parser, const char *gcg_string,
                            ErrorStack *error_stack) {
-  StringSplitter *gcg_lines = decode_gcg(gcg_parser, gcg_string);
+  StringSplitter *gcg_lines = decode_gcg(gcg_parser, gcg_string, error_stack);
 
-  if (!gcg_lines) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_GCG_PARSE_UNSUPPORTED_CHARACTER_ENCODING,
-        string_duplicate(
-            "cannot parse GCG with unsupported character encoding"));
+  if (!error_stack_is_empty(error_stack)) {
+    // The gcg_lines StringSplitter is NULL if the error stack is not empty
     return;
   }
 
@@ -1675,4 +1697,156 @@ void game_play_to_end(GameHistory *game_history, Game *game,
   game_play_to_turn(game_history, game,
                     game_history_get_number_of_events(game_history),
                     error_stack);
+}
+
+// Assumes the game history is valid
+void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
+               GameHistory *game_history, ErrorStack *error_stack) {
+  StringBuilder *gcg_sb = string_builder_create();
+  string_builder_add_formatted_string(gcg_sb, "#%s UTF-8\n",
+                                      GCG_CHAR_ENCODING_STRING);
+  string_builder_add_formatted_string(gcg_sb, "#%s Created with MAGPIE\n",
+                                      GCG_DESCRIPTION_STRING);
+  const char *id_auth = game_history_get_id_auth(game_history);
+  const char *uid = game_history_get_uid(game_history);
+  if (id_auth && !uid) {
+    log_fatal("game history has auth id '%s' but no uid", id_auth);
+  }
+  if (!id_auth && uid) {
+    log_fatal("game history has uid '%s' but no auth id", uid);
+  }
+  if (uid) {
+    string_builder_add_formatted_string(gcg_sb, "#%s %s %s\n", GCG_ID_STRING,
+                                        id_auth, uid);
+  }
+  const char *lexicon = game_history_get_lexicon_name(game_history);
+  if (lexicon) {
+    string_builder_add_formatted_string(gcg_sb, "#%s %s\n", GCG_LEXICON_STRING,
+                                        lexicon);
+  }
+  const game_variant_t game_variant =
+      game_history_get_game_variant(game_history);
+  if (game_variant != GAME_VARIANT_UNKNOWN) {
+    string_builder_add_formatted_string(gcg_sb, "#%s ", GCG_GAME_TYPE_STRING);
+    string_builder_add_game_variant(gcg_sb, game_variant);
+    string_builder_add_string(gcg_sb, "\n");
+  }
+  const char *title = game_history_get_title(game_history);
+  if (title) {
+    string_builder_add_formatted_string(gcg_sb, "#%s %s\n", GCG_TITLE_STRING,
+                                        title);
+  }
+  const char *board_layout_name =
+      game_history_get_board_layout_name(game_history);
+  if (board_layout_name) {
+    string_builder_add_formatted_string(
+        gcg_sb, "#%s %s\n", GCG_BOARD_LAYOUT_STRING, board_layout_name);
+  }
+  const char *ld_name = game_history_get_ld_name(game_history);
+  if (ld_name) {
+    string_builder_add_formatted_string(gcg_sb, "#%s %s\n",
+                                        GCG_TILE_DISTRIBUTION_STRING, ld_name);
+  }
+
+  for (int player_index = 0; player_index < 2; player_index++) {
+    const char *player_nickname =
+        game_history_player_get_nickname(game_history, player_index);
+    if (!player_nickname) {
+      log_fatal("player %d has no nickname", player_index);
+    }
+    const char *player_name =
+        game_history_player_get_name(game_history, player_index);
+    if (!player_name) {
+      log_fatal("player %d has no name", player_index);
+    }
+    string_builder_add_formatted_string(gcg_sb, "#%s%d %s %s\n",
+                                        GCG_PLAYER_STRING, player_index + 1,
+                                        player_nickname, player_name);
+  }
+  const int number_of_events = game_history_get_number_of_events(game_history);
+  Equity previous_move_score = 0;
+  int player_on_turn = 0;
+  bool game_is_over = false;
+  for (int event_index = 0; event_index < number_of_events; event_index++) {
+    GameEvent *event = game_history_get_event(game_history, event_index);
+    const Rack *rack = game_event_get_rack(event);
+    string_builder_add_formatted_string(
+        gcg_sb, ">%s: ",
+        game_history_player_get_nickname(game_history,
+                                         game_event_get_player_index(event)));
+    switch (game_event_get_type(event)) {
+    case GAME_EVENT_PASS:
+    case GAME_EVENT_TILE_PLACEMENT_MOVE:
+    case GAME_EVENT_EXCHANGE:
+      string_builder_add_rack(gcg_sb, rack, ld, true);
+      string_builder_add_char(gcg_sb, ' ');
+      const ValidatedMoves *vms = game_event_get_vms(event);
+      const Move *move = validated_moves_get_move(vms, 0);
+      string_builder_add_gcg_move(gcg_sb, move, ld);
+      previous_move_score = move_get_score(move);
+      player_on_turn = 1 - game_event_get_player_index(event);
+      break;
+    case GAME_EVENT_PHONY_TILES_RETURNED:
+      string_builder_add_rack(gcg_sb, rack, ld, true);
+      string_builder_add_formatted_string(gcg_sb, " -- -%d",
+                                          equity_to_int(previous_move_score));
+      break;
+    case GAME_EVENT_CHALLENGE_BONUS:
+      string_builder_add_rack(gcg_sb, rack, ld, true);
+      string_builder_add_formatted_string(
+          gcg_sb, " (challenge) +%d",
+          equity_to_int(game_event_get_score_adjustment(event)));
+      break;
+    case GAME_EVENT_END_RACK_POINTS:
+      string_builder_add_char(gcg_sb, '(');
+      string_builder_add_rack(gcg_sb, rack, ld, true);
+      string_builder_add_formatted_string(
+          gcg_sb, ") +%d",
+          equity_to_int(game_event_get_score_adjustment(event)));
+      game_is_over = true;
+      break;
+    case GAME_EVENT_TIME_PENALTY:
+      if (rack) {
+        string_builder_add_rack(gcg_sb, rack, ld, true);
+      }
+      string_builder_add_char(gcg_sb, ' ');
+      string_builder_add_formatted_string(
+          gcg_sb, "(time) %d",
+          equity_to_int(game_event_get_score_adjustment(event)));
+      game_is_over = true;
+      break;
+    case GAME_EVENT_END_RACK_PENALTY:
+      string_builder_add_rack(gcg_sb, rack, ld, true);
+      string_builder_add_string(gcg_sb, " (");
+      string_builder_add_rack(gcg_sb, rack, ld, true);
+      string_builder_add_formatted_string(
+          gcg_sb, ") %d",
+          equity_to_int(game_event_get_score_adjustment(event)));
+      game_is_over = true;
+      break;
+    case GAME_EVENT_UNKNOWN:
+      log_fatal("game history contains unknown event type");
+      break;
+    }
+    string_builder_add_formatted_string(
+        gcg_sb, " %d\n", equity_to_int(game_event_get_cumulative_score(event)));
+    const char *note = game_event_get_note(event);
+    if (note) {
+      // The note already contains a trailing newline
+      string_builder_add_formatted_string(gcg_sb, "#%s %s", GCG_NOTE_STRING,
+                                          note);
+    }
+  }
+  if (!game_is_over) {
+    const Rack *last_known_rack =
+        game_history_player_get_last_known_rack(game_history, player_on_turn);
+    if (last_known_rack) {
+      string_builder_add_formatted_string(gcg_sb, "#%s%d ", GCG_RACK_STRING,
+                                          player_on_turn + 1);
+      string_builder_add_rack(gcg_sb, last_known_rack, ld, true);
+    }
+  }
+  write_string_to_file(gcg_filename, "w", string_builder_peek(gcg_sb),
+                       error_stack);
+  string_builder_destroy(gcg_sb);
 }

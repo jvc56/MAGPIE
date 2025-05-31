@@ -30,29 +30,20 @@ struct GameEvent {
   char *note;
 };
 
-GameEvent *game_event_create(void) {
-  GameEvent *game_event = malloc_or_die(sizeof(GameEvent));
+void game_event_reset(GameEvent *game_event) {
   game_event->event_type = GAME_EVENT_UNKNOWN;
   game_event->player_index = -1;
   game_event->cumulative_score = 0;
   game_event->score_adjustment = 0;
-  game_event->cgp_move_string = NULL;
   game_event->move_score = 0;
-  game_event->vms = NULL;
-  game_event->rack = NULL;
-  game_event->note = NULL;
-  return game_event;
-}
-
-void game_event_destroy(GameEvent *game_event) {
-  if (!game_event) {
-    return;
-  }
-  validated_moves_destroy(game_event->vms);
-  rack_destroy(game_event->rack);
   free(game_event->cgp_move_string);
+  game_event->cgp_move_string = NULL;
+  validated_moves_destroy(game_event->vms);
+  game_event->vms = NULL;
+  rack_destroy(game_event->rack);
+  game_event->rack = NULL;
   free(game_event->note);
-  free(game_event);
+  game_event->note = NULL;
 }
 
 void game_event_set_type(GameEvent *event, game_event_t event_type) {
@@ -90,6 +81,7 @@ Equity game_event_get_move_score(const GameEvent *event) {
 
 // Takes ownership of the cgp_move_string
 void game_event_set_cgp_move_string(GameEvent *event, char *cgp_move_string) {
+  free(event->cgp_move_string);
   event->cgp_move_string = cgp_move_string;
 }
 
@@ -106,11 +98,15 @@ Equity game_event_get_score_adjustment(const GameEvent *event) {
   return event->score_adjustment;
 }
 
-void game_event_set_rack(GameEvent *event, Rack *rack) { event->rack = rack; }
+void game_event_set_rack(GameEvent *event, Rack *rack) {
+  rack_destroy(event->rack);
+  event->rack = rack;
+}
 
 Rack *game_event_get_rack(const GameEvent *event) { return event->rack; }
 
 void game_event_set_vms(GameEvent *event, ValidatedMoves *vms) {
+  validated_moves_destroy(event->vms);
   event->vms = vms;
 }
 
@@ -156,7 +152,7 @@ struct GameHistory {
   game_variant_t game_variant;
   GameHistoryPlayer *players[2];
   int number_of_events;
-  GameEvent **events;
+  GameEvent *events;
 };
 
 GameHistoryPlayer *game_history_player_create(const char *name,
@@ -349,23 +345,36 @@ int game_history_get_number_of_events(const GameHistory *history) {
 }
 
 GameEvent *game_history_get_event(const GameHistory *history, int event_index) {
-  return history->events[event_index];
+  return &history->events[event_index];
+}
+
+void game_history_reset(GameHistory *game_history) {
+  free(game_history->title);
+  game_history->title = NULL;
+  free(game_history->description);
+  game_history->description = NULL;
+  free(game_history->id_auth);
+  game_history->id_auth = NULL;
+  free(game_history->uid);
+  game_history->uid = NULL;
+  free(game_history->lexicon_name);
+  game_history->lexicon_name = NULL;
+  free(game_history->ld_name);
+  game_history->ld_name = NULL;
+  free(game_history->board_layout_name);
+  game_history->board_layout_name = board_layout_get_default_name();
+  for (int i = 0; i < 2; i++) {
+    game_history_player_destroy(game_history->players[i]);
+    game_history->players[i] = NULL;
+  }
+  game_history->game_variant = GAME_VARIANT_CLASSIC;
+  game_history->number_of_events = 0;
 }
 
 GameHistory *game_history_create(void) {
-  GameHistory *game_history = malloc_or_die(sizeof(GameHistory));
-  game_history->title = NULL;
-  game_history->description = NULL;
-  game_history->id_auth = NULL;
-  game_history->uid = NULL;
-  game_history->lexicon_name = NULL;
-  game_history->ld_name = NULL;
-  game_history->game_variant = GAME_VARIANT_CLASSIC;
-  game_history->board_layout_name = board_layout_get_default_name();
-  game_history->players[0] = NULL;
-  game_history->players[1] = NULL;
-  game_history->number_of_events = 0;
-  game_history->events = malloc_or_die(sizeof(GameEvent *) * (MAX_GAME_EVENTS));
+  GameHistory *game_history = calloc_or_die(sizeof(GameHistory), 1);
+  game_history->events = calloc_or_die(sizeof(GameEvent), (MAX_GAME_EVENTS));
+  game_history_reset(game_history);
   return game_history;
 }
 
@@ -380,12 +389,11 @@ void game_history_destroy(GameHistory *game_history) {
   free(game_history->lexicon_name);
   free(game_history->ld_name);
   free(game_history->board_layout_name);
-
   for (int i = 0; i < 2; i++) {
     game_history_player_destroy(game_history->players[i]);
   }
-  for (int i = 0; i < game_history->number_of_events; i++) {
-    game_event_destroy(game_history->events[i]);
+  for (int i = 0; i < MAX_GAME_EVENTS; i++) {
+    game_event_reset(&game_history->events[i]);
   }
   free(game_history->events);
   free(game_history);
@@ -400,7 +408,8 @@ GameEvent *game_history_create_and_add_game_event(GameHistory *game_history,
                              MAX_GAME_EVENTS));
     return NULL;
   }
-  GameEvent *game_event = game_event_create();
-  game_history->events[game_history->number_of_events++] = game_event;
+  GameEvent *game_event =
+      &game_history->events[game_history->number_of_events++];
+  game_event_reset(game_event);
   return game_event;
 }
