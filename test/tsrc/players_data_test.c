@@ -151,6 +151,34 @@ void test_reloaded_data(void) {
   players_data_destroy(players_data);
 }
 
+void test_null_data(void) {
+  PlayersData *players_data = players_data_create();
+  ErrorStack *error_stack = error_stack_create();
+
+  // Confirm that WMP can be set to NULL without errors.
+
+  players_data_set(players_data, PLAYERS_DATA_TYPE_WMP, DEFAULT_TEST_DATA_PATH,
+                   "CSW21", "CSW21", error_stack);
+  assert_players_data(players_data, PLAYERS_DATA_TYPE_WMP, "CSW21", "CSW21");
+  players_data_set(players_data, PLAYERS_DATA_TYPE_WMP, DEFAULT_TEST_DATA_PATH,
+                   NULL, NULL, error_stack);
+  assert_players_data(players_data, PLAYERS_DATA_TYPE_WMP, NULL, NULL);
+
+  players_data_set(players_data, PLAYERS_DATA_TYPE_WMP, DEFAULT_TEST_DATA_PATH,
+                   "CSW21", "CSW21", error_stack);
+  assert_players_data(players_data, PLAYERS_DATA_TYPE_WMP, "CSW21", "CSW21");
+  players_data_set(players_data, PLAYERS_DATA_TYPE_WMP, DEFAULT_TEST_DATA_PATH,
+                   NULL, NULL, error_stack);
+  assert_players_data(players_data, PLAYERS_DATA_TYPE_WMP, NULL, NULL);
+
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    assert(0);
+  }
+  error_stack_destroy(error_stack);
+  players_data_destroy(players_data);
+}
+
 void test_players_data(void) {
   ErrorStack *error_stack = error_stack_create();
   const char *data_names[] = {
@@ -166,5 +194,6 @@ void test_players_data(void) {
                      number_of_data_names, error_stack);
   test_unshared_data();
   test_reloaded_data();
+  test_null_data();
   error_stack_destroy(error_stack);
 }

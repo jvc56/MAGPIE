@@ -1350,6 +1350,11 @@ void config_load_lexicon_dependent_data(Config *config,
                                         ErrorStack *error_stack) {
   // Lexical player data
 
+  // For both the kwg and klv, we disallow any non-NULL -> NULL transitions.
+  // Once the kwg and klv are set for both players, they can change to new
+  // lexica or leave values, but they can never change to NULL. Therefore, if
+  // new names are NULL, it means they weren't specified for this command and
+  // the existing kwg and klv types should persist.
   const char *new_lexicon_name =
       config_get_parg_value(config, ARG_TOKEN_LEXICON, 0);
 
@@ -1465,27 +1470,44 @@ void config_load_lexicon_dependent_data(Config *config,
   }
 
   // Load lexica (in WMP format)
-  const char *p1_wmp_name = NULL;
-  const char *p2_wmp_name = NULL;
-  bool use_wmp = false;
-  config_load_bool(config, ARG_TOKEN_USE_WMP, &use_wmp, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
+
+  // For the wmp, we allow non-NULL -> NULL transitions.
+
+  // Start by assuming we are just using whatever the existing wmp settings are
+  bool p1_use_wmp = !!players_data_get_data_name(config->players_data,
+                                                 PLAYERS_DATA_TYPE_WMP, 0);
+  bool p2_use_wmp = !!players_data_get_data_name(config->players_data,
+                                                 PLAYERS_DATA_TYPE_WMP, 1);
+
+  if (config_get_parg_value(config, ARG_TOKEN_USE_WMP, 0)) {
+    config_load_bool(config, ARG_TOKEN_USE_WMP, &p1_use_wmp, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    p2_use_wmp = p1_use_wmp;
   }
+
   // The "w1" and "w2" args override the "use_wmp" arg
-  bool p1_use_wmp = use_wmp;
-  bool p2_use_wmp = use_wmp;
-  config_load_bool(config, ARG_TOKEN_P1_USE_WMP, &p1_use_wmp, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
+  if (config_get_parg_value(config, ARG_TOKEN_P1_USE_WMP, 0)) {
+    config_load_bool(config, ARG_TOKEN_P1_USE_WMP, &p1_use_wmp, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
   }
+
+  if (config_get_parg_value(config, ARG_TOKEN_P2_USE_WMP, 0)) {
+    config_load_bool(config, ARG_TOKEN_P2_USE_WMP, &p2_use_wmp, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  const char *p1_wmp_name = NULL;
   if (p1_use_wmp) {
     p1_wmp_name = updated_p1_lexicon_name;
   }
-  config_load_bool(config, ARG_TOKEN_P2_USE_WMP, &p2_use_wmp, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
+
+  const char *p2_wmp_name = NULL;
   if (p2_use_wmp) {
     p2_wmp_name = updated_p2_lexicon_name;
   }
