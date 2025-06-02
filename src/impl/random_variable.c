@@ -365,7 +365,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
 
   // This will shuffle the bag, so there is no need
   // to call bag_shuffle explicitly.
-  game_seed(game, simmed_play_get_seed(simmed_play));
+  game_set_seed(game, simmed_play_get_seed(simmed_play));
 
   int player_off_turn_index = 1 - game_get_player_on_turn_index(game);
   // set random rack for opponent (throw in rack, bag_shuffle, draw new tiles).

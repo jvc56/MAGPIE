@@ -45,6 +45,7 @@ struct Game {
   int max_scoreless_turns;
   Equity bingo_bonus;
   game_end_reason_t game_end_reason;
+  uint64_t seed;
   bool data_is_shared[NUMBER_OF_DATA];
   Board *board;
   Bag *bag;
@@ -438,7 +439,12 @@ void game_reset(Game *game) {
 // Sets the bag state with the given seed, ensuring the
 // next iteration will be consistent. Any leftover random
 // racks should be returned before calling this function.
-void game_seed(Game *game, uint64_t seed) { bag_seed(game->bag, seed); }
+void game_set_seed(Game *game, uint64_t seed) {
+  game->seed = seed;
+  bag_seed(game->bag, seed);
+}
+
+uint64_t game_get_seed(const Game *game) { return game->seed; }
 
 // This assumes the game has not started yet.
 void game_set_starting_player_index(Game *game, int starting_player_index) {

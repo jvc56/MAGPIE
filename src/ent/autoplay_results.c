@@ -9,6 +9,7 @@
 #include "move.h"
 #include "stats.h"
 
+#include "../str/game_string.h"
 #include "../str/move_string.h"
 #include "../str/rack_string.h"
 
@@ -651,6 +652,7 @@ typedef struct WinPctData {
   uint64_t **wins;
   int turn_snapshot_index;
   WinPctTurnSnapshot turn_snapshots[WIN_PCT_MAX_NUM_TURNS];
+  StringBuilder *game_sb;
 } WinPctData;
 
 void win_pct_data_reset_turn_snapshots(WinPctData *win_pct_data) {
@@ -689,6 +691,7 @@ void win_pct_data_create(Recorder *recorder) {
         calloc_or_die(WIN_PCT_NUM_COLUMNS, sizeof(uint64_t));
   }
   win_pct_data_reset_turn_snapshots(win_pct_data);
+  win_pct_data->game_sb = string_builder_create();
   recorder->data = win_pct_data;
 }
 
@@ -699,6 +702,7 @@ void win_pct_data_destroy(Recorder *recorder) {
     free(win_pct_data->wins[i]);
   }
   free(win_pct_data->wins);
+  string_builder_destroy(win_pct_data->game_sb);
   free(win_pct_data);
 }
 
@@ -728,6 +732,11 @@ void win_pct_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   turn_snapshot->score_diff = spread;
   turn_snapshot->num_tiles_remaining = num_tiles_remaining;
   turn_snapshot->player_index = player_index;
+  string_builder_add_formatted_string(win_pct_data->game_sb,
+                                      "Player %d: ", player_index + 1);
+  string_builder_add_move(win_pct_data->game_sb, game_get_board(game),
+                          args->move, game_get_ld(game));
+  string_builder_add_string(win_pct_data->game_sb, "\n");
   win_pct_data->turn_snapshot_index++;
 }
 
@@ -738,10 +747,7 @@ void win_pct_data_add_game(Recorder *recorder, const RecorderArgs *args) {
   const int final_game_spread =
       equity_to_int(player_get_score(game_get_player(game, 0)) -
                     player_get_score(game_get_player(game, 1)));
-  if (final_game_spread > WIN_PCT_MAX_SPREAD ||
-      final_game_spread < -WIN_PCT_MAX_SPREAD) {
-    return;
-  }
+  bool big_swing = false;
   for (int current_turn_snapshot_index = 0;
        current_turn_snapshot_index < end_turn_snapshot_index;
        current_turn_snapshot_index++) {
@@ -760,6 +766,14 @@ void win_pct_data_add_game(Recorder *recorder, const RecorderArgs *args) {
       player_on_turn_final_game_spread = -final_game_spread;
     }
     const int final_score_diff = player_on_turn_final_game_spread - score_diff;
+    if (final_score_diff > WIN_PCT_MAX_SPREAD ||
+        final_score_diff < -WIN_PCT_MAX_SPREAD) {
+      string_builder_add_formatted_string(
+          win_pct_data->game_sb, "big swing: %d, %d, %d, %d, %d\n", score_diff,
+          num_tiles_remaining, player_index, final_score_diff,
+          player_on_turn_final_game_spread);
+      big_swing = true;
+    }
     const int row_index = num_tiles_remaining - 1;
     win_pct_data->total_games[row_index]++;
     int start_col_index = WIN_PCT_MAX_SPREAD - final_score_diff;
@@ -778,6 +792,22 @@ void win_pct_data_add_game(Recorder *recorder, const RecorderArgs *args) {
       win_pct_data->wins[row_index][i] += 2;
     }
   }
+  if (big_swing) {
+    string_builder_add_game(win_pct_data->game_sb, game, NULL);
+    char *game_filename =
+        get_formatted_string("winpct_game_%lu.txt", game_get_seed(game));
+    ErrorStack *error_stack = error_stack_create();
+    write_string_to_file(game_filename, "w",
+                         string_builder_peek(win_pct_data->game_sb),
+                         error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_print_and_reset(error_stack);
+      log_fatal("error writing win pct game file: %s", game_filename);
+    }
+    free(game_filename);
+    error_stack_destroy(error_stack);
+  }
+  string_builder_clear(win_pct_data->game_sb);
   win_pct_data_reset_turn_snapshots(win_pct_data);
 }
 
@@ -910,7 +940,6 @@ void leaves_data_create(Recorder *recorder) {
 
 void leaves_data_destroy(Recorder *recorder) {
   LeavesData *leaves_data = (LeavesData *)recorder->data;
-  free(leaves_data->leave_counts);
   free(leaves_data);
 }
 
@@ -931,6 +960,41 @@ void leaves_data_add_move(Recorder *recorder, const RecorderArgs *args) {
               leave_index, string_builder_peek(sb), num_tiles);
     string_builder_destroy(sb);
   }
+  bool is_notable_leave =
+      equity_to_double(klv_get_indexed_leave_value(
+          recorder->recorder_context->klv, leave_index)) <= -40.0;
+  if (!is_notable_leave) {
+    const int ld_size = rack_get_dist_size(args->leave);
+    for (int i = 0; i < ld_size; i++) {
+      if (rack_get_letter(args->leave, i) >= 5) {
+        is_notable_leave = true;
+        break;
+      }
+    }
+  }
+
+  if (is_notable_leave) {
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_move(sb, game_get_board(args->game), args->move,
+                            recorder->recorder_context->ld);
+    string_builder_add_string(sb, "\n");
+    string_builder_add_rack(sb, args->leave, recorder->recorder_context->ld,
+                            false);
+    string_builder_add_game(sb, args->game, NULL);
+    char *game_filename =
+        get_formatted_string("leave_game_%lu.txt", game_get_seed(args->game));
+    ErrorStack *error_stack = error_stack_create();
+    write_string_to_file(game_filename, "w", string_builder_peek(sb),
+                         error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_print_and_reset(error_stack);
+      log_fatal("error writing win pct game file: %s", game_filename);
+    }
+    free(game_filename);
+    error_stack_destroy(error_stack);
+    string_builder_destroy(sb);
+  }
+
   leaves_data->leave_counts[leave_index]++;
 }
 

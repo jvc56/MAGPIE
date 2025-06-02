@@ -298,7 +298,7 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
   Game *game = game_runner->game;
   game_reset(game);
   game_runner->seed = iter_output->seed;
-  game_seed(game, iter_output->seed);
+  game_set_seed(game, iter_output->seed);
   game_set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
   game_runner->turn_number = 0;
