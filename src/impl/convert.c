@@ -271,55 +271,60 @@ void convert(ConversionArgs *args, ConversionResults *conversion_results,
     return;
   }
 
-  if (args->input_name == NULL) {
+  if (args->input_and_output_name == NULL) {
     error_stack_push(error_stack, ERROR_STATUS_CONVERT_INPUT_FILE_ERROR,
                      get_formatted_string("input file name is missing"));
     return;
   }
 
-  if (args->output_name == NULL) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONVERT_OUTPUT_FILE_NOT_WRITABLE,
-        get_formatted_string("output file name is missing or not writable"));
-    return;
+  char *ld_name = NULL;
+  if (args->ld_name != NULL) {
+    ld_name = string_duplicate(args->ld_name);
+  } else {
+    ld_name = ld_get_default_name_from_lexicon_name(args->input_and_output_name,
+                                                    error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
   }
 
-  if (args->ld == NULL) {
-    error_stack_push(error_stack,
-                     ERROR_STATUS_CONVERT_MISSING_LETTER_DISTRIBUTION,
-                     get_formatted_string("missing letter distribution"));
+  LetterDistribution *ld = ld_create(args->data_paths, ld_name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  free(ld_name);
 
   data_filepath_t input_filepath_type =
       get_input_filepath_type_from_conv_type(conversion_type);
 
   char *input_filename = data_filepaths_get_readable_filename(
-      args->data_paths, args->input_name, input_filepath_type, error_stack);
+      args->data_paths, args->input_and_output_name, input_filepath_type,
+      error_stack);
 
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
 
   char *data_path = data_filepaths_get_data_path_name(
-      args->data_paths, args->output_name, input_filepath_type, error_stack);
+      args->data_paths, args->input_and_output_name, input_filepath_type,
+      error_stack);
 
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
 
   char *output_filename = data_filepaths_get_writable_filename(
-      data_path, args->output_name,
+      data_path, args->input_and_output_name,
       get_output_filepath_type_from_conv_type(conversion_type), error_stack);
 
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
 
-  convert_with_filenames(args->ld, conversion_type, args->data_paths,
-                         input_filename, output_filename, conversion_results,
-                         error_stack);
+  convert_with_filenames(ld, conversion_type, args->data_paths, input_filename,
+                         output_filename, conversion_results, error_stack);
 
+  ld_destroy(ld);
   free(data_path);
   free(input_filename);
   free(output_filename);
