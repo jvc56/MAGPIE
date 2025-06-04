@@ -766,8 +766,9 @@ void win_pct_data_add_game(Recorder *recorder, const RecorderArgs *args) {
       player_on_turn_final_game_spread = -final_game_spread;
     }
     const int final_score_diff = player_on_turn_final_game_spread - score_diff;
-    if (final_score_diff > WIN_PCT_MAX_SPREAD ||
-        final_score_diff < -WIN_PCT_MAX_SPREAD) {
+    if ((final_score_diff > WIN_PCT_MAX_SPREAD ||
+         final_score_diff < -WIN_PCT_MAX_SPREAD) &&
+        num_tiles_remaining < 20) {
       string_builder_add_formatted_string(
           win_pct_data->game_sb, "big swing: %d, %d, %d, %d, %d\n", score_diff,
           num_tiles_remaining, player_index, final_score_diff,
@@ -940,6 +941,7 @@ void leaves_data_create(Recorder *recorder) {
 
 void leaves_data_destroy(Recorder *recorder) {
   LeavesData *leaves_data = (LeavesData *)recorder->data;
+  free(leaves_data->leave_counts);
   free(leaves_data);
 }
 
@@ -972,29 +974,6 @@ void leaves_data_add_move(Recorder *recorder, const RecorderArgs *args) {
       }
     }
   }
-
-  if (is_notable_leave) {
-    StringBuilder *sb = string_builder_create();
-    string_builder_add_move(sb, game_get_board(args->game), args->move,
-                            recorder->recorder_context->ld);
-    string_builder_add_string(sb, "\n");
-    string_builder_add_rack(sb, args->leave, recorder->recorder_context->ld,
-                            false);
-    string_builder_add_game(sb, args->game, NULL);
-    char *game_filename =
-        get_formatted_string("leave_game_%lu.txt", game_get_seed(args->game));
-    ErrorStack *error_stack = error_stack_create();
-    write_string_to_file(game_filename, "w", string_builder_peek(sb),
-                         error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      error_stack_print_and_reset(error_stack);
-      log_fatal("error writing win pct game file: %s", game_filename);
-    }
-    free(game_filename);
-    error_stack_destroy(error_stack);
-    string_builder_destroy(sb);
-  }
-
   leaves_data->leave_counts[leave_index]++;
 }
 
