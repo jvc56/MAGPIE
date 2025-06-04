@@ -550,7 +550,7 @@ void test_config_wmp(void) {
                          error_stack);
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) != NULL);
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) != NULL);
-  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) ==
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) ==
          players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1));
   wmp1 = players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0);
   wmp2 = players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1);
