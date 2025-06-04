@@ -13,7 +13,14 @@ void convert_and_assert_status(ConversionArgs *args, ConversionResults *results,
                                error_code_t expected_status) {
   ErrorStack *error_stack = error_stack_create();
   convert(args, results, error_stack);
-  assert(error_stack_top(error_stack) == expected_status);
+  if (error_stack_top(error_stack) != expected_status) {
+    if (error_stack_top(error_stack) == ERROR_STATUS_SUCCESS) {
+      log_fatal("expected error status %d but got success", expected_status);
+    } else {
+      error_stack_print_and_reset(error_stack);
+    }
+    assert(0);
+  }
   error_stack_destroy(error_stack);
 }
 
@@ -22,11 +29,12 @@ void test_convert_error(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   ConversionResults *conversion_results = conversion_results_create();
   ConversionArgs args;
+  args.conversion_type_string = NULL;
+  args.data_paths = NULL;
+  args.input_and_output_name = NULL;
+  args.ld_name = NULL;
 
   args.conversion_type_string = "bad conversion type";
-  args.data_paths = NULL;
-  args.input_name = NULL;
-  args.output_name = NULL;
   convert_and_assert_status(&args, conversion_results,
                             ERROR_STATUS_CONVERT_UNRECOGNIZED_CONVERSION_TYPE);
 
@@ -34,54 +42,36 @@ void test_convert_error(void) {
   convert_and_assert_status(&args, conversion_results,
                             ERROR_STATUS_CONVERT_INPUT_FILE_ERROR);
 
-  args.input_name = "some not null name";
+  args.input_and_output_name = "some not null name";
   convert_and_assert_status(&args, conversion_results,
-                            ERROR_STATUS_CONVERT_OUTPUT_FILE_NOT_WRITABLE);
+                            ERROR_STATUS_LD_LEXICON_DEFAULT_NOT_FOUND);
 
   args.conversion_type_string = "text2dawg";
   args.data_paths = DEFAULT_TEST_DATA_PATH;
-  args.input_name = "CSW21_too_long";
-  args.output_name = "CSW21_too_long";
-  args.ld = NULL;
-  convert_and_assert_status(&args, conversion_results,
-                            ERROR_STATUS_CONVERT_MISSING_LETTER_DISTRIBUTION);
-
-  args.conversion_type_string = "text2dawg";
-  args.data_paths = DEFAULT_TEST_DATA_PATH;
-  args.input_name = "CSW21_too_long";
-  args.output_name = "CSW21_too_long";
-  args.ld = config_get_ld(config);
+  args.input_and_output_name = "CSW21_too_long";
   convert_and_assert_status(&args, conversion_results,
                             ERROR_STATUS_CONVERT_TEXT_CONTAINS_WORD_TOO_LONG);
 
   args.conversion_type_string = "text2dawg";
   args.data_paths = DEFAULT_TEST_DATA_PATH;
-  args.input_name = "CSW21_too_long_2";
-  args.output_name = "CSW21_too_long_2";
-  args.ld = config_get_ld(config);
+  args.input_and_output_name = "CSW21_too_long_2";
   convert_and_assert_status(&args, conversion_results,
                             ERROR_STATUS_CONVERT_TEXT_CONTAINS_WORD_TOO_LONG);
   args.conversion_type_string = "text2dawg";
   args.data_paths = DEFAULT_TEST_DATA_PATH;
-  args.input_name = "CSW21_invalid_letter";
-  args.output_name = "CSW21_invalid_letter";
-  args.ld = config_get_ld(config);
+  args.input_and_output_name = "CSW21_invalid_letter";
   convert_and_assert_status(&args, conversion_results,
                             ERROR_STATUS_CONVERT_TEXT_CONTAINS_INVALID_LETTER);
 
   args.conversion_type_string = "text2dawg";
   args.data_paths = DEFAULT_TEST_DATA_PATH;
-  args.input_name = "CSW21_invalid_blank_letter";
-  args.output_name = "CSW21_invalid_blank_letter";
-  args.ld = config_get_ld(config);
+  args.input_and_output_name = "CSW21_invalid_blank_letter";
   convert_and_assert_status(&args, conversion_results,
                             ERROR_STATUS_CONVERT_TEXT_CONTAINS_INVALID_LETTER);
 
   args.conversion_type_string = "text2dawg";
   args.data_paths = DEFAULT_TEST_DATA_PATH;
-  args.input_name = "CSW21_too_short";
-  args.output_name = "CSW21_too_short";
-  args.ld = config_get_ld(config);
+  args.input_and_output_name = "CSW21_too_short";
   convert_and_assert_status(&args, conversion_results,
                             ERROR_STATUS_CONVERT_TEXT_CONTAINS_WORD_TOO_SHORT);
 
@@ -95,8 +85,7 @@ void test_convert_success(void) {
   ValidatedMoves *vms;
   Game *game;
 
-  load_and_exec_config_or_die(
-      config, "convert text2dawg CSW21_dawg_only CSW21_dawg_only");
+  load_and_exec_config_or_die(config, "convert text2dawg CSW21_dawg_only");
   load_and_exec_config_or_die(config, "set -lex CSW21_dawg_only");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   game = config_get_game(config);
@@ -104,8 +93,7 @@ void test_convert_success(void) {
       game, 0, "H8.BRAVO", false, false, false, ERROR_STATUS_SUCCESS);
   validated_moves_destroy(vms);
 
-  load_and_exec_config_or_die(
-      config, "convert text2dawg CSW21_gaddag_only CSW21_gaddag_only");
+  load_and_exec_config_or_die(config, "convert text2dawg CSW21_gaddag_only");
   load_and_exec_config_or_die(config, "set -lex CSW21_gaddag_only");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   game = config_get_game(config);
@@ -113,8 +101,8 @@ void test_convert_success(void) {
       game, 0, "H8.CHARLIE", false, false, false, ERROR_STATUS_SUCCESS);
   validated_moves_destroy(vms);
 
-  load_and_exec_config_or_die(
-      config, "convert text2dawg CSW21_dawg_and_gaddag CSW21_dawg_and_gaddag");
+  load_and_exec_config_or_die(config,
+                              "convert text2dawg CSW21_dawg_and_gaddag");
   load_and_exec_config_or_die(config, "set -lex CSW21_dawg_and_gaddag");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   game = config_get_game(config);
@@ -122,12 +110,10 @@ void test_convert_success(void) {
       game, 0, "H8.QUEBEC", false, false, false, ERROR_STATUS_SUCCESS);
   validated_moves_destroy(vms);
 
-  load_and_exec_config_or_die(config,
-                              "convert text2wordmap CSW21_small CSW21_small");
+  load_and_exec_config_or_die(config, "convert text2wordmap CSW21_small");
 
   load_and_exec_config_or_die(config, "set -ld english_small");
-  load_and_exec_config_or_die(config,
-                              "convert csv2klv CSW21_small CSW21_small");
+  load_and_exec_config_or_die(config, "convert csv2klv CSW21_small");
   load_and_exec_config_or_die(
       config, "set -k1 CSW21_small -k2 CSW21_small -ld english_small");
   const KLV *klv = players_data_get_klv(config_get_players_data(config), 0);
@@ -139,7 +125,7 @@ void test_convert_success(void) {
   rack_destroy(leave);
 
   load_and_exec_config_or_die(config,
-                              "convert klv2csv CSW21_small CSW21_small");
+                              "convert klv2csv CSW21_small english_small");
   char *leaves_file_string =
       get_string_from_file_or_die("testdata/leaves/CSW21_small.csv");
   assert_strings_equal(leaves_file_string,

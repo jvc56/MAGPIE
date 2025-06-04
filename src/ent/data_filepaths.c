@@ -156,7 +156,6 @@ char *data_filepaths_get_data_path_name(const char *data_paths,
   if (!data_name) {
     error_stack_push(error_stack, ERROR_STATUS_FILEPATH_NULL_FILENAME,
                      get_formatted_string("data name is null for data type %s",
-                                          data_name,
                                           filepath_type_names[type]));
     return NULL;
   }
@@ -178,7 +177,6 @@ char *data_filepaths_get_readable_filename(const char *data_paths,
   if (!data_name) {
     error_stack_push(error_stack, ERROR_STATUS_FILEPATH_NULL_FILENAME,
                      get_formatted_string("data name is null for data type %s",
-                                          data_name,
                                           filepath_type_names[type]));
     return NULL;
   }
@@ -214,7 +212,6 @@ char *data_filepaths_get_writable_filename(const char *data_paths,
   if (!data_name) {
     error_stack_push(error_stack, ERROR_STATUS_FILEPATH_NULL_FILENAME,
                      get_formatted_string("data name is null for data type %s",
-                                          data_name,
                                           filepath_type_names[type]));
     return NULL;
   }
