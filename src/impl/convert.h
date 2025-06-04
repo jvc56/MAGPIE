@@ -11,9 +11,8 @@
 typedef struct ConversionArgs {
   const char *conversion_type_string;
   const char *data_paths;
-  const char *input_name;
-  const char *output_name;
-  const LetterDistribution *ld;
+  const char *input_and_output_name;
+  const char *ld_name;
 } ConversionArgs;
 
 void convert(ConversionArgs *args, ConversionResults *conversion_results,

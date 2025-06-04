@@ -987,9 +987,9 @@ void config_fill_conversion_args(const Config *config, ConversionArgs *args) {
   args->conversion_type_string =
       config_get_parg_value(config, ARG_TOKEN_CONVERT, 0);
   args->data_paths = config_get_data_paths(config);
-  args->input_name = config_get_parg_value(config, ARG_TOKEN_CONVERT, 1);
-  args->output_name = config_get_parg_value(config, ARG_TOKEN_CONVERT, 2);
-  args->ld = config->ld;
+  args->input_and_output_name =
+      config_get_parg_value(config, ARG_TOKEN_CONVERT, 1);
+  args->ld_name = config_get_parg_value(config, ARG_TOKEN_CONVERT, 2);
 }
 
 void config_convert(const Config *config, ConversionResults *results,
@@ -1075,17 +1075,22 @@ void execute_create_data(Config *config, ErrorStack *error_stack) {
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
-    LetterDistribution *ld = ld_create(
-        config_get_data_paths(config),
-        config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 2), error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
+    const char *ld_name_arg =
+        config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 2);
+    LetterDistribution *ld = config_get_ld(config);
+    if (ld_name_arg) {
+      ld = ld_create(config_get_data_paths(config), ld_name_arg, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
     }
     KLV *klv = klv_create_empty(ld, klv_name_str);
     klv_write(klv, klv_filename, error_stack);
     klv_destroy(klv);
     free(klv_filename);
-    ld_destroy(ld);
+    if (ld_name_arg) {
+      ld_destroy(ld);
+    }
   } else {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_CREATE_DATA_TYPE,
@@ -1350,6 +1355,11 @@ void config_load_lexicon_dependent_data(Config *config,
                                         ErrorStack *error_stack) {
   // Lexical player data
 
+  // For both the kwg and klv, we disallow any non-NULL -> NULL transitions.
+  // Once the kwg and klv are set for both players, they can change to new
+  // lexica or leave values, but they can never change to NULL. Therefore, if
+  // new names are NULL, it means they weren't specified for this command and
+  // the existing kwg and klv types should persist.
   const char *new_lexicon_name =
       config_get_parg_value(config, ARG_TOKEN_LEXICON, 0);
 
@@ -1465,27 +1475,44 @@ void config_load_lexicon_dependent_data(Config *config,
   }
 
   // Load lexica (in WMP format)
-  const char *p1_wmp_name = NULL;
-  const char *p2_wmp_name = NULL;
-  bool use_wmp = false;
-  config_load_bool(config, ARG_TOKEN_USE_WMP, &use_wmp, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
+
+  // For the wmp, we allow non-NULL -> NULL transitions.
+
+  // Start by assuming we are just using whatever the existing wmp settings are
+  bool p1_use_wmp = !!players_data_get_data_name(config->players_data,
+                                                 PLAYERS_DATA_TYPE_WMP, 0);
+  bool p2_use_wmp = !!players_data_get_data_name(config->players_data,
+                                                 PLAYERS_DATA_TYPE_WMP, 1);
+
+  if (config_get_parg_value(config, ARG_TOKEN_USE_WMP, 0)) {
+    config_load_bool(config, ARG_TOKEN_USE_WMP, &p1_use_wmp, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    p2_use_wmp = p1_use_wmp;
   }
+
   // The "w1" and "w2" args override the "use_wmp" arg
-  bool p1_use_wmp = use_wmp;
-  bool p2_use_wmp = use_wmp;
-  config_load_bool(config, ARG_TOKEN_P1_USE_WMP, &p1_use_wmp, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
+  if (config_get_parg_value(config, ARG_TOKEN_P1_USE_WMP, 0)) {
+    config_load_bool(config, ARG_TOKEN_P1_USE_WMP, &p1_use_wmp, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
   }
+
+  if (config_get_parg_value(config, ARG_TOKEN_P2_USE_WMP, 0)) {
+    config_load_bool(config, ARG_TOKEN_P2_USE_WMP, &p2_use_wmp, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  const char *p1_wmp_name = NULL;
   if (p1_use_wmp) {
     p1_wmp_name = updated_p1_lexicon_name;
   }
-  config_load_bool(config, ARG_TOKEN_P2_USE_WMP, &p2_use_wmp, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
+
+  const char *p2_wmp_name = NULL;
   if (p2_use_wmp) {
     p2_wmp_name = updated_p2_lexicon_name;
   }
@@ -1946,11 +1973,11 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack) {
                     status_infer);
   parsed_arg_create(config, ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2,
                     execute_autoplay, status_autoplay);
-  parsed_arg_create(config, ARG_TOKEN_CONVERT, "convert", 3, 3, execute_convert,
+  parsed_arg_create(config, ARG_TOKEN_CONVERT, "convert", 2, 3, execute_convert,
                     status_convert);
   parsed_arg_create(config, ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2,
                     execute_leave_gen, status_leave_gen);
-  parsed_arg_create(config, ARG_TOKEN_CREATE_DATA, "createdata", 3, 3,
+  parsed_arg_create(config, ARG_TOKEN_CREATE_DATA, "createdata", 2, 3,
                     execute_create_data, status_create_data);
   parsed_arg_create(config, ARG_TOKEN_DATA_PATH, "path", 1, 1, execute_fatal,
                     status_fatal);

@@ -12,6 +12,8 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 
+const char *players_data_type_names[] = {"kwg", "klv", "wordmap"};
+
 // The PlayersData struct holds all of the
 // information that can be set during configuration.
 // This is then copied to the Player struct in the
@@ -112,6 +114,9 @@ void players_data_set_data(PlayersData *players_data,
 void *players_data_create_data(players_data_t players_data_type,
                                const char *data_paths, const char *data_name,
                                ErrorStack *error_stack) {
+  if (!data_name) {
+    return NULL;
+  }
   void *data = NULL;
   switch (players_data_type) {
   case PLAYERS_DATA_TYPE_KWG:
@@ -233,17 +238,23 @@ void players_data_destroy(PlayersData *players_data) {
   free(players_data);
 }
 
+bool players_data_type_is_nullable(players_data_t players_data_type) {
+  return players_data_type == PLAYERS_DATA_TYPE_WMP;
+}
+
 void players_data_set(PlayersData *players_data,
                       players_data_t players_data_type, const char *data_paths,
                       const char *p1_data_name, const char *p2_data_name,
                       ErrorStack *error_stack) {
   // WMP is optional, KWG and KLV are required for every player.
-  if (players_data_type != PLAYERS_DATA_TYPE_WMP) {
+  if (!players_data_type_is_nullable(players_data_type)) {
     if (is_string_empty_or_null(p1_data_name)) {
-      log_fatal("cannot set player one data with null or empty name");
+      log_fatal("cannot set data type '%s' to null for player one",
+                players_data_type_names[players_data_type]);
     }
     if (is_string_empty_or_null(p2_data_name)) {
-      log_fatal("cannot set player two data with null or empty name");
+      log_fatal("cannot set data type '%s' to null for player two",
+                players_data_type_names[players_data_type]);
     }
   }
 

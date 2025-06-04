@@ -46,7 +46,14 @@
 
 #define ENCODED_RACK_UNIT_TYPE uint64_t
 
-#define BITS_PER_ML BITS_TO_REPRESENT(MAX_ALPHABET_SIZE)
+// Use -1 for bits per ml since the ml bits just represent the tiles and aren't
+// specifying a count of anything.
+#define BITS_PER_ML BITS_TO_REPRESENT(MAX_ALPHABET_SIZE - 1)
+// Do not use any adjustments for RACK_SIZE since this represents the actual
+// count. For example, a rack size of 8 has 9 distinct counts (0, 1, 2, ..., 8).
+// We could possibly do an increment on the read to convert the actual bit
+// values from [0, 7] to [1, 8] since there will never be zero of a tile in the
+// encoded rack, but we'll leave that for later.
 #define BITS_PER_COUNT BITS_TO_REPRESENT(RACK_SIZE)
 #define BITS_PER_ML_AND_COUNT (BITS_PER_ML + BITS_PER_COUNT)
 #define BITS_PER_UNIT (sizeof(ENCODED_RACK_UNIT_TYPE) * CHAR_BIT)
@@ -57,16 +64,20 @@ typedef struct EncodedRack {
   ENCODED_RACK_UNIT_TYPE array[ENCODED_RACK_UNITS];
 } EncodedRack;
 
+static inline ENCODED_RACK_UNIT_TYPE encoded_rack_shift_bit(int bit_index) {
+  return (ENCODED_RACK_UNIT_TYPE)1 << (bit_index % BITS_PER_UNIT);
+}
+
 static inline void encoded_rack_set_bit(EncodedRack *encoded_rack,
                                         int bit_index) {
   encoded_rack->array[bit_index / BITS_PER_UNIT] |=
-      (ENCODED_RACK_UNIT_TYPE)1 << (bit_index % BITS_PER_UNIT);
+      encoded_rack_shift_bit(bit_index);
 }
 
 static inline bool encoded_rack_get_bit(const EncodedRack *encoded_rack,
                                         int bit_index) {
   return (encoded_rack->array[bit_index / BITS_PER_UNIT] &
-          (ENCODED_RACK_UNIT_TYPE)1 << bit_index) != 0;
+          encoded_rack_shift_bit(bit_index)) != 0;
 }
 
 static inline void encoded_rack_set_ml(EncodedRack *encoded_rack, uint8_t ml,

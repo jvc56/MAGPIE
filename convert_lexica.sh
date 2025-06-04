@@ -9,7 +9,7 @@ for path in data/lexica/*_super.kwg; do
     [[ -e "$path" ]] || continue  # Skip if none found
     lexicon=$(basename "$path" .kwg)
     echo "Converting $lexicon.kwg (super) to $lexicon.txt"
-    bin/magpie convert dawg2text "$lexicon" "$lexicon" -lex "$lexicon"
+    bin/magpie convert dawg2text "$lexicon"
 done
 
 # 3) Build again for nstandard (BOARD_DIM=15)
@@ -22,7 +22,7 @@ for path in data/lexica/*.kwg; do
     [[ "$path" == *"_super.kwg" ]] && continue
     lexicon=$(basename "$path" .kwg)
     echo "Converting $lexicon.kwg to $lexicon.txt"
-    bin/magpie convert dawg2text "$lexicon" "$lexicon" -lex "$lexicon"
+    bin/magpie convert dawg2text "$lexicon"
 done
 
 # 5) Convert all .txt (that have corresponding .kwg) to .wmp (skip OSPS)
@@ -37,5 +37,5 @@ for path in data/lexica/*.kwg; do
         continue
     fi
     echo "Converting $lexicon.txt to $lexicon.wmp"
-    bin/magpie convert text2wordmap "$lexicon" "$lexicon" -lex "$lexicon"
+    bin/magpie convert text2wordmap "$lexicon"
 done
