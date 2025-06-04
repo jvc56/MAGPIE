@@ -83,7 +83,7 @@ void test_config_load_error_cases(void) {
   test_config_load_error(config, "cgp 1 2 3",
                          ERROR_STATUS_CONFIG_LOAD_INSUFFICIENT_NUMBER_OF_VALUES,
                          error_stack);
-  test_config_load_error(config, "create klv CSW50",
+  test_config_load_error(config, "create klv",
                          ERROR_STATUS_CONFIG_LOAD_INSUFFICIENT_NUMBER_OF_VALUES,
                          error_stack);
   test_config_load_error(config, "sim -bdn invalid_number_of_rows15",
@@ -527,9 +527,139 @@ void test_config_exec_parse_args(void) {
   config_destroy(config);
 }
 
+void test_config_wmp(void) {
+  ErrorStack *error_stack = error_stack_create();
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  const PlayersData *players_data = config_get_players_data(config);
+  WMP *wmp1 = NULL;
+  WMP *wmp2 = NULL;
+
+  // Players start off with no wmp
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) == NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) == NULL);
+
+  // Setting some unrelated fields shouldn't change the status of wmp
+  test_config_load_error(config, "set -pfreq 1000", ERROR_STATUS_SUCCESS,
+                         error_stack);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) == NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) == NULL);
+
+  // Both players should share the same wmp
+  test_config_load_error(config, "set -wmp true", ERROR_STATUS_SUCCESS,
+                         error_stack);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) != NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) != NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) ==
+         players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1));
+  wmp1 = players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0);
+  wmp2 = players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1);
+
+  // Setting some unrelated fields shouldn't change the status of wmp
+  test_config_load_error(config, "set -pfreq 1000", ERROR_STATUS_SUCCESS,
+                         error_stack);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) != NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) != NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) ==
+         players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1));
+  assert(wmp1 == players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0));
+  assert(wmp2 == players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1));
+
+  // Unset the wmp for player one
+  test_config_load_error(config, "set -w1 false", ERROR_STATUS_SUCCESS,
+                         error_stack);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) == NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) != NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) == wmp1);
+
+  // Setting some unrelated fields shouldn't change the status of wmp
+  test_config_load_error(config, "set -pfreq 100", ERROR_STATUS_SUCCESS,
+                         error_stack);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) == NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) != NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) == wmp1);
+
+  // Unset the wmp for player two
+  test_config_load_error(config, "set -w2 false", ERROR_STATUS_SUCCESS,
+                         error_stack);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) == NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) == NULL);
+
+  // Setting some unrelated fields shouldn't change the status of wmp
+  test_config_load_error(config, "set -pfreq 1000", ERROR_STATUS_SUCCESS,
+                         error_stack);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) == NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) == NULL);
+
+  // Set the wmp for player one
+  test_config_load_error(config, "set -w1 true", ERROR_STATUS_SUCCESS,
+                         error_stack);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) != NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) == NULL);
+  // The wmp should be a different pointer now
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) != wmp1);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) != wmp1);
+  wmp1 = players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0);
+
+  // Setting some unrelated fields shouldn't change the status of wmp
+  test_config_load_error(config, "set -pfreq 100000", ERROR_STATUS_SUCCESS,
+                         error_stack);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) != NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) == NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) == wmp1);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) != wmp1);
+
+  // Change lexicons
+  test_config_load_error(config, "set -lex NWL20", ERROR_STATUS_SUCCESS,
+                         error_stack);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) != NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) == NULL);
+  // The wmp should be a different pointer now
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) != wmp1);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) != wmp1);
+  wmp1 = players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0);
+
+  // Setting some unrelated fields shouldn't change the status of wmp
+  test_config_load_error(config, "set -pfreq 100000", ERROR_STATUS_SUCCESS,
+                         error_stack);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) != NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) == NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) == wmp1);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) != wmp1);
+
+  // Set the wmp for player two
+  test_config_load_error(config, "set -w2 true", ERROR_STATUS_SUCCESS,
+                         error_stack);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) != NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) != NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) == wmp1);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) == wmp1);
+
+  // Setting some unrelated fields shouldn't change the status of wmp
+  test_config_load_error(config, "set -pfreq 100000", ERROR_STATUS_SUCCESS,
+                         error_stack);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) != NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) != NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) == wmp1);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) == wmp1);
+
+  // Change lexicons
+  test_config_load_error(config, "set -lex CSW21", ERROR_STATUS_SUCCESS,
+                         error_stack);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) != NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) != NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) != wmp1);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) ==
+         players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1));
+
+  config_destroy(config);
+  error_stack_destroy(error_stack);
+}
+
 void test_config(void) {
   test_config_load_error_cases();
   test_config_load_success();
   test_config_lexical_data();
   test_config_exec_parse_args();
+  test_config_wmp();
 }
