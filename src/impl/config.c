@@ -82,7 +82,6 @@ typedef enum {
   ARG_TOKEN_RANDOM_SEED,
   ARG_TOKEN_NUMBER_OF_THREADS,
   ARG_TOKEN_PRINT_INFO_INTERVAL,
-  ARG_TOKEN_RECORD_FILEPATH,
   ARG_TOKEN_EXEC_MODE,
   ARG_TOKEN_TT_FRACTION_OF_MEM,
   ARG_TOKEN_TIME_LIMIT,
@@ -1069,12 +1068,6 @@ void execute_create_data(Config *config, ErrorStack *error_stack) {
   if (has_iprefix(create_type_str, "klv")) {
     const char *klv_name_str =
         config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 1);
-    char *klv_filename = data_filepaths_get_writable_filename(
-        config_get_data_paths(config), klv_name_str, DATA_FILEPATH_TYPE_KLV,
-        error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
     const char *ld_name_arg =
         config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 2);
     LetterDistribution *ld = config_get_ld(config);
@@ -1085,9 +1078,8 @@ void execute_create_data(Config *config, ErrorStack *error_stack) {
       }
     }
     KLV *klv = klv_create_empty(ld, klv_name_str);
-    klv_write(klv, klv_filename, error_stack);
+    klv_write(klv, config_get_data_paths(config), klv_name_str, error_stack);
     klv_destroy(klv);
-    free(klv_filename);
     if (ld_name_arg) {
       ld_destroy(ld);
     }
@@ -1630,7 +1622,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     free(config->data_paths);
     config->data_paths = string_duplicate(new_path);
   }
-
+  autoplay_results_set_data_paths(config->autoplay_results, config->data_paths);
   // Exec Mode
 
   const char *new_exec_mode_str =
@@ -1886,13 +1878,6 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       return;
     }
   }
-
-  const char *record_filepath =
-      config_get_parg_value(config, ARG_TOKEN_RECORD_FILEPATH, 0);
-  if (record_filepath) {
-    autoplay_results_set_record_filepath(config->autoplay_results,
-                                         record_filepath);
-  }
 }
 
 // Parses the arguments given by the cmd string and updates the state of
@@ -2047,8 +2032,6 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack) {
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_PRINT_INFO_INTERVAL, "pfrequency", 1, 1,
                     execute_fatal, status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_RECORD_FILEPATH, "recfile", 1, 1,
-                    execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_EXEC_MODE, "mode", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_TT_FRACTION_OF_MEM, "ttfraction", 1, 1,
@@ -2089,6 +2072,9 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack) {
   config->autoplay_results = autoplay_results_create();
   config->conversion_results = conversion_results_create();
   config->tt_fraction_of_mem = 0.25;
+
+  autoplay_results_set_players_data(config->autoplay_results,
+                                    config->players_data);
 }
 
 Config *config_create_default(ErrorStack *error_stack) {

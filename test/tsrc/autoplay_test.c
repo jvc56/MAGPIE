@@ -199,13 +199,7 @@ void test_autoplay_divergent_games(void) {
     small_diff_klv->leave_values[i] += int_to_equity(-1 + (2 * (i % 2)));
   }
 
-  char *small_diff_klv_filename = data_filepaths_get_writable_filename(
-      DEFAULT_TEST_DATA_PATH, "CSW21_small_diff", DATA_FILEPATH_TYPE_KLV,
-      error_stack);
-  assert(error_stack_is_empty(error_stack));
-
-  klv_write_or_die(small_diff_klv, small_diff_klv_filename);
-  free(small_diff_klv_filename);
+  klv_write_or_die(small_diff_klv, DEFAULT_TEST_DATA_PATH, "CSW21_small_diff");
   klv_destroy(small_diff_klv);
 
   load_and_exec_config_or_die(
@@ -224,23 +218,12 @@ void test_autoplay_divergent_games(void) {
   config_destroy(csw_config);
 }
 
-void test_autoplay_fj_record(void) {
-  Config *csw_config =
-      config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
-                           "all -numplays 1  -gp false -threads 11");
-  load_and_exec_config_or_die(
-      csw_config,
-      "autoplay fj 50 -seed 50 -wb 1000000 -recfile ./data/lexica/output.txt");
-  config_destroy(csw_config);
-}
-
 void test_autoplay_win_pct_record(void) {
   Config *csw_config =
       config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
                            "all -numplays 1  -gp false -threads 1");
   load_and_exec_config_or_die(csw_config,
-                              "autoplay winpct 50 -seed 50 -wb 1000000 "
-                              "-recfile ./data/test_record.txt");
+                              "autoplay winpct 50 -seed 50 -wb 1000000 ");
   config_destroy(csw_config);
 }
 
@@ -249,8 +232,7 @@ void test_autoplay_leaves_record(void) {
       config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
                            "all -numplays 1  -gp false -threads 1");
   load_and_exec_config_or_die(csw_config,
-                              "autoplay leaves 2 -seed 50 -wb 1000000 "
-                              "-recfile ./data/test_record.txt");
+                              "autoplay leaves 2 -seed 50 -wb 1000000 ");
   config_destroy(csw_config);
 }
 
