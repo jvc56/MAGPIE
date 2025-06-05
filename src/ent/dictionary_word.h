@@ -31,6 +31,7 @@ void dictionary_word_list_destroy(DictionaryWordList *dictionary_word_list);
 
 void dictionary_word_list_write_to_file(
     const DictionaryWordList *dictionary_word_list,
-    const LetterDistribution *ld, const char *filename,
-    ErrorStack *error_stack);
+    const LetterDistribution *ld, const char *data_paths,
+    const char *output_name, ErrorStack *error_stack);
+
 #endif // DICTIONARY_WORD_H

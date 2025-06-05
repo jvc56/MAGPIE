@@ -192,9 +192,10 @@ KLV *klv_create_or_die(const char *data_paths, const char *klv_name) {
   return klv;
 }
 
-void klv_write_or_die(const KLV *klv, const char *klv_filename) {
+void klv_write_or_die(const KLV *klv, const char *data_paths,
+                      const char *klv_name) {
   ErrorStack *error_stack = error_stack_create();
-  klv_write(klv, klv_filename, error_stack);
+  klv_write(klv, data_paths, klv_name, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
     abort();
@@ -215,9 +216,9 @@ KLV *klv_read_from_csv_or_die(const LetterDistribution *ld,
 }
 
 void klv_write_to_csv_or_die(KLV *klv, const LetterDistribution *ld,
-                             const char *csv_filename) {
+                             const char *data_paths, const char *csv_name) {
   ErrorStack *error_stack = error_stack_create();
-  klv_write_to_csv(klv, ld, csv_filename, NULL, error_stack);
+  klv_write_to_csv(klv, ld, data_paths, csv_name, NULL, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
     abort();

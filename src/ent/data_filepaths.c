@@ -21,19 +21,6 @@ const char *filepath_type_names[] = {
     "kwg", "klv",    "board layout", "win percentage", "letter distribution",
     "gcg", "leaves", "lexicon",      "wordmap"};
 
-bool is_filepath(const char *filepath) {
-  return string_contains(filepath, '/') || string_contains(filepath, '\\') ||
-         has_suffix(filepath, KWG_EXTENSION) ||
-         has_suffix(filepath, WORDMAP_EXTENSION) ||
-         has_suffix(filepath, KLV_EXTENSION) ||
-         has_suffix(filepath, LAYOUT_EXTENSION) ||
-         has_suffix(filepath, WIN_PCT_EXTENSION) ||
-         has_suffix(filepath, LD_EXTENSION) ||
-         has_suffix(filepath, GCG_EXTENSION) ||
-         has_suffix(filepath, LEAVES_EXTENSION) ||
-         has_suffix(filepath, LEXICON_EXTENSION);
-}
-
 void string_builder_add_directory_for_data_type(StringBuilder *sb,
                                                 const char *data_path,
                                                 data_filepath_t type) {
@@ -159,9 +146,6 @@ char *data_filepaths_get_data_path_name(const char *data_paths,
                                           filepath_type_names[type]));
     return NULL;
   }
-  if (is_filepath(data_name)) {
-    return NULL;
-  }
   return data_filepaths_get_first_valid_filename(data_paths, data_name, type,
                                                  true, error_stack);
 }
@@ -180,23 +164,8 @@ char *data_filepaths_get_readable_filename(const char *data_paths,
                                           filepath_type_names[type]));
     return NULL;
   }
-
-  char *full_filename = NULL;
-
-  if (is_filepath(data_name)) {
-    if (access(data_name, F_OK | R_OK) == 0) {
-      full_filename = string_duplicate(data_name);
-    } else {
-      error_stack_push(error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
-                       get_formatted_string("file %s not found", data_name));
-      return NULL;
-    }
-  } else {
-    full_filename = data_filepaths_get_first_valid_filename(
-        data_paths, data_name, type, false, error_stack);
-  }
-
-  return full_filename;
+  return data_filepaths_get_first_valid_filename(data_paths, data_name, type,
+                                                 false, error_stack);
 }
 
 // Returns a filename string for writing. This filename might not
@@ -216,21 +185,18 @@ char *data_filepaths_get_writable_filename(const char *data_paths,
     return NULL;
   }
   char *writable_filepath;
-  if (is_filepath(data_name)) {
-    writable_filepath = string_duplicate(data_name);
-  } else {
-    if (!data_paths) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_FILEPATH_NULL_PATH,
-          get_formatted_string("data path is unexpectedly empty when trying to "
-                               "get filepath of type %s",
-                               filepath_type_names[type]));
-      return NULL;
-    }
-    char *first_data_path = cut_off_after_first_char(data_paths, ':');
-    writable_filepath = get_filepath(first_data_path, data_name, type);
-    free(first_data_path);
+
+  if (!data_paths) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_FILEPATH_NULL_PATH,
+        get_formatted_string("data path is unexpectedly empty when trying to "
+                             "get filepath of type %s",
+                             filepath_type_names[type]));
+    return NULL;
   }
+  char *first_data_path = cut_off_after_first_char(data_paths, ':');
+  writable_filepath = get_filepath(first_data_path, data_name, type);
+  free(first_data_path);
   // File already exists and is not writable
   if (access(writable_filepath, F_OK) == 0 &&
       access(writable_filepath, W_OK) != 0) {

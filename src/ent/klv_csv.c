@@ -106,8 +106,14 @@ void klv_iter_for_length(LeaveIter *leave_iter, KLV *klv, Rack *bag_as_rack,
 // double. If leave_counts is not NULL, then the value is
 // leave_counts[leave_index] as a uint64_t.
 void klv_write_to_csv(KLV *klv, const LetterDistribution *ld,
-                      const char *csv_filename, const uint64_t *leave_counts,
-                      ErrorStack *error_stack) {
+                      const char *data_paths, const char *leaves_name,
+                      const uint64_t *leave_counts, ErrorStack *error_stack) {
+  char *leaves_filename = data_filepaths_get_writable_filename(
+      data_paths, leaves_name, DATA_FILEPATH_TYPE_LEAVES, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   const int dist_size = ld_get_size(ld);
   Rack *leave = rack_create(dist_size);
   Rack *bag_as_rack = get_new_bag_as_rack(ld);
@@ -131,8 +137,9 @@ void klv_write_to_csv(KLV *klv, const LetterDistribution *ld,
   rack_destroy(leave);
   rack_destroy(bag_as_rack);
 
-  write_string_to_file(csv_filename, "w", string_builder_peek(klv_builder),
+  write_string_to_file(leaves_filename, "w", string_builder_peek(klv_builder),
                        error_stack);
+  free(leaves_filename);
   string_builder_destroy(klv_builder);
 }
 

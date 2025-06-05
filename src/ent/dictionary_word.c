@@ -136,8 +136,13 @@ void dictionary_word_list_destroy(DictionaryWordList *dictionary_word_list) {
 
 void dictionary_word_list_write_to_file(
     const DictionaryWordList *dictionary_word_list,
-    const LetterDistribution *ld, const char *filename,
-    ErrorStack *error_stack) {
+    const LetterDistribution *ld, const char *data_paths,
+    const char *output_name, ErrorStack *error_stack) {
+  char *filename = data_filepaths_get_writable_filename(
+      data_paths, output_name, DATA_FILEPATH_TYPE_LEXICON, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
   StringBuilder *sb = string_builder_create();
   for (int word_idx = 0; word_idx < dictionary_word_list->count; word_idx++) {
     const DictionaryWord *word =
@@ -151,4 +156,5 @@ void dictionary_word_list_write_to_file(
   }
   write_string_to_file(filename, "w", string_builder_peek(sb), error_stack);
   string_builder_destroy(sb);
+  free(filename);
 }

@@ -45,12 +45,13 @@ void string_builder_add_winning_player_confidence(StringBuilder *sb,
                                                   uint64_t total_games);
 void autoplay_results_set_write_buffer_size(AutoplayResults *autoplay_results,
                                             int write_buffer_size);
-void autoplay_results_set_record_filepath(AutoplayResults *autoplay_results,
-                                          const char *filepath);
+void autoplay_results_set_data_paths(AutoplayResults *autoplay_results,
+                                     const char *data_paths);
 void autoplay_results_set_ld(AutoplayResults *autoplay_results,
                              const LetterDistribution *ld);
 void autoplay_results_set_klv(AutoplayResults *autoplay_results, KLV *klv);
 uint64_t autoplay_results_build_option(autoplay_recorder_t recorder_type);
 uint64_t autoplay_results_get_options(const AutoplayResults *autoplay_results);
-
+void autoplay_results_set_players_data(AutoplayResults *autoplay_results,
+                                       const PlayersData *players_data);
 #endif
