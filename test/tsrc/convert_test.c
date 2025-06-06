@@ -80,6 +80,7 @@ void test_convert_error(void) {
 }
 
 void test_convert_success(void) {
+  ErrorStack *error_stack = error_stack_create();
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   ValidatedMoves *vms;
@@ -126,15 +127,26 @@ void test_convert_success(void) {
 
   load_and_exec_config_or_die(config,
                               "convert klv2csv CSW21_small english_small");
-  char *leaves_file_string =
-      get_string_from_file_or_die("testdata/leaves/CSW21_small.csv");
+
+  char *leaves_filename = data_filepaths_get_readable_filename(
+      DEFAULT_TEST_DATA_PATH, "CSW21_small", DATA_FILEPATH_TYPE_LEAVES,
+      error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("failed to read input file '%s'\n", leaves_filename);
+  }
+
+  char *leaves_file_string = get_string_from_file_or_die(leaves_filename);
+
   assert_strings_equal(leaves_file_string,
                        "?,1.000000\nA,0.000000\nB,0.000000\n?A,2.000000\n?B,0."
                        "000000\nAA,0.000000\nAB,0.000000\n?AA,0.000000\n?AB,0."
                        "000000\nAAB,4.000000\n?AAB,3.000000\n");
   free(leaves_file_string);
+  free(leaves_filename);
 
   config_destroy(config);
+  error_stack_destroy(error_stack);
 }
 
 void test_convert(void) {
