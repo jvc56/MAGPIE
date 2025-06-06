@@ -21,18 +21,19 @@
 #define BONUS_SQUARE_CHAR_QUADRUPLE_LETTER '^'
 #define BONUS_SQUARE_CHAR_QUADRUPLE_WORD '~'
 
-static const uint8_t bonus_square_chars_to_values_map[BONUS_SQUARE_MAP_SIZE] = {
-    [BONUS_SQUARE_CHAR_NONE] = 0x11,
-    [BONUS_SQUARE_CHAR_DOUBLE_LETTER] = 0x12,
-    [BONUS_SQUARE_CHAR_DOUBLE_WORD] = 0x21,
-    [BONUS_SQUARE_CHAR_TRIPLE_LETTER] = 0x13,
-    [BONUS_SQUARE_CHAR_TRIPLE_WORD] = 0x31,
-    [BONUS_SQUARE_CHAR_QUADRUPLE_LETTER] = 0x14,
-    [BONUS_SQUARE_CHAR_QUADRUPLE_WORD] = 0x41,
-    [BRICK_CHAR] = BRICK_VALUE,
+static const BonusSquare
+    bonus_square_chars_to_values_map[BONUS_SQUARE_MAP_SIZE] = {
+        [BONUS_SQUARE_CHAR_NONE] = 0x11,
+        [BONUS_SQUARE_CHAR_DOUBLE_LETTER] = 0x12,
+        [BONUS_SQUARE_CHAR_DOUBLE_WORD] = 0x21,
+        [BONUS_SQUARE_CHAR_TRIPLE_LETTER] = 0x13,
+        [BONUS_SQUARE_CHAR_TRIPLE_WORD] = 0x31,
+        [BONUS_SQUARE_CHAR_QUADRUPLE_LETTER] = 0x14,
+        [BONUS_SQUARE_CHAR_QUADRUPLE_WORD] = 0x41,
+        [BRICK_CHAR] = BRICK_VALUE,
 };
 
-static const char bonus_square_values_to_chars_map[BONUS_SQUARE_MAP_SIZE] = {
+static const char bonus_squares_to_chars_map[BONUS_SQUARE_MAP_SIZE] = {
     [0x11] = BONUS_SQUARE_CHAR_NONE,
     [0x12] = BONUS_SQUARE_CHAR_DOUBLE_LETTER,
     [0x21] = BONUS_SQUARE_CHAR_DOUBLE_WORD,
@@ -46,12 +47,13 @@ static const char bonus_square_values_to_chars_map[BONUS_SQUARE_MAP_SIZE] = {
 struct BoardLayout {
   char *name;
   int start_coords[2];
-  uint8_t bonus_squares[BOARD_DIM * BOARD_DIM];
+  BonusSquare bonus_squares[BOARD_DIM * BOARD_DIM];
 };
 
 int board_layout_get_index(int row, int col) { return row * BOARD_DIM + col; }
 
-uint8_t board_layout_get_bonus_square(const BoardLayout *bl, int row, int col) {
+BonusSquare board_layout_get_bonus_square(const BoardLayout *bl, int row,
+                                          int col) {
   return bl->bonus_squares[board_layout_get_index(row, col)];
 }
 
@@ -97,11 +99,11 @@ void board_layout_parse_split_start_coords(
   }
 }
 
-char bonus_square_value_to_char(uint8_t bonus_square_value) {
-  return bonus_square_values_to_chars_map[bonus_square_value];
+char bonus_square_to_char(BonusSquare bonus_square) {
+  return bonus_squares_to_chars_map[bonus_square];
 }
 
-uint8_t bonus_square_char_to_value(char bonus_square_char) {
+BonusSquare bonus_square_char_to_value(char bonus_square_char) {
   return bonus_square_chars_to_values_map[(int)bonus_square_char];
 }
 
@@ -136,7 +138,7 @@ void board_layout_parse_split_file(BoardLayout *bl,
     return;
   }
 
-  uint8_t tmp_bonus_squares[BOARD_DIM * BOARD_DIM];
+  BonusSquare tmp_bonus_squares[BOARD_DIM * BOARD_DIM];
   for (int row = 0; row < BOARD_DIM; row++) {
     const char *layout_row = string_splitter_get_item(file_lines, row + 1);
     if (string_length(layout_row) != BOARD_DIM) {
@@ -150,16 +152,16 @@ void board_layout_parse_split_file(BoardLayout *bl,
     for (int col = 0; col < BOARD_DIM; col++) {
       const char bonus_square_char = layout_row[col];
       const int index = board_layout_get_index(row, col);
-      const uint8_t bonus_square_value =
+      const BonusSquare bonus_square =
           bonus_square_char_to_value(bonus_square_char);
-      if (bonus_square_value == 0) {
+      if (bonus_square == 0) {
         error_stack_push(
             error_stack, ERROR_STATUS_BOARD_LAYOUT_INVALID_BONUS_SQUARE,
             get_formatted_string("encountered invalid bonus square: %c",
                                  bonus_square_char));
         return;
       }
-      tmp_bonus_squares[index] = bonus_square_value;
+      tmp_bonus_squares[index] = bonus_square;
     }
   }
   memcpy(bl->bonus_squares, tmp_bonus_squares, sizeof(tmp_bonus_squares));

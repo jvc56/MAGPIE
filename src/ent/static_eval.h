@@ -186,8 +186,8 @@ static inline Equity static_eval_get_move_score(const LetterDistribution *ld,
   }
 
   for (int idx = 0; idx < tiles_length; idx++) {
-    uint8_t ml = move_get_tile(move, idx);
-    uint8_t bonus_square =
+    MachineLetter ml = move_get_tile(move, idx);
+    BonusSquare bonus_square =
         board_get_bonus_square(board, row_start, col_start + idx);
     int letter_multiplier = 1;
     int this_word_multiplier = 1;

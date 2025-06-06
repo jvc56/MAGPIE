@@ -47,6 +47,8 @@
 #include "test_constants.h"
 #include "test_util.h"
 
+#define TEST_EPSILON 1e-6
+
 // Global variable for the timeout function.
 jmp_buf env;
 
@@ -54,7 +56,7 @@ void assert_equal_at_equity_resolution(double a, double b) {
   assert(double_to_equity(a) == double_to_equity(b));
 }
 
-bool within_epsilon(double a, double b) { return fabs(a - b) < 1e-6; }
+bool within_epsilon(double a, double b) { return fabs(a - b) < TEST_EPSILON; }
 
 // This test function only works for single-char alphabets
 void set_row(Game *game, int row, const char *row_content) {
@@ -473,12 +475,12 @@ void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size) {
   Rack *rack = rack_create(rack_array_size);
 
   for (int i = 0; i < b1_number_of_tiles_remaining; i++) {
-    uint8_t letter = bag_draw_random_letter(b1_copy, 0);
+    MachineLetter letter = bag_draw_random_letter(b1_copy, 0);
     rack_add_letter(rack, letter);
   }
 
   for (int i = 0; i < b2_number_of_tiles_remaining; i++) {
-    uint8_t letter = bag_draw_random_letter(b2_copy, 0);
+    MachineLetter letter = bag_draw_random_letter(b2_copy, 0);
     assert(rack_get_letter(rack, letter) > 0);
     rack_take_letter(rack, letter);
   }
@@ -870,7 +872,7 @@ void assert_word_count(const LetterDistribution *ld,
                        const DictionaryWordList *words,
                        const char *human_readable_word, int expected_count) {
   int expected_length = string_length(human_readable_word);
-  uint8_t expected[BOARD_DIM];
+  MachineLetter expected[BOARD_DIM];
   ld_str_to_mls(ld, human_readable_word, false, expected, expected_length);
   int count = 0;
   for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
@@ -897,7 +899,7 @@ BitRack string_to_bit_rack(const LetterDistribution *ld,
 // to support multibyte user-visible characters, but Polish isn't even supported
 // for BitRack (and therefore for WMP) because the lexicon is >32 letters
 // (including the blank).
-void assert_word_in_buffer(uint8_t *buffer, const char *expected_word,
+void assert_word_in_buffer(MachineLetter *buffer, const char *expected_word,
                            const LetterDistribution *ld, int word_idx,
                            int length) {
   const int start = word_idx * length;

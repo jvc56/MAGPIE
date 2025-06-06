@@ -320,7 +320,8 @@ void assert_game_event(const GameHistory *game_history, int event_index,
     if (move_type != GAME_EVENT_PASS) {
       assert(move_get_tiles_played(move) == tiles_played);
       assert(move_get_tiles_length(move) == tiles_length);
-      uint8_t *machine_letters = malloc_or_die(sizeof(uint8_t) * tiles_length);
+      MachineLetter *machine_letters =
+          malloc_or_die(sizeof(MachineLetter) * tiles_length);
       int number_of_machine_letters = ld_str_to_mls(
           ld, tiles_string, move_type == GAME_EVENT_TILE_PLACEMENT_MOVE,
           machine_letters, tiles_length);

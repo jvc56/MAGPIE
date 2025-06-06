@@ -18,10 +18,10 @@ void test_board_layout_success(void) {
       "set -lex CSW21 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
-  assert(bonus_square_value_to_char(0x12) == '\'');
-  assert(bonus_square_value_to_char(0x21) == '-');
-  assert(bonus_square_value_to_char(0x13) == '"');
-  assert(bonus_square_value_to_char(0x31) == '=');
+  assert(bonus_square_to_char(0x12) == '\'');
+  assert(bonus_square_to_char(0x21) == '-');
+  assert(bonus_square_to_char(0x13) == '"');
+  assert(bonus_square_to_char(0x31) == '=');
 
   assert(bonus_square_char_to_value('\'') == 0x12);
   assert(bonus_square_char_to_value('-') == 0x21);

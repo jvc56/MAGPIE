@@ -38,7 +38,7 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
       line[read - 1] = '\0';
     }
     const int line_length = string_length(line);
-    uint8_t *mls = malloc_or_die(line_length);
+    MachineLetter *mls = malloc_or_die(line_length);
     const int mls_length = ld_str_to_mls(ld, line, false, mls, line_length);
     if (mls_length > BOARD_DIM) {
       error_stack_push(

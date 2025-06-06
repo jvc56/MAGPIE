@@ -46,7 +46,7 @@ void string_builder_add_leave_rack(StringBuilder *inference_string,
 void string_builder_add_letter_minimum(
     StringBuilder *inference_string, InferenceResults *inference_results,
     inference_stat_t inference_stat_type, const Rack *rack,
-    const Rack *bag_as_rack, uint8_t letter, int minimum,
+    const Rack *bag_as_rack, MachineLetter letter, int minimum,
     int number_of_tiles_played_or_exchanged) {
 
   Stat *equity_values = inference_results_get_equity_values(
@@ -72,7 +72,7 @@ void string_builder_add_letter_line(StringBuilder *inference_string,
                                     InferenceResults *inference_results,
                                     inference_stat_t inference_stat_type,
                                     const Rack *rack, const Rack *bag_as_rack,
-                                    Stat *letter_stat, uint8_t letter,
+                                    Stat *letter_stat, MachineLetter letter,
                                     int max_duplicate_letter_draw,
                                     int number_of_tiles_played_or_exchanged) {
   inference_results_set_stat_for_letter(inference_results, inference_stat_type,
@@ -281,7 +281,7 @@ void string_builder_add_ucgi_leave_rack(StringBuilder *ucgi_string_builder,
 void string_builder_ucgi_add_letter_minimum(
     InferenceResults *inference_results, inference_stat_t inference_stat_type,
     const Rack *rack, const Rack *bag_as_rack,
-    StringBuilder *ucgi_string_builder, uint8_t letter, int minimum,
+    StringBuilder *ucgi_string_builder, MachineLetter letter, int minimum,
     int number_of_tiles_played_or_exchanged) {
   int draw_subtotal = inference_results_get_subtotal_sum_with_minimum(
       inference_results, inference_stat_type, letter, minimum,
@@ -304,7 +304,8 @@ void string_builder_ucgi_add_letter_line(
     const LetterDistribution *ld, InferenceResults *inference_results,
     inference_stat_t inference_stat_type, const Rack *rack,
     const Rack *bag_as_rack, StringBuilder *ucgi_string_builder,
-    Stat *letter_stat, uint8_t letter, int number_of_tiles_played_or_exchanged,
+    Stat *letter_stat, MachineLetter letter,
+    int number_of_tiles_played_or_exchanged,
     const char *inference_record_type) {
 
   inference_results_set_stat_for_letter(inference_results, inference_stat_type,

@@ -23,7 +23,7 @@
 typedef struct LeaveMap {
   int rack_array_size;
   Equity leave_values[1 << RACK_SIZE];
-  uint8_t letter_base_index_map[MAX_ALPHABET_SIZE];
+  MachineLetter letter_base_index_map[MAX_ALPHABET_SIZE];
   uint64_t reversed_letter_bit_map[RACK_SIZE];
   int current_index;
 } LeaveMap;
@@ -77,7 +77,8 @@ static inline int leave_map_get_current_index(const LeaveMap *leave_map) {
   return leave_map->current_index;
 }
 
-static inline void leave_map_take_letter(LeaveMap *leave_map, uint8_t letter,
+static inline void leave_map_take_letter(LeaveMap *leave_map,
+                                         MachineLetter letter,
                                          int number_of_letter_on_rack) {
   int base_index = leave_map->letter_base_index_map[letter];
   int offset = number_of_letter_on_rack;
@@ -85,7 +86,8 @@ static inline void leave_map_take_letter(LeaveMap *leave_map, uint8_t letter,
   leave_map->current_index &= ~(1 << bit_index);
 }
 
-static inline void leave_map_add_letter(LeaveMap *leave_map, uint8_t letter,
+static inline void leave_map_add_letter(LeaveMap *leave_map,
+                                        MachineLetter letter,
                                         int number_of_letter_on_rack) {
   int base_index = leave_map->letter_base_index_map[letter];
   int offset = number_of_letter_on_rack;
@@ -95,28 +97,28 @@ static inline void leave_map_add_letter(LeaveMap *leave_map, uint8_t letter,
 
 static inline void
 leave_map_take_letter_and_update_current_index(LeaveMap *leave_map, Rack *rack,
-                                               uint8_t letter) {
+                                               MachineLetter letter) {
   rack_take_letter(rack, letter);
   leave_map_take_letter(leave_map, letter, rack_get_letter(rack, letter));
 }
 
 static inline void
 leave_map_add_letter_and_update_current_index(LeaveMap *leave_map, Rack *rack,
-                                              uint8_t letter) {
+                                              MachineLetter letter) {
   rack_add_letter(rack, letter);
   leave_map_add_letter(leave_map, letter, rack_get_letter(rack, letter) - 1);
 }
 
 static inline void alpha_leave_map_take_letter_and_update_current_index(
-    LeaveMap *leave_map, Rack *rack, Rack *played_tiles, uint8_t letter,
-    uint8_t unblanked_letter) {
+    LeaveMap *leave_map, Rack *rack, Rack *played_tiles, MachineLetter letter,
+    MachineLetter unblanked_letter) {
   leave_map_take_letter_and_update_current_index(leave_map, rack, letter);
   rack_add_letter(played_tiles, unblanked_letter);
 }
 
 static inline void alpha_leave_map_add_letter_and_update_current_index(
-    LeaveMap *leave_map, Rack *rack, Rack *played_tiles, uint8_t letter,
-    uint8_t unblanked_letter) {
+    LeaveMap *leave_map, Rack *rack, Rack *played_tiles, MachineLetter letter,
+    MachineLetter unblanked_letter) {
   leave_map_add_letter_and_update_current_index(leave_map, rack, letter);
   rack_take_letter(played_tiles, unblanked_letter);
 }
@@ -137,9 +139,8 @@ static inline void alpha_leave_map_add_letter_and_update_current_index(
 // them in the reverse order, i.e. we're changing the _last_ O _first_, which
 // means the bit index depends on the number of that letter on the full rack,
 // which is why a little table for these is generated upfront.
-static inline void
-leave_map_take_letter_and_update_complement_index(LeaveMap *leave_map,
-                                                  Rack *rack, uint8_t letter) {
+static inline void leave_map_take_letter_and_update_complement_index(
+    LeaveMap *leave_map, Rack *rack, MachineLetter letter) {
   rack_take_letter(rack, letter);
   const int base_index = leave_map->letter_base_index_map[letter];
   const int offset = rack->array[letter];
@@ -148,9 +149,8 @@ leave_map_take_letter_and_update_complement_index(LeaveMap *leave_map,
   leave_map->current_index |= reversed_bit;
 }
 
-static inline void
-leave_map_add_letter_and_update_complement_index(LeaveMap *leave_map,
-                                                 Rack *rack, uint8_t letter) {
+static inline void leave_map_add_letter_and_update_complement_index(
+    LeaveMap *leave_map, Rack *rack, MachineLetter letter) {
   rack_add_letter(rack, letter);
   const int base_index = leave_map->letter_base_index_map[letter];
   const int offset = rack->array[letter] - 1;
@@ -160,7 +160,7 @@ leave_map_add_letter_and_update_complement_index(LeaveMap *leave_map,
 }
 
 static inline void
-leave_map_complement_take_letter(LeaveMap *leave_map, uint8_t letter,
+leave_map_complement_take_letter(LeaveMap *leave_map, MachineLetter letter,
                                  int number_of_letter_on_rack) {
   const int base_index = leave_map->letter_base_index_map[letter];
   const int offset = number_of_letter_on_rack;
@@ -170,7 +170,7 @@ leave_map_complement_take_letter(LeaveMap *leave_map, uint8_t letter,
 }
 
 static inline void
-leave_map_complement_add_letter(LeaveMap *leave_map, uint8_t letter,
+leave_map_complement_add_letter(LeaveMap *leave_map, MachineLetter letter,
                                 int number_of_letter_on_rack) {
   const int base_index = leave_map->letter_base_index_map[letter];
   const int offset = number_of_letter_on_rack;

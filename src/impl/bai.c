@@ -26,6 +26,7 @@
 #include "random_variable.h"
 
 #define MINIMUM_VARIANCE 1e-10
+#define BAI_ARM_SAMPLE_MINIMUM 50
 
 // Internal BAI structs
 

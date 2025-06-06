@@ -16,7 +16,7 @@ play_move_status_t play_move(const Move *move, Game *game,
 void set_random_rack(Game *game, int player_index, Rack *known_rack);
 Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list);
 void generate_moves_for_game(Game *game, int thread_index, MoveList *move_list);
-void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter,
+void draw_letter_to_rack(Bag *bag, Rack *rack, MachineLetter letter,
                          int player_draw_index);
 void draw_to_full_rack(Game *game, int player_index);
 int draw_rack_string_from_bag(Game *game, int player_index,
