@@ -70,11 +70,12 @@ Config *config_create_or_die(const char *cmd);
 Config *config_create_default_test(void);
 WMP *wmp_create_or_die(const char *data_paths, const char *wmp_name);
 KLV *klv_create_or_die(const char *data_paths, const char *klv_name);
-void klv_write_or_die(const KLV *klv, const char *klv_filename);
+void klv_write_or_die(const KLV *klv, const char *data_paths,
+                      const char *klv_name);
 KLV *klv_read_from_csv_or_die(const LetterDistribution *ld,
                               const char *data_paths, const char *leaves_name);
 void klv_write_to_csv_or_die(KLV *klv, const LetterDistribution *ld,
-                             const char *csv_filename);
+                             const char *data_paths, const char *csv_name);
 char *get_string_from_file_or_die(const char *filename);
 void set_row(Game *game, int row, const char *row_content);
 void assert_board_layout_error(const char *data_paths,

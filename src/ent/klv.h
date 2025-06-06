@@ -319,10 +319,17 @@ static inline Equity klv_get_leave_value(const KLV *klv, const Rack *leave) {
   return klv_get_indexed_leave_value(klv, index);
 }
 
-static inline void klv_write(const KLV *klv, const char *klv_filename,
-                             ErrorStack *error_stack) {
+static inline void klv_write(const KLV *klv, const char *data_paths,
+                             const char *klv_name, ErrorStack *error_stack) {
+  char *klv_filename = data_filepaths_get_writable_filename(
+      data_paths, klv_name, DATA_FILEPATH_TYPE_KLV, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // Open the file stream for writing
   FILE *stream = fopen_safe(klv_filename, "wb", error_stack);
+  free(klv_filename);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }

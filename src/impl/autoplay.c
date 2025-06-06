@@ -72,15 +72,17 @@ void postgen_prebroadcast_func(void *data) {
     log_fatal("leavegen failed to write results to file");
   }
 
-  klv_write(lg_shared_data->klv, gen_labeled_klv_filename, error_stack);
+  klv_write(lg_shared_data->klv, lg_shared_data->data_paths,
+            gen_labeled_klv_name, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
     log_fatal("leavegen failed to write klv to file: %s",
               gen_labeled_klv_filename);
   }
 
-  klv_write_to_csv(lg_shared_data->klv, lg_shared_data->ld, leaves_filename,
-                   NULL, error_stack);
+  klv_write_to_csv(lg_shared_data->klv, lg_shared_data->ld,
+                   lg_shared_data->data_paths, gen_labeled_klv_name, NULL,
+                   error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
     log_fatal("leavegen failed to write klv to CSV");
