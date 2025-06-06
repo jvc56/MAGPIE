@@ -764,13 +764,11 @@ void win_pct_data_add_game(Recorder *recorder, const RecorderArgs *args) {
     if (start_col_index < 0) {
       start_col_index = -1;
     }
-    // If a this "point swing" is possible for X tiles remaining, then we can
-    // assume that it is possible for any X + C tiles remaining where C > 0.
+    // If this final score difference is possible for X tiles remaining, then we
+    // can assume that it is possible for any X + C tiles remaining where C > 0.
     for (int row_index = start_row_index; row_index < win_pct_data->num_rows;
          row_index++) {
       win_pct_data->total_games[row_index]++;
-      // This will happen in the rare cases where the score swings more than
-      // WIN_PCT_MAX_SPREAD points
       if (start_col_index >= 0 && start_col_index < WIN_PCT_NUM_COLUMNS) {
         // Increment the wins value for the tie by 1 since ties are worth 1
         win_pct_data->wins[row_index][start_col_index]++;
