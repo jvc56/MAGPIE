@@ -29,6 +29,7 @@ void string_builder_add_directory_for_data_type(StringBuilder *sb,
   case DATA_FILEPATH_TYPE_KLV:
   case DATA_FILEPATH_TYPE_LEXICON:
   case DATA_FILEPATH_TYPE_WORDMAP:
+  case DATA_FILEPATH_TYPE_LEAVES:
     string_builder_add_formatted_string(sb, "%s/lexica/", data_path);
     break;
   case DATA_FILEPATH_TYPE_LAYOUT:
@@ -43,9 +44,6 @@ void string_builder_add_directory_for_data_type(StringBuilder *sb,
     break;
   case DATA_FILEPATH_TYPE_GCG:
     string_builder_add_formatted_string(sb, "%s/gcgs/", data_path);
-    break;
-  case DATA_FILEPATH_TYPE_LEAVES:
-    string_builder_add_formatted_string(sb, "%s/leaves/", data_path);
     break;
   }
 }
