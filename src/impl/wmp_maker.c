@@ -154,8 +154,8 @@ uint32_t number_of_double_blank_words(const MutableWordsOfSameLengthMap *wfl,
       entry, num_double_blank_buckets, bucket_idx);
   for (int pair_idx = 0; pair_idx < num_pairs; pair_idx++) {
     const DictionaryWord *pair = dictionary_word_list_get_word(pairs, pair_idx);
-    const uint8_t ml1 = dictionary_word_get_word(pair)[0];
-    const uint8_t ml2 = dictionary_word_get_word(pair)[1];
+    const MachineLetter ml1 = dictionary_word_get_word(pair)[0];
+    const MachineLetter ml2 = dictionary_word_get_word(pair)[1];
     bit_rack_add_letter(&bit_rack, ml1);
     bit_rack_add_letter(&bit_rack, ml2);
     num_words += get_number_of_words(wfl, &bit_rack);
@@ -236,7 +236,7 @@ void write_inlined_word_range(const DictionaryWordList *words,
   for (int word_idx = 0; word_idx < dictionary_word_list_get_count(words);
        word_idx++) {
     const DictionaryWord *word = dictionary_word_list_get_word(words, word_idx);
-    const uint8_t *word_letters = dictionary_word_get_word(word);
+    const MachineLetter *word_letters = dictionary_word_get_word(word);
     const int word_length = dictionary_word_get_length(word);
     memcpy(bytes + word_idx * word_length, word_letters, word_length);
   }
@@ -250,19 +250,19 @@ void write_uninlined_word_range(uint32_t word_start, uint32_t num_words,
 }
 
 void write_letters(const MutableWordMapEntry *entry, uint32_t word_start,
-                   int word_length, uint8_t *letters) {
+                   int word_length, MachineLetter *letters) {
   const int num_words = dictionary_word_list_get_count(entry->letters);
   for (int word_idx = 0; word_idx < num_words; word_idx++) {
     const DictionaryWord *word =
         dictionary_word_list_get_word(entry->letters, word_idx);
-    const uint8_t *word_letters = dictionary_word_get_word(word);
+    const MachineLetter *word_letters = dictionary_word_get_word(word);
     memcpy(letters + word_start + word_idx * word_length, word_letters,
            word_length);
   }
 }
 
 uint32_t write_word_entries(const MutableWordMapBucket *bucket, int word_length,
-                            WMPEntry *entries, uint8_t *letters,
+                            WMPEntry *entries, MachineLetter *letters,
                             uint32_t *word_start) {
   for (uint32_t entry_idx = 0; entry_idx < bucket->num_entries; entry_idx++) {
     const MutableWordMapEntry *entry = &bucket->entries[entry_idx];
@@ -297,7 +297,7 @@ void fill_wfl_blankless(const MutableWordsOfSameLengthMap *mwfl,
 
   wfl->num_uninlined_words = mwfl_get_num_uninlined_words(mwfl, word_length);
   wfl->word_letters =
-      (uint8_t *)malloc_or_die(wfl->num_uninlined_words * word_length);
+      (MachineLetter *)malloc_or_die(wfl->num_uninlined_words * word_length);
   wfl->num_word_entries = entry_idx;
   wfl->word_map_entries =
       (WMPEntry *)malloc_or_die(wfl->num_word_entries * sizeof(WMPEntry));
@@ -356,7 +356,7 @@ mdbfl_get_first_blank_letters(const MutableDoubleBlankMapEntry *entry) {
        i++) {
     const DictionaryWord *pair =
         dictionary_word_list_get_word(entry->letter_pairs, i);
-    const uint8_t *pair_letters = dictionary_word_get_word(pair);
+    const MachineLetter *pair_letters = dictionary_word_get_word(pair);
     first_blank_letters |= 1 << pair_letters[0];
   }
   return first_blank_letters;
@@ -536,7 +536,7 @@ BitRack entry_get_full_bit_rack(const MutableWordMapEntry *entry,
 }
 
 void set_blank_map_bit(MutableBlanksForSameLengthMap *mbfl,
-                       const BitRack *bit_rack, uint8_t ml) {
+                       const BitRack *bit_rack, MachineLetter ml) {
   BitRack quotient;
   uint32_t bucket_index;
   bit_rack_div_mod(bit_rack, mbfl->num_blank_buckets, &quotient, &bucket_index);
@@ -565,7 +565,7 @@ void insert_blanks_from_word_entry(const MutableWordMapEntry *word_entry,
                                    MutableBlanksForSameLengthMap *mbfl) {
   BitRack bit_rack =
       entry_get_full_bit_rack(word_entry, num_word_buckets, word_bucket_idx);
-  for (uint8_t ml = 1; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+  for (MachineLetter ml = 1; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
     if (bit_rack_get_letter(&bit_rack, ml) > 0) {
       bit_rack_take_letter(&bit_rack, ml);
       bit_rack_add_letter(&bit_rack, BLANK_MACHINE_LETTER);
@@ -621,7 +621,7 @@ void mutable_double_blank_map_bucket_init(MutableDoubleBlankMapBucket *bucket) {
 
 void mutable_double_blank_map_bucket_insert_pair(
     MutableDoubleBlankMapBucket *bucket, BitRack quotient,
-    const uint8_t *blanks_as_word) {
+    const MachineLetter *blanks_as_word) {
   for (uint32_t i = 0; i < bucket->num_entries; i++) {
     MutableDoubleBlankMapEntry *entry = &bucket->entries[i];
     if (bit_rack_equals(&entry->quotient, &quotient)) {
@@ -646,13 +646,13 @@ void insert_double_blanks_from_word_entry(
     uint32_t word_bucket_idx, MutableDoubleBlanksForSameLengthMap *mdbfl) {
   BitRack bit_rack =
       entry_get_full_bit_rack(word_entry, num_word_buckets, word_bucket_idx);
-  uint8_t blanks_as_word[2];
-  for (uint8_t ml1 = 1; ml1 < BIT_RACK_MAX_ALPHABET_SIZE; ml1++) {
+  MachineLetter blanks_as_word[2];
+  for (MachineLetter ml1 = 1; ml1 < BIT_RACK_MAX_ALPHABET_SIZE; ml1++) {
     if (bit_rack_get_letter(&bit_rack, ml1) > 0) {
       bit_rack_take_letter(&bit_rack, ml1);
       bit_rack_add_letter(&bit_rack, BLANK_MACHINE_LETTER);
       blanks_as_word[0] = ml1;
-      for (uint8_t ml2 = ml1; ml2 < BIT_RACK_MAX_ALPHABET_SIZE; ml2++) {
+      for (MachineLetter ml2 = ml1; ml2 < BIT_RACK_MAX_ALPHABET_SIZE; ml2++) {
         if (bit_rack_get_letter(&bit_rack, ml2) > 0) {
           bit_rack_take_letter(&bit_rack, ml2);
           bit_rack_add_letter(&bit_rack, BLANK_MACHINE_LETTER);

@@ -6,7 +6,7 @@
 #include "../ent/kwg.h"
 
 typedef struct BoardRow {
-  uint8_t letters[BOARD_DIM];
+  MachineLetter letters[BOARD_DIM];
 } BoardRow;
 
 typedef struct BoardRows {
@@ -14,7 +14,7 @@ typedef struct BoardRows {
   int num_rows;
 } BoardRows;
 
-void generate_possible_words(const Game* game, const KWG* override_kwg,
-                             DictionaryWordList* possible_word_list);
+void generate_possible_words(const Game *game, const KWG *override_kwg,
+                             DictionaryWordList *possible_word_list);
 
-#endif  // WORD_PRUNE_H
+#endif // WORD_PRUNE_H

@@ -36,25 +36,27 @@ Stat *inference_results_get_equity_values(InferenceResults *results,
                                           inference_stat_t inference_stat_type);
 uint64_t inference_results_get_subtotal(const InferenceResults *results,
                                         inference_stat_t inference_stat_type,
-                                        uint8_t letter, int number_of_letters,
+                                        MachineLetter letter,
+                                        int number_of_letters,
                                         inference_subtotal_t subtotal_type);
 
 void inference_results_add_to_letter_subtotal(
     InferenceResults *results, inference_stat_t inference_stat_type,
-    uint8_t letter, int number_of_letters, inference_subtotal_t subtotal_type,
-    uint64_t delta);
+    MachineLetter letter, int number_of_letters,
+    inference_subtotal_t subtotal_type, uint64_t delta);
 uint64_t inference_results_get_subtotal_sum_with_minimum(
     const InferenceResults *results, inference_stat_t inference_stat_type,
-    uint8_t letter, int minimum_number_of_letters, int subtotal_index_offset);
+    MachineLetter letter, int minimum_number_of_letters,
+    int subtotal_index_offset);
 LeaveRackList *
 inference_results_get_leave_rack_list(InferenceResults *inference_results);
 void inference_results_add_subtotals(InferenceResults *result_being_added,
                                      InferenceResults *result_being_updated);
 void inference_results_set_stat_for_letter(InferenceResults *inference_results,
                                            inference_stat_t inference_stat_type,
-                                           Stat *stat, uint8_t letter);
+                                           Stat *stat, MachineLetter letter);
 double get_probability_for_random_minimum_draw(
-    const Rack *bag_as_rack, const Rack *target_rack, uint8_t this_letter,
+    const Rack *bag_as_rack, const Rack *target_rack, MachineLetter this_letter,
     int minimum, int number_of_target_played_tiles);
 
 #endif

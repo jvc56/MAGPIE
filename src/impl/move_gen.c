@@ -72,7 +72,7 @@ void gen_destroy_cache(void) {
 
 // Cache getter functions
 
-static inline uint8_t gen_cache_get_letter(const MoveGen *gen, int col) {
+static inline MachineLetter gen_cache_get_letter(const MoveGen *gen, int col) {
   return square_get_letter(&gen->row_cache[col]);
 }
 
@@ -88,7 +88,8 @@ static inline bool gen_cache_get_is_cross_word(const MoveGen *gen, int col) {
   return square_get_is_cross_word(&gen->row_cache[col]);
 }
 
-static inline uint8_t gen_cache_get_bonus_square(const MoveGen *gen, int col) {
+static inline MachineLetter gen_cache_get_bonus_square(const MoveGen *gen,
+                                                       int col) {
   return square_get_bonus_square(&gen->row_cache[col]);
 }
 
@@ -139,7 +140,7 @@ static inline void set_play_for_record(Move *move, game_event_t move_type,
                                        int leftstrip, int rightstrip,
                                        Equity score, int start_row,
                                        int start_col, int tiles_played, int dir,
-                                       uint8_t strip[]) {
+                                       MachineLetter strip[]) {
   move_set_all_except_equity(move, strip, leftstrip, rightstrip, score,
                              start_row, start_col, tiles_played, dir,
                              move_type);
@@ -163,7 +164,7 @@ static inline void set_small_play_for_record(SmallMove *move,
                                              int leftstrip, int rightstrip,
                                              Equity score, int start_row,
                                              int start_col, int tiles_played,
-                                             int dir, uint8_t strip[]) {
+                                             int dir, MachineLetter strip[]) {
 
   small_move_set_all(move, strip, leftstrip, rightstrip, score, start_row,
                      start_col, tiles_played, board_is_dir_vertical(dir),
@@ -173,7 +174,7 @@ static inline void set_small_play_for_record(SmallMove *move,
 static inline void update_best_move_or_insert_into_movelist(
     MoveGen *gen, int leftstrip, int rightstrip, game_event_t move_type,
     Equity score, int start_row, int start_col, int tiles_played, int dir,
-    uint8_t strip[]) {
+    MachineLetter strip[]) {
   if (gen->move_record_type == MOVE_RECORD_ALL) {
     Move *move = move_list_get_spare_move(gen->move_list);
     set_play_for_record(move, move_type, leftstrip, rightstrip, score,
@@ -240,7 +241,7 @@ static inline void record_exchange(MoveGen *gen) {
 
   int tiles_exchanged = 0;
 
-  for (uint8_t ml = 0; ml < rack_get_dist_size(&gen->player_rack); ml++) {
+  for (MachineLetter ml = 0; ml < rack_get_dist_size(&gen->player_rack); ml++) {
     const int8_t num_this = rack_get_letter(&gen->player_rack, ml);
     for (int i = 0; i < num_this; i++) {
       gen->exchange_strip[tiles_exchanged] = ml;
@@ -257,7 +258,7 @@ static inline void record_exchange(MoveGen *gen) {
 // is true, record exchange moves for them. KLV indices are retained to speed up
 // lookup of leaves with common lexicographical "prefixes".
 void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
-                             uint32_t word_index, uint8_t ml,
+                             uint32_t word_index, MachineLetter ml,
                              bool add_exchange) {
   const uint32_t ld_size = ld_get_size(&gen->ld);
   while (ml < ld_size && rack_get_letter(&gen->player_rack, ml) == 0) {
@@ -307,14 +308,15 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
   }
 }
 
-void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
-           bool accepts, int leftstrip, int rightstrip, bool unique_play,
-           int main_word_score, int word_multiplier, int cross_score);
+void go_on(MoveGen *gen, int current_col, MachineLetter L,
+           uint32_t new_node_index, bool accepts, int leftstrip, int rightstrip,
+           bool unique_play, int main_word_score, int word_multiplier,
+           int cross_score);
 
 void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
                    int rightstrip, bool unique_play, int main_word_score,
                    int word_multiplier, int cross_score) {
-  const uint8_t current_letter = gen_cache_get_letter(gen, col);
+  const MachineLetter current_letter = gen_cache_get_letter(gen, col);
   // If current_letter is nonempty, leftx is the set of letters that could go
   // immediately left of the current block of played tiles.
   //
@@ -332,7 +334,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
     possible_letters_here = 0;
   }
   if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
-    const uint8_t raw = get_unblanked_machine_letter(current_letter);
+    const MachineLetter raw = get_unblanked_machine_letter(current_letter);
     uint32_t next_node_index = 0;
     bool accepts = false;
     for (uint32_t i = node_index;; i++) {
@@ -353,7 +355,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
              ((possible_letters_here & gen->rack_cross_set) != 0)) {
     for (uint32_t i = node_index;; i++) {
       const uint32_t node = kwg_node(gen->kwg, i);
-      const uint8_t ml = kwg_node_tile(node);
+      const MachineLetter ml = kwg_node_tile(node);
       const int8_t number_of_ml = rack_get_letter(&gen->player_rack, ml);
       if (ml != 0 &&
           (number_of_ml != 0 ||
@@ -397,17 +399,19 @@ static inline bool play_is_nonempty_and_nonduplicate(int tiles_played,
   return (tiles_played > 1) || ((tiles_played == 1) && is_unique);
 }
 
-void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
-           bool accepts, int leftstrip, int rightstrip, bool unique_play,
-           int main_word_score, int word_multiplier, int cross_score) {
+void go_on(MoveGen *gen, int current_col, MachineLetter L,
+           uint32_t new_node_index, bool accepts, int leftstrip, int rightstrip,
+           bool unique_play, int main_word_score, int word_multiplier,
+           int cross_score) {
   // Handle incremental scoring
-  const uint8_t bonus_square = gen_cache_get_bonus_square(gen, current_col);
+  const MachineLetter bonus_square =
+      gen_cache_get_bonus_square(gen, current_col);
   int letter_multiplier = 1;
   int this_word_multiplier = 1;
   bool fresh_tile = false;
 
   const bool square_is_empty = gen_cache_is_empty(gen, current_col);
-  uint8_t ml;
+  MachineLetter ml;
   if (!square_is_empty) {
     gen->strip[current_col] = PLAYED_THROUGH_MARKER;
     ml = gen_cache_get_letter(gen, current_col);
@@ -497,28 +501,28 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
   }
 }
 
-void go_on_alpha(MoveGen *gen, int current_col, uint8_t L, int leftstrip,
+void go_on_alpha(MoveGen *gen, int current_col, MachineLetter L, int leftstrip,
                  int rightstrip, bool unique_play, int main_word_score,
                  int word_multiplier, int cross_score);
 
 void recursive_gen_alpha(MoveGen *gen, int col, int leftstrip, int rightstrip,
                          bool unique_play, int main_word_score,
                          int word_multiplier, int cross_score) {
-  const uint8_t current_letter = gen_cache_get_letter(gen, col);
+  const MachineLetter current_letter = gen_cache_get_letter(gen, col);
   uint64_t possible_letters_here = gen_cache_get_cross_set(gen, col);
   if (possible_letters_here == 1) {
     possible_letters_here = 0;
   }
   if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
-    const uint8_t raw = get_unblanked_machine_letter(current_letter);
+    const MachineLetter raw = get_unblanked_machine_letter(current_letter);
     rack_add_letter(&gen->full_player_rack, raw);
     go_on_alpha(gen, col, current_letter, leftstrip, rightstrip, unique_play,
                 main_word_score, word_multiplier, cross_score);
     rack_take_letter(&gen->full_player_rack, raw);
   } else if (!rack_is_empty(&gen->player_rack) &&
              ((possible_letters_here & gen->rack_cross_set) != 0)) {
-    const uint8_t ld_size = ld_get_size(&gen->ld);
-    for (uint8_t ml = 1; ml < ld_size; ml++) {
+    const MachineLetter ld_size = ld_get_size(&gen->ld);
+    for (MachineLetter ml = 1; ml < ld_size; ml++) {
       const int8_t number_of_ml = rack_get_letter(&gen->player_rack, ml);
       if (ml != 0 &&
           (number_of_ml != 0 ||
@@ -555,17 +559,17 @@ void recursive_gen_alpha(MoveGen *gen, int col, int leftstrip, int rightstrip,
   }
 }
 
-void go_on_alpha(MoveGen *gen, int current_col, uint8_t L, int leftstrip,
+void go_on_alpha(MoveGen *gen, int current_col, MachineLetter L, int leftstrip,
                  int rightstrip, bool unique_play, int main_word_score,
                  int word_multiplier, int cross_score) {
   // Handle incremental scoring
-  const uint8_t bonus_square = gen_cache_get_bonus_square(gen, current_col);
+  const BonusSquare bonus_square = gen_cache_get_bonus_square(gen, current_col);
   int letter_multiplier = 1;
   int this_word_multiplier = 1;
   bool fresh_tile = false;
 
   const bool square_is_empty = gen_cache_is_empty(gen, current_col);
-  uint8_t ml;
+  MachineLetter ml;
   if (!square_is_empty) {
     gen->strip[current_col] = PLAYED_THROUGH_MARKER;
     ml = gen_cache_get_letter(gen, current_col);
@@ -757,7 +761,7 @@ static inline void maybe_recalculate_effective_multipliers(MoveGen *gen) {
     const uint8_t xw_multiplier =
         gen->descending_cross_word_multipliers[i].multiplier;
     const uint8_t col = gen->descending_cross_word_multipliers[i].column;
-    const uint8_t bonus_square = gen_cache_get_bonus_square(gen, col);
+    const BonusSquare bonus_square = gen_cache_get_bonus_square(gen, col);
     const uint8_t letter_multiplier = bonus_square & 0x0F;
     const uint8_t effective_letter_multiplier =
         gen->shadow_word_multiplier * letter_multiplier + xw_multiplier;
@@ -771,7 +775,7 @@ static inline void insert_unrestricted_multipliers(MoveGen *gen, int col) {
   maybe_recalculate_effective_multipliers(gen);
 
   const bool is_cross_word = gen_cache_get_is_cross_word(gen, col);
-  const uint8_t bonus_square = gen_cache_get_bonus_square(gen, col);
+  const BonusSquare bonus_square = gen_cache_get_bonus_square(gen, col);
   const uint8_t letter_multiplier = bonus_square & 0x0F;
   const uint8_t this_word_multiplier = bonus_square >> 4;
   const uint8_t effective_cross_word_multiplier =
@@ -837,7 +841,7 @@ static inline bool try_restrict_tile_and_accumulate_score(
   if (!restricted) {
     return false;
   }
-  const uint8_t ml = get_single_bit_index(possible_letters_here);
+  const MachineLetter ml = get_single_bit_index(possible_letters_here);
   rack_take_letter(&gen->player_rack, ml);
   if (rack_get_letter(&gen->player_rack, ml) == 0) {
     gen->rack_cross_set &= ~possible_letters_here;
@@ -924,7 +928,7 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
     if (possible_letters_here == 0) {
       break;
     }
-    const uint8_t bonus_square =
+    const BonusSquare bonus_square =
         gen_cache_get_bonus_square(gen, gen->current_right_col);
     const Equity cross_score =
         gen_cache_get_cross_score(gen, gen->current_right_col);
@@ -946,12 +950,12 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
       is_unique = true;
     }
     while (gen->current_right_col + 1 < BOARD_DIM) {
-      const uint8_t next_letter =
+      const MachineLetter next_letter =
           gen_cache_get_letter(gen, gen->current_right_col + 1);
       if (next_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
         break;
       }
-      const uint8_t unblanked_playthrough_ml =
+      const MachineLetter unblanked_playthrough_ml =
           get_unblanked_machine_letter(next_letter);
       rack_add_letter(&gen->bingo_alpha_rack, unblanked_playthrough_ml);
       // Adding a letter here would be unsafe if the LetterDistribution's
@@ -1030,7 +1034,7 @@ static inline void nonplaythrough_shadow_play_left(MoveGen *gen,
 
     gen->current_left_col--;
     gen->tiles_played++;
-    const uint8_t bonus_square =
+    const BonusSquare bonus_square =
         gen_cache_get_bonus_square(gen, gen->current_left_col);
     int letter_multiplier = bonus_square & 0x0F;
     int this_word_multiplier = bonus_square >> 4;
@@ -1083,7 +1087,7 @@ static inline void playthrough_shadow_play_left(MoveGen *gen, bool is_unique) {
     if (possible_tiles_for_shadow_left == 0) {
       break;
     }
-    const uint8_t bonus_square =
+    const BonusSquare bonus_square =
         gen_cache_get_bonus_square(gen, gen->current_left_col);
     const Equity cross_score =
         gen_cache_get_cross_score(gen, gen->current_left_col);
@@ -1120,7 +1124,7 @@ static inline void shadow_start_nonplaythrough(MoveGen *gen) {
   }
 
   // Play tile on empty anchor square and set scoring parameters
-  const uint8_t bonus_square =
+  const BonusSquare bonus_square =
       gen_cache_get_bonus_square(gen, gen->current_left_col);
   const Equity cross_score =
       gen_cache_get_cross_score(gen, gen->current_left_col);
@@ -1149,11 +1153,11 @@ static inline void shadow_start_nonplaythrough(MoveGen *gen) {
 }
 
 static inline void shadow_start_playthrough(MoveGen *gen,
-                                            uint8_t current_letter) {
+                                            MachineLetter current_letter) {
   // Traverse the full length of the tiles on the board until hitting an
   // empty square
   for (;;) {
-    const uint8_t unblanked_playthrough_ml =
+    const MachineLetter unblanked_playthrough_ml =
         get_unblanked_machine_letter(current_letter);
     rack_add_letter(&gen->bingo_alpha_rack, unblanked_playthrough_ml);
     if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
@@ -1186,7 +1190,7 @@ static inline void shadow_start(MoveGen *gen) {
   rack_copy(&gen->full_player_rack, &gen->player_rack);
   rack_copy(&gen->bingo_alpha_rack, &gen->player_rack);
 
-  const uint8_t current_letter =
+  const MachineLetter current_letter =
       gen_cache_get_letter(gen, gen->current_left_col);
   if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
     shadow_start_nonplaythrough(gen);
@@ -1293,7 +1297,7 @@ void shadow_by_orientation(MoveGen *gen) {
 static inline void set_descending_tile_scores(MoveGen *gen) {
   int i = 0;
   for (int j = 0; j < (int)ld_get_size(&gen->ld); j++) {
-    const uint8_t j_score_order = ld_get_score_order(&gen->ld, j);
+    const MachineLetter j_score_order = ld_get_score_order(&gen->ld, j);
     for (int k = 0; k < rack_get_letter(&gen->player_rack, j_score_order);
          k++) {
       gen->descending_tile_scores[i] = gen->tile_scores[j_score_order];

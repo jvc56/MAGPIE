@@ -569,7 +569,7 @@ void small_play_recorder_test(void) {
   assert(move_list->spare_move->tiles_played == 7);
   assert(memcmp(move_list->spare_move->tiles,
                 // h E a D W _ _ D S
-                (uint8_t[]){8 | 0x80, 5, 1 | 0x80, 4, 23, 0, 0, 4, 19},
+                (MachineLetter[]){8 | 0x80, 5, 1 | 0x80, 4, 23, 0, 0, 4, 19},
                 9) == 0);
 
   free(temp_small_moves);

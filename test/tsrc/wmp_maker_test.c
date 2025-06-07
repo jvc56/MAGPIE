@@ -19,7 +19,7 @@ void test_make_wmp_from_words(void) {
   kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
 
   DictionaryWordList *q_words_2to8 = dictionary_word_list_create();
-  const uint8_t q = ld_hl_to_ml(ld, "Q");
+  const MachineLetter q = ld_hl_to_ml(ld, "Q");
   for (int word_idx = 0; word_idx < dictionary_word_list_get_count(words);
        word_idx++) {
     const DictionaryWord *word = dictionary_word_list_get_word(words, word_idx);
@@ -43,7 +43,7 @@ void test_make_wmp_from_words(void) {
   assert(wmp->board_dim == BOARD_DIM);
   assert(wmp->max_word_lookup_bytes == 8 * 47); // EIQSTU??
 
-  uint8_t *buffer = malloc_or_die(wmp->max_word_lookup_bytes);
+  MachineLetter *buffer = malloc_or_die(wmp->max_word_lookup_bytes);
 
   BitRack iq = string_to_bit_rack(ld, "IQ");
   int bytes_written = wmp_write_words_to_buffer(wmp, &iq, 2, buffer);

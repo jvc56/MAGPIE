@@ -75,11 +75,11 @@ void string_builder_add_board_row(StringBuilder *game_string,
                                   const Board *board, int row) {
   string_builder_add_formatted_string(game_string, "%2d|", row + 1);
   for (int i = 0; i < BOARD_DIM; i++) {
-    uint8_t current_letter = board_get_letter(board, row, i);
+    MachineLetter current_letter = board_get_letter(board, row, i);
     if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
       string_builder_add_char(
           game_string,
-          bonus_square_value_to_char(board_get_bonus_square(board, row, i)));
+          bonus_square_to_char(board_get_bonus_square(board, row, i)));
     } else {
       string_builder_add_user_visible_letter(game_string, ld, current_letter);
     }

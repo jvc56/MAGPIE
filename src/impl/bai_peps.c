@@ -21,6 +21,7 @@
 #include "bai_logger.h"
 
 #define BAI_BINARY_SEARCH_MAX_ITER 100
+#define BAI_EPSILON 1e-10
 
 BAIGLRTResults *bai_glrt_results_create(const int K) {
   BAIGLRTResults *glrt_results = malloc_or_die(sizeof(BAIGLRTResults));

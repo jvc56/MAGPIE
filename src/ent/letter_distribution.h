@@ -38,27 +38,29 @@ typedef struct LetterDistribution {
   uint8_t distribution[MACHINE_LETTER_MAX_VALUE];
   // machine letters sorted in descending
   // score order
-  uint8_t score_order[MACHINE_LETTER_MAX_VALUE];
+  MachineLetter score_order[MACHINE_LETTER_MAX_VALUE];
   bool is_vowel[MACHINE_LETTER_MAX_VALUE];
   int total_tiles;
   int max_tile_length;
   char ld_ml_to_hl[MACHINE_LETTER_MAX_VALUE][MAX_LETTER_BYTE_LENGTH];
 } LetterDistribution;
 
-static inline uint8_t get_blanked_machine_letter(uint8_t ml) {
+static inline MachineLetter get_blanked_machine_letter(MachineLetter ml) {
   return ml | BLANK_MASK;
 }
 
-static inline uint8_t get_unblanked_machine_letter(uint8_t ml) {
+static inline MachineLetter get_unblanked_machine_letter(MachineLetter ml) {
   return ml & UNBLANK_MASK;
 }
 
-static inline bool get_is_blanked(uint8_t ml) { return (ml & BLANK_MASK) > 0; }
+static inline bool get_is_blanked(MachineLetter ml) {
+  return (ml & BLANK_MASK) > 0;
+}
 
 // Returns true if the machine letters are successfully unblanked
 // Returns false if the unblanking fails and renders the machine letters
 // invalid.
-static inline bool unblank_machine_letters(uint8_t *mls, int size) {
+static inline bool unblank_machine_letters(MachineLetter *mls, int size) {
   for (int i = 0; i < size; i++) {
     if (mls[i] == BLANK_MACHINE_LETTER) {
       return false;
@@ -73,7 +75,7 @@ static inline void sort_score_order(LetterDistribution *ld) {
   int size = ld->size;
 
   for (int i = 1; i < size; ++i) {
-    uint8_t key = ld->score_order[i];
+    MachineLetter key = ld->score_order[i];
     int j = i - 1;
 
     while (j >= 0 && scores[ld->score_order[j]] < scores[key]) {
@@ -168,7 +170,7 @@ static inline void ld_create_internal(const char *ld_name,
     string_copy(ld->ld_ml_to_hl[machine_letter], letter);
 
     if (machine_letter > 0) {
-      uint8_t blanked_machine_letter =
+      MachineLetter blanked_machine_letter =
           get_blanked_machine_letter(machine_letter);
       string_copy(ld->ld_ml_to_hl[blanked_machine_letter], lower_case_letter);
     }
@@ -220,24 +222,23 @@ static inline const char *ld_get_name(const LetterDistribution *ld) {
 
 static inline int ld_get_size(const LetterDistribution *ld) { return ld->size; }
 
-static inline int ld_get_dist(const LetterDistribution *ld,
-                              uint8_t machine_letter) {
-  return ld->distribution[machine_letter];
+static inline int ld_get_dist(const LetterDistribution *ld, MachineLetter ml) {
+  return ld->distribution[ml];
 }
 
 static inline Equity ld_get_score(const LetterDistribution *ld,
-                                  uint8_t machine_letter) {
-  return ld->scores[machine_letter];
+                                  MachineLetter ml) {
+  return ld->scores[ml];
 }
 
 static inline int ld_get_score_order(const LetterDistribution *ld,
-                                     uint8_t machine_letter) {
-  return ld->score_order[machine_letter];
+                                     MachineLetter ml) {
+  return ld->score_order[ml];
 }
 
 static inline bool ld_get_is_vowel(const LetterDistribution *ld,
-                                   uint8_t machine_letter) {
-  return ld->is_vowel[machine_letter];
+                                   MachineLetter ml) {
+  return ld->is_vowel[ml];
 }
 
 static inline int ld_get_total_tiles(const LetterDistribution *ld) {
@@ -282,7 +283,8 @@ is_human_readable_letter_multichar(const char *human_readable_letter) {
          get_number_of_utf8_bytes_for_code_point(human_readable_letter[0]);
 }
 
-static inline char *ld_ml_to_hl(const LetterDistribution *ld, uint8_t ml) {
+static inline char *ld_ml_to_hl(const LetterDistribution *ld,
+                                MachineLetter ml) {
   const char *human_readable_letter = ld->ld_ml_to_hl[ml];
   if (is_human_readable_letter_multichar(human_readable_letter)) {
     return get_formatted_string("[%s]", human_readable_letter);
@@ -294,8 +296,8 @@ static inline char *ld_ml_to_hl(const LetterDistribution *ld, uint8_t ml) {
 // This is a linear search. This function should not be used for anything
 // that is speed-critical. If we ever need to use this in anything
 // speed-critical, we should use a hash.
-static inline uint8_t ld_hl_to_ml(const LetterDistribution *ld,
-                                  const char *letter) {
+static inline MachineLetter ld_hl_to_ml(const LetterDistribution *ld,
+                                        const char *letter) {
   for (int i = 0; i < MACHINE_LETTER_MAX_VALUE; i++) {
     if (strings_equal(ld->ld_ml_to_hl[i], letter)) {
       return i;
@@ -314,8 +316,8 @@ static inline bool char_is_playthrough(const char c) {
 // enough. This function will return -1 if it encounters an invalid letter.
 // Note: This is a slow function that should not be used in any hot loops.
 static inline int ld_str_to_mls(const LetterDistribution *ld, const char *str,
-                                bool allow_played_through_marker, uint8_t *mls,
-                                size_t mls_size) {
+                                bool allow_played_through_marker,
+                                MachineLetter *mls, size_t mls_size) {
 
   int num_mls = 0;
   size_t num_bytes = string_length(str);
@@ -407,7 +409,7 @@ static inline int ld_str_to_mls(const LetterDistribution *ld, const char *str,
       if (num_mls >= (int)mls_size) {
         return -1;
       }
-      uint8_t ml = ld_hl_to_ml(ld, current_letter);
+      MachineLetter ml = ld_hl_to_ml(ld, current_letter);
       if (ml == INVALID_LETTER) {
         if (current_letter_byte_index == 1 && allow_played_through_marker &&
             char_is_playthrough(current_char)) {

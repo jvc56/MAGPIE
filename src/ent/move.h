@@ -32,7 +32,7 @@ typedef struct Move {
   // Equal to tiles_played for exchanges
   uint8_t tiles_length;
   uint8_t dir;
-  uint8_t tiles[MOVE_MAX_TILES];
+  MachineLetter tiles[MOVE_MAX_TILES];
 } Move;
 
 typedef struct SmallMove {
@@ -135,7 +135,7 @@ static inline Equity move_get_equity(const Move *move) { return move->equity; }
 
 static inline int move_get_dir(const Move *move) { return move->dir; }
 
-static inline uint8_t move_get_tile(const Move *move, int index) {
+static inline MachineLetter move_get_tile(const Move *move, int index) {
   return move->tiles[index];
 }
 
@@ -165,7 +165,7 @@ static inline void move_set_tiles_length(Move *move, int tiles_length) {
 
 static inline void move_set_dir(Move *move, int dir) { move->dir = dir; }
 
-static inline void move_set_tile(Move *move, uint8_t tile, int index) {
+static inline void move_set_tile(Move *move, MachineLetter tile, int index) {
   if (index >= 0 && index < BOARD_DIM) {
     move->tiles[index] = tile;
   }
@@ -175,7 +175,8 @@ static inline void move_set_equity(Move *move, Equity equity) {
   move->equity = equity;
 }
 
-static inline void move_set_all_except_equity(Move *move, const uint8_t strip[],
+static inline void move_set_all_except_equity(Move *move,
+                                              const MachineLetter strip[],
                                               int leftstrip, int rightstrip,
                                               Equity score, int row_start,
                                               int col_start, int tiles_played,
@@ -198,10 +199,11 @@ static inline void move_set_all_except_equity(Move *move, const uint8_t strip[],
   }
 }
 
-static inline void move_set_all(Move *move, uint8_t strip[], int leftstrip,
-                                int rightstrip, Equity score, int row_start,
-                                int col_start, int tiles_played, int dir,
-                                game_event_t move_type, Equity leave_value) {
+static inline void move_set_all(Move *move, MachineLetter strip[],
+                                int leftstrip, int rightstrip, Equity score,
+                                int row_start, int col_start, int tiles_played,
+                                int dir, game_event_t move_type,
+                                Equity leave_value) {
   move_set_all_except_equity(move, strip, leftstrip, rightstrip, score,
                              row_start, col_start, tiles_played, dir,
                              move_type);
@@ -243,7 +245,7 @@ static inline Move *move_list_get_move(const MoveList *ml, int move_index) {
   return ml->moves[move_index];
 }
 
-static inline void move_list_set_spare_move(MoveList *ml, uint8_t strip[],
+static inline void move_list_set_spare_move(MoveList *ml, MachineLetter strip[],
                                             int leftstrip, int rightstrip,
                                             Equity score, int row_start,
                                             int col_start, int tiles_played,
@@ -262,12 +264,11 @@ static inline void small_move_set_as_pass(SmallMove *move) {
   move->tiny_move = 0;
 }
 
-static inline void small_move_set_all(SmallMove *move, const uint8_t strip[],
-                                      int leftstrip, int rightstrip,
-                                      Equity score, int row_start,
-                                      int col_start, int tiles_played,
-                                      bool dir_is_vertical,
-                                      game_event_t move_type) {
+static inline void
+small_move_set_all(SmallMove *move, const MachineLetter strip[], int leftstrip,
+                   int rightstrip, Equity score, int row_start, int col_start,
+                   int tiles_played, bool dir_is_vertical,
+                   game_event_t move_type) {
 
   int play_length;
   if (move_type == GAME_EVENT_EXCHANGE) {
@@ -288,7 +289,7 @@ static inline void small_move_set_all(SmallMove *move, const uint8_t strip[],
   int bts = 20; // start at bitshift of 20 for the first tile
   int blanks_mask = 0;
   for (int i = 0; i < play_length; i++) {
-    uint8_t ml = strip[leftstrip + i];
+    MachineLetter ml = strip[leftstrip + i];
     if (ml == PLAYED_THROUGH_MARKER) {
       // play-through tile
       continue;
@@ -736,7 +737,7 @@ static inline void small_move_to_move(Move *move, const SmallMove *sm,
   bool out_of_bounds = false;
 
   while (!out_of_bounds) {
-    uint8_t on_board = board_get_letter(board, r, c);
+    MachineLetter on_board = board_get_letter(board, r, c);
     r += ri;
     c += ci;
     if (r >= bdim || c >= bdim) {
@@ -751,7 +752,7 @@ static inline void small_move_to_move(Move *move, const SmallMove *sm,
       break;
     }
     uint64_t shifted = sm->tiny_move & SMALL_MOVE_T_BITMASK[tidx];
-    uint8_t tile = shifted >> tile_shift;
+    MachineLetter tile = shifted >> tile_shift;
     if (tile == 0) {
       break;
     }

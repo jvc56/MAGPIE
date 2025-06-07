@@ -19,7 +19,8 @@ void place_letters_on_board(Game *game, const char *letters, int row_start,
                             int *current_column_index,
                             ErrorStack *error_stack) {
   size_t letters_length = string_length(letters);
-  uint8_t *machine_letters = malloc_or_die(sizeof(uint8_t) * letters_length);
+  MachineLetter *machine_letters =
+      malloc_or_die(sizeof(MachineLetter) * letters_length);
   const LetterDistribution *ld = game_get_ld(game);
   Bag *bag = game_get_bag(game);
   Board *board = game_get_board(game);
@@ -281,7 +282,7 @@ void string_builder_add_cgp(StringBuilder *cgp_builder, const Game *game,
   for (int row = 0; row < BOARD_DIM; row++) {
     int consecutive_empty_squares = 0;
     for (int col = 0; col < BOARD_DIM; col++) {
-      uint8_t ml = board_get_letter(board, row, col);
+      MachineLetter ml = board_get_letter(board, row, col);
       if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
         consecutive_empty_squares++;
       } else {

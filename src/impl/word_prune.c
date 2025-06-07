@@ -44,15 +44,15 @@ BoardRows *board_rows_create(const Game *game) {
   BoardRow *rows = container->rows;
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
-      uint8_t letter = board_get_letter(game_get_board(game), row, col);
-      uint8_t unblanked = get_unblanked_machine_letter(letter);
+      MachineLetter letter = board_get_letter(game_get_board(game), row, col);
+      MachineLetter unblanked = get_unblanked_machine_letter(letter);
       rows[row].letters[col] = unblanked;
     }
   }
   for (int col = 0; col < BOARD_DIM; col++) {
     for (int row = 0; row < BOARD_DIM; row++) {
-      uint8_t letter = board_get_letter(game_get_board(game), row, col);
-      uint8_t unblanked = get_unblanked_machine_letter(letter);
+      MachineLetter letter = board_get_letter(game_get_board(game), row, col);
+      MachineLetter unblanked = get_unblanked_machine_letter(letter);
       rows[BOARD_DIM + col].letters[row] = unblanked;
     }
   }
@@ -91,7 +91,7 @@ int max_nonplaythrough_spaces_in_row(BoardRow *board_row) {
 }
 
 void add_playthrough_word(DictionaryWordList *possible_word_list,
-                          uint8_t *strip, int leftstrip, int rightstrip) {
+                          MachineLetter *strip, int leftstrip, int rightstrip) {
   const int word_length = rightstrip - leftstrip + 1;
   dictionary_word_list_add_word(possible_word_list, strip + leftstrip,
                                 word_length);
@@ -99,7 +99,7 @@ void add_playthrough_word(DictionaryWordList *possible_word_list,
 
 void add_words_without_playthrough(const KWG *kwg, uint32_t node_index,
                                    Rack *rack, int max_nonplaythrough,
-                                   uint8_t *word, int tiles_played,
+                                   MachineLetter *word, int tiles_played,
                                    bool accepts,
                                    DictionaryWordList *possible_word_list) {
   if (accepts) {
@@ -113,7 +113,7 @@ void add_words_without_playthrough(const KWG *kwg, uint32_t node_index,
   }
   for (uint32_t i = node_index;; i++) {
     const uint32_t node = kwg_node(kwg, i);
-    const uint8_t ml = kwg_node_tile(node);
+    const MachineLetter ml = kwg_node_tile(node);
     const int new_node_index = kwg_node_arc_index_prefetch(node, kwg);
     if ((rack_get_letter(rack, ml) > 0) ||
         (rack_get_letter(rack, BLANK_MACHINE_LETTER) > 0)) {
@@ -142,20 +142,21 @@ void add_words_without_playthrough(const KWG *kwg, uint32_t node_index,
 
 void playthrough_words_go_on(const BoardRow *board_row, const KWG *kwg,
                              Rack *rack, int current_col, int anchor_col,
-                             uint8_t current_letter, uint32_t new_node_index,
-                             bool accepts, int leftstrip, int rightstrip,
-                             int leftmost_col, int tiles_played, uint8_t *strip,
+                             MachineLetter current_letter,
+                             uint32_t new_node_index, bool accepts,
+                             int leftstrip, int rightstrip, int leftmost_col,
+                             int tiles_played, MachineLetter *strip,
                              DictionaryWordList *possible_word_list);
 
 void playthrough_words_recursive_gen(const BoardRow *board_row, const KWG *kwg,
                                      Rack *rack, int col, int anchor_col,
                                      uint32_t node_index, int leftstrip,
                                      int rightstrip, int leftmost_col,
-                                     int tiles_played, uint8_t *strip,
+                                     int tiles_played, MachineLetter *strip,
                                      DictionaryWordList *possible_word_list) {
-  const uint8_t current_letter = board_row->letters[col];
+  const MachineLetter current_letter = board_row->letters[col];
   if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
-    const uint8_t ml = current_letter; // already unblanked
+    const MachineLetter ml = current_letter; // already unblanked
     uint32_t next_node_index = 0;
     bool accepts = false;
     for (uint32_t i = node_index;; i++) {
@@ -176,7 +177,7 @@ void playthrough_words_recursive_gen(const BoardRow *board_row, const KWG *kwg,
   } else if (!rack_is_empty(rack)) {
     for (uint32_t i = node_index;; i++) {
       const uint32_t node = kwg_node(kwg, i);
-      const uint8_t ml = kwg_node_tile(node);
+      const MachineLetter ml = kwg_node_tile(node);
       if (ml != SEPARATION_MACHINE_LETTER) {
         if (rack_get_letter(rack, ml) > 0) {
           const uint32_t next_node_index =
@@ -209,9 +210,10 @@ void playthrough_words_recursive_gen(const BoardRow *board_row, const KWG *kwg,
 
 void playthrough_words_go_on(const BoardRow *board_row, const KWG *kwg,
                              Rack *rack, int current_col, int anchor_col,
-                             uint8_t current_letter, uint32_t new_node_index,
-                             bool accepts, int leftstrip, int rightstrip,
-                             int leftmost_col, int tiles_played, uint8_t *strip,
+                             MachineLetter current_letter,
+                             uint32_t new_node_index, bool accepts,
+                             int leftstrip, int rightstrip, int leftmost_col,
+                             int tiles_played, MachineLetter *strip,
                              DictionaryWordList *possible_word_list) {
   if (current_col <= anchor_col) {
     if (board_row->letters[current_col] != ALPHABET_EMPTY_SQUARE_MARKER) {
@@ -276,11 +278,11 @@ void playthrough_words_go_on(const BoardRow *board_row, const KWG *kwg,
 void add_playthrough_words_from_row(const BoardRow *board_row, const KWG *kwg,
                                     Rack *bag_as_rack,
                                     DictionaryWordList *possible_word_list) {
-  uint8_t strip[BOARD_DIM];
+  MachineLetter strip[BOARD_DIM];
   const int gaddag_root = kwg_get_root_node_index(kwg);
   int leftmost_col = 0;
   for (int col = 0; col < BOARD_DIM; col++) {
-    uint8_t current_letter = board_row->letters[col];
+    MachineLetter current_letter = board_row->letters[col];
     if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
       while (((col < BOARD_DIM - 1) &&
               (board_row->letters[col + 1] != ALPHABET_EMPTY_SQUARE_MARKER))) {
@@ -290,7 +292,7 @@ void add_playthrough_words_from_row(const BoardRow *board_row, const KWG *kwg,
         col--;
       }
       current_letter = board_row->letters[col];
-      const uint8_t ml = current_letter; // already unblanked
+      const MachineLetter ml = current_letter; // already unblanked
       uint32_t next_node_index = 0;
       bool accepts = false;
       for (int i = gaddag_root;; i++) {
@@ -355,7 +357,7 @@ void generate_possible_words(const Game *game, const KWG *override_kwg,
     }
   }
 
-  uint8_t word[BOARD_DIM];
+  MachineLetter word[BOARD_DIM];
   add_words_without_playthrough(kwg, kwg_get_dawg_root_node_index(kwg),
                                 unplayed_as_rack, max_nonplaythrough_spaces,
                                 word, 0, false, temp_list);

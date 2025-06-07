@@ -7,6 +7,6 @@
 
 void string_builder_add_user_visible_letter(StringBuilder *string_builder,
                                             const LetterDistribution *ld,
-                                            uint8_t ml);
+                                            MachineLetter ml);
 
 #endif

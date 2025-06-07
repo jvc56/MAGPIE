@@ -117,7 +117,7 @@ void assert_word_count(const LetterDistribution *ld,
 BitRack string_to_bit_rack(const LetterDistribution *ld,
                            const char *rack_string);
 
-void assert_word_in_buffer(uint8_t *buffer, const char *expected_word,
+void assert_word_in_buffer(MachineLetter *buffer, const char *expected_word,
                            const LetterDistribution *ld, int word_idx,
                            int length);
 

@@ -35,14 +35,14 @@ void test_ld_str_to_mls(void) {
       "set -lex OSPS49 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const LetterDistribution *polish_ld = config_get_ld(osps_config);
 
-  uint8_t mls[4];
+  MachineLetter mls[4];
   int num_mls = ld_str_to_mls(english_ld, "??", false, mls, 4);
   assert(num_mls == 2);
   assert(mls[0] == 0);
   assert(mls[1] == 0);
 
   // english:
-  uint8_t emls[20];
+  MachineLetter emls[20];
   num_mls = ld_str_to_mls(english_ld, "ABZ", false, emls, 20);
   assert(num_mls == 3);
   assert(emls[0] == 1);
@@ -50,7 +50,7 @@ void test_ld_str_to_mls(void) {
   assert(emls[2] == 26);
 
   // catalan:
-  uint8_t cmls[20];
+  MachineLetter cmls[20];
   num_mls = ld_str_to_mls(catalan_ld, "A[l·l]O[QU]IMI[qu]ES", false, cmls, 20);
   assert(num_mls == 10);
   assert(cmls[0] == 1);
@@ -65,7 +65,7 @@ void test_ld_str_to_mls(void) {
   assert(cmls[9] == 21);
 
   // Test consecutive multichar letters
-  uint8_t cmls2[20];
+  MachineLetter cmls2[20];
   num_mls =
       ld_str_to_mls(catalan_ld, "[L·L]ES[QU][qu]A[QU][qu]", false, cmls2, 20);
   assert(num_mls == 8);
@@ -79,7 +79,7 @@ void test_ld_str_to_mls(void) {
   assert(cmls2[7] == get_blanked_machine_letter(19));
 
   // Polish
-  uint8_t pmls[20];
+  MachineLetter pmls[20];
   num_mls = ld_str_to_mls(polish_ld, "FGÓIŁHAŃ", false, pmls, 20);
   assert(num_mls == 8);
   assert(pmls[0] == 9);
@@ -100,7 +100,7 @@ void test_ld_str_to_mls(void) {
   assert(pmls[4] == 21);
   assert(pmls[5] == 12);
 
-  uint8_t imls[40];
+  MachineLetter imls[40];
 
   // Ensure allowing playthrough tiles works
   assert(ld_str_to_mls(english_ld, ".BDEF", true, imls, 40) == 5);

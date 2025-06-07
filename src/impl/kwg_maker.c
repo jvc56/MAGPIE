@@ -44,7 +44,7 @@ void node_index_list_add(NodeIndexList *list, uint32_t index) {
 void node_index_list_destroy(NodeIndexList *list) { free(list->indices); }
 
 typedef struct MutableNode {
-  uint8_t ml;
+  MachineLetter ml;
   bool accepts;
   bool is_end;
   NodeIndexList children;
@@ -97,7 +97,7 @@ int mutable_node_list_add_root(MutableNodeList *nodes) {
   return root_node_index;
 }
 
-int add_child(uint32_t node_index, MutableNodeList *nodes, uint8_t ml) {
+int add_child(uint32_t node_index, MutableNodeList *nodes, MachineLetter ml) {
   int child_node_index = nodes->count;
   MutableNode *node = &nodes->nodes[node_index];
   node_index_list_add(&node->children, child_node_index);
@@ -128,7 +128,7 @@ uint64_t mutable_node_hash_value(MutableNode *node, MutableNodeList *nodes,
   }
   uint64_t hash_with_just_children = 0;
 
-  for (uint8_t i = 0; i < node->children.count; i++) {
+  for (MachineLetter i = 0; i < node->children.count; i++) {
     uint64_t child_hash = 0;
     const int child_index = node->children.indices[i];
     if (child_index != 0) {
@@ -149,7 +149,7 @@ uint64_t mutable_node_hash_value(MutableNode *node, MutableNodeList *nodes,
   uint64_t hash_with_node =
       hash_with_just_children * KWG_HASH_COMBINING_PRIME_2;
 
-  const uint8_t ml = node->ml;
+  const MachineLetter ml = node->ml;
   const bool accepts = node->accepts;
   hash_with_node ^= 1 + ml;
   if (accepts) {
@@ -186,7 +186,7 @@ bool mutable_node_equals(const MutableNode *node_a, const MutableNode *node_b,
       (node_a->children.count != node_b->children.count)) {
     return false;
   }
-  for (uint8_t i = 0; i < node_a->children.count; i++) {
+  for (MachineLetter i = 0; i < node_a->children.count; i++) {
     const MutableNode *child_a = &nodes->nodes[node_a->children.indices[i]];
     const MutableNode *child_b = &nodes->nodes[node_b->children.indices[i]];
     if (!mutable_node_equals(child_a, child_b, nodes, true)) {
@@ -300,7 +300,7 @@ void insert_suffix(uint32_t node_index, MutableNodeList *nodes,
   }
   const int ml = dictionary_word_get_word(word)[pos];
   const uint8_t node_num_children = node->children.count;
-  for (uint8_t i = 0; i < node_num_children; i++) {
+  for (MachineLetter i = 0; i < node_num_children; i++) {
     node = &nodes->nodes[node_index];
     const int child_index = node->children.indices[i];
     const MutableNode *child = &nodes->nodes[node->children.indices[i]];
@@ -341,9 +341,9 @@ void copy_nodes(NodePointerList *ordered_pointers, MutableNodeList *nodes,
 
 void add_gaddag_strings_for_word(const DictionaryWord *word,
                                  DictionaryWordList *gaddag_strings) {
-  const uint8_t *raw_word = dictionary_word_get_word(word);
+  const MachineLetter *raw_word = dictionary_word_get_word(word);
   const int length = dictionary_word_get_length(word);
-  uint8_t gaddag_string[MAX_KWG_STRING_LENGTH];
+  MachineLetter gaddag_string[MAX_KWG_STRING_LENGTH];
   // First add the word reversed without the separator.
   for (int i = 0; i < length; i++) {
     const int source_index = length - i - 1;
@@ -372,7 +372,7 @@ void add_gaddag_strings(const DictionaryWordList *words,
   dictionary_word_list_sort(gaddag_strings);
 }
 
-void write_words_aux(const KWG *kwg, uint32_t node_index, uint8_t *prefix,
+void write_words_aux(const KWG *kwg, uint32_t node_index, MachineLetter *prefix,
                      int prefix_length, int max_length, bool accepts,
                      DictionaryWordList *words, bool *nodes_reached) {
   if (accepts && (prefix_length <= max_length)) {
@@ -386,7 +386,7 @@ void write_words_aux(const KWG *kwg, uint32_t node_index, uint8_t *prefix,
       nodes_reached[i] = true;
     }
     const uint32_t node = kwg_node(kwg, i);
-    const uint8_t ml = kwg_node_tile(node);
+    const MachineLetter ml = kwg_node_tile(node);
     const uint32_t new_node_index = kwg_node_arc_index_prefetch(node, kwg);
     const bool node_accepts = kwg_node_accepts(node);
     if (prefix_length < max_length) {
@@ -402,7 +402,7 @@ void write_words_aux(const KWG *kwg, uint32_t node_index, uint8_t *prefix,
 
 void kwg_write_words(const KWG *kwg, uint32_t node_index,
                      DictionaryWordList *words, bool *nodes_reached) {
-  uint8_t prefix[BOARD_DIM];
+  MachineLetter prefix[BOARD_DIM];
   write_words_aux(kwg, node_index, prefix, 0, BOARD_DIM, false, words,
                   nodes_reached);
 }
@@ -410,12 +410,12 @@ void kwg_write_words(const KWG *kwg, uint32_t node_index,
 void kwg_write_gaddag_strings(const KWG *kwg, uint32_t node_index,
                               DictionaryWordList *gaddag_strings,
                               bool *nodes_reached) {
-  uint8_t prefix[MAX_KWG_STRING_LENGTH];
+  MachineLetter prefix[MAX_KWG_STRING_LENGTH];
   write_words_aux(kwg, node_index, prefix, 0, MAX_KWG_STRING_LENGTH, false,
                   gaddag_strings, nodes_reached);
 }
 
-int get_letters_in_common(const DictionaryWord *word, uint8_t *last_word,
+int get_letters_in_common(const DictionaryWord *word, MachineLetter *last_word,
                           int *last_word_length) {
   const int length = dictionary_word_get_length(word);
   int min_length = length;
@@ -447,7 +447,7 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   // Size is one beyond the longest string because nodes are created for
   // potential children at the max+1'th, though there are none.
   int cached_node_indices[MAX_KWG_STRING_LENGTH + 1];
-  uint8_t last_word[MAX_KWG_STRING_LENGTH];
+  MachineLetter last_word[MAX_KWG_STRING_LENGTH];
   int last_word_length = 0;
   for (int i = 0; i < MAX_KWG_STRING_LENGTH; i++) {
     last_word[i] = 0;

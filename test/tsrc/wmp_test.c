@@ -80,7 +80,7 @@ void test_short_and_long_words(void) {
 
   WMP *wmp = wmp_create_or_die("testdata", "CSW21_3or15");
 
-  uint8_t *buffer = malloc_or_die(wmp->max_word_lookup_bytes);
+  MachineLetter *buffer = malloc_or_die(wmp->max_word_lookup_bytes);
   BitRack inq = string_to_bit_rack(ld, "INQ");
   int bytes_written = wmp_write_words_to_buffer(wmp, &inq, 3, buffer);
   assert(bytes_written == 3);

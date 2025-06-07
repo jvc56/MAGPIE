@@ -59,8 +59,8 @@ static inline uint16_t rack_get_dist_size(const Rack *rack) {
   return rack->dist_size;
 }
 
-static inline int8_t rack_get_letter(const Rack *rack, uint8_t machine_letter) {
-  return rack->array[machine_letter];
+static inline int8_t rack_get_letter(const Rack *rack, MachineLetter ml) {
+  return rack->array[ml];
 }
 
 static inline uint16_t rack_get_total_letters(const Rack *rack) {
@@ -118,22 +118,24 @@ static inline int rack_contains_subrack(const Rack *rack, const Rack *subrack) {
   return true;
 }
 
-static inline void rack_take_letter(Rack *rack, uint8_t letter) {
+static inline void rack_take_letter(Rack *rack, MachineLetter letter) {
   rack->array[letter]--;
   rack->number_of_letters--;
 }
 
-static inline void rack_take_letters(Rack *rack, uint8_t letter, int count) {
+static inline void rack_take_letters(Rack *rack, MachineLetter letter,
+                                     int count) {
   rack->array[letter] -= count;
   rack->number_of_letters -= count;
 }
 
-static inline void rack_add_letter(Rack *rack, uint8_t letter) {
+static inline void rack_add_letter(Rack *rack, MachineLetter letter) {
   rack->array[letter]++;
   rack->number_of_letters++;
 }
 
-static inline void rack_add_letters(Rack *rack, uint8_t letter, int count) {
+static inline void rack_add_letters(Rack *rack, MachineLetter letter,
+                                    int count) {
   rack->array[letter] += count;
   rack->number_of_letters += count;
 }
@@ -142,7 +144,7 @@ static inline int rack_set_to_string(const LetterDistribution *ld, Rack *rack,
                                      const char *rack_string) {
   rack_reset(rack);
 
-  uint8_t mls[MAX_RACK_SIZE];
+  MachineLetter mls[MAX_RACK_SIZE];
   int num_mls = ld_str_to_mls(ld, rack_string, false, mls, MAX_RACK_SIZE);
   for (int i = 0; i < num_mls; i++) {
     rack_add_letter(rack, mls[i]);

@@ -119,7 +119,7 @@ bool play_connects(const Board *board, int row, int col) {
 }
 
 void validate_tiles_played_with_mls(const Board *board,
-                                    const uint8_t *machine_letters,
+                                    const MachineLetter *machine_letters,
                                     int number_of_machine_letters, Move *move,
                                     Rack *tiles_played_rack,
                                     bool allow_playthrough,
@@ -127,7 +127,7 @@ void validate_tiles_played_with_mls(const Board *board,
   // Set all the tiles and later overwrite them with
   // playthrough markers if it was a tile placement move
   for (int i = 0; i < number_of_machine_letters; i++) {
-    uint8_t ml = machine_letters[i];
+    MachineLetter ml = machine_letters[i];
     move_set_tile(move, ml, i);
     if (ml != PLAYED_THROUGH_MARKER) {
       if (get_is_blanked(ml)) {
@@ -162,8 +162,9 @@ void validate_tiles_played_with_mls(const Board *board,
             string_duplicate("move is played over a bricked square"));
         return;
       }
-      uint8_t board_letter = board_get_letter(board, current_row, current_col);
-      uint8_t ml = machine_letters[i];
+      MachineLetter board_letter =
+          board_get_letter(board, current_row, current_col);
+      MachineLetter ml = machine_letters[i];
       if (board_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
         move_set_tile(move, ml, i);
         tiles_played++;
@@ -214,8 +215,8 @@ void validate_tiles_played(const LetterDistribution *ld, const Board *board,
                            Rack *tiles_played_rack, bool allow_playthrough,
                            ErrorStack *error_stack) {
   int machine_letters_size = string_length(tiles_played) + 1;
-  uint8_t *machine_letters =
-      malloc_or_die(sizeof(uint8_t) * machine_letters_size);
+  MachineLetter *machine_letters =
+      malloc_or_die(sizeof(MachineLetter) * machine_letters_size);
   int number_of_machine_letters =
       ld_str_to_mls(ld, tiles_played, allow_playthrough, machine_letters,
                     machine_letters_size);

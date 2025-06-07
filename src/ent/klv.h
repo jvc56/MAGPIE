@@ -67,7 +67,7 @@ static inline uint32_t klv_get_root_node_index(const KLV *klv) {
 static inline uint32_t increment_node_to_ml(const KLV *klv, uint32_t node_index,
                                             uint32_t word_index,
                                             uint32_t *next_word_index,
-                                            uint8_t ml) {
+                                            MachineLetter ml) {
   if (node_index == 0) {
     *next_word_index = KLV_UNFOUND_INDEX;
     return 0;

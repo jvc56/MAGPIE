@@ -145,7 +145,7 @@ inference_results_get_leave_rack_list(InferenceResults *inference_results) {
   return inference_results->leave_rack_list;
 }
 
-int get_letter_subtotal_index(uint8_t letter, int number_of_letters,
+int get_letter_subtotal_index(MachineLetter letter, int number_of_letters,
                               inference_subtotal_t subtotal_type) {
   return (letter * 2 * (RACK_SIZE)) + ((number_of_letters - 1) * 2) +
          subtotal_type;
@@ -153,7 +153,8 @@ int get_letter_subtotal_index(uint8_t letter, int number_of_letters,
 
 uint64_t inference_results_get_subtotal(const InferenceResults *results,
                                         inference_stat_t inference_stat_type,
-                                        uint8_t letter, int number_of_letters,
+                                        MachineLetter letter,
+                                        int number_of_letters,
                                         inference_subtotal_t subtotal_type) {
   return results->subtotals[(int)inference_stat_type][get_letter_subtotal_index(
       letter, number_of_letters, (int)subtotal_type)];
@@ -161,15 +162,16 @@ uint64_t inference_results_get_subtotal(const InferenceResults *results,
 
 void inference_results_add_to_letter_subtotal(
     InferenceResults *results, inference_stat_t inference_stat_type,
-    uint8_t letter, int number_of_letters, inference_subtotal_t subtotal_type,
-    uint64_t delta) {
+    MachineLetter letter, int number_of_letters,
+    inference_subtotal_t subtotal_type, uint64_t delta) {
   results->subtotals[inference_stat_type][get_letter_subtotal_index(
       letter, number_of_letters, (int)subtotal_type)] += delta;
 }
 
 uint64_t inference_results_get_subtotal_sum_with_minimum(
     const InferenceResults *results, inference_stat_t inference_stat_type,
-    uint8_t letter, int minimum_number_of_letters, int subtotal_index_offset) {
+    MachineLetter letter, int minimum_number_of_letters,
+    int subtotal_index_offset) {
   uint64_t sum = 0;
   for (int i = minimum_number_of_letters; i <= (RACK_SIZE); i++) {
     sum += inference_results_get_subtotal(results, inference_stat_type, letter,
@@ -190,7 +192,7 @@ void inference_results_add_subtotals(InferenceResults *result_being_added,
 
 void inference_results_set_stat_for_letter(InferenceResults *inference_results,
                                            inference_stat_t inference_stat_type,
-                                           Stat *stat, uint8_t letter) {
+                                           Stat *stat, MachineLetter letter) {
   stat_reset(stat);
   for (int i = 1; i <= (RACK_SIZE); i++) {
     uint64_t number_of_draws_with_exactly_i_of_letter =
@@ -214,7 +216,7 @@ void inference_results_set_stat_for_letter(InferenceResults *inference_results,
 // 'minimum' of 'this_letter' on their rack assuming
 // a uniform random distribution.
 double get_probability_for_random_minimum_draw(
-    const Rack *bag_as_rack, const Rack *target_rack, uint8_t this_letter,
+    const Rack *bag_as_rack, const Rack *target_rack, MachineLetter this_letter,
     int minimum, int number_of_target_played_tiles) {
   const int8_t number_of_this_letters_already_on_rack =
       rack_get_letter(target_rack, this_letter);

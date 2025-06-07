@@ -17,7 +17,7 @@ struct Bag {
   // The total number of tiles
   // in the bag for the initial state.
   int size;
-  uint8_t *tiles;
+  MachineLetter *tiles;
   // Inclusive start index for when
   // tiles start in the 'tiles' array.
   int start_tile_index;
@@ -97,7 +97,7 @@ Bag *bag_create(const LetterDistribution *ld, uint64_t seed) {
   Bag *bag = malloc_or_die(sizeof(Bag));
   bag->prng = prng_create(seed);
   bag->size = ld_get_total_tiles(ld);
-  bag->tiles = malloc_or_die(sizeof(uint8_t) * bag->size);
+  bag->tiles = malloc_or_die(sizeof(MachineLetter) * bag->size);
   bag_reset(ld, bag);
   return bag;
 }
@@ -115,7 +115,7 @@ Bag *bag_duplicate(const Bag *bag) {
   Bag *new_bag = malloc_or_die(sizeof(Bag));
   new_bag->prng = prng_create(0);
   new_bag->size = bag->size;
-  new_bag->tiles = malloc_or_die(sizeof(uint8_t) * new_bag->size);
+  new_bag->tiles = malloc_or_die(sizeof(MachineLetter) * new_bag->size);
   bag_copy(new_bag, bag);
   return new_bag;
 }
@@ -134,8 +134,8 @@ bool bag_is_empty(const Bag *bag) { return bag_get_tiles(bag) == 0; }
 // This assumes the bag is shuffled and nonempty.
 // The player index is used to determine which side
 // of the bag the player draws from.
-uint8_t bag_draw_random_letter(Bag *bag, int player_draw_index) {
-  uint8_t letter;
+MachineLetter bag_draw_random_letter(Bag *bag, int player_draw_index) {
+  MachineLetter letter;
   // This assumes player_draw_index can only be 0 or 1
   // Player 0 draws from the end of the bag and
   // player 1 draws from the start of the bag
@@ -150,7 +150,7 @@ uint8_t bag_draw_random_letter(Bag *bag, int player_draw_index) {
 }
 
 // Returns false if the letters does not exist.
-bool bag_draw_letter(Bag *bag, uint8_t letter, int player_draw_index) {
+bool bag_draw_letter(Bag *bag, MachineLetter letter, int player_draw_index) {
   if (get_is_blanked(letter)) {
     letter = BLANK_MACHINE_LETTER;
   }
@@ -174,7 +174,7 @@ bool bag_draw_letter(Bag *bag, uint8_t letter, int player_draw_index) {
   return true;
 }
 
-bool bag_draw_letters(Bag *bag, uint8_t letter, int num_letters,
+bool bag_draw_letters(Bag *bag, MachineLetter letter, int num_letters,
                       int player_draw_index) {
   for (int i = 0; i < num_letters; i++) {
     if (!bag_draw_letter(bag, letter, player_draw_index)) {
@@ -187,7 +187,7 @@ bool bag_draw_letters(Bag *bag, uint8_t letter, int num_letters,
 // The player index should be the player who drew the tile.
 // Failing to adhere to this requirement will result in
 // undefined behavior.
-void bag_add_letter(Bag *bag, uint8_t letter, int player_draw_index) {
+void bag_add_letter(Bag *bag, MachineLetter letter, int player_draw_index) {
   if (get_is_blanked(letter)) {
     letter = BLANK_MACHINE_LETTER;
   }
@@ -216,7 +216,7 @@ void bag_add_letter(Bag *bag, uint8_t letter, int player_draw_index) {
 // Gets the number of a tiles 'ml' in the bag. For drawing tiles
 // to get the tile itself and update the bag, see
 // the bag_draw* functions.
-int bag_get_letter(const Bag *bag, uint8_t ml) {
+int bag_get_letter(const Bag *bag, MachineLetter ml) {
   int sum = 0;
   for (int i = bag->start_tile_index; i < bag->end_tile_index; i++) {
     if (bag->tiles[i] == ml) {

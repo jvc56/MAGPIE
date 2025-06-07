@@ -55,7 +55,7 @@ void test_move_compare(void) {
 
   int tiles_length = rightstrip - leftstrip + 1;
 
-  uint8_t tiles[BOARD_DIM];
+  MachineLetter tiles[BOARD_DIM];
 
   for (int i = 0; i < tiles_length; i++) {
     tiles[i] = i + 10;

@@ -8,7 +8,7 @@
 // https://github.com/andy-k/wolges/blob/main/details.txt
 
 static inline uint32_t kwg_seek(const KWG *kwg, uint32_t node_index,
-                                uint8_t tile) {
+                                MachineLetter tile) {
   node_index = kwg_node_arc_index(kwg_node(kwg, node_index));
   if (node_index > 0) {
     for (;;) {
@@ -25,12 +25,12 @@ static inline uint32_t kwg_seek(const KWG *kwg, uint32_t node_index,
   return 0;
 }
 
-static inline bool kwg_completes_alpha_cross_set(const KWG *kwg,
-                                                 uint32_t node_index,
-                                                 const Rack *rack,
-                                                 const uint8_t next_letter) {
+static inline bool
+kwg_completes_alpha_cross_set(const KWG *kwg, uint32_t node_index,
+                              const Rack *rack,
+                              const MachineLetter next_letter) {
   const uint16_t dist_size = rack_get_dist_size(rack);
-  for (uint8_t letter = next_letter; letter < dist_size; letter++) {
+  for (MachineLetter letter = next_letter; letter < dist_size; letter++) {
     int num_letter = rack_get_letter(rack, letter);
     for (int k = 0; k < num_letter; k++) {
       node_index = kwg_seek(kwg, node_index, letter);
@@ -55,7 +55,7 @@ static inline bool kwg_accepts_alpha_with_blanks(const KWG *kwg,
   Rack designated_rack;
   rack_copy(&designated_rack, rack);
   rack_take_letter(&designated_rack, 0);
-  for (uint8_t letter = 1; letter < dist_size; letter++) {
+  for (MachineLetter letter = 1; letter < dist_size; letter++) {
     rack_add_letter(&designated_rack, letter);
     if (kwg_accepts_alpha_with_blanks(kwg, &designated_rack)) {
       return true;
@@ -74,12 +74,12 @@ static inline uint64_t kwg_compute_alpha_cross_set(const KWG *kwg,
   }
   const uint16_t dist_size = rack_get_dist_size(rack);
   // Use 1 to skip the blank
-  for (uint8_t letter = 1; letter < dist_size; letter++) {
+  for (MachineLetter letter = 1; letter < dist_size; letter++) {
     int num_letter = rack_get_letter(rack, letter);
     for (int k = 0; k < num_letter; k++) {
       for (;;) {
         const uint32_t node = kwg_node(kwg, node_index);
-        const uint8_t tile = kwg_node_tile(node);
+        const MachineLetter tile = kwg_node_tile(node);
         if (tile > letter) {
           return cross_set;
         } else if (tile < letter) {

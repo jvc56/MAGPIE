@@ -41,7 +41,7 @@ void get_leave_for_move(const Move *move, Game *game, Rack *leave) {
                        game, game_get_player_on_turn_index(game))));
   int tiles_length = move_get_tiles_length(move);
   for (int idx = 0; idx < tiles_length; idx++) {
-    uint8_t letter = move_get_tile(move, idx);
+    MachineLetter letter = move_get_tile(move, idx);
     if (letter == PLAYED_THROUGH_MARKER) {
       continue;
     }
@@ -70,7 +70,7 @@ void play_move_on_board(const Move *move, Game *game) {
   int tiles_length = move_get_tiles_length(move);
 
   for (int idx = 0; idx < tiles_length; idx++) {
-    uint8_t letter = move_get_tile(move, idx);
+    MachineLetter letter = move_get_tile(move, idx);
     if (letter == PLAYED_THROUGH_MARKER) {
       continue;
     }
@@ -396,7 +396,7 @@ Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
   return move_list_get_move(move_list, 0);
 }
 
-void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter,
+void draw_letter_to_rack(Bag *bag, Rack *rack, MachineLetter letter,
                          int player_draw_index) {
   bag_draw_letter(bag, letter, player_draw_index);
   rack_add_letter(rack, letter);
@@ -419,7 +419,7 @@ bool moves_are_similar(const Move *m1, const Move *m2, int dist_size) {
   rack_set_dist_size(&similar_plays_rack, dist_size);
   rack_reset(&similar_plays_rack);
   for (int i = 0; i < move_get_tiles_length(m1); i++) {
-    uint8_t tile = move_get_tile(m1, i);
+    MachineLetter tile = move_get_tile(m1, i);
     if (tile == PLAYED_THROUGH_MARKER) {
       continue;
     }
@@ -431,7 +431,7 @@ bool moves_are_similar(const Move *m1, const Move *m2, int dist_size) {
   }
 
   for (int i = 0; i < move_get_tiles_length(m2); i++) {
-    uint8_t tile = move_get_tile(m1, i);
+    MachineLetter tile = move_get_tile(m1, i);
     if (tile == PLAYED_THROUGH_MARKER) {
       continue;
     }

@@ -32,7 +32,7 @@ void string_builder_add_move_description(StringBuilder *move_string_builder,
     int number_of_tiles_to_print = move_get_tiles_length(move);
 
     for (int i = 0; i < number_of_tiles_to_print; i++) {
-      uint8_t letter = move_get_tile(move, i);
+      MachineLetter letter = move_get_tile(move, i);
       if (letter == PLAYED_THROUGH_MARKER &&
           move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
         string_builder_add_char(move_string_builder, ASCII_PLAYED_THROUGH);
@@ -77,8 +77,8 @@ void string_builder_add_move(StringBuilder *string_builder, const Board *board,
   int current_row = move_get_row_start(move);
   int current_col = move_get_col_start(move);
   for (int i = 0; i < move_get_tiles_length(move); i++) {
-    uint8_t tile = move_get_tile(move, i);
-    uint8_t print_tile = tile;
+    MachineLetter tile = move_get_tile(move, i);
+    MachineLetter print_tile = tile;
     if (tile == PLAYED_THROUGH_MARKER) {
       if (board) {
         print_tile = board_get_letter(board, current_row, current_col);
@@ -148,7 +148,7 @@ void string_builder_add_ucgi_move(StringBuilder *move_string_builder,
     }
 
     for (int i = 0; i < number_of_tiles_to_print; i++) {
-      uint8_t letter = move_get_tile(move, i);
+      MachineLetter letter = move_get_tile(move, i);
       if (letter == PLAYED_THROUGH_MARKER &&
           move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
         int r = move_get_row_start(move) + (ri * i);
@@ -192,7 +192,7 @@ void string_builder_add_gcg_move(StringBuilder *move_string_builder,
     string_builder_add_char(move_string_builder, ' ');
     const int tiles_length = move_get_tiles_length(move);
     for (int i = 0; i < tiles_length; i++) {
-      uint8_t letter = move_get_tile(move, i);
+      MachineLetter letter = move_get_tile(move, i);
       if (letter == PLAYED_THROUGH_MARKER) {
         string_builder_add_char(move_string_builder, ASCII_PLAYED_THROUGH);
       } else {
