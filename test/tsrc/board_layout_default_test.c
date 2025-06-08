@@ -19,35 +19,6 @@ void assert_bonus_square(const BonusSquare bonus_square,
                          const uint8_t expected_value) {
   const uint8_t word_multiplier = (expected_value >> 4);
   const uint8_t letter_multiplier = expected_value & 0xF;
-  // FIXME: remove when all tests pass
-  // printf("\nraw value: 0b");
-  // for (int i = 7; i >= 0; i--) {
-  //   printf("%c", (bonus_square.raw >> i) & 1 ? '1' : '0');
-  // }
-  // printf("\n");
-
-  // const uint8_t actual_word_multiplier =
-  //     bonus_square_get_word_multiplier(bonus_square);
-  // printf("actual wm: 0b");
-  // for (int i = 7; i >= 0; i--) {
-  //   printf("%c", (actual_word_multiplier >> i) & 1 ? '1' : '0');
-  // }
-  // printf("\n");
-
-  // const uint8_t actual_letter_multiplier =
-  //     bonus_square_get_letter_multiplier(bonus_square);
-  // printf("actual lm: 0b");
-  // for (int i = 7; i >= 0; i--) {
-  //   printf("%c", (actual_letter_multiplier >> i) & 1 ? '1' : '0');
-  // }
-  // printf("\n");
-
-  // printf("expected value: 0b");
-  // for (int i = 7; i >= 0; i--) {
-  //   printf("%c", (expected_value >> i) & 1 ? '1' : '0');
-  // }
-  // printf("\n");
-
   if (bonus_square_get_word_multiplier(bonus_square) != word_multiplier) {
     log_fatal("word multiplier mismatch: expected %d, got %d", word_multiplier,
               bonus_square_get_word_multiplier(bonus_square));
