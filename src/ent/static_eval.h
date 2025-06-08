@@ -196,8 +196,8 @@ static inline Equity static_eval_get_move_score(const LetterDistribution *ld,
       ml = board_get_letter(board, row_start, col_start + idx);
     } else {
       fresh_tile = true;
-      this_word_multiplier = bonus_square >> 4;
-      letter_multiplier = bonus_square & 0x0F;
+      this_word_multiplier = bonus_square_get_word_multiplier(bonus_square);
+      letter_multiplier = bonus_square_get_letter_multiplier(bonus_square);
       word_multiplier *= this_word_multiplier;
     }
 

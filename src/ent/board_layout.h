@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "../def/board_layout_defs.h"
+#include "bonus_square.h"
 
 #include "../util/io_util.h"
 
@@ -20,8 +20,6 @@ BoardLayout *board_layout_create_default(const char *data_paths,
                                          ErrorStack *error_stack);
 void board_layout_destroy(BoardLayout *bl);
 
-char bonus_square_to_char(BonusSquare bonus_square);
-BonusSquare bonus_square_char_to_value(char bonus_square_char);
 int board_layout_get_index(int row, int col);
 BonusSquare board_layout_get_bonus_square(const BoardLayout *bl, int row,
                                           int col);

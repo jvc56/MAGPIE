@@ -4,45 +4,13 @@
 #include <stdio.h>
 
 #include "../def/board_defs.h"
-#include "../def/board_layout_defs.h"
+
+#include "bonus_square.h"
 
 #include "data_filepaths.h"
 
 #include "../util/io_util.h"
 #include "../util/string_util.h"
-
-#define BONUS_SQUARE_MAP_SIZE 256
-
-#define BONUS_SQUARE_CHAR_NONE ' '
-#define BONUS_SQUARE_CHAR_DOUBLE_LETTER '\''
-#define BONUS_SQUARE_CHAR_DOUBLE_WORD '-'
-#define BONUS_SQUARE_CHAR_TRIPLE_LETTER '"'
-#define BONUS_SQUARE_CHAR_TRIPLE_WORD '='
-#define BONUS_SQUARE_CHAR_QUADRUPLE_LETTER '^'
-#define BONUS_SQUARE_CHAR_QUADRUPLE_WORD '~'
-
-static const BonusSquare
-    bonus_square_chars_to_values_map[BONUS_SQUARE_MAP_SIZE] = {
-        [BONUS_SQUARE_CHAR_NONE] = 0x11,
-        [BONUS_SQUARE_CHAR_DOUBLE_LETTER] = 0x12,
-        [BONUS_SQUARE_CHAR_DOUBLE_WORD] = 0x21,
-        [BONUS_SQUARE_CHAR_TRIPLE_LETTER] = 0x13,
-        [BONUS_SQUARE_CHAR_TRIPLE_WORD] = 0x31,
-        [BONUS_SQUARE_CHAR_QUADRUPLE_LETTER] = 0x14,
-        [BONUS_SQUARE_CHAR_QUADRUPLE_WORD] = 0x41,
-        [BRICK_CHAR] = BRICK_VALUE,
-};
-
-static const char bonus_squares_to_chars_map[BONUS_SQUARE_MAP_SIZE] = {
-    [0x11] = BONUS_SQUARE_CHAR_NONE,
-    [0x12] = BONUS_SQUARE_CHAR_DOUBLE_LETTER,
-    [0x21] = BONUS_SQUARE_CHAR_DOUBLE_WORD,
-    [0x13] = BONUS_SQUARE_CHAR_TRIPLE_LETTER,
-    [0x31] = BONUS_SQUARE_CHAR_TRIPLE_WORD,
-    [0x14] = BONUS_SQUARE_CHAR_QUADRUPLE_LETTER,
-    [0x41] = BONUS_SQUARE_CHAR_QUADRUPLE_WORD,
-    [BRICK_VALUE] = BRICK_CHAR,
-};
 
 struct BoardLayout {
   char *name;
@@ -99,14 +67,6 @@ void board_layout_parse_split_start_coords(
   }
 }
 
-char bonus_square_to_char(BonusSquare bonus_square) {
-  return bonus_squares_to_chars_map[bonus_square];
-}
-
-BonusSquare bonus_square_char_to_value(char bonus_square_char) {
-  return bonus_square_chars_to_values_map[(int)bonus_square_char];
-}
-
 void board_layout_parse_split_file(BoardLayout *bl,
                                    const char *board_layout_name,
                                    const StringSplitter *file_lines,
@@ -153,8 +113,8 @@ void board_layout_parse_split_file(BoardLayout *bl,
       const char bonus_square_char = layout_row[col];
       const int index = board_layout_get_index(row, col);
       const BonusSquare bonus_square =
-          bonus_square_char_to_value(bonus_square_char);
-      if (bonus_square == 0) {
+          bonus_square_from_char(bonus_square_char);
+      if (bonus_square_is_invalid(bonus_square)) {
         error_stack_push(
             error_stack, ERROR_STATUS_BOARD_LAYOUT_INVALID_BONUS_SQUARE,
             get_formatted_string("encountered invalid bonus square: %c",

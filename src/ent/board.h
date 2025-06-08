@@ -71,7 +71,7 @@ static inline void square_set_bonus_square(Square *s,
 // Square: is brick
 
 static inline bool square_get_is_brick(const Square *s) {
-  return s->bonus_square == BRICK_VALUE;
+  return s->bonus_square.raw == BRICK_VALUE;
 }
 
 // Square: Cross sets
@@ -652,8 +652,8 @@ static inline bool
 board_are_bonus_squares_symmetric_by_transposition(const Board *board) {
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = row + 1; col < BOARD_DIM; col++) {
-      if (board_get_bonus_square(board, row, col) !=
-          board_get_bonus_square(board, col, row)) {
+      if (board_get_bonus_square(board, row, col).raw !=
+          board_get_bonus_square(board, col, row).raw) {
         return false;
       }
     }
@@ -715,11 +715,12 @@ static inline void update_opening_penalty(Board *board, int dir, int i,
                                           int bonus_square_col) {
   BonusSquare bonus_square =
       board_get_bonus_square(board, bonus_square_row, bonus_square_col);
-  if (bonus_square == BRICK_VALUE) {
+  if (bonus_square_is_brick(bonus_square)) {
     return;
   }
-  int word_multiplier = bonus_square >> 4;
-  int letter_multiplier = bonus_square & 0x0F;
+  const int word_multiplier = bonus_square_get_word_multiplier(bonus_square);
+  const int letter_multiplier =
+      bonus_square_get_letter_multiplier(bonus_square);
 
   // Very basic heuristic which will undoubtedly be greatly improved
   // at a later time.

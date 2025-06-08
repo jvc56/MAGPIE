@@ -88,8 +88,8 @@ static inline bool gen_cache_get_is_cross_word(const MoveGen *gen, int col) {
   return square_get_is_cross_word(&gen->row_cache[col]);
 }
 
-static inline MachineLetter gen_cache_get_bonus_square(const MoveGen *gen,
-                                                       int col) {
+static inline BonusSquare gen_cache_get_bonus_square(const MoveGen *gen,
+                                                     int col) {
   return square_get_bonus_square(&gen->row_cache[col]);
 }
 
@@ -404,10 +404,9 @@ void go_on(MoveGen *gen, int current_col, MachineLetter L,
            bool unique_play, int main_word_score, int word_multiplier,
            int cross_score) {
   // Handle incremental scoring
-  const MachineLetter bonus_square =
-      gen_cache_get_bonus_square(gen, current_col);
-  int letter_multiplier = 1;
-  int this_word_multiplier = 1;
+  const BonusSquare bonus_square = gen_cache_get_bonus_square(gen, current_col);
+  uint8_t letter_multiplier = 1;
+  uint8_t this_word_multiplier = 1;
   bool fresh_tile = false;
 
   const bool square_is_empty = gen_cache_is_empty(gen, current_col);
@@ -419,8 +418,8 @@ void go_on(MoveGen *gen, int current_col, MachineLetter L,
     gen->strip[current_col] = L;
     ml = L;
     fresh_tile = true;
-    this_word_multiplier = bonus_square >> 4;
-    letter_multiplier = bonus_square & 0x0F;
+    this_word_multiplier = bonus_square_get_word_multiplier(bonus_square);
+    letter_multiplier = bonus_square_get_letter_multiplier(bonus_square);
   }
 
   int inc_word_multiplier = this_word_multiplier * word_multiplier;
@@ -577,8 +576,8 @@ void go_on_alpha(MoveGen *gen, int current_col, MachineLetter L, int leftstrip,
     gen->strip[current_col] = L;
     ml = L;
     fresh_tile = true;
-    this_word_multiplier = bonus_square >> 4;
-    letter_multiplier = bonus_square & 0x0F;
+    this_word_multiplier = bonus_square_get_word_multiplier(bonus_square);
+    letter_multiplier = bonus_square_get_letter_multiplier(bonus_square);
   }
 
   int inc_word_multiplier = this_word_multiplier * word_multiplier;
@@ -762,7 +761,8 @@ static inline void maybe_recalculate_effective_multipliers(MoveGen *gen) {
         gen->descending_cross_word_multipliers[i].multiplier;
     const uint8_t col = gen->descending_cross_word_multipliers[i].column;
     const BonusSquare bonus_square = gen_cache_get_bonus_square(gen, col);
-    const uint8_t letter_multiplier = bonus_square & 0x0F;
+    const uint8_t letter_multiplier =
+        bonus_square_get_letter_multiplier(bonus_square);
     const uint8_t effective_letter_multiplier =
         gen->shadow_word_multiplier * letter_multiplier + xw_multiplier;
     insert_unrestricted_effective_letter_multiplier(
@@ -776,8 +776,10 @@ static inline void insert_unrestricted_multipliers(MoveGen *gen, int col) {
 
   const bool is_cross_word = gen_cache_get_is_cross_word(gen, col);
   const BonusSquare bonus_square = gen_cache_get_bonus_square(gen, col);
-  const uint8_t letter_multiplier = bonus_square & 0x0F;
-  const uint8_t this_word_multiplier = bonus_square >> 4;
+  const uint8_t this_word_multiplier =
+      bonus_square_get_word_multiplier(bonus_square);
+  const uint8_t letter_multiplier =
+      bonus_square_get_letter_multiplier(bonus_square);
   const uint8_t effective_cross_word_multiplier =
       letter_multiplier * this_word_multiplier * is_cross_word;
   insert_unrestricted_cross_word_multiplier(
@@ -932,8 +934,10 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
         gen_cache_get_bonus_square(gen, gen->current_right_col);
     const Equity cross_score =
         gen_cache_get_cross_score(gen, gen->current_right_col);
-    const int letter_multiplier = bonus_square & 0x0F;
-    const int this_word_multiplier = bonus_square >> 4;
+    const int letter_multiplier =
+        bonus_square_get_letter_multiplier(bonus_square);
+    const int this_word_multiplier =
+        bonus_square_get_word_multiplier(bonus_square);
     gen->shadow_perpendicular_additional_score +=
         cross_score * this_word_multiplier;
     gen->shadow_word_multiplier *= this_word_multiplier;
@@ -1036,8 +1040,8 @@ static inline void nonplaythrough_shadow_play_left(MoveGen *gen,
     gen->tiles_played++;
     const BonusSquare bonus_square =
         gen_cache_get_bonus_square(gen, gen->current_left_col);
-    int letter_multiplier = bonus_square & 0x0F;
-    int this_word_multiplier = bonus_square >> 4;
+    int letter_multiplier = bonus_square_get_letter_multiplier(bonus_square);
+    int this_word_multiplier = bonus_square_get_word_multiplier(bonus_square);
     gen->shadow_word_multiplier *= this_word_multiplier;
     if (!try_restrict_tile_and_accumulate_score(
             gen, possible_tiles_for_shadow_left, letter_multiplier,
@@ -1091,8 +1095,10 @@ static inline void playthrough_shadow_play_left(MoveGen *gen, bool is_unique) {
         gen_cache_get_bonus_square(gen, gen->current_left_col);
     const Equity cross_score =
         gen_cache_get_cross_score(gen, gen->current_left_col);
-    const int letter_multiplier = bonus_square & 0x0F;
-    const int this_word_multiplier = bonus_square >> 4;
+    const int letter_multiplier =
+        bonus_square_get_letter_multiplier(bonus_square);
+    const int this_word_multiplier =
+        bonus_square_get_word_multiplier(bonus_square);
     gen->shadow_perpendicular_additional_score +=
         cross_score * this_word_multiplier;
 
@@ -1128,8 +1134,10 @@ static inline void shadow_start_nonplaythrough(MoveGen *gen) {
       gen_cache_get_bonus_square(gen, gen->current_left_col);
   const Equity cross_score =
       gen_cache_get_cross_score(gen, gen->current_left_col);
-  const int letter_multiplier = bonus_square & 0x0F;
-  const int this_word_multiplier = bonus_square >> 4;
+  const int letter_multiplier =
+      bonus_square_get_letter_multiplier(bonus_square);
+  const int this_word_multiplier =
+      bonus_square_get_word_multiplier(bonus_square);
   gen->shadow_perpendicular_additional_score =
       cross_score * this_word_multiplier;
 

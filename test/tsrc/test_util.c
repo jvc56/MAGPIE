@@ -508,8 +508,8 @@ void assert_boards_are_equal(Board *b1, Board *b2) {
       for (int col = 0; col < BOARD_DIM; col++) {
         assert(board_get_letter(b1, row, col) ==
                board_get_letter(b2, row, col));
-        assert(board_get_bonus_square(b1, row, col) ==
-               board_get_bonus_square(b2, row, col));
+        assert(bonus_squares_are_equal(board_get_bonus_square(b1, row, col),
+                                       board_get_bonus_square(b2, row, col)));
         for (int dir = 0; dir < 2; dir++) {
           assert(board_get_anchor(b1, row, col, dir) ==
                  board_get_anchor(b2, row, col, dir));
