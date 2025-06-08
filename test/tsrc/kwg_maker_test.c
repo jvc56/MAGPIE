@@ -15,7 +15,7 @@
 void add_test_word(const LetterDistribution *ld, DictionaryWordList *words,
                    const char *human_readable_word) {
   int length = string_length(human_readable_word);
-  uint8_t word[MAX_KWG_STRING_LENGTH];
+  MachineLetter word[MAX_KWG_STRING_LENGTH];
   ld_str_to_mls(ld, human_readable_word, false, word, length);
   dictionary_word_list_add_word(words, word, length);
 }
@@ -37,7 +37,7 @@ void assert_word_lists_are_equal(const DictionaryWordList *expected,
 
 uint32_t kwg_prefix_arc_aux(const KWG *kwg, uint32_t node_index,
                             const DictionaryWord *prefix, int pos) {
-  const uint8_t ml = dictionary_word_get_word(prefix)[pos];
+  const MachineLetter ml = dictionary_word_get_word(prefix)[pos];
   const uint32_t next_node_index = kwg_get_next_node_index(kwg, node_index, ml);
   if (pos + 1 == dictionary_word_get_length(prefix)) {
     return next_node_index;
@@ -291,7 +291,7 @@ void test_polish_gaddag(void) {
   kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
 
   DictionaryWordList *ziet_words = dictionary_word_list_create();
-  const uint8_t ziet = ld_hl_to_ml(ld, "Ź");
+  const MachineLetter ziet = ld_hl_to_ml(ld, "Ź");
   for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
     const DictionaryWord *word = dictionary_word_list_get_word(words, i);
     const uint8_t length = dictionary_word_get_length(word);
@@ -338,7 +338,7 @@ void test_large_gaddag(void) {
   kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
 
   DictionaryWordList *q_words = dictionary_word_list_create();
-  const uint8_t q = ld_hl_to_ml(ld, "Q");
+  const MachineLetter q = ld_hl_to_ml(ld, "Q");
   for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
     const DictionaryWord *word = dictionary_word_list_get_word(words, i);
     const uint8_t length = dictionary_word_get_length(word);

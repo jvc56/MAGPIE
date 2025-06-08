@@ -10,74 +10,81 @@
 #include "../../src/impl/gameplay.h"
 #include "../../src/impl/move_gen.h"
 
+#include "../../src/util/io_util.h"
+
 #include "test_constants.h"
 #include "test_util.h"
+
+void assert_bonus_square(const BonusSquare bonus_square,
+                         const uint8_t expected_value) {
+  const uint8_t word_multiplier = (expected_value >> 4);
+  const uint8_t letter_multiplier = expected_value & 0xF;
+  if (bonus_square_get_word_multiplier(bonus_square) != word_multiplier) {
+    log_fatal("word multiplier mismatch: expected %d, got %d", word_multiplier,
+              bonus_square_get_word_multiplier(bonus_square));
+  }
+  if (bonus_square_get_letter_multiplier(bonus_square) != letter_multiplier) {
+    log_fatal("letter multiplier mismatch: expected %d, got %d",
+              letter_multiplier,
+              bonus_square_get_letter_multiplier(bonus_square));
+  }
+}
 
 void test_board_layout_success(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
-  assert(bonus_square_value_to_char(0x12) == '\'');
-  assert(bonus_square_value_to_char(0x21) == '-');
-  assert(bonus_square_value_to_char(0x13) == '"');
-  assert(bonus_square_value_to_char(0x31) == '=');
-
-  assert(bonus_square_char_to_value('\'') == 0x12);
-  assert(bonus_square_char_to_value('-') == 0x21);
-  assert(bonus_square_char_to_value('"') == 0x13);
-  assert(bonus_square_char_to_value('=') == 0x31);
-
   Board *board = game_get_board(game);
 
   for (int i = 0; i < 2; i++) {
-    assert(board_get_bonus_square(board, 0, 1) == 0x11);
-    assert(board_get_bonus_square(board, 1, 0) == 0x11);
-    assert(board_get_bonus_square(board, 4, 3) == 0x11);
-    assert(board_get_bonus_square(board, 3, 4) == 0x11);
-    assert(board_get_bonus_square(board, 9, 4) == 0x11);
-    assert(board_get_bonus_square(board, 4, 9) == 0x11);
-    assert(board_get_bonus_square(board, 1, 14) == 0x11);
-    assert(board_get_bonus_square(board, 14, 1) == 0x11);
-    assert(board_get_bonus_square(board, 10, 13) == 0x11);
-    assert(board_get_bonus_square(board, 13, 10) == 0x11);
+    assert_bonus_square(board_get_bonus_square(board, 0, 1), 0x11);
+    assert_bonus_square(board_get_bonus_square(board, 1, 0), 0x11);
+    assert_bonus_square(board_get_bonus_square(board, 4, 3), 0x11);
+    assert_bonus_square(board_get_bonus_square(board, 3, 4), 0x11);
+    assert_bonus_square(board_get_bonus_square(board, 9, 4), 0x11);
+    assert_bonus_square(board_get_bonus_square(board, 4, 9), 0x11);
+    assert_bonus_square(board_get_bonus_square(board, 1, 14), 0x11);
+    assert_bonus_square(board_get_bonus_square(board, 14, 1), 0x11);
+    assert_bonus_square(board_get_bonus_square(board, 10, 13), 0x11);
+    assert_bonus_square(board_get_bonus_square(board, 13, 10), 0x11);
 
-    assert(board_get_bonus_square(board, 0, 0) == 0x31);
-    assert(board_get_bonus_square(board, 0, 7) == 0x31);
-    assert(board_get_bonus_square(board, 7, 0) == 0x31);
-    assert(board_get_bonus_square(board, 7, 14) == 0x31);
-    assert(board_get_bonus_square(board, 14, 7) == 0x31);
-    assert(board_get_bonus_square(board, 0, 14) == 0x31);
-    assert(board_get_bonus_square(board, 14, 0) == 0x31);
-    assert(board_get_bonus_square(board, 14, 14) == 0x31);
+    assert_bonus_square(board_get_bonus_square(board, 0, 0), 0x31);
+    assert_bonus_square(board_get_bonus_square(board, 0, 7), 0x31);
+    assert_bonus_square(board_get_bonus_square(board, 7, 0), 0x31);
+    assert_bonus_square(board_get_bonus_square(board, 7, 14), 0x31);
+    assert_bonus_square(board_get_bonus_square(board, 14, 7), 0x31);
+    assert_bonus_square(board_get_bonus_square(board, 0, 14), 0x31);
+    assert_bonus_square(board_get_bonus_square(board, 14, 0), 0x31);
+    assert_bonus_square(board_get_bonus_square(board, 14, 14), 0x31);
 
-    assert(board_get_bonus_square(board, 5, 1) == 0x13);
-    assert(board_get_bonus_square(board, 9, 1) == 0x13);
-    assert(board_get_bonus_square(board, 9, 5) == 0x13);
-    assert(board_get_bonus_square(board, 9, 9) == 0x13);
-    assert(board_get_bonus_square(board, 9, 13) == 0x13);
+    assert_bonus_square(board_get_bonus_square(board, 5, 1), 0x13);
+    assert_bonus_square(board_get_bonus_square(board, 9, 1), 0x13);
+    assert_bonus_square(board_get_bonus_square(board, 9, 5), 0x13);
+    assert_bonus_square(board_get_bonus_square(board, 9, 9), 0x13);
+    assert_bonus_square(board_get_bonus_square(board, 9, 13), 0x13);
 
-    assert(board_get_bonus_square(board, 6, 2) == 0x12);
-    assert(board_get_bonus_square(board, 7, 3) == 0x12);
-    assert(board_get_bonus_square(board, 2, 8) == 0x12);
-    assert(board_get_bonus_square(board, 3, 14) == 0x12);
-    assert(board_get_bonus_square(board, 11, 14) == 0x12);
-    assert(board_get_bonus_square(board, 6, 6) == 0x12);
-    assert(board_get_bonus_square(board, 8, 8) == 0x12);
+    assert_bonus_square(board_get_bonus_square(board, 6, 2), 0x12);
+    assert_bonus_square(board_get_bonus_square(board, 7, 3), 0x12);
+    assert_bonus_square(board_get_bonus_square(board, 2, 8), 0x12);
+    assert_bonus_square(board_get_bonus_square(board, 3, 14), 0x12);
+    assert_bonus_square(board_get_bonus_square(board, 11, 14), 0x12);
+    assert_bonus_square(board_get_bonus_square(board, 6, 6), 0x12);
+    assert_bonus_square(board_get_bonus_square(board, 8, 8), 0x12);
 
-    assert(board_get_bonus_square(board, 1, 1) == 0x21);
-    assert(board_get_bonus_square(board, 2, 2) == 0x21);
-    assert(board_get_bonus_square(board, 3, 3) == 0x21);
-    assert(board_get_bonus_square(board, 7, 7) == 0x21);
-    assert(board_get_bonus_square(board, 13, 1) == 0x21);
-    assert(board_get_bonus_square(board, 12, 2) == 0x21);
-    assert(board_get_bonus_square(board, 11, 3) == 0x21);
-    assert(board_get_bonus_square(board, 3, 11) == 0x21);
-    assert(board_get_bonus_square(board, 2, 12) == 0x21);
-    assert(board_get_bonus_square(board, 1, 13) == 0x21);
-    assert(board_get_bonus_square(board, 13, 13) == 0x21);
-    assert(board_get_bonus_square(board, 12, 12) == 0x21);
-    assert(board_get_bonus_square(board, 11, 11) == 0x21);
+    assert_bonus_square(board_get_bonus_square(board, 1, 1), 0x21);
+    assert_bonus_square(board_get_bonus_square(board, 2, 2), 0x21);
+    assert_bonus_square(board_get_bonus_square(board, 3, 3), 0x21);
+    assert_bonus_square(board_get_bonus_square(board, 7, 7), 0x21);
+    assert_bonus_square(board_get_bonus_square(board, 13, 1), 0x21);
+    assert_bonus_square(board_get_bonus_square(board, 12, 2), 0x21);
+    assert_bonus_square(board_get_bonus_square(board, 11, 3), 0x21);
+    assert_bonus_square(board_get_bonus_square(board, 3, 11), 0x21);
+    assert_bonus_square(board_get_bonus_square(board, 2, 12), 0x21);
+    assert_bonus_square(board_get_bonus_square(board, 1, 13), 0x21);
+    assert_bonus_square(board_get_bonus_square(board, 13, 13), 0x21);
+    assert_bonus_square(board_get_bonus_square(board, 12, 12), 0x21);
+    assert_bonus_square(board_get_bonus_square(board, 11, 11), 0x21);
     board_transpose(board);
   }
 

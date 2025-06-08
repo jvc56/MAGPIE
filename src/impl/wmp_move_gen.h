@@ -173,7 +173,7 @@ static inline const Equity *wmp_move_gen_get_nonplaythrough_best_leave_values(
 }
 
 static inline void wmp_move_gen_add_playthrough_letter(WMPMoveGen *wmp_move_gen,
-                                                       uint8_t ml) {
+                                                       MachineLetter ml) {
   bit_rack_add_letter(&wmp_move_gen->playthrough_bit_rack, ml);
   wmp_move_gen->num_tiles_played_through++;
 }

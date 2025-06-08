@@ -80,8 +80,8 @@ static inline bool encoded_rack_get_bit(const EncodedRack *encoded_rack,
           encoded_rack_shift_bit(bit_index)) != 0;
 }
 
-static inline void encoded_rack_set_ml(EncodedRack *encoded_rack, uint8_t ml,
-                                       int *bit_index) {
+static inline void encoded_rack_set_ml(EncodedRack *encoded_rack,
+                                       MachineLetter ml, int *bit_index) {
   int start_bit_index = *bit_index;
   while (ml) {
     if (ml & 1) {
@@ -93,9 +93,9 @@ static inline void encoded_rack_set_ml(EncodedRack *encoded_rack, uint8_t ml,
   *bit_index += BITS_PER_ML - (*bit_index - start_bit_index);
 }
 
-static inline uint8_t encoded_rack_get_ml(const EncodedRack *encoded_rack,
-                                          int *bit_index) {
-  uint8_t ml = 0;
+static inline MachineLetter encoded_rack_get_ml(const EncodedRack *encoded_rack,
+                                                int *bit_index) {
+  MachineLetter ml = 0;
   for (int i = 0; i < BITS_PER_ML; i++) {
     if (encoded_rack_get_bit(encoded_rack, *bit_index)) {
       ml |= 1 << i;
@@ -154,7 +154,7 @@ static inline void rack_encode(const Rack *rack, EncodedRack *encoded_rack) {
 static inline void rack_decode(const EncodedRack *encoded_rack, Rack *rack) {
   rack_reset(rack);
   int bit_index = 0;
-  uint8_t curr_ml = 0;
+  MachineLetter curr_ml = 0;
   while (true) {
     curr_ml = encoded_rack_get_ml(encoded_rack, &bit_index);
     if (curr_ml == MAX_ALPHABET_SIZE) {

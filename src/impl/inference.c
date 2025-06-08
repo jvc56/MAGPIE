@@ -166,7 +166,8 @@ void evaluate_possible_leave(Inference *inference) {
       // but now we have to record the leave and the exchanged tiles
       for (int exchanged_tile_index = 0; exchanged_tile_index < tiles_played;
            exchanged_tile_index++) {
-        uint8_t tile_exchanged = move_get_tile(top_move, exchanged_tile_index);
+        MachineLetter tile_exchanged =
+            move_get_tile(top_move, exchanged_tile_index);
         rack_add_letter(inference->current_target_exchanged, tile_exchanged);
         rack_take_letter(inference->current_target_leave, tile_exchanged);
       }
@@ -188,7 +189,8 @@ void evaluate_possible_leave(Inference *inference) {
       rack_reset(inference->current_target_exchanged);
       for (int exchanged_tile_index = 0; exchanged_tile_index < tiles_played;
            exchanged_tile_index++) {
-        uint8_t tile_exchanged = move_get_tile(top_move, exchanged_tile_index);
+        MachineLetter tile_exchanged =
+            move_get_tile(top_move, exchanged_tile_index);
         rack_add_letter(inference->current_target_leave, tile_exchanged);
       }
     } else {
@@ -204,13 +206,15 @@ void evaluate_possible_leave(Inference *inference) {
   }
 }
 
-void increment_letter_for_inference(Inference *inference, uint8_t letter) {
+void increment_letter_for_inference(Inference *inference,
+                                    MachineLetter letter) {
   rack_take_letter(inference->bag_as_rack, letter);
   rack_add_letter(inference->current_target_rack, letter);
   rack_add_letter(inference->current_target_leave, letter);
 }
 
-void decrement_letter_for_inference(Inference *inference, uint8_t letter) {
+void decrement_letter_for_inference(Inference *inference,
+                                    MachineLetter letter) {
   rack_add_letter(inference->bag_as_rack, letter);
   rack_take_letter(inference->current_target_rack, letter);
   rack_take_letter(inference->current_target_leave, letter);

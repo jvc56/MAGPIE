@@ -186,8 +186,8 @@ static inline Equity static_eval_get_move_score(const LetterDistribution *ld,
   }
 
   for (int idx = 0; idx < tiles_length; idx++) {
-    uint8_t ml = move_get_tile(move, idx);
-    uint8_t bonus_square =
+    MachineLetter ml = move_get_tile(move, idx);
+    BonusSquare bonus_square =
         board_get_bonus_square(board, row_start, col_start + idx);
     int letter_multiplier = 1;
     int this_word_multiplier = 1;
@@ -196,8 +196,8 @@ static inline Equity static_eval_get_move_score(const LetterDistribution *ld,
       ml = board_get_letter(board, row_start, col_start + idx);
     } else {
       fresh_tile = true;
-      this_word_multiplier = bonus_square >> 4;
-      letter_multiplier = bonus_square & 0x0F;
+      this_word_multiplier = bonus_square_get_word_multiplier(bonus_square);
+      letter_multiplier = bonus_square_get_letter_multiplier(bonus_square);
       word_multiplier *= this_word_multiplier;
     }
 

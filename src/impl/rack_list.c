@@ -52,7 +52,7 @@ typedef enum {
 // Smaller, mutable version of the LetterDistribution struct.
 typedef struct RackListLetterDistribution {
   int size;
-  uint8_t distribution[MACHINE_LETTER_MAX_VALUE];
+  int distribution[MACHINE_LETTER_MAX_VALUE];
 } RackListLetterDistribution;
 
 void rack_list_ld_init(RackListLetterDistribution *rl_ld,
@@ -73,8 +73,7 @@ void rack_list_ld_decrement(RackListLetterDistribution *rl_ld, int index,
   rl_ld->distribution[index] -= amount;
 }
 
-uint8_t rack_list_ld_get_dist(const RackListLetterDistribution *rl_ld,
-                              int index) {
+int rack_list_ld_get_dist(const RackListLetterDistribution *rl_ld, int index) {
   return rl_ld->distribution[index];
 }
 
@@ -116,10 +115,10 @@ uint64_t get_total_combos_for_rack(const RackListLetterDistribution *rl_ld,
 
 int rack_list_generate_all_racks(rack_gen_mode_t mode,
                                  const RackListLetterDistribution *rl_ld,
-                                 Rack *rack, uint8_t ml,
-                                 DictionaryWordList *dwl, uint8_t *rack_array,
-                                 RackList *rack_list, uint32_t node_index,
-                                 uint32_t klv_index) {
+                                 Rack *rack, MachineLetter ml,
+                                 DictionaryWordList *dwl,
+                                 MachineLetter *rack_array, RackList *rack_list,
+                                 uint32_t node_index, uint32_t klv_index) {
   int number_of_set_racks = 0;
   const uint32_t ld_size = rack_list_ld_get_size(rl_ld);
   while (ml < ld_size &&
@@ -203,7 +202,7 @@ RackList *rack_list_create(const LetterDistribution *ld,
 
   DictionaryWordList *dwl = dictionary_word_list_create();
 
-  uint8_t rack_array[RACK_SIZE];
+  MachineLetter rack_array[RACK_SIZE];
   RackListLetterDistribution rl_ld;
   rack_list_ld_init(&rl_ld, ld);
 
@@ -353,7 +352,8 @@ typedef struct RackListLeave {
 void generate_leaves(RackListLeave *leave_list, const KLV *klv,
                      double rack_equity, Rack *full_rack,
                      RackListLetterDistribution *rl_ld, Rack *leave,
-                     uint32_t node_index, uint32_t word_index, uint8_t ml) {
+                     uint32_t node_index, uint32_t word_index,
+                     MachineLetter ml) {
   const uint16_t ld_size = rack_get_dist_size(full_rack);
   while (ml < ld_size && rack_get_letter(full_rack, ml) == 0) {
     ml++;

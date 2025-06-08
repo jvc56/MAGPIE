@@ -48,7 +48,7 @@ void klv_write_row(void *data, uint32_t word_index) {
 void klv_add_leave_to_word_list(void *data,
                                 uint32_t __attribute__((unused)) word_index) {
   KLVCreateData *klv_data = (KLVCreateData *)data;
-  uint8_t word[(RACK_SIZE)-1];
+  MachineLetter word[(RACK_SIZE)-1];
   int letter_index = 0;
   const int dist_size = rack_get_dist_size(klv_data->leave);
   for (int i = 0; i < dist_size; i++) {
@@ -61,7 +61,8 @@ void klv_add_leave_to_word_list(void *data,
 
 // To record in alphabetical order for all lengths, use length = -1
 void klv_iter_for_length_recur(LeaveIter *leave_iter, KLV *klv, int length,
-                               Rack *bag_as_rack, Rack *leave, uint8_t ml) {
+                               Rack *bag_as_rack, Rack *leave,
+                               MachineLetter ml) {
   const int dist_size = rack_get_dist_size(leave);
   if (ml == dist_size) {
     return;

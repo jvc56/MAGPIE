@@ -71,8 +71,9 @@ static inline uint32_t kwg_get_root_node_index(const KWG *kwg) {
   return kwg_node_arc_index(gaddag_pointer_node);
 }
 
-static inline uint32_t
-kwg_get_next_node_index(const KWG *kwg, uint32_t node_index, uint8_t letter) {
+static inline uint32_t kwg_get_next_node_index(const KWG *kwg,
+                                               uint32_t node_index,
+                                               MachineLetter letter) {
   uint32_t i = node_index;
   while (1) {
     const uint32_t node = kwg_node(kwg, i);
@@ -187,7 +188,7 @@ static inline void kwg_write_to_file(const KWG *kwg, const char *filename,
   fclose_or_die(stream);
 }
 
-static inline bool kwg_in_letter_set(const KWG *kwg, uint8_t letter,
+static inline bool kwg_in_letter_set(const KWG *kwg, MachineLetter letter,
                                      uint32_t node_index) {
   letter = get_unblanked_machine_letter(letter);
   uint32_t i = node_index;

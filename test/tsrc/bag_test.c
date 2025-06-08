@@ -42,7 +42,7 @@ void test_bag(void) {
 
   int number_of_remaining_tiles = bag_get_tiles(bag);
   for (int k = 0; k < number_of_remaining_tiles; k++) {
-    uint8_t letter = bag_draw_random_letter(bag, 0);
+    MachineLetter letter = bag_draw_random_letter(bag, 0);
     rack_add_letter(rack, letter);
   }
 
@@ -75,13 +75,13 @@ void test_bag(void) {
   // The first (TEST_BAG_SIZE) / 2 tiles
   // are drawn by player 0 and the next (TEST_BAG_SIZE) / 2
   // tiles are drawn by player 1
-  uint8_t draw_order[(TEST_BAG_SIZE) * 2];
-  uint8_t tiles_drawn[2] = {0, 0};
+  MachineLetter draw_order[(TEST_BAG_SIZE) * 2];
+  MachineLetter tiles_drawn[2] = {0, 0};
 
   // Establish the initial draw order
   for (int i = 0; i < (TEST_BAG_SIZE); i++) {
     int player_index = i % 2;
-    uint8_t letter = bag_draw_random_letter(bag, player_index);
+    MachineLetter letter = bag_draw_random_letter(bag, player_index);
     int tiles_index =
         get_drawn_tile_index(tiles_drawn[player_index]++, player_index);
     draw_order[tiles_index] = letter;
@@ -97,7 +97,7 @@ void test_bag(void) {
 
   for (int i = 0; i < (TEST_BAG_SIZE); i++) {
     int player_index = i / ((TEST_BAG_SIZE) / 2);
-    uint8_t letter = bag_draw_random_letter(bag, player_index);
+    MachineLetter letter = bag_draw_random_letter(bag, player_index);
     int tiles_index =
         get_drawn_tile_index(tiles_drawn[player_index]++, player_index);
     assert(draw_order[tiles_index] == letter);
@@ -110,7 +110,7 @@ void test_bag(void) {
 
   for (int i = 0; i < (TEST_BAG_SIZE); i++) {
     int player_index = (i % 10) / 5;
-    uint8_t letter = bag_draw_random_letter(bag, player_index);
+    MachineLetter letter = bag_draw_random_letter(bag, player_index);
     int tiles_index =
         get_drawn_tile_index(tiles_drawn[player_index]++, player_index);
     assert(draw_order[tiles_index] == letter);
@@ -135,7 +135,7 @@ void test_bag(void) {
   // One player draws way more than the other
   for (int i = 0; i < (TEST_BAG_SIZE); i++) {
     int player_index = i / ((TEST_BAG_SIZE)-10);
-    uint8_t letter = bag_draw_random_letter(bag, player_index);
+    MachineLetter letter = bag_draw_random_letter(bag, player_index);
     int tiles_index;
     if (i < (TEST_BAG_SIZE) / 2) {
       // Draws from the first half of the bag
@@ -161,7 +161,7 @@ void test_bag(void) {
 
   // Player 1 draws all tiles
   for (int i = 0; i < (TEST_BAG_SIZE); i++) {
-    uint8_t letter = bag_draw_random_letter(bag, 1);
+    MachineLetter letter = bag_draw_random_letter(bag, 1);
     int tiles_index;
     if (i < (TEST_BAG_SIZE) / 2) {
       tiles_index = get_drawn_tile_index(i, 1);
