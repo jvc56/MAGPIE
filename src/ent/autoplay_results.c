@@ -737,10 +737,6 @@ void win_pct_data_add_game(Recorder *recorder, const RecorderArgs *args) {
   const int final_game_spread =
       equity_to_int(player_get_score(game_get_player(game, 0)) -
                     player_get_score(game_get_player(game, 1)));
-  if (final_game_spread > WIN_PCT_MAX_SPREAD ||
-      final_game_spread < -WIN_PCT_MAX_SPREAD) {
-    return;
-  }
   for (int current_turn_snapshot_index = 0;
        current_turn_snapshot_index < end_turn_snapshot_index;
        current_turn_snapshot_index++) {
