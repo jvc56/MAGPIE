@@ -3,9 +3,6 @@
 
 #include <stdbool.h>
 
-#define BAI_EPSILON 1e-10
-#define BAI_ARM_SAMPLE_MINIMUM 50
-
 typedef enum {
   BAI_THRESHOLD_NONE,
   BAI_THRESHOLD_GK16,
@@ -23,8 +20,8 @@ typedef struct BAIOptions {
   bai_sampling_rule_t sampling_rule;
   bai_threshold_t threshold;
   double delta;
-  // If the sampling rule is round robin complete, this limit
-  // refers to the total number of complete round robins instead
+  // If the sampling rule is round robin, the sample limit
+  // refers to the total number of round robins instead
   // of the total number of samples.
   int sample_limit;
   int epigon_cutoff;

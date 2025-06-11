@@ -12,7 +12,7 @@
 #include "../util/string_util.h"
 
 struct DictionaryWord {
-  uint8_t word[MAX_KWG_STRING_LENGTH];
+  MachineLetter word[MAX_KWG_STRING_LENGTH];
   uint8_t length;
 };
 
@@ -22,7 +22,8 @@ struct DictionaryWordList {
   int capacity;
 };
 
-const uint8_t *dictionary_word_get_word(const DictionaryWord *dictionary_word) {
+const MachineLetter *
+dictionary_word_get_word(const DictionaryWord *dictionary_word) {
   return dictionary_word->word;
 }
 
@@ -50,7 +51,7 @@ void dictionary_word_list_clear(DictionaryWordList *dictionary_word_list) {
 }
 
 void dictionary_word_list_add_word(DictionaryWordList *dictionary_word_list,
-                                   const uint8_t *word, int word_length) {
+                                   const MachineLetter *word, int word_length) {
   if (dictionary_word_list->count == dictionary_word_list->capacity) {
     dictionary_word_list->dictionary_words = realloc_or_die(
         dictionary_word_list->dictionary_words,

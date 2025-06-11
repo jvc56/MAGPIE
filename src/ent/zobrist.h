@@ -93,7 +93,7 @@ zobrist_calculate_hash(const Zobrist *z, const Board *game_board,
 
   for (int i = 0; i < BOARD_DIM * BOARD_DIM; i++) {
     const Square *sq = &(game_board->squares[i]);
-    uint8_t letter = sq->letter;
+    MachineLetter letter = sq->letter;
     if (letter == 0) {
       continue;
     }
@@ -137,7 +137,7 @@ inline static uint64_t zobrist_add_move(const Zobrist *z, uint64_t key,
   if (move->move_type != GAME_EVENT_PASS) {
     // create placeholder rack to keep track of what our rack would be
     // before we made the play.
-    uint8_t placeholder_rack[ZOBRIST_MAX_LETTERS];
+    MachineLetter placeholder_rack[ZOBRIST_MAX_LETTERS];
     memset(placeholder_rack, 0, ZOBRIST_MAX_LETTERS);
 
     int row = move_get_row_start(move);
@@ -169,7 +169,7 @@ inline static uint64_t zobrist_add_move(const Zobrist *z, uint64_t key,
     }
     // now "play" all the tiles in the placeholder rack
     for (int idx = 0; idx < move->tiles_length; idx++) {
-      uint8_t tile = move->tiles[idx];
+      MachineLetter tile = move->tiles[idx];
       if (tile == PLAYED_THROUGH_MARKER) {
         continue;
       }

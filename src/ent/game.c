@@ -157,7 +157,7 @@ Equity traverse_backwards_for_score(const Board *board,
                                     int col) {
   Equity score = 0;
   while (board_is_position_in_bounds_and_not_bricked(board, row, col)) {
-    uint8_t ml = board_get_letter(board, row, col);
+    MachineLetter ml = board_get_letter(board, row, col);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
       break;
     }
@@ -176,7 +176,7 @@ static inline uint32_t traverse_backwards(const KWG *kwg, const Board *board,
                                           bool check_letter_set,
                                           int left_most_col) {
   while (board_is_position_in_bounds_and_not_bricked(board, row, col)) {
-    uint8_t ml = board_get_letter(board, row, col);
+    MachineLetter ml = board_get_letter(board, row, col);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
       break;
     }
@@ -203,7 +203,7 @@ static inline uint32_t traverse_backwards(const KWG *kwg, const Board *board,
 static inline void traverse_backwards_add_to_rack(const Board *board, int row,
                                                   int col, Rack *rack) {
   while (board_is_position_in_bounds_and_not_bricked(board, row, col)) {
-    uint8_t ml = board_get_letter(board, row, col);
+    MachineLetter ml = board_get_letter(board, row, col);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
       break;
     }

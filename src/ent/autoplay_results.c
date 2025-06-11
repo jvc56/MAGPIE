@@ -775,25 +775,21 @@ void win_pct_data_add_game(Recorder *recorder, const RecorderArgs *args) {
       big_swing = true;
     }
     const int start_row_index = num_tiles_remaining - 1;
+    const int row_index = num_tiles_remaining - 1;
     int start_col_index = WIN_PCT_MAX_SPREAD - final_score_diff;
     if (start_col_index < 0) {
       start_col_index = -1;
     }
-    // If this final score difference is possible for X tiles remaining, then we
-    // can assume that it is possible for any X + C tiles remaining where C > 0.
-    for (int row_index = start_row_index; row_index < win_pct_data->num_rows;
-         row_index++) {
-      win_pct_data->total_games[row_index]++;
-      if (start_col_index >= 0 && start_col_index < WIN_PCT_NUM_COLUMNS) {
-        // Increment the wins value for the tie by 1 since ties are worth 1
-        win_pct_data->wins[row_index][start_col_index]++;
-      }
-      // All score differences greater than player_on_turn_final_game_spread
-      // would have resulted in a win for the player on turn, so increment all
-      // of these spreads by the win value of 2
-      for (int i = start_col_index + 1; i < WIN_PCT_NUM_COLUMNS; i++) {
-        win_pct_data->wins[row_index][i] += 2;
-      }
+    win_pct_data->total_games[row_index]++;
+    if (start_col_index >= 0 && start_col_index < WIN_PCT_NUM_COLUMNS) {
+      // Increment the wins value for the tie by 1 since ties are worth 1
+      win_pct_data->wins[row_index][start_col_index]++;
+    }
+    // All score differences greater than player_on_turn_final_game_spread
+    // would have resulted in a win for the player on turn, so increment all
+    // of these spreads by the win value of 2
+    for (int i = start_col_index + 1; i < WIN_PCT_NUM_COLUMNS; i++) {
+      win_pct_data->wins[row_index][i] += 2;
     }
   }
   if (big_swing) {

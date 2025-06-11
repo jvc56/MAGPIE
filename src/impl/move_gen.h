@@ -51,8 +51,8 @@ typedef struct MoveGen {
   Move best_move_and_current_move[2];
   int best_move_index;
 
-  uint8_t strip[(MOVE_MAX_TILES)];
-  uint8_t exchange_strip[(MOVE_MAX_TILES)];
+  MachineLetter strip[(MOVE_MAX_TILES)];
+  MachineLetter exchange_strip[(MOVE_MAX_TILES)];
   LeaveMap leave_map;
   BitRack player_bit_rack;
   // Shadow plays
@@ -101,7 +101,7 @@ typedef struct MoveGen {
   Equity best_leaves[(RACK_SIZE)];
   AnchorHeap anchor_heap;
   LetterDistribution ld;
-  
+
   // Include space for blank letters so their scores can be added without
   // checking whether tiles are blanked.
   Equity tile_scores[MAX_ALPHABET_SIZE + BLANK_MASK];
@@ -114,7 +114,6 @@ typedef struct MoveGen {
 
   WMPMoveGen wmp_move_gen;
 } MoveGen;
-
 
 void gen_destroy_cache(void);
 

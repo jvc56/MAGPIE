@@ -23,8 +23,8 @@ typedef struct Square {
   uint64_t left_extension_set;
   uint64_t right_extension_set;
   Equity cross_score;
-  uint8_t letter;
-  uint8_t bonus_square;
+  MachineLetter letter;
+  BonusSquare bonus_square;
   bool anchor;
   bool is_cross_word;
 } Square;
@@ -49,26 +49,29 @@ typedef struct Board {
 
 // Square: Letter
 
-static inline uint8_t square_get_letter(const Square *s) { return s->letter; }
+static inline MachineLetter square_get_letter(const Square *s) {
+  return s->letter;
+}
 
-static inline void square_set_letter(Square *s, uint8_t letter) {
+static inline void square_set_letter(Square *s, MachineLetter letter) {
   s->letter = letter;
 }
 
 // Square: Bonus square
 
-static inline uint8_t square_get_bonus_square(const Square *s) {
+static inline BonusSquare square_get_bonus_square(const Square *s) {
   return s->bonus_square;
 }
 
-static inline void square_set_bonus_square(Square *s, uint8_t bonus_square) {
+static inline void square_set_bonus_square(Square *s,
+                                           BonusSquare bonus_square) {
   s->bonus_square = bonus_square;
 }
 
 // Square: is brick
 
 static inline bool square_get_is_brick(const Square *s) {
-  return s->bonus_square == BRICK_VALUE;
+  return s->bonus_square.raw == BRICK_VALUE;
 }
 
 // Square: Cross sets
@@ -81,11 +84,12 @@ static inline void square_set_cross_set(Square *s, uint64_t cross_set) {
   s->cross_set = cross_set;
 }
 
-static inline uint64_t get_cross_set_bit(uint8_t letter) {
+static inline uint64_t get_cross_set_bit(MachineLetter letter) {
   return (uint64_t)1 << letter;
 }
 
-static inline void square_set_cross_set_letter(Square *s, uint8_t letter) {
+static inline void square_set_cross_set_letter(Square *s,
+                                               MachineLetter letter) {
   s->cross_set |= get_cross_set_bit(letter);
 }
 
@@ -192,13 +196,13 @@ board_get_readonly_square(const Board *b, int row, int col, int dir, int ci) {
 // and can be read with a cross index of 0 since letters do not change
 // across cross indexes.
 
-static inline uint8_t board_get_letter(const Board *b, int row, int col) {
+static inline MachineLetter board_get_letter(const Board *b, int row, int col) {
   // Cross index doesn't matter for letter reads.
   return square_get_letter(board_get_readonly_square(b, row, col, 0, 0));
 }
 
 static inline void board_set_letter(Board *b, int row, int col,
-                                    uint8_t letter) {
+                                    MachineLetter letter) {
   // Letter should be set on all 4 squares.
   for (int ci = 0; ci < 2; ci++) {
     for (int dir = 0; dir < 2; dir++) {
@@ -243,18 +247,19 @@ static inline void board_set_letter(Board *b, int row, int col,
 // and can be read with a cross index of 0 since bonus squares do not change
 // across cross indexes.
 
-static inline uint8_t board_get_bonus_square(const Board *b, int row, int col) {
+static inline BonusSquare board_get_bonus_square(const Board *b, int row,
+                                                 int col) {
   // Cross index doesn't matter for bonus square reads.
   return square_get_bonus_square(board_get_readonly_square(b, row, col, 0, 0));
 }
 
-static inline uint8_t board_get_is_brick(const Board *b, int row, int col) {
+static inline bool board_get_is_brick(const Board *b, int row, int col) {
   // Cross index doesn't matter for bonus square reads.
   return square_get_is_brick(board_get_readonly_square(b, row, col, 0, 0));
 }
 
 static inline void board_set_bonus_square(Board *b, int row, int col,
-                                          uint8_t bonus_square) {
+                                          BonusSquare bonus_square) {
   // Bonus square should be set on all 4 squares.
   for (int ci = 0; ci < 2; ci++) {
     for (int dir = 0; dir < 2; dir++) {
@@ -297,7 +302,8 @@ static inline void board_set_cross_set_with_blank(Board *b, int row, int col,
 }
 
 static inline void board_set_cross_set_letter(Board *b, int row, int col,
-                                              int dir, int ci, uint8_t letter) {
+                                              int dir, int ci,
+                                              MachineLetter letter) {
   square_set_cross_set_letter(board_get_writable_square(b, row, col, dir, ci),
                               letter);
 }
@@ -506,7 +512,7 @@ static inline bool board_is_empty_or_bricked(const Board *board, int row,
 }
 
 static inline bool board_is_letter_allowed_in_cross_set(uint64_t cross_set,
-                                                        uint8_t letter) {
+                                                        MachineLetter letter) {
   return (cross_set & ((uint64_t)1 << letter)) != 0;
 }
 
@@ -646,8 +652,8 @@ static inline bool
 board_are_bonus_squares_symmetric_by_transposition(const Board *board) {
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = row + 1; col < BOARD_DIM; col++) {
-      if (board_get_bonus_square(board, row, col) !=
-          board_get_bonus_square(board, col, row)) {
+      if (board_get_bonus_square(board, row, col).raw !=
+          board_get_bonus_square(board, col, row).raw) {
         return false;
       }
     }
@@ -707,13 +713,14 @@ static inline void board_reset(Board *board) {
 static inline void update_opening_penalty(Board *board, int dir, int i,
                                           int bonus_square_row,
                                           int bonus_square_col) {
-  uint8_t bonus_square =
+  BonusSquare bonus_square =
       board_get_bonus_square(board, bonus_square_row, bonus_square_col);
-  if (bonus_square == BRICK_VALUE) {
+  if (bonus_square_is_brick(bonus_square)) {
     return;
   }
-  int word_multiplier = bonus_square >> 4;
-  int letter_multiplier = bonus_square & 0x0F;
+  const int word_multiplier = bonus_square_get_word_multiplier(bonus_square);
+  const int letter_multiplier =
+      bonus_square_get_letter_multiplier(bonus_square);
 
   // Very basic heuristic which will undoubtedly be greatly improved
   // at a later time.
@@ -731,13 +738,13 @@ static inline void board_apply_layout(const BoardLayout *bl, Board *board) {
   board->transposed = 0;
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
-      uint8_t board_layout_bonus_value =
+      BonusSquare board_layout_bonus_square =
           board_layout_get_bonus_square(bl, row, col);
       for (int dir = 0; dir < 2; dir++) {
         for (int ci = 0; ci < 2; ci++) {
           int board_index =
               get_square_index(board->transposed, row, col, dir, ci);
-          board->squares[board_index].bonus_square = board_layout_bonus_value;
+          board->squares[board_index].bonus_square = board_layout_bonus_square;
         }
       }
     }

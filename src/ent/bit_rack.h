@@ -73,10 +73,10 @@ static inline BitRack bit_rack_create_empty(void) {
 static inline BitRack
 bit_rack_create_from_dictionary_word(const DictionaryWord *dictionary_word) {
   BitRack bit_rack = bit_rack_create_empty();
-  const uint8_t *word = dictionary_word_get_word(dictionary_word);
+  const MachineLetter *word = dictionary_word_get_word(dictionary_word);
   const uint8_t length = dictionary_word_get_length(dictionary_word);
   for (int i = 0; i < length; i++) {
-    const uint8_t letter = word[i];
+    const MachineLetter letter = word[i];
     const int shift = letter * BIT_RACK_BITS_PER_LETTER;
 #if USE_INT128_INTRINSIC
     bit_rack += (unsigned __int128)1 << shift;
@@ -114,12 +114,13 @@ static inline BitRack bit_rack_create_from_rack(const LetterDistribution *ld,
   return bit_rack;
 }
 
-static inline uint8_t bit_rack_get_letter(const BitRack *bit_rack, uint8_t ml) {
+static inline MachineLetter bit_rack_get_letter(const BitRack *bit_rack,
+                                                MachineLetter ml) {
   const int shift = ml * BIT_RACK_BITS_PER_LETTER;
 
 #if USE_INT128_INTRINSIC
-  return (uint8_t)((*bit_rack >> shift) &
-                   ((1 << BIT_RACK_BITS_PER_LETTER) - 1));
+  return (MachineLetter)((*bit_rack >> shift) &
+                         ((1 << BIT_RACK_BITS_PER_LETTER) - 1));
 #else
   if (shift < 64) {
     return (int)((bit_rack->low >> shift) &
@@ -258,8 +259,8 @@ static inline BitRack bit_rack_mul(const BitRack *bit_rack,
 #endif
 }
 
-static inline void bit_rack_set_letter_count(BitRack *bit_rack, uint8_t ml,
-                                             uint8_t count) {
+static inline void bit_rack_set_letter_count(BitRack *bit_rack,
+                                             MachineLetter ml, uint8_t count) {
   const int shift = ml * BIT_RACK_BITS_PER_LETTER;
 #if USE_INT128_INTRINSIC
   *bit_rack &=
@@ -297,7 +298,7 @@ static inline BitRack largest_bit_rack_for_ld(const LetterDistribution *ld) {
   return bit_rack;
 }
 
-static inline void bit_rack_add_letter(BitRack *bit_rack, uint8_t ml) {
+static inline void bit_rack_add_letter(BitRack *bit_rack, MachineLetter ml) {
   const int shift = ml * BIT_RACK_BITS_PER_LETTER;
 #if USE_INT128_INTRINSIC
   *bit_rack += (unsigned __int128)1 << shift;
@@ -310,7 +311,7 @@ static inline void bit_rack_add_letter(BitRack *bit_rack, uint8_t ml) {
 #endif
 }
 
-static inline void bit_rack_take_letter(BitRack *bit_rack, uint8_t ml) {
+static inline void bit_rack_take_letter(BitRack *bit_rack, MachineLetter ml) {
   const int shift = ml * BIT_RACK_BITS_PER_LETTER;
 #if USE_INT128_INTRINSIC
   *bit_rack -= (unsigned __int128)1 << shift;
@@ -324,36 +325,36 @@ static inline void bit_rack_take_letter(BitRack *bit_rack, uint8_t ml) {
 }
 
 static inline void bit_rack_write_12_bytes(const BitRack *bit_rack,
-                                           uint8_t bytes[12]) {
+                                           MachineLetter bytes[12]) {
 #if USE_INT128_INTRINSIC
-  memcpy(bytes, ((uint8_t *)bit_rack), 12);
+  memcpy(bytes, ((MachineLetter *)bit_rack), 12);
 #if !IS_LITTLE_ENDIAN
   uint32_t high = bit_rack_get_high_64(bit_rack);
   uint64_t low = bit_rack_get_low_64(bit_rack);
   high = htole32(high);
   low = htole64(low);
-  memcpy(bytes, ((uint8_t *)&low, 8);
-  memcpy(bytes + 4, ((uint8_t *)&high), 4);
+  memcpy(bytes, ((MachineLetter *)&low, 8);
+  memcpy(bytes + 4, ((MachineLetter *)&high), 4);
 #endif
 #else
 #if IS_LITTLE_ENDIAN
-  memcpy(bytes, ((uint8_t *)&bit_rack->low), 8);
-  memcpy(bytes + 8, ((uint8_t *)&bit_rack->high), 4);
+  memcpy(bytes, ((MachineLetter *)&bit_rack->low), 8);
+  memcpy(bytes + 8, ((MachineLetter *)&bit_rack->high), 4);
 #else
   uint32_t high = bit_rack->high;
   uint64_t low = bit_rack->low;
   high = htole32(high);
   low = htole64(low);
-  memcpy(bytes, ((uint8_t *)low), 8);
-  memcpy(bytes + 8, ((uint8_t *)&high), 4);
+  memcpy(bytes, ((MachineLetter *)low), 8);
+  memcpy(bytes + 8, ((MachineLetter *)&high), 4);
 #endif
 #endif
 }
 
-static inline BitRack bit_rack_read_12_bytes(const uint8_t bytes[12]) {
+static inline BitRack bit_rack_read_12_bytes(const MachineLetter bytes[12]) {
   BitRack bit_rack = bit_rack_create_empty();
 #if USE_INT128_INTRINSIC
-  memcpy(((uint8_t *)&bit_rack), bytes, 12);
+  memcpy(((MachineLetter *)&bit_rack), bytes, 12);
 #if !IS_LITTLE_ENDIAN
   uint64_t low = bit_rack_get_low_64(&bit_rack);
   uint64_t high = bit_rack_get_high_64(&bit_rack);
@@ -363,13 +364,13 @@ static inline BitRack bit_rack_read_12_bytes(const uint8_t bytes[12]) {
 #endif
 #else
 #if IS_LITTLE_ENDIAN
-  memcpy(((uint8_t *)&bit_rack.low), bytes, 8);
-  memcpy(((uint8_t *)&bit_rack.high), bytes + 8, 4);
+  memcpy(((MachineLetter *)&bit_rack.low), bytes, 8);
+  memcpy(((MachineLetter *)&bit_rack.high), bytes + 8, 4);
 #else
   uint32_t high;
-  memcpy(((uint8_t *)&high), bytes, 4);
+  memcpy(((MachineLetter *)&high), bytes, 4);
   bit_rack_set_high_64(&bit_rack, le32toh(high));
-  memcpy(((uint8_t *)&bit_rack.low), bytes + 4, 8);
+  memcpy(((MachineLetter *)&bit_rack.low), bytes + 4, 8);
   bit_rack.low = le64toh(bit_rack.low);
 #endif
 #endif

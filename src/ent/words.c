@@ -18,7 +18,7 @@
 #include "letter_distribution.h"
 
 typedef struct FormedWord {
-  uint8_t word[BOARD_DIM];
+  MachineLetter word[BOARD_DIM];
   int word_length;
   bool valid;
 } FormedWord;
@@ -46,10 +46,10 @@ FormedWords *formed_words_create(Board *board, Move *move) {
 
   FormedWords *ws = malloc_or_die(sizeof(FormedWords));
   int formed_words_idx = 0;
-  uint8_t main_word[BOARD_DIM];
+  MachineLetter main_word[BOARD_DIM];
   int main_word_idx = 0;
   for (int idx = 0; idx < tiles_length; idx++) {
-    uint8_t ml = move_get_tile(move, idx);
+    MachineLetter ml = move_get_tile(move, idx);
     bool fresh_tile = false;
 
     if (ml == PLAYED_THROUGH_MARKER) {
@@ -96,7 +96,7 @@ FormedWords *formed_words_create(Board *board, Move *move) {
       ws->words[formed_words_idx].valid = false; // we don't know validity yet.
       for (int r = rbegin; r <= rend; r++) {
         if (r != row_start) {
-          uint8_t lt = get_unblanked_machine_letter(
+          MachineLetter lt = get_unblanked_machine_letter(
               board_get_letter(board, r, col_start + idx));
           ws->words[formed_words_idx].word[widx] = lt;
         } else {
@@ -129,7 +129,8 @@ void formed_words_destroy(FormedWords *fw) {
 
 int formed_words_get_num_words(const FormedWords *fw) { return fw->num_words; }
 
-const uint8_t *formed_words_get_word(const FormedWords *fw, int word_index) {
+const MachineLetter *formed_words_get_word(const FormedWords *fw,
+                                           int word_index) {
   return fw->words[word_index].word;
 }
 
@@ -155,7 +156,7 @@ bool is_word_valid_standard(const FormedWord *w, const KWG *kwg) {
       // if we've gone too far the word is not found
       return false;
     }
-    uint8_t ml = w->word[lidx];
+    MachineLetter ml = w->word[lidx];
     if (kwg_node_tile(node) == ml) {
       if (lidx == w->word_length - 1) {
         return kwg_node_accepts(node);

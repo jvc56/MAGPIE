@@ -1,6 +1,10 @@
 #ifndef LETTER_DISTRIBUTION_DEFS_H
 #define LETTER_DISTRIBUTION_DEFS_H
 
+#include <stdint.h>
+
+typedef uint8_t MachineLetter;
+
 #define ALPHABET_EMPTY_SQUARE_MARKER 0
 #define PLAYED_THROUGH_MARKER 0
 #define BLANK_MACHINE_LETTER 0
