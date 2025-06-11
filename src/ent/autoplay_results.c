@@ -774,7 +774,6 @@ void win_pct_data_add_game(Recorder *recorder, const RecorderArgs *args) {
           player_on_turn_final_game_spread);
       big_swing = true;
     }
-    const int start_row_index = num_tiles_remaining - 1;
     const int row_index = num_tiles_remaining - 1;
     int start_col_index = WIN_PCT_MAX_SPREAD - final_score_diff;
     if (start_col_index < 0) {
@@ -973,18 +972,6 @@ void leaves_data_add_move(Recorder *recorder, const RecorderArgs *args) {
     log_fatal("invalid leave index '%d' for leave '%s' which has %d tiles",
               leave_index, string_builder_peek(sb), num_tiles);
     string_builder_destroy(sb);
-  }
-  bool is_notable_leave =
-      equity_to_double(klv_get_indexed_leave_value(
-          recorder->recorder_context->klv, leave_index)) <= -40.0;
-  if (!is_notable_leave) {
-    const int ld_size = rack_get_dist_size(args->leave);
-    for (int i = 0; i < ld_size; i++) {
-      if (rack_get_letter(args->leave, i) >= 5) {
-        is_notable_leave = true;
-        break;
-      }
-    }
   }
   leaves_data->leave_counts[leave_index]++;
 }
