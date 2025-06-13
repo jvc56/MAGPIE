@@ -752,7 +752,7 @@ void validated_moves_set_rack_to_played_tiles(const ValidatedMoves *vms, int i,
               "tiles, have %d moves but tried to get move %d",
               vms->number_of_moves, i);
   }
-  const Move *move = vms->moves[i]->move;
+  const Move *move = validated_moves_get_move(vms, i);
   if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
     log_fatal("attempted to get set the rack to played tiles for a non-tile "
               "placement move");
