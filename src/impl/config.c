@@ -320,6 +320,7 @@ bool config_continue_on_coldstart(const Config *config) {
 
 // Config command execution helper functions
 
+// FIXME: need to recreate the MoveList and several results as well
 bool is_game_recreation_required(const Config *config) {
   // If the ld changes (bag and rack size)
   // a recreation is required to resize the
@@ -354,6 +355,8 @@ void config_game_update(const Config *config, Game *game) {
 //
 // Preconditions:
 //  - The config is loaded
+// FIXME: this should be renamed to config_init_ld_dependent_fields
+// and refactored accordingly
 void config_init_game(Config *config) {
   if (config->game && is_game_recreation_required(config)) {
     game_destroy(config->game);

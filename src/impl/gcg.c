@@ -777,12 +777,34 @@ void play_game_history_turn(GameHistory *game_history, Game *game,
     }
 
     game_set_backup_mode(game, BACKUP_MODE_OFF);
+    if (game_event_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      Rack *previous_played_tiles =
+          game_history_player_get_previous_played_tiles(
+              game_history, game_event_player_index);
+      Rack *known_rack_from_phonies =
+          game_history_player_get_known_rack_from_phonies(
+              game_history, game_event_player_index);
+      validated_moves_set_rack_to_played_tiles(vms, 0, previous_played_tiles);
+      rack_subtract_using_floor_zero(known_rack_from_phonies,
+                                     previous_played_tiles);
+    } else if (game_event_type == GAME_EVENT_EXCHANGE) {
+      Rack *known_rack_from_phonies =
+          game_history_player_get_known_rack_from_phonies(
+              game_history, game_event_player_index);
+      rack_reset(known_rack_from_phonies);
+    }
     break;
   case GAME_EVENT_CHALLENGE_BONUS:
     player_add_to_score(game_get_player(game, game_event_player_index),
                         game_event_get_score_adjustment(game_event));
     break;
-  case GAME_EVENT_PHONY_TILES_RETURNED:
+  case GAME_EVENT_PHONY_TILES_RETURNED:;
+    Rack *previous_played_tiles = game_history_player_get_previous_played_tiles(
+        game_history, game_event_player_index);
+    Rack *known_rack_from_phonies =
+        game_history_player_get_known_rack_from_phonies(
+            game_history, game_event_player_index);
+    rack_union(known_rack_from_phonies, previous_played_tiles);
     // This event is guaranteed to immediately succeed
     // a tile placement move.
     return_phony_tiles(game);
@@ -1595,15 +1617,18 @@ void parse_gcg_with_parser(GCGParser *gcg_parser, const char *gcg_string,
 
   string_splitter_destroy(gcg_lines);
 
-  if (!error_stack_is_empty(error_stack)) {
+  if (!error_stack_is_empty(error_stack) ||
+      game_history_get_number_of_events(gcg_parser->game_history) == 0) {
     return;
   }
 
-  // Play through the game
+  // Play through the game solely to detected errors
   draw_initial_racks(gcg_parser->game, gcg_parser->game_history, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  const int ld_size = ld_get_size(game_get_ld(gcg_parser->game));
+  game_history_init_player_phony_calc_racks(gcg_parser->game_history, ld_size);
   int number_of_game_events =
       game_history_get_number_of_events(gcg_parser->game_history);
   for (int game_event_index = 0; game_event_index < number_of_game_events;
@@ -1647,6 +1672,8 @@ void game_play_to_turn(GameHistory *game_history, Game *game, int turn_index,
   }
   int number_of_game_events = game_history_get_number_of_events(game_history);
   int current_turn_index = 0;
+  const int ld_size = ld_get_size(game_get_ld(game));
+  game_history_init_player_phony_calc_racks(game_history, ld_size);
   for (int game_event_index = 0; game_event_index < number_of_game_events;
        game_event_index++) {
     GameEvent *game_event =
@@ -1670,6 +1697,20 @@ void game_play_to_turn(GameHistory *game_history, Game *game, int turn_index,
   int player_off_turn_index = 1 - player_on_turn_index;
 
   return_rack_to_bag(game, player_off_turn_index);
+  const Rack *player_off_turn_known_phony_tiles =
+      game_history_player_get_known_rack_from_phonies(game_history,
+                                                      player_off_turn_index);
+
+  if (!draw_rack_from_bag(game, player_off_turn_index,
+                          player_off_turn_known_phony_tiles)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_GCG_PARSE_RACK_NOT_IN_BAG,
+        get_formatted_string(
+            "last rack for player %d not in bag when replaying game",
+            player_off_turn_index + 1));
+    return;
+  }
+
   if (game_history_player_get_next_rack_set(game_history,
                                             player_on_turn_index)) {
     return;
@@ -1684,16 +1725,15 @@ void game_play_to_turn(GameHistory *game_history, Game *game, int turn_index,
                           player_on_turn_last_known_rack)) {
     error_stack_push(
         error_stack, ERROR_STATUS_GCG_PARSE_RACK_NOT_IN_BAG,
-        string_duplicate(
-            "last rack for player not in bag when replaying game"));
+        get_formatted_string(
+            "last rack for player %d not in bag when replaying game",
+            player_on_turn_index + 1));
     return;
   }
 }
 
 void game_play_to_end(GameHistory *game_history, Game *game,
                       ErrorStack *error_stack) {
-  // FIXME: backup the game before playing to turn, which might fail and corrupt
-  // the game state
   game_play_to_turn(game_history, game,
                     game_history_get_number_of_events(game_history),
                     error_stack);

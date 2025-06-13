@@ -139,6 +139,8 @@ typedef struct GameHistoryPlayer {
   Equity score;
   bool next_rack_set;
   Rack *last_known_rack;
+  Rack *known_rack_from_phonies;
+  Rack *previous_played_tiles;
 } GameHistoryPlayer;
 
 struct GameHistory {
@@ -163,6 +165,8 @@ GameHistoryPlayer *game_history_player_create(const char *name,
   player->score = 0;
   player->next_rack_set = false;
   player->last_known_rack = NULL;
+  player->known_rack_from_phonies = NULL;
+  player->previous_played_tiles = NULL;
   return player;
 }
 
@@ -173,6 +177,8 @@ void game_history_player_destroy(GameHistoryPlayer *player) {
   free(player->name);
   free(player->nickname);
   rack_destroy(player->last_known_rack);
+  rack_destroy(player->known_rack_from_phonies);
+  rack_destroy(player->previous_played_tiles);
   free(player);
 }
 
@@ -242,6 +248,34 @@ Rack *game_history_player_get_last_known_rack(const GameHistory *game_history,
                                               int player_index) {
   GameHistoryPlayer *player = game_history->players[player_index];
   return player->last_known_rack;
+}
+
+void game_history_init_player_phony_calc_racks(GameHistory *game_history,
+                                               const int ld_size) {
+  for (int player_index = 0; player_index < 2; player_index++) {
+    GameHistoryPlayer *player = game_history->players[player_index];
+    if (!player->known_rack_from_phonies) {
+      player->known_rack_from_phonies = rack_create(ld_size);
+      player->previous_played_tiles = rack_create(ld_size);
+    } else {
+      rack_reset(player->known_rack_from_phonies);
+      rack_reset(player->previous_played_tiles);
+    }
+  }
+}
+
+Rack *
+game_history_player_get_known_rack_from_phonies(const GameHistory *game_history,
+                                                const int player_index) {
+  GameHistoryPlayer *player = game_history->players[player_index];
+  return player->known_rack_from_phonies;
+}
+
+Rack *
+game_history_player_get_previous_played_tiles(const GameHistory *game_history,
+                                              const int player_index) {
+  GameHistoryPlayer *player = game_history->players[player_index];
+  return player->previous_played_tiles;
 }
 
 bool game_history_player_is_set(const GameHistory *game_history,

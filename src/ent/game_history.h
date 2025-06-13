@@ -77,12 +77,8 @@ int game_history_get_number_of_events(const GameHistory *history);
 
 GameEvent *game_history_get_event(const GameHistory *history, int event_index);
 
-void game_history_set_cumulative_scores(GameHistory *game_history);
 GameEvent *game_history_create_and_add_game_event(GameHistory *game_history,
                                                   ErrorStack *error_stack);
-
-Game *game_history_get_game(const GameHistory *game_history);
-void game_history_set_game(GameHistory *game_history, Game *game);
 
 void game_history_player_set_name(GameHistory *game_history, int player_index,
                                   const char *name);
@@ -109,6 +105,15 @@ void game_history_player_set_last_known_rack(GameHistory *game_history,
                                              const Rack *rack);
 Rack *game_history_player_get_last_known_rack(const GameHistory *game_history,
                                               int player_index);
+
+void game_history_init_player_phony_calc_racks(GameHistory *game_history,
+                                               const int ld_size);
+Rack *
+game_history_player_get_known_rack_from_phonies(const GameHistory *game_history,
+                                                const int player_index);
+Rack *
+game_history_player_get_previous_played_tiles(const GameHistory *game_history,
+                                              const int player_index);
 void game_history_set_player(GameHistory *history, int player_index,
                              const char *player_name,
                              const char *player_nickname);

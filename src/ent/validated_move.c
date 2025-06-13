@@ -744,3 +744,29 @@ void validated_moves_add_to_move_list(const ValidatedMoves *vms, MoveList *ml) {
 
   free(moves);
 }
+
+void validated_moves_set_rack_to_played_tiles(const ValidatedMoves *vms, int i,
+                                              Rack *rack_to_set) {
+  if (i < 0 || i >= vms->number_of_moves) {
+    log_fatal("attempted to get out of bounds move when setting rack to played "
+              "tiles, have %d moves but tried to get move %d",
+              vms->number_of_moves, i);
+  }
+  const Move *move = vms->moves[i]->move;
+  if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    log_fatal("attempted to get set the rack to played tiles for a non-tile "
+              "placement move");
+  }
+  rack_reset(rack_to_set);
+  const int tiles_length = move_get_tiles_length(move);
+  for (int j = 0; j < tiles_length; j++) {
+    const MachineLetter tile = move_get_tile(move, j);
+    if (tile != PLAYED_THROUGH_MARKER) {
+      if (get_is_blanked(tile)) {
+        rack_add_letter(rack_to_set, BLANK_MACHINE_LETTER);
+      } else {
+        rack_add_letter(rack_to_set, tile);
+      }
+    }
+  }
+}

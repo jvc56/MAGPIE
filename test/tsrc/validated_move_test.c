@@ -205,6 +205,19 @@ void test_validated_move_errors(void) {
   config_destroy(config);
 }
 
+void assert_validated_move_played_tiles(const Config *config, const char *cgp,
+                                        const char *ucgi_move,
+                                        const char *expected_played_tiles) {
+  const LetterDistribution *ld = config_get_ld(config);
+  Rack *played_tiles = rack_create(ld_get_size(ld));
+  ValidatedMoves *vms = assert_validated_move_success(
+      config_get_game(config), cgp, ucgi_move, 0, false, true);
+  validated_moves_set_rack_to_played_tiles(vms, 0, played_tiles);
+  assert_rack_equals_string(ld, played_tiles, expected_played_tiles);
+  rack_destroy(played_tiles);
+  validated_moves_destroy(vms);
+}
+
 void test_validated_move_success(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
@@ -214,6 +227,20 @@ void test_validated_move_success(void) {
   const Move *move = NULL;
   Rack *rack = rack_create(ld_get_size(ld));
   Rack *leave = rack_create(ld_get_size(ld));
+  Rack *played_tiles = rack_create(ld_get_size(ld));
+
+  assert_validated_move_played_tiles(config, EMPTY_CGP, "8H.FRAWZEY",
+                                     "AEFRWYZ");
+  assert_validated_move_played_tiles(config, EMPTY_CGP, "H8.CAB", "ABC");
+  assert_validated_move_played_tiles(config, EMPTY_CGP, "8D.QUINZe", "INQUZ?");
+  assert_validated_move_played_tiles(config, EMPTY_CGP, "8H.qi", "??");
+  assert_validated_move_played_tiles(config, ION_OPENING_CGP, "8E.L$$$", "L");
+  assert_validated_move_played_tiles(config, ION_OPENING_CGP, "8E.L$$$S", "LS");
+  assert_validated_move_played_tiles(config, ION_OPENING_CGP, "F7.Q$", "Q");
+  assert_validated_move_played_tiles(config, ION_OPENING_CGP, "F7.Q$S", "QS");
+  assert_validated_move_played_tiles(config, ION_OPENING_CGP, "7F.QI", "IQ");
+  assert_validated_move_played_tiles(config, EMPTY_CGP, "8H.vAUNCEs",
+                                     "ACENU??");
 
   vms = assert_validated_move_success(config_get_game(config), EMPTY_CGP,
                                       "pass", 0, false, false);
@@ -514,6 +541,7 @@ void test_validated_move_success(void) {
   assert_move_score(move, 84);
   validated_moves_destroy(vms);
 
+  rack_destroy(played_tiles);
   rack_destroy(rack);
   rack_destroy(leave);
   config_destroy(config);
