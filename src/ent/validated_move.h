@@ -35,5 +35,6 @@ int validated_moves_get_challenge_points(const ValidatedMoves *vms, int i);
 bool validated_moves_get_challenge_turn_loss(const ValidatedMoves *vms, int i);
 
 void validated_moves_add_to_move_list(const ValidatedMoves *vms, MoveList *ml);
-
+void validated_moves_set_rack_to_played_tiles(const ValidatedMoves *vms, int i,
+                                              Rack *rack_to_set);
 #endif

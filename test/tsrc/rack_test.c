@@ -14,7 +14,7 @@ void test_rack_main(void) {
   const LetterDistribution *ld = config_get_ld(config);
   const int ld_size = ld_get_size(ld);
   Rack *rack = rack_create(ld_size);
-  Rack *rack_sub = rack_create(ld_size);
+  Rack *rack_to_sub = rack_create(ld_size);
 
   // Test score on rack
   rack_set_to_string(ld, rack, "ABCDEFG");
@@ -32,8 +32,8 @@ void test_rack_main(void) {
 
   // Test subtraction
   rack_set_to_string(ld, rack, "ABCDEFG");
-  rack_set_to_string(ld, rack_sub, "ABC");
-  assert(rack_subtract(rack, rack_sub));
+  rack_set_to_string(ld, rack_to_sub, "ABC");
+  assert(rack_subtract(rack, rack_to_sub));
 
   assert(rack_get_letter(rack, ld_hl_to_ml(ld, "D")) == 1);
   assert(rack_get_letter(rack, ld_hl_to_ml(ld, "E")) == 1);
@@ -42,21 +42,21 @@ void test_rack_main(void) {
   assert(!rack_is_empty(rack));
   assert(rack_get_total_letters(rack) == 4);
 
-  rack_set_to_string(ld, rack_sub, "DEFG");
-  assert(rack_subtract(rack, rack_sub));
+  rack_set_to_string(ld, rack_to_sub, "DEFG");
+  assert(rack_subtract(rack, rack_to_sub));
   assert(rack_is_empty(rack));
   assert(rack_get_total_letters(rack) == 0);
 
   rack_set_to_string(ld, rack, "AAAABBB");
-  rack_set_to_string(ld, rack_sub, "AABB");
-  assert(rack_subtract(rack, rack_sub));
+  rack_set_to_string(ld, rack_to_sub, "AABB");
+  assert(rack_subtract(rack, rack_to_sub));
   assert(rack_get_letter(rack, ld_hl_to_ml(ld, "A")) == 2);
   assert(rack_get_letter(rack, ld_hl_to_ml(ld, "B")) == 1);
   assert(!rack_is_empty(rack));
   assert(rack_get_total_letters(rack) == 3);
 
-  rack_set_to_string(ld, rack_sub, "AAAA");
-  assert(!rack_subtract(rack, rack_sub));
+  rack_set_to_string(ld, rack_to_sub, "AAAA");
+  assert(!rack_subtract(rack, rack_to_sub));
 
   rack_set_to_string(ld, rack, "AENPPSW");
 
@@ -116,12 +116,93 @@ void test_rack_main(void) {
   rack_set_to_string(ld, rack_to_add, "BCCEF");
   rack_add(rack, rack_to_add);
 
-  // Use rack_sub as comparison
-  rack_set_to_string(ld, rack_sub, "ABBBCCCEF");
-  racks_are_equal(rack, rack_sub);
+  // Use rack_to_sub as comparison
+  rack_set_to_string(ld, rack_to_sub, "ABBBCCCEF");
+  racks_are_equal(rack, rack_to_sub);
 
+  Rack *expected_rack = rack_create(ld_get_size(ld));
+
+  rack_set_to_string(ld, rack, "AEEIIIU");
+  rack_set_to_string(ld, rack_to_sub, "BCEIIII");
+  rack_set_to_string(ld, expected_rack, "AEU");
+  rack_subtract_using_floor_zero(rack, rack_to_sub);
+  racks_are_equal(rack, expected_rack);
+
+  rack_set_to_string(ld, rack, "");
+  rack_set_to_string(ld, rack_to_sub, "A");
+  rack_set_to_string(ld, expected_rack, "");
+  rack_subtract_using_floor_zero(rack, rack_to_sub);
+  racks_are_equal(rack, expected_rack);
+
+  rack_set_to_string(ld, rack, "A");
+  rack_set_to_string(ld, rack_to_sub, "");
+  rack_set_to_string(ld, expected_rack, "A");
+  rack_subtract_using_floor_zero(rack, rack_to_sub);
+  racks_are_equal(rack, expected_rack);
+
+  rack_set_to_string(ld, rack, "");
+  rack_set_to_string(ld, rack_to_sub, "");
+  rack_set_to_string(ld, expected_rack, "");
+  rack_subtract_using_floor_zero(rack, rack_to_sub);
+  racks_are_equal(rack, expected_rack);
+
+  rack_set_to_string(ld, rack, "");
+  rack_set_to_string(ld, rack_to_sub, "ABCDEFG");
+  rack_set_to_string(ld, expected_rack, "");
+  rack_subtract_using_floor_zero(rack, rack_to_sub);
+  racks_are_equal(rack, expected_rack);
+
+  rack_set_to_string(ld, rack, "ABCDEFG");
+  rack_set_to_string(ld, rack_to_sub, "");
+  rack_set_to_string(ld, expected_rack, "ABCDEFG");
+  rack_subtract_using_floor_zero(rack, rack_to_sub);
+  racks_are_equal(rack, expected_rack);
+
+  rack_set_to_string(ld, rack, "ABEEEEG");
+  rack_set_to_string(ld, rack_to_sub, "AGE");
+  rack_set_to_string(ld, expected_rack, "BEEE");
+  rack_subtract_using_floor_zero(rack, rack_to_sub);
+  racks_are_equal(rack, expected_rack);
+
+  rack_set_to_string(ld, rack, "");
+  rack_set_to_string(ld, rack_to_add, "");
+  rack_set_to_string(ld, expected_rack, "");
+  rack_union(rack, rack_to_add);
+  racks_are_equal(rack, expected_rack);
+
+  rack_set_to_string(ld, rack, "");
+  rack_set_to_string(ld, rack_to_add, "ABCDEFG");
+  rack_set_to_string(ld, expected_rack, "ABCDEFG");
+  rack_union(rack, rack_to_add);
+  racks_are_equal(rack, expected_rack);
+
+  rack_set_to_string(ld, rack, "ABCDEFG");
+  rack_set_to_string(ld, rack_to_add, "");
+  rack_set_to_string(ld, expected_rack, "ABCDEFG");
+  rack_union(rack, rack_to_add);
+  racks_are_equal(rack, expected_rack);
+
+  rack_set_to_string(ld, rack, "ABCDEFG");
+  rack_set_to_string(ld, rack_to_add, "ABCDEFG");
+  rack_set_to_string(ld, expected_rack, "ABCDEFG");
+  rack_union(rack, rack_to_add);
+  racks_are_equal(rack, expected_rack);
+
+  rack_set_to_string(ld, rack, "AABCD");
+  rack_set_to_string(ld, rack_to_add, "ABCCE");
+  rack_set_to_string(ld, expected_rack, "AABCCDE");
+  rack_union(rack, rack_to_add);
+  racks_are_equal(rack, expected_rack);
+
+  rack_set_to_string(ld, rack, "RUNION");
+  rack_set_to_string(ld, rack_to_add, "ANION");
+  rack_set_to_string(ld, expected_rack, "ARUNION");
+  rack_union(rack, rack_to_add);
+  racks_are_equal(rack, expected_rack);
+
+  rack_destroy(expected_rack);
   rack_destroy(rack);
-  rack_destroy(rack_sub);
+  rack_destroy(rack_to_sub);
   rack_destroy(rack_to_add);
   config_destroy(config);
 }

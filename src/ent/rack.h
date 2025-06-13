@@ -101,10 +101,37 @@ static inline bool rack_subtract(Rack *rack_to_update,
   return true;
 }
 
+// Subtracts value_to_sub from rack_to_update. Sets the rack_to_update
+// letter to zero if rack_to_update is less than value_to_sub letter.
+static inline void rack_subtract_using_floor_zero(Rack *rack_to_update,
+                                                  const Rack *value_to_sub) {
+  for (int i = 0; i < rack_to_update->dist_size; i++) {
+    int sub_value = value_to_sub->array[i];
+    if (rack_to_update->array[i] < sub_value) {
+      sub_value = rack_to_update->array[i];
+    }
+    rack_to_update->array[i] -= sub_value;
+    rack_to_update->number_of_letters -= sub_value;
+  }
+}
+
 static inline void rack_add(Rack *rack_to_update, const Rack *value_to_add) {
   for (int i = 0; i < rack_to_update->dist_size; i++) {
     rack_to_update->array[i] += value_to_add->array[i];
     rack_to_update->number_of_letters += value_to_add->array[i];
+  }
+}
+
+// Rack will set each letter in rack_to_update to the max count of the
+// letter in rack_to_update and value_to_union
+static inline void rack_union(Rack *rack_to_update,
+                              const Rack *value_to_union) {
+  for (int i = 0; i < rack_to_update->dist_size; i++) {
+    const int add_value = value_to_union->array[i];
+    if (rack_to_update->array[i] < add_value) {
+      rack_to_update->array[i] = add_value;
+      rack_to_update->number_of_letters += add_value - rack_to_update->array[i];
+    }
   }
 }
 
