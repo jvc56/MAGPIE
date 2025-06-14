@@ -942,7 +942,6 @@ void test_partially_known_rack_from_phonies(GameHistory *game_history) {
 void test_gcg(void) {
   // Use the same game_history for all tests to thoroughly test the
   // game_history_reset function
-  // FIXME: remove when done testing
   GameHistory *game_history = game_history_create();
   test_error_cases(game_history);
   test_parse_special_char(game_history);

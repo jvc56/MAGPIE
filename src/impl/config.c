@@ -320,7 +320,6 @@ bool config_continue_on_coldstart(const Config *config) {
 
 // Config command execution helper functions
 
-// FIXME: need to recreate the MoveList and several results as well
 bool is_game_recreation_required(const Config *config) {
   // If the ld changes (bag and rack size)
   // a recreation is required to resize the
@@ -355,8 +354,6 @@ void config_game_update(const Config *config, Game *game) {
 //
 // Preconditions:
 //  - The config is loaded
-// FIXME: this should be renamed to config_init_ld_dependent_fields
-// and refactored accordingly
 void config_init_game(Config *config) {
   if (config->game && is_game_recreation_required(config)) {
     game_destroy(config->game);
@@ -629,7 +626,6 @@ void execute_add_moves(Config *config, ErrorStack *error_stack) {
       validated_moves_create(config->game, player_on_turn_index, moves, true,
                              false, false, error_stack);
 
-  // FIXME: maybe move this into validated_moves_create somewhere
   if (error_stack_is_empty(error_stack)) {
     const LetterDistribution *ld = game_get_ld(config->game);
     const Board *board = game_get_board(config->game);

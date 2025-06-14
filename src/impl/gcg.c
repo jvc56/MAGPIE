@@ -93,54 +93,55 @@ typedef struct GCGParser {
 #define GCG_PLAYER_STRING "player"
 #define GCG_RACK_STRING "rack"
 
-const char *player_regex =
-    "#" GCG_PLAYER_STRING "([1-2])[[:space:]]+([^[:space:]]+)[[:space:]]+(.+)";
-const char *title_regex = "#" GCG_TITLE_STRING "[[:space:]]*(.*)";
-const char *description_regex = "#" GCG_DESCRIPTION_STRING "[[:space:]]*(.*)";
-const char *id_regex =
-    "#" GCG_ID_STRING "[[:space:]]*([^[:space:]]+)[[:space:]]+([^[:space:]]+)";
-const char *rack1_regex = "#" GCG_RACK_STRING "1 ([^[:space:]]+)";
-const char *rack2_regex = "#" GCG_RACK_STRING "2 ([^[:space:]]+)";
-const char *move_regex =
-    ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:"
-    "]]+([[:alnum:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+"
-    "[+]([[:digit:]]+)[[:space:]]+(-?[[:digit:]]+)";
-const char *note_regex = "#" GCG_NOTE_STRING " (.+)";
-const char *lexicon_name_regex = "#" GCG_LEXICON_STRING " (.+)";
-const char *character_encoding_regex =
-    "#" GCG_CHAR_ENCODING_STRING " ([[:graph:]]+)";
-const char *game_type_regex = "#" GCG_GAME_TYPE_STRING " (.*)";
-const char *tile_set_regex = "#" GCG_TILE_SET_STRING " (.*)";
-const char *board_layout_regex = "#" GCG_BOARD_LAYOUT_STRING " (.*)";
-const char *tile_distribution_name_regex =
-    "#" GCG_TILE_DISTRIBUTION_STRING " (.*)";
-const char *continuation_regex = "#- (.*)";
-const char *phony_tiles_returned_regex =
-    ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:]]+--[[:space:]]+-([["
-    ":digit:]]+)[[:space:]]+(-?[[:digit:]]+)";
-const char *pass_regex = ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:"
-                         "]]+-[[:space:]]+\\+0[[:space:]]+(-?[[:digit:]]+)";
-const char *challenge_bonus_regex =
-    ">([^[:space:]]+):[[:space:]]+([^[:space:]]*)[[:space:]]+\\(challenge\\)[[:"
-    "space:]]+(\\+[[:digit:]]+"
-    ")[[:space:]]+(-?[[:digit:]]+)";
-const char *exchange_regex =
-    ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:]]+-([^[:"
-    "space:]]+)[[:space:]]+\\+0[[:space:]]+(-?[[:digit:]]+)";
-const char *end_rack_points_regex =
-    ">([^[:space:]]+):[[:space:]]+\\(([^[:space:]]+)\\)[[:space:]]+(\\+[[:"
-    "digit:]]+)[[:space:]]+(-?[[:digit:]]+)";
-const char *time_penalty_regex =
-    ">([^[:space:]]+):[[:space:]]+([^[:space:]]*)[[:space:]]+\\(time\\)[[:"
-    "space:]]+(\\-[[:digit:]]+)"
-    "[[:space:]]+(-?[[:digit:]]+)";
-const char *points_lost_for_last_rack_regex =
-    ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:]]+\\(([^[:space:]]+)"
-    "\\)[[:space:]]+(\\-[[:digit:]]+)"
-    "[[:space:]]+(-?[[:digit:]]+)";
-const char *incomplete_regex = "#incomplete.*";
-const char *tile_declaration_regex =
-    "#tile ([^[:space:]]+)[[:space:]]+([^[:space:]]+)";
+typedef struct TokenStringRegexPair {
+  gcg_token_t token;
+  const char *regex_string;
+} TokenStringRegexPair;
+
+// Define the array of token enum and regex pairs
+const TokenStringRegexPair token_string_regex_pairs[] = {
+    {GCG_PLAYER_TOKEN, "#" GCG_PLAYER_STRING
+                       "([1-2])[[:space:]]+([^[:space:]]+)[[:space:]]+(.+)"},
+    {GCG_TITLE_TOKEN, "#" GCG_TITLE_STRING "[[:space:]]*(.*)"},
+    {GCG_DESCRIPTION_TOKEN, "#" GCG_DESCRIPTION_STRING "[[:space:]]*(.*)"},
+    {GCG_ID_TOKEN, "#" GCG_ID_STRING
+                   "[[:space:]]*([^[:space:]]+)[[:space:]]+([^[:space:]]+)"},
+    {GCG_RACK1_TOKEN, "#" GCG_RACK_STRING "1 ([^[:space:]]+)"},
+    {GCG_RACK2_TOKEN, "#" GCG_RACK_STRING "2 ([^[:space:]]+)"},
+    {GCG_ENCODING_TOKEN, "#" GCG_CHAR_ENCODING_STRING " ([[:graph:]]+)"},
+    {GCG_MOVE_TOKEN, ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:"
+                     "]]+([[:alnum:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+"
+                     "[+]([[:digit:]]+)[[:space:]]+(-?[[:digit:]]+)"},
+    {GCG_NOTE_TOKEN, "#" GCG_NOTE_STRING " (.+)"},
+    {GCG_LEXICON_TOKEN, "#" GCG_LEXICON_STRING " (.+)"},
+    {GCG_PHONY_TILES_RETURNED_TOKEN, ">([^[:space:]]+):[[:space:]]+([^[:space:]"
+                                     "]+)[[:space:]]+--[[:space:]]+-([["
+                                     ":digit:]]+)[[:space:]]+(-?[[:digit:]]+)"},
+    {GCG_PASS_TOKEN, ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:"
+                     "]]+-[[:space:]]+\\+0[[:space:]]+(-?[[:digit:]]+)"},
+    {GCG_CHALLENGE_BONUS_TOKEN, ">([^[:space:]]+):[[:space:]]+([^[:space:]]*)[["
+                                ":space:]]+\\(challenge\\)[[:"
+                                "space:]]+(\\+[[:digit:]]+"
+                                ")[[:space:]]+(-?[[:digit:]]+)"},
+    {GCG_EXCHANGE_TOKEN,
+     ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:]]+-([^[:"
+     "space:]]+)[[:space:]]+\\+0[[:space:]]+(-?[[:digit:]]+)"},
+    {GCG_END_RACK_POINTS_TOKEN,
+     ">([^[:space:]]+):[[:space:]]+\\(([^[:space:]]+)\\)[[:space:]]+(\\+[[:"
+     "digit:]]+)[[:space:]]+(-?[[:digit:]]+)"},
+    {GCG_TIME_PENALTY_TOKEN,
+     ">([^[:space:]]+):[[:space:]]+([^[:space:]]*)[[:space:]]+\\(time\\)[[:"
+     "space:]]+(\\-[[:digit:]]+)"
+     "[[:space:]]+(-?[[:digit:]]+)"},
+    {GCG_END_RACK_PENALTY_TOKEN, ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)["
+                                 "[:space:]]+\\(([^[:space:]]+)"
+                                 "\\)[[:space:]]+(\\-[[:digit:]]+)"
+                                 "[[:space:]]+(-?[[:digit:]]+)"},
+    {GCG_GAME_TYPE_TOKEN, "#" GCG_GAME_TYPE_STRING " (.*)"},
+    {GCG_TILE_SET_TOKEN, "#" GCG_TILE_SET_STRING " (.*)"},
+    {GCG_BOARD_LAYOUT_TOKEN, "#" GCG_BOARD_LAYOUT_STRING " (.*)"},
+    {GCG_TILE_DISTRIBUTION_NAME_TOKEN,
+     "#" GCG_TILE_DISTRIBUTION_STRING " (.*)"}};
 
 TokenRegexPair *token_regex_pair_create(gcg_token_t token,
                                         const char *regex_string) {
@@ -168,61 +169,16 @@ GCGParser *gcg_parser_create(Config *config, GameHistory *game_history) {
   gcg_parser->config = config;
   gcg_parser->game = NULL;
   gcg_parser->note_builder = string_builder_create();
-  // Allocate enough space for all of the tokens
-  // FIXME: this is dumb, create an array of pairs plz
   gcg_parser->token_regex_pairs =
       malloc_or_die(sizeof(TokenRegexPair *) * (NUMBER_OF_GCG_TOKENS));
-  gcg_parser->number_of_token_regex_pairs = 0;
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      token_regex_pair_create(GCG_PLAYER_TOKEN, player_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      token_regex_pair_create(GCG_TITLE_TOKEN, title_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      token_regex_pair_create(GCG_DESCRIPTION_TOKEN, description_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      token_regex_pair_create(GCG_ID_TOKEN, id_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      token_regex_pair_create(GCG_RACK1_TOKEN, rack1_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      token_regex_pair_create(GCG_RACK2_TOKEN, rack2_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      token_regex_pair_create(GCG_ENCODING_TOKEN, character_encoding_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      token_regex_pair_create(GCG_MOVE_TOKEN, move_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      token_regex_pair_create(GCG_NOTE_TOKEN, note_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      token_regex_pair_create(GCG_LEXICON_TOKEN, lexicon_name_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      token_regex_pair_create(GCG_PHONY_TILES_RETURNED_TOKEN,
-                              phony_tiles_returned_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      token_regex_pair_create(GCG_PASS_TOKEN, pass_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      token_regex_pair_create(GCG_CHALLENGE_BONUS_TOKEN, challenge_bonus_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      token_regex_pair_create(GCG_EXCHANGE_TOKEN, exchange_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      token_regex_pair_create(GCG_END_RACK_POINTS_TOKEN, end_rack_points_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      token_regex_pair_create(GCG_TIME_PENALTY_TOKEN, time_penalty_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      token_regex_pair_create(GCG_END_RACK_PENALTY_TOKEN,
-                              points_lost_for_last_rack_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      token_regex_pair_create(GCG_GAME_TYPE_TOKEN, game_type_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      token_regex_pair_create(GCG_TILE_SET_TOKEN, tile_set_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      token_regex_pair_create(GCG_BOARD_LAYOUT_TOKEN, board_layout_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      token_regex_pair_create(GCG_TILE_DISTRIBUTION_NAME_TOKEN,
-                              tile_distribution_name_regex);
-
-  for (int i = 0; i < NUMBER_OF_GCG_TOKENS; i++) {
-    gcg_parser->gcg_token_count[i] = 0;
+  gcg_parser->number_of_token_regex_pairs =
+      sizeof(token_string_regex_pairs) / sizeof(TokenStringRegexPair);
+  for (int i = 0; i < gcg_parser->number_of_token_regex_pairs; i++) {
+    gcg_parser->token_regex_pairs[i] =
+        token_regex_pair_create(token_string_regex_pairs[i].token,
+                                token_string_regex_pairs[i].regex_string);
   }
-
+  memset(gcg_parser->gcg_token_count, 0, sizeof(gcg_parser->gcg_token_count));
   return gcg_parser;
 }
 
@@ -672,11 +628,9 @@ bool game_event_has_player_rack(const GameEvent *game_event, int player_index) {
 
 // Returns NULL if there is no rack for the player and sets the next rack set
 // boolean
-// FIXME: return the next rack set boolean instead of hiding it here
 const Rack *get_player_next_rack(GameHistory *game_history,
                                  int initial_game_event_index,
                                  int player_index) {
-  Rack *rack = NULL;
   int number_of_game_events = game_history_get_number_of_events(game_history);
   for (int game_event_index = initial_game_event_index + 1;
        game_event_index < number_of_game_events; game_event_index++) {
@@ -693,7 +647,7 @@ const Rack *get_player_next_rack(GameHistory *game_history,
     }
   }
   game_history_player_set_next_rack_set(game_history, player_index, false);
-  return rack;
+  return NULL;
 }
 
 void play_game_history_turn(GameHistory *game_history, Game *game,
