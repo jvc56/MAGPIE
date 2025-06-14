@@ -31,14 +31,11 @@
 #include "../util/math_util.h"
 
 typedef struct Inference {
-  // The following fields are owned by the caller
-
-  // Game used by the inference to generate moves
-  Game *game;
   // KLV used to evaluate leaves to determine
   // which moves are top equity. This should be
   // the KLV of the target.
   const KLV *klv;
+  ThreadControl *thread_control;
 
   // The following fields are owned by this struct.
 
@@ -75,7 +72,8 @@ typedef struct Inference {
   Rack *bag_as_rack;
   // MoveList used by the inference to generate moves
   MoveList *move_list;
-  ThreadControl *thread_control;
+  // Game used by the inference to generate moves
+  Game *game;
   InferenceResults *results;
 } Inference;
 
