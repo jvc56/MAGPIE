@@ -140,9 +140,17 @@ char *wasm_score_move(const char *cgpstr, const char *ucgi_move_str) {
 char *static_evaluation(const char *cgpstr, int num_plays) {
   load_cgp_into_iso_config(cgpstr, num_plays);
   Game *game = config_get_game(iso_config);
-  MoveList *move_list = NULL;
-  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list,
-                 /*override_kwg=*/NULL);
+  MoveList *move_list = config_get_move_list(iso_config);
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .thread_index = 0,
+      .max_equity_diff = 0,
+  };
+  generate_moves(&args);
 
   // This pointer needs to be freed by the caller:
   char *val = ucgi_static_moves(game, move_list);

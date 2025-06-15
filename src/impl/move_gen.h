@@ -26,7 +26,7 @@ typedef struct MoveGen {
   int tiles_played;
   int number_of_plays;
   int move_sort_type;
-  int move_record_type;
+  move_record_t move_record_type;
   int number_of_tiles_in_bag;
   int player_index;
   int bingo_bonus;
@@ -50,6 +50,10 @@ typedef struct MoveGen {
   int cross_index;
   Move best_move_and_current_move[2];
   int best_move_index;
+  // This field is only used for the MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST
+  // record type
+  Equity best_move_equity_or_score;
+  Equity max_equity_diff;
 
   MachineLetter strip[(MOVE_MAX_TILES)];
   MachineLetter exchange_strip[(MOVE_MAX_TILES)];
@@ -115,21 +119,27 @@ typedef struct MoveGen {
   WMPMoveGen wmp_move_gen;
 } MoveGen;
 
+typedef struct MoveGenArgs {
+  Game *game;
+  move_record_t move_record_type;
+  move_sort_t move_sort_type;
+  Equity max_equity_diff;
+  int thread_index;
+  MoveList *move_list;
+  const KWG *override_kwg;
+} MoveGenArgs;
+
 void gen_destroy_cache(void);
 
 // If override_kwg is NULL, the full KWG for the on-turn player is used,
 // but if it is nonnull, override_kwg is used. The only use case for this
 // so far is using a reduced wordlist kwg (done with wordprune) for endgame
 // solving.
-void generate_moves(Game *game, move_record_t move_record_type,
-                    move_sort_t move_sort_type, int thread_index,
-                    MoveList *move_list, const KWG *override_kwg);
+void generate_moves(const MoveGenArgs *args);
 
 MoveGen *get_movegen(int thread_index);
 
-void gen_load_position(MoveGen *gen, Game *game, move_record_t move_record_type,
-                       move_sort_t move_sort_type, MoveList *move_list,
-                       const KWG *override_kwg);
+void gen_load_position(MoveGen *gen, const MoveGenArgs *args);
 
 void gen_look_up_leaves_and_record_exchanges(MoveGen *gen);
 

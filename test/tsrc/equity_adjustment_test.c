@@ -24,8 +24,15 @@ void test_macondo_opening_equity_adjustments(void) {
   const KLV *klv = player_get_klv(player0);
   const LetterDistribution *ld = game_get_ld(game);
   MoveList *move_list = move_list_create(1);
+  const MoveGenArgs move_gen_args = {
+      .game = game,
+      .move_list = move_list,
+      .thread_index = 0,
+      .max_equity_diff = 0,
+  };
+
   rack_set_to_string(ld, rack, "EORSTVX");
-  generate_moves_for_game(game, 0, move_list);
+  generate_moves_for_game(&move_gen_args);
 
   // Should be 8G VORTEX
   SortedMoveList *vortex_sorted_move_list = sorted_move_list_create(move_list);
@@ -43,7 +50,7 @@ void test_macondo_opening_equity_adjustments(void) {
 
   rack_set_to_string(ld, rack, "BDEIIIJ");
   // Should be 8D JIBED
-  generate_moves_for_game(game, 0, move_list);
+  generate_moves_for_game(&move_gen_args);
 
   SortedMoveList *jibed_sorted_move_list = sorted_move_list_create(move_list);
 
@@ -60,7 +67,7 @@ void test_macondo_opening_equity_adjustments(void) {
   game_reset(game);
 
   rack_set_to_string(ld, rack, "ACEEEFT");
-  generate_moves_for_game(game, 0, move_list);
+  generate_moves_for_game(&move_gen_args);
   // Should be 8D FACETE
   SortedMoveList *facete_sorted_move_list = sorted_move_list_create(move_list);
   top_move = facete_sorted_move_list->moves[0];
@@ -75,7 +82,7 @@ void test_macondo_opening_equity_adjustments(void) {
   game_reset(game);
 
   rack_set_to_string(ld, rack, "AAAALTY");
-  generate_moves_for_game(game, 0, move_list);
+  generate_moves_for_game(&move_gen_args);
   // Should be 8G ATALAYA
   SortedMoveList *atalaya_sorted_move_list = sorted_move_list_create(move_list);
   top_move = atalaya_sorted_move_list->moves[0];
@@ -98,6 +105,12 @@ void test_macondo_endgame_equity_adjustments(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   MoveList *move_list = move_list_create(6);
+  const MoveGenArgs move_gen_args = {
+      .game = game,
+      .move_list = move_list,
+      .thread_index = 0,
+      .max_equity_diff = 0,
+  };
 
   load_cgp_or_die(
       game,
@@ -105,7 +118,7 @@ void test_macondo_endgame_equity_adjustments(void) {
       "3L2HUE2KANE/3LI3FILII2/J1TANGENT2T1Z1/A2TA5FA1OP/R2EN5Ok1OU/"
       "VILDE5YEX1D/I3R6SUQS/E13Y INR/OT 440/448 0 lex CSW21;");
 
-  generate_moves_for_game(game, 0, move_list);
+  generate_moves_for_game(&move_gen_args);
 
   SortedMoveList *endgame_sorted_move_list = sorted_move_list_create(move_list);
 

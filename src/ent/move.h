@@ -429,6 +429,7 @@ static inline void move_list_load_with_empty_moves(MoveList *ml, int capacity) {
   ml->moves_size = ml->capacity + 1;
   ml->moves = (Move **)malloc_or_die(sizeof(Move *) * ml->moves_size);
   for (int i = 0; i < ml->moves_size; i++) {
+    // FIXME: maybe don't alloc for moves here
     ml->moves[i] = move_create();
   }
 }
@@ -440,6 +441,7 @@ static inline void move_list_load_with_empty_small_moves(MoveList *ml,
   ml->small_moves =
       (SmallMove **)malloc_or_die(sizeof(SmallMove *) * ml->capacity);
   for (int i = 0; i < ml->capacity; i++) {
+    // FIXME: maybe don't alloc for moves here
     ml->small_moves[i] = (SmallMove *)malloc_or_die(sizeof(SmallMove));
   }
 }
@@ -555,6 +557,11 @@ static inline Move *move_list_pop_move(MoveList *ml) {
   return ml->spare_move;
 }
 
+// Assumes the move list is not empty
+static inline Equity move_list_peek_equity(const MoveList *ml) {
+  return ml->moves[0]->equity;
+}
+
 static inline void move_list_insert_spare_move(MoveList *ml, Equity equity) {
   ml->spare_move->equity = equity;
 
@@ -627,14 +634,6 @@ static inline void move_list_insert_spare_small_move(MoveList *ml) {
   ml->small_moves[ml->count] = ml->spare_small_move;
   ml->spare_small_move = swap;
   ml->count++;
-}
-
-static inline MoveList *small_move_list_create(int capacity) {
-  MoveList *ml = (MoveList *)malloc_or_die(sizeof(MoveList));
-  ml->count = 0;
-  ml->spare_move = malloc_or_die(sizeof(SmallMove));
-  move_list_load_with_empty_small_moves(ml, capacity);
-  return ml;
 }
 
 static inline void small_move_list_destroy(MoveList *ml) {

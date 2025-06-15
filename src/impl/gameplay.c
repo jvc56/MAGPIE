@@ -381,18 +381,38 @@ void return_phony_tiles(Game *game) {
   game_increment_consecutive_scoreless_turns(game);
 }
 
-void generate_moves_for_game(Game *game, int thread_index,
-                             MoveList *move_list) {
+// Overwrites the passed in values for the following MoveGenArgs fields:
+// - move_record_type (with the player on turn's record type)
+// - move_sort_type (with the player on turn's sort type)
+// - overrride_kwg (with NULL)
+void generate_moves_for_game(const MoveGenArgs *args) {
   Player *player_on_turn =
-      game_get_player(game, game_get_player_on_turn_index(game));
-  generate_moves(game, player_get_move_record_type(player_on_turn),
-                 player_get_move_sort_type(player_on_turn), thread_index,
-                 move_list, /*override_kwg=*/NULL);
+      game_get_player(args->game, game_get_player_on_turn_index(args->game));
+
+  const MoveGenArgs args_with_overwritten_record_and_sort = {
+      .game = args->game,
+      .move_list = args->move_list,
+      .move_record_type = player_get_move_record_type(player_on_turn),
+      .move_sort_type = player_get_move_sort_type(player_on_turn),
+      .override_kwg = NULL,
+      .thread_index = args->thread_index,
+      .max_equity_diff = args->max_equity_diff,
+  };
+
+  generate_moves(&args_with_overwritten_record_and_sort);
 }
 
 Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
-  generate_moves(game, MOVE_RECORD_BEST, MOVE_SORT_EQUITY, thread_index,
-                 move_list, /*override_kwg=*/NULL);
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_BEST,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .thread_index = thread_index,
+      .max_equity_diff = 0,
+  };
+  generate_moves(&args);
   return move_list_get_move(move_list, 0);
 }
 
