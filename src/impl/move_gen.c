@@ -184,10 +184,11 @@ static inline Equity gen_get_cutoff_equity_or_score(const MoveGen *gen) {
     cutoff_equity_or_score =
         gen->best_move_equity_or_score - gen->max_equity_diff;
     break;
-  case MOVE_RECORD_BEST:
-    cutoff_equity_or_score = get_move_equity_for_sort_type(
-        gen, gen_get_readonly_best_move(gen),
-        move_get_score(gen_get_readonly_best_move(gen)));
+  case MOVE_RECORD_BEST:;
+    const Move *move = gen_get_readonly_best_move(gen);
+    cutoff_equity_or_score = (gen->move_sort_type == MOVE_SORT_EQUITY)
+                                 ? move_get_equity(move)
+                                 : move_get_score(move);
     break;
   }
   return cutoff_equity_or_score;
