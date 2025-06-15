@@ -176,7 +176,7 @@ static inline Equity gen_get_cutoff_equity_or_score(const MoveGen *gen) {
   switch (gen->move_record_type) {
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_ALL_SMALL:
-    log_fatal("gen_get_cutoff_equity_or_score_or_score called with "
+    log_fatal("gen_get_cutoff_equity_or_score called with "
               "MOVE_RECORD_ALL or "
               "MOVE_RECORD_ALL_SMALL");
     break;

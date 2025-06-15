@@ -154,7 +154,6 @@ char *static_evaluation(const char *cgpstr, int num_plays) {
 
   // This pointer needs to be freed by the caller:
   char *val = ucgi_static_moves(game, move_list);
-  move_list_destroy(move_list);
   return val;
 }
 
