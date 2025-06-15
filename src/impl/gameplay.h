@@ -10,12 +10,14 @@
 #include "../ent/move.h"
 #include "../ent/rack.h"
 
+#include "move_gen.h"
+
 void draw_starting_racks(Game *game);
 play_move_status_t play_move(const Move *move, Game *game,
                              const Rack *rack_to_draw, Rack *leave);
 void set_random_rack(Game *game, int player_index, Rack *known_rack);
 Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list);
-void generate_moves_for_game(Game *game, int thread_index, MoveList *move_list);
+void generate_moves_for_game(const MoveGenArgs *args);
 void draw_letter_to_rack(Bag *bag, Rack *rack, MachineLetter letter,
                          int player_draw_index);
 void draw_to_full_rack(Game *game, int player_index);

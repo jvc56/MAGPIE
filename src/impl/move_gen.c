@@ -171,17 +171,73 @@ static inline void set_small_play_for_record(SmallMove *move,
                      move_type);
 }
 
+static inline Equity gen_get_cutoff_equity_or_score(const MoveGen *gen) {
+  Equity cutoff_equity_or_score;
+  switch (gen->move_record_type) {
+  case MOVE_RECORD_ALL:
+  case MOVE_RECORD_ALL_SMALL:
+    log_fatal("gen_get_cutoff_equity_or_score_or_score called with "
+              "MOVE_RECORD_ALL or "
+              "MOVE_RECORD_ALL_SMALL");
+    break;
+  case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
+    cutoff_equity_or_score =
+        gen->best_move_equity_or_score - gen->max_equity_diff;
+    break;
+  case MOVE_RECORD_BEST:
+    cutoff_equity_or_score = get_move_equity_for_sort_type(
+        gen, gen_get_readonly_best_move(gen),
+        move_get_score(gen_get_readonly_best_move(gen)));
+    break;
+  }
+  return cutoff_equity_or_score;
+}
+
+static inline void
+gen_insert_spare_move_within_x_equity_of_best(MoveGen *gen,
+                                              Equity move_equity_or_score) {
+  if (gen->best_move_equity_or_score == EQUITY_INITIAL_VALUE) {
+    gen->best_move_equity_or_score = move_equity_or_score;
+    move_list_insert_spare_move(gen->move_list, move_equity_or_score);
+    return;
+  }
+  Equity cutoff_equity_or_score = gen_get_cutoff_equity_or_score(gen);
+  if (move_equity_or_score < cutoff_equity_or_score) {
+    return;
+  }
+  move_list_insert_spare_move(gen->move_list, move_equity_or_score);
+  if (move_equity_or_score > gen->best_move_equity_or_score) {
+    // The current move is better than the best move, so update the best move to
+    // the current move
+    gen->best_move_equity_or_score = move_equity_or_score;
+    // Update the cutoff now that the best possible equity or score has improved
+    cutoff_equity_or_score = gen_get_cutoff_equity_or_score(gen);
+    while (move_list_get_count(gen->move_list) > 0 &&
+           move_list_peek_equity(gen->move_list) < cutoff_equity_or_score) {
+      move_list_pop_move(gen->move_list);
+    }
+  }
+}
+
 static inline void update_best_move_or_insert_into_movelist(
     MoveGen *gen, int leftstrip, int rightstrip, game_event_t move_type,
     Equity score, int start_row, int start_col, int tiles_played, int dir,
     MachineLetter strip[]) {
-  if (gen->move_record_type == MOVE_RECORD_ALL) {
+  switch (gen->move_record_type) {
+  case MOVE_RECORD_ALL:
+  case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:;
     Move *move = move_list_get_spare_move(gen->move_list);
     set_play_for_record(move, move_type, leftstrip, rightstrip, score,
                         start_row, start_col, tiles_played, dir, strip);
-    move_list_insert_spare_move(
-        gen->move_list, get_move_equity_for_sort_type(gen, move, score));
-  } else if (gen->move_record_type == MOVE_RECORD_BEST) {
+    const Equity move_equity_or_score =
+        get_move_equity_for_sort_type(gen, move, score);
+    if (gen->move_record_type == MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST) {
+      gen_insert_spare_move_within_x_equity_of_best(gen, move_equity_or_score);
+    } else {
+      move_list_insert_spare_move(gen->move_list, move_equity_or_score);
+    }
+    break;
+  case MOVE_RECORD_BEST:;
     Move *current_move = gen_get_current_move(gen);
     set_play_for_record(current_move, move_type, leftstrip, rightstrip, score,
                         start_row, start_col, tiles_played, dir, strip);
@@ -190,12 +246,15 @@ static inline void update_best_move_or_insert_into_movelist(
     if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
       gen_switch_best_move_and_current_move(gen);
     }
-  } else if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
-    SmallMove *move = small_move_list_get_spare_move(gen->move_list);
-    set_small_play_for_record(move, move_type, leftstrip, rightstrip, score,
-                              start_row, start_col, tiles_played, dir, strip);
+    break;
+  case MOVE_RECORD_ALL_SMALL:;
+    SmallMove *small_move = small_move_list_get_spare_move(gen->move_list);
+    set_small_play_for_record(small_move, move_type, leftstrip, rightstrip,
+                              score, start_row, start_col, tiles_played, dir,
+                              strip);
     // small_move doesn't use equity.
     move_list_insert_spare_small_move(gen->move_list);
+    break;
   }
 }
 
@@ -223,20 +282,34 @@ static inline void record_tile_placement_move(MoveGen *gen, int leftstrip,
 
 static inline bool better_play_has_been_found(const MoveGen *gen,
                                               Equity highest_possible_value) {
-  const Move *move = gen_get_readonly_best_move(gen);
-  const Equity best_value_found = (gen->move_sort_type == MOVE_SORT_EQUITY)
-                                      ? move_get_equity(move)
-                                      : move_get_score(move);
-  return highest_possible_value < best_value_found;
+  bool better_play_found = false;
+  switch (gen->move_record_type) {
+  case MOVE_RECORD_ALL:
+  case MOVE_RECORD_ALL_SMALL:
+    break;
+  case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
+  case MOVE_RECORD_BEST:
+    better_play_found =
+        highest_possible_value < gen_get_cutoff_equity_or_score(gen);
+    break;
+  }
+  return better_play_found;
 }
 
 static inline void record_exchange(MoveGen *gen) {
-  if ((gen->move_record_type == MOVE_RECORD_BEST) &&
-      (gen->move_sort_type == MOVE_SORT_EQUITY)) {
-    const Equity leave_value = leave_map_get_current_value(&gen->leave_map);
-    if (better_play_has_been_found(gen, leave_value)) {
-      return;
+  switch (gen->move_record_type) {
+  case MOVE_RECORD_ALL:
+  case MOVE_RECORD_ALL_SMALL:
+    break;
+  case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
+  case MOVE_RECORD_BEST:
+    if (gen->move_sort_type == MOVE_SORT_EQUITY) {
+      const Equity leave_value = leave_map_get_current_value(&gen->leave_map);
+      if (better_play_has_been_found(gen, leave_value)) {
+        return;
+      }
     }
+    break;
   }
 
   int tiles_exchanged = 0;
@@ -1316,9 +1389,14 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
          sizeof(gen->descending_tile_scores));
 }
 
-void gen_load_position(MoveGen *gen, Game *game, move_record_t move_record_type,
-                       move_sort_t move_sort_type, MoveList *move_list,
-                       const KWG *override_kwg) {
+void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
+  Game *game = args->game;
+  move_record_t move_record_type = args->move_record_type;
+  move_sort_t move_sort_type = args->move_sort_type;
+  MoveList *move_list = args->move_list;
+  const KWG *override_kwg = args->override_kwg;
+  gen->max_equity_diff = args->max_equity_diff;
+
   gen->board = game_get_board(game);
   gen->player_index = game_get_player_on_turn_index(game);
   Player *player = game_get_player(game, gen->player_index);
@@ -1354,6 +1432,7 @@ void gen_load_position(MoveGen *gen, Game *game, move_record_t move_record_type,
   // Reset the best and current moves
   gen->best_move_index = 0;
   move_set_equity(gen_get_best_move(gen), EQUITY_INITIAL_VALUE);
+  gen->best_move_equity_or_score = EQUITY_INITIAL_VALUE;
 
   // Set rack cross set and cache ld's tile scores
   gen->rack_cross_set = 0;
@@ -1440,8 +1519,7 @@ void gen_record_scoring_plays(MoveGen *gen) {
   }
   while (gen->anchor_heap.count > 0) {
     const Anchor anchor = anchor_heap_extract_max(&gen->anchor_heap);
-    if (gen->move_record_type == MOVE_RECORD_BEST &&
-        better_play_has_been_found(gen, anchor.highest_possible_equity)) {
+    if (better_play_has_been_found(gen, anchor.highest_possible_equity)) {
       break;
     }
     gen->current_anchor_col = anchor.col;
@@ -1467,19 +1545,20 @@ void gen_record_scoring_plays(MoveGen *gen) {
                     0);
     }
 
-    if (gen->move_record_type == MOVE_RECORD_BEST) {
-      // If a better play has been found than should have been possible for
-      // this anchor, highest_possible_equity was invalid.
-      assert(!better_play_has_been_found(gen, anchor.highest_possible_equity));
-    }
+    // If a better play has been found than should have been possible for
+    // this anchor, highest_possible_equity was invalid.
+    assert(!better_play_has_been_found(gen, anchor.highest_possible_equity));
   }
 }
 
 void gen_record_pass(MoveGen *gen) {
-  if (gen->move_record_type == MOVE_RECORD_ALL) {
+  switch (gen->move_record_type) {
+  case MOVE_RECORD_ALL:
     move_list_set_spare_move_as_pass(gen->move_list);
     move_list_insert_spare_move(gen->move_list, EQUITY_PASS_VALUE);
-  } else if (gen->move_record_type == MOVE_RECORD_BEST) {
+    break;
+  case MOVE_RECORD_BEST:
+  case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:;
     const Move *top_move = gen_get_readonly_best_move(gen);
     Move *spare_move = move_list_get_spare_move(gen->move_list);
     if (move_get_equity(top_move) < EQUITY_PASS_VALUE) {
@@ -1489,18 +1568,17 @@ void gen_record_pass(MoveGen *gen) {
     }
     move_list_insert_spare_move_top_equity(gen->move_list,
                                            move_get_equity(spare_move));
-  } else if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
+    break;
+  case MOVE_RECORD_ALL_SMALL:
     move_list_set_spare_small_move_as_pass(gen->move_list);
     move_list_insert_spare_small_move(gen->move_list);
+    break;
   }
 }
 
-void generate_moves(Game *game, move_record_t move_record_type,
-                    move_sort_t move_sort_type, int thread_index,
-                    MoveList *move_list, const KWG *override_kwg) {
-  MoveGen *gen = get_movegen(thread_index);
-  gen_load_position(gen, game, move_record_type, move_sort_type, move_list,
-                    override_kwg);
+void generate_moves(const MoveGenArgs *args) {
+  MoveGen *gen = get_movegen(args->thread_index);
+  gen_load_position(gen, args);
   gen_look_up_leaves_and_record_exchanges(gen);
 
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {

@@ -401,7 +401,8 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // 2) EENRRTT keeping ERT = 11 * 5 * 5 = 275 possible draws
   // 3) ENNRRTT keeping NRT = 5 * 5 * 5  = 125 possible draws which sums to 450
   // total draws. We use this case to easily check that the combinatorial math
-  // is correct Refetch equity values because the underlying inference_results
+  // is correct.
+  // Refetch equity values because the underlying inference_results
   // results were recreated
   equity_values = inference_results_get_equity_values(inference_results,
                                                       INFERENCE_TYPE_LEAVE);

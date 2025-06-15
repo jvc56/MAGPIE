@@ -38,10 +38,16 @@ void load_and_generate_moves(Game *game, MoveList *move_list, Player *player,
                              const char *cgp, const char *rack) {
   const LetterDistribution *ld = game_get_ld(game);
   Rack *player_rack = player_get_rack(player);
+  const MoveGenArgs move_gen_args = {
+      .game = game,
+      .move_list = move_list,
+      .thread_index = 0,
+      .max_equity_diff = 0,
+  };
 
   load_cgp_or_die(game, cgp);
   rack_set_to_string(ld, player_rack, rack);
-  generate_moves_for_game(game, 0, move_list);
+  generate_moves_for_game(&move_gen_args);
 }
 
 void test_shadow_score(void) {
