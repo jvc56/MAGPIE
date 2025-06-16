@@ -90,6 +90,7 @@ void string_builder_add_space_padded_string(StringBuilder *string_builder,
   const size_t number_of_spaces =
       total_length > printed_length ? total_length - printed_length : 0;
   string_builder_add_spaces(string_builder, number_of_spaces);
+  free(formatted_string);
 }
 
 void string_builder_add_table_row(StringBuilder *string_builder,
