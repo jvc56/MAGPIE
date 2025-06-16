@@ -268,7 +268,7 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
 
   for (int i = 0; i < NUMBER_OF_GAME_END_REASONS; i++) {
     string_builder_add_formatted_string(
-        sb, "Game End Reason %-*s %d (%2.2f%%)\n", 10, game_end_reason_strs[i],
+        sb, "Game End Reason %-*s %d (%2.2f%%%%)\n", 10, game_end_reason_strs[i],
         gd->game_end_reasons[i],
         100 * ((double)gd->game_end_reasons[i] / gd->total_games));
   }
