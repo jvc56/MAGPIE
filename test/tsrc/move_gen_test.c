@@ -947,6 +947,105 @@ void movegen_only_one_player_wmp(void) {
   config_destroy(config);
 }
 
+void movegen_within_x_of_best_test(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -s1 equity -s2 equity "
+                                        "-r1 equity -r2 equity -numplays 100");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  Player *player = game_get_player(game, 0);
+  MoveList *move_list = move_list_create(10000);
+  MoveGenArgs move_gen_args = {
+      .game = game,
+      .move_list = move_list,
+      .thread_index = 0,
+      .max_equity_diff = 0,
+  };
+  int all_move_list_count = 0;
+  int move_list_count = 0;
+  SortedMoveList *sml = NULL;
+
+  player_set_move_record_type(player, MOVE_RECORD_ALL);
+  load_cgp_or_die(game, EMPTY_CGP);
+  rack_set_to_string(ld, player_get_rack(player), "ZILLION");
+  move_gen_args.max_equity_diff = int_to_equity(1);
+  generate_moves_for_game(&move_gen_args);
+  sml = sorted_move_list_create(move_list);
+  all_move_list_count = sml->count;
+  assert_move(game, NULL, sml, 0, "8D ZILLION 102");
+  rack_reset(player_get_rack(player));
+  sorted_move_list_destroy(sml);
+  sml = NULL;
+  player_set_move_record_type(player, MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST);
+
+  load_cgp_or_die(game, EMPTY_CGP);
+  rack_set_to_string(ld, player_get_rack(player), "ZILLION");
+  move_gen_args.max_equity_diff = int_to_equity(1);
+  generate_moves_for_game(&move_gen_args);
+  sml = sorted_move_list_create(move_list);
+  assert_move(game, NULL, sml, 0, "8D ZILLION 102");
+  assert(sml->count == 1);
+  rack_reset(player_get_rack(player));
+  sorted_move_list_destroy(sml);
+  sml = NULL;
+
+  load_cgp_or_die(game, EMPTY_CGP);
+  rack_set_to_string(ld, player_get_rack(player), "ZILLION");
+  move_gen_args.max_equity_diff = int_to_equity(15);
+  generate_moves_for_game(&move_gen_args);
+  sml = sorted_move_list_create(move_list);
+  assert_move(game, NULL, sml, 0, "8D ZILLION 102");
+  assert(sml->count == 1);
+  rack_reset(player_get_rack(player));
+  sorted_move_list_destroy(sml);
+  sml = NULL;
+
+  load_cgp_or_die(game, EMPTY_CGP);
+  rack_set_to_string(ld, player_get_rack(player), "ZILLION");
+  move_gen_args.max_equity_diff = int_to_equity(25);
+  generate_moves_for_game(&move_gen_args);
+  sml = sorted_move_list_create(move_list);
+  assert(sml->count == 7);
+  assert_move(game, NULL, sml, 0, "8D ZILLION 102");
+  for (int i = 0; i < move_list_count; i++) {
+    const Move *move = sml->moves[i];
+    assert(move_get_tiles_played(move) == 7);
+  }
+  rack_reset(player_get_rack(player));
+  sorted_move_list_destroy(sml);
+  sml = NULL;
+
+  load_cgp_or_die(game, EMPTY_CGP);
+  rack_set_to_string(ld, player_get_rack(player), "ZILLION");
+  move_gen_args.max_equity_diff = int_to_equity(75);
+  generate_moves_for_game(&move_gen_args);
+  move_list_count = move_list_get_count(move_list);
+  // All placements of ZILLIONS and all placements of ZILL are within 75 equity
+  assert(move_list_count == 11);
+  sml = sorted_move_list_create(move_list);
+  assert_move(game, NULL, sml, 0, "8D ZILLION 102");
+  rack_reset(player_get_rack(player));
+  sorted_move_list_destroy(sml);
+  sml = NULL;
+
+  load_cgp_or_die(game, EMPTY_CGP);
+  rack_set_to_string(ld, player_get_rack(player), "ZILLION");
+  // All moves should be within 1000 equity of the best move
+  // except for the pass
+  move_gen_args.max_equity_diff = int_to_equity(1000);
+  generate_moves_for_game(&move_gen_args);
+  assert(all_move_list_count == move_list_get_count(move_list) + 1);
+  rack_reset(player_get_rack(player));
+
+  // FIXME: implement remaining tests
+  // exchange as best move(s)
+  // pass as only move
+  // many plays with the same equity
+
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_move_gen(void) {
   leave_lookup_test();
   unfound_leave_lookup_test();
@@ -963,4 +1062,5 @@ void test_move_gen(void) {
   movegen_var_bingo_bonus_test();
   movegen_no_wmp_by_default_test();
   movegen_only_one_player_wmp();
+  movegen_within_x_of_best_test();
 }

@@ -283,18 +283,20 @@ static inline void record_tile_placement_move(MoveGen *gen, int leftstrip,
 
 static inline bool better_play_has_been_found(const MoveGen *gen,
                                               Equity highest_possible_value) {
-  bool better_play_found = false;
   switch (gen->move_record_type) {
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_ALL_SMALL:
+    return false;
     break;
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
+    if (gen->best_move_equity_or_score == EQUITY_INITIAL_VALUE) {
+      return false;
+    }
+    break;
   case MOVE_RECORD_BEST:
-    better_play_found =
-        highest_possible_value < gen_get_cutoff_equity_or_score(gen);
     break;
   }
-  return better_play_found;
+  return highest_possible_value < gen_get_cutoff_equity_or_score(gen);
 }
 
 static inline void record_exchange(MoveGen *gen) {

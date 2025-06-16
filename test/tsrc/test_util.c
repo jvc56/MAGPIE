@@ -265,6 +265,7 @@ void resort_sorted_move_list_by_score(SortedMoveList *sml) {
   qsort(sml->moves, sml->count, sizeof(Move *), compare_moves_for_sml);
 }
 
+// Empties the passed in move list and returns a SortedMoveList
 SortedMoveList *sorted_move_list_create(MoveList *ml) {
   int number_of_moves = move_list_get_count(ml);
   SortedMoveList *sorted_move_list = malloc_or_die((sizeof(SortedMoveList)));

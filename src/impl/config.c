@@ -1239,6 +1239,9 @@ void config_load_record_type(Config *config, const char *record_type_str,
   if (has_iprefix(record_type_str, "best")) {
     players_data_set_move_record_type(config->players_data, player_index,
                                       MOVE_RECORD_BEST);
+  } else if (has_iprefix(record_type_str, "equity")) {
+    players_data_set_move_record_type(config->players_data, player_index,
+                                      MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST);
   } else if (has_iprefix(record_type_str, "all")) {
     players_data_set_move_record_type(config->players_data, player_index,
                                       MOVE_RECORD_ALL);
