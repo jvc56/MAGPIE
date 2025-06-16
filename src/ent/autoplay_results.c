@@ -180,11 +180,11 @@ char *game_data_ucgi_str(const GameData *gd) {
 }
 
 char *get_total_int_and_percentage_string(uint64_t total, double pct) {
-  return get_formatted_string("%lu (%2.2f%%)", total, pct * 100.0);
+  return get_formatted_string("%lu (%2.2f%%%%)", total, pct * 100.0);
 }
 
 char *get_total_float_and_percentage_string(double total, double pct) {
-  return get_formatted_string("%2.1f (%2.2f%%)", total, pct * 100.0);
+  return get_formatted_string("%2.1f (%2.2f%%%%)", total, pct * 100.0);
 }
 
 char *get_score_and_dev_string(double score, double stdev) {
@@ -273,45 +273,41 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
         100 * ((double)gd->game_end_reasons[i] / gd->total_games));
   }
 
-  string_builder_add_formatted_string(sb, "\n%-*s%-*s%-*s\n", col_width, "",
-                                      col_width, "Player 1", col_width,
-                                      "Player 2");
+  string_builder_add_string(sb, "\n");
+  string_builder_add_table_row(sb, col_width, "", "Player 1",
+                               "Player 2");
 
   char *p0_total_str =
       get_total_float_and_percentage_string(p0_total, p0_total_pct);
   char *p1_total_str =
       get_total_float_and_percentage_string(p1_total, p1_total_pct);
-  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_width,
-                                      "Total:", col_width, p0_total_str,
-                                      col_width, p1_total_str);
+  string_builder_add_table_row(sb, col_width, "Total:", p0_total_str,
+                               p1_total_str);
+
   free(p1_total_str);
   free(p0_total_str);
 
   char *p0_win_str = get_total_int_and_percentage_string(p0_wins, p0_win_pct);
   char *p0_loss_str =
       get_total_int_and_percentage_string(p0_losses, p0_loss_pct);
-  string_builder_add_formatted_string(
-      sb,
-      "%-*s%-*s%-*s\n"
-      "%-*s%-*s%-*s\n",
-      col_width, "Wins:", col_width, p0_win_str, col_width, p0_loss_str,
-      col_width, "Losses:", col_width, p0_loss_str, col_width, p0_win_str);
+  string_builder_add_table_row(sb, col_width, "Wins:", p0_win_str,
+                               p0_loss_str);
+  string_builder_add_table_row(sb, col_width, "Losses:", p0_loss_str,
+                               p0_win_str);
   free(p0_win_str);
   free(p0_loss_str);
 
   char *p0_ties_str = get_total_int_and_percentage_string(p0_ties, p0_tie_pct);
-  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_width,
-                                      "Ties:", col_width, p0_ties_str,
-                                      col_width, p0_ties_str);
+  string_builder_add_table_row(sb, col_width, "Ties:", p0_ties_str,
+                               p0_ties_str);
   free(p0_ties_str);
 
   char *p0_score_str = get_score_and_dev_string(stat_get_mean(gd->p0_score),
                                                 stat_get_stdev(gd->p0_score));
   char *p1_score_str = get_score_and_dev_string(stat_get_mean(gd->p1_score),
                                                 stat_get_stdev(gd->p1_score));
-  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_width,
-                                      "Score:", col_width, p0_score_str,
-                                      col_width, p1_score_str);
+  string_builder_add_table_row(sb, col_width, "Score:", p0_score_str,
+                               p1_score_str);                                                
   free(p1_score_str);
   free(p0_score_str);
 
