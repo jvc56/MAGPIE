@@ -17,6 +17,10 @@ void string_builder_add_string(StringBuilder *string_builder,
                                const char *string);
 void string_builder_add_formatted_string(StringBuilder *string_builder,
                                          const char *format, ...);
+void string_builder_add_table_row(StringBuilder *string_builder,
+                                  size_t cell_width, const char *left_cell,
+                                  const char *middle_cell,
+                                  const char *right_cell);
 void string_builder_add_spaces(StringBuilder *string_builder,
                                int number_of_spaces);
 void string_builder_add_int(StringBuilder *string_builder, int64_t n);
