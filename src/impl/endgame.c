@@ -26,7 +26,7 @@
 
 #ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
-#endif 
+#endif
 
 const int32_t LARGE_VALUE = (1 << 30); // for alpha-beta pruning
 
@@ -165,9 +165,16 @@ void solver_worker_destroy(EndgameSolverWorker *solver_worker) {
 int generate_stm_plays(EndgameSolverWorker *worker) {
   // stm means side to move
   // This won't actually sort by score. We'll do this later.
-  generate_moves(worker->game_copy, MOVE_RECORD_ALL_SMALL, MOVE_SORT_SCORE,
-                 worker->thread_index, worker->move_list,
-                 worker->solver->pruned_kwg);
+  const MoveGenArgs args = {
+      .game = worker->game_copy,
+      .move_list = worker->move_list,
+      .move_record_type = MOVE_RECORD_ALL_SMALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .override_kwg = worker->solver->pruned_kwg,
+      .thread_index = worker->thread_index,
+      .max_equity_diff = 0,
+  };
+  generate_moves(&args);
   SmallMove *arena_small_moves = (SmallMove *)arena_alloc(
       worker->small_move_arena, worker->move_list->count * sizeof(SmallMove));
   for (int i = 0; i < worker->move_list->count; i++) {
@@ -271,8 +278,8 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
   int on_turn_idx = game_get_player_on_turn_index(worker->game_copy);
   Player *player_on_turn = game_get_player(worker->game_copy, on_turn_idx);
   Player *other_player = game_get_player(worker->game_copy, 1 - on_turn_idx);
-  int on_turn_spread =
-      equity_to_int(player_get_score(player_on_turn) - player_get_score(other_player));
+  int on_turn_spread = equity_to_int(player_get_score(player_on_turn) -
+                                     player_get_score(other_player));
   uint64_t tt_move = INVALID_TINY_MOVE;
 
   if (worker->solver->transposition_table_optim) {

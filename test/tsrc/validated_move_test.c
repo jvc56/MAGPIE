@@ -623,6 +623,12 @@ void test_validated_move_distinct_kwg(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   MoveList *move_list = move_list_create(1);
+  const MoveGenArgs move_gen_args = {
+      .game = game,
+      .move_list = move_list,
+      .thread_index = 0,
+      .max_equity_diff = 0,
+  };
 
   Player *player0 = game_get_player(game, 0);
   Player *player1 = game_get_player(game, 1);
@@ -635,7 +641,7 @@ void test_validated_move_distinct_kwg(void) {
   validated_moves_destroy(vms);
 
   rack_set_to_string(ld, player0_rack, "KOPRRSS");
-  generate_moves_for_game(game, 0, move_list);
+  generate_moves_for_game(&move_gen_args);
   assert_move(game, move_list, NULL, 0, "8H SPORK 32");
   play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
 
@@ -651,7 +657,7 @@ void test_validated_move_distinct_kwg(void) {
   validated_moves_destroy(vms);
 
   rack_set_to_string(ld, player1_rack, "CEHIIRZ");
-  generate_moves_for_game(game, 0, move_list);
+  generate_moves_for_game(&move_gen_args);
   assert_move(game, move_list, NULL, 0, "H8 (S)CHIZIER 146");
   play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
 
@@ -667,7 +673,7 @@ void test_validated_move_distinct_kwg(void) {
 
   // print_board(game_get_board(game));
   rack_set_to_string(ld, player0_rack, "GGLLOWY");
-  generate_moves_for_game(game, 0, move_list);
+  generate_moves_for_game(&move_gen_args);
   assert_move(game, move_list, NULL, 0, "11G W(I)GGLY 28");
   play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
 
@@ -682,7 +688,7 @@ void test_validated_move_distinct_kwg(void) {
   validated_moves_destroy(vms);
 
   rack_set_to_string(ld, player1_rack, "AEEQRSU");
-  generate_moves_for_game(game, 0, move_list);
+  generate_moves_for_game(&move_gen_args);
   assert_move(game, move_list, NULL, 0, "13C QUEAS(I)ER 88");
 
   move_list_destroy(move_list);

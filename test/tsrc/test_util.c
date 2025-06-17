@@ -265,6 +265,7 @@ void resort_sorted_move_list_by_score(SortedMoveList *sml) {
   qsort(sml->moves, sml->count, sizeof(Move *), compare_moves_for_sml);
 }
 
+// Empties the passed in move list and returns a SortedMoveList
 SortedMoveList *sorted_move_list_create(MoveList *ml) {
   int number_of_moves = move_list_get_count(ml);
   SortedMoveList *sorted_move_list = malloc_or_die((sizeof(SortedMoveList)));
@@ -352,8 +353,18 @@ void sort_and_print_move_list(const Board *board, const LetterDistribution *ld,
 
 void play_top_n_equity_move(Game *game, int n) {
   MoveList *move_list = move_list_create(n + 1);
-  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list,
-                 /*override_kwg=*/NULL);
+
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .thread_index = 0,
+      .max_equity_diff = 0,
+  };
+
+  generate_moves(&args);
   SortedMoveList *sorted_move_list = sorted_move_list_create(move_list);
   play_move(sorted_move_list->moves[n], game, NULL, NULL);
   sorted_move_list_destroy(sorted_move_list);
@@ -697,10 +708,16 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
   Player *player = game_get_player(game, game_get_player_on_turn_index(game));
   Rack *player_rack = player_get_rack(player);
   MoveList *move_list = move_list_create(1);
+  const MoveGenArgs move_gen_args = {
+      .game = game,
+      .move_list = move_list,
+      .thread_index = 0,
+      .max_equity_diff = 0,
+  };
 
   rack_set_to_string(game_get_ld(game), player_rack, rack_string);
 
-  generate_moves_for_game(game, 0, move_list);
+  generate_moves_for_game(&move_gen_args);
   char *gen_move_string;
   if (strings_equal(move_position, "exch")) {
     gen_move_string = get_formatted_string("(exch %s)", move_tiles);
@@ -962,9 +979,16 @@ void generate_anchors_for_test(Game *game) {
   // looking up leave values and it is not adding a parameter to prevent this.
   MoveList *move_list = move_list_create(1000);
   MoveGen *gen = get_movegen(/*thread_index=*/0);
-  gen_load_position(gen, game, player_get_move_record_type(player_on_turn),
-                    player_get_move_sort_type(player_on_turn), move_list,
-                    /*override_kwg=*/NULL);
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = player_get_move_record_type(player_on_turn),
+      .move_sort_type = player_get_move_sort_type(player_on_turn),
+      .override_kwg = NULL,
+      .thread_index = 0,
+      .max_equity_diff = 0,
+  };
+  gen_load_position(gen, &args);
   gen_look_up_leaves_and_record_exchanges(gen);
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
     wmp_move_gen_check_nonplaythrough_existence(

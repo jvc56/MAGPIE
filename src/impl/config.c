@@ -75,6 +75,7 @@ typedef enum {
   ARG_TOKEN_MAX_ITERATIONS,
   ARG_TOKEN_STOP_COND_PCT,
   ARG_TOKEN_EQUITY_MARGIN,
+  ARG_TOKEN_MAX_EQUITY_DIFF,
   ARG_TOKEN_USE_GAME_PAIRS,
   ARG_TOKEN_USE_SMALL_PLAYS,
   ARG_TOKEN_WRITE_BUFFER_SIZE,
@@ -119,6 +120,7 @@ struct Config {
   int max_iterations;
   double stop_cond_pct;
   double equity_margin;
+  Equity max_equity_diff;
   bool use_game_pairs;
   bool human_readable;
   bool use_small_plays;
@@ -252,6 +254,10 @@ double config_get_stop_cond_pct(const Config *config) {
 
 double config_get_equity_margin(const Config *config) {
   return config->equity_margin;
+}
+
+Equity config_get_max_equity_diff(const Config *config) {
+  return config->max_equity_diff;
 }
 
 int config_get_time_limit_seconds(const Config *config) {
@@ -730,7 +736,13 @@ void execute_move_gen(Config *config, ErrorStack *error_stack) {
                               MOVE_LIST_TYPE_SMALL);
   }
   MoveList *ml = config->move_list;
-  generate_moves_for_game(config->game, 0, ml);
+  const MoveGenArgs args = {
+      .game = config->game,
+      .move_list = ml,
+      .thread_index = 0,
+      .max_equity_diff = config->max_equity_diff,
+  };
+  generate_moves_for_game(&args);
   print_ucgi_static_moves(config->game, ml, config->thread_control);
 }
 
@@ -1227,6 +1239,9 @@ void config_load_record_type(Config *config, const char *record_type_str,
   if (has_iprefix(record_type_str, "best")) {
     players_data_set_move_record_type(config->players_data, player_index,
                                       MOVE_RECORD_BEST);
+  } else if (has_iprefix(record_type_str, "equity")) {
+    players_data_set_move_record_type(config->players_data, player_index,
+                                      MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST);
   } else if (has_iprefix(record_type_str, "all")) {
     players_data_set_move_record_type(config->players_data, player_index,
                                       MOVE_RECORD_ALL);
@@ -1720,6 +1735,18 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  const char *new_max_equity_diff_double =
+      config_get_parg_value(config, ARG_TOKEN_MAX_EQUITY_DIFF, 0);
+  if (new_max_equity_diff_double) {
+    double max_equity_diff_double;
+    config_load_double(config, ARG_TOKEN_MAX_EQUITY_DIFF, 0, EQUITY_MAX_DOUBLE,
+                       &max_equity_diff_double, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    config->max_equity_diff = double_to_equity(max_equity_diff_double);
+  }
+
   config_load_double(config, ARG_TOKEN_TT_FRACTION_OF_MEM, 0, 1,
                      &config->tt_fraction_of_mem, error_stack);
 
@@ -2017,6 +2044,8 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack) {
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_EQUITY_MARGIN, "equitymargin", 1, 1,
                     execute_fatal, status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_MAX_EQUITY_DIFF, "maxequitydifference", 1,
+                    1, execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1,
@@ -2051,6 +2080,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack) {
   config->num_small_plays = DEFAULT_SMALL_MOVE_LIST_CAPACITY;
   config->plies = 2;
   config->equity_margin = 0;
+  config->max_equity_diff = int_to_equity(10);
   config->max_iterations = 5000;
   config->stop_cond_pct = 99;
   config->time_limit_seconds = 0;
