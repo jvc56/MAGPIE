@@ -173,7 +173,13 @@
   "15/15 ACEHIX?/ 169/58 0 -lex CSW21;"
 #define PARRODQ_CGP                                                            \
   "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 PARRODQ/ 0/0 0 -lex CSW21;"
-
+#define UNPLAYABLE_V_CGP                                                       \
+  "7N6M/5ZOON4AA/7B5UN/2S4L3LADY/2T4E2QI1I1/2A2PORN3NOR/2BICE2AA1DA1E/"        \
+  "6GUVS1OP1F/8ET1LA1U/5J3R1E1UT/4VOTE1I1R1NE/5G1MICKIES1/6FE1T1THEW/"         \
+  "5DOR3E1XI/6OY6G / 0/0 0 -lex CSW21;"
+#define PRETZEL_OPENING_CGP                                                    \
+  "15/15/15/15/15/15/15/7PRETZEL1/15/15/15/15/15/15/15 / 0/106 0 -lex "        \
+  "CSW21;"
 // 21 x 21 boards
 
 #define ANTHROPOMORPHISATIONS_CGP                                              \

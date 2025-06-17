@@ -1036,10 +1036,72 @@ void movegen_within_x_of_best_test(void) {
   assert(all_move_list_count == move_list_get_count(move_list) + 1);
   rack_reset(player_get_rack(player));
 
-  // FIXME: implement remaining tests
-  // exchange as best move(s)
-  // pass as only move
-  // many plays with the same equity
+  load_cgp_or_die(game, EMPTY_CGP);
+  rack_set_to_string(ld, player_get_rack(player), "AUUUUVV");
+  move_gen_args.max_equity_diff = int_to_equity(10);
+  generate_moves_for_game(&move_gen_args);
+  sml = sorted_move_list_create(move_list);
+  assert_move(game, NULL, sml, 0, "(exch UUUUVV)");
+  for (int i = 0; i < sml->count; i++) {
+    const Move *move = sml->moves[i];
+    assert(move_get_type(move) == GAME_EVENT_EXCHANGE);
+  }
+  rack_reset(player_get_rack(player));
+  sorted_move_list_destroy(sml);
+  sml = NULL;
+
+  load_cgp_or_die(game, UNPLAYABLE_V_CGP);
+  rack_set_to_string(ld, player_get_rack(player), "V");
+  // Have the opponent draw any 7 tiles to prevent exchanges
+  // from being generated
+  draw_to_full_rack(game, 1);
+  generate_moves_for_game(&move_gen_args);
+  assert(count_scoring_plays(move_list) == 0);
+  assert(count_nonscoring_plays(move_list) == 1);
+  assert(move_get_type(move_list_get_move(move_list, 0)) == GAME_EVENT_PASS);
+  rack_reset(player_get_rack(player));
+
+  load_cgp_or_die(game, PRETZEL_OPENING_CGP);
+  rack_set_to_string(ld, player_get_rack(player), "ENTRIES");
+  move_gen_args.max_equity_diff = int_to_equity(0);
+  generate_moves_for_game(&move_gen_args);
+  sml = sorted_move_list_create(move_list);
+  assert(sml->count == 6);
+  for (int i = 0; i < sml->count; i++) {
+    const Move *move = sml->moves[i];
+    assert(move_get_score(move) == int_to_equity(131));
+  }
+  rack_reset(player_get_rack(player));
+  sorted_move_list_destroy(sml);
+  sml = NULL;
+
+  load_cgp_or_die(game, PRETZEL_OPENING_CGP);
+  rack_set_to_string(ld, player_get_rack(player), "ENTRIES");
+  move_gen_args.max_equity_diff = int_to_equity(48);
+  generate_moves_for_game(&move_gen_args);
+  sml = sorted_move_list_create(move_list);
+  assert(sml->count == 6);
+  for (int i = 0; i < sml->count; i++) {
+    const Move *move = sml->moves[i];
+    assert(move_get_score(move) == int_to_equity(131));
+  }
+  rack_reset(player_get_rack(player));
+  sorted_move_list_destroy(sml);
+  sml = NULL;
+
+  load_cgp_or_die(game, PRETZEL_OPENING_CGP);
+  rack_set_to_string(ld, player_get_rack(player), "ENTRIES");
+  move_gen_args.max_equity_diff = int_to_equity(50);
+  generate_moves_for_game(&move_gen_args);
+  sml = sorted_move_list_create(move_list);
+  assert(sml->count == 8);
+  for (int i = 0; i < sml->count; i++) {
+    const Move *move = sml->moves[i];
+    assert(move_get_tiles_played(move) == 7);
+  }
+  rack_reset(player_get_rack(player));
+  sorted_move_list_destroy(sml);
+  sml = NULL;
 
   move_list_destroy(move_list);
   game_destroy(game);
