@@ -2,19 +2,23 @@
 #define ANCHOR_H
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "../def/board_defs.h"
 
+#include "../ent/bit_rack.h"
 #include "../ent/equity.h"
 
-#include "../util/io_util.h"
 #include "../util/string_util.h"
 
 typedef struct Anchor {
-  // The highest possibly equity
-  // that can be achieved from this
-  // anchor column.
+  // All the tiles that must be played through for this (sub)anchor.
+  // Only used by WMP Move Gen.
+  BitRack playthrough;
+  // Highest possible equity that can be achieved from this anchor.
   Equity highest_possible_equity;
+  // Highest possible score for this anchor. Only used by WMP Move Gen.
+  Equity highest_possible_score;
   // The row of the board for this anchor
   uint8_t row;
   // The column of the board for this anchor
@@ -33,16 +37,30 @@ typedef struct AnchorHeap {
 } AnchorHeap;
 
 // Appends anchors to the end of the list without any comparisons.
-static inline void
-anchor_heap_add_unheaped_anchor(AnchorHeap *ah, uint8_t row, uint8_t col,
-                                uint8_t last_anchor_col, uint8_t dir,
-                                Equity highest_possible_equity) {
+static inline void anchor_heap_add_unheaped_anchor(
+    AnchorHeap *ah, uint8_t row, uint8_t col, uint8_t last_anchor_col,
+    uint8_t dir, Equity highest_possible_equity) {
   const int i = ah->count;
   ah->anchors[i].row = row;
   ah->anchors[i].col = col;
   ah->anchors[i].last_anchor_col = last_anchor_col;
   ah->anchors[i].dir = dir;
   ah->anchors[i].highest_possible_equity = highest_possible_equity;
+  ah->count++;
+}
+
+static inline void anchor_heap_add_unheaped_wmp_anchor(
+    AnchorHeap *ah, uint8_t row, uint8_t col, uint8_t last_anchor_col,
+    uint8_t dir, Equity highest_possible_equity, const BitRack *playthrough,
+    Equity highest_possible_score) {
+  const int i = ah->count;
+  ah->anchors[i].row = row;
+  ah->anchors[i].col = col;
+  ah->anchors[i].last_anchor_col = last_anchor_col;
+  ah->anchors[i].dir = dir;
+  ah->anchors[i].highest_possible_equity = highest_possible_equity;
+  ah->anchors[i].highest_possible_score = highest_possible_score;
+  ah->anchors[i].playthrough = *playthrough;
   ah->count++;
 }
 

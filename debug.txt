@@ -1,0 +1,1612 @@
+   A B C D E F G H I J K L M N O   -> Player 1                 HHIRRUV   0
+   ------------------------------     Player 2                 AEFLMST   0
+ 1|=     '       =       '     = | --Tracking-----------------------------------
+ 2|  -       "       "       -   | AAAAAAAABBCCDDDDEEEEEEEEEEEFGGGIIIIIIIIJKLLLMNNNNNNOOOOOOOOPPQRRRRSSSTTTTTUUUVWWXYYZ??  86
+ 3|    -       '   '       -     |
+ 4|'     -       '       -     ' |
+ 5|        -           -         |
+ 6|  "       "       "       "   |
+ 7|    '       '   '       '     |
+ 8|=     '       -       '     = |
+ 9|    '       '   '       '     |
+10|  "       "       "       "   |
+11|        -           -         |
+12|'     -       '       -     ' |
+13|    -       '   '       -     |
+14|  -       "       "       -   |
+15|=     '       =       '     = |
+   ------------------------------
+
+   A B C D E F G H I J K L M N O   -> Player 1                 HHIRRUV   0
+   ------------------------------     Player 2                 AEFLMST   0
+ 1|=     '       =       '     = | --Tracking-----------------------------------
+ 2|  -       "       "       -   | AAAAAAAABBCCDDDDEEEEEEEEEEEFGGGIIIIIIIIJKLLLMNNNNNNOOOOOOOOPPQRRRRSSSTTTTTUUUVWWXYYZ??  86
+ 3|    -       '   '       -     |
+ 4|'     -       '       -     ' |
+ 5|        -           -         |
+ 6|  "       "       "       "   |
+ 7|    '       '   '       '     |
+ 8|=     '       -       '     = |
+ 9|    '       '   '       '     |
+10|  "       "       "       "   |
+11|        -           -         |
+12|'     -       '       -     ' |
+13|    -       '   '       -     |
+14|  -       "       "       -   |
+15|=     '       =       '     = |
+   ------------------------------
+
+Comparing move: (exch HHIRRUV)
+Comparing move: (exch HHIRUV)
+Comparing move: (exch HIRRUV)
+Comparing move: (exch HIRUV)
+playthrough_blocks: 0, tiles_played: 1
+wmp_move_gen_get_anchor: index: 0
+playthrough_blocks: 0, tiles_played: 2
+wmp_move_gen_get_anchor: index: 1
+playthrough_blocks: 0, tiles_played: 3
+wmp_move_gen_get_anchor: index: 2
+playthrough_blocks: 0, tiles_played: 2
+wmp_move_gen_get_anchor: index: 1
+playthrough_blocks: 0, tiles_played: 3
+wmp_move_gen_get_anchor: index: 2
+playthrough_blocks: 0, tiles_played: 3
+wmp_move_gen_get_anchor: index: 2
+Comparing move: 8G UH 10
+Comparing move: 8F HUH 18
+Comparing move: 8H HI 10
+Comparing move: 8H HUH 18
+Comparing move: 8H HUI 12
+Comparing move: 8G HI 10
+Comparing move: 8F HUI 12
+Comparing move: 8G UR 4
+Comparing move: 8G HUH 18
+Comparing move: 8G HUI 12
+Comparing move: 8H UH 10
+Comparing move: 8H UR 4
+Playing move: 8G HUH 18
+   A B C D E F G H I J K L M N O      Player 1                 IMRRRUV   18
+   ------------------------------  -> Player 2                 AEFLMST   0
+ 1|=     '       =       '     = | --Tracking-----------------------------------
+ 2|  -       "       "       -   | AAAAAAAABBCCDDDDEEEEEEEEEEEFGGGIIIIIIIIJKLLLNNNNNNOOOOOOOOPPQRRRSSSTTTTTUUVWWXYYZ??  83
+ 3|    -       '   '       -     |
+ 4|'     -       '       -     ' |
+ 5|        -           -         |
+ 6|  "       "       "       "   |
+ 7|    '       '   '       '     |
+ 8|=     '     H U H     '     = |
+ 9|    '       '   '       '     |
+10|  "       "       "       "   |
+11|        -           -         |
+12|'     -       '       -     ' |
+13|    -       '   '       -     |
+14|  -       "       "       -   |
+15|=     '       =       '     = |
+   ------------------------------
+
+   A B C D E F G H I J K L M N O      Player 1                 IMRRRUV   18
+   ------------------------------  -> Player 2                 AEFLMST   0
+ 1|=     '       =       '     = | --Tracking-----------------------------------
+ 2|  -       "       "       -   | AAAAAAAABBCCDDDDEEEEEEEEEEEFGGGIIIIIIIIJKLLLNNNNNNOOOOOOOOPPQRRRSSSTTTTTUUVWWXYYZ??  83
+ 3|    -       '   '       -     |
+ 4|'     -       '       -     ' |
+ 5|        -           -         |
+ 6|  "       "       "       "   |
+ 7|    '       '   '       '     |
+ 8|=     '     H U H     '     = |
+ 9|    '       '   '       '     |
+10|  "       "       "       "   |
+11|        -           -         |
+12|'     -       '       -     ' |
+13|    -       '   '       -     |
+14|  -       "       "       -   |
+15|=     '       =       '     = |
+   ------------------------------
+
+Comparing move: (exch AEFLMST)
+Comparing move: (exch AEFLMT)
+Comparing move: (exch AEFLM)
+Comparing move: (exch AFLMT)
+Comparing move: (exch AFLM)
+Comparing move: (exch AFL)
+Comparing move: (exch AFM)
+Comparing move: (exch FLM)
+Comparing move: (exch FL)
+Comparing move: (exch FM)
+Comparing move: (exch F)
+Comparing move: H6 EA(U) 3
+Comparing move: H6 EA(U)S 4
+Comparing move: H6 FA(U)LT 8
+Comparing move: H6 FA(U)LTS 9
+Comparing move: H6 FA(U)T 7
+Comparing move: H6 FA(U)TS 8
+Comparing move: H6 LA(U)F 7
+Comparing move: H6 LA(U)FS 8
+Comparing move: H6 MA(U)L 6
+Comparing move: H6 MA(U)LS 7
+Comparing move: H6 MA(U)T 6
+Comparing move: H6 MA(U)TS 7
+Comparing move: H6 SA(U) 3
+Comparing move: H6 SA(U)L 4
+Comparing move: H6 SA(U)LT 5
+Comparing move: H6 SA(U)T 4
+Comparing move: H6 SA(U)TE 5
+Comparing move: H6 TA(U) 3
+Comparing move: H6 TA(U)S 4
+Comparing move: H7 A(U)E 3
+Comparing move: H7 A(U)F 6
+Comparing move: H7 A(U)FS 7
+Comparing move: H6 FE(U) 6
+Comparing move: H6 FE(U)S 7
+Comparing move: H6 LE(U) 3
+Comparing move: H6 ME(U) 5
+Comparing move: H6 ME(U)S 6
+Comparing move: H4 SAMF(U) 11
+Comparing move: H3 MASTF(U)L 13
+Comparing move: H7 F(U)EL 7
+Comparing move: H7 F(U)ELS 8
+Comparing move: H7 F(U)M 8
+Comparing move: H7 F(U)ME 9
+Comparing move: H7 F(U)MES 10
+Comparing move: H7 F(U)MET 10
+Comparing move: H7 F(U)METS 12
+Comparing move: H7 F(U)MS 9
+Comparing move: H7 F(U)SE 7
+Comparing move: H7 F(U)SEL 8
+Comparing move: H7 F(U)ST 7
+Comparing move: H7 F(U)TSAL 10
+Comparing move: H6 AL(U) 3
+Comparing move: H5 MAL(U)S 7
+Comparing move: H5 SAL(U)E 5
+Comparing move: H5 SAL(U)T 5
+Comparing move: H5 SAL(U)TE 6
+Comparing move: H5 TAL(U)S 5
+Comparing move: H6 AL(U)M 6
+Comparing move: H6 AL(U)MS 7
+Comparing move: H6 AL(U)S 4
+Comparing move: H6 FL(U) 6
+Comparing move: H6 FL(U)ATE 9
+Comparing move: H6 FL(U)ATES 11
+Comparing move: H6 FL(U)E 7
+Comparing move: H6 FL(U)ES 8
+Comparing move: H6 FL(U)ME 10
+Comparing move: H6 FL(U)MES 11
+Comparing move: H6 FL(U)S 7
+Comparing move: H6 FL(U)TE 8
+Comparing move: H6 FL(U)TES 9
+Comparing move: H6 SL(U)E 4
+Comparing move: H6 SL(U)M 6
+Comparing move: H6 SL(U)T 4
+Comparing move: H7 L(U)ES 4
+Comparing move: H7 L(U)M 5
+Comparing move: H7 L(U)MA 6
+Comparing move: H7 L(U)MAS 7
+Comparing move: H7 L(U)MS 6
+Comparing move: H7 L(U)ST 4
+Comparing move: H7 L(U)TE 4
+Comparing move: H7 L(U)TEA 5
+Comparing move: H7 L(U)TES 5
+Comparing move: H7 M(U) 4
+Comparing move: H6 AM(U) 5
+Comparing move: H6 AM(U)LET 8
+Comparing move: H6 AM(U)LETS 10
+Comparing move: H6 AM(U)S 6
+Comparing move: H6 AM(U)SE 7
+Comparing move: H6 EM(U) 5
+Comparing move: H6 EM(U)S 6
+Comparing move: H6 SM(U)T 6
+Comparing move: H7 M(U)LE 6
+Comparing move: H7 M(U)LES 7
+Comparing move: H7 M(U)LETA 9
+Comparing move: H7 M(U)LETAS 10
+Comparing move: H7 M(U)LSE 7
+Comparing move: H7 M(U)S 5
+Comparing move: H7 M(U)SE 6
+Comparing move: H7 M(U)SET 7
+Comparing move: H7 M(U)ST 6
+Comparing move: H7 M(U)T 5
+Comparing move: H7 M(U)TASE 9
+Comparing move: H7 M(U)TE 6
+Comparing move: H7 M(U)TES 7
+Comparing move: H7 M(U)TS 6
+Comparing move: H5 MAS(U) 6
+Comparing move: H7 S(U)E 3
+Comparing move: H7 S(U)ET 4
+Comparing move: H7 S(U)LFA 8
+Comparing move: H7 S(U)LFATE 11
+Comparing move: H7 S(U)M 5
+Comparing move: H4 MEAT(U)S 11
+Comparing move: H5 LAT(U) 4
+Comparing move: H4 FLAT(U)S 13
+Comparing move: H5 LAT(U)S 5
+Comparing move: H5 FET(U)S 8
+Comparing move: H6 ST(U)LM 7
+Comparing move: H6 ST(U)M 6
+Comparing move: H7 T(U)FA 7
+Comparing move: H7 T(U)FAS 8
+Comparing move: H7 T(U)LE 4
+Comparing move: H7 T(U)LES 5
+Comparing move: H7 T(U)M 5
+Comparing move: H7 T(U)MS 6
+Comparing move: H8 (U)LE 3
+Comparing move: H8 (U)LEMA 8
+Comparing move: H8 (U)LEMAS 9
+Comparing move: H8 (U)LES 4
+Comparing move: H8 (U)M 4
+Comparing move: H8 (U)ME 5
+Comparing move: H8 (U)MES 6
+Comparing move: H8 (U)MS 5
+Comparing move: H8 (U)S 2
+Comparing move: H8 (U)SE 3
+Comparing move: H8 (U)T 2
+Comparing move: H8 (U)TA 3
+Comparing move: H8 (U)TAS 4
+Comparing move: H8 (U)TE 3
+Comparing move: H8 (U)TES 4
+Comparing move: H8 (U)TS 3
+Comparing move: 9F EA 9
+Comparing move: 9E FEAT 16
+Comparing move: 9E LEA 10
+Comparing move: 9D FLEA 14
+Comparing move: 9D FLEAM 21
+Comparing move: 9D FLEAS 17
+Comparing move: 9E LEAM 17
+Comparing move: 9E LEAS 13
+Comparing move: 9E LEAT 13
+Comparing move: 9E MEAT 15
+Comparing move: 9E SEA 10
+Comparing move: 9E SEAM 17
+Comparing move: 9E SEAT 13
+Comparing move: 9E TEA 10
+Comparing move: 9D STEAM 18
+Comparing move: 9E TEAM 17
+Comparing move: 9E TEAS 13
+Comparing move: 9F EAS 12
+Comparing move: 9F EAT 12
+Comparing move: 9F FA 12
+Comparing move: 9F FAME 27
+Comparing move: 9F FAMES 28
+Comparing move: 9F FAS 15
+Comparing move: 9F FAT 15
+Comparing move: 9F FATE 23
+Comparing move: 9F FATES 24
+Comparing move: 9F LA 9
+Comparing move: 9D MELA 13
+Comparing move: 9D MELAS 16
+Comparing move: 9D TELA 11
+Comparing move: 9C STELA 13
+Comparing move: 9E FLAM 20
+Comparing move: 9E FLAME 28
+Comparing move: 9E FLAMES 29
+Comparing move: 9E FLAT 16
+Comparing move: 9C TESLA 13
+Comparing move: 9E SLAM 17
+Comparing move: 9E SLAT 13
+Comparing move: 9E SLATE 21
+Comparing move: 9F LAM 16
+Comparing move: 9F LAME 24
+Comparing move: 9F LAMES 25
+Comparing move: 9F LAMEST 26
+Comparing move: 9F LAS 12
+Comparing move: 9F LASE 20
+Comparing move: 9F LAT 12
+Comparing move: 9F LATE 20
+Comparing move: 9F MA 11
+Comparing move: 9E SMA 12
+Comparing move: 9F MAS 14
+Comparing move: 9F MASE 22
+Comparing move: 9F MAT 14
+Comparing move: 9F MATE 22
+Comparing move: 9F MATES 23
+Comparing move: 9D MESA 13
+Comparing move: 9F SAM 16
+Comparing move: 9F SAME 24
+Comparing move: 9F SAMEL 25
+Comparing move: 9F SAT 12
+Comparing move: 9F SATE 20
+Comparing move: 9F SATEM 23
+Comparing move: 9F TA 9
+Comparing move: 9E ETA 10
+Comparing move: 9D FETA 14
+Comparing move: 9D FETAS 17
+Comparing move: 9D META 13
+Comparing move: 9D SETA 11
+Comparing move: 9E ETAS 13
+Comparing move: 9C FESTA 19
+Comparing move: 9F TAM 16
+Comparing move: 9F TAME 24
+Comparing move: 9F TAMES 25
+Comparing move: 9F TAS 12
+Comparing move: 9F TASE 20
+Comparing move: 9G AM 15
+Comparing move: 9G AME 23
+Comparing move: 9G AMES 24
+Comparing move: 9G AS 11
+Comparing move: 9G AT 11
+Comparing move: 9G ATE 19
+Comparing move: 9G ATES 20
+Comparing move: 9F AE 9
+Comparing move: 9E FAE 13
+Comparing move: 9D SLAE 11
+Comparing move: 9E MAE 12
+Comparing move: 9E MAES 15
+Comparing move: 9E SAE 10
+Comparing move: 9E TAE 10
+Comparing move: 9E TAES 13
+Comparing move: 9F FE 12
+Comparing move: 9D SAFE 14
+Comparing move: 9F FEM 19
+Comparing move: 9F FEMAL 28
+Comparing move: 9F FEMALS 29
+Comparing move: 9F FES 15
+Comparing move: 9F FET 15
+Comparing move: 9F FETA 23
+Comparing move: 9F FETAL 24
+Comparing move: 9F FETAS 24
+Comparing move: 9E ALE 10
+Comparing move: 9D MALE 13
+Comparing move: 9D MALES 16
+Comparing move: 9D SALE 11
+Comparing move: 9D SALET 14
+Comparing move: 9D TALE 11
+Comparing move: 9C STALE 13
+Comparing move: 9D TALES 14
+Comparing move: 9E ALES 13
+Comparing move: 9C SAMLET 18
+Comparing move: 9F LET 12
+Comparing move: 9F ME 11
+Comparing move: 9E AME 12
+Comparing move: 9D FAME 16
+Comparing move: 9D FAMES 19
+Comparing move: 9D LAME 13
+Comparing move: 9C FLAME 21
+Comparing move: 9C FLAMES 24
+Comparing move: 9D LAMES 16
+Comparing move: 9D SAME 13
+Comparing move: 9D TAME 13
+Comparing move: 9D TAMES 16
+Comparing move: 9E AMES 15
+Comparing move: 9D ALME 13
+Comparing move: 9D ALMES 16
+Comparing move: 9F MES 14
+Comparing move: 9F MESA 22
+Comparing move: 9F MESAL 23
+Comparing move: 9F MET 14
+Comparing move: 9F META 22
+Comparing move: 9F METAL 23
+Comparing move: 9F METALS 24
+Comparing move: 9D LASE 11
+Comparing move: 9D MASE 13
+Comparing move: 9D TASE 11
+Comparing move: 9C FALSE 19
+Comparing move: 9F SET 12
+Comparing move: 9F SETA 20
+Comparing move: 9F SETAL 21
+Comparing move: 9F TE 9
+Comparing move: 9E ATE 10
+Comparing move: 9D FATE 14
+Comparing move: 9D FATES 17
+Comparing move: 9D LATE 11
+Comparing move: 9C SLATE 13
+Comparing move: 9D MATE 13
+Comparing move: 9D MATES 16
+Comparing move: 9D SATE 11
+Comparing move: 9D SATEM 18
+Comparing move: 9E ATES 13
+Comparing move: 9E STEM 17
+Comparing move: 9F TES 12
+Comparing move: 9G EM 15
+Comparing move: 9G ES 11
+Comparing move: 9G ET 11
+Comparing move: 9G ETA 19
+Comparing move: 9G ETAS 20
+Comparing move: 9F AM 17
+Comparing move: 9D LEAM 19
+Comparing move: 9C FLEAM 27
+Comparing move: 9C FLEAMS 30
+Comparing move: 9D LEAMS 22
+Comparing move: 9D SEAM 19
+Comparing move: 9D TEAM 19
+Comparing move: 9C STEAM 21
+Comparing move: 9D TEAMS 22
+Comparing move: 9E LAM 18
+Comparing move: 9D FLAM 22
+Comparing move: 9D FLAMS 25
+Comparing move: 9D SLAM 19
+Comparing move: 9E LAMS 21
+Comparing move: 9E SAM 18
+Comparing move: 9E TAM 18
+Comparing move: 9E TAMS 21
+Comparing move: 9F EM 17
+Comparing move: 9E FEM 21
+Comparing move: 9E FEMS 24
+Comparing move: 9C SATEM 21
+Comparing move: 9D STEM 19
+Comparing move: 9E TEMS 21
+Comparing move: 9F EMS 20
+Comparing move: 9E ALMS 21
+Comparing move: 9E ELM 18
+Comparing move: 9E ELMS 21
+Comparing move: 7F EA 9
+Comparing move: 7E LEA 10
+Comparing move: 7D FLEA 14
+Comparing move: 7D FLEAM 21
+Comparing move: 7D FLEAMS 29
+Comparing move: 7E LEAM 17
+Comparing move: 7E LEAMS 25
+Comparing move: 7E SEA 10
+Comparing move: 7E SEAM 17
+Comparing move: 7E TEA 10
+Comparing move: 7D STEAM 18
+Comparing move: 7E TEAM 17
+Comparing move: 7E TEAMS 25
+Comparing move: 7F FA 12
+Comparing move: 7F FAME 27
+Comparing move: 7F FAMES 28
+Comparing move: 7F LA 9
+Comparing move: 7D MELA 13
+Comparing move: 7D TELA 11
+Comparing move: 7C STELA 13
+Comparing move: 7E FLAM 20
+Comparing move: 7E FLAME 28
+Comparing move: 7E FLAMES 29
+Comparing move: 7E FLAMS 28
+Comparing move: 7C TESLA 13
+Comparing move: 7E SLAM 17
+Comparing move: 7F LAM 16
+Comparing move: 7F LAME 24
+Comparing move: 7F LAMES 25
+Comparing move: 7F LAMEST 26
+Comparing move: 7F LAMS 24
+Comparing move: 7F MA 11
+Comparing move: 7E SMA 12
+Comparing move: 7D MESA 13
+Comparing move: 7F SAM 16
+Comparing move: 7F SAME 24
+Comparing move: 7F SAMEL 25
+Comparing move: 7F TA 9
+Comparing move: 7E ETA 10
+Comparing move: 7D FETA 14
+Comparing move: 7D META 13
+Comparing move: 7D SETA 11
+Comparing move: 7C FESTA 19
+Comparing move: 7F TAM 16
+Comparing move: 7F TAME 24
+Comparing move: 7F TAMES 25
+Comparing move: 7F TAMS 24
+Comparing move: 7G AM 15
+Comparing move: 7G AME 23
+Comparing move: 7G AMES 24
+Comparing move: 7F AE 9
+Comparing move: 7E FAE 13
+Comparing move: 7D SLAE 11
+Comparing move: 7E MAE 12
+Comparing move: 7E SAE 10
+Comparing move: 7E TAE 10
+Comparing move: 7F FE 12
+Comparing move: 7D SAFE 14
+Comparing move: 7F FEM 19
+Comparing move: 7F FEMAL 28
+Comparing move: 7F FEMALS 29
+Comparing move: 7F FEMS 27
+Comparing move: 7E ALE 10
+Comparing move: 7D MALE 13
+Comparing move: 7D SALE 11
+Comparing move: 7D TALE 11
+Comparing move: 7C STALE 13
+Comparing move: 7F ME 11
+Comparing move: 7E AME 12
+Comparing move: 7D FAME 16
+Comparing move: 7D LAME 13
+Comparing move: 7C FLAME 21
+Comparing move: 7D SAME 13
+Comparing move: 7D TAME 13
+Comparing move: 7D ALME 13
+Comparing move: 7D LASE 11
+Comparing move: 7D MASE 13
+Comparing move: 7D TASE 11
+Comparing move: 7C FALSE 19
+Comparing move: 7F TE 9
+Comparing move: 7E ATE 10
+Comparing move: 7D FATE 14
+Comparing move: 7D LATE 11
+Comparing move: 7C SLATE 13
+Comparing move: 7D MATE 13
+Comparing move: 7D SATE 11
+Comparing move: 7D SATEM 18
+Comparing move: 7E STEM 17
+Comparing move: 7F TEMS 24
+Comparing move: 7G EM 15
+Comparing move: 7G EMS 23
+Comparing move: 7F AS 9
+Comparing move: 7E EAS 10
+Comparing move: 7D LEAS 11
+Comparing move: 7C FLEAS 19
+Comparing move: 7D TEAS 11
+Comparing move: 7E FAS 13
+Comparing move: 7E LAS 10
+Comparing move: 7C MELAS 17
+Comparing move: 7E MAS 12
+Comparing move: 7E TAS 10
+Comparing move: 7D ETAS 11
+Comparing move: 7C FETAS 19
+Comparing move: 7F ES 9
+Comparing move: 7D MAES 13
+Comparing move: 7D TAES 11
+Comparing move: 7E FES 13
+Comparing move: 7D ALES 11
+Comparing move: 7C MALES 17
+Comparing move: 7C TALES 13
+Comparing move: 7E MES 12
+Comparing move: 7D AMES 13
+Comparing move: 7C FAMES 21
+Comparing move: 7C LAMES 15
+Comparing move: 7B FLAMES 19
+Comparing move: 7C TAMES 15
+Comparing move: 7C ALMES 15
+Comparing move: 7E TES 10
+Comparing move: 7D ATES 11
+Comparing move: 7C FATES 19
+Comparing move: 7C MATES 17
+Comparing move: 7C LEAFS 16
+Comparing move: 7E EFS 13
+Comparing move: 7C ALEFS 16
+Comparing move: 7D TEFS 14
+Comparing move: 7D ALFS 14
+Comparing move: 7D ELFS 14
+Comparing move: 7E ALS 10
+Comparing move: 7C FEALS 19
+Comparing move: 7C MEALS 17
+Comparing move: 7C TEALS 13
+Comparing move: 7D MALS 13
+Comparing move: 7B FEMALS 19
+Comparing move: 7B METALS 16
+Comparing move: 7E ELS 10
+Comparing move: 7C TAELS 13
+Comparing move: 7D MELS 13
+Comparing move: 7D TELS 11
+Comparing move: 7C LEAMS 15
+Comparing move: 7B FLEAMS 19
+Comparing move: 7C TEAMS 15
+Comparing move: 7D LAMS 13
+Comparing move: 7C FLAMS 21
+Comparing move: 7D TAMS 13
+Comparing move: 7E EMS 12
+Comparing move: 7D FEMS 16
+Comparing move: 7D TEMS 13
+Comparing move: 7D ALMS 13
+Comparing move: 7D ELMS 13
+Comparing move: 7E ATS 10
+Comparing move: 7D EATS 11
+Comparing move: 7C FEATS 19
+Comparing move: 7C LEATS 13
+Comparing move: 7C MEATS 17
+Comparing move: 7D FATS 14
+Comparing move: 7D LATS 11
+Comparing move: 7C FLATS 19
+Comparing move: 7D MATS 13
+Comparing move: 7D FETS 14
+Comparing move: 7D LETS 11
+Comparing move: 7D METS 13
+Comparing move: 7D EFTS 14
+Comparing move: 7C LEFTS 16
+Comparing move: 7D ALTS 11
+Comparing move: 7C MALTS 17
+Comparing move: 7D ELTS 11
+Comparing move: 7C FELTS 19
+Comparing move: 7C MELTS 17
+Comparing move: 7G SMA 23
+Comparing move: 7G SMALT 25
+Comparing move: 7G SMELT 25
+Comparing move: 7H MA 15
+Comparing move: 7H MAE 16
+Comparing move: 7H MAES 17
+Comparing move: 7H MAL 16
+Comparing move: 7H MALE 17
+Comparing move: 7H MALES 18
+Comparing move: 7H MALS 17
+Comparing move: 7H MALT 17
+Comparing move: 7H MALTS 18
+Comparing move: 7H MAS 16
+Comparing move: 7H MASE 17
+Comparing move: 7H MAST 17
+Comparing move: 7H MAT 16
+Comparing move: 7H MATE 17
+Comparing move: 7H MATES 18
+Comparing move: 7H MATS 17
+Comparing move: 7H ME 15
+Comparing move: 7H MEAL 17
+Comparing move: 7H MEALS 18
+Comparing move: 7H MEAT 17
+Comparing move: 7H MEATS 18
+Comparing move: 7H MEL 16
+Comparing move: 7H MELA 17
+Comparing move: 7H MELAS 18
+Comparing move: 7H MELS 17
+Comparing move: 7H MELT 17
+Comparing move: 7H MELTS 18
+Comparing move: 7H MES 16
+Comparing move: 7H MESA 17
+Comparing move: 7H MESAL 18
+Comparing move: 7H MET 16
+Comparing move: 7H META 17
+Comparing move: 7H METAL 18
+Comparing move: 7H METALS 20
+Comparing move: 7H METS 17
+Comparing move: 9H MA 15
+Comparing move: 9H MAE 16
+Comparing move: 9H MAES 17
+Comparing move: 9H MAL 16
+Comparing move: 9H MALE 17
+Comparing move: 9H MALES 18
+Comparing move: 9H MALS 17
+Comparing move: 9H MALT 17
+Comparing move: 9H MALTS 18
+Comparing move: 9H MAS 16
+Comparing move: 9H MASE 17
+Comparing move: 9H MAST 17
+Comparing move: 9H MAT 16
+Comparing move: 9H MATE 17
+Comparing move: 9H MATES 18
+Comparing move: 9H MATS 17
+Comparing move: 9H ME 15
+Comparing move: 9H MEAL 17
+Comparing move: 9H MEALS 18
+Comparing move: 9H MEAT 17
+Comparing move: 9H MEATS 18
+Comparing move: 9H MEL 16
+Comparing move: 9H MELA 17
+Comparing move: 9H MELAS 18
+Comparing move: 9H MELS 17
+Comparing move: 9H MELT 17
+Comparing move: 9H MELTS 18
+Comparing move: 9H MES 16
+Comparing move: 9H MESA 17
+Comparing move: 9H MESAL 18
+Comparing move: 9H MET 16
+Comparing move: 9H META 17
+Comparing move: 9H METAL 18
+Comparing move: 9H METALS 20
+Comparing move: 9H METS 17
+Comparing move: 9H SAE 12
+Comparing move: 9H SAFE 16
+Comparing move: 9H SAFT 16
+Comparing move: 9H SAL 12
+Comparing move: 9H SALE 13
+Comparing move: 9H SALET 14
+Comparing move: 9H SALT 13
+Comparing move: 9H SAM 14
+Comparing move: 9H SAME 15
+Comparing move: 9H SAMEL 16
+Comparing move: 9H SAMLET 18
+Comparing move: 9H SAT 12
+Comparing move: 9H SATE 13
+Comparing move: 9H SATEM 16
+Comparing move: 9H SEA 12
+Comparing move: 9H SEAL 13
+Comparing move: 9H SEAM 15
+Comparing move: 9H SEAT 13
+Comparing move: 9H SEL 12
+Comparing move: 9H SELF 16
+Comparing move: 9H SET 12
+Comparing move: 9H SETA 13
+Comparing move: 9H SETAL 14
+Comparing move: 9H SMA 20
+Comparing move: 9H SMALT 22
+Comparing move: 9H SMELT 22
+Comparing move: 9H TA 11
+Comparing move: 9H TAE 12
+Comparing move: 9H TAEL 13
+Comparing move: 9H TAELS 14
+Comparing move: 9H TAES 13
+Comparing move: 9H TALE 13
+Comparing move: 9H TALES 14
+Comparing move: 9H TAM 14
+Comparing move: 9H TAME 15
+Comparing move: 9H TAMES 16
+Comparing move: 9H TAMS 15
+Comparing move: 9H TAS 12
+Comparing move: 9H TASE 13
+Comparing move: 9H TE 11
+Comparing move: 9H TEA 12
+Comparing move: 9H TEAL 13
+Comparing move: 9H TEALS 14
+Comparing move: 9H TEAM 15
+Comparing move: 9H TEAMS 16
+Comparing move: 9H TEAS 13
+Comparing move: 9H TEF 15
+Comparing move: 9H TEFS 16
+Comparing move: 9H TEL 12
+Comparing move: 9H TELA 13
+Comparing move: 9H TELS 13
+Comparing move: 9H TEMS 15
+Comparing move: 9H TES 12
+Comparing move: 9H TESLA 14
+Comparing move: 9I AE 9
+Comparing move: 9I AFT 13
+Comparing move: 9I AL 9
+Comparing move: 9I ALE 10
+Comparing move: 9I ALEF 14
+Comparing move: 9I ALEFS 16
+Comparing move: 9I ALEFT 16
+Comparing move: 9I ALES 11
+Comparing move: 9I ALF 13
+Comparing move: 9I ALFS 14
+Comparing move: 9I ALME 13
+Comparing move: 9I ALMES 15
+Comparing move: 9I ALMS 13
+Comparing move: 9I ALS 10
+Comparing move: 9I ALT 10
+Comparing move: 9I ALTS 11
+Comparing move: 9I AM 11
+Comparing move: 9I AME 12
+Comparing move: 9I AMES 13
+Comparing move: 9I AS 9
+Comparing move: 9I AT 9
+Comparing move: 9I ATE 10
+Comparing move: 9I ATES 11
+Comparing move: 9I ATS 10
+Comparing move: 9I EA 9
+Comparing move: 9I EAS 10
+Comparing move: 9I EAST 11
+Comparing move: 9I EAT 10
+Comparing move: 9I EATS 11
+Comparing move: 9I EF 12
+Comparing move: 9I EFS 13
+Comparing move: 9I EFT 13
+Comparing move: 9I EFTS 14
+Comparing move: 9I EL 9
+Comparing move: 9I ELF 13
+Comparing move: 9I ELFS 14
+Comparing move: 9I ELM 12
+Comparing move: 9I ELMS 13
+Comparing move: 9I ELS 10
+Comparing move: 9I ELT 10
+Comparing move: 9I ELTS 11
+Comparing move: 9I EM 11
+Comparing move: 9I EMS 12
+Comparing move: 9I ES 9
+Comparing move: 9I EST 10
+Comparing move: 9I ET 9
+Comparing move: 9I ETA 10
+Comparing move: 9I ETAS 11
+Comparing move: 9I MA 17
+Comparing move: 9I MAE 18
+Comparing move: 9I MAES 19
+Comparing move: 9I MAL 18
+Comparing move: 9I MALE 19
+Comparing move: 9I MALES 21
+Comparing move: 9I MALS 19
+Comparing move: 9I MALT 19
+Comparing move: 9I MALTS 21
+Comparing move: 9I MAS 18
+Comparing move: 9I MASE 19
+Comparing move: 9I MAST 19
+Comparing move: 9I MAT 18
+Comparing move: 9I MATE 19
+Comparing move: 9I MATES 21
+Comparing move: 9I MATS 19
+Comparing move: 9I ME 17
+Comparing move: 9I MEAL 19
+Comparing move: 9I MEALS 21
+Comparing move: 9I MEAT 19
+Comparing move: 9I MEATS 21
+Comparing move: 9I MEL 18
+Comparing move: 9I MELA 19
+Comparing move: 9I MELAS 21
+Comparing move: 9I MELS 19
+Comparing move: 9I MELT 19
+Comparing move: 9I MELTS 21
+Comparing move: 9I MES 18
+Comparing move: 9I MESA 19
+Comparing move: 9I MESAL 21
+Comparing move: 9I MET 18
+Comparing move: 9I META 19
+Comparing move: 9I METAL 21
+Comparing move: 9I METALS 22
+Comparing move: 9I METS 19
+Comparing move: 7I AE 9
+Comparing move: 7I AFT 13
+Comparing move: 7I AL 9
+Comparing move: 7I ALE 10
+Comparing move: 7I ALEF 14
+Comparing move: 7I ALEFS 16
+Comparing move: 7I ALEFT 16
+Comparing move: 7I ALES 11
+Comparing move: 7I ALF 13
+Comparing move: 7I ALFS 14
+Comparing move: 7I ALME 13
+Comparing move: 7I ALMES 15
+Comparing move: 7I ALMS 13
+Comparing move: 7I ALS 10
+Comparing move: 7I ALT 10
+Comparing move: 7I ALTS 11
+Comparing move: 7I AM 11
+Comparing move: 7I AME 12
+Comparing move: 7I AMES 13
+Comparing move: 7I AS 9
+Comparing move: 7I AT 9
+Comparing move: 7I ATE 10
+Comparing move: 7I ATES 11
+Comparing move: 7I ATS 10
+Comparing move: 7I EA 9
+Comparing move: 7I EAS 10
+Comparing move: 7I EAST 11
+Comparing move: 7I EAT 10
+Comparing move: 7I EATS 11
+Comparing move: 7I EF 12
+Comparing move: 7I EFS 13
+Comparing move: 7I EFT 13
+Comparing move: 7I EFTS 14
+Comparing move: 7I EL 9
+Comparing move: 7I ELF 13
+Comparing move: 7I ELFS 14
+Comparing move: 7I ELM 12
+Comparing move: 7I ELMS 13
+Comparing move: 7I ELS 10
+Comparing move: 7I ELT 10
+Comparing move: 7I ELTS 11
+Comparing move: 7I EM 11
+Comparing move: 7I EMS 12
+Comparing move: 7I ES 9
+Comparing move: 7I EST 10
+Comparing move: 7I ET 9
+Comparing move: 7I ETA 10
+Comparing move: 7I ETAS 11
+Comparing move: 7I SAE 10
+Comparing move: 7I SAFE 14
+Comparing move: 7I SAFT 14
+Comparing move: 7I SAL 10
+Comparing move: 7I SALE 11
+Comparing move: 7I SALET 13
+Comparing move: 7I SALT 11
+Comparing move: 7I SAM 12
+Comparing move: 7I SAME 13
+Comparing move: 7I SAMEL 15
+Comparing move: 7I SAMLET 16
+Comparing move: 7I SAT 10
+Comparing move: 7I SATE 11
+Comparing move: 7I SATEM 17
+Comparing move: 7I SEA 10
+Comparing move: 7I SEAL 11
+Comparing move: 7I SEAM 13
+Comparing move: 7I SEAT 11
+Comparing move: 7I SEL 10
+Comparing move: 7I SELF 14
+Comparing move: 7I SET 10
+Comparing move: 7I SETA 11
+Comparing move: 7I SETAL 13
+Comparing move: 7I SLAE 11
+Comparing move: 7I SLAM 13
+Comparing move: 7I SLAT 11
+Comparing move: 7I SLATE 13
+Comparing move: 7I SMA 12
+Comparing move: 7I SMALT 15
+Comparing move: 7I SMELT 15
+Comparing move: 7I ST 9
+Comparing move: 7I STALE 13
+Comparing move: 7I STEAL 13
+Comparing move: 7I STEAM 17
+Comparing move: 7I STELA 13
+Comparing move: 7I STEM 13
+Comparing move: I7 A(H) 6
+Comparing move: I6 FA(H) 10
+Comparing move: I6 FA(H)S 12
+Comparing move: I6 LA(H) 7
+Comparing move: I4 SELA(H) 9
+Comparing move: I6 LA(H)S 9
+Comparing move: I7 A(H)EM 11
+Comparing move: I7 A(H)S 8
+Comparing move: I7 E(H) 6
+Comparing move: I6 FE(H) 10
+Comparing move: I6 FE(H)M 16
+Comparing move: I6 FE(H)S 12
+Comparing move: I6 ME(H) 9
+Comparing move: I4 ALME(H) 11
+Comparing move: I4 ALME(H)S 13
+Comparing move: I7 E(H)S 8
+Comparing move: I7 S(H) 6
+Comparing move: I6 AS(H) 7
+Comparing move: I4 LEAS(H) 9
+Comparing move: I5 FAS(H) 11
+Comparing move: I5 LAS(H) 8
+Comparing move: I4 FLAS(H) 12
+Comparing move: I5 MAS(H) 10
+Comparing move: I5 TAS(H) 8
+Comparing move: I6 AS(H)ET 10
+Comparing move: I4 FLES(H) 12
+Comparing move: I5 MES(H) 10
+Comparing move: I7 S(H)A 8
+Comparing move: I7 S(H)AFT 13
+Comparing move: I7 S(H)ALE 10
+Comparing move: I7 S(H)ALM 12
+Comparing move: I7 S(H)ALT 10
+Comparing move: I7 S(H)AM 11
+Comparing move: I7 S(H)AME 12
+Comparing move: I7 S(H)AT 9
+Comparing move: I7 S(H)E 8
+Comparing move: I7 S(H)EA 9
+Comparing move: I7 S(H)EAF 13
+Comparing move: I7 S(H)EAL 10
+Comparing move: I7 S(H)ELF 13
+Comparing move: I7 S(H)ELTA 11
+Comparing move: I7 S(H)ET 9
+Comparing move: I5 EAT(H) 8
+Comparing move: I4 MEAT(H) 11
+Comparing move: I3 SMEAT(H) 13
+Comparing move: I4 MEAT(H)S 13
+Comparing move: I5 LAT(H) 8
+Comparing move: I5 LAT(H)E 10
+Comparing move: I5 LAT(H)ES 11
+Comparing move: I5 LAT(H)S 10
+Comparing move: I5 MAT(H) 10
+Comparing move: I5 MAT(H)S 12
+Comparing move: I6 ET(H) 7
+Comparing move: I5 MET(H) 10
+Comparing move: I5 MET(H)S 12
+Comparing move: I6 ET(H)AL 10
+Comparing move: I6 ET(H)ALS 11
+Comparing move: I6 ET(H)S 9
+Comparing move: I7 T(H)AE 9
+Comparing move: I7 T(H)ALE 10
+Comparing move: I7 T(H)E 8
+Comparing move: I7 T(H)ELF 13
+Comparing move: I7 T(H)EM 11
+Comparing move: I7 T(H)EMA 12
+Comparing move: I8 (H)A 6
+Comparing move: I8 (H)AE 7
+Comparing move: I8 (H)AEM 10
+Comparing move: I8 (H)AEMS 11
+Comparing move: I8 (H)AES 8
+Comparing move: I8 (H)AET 8
+Comparing move: I8 (H)AETS 9
+Comparing move: I8 (H)AFT 11
+Comparing move: I8 (H)AFTS 12
+Comparing move: I8 (H)ALE 8
+Comparing move: I8 (H)ALES 9
+Comparing move: I8 (H)ALEST 11
+Comparing move: I8 (H)ALF 11
+Comparing move: I8 (H)ALFS 12
+Comparing move: I8 (H)ALM 10
+Comparing move: I8 (H)ALMS 11
+Comparing move: I8 (H)ALSE 9
+Comparing move: I8 (H)ALT 8
+Comparing move: I8 (H)ALTS 9
+Comparing move: I8 (H)AM 9
+Comparing move: I8 (H)AME 10
+Comparing move: I8 (H)AMES 11
+Comparing move: I8 (H)AMLET 13
+Comparing move: I8 (H)AMLETS 14
+Comparing move: I8 (H)AMS 10
+Comparing move: I8 (H)AS 7
+Comparing move: I8 (H)ASLET 11
+Comparing move: I8 (H)AST 8
+Comparing move: I8 (H)ASTE 9
+Comparing move: I8 (H)AT 7
+Comparing move: I8 (H)ATE 8
+Comparing move: I8 (H)ATES 9
+Comparing move: I8 (H)ATS 8
+Comparing move: I8 (H)E 6
+Comparing move: I8 (H)EAL 8
+Comparing move: I8 (H)EALS 9
+Comparing move: I8 (H)EAST 9
+Comparing move: I8 (H)EAT 8
+Comparing move: I8 (H)EATS 9
+Comparing move: I8 (H)EFT 11
+Comparing move: I8 (H)EFTS 12
+Comparing move: I8 (H)ELM 10
+Comparing move: I8 (H)ELMS 11
+Comparing move: I8 (H)EM 9
+Comparing move: I8 (H)EMAL 11
+Comparing move: I8 (H)EMS 10
+Comparing move: I8 (H)ES 7
+Comparing move: I8 (H)EST 8
+Comparing move: I8 (H)ET 7
+Comparing move: I8 (H)ETS 8
+Comparing move: I8 (H)M 10
+Comparing move: G7 A(H) 6
+Comparing move: G6 FA(H) 10
+Comparing move: G6 FA(H)S 12
+Comparing move: G6 LA(H) 7
+Comparing move: G4 SELA(H) 9
+Comparing move: G6 LA(H)S 9
+Comparing move: G7 A(H)EM 11
+Comparing move: G7 A(H)S 8
+Comparing move: G7 E(H) 6
+Comparing move: G6 FE(H) 10
+Comparing move: G6 FE(H)M 16
+Comparing move: G6 FE(H)S 12
+Comparing move: G6 ME(H) 9
+Comparing move: G4 ALME(H) 11
+Comparing move: G4 ALME(H)S 13
+Comparing move: G7 E(H)S 8
+Comparing move: G7 S(H) 6
+Comparing move: G6 AS(H) 7
+Comparing move: G4 LEAS(H) 9
+Comparing move: G5 FAS(H) 11
+Comparing move: G5 LAS(H) 8
+Comparing move: G4 FLAS(H) 12
+Comparing move: G5 MAS(H) 10
+Comparing move: G5 TAS(H) 8
+Comparing move: G6 AS(H)ET 10
+Comparing move: G4 FLES(H) 12
+Comparing move: G5 MES(H) 10
+Comparing move: G7 S(H)A 8
+Comparing move: G7 S(H)AFT 13
+Comparing move: G7 S(H)ALE 10
+Comparing move: G7 S(H)ALM 12
+Comparing move: G7 S(H)ALT 10
+Comparing move: G7 S(H)AM 11
+Comparing move: G7 S(H)AME 12
+Comparing move: G7 S(H)AT 9
+Comparing move: G7 S(H)E 8
+Comparing move: G7 S(H)EA 9
+Comparing move: G7 S(H)EAF 13
+Comparing move: G7 S(H)EAL 10
+Comparing move: G7 S(H)ELF 13
+Comparing move: G7 S(H)ELTA 11
+Comparing move: G7 S(H)ET 9
+Comparing move: G5 EAT(H) 8
+Comparing move: G4 MEAT(H) 11
+Comparing move: G3 SMEAT(H) 13
+Comparing move: G4 MEAT(H)S 13
+Comparing move: G5 LAT(H) 8
+Comparing move: G5 LAT(H)E 10
+Comparing move: G5 LAT(H)ES 11
+Comparing move: G5 LAT(H)S 10
+Comparing move: G5 MAT(H) 10
+Comparing move: G5 MAT(H)S 12
+Comparing move: G6 ET(H) 7
+Comparing move: G5 MET(H) 10
+Comparing move: G5 MET(H)S 12
+Comparing move: G6 ET(H)AL 10
+Comparing move: G6 ET(H)ALS 11
+Comparing move: G6 ET(H)S 9
+Comparing move: G7 T(H)AE 9
+Comparing move: G7 T(H)ALE 10
+Comparing move: G7 T(H)E 8
+Comparing move: G7 T(H)ELF 13
+Comparing move: G7 T(H)EM 11
+Comparing move: G7 T(H)EMA 12
+Comparing move: G8 (H)A 6
+Comparing move: G8 (H)AE 7
+Comparing move: G8 (H)AEM 10
+Comparing move: G8 (H)AEMS 11
+Comparing move: G8 (H)AES 8
+Comparing move: G8 (H)AET 8
+Comparing move: G8 (H)AETS 9
+Comparing move: G8 (H)AFT 11
+Comparing move: G8 (H)AFTS 12
+Comparing move: G8 (H)ALE 8
+Comparing move: G8 (H)ALES 9
+Comparing move: G8 (H)ALEST 11
+Comparing move: G8 (H)ALF 11
+Comparing move: G8 (H)ALFS 12
+Comparing move: G8 (H)ALM 10
+Comparing move: G8 (H)ALMS 11
+Comparing move: G8 (H)ALSE 9
+Comparing move: G8 (H)ALT 8
+Comparing move: G8 (H)ALTS 9
+Comparing move: G8 (H)AM 9
+Comparing move: G8 (H)AME 10
+Comparing move: G8 (H)AMES 11
+Comparing move: G8 (H)AMLET 13
+Comparing move: G8 (H)AMLETS 14
+Comparing move: G8 (H)AMS 10
+Comparing move: G8 (H)AS 7
+Comparing move: G8 (H)ASLET 11
+Comparing move: G8 (H)AST 8
+Comparing move: G8 (H)ASTE 9
+Comparing move: G8 (H)AT 7
+Comparing move: G8 (H)ATE 8
+Comparing move: G8 (H)ATES 9
+Comparing move: G8 (H)ATS 8
+Comparing move: G8 (H)E 6
+Comparing move: G8 (H)EAL 8
+Comparing move: G8 (H)EALS 9
+Comparing move: G8 (H)EAST 9
+Comparing move: G8 (H)EAT 8
+Comparing move: G8 (H)EATS 9
+Comparing move: G8 (H)EFT 11
+Comparing move: G8 (H)EFTS 12
+Comparing move: G8 (H)ELM 10
+Comparing move: G8 (H)ELMS 11
+Comparing move: G8 (H)EM 9
+Comparing move: G8 (H)EMAL 11
+Comparing move: G8 (H)EMS 10
+Comparing move: G8 (H)ES 7
+Comparing move: G8 (H)EST 8
+Comparing move: G8 (H)ET 7
+Comparing move: G8 (H)ETS 8
+Comparing move: G8 (H)M 10
+Playing move: 9D FLAM 22
+   A B C D E F G H I J K L M N O   -> Player 1                 IMRRRUV   18
+   ------------------------------     Player 2                 BEGSTTX   22
+ 1|=     '       =       '     = | --Tracking-----------------------------------
+ 2|  -       "       "       -   | AAAAAAAABCCDDDDEEEEEEEEEEEFGGIIIIIIIIJKLLLNNNNNNOOOOOOOOPPQRRRSSSTTTTUUVWWYYZ??  79
+ 3|    -       '   '       -     |
+ 4|'     -       '       -     ' |
+ 5|        -           -         |
+ 6|  "       "       "       "   |
+ 7|    '       '   '       '     |
+ 8|=     '     H U H     '     = |
+ 9|    ' F L A M   '       '     |
+10|  "       "       "       "   |
+11|        -           -         |
+12|'     -       '       -     ' |
+13|    -       '   '       -     |
+14|  -       "       "       -   |
+15|=     '       =       '     = |
+   ------------------------------
+
+   A B C D E F G H I J K L M N O   -> Player 1                 IMRRRUV   18
+   ------------------------------     Player 2                 BEGSTTX   22
+ 1|=     '       =       '     = | --Tracking-----------------------------------
+ 2|  -       "       "       -   | AAAAAAAABCCDDDDEEEEEEEEEEEFGGIIIIIIIIJKLLLNNNNNNOOOOOOOOPPQRRRSSSTTTTUUVWWYYZ??  79
+ 3|    -       '   '       -     |
+ 4|'     -       '       -     ' |
+ 5|        -           -         |
+ 6|  "       "       "       "   |
+ 7|    '       '   '       '     |
+ 8|=     '     H U H     '     = |
+ 9|    ' F L A M   '       '     |
+10|  "       "       "       "   |
+11|        -           -         |
+12|'     -       '       -     ' |
+13|    -       '   '       -     |
+14|  -       "       "       -   |
+15|=     '       =       '     = |
+   ------------------------------
+
+Comparing move: (exch IMRRRUV)
+Comparing move: (exch IMRRUV)
+Comparing move: (exch RRUV)
+playthrough_blocks: 0, tiles_played: 1
+wmp_move_gen_get_anchor: index: 0
+playthrough_blocks: 0, tiles_played: 2
+wmp_move_gen_get_anchor: index: 1
+playthrough_blocks: 0, tiles_played: 3
+wmp_move_gen_get_anchor: index: 2
+playthrough_blocks: 0, tiles_played: 4
+wmp_move_gen_get_anchor: index: 3
+playthrough_blocks: 0, tiles_played: 5
+wmp_move_gen_get_anchor: index: 4
+playthrough_blocks: 0, tiles_played: 1
+wmp_move_gen_get_anchor: index: 0
+playthrough_blocks: 0, tiles_played: 2
+wmp_move_gen_get_anchor: index: 1
+playthrough_blocks: 0, tiles_played: 3
+wmp_move_gen_get_anchor: index: 2
+playthrough_blocks: 0, tiles_played: 4
+wmp_move_gen_get_anchor: index: 3
+playthrough_blocks: 0, tiles_played: 5
+wmp_move_gen_get_anchor: index: 4
+playthrough_blocks: 0, tiles_played: 1
+wmp_move_gen_get_anchor: index: 0
+playthrough_blocks: 0, tiles_played: 2
+wmp_move_gen_get_anchor: index: 1
+playthrough_blocks: 0, tiles_played: 3
+wmp_move_gen_get_anchor: index: 2
+playthrough_blocks: 0, tiles_played: 4
+wmp_move_gen_get_anchor: index: 3
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: 
+adding playthrough letter in shadow_start_playthrough: H
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: H
+adding playthrough letter in shadow_start_playthrough: U
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: HU
+adding playthrough letter in shadow_start_playthrough: H
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: HHU
+incrementing blocks in shadow_start_playthrough
+playthrough_blocks: 1, tiles_played: 1
+wmp_move_gen_get_anchor: index: 8
+playthrough_blocks: 1, tiles_played: 2
+wmp_move_gen_get_anchor: index: 9
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: 
+adding playthrough letter in shadow_start_playthrough: M
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: M
+adding playthrough letter in shadow_start_playthrough: A
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: AM
+adding playthrough letter in shadow_start_playthrough: L
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: ALM
+adding playthrough letter in shadow_start_playthrough: F
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: AFLM
+incrementing blocks in shadow_start_playthrough
+playthrough_blocks: 1, tiles_played: 1
+wmp_move_gen_get_anchor: index: 8
+playthrough_blocks: 1, tiles_played: 2
+wmp_move_gen_get_anchor: index: 9
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 1
+wmp_move_gen_get_anchor: index: 8
+playthrough_blocks: 1, tiles_played: 2
+wmp_move_gen_get_anchor: index: 9
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 2
+wmp_move_gen_get_anchor: index: 9
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 0, tiles_played: 1
+wmp_move_gen_get_anchor: index: 0
+playthrough_blocks: 0, tiles_played: 2
+wmp_move_gen_get_anchor: index: 1
+playthrough_blocks: 0, tiles_played: 3
+wmp_move_gen_get_anchor: index: 2
+playthrough_blocks: 0, tiles_played: 4
+wmp_move_gen_get_anchor: index: 3
+playthrough_blocks: 0, tiles_played: 5
+wmp_move_gen_get_anchor: index: 4
+playthrough_blocks: 0, tiles_played: 1
+wmp_move_gen_get_anchor: index: 0
+playthrough_blocks: 0, tiles_played: 2
+wmp_move_gen_get_anchor: index: 1
+playthrough_blocks: 0, tiles_played: 3
+wmp_move_gen_get_anchor: index: 2
+playthrough_blocks: 0, tiles_played: 4
+wmp_move_gen_get_anchor: index: 3
+playthrough_blocks: 0, tiles_played: 5
+wmp_move_gen_get_anchor: index: 4
+playthrough_blocks: 0, tiles_played: 1
+wmp_move_gen_get_anchor: index: 0
+playthrough_blocks: 0, tiles_played: 2
+wmp_move_gen_get_anchor: index: 1
+playthrough_blocks: 0, tiles_played: 3
+wmp_move_gen_get_anchor: index: 2
+playthrough_blocks: 0, tiles_played: 4
+wmp_move_gen_get_anchor: index: 3
+playthrough_blocks: 0, tiles_played: 5
+wmp_move_gen_get_anchor: index: 4
+playthrough_blocks: 0, tiles_played: 1
+wmp_move_gen_get_anchor: index: 0
+playthrough_blocks: 0, tiles_played: 2
+wmp_move_gen_get_anchor: index: 1
+playthrough_blocks: 0, tiles_played: 3
+wmp_move_gen_get_anchor: index: 2
+playthrough_blocks: 0, tiles_played: 4
+wmp_move_gen_get_anchor: index: 3
+playthrough_blocks: 0, tiles_played: 5
+wmp_move_gen_get_anchor: index: 4
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: 
+adding playthrough letter in shadow_start_playthrough: F
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: F
+incrementing blocks in shadow_start_playthrough
+playthrough_blocks: 1, tiles_played: 1
+wmp_move_gen_get_anchor: index: 8
+playthrough_blocks: 1, tiles_played: 2
+wmp_move_gen_get_anchor: index: 9
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 1
+wmp_move_gen_get_anchor: index: 8
+playthrough_blocks: 1, tiles_played: 2
+wmp_move_gen_get_anchor: index: 9
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 2
+wmp_move_gen_get_anchor: index: 9
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: 
+adding playthrough letter in shadow_start_playthrough: L
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: L
+incrementing blocks in shadow_start_playthrough
+playthrough_blocks: 1, tiles_played: 1
+wmp_move_gen_get_anchor: index: 8
+playthrough_blocks: 1, tiles_played: 2
+wmp_move_gen_get_anchor: index: 9
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 1
+wmp_move_gen_get_anchor: index: 8
+playthrough_blocks: 1, tiles_played: 2
+wmp_move_gen_get_anchor: index: 9
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 2
+wmp_move_gen_get_anchor: index: 9
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: 
+adding playthrough letter in shadow_start_playthrough: A
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: A
+incrementing blocks in shadow_start_playthrough
+playthrough_blocks: 1, tiles_played: 1
+wmp_move_gen_get_anchor: index: 8
+playthrough_blocks: 1, tiles_played: 2
+wmp_move_gen_get_anchor: index: 9
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: 
+adding playthrough letter in shadow_start_playthrough: M
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: M
+adding playthrough letter in shadow_start_playthrough: H
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: HM
+incrementing blocks in shadow_start_playthrough
+playthrough_blocks: 1, tiles_played: 1
+wmp_move_gen_get_anchor: index: 8
+playthrough_blocks: 1, tiles_played: 2
+wmp_move_gen_get_anchor: index: 9
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: 
+adding playthrough letter in shadow_start_playthrough: U
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: U
+incrementing blocks in shadow_start_playthrough
+playthrough_blocks: 1, tiles_played: 2
+wmp_move_gen_get_anchor: index: 9
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 1
+wmp_move_gen_get_anchor: index: 8
+playthrough_blocks: 1, tiles_played: 2
+wmp_move_gen_get_anchor: index: 9
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 2
+wmp_move_gen_get_anchor: index: 9
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: 
+adding playthrough letter in shadow_start_playthrough: H
+wmp_move_gen_print_playthrough playthrough blocks: 0, tiles: H
+incrementing blocks in shadow_start_playthrough
+playthrough_blocks: 1, tiles_played: 1
+wmp_move_gen_get_anchor: index: 8
+playthrough_blocks: 1, tiles_played: 2
+wmp_move_gen_get_anchor: index: 9
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 1
+wmp_move_gen_get_anchor: index: 8
+playthrough_blocks: 1, tiles_played: 2
+wmp_move_gen_get_anchor: index: 9
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 2
+wmp_move_gen_get_anchor: index: 9
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 3
+wmp_move_gen_get_anchor: index: 10
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 4
+wmp_move_gen_get_anchor: index: 11
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 5
+wmp_move_gen_get_anchor: index: 12
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 1, tiles_played: 6
+wmp_move_gen_get_anchor: index: 13
+playthrough_blocks: 0, tiles_played: 2
+wmp_move_gen_get_anchor: index: 1
+playthrough_blocks: 0, tiles_played: 3
+wmp_move_gen_get_anchor: index: 2
+playthrough_blocks: 0, tiles_played: 4
+wmp_move_gen_get_anchor: index: 3
+playthrough_blocks: 0, tiles_played: 5
+wmp_move_gen_get_anchor: index: 4
+playthrough_blocks: 0, tiles_played: 2
+wmp_move_gen_get_anchor: index: 1
+playthrough_blocks: 0, tiles_played: 3
+wmp_move_gen_get_anchor: index: 2
+playthrough_blocks: 0, tiles_played: 4
+wmp_move_gen_get_anchor: index: 3
+playthrough_blocks: 0, tiles_played: 5
+wmp_move_gen_get_anchor: index: 4
+playthrough_blocks: 0, tiles_played: 3
+wmp_move_gen_get_anchor: index: 2
+playthrough_blocks: 0, tiles_played: 4
+wmp_move_gen_get_anchor: index: 3
+playthrough_blocks: 0, tiles_played: 5
+wmp_move_gen_get_anchor: index: 4
+playthrough_blocks: 0, tiles_played: 4
+wmp_move_gen_get_anchor: index: 3
+playthrough_blocks: 0, tiles_played: 5
+wmp_move_gen_get_anchor: index: 4
+playthrough_blocks: 0, tiles_played: 5
+wmp_move_gen_get_anchor: index: 4
+Comparing move: 8G (HUH)U 10
+Comparing move: 9D (FLAM)M 16
+Comparing move: 9D (FLAM)M 16
+Comparing move: D8 I(F) 6
+Comparing move: D7 RI(F) 7
+Comparing move: D9 (F)IR 6
+Comparing move: D9 (F)IRM 18
+Comparing move: D9 (F)UM 8
+Comparing move: D9 (F)UR 6
+Comparing move: D9 (F)URR 14
+Comparing move: D8 I(F) 6
+Comparing move: D7 RI(F) 7
+Comparing move: D9 (F)IR 6
+Comparing move: D9 (F)IRM 18
+Comparing move: D9 (F)UM 8
+Comparing move: D9 (F)UR 6
+Comparing move: D9 (F)URR 14

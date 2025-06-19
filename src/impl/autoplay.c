@@ -23,6 +23,9 @@
 #include "move_gen.h"
 #include "rack_list.h"
 
+#include "../str/game_string.h"
+#include "../str/move_string.h"
+
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 
@@ -321,6 +324,11 @@ bool game_runner_is_game_over(GameRunner *game_runner) {
 
 void game_runner_play_move(AutoplayWorker *autoplay_worker,
                            GameRunner *game_runner, Move **move) {
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_game(sb, game_runner->game, NULL);
+  printf("%s\n", string_builder_peek(sb));
+  string_builder_destroy(sb);
+
   if (game_runner_is_game_over(game_runner)) {
     log_fatal("game runner attempted to play a move when the game is over");
   }
@@ -357,6 +365,10 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     rack_copy(player_rack, &original_rack);
   }
   *move = get_top_equity_move(game, thread_index, game_runner->move_list);
+  StringBuilder *move_sb = string_builder_create();
+  string_builder_add_move(move_sb, game_get_board(game), *move, game_get_ld(game));
+  printf("Playing move: %s\n", string_builder_peek(move_sb));
+  string_builder_destroy(move_sb);
 
   if (lg_shared_data) {
     rack_list_add_rack(lg_shared_data->rack_list, player_rack,
