@@ -598,9 +598,9 @@ void test_config_wmp(void) {
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) == NULL);
 
   // wmp_create should have been called, but this does not guarantee that the
-  // wmp pointers differ what they were previously. We need some other way to
-  // validate that data was reloaded, but until then commenting this out because
-  // it breaks tests in release mode.
+  // wmp pointers differ from what they were previously. We need some other way
+  // to validate that data was reloaded, but until then commenting this out
+  // because it breaks tests in release mode.
 
   // assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) != wmp1);
   // assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) != wmp1);
