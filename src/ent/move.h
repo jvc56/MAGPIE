@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "../def/board_defs.h"
 #include "../def/game_history_defs.h"
@@ -211,17 +212,7 @@ static inline void move_set_all(Move *move, MachineLetter strip[],
 }
 
 static inline void move_copy(Move *dest_move, const Move *src_move) {
-  for (int i = 0; i < (BOARD_DIM); i++) {
-    dest_move->tiles[i] = src_move->tiles[i];
-  }
-  dest_move->score = src_move->score;
-  dest_move->row_start = src_move->row_start;
-  dest_move->col_start = src_move->col_start;
-  dest_move->tiles_played = src_move->tiles_played;
-  dest_move->tiles_length = src_move->tiles_length;
-  dest_move->equity = src_move->equity;
-  dest_move->dir = src_move->dir;
-  dest_move->move_type = src_move->move_type;
+  memcpy(dest_move, src_move, sizeof(Move));
 }
 
 static inline void move_set_as_pass(Move *move) {
