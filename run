@@ -21,6 +21,7 @@ else
         exit 1
     fi
     echo "Release tests passed, now running dev mode tests"
+    make clean
     make magpie_test
     ./bin/magpie_test $2
 fi
