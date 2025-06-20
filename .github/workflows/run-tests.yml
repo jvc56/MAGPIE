@@ -34,9 +34,6 @@ jobs:
       - name: Run unit tests
         run: ./run u && ./run u 21
 
-      - name: Build release
-        run: make clean && make magpie BUILD=release
-
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
