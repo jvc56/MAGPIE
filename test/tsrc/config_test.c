@@ -534,6 +534,7 @@ void test_config_wmp(void) {
   const PlayersData *players_data = config_get_players_data(config);
   WMP *wmp1 = NULL;
   WMP *wmp2 = NULL;
+  const char *invalid_wmp_name = "invalid wmp name";
 
   // Players start off with no wmp
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) == NULL);
@@ -579,6 +580,11 @@ void test_config_wmp(void) {
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) != NULL);
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) == wmp1);
 
+  // Update the name of wmp1 to confirm that the update is not persisted when
+  // the wmp is reloaded later in this test.
+  free(wmp1->name);
+  wmp1->name = string_duplicate(invalid_wmp_name);
+
   // Unset the wmp for player two
   test_config_load_error(config, "set -w2 false", ERROR_STATUS_SUCCESS,
                          error_stack);
@@ -597,15 +603,9 @@ void test_config_wmp(void) {
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) != NULL);
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) == NULL);
 
-  // wmp_create should have been called, but this does not guarantee that the
-  // wmp pointers differ from what they were previously. We need some other way
-  // to validate that data was reloaded, but until then commenting this out
-  // because it breaks tests in release mode.
-
-  // assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) != wmp1);
-  // assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) != wmp1);
-
+  // The wmp should have been reloaded from the lexicon name.
   wmp1 = players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0);
+  assert_strings_equal(wmp1->name, "CSW21");
 
   // Setting some unrelated fields shouldn't change the status of wmp
   test_config_load_error(config, "set -pfreq 100000", ERROR_STATUS_SUCCESS,

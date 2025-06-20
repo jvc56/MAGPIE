@@ -52,7 +52,6 @@ void win_pct_create_internal(const char *win_pct_name,
   }
 
   // Allocate memory for the 2D array
-  // FIXME: allocate a single contiguous block
   float **array =
       (float **)malloc_or_die(wp->max_tiles_unseen * sizeof(float *));
 
