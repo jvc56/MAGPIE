@@ -596,9 +596,15 @@ void test_config_wmp(void) {
                          error_stack);
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) != NULL);
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) == NULL);
-  // The wmp should be a different pointer now
-  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) != wmp1);
-  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) != wmp1);
+
+  // wmp_create should have been called, but this does not guarantee that the
+  // wmp pointers differ from what they were previously. We need some other way
+  // to validate that data was reloaded, but until then commenting this out
+  // because it breaks tests in release mode.
+
+  // assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) != wmp1);
+  // assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) != wmp1);
+
   wmp1 = players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0);
 
   // Setting some unrelated fields shouldn't change the status of wmp

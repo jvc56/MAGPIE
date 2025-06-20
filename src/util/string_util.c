@@ -79,6 +79,34 @@ void string_builder_add_formatted_string(StringBuilder *string_builder,
   free(formatted_string);
 }
 
+void string_builder_add_space_padded_string(StringBuilder *string_builder,
+                                            const char *string,
+                                            size_t total_length) {
+  // string is a format string potentially containing escape sequences, but must
+  // have no arguments.
+  string_builder_add_string(string_builder, string);
+  char *formatted_string = get_formatted_string(string);
+  const size_t printed_length = strlen(formatted_string);
+  const size_t number_of_spaces =
+      total_length > printed_length ? total_length - printed_length : 0;
+  string_builder_add_spaces(string_builder, number_of_spaces);
+  free(formatted_string);
+}
+
+void string_builder_add_table_row(StringBuilder *string_builder,
+                                  size_t cell_width, const char *left_cell,
+                                  const char *middle_cell,
+                                  const char *right_cell) {
+  // Cell strings are format strings potentially containing escape sequences,
+  // but must have no arguments.
+  string_builder_add_space_padded_string(string_builder, left_cell, cell_width);
+  string_builder_add_space_padded_string(string_builder, middle_cell,
+                                         cell_width);
+  string_builder_add_space_padded_string(string_builder, right_cell,
+                                         cell_width);
+  string_builder_add_string(string_builder, "\n");
+}
+
 void string_builder_add_spaces(StringBuilder *string_builder,
                                int number_of_spaces) {
   string_builder_add_formatted_string(string_builder, "%*s", number_of_spaces,

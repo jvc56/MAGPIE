@@ -179,7 +179,11 @@ static inline Equity gen_get_cutoff_equity_or_score(const MoveGen *gen) {
     log_fatal("gen_get_cutoff_equity_or_score called with "
               "MOVE_RECORD_ALL or "
               "MOVE_RECORD_ALL_SMALL");
-    break;
+#if defined(__has_builtin) && __has_builtin(__builtin_unreachable)
+    __builtin_unreachable();
+#else
+    return 0;
+#endif
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
     cutoff_equity_or_score =
         gen->best_move_equity_or_score - gen->max_equity_diff;
