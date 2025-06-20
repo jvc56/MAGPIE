@@ -173,6 +173,9 @@ BoardLayout *board_layout_create_default(const char *data_paths,
 }
 
 void board_layout_destroy(BoardLayout *bl) {
+  if (!bl) {
+    return;
+  }
   free(bl->name);
   free(bl);
 }

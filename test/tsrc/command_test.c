@@ -410,7 +410,8 @@ void test_process_command(const char *arg_string,
 
   MainArgs *main_args = get_main_args_from_string(arg_string_with_exec);
 
-  process_command(main_args->argc, main_args->argv);
+  process_command_with_data_paths(main_args->argc, main_args->argv,
+                                  DEFAULT_TEST_DATA_PATH);
   main_args_destroy(main_args);
 
   char *test_output = get_string_from_file_or_die(test_output_filename);
@@ -459,7 +460,7 @@ void test_process_command(const char *arg_string,
 void test_exec_single_command(void) {
   char *plies_error_substr = get_formatted_string(
       "error %d", ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
-  test_process_command("sim -lex CSW21 -it 1000 -plies 2h3", 0, NULL, 2,
+  test_process_command("sim -lex CSW21 -it 10 -plies 2h3", 0, NULL, 2,
                        plies_error_substr);
   free(plies_error_substr);
 
@@ -584,8 +585,8 @@ void test_exec_console_command(void) {
 }
 
 void test_command(void) {
-  test_command_execution();
   test_exec_single_command();
+  test_command_execution();
   test_exec_ucgi_command();
   test_exec_console_command();
   io_reset_stream_out();

@@ -13,5 +13,7 @@ void execute_command_async(Config *config, ErrorStack *error_stack,
 char *command_search_status(Config *config, bool should_exit);
 void caches_destroy(void);
 void process_command(int argc, char *argv[]);
+void process_command_with_data_paths(int argc, char *argv[],
+                                     const char *data_paths);
 
 #endif

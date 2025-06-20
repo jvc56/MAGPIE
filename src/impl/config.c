@@ -1945,9 +1945,10 @@ char *config_get_execute_status(Config *config) {
   return status;
 }
 
-void config_create_default_internal(Config *config, ErrorStack *error_stack) {
+void config_create_default_internal(Config *config, ErrorStack *error_stack,
+                                    const char *data_paths) {
   // Attempt to load fields that might fail first
-  config->data_paths = string_duplicate(DEFAULT_DATA_PATHS);
+  config->data_paths = string_duplicate(data_paths);
   config->board_layout =
       board_layout_create_default(config->data_paths, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -2107,8 +2108,15 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack) {
 }
 
 Config *config_create_default(ErrorStack *error_stack) {
-  Config *config = malloc_or_die(sizeof(Config));
-  config_create_default_internal(config, error_stack);
+  Config *config = calloc_or_die(1, sizeof(Config));
+  config_create_default_internal(config, error_stack, DEFAULT_DATA_PATHS);
+  return config;
+}
+
+Config *config_create_default_with_data_paths(ErrorStack *error_stack,
+                                              const char *data_paths) {
+  Config *config = calloc_or_die(1, sizeof(Config));
+  config_create_default_internal(config, error_stack, data_paths);
   return config;
 }
 

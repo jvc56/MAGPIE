@@ -216,10 +216,11 @@ void caches_destroy(void) {
   fileproxy_destroy_cache();
 }
 
-void process_command(int argc, char *argv[]) {
+void process_command_internal(int argc, char *argv[], const char *data_paths) {
   log_set_level(LOG_FATAL);
   ErrorStack *error_stack = error_stack_create();
-  Config *config = config_create_default(error_stack);
+  Config *config =
+      config_create_default_with_data_paths(error_stack, data_paths);
   if (error_stack_is_empty(error_stack)) {
     char *initial_command_string = create_command_from_args(argc, argv);
     command_scan_loop(config, error_stack, initial_command_string);
@@ -230,4 +231,13 @@ void process_command(int argc, char *argv[]) {
   }
   config_destroy(config);
   error_stack_destroy(error_stack);
+}
+
+void process_command(int argc, char *argv[]) {
+  process_command_internal(argc, argv, DEFAULT_DATA_PATHS);
+}
+
+void process_command_with_data_paths(int argc, char *argv[],
+                                     const char *data_paths) {
+  process_command_internal(argc, argv, data_paths);
 }

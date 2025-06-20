@@ -161,12 +161,12 @@ char *cross_set_to_string(const LetterDistribution *ld, uint64_t input) {
 // after calling this function.
 Config *config_create_or_die(const char *cmd) {
   ErrorStack *error_stack = error_stack_create();
-  Config *config = config_create_default(error_stack);
+  Config *config = config_create_default_with_data_paths(
+      error_stack, DEFAULT_TEST_DATA_PATH);
   if (!error_stack_is_empty(error_stack)) {
-    error_stack_reset(error_stack);
+    error_stack_print_and_reset(error_stack);
     abort();
   }
-  load_and_exec_config_or_die(config, "set -path " DEFAULT_TEST_DATA_PATH);
   load_and_exec_config_or_die(config, cmd);
   error_stack_destroy(error_stack);
   return config;
@@ -241,12 +241,12 @@ char *get_string_from_file_or_die(const char *filename) {
 
 Config *config_create_default_test(void) {
   ErrorStack *error_stack = error_stack_create();
-  Config *config = config_create_default(error_stack);
+  Config *config = config_create_default_with_data_paths(
+      error_stack, DEFAULT_TEST_DATA_PATH);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_reset(error_stack);
     abort();
   }
-  load_and_exec_config_or_die(config, "set -path " DEFAULT_TEST_DATA_PATH);
   error_stack_destroy(error_stack);
   return config;
 }
