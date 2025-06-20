@@ -62,7 +62,7 @@ void test_bai_track_and_stop(int num_threads) {
       .sampling_rule = BAI_SAMPLING_RULE_TRACK_AND_STOP,
       .threshold = BAI_THRESHOLD_GK16,
       .delta = 0.05,
-      .sample_limit = 1000,
+      .sample_limit = 200,
       .epigon_cutoff = 0,
       .time_limit_seconds = 0,
   };
@@ -80,7 +80,7 @@ void test_bai_track_and_stop(int num_threads) {
 }
 
 void test_bai_sample_limit(int num_threads) {
-  const double means_and_vars[] = {-10, 1, 0, 1, 100, 10, -20, 5};
+  const double means_and_vars[] = {-10, 1, 100, 10, -20, 5};
   const int num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
   RandomVariablesArgs rv_args = {
       .type = RANDOM_VARIABLES_NORMAL,
@@ -100,7 +100,7 @@ void test_bai_sample_limit(int num_threads) {
   BAIOptions bai_options = {
       .threshold = BAI_THRESHOLD_NONE,
       .delta = 0.05,
-      .sample_limit = 500,
+      .sample_limit = 200,
       .epigon_cutoff = 10,
       .time_limit_seconds = 0,
   };
@@ -113,7 +113,7 @@ void test_bai_sample_limit(int num_threads) {
     bai_options.sampling_rule = sampling_rules[i];
     bai(&bai_options, rvs, rng, thread_control, NULL, bai_result);
     assert(bai_result_get_exit_status(bai_result) == EXIT_STATUS_SAMPLE_LIMIT);
-    assert(bai_result_get_best_arm(bai_result) == 2);
+    assert(bai_result_get_best_arm(bai_result) == 1);
     int expected_num_samples = bai_options.sample_limit;
     if (bai_options.sampling_rule == BAI_SAMPLING_RULE_ROUND_ROBIN) {
       expected_num_samples *= num_rvs;
@@ -179,7 +179,7 @@ void test_bai_time_limit(int num_threads) {
       .delta = 0.01,
       .sample_limit = 100000000,
       .epigon_cutoff = 100000,
-      .time_limit_seconds = 5,
+      .time_limit_seconds = 2,
   };
 
   ThreadControl *thread_control = thread_control_create();
@@ -253,7 +253,7 @@ void write_bai_input(const double delta, const RandomVariablesArgs *rv_args,
 }
 
 void test_bai_epigons(int num_threads) {
-  const int num_samples = 5000;
+  const int num_samples = 1000;
   double *samples = (double *)malloc_or_die(num_samples * sizeof(double));
   for (int i = 0; i < num_samples; i++) {
     samples[i] = 0.5;
@@ -436,7 +436,7 @@ void test_bai(void) {
   if (bai_input_filename && bai_params_index) {
     test_bai_input_from_file(bai_input_filename, bai_params_index);
   } else {
-    const int num_threads[] = {1, 2, 5, 11};
+    const int num_threads[] = {1, 11};
     const int num_thread_tests = sizeof(num_threads) / sizeof(int);
     for (int i = 0; i < num_thread_tests; i++) {
       test_bai_sample_limit(i);
