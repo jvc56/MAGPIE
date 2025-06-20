@@ -19,7 +19,7 @@ jobs:
             data/*
             testdata/*
           # Increment this whenever the downloaded data changes
-          key: downloaded-data-files-16
+          key: downloaded-data-files-17
 
       - name: Download data files
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
