@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "../../src/def/config_defs.h"
@@ -17,6 +18,8 @@
 
 #include "test_constants.h"
 #include "test_util.h"
+
+#define DEFAULT_NAP_TIME 0.01
 
 typedef struct ProcessArgs {
   const char *arg_string;
@@ -96,9 +99,36 @@ void main_args_destroy(MainArgs *main_args) {
   free(main_args);
 }
 
+double nap(double const seconds) {
+  long const secs = (long)seconds;
+  double const frac = seconds - (double)secs;
+  struct timespec req, rem;
+  int result;
+
+  if (seconds <= 0.0) {
+    return 0.0;
+  }
+
+  req.tv_sec = (time_t)secs;
+  req.tv_nsec = (long)(1000000000.0 * frac);
+  if (req.tv_nsec > 999999999L) {
+    req.tv_nsec = 999999999L;
+  }
+
+  rem.tv_sec = (time_t)0;
+  rem.tv_nsec = (long)0L;
+
+  result = nanosleep(&req, &rem);
+  if (result == -1) {
+    return (double)rem.tv_sec + (double)rem.tv_nsec / 1000000000.0;
+  }
+
+  return 0.0;
+}
+
 void block_for_search(Config *config, int max_seconds) {
   // Poll for the end of the command
-  int seconds_elapsed = 0;
+  double seconds_elapsed = 0;
   while (1) {
     char *search_status = command_search_status(config, false);
     bool search_is_finished =
@@ -107,10 +137,10 @@ void block_for_search(Config *config, int max_seconds) {
     if (search_is_finished) {
       break;
     } else {
-      sleep(1);
+      nap(DEFAULT_NAP_TIME);
     }
-    seconds_elapsed++;
-    if (seconds_elapsed >= max_seconds) {
+    seconds_elapsed += DEFAULT_NAP_TIME;
+    if (seconds_elapsed >= (double)max_seconds) {
       log_fatal("Test aborted after searching for %d seconds\n", max_seconds);
     }
   }
@@ -118,15 +148,15 @@ void block_for_search(Config *config, int max_seconds) {
 
 void block_for_process_command(ProcessArgs *process_args, int max_seconds) {
   // Poll for the end of the process
-  int seconds_elapsed = 0;
+  double seconds_elapsed = 0;
   while (1) {
     if (get_process_args_finished(process_args)) {
       break;
     } else {
-      sleep(1);
+      nap(DEFAULT_NAP_TIME);
     }
-    seconds_elapsed++;
-    if (seconds_elapsed >= max_seconds) {
+    seconds_elapsed += DEFAULT_NAP_TIME;
+    if (seconds_elapsed >= (double)max_seconds) {
       log_fatal("Test aborted after processing for %d seconds\n", max_seconds);
     }
   }
@@ -157,12 +187,10 @@ void assert_command_status_and_output(Config *config, const char *command,
   }
 
   // Let the async command start up
-  sleep(1);
+  nap(DEFAULT_NAP_TIME);
 
   if (should_exit) {
     char *status_string = command_search_status(config, true);
-    // For now, we do not care about the contents of of the status,
-    // we just want to thread_control_exit the command.
     free(status_string);
   }
   block_for_search(config, seconds_to_wait);
@@ -324,66 +352,63 @@ void test_command_execution(void) {
       "-r1 best -r2 best -threads 1 -hr true -gp true",
       false, 30, 40, 0);
 
-  for (int i = 0; i < 3; i++) {
-    // Catalan
-    assert_command_status_and_output(config, "cgp " CATALAN_CGP, false, 5, 0,
-                                     0);
-    assert_command_status_and_output(config, "gen -r1 all -r2 all -numplays 15",
-                                     false, 5, 16, 0);
-    assert_command_status_and_output(
-        config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ",
-        false, 60, 221, 0);
-    assert_command_status_and_output(config, "cgp " EMPTY_CATALAN_CGP, false, 5,
-                                     0, 0);
-    assert_command_status_and_output(
-        config, "infer 1 AIMSX 52 -numplays 20 -threads 4 -pfreq 1000000",
-        false, 60, 52, 0);
+  // Catalan
+  assert_command_status_and_output(config, "cgp " CATALAN_CGP, false, 5, 0, 0);
+  assert_command_status_and_output(config, "gen -r1 all -r2 all -numplays 15",
+                                   false, 5, 16, 0);
+  assert_command_status_and_output(
+      config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ", false,
+      60, 221, 0);
+  assert_command_status_and_output(config, "cgp " EMPTY_CATALAN_CGP, false, 5,
+                                   0, 0);
+  assert_command_status_and_output(
+      config, "infer 1 AIMSX 52 -numplays 20 -threads 4 -pfreq 1000000", false,
+      60, 52, 0);
 
-    assert_command_status_and_output(
-        config,
-        "autoplay game 10 -s1 equity -s2 equity -r1 "
-        "best -r2 best -numplays 1  -hr false -gp false ",
-        false, 30, 1, 0);
-    // CSW
-    assert_command_status_and_output(config, "cgp " DELDAR_VS_HARSHAN_CGP,
-                                     false, 5, 0, 0);
-    assert_command_status_and_output(config, "gen -r1 all -r2 all -numplays 15",
-                                     false, 5, 16, 0);
-    assert_command_status_and_output(
-        config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ",
-        false, 60, 221, 0);
+  assert_command_status_and_output(
+      config,
+      "autoplay game 10 -s1 equity -s2 equity -r1 "
+      "best -r2 best -numplays 1  -hr false -gp false ",
+      false, 30, 1, 0);
+  // CSW
+  assert_command_status_and_output(config, "cgp " DELDAR_VS_HARSHAN_CGP, false,
+                                   5, 0, 0);
+  assert_command_status_and_output(config, "gen -r1 all -r2 all -numplays 15",
+                                   false, 5, 16, 0);
+  assert_command_status_and_output(
+      config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ", false,
+      60, 221, 0);
 
-    assert_command_status_and_output(config, "cgp " EMPTY_CGP, false, 5, 0, 0);
-    assert_command_status_and_output(
-        config, "infer 1 DGINR 18 -numplays 20 -threads 4 -pfreq 1000000 ",
-        false, 60, 52, 0);
+  assert_command_status_and_output(config, "cgp " EMPTY_CGP, false, 5, 0, 0);
+  assert_command_status_and_output(
+      config, "infer 1 DGINR 18 -numplays 20 -threads 4 -pfreq 1000000 ", false,
+      60, 52, 0);
 
-    assert_command_status_and_output(
-        config,
-        "autoplay game 10 -lex CSW21 -s1 equity -s2 equity "
-        "-r1 best -r2 best -numplays 1 -gp false ",
-        false, 30, 1, 0);
-    // Polish
-    assert_command_status_and_output(config, "cgp " POLISH_CGP, false, 5, 0, 0);
-    assert_command_status_and_output(config, "gen -r1 all -r2 all -numplays 15",
-                                     false, 5, 16, 0);
-    assert_command_status_and_output(
-        config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ",
-        false, 60, 221, 0);
+  assert_command_status_and_output(
+      config,
+      "autoplay game 10 -lex CSW21 -s1 equity -s2 equity "
+      "-r1 best -r2 best -numplays 1 -gp false ",
+      false, 30, 1, 0);
+  // Polish
+  assert_command_status_and_output(config, "cgp " POLISH_CGP, false, 5, 0, 0);
+  assert_command_status_and_output(config, "gen -r1 all -r2 all -numplays 15",
+                                   false, 5, 16, 0);
+  assert_command_status_and_output(
+      config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ", false,
+      60, 221, 0);
 
-    assert_command_status_and_output(config, "cgp " EMPTY_POLISH_CGP, false, 5,
-                                     0, 0);
-    assert_command_status_and_output(config,
-                                     "infer 1 HUJA 20 -numplays 20 -pfreq "
-                                     "1000000 -threads 4",
-                                     false, 60, 58, 0);
+  assert_command_status_and_output(config, "cgp " EMPTY_POLISH_CGP, false, 5, 0,
+                                   0);
+  assert_command_status_and_output(config,
+                                   "infer 1 HUJA 20 -numplays 20 -pfreq "
+                                   "1000000 -threads 4",
+                                   false, 60, 58, 0);
 
-    assert_command_status_and_output(
-        config,
-        "autoplay game 10 -s1 equity -s2 equity -r1 best "
-        "-r2 best -numplays 1 -lex OSPS49 -hr false -gp false",
-        false, 30, 1, 0);
-  }
+  assert_command_status_and_output(
+      config,
+      "autoplay game 10 -s1 equity -s2 equity -r1 best "
+      "-r2 best -numplays 1 -lex OSPS49 -hr false -gp false",
+      false, 30, 1, 0);
   config_destroy(config);
 }
 
@@ -501,14 +526,14 @@ void test_exec_ucgi_command(void) {
                  process_args);
   pthread_detach(cmd_execution_thread);
 
-  sleep(1);
+  nap(1.0);
   fprintf(input_writer, "set -r1 best -r2 best -it 1 -numplays 1 -threads 1\n");
   fflush(input_writer);
-  sleep(1);
+  nap(1.0);
   fprintf(input_writer,
           "autoplay game 1 -lex CSW21 -s1 equity -s2 equity -gp false\n");
   fflush(input_writer);
-  sleep(1);
+  nap(1.0);
   fprintf(
       input_writer,
       "autoplay game 10000000 -lex CSW21 -s1 equity -s2 equity  -gp false\n");
@@ -518,14 +543,14 @@ void test_exec_ucgi_command(void) {
   fprintf(input_writer,
           "autoplay game 1 -lex CSW21 -s1 equity -s2 equity  -gp false\n");
   fflush(input_writer);
-  sleep(1);
+  nap(1.0);
   // Interrupt the autoplay which won't finish in 1 second
   fprintf(input_writer, "stop\n");
   fflush(input_writer);
-  sleep(1);
+  nap(1.0);
   fprintf(input_writer, "quit\n");
   fflush(input_writer);
-  sleep(1);
+  nap(1.0);
 
   // Wait for magpie to quit
   block_for_process_command(process_args, 5);

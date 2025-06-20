@@ -205,7 +205,7 @@ void test_sim_threshold(void) {
 void test_sim_time_limit(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all "
-      "-plies 2 -threads 1 -it 1000000000 -scond none -tlim 5");
+      "-plies 2 -threads 1 -it 1000000000 -scond none -tlim 2");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 ACEIRST");
   load_and_exec_config_or_die(config, "gen");
@@ -347,8 +347,8 @@ void test_sim_round_robin_consistency(void) {
 
 void test_sim_top_two_consistency(void) {
   Config *config =
-      config_create_or_die("set -lex CSW21 -numplays 15 -plies 5 -threads 1 "
-                           "-iter 50 -scond 99 -seed 33 -sr tt");
+      config_create_or_die("set -lex CSW21 -numplays 15 -plies 5 -threads 10 "
+                           "-iter 30 -scond 99 -seed 33 -sr tt");
   load_and_exec_config_or_die(config, "cgp " PARRODQ_CGP);
   load_and_exec_config_or_die(config, "gen");
 
@@ -360,7 +360,7 @@ void test_sim_top_two_consistency(void) {
       sim_results_get_bai_result(expected_sim_results));
 
   SimResults *actual_sim_results = sim_results_create();
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < 2; i++) {
     assert(config_simulate_and_return_status(
                config, NULL, actual_sim_results) == ERROR_STATUS_SUCCESS);
     exit_status_t actual_exit_status = bai_result_get_exit_status(

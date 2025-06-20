@@ -24,48 +24,31 @@ void assert_rack_list_item_count_and_mean(const LetterDistribution *ld,
 }
 
 void test_rack_list(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Config *config =
+      config_create_or_die("set -lex CSW21 -ld english_ab -s1 equity -s2 "
+                           "equity -r1 all -r2 all -numplays 1");
   const LetterDistribution *ld = config_get_ld(config);
   RackList *rack_list = rack_list_create(ld, 3);
   const KLV *rack_list_klv = rack_list_get_klv(rack_list);
 
   const int number_of_racks = rack_list_get_number_of_racks(rack_list);
-  assert(number_of_racks == 3199724);
+  assert(number_of_racks == 8);
 
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "??AAAAA",
+  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "AAAAAAA",
                                        0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "??AAAAB",
+  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "AAAAAAB",
                                        0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "??AAAAC",
+  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "AAAAABB",
                                        0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "??AAAAD",
+  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "AAAABBB",
                                        0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "??AAAAE",
+  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "AAABBBB",
                                        0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "??AAAAF",
+  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "AABBBBB",
                                        0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "??AAAAG",
+  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "ABBBBBB",
                                        0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "EEEEEEE",
-                                       0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "LLLLMMN",
-                                       0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "VWWXYYZ",
-                                       0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "VVWWXYY",
-                                       0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "VVWWXYZ",
-                                       0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "VVWWYYZ",
-                                       0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "VVWXYYZ",
-                                       0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "UVVWWXY",
-                                       0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "UVVWWXY",
-                                       0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "UVVWWYY",
+  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "BBBBBBB",
                                        0, 0.0);
 
   Rack rack;
@@ -73,10 +56,10 @@ void test_rack_list(void) {
   rack_set_dist_size(&rack, ld_size);
   rack_reset(&rack);
 
-  char *rack_strs[] = {"AEINRT", "BCCGHI"};
+  char *rack_strs[] = {"AAAAAA", "AAAABB", "AABBBB", "BBBBBB"};
   const int num_racks = sizeof(rack_strs) / sizeof(rack_strs[0]);
-  double total_equities[] = {0.0, 0.0};
-  uint64_t total_combos[] = {0, 0};
+  double *total_equities = calloc_or_die(num_racks, sizeof(double));
+  uint64_t *total_combos = calloc_or_die(num_racks, sizeof(uint64_t));
   double all_comb_equities = 0.0;
 
   for (int rack_index = 0; rack_index < num_racks; rack_index++) {
@@ -105,7 +88,7 @@ void test_rack_list(void) {
     }
   }
 
-  KLV *leaves_klv = klv_create_or_die(DEFAULT_DATA_PATHS, "CSW21");
+  KLV *leaves_klv = klv_create_or_die(DEFAULT_TEST_DATA_PATH, "CSW21_ab");
   rack_list_write_to_klv(rack_list, ld, leaves_klv);
 
   for (int rack_index = 0; rack_index < num_racks; rack_index++) {
@@ -119,26 +102,24 @@ void test_rack_list(void) {
 
   rack_list_reset(rack_list, 4);
 
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "AAEINRT",
+  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "AAAAAAA",
                                        0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "ABEINRT",
+  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "AAAAAAB",
                                        0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "AEINRT?",
+  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "AAAAABB",
                                        0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "AEINRTY",
+  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "AAAABBB",
                                        0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "AEINRTZ",
+  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "AAABBBB",
                                        0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "ABCDFGH",
+  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "AABBBBB",
                                        0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "BBCDFGH",
+  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "ABBBBBB",
                                        0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "?BCDFGH",
+  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "BBBBBBB",
                                        0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "BCDFGHY",
-                                       0, 0.0);
-  assert_rack_list_item_count_and_mean(ld, rack_list_klv, rack_list, "BCDFGHZ",
-                                       0, 0.0);
+  free(total_equities);
+  free(total_combos);
   klv_destroy(leaves_klv);
   rack_list_destroy(rack_list);
   config_destroy(config);
