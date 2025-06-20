@@ -40,20 +40,17 @@ void wasm_load_command(const char *cmd) {
 
 void wasm_init_configs(const char *paths) {
   iso_error_stack = error_stack_create();
-  iso_config = config_create_default(iso_error_stack);
+  iso_config = config_create_default_with_data_paths(iso_error_stack, paths);
   if (!error_stack_is_empty(iso_error_stack)) {
     error_stack_print_and_reset(iso_error_stack);
     return;
   }
   wasm_error_stack = error_stack_create();
-  wasm_config = config_create_default(wasm_error_stack);
+  wasm_config = config_create_default_with_data_paths(wasm_error_stack, paths);
   if (!error_stack_is_empty(wasm_error_stack)) {
     error_stack_print_and_reset(wasm_error_stack);
     return;
   }
-  char *cmd = get_formatted_string("set -path %s", paths);
-  wasm_load_command(cmd);
-  free(cmd);
 }
 
 void wasm_destroy_configs(void) {

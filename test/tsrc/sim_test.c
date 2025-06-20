@@ -69,14 +69,6 @@ void print_sim_stats(Game *game, SimResults *sim_results) {
   string_builder_destroy(move_description);
 }
 
-void test_win_pct(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all");
-  assert(within_epsilon(win_pct_get(config_get_win_pcts(config), 118, 90),
-                        0.844430));
-  config_destroy(config);
-}
-
 void test_sim_error_cases(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 15 -plies "
@@ -764,7 +756,6 @@ void test_sim(void) {
   } else {
     test_similar_play_consistency(1);
     test_similar_play_consistency(10);
-    test_win_pct();
     test_sim_error_cases();
     test_sim_single_iteration();
     test_sim_threshold();

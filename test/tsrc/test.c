@@ -44,6 +44,7 @@
 #include "transposition_table_test.h"
 #include "validated_move_test.h"
 #include "wasm_api_test.h"
+#include "win_pct_test.h"
 #include "wmp_maker_test.h"
 #include "wmp_move_gen_test.h"
 #include "wmp_test.h"
@@ -103,6 +104,7 @@ static TestEntry test_table[] = {
     {"wmp", test_wmp},
     {"wmpmaker", test_wmp_maker},
     {"wmg", test_wmp_move_gen},
+    {"winpct", test_win_pct},
     {"endgame", test_endgame},
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},
