@@ -17,15 +17,24 @@
 
 typedef struct BAISamplingRule BAISamplingRule;
 
+typedef struct BAINextSampleArgs {
+  const BAISamplingRule *bai_sampling_rule;
+  int astar;
+  int aalt;
+  const double *ξ;
+  const double *ϕ2;
+  const int *N;
+  const double *S;
+  const double *Zs;
+  const int size;
+  RandomVariables *rng;
+  BAILogger *bai_logger;
+} BAINextSampleArgs;
+
 BAISamplingRule *bai_sampling_rule_create(const bai_sampling_rule_t type,
                                           const int *N, const int size);
 void bai_sampling_rule_destroy(BAISamplingRule *bai_sampling_rule);
-int bai_sampling_rule_next_sample(const BAISamplingRule *bai_sampling_rule,
-                                  const int astar, const int aalt,
-                                  const double *ξ, const double *ϕ2,
-                                  const int *N, const double *S,
-                                  const double *Zs, const int size,
-                                  RandomVariables *rng, BAILogger *bai_logger);
+int bai_sampling_rule_next_sample(const BAINextSampleArgs *args);
 void bai_sampling_rule_swap_indexes(BAISamplingRule *bai_sampling_rule,
                                     const int i, const int j,
                                     BAILogger *bai_logger);

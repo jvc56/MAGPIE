@@ -8,9 +8,8 @@ struct BAIResult {
   exit_status_t exit_status;
   int best_arm;
   int total_samples;
-  double sample_time;
-  double bai_wait_time;
-  double sample_wait_time;
+  int thread_waits_for_consume;
+  int thread_waits_for_produce;
   double total_time;
   pthread_mutex_t mutex;
 };
@@ -19,9 +18,8 @@ void bai_result_reset(BAIResult *bai_result) {
   bai_result->exit_status = EXIT_STATUS_NONE;
   bai_result->best_arm = 0;
   bai_result->total_samples = 0;
-  bai_result->sample_time = 0;
-  bai_result->bai_wait_time = 0;
-  bai_result->sample_wait_time = 0;
+  bai_result->thread_waits_for_consume = 0;
+  bai_result->thread_waits_for_produce = 0;
   bai_result->total_time = 0;
 }
 
@@ -59,36 +57,24 @@ int bai_result_get_total_samples(BAIResult *bai_result) {
   return bai_result->total_samples;
 }
 
-void bai_result_increment_sample_time(BAIResult *bai_result,
-                                      const double sample_time) {
+void bai_result_increment_thread_waits_for_consume(BAIResult *bai_result) {
   pthread_mutex_lock(&bai_result->mutex);
-  bai_result->sample_time += sample_time;
+  bai_result->thread_waits_for_consume++;
   pthread_mutex_unlock(&bai_result->mutex);
 }
 
-double bai_result_get_sample_time(BAIResult *bai_result) {
-  return bai_result->sample_time;
+int bai_result_get_thread_waits_for_consume(BAIResult *bai_result) {
+  return bai_result->thread_waits_for_consume;
 }
 
-void bai_result_increment_sample_wait_time(BAIResult *bai_result,
-                                           const double sample_wait_time) {
+void bai_result_increment_thread_waits_for_produce(BAIResult *bai_result) {
   pthread_mutex_lock(&bai_result->mutex);
-  bai_result->sample_wait_time += sample_wait_time;
+  bai_result->thread_waits_for_produce++;
   pthread_mutex_unlock(&bai_result->mutex);
 }
 
-double bai_result_get_sample_wait_time(BAIResult *bai_result) {
-  return bai_result->sample_wait_time;
-}
-
-// Note: This is not thread safe since the BAI algorithm is single threaded
-void bai_result_increment_bai_wait_time(BAIResult *bai_result,
-                                        const double bai_wait_time) {
-  bai_result->bai_wait_time += bai_wait_time;
-}
-
-double bai_result_get_bai_wait_time(BAIResult *bai_result) {
-  return bai_result->bai_wait_time;
+int bai_result_get_thread_waits_for_produce(BAIResult *bai_result) {
+  return bai_result->thread_waits_for_produce;
 }
 
 void bai_result_set_total_time(BAIResult *bai_result, const double total_time) {

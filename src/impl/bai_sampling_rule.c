@@ -205,15 +205,10 @@ void bai_sampling_rule_destroy(BAISamplingRule *bai_sampling_rule) {
   free(bai_sampling_rule);
 }
 
-int bai_sampling_rule_next_sample(const BAISamplingRule *bai_sampling_rule,
-                                  const int astar, const int aalt,
-                                  const double *ξ, const double *ϕ2,
-                                  const int *N, const double *S,
-                                  const double *Zs, const int size,
-                                  RandomVariables *rng, BAILogger *bai_logger) {
-  return bai_sampling_rule->next_sample_func(bai_sampling_rule->data, astar,
-                                             aalt, ξ, ϕ2, N, S, Zs, size, rng,
-                                             bai_logger);
+int bai_sampling_rule_next_sample(const BAINextSampleArgs *args) {
+  return args->bai_sampling_rule->next_sample_func(
+      args->bai_sampling_rule->data, args->astar, args->aalt, args->ξ, args->ϕ2,
+      args->N, args->S, args->Zs, args->size, args->rng, args->bai_logger);
 }
 
 void bai_sampling_rule_swap_indexes(BAISamplingRule *bai_sampling_rule,

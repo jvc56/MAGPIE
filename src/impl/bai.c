@@ -41,6 +41,7 @@ typedef struct ProdConQueueMessage {
   const BAIArmDatum *arm_datum;
   double sample;
   bool queue_closed;
+  bool is_last_message;
 } ProdConQueueMessage;
 
 typedef struct ProdConQueue {
@@ -52,6 +53,7 @@ typedef struct ProdConQueue {
   bool closed;
   pthread_mutex_t mutex;
   pthread_cond_t empty;
+  pthread_cond_t full;
 } ProdConQueue;
 
 ProdConQueue *prod_con_queue_create(int size) {
@@ -64,6 +66,7 @@ ProdConQueue *prod_con_queue_create(int size) {
   pcq->queue = malloc_or_die(sizeof(ProdConQueueMessage) * pcq->size);
   pthread_mutex_init(&pcq->mutex, NULL);
   pthread_cond_init(&pcq->empty, NULL);
+  pthread_cond_init(&pcq->full, NULL);
   return pcq;
 }
 
@@ -90,43 +93,67 @@ void prod_con_queue_close(ProdConQueue *pcq) {
   pthread_cond_broadcast(&pcq->empty);
 }
 
-// Exits fatally if the queue is full. The caller is expected
-// to prevent the queue from being full.
-void prod_con_queue_produce(ProdConQueue *pcq, ProdConQueueMessage msg) {
+bool prod_con_queue_produce(ProdConQueue *pcq,
+                            const ProdConQueueMessage *msgs) {
+  int num_msgs = 0;
+  for (int i = 0; i < pcq->size; i++) {
+    num_msgs++;
+    if (msgs[i].is_last_message) {
+      break;
+    }
+  }
+  bool had_to_wait = false;
   pthread_mutex_lock(&pcq->mutex);
   if (pcq->closed) {
     log_fatal("attempted to produce to a closed queue");
   }
-  if (pcq->count == pcq->size) {
-    log_fatal("queue is unexpectedly full with %d messages", pcq->count);
+  while (pcq->count + num_msgs > pcq->size) {
+    had_to_wait = true;
+    pthread_cond_wait(&pcq->full, &pcq->mutex);
   }
-  pcq->queue[pcq->newest] = msg;
-  pcq->newest = (pcq->newest + 1) % pcq->size;
-  pcq->count++;
+  for (int i = 0; i < num_msgs; i++) {
+    const ProdConQueueMessage msg = msgs[i];
+    pcq->queue[pcq->newest] = msg;
+    pcq->newest = (pcq->newest + 1) % pcq->size;
+    pcq->count++;
+  }
   pthread_mutex_unlock(&pcq->mutex);
   pthread_cond_signal(&pcq->empty);
+  return had_to_wait;
 }
 
-ProdConQueueMessage prod_con_queue_consume(ProdConQueue *pcq) {
+bool prod_con_queue_consume(ProdConQueue *pcq, const bool consume_all,
+                            ProdConQueueMessage *msgs) {
+  bool had_to_wait = false;
   pthread_mutex_lock(&pcq->mutex);
   while (pcq->count == 0 && !pcq->closed) {
+    had_to_wait = true;
     pthread_cond_wait(&pcq->empty, &pcq->mutex);
   }
   if (pcq->count == 0 && pcq->closed) {
     pthread_mutex_unlock(&pcq->mutex);
-    return (ProdConQueueMessage){.queue_closed = true};
+    msgs[0].queue_closed = true;
+    return had_to_wait;
   }
-  ProdConQueueMessage msg = pcq->queue[pcq->oldest];
-  msg.queue_closed = false;
-  // Setting these is not strictly necessary, but if there
-  // is some accidental double consume, this will make it
-  // easier to detect.
-  pcq->queue[pcq->oldest].arm_datum = NULL;
-  pcq->queue[pcq->oldest].sample = INFINITY;
-  pcq->oldest = (pcq->oldest + 1) % pcq->size;
-  pcq->count--;
+  int num_to_consume = 1;
+  if (consume_all) {
+    num_to_consume = pcq->count;
+  }
+  for (int msg_index = 0; msg_index < num_to_consume; msg_index++) {
+    msgs[msg_index] = pcq->queue[pcq->oldest];
+    msgs[msg_index].queue_closed = false;
+    msgs[msg_index].is_last_message = msg_index == num_to_consume - 1;
+    // Setting NULL and INFINITY for arm_datum and sample is not strictly
+    // necessary, but if there is some accidental double consume this will make
+    // it easier to detect.
+    pcq->queue[pcq->oldest].arm_datum = NULL;
+    pcq->queue[pcq->oldest].sample = INFINITY;
+    pcq->oldest = (pcq->oldest + 1) % pcq->size;
+    pcq->count--;
+  }
   pthread_mutex_unlock(&pcq->mutex);
-  return msg;
+  pthread_cond_signal(&pcq->full);
+  return had_to_wait;
 }
 
 typedef struct BAI {
@@ -137,6 +164,7 @@ typedef struct BAI {
   int epigon_cutoff;
   bool threshold_reached;
   bool is_multithreaded;
+  int total_active_requests_target;
   int *N_received;
   int *N_requested;
   double *S;
@@ -147,7 +175,6 @@ typedef struct BAI {
   BAIArmDatum **arm_data;
   ProdConQueue *request_queue;
   ProdConQueue *response_queue;
-  Timer *wait_timer;
   // These fields are not owned by the BAI struct and are
   // added for convenience.
   ThreadControl *thread_control;
@@ -183,14 +210,14 @@ BAI *bai_create(ThreadControl *thread_control, RandomVariables *rvs,
   }
   bai->request_queue = NULL;
   bai->response_queue = NULL;
-  bai->is_multithreaded = false;
   const int number_of_threads = thread_control_get_threads(thread_control);
-  if (number_of_threads > 1) {
-    bai->is_multithreaded = true;
-    bai->request_queue = prod_con_queue_create(number_of_threads);
-    bai->response_queue = prod_con_queue_create(number_of_threads);
+  bai->is_multithreaded = number_of_threads > 1;
+  if (bai->is_multithreaded) {
+    const int queue_size = 2 * number_of_threads;
+    bai->request_queue = prod_con_queue_create(queue_size);
+    bai->response_queue = prod_con_queue_create(queue_size);
   }
-  bai->wait_timer = mtimer_create(CLOCK_MONOTONIC);
+  bai->total_active_requests_target = number_of_threads;
   bai->thread_control = thread_control;
   bai->rvs = rvs;
   bai->bai_logger = bai_logger;
@@ -211,7 +238,6 @@ void bai_destroy(BAI *bai) {
   free(bai->arm_data);
   prod_con_queue_destroy(bai->request_queue);
   prod_con_queue_destroy(bai->response_queue);
-  mtimer_destroy(bai->wait_timer);
   free(bai);
 }
 
@@ -260,28 +286,25 @@ void *bai_sample_worker(void *args) {
   thread_index = *thread_index_counter;
   (*thread_index_counter)++;
   pthread_mutex_unlock(thread_index_counter_mutex);
-  Timer *timer = mtimer_create(CLOCK_MONOTONIC);
   ProdConQueueMessage req;
   ProdConQueueMessage resp;
   while (true) {
-    mtimer_start(timer);
-    req = prod_con_queue_consume(request_queue);
-    mtimer_stop(timer);
-    bai_result_increment_sample_wait_time(bai_worker_args->bai_result,
-                                          mtimer_elapsed_seconds(timer));
+    if (prod_con_queue_consume(request_queue, false, &req)) {
+      bai_result_increment_thread_waits_for_consume(
+          bai_worker_args->bai_result);
+    }
     if (req.queue_closed) {
       break;
     }
-    mtimer_start(timer);
     resp.sample =
         rvs_sample(rvs, req.arm_datum->rvs_index, thread_index, bai_logger);
-    mtimer_stop(timer);
-    bai_result_increment_sample_time(bai_worker_args->bai_result,
-                                     mtimer_elapsed_seconds(timer));
     resp.arm_datum = req.arm_datum;
-    prod_con_queue_produce(response_queue, resp);
+    resp.is_last_message = true;
+    if (prod_con_queue_produce(response_queue, &resp)) {
+      bai_result_increment_thread_waits_for_produce(
+          bai_worker_args->bai_result);
+    }
   }
-  mtimer_destroy(timer);
   return NULL;
 }
 
@@ -298,24 +321,33 @@ void bai_update_arm_data_with_sample(BAI *bai, const int k,
   bai->total_samples_received++;
 }
 
-void bai_sample_request(BAI *bai, const int k) {
-  prod_con_queue_produce(bai->request_queue, (ProdConQueueMessage){
-                                                 .arm_datum = bai->arm_data[k],
-                                             });
-  bai->N_requested[k]++;
-  bai->total_samples_requested++;
+void bai_sample_request(BAI *bai, const ProdConQueueMessage *requests) {
+  int num_requests = 0;
+  for (int i = 0; i < bai->request_queue->size; i++) {
+    bai->N_requested[requests[i].arm_datum->bai_index]++;
+    num_requests++;
+    if (requests[i].is_last_message) {
+      break;
+    }
+  }
+  bai->total_samples_requested += num_requests;
+  prod_con_queue_produce(bai->request_queue, requests);
 }
 
-void bai_sample_receive(BAI *bai, BAIResult *bai_result) {
-  mtimer_start(bai->wait_timer);
-  const ProdConQueueMessage resp = prod_con_queue_consume(bai->response_queue);
-  mtimer_stop(bai->wait_timer);
-  bai_result_increment_bai_wait_time(bai_result,
-                                     mtimer_elapsed_seconds(bai->wait_timer));
-  if (resp.arm_datum->is_epigon) {
-    return;
+void bai_sample_receive(BAI *bai, bool consume_all,
+                        ProdConQueueMessage *responses) {
+  prod_con_queue_consume(bai->response_queue, consume_all, responses);
+  for (int i = 0; i < bai->response_queue->size; i++) {
+    const ProdConQueueMessage *resp = &responses[i];
+    if (resp->arm_datum->is_epigon) {
+      continue;
+    }
+    bai_update_arm_data_with_sample(bai, resp->arm_datum->bai_index,
+                                    resp->sample);
+    if (resp->is_last_message) {
+      break;
+    }
   }
-  bai_update_arm_data_with_sample(bai, resp.arm_datum->bai_index, resp.sample);
 }
 
 void bai_sample_singlethreaded(BAI *bai, const int k) {
@@ -537,8 +569,15 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
       .bai_result = bai_result,
   };
 
+  ProdConQueueMessage *request_array = NULL;
+  ProdConQueueMessage *response_array = NULL;
+
   if (bai->is_multithreaded) {
     worker_ids = malloc_or_die((sizeof(pthread_t)) * number_of_threads);
+    request_array =
+        malloc_or_die((sizeof(ProdConQueueMessage)) * bai->request_queue->size);
+    response_array = malloc_or_die((sizeof(ProdConQueueMessage)) *
+                                   bai->response_queue->size);
     for (int thread_index = 0; thread_index < number_of_threads;
          thread_index++) {
       pthread_create(&worker_ids[thread_index], NULL, bai_sample_worker,
@@ -550,21 +589,23 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
     // overflow.
     for (int k = 0; k < bai->initial_K; k++) {
       for (int i = 0; i < (BAI_ARM_SAMPLE_MINIMUM); i++) {
-        if (bai->total_samples_requested >= number_of_threads) {
-          bai_sample_receive(bai, bai_result);
+        if (bai->total_samples_requested >= bai->request_queue->size) {
+          bai_sample_receive(bai, false, response_array);
         }
-        bai_sample_request(bai, k);
+        request_array[0].arm_datum = bai->arm_data[k];
+        request_array[0].is_last_message = true;
+        bai_sample_request(bai, request_array);
       }
     }
-    int num_to_receive = number_of_threads;
+    int num_to_receive = bai->request_queue->size;
     if (num_to_receive > bai->total_samples_requested) {
       num_to_receive = bai->total_samples_requested;
     }
     for (int i = 0; i < num_to_receive; i++) {
       // At this point we have requested some X samples and have only
-      // received X - number_of_threads samples, so we need to receive
-      // the remaining number_of_threads samples.
-      bai_sample_receive(bai, bai_result);
+      // received X - bai->request_queue->size samples, so we need to receive
+      // the remaining bai->request_queue->size samples.
+      bai_sample_receive(bai, false, response_array);
     }
   } else {
     for (int k = 0; k < bai->initial_K; k++) {
@@ -580,33 +621,6 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   bai->bai_sampling_rule = bai_sampling_rule_create(
       bai_options->sampling_rule, bai->N_received, bai->initial_K);
 
-  if (bai->is_multithreaded) {
-    // Ensure all threads are saturated by starting number_of_threads requests
-    // before the main algorithm starts. Once started, the main algorithm will
-    // request and receive samples on a 1-for-1 basis to keep all of the threads
-    // saturated. Here, we just request a sample for the current best arm
-    // number_of_threads times since it's likely we will need to sample the
-    // the best arm number_of_threads times anyway.
-    int non_rr_sample_index = -1;
-    if (bai_options->sampling_rule != BAI_SAMPLING_RULE_ROUND_ROBIN) {
-      non_rr_sample_index = 0;
-      for (int i = 1; i < bai->initial_K; i++) {
-        if (bai->hμ[i] > bai->hμ[non_rr_sample_index]) {
-          non_rr_sample_index = i;
-        }
-      }
-    }
-    for (int i = 0;
-         i < number_of_threads && !bai_sample_limit_reached(bai_options, bai);
-         i++) {
-      int next_sample = non_rr_sample_index;
-      if (next_sample == -1) {
-        next_sample = i % bai->initial_K;
-      }
-      bai_sample_request(bai, next_sample);
-    }
-  }
-
   BAIIsFinishedArgs is_finished_args = {
       .bai_options = bai_options,
       .thread_control = thread_control,
@@ -616,6 +630,7 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
       .bai_result = bai_result,
   };
   int astar = 0;
+  bool is_initial_request = true;
   while (
       !bai_is_finished(&is_finished_args, EXIT_STATUS_SAMPLE_LIMIT, astar) &&
       !bai_is_finished(&is_finished_args, EXIT_STATUS_TIME_LIMIT, astar) &&
@@ -649,15 +664,51 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
     } else {
       N = bai->N_received;
     }
-    const int k = bai_sampling_rule_next_sample(bai->bai_sampling_rule, astar,
-                                                aalt, ξ, ϕ2, N, bai->S, Zs,
-                                                bai->K, rng, bai_logger);
 
+    const BAINextSampleArgs bai_next_sample_args = {.bai_sampling_rule =
+                                                        bai->bai_sampling_rule,
+                                                    .astar = astar,
+                                                    .aalt = aalt,
+                                                    .ξ = ξ,
+                                                    .ϕ2 = ϕ2,
+                                                    .N = N,
+                                                    .S = bai->S,
+                                                    .Zs = Zs,
+                                                    .size = bai->K,
+                                                    .rng = rng,
+                                                    .bai_logger = bai_logger};
     if (bai->is_multithreaded) {
-      bai_sample_receive(bai, bai_result);
-      bai_sample_request(bai, k);
+      if (!is_initial_request) {
+        bai_sample_receive(bai, true, response_array);
+      }
+      const int num_total_active_requests =
+          prod_con_queue_get_count(bai->request_queue);
+      const int num_requests_to_create =
+          bai->total_active_requests_target - num_total_active_requests;
+      if (num_requests_to_create > 0) {
+        int req_index = 0;
+        for (; req_index < num_requests_to_create &&
+               !bai_sample_limit_reached(bai_options, bai);
+             req_index++) {
+          const int k = bai_sampling_rule_next_sample(&bai_next_sample_args);
+          request_array[req_index].arm_datum = bai->arm_data[k];
+          request_array[req_index].is_last_message = false;
+        }
+        if (req_index > 0) {
+          request_array[req_index - 1].is_last_message = true;
+          bai_sample_request(bai, request_array);
+          if (num_total_active_requests == 0) {
+            bai->total_active_requests_target++;
+            if (bai->total_active_requests_target > bai->request_queue->size) {
+              bai->total_active_requests_target = bai->request_queue->size;
+            }
+          }
+        }
+        is_initial_request = false;
+      }
     } else {
-      bai_sample_singlethreaded(bai, k);
+      bai_sample_singlethreaded(
+          bai, bai_sampling_rule_next_sample(&bai_next_sample_args));
     }
     astar = bai_potentially_mark_epigons(bai, astar);
   }
@@ -668,6 +719,7 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
       pthread_join(worker_ids[thread_index], NULL);
     }
     free(worker_ids);
+    free(response_array);
   }
   bai_glrt_results_destroy(glrt_results);
   bai_destroy_threshold(Sβ);
