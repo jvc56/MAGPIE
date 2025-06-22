@@ -176,10 +176,7 @@ void test_sim_threshold(void) {
   while (!done) {
     int ret = pthread_cond_timedwait(&cond, &mutex, &ts);
     if (ret == ETIMEDOUT) {
-      printf("sim did not complete within %d seconds.\n", timeout_seconds);
-      pthread_cancel(thread);
-      pthread_mutex_unlock(&mutex);
-      assert(0);
+      log_fatal("sim did not complete within %d seconds.\n", timeout_seconds);
     }
   }
   pthread_mutex_unlock(&mutex);
@@ -236,10 +233,7 @@ void test_sim_time_limit(void) {
   while (!done) {
     int ret = pthread_cond_timedwait(&cond, &mutex, &ts);
     if (ret == ETIMEDOUT) {
-      printf("sim did not complete within %d seconds.\n", timeout_seconds);
-      pthread_cancel(thread);
-      pthread_mutex_unlock(&mutex);
-      assert(0);
+      log_fatal("sim did not complete within %d seconds.\n", timeout_seconds);
     }
   }
   pthread_mutex_unlock(&mutex);
@@ -287,10 +281,7 @@ void test_sim_one_arm_remaining(void) {
   while (!done) {
     int ret = pthread_cond_timedwait(&cond, &mutex, &ts);
     if (ret == ETIMEDOUT) {
-      printf("sim did not complete within %d seconds.\n", timeout_seconds);
-      pthread_cancel(thread);
-      pthread_mutex_unlock(&mutex);
-      assert(0);
+      log_fatal("sim did not complete within %d seconds.\n", timeout_seconds);
     }
   }
   pthread_mutex_unlock(&mutex);
@@ -328,15 +319,14 @@ void test_sim_round_robin_consistency(void) {
       sim_results = sim_results_multithreaded;
     }
 
-    printf("testing with %d threads\n", i + 1);
     error_code_t status =
         config_simulate_and_return_status(config, NULL, sim_results);
     assert(status == ERROR_STATUS_SUCCESS);
     assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
            EXIT_STATUS_SAMPLE_LIMIT);
 
+    printf("asserting for %d threads\n", i + 1);
     if (i != 0) {
-      printf("comparing with %d threads\n", i + 1);
       assert_sim_results_equal(sim_results_single_threaded, sim_results);
     }
   }
@@ -391,7 +381,6 @@ void perf_test_multithread_sim(void) {
   assert(status == ERROR_STATUS_SUCCESS);
   assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
          EXIT_STATUS_SAMPLE_LIMIT);
-  printf("iter count: %d\n", sim_results_get_iteration_count(sim_results));
   assert(sim_results_get_iteration_count(sim_results) == 1000);
 
   print_sim_stats(config_get_game(config), sim_results);

@@ -90,6 +90,7 @@ void prod_con_queue_close(ProdConQueue *pcq) {
   pthread_mutex_lock(&pcq->mutex);
   pcq->closed = true;
   pthread_mutex_unlock(&pcq->mutex);
+  pthread_cond_broadcast(&pcq->full);
   pthread_cond_broadcast(&pcq->empty);
 }
 
@@ -105,7 +106,8 @@ bool prod_con_queue_produce(ProdConQueue *pcq,
   bool had_to_wait = false;
   pthread_mutex_lock(&pcq->mutex);
   if (pcq->closed) {
-    log_fatal("attempted to produce to a closed queue");
+    pthread_mutex_unlock(&pcq->mutex);
+    return had_to_wait;
   }
   while (pcq->count + num_msgs > pcq->size) {
     had_to_wait = true;
@@ -118,7 +120,8 @@ bool prod_con_queue_produce(ProdConQueue *pcq,
     pcq->count++;
   }
   pthread_mutex_unlock(&pcq->mutex);
-  pthread_cond_signal(&pcq->empty);
+  // FIXME: make signal if just one
+  pthread_cond_broadcast(&pcq->empty);
   return had_to_wait;
 }
 
@@ -152,7 +155,8 @@ bool prod_con_queue_consume(ProdConQueue *pcq, const bool consume_all,
     pcq->count--;
   }
   pthread_mutex_unlock(&pcq->mutex);
-  pthread_cond_signal(&pcq->full);
+  // FIXME: make signal if just one
+  pthread_cond_broadcast(&pcq->full);
   return had_to_wait;
 }
 
@@ -449,6 +453,21 @@ bool stopping_criterion(const int K, const double *Zs, const BAIThreshold *Sβ,
   return true;
 }
 
+// Assumes bai_options->sample_limit > 0
+int bai_samples_remaining(const BAIOptions *bai_options, const BAI *bai) {
+  if (bai_options->sampling_rule != BAI_SAMPLING_RULE_ROUND_ROBIN) {
+    return bai_options->sample_limit - bai->total_samples_requested;
+  }
+  int samples_remaining;
+  for (int i = 0; i < bai->K; i++) {
+    const int N_remaining = bai_options->sample_limit - bai->N_requested[i];
+    if (N_remaining > 0) {
+      samples_remaining = N_remaining;
+    }
+  }
+  return samples_remaining;
+}
+
 bool bai_sample_limit_reached(const BAIOptions *bai_options, const BAI *bai) {
   if (bai_options->sample_limit == 0) {
     return false;
@@ -683,13 +702,16 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
       }
       const int num_total_active_requests =
           prod_con_queue_get_count(bai->request_queue);
-      const int num_requests_to_create =
+      const int samples_remaining = bai_samples_remaining(bai_options, bai);
+      int num_requests_to_create =
           bai->total_active_requests_target - num_total_active_requests;
+      if (num_requests_to_create > samples_remaining) {
+        num_requests_to_create = samples_remaining;
+      }
       if (num_requests_to_create > 0) {
+        bai_result_add_requests_created(bai_result, num_requests_to_create);
         int req_index = 0;
-        for (; req_index < num_requests_to_create &&
-               !bai_sample_limit_reached(bai_options, bai);
-             req_index++) {
+        for (; req_index < num_requests_to_create; req_index++) {
           const int k = bai_sampling_rule_next_sample(&bai_next_sample_args);
           request_array[req_index].arm_datum = bai->arm_data[k];
           request_array[req_index].is_last_message = false;
@@ -714,11 +736,13 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   }
   if (bai->is_multithreaded) {
     prod_con_queue_close(bai->request_queue);
+    prod_con_queue_close(bai->response_queue);
     for (int thread_index = 0; thread_index < number_of_threads;
          thread_index++) {
       pthread_join(worker_ids[thread_index], NULL);
     }
     free(worker_ids);
+    free(request_array);
     free(response_array);
   }
   bai_glrt_results_destroy(glrt_results);

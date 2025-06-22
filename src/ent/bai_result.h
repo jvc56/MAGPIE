@@ -3,6 +3,8 @@
 
 #include "../def/thread_control_defs.h"
 
+#include "stats.h"
+
 typedef struct BAIResult BAIResult;
 
 BAIResult *bai_result_create(void);
@@ -21,5 +23,7 @@ void bai_result_increment_thread_waits_for_consume(BAIResult *bai_result);
 int bai_result_get_thread_waits_for_consume(BAIResult *bai_result);
 void bai_result_increment_thread_waits_for_produce(BAIResult *bai_result);
 int bai_result_get_thread_waits_for_produce(BAIResult *bai_result);
+void bai_result_add_requests_created(BAIResult *bai_result, int num_requests);
+Stat *bai_result_get_requests_created(BAIResult *bai_result);
 
 #endif
