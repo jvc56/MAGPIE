@@ -17,7 +17,7 @@
 
 #define MAX_POSSIBLE_PLAYTHROUGH_BLOCKS ((BOARD_DIM / 2) + 1)
 #define MAX_WMP_MOVE_GEN_ANCHORS                                               \
-  ((RACK_SIZE + 1) * MAX_POSSIBLE_PLAYTHROUGH_BLOCKS)
+  ((RACK_SIZE) * (MAX_POSSIBLE_PLAYTHROUGH_BLOCKS + 1))
 
 typedef struct SubrackInfo {
   BitRack subrack;
@@ -46,7 +46,27 @@ typedef struct WMPMoveGen {
   int playthrough_blocks_copy;
 
   Anchor anchors[MAX_WMP_MOVE_GEN_ANCHORS];
+  int tiles_to_play;
+  int word_length;
+  int num_words;
+  uint8_t buffer[WMP_RESULT_BUFFER_SIZE];
 } WMPMoveGen;
+
+static inline int wmp_move_gen_anchor_index(int playthrough_blocks,
+                                            int tiles_played) {
+  printf("playthrough_blocks: %d, tiles_played: %d\n", playthrough_blocks,
+         tiles_played);
+  return (RACK_SIZE * playthrough_blocks) + (tiles_played - 1);
+}
+
+static inline Anchor *wmp_move_gen_get_anchor(WMPMoveGen *wmp_move_gen,
+                                              int playthrough_blocks,
+                                              int tiles_played) {
+  int index = wmp_move_gen_anchor_index(playthrough_blocks, tiles_played);
+  printf("wmp_move_gen_get_anchor: index: %d\n", index);
+  assert(index >= 0 && index < MAX_WMP_MOVE_GEN_ANCHORS);
+  return &wmp_move_gen->anchors[index];
+}
 
 static inline void reset_anchors(WMPMoveGen *wmp_move_gen) {
   Anchor initial_anchor = {
@@ -57,9 +77,18 @@ static inline void reset_anchors(WMPMoveGen *wmp_move_gen) {
       .col = 0,
       .last_anchor_col = 0,
       .dir = 0,
+      .tiles_to_play = 0,
+      .playthrough_blocks = 0,
   };
-  for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
-    memcpy(&wmp_move_gen->anchors[i], &initial_anchor, sizeof(Anchor));
+  for (int num_tiles_played = 1; num_tiles_played <= RACK_SIZE;
+       num_tiles_played++) {
+    for (int blocks = 0; blocks <= MAX_POSSIBLE_PLAYTHROUGH_BLOCKS; blocks++) {
+      Anchor *anchor =
+          wmp_move_gen_get_anchor(wmp_move_gen, blocks, num_tiles_played);
+      *anchor = initial_anchor;
+      anchor->playthrough_blocks = blocks;
+      anchor->tiles_to_play = num_tiles_played;
+    }
   }
 }
 
@@ -264,30 +293,21 @@ wmp_move_gen_print_playthrough(const WMPMoveGen *wmp_move_gen) {
   printf("\n");
 }
 
-static inline int wmp_move_gen_anchor_index(int playthrough_blocks,
-                                            int tiles_played) {
-  printf("playthrough_blocks: %d, tiles_played: %d\n", playthrough_blocks,
-         tiles_played);                                              
-  return playthrough_blocks * (RACK_SIZE + 1) + (tiles_played - 1);
-}
-
-static inline Anchor *wmp_move_gen_get_anchor(WMPMoveGen *wmp_move_gen,
-                                              int playthrough_blocks,
-                                              int tiles_played) {
-  int index = wmp_move_gen_anchor_index(playthrough_blocks, tiles_played);
-  printf("wmp_move_gen_get_anchor: index: %d\n", index);
-  assert(index >= 0 && index < MAX_WMP_MOVE_GEN_ANCHORS);
-  return &wmp_move_gen->anchors[index];
-}
-
 static inline void wmp_move_gen_maybe_update_anchor(WMPMoveGen *wmp_move_gen,
                                                     int tiles_played,
                                                     Equity score,
                                                     Equity equity) {
+  assert(tiles_played > 0);
+  assert(tiles_played <= RACK_SIZE);
+  assert(wmp_move_gen->playthrough_blocks >= 0);
+  assert(wmp_move_gen->playthrough_blocks <= MAX_POSSIBLE_PLAYTHROUGH_BLOCKS);
   Anchor *anchor = wmp_move_gen_get_anchor(
       wmp_move_gen, wmp_move_gen->playthrough_blocks, tiles_played);
-  anchor->highest_possible_score = score;
-  anchor->highest_possible_equity = equity;
-  anchor->playthrough = wmp_move_gen->playthrough_bit_rack;
+  if (score > anchor->highest_possible_score) {
+    anchor->highest_possible_score = score;
+  }
+  if (equity > anchor->highest_possible_equity) {
+    anchor->highest_possible_equity = equity;
+  }
 }
 #endif

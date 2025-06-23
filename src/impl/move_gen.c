@@ -708,7 +708,7 @@ static inline void shadow_record(MoveGen *gen) {
         gen->full_rack_descending_tile_scores, gen->number_of_tiles_in_bag,
         gen->number_of_letters_on_rack, gen->tiles_played);
   }
-   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
      wmp_move_gen_maybe_update_anchor(&gen->wmp_move_gen, gen->tiles_played,
                                       score, equity);
   }
@@ -1451,6 +1451,11 @@ void gen_shadow(MoveGen *gen) {
   }
 }
 
+void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
+  assert(anchor->tiles_to_play <= rack_get_total_letters(&gen->player_rack));
+  //WMPMoveGen *wgen = &gen->wmp_move_gen;
+}
+
 void gen_record_scoring_plays(MoveGen *gen) {
   // Reset the reused generator fields
   gen->tiles_played = 0;
@@ -1487,6 +1492,8 @@ void gen_record_scoring_plays(MoveGen *gen) {
     if (gen->is_wordsmog) {
       recursive_gen_alpha(gen, anchor.col, anchor.col, anchor.col,
                           gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+    } else if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+      wordmap_gen(gen, &anchor);
     } else {
       recursive_gen(gen, anchor.col, kwg_root_node_index, anchor.col,
                     anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,

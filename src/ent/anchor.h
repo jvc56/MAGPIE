@@ -29,6 +29,13 @@ typedef struct Anchor {
   // The direction of the board for
   // this anchor column.
   uint8_t dir;
+  // Number of rack tiles used playing in this anchor.
+  // Only used by WMP Move Gen.
+  uint8_t tiles_to_play;
+  // Number of playthrough blocks used by the anchor. Word will only play
+  // rightward/downward from the anchor square.
+  // Only used by WMP Move Gen.
+  uint8_t playthrough_blocks;
 } Anchor;
 
 typedef struct AnchorHeap {
