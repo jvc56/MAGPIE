@@ -56,7 +56,6 @@ void win_pct_create_internal(const char *win_pct_name,
       (float **)malloc_or_die(wp->max_tiles_unseen * sizeof(float *));
 
   // Read data lines
-  int row = 0;
   StringSplitter *split_tiles_remaining_row = NULL;
   int prev_nonzero_total_games_index = -1;
   for (unsigned int tiles_unseen_index = 0;
