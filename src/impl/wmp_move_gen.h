@@ -54,8 +54,8 @@ typedef struct WMPMoveGen {
 
 static inline int wmp_move_gen_anchor_index(int playthrough_blocks,
                                             int tiles_played) {
-  printf("playthrough_blocks: %d, tiles_played: %d\n", playthrough_blocks,
-         tiles_played);
+  // printf("playthrough_blocks: %d, tiles_played: %d\n", playthrough_blocks,
+  //        tiles_played);
   return (RACK_SIZE * playthrough_blocks) + (tiles_played - 1);
 }
 
@@ -63,7 +63,7 @@ static inline Anchor *wmp_move_gen_get_anchor(WMPMoveGen *wmp_move_gen,
                                               int playthrough_blocks,
                                               int tiles_played) {
   int index = wmp_move_gen_anchor_index(playthrough_blocks, tiles_played);
-  printf("wmp_move_gen_get_anchor: index: %d\n", index);
+  //printf("wmp_move_gen_get_anchor: index: %d\n", index);
   assert(index >= 0 && index < MAX_WMP_MOVE_GEN_ANCHORS);
   return &wmp_move_gen->anchors[index];
 }
@@ -271,7 +271,9 @@ static inline void wmp_move_gen_add_anchors(WMPMoveGen *wmp_move_gen, int row,
       anchor_heap_add_unheaped_wmp_anchor(
           anchor_heap, row, col, last_anchor_col, dir,
           anchor->highest_possible_equity, &anchor->playthrough,
-          anchor->highest_possible_score);
+          anchor->highest_possible_score,
+          anchor->tiles_to_play,
+          anchor->playthrough_blocks);
     }
   }
 }
@@ -310,4 +312,17 @@ static inline void wmp_move_gen_maybe_update_anchor(WMPMoveGen *wmp_move_gen,
     anchor->highest_possible_equity = equity;
   }
 }
+
+static inline void wmp_move_gen_print_anchors(WMPMoveGen *wmp_move_gen) {
+  for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
+    Anchor *anchor = &wmp_move_gen->anchors[i];
+    if (anchor->highest_possible_equity > EQUITY_INITIAL_VALUE) {
+      printf("wmp move gen anchor, tiles_to_play: %d, playthrough_blocks: %d, "
+             "equity: %f\n",
+             anchor->tiles_to_play, anchor->playthrough_blocks,
+             equity_to_double(anchor->highest_possible_equity));
+    }
+  }
+}
+
 #endif

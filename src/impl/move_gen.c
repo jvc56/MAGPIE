@@ -1293,7 +1293,7 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   }
 
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
-    // wmp_move_gen_print_anchors(&gen->wmp_move_gen);
+    wmp_move_gen_print_anchors(&gen->wmp_move_gen);
     wmp_move_gen_add_anchors(&gen->wmp_move_gen, gen->current_row_index, col,
                              gen->last_anchor_col, gen->dir, &gen->anchor_heap);
   } else {

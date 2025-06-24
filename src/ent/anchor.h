@@ -53,13 +53,16 @@ static inline void anchor_heap_add_unheaped_anchor(
   ah->anchors[i].last_anchor_col = last_anchor_col;
   ah->anchors[i].dir = dir;
   ah->anchors[i].highest_possible_equity = highest_possible_equity;
+  ah->anchors[i].tiles_to_play = 98;
+  ah->anchors[i].playthrough_blocks = 99;
   ah->count++;
 }
 
 static inline void anchor_heap_add_unheaped_wmp_anchor(
     AnchorHeap *ah, uint8_t row, uint8_t col, uint8_t last_anchor_col,
     uint8_t dir, Equity highest_possible_equity, const BitRack *playthrough,
-    Equity highest_possible_score) {
+    Equity highest_possible_score, uint8_t tiles_to_play,
+    uint8_t playthrough_blocks) {
   const int i = ah->count;
   ah->anchors[i].row = row;
   ah->anchors[i].col = col;
@@ -68,6 +71,8 @@ static inline void anchor_heap_add_unheaped_wmp_anchor(
   ah->anchors[i].highest_possible_equity = highest_possible_equity;
   ah->anchors[i].highest_possible_score = highest_possible_score;
   ah->anchors[i].playthrough = *playthrough;
+  ah->anchors[i].tiles_to_play = tiles_to_play;
+  ah->anchors[i].playthrough_blocks = playthrough_blocks;
   ah->count++;
 }
 
