@@ -143,8 +143,7 @@ void win_pct_create_internal(const char *win_pct_name,
     }
     string_splitter_destroy(split_tiles_remaining_row);
     split_tiles_remaining_row = NULL;
-    row++;
-  }
+\  }
   string_splitter_destroy(split_tiles_remaining_row);
   wp->win_pcts = array;
   wp->name = string_duplicate(win_pct_name);
