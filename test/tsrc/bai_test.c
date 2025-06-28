@@ -63,7 +63,6 @@ void test_bai_track_and_stop(int num_threads) {
       .threshold = BAI_THRESHOLD_GK16,
       .delta = 0.05,
       .sample_limit = 200,
-      .epigon_cutoff = 0,
       .time_limit_seconds = 0,
   };
 
@@ -101,7 +100,6 @@ void test_bai_sample_limit(int num_threads) {
       .threshold = BAI_THRESHOLD_NONE,
       .delta = 0.05,
       .sample_limit = 200,
-      .epigon_cutoff = 10,
       .time_limit_seconds = 0,
   };
   ThreadControl *thread_control = thread_control_create();
@@ -178,7 +176,6 @@ void test_bai_time_limit(int num_threads) {
       .threshold = BAI_THRESHOLD_NONE,
       .delta = 0.01,
       .sample_limit = 100000000,
-      .epigon_cutoff = 100000,
       .time_limit_seconds = 2,
   };
 
@@ -270,7 +267,6 @@ void test_bai_epigons(int num_threads) {
   BAIOptions bai_options = {
       .delta = 0.01,
       .sample_limit = num_samples,
-      .epigon_cutoff = 100,
       .time_limit_seconds = 0,
   };
 
@@ -408,7 +404,6 @@ void test_bai_input_from_file(const char *bai_input_filename,
       .threshold = strategies[pi][1],
       .delta = delta,
       .sample_limit = num_samples,
-      .epigon_cutoff = 0,
       .time_limit_seconds = 0,
   };
   ThreadControl *thread_control = thread_control_create();

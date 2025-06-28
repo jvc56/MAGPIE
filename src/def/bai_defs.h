@@ -24,7 +24,6 @@ typedef struct BAIOptions {
   // refers to the total number of round robins instead
   // of the total number of samples.
   int sample_limit;
-  int epigon_cutoff;
   int time_limit_seconds;
 } BAIOptions;
 

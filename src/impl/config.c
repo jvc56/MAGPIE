@@ -88,7 +88,6 @@ typedef enum {
   ARG_TOKEN_TIME_LIMIT,
   ARG_TOKEN_SAMPLING_RULE,
   ARG_TOKEN_THRESHOLD,
-  ARG_TOKEN_EPIGON_CUTOFF,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -129,7 +128,6 @@ struct Config {
   int time_limit_seconds;
   bai_sampling_rule_t sampling_rule;
   bai_threshold_t threshold;
-  int epigon_cutoff;
   game_variant_t game_variant;
   WinPct *win_pcts;
   BoardLayout *board_layout;
@@ -773,7 +771,6 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->bai_options.time_limit_seconds =
       config_get_time_limit_seconds(config);
   sim_args->bai_options.sampling_rule = config->sampling_rule;
-  sim_args->bai_options.epigon_cutoff = config->epigon_cutoff;
 }
 
 void config_simulate(const Config *config, Rack *known_opp_rack,
@@ -1709,12 +1706,6 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_int(config, ARG_TOKEN_EPIGON_CUTOFF, 0, INT_MAX,
-                  &config->epigon_cutoff, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
   // Double values
 
   const char *new_stop_cond_str =
@@ -2071,8 +2062,6 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_THRESHOLD, "threshold", 1, 1,
                     execute_fatal, status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_EPIGON_CUTOFF, "epigoncutoff", 1, 1,
-                    execute_fatal, status_fatal);
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
   config->exec_mode = EXEC_MODE_CONSOLE;
@@ -2087,7 +2076,6 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->time_limit_seconds = 0;
   config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO;
   config->threshold = BAI_THRESHOLD_GK16;
-  config->epigon_cutoff = 1000;
   config->use_game_pairs = false;
   config->use_small_plays = false;
   config->human_readable = false;
