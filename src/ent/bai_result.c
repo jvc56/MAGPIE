@@ -17,7 +17,7 @@ struct BAIResult {
 
 void bai_result_reset(BAIResult *bai_result) {
   bai_result->exit_status = EXIT_STATUS_NONE;
-  bai_result->best_arm = 0;
+  bai_result->best_arm = -1;
   bai_result->total_samples = 0;
   bai_result->sample_time = 0;
   bai_result->bai_wait_time = 0;

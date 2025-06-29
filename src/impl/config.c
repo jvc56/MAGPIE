@@ -1257,8 +1257,6 @@ void config_load_sampling_rule(Config *config, const char *sampling_rule_str,
                                ErrorStack *error_stack) {
   if (has_iprefix(sampling_rule_str, "rr")) {
     config->sampling_rule = BAI_SAMPLING_RULE_ROUND_ROBIN;
-  } else if (has_iprefix(sampling_rule_str, "tas")) {
-    config->sampling_rule = BAI_SAMPLING_RULE_TRACK_AND_STOP;
   } else if (has_iprefix(sampling_rule_str, "tt")) {
     config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO;
   } else {

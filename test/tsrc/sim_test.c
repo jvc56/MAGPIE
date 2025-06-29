@@ -248,7 +248,7 @@ void test_sim_time_limit(void) {
 
   assert(status == ERROR_STATUS_SUCCESS);
   assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
-         EXIT_STATUS_TIME_LIMIT);
+         EXIT_STATUS_TIMEOUT);
   config_destroy(config);
 }
 

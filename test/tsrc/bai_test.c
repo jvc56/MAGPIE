@@ -16,13 +16,11 @@
 
 static const int sampling_rules[3] = {
     BAI_SAMPLING_RULE_ROUND_ROBIN,
-    BAI_SAMPLING_RULE_TRACK_AND_STOP,
     BAI_SAMPLING_RULE_TOP_TWO,
 };
 static const int num_sampling_rules = sizeof(sampling_rules) / sizeof(int);
 
 static const int strategies[][3] = {
-    {BAI_SAMPLING_RULE_TRACK_AND_STOP, BAI_THRESHOLD_GK16},
     {BAI_SAMPLING_RULE_TOP_TWO, BAI_THRESHOLD_GK16},
 };
 static const int num_strategies_entries =
@@ -40,7 +38,7 @@ void assert_num_epigons(const RandomVariables *rvs,
   assert(expected_num_epigons == actual_num_epigons);
 }
 
-void test_bai_track_and_stop(int num_threads) {
+void test_bai_top_two(int num_threads) {
   const double means_and_vars[] = {-10, 1, 0, 1};
   const int num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
   RandomVariablesArgs rv_args = {
@@ -59,7 +57,7 @@ void test_bai_track_and_stop(int num_threads) {
   RandomVariables *rng = rvs_create(&rng_args);
 
   BAIOptions bai_options = {
-      .sampling_rule = BAI_SAMPLING_RULE_TRACK_AND_STOP,
+      .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO,
       .threshold = BAI_THRESHOLD_GK16,
       .delta = 0.05,
       .sample_limit = 200,
@@ -119,6 +117,8 @@ void test_bai_sample_limit(int num_threads) {
     if (expected_num_samples < num_rvs * arm_sample_minimum) {
       expected_num_samples = num_rvs * arm_sample_minimum;
     }
+    printf("asserting %ld == %d\n", rvs_get_total_samples(rvs),
+           expected_num_samples);
     assert(rvs_get_total_samples(rvs) == (uint64_t)expected_num_samples);
     assert(bai_result_get_total_samples(bai_result) == expected_num_samples);
     assert_num_epigons(rvs, 0);
@@ -172,7 +172,7 @@ void test_bai_time_limit(int num_threads) {
   RandomVariables *rng = rvs_create(&rng_args);
 
   BAIOptions bai_options = {
-      .sampling_rule = BAI_SAMPLING_RULE_TRACK_AND_STOP,
+      .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO,
       .threshold = BAI_THRESHOLD_NONE,
       .delta = 0.01,
       .sample_limit = 100000000,
@@ -218,7 +218,7 @@ void test_bai_time_limit(int num_threads) {
 
   pthread_join(thread, NULL);
 
-  assert(bai_result_get_exit_status(bai_result) == EXIT_STATUS_TIME_LIMIT);
+  assert(bai_result_get_exit_status(bai_result) == EXIT_STATUS_TIMEOUT);
 
   bai_result_destroy(bai_result);
   thread_control_destroy(thread_control);
@@ -434,10 +434,11 @@ void test_bai(void) {
     const int num_threads[] = {1, 11};
     const int num_thread_tests = sizeof(num_threads) / sizeof(int);
     for (int i = 0; i < num_thread_tests; i++) {
-      test_bai_sample_limit(i);
-      test_bai_time_limit(i);
-      test_bai_track_and_stop(i);
-      test_bai_epigons(i);
+      const int num_threads_i = num_threads[i];
+      test_bai_sample_limit(num_threads_i);
+      test_bai_time_limit(num_threads_i);
+      test_bai_top_two(num_threads_i);
+      test_bai_epigons(num_threads_i);
     }
   }
 }

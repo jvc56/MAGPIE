@@ -10,11 +10,8 @@ typedef enum {
 
 typedef enum {
   BAI_SAMPLING_RULE_ROUND_ROBIN,
-  BAI_SAMPLING_RULE_TRACK_AND_STOP,
   BAI_SAMPLING_RULE_TOP_TWO,
 } bai_sampling_rule_t;
-
-typedef enum { BAI_CTRACKING, BAI_DTRACKING } bai_tracking_t;
 
 typedef struct BAIOptions {
   bai_sampling_rule_t sampling_rule;
