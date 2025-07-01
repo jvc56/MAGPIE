@@ -14,6 +14,8 @@
 #include "../../src/impl/bai.h"
 #include "../../src/util/io_util.h"
 
+#define NUM_UNIQUE_MEANS 10000
+
 static const int sampling_rules[3] = {
     BAI_SAMPLING_RULE_ROUND_ROBIN,
     BAI_SAMPLING_RULE_TOP_TWO,
@@ -117,8 +119,6 @@ void test_bai_sample_limit(int num_threads) {
     if (expected_num_samples < num_rvs * arm_sample_minimum) {
       expected_num_samples = num_rvs * arm_sample_minimum;
     }
-    printf("asserting %ld == %d\n", rvs_get_total_samples(rvs),
-           expected_num_samples);
     assert(rvs_get_total_samples(rvs) == (uint64_t)expected_num_samples);
     assert(bai_result_get_total_samples(bai_result) == expected_num_samples);
     assert_num_epigons(rvs, 0);
@@ -282,13 +282,13 @@ void test_bai_epigons(int num_threads) {
     for (int num_rvs = 2; num_rvs <= 10; num_rvs++) {
       double *means_and_vars =
           (double *)malloc_or_die(num_rvs * 2 * sizeof(double));
-      int expected_epigons = 0;
       for (int i = 0; i < num_rvs; i++) {
         means_and_vars[i * 2] = 3 * (max_classes - (i % max_classes));
         means_and_vars[i * 2 + 1] = 5 * (max_classes - (i % max_classes));
-        if (i > 0 && i % max_classes == 0) {
-          expected_epigons++;
-        }
+      }
+      int expected_epigons = num_rvs - max_classes;
+      if (expected_epigons < 0) {
+        expected_epigons = 0;
       }
       rv_args.num_rvs = num_rvs;
       rv_args.means_and_vars = means_and_vars;
@@ -425,11 +425,93 @@ void test_bai_input_from_file(const char *bai_input_filename,
   free(rng_samples);
 }
 
+void test_bai_from_seed(const char *bai_seed) {
+
+  ErrorStack *error_stack = error_stack_create();
+  const uint64_t seed = string_to_uint64(bai_seed, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("invalid seed: %s\n", bai_seed);
+  }
+  error_stack_destroy(error_stack);
+  printf("running bai comparison with seed %s\n", bai_seed);
+
+  XoshiroPRNG *prng = prng_create(seed);
+
+  const int num_rvs = prng_get_random_number(prng, 20) + 2;
+  const uint64_t rv_seed = prng_get_random_number(prng, UINT64_MAX);
+  const uint64_t rng_seed = prng_get_random_number(prng, UINT64_MAX);
+
+  double *means_and_vars = malloc_or_die(num_rvs * 2 * sizeof(double));
+  int means_map[NUM_UNIQUE_MEANS];
+  for (int i = 0; i < NUM_UNIQUE_MEANS; i++) {
+    means_map[i] = 0;
+  }
+  for (int i = 0; i < num_rvs * 2; i++) {
+    double value;
+    if (i % 2 == 1) {
+      value = (double)(prng_get_random_number(prng, 10) + 1);
+    } else {
+      int mean_int = prng_get_random_number(prng, NUM_UNIQUE_MEANS);
+      while (means_map[mean_int] != 0) {
+        mean_int = prng_get_random_number(prng, NUM_UNIQUE_MEANS);
+      }
+      means_map[mean_int] = 1;
+      value = (double)(mean_int - NUM_UNIQUE_MEANS / 2) / 100;
+    }
+    means_and_vars[i] = value;
+  }
+
+  prng_destroy(prng);
+
+  RandomVariablesArgs rv_args = {
+      .type = RANDOM_VARIABLES_NORMAL,
+      .num_rvs = num_rvs,
+      .seed = rv_seed,
+      .means_and_vars = means_and_vars,
+  };
+  RandomVariables *rvs = rvs_create(&rv_args);
+
+  RandomVariablesArgs rng_args = {
+      .type = RANDOM_VARIABLES_UNIFORM,
+      .num_rvs = 1,
+      .seed = rng_seed,
+  };
+  RandomVariables *rng = rvs_create(&rng_args);
+
+  BAIOptions bai_options = {
+      .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO,
+      .threshold = BAI_THRESHOLD_GK16,
+      .delta = 0.01,
+      .sample_limit = 100000,
+      .time_limit_seconds = 0,
+  };
+  ThreadControl *thread_control = thread_control_create();
+  BAIResult *bai_result = bai_result_create();
+  BAILogger *bai_logger = bai_logger_create("bai_log.txt");
+
+  bai(&bai_options, rvs, rng, thread_control, bai_logger, bai_result);
+
+  bai_logger_log_int(bai_logger, "result",
+                     bai_result_get_best_arm(bai_result) + 1);
+  bai_logger_flush(bai_logger);
+
+  bai_result_destroy(bai_result);
+  bai_logger_destroy(bai_logger);
+  thread_control_destroy(thread_control);
+  rvs_destroy(rvs);
+  rvs_destroy(rng);
+  free(means_and_vars);
+}
+
 void test_bai(void) {
   const char *bai_input_filename = getenv("BAI_INPUT");
   const char *bai_params_index = getenv("BAI_PARAMS_INDEX");
+  const char *bai_seed = getenv("BAI_SEED");
   if (bai_input_filename && bai_params_index) {
     test_bai_input_from_file(bai_input_filename, bai_params_index);
+  } else if (bai_seed) {
+    test_bai_from_seed(bai_seed);
   } else {
     const int num_threads[] = {1, 11};
     const int num_thread_tests = sizeof(num_threads) / sizeof(int);

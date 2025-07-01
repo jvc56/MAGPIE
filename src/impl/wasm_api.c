@@ -155,7 +155,10 @@ char *static_evaluation(const char *cgpstr, int num_plays) {
 }
 
 int process_command_wasm(const char *cmd) {
-  execute_command_async(wasm_config, wasm_error_stack, cmd);
+  execute_command_sync(wasm_config, wasm_error_stack, cmd);
+  if (!error_stack_is_empty(wasm_error_stack)) {
+    error_stack_print_and_reset(wasm_error_stack);
+  }
   return 0;
 }
 
