@@ -728,7 +728,7 @@ void test_moves_are_similar(void) {
   Rack *player0_rack = player_get_rack(game_get_player(game, 0));
   ValidatedMoves *vms = NULL;
 
-  load_cgp_or_die(game, ZINE_ZIN_CGP);
+  load_cgp_or_die(game, ZINE_LINE_CGP);
 
   rack_set_to_string(ld, player0_rack, "EEEIILZ");
   vms = validated_moves_create_and_assert_status(
