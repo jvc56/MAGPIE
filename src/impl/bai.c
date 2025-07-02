@@ -318,12 +318,23 @@ void bai_sample_receive(BAI *bai, BAIResult *bai_result) {
   bai_update_arm_data_with_sample(bai, resp.arm_datum->bai_index, resp.sample);
 }
 
-void bai_sample_singlethreaded(BAI *bai, const int k) {
+void bai_sample_singlethreaded(BAI *bai, const int k, BAILogger *bai_logger) {
+  bai_logger_log_int(bai_logger, "sample arm", k);
   const double sample =
       rvs_sample(bai->rvs, bai_get_rvs_index(bai, k), 0, bai->bai_logger);
   bai->N_requested[k]++;
   bai->total_samples_requested++;
   bai_update_arm_data_with_sample(bai, k, sample);
+  bai_logger_log_int(bai_logger, "total samples", bai->total_samples_requested);
+  for (int i = 0; i < bai->K; i++) {
+    bai_logger_log_int(bai_logger, "arm", i);
+    bai_logger_log_int(bai_logger, "N", bai->N_requested[i]);
+    bai_logger_log_double(bai_logger, "S", bai->S[i]);
+    bai_logger_log_double(bai_logger, "S2", bai->S2[i]);
+    bai_logger_log_double(bai_logger, "hμ", bai->hμ[i]);
+    bai_logger_log_double(bai_logger, "hσ2", bai->hσ2[i]);
+  }
+  bai_logger_flush(bai_logger);
 }
 
 void swap_indexes_bool(bool *a, const int i, const int j) {
@@ -373,13 +384,9 @@ int bai_potentially_mark_epigons(BAI *bai, const int astar) {
   // Always make astar the first arm.
   bai_swap(bai, astar, 0);
   for (int i = bai->K - 1; i > 0; i--) {
-    bai_logger_log_int(bai->bai_logger, "evale", i);
     if (!bai_rvs_mark_as_epigon_if_similar(bai, 0, i)) {
-      bai_logger_log_int(bai->bai_logger, "not_epigon", i);
       continue;
     }
-    bai_logger_log_int(bai->bai_logger, "epigon_marked", i);
-    bai_logger_log_int(bai->bai_logger, "swap", bai->K - 1);
     bai_swap(bai, i, bai->K - 1);
     bai->K--;
     if (bai->K == 1) {
@@ -474,7 +481,7 @@ bool bai_is_finished(BAIIsFinishedArgs *args, const exit_status_t exit_status,
         args->bai->threshold_reached ||
         stopping_criterion(args->bai->K, args->Zs, args->Sβ,
                            args->bai->N_received, args->bai->hμ, args->bai->hσ2,
-                           astar, args->bai->bai_logger);
+                           astar, NULL);
     finished =
         args->bai->threshold_reached &&
         (args->bai_options->sampling_rule != BAI_SAMPLING_RULE_ROUND_ROBIN ||
@@ -569,7 +576,7 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   } else {
     for (int k = 0; k < bai->initial_K; k++) {
       for (int i = 0; i < (BAI_ARM_SAMPLE_MINIMUM); i++) {
-        bai_sample_singlethreaded(bai, k);
+        bai_sample_singlethreaded(bai, k, bai_logger);
       }
     }
   }
@@ -616,28 +623,21 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
       .bai_result = bai_result,
   };
   int astar = 0;
+  bai_logger_log_title(bai_logger, "finished initlal sampling");
+  bai_logger_flush(bai_logger);
   while (
       !bai_is_finished(&is_finished_args, EXIT_STATUS_SAMPLE_LIMIT, astar) &&
       !bai_is_finished(&is_finished_args, EXIT_STATUS_TIME_LIMIT, astar) &&
       !bai_is_finished(&is_finished_args, EXIT_STATUS_USER_INTERRUPT, astar) &&
       !bai_is_finished(&is_finished_args, EXIT_STATUS_ONE_ARM_REMAINING,
                        astar)) {
-    bai_logger_log_int(bai_logger, "t", bai->total_samples_received);
     bai_glrt(bai->K, bai->N_received, bai->hμ, bai->hσ2, glrt_results,
-             bai_logger);
+             NULL);
     const double *Zs = glrt_results->vals;
     const int aalt = glrt_results->k;
     astar = glrt_results->astar;
     const double *ξ = bai->hμ;
     const double *ϕ2 = bai->hσ2;
-
-    bai_logger_log_title(bai_logger, "GLRT_RETURN_VALUES");
-    bai_logger_log_double_array(bai_logger, "Zs", Zs, bai->K);
-    bai_logger_log_int(bai_logger, "aalt", aalt + 1);
-    bai_logger_log_int(bai_logger, "astar", astar + 1);
-    bai_logger_log_double_array(bai_logger, "ksi", ξ, bai->K);
-    bai_logger_log_double_array(bai_logger, "phi2", ϕ2, bai->K);
-    bai_logger_flush(bai_logger);
 
     if (bai_is_finished(&is_finished_args, EXIT_STATUS_THRESHOLD, astar)) {
       break;
@@ -649,15 +649,21 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
     } else {
       N = bai->N_received;
     }
+
+    bai_logger_log_int(bai_logger, "astar", astar);
+    bai_logger_log_int(bai_logger, "challenger", aalt);
+    // bai_logger_log_double_array(bai_logger, "Zs", Zs, bai->K);
+    bai_logger_flush(bai_logger);
+    
     const int k = bai_sampling_rule_next_sample(bai->bai_sampling_rule, astar,
                                                 aalt, ξ, ϕ2, N, bai->S, Zs,
-                                                bai->K, rng, bai_logger);
+                                                bai->K, rng, NULL);
 
     if (bai->is_multithreaded) {
       bai_sample_receive(bai, bai_result);
       bai_sample_request(bai, k);
     } else {
-      bai_sample_singlethreaded(bai, k);
+      bai_sample_singlethreaded(bai, k, bai_logger);
     }
     astar = bai_potentially_mark_epigons(bai, astar);
   }
