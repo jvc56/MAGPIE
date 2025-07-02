@@ -720,6 +720,30 @@ void test_leave_record(void) {
   config_destroy(config);
 }
 
+void test_moves_are_similar(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL23 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  Rack *player0_rack = player_get_rack(game_get_player(game, 0));
+  ValidatedMoves *vms = NULL;
+
+  load_cgp_or_die(game, ZINE_ZIN_CGP);
+
+  rack_set_to_string(ld, player0_rack, "EEEIILZ");
+  vms = validated_moves_create_and_assert_status(
+      game, 0, "14f.ZINE,14f.LINE", false, false, false, ERROR_STATUS_SUCCESS);
+  const Move *m1 = validated_moves_get_move(vms, 0);
+  const Move *m2 = validated_moves_get_move(vms, 1);
+  assert(!moves_are_similar(m2, m1, ld_get_size(ld)));
+  assert(!moves_are_similar(m1, m2, ld_get_size(ld)));
+  validated_moves_destroy(vms);
+  vms = NULL;
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_gameplay(void) {
   test_draw_to_full_rack();
   test_rack_is_drawable();
@@ -730,4 +754,5 @@ void test_gameplay(void) {
   test_set_random_rack();
   test_backups();
   test_leave_record();
+  test_moves_are_similar();
 }

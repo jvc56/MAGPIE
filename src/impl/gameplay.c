@@ -451,7 +451,7 @@ bool moves_are_similar(const Move *m1, const Move *m2, int dist_size) {
   }
 
   for (int i = 0; i < move_get_tiles_length(m2); i++) {
-    MachineLetter tile = move_get_tile(m1, i);
+    MachineLetter tile = move_get_tile(m2, i);
     if (tile == PLAYED_THROUGH_MARKER) {
       continue;
     }
