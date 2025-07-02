@@ -29,7 +29,7 @@
 // Internal BAI structs
 
 // FIXME: just make this whole thing a .h when done
-// FIXME: debug seed 199101
+// FIXME: debug seed 157300
 typedef struct BAIArmDatum {
   int num_samples;
   double samples_sum;
@@ -309,7 +309,8 @@ void bai_update_threshold_and_challenger(BAISyncData *bai_sync_data,
       break;
     }
   }
-  if (num_arms_at_threshold == bai_sync_data->num_arms) {
+  if (!bai_sync_data->initial_phase &&
+      num_arms_at_threshold == bai_sync_data->num_arms) {
     bai_sync_data->exit_status = EXIT_STATUS_THRESHOLD;
   }
 }
