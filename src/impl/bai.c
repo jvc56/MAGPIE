@@ -29,17 +29,15 @@
 // Internal BAI structs
 
 // FIXME: just make this whole thing a .h when done
-
+// FIXME: debug seed 199101
 typedef struct BAIArmDatum {
   int num_samples;
   double samples_sum;
   double samples_squared_sum;
   double mean;
   double var;
-  int challenger_index;
-  double challenger_value;
-  bool reached_threshold;
   bool is_epigon;
+  double *Zs;
 } BAIArmDatum;
 
 typedef struct BAISyncData {
@@ -48,8 +46,7 @@ typedef struct BAISyncData {
   int num_total_samples_completed;
   int num_total_samples_requested;
   int astar_index;
-  double astar_mean;
-  double threshold_value;
+  int challenger_index;
   bool initial_phase;
   exit_status_t exit_status;
   BAIArmDatum *arm_data;
@@ -65,16 +62,24 @@ BAISyncData *bai_sync_data_create(const int num_initial_arms,
   bai_sync_data->num_total_samples_completed = 0;
   bai_sync_data->num_total_samples_requested = 0;
   bai_sync_data->astar_index = -1;
+  bai_sync_data->challenger_index = -1;
   bai_sync_data->initial_phase = true;
   bai_sync_data->exit_status = EXIT_STATUS_NONE;
   bai_sync_data->arm_data =
       calloc_or_die(num_initial_arms, sizeof(BAIArmDatum));
+  for (int i = 0; i < num_initial_arms; i++) {
+    bai_sync_data->arm_data[i].Zs =
+        malloc_or_die(num_initial_arms * sizeof(double));
+  }
   bai_sync_data->rng = rng;
   pthread_mutex_init(&bai_sync_data->mutex, NULL);
   return bai_sync_data;
 }
 
 void bai_sync_data_destroy(BAISyncData *bai_sync_data) {
+  for (int i = 0; i < bai_sync_data->num_arms; i++) {
+    free(bai_sync_data->arm_data[i].Zs);
+  }
   free(bai_sync_data->arm_data);
   free(bai_sync_data);
 }
@@ -153,20 +158,13 @@ int bai_sync_data_get_next_bai_sample_index_while_locked(BAISampleArgs *args) {
   switch (args->sampling_rule) {
   case BAI_SAMPLING_RULE_ROUND_ROBIN:
     if (args->bai_sync_data->num_total_samples_requested %
-            args->bai_sync_data->num_arms ==
-        0) {
-      if (args->bai_sync_data->num_total_samples_requested /
-              args->bai_sync_data->num_arms ==
-          args->sample_limit) {
-        args->bai_sync_data->exit_status = EXIT_STATUS_SAMPLE_LIMIT;
-        return -1;
-      }
-      if (args->threshold == BAI_THRESHOLD_GK16 &&
-          args->bai_sync_data->num_arms_reached_threshold ==
-              args->bai_sync_data->num_arms) {
-        args->bai_sync_data->exit_status = EXIT_STATUS_THRESHOLD;
-        return -1;
-      }
+                args->bai_sync_data->num_arms ==
+            0 &&
+        args->bai_sync_data->num_total_samples_requested /
+                args->bai_sync_data->num_arms ==
+            args->sample_limit) {
+      args->bai_sync_data->exit_status = EXIT_STATUS_SAMPLE_LIMIT;
+      return -1;
     }
     arm_index = args->bai_sync_data->num_total_samples_requested %
                 args->bai_sync_data->num_arms;
@@ -177,18 +175,10 @@ int bai_sync_data_get_next_bai_sample_index_while_locked(BAISampleArgs *args) {
       args->bai_sync_data->exit_status = EXIT_STATUS_SAMPLE_LIMIT;
       return -1;
     }
-    if (args->threshold == BAI_THRESHOLD_GK16 &&
-        args->bai_sync_data->num_arms_reached_threshold ==
-            args->bai_sync_data->num_arms) {
-      args->bai_sync_data->exit_status = EXIT_STATUS_THRESHOLD;
-      return -1;
-    }
     arm_index = args->bai_sync_data->astar_index;
     // FIXME: test selecting the arm with the fewest samples
-    if (rvs_sample(args->bai_sync_data->rng, 0, 0, args->bai_logger) < 0.5) {
-      arm_index =
-          args->bai_sync_data->arm_data[args->bai_sync_data->astar_index]
-              .challenger_index;
+    if (rvs_sample(args->bai_sync_data->rng, 0, 0, args->bai_logger) > 0.5) {
+      arm_index = args->bai_sync_data->challenger_index;
     }
     break;
   }
@@ -226,16 +216,12 @@ int bai_sync_data_get_next_sample_index_while_locked(
   if (args->bai_logger) {
     bai_logger_log_int(args->bai_logger, "astar",
                        args->bai_sync_data->astar_index);
-    bai_logger_log_int(
-        args->bai_logger, "challenger",
-        args->bai_sync_data->arm_data[args->bai_sync_data->astar_index]
-            .challenger_index);
-    bai_logger_log_double(
-        args->bai_logger, "Z",
-        bai_get_arm_z(
-            args->bai_sync_data, args->bai_sync_data->astar_index,
-            args->bai_sync_data->arm_data[args->bai_sync_data->astar_index]
-                .challenger_index));
+    bai_logger_log_int(args->bai_logger, "challenger",
+                       args->bai_sync_data->challenger_index);
+    // bai_logger_log_double_array(
+    //     args->bai_logger, "Zs",
+    //     args->bai_sync_data->arm_data[args->bai_sync_data->astar_index].Zs,
+    //     args->bai_sync_data->num_arms);
     bai_logger_flush(args->bai_logger);
   }
 
@@ -252,68 +238,79 @@ int bai_sync_data_get_next_sample_index(BAISampleArgs *args, const bool timeout,
   return arm_index;
 }
 
-// Assumes that either threshold is not none or sampling rule is not round robin
+// Returns true if all arms have reached the threshold
+// Assumes the caller has locked bai_sync_data or is the only thread running
 void bai_update_threshold_and_challenger(BAISyncData *bai_sync_data,
                                          bai_threshold_t threshold,
                                          bai_sampling_rule_t sampling_rule,
+                                         const double delta,
                                          const int arm_index) {
-  const double Z =
-      bai_get_arm_z(bai_sync_data, bai_sync_data->astar_index, arm_index);
-  BAIArmDatum *arm_datum = &bai_sync_data->arm_data[arm_index];
+  if (threshold == BAI_THRESHOLD_NONE &&
+      sampling_rule == BAI_SAMPLING_RULE_ROUND_ROBIN) {
+    return;
+  }
+
+  BAIArmDatum *astar_arm_datum =
+      &bai_sync_data->arm_data[bai_sync_data->astar_index];
+  int num_arms_at_threshold = 0;
+
+  double bai_threshold;
   switch (threshold) {
   case BAI_THRESHOLD_NONE:
     break;
-  case BAI_THRESHOLD_GK16:;
-    const bool old_reached_threshold = arm_datum->reached_threshold;
-    const bool new_reached_threshold =
-        arm_datum->is_epigon || Z > bai_sync_data->threshold_value;
-    arm_datum->reached_threshold = new_reached_threshold;
-    if (!old_reached_threshold && new_reached_threshold) {
-      bai_sync_data->num_arms_reached_threshold++;
-    } else if (old_reached_threshold && !new_reached_threshold) {
-      bai_sync_data->num_arms_reached_threshold--;
-    }
+  case BAI_THRESHOLD_GK16:
+    bai_threshold = log(
+        (log((double)bai_sync_data->num_total_samples_completed) + 1) / delta);
     break;
   }
+
+  double challenger_value;
   switch (sampling_rule) {
   case BAI_SAMPLING_RULE_ROUND_ROBIN:
     break;
-  case BAI_SAMPLING_RULE_TOP_TWO:;
-    if (arm_datum->is_epigon) {
-      break;
-    }
-    const double challenger_value = Z + log((double)arm_datum->num_samples);
-    BAIArmDatum *astar_arm_datum =
-        &bai_sync_data->arm_data[bai_sync_data->astar_index];
-    if (astar_arm_datum->challenger_index < 0 ||
-        challenger_value < astar_arm_datum->challenger_value) {
-      astar_arm_datum->challenger_index = arm_index;
-      astar_arm_datum->challenger_value = challenger_value;
-    }
+  case BAI_SAMPLING_RULE_TOP_TWO:
+    bai_sync_data->challenger_index = -1;
     break;
   }
-}
 
-void bai_update_all_threshold_and_challenger_for_astar(
-    BAISyncData *bai_sync_data, bai_threshold_t threshold,
-    bai_sampling_rule_t sampling_rule) {
-  // Reset the challenger index
-  BAIArmDatum *astar_arm_datum =
-      &bai_sync_data->arm_data[bai_sync_data->astar_index];
-  astar_arm_datum->challenger_index = -1;
-  // The astar arm is not considered when assessing the thresholds in BAI,
-  // so set it to reach the threshold here so that the check for all arms
-  // reaching the threshold can end the algorithm.
-  if (!astar_arm_datum->reached_threshold) {
-    astar_arm_datum->reached_threshold = true;
-    bai_sync_data->num_arms_reached_threshold++;
-  }
+  const bool update_all = arm_index == bai_sync_data->astar_index;
   for (int i = 0; i < bai_sync_data->num_arms; i++) {
-    if (i == bai_sync_data->astar_index) {
+    if (i == bai_sync_data->astar_index ||
+        bai_sync_data->arm_data[i].is_epigon) {
+      num_arms_at_threshold++;
       continue;
     }
-    bai_update_threshold_and_challenger(bai_sync_data, threshold, sampling_rule,
-                                        i);
+    if (update_all || i == arm_index) {
+      astar_arm_datum->Zs[i] =
+          bai_get_arm_z(bai_sync_data, bai_sync_data->astar_index, i);
+    }
+    double arm_Z = astar_arm_datum->Zs[i];
+    switch (threshold) {
+    case BAI_THRESHOLD_NONE:
+      break;
+    case BAI_THRESHOLD_GK16:
+      if (arm_Z > bai_threshold) {
+        num_arms_at_threshold++;
+      }
+      break;
+    }
+    switch (sampling_rule) {
+    case BAI_SAMPLING_RULE_ROUND_ROBIN:
+      break;
+    case BAI_SAMPLING_RULE_TOP_TWO:;
+      // FIXME: consider caching the log result
+      double arm_challenger_value =
+          arm_Z + log((double)bai_sync_data->arm_data[i].num_samples);
+      if (bai_sync_data->challenger_index < 0 ||
+          arm_challenger_value < challenger_value) {
+        bai_sync_data->challenger_index = i;
+        challenger_value = arm_challenger_value;
+      }
+      break;
+    }
+  }
+  if (num_arms_at_threshold == bai_sync_data->num_arms) {
+    bai_sync_data->exit_status = EXIT_STATUS_THRESHOLD;
   }
 }
 
@@ -327,9 +324,6 @@ void bai_sync_data_add_sample_while_locked(BAISampleArgs *args,
     return;
   }
   bai_sync_data->num_total_samples_completed++;
-  bai_sync_data->threshold_value =
-      log((log((double)bai_sync_data->num_total_samples_completed) + 1) /
-          args->delta);
   BAIArmDatum *sample_arm_datum = &arm_data[arm_index];
   sample_arm_datum->num_samples++;
   sample_arm_datum->samples_sum += sample_value;
@@ -342,27 +336,22 @@ void bai_sync_data_add_sample_while_locked(BAISampleArgs *args,
   if (sample_arm_datum->var < MINIMUM_VARIANCE) {
     sample_arm_datum->var = MINIMUM_VARIANCE;
   }
+
+  bai_sync_data->astar_index = 0;
+  double astar_mean = arm_data[0].mean;
+  for (int i = 1; i < bai_sync_data->num_arms; i++) {
+    const BAIArmDatum *arm_datum = &arm_data[i];
+    if (arm_datum->mean > astar_mean) {
+      bai_sync_data->astar_index = i;
+      astar_mean = arm_datum->mean;
+    }
+  }
+
+  bai_update_threshold_and_challenger(bai_sync_data, args->threshold,
+                                      args->sampling_rule, args->delta,
+                                      arm_index);
+
   BAILogger *bai_logger = args->bai_logger;
-
-  if (bai_sync_data->astar_index < 0 ||
-      sample_arm_datum->mean > bai_sync_data->astar_mean) {
-    bai_sync_data->astar_index = arm_index;
-    bai_sync_data->astar_mean = sample_arm_datum->mean;
-  }
-
-  if (args->threshold == BAI_THRESHOLD_NONE &&
-      args->sampling_rule == BAI_SAMPLING_RULE_ROUND_ROBIN) {
-    return;
-  }
-
-  if (arm_index == bai_sync_data->astar_index) {
-    bai_update_all_threshold_and_challenger_for_astar(
-        bai_sync_data, args->threshold, args->sampling_rule);
-  } else {
-    bai_update_threshold_and_challenger(bai_sync_data, args->threshold,
-                                        args->sampling_rule, arm_index);
-  }
-
   if (bai_logger) {
     bai_logger_log_int(bai_logger, "total samples",
                        bai_sync_data->num_total_samples_completed);
@@ -426,9 +415,11 @@ void bai_cull_epigons(void *uncasted_bai_worker_args) {
     bai_sync_data->exit_status = EXIT_STATUS_ONE_ARM_REMAINING;
   }
   bai_sync_data->initial_phase = false;
-  bai_update_all_threshold_and_challenger_for_astar(
+  assert(!bai_sync_data->arm_data[bai_sync_data->astar_index].is_epigon);
+  bai_update_threshold_and_challenger(
       bai_sync_data, bai_worker_args->bai_options->threshold,
-      bai_worker_args->bai_options->sampling_rule);
+      bai_worker_args->bai_options->sampling_rule,
+      bai_worker_args->bai_options->delta, bai_sync_data->astar_index);
   bai_logger_log_title(bai_worker_args->bai_logger,
                        "finished initlal sampling");
   bai_logger_flush(bai_worker_args->bai_logger);
@@ -461,6 +452,7 @@ void bai_worker_sample_loop(BAIWorkerArgs *bai_worker_args) {
     if (arm_index < 0) {
       break;
     }
+    bai_logger_log_int(bai_logger, "sample arm", arm_index);
     double sample = rvs_sample(rvs, arm_index, thread_index, bai_logger);
     bai_sync_data_add_sample(&sample_args, arm_index, sample);
   }
