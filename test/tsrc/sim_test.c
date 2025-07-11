@@ -646,7 +646,7 @@ void test_sim_perf(const char *sim_perf_iters) {
   Config *config =
       config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
                            "all -numplays 10 -plies 2 -scond none");
-  const uint64_t max_samples = 20000;
+  const uint64_t max_samples = 500000;
   char *set_threads_cmd =
       get_formatted_string("set -threads 1 -iter %lu", max_samples);
   load_and_exec_config_or_die(config, set_threads_cmd);
@@ -654,12 +654,9 @@ void test_sim_perf(const char *sim_perf_iters) {
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   Game *game = config_get_game(config);
   Bag *bag = game_get_bag(game);
-  const char *strategies[] = {
-      "-sr tt -threads 1 ",  "-sr tt -threads 2 ",  "-sr tt -threads 3 ",
-      "-sr tt -threads 4 ",  "-sr tt -threads 5 ",  "-sr tt -threads 6 ",
-      "-sr tt -threads 7 ",  "-sr tt -threads 8 ",  "-sr tt -threads 9 ",
-      "-sr tt -threads 10 ", "-sr tt -threads 11 ", "-sr tt -threads 12 ",
-  };
+  // Set threads to the maximum number of threads supported by the system
+  // to ensure that all cores achieve close to 100% utilization
+  const char *strategies[] = {"-sr tt -threads 12 "};
   const int num_strategies = sizeof(strategies) / sizeof(strategies[0]);
   SimStrategyStats **stats =
       malloc_or_die(num_strategies * sizeof(SimStrategyStats *));
