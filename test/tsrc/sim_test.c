@@ -372,9 +372,10 @@ void test_sim_top_two_consistency(void) {
 }
 
 void perf_test_multithread_sim(void) {
-  Config *config = config_create_or_die(
-      "set -s1 score -s2 score -r1 all -r2 all "
-      "-threads 4 -plies 2 -it 1000 -numplays 15 -scond none -pfreq 100");
+  Config *config =
+      config_create_or_die("set -s1 score -s2 score -r1 all -r2 all "
+                           "-threads 4 -plies 2 -it 1000 -minp 10 -numplays 15 "
+                           "-scond none -pfreq 100");
   load_and_exec_config_or_die(
       config,
       "cgp "
@@ -408,7 +409,7 @@ void perf_test_multithread_sim(void) {
 void test_play_similarity(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all "
-      "-plies 2 -threads 1 -it 1200 -scond none -pfreq 100");
+      "-plies 2 -threads 10 -it 1200 -minp 20 -scond none -pfreq 100");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 ACEIRST");
   load_and_exec_config_or_die(config, "gen");
@@ -425,12 +426,14 @@ void test_play_similarity(void) {
       simmed_play_get_move(sim_results_get_sorted_simmed_play(sim_results, 0));
   const int best_play_col = move_get_col_start(best_play);
   const int best_play_row = move_get_row_start(best_play);
+  const int best_play_length = move_get_tiles_length(best_play);
   const int num_plays = sim_results_get_number_of_plays(sim_results);
   for (int i = 1; i < num_plays; i++) {
     SimmedPlay *play_i = sim_results_get_sorted_simmed_play(sim_results, i);
     Move *move_i = simmed_play_get_move(play_i);
     if (move_get_col_start(move_i) == best_play_col &&
-        move_get_row_start(move_i) == best_play_row) {
+        move_get_row_start(move_i) == best_play_row &&
+        move_get_tiles_length(move_i) == best_play_length) {
       assert(simmed_play_get_is_epigon(play_i));
     }
   }
