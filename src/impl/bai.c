@@ -4,7 +4,8 @@
  * Dealing with Unknown Variances in Best-Arm Identification
  * (https://arxiv.org/pdf/2210.00974)
  *
- * with Julia source code kindly provided by Marc Jourdan.
+ * with Julia source code (https://marcjourdan.netlify.app/publication/baiuv/)
+ * kindly provided by Marc Jourdan.
  */
 #include <assert.h>
 #include <limits.h>
@@ -369,10 +370,11 @@ void bai_cull_epigons(void *uncasted_bai_worker_args) {
       }
     }
   }
+  bai_sync_data->initial_phase = false;
   if (num_epigons == bai_sync_data->num_arms - 1) {
     bai_sync_data->exit_status = EXIT_STATUS_ONE_ARM_REMAINING;
+    return;
   }
-  bai_sync_data->initial_phase = false;
   assert(!bai_sync_data->arm_data[bai_sync_data->astar_index].is_epigon);
   bai_update_threshold_and_challenger(
       bai_sync_data, bai_worker_args->bai_options->threshold,
