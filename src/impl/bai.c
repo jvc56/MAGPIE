@@ -135,29 +135,25 @@ double bai_get_arm_z(BAISyncData *bai_sync_data, const int astar_index,
          challenger_arm_data->num_samples * d_a;
 }
 
+int bai_sync_data_sample_limit_reached(BAISyncData *bai_sync_data,
+                                       int sample_limit) {
+  return bai_sync_data->num_total_samples_requested >= sample_limit;
+}
+
 // Assumes the caller has locked the bai sync data mutex
 int bai_sync_data_get_next_bai_sample_index_while_locked(BAISampleArgs *args) {
+  if (bai_sync_data_sample_limit_reached(args->bai_sync_data,
+                                         args->sample_limit)) {
+    args->bai_sync_data->exit_status = EXIT_STATUS_SAMPLE_LIMIT;
+    return -1;
+  }
   int arm_index;
   switch (args->sampling_rule) {
   case BAI_SAMPLING_RULE_ROUND_ROBIN:
-    if (args->bai_sync_data->num_total_samples_requested %
-                args->bai_sync_data->num_arms ==
-            0 &&
-        args->bai_sync_data->num_total_samples_requested /
-                args->bai_sync_data->num_arms ==
-            args->sample_limit) {
-      args->bai_sync_data->exit_status = EXIT_STATUS_SAMPLE_LIMIT;
-      return -1;
-    }
     arm_index = args->bai_sync_data->num_total_samples_requested %
                 args->bai_sync_data->num_arms;
     break;
   case BAI_SAMPLING_RULE_TOP_TWO:
-    if (args->bai_sync_data->num_total_samples_requested >=
-        args->sample_limit) {
-      args->bai_sync_data->exit_status = EXIT_STATUS_SAMPLE_LIMIT;
-      return -1;
-    }
     arm_index = args->bai_sync_data->astar_index;
     // FIXME: test selecting the arm with the fewest samples
     if (rvs_sample(args->bai_sync_data->rng, 0, 0, NULL) > 0.5) {
@@ -347,6 +343,12 @@ typedef struct BAIWorkerArgs {
 void bai_cull_epigons(void *uncasted_bai_worker_args) {
   BAIWorkerArgs *bai_worker_args = (BAIWorkerArgs *)uncasted_bai_worker_args;
   BAISyncData *bai_sync_data = bai_worker_args->sync_data;
+  bai_sync_data->initial_phase = false;
+  if (bai_sync_data_sample_limit_reached(
+          bai_sync_data, bai_worker_args->bai_options->sample_limit)) {
+    bai_sync_data->exit_status = EXIT_STATUS_SAMPLE_LIMIT;
+    return;
+  }
   RandomVariables *rvs = bai_worker_args->rvs;
   int num_epigons = 0;
   for (int i = 0; i < bai_sync_data->num_arms; i++) {
@@ -370,7 +372,6 @@ void bai_cull_epigons(void *uncasted_bai_worker_args) {
       }
     }
   }
-  bai_sync_data->initial_phase = false;
   if (num_epigons == bai_sync_data->num_arms - 1) {
     bai_sync_data->exit_status = EXIT_STATUS_ONE_ARM_REMAINING;
     return;
@@ -458,6 +459,7 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     pthread_join(worker_ids[thread_index], NULL);
   }
+  thread_control_exit(thread_control, sync_data->exit_status);
   bai_result_set_exit_status(bai_result, sync_data->exit_status);
   bai_result_set_best_arm(bai_result, sync_data->astar_index);
   bai_result_set_total_samples(bai_result,

@@ -328,7 +328,6 @@ void test_sim_round_robin_consistency(void) {
       sim_results = sim_results_multithreaded;
     }
 
-    printf("testing with %d threads\n", i + 1);
     error_code_t status =
         config_simulate_and_return_status(config, NULL, sim_results);
     assert(status == ERROR_STATUS_SUCCESS);
@@ -336,7 +335,6 @@ void test_sim_round_robin_consistency(void) {
            EXIT_STATUS_SAMPLE_LIMIT);
 
     if (i != 0) {
-      printf("comparing with %d threads\n", i + 1);
       assert_sim_results_equal(sim_results_single_threaded, sim_results);
     }
   }
@@ -391,7 +389,6 @@ void perf_test_multithread_sim(void) {
   assert(status == ERROR_STATUS_SUCCESS);
   assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
          EXIT_STATUS_SAMPLE_LIMIT);
-  printf("iter count: %d\n", sim_results_get_iteration_count(sim_results));
   assert(sim_results_get_iteration_count(sim_results) == 1000);
 
   print_sim_stats(config_get_game(config), sim_results);
@@ -442,9 +439,11 @@ void test_play_similarity(void) {
 }
 
 void test_similar_play_consistency(const int num_threads) {
+  // The number of iterations needs to be less than 2 *
+  // BAI_ARM_SAMPLE_MINIMUM so that neither play is marked as an epigon
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all "
-      "-plies 2 -it 1000 -epigon 10000 -scond none -numplays 2 -sr "
+      "-plies 2 -it 90 -scond none -numplays 2 -sr "
       "rr");
   char *set_threads_cmd = get_formatted_string("set -threads %d", num_threads);
   load_and_exec_config_or_die(config, set_threads_cmd);

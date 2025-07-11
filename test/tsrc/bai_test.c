@@ -113,9 +113,6 @@ void test_bai_sample_limit(int num_threads) {
     assert(bai_result_get_exit_status(bai_result) == EXIT_STATUS_SAMPLE_LIMIT);
     assert(bai_result_get_best_arm(bai_result) == 1);
     int expected_num_samples = bai_options.sample_limit;
-    if (bai_options.sampling_rule == BAI_SAMPLING_RULE_ROUND_ROBIN) {
-      expected_num_samples *= num_rvs;
-    }
     if (expected_num_samples < num_rvs * arm_sample_minimum) {
       expected_num_samples = num_rvs * arm_sample_minimum;
     }
