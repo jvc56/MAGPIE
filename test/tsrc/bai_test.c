@@ -19,6 +19,7 @@
 static const int sampling_rules[3] = {
     BAI_SAMPLING_RULE_ROUND_ROBIN,
     BAI_SAMPLING_RULE_TOP_TWO,
+    BAI_SAMPLING_RULE_TOP_FEW,
 };
 static const int num_sampling_rules = sizeof(sampling_rules) / sizeof(int);
 

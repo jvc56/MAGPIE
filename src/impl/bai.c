@@ -155,8 +155,16 @@ int bai_sync_data_get_next_bai_sample_index_while_locked(BAISampleArgs *args) {
     break;
   case BAI_SAMPLING_RULE_TOP_TWO:
     arm_index = args->bai_sync_data->astar_index;
-    // FIXME: test selecting the arm with the fewest samples
     if (rvs_sample(args->bai_sync_data->rng, 0, 0, NULL) > 0.5) {
+      arm_index = args->bai_sync_data->challenger_index;
+    }
+    break;
+  case BAI_SAMPLING_RULE_TOP_FEW:
+    arm_index = args->bai_sync_data->astar_index;
+    if (args->bai_sync_data->arm_data[args->bai_sync_data->challenger_index]
+            .num_samples <
+        args->bai_sync_data->arm_data[args->bai_sync_data->astar_index]
+            .num_samples) {
       arm_index = args->bai_sync_data->challenger_index;
     }
     break;
@@ -236,6 +244,7 @@ void bai_update_threshold_and_challenger(BAISyncData *bai_sync_data,
   case BAI_SAMPLING_RULE_ROUND_ROBIN:
     break;
   case BAI_SAMPLING_RULE_TOP_TWO:
+  case BAI_SAMPLING_RULE_TOP_FEW:
     bai_sync_data->challenger_index = -1;
     break;
   }
@@ -263,7 +272,8 @@ void bai_update_threshold_and_challenger(BAISyncData *bai_sync_data,
     switch (sampling_rule) {
     case BAI_SAMPLING_RULE_ROUND_ROBIN:
       break;
-    case BAI_SAMPLING_RULE_TOP_TWO:;
+    case BAI_SAMPLING_RULE_TOP_TWO:
+    case BAI_SAMPLING_RULE_TOP_FEW:;
       // FIXME: consider caching the log result
       double arm_challenger_value =
           arm_Z + log((double)bai_sync_data->arm_data[i].num_samples);
@@ -460,10 +470,9 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
     pthread_join(worker_ids[thread_index], NULL);
   }
   thread_control_exit(thread_control, sync_data->exit_status);
-  bai_result_set_exit_status(bai_result, sync_data->exit_status);
-  bai_result_set_best_arm(bai_result, sync_data->astar_index);
-  bai_result_set_total_samples(bai_result,
-                               sync_data->num_total_samples_requested);
+  bai_result_set_all(bai_result, sync_data->exit_status, sync_data->astar_index,
+                     sync_data->num_total_samples_completed,
+                     thread_control_get_seconds_elapsed(thread_control));
   free(bai_worker_args_array);
   free(worker_ids);
   bai_sync_data_destroy(sync_data);
