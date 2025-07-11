@@ -131,6 +131,9 @@ void test_config_load_error_cases(void) {
   test_config_load_error(config, "sim -it 0",
                          ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
                          error_stack);
+  test_config_load_error(config, "sim -minp 1",
+                         ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+                         error_stack);
   test_config_load_error(config, "sim -scond -95",
                          ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS,
                          error_stack);

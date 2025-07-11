@@ -63,6 +63,7 @@ void test_bai_top_two(int num_threads) {
       .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO,
       .threshold = BAI_THRESHOLD_GK16,
       .delta = 0.05,
+      .sample_minimum = 50,
       .sample_limit = 200,
       .time_limit_seconds = 0,
   };
@@ -100,6 +101,7 @@ void test_bai_sample_limit(int num_threads) {
   BAIOptions bai_options = {
       .threshold = BAI_THRESHOLD_NONE,
       .delta = 0.05,
+      .sample_minimum = 37,
       .sample_limit = 200,
       .time_limit_seconds = 0,
   };
@@ -107,15 +109,14 @@ void test_bai_sample_limit(int num_threads) {
   thread_control_set_threads(thread_control, num_threads);
   BAIResult *bai_result = bai_result_create();
   // This needs to align with the ARM_SAMPLE_MINIMUM in bai.c
-  const int arm_sample_minimum = 50;
   for (int i = 0; i < num_sampling_rules; i++) {
     bai_options.sampling_rule = sampling_rules[i];
     bai(&bai_options, rvs, rng, thread_control, NULL, bai_result);
     assert(bai_result_get_exit_status(bai_result) == EXIT_STATUS_SAMPLE_LIMIT);
     assert(bai_result_get_best_arm(bai_result) == 1);
     int expected_num_samples = bai_options.sample_limit;
-    if (expected_num_samples < num_rvs * arm_sample_minimum) {
-      expected_num_samples = num_rvs * arm_sample_minimum;
+    if (expected_num_samples < num_rvs * bai_options.sample_minimum) {
+      expected_num_samples = num_rvs * bai_options.sample_minimum;
     }
     assert(rvs_get_total_samples(rvs) == (uint64_t)expected_num_samples);
     assert_num_epigons(rvs, 0);
@@ -172,6 +173,7 @@ void test_bai_time_limit(int num_threads) {
       .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO,
       .threshold = BAI_THRESHOLD_NONE,
       .delta = 0.01,
+      .sample_minimum = 50,
       .sample_limit = 100000000,
       .time_limit_seconds = 2,
   };
@@ -263,6 +265,7 @@ void test_bai_epigons(int num_threads) {
   };
   BAIOptions bai_options = {
       .delta = 0.01,
+      .sample_minimum = 50,
       .sample_limit = num_samples,
       .time_limit_seconds = 0,
   };
@@ -400,6 +403,7 @@ void test_bai_input_from_file(const char *bai_input_filename,
       .sampling_rule = strategies[pi][0],
       .threshold = strategies[pi][1],
       .delta = delta,
+      .sample_minimum = 50,
       .sample_limit = num_samples,
       .time_limit_seconds = 0,
   };
@@ -480,6 +484,7 @@ void test_bai_from_seed(const char *bai_seed) {
       .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO,
       .threshold = BAI_THRESHOLD_GK16,
       .delta = 0.01,
+      .sample_minimum = 50,
       .sample_limit = 100000,
       .time_limit_seconds = 0,
   };

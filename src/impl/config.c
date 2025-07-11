@@ -76,6 +76,7 @@ typedef enum {
   ARG_TOKEN_STOP_COND_PCT,
   ARG_TOKEN_EQUITY_MARGIN,
   ARG_TOKEN_MAX_EQUITY_DIFF,
+  ARG_TOKEN_MIN_PLAY_ITERATIONS,
   ARG_TOKEN_USE_GAME_PAIRS,
   ARG_TOKEN_USE_SMALL_PLAYS,
   ARG_TOKEN_WRITE_BUFFER_SIZE,
@@ -117,6 +118,7 @@ struct Config {
   int num_small_plays;
   int plies;
   int max_iterations;
+  int min_play_iterations;
   double stop_cond_pct;
   double equity_margin;
   Equity max_equity_diff;
@@ -760,6 +762,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->game = config_get_game(config);
   sim_args->move_list = config_get_move_list(config);
   sim_args->bai_options.sample_limit = config_get_max_iterations(config);
+  sim_args->bai_options.sample_minimum = config->min_play_iterations;
   const double percentile = config_get_stop_cond_pct(config);
   if (percentile > 100 || config->threshold == BAI_THRESHOLD_NONE) {
     sim_args->bai_options.threshold = BAI_THRESHOLD_NONE;
@@ -1676,6 +1679,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_int(config, ARG_TOKEN_MIN_PLAY_ITERATIONS, 2, INT_MAX,
+                  &config->min_play_iterations, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   int number_of_threads = -1;
   config_load_int(config, ARG_TOKEN_NUMBER_OF_THREADS, 1, MAX_THREADS,
                   &number_of_threads, error_stack);
@@ -2032,6 +2041,8 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
                     1, execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_MAX_ITERATIONS, "iterations", 1, 1,
                     execute_fatal, status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_MIN_PLAY_ITERATIONS, "minplayiterations",
+                    1, 1, execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_STOP_COND_PCT, "scondition", 1, 1,
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_EQUITY_MARGIN, "equitymargin", 1, 1,
@@ -2071,6 +2082,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->plies = 2;
   config->equity_margin = 0;
   config->max_equity_diff = int_to_equity(10);
+  config->min_play_iterations = 100;
   config->max_iterations = 5000;
   config->stop_cond_pct = 99;
   config->time_limit_seconds = 0;

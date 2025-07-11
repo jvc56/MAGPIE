@@ -25,7 +25,6 @@
 #include "random_variable.h"
 
 #define MINIMUM_VARIANCE 1e-10
-#define BAI_ARM_SAMPLE_MINIMUM 50
 
 // Internal BAI structs
 
@@ -97,6 +96,7 @@ typedef struct BAISampleArgs {
   BAISyncData *bai_sync_data;
   double delta;
   int sample_limit;
+  int sample_minimum;
   bai_sampling_rule_t sampling_rule;
   bai_threshold_t threshold;
 } BAISampleArgs;
@@ -176,11 +176,11 @@ int bai_sync_data_get_next_bai_sample_index_while_locked(BAISampleArgs *args) {
 int bai_sync_data_get_next_initial_sample_index_while_locked(
     BAISampleArgs *args) {
   if (args->bai_sync_data->num_total_samples_requested >=
-      args->bai_sync_data->num_arms * BAI_ARM_SAMPLE_MINIMUM) {
+      args->bai_sync_data->num_arms * args->sample_minimum) {
     return -1;
   }
   return args->bai_sync_data->num_total_samples_requested++ /
-         BAI_ARM_SAMPLE_MINIMUM;
+         args->sample_minimum;
 }
 
 int bai_sync_data_get_next_sample_index_while_locked(
@@ -274,7 +274,6 @@ void bai_update_threshold_and_challenger(BAISyncData *bai_sync_data,
       break;
     case BAI_SAMPLING_RULE_TOP_TWO:
     case BAI_SAMPLING_RULE_TOP_FEW:;
-      // FIXME: consider caching the log result
       double arm_challenger_value =
           arm_Z + log((double)bai_sync_data->arm_data[i].num_samples);
       if (bai_sync_data->challenger_index < 0 ||
@@ -404,6 +403,7 @@ void bai_worker_sample_loop(BAIWorkerArgs *bai_worker_args) {
       .bai_sync_data = sync_data,
       .delta = bai_options->delta,
       .sample_limit = bai_options->sample_limit,
+      .sample_minimum = bai_options->sample_minimum,
       .sampling_rule = bai_options->sampling_rule,
       .threshold = bai_options->threshold,
   };

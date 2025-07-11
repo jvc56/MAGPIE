@@ -257,7 +257,8 @@ void test_command_execution(void) {
   assert(move_list_get_count(ml) == 3);
 
   assert_command_status_and_output(
-      config, "sim -plies 2 -scond 95 -threads 8 -it 100000 -pfreq 5000000",
+      config,
+      "sim -plies 2 -scond 95 -threads 8 -it 100000 -minp 50 -pfreq 5000000",
       false, 60, 5, 0);
 
   assert(move_list_get_count(ml) == 3);
