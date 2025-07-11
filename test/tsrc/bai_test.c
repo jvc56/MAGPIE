@@ -118,7 +118,6 @@ void test_bai_sample_limit(int num_threads) {
       expected_num_samples = num_rvs * arm_sample_minimum;
     }
     assert(rvs_get_total_samples(rvs) == (uint64_t)expected_num_samples);
-    assert(bai_result_get_total_samples(bai_result) == expected_num_samples);
     assert_num_epigons(rvs, 0);
   }
   thread_control_destroy(thread_control);

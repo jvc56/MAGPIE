@@ -471,7 +471,6 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   }
   thread_control_exit(thread_control, sync_data->exit_status);
   bai_result_set_all(bai_result, sync_data->exit_status, sync_data->astar_index,
-                     sync_data->num_total_samples_completed,
                      thread_control_get_seconds_elapsed(thread_control));
   free(bai_worker_args_array);
   free(worker_ids);
