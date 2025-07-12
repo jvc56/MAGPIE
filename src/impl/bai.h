@@ -32,7 +32,6 @@
 
 // Internal BAI structs
 
-// FIXME: just make this whole thing a .h when done
 typedef struct BAIArmDatum {
   int num_samples;
   double samples_sum;
@@ -221,7 +220,6 @@ bai_sync_data_get_next_sample_index(BAISampleArgs *args, const bool timeout,
   return arm_index;
 }
 
-// Returns true if all arms have reached the threshold
 // Assumes the caller has locked bai_sync_data or is the only thread running
 static inline void bai_update_threshold_and_challenger(
     BAISyncData *bai_sync_data, bai_threshold_t threshold,
