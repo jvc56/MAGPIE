@@ -7,7 +7,6 @@
 
 #include "../def/autoplay_defs.h"
 #include "../def/config_defs.h"
-#include "../def/exec_defs.h"
 #include "../def/game_defs.h"
 #include "../def/inference_defs.h"
 #include "../def/thread_control_defs.h"
@@ -198,6 +197,10 @@ command_status_func_t config_get_parg_status_func(const Config *config,
 
 const char *config_get_parg_name(const Config *config, arg_token_t arg_token) {
   return config_get_parg(config, arg_token)->name;
+}
+
+const char *config_get_current_exec_name(const Config *config) {
+  return config_get_parg_name(config, config->exec_parg_token);
 }
 
 // Returns NULL if the value was not set in the most recent config load call.
@@ -555,11 +558,9 @@ void execute_noop(Config __attribute__((unused)) * config,
   return;
 }
 
-// Used for pargs that are not commands.
-char *status_fatal(Config *config) {
-  log_fatal("attempted to get status of nonexecutable argument (arg token %d)",
-            config->exec_parg_token);
-  return NULL;
+char *status_generic(Config *config) {
+  return get_formatted_string("%s %s\n", COMMAND_RUNNING_KEYWORD,
+                              config->pargs[config->exec_parg_token]->name);
 }
 
 // Load CGP
@@ -1936,6 +1937,11 @@ void config_execute_command(Config *config, ErrorStack *error_stack) {
   if (config_exec_parg_is_set(config)) {
     config_get_parg_exec_func(config, config->exec_parg_token)(config,
                                                                error_stack);
+    char *finished_msg =
+        get_formatted_string("%s %s\n", COMMAND_FINISHED_KEYWORD,
+                             config->pargs[config->exec_parg_token]->name);
+    thread_control_print(config_get_thread_control(config), finished_msg);
+    free(finished_msg);
   }
 }
 
@@ -1973,7 +1979,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   }
 
   parsed_arg_create(config, ARG_TOKEN_SET, "setoptions", 0, 0, execute_noop,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_CGP, "cgp", 4, 4, execute_cgp_load,
                     status_cgp_load);
   parsed_arg_create(config, ARG_TOKEN_MOVES, "addmoves", 1, 1,
@@ -1995,87 +2001,87 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   parsed_arg_create(config, ARG_TOKEN_CREATE_DATA, "createdata", 2, 3,
                     execute_create_data, status_create_data);
   parsed_arg_create(config, ARG_TOKEN_DATA_PATH, "path", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_BINGO_BONUS, "bb", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_BOARD_LAYOUT, "bdn", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_GAME_VARIANT, "var", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_LETTER_DISTRIBUTION, "ld", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_LEXICON, "lex", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_USE_WMP, "wmp", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_LEAVES, "leaves", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_P1_NAME, "p1", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_P1_LEXICON, "l1", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_P1_USE_WMP, "w1", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_P1_LEAVES, "k1", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_P2_NAME, "p2", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_P2_LEXICON, "l2", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_P2_USE_WMP, "w2", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_P2_LEAVES, "k2", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_WIN_PCT, "winpct", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_PLIES, "plies", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_SMALL_PLAYS, "numsmallplays", 1,
-                    1, execute_fatal, status_fatal);
+                    1, execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_MAX_ITERATIONS, "iterations", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_MIN_PLAY_ITERATIONS, "minplayiterations",
-                    1, 1, execute_fatal, status_fatal);
+                    1, 1, execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_STOP_COND_PCT, "scondition", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_EQUITY_MARGIN, "equitymargin", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_MAX_EQUITY_DIFF, "maxequitydifference", 1,
-                    1, execute_fatal, status_fatal);
+                    1, execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_WRITE_BUFFER_SIZE, "wb", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_RANDOM_SEED, "seed", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_THREADS, "threads", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_PRINT_INFO_INTERVAL, "pfrequency", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_EXEC_MODE, "mode", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_TT_FRACTION_OF_MEM, "ttfraction", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_TIME_LIMIT, "tlim", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_SAMPLING_RULE, "sr", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_THRESHOLD, "threshold", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
   config->exec_mode = EXEC_MODE_CONSOLE;

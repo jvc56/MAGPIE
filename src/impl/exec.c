@@ -6,7 +6,6 @@
 
 #include "../def/autoplay_defs.h"
 #include "../def/config_defs.h"
-#include "../def/exec_defs.h"
 #include "../def/game_defs.h"
 #include "../def/inference_defs.h"
 #include "../def/thread_control_defs.h"
@@ -50,14 +49,15 @@ char *command_search_status(Config *config, bool should_exit) {
 
   ThreadControl *thread_control = config_get_thread_control(config);
 
-  int mode = thread_control_get_mode(thread_control);
-  if (mode != MODE_SEARCHING) {
-    return string_duplicate(SEARCH_STATUS_FINISHED);
+  if (thread_control_get_mode(thread_control) != MODE_SEARCHING) {
+    return get_formatted_string("%s %s\n", COMMAND_FINISHED_KEYWORD,
+                                config_get_current_exec_name(config));
   }
 
   if (should_exit) {
     if (!thread_control_exit(thread_control, EXIT_STATUS_USER_INTERRUPT)) {
-      return string_duplicate("command already exited");
+      return get_formatted_string("%s %s\n", COMMAND_FINISHED_KEYWORD,
+                                  config_get_current_exec_name(config));
     }
     thread_control_wait_for_mode_stopped(thread_control);
   }

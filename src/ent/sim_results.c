@@ -112,8 +112,18 @@ void sim_results_destroy(SimResults *sim_results) {
   free(sim_results);
 }
 
+void sim_results_lock_simmed_plays(SimResults *sim_results) {
+  pthread_mutex_lock(&sim_results->simmed_plays_mutex);
+}
+
+void sim_results_unlock_simmed_plays(SimResults *sim_results) {
+  pthread_mutex_unlock(&sim_results->simmed_plays_mutex);
+}
+
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
                        int max_plies, uint64_t seed) {
+  // FIXME: figure out why this hangs the program
+  // sim_results_lock_simmed_plays(sim_results);
   sim_results_destroy_internal(sim_results);
 
   const int num_simmed_plays = move_list_get_count(move_list);
@@ -132,6 +142,7 @@ void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
   sim_results->max_plies = max_plies;
   sim_results->iteration_count = 0;
   atomic_init(&sim_results->node_count, 0);
+  // sim_results_unlock_simmed_plays(sim_results);
 }
 
 SimResults *sim_results_create(void) {
@@ -231,14 +242,6 @@ BAIResult *sim_results_get_bai_result(SimResults *sim_results) {
 
 void sim_results_increment_node_count(SimResults *sim_results) {
   atomic_fetch_add(&sim_results->node_count, 1);
-}
-
-void sim_results_lock_simmed_plays(SimResults *sim_results) {
-  pthread_mutex_lock(&sim_results->simmed_plays_mutex);
-}
-
-void sim_results_unlock_simmed_plays(SimResults *sim_results) {
-  pthread_mutex_unlock(&sim_results->simmed_plays_mutex);
 }
 
 void simmed_play_add_score_stat(SimmedPlay *sp, Equity score, bool is_bingo,
