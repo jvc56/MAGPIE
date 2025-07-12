@@ -162,6 +162,14 @@ int process_command_wasm(const char *cmd) {
   return 0;
 }
 
+int process_command_wasm_sync(const char *cmd) {
+  execute_command_sync(wasm_config, wasm_error_stack, cmd);
+  if (!error_stack_is_empty(wasm_error_stack)) {
+    error_stack_print_and_reset(wasm_error_stack);
+  }
+  return 0;
+}
+
 char *get_search_status_wasm(void) {
   return command_search_status(wasm_config, false);
 }
