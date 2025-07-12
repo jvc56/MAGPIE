@@ -38,10 +38,6 @@
 #define STOP_COMMAND_STRING "stop"
 #define FILE_COMMAND_STRING "file"
 
-// This struct is used to easily pass arguments to an asynchronous command
-
-// Returns NULL and prints a warning if a search is ongoing or some other error
-// occurred
 char *command_search_status(Config *config, bool should_exit) {
   if (!config) {
     log_fatal("config is unexpectedly null");
@@ -49,16 +45,8 @@ char *command_search_status(Config *config, bool should_exit) {
 
   ThreadControl *thread_control = config_get_thread_control(config);
 
-  if (thread_control_get_mode(thread_control) != MODE_SEARCHING) {
-    return get_formatted_string("%s %s\n", COMMAND_FINISHED_KEYWORD,
-                                config_get_current_exec_name(config));
-  }
-
   if (should_exit) {
-    if (!thread_control_exit(thread_control, EXIT_STATUS_USER_INTERRUPT)) {
-      return get_formatted_string("%s %s\n", COMMAND_FINISHED_KEYWORD,
-                                  config_get_current_exec_name(config));
-    }
+    thread_control_exit(thread_control, EXIT_STATUS_USER_INTERRUPT);
     thread_control_wait_for_mode_stopped(thread_control);
   }
 
@@ -68,7 +56,7 @@ char *command_search_status(Config *config, bool should_exit) {
 void execute_command_and_set_mode_stopped(Config *config,
                                           ErrorStack *error_stack) {
   config_execute_command(config, error_stack);
-  thread_control_set_mode_stopped(config_get_thread_control(config));
+  thread_control_set_mode_finished(config_get_thread_control(config));
 }
 
 void *execute_command_thread_worker(void *uncasted_args) {
@@ -85,7 +73,7 @@ void *execute_command_thread_worker(void *uncasted_args) {
 void execute_command_sync_or_async(Config *config, ErrorStack *error_stack,
                                    const char *command, bool sync) {
   ThreadControl *thread_control = config_get_thread_control(config);
-  if (!thread_control_set_mode_searching(thread_control)) {
+  if (!thread_control_set_mode_started(thread_control)) {
     error_stack_push(
         error_stack, ERROR_STATUS_COMMAND_STILL_RUNNING,
         string_duplicate(
@@ -98,7 +86,7 @@ void execute_command_sync_or_async(Config *config, ErrorStack *error_stack,
   // execution asynchronously (if enabled)
   config_load_command(config, command, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    thread_control_set_mode_stopped(thread_control);
+    thread_control_set_mode_finished(thread_control);
     return;
   }
 
@@ -130,7 +118,7 @@ void process_ucgi_command(Config *config, ErrorStack *error_stack,
     // More of a formality to align with UCI
     thread_control_print(thread_control, "id name MAGPIE 0.1\nucgiok\n");
   } else if (strings_equal(command, STOP_COMMAND_STRING)) {
-    if (thread_control_get_mode(thread_control) == MODE_SEARCHING) {
+    if (thread_control_get_mode(thread_control) != MODE_FINISHED) {
       if (!thread_control_exit(thread_control, EXIT_STATUS_USER_INTERRUPT)) {
         error_stack_push(
             error_stack, ERROR_STATUS_COMMAND_ALREADY_STOPPED,

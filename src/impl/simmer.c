@@ -37,6 +37,8 @@ void simulate(const SimArgs *sim_args, SimResults *sim_results,
 
   RandomVariables *rng = rvs_create(&rng_args);
 
+  assert(thread_control_set_mode_status_ready(sim_args->thread_control));
+
   bai(&sim_args->bai_options, rvs, rng, sim_args->thread_control, NULL,
       sim_results_get_bai_result(sim_results));
 

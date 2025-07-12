@@ -558,9 +558,24 @@ void execute_noop(Config __attribute__((unused)) * config,
   return;
 }
 
-char *status_generic(Config *config) {
+char *get_status_finished_str(Config *config) {
+  return get_formatted_string("%s %s\n", COMMAND_FINISHED_KEYWORD,
+                              config_get_current_exec_name(config));
+}
+
+char *get_status_running_str(Config *config) {
   return get_formatted_string("%s %s\n", COMMAND_RUNNING_KEYWORD,
-                              config->pargs[config->exec_parg_token]->name);
+                              config_get_current_exec_name(config));
+}
+
+char *status_generic(Config *config) {
+  char *status_str = NULL;
+  if (thread_control_get_mode(config->thread_control) == MODE_FINISHED) {
+    status_str = get_status_finished_str(config);
+  } else {
+    status_str = get_status_running_str(config);
+  }
+  return status_str;
 }
 
 // Load CGP
@@ -606,10 +621,6 @@ void execute_cgp_load(Config *config, ErrorStack *error_stack) {
     config_reset_move_list(config);
   }
   string_builder_destroy(cgp_builder);
-}
-
-char *status_cgp_load(Config __attribute__((unused)) * config) {
-  return string_duplicate("no status available for cgp load");
 }
 
 // Adding moves
@@ -662,10 +673,6 @@ void execute_add_moves(Config *config, ErrorStack *error_stack) {
   validated_moves_destroy(new_validated_moves);
 }
 
-char *status_add_moves(Config __attribute__((unused)) * config) {
-  return string_duplicate("no status available for adding moves");
-}
-
 // Setting player rack
 
 void execute_set_rack(Config *config, ErrorStack *error_stack) {
@@ -713,10 +720,6 @@ void execute_set_rack(Config *config, ErrorStack *error_stack) {
   rack_destroy(new_rack);
 }
 
-char *status_set_rack(Config __attribute__((unused)) * config) {
-  return string_duplicate("no status available for setting player rack");
-}
-
 // Move generation
 
 void execute_move_gen(Config *config, ErrorStack *error_stack) {
@@ -745,10 +748,6 @@ void execute_move_gen(Config *config, ErrorStack *error_stack) {
   };
   generate_moves_for_game(&args);
   print_ucgi_static_moves(config->game, ml, config->thread_control);
-}
-
-char *status_move_gen(Config __attribute__((unused)) * config) {
-  return get_formatted_string("no status available for move generation");
 }
 
 // Sim
@@ -820,11 +819,23 @@ char *status_sim(Config *config) {
   if (!sim_results) {
     return string_duplicate("simmer has not been initialized");
   }
-  return ucgi_sim_stats(
-      config->game, sim_results,
-      (double)sim_results_get_node_count(sim_results) /
-          thread_control_get_seconds_elapsed(config->thread_control),
-      true);
+  char *status_str = NULL;
+  switch (thread_control_get_mode(config->thread_control)) {
+  case MODE_STARTED:
+    status_str = string_duplicate("simmer status not yet available");
+    break;
+  case MODE_FINISHED:
+    status_str = get_status_finished_str(config);
+    break;
+  case MODE_STATUS_READY:
+    status_str = ucgi_sim_stats(
+        config->game, sim_results,
+        (double)sim_results_get_node_count(sim_results) /
+            thread_control_get_seconds_elapsed(config->thread_control),
+        true);
+    break;
+  }
+  return status_str;
 }
 
 // Inference
@@ -929,10 +940,6 @@ void execute_infer(Config *config, ErrorStack *error_stack) {
   rack_destroy(target_played_tiles);
 }
 
-char *status_infer(Config __attribute__((unused)) * config) {
-  return string_duplicate("no status available for inference");
-}
-
 // Autoplay
 
 void config_fill_autoplay_args(const Config *config,
@@ -988,10 +995,6 @@ void execute_autoplay(Config *config, ErrorStack *error_stack) {
                   num_games_str, 0, error_stack);
 }
 
-char *status_autoplay(Config __attribute__((unused)) * config) {
-  return string_duplicate("no status available for autoplay");
-}
-
 // Conversion
 
 void config_fill_conversion_args(const Config *config, ConversionArgs *args) {
@@ -1012,10 +1015,6 @@ void config_convert(const Config *config, ConversionResults *results,
 
 void execute_convert(Config *config, ErrorStack *error_stack) {
   config_convert(config, config->conversion_results, error_stack);
-}
-
-char *status_convert(Config __attribute__((unused)) * config) {
-  return string_duplicate("no status available for convert");
 }
 
 // Leave Gen
@@ -1066,10 +1065,6 @@ void execute_leave_gen(Config *config, ErrorStack *error_stack) {
                   error_stack);
 }
 
-char *status_leave_gen(Config __attribute__((unused)) * config) {
-  return string_duplicate("no status available for leave gen");
-}
-
 // Create
 
 // This only implements creating a klv for now.
@@ -1101,10 +1096,6 @@ void execute_create_data(Config *config, ErrorStack *error_stack) {
         get_formatted_string("data creation not supported for type %s",
                              create_type_str));
   }
-}
-
-char *status_create_data(Config __attribute__((unused)) * config) {
-  return string_duplicate("no status available for create");
 }
 
 // Config load helpers
@@ -1937,9 +1928,7 @@ void config_execute_command(Config *config, ErrorStack *error_stack) {
   if (config_exec_parg_is_set(config)) {
     config_get_parg_exec_func(config, config->exec_parg_token)(config,
                                                                error_stack);
-    char *finished_msg =
-        get_formatted_string("%s %s\n", COMMAND_FINISHED_KEYWORD,
-                             config->pargs[config->exec_parg_token]->name);
+    char *finished_msg = get_status_finished_str(config);
     thread_control_print(config_get_thread_control(config), finished_msg);
     free(finished_msg);
   }
@@ -1981,25 +1970,25 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   parsed_arg_create(config, ARG_TOKEN_SET, "setoptions", 0, 0, execute_noop,
                     status_generic);
   parsed_arg_create(config, ARG_TOKEN_CGP, "cgp", 4, 4, execute_cgp_load,
-                    status_cgp_load);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_MOVES, "addmoves", 1, 1,
-                    execute_add_moves, status_add_moves);
+                    execute_add_moves, status_generic);
   parsed_arg_create(config, ARG_TOKEN_RACK, "rack", 2, 2, execute_set_rack,
-                    status_set_rack);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_GEN, "generate", 0, 0, execute_move_gen,
-                    status_move_gen);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_SIM, "simulate", 0, 1, execute_sim,
                     status_sim);
   parsed_arg_create(config, ARG_TOKEN_INFER, "infer", 2, 3, execute_infer,
-                    status_infer);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2,
-                    execute_autoplay, status_autoplay);
+                    execute_autoplay, status_generic);
   parsed_arg_create(config, ARG_TOKEN_CONVERT, "convert", 2, 3, execute_convert,
-                    status_convert);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2,
-                    execute_leave_gen, status_leave_gen);
+                    execute_leave_gen, status_generic);
   parsed_arg_create(config, ARG_TOKEN_CREATE_DATA, "createdata", 2, 3,
-                    execute_create_data, status_create_data);
+                    execute_create_data, status_generic);
   parsed_arg_create(config, ARG_TOKEN_DATA_PATH, "path", 1, 1, execute_fatal,
                     status_generic);
   parsed_arg_create(config, ARG_TOKEN_BINGO_BONUS, "bb", 1, 1, execute_fatal,

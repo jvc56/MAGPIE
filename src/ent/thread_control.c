@@ -25,7 +25,7 @@ struct ThreadControl {
   exit_status_t exit_status;
   pthread_mutex_t current_mode_mutex;
   pthread_mutex_t exit_status_mutex;
-  pthread_mutex_t searching_mode_mutex;
+  pthread_mutex_t not_finished_mode_mutex;
   pthread_mutex_t iter_mutex;
   pthread_mutex_t iter_completed_mutex;
   pthread_mutex_t print_mutex;
@@ -37,7 +37,7 @@ struct ThreadControl {
 ThreadControl *thread_control_create(void) {
   ThreadControl *thread_control = malloc_or_die(sizeof(ThreadControl));
   thread_control->exit_status = EXIT_STATUS_NONE;
-  thread_control->current_mode = MODE_STOPPED;
+  thread_control->current_mode = MODE_FINISHED;
   thread_control->number_of_threads = 1;
   thread_control->print_info_interval = 0;
   thread_control->iter_count = 0;
@@ -46,7 +46,7 @@ ThreadControl *thread_control_create(void) {
   thread_control->max_iter_count = 0;
   pthread_mutex_init(&thread_control->current_mode_mutex, NULL);
   pthread_mutex_init(&thread_control->exit_status_mutex, NULL);
-  pthread_mutex_init(&thread_control->searching_mode_mutex, NULL);
+  pthread_mutex_init(&thread_control->not_finished_mode_mutex, NULL);
   pthread_mutex_init(&thread_control->iter_mutex, NULL);
   pthread_mutex_init(&thread_control->iter_completed_mutex, NULL);
   pthread_mutex_init(&thread_control->print_mutex, NULL);
@@ -115,25 +115,35 @@ bool thread_control_exit(ThreadControl *thread_control,
   return success;
 }
 
-bool thread_control_set_mode_searching(ThreadControl *thread_control) {
+bool thread_control_set_mode_started(ThreadControl *thread_control) {
   bool success = false;
   pthread_mutex_lock(&thread_control->current_mode_mutex);
-  if (thread_control->current_mode == MODE_STOPPED) {
-    thread_control->current_mode = MODE_SEARCHING;
-    // Searching mode mutex should remain locked while we are searching.
-    pthread_mutex_lock(&thread_control->searching_mode_mutex);
+  if (thread_control->current_mode == MODE_FINISHED) {
+    thread_control->current_mode = MODE_STARTED;
+    pthread_mutex_lock(&thread_control->not_finished_mode_mutex);
     success = true;
   }
   pthread_mutex_unlock(&thread_control->current_mode_mutex);
   return success;
 }
 
-bool thread_control_set_mode_stopped(ThreadControl *thread_control) {
+bool thread_control_set_mode_status_ready(ThreadControl *thread_control) {
   bool success = false;
   pthread_mutex_lock(&thread_control->current_mode_mutex);
-  if (thread_control->current_mode == MODE_SEARCHING) {
-    thread_control->current_mode = MODE_STOPPED;
-    pthread_mutex_unlock(&thread_control->searching_mode_mutex);
+  if (thread_control->current_mode == MODE_STARTED) {
+    thread_control->current_mode = MODE_STATUS_READY;
+    success = true;
+  }
+  pthread_mutex_unlock(&thread_control->current_mode_mutex);
+  return success;
+}
+
+bool thread_control_set_mode_finished(ThreadControl *thread_control) {
+  bool success = false;
+  pthread_mutex_lock(&thread_control->current_mode_mutex);
+  if (thread_control->current_mode != MODE_FINISHED) {
+    thread_control->current_mode = MODE_FINISHED;
+    pthread_mutex_unlock(&thread_control->not_finished_mode_mutex);
     success = true;
   }
   pthread_mutex_unlock(&thread_control->current_mode_mutex);
@@ -168,9 +178,9 @@ void thread_control_print(ThreadControl *thread_control, const char *content) {
 }
 
 void thread_control_wait_for_mode_stopped(ThreadControl *thread_control) {
-  pthread_mutex_lock(&thread_control->searching_mode_mutex);
+  pthread_mutex_lock(&thread_control->not_finished_mode_mutex);
   // We can only acquire the lock once the search has stopped.
-  pthread_mutex_unlock(&thread_control->searching_mode_mutex);
+  pthread_mutex_unlock(&thread_control->not_finished_mode_mutex);
 }
 
 // Returns true if the iter_count is already greater than or equal to
