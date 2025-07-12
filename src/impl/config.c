@@ -76,6 +76,7 @@ typedef enum {
   ARG_TOKEN_STOP_COND_PCT,
   ARG_TOKEN_EQUITY_MARGIN,
   ARG_TOKEN_MAX_EQUITY_DIFF,
+  ARG_TOKEN_MIN_PLAY_ITERATIONS,
   ARG_TOKEN_USE_GAME_PAIRS,
   ARG_TOKEN_USE_SMALL_PLAYS,
   ARG_TOKEN_WRITE_BUFFER_SIZE,
@@ -88,7 +89,6 @@ typedef enum {
   ARG_TOKEN_TIME_LIMIT,
   ARG_TOKEN_SAMPLING_RULE,
   ARG_TOKEN_THRESHOLD,
-  ARG_TOKEN_EPIGON_CUTOFF,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -118,6 +118,7 @@ struct Config {
   int num_small_plays;
   int plies;
   int max_iterations;
+  int min_play_iterations;
   double stop_cond_pct;
   double equity_margin;
   Equity max_equity_diff;
@@ -129,7 +130,6 @@ struct Config {
   int time_limit_seconds;
   bai_sampling_rule_t sampling_rule;
   bai_threshold_t threshold;
-  int epigon_cutoff;
   game_variant_t game_variant;
   WinPct *win_pcts;
   BoardLayout *board_layout;
@@ -762,6 +762,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->game = config_get_game(config);
   sim_args->move_list = config_get_move_list(config);
   sim_args->bai_options.sample_limit = config_get_max_iterations(config);
+  sim_args->bai_options.sample_minimum = config->min_play_iterations;
   const double percentile = config_get_stop_cond_pct(config);
   if (percentile > 100 || config->threshold == BAI_THRESHOLD_NONE) {
     sim_args->bai_options.threshold = BAI_THRESHOLD_NONE;
@@ -773,7 +774,6 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->bai_options.time_limit_seconds =
       config_get_time_limit_seconds(config);
   sim_args->bai_options.sampling_rule = config->sampling_rule;
-  sim_args->bai_options.epigon_cutoff = config->epigon_cutoff;
 }
 
 void config_simulate(const Config *config, Rack *known_opp_rack,
@@ -1260,10 +1260,10 @@ void config_load_sampling_rule(Config *config, const char *sampling_rule_str,
                                ErrorStack *error_stack) {
   if (has_iprefix(sampling_rule_str, "rr")) {
     config->sampling_rule = BAI_SAMPLING_RULE_ROUND_ROBIN;
-  } else if (has_iprefix(sampling_rule_str, "tas")) {
-    config->sampling_rule = BAI_SAMPLING_RULE_TRACK_AND_STOP;
   } else if (has_iprefix(sampling_rule_str, "tt")) {
     config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO;
+  } else if (has_iprefix(sampling_rule_str, "tf")) {
+    config->sampling_rule = BAI_SAMPLING_RULE_TOP_FEW;
   } else {
     error_stack_push(error_stack,
                      ERROR_STATUS_CONFIG_LOAD_MALFORMED_SAMPLING_RULE,
@@ -1679,6 +1679,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_int(config, ARG_TOKEN_MIN_PLAY_ITERATIONS, 2, INT_MAX,
+                  &config->min_play_iterations, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   int number_of_threads = -1;
   config_load_int(config, ARG_TOKEN_NUMBER_OF_THREADS, 1, MAX_THREADS,
                   &number_of_threads, error_stack);
@@ -1705,12 +1711,6 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   config_load_int(config, ARG_TOKEN_TIME_LIMIT, 0, INT_MAX,
                   &config->time_limit_seconds, error_stack);
 
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
-  config_load_int(config, ARG_TOKEN_EPIGON_CUTOFF, 0, INT_MAX,
-                  &config->epigon_cutoff, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -2041,6 +2041,8 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
                     1, execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_MAX_ITERATIONS, "iterations", 1, 1,
                     execute_fatal, status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_MIN_PLAY_ITERATIONS, "minplayiterations",
+                    1, 1, execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_STOP_COND_PCT, "scondition", 1, 1,
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_EQUITY_MARGIN, "equitymargin", 1, 1,
@@ -2071,8 +2073,6 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_THRESHOLD, "threshold", 1, 1,
                     execute_fatal, status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_EPIGON_CUTOFF, "epigoncutoff", 1, 1,
-                    execute_fatal, status_fatal);
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
   config->exec_mode = EXEC_MODE_CONSOLE;
@@ -2082,12 +2082,12 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->plies = 2;
   config->equity_margin = 0;
   config->max_equity_diff = int_to_equity(10);
+  config->min_play_iterations = 100;
   config->max_iterations = 5000;
   config->stop_cond_pct = 99;
   config->time_limit_seconds = 0;
-  config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO;
+  config->sampling_rule = BAI_SAMPLING_RULE_TOP_FEW;
   config->threshold = BAI_THRESHOLD_GK16;
-  config->epigon_cutoff = 1000;
   config->use_game_pairs = false;
   config->use_small_plays = false;
   config->human_readable = false;

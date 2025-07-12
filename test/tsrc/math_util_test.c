@@ -1,8 +1,6 @@
 #include <assert.h>
 #include <math.h>
 
-#include "../../src/impl/bai_peps.h"
-
 #include "../../src/util/math_util.h"
 
 #include "test_util.h"

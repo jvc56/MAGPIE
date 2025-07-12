@@ -445,7 +445,7 @@ bool moves_are_similar(const Move *m1, const Move *m2, int dist_size) {
     }
     int ml = tile;
     if (get_is_blanked(ml)) {
-      ml = 0;
+      ml = BLANK_MACHINE_LETTER;
     }
     rack_add_letter(&similar_plays_rack, ml);
   }
@@ -457,7 +457,7 @@ bool moves_are_similar(const Move *m1, const Move *m2, int dist_size) {
     }
     int ml = tile;
     if (get_is_blanked(ml)) {
-      ml = 0;
+      ml = BLANK_MACHINE_LETTER;
     }
     rack_take_letter(&similar_plays_rack, ml);
   }
