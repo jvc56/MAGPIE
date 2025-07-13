@@ -9,6 +9,8 @@
 #define DEFAULT_SMALL_MOVE_LIST_CAPACITY 250000
 #define DEFAULT_DATA_PATHS "./data"
 #define DEFAULT_WIN_PCT "winpct"
+#define COMMAND_FINISHED_KEYWORD "finished"
+#define COMMAND_RUNNING_KEYWORD "running"
 
 typedef enum {
   EXEC_MODE_UNKNOWN,

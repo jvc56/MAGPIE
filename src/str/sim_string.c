@@ -3,8 +3,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../def/exec_defs.h"
-
 #include "../ent/board.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
@@ -26,7 +24,7 @@ char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
   sim_results_unlock_simmed_plays(sim_results);
 
   if (!success) {
-    return string_duplicate(SEARCH_STATUS_STARTING);
+    return string_duplicate("sim not started yet");
   }
 
   // No need to keep the mutex locked too long here. This is because this

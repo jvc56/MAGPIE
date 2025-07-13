@@ -112,6 +112,14 @@ void sim_results_destroy(SimResults *sim_results) {
   free(sim_results);
 }
 
+void sim_results_lock_simmed_plays(SimResults *sim_results) {
+  pthread_mutex_lock(&sim_results->simmed_plays_mutex);
+}
+
+void sim_results_unlock_simmed_plays(SimResults *sim_results) {
+  pthread_mutex_unlock(&sim_results->simmed_plays_mutex);
+}
+
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
                        int max_plies, uint64_t seed) {
   sim_results_destroy_internal(sim_results);
@@ -231,14 +239,6 @@ BAIResult *sim_results_get_bai_result(SimResults *sim_results) {
 
 void sim_results_increment_node_count(SimResults *sim_results) {
   atomic_fetch_add(&sim_results->node_count, 1);
-}
-
-void sim_results_lock_simmed_plays(SimResults *sim_results) {
-  pthread_mutex_lock(&sim_results->simmed_plays_mutex);
-}
-
-void sim_results_unlock_simmed_plays(SimResults *sim_results) {
-  pthread_mutex_unlock(&sim_results->simmed_plays_mutex);
 }
 
 void simmed_play_add_score_stat(SimmedPlay *sp, Equity score, bool is_bingo,

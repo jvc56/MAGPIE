@@ -2,8 +2,9 @@
 #define THREAD_CONTROL_DEFS_H
 
 typedef enum {
-  MODE_STOPPED,
-  MODE_SEARCHING,
+  MODE_STARTED,
+  MODE_STATUS_READY,
+  MODE_FINISHED,
 } mode_search_status_t;
 
 typedef enum {

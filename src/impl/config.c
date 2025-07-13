@@ -7,7 +7,6 @@
 
 #include "../def/autoplay_defs.h"
 #include "../def/config_defs.h"
-#include "../def/exec_defs.h"
 #include "../def/game_defs.h"
 #include "../def/inference_defs.h"
 #include "../def/thread_control_defs.h"
@@ -198,6 +197,10 @@ command_status_func_t config_get_parg_status_func(const Config *config,
 
 const char *config_get_parg_name(const Config *config, arg_token_t arg_token) {
   return config_get_parg(config, arg_token)->name;
+}
+
+const char *config_get_current_exec_name(const Config *config) {
+  return config_get_parg_name(config, config->exec_parg_token);
 }
 
 // Returns NULL if the value was not set in the most recent config load call.
@@ -555,11 +558,24 @@ void execute_noop(Config __attribute__((unused)) * config,
   return;
 }
 
-// Used for pargs that are not commands.
-char *status_fatal(Config *config) {
-  log_fatal("attempted to get status of nonexecutable argument (arg token %d)",
-            config->exec_parg_token);
-  return NULL;
+char *get_status_finished_str(Config *config) {
+  return get_formatted_string("%s %s\n", COMMAND_FINISHED_KEYWORD,
+                              config_get_current_exec_name(config));
+}
+
+char *get_status_running_str(Config *config) {
+  return get_formatted_string("%s %s\n", COMMAND_RUNNING_KEYWORD,
+                              config_get_current_exec_name(config));
+}
+
+char *status_generic(Config *config) {
+  char *status_str = NULL;
+  if (thread_control_get_mode(config->thread_control) == MODE_FINISHED) {
+    status_str = get_status_finished_str(config);
+  } else {
+    status_str = get_status_running_str(config);
+  }
+  return status_str;
 }
 
 // Load CGP
@@ -605,10 +621,6 @@ void execute_cgp_load(Config *config, ErrorStack *error_stack) {
     config_reset_move_list(config);
   }
   string_builder_destroy(cgp_builder);
-}
-
-char *status_cgp_load(Config __attribute__((unused)) * config) {
-  return string_duplicate("no status available for cgp load");
 }
 
 // Adding moves
@@ -661,10 +673,6 @@ void execute_add_moves(Config *config, ErrorStack *error_stack) {
   validated_moves_destroy(new_validated_moves);
 }
 
-char *status_add_moves(Config __attribute__((unused)) * config) {
-  return string_duplicate("no status available for adding moves");
-}
-
 // Setting player rack
 
 void execute_set_rack(Config *config, ErrorStack *error_stack) {
@@ -712,10 +720,6 @@ void execute_set_rack(Config *config, ErrorStack *error_stack) {
   rack_destroy(new_rack);
 }
 
-char *status_set_rack(Config __attribute__((unused)) * config) {
-  return string_duplicate("no status available for setting player rack");
-}
-
 // Move generation
 
 void execute_move_gen(Config *config, ErrorStack *error_stack) {
@@ -744,10 +748,6 @@ void execute_move_gen(Config *config, ErrorStack *error_stack) {
   };
   generate_moves_for_game(&args);
   print_ucgi_static_moves(config->game, ml, config->thread_control);
-}
-
-char *status_move_gen(Config __attribute__((unused)) * config) {
-  return get_formatted_string("no status available for move generation");
 }
 
 // Sim
@@ -819,11 +819,23 @@ char *status_sim(Config *config) {
   if (!sim_results) {
     return string_duplicate("simmer has not been initialized");
   }
-  return ucgi_sim_stats(
-      config->game, sim_results,
-      (double)sim_results_get_node_count(sim_results) /
-          thread_control_get_seconds_elapsed(config->thread_control),
-      true);
+  char *status_str = NULL;
+  switch (thread_control_get_mode(config->thread_control)) {
+  case MODE_STARTED:
+    status_str = string_duplicate("simmer status not yet available");
+    break;
+  case MODE_FINISHED:
+    status_str = get_status_finished_str(config);
+    break;
+  case MODE_STATUS_READY:
+    status_str = ucgi_sim_stats(
+        config->game, sim_results,
+        (double)sim_results_get_node_count(sim_results) /
+            thread_control_get_seconds_elapsed(config->thread_control),
+        true);
+    break;
+  }
+  return status_str;
 }
 
 // Inference
@@ -928,10 +940,6 @@ void execute_infer(Config *config, ErrorStack *error_stack) {
   rack_destroy(target_played_tiles);
 }
 
-char *status_infer(Config __attribute__((unused)) * config) {
-  return string_duplicate("no status available for inference");
-}
-
 // Autoplay
 
 void config_fill_autoplay_args(const Config *config,
@@ -987,10 +995,6 @@ void execute_autoplay(Config *config, ErrorStack *error_stack) {
                   num_games_str, 0, error_stack);
 }
 
-char *status_autoplay(Config __attribute__((unused)) * config) {
-  return string_duplicate("no status available for autoplay");
-}
-
 // Conversion
 
 void config_fill_conversion_args(const Config *config, ConversionArgs *args) {
@@ -1011,10 +1015,6 @@ void config_convert(const Config *config, ConversionResults *results,
 
 void execute_convert(Config *config, ErrorStack *error_stack) {
   config_convert(config, config->conversion_results, error_stack);
-}
-
-char *status_convert(Config __attribute__((unused)) * config) {
-  return string_duplicate("no status available for convert");
 }
 
 // Leave Gen
@@ -1065,10 +1065,6 @@ void execute_leave_gen(Config *config, ErrorStack *error_stack) {
                   error_stack);
 }
 
-char *status_leave_gen(Config __attribute__((unused)) * config) {
-  return string_duplicate("no status available for leave gen");
-}
-
 // Create
 
 // This only implements creating a klv for now.
@@ -1100,10 +1096,6 @@ void execute_create_data(Config *config, ErrorStack *error_stack) {
         get_formatted_string("data creation not supported for type %s",
                              create_type_str));
   }
-}
-
-char *status_create_data(Config __attribute__((unused)) * config) {
-  return string_duplicate("no status available for create");
 }
 
 // Config load helpers
@@ -1287,8 +1279,10 @@ void config_load_threshold(Config *config, const char *threshold_str,
 
 bool is_lexicon_required(const char *new_p1_leaves_name,
                          const char *new_p2_leaves_name,
-                         const char *new_ld_name) {
-  return new_p1_leaves_name || new_p2_leaves_name || new_ld_name;
+                         const char *new_ld_name, const bool use_wmp1,
+                         const bool use_wmp2) {
+  return new_p1_leaves_name || new_p2_leaves_name || new_ld_name || use_wmp1 ||
+         use_wmp2;
 }
 
 bool lex_lex_compat(const char *p1_lexicon_name, const char *p2_lexicon_name,
@@ -1429,18 +1423,48 @@ void config_load_lexicon_dependent_data(Config *config,
     return;
   }
 
+  // Determine the status of the wmp for both players
+  // Start by assuming we are just using whatever the existing wmp settings are
+  bool p1_use_wmp = !!players_data_get_data_name(config->players_data,
+                                                 PLAYERS_DATA_TYPE_WMP, 0);
+  bool p2_use_wmp = !!players_data_get_data_name(config->players_data,
+                                                 PLAYERS_DATA_TYPE_WMP, 1);
+
+  if (config_get_parg_value(config, ARG_TOKEN_USE_WMP, 0)) {
+    config_load_bool(config, ARG_TOKEN_USE_WMP, &p1_use_wmp, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    p2_use_wmp = p1_use_wmp;
+  }
+
+  // The "w1" and "w2" args override the "use_wmp" arg
+  if (config_get_parg_value(config, ARG_TOKEN_P1_USE_WMP, 0)) {
+    config_load_bool(config, ARG_TOKEN_P1_USE_WMP, &p1_use_wmp, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  if (config_get_parg_value(config, ARG_TOKEN_P2_USE_WMP, 0)) {
+    config_load_bool(config, ARG_TOKEN_P2_USE_WMP, &p2_use_wmp, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
   // Both lexicons are not specified, so we don't
   // load any of the lexicon dependent data
   if (!updated_p1_lexicon_name && !updated_p2_lexicon_name) {
     // We can use the new_* variables here since if lexicons
     // are null, it is guaranteed that there are no leaves or ld
     // since they are all set after this if check.
-    if (is_lexicon_required(new_p1_leaves_name, new_p2_leaves_name,
-                            new_ld_name)) {
+    if (is_lexicon_required(new_p1_leaves_name, new_p2_leaves_name, new_ld_name,
+                            p1_use_wmp, p2_use_wmp)) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING,
-          string_duplicate(
-              "cannot set leaves or letter distribition without a lexicon"));
+          string_duplicate("cannot set leaves, letter distribition, or word "
+                           "maps without a lexicon"));
       return;
     } else {
       return;
@@ -1483,35 +1507,6 @@ void config_load_lexicon_dependent_data(Config *config,
   // Load lexica (in WMP format)
 
   // For the wmp, we allow non-NULL -> NULL transitions.
-
-  // Start by assuming we are just using whatever the existing wmp settings are
-  bool p1_use_wmp = !!players_data_get_data_name(config->players_data,
-                                                 PLAYERS_DATA_TYPE_WMP, 0);
-  bool p2_use_wmp = !!players_data_get_data_name(config->players_data,
-                                                 PLAYERS_DATA_TYPE_WMP, 1);
-
-  if (config_get_parg_value(config, ARG_TOKEN_USE_WMP, 0)) {
-    config_load_bool(config, ARG_TOKEN_USE_WMP, &p1_use_wmp, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-    p2_use_wmp = p1_use_wmp;
-  }
-
-  // The "w1" and "w2" args override the "use_wmp" arg
-  if (config_get_parg_value(config, ARG_TOKEN_P1_USE_WMP, 0)) {
-    config_load_bool(config, ARG_TOKEN_P1_USE_WMP, &p1_use_wmp, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-  }
-
-  if (config_get_parg_value(config, ARG_TOKEN_P2_USE_WMP, 0)) {
-    config_load_bool(config, ARG_TOKEN_P2_USE_WMP, &p2_use_wmp, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-  }
 
   const char *p1_wmp_name = NULL;
   if (p1_use_wmp) {
@@ -1933,6 +1928,9 @@ void config_execute_command(Config *config, ErrorStack *error_stack) {
   if (config_exec_parg_is_set(config)) {
     config_get_parg_exec_func(config, config->exec_parg_token)(config,
                                                                error_stack);
+    char *finished_msg = get_status_finished_str(config);
+    thread_control_print(config_get_thread_control(config), finished_msg);
+    free(finished_msg);
   }
 }
 
@@ -1970,109 +1968,109 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   }
 
   parsed_arg_create(config, ARG_TOKEN_SET, "setoptions", 0, 0, execute_noop,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_CGP, "cgp", 4, 4, execute_cgp_load,
-                    status_cgp_load);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_MOVES, "addmoves", 1, 1,
-                    execute_add_moves, status_add_moves);
+                    execute_add_moves, status_generic);
   parsed_arg_create(config, ARG_TOKEN_RACK, "rack", 2, 2, execute_set_rack,
-                    status_set_rack);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_GEN, "generate", 0, 0, execute_move_gen,
-                    status_move_gen);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_SIM, "simulate", 0, 1, execute_sim,
                     status_sim);
   parsed_arg_create(config, ARG_TOKEN_INFER, "infer", 2, 3, execute_infer,
-                    status_infer);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2,
-                    execute_autoplay, status_autoplay);
+                    execute_autoplay, status_generic);
   parsed_arg_create(config, ARG_TOKEN_CONVERT, "convert", 2, 3, execute_convert,
-                    status_convert);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2,
-                    execute_leave_gen, status_leave_gen);
+                    execute_leave_gen, status_generic);
   parsed_arg_create(config, ARG_TOKEN_CREATE_DATA, "createdata", 2, 3,
-                    execute_create_data, status_create_data);
+                    execute_create_data, status_generic);
   parsed_arg_create(config, ARG_TOKEN_DATA_PATH, "path", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_BINGO_BONUS, "bb", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_BOARD_LAYOUT, "bdn", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_GAME_VARIANT, "var", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_LETTER_DISTRIBUTION, "ld", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_LEXICON, "lex", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_USE_WMP, "wmp", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_LEAVES, "leaves", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_P1_NAME, "p1", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_P1_LEXICON, "l1", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_P1_USE_WMP, "w1", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_P1_LEAVES, "k1", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_P2_NAME, "p2", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_P2_LEXICON, "l2", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_P2_USE_WMP, "w2", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_P2_LEAVES, "k2", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_WIN_PCT, "winpct", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_PLIES, "plies", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_SMALL_PLAYS, "numsmallplays", 1,
-                    1, execute_fatal, status_fatal);
+                    1, execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_MAX_ITERATIONS, "iterations", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_MIN_PLAY_ITERATIONS, "minplayiterations",
-                    1, 1, execute_fatal, status_fatal);
+                    1, 1, execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_STOP_COND_PCT, "scondition", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_EQUITY_MARGIN, "equitymargin", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_MAX_EQUITY_DIFF, "maxequitydifference", 1,
-                    1, execute_fatal, status_fatal);
+                    1, execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_WRITE_BUFFER_SIZE, "wb", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_RANDOM_SEED, "seed", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_THREADS, "threads", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_PRINT_INFO_INTERVAL, "pfrequency", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_EXEC_MODE, "mode", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_TT_FRACTION_OF_MEM, "ttfraction", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   parsed_arg_create(config, ARG_TOKEN_TIME_LIMIT, "tlim", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_SAMPLING_RULE, "sr", 1, 1, execute_fatal,
-                    status_fatal);
+                    status_generic);
   parsed_arg_create(config, ARG_TOKEN_THRESHOLD, "threshold", 1, 1,
-                    execute_fatal, status_fatal);
+                    execute_fatal, status_generic);
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
   config->exec_mode = EXEC_MODE_CONSOLE;

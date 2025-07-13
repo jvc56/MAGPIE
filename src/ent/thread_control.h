@@ -34,8 +34,9 @@ bool thread_control_exit(ThreadControl *thread_control,
 exit_status_t thread_control_get_exit_status(ThreadControl *thread_control);
 void thread_control_set_print_info_interval(ThreadControl *thread_control,
                                             int print_info_interval);
-bool thread_control_set_mode_searching(ThreadControl *thread_control);
-bool thread_control_set_mode_stopped(ThreadControl *thread_control);
+bool thread_control_set_mode_started(ThreadControl *thread_control);
+bool thread_control_set_mode_status_ready(ThreadControl *thread_control);
+bool thread_control_set_mode_finished(ThreadControl *thread_control);
 mode_search_status_t thread_control_get_mode(ThreadControl *thread_control);
 void thread_control_set_threads(ThreadControl *thread_control,
                                 int number_of_threads);

@@ -774,7 +774,9 @@ error_code_t config_simulate_and_return_status(const Config *config,
                                                Rack *known_opp_rack,
                                                SimResults *sim_results) {
   ErrorStack *error_stack = error_stack_create();
+  thread_control_set_mode_started(config_get_thread_control(config));
   config_simulate(config, known_opp_rack, sim_results, error_stack);
+  thread_control_set_mode_finished(config_get_thread_control(config));
   error_code_t status = error_stack_top(error_stack);
   error_stack_destroy(error_stack);
   return status;
