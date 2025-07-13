@@ -268,14 +268,13 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
 
   for (int i = 0; i < NUMBER_OF_GAME_END_REASONS; i++) {
     string_builder_add_formatted_string(
-        sb, "Game End Reason %-*s %d (%2.2f%%%%)\n", 10, game_end_reason_strs[i],
-        gd->game_end_reasons[i],
+        sb, "Game End Reason %-*s %d (%2.2f%%%%)\n", 10,
+        game_end_reason_strs[i], gd->game_end_reasons[i],
         100 * ((double)gd->game_end_reasons[i] / gd->total_games));
   }
 
   string_builder_add_string(sb, "\n");
-  string_builder_add_table_row(sb, col_width, "", "Player 1",
-                               "Player 2");
+  string_builder_add_table_row(sb, col_width, "", "Player 1", "Player 2");
 
   char *p0_total_str =
       get_total_float_and_percentage_string(p0_total, p0_total_pct);
@@ -290,8 +289,7 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
   char *p0_win_str = get_total_int_and_percentage_string(p0_wins, p0_win_pct);
   char *p0_loss_str =
       get_total_int_and_percentage_string(p0_losses, p0_loss_pct);
-  string_builder_add_table_row(sb, col_width, "Wins:", p0_win_str,
-                               p0_loss_str);
+  string_builder_add_table_row(sb, col_width, "Wins:", p0_win_str, p0_loss_str);
   string_builder_add_table_row(sb, col_width, "Losses:", p0_loss_str,
                                p0_win_str);
   free(p0_win_str);
@@ -307,7 +305,7 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
   char *p1_score_str = get_score_and_dev_string(stat_get_mean(gd->p1_score),
                                                 stat_get_stdev(gd->p1_score));
   string_builder_add_table_row(sb, col_width, "Score:", p0_score_str,
-                               p1_score_str);                                                
+                               p1_score_str);
   free(p1_score_str);
   free(p0_score_str);
 
@@ -567,8 +565,7 @@ void fj_write_buffer_to_output(Recorder *recorder, int remaining_tiles,
     if (fputs(string_builder_peek(sb), shared_data->fhs[remaining_tiles]) ==
         EOF) {
       fclose_or_die(shared_data->fhs[remaining_tiles]);
-      log_fatal("error writing to fj file of remaining tiles: %d",
-                remaining_tiles);
+      log_fatal("error writing to fj file of remaining tiles: %d", index);
     }
     fflush(shared_data->fhs[remaining_tiles]);
     pthread_mutex_unlock(&shared_data->fh_mutexes[remaining_tiles]);

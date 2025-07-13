@@ -177,7 +177,7 @@ static inline void move_set_equity(Move *move, Equity equity) {
 }
 
 static inline void move_set_all_except_equity(Move *move,
-                                              const MachineLetter strip[],
+                                              const MachineLetter *strip,
                                               int leftstrip, int rightstrip,
                                               Equity score, int row_start,
                                               int col_start, int tiles_played,
@@ -193,7 +193,7 @@ static inline void move_set_all_except_equity(Move *move,
   } else {
     move->tiles_length = rightstrip - leftstrip + 1;
   }
-  if (move_type != GAME_EVENT_PASS) {
+  if (strip) {
     for (int i = 0; i < move->tiles_length; i++) {
       move->tiles[i] = strip[leftstrip + i];
     }

@@ -27,6 +27,11 @@ ifeq ($(shell echo "int main() { return 0; }" | $(CC) -x c - -fsanitize=leak -o 
     FSAN_ARG += -fsanitize=leak
 endif
 
+# Test whether the analyzer is supported by the compiler
+ifeq ($(shell echo "int main() { return 0; }" | $(CC) -x c - -fanalyzer -o /dev/null >/dev/null 2>&1; echo $$?),0)
+    FSAN_ARG += -fanalyzer
+endif
+
 cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror $(FSAN_ARG)
 cflags.vlg := -g -O0 -Wall -Wno-trigraphs -Wextra
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage

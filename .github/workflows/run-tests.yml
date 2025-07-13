@@ -11,6 +11,15 @@ jobs:
           version: latest
           platform: x64
 
+      - name: Install cppcheck
+        run: |
+          sudo apt install cppcheck
+
+      - name: Run cppcheck
+        run: |
+          cppcheck --enable=all --inconclusive --force --verbose --suppress=missingIncludeSystem  --error-exitcode=1 src/ test/ cmd/
+        continue-on-error: false
+
       - name: Get datafile cache
         id: cache-datafiles
         uses: actions/cache@v3

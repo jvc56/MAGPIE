@@ -462,7 +462,10 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
   Stat **exchanged_stats = NULL;
   Stat **rack_stats = NULL;
 
-  if (inference->target_number_of_tiles_exchanged > 0) {
+  const bool tiles_were_exchanged =
+      inference->target_number_of_tiles_exchanged > 0;
+
+  if (tiles_were_exchanged) {
     exchanged_stats = malloc_or_die((sizeof(Stat *)) * (number_of_threads));
     rack_stats = malloc_or_die((sizeof(Stat *)) * (number_of_threads));
   }
@@ -473,7 +476,7 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
     add_inference(inference_worker, inference);
     leave_stats[thread_index] = inference_results_get_equity_values(
         inference_worker->results, INFERENCE_TYPE_LEAVE);
-    if (inference->target_number_of_tiles_exchanged > 0) {
+    if (tiles_were_exchanged) {
       exchanged_stats[thread_index] = inference_results_get_equity_values(
           inference_worker->results, INFERENCE_TYPE_EXCHANGED);
       rack_stats[thread_index] = inference_results_get_equity_values(
@@ -489,7 +492,7 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
                 inference_results_get_equity_values(inference->results,
                                                     INFERENCE_TYPE_LEAVE));
   free(leave_stats);
-  if (inference->target_number_of_tiles_exchanged > 0) {
+  if (tiles_were_exchanged) {
     stats_combine(exchanged_stats, number_of_threads,
                   inference_results_get_equity_values(
                       inference->results, INFERENCE_TYPE_EXCHANGED));
