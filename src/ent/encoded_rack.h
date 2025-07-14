@@ -90,6 +90,7 @@ static inline void encoded_rack_set_ml(EncodedRack *encoded_rack,
     ml >>= 1;
     (*bit_index)++;
   }
+  // cppcheck-suppress internalAstError
   *bit_index += BITS_PER_ML - (*bit_index - start_bit_index);
 }
 

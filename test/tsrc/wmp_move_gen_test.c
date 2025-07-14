@@ -122,7 +122,8 @@ void test_playthrough_bingo_existence(void) {
   assert(wmp_move_gen_has_playthrough(&wmg));
 
   // CHEESE? + N = ENCHEErS
-  assert(wmp_move_gen_check_playthrough_full_rack_existence(&wmg));
+  bool entry_exists = wmp_move_gen_check_playthrough_full_rack_existence(&wmg);
+  assert(entry_exists);
 
   // Save left-playthrough as N.
   wmp_move_gen_save_playthrough_state(&wmg);
@@ -130,18 +131,20 @@ void test_playthrough_bingo_existence(void) {
   wmp_move_gen_add_playthrough_letter(&wmg, ld_hl_to_ml(ld, "P"));
 
   // CHEESE? + NP = NiPCHEESE/PENnEECHS
-  assert(wmp_move_gen_check_playthrough_full_rack_existence(&wmg));
+  entry_exists = wmp_move_gen_check_playthrough_full_rack_existence(&wmg);
+  assert(entry_exists);
 
   // Add a Q, and then there will be no bingo.
   wmp_move_gen_add_playthrough_letter(&wmg, ld_hl_to_ml(ld, "Q"));
-  assert(!wmp_move_gen_check_playthrough_full_rack_existence(&wmg));
+  assert(!entry_exists);
 
   // Restore left-playthrough as N.
   wmp_move_gen_restore_playthrough_state(&wmg);
   // Add an I, as if playing left.
   wmp_move_gen_add_playthrough_letter(&wmg, ld_hl_to_ml(ld, "I"));
   // CHEESE? + NI = NIpCHEESE
-  assert(wmp_move_gen_check_playthrough_full_rack_existence(&wmg));
+  entry_exists = wmp_move_gen_check_playthrough_full_rack_existence(&wmg);
+  assert(entry_exists);
 
   // Save left-playthrough as NI.
   wmp_move_gen_save_playthrough_state(&wmg);
@@ -149,7 +152,8 @@ void test_playthrough_bingo_existence(void) {
   // Add a P, as if playing right.
   wmp_move_gen_add_playthrough_letter(&wmg, ld_hl_to_ml(ld, "P"));
   // CHEESE? + NIP = NIPCHEESEs
-  assert(wmp_move_gen_check_playthrough_full_rack_existence(&wmg));
+  entry_exists = wmp_move_gen_check_playthrough_full_rack_existence(&wmg);
+  assert(entry_exists);
 
   // Add a Q, and then there will be no bingo.
   wmp_move_gen_add_playthrough_letter(&wmg, ld_hl_to_ml(ld, "Q"));

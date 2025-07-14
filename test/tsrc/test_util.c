@@ -442,9 +442,9 @@ bool equal_rack(const Rack *expected_rack, const Rack *actual_rack) {
 
 void assert_strings_equal(const char *str1, const char *str2) {
   if (!strings_equal(str1, str2)) {
-    if (str1 && !str2) {
+    if (!str2) {
       fprintf(stderr, "strings are not equal:\n>%s<\n>%s<\n", str1, "(NULL)");
-    } else if (!str1 && str2) {
+    } else if (!str1) {
       fprintf(stderr, "strings are not equal:\n>%s<\n>%s<\n", "(NULL)", str2);
     } else {
       fprintf(stderr, "strings are not equal:\n>%s<\n>%s<\n", str1, str2);
@@ -554,6 +554,10 @@ void assert_boards_are_equal(Board *b1, Board *b2) {
 
 void assert_move(Game *game, MoveList *move_list, const SortedMoveList *sml,
                  int move_index, const char *expected_move_string) {
+  if (!sml && !move_list) {
+    log_fatal("sml and move_list are both null");
+    return;
+  }
   Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
 

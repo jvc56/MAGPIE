@@ -52,6 +52,7 @@ void test_make_wmp_from_words(void) {
 
   BitRack q_blank = string_to_bit_rack(ld, "Q?");
   bytes_written = wmp_write_words_to_buffer(wmp, &q_blank, 2, buffer);
+  assert(bytes_written == 2);
   assert_word_in_buffer(buffer, "QI", ld, 0, 2);
 
   BitRack square_blank = string_to_bit_rack(ld, "SQUARE?");

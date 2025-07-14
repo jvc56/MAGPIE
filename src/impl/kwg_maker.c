@@ -27,7 +27,8 @@ typedef struct NodeIndexList {
 
 void node_index_list_initialize(NodeIndexList *list) {
   list->capacity = KWG_NODE_INDEX_LIST_INITIAL_CAPACITY;
-  list->indices = malloc_or_die(sizeof(uint32_t) * list->capacity);
+  list->indices =
+      malloc_or_die(sizeof(uint32_t) * KWG_NODE_INDEX_LIST_INITIAL_CAPACITY);
   list->count = 0;
 }
 
@@ -205,15 +206,16 @@ typedef struct NodePointerList {
 NodePointerList *node_pointer_list_create(void) {
   NodePointerList *node_pointer_list = malloc_or_die(sizeof(NodePointerList));
   node_pointer_list->capacity = KWG_ORDERED_POINTER_LIST_INITIAL_CAPACITY;
-  node_pointer_list->nodes =
-      malloc_or_die(sizeof(MutableNode *) * node_pointer_list->capacity);
+  node_pointer_list->nodes = malloc_or_die(
+      sizeof(MutableNode *) * KWG_ORDERED_POINTER_LIST_INITIAL_CAPACITY);
   node_pointer_list->count = 0;
   return node_pointer_list;
 }
 
 void node_pointer_list_initialize(NodePointerList *list) {
   list->capacity = KWG_HASH_BUCKET_ITEMS_CAPACITY;
-  list->nodes = malloc_or_die(sizeof(MutableNode *) * list->capacity);
+  list->nodes =
+      malloc_or_die(sizeof(MutableNode *) * KWG_HASH_BUCKET_ITEMS_CAPACITY);
   list->count = 0;
 }
 

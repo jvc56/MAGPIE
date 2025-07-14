@@ -47,6 +47,7 @@ char *format_string_with_va_list(const char *format, va_list *args) {
   va_list args_copy_for_size;
   va_copy(args_copy_for_size, *args);
   size = vsnprintf(NULL, 0, format, args_copy_for_size) + 1;
+  va_end(args_copy_for_size);
   char *string_buffer = malloc_or_die(size);
   vsnprintf(string_buffer, size, format, *args);
   return string_buffer;
@@ -157,7 +158,7 @@ char *read_line_from_stdin(void) {
       line = NULL;
     }
   }
-  if (read && read > 0 && line[read - 1] == '\n') {
+  if (read > 0 && line[read - 1] == '\n') {
     line[read - 1] = '\0';
   }
   return line;

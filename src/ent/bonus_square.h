@@ -51,6 +51,7 @@ static inline char bonus_square_to_char(BonusSquare bonus_square) {
 
 static inline BonusSquare bonus_square_from_char(char bonus_square_char) {
   return (BonusSquare){
+      // cppcheck-suppress unreadVariable
       .raw = bonus_square_chars_to_raw_map[(int)bonus_square_char]};
 }
 

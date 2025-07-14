@@ -93,7 +93,7 @@ static inline uint64_t kwg_get_letter_sets(const KWG *kwg, uint32_t node_index,
   for (uint32_t i = node_index;; ++i) {
     const uint32_t node = kwg_node(kwg, i);
     const uint32_t t = kwg_node_tile(node);
-    const uint64_t bit = ((uint64_t)1 << t) ^ !t;
+    const uint64_t bit = ((uint64_t)1 << t) ^ (!t);
     es |= bit;
     ls |= bit & (uint64_t)-(int64_t)kwg_node_accepts(node);
     if (kwg_node_is_end(node)) {

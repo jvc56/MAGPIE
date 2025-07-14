@@ -148,6 +148,7 @@ void test_hash_after_passing(void) {
   uint64_t h3 = zobrist_add_move(z, h2, validated_moves_get_move(vms, 0), rack,
                                  false, 2, 1);
   play_status = play_move(validated_moves_get_move(vms, 0), game, NULL, NULL);
+  assert(play_status == PLAY_MOVE_STATUS_SUCCESS);
 
   // should not be equal to the very first hash
   assert(h != h3);

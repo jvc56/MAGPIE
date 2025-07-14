@@ -698,7 +698,6 @@ void distinct_lexica_test(bool w1) {
       "15/15/15/15/15/15/15/7SPORK3/7C7/7H7/6WIGGLY3/7Z7/7I7/7E7/7R7 / 0/0 0");
 
   const LetterDistribution *ld2 = game_get_ld(game2);
-  ld = game_get_ld(game2);
   MoveList *move_list2 = move_list_create(1);
 
   player0 = game_get_player(game2, 0);
