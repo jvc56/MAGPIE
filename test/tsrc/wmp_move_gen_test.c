@@ -136,6 +136,7 @@ void test_playthrough_bingo_existence(void) {
 
   // Add a Q, and then there will be no bingo.
   wmp_move_gen_add_playthrough_letter(&wmg, ld_hl_to_ml(ld, "Q"));
+  entry_exists = wmp_move_gen_check_playthrough_full_rack_existence(&wmg);
   assert(!entry_exists);
 
   // Restore left-playthrough as N.

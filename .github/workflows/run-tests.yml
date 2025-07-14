@@ -12,7 +12,7 @@ jobs:
 
       - name: Run cppcheck
         run: |
-          cppcheck --enable=all --force --verbose --inline-suppr --suppress=missingIncludeSystem --suppress=selfAssignment --suppress=unusedFunction --std=c99 --error-exitcode=1 src/ test/ cmd/
+          cppcheck --version && cppcheck --enable=all --force --verbose --inline-suppr --suppress=missingIncludeSystem --suppress=selfAssignment --suppress=unusedFunction --std=c99 --error-exitcode=1 src/ test/ cmd/
         continue-on-error: false
 
       - name: Set up Python
