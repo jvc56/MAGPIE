@@ -598,7 +598,7 @@ static inline void move_list_resize(MoveList *ml, int new_capacity) {
   }
 }
 
-static inline bool move_list_move_exists(MoveList *ml, Move *m) {
+static inline bool move_list_move_exists(MoveList *ml, const Move *m) {
   for (int i = 0; i < ml->count; i++) {
     if (compare_moves(ml->moves[i], m, true) == -1) {
       return true;
@@ -703,7 +703,7 @@ static inline int compare_small_moves_by_score(const void *a, const void *b) {
 }
 
 static inline void small_move_to_move(Move *move, const SmallMove *sm,
-                                      Board *board) {
+                                      const Board *board) {
   if (small_move_is_pass(sm)) {
     move_set_as_pass(move);
     return;

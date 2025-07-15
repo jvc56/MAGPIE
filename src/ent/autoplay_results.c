@@ -69,17 +69,17 @@ struct AutoplayResults {
 
 // Generic recorders
 
-void add_move_noop(Recorder __attribute__((unused)) * recorder,
+void add_move_noop(const Recorder __attribute__((unused)) * recorder,
                    const RecorderArgs __attribute__((unused)) * args) {
   return;
 }
 
-void add_game_noop(Recorder __attribute__((unused)) * recorder,
+void add_game_noop(const Recorder __attribute__((unused)) * recorder,
                    const RecorderArgs __attribute__((unused)) * args) {
   return;
 }
 
-char *get_str_noop(Recorder __attribute__((unused)) * recorder,
+char *get_str_noop(const Recorder __attribute__((unused)) * recorder,
                    const RecorderArgs __attribute__((unused)) * args) {
   return NULL;
 }
@@ -415,7 +415,7 @@ void game_data_sets_finalize(Recorder **recorder_list, int recorder_list_size,
 }
 
 char *game_data_sets_str(Recorder *recorder, const RecorderArgs *args) {
-  GameDataSets *sets = (GameDataSets *)recorder->data;
+  const GameDataSets *sets = (GameDataSets *)recorder->data;
   StringBuilder *sb = string_builder_create();
 
   char *all_game_str =
@@ -963,7 +963,7 @@ void leaves_data_finalize(Recorder **recorder_list, int list_size,
     char line[256];
     while (fgets(line, sizeof(line), leaves_file)) {
       char *leave_str = strtok(line, ",");
-      char *count_str = strtok(NULL, "\n");
+      const char *count_str = strtok(NULL, "\n");
       if (!leave_str || !count_str) {
         log_fatal("invalid row in existing autoplay leaves count file '%s': %s",
                   leaves_count_filename, line);

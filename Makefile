@@ -27,12 +27,8 @@ ifeq ($(shell echo "int main() { return 0; }" | $(CC) -x c - -fsanitize=leak -o 
     FSAN_ARG += -fsanitize=leak
 endif
 
-# Test whether the analyzer is supported by the compiler
-ifeq ($(shell echo "int main() { return 0; }" | $(CC) -x c - -fanalyzer -o /dev/null >/dev/null 2>&1; echo $$?),0)
-    FSAN_ARG += -fanalyzer
-endif
-
 cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror $(FSAN_ARG)
+cflags.fan := -fanalyzer -Wno-trigraphs
 cflags.vlg := -g -O0 -Wall -Wno-trigraphs -Wextra
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
 cflags.release := -O3 -flto -funroll-loops -march=native -Wall -Wno-trigraphs
@@ -40,6 +36,7 @@ cflags.release := -O3 -flto -funroll-loops -march=native -Wall -Wno-trigraphs
 lflags.cov := --coverage
 
 ldflags.dev := -Llib -pthread $(FSAN_ARG)
+ldflags.fan := -fanalyzer -Wno-trigraphs
 ldflags.vlg := -Llib -pthread
 ldflags.release := -Llib -pthread
 ldflags.cov := -Llib -pthread 

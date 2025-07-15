@@ -121,7 +121,9 @@ static inline void kwg_read_nodes_from_stream(KWG *kwg, size_t number_of_nodes,
   }
 }
 
-static inline uint32_t *kwg_get_mutable_nodes(KWG *kwg) { return kwg->nodes; }
+static inline uint32_t *kwg_get_mutable_nodes(const KWG *kwg) {
+  return kwg->nodes;
+}
 
 static inline void load_kwg(const char *kwg_name, const char *kwg_filename,
                             KWG *kwg, ErrorStack *error_stack) {
