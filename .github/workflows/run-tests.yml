@@ -6,7 +6,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Run cppcheck
+      - name: Run cppcheck static analysis
         run: |
           ./run_cppcheck.sh
 
@@ -15,9 +15,18 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Compile with fanalyzer
+      - name: Compile with fanalyzer static analysis
         run: |
           ./run_fanalyzer.sh
+
+  clang-tidy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Run clang-tidy static analysis
+        run: |
+          sudo apt install -y clang-tidy && ./run_clang_tidy.sh
 
   circular-dependencies:
     runs-on: ubuntu-latest
