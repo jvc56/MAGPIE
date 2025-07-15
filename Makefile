@@ -27,7 +27,7 @@ ifeq ($(shell echo "int main() { return 0; }" | $(CC) -x c - -fsanitize=leak -o 
     FSAN_ARG += -fsanitize=leak
 endif
 
-FANALYZER_ARG := -fanalyzer
+FANALYZER_ARG := -fanalyzer -Wno-trigraphs
 
 cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror $(FSAN_ARG)
 cflags.fan := $(FANALYZER_ARG)

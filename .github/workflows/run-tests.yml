@@ -9,7 +9,6 @@ jobs:
       - name: Run cppcheck
         run: |
           ./run_cppcheck.sh
-        continue-on-error: false
 
   fanalyzer:
     runs-on: ubuntu-latest
@@ -18,7 +17,7 @@ jobs:
 
       - name: Compile with fanalyzer
         run: |
-          make clean && make magpie_test BUILD=fan
+          ./run_fanalyzer.sh
 
   circular-dependencies:
     runs-on: ubuntu-latest
