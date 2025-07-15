@@ -61,6 +61,7 @@ Game *config_get_game(const Config *config);
 MoveList *config_get_move_list(const Config *config);
 SimResults *config_get_sim_results(const Config *config);
 AutoplayResults *config_get_autoplay_results(const Config *config);
+const char *config_get_current_exec_name(const Config *config);
 
 // Entity creators
 

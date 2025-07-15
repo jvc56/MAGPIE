@@ -59,6 +59,12 @@ void test_config_load_error_cases(void) {
                          error_stack);
   test_config_load_error(config, "sim -it 1000 -l2 CSW21",
                          ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING, error_stack);
+  test_config_load_error(config, "set -wmp true",
+                         ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING, error_stack);
+  test_config_load_error(config, "set -w1 true",
+                         ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING, error_stack);
+  test_config_load_error(config, "set -w2 true",
+                         ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING, error_stack);
   test_config_load_error(config, "set -mode uci",
                          ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_EXEC_MODE,
                          error_stack);
@@ -358,6 +364,7 @@ void test_config_lexical_data(void) {
 void assert_config_exec_status(Config *config, const char *cmd,
                                error_code_t expected_error_code) {
   ErrorStack *error_stack = error_stack_create();
+  thread_control_set_mode_started(config_get_thread_control(config));
   config_load_command(config, cmd, error_stack);
   error_code_t status = error_stack_top(error_stack);
   if (status != ERROR_STATUS_SUCCESS) {
@@ -365,6 +372,7 @@ void assert_config_exec_status(Config *config, const char *cmd,
   }
 
   config_execute_command(config, error_stack);
+  thread_control_set_mode_finished(config_get_thread_control(config));
 
   error_code_t actual_error_code = error_stack_top(error_stack);
 
@@ -435,7 +443,6 @@ void test_config_exec_parse_args(void) {
   // Simulation
   assert_config_exec_status(config, "gen -numplays 2", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "sim AEIN3R -it 1",
-
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   assert_config_exec_status(config, "sim -it 1", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "sim AEINR -it 1", ERROR_STATUS_SUCCESS);
