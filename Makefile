@@ -37,7 +37,7 @@ lflags.cov := --coverage
 ldflags.dev := -Llib -pthread $(FSAN_ARG)
 ldflags.vlg := -Llib -pthread
 ldflags.release := -Llib -pthread
-ldflags.cov := -Llib -pthread 
+ldflags.cov := -Llib -pthread
 
 CFLAGS := ${cflags.${BUILD}}
 
@@ -58,6 +58,9 @@ LDLIBS   := -lm
 .PHONY: all clean iwyu
 
 all: magpie magpie_test
+
+libmagpie.a: $(OBJ_SRC)
+	ar rcs $@ $^
 
 magpie: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@

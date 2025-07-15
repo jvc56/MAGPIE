@@ -12,4 +12,8 @@ void wasm_destroy_configs(void);
 
 char *wasm_score_move(const char *cgpstr, const char *ucgi_move_str);
 
+extern int process_command_wasm_sync(const char *cmd);
+extern void wasm_init_configs(const char *paths);
+extern void wasm_destroy_configs(void);
+extern char *get_search_status_wasm(void);
 #endif
