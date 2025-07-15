@@ -69,17 +69,17 @@ struct AutoplayResults {
 
 // Generic recorders
 
-void add_move_noop(const Recorder __attribute__((unused)) * recorder,
+void add_move_noop(Recorder __attribute__((unused)) * recorder,
                    const RecorderArgs __attribute__((unused)) * args) {
   return;
 }
 
-void add_game_noop(const Recorder __attribute__((unused)) * recorder,
+void add_game_noop(Recorder __attribute__((unused)) * recorder,
                    const RecorderArgs __attribute__((unused)) * args) {
   return;
 }
 
-char *get_str_noop(const Recorder __attribute__((unused)) * recorder,
+char *get_str_noop(Recorder __attribute__((unused)) * recorder,
                    const RecorderArgs __attribute__((unused)) * args) {
   return NULL;
 }

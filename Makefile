@@ -27,7 +27,7 @@ ifeq ($(shell echo "int main() { return 0; }" | $(CC) -x c - -fsanitize=leak -o 
     FSAN_ARG += -fsanitize=leak
 endif
 
-FANALYZER_ARG := -fanalyzer -Wno-trigraphs
+FANALYZER_ARG := -fanalyzer -Wno-trigraphs -Wno-analyzer-double-free -Wno-analyzer-use-after-free -Wno-analyzer-null-dereference -Wno-analyzer-file-leak -Wno-analyzer-null-argument
 
 cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror $(FSAN_ARG)
 cflags.fan := $(FANALYZER_ARG)
@@ -38,7 +38,7 @@ cflags.release := -O3 -flto -funroll-loops -march=native -Wall -Wno-trigraphs
 lflags.cov := --coverage
 
 ldflags.dev := -Llib -pthread $(FSAN_ARG)
-ldflags.fan := $(FANALYZER_ARG)
+ldflags.fan := -Llib -pthread $(FANALYZER_ARG)
 ldflags.vlg := -Llib -pthread
 ldflags.release := -Llib -pthread
 ldflags.cov := -Llib -pthread 

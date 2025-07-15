@@ -501,7 +501,7 @@ typedef struct SimStrategyStats {
 } SimStrategyStats;
 
 SimStrategyStats *sim_strategy_stats_create(void) {
-  SimStrategyStats *stats = malloc(sizeof(SimStrategyStats));
+  SimStrategyStats *stats = malloc_or_die(sizeof(SimStrategyStats));
   stats->total = 0;
   stats->num_samples = stat_create(true);
   stats->total_time = stat_create(true);
