@@ -82,6 +82,8 @@ if [ "${CPPCHECK_EXIT_CODE}" -eq 0 ]; then
     echo "cppcheck analysis completed successfully with no errors found."
 elif [ "${CPPCHECK_EXIT_CODE}" -eq 1 ]; then
     echo "cppcheck analysis completed with errors (exit code 1). Please review the output."
+    exit 1
 else
     echo "cppcheck analysis failed with exit code ${CPPCHECK_EXIT_CODE}. Something unexpected happened."
+    exit 1
 fi
