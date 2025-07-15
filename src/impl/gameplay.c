@@ -284,7 +284,7 @@ void execute_exchange_move(const Move *move, Game *game, Rack *leave) {
       player_get_rack(game_get_player(game, player_on_turn_index));
   Bag *bag = game_get_bag(game);
 
-  const num_tiles_exchanged = move_get_tiles_played(move);
+  const int num_tiles_exchanged = move_get_tiles_played(move);
 
   for (int i = 0; i < num_tiles_exchanged; i++) {
     rack_take_letter(player_on_turn_rack, move_get_tile(move, i));
