@@ -1108,6 +1108,34 @@ void movegen_within_x_of_best_test(void) {
   config_destroy(config);
 }
 
+void movegen_should_not_gen_exchanges(void) {
+  Config *config = config_create_default_test();
+  load_and_exec_config_or_die(
+      config,
+      "set -r2 equity -numplays 40 -maxequitydiff 30 -sr tt -threads 16 -scond "
+      "95 "
+      "-s2 equity -plies 5 -minp 100 -thres gk16 -it 1000000 -wmp true -s1 "
+      "equity -r1 equity ");
+  load_and_exec_config_or_die(
+      config,
+      "cgp "
+      "WAgTAILS5K1/7P4QI1/3NEUTRINO1UN1/JOTA3I3BEDU/I2EFF1N2ZAS1N/"
+      "HM5G2AGO1R/AE4REP2G2E/D6SOOTY1TA/ID11EL/1AR10L1/1WO7UNBOX/1TE10M1/"
+      "1E11I1/1D10ICY/15 AILORRV/ 303/458 0 -lex NWL23 -ld english");
+
+  load_and_exec_config_or_die(config, "gen");
+
+  MoveList *move_list = config_get_move_list(config);
+  print_game(config_get_game(config), move_list);
+  const int num_moves = move_list_get_count(move_list);
+  for (int i = 0; i < num_moves; i++) {
+    const Move *move = move_list_get_move(move_list, i);
+    assert(move_get_type(move) != GAME_EVENT_EXCHANGE);
+  }
+
+  config_destroy(config);
+}
+
 void test_move_gen(void) {
   leave_lookup_test();
   unfound_leave_lookup_test();
@@ -1125,4 +1153,5 @@ void test_move_gen(void) {
   movegen_no_wmp_by_default_test();
   movegen_only_one_player_wmp();
   movegen_within_x_of_best_test();
+  movegen_should_not_gen_exchanges();
 }
