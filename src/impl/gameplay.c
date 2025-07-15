@@ -284,7 +284,9 @@ void execute_exchange_move(const Move *move, Game *game, Rack *leave) {
       player_get_rack(game_get_player(game, player_on_turn_index));
   Bag *bag = game_get_bag(game);
 
-  for (int i = 0; i < move_get_tiles_played(move); i++) {
+  const int num_tiles_exchanged = move_get_tiles_played(move);
+
+  for (int i = 0; i < num_tiles_exchanged; i++) {
     rack_take_letter(player_on_turn_rack, move_get_tile(move, i));
   }
 
@@ -293,8 +295,9 @@ void execute_exchange_move(const Move *move, Game *game, Rack *leave) {
   }
 
   draw_to_full_rack(game, player_on_turn_index);
+  assert(rack_get_total_letters(player_on_turn_rack) == RACK_SIZE);
   int player_draw_index = game_get_player_on_turn_draw_index(game);
-  for (int i = 0; i < move_get_tiles_played(move); i++) {
+  for (int i = 0; i < num_tiles_exchanged; i++) {
     bag_add_letter(bag, move_get_tile(move, i), player_draw_index);
   }
 }
