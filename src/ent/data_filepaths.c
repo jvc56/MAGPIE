@@ -131,23 +131,6 @@ char *data_filepaths_get_first_valid_filename(const char *data_paths,
   return ret_val;
 }
 
-// Returns the data path that is used in the filename
-// returned by data_filepaths_get_readable_filename.
-// Assumes the data name is not already a valid filepath.
-char *data_filepaths_get_data_path_name(const char *data_paths,
-                                        const char *data_name,
-                                        data_filepath_t type,
-                                        ErrorStack *error_stack) {
-  if (!data_name) {
-    error_stack_push(error_stack, ERROR_STATUS_FILEPATH_NULL_FILENAME,
-                     get_formatted_string("data name is null for data type %s",
-                                          filepath_type_names[type]));
-    return NULL;
-  }
-  return data_filepaths_get_first_valid_filename(data_paths, data_name, type,
-                                                 true, error_stack);
-}
-
 // Returns a filename string that exists and is readable.
 // Dies if no such file can be found.
 // If data_name looks like a filepath, then data_name is just returned

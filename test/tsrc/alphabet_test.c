@@ -14,7 +14,7 @@
 void test_alphabet(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
-  LetterDistribution *ld = config_get_ld(config);
+  const LetterDistribution *ld = config_get_ld(config);
   // Test blank
   assert(get_blanked_machine_letter(1) == (1 | BLANK_MASK));
   assert(get_blanked_machine_letter(5) == (5 | BLANK_MASK));
@@ -65,7 +65,7 @@ void test_alphabet(void) {
 
   Config *catalan_config = config_create_or_die(
       "set -lex DISC2 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
-  LetterDistribution *catalan_ld = config_get_ld(catalan_config);
+  const LetterDistribution *catalan_ld = config_get_ld(catalan_config);
 
   string_builder_add_user_visible_letter(letter, catalan_ld,
                                          get_blanked_machine_letter(13));

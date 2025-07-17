@@ -135,16 +135,6 @@ static inline void rack_union(Rack *rack_to_update,
   }
 }
 
-static inline int rack_contains_subrack(const Rack *rack, const Rack *subrack) {
-  const int dist_size = rack->dist_size;
-  for (int i = 0; i < dist_size; i++) {
-    if (subrack->array[i] > rack->array[i]) {
-      return false;
-    }
-  }
-  return true;
-}
-
 static inline void rack_take_letter(Rack *rack, MachineLetter letter) {
   rack->array[letter]--;
   rack->number_of_letters--;

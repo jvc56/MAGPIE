@@ -336,7 +336,7 @@ void add_inference(Inference *inference_to_add,
       inference_results_get_leave_rack_list(inference_to_update->results);
 
   while (leave_rack_list_get_count(lrl_to_add) > 0) {
-    LeaveRack *leave_rack_to_add = leave_rack_list_pop_rack(lrl_to_add);
+    const LeaveRack *leave_rack_to_add = leave_rack_list_pop_rack(lrl_to_add);
     leave_rack_list_insert_rack(leave_rack_get_leave(leave_rack_to_add),
                                 leave_rack_get_exchanged(leave_rack_to_add),
                                 leave_rack_get_draws(leave_rack_to_add),
@@ -512,7 +512,7 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
 }
 
 void verify_inference(const Inference *inference, ErrorStack *error_stack) {
-  Rack *bag_as_rack = inference->bag_as_rack;
+  const Rack *bag_as_rack = inference->bag_as_rack;
   for (int i = 0; i < inference->ld_size; i++) {
     if (rack_get_letter(bag_as_rack, i) < 0) {
       error_stack_push(

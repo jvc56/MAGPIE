@@ -112,7 +112,8 @@ void assert_opening_penalties(Game *game, const char *data_paths,
                               const char *layout, const char *rack_string,
                               int score, Equity equity) {
   load_game_with_test_board(game, data_paths, layout);
-  Player *player = game_get_player(game, game_get_player_on_turn_index(game));
+  const Player *player =
+      game_get_player(game, game_get_player_on_turn_index(game));
   Rack *player_rack = player_get_rack(player);
   MoveList *move_list = move_list_create(1);
   rack_set_to_string(game_get_ld(game), player_rack, rack_string);
@@ -123,7 +124,7 @@ void assert_opening_penalties(Game *game, const char *data_paths,
       .max_equity_diff = 0,
   };
   generate_moves_for_game(&move_gen_args);
-  Move *move = move_list_get_move(move_list, 0);
+  const Move *move = move_list_get_move(move_list, 0);
   assert_move_score(move, score);
   assert_move_equity_exact(move, equity);
   move_list_destroy(move_list);
@@ -133,7 +134,7 @@ void test_board_layout_correctness(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
-  Board *board = game_get_board(game);
+  const Board *board = game_get_board(game);
   const char *data_paths = config_get_data_paths(config);
 
   assert(board_get_anchor(board, 7, 7, BOARD_HORIZONTAL_DIRECTION));

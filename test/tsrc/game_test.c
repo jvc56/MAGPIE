@@ -184,8 +184,8 @@ void test_game_main(void) {
   Game *game = config_game_create(config);
   Rack *rack = rack_create(ld_get_size(ld));
 
-  Rack *player0_rack = player_get_rack(game_get_player(game, 0));
-  Rack *player1_rack = player_get_rack(game_get_player(game, 1));
+  const Rack *player0_rack = player_get_rack(game_get_player(game, 0));
+  const Rack *player1_rack = player_get_rack(game_get_player(game, 1));
 
   // Test Reset
   game_set_consecutive_scoreless_turns(game, 3);

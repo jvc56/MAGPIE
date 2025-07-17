@@ -32,13 +32,8 @@ void test_leaves(void) {
     log_fatal("failed to get leaves csv filepath for test\n");
   }
 
-  FILE *file = fopen(leaves_csv_filename, "r");
-  if (!file) {
-    log_fatal("Error opening file: %s\n", leaves_csv_filename);
-  }
-
+  FILE *file = fopen_or_die(leaves_csv_filename, "r");
   free(leaves_csv_filename);
-
   char line[100];
   while (fgets(line, sizeof(line), file)) {
     StringSplitter *leave_and_value = split_string(line, ',', true);

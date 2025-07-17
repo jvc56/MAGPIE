@@ -245,10 +245,6 @@ static inline int ld_get_total_tiles(const LetterDistribution *ld) {
   return ld->total_tiles;
 }
 
-static inline int ld_get_max_tile_length(const LetterDistribution *ld) {
-  return ld->max_tile_length;
-}
-
 // Returns:
 //  * the number of utf8 bytes for this code point for the first byte or
 //  * 0 for subsequent bytes in the code point or

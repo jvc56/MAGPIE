@@ -36,7 +36,7 @@ Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
 }
 
 // Assumes the move hasn't been played yet and is in the rack
-void get_leave_for_move(const Move *move, Game *game, Rack *leave) {
+void get_leave_for_move(const Move *move, const Game *game, Rack *leave) {
   rack_copy(leave, player_get_rack(game_get_player(
                        game, game_get_player_on_turn_index(game))));
   int tiles_length = move_get_tiles_length(move);
@@ -52,7 +52,7 @@ void get_leave_for_move(const Move *move, Game *game, Rack *leave) {
   }
 }
 
-void play_move_on_board(const Move *move, Game *game) {
+void play_move_on_board(const Move *move, const Game *game) {
   // PlaceMoveTiles
   Board *board = game_get_board(game);
   int row_start = move_get_row_start(move);
@@ -114,11 +114,12 @@ void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
       continue;
     }
 
-    Board *board = game_get_board(game);
-    bool kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
-    int right_col =
+    const Board *board = game_get_board(game);
+    const bool kwgs_are_shared =
+        game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
+    const int right_col =
         board_get_word_edge(board, row, col_start, WORD_DIRECTION_RIGHT);
-    int left_col =
+    const int left_col =
         board_get_word_edge(board, row, col_start, WORD_DIRECTION_LEFT);
     game_gen_cross_set(game, row, right_col + 1, csd, 0);
     game_gen_cross_set(game, row, left_col - 1, csd, 0);
@@ -165,7 +166,7 @@ void update_cross_set_for_move(const Move *move, Game *game) {
 }
 
 // Draws the required number of tiles to fill the rack to RACK_SIZE.
-void draw_to_full_rack(Game *game, int player_index) {
+void draw_to_full_rack(const Game *game, const int player_index) {
   Bag *bag = game_get_bag(game);
   Rack *player_rack = player_get_rack(game_get_player(game, player_index));
   const int player_draw_index = game_get_player_draw_index(game, player_index);
@@ -179,9 +180,11 @@ void draw_to_full_rack(Game *game, int player_index) {
 
 // Returns true if there are enough tiles in bag and player_rack
 // to draw rack_to_draw.
-bool rack_is_drawable(Game *game, int player_index, const Rack *rack_to_draw) {
-  Bag *bag = game_get_bag(game);
-  Rack *player_rack = player_get_rack(game_get_player(game, player_index));
+bool rack_is_drawable(const Game *game, const int player_index,
+                      const Rack *rack_to_draw) {
+  const Bag *bag = game_get_bag(game);
+  const Rack *player_rack =
+      player_get_rack(game_get_player(game, player_index));
   const uint16_t dist_size = rack_get_dist_size(player_rack);
   for (int i = 0; i < dist_size; i++) {
     if (bag_get_letter(bag, i) + rack_get_letter(player_rack, i) <
@@ -196,7 +199,7 @@ bool rack_is_drawable(Game *game, int player_index, const Rack *rack_to_draw) {
 // bag to the rack. Assumes the rack is empty.
 // Returns true on success.
 // Return false when the rack letters are not in the bag.
-bool draw_rack_from_bag(Game *game, int player_index,
+bool draw_rack_from_bag(const Game *game, const int player_index,
                         const Rack *rack_to_draw) {
   Bag *bag = game_get_bag(game);
   Rack *player_rack = player_get_rack(game_get_player(game, player_index));
@@ -236,7 +239,7 @@ void draw_leave_from_bag(Bag *bag, int player_draw_index, Rack *rack_to_update,
 // Returns number of letters drawn on success
 // Returns -1 if the string was malformed.
 // Returns -2 if the tiles were not in the bag.
-int draw_rack_string_from_bag(Game *game, int player_index,
+int draw_rack_string_from_bag(const Game *game, const int player_index,
                               const char *rack_string) {
   const LetterDistribution *ld = game_get_ld(game);
   Rack *player_rack_copy = rack_create(ld_get_size(ld));
@@ -256,7 +259,7 @@ int draw_rack_string_from_bag(Game *game, int player_index,
   return number_of_letters_set;
 }
 
-void return_rack_to_bag(Game *game, int player_index) {
+void return_rack_to_bag(const Game *game, const int player_index) {
   Bag *bag = game_get_bag(game);
   Rack *player_rack = player_get_rack(game_get_player(game, player_index));
   int player_draw_index = game_get_player_draw_index(game, player_index);
@@ -270,7 +273,8 @@ void return_rack_to_bag(Game *game, int player_index) {
   rack_reset(player_rack);
 }
 
-void set_random_rack(Game *game, int player_index, Rack *known_rack) {
+void set_random_rack(const Game *game, const int player_index,
+                     const Rack *known_rack) {
   return_rack_to_bag(game, player_index);
   if (known_rack) {
     draw_rack_from_bag(game, player_index, known_rack);
@@ -278,7 +282,7 @@ void set_random_rack(Game *game, int player_index, Rack *known_rack) {
   draw_to_full_rack(game, player_index);
 }
 
-void execute_exchange_move(const Move *move, Game *game, Rack *leave) {
+void execute_exchange_move(const Move *move, const Game *game, Rack *leave) {
   int player_on_turn_index = game_get_player_on_turn_index(game);
   Rack *player_on_turn_rack =
       player_get_rack(game_get_player(game, player_on_turn_index));
@@ -311,7 +315,7 @@ void standard_end_of_game_calculations(Game *game) {
   game_set_game_end_reason(game, GAME_END_REASON_STANDARD);
 }
 
-void draw_starting_racks(Game *game) {
+void draw_starting_racks(const Game *game) {
   draw_to_full_rack(game, 0);
   draw_to_full_rack(game, 1);
 }
@@ -330,7 +334,7 @@ play_move_status_t play_move(const Move *move, Game *game,
   const LetterDistribution *ld = game_get_ld(game);
   int player_on_turn_index = game_get_player_on_turn_index(game);
   Player *player_on_turn = game_get_player(game, player_on_turn_index);
-  Rack *player_on_turn_rack = player_get_rack(player_on_turn);
+  const Rack *player_on_turn_rack = player_get_rack(player_on_turn);
   if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     play_move_on_board(move, game);
     if (leave) {
@@ -386,7 +390,7 @@ void return_phony_tiles(Game *game) {
 // - move_sort_type (with the player on turn's sort type)
 // - overrride_kwg (with NULL)
 void generate_moves_for_game(const MoveGenArgs *args) {
-  Player *player_on_turn =
+  const Player *player_on_turn =
       game_get_player(args->game, game_get_player_on_turn_index(args->game));
 
   const MoveGenArgs args_with_overwritten_record_and_sort = {
@@ -414,12 +418,6 @@ Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
   };
   generate_moves(&args);
   return move_list_get_move(move_list, 0);
-}
-
-void draw_letter_to_rack(Bag *bag, Rack *rack, MachineLetter letter,
-                         int player_draw_index) {
-  bag_draw_letter(bag, letter, player_draw_index);
-  rack_add_letter(rack, letter);
 }
 
 bool moves_are_similar(const Move *m1, const Move *m2, int dist_size) {

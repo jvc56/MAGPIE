@@ -90,20 +90,6 @@ double stat_get_margin_of_error(const Stat *stat, double zval) {
   return zval * stat_get_sem(stat);
 }
 
-double stats_get_welch_t(const Stat *stat1, const Stat *stat2) {
-  double mean1 = stat_get_mean(stat1);
-  double mean2 = stat_get_mean(stat2);
-  double sem1 = stat_get_sem(stat1);
-  double sem2 = stat_get_sem(stat2);
-  return (mean1 - mean2) / sqrt(sem1 * sem1 + sem2 * sem2);
-}
-
-// Returns true if stat1 is greater than stat2
-// with a statistical significance of zval.
-bool stats_is_greater_than(const Stat *stat1, const Stat *stat2, double zval) {
-  return stats_get_welch_t(stat1, stat2) > zval;
-}
-
 void stats_combine(Stat **stats, int number_of_stats, Stat *combined_stat) {
   uint64_t combined_num_unique_samples = 0;
   uint64_t combined_num_samples = 0;

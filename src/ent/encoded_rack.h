@@ -154,9 +154,8 @@ static inline void rack_encode(const Rack *rack, EncodedRack *encoded_rack) {
 static inline void rack_decode(const EncodedRack *encoded_rack, Rack *rack) {
   rack_reset(rack);
   int bit_index = 0;
-  MachineLetter curr_ml = 0;
   while (true) {
-    curr_ml = encoded_rack_get_ml(encoded_rack, &bit_index);
+    MachineLetter curr_ml = encoded_rack_get_ml(encoded_rack, &bit_index);
     if (curr_ml == MAX_ALPHABET_SIZE) {
       break;
     }

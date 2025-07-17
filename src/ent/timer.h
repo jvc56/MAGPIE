@@ -37,11 +37,6 @@ static inline void mtimer_start(Timer *timer) {
   timer->is_running = true;
 }
 
-static inline void mtimer_stop(Timer *timer) {
-  clock_gettime(timer->clock_type, &timer->end_time);
-  timer->is_running = false;
-}
-
 static inline double mtimer_elapsed_seconds(const Timer *timer) {
   struct timespec finish_time;
   if (timer->is_running) {

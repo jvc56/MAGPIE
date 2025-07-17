@@ -17,7 +17,6 @@ double stat_get_variance(const Stat *stat);
 double stat_get_stdev(const Stat *stat);
 double stat_get_sem(const Stat *stat);
 double stat_get_margin_of_error(const Stat *stat, double zval);
-bool stats_is_greater_than(const Stat *stat1, const Stat *stat2, double zval);
 
 void stat_push(Stat *stat, double value, uint64_t num_samples);
 

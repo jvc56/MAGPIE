@@ -15,6 +15,6 @@ typedef struct ConversionArgs {
   const char *ld_name;
 } ConversionArgs;
 
-void convert(ConversionArgs *args, ConversionResults *conversion_results,
+void convert(const ConversionArgs *args, ConversionResults *conversion_results,
              ErrorStack *error_stack);
 #endif

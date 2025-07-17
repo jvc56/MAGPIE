@@ -22,8 +22,8 @@ void string_builder_add_leave_rack(StringBuilder *inference_string,
                                    const LetterDistribution *ld, int index,
                                    uint64_t total_draws) {
 
-  Rack *leave_rack_leave = leave_rack_get_leave(leave_rack);
-  Rack *leave_rack_exchanged = leave_rack_get_exchanged(leave_rack);
+  const Rack *leave_rack_leave = leave_rack_get_leave(leave_rack);
+  const Rack *leave_rack_exchanged = leave_rack_get_exchanged(leave_rack);
   int leave_rack_draws = leave_rack_get_draws(leave_rack);
   double leave_rack_equity = leave_rack_get_equity(leave_rack);
 
@@ -49,7 +49,7 @@ void string_builder_add_letter_minimum(
     const Rack *bag_as_rack, MachineLetter letter, int minimum,
     int number_of_tiles_played_or_exchanged) {
 
-  Stat *equity_values = inference_results_get_equity_values(
+  const Stat *equity_values = inference_results_get_equity_values(
       inference_results, inference_stat_type);
 
   int draw_subtotal = inference_results_get_subtotal_sum_with_minimum(
@@ -96,7 +96,7 @@ void string_builder_add_inference_type(
     const Rack *rack, const Rack *bag_as_rack, Stat *letter_stat,
     int number_of_tiles_played_or_exchanged) {
 
-  Stat *equity_values = inference_results_get_equity_values(
+  const Stat *equity_values = inference_results_get_equity_values(
       inference_results, inference_stat_type);
 
   uint64_t total_draws = stat_get_num_samples(equity_values);
@@ -175,7 +175,7 @@ void string_builder_add_inference(StringBuilder *inference_string,
       inference_string, "\nScore:                 %d\n",
       inference_results_get_target_score(inference_results));
 
-  Rack *target_unplayed_tiles =
+  const Rack *target_unplayed_tiles =
       inference_results_get_target_known_unplayed_tiles(inference_results);
   if (rack_get_total_letters(target_unplayed_tiles) > 0) {
     string_builder_add_string(inference_string, "Partial Rack:          ");
@@ -190,7 +190,8 @@ void string_builder_add_inference(StringBuilder *inference_string,
   // Create a transient stat to use the stat functions
   Stat *letter_stat = stat_create(false);
 
-  Rack *bag_as_rack = inference_results_get_bag_as_rack(inference_results);
+  const Rack *bag_as_rack =
+      inference_results_get_bag_as_rack(inference_results);
 
   string_builder_add_inference_type(
       inference_string, inference_results, INFERENCE_TYPE_LEAVE, ld,
@@ -258,8 +259,8 @@ void string_builder_add_ucgi_leave_rack(StringBuilder *ucgi_string_builder,
                                         const LetterDistribution *ld, int index,
                                         uint64_t total_draws,
                                         bool is_exchange) {
-  Rack *leave_rack_leave = leave_rack_get_leave(leave_rack);
-  Rack *leave_rack_exchanged = leave_rack_get_exchanged(leave_rack);
+  const Rack *leave_rack_leave = leave_rack_get_leave(leave_rack);
+  const Rack *leave_rack_exchanged = leave_rack_get_exchanged(leave_rack);
   const int draws = leave_rack_get_draws(leave_rack);
   const double equity = equity_to_double(leave_rack_get_equity(leave_rack));
   if (!is_exchange) {
@@ -331,7 +332,7 @@ void string_builder_ucgi_add_inference_record(
     StringBuilder *ucgi_string_builder, Stat *letter_stat,
     int number_of_tiles_played_or_exchanged,
     const char *inference_record_type) {
-  Stat *equity_values = inference_results_get_equity_values(
+  const Stat *equity_values = inference_results_get_equity_values(
       inference_results, inference_stat_type);
 
   uint64_t total_draws = stat_get_num_samples(equity_values);
@@ -399,8 +400,9 @@ void print_ucgi_inference(const LetterDistribution *ld,
   // Get the list of most common leaves
   const LeaveRackList *leave_rack_list =
       inference_results_get_leave_rack_list(inference_results);
-  int number_of_common_leaves = leave_rack_list_get_count(leave_rack_list);
-  Stat *common_leave_equity_values = inference_results_get_equity_values(
+  const int number_of_common_leaves =
+      leave_rack_list_get_count(leave_rack_list);
+  const Stat *common_leave_equity_values = inference_results_get_equity_values(
       inference_results, common_leaves_type);
   for (int common_leave_index = 0; common_leave_index < number_of_common_leaves;
        common_leave_index++) {

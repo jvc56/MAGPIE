@@ -48,8 +48,8 @@ uint64_t inference_results_get_subtotal_sum_with_minimum(
     const InferenceResults *results, inference_stat_t inference_stat_type,
     MachineLetter letter, int minimum_number_of_letters,
     int subtotal_index_offset);
-LeaveRackList *
-inference_results_get_leave_rack_list(InferenceResults *inference_results);
+LeaveRackList *inference_results_get_leave_rack_list(
+    const InferenceResults *inference_results);
 void inference_results_add_subtotals(InferenceResults *result_being_added,
                                      InferenceResults *result_being_updated);
 void inference_results_set_stat_for_letter(InferenceResults *inference_results,

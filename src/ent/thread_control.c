@@ -75,16 +75,6 @@ void thread_control_set_print_info_interval(ThreadControl *thread_control,
   thread_control->print_info_interval = print_info_interval;
 }
 
-uint64_t
-thread_control_get_max_iter_count(const ThreadControl *thread_control) {
-  return thread_control->max_iter_count;
-}
-
-void thread_control_increment_max_iter_count(ThreadControl *thread_control,
-                                             uint64_t inc) {
-  thread_control->max_iter_count += inc;
-}
-
 exit_status_t thread_control_get_exit_status(ThreadControl *thread_control) {
   exit_status_t exit_status;
   pthread_mutex_lock(&thread_control->exit_status_mutex);
@@ -223,20 +213,6 @@ void thread_control_complete_iter(
   pthread_mutex_unlock(&thread_control->iter_completed_mutex);
 }
 
-// NOT THREAD SAFE: This function is meant to be called
-// before or after a multithreaded operation. Do not call this in a
-// multithreaded context as it is intentionally not thread safe.
-void thread_control_start_timer(ThreadControl *thread_control) {
-  mtimer_start(thread_control->timer);
-}
-
-// NOT THREAD SAFE: This function is meant to be called
-// before or after a multithreaded operation. Do not call this in a
-// multithreaded context as it is intentionally not thread safe.
-void thread_control_stop_timer(ThreadControl *thread_control) {
-  mtimer_stop(thread_control->timer);
-}
-
 double thread_control_get_seconds_elapsed(const ThreadControl *thread_control) {
   return mtimer_elapsed_seconds(thread_control->timer);
 }
@@ -260,7 +236,7 @@ void thread_control_increment_seed(ThreadControl *thread_control) {
 // NOT THREAD SAFE: This function is meant to be called
 // before or after a multithreaded operation. Do not call this in a
 // multithreaded context as it is intentionally not thread safe.
-uint64_t thread_control_get_seed(ThreadControl *thread_control) {
+uint64_t thread_control_get_seed(const ThreadControl *thread_control) {
   return thread_control->seed;
 }
 

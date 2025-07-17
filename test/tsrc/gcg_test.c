@@ -279,7 +279,8 @@ void assert_game_event(const GameHistory *game_history, int event_index,
                        int tiles_played, int tiles_length,
                        const char *tiles_string, int score_adjustment,
                        const LetterDistribution *ld) {
-  GameEvent *game_event = game_history_get_event(game_history, event_index);
+  const GameEvent *game_event =
+      game_history_get_event(game_history, event_index);
   int ld_size = ld_get_size(ld);
   // Game Event assertions
   assert(game_event_get_type(game_event) == event_type);

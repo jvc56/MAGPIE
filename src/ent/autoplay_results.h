@@ -26,7 +26,6 @@ autoplay_results_create_empty_copy(const AutoplayResults *orig);
 void autoplay_results_set_options(AutoplayResults *autoplay_results,
                                   const char *options_str,
                                   ErrorStack *error_stack);
-void autoplay_results_reset_options(AutoplayResults *autoplay_results);
 void autoplay_results_destroy(AutoplayResults *autoplay_results);
 void autoplay_results_reset(AutoplayResults *autoplay_results);
 void autoplay_results_add_move(AutoplayResults *autoplay_results,

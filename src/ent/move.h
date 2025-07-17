@@ -236,16 +236,6 @@ static inline Move *move_list_get_move(const MoveList *ml, int move_index) {
   return ml->moves[move_index];
 }
 
-static inline void move_list_set_spare_move(MoveList *ml, MachineLetter strip[],
-                                            int leftstrip, int rightstrip,
-                                            Equity score, int row_start,
-                                            int col_start, int tiles_played,
-                                            int dir, game_event_t move_type) {
-  move_set_all_except_equity(ml->spare_move, strip, leftstrip, rightstrip,
-                             score, row_start, col_start, tiles_played, dir,
-                             move_type);
-}
-
 static inline SmallMove *small_move_list_get_spare_move(const MoveList *ml) {
   return ml->spare_small_move;
 }
@@ -598,7 +588,7 @@ static inline void move_list_resize(MoveList *ml, int new_capacity) {
   }
 }
 
-static inline bool move_list_move_exists(MoveList *ml, const Move *m) {
+static inline bool move_list_move_exists(const MoveList *ml, const Move *m) {
   for (int i = 0; i < ml->count; i++) {
     if (compare_moves(ml->moves[i], m, true) == -1) {
       return true;

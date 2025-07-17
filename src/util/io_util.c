@@ -258,7 +258,7 @@ void error_stack_push(ErrorStack *error_stack, error_code_t error_code,
   error_stack->size++;
 }
 
-bool error_stack_is_empty(ErrorStack *error_stack) {
+bool error_stack_is_empty(const ErrorStack *error_stack) {
   return error_stack->size == 0;
 }
 

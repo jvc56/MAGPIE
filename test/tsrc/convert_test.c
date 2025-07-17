@@ -9,7 +9,8 @@
 #include "test_constants.h"
 #include "test_util.h"
 
-void convert_and_assert_status(ConversionArgs *args, ConversionResults *results,
+void convert_and_assert_status(const ConversionArgs *args,
+                               ConversionResults *results,
                                error_code_t expected_status) {
   ErrorStack *error_stack = error_stack_create();
   convert(args, results, error_stack);
@@ -84,7 +85,7 @@ void test_convert_success(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   ValidatedMoves *vms;
-  Game *game;
+  const Game *game;
 
   load_and_exec_config_or_die(config, "convert text2dawg CSW21_dawg_only");
   load_and_exec_config_or_die(config, "set -lex CSW21_dawg_only");

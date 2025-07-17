@@ -56,6 +56,7 @@ void klv_add_leave_to_word_list(void *data,
       word[letter_index++] = i;
     }
   }
+  // cppcheck-suppress uninitvar
   dictionary_word_list_add_word(klv_data->dwl, word, letter_index);
 }
 
@@ -173,7 +174,7 @@ KLV *klv_create_empty(const LetterDistribution *ld, const char *name) {
 
 // Reads a CSV file of leave,value and returns a KLV.
 void klv_read_from_csv_internal(const LetterDistribution *ld,
-                                FILE *leaves_stream, KLV *klv,
+                                FILE *leaves_stream, const KLV *klv,
                                 bool *leave_was_set,
                                 const char *leaves_filename,
                                 ErrorStack *error_stack) {

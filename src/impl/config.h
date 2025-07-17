@@ -25,7 +25,6 @@
 typedef struct Config Config;
 
 // Constructors and Destructors
-Config *config_create_default(ErrorStack *error_stack);
 Config *config_create_default_with_data_paths(ErrorStack *error_stack,
                                               const char *data_paths);
 void config_destroy(Config *config);

@@ -65,7 +65,7 @@ BoardRows *board_rows_create(const Game *game) {
 void board_rows_destroy(BoardRows *board_rows) { free(board_rows); }
 
 // max consecutive empty spaces not touching a tile
-int max_nonplaythrough_spaces_in_row(BoardRow *board_row) {
+int max_nonplaythrough_spaces_in_row(const BoardRow *board_row) {
   int max_empty_spaces = 0;
   int empty_spaces = 0;
   for (int i = 0; i < BOARD_DIM; i++) {
@@ -91,7 +91,8 @@ int max_nonplaythrough_spaces_in_row(BoardRow *board_row) {
 }
 
 void add_playthrough_word(DictionaryWordList *possible_word_list,
-                          MachineLetter *strip, int leftstrip, int rightstrip) {
+                          const MachineLetter *strip, int leftstrip,
+                          int rightstrip) {
   const int word_length = rightstrip - leftstrip + 1;
   dictionary_word_list_add_word(possible_word_list, strip + leftstrip,
                                 word_length);
@@ -329,18 +330,20 @@ void generate_possible_words(const Game *game, const KWG *override_kwg,
   DictionaryWordList *temp_list = dictionary_word_list_create();
 
   const int ld_size = ld_get_size(game_get_ld(game));
-  Rack *unplayed_as_rack = rack_create(ld_size);
-  Bag *bag = game_get_bag(game);
+  Rack unplayed_as_rack;
+  rack_set_dist_size(&unplayed_as_rack, ld_size);
+  rack_reset(&unplayed_as_rack);
+  const Bag *bag = game_get_bag(game);
   for (int i = 0; i < ld_size; i++) {
     for (int j = 0; j < bag_get_letter(bag, i); j++) {
-      rack_add_letter(unplayed_as_rack, i);
+      rack_add_letter(&unplayed_as_rack, i);
     }
     // Add tiles from players' racks
     for (int player_index = 0; player_index < 2; player_index++) {
       const Player *player = game_get_player(game, player_index);
       const Rack *rack = player_get_rack(player);
       for (int j = 0; j < rack_get_letter(rack, i); j++) {
-        rack_add_letter(unplayed_as_rack, i);
+        rack_add_letter(&unplayed_as_rack, i);
       }
     }
   }
@@ -359,14 +362,13 @@ void generate_possible_words(const Game *game, const KWG *override_kwg,
 
   MachineLetter word[BOARD_DIM];
   add_words_without_playthrough(kwg, kwg_get_dawg_root_node_index(kwg),
-                                unplayed_as_rack, max_nonplaythrough_spaces,
+                                &unplayed_as_rack, max_nonplaythrough_spaces,
                                 word, 0, false, temp_list);
   for (int i = 0; i < board_rows->num_rows; i++) {
-    add_playthrough_words_from_row(&board_rows->rows[i], kwg, unplayed_as_rack,
+    add_playthrough_words_from_row(&board_rows->rows[i], kwg, &unplayed_as_rack,
                                    temp_list);
   }
 
-  rack_destroy(unplayed_as_rack);
   board_rows_destroy(board_rows);
 
   dictionary_word_list_sort(temp_list);

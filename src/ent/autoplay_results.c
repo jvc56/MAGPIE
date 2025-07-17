@@ -1191,10 +1191,6 @@ void autoplay_results_set_options(AutoplayResults *autoplay_results,
   string_splitter_destroy(split_options);
 }
 
-void autoplay_results_reset_options(AutoplayResults *autoplay_results) {
-  autoplay_results_set_options_int(autoplay_results, 0, NULL);
-}
-
 RecorderContext *create_recorder_context(void) {
   RecorderContext *recorder_context = malloc_or_die(sizeof(RecorderContext));
   recorder_context->write_buffer_size = DEFAULT_WRITE_BUFFER_SIZE;

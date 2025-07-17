@@ -41,6 +41,8 @@
 char *command_search_status(Config *config, bool should_exit) {
   if (!config) {
     log_fatal("config is unexpectedly null");
+    // unreached, but to silence static analyzer warnings
+    return NULL;
   }
 
   ThreadControl *thread_control = config_get_thread_control(config);

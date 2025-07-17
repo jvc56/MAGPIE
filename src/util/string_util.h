@@ -24,8 +24,6 @@ void string_builder_add_table_row(StringBuilder *string_builder,
 void string_builder_add_spaces(StringBuilder *string_builder,
                                int number_of_spaces);
 void string_builder_add_int(StringBuilder *string_builder, int64_t n);
-void string_builder_add_uint(StringBuilder *string_builder, uint64_t n);
-void string_builder_add_double(StringBuilder *string_builder, double val);
 void string_builder_add_char(StringBuilder *string_builder, char c);
 void string_builder_clear(StringBuilder *string_builder);
 size_t string_builder_length(const StringBuilder *string_builder);
@@ -64,16 +62,12 @@ void string_list_destroy(StringList *string_list);
 // Boolean string functions
 bool has_prefix(const char *pre, const char *str);
 bool has_iprefix(const char *pre, const char *str);
-bool has_suffix(const char *str, const char *suffix);
-bool has_isuffix(const char *str, const char *suffix);
-bool string_contains(const char *str, char ch);
 bool is_string_empty_or_whitespace(const char *str);
 bool is_string_empty_or_null(const char *str);
 bool strings_equal(const char *str1, const char *str2);
 bool strings_iequal(const char *str1, const char *str2);
 bool is_all_digits_or_empty(const char *str);
 bool has_substring(const char *str, const char *pattern);
-bool is_decimal_number(const char *str);
 size_t string_length(const char *str);
 
 // Malloc'ing string functions
@@ -90,7 +84,6 @@ char *insert_before_dot(const char *str, const char *insert);
 const char *get_base_filename(const char *filepath);
 
 // Inplace string functions
-void remove_first_newline(char *str);
 void trim_whitespace(char *str);
 void trim_char(char *str, const char c);
 

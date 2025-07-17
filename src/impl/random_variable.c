@@ -162,6 +162,7 @@ double rv_normal_sample(RandomVariables *rvs, const uint64_t k,
   }
   s = sqrt(-2.0 * log(s) / s);
   return rv_normal->means_and_vars[k * 2] +
+         // cppcheck-suppress uninitvar
          rv_normal->means_and_vars[k * 2 + 1] * u * s;
 }
 
@@ -337,13 +338,14 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
 bool simmer_plays_are_similar(const Simmer *simmer,
                               const int current_best_play_index,
                               const int other_play_index) {
-  SimResults *sim_results = simmer->sim_results;
-  SimmedPlay *m1 =
+  const SimResults *sim_results = simmer->sim_results;
+  const SimmedPlay *m1 =
       sim_results_get_simmed_play(sim_results, current_best_play_index);
-  SimmedPlay *m2 = sim_results_get_simmed_play(sim_results, other_play_index);
+  const SimmedPlay *m2 =
+      sim_results_get_simmed_play(sim_results, other_play_index);
 
-  Move *m1_move = simmed_play_get_move(m1);
-  Move *m2_move = simmed_play_get_move(m2);
+  const Move *m1_move = simmed_play_get_move(m1);
+  const Move *m2_move = simmed_play_get_move(m2);
 
   return moves_are_similar(m1_move, m2_move, simmer->dist_size);
 }
@@ -380,8 +382,8 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   // further plies will NOT be backed up.
   Rack spare_rack;
   for (int ply = 0; ply < plies; ply++) {
-    int player_on_turn_index = game_get_player_on_turn_index(game);
-    Player *player_on_turn = game_get_player(game, player_on_turn_index);
+    const int player_on_turn_index = game_get_player_on_turn_index(game);
+    const Player *player_on_turn = game_get_player(game, player_on_turn_index);
 
     if (game_over(game)) {
       break;
@@ -438,7 +440,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
 
 bool rv_sim_mark_as_epigon_if_similar(RandomVariables *rvs, const int leader,
                                       const int i) {
-  Simmer *simmer = (Simmer *)rvs->data;
+  const Simmer *simmer = (Simmer *)rvs->data;
   const bool plays_are_similar = simmer_plays_are_similar(simmer, leader, i);
   if (plays_are_similar) {
     simmed_play_set_is_epigon(
@@ -477,14 +479,15 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   ThreadControl *thread_control = sim_args->thread_control;
 
   simmer->initial_player = game_get_player_on_turn_index(sim_args->game);
-  Player *player = game_get_player(sim_args->game, simmer->initial_player);
-  Player *opponent =
+  const Player *player =
+      game_get_player(sim_args->game, simmer->initial_player);
+  const Player *opponent =
       game_get_player(sim_args->game, 1 - simmer->initial_player);
 
   simmer->initial_spread =
       player_get_score(player) - player_get_score(opponent);
 
-  Rack *known_opp_rack = sim_args->known_opp_rack;
+  const Rack *known_opp_rack = sim_args->known_opp_rack;
   if (known_opp_rack && !rack_is_empty(known_opp_rack)) {
     simmer->known_opp_rack = rack_duplicate(known_opp_rack);
   } else {

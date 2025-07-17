@@ -16,7 +16,7 @@
 #include "test_constants.h"
 #include "test_util.h"
 
-void load_and_shadow(Game *game, Player *player, const char *cgp,
+void load_and_shadow(Game *game, const Player *player, const char *cgp,
                      const char *rack, AnchorHeap *sorted_anchors) {
   const LetterDistribution *ld = game_get_ld(game);
   Rack *player_rack = player_get_rack(player);
@@ -34,8 +34,9 @@ void load_and_shadow(Game *game, Player *player, const char *cgp,
   }
 }
 
-void load_and_generate_moves(Game *game, MoveList *move_list, Player *player,
-                             const char *cgp, const char *rack) {
+void load_and_generate_moves(Game *game, MoveList *move_list,
+                             const Player *player, const char *cgp,
+                             const char *rack) {
   const LetterDistribution *ld = game_get_ld(game);
   Rack *player_rack = player_get_rack(player);
   const MoveGenArgs move_gen_args = {
@@ -455,7 +456,7 @@ void test_shadow_score(void) {
   assert_anchor_equity_int(&anchor_list, 0, 1836);
 
   game_reset(game);
-  char qi_qis[300] =
+  const char qi_qis[300] =
       "15/15/15/15/15/15/15/6QI7/6I8/6S8/15/15/15/15/15 FRUITED/EGGCUPS 22/12 "
       "0 lex CSW21";
   load_and_shadow(game, player, qi_qis, "FRUITED", &anchor_list);
@@ -486,7 +487,7 @@ void test_shadow_score(void) {
   assert(anchor_list.anchors[2].dir == BOARD_VERTICAL_DIRECTION);
 
   game_reset(game);
-  char shuttled_ravioli[300] =
+  const char shuttled_ravioli[300] =
       "14Z/5V7NA/5R4P2AN/5O1N1ARGUFY/5TOO2I2F1/4T1COWKS2E1/2REE1UN2A2R1/"
       "1RAVIoLI2G3Q/1EXON1IN2E1P1A/1C1L3GEM2AHI/BEMUD2SHUTTlED/1D1E8AI1/"
       "YET9IS1/ODA9ST1/W1JOLLER7 BII/EO 477/388 0 lex CSW21";
@@ -514,7 +515,7 @@ void test_shadow_score(void) {
   assert_anchor_equity_int(&anchor_list, 5, 14);
 
   game_reset(game);
-  char toeless[300] =
+  const char toeless[300] =
       "15/15/15/15/15/15/5Q2J6/5UVAE6/5I2U6/5Z9/15/15/15/15/15 TOELESS/EEGIPRW "
       "42/38 0 lex CSW21";
   load_and_shadow(game, player, toeless, "TOELESS", &anchor_list);
@@ -522,7 +523,7 @@ void test_shadow_score(void) {
   assert_anchor_equity_int(&anchor_list, 0, 86);
 
   game_reset(game);
-  char addle[300] =
+  const char addle[300] =
       "5E1p7/1A1C1G1E5S1/1JIZ1G1R3V1P1/HO1APE1A3U1I1/OW1RAD1EXFIL1T1/"
       "MA2W2OI2G1T1/IN2K2N2MOBE1/E2FYRDS2o1ANS/3O6V1N1H/3U6ADD1E/3S6BOO1E/"
       "3T6LOR1L/INCITANT1AYRE2/3E5U5/3REQUITE5 L/I 467/473 0 lex CSW21";
@@ -547,7 +548,7 @@ void test_shadow_score(void) {
   assert_anchor_equity_int(&anchor_list, 5, 9);
 
   game_reset(game);
-  char magpies[300] =
+  const char magpies[300] =
       "15/15/15/15/15/15/15/MAGPIE2LUMBAGO/15/15/15/15/15/15/15 SS/Q "
       "0/0 0 lex CSW21";
   load_and_shadow(game, player, magpies, "SS", &anchor_list);
@@ -596,7 +597,7 @@ void test_shadow_wmp_playthrough_bingo_existence(void) {
   Player *player = game_get_player(game, 0);
 
   player_set_move_sort_type(player, MOVE_SORT_SCORE);
-  char qi_qis[300] =
+  const char qi_qis[300] =
       "15/15/15/15/15/15/15/6QI7/6I8/6S8/15/15/15/15/15 FRUITED/EGGCUPS 22/12 "
       "0 lex CSW21";
 

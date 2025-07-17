@@ -1,5 +1,6 @@
 #include "string_util.h"
 
+#include <assert.h>
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -115,14 +116,6 @@ void string_builder_add_spaces(StringBuilder *string_builder,
 
 void string_builder_add_int(StringBuilder *string_builder, int64_t n) {
   string_builder_add_formatted_string(string_builder, "%d", n);
-}
-
-void string_builder_add_uint(StringBuilder *string_builder, uint64_t n) {
-  string_builder_add_formatted_string(string_builder, "%lu", n);
-}
-
-void string_builder_add_double(StringBuilder *string_builder, double val) {
-  string_builder_add_formatted_string(string_builder, "%0.2f", val);
 }
 
 void string_builder_add_char(StringBuilder *string_builder, char c) {
@@ -321,8 +314,8 @@ int split_string_scan(const StringDelimiter *string_delimiter,
 }
 
 StringSplitter *split_string_internal(const char *input_string,
-                                      StringDelimiter *string_delimiter,
-                                      bool ignore_empty) {
+                                      const StringDelimiter *string_delimiter,
+                                      const bool ignore_empty) {
 
   int number_of_items = split_string_scan(string_delimiter, NULL, input_string,
                                           ignore_empty, false);
@@ -450,51 +443,12 @@ bool has_iprefix(const char *pre, const char *str) {
   return strncasecmp(pre, str, string_length(pre)) == 0;
 }
 
-bool has_suffix(const char *str, const char *suffix) {
-  if (!str || !suffix) {
-    return false;
-  }
-  size_t str_len = strlen(str);
-  size_t suffix_len = strlen(suffix);
-  if (suffix_len > str_len) {
-    return false;
-  }
-  return strncmp(str + str_len - suffix_len, suffix, suffix_len) == 0;
-}
-
-bool has_isuffix(const char *str, const char *suffix) {
-  if (!str || !suffix) {
-    return false;
-  }
-  size_t str_len = strlen(str);
-  size_t suffix_len = strlen(suffix);
-  if (suffix_len > str_len) {
-    return false;
-  }
-  return strncasecmp(str + str_len - suffix_len, suffix, suffix_len) == 0;
-}
-
-bool string_contains(const char *str, char ch) {
-  if (!str) {
-    return false;
-  }
-
-  // Iterate through the string to check for the character
-  while (*str) {
-    if (*str == ch) {
-      return true;
-    }
-    str++;
-  }
-
-  return false;
-}
-
 // Raises a fatal error if str is null
 bool is_string_empty_or_whitespace(const char *str) {
   if (!str) {
     log_fatal("unexpected null string when checking for whitespace or empty");
   }
+  // cppcheck-suppress nullPointerRedundantCheck
   while (*str != '\0') {
     if (!isspace((unsigned char)*str)) {
       return false;
@@ -554,36 +508,11 @@ bool has_substring(const char *str, const char *pattern) {
   return (ptr != NULL);
 }
 
-bool is_decimal_number(const char *str) {
-  if (!str || *str == '\0') {
-    return false; // Empty string is not a valid decimal number
-  }
-
-  int i = 0;
-  bool has_decimal_point = false;
-
-  if (str[i] == '\0') {
-    return false; // No digits in the string
-  }
-
-  while (str[i] != '\0') {
-    if (isdigit(str[i])) {
-      i++;
-    } else if (str[i] == '.' && !has_decimal_point) {
-      has_decimal_point = true;
-      i++;
-    } else {
-      return false; // Invalid character in the string
-    }
-  }
-
-  return true;
-}
-
 size_t string_length(const char *str) {
   if (!str) {
     log_fatal("cannot get the length of a null string");
   }
+  // cppcheck-suppress nullPointerRedundantCheck
   return strlen(str);
 }
 
@@ -592,6 +521,7 @@ char *string_duplicate(const char *str) {
     log_fatal("cannot duplicate null string");
   }
 
+  // cppcheck-suppress nullPointerRedundantCheck
   char *duplicate = strdup(str);
 
   if (!duplicate) {
@@ -663,10 +593,7 @@ char *iso_8859_1_to_utf8(const char *iso_8859_1_string) {
 char *get_dirpath_from_filepath(const char *filepath) {
   // Make a copy of the input filepath because strtok modifies the string
   char *filepath_copy = string_duplicate(filepath);
-  if (filepath_copy == NULL) {
-    log_fatal("failed to duplicate string: %s", filepath);
-  }
-
+  assert(filepath_copy);
   // Find the last occurrence of the '/' or '\' character
   char *last_slash = strrchr(filepath_copy, '/');
   char *last_backslash = strrchr(filepath_copy, '\\');
@@ -690,7 +617,7 @@ char *get_dirpath_from_filepath(const char *filepath) {
 }
 
 char *cut_off_after_last_char(const char *str, char ch) {
-  char *pos = strrchr(str, ch);
+  const char *pos = strrchr(str, ch);
 
   if (pos == NULL) {
     return string_duplicate(str);
@@ -707,7 +634,7 @@ char *cut_off_after_last_char(const char *str, char ch) {
 }
 
 char *cut_off_after_first_char(const char *str, char ch) {
-  char *pos = strchr(str, ch);
+  const char *pos = strchr(str, ch);
 
   if (pos == NULL) {
     return string_duplicate(str);
@@ -804,8 +731,6 @@ void trim_internal(char *str, const char c, bool trim_whitespace) {
 void trim_whitespace(char *str) { trim_internal(str, 0, true); }
 
 void trim_char(char *str, const char c) { trim_internal(str, c, false); }
-
-void remove_first_newline(char *str) { str[strcspn(str, "\n")] = 0; }
 
 int string_to_int(const char *str, ErrorStack *error_stack) {
   const char *str_copy = str;

@@ -35,10 +35,10 @@ void test_vs_joey(void) {
       config_get_thread_control(config), config_get_game(config),
       config_get_tt_fraction_of_mem(config));
 
-  Player *p1 = game_get_player(config_get_game(config), 0);
-  Rack *r1 = player_get_rack(p1);
-  Player *p2 = game_get_player(config_get_game(config), 1);
-  Rack *r2 = player_get_rack(p2);
+  const Player *p1 = game_get_player(config_get_game(config), 0);
+  const Rack *r1 = player_get_rack(p1);
+  const Player *p2 = game_get_player(config_get_game(config), 1);
+  const Rack *r2 = player_get_rack(p2);
 
   log_warn("Rack1: %d", rack_get_total_letters(r1));
   log_warn("Rack2: %d", rack_get_total_letters(r2));

@@ -301,7 +301,7 @@ void players_data_set(PlayersData *players_data,
   // Possibly destroy existing data
   // and set new data
   for (int player_index = 0; player_index < 2; player_index++) {
-    void *existing_data =
+    const void *existing_data =
         players_data_get_data(players_data, players_data_type, player_index);
     if (existing_data != data_pointers[0] &&
         existing_data != data_pointers[1] &&

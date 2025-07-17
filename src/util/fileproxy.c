@@ -37,7 +37,8 @@ FILE *stream_from_filename(const char *filename, ErrorStack *error_stack) {
   return stream;
 }
 
-void precache_file_data(const char *filename, char *raw_data, int num_bytes) {
+void precache_file_data(const char *filename, const char *raw_data,
+                        const int num_bytes) {
   char *data_copy = malloc_or_die(sizeof(char) * num_bytes);
   memcpy(data_copy, raw_data, num_bytes);
 

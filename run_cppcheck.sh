@@ -69,6 +69,8 @@ echo "Running cppcheck analysis on src/, test/, and cmd/ directories..."
     --verbose \
     --inline-suppr \
     --suppress=missingIncludeSystem \
+    --suppress=staticFunction \
+    --suppress=constParameterCallback \
     --std=c99 \
     --error-exitcode=1 \
     -U_WIN32 \

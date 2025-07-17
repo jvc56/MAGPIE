@@ -12,14 +12,7 @@
 
 #include "test_util.h"
 
-void print_word_index_for_rack(const KLV *klv, const LetterDistribution *ld,
-                               Rack *rack, const char *rack_str) {
-  rack_set_to_string(ld, rack, rack_str);
-  const int word_index = klv_get_word_index(klv, rack);
-  printf("leave index and word count for >%s<: %d\n", rack_str, word_index);
-}
-
-void set_klv_leave_value(KLV *klv, const LetterDistribution *ld,
+void set_klv_leave_value(const KLV *klv, const LetterDistribution *ld,
                          const char *rack_str, double value) {
   Rack *rack = rack_create(ld_get_size(ld));
   rack_set_to_string(ld, rack, rack_str);

@@ -543,7 +543,7 @@ void test_config_wmp(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const PlayersData *players_data = config_get_players_data(config);
   WMP *wmp1 = NULL;
-  WMP *wmp2 = NULL;
+  const WMP *wmp2 = NULL;
   const char *invalid_wmp_name = "invalid wmp name";
 
   // Players start off with no wmp

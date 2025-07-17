@@ -46,12 +46,12 @@ void assert_racks_equal(const LetterDistribution *ld, const Rack *r1,
                         const Rack *r2);
 void assert_rack_equals_string(const LetterDistribution *ld, const Rack *r1,
                                const char *r2_str);
-void assert_move(Game *game, MoveList *move_list, const SortedMoveList *sml,
-                 int move_index, const char *expected_move_string);
-void clear_bag(Bag *bag);
+void assert_move(const Game *game, const MoveList *move_list,
+                 const SortedMoveList *sml, int move_index,
+                 const char *expected_move_string);
 void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size);
 void assert_boards_are_equal(Board *b1, Board *b2);
-void assert_games_are_equal(Game *g1, Game *g2, bool check_scores);
+void assert_games_are_equal(const Game *g1, const Game *g2, bool check_scores);
 void print_game(const Game *game, const MoveList *move_list);
 void print_cgp(const Game *game);
 void print_english_rack(const Rack *rack);
@@ -65,8 +65,6 @@ bool load_and_exec_config_or_die_timed(Config *config, const char *cmd,
                                        int seconds);
 char *get_test_filename(const char *filename);
 void delete_file(const char *filename);
-void reset_file(const char *filename);
-void fifo_create(const char *fifo_name);
 void delete_fifo(const char *fifo_name);
 Config *config_create_or_die(const char *cmd);
 Config *config_create_default_test(void);
@@ -79,7 +77,7 @@ KLV *klv_read_from_csv_or_die(const LetterDistribution *ld,
 void klv_write_to_csv_or_die(KLV *klv, const LetterDistribution *ld,
                              const char *data_paths, const char *csv_name);
 char *get_string_from_file_or_die(const char *filename);
-void set_row(Game *game, int row, const char *row_content);
+void set_row(const Game *game, const int row, const char *row_content);
 void assert_board_layout_error(const char *data_paths,
                                const char *board_layout_filename,
                                error_code_t expected_status);
@@ -119,7 +117,8 @@ void assert_word_count(const LetterDistribution *ld,
 BitRack string_to_bit_rack(const LetterDistribution *ld,
                            const char *rack_string);
 
-void assert_word_in_buffer(MachineLetter *buffer, const char *expected_word,
+void assert_word_in_buffer(const MachineLetter *buffer,
+                           const char *expected_word,
                            const LetterDistribution *ld, int word_idx,
                            int length);
 

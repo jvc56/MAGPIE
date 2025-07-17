@@ -630,8 +630,8 @@ void test_validated_move_distinct_kwg(void) {
       .max_equity_diff = 0,
   };
 
-  Player *player0 = game_get_player(game, 0);
-  Player *player1 = game_get_player(game, 1);
+  const Player *player0 = game_get_player(game, 0);
+  const Player *player1 = game_get_player(game, 1);
   Rack *player0_rack = player_get_rack(player0);
   Rack *player1_rack = player_get_rack(player1);
 

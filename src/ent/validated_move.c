@@ -426,7 +426,8 @@ void validate_split_move(const StringSplitter *split_move, const Game *game,
   }
 
   // Check if the rack is in the bag
-  Rack *game_player_rack = player_get_rack(game_get_player(game, player_index));
+  const Rack *game_player_rack =
+      player_get_rack(game_get_player(game, player_index));
   for (int i = 0; i < dist_size; i++) {
     if (rack_get_letter(vm->rack, i) >
         bag_get_letter(bag, i) + rack_get_letter(game_player_rack, i)) {
@@ -701,10 +702,6 @@ const FormedWords *validated_moves_get_formed_words(const ValidatedMoves *vms,
 
 const Rack *validated_moves_get_rack(const ValidatedMoves *vms, int i) {
   return vms->moves[i]->rack;
-}
-
-const Rack *validated_moves_get_leave(const ValidatedMoves *vms, int i) {
-  return vms->moves[i]->leave;
 }
 
 bool validated_moves_get_unknown_exchange(const ValidatedMoves *vms, int i) {

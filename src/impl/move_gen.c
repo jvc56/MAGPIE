@@ -603,8 +603,7 @@ void recursive_gen_alpha(MoveGen *gen, int col, int leftstrip, int rightstrip,
     const MachineLetter ld_size = ld_get_size(&gen->ld);
     for (MachineLetter ml = 1; ml < ld_size; ml++) {
       const int8_t number_of_ml = rack_get_letter(&gen->player_rack, ml);
-      if (ml != 0 &&
-          (number_of_ml != 0 ||
+      if ((number_of_ml != 0 ||
            rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&
           board_is_letter_allowed_in_cross_set(possible_letters_here, ml)) {
         if (number_of_ml > 0) {
@@ -1397,7 +1396,7 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
 }
 
 void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
-  Game *game = args->game;
+  const Game *game = args->game;
   move_record_t move_record_type = args->move_record_type;
   move_sort_t move_sort_type = args->move_sort_type;
   MoveList *move_list = args->move_list;
@@ -1406,8 +1405,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
 
   gen->board = game_get_board(game);
   gen->player_index = game_get_player_on_turn_index(game);
-  Player *player = game_get_player(game, gen->player_index);
-  Player *opponent = game_get_player(game, 1 - gen->player_index);
+  const Player *player = game_get_player(game, gen->player_index);
+  const Player *opponent = game_get_player(game, 1 - gen->player_index);
 
   memcpy(&gen->ld, game_get_ld(game), sizeof(LetterDistribution));
   gen->kwg = player_get_kwg(player);

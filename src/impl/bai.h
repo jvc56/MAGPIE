@@ -86,16 +86,6 @@ static inline void bai_sync_data_destroy(BAISyncData *bai_sync_data) {
   free(bai_sync_data);
 }
 
-static inline void
-bai_sync_data_set_exit_status_if_unset(BAISyncData *bai_sync_data,
-                                       exit_status_t exit_status) {
-  pthread_mutex_lock(&bai_sync_data->mutex);
-  if (bai_sync_data->exit_status == EXIT_STATUS_NONE) {
-    bai_sync_data->exit_status = exit_status;
-  }
-  pthread_mutex_unlock(&bai_sync_data->mutex);
-}
-
 typedef struct BAISampleArgs {
   BAISyncData *bai_sync_data;
   double delta;
@@ -130,7 +120,8 @@ static inline double bai_get_arm_z(BAISyncData *bai_sync_data,
                                    const int astar_index,
                                    const int challenger_index) {
   const BAIArmDatum *astar_arm_data = &bai_sync_data->arm_data[astar_index];
-  BAIArmDatum *challenger_arm_data = &bai_sync_data->arm_data[challenger_index];
+  const BAIArmDatum *challenger_arm_data =
+      &bai_sync_data->arm_data[challenger_index];
   const double alt_lambda = bai_alt_lambda(
       astar_arm_data->mean, astar_arm_data->var, astar_arm_data->num_samples,
       challenger_arm_data->mean, challenger_arm_data->var,
@@ -143,8 +134,9 @@ static inline double bai_get_arm_z(BAISyncData *bai_sync_data,
          challenger_arm_data->num_samples * d_a;
 }
 
-static inline int bai_sync_data_sample_limit_reached(BAISyncData *bai_sync_data,
-                                                     int sample_limit) {
+static inline int
+bai_sync_data_sample_limit_reached(const BAISyncData *bai_sync_data,
+                                   int sample_limit) {
   return bai_sync_data->num_total_samples_requested >= sample_limit;
 }
 

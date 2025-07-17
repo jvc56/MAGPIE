@@ -51,8 +51,9 @@ int count_nonscoring_plays(const MoveList *ml) {
 // Use NULL for rack_string if setting with CGP
 void assert_move_gen_row(Game *game, MoveList *move_list,
                          const char *rack_string, const char *row_string,
-                         int row, int min_length, int expected_plays,
-                         int *move_indexes, const char **move_strings) {
+                         const int row, const int min_length,
+                         const int expected_plays, const int *move_indexes,
+                         const char **move_strings) {
   if (row_string) {
     StringBuilder *cgp_builder = string_builder_create();
     for (int i = 0; i < BOARD_DIM; i++) {
@@ -72,7 +73,7 @@ void assert_move_gen_row(Game *game, MoveList *move_list,
   }
 
   if (rack_string) {
-    Player *player_on_turn =
+    const Player *player_on_turn =
         game_get_player(game, game_get_player_on_turn_index(game));
     rack_set_to_string(game_get_ld(game), player_get_rack(player_on_turn),
                        rack_string);
@@ -91,7 +92,7 @@ void assert_move_gen_row(Game *game, MoveList *move_list,
   if (expected_plays >= 0) {
     int actual_plays = 0;
     for (int i = 0; i < sml->count; i++) {
-      Move *move = sml->moves[i];
+      const Move *move = sml->moves[i];
       if (move_get_row_start(move) == row &&
           move_get_dir(move) == BOARD_HORIZONTAL_DIRECTION &&
           (min_length < 0 || move_get_tiles_length(move) >= min_length)) {
@@ -129,7 +130,7 @@ void macondo_tests(void) {
   Game *game = config_game_create(config);
   Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
-  Player *player = game_get_player(game, 0);
+  const Player *player = game_get_player(game, 0);
   MoveList *move_list = move_list_create(10000);
   MoveGenArgs move_gen_args = {
       .game = game,
@@ -348,9 +349,10 @@ void leave_lookup_test(void) {
   const KLV *klv = player_get_klv(game_get_player(game, 0));
   MoveList *move_list = move_list_create(1000);
 
-  char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
-                  "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
-                  "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
+  const char cgp[300] =
+      "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
+      "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
+      "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
   load_cgp_or_die(game, cgp);
 
   Rack *rack = rack_create(ld_get_size(ld));
@@ -391,15 +393,15 @@ void unfound_leave_lookup_test(void) {
       .max_equity_diff = 0,
   };
 
-  char cgp[300] = "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 "
-                  "UNFOUND/UNFOUND 0/0 0 lex CSW21;";
+  const char cgp[300] = "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 "
+                        "UNFOUND/UNFOUND 0/0 0 lex CSW21;";
   load_cgp_or_die(game, cgp);
 
   // CGP loader won't accept this impossible rack so we set it manually here.
   rack_set_to_string(game_get_ld(game), rack, "PIZZAQQ");
 
   generate_moves_for_game(&move_gen_args);
-  Move *move = move_list_get_move(move_list, 0);
+  const Move *move = move_list_get_move(move_list, 0);
 
   assert_move(game, move_list, NULL, 0, "8D PIZZA 56");
   // Unfound leave of QQ gets 0.0 value.
@@ -416,9 +418,10 @@ void exchange_tests(void) {
   Game *game = config_game_create(config);
   MoveList *move_list = move_list_create(10);
 
-  char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
-                  "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
-                  "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
+  const char cgp[300] =
+      "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
+      "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
+      "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
   load_cgp_or_die(game, cgp);
   // The top equity plays uses 7 tiles,
   // so exchanges should not be possible.
@@ -461,7 +464,7 @@ void exchange_tests(void) {
   config_destroy(config);
 }
 
-void many_moves_tests(void) {
+void movegen_many_moves(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -600,7 +603,8 @@ void small_play_recorder_test(void) {
 
   // Copy to a temp array by value. The qsort comparator expects SmallMove
   // and not SmallMove*
-  SmallMove *temp_small_moves = malloc(expected_count * sizeof(SmallMove));
+  SmallMove *temp_small_moves =
+      malloc_or_die(expected_count * sizeof(SmallMove));
   for (size_t i = 0; i < (size_t)expected_count; ++i) {
     temp_small_moves[i] = *(move_list->small_moves[i]);
   }
@@ -648,8 +652,8 @@ void distinct_lexica_test(bool w1) {
       .max_equity_diff = 0,
   };
 
-  Player *player0 = game_get_player(game, 0);
-  Player *player1 = game_get_player(game, 1);
+  const Player *player0 = game_get_player(game, 0);
+  const Player *player1 = game_get_player(game, 1);
   Rack *player0_rack = player_get_rack(player0);
   Rack *player1_rack = player_get_rack(player1);
 
@@ -779,8 +783,8 @@ void consistent_tiebreaking_test(void) {
       .max_equity_diff = 0,
   };
 
-  Player *player0 = game_get_player(game, 0);
-  Player *player1 = game_get_player(game, 1);
+  const Player *player0 = game_get_player(game, 0);
+  const Player *player1 = game_get_player(game, 1);
   Rack *player0_rack = player_get_rack(player0);
   Rack *player1_rack = player_get_rack(player1);
 
@@ -1005,7 +1009,7 @@ void movegen_within_x_of_best_test(void) {
   sml = sorted_move_list_create(move_list);
   assert(sml->count == 7);
   assert_move(game, NULL, sml, 0, "8D ZILLION 102");
-  for (int i = 0; i < move_list_count; i++) {
+  for (int i = 0; i < sml->count; i++) {
     const Move *move = sml->moves[i];
     assert(move_get_tiles_played(move) == 7);
   }
@@ -1124,4 +1128,5 @@ void test_move_gen(void) {
   movegen_no_wmp_by_default_test();
   movegen_only_one_player_wmp();
   movegen_within_x_of_best_test();
+  movegen_many_moves();
 }

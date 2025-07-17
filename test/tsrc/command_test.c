@@ -169,10 +169,10 @@ void assert_command_status_and_output(Config *config, const char *command,
   char *test_outerror_filename = get_test_filename("outerror");
 
   // Reset the contents of output
-  fclose_or_die(fopen(test_output_filename, "w"));
+  fclose_or_die(fopen_or_die(test_output_filename, "w"));
 
-  FILE *output_fh = fopen(test_output_filename, "w");
-  FILE *errorout_fh = fopen(test_outerror_filename, "w");
+  FILE *output_fh = fopen_or_die(test_output_filename, "w");
+  FILE *errorout_fh = fopen_or_die(test_outerror_filename, "w");
 
   io_set_stream_out(output_fh);
   io_set_stream_err(errorout_fh);
@@ -252,7 +252,7 @@ void test_command_execution(void) {
   assert_command_status_and_output(
       config, "addmoves 8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 1, 0);
 
-  MoveList *ml = config_get_move_list(config);
+  const MoveList *ml = config_get_move_list(config);
   assert(move_list_get_count(ml) == 3);
 
   assert_command_status_and_output(
@@ -514,8 +514,8 @@ void test_exec_ucgi_command(void) {
     perror("mkfifo");
   }
 
-  FILE *input_writer = fopen(test_input_filename, "w+");
-  FILE *input_reader = fopen(test_input_filename, "r");
+  FILE *input_writer = fopen_or_die(test_input_filename, "w+");
+  FILE *input_reader = fopen_or_die(test_input_filename, "r");
   io_set_stream_in(input_reader);
 
   ProcessArgs *process_args =

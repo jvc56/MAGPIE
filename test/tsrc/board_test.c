@@ -15,7 +15,8 @@
 #include "test_constants.h"
 #include "test_util.h"
 
-void test_board_cross_set_for_cross_set_index(Game *game, int cross_set_index) {
+void test_board_cross_set_for_cross_set_index(const Game *game,
+                                              const int cross_set_index) {
   // Test cross set
   Board *board = game_get_board(game);
 
@@ -100,8 +101,8 @@ void test_board_all(void) {
       "set -lex CSW21 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
-  Player *player0 = game_get_player(game, 0);
-  Player *player1 = game_get_player(game, 1);
+  const Player *player0 = game_get_player(game, 0);
+  const Player *player1 = game_get_player(game, 1);
   Rack *player0_rack = player_get_rack(player0);
   Rack *player1_rack = player_get_rack(player1);
   Board *board = game_get_board(game);

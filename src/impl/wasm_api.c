@@ -77,8 +77,8 @@ char *wasm_score_move(const char *cgpstr, const char *ucgi_move_str) {
     return error_stack_get_string_and_reset(iso_error_stack);
   }
 
-  Game *game = config_get_game(iso_config);
-  Board *board = game_get_board(game);
+  const Game *game = config_get_game(iso_config);
+  const Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
   const int player_on_turn_index = game_get_player_on_turn_index(game);
 

@@ -37,25 +37,25 @@ char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
   // (error), eq(e) - equity (error) scm - mean of score, scd - stdev of
   // score, bp - bingo perc ig - this play has been cut-off
   const LetterDistribution *ld = game_get_ld(game);
-  Board *board = game_get_board(game);
+  const Board *board = game_get_board(game);
   StringBuilder *sim_stats_string_builder = string_builder_create();
   int number_of_simmed_plays = sim_results_get_number_of_plays(sim_results);
   for (int i = 0; i < number_of_simmed_plays; i++) {
     const SimmedPlay *play = sim_results_get_sorted_simmed_play(sim_results, i);
-    Stat *win_pct_stat = simmed_play_get_win_pct_stat(play);
-    double wp_mean = stat_get_mean(win_pct_stat) * 100.0;
-    double wp_stdev = stat_get_stdev(win_pct_stat) * 100.0;
+    const Stat *win_pct_stat = simmed_play_get_win_pct_stat(play);
+    const double wp_mean = stat_get_mean(win_pct_stat) * 100.0;
+    const double wp_stdev = stat_get_stdev(win_pct_stat) * 100.0;
 
-    Stat *equity_stat = simmed_play_get_equity_stat(play);
-    double eq_mean = stat_get_mean(equity_stat);
-    double eq_se = stat_get_stdev(equity_stat);
+    const Stat *equity_stat = simmed_play_get_equity_stat(play);
+    const double eq_mean = stat_get_mean(equity_stat);
+    const double eq_se = stat_get_stdev(equity_stat);
 
-    uint64_t niters = stat_get_num_unique_samples(equity_stat);
+    const uint64_t niters = stat_get_num_unique_samples(equity_stat);
 
-    Move *move = simmed_play_get_move(play);
+    const Move *move = simmed_play_get_move(play);
     string_builder_add_string(sim_stats_string_builder, "info currmove ");
     string_builder_add_ucgi_move(sim_stats_string_builder, move, board, ld);
-    bool is_epigon = simmed_play_get_is_epigon(play);
+    const bool is_epigon = simmed_play_get_is_epigon(play);
     string_builder_add_formatted_string(
         sim_stats_string_builder,
         " sc %d wp %.3f stdev %.3f eq %.3f eqe %.3f it %llu "

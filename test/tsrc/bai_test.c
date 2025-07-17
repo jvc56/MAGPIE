@@ -204,6 +204,7 @@ void test_bai_time_limit(int num_threads) {
   ts.tv_sec += timeout_seconds;
 
   pthread_mutex_lock(&mutex);
+  // cppcheck-suppress knownConditionTrueFalse
   while (!done) {
     int ret = pthread_cond_timedwait(&cond, &mutex, &ts);
     if (ret == ETIMEDOUT) {
@@ -227,6 +228,7 @@ void test_bai_time_limit(int num_threads) {
 
 // Assumes rv_args are normal predetermined
 // Assumes rng_args are uniform
+// cppcheck-suppress unusedFunction
 void write_bai_input(const double delta, const RandomVariablesArgs *rv_args,
                      const RandomVariablesArgs *rng_args) {
   FILE *file = fopen_or_die("normal_data.txt", "w");
@@ -396,6 +398,7 @@ void test_bai_input_from_file(const char *bai_input_filename,
   const int pi = atoi(bai_params_index);
   if (pi < 0 || pi >= num_strategies_entries) {
     log_fatal("Invalid BAI params index: %s\n", bai_params_index);
+    return;
   }
   printf("magpie bai test running 0-indexed %d...\n", pi);
 

@@ -143,6 +143,7 @@ void prng_jump(XoshiroPRNG *prng) {
    from each of which jump() will generate 2^64 non-overlapping
    subsequences for parallel distributed computations. */
 
+// cppcheck-suppress unusedFunction
 void prng_long_jump(XoshiroPRNG *prng) {
   static const uint64_t LONG_JUMP[] = {0x76e15d3efefdcbbf, 0xc5004e441c522fb3,
                                        0x77710069854ee241, 0x39109bb02acbe635};

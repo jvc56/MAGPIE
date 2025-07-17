@@ -14,9 +14,9 @@
 
 #define TEST_BAG_SIZE 100
 
-void test_add_letter(const Config *config, Bag *bag, char *r,
-                     char *expected_bag_string, int player_index) {
-  LetterDistribution *ld = config_get_ld(config);
+void test_add_letter(const Config *config, Bag *bag, const char *r,
+                     const char *expected_bag_string, const int player_index) {
+  const LetterDistribution *ld = config_get_ld(config);
   bag_add_letter(bag, ld_hl_to_ml(ld, r), player_index);
   StringBuilder *bag_string = string_builder_create();
   string_builder_add_bag(bag_string, bag, ld);

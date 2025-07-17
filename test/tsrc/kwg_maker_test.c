@@ -25,8 +25,10 @@ void assert_word_lists_are_equal(const DictionaryWordList *expected,
   assert(dictionary_word_list_get_count(expected) ==
          dictionary_word_list_get_count(actual));
   for (int i = 0; i < dictionary_word_list_get_count(expected); i++) {
-    DictionaryWord *expected_word = dictionary_word_list_get_word(expected, i);
-    DictionaryWord *actual_word = dictionary_word_list_get_word(actual, i);
+    const DictionaryWord *expected_word =
+        dictionary_word_list_get_word(expected, i);
+    const DictionaryWord *actual_word =
+        dictionary_word_list_get_word(actual, i);
     assert(dictionary_word_get_length(expected_word) ==
            dictionary_word_get_length(actual_word));
     assert(memcmp(dictionary_word_get_word(expected_word),
@@ -48,7 +50,7 @@ uint32_t kwg_prefix_arc_aux(const KWG *kwg, uint32_t node_index,
   return kwg_prefix_arc_aux(kwg, next_node_index, prefix, pos + 1);
 }
 
-uint32_t kwg_dawg_prefix_arc(const KWG *kwg, LetterDistribution *ld,
+uint32_t kwg_dawg_prefix_arc(const KWG *kwg, const LetterDistribution *ld,
                              const char *human_readable_prefix) {
   // Make a list with one word in it just because I don't have a handy function
   // to create a DictionaryWord by itself.
@@ -58,14 +60,14 @@ uint32_t kwg_dawg_prefix_arc(const KWG *kwg, LetterDistribution *ld,
                 string_length(human_readable_prefix));
   dictionary_word_list_add_word(prefix_list, prefix_bytes,
                                 string_length(human_readable_prefix));
-  DictionaryWord *prefix = dictionary_word_list_get_word(prefix_list, 0);
+  const DictionaryWord *prefix = dictionary_word_list_get_word(prefix_list, 0);
   const uint32_t arc =
       kwg_prefix_arc_aux(kwg, kwg_get_dawg_root_node_index(kwg), prefix, 0);
   dictionary_word_list_destroy(prefix_list);
   return arc;
 }
 
-uint32_t kwg_gaddag_prefix_arc(const KWG *kwg, LetterDistribution *ld,
+uint32_t kwg_gaddag_prefix_arc(const KWG *kwg, const LetterDistribution *ld,
                                const char *human_readable_prefix) {
   char string_for_conversion[MAX_KWG_STRING_LENGTH];
   string_copy(string_for_conversion, human_readable_prefix);
@@ -82,7 +84,7 @@ uint32_t kwg_gaddag_prefix_arc(const KWG *kwg, LetterDistribution *ld,
                 string_length(string_for_conversion));
   dictionary_word_list_add_word(prefix_list, prefix_bytes,
                                 string_length(string_for_conversion));
-  DictionaryWord *prefix = dictionary_word_list_get_word(prefix_list, 0);
+  const DictionaryWord *prefix = dictionary_word_list_get_word(prefix_list, 0);
   const uint32_t arc =
       kwg_prefix_arc_aux(kwg, kwg_get_root_node_index(kwg), prefix, 0);
   dictionary_word_list_destroy(prefix_list);
@@ -91,7 +93,7 @@ uint32_t kwg_gaddag_prefix_arc(const KWG *kwg, LetterDistribution *ld,
 
 void test_qi_xi_xu_word_trie(void) {
   Config *config = config_create_or_die("set -lex CSW21");
-  LetterDistribution *ld = config_get_ld(config);
+  const LetterDistribution *ld = config_get_ld(config);
   DictionaryWordList *words = dictionary_word_list_create();
   add_test_word(ld, words, "QI");
   add_test_word(ld, words, "XI");
@@ -126,7 +128,7 @@ void test_qi_xi_xu_word_trie(void) {
 
 void test_egg_unmerged_gaddag(void) {
   Config *config = config_create_or_die("set -lex CSW21");
-  LetterDistribution *ld = config_get_ld(config);
+  const LetterDistribution *ld = config_get_ld(config);
   DictionaryWordList *words = dictionary_word_list_create();
   add_test_word(ld, words, "EGG");
 
@@ -143,7 +145,7 @@ void test_egg_unmerged_gaddag(void) {
 
 void test_careen_career_unmerged_gaddag(void) {
   Config *config = config_create_or_die("set -lex CSW21");
-  LetterDistribution *ld = config_get_ld(config);
+  const LetterDistribution *ld = config_get_ld(config);
   DictionaryWordList *words = dictionary_word_list_create();
   add_test_word(ld, words, "CAREEN");
   add_test_word(ld, words, "CAREER");
@@ -171,7 +173,7 @@ void test_careen_career_unmerged_gaddag(void) {
 
 void test_careen_career_exact_merged_gaddag(void) {
   Config *config = config_create_or_die("set -lex CSW21");
-  LetterDistribution *ld = config_get_ld(config);
+  const LetterDistribution *ld = config_get_ld(config);
   DictionaryWordList *words = dictionary_word_list_create();
   add_test_word(ld, words, "CAREEN");
   add_test_word(ld, words, "CAREER");
@@ -201,7 +203,7 @@ void test_careen_career_exact_merged_gaddag(void) {
 
 void test_two_letter_trie(void) {
   Config *config = config_create_or_die("set -lex CSW21");
-  LetterDistribution *ld = config_get_ld(config);
+  const LetterDistribution *ld = config_get_ld(config);
   Game *game = config_game_create(config);
   const Player *player = game_get_player(game, 0);
   const KWG *csw_kwg = player_get_kwg(player);
@@ -210,7 +212,7 @@ void test_two_letter_trie(void) {
 
   DictionaryWordList *two_letter_words = dictionary_word_list_create();
   for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
-    DictionaryWord *word = dictionary_word_list_get_word(words, i);
+    const DictionaryWord *word = dictionary_word_list_get_word(words, i);
     if (dictionary_word_get_length(word) == 2) {
       dictionary_word_list_add_word(two_letter_words,
                                     dictionary_word_get_word(word),
@@ -243,7 +245,7 @@ void test_two_letter_trie(void) {
 
 void test_two_letter_merged_dawg(void) {
   Config *config = config_create_or_die("set -lex CSW21");
-  LetterDistribution *ld = config_get_ld(config);
+  const LetterDistribution *ld = config_get_ld(config);
   Game *game = config_game_create(config);
   const Player *player = game_get_player(game, 0);
   const KWG *csw_kwg = player_get_kwg(player);
@@ -252,7 +254,7 @@ void test_two_letter_merged_dawg(void) {
 
   DictionaryWordList *two_letter_words = dictionary_word_list_create();
   for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
-    DictionaryWord *word = dictionary_word_list_get_word(words, i);
+    const DictionaryWord *word = dictionary_word_list_get_word(words, i);
     if (dictionary_word_get_length(word) == 2) {
       dictionary_word_list_add_word(two_letter_words,
                                     dictionary_word_get_word(word),

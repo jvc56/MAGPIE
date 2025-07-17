@@ -63,11 +63,6 @@ static inline BonusSquare square_get_bonus_square(const Square *s) {
   return s->bonus_square;
 }
 
-static inline void square_set_bonus_square(Square *s,
-                                           BonusSquare bonus_square) {
-  s->bonus_square = bonus_square;
-}
-
 // Square: is brick
 
 static inline bool square_get_is_brick(const Square *s) {
@@ -256,17 +251,6 @@ static inline BonusSquare board_get_bonus_square(const Board *b, int row,
 static inline bool board_get_is_brick(const Board *b, int row, int col) {
   // Cross index doesn't matter for bonus square reads.
   return square_get_is_brick(board_get_readonly_square(b, row, col, 0, 0));
-}
-
-static inline void board_set_bonus_square(Board *b, int row, int col,
-                                          BonusSquare bonus_square) {
-  // Bonus square should be set on all 4 squares.
-  for (int ci = 0; ci < 2; ci++) {
-    for (int dir = 0; dir < 2; dir++) {
-      square_set_bonus_square(board_get_writable_square(b, row, col, dir, ci),
-                              bonus_square);
-    }
-  }
 }
 
 // Board: Cross set
@@ -465,10 +449,6 @@ static inline bool board_get_transposed(const Board *board) {
 
 static inline void board_transpose(Board *board) {
   board->transposed = !board->transposed;
-}
-
-static inline void board_set_transposed(Board *board, bool transposed) {
-  board->transposed = transposed;
 }
 
 // Board: tiles played

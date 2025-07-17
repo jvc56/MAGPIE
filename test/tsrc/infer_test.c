@@ -28,7 +28,7 @@ error_code_t infer_for_test(const Config *config, int target_index,
                             int target_score, int target_num_exch,
                             const char *target_played_tiles_str,
                             InferenceResults *inference_results) {
-  Game *game = config_get_game(config);
+  const Game *game = config_get_game(config);
   const LetterDistribution *ld = game_get_ld(game);
   Rack *target_played_tiles = rack_create(ld_get_size(ld));
   if (target_played_tiles_str != NULL) {
@@ -203,17 +203,17 @@ void test_infer_nonerror_cases(int number_of_threads) {
   int ld_size = ld_get_size(ld);
   Rack *rack = rack_create(ld_size);
 
-  Player *player0 = game_get_player(game, 0);
-  Player *player1 = game_get_player(game, 1);
+  const Player *player0 = game_get_player(game, 0);
+  const Player *player1 = game_get_player(game, 1);
   const KLV *klv = player_get_klv(player0);
 
   Rack *player0_rack = player_get_rack(player0);
-  Rack *player1_rack = player_get_rack(player1);
+  const Rack *player1_rack = player_get_rack(player1);
 
   InferenceResults *inference_results = inference_results_create();
   Stat *letter_stat = stat_create(false);
   error_code_t status;
-  LeaveRackList *lrl;
+  const LeaveRackList *lrl;
 
   load_and_exec_config_or_die(config, "set -numplays 20");
   status = infer_for_test(config, 0, 52, 0, "MUZAKS", inference_results);
@@ -221,7 +221,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // With this rack, only keeping an S is possible, and
   // there are 3 S remaining.
 
-  Stat *equity_values = inference_results_get_equity_values(
+  const Stat *equity_values = inference_results_get_equity_values(
       inference_results, INFERENCE_TYPE_LEAVE);
   assert(stat_get_num_samples(equity_values) == 3);
   assert(stat_get_num_unique_samples(equity_values) == 1);

@@ -35,8 +35,8 @@ void pvline_clear(PVLine *pv_line) {
   pv_line->score = 0;
 }
 
-void pvline_update(PVLine *pv_line, const PVLine *new_pv_line, SmallMove *move,
-                   int32_t score) {
+void pvline_update(PVLine *pv_line, const PVLine *new_pv_line,
+                   const SmallMove *move, int32_t score) {
   pvline_clear(pv_line);
   pv_line->moves[0].metadata = move->metadata;
   pv_line->moves[0].tiny_move = move->tiny_move;
@@ -90,8 +90,8 @@ EndgameSolver *endgame_solver_create(ThreadControl *tc, const Game *game,
   es->solving_player = game_get_player_on_turn_index(game);
   es->initial_small_move_arena_size = 1024 * 1024;
   es->pruned_kwg = NULL;
-  Player *player = game_get_player(game, es->solving_player);
-  Player *opponent = game_get_player(game, 1 - es->solving_player);
+  const Player *player = game_get_player(game, es->solving_player);
+  const Player *opponent = game_get_player(game, 1 - es->solving_player);
 
   es->initial_spread =
       equity_to_int(player_get_score(player) - player_get_score(opponent));
@@ -251,9 +251,10 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
 }
 
 // XXX: Move this debug helper to a utility function or something.
+// cppcheck-suppress unusedFunction
 char *create_spaces(int depth) {
   // Allocate memory for the string of spaces (+1 for the null terminator)
-  char *spaces = (char *)malloc(depth + 1);
+  char *spaces = (char *)malloc_or_die(depth + 1);
 
   // Fill the string with spaces
   for (int i = 0; i < depth; i++) {
@@ -276,8 +277,10 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
   int32_t alpha_orig = alpha;
 
   int on_turn_idx = game_get_player_on_turn_index(worker->game_copy);
-  Player *player_on_turn = game_get_player(worker->game_copy, on_turn_idx);
-  Player *other_player = game_get_player(worker->game_copy, 1 - on_turn_idx);
+  const Player *player_on_turn =
+      game_get_player(worker->game_copy, on_turn_idx);
+  const Player *other_player =
+      game_get_player(worker->game_copy, 1 - on_turn_idx);
   int on_turn_spread = equity_to_int(player_get_score(player_on_turn) -
                                      player_get_score(other_player));
   uint64_t tt_move = INVALID_TINY_MOVE;
@@ -358,7 +361,7 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
     //          string_builder_peek(move_description), small_move->tiny_move,
     //          small_move->metadata);
 
-    Rack *stm_rack = player_get_rack(player_on_turn);
+    const Rack *stm_rack = player_get_rack(player_on_turn);
 
     int last_consecutive_scoreless_turns =
         game_get_consecutive_scoreless_turns(worker->game_copy);
@@ -479,9 +482,9 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
 
   uint64_t initial_hash_key = 0;
   if (worker->solver->transposition_table_optim) {
-    Player *solving_player =
+    const Player *solving_player =
         game_get_player(worker->game_copy, worker->solver->solving_player);
-    Player *other_player =
+    const Player *other_player =
         game_get_player(worker->game_copy, 1 - worker->solver->solving_player);
     initial_hash_key = zobrist_calculate_hash(
         worker->solver->transposition_table->zobrist,
@@ -531,7 +534,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
 void *solver_worker_start(void *uncasted_solver_worker) {
   EndgameSolverWorker *solver_worker =
       (EndgameSolverWorker *)uncasted_solver_worker;
-  EndgameSolver *solver = solver_worker->solver;
+  const EndgameSolver *solver = solver_worker->solver;
   // ThreadControl *thread_control = solver->thread_control;
   // later allow thread control to quit early.
   iterative_deepening(solver_worker, solver->requested_plies);

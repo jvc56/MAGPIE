@@ -59,7 +59,7 @@ void assert_equal_at_equity_resolution(double a, double b) {
 bool within_epsilon(double a, double b) { return fabs(a - b) < TEST_EPSILON; }
 
 // This test function only works for single-char alphabets
-void set_row(Game *game, int row, const char *row_content) {
+void set_row(const Game *game, const int row, const char *row_content) {
   Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
 
@@ -477,13 +477,6 @@ void assert_rack_equals_string(const LetterDistribution *ld, const Rack *r1,
   free(r1_str);
 }
 
-void clear_bag(Bag *bag) {
-  int number_of_letters = bag_get_tiles(bag);
-  for (int i = 0; i < number_of_letters; i++) {
-    bag_draw_random_letter(bag, 0);
-  }
-}
-
 void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size) {
   Bag *b1_copy = bag_duplicate(b1);
   Bag *b2_copy = bag_duplicate(b2);
@@ -552,17 +545,18 @@ void assert_boards_are_equal(Board *b1, Board *b2) {
   }
 }
 
-void assert_move(Game *game, MoveList *move_list, const SortedMoveList *sml,
-                 int move_index, const char *expected_move_string) {
+void assert_move(const Game *game, const MoveList *move_list,
+                 const SortedMoveList *sml, int move_index,
+                 const char *expected_move_string) {
   if (!sml && !move_list) {
     log_fatal("sml and move_list are both null");
     return;
   }
-  Board *board = game_get_board(game);
+  const Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
 
   StringBuilder *move_string = string_builder_create();
-  Move *move;
+  const Move *move;
   if (sml) {
     move = sml->moves[move_index];
   } else {
@@ -585,7 +579,8 @@ void assert_players_are_equal(const Player *p1, const Player *p2,
   }
 }
 
-void assert_games_are_equal(Game *g1, Game *g2, bool check_scores) {
+void assert_games_are_equal(const Game *g1, const Game *g2,
+                            const bool check_scores) {
   assert(game_get_consecutive_scoreless_turns(g1) ==
          game_get_consecutive_scoreless_turns(g2));
   assert(game_get_game_end_reason(g1) == game_get_game_end_reason(g2));
@@ -611,8 +606,8 @@ void assert_games_are_equal(Game *g1, Game *g2, bool check_scores) {
   Board *board1 = game_get_board(g1);
   Board *board2 = game_get_board(g2);
 
-  Bag *bag1 = game_get_bag(g1);
-  Bag *bag2 = game_get_bag(g2);
+  const Bag *bag1 = game_get_bag(g1);
+  const Bag *bag2 = game_get_bag(g2);
 
   assert_boards_are_equal(board1, board2);
   assert_bags_are_equal(bag1, bag2, ld_get_size(game_get_ld(g1)));
@@ -629,21 +624,6 @@ void delete_file(const char *filename) {
     int error_number = errno;
     if (error_number != ENOENT) {
       log_fatal("remove %s failed with code: %d\n", filename, error_number);
-    }
-  }
-}
-
-void reset_file(const char *filename) { fclose_or_die(fopen(filename, "w")); }
-
-void fifo_create(const char *fifo_name) {
-  int result;
-
-  errno = 0;
-  result = mkfifo(fifo_name, 0666); // Read/write permissions for everyone
-  if (result < 0) {
-    int error_number = errno;
-    if (error_number != EEXIST) {
-      log_fatal("mkfifo %s for with %d\n", fifo_name, error_number);
     }
   }
 }
@@ -707,9 +687,10 @@ char *remove_parentheses(const char *input) {
 void assert_validated_and_generated_moves(Game *game, const char *rack_string,
                                           const char *move_position,
                                           const char *move_tiles,
-                                          int move_score,
-                                          bool play_move_on_board) {
-  Player *player = game_get_player(game, game_get_player_on_turn_index(game));
+                                          const int move_score,
+                                          const bool play_move_on_board) {
+  const Player *player =
+      game_get_player(game, game_get_player_on_turn_index(game));
   Rack *player_rack = player_get_rack(player);
   MoveList *move_list = move_list_create(1);
   const MoveGenArgs move_gen_args = {
@@ -909,7 +890,7 @@ void assert_word_count(const LetterDistribution *ld,
   ld_str_to_mls(ld, human_readable_word, false, expected, expected_length);
   int count = 0;
   for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
-    DictionaryWord *word = dictionary_word_list_get_word(words, i);
+    const DictionaryWord *word = dictionary_word_list_get_word(words, i);
     if ((dictionary_word_get_length(word) == expected_length) &&
         (memcmp(dictionary_word_get_word(word), expected, expected_length) ==
          0)) {
@@ -932,9 +913,10 @@ BitRack string_to_bit_rack(const LetterDistribution *ld,
 // to support multibyte user-visible characters, but Polish isn't even supported
 // for BitRack (and therefore for WMP) because the lexicon is >32 letters
 // (including the blank).
-void assert_word_in_buffer(MachineLetter *buffer, const char *expected_word,
-                           const LetterDistribution *ld, int word_idx,
-                           int length) {
+void assert_word_in_buffer(const MachineLetter *buffer,
+                           const char *expected_word,
+                           const LetterDistribution *ld, const int word_idx,
+                           const int length) {
   const int start = word_idx * length;
   char hl[2] = {0, 0};
   for (int i = 0; i < length; i++) {
@@ -979,7 +961,7 @@ void assert_anchor_equity_exact(const AnchorHeap *ah, int i, Equity expected) {
 }
 
 void generate_anchors_for_test(Game *game) {
-  Player *player_on_turn =
+  const Player *player_on_turn =
       game_get_player(game, game_get_player_on_turn_index(game));
   // We don't care about them, but exchanges will be recorded while
   // looking up leave values and it is not adding a parameter to prevent this.

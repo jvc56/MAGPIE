@@ -140,8 +140,8 @@ inference_results_get_equity_values(InferenceResults *results,
   return results->equity_values[(int)inference_stat_type];
 }
 
-LeaveRackList *
-inference_results_get_leave_rack_list(InferenceResults *inference_results) {
+LeaveRackList *inference_results_get_leave_rack_list(
+    const InferenceResults *inference_results) {
   return inference_results->leave_rack_list;
 }
 
@@ -245,8 +245,7 @@ double get_probability_for_random_minimum_draw(
 
   // If the player is emptying the bag and there are the minimum
   // number of leaves remaining, the probability is trivially 1.
-  if (total_number_of_letters_in_bag <= total_number_of_letters_to_draw &&
-      number_of_this_letter_in_bag >= minimum_adjusted_for_partial_rack) {
+  if (total_number_of_letters_in_bag <= total_number_of_letters_to_draw) {
     return 1;
   }
 

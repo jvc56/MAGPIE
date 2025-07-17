@@ -172,88 +172,6 @@ void convert_with_names(const LetterDistribution *ld,
   }
 }
 
-data_filepath_t
-get_input_filepath_type_from_conv_type(conversion_type_t conversion_type) {
-  data_filepath_t filepath_type;
-  switch (conversion_type) {
-  case CONVERT_TEXT2DAWG:
-    filepath_type = DATA_FILEPATH_TYPE_LEXICON;
-    break;
-  case CONVERT_TEXT2GADDAG:
-    filepath_type = DATA_FILEPATH_TYPE_LEXICON;
-    break;
-  case CONVERT_TEXT2KWG:
-    filepath_type = DATA_FILEPATH_TYPE_LEXICON;
-    break;
-  case CONVERT_TEXT2WORDMAP:
-    filepath_type = DATA_FILEPATH_TYPE_LEXICON;
-    break;
-  case CONVERT_DAWG2TEXT:
-    filepath_type = DATA_FILEPATH_TYPE_KWG;
-    break;
-  case CONVERT_GADDAG2TEXT:
-    filepath_type = DATA_FILEPATH_TYPE_KWG;
-    break;
-  case CONVERT_CSV2KLV:
-    filepath_type = DATA_FILEPATH_TYPE_LEAVES;
-    break;
-  case CONVERT_KLV2CSV:
-    filepath_type = DATA_FILEPATH_TYPE_KLV;
-    break;
-  case CONVERT_UNKNOWN:
-    log_fatal("cannot get input filepath type for unknown conversion type");
-#if defined(__has_builtin) && __has_builtin(__builtin_unreachable)
-    __builtin_unreachable();
-#else
-    // Unreachable code, suppresses compiler warning
-    filepath_type = DATA_FILEPATH_TYPE_LEXICON;
-#endif
-    break;
-  }
-  return filepath_type;
-}
-
-data_filepath_t
-get_output_filepath_type_from_conv_type(conversion_type_t conversion_type) {
-  data_filepath_t filepath_type;
-  switch (conversion_type) {
-  case CONVERT_TEXT2DAWG:
-    filepath_type = DATA_FILEPATH_TYPE_KWG;
-    break;
-  case CONVERT_TEXT2GADDAG:
-    filepath_type = DATA_FILEPATH_TYPE_KWG;
-    break;
-  case CONVERT_TEXT2WORDMAP:
-    filepath_type = DATA_FILEPATH_TYPE_WORDMAP;
-    break;
-  case CONVERT_TEXT2KWG:
-    filepath_type = DATA_FILEPATH_TYPE_KWG;
-    break;
-  case CONVERT_DAWG2TEXT:
-    filepath_type = DATA_FILEPATH_TYPE_LEXICON;
-    break;
-  case CONVERT_GADDAG2TEXT:
-    filepath_type = DATA_FILEPATH_TYPE_LEXICON;
-    break;
-  case CONVERT_CSV2KLV:
-    filepath_type = DATA_FILEPATH_TYPE_KLV;
-    break;
-  case CONVERT_KLV2CSV:
-    filepath_type = DATA_FILEPATH_TYPE_LEAVES;
-    break;
-  case CONVERT_UNKNOWN:
-    log_fatal("cannot get output filepath type for unknown conversion type");
-#if defined(__has_builtin) && __has_builtin(__builtin_unreachable)
-    __builtin_unreachable();
-#else
-    // Unreachable code, suppresses compiler warning
-    filepath_type = DATA_FILEPATH_TYPE_LEXICON;
-#endif
-    break;
-  }
-  return filepath_type;
-}
-
 conversion_type_t
 get_conversion_type_from_string(const char *conversion_type_string) {
   conversion_type_t conversion_type = CONVERT_UNKNOWN;
@@ -277,7 +195,7 @@ get_conversion_type_from_string(const char *conversion_type_string) {
   return conversion_type;
 }
 
-void convert(ConversionArgs *args, ConversionResults *conversion_results,
+void convert(const ConversionArgs *args, ConversionResults *conversion_results,
              ErrorStack *error_stack) {
   const char *conversion_type_string = args->conversion_type_string;
   conversion_type_t conversion_type =

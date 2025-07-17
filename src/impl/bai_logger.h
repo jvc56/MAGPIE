@@ -22,6 +22,7 @@ typedef struct BAILogger {
   StringBuilder *buffer;
 } BAILogger;
 
+// cppcheck-suppress unusedFunction
 static inline BAILogger *bai_logger_create(const char *log_filename) {
   BAILogger *bai_logger = (BAILogger *)malloc_or_die(sizeof(BAILogger));
   bai_logger->fh = fopen_or_die(log_filename, "w");
@@ -29,6 +30,7 @@ static inline BAILogger *bai_logger_create(const char *log_filename) {
   return bai_logger;
 }
 
+// cppcheck-suppress unusedFunction
 static inline void bai_logger_destroy(BAILogger *bai_logger) {
   if (!bai_logger) {
     return;
@@ -38,6 +40,7 @@ static inline void bai_logger_destroy(BAILogger *bai_logger) {
   free(bai_logger);
 }
 
+// cppcheck-suppress unusedFunction
 static inline void bai_logger_log_title(BAILogger *bai_logger,
                                         const char *title) {
   if (!bai_logger) {
@@ -46,6 +49,7 @@ static inline void bai_logger_log_title(BAILogger *bai_logger,
   string_builder_add_formatted_string(bai_logger->buffer, "%s\n", title);
 }
 
+// cppcheck-suppress unusedFunction
 static inline void bai_logger_log_int(BAILogger *bai_logger,
                                       const char *int_name, const int x) {
   if (!bai_logger) {
@@ -55,6 +59,7 @@ static inline void bai_logger_log_int(BAILogger *bai_logger,
                                       x);
 }
 
+// cppcheck-suppress unusedFunction
 static inline void bai_logger_log_bool(BAILogger *bai_logger,
                                        const char *bool_name, const bool x) {
   if (!bai_logger) {
@@ -64,6 +69,7 @@ static inline void bai_logger_log_bool(BAILogger *bai_logger,
                                       bool_name, x ? "true" : "false");
 }
 
+// cppcheck-suppress unusedFunction
 static inline void bai_logger_string_builder_add_double(StringBuilder *sb,
                                                         const double x) {
   if (isinf(x)) {
@@ -75,6 +81,7 @@ static inline void bai_logger_string_builder_add_double(StringBuilder *sb,
   }
 }
 
+// cppcheck-suppress unusedFunction
 static inline void bai_logger_log_double(BAILogger *bai_logger,
                                          const char *double_name,
                                          const double x) {
@@ -86,6 +93,7 @@ static inline void bai_logger_log_double(BAILogger *bai_logger,
   string_builder_add_string(bai_logger->buffer, "\n");
 }
 
+// cppcheck-suppress unusedFunction
 static inline void bai_logger_log_double_array(BAILogger *bai_logger,
                                                const char *double_array_name,
                                                const double *x, int size) {
@@ -103,6 +111,7 @@ static inline void bai_logger_log_double_array(BAILogger *bai_logger,
   string_builder_add_string(bai_logger->buffer, "\n");
 }
 
+// cppcheck-suppress unusedFunction
 static inline void bai_logger_log_int_array(BAILogger *bai_logger,
                                             const char *double_array_name,
                                             const int *x, int size) {
@@ -120,6 +129,7 @@ static inline void bai_logger_log_int_array(BAILogger *bai_logger,
   string_builder_add_string(bai_logger->buffer, "\n");
 }
 
+// cppcheck-suppress unusedFunction
 static inline void bai_logger_log_bool_array(BAILogger *bai_logger,
                                              const char *double_array_name,
                                              const bool *x, int size) {
@@ -141,6 +151,7 @@ static inline void bai_logger_log_bool_array(BAILogger *bai_logger,
   string_builder_add_string(bai_logger->buffer, "\n");
 }
 
+// cppcheck-suppress unusedFunction
 static inline void bai_logger_flush(BAILogger *bai_logger) {
   if (!bai_logger) {
     return;

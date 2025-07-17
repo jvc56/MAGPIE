@@ -259,10 +259,6 @@ double config_get_equity_margin(const Config *config) {
   return config->equity_margin;
 }
 
-Equity config_get_max_equity_diff(const Config *config) {
-  return config->max_equity_diff;
-}
-
 int config_get_time_limit_seconds(const Config *config) {
   return config->time_limit_seconds;
 }
@@ -450,8 +446,8 @@ bool config_has_game_data(const Config *config) {
 
 // Config loading for primitive types
 
-void config_load_int(Config *config, arg_token_t arg_token, int min, int max,
-                     int *value, ErrorStack *error_stack) {
+void config_load_int(const Config *config, arg_token_t arg_token, int min,
+                     int max, int *value, ErrorStack *error_stack) {
   const char *int_str = config_get_parg_value(config, arg_token, 0);
   if (!int_str) {
     return;
@@ -476,7 +472,7 @@ void config_load_int(Config *config, arg_token_t arg_token, int min, int max,
   *value = new_value;
 }
 
-void config_load_double(Config *config, arg_token_t arg_token, double min,
+void config_load_double(const Config *config, arg_token_t arg_token, double min,
                         double max, double *value, ErrorStack *error_stack) {
   const char *double_str = config_get_parg_value(config, arg_token, 0);
   if (!double_str) {
@@ -502,7 +498,7 @@ void config_load_double(Config *config, arg_token_t arg_token, double min,
   *value = new_value;
 }
 
-void config_load_bool(Config *config, arg_token_t arg_token, bool *value,
+void config_load_bool(const Config *config, arg_token_t arg_token, bool *value,
                       ErrorStack *error_stack) {
   const char *bool_str = config_get_parg_value(config, arg_token, 0);
   if (!bool_str) {
@@ -520,8 +516,8 @@ void config_load_bool(Config *config, arg_token_t arg_token, bool *value,
   }
 }
 
-void config_load_uint64(Config *config, arg_token_t arg_token, uint64_t *value,
-                        ErrorStack *error_stack) {
+void config_load_uint64(const Config *config, arg_token_t arg_token,
+                        uint64_t *value, ErrorStack *error_stack) {
   const char *int_str = config_get_parg_value(config, arg_token, 0);
   if (!int_str) {
     return;
@@ -558,12 +554,12 @@ void execute_noop(Config __attribute__((unused)) * config,
   return;
 }
 
-char *get_status_finished_str(Config *config) {
+char *get_status_finished_str(const Config *config) {
   return get_formatted_string("%s %s\n", COMMAND_FINISHED_KEYWORD,
                               config_get_current_exec_name(config));
 }
 
-char *get_status_running_str(Config *config) {
+char *get_status_running_str(const Config *config) {
   return get_formatted_string("%s %s\n", COMMAND_RUNNING_KEYWORD,
                               config_get_current_exec_name(config));
 }
@@ -694,9 +690,8 @@ void execute_set_rack(Config *config, ErrorStack *error_stack) {
   // Convert from 1-indexed user input to 0-indexed internal use
   player_index--;
 
-  Rack *player_rack =
-      player_get_rack(game_get_player(config->game, player_index));
-  Rack *new_rack = rack_duplicate(player_rack);
+  Rack *new_rack = rack_duplicate(
+      player_get_rack(game_get_player(config->game, player_index)));
   rack_reset(new_rack);
 
   const char *rack_str = config_get_parg_value(config, ARG_TOKEN_RACK, 1);
@@ -1100,7 +1095,8 @@ void execute_create_data(Config *config, ErrorStack *error_stack) {
 
 // Config load helpers
 
-void config_load_parsed_args(Config *config, StringSplitter *cmd_split_string,
+void config_load_parsed_args(Config *config,
+                             const StringSplitter *cmd_split_string,
                              ErrorStack *error_stack) {
   int number_of_input_strs =
       string_splitter_get_number_of_items(cmd_split_string);
@@ -2103,12 +2099,6 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
 
   autoplay_results_set_players_data(config->autoplay_results,
                                     config->players_data);
-}
-
-Config *config_create_default(ErrorStack *error_stack) {
-  Config *config = calloc_or_die(1, sizeof(Config));
-  config_create_default_internal(config, error_stack, DEFAULT_DATA_PATHS);
-  return config;
 }
 
 Config *config_create_default_with_data_paths(ErrorStack *error_stack,

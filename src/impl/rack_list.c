@@ -82,6 +82,7 @@ int rack_list_ld_get_size(const RackListLetterDistribution *rl_ld) {
 }
 
 int convert_klv_index_to_rack_list_index(int klv_index) {
+  // cppcheck-suppress integerOverflowCond
   return klv_index - (RACK_SIZE);
 }
 
@@ -131,6 +132,7 @@ int rack_list_generate_all_racks(rack_gen_mode_t mode,
       number_of_set_racks++;
       switch (mode) {
       case RACK_GEN_MODE_CREATE_DWL:
+        assert(dwl);
         dictionary_word_list_add_word(dwl, rack_array, (RACK_SIZE));
         break;
       case RACK_GEN_MODE_SET_RACK_LIST_ITEMS:
@@ -453,12 +455,6 @@ double rack_list_get_mean(const RackList *rack_list, int klv_index) {
   return rack_list
       ->racks_ordered_by_index[convert_klv_index_to_rack_list_index(klv_index)]
       ->mean;
-}
-
-int rack_list_get_count_index(const RackList *rack_list, int klv_index) {
-  return rack_list
-      ->racks_ordered_by_index[convert_klv_index_to_rack_list_index(klv_index)]
-      ->count_index;
 }
 
 const EncodedRack *rack_list_get_encoded_rack(const RackList *rack_list,

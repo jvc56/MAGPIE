@@ -33,14 +33,14 @@ void bai_result_set_all(BAIResult *bai_result, exit_status_t exit_status,
   bai_result->total_time = total_time;
 }
 
-exit_status_t bai_result_get_exit_status(BAIResult *bai_result) {
+exit_status_t bai_result_get_exit_status(const BAIResult *bai_result) {
   return bai_result->exit_status;
 }
 
-int bai_result_get_best_arm(BAIResult *bai_result) {
+int bai_result_get_best_arm(const BAIResult *bai_result) {
   return bai_result->best_arm;
 }
 
-double bai_result_get_total_time(BAIResult *bai_result) {
+double bai_result_get_total_time(const BAIResult *bai_result) {
   return bai_result->total_time;
 }

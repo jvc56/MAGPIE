@@ -19,7 +19,7 @@ void test_macondo_opening_equity_adjustments(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
-  Player *player0 = game_get_player(game, 0);
+  const Player *player0 = game_get_player(game, 0);
   Rack *rack = player_get_rack(player0);
   const KLV *klv = player_get_klv(player0);
   const LetterDistribution *ld = game_get_ld(game);

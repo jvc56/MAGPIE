@@ -125,7 +125,7 @@ void test_reloaded_data(void) {
                    "CSW21", "CSW21", error_stack);
   assert(error_stack_is_empty(error_stack));
 
-  KLV *klv1 = players_data_get_klv(players_data, 0);
+  const KLV *klv1 = players_data_get_klv(players_data, 0);
 
   const int leave_index = 7;
   const double old_leave_value = klv_get_indexed_leave_value(klv1, leave_index);
@@ -141,7 +141,7 @@ void test_reloaded_data(void) {
                       DEFAULT_TEST_DATA_PATH, error_stack);
   assert(error_stack_is_empty(error_stack));
 
-  KLV *klv2 = players_data_get_klv(players_data, 0);
+  const KLV *klv2 = players_data_get_klv(players_data, 0);
 
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_KLV, 0) != klv1);
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_KLV, 1) != klv1);

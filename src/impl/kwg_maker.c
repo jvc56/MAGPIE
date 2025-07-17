@@ -317,7 +317,7 @@ void insert_suffix(uint32_t node_index, MutableNodeList *nodes,
 }
 
 void copy_nodes(NodePointerList *ordered_pointers, MutableNodeList *nodes,
-                KWG *kwg) {
+                const KWG *kwg) {
   uint32_t *kwg_nodes = kwg_get_mutable_nodes(kwg);
   for (size_t node_idx = 0; node_idx < ordered_pointers->count; node_idx++) {
     MutableNode *node = ordered_pointers->nodes[node_idx];
@@ -345,6 +345,7 @@ void add_gaddag_strings_for_word(const DictionaryWord *word,
                                  DictionaryWordList *gaddag_strings) {
   const MachineLetter *raw_word = dictionary_word_get_word(word);
   const int length = dictionary_word_get_length(word);
+  assert(length > 0);
   MachineLetter gaddag_string[MAX_KWG_STRING_LENGTH];
   // First add the word reversed without the separator.
   for (int i = 0; i < length; i++) {

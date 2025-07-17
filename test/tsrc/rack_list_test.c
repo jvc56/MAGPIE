@@ -5,10 +5,9 @@
 
 #include "test_util.h"
 
-void assert_rack_list_item_count_and_mean(const LetterDistribution *ld,
-                                          const KLV *klv, RackList *rack_list,
-                                          const char *rack_str, uint64_t count,
-                                          double mean) {
+void assert_rack_list_item_count_and_mean(
+    const LetterDistribution *ld, const KLV *klv, const RackList *rack_list,
+    const char *rack_str, const uint64_t count, const double mean) {
   Rack *decoded_rack = rack_create(ld_get_size(ld));
   Rack *rack = rack_create(ld_get_size(ld));
   rack_set_to_string(ld, rack, rack_str);

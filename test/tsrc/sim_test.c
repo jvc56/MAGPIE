@@ -35,18 +35,18 @@
 #include "test_constants.h"
 #include "test_util.h"
 
-void print_sim_stats(Game *game, SimResults *sim_results) {
+void print_sim_stats(const Game *game, SimResults *sim_results) {
   sim_results_sort_plays_by_win_rate(sim_results);
   const LetterDistribution *ld = game_get_ld(game);
   printf("%-20s%-9s%-16s%-16s\n", "Play", "Score", "Win%", "Equity");
   StringBuilder *move_description = string_builder_create();
   for (int i = 0; i < sim_results_get_number_of_plays(sim_results); i++) {
     const SimmedPlay *play = sim_results_get_sorted_simmed_play(sim_results, i);
-    Stat *win_pct_stat = simmed_play_get_win_pct_stat(play);
-    double wp_mean = stat_get_mean(win_pct_stat) * 100.0;
+    const Stat *win_pct_stat = simmed_play_get_win_pct_stat(play);
+    const double wp_mean = stat_get_mean(win_pct_stat) * 100.0;
 
-    Stat *equity_stat = simmed_play_get_equity_stat(play);
-    double eq_mean = stat_get_mean(equity_stat);
+    const Stat *equity_stat = simmed_play_get_equity_stat(play);
+    const double eq_mean = stat_get_mean(equity_stat);
 
     char *wp_str = NULL;
     char *eq_str = NULL;
@@ -57,7 +57,7 @@ void print_sim_stats(Game *game, SimResults *sim_results) {
     eq_str = get_formatted_string("%.3f %.3f", eq_mean, eq_stdev);
 
     const char *is_epigon = simmed_play_get_is_epigon(play) ? "❌" : "";
-    Move *move = simmed_play_get_move(play);
+    const Move *move = simmed_play_get_move(play);
     string_builder_add_move_description(move_description, move, ld);
     printf("%-20s%-9d%-16s%-16s%s\n", string_builder_peek(move_description),
            move_get_score(move), wp_str, eq_str, is_epigon);
@@ -111,7 +111,7 @@ void test_more_iterations(void) {
          EXIT_STATUS_SAMPLE_LIMIT);
   sim_results_sort_plays_by_win_rate(sim_results);
 
-  SimmedPlay *play = sim_results_get_sorted_simmed_play(sim_results, 0);
+  const SimmedPlay *play = sim_results_get_sorted_simmed_play(sim_results, 0);
   StringBuilder *move_string_builder = string_builder_create();
   string_builder_add_move_description(
       move_string_builder, simmed_play_get_move(play), config_get_ld(config));
@@ -173,6 +173,7 @@ void test_sim_threshold(void) {
   ts.tv_sec += timeout_seconds;
 
   pthread_mutex_lock(&mutex);
+  // cppcheck-suppress knownConditionTrueFalse
   while (!done) {
     int ret = pthread_cond_timedwait(&cond, &mutex, &ts);
     if (ret == ETIMEDOUT) {
@@ -191,7 +192,7 @@ void test_sim_threshold(void) {
          EXIT_STATUS_THRESHOLD);
 
   sim_results_sort_plays_by_win_rate(sim_results);
-  SimmedPlay *play = sim_results_get_sorted_simmed_play(sim_results, 0);
+  const SimmedPlay *play = sim_results_get_sorted_simmed_play(sim_results, 0);
   StringBuilder *move_string_builder = string_builder_create();
   string_builder_add_move_description(
       move_string_builder, simmed_play_get_move(play), config_get_ld(config));
@@ -233,6 +234,7 @@ void test_sim_time_limit(void) {
   ts.tv_sec += timeout_seconds;
 
   pthread_mutex_lock(&mutex);
+  // cppcheck-suppress knownConditionTrueFalse
   while (!done) {
     int ret = pthread_cond_timedwait(&cond, &mutex, &ts);
     if (ret == ETIMEDOUT) {
@@ -284,6 +286,7 @@ void test_sim_one_arm_remaining(void) {
   ts.tv_sec += timeout_seconds;
 
   pthread_mutex_lock(&mutex);
+  // cppcheck-suppress knownConditionTrueFalse
   while (!done) {
     int ret = pthread_cond_timedwait(&cond, &mutex, &ts);
     if (ret == ETIMEDOUT) {
@@ -395,7 +398,7 @@ void perf_test_multithread_sim(void) {
   print_sim_stats(config_get_game(config), sim_results);
   sim_results_sort_plays_by_win_rate(sim_results);
 
-  SimmedPlay *play = sim_results_get_sorted_simmed_play(sim_results, 0);
+  const SimmedPlay *play = sim_results_get_sorted_simmed_play(sim_results, 0);
   StringBuilder *move_string_builder = string_builder_create();
   string_builder_add_move_description(
       move_string_builder, simmed_play_get_move(play), config_get_ld(config));
@@ -429,8 +432,9 @@ void test_play_similarity(void) {
   const int best_play_length = move_get_tiles_length(best_play);
   const int num_plays = sim_results_get_number_of_plays(sim_results);
   for (int i = 1; i < num_plays; i++) {
-    SimmedPlay *play_i = sim_results_get_sorted_simmed_play(sim_results, i);
-    Move *move_i = simmed_play_get_move(play_i);
+    const SimmedPlay *play_i =
+        sim_results_get_sorted_simmed_play(sim_results, i);
+    const Move *move_i = simmed_play_get_move(play_i);
     if (move_get_col_start(move_i) == best_play_col &&
         move_get_row_start(move_i) == best_play_row &&
         move_get_tiles_length(move_i) == best_play_length) {
@@ -474,9 +478,9 @@ void test_similar_play_consistency(const int num_threads) {
   assert(status == ERROR_STATUS_SUCCESS);
   assert(thread_control_get_exit_status(config_get_thread_control(config)) ==
          EXIT_STATUS_SAMPLE_LIMIT);
-  SimmedPlay *p1 = sim_results_get_simmed_play(sim_results, 0);
+  const SimmedPlay *p1 = sim_results_get_simmed_play(sim_results, 0);
   const Move *m1 = simmed_play_get_move(p1);
-  SimmedPlay *p2 = sim_results_get_simmed_play(sim_results, 1);
+  const SimmedPlay *p2 = sim_results_get_simmed_play(sim_results, 1);
   const Move *m2 = simmed_play_get_move(p2);
 
   assert(move_get_score(m1) == move_get_score(m2));
@@ -531,12 +535,7 @@ void sim_strategy_stats_commit(SimStrategyStats **stats, int j) {
 // Overwrites the existing file with the new updated stats
 void write_stats_to_file(const char *filename, const char *strategies[],
                          SimStrategyStats **stats, int num_strategies) {
-
-  FILE *output_file = fopen(filename, "w");
-  if (!output_file) {
-    log_fatal("failed to open output file '%s'\n", filename);
-  }
-
+  FILE *output_file = fopen_or_die(filename, "w");
   // Write header row
   fprintf(output_file, "%-20s | %-11s | %-11s | %-11s\n", "Strategy", "Samples",
           "Samples/Sec", "Total Time");
@@ -556,10 +555,7 @@ void write_stats_to_file(const char *filename, const char *strategies[],
 
 void append_game_with_moves_to_file(const char *filename, const Game *game,
                                     const MoveList *move_list) {
-  FILE *output_file = fopen(filename, "a");
-  if (!output_file) {
-    log_fatal("failed to open output file '%s'\n", filename);
-  }
+  FILE *output_file = fopen_or_die(filename, "a");
   StringBuilder *game_string = string_builder_create();
   string_builder_add_game(game_string, game, move_list);
   fprintf(output_file, "%s\n", string_builder_peek(game_string));
@@ -568,10 +564,7 @@ void append_game_with_moves_to_file(const char *filename, const Game *game,
 }
 
 void append_content_to_file(const char *filename, const char *sim_stats_str) {
-  FILE *output_file = fopen(filename, "a");
-  if (!output_file) {
-    log_fatal("failed to open output file '%s'\n", filename);
-  }
+  FILE *output_file = fopen_or_die(filename, "a");
   fprintf(output_file, "%s\n", sim_stats_str);
   fclose_or_die(output_file);
 }
@@ -591,7 +584,7 @@ void test_sim_perf(const char *sim_perf_iters) {
   free(set_threads_cmd);
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   Game *game = config_get_game(config);
-  Bag *bag = game_get_bag(game);
+  const Bag *bag = game_get_bag(game);
   const char *strategies[] = {
       "-sr tt -threads 10",
       "-sr tf -threads 10",
@@ -603,7 +596,7 @@ void test_sim_perf(const char *sim_perf_iters) {
     stats[i] = sim_strategy_stats_create();
   }
   SimResults *sim_results = config_get_sim_results(config);
-  BAIResult *bai_result = sim_results_get_bai_result(sim_results);
+  const BAIResult *bai_result = sim_results_get_bai_result(sim_results);
   ThreadControl *thread_control = config_get_thread_control(config);
   const char *sim_perf_filename = "sim_perf_stats.txt";
   const char *sim_perf_game_details_filename = "sim_perf_game_details.txt";

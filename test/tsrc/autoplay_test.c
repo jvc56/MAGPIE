@@ -135,7 +135,7 @@ void test_autoplay_divergent_games(void) {
   Config *csw_config =
       config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
                            "all -numplays 1  -gp true -threads 11");
-  Game *game;
+  const Game *game;
 
   AutoplayResults *ar = autoplay_results_create();
 

@@ -508,8 +508,8 @@ void load_config_with_game_history(const GameHistory *game_history,
 // Validates that the game event player indexes are
 // aligned with the game and enforces game event sequence
 // logic
-void validate_game_event_order_and_index(GameEvent *game_event,
-                                         GameEvent *previous_game_event,
+void validate_game_event_order_and_index(const GameEvent *game_event,
+                                         const GameEvent *previous_game_event,
                                          int game_player_on_turn_index,
                                          bool game_is_over,
                                          ErrorStack *error_stack) {
@@ -634,7 +634,7 @@ const Rack *get_player_next_rack(GameHistory *game_history,
   int number_of_game_events = game_history_get_number_of_events(game_history);
   for (int game_event_index = initial_game_event_index + 1;
        game_event_index < number_of_game_events; game_event_index++) {
-    GameEvent *game_event =
+    const GameEvent *game_event =
         game_history_get_event(game_history, game_event_index);
     if (game_event_index == initial_game_event_index + 1 &&
         game_event_get_type(game_event) == GAME_EVENT_PHONY_TILES_RETURNED) {
@@ -655,7 +655,7 @@ void play_game_history_turn(GameHistory *game_history, Game *game,
                             ErrorStack *error_stack) {
   GameEvent *game_event =
       game_history_get_event(game_history, game_event_index);
-  GameEvent *previous_game_event = NULL;
+  const GameEvent *previous_game_event = NULL;
   if (game_event_index > 0) {
     previous_game_event =
         game_history_get_event(game_history, game_event_index - 1);
@@ -753,8 +753,9 @@ void play_game_history_turn(GameHistory *game_history, Game *game,
                         game_event_get_score_adjustment(game_event));
     break;
   case GAME_EVENT_PHONY_TILES_RETURNED:;
-    Rack *previous_played_tiles = game_history_player_get_previous_played_tiles(
-        game_history, game_event_player_index);
+    const Rack *previous_played_tiles =
+        game_history_player_get_previous_played_tiles(game_history,
+                                                      game_event_player_index);
     Rack *known_rack_from_phonies =
         game_history_player_get_known_rack_from_phonies(
             game_history, game_event_player_index);
@@ -1630,7 +1631,7 @@ void game_play_to_turn(GameHistory *game_history, Game *game, int turn_index,
   game_history_init_player_phony_calc_racks(game_history, ld_size);
   for (int game_event_index = 0; game_event_index < number_of_game_events;
        game_event_index++) {
-    GameEvent *game_event =
+    const GameEvent *game_event =
         game_history_get_event(game_history, game_event_index);
     current_turn_index += game_event_get_turn_value(game_event);
     if (current_turn_index > turn_index && !game_over(game)) {
@@ -1671,7 +1672,7 @@ void game_play_to_turn(GameHistory *game_history, Game *game, int turn_index,
   }
 
   return_rack_to_bag(game, player_on_turn_index);
-  Rack *player_on_turn_last_known_rack =
+  const Rack *player_on_turn_last_known_rack =
       game_history_player_get_last_known_rack(game_history,
                                               player_on_turn_index);
   if (player_on_turn_last_known_rack &&
@@ -1695,7 +1696,7 @@ void game_play_to_end(GameHistory *game_history, Game *game,
 
 // Assumes the game history is valid
 void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
-               GameHistory *game_history, ErrorStack *error_stack) {
+               const GameHistory *game_history, ErrorStack *error_stack) {
   StringBuilder *gcg_sb = string_builder_create();
   string_builder_add_formatted_string(gcg_sb, "#%s UTF-8\n",
                                       GCG_CHAR_ENCODING_STRING);
@@ -1762,7 +1763,7 @@ void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
   int player_on_turn = 0;
   bool game_is_over = false;
   for (int event_index = 0; event_index < number_of_events; event_index++) {
-    GameEvent *event = game_history_get_event(game_history, event_index);
+    const GameEvent *event = game_history_get_event(game_history, event_index);
     const Rack *rack = game_event_get_rack(event);
     string_builder_add_formatted_string(
         gcg_sb, ">%s: ",

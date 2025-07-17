@@ -90,6 +90,7 @@ static inline void arena_dealloc(Arena *arena, size_t size) {
   arena->size -= size;
 }
 
+// cppcheck-suppress unusedFunction
 static inline void arena_reset(Arena *arena) {
   if (!arena) {
     return;

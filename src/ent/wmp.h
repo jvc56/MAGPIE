@@ -531,11 +531,6 @@ static inline int wmp_write_words_to_buffer(const WMP *wmp, BitRack *bit_rack,
                                          buffer);
 }
 
-static inline bool wmp_has_word(const WMP *wmp, const BitRack *bit_rack,
-                                int word_length) {
-  return wmp_get_word_entry(wmp, bit_rack, word_length) != NULL;
-}
-
 static inline void write_byte_to_stream_or_die(uint8_t byte, FILE *stream,
                                                const char *description) {
   fwrite_or_die(&byte, sizeof(byte), 1, stream, description);

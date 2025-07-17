@@ -294,8 +294,9 @@ void game_runner_destroy(GameRunner *game_runner) {
   free(game_runner);
 }
 
-void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
-                       ThreadControlIterOutput *iter_output,
+void game_runner_start(const AutoplayWorker *autoplay_worker,
+                       GameRunner *game_runner,
+                       const ThreadControlIterOutput *iter_output,
                        int starting_player_index) {
   Game *game = game_runner->game;
   game_reset(game);
@@ -380,7 +381,7 @@ void print_current_status(
       status_sb, "Played %ld games in %.3f seconds.",
       iter_completed_output->iter_count_completed,
       iter_completed_output->time_elapsed);
-  LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
+  const LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
   if (lg_shared_data) {
     string_builder_add_formatted_string(
         status_sb,
@@ -398,8 +399,8 @@ void print_current_status(
   string_builder_destroy(status_sb);
 }
 
-void autoplay_add_game(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
-                       bool divergent) {
+void autoplay_add_game(AutoplayWorker *autoplay_worker,
+                       const GameRunner *game_runner, bool divergent) {
   autoplay_results_add_game(autoplay_worker->autoplay_results,
                             game_runner->game, game_runner->turn_number,
                             divergent, game_runner->seed);
@@ -411,10 +412,9 @@ void autoplay_add_game(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
   }
 }
 
-void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
-                                     GameRunner *game_runner1,
-                                     GameRunner *game_runner2,
-                                     ThreadControlIterOutput *iter_output) {
+void play_autoplay_game_or_game_pair(
+    AutoplayWorker *autoplay_worker, GameRunner *game_runner1,
+    GameRunner *game_runner2, const ThreadControlIterOutput *iter_output) {
   const int starting_player_index = iter_output->iter_count % 2;
   game_runner_start(autoplay_worker, game_runner1, iter_output,
                     starting_player_index);
@@ -522,7 +522,7 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
 }
 
 void parse_min_rack_targets(const AutoplayArgs *args,
-                            StringSplitter *split_min_rack_targets,
+                            const StringSplitter *split_min_rack_targets,
                             int *min_rack_targets, ErrorStack *error_stack) {
   int num_gens = string_splitter_get_number_of_items(split_min_rack_targets);
   for (int i = 0; i < num_gens; i++) {

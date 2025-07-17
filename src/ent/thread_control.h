@@ -46,18 +46,13 @@ bool thread_control_get_next_iter_output(ThreadControl *thread_control,
                                          ThreadControlIterOutput *iter_output);
 void thread_control_set_seed(ThreadControl *thread_control, uint64_t seed);
 void thread_control_increment_seed(ThreadControl *thread_control);
-uint64_t thread_control_get_seed(ThreadControl *thread_control);
+uint64_t thread_control_get_seed(const ThreadControl *thread_control);
 uint64_t thread_control_get_iter_count(const ThreadControl *thread_control);
 void thread_control_reset(ThreadControl *thread_control,
                           uint64_t max_iter_count);
-uint64_t thread_control_get_max_iter_count(const ThreadControl *thread_control);
-void thread_control_increment_max_iter_count(ThreadControl *thread_control,
-                                             uint64_t inc);
 void thread_control_complete_iter(
     ThreadControl *thread_control,
     ThreadControlIterCompletedOutput *iter_completed_output);
-void thread_control_start_timer(ThreadControl *thread_control);
-void thread_control_stop_timer(ThreadControl *thread_control);
 double thread_control_get_seconds_elapsed(const ThreadControl *thread_control);
 void thread_control_copy_to_dst_and_jump(ThreadControl *thread_control,
                                          XoshiroPRNG *dst);

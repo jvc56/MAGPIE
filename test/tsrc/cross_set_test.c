@@ -16,10 +16,10 @@
 #include "test_constants.h"
 #include "test_util.h"
 
-void test_gen_cross_set(Game *game, int row, int col,
+void test_gen_cross_set(const Game *game, int row, int col,
                         const char *expected_cross_set_string,
                         int expected_cross_score) {
-  Board *board = game_get_board(game);
+  const Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
 
   uint64_t expected_cross_set =

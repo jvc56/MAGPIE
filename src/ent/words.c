@@ -28,11 +28,16 @@ struct FormedWords {
   FormedWord words[RACK_SIZE + 1]; // max number of words we can form
 };
 
-FormedWords *formed_words_create(Board *board, Move *move) {
-  int tiles_length = move_get_tiles_length(move);
+FormedWords *formed_words_create(Board *board, const Move *move) {
+  FormedWords *ws = malloc_or_die(sizeof(FormedWords));
+  const int tiles_length = move_get_tiles_length(move);
+  if (tiles_length <= 0) {
+    ws->num_words = 0;
+    return ws;
+  }
+  const int dir = move_get_dir(move);
   int row_start = move_get_row_start(move);
   int col_start = move_get_col_start(move);
-  int dir = move_get_dir(move);
 
   bool board_was_transposed = false;
 
@@ -44,7 +49,6 @@ FormedWords *formed_words_create(Board *board, Move *move) {
     row_start = ph;
   }
 
-  FormedWords *ws = malloc_or_die(sizeof(FormedWords));
   int formed_words_idx = 0;
   MachineLetter main_word[BOARD_DIM];
   int main_word_idx = 0;

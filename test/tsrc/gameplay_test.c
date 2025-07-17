@@ -19,7 +19,7 @@
 #include "test_constants.h"
 #include "test_util.h"
 
-void return_racks_to_bag(Game *game) {
+void return_racks_to_bag(const Game *game) {
   return_rack_to_bag(game, 0);
   return_rack_to_bag(game, 1);
 }
@@ -41,10 +41,9 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
     return_racks_to_bag(actual_game);
 
     const LetterDistribution *ld = game_get_ld(actual_game);
-    Bag *bag = game_get_bag(actual_game);
+    const Bag *bag = game_get_bag(actual_game);
 
-    int player_on_turn_index = game_get_player_on_turn_index(actual_game);
-    int opponent_index = 1 - player_on_turn_index;
+    const int player_on_turn_index = game_get_player_on_turn_index(actual_game);
 
     draw_rack_string_from_bag(actual_game, player_on_turn_index, racks[i]);
     // If it's the last turn, have the opponent draw the remaining tiles
@@ -52,14 +51,14 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
     // than RACK_SIZE tiles, have the opponent draw the remaining tiles
     // so the endgame adjustments are added to the move equity values.
     if (i == array_length - 1 || bag_get_tiles(bag) < RACK_SIZE) {
-      draw_to_full_rack(actual_game, opponent_index);
+      draw_to_full_rack(actual_game, 1 - player_on_turn_index);
     }
 
-    Player *player0 = game_get_player(actual_game, 0);
-    Player *player1 = game_get_player(actual_game, 1);
+    const Player *player0 = game_get_player(actual_game, 0);
+    const Player *player1 = game_get_player(actual_game, 1);
 
-    Rack *player0_rack = player_get_rack(player0);
-    Rack *player1_rack = player_get_rack(player1);
+    const Rack *player0_rack = player_get_rack(player0);
+    const Rack *player1_rack = player_get_rack(player1);
 
     if (i == array_length - 1) {
       player0_score_before_last_move = player_get_score(player0);
@@ -110,8 +109,8 @@ void test_draw_to_full_rack(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
-  Game *game = config_get_game(config);
-  Bag *bag = game_get_bag(game);
+  const Game *game = config_get_game(config);
+  const Bag *bag = game_get_bag(game);
   // Check drawing from the bag
   int drawing_player_index = 0;
   int number_of_remaining_tiles = bag_get_tiles(bag);
@@ -485,15 +484,15 @@ void test_playmove(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
-  Board *board = game_get_board(game);
+  const Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
 
-  Player *player0 = game_get_player(game, 0);
-  Player *player1 = game_get_player(game, 1);
+  const Player *player0 = game_get_player(game, 0);
+  const Player *player1 = game_get_player(game, 1);
 
-  Rack *player0_rack = player_get_rack(player0);
-  Rack *player1_rack = player_get_rack(player1);
+  const Rack *player0_rack = player_get_rack(player0);
+  const Rack *player1_rack = player_get_rack(player1);
 
   // Test play
   draw_rack_string_from_bag(game, 0, "DEKNRTY");
@@ -577,10 +576,10 @@ void test_set_random_rack(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
-  Bag *bag = game_get_bag(game);
+  const Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
 
-  Player *player0 = game_get_player(game, 0);
+  const Player *player0 = game_get_player(game, 0);
 
   Rack *player0_rack = player_get_rack(player0);
 
@@ -625,14 +624,14 @@ void test_backups(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
-  Board *board = game_get_board(game);
-  Bag *bag = game_get_bag(game);
+  const Board *board = game_get_board(game);
+  const Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
 
-  Player *player0 = game_get_player(game, 0);
-  Player *player1 = game_get_player(game, 1);
+  const Player *player0 = game_get_player(game, 0);
+  const Player *player1 = game_get_player(game, 1);
 
-  Rack *player1_rack = player_get_rack(player1);
+  const Rack *player1_rack = player_get_rack(player1);
 
   // draw some random rack.
   draw_rack_string_from_bag(game, 0, "DEKNRTY");

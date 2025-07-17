@@ -98,25 +98,6 @@ uint32_t next_prime(uint32_t n) {
 #endif
 }
 
-int get_min_word_length(const MutableWordMap *word_map) {
-  for (int i = 0; i <= BOARD_DIM; i++) {
-    if (word_map->maps[i].num_word_buckets > 0) {
-      return i;
-    }
-  }
-  return INT_MAX;
-}
-
-int get_max_word_length(const MutableWordMap *word_map) {
-  for (int i = BOARD_DIM; i >= 0; i--) {
-    if (word_map->maps[i].num_word_buckets > 0) {
-      return i;
-    }
-  }
-  log_fatal("no words in word map");
-  return -1;
-}
-
 uint32_t get_number_of_words(const MutableWordsOfSameLengthMap *map,
                              const BitRack *bit_rack) {
   BitRack quotient;

@@ -258,8 +258,9 @@ static inline void game_gen_alpha_cross_set(Game *game, int row, int col,
   board_set_cross_score(board, row, col, dir, cross_set_index, score);
 }
 
-static inline void game_gen_classic_cross_set(Game *game, int row, int col,
-                                              int dir, int cross_set_index) {
+static inline void game_gen_classic_cross_set(const Game *game, int row,
+                                              int col, int dir,
+                                              int cross_set_index) {
   if (!board_is_position_in_bounds(row, col)) {
     return;
   }
@@ -446,10 +447,6 @@ void game_set_starting_player_index(Game *game, int starting_player_index) {
   game->player_on_turn_index = starting_player_index;
 }
 
-void game_set_player_on_turn_index(Game *game, int player_on_turn_index) {
-  game->player_on_turn_index = player_on_turn_index;
-}
-
 void pre_allocate_backups(Game *game) {
   // pre-allocate heap backup structures to make backups as fast as possible.
   const LetterDistribution *ld = game_get_ld(game);
@@ -583,8 +580,8 @@ void game_backup(Game *game) {
     state->player_on_turn_index = game->player_on_turn_index;
     state->starting_player_index = game->starting_player_index;
     state->consecutive_scoreless_turns = game->consecutive_scoreless_turns;
-    Player *player0 = game->players[0];
-    Player *player1 = game->players[1];
+    const Player *player0 = game->players[0];
+    const Player *player1 = game->players[1];
     rack_copy(state->p0rack, player_get_rack(player0));
     state->p0score = player_get_score(player0);
     rack_copy(state->p1rack, player_get_rack(player1));
@@ -599,7 +596,8 @@ void game_unplay_last_move(Game *game) {
   if (game->backup_cursor == 0) {
     log_fatal("cannot unplay last move without a game backup");
   }
-  MinimalGameBackup *state = game->game_backups[game->backup_cursor - 1];
+  // cppcheck-suppress negativeIndex
+  const MinimalGameBackup *state = game->game_backups[game->backup_cursor - 1];
   game->backup_cursor--;
 
   game->consecutive_scoreless_turns = state->consecutive_scoreless_turns;
@@ -644,6 +642,6 @@ void game_destroy(Game *game) {
   free(game);
 }
 
-int game_get_max_scoreless_turns(Game *game) {
+int game_get_max_scoreless_turns(const Game *game) {
   return game->max_scoreless_turns;
 }

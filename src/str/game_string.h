@@ -15,7 +15,7 @@ void string_builder_add_game(StringBuilder *game_string, const Game *game,
 
 char *ucgi_static_moves(const Game *game, const MoveList *move_list);
 
-void print_ucgi_static_moves(Game *game, MoveList *move_list,
+void print_ucgi_static_moves(const Game *game, const MoveList *move_list,
                              ThreadControl *thread_control);
 
 #endif

@@ -17,7 +17,7 @@ struct WinPct {
   unsigned int max_tiles_unseen;
 };
 
-const char *win_pct_get_name(WinPct *wp) { return wp->name; }
+const char *win_pct_get_name(const WinPct *wp) { return wp->name; }
 
 float win_pct_get(const WinPct *wp, int spread_plus_leftover,
                   unsigned int game_unseen_tiles) {
@@ -38,7 +38,7 @@ float win_pct_get(const WinPct *wp, int spread_plus_leftover,
 
 void win_pct_create_internal(const char *win_pct_name,
                              const char *win_pct_filename, WinPct *wp,
-                             StringSplitter *split_win_pct_contents,
+                             const StringSplitter *split_win_pct_contents,
                              ErrorStack *error_stack) {
   wp->max_tiles_unseen =
       string_splitter_get_number_of_items(split_win_pct_contents);

@@ -46,7 +46,7 @@ typedef struct WMPMoveGen {
 
 static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
                                      const LetterDistribution *ld,
-                                     Rack *player_rack, const WMP *wmp) {
+                                     const Rack *player_rack, const WMP *wmp) {
   wmp_move_gen->wmp = wmp;
   if (wmp == NULL || player_rack == NULL || ld == NULL) {
     return;
@@ -192,7 +192,8 @@ wmp_move_gen_restore_playthrough_state(WMPMoveGen *wmp_move_gen) {
       wmp_move_gen->num_tiles_played_through_copy;
 }
 
-static inline bool wmp_move_gen_has_playthrough(WMPMoveGen *wmp_move_gen) {
+static inline bool
+wmp_move_gen_has_playthrough(const WMPMoveGen *wmp_move_gen) {
   return wmp_move_gen->num_tiles_played_through > 0;
 }
 
