@@ -129,8 +129,6 @@ void test_bag(void) {
   assert_bags_are_equal(bag, copy_of_bag, ld_size);
 
   bag_copy(bag, copy_of_bag);
-  tiles_drawn[0] = 0;
-  tiles_drawn[1] = 0;
 
   // One player draws way more than the other
   for (int i = 0; i < (TEST_BAG_SIZE); i++) {
@@ -156,8 +154,6 @@ void test_bag(void) {
   assert(bag_is_empty(bag));
 
   bag_copy(bag, copy_of_bag);
-  tiles_drawn[0] = 0;
-  tiles_drawn[1] = 0;
 
   // Player 1 draws all tiles
   for (int i = 0; i < (TEST_BAG_SIZE); i++) {

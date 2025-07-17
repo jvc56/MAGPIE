@@ -229,7 +229,7 @@ void test_bai_time_limit(int num_threads) {
 // Assumes rng_args are uniform
 void write_bai_input(const double delta, const RandomVariablesArgs *rv_args,
                      const RandomVariablesArgs *rng_args) {
-  FILE *file = fopen("normal_data.txt", "w");
+  FILE *file = fopen_or_die("normal_data.txt", "w");
   fprintf(file, "%0.20f\n", delta);
   fprintf(file, "%" PRIu64 "\n", rv_args->num_rvs);
   for (uint64_t i = 0; i < rv_args->num_rvs; i++) {

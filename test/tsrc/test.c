@@ -52,6 +52,15 @@
 #include "word_test.h"
 #include "zobrist_test.h"
 
+// FIXME: for static analyzer, run something like this and:
+// - cache cppcheck_build
+// - grab latest cppcheck version
+//
+// ~/cppcheck-2.17.1/build/bin/cppcheck --check-level=exhaustive
+// --cppcheck-build-dir=cppcheck_build  --enable=all --force --verbose
+// --inline-suppr --suppress=missingIncludeSystem  --std=c99 --error-exitcode=1
+// -U_WIN32 -U__APPLE__    src/ test/ cmd/
+
 typedef void (*TestFunc)(void);
 
 typedef struct {

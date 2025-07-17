@@ -100,20 +100,6 @@ static inline uint32_t follow_arc(const KLV *klv, uint32_t node_index,
   return kwg_node_arc_index(node);
 }
 
-static inline float reverse_float(const float in_float) {
-  float ret_val;
-  const char *float_to_convert = (char *)&in_float;
-  char *return_float = (char *)&ret_val;
-
-  // swap the bytes into a temporary buffer
-  return_float[0] = float_to_convert[3];
-  return_float[1] = float_to_convert[2];
-  return_float[2] = float_to_convert[1];
-  return_float[3] = float_to_convert[0];
-
-  return ret_val;
-}
-
 static inline int klv_count_words_at(const KLV *klv, uint32_t node_index,
                                      uint32_t kwg_size) {
   if (node_index >= kwg_size) {

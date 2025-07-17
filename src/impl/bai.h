@@ -105,23 +105,25 @@ typedef struct BAISampleArgs {
   bai_threshold_t threshold;
 } BAISampleArgs;
 
-static inline double bai_alt_lambda(const double μ1, const double σ21,
-                                    const double w1, const double μa,
-                                    const double σ2a, const double wa) {
+static inline double bai_alt_lambda(const double mu1, const double sigma21,
+                                    const double w1, const double mua,
+                                    const double sigma2a, const double wa) {
   if (w1 == 0) {
-    return μa;
+    return mua;
   }
-  if (wa == 0 || μ1 == μa) {
-    return μ1;
+  if (wa == 0 || mu1 == mua) {
+    return mu1;
   }
   const double x = wa / w1;
-  const double result = (σ2a * μ1 + x * σ21 * μa) / (σ2a + x * σ21);
+  const double result =
+      (sigma2a * mu1 + x * sigma21 * mua) / (sigma2a + x * sigma21);
   return result;
 }
 
-static inline double bai_d(const double μ, const double σ2, const double λ) {
-  const double diff = μ - λ;
-  return 0.5 * (diff * diff) / σ2;
+static inline double bai_d(const double mu, const double sigma2,
+                           const double lambda) {
+  const double diff = mu - lambda;
+  return 0.5 * (diff * diff) / sigma2;
 }
 
 static inline double bai_get_arm_z(BAISyncData *bai_sync_data,

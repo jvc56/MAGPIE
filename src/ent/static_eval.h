@@ -60,7 +60,7 @@ static inline Equity endgame_outplay_adjustment(Equity opponent_rack_score) {
 static inline Equity standard_endgame_adjustment(const LetterDistribution *ld,
                                                  const Rack *player_leave,
                                                  const Rack *opp_rack) {
-  if (!rack_is_empty(player_leave)) {
+  if (player_leave && !rack_is_empty(player_leave)) {
     // This play is not going out. We should penalize it by our own score
     // plus some constant.
     return endgame_nonoutplay_adjustment(rack_get_score(ld, player_leave));

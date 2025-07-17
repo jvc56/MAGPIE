@@ -1,7 +1,43 @@
-name: run-unit-tests
+name: ci
 on: [push]
 jobs:
-  run-unit-tests:
+  cppcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Run cppcheck static analysis
+        run: |
+          ./run_cppcheck.sh
+
+  clang-tidy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Run clang-tidy static analysis
+        run: |
+          sudo apt-get install -y clang-tidy && ./run_clang_tidy.sh
+
+  circular-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install networkx
+
+      - name: Check circular dependencies
+        run: python3 find_circ_deps.py
+
+  unit-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -30,16 +66,3 @@ jobs:
 
       - name: Run unit tests
         run: ./run u && ./run u 21
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.x"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r github_action_reqs.txt
-
-      - name: Check circular dependencies
-        run: python3 find_circ_deps.py

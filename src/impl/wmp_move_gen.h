@@ -48,7 +48,7 @@ static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
                                      const LetterDistribution *ld,
                                      Rack *player_rack, const WMP *wmp) {
   wmp_move_gen->wmp = wmp;
-  if (wmp == NULL) {
+  if (wmp == NULL || player_rack == NULL || ld == NULL) {
     return;
   }
   wmp_move_gen->player_bit_rack = bit_rack_create_from_rack(ld, player_rack);

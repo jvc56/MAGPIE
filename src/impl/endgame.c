@@ -528,7 +528,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   }
 }
 
-void *solver_worker(void *uncasted_solver_worker) {
+void *solver_worker_start(void *uncasted_solver_worker) {
   EndgameSolverWorker *solver_worker =
       (EndgameSolverWorker *)uncasted_solver_worker;
   EndgameSolver *solver = solver_worker->solver;
@@ -554,7 +554,7 @@ PVLine endgame_solve(EndgameSolver *solver, int plies) {
   for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
     solver_workers[thread_index] =
         endgame_solver_create_worker(solver, thread_index);
-    pthread_create(&worker_ids[thread_index], NULL, solver_worker,
+    pthread_create(&worker_ids[thread_index], NULL, solver_worker_start,
                    solver_workers[thread_index]);
   }
 

@@ -115,7 +115,7 @@ void stats_combine(Stat **stats, int number_of_stats, Stat *combined_stat) {
     combined_num_samples += num_samples;
     combined_mean += stat_get_mean(stats[i]) * num_samples;
   }
-  if (combined_num_samples <= 0) {
+  if (combined_num_samples == 0) {
     combined_stat->num_unique_samples = 0;
     combined_stat->num_samples = 0;
     combined_stat->mean = 0;
