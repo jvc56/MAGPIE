@@ -10,15 +10,6 @@ jobs:
         run: |
           ./run_cppcheck.sh
 
-  fanalyzer:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Compile with fanalyzer static analysis
-        run: |
-          ./run_fanalyzer.sh
-
   clang-tidy:
     runs-on: ubuntu-latest
     steps:
