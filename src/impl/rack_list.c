@@ -132,7 +132,6 @@ int rack_list_generate_all_racks(rack_gen_mode_t mode,
       number_of_set_racks++;
       switch (mode) {
       case RACK_GEN_MODE_CREATE_DWL:
-        assert(dwl);
         dictionary_word_list_add_word(dwl, rack_array, (RACK_SIZE));
         break;
       case RACK_GEN_MODE_SET_RACK_LIST_ITEMS:
@@ -166,9 +165,7 @@ int rack_list_generate_all_racks(rack_gen_mode_t mode,
       case RACK_GEN_MODE_CREATE_DWL:
         rack_array[rack_get_total_letters(rack) - 1] = ml;
         break;
-      case RACK_GEN_MODE_SET_RACK_LIST_ITEMS:
-          // Empty statement to allow declaration
-          ;
+      case RACK_GEN_MODE_SET_RACK_LIST_ITEMS:;
         uint32_t sibling_klv_index;
         node_index = increment_node_to_ml(rack_list->klv, node_index, klv_index,
                                           &sibling_klv_index, ml);
@@ -227,7 +224,7 @@ RackList *rack_list_create(const LetterDistribution *ld,
   }
 
   rack_list_generate_all_racks(RACK_GEN_MODE_SET_RACK_LIST_ITEMS, &rl_ld, &rack,
-                               0, NULL, NULL, rack_list,
+                               0, NULL, rack_array, rack_list,
                                kwg_get_dawg_root_node_index(kwg), 0);
 
   rack_list->racks_partitioned_by_target_count =

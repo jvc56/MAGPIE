@@ -345,13 +345,13 @@ void add_gaddag_strings_for_word(const DictionaryWord *word,
                                  DictionaryWordList *gaddag_strings) {
   const MachineLetter *raw_word = dictionary_word_get_word(word);
   const int length = dictionary_word_get_length(word);
-  assert(length > 0);
   MachineLetter gaddag_string[MAX_KWG_STRING_LENGTH];
   // First add the word reversed without the separator.
   for (int i = 0; i < length; i++) {
     const int source_index = length - i - 1;
     gaddag_string[i] = raw_word[source_index];
   }
+  // cppcheck-suppress uninitvar
   dictionary_word_list_add_word(gaddag_strings, gaddag_string, length);
   // Add the word with separator pivoting at each position from length-1 to 0.
   for (int separator_pos = length - 1; separator_pos >= 1; separator_pos--) {

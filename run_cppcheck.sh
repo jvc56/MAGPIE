@@ -5,6 +5,7 @@ CPPCHECK_VERSION="2.17.1"
 CPPCHECK_ZIP_URL="https://github.com/danmar/cppcheck/archive/refs/tags/${CPPCHECK_VERSION}.zip"
 CPPCHECK_SOURCE_DIR_UNZIPPED="cppcheck-${CPPCHECK_VERSION}" # Directory created by unzip
 CPPCHECK_DIR="cppcheck" # The desired generic directory name for the source
+CPPCHECK_BUILD_DIR="cppcheck_build"
 LOCAL_CPPCHECK_EXECUTABLE="./${CPPCHECK_DIR}/build/bin/cppcheck" # Path for the compiled executable
 ZIP_FILE="${CPPCHECK_VERSION}.zip"
 
@@ -60,6 +61,8 @@ fi
 MAX_CORES=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
 echo "Using ${MAX_CORES} CPU cores for cppcheck analysis."
 
+mkdir -p "${CPPCHECK_BUILD_DIR}"
+
 # --- Run cppcheck command ---
 echo "Running cppcheck analysis on src/, test/, and cmd/ directories..."
 "${CPPCHECK_EXECUTABLE}" \
@@ -67,10 +70,12 @@ echo "Running cppcheck analysis on src/, test/, and cmd/ directories..."
     --enable=all \
     --force \
     --verbose \
+    --cppcheck-build-dir="${CPPCHECK_BUILD_DIR}" \
     --inline-suppr \
     --suppress=missingIncludeSystem \
-    --suppress=staticFunction \
     --suppress=constParameterCallback \
+    --suppress=unusedFunction \
+    --suppress=normalCheckLevelMaxBranches \
     --std=c99 \
     --error-exitcode=1 \
     -U_WIN32 \

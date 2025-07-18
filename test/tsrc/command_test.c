@@ -425,10 +425,10 @@ void test_process_command(const char *arg_string,
       get_formatted_string("./bin/magpie %s", arg_string);
 
   // Reset the contents of output
-  fclose_or_die(fopen(test_output_filename, "w"));
+  fclose_or_die(fopen_or_die(test_output_filename, "w"));
 
-  FILE *output_fh = fopen(test_output_filename, "w");
-  FILE *errorout_fh = fopen(test_outerror_filename, "w");
+  FILE *output_fh = fopen_or_die(test_output_filename, "w");
+  FILE *errorout_fh = fopen_or_die(test_outerror_filename, "w");
 
   io_set_stream_out(output_fh);
   io_set_stream_err(errorout_fh);
@@ -569,8 +569,8 @@ void test_exec_console_command(void) {
   // Reset the contents of input
   unlink(test_input_filename);
 
-  FILE *input_writer = fopen(test_input_filename, "w+");
-  FILE *input_reader = fopen(test_input_filename, "r");
+  FILE *input_writer = fopen_or_die(test_input_filename, "w+");
+  FILE *input_reader = fopen_or_die(test_input_filename, "r");
   io_set_stream_in(input_reader);
 
   char *initial_command = get_formatted_string("cgp %s", EMPTY_CGP);

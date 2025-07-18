@@ -123,7 +123,8 @@ void parse_cgp_board(const Game *game, const char *cgp_board,
 }
 
 void parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
-                                          Game *game, ErrorStack *error_stack) {
+                                          const Game *game,
+                                          ErrorStack *error_stack) {
   for (int player_index = 0; player_index < 2; player_index++) {
     int number_of_letters_added = draw_rack_string_from_bag(
         game, player_index,
@@ -148,7 +149,7 @@ void parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
   }
 }
 
-void parse_cgp_racks(Game *game, const char *cgp_racks,
+void parse_cgp_racks(const Game *game, const char *cgp_racks,
                      ErrorStack *error_stack) {
   StringSplitter *player_racks = split_string(cgp_racks, '/', false);
   if (string_splitter_get_number_of_items(player_racks) != 2) {

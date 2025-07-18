@@ -59,7 +59,6 @@ static inline Equity klv_set_indexed_leave_value(const KLV *klv, uint32_t index,
   return klv->leave_values[index] = value;
 }
 
-// cppcheck-suppress unusedFunction
 static inline uint32_t klv_get_root_node_index(const KLV *klv) {
   const uint32_t dawg_pointer_node = kwg_node(klv->kwg, 0);
   return kwg_node_arc_index(dawg_pointer_node);

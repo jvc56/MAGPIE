@@ -101,7 +101,6 @@ transposition_table_create(double fraction_of_memory) {
   return tt;
 }
 
-// cppcheck-suppress unusedFunction
 static inline void transposition_table_reset(TranspositionTable *tt) {
   // This function resets the transposition table. If you want to reallocate
   // space for it, destroy and recreate it with the new space.

@@ -220,8 +220,6 @@ static inline bool bit_rack_equals(const BitRack *a, const BitRack *b) {
 #endif
 }
 
-// Might be needed for debugging
-// cppcheck-suppress unusedFunction
 static inline Rack *bit_rack_to_rack(const BitRack *bit_rack) {
   Rack *rack = rack_create(BIT_RACK_MAX_ALPHABET_SIZE);
   for (int ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
@@ -383,8 +381,6 @@ static inline BitRack bit_rack_read_12_bytes(const MachineLetter bytes[12]) {
   return bit_rack;
 }
 
-// Might be needed for debugging
-// cppcheck-suppress unusedFunction
 static inline int bit_rack_num_letters(const BitRack *bit_rack) {
   int num_letters = 0;
   for (int ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {

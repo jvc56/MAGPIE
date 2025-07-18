@@ -228,7 +228,6 @@ void test_bai_time_limit(int num_threads) {
 
 // Assumes rv_args are normal predetermined
 // Assumes rng_args are uniform
-// cppcheck-suppress unusedFunction
 void write_bai_input(const double delta, const RandomVariablesArgs *rv_args,
                      const RandomVariablesArgs *rng_args) {
   FILE *file = fopen_or_die("normal_data.txt", "w");

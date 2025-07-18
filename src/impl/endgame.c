@@ -251,7 +251,6 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
 }
 
 // XXX: Move this debug helper to a utility function or something.
-// cppcheck-suppress unusedFunction
 char *create_spaces(int depth) {
   // Allocate memory for the string of spaces (+1 for the null terminator)
   char *spaces = (char *)malloc_or_die(depth + 1);
