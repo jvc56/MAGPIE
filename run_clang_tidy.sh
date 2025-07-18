@@ -4,7 +4,14 @@ echo "clang-tidy version:"
 clang-tidy --version
 
 SEARCH_DIRECTORIES="src/ test/ cmd/"
-CLANG_TIDY_CHECKS="bugprone-*,readability-*,performance-*,portability-*,clang-analyzer-*"
+CLANG_TIDY_CHECKS="*,
+                  -readability-magic-numbers,
+                  -cppcoreguidelines-avoid-magic-numbers,
+                  -hicpp-signed-bitwise,
+                  -hicpp-multiway-paths-covered,
+                  -cppcoreguidelines-init-variables,
+                  -clang-analyzer-core.uninitialized.Assign,
+                  -clang-analyzer-core.uninitialized.UndefReturn"
 C_COMPILER_FLAGS="-std=c99"
 LOG_FILE=$(mktemp)
 # Ensure the temporary log file is removed when the script exits,
@@ -31,7 +38,9 @@ CLANG_TIDY_COMMAND_FAILED=0
 find $SEARCH_DIRECTORIES -name "*.c" -print0 | while IFS= read -r -d $'\0' C_FILE; do
     echo "Analyzing: $C_FILE"
 
-    CLANG_TIDY_CMD="clang-tidy \"$C_FILE\" -checks=\"$CLANG_TIDY_CHECKS\" -- $C_COMPILER_FLAGS"
+    CLANG_TIDY_CMD="clang-tidy \"$C_FILE\" \
+        -checks=\"$CLANG_TIDY_CHECKS\" \
+        -- $C_COMPILER_FLAGS"
 
     # Execute clang-tidy for the current file
     # Redirect stderr to stdout (2>&1) and pipe to tee.

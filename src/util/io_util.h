@@ -204,8 +204,8 @@ typedef enum {
 #define log_warn(...) log_with_info(LOG_WARN, __FILE__, __LINE__, __VA_ARGS__)
 #define log_fatal(...) log_with_info(LOG_FATAL, __FILE__, __LINE__, __VA_ARGS__)
 
-void log_with_info(log_level_t log_level, const char *file, int line,
-                   const char *fmt, ...);
+void log_with_info(log_level_t log_level, const char *caller_filename,
+                   int caller_line, const char *fmt, ...);
 
 void write_to_stream_out(const char *fmt, ...);
 void write_to_stream_err(const char *fmt, ...);
@@ -242,8 +242,8 @@ void *realloc_or_die(void *realloc_target, size_t size);
 typedef struct ErrorStack ErrorStack;
 
 ErrorStack *error_stack_create(void);
-void error_stack_destroy(ErrorStack *error_status);
-void error_stack_push(ErrorStack *error_status, error_code_t error_code,
+void error_stack_destroy(ErrorStack *error_stack);
+void error_stack_push(ErrorStack *error_stack, error_code_t error_code,
                       char *msg);
 error_code_t error_stack_top(ErrorStack *error_stack);
 char *error_stack_get_string_and_reset(ErrorStack *error_stack);

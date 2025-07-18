@@ -570,7 +570,13 @@ void append_content_to_file(const char *filename, const char *sim_stats_str) {
 }
 
 void test_sim_perf(const char *sim_perf_iters) {
-  const int num_iters = atoi(sim_perf_iters);
+  ErrorStack *error_stack = error_stack_create();
+  const int num_iters = string_to_int(sim_perf_iters, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("Invalid number of iterations: %s\n", sim_perf_iters);
+  }
+  error_stack_destroy(error_stack);
   if (num_iters < 0) {
     log_fatal("Invalid number of iterations: %s\n", sim_perf_iters);
   }

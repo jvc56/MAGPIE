@@ -53,6 +53,4 @@ void simulate(const SimArgs *sim_args, SimResults *sim_results,
   rvs_destroy(rvs);
   rvs_destroy(rng);
   gen_destroy_cache();
-
-  return;
 }

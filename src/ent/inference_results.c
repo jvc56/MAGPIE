@@ -147,8 +147,8 @@ LeaveRackList *inference_results_get_leave_rack_list(
 
 int get_letter_subtotal_index(MachineLetter letter, int number_of_letters,
                               inference_subtotal_t subtotal_type) {
-  return (letter * 2 * (RACK_SIZE)) + ((number_of_letters - 1) * 2) +
-         subtotal_type;
+  return (int)((letter * 2 * (RACK_SIZE)) + ((number_of_letters - 1) * 2) +
+               subtotal_type);
 }
 
 uint64_t inference_results_get_subtotal(const InferenceResults *results,
@@ -231,7 +231,8 @@ double get_probability_for_random_minimum_draw(
       rack_get_total_letters(bag_as_rack);
   const uint8_t total_number_of_letters_on_rack =
       rack_get_total_letters(target_rack);
-  int number_of_this_letter_in_bag = rack_get_letter(bag_as_rack, this_letter);
+  int number_of_this_letter_in_bag =
+      (int)rack_get_letter(bag_as_rack, this_letter);
 
   // If there are not enough letters to meet the minimum, the probability
   // is trivially 0.

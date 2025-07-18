@@ -188,6 +188,7 @@ static inline void bit_rack_div_mod_no_intrinsic(const BitRack *bit_rack,
 
 static inline void bit_rack_div_mod(const BitRack *bit_rack, uint32_t divisor,
                                     BitRack *quotient, uint32_t *remainder) {
+  assert(divisor != 0);
 #if USE_INT128_INTRINSIC
   *quotient = *bit_rack / divisor;
   *remainder = *bit_rack % divisor;

@@ -347,7 +347,8 @@ void string_builder_ucgi_add_inference_record(
       inference_record_type, total_draws, inference_record_type, total_leaves,
       inference_record_type, stat_get_mean(equity_values),
       inference_record_type, stat_get_stdev(equity_values));
-  for (int i = 0; i < (int)ld_get_size(ld); i++) {
+  const int ld_size = ld_get_size(ld);
+  for (int i = 0; i < ld_size; i++) {
     string_builder_ucgi_add_letter_line(
         ld, inference_results, inference_stat_type, rack, bag_as_rack,
         ucgi_string_builder, letter_stat, i,

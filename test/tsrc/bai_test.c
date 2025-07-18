@@ -394,7 +394,13 @@ void test_bai_input_from_file(const char *bai_input_filename,
   };
   RandomVariables *rng = rvs_create(&rng_args);
 
-  const int pi = atoi(bai_params_index);
+  ErrorStack *error_stack = error_stack_create();
+  const int pi = string_to_int(bai_params_index, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("Invalid BAI params index: %s\n", bai_params_index);
+  }
+  error_stack_destroy(error_stack);
   if (pi < 0 || pi >= num_strategies_entries) {
     log_fatal("Invalid BAI params index: %s\n", bai_params_index);
     return;
@@ -441,7 +447,8 @@ void test_bai_from_seed(const char *bai_seed) {
 
   XoshiroPRNG *prng = prng_create(seed);
 
-  const int num_rvs = prng_get_random_number(prng, 20) + 2;
+  const uint64_t num_rvs =
+      prng_get_random_number(prng, (uint64_t)20) + (uint64_t)2;
   const uint64_t rv_seed = prng_get_random_number(prng, UINT64_MAX);
   const uint64_t rng_seed = prng_get_random_number(prng, UINT64_MAX);
 
@@ -450,7 +457,7 @@ void test_bai_from_seed(const char *bai_seed) {
   for (int i = 0; i < NUM_UNIQUE_MEANS; i++) {
     means_map[i] = 0;
   }
-  for (int i = 0; i < num_rvs * 2; i++) {
+  for (uint64_t i = 0; i < num_rvs * 2; i++) {
     double value;
     if (i % 2 == 1) {
       value = (double)(prng_get_random_number(prng, 10) + 1);

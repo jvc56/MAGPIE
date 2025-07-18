@@ -31,7 +31,7 @@ struct PlayersData {
 
 int players_data_get_player_data_index(players_data_t players_data_type,
                                        int player_index) {
-  return players_data_type * 2 + player_index;
+  return (int)players_data_type * 2 + player_index;
 }
 
 void players_data_set_name(PlayersData *players_data, int player_index,

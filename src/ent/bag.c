@@ -38,7 +38,8 @@ void bag_shuffle(Bag *bag) {
   if (tiles_remaining > 1) {
     int i;
     for (i = bag->start_tile_index; i < bag->end_tile_index - 1; i++) {
-      int j = i + prng_get_random_number(bag->prng, bag->end_tile_index - i);
+      int j =
+          i + (int)prng_get_random_number(bag->prng, bag->end_tile_index - i);
       int t = bag->tiles[j];
       bag->tiles[j] = bag->tiles[i];
       bag->tiles[i] = t;

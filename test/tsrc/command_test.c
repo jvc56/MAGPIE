@@ -101,7 +101,8 @@ void main_args_destroy(MainArgs *main_args) {
 double nap(double const seconds) {
   long const secs = (long)seconds;
   double const frac = seconds - (double)secs;
-  struct timespec req, rem;
+  struct timespec req;
+  struct timespec rem;
   int result;
 
   if (seconds <= 0.0) {
@@ -135,9 +136,8 @@ void block_for_search(Config *config, int max_seconds) {
     free(search_status);
     if (search_is_finished) {
       break;
-    } else {
-      nap(DEFAULT_NAP_TIME);
     }
+    nap(DEFAULT_NAP_TIME);
     seconds_elapsed += DEFAULT_NAP_TIME;
     if (seconds_elapsed >= (double)max_seconds) {
       log_fatal("Test aborted after searching for %d seconds\n", max_seconds);
@@ -151,9 +151,8 @@ void block_for_process_command(ProcessArgs *process_args, int max_seconds) {
   while (1) {
     if (get_process_args_finished(process_args)) {
       break;
-    } else {
-      nap(DEFAULT_NAP_TIME);
     }
+    nap(DEFAULT_NAP_TIME);
     seconds_elapsed += DEFAULT_NAP_TIME;
     if (seconds_elapsed >= (double)max_seconds) {
       log_fatal("Test aborted after processing for %d seconds\n", max_seconds);

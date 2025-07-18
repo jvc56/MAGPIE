@@ -129,7 +129,7 @@ uint64_t mutable_node_hash_value(MutableNode *node, MutableNodeList *nodes,
   }
   uint64_t hash_with_just_children = 0;
 
-  for (MachineLetter i = 0; i < node->children.count; i++) {
+  for (size_t i = 0; i < node->children.count; i++) {
     uint64_t child_hash = 0;
     const int child_index = node->children.indices[i];
     if (child_index != 0) {

@@ -550,9 +550,7 @@ void execute_fatal(Config *config,
 
 // Used for commands that only update the config state
 void execute_noop(Config __attribute__((unused)) * config,
-                  ErrorStack __attribute__((unused)) * error_stack) {
-  return;
-}
+                  ErrorStack __attribute__((unused)) * error_stack) {}
 
 char *get_status_finished_str(const Config *config) {
   return get_formatted_string("%s %s\n", COMMAND_FINISHED_KEYWORD,
@@ -1178,9 +1176,8 @@ void config_load_parsed_args(Config *config,
                            get_formatted_string(
                                "encountered unexpected command: %s", arg_name));
           return;
-        } else {
-          config->exec_parg_token = current_arg_token;
         }
+        config->exec_parg_token = current_arg_token;
       }
       current_value_index = 0;
     } else {
@@ -1461,10 +1458,8 @@ void config_load_lexicon_dependent_data(Config *config,
           error_stack, ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING,
           string_duplicate("cannot set leaves, letter distribition, or word "
                            "maps without a lexicon"));
-      return;
-    } else {
-      return;
     }
+    return;
   }
 
   const bool lex_lex_is_compat = lex_lex_compat(
@@ -1729,12 +1724,13 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   const char *new_max_equity_diff_double =
       config_get_parg_value(config, ARG_TOKEN_MAX_EQUITY_DIFF, 0);
   if (new_max_equity_diff_double) {
-    double max_equity_diff_double;
+    double max_equity_diff_double = NAN;
     config_load_double(config, ARG_TOKEN_MAX_EQUITY_DIFF, 0, EQUITY_MAX_DOUBLE,
                        &max_equity_diff_double, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
+    assert(!isnan(max_equity_diff_double));
     config->max_equity_diff = double_to_equity(max_equity_diff_double);
   }
 

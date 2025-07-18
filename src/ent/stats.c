@@ -39,13 +39,12 @@ void stat_push(Stat *stat, double value, uint64_t value_num_samples) {
   stat->num_unique_samples++;
   stat->num_samples += value_num_samples;
   double old_mean = stat->mean;
-  double value_minus_old_mean = ((double)value) - old_mean;
+  double value_minus_old_mean = value - old_mean;
   stat->mean = old_mean + (((double)value_num_samples) / stat->num_samples) *
                               value_minus_old_mean;
   stat->sum_of_mean_differences_squared =
       stat->sum_of_mean_differences_squared +
-      ((double)value_num_samples) * value_minus_old_mean *
-          (((double)value) - stat->mean);
+      ((double)value_num_samples) * value_minus_old_mean * (value - stat->mean);
 }
 
 uint64_t stat_get_num_unique_samples(const Stat *stat) {

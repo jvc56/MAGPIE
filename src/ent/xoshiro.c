@@ -121,7 +121,7 @@ void prng_jump(XoshiroPRNG *prng) {
   uint64_t s1 = 0;
   uint64_t s2 = 0;
   uint64_t s3 = 0;
-  for (unsigned long i = 0; i < sizeof JUMP / sizeof *JUMP; i++)
+  for (unsigned long i = 0; i < sizeof(JUMP) / sizeof(*JUMP); i++) {
     for (int b = 0; b < 64; b++) {
       if (JUMP[i] & UINT64_C(1) << b) {
         s0 ^= prng->s[0];
@@ -131,7 +131,7 @@ void prng_jump(XoshiroPRNG *prng) {
       }
       prng_next(prng);
     }
-
+  }
   prng->s[0] = s0;
   prng->s[1] = s1;
   prng->s[2] = s2;
@@ -151,7 +151,7 @@ void prng_long_jump(XoshiroPRNG *prng) {
   uint64_t s1 = 0;
   uint64_t s2 = 0;
   uint64_t s3 = 0;
-  for (unsigned long i = 0; i < sizeof LONG_JUMP / sizeof *LONG_JUMP; i++)
+  for (unsigned long i = 0; i < sizeof(LONG_JUMP) / sizeof(*LONG_JUMP); i++) {
     for (int b = 0; b < 64; b++) {
       if (LONG_JUMP[i] & UINT64_C(1) << b) {
         s0 ^= prng->s[0];
@@ -161,7 +161,7 @@ void prng_long_jump(XoshiroPRNG *prng) {
       }
       prng_next(prng);
     }
-
+  }
   prng->s[0] = s0;
   prng->s[1] = s1;
   prng->s[2] = s2;

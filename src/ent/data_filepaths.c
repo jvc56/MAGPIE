@@ -10,9 +10,8 @@
 #define KWG_EXTENSION ".kwg"
 #define WORDMAP_EXTENSION ".wmp"
 #define KLV_EXTENSION ".klv2"
-#define LAYOUT_EXTENSION ".txt"
-#define WIN_PCT_EXTENSION ".csv"
-#define LD_EXTENSION ".csv"
+#define TXT_EXTENSION ".txt"
+#define CSV_EXTENSION ".csv"
 #define GCG_EXTENSION ".gcg"
 #define LEAVES_EXTENSION ".csv"
 #define LEXICON_EXTENSION ".txt"
@@ -65,20 +64,16 @@ char *get_filepath(const char *data_path, const char *data_name,
     file_ext = KLV_EXTENSION;
     break;
   case DATA_FILEPATH_TYPE_LAYOUT:
-    file_ext = LAYOUT_EXTENSION;
+    file_ext = TXT_EXTENSION;
     break;
   case DATA_FILEPATH_TYPE_WIN_PCT:
-    file_ext = WIN_PCT_EXTENSION;
-    break;
   case DATA_FILEPATH_TYPE_LD:
-    file_ext = LD_EXTENSION;
+    file_ext = CSV_EXTENSION;
     break;
   case DATA_FILEPATH_TYPE_GCG:
     file_ext = GCG_EXTENSION;
     break;
   case DATA_FILEPATH_TYPE_LEAVES:
-    file_ext = LEAVES_EXTENSION;
-    break;
   case DATA_FILEPATH_TYPE_LEXICON:
     file_ext = LEXICON_EXTENSION;
     break;
@@ -165,7 +160,6 @@ char *data_filepaths_get_writable_filename(const char *data_paths,
                                           filepath_type_names[type]));
     return NULL;
   }
-  char *writable_filepath;
 
   if (!data_paths) {
     error_stack_push(
@@ -176,7 +170,7 @@ char *data_filepaths_get_writable_filename(const char *data_paths,
     return NULL;
   }
   char *first_data_path = cut_off_after_first_char(data_paths, ':');
-  writable_filepath = get_filepath(first_data_path, data_name, type);
+  char *writable_filepath = get_filepath(first_data_path, data_name, type);
   free(first_data_path);
   // File already exists and is not writable
   if (access(writable_filepath, F_OK) == 0 &&

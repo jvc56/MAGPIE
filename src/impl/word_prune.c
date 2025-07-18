@@ -14,7 +14,8 @@ int compare_board_rows(const void *a, const void *b) {
   for (int i = 0; i < BOARD_DIM; i++) {
     if (row_a->letters[i] < row_b->letters[i]) {
       return -1;
-    } else if (row_a->letters[i] > row_b->letters[i]) {
+    }
+    if (row_a->letters[i] > row_b->letters[i]) {
       return 1;
     }
   }

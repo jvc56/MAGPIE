@@ -153,8 +153,8 @@ double rv_normal_sample(RandomVariables *rvs, const uint64_t k,
                         BAILogger __attribute__((unused)) * bai_logger) {
   // Implements the Box-Muller transform
   RVNormal *rv_normal = (RVNormal *)rvs->data;
-  double u, s;
-  s = 2.0;
+  double u;
+  double s = 2.0;
   while (s >= 1.0 || s == 0.0) {
     u = 2.0 * uniform_sample(rv_normal->xoshiro_prng) - 1.0;
     const double v = 2.0 * uniform_sample(rv_normal->xoshiro_prng) - 1.0;
@@ -234,7 +234,7 @@ double rv_normal_predetermined_sample(RandomVariables *rvs, const uint64_t k,
   const double result = mean + sqrt(sigma2) * sample;
   bai_logger_log_title(bai_logger, "DETERMINISTIC_SAMPLE");
   bai_logger_log_int(bai_logger, "index", index + 1);
-  bai_logger_log_int(bai_logger, "arm", k + 1);
+  bai_logger_log_int(bai_logger, "arm", (int)k + 1);
   bai_logger_log_double(bai_logger, "s", result);
   bai_logger_log_double(bai_logger, "u", mean);
   bai_logger_log_double(bai_logger, "sigma2", sigma2);

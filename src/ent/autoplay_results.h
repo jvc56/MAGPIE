@@ -35,12 +35,12 @@ void autoplay_results_add_game(AutoplayResults *autoplay_results,
                                const Game *game, uint64_t turns, bool divergent,
                                uint64_t seed);
 void autoplay_results_finalize(AutoplayResults **autoplay_results_list,
-                               int list_size, AutoplayResults *target);
+                               int list_size, AutoplayResults *primary);
 char *autoplay_results_to_string(AutoplayResults *autoplay_results,
                                  bool human_readable, bool show_divergent);
 void string_builder_add_winning_player_confidence(StringBuilder *sb,
-                                                  double p0_win_pct,
-                                                  double p1_win_pct,
+                                                  double p0_total,
+                                                  double p1_total,
                                                   uint64_t total_games);
 void autoplay_results_set_write_buffer_size(AutoplayResults *autoplay_results,
                                             int write_buffer_size);

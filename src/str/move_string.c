@@ -66,11 +66,13 @@ void string_builder_add_move(StringBuilder *string_builder, const Board *board,
   }
 
   if (board_is_dir_vertical(move_get_dir(move))) {
-    string_builder_add_char(string_builder, move_get_col_start(move) + 'A');
+    string_builder_add_char(string_builder,
+                            (char)move_get_col_start(move) + 'A');
     string_builder_add_int(string_builder, move_get_row_start(move) + 1);
   } else {
     string_builder_add_int(string_builder, move_get_row_start(move) + 1);
-    string_builder_add_char(string_builder, move_get_col_start(move) + 'A');
+    string_builder_add_char(string_builder,
+                            (char)move_get_col_start(move) + 'A');
   }
 
   string_builder_add_spaces(string_builder, 1);

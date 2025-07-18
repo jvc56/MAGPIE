@@ -88,8 +88,9 @@ int dictionary_word_compare(const void *a, const void *b) {
     if (dictionary_word_get_word(word_a)[i] <
         dictionary_word_get_word(word_b)[i]) {
       return -1;
-    } else if (dictionary_word_get_word(word_a)[i] >
-               dictionary_word_get_word(word_b)[i]) {
+    }
+    if (dictionary_word_get_word(word_a)[i] >
+        dictionary_word_get_word(word_b)[i]) {
       return 1;
     }
   }
@@ -98,7 +99,8 @@ int dictionary_word_compare(const void *a, const void *b) {
   // the shorter word is considered "less" than the longer one
   if (length_a < length_b) {
     return -1;
-  } else if (length_a > length_b) {
+  }
+  if (length_a > length_b) {
     return 1;
   }
   return 0;

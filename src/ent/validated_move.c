@@ -196,16 +196,16 @@ void validate_tiles_played_with_mls(const Board *board,
           string_duplicate("move tiles are not connected to existing board "
                            "tiles or do not occupy the start square"));
       return;
-    } else if (tiles_played > (RACK_SIZE)) {
+    }
+    if (tiles_played > (RACK_SIZE)) {
       error_stack_push(
           error_stack, ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_OVERFLOW,
           get_formatted_string(
               "more tiles played (%d) than can fit in the rack (%d)",
               tiles_played, RACK_SIZE));
       return;
-    } else {
-      move_set_tiles_played(move, tiles_played);
     }
+    move_set_tiles_played(move, tiles_played);
   }
 }
 
@@ -214,7 +214,7 @@ void validate_tiles_played(const LetterDistribution *ld, const Board *board,
                            Move *move, const char *tiles_played,
                            Rack *tiles_played_rack, bool allow_playthrough,
                            ErrorStack *error_stack) {
-  int machine_letters_size = string_length(tiles_played) + 1;
+  size_t machine_letters_size = string_length(tiles_played) + 1;
   MachineLetter *machine_letters =
       malloc_or_die(sizeof(MachineLetter) * machine_letters_size);
   int number_of_machine_letters =

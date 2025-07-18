@@ -73,7 +73,7 @@ FormedWords *formed_words_create(Board *board, const Move *move) {
 
     if (fresh_tile && actual_cross_word) {
       // Search for a word
-      int rbegin, rend;
+      int rbegin;
       for (rbegin = row_start - 1; rbegin >= 0; rbegin--) {
         if (board_is_empty(board, rbegin, col_start + idx)) {
           rbegin++;
@@ -83,7 +83,7 @@ FormedWords *formed_words_create(Board *board, const Move *move) {
       if (rbegin < 0) {
         rbegin = 0;
       }
-
+      int rend;
       for (rend = rbegin; rend < BOARD_DIM; rend++) {
         if (rend != row_start && board_is_empty(board, rend, col_start + idx)) {
           rend--;
@@ -194,9 +194,8 @@ bool is_word_valid(const FormedWord *w, const KWG *kwg, bool is_wordsmog) {
   }
   if (is_wordsmog) {
     return is_word_valid_alpha(w, kwg);
-  } else {
-    return is_word_valid_standard(w, kwg);
   }
+  return is_word_valid_standard(w, kwg);
 }
 
 void formed_words_populate_validities(const KWG *kwg, FormedWords *ws,

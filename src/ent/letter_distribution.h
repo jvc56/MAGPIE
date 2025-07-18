@@ -314,7 +314,7 @@ static inline bool char_is_playthrough(const char c) {
 static inline int ld_str_to_mls(const LetterDistribution *ld, const char *str,
                                 bool allow_played_through_marker,
                                 MachineLetter *mls, size_t mls_size) {
-
+  assert(str != NULL);
   int num_mls = 0;
   size_t num_bytes = string_length(str);
   // Use +1 for the null terminator

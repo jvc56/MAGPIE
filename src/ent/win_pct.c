@@ -61,7 +61,8 @@ void win_pct_create_internal(const char *win_pct_name,
   for (unsigned int tiles_unseen_index = 0;
        tiles_unseen_index < wp->max_tiles_unseen; tiles_unseen_index++) {
     split_tiles_remaining_row = split_string_by_whitespace(
-        string_splitter_get_item(split_win_pct_contents, tiles_unseen_index),
+        string_splitter_get_item(split_win_pct_contents,
+                                 (int)tiles_unseen_index),
         true);
     int num_spreads_in_row =
         string_splitter_get_number_of_items(split_tiles_remaining_row) - 1;
@@ -139,7 +140,7 @@ void win_pct_create_internal(const char *win_pct_name,
         array[tiles_unseen_index][spread_index] =
             total_win_score / (float)(total_games_for_tiles_remaining * 2);
       }
-      prev_nonzero_total_games_index = tiles_unseen_index;
+      prev_nonzero_total_games_index = (int)tiles_unseen_index;
     }
     string_splitter_destroy(split_tiles_remaining_row);
     split_tiles_remaining_row = NULL;

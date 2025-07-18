@@ -321,7 +321,7 @@ static inline void record_exchange(MoveGen *gen) {
 
   int tiles_exchanged = 0;
 
-  for (MachineLetter ml = 0; ml < rack_get_dist_size(&gen->player_rack); ml++) {
+  for (uint16_t ml = 0; ml < rack_get_dist_size(&gen->player_rack); ml++) {
     const int8_t num_this = rack_get_letter(&gen->player_rack, ml);
     for (int i = 0; i < num_this; i++) {
       gen->exchange_strip[tiles_exchanged] = ml;
@@ -1383,7 +1383,8 @@ void shadow_by_orientation(MoveGen *gen) {
 
 static inline void set_descending_tile_scores(MoveGen *gen) {
   int i = 0;
-  for (int j = 0; j < (int)ld_get_size(&gen->ld); j++) {
+  const int ld_size = ld_get_size(&gen->ld);
+  for (int j = 0; j < ld_size; j++) {
     const MachineLetter j_score_order = ld_get_score_order(&gen->ld, j);
     for (int k = 0; k < rack_get_letter(&gen->player_rack, j_score_order);
          k++) {

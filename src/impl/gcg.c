@@ -307,7 +307,8 @@ gcg_token_t find_matching_gcg_token(GCGParser *gcg_parser,
                 (MAX_GROUPS), gcg_parser->matching_groups, 0);
     if (!regexec_result) {
       return gcg_parser->token_regex_pairs[i]->token;
-    } else if (regexec_result != REG_NOMATCH) {
+    }
+    if (regexec_result != REG_NOMATCH) {
       char msgbuf[100];
       regerror(regexec_result, &gcg_parser->token_regex_pairs[i]->regex, msgbuf,
                sizeof(msgbuf));
@@ -1545,7 +1546,6 @@ void draw_initial_racks(Game *game, GameHistory *game_history,
       }
     }
   }
-  return;
 }
 
 void parse_gcg_with_parser(GCGParser *gcg_parser, const char *gcg_string,

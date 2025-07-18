@@ -138,10 +138,9 @@ bool load_and_exec_config_or_die_timed(Config *config, const char *cmd,
 
     // If the function completes within the time limit, return true
     return true;
-  } else {
-    // If longjmp is called, the function exceeded the time limit
-    return false;
   }
+  // If longjmp is called, the function exceeded the time limit
+  return false;
 }
 
 char *cross_set_to_string(const LetterDistribution *ld, uint64_t input) {
@@ -672,10 +671,10 @@ void load_game_with_test_board(Game *game, const char *data_paths,
 }
 
 char *remove_parentheses(const char *input) {
-  int len = strlen(input);
+  size_t len = strlen(input);
   char *result = (char *)malloc_or_die((len + 1) * sizeof(char));
   int j = 0;
-  for (int i = 0; i < len; i++) {
+  for (size_t i = 0; i < len; i++) {
     if (input[i] != '(' && input[i] != ')') {
       result[j++] = input[i];
     }

@@ -22,12 +22,12 @@ Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play);
 int simmed_play_get_id(const SimmedPlay *simmed_play);
 bool simmed_play_get_is_epigon(const SimmedPlay *simmed_play);
 void simmed_play_set_is_epigon(SimmedPlay *simmed_play);
-uint64_t simmed_play_get_seed(SimmedPlay *sp);
-void simmed_play_add_score_stat(SimmedPlay *sp, Equity score, bool is_bingo,
-                                int ply);
-void simmed_play_add_equity_stat(SimmedPlay *sp, Equity initial_spread,
+uint64_t simmed_play_get_seed(SimmedPlay *simmed_play);
+void simmed_play_add_score_stat(SimmedPlay *simmed_play, Equity score,
+                                bool is_bingo, int ply);
+void simmed_play_add_equity_stat(SimmedPlay *simmed_play, Equity initial_spread,
                                  Equity spread, Equity leftover);
-double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *sp,
+double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
                                     Equity spread, Equity leftover,
                                     game_end_reason_t game_end_reason,
                                     int game_unseen_tiles, bool plies_are_odd);

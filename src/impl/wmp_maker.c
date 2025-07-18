@@ -451,7 +451,7 @@ uint32_t compute_min_num_buckets(const LetterDistribution *ld) {
   const uint64_t high64 = bit_rack_get_high_64(&bit_rack);
   const int num_quotient_bits = WMP_QUOTIENT_BYTES * 8;
   const uint64_t max_quotient_high = (1ULL << (num_quotient_bits - 64)) - 1;
-  const int divisor = (high64 / max_quotient_high) + 1;
+  const uint32_t divisor = (high64 / max_quotient_high) + 1;
   BitRack actual_quotient;
   uint32_t remainder;
   bit_rack_div_mod(&bit_rack, divisor, &actual_quotient, &remainder);
