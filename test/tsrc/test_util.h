@@ -79,7 +79,7 @@ void klv_write_to_csv_or_die(KLV *klv, const LetterDistribution *ld,
 char *get_string_from_file_or_die(const char *filename);
 void set_row(const Game *game, const int row, const char *row_content);
 void assert_board_layout_error(const char *data_paths,
-                               const char *board_layout_filename,
+                               const char *board_layout_name,
                                error_code_t expected_status);
 void load_game_with_test_board(Game *game, const char *data_paths,
                                const char *board_layout_name);

@@ -243,5 +243,4 @@ void test_autoplay(void) {
   test_autoplay_divergent_games();
   test_autoplay_win_pct_record();
   test_autoplay_leaves_record();
-  return;
 }

@@ -11,8 +11,11 @@ CLANG_TIDY_CHECKS="*,
                   -hicpp-multiway-paths-covered,
                   -cppcoreguidelines-init-variables,
                   -clang-analyzer-core.uninitialized.Assign,
-                  -clang-analyzer-core.uninitialized.UndefReturn"
-C_COMPILER_FLAGS="-std=c99"
+                  -clang-analyzer-core.uninitialized.UndefReturn,
+                  -clang-diagnostic-unknown-escape-sequence"
+CLANG_TIDY_EXCLUDE_HEADER_FILTER="*timer.h"
+# Use -D_POSIX_C_SOURCE=199309L to make timer.h compile
+C_COMPILER_FLAGS="-std=c99 -D_POSIX_C_SOURCE=200809L"
 LOG_FILE=$(mktemp)
 # Ensure the temporary log file is removed when the script exits,
 # regardless of how it exits (success, failure, or interruption).
@@ -39,6 +42,7 @@ find $SEARCH_DIRECTORIES -name "*.c" -print0 | while IFS= read -r -d $'\0' C_FIL
     echo "Analyzing: $C_FILE"
 
     CLANG_TIDY_CMD="clang-tidy \"$C_FILE\" \
+        --header-filter=\"$CLANG_TIDY_EXCLUDE_HEADER_FILTER\" \
         -checks=\"$CLANG_TIDY_CHECKS\" \
         -- $C_COMPILER_FLAGS"
 

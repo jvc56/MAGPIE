@@ -28,7 +28,8 @@ const Rack *validated_moves_get_rack(const ValidatedMoves *vms, int i);
 bool validated_moves_get_unknown_exchange(const ValidatedMoves *vms, int i);
 
 char *validated_moves_get_phonies_string(const LetterDistribution *ld,
-                                         const ValidatedMoves *vms, int i);
+                                         const ValidatedMoves *vms,
+                                         int vm_index);
 
 int validated_moves_get_challenge_points(const ValidatedMoves *vms, int i);
 bool validated_moves_get_challenge_turn_loss(const ValidatedMoves *vms, int i);

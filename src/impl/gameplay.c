@@ -265,8 +265,8 @@ void return_rack_to_bag(const Game *game, const int player_index) {
   int player_draw_index = game_get_player_draw_index(game, player_index);
   const uint16_t dist_size = rack_get_dist_size(player_rack);
   for (int i = 0; i < dist_size; i++) {
-    const int rack_number_of_letter = rack_get_letter(player_rack, i);
-    for (int j = 0; j < rack_number_of_letter; j++) {
+    const int8_t rack_number_of_letter = rack_get_letter(player_rack, i);
+    for (int8_t j = 0; j < rack_number_of_letter; j++) {
       bag_add_letter(bag, i, player_draw_index);
     }
   }

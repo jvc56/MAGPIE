@@ -447,8 +447,9 @@ bool has_iprefix(const char *pre, const char *str) {
 bool is_string_empty_or_whitespace(const char *str) {
   if (!str) {
     log_fatal("unexpected null string when checking for whitespace or empty");
+    // unreachable return, but silences static analyzer warnings
+    return false;
   }
-  // cppcheck-suppress nullPointerRedundantCheck
   while (*str != '\0') {
     if (!isspace((unsigned char)*str)) {
       return false;
@@ -511,27 +512,23 @@ bool has_substring(const char *str, const char *pattern) {
 size_t string_length(const char *str) {
   if (!str) {
     log_fatal("cannot get the length of a null string");
+    // unreachable return, but silences static analyzer warnings
+    return 0;
   }
-  // cppcheck-suppress nullPointerRedundantCheck
   return strlen(str);
 }
 
 char *string_duplicate(const char *str) {
   if (!str) {
     log_fatal("cannot duplicate null string");
+    // unreachable return, but silences static analyzer warnings
+    return NULL;
   }
-
-  // cppcheck-suppress nullPointerRedundantCheck
-  char *duplicate = strdup(str);
-
-  if (!duplicate) {
-    log_fatal("string duplicate failed");
-  }
-
+  char *duplicate = malloc_or_die(sizeof(char) * (string_length(str) + 1));
+  strncpy(duplicate, str, string_length(str));
+  duplicate[string_length(str)] = '\0';
   return duplicate;
 }
-
-char *string_copy(char *dest, const char *src) { return strcpy(dest, src); }
 
 char *get_substring(const char *input_string, int start_index, int end_index) {
   if (!input_string) {
@@ -666,14 +663,15 @@ char *insert_before_dot(const char *str, const char *insert) {
     strncpy(new_str, str, prefix_len);
 
     // Insert the new content
-    string_copy(new_str + prefix_len, insert);
+    strncpy(new_str + prefix_len, insert, new_len - prefix_len);
 
     // Copy the part after the dot
-    string_copy(new_str + prefix_len + insert_len, dot_position);
+    strncpy(new_str + prefix_len + insert_len, dot_position,
+            str_len - prefix_len - insert_len);
   } else {
     // If there's no dot, concatenate the original string and the insert string
-    string_copy(new_str, str);
-    strcat(new_str, insert);
+    strncpy(new_str, str, new_len);
+    strncat(new_str, insert, insert_len);
   }
 
   return new_str;
@@ -713,7 +711,7 @@ void trim_internal(char *str, const char c, bool trim_whitespace) {
   }
 
   char *ptr = str;
-  int len = strlen(ptr);
+  size_t len = strlen(ptr);
 
   while (len - 1 > 0 &&
          matches_trim_condition(ptr[len - 1], c, trim_whitespace)) {

@@ -11,6 +11,9 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 
+#include <stdio.h>
+#include <sys/types.h>
+
 void convert_from_text_with_dwl(const LetterDistribution *ld,
                                 conversion_type_t conversion_type,
                                 const char *data_paths, const char *input_name,

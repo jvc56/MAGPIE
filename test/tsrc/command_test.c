@@ -116,9 +116,9 @@ double nap(double const seconds) {
   }
 
   rem.tv_sec = (time_t)0;
-  rem.tv_nsec = (long)0L;
+  rem.tv_nsec = 0L;
 
-  result = nanosleep(&req, &rem);
+  result = mtimer_nanosleep(&req, &rem);
   if (result == -1) {
     return (double)rem.tv_sec + (double)rem.tv_nsec / 1000000000.0;
   }

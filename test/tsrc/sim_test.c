@@ -168,7 +168,7 @@ void test_sim_threshold(void) {
   pthread_create(&thread, NULL, sim_thread_func, &args);
 
   struct timespec ts;
-  clock_gettime(CLOCK_REALTIME, &ts);
+  mtimer_clock_gettime_realtime(&ts);
   const int timeout_seconds = 10;
   ts.tv_sec += timeout_seconds;
 
@@ -229,7 +229,7 @@ void test_sim_time_limit(void) {
   pthread_create(&thread, NULL, sim_thread_func, &args);
 
   struct timespec ts;
-  clock_gettime(CLOCK_REALTIME, &ts);
+  mtimer_clock_gettime_realtime(&ts);
   const int timeout_seconds = 10;
   ts.tv_sec += timeout_seconds;
 
@@ -281,7 +281,7 @@ void test_sim_one_arm_remaining(void) {
   pthread_create(&thread, NULL, sim_thread_func, &args);
 
   struct timespec ts;
-  clock_gettime(CLOCK_REALTIME, &ts);
+  mtimer_clock_gettime_realtime(&ts);
   const int timeout_seconds = 10;
   ts.tv_sec += timeout_seconds;
 

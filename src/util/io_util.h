@@ -205,7 +205,7 @@ typedef enum {
 #define log_fatal(...) log_with_info(LOG_FATAL, __FILE__, __LINE__, __VA_ARGS__)
 
 void log_with_info(log_level_t log_level, const char *caller_filename,
-                   int caller_line, const char *fmt, ...);
+                   int caller_line, const char *format, ...);
 
 void write_to_stream_out(const char *fmt, ...);
 void write_to_stream_err(const char *fmt, ...);

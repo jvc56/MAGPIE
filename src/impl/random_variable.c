@@ -153,7 +153,7 @@ double rv_normal_sample(RandomVariables *rvs, const uint64_t k,
                         BAILogger __attribute__((unused)) * bai_logger) {
   // Implements the Box-Muller transform
   RVNormal *rv_normal = (RVNormal *)rvs->data;
-  double u;
+  double u = 0.0;
   double s = 2.0;
   while (s >= 1.0 || s == 0.0) {
     u = 2.0 * uniform_sample(rv_normal->xoshiro_prng) - 1.0;
@@ -162,7 +162,6 @@ double rv_normal_sample(RandomVariables *rvs, const uint64_t k,
   }
   s = sqrt(-2.0 * log(s) / s);
   return rv_normal->means_and_vars[k * 2] +
-         // cppcheck-suppress uninitvar
          rv_normal->means_and_vars[k * 2 + 1] * u * s;
 }
 

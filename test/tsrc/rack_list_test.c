@@ -64,7 +64,7 @@ void test_rack_list(void) {
   for (int rack_index = 0; rack_index < num_racks; rack_index++) {
     rack_set_to_string(ld, &rack, rack_strs[rack_index]);
     for (int ml = 0; ml < ld_size; ml++) {
-      const int num_ml_already_in_rack = rack_get_letter(&rack, ml);
+      const int num_ml_already_in_rack = (int)rack_get_letter(&rack, ml);
       if (num_ml_already_in_rack == ld_get_dist(ld, ml)) {
         continue;
       }
@@ -76,7 +76,7 @@ void test_rack_list(void) {
       total_combos[rack_index] += draw_combos;
       uint64_t rack_combos = 1;
       for (int j = 0; j < ld_size; j++) {
-        const int num_ml = rack_get_letter(&rack, j);
+        const int8_t num_ml = rack_get_letter(&rack, j);
         if (num_ml == 0) {
           continue;
         }

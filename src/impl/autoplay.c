@@ -415,7 +415,7 @@ void autoplay_add_game(AutoplayWorker *autoplay_worker,
 void play_autoplay_game_or_game_pair(
     AutoplayWorker *autoplay_worker, GameRunner *game_runner1,
     GameRunner *game_runner2, const ThreadControlIterOutput *iter_output) {
-  const int starting_player_index = iter_output->iter_count % 2;
+  const int starting_player_index = (int)(iter_output->iter_count % 2);
   game_runner_start(autoplay_worker, game_runner1, iter_output,
                     starting_player_index);
   if (game_runner2) {

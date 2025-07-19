@@ -70,7 +70,8 @@ uint32_t kwg_dawg_prefix_arc(const KWG *kwg, const LetterDistribution *ld,
 uint32_t kwg_gaddag_prefix_arc(const KWG *kwg, const LetterDistribution *ld,
                                const char *human_readable_prefix) {
   char string_for_conversion[MAX_KWG_STRING_LENGTH];
-  string_copy(string_for_conversion, human_readable_prefix);
+  strncpy(string_for_conversion, human_readable_prefix,
+          sizeof(string_for_conversion));
   for (size_t i = 0; i < string_length(human_readable_prefix); i++) {
     if (string_for_conversion[i] == '@') {
       string_for_conversion[i] = '?';

@@ -200,7 +200,7 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
   bool last_move_was_pass = game_get_consecutive_scoreless_turns(
                                 worker->game_copy) == 1; // check if this is ok.
 
-  int arena_offset =
+  size_t arena_offset =
       worker->small_move_arena->size - (sizeof(SmallMove) * move_count);
 
   for (size_t i = 0; i < (size_t)move_count; i++) {
@@ -340,7 +340,7 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
 
   int32_t best_value = -LARGE_VALUE;
   uint64_t best_tiny_move = INVALID_TINY_MOVE;
-  int arena_offset =
+  size_t arena_offset =
       worker->small_move_arena->size - (sizeof(SmallMove) * nplays);
 
   // log_warn("Iterating through %d plays", nplays);

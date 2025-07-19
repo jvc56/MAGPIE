@@ -315,9 +315,9 @@ void print_english_rack(const Rack *rack) {
   }
   const uint16_t ld_size = rack_get_dist_size(rack);
   for (int i = 1; i < ld_size; i++) {
-    const int num_letter = rack_get_letter(rack, i);
-    for (int j = 0; j < num_letter; j++) {
-      printf("%c", i + 'A' - 1);
+    const int8_t num_letter = rack_get_letter(rack, i);
+    for (int8_t j = 0; j < num_letter; j++) {
+      printf("%c", (char)(i + 'A' - 1));
     }
   }
 }

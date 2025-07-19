@@ -199,7 +199,7 @@ void test_bai_time_limit(int num_threads) {
   pthread_create(&thread, NULL, bai_thread_func, &args);
 
   struct timespec ts;
-  clock_gettime(CLOCK_REALTIME, &ts);
+  mtimer_clock_gettime_realtime(&ts);
   const int timeout_seconds = bai_options.time_limit_seconds + 5;
   ts.tv_sec += timeout_seconds;
 
@@ -318,124 +318,7 @@ void test_bai_epigons(int num_threads) {
   thread_control_destroy(thread_control);
 }
 
-void test_bai_input_from_file(const char *bai_input_filename,
-                              const char *bai_params_index) {
-  FILE *file = fopen(bai_input_filename, "r");
-  if (!file) {
-    log_fatal("Failed to open BAI_INPUT file: %s\n", bai_input_filename);
-  }
-
-  double delta;
-  int num_rvs;
-  double *means_and_vars;
-  int num_samples;
-  double *samples;
-  double *rng_samples;
-
-  if (fscanf(file, "%lf", &delta) != 1) {
-    log_fatal("Failed to read delta from file: %s\n", bai_input_filename);
-  }
-
-  if (fscanf(file, "%d", &num_rvs) != 1) {
-    log_fatal("Failed to read num_rvs from file: %s\n", bai_input_filename);
-  }
-
-  means_and_vars = (double *)malloc_or_die(
-      num_rvs * 2 * sizeof(double)); // 2 values per RV (mean and std dev)
-  for (int i = 0; i < num_rvs; ++i) {
-    if (fscanf(file, "%lf,%lf", &means_and_vars[i * 2],
-               &means_and_vars[i * 2 + 1]) != 2) {
-      log_fatal("Failed to read means and stdevs from file at index %d.\n", i);
-    }
-  }
-  if (fscanf(file, "%d", &num_samples) != 1) {
-    log_fatal("Failed to read num_samples from file: %s\n", bai_input_filename);
-  }
-
-  samples = (double *)malloc_or_die(num_samples * sizeof(double));
-  for (int i = 0; i < num_samples; ++i) {
-    if (fscanf(file, "%lf", &samples[i]) != 1) {
-      log_fatal("Failed to read sample %d from file.\n", i);
-    }
-  }
-
-  rng_samples = (double *)malloc_or_die(num_samples * sizeof(double));
-  for (int i = 0; i < num_samples; ++i) {
-    if (fscanf(file, "%lf", &rng_samples[i]) != 1) {
-      log_fatal("Failed to read sample %d from file.\n", i);
-    }
-  }
-
-  fclose_or_die(file);
-
-  BAILogger *bai_logger = bai_logger_create("bai_log_magpie.txt");
-
-  bai_logger_log_double(bai_logger, "delta", delta);
-  bai_logger_log_int(bai_logger, "num_rvs", num_rvs);
-  bai_logger_log_double_array(bai_logger, "means_and_stddevs", means_and_vars,
-                              num_rvs * 2);
-  bai_logger_log_int(bai_logger, "num_samples", num_samples);
-  bai_logger_flush(bai_logger);
-
-  RandomVariablesArgs rv_args = {
-      .type = RANDOM_VARIABLES_NORMAL_PREDETERMINED,
-      .num_rvs = num_rvs,
-      .means_and_vars = means_and_vars,
-      .num_samples = num_samples,
-      .samples = samples,
-  };
-  RandomVariables *rvs = rvs_create(&rv_args);
-
-  RandomVariablesArgs rng_args = {
-      .type = RANDOM_VARIABLES_UNIFORM_PREDETERMINED,
-      .num_rvs = num_rvs,
-      .num_samples = num_samples,
-      .samples = rng_samples,
-  };
-  RandomVariables *rng = rvs_create(&rng_args);
-
-  ErrorStack *error_stack = error_stack_create();
-  const int pi = string_to_int(bai_params_index, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_print_and_reset(error_stack);
-    log_fatal("Invalid BAI params index: %s\n", bai_params_index);
-  }
-  error_stack_destroy(error_stack);
-  if (pi < 0 || pi >= num_strategies_entries) {
-    log_fatal("Invalid BAI params index: %s\n", bai_params_index);
-    return;
-  }
-  printf("magpie bai test running 0-indexed %d...\n", pi);
-
-  BAIOptions bai_options = {
-      .sampling_rule = strategies[pi][0],
-      .threshold = strategies[pi][1],
-      .delta = delta,
-      .sample_minimum = 50,
-      .sample_limit = num_samples,
-      .time_limit_seconds = 0,
-  };
-  ThreadControl *thread_control = thread_control_create();
-  BAIResult *bai_result = bai_result_create();
-
-  bai(&bai_options, rvs, rng, thread_control, bai_logger, bai_result);
-
-  bai_logger_log_int(bai_logger, "result",
-                     bai_result_get_best_arm(bai_result) + 1);
-  bai_logger_flush(bai_logger);
-
-  bai_result_destroy(bai_result);
-  bai_logger_destroy(bai_logger);
-  thread_control_destroy(thread_control);
-  rvs_destroy(rvs);
-  rvs_destroy(rng);
-  free(means_and_vars);
-  free(samples);
-  free(rng_samples);
-}
-
 void test_bai_from_seed(const char *bai_seed) {
-
   ErrorStack *error_stack = error_stack_create();
   const uint64_t seed = string_to_uint64(bai_seed, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -467,7 +350,7 @@ void test_bai_from_seed(const char *bai_seed) {
         mean_int = prng_get_random_number(prng, NUM_UNIQUE_MEANS);
       }
       means_map[mean_int] = 1;
-      value = (double)(mean_int - NUM_UNIQUE_MEANS / 2) / 100;
+      value = (mean_int - (double)(NUM_UNIQUE_MEANS) / 2.0) / 100.0;
     }
     means_and_vars[i] = value;
   }
@@ -516,12 +399,8 @@ void test_bai_from_seed(const char *bai_seed) {
 }
 
 void test_bai(void) {
-  const char *bai_input_filename = getenv("BAI_INPUT");
-  const char *bai_params_index = getenv("BAI_PARAMS_INDEX");
   const char *bai_seed = getenv("BAI_SEED");
-  if (bai_input_filename && bai_params_index) {
-    test_bai_input_from_file(bai_input_filename, bai_params_index);
-  } else if (bai_seed) {
+  if (bai_seed) {
     test_bai_from_seed(bai_seed);
   } else {
     const int num_threads[] = {1, 11};

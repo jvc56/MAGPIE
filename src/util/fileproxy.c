@@ -1,6 +1,9 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "io_util.h"
 #include "string_util.h"
@@ -42,7 +45,8 @@ void precache_file_data(const char *filename, const char *raw_data,
   char *data_copy = malloc_or_die(sizeof(char) * num_bytes);
   memcpy(data_copy, raw_data, num_bytes);
 
-  string_copy(file_cache.entries[file_cache.num_items].filename, filename);
+  strncpy(file_cache.entries[file_cache.num_items].filename, filename,
+          sizeof(file_cache.entries[file_cache.num_items].filename));
   file_cache.entries[file_cache.num_items].raw_data = data_copy;
   file_cache.entries[file_cache.num_items].byte_size = num_bytes;
   log_debug("Cached %s (%d) in cache, with a size of %d", filename,

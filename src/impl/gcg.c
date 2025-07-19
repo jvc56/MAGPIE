@@ -622,9 +622,8 @@ bool game_event_has_player_rack(const GameEvent *game_event, int player_index) {
            game_event_type == GAME_EVENT_PASS ||
            game_event_type == GAME_EVENT_EXCHANGE ||
            game_event_type == GAME_EVENT_END_RACK_PENALTY;
-  } else {
-    return game_event_type == GAME_EVENT_END_RACK_POINTS;
   }
+  return game_event_type == GAME_EVENT_END_RACK_POINTS;
 }
 
 // Returns NULL if there is no rack for the player and sets the next rack set

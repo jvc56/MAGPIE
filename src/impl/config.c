@@ -1780,18 +1780,22 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  int write_buffer_size;
-  config_load_int(config, ARG_TOKEN_WRITE_BUFFER_SIZE, 1, INT_MAX,
-                  &write_buffer_size, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
+  const char *write_buffer_size_str =
+      config_get_parg_value(config, ARG_TOKEN_WRITE_BUFFER_SIZE, 0);
+  if (write_buffer_size_str) {
+    int write_buffer_size = 0;
+    config_load_int(config, ARG_TOKEN_WRITE_BUFFER_SIZE, 1, INT_MAX,
+                    &write_buffer_size, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    autoplay_results_set_write_buffer_size(config->autoplay_results,
+                                           write_buffer_size);
   }
 
-  autoplay_results_set_write_buffer_size(config->autoplay_results,
-                                         write_buffer_size);
   // Seed
 
-  uint64_t seed;
+  uint64_t seed = 0;
   config_load_uint64(config, ARG_TOKEN_RANDOM_SEED, &seed, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;

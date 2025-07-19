@@ -11,7 +11,7 @@
 
 #include "test_util.h"
 
-int get_file_size(const char *filename) {
+long get_file_size(const char *filename) {
   ErrorStack *error_stack = error_stack_create();
   FILE *stream = stream_from_filename(filename, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -20,7 +20,7 @@ int get_file_size(const char *filename) {
   }
   error_stack_destroy(error_stack);
   fseek(stream, 0L, SEEK_END);
-  const int file_size = ftell(stream);
+  const long file_size = ftell(stream);
   fseek(stream, 0L, SEEK_SET);
   return file_size;
 }
@@ -35,8 +35,8 @@ void write_words_to_testdata_wmp(const DictionaryWordList *words,
   wmp_write_to_file(wmp, wmp_filename, error_stack);
   assert(error_stack_is_empty(error_stack));
   error_stack_destroy(error_stack);
-  const int file_size = get_file_size(wmp_filename);
-  printf("wrote %d bytes to %s in %f seconds\n", file_size, wmp_filename,
+  const long file_size = get_file_size(wmp_filename);
+  printf("wrote %ld bytes to %s in %f seconds\n", file_size, wmp_filename,
          (double)(end - start) / CLOCKS_PER_SEC);
   wmp_destroy(wmp);
 }

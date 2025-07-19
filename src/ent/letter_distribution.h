@@ -167,12 +167,14 @@ static inline void ld_create_internal(const char *ld_name,
     ld->scores[machine_letter] = score;
     ld->is_vowel[machine_letter] = is_vowel == 1;
 
-    string_copy(ld->ld_ml_to_hl[machine_letter], letter);
+    strncpy(ld->ld_ml_to_hl[machine_letter], letter,
+            sizeof(ld->ld_ml_to_hl[machine_letter]));
 
     if (machine_letter > 0) {
       MachineLetter blanked_machine_letter =
           get_blanked_machine_letter(machine_letter);
-      string_copy(ld->ld_ml_to_hl[blanked_machine_letter], lower_case_letter);
+      strncpy(ld->ld_ml_to_hl[blanked_machine_letter], lower_case_letter,
+              sizeof(ld->ld_ml_to_hl[blanked_machine_letter]));
     }
     string_splitter_destroy(single_letter_info);
     single_letter_info = NULL;

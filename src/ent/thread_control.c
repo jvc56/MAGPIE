@@ -53,7 +53,7 @@ ThreadControl *thread_control_create(void) {
   pthread_mutex_init(&thread_control->iter_mutex, NULL);
   pthread_mutex_init(&thread_control->iter_completed_mutex, NULL);
   pthread_mutex_init(&thread_control->print_mutex, NULL);
-  thread_control->timer = mtimer_create(CLOCK_MONOTONIC);
+  thread_control->timer = mtimer_create_monotonic();
   thread_control->seed = time(NULL);
   thread_control->prng = prng_create(thread_control->seed);
   return thread_control;

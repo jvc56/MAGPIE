@@ -1,10 +1,14 @@
 #ifndef TIMER_H
 #define TIMER_H
 
+#include <assert.h>
+#include <errno.h>
+#include <inttypes.h>
+#include <pthread.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
-
 #include <time.h>
 
 #include "../util/io_util.h"
@@ -24,6 +28,10 @@ static inline Timer *mtimer_create(int clock_type) {
   timer->clock_type = clock_type;
   mtimer_reset(timer);
   return timer;
+}
+
+static inline Timer *mtimer_create_monotonic(void) {
+  return mtimer_create(CLOCK_MONOTONIC);
 }
 
 static inline void mtimer_destroy(Timer *timer) {
@@ -49,6 +57,14 @@ static inline double mtimer_elapsed_seconds(const Timer *timer) {
   double elapsed = (finish_time.tv_sec - timer->start_time.tv_sec);
   elapsed += (finish_time.tv_nsec - timer->start_time.tv_nsec) / 1000000000.0;
   return elapsed;
+}
+
+static inline int mtimer_nanosleep(struct timespec *req, struct timespec *rem) {
+  return nanosleep(req, rem);
+}
+
+static inline void mtimer_clock_gettime_realtime(struct timespec *ts) {
+  clock_gettime(CLOCK_REALTIME, &ts);
 }
 
 #endif
