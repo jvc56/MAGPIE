@@ -124,7 +124,7 @@ void process_ucgi_command(Config *config, ErrorStack *error_stack,
     // More of a formality to align with UCI
     thread_control_print(thread_control, "id name MAGPIE 0.1\nucgiok\n");
   } else if (strings_equal(command, STOP_COMMAND_STRING)) {
-    if (thread_control_is_running(thread_control)) {
+    if (thread_control_is_started(thread_control)) {
       thread_control_set_status(thread_control,
                                 THREAD_CONTROL_STATUS_USER_INTERRUPT);
     } else {

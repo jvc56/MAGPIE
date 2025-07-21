@@ -30,7 +30,7 @@ bool thread_control_is_winding_down(ThreadControl *thread_control);
 bool thread_control_is_finished(ThreadControl *thread_control);
 bool thread_control_is_sim_printable(ThreadControl *thread_control,
                                      const bool simmed_plays_initialized);
-bool thread_control_is_running(ThreadControl *thread_control);
+bool thread_control_is_started(ThreadControl *thread_control);
 
 int thread_control_get_print_info_interval(const ThreadControl *thread_control);
 int thread_control_get_threads(const ThreadControl *thread_control);

@@ -354,9 +354,6 @@ void test_sim_top_two_consistency(void) {
   load_and_exec_config_or_die(config, "gen");
   ThreadControl *thread_control = config_get_thread_control(config);
 
-  thread_control_status_t initial_status =
-      thread_control_get_status(thread_control);
-  printf("initial status: %d\n", initial_status);
   // Get the initial reference results.
   SimResults *expected_sim_results = config_get_sim_results(config);
   assert(config_simulate_and_return_status(
@@ -366,10 +363,6 @@ void test_sim_top_two_consistency(void) {
 
   SimResults *actual_sim_results = sim_results_create();
   for (int i = 0; i < 2; i++) {
-    initial_status = thread_control_get_status(thread_control);
-    const thread_control_status_t initial_status =
-        thread_control_get_status(thread_control);
-    printf("before %d, initial status: %d\n", i, initial_status);
     assert(config_simulate_and_return_status(
                config, NULL, actual_sim_results) == ERROR_STATUS_SUCCESS);
     thread_control_status_t actual_exit_status =

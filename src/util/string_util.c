@@ -656,22 +656,28 @@ char *insert_before_dot(const char *str, const char *insert) {
   // Calculate the new length of the string
   size_t new_len = str_len + insert_len;
   char *new_str = (char *)malloc_or_die(new_len + 1);
+  if (!new_str)
+    return NULL; // Handle allocation failure
 
   if (dot_position) {
     // Copy the part before the dot
     size_t prefix_len = dot_position - str;
-    strncpy(new_str, str, prefix_len);
+    memcpy(new_str, str, prefix_len);
 
     // Insert the new content
-    strncpy(new_str + prefix_len, insert, new_len - prefix_len);
+    memcpy(new_str + prefix_len, insert, insert_len);
 
-    // Copy the part after the dot
-    strncpy(new_str + prefix_len + insert_len, dot_position,
-            str_len - prefix_len - insert_len);
+    // Copy the part from the dot onwards
+    memcpy(new_str + prefix_len + insert_len, dot_position,
+           str_len - prefix_len);
+
+    // Null terminate
+    new_str[new_len] = '\0';
   } else {
     // If there's no dot, concatenate the original string and the insert string
-    strncpy(new_str, str, new_len);
-    strncat(new_str, insert, insert_len);
+    memcpy(new_str, str, str_len);
+    memcpy(new_str + str_len, insert, insert_len);
+    new_str[new_len] = '\0';
   }
 
   return new_str;

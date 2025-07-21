@@ -14,6 +14,8 @@
 #include "../../src/impl/bai.h"
 #include "../../src/util/io_util.h"
 
+#include "test_util.h"
+
 #define NUM_UNIQUE_MEANS 10000
 
 static const int sampling_rules[3] = {
@@ -44,10 +46,7 @@ void assert_num_epigons(const RandomVariables *rvs,
 void bai_wrapper(const BAIOptions *bai_options, RandomVariables *rvs,
                  RandomVariables *rng, ThreadControl *thread_control,
                  BAILogger *bai_logger, BAIResult *bai_result) {
-  if (!thread_control_is_finished(thread_control)) {
-    thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_FINISHED);
-  }
-  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+  set_thread_control_status_to_start(thread_control);
   bai(bai_options, rvs, rng, thread_control, bai_logger, bai_result);
 }
 

@@ -94,16 +94,18 @@ uint64_t string_to_cross_set(const LetterDistribution *ld,
   return c;
 }
 
+void set_thread_control_status_to_start(ThreadControl *thread_control) {
+  if (!thread_control_is_ready_for_new_command(thread_control)) {
+    thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_FINISHED);
+  }
+  if (!thread_control_is_started(thread_control)) {
+    thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+  }
+}
+
 void load_and_exec_config_or_die(Config *config, const char *cmd) {
   ErrorStack *error_stack = error_stack_create();
-  if (thread_control_is_winding_down(config_get_thread_control(config))) {
-    thread_control_set_status(config_get_thread_control(config),
-                              THREAD_CONTROL_STATUS_FINISHED);
-  }
-  if (!thread_control_is_running(config_get_thread_control(config))) {
-    thread_control_set_status(config_get_thread_control(config),
-                              THREAD_CONTROL_STATUS_STARTED);
-  }
+  set_thread_control_status_to_start(config_get_thread_control(config));
   config_load_command(config, cmd, error_stack);
   error_code_t status = error_stack_top(error_stack);
   if (status != ERROR_STATUS_SUCCESS) {
@@ -111,8 +113,6 @@ void load_and_exec_config_or_die(Config *config, const char *cmd) {
     log_fatal("load config failed with status %d: %s\n", status, cmd);
   }
   config_execute_command(config, error_stack);
-  thread_control_set_status(config_get_thread_control(config),
-                            THREAD_CONTROL_STATUS_FINISHED);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
     abort();
@@ -768,14 +768,7 @@ error_code_t config_simulate_and_return_status(const Config *config,
                                                Rack *known_opp_rack,
                                                SimResults *sim_results) {
   ErrorStack *error_stack = error_stack_create();
-  if (thread_control_is_winding_down(config_get_thread_control(config))) {
-    thread_control_set_status(config_get_thread_control(config),
-                              THREAD_CONTROL_STATUS_FINISHED);
-  }
-  if (!thread_control_is_running(config_get_thread_control(config))) {
-    thread_control_set_status(config_get_thread_control(config),
-                              THREAD_CONTROL_STATUS_STARTED);
-  }
+  set_thread_control_status_to_start(config_get_thread_control(config));
   config_simulate(config, known_opp_rack, sim_results, error_stack);
   error_code_t status = error_stack_top(error_stack);
   error_stack_destroy(error_stack);

@@ -96,7 +96,7 @@ bool thread_control_is_winding_down_status(thread_control_status_t tc_status) {
   return is_winding_down;
 }
 
-bool thread_control_is_running_status(thread_control_status_t tc_status) {
+bool thread_control_is_started_status(thread_control_status_t tc_status) {
   return tc_status == THREAD_CONTROL_STATUS_STARTED;
 }
 
@@ -110,8 +110,8 @@ bool thread_control_is_finished(ThreadControl *thread_control) {
          THREAD_CONTROL_STATUS_FINISHED;
 }
 
-bool thread_control_is_running(ThreadControl *thread_control) {
-  return thread_control_is_running_status(
+bool thread_control_is_started(ThreadControl *thread_control) {
+  return thread_control_is_started_status(
       thread_control_get_status(thread_control));
 }
 

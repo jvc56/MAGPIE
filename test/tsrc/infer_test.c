@@ -35,12 +35,10 @@ error_code_t infer_for_test(const Config *config, int target_index,
     rack_set_to_string(ld, target_played_tiles, target_played_tiles_str);
   }
   ErrorStack *error_stack = error_stack_create();
-  ThreadControl *thread_control = config_get_thread_control(config);
-  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+  set_thread_control_status_to_start(config_get_thread_control(config));
   config_infer(config, target_index, target_score, target_num_exch,
                target_played_tiles, inference_results, error_stack);
   error_code_t status = error_stack_top(error_stack);
-  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_FINISHED);
   rack_destroy(target_played_tiles);
   error_stack_destroy(error_stack);
   return status;

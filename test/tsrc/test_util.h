@@ -59,6 +59,7 @@ void print_rack(const Rack *rack, const LetterDistribution *ld);
 void print_inference(const LetterDistribution *ld,
                      const Rack *target_played_tiles,
                      InferenceResults *inference_results);
+void set_thread_control_status_to_start(ThreadControl *thread_control);
 void load_cgp_or_die(Game *game, const char *cgp);
 void load_and_exec_config_or_die(Config *config, const char *cmd);
 bool load_and_exec_config_or_die_timed(Config *config, const char *cmd,
