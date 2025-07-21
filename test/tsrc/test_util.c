@@ -758,6 +758,10 @@ error_code_t config_simulate_and_return_status(const Config *config,
                                                Rack *known_opp_rack,
                                                SimResults *sim_results) {
   ErrorStack *error_stack = error_stack_create();
+  if (thread_control_is_winding_down(config_get_thread_control(config))) {
+    thread_control_set_status(config_get_thread_control(config),
+                              THREAD_CONTROL_STATUS_FINISHED);
+  }
   thread_control_set_status(config_get_thread_control(config),
                             THREAD_CONTROL_STATUS_STARTED);
   config_simulate(config, known_opp_rack, sim_results, error_stack);
