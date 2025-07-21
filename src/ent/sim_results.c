@@ -33,6 +33,7 @@ struct SimResults {
   int max_plies;
   int num_simmed_plays;
   int iteration_count;
+  bool simmed_plays_initialized;
   pthread_mutex_t simmed_plays_mutex;
   atomic_int node_count;
   SimmedPlay **simmed_plays;
@@ -120,6 +121,21 @@ void sim_results_unlock_simmed_plays(SimResults *sim_results) {
   pthread_mutex_unlock(&sim_results->simmed_plays_mutex);
 }
 
+bool sim_results_get_simmed_plays_initialized(SimResults *sim_results) {
+  bool value;
+  sim_results_lock_simmed_plays(sim_results);
+  value = sim_results->simmed_plays_initialized;
+  sim_results_unlock_simmed_plays(sim_results);
+  return value;
+}
+
+void sim_results_set_simmed_plays_initialized(SimResults *sim_results,
+                                              bool value) {
+  sim_results_lock_simmed_plays(sim_results);
+  sim_results->simmed_plays_initialized = value;
+  sim_results_unlock_simmed_plays(sim_results);
+}
+
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
                        int max_plies, uint64_t seed) {
   sim_results_destroy_internal(sim_results);
@@ -140,6 +156,7 @@ void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
   sim_results->max_plies = max_plies;
   sim_results->iteration_count = 0;
   atomic_init(&sim_results->node_count, 0);
+  sim_results_set_simmed_plays_initialized(sim_results, true);
 }
 
 SimResults *sim_results_create(void) {
@@ -148,6 +165,7 @@ SimResults *sim_results_create(void) {
   sim_results->max_plies = 0;
   sim_results->iteration_count = 0;
   atomic_init(&sim_results->node_count, 0);
+  sim_results->simmed_plays_initialized = false;
   pthread_mutex_init(&sim_results->simmed_plays_mutex, NULL);
   sim_results->simmed_plays = NULL;
   sim_results->sorted_simmed_plays = NULL;

@@ -13,7 +13,6 @@
 #define TXT_EXTENSION ".txt"
 #define CSV_EXTENSION ".csv"
 #define GCG_EXTENSION ".gcg"
-#define LEAVES_EXTENSION ".csv"
 #define LEXICON_EXTENSION ".txt"
 
 const char *filepath_type_names[] = {
@@ -68,12 +67,12 @@ char *get_filepath(const char *data_path, const char *data_name,
     break;
   case DATA_FILEPATH_TYPE_WIN_PCT:
   case DATA_FILEPATH_TYPE_LD:
+  case DATA_FILEPATH_TYPE_LEAVES:
     file_ext = CSV_EXTENSION;
     break;
   case DATA_FILEPATH_TYPE_GCG:
     file_ext = GCG_EXTENSION;
     break;
-  case DATA_FILEPATH_TYPE_LEAVES:
   case DATA_FILEPATH_TYPE_LEXICON:
     file_ext = LEXICON_EXTENSION;
     break;

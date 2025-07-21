@@ -564,7 +564,7 @@ char *get_status_running_str(const Config *config) {
 
 char *status_generic(Config *config) {
   char *status_str = NULL;
-  if (thread_control_get_mode(config->thread_control) == MODE_FINISHED) {
+  if (thread_control_is_finished(config->thread_control)) {
     status_str = get_status_finished_str(config);
   } else {
     status_str = get_status_running_str(config);
@@ -813,20 +813,16 @@ char *status_sim(Config *config) {
     return string_duplicate("simmer has not been initialized");
   }
   char *status_str = NULL;
-  switch (thread_control_get_mode(config->thread_control)) {
-  case MODE_STARTED:
-    status_str = string_duplicate("simmer status not yet available");
-    break;
-  case MODE_FINISHED:
-    status_str = get_status_finished_str(config);
-    break;
-  case MODE_STATUS_READY:
+  if (thread_control_is_sim_printable(
+          config->thread_control,
+          sim_results_get_simmed_plays_initialized(sim_results))) {
     status_str = ucgi_sim_stats(
         config->game, sim_results,
         (double)sim_results_get_node_count(sim_results) /
             thread_control_get_seconds_elapsed(config->thread_control),
         true);
-    break;
+  } else {
+    status_str = string_duplicate("simmer status not yet available");
   }
   return status_str;
 }

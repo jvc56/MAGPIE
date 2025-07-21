@@ -364,7 +364,8 @@ void test_config_lexical_data(void) {
 void assert_config_exec_status(Config *config, const char *cmd,
                                error_code_t expected_error_code) {
   ErrorStack *error_stack = error_stack_create();
-  thread_control_set_mode_started(config_get_thread_control(config));
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
   config_load_command(config, cmd, error_stack);
   error_code_t status = error_stack_top(error_stack);
   if (status != ERROR_STATUS_SUCCESS) {
@@ -372,7 +373,8 @@ void assert_config_exec_status(Config *config, const char *cmd,
   }
 
   config_execute_command(config, error_stack);
-  thread_control_set_mode_finished(config_get_thread_control(config));
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_FINISHED);
 
   error_code_t actual_error_code = error_stack_top(error_stack);
 

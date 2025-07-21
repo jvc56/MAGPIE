@@ -129,12 +129,9 @@ double nap(double const seconds) {
 void block_for_search(Config *config, int max_seconds) {
   // Poll for the end of the command
   double seconds_elapsed = 0;
-  while (1) {
-    char *search_status = command_search_status(config, false);
-    bool search_is_finished =
-        has_prefix(COMMAND_FINISHED_KEYWORD, search_status);
-    free(search_status);
-    if (search_is_finished) {
+  ThreadControl *thread_control = config_get_thread_control(config);
+  while (true) {
+    if (thread_control_is_finished(thread_control)) {
       break;
     }
     nap(DEFAULT_NAP_TIME);
@@ -201,7 +198,7 @@ void assert_command_status_and_output(Config *config, const char *command,
   if (newlines_in_output != expected_output_line_count) {
     printf("%s\nassert output: output counts do not match %d != %d\n", command,
            newlines_in_output, expected_output_line_count);
-    printf("got:\n%s", test_output);
+    printf("got:>%s<\n", test_output);
     fail_test = true;
   }
 
@@ -285,7 +282,7 @@ void test_command_execution(void) {
   assert_command_status_and_output(
       config, "addmoves 8f.NIL,8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 1, 0);
   assert_command_status_and_output(
-      config, "sim -plies 2 -scond 95 -threads 8 -it 1 -pfreq 70", false, 60,
+      config, "sim -plies 2 -scond none -threads 8 -it 1 -pfreq 70", false, 60,
       331, 0);
 
   // Sim finishes with max iterations
@@ -297,6 +294,7 @@ void test_command_execution(void) {
                                    5, 1, 0);
   // Get all moves through move gen
   assert_command_status_and_output(config, "gen -numplays 15", false, 5, 17, 0);
+  // FIXME: block_for_search is ending too early
   assert_command_status_and_output(
       config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ", false,
       60, 222, 0);

@@ -371,7 +371,7 @@ bool should_print_info(const Inference *inference) {
 
 void iterate_through_all_possible_leaves(Inference *inference,
                                          int tiles_to_infer, int start_letter) {
-  if (thread_control_get_is_exited(inference->thread_control)) {
+  if (thread_control_is_winding_down(inference->thread_control)) {
     return;
   }
   if (tiles_to_infer == 0) {
@@ -486,7 +486,8 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
 
   // Infer was able to finish normally, which is when it
   // iterates through every rack
-  thread_control_exit(thread_control, EXIT_STATUS_MAX_ITERATIONS);
+  thread_control_set_status(thread_control,
+                            THREAD_CONTROL_STATUS_MAX_ITERATIONS);
 
   stats_combine(leave_stats, number_of_threads,
                 inference_results_get_equity_values(inference->results,
@@ -574,8 +575,6 @@ void verify_inference(const Inference *inference, ErrorStack *error_stack) {
 
 void infer(InferenceArgs *args, InferenceResults *results,
            ErrorStack *error_stack) {
-  thread_control_reset(args->thread_control, 0);
-
   if (!args->target_played_tiles) {
     error_stack_push(error_stack, ERROR_STATUS_INFERENCE_NO_TILES_PLAYED,
                      string_duplicate("no tile placement or exchange move was "
@@ -599,11 +598,11 @@ void infer(InferenceArgs *args, InferenceResults *results,
         inference->bag_as_rack, inference->results, inference->target_score,
         inference->target_number_of_tiles_exchanged, inference->equity_margin);
 
-    if (thread_control_get_exit_status(args->thread_control) ==
-        EXIT_STATUS_MAX_ITERATIONS) {
+    if (thread_control_get_status(args->thread_control) ==
+        THREAD_CONTROL_STATUS_MAX_ITERATIONS) {
       // Only print if infer was able to finish normally.
-      // If thread_control_exit status isn't max iterations, it was interrupted
-      // by the user and the results will not be valid.
+      // If thread_control_set_status status isn't max iterations, it was
+      // interrupted by the user and the results will not be valid.
       print_ucgi_inference(game_get_ld(inference->game), inference->results,
                            args->thread_control);
     }

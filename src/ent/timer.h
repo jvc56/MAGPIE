@@ -64,7 +64,7 @@ static inline int mtimer_nanosleep(struct timespec *req, struct timespec *rem) {
 }
 
 static inline void mtimer_clock_gettime_realtime(struct timespec *ts) {
-  clock_gettime(CLOCK_REALTIME, &ts);
+  clock_gettime(CLOCK_REALTIME, ts);
 }
 
 #endif

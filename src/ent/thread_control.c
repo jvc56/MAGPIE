@@ -18,38 +18,32 @@
 struct ThreadControl {
   int number_of_threads;
   int print_info_interval;
-  uint64_t iter_count;
-  uint64_t iter_count_completed;
   uint64_t max_iter_count;
   double time_elapsed;
   uint64_t seed;
   XoshiroPRNG *prng;
-  mode_search_status_t current_mode;
-  exit_status_t exit_status;
-  pthread_mutex_t current_mode_mutex;
-  pthread_mutex_t exit_status_mutex;
-  pthread_mutex_t not_finished_mode_mutex;
-  pthread_mutex_t iter_mutex;
-  pthread_mutex_t iter_completed_mutex;
-  pthread_mutex_t print_mutex;
   FILE *out_fh;
   FILE *in_fh;
   Timer *timer;
+  uint64_t iter_count;
+  pthread_mutex_t iter_mutex;
+  uint64_t iter_count_completed;
+  pthread_mutex_t iter_completed_mutex;
+  thread_control_status_t tc_status;
+  pthread_mutex_t tc_status_mutex;
+  pthread_mutex_t print_mutex;
 };
 
 ThreadControl *thread_control_create(void) {
   ThreadControl *thread_control = malloc_or_die(sizeof(ThreadControl));
-  thread_control->exit_status = EXIT_STATUS_NONE;
-  thread_control->current_mode = MODE_FINISHED;
+  thread_control->tc_status = THREAD_CONTROL_STATUS_UNINITIALIZED;
   thread_control->number_of_threads = 1;
   thread_control->print_info_interval = 0;
   thread_control->iter_count = 0;
   thread_control->iter_count_completed = 0;
   thread_control->time_elapsed = 0;
   thread_control->max_iter_count = 0;
-  pthread_mutex_init(&thread_control->current_mode_mutex, NULL);
-  pthread_mutex_init(&thread_control->exit_status_mutex, NULL);
-  pthread_mutex_init(&thread_control->not_finished_mode_mutex, NULL);
+  pthread_mutex_init(&thread_control->tc_status_mutex, NULL);
   pthread_mutex_init(&thread_control->iter_mutex, NULL);
   pthread_mutex_init(&thread_control->iter_completed_mutex, NULL);
   pthread_mutex_init(&thread_control->print_mutex, NULL);
@@ -78,77 +72,130 @@ void thread_control_set_print_info_interval(ThreadControl *thread_control,
   thread_control->print_info_interval = print_info_interval;
 }
 
-exit_status_t thread_control_get_exit_status(ThreadControl *thread_control) {
-  exit_status_t exit_status;
-  pthread_mutex_lock(&thread_control->exit_status_mutex);
-  exit_status = thread_control->exit_status;
-  pthread_mutex_unlock(&thread_control->exit_status_mutex);
-  return exit_status;
+thread_control_status_t
+thread_control_get_status(ThreadControl *thread_control) {
+  thread_control_status_t tc_status;
+  pthread_mutex_lock(&thread_control->tc_status_mutex);
+  tc_status = thread_control->tc_status;
+  pthread_mutex_unlock(&thread_control->tc_status_mutex);
+  return tc_status;
 }
 
-bool thread_control_get_is_exited(ThreadControl *thread_control) {
-  return thread_control_get_exit_status(thread_control) != EXIT_STATUS_NONE;
-}
-
-// Returns true if the exit status was set successfully
-// Returns false if the exit status was already set
-bool thread_control_exit(ThreadControl *thread_control,
-                         exit_status_t exit_status) {
-  bool success = false;
-  pthread_mutex_lock(&thread_control->exit_status_mutex);
-  // Assume the first reason to thread_control_exit is the only
-  // reason we care about, so subsequent calls to thread_control_exit
-  // can be ignored.
-  if (thread_control->exit_status == EXIT_STATUS_NONE &&
-      exit_status != EXIT_STATUS_NONE) {
-    thread_control->exit_status = exit_status;
-    success = true;
+bool thread_control_is_winding_down_status(thread_control_status_t tc_status) {
+  bool is_winding_down;
+  switch (tc_status) {
+  case THREAD_CONTROL_STATUS_UNINITIALIZED:
+  case THREAD_CONTROL_STATUS_STARTED:
+  case THREAD_CONTROL_STATUS_FINISHED:
+    is_winding_down = false;
+    break;
+  default:
+    is_winding_down = true;
+    break;
   }
-  pthread_mutex_unlock(&thread_control->exit_status_mutex);
-  return success;
+  return is_winding_down;
 }
 
-bool thread_control_set_mode_started(ThreadControl *thread_control) {
-  bool success = false;
-  pthread_mutex_lock(&thread_control->current_mode_mutex);
-  if (thread_control->current_mode == MODE_FINISHED) {
-    thread_control->current_mode = MODE_STARTED;
-    pthread_mutex_lock(&thread_control->not_finished_mode_mutex);
-    success = true;
+bool thread_control_is_running_status(thread_control_status_t tc_status) {
+  return tc_status == THREAD_CONTROL_STATUS_STARTED;
+}
+
+bool thread_control_is_winding_down(ThreadControl *thread_control) {
+  return thread_control_is_winding_down_status(
+      thread_control_get_status(thread_control));
+}
+
+bool thread_control_is_finished(ThreadControl *thread_control) {
+  return thread_control_get_status(thread_control) ==
+         THREAD_CONTROL_STATUS_FINISHED;
+}
+
+bool thread_control_is_running(ThreadControl *thread_control) {
+  return thread_control_is_running_status(
+      thread_control_get_status(thread_control));
+}
+
+bool thread_control_is_ready_for_new_command(ThreadControl *thread_control) {
+  const thread_control_status_t tc_status =
+      thread_control_get_status(thread_control);
+  bool is_ready;
+  switch (tc_status) {
+  case THREAD_CONTROL_STATUS_UNINITIALIZED:
+  case THREAD_CONTROL_STATUS_FINISHED:
+    is_ready = true;
+    break;
+  default:
+    is_ready = false;
+    break;
   }
-  pthread_mutex_unlock(&thread_control->current_mode_mutex);
-  return success;
+  return is_ready;
 }
 
-bool thread_control_set_mode_status_ready(ThreadControl *thread_control) {
-  bool success = false;
-  pthread_mutex_lock(&thread_control->current_mode_mutex);
-  if (thread_control->current_mode == MODE_STARTED) {
-    thread_control->current_mode = MODE_STATUS_READY;
-    success = true;
+bool thread_control_is_sim_printable(ThreadControl *thread_control,
+                                     const bool simmed_plays_initialized) {
+  bool is_printable;
+  switch (thread_control_get_status(thread_control)) {
+  case THREAD_CONTROL_STATUS_UNINITIALIZED:
+    is_printable = false;
+    break;
+  case THREAD_CONTROL_STATUS_STARTED:
+    is_printable = simmed_plays_initialized;
+    break;
+  case THREAD_CONTROL_STATUS_MAX_ITERATIONS:
+  case THREAD_CONTROL_STATUS_USER_INTERRUPT:
+  case THREAD_CONTROL_STATUS_THRESHOLD:
+  case THREAD_CONTROL_STATUS_SAMPLE_LIMIT:
+  case THREAD_CONTROL_STATUS_TIMEOUT:
+  case THREAD_CONTROL_STATUS_ONE_ARM_REMAINING:
+  case THREAD_CONTROL_STATUS_FINISHED:
+    is_printable = true;
+    break;
   }
-  pthread_mutex_unlock(&thread_control->current_mode_mutex);
-  return success;
+  return is_printable;
 }
 
-bool thread_control_set_mode_finished(ThreadControl *thread_control) {
-  bool success = false;
-  pthread_mutex_lock(&thread_control->current_mode_mutex);
-  if (thread_control->current_mode != MODE_FINISHED) {
-    thread_control->current_mode = MODE_FINISHED;
-    pthread_mutex_unlock(&thread_control->not_finished_mode_mutex);
-    success = true;
+void thread_control_verify_state_change(thread_control_status_t old_status,
+                                        thread_control_status_t new_status) {
+  if (new_status == THREAD_CONTROL_STATUS_UNINITIALIZED ||
+      (old_status == THREAD_CONTROL_STATUS_UNINITIALIZED &&
+       new_status != THREAD_CONTROL_STATUS_STARTED) ||
+      (old_status != THREAD_CONTROL_STATUS_UNINITIALIZED &&
+       old_status != THREAD_CONTROL_STATUS_FINISHED &&
+       new_status == THREAD_CONTROL_STATUS_STARTED)) {
+    log_fatal("invalid thread control state transition: %d -> %d\n", old_status,
+              new_status);
   }
-  pthread_mutex_unlock(&thread_control->current_mode_mutex);
-  return success;
 }
 
-mode_search_status_t thread_control_get_mode(ThreadControl *thread_control) {
-  mode_search_status_t mode;
-  pthread_mutex_lock(&thread_control->current_mode_mutex);
-  mode = thread_control->current_mode;
-  pthread_mutex_unlock(&thread_control->current_mode_mutex);
-  return mode;
+bool thread_control_is_noop_state_change(thread_control_status_t old_status,
+                                         thread_control_status_t new_status) {
+  return thread_control_is_winding_down_status(old_status) &&
+         thread_control_is_winding_down_status(new_status);
+}
+
+// Returns true if the status was set successfully.
+// Returns false if the exit status remains unchanged.
+bool thread_control_set_status(ThreadControl *thread_control,
+                               thread_control_status_t new_status) {
+  bool success = false;
+  pthread_mutex_lock(&thread_control->tc_status_mutex);
+  const thread_control_status_t old_status = thread_control->tc_status;
+  thread_control_verify_state_change(old_status, new_status);
+  // Only set the status to some specific exit reason if it is not already set
+  // to some other winding down reason.
+  if (!thread_control_is_noop_state_change(old_status, new_status)) {
+    thread_control->tc_status = new_status;
+    success = true;
+    // Reset the thread control
+    if (new_status == THREAD_CONTROL_STATUS_STARTED) {
+      thread_control->iter_count = 0;
+      thread_control->iter_count_completed = 0;
+      thread_control->time_elapsed = 0;
+      mtimer_start(thread_control->timer);
+    }
+  }
+  pthread_mutex_unlock(&thread_control->tc_status_mutex);
+  return success;
 }
 
 // NOT THREAD SAFE: This does not require locking since it is
@@ -168,12 +215,6 @@ void thread_control_print(ThreadControl *thread_control, const char *content) {
   pthread_mutex_lock(&thread_control->print_mutex);
   write_to_stream_out(content);
   pthread_mutex_unlock(&thread_control->print_mutex);
-}
-
-void thread_control_wait_for_mode_stopped(ThreadControl *thread_control) {
-  pthread_mutex_lock(&thread_control->not_finished_mode_mutex);
-  // We can only acquire the lock once the search has stopped.
-  pthread_mutex_unlock(&thread_control->not_finished_mode_mutex);
 }
 
 // Returns true if the iter_count is already greater than or equal to
@@ -262,13 +303,8 @@ uint64_t thread_control_get_iter_count(const ThreadControl *thread_control) {
 // before or after a multithreaded operation. Do not call this in a
 // multithreaded context as it is intentionally not thread safe.
 // Resets all iteration counts and resets then starts the timer.
-void thread_control_reset(ThreadControl *thread_control,
-                          uint64_t max_iter_count) {
-  thread_control->iter_count = 0;
-  thread_control->iter_count_completed = 0;
-  thread_control->time_elapsed = 0;
+// FIXME: merge with set mode started somehow
+void thread_control_set_max_iter_count(ThreadControl *thread_control,
+                                       uint64_t max_iter_count) {
   thread_control->max_iter_count = max_iter_count;
-  thread_control->exit_status = EXIT_STATUS_NONE;
-  mtimer_reset(thread_control->timer);
-  mtimer_start(thread_control->timer);
 }

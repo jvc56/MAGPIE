@@ -712,6 +712,9 @@ void trim_internal(char *str, const char c, bool trim_whitespace) {
 
   char *ptr = str;
   size_t len = strlen(ptr);
+  if (len == 0) {
+    return;
+  }
 
   while (len - 1 > 0 &&
          matches_trim_condition(ptr[len - 1], c, trim_whitespace)) {
