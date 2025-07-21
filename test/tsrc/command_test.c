@@ -294,7 +294,6 @@ void test_command_execution(void) {
                                    5, 1, 0);
   // Get all moves through move gen
   assert_command_status_and_output(config, "gen -numplays 15", false, 5, 17, 0);
-  // FIXME: block_for_search is ending too early
   assert_command_status_and_output(
       config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ", false,
       60, 222, 0);

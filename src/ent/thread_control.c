@@ -303,7 +303,6 @@ uint64_t thread_control_get_iter_count(const ThreadControl *thread_control) {
 // before or after a multithreaded operation. Do not call this in a
 // multithreaded context as it is intentionally not thread safe.
 // Resets all iteration counts and resets then starts the timer.
-// FIXME: merge with set mode started somehow
 void thread_control_set_max_iter_count(ThreadControl *thread_control,
                                        uint64_t max_iter_count) {
   thread_control->max_iter_count = max_iter_count;

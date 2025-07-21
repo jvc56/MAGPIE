@@ -40,6 +40,7 @@ error_code_t infer_for_test(const Config *config, int target_index,
   config_infer(config, target_index, target_score, target_num_exch,
                target_played_tiles, inference_results, error_stack);
   error_code_t status = error_stack_top(error_stack);
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_FINISHED);
   rack_destroy(target_played_tiles);
   error_stack_destroy(error_stack);
   return status;
