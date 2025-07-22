@@ -632,8 +632,10 @@ static inline bool
 board_are_bonus_squares_symmetric_by_transposition(const Board *board) {
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = row + 1; col < BOARD_DIM; col++) {
+      const int row_transposed = col;
+      const int col_transposed = row;
       if (board_get_bonus_square(board, row, col).raw !=
-          board_get_bonus_square(board, col, row).raw) {
+          board_get_bonus_square(board, row_transposed, col_transposed).raw) {
         return false;
       }
     }

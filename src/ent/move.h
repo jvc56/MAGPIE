@@ -498,18 +498,22 @@ static inline void down_heapify(MoveList *ml, int parent_node) {
   int min;
   Move *temp;
 
-  if (left >= ml->count || left < 0)
+  if (left >= ml->count || left < 0) {
     left = -1;
-  if (right >= ml->count || right < 0)
+  }
+  if (right >= ml->count || right < 0) {
     right = -1;
+  }
 
   if (left != -1 &&
-      compare_moves(ml->moves[parent_node], ml->moves[left], false))
+      compare_moves(ml->moves[parent_node], ml->moves[left], false)) {
     min = left;
-  else
+  } else {
     min = parent_node;
-  if (right != -1 && compare_moves(ml->moves[min], ml->moves[right], false))
+  }
+  if (right != -1 && compare_moves(ml->moves[min], ml->moves[right], false)) {
     min = right;
+  }
 
   if (min != parent_node) {
     temp = ml->moves[min];
@@ -630,7 +634,7 @@ static inline void small_move_list_destroy(MoveList *ml) {
 static inline void small_move_list_reset(MoveList *ml) { ml->count = 0; }
 
 static inline int small_move_get_tiles_played(const SmallMove *sm) {
-  return (sm->metadata >> 24) & 0xFF;
+  return (int)((sm->metadata >> 24) & 0xFF);
 }
 
 static inline void small_move_set_estimated_value(SmallMove *sm, int32_t val) {
@@ -699,8 +703,8 @@ static inline void small_move_to_move(Move *move, const SmallMove *sm,
     return;
   }
   // Convert the small move to a Move*
-  int row = (sm->tiny_move & SMALL_MOVE_ROW_BITMASK) >> 6;
-  int col = (sm->tiny_move & SMALL_MOVE_COL_BITMASK) >> 1;
+  int row = (int)((sm->tiny_move & SMALL_MOVE_ROW_BITMASK) >> 6);
+  int col = (int)((sm->tiny_move & SMALL_MOVE_COL_BITMASK) >> 1);
   bool vert = false;
   if ((sm->tiny_move & 1) > 0) {
     vert = true;
@@ -710,7 +714,7 @@ static inline void small_move_to_move(Move *move, const SmallMove *sm,
   int bdim = BOARD_DIM;
   int r = row;
   int c = col;
-  int blank_mask = (sm->tiny_move & SMALL_MOVE_BLANKS_BIT_MASK);
+  int blank_mask = (int)(sm->tiny_move & SMALL_MOVE_BLANKS_BIT_MASK);
   int tidx = 0;
   int midx = 0;
   int tile_shift = 20;
@@ -750,7 +754,7 @@ static inline void small_move_to_move(Move *move, const SmallMove *sm,
   move->score = int_to_equity(small_move_get_score(sm));
   move->row_start = row;
   move->col_start = col;
-  move->equity = 0.0;
+  move->equity = 0;
   move->dir = vert ? BOARD_VERTICAL_DIRECTION : BOARD_HORIZONTAL_DIRECTION;
 }
 

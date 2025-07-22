@@ -7,7 +7,7 @@
 #include "letter_distribution.h"
 #include "xoshiro.h"
 
-#define MAX_BAG_SIZE 1000
+enum { MAX_BAG_SIZE = 1000 };
 
 typedef struct Bag Bag;
 
@@ -28,4 +28,5 @@ void bag_seed(Bag *bag, uint64_t seed);
 void bag_reset(const LetterDistribution *ld, Bag *bag);
 void bag_shuffle(Bag *bag);
 void bag_increment_unseen_count(const Bag *bag, int *unseen_count);
+
 #endif

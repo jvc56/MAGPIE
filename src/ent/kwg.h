@@ -89,7 +89,8 @@ static inline uint32_t kwg_get_next_node_index(const KWG *kwg,
 
 static inline uint64_t kwg_get_letter_sets(const KWG *kwg, uint32_t node_index,
                                            uint64_t *extension_set) {
-  uint64_t ls = 0, es = 0;
+  uint64_t ls = 0;
+  uint64_t es = 0;
   for (uint32_t i = node_index;; ++i) {
     const uint32_t node = kwg_node(kwg, i);
     const uint32_t t = kwg_node_tile(node);
@@ -106,7 +107,7 @@ static inline uint64_t kwg_get_letter_sets(const KWG *kwg, uint32_t node_index,
 
 static inline void kwg_allocate_nodes(KWG *kwg, size_t number_of_nodes) {
   kwg->nodes = (uint32_t *)malloc_or_die(number_of_nodes * sizeof(uint32_t));
-  kwg->number_of_nodes = number_of_nodes;
+  kwg->number_of_nodes = (int)number_of_nodes;
 }
 
 static inline void kwg_read_nodes_from_stream(KWG *kwg, size_t number_of_nodes,
@@ -134,9 +135,9 @@ static inline void load_kwg(const char *kwg_name, const char *kwg_filename,
 
   kwg->name = string_duplicate(kwg_name);
 
-  fseek(stream, 0, SEEK_END);        // seek to end of file
+  fseek_or_die(stream, 0, SEEK_END); // seek to end of file
   long int kwg_size = ftell(stream); // get current file pointer
-  fseek(stream, 0, SEEK_SET);
+  fseek_or_die(stream, 0, SEEK_SET);
 
   size_t number_of_nodes = kwg_size / sizeof(uint32_t);
 

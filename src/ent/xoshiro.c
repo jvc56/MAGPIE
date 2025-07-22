@@ -103,7 +103,8 @@ uint64_t prng_next(XoshiroPRNG *prng) {
 uint64_t prng_get_random_number(XoshiroPRNG *prng, uint64_t n) {
   uint64_t x = prng_next(prng);
   // Eliminate modulus bias
-  while (x >= XOSHIRO_MAX - (XOSHIRO_MAX % n)) {
+  const uint64_t threshold = XOSHIRO_MAX - (XOSHIRO_MAX % n);
+  while (x >= threshold) {
     x = prng_next(prng);
   }
   return x % n;

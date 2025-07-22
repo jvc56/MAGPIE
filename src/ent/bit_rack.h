@@ -224,8 +224,9 @@ static inline bool bit_rack_equals(const BitRack *a, const BitRack *b) {
 static inline Rack *bit_rack_to_rack(const BitRack *bit_rack) {
   Rack *rack = rack_create(BIT_RACK_MAX_ALPHABET_SIZE);
   for (int ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
-    rack->array[ml] = bit_rack_get_letter(bit_rack, ml);
-    rack->number_of_letters += rack->array[ml];
+    const MachineLetter num_ml = bit_rack_get_letter(bit_rack, ml);
+    rack->array[ml] = (int8_t)num_ml;
+    rack->number_of_letters += (uint16_t)num_ml;
   }
   return rack;
 }

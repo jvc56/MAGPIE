@@ -1,7 +1,12 @@
 #!/bin/bash
 
-echo "clang-tidy version:"
-clang-tidy --version
+CLANG_TIDY_EXEC="$1"
+if [ -z "$CLANG_TIDY_EXEC" ]; then
+    CLANG_TIDY_EXEC="clang-tidy"
+fi
+
+echo "$CLANG_TIDY_EXEC version:"
+$CLANG_TIDY_EXEC --version
 
 SEARCH_DIRECTORIES="src/ test/ cmd/"
 CLANG_TIDY_CHECKS="*,
@@ -12,10 +17,20 @@ CLANG_TIDY_CHECKS="*,
                   -cppcoreguidelines-init-variables,
                   -clang-analyzer-core.uninitialized.Assign,
                   -clang-analyzer-core.uninitialized.UndefReturn,
-                  -clang-diagnostic-unknown-escape-sequence"
-CLANG_TIDY_EXCLUDE_HEADER_FILTER="*timer.h"
-# Use -D_POSIX_C_SOURCE=199309L to make timer.h compile
-C_COMPILER_FLAGS="-std=c99 -D_POSIX_C_SOURCE=200809L"
+                  -clang-diagnostic-unknown-escape-sequence,
+                  -llvmlibc-restrict-system-libc-headers,
+                  -altera-struct-pack-align,
+                  -readability-identifier-length,
+                  -readability-function-cognitive-complexity,
+                  -altera-unroll-loops,
+                  -altera-id-dependent-backward-branch,
+                  -bugprone-easily-swappable-parameters,
+                  -concurrency-mt-unsafe,
+                  -bugprone-multi-level-implicit-pointer-conversion,
+                  -misc-no-recursion,
+                  -llvm-header-guard"
+CLANG_TIDY_EXCLUDE_HEADER_FILTER=".*"
+C_COMPILER_FLAGS="-std=c99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -D__linux__  -U_WIN32 -U__APPLE__ "
 LOG_FILE=$(mktemp)
 # Ensure the temporary log file is removed when the script exits,
 # regardless of how it exits (success, failure, or interruption).
@@ -41,7 +56,7 @@ CLANG_TIDY_COMMAND_FAILED=0
 find $SEARCH_DIRECTORIES -name "*.c" -print0 | while IFS= read -r -d $'\0' C_FILE; do
     echo "Analyzing: $C_FILE"
 
-    CLANG_TIDY_CMD="clang-tidy \"$C_FILE\" \
+    CLANG_TIDY_CMD="$CLANG_TIDY_EXEC \"$C_FILE\" \
         --header-filter=\"$CLANG_TIDY_EXCLUDE_HEADER_FILTER\" \
         -checks=\"$CLANG_TIDY_CHECKS\" \
         -- $C_COMPILER_FLAGS"

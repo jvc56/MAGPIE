@@ -25,7 +25,7 @@
 // on how the KLV data structure works, see
 // https://github.com/andy-k/wolges/blob/main/details.txt
 typedef struct KLV {
-  int number_of_leaves;
+  uint32_t number_of_leaves;
   KWG *kwg;
   char *name;
   uint32_t *word_counts;
@@ -36,7 +36,7 @@ static inline const char *klv_get_name(const KLV *klv) { return klv->name; }
 
 static inline const KWG *klv_get_kwg(const KLV *klv) { return klv->kwg; }
 
-static inline int klv_get_number_of_leaves(const KLV *klv) {
+static inline uint32_t klv_get_number_of_leaves(const KLV *klv) {
   return klv->number_of_leaves;
 }
 
@@ -48,7 +48,7 @@ static inline void klv_set_all_leave_values_to_zero(KLV *klv) {
 static inline Equity klv_get_indexed_leave_value(const KLV *klv,
                                                  uint32_t index) {
   if (index == KLV_UNFOUND_INDEX) {
-    return 0.0;
+    return 0;
   }
   return klv->leave_values[index];
 }
@@ -130,12 +130,12 @@ static inline int klv_count_words_at(const KLV *klv, uint32_t node_index,
     klv->word_counts[node_index] =
         this_node_word_count + child_word_count + sibling_word_count;
   }
-  return klv->word_counts[node_index];
+  return (int)klv->word_counts[node_index];
 }
 
 static inline void klv_count_words(const KLV *klv, size_t kwg_size) {
-  for (int p = kwg_size - 1; p >= 0; p--) {
-    klv_count_words_at(klv, p, (int)kwg_size);
+  for (size_t p = kwg_size - 1; p >= 0; p--) {
+    klv_count_words_at(klv, p, kwg_size);
   }
 }
 
@@ -240,10 +240,10 @@ static inline KLV *klv_create_zeroed_from_kwg(KWG *kwg, int number_of_leaves,
 static inline uint32_t klv_get_word_index_internal(const KLV *klv,
                                                    const Rack *leave,
                                                    uint32_t node_index) {
-  int idx = 0;
-  int lidx = 0;
-  int lidx_letter_count = rack_get_letter(leave, lidx);
-  int number_of_letters = rack_get_total_letters(leave);
+  uint32_t idx = 0;
+  MachineLetter lidx = 0;
+  int8_t lidx_letter_count = rack_get_letter(leave, lidx);
+  uint16_t number_of_letters = rack_get_total_letters(leave);
 
   // Advance lidx
   while (lidx_letter_count == 0) {
@@ -282,7 +282,7 @@ static inline uint32_t klv_get_word_index_internal(const KLV *klv,
   return KLV_UNFOUND_INDEX;
 }
 
-static inline int klv_get_word_index(const KLV *klv, const Rack *leave) {
+static inline uint32_t klv_get_word_index(const KLV *klv, const Rack *leave) {
   if (rack_is_empty(leave)) {
     return -1;
   }
@@ -295,10 +295,10 @@ static inline int klv_get_word_index(const KLV *klv, const Rack *leave) {
 
 static inline Equity klv_get_leave_value(const KLV *klv, const Rack *leave) {
   if (rack_is_empty(leave)) {
-    return 0.0;
+    return 0;
   }
   if (!klv) {
-    return 0.0;
+    return 0;
   }
   const uint32_t index = klv_get_word_index_internal(
       klv, leave, kwg_get_dawg_root_node_index(klv->kwg));

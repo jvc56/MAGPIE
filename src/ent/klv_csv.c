@@ -1,13 +1,29 @@
+#include "../def/kwg_defs.h"
+#include "../def/letter_distribution_defs.h"
+#include "../def/rack_defs.h"
+
+#include "../ent/data_filepaths.h"
 #include "../ent/dictionary_word.h"
+#include "../ent/equity.h"
 #include "../ent/klv.h"
+#include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/rack.h"
+
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "../impl/kwg_maker.h"
 
 #include "../str/rack_string.h"
 
-#define LEAVES_CSV_MAX_LINE_LENGTH 256
+#include "../util/fileproxy.h"
+#include "../util/io_util.h"
+#include "../util/string_util.h"
+
+enum { LEAVES_CSV_MAX_LINE_LENGTH = 256 };
 
 typedef void (*leave_iter_func_t)(void *, uint32_t);
 
@@ -196,7 +212,7 @@ void klv_read_from_csv_internal(const LetterDistribution *ld,
     trim_whitespace(value_str);
     if (leave_str && value_str) {
       rack_set_to_string(ld, &leave_rack, leave_str);
-      const int leave_index = klv_get_word_index(klv, &leave_rack);
+      const uint32_t leave_index = klv_get_word_index(klv, &leave_rack);
       if (leave_was_set[leave_index]) {
         error_stack_push(
             error_stack, ERROR_STATUS_KLV_DUPLICATE_LEAVE,
@@ -236,7 +252,7 @@ KLV *klv_read_from_csv(const LetterDistribution *ld, const char *data_paths,
   FILE *stream = stream_from_filename(leaves_filename, error_stack);
   if (error_stack_is_empty(error_stack)) {
     klv = klv_create_empty(ld, leaves_name);
-    int number_of_leaves = klv_get_number_of_leaves(klv);
+    uint32_t number_of_leaves = klv_get_number_of_leaves(klv);
     bool *leave_was_set = (bool *)calloc_or_die(number_of_leaves, sizeof(bool));
     klv_read_from_csv_internal(ld, stream, klv, leave_was_set, leaves_filename,
                                error_stack);

@@ -5,6 +5,7 @@
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 
+#include "../ent/board_layout.h"
 #include "../ent/equity.h"
 
 #include "rack.h"

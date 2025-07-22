@@ -524,28 +524,28 @@ void test_exec_ucgi_command(void) {
 
   nap(1.0);
   fprintf(input_writer, "set -r1 best -r2 best -it 1 -numplays 1 -threads 1\n");
-  fflush(input_writer);
+  fflush_or_die(input_writer);
   nap(1.0);
   fprintf(input_writer,
           "autoplay game 1 -lex CSW21 -s1 equity -s2 equity -gp false\n");
-  fflush(input_writer);
+  fflush_or_die(input_writer);
   nap(1.0);
   fprintf(
       input_writer,
       "autoplay game 10000000 -lex CSW21 -s1 equity -s2 equity  -gp false\n");
-  fflush(input_writer);
+  fflush_or_die(input_writer);
   // Try to immediately start another command while the previous one
   // is still running. This should give a warning.
   fprintf(input_writer,
           "autoplay game 1 -lex CSW21 -s1 equity -s2 equity  -gp false\n");
-  fflush(input_writer);
+  fflush_or_die(input_writer);
   nap(1.0);
   // Interrupt the autoplay which won't finish in 1 second
   fprintf(input_writer, "stop\n");
-  fflush(input_writer);
+  fflush_or_die(input_writer);
   nap(1.0);
   fprintf(input_writer, "quit\n");
-  fflush(input_writer);
+  fflush_or_die(input_writer);
   nap(1.0);
 
   // Wait for magpie to quit

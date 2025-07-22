@@ -10,6 +10,7 @@
 #include "kwg.h"
 #include "letter_distribution.h"
 #include "players_data.h"
+#include "rack.h"
 #include "wmp.h"
 
 #include "../util/io_util.h"

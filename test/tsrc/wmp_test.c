@@ -19,9 +19,9 @@ long get_file_size(const char *filename) {
     log_fatal("wmp test failed to open wmp file: %s", filename);
   }
   error_stack_destroy(error_stack);
-  fseek(stream, 0L, SEEK_END);
+  fseek_or_die(stream, 0L, SEEK_END);
   const long file_size = ftell(stream);
-  fseek(stream, 0L, SEEK_SET);
+  fseek_or_die(stream, 0L, SEEK_SET);
   return file_size;
 }
 

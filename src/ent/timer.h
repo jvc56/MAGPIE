@@ -54,8 +54,9 @@ static inline double mtimer_elapsed_seconds(const Timer *timer) {
     finish_time.tv_sec = timer->end_time.tv_sec;
     finish_time.tv_nsec = timer->end_time.tv_nsec;
   }
-  double elapsed = (finish_time.tv_sec - timer->start_time.tv_sec);
-  elapsed += (finish_time.tv_nsec - timer->start_time.tv_nsec) / 1000000000.0;
+  double elapsed = (double)(finish_time.tv_sec - timer->start_time.tv_sec);
+  elapsed +=
+      (double)(finish_time.tv_nsec - timer->start_time.tv_nsec) / 1000000000.0;
   return elapsed;
 }
 

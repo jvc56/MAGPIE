@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#include "../def/bit_rack_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/move_defs.h"
 
@@ -14,10 +15,12 @@
 #include "../ent/leave_map.h"
 #include "../ent/wmp.h"
 
-#define MAX_POSSIBLE_PLAYTHROUGH_BLOCKS ((BOARD_DIM / 2) + 1)
-#define MIN_TILES_FOR_WMP_GEN 2
-#define MAX_WMP_MOVE_GEN_ANCHORS                                               \
-  ((RACK_SIZE + 1) * MAX_POSSIBLE_PLAYTHROUGH_BLOCKS)
+enum {
+  MAX_POSSIBLE_PLAYTHROUGH_BLOCKS = ((BOARD_DIM / 2) + 1),
+  MIN_TILES_FOR_WMP_GEN = 2,
+  MAX_WMP_MOVE_GEN_ANCHORS =
+      ((RACK_SIZE + 1) * MAX_POSSIBLE_PLAYTHROUGH_BLOCKS),
+};
 
 typedef struct SubrackInfo {
   BitRack subrack;

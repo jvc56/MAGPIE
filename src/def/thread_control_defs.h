@@ -13,6 +13,6 @@ typedef enum {
   THREAD_CONTROL_STATUS_FINISHED,
 } thread_control_status_t;
 
-#define MAX_THREADS 512
+enum { MAX_THREADS = 512 };
 
 #endif

@@ -1,22 +1,37 @@
 #include "autoplay_results.h"
 
 #include <pthread.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
+#include "bag.h"
+#include "data_filepaths.h"
+#include "equity.h"
 #include "game.h"
+#include "klv.h"
 #include "klv_csv.h"
+#include "letter_distribution.h"
 #include "move.h"
+#include "player.h"
+#include "players_data.h"
+#include "rack.h"
 #include "stats.h"
 
-#include "../str/move_string.h"
+#include "../def/game_defs.h"
+#include "../def/letter_distribution_defs.h"
+#include "../def/players_data_defs.h"
+#include "../def/rack_defs.h"
+
 #include "../str/rack_string.h"
 
 #include "../util/io_util.h"
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 
-#define DEFAULT_WRITE_BUFFER_SIZE 1024
+enum { DEFAULT_WRITE_BUFFER_SIZE = 1024 };
 
 typedef struct RecorderArgs {
   const Game *game;
@@ -195,8 +210,8 @@ void string_builder_add_winning_player_confidence(StringBuilder *sb,
   // See
   // https://library.virginia.edu/data/articles/continuity-corrections-imperfect-responses-to-slight-problems#fn1
   // for more details.
-  double p0_total_corrected_pct = (p0_total - 0.5) / total_games;
-  double p1_total_corrected_pct = (p1_total - 0.5) / total_games;
+  double p0_total_corrected_pct = (p0_total - 0.5) / (double)total_games;
+  double p1_total_corrected_pct = (p1_total - 0.5) / (double)total_games;
 
   int winning_player_num = 0;
   double winning_player_total_corrected_pct;
@@ -221,11 +236,11 @@ void string_builder_add_winning_player_confidence(StringBuilder *sb,
 
 char *game_data_human_readable_str(const GameData *gd, bool divergent) {
   uint64_t p0_wins = gd->p0_wins;
-  double p0_win_pct = (double)p0_wins / gd->total_games;
+  double p0_win_pct = (double)p0_wins / (double)gd->total_games;
   uint64_t p0_losses = gd->p0_losses;
-  double p0_loss_pct = (double)p0_losses / gd->total_games;
+  double p0_loss_pct = (double)p0_losses / (double)gd->total_games;
   uint64_t p0_ties = gd->p0_ties;
-  double p0_tie_pct = (double)p0_ties / gd->total_games;
+  double p0_tie_pct = (double)p0_ties / (double)gd->total_games;
 
   double p0_total = (double)gd->p0_wins + (double)gd->p0_ties / (double)2;
   double p0_total_pct = p0_total / (double)(gd->total_games);
@@ -431,8 +446,7 @@ char *game_data_sets_str(Recorder *recorder, const RecorderArgs *args) {
 }
 
 // FJ recorders
-#define MAX_NUMBER_OF_MOVES 100
-#define MAX_NUMBER_OF_TILES 100
+enum { MAX_NUMBER_OF_MOVES = 100, MAX_NUMBER_OF_TILES = 100 };
 #define FJ_FILENAME "fj_log.csv"
 
 typedef struct FJMove {
@@ -562,7 +576,7 @@ void fj_write_buffer_to_output(Recorder *recorder, int remaining_tiles,
       log_fatal("error writing to fj file of remaining tiles: %d",
                 remaining_tiles);
     }
-    fflush(shared_data->fhs[remaining_tiles]);
+    fflush_or_die(shared_data->fhs[remaining_tiles]);
     pthread_mutex_unlock(&shared_data->fh_mutexes[remaining_tiles]);
     string_builder_clear(sb);
   }
@@ -618,12 +632,13 @@ void fj_data_finalize(Recorder **recorders, int num_recorders,
 }
 
 // Win percentage recorder functions
-
-#define WIN_PCT_MAX_SPREAD 500
-// Use x2 the max spread to account for positive and negative spread
-// Use +1 to account for the tie
-#define WIN_PCT_NUM_COLUMNS ((WIN_PCT_MAX_SPREAD * 2) + 1)
-#define WIN_PCT_MAX_NUM_TURNS 100
+enum {
+  WIN_PCT_MAX_SPREAD = 500,
+  // Use x2 the max spread to account for positive and negative spread
+  // Use +1 to account for the tie
+  WIN_PCT_NUM_COLUMNS = ((WIN_PCT_MAX_SPREAD * 2) + 1),
+  WIN_PCT_MAX_NUM_TURNS = 100,
+};
 
 typedef struct WinPctTurnSnapshot {
   int score_diff;
@@ -884,7 +899,7 @@ void win_pct_data_finalize(Recorder **recorder_list, int list_size,
 // Leave recorder functions
 
 typedef struct LeavesData {
-  int num_leaves;
+  uint32_t num_leaves;
   uint64_t *leave_counts;
 } LeavesData;
 
@@ -984,7 +999,7 @@ void leaves_data_finalize(Recorder **recorder_list, int list_size,
       }
       primary_leaves_data->leave_counts[leave_index] = count;
     }
-    fclose(leaves_file);
+    fclose_or_die(leaves_file);
   }
 
   for (int i = 0; i < list_size; i++) {

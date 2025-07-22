@@ -20,7 +20,8 @@ static inline Equity double_to_equity(double x) {
   double rounded = round(x * EQUITY_RESOLUTION);
   if (rounded > EQUITY_MAX_VALUE) {
     return EQUITY_MAX_VALUE;
-  } else if (rounded < EQUITY_MIN_VALUE) {
+  }
+  if (rounded < EQUITY_MIN_VALUE) {
     return EQUITY_MIN_VALUE;
   }
   return (Equity)rounded;

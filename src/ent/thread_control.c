@@ -2,8 +2,9 @@
 
 #include <pthread.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
-#include <sys/time.h>
 
 #include <time.h>
 
@@ -13,7 +14,6 @@
 #include "xoshiro.h"
 
 #include "../util/io_util.h"
-#include "../util/string_util.h"
 
 struct ThreadControl {
   int number_of_threads;

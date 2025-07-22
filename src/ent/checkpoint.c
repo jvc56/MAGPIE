@@ -1,6 +1,7 @@
 #include "checkpoint.h"
 
 #include <pthread.h>
+#include <stdlib.h>
 
 #include "../util/io_util.h"
 

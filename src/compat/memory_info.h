@@ -53,7 +53,7 @@ static uint64_t get_total_memory(void) {
       break;
     }
   }
-  fclose(file);
+  fclose_or_die(file);
 #else
   log_fatal("unsupported platform");
 #endif

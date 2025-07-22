@@ -1,9 +1,11 @@
 #include "bag.h"
 
+#include <stdint.h>
 #include <stdlib.h>
 
 #include "../def/letter_distribution_defs.h"
 
+#include "letter_distribution.h"
 #include "xoshiro.h"
 
 #include "../util/io_util.h"
@@ -185,7 +187,7 @@ void bag_add_letter(Bag *bag, MachineLetter letter, int player_draw_index) {
   int number_of_tiles_remaining = bag_get_tiles(bag);
   if (number_of_tiles_remaining > 0) {
     insert_index +=
-        prng_get_random_number(bag->prng, number_of_tiles_remaining + 1);
+        (int)prng_get_random_number(bag->prng, number_of_tiles_remaining + 1);
   }
   // Add swapped tiles
   // to the player's respective "side" of the bag.

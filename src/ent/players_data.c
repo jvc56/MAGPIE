@@ -12,7 +12,7 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 
-const char *players_data_type_names[] = {"kwg", "klv", "wordmap"};
+static const char *const players_data_type_names[] = {"kwg", "klv", "wordmap"};
 
 // The PlayersData struct holds all of the
 // information that can be set during configuration.

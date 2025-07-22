@@ -2,6 +2,7 @@
 
 #include <stdlib.h>
 
+#include "equity.h"
 #include "rack.h"
 
 #include "../util/io_util.h"

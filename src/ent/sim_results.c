@@ -3,12 +3,13 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
 
-#include "../def/bai_defs.h"
 #include "../def/game_defs.h"
 
 #include "bai_result.h"
+#include "equity.h"
 #include "move.h"
 #include "stats.h"
 #include "win_pct.h"

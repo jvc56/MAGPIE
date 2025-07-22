@@ -234,6 +234,7 @@ void io_reset_stream_in(void);
 
 char *format_string_with_va_list(const char *format, va_list *args);
 char *get_formatted_string(const char *format, ...);
+void fflush_or_die(FILE *stream);
 void *malloc_or_die(size_t size);
 void *calloc_or_die(size_t num, size_t size);
 void *realloc_or_die(void *realloc_target, size_t size);
@@ -253,6 +254,7 @@ bool error_stack_is_empty(const ErrorStack *error_stack);
 // printing or retrieving the error string
 void error_stack_reset(ErrorStack *error_stack);
 
+void fseek_or_die(FILE *stream, long offset, int whence);
 char *get_string_from_file(const char *filename, ErrorStack *error_stack);
 void write_string_to_file(const char *filename, const char *mode,
                           const char *string, ErrorStack *error_stack);

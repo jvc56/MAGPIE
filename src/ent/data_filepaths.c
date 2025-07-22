@@ -15,7 +15,7 @@
 #define GCG_EXTENSION ".gcg"
 #define LEXICON_EXTENSION ".txt"
 
-const char *filepath_type_names[] = {
+static const char *const filepath_type_names[] = {
     "kwg", "klv",    "board layout", "win percentage", "letter distribution",
     "gcg", "leaves", "lexicon",      "wordmap"};
 

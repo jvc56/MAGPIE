@@ -1,7 +1,11 @@
 #include <assert.h>
 #include <limits.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "../def/board_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../def/wmp_defs.h"
 
 #include "../ent/bit_rack.h"
@@ -9,6 +13,8 @@
 #include "../ent/wmp.h"
 
 #include "wmp_maker.h"
+
+#include "../util/io_util.h"
 
 typedef struct MutableWordsMapEntry {
   BitRack quotient;
@@ -79,9 +85,9 @@ uint32_t next_prime(uint32_t n) {
   if (n % 2 == 0) {
     n++;
   }
-  for (int i = n;; i += 2) {
+  for (uint32_t i = n;; i += 2) {
     bool is_prime = true;
-    for (int j = 3; j * j <= i; j += 2) {
+    for (uint32_t j = 3; j * j <= i; j += 2) {
       if (i % j == 0) {
         is_prime = false;
         break;
@@ -196,13 +202,13 @@ max_word_lookup_result_size(const MutableWordMap *word_map,
 int mwfl_get_num_uninlined_words(const MutableWordsOfSameLengthMap *mwfl,
                                  int word_length) {
   int num_uninlined_words = 0;
-  const int max_inlined = max_inlined_words(word_length);
+  const uint32_t max_inlined = max_inlined_words(word_length);
   for (uint32_t bucket_idx = 0; bucket_idx < mwfl->num_word_buckets;
        bucket_idx++) {
     const MutableWordMapBucket *bucket = &mwfl->word_buckets[bucket_idx];
     for (uint32_t entry_idx = 0; entry_idx < bucket->num_entries; entry_idx++) {
       const MutableWordMapEntry *entry = &bucket->entries[entry_idx];
-      const int num_words = dictionary_word_list_get_count(entry->letters);
+      const uint32_t num_words = dictionary_word_list_get_count(entry->letters);
       if (num_words > max_inlined) {
         num_uninlined_words += dictionary_word_list_get_count(entry->letters);
       }
@@ -219,7 +225,8 @@ void write_inlined_word_range(const DictionaryWordList *words,
     const DictionaryWord *word = dictionary_word_list_get_word(words, word_idx);
     const MachineLetter *word_letters = dictionary_word_get_word(word);
     const int word_length = dictionary_word_get_length(word);
-    memcpy(bytes + word_idx * word_length, word_letters, word_length);
+    memcpy(bytes + (ptrdiff_t)(word_idx * word_length), word_letters,
+           word_length);
   }
 }
 
@@ -237,8 +244,8 @@ void write_letters(const MutableWordMapEntry *entry, uint32_t word_start,
     const DictionaryWord *word =
         dictionary_word_list_get_word(entry->letters, word_idx);
     const MachineLetter *word_letters = dictionary_word_get_word(word);
-    memcpy(letters + word_start + word_idx * word_length, word_letters,
-           word_length);
+    memcpy(letters + (ptrdiff_t)(word_start + word_idx * word_length),
+           word_letters, word_length);
   }
 }
 
@@ -546,6 +553,7 @@ void insert_blanks_from_word_entry(const MutableWordMapEntry *word_entry,
                                    MutableBlanksForSameLengthMap *mbfl) {
   BitRack bit_rack =
       entry_get_full_bit_rack(word_entry, num_word_buckets, word_bucket_idx);
+  // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
   for (MachineLetter ml = 1; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
     if (bit_rack_get_letter(&bit_rack, ml) > 0) {
       bit_rack_take_letter(&bit_rack, ml);
@@ -628,11 +636,13 @@ void insert_double_blanks_from_word_entry(
   BitRack bit_rack =
       entry_get_full_bit_rack(word_entry, num_word_buckets, word_bucket_idx);
   MachineLetter blanks_as_word[2];
+  // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
   for (MachineLetter ml1 = 1; ml1 < BIT_RACK_MAX_ALPHABET_SIZE; ml1++) {
     if (bit_rack_get_letter(&bit_rack, ml1) > 0) {
       bit_rack_take_letter(&bit_rack, ml1);
       bit_rack_add_letter(&bit_rack, BLANK_MACHINE_LETTER);
       blanks_as_word[0] = ml1;
+      // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
       for (MachineLetter ml2 = ml1; ml2 < BIT_RACK_MAX_ALPHABET_SIZE; ml2++) {
         if (bit_rack_get_letter(&bit_rack, ml2) > 0) {
           bit_rack_take_letter(&bit_rack, ml2);

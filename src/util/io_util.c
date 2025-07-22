@@ -62,11 +62,20 @@ char *get_formatted_string(const char *format, ...) {
   return formatted_string;
 }
 
+void fflush_or_die(FILE *stream) {
+  if (fflush(stream) != 0) {
+    int error_number = errno;
+    const char *system_error_message = strerror(error_number);
+    log_fatal("failed to flush stream: %s (%d)", system_error_message,
+              error_number);
+  }
+}
+
 void write_to_stream_with_vargs(FILE *stream, const bool flush, const char *fmt,
                                 va_list args) {
   vfprintf(stream, fmt, args);
   if (flush) {
-    fflush(stream);
+    fflush_or_die(stream);
   }
 }
 
@@ -113,7 +122,7 @@ void log_with_info(log_level_t log_level, const char *caller_filename,
   write_to_stream_with_vargs(output_fh, false, format, args);
   va_end(args);
   fprintf(output_fh, "\n");
-  fflush(output_fh);
+  fflush_or_die(output_fh);
 
   if (exit_fatally) {
     abort();
@@ -325,6 +334,15 @@ void write_string_to_file(const char *filename, const char *mode,
   fclose_or_die(file_handle);
 }
 
+void fseek_or_die(FILE *stream, long offset, int whence) {
+  if (fseek(stream, offset, whence) != 0) {
+    int error_number = errno;
+    const char *system_error_message = strerror(error_number);
+    log_fatal("failed to fseek stream: %s (%d)", system_error_message,
+              error_number);
+  }
+}
+
 char *get_string_from_file(const char *filename, ErrorStack *error_stack) {
   FILE *file_handle = fopen_safe(filename, "r", error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -332,9 +350,9 @@ char *get_string_from_file(const char *filename, ErrorStack *error_stack) {
   }
 
   // Get the file size by seeking to the end and then back to the beginning
-  fseek(file_handle, 0, SEEK_END);
+  fseek_or_die(file_handle, 0, SEEK_END);
   long file_size = ftell(file_handle);
-  fseek(file_handle, 0, SEEK_SET);
+  fseek_or_die(file_handle, 0, SEEK_SET);
 
   char *result_string =
       (char *)malloc_or_die(file_size + 1); // +1 for null terminator

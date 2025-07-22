@@ -1,11 +1,14 @@
 #include "dictionary_word.h"
 
 #include <stdint.h>
-#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "../def/dictionary_word_defs.h"
 #include "../def/kwg_defs.h"
+#include "../def/letter_distribution_defs.h"
 
+#include "../ent/data_filepaths.h"
 #include "../ent/letter_distribution.h"
 
 #include "../util/io_util.h"

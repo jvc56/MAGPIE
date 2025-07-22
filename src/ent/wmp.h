@@ -197,9 +197,9 @@ static inline void read_wfl_blankless_words(WMPForLength *wfl, uint32_t len,
 
   read_uint32_from_stream(&wfl->num_uninlined_words, stream);
   wfl->word_letters =
-      (MachineLetter *)malloc_or_die(wfl->num_uninlined_words * len);
-  read_bytes_from_stream(wfl->word_letters, wfl->num_uninlined_words * len,
-                         stream);
+      (MachineLetter *)malloc_or_die(wfl->num_uninlined_words * (size_t)(len));
+  read_bytes_from_stream(wfl->word_letters,
+                         wfl->num_uninlined_words * (size_t)(len), stream);
 }
 
 static inline void read_wfl_blanks(WMPForLength *wfl, FILE *stream) {
@@ -328,7 +328,7 @@ static inline uint32_t max_inlined_words(int word_length) {
 
 static inline int wmp_entry_number_of_inlined_bytes(const WMPEntry *entry,
                                                     int word_length) {
-  int num_bytes = max_inlined_words(word_length) * word_length;
+  int num_bytes = (int)max_inlined_words(word_length) * word_length;
   while (num_bytes > word_length) {
     const int byte_idx = num_bytes - 1;
     if (entry->bucket_or_inline[byte_idx] != 0) {
@@ -351,7 +351,7 @@ static inline int wmp_entry_write_uninlined_blankless_words_to_buffer(
     const WMPEntry *entry, const WMPForLength *wfl, int word_length,
     uint8_t *buffer) {
   const MachineLetter *letters = wfl->word_letters + entry->word_start;
-  const int bytes_written = entry->num_words * word_length;
+  const int bytes_written = (int)entry->num_words * word_length;
   memcpy(buffer, letters, bytes_written);
   return bytes_written;
 }
@@ -403,6 +403,7 @@ wmp_entry_write_blanks_to_buffer(const WMPEntry *entry, const WMPForLength *wfl,
                                  MachineLetter min_ml, uint8_t *buffer) {
   int bytes_written = 0;
   bit_rack_set_letter_count(bit_rack, BLANK_MACHINE_LETTER, 0);
+  // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
   for (MachineLetter ml = min_ml; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
     if (entry->blank_letters & (1ULL << ml)) {
       bit_rack_add_letter(bit_rack, ml);
@@ -461,15 +462,21 @@ static inline const char *wmp_get_name(const WMP *wmp) { return wmp->name; }
 static inline const WMPEntry *
 wmp_get_word_entry(const WMP *wmp, const BitRack *bit_rack, int word_length) {
   const WMPForLength *wfl = &wmp->wfls[word_length];
+  const WMPEntry *entry = NULL;
   switch (bit_rack_get_letter(bit_rack, BLANK_MACHINE_LETTER)) {
   case 0:
-    return wfl_get_word_entry(wfl, bit_rack);
+    entry = wfl_get_word_entry(wfl, bit_rack);
+    break;
   case 1:
-    return wfl_get_blank_entry(wfl, bit_rack);
+    entry = wfl_get_blank_entry(wfl, bit_rack);
+    break;
   case 2:
-    return wfl_get_double_blank_entry(wfl, bit_rack);
+    entry = wfl_get_double_blank_entry(wfl, bit_rack);
+    break;
+  default:
+    break;
   }
-  return NULL;
+  return entry;
 }
 
 static inline int wfl_write_blanks_to_buffer(const WMPForLength *wfl,
@@ -489,6 +496,7 @@ static inline int wmp_entry_write_double_blanks_to_buffer(
     int word_length, uint8_t *buffer) {
   int bytes_written = 0;
   bit_rack_set_letter_count(bit_rack, BLANK_MACHINE_LETTER, 1);
+  // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
   for (MachineLetter ml = 1; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
     if (entry->blank_letters & (1ULL << ml)) {
       bit_rack_add_letter(bit_rack, ml);
@@ -507,18 +515,24 @@ static inline int wmp_entry_write_words_to_buffer(const WMPEntry *entry,
                                                   int word_length,
                                                   uint8_t *buffer) {
   const WMPForLength *wfl = &wmp->wfls[word_length];
+  int result = 0;
   switch (bit_rack_get_letter(bit_rack, BLANK_MACHINE_LETTER)) {
   case 0:
-    return wmp_entry_write_blankless_words_to_buffer(entry, wfl, word_length,
-                                                     buffer);
+    result = wmp_entry_write_blankless_words_to_buffer(entry, wfl, word_length,
+                                                       buffer);
+    break;
   case 1:
-    return wmp_entry_write_blanks_to_buffer(entry, wfl, bit_rack, word_length,
-                                            1, buffer);
+    result = wmp_entry_write_blanks_to_buffer(entry, wfl, bit_rack, word_length,
+                                              1, buffer);
+    break;
   case 2:
-    return wmp_entry_write_double_blanks_to_buffer(entry, wfl, bit_rack,
-                                                   word_length, buffer);
+    result = wmp_entry_write_double_blanks_to_buffer(entry, wfl, bit_rack,
+                                                     word_length, buffer);
+    break;
+  default:
+    break;
   }
-  return 0;
+  return result;
 }
 
 static inline int wmp_write_words_to_buffer(const WMP *wmp, BitRack *bit_rack,
@@ -554,7 +568,8 @@ static inline void write_wfl_to_stream(int length, const WMPForLength *wfl,
   write_uint32_to_stream_or_die(wfl->num_uninlined_words, stream,
                                 "num uninlined words");
   fwrite_or_die(wfl->word_letters, sizeof(MachineLetter),
-                wfl->num_uninlined_words * length, stream, "word letters");
+                wfl->num_uninlined_words * (size_t)length, stream,
+                "word letters");
   write_uint32_to_stream_or_die(wfl->num_blank_buckets, stream,
                                 "num blank buckets");
   fwrite_or_die(wfl->blank_bucket_starts, sizeof(uint32_t),

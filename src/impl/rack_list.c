@@ -1,18 +1,21 @@
 #include "rack_list.h"
 
 #include <pthread.h>
+#include <stdint.h>
 
-#include "../ent/bag.h"
+#include "../ent/dictionary_word.h"
 #include "../ent/encoded_rack.h"
-#include "../ent/game.h"
 #include "../ent/klv.h"
+#include "../ent/kwg.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/rack.h"
-#include "../ent/thread_control.h"
 #include "../ent/xoshiro.h"
 
-#include "kwg_maker.h"
+#include "../def/klv_defs.h"
+#include "../def/letter_distribution_defs.h"
+#include "../def/rack_defs.h"
 
-#include "../str/rack_string.h"
+#include "kwg_maker.h"
 
 #include "../util/io_util.h"
 #include "../util/math_util.h"
@@ -139,7 +142,7 @@ int rack_list_generate_all_racks(rack_gen_mode_t mode,
           log_fatal("word index not found in klv: %u", klv_index);
         }
         const uint32_t rack_list_index =
-            convert_klv_index_to_rack_list_index(klv_index);
+            convert_klv_index_to_rack_list_index((int)klv_index);
         rack_encode(
             rack,
             &rack_list->racks_ordered_by_index[rack_list_index]->encoded_rack);

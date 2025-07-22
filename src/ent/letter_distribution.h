@@ -27,9 +27,11 @@ typedef enum {
   LD_TYPE_FRENCH,
 } ld_t;
 
-#define INVALID_LETTER (0x80 - 1)
-#define MULTICHAR_START_DELIMITER '['
-#define MULTICHAR_END_DELIMITER ']'
+enum {
+  INVALID_LETTER = 0x80 - 1,
+  MULTICHAR_START_DELIMITER = '[',
+  MULTICHAR_END_DELIMITER = ']'
+};
 
 typedef struct LetterDistribution {
   char *name;
@@ -41,7 +43,7 @@ typedef struct LetterDistribution {
   MachineLetter score_order[MACHINE_LETTER_MAX_VALUE];
   bool is_vowel[MACHINE_LETTER_MAX_VALUE];
   int total_tiles;
-  int max_tile_length;
+  size_t max_tile_length;
   char ld_ml_to_hl[MACHINE_LETTER_MAX_VALUE][MAX_LETTER_BYTE_LENGTH];
 } LetterDistribution;
 
@@ -105,7 +107,7 @@ static inline void ld_create_internal(const char *ld_name,
   }
 
   int machine_letter = 0;
-  int max_tile_length = 0;
+  size_t max_tile_length = 0;
   ld->total_tiles = 0;
   StringSplitter *single_letter_info = NULL;
   for (int i = 0; i < number_of_lines; i++) {
@@ -157,7 +159,7 @@ static inline void ld_create_internal(const char *ld_name,
       break;
     }
 
-    int tile_length = string_length(letter);
+    size_t tile_length = string_length(letter);
     if (tile_length > max_tile_length) {
       max_tile_length = tile_length;
     }
@@ -286,9 +288,8 @@ static inline char *ld_ml_to_hl(const LetterDistribution *ld,
   const char *human_readable_letter = ld->ld_ml_to_hl[ml];
   if (is_human_readable_letter_multichar(human_readable_letter)) {
     return get_formatted_string("[%s]", human_readable_letter);
-  } else {
-    return string_duplicate(human_readable_letter);
   }
+  return string_duplicate(human_readable_letter);
 }
 
 // This is a linear search. This function should not be used for anything
@@ -496,6 +497,7 @@ static inline ld_t ld_get_type_from_ld_name(const char *ld_name,
 // BOARD_DIM to determine a default letter distribution name.
 static inline char *ld_get_default_name_from_type(ld_t ld_type,
                                                   ErrorStack *error_stack) {
+  // NOLINTNEXTLINE(misc-redundant-expression)
   if (BOARD_DIM != DEFAULT_BOARD_DIM && BOARD_DIM != DEFAULT_SUPER_BOARD_DIM) {
     error_stack_push(
         error_stack, ERROR_STATUS_LD_UNSUPPORTED_BOARD_DIM_DEFAULT,

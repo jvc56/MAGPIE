@@ -45,10 +45,10 @@ static inline void leave_map_init(const Rack *rack, LeaveMap *leave_map) {
   int current_base_index = 0;
   leave_map->rack_array_size = rack_get_dist_size(rack);
   for (int i = 0; i < leave_map->rack_array_size; i++) {
-    const int num_this = rack_get_letter(rack, i);
+    const int8_t num_this = rack_get_letter(rack, i);
     if (num_this > 0) {
       leave_map->letter_base_index_map[i] = current_base_index;
-      for (int j = 0; j < num_this; j++) {
+      for (int8_t j = 0; j < num_this; j++) {
         const int bit_index = current_base_index + num_this - j - 1;
         const int bit = 1 << bit_index;
         leave_map->reversed_letter_bit_map[current_base_index + j] = bit;
@@ -143,7 +143,7 @@ static inline void leave_map_take_letter_and_update_complement_index(
     LeaveMap *leave_map, Rack *rack, MachineLetter letter) {
   rack_take_letter(rack, letter);
   const int base_index = leave_map->letter_base_index_map[letter];
-  const int offset = rack->array[letter];
+  const int offset = (int)rack->array[letter];
   const int bit_index = base_index + offset;
   const int reversed_bit = leave_map->reversed_letter_bit_map[bit_index];
   leave_map->current_index |= reversed_bit;

@@ -15,9 +15,13 @@
 #include "board.h"
 #include "kwg.h"
 #include "kwg_alpha.h"
+#include "letter_distribution.h"
 #include "player.h"
 #include "players_data.h"
 #include "rack.h"
+
+#include "../util/io_util.h"
+#include "../util/string_util.h"
 
 typedef struct MinimalGameBackup {
   Board *board;
@@ -357,7 +361,7 @@ static inline void game_gen_classic_cross_set(const Game *game, int row,
   if (nonempty_to_left && nonempty_to_right) {
     uint64_t letter_set = 0;
     if (left_lpath_is_valid && right_lpath_is_valid) {
-      for (int i = right_lnode_index;; i++) {
+      for (uint32_t i = right_lnode_index;; i++) {
         const uint32_t node = kwg_node(kwg, i);
         const uint32_t ml = kwg_node_tile(node);
         // Only try letters that are possible in right extensions from the
@@ -450,7 +454,7 @@ void game_set_starting_player_index(Game *game, int starting_player_index) {
 void pre_allocate_backups(Game *game) {
   // pre-allocate heap backup structures to make backups as fast as possible.
   const LetterDistribution *ld = game_get_ld(game);
-  uint32_t ld_size = ld_get_size(ld);
+  int ld_size = ld_get_size(ld);
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
     game->game_backups[i] = malloc_or_die(sizeof(MinimalGameBackup));
     game->game_backups[i]->bag = bag_create(ld, 0);

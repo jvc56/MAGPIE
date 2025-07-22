@@ -65,19 +65,23 @@ static inline void anchor_heapify_down(AnchorHeap *heap, int parent_node) {
   int right = parent_node * 2 + 2;
   int min;
 
-  if (left >= heap->count || left < 0)
+  if (left >= heap->count || left < 0) {
     left = -1;
-  if (right >= heap->count || right < 0)
+  }
+  if (right >= heap->count || right < 0) {
     right = -1;
+  }
 
   if (left != -1 &&
-      anchor_is_better(&heap->anchors[left], &heap->anchors[parent_node]))
+      anchor_is_better(&heap->anchors[left], &heap->anchors[parent_node])) {
     min = left;
-  else
+  } else {
     min = parent_node;
+  }
   if (right != -1 &&
-      anchor_is_better(&heap->anchors[right], &heap->anchors[min]))
+      anchor_is_better(&heap->anchors[right], &heap->anchors[min])) {
     min = right;
+  }
 
   if (min != parent_node) {
     swap_anchors(&heap->anchors[min], &heap->anchors[parent_node]);

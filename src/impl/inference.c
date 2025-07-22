@@ -12,6 +12,7 @@
 #include "../def/thread_control_defs.h"
 
 #include "../ent/bag.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
 #include "../ent/klv.h"
@@ -29,6 +30,7 @@
 
 #include "../util/io_util.h"
 #include "../util/math_util.h"
+#include "../util/string_util.h"
 
 typedef struct Inference {
   // KLV used to evaluate leaves to determine
@@ -182,7 +184,7 @@ void evaluate_possible_leave(Inference *inference) {
           number_of_draws_for_leave);
       leave_rack_list_insert_rack(
           inference->current_target_leave, inference->current_target_exchanged,
-          number_of_draws_for_leave, current_leave_value,
+          (int)number_of_draws_for_leave, current_leave_value,
           inference_results_get_leave_rack_list(inference->results));
       rack_reset(inference->current_target_exchanged);
       for (int exchanged_tile_index = 0; exchanged_tile_index < tiles_played;
@@ -197,7 +199,7 @@ void evaluate_possible_leave(Inference *inference) {
                          equity_to_double(current_leave_value),
                          number_of_draws_for_leave);
       leave_rack_list_insert_rack(
-          inference->current_target_leave, NULL, number_of_draws_for_leave,
+          inference->current_target_leave, NULL, (int)number_of_draws_for_leave,
           current_leave_value,
           inference_results_get_leave_rack_list(inference->results));
     }

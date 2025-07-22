@@ -35,13 +35,13 @@ typedef struct StringSplitter StringSplitter;
 int string_splitter_get_number_of_items(const StringSplitter *string_splitter);
 const char *string_splitter_get_item(const StringSplitter *string_splitter,
                                      int item_index);
-void string_splitter_trim_char(StringSplitter *string_splitter, const char c);
+void string_splitter_trim_char(StringSplitter *string_splitter, char c);
 char *string_splitter_join(const StringSplitter *string_splitter,
                            int start_index, int end_index,
                            const char *separator);
 StringSplitter *split_string_by_whitespace(const char *input_string,
                                            bool ignore_empty);
-StringSplitter *split_string(const char *input_string, const char delimiter,
+StringSplitter *split_string(const char *input_string, char delimiter,
                              bool ignore_empty);
 void string_splitter_destroy(StringSplitter *string_splitter);
 StringSplitter *split_string_by_newline(const char *input_string,
@@ -84,7 +84,7 @@ const char *get_base_filename(const char *filepath);
 
 // Inplace string functions
 void trim_whitespace(char *str);
-void trim_char(char *str, const char c);
+void trim_char(char *str, char c);
 
 // String conversions
 int string_to_int(const char *str, ErrorStack *error_stack);

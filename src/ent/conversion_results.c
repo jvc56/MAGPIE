@@ -2,6 +2,8 @@
 
 #include "../util/io_util.h"
 
+#include <stdlib.h>
+
 struct ConversionResults {
   int number_of_strings;
   int number_of_nodes;

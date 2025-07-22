@@ -1,7 +1,9 @@
 #include "win_pct.h"
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "data_filepaths.h"
 
@@ -138,7 +140,8 @@ void win_pct_create_internal(const char *win_pct_name,
           break;
         }
         array[tiles_unseen_index][spread_index] =
-            total_win_score / (float)(total_games_for_tiles_remaining * 2);
+            (float)total_win_score /
+            (float)(total_games_for_tiles_remaining * 2);
       }
       prev_nonzero_total_games_index = (int)tiles_unseen_index;
     }

@@ -1,17 +1,20 @@
 #include "inference_results.h"
 
+#include <stdint.h>
 #include <stdlib.h>
 
 #include "../def/inference_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 
 #include "leave_rack.h"
+#include "rack.h"
 #include "stats.h"
 
 #include "../util/io_util.h"
 #include "../util/math_util.h"
 
-#define NUMBER_OF_STAT_TYPES 3
+enum { NUMBER_OF_STAT_TYPES = 3 };
 
 struct InferenceResults {
   int subtotals_size;
@@ -266,5 +269,5 @@ double get_probability_for_random_minimum_draw(
                total_number_of_letters_to_draw - i);
   }
 
-  return ((double)total_draws_for_this_letter_minimum) / total_draws;
+  return ((double)total_draws_for_this_letter_minimum) / (double)total_draws;
 }

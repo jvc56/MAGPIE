@@ -1,20 +1,35 @@
 #include "validated_move.h"
 
 #include <ctype.h>
+#include <stdlib.h>
 
+#include "../def/board_defs.h"
+#include "../def/equity_defs.h"
+#include "../def/game_defs.h"
+#include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
+#include "../def/move_defs.h"
+#include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/validated_move_defs.h"
 
+#include "bag.h"
+#include "board.h"
+#include "equity.h"
 #include "game.h"
+#include "klv.h"
+#include "kwg.h"
+#include "letter_distribution.h"
 #include "move.h"
+#include "player.h"
+#include "rack.h"
 #include "static_eval.h"
 #include "words.h"
 
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 
-#define MOVE_MAX_FIELDS 5
+enum { MOVE_MAX_FIELDS = 5 };
 
 typedef struct ValidatedMove {
   Move *move;
@@ -47,10 +62,10 @@ void validate_coordinates(Move *move, const char *coords_string,
                           ErrorStack *error_stack) {
   int row_start = 0;
   int col_start = 0;
-  int coords_string_length = string_length(coords_string);
+  size_t coords_string_length = string_length(coords_string);
   bool started_row_parse = false;
   bool started_col_parse = false;
-  for (int i = 0; i < coords_string_length; i++) {
+  for (size_t i = 0; i < coords_string_length; i++) {
     char position_char = coords_string[i];
     if (isdigit(position_char)) {
       if (i == 0) {
@@ -661,7 +676,8 @@ ValidatedMoves *validated_moves_create(const Game *game, int player_index,
     StringSplitter *split_moves = split_string(ucgi_moves_string, ',', true);
     vms->number_of_moves = string_splitter_get_number_of_items(split_moves);
 
-    vms->moves = malloc_or_die(sizeof(ValidatedMove *) * vms->number_of_moves);
+    vms->moves = (ValidatedMove **)malloc_or_die(sizeof(ValidatedMove *) *
+                                                 vms->number_of_moves);
 
     for (int i = 0; i < vms->number_of_moves; i++) {
       vms->moves[i] = validated_move_create(
@@ -718,7 +734,7 @@ bool validated_moves_get_challenge_turn_loss(const ValidatedMoves *vms, int i) {
 
 // Adds moves in vms to ml that do not already exist in ml
 void validated_moves_add_to_move_list(const ValidatedMoves *vms, MoveList *ml) {
-  Move **moves = malloc_or_die(sizeof(Move *) * vms->number_of_moves);
+  Move **moves = (Move **)malloc_or_die(sizeof(Move *) * vms->number_of_moves);
   int number_of_new_moves = 0;
   for (int i = 0; i < vms->number_of_moves; i++) {
     if (!move_list_move_exists(ml, vms->moves[i]->move)) {
