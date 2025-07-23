@@ -2,11 +2,23 @@
 
 #include <math.h>
 #include <stdatomic.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdlib.h>
 
+#include "../def/game_defs.h"
+#include "../def/rack_defs.h"
+
+#include "../ent/bag.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/letter_distribution.h"
+#include "../ent/move.h"
 #include "../ent/player.h"
+#include "../ent/rack.h"
 #include "../ent/sim_results.h"
+#include "../ent/thread_control.h"
+#include "../ent/win_pct.h"
 #include "../ent/xoshiro.h"
 
 #include "bai_logger.h"
@@ -15,7 +27,6 @@
 #include "../str/sim_string.h"
 
 #include "../util/io_util.h"
-#include "../util/string_util.h"
 
 #define SIMILARITY_EPSILON 1e-6
 
@@ -26,7 +37,7 @@ typedef bool (*rvs_is_epigon_func_t)(const RandomVariables *, const int);
 typedef void (*rvs_destroy_data_func_t)(RandomVariables *);
 
 struct RandomVariables {
-  int num_rvs;
+  uint64_t num_rvs;
   atomic_uint_fast64_t total_samples;
   rvs_sample_func_t sample_func;
   rvs_similar_func_t similar_func;
@@ -172,10 +183,12 @@ bool rv_normal_mark_as_epigon_if_similar(RandomVariables *rvs, const int leader,
   }
   RVNormal *rv_normal = (RVNormal *)rvs->data;
   rv_normal->is_epigon[i] =
-      fabs(rv_normal->means_and_vars[leader * 2] -
-           rv_normal->means_and_vars[i * 2]) < SIMILARITY_EPSILON &&
-      fabs(rv_normal->means_and_vars[leader * 2 + 1] -
-           rv_normal->means_and_vars[i * 2 + 1]) < SIMILARITY_EPSILON;
+      fabs(rv_normal->means_and_vars[(ptrdiff_t)(leader * 2)] -
+           rv_normal->means_and_vars[(ptrdiff_t)(i * 2)]) <
+          SIMILARITY_EPSILON &&
+      fabs(rv_normal->means_and_vars[(ptrdiff_t)(leader * 2 + 1)] -
+           rv_normal->means_and_vars[(ptrdiff_t)(i * 2 + 1)]) <
+          SIMILARITY_EPSILON;
   return rv_normal->is_epigon[i];
 }
 
@@ -228,11 +241,11 @@ double rv_normal_predetermined_sample(RandomVariables *rvs, const uint64_t k,
   }
   const double mean = rv_normal_predetermined->means_and_vars[k * 2];
   const double sigma2 = rv_normal_predetermined->means_and_vars[k * 2 + 1];
-  const int index = rv_normal_predetermined->index++;
+  const uint64_t index = rv_normal_predetermined->index++;
   const double sample = rv_normal_predetermined->samples[index];
   const double result = mean + sqrt(sigma2) * sample;
   bai_logger_log_title(bai_logger, "DETERMINISTIC_SAMPLE");
-  bai_logger_log_int(bai_logger, "index", index + 1);
+  bai_logger_log_int(bai_logger, "index", (int)(index + 1));
   bai_logger_log_int(bai_logger, "arm", (int)k + 1);
   bai_logger_log_double(bai_logger, "s", result);
   bai_logger_log_double(bai_logger, "u", mean);
@@ -355,7 +368,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   Simmer *simmer = (Simmer *)rvs->data;
   SimResults *sim_results = simmer->sim_results;
   SimmedPlay *simmed_play =
-      sim_results_get_simmed_play(sim_results, play_index);
+      sim_results_get_simmed_play(sim_results, (int)play_index);
   if (simmed_play_get_is_epigon(simmed_play)) {
     return INFINITY;
   }
@@ -568,7 +581,7 @@ bool rvs_is_epigon(const RandomVariables *rvs, const int i) {
   return rvs->is_epigon_func(rvs, i);
 }
 
-int rvs_get_num_rvs(const RandomVariables *rvs) { return rvs->num_rvs; }
+uint64_t rvs_get_num_rvs(const RandomVariables *rvs) { return rvs->num_rvs; }
 
 // NOT THREAD SAFE: caller is responsible for ensuring thread safety.
 uint64_t rvs_get_total_samples(const RandomVariables *rvs) {

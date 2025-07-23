@@ -1,33 +1,17 @@
 #include "exec.h"
 
+#include <assert.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdlib.h>
 
-#include "../def/autoplay_defs.h"
 #include "../def/config_defs.h"
-#include "../def/game_defs.h"
-#include "../def/inference_defs.h"
 #include "../def/thread_control_defs.h"
-#include "../def/validated_move_defs.h"
 
-#include "../ent/game.h"
-#include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
-#include "../ent/validated_move.h"
 
-#include "autoplay.h"
-#include "cgp.h"
 #include "config.h"
-#include "convert.h"
-#include "gameplay.h"
-#include "inference.h"
 #include "move_gen.h"
-#include "simmer.h"
-
-#include "../str/game_string.h"
-#include "../str/move_string.h"
-#include "../str/sim_string.h"
 
 #include "../util/fileproxy.h"
 #include "../util/io_util.h"

@@ -43,12 +43,12 @@ typedef struct BAIArmDatum {
 } BAIArmDatum;
 
 typedef struct BAISyncData {
-  int num_arms;
-  int num_arms_reached_threshold;
-  int num_total_samples_completed;
-  int num_total_samples_requested;
-  int astar_index;
-  int challenger_index;
+  uint64_t num_arms;
+  uint64_t num_arms_reached_threshold;
+  uint64_t num_total_samples_completed;
+  uint64_t num_total_samples_requested;
+  uint64_t astar_index;
+  uint64_t challenger_index;
   bool initial_phase;
   BAIArmDatum *arm_data;
   RandomVariables *rng;
@@ -57,7 +57,7 @@ typedef struct BAISyncData {
 } BAISyncData;
 
 static inline BAISyncData *bai_sync_data_create(ThreadControl *thread_control,
-                                                const int num_initial_arms,
+                                                const uint64_t num_initial_arms,
                                                 RandomVariables *rng) {
   BAISyncData *bai_sync_data = malloc_or_die(sizeof(BAISyncData));
   bai_sync_data->num_arms = num_initial_arms;

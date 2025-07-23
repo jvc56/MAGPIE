@@ -1,14 +1,21 @@
 #include <ctype.h>
+#include <stdlib.h>
 
+#include "../def/board_defs.h"
 #include "../def/config_defs.h"
 #include "../def/game_defs.h"
+#include "../def/letter_distribution_defs.h"
 
 #include "../ent/bag.h"
+#include "../ent/board.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
+#include "../ent/player.h"
+#include "../ent/rack.h"
 
 #include "../util/io_util.h"
+#include "../util/string_util.h"
 
 #include "../impl/gameplay.h"
 

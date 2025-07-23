@@ -13,6 +13,7 @@ typedef struct UnrestrictedMultiplier {
   uint8_t column;
 } UnrestrictedMultiplier;
 
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 typedef struct MoveGen {
   // Owned by this MoveGen struct
   int current_row_index;

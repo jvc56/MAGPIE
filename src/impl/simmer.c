@@ -1,9 +1,13 @@
 #include "simmer.h"
 
+#include <stdlib.h>
+
+#include "../ent/move.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 
 #include "../util/io_util.h"
+#include "../util/string_util.h"
 
 #include "../str/sim_string.h"
 

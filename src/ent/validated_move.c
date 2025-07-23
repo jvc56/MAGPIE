@@ -1,6 +1,7 @@
 #include "validated_move.h"
 
 #include <ctype.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 #include "../def/board_defs.h"
@@ -742,14 +743,14 @@ void validated_moves_add_to_move_list(const ValidatedMoves *vms, MoveList *ml) {
     }
   }
 
-  int current_capacity = move_list_get_capacity(ml);
-  int current_number_of_moves = move_list_get_count(ml);
-  int new_capacity = current_number_of_moves + number_of_new_moves;
+  uint32_t current_capacity = move_list_get_capacity(ml);
+  uint32_t current_number_of_moves = move_list_get_count(ml);
+  uint32_t new_capacity = current_number_of_moves + number_of_new_moves;
   if (new_capacity > current_capacity) {
     move_list_resize(ml, new_capacity);
   }
 
-  for (int i = 0; i < number_of_new_moves; i++) {
+  for (uint32_t i = 0; i < number_of_new_moves; i++) {
     Move *spare_move = move_list_get_spare_move(ml);
     move_copy(spare_move, moves[i]);
     move_list_insert_spare_move(ml, move_get_equity(spare_move));

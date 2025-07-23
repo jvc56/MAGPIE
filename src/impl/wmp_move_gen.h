@@ -28,6 +28,7 @@ typedef struct SubrackInfo {
   Equity leave_value;
 } SubrackInfo;
 
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 typedef struct WMPMoveGen {
   const WMP *wmp;
   BitRack player_bit_rack;

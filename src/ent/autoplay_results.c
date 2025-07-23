@@ -21,6 +21,7 @@
 #include "stats.h"
 
 #include "../def/game_defs.h"
+#include "../def/klv_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
@@ -45,7 +46,7 @@ typedef struct RecorderArgs {
 
 // Read-only data shared across all recorder types
 typedef struct RecorderContext {
-  int write_buffer_size;
+  size_t write_buffer_size;
   char *data_paths;
   const LetterDistribution *ld;
   KLV *klv;
@@ -281,7 +282,7 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
     string_builder_add_formatted_string(
         sb, "Game End Reason %-*s %d (%2.2f%%%%)\n", 10,
         game_end_reason_strs[i], gd->game_end_reasons[i],
-        100 * ((double)gd->game_end_reasons[i] / gd->total_games));
+        100 * ((double)gd->game_end_reasons[i] / (double)gd->total_games));
   }
 
   string_builder_add_string(sb, "\n");
@@ -566,7 +567,7 @@ void fj_write_buffer_to_output(Recorder *recorder, int remaining_tiles,
   FJSharedData *shared_data = (FJSharedData *)recorder->thread_shared_data;
   const RecorderContext *recorder_context = recorder->recorder_context;
   StringBuilder *sb = fj_data->sbs[remaining_tiles];
-  int str_len = string_builder_length(sb);
+  size_t str_len = string_builder_length(sb);
   if (str_len > 0 &&
       (always_flush || str_len >= recorder_context->write_buffer_size)) {
     pthread_mutex_lock(&shared_data->fh_mutexes[remaining_tiles]);
@@ -931,7 +932,7 @@ void leaves_data_add_move(Recorder *recorder, const RecorderArgs *args) {
     return;
   }
   LeavesData *leaves_data = (LeavesData *)recorder->data;
-  int leave_index =
+  uint32_t leave_index =
       klv_get_word_index(recorder->recorder_context->klv, args->leave);
   if (leave_index < 0 || leave_index >= leaves_data->num_leaves) {
     StringBuilder *sb = string_builder_create();
@@ -985,9 +986,9 @@ void leaves_data_finalize(Recorder **recorder_list, int list_size,
                   "file '%s': %s",
                   leaves_count_filename, line);
       }
-      const int leave_index = klv_get_word_index(
+      const uint32_t leave_index = klv_get_word_index(
           primary_recorder->recorder_context->klv, &leave_rack);
-      if ((unsigned int)leave_index == KLV_UNFOUND_INDEX) {
+      if (leave_index == KLV_UNFOUND_INDEX) {
         log_fatal("klv does not contain leave from file '%s': %s ",
                   leaves_count_filename, leave_str);
       }
@@ -1333,7 +1334,7 @@ char *autoplay_results_to_string(AutoplayResults *autoplay_results,
 }
 
 void autoplay_results_set_write_buffer_size(AutoplayResults *autoplay_results,
-                                            int write_buffer_size) {
+                                            size_t write_buffer_size) {
   autoplay_results->recorder_context->write_buffer_size = write_buffer_size;
 }
 

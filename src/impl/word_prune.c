@@ -1,12 +1,23 @@
 #include "word_prune.h"
 
+#include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
+#include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/letter_distribution_defs.h"
 
+#include "../ent/bag.h"
+#include "../ent/board.h"
+#include "../ent/dictionary_word.h"
+#include "../ent/game.h"
+#include "../ent/kwg.h"
+#include "../ent/letter_distribution.h"
+#include "../ent/player.h"
+#include "../ent/rack.h"
+
 #include "../util/io_util.h"
-#include "../util/string_util.h"
 
 int compare_board_rows(const void *a, const void *b) {
   const BoardRow *row_a = (const BoardRow *)a;
@@ -58,7 +69,7 @@ BoardRows *board_rows_create(const Game *game) {
     }
   }
   container->num_rows = BOARD_DIM * 2;
-  qsort(rows, BOARD_DIM * 2, sizeof(BoardRow), compare_board_rows);
+  qsort(rows, (size_t)(BOARD_DIM * 2), sizeof(BoardRow), compare_board_rows);
   container->num_rows = unique_rows(container);
   return container;
 }
@@ -116,7 +127,7 @@ void add_words_without_playthrough(const KWG *kwg, uint32_t node_index,
   for (uint32_t i = node_index;; i++) {
     const uint32_t node = kwg_node(kwg, i);
     const MachineLetter ml = kwg_node_tile(node);
-    const int new_node_index = kwg_node_arc_index_prefetch(node, kwg);
+    const uint32_t new_node_index = kwg_node_arc_index_prefetch(node, kwg);
     if ((rack_get_letter(rack, ml) > 0) ||
         (rack_get_letter(rack, BLANK_MACHINE_LETTER) > 0)) {
       bool node_accepts = kwg_node_accepts(node);
@@ -281,7 +292,7 @@ void add_playthrough_words_from_row(const BoardRow *board_row, const KWG *kwg,
                                     Rack *bag_as_rack,
                                     DictionaryWordList *possible_word_list) {
   MachineLetter strip[BOARD_DIM];
-  const int gaddag_root = kwg_get_root_node_index(kwg);
+  const uint32_t gaddag_root = kwg_get_root_node_index(kwg);
   int leftmost_col = 0;
   for (int col = 0; col < BOARD_DIM; col++) {
     MachineLetter current_letter = board_row->letters[col];
@@ -297,7 +308,7 @@ void add_playthrough_words_from_row(const BoardRow *board_row, const KWG *kwg,
       const MachineLetter ml = current_letter; // already unblanked
       uint32_t next_node_index = 0;
       bool accepts = false;
-      for (int i = gaddag_root;; i++) {
+      for (uint32_t i = gaddag_root;; i++) {
         const uint32_t node = kwg_node(kwg, i);
         if (kwg_node_tile(node) == ml) {
           next_node_index = kwg_node_arc_index_prefetch(node, kwg);

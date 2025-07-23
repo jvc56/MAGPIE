@@ -322,7 +322,7 @@ static inline bool wmp_entry_is_inlined(const WMPEntry *entry) {
   return entry->nonzero_if_inlined != 0;
 }
 
-static inline uint32_t max_inlined_words(int word_length) {
+static inline uint32_t max_inlined_words(uint32_t word_length) {
   return WMP_INLINE_VALUE_BYTES / word_length;
 }
 

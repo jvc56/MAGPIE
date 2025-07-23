@@ -6,22 +6,33 @@
 #include <stdbool.h>
 
 #include "../def/autoplay_defs.h"
+#include "../def/bai_defs.h"
 #include "../def/config_defs.h"
 #include "../def/game_defs.h"
-#include "../def/inference_defs.h"
+#include "../def/move_defs.h"
+#include "../def/players_data_defs.h"
 #include "../def/thread_control_defs.h"
-#include "../def/validated_move_defs.h"
 
 #include "../ent/autoplay_results.h"
+#include "../ent/board.h"
+#include "../ent/board_layout.h"
+#include "../ent/conversion_results.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/inference_results.h"
+#include "../ent/klv.h"
 #include "../ent/klv_csv.h"
 #include "../ent/letter_distribution.h"
+#include "../ent/move.h"
+#include "../ent/player.h"
 #include "../ent/players_data.h"
+#include "../ent/rack.h"
+#include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "../ent/validated_move.h"
+#include "../ent/win_pct.h"
 
 #include "autoplay.h"
-#include "bai.h"
 #include "cgp.h"
 #include "convert.h"
 #include "gameplay.h"
@@ -1304,8 +1315,10 @@ bool lexicons_and_leaves_compat(const char *updated_p1_lexicon_name,
                                 const char *updated_p2_lexicon_name,
                                 const char *updated_p2_leaves_name,
                                 ErrorStack *error_stack) {
-  const bool leaves_are_compatible = lex_lex_compat(
-      updated_p1_leaves_name, updated_p2_leaves_name, error_stack);
+  const char *p1_lex_compat_name = updated_p1_leaves_name;
+  const char *p2_lex_compat_name = updated_p2_leaves_name;
+  const bool leaves_are_compatible =
+      lex_lex_compat(p1_lex_compat_name, p2_lex_compat_name, error_stack);
   if (!error_stack_is_empty(error_stack) || !leaves_are_compatible) {
     return false;
   }
@@ -1786,7 +1799,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       return;
     }
     autoplay_results_set_write_buffer_size(config->autoplay_results,
-                                           write_buffer_size);
+                                           (size_t)write_buffer_size);
   }
 
   // Seed

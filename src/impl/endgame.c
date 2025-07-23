@@ -1,9 +1,24 @@
 #include <pthread.h>
+#include <stdint.h>
+#include <stdlib.h>
 
+#include "../def/kwg_defs.h"
+
+#include "../ent/dictionary_word.h"
+#include "../ent/equity.h"
+#include "../ent/game.h"
+#include "../ent/kwg.h"
 #include "../ent/move.h"
+#include "../ent/player.h"
+#include "../ent/rack.h"
+#include "../ent/small_move_arena.h"
+#include "../ent/thread_control.h"
+#include "../ent/transposition_table.h"
+#include "../ent/zobrist.h"
 
 #include "../str/move_string.h"
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
 
 #include "endgame.h"
@@ -12,13 +27,15 @@
 #include "move_gen.h"
 #include "word_prune.h"
 
-#define DEFAULT_ENDGAME_MOVELIST_CAPACITY 250000
-
-// Bit flags for move estimates. These large numbers will force these estimated
-// values to sort first.
-#define EARLY_PASS_BF (1 << 29)
-#define HASH_MOVE_BF (1 << 28)
-#define GOING_OUT_BF (1 << 27)
+enum {
+  DEFAULT_ENDGAME_MOVELIST_CAPACITY = 250000,
+  // Bit flags for move estimates. These large numbers will force these
+  // estimated values to sort first.
+  LARGE_VALUE = 1 << 30, // for alpha-beta pruning
+  EARLY_PASS_BF = 1 << 29,
+  HASH_MOVE_BF = 1 << 28,
+  GOING_OUT_BF = 1 << 27,
+};
 
 #ifndef MAX
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -27,8 +44,6 @@
 #ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #endif
-
-const int32_t LARGE_VALUE = (1 << 30); // for alpha-beta pruning
 
 void pvline_clear(PVLine *pv_line) {
   pv_line->num_moves = 0;

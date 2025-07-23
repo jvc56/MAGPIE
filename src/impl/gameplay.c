@@ -1,5 +1,6 @@
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
@@ -13,6 +14,7 @@
 
 #include "../ent/bag.h"
 #include "../ent/board.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/klv.h"
 #include "../ent/letter_distribution.h"
@@ -420,24 +422,24 @@ Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
   return move_list_get_move(move_list, 0);
 }
 
-bool moves_are_similar(const Move *m1, const Move *m2, int dist_size) {
-  if (!(move_get_dir(m1) == move_get_dir(m2) &&
-        move_get_col_start(m1) == move_get_col_start(m2) &&
-        move_get_row_start(m1) == move_get_row_start(m2))) {
+bool moves_are_similar(const Move *move1, const Move *move2, int dist_size) {
+  if (!(move_get_dir(move1) == move_get_dir(move2) &&
+        move_get_col_start(move1) == move_get_col_start(move2) &&
+        move_get_row_start(move1) == move_get_row_start(move2))) {
     return false;
   }
-  if (!(move_get_tiles_played(m1) == move_get_tiles_played(m2) &&
-        move_get_tiles_length(m1) == move_get_tiles_length(m2))) {
+  if (!(move_get_tiles_played(move1) == move_get_tiles_played(move2) &&
+        move_get_tiles_length(move1) == move_get_tiles_length(move2))) {
     return false;
   }
 
-  // Create a rack from m1, then subtract the rack from m2. The final
+  // Create a rack from move1, then subtract the rack from move2. The final
   // rack should have all zeroes.
   Rack similar_plays_rack;
   rack_set_dist_size(&similar_plays_rack, dist_size);
   rack_reset(&similar_plays_rack);
-  for (int i = 0; i < move_get_tiles_length(m1); i++) {
-    MachineLetter tile = move_get_tile(m1, i);
+  for (int i = 0; i < move_get_tiles_length(move1); i++) {
+    MachineLetter tile = move_get_tile(move1, i);
     if (tile == PLAYED_THROUGH_MARKER) {
       continue;
     }
@@ -448,8 +450,8 @@ bool moves_are_similar(const Move *m1, const Move *m2, int dist_size) {
     rack_add_letter(&similar_plays_rack, ml);
   }
 
-  for (int i = 0; i < move_get_tiles_length(m2); i++) {
-    MachineLetter tile = move_get_tile(m2, i);
+  for (int i = 0; i < move_get_tiles_length(move2); i++) {
+    MachineLetter tile = move_get_tile(move2, i);
     if (tile == PLAYED_THROUGH_MARKER) {
       continue;
     }

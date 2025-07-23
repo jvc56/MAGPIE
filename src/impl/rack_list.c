@@ -1,10 +1,14 @@
 #include "rack_list.h"
 
 #include <pthread.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "../ent/dictionary_word.h"
 #include "../ent/encoded_rack.h"
+#include "../ent/equity.h"
 #include "../ent/klv.h"
 #include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
@@ -12,6 +16,7 @@
 #include "../ent/xoshiro.h"
 
 #include "../def/klv_defs.h"
+#include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 
@@ -89,7 +94,7 @@ int convert_klv_index_to_rack_list_index(int klv_index) {
   return klv_index - (RACK_SIZE);
 }
 
-int convert_word_index_to_rack_list_index(int word_index) {
+uint32_t convert_word_index_to_rack_list_index(uint32_t word_index) {
   return word_index - (RACK_SIZE) + 1;
 }
 
@@ -338,7 +343,7 @@ bool rack_list_get_rare_rack(RackList *rack_list, XoshiroPRNG *prng,
   if (rack_list_get_racks_below_target_count(rack_list) == 0) {
     return false;
   }
-  const int random_rack_index =
+  const uint64_t random_rack_index =
       prng_get_random_number(prng, rack_list->partition_index + 1);
   rack_decode(&rack_list->racks_partitioned_by_target_count[random_rack_index]
                    ->encoded_rack,
@@ -368,7 +373,7 @@ void generate_leaves(RackListLeave *leave_list, const KLV *klv,
       // rack after the leave is subtracted from the letter distribution.
       const uint64_t count = get_total_combos_for_rack(rl_ld, full_rack);
       leave_list[word_index - 1].count_sum += count;
-      leave_list[word_index - 1].equity_sum += rack_equity * count;
+      leave_list[word_index - 1].equity_sum += rack_equity * (double)count;
     }
   } else {
     generate_leaves(leave_list, klv, rack_equity, full_rack, rl_ld, leave,
@@ -406,10 +411,10 @@ void rack_list_write_to_klv(RackList *rack_list, const LetterDistribution *ld,
   }
   double average_equity = weighted_sum / (double)rack_list->total_combos_sum;
 
-  const int klv_number_of_leaves = klv_get_number_of_leaves(klv);
+  const uint32_t klv_number_of_leaves = klv_get_number_of_leaves(klv);
   RackListLeave *leave_list =
       malloc_or_die(sizeof(RackListLeave) * klv_number_of_leaves);
-  for (int i = 0; i < klv_number_of_leaves; i++) {
+  for (uint32_t i = 0; i < klv_number_of_leaves; i++) {
     leave_list[i].count_sum = 0;
     leave_list[i].equity_sum = 0;
   }
@@ -428,7 +433,7 @@ void rack_list_write_to_klv(RackList *rack_list, const LetterDistribution *ld,
   for (int i = 0; i < klv_number_of_leaves; i++) {
     if (leave_list[i].count_sum > 0) {
       klv->leave_values[i] = double_to_equity(
-          (leave_list[i].equity_sum / leave_list[i].count_sum) -
+          (leave_list[i].equity_sum / (double)leave_list[i].count_sum) -
           average_equity);
     } else {
       klv->leave_values[i] = 0;

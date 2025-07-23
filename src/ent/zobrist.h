@@ -31,10 +31,10 @@ typedef struct Zobrist {
 static Zobrist *zobrist_create(uint64_t seed) {
   Zobrist *z = malloc_or_die(sizeof(Zobrist));
   z->prng = prng_create(seed);
-
+  const unsigned long total_squares = (size_t)(BOARD_DIM * BOARD_DIM);
   // pos_table is a BOARD_DIM x BOARD_DIM 2d array of random integers
-  z->pos_table = malloc_or_die(BOARD_DIM * BOARD_DIM * sizeof(uint64_t *));
-  for (size_t i = 0; i < BOARD_DIM * BOARD_DIM; i++) {
+  z->pos_table = malloc_or_die(total_squares * sizeof(uint64_t *));
+  for (size_t i = 0; i < total_squares; i++) {
     // * 2 for the blank
     z->pos_table[i] = malloc_or_die(ZOBRIST_MAX_LETTERS * 2 * sizeof(uint64_t));
     for (int j = 0; j < ZOBRIST_MAX_LETTERS * 2; j++) {

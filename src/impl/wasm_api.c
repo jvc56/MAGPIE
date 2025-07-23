@@ -12,12 +12,14 @@
 #include "../ent/move.h"
 #include "../ent/validated_move.h"
 
+#include "config.h"
 #include "exec.h"
 #include "move_gen.h"
 
 #include "../str/game_string.h"
 #include "../str/move_string.h"
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
 
 static Config *iso_config = NULL;
