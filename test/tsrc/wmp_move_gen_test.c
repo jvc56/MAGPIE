@@ -1,8 +1,18 @@
 
 #include <assert.h>
+#include <stdlib.h>
 
 #include "wmp_move_gen_test.h"
 
+#include "../../src/def/kwg_defs.h"
+#include "../../src/def/rack_defs.h"
+#include "../../src/ent/equity.h"
+#include "../../src/ent/game.h"
+#include "../../src/ent/leave_map.h"
+#include "../../src/ent/letter_distribution.h"
+#include "../../src/ent/player.h"
+#include "../../src/ent/rack.h"
+#include "../../src/ent/wmp.h"
 #include "../../src/impl/config.h"
 #include "../../src/impl/wmp_move_gen.h"
 

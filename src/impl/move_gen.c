@@ -5,17 +5,24 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
+#include "../def/equity_defs.h"
+#include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/klv_defs.h"
+#include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
+#include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/anchor.h"
+#include "../ent/bag.h"
 #include "../ent/board.h"
+#include "../ent/bonus_square.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/klv.h"
@@ -321,7 +328,9 @@ static inline void record_exchange(MoveGen *gen) {
 
   int tiles_exchanged = 0;
 
-  for (uint16_t ml = 0; ml < rack_get_dist_size(&gen->player_rack); ml++) {
+  const uint16_t rack_dist_size = rack_get_dist_size(&gen->player_rack);
+
+  for (uint16_t ml = 0; ml < rack_dist_size; ml++) {
     const int8_t num_this = rack_get_letter(&gen->player_rack, ml);
     for (int i = 0; i < num_this; i++) {
       gen->exchange_strip[tiles_exchanged] = ml;
@@ -340,7 +349,7 @@ static inline void record_exchange(MoveGen *gen) {
 void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
                              uint32_t word_index, MachineLetter ml,
                              bool add_exchange) {
-  const uint32_t ld_size = ld_get_size(&gen->ld);
+  const int ld_size = ld_get_size(&gen->ld);
   while (ml < ld_size && rack_get_letter(&gen->player_rack, ml) == 0) {
     ml++;
   }
@@ -348,7 +357,7 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
     const int number_of_letters_on_rack =
         rack_get_total_letters(&gen->player_rack);
     if (number_of_letters_on_rack > 0) {
-      Equity value = 0.0;
+      Equity value = 0;
       if (word_index != KLV_UNFOUND_INDEX) {
         value = klv_get_indexed_leave_value(gen->klv, word_index - 1);
       }
@@ -1520,7 +1529,7 @@ void gen_record_scoring_plays(MoveGen *gen) {
   gen->current_row_index = -1;
   gen->dir = -1;
 
-  const int kwg_root_node_index = kwg_get_root_node_index(gen->kwg);
+  const uint32_t kwg_root_node_index = kwg_get_root_node_index(gen->kwg);
   if (gen->is_wordsmog) {
     rack_reset(&gen->full_player_rack);
   }

@@ -1,12 +1,18 @@
 
-#include "../../src/impl/config.h"
 #include <assert.h>
+#include <stdint.h>
+#include <stdlib.h>
 
-#include "../../src/def/validated_move_defs.h"
+#include "../../src/def/gameplay_defs.h"
 #include "../../src/ent/game.h"
+#include "../../src/ent/letter_distribution.h"
+#include "../../src/ent/player.h"
+#include "../../src/ent/rack.h"
 #include "../../src/ent/validated_move.h"
 #include "../../src/ent/zobrist.h"
+#include "../../src/impl/config.h"
 #include "../../src/impl/gameplay.h"
+#include "../../src/util/io_util.h"
 #include "test_util.h"
 #include "zobrist_test.h"
 

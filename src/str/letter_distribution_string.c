@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#include "../def/letter_distribution_defs.h"
 #include "../ent/letter_distribution.h"
 
 #include "../util/string_util.h"

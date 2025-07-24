@@ -1,6 +1,8 @@
 #ifndef EQUITY_DEFS_H
 #define EQUITY_DEFS_H
 
+#include <stdint.h>
+
 enum {
   EQUITY_UNDEFINED_VALUE = INT32_MIN,
   EQUITY_INITIAL_VALUE = INT32_MIN + 1,

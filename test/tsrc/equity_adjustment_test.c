@@ -9,8 +9,8 @@
 #include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
 #include "../../src/impl/config.h"
+#include "../../src/impl/move_gen.h"
 
-#include "../../src/impl/cgp.h"
 #include "../../src/impl/gameplay.h"
 
 #include "test_util.h"

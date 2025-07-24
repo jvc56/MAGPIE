@@ -7,13 +7,19 @@
 #include "../../src/def/board_defs.h"
 #include "../../src/def/game_defs.h"
 #include "../../src/def/game_history_defs.h"
+#include "../../src/def/letter_distribution_defs.h"
 
 #include "../../src/ent/data_filepaths.h"
+#include "../../src/ent/equity.h"
+#include "../../src/ent/game.h"
 #include "../../src/ent/game_history.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/move.h"
+#include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
+#include "../../src/ent/validated_move.h"
 
+#include "../../src/impl/config.h"
 #include "../../src/impl/gcg.h"
 
 #include "../../src/util/io_util.h"

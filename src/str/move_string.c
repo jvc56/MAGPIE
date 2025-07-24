@@ -4,11 +4,13 @@
 #include "../def/letter_distribution_defs.h"
 
 #include "../ent/board.h"
+#include "../ent/equity.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 
 #include "letter_distribution_string.h"
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
 
 void string_builder_add_move_description(StringBuilder *move_string_builder,

@@ -38,7 +38,7 @@ typedef struct RecorderArgs {
   const Game *game;
   const Move *move;
   const Rack *leave;
-  uint64_t number_of_turns;
+  int number_of_turns;
   uint64_t seed;
   bool divergent;
   bool human_readable;
@@ -147,7 +147,7 @@ void game_data_destroy(GameData *gd) {
 
 void game_data_add_game(GameData *gd, const RecorderArgs *args) {
   const Game *game = args->game;
-  const uint64_t turns = args->number_of_turns;
+  const int turns = args->number_of_turns;
   const int p0_game_score =
       equity_to_int(player_get_score(game_get_player(game, 0)));
   const int p1_game_score =
@@ -1285,7 +1285,7 @@ void autoplay_results_add_move(AutoplayResults *autoplay_results,
 }
 
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
-                               const Game *game, uint64_t turns, bool divergent,
+                               const Game *game, int turns, bool divergent,
                                uint64_t seed) {
   RecorderArgs args;
   args.game = game;

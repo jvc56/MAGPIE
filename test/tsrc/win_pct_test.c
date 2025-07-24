@@ -1,20 +1,9 @@
 #include <assert.h>
+#include <stdint.h>
 
-#include "../../src/def/validated_move_defs.h"
-
-#include "../../src/ent/board.h"
-#include "../../src/ent/game.h"
-#include "../../src/ent/kwg.h"
-#include "../../src/ent/player.h"
-#include "../../src/ent/validated_move.h"
-#include "../../src/ent/words.h"
+#include "../../src/ent/win_pct.h"
 #include "../../src/impl/config.h"
 
-#include "../../src/util/string_util.h"
-
-#include "../../src/impl/cgp.h"
-
-#include "test_constants.h"
 #include "test_util.h"
 
 void assert_win_pct_get(const float actual, const double expected) {

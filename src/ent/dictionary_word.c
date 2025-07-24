@@ -68,8 +68,8 @@ void dictionary_word_list_add_word(DictionaryWordList *dictionary_word_list,
   dictionary_word_list->count++;
 }
 
-uint32_t
-dictionary_word_list_get_count(const DictionaryWordList *dictionary_word_list) {
+int dictionary_word_list_get_count(
+    const DictionaryWordList *dictionary_word_list) {
   return dictionary_word_list->count;
 }
 

@@ -1,15 +1,10 @@
 #include <assert.h>
+#include <stdlib.h>
 
-#include "../../src/def/board_defs.h"
-#include "../../src/def/letter_distribution_defs.h"
 #include "../../src/ent/dictionary_word.h"
 #include "../../src/ent/game.h"
-#include "../../src/ent/player.h"
-#include "../../src/impl/cgp.h"
 #include "../../src/impl/config.h"
 #include "../../src/impl/word_prune.h"
-#include "../../src/util/io_util.h"
-#include "../../src/util/string_util.h"
 
 #include "test_util.h"
 

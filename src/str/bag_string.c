@@ -9,7 +9,7 @@
 
 #include "../util/string_util.h"
 
-#define BLANK_SORT_VALUE 255
+enum { BLANK_SORT_VALUE = 255 };
 
 void string_builder_add_bag(StringBuilder *bag_string_builder, const Bag *bag,
                             const LetterDistribution *ld) {

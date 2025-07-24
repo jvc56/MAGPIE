@@ -1,14 +1,16 @@
 #include <assert.h>
+#include <stdint.h>
+#include <stdlib.h>
 
-#include "../../src/ent/dictionary_word.h"
+#include "../../src/ent/data_filepaths.h"
+#include "../../src/ent/equity.h"
 #include "../../src/ent/klv.h"
 #include "../../src/ent/klv_csv.h"
 #include "../../src/ent/letter_distribution.h"
+#include "../../src/ent/rack.h"
 
 #include "../../src/impl/config.h"
-#include "../../src/impl/convert.h"
-
-#include "../../src/util/string_util.h"
+#include "../../src/util/io_util.h"
 
 #include "test_util.h"
 
@@ -16,7 +18,7 @@ void set_klv_leave_value(const KLV *klv, const LetterDistribution *ld,
                          const char *rack_str, double value) {
   Rack *rack = rack_create(ld_get_size(ld));
   rack_set_to_string(ld, rack, rack_str);
-  const int klv_word_index = klv_get_word_index(klv, rack);
+  const uint32_t klv_word_index = klv_get_word_index(klv, rack);
   klv_set_indexed_leave_value(klv, klv_word_index, double_to_equity(value));
   rack_destroy(rack);
 }

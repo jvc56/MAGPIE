@@ -36,14 +36,16 @@ static Zobrist *zobrist_create(uint64_t seed) {
   z->pos_table = malloc_or_die(total_squares * sizeof(uint64_t *));
   for (size_t i = 0; i < total_squares; i++) {
     // * 2 for the blank
-    z->pos_table[i] = malloc_or_die(ZOBRIST_MAX_LETTERS * 2 * sizeof(uint64_t));
+    z->pos_table[i] =
+        malloc_or_die((size_t)(ZOBRIST_MAX_LETTERS * 2) * sizeof(uint64_t));
     for (int j = 0; j < ZOBRIST_MAX_LETTERS * 2; j++) {
       z->pos_table[i][j] = prng_get_random_number(z->prng, UINT64_MAX);
     }
   }
   // rack tables are ZOBRIST_MAX_LETTERS * RACK_SIZE 2D arrays of random
   // integers
-  z->our_rack_table = malloc_or_die(ZOBRIST_MAX_LETTERS * sizeof(uint64_t *));
+  z->our_rack_table =
+      malloc_or_die((size_t)ZOBRIST_MAX_LETTERS * sizeof(uint64_t *));
   for (int i = 0; i < ZOBRIST_MAX_LETTERS; i++) {
     z->our_rack_table[i] = malloc_or_die(RACK_SIZE * sizeof(uint64_t));
     for (int j = 0; j < RACK_SIZE; j++) {
@@ -51,7 +53,8 @@ static Zobrist *zobrist_create(uint64_t seed) {
     }
   }
 
-  z->their_rack_table = malloc_or_die(ZOBRIST_MAX_LETTERS * sizeof(uint64_t *));
+  z->their_rack_table =
+      malloc_or_die((size_t)ZOBRIST_MAX_LETTERS * sizeof(uint64_t *));
   for (int i = 0; i < ZOBRIST_MAX_LETTERS; i++) {
     z->their_rack_table[i] = malloc_or_die(RACK_SIZE * sizeof(uint64_t));
     for (int j = 0; j < RACK_SIZE; j++) {
@@ -69,7 +72,7 @@ static Zobrist *zobrist_create(uint64_t seed) {
 }
 
 static void zobrist_destroy(Zobrist *z) {
-  for (size_t i = 0; i < BOARD_DIM * BOARD_DIM; i++) {
+  for (int i = 0; i < BOARD_DIM * BOARD_DIM; i++) {
     free(z->pos_table[i]);
   }
   free(z->pos_table);
@@ -104,12 +107,12 @@ zobrist_calculate_hash(const Zobrist *z, const Board *game_board,
     key ^= z->pos_table[i][letter];
   }
 
-  for (int i = 0; i < our_rack->dist_size; i++) {
-    int ct = our_rack->array[i];
+  for (uint16_t i = 0; i < our_rack->dist_size; i++) {
+    int8_t ct = our_rack->array[i];
     key ^= z->our_rack_table[i][ct];
   }
-  for (int i = 0; i < their_rack->dist_size; i++) {
-    int ct = their_rack->array[i];
+  for (uint16_t i = 0; i < their_rack->dist_size; i++) {
+    int8_t ct = their_rack->array[i];
     key ^= z->their_rack_table[i][ct];
   }
   if (their_turn) {

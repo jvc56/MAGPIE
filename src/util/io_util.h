@@ -264,4 +264,6 @@ FILE *fopen_safe(const char *filename, const char *mode,
 void fclose_or_die(FILE *stream);
 void fwrite_or_die(const void *ptr, size_t size, size_t nmemb, FILE *stream,
                    const char *description);
+void fprintf_or_die(FILE *stream, const char *format, ...);
+
 #endif

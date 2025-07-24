@@ -1,25 +1,24 @@
 #include <assert.h>
 #include <stdlib.h>
-#include <sys/stat.h>
 
 #include "../../src/def/inference_defs.h"
 #include "../../src/def/letter_distribution_defs.h"
 
 #include "../../src/ent/bag.h"
+#include "../../src/ent/equity.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/inference_results.h"
 #include "../../src/ent/klv.h"
+#include "../../src/ent/leave_rack.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
 #include "../../src/ent/stats.h"
 
-#include "../../src/impl/cgp.h"
 #include "../../src/impl/config.h"
 
 #include "../../src/util/io_util.h"
 #include "../../src/util/math_util.h"
-#include "../../src/util/string_util.h"
 
 #include "test_constants.h"
 #include "test_util.h"

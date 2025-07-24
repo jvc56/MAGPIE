@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "../../src/def/board_defs.h"
 
@@ -10,8 +11,6 @@
 #include "../../src/ent/game.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/impl/config.h"
-
-#include "../../src/impl/cgp.h"
 
 #include "test_constants.h"
 #include "test_util.h"

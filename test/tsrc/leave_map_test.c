@@ -1,7 +1,7 @@
 #include <assert.h>
 #include <stdbool.h>
-#include <stdio.h>
 
+#include "../../src/ent/equity.h"
 #include "../../src/ent/leave_map.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/rack.h"
@@ -17,7 +17,7 @@ void take_set(const LetterDistribution *ld, LeaveMap *leave_map, Rack *rack,
                                                  ld_hl_to_ml(ld, letter));
   int current_index = leave_map_get_current_index(leave_map);
   assert(current_index == expected_take_index);
-  leave_map_set_current_value(leave_map, value);
+  leave_map_set_current_value(leave_map, double_to_equity(value));
 }
 
 void take_set_add(const LetterDistribution *ld, LeaveMap *leave_map, Rack *rack,
@@ -28,7 +28,7 @@ void take_set_add(const LetterDistribution *ld, LeaveMap *leave_map, Rack *rack,
                                                  ld_hl_to_ml(ld, letter));
   assert(leave_map_get_current_index(leave_map) == expected_take_index);
   if (set) {
-    leave_map_set_current_value(leave_map, value);
+    leave_map_set_current_value(leave_map, double_to_equity(value));
   } else {
     assert(within_epsilon(leave_map_get_current_value(leave_map), value));
   }
@@ -66,7 +66,7 @@ void test_leave_map(void) {
   rack_set_to_string(ld, rack, "DDDIIUU");
   leave_map_init(rack, leave_map);
 
-  leave_map_set_current_value(leave_map, 100.0);
+  leave_map_set_current_value(leave_map, double_to_equity(100.0));
   // 1111011
   // DDIIUU
   take_set(ld, leave_map, rack, "D", 123, 11.0);

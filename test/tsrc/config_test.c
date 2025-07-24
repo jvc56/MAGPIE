@@ -1,24 +1,16 @@
-#include "../../src/impl/config.h"
-
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 
-#include "../../src/def/autoplay_defs.h"
-#include "../../src/def/config_defs.h"
 #include "../../src/def/game_defs.h"
 #include "../../src/def/move_defs.h"
 #include "../../src/def/players_data_defs.h"
-#include "../../src/def/validated_move_defs.h"
-#include "../../src/ent/game.h"
-#include "../../src/ent/kwg.h"
+#include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/players_data.h"
-#include "../../src/ent/rack.h"
 #include "../../src/ent/thread_control.h"
-#include "../../src/impl/cgp.h"
-#include "../../src/str/rack_string.h"
+#include "../../src/ent/wmp.h"
+#include "../../src/impl/config.h"
 #include "../../src/util/io_util.h"
 #include "../../src/util/string_util.h"
 

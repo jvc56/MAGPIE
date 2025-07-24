@@ -2,12 +2,14 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "../../src/def/config_defs.h"
 #include "../../src/def/move_defs.h"
 #include "../../src/def/players_data_defs.h"
 
+#include "../../src/ent/equity.h"
+#include "../../src/ent/klv.h"
 #include "../../src/ent/players_data.h"
 
+#include "../../src/util/io_util.h"
 #include "../../src/util/string_util.h"
 
 #include "test_util.h"
@@ -131,7 +133,8 @@ void test_reloaded_data(void) {
   const double old_leave_value = klv_get_indexed_leave_value(klv1, leave_index);
   const double new_leave_value = 17.0;
 
-  klv_set_indexed_leave_value(klv1, leave_index, new_leave_value);
+  klv_set_indexed_leave_value(klv1, leave_index,
+                              double_to_equity(new_leave_value));
 
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_KLV, 1) == klv1);
   assert(within_epsilon(klv_get_indexed_leave_value(klv1, leave_index),

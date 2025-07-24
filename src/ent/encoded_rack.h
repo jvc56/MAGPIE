@@ -65,26 +65,25 @@ typedef struct EncodedRack {
   ENCODED_RACK_UNIT_TYPE array[ENCODED_RACK_UNITS];
 } EncodedRack;
 
-static inline ENCODED_RACK_UNIT_TYPE
-encoded_rack_shift_bit(uint32_t bit_index) {
+static inline ENCODED_RACK_UNIT_TYPE encoded_rack_shift_bit(int bit_index) {
   return (ENCODED_RACK_UNIT_TYPE)1 << (bit_index % BITS_PER_UNIT);
 }
 
 static inline void encoded_rack_set_bit(EncodedRack *encoded_rack,
-                                        uint32_t bit_index) {
+                                        int bit_index) {
   encoded_rack->array[bit_index / BITS_PER_UNIT] |=
       encoded_rack_shift_bit(bit_index);
 }
 
 static inline bool encoded_rack_get_bit(const EncodedRack *encoded_rack,
-                                        uint32_t bit_index) {
+                                        int bit_index) {
   return (encoded_rack->array[bit_index / BITS_PER_UNIT] &
           encoded_rack_shift_bit(bit_index)) != 0;
 }
 
 static inline void encoded_rack_set_ml(EncodedRack *encoded_rack,
-                                       MachineLetter ml, uint32_t *bit_index) {
-  uint32_t start_bit_index = *bit_index;
+                                       MachineLetter ml, int *bit_index) {
+  int start_bit_index = *bit_index;
   while (ml) {
     if (ml & 1) {
       encoded_rack_set_bit(encoded_rack, *bit_index);
@@ -96,7 +95,7 @@ static inline void encoded_rack_set_ml(EncodedRack *encoded_rack,
 }
 
 static inline MachineLetter encoded_rack_get_ml(const EncodedRack *encoded_rack,
-                                                uint32_t *bit_index) {
+                                                int *bit_index) {
   MachineLetter ml = 0;
   for (int i = 0; i < BITS_PER_ML; i++) {
     if (encoded_rack_get_bit(encoded_rack, *bit_index)) {
@@ -108,8 +107,8 @@ static inline MachineLetter encoded_rack_get_ml(const EncodedRack *encoded_rack,
 }
 
 static inline void encoded_rack_set_count(EncodedRack *encoded_rack, int count,
-                                          uint32_t *bit_index) {
-  uint32_t start_bit_index = *bit_index;
+                                          int *bit_index) {
+  int start_bit_index = *bit_index;
   while (count) {
     if (count & 1) {
       encoded_rack_set_bit(encoded_rack, *bit_index);
@@ -120,8 +119,8 @@ static inline void encoded_rack_set_count(EncodedRack *encoded_rack, int count,
   *bit_index += BITS_PER_COUNT - (*bit_index - start_bit_index);
 }
 
-static inline uint32_t encoded_rack_get_count(const EncodedRack *encoded_rack,
-                                              uint32_t *bit_index) {
+static inline int encoded_rack_get_count(const EncodedRack *encoded_rack,
+                                         int *bit_index) {
   int count = 0;
   for (uint8_t i = 0; i < BITS_PER_COUNT; i++) {
     if (encoded_rack_get_bit(encoded_rack, *bit_index)) {
@@ -132,7 +131,7 @@ static inline uint32_t encoded_rack_get_count(const EncodedRack *encoded_rack,
   return count;
 }
 
-static inline bool rack_encode_at_end(uint32_t bit_index) {
+static inline bool rack_encode_at_end(int bit_index) {
   return (ENCODED_RACK_UNIT_TYPE)bit_index >= BITS_PER_RACK;
 }
 
@@ -140,7 +139,7 @@ static inline void rack_encode(const Rack *rack, EncodedRack *encoded_rack) {
   for (int i = 0; i < (int)ENCODED_RACK_UNITS; i++) {
     encoded_rack->array[i] = 0;
   }
-  uint32_t bit_index = 0;
+  int bit_index = 0;
   for (int ml = 0; ml < rack->dist_size; ml++) {
     const int8_t number_of_ml = rack_get_letter(rack, ml);
     if (number_of_ml > 0) {
@@ -155,14 +154,13 @@ static inline void rack_encode(const Rack *rack, EncodedRack *encoded_rack) {
 
 static inline void rack_decode(const EncodedRack *encoded_rack, Rack *rack) {
   rack_reset(rack);
-  uint32_t bit_index = 0;
+  int bit_index = 0;
   while (true) {
     MachineLetter curr_ml = encoded_rack_get_ml(encoded_rack, &bit_index);
     if (curr_ml == MAX_ALPHABET_SIZE) {
       break;
     }
-    const uint32_t number_of_ml =
-        encoded_rack_get_count(encoded_rack, &bit_index);
+    const int number_of_ml = encoded_rack_get_count(encoded_rack, &bit_index);
     rack_add_letters(rack, curr_ml, number_of_ml);
     if (rack_encode_at_end(bit_index)) {
       break;

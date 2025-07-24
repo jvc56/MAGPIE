@@ -1,5 +1,9 @@
 #include <assert.h>
 
+#include "../../src/ent/game.h"
+#include "../../src/ent/move.h"
+#include "../../src/ent/player.h"
+#include "../../src/ent/rack.h"
 #include "../../src/impl/config.h"
 #include "../../src/impl/endgame.h"
 #include "../../src/util/io_util.h"

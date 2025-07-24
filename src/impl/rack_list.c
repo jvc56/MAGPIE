@@ -288,7 +288,7 @@ void rack_list_swap_items(RackList *rack_list, int i, int j) {
 }
 
 void rack_list_add_rack_with_rack_list_index(RackList *rack_list,
-                                             int rack_list_index,
+                                             uint32_t rack_list_index,
                                              double equity) {
   RackListItem *item = rack_list->racks_ordered_by_index[rack_list_index];
   bool item_reached_target_count = false;

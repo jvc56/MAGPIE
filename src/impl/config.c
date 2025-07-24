@@ -1,16 +1,22 @@
 #include "config.h"
 
+#include <assert.h>
 #include <ctype.h>
 #include <float.h>
 #include <limits.h>
+#include <math.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 #include "../def/autoplay_defs.h"
 #include "../def/bai_defs.h"
 #include "../def/config_defs.h"
+#include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
+#include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
 
 #include "../ent/autoplay_results.h"
@@ -37,6 +43,8 @@
 #include "convert.h"
 #include "gameplay.h"
 #include "inference.h"
+#include "move_gen.h"
+#include "random_variable.h"
 #include "simmer.h"
 
 #include "../str/game_string.h"
@@ -1315,10 +1323,10 @@ bool lexicons_and_leaves_compat(const char *updated_p1_lexicon_name,
                                 const char *updated_p2_lexicon_name,
                                 const char *updated_p2_leaves_name,
                                 ErrorStack *error_stack) {
-  const char *p1_lex_compat_name = updated_p1_leaves_name;
-  const char *p2_lex_compat_name = updated_p2_leaves_name;
-  const bool leaves_are_compatible =
-      lex_lex_compat(p1_lex_compat_name, p2_lex_compat_name, error_stack);
+  const char *first_lex_compat_name = updated_p1_leaves_name;
+  const char *second_lex_compat_name = updated_p2_leaves_name;
+  const bool leaves_are_compatible = lex_lex_compat(
+      first_lex_compat_name, second_lex_compat_name, error_stack);
   if (!error_stack_is_empty(error_stack) || !leaves_are_compatible) {
     return false;
   }
@@ -1329,8 +1337,10 @@ bool lexicons_and_leaves_compat(const char *updated_p1_lexicon_name,
     return false;
   }
 
+  first_lex_compat_name = updated_p2_lexicon_name;
+  second_lex_compat_name = updated_p2_leaves_name;
   const bool lex2_and_leaves2_are_compatible = lex_lex_compat(
-      updated_p2_lexicon_name, updated_p2_leaves_name, error_stack);
+      first_lex_compat_name, second_lex_compat_name, error_stack);
   if (!error_stack_is_empty(error_stack) || !lex2_and_leaves2_are_compatible) {
     return false;
   }

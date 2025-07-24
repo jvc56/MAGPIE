@@ -1,16 +1,17 @@
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/stat.h>
 #include <time.h>
 
-#include "../../src/def/autoplay_defs.h"
-
 #include "../../src/ent/autoplay_results.h"
-#include "../../src/ent/data_filepaths.h"
+#include "../../src/ent/equity.h"
+#include "../../src/ent/game.h"
+#include "../../src/ent/klv.h"
 
 #include "../../src/impl/config.h"
 
+#include "../../src/util/io_util.h"
 #include "../../src/util/math_util.h"
 #include "../../src/util/string_util.h"
 
@@ -193,10 +194,10 @@ void test_autoplay_divergent_games(void) {
   load_and_exec_config_or_die(csw_config, "set -lex CSW21");
 
   KLV *small_diff_klv = klv_create_or_die(DEFAULT_TEST_DATA_PATH, "CSW21");
-  const int num = klv_get_number_of_leaves(small_diff_klv);
+  const uint32_t num = klv_get_number_of_leaves(small_diff_klv);
 
-  for (int i = 0; i < num; i++) {
-    small_diff_klv->leave_values[i] += int_to_equity(-1 + (2 * (i % 2)));
+  for (uint32_t i = 0; i < num; i++) {
+    small_diff_klv->leave_values[i] += int_to_equity(-1 + (int)(2 * (i % 2)));
   }
 
   klv_write_or_die(small_diff_klv, DEFAULT_TEST_DATA_PATH, "CSW21_small_diff");

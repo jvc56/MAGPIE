@@ -1,11 +1,24 @@
 #include <assert.h>
+#include <stdint.h>
+#include <stdlib.h>
 
+#include "../../src/def/board_defs.h"
+#include "../../src/def/letter_distribution_defs.h"
 #include "../../src/def/wmp_defs.h"
 
+#include "../../src/ent/bit_rack.h"
+#include "../../src/ent/dictionary_word.h"
+#include "../../src/ent/game.h"
+#include "../../src/ent/kwg.h"
+#include "../../src/ent/letter_distribution.h"
+#include "../../src/ent/player.h"
 #include "../../src/ent/wmp.h"
 
+#include "../../src/impl/config.h"
 #include "../../src/impl/kwg_maker.h"
 #include "../../src/impl/wmp_maker.h"
+
+#include "../../src/util/io_util.h"
 
 #include "test_util.h"
 

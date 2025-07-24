@@ -4,12 +4,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 
-#include "../../src/def/config_defs.h"
-
+#include "../../src/ent/move.h"
+#include "../../src/ent/thread_control.h"
+#include "../../src/ent/timer.h"
+#include "../../src/impl/config.h"
 #include "../../src/impl/exec.h"
 
 #include "../../src/util/io_util.h"
@@ -523,28 +524,31 @@ void test_exec_ucgi_command(void) {
   pthread_detach(cmd_execution_thread);
 
   nap(1.0);
-  fprintf(input_writer, "set -r1 best -r2 best -it 1 -numplays 1 -threads 1\n");
+  fprintf_or_die(input_writer,
+                 "set -r1 best -r2 best -it 1 -numplays 1 -threads 1\n");
   fflush_or_die(input_writer);
   nap(1.0);
-  fprintf(input_writer,
-          "autoplay game 1 -lex CSW21 -s1 equity -s2 equity -gp false\n");
+  fprintf_or_die(
+      input_writer,
+      "autoplay game 1 -lex CSW21 -s1 equity -s2 equity -gp false\n");
   fflush_or_die(input_writer);
   nap(1.0);
-  fprintf(
+  fprintf_or_die(
       input_writer,
       "autoplay game 10000000 -lex CSW21 -s1 equity -s2 equity  -gp false\n");
   fflush_or_die(input_writer);
   // Try to immediately start another command while the previous one
   // is still running. This should give a warning.
-  fprintf(input_writer,
-          "autoplay game 1 -lex CSW21 -s1 equity -s2 equity  -gp false\n");
+  fprintf_or_die(
+      input_writer,
+      "autoplay game 1 -lex CSW21 -s1 equity -s2 equity  -gp false\n");
   fflush_or_die(input_writer);
   nap(1.0);
   // Interrupt the autoplay which won't finish in 1 second
-  fprintf(input_writer, "stop\n");
+  fprintf_or_die(input_writer, "stop\n");
   fflush_or_die(input_writer);
   nap(1.0);
-  fprintf(input_writer, "quit\n");
+  fprintf_or_die(input_writer, "quit\n");
   fflush_or_die(input_writer);
   nap(1.0);
 

@@ -1,8 +1,16 @@
 #include <assert.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "../../src/def/kwg_defs.h"
+#include "../../src/def/letter_distribution_defs.h"
 
 #include "../../src/ent/dictionary_word.h"
+#include "../../src/ent/game.h"
+#include "../../src/ent/kwg.h"
+#include "../../src/ent/letter_distribution.h"
+#include "../../src/ent/player.h"
 #include "../../src/impl/config.h"
 
 #include "../../src/impl/kwg_maker.h"
@@ -14,7 +22,7 @@
 
 void add_test_word(const LetterDistribution *ld, DictionaryWordList *words,
                    const char *human_readable_word) {
-  int length = string_length(human_readable_word);
+  int length = (int)string_length(human_readable_word);
   MachineLetter word[MAX_KWG_STRING_LENGTH];
   ld_str_to_mls(ld, human_readable_word, false, word, length);
   dictionary_word_list_add_word(words, word, length);
@@ -59,7 +67,7 @@ uint32_t kwg_dawg_prefix_arc(const KWG *kwg, const LetterDistribution *ld,
   ld_str_to_mls(ld, human_readable_prefix, false, prefix_bytes,
                 string_length(human_readable_prefix));
   dictionary_word_list_add_word(prefix_list, prefix_bytes,
-                                string_length(human_readable_prefix));
+                                (int)string_length(human_readable_prefix));
   const DictionaryWord *prefix = dictionary_word_list_get_word(prefix_list, 0);
   const uint32_t arc =
       kwg_prefix_arc_aux(kwg, kwg_get_dawg_root_node_index(kwg), prefix, 0);
@@ -84,7 +92,7 @@ uint32_t kwg_gaddag_prefix_arc(const KWG *kwg, const LetterDistribution *ld,
   ld_str_to_mls(ld, string_for_conversion, false, prefix_bytes,
                 string_length(string_for_conversion));
   dictionary_word_list_add_word(prefix_list, prefix_bytes,
-                                string_length(string_for_conversion));
+                                (int)string_length(string_for_conversion));
   const DictionaryWord *prefix = dictionary_word_list_get_word(prefix_list, 0);
   const uint32_t arc =
       kwg_prefix_arc_aux(kwg, kwg_get_root_node_index(kwg), prefix, 0);

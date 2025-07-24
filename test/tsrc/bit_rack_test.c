@@ -1,4 +1,8 @@
 #include <assert.h>
+#include <stdint.h>
+
+#include "../../src/def/bit_rack_defs.h"
+#include "../../src/def/board_defs.h"
 
 #include "../../src/ent/bit_rack.h"
 #include "../../src/ent/letter_distribution.h"
@@ -50,7 +54,8 @@ void test_create_from_rack(void) {
   rack_set_to_string(ld, rack, "AABBEWW");
   const BitRack bit_rack = bit_rack_create_from_rack(ld, rack);
   for (int ml = 0; ml < ld_size; ml++) {
-    assert(rack_get_letter(rack, ml) == bit_rack_get_letter(&bit_rack, ml));
+    assert(rack_get_letter(rack, ml) ==
+           (int8_t)bit_rack_get_letter(&bit_rack, ml));
   }
   rack_destroy(rack);
   config_destroy(config);

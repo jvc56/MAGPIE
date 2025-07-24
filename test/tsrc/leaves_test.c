@@ -1,8 +1,12 @@
 #include <assert.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 
+#include "../../src/def/equity_defs.h"
 #include "../../src/ent/data_filepaths.h"
+#include "../../src/ent/equity.h"
 #include "../../src/ent/klv.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/players_data.h"

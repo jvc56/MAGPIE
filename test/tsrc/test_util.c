@@ -9,32 +9,45 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/stat.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "../../src/def/board_defs.h"
+#include "../../src/def/cross_set_defs.h"
 #include "../../src/def/letter_distribution_defs.h"
 #include "../../src/def/move_defs.h"
+#include "../../src/def/thread_control_defs.h"
 
 #include "../../src/ent/anchor.h"
 #include "../../src/ent/bag.h"
 #include "../../src/ent/bit_rack.h"
 #include "../../src/ent/board.h"
+#include "../../src/ent/board_layout.h"
+#include "../../src/ent/bonus_square.h"
 #include "../../src/ent/dictionary_word.h"
 #include "../../src/ent/equity.h"
 #include "../../src/ent/game.h"
+#include "../../src/ent/game_history.h"
 #include "../../src/ent/inference_results.h"
+#include "../../src/ent/klv.h"
 #include "../../src/ent/klv_csv.h"
+#include "../../src/ent/kwg.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/move.h"
+#include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
+#include "../../src/ent/sim_results.h"
+#include "../../src/ent/stats.h"
+#include "../../src/ent/thread_control.h"
 #include "../../src/ent/validated_move.h"
+#include "../../src/ent/wmp.h"
 
 #include "../../src/impl/cgp.h"
 #include "../../src/impl/config.h"
 #include "../../src/impl/gameplay.h"
 #include "../../src/impl/gcg.h"
 #include "../../src/impl/move_gen.h"
+#include "../../src/impl/wmp_move_gen.h"
 
 #include "../../src/str/game_string.h"
 #include "../../src/str/inference_string.h"
@@ -68,10 +81,11 @@ void set_row(const Game *game, const int row, const char *row_content) {
   }
   char letter[2];
   letter[1] = '\0';
-  for (size_t i = 0; i < string_length(row_content); i++) {
+  size_t content_length = string_length(row_content);
+  for (size_t i = 0; i < content_length; i++) {
     if (row_content[i] != ' ') {
       letter[0] = row_content[i];
-      board_set_letter(board, row, i, ld_hl_to_ml(ld, letter));
+      board_set_letter(board, row, (int)i, ld_hl_to_ml(ld, letter));
       board_increment_tiles_played(board, 1);
     }
   }
@@ -131,8 +145,10 @@ void timeout_handler(int __attribute__((unused)) signum) {
 bool load_and_exec_config_or_die_timed(Config *config, const char *cmd,
                                        int seconds) {
   // Set up the signal handler
-  signal(SIGALRM, timeout_handler);
-
+  sig_t prev = signal(SIGALRM, timeout_handler);
+  if (prev == SIG_ERR) {
+    abort();
+  }
   // Set a time limit
   alarm(seconds);
 
@@ -452,11 +468,14 @@ bool equal_rack(const Rack *expected_rack, const Rack *actual_rack) {
 void assert_strings_equal(const char *str1, const char *str2) {
   if (!strings_equal(str1, str2)) {
     if (!str2) {
-      fprintf(stderr, "strings are not equal:\n>%s<\n>%s<\n", str1, "(NULL)");
+      fprintf_or_die(stderr, "strings are not equal:\n>%s<\n>%s<\n", str1,
+                     "(NULL)");
     } else if (!str1) {
-      fprintf(stderr, "strings are not equal:\n>%s<\n>%s<\n", "(NULL)", str2);
+      fprintf_or_die(stderr, "strings are not equal:\n>%s<\n>%s<\n", "(NULL)",
+                     str2);
     } else {
-      fprintf(stderr, "strings are not equal:\n>%s<\n>%s<\n", str1, str2);
+      fprintf_or_die(stderr, "strings are not equal:\n>%s<\n>%s<\n", str1,
+                     str2);
     }
     assert(0);
   }
@@ -573,8 +592,8 @@ void assert_move(const Game *game, const MoveList *move_list,
   }
   string_builder_add_move(move_string, board, move, ld);
   if (!strings_equal(string_builder_peek(move_string), expected_move_string)) {
-    fprintf(stderr, "moves are not equal\ngot: >%s<\nexp: >%s<\n",
-            string_builder_peek(move_string), expected_move_string);
+    fprintf_or_die(stderr, "moves are not equal\ngot: >%s<\nexp: >%s<\n",
+                   string_builder_peek(move_string), expected_move_string);
     assert(0);
   }
   string_builder_destroy(move_string);
@@ -855,8 +874,6 @@ void assert_sim_results_equal(SimResults *sr1, SimResults *sr2) {
   assert(sim_results_get_max_plies(sr1) == sim_results_get_max_plies(sr2));
   assert(sim_results_get_number_of_plays(sr1) ==
          sim_results_get_number_of_plays(sr2));
-  printf("%d %d\n", sim_results_get_iteration_count(sr1),
-         sim_results_get_iteration_count(sr2));
   assert(sim_results_get_iteration_count(sr1) ==
          sim_results_get_iteration_count(sr2));
   assert(sim_results_get_node_count(sr1) == sim_results_get_node_count(sr2));
@@ -879,12 +896,12 @@ void assert_kwgs_are_equal(const KWG *kwg1, const KWG *kwg2) {
 void assert_klvs_equal(const KLV *klv1, const KLV *klv2) {
   assert_kwgs_are_equal(klv_get_kwg(klv1), klv_get_kwg(klv2));
   const int num_nodes = kwg_get_number_of_nodes(klv_get_kwg(klv1));
-  const int number_of_leaves = klv_get_number_of_leaves(klv1);
+  const uint32_t number_of_leaves = klv_get_number_of_leaves(klv1);
   assert(number_of_leaves == klv_get_number_of_leaves(klv2));
   for (int i = 0; i < num_nodes; i++) {
     assert(klv1->word_counts[i] == klv2->word_counts[i]);
   }
-  for (int i = 0; i < number_of_leaves; i++) {
+  for (uint32_t i = 0; i < number_of_leaves; i++) {
     assert(within_epsilon(klv_get_indexed_leave_value(klv1, i),
                           klv_get_indexed_leave_value(klv2, i)));
   }
@@ -893,13 +910,14 @@ void assert_klvs_equal(const KLV *klv1, const KLV *klv2) {
 void assert_word_count(const LetterDistribution *ld,
                        const DictionaryWordList *words,
                        const char *human_readable_word, int expected_count) {
-  int expected_length = string_length(human_readable_word);
+  size_t expected_length = string_length(human_readable_word);
   MachineLetter expected[BOARD_DIM];
   ld_str_to_mls(ld, human_readable_word, false, expected, expected_length);
   int count = 0;
-  for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
+  const int word_count = dictionary_word_list_get_count(words);
+  for (int i = 0; i < word_count; i++) {
     const DictionaryWord *word = dictionary_word_list_get_word(words, i);
-    if ((dictionary_word_get_length(word) == expected_length) &&
+    if ((dictionary_word_get_length(word) == (uint8_t)expected_length) &&
         (memcmp(dictionary_word_get_word(word), expected, expected_length) ==
          0)) {
       count++;

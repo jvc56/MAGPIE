@@ -32,7 +32,7 @@ void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Game *game, const Move *move,
                                const Rack *leave);
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
-                               const Game *game, uint64_t turns, bool divergent,
+                               const Game *game, int turns, bool divergent,
                                uint64_t seed);
 void autoplay_results_finalize(AutoplayResults **autoplay_results_list,
                                int list_size, AutoplayResults *primary);

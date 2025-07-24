@@ -1,19 +1,9 @@
 #include <assert.h>
-#include <time.h>
 
-#include "../../src/def/autoplay_defs.h"
-
-#include "../../src/ent/autoplay_results.h"
-#include "../../src/ent/board.h"
-#include "../../src/ent/board_layout.h"
 #include "../../src/ent/game.h"
-#include "../../src/ent/move.h"
-#include "../../src/ent/validated_move.h"
 #include "../../src/impl/config.h"
 
-#include "../../src/impl/autoplay.h"
-#include "../../src/impl/gameplay.h"
-#include "../../src/impl/move_gen.h"
+#include "../../src/util/io_util.h"
 
 #include "test_constants.h"
 #include "test_util.h"

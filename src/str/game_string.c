@@ -3,10 +3,14 @@
 #include <stdlib.h>
 
 #include "../def/board_defs.h"
+#include "../def/game_defs.h"
+#include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
 
 #include "../ent/bag.h"
 #include "../ent/board.h"
+#include "../ent/bonus_square.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
@@ -20,6 +24,7 @@
 #include "move_string.h"
 #include "rack_string.h"
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
 
 void string_builder_add_game_variant(StringBuilder *sb,

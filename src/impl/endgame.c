@@ -1,9 +1,14 @@
+#include <assert.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
 
+#include "../def/game_defs.h"
+#include "../def/gameplay_defs.h"
 #include "../def/kwg_defs.h"
+#include "../def/move_defs.h"
 
+#include "../ent/bag.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -306,7 +311,7 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
       int16_t score = ttentry_score(tt_entry);
       uint8_t flag = ttentry_flag(tt_entry);
       // add spread back in; we subtract it when storing.
-      score += (int16_t)on_turn_spread;
+      score = (int16_t)((int16_t)on_turn_spread + score);
       if (flag == TT_EXACT) {
         if (!pv_node) {
           return score;
@@ -454,7 +459,7 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
   }
 
   if (worker->solver->transposition_table_optim) {
-    int16_t score = best_value - on_turn_spread;
+    int16_t score = (int16_t)(best_value - on_turn_spread);
     uint8_t flag;
     TTEntry entry_to_store = {.score = score};
     if (best_value <= alpha_orig) {

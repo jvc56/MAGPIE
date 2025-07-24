@@ -1,35 +1,31 @@
 #include <assert.h>
 #include <errno.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
-#include "../../src/def/config_defs.h"
+#include "../../src/def/rack_defs.h"
 #include "../../src/def/thread_control_defs.h"
 
 #include "../../src/ent/bag.h"
-#include "../../src/ent/board.h"
+#include "../../src/ent/bai_result.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/move.h"
-#include "../../src/ent/player.h"
-#include "../../src/ent/rack.h"
 #include "../../src/ent/sim_results.h"
 #include "../../src/ent/stats.h"
 #include "../../src/ent/thread_control.h"
-#include "../../src/ent/win_pct.h"
 #include "../../src/impl/config.h"
 
-#include "../../src/impl/cgp.h"
 #include "../../src/impl/gameplay.h"
-#include "../../src/impl/move_gen.h"
-#include "../../src/impl/simmer.h"
 
 #include "../../src/str/game_string.h"
 #include "../../src/str/move_string.h"
 #include "../../src/str/sim_string.h"
 
-#include "../../src/util/math_util.h"
+#include "../../src/util/io_util.h"
 #include "../../src/util/string_util.h"
 
 #include "test_constants.h"
@@ -65,7 +61,7 @@ void print_sim_stats(const Game *game, SimResults *sim_results) {
     free(wp_str);
     free(eq_str);
   }
-  printf("Iterations: %d\n", sim_results_get_iteration_count(sim_results));
+  printf("Iterations: %lu\n", sim_results_get_iteration_count(sim_results));
   string_builder_destroy(move_description);
 }
 
@@ -538,17 +534,17 @@ void write_stats_to_file(const char *filename, const char *strategies[],
                          SimStrategyStats **stats, int num_strategies) {
   FILE *output_file = fopen_or_die(filename, "w");
   // Write header row
-  fprintf(output_file, "%-20s | %-11s | %-11s | %-11s\n", "Strategy", "Samples",
-          "Samples/Sec", "Total Time");
+  fprintf_or_die(output_file, "%-20s | %-11s | %-11s | %-11s\n", "Strategy",
+                 "Samples", "Samples/Sec", "Total Time");
 
   // Write stats for each strategy
   for (int j = 0; j < num_strategies; j++) {
     const SimStrategyStats *stats_j = stats[j];
-    fprintf(output_file, "%-20s | %-11.2f | %-11.2f | %-11.2f\n", strategies[j],
-            stat_get_mean(stats_j->num_samples),
-            stat_get_mean(stats_j->num_samples) /
-                stat_get_mean(stats_j->total_time),
-            stat_get_mean(stats_j->total_time));
+    fprintf_or_die(output_file, "%-20s | %-11.2f | %-11.2f | %-11.2f\n",
+                   strategies[j], stat_get_mean(stats_j->num_samples),
+                   stat_get_mean(stats_j->num_samples) /
+                       stat_get_mean(stats_j->total_time),
+                   stat_get_mean(stats_j->total_time));
   }
 
   fclose_or_die(output_file);
@@ -559,14 +555,14 @@ void append_game_with_moves_to_file(const char *filename, const Game *game,
   FILE *output_file = fopen_or_die(filename, "a");
   StringBuilder *game_string = string_builder_create();
   string_builder_add_game(game_string, game, move_list);
-  fprintf(output_file, "%s\n", string_builder_peek(game_string));
+  fprintf_or_die(output_file, "%s\n", string_builder_peek(game_string));
   string_builder_destroy(game_string);
   fclose_or_die(output_file);
 }
 
 void append_content_to_file(const char *filename, const char *sim_stats_str) {
   FILE *output_file = fopen_or_die(filename, "a");
-  fprintf(output_file, "%s\n", sim_stats_str);
+  fprintf_or_die(output_file, "%s\n", sim_stats_str);
   fclose_or_die(output_file);
 }
 
@@ -637,9 +633,9 @@ void test_sim_perf(const char *sim_perf_iters) {
                          false);
       append_content_to_file(sim_perf_game_details_filename, sim_stats_str);
       free(sim_stats_str);
-      sim_strategy_stats_stage(stats, j,
-                               sim_results_get_iteration_count(sim_results),
-                               bai_result_get_total_time(bai_result));
+      sim_strategy_stats_stage(
+          stats, j, (int)sim_results_get_iteration_count(sim_results),
+          bai_result_get_total_time(bai_result));
     }
     for (int j = 0; j < num_strategies; j++) {
       sim_strategy_stats_commit(stats, j);

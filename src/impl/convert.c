@@ -1,17 +1,23 @@
 #include "convert.h"
 
+#include "../def/board_defs.h"
+#include "../def/convert_defs.h"
+#include "../def/kwg_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../ent/conversion_results.h"
+#include "../ent/data_filepaths.h"
 #include "../ent/dictionary_word.h"
+#include "../ent/klv.h"
 #include "../ent/klv_csv.h"
 #include "../ent/kwg.h"
-
-#include "kwg_maker.h"
-#include "wmp_maker.h"
-
+#include "../ent/letter_distribution.h"
+#include "../ent/wmp.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
-
+#include "kwg_maker.h"
+#include "wmp_maker.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/types.h>
 
 void convert_from_text_with_dwl(const LetterDistribution *ld,
@@ -40,7 +46,7 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
     if (read > 0 && line[read - 1] == '\n') {
       line[read - 1] = '\0';
     }
-    const int line_length = string_length(line);
+    const size_t line_length = string_length(line);
     MachineLetter *mls = malloc_or_die(line_length);
     const int mls_length = ld_str_to_mls(ld, line, false, mls, line_length);
     if (mls_length > BOARD_DIM) {

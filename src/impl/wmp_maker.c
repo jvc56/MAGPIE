@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../def/bit_rack_defs.h"
 #include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/wmp_defs.h"
@@ -286,8 +287,8 @@ void fill_wfl_blankless(const MutableWordsOfSameLengthMap *mwfl,
   wfl->word_bucket_starts[wfl->num_word_buckets] = entry_idx;
 
   wfl->num_uninlined_words = mwfl_get_num_uninlined_words(mwfl, word_length);
-  wfl->word_letters =
-      (MachineLetter *)malloc_or_die(wfl->num_uninlined_words * word_length);
+  wfl->word_letters = (MachineLetter *)malloc_or_die(
+      (size_t)wfl->num_uninlined_words * (size_t)word_length);
   wfl->num_word_entries = entry_idx;
   wfl->word_map_entries =
       (WMPEntry *)malloc_or_die(wfl->num_word_entries * sizeof(WMPEntry));
@@ -795,7 +796,7 @@ void reinsert_entries_from_word_bucket(const MutableWordMapBucket *bucket,
 void fill_resized_mwfl(const MutableWordsOfSameLengthMap *mwfl,
                        const LetterDistribution *ld,
                        MutableWordsOfSameLengthMap *new_mwfl) {
-  const int num_entries = mwfl_get_num_entries(mwfl);
+  const uint32_t num_entries = mwfl_get_num_entries(mwfl);
   const uint32_t min_num_buckets = compute_min_num_buckets(ld);
   new_mwfl->num_word_buckets = next_prime(num_entries);
   if (new_mwfl->num_word_buckets < min_num_buckets) {

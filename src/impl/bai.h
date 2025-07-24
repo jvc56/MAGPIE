@@ -43,12 +43,12 @@ typedef struct BAIArmDatum {
 } BAIArmDatum;
 
 typedef struct BAISyncData {
-  uint64_t num_arms;
-  uint64_t num_arms_reached_threshold;
-  uint64_t num_total_samples_completed;
-  uint64_t num_total_samples_requested;
-  uint64_t astar_index;
-  uint64_t challenger_index;
+  int num_arms;
+  int num_arms_reached_threshold;
+  int num_total_samples_completed;
+  int num_total_samples_requested;
+  int astar_index;
+  int challenger_index;
   bool initial_phase;
   BAIArmDatum *arm_data;
   RandomVariables *rng;
@@ -57,7 +57,7 @@ typedef struct BAISyncData {
 } BAISyncData;
 
 static inline BAISyncData *bai_sync_data_create(ThreadControl *thread_control,
-                                                const uint64_t num_initial_arms,
+                                                const int num_initial_arms,
                                                 RandomVariables *rng) {
   BAISyncData *bai_sync_data = malloc_or_die(sizeof(BAISyncData));
   bai_sync_data->num_arms = num_initial_arms;
@@ -124,15 +124,15 @@ static inline double bai_get_arm_z(BAISyncData *bai_sync_data,
   const BAIArmDatum *challenger_arm_data =
       &bai_sync_data->arm_data[challenger_index];
   const double alt_lambda = bai_alt_lambda(
-      astar_arm_data->mean, astar_arm_data->var, astar_arm_data->num_samples,
-      challenger_arm_data->mean, challenger_arm_data->var,
-      challenger_arm_data->num_samples);
+      astar_arm_data->mean, astar_arm_data->var,
+      (double)astar_arm_data->num_samples, challenger_arm_data->mean,
+      challenger_arm_data->var, (double)challenger_arm_data->num_samples);
   const double d_astar =
       bai_d(astar_arm_data->mean, astar_arm_data->var, alt_lambda);
   const double d_a =
       bai_d(challenger_arm_data->mean, challenger_arm_data->var, alt_lambda);
-  return astar_arm_data->num_samples * d_astar +
-         challenger_arm_data->num_samples * d_a;
+  return (double)astar_arm_data->num_samples * d_astar +
+         (double)challenger_arm_data->num_samples * d_a;
 }
 
 static inline int
@@ -441,7 +441,7 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
       checkpoint_create(number_of_threads, bai_cull_epigons);
 
   BAISyncData *sync_data =
-      bai_sync_data_create(thread_control, rvs_get_num_rvs(rvs), rng);
+      bai_sync_data_create(thread_control, (int)rvs_get_num_rvs(rvs), rng);
 
   BAIWorkerArgs bai_worker_args = {
       .thread_control = thread_control,

@@ -1,6 +1,8 @@
 #ifndef WMP_DEFS_H
 #define WMP_DEFS_H
 
+#include <stdint.h>
+
 enum {
   WMP_INLINE_VALUE_BYTES = 16,
   WMP_NONINLINE_PADDING_BYTES =

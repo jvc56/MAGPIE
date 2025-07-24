@@ -1,9 +1,10 @@
 #include <assert.h>
 #include <pthread.h>
+#include <stdlib.h>
 
 #include "../../src/ent/checkpoint.h"
 
-#define NUM_THREADS 4
+enum { NUM_THREADS = 4 };
 
 typedef struct {
   Checkpoint *checkpoint;

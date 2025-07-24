@@ -4,6 +4,7 @@
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,8 +12,11 @@
 
 #include "io_util.h"
 
-#define STRING_LIST_INITIAL_CAPACITY 10
-#define STRING_BUILDER_MIN_SIZE 32
+enum {
+  STRING_LIST_INITIAL_CAPACITY = 10,
+  STRING_BUILDER_MIN_SIZE = 32,
+};
+
 #define STRING_CONV_ACCEPT_CHARS " \t\n\r"
 
 // ****************************************************************************
@@ -90,7 +94,7 @@ void string_builder_add_space_padded_string(StringBuilder *string_builder,
   const size_t printed_length = strlen(formatted_string);
   const size_t number_of_spaces =
       total_length > printed_length ? total_length - printed_length : 0;
-  string_builder_add_spaces(string_builder, number_of_spaces);
+  string_builder_add_spaces(string_builder, (int)number_of_spaces);
   free(formatted_string);
 }
 
@@ -535,7 +539,7 @@ char *get_substring(const char *input_string, int start_index, int end_index) {
     log_fatal("cannot get substring of null string");
   }
 
-  int input_length = string_length(input_string);
+  int input_length = (int)string_length(input_string);
 
   if (start_index < 0 || end_index < start_index ||
       start_index > input_length || end_index > input_length) {
@@ -656,8 +660,9 @@ char *insert_before_dot(const char *str, const char *insert) {
   // Calculate the new length of the string
   size_t new_len = str_len + insert_len;
   char *new_str = (char *)malloc_or_die(new_len + 1);
-  if (!new_str)
+  if (!new_str) {
     return NULL; // Handle allocation failure
+  }
 
   if (dot_position) {
     // Copy the part before the dot

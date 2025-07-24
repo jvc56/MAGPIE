@@ -1,10 +1,19 @@
 #include <assert.h>
+#include <stdlib.h>
 
 #include "../../src/ent/conversion_results.h"
+#include "../../src/ent/data_filepaths.h"
+#include "../../src/ent/equity.h"
+#include "../../src/ent/game.h"
+#include "../../src/ent/klv.h"
+#include "../../src/ent/letter_distribution.h"
+#include "../../src/ent/players_data.h"
+#include "../../src/ent/rack.h"
 #include "../../src/ent/validated_move.h"
 
 #include "../../src/impl/config.h"
 #include "../../src/impl/convert.h"
+#include "../../src/util/io_util.h"
 
 #include "test_constants.h"
 #include "test_util.h"

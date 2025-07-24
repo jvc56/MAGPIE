@@ -1,11 +1,16 @@
-#include "../def/cross_set_defs.h"
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
-#include "../ent/conversion_results.h"
+#include "../def/board_defs.h"
+#include "../def/cross_set_defs.h"
+#include "../def/kwg_defs.h"
+#include "../def/letter_distribution_defs.h"
+
 #include "../ent/dictionary_word.h"
 #include "../ent/kwg.h"
 
 #include "../util/io_util.h"
-#include "../util/string_util.h"
 
 // The KWG data structure was originally
 // developed in wolges. For more details
@@ -92,20 +97,20 @@ MutableNode *mutable_node_list_add(MutableNodeList *nodes) {
 }
 
 int mutable_node_list_add_root(MutableNodeList *nodes) {
-  const int root_node_index = nodes->count;
+  const size_t root_node_index = nodes->count;
   MutableNode *root = mutable_node_list_add(nodes);
   node_index_list_initialize(&root->children);
-  return root_node_index;
+  return (int)root_node_index;
 }
 
 int add_child(uint32_t node_index, MutableNodeList *nodes, MachineLetter ml) {
-  int child_node_index = nodes->count;
+  const size_t child_node_index = nodes->count;
   MutableNode *node = &nodes->nodes[node_index];
   node_index_list_add(&node->children, child_node_index);
   MutableNode *child = mutable_node_list_add(nodes);
   child->ml = ml;
   node_index_list_initialize(&child->children);
-  return child_node_index;
+  return (int)child_node_index;
 }
 
 void mutable_node_list_destroy(MutableNodeList *nodes) {
@@ -131,7 +136,7 @@ uint64_t mutable_node_hash_value(MutableNode *node, MutableNodeList *nodes,
 
   for (size_t i = 0; i < node->children.count; i++) {
     uint64_t child_hash = 0;
-    const int child_index = node->children.indices[i];
+    const size_t child_index = node->children.indices[i];
     if (child_index != 0) {
       MutableNode *child = &nodes->nodes[node->children.indices[i]];
       child_hash = mutable_node_hash_value(child, nodes, true);
@@ -274,7 +279,7 @@ void set_final_indices(MutableNode *node, MutableNodeList *nodes,
                        NodePointerList *ordered_pointers) {
   // Add the children in a sequence.
   for (size_t i = 0; i < node->children.count; i++) {
-    const int child_index = node->children.indices[i];
+    const uint32_t child_index = node->children.indices[i];
     MutableNode *child = &nodes->nodes[child_index];
     child->is_end = (i == (node->children.count - 1));
     child->final_index = ordered_pointers->count;
@@ -282,7 +287,7 @@ void set_final_indices(MutableNode *node, MutableNodeList *nodes,
   }
   // Then add each of their subtries afterwards.
   for (size_t i = 0; i < node->children.count; i++) {
-    const int child_index = node->children.indices[i];
+    const uint32_t child_index = node->children.indices[i];
     MutableNode *child = &nodes->nodes[child_index];
     if (child->merged_into != NULL) {
       continue;
@@ -304,7 +309,7 @@ void insert_suffix(uint32_t node_index, MutableNodeList *nodes,
   const uint8_t node_num_children = node->children.count;
   for (MachineLetter i = 0; i < node_num_children; i++) {
     node = &nodes->nodes[node_index];
-    const int child_index = node->children.indices[i];
+    const uint32_t child_index = node->children.indices[i];
     const MutableNode *child = &nodes->nodes[node->children.indices[i]];
     if (child->ml == ml) {
       insert_suffix(child_index, nodes, word, pos + 1, cached_node_indices);
@@ -332,7 +337,7 @@ void copy_nodes(NodePointerList *ordered_pointers, MutableNodeList *nodes,
       NodeIndexList *children = (node->merged_into == NULL)
                                     ? &node->children
                                     : &node->merged_into->children;
-      const int original_child_index = children->indices[0];
+      const uint32_t original_child_index = children->indices[0];
       const uint32_t final_child_index =
           nodes->nodes[original_child_index].final_index;
       serialized_node |= final_child_index;
@@ -519,7 +524,7 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   if (output_gaddag) {
     set_final_indices(gaddag_root, nodes, ordered_pointers);
   }
-  const int final_node_count = ordered_pointers->count;
+  const size_t final_node_count = ordered_pointers->count;
   KWG *kwg = kwg_create_empty();
   kwg_allocate_nodes(kwg, final_node_count);
   copy_nodes(ordered_pointers, nodes, kwg);

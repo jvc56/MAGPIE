@@ -5,13 +5,16 @@
 #include "../def/config_defs.h"
 #include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
+#include "../def/players_data_defs.h"
 
 #include "../ent/bag.h"
 #include "../ent/board.h"
+#include "../ent/board_layout.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/player.h"
+#include "../ent/players_data.h"
 #include "../ent/rack.h"
 
 #include "../util/io_util.h"
@@ -66,11 +69,11 @@ void place_letters_on_board(const Game *game, const char *letters,
 void parse_cgp_board_row(const Game *game, const char *cgp_board_row,
                          int row_index, ErrorStack *error_stack) {
   StringBuilder *tile_string_builder = string_builder_create();
-  int row_length = string_length(cgp_board_row);
+  size_t row_length = string_length(cgp_board_row);
 
   int current_row_number_of_spaces = 0;
   int current_column_index = 0;
-  for (int i = 0; i < row_length; i++) {
+  for (size_t i = 0; i < row_length; i++) {
     char current_char = cgp_board_row[i];
     if (isdigit(current_char)) {
       current_row_number_of_spaces =

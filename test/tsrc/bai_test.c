@@ -2,21 +2,30 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <pthread.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 
 #include "../../src/def/bai_defs.h"
+#include "../../src/def/thread_control_defs.h"
+
+#include "../../src/ent/bai_result.h"
+#include "../../src/ent/thread_control.h"
+#include "../../src/ent/timer.h"
+#include "../../src/ent/xoshiro.h"
 
 #include "../../src/impl/bai_logger.h"
 #include "../../src/impl/random_variable.h"
 
 #include "../../src/impl/bai.h"
 #include "../../src/util/io_util.h"
+#include "../../src/util/string_util.h"
 
 #include "test_util.h"
 
-#define NUM_UNIQUE_MEANS 10000
+enum { NUM_UNIQUE_MEANS = 10000 };
 
 static const int sampling_rules[3] = {
     BAI_SAMPLING_RULE_ROUND_ROBIN,
@@ -33,7 +42,7 @@ static const int num_strategies_entries =
 
 void assert_num_epigons(const RandomVariables *rvs,
                         const int expected_num_epigons) {
-  const int num_rvs = rvs_get_num_rvs(rvs);
+  const int num_rvs = (int)rvs_get_num_rvs(rvs);
   int actual_num_epigons = 0;
   for (int k = 0; k < num_rvs; k++) {
     if (rvs_is_epigon(rvs, k)) {
@@ -242,19 +251,19 @@ void test_bai_time_limit(int num_threads) {
 void write_bai_input(const double delta, const RandomVariablesArgs *rv_args,
                      const RandomVariablesArgs *rng_args) {
   FILE *file = fopen_or_die("normal_data.txt", "w");
-  fprintf(file, "%0.20f\n", delta);
-  fprintf(file, "%" PRIu64 "\n", rv_args->num_rvs);
+  fprintf_or_die(file, "%0.20f\n", delta);
+  fprintf_or_die(file, "%" PRIu64 "\n", rv_args->num_rvs);
   for (uint64_t i = 0; i < rv_args->num_rvs; i++) {
-    fprintf(file, "%0.20f,%0.20f\n", rv_args->means_and_vars[i * 2],
-            rv_args->means_and_vars[i * 2 + 1]);
+    fprintf_or_die(file, "%0.20f,%0.20f\n", rv_args->means_and_vars[i * 2],
+                   rv_args->means_and_vars[i * 2 + 1]);
   }
-  fprintf(file, "%" PRIu64 "\n", rv_args->num_samples);
+  fprintf_or_die(file, "%" PRIu64 "\n", rv_args->num_samples);
   for (uint64_t i = 0; i < rv_args->num_samples; i++) {
-    fprintf(file, "%0.20f\n", rv_args->samples[i]);
+    fprintf_or_die(file, "%0.20f\n", rv_args->samples[i]);
   }
   RandomVariables *rng = rvs_create(rng_args);
   for (uint64_t i = 0; i < rv_args->num_samples; i++) {
-    fprintf(file, "%0.20f\n", rvs_sample(rng, 0, 0, NULL));
+    fprintf_or_die(file, "%0.20f\n", rvs_sample(rng, 0, 0, NULL));
   }
   rvs_destroy(rng);
   fclose_or_die(file);
@@ -294,10 +303,12 @@ void test_bai_epigons(int num_threads) {
     }
     for (int num_rvs = 2; num_rvs <= 10; num_rvs++) {
       double *means_and_vars =
-          (double *)malloc_or_die(num_rvs * 2 * sizeof(double));
+          (double *)malloc_or_die((size_t)num_rvs * 2 * sizeof(double));
       for (int i = 0; i < num_rvs; i++) {
-        means_and_vars[i * 2] = 3 * (max_classes - (i % max_classes));
-        means_and_vars[i * 2 + 1] = 5 * (max_classes - (i % max_classes));
+        means_and_vars[(ptrdiff_t)(i * 2)] =
+            3 * (max_classes - (i % max_classes));
+        means_and_vars[(ptrdiff_t)(i * 2 + 1)] =
+            5 * (max_classes - (i % max_classes));
       }
       int expected_epigons = num_rvs - max_classes;
       if (expected_epigons < 0) {
@@ -359,9 +370,9 @@ void test_bai_from_seed(const char *bai_seed) {
     if (i % 2 == 1) {
       value = (double)(prng_get_random_number(prng, 10) + 1);
     } else {
-      int mean_int = prng_get_random_number(prng, NUM_UNIQUE_MEANS);
+      int mean_int = (int)prng_get_random_number(prng, NUM_UNIQUE_MEANS);
       while (means_map[mean_int] != 0) {
-        mean_int = prng_get_random_number(prng, NUM_UNIQUE_MEANS);
+        mean_int = (int)prng_get_random_number(prng, NUM_UNIQUE_MEANS);
       }
       means_map[mean_int] = 1;
       value = (mean_int - (double)(NUM_UNIQUE_MEANS) / 2.0) / 100.0;

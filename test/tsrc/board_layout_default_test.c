@@ -1,9 +1,15 @@
 #include <assert.h>
+#include <stdint.h>
 
+#include "../../src/def/board_defs.h"
+#include "../../src/def/static_eval_defs.h"
 #include "../../src/ent/board.h"
-#include "../../src/ent/board_layout.h"
+#include "../../src/ent/bonus_square.h"
+#include "../../src/ent/equity.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/move.h"
+#include "../../src/ent/player.h"
+#include "../../src/ent/rack.h"
 #include "../../src/ent/validated_move.h"
 #include "../../src/impl/config.h"
 

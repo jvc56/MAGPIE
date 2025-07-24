@@ -3,8 +3,10 @@
 #include <stdlib.h>
 
 #include "../def/inference_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 
+#include "../ent/equity.h"
 #include "../ent/inference_results.h"
 #include "../ent/leave_rack.h"
 #include "../ent/letter_distribution.h"
@@ -15,6 +17,7 @@
 #include "letter_distribution_string.h"
 #include "rack_string.h"
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
 
 void string_builder_add_leave_rack(StringBuilder *inference_string,
@@ -31,15 +34,16 @@ void string_builder_add_leave_rack(StringBuilder *inference_string,
     string_builder_add_rack(inference_string, leave_rack_leave, ld, false);
     string_builder_add_formatted_string(
         inference_string, "%-3d %-6.2f %-6d %0.2f\n", index + 1,
-        ((double)leave_rack_draws / total_draws) * 100, leave_rack_draws,
-        leave_rack_equity);
+        ((double)leave_rack_draws / (double)total_draws) * 100,
+        leave_rack_draws, leave_rack_equity);
   } else {
     string_builder_add_rack(inference_string, leave_rack_leave, ld, false);
     string_builder_add_spaces(inference_string, 1);
     string_builder_add_rack(inference_string, leave_rack_exchanged, ld, false);
     string_builder_add_formatted_string(
         inference_string, "%-3d %-6.2f %-6d\n", index + 1,
-        ((double)leave_rack_draws / total_draws) * 100, leave_rack_draws);
+        ((double)leave_rack_draws / (double)total_draws) * 100,
+        leave_rack_draws);
   }
 }
 
@@ -52,10 +56,10 @@ void string_builder_add_letter_minimum(
   const Stat *equity_values = inference_results_get_equity_values(
       inference_results, inference_stat_type);
 
-  int draw_subtotal = inference_results_get_subtotal_sum_with_minimum(
+  uint64_t draw_subtotal = inference_results_get_subtotal_sum_with_minimum(
       inference_results, inference_stat_type, letter, minimum,
       INFERENCE_SUBTOTAL_DRAW);
-  int leave_subtotal = inference_results_get_subtotal_sum_with_minimum(
+  uint64_t leave_subtotal = inference_results_get_subtotal_sum_with_minimum(
       inference_results, inference_stat_type, letter, minimum,
       INFERENCE_SUBTOTAL_LEAVE);
   double inference_probability =
@@ -63,8 +67,9 @@ void string_builder_add_letter_minimum(
   double random_probability = get_probability_for_random_minimum_draw(
       bag_as_rack, rack, letter, minimum, number_of_tiles_played_or_exchanged);
   string_builder_add_formatted_string(
-      inference_string, " | %-7.2f %-7.2f%-9d%-9d", inference_probability * 100,
-      random_probability * 100, draw_subtotal, leave_subtotal);
+      inference_string, " | %-7.2f %-7.2f%-9lu%-9lu",
+      inference_probability * 100, random_probability * 100, draw_subtotal,
+      leave_subtotal);
 }
 
 void string_builder_add_letter_line(StringBuilder *inference_string,
@@ -114,7 +119,7 @@ void string_builder_add_inference_type(
   for (int letter = 0; letter < (int)ld_size; letter++) {
     for (int number_of_letter = 1; number_of_letter <= (RACK_SIZE);
          number_of_letter++) {
-      int draws = inference_results_get_subtotal_sum_with_minimum(
+      const uint64_t draws = inference_results_get_subtotal_sum_with_minimum(
           inference_results, inference_stat_type, letter, number_of_letter,
           INFERENCE_SUBTOTAL_DRAW);
       if (draws == 0) {
@@ -267,7 +272,7 @@ void string_builder_add_ucgi_leave_rack(StringBuilder *ucgi_string_builder,
     string_builder_add_rack(ucgi_string_builder, leave_rack_leave, ld, false);
     string_builder_add_formatted_string(
         ucgi_string_builder, " %-3d %-6.2f %-6d %0.2f\n", index + 1,
-        ((double)draws / total_draws) * 100, draws, equity);
+        ((double)draws / (double)total_draws) * 100, draws, equity);
   } else {
     string_builder_add_rack(ucgi_string_builder, leave_rack_leave, ld, false);
     string_builder_add_spaces(ucgi_string_builder, 1);
@@ -275,7 +280,7 @@ void string_builder_add_ucgi_leave_rack(StringBuilder *ucgi_string_builder,
                             false);
     string_builder_add_formatted_string(
         ucgi_string_builder, "%-3d %-6.2f %-6d\n", index + 1,
-        ((double)draws / total_draws) * 100, draws);
+        ((double)draws / (double)total_draws) * 100, draws);
   }
 }
 
@@ -284,10 +289,10 @@ void string_builder_ucgi_add_letter_minimum(
     const Rack *rack, const Rack *bag_as_rack,
     StringBuilder *ucgi_string_builder, MachineLetter letter, int minimum,
     int number_of_tiles_played_or_exchanged) {
-  int draw_subtotal = inference_results_get_subtotal_sum_with_minimum(
+  uint64_t draw_subtotal = inference_results_get_subtotal_sum_with_minimum(
       inference_results, inference_stat_type, letter, minimum,
       INFERENCE_SUBTOTAL_DRAW);
-  int leave_subtotal = inference_results_get_subtotal_sum_with_minimum(
+  uint64_t leave_subtotal = inference_results_get_subtotal_sum_with_minimum(
       inference_results, inference_stat_type, letter, minimum,
       INFERENCE_SUBTOTAL_LEAVE);
   double inference_probability =
@@ -297,7 +302,7 @@ void string_builder_ucgi_add_letter_minimum(
   double random_probability = get_probability_for_random_minimum_draw(
       bag_as_rack, rack, letter, minimum, number_of_tiles_played_or_exchanged);
   string_builder_add_formatted_string(
-      ucgi_string_builder, " %f %f %d %d", inference_probability * 100,
+      ucgi_string_builder, " %f %f %lu %lu", inference_probability * 100,
       random_probability * 100, draw_subtotal, leave_subtotal);
 }
 

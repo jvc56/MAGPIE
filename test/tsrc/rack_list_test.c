@@ -1,6 +1,17 @@
+#include <assert.h>
+#include <stdint.h>
+#include <stdlib.h>
+
 #include "../../src/impl/config.h"
 
+#include "../../src/ent/encoded_rack.h"
+#include "../../src/ent/equity.h"
+#include "../../src/ent/klv.h"
+#include "../../src/ent/letter_distribution.h"
+#include "../../src/ent/rack.h"
 #include "../../src/impl/rack_list.h"
+
+#include "../../src/util/io_util.h"
 #include "../../src/util/math_util.h"
 
 #include "test_util.h"
@@ -11,7 +22,7 @@ void assert_rack_list_item_count_and_mean(
   Rack *decoded_rack = rack_create(ld_get_size(ld));
   Rack *rack = rack_create(ld_get_size(ld));
   rack_set_to_string(ld, rack, rack_str);
-  int klv_index = klv_get_word_index(klv, rack) + 1;
+  int klv_index = (int)klv_get_word_index(klv, rack) + 1;
   rack_decode(rack_list_get_encoded_rack(rack_list, klv_index), decoded_rack);
   assert_racks_equal(ld, rack, decoded_rack);
 
@@ -72,7 +83,7 @@ void test_rack_list(void) {
       double rack_equity = (double)ml;
       rack_list_add_rack(rack_list, &rack, rack_equity);
       const uint64_t draw_combos = ld_get_dist(ld, ml) - num_ml_already_in_rack;
-      total_equities[rack_index] += rack_equity * draw_combos;
+      total_equities[rack_index] += rack_equity * (double)draw_combos;
       total_combos[rack_index] += draw_combos;
       uint64_t rack_combos = 1;
       for (int j = 0; j < ld_size; j++) {
@@ -82,7 +93,7 @@ void test_rack_list(void) {
         }
         rack_combos *= choose(ld_get_dist(ld, j), num_ml);
       }
-      all_comb_equities += rack_equity * rack_combos;
+      all_comb_equities += rack_equity * (double)rack_combos;
       rack_take_letter(&rack, ml);
     }
   }
@@ -94,8 +105,8 @@ void test_rack_list(void) {
     rack_set_to_string(ld, &rack, rack_strs[rack_index]);
     Equity actual_eq = klv_get_leave_value(leaves_klv, &rack);
     Equity expected_eq = double_to_equity(
-        (total_equities[rack_index] / total_combos[rack_index]) -
-        (all_comb_equities / 16007560800));
+        (total_equities[rack_index] / (double)total_combos[rack_index]) -
+        (all_comb_equities / 16007560800.0));
     assert(actual_eq == expected_eq);
   }
 

@@ -1,3 +1,4 @@
+#include "../def/equity_defs.h"
 #include "../ent/equity.h"
 
 #include "../util/string_util.h"

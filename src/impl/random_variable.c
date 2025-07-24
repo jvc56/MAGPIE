@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "../def/game_defs.h"
 #include "../def/rack_defs.h"
@@ -109,7 +110,7 @@ double rv_uniform_predetermined_sample(
       rv_uniform_predetermined->num_samples) {
     log_fatal("ran out of uniform predetermined samples");
   }
-  const int index = rv_uniform_predetermined->index++;
+  const uint64_t index = rv_uniform_predetermined->index++;
   const double result = rv_uniform_predetermined->samples[index];
   return result;
 }
@@ -264,11 +265,12 @@ bool rv_normal_predetermined_mark_as_epigon_if_similar(RandomVariables *rvs,
   RVNormalPredetermined *rv_normal_predetermined =
       (RVNormalPredetermined *)rvs->data;
   rv_normal_predetermined->is_epigon[i] =
-      fabs(rv_normal_predetermined->means_and_vars[leader * 2] -
-           rv_normal_predetermined->means_and_vars[i * 2]) <
+      fabs(rv_normal_predetermined->means_and_vars[(ptrdiff_t)(leader * 2)] -
+           rv_normal_predetermined->means_and_vars[(ptrdiff_t)(i * 2)]) <
           SIMILARITY_EPSILON &&
-      fabs(rv_normal_predetermined->means_and_vars[leader * 2 + 1] -
-           rv_normal_predetermined->means_and_vars[i * 2 + 1]) <
+      fabs(
+          rv_normal_predetermined->means_and_vars[(ptrdiff_t)(leader * 2 + 1)] -
+          rv_normal_predetermined->means_and_vars[(ptrdiff_t)(i * 2 + 1)]) <
           SIMILARITY_EPSILON;
   return rv_normal_predetermined->is_epigon[i];
 }

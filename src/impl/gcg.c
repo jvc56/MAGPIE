@@ -10,8 +10,10 @@
 #include "../def/game_history_defs.h"
 #include "../def/gameplay_defs.h"
 #include "../def/letter_distribution_defs.h"
+#include "../def/players_data_defs.h"
 #include "../def/validated_move_defs.h"
 
+#include "../ent/board_layout.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
@@ -379,7 +381,7 @@ Rack *get_rack_from_matching(const GCGParser *gcg_parser, const char *gcg_line,
   char *player_rack_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
   const LetterDistribution *ld = game_get_ld(gcg_parser->game);
-  const uint32_t ld_size = ld_get_size(ld);
+  const int ld_size = ld_get_size(ld);
   Rack *rack = rack_create(ld_size);
   int number_of_letters_set = rack_set_to_string(ld, rack, player_rack_string);
   free(player_rack_string);
@@ -409,8 +411,8 @@ void add_tiles_played_to_string_builder(StringBuilder *sb,
                                         const char *gcg_line, int group_index) {
   char *matching_group_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
-  int matching_group_string_length = string_length(matching_group_string);
-  for (int i = 0; i < matching_group_string_length; i++) {
+  size_t matching_group_string_length = string_length(matching_group_string);
+  for (size_t i = 0; i < matching_group_string_length; i++) {
     if (matching_group_string[i] == ASCII_PLAYED_THROUGH) {
       matching_group_string[i] = ASCII_UCGI_PLAYED_THROUGH;
     }

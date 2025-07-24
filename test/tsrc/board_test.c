@@ -1,15 +1,22 @@
 #include <assert.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #include "../../src/def/board_defs.h"
+#include "../../src/def/cross_set_defs.h"
+#include "../../src/def/letter_distribution_defs.h"
 
 #include "../../src/ent/board.h"
 #include "../../src/ent/game.h"
+#include "../../src/ent/letter_distribution.h"
+#include "../../src/ent/player.h"
+#include "../../src/ent/rack.h"
 #include "../../src/ent/validated_move.h"
 #include "../../src/impl/config.h"
 
-#include "../../src/impl/cgp.h"
 #include "../../src/impl/gameplay.h"
+
+#include "../../src/util/io_util.h"
 
 #include "board_test.h"
 #include "test_constants.h"

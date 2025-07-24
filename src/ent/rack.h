@@ -21,13 +21,13 @@ typedef struct Rack {
 } Rack;
 
 static inline void rack_reset(Rack *rack) {
-  for (int i = 0; i < rack->dist_size; i++) {
+  for (uint16_t i = 0; i < rack->dist_size; i++) {
     rack->array[i] = 0;
   }
   rack->number_of_letters = 0;
 }
 
-static inline Rack *rack_create(int dist_size) {
+static inline Rack *rack_create(uint16_t dist_size) {
   Rack *rack = (Rack *)malloc_or_die(sizeof(Rack));
   rack->dist_size = dist_size;
   rack_reset(rack);

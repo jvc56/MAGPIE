@@ -1,3 +1,4 @@
+#include "../def/game_history_defs.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/validated_move.h"
@@ -6,6 +7,7 @@
 #include "letter_distribution_string.h"
 
 #include "../util/string_util.h"
+#include <stdlib.h>
 
 char *validated_moves_get_phonies_string(const LetterDistribution *ld,
                                          const ValidatedMoves *vms,

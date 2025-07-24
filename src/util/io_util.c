@@ -1,7 +1,6 @@
 #include "io_util.h"
 
 #include <assert.h>
-#include <ctype.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -9,10 +8,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
 #include <time.h>
 
-#define ERROR_STACK_CAPACITY 100
+enum { ERROR_STACK_CAPACITY = 100 };
 
 static log_level_t current_log_level = LOG_FATAL;
 static FILE *stream_out = NULL;
@@ -47,10 +45,23 @@ char *format_string_with_va_list(const char *format, va_list *args) {
   int size;
   va_list args_copy_for_size;
   va_copy(args_copy_for_size, *args);
-  size = vsnprintf(NULL, 0, format, args_copy_for_size) + 1;
+  size = vsnprintf(NULL, 0, format, args_copy_for_size);
+  if (size < 0) {
+    log_fatal("vsnprintf failed to determine size for format: %s", format);
+  }
   va_end(args_copy_for_size);
+  size++;
   char *string_buffer = malloc_or_die(size);
-  vsnprintf(string_buffer, size, format, *args);
+  int bytes_written = vsnprintf(string_buffer, size, format, *args);
+  if (bytes_written < 0) {
+    log_fatal("vsnprintf failed when writing formatted string for format: %s",
+              format);
+  }
+  if (bytes_written >= size) {
+    log_fatal("vsnprintf string overflow when writing formatted string for "
+              "format: %s",
+              format);
+  }
   return string_buffer;
 }
 
@@ -73,9 +84,22 @@ void fflush_or_die(FILE *stream) {
 
 void write_to_stream_with_vargs(FILE *stream, const bool flush, const char *fmt,
                                 va_list args) {
-  vfprintf(stream, fmt, args);
+  int bytes_written = vfprintf(stream, fmt, args);
+  if (bytes_written < 0) {
+    abort();
+  }
   if (flush) {
     fflush_or_die(stream);
+  }
+}
+
+void fprintf_or_die(FILE *stream, const char *format, ...) {
+  va_list args;
+  va_start(args, format);
+  int result = vfprintf(stream, format, args);
+  va_end(args);
+  if (result < 0) {
+    abort();
   }
 }
 
@@ -115,13 +139,13 @@ void log_with_info(log_level_t log_level, const char *caller_filename,
   time_t t = time(NULL);
   time_buf[strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S",
                     localtime(&t))] = '\0';
-  fprintf(output_fh, "[%s] %-5s %s:%d: ", time_buf, level_string,
-          caller_filename, caller_line);
+  fprintf_or_die(output_fh, "[%s] %-5s %s:%d: ", time_buf, level_string,
+                 caller_filename, caller_line);
   va_list args;
   va_start(args, format);
   write_to_stream_with_vargs(output_fh, false, format, args);
   va_end(args);
-  fprintf(output_fh, "\n");
+  fprintf_or_die(output_fh, "\n");
   fflush_or_die(output_fh);
 
   if (exit_fatally) {

@@ -1,6 +1,5 @@
 #include "math_util.h"
 
-#include <complex.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -67,39 +66,6 @@ double zeta(double s) {
   zeta += w * t * pg_horner(t, m, coeffs, sizeof(coeffs) / sizeof(coeffs[0]));
 
   return zeta;
-}
-
-bool cubic_roots(double a, double b, double c, double d,
-                 complex double *roots) {
-  if (a == 0) {
-    return false;
-  }
-  const double p = b / a;
-  const double q = c / a;
-  const double r = d / a;
-
-  const double Q = (3 * q - p * p) / 9.0;
-  const double R = (9 * p * q - 27 * r - 2 * p * p * p) / 54.0;
-
-  const double discriminant = Q * Q * Q + R * R;
-
-  if (discriminant >= 0) {
-    const double S_real = cbrt(R + sqrt(discriminant));
-    const double T_real = cbrt(R - sqrt(discriminant));
-    const complex double S = S_real;
-    const complex double T = T_real;
-    roots[0] = -(S + T) / 2.0 - p / 3.0 - ((S - T) * sqrt(3.0) / 2.0) * I;
-    roots[1] = -(S + T) / 2.0 - p / 3.0 + ((S - T) * sqrt(3.0) / 2.0) * I;
-    roots[2] = S + T - p / 3.0;
-  } else {
-    const double theta = acos(R / sqrt(-Q * Q * Q));
-    const double sqrt_Q = sqrt(-Q);
-    roots[0] = 2 * sqrt_Q * cos((theta + 4 * M_PI) / 3.0) - p / 3.0;
-    roots[1] = 2 * sqrt_Q * cos((theta + 2 * M_PI) / 3.0) - p / 3.0;
-    roots[2] = 2 * sqrt_Q * cos(theta / 3.0) - p / 3.0;
-  }
-
-  return true;
 }
 
 uint64_t choose(uint64_t n, uint64_t k) {

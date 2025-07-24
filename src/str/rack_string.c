@@ -1,5 +1,7 @@
+#include "../def/letter_distribution_defs.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/rack.h"
+#include <stdint.h>
 
 #include "letter_distribution_string.h"
 

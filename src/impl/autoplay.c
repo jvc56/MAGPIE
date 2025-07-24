@@ -6,16 +6,23 @@
 #include <stdlib.h>
 
 #include "../def/autoplay_defs.h"
+#include "../def/players_data_defs.h"
+#include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
 
 #include "../ent/autoplay_results.h"
 #include "../ent/bag.h"
 #include "../ent/checkpoint.h"
+#include "../ent/data_filepaths.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/klv.h"
 #include "../ent/klv_csv.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
+#include "../ent/players_data.h"
+#include "../ent/rack.h"
 #include "../ent/thread_control.h"
 #include "../ent/xoshiro.h"
 
@@ -566,7 +573,7 @@ void valid_autoplay_results_options(const AutoplayResults *autoplay_results,
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
               ErrorStack *error_stack) {
   const bool is_leavegen_mode = args->type == AUTOPLAY_TYPE_LEAVE_GEN;
-  uint64_t num_gens = 1;
+  int num_gens = 1;
   int *min_rack_targets = NULL;
   uint64_t first_gen_num_games;
   if (is_leavegen_mode) {

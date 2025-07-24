@@ -1,6 +1,8 @@
 #include <assert.h>
 #include <stdint.h>
 
+#include "../../src/def/letter_distribution_defs.h"
+
 #include "../../src/ent/bag.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/rack.h"
@@ -12,7 +14,7 @@
 
 #include "test_util.h"
 
-#define TEST_BAG_SIZE 100
+enum { TEST_BAG_SIZE = 100 };
 
 void test_add_letter(const Config *config, Bag *bag, const char *r,
                      const char *expected_bag_string, const int player_index) {

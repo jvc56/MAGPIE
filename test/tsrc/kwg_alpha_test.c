@@ -1,8 +1,13 @@
 #include "../../src/ent/kwg_alpha.h"
 
 #include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "../../src/ent/kwg.h"
+#include "../../src/ent/letter_distribution.h"
+#include "../../src/ent/players_data.h"
 #include "../../src/ent/rack.h"
 
 #include "../../src/impl/config.h"

@@ -90,9 +90,9 @@ static const uint64_t SMALL_MOVE_T_BITMASK[7] = {
 };
 
 typedef struct MoveList {
-  uint32_t count;
-  uint32_t capacity;
-  uint32_t moves_size;
+  int count;
+  int capacity;
+  int moves_size;
   Move *spare_move;
   Move **moves;
   SmallMove *spare_small_move;
@@ -226,11 +226,9 @@ static inline Move *move_list_get_spare_move(const MoveList *ml) {
   return ml->spare_move;
 }
 
-static inline uint32_t move_list_get_count(const MoveList *ml) {
-  return ml->count;
-}
+static inline int move_list_get_count(const MoveList *ml) { return ml->count; }
 
-static inline uint32_t move_list_get_capacity(const MoveList *ml) {
+static inline int move_list_get_capacity(const MoveList *ml) {
   return ml->capacity;
 }
 
@@ -403,8 +401,7 @@ static inline void move_list_insert_spare_move_top_equity(MoveList *ml,
   }
 }
 
-static inline void move_list_load_with_empty_moves(MoveList *ml,
-                                                   uint32_t capacity) {
+static inline void move_list_load_with_empty_moves(MoveList *ml, int capacity) {
   ml->capacity = capacity;
   // We need to use +1 here so that the
   // move list can temporarily hold the
@@ -419,7 +416,7 @@ static inline void move_list_load_with_empty_moves(MoveList *ml,
 }
 
 static inline void move_list_load_with_empty_small_moves(MoveList *ml,
-                                                         uint32_t capacity) {
+                                                         int capacity) {
   ml->capacity = capacity;
 
   ml->small_moves =
@@ -437,7 +434,7 @@ static inline void moves_for_move_list_destroy(MoveList *ml) {
   free(ml->moves);
 }
 
-static inline MoveList *move_list_create(uint32_t capacity) {
+static inline MoveList *move_list_create(int capacity) {
   MoveList *ml = (MoveList *)malloc_or_die(sizeof(MoveList));
   ml->count = 0;
   ml->spare_move = move_create();
@@ -446,7 +443,7 @@ static inline MoveList *move_list_create(uint32_t capacity) {
   return ml;
 }
 
-static inline MoveList *move_list_create_small(uint32_t capacity) {
+static inline MoveList *move_list_create_small(int capacity) {
   MoveList *ml = (MoveList *)malloc_or_die(sizeof(MoveList));
   ml->count = 0;
   ml->spare_small_move = (SmallMove *)malloc_or_die(sizeof(SmallMove));
@@ -482,9 +479,9 @@ static inline void move_list_reset(MoveList *ml) {
   ml->moves[0]->equity = EQUITY_INITIAL_VALUE;
 }
 
-static inline void up_heapify(MoveList *ml, uint32_t index) {
+static inline void up_heapify(MoveList *ml, int index) {
   Move *temp;
-  uint32_t parent_node = (index - 1) / 2;
+  int parent_node = (index - 1) / 2;
 
   if (index > 0 &&
       compare_moves(ml->moves[parent_node], ml->moves[index], false)) {
@@ -569,8 +566,8 @@ static inline void move_list_insert_spare_move(MoveList *ml, Equity equity) {
 // to a descending sorted array. The
 // count stays constant.
 static inline void move_list_sort_moves(MoveList *ml) {
-  uint32_t number_of_moves = ml->count;
-  for (uint32_t i = 1; i < number_of_moves; i++) {
+  int number_of_moves = ml->count;
+  for (int i = 1; i < number_of_moves; i++) {
     Move *move = move_list_pop_move(ml);
     // Use a swap var to preserve the spare leave pointer
     Move *swap = ml->moves[ml->count];
@@ -581,22 +578,22 @@ static inline void move_list_sort_moves(MoveList *ml) {
   ml->count = number_of_moves;
 }
 
-static inline void move_list_resize(MoveList *ml, uint32_t new_capacity) {
+static inline void move_list_resize(MoveList *ml, int new_capacity) {
   if (new_capacity == ml->capacity) {
     return;
   }
-  uint32_t old_moves_size = ml->moves_size;
+  int old_moves_size = ml->moves_size;
   ml->capacity = new_capacity;
   ml->moves_size = new_capacity + 1;
   ml->moves =
       (Move **)realloc_or_die(ml->moves, sizeof(Move *) * ml->moves_size);
-  for (uint32_t i = old_moves_size; i < ml->moves_size; i++) {
+  for (int i = old_moves_size; i < ml->moves_size; i++) {
     ml->moves[i] = move_create();
   }
 }
 
 static inline bool move_list_move_exists(const MoveList *ml, const Move *m) {
-  for (uint32_t i = 0; i < ml->count; i++) {
+  for (int i = 0; i < ml->count; i++) {
     if (compare_moves(ml->moves[i], m, true) == -1) {
       return true;
     }
@@ -605,7 +602,7 @@ static inline bool move_list_move_exists(const MoveList *ml, const Move *m) {
 }
 
 static inline void small_moves_for_move_list_destroy(MoveList *ml) {
-  for (uint32_t i = 0; i < ml->capacity; i++) {
+  for (int i = 0; i < ml->capacity; i++) {
     small_move_destroy(ml->small_moves[i]);
   }
   free(ml->small_moves);

@@ -1,11 +1,12 @@
 #include <assert.h>
-#include <stdlib.h>
 
 #include "../../src/def/board_defs.h"
 #include "../../src/def/equity_defs.h"
 #include "../../src/def/game_history_defs.h"
+#include "../../src/def/letter_distribution_defs.h"
 
 #include "../../src/ent/board.h"
+#include "../../src/ent/equity.h"
 #include "../../src/ent/move.h"
 
 void test_move_resize(void) {
@@ -13,29 +14,29 @@ void test_move_resize(void) {
 
   assert(move_list_get_capacity(ml) == 3);
 
-  Move *m1 = move_list_get_move(ml, 0);
-  Move *m2 = move_list_get_move(ml, 1);
-  Move *m3 = move_list_get_move(ml, 2);
+  Move *move1 = move_list_get_move(ml, 0);
+  Move *move2 = move_list_get_move(ml, 1);
+  Move *move3 = move_list_get_move(ml, 2);
 
-  int m1_score = 1234;
-  int m2_score = 5678;
-  int m3_score = 99834;
+  int move1_score = 1234;
+  int move2_score = 5678;
+  int move3_score = 99834;
 
-  move_set_score(m1, m1_score);
-  move_set_score(m2, m2_score);
-  move_set_score(m3, m3_score);
+  move_set_score(move1, move1_score);
+  move_set_score(move2, move2_score);
+  move_set_score(move3, move3_score);
 
   move_list_resize(ml, 5);
 
   // Resizing should leave existing moves unchanged;
 
-  assert(move_list_get_move(ml, 0) == m1);
-  assert(move_list_get_move(ml, 1) == m2);
-  assert(move_list_get_move(ml, 2) == m3);
+  assert(move_list_get_move(ml, 0) == move1);
+  assert(move_list_get_move(ml, 1) == move2);
+  assert(move_list_get_move(ml, 2) == move3);
 
-  assert(move_get_score(m1) == m1_score);
-  assert(move_get_score(m2) == m2_score);
-  assert(move_get_score(m3) == m3_score);
+  assert(move_get_score(move1) == move1_score);
+  assert(move_get_score(move2) == move2_score);
+  assert(move_get_score(move3) == move3_score);
 
   move_list_destroy(ml);
 }
@@ -51,7 +52,7 @@ void test_move_compare(void) {
   int tiles_played = 5;
   int dir = BOARD_HORIZONTAL_DIRECTION;
   game_event_t mtype = GAME_EVENT_TILE_PLACEMENT_MOVE;
-  double equity = 6.7;
+  Equity equity = double_to_equity(6.7);
 
   int tiles_length = rightstrip - leftstrip + 1;
 

@@ -1,6 +1,3 @@
-#define _POSIX_C_SOURCE 200809L
-
-#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,8 +5,10 @@
 #include "io_util.h"
 #include "string_util.h"
 
-#define MAX_CACHE_SIZE 32
-#define MAX_DATA_FILENAME_LENGTH 64
+enum {
+  MAX_CACHE_SIZE = 32,
+  MAX_DATA_FILENAME_LENGTH = 64,
+};
 
 typedef struct FileCacheEntry {
   char filename[MAX_DATA_FILENAME_LENGTH];
