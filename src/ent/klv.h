@@ -134,8 +134,11 @@ static inline int klv_count_words_at(const KLV *klv, uint32_t node_index,
 }
 
 static inline void klv_count_words(const KLV *klv, size_t kwg_size) {
-  for (size_t p = kwg_size - 1; p >= 0; p--) {
+  for (size_t p = kwg_size - 1;; p--) {
     klv_count_words_at(klv, p, kwg_size);
+    if (p == 0) {
+      break;
+    }
   }
 }
 
@@ -284,10 +287,10 @@ static inline uint32_t klv_get_word_index_internal(const KLV *klv,
 
 static inline uint32_t klv_get_word_index(const KLV *klv, const Rack *leave) {
   if (rack_is_empty(leave)) {
-    return -1;
+    return KLV_UNFOUND_INDEX;
   }
   if (!klv) {
-    return -1;
+    return KLV_UNFOUND_INDEX;
   }
   return klv_get_word_index_internal(klv, leave,
                                      kwg_get_dawg_root_node_index(klv->kwg));

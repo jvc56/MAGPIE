@@ -52,9 +52,22 @@ static uint64_t get_total_memory(void) {
       char *endptr;
       errno = 0;
       unsigned long memtotal_kb = strtoul(line + 9, &endptr, 10);
-      if (errno != 0 || *endptr != '\0') {
+
+      // Check for conversion errors
+      if (errno != 0 || endptr == line + 9) {
         log_fatal("error parsing memtotal");
       }
+
+      // Skip whitespace after the number
+      while (*endptr == ' ' || *endptr == '\t') {
+        endptr++;
+      }
+
+      // Verify we found "kB" (case insensitive check)
+      if (strncasecmp(endptr, "kB", 2) != 0) {
+        log_fatal("expected 'kB' unit in meminfo");
+      }
+
       total_memory = memtotal_kb * 1024; // Convert from KB to Bytes
       break;
     }

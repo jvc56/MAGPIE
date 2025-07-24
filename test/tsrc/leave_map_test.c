@@ -27,10 +27,11 @@ void take_set_add(const LetterDistribution *ld, LeaveMap *leave_map, Rack *rack,
   leave_map_take_letter_and_update_current_index(leave_map, rack,
                                                  ld_hl_to_ml(ld, letter));
   assert(leave_map_get_current_index(leave_map) == expected_take_index);
+  Equity value_equity = double_to_equity(value);
   if (set) {
-    leave_map_set_current_value(leave_map, double_to_equity(value));
+    leave_map_set_current_value(leave_map, value_equity);
   } else {
-    assert(within_epsilon(leave_map_get_current_value(leave_map), value));
+    assert(leave_map_get_current_value(leave_map) == value_equity);
   }
   leave_map_add_letter_and_update_current_index(leave_map, rack,
                                                 ld_hl_to_ml(ld, letter));
@@ -97,21 +98,21 @@ void test_leave_map(void) {
   leave_map_add_letter_and_update_current_index(leave_map, rack,
                                                 ld_hl_to_ml(ld, "U"));
   assert(leave_map_get_current_index(leave_map) == 41);
-  assert(within_epsilon(leave_map_get_current_value(leave_map), 14.0));
+  assert(leave_map_get_current_value(leave_map) == double_to_equity(14.0));
 
   leave_map_add_letter_and_update_current_index(leave_map, rack,
                                                 ld_hl_to_ml(ld, "D"));
   leave_map_add_letter_and_update_current_index(leave_map, rack,
                                                 ld_hl_to_ml(ld, "I"));
   assert(leave_map_get_current_index(leave_map) == 59);
-  assert(within_epsilon(leave_map_get_current_value(leave_map), 12.0));
+  assert(leave_map_get_current_value(leave_map) == double_to_equity(12.0));
 
   leave_map_add_letter_and_update_current_index(leave_map, rack,
                                                 ld_hl_to_ml(ld, "U"));
   leave_map_add_letter_and_update_current_index(leave_map, rack,
                                                 ld_hl_to_ml(ld, "D"));
   assert(leave_map_get_current_index(leave_map) == 127);
-  assert(within_epsilon(leave_map_get_current_value(leave_map), 100.0));
+  assert(leave_map_get_current_value(leave_map) == double_to_equity(100.0));
 
   rack_destroy(rack);
   leave_map_destroy(leave_map);

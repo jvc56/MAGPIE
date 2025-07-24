@@ -130,15 +130,13 @@ void test_reloaded_data(void) {
   const KLV *klv1 = players_data_get_klv(players_data, 0);
 
   const int leave_index = 7;
-  const double old_leave_value = klv_get_indexed_leave_value(klv1, leave_index);
-  const double new_leave_value = 17.0;
+  const Equity old_leave_value = klv_get_indexed_leave_value(klv1, leave_index);
+  const Equity new_leave_value = double_to_equity(17.0);
 
-  klv_set_indexed_leave_value(klv1, leave_index,
-                              double_to_equity(new_leave_value));
+  klv_set_indexed_leave_value(klv1, leave_index, new_leave_value);
 
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_KLV, 1) == klv1);
-  assert(within_epsilon(klv_get_indexed_leave_value(klv1, leave_index),
-                        new_leave_value));
+  assert(klv_get_indexed_leave_value(klv1, leave_index) == new_leave_value);
 
   players_data_reload(players_data, PLAYERS_DATA_TYPE_KLV,
                       DEFAULT_TEST_DATA_PATH, error_stack);
@@ -148,8 +146,7 @@ void test_reloaded_data(void) {
 
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_KLV, 0) != klv1);
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_KLV, 1) != klv1);
-  assert(within_epsilon(klv_get_indexed_leave_value(klv2, leave_index),
-                        old_leave_value));
+  assert(klv_get_indexed_leave_value(klv2, leave_index) == old_leave_value);
   error_stack_destroy(error_stack);
   players_data_destroy(players_data);
 }

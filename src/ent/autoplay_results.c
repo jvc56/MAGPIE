@@ -934,7 +934,8 @@ void leaves_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   LeavesData *leaves_data = (LeavesData *)recorder->data;
   uint32_t leave_index =
       klv_get_word_index(recorder->recorder_context->klv, args->leave);
-  if (leave_index < 0 || leave_index >= leaves_data->num_leaves) {
+  if (leave_index == KLV_UNFOUND_INDEX ||
+      leave_index >= leaves_data->num_leaves) {
     StringBuilder *sb = string_builder_create();
     string_builder_add_rack(sb, args->leave, recorder->recorder_context->ld,
                             false);
@@ -1005,7 +1006,7 @@ void leaves_data_finalize(Recorder **recorder_list, int list_size,
 
   for (int i = 0; i < list_size; i++) {
     LeavesData *leaves_data = (LeavesData *)recorder_list[i]->data;
-    for (int j = 0; j < leaves_data->num_leaves; j++) {
+    for (uint32_t j = 0; j < leaves_data->num_leaves; j++) {
       primary_leaves_data->leave_counts[j] += leaves_data->leave_counts[j];
     }
   }

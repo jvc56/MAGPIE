@@ -31,7 +31,7 @@ CLANG_TIDY_CHECKS="*,
                   -llvm-header-guard,
                   -cppcoreguidelines-avoid-non-const-global-variables"
 CLANG_TIDY_EXCLUDE_HEADER_FILTER=".*"
-C_COMPILER_FLAGS="-std=c99 -Wno-trigraphs -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -D__linux__  -U_WIN32 -U__APPLE__ "
+C_COMPILER_FLAGS="-std=c99 -Wno-trigraphs -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -D__linux__ -U_WIN32 -U__APPLE__ "
 LOG_FILE=$(mktemp)
 # Ensure the temporary log file is removed when the script exits,
 # regardless of how it exits (success, failure, or interruption).

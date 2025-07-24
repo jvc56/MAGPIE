@@ -17,6 +17,7 @@
 #include "../../src/ent/sim_results.h"
 #include "../../src/ent/stats.h"
 #include "../../src/ent/thread_control.h"
+#include "../../src/ent/timer.h"
 #include "../../src/impl/config.h"
 
 #include "../../src/impl/gameplay.h"

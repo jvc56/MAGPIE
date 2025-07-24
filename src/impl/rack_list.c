@@ -430,7 +430,7 @@ void rack_list_write_to_klv(RackList *rack_list, const LetterDistribution *ld,
     generate_leaves(leave_list, klv, rli->mean, &rack, &rl_ld, &leave,
                     kwg_get_dawg_root_node_index(klv->kwg), 0, 0);
   }
-  for (int i = 0; i < klv_number_of_leaves; i++) {
+  for (uint32_t i = 0; i < klv_number_of_leaves; i++) {
     if (leave_list[i].count_sum > 0) {
       klv->leave_values[i] = double_to_equity(
           (leave_list[i].equity_sum / (double)leave_list[i].count_sum) -
