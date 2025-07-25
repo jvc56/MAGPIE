@@ -2,6 +2,7 @@
 
 CLANG_TIDY_EXEC="$1"
 if [ -z "$CLANG_TIDY_EXEC" ]; then
+    echo "No clang-tidy executable specified. Using 'clang-tidy'."
     CLANG_TIDY_EXEC="clang-tidy"
 fi
 
@@ -13,7 +14,6 @@ CLANG_TIDY_CHECKS="*,
                   -readability-magic-numbers,
                   -cppcoreguidelines-avoid-magic-numbers,
                   -hicpp-signed-bitwise,
-                  -hicpp-multiway-paths-covered,
                   -cppcoreguidelines-init-variables,
                   -clang-analyzer-core.uninitialized.Assign,
                   -clang-analyzer-core.uninitialized.UndefReturn,
