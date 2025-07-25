@@ -1,5 +1,4 @@
 #include <assert.h>
-#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -123,8 +122,8 @@ typedef struct SimTestArgs {
   Config *config;
   SimResults *sim_results;
   error_code_t *status;
-  pthread_mutex_t *mutex;
-  pthread_cond_t *cond;
+  cpthread_mutex_t *mutex;
+  cpthread_cond_t *cond;
   int *done;
 } SimTestArgs;
 
@@ -133,10 +132,10 @@ void *sim_thread_func(void *arg) {
   *(args->status) =
       config_simulate_and_return_status(args->config, NULL, args->sim_results);
 
-  pthread_mutex_lock(args->mutex);
+  cpthread_mutex_lock(args->mutex);
   *(args->done) = 1;
-  pthread_cond_signal(args->cond);
-  pthread_mutex_unlock(args->mutex);
+  cpthread_cond_signal(args->cond);
+  cpthread_mutex_unlock(args->mutex);
 
   return NULL;
 }
@@ -151,8 +150,10 @@ void test_sim_threshold(void) {
   error_code_t status;
   int done = 0;
 
-  pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-  pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+  cpthread_mutex_t mutex;
+  cpthread_mutex_init(&mutex);
+  cpthread_cond_t cond;
+  cpthread_cond_init(&cond);
 
   SimTestArgs args = {.config = config,
                       .sim_results = sim_results,
@@ -161,28 +162,22 @@ void test_sim_threshold(void) {
                       .cond = &cond,
                       .done = &done};
 
-  pthread_t thread;
-  pthread_create(&thread, NULL, sim_thread_func, &args);
+  cpthread_t thread;
+  cpthread_create(&thread, sim_thread_func, &args);
 
   struct timespec ts;
   mtimer_clock_gettime_realtime(&ts);
   const int timeout_seconds = 10;
   ts.tv_sec += timeout_seconds;
 
-  pthread_mutex_lock(&mutex);
+  cpthread_mutex_lock(&mutex);
   // cppcheck-suppress knownConditionTrueFalse
   while (!done) {
-    int ret = pthread_cond_timedwait(&cond, &mutex, &ts);
-    if (ret == ETIMEDOUT) {
-      printf("sim did not complete within %d seconds.\n", timeout_seconds);
-      pthread_cancel(thread);
-      pthread_mutex_unlock(&mutex);
-      assert(0);
-    }
+    cpthread_cond_timedwait(&cond, &mutex, &ts);
   }
-  pthread_mutex_unlock(&mutex);
+  cpthread_mutex_unlock(&mutex);
 
-  pthread_join(thread, NULL);
+  cpthread_join(thread);
 
   assert(status == ERROR_STATUS_SUCCESS);
   assert(thread_control_get_status(config_get_thread_control(config)) ==
@@ -212,8 +207,10 @@ void test_sim_time_limit(void) {
   error_code_t status;
   int done = 0;
 
-  pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-  pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+  cpthread_mutex_t mutex;
+  cpthread_mutex_init(&mutex);
+  cpthread_cond_t cond;
+  cpthread_cond_init(&cond);
 
   SimTestArgs args = {.config = config,
                       .sim_results = sim_results,
@@ -222,28 +219,22 @@ void test_sim_time_limit(void) {
                       .cond = &cond,
                       .done = &done};
 
-  pthread_t thread;
-  pthread_create(&thread, NULL, sim_thread_func, &args);
+  cpthread_t thread;
+  cpthread_create(&thread, sim_thread_func, &args);
 
   struct timespec ts;
   mtimer_clock_gettime_realtime(&ts);
   const int timeout_seconds = 10;
   ts.tv_sec += timeout_seconds;
 
-  pthread_mutex_lock(&mutex);
+  cpthread_mutex_lock(&mutex);
   // cppcheck-suppress knownConditionTrueFalse
   while (!done) {
-    int ret = pthread_cond_timedwait(&cond, &mutex, &ts);
-    if (ret == ETIMEDOUT) {
-      printf("sim did not complete within %d seconds.\n", timeout_seconds);
-      pthread_cancel(thread);
-      pthread_mutex_unlock(&mutex);
-      assert(0);
-    }
+    cpthread_cond_timedwait(&cond, &mutex, &ts);
   }
-  pthread_mutex_unlock(&mutex);
+  cpthread_mutex_unlock(&mutex);
 
-  pthread_join(thread, NULL);
+  cpthread_join(thread);
 
   assert(status == ERROR_STATUS_SUCCESS);
   assert(thread_control_get_status(config_get_thread_control(config)) ==
@@ -264,8 +255,10 @@ void test_sim_one_arm_remaining(void) {
   error_code_t status;
   int done = 0;
 
-  pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-  pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+  cpthread_mutex_t mutex;
+  cpthread_mutex_init(&mutex);
+  cpthread_cond_t cond;
+  cpthread_cond_init(&cond);
 
   SimTestArgs args = {.config = config,
                       .sim_results = sim_results,
@@ -274,28 +267,22 @@ void test_sim_one_arm_remaining(void) {
                       .cond = &cond,
                       .done = &done};
 
-  pthread_t thread;
-  pthread_create(&thread, NULL, sim_thread_func, &args);
+  cpthread_t thread;
+  cpthread_create(&thread, sim_thread_func, &args);
 
   struct timespec ts;
   mtimer_clock_gettime_realtime(&ts);
   const int timeout_seconds = 10;
   ts.tv_sec += timeout_seconds;
 
-  pthread_mutex_lock(&mutex);
+  cpthread_mutex_lock(&mutex);
   // cppcheck-suppress knownConditionTrueFalse
   while (!done) {
-    int ret = pthread_cond_timedwait(&cond, &mutex, &ts);
-    if (ret == ETIMEDOUT) {
-      printf("sim did not complete within %d seconds.\n", timeout_seconds);
-      pthread_cancel(thread);
-      pthread_mutex_unlock(&mutex);
-      assert(0);
-    }
+    cpthread_cond_timedwait(&cond, &mutex, &ts);
   }
-  pthread_mutex_unlock(&mutex);
+  cpthread_mutex_unlock(&mutex);
 
-  pthread_join(thread, NULL);
+  cpthread_join(thread);
 
   assert(status == ERROR_STATUS_SUCCESS);
   assert(thread_control_get_status(config_get_thread_control(config)) ==

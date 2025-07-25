@@ -1,5 +1,5 @@
+#include "../compat/cpthread.h"
 #include <assert.h>
-#include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -570,18 +570,18 @@ PVLine endgame_solve(EndgameSolver *solver, int plies) {
 
   EndgameSolverWorker **solver_workers =
       malloc_or_die((sizeof(EndgameSolverWorker *)) * solver->threads);
-  pthread_t *worker_ids =
-      malloc_or_die((sizeof(pthread_t)) * (solver->threads));
+  cpthread_t *worker_ids =
+      malloc_or_die((sizeof(cpthread_t)) * (solver->threads));
 
   for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
     solver_workers[thread_index] =
         endgame_solver_create_worker(solver, thread_index);
-    pthread_create(&worker_ids[thread_index], NULL, solver_worker_start,
-                   solver_workers[thread_index]);
+    cpthread_create(&worker_ids[thread_index], solver_worker_start,
+                    solver_workers[thread_index]);
   }
 
   for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
-    pthread_join(worker_ids[thread_index], NULL);
+    cpthread_join(worker_ids[thread_index]);
     solver_worker_destroy(solver_workers[thread_index]);
   }
 

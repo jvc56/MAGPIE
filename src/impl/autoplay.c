@@ -1,6 +1,6 @@
 #include "autoplay.h"
 
-#include <pthread.h>
+#include "../compat/cpthread.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -637,20 +637,20 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
 
   AutoplayWorker **autoplay_workers =
       malloc_or_die((sizeof(AutoplayWorker *)) * (number_of_threads));
-  pthread_t *worker_ids =
-      malloc_or_die((sizeof(pthread_t)) * (number_of_threads));
+  cpthread_t *worker_ids =
+      malloc_or_die((sizeof(cpthread_t)) * (number_of_threads));
 
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     autoplay_workers[thread_index] = autoplay_worker_create(
         args, autoplay_results, thread_index, shared_data);
     autoplay_results_list[thread_index] =
         autoplay_workers[thread_index]->autoplay_results;
-    pthread_create(&worker_ids[thread_index], NULL, autoplay_worker,
-                   autoplay_workers[thread_index]);
+    cpthread_create(&worker_ids[thread_index], autoplay_worker,
+                    autoplay_workers[thread_index]);
   }
 
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
-    pthread_join(worker_ids[thread_index], NULL);
+    cpthread_join(worker_ids[thread_index]);
   }
 
   // If autoplay was interrupted by the user,

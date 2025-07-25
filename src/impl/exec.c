@@ -1,7 +1,7 @@
 #include "exec.h"
 
+#include "../compat/cpthread.h"
 #include <assert.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdlib.h>
 
@@ -83,10 +83,10 @@ void execute_command_sync_or_async(Config *config, ErrorStack *error_stack,
   if (sync) {
     execute_command_and_set_status_finished(config, error_stack);
   } else {
-    pthread_t cmd_execution_thread;
-    pthread_create(&cmd_execution_thread, NULL, execute_command_thread_worker,
-                   config);
-    pthread_detach(cmd_execution_thread);
+    cpthread_t cmd_execution_thread;
+    cpthread_create(&cmd_execution_thread, execute_command_thread_worker,
+                    config);
+    cpthread_detach(cmd_execution_thread);
   }
 }
 

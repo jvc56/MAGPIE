@@ -1,6 +1,6 @@
 #include "sim_results.h"
 
-#include <pthread.h>
+#include "../compat/cpthread.h"
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -27,7 +27,7 @@ struct SimmedPlay {
   bool is_epigon;
   int play_id;
   XoshiroPRNG *prng;
-  pthread_mutex_t mutex;
+  cpthread_mutex_t mutex;
 };
 
 struct SimResults {
@@ -35,7 +35,7 @@ struct SimResults {
   int num_simmed_plays;
   uint64_t iteration_count;
   bool simmed_plays_initialized;
-  pthread_mutex_t simmed_plays_mutex;
+  cpthread_mutex_t simmed_plays_mutex;
   atomic_int node_count;
   SimmedPlay **simmed_plays;
   SimmedPlay **sorted_simmed_plays;
@@ -65,7 +65,7 @@ SimmedPlay **simmed_plays_create(const MoveList *move_list,
     simmed_play->is_epigon = false;
     simmed_play->play_id = i;
     simmed_play->prng = prng_create(seed);
-    pthread_mutex_init(&simmed_play->mutex, NULL);
+    cpthread_mutex_init(&simmed_play->mutex);
     simmed_plays[i] = simmed_play;
   }
   return simmed_plays;
@@ -88,7 +88,6 @@ void simmed_plays_destroy(SimmedPlay **simmed_plays, int num_simmed_plays,
     stat_destroy(simmed_plays[i]->win_pct_stat);
     move_destroy(simmed_plays[i]->move);
     prng_destroy(simmed_plays[i]->prng);
-    pthread_mutex_destroy(&simmed_plays[i]->mutex);
     free(simmed_plays[i]);
   }
   free(simmed_plays);
@@ -115,11 +114,11 @@ void sim_results_destroy(SimResults *sim_results) {
 }
 
 void sim_results_lock_simmed_plays(SimResults *sim_results) {
-  pthread_mutex_lock(&sim_results->simmed_plays_mutex);
+  cpthread_mutex_lock(&sim_results->simmed_plays_mutex);
 }
 
 void sim_results_unlock_simmed_plays(SimResults *sim_results) {
-  pthread_mutex_unlock(&sim_results->simmed_plays_mutex);
+  cpthread_mutex_unlock(&sim_results->simmed_plays_mutex);
 }
 
 bool sim_results_get_simmed_plays_initialized(SimResults *sim_results) {
@@ -167,7 +166,7 @@ SimResults *sim_results_create(void) {
   sim_results->iteration_count = 0;
   atomic_init(&sim_results->node_count, 0);
   sim_results->simmed_plays_initialized = false;
-  pthread_mutex_init(&sim_results->simmed_plays_mutex, NULL);
+  cpthread_mutex_init(&sim_results->simmed_plays_mutex);
   sim_results->simmed_plays = NULL;
   sim_results->sorted_simmed_plays = NULL;
   sim_results->bai_result = bai_result_create();
@@ -205,17 +204,17 @@ int simmed_play_get_id(const SimmedPlay *simmed_play) {
 }
 
 void simmed_play_set_is_epigon(SimmedPlay *simmed_play) {
-  pthread_mutex_lock(&simmed_play->mutex);
+  cpthread_mutex_lock(&simmed_play->mutex);
   simmed_play->is_epigon = true;
-  pthread_mutex_unlock(&simmed_play->mutex);
+  cpthread_mutex_unlock(&simmed_play->mutex);
 }
 
 // Returns the current seed and updates the seed using prng_next
 uint64_t simmed_play_get_seed(SimmedPlay *simmed_play) {
   uint64_t seed;
-  pthread_mutex_lock(&simmed_play->mutex);
+  cpthread_mutex_lock(&simmed_play->mutex);
   seed = prng_next(simmed_play->prng);
-  pthread_mutex_unlock(&simmed_play->mutex);
+  cpthread_mutex_unlock(&simmed_play->mutex);
   return seed;
 }
 
@@ -263,19 +262,19 @@ void sim_results_increment_node_count(SimResults *sim_results) {
 
 void simmed_play_add_score_stat(SimmedPlay *simmed_play, Equity score,
                                 bool is_bingo, int ply) {
-  pthread_mutex_lock(&simmed_play->mutex);
+  cpthread_mutex_lock(&simmed_play->mutex);
   stat_push(simmed_play->score_stat[ply], equity_to_double(score), 1);
   stat_push(simmed_play->bingo_stat[ply], (double)is_bingo, 1);
-  pthread_mutex_unlock(&simmed_play->mutex);
+  cpthread_mutex_unlock(&simmed_play->mutex);
 }
 
 void simmed_play_add_equity_stat(SimmedPlay *simmed_play, Equity initial_spread,
                                  Equity spread, Equity leftover) {
-  pthread_mutex_lock(&simmed_play->mutex);
+  cpthread_mutex_lock(&simmed_play->mutex);
   stat_push(simmed_play->equity_stat,
             equity_to_double(spread - initial_spread + leftover), 1);
   stat_push(simmed_play->leftover_stat, equity_to_double(leftover), 1);
-  pthread_mutex_unlock(&simmed_play->mutex);
+  cpthread_mutex_unlock(&simmed_play->mutex);
 }
 
 int round_to_nearest_int(double a) {
@@ -311,9 +310,9 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
       wpct = 1.0 - wpct;
     }
   }
-  pthread_mutex_lock(&simmed_play->mutex);
+  cpthread_mutex_lock(&simmed_play->mutex);
   stat_push(simmed_play->win_pct_stat, wpct, 1);
-  pthread_mutex_unlock(&simmed_play->mutex);
+  cpthread_mutex_unlock(&simmed_play->mutex);
   return wpct;
 }
 

@@ -1,7 +1,6 @@
 #include <assert.h>
 #include <errno.h>
 #include <inttypes.h>
-#include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -22,6 +21,8 @@
 #include "../../src/impl/bai.h"
 #include "../../src/util/io_util.h"
 #include "../../src/util/string_util.h"
+
+#include "../../src/compat/cpthread.h"
 
 #include "test_util.h"
 
@@ -152,8 +153,8 @@ typedef struct BAITestArgs {
   RandomVariables *rng;
   ThreadControl *thread_control;
   BAIResult *result;
-  pthread_mutex_t *mutex;
-  pthread_cond_t *cond;
+  cpthread_mutex_t *mutex;
+  cpthread_cond_t *cond;
   int *done;
 } BAITestArgs;
 
@@ -162,10 +163,10 @@ void *bai_thread_func(void *arg) {
   bai_wrapper(args->options, args->rvs, args->rng, args->thread_control, NULL,
               args->result);
 
-  pthread_mutex_lock(args->mutex);
+  cpthread_mutex_lock(args->mutex);
   *(args->done) = 1;
-  pthread_cond_signal(args->cond);
-  pthread_mutex_unlock(args->mutex);
+  cpthread_cond_signal(args->cond);
+  cpthread_mutex_unlock(args->mutex);
 
   return NULL;
 }
@@ -202,8 +203,10 @@ void test_bai_time_limit(int num_threads) {
   BAIResult *bai_result = bai_result_create();
   int done = 0;
 
-  pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-  pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+  cpthread_mutex_t mutex;
+  cpthread_mutex_init(&mutex);
+  cpthread_cond_t cond;
+  cpthread_cond_init(&cond);
 
   BAITestArgs args = {.options = &bai_options,
                       .rvs = rvs,
@@ -214,28 +217,22 @@ void test_bai_time_limit(int num_threads) {
                       .cond = &cond,
                       .done = &done};
 
-  pthread_t thread;
-  pthread_create(&thread, NULL, bai_thread_func, &args);
+  cpthread_t thread;
+  cpthread_create(&thread, bai_thread_func, &args);
 
   struct timespec ts;
   mtimer_clock_gettime_realtime(&ts);
   const int timeout_seconds = bai_options.time_limit_seconds + 5;
   ts.tv_sec += timeout_seconds;
 
-  pthread_mutex_lock(&mutex);
+  cpthread_mutex_lock(&mutex);
   // cppcheck-suppress knownConditionTrueFalse
   while (!done) {
-    int ret = pthread_cond_timedwait(&cond, &mutex, &ts);
-    if (ret == ETIMEDOUT) {
-      printf("bai did not complete within %d seconds.\n", timeout_seconds);
-      pthread_cancel(thread);
-      pthread_mutex_unlock(&mutex);
-      assert(0);
-    }
+    cpthread_cond_timedwait(&cond, &mutex, &ts);
   }
-  pthread_mutex_unlock(&mutex);
+  cpthread_mutex_unlock(&mutex);
 
-  pthread_join(thread, NULL);
+  cpthread_join(thread);
 
   assert(thread_control_get_status(thread_control) ==
          THREAD_CONTROL_STATUS_TIMEOUT);

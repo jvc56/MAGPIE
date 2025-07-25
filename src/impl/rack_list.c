@@ -1,6 +1,6 @@
 #include "rack_list.h"
 
-#include <pthread.h>
+#include "../compat/cpthread.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -32,7 +32,7 @@ typedef struct RackListItem {
   double mean;
   uint64_t total_combos;
   EncodedRack encoded_rack;
-  pthread_mutex_t mutex;
+  cpthread_mutex_t mutex;
 } RackListItem;
 
 struct RackList {
@@ -45,7 +45,7 @@ struct RackList {
   // with an index greater than this are no longer considered rare.
   // All racks with an index less than or equal to this are considered rare.
   int partition_index;
-  pthread_mutex_t partition_index_mutex;
+  cpthread_mutex_t partition_index_mutex;
   uint64_t total_combos_sum;
   KLV *klv;
   RackListItem **racks_ordered_by_index;
@@ -104,7 +104,7 @@ RackListItem *rack_list_item_create(int count_index) {
   item->mean = 0;
   item->count_index = count_index;
   item->total_combos = 0;
-  pthread_mutex_init(&item->mutex, NULL);
+  cpthread_mutex_init(&item->mutex);
   return item;
 }
 
@@ -242,7 +242,7 @@ RackList *rack_list_create(const LetterDistribution *ld,
          rack_list->racks_ordered_by_index, racks_malloc_size);
 
   rack_list->partition_index = rack_list->number_of_racks - 1;
-  pthread_mutex_init(&rack_list->partition_index_mutex, NULL);
+  cpthread_mutex_init(&rack_list->partition_index_mutex);
   rack_list->target_rack_count = target_rack_count;
 
   return rack_list;
@@ -292,28 +292,28 @@ void rack_list_add_rack_with_rack_list_index(RackList *rack_list,
                                              double equity) {
   RackListItem *item = rack_list->racks_ordered_by_index[rack_list_index];
   bool item_reached_target_count = false;
-  pthread_mutex_lock(&item->mutex);
+  cpthread_mutex_lock(&item->mutex);
   rack_list_item_increment_count(item, equity);
   item_reached_target_count = item->count == rack_list->target_rack_count;
-  pthread_mutex_unlock(&item->mutex);
+  cpthread_mutex_unlock(&item->mutex);
 
   if (item_reached_target_count) {
-    pthread_mutex_lock(&rack_list->partition_index_mutex);
+    cpthread_mutex_lock(&rack_list->partition_index_mutex);
     const int curr_partition_index = rack_list->partition_index;
     if (curr_partition_index >= item->count_index) {
       if (curr_partition_index != item->count_index) {
         RackListItem *swap_item =
             rack_list->racks_partitioned_by_target_count[curr_partition_index];
-        pthread_mutex_lock(&item->mutex);
-        pthread_mutex_lock(&swap_item->mutex);
+        cpthread_mutex_lock(&item->mutex);
+        cpthread_mutex_lock(&swap_item->mutex);
         rack_list_swap_items(rack_list, item->count_index,
                              swap_item->count_index);
-        pthread_mutex_unlock(&swap_item->mutex);
-        pthread_mutex_unlock(&item->mutex);
+        cpthread_mutex_unlock(&swap_item->mutex);
+        cpthread_mutex_unlock(&item->mutex);
       }
       rack_list->partition_index--;
     }
-    pthread_mutex_unlock(&rack_list->partition_index_mutex);
+    cpthread_mutex_unlock(&rack_list->partition_index_mutex);
   }
 }
 

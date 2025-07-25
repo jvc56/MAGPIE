@@ -11,9 +11,9 @@
  * kindly provided by Marc Jourdan.
  */
 
+#include "../compat/cpthread.h"
 #include <assert.h>
 #include <limits.h>
-#include <pthread.h>
 #include <stdbool.h>
 
 #include "../def/bai_defs.h"
@@ -52,7 +52,7 @@ typedef struct BAISyncData {
   bool initial_phase;
   BAIArmDatum *arm_data;
   RandomVariables *rng;
-  pthread_mutex_t mutex;
+  cpthread_mutex_t mutex;
   ThreadControl *thread_control;
 } BAISyncData;
 
@@ -74,7 +74,7 @@ static inline BAISyncData *bai_sync_data_create(ThreadControl *thread_control,
         malloc_or_die(num_initial_arms * sizeof(double));
   }
   bai_sync_data->rng = rng;
-  pthread_mutex_init(&bai_sync_data->mutex, NULL);
+  cpthread_mutex_init(&bai_sync_data->mutex);
   bai_sync_data->thread_control = thread_control;
   return bai_sync_data;
 }
@@ -196,9 +196,9 @@ bai_sync_data_get_next_sample_index_while_locked(BAISampleArgs *args) {
 
 static inline int bai_sync_data_get_next_sample_index(BAISampleArgs *args) {
   int arm_index;
-  pthread_mutex_lock(&args->bai_sync_data->mutex);
+  cpthread_mutex_lock(&args->bai_sync_data->mutex);
   arm_index = bai_sync_data_get_next_sample_index_while_locked(args);
-  pthread_mutex_unlock(&args->bai_sync_data->mutex);
+  cpthread_mutex_unlock(&args->bai_sync_data->mutex);
   return arm_index;
 }
 
@@ -323,9 +323,9 @@ bai_sync_data_add_sample_while_locked(BAISampleArgs *args, const int arm_index,
 static inline void bai_sync_data_add_sample(BAISampleArgs *args,
                                             const int arm_index,
                                             const double sample_value) {
-  pthread_mutex_lock(&args->bai_sync_data->mutex);
+  cpthread_mutex_lock(&args->bai_sync_data->mutex);
   bai_sync_data_add_sample_while_locked(args, arm_index, sample_value);
-  pthread_mutex_unlock(&args->bai_sync_data->mutex);
+  cpthread_mutex_unlock(&args->bai_sync_data->mutex);
 }
 
 typedef struct BAIWorkerArgs {
@@ -452,18 +452,18 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
       .checkpoint = checkpoint,
   };
 
-  pthread_t *worker_ids =
-      malloc_or_die((sizeof(pthread_t)) * number_of_threads);
+  cpthread_t *worker_ids =
+      malloc_or_die((sizeof(cpthread_t)) * number_of_threads);
   BAIWorkerArgs *bai_worker_args_array =
       malloc_or_die((sizeof(BAIWorkerArgs)) * number_of_threads);
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     bai_worker_args_array[thread_index] = bai_worker_args;
     bai_worker_args_array[thread_index].thread_index = thread_index;
-    pthread_create(&worker_ids[thread_index], NULL, bai_worker,
-                   &bai_worker_args_array[thread_index]);
+    cpthread_create(&worker_ids[thread_index], bai_worker,
+                    &bai_worker_args_array[thread_index]);
   }
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
-    pthread_join(worker_ids[thread_index], NULL);
+    cpthread_join(worker_ids[thread_index]);
   }
   bai_result_set_all(bai_result, sync_data->astar_index,
                      thread_control_get_seconds_elapsed(thread_control));

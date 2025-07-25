@@ -1,6 +1,6 @@
 #include "autoplay_results.h"
 
-#include <pthread.h>
+#include "../compat/cpthread.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -466,7 +466,7 @@ typedef struct FJData {
 } FJData;
 
 typedef struct FJSharedData {
-  pthread_mutex_t fh_mutexes[MAX_NUMBER_OF_TILES];
+  cpthread_mutex_t fh_mutexes[MAX_NUMBER_OF_TILES];
   FILE *fhs[MAX_NUMBER_OF_TILES];
 } FJSharedData;
 
@@ -514,7 +514,7 @@ void fj_data_create(Recorder *recorder) {
   if (recorder->owns_thread_shared_data) {
     shared_data = malloc_or_die(sizeof(FJSharedData));
     for (int i = 0; i < MAX_NUMBER_OF_TILES; i++) {
-      pthread_mutex_init(&shared_data->fh_mutexes[i], NULL);
+      cpthread_mutex_init(&shared_data->fh_mutexes[i]);
       shared_data->fhs[i] = NULL;
     }
   }
@@ -570,7 +570,7 @@ void fj_write_buffer_to_output(Recorder *recorder, int remaining_tiles,
   size_t str_len = string_builder_length(sb);
   if (str_len > 0 &&
       (always_flush || str_len >= recorder_context->write_buffer_size)) {
-    pthread_mutex_lock(&shared_data->fh_mutexes[remaining_tiles]);
+    cpthread_mutex_lock(&shared_data->fh_mutexes[remaining_tiles]);
     if (fputs(string_builder_peek(sb), shared_data->fhs[remaining_tiles]) ==
         EOF) {
       fclose_or_die(shared_data->fhs[remaining_tiles]);
@@ -578,7 +578,7 @@ void fj_write_buffer_to_output(Recorder *recorder, int remaining_tiles,
                 remaining_tiles);
     }
     fflush_or_die(shared_data->fhs[remaining_tiles]);
-    pthread_mutex_unlock(&shared_data->fh_mutexes[remaining_tiles]);
+    cpthread_mutex_unlock(&shared_data->fh_mutexes[remaining_tiles]);
     string_builder_clear(sb);
   }
 }

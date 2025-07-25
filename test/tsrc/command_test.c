@@ -1,5 +1,4 @@
 #include <assert.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,6 +11,8 @@
 #include "../../src/ent/timer.h"
 #include "../../src/impl/config.h"
 #include "../../src/impl/exec.h"
+
+#include "../../src/compat/cpthread.h"
 
 #include "../../src/util/io_util.h"
 #include "../../src/util/string_util.h"
@@ -28,7 +29,7 @@ typedef struct ProcessArgs {
   int expected_outerror_line_count;
   const char *outerror_substr;
   bool finished;
-  pthread_mutex_t finished_mutex;
+  cpthread_mutex_t finished_mutex;
 } ProcessArgs;
 
 typedef struct MainArgs {
@@ -48,7 +49,7 @@ ProcessArgs *process_args_create(const char *arg_string,
   process_args->expected_outerror_line_count = expected_outerror_line_count;
   process_args->outerror_substr = outerror_substr;
   process_args->finished = false;
-  pthread_mutex_init(&process_args->finished_mutex, NULL);
+  cpthread_mutex_init(&process_args->finished_mutex);
   return process_args;
 }
 
@@ -62,16 +63,16 @@ void process_args_destroy(ProcessArgs *process_args) {
 
 bool get_process_args_finished(ProcessArgs *process_args) {
   bool finished;
-  pthread_mutex_lock(&process_args->finished_mutex);
+  cpthread_mutex_lock(&process_args->finished_mutex);
   finished = process_args->finished;
-  pthread_mutex_unlock(&process_args->finished_mutex);
+  cpthread_mutex_unlock(&process_args->finished_mutex);
   return finished;
 }
 
 void set_process_args_finished(ProcessArgs *process_args, bool finished) {
-  pthread_mutex_lock(&process_args->finished_mutex);
+  cpthread_mutex_lock(&process_args->finished_mutex);
   process_args->finished = finished;
-  pthread_mutex_unlock(&process_args->finished_mutex);
+  cpthread_mutex_unlock(&process_args->finished_mutex);
 }
 
 MainArgs *get_main_args_from_string(const char *arg_string) {
@@ -518,10 +519,10 @@ void test_exec_ucgi_command(void) {
   ProcessArgs *process_args =
       process_args_create("set -mode ucgi", 6, "autoplay", 1, "still running");
 
-  pthread_t cmd_execution_thread;
-  pthread_create(&cmd_execution_thread, NULL, test_process_command_async,
-                 process_args);
-  pthread_detach(cmd_execution_thread);
+  cpthread_t cmd_execution_thread;
+  cpthread_create(&cmd_execution_thread, test_process_command_async,
+                  process_args);
+  cpthread_detach(cmd_execution_thread);
 
   nap(1.0);
   fprintf_or_die(input_writer,
@@ -581,10 +582,10 @@ void test_exec_console_command(void) {
   ProcessArgs *process_args = process_args_create(
       initial_command, 45, "autoplay games 20", 1, config_load_error_substr);
 
-  pthread_t cmd_execution_thread;
-  pthread_create(&cmd_execution_thread, NULL, test_process_command_async,
-                 process_args);
-  pthread_detach(cmd_execution_thread);
+  cpthread_t cmd_execution_thread;
+  cpthread_create(&cmd_execution_thread, test_process_command_async,
+                  process_args);
+  cpthread_detach(cmd_execution_thread);
 
   write_to_stream(input_writer,
                   "infer 1 DGINR 18 -numplays 7 -threads 4 -pfreq 1000000\n");

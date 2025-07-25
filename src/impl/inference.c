@@ -1,6 +1,6 @@
 #include "inference.h"
 
-#include <pthread.h>
+#include "../compat/cpthread.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -57,7 +57,7 @@ typedef struct Inference {
   uint64_t total_racks_evaluated;
   int thread_index;
   uint64_t *shared_rack_index;
-  pthread_mutex_t *shared_rack_index_lock;
+  cpthread_mutex_t *shared_rack_index_lock;
   // Rack containing just the unknown leave, which is
   // the tiles on the target's rack unseen to
   // the observer making the inference.
@@ -380,13 +380,13 @@ void iterate_through_all_possible_leaves(Inference *inference,
     bool perform_evaluation = false;
     bool print_info = false;
 
-    pthread_mutex_lock(inference->shared_rack_index_lock);
+    cpthread_mutex_lock(inference->shared_rack_index_lock);
     if (inference->current_rack_index == *inference->shared_rack_index) {
       print_info = should_print_info(inference);
       perform_evaluation = true;
       *inference->shared_rack_index += 1;
     }
-    pthread_mutex_unlock(inference->shared_rack_index_lock);
+    cpthread_mutex_unlock(inference->shared_rack_index_lock);
 
     if (perform_evaluation) {
       evaluate_possible_leave(inference);
@@ -419,7 +419,7 @@ void *infer_worker(void *uncasted_inference) {
 
 void set_shared_variables_for_inference(
     Inference *inference, uint64_t *shared_rack_index,
-    pthread_mutex_t *shared_rack_index_lock) {
+    cpthread_mutex_t *shared_rack_index_lock) {
   inference->shared_rack_index = shared_rack_index;
   inference->shared_rack_index_lock = shared_rack_index_lock;
 }
@@ -439,24 +439,22 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
   int number_of_threads = thread_control_get_threads(thread_control);
 
   uint64_t shared_rack_index = 0;
-  pthread_mutex_t shared_rack_index_lock;
+  cpthread_mutex_t shared_rack_index_lock;
 
-  if (pthread_mutex_init(&shared_rack_index_lock, NULL) != 0) {
-    log_fatal("mutex init failed for inference\n");
-  }
+  cpthread_mutex_init(&shared_rack_index_lock);
 
   Inference **inferences_for_workers =
       malloc_or_die((sizeof(Inference *)) * (number_of_threads));
-  pthread_t *worker_ids =
-      malloc_or_die((sizeof(pthread_t)) * (number_of_threads));
+  cpthread_t *worker_ids =
+      malloc_or_die((sizeof(cpthread_t)) * (number_of_threads));
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     inferences_for_workers[thread_index] =
         inference_duplicate(inference, thread_index, thread_control);
     set_shared_variables_for_inference(inferences_for_workers[thread_index],
                                        &shared_rack_index,
                                        &shared_rack_index_lock);
-    pthread_create(&worker_ids[thread_index], NULL, infer_worker,
-                   inferences_for_workers[thread_index]);
+    cpthread_create(&worker_ids[thread_index], infer_worker,
+                    inferences_for_workers[thread_index]);
   }
 
   Stat **leave_stats = malloc_or_die((sizeof(Stat *)) * (number_of_threads));
@@ -473,7 +471,7 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
   }
 
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
-    pthread_join(worker_ids[thread_index], NULL);
+    cpthread_join(worker_ids[thread_index]);
     Inference *inference_worker = inferences_for_workers[thread_index];
     add_inference(inference_worker, inference);
     leave_stats[thread_index] = inference_results_get_equity_values(

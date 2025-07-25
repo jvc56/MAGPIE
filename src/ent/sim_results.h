@@ -1,7 +1,7 @@
 #ifndef SIM_RESULTS_H
 #define SIM_RESULTS_H
 
-#include <pthread.h>
+#include "../compat/cpthread.h"
 #include <stdbool.h>
 
 #include "../def/bai_defs.h"

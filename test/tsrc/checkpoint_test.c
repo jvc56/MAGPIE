@@ -1,7 +1,7 @@
 #include <assert.h>
-#include <pthread.h>
 #include <stdlib.h>
 
+#include "../../src/compat/cpthread.h"
 #include "../../src/ent/checkpoint.h"
 
 enum { NUM_THREADS = 4 };
@@ -23,7 +23,7 @@ void prebroadcast_func(void *data) {
 }
 
 void test_checkpoint(void) {
-  pthread_t threads[NUM_THREADS];
+  cpthread_t threads[NUM_THREADS];
   Checkpoint *checkpoint;
   thread_data_t thread_data[NUM_THREADS];
   int shared_data = 0;
@@ -34,11 +34,11 @@ void test_checkpoint(void) {
   for (i = 0; i < NUM_THREADS; i++) {
     thread_data[i].checkpoint = checkpoint;
     thread_data[i].shared_data = &shared_data;
-    pthread_create(&threads[i], NULL, thread_func, &thread_data[i]);
+    cpthread_create(&threads[i], thread_func, &thread_data[i]);
   }
 
   for (i = 0; i < NUM_THREADS; i++) {
-    pthread_join(threads[i], NULL);
+    cpthread_join(threads[i]);
   }
 
   checkpoint_destroy(checkpoint);

@@ -1,10 +1,10 @@
 #ifndef TIMER_H
 #define TIMER_H
 
+#include "../compat/cpthread.h"
 #include <assert.h>
 #include <errno.h>
 #include <inttypes.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>

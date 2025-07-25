@@ -1,6 +1,6 @@
 #include "bai_result.h"
 
-#include <pthread.h>
+#include "../compat/cpthread.h"
 #include <stdlib.h>
 
 #include "../util/io_util.h"
@@ -8,7 +8,7 @@
 struct BAIResult {
   int best_arm;
   double total_time;
-  pthread_mutex_t mutex;
+  cpthread_mutex_t mutex;
 };
 
 void bai_result_reset(BAIResult *bai_result) {
@@ -18,7 +18,7 @@ void bai_result_reset(BAIResult *bai_result) {
 
 BAIResult *bai_result_create(void) {
   BAIResult *bai_result = malloc_or_die(sizeof(BAIResult));
-  pthread_mutex_init(&bai_result->mutex, NULL);
+  cpthread_mutex_init(&bai_result->mutex);
   bai_result_reset(bai_result);
   return bai_result;
 }

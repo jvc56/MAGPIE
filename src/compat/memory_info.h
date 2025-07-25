@@ -1,3 +1,6 @@
+#ifndef COMPAT_MEMORY_INFO_H
+#define COMPAT_MEMORY_INFO_H
+
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -89,3 +92,5 @@ static uint64_t get_total_memory(void) {
 //     }
 //     return 0;
 // }
+
+#endif
