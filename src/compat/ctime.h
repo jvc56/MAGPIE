@@ -1,7 +1,6 @@
 #ifndef TIMER_H
 #define TIMER_H
 
-#include "../compat/cpthread.h"
 #include <assert.h>
 #include <errno.h>
 #include <inttypes.h>
@@ -63,12 +62,6 @@ static inline double ctimer_elapsed_seconds(const Timer *timer) {
 }
 
 static inline time_t ctime_get_current_time(void) { return time(NULL); }
-
-static inline void ctime_write_current_time(char *time_buf) {
-  time_t current_time = ctime_get_current_time();
-  time_buf[strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S",
-                    localtime(&current_time))] = '\0';
-}
 
 static inline int ctime_nanosleep(TimeSpec *req, TimeSpec *rem) {
   return nanosleep(req, rem);

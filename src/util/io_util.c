@@ -8,8 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "../compat/ctime.h"
+#include <time.h>
 
 enum { ERROR_STACK_CAPACITY = 100 };
 
@@ -137,7 +136,9 @@ void log_with_info(log_level_t log_level, const char *caller_filename,
   }
 
   char time_buf[64];
-  ctime_write_current_time(time_buf);
+  time_t current_time = time(NULL);
+  time_buf[strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S",
+                    localtime(&current_time))] = '\0';
   fprintf_or_die(output_fh, "[%s] %-5s %s:%d: ", time_buf, level_string,
                  caller_filename, caller_line);
   va_list args;
