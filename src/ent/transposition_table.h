@@ -4,8 +4,8 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <time.h>
 
+#include "../compat/ctime.h"
 #include "../compat/memory_info.h"
 #include "zobrist.h"
 
@@ -94,7 +94,7 @@ transposition_table_create(double fraction_of_memory) {
   tt->table = malloc_or_die(sizeof(TTEntry) * num_elems);
   memset(tt->table, 0, sizeof(TTEntry) * num_elems);
   tt->size_mask = num_elems - 1;
-  tt->zobrist = zobrist_create(time(NULL));
+  tt->zobrist = zobrist_create(ctime_get_current_time());
   atomic_init(&tt->created, 0);
   atomic_init(&tt->hits, 0);
   atomic_init(&tt->lookups, 0);

@@ -3,12 +3,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
-#include <time.h>
 #include <unistd.h>
 
+#include "../../src/compat/ctime.h"
 #include "../../src/ent/move.h"
 #include "../../src/ent/thread_control.h"
-#include "../../src/ent/timer.h"
 #include "../../src/impl/config.h"
 #include "../../src/impl/exec.h"
 
@@ -100,34 +99,6 @@ void main_args_destroy(MainArgs *main_args) {
   free(main_args);
 }
 
-double nap(double const seconds) {
-  long const secs = (long)seconds;
-  double const frac = seconds - (double)secs;
-  struct timespec req;
-  struct timespec rem;
-  int result;
-
-  if (seconds <= 0.0) {
-    return 0.0;
-  }
-
-  req.tv_sec = (time_t)secs;
-  req.tv_nsec = (long)(1000000000.0 * frac);
-  if (req.tv_nsec > 999999999L) {
-    req.tv_nsec = 999999999L;
-  }
-
-  rem.tv_sec = (time_t)0;
-  rem.tv_nsec = 0L;
-
-  result = mtimer_nanosleep(&req, &rem);
-  if (result == -1) {
-    return (double)rem.tv_sec + (double)rem.tv_nsec / 1000000000.0;
-  }
-
-  return 0.0;
-}
-
 void block_for_search(Config *config, int max_seconds) {
   // Poll for the end of the command
   double seconds_elapsed = 0;
@@ -136,7 +107,7 @@ void block_for_search(Config *config, int max_seconds) {
     if (thread_control_is_finished(thread_control)) {
       break;
     }
-    nap(DEFAULT_NAP_TIME);
+    ctime_nap(DEFAULT_NAP_TIME);
     seconds_elapsed += DEFAULT_NAP_TIME;
     if (seconds_elapsed >= (double)max_seconds) {
       log_fatal("Test aborted after searching for %d seconds\n", max_seconds);
@@ -151,7 +122,7 @@ void block_for_process_command(ProcessArgs *process_args, int max_seconds) {
     if (get_process_args_finished(process_args)) {
       break;
     }
-    nap(DEFAULT_NAP_TIME);
+    ctime_nap(DEFAULT_NAP_TIME);
     seconds_elapsed += DEFAULT_NAP_TIME;
     if (seconds_elapsed >= (double)max_seconds) {
       log_fatal("Test aborted after processing for %d seconds\n", max_seconds);
@@ -184,7 +155,7 @@ void assert_command_status_and_output(Config *config, const char *command,
   }
 
   // Let the async command start up
-  nap(DEFAULT_NAP_TIME);
+  ctime_nap(DEFAULT_NAP_TIME);
 
   if (should_exit) {
     char *status_string = command_search_status(config, true);
@@ -524,16 +495,16 @@ void test_exec_ucgi_command(void) {
                   process_args);
   cpthread_detach(cmd_execution_thread);
 
-  nap(1.0);
+  ctime_nap(1.0);
   fprintf_or_die(input_writer,
                  "set -r1 best -r2 best -it 1 -numplays 1 -threads 1\n");
   fflush_or_die(input_writer);
-  nap(1.0);
+  ctime_nap(1.0);
   fprintf_or_die(
       input_writer,
       "autoplay game 1 -lex CSW21 -s1 equity -s2 equity -gp false\n");
   fflush_or_die(input_writer);
-  nap(1.0);
+  ctime_nap(1.0);
   fprintf_or_die(
       input_writer,
       "autoplay game 10000000 -lex CSW21 -s1 equity -s2 equity  -gp false\n");
@@ -544,14 +515,14 @@ void test_exec_ucgi_command(void) {
       input_writer,
       "autoplay game 1 -lex CSW21 -s1 equity -s2 equity  -gp false\n");
   fflush_or_die(input_writer);
-  nap(1.0);
+  ctime_nap(1.0);
   // Interrupt the autoplay which won't finish in 1 second
   fprintf_or_die(input_writer, "stop\n");
   fflush_or_die(input_writer);
-  nap(1.0);
+  ctime_nap(1.0);
   fprintf_or_die(input_writer, "quit\n");
   fflush_or_die(input_writer);
-  nap(1.0);
+  ctime_nap(1.0);
 
   // Wait for magpie to quit
   block_for_process_command(process_args, 5);

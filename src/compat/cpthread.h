@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <stddef.h>
+#include <time.h>
 
 #include "../util/io_util.h"
 
@@ -53,6 +54,21 @@ static inline void cpthread_cond_timedwait(cpthread_cond_t *cond,
     log_fatal("cond timedwait timed out");
   }
   log_fatal("cond timedwait failed");
+}
+
+static inline void cpthread_cond_timedwait_loop(cpthread_cond_t *cond,
+                                                cpthread_mutex_t *mutex,
+                                                const int timeout_seconds,
+                                                int *done) {
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  ts.tv_sec += timeout_seconds;
+  cpthread_mutex_lock(mutex);
+  // cppcheck-suppress knownConditionTrueFalse
+  while (!done) {
+    cpthread_cond_timedwait(cond, mutex, &ts);
+  }
+  cpthread_mutex_unlock(mutex);
 }
 
 static inline void cpthread_cond_signal(cpthread_cond_t *cond) {

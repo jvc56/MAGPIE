@@ -6,7 +6,8 @@
 
 #include "../def/thread_control_defs.h"
 
-#include "timer.h"
+#include "../compat/ctime.h"
+
 #include "xoshiro.h"
 
 typedef struct ThreadControl ThreadControl;

@@ -3,11 +3,11 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
 
 #include "../../src/def/rack_defs.h"
 #include "../../src/def/thread_control_defs.h"
 
+#include "../../src/compat/ctime.h"
 #include "../../src/ent/bag.h"
 #include "../../src/ent/bai_result.h"
 #include "../../src/ent/game.h"
@@ -16,7 +16,6 @@
 #include "../../src/ent/sim_results.h"
 #include "../../src/ent/stats.h"
 #include "../../src/ent/thread_control.h"
-#include "../../src/ent/timer.h"
 #include "../../src/impl/config.h"
 
 #include "../../src/impl/gameplay.h"
@@ -164,19 +163,7 @@ void test_sim_threshold(void) {
 
   cpthread_t thread;
   cpthread_create(&thread, sim_thread_func, &args);
-
-  struct timespec ts;
-  mtimer_clock_gettime_realtime(&ts);
-  const int timeout_seconds = 10;
-  ts.tv_sec += timeout_seconds;
-
-  cpthread_mutex_lock(&mutex);
-  // cppcheck-suppress knownConditionTrueFalse
-  while (!done) {
-    cpthread_cond_timedwait(&cond, &mutex, &ts);
-  }
-  cpthread_mutex_unlock(&mutex);
-
+  cpthread_cond_timedwait_loop(&cond, &mutex, 10, &done);
   cpthread_join(thread);
 
   assert(status == ERROR_STATUS_SUCCESS);
@@ -221,19 +208,7 @@ void test_sim_time_limit(void) {
 
   cpthread_t thread;
   cpthread_create(&thread, sim_thread_func, &args);
-
-  struct timespec ts;
-  mtimer_clock_gettime_realtime(&ts);
-  const int timeout_seconds = 10;
-  ts.tv_sec += timeout_seconds;
-
-  cpthread_mutex_lock(&mutex);
-  // cppcheck-suppress knownConditionTrueFalse
-  while (!done) {
-    cpthread_cond_timedwait(&cond, &mutex, &ts);
-  }
-  cpthread_mutex_unlock(&mutex);
-
+  cpthread_cond_timedwait_loop(&cond, &mutex, 10, &done);
   cpthread_join(thread);
 
   assert(status == ERROR_STATUS_SUCCESS);
@@ -269,19 +244,7 @@ void test_sim_one_arm_remaining(void) {
 
   cpthread_t thread;
   cpthread_create(&thread, sim_thread_func, &args);
-
-  struct timespec ts;
-  mtimer_clock_gettime_realtime(&ts);
-  const int timeout_seconds = 10;
-  ts.tv_sec += timeout_seconds;
-
-  cpthread_mutex_lock(&mutex);
-  // cppcheck-suppress knownConditionTrueFalse
-  while (!done) {
-    cpthread_cond_timedwait(&cond, &mutex, &ts);
-  }
-  cpthread_mutex_unlock(&mutex);
-
+  cpthread_cond_timedwait_loop(&cond, &mutex, 10, &done);
   cpthread_join(thread);
 
   assert(status == ERROR_STATUS_SUCCESS);
@@ -298,7 +261,7 @@ void test_sim_round_robin_consistency(void) {
   load_and_exec_config_or_die(config, "rack 1 AEIQRST");
   load_and_exec_config_or_die(config, "gen");
 
-  uint64_t seed = time(NULL);
+  uint64_t seed = ctime_get_current_time();
   SimResults *sim_results_single_threaded = config_get_sim_results(config);
   SimResults *sim_results_multithreaded = sim_results_create();
   for (int i = 0; i < 11; i++) {

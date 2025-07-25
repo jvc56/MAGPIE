@@ -5,14 +5,13 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
 
 #include "../../src/def/bai_defs.h"
 #include "../../src/def/thread_control_defs.h"
 
+#include "../../src/compat/ctime.h"
 #include "../../src/ent/bai_result.h"
 #include "../../src/ent/thread_control.h"
-#include "../../src/ent/timer.h"
 #include "../../src/ent/xoshiro.h"
 
 #include "../../src/impl/bai_logger.h"
@@ -219,19 +218,7 @@ void test_bai_time_limit(int num_threads) {
 
   cpthread_t thread;
   cpthread_create(&thread, bai_thread_func, &args);
-
-  struct timespec ts;
-  mtimer_clock_gettime_realtime(&ts);
-  const int timeout_seconds = bai_options.time_limit_seconds + 5;
-  ts.tv_sec += timeout_seconds;
-
-  cpthread_mutex_lock(&mutex);
-  // cppcheck-suppress knownConditionTrueFalse
-  while (!done) {
-    cpthread_cond_timedwait(&cond, &mutex, &ts);
-  }
-  cpthread_mutex_unlock(&mutex);
-
+  cpthread_cond_timedwait_loop(&cond, &mutex, 10, &done);
   cpthread_join(thread);
 
   assert(thread_control_get_status(thread_control) ==

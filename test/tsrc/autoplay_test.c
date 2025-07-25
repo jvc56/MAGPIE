@@ -2,7 +2,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
 
 #include "../../src/ent/autoplay_results.h"
 #include "../../src/ent/equity.h"

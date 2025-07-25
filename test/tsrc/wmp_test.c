@@ -1,7 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
 
 #include "../../src/def/letter_distribution_defs.h"
 #include "../../src/def/wmp_defs.h"

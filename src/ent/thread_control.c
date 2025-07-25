@@ -6,11 +6,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <time.h>
-
 #include "../def/thread_control_defs.h"
 
-#include "timer.h"
+#include "../compat/ctime.h"
+
 #include "xoshiro.h"
 
 #include "../util/io_util.h"
@@ -47,8 +46,8 @@ ThreadControl *thread_control_create(void) {
   cpthread_mutex_init(&thread_control->iter_mutex);
   cpthread_mutex_init(&thread_control->iter_completed_mutex);
   cpthread_mutex_init(&thread_control->print_mutex);
-  thread_control->timer = mtimer_create_monotonic();
-  thread_control->seed = time(NULL);
+  thread_control->timer = ctimer_create_monotonic();
+  thread_control->seed = ctime_get_current_time();
   thread_control->prng = prng_create(thread_control->seed);
   return thread_control;
 }
@@ -57,7 +56,7 @@ void thread_control_destroy(ThreadControl *thread_control) {
   if (!thread_control) {
     return;
   }
-  mtimer_destroy(thread_control->timer);
+  ctimer_destroy(thread_control->timer);
   prng_destroy(thread_control->prng);
   free(thread_control);
 }
@@ -191,7 +190,7 @@ bool thread_control_set_status(ThreadControl *thread_control,
       thread_control->iter_count = 0;
       thread_control->iter_count_completed = 0;
       thread_control->time_elapsed = 0;
-      mtimer_start(thread_control->timer);
+      ctimer_start(thread_control->timer);
     }
   }
   cpthread_mutex_unlock(&thread_control->tc_status_mutex);
@@ -244,7 +243,7 @@ void thread_control_complete_iter(
   cpthread_mutex_lock(&thread_control->iter_completed_mutex);
   // Update internal fields
   thread_control->iter_count_completed++;
-  thread_control->time_elapsed = mtimer_elapsed_seconds(thread_control->timer);
+  thread_control->time_elapsed = ctimer_elapsed_seconds(thread_control->timer);
   // Set output
   iter_completed_output->iter_count_completed =
       thread_control->iter_count_completed;
@@ -258,7 +257,7 @@ void thread_control_complete_iter(
 }
 
 double thread_control_get_seconds_elapsed(const ThreadControl *thread_control) {
-  return mtimer_elapsed_seconds(thread_control->timer);
+  return ctimer_elapsed_seconds(thread_control->timer);
 }
 
 // NOT THREAD SAFE: This function is meant to be called
