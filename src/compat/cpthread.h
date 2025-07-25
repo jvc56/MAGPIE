@@ -59,7 +59,7 @@ static inline void cpthread_cond_timedwait(cpthread_cond_t *cond,
 static inline void cpthread_cond_timedwait_loop(cpthread_cond_t *cond,
                                                 cpthread_mutex_t *mutex,
                                                 const int timeout_seconds,
-                                                int *done) {
+                                                const int *done) {
   struct timespec ts;
   clock_gettime(CLOCK_REALTIME, &ts);
   ts.tv_sec += timeout_seconds;

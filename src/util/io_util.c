@@ -137,9 +137,7 @@ void log_with_info(log_level_t log_level, const char *caller_filename,
   }
 
   char time_buf[64];
-  ctime_t current_time = ctime_get_current_time();
-  time_buf[strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S",
-                    localtime(&current_time))] = '\0';
+  ctime_write_current_time(time_buf);
   fprintf_or_die(output_fh, "[%s] %-5s %s:%d: ", time_buf, level_string,
                  caller_filename, caller_line);
   va_list args;

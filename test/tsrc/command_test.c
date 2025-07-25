@@ -99,7 +99,7 @@ void main_args_destroy(MainArgs *main_args) {
   free(main_args);
 }
 
-void block_for_search(Config *config, int max_seconds) {
+void block_for_search(const Config *config, int max_seconds) {
   // Poll for the end of the command
   double seconds_elapsed = 0;
   ThreadControl *thread_control = config_get_thread_control(config);

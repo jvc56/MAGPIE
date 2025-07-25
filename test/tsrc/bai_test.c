@@ -1,5 +1,4 @@
 #include <assert.h>
-#include <errno.h>
 #include <inttypes.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -9,7 +8,6 @@
 #include "../../src/def/bai_defs.h"
 #include "../../src/def/thread_control_defs.h"
 
-#include "../../src/compat/ctime.h"
 #include "../../src/ent/bai_result.h"
 #include "../../src/ent/thread_control.h"
 #include "../../src/ent/xoshiro.h"

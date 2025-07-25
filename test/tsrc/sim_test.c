@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -19,6 +20,8 @@
 #include "../../src/impl/config.h"
 
 #include "../../src/impl/gameplay.h"
+
+#include "../../src/compat/cpthread.h"
 
 #include "../../src/str/game_string.h"
 #include "../../src/str/move_string.h"

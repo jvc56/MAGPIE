@@ -90,7 +90,6 @@ int rack_list_ld_get_size(const RackListLetterDistribution *rl_ld) {
 }
 
 int convert_klv_index_to_rack_list_index(int klv_index) {
-  // cppcheck-suppress integerOverflowCond
   return klv_index - (RACK_SIZE);
 }
 

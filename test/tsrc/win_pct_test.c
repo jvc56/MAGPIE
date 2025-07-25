@@ -7,7 +7,7 @@
 #include "test_util.h"
 
 void assert_win_pct_get(const float actual, const double expected) {
-  assert(within_epsilon(actual, (float)expected));
+  assert(within_epsilon(actual, expected));
 }
 
 void test_win_pct(void) {

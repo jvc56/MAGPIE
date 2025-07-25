@@ -5,6 +5,8 @@
 #include "../../src/def/letter_distribution_defs.h"
 #include "../../src/def/wmp_defs.h"
 
+#include "../../src/compat/ctime.h"
+
 #include "../../src/ent/bit_rack.h"
 #include "../../src/ent/data_filepaths.h"
 #include "../../src/ent/dictionary_word.h"
@@ -41,16 +43,18 @@ long get_file_size(const char *filename) {
 void write_words_to_testdata_wmp(const DictionaryWordList *words,
                                  const LetterDistribution *ld,
                                  const char *wmp_filename) {
-  const clock_t start = clock();
+  Timer *timer = ctimer_create_monotonic();
+  ctimer_start(timer);
   WMP *wmp = make_wmp_from_words(words, ld);
-  const clock_t end = clock();
+  double seconds_elapsed = ctimer_elapsed_seconds(timer);
+  ctimer_destroy(timer);
   ErrorStack *error_stack = error_stack_create();
   wmp_write_to_file(wmp, wmp_filename, error_stack);
   assert(error_stack_is_empty(error_stack));
   error_stack_destroy(error_stack);
   const long file_size = get_file_size(wmp_filename);
   printf("wrote %ld bytes to %s in %f seconds\n", file_size, wmp_filename,
-         (double)(end - start) / CLOCKS_PER_SEC);
+         seconds_elapsed);
   wmp_destroy(wmp);
 }
 
