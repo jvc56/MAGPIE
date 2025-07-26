@@ -17,6 +17,7 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "move_gen.h"
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>

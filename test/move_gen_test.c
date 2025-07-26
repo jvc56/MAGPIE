@@ -1130,7 +1130,7 @@ void movegen_should_not_gen_exchanges(void) {
 
   load_and_exec_config_or_die(config, "gen");
 
-  MoveList *move_list = config_get_move_list(config);
+  const MoveList *move_list = config_get_move_list(config);
   const int num_moves = move_list_get_count(move_list);
   for (int i = 0; i < num_moves; i++) {
     const Move *move = move_list_get_move(move_list, i);
