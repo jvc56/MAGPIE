@@ -18,7 +18,6 @@
 #include "wmp_maker.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/types.h>
 
 void convert_from_text_with_dwl(const LetterDistribution *ld,
                                 conversion_type_t conversion_type,

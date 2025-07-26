@@ -42,7 +42,6 @@
 #include "../src/util/string_util.h"
 #include "test_constants.h"
 #include <assert.h>
-#include <dirent.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <math.h>
