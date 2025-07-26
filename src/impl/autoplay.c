@@ -1,15 +1,11 @@
+
 #include "autoplay.h"
 
 #include "../compat/cpthread.h"
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
-
 #include "../def/autoplay_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
-
 #include "../ent/autoplay_results.h"
 #include "../ent/bag.h"
 #include "../ent/checkpoint.h"
@@ -25,13 +21,14 @@
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
 #include "../ent/xoshiro.h"
-
+#include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "gameplay.h"
 #include "move_gen.h"
 #include "rack_list.h"
-
-#include "../util/io_util.h"
-#include "../util/string_util.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 typedef struct LeavegenSharedData {
   int num_gens;
