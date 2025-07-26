@@ -8,7 +8,7 @@ jobs:
 
       - name: Run cppcheck static analysis
         run: |
-          ./run_cppcheck.sh
+          ./cppcheck.sh
 
   clang-tidy:
     runs-on: ubuntu-latest
@@ -17,7 +17,21 @@ jobs:
 
       - name: Run clang-tidy static analysis
         run: |
-          sudo apt-get install -y clang-tidy && ./run_clang_tidy.sh
+          sudo apt-get install -y clang-tidy-18 && ./tidy.sh
+
+  clang-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+
+      - name: Run python clang-format analysis script
+        run: |
+          sudo apt-get install -y clang-format-18 && python3 ./format.py
 
   circular-dependencies:
     runs-on: ubuntu-latest

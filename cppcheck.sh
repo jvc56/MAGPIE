@@ -4,7 +4,7 @@
 CPPCHECK_VERSION="2.17.1"
 CPPCHECK_ZIP_URL="https://github.com/danmar/cppcheck/archive/refs/tags/${CPPCHECK_VERSION}.zip"
 CPPCHECK_SOURCE_DIR_UNZIPPED="cppcheck-${CPPCHECK_VERSION}" # Directory created by unzip
-CPPCHECK_DIR="cppcheck" # The desired generic directory name for the source
+CPPCHECK_DIR="cppcheck_dir" # The desired generic directory name for the source
 CPPCHECK_BUILD_DIR="cppcheck_build"
 LOCAL_CPPCHECK_EXECUTABLE="./${CPPCHECK_DIR}/build/bin/cppcheck" # Path for the compiled executable
 ZIP_FILE="${CPPCHECK_VERSION}.zip"

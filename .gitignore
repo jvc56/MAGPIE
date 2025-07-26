@@ -16,5 +16,5 @@ testdata
 quackle
 *.gcg
 oprofile_data
-cppcheck*
+cppcheck_*
 TODO
