@@ -1492,8 +1492,12 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
     leave_map_set_current_index(&gen->leave_map, 0);
     uint32_t node_index = kwg_get_dawg_root_node_index(gen->klv->kwg);
     rack_reset(&gen->leave);
-    generate_exchange_moves(gen, &gen->leave, node_index, 0, 0,
-                            gen->number_of_tiles_in_bag >= RACK_SIZE);
+    // Assumes the player has drawn a full rack but not the opponent.
+    generate_exchange_moves(
+        gen, &gen->leave, node_index, 0, 0,
+        gen->number_of_tiles_in_bag +
+                rack_get_total_letters(&gen->opponent_rack) >=
+            (RACK_SIZE * 2));
   }
 }
 
