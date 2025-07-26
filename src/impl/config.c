@@ -1,39 +1,53 @@
 #include "config.h"
 
-#include <ctype.h>
-#include <float.h>
-#include <limits.h>
-#include <stdbool.h>
-
 #include "../def/autoplay_defs.h"
+#include "../def/bai_defs.h"
 #include "../def/config_defs.h"
+#include "../def/equity_defs.h"
 #include "../def/game_defs.h"
-#include "../def/inference_defs.h"
+#include "../def/move_defs.h"
+#include "../def/players_data_defs.h"
+#include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
-#include "../def/validated_move_defs.h"
-
 #include "../ent/autoplay_results.h"
+#include "../ent/board.h"
+#include "../ent/board_layout.h"
+#include "../ent/conversion_results.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/inference_results.h"
+#include "../ent/klv.h"
 #include "../ent/klv_csv.h"
 #include "../ent/letter_distribution.h"
+#include "../ent/move.h"
+#include "../ent/player.h"
 #include "../ent/players_data.h"
+#include "../ent/rack.h"
+#include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "../ent/validated_move.h"
-
+#include "../ent/win_pct.h"
+#include "../str/game_string.h"
+#include "../str/move_string.h"
+#include "../str/sim_string.h"
+#include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "autoplay.h"
-#include "bai.h"
 #include "cgp.h"
 #include "convert.h"
 #include "gameplay.h"
 #include "inference.h"
+#include "move_gen.h"
+#include "random_variable.h"
 #include "simmer.h"
-
-#include "../str/game_string.h"
-#include "../str/move_string.h"
-#include "../str/sim_string.h"
-
-#include "../util/io_util.h"
-#include "../util/string_util.h"
+#include <assert.h>
+#include <ctype.h>
+#include <float.h>
+#include <limits.h>
+#include <math.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 typedef enum {
   ARG_TOKEN_SET,
@@ -259,10 +273,6 @@ double config_get_equity_margin(const Config *config) {
   return config->equity_margin;
 }
 
-Equity config_get_max_equity_diff(const Config *config) {
-  return config->max_equity_diff;
-}
-
 int config_get_time_limit_seconds(const Config *config) {
   return config->time_limit_seconds;
 }
@@ -450,8 +460,8 @@ bool config_has_game_data(const Config *config) {
 
 // Config loading for primitive types
 
-void config_load_int(Config *config, arg_token_t arg_token, int min, int max,
-                     int *value, ErrorStack *error_stack) {
+void config_load_int(const Config *config, arg_token_t arg_token, int min,
+                     int max, int *value, ErrorStack *error_stack) {
   const char *int_str = config_get_parg_value(config, arg_token, 0);
   if (!int_str) {
     return;
@@ -476,7 +486,7 @@ void config_load_int(Config *config, arg_token_t arg_token, int min, int max,
   *value = new_value;
 }
 
-void config_load_double(Config *config, arg_token_t arg_token, double min,
+void config_load_double(const Config *config, arg_token_t arg_token, double min,
                         double max, double *value, ErrorStack *error_stack) {
   const char *double_str = config_get_parg_value(config, arg_token, 0);
   if (!double_str) {
@@ -502,7 +512,7 @@ void config_load_double(Config *config, arg_token_t arg_token, double min,
   *value = new_value;
 }
 
-void config_load_bool(Config *config, arg_token_t arg_token, bool *value,
+void config_load_bool(const Config *config, arg_token_t arg_token, bool *value,
                       ErrorStack *error_stack) {
   const char *bool_str = config_get_parg_value(config, arg_token, 0);
   if (!bool_str) {
@@ -520,8 +530,8 @@ void config_load_bool(Config *config, arg_token_t arg_token, bool *value,
   }
 }
 
-void config_load_uint64(Config *config, arg_token_t arg_token, uint64_t *value,
-                        ErrorStack *error_stack) {
+void config_load_uint64(const Config *config, arg_token_t arg_token,
+                        uint64_t *value, ErrorStack *error_stack) {
   const char *int_str = config_get_parg_value(config, arg_token, 0);
   if (!int_str) {
     return;
@@ -554,23 +564,21 @@ void execute_fatal(Config *config,
 
 // Used for commands that only update the config state
 void execute_noop(Config __attribute__((unused)) * config,
-                  ErrorStack __attribute__((unused)) * error_stack) {
-  return;
-}
+                  ErrorStack __attribute__((unused)) * error_stack) {}
 
-char *get_status_finished_str(Config *config) {
+char *get_status_finished_str(const Config *config) {
   return get_formatted_string("%s %s\n", COMMAND_FINISHED_KEYWORD,
                               config_get_current_exec_name(config));
 }
 
-char *get_status_running_str(Config *config) {
+char *get_status_running_str(const Config *config) {
   return get_formatted_string("%s %s\n", COMMAND_RUNNING_KEYWORD,
                               config_get_current_exec_name(config));
 }
 
 char *status_generic(Config *config) {
   char *status_str = NULL;
-  if (thread_control_get_mode(config->thread_control) == MODE_FINISHED) {
+  if (thread_control_is_finished(config->thread_control)) {
     status_str = get_status_finished_str(config);
   } else {
     status_str = get_status_running_str(config);
@@ -694,9 +702,8 @@ void execute_set_rack(Config *config, ErrorStack *error_stack) {
   // Convert from 1-indexed user input to 0-indexed internal use
   player_index--;
 
-  Rack *player_rack =
-      player_get_rack(game_get_player(config->game, player_index));
-  Rack *new_rack = rack_duplicate(player_rack);
+  Rack *new_rack = rack_duplicate(
+      player_get_rack(game_get_player(config->game, player_index)));
   rack_reset(new_rack);
 
   const char *rack_str = config_get_parg_value(config, ARG_TOKEN_RACK, 1);
@@ -820,20 +827,16 @@ char *status_sim(Config *config) {
     return string_duplicate("simmer has not been initialized");
   }
   char *status_str = NULL;
-  switch (thread_control_get_mode(config->thread_control)) {
-  case MODE_STARTED:
-    status_str = string_duplicate("simmer status not yet available");
-    break;
-  case MODE_FINISHED:
-    status_str = get_status_finished_str(config);
-    break;
-  case MODE_STATUS_READY:
+  if (thread_control_is_sim_printable(
+          config->thread_control,
+          sim_results_get_simmed_plays_initialized(sim_results))) {
     status_str = ucgi_sim_stats(
         config->game, sim_results,
         (double)sim_results_get_node_count(sim_results) /
             thread_control_get_seconds_elapsed(config->thread_control),
         true);
-    break;
+  } else {
+    status_str = string_duplicate("simmer status not yet available");
   }
   return status_str;
 }
@@ -1100,7 +1103,8 @@ void execute_create_data(Config *config, ErrorStack *error_stack) {
 
 // Config load helpers
 
-void config_load_parsed_args(Config *config, StringSplitter *cmd_split_string,
+void config_load_parsed_args(Config *config,
+                             const StringSplitter *cmd_split_string,
                              ErrorStack *error_stack) {
   int number_of_input_strs =
       string_splitter_get_number_of_items(cmd_split_string);
@@ -1182,9 +1186,8 @@ void config_load_parsed_args(Config *config, StringSplitter *cmd_split_string,
                            get_formatted_string(
                                "encountered unexpected command: %s", arg_name));
           return;
-        } else {
-          config->exec_parg_token = current_arg_token;
         }
+        config->exec_parg_token = current_arg_token;
       }
       current_value_index = 0;
     } else {
@@ -1315,8 +1318,10 @@ bool lexicons_and_leaves_compat(const char *updated_p1_lexicon_name,
                                 const char *updated_p2_lexicon_name,
                                 const char *updated_p2_leaves_name,
                                 ErrorStack *error_stack) {
+  const char *first_lex_compat_name = updated_p1_leaves_name;
+  const char *second_lex_compat_name = updated_p2_leaves_name;
   const bool leaves_are_compatible = lex_lex_compat(
-      updated_p1_leaves_name, updated_p2_leaves_name, error_stack);
+      first_lex_compat_name, second_lex_compat_name, error_stack);
   if (!error_stack_is_empty(error_stack) || !leaves_are_compatible) {
     return false;
   }
@@ -1327,8 +1332,10 @@ bool lexicons_and_leaves_compat(const char *updated_p1_lexicon_name,
     return false;
   }
 
+  first_lex_compat_name = updated_p2_lexicon_name;
+  second_lex_compat_name = updated_p2_leaves_name;
   const bool lex2_and_leaves2_are_compatible = lex_lex_compat(
-      updated_p2_lexicon_name, updated_p2_leaves_name, error_stack);
+      first_lex_compat_name, second_lex_compat_name, error_stack);
   if (!error_stack_is_empty(error_stack) || !lex2_and_leaves2_are_compatible) {
     return false;
   }
@@ -1465,10 +1472,8 @@ void config_load_lexicon_dependent_data(Config *config,
           error_stack, ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING,
           string_duplicate("cannot set leaves, letter distribition, or word "
                            "maps without a lexicon"));
-      return;
-    } else {
-      return;
     }
+    return;
   }
 
   const bool lex_lex_is_compat = lex_lex_compat(
@@ -1733,12 +1738,13 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   const char *new_max_equity_diff_double =
       config_get_parg_value(config, ARG_TOKEN_MAX_EQUITY_DIFF, 0);
   if (new_max_equity_diff_double) {
-    double max_equity_diff_double;
+    double max_equity_diff_double = NAN;
     config_load_double(config, ARG_TOKEN_MAX_EQUITY_DIFF, 0, EQUITY_MAX_DOUBLE,
                        &max_equity_diff_double, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
+    assert(!isnan(max_equity_diff_double));
     config->max_equity_diff = double_to_equity(max_equity_diff_double);
   }
 
@@ -1788,18 +1794,22 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  int write_buffer_size;
-  config_load_int(config, ARG_TOKEN_WRITE_BUFFER_SIZE, 1, INT_MAX,
-                  &write_buffer_size, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
+  const char *write_buffer_size_str =
+      config_get_parg_value(config, ARG_TOKEN_WRITE_BUFFER_SIZE, 0);
+  if (write_buffer_size_str) {
+    int write_buffer_size = 0;
+    config_load_int(config, ARG_TOKEN_WRITE_BUFFER_SIZE, 1, INT_MAX,
+                    &write_buffer_size, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    autoplay_results_set_write_buffer_size(config->autoplay_results,
+                                           (size_t)write_buffer_size);
   }
 
-  autoplay_results_set_write_buffer_size(config->autoplay_results,
-                                         write_buffer_size);
   // Seed
 
-  uint64_t seed;
+  uint64_t seed = 0;
   config_load_uint64(config, ARG_TOKEN_RANDOM_SEED, &seed, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -2103,12 +2113,6 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
 
   autoplay_results_set_players_data(config->autoplay_results,
                                     config->players_data);
-}
-
-Config *config_create_default(ErrorStack *error_stack) {
-  Config *config = calloc_or_die(1, sizeof(Config));
-  config_create_default_internal(config, error_stack, DEFAULT_DATA_PATHS);
-  return config;
 }
 
 Config *config_create_default_with_data_paths(ErrorStack *error_stack,

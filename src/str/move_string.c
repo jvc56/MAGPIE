@@ -1,15 +1,13 @@
-#include <stdint.h>
-
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
-
 #include "../ent/board.h"
+#include "../ent/equity.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
-
-#include "letter_distribution_string.h"
-
+#include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "letter_distribution_string.h"
+#include <stdint.h>
 
 void string_builder_add_move_description(StringBuilder *move_string_builder,
                                          const Move *move,
@@ -66,11 +64,13 @@ void string_builder_add_move(StringBuilder *string_builder, const Board *board,
   }
 
   if (board_is_dir_vertical(move_get_dir(move))) {
-    string_builder_add_char(string_builder, move_get_col_start(move) + 'A');
+    string_builder_add_char(string_builder,
+                            (char)(move_get_col_start(move) + 'A'));
     string_builder_add_int(string_builder, move_get_row_start(move) + 1);
   } else {
     string_builder_add_int(string_builder, move_get_row_start(move) + 1);
-    string_builder_add_char(string_builder, move_get_col_start(move) + 'A');
+    string_builder_add_char(string_builder,
+                            (char)(move_get_col_start(move) + 'A'));
   }
 
   string_builder_add_spaces(string_builder, 1);

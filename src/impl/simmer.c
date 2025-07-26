@@ -1,15 +1,15 @@
 #include "simmer.h"
 
+#include "../ent/move.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
-
-#include "../util/io_util.h"
-
 #include "../str/sim_string.h"
-
+#include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "bai.h"
 #include "move_gen.h"
 #include "random_variable.h"
+#include <stdlib.h>
 
 void simulate(const SimArgs *sim_args, SimResults *sim_results,
               ErrorStack *error_stack) {
@@ -37,12 +37,16 @@ void simulate(const SimArgs *sim_args, SimResults *sim_results,
 
   RandomVariables *rng = rvs_create(&rng_args);
 
-  assert(thread_control_set_mode_status_ready(sim_args->thread_control));
-
   bai(&sim_args->bai_options, rvs, rng, sim_args->thread_control, NULL,
       sim_results_get_bai_result(sim_results));
 
   sim_results_set_iteration_count(sim_results, rvs_get_total_samples(rvs));
+  // The simmed plays are still initialized and can be printed, but
+  // we set this false here in preparation for the next sim command
+  // which may have to free the simmed plays during recreation.
+  // This setting will prevent status queries from accessing NULL
+  // or invalid simmed plays.
+  sim_results_set_simmed_plays_initialized(sim_results, false);
 
   print_ucgi_sim_stats(
       sim_args->game, sim_results, sim_args->thread_control,
@@ -53,6 +57,4 @@ void simulate(const SimArgs *sim_args, SimResults *sim_results,
   rvs_destroy(rvs);
   rvs_destroy(rng);
   gen_destroy_cache();
-
-  return;
 }

@@ -1,21 +1,18 @@
 #ifndef MOVE_H
 #define MOVE_H
 
+#include "../def/board_defs.h"
+#include "../def/game_history_defs.h"
+#include "../def/move_defs.h"
+#include "../ent/equity.h"
+#include "../ent/letter_distribution.h"
+#include "../util/io_util.h"
+#include "board.h"
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "../def/board_defs.h"
-#include "../def/game_history_defs.h"
-#include "../def/move_defs.h"
-#include "../ent/letter_distribution.h"
-#include "board.h"
-
-#include "../ent/equity.h"
-
-#include "../util/io_util.h"
 
 typedef enum {
   MOVE_LIST_TYPE_DEFAULT,
@@ -177,7 +174,7 @@ static inline void move_set_equity(Move *move, Equity equity) {
 }
 
 static inline void move_set_all_except_equity(Move *move,
-                                              const MachineLetter strip[],
+                                              const MachineLetter *strip,
                                               int leftstrip, int rightstrip,
                                               Equity score, int row_start,
                                               int col_start, int tiles_played,
@@ -193,7 +190,7 @@ static inline void move_set_all_except_equity(Move *move,
   } else {
     move->tiles_length = rightstrip - leftstrip + 1;
   }
-  if (move_type != GAME_EVENT_PASS) {
+  if (strip) {
     for (int i = 0; i < move->tiles_length; i++) {
       move->tiles[i] = strip[leftstrip + i];
     }
@@ -234,16 +231,6 @@ static inline int move_list_get_capacity(const MoveList *ml) {
 
 static inline Move *move_list_get_move(const MoveList *ml, int move_index) {
   return ml->moves[move_index];
-}
-
-static inline void move_list_set_spare_move(MoveList *ml, MachineLetter strip[],
-                                            int leftstrip, int rightstrip,
-                                            Equity score, int row_start,
-                                            int col_start, int tiles_played,
-                                            int dir, game_event_t move_type) {
-  move_set_all_except_equity(ml->spare_move, strip, leftstrip, rightstrip,
-                             score, row_start, col_start, tiles_played, dir,
-                             move_type);
 }
 
 static inline SmallMove *small_move_list_get_spare_move(const MoveList *ml) {
@@ -508,18 +495,22 @@ static inline void down_heapify(MoveList *ml, int parent_node) {
   int min;
   Move *temp;
 
-  if (left >= ml->count || left < 0)
+  if (left >= ml->count || left < 0) {
     left = -1;
-  if (right >= ml->count || right < 0)
+  }
+  if (right >= ml->count || right < 0) {
     right = -1;
+  }
 
   if (left != -1 &&
-      compare_moves(ml->moves[parent_node], ml->moves[left], false))
+      compare_moves(ml->moves[parent_node], ml->moves[left], false)) {
     min = left;
-  else
+  } else {
     min = parent_node;
-  if (right != -1 && compare_moves(ml->moves[min], ml->moves[right], false))
+  }
+  if (right != -1 && compare_moves(ml->moves[min], ml->moves[right], false)) {
     min = right;
+  }
 
   if (min != parent_node) {
     temp = ml->moves[min];
@@ -598,7 +589,7 @@ static inline void move_list_resize(MoveList *ml, int new_capacity) {
   }
 }
 
-static inline bool move_list_move_exists(MoveList *ml, Move *m) {
+static inline bool move_list_move_exists(const MoveList *ml, const Move *m) {
   for (int i = 0; i < ml->count; i++) {
     if (compare_moves(ml->moves[i], m, true) == -1) {
       return true;
@@ -640,7 +631,7 @@ static inline void small_move_list_destroy(MoveList *ml) {
 static inline void small_move_list_reset(MoveList *ml) { ml->count = 0; }
 
 static inline int small_move_get_tiles_played(const SmallMove *sm) {
-  return (sm->metadata >> 24) & 0xFF;
+  return (int)((sm->metadata >> 24) & 0xFF);
 }
 
 static inline void small_move_set_estimated_value(SmallMove *sm, int32_t val) {
@@ -703,14 +694,14 @@ static inline int compare_small_moves_by_score(const void *a, const void *b) {
 }
 
 static inline void small_move_to_move(Move *move, const SmallMove *sm,
-                                      Board *board) {
+                                      const Board *board) {
   if (small_move_is_pass(sm)) {
     move_set_as_pass(move);
     return;
   }
   // Convert the small move to a Move*
-  int row = (sm->tiny_move & SMALL_MOVE_ROW_BITMASK) >> 6;
-  int col = (sm->tiny_move & SMALL_MOVE_COL_BITMASK) >> 1;
+  int row = (int)((sm->tiny_move & SMALL_MOVE_ROW_BITMASK) >> 6);
+  int col = (int)((sm->tiny_move & SMALL_MOVE_COL_BITMASK) >> 1);
   bool vert = false;
   if ((sm->tiny_move & 1) > 0) {
     vert = true;
@@ -720,7 +711,7 @@ static inline void small_move_to_move(Move *move, const SmallMove *sm,
   int bdim = BOARD_DIM;
   int r = row;
   int c = col;
-  int blank_mask = (sm->tiny_move & SMALL_MOVE_BLANKS_BIT_MASK);
+  int blank_mask = (int)(sm->tiny_move & SMALL_MOVE_BLANKS_BIT_MASK);
   int tidx = 0;
   int midx = 0;
   int tile_shift = 20;
@@ -760,7 +751,7 @@ static inline void small_move_to_move(Move *move, const SmallMove *sm,
   move->score = int_to_equity(small_move_get_score(sm));
   move->row_start = row;
   move->col_start = col;
-  move->equity = 0.0;
+  move->equity = 0;
   move->dir = vert ? BOARD_VERTICAL_DIRECTION : BOARD_HORIZONTAL_DIRECTION;
 }
 

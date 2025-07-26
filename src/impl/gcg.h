@@ -3,9 +3,7 @@
 #define GCG_H
 
 #include "../ent/game_history.h"
-
 #include "../util/io_util.h"
-
 #include "config.h"
 
 void parse_gcg(const char *gcg_filename, Config *config,

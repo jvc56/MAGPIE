@@ -1,7 +1,6 @@
 #include "io_util.h"
 
 #include <assert.h>
-#include <ctype.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -11,7 +10,7 @@
 #include <string.h>
 #include <time.h>
 
-#define ERROR_STACK_CAPACITY 100
+enum { ERROR_STACK_CAPACITY = 100 };
 
 static log_level_t current_log_level = LOG_FATAL;
 static FILE *stream_out = NULL;
@@ -46,9 +45,23 @@ char *format_string_with_va_list(const char *format, va_list *args) {
   int size;
   va_list args_copy_for_size;
   va_copy(args_copy_for_size, *args);
-  size = vsnprintf(NULL, 0, format, args_copy_for_size) + 1;
+  size = vsnprintf(NULL, 0, format, args_copy_for_size);
+  if (size < 0) {
+    log_fatal("vsnprintf failed to determine size for format: %s", format);
+  }
+  va_end(args_copy_for_size);
+  size++;
   char *string_buffer = malloc_or_die(size);
-  vsnprintf(string_buffer, size, format, *args);
+  int bytes_written = vsnprintf(string_buffer, size, format, *args);
+  if (bytes_written < 0) {
+    log_fatal("vsnprintf failed when writing formatted string for format: %s",
+              format);
+  }
+  if (bytes_written >= size) {
+    log_fatal("vsnprintf string overflow when writing formatted string for "
+              "format: %s",
+              format);
+  }
   return string_buffer;
 }
 
@@ -60,11 +73,33 @@ char *get_formatted_string(const char *format, ...) {
   return formatted_string;
 }
 
+void fflush_or_die(FILE *stream) {
+  if (fflush(stream) != 0) {
+    int error_number = errno;
+    const char *system_error_message = strerror(error_number);
+    log_fatal("failed to flush stream: %s (%d)", system_error_message,
+              error_number);
+  }
+}
+
 void write_to_stream_with_vargs(FILE *stream, const bool flush, const char *fmt,
                                 va_list args) {
-  vfprintf(stream, fmt, args);
+  int bytes_written = vfprintf(stream, fmt, args);
+  if (bytes_written < 0) {
+    abort();
+  }
   if (flush) {
-    fflush(stream);
+    fflush_or_die(stream);
+  }
+}
+
+void fprintf_or_die(FILE *stream, const char *format, ...) {
+  va_list args;
+  va_start(args, format);
+  int result = vfprintf(stream, format, args);
+  va_end(args);
+  if (result < 0) {
+    abort();
   }
 }
 
@@ -101,17 +136,17 @@ void log_with_info(log_level_t log_level, const char *caller_filename,
   }
 
   char time_buf[64];
-  time_t t = time(NULL);
+  time_t current_time = time(NULL);
   time_buf[strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S",
-                    localtime(&t))] = '\0';
-  fprintf(output_fh, "[%s] %-5s %s:%d: ", time_buf, level_string,
-          caller_filename, caller_line);
+                    localtime(&current_time))] = '\0';
+  fprintf_or_die(output_fh, "[%s] %-5s %s:%d: ", time_buf, level_string,
+                 caller_filename, caller_line);
   va_list args;
   va_start(args, format);
   write_to_stream_with_vargs(output_fh, false, format, args);
   va_end(args);
-  fprintf(output_fh, "\n");
-  fflush(output_fh);
+  fprintf_or_die(output_fh, "\n");
+  fflush_or_die(output_fh);
 
   if (exit_fatally) {
     abort();
@@ -157,7 +192,7 @@ char *read_line_from_stdin(void) {
       line = NULL;
     }
   }
-  if (read && read > 0 && line[read - 1] == '\n') {
+  if (read > 0 && line[read - 1] == '\n') {
     line[read - 1] = '\0';
   }
   return line;
@@ -257,7 +292,7 @@ void error_stack_push(ErrorStack *error_stack, error_code_t error_code,
   error_stack->size++;
 }
 
-bool error_stack_is_empty(ErrorStack *error_stack) {
+bool error_stack_is_empty(const ErrorStack *error_stack) {
   return error_stack->size == 0;
 }
 
@@ -323,6 +358,15 @@ void write_string_to_file(const char *filename, const char *mode,
   fclose_or_die(file_handle);
 }
 
+void fseek_or_die(FILE *stream, long offset, int whence) {
+  if (fseek(stream, offset, whence) != 0) {
+    int error_number = errno;
+    const char *system_error_message = strerror(error_number);
+    log_fatal("failed to fseek stream: %s (%d)", system_error_message,
+              error_number);
+  }
+}
+
 char *get_string_from_file(const char *filename, ErrorStack *error_stack) {
   FILE *file_handle = fopen_safe(filename, "r", error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -330,9 +374,9 @@ char *get_string_from_file(const char *filename, ErrorStack *error_stack) {
   }
 
   // Get the file size by seeking to the end and then back to the beginning
-  fseek(file_handle, 0, SEEK_END);
+  fseek_or_die(file_handle, 0, SEEK_END);
   long file_size = ftell(file_handle);
-  fseek(file_handle, 0, SEEK_SET);
+  fseek_or_die(file_handle, 0, SEEK_SET);
 
   char *result_string =
       (char *)malloc_or_die(file_size + 1); // +1 for null terminator

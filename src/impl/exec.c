@@ -1,37 +1,17 @@
 #include "exec.h"
 
-#include <pthread.h>
-#include <stdbool.h>
-#include <stdlib.h>
-
-#include "../def/autoplay_defs.h"
+#include "../compat/cpthread.h"
 #include "../def/config_defs.h"
-#include "../def/game_defs.h"
-#include "../def/inference_defs.h"
 #include "../def/thread_control_defs.h"
-#include "../def/validated_move_defs.h"
-
-#include "../ent/game.h"
-#include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
-#include "../ent/validated_move.h"
-
-#include "autoplay.h"
-#include "cgp.h"
-#include "config.h"
-#include "convert.h"
-#include "gameplay.h"
-#include "inference.h"
-#include "move_gen.h"
-#include "simmer.h"
-
-#include "../str/game_string.h"
-#include "../str/move_string.h"
-#include "../str/sim_string.h"
-
 #include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "config.h"
+#include "move_gen.h"
+#include <assert.h>
+#include <stdbool.h>
+#include <stdlib.h>
 
 #define UCGI_COMMAND_STRING "ucgi"
 #define QUIT_COMMAND_STRING "quit"
@@ -41,22 +21,25 @@
 char *command_search_status(Config *config, bool should_exit) {
   if (!config) {
     log_fatal("config is unexpectedly null");
+    // unreachable, but to silence static analyzer warnings
+    return NULL;
   }
 
   ThreadControl *thread_control = config_get_thread_control(config);
 
   if (should_exit) {
-    thread_control_exit(thread_control, EXIT_STATUS_USER_INTERRUPT);
-    thread_control_wait_for_mode_stopped(thread_control);
+    thread_control_set_status(thread_control,
+                              THREAD_CONTROL_STATUS_USER_INTERRUPT);
   }
 
   return config_get_execute_status(config);
 }
 
-void execute_command_and_set_mode_stopped(Config *config,
-                                          ErrorStack *error_stack) {
+void execute_command_and_set_status_finished(Config *config,
+                                             ErrorStack *error_stack) {
   config_execute_command(config, error_stack);
-  thread_control_set_mode_finished(config_get_thread_control(config));
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_FINISHED);
 }
 
 void *execute_command_thread_worker(void *uncasted_args) {
@@ -64,7 +47,7 @@ void *execute_command_thread_worker(void *uncasted_args) {
   // Create another error stack so this asynchronous command doesn't
   // interfere with the synchronous error stack on the main thread.
   ErrorStack *error_stack_async = error_stack_create();
-  execute_command_and_set_mode_stopped(config, error_stack_async);
+  execute_command_and_set_status_finished(config, error_stack_async);
   error_stack_print_and_reset(error_stack_async);
   error_stack_destroy(error_stack_async);
   return NULL;
@@ -73,7 +56,7 @@ void *execute_command_thread_worker(void *uncasted_args) {
 void execute_command_sync_or_async(Config *config, ErrorStack *error_stack,
                                    const char *command, bool sync) {
   ThreadControl *thread_control = config_get_thread_control(config);
-  if (!thread_control_set_mode_started(thread_control)) {
+  if (!thread_control_is_ready_for_new_command(thread_control)) {
     error_stack_push(
         error_stack, ERROR_STATUS_COMMAND_STILL_RUNNING,
         string_duplicate(
@@ -81,22 +64,25 @@ void execute_command_sync_or_async(Config *config, ErrorStack *error_stack,
             "is still running"));
     return;
   }
-
+  const bool reset_result =
+      thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+  assert(reset_result);
   // Loading the config should always be done synchronously and then start the
   // execution asynchronously (if enabled)
   config_load_command(config, command, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    thread_control_set_mode_finished(thread_control);
+    thread_control_set_status(config_get_thread_control(config),
+                              THREAD_CONTROL_STATUS_FINISHED);
     return;
   }
 
   if (sync) {
-    execute_command_and_set_mode_stopped(config, error_stack);
+    execute_command_and_set_status_finished(config, error_stack);
   } else {
-    pthread_t cmd_execution_thread;
-    pthread_create(&cmd_execution_thread, NULL, execute_command_thread_worker,
-                   config);
-    pthread_detach(cmd_execution_thread);
+    cpthread_t cmd_execution_thread;
+    cpthread_create(&cmd_execution_thread, execute_command_thread_worker,
+                    config);
+    cpthread_detach(cmd_execution_thread);
   }
 }
 
@@ -118,12 +104,9 @@ void process_ucgi_command(Config *config, ErrorStack *error_stack,
     // More of a formality to align with UCI
     thread_control_print(thread_control, "id name MAGPIE 0.1\nucgiok\n");
   } else if (strings_equal(command, STOP_COMMAND_STRING)) {
-    if (thread_control_get_mode(thread_control) != MODE_FINISHED) {
-      if (!thread_control_exit(thread_control, EXIT_STATUS_USER_INTERRUPT)) {
-        error_stack_push(
-            error_stack, ERROR_STATUS_COMMAND_ALREADY_STOPPED,
-            string_duplicate("command already received stop signal"));
-      }
+    if (thread_control_is_started(thread_control)) {
+      thread_control_set_status(thread_control,
+                                THREAD_CONTROL_STATUS_USER_INTERRUPT);
     } else {
       error_stack_push(
           error_stack, ERROR_STATUS_COMMAND_NOTHING_TO_STOP,

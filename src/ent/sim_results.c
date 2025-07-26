@@ -1,20 +1,18 @@
 #include "sim_results.h"
 
-#include <pthread.h>
-#include <stdatomic.h>
-#include <stdbool.h>
-#include <stdlib.h>
-
-#include "../def/bai_defs.h"
+#include "../compat/cpthread.h"
 #include "../def/game_defs.h"
-
+#include "../util/io_util.h"
 #include "bai_result.h"
+#include "equity.h"
 #include "move.h"
 #include "stats.h"
 #include "win_pct.h"
 #include "xoshiro.h"
-
-#include "../util/io_util.h"
+#include <stdatomic.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 struct SimmedPlay {
   Move *move;
@@ -26,14 +24,15 @@ struct SimmedPlay {
   bool is_epigon;
   int play_id;
   XoshiroPRNG *prng;
-  pthread_mutex_t mutex;
+  cpthread_mutex_t mutex;
 };
 
 struct SimResults {
   int max_plies;
   int num_simmed_plays;
-  int iteration_count;
-  pthread_mutex_t simmed_plays_mutex;
+  uint64_t iteration_count;
+  bool simmed_plays_initialized;
+  cpthread_mutex_t simmed_plays_mutex;
   atomic_int node_count;
   SimmedPlay **simmed_plays;
   SimmedPlay **sorted_simmed_plays;
@@ -47,24 +46,24 @@ SimmedPlay **simmed_plays_create(const MoveList *move_list,
       malloc_or_die((sizeof(SimmedPlay)) * num_simmed_plays);
 
   for (int i = 0; i < num_simmed_plays; i++) {
-    SimmedPlay *sp = malloc_or_die(sizeof(SimmedPlay));
-    sp->move = move_create();
-    move_copy(sp->move, move_list_get_move(move_list, i));
+    SimmedPlay *simmed_play = malloc_or_die(sizeof(SimmedPlay));
+    simmed_play->move = move_create();
+    move_copy(simmed_play->move, move_list_get_move(move_list, i));
 
-    sp->score_stat = malloc_or_die(sizeof(Stat *) * max_plies);
-    sp->bingo_stat = malloc_or_die(sizeof(Stat *) * max_plies);
-    sp->equity_stat = stat_create(true);
-    sp->leftover_stat = stat_create(true);
-    sp->win_pct_stat = stat_create(true);
+    simmed_play->score_stat = malloc_or_die(sizeof(Stat *) * max_plies);
+    simmed_play->bingo_stat = malloc_or_die(sizeof(Stat *) * max_plies);
+    simmed_play->equity_stat = stat_create(true);
+    simmed_play->leftover_stat = stat_create(true);
+    simmed_play->win_pct_stat = stat_create(true);
     for (int j = 0; j < max_plies; j++) {
-      sp->score_stat[j] = stat_create(true);
-      sp->bingo_stat[j] = stat_create(true);
+      simmed_play->score_stat[j] = stat_create(true);
+      simmed_play->bingo_stat[j] = stat_create(true);
     }
-    sp->is_epigon = false;
-    sp->play_id = i;
-    sp->prng = prng_create(seed);
-    pthread_mutex_init(&sp->mutex, NULL);
-    simmed_plays[i] = sp;
+    simmed_play->is_epigon = false;
+    simmed_play->play_id = i;
+    simmed_play->prng = prng_create(seed);
+    cpthread_mutex_init(&simmed_play->mutex);
+    simmed_plays[i] = simmed_play;
   }
   return simmed_plays;
 }
@@ -86,7 +85,6 @@ void simmed_plays_destroy(SimmedPlay **simmed_plays, int num_simmed_plays,
     stat_destroy(simmed_plays[i]->win_pct_stat);
     move_destroy(simmed_plays[i]->move);
     prng_destroy(simmed_plays[i]->prng);
-    pthread_mutex_destroy(&simmed_plays[i]->mutex);
     free(simmed_plays[i]);
   }
   free(simmed_plays);
@@ -113,11 +111,26 @@ void sim_results_destroy(SimResults *sim_results) {
 }
 
 void sim_results_lock_simmed_plays(SimResults *sim_results) {
-  pthread_mutex_lock(&sim_results->simmed_plays_mutex);
+  cpthread_mutex_lock(&sim_results->simmed_plays_mutex);
 }
 
 void sim_results_unlock_simmed_plays(SimResults *sim_results) {
-  pthread_mutex_unlock(&sim_results->simmed_plays_mutex);
+  cpthread_mutex_unlock(&sim_results->simmed_plays_mutex);
+}
+
+bool sim_results_get_simmed_plays_initialized(SimResults *sim_results) {
+  bool value;
+  sim_results_lock_simmed_plays(sim_results);
+  value = sim_results->simmed_plays_initialized;
+  sim_results_unlock_simmed_plays(sim_results);
+  return value;
+}
+
+void sim_results_set_simmed_plays_initialized(SimResults *sim_results,
+                                              bool value) {
+  sim_results_lock_simmed_plays(sim_results);
+  sim_results->simmed_plays_initialized = value;
+  sim_results_unlock_simmed_plays(sim_results);
 }
 
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
@@ -140,6 +153,7 @@ void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
   sim_results->max_plies = max_plies;
   sim_results->iteration_count = 0;
   atomic_init(&sim_results->node_count, 0);
+  sim_results_set_simmed_plays_initialized(sim_results, true);
 }
 
 SimResults *sim_results_create(void) {
@@ -148,7 +162,8 @@ SimResults *sim_results_create(void) {
   sim_results->max_plies = 0;
   sim_results->iteration_count = 0;
   atomic_init(&sim_results->node_count, 0);
-  pthread_mutex_init(&sim_results->simmed_plays_mutex, NULL);
+  sim_results->simmed_plays_initialized = false;
+  cpthread_mutex_init(&sim_results->simmed_plays_mutex);
   sim_results->simmed_plays = NULL;
   sim_results->sorted_simmed_plays = NULL;
   sim_results->bai_result = bai_result_create();
@@ -185,18 +200,18 @@ int simmed_play_get_id(const SimmedPlay *simmed_play) {
   return simmed_play->play_id;
 }
 
-void simmed_play_set_is_epigon(SimmedPlay *sp) {
-  pthread_mutex_lock(&sp->mutex);
-  sp->is_epigon = true;
-  pthread_mutex_unlock(&sp->mutex);
+void simmed_play_set_is_epigon(SimmedPlay *simmed_play) {
+  cpthread_mutex_lock(&simmed_play->mutex);
+  simmed_play->is_epigon = true;
+  cpthread_mutex_unlock(&simmed_play->mutex);
 }
 
 // Returns the current seed and updates the seed using prng_next
-uint64_t simmed_play_get_seed(SimmedPlay *sp) {
+uint64_t simmed_play_get_seed(SimmedPlay *simmed_play) {
   uint64_t seed;
-  pthread_mutex_lock(&sp->mutex);
-  seed = prng_next(sp->prng);
-  pthread_mutex_unlock(&sp->mutex);
+  cpthread_mutex_lock(&simmed_play->mutex);
+  seed = prng_next(simmed_play->prng);
+  cpthread_mutex_unlock(&simmed_play->mutex);
   return seed;
 }
 
@@ -214,17 +229,18 @@ int sim_results_get_node_count(const SimResults *sim_results) {
 
 // Not thread safe. Caller is responsible for ensuring thread
 // safety
-int sim_results_get_iteration_count(const SimResults *sim_results) {
+uint64_t sim_results_get_iteration_count(const SimResults *sim_results) {
   return sim_results->iteration_count;
 }
 
 // Not thread safe. Caller is responsible for ensuring thread
 // safety
-void sim_results_set_iteration_count(SimResults *sim_results, int count) {
+void sim_results_set_iteration_count(SimResults *sim_results, uint64_t count) {
   sim_results->iteration_count = count;
 }
 
-SimmedPlay *sim_results_get_simmed_play(SimResults *sim_results, int index) {
+SimmedPlay *sim_results_get_simmed_play(const SimResults *sim_results,
+                                        const int index) {
   return sim_results->simmed_plays[index];
 }
 
@@ -233,7 +249,7 @@ SimmedPlay *sim_results_get_sorted_simmed_play(SimResults *sim_results,
   return sim_results->sorted_simmed_plays[index];
 }
 
-BAIResult *sim_results_get_bai_result(SimResults *sim_results) {
+BAIResult *sim_results_get_bai_result(const SimResults *sim_results) {
   return sim_results->bai_result;
 }
 
@@ -241,28 +257,28 @@ void sim_results_increment_node_count(SimResults *sim_results) {
   atomic_fetch_add(&sim_results->node_count, 1);
 }
 
-void simmed_play_add_score_stat(SimmedPlay *sp, Equity score, bool is_bingo,
-                                int ply) {
-  pthread_mutex_lock(&sp->mutex);
-  stat_push(sp->score_stat[ply], equity_to_double(score), 1);
-  stat_push(sp->bingo_stat[ply], (double)is_bingo, 1);
-  pthread_mutex_unlock(&sp->mutex);
+void simmed_play_add_score_stat(SimmedPlay *simmed_play, Equity score,
+                                bool is_bingo, int ply) {
+  cpthread_mutex_lock(&simmed_play->mutex);
+  stat_push(simmed_play->score_stat[ply], equity_to_double(score), 1);
+  stat_push(simmed_play->bingo_stat[ply], (double)is_bingo, 1);
+  cpthread_mutex_unlock(&simmed_play->mutex);
 }
 
-void simmed_play_add_equity_stat(SimmedPlay *sp, Equity initial_spread,
+void simmed_play_add_equity_stat(SimmedPlay *simmed_play, Equity initial_spread,
                                  Equity spread, Equity leftover) {
-  pthread_mutex_lock(&sp->mutex);
-  stat_push(sp->equity_stat,
+  cpthread_mutex_lock(&simmed_play->mutex);
+  stat_push(simmed_play->equity_stat,
             equity_to_double(spread - initial_spread + leftover), 1);
-  stat_push(sp->leftover_stat, equity_to_double(leftover), 1);
-  pthread_mutex_unlock(&sp->mutex);
+  stat_push(simmed_play->leftover_stat, equity_to_double(leftover), 1);
+  cpthread_mutex_unlock(&simmed_play->mutex);
 }
 
 int round_to_nearest_int(double a) {
   return (int)(a + 0.5 - (a < 0)); // truncated to 55
 }
 
-double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *sp,
+double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
                                     Equity spread, Equity leftover,
                                     game_end_reason_t game_end_reason,
                                     int game_unseen_tiles, bool plies_are_odd) {
@@ -291,9 +307,9 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *sp,
       wpct = 1.0 - wpct;
     }
   }
-  pthread_mutex_lock(&sp->mutex);
-  stat_push(sp->win_pct_stat, wpct, 1);
-  pthread_mutex_unlock(&sp->mutex);
+  cpthread_mutex_lock(&simmed_play->mutex);
+  stat_push(simmed_play->win_pct_stat, wpct, 1);
+  cpthread_mutex_unlock(&simmed_play->mutex);
   return wpct;
 }
 
@@ -303,7 +319,8 @@ int compare_simmed_plays(const void *a, const void *b) {
 
   if (play_a->is_epigon && !play_b->is_epigon) {
     return 1;
-  } else if (play_b->is_epigon && !play_a->is_epigon) {
+  }
+  if (play_b->is_epigon && !play_a->is_epigon) {
     return -1;
   }
 
@@ -313,21 +330,21 @@ int compare_simmed_plays(const void *a, const void *b) {
 
   if (mean_a > mean_b) {
     return -1;
-  } else if (mean_a < mean_b) {
-    return 1;
-  } else {
-    // If win_pct_stat->mean values are equal, compare equity_stat->mean
-    double equity_mean_a = stat_get_mean(play_a->equity_stat);
-    double equity_mean_b = stat_get_mean(play_b->equity_stat);
-
-    if (equity_mean_a > equity_mean_b) {
-      return -1;
-    } else if (equity_mean_a < equity_mean_b) {
-      return 1;
-    } else {
-      return 0;
-    }
   }
+  if (mean_a < mean_b) {
+    return 1;
+  }
+  // If win_pct_stat->mean values are equal, compare equity_stat->mean
+  double equity_mean_a = stat_get_mean(play_a->equity_stat);
+  double equity_mean_b = stat_get_mean(play_b->equity_stat);
+
+  if (equity_mean_a > equity_mean_b) {
+    return -1;
+  }
+  if (equity_mean_a < equity_mean_b) {
+    return 1;
+  }
+  return 0;
 }
 
 // Sorts the sorted_simmed_plays and leaves the simmed_plays unchanged.

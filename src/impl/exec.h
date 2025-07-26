@@ -3,7 +3,6 @@
 #define EXEC_H
 
 #include "../util/io_util.h"
-
 #include "config.h"
 
 void execute_command_sync(Config *config, ErrorStack *error_stack,

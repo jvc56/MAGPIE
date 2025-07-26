@@ -6,7 +6,7 @@ BIN_DIR := bin
 COV_DIR := cov
 
 SRC  := $(wildcard $(SRC_DIR)/**/*.c)
-TEST := $(wildcard $(TEST_DIR)/**/*.c)
+TEST := $(wildcard $(TEST_DIR)/*.c)
 CMD := $(wildcard $(CMD_DIR)/*.c)
 OBJ_SRC := $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/$(SRC_DIR)/%.o)
 OBJ_TEST := $(TEST:$(TEST_DIR)/%.c=$(OBJ_DIR)/$(TEST_DIR)/%.o)

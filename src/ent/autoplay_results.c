@@ -1,28 +1,40 @@
 #include "autoplay_results.h"
 
-#include <pthread.h>
-#include <stdlib.h>
-#include <unistd.h>
-
-#include "game.h"
-#include "klv_csv.h"
-#include "move.h"
-#include "stats.h"
-
-#include "../str/move_string.h"
+#include "../compat/cpthread.h"
+#include "../def/game_defs.h"
+#include "../def/klv_defs.h"
+#include "../def/letter_distribution_defs.h"
+#include "../def/players_data_defs.h"
+#include "../def/rack_defs.h"
 #include "../str/rack_string.h"
-
 #include "../util/io_util.h"
 #include "../util/math_util.h"
 #include "../util/string_util.h"
+#include "bag.h"
+#include "data_filepaths.h"
+#include "equity.h"
+#include "game.h"
+#include "klv.h"
+#include "klv_csv.h"
+#include "letter_distribution.h"
+#include "move.h"
+#include "player.h"
+#include "players_data.h"
+#include "rack.h"
+#include "stats.h"
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
-#define DEFAULT_WRITE_BUFFER_SIZE 1024
+enum { DEFAULT_WRITE_BUFFER_SIZE = 1024 };
 
 typedef struct RecorderArgs {
   const Game *game;
   const Move *move;
   const Rack *leave;
-  uint64_t number_of_turns;
+  int number_of_turns;
   uint64_t seed;
   bool divergent;
   bool human_readable;
@@ -30,7 +42,7 @@ typedef struct RecorderArgs {
 
 // Read-only data shared across all recorder types
 typedef struct RecorderContext {
-  int write_buffer_size;
+  size_t write_buffer_size;
   char *data_paths;
   const LetterDistribution *ld;
   KLV *klv;
@@ -70,14 +82,10 @@ struct AutoplayResults {
 // Generic recorders
 
 void add_move_noop(Recorder __attribute__((unused)) * recorder,
-                   const RecorderArgs __attribute__((unused)) * args) {
-  return;
-}
+                   const RecorderArgs __attribute__((unused)) * args) {}
 
 void add_game_noop(Recorder __attribute__((unused)) * recorder,
-                   const RecorderArgs __attribute__((unused)) * args) {
-  return;
-}
+                   const RecorderArgs __attribute__((unused)) * args) {}
 
 char *get_str_noop(Recorder __attribute__((unused)) * recorder,
                    const RecorderArgs __attribute__((unused)) * args) {
@@ -135,7 +143,7 @@ void game_data_destroy(GameData *gd) {
 
 void game_data_add_game(GameData *gd, const RecorderArgs *args) {
   const Game *game = args->game;
-  const uint64_t turns = args->number_of_turns;
+  const int turns = args->number_of_turns;
   const int p0_game_score =
       equity_to_int(player_get_score(game_get_player(game, 0)));
   const int p1_game_score =
@@ -199,8 +207,8 @@ void string_builder_add_winning_player_confidence(StringBuilder *sb,
   // See
   // https://library.virginia.edu/data/articles/continuity-corrections-imperfect-responses-to-slight-problems#fn1
   // for more details.
-  double p0_total_corrected_pct = (p0_total - 0.5) / total_games;
-  double p1_total_corrected_pct = (p1_total - 0.5) / total_games;
+  double p0_total_corrected_pct = (p0_total - 0.5) / (double)total_games;
+  double p1_total_corrected_pct = (p1_total - 0.5) / (double)total_games;
 
   int winning_player_num = 0;
   double winning_player_total_corrected_pct;
@@ -225,11 +233,11 @@ void string_builder_add_winning_player_confidence(StringBuilder *sb,
 
 char *game_data_human_readable_str(const GameData *gd, bool divergent) {
   uint64_t p0_wins = gd->p0_wins;
-  double p0_win_pct = (double)p0_wins / gd->total_games;
+  double p0_win_pct = (double)p0_wins / (double)gd->total_games;
   uint64_t p0_losses = gd->p0_losses;
-  double p0_loss_pct = (double)p0_losses / gd->total_games;
+  double p0_loss_pct = (double)p0_losses / (double)gd->total_games;
   uint64_t p0_ties = gd->p0_ties;
-  double p0_tie_pct = (double)p0_ties / gd->total_games;
+  double p0_tie_pct = (double)p0_ties / (double)gd->total_games;
 
   double p0_total = (double)gd->p0_wins + (double)gd->p0_ties / (double)2;
   double p0_total_pct = p0_total / (double)(gd->total_games);
@@ -268,14 +276,13 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
 
   for (int i = 0; i < NUMBER_OF_GAME_END_REASONS; i++) {
     string_builder_add_formatted_string(
-        sb, "Game End Reason %-*s %d (%2.2f%%%%)\n", 10, game_end_reason_strs[i],
-        gd->game_end_reasons[i],
-        100 * ((double)gd->game_end_reasons[i] / gd->total_games));
+        sb, "Game End Reason %-*s %d (%2.2f%%%%)\n", 10,
+        game_end_reason_strs[i], gd->game_end_reasons[i],
+        100 * ((double)gd->game_end_reasons[i] / (double)gd->total_games));
   }
 
   string_builder_add_string(sb, "\n");
-  string_builder_add_table_row(sb, col_width, "", "Player 1",
-                               "Player 2");
+  string_builder_add_table_row(sb, col_width, "", "Player 1", "Player 2");
 
   char *p0_total_str =
       get_total_float_and_percentage_string(p0_total, p0_total_pct);
@@ -290,8 +297,7 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
   char *p0_win_str = get_total_int_and_percentage_string(p0_wins, p0_win_pct);
   char *p0_loss_str =
       get_total_int_and_percentage_string(p0_losses, p0_loss_pct);
-  string_builder_add_table_row(sb, col_width, "Wins:", p0_win_str,
-                               p0_loss_str);
+  string_builder_add_table_row(sb, col_width, "Wins:", p0_win_str, p0_loss_str);
   string_builder_add_table_row(sb, col_width, "Losses:", p0_loss_str,
                                p0_win_str);
   free(p0_win_str);
@@ -307,7 +313,7 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
   char *p1_score_str = get_score_and_dev_string(stat_get_mean(gd->p1_score),
                                                 stat_get_stdev(gd->p1_score));
   string_builder_add_table_row(sb, col_width, "Score:", p0_score_str,
-                               p1_score_str);                                                
+                               p1_score_str);
   free(p1_score_str);
   free(p0_score_str);
 
@@ -325,9 +331,8 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
 char *game_data_str(const GameData *gd, bool human_readable, bool divergent) {
   if (human_readable) {
     return game_data_human_readable_str(gd, divergent);
-  } else {
-    return game_data_ucgi_str(gd);
   }
+  return game_data_ucgi_str(gd);
 }
 
 typedef struct GameDataSets {
@@ -417,7 +422,7 @@ void game_data_sets_finalize(Recorder **recorder_list, int recorder_list_size,
 }
 
 char *game_data_sets_str(Recorder *recorder, const RecorderArgs *args) {
-  GameDataSets *sets = (GameDataSets *)recorder->data;
+  const GameDataSets *sets = (GameDataSets *)recorder->data;
   StringBuilder *sb = string_builder_create();
 
   char *all_game_str =
@@ -438,8 +443,7 @@ char *game_data_sets_str(Recorder *recorder, const RecorderArgs *args) {
 }
 
 // FJ recorders
-#define MAX_NUMBER_OF_MOVES 100
-#define MAX_NUMBER_OF_TILES 100
+enum { MAX_NUMBER_OF_MOVES = 100, MAX_NUMBER_OF_TILES = 100 };
 #define FJ_FILENAME "fj_log.csv"
 
 typedef struct FJMove {
@@ -458,7 +462,7 @@ typedef struct FJData {
 } FJData;
 
 typedef struct FJSharedData {
-  pthread_mutex_t fh_mutexes[MAX_NUMBER_OF_TILES];
+  cpthread_mutex_t fh_mutexes[MAX_NUMBER_OF_TILES];
   FILE *fhs[MAX_NUMBER_OF_TILES];
 } FJSharedData;
 
@@ -506,7 +510,7 @@ void fj_data_create(Recorder *recorder) {
   if (recorder->owns_thread_shared_data) {
     shared_data = malloc_or_die(sizeof(FJSharedData));
     for (int i = 0; i < MAX_NUMBER_OF_TILES; i++) {
-      pthread_mutex_init(&shared_data->fh_mutexes[i], NULL);
+      cpthread_mutex_init(&shared_data->fh_mutexes[i]);
       shared_data->fhs[i] = NULL;
     }
   }
@@ -551,7 +555,6 @@ void fj_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   rack_increment_unseen_count(player_get_rack(opponent),
                               fj_move->unseen_counts);
   fj_data->move_count++;
-  return;
 }
 
 void fj_write_buffer_to_output(Recorder *recorder, int remaining_tiles,
@@ -560,18 +563,18 @@ void fj_write_buffer_to_output(Recorder *recorder, int remaining_tiles,
   FJSharedData *shared_data = (FJSharedData *)recorder->thread_shared_data;
   const RecorderContext *recorder_context = recorder->recorder_context;
   StringBuilder *sb = fj_data->sbs[remaining_tiles];
-  int str_len = string_builder_length(sb);
+  size_t str_len = string_builder_length(sb);
   if (str_len > 0 &&
       (always_flush || str_len >= recorder_context->write_buffer_size)) {
-    pthread_mutex_lock(&shared_data->fh_mutexes[remaining_tiles]);
+    cpthread_mutex_lock(&shared_data->fh_mutexes[remaining_tiles]);
     if (fputs(string_builder_peek(sb), shared_data->fhs[remaining_tiles]) ==
         EOF) {
       fclose_or_die(shared_data->fhs[remaining_tiles]);
       log_fatal("error writing to fj file of remaining tiles: %d",
                 remaining_tiles);
     }
-    fflush(shared_data->fhs[remaining_tiles]);
-    pthread_mutex_unlock(&shared_data->fh_mutexes[remaining_tiles]);
+    fflush_or_die(shared_data->fhs[remaining_tiles]);
+    cpthread_mutex_unlock(&shared_data->fh_mutexes[remaining_tiles]);
     string_builder_clear(sb);
   }
 }
@@ -626,12 +629,13 @@ void fj_data_finalize(Recorder **recorders, int num_recorders,
 }
 
 // Win percentage recorder functions
-
-#define WIN_PCT_MAX_SPREAD 500
-// Use x2 the max spread to account for positive and negative spread
-// Use +1 to account for the tie
-#define WIN_PCT_NUM_COLUMNS ((WIN_PCT_MAX_SPREAD * 2) + 1)
-#define WIN_PCT_MAX_NUM_TURNS 100
+enum {
+  WIN_PCT_MAX_SPREAD = 500,
+  // Use x2 the max spread to account for positive and negative spread
+  // Use +1 to account for the tie
+  WIN_PCT_NUM_COLUMNS = ((WIN_PCT_MAX_SPREAD * 2) + 1),
+  WIN_PCT_MAX_NUM_TURNS = 100,
+};
 
 typedef struct WinPctTurnSnapshot {
   int score_diff;
@@ -892,7 +896,7 @@ void win_pct_data_finalize(Recorder **recorder_list, int list_size,
 // Leave recorder functions
 
 typedef struct LeavesData {
-  int num_leaves;
+  uint32_t num_leaves;
   uint64_t *leave_counts;
 } LeavesData;
 
@@ -924,9 +928,10 @@ void leaves_data_add_move(Recorder *recorder, const RecorderArgs *args) {
     return;
   }
   LeavesData *leaves_data = (LeavesData *)recorder->data;
-  int leave_index =
+  uint32_t leave_index =
       klv_get_word_index(recorder->recorder_context->klv, args->leave);
-  if (leave_index < 0 || leave_index >= leaves_data->num_leaves) {
+  if (leave_index == KLV_UNFOUND_INDEX ||
+      leave_index >= leaves_data->num_leaves) {
     StringBuilder *sb = string_builder_create();
     string_builder_add_rack(sb, args->leave, recorder->recorder_context->ld,
                             false);
@@ -966,7 +971,7 @@ void leaves_data_finalize(Recorder **recorder_list, int list_size,
     char line[256];
     while (fgets(line, sizeof(line), leaves_file)) {
       char *leave_str = strtok(line, ",");
-      char *count_str = strtok(NULL, "\n");
+      const char *count_str = strtok(NULL, "\n");
       if (!leave_str || !count_str) {
         log_fatal("invalid row in existing autoplay leaves count file '%s': %s",
                   leaves_count_filename, line);
@@ -978,9 +983,9 @@ void leaves_data_finalize(Recorder **recorder_list, int list_size,
                   "file '%s': %s",
                   leaves_count_filename, line);
       }
-      const int leave_index = klv_get_word_index(
+      const uint32_t leave_index = klv_get_word_index(
           primary_recorder->recorder_context->klv, &leave_rack);
-      if ((unsigned int)leave_index == KLV_UNFOUND_INDEX) {
+      if (leave_index == KLV_UNFOUND_INDEX) {
         log_fatal("klv does not contain leave from file '%s': %s ",
                   leaves_count_filename, leave_str);
       }
@@ -992,12 +997,12 @@ void leaves_data_finalize(Recorder **recorder_list, int list_size,
       }
       primary_leaves_data->leave_counts[leave_index] = count;
     }
-    fclose(leaves_file);
+    fclose_or_die(leaves_file);
   }
 
   for (int i = 0; i < list_size; i++) {
     LeavesData *leaves_data = (LeavesData *)recorder_list[i]->data;
-    for (int j = 0; j < leaves_data->num_leaves; j++) {
+    for (uint32_t j = 0; j < leaves_data->num_leaves; j++) {
       primary_leaves_data->leave_counts[j] += leaves_data->leave_counts[j];
     }
   }
@@ -1194,10 +1199,6 @@ void autoplay_results_set_options(AutoplayResults *autoplay_results,
   string_splitter_destroy(split_options);
 }
 
-void autoplay_results_reset_options(AutoplayResults *autoplay_results) {
-  autoplay_results_set_options_int(autoplay_results, 0, NULL);
-}
-
 RecorderContext *create_recorder_context(void) {
   RecorderContext *recorder_context = malloc_or_die(sizeof(RecorderContext));
   recorder_context->write_buffer_size = DEFAULT_WRITE_BUFFER_SIZE;
@@ -1281,7 +1282,7 @@ void autoplay_results_add_move(AutoplayResults *autoplay_results,
 }
 
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
-                               const Game *game, uint64_t turns, bool divergent,
+                               const Game *game, int turns, bool divergent,
                                uint64_t seed) {
   RecorderArgs args;
   args.game = game;
@@ -1330,7 +1331,7 @@ char *autoplay_results_to_string(AutoplayResults *autoplay_results,
 }
 
 void autoplay_results_set_write_buffer_size(AutoplayResults *autoplay_results,
-                                            int write_buffer_size) {
+                                            size_t write_buffer_size) {
   autoplay_results->recorder_context->write_buffer_size = write_buffer_size;
 }
 

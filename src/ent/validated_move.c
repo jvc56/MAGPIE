@@ -1,20 +1,33 @@
 #include "validated_move.h"
 
-#include <ctype.h>
-
+#include "../def/board_defs.h"
+#include "../def/equity_defs.h"
+#include "../def/game_defs.h"
+#include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
+#include "../def/move_defs.h"
+#include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/validated_move_defs.h"
-
-#include "game.h"
-#include "move.h"
-#include "static_eval.h"
-#include "words.h"
-
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "bag.h"
+#include "board.h"
+#include "equity.h"
+#include "game.h"
+#include "klv.h"
+#include "kwg.h"
+#include "letter_distribution.h"
+#include "move.h"
+#include "player.h"
+#include "rack.h"
+#include "static_eval.h"
+#include "words.h"
+#include <ctype.h>
+#include <stdint.h>
+#include <stdlib.h>
 
-#define MOVE_MAX_FIELDS 5
+enum { MOVE_MAX_FIELDS = 5 };
 
 typedef struct ValidatedMove {
   Move *move;
@@ -47,10 +60,10 @@ void validate_coordinates(Move *move, const char *coords_string,
                           ErrorStack *error_stack) {
   int row_start = 0;
   int col_start = 0;
-  int coords_string_length = string_length(coords_string);
+  size_t coords_string_length = string_length(coords_string);
   bool started_row_parse = false;
   bool started_col_parse = false;
-  for (int i = 0; i < coords_string_length; i++) {
+  for (size_t i = 0; i < coords_string_length; i++) {
     char position_char = coords_string[i];
     if (isdigit(position_char)) {
       if (i == 0) {
@@ -196,16 +209,16 @@ void validate_tiles_played_with_mls(const Board *board,
           string_duplicate("move tiles are not connected to existing board "
                            "tiles or do not occupy the start square"));
       return;
-    } else if (tiles_played > (RACK_SIZE)) {
+    }
+    if (tiles_played > (RACK_SIZE)) {
       error_stack_push(
           error_stack, ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_OVERFLOW,
           get_formatted_string(
               "more tiles played (%d) than can fit in the rack (%d)",
               tiles_played, RACK_SIZE));
       return;
-    } else {
-      move_set_tiles_played(move, tiles_played);
     }
+    move_set_tiles_played(move, tiles_played);
   }
 }
 
@@ -214,7 +227,7 @@ void validate_tiles_played(const LetterDistribution *ld, const Board *board,
                            Move *move, const char *tiles_played,
                            Rack *tiles_played_rack, bool allow_playthrough,
                            ErrorStack *error_stack) {
-  int machine_letters_size = string_length(tiles_played) + 1;
+  size_t machine_letters_size = string_length(tiles_played) + 1;
   MachineLetter *machine_letters =
       malloc_or_die(sizeof(MachineLetter) * machine_letters_size);
   int number_of_machine_letters =
@@ -426,7 +439,8 @@ void validate_split_move(const StringSplitter *split_move, const Game *game,
   }
 
   // Check if the rack is in the bag
-  Rack *game_player_rack = player_get_rack(game_get_player(game, player_index));
+  const Rack *game_player_rack =
+      player_get_rack(game_get_player(game, player_index));
   for (int i = 0; i < dist_size; i++) {
     if (rack_get_letter(vm->rack, i) >
         bag_get_letter(bag, i) + rack_get_letter(game_player_rack, i)) {
@@ -660,7 +674,8 @@ ValidatedMoves *validated_moves_create(const Game *game, int player_index,
     StringSplitter *split_moves = split_string(ucgi_moves_string, ',', true);
     vms->number_of_moves = string_splitter_get_number_of_items(split_moves);
 
-    vms->moves = malloc_or_die(sizeof(ValidatedMove *) * vms->number_of_moves);
+    vms->moves = (ValidatedMove **)malloc_or_die(sizeof(ValidatedMove *) *
+                                                 vms->number_of_moves);
 
     for (int i = 0; i < vms->number_of_moves; i++) {
       vms->moves[i] = validated_move_create(
@@ -703,10 +718,6 @@ const Rack *validated_moves_get_rack(const ValidatedMoves *vms, int i) {
   return vms->moves[i]->rack;
 }
 
-const Rack *validated_moves_get_leave(const ValidatedMoves *vms, int i) {
-  return vms->moves[i]->leave;
-}
-
 bool validated_moves_get_unknown_exchange(const ValidatedMoves *vms, int i) {
   return vms->moves[i]->unknown_exchange;
 }
@@ -721,7 +732,7 @@ bool validated_moves_get_challenge_turn_loss(const ValidatedMoves *vms, int i) {
 
 // Adds moves in vms to ml that do not already exist in ml
 void validated_moves_add_to_move_list(const ValidatedMoves *vms, MoveList *ml) {
-  Move **moves = malloc_or_die(sizeof(Move *) * vms->number_of_moves);
+  Move **moves = (Move **)malloc_or_die(sizeof(Move *) * vms->number_of_moves);
   int number_of_new_moves = 0;
   for (int i = 0; i < vms->number_of_moves; i++) {
     if (!move_list_move_exists(ml, vms->moves[i]->move)) {

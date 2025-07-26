@@ -1,14 +1,11 @@
 #ifndef ENCODED_RACK_H
 #define ENCODED_RACK_H
 
-#include <limits.h>
-
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
-
-#include "rack.h"
-
 #include "../util/io_util.h"
+#include "rack.h"
+#include <limits.h>
 
 #define BITS_TO_REPRESENT(n)                                                   \
   ((n) == 0            ? 1                                                     \
@@ -48,17 +45,18 @@
 
 // Use -1 for bits per ml since the ml bits just represent the tiles and aren't
 // specifying a count of anything.
-#define BITS_PER_ML BITS_TO_REPRESENT(MAX_ALPHABET_SIZE - 1)
+#define BITS_PER_ML (uint8_t) BITS_TO_REPRESENT(MAX_ALPHABET_SIZE - 1)
 // Do not use any adjustments for RACK_SIZE since this represents the actual
 // count. For example, a rack size of 8 has 9 distinct counts (0, 1, 2, ..., 8).
 // We could possibly do an increment on the read to convert the actual bit
 // values from [0, 7] to [1, 8] since there will never be zero of a tile in the
 // encoded rack, but we'll leave that for later.
-#define BITS_PER_COUNT BITS_TO_REPRESENT(RACK_SIZE)
+#define BITS_PER_COUNT (uint8_t) BITS_TO_REPRESENT(RACK_SIZE)
 #define BITS_PER_ML_AND_COUNT (BITS_PER_ML + BITS_PER_COUNT)
-#define BITS_PER_UNIT (sizeof(ENCODED_RACK_UNIT_TYPE) * CHAR_BIT)
-#define BITS_PER_RACK (BITS_PER_ML_AND_COUNT * RACK_SIZE)
-#define ENCODED_RACK_UNITS ((BITS_PER_RACK + BITS_PER_UNIT - 1) / BITS_PER_UNIT)
+#define BITS_PER_UNIT (uint8_t)(sizeof(ENCODED_RACK_UNIT_TYPE) * CHAR_BIT)
+#define BITS_PER_RACK (uint8_t)(BITS_PER_ML_AND_COUNT * RACK_SIZE)
+#define ENCODED_RACK_UNITS                                                     \
+  (uint8_t)((BITS_PER_RACK + BITS_PER_UNIT - 1) / BITS_PER_UNIT)
 
 typedef struct EncodedRack {
   ENCODED_RACK_UNIT_TYPE array[ENCODED_RACK_UNITS];
@@ -121,7 +119,7 @@ static inline void encoded_rack_set_count(EncodedRack *encoded_rack, int count,
 static inline int encoded_rack_get_count(const EncodedRack *encoded_rack,
                                          int *bit_index) {
   int count = 0;
-  for (int i = 0; i < BITS_PER_COUNT; i++) {
+  for (uint8_t i = 0; i < BITS_PER_COUNT; i++) {
     if (encoded_rack_get_bit(encoded_rack, *bit_index)) {
       count |= 1 << i;
     }
@@ -154,9 +152,8 @@ static inline void rack_encode(const Rack *rack, EncodedRack *encoded_rack) {
 static inline void rack_decode(const EncodedRack *encoded_rack, Rack *rack) {
   rack_reset(rack);
   int bit_index = 0;
-  MachineLetter curr_ml = 0;
   while (true) {
-    curr_ml = encoded_rack_get_ml(encoded_rack, &bit_index);
+    MachineLetter curr_ml = encoded_rack_get_ml(encoded_rack, &bit_index);
     if (curr_ml == MAX_ALPHABET_SIZE) {
       break;
     }

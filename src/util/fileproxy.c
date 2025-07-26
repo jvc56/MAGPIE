@@ -1,12 +1,13 @@
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "io_util.h"
 #include "string_util.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-#define MAX_CACHE_SIZE 32
-#define MAX_DATA_FILENAME_LENGTH 64
+enum {
+  MAX_CACHE_SIZE = 32,
+  MAX_DATA_FILENAME_LENGTH = 64,
+};
 
 typedef struct FileCacheEntry {
   char filename[MAX_DATA_FILENAME_LENGTH];
@@ -37,11 +38,13 @@ FILE *stream_from_filename(const char *filename, ErrorStack *error_stack) {
   return stream;
 }
 
-void precache_file_data(const char *filename, char *raw_data, int num_bytes) {
+void precache_file_data(const char *filename, const char *raw_data,
+                        const int num_bytes) {
   char *data_copy = malloc_or_die(sizeof(char) * num_bytes);
   memcpy(data_copy, raw_data, num_bytes);
 
-  string_copy(file_cache.entries[file_cache.num_items].filename, filename);
+  strncpy(file_cache.entries[file_cache.num_items].filename, filename,
+          sizeof(file_cache.entries[file_cache.num_items].filename));
   file_cache.entries[file_cache.num_items].raw_data = data_copy;
   file_cache.entries[file_cache.num_items].byte_size = num_bytes;
   log_debug("Cached %s (%d) in cache, with a size of %d", filename,

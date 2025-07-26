@@ -9,11 +9,10 @@
 #ifndef BAI_LOGGER_H
 #define BAI_LOGGER_H
 
-#include <math.h>
-#include <stdio.h>
-
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include <math.h>
+#include <stdio.h>
 
 #define BAI_LOGGER_NUM_DECIMALS 15
 

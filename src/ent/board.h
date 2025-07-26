@@ -1,22 +1,18 @@
 #ifndef BOARD_H
 #define BOARD_H
 
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
-
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/static_eval_defs.h"
-
-#include "board_layout.h"
-
-#include "letter_distribution.h"
-
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "board_layout.h"
+#include "letter_distribution.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 typedef struct Square {
   uint64_t cross_set;
@@ -61,11 +57,6 @@ static inline void square_set_letter(Square *s, MachineLetter letter) {
 
 static inline BonusSquare square_get_bonus_square(const Square *s) {
   return s->bonus_square;
-}
-
-static inline void square_set_bonus_square(Square *s,
-                                           BonusSquare bonus_square) {
-  s->bonus_square = bonus_square;
 }
 
 // Square: is brick
@@ -256,17 +247,6 @@ static inline BonusSquare board_get_bonus_square(const Board *b, int row,
 static inline bool board_get_is_brick(const Board *b, int row, int col) {
   // Cross index doesn't matter for bonus square reads.
   return square_get_is_brick(board_get_readonly_square(b, row, col, 0, 0));
-}
-
-static inline void board_set_bonus_square(Board *b, int row, int col,
-                                          BonusSquare bonus_square) {
-  // Bonus square should be set on all 4 squares.
-  for (int ci = 0; ci < 2; ci++) {
-    for (int dir = 0; dir < 2; dir++) {
-      square_set_bonus_square(board_get_writable_square(b, row, col, dir, ci),
-                              bonus_square);
-    }
-  }
 }
 
 // Board: Cross set
@@ -467,10 +447,6 @@ static inline void board_transpose(Board *board) {
   board->transposed = !board->transposed;
 }
 
-static inline void board_set_transposed(Board *board, bool transposed) {
-  board->transposed = transposed;
-}
-
 // Board: tiles played
 
 static inline int board_get_tiles_played(const Board *board) {
@@ -652,8 +628,10 @@ static inline bool
 board_are_bonus_squares_symmetric_by_transposition(const Board *board) {
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = row + 1; col < BOARD_DIM; col++) {
+      const int row_transposed = col;
+      const int col_transposed = row;
       if (board_get_bonus_square(board, row, col).raw !=
-          board_get_bonus_square(board, col, row).raw) {
+          board_get_bonus_square(board, row_transposed, col_transposed).raw) {
         return false;
       }
     }

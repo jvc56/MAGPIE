@@ -1,21 +1,21 @@
 #ifndef TRANSPOSITION_TABLE_H
 #define TRANSPOSITION_TABLE_H
 
+#include "../compat/ctime.h"
+#include "../compat/memory_info.h"
+#include "zobrist.h"
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <time.h>
 
-#include "../compat/memory_info.h"
-#include "zobrist.h"
-
-#define TT_EXACT 0x01
-#define TT_LOWER 0x02
-#define TT_UPPER 0x03
-
-#define TTENTRY_SIZE_BYTES 16
-#define BOTTOM3_BYTE_MASK ((1 << 24) - 1)
-#define DEPTH_MASK ((1 << 6) - 1)
+enum {
+  TT_EXACT = 0x01,
+  TT_LOWER = 0x02,
+  TT_UPPER = 0x03,
+  TTENTRY_SIZE_BYTES = 16,
+  BOTTOM3_BYTE_MASK = ((1 << 24) - 1),
+  DEPTH_MASK = ((1 << 6) - 1),
+};
 
 typedef struct TTEntry {
   // Don't store the full hash, but the top 5 bytes. The bottom 3 bytes
@@ -89,11 +89,11 @@ transposition_table_create(double fraction_of_memory) {
   log_warn("Creating transposition table. System memory: %lu, TT size: 2**%d "
            "(number of elements: %d, memory required: %dMB)",
            total_memory, tt->size_power_of_2, num_elems,
-           (sizeof(TTEntry) * num_elems) / (1024 * 1024));
+           (sizeof(TTEntry) * num_elems) / (size_t)(1024 * 1024));
   tt->table = malloc_or_die(sizeof(TTEntry) * num_elems);
   memset(tt->table, 0, sizeof(TTEntry) * num_elems);
   tt->size_mask = num_elems - 1;
-  tt->zobrist = zobrist_create(time(NULL));
+  tt->zobrist = zobrist_create(ctime_get_current_time());
   atomic_init(&tt->created, 0);
   atomic_init(&tt->hits, 0);
   atomic_init(&tt->lookups, 0);

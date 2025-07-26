@@ -1,15 +1,13 @@
 #ifndef GAME_H
 #define GAME_H
 
-#include <stdbool.h>
-
 #include "../def/game_defs.h"
 #include "../def/players_data_defs.h"
-
 #include "bag.h"
 #include "board.h"
 #include "letter_distribution.h"
 #include "player.h"
+#include <stdbool.h>
 
 typedef struct Game Game;
 
@@ -48,7 +46,7 @@ bool game_get_data_is_shared(const Game *game,
                              players_data_t players_data_type);
 
 void game_set_consecutive_scoreless_turns(Game *game, int value);
-int game_get_max_scoreless_turns(Game *game);
+int game_get_max_scoreless_turns(const Game *game);
 void game_increment_consecutive_scoreless_turns(Game *game);
 void game_set_endgame_solving_mode(Game *game);
 void game_set_game_end_reason(Game *game, game_end_reason_t game_end_reason);
@@ -58,7 +56,6 @@ void game_set_backup_mode(Game *game, backup_mode_t backup_mode);
 void game_backup(Game *game);
 void game_unplay_last_move(Game *game);
 void game_set_starting_player_index(Game *game, int starting_player_index);
-void game_set_player_on_turn_index(Game *game, int player_on_turn_index);
 void game_gen_all_cross_sets(Game *game);
 void game_gen_cross_set(Game *game, int row, int col, int dir,
                         int cross_set_index);

@@ -6,7 +6,9 @@
 
 // Passes and exchanges can exceed the board size when racks are bigger than the
 // board dimension.
-#define MOVE_MAX_TILES ((BOARD_DIM) > (RACK_SIZE) ? (BOARD_DIM) : (RACK_SIZE))
+enum {
+  MOVE_MAX_TILES = ((BOARD_DIM) > (RACK_SIZE) ? (BOARD_DIM) : (RACK_SIZE))
+};
 
 typedef enum {
   MOVE_SORT_EQUITY,

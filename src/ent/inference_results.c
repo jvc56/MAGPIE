@@ -1,17 +1,17 @@
 #include "inference_results.h"
 
-#include <stdlib.h>
-
 #include "../def/inference_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
-
-#include "leave_rack.h"
-#include "stats.h"
-
 #include "../util/io_util.h"
 #include "../util/math_util.h"
+#include "leave_rack.h"
+#include "rack.h"
+#include "stats.h"
+#include <stdint.h>
+#include <stdlib.h>
 
-#define NUMBER_OF_STAT_TYPES 3
+enum { NUMBER_OF_STAT_TYPES = 3 };
 
 struct InferenceResults {
   int subtotals_size;
@@ -140,15 +140,15 @@ inference_results_get_equity_values(InferenceResults *results,
   return results->equity_values[(int)inference_stat_type];
 }
 
-LeaveRackList *
-inference_results_get_leave_rack_list(InferenceResults *inference_results) {
+LeaveRackList *inference_results_get_leave_rack_list(
+    const InferenceResults *inference_results) {
   return inference_results->leave_rack_list;
 }
 
 int get_letter_subtotal_index(MachineLetter letter, int number_of_letters,
                               inference_subtotal_t subtotal_type) {
-  return (letter * 2 * (RACK_SIZE)) + ((number_of_letters - 1) * 2) +
-         subtotal_type;
+  return (int)((letter * 2 * (RACK_SIZE)) + ((number_of_letters - 1) * 2) +
+               subtotal_type);
 }
 
 uint64_t inference_results_get_subtotal(const InferenceResults *results,
@@ -231,7 +231,8 @@ double get_probability_for_random_minimum_draw(
       rack_get_total_letters(bag_as_rack);
   const uint8_t total_number_of_letters_on_rack =
       rack_get_total_letters(target_rack);
-  int number_of_this_letter_in_bag = rack_get_letter(bag_as_rack, this_letter);
+  int number_of_this_letter_in_bag =
+      (int)rack_get_letter(bag_as_rack, this_letter);
 
   // If there are not enough letters to meet the minimum, the probability
   // is trivially 0.
@@ -245,8 +246,7 @@ double get_probability_for_random_minimum_draw(
 
   // If the player is emptying the bag and there are the minimum
   // number of leaves remaining, the probability is trivially 1.
-  if (total_number_of_letters_in_bag <= total_number_of_letters_to_draw &&
-      number_of_this_letter_in_bag >= minimum_adjusted_for_partial_rack) {
+  if (total_number_of_letters_in_bag <= total_number_of_letters_to_draw) {
     return 1;
   }
 
@@ -266,5 +266,5 @@ double get_probability_for_random_minimum_draw(
                total_number_of_letters_to_draw - i);
   }
 
-  return ((double)total_draws_for_this_letter_minimum) / total_draws;
+  return ((double)total_draws_for_this_letter_minimum) / (double)total_draws;
 }

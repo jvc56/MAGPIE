@@ -1,17 +1,21 @@
 #include "string_util.h"
 
+#include "io_util.h"
+#include <assert.h>
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
-#include "io_util.h"
+enum {
+  STRING_LIST_INITIAL_CAPACITY = 10,
+  STRING_BUILDER_MIN_SIZE = 32,
+};
 
-#define STRING_LIST_INITIAL_CAPACITY 10
-#define STRING_BUILDER_MIN_SIZE 32
 #define STRING_CONV_ACCEPT_CHARS " \t\n\r"
 
 // ****************************************************************************
@@ -89,7 +93,7 @@ void string_builder_add_space_padded_string(StringBuilder *string_builder,
   const size_t printed_length = strlen(formatted_string);
   const size_t number_of_spaces =
       total_length > printed_length ? total_length - printed_length : 0;
-  string_builder_add_spaces(string_builder, number_of_spaces);
+  string_builder_add_spaces(string_builder, (int)number_of_spaces);
   free(formatted_string);
 }
 
@@ -115,14 +119,6 @@ void string_builder_add_spaces(StringBuilder *string_builder,
 
 void string_builder_add_int(StringBuilder *string_builder, int64_t n) {
   string_builder_add_formatted_string(string_builder, "%d", n);
-}
-
-void string_builder_add_uint(StringBuilder *string_builder, uint64_t n) {
-  string_builder_add_formatted_string(string_builder, "%lu", n);
-}
-
-void string_builder_add_double(StringBuilder *string_builder, double val) {
-  string_builder_add_formatted_string(string_builder, "%0.2f", val);
 }
 
 void string_builder_add_char(StringBuilder *string_builder, char c) {
@@ -321,8 +317,8 @@ int split_string_scan(const StringDelimiter *string_delimiter,
 }
 
 StringSplitter *split_string_internal(const char *input_string,
-                                      StringDelimiter *string_delimiter,
-                                      bool ignore_empty) {
+                                      const StringDelimiter *string_delimiter,
+                                      const bool ignore_empty) {
 
   int number_of_items = split_string_scan(string_delimiter, NULL, input_string,
                                           ignore_empty, false);
@@ -450,50 +446,12 @@ bool has_iprefix(const char *pre, const char *str) {
   return strncasecmp(pre, str, string_length(pre)) == 0;
 }
 
-bool has_suffix(const char *str, const char *suffix) {
-  if (!str || !suffix) {
-    return false;
-  }
-  size_t str_len = strlen(str);
-  size_t suffix_len = strlen(suffix);
-  if (suffix_len > str_len) {
-    return false;
-  }
-  return strncmp(str + str_len - suffix_len, suffix, suffix_len) == 0;
-}
-
-bool has_isuffix(const char *str, const char *suffix) {
-  if (!str || !suffix) {
-    return false;
-  }
-  size_t str_len = strlen(str);
-  size_t suffix_len = strlen(suffix);
-  if (suffix_len > str_len) {
-    return false;
-  }
-  return strncasecmp(str + str_len - suffix_len, suffix, suffix_len) == 0;
-}
-
-bool string_contains(const char *str, char ch) {
-  if (!str) {
-    return false;
-  }
-
-  // Iterate through the string to check for the character
-  while (*str) {
-    if (*str == ch) {
-      return true;
-    }
-    str++;
-  }
-
-  return false;
-}
-
 // Raises a fatal error if str is null
 bool is_string_empty_or_whitespace(const char *str) {
   if (!str) {
     log_fatal("unexpected null string when checking for whitespace or empty");
+    // unreachable return, but silences static analyzer warnings
+    return false;
   }
   while (*str != '\0') {
     if (!isspace((unsigned char)*str)) {
@@ -554,35 +512,11 @@ bool has_substring(const char *str, const char *pattern) {
   return (ptr != NULL);
 }
 
-bool is_decimal_number(const char *str) {
-  if (!str || *str == '\0') {
-    return false; // Empty string is not a valid decimal number
-  }
-
-  int i = 0;
-  bool has_decimal_point = false;
-
-  if (str[i] == '\0') {
-    return false; // No digits in the string
-  }
-
-  while (str[i] != '\0') {
-    if (isdigit(str[i])) {
-      i++;
-    } else if (str[i] == '.' && !has_decimal_point) {
-      has_decimal_point = true;
-      i++;
-    } else {
-      return false; // Invalid character in the string
-    }
-  }
-
-  return true;
-}
-
 size_t string_length(const char *str) {
   if (!str) {
     log_fatal("cannot get the length of a null string");
+    // unreachable return, but silences static analyzer warnings
+    return 0;
   }
   return strlen(str);
 }
@@ -590,25 +524,21 @@ size_t string_length(const char *str) {
 char *string_duplicate(const char *str) {
   if (!str) {
     log_fatal("cannot duplicate null string");
+    // unreachable return, but silences static analyzer warnings
+    return NULL;
   }
-
-  char *duplicate = strdup(str);
-
-  if (!duplicate) {
-    log_fatal("string duplicate failed");
-  }
-
+  char *duplicate = malloc_or_die(sizeof(char) * (string_length(str) + 1));
+  strncpy(duplicate, str, string_length(str));
+  duplicate[string_length(str)] = '\0';
   return duplicate;
 }
-
-char *string_copy(char *dest, const char *src) { return strcpy(dest, src); }
 
 char *get_substring(const char *input_string, int start_index, int end_index) {
   if (!input_string) {
     log_fatal("cannot get substring of null string");
   }
 
-  int input_length = string_length(input_string);
+  int input_length = (int)string_length(input_string);
 
   if (start_index < 0 || end_index < start_index ||
       start_index > input_length || end_index > input_length) {
@@ -663,10 +593,7 @@ char *iso_8859_1_to_utf8(const char *iso_8859_1_string) {
 char *get_dirpath_from_filepath(const char *filepath) {
   // Make a copy of the input filepath because strtok modifies the string
   char *filepath_copy = string_duplicate(filepath);
-  if (filepath_copy == NULL) {
-    log_fatal("failed to duplicate string: %s", filepath);
-  }
-
+  assert(filepath_copy);
   // Find the last occurrence of the '/' or '\' character
   char *last_slash = strrchr(filepath_copy, '/');
   char *last_backslash = strrchr(filepath_copy, '\\');
@@ -690,7 +617,7 @@ char *get_dirpath_from_filepath(const char *filepath) {
 }
 
 char *cut_off_after_last_char(const char *str, char ch) {
-  char *pos = strrchr(str, ch);
+  const char *pos = strrchr(str, ch);
 
   if (pos == NULL) {
     return string_duplicate(str);
@@ -707,7 +634,7 @@ char *cut_off_after_last_char(const char *str, char ch) {
 }
 
 char *cut_off_after_first_char(const char *str, char ch) {
-  char *pos = strchr(str, ch);
+  const char *pos = strchr(str, ch);
 
   if (pos == NULL) {
     return string_duplicate(str);
@@ -732,21 +659,29 @@ char *insert_before_dot(const char *str, const char *insert) {
   // Calculate the new length of the string
   size_t new_len = str_len + insert_len;
   char *new_str = (char *)malloc_or_die(new_len + 1);
+  if (!new_str) {
+    return NULL; // Handle allocation failure
+  }
 
   if (dot_position) {
     // Copy the part before the dot
     size_t prefix_len = dot_position - str;
-    strncpy(new_str, str, prefix_len);
+    memcpy(new_str, str, prefix_len);
 
     // Insert the new content
-    string_copy(new_str + prefix_len, insert);
+    memcpy(new_str + prefix_len, insert, insert_len);
 
-    // Copy the part after the dot
-    string_copy(new_str + prefix_len + insert_len, dot_position);
+    // Copy the part from the dot onwards
+    memcpy(new_str + prefix_len + insert_len, dot_position,
+           str_len - prefix_len);
+
+    // Null terminate
+    new_str[new_len] = '\0';
   } else {
     // If there's no dot, concatenate the original string and the insert string
-    string_copy(new_str, str);
-    strcat(new_str, insert);
+    memcpy(new_str, str, str_len);
+    memcpy(new_str + str_len, insert, insert_len);
+    new_str[new_len] = '\0';
   }
 
   return new_str;
@@ -786,7 +721,10 @@ void trim_internal(char *str, const char c, bool trim_whitespace) {
   }
 
   char *ptr = str;
-  int len = strlen(ptr);
+  size_t len = strlen(ptr);
+  if (len == 0) {
+    return;
+  }
 
   while (len - 1 > 0 &&
          matches_trim_condition(ptr[len - 1], c, trim_whitespace)) {
@@ -804,8 +742,6 @@ void trim_internal(char *str, const char c, bool trim_whitespace) {
 void trim_whitespace(char *str) { trim_internal(str, 0, true); }
 
 void trim_char(char *str, const char c) { trim_internal(str, c, false); }
-
-void remove_first_newline(char *str) { str[strcspn(str, "\n")] = 0; }
 
 int string_to_int(const char *str, ErrorStack *error_stack) {
   const char *str_copy = str;

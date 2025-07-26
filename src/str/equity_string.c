@@ -1,5 +1,5 @@
+#include "../def/equity_defs.h"
 #include "../ent/equity.h"
-
 #include "../util/string_util.h"
 
 void string_builder_add_equity(StringBuilder *sb, Equity equity,

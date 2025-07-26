@@ -1,10 +1,9 @@
 #include "leave_rack.h"
 
-#include <stdlib.h>
-
-#include "rack.h"
-
 #include "../util/io_util.h"
+#include "equity.h"
+#include "rack.h"
+#include <stdlib.h>
 
 struct LeaveRack {
   Rack *leave;
@@ -110,19 +109,23 @@ void down_heapify_leave_rack(LeaveRackList *lrl, int parent_node) {
   int min;
   LeaveRack *temp;
 
-  if (left >= lrl->count || left < 0)
+  if (left >= lrl->count || left < 0) {
     left = -1;
-  if (right >= lrl->count || right < 0)
+  }
+  if (right >= lrl->count || right < 0) {
     right = -1;
+  }
 
   if (left != -1 &&
-      lrl->leave_racks[left]->draws < lrl->leave_racks[parent_node]->draws)
+      lrl->leave_racks[left]->draws < lrl->leave_racks[parent_node]->draws) {
     min = left;
-  else
+  } else {
     min = parent_node;
+  }
   if (right != -1 &&
-      lrl->leave_racks[right]->draws < lrl->leave_racks[min]->draws)
+      lrl->leave_racks[right]->draws < lrl->leave_racks[min]->draws) {
     min = right;
+  }
 
   if (min != parent_node) {
     temp = lrl->leave_racks[min];

@@ -1,15 +1,15 @@
 #include "dictionary_word.h"
 
-#include <stdint.h>
-#include <stdio.h>
-
 #include "../def/dictionary_word_defs.h"
 #include "../def/kwg_defs.h"
-
+#include "../def/letter_distribution_defs.h"
+#include "../ent/data_filepaths.h"
 #include "../ent/letter_distribution.h"
-
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 struct DictionaryWord {
   MachineLetter word[MAX_KWG_STRING_LENGTH];
@@ -88,8 +88,9 @@ int dictionary_word_compare(const void *a, const void *b) {
     if (dictionary_word_get_word(word_a)[i] <
         dictionary_word_get_word(word_b)[i]) {
       return -1;
-    } else if (dictionary_word_get_word(word_a)[i] >
-               dictionary_word_get_word(word_b)[i]) {
+    }
+    if (dictionary_word_get_word(word_a)[i] >
+        dictionary_word_get_word(word_b)[i]) {
       return 1;
     }
   }
@@ -98,7 +99,8 @@ int dictionary_word_compare(const void *a, const void *b) {
   // the shorter word is considered "less" than the longer one
   if (length_a < length_b) {
     return -1;
-  } else if (length_a > length_b) {
+  }
+  if (length_a > length_b) {
     return 1;
   }
   return 0;
@@ -118,15 +120,6 @@ void dictionary_word_list_unique(DictionaryWordList *sorted,
       dictionary_word_list_add_word(unique, sorted->dictionary_words[i].word,
                                     sorted->dictionary_words[i].length);
     }
-  }
-}
-
-void dictionary_word_list_copy(const DictionaryWordList *src,
-                               DictionaryWordList **dst) {
-  *dst = dictionary_word_list_create_with_capacity(src->count);
-  for (int i = 0; i < src->count; i++) {
-    dictionary_word_list_add_word(*dst, src->dictionary_words[i].word,
-                                  src->dictionary_words[i].length);
   }
 }
 

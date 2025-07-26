@@ -3,7 +3,6 @@
 
 #include "../def/game_history_defs.h"
 #include "../def/validated_move_defs.h"
-
 #include "../util/io_util.h"
 #include "game.h"
 #include "letter_distribution.h"
@@ -25,11 +24,11 @@ const Move *validated_moves_get_move(const ValidatedMoves *vms, int i);
 const FormedWords *validated_moves_get_formed_words(const ValidatedMoves *vms,
                                                     int i);
 const Rack *validated_moves_get_rack(const ValidatedMoves *vms, int i);
-const Rack *validated_moves_get_leave(const ValidatedMoves *vms, int i);
 bool validated_moves_get_unknown_exchange(const ValidatedMoves *vms, int i);
 
 char *validated_moves_get_phonies_string(const LetterDistribution *ld,
-                                         ValidatedMoves *vms, int i);
+                                         const ValidatedMoves *vms,
+                                         int vm_index);
 
 int validated_moves_get_challenge_points(const ValidatedMoves *vms, int i);
 bool validated_moves_get_challenge_turn_loss(const ValidatedMoves *vms, int i);

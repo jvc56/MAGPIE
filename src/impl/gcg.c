@@ -1,34 +1,35 @@
-#include <regex.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-
+#include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/gameplay_defs.h"
 #include "../def/letter_distribution_defs.h"
-
+#include "../def/players_data_defs.h"
+#include "../def/validated_move_defs.h"
+#include "../ent/board_layout.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/player.h"
+#include "../ent/players_data.h"
 #include "../ent/rack.h"
 #include "../ent/validated_move.h"
-
-#include "config.h"
-
 #include "../impl/gameplay.h"
-
 #include "../str/game_string.h"
 #include "../str/move_string.h"
 #include "../str/rack_string.h"
-
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "config.h"
+#include <regex.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-#define MAX_GROUPS 7
+enum { MAX_GROUPS = 7 };
 
 typedef enum {
   GCG_ENCODING_ISO_8859_1,
@@ -307,7 +308,8 @@ gcg_token_t find_matching_gcg_token(GCGParser *gcg_parser,
                 (MAX_GROUPS), gcg_parser->matching_groups, 0);
     if (!regexec_result) {
       return gcg_parser->token_regex_pairs[i]->token;
-    } else if (regexec_result != REG_NOMATCH) {
+    }
+    if (regexec_result != REG_NOMATCH) {
       char msgbuf[100];
       regerror(regexec_result, &gcg_parser->token_regex_pairs[i]->regex, msgbuf,
                sizeof(msgbuf));
@@ -373,7 +375,7 @@ Rack *get_rack_from_matching(const GCGParser *gcg_parser, const char *gcg_line,
   char *player_rack_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
   const LetterDistribution *ld = game_get_ld(gcg_parser->game);
-  const uint32_t ld_size = ld_get_size(ld);
+  const int ld_size = ld_get_size(ld);
   Rack *rack = rack_create(ld_size);
   int number_of_letters_set = rack_set_to_string(ld, rack, player_rack_string);
   free(player_rack_string);
@@ -403,8 +405,8 @@ void add_tiles_played_to_string_builder(StringBuilder *sb,
                                         const char *gcg_line, int group_index) {
   char *matching_group_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
-  int matching_group_string_length = string_length(matching_group_string);
-  for (int i = 0; i < matching_group_string_length; i++) {
+  size_t matching_group_string_length = string_length(matching_group_string);
+  for (size_t i = 0; i < matching_group_string_length; i++) {
     if (matching_group_string[i] == ASCII_PLAYED_THROUGH) {
       matching_group_string[i] = ASCII_UCGI_PLAYED_THROUGH;
     }
@@ -508,8 +510,8 @@ void load_config_with_game_history(const GameHistory *game_history,
 // Validates that the game event player indexes are
 // aligned with the game and enforces game event sequence
 // logic
-void validate_game_event_order_and_index(GameEvent *game_event,
-                                         GameEvent *previous_game_event,
+void validate_game_event_order_and_index(const GameEvent *game_event,
+                                         const GameEvent *previous_game_event,
                                          int game_player_on_turn_index,
                                          bool game_is_over,
                                          ErrorStack *error_stack) {
@@ -621,9 +623,8 @@ bool game_event_has_player_rack(const GameEvent *game_event, int player_index) {
            game_event_type == GAME_EVENT_PASS ||
            game_event_type == GAME_EVENT_EXCHANGE ||
            game_event_type == GAME_EVENT_END_RACK_PENALTY;
-  } else {
-    return game_event_type == GAME_EVENT_END_RACK_POINTS;
   }
+  return game_event_type == GAME_EVENT_END_RACK_POINTS;
 }
 
 // Returns NULL if there is no rack for the player and sets the next rack set
@@ -634,7 +635,7 @@ const Rack *get_player_next_rack(GameHistory *game_history,
   int number_of_game_events = game_history_get_number_of_events(game_history);
   for (int game_event_index = initial_game_event_index + 1;
        game_event_index < number_of_game_events; game_event_index++) {
-    GameEvent *game_event =
+    const GameEvent *game_event =
         game_history_get_event(game_history, game_event_index);
     if (game_event_index == initial_game_event_index + 1 &&
         game_event_get_type(game_event) == GAME_EVENT_PHONY_TILES_RETURNED) {
@@ -655,7 +656,7 @@ void play_game_history_turn(GameHistory *game_history, Game *game,
                             ErrorStack *error_stack) {
   GameEvent *game_event =
       game_history_get_event(game_history, game_event_index);
-  GameEvent *previous_game_event = NULL;
+  const GameEvent *previous_game_event = NULL;
   if (game_event_index > 0) {
     previous_game_event =
         game_history_get_event(game_history, game_event_index - 1);
@@ -753,8 +754,9 @@ void play_game_history_turn(GameHistory *game_history, Game *game,
                         game_event_get_score_adjustment(game_event));
     break;
   case GAME_EVENT_PHONY_TILES_RETURNED:;
-    Rack *previous_played_tiles = game_history_player_get_previous_played_tiles(
-        game_history, game_event_player_index);
+    const Rack *previous_played_tiles =
+        game_history_player_get_previous_played_tiles(game_history,
+                                                      game_event_player_index);
     Rack *known_rack_from_phonies =
         game_history_player_get_known_rack_from_phonies(
             game_history, game_event_player_index);
@@ -1544,7 +1546,6 @@ void draw_initial_racks(Game *game, GameHistory *game_history,
       }
     }
   }
-  return;
 }
 
 void parse_gcg_with_parser(GCGParser *gcg_parser, const char *gcg_string,
@@ -1630,7 +1631,7 @@ void game_play_to_turn(GameHistory *game_history, Game *game, int turn_index,
   game_history_init_player_phony_calc_racks(game_history, ld_size);
   for (int game_event_index = 0; game_event_index < number_of_game_events;
        game_event_index++) {
-    GameEvent *game_event =
+    const GameEvent *game_event =
         game_history_get_event(game_history, game_event_index);
     current_turn_index += game_event_get_turn_value(game_event);
     if (current_turn_index > turn_index && !game_over(game)) {
@@ -1671,7 +1672,7 @@ void game_play_to_turn(GameHistory *game_history, Game *game, int turn_index,
   }
 
   return_rack_to_bag(game, player_on_turn_index);
-  Rack *player_on_turn_last_known_rack =
+  const Rack *player_on_turn_last_known_rack =
       game_history_player_get_last_known_rack(game_history,
                                               player_on_turn_index);
   if (player_on_turn_last_known_rack &&
@@ -1695,7 +1696,7 @@ void game_play_to_end(GameHistory *game_history, Game *game,
 
 // Assumes the game history is valid
 void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
-               GameHistory *game_history, ErrorStack *error_stack) {
+               const GameHistory *game_history, ErrorStack *error_stack) {
   StringBuilder *gcg_sb = string_builder_create();
   string_builder_add_formatted_string(gcg_sb, "#%s UTF-8\n",
                                       GCG_CHAR_ENCODING_STRING);
@@ -1762,7 +1763,7 @@ void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
   int player_on_turn = 0;
   bool game_is_over = false;
   for (int event_index = 0; event_index < number_of_events; event_index++) {
-    GameEvent *event = game_history_get_event(game_history, event_index);
+    const GameEvent *event = game_history_get_event(game_history, event_index);
     const Rack *rack = game_event_get_rack(event);
     string_builder_add_formatted_string(
         gcg_sb, ">%s: ",

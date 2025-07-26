@@ -1,23 +1,23 @@
 #include "game.h"
 
-#include <stdint.h>
-#include <stdlib.h>
-
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
-
 #include "../ent/equity.h"
-
+#include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "bag.h"
 #include "board.h"
 #include "kwg.h"
 #include "kwg_alpha.h"
+#include "letter_distribution.h"
 #include "player.h"
 #include "players_data.h"
 #include "rack.h"
+#include <stdint.h>
+#include <stdlib.h>
 
 typedef struct MinimalGameBackup {
   Board *board;
@@ -258,8 +258,9 @@ static inline void game_gen_alpha_cross_set(Game *game, int row, int col,
   board_set_cross_score(board, row, col, dir, cross_set_index, score);
 }
 
-static inline void game_gen_classic_cross_set(Game *game, int row, int col,
-                                              int dir, int cross_set_index) {
+static inline void game_gen_classic_cross_set(const Game *game, int row,
+                                              int col, int dir,
+                                              int cross_set_index) {
   if (!board_is_position_in_bounds(row, col)) {
     return;
   }
@@ -356,7 +357,7 @@ static inline void game_gen_classic_cross_set(Game *game, int row, int col,
   if (nonempty_to_left && nonempty_to_right) {
     uint64_t letter_set = 0;
     if (left_lpath_is_valid && right_lpath_is_valid) {
-      for (int i = right_lnode_index;; i++) {
+      for (uint32_t i = right_lnode_index;; i++) {
         const uint32_t node = kwg_node(kwg, i);
         const uint32_t ml = kwg_node_tile(node);
         // Only try letters that are possible in right extensions from the
@@ -446,14 +447,10 @@ void game_set_starting_player_index(Game *game, int starting_player_index) {
   game->player_on_turn_index = starting_player_index;
 }
 
-void game_set_player_on_turn_index(Game *game, int player_on_turn_index) {
-  game->player_on_turn_index = player_on_turn_index;
-}
-
 void pre_allocate_backups(Game *game) {
   // pre-allocate heap backup structures to make backups as fast as possible.
   const LetterDistribution *ld = game_get_ld(game);
-  uint32_t ld_size = ld_get_size(ld);
+  int ld_size = ld_get_size(ld);
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
     game->game_backups[i] = malloc_or_die(sizeof(MinimalGameBackup));
     game->game_backups[i]->bag = bag_create(ld, 0);
@@ -583,8 +580,8 @@ void game_backup(Game *game) {
     state->player_on_turn_index = game->player_on_turn_index;
     state->starting_player_index = game->starting_player_index;
     state->consecutive_scoreless_turns = game->consecutive_scoreless_turns;
-    Player *player0 = game->players[0];
-    Player *player1 = game->players[1];
+    const Player *player0 = game->players[0];
+    const Player *player1 = game->players[1];
     rack_copy(state->p0rack, player_get_rack(player0));
     state->p0score = player_get_score(player0);
     rack_copy(state->p1rack, player_get_rack(player1));
@@ -599,7 +596,8 @@ void game_unplay_last_move(Game *game) {
   if (game->backup_cursor == 0) {
     log_fatal("cannot unplay last move without a game backup");
   }
-  MinimalGameBackup *state = game->game_backups[game->backup_cursor - 1];
+  // cppcheck-suppress negativeIndex
+  const MinimalGameBackup *state = game->game_backups[game->backup_cursor - 1];
   game->backup_cursor--;
 
   game->consecutive_scoreless_turns = state->consecutive_scoreless_turns;
@@ -644,6 +642,6 @@ void game_destroy(Game *game) {
   free(game);
 }
 
-int game_get_max_scoreless_turns(Game *game) {
+int game_get_max_scoreless_turns(const Game *game) {
   return game->max_scoreless_turns;
 }

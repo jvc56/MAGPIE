@@ -1,20 +1,16 @@
 #ifndef LETTER_DISTRIBUTION_H
 #define LETTER_DISTRIBUTION_H
 
+#include "../def/board_defs.h"
+#include "../def/letter_distribution_defs.h"
+#include "../ent/equity.h"
+#include "../util/io_util.h"
+#include "../util/string_util.h"
+#include "data_filepaths.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
-
-#include "../def/board_defs.h"
-#include "../def/letter_distribution_defs.h"
-
-#include "../ent/equity.h"
-
-#include "data_filepaths.h"
-
-#include "../util/io_util.h"
-#include "../util/string_util.h"
 
 typedef enum {
   LD_TYPE_UNKNOWN,
@@ -27,9 +23,11 @@ typedef enum {
   LD_TYPE_FRENCH,
 } ld_t;
 
-#define INVALID_LETTER (0x80 - 1)
-#define MULTICHAR_START_DELIMITER '['
-#define MULTICHAR_END_DELIMITER ']'
+enum {
+  INVALID_LETTER = 0x80 - 1,
+  MULTICHAR_START_DELIMITER = '[',
+  MULTICHAR_END_DELIMITER = ']'
+};
 
 typedef struct LetterDistribution {
   char *name;
@@ -41,7 +39,7 @@ typedef struct LetterDistribution {
   MachineLetter score_order[MACHINE_LETTER_MAX_VALUE];
   bool is_vowel[MACHINE_LETTER_MAX_VALUE];
   int total_tiles;
-  int max_tile_length;
+  size_t max_tile_length;
   char ld_ml_to_hl[MACHINE_LETTER_MAX_VALUE][MAX_LETTER_BYTE_LENGTH];
 } LetterDistribution;
 
@@ -105,7 +103,7 @@ static inline void ld_create_internal(const char *ld_name,
   }
 
   int machine_letter = 0;
-  int max_tile_length = 0;
+  size_t max_tile_length = 0;
   ld->total_tiles = 0;
   StringSplitter *single_letter_info = NULL;
   for (int i = 0; i < number_of_lines; i++) {
@@ -157,7 +155,7 @@ static inline void ld_create_internal(const char *ld_name,
       break;
     }
 
-    int tile_length = string_length(letter);
+    size_t tile_length = string_length(letter);
     if (tile_length > max_tile_length) {
       max_tile_length = tile_length;
     }
@@ -167,12 +165,14 @@ static inline void ld_create_internal(const char *ld_name,
     ld->scores[machine_letter] = score;
     ld->is_vowel[machine_letter] = is_vowel == 1;
 
-    string_copy(ld->ld_ml_to_hl[machine_letter], letter);
+    strncpy(ld->ld_ml_to_hl[machine_letter], letter,
+            sizeof(ld->ld_ml_to_hl[machine_letter]));
 
     if (machine_letter > 0) {
       MachineLetter blanked_machine_letter =
           get_blanked_machine_letter(machine_letter);
-      string_copy(ld->ld_ml_to_hl[blanked_machine_letter], lower_case_letter);
+      strncpy(ld->ld_ml_to_hl[blanked_machine_letter], lower_case_letter,
+              sizeof(ld->ld_ml_to_hl[blanked_machine_letter]));
     }
     string_splitter_destroy(single_letter_info);
     single_letter_info = NULL;
@@ -245,10 +245,6 @@ static inline int ld_get_total_tiles(const LetterDistribution *ld) {
   return ld->total_tiles;
 }
 
-static inline int ld_get_max_tile_length(const LetterDistribution *ld) {
-  return ld->max_tile_length;
-}
-
 // Returns:
 //  * the number of utf8 bytes for this code point for the first byte or
 //  * 0 for subsequent bytes in the code point or
@@ -288,9 +284,8 @@ static inline char *ld_ml_to_hl(const LetterDistribution *ld,
   const char *human_readable_letter = ld->ld_ml_to_hl[ml];
   if (is_human_readable_letter_multichar(human_readable_letter)) {
     return get_formatted_string("[%s]", human_readable_letter);
-  } else {
-    return string_duplicate(human_readable_letter);
   }
+  return string_duplicate(human_readable_letter);
 }
 
 // This is a linear search. This function should not be used for anything
@@ -318,7 +313,7 @@ static inline bool char_is_playthrough(const char c) {
 static inline int ld_str_to_mls(const LetterDistribution *ld, const char *str,
                                 bool allow_played_through_marker,
                                 MachineLetter *mls, size_t mls_size) {
-
+  assert(str != NULL);
   int num_mls = 0;
   size_t num_bytes = string_length(str);
   // Use +1 for the null terminator
@@ -498,6 +493,7 @@ static inline ld_t ld_get_type_from_ld_name(const char *ld_name,
 // BOARD_DIM to determine a default letter distribution name.
 static inline char *ld_get_default_name_from_type(ld_t ld_type,
                                                   ErrorStack *error_stack) {
+  // NOLINTNEXTLINE(misc-redundant-expression)
   if (BOARD_DIM != DEFAULT_BOARD_DIM && BOARD_DIM != DEFAULT_SUPER_BOARD_DIM) {
     error_stack_push(
         error_stack, ERROR_STATUS_LD_UNSUPPORTED_BOARD_DIM_DEFAULT,

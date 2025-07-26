@@ -1,23 +1,24 @@
 #ifndef WMP_MOVEGEN_H
 #define WMP_MOVEGEN_H
 
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
-
+#include "../def/bit_rack_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/move_defs.h"
-
 #include "../ent/anchor.h"
 #include "../ent/bit_rack.h"
 #include "../ent/board.h"
 #include "../ent/leave_map.h"
 #include "../ent/wmp.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 
-#define MAX_POSSIBLE_PLAYTHROUGH_BLOCKS ((BOARD_DIM / 2) + 1)
-#define MIN_TILES_FOR_WMP_GEN 2
-#define MAX_WMP_MOVE_GEN_ANCHORS                                               \
-  ((RACK_SIZE + 1) * MAX_POSSIBLE_PLAYTHROUGH_BLOCKS)
+enum {
+  MAX_POSSIBLE_PLAYTHROUGH_BLOCKS = ((BOARD_DIM / 2) + 1),
+  MIN_TILES_FOR_WMP_GEN = 2,
+  MAX_WMP_MOVE_GEN_ANCHORS =
+      ((RACK_SIZE + 1) * MAX_POSSIBLE_PLAYTHROUGH_BLOCKS),
+};
 
 typedef struct SubrackInfo {
   BitRack subrack;
@@ -25,6 +26,7 @@ typedef struct SubrackInfo {
   Equity leave_value;
 } SubrackInfo;
 
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 typedef struct WMPMoveGen {
   const WMP *wmp;
   BitRack player_bit_rack;
@@ -46,9 +48,9 @@ typedef struct WMPMoveGen {
 
 static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
                                      const LetterDistribution *ld,
-                                     Rack *player_rack, const WMP *wmp) {
+                                     const Rack *player_rack, const WMP *wmp) {
   wmp_move_gen->wmp = wmp;
-  if (wmp == NULL) {
+  if (wmp == NULL || player_rack == NULL || ld == NULL) {
     return;
   }
   wmp_move_gen->player_bit_rack = bit_rack_create_from_rack(ld, player_rack);
@@ -192,7 +194,8 @@ wmp_move_gen_restore_playthrough_state(WMPMoveGen *wmp_move_gen) {
       wmp_move_gen->num_tiles_played_through_copy;
 }
 
-static inline bool wmp_move_gen_has_playthrough(WMPMoveGen *wmp_move_gen) {
+static inline bool
+wmp_move_gen_has_playthrough(const WMPMoveGen *wmp_move_gen) {
   return wmp_move_gen->num_tiles_played_through > 0;
 }
 

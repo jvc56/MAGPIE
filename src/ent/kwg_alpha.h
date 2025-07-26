@@ -1,7 +1,6 @@
-#include <stdint.h>
-
 #include "kwg.h"
 #include "rack.h"
+#include <stdint.h>
 
 // These kwg alpha functions were originally
 // developed in wolges. For more details see
@@ -31,8 +30,8 @@ kwg_completes_alpha_cross_set(const KWG *kwg, uint32_t node_index,
                               const MachineLetter next_letter) {
   const uint16_t dist_size = rack_get_dist_size(rack);
   for (MachineLetter letter = next_letter; letter < dist_size; letter++) {
-    int num_letter = rack_get_letter(rack, letter);
-    for (int k = 0; k < num_letter; k++) {
+    int8_t num_letter = rack_get_letter(rack, letter);
+    for (int8_t k = 0; k < num_letter; k++) {
       node_index = kwg_seek(kwg, node_index, letter);
       if (node_index == 0) {
         return false;
@@ -75,14 +74,15 @@ static inline uint64_t kwg_compute_alpha_cross_set(const KWG *kwg,
   const uint16_t dist_size = rack_get_dist_size(rack);
   // Use 1 to skip the blank
   for (MachineLetter letter = 1; letter < dist_size; letter++) {
-    int num_letter = rack_get_letter(rack, letter);
-    for (int k = 0; k < num_letter; k++) {
+    int8_t num_letter = rack_get_letter(rack, letter);
+    for (int8_t k = 0; k < num_letter; k++) {
       for (;;) {
         const uint32_t node = kwg_node(kwg, node_index);
         const MachineLetter tile = kwg_node_tile(node);
         if (tile > letter) {
           return cross_set;
-        } else if (tile < letter) {
+        }
+        if (tile < letter) {
           if (kwg_completes_alpha_cross_set(kwg, node_index, rack, letter)) {
             cross_set |= 1 << tile;
           }

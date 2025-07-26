@@ -4,7 +4,6 @@
 #include "../ent/board.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
-
 #include "../util/string_util.h"
 
 void string_builder_add_move_description(StringBuilder *move_string_builder,

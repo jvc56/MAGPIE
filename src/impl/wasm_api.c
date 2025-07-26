@@ -1,24 +1,21 @@
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "../def/move_defs.h"
-
 #include "../ent/board.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/validated_move.h"
-
-#include "exec.h"
-#include "move_gen.h"
-
 #include "../str/game_string.h"
 #include "../str/move_string.h"
-
+#include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "config.h"
+#include "exec.h"
+#include "move_gen.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 static Config *iso_config = NULL;
 static ErrorStack *iso_error_stack = NULL;
@@ -77,8 +74,8 @@ char *wasm_score_move(const char *cgpstr, const char *ucgi_move_str) {
     return error_stack_get_string_and_reset(iso_error_stack);
   }
 
-  Game *game = config_get_game(iso_config);
-  Board *board = game_get_board(game);
+  const Game *game = config_get_game(iso_config);
+  const Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
   const int player_on_turn_index = game_get_player_on_turn_index(game);
 

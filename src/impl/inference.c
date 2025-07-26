@@ -1,17 +1,13 @@
 #include "inference.h"
 
-#include <pthread.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
-
+#include "../compat/cpthread.h"
 #include "../def/game_history_defs.h"
 #include "../def/inference_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
-
 #include "../ent/bag.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
 #include "../ent/klv.h"
@@ -21,14 +17,15 @@
 #include "../ent/rack.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
-
-#include "gameplay.h"
-#include "move_gen.h"
-
 #include "../str/inference_string.h"
-
 #include "../util/io_util.h"
 #include "../util/math_util.h"
+#include "../util/string_util.h"
+#include "gameplay.h"
+#include "move_gen.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 typedef struct Inference {
   // KLV used to evaluate leaves to determine
@@ -55,7 +52,7 @@ typedef struct Inference {
   uint64_t total_racks_evaluated;
   int thread_index;
   uint64_t *shared_rack_index;
-  pthread_mutex_t *shared_rack_index_lock;
+  cpthread_mutex_t *shared_rack_index_lock;
   // Rack containing just the unknown leave, which is
   // the tiles on the target's rack unseen to
   // the observer making the inference.
@@ -182,7 +179,7 @@ void evaluate_possible_leave(Inference *inference) {
           number_of_draws_for_leave);
       leave_rack_list_insert_rack(
           inference->current_target_leave, inference->current_target_exchanged,
-          number_of_draws_for_leave, current_leave_value,
+          (int)number_of_draws_for_leave, current_leave_value,
           inference_results_get_leave_rack_list(inference->results));
       rack_reset(inference->current_target_exchanged);
       for (int exchanged_tile_index = 0; exchanged_tile_index < tiles_played;
@@ -197,7 +194,7 @@ void evaluate_possible_leave(Inference *inference) {
                          equity_to_double(current_leave_value),
                          number_of_draws_for_leave);
       leave_rack_list_insert_rack(
-          inference->current_target_leave, NULL, number_of_draws_for_leave,
+          inference->current_target_leave, NULL, (int)number_of_draws_for_leave,
           current_leave_value,
           inference_results_get_leave_rack_list(inference->results));
     }
@@ -336,7 +333,7 @@ void add_inference(Inference *inference_to_add,
       inference_results_get_leave_rack_list(inference_to_update->results);
 
   while (leave_rack_list_get_count(lrl_to_add) > 0) {
-    LeaveRack *leave_rack_to_add = leave_rack_list_pop_rack(lrl_to_add);
+    const LeaveRack *leave_rack_to_add = leave_rack_list_pop_rack(lrl_to_add);
     leave_rack_list_insert_rack(leave_rack_get_leave(leave_rack_to_add),
                                 leave_rack_get_exchanged(leave_rack_to_add),
                                 leave_rack_get_draws(leave_rack_to_add),
@@ -371,20 +368,20 @@ bool should_print_info(const Inference *inference) {
 
 void iterate_through_all_possible_leaves(Inference *inference,
                                          int tiles_to_infer, int start_letter) {
-  if (thread_control_get_is_exited(inference->thread_control)) {
+  if (thread_control_is_winding_down(inference->thread_control)) {
     return;
   }
   if (tiles_to_infer == 0) {
     bool perform_evaluation = false;
     bool print_info = false;
 
-    pthread_mutex_lock(inference->shared_rack_index_lock);
+    cpthread_mutex_lock(inference->shared_rack_index_lock);
     if (inference->current_rack_index == *inference->shared_rack_index) {
       print_info = should_print_info(inference);
       perform_evaluation = true;
       *inference->shared_rack_index += 1;
     }
-    pthread_mutex_unlock(inference->shared_rack_index_lock);
+    cpthread_mutex_unlock(inference->shared_rack_index_lock);
 
     if (perform_evaluation) {
       evaluate_possible_leave(inference);
@@ -417,7 +414,7 @@ void *infer_worker(void *uncasted_inference) {
 
 void set_shared_variables_for_inference(
     Inference *inference, uint64_t *shared_rack_index,
-    pthread_mutex_t *shared_rack_index_lock) {
+    cpthread_mutex_t *shared_rack_index_lock) {
   inference->shared_rack_index = shared_rack_index;
   inference->shared_rack_index_lock = shared_rack_index_lock;
 }
@@ -437,24 +434,22 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
   int number_of_threads = thread_control_get_threads(thread_control);
 
   uint64_t shared_rack_index = 0;
-  pthread_mutex_t shared_rack_index_lock;
+  cpthread_mutex_t shared_rack_index_lock;
 
-  if (pthread_mutex_init(&shared_rack_index_lock, NULL) != 0) {
-    log_fatal("mutex init failed for inference\n");
-  }
+  cpthread_mutex_init(&shared_rack_index_lock);
 
   Inference **inferences_for_workers =
       malloc_or_die((sizeof(Inference *)) * (number_of_threads));
-  pthread_t *worker_ids =
-      malloc_or_die((sizeof(pthread_t)) * (number_of_threads));
+  cpthread_t *worker_ids =
+      malloc_or_die((sizeof(cpthread_t)) * (number_of_threads));
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     inferences_for_workers[thread_index] =
         inference_duplicate(inference, thread_index, thread_control);
     set_shared_variables_for_inference(inferences_for_workers[thread_index],
                                        &shared_rack_index,
                                        &shared_rack_index_lock);
-    pthread_create(&worker_ids[thread_index], NULL, infer_worker,
-                   inferences_for_workers[thread_index]);
+    cpthread_create(&worker_ids[thread_index], infer_worker,
+                    inferences_for_workers[thread_index]);
   }
 
   Stat **leave_stats = malloc_or_die((sizeof(Stat *)) * (number_of_threads));
@@ -462,18 +457,21 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
   Stat **exchanged_stats = NULL;
   Stat **rack_stats = NULL;
 
-  if (inference->target_number_of_tiles_exchanged > 0) {
+  const bool tiles_were_exchanged =
+      inference->target_number_of_tiles_exchanged > 0;
+
+  if (tiles_were_exchanged) {
     exchanged_stats = malloc_or_die((sizeof(Stat *)) * (number_of_threads));
     rack_stats = malloc_or_die((sizeof(Stat *)) * (number_of_threads));
   }
 
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
-    pthread_join(worker_ids[thread_index], NULL);
+    cpthread_join(worker_ids[thread_index]);
     Inference *inference_worker = inferences_for_workers[thread_index];
     add_inference(inference_worker, inference);
     leave_stats[thread_index] = inference_results_get_equity_values(
         inference_worker->results, INFERENCE_TYPE_LEAVE);
-    if (inference->target_number_of_tiles_exchanged > 0) {
+    if (tiles_were_exchanged) {
       exchanged_stats[thread_index] = inference_results_get_equity_values(
           inference_worker->results, INFERENCE_TYPE_EXCHANGED);
       rack_stats[thread_index] = inference_results_get_equity_values(
@@ -483,13 +481,14 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
 
   // Infer was able to finish normally, which is when it
   // iterates through every rack
-  thread_control_exit(thread_control, EXIT_STATUS_MAX_ITERATIONS);
+  thread_control_set_status(thread_control,
+                            THREAD_CONTROL_STATUS_MAX_ITERATIONS);
 
   stats_combine(leave_stats, number_of_threads,
                 inference_results_get_equity_values(inference->results,
                                                     INFERENCE_TYPE_LEAVE));
   free(leave_stats);
-  if (inference->target_number_of_tiles_exchanged > 0) {
+  if (tiles_were_exchanged) {
     stats_combine(exchanged_stats, number_of_threads,
                   inference_results_get_equity_values(
                       inference->results, INFERENCE_TYPE_EXCHANGED));
@@ -509,7 +508,7 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
 }
 
 void verify_inference(const Inference *inference, ErrorStack *error_stack) {
-  Rack *bag_as_rack = inference->bag_as_rack;
+  const Rack *bag_as_rack = inference->bag_as_rack;
   for (int i = 0; i < inference->ld_size; i++) {
     if (rack_get_letter(bag_as_rack, i) < 0) {
       error_stack_push(
@@ -571,8 +570,6 @@ void verify_inference(const Inference *inference, ErrorStack *error_stack) {
 
 void infer(InferenceArgs *args, InferenceResults *results,
            ErrorStack *error_stack) {
-  thread_control_reset(args->thread_control, 0);
-
   if (!args->target_played_tiles) {
     error_stack_push(error_stack, ERROR_STATUS_INFERENCE_NO_TILES_PLAYED,
                      string_duplicate("no tile placement or exchange move was "
@@ -596,11 +593,11 @@ void infer(InferenceArgs *args, InferenceResults *results,
         inference->bag_as_rack, inference->results, inference->target_score,
         inference->target_number_of_tiles_exchanged, inference->equity_margin);
 
-    if (thread_control_get_exit_status(args->thread_control) ==
-        EXIT_STATUS_MAX_ITERATIONS) {
+    if (thread_control_get_status(args->thread_control) ==
+        THREAD_CONTROL_STATUS_MAX_ITERATIONS) {
       // Only print if infer was able to finish normally.
-      // If thread_control_exit status isn't max iterations, it was interrupted
-      // by the user and the results will not be valid.
+      // If thread_control_set_status status isn't max iterations, it was
+      // interrupted by the user and the results will not be valid.
       print_ucgi_inference(game_get_ld(inference->game), inference->results,
                            args->thread_control);
     }

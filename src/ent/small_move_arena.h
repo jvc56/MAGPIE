@@ -3,7 +3,6 @@
 
 #include "../compat/malloc.h"
 #include "../util/io_util.h"
-
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -15,13 +14,14 @@ typedef struct {
   size_t capacity; // Total capacity of the memory block
 } Arena;
 
-#define INITIAL_ARENA_CAPACITY (1024 * 1024) // 1 MB
+#define INITIAL_ARENA_CAPACITY (size_t)(1024 * 1024) // 1 MB
 
 static inline Arena *create_arena(size_t initial_capacity, size_t alignment) {
   // alignment = 16 for our "SmallMove" structure.
   Arena *arena = malloc(sizeof(Arena));
-  if (!arena)
+  if (!arena) {
     return NULL;
+  }
 
   // Set default capacity if not specified
   arena->capacity =

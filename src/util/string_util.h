@@ -2,12 +2,11 @@
 #ifndef STRING_BUILDER_H
 #define STRING_BUILDER_H
 
+#include "io_util.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-
-#include "io_util.h"
 
 typedef struct StringBuilder StringBuilder;
 
@@ -24,8 +23,6 @@ void string_builder_add_table_row(StringBuilder *string_builder,
 void string_builder_add_spaces(StringBuilder *string_builder,
                                int number_of_spaces);
 void string_builder_add_int(StringBuilder *string_builder, int64_t n);
-void string_builder_add_uint(StringBuilder *string_builder, uint64_t n);
-void string_builder_add_double(StringBuilder *string_builder, double val);
 void string_builder_add_char(StringBuilder *string_builder, char c);
 void string_builder_clear(StringBuilder *string_builder);
 size_t string_builder_length(const StringBuilder *string_builder);
@@ -37,13 +34,13 @@ typedef struct StringSplitter StringSplitter;
 int string_splitter_get_number_of_items(const StringSplitter *string_splitter);
 const char *string_splitter_get_item(const StringSplitter *string_splitter,
                                      int item_index);
-void string_splitter_trim_char(StringSplitter *string_splitter, const char c);
+void string_splitter_trim_char(StringSplitter *string_splitter, char c);
 char *string_splitter_join(const StringSplitter *string_splitter,
                            int start_index, int end_index,
                            const char *separator);
 StringSplitter *split_string_by_whitespace(const char *input_string,
                                            bool ignore_empty);
-StringSplitter *split_string(const char *input_string, const char delimiter,
+StringSplitter *split_string(const char *input_string, char delimiter,
                              bool ignore_empty);
 void string_splitter_destroy(StringSplitter *string_splitter);
 StringSplitter *split_string_by_newline(const char *input_string,
@@ -64,21 +61,16 @@ void string_list_destroy(StringList *string_list);
 // Boolean string functions
 bool has_prefix(const char *pre, const char *str);
 bool has_iprefix(const char *pre, const char *str);
-bool has_suffix(const char *str, const char *suffix);
-bool has_isuffix(const char *str, const char *suffix);
-bool string_contains(const char *str, char ch);
 bool is_string_empty_or_whitespace(const char *str);
 bool is_string_empty_or_null(const char *str);
 bool strings_equal(const char *str1, const char *str2);
 bool strings_iequal(const char *str1, const char *str2);
 bool is_all_digits_or_empty(const char *str);
 bool has_substring(const char *str, const char *pattern);
-bool is_decimal_number(const char *str);
 size_t string_length(const char *str);
 
 // Malloc'ing string functions
 char *string_duplicate(const char *str);
-char *string_copy(char *dest, const char *src);
 char *get_substring(const char *input_string, int start_index, int end_index);
 char *iso_8859_1_to_utf8(const char *iso_8859_1_string);
 char *get_dirpath_from_filepath(const char *filepath);
@@ -90,9 +82,8 @@ char *insert_before_dot(const char *str, const char *insert);
 const char *get_base_filename(const char *filepath);
 
 // Inplace string functions
-void remove_first_newline(char *str);
 void trim_whitespace(char *str);
-void trim_char(char *str, const char c);
+void trim_char(char *str, char c);
 
 // String conversions
 int string_to_int(const char *str, ErrorStack *error_stack);
