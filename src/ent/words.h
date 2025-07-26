@@ -1,11 +1,10 @@
 #ifndef WORDS_H
 #define WORDS_H
 
-#include <stdint.h>
-
 #include "board.h"
 #include "kwg.h"
 #include "move.h"
+#include <stdint.h>
 
 typedef struct FormedWords FormedWords;
 

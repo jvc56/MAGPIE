@@ -1,7 +1,6 @@
-#include <stdint.h>
-
 #include "kwg.h"
 #include "rack.h"
+#include <stdint.h>
 
 // These kwg alpha functions were originally
 // developed in wolges. For more details see

@@ -1,8 +1,6 @@
 #include "../src/def/board_defs.h"
 #include "../src/impl/exec.h"
-
 #include "../src/util/io_util.h"
-
 #include "alphabet_test.h"
 #include "autoplay_test.h"
 #include "bag_test.h"
@@ -52,7 +50,6 @@
 #include "word_prune_test.h"
 #include "word_test.h"
 #include "zobrist_test.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

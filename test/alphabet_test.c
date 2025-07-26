@@ -1,15 +1,10 @@
-#include <assert.h>
-
 #include "../src/def/letter_distribution_defs.h"
-
 #include "../src/ent/letter_distribution.h"
 #include "../src/impl/config.h"
-
 #include "../src/str/letter_distribution_string.h"
-
 #include "../src/util/string_util.h"
-
 #include "test_util.h"
+#include <assert.h>
 
 void test_alphabet(void) {
   Config *config = config_create_or_die(

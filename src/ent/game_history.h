@@ -4,7 +4,6 @@
 #include "../def/board_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
-
 #include "letter_distribution.h"
 #include "rack.h"
 #include "validated_move.h"

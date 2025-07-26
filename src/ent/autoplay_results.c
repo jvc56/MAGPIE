@@ -1,12 +1,15 @@
 #include "autoplay_results.h"
 
 #include "../compat/cpthread.h"
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-
+#include "../def/game_defs.h"
+#include "../def/klv_defs.h"
+#include "../def/letter_distribution_defs.h"
+#include "../def/players_data_defs.h"
+#include "../def/rack_defs.h"
+#include "../str/rack_string.h"
+#include "../util/io_util.h"
+#include "../util/math_util.h"
+#include "../util/string_util.h"
 #include "bag.h"
 #include "data_filepaths.h"
 #include "equity.h"
@@ -19,18 +22,11 @@
 #include "players_data.h"
 #include "rack.h"
 #include "stats.h"
-
-#include "../def/game_defs.h"
-#include "../def/klv_defs.h"
-#include "../def/letter_distribution_defs.h"
-#include "../def/players_data_defs.h"
-#include "../def/rack_defs.h"
-
-#include "../str/rack_string.h"
-
-#include "../util/io_util.h"
-#include "../util/math_util.h"
-#include "../util/string_util.h"
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 enum { DEFAULT_WRITE_BUFFER_SIZE = 1024 };
 

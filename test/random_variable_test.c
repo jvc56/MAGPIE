@@ -1,12 +1,10 @@
+#include "../src/impl/random_variable.h"
+#include "test_util.h"
 #include <assert.h>
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
-
-#include "../src/impl/random_variable.h"
-
-#include "test_util.h"
 
 void test_random_variable_uniform(void) {
   const uint64_t num_rvs = 20;

@@ -1,9 +1,7 @@
+#include "../src/util/string_util.h"
+#include "test_util.h"
 #include <assert.h>
 #include <stdbool.h>
-
-#include "../src/util/string_util.h"
-
-#include "test_util.h"
 
 void test_string_splitter(const char *input, const char delimiter,
                           bool ignore_empty, int expected_number_of_items,

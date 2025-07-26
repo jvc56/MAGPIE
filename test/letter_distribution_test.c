@@ -1,13 +1,11 @@
-#include <assert.h>
-#include <stdbool.h>
-#include <stdint.h>
-
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/impl/config.h"
-
 #include "test_util.h"
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
 
 void test_ld_score_order(void) {
   Config *config = config_create_or_die(

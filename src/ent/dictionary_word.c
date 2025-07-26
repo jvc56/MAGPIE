@@ -1,18 +1,15 @@
 #include "dictionary_word.h"
 
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "../def/dictionary_word_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
-
 #include "../ent/data_filepaths.h"
 #include "../ent/letter_distribution.h"
-
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 struct DictionaryWord {
   MachineLetter word[MAX_KWG_STRING_LENGTH];

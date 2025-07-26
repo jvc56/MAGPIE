@@ -1,10 +1,3 @@
-#include <regex.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
@@ -12,7 +5,6 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/validated_move_defs.h"
-
 #include "../ent/board_layout.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -23,17 +15,19 @@
 #include "../ent/players_data.h"
 #include "../ent/rack.h"
 #include "../ent/validated_move.h"
-
-#include "config.h"
-
 #include "../impl/gameplay.h"
-
 #include "../str/game_string.h"
 #include "../str/move_string.h"
 #include "../str/rack_string.h"
-
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "config.h"
+#include <regex.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 enum { MAX_GROUPS = 7 };
 

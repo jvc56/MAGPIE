@@ -1,18 +1,15 @@
 #ifndef ZOBRIST_H
 #define ZOBRIST_H
 
-#include <stdint.h>
-
 #include "../def/board_defs.h"
 #include "../def/rack_defs.h"
-
 #include "../util/io_util.h"
-
 #include "board.h"
 #include "letter_distribution.h"
 #include "move.h"
 #include "rack.h"
 #include "xoshiro.h"
+#include <stdint.h>
 
 #define ZOBRIST_MAX_LETTERS 35 // For the purposes of Zobrist hashing.
 

@@ -1,14 +1,11 @@
 #ifndef THREAD_CONTROL_H
 #define THREAD_CONTROL_H
 
+#include "../compat/ctime.h"
+#include "../def/thread_control_defs.h"
+#include "xoshiro.h"
 #include <stdbool.h>
 #include <stdint.h>
-
-#include "../def/thread_control_defs.h"
-
-#include "../compat/ctime.h"
-
-#include "xoshiro.h"
 
 typedef struct ThreadControl ThreadControl;
 

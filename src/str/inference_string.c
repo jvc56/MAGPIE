@@ -1,11 +1,6 @@
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
-
 #include "../def/inference_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
-
 #include "../ent/equity.h"
 #include "../ent/inference_results.h"
 #include "../ent/leave_rack.h"
@@ -13,12 +8,13 @@
 #include "../ent/rack.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
-
-#include "letter_distribution_string.h"
-#include "rack_string.h"
-
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "letter_distribution_string.h"
+#include "rack_string.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 void string_builder_add_leave_rack(StringBuilder *inference_string,
                                    const LeaveRack *leave_rack,

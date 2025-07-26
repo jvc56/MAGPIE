@@ -1,15 +1,7 @@
 #include "random_variable.h"
 
-#include <math.h>
-#include <stdatomic.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "../def/game_defs.h"
 #include "../def/rack_defs.h"
-
 #include "../ent/bag.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -21,13 +13,16 @@
 #include "../ent/thread_control.h"
 #include "../ent/win_pct.h"
 #include "../ent/xoshiro.h"
-
+#include "../str/sim_string.h"
+#include "../util/io_util.h"
 #include "bai_logger.h"
 #include "gameplay.h"
-
-#include "../str/sim_string.h"
-
-#include "../util/io_util.h"
+#include <math.h>
+#include <stdatomic.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define SIMILARITY_EPSILON 1e-6
 

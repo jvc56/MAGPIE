@@ -1,24 +1,19 @@
 #ifndef KLV_H
 #define KLV_H
 
+#include "../compat/endian_conv.h"
+#include "../def/klv_defs.h"
+#include "../ent/kwg.h"
+#include "../util/fileproxy.h"
+#include "../util/io_util.h"
+#include "../util/string_util.h"
+#include "data_filepaths.h"
+#include "kwg.h"
+#include "rack.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-
-#include "../def/klv_defs.h"
-
-#include "../ent/kwg.h"
-
-#include "../compat/endian_conv.h"
-
-#include "../util/fileproxy.h"
-#include "../util/io_util.h"
-#include "../util/string_util.h"
-
-#include "data_filepaths.h"
-#include "kwg.h"
-#include "rack.h"
 
 // The KLV data structure was originally
 // developed in wolges. For more details

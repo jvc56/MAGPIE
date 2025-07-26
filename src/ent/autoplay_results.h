@@ -1,14 +1,12 @@
 #ifndef AUTOPLAY_RESULTS_H
 #define AUTOPLAY_RESULTS_H
 
-#include <stdbool.h>
-
+#include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "game.h"
 #include "klv.h"
 #include "move.h"
-
-#include "../util/io_util.h"
-#include "../util/string_util.h"
+#include <stdbool.h>
 
 typedef enum {
   AUTOPLAY_RECORDER_TYPE_GAME,

@@ -1,11 +1,7 @@
-#include <assert.h>
-#include <stdlib.h>
-
 #include "../src/def/board_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
-
 #include "../src/ent/game.h"
 #include "../src/ent/klv.h"
 #include "../src/ent/letter_distribution.h"
@@ -15,14 +11,13 @@
 #include "../src/ent/rack.h"
 #include "../src/ent/validated_move.h"
 #include "../src/impl/config.h"
-#include "../src/impl/move_gen.h"
-
 #include "../src/impl/gameplay.h"
-
+#include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
-
 #include "test_constants.h"
 #include "test_util.h"
+#include <assert.h>
+#include <stdlib.h>
 
 void assert_validated_move_error(Game *game, const char *cgp_str,
                                  const char *move_str, int player_index,

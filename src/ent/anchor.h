@@ -1,14 +1,11 @@
 #ifndef ANCHOR_H
 #define ANCHOR_H
 
-#include <stdlib.h>
-
 #include "../def/board_defs.h"
-
 #include "../ent/equity.h"
-
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include <stdlib.h>
 
 typedef struct Anchor {
   // The highest possibly equity

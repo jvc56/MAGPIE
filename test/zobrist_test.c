@@ -1,7 +1,5 @@
 
-#include <assert.h>
-#include <stdint.h>
-#include <stdlib.h>
+#include "zobrist_test.h"
 
 #include "../src/def/gameplay_defs.h"
 #include "../src/ent/game.h"
@@ -14,7 +12,9 @@
 #include "../src/impl/gameplay.h"
 #include "../src/util/io_util.h"
 #include "test_util.h"
-#include "zobrist_test.h"
+#include <assert.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 void test_hash_after_making_play(void) {
   Config *config = config_create_or_die("set -s1 score -s2 score");

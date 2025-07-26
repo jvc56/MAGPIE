@@ -1,26 +1,21 @@
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "../def/move_defs.h"
-
 #include "../ent/board.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/validated_move.h"
-
+#include "../str/game_string.h"
+#include "../str/move_string.h"
+#include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "config.h"
 #include "exec.h"
 #include "move_gen.h"
-
-#include "../str/game_string.h"
-#include "../str/move_string.h"
-
-#include "../util/io_util.h"
-#include "../util/string_util.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 static Config *iso_config = NULL;
 static ErrorStack *iso_error_stack = NULL;

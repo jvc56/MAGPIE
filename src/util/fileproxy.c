@@ -1,9 +1,8 @@
+#include "io_util.h"
+#include "string_util.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "io_util.h"
-#include "string_util.h"
 
 enum {
   MAX_CACHE_SIZE = 32,

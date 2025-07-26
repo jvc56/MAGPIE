@@ -10,10 +10,9 @@ See <http://creativecommons.org/publicdomain/zero/1.0/>. */
 
 #include "xoshiro.h"
 
+#include "../util/io_util.h"
 #include <stdint.h>
 #include <stdlib.h>
-
-#include "../util/io_util.h"
 
 /* This is xoshiro256++ 1.0, one of our all-purpose, rock-solid generators.
    It has excellent (sub-ns) speed, a state (256 bits) that is large

@@ -1,11 +1,8 @@
-#include <assert.h>
-#include <stdint.h>
-#include <stdlib.h>
+#include "board_test.h"
 
 #include "../src/def/board_defs.h"
 #include "../src/def/cross_set_defs.h"
 #include "../src/def/letter_distribution_defs.h"
-
 #include "../src/ent/board.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
@@ -13,14 +10,13 @@
 #include "../src/ent/rack.h"
 #include "../src/ent/validated_move.h"
 #include "../src/impl/config.h"
-
 #include "../src/impl/gameplay.h"
-
 #include "../src/util/io_util.h"
-
-#include "board_test.h"
 #include "test_constants.h"
 #include "test_util.h"
+#include <assert.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 void test_board_cross_set_for_cross_set_index(const Game *game,
                                               const int cross_set_index) {

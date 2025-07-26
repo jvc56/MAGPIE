@@ -1,13 +1,10 @@
+#include "../src/impl/wasm_api.h"
+#include "../src/util/string_util.h"
+#include "test_constants.h"
+#include "test_util.h"
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
-
-#include "../src/impl/wasm_api.h"
-
-#include "../src/util/string_util.h"
-
-#include "test_constants.h"
-#include "test_util.h"
 
 const char *cgp1 =
     "4AUREOLED3/11O3/11Z3/10FY3/10A4/10C4/10I4/7THANX3/10GUV2/"

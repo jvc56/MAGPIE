@@ -1,9 +1,3 @@
-#include <assert.h>
-#include <math.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "../src/def/equity_defs.h"
 #include "../src/ent/data_filepaths.h"
 #include "../src/ent/equity.h"
@@ -11,13 +5,15 @@
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
-
 #include "../src/impl/config.h"
-
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
-
 #include "test_util.h"
+#include <assert.h>
+#include <math.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 void test_leaves(void) {
   Config *config = config_create_or_die(

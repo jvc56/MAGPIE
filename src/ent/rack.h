@@ -1,16 +1,13 @@
 #ifndef RACK_H
 #define RACK_H
 
+#include "../def/rack_defs.h"
+#include "../util/io_util.h"
+#include "../util/string_util.h"
+#include "letter_distribution.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
-
-#include "../def/rack_defs.h"
-
-#include "letter_distribution.h"
-
-#include "../util/io_util.h"
-#include "../util/string_util.h"
 
 typedef struct Rack {
   // counts must be signed for the sake of inference code checking that

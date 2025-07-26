@@ -1,15 +1,13 @@
 #ifndef GAME_H
 #define GAME_H
 
-#include <stdbool.h>
-
 #include "../def/game_defs.h"
 #include "../def/players_data_defs.h"
-
 #include "bag.h"
 #include "board.h"
 #include "letter_distribution.h"
 #include "player.h"
+#include <stdbool.h>
 
 typedef struct Game Game;
 

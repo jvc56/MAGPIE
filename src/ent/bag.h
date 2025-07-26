@@ -1,11 +1,10 @@
 #ifndef BAG_H
 #define BAG_H
 
-#include <stdbool.h>
-#include <stdint.h>
-
 #include "letter_distribution.h"
 #include "xoshiro.h"
+#include <stdbool.h>
+#include <stdint.h>
 
 enum { MAX_BAG_SIZE = 1000 };
 

@@ -2,15 +2,13 @@
 #define BIT_RACK_H
 
 #include "../compat/endian_conv.h"
-
-#include <stdbool.h>
-#include <stdint.h>
-
 #include "../def/bit_rack_defs.h"
 #include "../def/board_defs.h"
 #include "dictionary_word.h"
 #include "letter_distribution.h"
 #include "rack.h"
+#include <stdbool.h>
+#include <stdint.h>
 
 // These are 128 bit integers representing multisets of tiles, used as keys for
 // maps storing words formed by those tiles. They can include both undesignated

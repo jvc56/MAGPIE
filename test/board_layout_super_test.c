@@ -1,12 +1,9 @@
-#include <assert.h>
-
 #include "../src/ent/game.h"
 #include "../src/impl/config.h"
-
 #include "../src/util/io_util.h"
-
 #include "test_constants.h"
 #include "test_util.h"
+#include <assert.h>
 
 void test_board_layout_error_super(void) {
   // Most of the error enums are tested in the 15 version.

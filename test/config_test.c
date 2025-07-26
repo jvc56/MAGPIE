@@ -1,7 +1,4 @@
-#include <assert.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include "config_test.h"
 
 #include "../src/def/game_defs.h"
 #include "../src/def/move_defs.h"
@@ -13,10 +10,12 @@
 #include "../src/impl/config.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
-
-#include "config_test.h"
 #include "test_constants.h"
 #include "test_util.h"
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 void test_config_load_error(Config *config, const char *cmd,
                             error_code_t expected_status,

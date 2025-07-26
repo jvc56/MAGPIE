@@ -1,18 +1,14 @@
+#include "../src/ent/kwg.h"
 #include "../src/ent/kwg_alpha.h"
-
+#include "../src/ent/letter_distribution.h"
+#include "../src/ent/players_data.h"
+#include "../src/ent/rack.h"
+#include "../src/impl/config.h"
+#include "test_util.h"
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-
-#include "../src/ent/kwg.h"
-#include "../src/ent/letter_distribution.h"
-#include "../src/ent/players_data.h"
-#include "../src/ent/rack.h"
-
-#include "../src/impl/config.h"
-
-#include "test_util.h"
 
 void assert_kwg_accepts_alpha(const KWG *kwg, const LetterDistribution *ld,
                               const char *rack_string, bool accepts) {

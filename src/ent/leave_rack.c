@@ -1,11 +1,9 @@
 #include "leave_rack.h"
 
-#include <stdlib.h>
-
+#include "../util/io_util.h"
 #include "equity.h"
 #include "rack.h"
-
-#include "../util/io_util.h"
+#include <stdlib.h>
 
 struct LeaveRack {
   Rack *leave;

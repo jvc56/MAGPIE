@@ -1,21 +1,18 @@
 #ifndef MOVE_H
 #define MOVE_H
 
+#include "../def/board_defs.h"
+#include "../def/game_history_defs.h"
+#include "../def/move_defs.h"
+#include "../ent/equity.h"
+#include "../ent/letter_distribution.h"
+#include "../util/io_util.h"
+#include "board.h"
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "../def/board_defs.h"
-#include "../def/game_history_defs.h"
-#include "../def/move_defs.h"
-#include "../ent/letter_distribution.h"
-#include "board.h"
-
-#include "../ent/equity.h"
-
-#include "../util/io_util.h"
 
 typedef enum {
   MOVE_LIST_TYPE_DEFAULT,

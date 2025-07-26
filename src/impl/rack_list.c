@@ -1,11 +1,10 @@
 #include "rack_list.h"
 
 #include "../compat/cpthread.h"
-#include <stddef.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-
+#include "../def/klv_defs.h"
+#include "../def/kwg_defs.h"
+#include "../def/letter_distribution_defs.h"
+#include "../def/rack_defs.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/encoded_rack.h"
 #include "../ent/equity.h"
@@ -14,16 +13,13 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/rack.h"
 #include "../ent/xoshiro.h"
-
-#include "../def/klv_defs.h"
-#include "../def/kwg_defs.h"
-#include "../def/letter_distribution_defs.h"
-#include "../def/rack_defs.h"
-
-#include "kwg_maker.h"
-
 #include "../util/io_util.h"
 #include "../util/math_util.h"
+#include "kwg_maker.h"
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 typedef struct RackListItem {
   // Index of this item in the rack list items ordered by count.

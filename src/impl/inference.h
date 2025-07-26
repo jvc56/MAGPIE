@@ -2,12 +2,10 @@
 #define INFERENCE_H
 
 #include "../def/inference_defs.h"
-
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
-
 #include "../util/io_util.h"
 
 typedef struct InferenceArgs {

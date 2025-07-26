@@ -1,10 +1,8 @@
-#include <assert.h>
-#include <stdlib.h>
-
 #include "../src/ent/stats.h"
 #include "../src/util/io_util.h"
-
 #include "test_util.h"
+#include <assert.h>
+#include <stdlib.h>
 
 void test_single_stat(void) {
   Stat *stat = stat_create(false);

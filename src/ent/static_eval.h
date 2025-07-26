@@ -5,7 +5,6 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/static_eval_defs.h"
-
 #include "../ent/board.h"
 #include "../ent/equity.h"
 #include "../ent/klv.h"

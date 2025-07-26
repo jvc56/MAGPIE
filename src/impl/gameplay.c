@@ -1,7 +1,3 @@
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
-
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/game_defs.h"
@@ -11,7 +7,6 @@
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
-
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/equity.h"
@@ -21,8 +16,10 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
-
 #include "move_gen.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
   for (int i = 0; i < move_get_tiles_length(move); i++) {

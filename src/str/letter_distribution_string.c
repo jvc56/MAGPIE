@@ -1,10 +1,8 @@
-#include <stdint.h>
-#include <stdlib.h>
-
 #include "../def/letter_distribution_defs.h"
 #include "../ent/letter_distribution.h"
-
 #include "../util/string_util.h"
+#include <stdint.h>
+#include <stdlib.h>
 
 void string_builder_add_user_visible_letter(StringBuilder *string_builder,
                                             const LetterDistribution *ld,

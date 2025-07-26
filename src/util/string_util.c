@@ -1,5 +1,6 @@
 #include "string_util.h"
 
+#include "io_util.h"
 #include <assert.h>
 #include <ctype.h>
 #include <stdarg.h>
@@ -9,8 +10,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-
-#include "io_util.h"
 
 enum {
   STRING_LIST_INITIAL_CAPACITY = 10,

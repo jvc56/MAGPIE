@@ -1,12 +1,5 @@
 #include "move_gen.h"
 
-#include <assert.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/equity_defs.h"
@@ -34,10 +27,14 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/static_eval.h"
-
-#include "wmp_move_gen.h"
-
 #include "../util/io_util.h"
+#include "wmp_move_gen.h"
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 

@@ -1,18 +1,13 @@
-#include <assert.h>
-#include <stdint.h>
-
 #include "../src/def/letter_distribution_defs.h"
-
 #include "../src/ent/bag.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/rack.h"
 #include "../src/impl/config.h"
-
 #include "../src/str/bag_string.h"
-
 #include "../src/util/string_util.h"
-
 #include "test_util.h"
+#include <assert.h>
+#include <stdint.h>
 
 enum { TEST_BAG_SIZE = 100 };
 

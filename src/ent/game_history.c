@@ -1,18 +1,14 @@
 #include "game_history.h"
 
-#include <stdlib.h>
-
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
-
 #include "../ent/board_layout.h"
 #include "../ent/equity.h"
-
-#include "rack.h"
-#include "validated_move.h"
-
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "rack.h"
+#include "validated_move.h"
+#include <stdlib.h>
 
 struct GameEvent {
   game_event_t event_type;

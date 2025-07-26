@@ -1,19 +1,17 @@
 #ifndef WMP_MOVEGEN_H
 #define WMP_MOVEGEN_H
 
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
-
 #include "../def/bit_rack_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/move_defs.h"
-
 #include "../ent/anchor.h"
 #include "../ent/bit_rack.h"
 #include "../ent/board.h"
 #include "../ent/leave_map.h"
 #include "../ent/wmp.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 enum {
   MAX_POSSIBLE_PLAYTHROUGH_BLOCKS = ((BOARD_DIM / 2) + 1),

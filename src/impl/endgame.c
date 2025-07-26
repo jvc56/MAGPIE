@@ -1,13 +1,10 @@
-#include "../compat/cpthread.h"
-#include <assert.h>
-#include <stdint.h>
-#include <stdlib.h>
+#include "endgame.h"
 
+#include "../compat/cpthread.h"
 #include "../def/game_defs.h"
 #include "../def/gameplay_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/move_defs.h"
-
 #include "../ent/bag.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/equity.h"
@@ -20,17 +17,16 @@
 #include "../ent/thread_control.h"
 #include "../ent/transposition_table.h"
 #include "../ent/zobrist.h"
-
 #include "../str/move_string.h"
-
 #include "../util/io_util.h"
 #include "../util/string_util.h"
-
-#include "endgame.h"
 #include "gameplay.h"
 #include "kwg_maker.h"
 #include "move_gen.h"
 #include "word_prune.h"
+#include <assert.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 enum {
   DEFAULT_ENDGAME_MOVELIST_CAPACITY = 250000,

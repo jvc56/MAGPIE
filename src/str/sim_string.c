@@ -1,8 +1,3 @@
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "../ent/board.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -11,10 +6,12 @@
 #include "../ent/sim_results.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
-
-#include "move_string.h"
-
 #include "../util/string_util.h"
+#include "move_string.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
                      bool best_known_play) {

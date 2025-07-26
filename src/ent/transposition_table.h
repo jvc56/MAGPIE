@@ -1,13 +1,12 @@
 #ifndef TRANSPOSITION_TABLE_H
 #define TRANSPOSITION_TABLE_H
 
-#include <stdatomic.h>
-#include <stdbool.h>
-#include <stdint.h>
-
 #include "../compat/ctime.h"
 #include "../compat/memory_info.h"
 #include "zobrist.h"
+#include <stdatomic.h>
+#include <stdbool.h>
+#include <stdint.h>
 
 enum {
   TT_EXACT = 0x01,

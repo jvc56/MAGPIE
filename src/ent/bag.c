@@ -1,14 +1,11 @@
 #include "bag.h"
 
-#include <stdint.h>
-#include <stdlib.h>
-
 #include "../def/letter_distribution_defs.h"
-
+#include "../util/io_util.h"
 #include "letter_distribution.h"
 #include "xoshiro.h"
-
-#include "../util/io_util.h"
+#include <stdint.h>
+#include <stdlib.h>
 
 // The bag uses a start and end
 // tile index to establish two "sides"

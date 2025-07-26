@@ -2,10 +2,8 @@
 #define CONVERT_H
 
 #include "../def/convert_defs.h"
-
 #include "../ent/conversion_results.h"
 #include "../ent/letter_distribution.h"
-
 #include "../util/io_util.h"
 
 typedef struct ConversionArgs {

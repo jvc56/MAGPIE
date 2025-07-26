@@ -1,7 +1,6 @@
 #include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
-
 #include "../ent/data_filepaths.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/equity.h"
@@ -9,19 +8,15 @@
 #include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/rack.h"
-
+#include "../impl/kwg_maker.h"
+#include "../str/rack_string.h"
+#include "../util/fileproxy.h"
+#include "../util/io_util.h"
+#include "../util/string_util.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "../impl/kwg_maker.h"
-
-#include "../str/rack_string.h"
-
-#include "../util/fileproxy.h"
-#include "../util/io_util.h"
-#include "../util/string_util.h"
 
 enum { LEAVES_CSV_MAX_LINE_LENGTH = 256 };
 

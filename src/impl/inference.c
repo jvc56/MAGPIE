@@ -1,16 +1,11 @@
 #include "inference.h"
 
 #include "../compat/cpthread.h"
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
-
 #include "../def/game_history_defs.h"
 #include "../def/inference_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
-
 #include "../ent/bag.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -22,15 +17,15 @@
 #include "../ent/rack.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
-
-#include "gameplay.h"
-#include "move_gen.h"
-
 #include "../str/inference_string.h"
-
 #include "../util/io_util.h"
 #include "../util/math_util.h"
 #include "../util/string_util.h"
+#include "gameplay.h"
+#include "move_gen.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 typedef struct Inference {
   // KLV used to evaluate leaves to determine

@@ -1,19 +1,15 @@
 #include "simmer.h"
 
-#include <stdlib.h>
-
 #include "../ent/move.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
-
+#include "../str/sim_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
-
-#include "../str/sim_string.h"
-
 #include "bai.h"
 #include "move_gen.h"
 #include "random_variable.h"
+#include <stdlib.h>
 
 void simulate(const SimArgs *sim_args, SimResults *sim_results,
               ErrorStack *error_stack) {

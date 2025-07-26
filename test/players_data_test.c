@@ -1,18 +1,14 @@
-#include <assert.h>
-#include <stdbool.h>
-#include <stddef.h>
-
 #include "../src/def/move_defs.h"
 #include "../src/def/players_data_defs.h"
-
 #include "../src/ent/equity.h"
 #include "../src/ent/klv.h"
 #include "../src/ent/players_data.h"
-
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
-
 #include "test_util.h"
+#include <assert.h>
+#include <stdbool.h>
+#include <stddef.h>
 
 void assert_players_data(const PlayersData *players_data,
                          players_data_t players_data_type,

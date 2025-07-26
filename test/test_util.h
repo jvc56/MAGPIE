@@ -1,8 +1,6 @@
 #ifndef TEST_UTIL_H
 #define TEST_UTIL_H
 
-#include <stdbool.h>
-
 #include "../src/ent/anchor.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/bit_rack.h"
@@ -16,8 +14,8 @@
 #include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/validated_move.h"
-
 #include "../src/impl/config.h"
+#include <stdbool.h>
 
 #define TRIVIAL_CROSS_SET_STRING "*"
 #define DEFAULT_TEST_DATA_PATH "./testdata:./data"

@@ -1,16 +1,13 @@
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
-
 #include "../ent/dictionary_word.h"
 #include "../ent/kwg.h"
-
 #include "../util/io_util.h"
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 // The KWG data structure was originally
 // developed in wolges. For more details

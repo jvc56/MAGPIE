@@ -1,23 +1,19 @@
+#include "../src/compat/cpthread.h"
+#include "../src/compat/ctime.h"
+#include "../src/ent/move.h"
+#include "../src/ent/thread_control.h"
+#include "../src/impl/config.h"
+#include "../src/impl/exec.h"
+#include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
+#include "test_constants.h"
+#include "test_util.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-#include "../src/compat/ctime.h"
-#include "../src/ent/move.h"
-#include "../src/ent/thread_control.h"
-#include "../src/impl/config.h"
-#include "../src/impl/exec.h"
-
-#include "../src/compat/cpthread.h"
-
-#include "../src/util/io_util.h"
-#include "../src/util/string_util.h"
-
-#include "test_constants.h"
-#include "test_util.h"
 
 #define DEFAULT_NAP_TIME 0.01
 

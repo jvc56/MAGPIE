@@ -1,16 +1,13 @@
 #include "players_data.h"
 
-#include <stdlib.h>
-
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
-
+#include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "klv.h"
 #include "kwg.h"
 #include "wmp.h"
-
-#include "../util/io_util.h"
-#include "../util/string_util.h"
+#include <stdlib.h>
 
 static const char *const players_data_type_names[] = {"kwg", "klv", "wordmap"};
 

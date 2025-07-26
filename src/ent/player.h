@@ -2,7 +2,6 @@
 #define PLAYER_H
 
 #include "../def/move_defs.h"
-
 #include "klv.h"
 #include "kwg.h"
 #include "players_data.h"

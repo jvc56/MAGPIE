@@ -1,18 +1,15 @@
 #include "inference_results.h"
 
-#include <stdint.h>
-#include <stdlib.h>
-
 #include "../def/inference_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
-
+#include "../util/io_util.h"
+#include "../util/math_util.h"
 #include "leave_rack.h"
 #include "rack.h"
 #include "stats.h"
-
-#include "../util/io_util.h"
-#include "../util/math_util.h"
+#include <stdint.h>
+#include <stdlib.h>
 
 enum { NUMBER_OF_STAT_TYPES = 3 };
 

@@ -1,13 +1,11 @@
-#include <assert.h>
-
 #include "../src/def/board_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
-
 #include "../src/ent/board.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/move.h"
+#include <assert.h>
 
 void test_move_resize(void) {
   MoveList *ml = move_list_create(3);

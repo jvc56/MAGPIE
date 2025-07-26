@@ -1,16 +1,13 @@
 #ifndef RANDOM_VARIABLE_H
 #define RANDOM_VARIABLE_H
 
-#include <stdint.h>
-
 #include "../def/bai_defs.h"
-
 #include "../ent/game.h"
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
-
 #include "bai_logger.h"
+#include <stdint.h>
 
 typedef struct RandomVariables RandomVariables;
 

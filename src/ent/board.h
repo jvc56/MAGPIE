@@ -1,22 +1,18 @@
 #ifndef BOARD_H
 #define BOARD_H
 
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
-
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/static_eval_defs.h"
-
-#include "board_layout.h"
-
-#include "letter_distribution.h"
-
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "board_layout.h"
+#include "letter_distribution.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 typedef struct Square {
   uint64_t cross_set;

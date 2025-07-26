@@ -2,15 +2,13 @@
 #define SIM_RESULTS_H
 
 #include "../compat/cpthread.h"
-#include <stdbool.h>
-
 #include "../def/bai_defs.h"
 #include "../def/game_defs.h"
 #include "../ent/bai_result.h"
-
 #include "move.h"
 #include "stats.h"
 #include "win_pct.h"
+#include <stdbool.h>
 
 typedef struct SimmedPlay SimmedPlay;
 

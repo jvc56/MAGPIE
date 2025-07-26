@@ -1,18 +1,14 @@
 #include "board_layout.h"
 
+#include "../def/board_defs.h"
+#include "../util/io_util.h"
+#include "../util/string_util.h"
+#include "bonus_square.h"
+#include "data_filepaths.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "../def/board_defs.h"
-
-#include "bonus_square.h"
-
-#include "data_filepaths.h"
-
-#include "../util/io_util.h"
-#include "../util/string_util.h"
 
 struct BoardLayout {
   char *name;

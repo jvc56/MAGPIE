@@ -1,14 +1,12 @@
 #include "win_pct.h"
 
+#include "../util/io_util.h"
+#include "../util/string_util.h"
+#include "data_filepaths.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "data_filepaths.h"
-
-#include "../util/io_util.h"
-#include "../util/string_util.h"
 
 struct WinPct {
   char *name;

@@ -1,14 +1,7 @@
-#include <assert.h>
-#include <errno.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-
+#include "../src/compat/cpthread.h"
+#include "../src/compat/ctime.h"
 #include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
-
-#include "../src/compat/ctime.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/bai_result.h"
 #include "../src/ent/game.h"
@@ -18,20 +11,20 @@
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
 #include "../src/impl/config.h"
-
 #include "../src/impl/gameplay.h"
-
-#include "../src/compat/cpthread.h"
-
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
 #include "../src/str/sim_string.h"
-
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
-
 #include "test_constants.h"
 #include "test_util.h"
+#include <assert.h>
+#include <errno.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 void print_sim_stats(const Game *game, SimResults *sim_results) {
   sim_results_sort_plays_by_win_rate(sim_results);

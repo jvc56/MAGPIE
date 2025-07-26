@@ -1,7 +1,6 @@
+#include "../src/ent/transposition_table.h"
 #include <assert.h>
 #include <stdatomic.h>
-
-#include "../src/ent/transposition_table.h"
 
 void test_transposition_table(void) {
   // Ensure that tt size is 2**24 in size by passing in 0.

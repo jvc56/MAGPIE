@@ -1,19 +1,16 @@
-#include <assert.h>
+#include "game_test.h"
 
 #include "../src/def/game_defs.h"
-
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
-#include "../src/impl/config.h"
-
 #include "../src/impl/cgp.h"
+#include "../src/impl/config.h"
 #include "../src/util/io_util.h"
-
-#include "game_test.h"
 #include "test_constants.h"
 #include "test_util.h"
+#include <assert.h>
 
 void reset_and_load_game_failure(Game *game, const char *cgp,
                                  error_code_t expected_cgp_parse_status) {

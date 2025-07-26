@@ -1,20 +1,16 @@
-#include <assert.h>
-#include <stdint.h>
-#include <stdlib.h>
-
-#include "../src/impl/config.h"
-
 #include "../src/ent/encoded_rack.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/klv.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/rack.h"
+#include "../src/impl/config.h"
 #include "../src/impl/rack_list.h"
-
 #include "../src/util/io_util.h"
 #include "../src/util/math_util.h"
-
 #include "test_util.h"
+#include <assert.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 void assert_rack_list_item_count_and_mean(
     const LetterDistribution *ld, const KLV *klv, const RackList *rack_list,

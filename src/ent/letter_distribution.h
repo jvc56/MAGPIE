@@ -1,20 +1,16 @@
 #ifndef LETTER_DISTRIBUTION_H
 #define LETTER_DISTRIBUTION_H
 
+#include "../def/board_defs.h"
+#include "../def/letter_distribution_defs.h"
+#include "../ent/equity.h"
+#include "../util/io_util.h"
+#include "../util/string_util.h"
+#include "data_filepaths.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
-
-#include "../def/board_defs.h"
-#include "../def/letter_distribution_defs.h"
-
-#include "../ent/equity.h"
-
-#include "data_filepaths.h"
-
-#include "../util/io_util.h"
-#include "../util/string_util.h"
 
 typedef enum {
   LD_TYPE_UNKNOWN,

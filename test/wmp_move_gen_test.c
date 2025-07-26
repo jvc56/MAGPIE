@@ -1,7 +1,4 @@
 
-#include <assert.h>
-#include <stdlib.h>
-
 #include "wmp_move_gen_test.h"
 
 #include "../src/def/kwg_defs.h"
@@ -15,8 +12,9 @@
 #include "../src/ent/wmp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/wmp_move_gen.h"
-
 #include "test_util.h"
+#include <assert.h>
+#include <stdlib.h>
 
 void test_wmp_move_gen_inactive(void) {
   WMPMoveGen wmg;

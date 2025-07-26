@@ -1,10 +1,9 @@
 #include "math_util.h"
 
+#include "io_util.h"
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
-
-#include "io_util.h"
 
 #define M_PI 3.14159265358979323846
 

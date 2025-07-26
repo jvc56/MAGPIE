@@ -1,12 +1,10 @@
-#include <assert.h>
-#include <stdlib.h>
-
 #include "../src/ent/dictionary_word.h"
 #include "../src/ent/game.h"
 #include "../src/impl/config.h"
 #include "../src/impl/word_prune.h"
-
 #include "test_util.h"
+#include <assert.h>
+#include <stdlib.h>
 
 void test_possible_words(void) {
   Config *config = config_create_or_die(

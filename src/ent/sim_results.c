@@ -1,21 +1,18 @@
 #include "sim_results.h"
 
 #include "../compat/cpthread.h"
-#include <stdatomic.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
-
 #include "../def/game_defs.h"
-
+#include "../util/io_util.h"
 #include "bai_result.h"
 #include "equity.h"
 #include "move.h"
 #include "stats.h"
 #include "win_pct.h"
 #include "xoshiro.h"
-
-#include "../util/io_util.h"
+#include <stdatomic.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 struct SimmedPlay {
   Move *move;

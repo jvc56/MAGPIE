@@ -1,12 +1,7 @@
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
-
 #include "../def/board_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
-
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/bonus_square.h"
@@ -17,15 +12,16 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
-
+#include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "bag_string.h"
 #include "equity_string.h"
 #include "letter_distribution_string.h"
 #include "move_string.h"
 #include "rack_string.h"
-
-#include "../util/io_util.h"
-#include "../util/string_util.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 void string_builder_add_game_variant(StringBuilder *sb,
                                      game_variant_t game_variant_type) {

@@ -1,9 +1,5 @@
 #include "validated_move.h"
 
-#include <ctype.h>
-#include <stdint.h>
-#include <stdlib.h>
-
 #include "../def/board_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
@@ -13,7 +9,8 @@
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/validated_move_defs.h"
-
+#include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "bag.h"
 #include "board.h"
 #include "equity.h"
@@ -26,9 +23,9 @@
 #include "rack.h"
 #include "static_eval.h"
 #include "words.h"
-
-#include "../util/io_util.h"
-#include "../util/string_util.h"
+#include <ctype.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 enum { MOVE_MAX_FIELDS = 5 };
 

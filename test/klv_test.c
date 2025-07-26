@@ -1,18 +1,15 @@
-#include <assert.h>
-#include <stdint.h>
-#include <stdlib.h>
-
 #include "../src/ent/data_filepaths.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/klv.h"
 #include "../src/ent/klv_csv.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/rack.h"
-
 #include "../src/impl/config.h"
 #include "../src/util/io_util.h"
-
 #include "test_util.h"
+#include <assert.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 void set_klv_leave_value(const KLV *klv, const LetterDistribution *ld,
                          const char *rack_str, double value) {

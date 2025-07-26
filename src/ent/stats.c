@@ -1,11 +1,10 @@
 #include "stats.h"
 
+#include "../util/io_util.h"
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
-
-#include "../util/io_util.h"
 
 struct Stat {
   uint64_t num_unique_samples;

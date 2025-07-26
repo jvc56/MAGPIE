@@ -1,21 +1,17 @@
-#include <assert.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "../src/ent/autoplay_results.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/klv.h"
-
 #include "../src/impl/config.h"
-
 #include "../src/util/io_util.h"
 #include "../src/util/math_util.h"
 #include "../src/util/string_util.h"
-
 #include "test_constants.h"
 #include "test_util.h"
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 void test_odds_that_player_is_better(void) {
   assert(within_epsilon(odds_that_player_is_better(0.6, 10), 73.645537));

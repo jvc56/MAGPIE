@@ -3,7 +3,6 @@
 
 #include "../def/game_history_defs.h"
 #include "../def/validated_move_defs.h"
-
 #include "../util/io_util.h"
 #include "game.h"
 #include "letter_distribution.h"

@@ -3,13 +3,11 @@
 
 #include "../def/gameplay_defs.h"
 #include "../def/move_defs.h"
-
 #include "../ent/bag.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/move.h"
 #include "../ent/rack.h"
-
 #include "move_gen.h"
 
 void draw_starting_racks(Game *game);

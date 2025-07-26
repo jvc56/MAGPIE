@@ -1,8 +1,7 @@
-#include <assert.h>
-#include <stdlib.h>
-
 #include "../src/compat/cpthread.h"
 #include "../src/ent/checkpoint.h"
+#include <assert.h>
+#include <stdlib.h>
 
 enum { NUM_THREADS = 4 };
 

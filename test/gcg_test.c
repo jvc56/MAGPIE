@@ -1,14 +1,7 @@
-#include <assert.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "../src/def/board_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
-
 #include "../src/ent/data_filepaths.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -18,14 +11,16 @@
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/validated_move.h"
-
 #include "../src/impl/config.h"
 #include "../src/impl/gcg.h"
-
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
-
 #include "test_util.h"
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 error_code_t test_parse_gcg(const char *gcg_filename, Config *config,
                             GameHistory *game_history) {

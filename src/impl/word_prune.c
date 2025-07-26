@@ -1,13 +1,8 @@
 #include "word_prune.h"
 
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/letter_distribution_defs.h"
-
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/dictionary_word.h"
@@ -16,8 +11,10 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
-
 #include "../util/io_util.h"
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 int compare_board_rows(const void *a, const void *b) {
   const BoardRow *row_a = (const BoardRow *)a;

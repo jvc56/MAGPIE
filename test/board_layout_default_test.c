@@ -1,6 +1,3 @@
-#include <assert.h>
-#include <stdint.h>
-
 #include "../src/def/board_defs.h"
 #include "../src/def/static_eval_defs.h"
 #include "../src/ent/board.h"
@@ -12,14 +9,13 @@
 #include "../src/ent/rack.h"
 #include "../src/ent/validated_move.h"
 #include "../src/impl/config.h"
-
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
-
 #include "../src/util/io_util.h"
-
 #include "test_constants.h"
 #include "test_util.h"
+#include <assert.h>
+#include <stdint.h>
 
 void assert_bonus_square(const BonusSquare bonus_square,
                          const uint8_t expected_value) {

@@ -1,10 +1,5 @@
-#include <assert.h>
-#include <stdbool.h>
-#include <stdio.h>
-
 #include "../src/def/game_defs.h"
 #include "../src/def/rack_defs.h"
-
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
 #include "../src/ent/equity.h"
@@ -15,12 +10,13 @@
 #include "../src/ent/rack.h"
 #include "../src/ent/validated_move.h"
 #include "../src/impl/config.h"
-
 #include "../src/impl/gameplay.h"
 #include "../src/util/io_util.h"
-
 #include "test_constants.h"
 #include "test_util.h"
+#include <assert.h>
+#include <stdbool.h>
+#include <stdio.h>
 
 void return_racks_to_bag(const Game *game) {
   return_rack_to_bag(game, 0);

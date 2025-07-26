@@ -1,23 +1,18 @@
 #ifndef WMP_H
 #define WMP_H
 
+#include "../compat/endian_conv.h"
+#include "../def/board_defs.h"
+#include "../def/wmp_defs.h"
+#include "../ent/bit_rack.h"
+#include "../util/fileproxy.h"
+#include "../util/io_util.h"
+#include "../util/string_util.h"
+#include "data_filepaths.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-
-#include "../compat/endian_conv.h"
-
-#include "../def/board_defs.h"
-#include "../def/wmp_defs.h"
-
-#include "../ent/bit_rack.h"
-
-#include "../util/fileproxy.h"
-#include "../util/io_util.h"
-#include "../util/string_util.h"
-
-#include "data_filepaths.h"
 // WordMap binary format:
 // ======================
 // 1 byte: major version number

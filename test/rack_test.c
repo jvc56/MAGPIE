@@ -1,12 +1,11 @@
-#include <assert.h>
+#include "rack_test.h"
 
 #include "../src/ent/encoded_rack.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/rack.h"
 #include "../src/impl/config.h"
-
-#include "rack_test.h"
 #include "test_util.h"
+#include <assert.h>
 
 void test_rack_main(void) {
   Config *config = config_create_or_die(

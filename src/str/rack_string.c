@@ -1,11 +1,9 @@
 #include "../def/letter_distribution_defs.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/rack.h"
-#include <stdint.h>
-
-#include "letter_distribution_string.h"
-
 #include "../util/string_util.h"
+#include "letter_distribution_string.h"
+#include <stdint.h>
 
 void add_blanks(StringBuilder *string_builder, const Rack *rack,
                 const LetterDistribution *ld) {

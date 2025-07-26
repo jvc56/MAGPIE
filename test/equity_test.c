@@ -1,11 +1,8 @@
+#include "../src/def/equity_defs.h"
+#include "../src/ent/equity.h"
+#include "test_util.h"
 #include <assert.h>
 #include <stdint.h>
-
-#include "../src/def/equity_defs.h"
-
-#include "../src/ent/equity.h"
-
-#include "test_util.h"
 
 void test_stability_and_negation(Equity eq1) {
   if (eq1 == EQUITY_UNDEFINED_VALUE || eq1 == EQUITY_INITIAL_VALUE ||

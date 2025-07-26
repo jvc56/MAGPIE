@@ -1,12 +1,8 @@
-#include <ctype.h>
-#include <stdlib.h>
-
 #include "../def/board_defs.h"
 #include "../def/config_defs.h"
 #include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
-
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/board_layout.h"
@@ -16,14 +12,13 @@
 #include "../ent/player.h"
 #include "../ent/players_data.h"
 #include "../ent/rack.h"
-
-#include "../util/io_util.h"
-#include "../util/string_util.h"
-
 #include "../impl/gameplay.h"
-
 #include "../str/game_string.h"
 #include "../str/rack_string.h"
+#include "../util/io_util.h"
+#include "../util/string_util.h"
+#include <ctype.h>
+#include <stdlib.h>
 
 void place_letters_on_board(const Game *game, const char *letters,
                             int row_start, int *current_column_index,

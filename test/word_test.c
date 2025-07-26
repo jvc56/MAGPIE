@@ -1,18 +1,14 @@
-#include <assert.h>
-#include <stdint.h>
-#include <string.h>
-
 #include "../src/def/letter_distribution_defs.h"
-
 #include "../src/ent/game.h"
 #include "../src/ent/validated_move.h"
 #include "../src/ent/words.h"
 #include "../src/impl/config.h"
-
 #include "../src/util/io_util.h"
-
 #include "test_constants.h"
 #include "test_util.h"
+#include <assert.h>
+#include <stdint.h>
+#include <string.h>
 
 void test_words_played(void) {
   Config *config = config_create_or_die(

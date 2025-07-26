@@ -1,16 +1,12 @@
 #ifndef LEAVE_MAP_H
 #define LEAVE_MAP_H
 
+#include "../def/rack_defs.h"
+#include "../util/io_util.h"
+#include "equity.h"
+#include "rack.h"
 #include <stdint.h>
 #include <stdlib.h>
-
-#include "../def/rack_defs.h"
-
-#include "equity.h"
-
-#include "../util/io_util.h"
-
-#include "rack.h"
 
 // The LeaveMap struct is used by
 // movegen to lookup the leave value

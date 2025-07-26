@@ -1,9 +1,5 @@
-#include <assert.h>
-#include <stdlib.h>
-
 #include "../src/def/inference_defs.h"
 #include "../src/def/letter_distribution_defs.h"
-
 #include "../src/ent/bag.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -14,14 +10,13 @@
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/stats.h"
-
 #include "../src/impl/config.h"
-
 #include "../src/util/io_util.h"
 #include "../src/util/math_util.h"
-
 #include "test_constants.h"
 #include "test_util.h"
+#include <assert.h>
+#include <stdlib.h>
 
 error_code_t infer_for_test(const Config *config, int target_index,
                             int target_score, int target_num_exch,

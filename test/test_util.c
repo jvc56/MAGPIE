@@ -1,23 +1,10 @@
-#include <assert.h>
-#include <dirent.h>
-#include <errno.h>
-#include <inttypes.h>
-#include <math.h>
-#include <setjmp.h>
-#include <signal.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
+#include "test_util.h"
 
 #include "../src/def/board_defs.h"
 #include "../src/def/cross_set_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/thread_control_defs.h"
-
 #include "../src/ent/anchor.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/bit_rack.h"
@@ -41,24 +28,32 @@
 #include "../src/ent/thread_control.h"
 #include "../src/ent/validated_move.h"
 #include "../src/ent/wmp.h"
-
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/gcg.h"
 #include "../src/impl/move_gen.h"
 #include "../src/impl/wmp_move_gen.h"
-
 #include "../src/str/game_string.h"
 #include "../src/str/inference_string.h"
 #include "../src/str/move_string.h"
 #include "../src/str/rack_string.h"
-
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
-
 #include "test_constants.h"
-#include "test_util.h"
+#include <assert.h>
+#include <dirent.h>
+#include <errno.h>
+#include <inttypes.h>
+#include <math.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 #define TEST_EPSILON 1e-6
 

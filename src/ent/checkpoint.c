@@ -1,9 +1,8 @@
 #include "checkpoint.h"
 
 #include "../compat/cpthread.h"
-#include <stdlib.h>
-
 #include "../util/io_util.h"
+#include <stdlib.h>
 
 struct Checkpoint {
   cpthread_mutex_t mutex;

@@ -1,5 +1,3 @@
-#include <assert.h>
-
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
@@ -8,6 +6,7 @@
 #include "../src/impl/endgame.h"
 #include "../src/util/io_util.h"
 #include "test_util.h"
+#include <assert.h>
 
 void test_vs_joey(void) {
   Config *config =

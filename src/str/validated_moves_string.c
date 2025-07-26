@@ -3,10 +3,8 @@
 #include "../ent/move.h"
 #include "../ent/validated_move.h"
 #include "../ent/words.h"
-
-#include "letter_distribution_string.h"
-
 #include "../util/string_util.h"
+#include "letter_distribution_string.h"
 #include <stdlib.h>
 
 char *validated_moves_get_phonies_string(const LetterDistribution *ld,

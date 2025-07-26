@@ -1,21 +1,17 @@
 #include "exec.h"
 
 #include "../compat/cpthread.h"
-#include <assert.h>
-#include <stdbool.h>
-#include <stdlib.h>
-
 #include "../def/config_defs.h"
 #include "../def/thread_control_defs.h"
-
 #include "../ent/thread_control.h"
-
-#include "config.h"
-#include "move_gen.h"
-
 #include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "config.h"
+#include "move_gen.h"
+#include <assert.h>
+#include <stdbool.h>
+#include <stdlib.h>
 
 #define UCGI_COMMAND_STRING "ucgi"
 #define QUIT_COMMAND_STRING "quit"

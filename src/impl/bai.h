@@ -12,21 +12,17 @@
  */
 
 #include "../compat/cpthread.h"
-#include <assert.h>
-#include <limits.h>
-#include <stdbool.h>
-
 #include "../def/bai_defs.h"
 #include "../def/thread_control_defs.h"
-
 #include "../ent/bai_result.h"
 #include "../ent/checkpoint.h"
 #include "../ent/thread_control.h"
-
 #include "../util/io_util.h"
-
 #include "bai_logger.h"
 #include "random_variable.h"
+#include <assert.h>
+#include <limits.h>
+#include <stdbool.h>
 
 #define MINIMUM_VARIANCE 1e-10
 

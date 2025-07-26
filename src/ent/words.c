@@ -1,23 +1,19 @@
 #include "words.h"
 
+#include "../def/board_defs.h"
+#include "../def/letter_distribution_defs.h"
+#include "../def/rack_defs.h"
+#include "../ent/kwg.h"
+#include "../ent/move.h"
+#include "../ent/rack.h"
+#include "../util/io_util.h"
+#include "board.h"
+#include "kwg_alpha.h"
+#include "letter_distribution.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "../def/board_defs.h"
-#include "../def/letter_distribution_defs.h"
-#include "../def/rack_defs.h"
-
-#include "../ent/kwg.h"
-#include "../ent/move.h"
-#include "../ent/rack.h"
-
-#include "../util/io_util.h"
-
-#include "board.h"
-#include "kwg_alpha.h"
-#include "letter_distribution.h"
 
 typedef struct FormedWord {
   MachineLetter word[BOARD_DIM];

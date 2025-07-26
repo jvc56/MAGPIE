@@ -1,27 +1,21 @@
+#include "../src/compat/cpthread.h"
+#include "../src/def/bai_defs.h"
+#include "../src/def/thread_control_defs.h"
+#include "../src/ent/bai_result.h"
+#include "../src/ent/thread_control.h"
+#include "../src/ent/xoshiro.h"
+#include "../src/impl/bai.h"
+#include "../src/impl/bai_logger.h"
+#include "../src/impl/random_variable.h"
+#include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
+#include "test_util.h"
 #include <assert.h>
 #include <inttypes.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-
-#include "../src/def/bai_defs.h"
-#include "../src/def/thread_control_defs.h"
-
-#include "../src/ent/bai_result.h"
-#include "../src/ent/thread_control.h"
-#include "../src/ent/xoshiro.h"
-
-#include "../src/impl/bai_logger.h"
-#include "../src/impl/random_variable.h"
-
-#include "../src/impl/bai.h"
-#include "../src/util/io_util.h"
-#include "../src/util/string_util.h"
-
-#include "../src/compat/cpthread.h"
-
-#include "test_util.h"
 
 enum { NUM_UNIQUE_MEANS = 10000 };
 

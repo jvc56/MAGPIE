@@ -1,19 +1,15 @@
 #ifndef KWG_H
 #define KWG_H
 
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "../compat/endian_conv.h"
-
 #include "../def/kwg_defs.h"
-
 #include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
-
 #include "data_filepaths.h"
 #include "letter_distribution.h"
+#include <stdio.h>
+#include <stdlib.h>
 
 typedef struct KWG {
   char *name;
@@ -96,7 +92,7 @@ static inline uint64_t kwg_get_letter_sets(const KWG *kwg, uint32_t node_index,
     const uint32_t t = kwg_node_tile(node);
     const uint64_t bit = ((uint64_t)1 << t) ^ (!t);
     es |= bit;
-    ls |= bit & (uint64_t)-(int64_t)kwg_node_accepts(node);
+    ls |= bit & (uint64_t) - (int64_t)kwg_node_accepts(node);
     if (kwg_node_is_end(node)) {
       break;
     }

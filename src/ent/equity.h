@@ -1,14 +1,12 @@
 #ifndef EQUITY_H
 #define EQUITY_H
 
+#include "../def/equity_defs.h"
+#include "../util/io_util.h"
 #include <assert.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
-
-#include "../def/equity_defs.h"
-
-#include "../util/io_util.h"
 
 typedef int32_t Equity;
 

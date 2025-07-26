@@ -1,24 +1,19 @@
-#include <assert.h>
-#include <stdlib.h>
-
 #include "../src/def/game_defs.h"
-
 #include "../src/ent/board_layout.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/players_data.h"
 #include "../src/ent/validated_move.h"
-
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
-
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
-
 #include "test_constants.h"
 #include "test_util.h"
+#include <assert.h>
+#include <stdlib.h>
 
 void assert_game_matches_cgp_with_options(const Config *config,
                                           const Game *game,

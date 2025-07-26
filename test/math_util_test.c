@@ -1,9 +1,7 @@
+#include "../src/util/math_util.h"
+#include "test_util.h"
 #include <assert.h>
 #include <math.h>
-
-#include "../src/util/math_util.h"
-
-#include "test_util.h"
 
 void test_math_util(void) {
   assert(within_epsilon(odds_that_player_is_better(0.5, 10), 50.0));

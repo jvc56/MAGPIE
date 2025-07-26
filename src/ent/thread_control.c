@@ -1,18 +1,14 @@
 #include "thread_control.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/ctime.h"
+#include "../def/thread_control_defs.h"
+#include "../util/io_util.h"
+#include "xoshiro.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-
-#include "../def/thread_control_defs.h"
-
-#include "../compat/ctime.h"
-
-#include "xoshiro.h"
-
-#include "../util/io_util.h"
 
 struct ThreadControl {
   int number_of_threads;

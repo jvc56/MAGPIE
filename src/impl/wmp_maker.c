@@ -1,23 +1,20 @@
+#include "wmp_maker.h"
+
+#include "../def/bit_rack_defs.h"
+#include "../def/board_defs.h"
+#include "../def/letter_distribution_defs.h"
+#include "../def/wmp_defs.h"
+#include "../ent/bit_rack.h"
+#include "../ent/dictionary_word.h"
+#include "../ent/letter_distribution.h"
+#include "../ent/wmp.h"
+#include "../util/io_util.h"
 #include <assert.h>
 #include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "../def/bit_rack_defs.h"
-#include "../def/board_defs.h"
-#include "../def/letter_distribution_defs.h"
-#include "../def/wmp_defs.h"
-
-#include "../ent/bit_rack.h"
-#include "../ent/dictionary_word.h"
-#include "../ent/letter_distribution.h"
-#include "../ent/wmp.h"
-
-#include "wmp_maker.h"
-
-#include "../util/io_util.h"
 
 typedef struct MutableWordsMapEntry {
   BitRack quotient;

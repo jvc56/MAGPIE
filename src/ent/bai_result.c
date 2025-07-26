@@ -1,9 +1,8 @@
 #include "bai_result.h"
 
 #include "../compat/cpthread.h"
-#include <stdlib.h>
-
 #include "../util/io_util.h"
+#include <stdlib.h>
 
 struct BAIResult {
   int best_arm;

@@ -1,15 +1,12 @@
-#include <assert.h>
-#include <stdint.h>
-
 #include "../src/def/bit_rack_defs.h"
 #include "../src/def/board_defs.h"
-
 #include "../src/ent/bit_rack.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/rack.h"
 #include "../src/impl/config.h"
-
 #include "test_util.h"
+#include <assert.h>
+#include <stdint.h>
 
 void test_compatibility(void) {
   assert(bit_rack_type_has_expected_size());

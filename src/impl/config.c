@@ -1,14 +1,5 @@
 #include "config.h"
 
-#include <assert.h>
-#include <ctype.h>
-#include <float.h>
-#include <limits.h>
-#include <math.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
-
 #include "../def/autoplay_defs.h"
 #include "../def/bai_defs.h"
 #include "../def/config_defs.h"
@@ -18,7 +9,6 @@
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
-
 #include "../ent/autoplay_results.h"
 #include "../ent/board.h"
 #include "../ent/board_layout.h"
@@ -37,7 +27,11 @@
 #include "../ent/thread_control.h"
 #include "../ent/validated_move.h"
 #include "../ent/win_pct.h"
-
+#include "../str/game_string.h"
+#include "../str/move_string.h"
+#include "../str/sim_string.h"
+#include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "autoplay.h"
 #include "cgp.h"
 #include "convert.h"
@@ -46,13 +40,14 @@
 #include "move_gen.h"
 #include "random_variable.h"
 #include "simmer.h"
-
-#include "../str/game_string.h"
-#include "../str/move_string.h"
-#include "../str/sim_string.h"
-
-#include "../util/io_util.h"
-#include "../util/string_util.h"
+#include <assert.h>
+#include <ctype.h>
+#include <float.h>
+#include <limits.h>
+#include <math.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 typedef enum {
   ARG_TOKEN_SET,

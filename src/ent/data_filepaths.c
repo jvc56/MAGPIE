@@ -1,11 +1,10 @@
 #include "data_filepaths.h"
 
+#include "../util/io_util.h"
+#include "../util/string_util.h"
 #include <glob.h>
 #include <stdlib.h>
 #include <unistd.h>
-
-#include "../util/io_util.h"
-#include "../util/string_util.h"
 
 #define KWG_EXTENSION ".kwg"
 #define WORDMAP_EXTENSION ".wmp"

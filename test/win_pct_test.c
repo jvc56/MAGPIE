@@ -1,10 +1,8 @@
-#include <assert.h>
-#include <stdint.h>
-
 #include "../src/ent/win_pct.h"
 #include "../src/impl/config.h"
-
 #include "test_util.h"
+#include <assert.h>
+#include <stdint.h>
 
 void assert_win_pct_get(const float actual, const double expected) {
   assert(within_epsilon(actual, expected));

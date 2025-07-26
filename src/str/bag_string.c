@@ -1,13 +1,11 @@
-#include "../def/letter_distribution_defs.h"
+#include "bag_string.h"
 
+#include "../def/letter_distribution_defs.h"
 #include "../ent/bag.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/rack.h"
-
-#include "bag_string.h"
-#include "letter_distribution_string.h"
-
 #include "../util/string_util.h"
+#include "letter_distribution_string.h"
 
 enum { BLANK_SORT_VALUE = 255 };
 
