@@ -1157,7 +1157,7 @@ void movegen_correctly_returns_from_anchor(void) {
       .max_equity_diff = 0,
   };
 
-  // The leave of NNN should be one 1 / EQUITY_RESOLUTION better
+  // A8 BRRR 72 should be 1 equity better than A8 BRR 69
   set_klv_leave_value(klv, ld, "NNN", 0);
   set_klv_leave_value(klv, ld, "NNNR", int_to_equity(3) - 1);
 
@@ -1166,9 +1166,20 @@ void movegen_correctly_returns_from_anchor(void) {
   generate_moves(&move_gen_args);
   assert_move(game, move_list, NULL, 0, "A8 BRRR 72");
 
-  // The leave of NNNR should be one 1 / EQUITY_RESOLUTION better
+  // A8 BRR 69 should be 1 equity better than A8 BRRR 72
   set_klv_leave_value(klv, ld, "NNN", 0);
   set_klv_leave_value(klv, ld, "NNNR", int_to_equity(3) + 1);
+
+  load_cgp_or_die(game, RATPACK_CGP);
+  rack_set_to_string(ld, player_rack, "BRRRNNN");
+  generate_moves(&move_gen_args);
+  assert_move(game, move_list, NULL, 0, "A8 BRR 69");
+
+  // A8 BRR 69 should be equal to A8 BRRR 72, but since the movegen
+  // will record A8 BRR 69 first, it should return immediately
+  // and give A8 BRR 69 as the best move.
+  set_klv_leave_value(klv, ld, "NNN", 0);
+  set_klv_leave_value(klv, ld, "NNNR", int_to_equity(3));
 
   load_cgp_or_die(game, RATPACK_CGP);
   rack_set_to_string(ld, player_rack, "BRRRNNN");
