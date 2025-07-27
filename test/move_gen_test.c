@@ -1140,6 +1140,46 @@ void movegen_should_not_gen_exchanges(void) {
   config_destroy(config);
 }
 
+void movegen_correctly_returns_from_anchor(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  Player *player = game_get_player(game, 0);
+  Rack *player_rack = player_get_rack(player);
+  MoveList *move_list = move_list_create(10);
+  KLV *klv = players_data_get_klv(config_get_players_data(config), 0);
+  MoveGenArgs move_gen_args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_BEST,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .thread_index = 0,
+      .max_equity_diff = 0,
+  };
+
+  // The leave of NNN should be one 1 / EQUITY_RESOLUTION better
+  set_klv_leave_value(klv, ld, "NNN", 0);
+  set_klv_leave_value(klv, ld, "NNNR", int_to_equity(3) - 1);
+
+  load_cgp_or_die(game, RATPACK_CGP);
+  rack_set_to_string(ld, player_rack, "BRRRNNN");
+  generate_moves(&move_gen_args);
+  assert_move(game, move_list, NULL, 0, "A8 BRRR 72");
+
+  // The leave of NNNR should be one 1 / EQUITY_RESOLUTION better
+  set_klv_leave_value(klv, ld, "NNN", 0);
+  set_klv_leave_value(klv, ld, "NNNR", int_to_equity(3) + 1);
+
+  load_cgp_or_die(game, RATPACK_CGP);
+  rack_set_to_string(ld, player_rack, "BRRRNNN");
+  generate_moves(&move_gen_args);
+  assert_move(game, move_list, NULL, 0, "A8 BRR 69");
+
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_move_gen(void) {
   leave_lookup_test();
   unfound_leave_lookup_test();
@@ -1159,4 +1199,5 @@ void test_move_gen(void) {
   movegen_within_x_of_best_test();
   movegen_many_moves();
   movegen_should_not_gen_exchanges();
+  movegen_correctly_returns_from_anchor();
 }

@@ -152,12 +152,12 @@
   "15/15/10LAZED/6EPITAXES1/7R7/7o7/7T7/7E7/7G7/7E7/2SNIFTER6/15/15/15/15 "    \
   "IJLNOPS/ 149/154 0 -lex CSW21;"
 #define CATALAN_CGP                                                            \
-  "15/15/15/11HUNS/4E5JO3/4n2CE[L·L]A4/2RECELAT6/3XAMIS2D4/4R1BO[NY]1E1P1E/"  \
+  "15/15/15/11HUNS/4E5JO3/4n2CE[L·L]A4/2RECELAT6/3XAMIS2D4/4R1BO[NY]1E1P1E/"   \
   "1ZELAM4S1E1N/4R5A1V1C/BUS[QU]IN4FRENA/U3A2MODI1T1U/R6ERINOSIS/"             \
   "LITIGAnT2O3E AAIPRRS/AADEGLT 388/446 0 -lex DISC2;"
-#define POLISH_CGP                                                                 \
+#define POLISH_CGP                                                             \
   "15/15/11FiŚ1/11LI2/9CŁA3/9Z1N3/8HOI4/6STĘPIĆ3/5AUR1Y5/4SAMY2G4/2CLE4JA1K2/" \
-  "2LARWO1SAMBIE1/2I1WENTO1O1IW1/E6END3Y1/ZDZIAŁaJ1Y5 ACNNPRW/AHIKPZŻ "          \
+  "2LARWO1SAMBIE1/2I1WENTO1O1IW1/E6END3Y1/ZDZIAŁaJ1Y5 ACNNPRW/AHIKPZŻ "        \
   "240/200 0 -lex OSPS49;"
 #define FRAWZEY_CGP                                                            \
   "15/15/15/14Q/14U/14I/14N/7FRAWZEYS/7O7/7A7/7M7/7L7/7I7/7K7/7E7 /  150/224 " \
@@ -184,6 +184,8 @@
   "C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/"        \
   "7PEW2DOE/9EF1DOR/2KUNA1J1BEVELS/3TURRETs2S2/7A4T2/7N7/7S7 / "               \
   "336/298 0"
+#define RATPACK_CGP                                                            \
+  "15/15/15/15/15/15/15/1RATPACK7/15/15/15/15/15/15/15 / 0/82 0"
 // 21 x 21 boards
 
 #define ANTHROPOMORPHISATIONS_CGP                                              \

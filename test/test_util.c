@@ -1014,3 +1014,12 @@ void extract_sorted_anchors_for_test(AnchorHeap *sorted_anchors) {
         anchor_heap_extract_max(&gen->anchor_heap);
   }
 }
+
+void set_klv_leave_value(const KLV *klv, const LetterDistribution *ld,
+                         const char *rack_str, const Equity equity) {
+  Rack *rack = rack_create(ld_get_size(ld));
+  rack_set_to_string(ld, rack, rack_str);
+  const uint32_t klv_word_index = klv_get_word_index(klv, rack);
+  klv_set_indexed_leave_value(klv, klv_word_index, equity);
+  rack_destroy(rack);
+}

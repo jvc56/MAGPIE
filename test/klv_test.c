@@ -11,15 +11,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-void set_klv_leave_value(const KLV *klv, const LetterDistribution *ld,
-                         const char *rack_str, double value) {
-  Rack *rack = rack_create(ld_get_size(ld));
-  rack_set_to_string(ld, rack, rack_str);
-  const uint32_t klv_word_index = klv_get_word_index(klv, rack);
-  klv_set_indexed_leave_value(klv, klv_word_index, double_to_equity(value));
-  rack_destroy(rack);
-}
-
 void test_small_klv(void) {
   Config *config = config_create_or_die("set -lex CSW21 -ld english_small");
   const LetterDistribution *ld = config_get_ld(config);
@@ -34,10 +25,10 @@ void test_small_klv(void) {
   KLV *small_klv = klv_create_empty(ld, klv_name);
   assert(klv_get_number_of_leaves(small_klv) == 11);
 
-  set_klv_leave_value(small_klv, ld, "?", 1.0);
-  set_klv_leave_value(small_klv, ld, "?A", 2.0);
-  set_klv_leave_value(small_klv, ld, "?AAB", 3.0);
-  set_klv_leave_value(small_klv, ld, "AAB", 4.0);
+  set_klv_leave_value(small_klv, ld, "?", double_to_equity(1.0));
+  set_klv_leave_value(small_klv, ld, "?A", double_to_equity(2.0));
+  set_klv_leave_value(small_klv, ld, "?AAB", double_to_equity(3.0));
+  set_klv_leave_value(small_klv, ld, "AAB", double_to_equity(4.0));
 
   klv_write_to_csv_or_die(small_klv, ld, data_path, klv_name);
 
@@ -80,10 +71,10 @@ void test_normal_klv(void) {
   KLV *normal_klv = klv_create_empty(ld, "normal");
   assert(klv_get_number_of_leaves(normal_klv) == 914624);
 
-  set_klv_leave_value(normal_klv, ld, "?", 1.0);
-  set_klv_leave_value(normal_klv, ld, "?Z", 2.0);
-  set_klv_leave_value(normal_klv, ld, "YYZ", 3.0);
-  set_klv_leave_value(normal_klv, ld, "WWXYYZ", 4.0);
+  set_klv_leave_value(normal_klv, ld, "?", double_to_equity(1.0));
+  set_klv_leave_value(normal_klv, ld, "?Z", double_to_equity(2.0));
+  set_klv_leave_value(normal_klv, ld, "YYZ", double_to_equity(3.0));
+  set_klv_leave_value(normal_klv, ld, "WWXYYZ", double_to_equity(4.0));
 
   klv_write_to_csv_or_die(normal_klv, ld, data_path, klv_name);
 
