@@ -321,7 +321,7 @@ void test_sim_top_two_consistency(void) {
 void perf_test_multithread_sim(void) {
   Config *config =
       config_create_or_die("set -s1 score -s2 score -r1 all -r2 all "
-                           "-threads 4 -plies 2 -it 1000 -minp 10 -numplays 15 "
+                           "-threads 4 -plies 2 -it 2000 -minp 50 -numplays 15 "
                            "-scond none -pfreq 100");
   load_and_exec_config_or_die(
       config,

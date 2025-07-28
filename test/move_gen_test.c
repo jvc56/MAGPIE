@@ -1144,10 +1144,10 @@ void movegen_correctly_returns_from_anchor(void) {
   Config *config = config_create_or_die("set -lex CSW21 -wmp true");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
-  Player *player = game_get_player(game, 0);
+  const Player *player = game_get_player(game, 0);
   Rack *player_rack = player_get_rack(player);
   MoveList *move_list = move_list_create(10);
-  KLV *klv = players_data_get_klv(config_get_players_data(config), 0);
+  const KLV *klv = players_data_get_klv(config_get_players_data(config), 0);
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
