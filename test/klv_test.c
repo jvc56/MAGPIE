@@ -3,7 +3,6 @@
 #include "../src/ent/klv.h"
 #include "../src/ent/klv_csv.h"
 #include "../src/ent/letter_distribution.h"
-#include "../src/ent/rack.h"
 #include "../src/impl/config.h"
 #include "../src/util/io_util.h"
 #include "test_util.h"
