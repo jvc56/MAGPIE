@@ -1932,10 +1932,17 @@ void config_load_command(Config *config, const char *cmd,
   string_splitter_destroy(cmd_split_string);
 }
 
-void config_execute_command(Config *config, ErrorStack *error_stack) {
+bool config_execute_command_silent(Config *config, ErrorStack *error_stack) {
   if (config_exec_parg_is_set(config)) {
     config_get_parg_exec_func(config, config->exec_parg_token)(config,
                                                                error_stack);
+    return true;
+  }
+  return false;
+}
+
+void config_execute_command(Config *config, ErrorStack *error_stack) {
+  if (config_execute_command_silent(config, error_stack)) {
     char *finished_msg = get_status_finished_str(config);
     thread_control_print(config_get_thread_control(config), finished_msg);
     free(finished_msg);

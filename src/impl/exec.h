@@ -7,6 +7,8 @@
 
 void execute_command_sync(Config *config, ErrorStack *error_stack,
                           const char *command);
+bool execute_command_sync_silent(Config *config, ErrorStack *error_stack,
+                                 const char *command);
 void execute_command_async(Config *config, ErrorStack *error_stack,
                            const char *command);
 char *command_search_status(Config *config, bool should_exit);

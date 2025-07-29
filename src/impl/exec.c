@@ -36,8 +36,13 @@ char *command_search_status(Config *config, bool should_exit) {
 }
 
 void execute_command_and_set_status_finished(Config *config,
-                                             ErrorStack *error_stack) {
-  config_execute_command(config, error_stack);
+                                             ErrorStack *error_stack,
+                                             bool silent) {
+  if (silent) {
+    config_execute_command_silent(config, error_stack);
+  } else {
+    config_execute_command(config, error_stack);
+  }
   thread_control_set_status(config_get_thread_control(config),
                             THREAD_CONTROL_STATUS_FINISHED);
 }
@@ -47,14 +52,14 @@ void *execute_command_thread_worker(void *uncasted_args) {
   // Create another error stack so this asynchronous command doesn't
   // interfere with the synchronous error stack on the main thread.
   ErrorStack *error_stack_async = error_stack_create();
-  execute_command_and_set_status_finished(config, error_stack_async);
+  execute_command_and_set_status_finished(config, error_stack_async, false);
   error_stack_print_and_reset(error_stack_async);
   error_stack_destroy(error_stack_async);
   return NULL;
 }
 
-void execute_command_sync_or_async(Config *config, ErrorStack *error_stack,
-                                   const char *command, bool sync) {
+bool load_command_sync(Config *config, ErrorStack *error_stack,
+                       const char *command) {
   ThreadControl *thread_control = config_get_thread_control(config);
   if (!thread_control_is_ready_for_new_command(thread_control)) {
     error_stack_push(
@@ -62,7 +67,7 @@ void execute_command_sync_or_async(Config *config, ErrorStack *error_stack,
         string_duplicate(
             "cannot execute a new command while the previous command "
             "is still running"));
-    return;
+    return false;
   }
   const bool reset_result =
       thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
@@ -73,27 +78,36 @@ void execute_command_sync_or_async(Config *config, ErrorStack *error_stack,
   if (!error_stack_is_empty(error_stack)) {
     thread_control_set_status(config_get_thread_control(config),
                               THREAD_CONTROL_STATUS_FINISHED);
-    return;
+    return false;
   }
 
-  if (sync) {
-    execute_command_and_set_status_finished(config, error_stack);
-  } else {
+  return true;
+}
+
+void execute_command_sync(Config *config, ErrorStack *error_stack,
+                          const char *command) {
+  if (load_command_sync(config, error_stack, command)) {
+    execute_command_and_set_status_finished(config, error_stack, false);
+  }
+}
+
+bool execute_command_sync_silent(Config *config, ErrorStack *error_stack,
+                                 const char *command) {
+  if (load_command_sync(config, error_stack, command)) {
+    execute_command_and_set_status_finished(config, error_stack, true);
+    return true;
+  }
+  return false;
+}
+
+void execute_command_async(Config *config, ErrorStack *error_stack,
+                           const char *command) {
+  if (load_command_sync(config, error_stack, command)) {
     cpthread_t cmd_execution_thread;
     cpthread_create(&cmd_execution_thread, execute_command_thread_worker,
                     config);
     cpthread_detach(cmd_execution_thread);
   }
-}
-
-void execute_command_sync(Config *config, ErrorStack *error_stack,
-                          const char *command) {
-  execute_command_sync_or_async(config, error_stack, command, true);
-}
-
-void execute_command_async(Config *config, ErrorStack *error_stack,
-                           const char *command) {
-  execute_command_sync_or_async(config, error_stack, command, false);
 }
 
 void process_ucgi_command(Config *config, ErrorStack *error_stack,
