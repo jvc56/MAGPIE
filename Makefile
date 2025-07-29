@@ -31,13 +31,17 @@ cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -
 cflags.vlg := -g -O0 -Wall -Wno-trigraphs -Wextra
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
 cflags.release := -O3 -flto -funroll-loops -march=native -Wall -Wno-trigraphs
+cflags.dll_dev = -g -O0 -fpic -Wall
+cflags.dll_release = -O3 -fpic -flto -funroll-loops -march=native -Wall -Wno-trigraphs
 
 lflags.cov := --coverage
 
 ldflags.dev := -Llib -pthread $(FSAN_ARG)
 ldflags.vlg := -Llib -pthread
 ldflags.release := -Llib -pthread
-ldflags.cov := -Llib -pthread 
+ldflags.cov := -Llib -pthread
+ldflags.dll_dev := -Llib -pthread
+ldflags.dll_release := -Llib -pthread
 
 CFLAGS := ${cflags.${BUILD}}
 
@@ -58,6 +62,9 @@ LDLIBS   := -lm
 .PHONY: all clean iwyu
 
 all: magpie magpie_test
+
+magpie_so: $(OBJ_SRC)
+	$(CC) -shared $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o libmagpie.so
 
 magpie: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
