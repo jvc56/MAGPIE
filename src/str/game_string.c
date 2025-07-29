@@ -100,7 +100,7 @@ void string_builder_add_move_with_rank_and_equity(StringBuilder *game_string,
   string_builder_add_move(game_string, board, move, ld);
   string_builder_add_string(game_string, " ");
   const Equity eq = move_get_equity(move);
-  string_builder_add_equity(game_string, eq, "%0.2f");
+  string_builder_add_equity(game_string, eq, "%0.3f");
 }
 
 void string_builder_add_game(StringBuilder *game_string, const Game *game,

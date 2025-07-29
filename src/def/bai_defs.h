@@ -11,7 +11,6 @@ typedef enum {
 typedef enum {
   BAI_SAMPLING_RULE_ROUND_ROBIN,
   BAI_SAMPLING_RULE_TOP_TWO,
-  BAI_SAMPLING_RULE_TOP_FEW,
 } bai_sampling_rule_t;
 
 typedef struct BAIOptions {

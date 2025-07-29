@@ -184,6 +184,8 @@
   "C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/"        \
   "7PEW2DOE/9EF1DOR/2KUNA1J1BEVELS/3TURRETs2S2/7A4T2/7N7/7S7 / "               \
   "336/298 0"
+#define RATPACK_CGP                                                            \
+  "15/15/15/15/15/15/15/1RATPACK7/15/15/15/15/15/15/15 / 0/82 0"
 // 21 x 21 boards
 
 #define ANTHROPOMORPHISATIONS_CGP                                              \

@@ -228,10 +228,11 @@ gen_insert_spare_move_within_x_equity_of_best(MoveGen *gen,
   }
 }
 
-static inline void update_best_move_or_insert_into_movelist(
+static inline bool update_best_move_or_insert_into_movelist(
     MoveGen *gen, int leftstrip, int rightstrip, game_event_t move_type,
     Equity score, int start_row, int start_col, int tiles_played, int dir,
     MachineLetter strip[]) {
+  bool best_equity_for_anchor_found = false;
   switch (gen->move_record_type) {
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:;
@@ -250,10 +251,14 @@ static inline void update_best_move_or_insert_into_movelist(
     Move *current_move = gen_get_current_move(gen);
     set_play_for_record(current_move, move_type, leftstrip, rightstrip, score,
                         start_row, start_col, tiles_played, dir, strip);
-    move_set_equity(current_move,
-                    get_move_equity_for_sort_type(gen, current_move, score));
+    const Equity current_move_equity =
+        get_move_equity_for_sort_type(gen, current_move, score);
+    move_set_equity(current_move, current_move_equity);
     if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
       gen_switch_best_move_and_current_move(gen);
+      if (current_move_equity == gen->current_anchor_highest_possible_equity) {
+        best_equity_for_anchor_found = true;
+      }
     }
     break;
   case MOVE_RECORD_ALL_SMALL:;
@@ -265,9 +270,10 @@ static inline void update_best_move_or_insert_into_movelist(
     move_list_insert_spare_small_move(gen->move_list);
     break;
   }
+  return best_equity_for_anchor_found;
 }
 
-static inline void record_tile_placement_move(MoveGen *gen, int leftstrip,
+static inline bool record_tile_placement_move(MoveGen *gen, int leftstrip,
                                               int rightstrip,
                                               int main_word_score,
                                               int word_multiplier,
@@ -284,7 +290,7 @@ static inline void record_tile_placement_move(MoveGen *gen, int leftstrip,
   const Equity score =
       main_word_score * word_multiplier + cross_score + bingo_bonus;
 
-  update_best_move_or_insert_into_movelist(
+  return update_best_move_or_insert_into_movelist(
       gen, leftstrip, rightstrip, GAME_EVENT_TILE_PLACEMENT_MOVE, score,
       start_row, start_col, tiles_played, gen->dir, gen->strip);
 }
@@ -394,12 +400,12 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
   }
 }
 
-void go_on(MoveGen *gen, int current_col, MachineLetter L,
+bool go_on(MoveGen *gen, int current_col, MachineLetter L,
            uint32_t new_node_index, bool accepts, int leftstrip, int rightstrip,
            bool unique_play, int main_word_score, int word_multiplier,
            int cross_score);
 
-void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
+bool recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
                    int rightstrip, bool unique_play, int main_word_score,
                    int word_multiplier, int cross_score) {
   const MachineLetter current_letter = gen_cache_get_letter(gen, col);
@@ -434,9 +440,11 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
         break;
       }
     }
-    go_on(gen, col, current_letter, next_node_index, accepts, leftstrip,
-          rightstrip, unique_play, main_word_score, word_multiplier,
-          cross_score);
+    if (go_on(gen, col, current_letter, next_node_index, accepts, leftstrip,
+              rightstrip, unique_play, main_word_score, word_multiplier,
+              cross_score)) {
+      return true;
+    }
   } else if (!rack_is_empty(&gen->player_rack) &&
              ((possible_letters_here & gen->rack_cross_set) != 0)) {
     for (uint32_t i = node_index;; i++) {
@@ -454,23 +462,31 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
           leave_map_take_letter_and_update_current_index(&gen->leave_map,
                                                          &gen->player_rack, ml);
           gen->tiles_played++;
-          go_on(gen, col, ml, next_node_index, accepts, leftstrip, rightstrip,
-                unique_play, main_word_score, word_multiplier, cross_score);
+          const bool best_equity_for_anchor_found = go_on(
+              gen, col, ml, next_node_index, accepts, leftstrip, rightstrip,
+              unique_play, main_word_score, word_multiplier, cross_score);
           gen->tiles_played--;
           leave_map_add_letter_and_update_current_index(&gen->leave_map,
                                                         &gen->player_rack, ml);
+          if (best_equity_for_anchor_found) {
+            return true;
+          }
         }
         // check blank
         if (rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) > 0) {
           leave_map_take_letter_and_update_current_index(
               &gen->leave_map, &gen->player_rack, BLANK_MACHINE_LETTER);
           gen->tiles_played++;
-          go_on(gen, col, get_blanked_machine_letter(ml), next_node_index,
-                accepts, leftstrip, rightstrip, unique_play, main_word_score,
-                word_multiplier, cross_score);
+          const bool best_equity_for_anchor_found =
+              go_on(gen, col, get_blanked_machine_letter(ml), next_node_index,
+                    accepts, leftstrip, rightstrip, unique_play,
+                    main_word_score, word_multiplier, cross_score);
           gen->tiles_played--;
           leave_map_add_letter_and_update_current_index(
               &gen->leave_map, &gen->player_rack, BLANK_MACHINE_LETTER);
+          if (best_equity_for_anchor_found) {
+            return true;
+          }
         }
       }
       if (kwg_node_is_end(node)) {
@@ -478,6 +494,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
       }
     }
   }
+  return false;
 }
 
 static inline bool play_is_nonempty_and_nonduplicate(int tiles_played,
@@ -485,7 +502,7 @@ static inline bool play_is_nonempty_and_nonduplicate(int tiles_played,
   return (tiles_played > 1) || ((tiles_played == 1) && is_unique);
 }
 
-void go_on(MoveGen *gen, int current_col, MachineLetter L,
+bool go_on(MoveGen *gen, int current_col, MachineLetter L,
            uint32_t new_node_index, bool accepts, int leftstrip, int rightstrip,
            bool unique_play, int main_word_score, int word_multiplier,
            int cross_score) {
@@ -532,13 +549,15 @@ void go_on(MoveGen *gen, int current_col, MachineLetter L,
 
     if (accepts && no_letter_directly_left &&
         play_is_nonempty_and_nonduplicate(gen->tiles_played, unique_play)) {
-      record_tile_placement_move(gen, leftstrip, rightstrip,
-                                 inc_main_word_score, inc_word_multiplier,
-                                 inc_cross_scores);
+      if (record_tile_placement_move(gen, leftstrip, rightstrip,
+                                     inc_main_word_score, inc_word_multiplier,
+                                     inc_cross_scores)) {
+        return true;
+      }
     }
 
     if (new_node_index == 0) {
-      return;
+      return false;
     }
 
     if (current_col > 0 && current_col - 1 != gen->last_anchor_col) {
@@ -573,9 +592,11 @@ void go_on(MoveGen *gen, int current_col, MachineLetter L,
 
     if (accepts && no_letter_directly_right &&
         play_is_nonempty_and_nonduplicate(gen->tiles_played, unique_play)) {
-      record_tile_placement_move(gen, leftstrip, rightstrip,
-                                 inc_main_word_score, inc_word_multiplier,
-                                 inc_cross_scores);
+      if (record_tile_placement_move(gen, leftstrip, rightstrip,
+                                     inc_main_word_score, inc_word_multiplier,
+                                     inc_cross_scores)) {
+        return true;
+      }
     }
 
     if (new_node_index != 0 && current_col < BOARD_DIM - 1) {
@@ -584,6 +605,7 @@ void go_on(MoveGen *gen, int current_col, MachineLetter L,
                     inc_cross_scores);
     }
   }
+  return false;
 }
 
 void go_on_alpha(MoveGen *gen, int current_col, MachineLetter L, int leftstrip,
@@ -1553,6 +1575,8 @@ void gen_record_scoring_plays(MoveGen *gen) {
     gen->last_anchor_col = anchor.last_anchor_col;
     gen->anchor_right_extension_set =
         gen_cache_get_right_extension_set(gen, gen->current_anchor_col);
+    gen->current_anchor_highest_possible_equity =
+        anchor.highest_possible_equity;
     if (gen->is_wordsmog) {
       recursive_gen_alpha(gen, anchor.col, anchor.col, anchor.col,
                           gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);

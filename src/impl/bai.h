@@ -158,15 +158,6 @@ bai_sync_data_get_next_bai_sample_index_while_locked(BAISampleArgs *args) {
       arm_index = args->bai_sync_data->challenger_index;
     }
     break;
-  case BAI_SAMPLING_RULE_TOP_FEW:
-    arm_index = args->bai_sync_data->astar_index;
-    if (args->bai_sync_data->arm_data[args->bai_sync_data->challenger_index]
-            .num_samples <
-        args->bai_sync_data->arm_data[args->bai_sync_data->astar_index]
-            .num_samples) {
-      arm_index = args->bai_sync_data->challenger_index;
-    }
-    break;
   }
   args->bai_sync_data->num_total_samples_requested++;
   return arm_index;
@@ -227,7 +218,6 @@ static inline void bai_update_threshold_and_challenger(
   case BAI_SAMPLING_RULE_ROUND_ROBIN:
     break;
   case BAI_SAMPLING_RULE_TOP_TWO:
-  case BAI_SAMPLING_RULE_TOP_FEW:
     bai_sync_data->challenger_index = -1;
     break;
   }
@@ -255,8 +245,7 @@ static inline void bai_update_threshold_and_challenger(
     switch (sampling_rule) {
     case BAI_SAMPLING_RULE_ROUND_ROBIN:
       break;
-    case BAI_SAMPLING_RULE_TOP_TWO:
-    case BAI_SAMPLING_RULE_TOP_FEW:;
+    case BAI_SAMPLING_RULE_TOP_TWO:;
       double arm_challenger_value =
           arm_Z + log((double)bai_sync_data->arm_data[i].num_samples);
       if (bai_sync_data->challenger_index < 0 ||

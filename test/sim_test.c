@@ -321,7 +321,7 @@ void test_sim_top_two_consistency(void) {
 void perf_test_multithread_sim(void) {
   Config *config =
       config_create_or_die("set -s1 score -s2 score -r1 all -r2 all "
-                           "-threads 4 -plies 2 -it 1000 -minp 10 -numplays 15 "
+                           "-threads 4 -plies 2 -it 2000 -minp 50 -numplays 15 "
                            "-scond none -pfreq 100");
   load_and_exec_config_or_die(
       config,
@@ -337,7 +337,7 @@ void perf_test_multithread_sim(void) {
   assert(status == ERROR_STATUS_SUCCESS);
   assert(thread_control_get_status(config_get_thread_control(config)) ==
          THREAD_CONTROL_STATUS_SAMPLE_LIMIT);
-  assert(sim_results_get_iteration_count(sim_results) == 1000);
+  assert(sim_results_get_iteration_count(sim_results) == 2000);
 
   print_sim_stats(config_get_game(config), sim_results);
   sim_results_sort_plays_by_win_rate(sim_results);

@@ -22,8 +22,8 @@ enum { NUM_UNIQUE_MEANS = 10000 };
 static const int sampling_rules[3] = {
     BAI_SAMPLING_RULE_ROUND_ROBIN,
     BAI_SAMPLING_RULE_TOP_TWO,
-    BAI_SAMPLING_RULE_TOP_FEW,
 };
+
 static const int num_sampling_rules = sizeof(sampling_rules) / sizeof(int);
 
 static const int strategies[][3] = {

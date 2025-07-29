@@ -1257,8 +1257,6 @@ void config_load_sampling_rule(Config *config, const char *sampling_rule_str,
     config->sampling_rule = BAI_SAMPLING_RULE_ROUND_ROBIN;
   } else if (has_iprefix(sampling_rule_str, "tt")) {
     config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO;
-  } else if (has_iprefix(sampling_rule_str, "tf")) {
-    config->sampling_rule = BAI_SAMPLING_RULE_TOP_FEW;
   } else {
     error_stack_push(error_stack,
                      ERROR_STATUS_CONFIG_LOAD_MALFORMED_SAMPLING_RULE,
@@ -2094,7 +2092,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->max_iterations = 5000;
   config->stop_cond_pct = 99;
   config->time_limit_seconds = 0;
-  config->sampling_rule = BAI_SAMPLING_RULE_TOP_FEW;
+  config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO;
   config->threshold = BAI_THRESHOLD_GK16;
   config->use_game_pairs = false;
   config->use_small_plays = false;
