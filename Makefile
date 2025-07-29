@@ -40,7 +40,7 @@ ldflags.dev := -Llib -pthread $(FSAN_ARG)
 ldflags.vlg := -Llib -pthread
 ldflags.release := -Llib -pthread
 ldflags.cov := -Llib -pthread
-ldflags.dll_dev := -Llib -pthread $(FSAN_ARG)
+ldflags.dll_dev := -Llib -pthread
 ldflags.dll_release := -Llib -pthread
 
 CFLAGS := ${cflags.${BUILD}}
