@@ -1937,9 +1937,8 @@ bool config_execute_command_silent(Config *config, ErrorStack *error_stack) {
     config_get_parg_exec_func(config, config->exec_parg_token)(config,
                                                                error_stack);
     return true;
-  } else {
-    return false;
   }
+  return false;
 }
 
 void config_execute_command(Config *config, ErrorStack *error_stack) {
