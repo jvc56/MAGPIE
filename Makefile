@@ -32,7 +32,7 @@ cflags.vlg := -g -O0 -Wall -Wno-trigraphs -Wextra
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
 cflags.release := -O3 -flto -funroll-loops -march=native -Wall -Wno-trigraphs
 cflags.dll_dev = -g -O0 -fpic -Wall
-cflags.dll_release = -g -O3 -fpic -flto -funroll-loops -march=native -Wall
+cflags.dll_release = -O3 -fpic -flto -funroll-loops -march=native -Wall -Wno-trigraphs
 
 lflags.cov := --coverage
 
