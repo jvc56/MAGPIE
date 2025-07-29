@@ -1,18 +1,15 @@
 #include "players_data.h"
 
-#include <stdlib.h>
-
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
-
+#include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "klv.h"
 #include "kwg.h"
 #include "wmp.h"
+#include <stdlib.h>
 
-#include "../util/io_util.h"
-#include "../util/string_util.h"
-
-const char *players_data_type_names[] = {"kwg", "klv", "wordmap"};
+static const char *const players_data_type_names[] = {"kwg", "klv", "wordmap"};
 
 // The PlayersData struct holds all of the
 // information that can be set during configuration.
@@ -31,7 +28,7 @@ struct PlayersData {
 
 int players_data_get_player_data_index(players_data_t players_data_type,
                                        int player_index) {
-  return players_data_type * 2 + player_index;
+  return (int)players_data_type * 2 + player_index;
 }
 
 void players_data_set_name(PlayersData *players_data, int player_index,
@@ -301,7 +298,7 @@ void players_data_set(PlayersData *players_data,
   // Possibly destroy existing data
   // and set new data
   for (int player_index = 0; player_index < 2; player_index++) {
-    void *existing_data =
+    const void *existing_data =
         players_data_get_data(players_data, players_data_type, player_index);
     if (existing_data != data_pointers[0] &&
         existing_data != data_pointers[1] &&

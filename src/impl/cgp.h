@@ -2,7 +2,6 @@
 #define CGP_H
 
 #include "../def/game_defs.h"
-
 #include "../ent/game.h"
 #include "../util/io_util.h"
 

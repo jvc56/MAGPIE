@@ -13,6 +13,6 @@ typedef enum {
   GAME_EVENT_END_RACK_PENALTY,
 } game_event_t;
 
-#define MAX_GAME_EVENTS 200
+enum { MAX_GAME_EVENTS = 200 };
 
 #endif

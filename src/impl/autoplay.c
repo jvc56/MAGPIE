@@ -1,30 +1,34 @@
+
 #include "autoplay.h"
 
-#include <pthread.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
-
+#include "../compat/cpthread.h"
 #include "../def/autoplay_defs.h"
+#include "../def/players_data_defs.h"
+#include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
-
 #include "../ent/autoplay_results.h"
 #include "../ent/bag.h"
 #include "../ent/checkpoint.h"
+#include "../ent/data_filepaths.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/klv.h"
 #include "../ent/klv_csv.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
+#include "../ent/players_data.h"
+#include "../ent/rack.h"
 #include "../ent/thread_control.h"
 #include "../ent/xoshiro.h"
-
+#include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "gameplay.h"
 #include "move_gen.h"
 #include "rack_list.h"
-
-#include "../util/io_util.h"
-#include "../util/string_util.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 typedef struct LeavegenSharedData {
   int num_gens;
@@ -294,8 +298,9 @@ void game_runner_destroy(GameRunner *game_runner) {
   free(game_runner);
 }
 
-void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
-                       ThreadControlIterOutput *iter_output,
+void game_runner_start(const AutoplayWorker *autoplay_worker,
+                       GameRunner *game_runner,
+                       const ThreadControlIterOutput *iter_output,
                        int starting_player_index) {
   Game *game = game_runner->game;
   game_reset(game);
@@ -380,7 +385,7 @@ void print_current_status(
       status_sb, "Played %ld games in %.3f seconds.",
       iter_completed_output->iter_count_completed,
       iter_completed_output->time_elapsed);
-  LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
+  const LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
   if (lg_shared_data) {
     string_builder_add_formatted_string(
         status_sb,
@@ -398,8 +403,8 @@ void print_current_status(
   string_builder_destroy(status_sb);
 }
 
-void autoplay_add_game(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
-                       bool divergent) {
+void autoplay_add_game(AutoplayWorker *autoplay_worker,
+                       const GameRunner *game_runner, bool divergent) {
   autoplay_results_add_game(autoplay_worker->autoplay_results,
                             game_runner->game, game_runner->turn_number,
                             divergent, game_runner->seed);
@@ -411,11 +416,10 @@ void autoplay_add_game(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
   }
 }
 
-void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
-                                     GameRunner *game_runner1,
-                                     GameRunner *game_runner2,
-                                     ThreadControlIterOutput *iter_output) {
-  const int starting_player_index = iter_output->iter_count % 2;
+void play_autoplay_game_or_game_pair(
+    AutoplayWorker *autoplay_worker, GameRunner *game_runner1,
+    GameRunner *game_runner2, const ThreadControlIterOutput *iter_output) {
+  const int starting_player_index = (int)(iter_output->iter_count % 2);
   game_runner_start(autoplay_worker, game_runner1, iter_output,
                     starting_player_index);
   if (game_runner2) {
@@ -474,7 +478,7 @@ void autoplay_single_generation(AutoplayWorker *autoplay_worker,
   ThreadControlIterOutput iter_output;
   while (
       // Check if autoplay was exited by the user.
-      !thread_control_get_is_exited(thread_control) &&
+      !thread_control_is_winding_down(thread_control) &&
       // Check if the maximum iteration has been reached.
       !thread_control_get_next_iter_output(thread_control, &iter_output) &&
       // Check if the target minimum leave count has been reached.
@@ -493,7 +497,7 @@ void autoplay_leave_gen(AutoplayWorker *autoplay_worker,
   for (int i = 0; i < lg_shared_data->num_gens; i++) {
     autoplay_single_generation(autoplay_worker, game_runner, NULL);
     checkpoint_wait(lg_shared_data->postgen_checkpoint, shared_data);
-    if (thread_control_get_is_exited(args->thread_control)) {
+    if (thread_control_is_winding_down(args->thread_control)) {
       break;
     }
   }
@@ -522,7 +526,7 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
 }
 
 void parse_min_rack_targets(const AutoplayArgs *args,
-                            StringSplitter *split_min_rack_targets,
+                            const StringSplitter *split_min_rack_targets,
                             int *min_rack_targets, ErrorStack *error_stack) {
   int num_gens = string_splitter_get_number_of_items(split_min_rack_targets);
   for (int i = 0; i < num_gens; i++) {
@@ -566,7 +570,7 @@ void valid_autoplay_results_options(const AutoplayResults *autoplay_results,
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
               ErrorStack *error_stack) {
   const bool is_leavegen_mode = args->type == AUTOPLAY_TYPE_LEAVE_GEN;
-  uint64_t num_gens = 1;
+  int num_gens = 1;
   int *min_rack_targets = NULL;
   uint64_t first_gen_num_games;
   if (is_leavegen_mode) {
@@ -605,7 +609,7 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
 
   ThreadControl *thread_control = args->thread_control;
 
-  thread_control_reset(thread_control, first_gen_num_games);
+  thread_control_set_max_iter_count(thread_control, first_gen_num_games);
 
   autoplay_results_reset(autoplay_results);
 
@@ -630,25 +634,26 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
 
   AutoplayWorker **autoplay_workers =
       malloc_or_die((sizeof(AutoplayWorker *)) * (number_of_threads));
-  pthread_t *worker_ids =
-      malloc_or_die((sizeof(pthread_t)) * (number_of_threads));
+  cpthread_t *worker_ids =
+      malloc_or_die((sizeof(cpthread_t)) * (number_of_threads));
 
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     autoplay_workers[thread_index] = autoplay_worker_create(
         args, autoplay_results, thread_index, shared_data);
     autoplay_results_list[thread_index] =
         autoplay_workers[thread_index]->autoplay_results;
-    pthread_create(&worker_ids[thread_index], NULL, autoplay_worker,
-                   autoplay_workers[thread_index]);
+    cpthread_create(&worker_ids[thread_index], autoplay_worker,
+                    autoplay_workers[thread_index]);
   }
 
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
-    pthread_join(worker_ids[thread_index], NULL);
+    cpthread_join(worker_ids[thread_index]);
   }
 
   // If autoplay was interrupted by the user,
   // this will not change the status.
-  thread_control_exit(thread_control, EXIT_STATUS_MAX_ITERATIONS);
+  thread_control_set_status(thread_control,
+                            THREAD_CONTROL_STATUS_MAX_ITERATIONS);
 
   // The stats have already been combined in leavegen mode
   if (!is_leavegen_mode) {

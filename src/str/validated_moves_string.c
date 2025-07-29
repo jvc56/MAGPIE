@@ -1,14 +1,15 @@
+#include "../def/game_history_defs.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/validated_move.h"
 #include "../ent/words.h"
-
-#include "letter_distribution_string.h"
-
 #include "../util/string_util.h"
+#include "letter_distribution_string.h"
+#include <stdlib.h>
 
 char *validated_moves_get_phonies_string(const LetterDistribution *ld,
-                                         ValidatedMoves *vms, int vm_index) {
+                                         const ValidatedMoves *vms,
+                                         int vm_index) {
   const Move *move = validated_moves_get_move(vms, vm_index);
   const FormedWords *fw = validated_moves_get_formed_words(vms, vm_index);
   game_event_t move_type = move_get_type(move);

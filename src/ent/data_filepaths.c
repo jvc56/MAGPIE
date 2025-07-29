@@ -1,23 +1,20 @@
 #include "data_filepaths.h"
 
+#include "../util/io_util.h"
+#include "../util/string_util.h"
 #include <glob.h>
 #include <stdlib.h>
 #include <unistd.h>
 
-#include "../util/io_util.h"
-#include "../util/string_util.h"
-
 #define KWG_EXTENSION ".kwg"
 #define WORDMAP_EXTENSION ".wmp"
 #define KLV_EXTENSION ".klv2"
-#define LAYOUT_EXTENSION ".txt"
-#define WIN_PCT_EXTENSION ".csv"
-#define LD_EXTENSION ".csv"
+#define TXT_EXTENSION ".txt"
+#define CSV_EXTENSION ".csv"
 #define GCG_EXTENSION ".gcg"
-#define LEAVES_EXTENSION ".csv"
 #define LEXICON_EXTENSION ".txt"
 
-const char *filepath_type_names[] = {
+static const char *const filepath_type_names[] = {
     "kwg", "klv",    "board layout", "win percentage", "letter distribution",
     "gcg", "leaves", "lexicon",      "wordmap"};
 
@@ -65,19 +62,15 @@ char *get_filepath(const char *data_path, const char *data_name,
     file_ext = KLV_EXTENSION;
     break;
   case DATA_FILEPATH_TYPE_LAYOUT:
-    file_ext = LAYOUT_EXTENSION;
+    file_ext = TXT_EXTENSION;
     break;
   case DATA_FILEPATH_TYPE_WIN_PCT:
-    file_ext = WIN_PCT_EXTENSION;
-    break;
   case DATA_FILEPATH_TYPE_LD:
-    file_ext = LD_EXTENSION;
+  case DATA_FILEPATH_TYPE_LEAVES:
+    file_ext = CSV_EXTENSION;
     break;
   case DATA_FILEPATH_TYPE_GCG:
     file_ext = GCG_EXTENSION;
-    break;
-  case DATA_FILEPATH_TYPE_LEAVES:
-    file_ext = LEAVES_EXTENSION;
     break;
   case DATA_FILEPATH_TYPE_LEXICON:
     file_ext = LEXICON_EXTENSION;
@@ -131,23 +124,6 @@ char *data_filepaths_get_first_valid_filename(const char *data_paths,
   return ret_val;
 }
 
-// Returns the data path that is used in the filename
-// returned by data_filepaths_get_readable_filename.
-// Assumes the data name is not already a valid filepath.
-char *data_filepaths_get_data_path_name(const char *data_paths,
-                                        const char *data_name,
-                                        data_filepath_t type,
-                                        ErrorStack *error_stack) {
-  if (!data_name) {
-    error_stack_push(error_stack, ERROR_STATUS_FILEPATH_NULL_FILENAME,
-                     get_formatted_string("data name is null for data type %s",
-                                          filepath_type_names[type]));
-    return NULL;
-  }
-  return data_filepaths_get_first_valid_filename(data_paths, data_name, type,
-                                                 true, error_stack);
-}
-
 // Returns a filename string that exists and is readable.
 // Dies if no such file can be found.
 // If data_name looks like a filepath, then data_name is just returned
@@ -182,7 +158,6 @@ char *data_filepaths_get_writable_filename(const char *data_paths,
                                           filepath_type_names[type]));
     return NULL;
   }
-  char *writable_filepath;
 
   if (!data_paths) {
     error_stack_push(
@@ -193,7 +168,7 @@ char *data_filepaths_get_writable_filename(const char *data_paths,
     return NULL;
   }
   char *first_data_path = cut_off_after_first_char(data_paths, ':');
-  writable_filepath = get_filepath(first_data_path, data_name, type);
+  char *writable_filepath = get_filepath(first_data_path, data_name, type);
   free(first_data_path);
   // File already exists and is not writable
   if (access(writable_filepath, F_OK) == 0 &&

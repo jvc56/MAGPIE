@@ -1,18 +1,15 @@
 #include "player.h"
 
-#include <stdlib.h>
-
 #include "../def/move_defs.h"
-
+#include "../util/io_util.h"
 #include "equity.h"
-
 #include "klv.h"
 #include "kwg.h"
 #include "letter_distribution.h"
 #include "players_data.h"
+#include "rack.h"
 #include "wmp.h"
-
-#include "../util/io_util.h"
+#include <stdlib.h>
 
 struct Player {
   // All const fields are owned

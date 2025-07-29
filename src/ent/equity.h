@@ -1,14 +1,12 @@
 #ifndef EQUITY_H
 #define EQUITY_H
 
+#include "../def/equity_defs.h"
+#include "../util/io_util.h"
 #include <assert.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
-
-#include "../def/equity_defs.h"
-
-#include "../util/io_util.h"
 
 typedef int32_t Equity;
 
@@ -20,7 +18,8 @@ static inline Equity double_to_equity(double x) {
   double rounded = round(x * EQUITY_RESOLUTION);
   if (rounded > EQUITY_MAX_VALUE) {
     return EQUITY_MAX_VALUE;
-  } else if (rounded < EQUITY_MIN_VALUE) {
+  }
+  if (rounded < EQUITY_MIN_VALUE) {
     return EQUITY_MIN_VALUE;
   }
   return (Equity)rounded;
@@ -50,6 +49,10 @@ static inline Equity equity_negate(Equity eq) {
   if (eq == EQUITY_PASS_VALUE) {
     log_fatal("cannot negate pass equity");
   }
+
+  // EQUITY_UNDEFINED_VALUE is INT32_MIN and so negation *would* be an overflow,
+  // but this is caught by the check above.
+  // cppcheck-suppress integerOverflowCond
   return -eq;
 }
 

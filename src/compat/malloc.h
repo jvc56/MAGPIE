@@ -30,8 +30,9 @@ static inline int portable_aligned_alloc(void **ptr, size_t alignment,
 
 // Portable aligned free function
 static inline void portable_aligned_free(void *ptr) {
-  if (!ptr)
+  if (!ptr) {
     return;
+  }
 
 #ifdef _WIN32
   _aligned_free(ptr);

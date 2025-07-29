@@ -4,7 +4,6 @@
 #include "../def/board_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
-
 #include "letter_distribution.h"
 #include "rack.h"
 #include "validated_move.h"
@@ -107,13 +106,13 @@ Rack *game_history_player_get_last_known_rack(const GameHistory *game_history,
                                               int player_index);
 
 void game_history_init_player_phony_calc_racks(GameHistory *game_history,
-                                               const int ld_size);
+                                               int ld_size);
 Rack *
 game_history_player_get_known_rack_from_phonies(const GameHistory *game_history,
-                                                const int player_index);
+                                                int player_index);
 Rack *
 game_history_player_get_previous_played_tiles(const GameHistory *game_history,
-                                              const int player_index);
+                                              int player_index);
 void game_history_set_player(GameHistory *history, int player_index,
                              const char *player_name,
                              const char *player_nickname);

@@ -1,12 +1,10 @@
 #ifndef BOARD_LAYOUT_H
 #define BOARD_LAYOUT_H
 
+#include "../util/io_util.h"
+#include "bonus_square.h"
 #include <stdbool.h>
 #include <stdint.h>
-
-#include "bonus_square.h"
-
-#include "../util/io_util.h"
 
 typedef struct BoardLayout BoardLayout;
 

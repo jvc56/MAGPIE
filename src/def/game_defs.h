@@ -5,8 +5,7 @@
 #define GAME_VARIANT_CLASSIC_NAME "classic"
 #define GAME_VARIANT_WORDSMOG_NAME "wordsmog"
 
-#define MAX_SEARCH_DEPTH 25
-#define MAX_SCORELESS_TURNS 6
+enum { MAX_SEARCH_DEPTH = 25, MAX_SCORELESS_TURNS = 6 };
 
 typedef enum {
   GAME_VARIANT_UNKNOWN,

@@ -1,13 +1,10 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#include <stdbool.h>
-
 #include "../def/autoplay_defs.h"
 #include "../def/config_defs.h"
 #include "../def/convert_defs.h"
 #include "../def/game_defs.h"
-
 #include "../ent/autoplay_results.h"
 #include "../ent/board_layout.h"
 #include "../ent/conversion_results.h"
@@ -19,13 +16,12 @@
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "../ent/win_pct.h"
-
 #include "../util/io_util.h"
+#include <stdbool.h>
 
 typedef struct Config Config;
 
 // Constructors and Destructors
-Config *config_create_default(ErrorStack *error_stack);
 Config *config_create_default_with_data_paths(ErrorStack *error_stack,
                                               const char *data_paths);
 void config_destroy(Config *config);

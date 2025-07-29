@@ -1,12 +1,12 @@
 #include "win_pct.h"
 
-#include <stdbool.h>
-#include <stdlib.h>
-
-#include "data_filepaths.h"
-
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "data_filepaths.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 struct WinPct {
   char *name;
@@ -17,7 +17,7 @@ struct WinPct {
   unsigned int max_tiles_unseen;
 };
 
-const char *win_pct_get_name(WinPct *wp) { return wp->name; }
+const char *win_pct_get_name(const WinPct *wp) { return wp->name; }
 
 float win_pct_get(const WinPct *wp, int spread_plus_leftover,
                   unsigned int game_unseen_tiles) {
@@ -38,7 +38,7 @@ float win_pct_get(const WinPct *wp, int spread_plus_leftover,
 
 void win_pct_create_internal(const char *win_pct_name,
                              const char *win_pct_filename, WinPct *wp,
-                             StringSplitter *split_win_pct_contents,
+                             const StringSplitter *split_win_pct_contents,
                              ErrorStack *error_stack) {
   wp->max_tiles_unseen =
       string_splitter_get_number_of_items(split_win_pct_contents);
@@ -61,7 +61,8 @@ void win_pct_create_internal(const char *win_pct_name,
   for (unsigned int tiles_unseen_index = 0;
        tiles_unseen_index < wp->max_tiles_unseen; tiles_unseen_index++) {
     split_tiles_remaining_row = split_string_by_whitespace(
-        string_splitter_get_item(split_win_pct_contents, tiles_unseen_index),
+        string_splitter_get_item(split_win_pct_contents,
+                                 (int)tiles_unseen_index),
         true);
     int num_spreads_in_row =
         string_splitter_get_number_of_items(split_tiles_remaining_row) - 1;
@@ -137,9 +138,10 @@ void win_pct_create_internal(const char *win_pct_name,
           break;
         }
         array[tiles_unseen_index][spread_index] =
-            total_win_score / (float)(total_games_for_tiles_remaining * 2);
+            (float)total_win_score /
+            (float)(total_games_for_tiles_remaining * 2);
       }
-      prev_nonzero_total_games_index = tiles_unseen_index;
+      prev_nonzero_total_games_index = (int)tiles_unseen_index;
     }
     string_splitter_destroy(split_tiles_remaining_row);
     split_tiles_remaining_row = NULL;

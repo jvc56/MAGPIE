@@ -1,15 +1,14 @@
 #ifndef WORDS_H
 #define WORDS_H
 
-#include <stdint.h>
-
 #include "board.h"
 #include "kwg.h"
 #include "move.h"
+#include <stdint.h>
 
 typedef struct FormedWords FormedWords;
 
-FormedWords *formed_words_create(Board *board, Move *move);
+FormedWords *formed_words_create(Board *board, const Move *move);
 void formed_words_destroy(FormedWords *fw);
 
 int formed_words_get_num_words(const FormedWords *fw);

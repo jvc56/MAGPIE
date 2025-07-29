@@ -1,15 +1,13 @@
-#include "../def/letter_distribution_defs.h"
+#include "bag_string.h"
 
+#include "../def/letter_distribution_defs.h"
 #include "../ent/bag.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/rack.h"
-
-#include "bag_string.h"
+#include "../util/string_util.h"
 #include "letter_distribution_string.h"
 
-#include "../util/string_util.h"
-
-#define BLANK_SORT_VALUE 255
+enum { BLANK_SORT_VALUE = 255 };
 
 void string_builder_add_bag(StringBuilder *bag_string_builder, const Bag *bag,
                             const LetterDistribution *ld) {

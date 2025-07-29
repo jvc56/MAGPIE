@@ -1,21 +1,19 @@
 #include "words.h"
 
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
-
 #include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
-
+#include "../ent/kwg.h"
+#include "../ent/move.h"
 #include "../ent/rack.h"
-
 #include "../util/io_util.h"
-#include "../util/string_util.h"
-
 #include "board.h"
 #include "kwg_alpha.h"
 #include "letter_distribution.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 typedef struct FormedWord {
   MachineLetter word[BOARD_DIM];
@@ -28,11 +26,16 @@ struct FormedWords {
   FormedWord words[RACK_SIZE + 1]; // max number of words we can form
 };
 
-FormedWords *formed_words_create(Board *board, Move *move) {
-  int tiles_length = move_get_tiles_length(move);
+FormedWords *formed_words_create(Board *board, const Move *move) {
+  FormedWords *ws = malloc_or_die(sizeof(FormedWords));
+  const int tiles_length = move_get_tiles_length(move);
+  if (tiles_length <= 0) {
+    ws->num_words = 0;
+    return ws;
+  }
+  const int dir = move_get_dir(move);
   int row_start = move_get_row_start(move);
   int col_start = move_get_col_start(move);
-  int dir = move_get_dir(move);
 
   bool board_was_transposed = false;
 
@@ -44,7 +47,6 @@ FormedWords *formed_words_create(Board *board, Move *move) {
     row_start = ph;
   }
 
-  FormedWords *ws = malloc_or_die(sizeof(FormedWords));
   int formed_words_idx = 0;
   MachineLetter main_word[BOARD_DIM];
   int main_word_idx = 0;
@@ -69,7 +71,7 @@ FormedWords *formed_words_create(Board *board, Move *move) {
 
     if (fresh_tile && actual_cross_word) {
       // Search for a word
-      int rbegin, rend;
+      int rbegin;
       for (rbegin = row_start - 1; rbegin >= 0; rbegin--) {
         if (board_is_empty(board, rbegin, col_start + idx)) {
           rbegin++;
@@ -79,7 +81,7 @@ FormedWords *formed_words_create(Board *board, Move *move) {
       if (rbegin < 0) {
         rbegin = 0;
       }
-
+      int rend;
       for (rend = rbegin; rend < BOARD_DIM; rend++) {
         if (rend != row_start && board_is_empty(board, rend, col_start + idx)) {
           rend--;
@@ -190,9 +192,8 @@ bool is_word_valid(const FormedWord *w, const KWG *kwg, bool is_wordsmog) {
   }
   if (is_wordsmog) {
     return is_word_valid_alpha(w, kwg);
-  } else {
-    return is_word_valid_standard(w, kwg);
   }
+  return is_word_valid_standard(w, kwg);
 }
 
 void formed_words_populate_validities(const KWG *kwg, FormedWords *ws,

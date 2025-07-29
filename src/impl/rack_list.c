@@ -1,21 +1,25 @@
 #include "rack_list.h"
 
-#include <pthread.h>
-
-#include "../ent/bag.h"
+#include "../compat/cpthread.h"
+#include "../def/klv_defs.h"
+#include "../def/kwg_defs.h"
+#include "../def/letter_distribution_defs.h"
+#include "../def/rack_defs.h"
+#include "../ent/dictionary_word.h"
 #include "../ent/encoded_rack.h"
-#include "../ent/game.h"
+#include "../ent/equity.h"
 #include "../ent/klv.h"
+#include "../ent/kwg.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/rack.h"
-#include "../ent/thread_control.h"
 #include "../ent/xoshiro.h"
-
-#include "kwg_maker.h"
-
-#include "../str/rack_string.h"
-
 #include "../util/io_util.h"
 #include "../util/math_util.h"
+#include "kwg_maker.h"
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 typedef struct RackListItem {
   // Index of this item in the rack list items ordered by count.
@@ -24,7 +28,7 @@ typedef struct RackListItem {
   double mean;
   uint64_t total_combos;
   EncodedRack encoded_rack;
-  pthread_mutex_t mutex;
+  cpthread_mutex_t mutex;
 } RackListItem;
 
 struct RackList {
@@ -37,7 +41,7 @@ struct RackList {
   // with an index greater than this are no longer considered rare.
   // All racks with an index less than or equal to this are considered rare.
   int partition_index;
-  pthread_mutex_t partition_index_mutex;
+  cpthread_mutex_t partition_index_mutex;
   uint64_t total_combos_sum;
   KLV *klv;
   RackListItem **racks_ordered_by_index;
@@ -85,7 +89,7 @@ int convert_klv_index_to_rack_list_index(int klv_index) {
   return klv_index - (RACK_SIZE);
 }
 
-int convert_word_index_to_rack_list_index(int word_index) {
+uint32_t convert_word_index_to_rack_list_index(uint32_t word_index) {
   return word_index - (RACK_SIZE) + 1;
 }
 
@@ -95,7 +99,7 @@ RackListItem *rack_list_item_create(int count_index) {
   item->mean = 0;
   item->count_index = count_index;
   item->total_combos = 0;
-  pthread_mutex_init(&item->mutex, NULL);
+  cpthread_mutex_init(&item->mutex);
   return item;
 }
 
@@ -104,7 +108,7 @@ uint64_t get_total_combos_for_rack(const RackListLetterDistribution *rl_ld,
   uint64_t total_combos = 1;
   const int ld_size = rack_list_ld_get_size(rl_ld);
   for (int ml = 0; ml < ld_size; ml++) {
-    const int num_ml = rack_get_letter(rack, ml);
+    const int8_t num_ml = rack_get_letter(rack, ml);
     if (num_ml == 0) {
       continue;
     }
@@ -138,7 +142,7 @@ int rack_list_generate_all_racks(rack_gen_mode_t mode,
           log_fatal("word index not found in klv: %u", klv_index);
         }
         const uint32_t rack_list_index =
-            convert_klv_index_to_rack_list_index(klv_index);
+            convert_klv_index_to_rack_list_index((int)klv_index);
         rack_encode(
             rack,
             &rack_list->racks_ordered_by_index[rack_list_index]->encoded_rack);
@@ -164,9 +168,7 @@ int rack_list_generate_all_racks(rack_gen_mode_t mode,
       case RACK_GEN_MODE_CREATE_DWL:
         rack_array[rack_get_total_letters(rack) - 1] = ml;
         break;
-      case RACK_GEN_MODE_SET_RACK_LIST_ITEMS:
-          // Empty statement to allow declaration
-          ;
+      case RACK_GEN_MODE_SET_RACK_LIST_ITEMS:;
         uint32_t sibling_klv_index;
         node_index = increment_node_to_ml(rack_list->klv, node_index, klv_index,
                                           &sibling_klv_index, ml);
@@ -225,7 +227,7 @@ RackList *rack_list_create(const LetterDistribution *ld,
   }
 
   rack_list_generate_all_racks(RACK_GEN_MODE_SET_RACK_LIST_ITEMS, &rl_ld, &rack,
-                               0, NULL, NULL, rack_list,
+                               0, NULL, rack_array, rack_list,
                                kwg_get_dawg_root_node_index(kwg), 0);
 
   rack_list->racks_partitioned_by_target_count =
@@ -235,7 +237,7 @@ RackList *rack_list_create(const LetterDistribution *ld,
          rack_list->racks_ordered_by_index, racks_malloc_size);
 
   rack_list->partition_index = rack_list->number_of_racks - 1;
-  pthread_mutex_init(&rack_list->partition_index_mutex, NULL);
+  cpthread_mutex_init(&rack_list->partition_index_mutex);
   rack_list->target_rack_count = target_rack_count;
 
   return rack_list;
@@ -281,32 +283,32 @@ void rack_list_swap_items(RackList *rack_list, int i, int j) {
 }
 
 void rack_list_add_rack_with_rack_list_index(RackList *rack_list,
-                                             int rack_list_index,
+                                             uint32_t rack_list_index,
                                              double equity) {
   RackListItem *item = rack_list->racks_ordered_by_index[rack_list_index];
   bool item_reached_target_count = false;
-  pthread_mutex_lock(&item->mutex);
+  cpthread_mutex_lock(&item->mutex);
   rack_list_item_increment_count(item, equity);
   item_reached_target_count = item->count == rack_list->target_rack_count;
-  pthread_mutex_unlock(&item->mutex);
+  cpthread_mutex_unlock(&item->mutex);
 
   if (item_reached_target_count) {
-    pthread_mutex_lock(&rack_list->partition_index_mutex);
+    cpthread_mutex_lock(&rack_list->partition_index_mutex);
     const int curr_partition_index = rack_list->partition_index;
     if (curr_partition_index >= item->count_index) {
       if (curr_partition_index != item->count_index) {
         RackListItem *swap_item =
             rack_list->racks_partitioned_by_target_count[curr_partition_index];
-        pthread_mutex_lock(&item->mutex);
-        pthread_mutex_lock(&swap_item->mutex);
+        cpthread_mutex_lock(&item->mutex);
+        cpthread_mutex_lock(&swap_item->mutex);
         rack_list_swap_items(rack_list, item->count_index,
                              swap_item->count_index);
-        pthread_mutex_unlock(&swap_item->mutex);
-        pthread_mutex_unlock(&item->mutex);
+        cpthread_mutex_unlock(&swap_item->mutex);
+        cpthread_mutex_unlock(&item->mutex);
       }
       rack_list->partition_index--;
     }
-    pthread_mutex_unlock(&rack_list->partition_index_mutex);
+    cpthread_mutex_unlock(&rack_list->partition_index_mutex);
   }
 }
 
@@ -336,7 +338,7 @@ bool rack_list_get_rare_rack(RackList *rack_list, XoshiroPRNG *prng,
   if (rack_list_get_racks_below_target_count(rack_list) == 0) {
     return false;
   }
-  const int random_rack_index =
+  const uint64_t random_rack_index =
       prng_get_random_number(prng, rack_list->partition_index + 1);
   rack_decode(&rack_list->racks_partitioned_by_target_count[random_rack_index]
                    ->encoded_rack,
@@ -366,13 +368,13 @@ void generate_leaves(RackListLeave *leave_list, const KLV *klv,
       // rack after the leave is subtracted from the letter distribution.
       const uint64_t count = get_total_combos_for_rack(rl_ld, full_rack);
       leave_list[word_index - 1].count_sum += count;
-      leave_list[word_index - 1].equity_sum += rack_equity * count;
+      leave_list[word_index - 1].equity_sum += rack_equity * (double)count;
     }
   } else {
     generate_leaves(leave_list, klv, rack_equity, full_rack, rl_ld, leave,
                     node_index, word_index, ml + 1);
-    const int num_this = rack_get_letter(full_rack, ml);
-    for (int i = 0; i < num_this; i++) {
+    const int8_t num_this = rack_get_letter(full_rack, ml);
+    for (int8_t i = 0; i < num_this; i++) {
       rack_add_letter(leave, ml);
       rack_take_letter(full_rack, ml);
       rack_list_ld_decrement(rl_ld, ml, 1);
@@ -404,10 +406,10 @@ void rack_list_write_to_klv(RackList *rack_list, const LetterDistribution *ld,
   }
   double average_equity = weighted_sum / (double)rack_list->total_combos_sum;
 
-  const int klv_number_of_leaves = klv_get_number_of_leaves(klv);
+  const uint32_t klv_number_of_leaves = klv_get_number_of_leaves(klv);
   RackListLeave *leave_list =
       malloc_or_die(sizeof(RackListLeave) * klv_number_of_leaves);
-  for (int i = 0; i < klv_number_of_leaves; i++) {
+  for (uint32_t i = 0; i < klv_number_of_leaves; i++) {
     leave_list[i].count_sum = 0;
     leave_list[i].equity_sum = 0;
   }
@@ -423,10 +425,10 @@ void rack_list_write_to_klv(RackList *rack_list, const LetterDistribution *ld,
     generate_leaves(leave_list, klv, rli->mean, &rack, &rl_ld, &leave,
                     kwg_get_dawg_root_node_index(klv->kwg), 0, 0);
   }
-  for (int i = 0; i < klv_number_of_leaves; i++) {
+  for (uint32_t i = 0; i < klv_number_of_leaves; i++) {
     if (leave_list[i].count_sum > 0) {
       klv->leave_values[i] = double_to_equity(
-          (leave_list[i].equity_sum / leave_list[i].count_sum) -
+          (leave_list[i].equity_sum / (double)leave_list[i].count_sum) -
           average_equity);
     } else {
       klv->leave_values[i] = 0;
@@ -453,12 +455,6 @@ double rack_list_get_mean(const RackList *rack_list, int klv_index) {
   return rack_list
       ->racks_ordered_by_index[convert_klv_index_to_rack_list_index(klv_index)]
       ->mean;
-}
-
-int rack_list_get_count_index(const RackList *rack_list, int klv_index) {
-  return rack_list
-      ->racks_ordered_by_index[convert_klv_index_to_rack_list_index(klv_index)]
-      ->count_index;
 }
 
 const EncodedRack *rack_list_get_encoded_rack(const RackList *rack_list,

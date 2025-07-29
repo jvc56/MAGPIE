@@ -1,15 +1,12 @@
 #ifndef AUTOPLAY_H
 #define AUTOPLAY_H
 
-#include <stdbool.h>
-
 #include "../def/autoplay_defs.h"
-
 #include "../ent/autoplay_results.h"
 #include "../ent/game.h"
 #include "../ent/thread_control.h"
-
 #include "../util/io_util.h"
+#include <stdbool.h>
 
 typedef struct AutoplayArgs {
   const char *num_games_or_min_rack_targets;

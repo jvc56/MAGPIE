@@ -150,7 +150,6 @@ typedef enum {
   ERROR_STATUS_MOVE_VALIDATION_UNKNOWN_EXCHANGE_DISALLOWED,
   // Command
   ERROR_STATUS_COMMAND_STILL_RUNNING,
-  ERROR_STATUS_COMMAND_ALREADY_STOPPED,
   ERROR_STATUS_COMMAND_NOTHING_TO_STOP,
   // Data filepaths
   ERROR_STATUS_FILEPATH_NULL_PATH,
@@ -204,8 +203,8 @@ typedef enum {
 #define log_warn(...) log_with_info(LOG_WARN, __FILE__, __LINE__, __VA_ARGS__)
 #define log_fatal(...) log_with_info(LOG_FATAL, __FILE__, __LINE__, __VA_ARGS__)
 
-void log_with_info(log_level_t log_level, const char *file, int line,
-                   const char *fmt, ...);
+void log_with_info(log_level_t log_level, const char *caller_filename,
+                   int caller_line, const char *format, ...);
 
 void write_to_stream_out(const char *fmt, ...);
 void write_to_stream_err(const char *fmt, ...);
@@ -235,6 +234,7 @@ void io_reset_stream_in(void);
 
 char *format_string_with_va_list(const char *format, va_list *args);
 char *get_formatted_string(const char *format, ...);
+void fflush_or_die(FILE *stream);
 void *malloc_or_die(size_t size);
 void *calloc_or_die(size_t num, size_t size);
 void *realloc_or_die(void *realloc_target, size_t size);
@@ -242,18 +242,19 @@ void *realloc_or_die(void *realloc_target, size_t size);
 typedef struct ErrorStack ErrorStack;
 
 ErrorStack *error_stack_create(void);
-void error_stack_destroy(ErrorStack *error_status);
-void error_stack_push(ErrorStack *error_status, error_code_t error_code,
+void error_stack_destroy(ErrorStack *error_stack);
+void error_stack_push(ErrorStack *error_stack, error_code_t error_code,
                       char *msg);
 error_code_t error_stack_top(ErrorStack *error_stack);
 char *error_stack_get_string_and_reset(ErrorStack *error_stack);
 void error_stack_print_and_reset(ErrorStack *error_stack);
-bool error_stack_is_empty(ErrorStack *error_stack);
+bool error_stack_is_empty(const ErrorStack *error_stack);
 
 // WARNING: for testing only, production code should only reset the stack after
 // printing or retrieving the error string
 void error_stack_reset(ErrorStack *error_stack);
 
+void fseek_or_die(FILE *stream, long offset, int whence);
 char *get_string_from_file(const char *filename, ErrorStack *error_stack);
 void write_string_to_file(const char *filename, const char *mode,
                           const char *string, ErrorStack *error_stack);
@@ -263,4 +264,6 @@ FILE *fopen_safe(const char *filename, const char *mode,
 void fclose_or_die(FILE *stream);
 void fwrite_or_die(const void *ptr, size_t size, size_t nmemb, FILE *stream,
                    const char *description);
+void fprintf_or_die(FILE *stream, const char *format, ...);
+
 #endif

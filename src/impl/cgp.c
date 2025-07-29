@@ -1,22 +1,27 @@
-#include <ctype.h>
-
+#include "../def/board_defs.h"
 #include "../def/config_defs.h"
 #include "../def/game_defs.h"
-
+#include "../def/letter_distribution_defs.h"
+#include "../def/players_data_defs.h"
 #include "../ent/bag.h"
+#include "../ent/board.h"
+#include "../ent/board_layout.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
-
-#include "../util/io_util.h"
-
+#include "../ent/player.h"
+#include "../ent/players_data.h"
+#include "../ent/rack.h"
 #include "../impl/gameplay.h"
-
 #include "../str/game_string.h"
 #include "../str/rack_string.h"
+#include "../util/io_util.h"
+#include "../util/string_util.h"
+#include <ctype.h>
+#include <stdlib.h>
 
-void place_letters_on_board(Game *game, const char *letters, int row_start,
-                            int *current_column_index,
+void place_letters_on_board(const Game *game, const char *letters,
+                            int row_start, int *current_column_index,
                             ErrorStack *error_stack) {
   size_t letters_length = string_length(letters);
   MachineLetter *machine_letters =
@@ -56,14 +61,14 @@ void place_letters_on_board(Game *game, const char *letters, int row_start,
   free(machine_letters);
 }
 
-void parse_cgp_board_row(Game *game, const char *cgp_board_row, int row_index,
-                         ErrorStack *error_stack) {
+void parse_cgp_board_row(const Game *game, const char *cgp_board_row,
+                         int row_index, ErrorStack *error_stack) {
   StringBuilder *tile_string_builder = string_builder_create();
-  int row_length = string_length(cgp_board_row);
+  size_t row_length = string_length(cgp_board_row);
 
   int current_row_number_of_spaces = 0;
   int current_column_index = 0;
-  for (int i = 0; i < row_length; i++) {
+  for (size_t i = 0; i < row_length; i++) {
     char current_char = cgp_board_row[i];
     if (isdigit(current_char)) {
       current_row_number_of_spaces =
@@ -101,7 +106,7 @@ void parse_cgp_board_row(Game *game, const char *cgp_board_row, int row_index,
   }
 }
 
-void parse_cgp_board(Game *game, const char *cgp_board,
+void parse_cgp_board(const Game *game, const char *cgp_board,
                      ErrorStack *error_stack) {
   StringSplitter *board_rows = split_string(cgp_board, '/', true);
 
@@ -123,7 +128,8 @@ void parse_cgp_board(Game *game, const char *cgp_board,
 }
 
 void parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
-                                          Game *game, ErrorStack *error_stack) {
+                                          const Game *game,
+                                          ErrorStack *error_stack) {
   for (int player_index = 0; player_index < 2; player_index++) {
     int number_of_letters_added = draw_rack_string_from_bag(
         game, player_index,
@@ -148,7 +154,7 @@ void parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
   }
 }
 
-void parse_cgp_racks(Game *game, const char *cgp_racks,
+void parse_cgp_racks(const Game *game, const char *cgp_racks,
                      ErrorStack *error_stack) {
   StringSplitter *player_racks = split_string(cgp_racks, '/', false);
   if (string_splitter_get_number_of_items(player_racks) != 2) {
@@ -162,7 +168,7 @@ void parse_cgp_racks(Game *game, const char *cgp_racks,
   string_splitter_destroy(player_racks);
 }
 
-void parse_cgp_scores(Game *game, const char *cgp_scores,
+void parse_cgp_scores(const Game *game, const char *cgp_scores,
                       ErrorStack *error_stack) {
   StringSplitter *player_scores = split_string(cgp_scores, '/', false);
   if (string_splitter_get_number_of_items(player_scores) != 2) {
@@ -348,7 +354,8 @@ char *game_get_cgp(const Game *game, bool write_player_on_turn_first) {
 //  - letter distribution
 //  - variant
 void string_builder_add_cgp_options(StringBuilder *cgp_options_builder,
-                                    PlayersData *players_data, int bingo_bonus,
+                                    const PlayersData *players_data,
+                                    const int bingo_bonus,
                                     const char *board_layout_name,
                                     const char *ld_name,
                                     game_variant_t game_variant) {
@@ -410,11 +417,12 @@ void string_builder_add_cgp_options(StringBuilder *cgp_options_builder,
 }
 
 char *game_get_cgp_with_options(const Game *game,
-                                bool write_player_on_turn_first,
-                                PlayersData *players_data, int bingo_bonus,
+                                const bool write_player_on_turn_first,
+                                const PlayersData *players_data,
+                                const int bingo_bonus,
                                 const char *board_layout_name,
                                 const char *ld_name,
-                                game_variant_t game_variant) {
+                                const game_variant_t game_variant) {
   StringBuilder *cgp_with_options_builder = string_builder_create();
   string_builder_add_cgp(cgp_with_options_builder, game,
                          write_player_on_turn_first);

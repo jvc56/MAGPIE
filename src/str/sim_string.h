@@ -5,7 +5,6 @@
 #include "../ent/game.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
-
 #include "../util/string_util.h"
 
 char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,

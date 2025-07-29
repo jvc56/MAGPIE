@@ -1,17 +1,14 @@
 #include "game_history.h"
 
-#include <stdlib.h>
-
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
-
+#include "../ent/board_layout.h"
 #include "../ent/equity.h"
-
-#include "rack.h"
-#include "validated_move.h"
-
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "rack.h"
+#include "validated_move.h"
+#include <stdlib.h>
 
 struct GameEvent {
   game_event_t event_type;
@@ -191,8 +188,7 @@ void game_history_player_set_name(GameHistory *game_history, int player_index,
 
 const char *game_history_player_get_name(const GameHistory *game_history,
                                          int player_index) {
-  GameHistoryPlayer *player = game_history->players[player_index];
-  return player->name;
+  return game_history->players[player_index]->name;
 }
 
 void game_history_player_set_nickname(GameHistory *game_history,
@@ -204,8 +200,7 @@ void game_history_player_set_nickname(GameHistory *game_history,
 
 const char *game_history_player_get_nickname(const GameHistory *game_history,
                                              int player_index) {
-  GameHistoryPlayer *player = game_history->players[player_index];
-  return player->nickname;
+  return game_history->players[player_index]->nickname;
 }
 
 void game_history_player_set_score(GameHistory *game_history, int player_index,
@@ -216,8 +211,7 @@ void game_history_player_set_score(GameHistory *game_history, int player_index,
 
 int game_history_player_get_score(const GameHistory *game_history,
                                   int player_index) {
-  GameHistoryPlayer *player = game_history->players[player_index];
-  return player->score;
+  return game_history->players[player_index]->score;
 }
 
 void game_history_player_set_next_rack_set(GameHistory *game_history,
@@ -229,8 +223,7 @@ void game_history_player_set_next_rack_set(GameHistory *game_history,
 
 bool game_history_player_get_next_rack_set(const GameHistory *game_history,
                                            int player_index) {
-  GameHistoryPlayer *player = game_history->players[player_index];
-  return player->next_rack_set;
+  return game_history->players[player_index]->next_rack_set;
 }
 
 void game_history_player_set_last_known_rack(GameHistory *game_history,
@@ -246,8 +239,7 @@ void game_history_player_set_last_known_rack(GameHistory *game_history,
 
 Rack *game_history_player_get_last_known_rack(const GameHistory *game_history,
                                               int player_index) {
-  GameHistoryPlayer *player = game_history->players[player_index];
-  return player->last_known_rack;
+  return game_history->players[player_index]->last_known_rack;
 }
 
 void game_history_init_player_phony_calc_racks(GameHistory *game_history,
@@ -267,15 +259,13 @@ void game_history_init_player_phony_calc_racks(GameHistory *game_history,
 Rack *
 game_history_player_get_known_rack_from_phonies(const GameHistory *game_history,
                                                 const int player_index) {
-  GameHistoryPlayer *player = game_history->players[player_index];
-  return player->known_rack_from_phonies;
+  return game_history->players[player_index]->known_rack_from_phonies;
 }
 
 Rack *
 game_history_player_get_previous_played_tiles(const GameHistory *game_history,
                                               const int player_index) {
-  GameHistoryPlayer *player = game_history->players[player_index];
-  return player->previous_played_tiles;
+  return game_history->players[player_index]->previous_played_tiles;
 }
 
 bool game_history_player_is_set(const GameHistory *game_history,
@@ -367,11 +357,6 @@ void game_history_set_player(GameHistory *history, int player_index,
                              const char *player_nickname) {
   history->players[player_index] =
       game_history_player_create(player_name, player_nickname);
-}
-
-GameHistoryPlayer *game_history_get_player(const GameHistory *history,
-                                           int player_index) {
-  return history->players[player_index];
 }
 
 int game_history_get_number_of_events(const GameHistory *history) {

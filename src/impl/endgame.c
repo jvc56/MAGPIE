@@ -1,24 +1,42 @@
-#include <pthread.h>
-
-#include "../ent/move.h"
-
-#include "../str/move_string.h"
-
-#include "../util/string_util.h"
-
 #include "endgame.h"
+
+#include "../compat/cpthread.h"
+#include "../def/game_defs.h"
+#include "../def/gameplay_defs.h"
+#include "../def/kwg_defs.h"
+#include "../def/move_defs.h"
+#include "../ent/bag.h"
+#include "../ent/dictionary_word.h"
+#include "../ent/equity.h"
+#include "../ent/game.h"
+#include "../ent/kwg.h"
+#include "../ent/move.h"
+#include "../ent/player.h"
+#include "../ent/rack.h"
+#include "../ent/small_move_arena.h"
+#include "../ent/thread_control.h"
+#include "../ent/transposition_table.h"
+#include "../ent/zobrist.h"
+#include "../str/move_string.h"
+#include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "gameplay.h"
 #include "kwg_maker.h"
 #include "move_gen.h"
 #include "word_prune.h"
+#include <assert.h>
+#include <stdint.h>
+#include <stdlib.h>
 
-#define DEFAULT_ENDGAME_MOVELIST_CAPACITY 250000
-
-// Bit flags for move estimates. These large numbers will force these estimated
-// values to sort first.
-#define EARLY_PASS_BF (1 << 29)
-#define HASH_MOVE_BF (1 << 28)
-#define GOING_OUT_BF (1 << 27)
+enum {
+  DEFAULT_ENDGAME_MOVELIST_CAPACITY = 250000,
+  // Bit flags for move estimates. These large numbers will force these
+  // estimated values to sort first.
+  LARGE_VALUE = 1 << 30, // for alpha-beta pruning
+  EARLY_PASS_BF = 1 << 29,
+  HASH_MOVE_BF = 1 << 28,
+  GOING_OUT_BF = 1 << 27,
+};
 
 #ifndef MAX
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -28,15 +46,13 @@
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #endif
 
-const int32_t LARGE_VALUE = (1 << 30); // for alpha-beta pruning
-
 void pvline_clear(PVLine *pv_line) {
   pv_line->num_moves = 0;
   pv_line->score = 0;
 }
 
-void pvline_update(PVLine *pv_line, const PVLine *new_pv_line, SmallMove *move,
-                   int32_t score) {
+void pvline_update(PVLine *pv_line, const PVLine *new_pv_line,
+                   const SmallMove *move, int32_t score) {
   pvline_clear(pv_line);
   pv_line->moves[0].metadata = move->metadata;
   pv_line->moves[0].tiny_move = move->tiny_move;
@@ -90,8 +106,8 @@ EndgameSolver *endgame_solver_create(ThreadControl *tc, const Game *game,
   es->solving_player = game_get_player_on_turn_index(game);
   es->initial_small_move_arena_size = 1024 * 1024;
   es->pruned_kwg = NULL;
-  Player *player = game_get_player(game, es->solving_player);
-  Player *opponent = game_get_player(game, 1 - es->solving_player);
+  const Player *player = game_get_player(game, es->solving_player);
+  const Player *opponent = game_get_player(game, 1 - es->solving_player);
 
   es->initial_spread =
       equity_to_int(player_get_score(player) - player_get_score(opponent));
@@ -200,7 +216,7 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
   bool last_move_was_pass = game_get_consecutive_scoreless_turns(
                                 worker->game_copy) == 1; // check if this is ok.
 
-  int arena_offset =
+  size_t arena_offset =
       worker->small_move_arena->size - (sizeof(SmallMove) * move_count);
 
   for (size_t i = 0; i < (size_t)move_count; i++) {
@@ -253,7 +269,7 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
 // XXX: Move this debug helper to a utility function or something.
 char *create_spaces(int depth) {
   // Allocate memory for the string of spaces (+1 for the null terminator)
-  char *spaces = (char *)malloc(depth + 1);
+  char *spaces = (char *)malloc_or_die(depth + 1);
 
   // Fill the string with spaces
   for (int i = 0; i < depth; i++) {
@@ -276,8 +292,10 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
   int32_t alpha_orig = alpha;
 
   int on_turn_idx = game_get_player_on_turn_index(worker->game_copy);
-  Player *player_on_turn = game_get_player(worker->game_copy, on_turn_idx);
-  Player *other_player = game_get_player(worker->game_copy, 1 - on_turn_idx);
+  const Player *player_on_turn =
+      game_get_player(worker->game_copy, on_turn_idx);
+  const Player *other_player =
+      game_get_player(worker->game_copy, 1 - on_turn_idx);
   int on_turn_spread = equity_to_int(player_get_score(player_on_turn) -
                                      player_get_score(other_player));
   uint64_t tt_move = INVALID_TINY_MOVE;
@@ -289,7 +307,7 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
       int16_t score = ttentry_score(tt_entry);
       uint8_t flag = ttentry_flag(tt_entry);
       // add spread back in; we subtract it when storing.
-      score += (int16_t)on_turn_spread;
+      score = (int16_t)((int16_t)on_turn_spread + score);
       if (flag == TT_EXACT) {
         if (!pv_node) {
           return score;
@@ -338,7 +356,7 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
 
   int32_t best_value = -LARGE_VALUE;
   uint64_t best_tiny_move = INVALID_TINY_MOVE;
-  int arena_offset =
+  size_t arena_offset =
       worker->small_move_arena->size - (sizeof(SmallMove) * nplays);
 
   // log_warn("Iterating through %d plays", nplays);
@@ -358,7 +376,7 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
     //          string_builder_peek(move_description), small_move->tiny_move,
     //          small_move->metadata);
 
-    Rack *stm_rack = player_get_rack(player_on_turn);
+    const Rack *stm_rack = player_get_rack(player_on_turn);
 
     int last_consecutive_scoreless_turns =
         game_get_consecutive_scoreless_turns(worker->game_copy);
@@ -437,7 +455,7 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
   }
 
   if (worker->solver->transposition_table_optim) {
-    int16_t score = best_value - on_turn_spread;
+    int16_t score = (int16_t)(best_value - on_turn_spread);
     uint8_t flag;
     TTEntry entry_to_store = {.score = score};
     if (best_value <= alpha_orig) {
@@ -479,9 +497,9 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
 
   uint64_t initial_hash_key = 0;
   if (worker->solver->transposition_table_optim) {
-    Player *solving_player =
+    const Player *solving_player =
         game_get_player(worker->game_copy, worker->solver->solving_player);
-    Player *other_player =
+    const Player *other_player =
         game_get_player(worker->game_copy, 1 - worker->solver->solving_player);
     initial_hash_key = zobrist_calculate_hash(
         worker->solver->transposition_table->zobrist,
@@ -528,10 +546,10 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   }
 }
 
-void *solver_worker(void *uncasted_solver_worker) {
+void *solver_worker_start(void *uncasted_solver_worker) {
   EndgameSolverWorker *solver_worker =
       (EndgameSolverWorker *)uncasted_solver_worker;
-  EndgameSolver *solver = solver_worker->solver;
+  const EndgameSolver *solver = solver_worker->solver;
   // ThreadControl *thread_control = solver->thread_control;
   // later allow thread control to quit early.
   iterative_deepening(solver_worker, solver->requested_plies);
@@ -548,18 +566,18 @@ PVLine endgame_solve(EndgameSolver *solver, int plies) {
 
   EndgameSolverWorker **solver_workers =
       malloc_or_die((sizeof(EndgameSolverWorker *)) * solver->threads);
-  pthread_t *worker_ids =
-      malloc_or_die((sizeof(pthread_t)) * (solver->threads));
+  cpthread_t *worker_ids =
+      malloc_or_die((sizeof(cpthread_t)) * (solver->threads));
 
   for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
     solver_workers[thread_index] =
         endgame_solver_create_worker(solver, thread_index);
-    pthread_create(&worker_ids[thread_index], NULL, solver_worker,
-                   solver_workers[thread_index]);
+    cpthread_create(&worker_ids[thread_index], solver_worker_start,
+                    solver_workers[thread_index]);
   }
 
   for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
-    pthread_join(worker_ids[thread_index], NULL);
+    cpthread_join(worker_ids[thread_index]);
     solver_worker_destroy(solver_workers[thread_index]);
   }
 

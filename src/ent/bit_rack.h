@@ -2,15 +2,13 @@
 #define BIT_RACK_H
 
 #include "../compat/endian_conv.h"
-
-#include <stdbool.h>
-#include <stdint.h>
-
 #include "../def/bit_rack_defs.h"
 #include "../def/board_defs.h"
 #include "dictionary_word.h"
 #include "letter_distribution.h"
 #include "rack.h"
+#include <stdbool.h>
+#include <stdint.h>
 
 // These are 128 bit integers representing multisets of tiles, used as keys for
 // maps storing words formed by those tiles. They can include both undesignated
@@ -54,7 +52,11 @@ bit_rack_is_compatible_with_ld(const LetterDistribution *ld) {
       max_letter_count < BOARD_DIM ? max_letter_count : BOARD_DIM;
   const int bit_rack_max_letter_count = (1 << BIT_RACK_BITS_PER_LETTER) - 1;
 
+  // The static analyzer thinks max_letter_count_on_board <=
+  // bit_rack_max_letter_count is always true, but it might be false for certain
+  // BOARD_DIM
   return ld->size <= BIT_RACK_MAX_ALPHABET_SIZE &&
+         // cppcheck-suppress knownConditionTrueFalse
          max_letter_count_on_board <= bit_rack_max_letter_count;
 }
 
@@ -184,6 +186,7 @@ static inline void bit_rack_div_mod_no_intrinsic(const BitRack *bit_rack,
 
 static inline void bit_rack_div_mod(const BitRack *bit_rack, uint32_t divisor,
                                     BitRack *quotient, uint32_t *remainder) {
+  assert(divisor != 0);
 #if USE_INT128_INTRINSIC
   *quotient = *bit_rack / divisor;
   *remainder = *bit_rack % divisor;
@@ -219,8 +222,9 @@ static inline bool bit_rack_equals(const BitRack *a, const BitRack *b) {
 static inline Rack *bit_rack_to_rack(const BitRack *bit_rack) {
   Rack *rack = rack_create(BIT_RACK_MAX_ALPHABET_SIZE);
   for (int ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
-    rack->array[ml] = bit_rack_get_letter(bit_rack, ml);
-    rack->number_of_letters += rack->array[ml];
+    const MachineLetter num_ml = bit_rack_get_letter(bit_rack, ml);
+    rack->array[ml] = (int8_t)num_ml;
+    rack->number_of_letters += (uint16_t)num_ml;
   }
   return rack;
 }

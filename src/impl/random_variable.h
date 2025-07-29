@@ -1,16 +1,13 @@
 #ifndef RANDOM_VARIABLE_H
 #define RANDOM_VARIABLE_H
 
-#include <stdint.h>
-
 #include "../def/bai_defs.h"
-
 #include "../ent/game.h"
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
-
 #include "bai_logger.h"
+#include <stdint.h>
 
 typedef struct RandomVariables RandomVariables;
 
@@ -50,7 +47,7 @@ double rvs_sample(RandomVariables *rvs, uint64_t k, int thread_index,
 void rvs_reset(RandomVariables *rvs);
 bool rvs_mark_as_epigon_if_similar(RandomVariables *rvs, int leader, int i);
 bool rvs_is_epigon(const RandomVariables *rvs, int i);
-int rvs_get_num_rvs(const RandomVariables *rvs);
+uint64_t rvs_get_num_rvs(const RandomVariables *rvs);
 uint64_t rvs_get_total_samples(const RandomVariables *rvs);
 
 #endif

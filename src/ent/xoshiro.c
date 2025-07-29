@@ -10,10 +10,9 @@ See <http://creativecommons.org/publicdomain/zero/1.0/>. */
 
 #include "xoshiro.h"
 
+#include "../util/io_util.h"
 #include <stdint.h>
 #include <stdlib.h>
-
-#include "../util/io_util.h"
 
 /* This is xoshiro256++ 1.0, one of our all-purpose, rock-solid generators.
    It has excellent (sub-ns) speed, a state (256 bits) that is large
@@ -103,7 +102,8 @@ uint64_t prng_next(XoshiroPRNG *prng) {
 uint64_t prng_get_random_number(XoshiroPRNG *prng, uint64_t n) {
   uint64_t x = prng_next(prng);
   // Eliminate modulus bias
-  while (x >= XOSHIRO_MAX - (XOSHIRO_MAX % n)) {
+  const uint64_t threshold = XOSHIRO_MAX - (XOSHIRO_MAX % n);
+  while (x >= threshold) {
     x = prng_next(prng);
   }
   return x % n;
@@ -121,7 +121,7 @@ void prng_jump(XoshiroPRNG *prng) {
   uint64_t s1 = 0;
   uint64_t s2 = 0;
   uint64_t s3 = 0;
-  for (unsigned long i = 0; i < sizeof JUMP / sizeof *JUMP; i++)
+  for (unsigned long i = 0; i < sizeof(JUMP) / sizeof(*JUMP); i++) {
     for (int b = 0; b < 64; b++) {
       if (JUMP[i] & UINT64_C(1) << b) {
         s0 ^= prng->s[0];
@@ -131,7 +131,7 @@ void prng_jump(XoshiroPRNG *prng) {
       }
       prng_next(prng);
     }
-
+  }
   prng->s[0] = s0;
   prng->s[1] = s1;
   prng->s[2] = s2;
@@ -151,7 +151,7 @@ void prng_long_jump(XoshiroPRNG *prng) {
   uint64_t s1 = 0;
   uint64_t s2 = 0;
   uint64_t s3 = 0;
-  for (unsigned long i = 0; i < sizeof LONG_JUMP / sizeof *LONG_JUMP; i++)
+  for (unsigned long i = 0; i < sizeof(LONG_JUMP) / sizeof(*LONG_JUMP); i++) {
     for (int b = 0; b < 64; b++) {
       if (LONG_JUMP[i] & UINT64_C(1) << b) {
         s0 ^= prng->s[0];
@@ -161,7 +161,7 @@ void prng_long_jump(XoshiroPRNG *prng) {
       }
       prng_next(prng);
     }
-
+  }
   prng->s[0] = s0;
   prng->s[1] = s1;
   prng->s[2] = s2;
