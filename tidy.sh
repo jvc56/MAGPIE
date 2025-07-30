@@ -10,6 +10,7 @@ echo "$CLANG_TIDY_EXEC version:"
 $CLANG_TIDY_EXEC --version
 
 SEARCH_DIRECTORIES="src/ test/ cmd/"
+EXCLUDED_FILES="linenoise.c"
 CLANG_TIDY_CHECKS="*,
                   -readability-magic-numbers,
                   -cppcoreguidelines-avoid-magic-numbers,
@@ -30,7 +31,7 @@ CLANG_TIDY_CHECKS="*,
                   -misc-no-recursion,
                   -llvm-header-guard,
                   -cppcoreguidelines-avoid-non-const-global-variables"
-CLANG_TIDY_EXCLUDE_HEADER_FILTER=".*"
+CLANG_TIDY_EXCLUDE_HEADER_FILTER="^(?!.*linenoise\.(c|h)).*"
 C_COMPILER_FLAGS="-std=c99 -Wno-trigraphs -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -D__linux__ -U_WIN32 -U__APPLE__ "
 LOG_FILE=$(mktemp)
 # Ensure the temporary log file is removed when the script exits,
@@ -47,6 +48,16 @@ echo "---------------------------------------------------"
 ANY_CLANG_TIDY_ISSUES=0
 CLANG_TIDY_COMMAND_FAILED=0
 
+# Build grep pattern for excluding files from analysis
+EXCLUDE_PATTERN=""
+for file in $EXCLUDED_FILES; do
+    if [ -z "$EXCLUDE_PATTERN" ]; then
+        EXCLUDE_PATTERN="$file"
+    else
+        EXCLUDE_PATTERN="$EXCLUDE_PATTERN\|$file"
+    fi
+done
+
 # Find all C source files and process them
 # 'find $SEARCH_DIRECTORIES -name "*.c"': Finds all files ending with .c
 #                                        within the specified directories.
@@ -54,7 +65,7 @@ CLANG_TIDY_COMMAND_FAILED=0
 #            which handles spaces or special characters in filenames correctly.
 # 'while IFS= read -r -d $'\0' C_FILE; do ... done': Reads null-separated filenames
 #                                                into the C_FILE variable.
-find $SEARCH_DIRECTORIES -name "*.c" -print0 | while IFS= read -r -d $'\0' C_FILE; do
+find $SEARCH_DIRECTORIES -name "*.c" -print0 | grep -zv "$EXCLUDE_PATTERN" | while IFS= read -r -d $'\0' C_FILE; do
     echo "Analyzing: $C_FILE"
 
     CLANG_TIDY_CMD="$CLANG_TIDY_EXEC \"$C_FILE\" \
