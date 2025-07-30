@@ -209,7 +209,7 @@ void log_with_info(log_level_t log_level, const char *caller_filename,
 void write_to_stream_out(const char *fmt, ...);
 void write_to_stream_err(const char *fmt, ...);
 void write_to_stream(FILE *stream, const char *fmt, ...);
-char *read_line_from_stdin(void);
+char *read_line_from_stream_in(void);
 
 // WARNING: This function should only be called once at startup or for testing
 void log_set_level(log_level_t new_log_level);
