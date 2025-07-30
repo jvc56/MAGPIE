@@ -1,6 +1,5 @@
 #include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
-#include "../src/compat/linenoise.h"
 #include "../src/ent/move.h"
 #include "../src/ent/thread_control.h"
 #include "../src/impl/config.h"
@@ -96,30 +95,6 @@ void main_args_destroy(MainArgs *main_args) {
   free(main_args);
 }
 
-void command_test_set_stream_in(FILE *stream) {
-  io_set_stream_in(stream);
-  linenoise_set_stream_in(stream);
-}
-
-void command_test_reset_stream_in(void) {
-  io_reset_stream_in();
-  linenoise_set_stream_in(NULL);
-}
-
-void command_test_set_stream_out(FILE *stream) {
-  io_set_stream_out(stream);
-  linenoise_set_stream_out(stream);
-}
-
-void command_test_reset_stream_out(void) {
-  io_reset_stream_out();
-  linenoise_set_stream_out(NULL);
-}
-
-void command_test_set_stream_err(FILE *stream) { io_set_stream_err(stream); }
-
-void command_test_reset_stream_err(void) { io_reset_stream_err(); }
-
 void block_for_search(const Config *config, int max_seconds) {
   // Poll for the end of the command
   double seconds_elapsed = 0;
@@ -164,8 +139,8 @@ void assert_command_status_and_output(Config *config, const char *command,
   FILE *output_fh = fopen_or_die(test_output_filename, "w");
   FILE *errorout_fh = fopen_or_die(test_outerror_filename, "w");
 
-  command_test_set_stream_out(output_fh);
-  command_test_set_stream_err(errorout_fh);
+  io_set_stream_out(output_fh);
+  io_set_stream_err(errorout_fh);
 
   ErrorStack *error_stack = error_stack_create();
 
@@ -214,8 +189,8 @@ void assert_command_status_and_output(Config *config, const char *command,
   free(test_outerror);
   free(test_output_filename);
   free(test_outerror_filename);
-  command_test_reset_stream_out();
-  command_test_reset_stream_err();
+  io_reset_stream_out();
+  io_reset_stream_err();
   error_stack_destroy(error_stack);
 }
 
@@ -420,8 +395,8 @@ void test_process_command(const char *arg_string,
   FILE *output_fh = fopen_or_die(test_output_filename, "w");
   FILE *errorout_fh = fopen_or_die(test_outerror_filename, "w");
 
-  command_test_set_stream_out(output_fh);
-  command_test_set_stream_err(errorout_fh);
+  io_set_stream_out(output_fh);
+  io_set_stream_err(errorout_fh);
 
   MainArgs *main_args = get_main_args_from_string(arg_string_with_exec);
 
@@ -468,8 +443,8 @@ void test_process_command(const char *arg_string,
   free(test_output_filename);
   free(test_outerror_filename);
   free(arg_string_with_exec);
-  command_test_reset_stream_out();
-  command_test_reset_stream_err();
+  io_reset_stream_out();
+  io_reset_stream_err();
 }
 
 void test_exec_single_command(void) {
@@ -506,7 +481,7 @@ void test_exec_ucgi_command(void) {
 
   FILE *input_writer = fopen_or_die(test_input_filename, "w+");
   FILE *input_reader = fopen_or_die(test_input_filename, "r");
-  command_test_set_stream_in(input_reader);
+  io_set_stream_in(input_reader);
 
   ProcessArgs *process_args =
       process_args_create("set -mode ucgi", 6, "autoplay", 1, "still running");
@@ -553,7 +528,7 @@ void test_exec_ucgi_command(void) {
   delete_fifo(test_input_filename);
   process_args_destroy(process_args);
   free(test_input_filename);
-  command_test_reset_stream_in();
+  io_reset_stream_in();
 }
 
 void test_exec_console_command(void) {
@@ -564,7 +539,7 @@ void test_exec_console_command(void) {
 
   FILE *input_writer = fopen_or_die(test_input_filename, "w+");
   FILE *input_reader = fopen_or_die(test_input_filename, "r");
-  command_test_set_stream_in(input_reader);
+  io_set_stream_in(input_reader);
 
   char *initial_command = get_formatted_string("cgp %s", EMPTY_CGP);
 
@@ -588,18 +563,18 @@ void test_exec_console_command(void) {
   // Stop should have no effect and appear as an error
   write_to_stream(input_writer, "stop\n");
   write_to_stream(input_writer, "quit\n");
-  fclose_or_die(input_writer);
 
   // Wait for magpie to quit
   block_for_process_command(process_args, 30);
 
+  fclose_or_die(input_writer);
   fclose_or_die(input_reader);
   delete_fifo(test_input_filename);
   process_args_destroy(process_args);
   free(config_load_error_substr);
   free(test_input_filename);
   free(initial_command);
-  command_test_reset_stream_in();
+  io_reset_stream_in();
 }
 
 void test_command(void) {
@@ -607,7 +582,7 @@ void test_command(void) {
   test_command_execution();
   test_exec_ucgi_command();
   test_exec_console_command();
-  command_test_reset_stream_out();
-  command_test_reset_stream_err();
-  command_test_reset_stream_in();
+  io_reset_stream_out();
+  io_reset_stream_err();
+  io_reset_stream_in();
 }

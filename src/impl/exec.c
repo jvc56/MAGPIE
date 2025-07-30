@@ -1,7 +1,6 @@
 #include "exec.h"
 
 #include "../compat/cpthread.h"
-#include "../compat/linenoise.h"
 #include "../def/config_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/thread_control.h"
@@ -142,19 +141,18 @@ void command_scan_loop(Config *config, ErrorStack *error_stack,
   if (!config_continue_on_coldstart(config)) {
     return;
   }
+  ThreadControl *thread_control = config_get_thread_control(config);
   char *input = NULL;
-  linenoiseHistorySetMaxLen(1000);
   while (1) {
     exec_mode_t exec_mode = config_get_exec_mode(config);
 
-    const char *prompt = "";
     if (exec_mode == EXEC_MODE_CONSOLE) {
-      prompt = "magpie>";
+      thread_control_print(thread_control, "magpie>");
     }
 
     free(input);
 
-    input = linenoise(prompt);
+    input = read_line_from_stdin();
     if (!input) {
       // NULL input indicates an EOF
       break;
@@ -169,7 +167,7 @@ void command_scan_loop(Config *config, ErrorStack *error_stack,
     if (is_string_empty_or_null(input)) {
       continue;
     }
-    linenoiseHistoryAdd(input);
+
     switch (exec_mode) {
     case EXEC_MODE_CONSOLE:
       execute_command_sync(config, error_stack, input);
