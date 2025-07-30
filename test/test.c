@@ -50,6 +50,7 @@
 #include "word_prune_test.h"
 #include "word_test.h"
 #include "zobrist_test.h"
+#include "load_test.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -110,6 +111,10 @@ static TestEntry test_table[] = {
     {"endgame", test_endgame},
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},
+    {"load", test_load},
+    {"cross_tables", test_cross_tables},
+    {"woogles", test_woogles},
+    {"local", test_local},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
