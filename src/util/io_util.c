@@ -175,7 +175,7 @@ void write_to_stream(FILE *stream, const char *fmt, ...) {
   va_end(args);
 }
 
-char *read_line_from_stdin(void) {
+char *read_line_from_stream_in(void) {
   char *line = NULL;
   size_t len = 0;
   ssize_t read;
