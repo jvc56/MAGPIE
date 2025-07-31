@@ -800,3 +800,37 @@ double string_to_double(const char *str, ErrorStack *error_stack) {
   }
   return result;
 }
+
+char *json_unescape_string(const char *json_string, ErrorStack *error_stack) {
+  if (!json_string) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
+                     string_duplicate("json_string cannot be null"));
+    return NULL;
+  }
+  
+  int input_len = strlen(json_string);
+  char *unescaped = malloc_or_die(input_len + 1);
+  char *dst = unescaped;
+  const char *src = json_string;
+  
+  while (*src) {
+    if (*src == '\\' && *(src + 1)) {
+      switch (*(src + 1)) {
+        case 'n': *dst++ = '\n'; src += 2; break;
+        case 't': *dst++ = '\t'; src += 2; break;
+        case 'r': *dst++ = '\r'; src += 2; break;
+        case '\\': *dst++ = '\\'; src += 2; break;
+        case '"': *dst++ = '"'; src += 2; break;
+        case '/': *dst++ = '/'; src += 2; break;
+        case 'b': *dst++ = '\b'; src += 2; break;
+        case 'f': *dst++ = '\f'; src += 2; break;
+        default: *dst++ = *src++; break; // Copy the backslash if unknown escape
+      }
+    } else {
+      *dst++ = *src++;
+    }
+  }
+  *dst = '\0';
+  
+  return unescaped;
+}

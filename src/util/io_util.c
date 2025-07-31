@@ -462,11 +462,15 @@ char *get_process_output(const char *cmd) {
     FILE *pipe = popen_or_die(cmd, "r");
   
     StringBuilder *content_builder = string_builder_create();
-    char buffer[4096];
-    while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
+    char *buffer = NULL;
+    size_t buffer_size = 0;
+    ssize_t line_length;
+    
+    while ((line_length = getline(&buffer, &buffer_size, pipe)) != -1) {
         string_builder_add_string(content_builder, buffer);
     }
     
+    free(buffer);
     int status = pclose(pipe);
     char *output = NULL;
     
