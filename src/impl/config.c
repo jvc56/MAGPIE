@@ -108,6 +108,7 @@ typedef enum {
 } arg_token_t;
 
 typedef void (*command_exec_func_t)(Config *, ErrorStack *);
+typedef char *(*command_api_func_t)(Config *, ErrorStack *);
 typedef char *(*command_status_func_t)(Config *);
 
 typedef struct ParsedArg {
@@ -117,6 +118,7 @@ typedef struct ParsedArg {
   int num_values;
   int num_set_values;
   command_exec_func_t exec_func;
+  command_api_func_t api_func;
   command_status_func_t status_func;
 } ParsedArg;
 
@@ -160,6 +162,7 @@ struct Config {
 void parsed_arg_create(Config *config, arg_token_t arg_token, const char *name,
                        int num_req_values, int num_values,
                        command_exec_func_t command_exec_func,
+                       command_api_func_t command_api_func,
                        command_status_func_t command_status_func) {
   ParsedArg *parsed_arg = malloc_or_die(sizeof(ParsedArg));
   parsed_arg->num_req_values = num_req_values;
@@ -171,6 +174,7 @@ void parsed_arg_create(Config *config, arg_token_t arg_token, const char *name,
   parsed_arg->name = string_duplicate(name);
   parsed_arg->num_set_values = 0;
   parsed_arg->exec_func = command_exec_func;
+  parsed_arg->api_func = command_api_func;
   parsed_arg->status_func = command_status_func;
 
   config->pargs[arg_token] = parsed_arg;
@@ -202,6 +206,11 @@ ParsedArg *config_get_parg(const Config *config, arg_token_t arg_token) {
 command_exec_func_t config_get_parg_exec_func(const Config *config,
                                               arg_token_t arg_token) {
   return config_get_parg(config, arg_token)->exec_func;
+}
+
+command_api_func_t config_get_parg_api_func(const Config *config,
+                                            arg_token_t arg_token) {
+  return config_get_parg(config, arg_token)->api_func;
 }
 
 command_status_func_t config_get_parg_status_func(const Config *config,
@@ -555,6 +564,11 @@ void config_load_uint64(const Config *config, arg_token_t arg_token,
 
 // Generic execution and status functions
 
+// Used for string api commands that return nothing
+char* empty_string() {
+  return string_duplicate("");
+}
+
 // Used for pargs that are not commands.
 void execute_fatal(Config *config,
                    ErrorStack __attribute__((unused)) * error_stack) {
@@ -562,9 +576,20 @@ void execute_fatal(Config *config,
             config->exec_parg_token);
 }
 
+char *str_api_fatal(Config *config,
+                    ErrorStack __attribute__((unused)) * error_stack) {
+  execute_fatal(config, error_stack);
+  return empty_string();
+}
+
 // Used for commands that only update the config state
 void execute_noop(Config __attribute__((unused)) * config,
                   ErrorStack __attribute__((unused)) * error_stack) {}
+
+char *str_api_noop(Config __attribute__((unused)) * config,
+                   ErrorStack __attribute__((unused)) * error_stack) {
+  return empty_string();
+}
 
 char *get_status_finished_str(const Config *config) {
   return get_formatted_string("%s %s\n", COMMAND_FINISHED_KEYWORD,
@@ -588,7 +613,7 @@ char *status_generic(Config *config) {
 
 // Load CGP
 
-void execute_cgp_load(Config *config, ErrorStack *error_stack) {
+void impl_cgp_load(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
@@ -633,7 +658,7 @@ void execute_cgp_load(Config *config, ErrorStack *error_stack) {
 
 // Adding moves
 
-void execute_add_moves(Config *config, ErrorStack *error_stack) {
+void impl_add_moves(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
@@ -683,7 +708,7 @@ void execute_add_moves(Config *config, ErrorStack *error_stack) {
 
 // Setting player rack
 
-void execute_set_rack(Config *config, ErrorStack *error_stack) {
+void impl_set_rack(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
@@ -729,7 +754,7 @@ void execute_set_rack(Config *config, ErrorStack *error_stack) {
 
 // Move generation
 
-void execute_move_gen(Config *config, ErrorStack *error_stack) {
+void impl_move_gen(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
@@ -754,7 +779,6 @@ void execute_move_gen(Config *config, ErrorStack *error_stack) {
       .max_equity_diff = config->max_equity_diff,
   };
   generate_moves_for_game(&args);
-  print_ucgi_static_moves(config->game, ml, config->thread_control);
 }
 
 // Sim
@@ -790,7 +814,7 @@ void config_simulate(const Config *config, Rack *known_opp_rack,
   return simulate(&args, sim_results, error_stack);
 }
 
-void execute_sim(Config *config, ErrorStack *error_stack) {
+void impl_sim(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
@@ -865,8 +889,8 @@ void config_infer(const Config *config, int target_index, int target_score,
   return infer(&args, results, error_stack);
 }
 
-void execute_infer_with_rack(Config *config, Rack *target_played_tiles,
-                             ErrorStack *error_stack) {
+void config_infer_with_rack(Config *config, Rack *target_played_tiles,
+                            ErrorStack *error_stack) {
   const char *target_index_str =
       config_get_parg_value(config, ARG_TOKEN_INFER, 0);
   int target_index;
@@ -927,7 +951,7 @@ void execute_infer_with_rack(Config *config, Rack *target_played_tiles,
                target_played_tiles, config->inference_results, error_stack);
 }
 
-void execute_infer(Config *config, ErrorStack *error_stack) {
+void impl_infer(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
@@ -939,7 +963,7 @@ void execute_infer(Config *config, ErrorStack *error_stack) {
   config_init_game(config);
   Rack *target_played_tiles =
       rack_create(ld_get_size(game_get_ld(config->game)));
-  execute_infer_with_rack(config, target_played_tiles, error_stack);
+  config_infer_with_rack(config, target_played_tiles, error_stack);
   rack_destroy(target_played_tiles);
 }
 
@@ -974,7 +998,7 @@ void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
   autoplay(&args, autoplay_results, error_stack);
 }
 
-void execute_autoplay(Config *config, ErrorStack *error_stack) {
+void impl_autoplay(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
@@ -1016,13 +1040,13 @@ void config_convert(const Config *config, ConversionResults *results,
   convert(&args, results, error_stack);
 }
 
-void execute_convert(Config *config, ErrorStack *error_stack) {
+void impl_convert(Config *config, ErrorStack *error_stack) {
   config_convert(config, config->conversion_results, error_stack);
 }
 
 // Leave Gen
 
-void execute_leave_gen(Config *config, ErrorStack *error_stack) {
+void impl_leave_gen(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
@@ -1071,7 +1095,7 @@ void execute_leave_gen(Config *config, ErrorStack *error_stack) {
 // Create
 
 // This only implements creating a klv for now.
-void execute_create_data(Config *config, ErrorStack *error_stack) {
+void impl_create_data(Config *config, ErrorStack *error_stack) {
   const char *create_type_str =
       config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 0);
 
@@ -1937,8 +1961,9 @@ bool config_execute_command_silent(Config *config, ErrorStack *error_stack) {
     config_get_parg_exec_func(config, config->exec_parg_token)(config,
                                                                error_stack);
     return true;
+  } else {
+    return false;
   }
-  return false;
 }
 
 void config_execute_command(Config *config, ErrorStack *error_stack) {
@@ -1956,6 +1981,108 @@ char *config_get_execute_status(Config *config) {
         config_get_parg_status_func(config, config->exec_parg_token)(config);
   }
   return status;
+}
+
+// API surface
+// -------------------------------------
+// There are two sets of API functions:
+// 1. execute_*, called by the magpie console and cli
+//    - prints output, if any, to stdout
+// 2. str_api_*, meant to be called by programs embedding magpie as a library
+//    - all functions are char* func(Config*, ErrorStack*, char* cmd)
+//    - uses the same parser as the execute commands, but returns output as a
+//      string
+
+
+void execute_cgp_load(Config *config, ErrorStack *error_stack) {
+  impl_cgp_load(config, error_stack);
+}
+
+char *str_api_cgp_load(Config *config, ErrorStack *error_stack) {
+  impl_cgp_load(config, error_stack);
+  return empty_string();
+}
+
+void execute_add_moves(Config *config, ErrorStack *error_stack) {
+  impl_add_moves(config, error_stack);
+}
+
+char* str_api_add_moves(Config *config, ErrorStack *error_stack) {
+  impl_add_moves(config, error_stack);
+  return empty_string();
+}
+
+void execute_set_rack(Config *config, ErrorStack *error_stack) {
+  impl_set_rack(config, error_stack);
+}
+
+char *str_api_set_rack(Config *config, ErrorStack *error_stack) {
+  impl_set_rack(config, error_stack);
+  return empty_string();
+}
+
+void execute_move_gen(Config *config, ErrorStack *error_stack) {
+  impl_move_gen(config, error_stack);
+  print_ucgi_static_moves(config->game, config->move_list, config->thread_control);
+}
+
+char *str_api_move_gen(Config *config, ErrorStack *error_stack) {
+  impl_move_gen(config, error_stack);
+  return ucgi_static_moves(config->game, config->move_list);
+}
+
+void execute_sim(Config *config, ErrorStack *error_stack) {
+  impl_sim(config, error_stack);
+}
+
+char *str_api_sim(Config *config, ErrorStack *error_stack) {
+  impl_sim(config, error_stack);
+  return empty_string();
+}
+
+void execute_infer(Config *config, ErrorStack *error_stack) {
+  impl_infer(config, error_stack);
+}
+
+char *str_api_infer(Config *config, ErrorStack *error_stack) {
+  impl_infer(config, error_stack);
+  return empty_string();
+}
+
+void execute_autoplay(Config *config, ErrorStack *error_stack) {
+  impl_autoplay(config, error_stack);
+}
+
+char *str_api_autoplay(Config *config, ErrorStack *error_stack) {
+  impl_autoplay(config, error_stack);
+  return empty_string();
+}
+
+void execute_convert(Config *config, ErrorStack *error_stack) {
+  impl_convert(config, error_stack);
+}
+
+char *str_api_convert(Config *config, ErrorStack *error_stack) {
+  impl_convert(config, error_stack);
+  return empty_string();
+}
+
+void execute_leave_gen(Config *config, ErrorStack *error_stack) {
+  impl_leave_gen(config, error_stack);
+}
+
+char *str_api_leave_gen(Config *config, ErrorStack *error_stack) {
+  impl_leave_gen(config, error_stack);
+  return empty_string();
+}
+
+void execute_create_data(Config *config, ErrorStack *error_stack) {
+  impl_create_data(config, error_stack);
+}
+
+char *str_api_create_data(Config *config, ErrorStack *error_stack) {
+  impl_create_data(config, error_stack);
+  return empty_string();
 }
 
 void config_create_default_internal(Config *config, ErrorStack *error_stack,
@@ -1982,110 +2109,73 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
     return;
   }
 
-  parsed_arg_create(config, ARG_TOKEN_SET, "setoptions", 0, 0, execute_noop,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_CGP, "cgp", 4, 4, execute_cgp_load,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_MOVES, "addmoves", 1, 1,
-                    execute_add_moves, status_generic);
-  parsed_arg_create(config, ARG_TOKEN_RACK, "rack", 2, 2, execute_set_rack,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_GEN, "generate", 0, 0, execute_move_gen,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_SIM, "simulate", 0, 1, execute_sim,
-                    status_sim);
-  parsed_arg_create(config, ARG_TOKEN_INFER, "infer", 2, 3, execute_infer,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2,
-                    execute_autoplay, status_generic);
-  parsed_arg_create(config, ARG_TOKEN_CONVERT, "convert", 2, 3, execute_convert,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2,
-                    execute_leave_gen, status_generic);
-  parsed_arg_create(config, ARG_TOKEN_CREATE_DATA, "createdata", 2, 3,
-                    execute_create_data, status_generic);
-  parsed_arg_create(config, ARG_TOKEN_DATA_PATH, "path", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_BINGO_BONUS, "bb", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_BOARD_LAYOUT, "bdn", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_GAME_VARIANT, "var", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_LETTER_DISTRIBUTION, "ld", 1, 1,
-                    execute_fatal, status_generic);
-  parsed_arg_create(config, ARG_TOKEN_LEXICON, "lex", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_USE_WMP, "wmp", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_LEAVES, "leaves", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_P1_NAME, "p1", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_P1_LEXICON, "l1", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_P1_USE_WMP, "w1", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_P1_LEAVES, "k1", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1,
-                    execute_fatal, status_generic);
-  parsed_arg_create(config, ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1,
-                    execute_fatal, status_generic);
-  parsed_arg_create(config, ARG_TOKEN_P2_NAME, "p2", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_P2_LEXICON, "l2", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_P2_USE_WMP, "w2", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_P2_LEAVES, "k2", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1,
-                    execute_fatal, status_generic);
-  parsed_arg_create(config, ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1,
-                    execute_fatal, status_generic);
-  parsed_arg_create(config, ARG_TOKEN_WIN_PCT, "winpct", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_PLIES, "plies", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1,
-                    execute_fatal, status_generic);
-  parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_SMALL_PLAYS, "numsmallplays", 1,
-                    1, execute_fatal, status_generic);
-  parsed_arg_create(config, ARG_TOKEN_MAX_ITERATIONS, "iterations", 1, 1,
-                    execute_fatal, status_generic);
-  parsed_arg_create(config, ARG_TOKEN_MIN_PLAY_ITERATIONS, "minplayiterations",
-                    1, 1, execute_fatal, status_generic);
-  parsed_arg_create(config, ARG_TOKEN_STOP_COND_PCT, "scondition", 1, 1,
-                    execute_fatal, status_generic);
-  parsed_arg_create(config, ARG_TOKEN_EQUITY_MARGIN, "equitymargin", 1, 1,
-                    execute_fatal, status_generic);
-  parsed_arg_create(config, ARG_TOKEN_MAX_EQUITY_DIFF, "maxequitydifference", 1,
-                    1, execute_fatal, status_generic);
-  parsed_arg_create(config, ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1,
-                    execute_fatal, status_generic);
-  parsed_arg_create(config, ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_WRITE_BUFFER_SIZE, "wb", 1, 1,
-                    execute_fatal, status_generic);
-  parsed_arg_create(config, ARG_TOKEN_RANDOM_SEED, "seed", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_THREADS, "threads", 1, 1,
-                    execute_fatal, status_generic);
-  parsed_arg_create(config, ARG_TOKEN_PRINT_INFO_INTERVAL, "pfrequency", 1, 1,
-                    execute_fatal, status_generic);
-  parsed_arg_create(config, ARG_TOKEN_EXEC_MODE, "mode", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_TT_FRACTION_OF_MEM, "ttfraction", 1, 1,
-                    execute_fatal, status_generic);
-  parsed_arg_create(config, ARG_TOKEN_TIME_LIMIT, "tlim", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_SAMPLING_RULE, "sr", 1, 1, execute_fatal,
-                    status_generic);
-  parsed_arg_create(config, ARG_TOKEN_THRESHOLD, "threshold", 1, 1,
-                    execute_fatal, status_generic);
+  // Command parsed from string input
+#define cmd(token, name, n_req, n_val, func, stat) \
+  parsed_arg_create(config, token, name, n_req, n_val, \
+  execute_##func, str_api_##func, status_##stat)
+
+  // Non-command arg
+#define arg(token, name, n_req, n_val) \
+  parsed_arg_create(config, token, name, n_req, n_val, \
+  execute_fatal, str_api_fatal, status_generic)
+
+  cmd(ARG_TOKEN_SET, "setoptions", 0, 0, noop, generic);
+  cmd(ARG_TOKEN_CGP, "cgp", 4, 4, cgp_load, generic);
+  cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic);
+  cmd(ARG_TOKEN_RACK, "rack", 2, 2, set_rack, generic);
+  cmd(ARG_TOKEN_GEN, "generate", 0, 0, move_gen, generic);
+  cmd(ARG_TOKEN_SIM, "simulate", 0, 1, sim, sim);
+  cmd(ARG_TOKEN_INFER, "infer", 2, 3, infer, generic);
+  cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, generic);
+  cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic);
+  cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic);
+  cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic);
+
+  arg(ARG_TOKEN_DATA_PATH, "path", 1, 1);
+  arg(ARG_TOKEN_BINGO_BONUS, "bb", 1, 1);
+  arg(ARG_TOKEN_BOARD_LAYOUT, "bdn", 1, 1);
+  arg(ARG_TOKEN_GAME_VARIANT, "var", 1, 1);
+  arg(ARG_TOKEN_LETTER_DISTRIBUTION, "ld", 1, 1);
+  arg(ARG_TOKEN_LEXICON, "lex", 1, 1);
+  arg(ARG_TOKEN_USE_WMP, "wmp", 1, 1);
+  arg(ARG_TOKEN_LEAVES, "leaves", 1, 1);
+  arg(ARG_TOKEN_P1_NAME, "p1", 1, 1);
+  arg(ARG_TOKEN_P1_LEXICON, "l1", 1, 1);
+  arg(ARG_TOKEN_P1_USE_WMP, "w1", 1, 1);
+  arg(ARG_TOKEN_P1_LEAVES, "k1", 1, 1);
+  arg(ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1);
+  arg(ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1);
+  arg(ARG_TOKEN_P2_NAME, "p2", 1, 1);
+  arg(ARG_TOKEN_P2_LEXICON, "l2", 1, 1);
+  arg(ARG_TOKEN_P2_USE_WMP, "w2", 1, 1);
+  arg(ARG_TOKEN_P2_LEAVES, "k2", 1, 1);
+  arg(ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1);
+  arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
+  arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
+  arg(ARG_TOKEN_PLIES, "plies", 1, 1);
+  arg(ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1);
+  arg(ARG_TOKEN_NUMBER_OF_SMALL_PLAYS, "numsmallplays", 1, 1);
+  arg(ARG_TOKEN_MAX_ITERATIONS, "iterations", 1, 1);
+  arg(ARG_TOKEN_MIN_PLAY_ITERATIONS, "minplayiterations", 1, 1);
+  arg(ARG_TOKEN_STOP_COND_PCT, "scondition", 1, 1);
+  arg(ARG_TOKEN_EQUITY_MARGIN, "equitymargin", 1, 1);
+  arg(ARG_TOKEN_MAX_EQUITY_DIFF, "maxequitydifference", 1, 1);
+  arg(ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1);
+  arg(ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1);
+  arg(ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1);
+  arg(ARG_TOKEN_WRITE_BUFFER_SIZE, "wb", 1, 1);
+  arg(ARG_TOKEN_RANDOM_SEED, "seed", 1, 1);
+  arg(ARG_TOKEN_NUMBER_OF_THREADS, "threads", 1, 1);
+  arg(ARG_TOKEN_PRINT_INFO_INTERVAL, "pfrequency", 1, 1);
+  arg(ARG_TOKEN_EXEC_MODE, "mode", 1, 1);
+  arg(ARG_TOKEN_TT_FRACTION_OF_MEM, "ttfraction", 1, 1);
+  arg(ARG_TOKEN_TIME_LIMIT, "tlim", 1, 1);
+  arg(ARG_TOKEN_SAMPLING_RULE, "sr", 1, 1);
+  arg(ARG_TOKEN_THRESHOLD, "threshold", 1, 1);
+
+#undef cmd
+#undef arg
+
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
   config->exec_mode = EXEC_MODE_CONSOLE;
