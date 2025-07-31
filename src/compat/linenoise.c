@@ -181,7 +181,7 @@ FILE *linenoise_get_stream_out(void) {
 
 int linenoise_get_in_fileno(void) {
   if (!stream_in) {
-    return linenoise_get_in_fileno();
+    return fileno(linenoise_get_stream_in());
   }
   return fileno(stream_in);
 }
