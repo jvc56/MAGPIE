@@ -7,9 +7,16 @@
 typedef struct DownloadGCGOptions {
   const char *source_identifier;  // Game ID, URL, or local file path
   const char *lexicon;            // Optional lexicon override
-  const char *ld;                 // Optional letter distribution override
-  void *config;                   // Config* - optional, will create default if NULL
+  void *config;
 } DownloadGCGOptions;
+
+// helper functions for .gcg sources
+char *get_xt_gcg_string(const char *identifier, ErrorStack *error_stack);
+char *get_woogles_gcg_string(const char *identifier, ErrorStack *error_stack);
+char *get_local_gcg_string(const char *identifier, ErrorStack *error_stack);
+
+// main dispatcher function
+char *get_gcg_string(const DownloadGCGOptions *options, ErrorStack *error_stack);
 
 void download_gcg(const DownloadGCGOptions *options, GameHistory *game_history,
                   ErrorStack *error_stack);

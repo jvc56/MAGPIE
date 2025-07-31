@@ -266,4 +266,6 @@ void fwrite_or_die(const void *ptr, size_t size, size_t nmemb, FILE *stream,
                    const char *description);
 void fprintf_or_die(FILE *stream, const char *format, ...);
 
+FILE *popen_or_die(const char *command, const char *mode);
+char *get_process_output(const char *cmd);
 #endif

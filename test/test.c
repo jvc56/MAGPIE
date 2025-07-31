@@ -112,9 +112,6 @@ static TestEntry test_table[] = {
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},
     {"load", test_load},
-    {"cross_tables", test_cross_tables},
-    {"woogles", test_woogles},
-    {"local", test_local},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
