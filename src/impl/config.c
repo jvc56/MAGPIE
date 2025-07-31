@@ -565,9 +565,7 @@ void config_load_uint64(const Config *config, arg_token_t arg_token,
 // Generic execution and status functions
 
 // Used for string api commands that return nothing
-char* empty_string() {
-  return string_duplicate("");
-}
+char *empty_string() { return string_duplicate(""); }
 
 // Used for pargs that are not commands.
 void execute_fatal(Config *config,
@@ -1993,7 +1991,6 @@ char *config_get_execute_status(Config *config) {
 //    - uses the same parser as the execute commands, but returns output as a
 //      string
 
-
 void execute_cgp_load(Config *config, ErrorStack *error_stack) {
   impl_cgp_load(config, error_stack);
 }
@@ -2007,7 +2004,7 @@ void execute_add_moves(Config *config, ErrorStack *error_stack) {
   impl_add_moves(config, error_stack);
 }
 
-char* str_api_add_moves(Config *config, ErrorStack *error_stack) {
+char *str_api_add_moves(Config *config, ErrorStack *error_stack) {
   impl_add_moves(config, error_stack);
   return empty_string();
 }
@@ -2023,7 +2020,8 @@ char *str_api_set_rack(Config *config, ErrorStack *error_stack) {
 
 void execute_move_gen(Config *config, ErrorStack *error_stack) {
   impl_move_gen(config, error_stack);
-  print_ucgi_static_moves(config->game, config->move_list, config->thread_control);
+  print_ucgi_static_moves(config->game, config->move_list,
+                          config->thread_control);
 }
 
 char *str_api_move_gen(Config *config, ErrorStack *error_stack) {
@@ -2110,14 +2108,14 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   }
 
   // Command parsed from string input
-#define cmd(token, name, n_req, n_val, func, stat) \
-  parsed_arg_create(config, token, name, n_req, n_val, \
-  execute_##func, str_api_##func, status_##stat)
+#define cmd(token, name, n_req, n_val, func, stat)                             \
+  parsed_arg_create(config, token, name, n_req, n_val, execute_##func,         \
+                    str_api_##func, status_##stat)
 
   // Non-command arg
-#define arg(token, name, n_req, n_val) \
-  parsed_arg_create(config, token, name, n_req, n_val, \
-  execute_fatal, str_api_fatal, status_generic)
+#define arg(token, name, n_req, n_val)                                         \
+  parsed_arg_create(config, token, name, n_req, n_val, execute_fatal,          \
+                    str_api_fatal, status_generic)
 
   cmd(ARG_TOKEN_SET, "setoptions", 0, 0, noop, generic);
   cmd(ARG_TOKEN_CGP, "cgp", 4, 4, cgp_load, generic);
