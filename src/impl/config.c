@@ -1093,7 +1093,7 @@ void impl_leave_gen(Config *config, ErrorStack *error_stack) {
 // Create
 
 // This only implements creating a klv for now.
-void impl_create_data(Config *config, ErrorStack *error_stack) {
+void impl_create_data(const Config *config, ErrorStack *error_stack) {
   const char *create_type_str =
       config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 0);
 
