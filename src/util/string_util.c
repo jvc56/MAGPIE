@@ -801,14 +801,8 @@ double string_to_double(const char *str, ErrorStack *error_stack) {
   return result;
 }
 
-char *json_unescape_string(const char *json_string, ErrorStack *error_stack) {
-  if (!json_string) {
-    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
-                     string_duplicate("json_string cannot be null"));
-    return NULL;
-  }
-  
-  int input_len = strlen(json_string);
+char *json_unescape_string(const char *json_string) {
+  int input_len = string_length(json_string);
   char *unescaped = malloc_or_die(input_len + 1);
   char *dst = unescaped;
   const char *src = json_string;

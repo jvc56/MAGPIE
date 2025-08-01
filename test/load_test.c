@@ -12,6 +12,41 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Helper function to validate GCG download
+void validate_download_gcg(const DownloadGCGOptions *options, error_code_t expected_error, const char *test_name) {
+  GameHistory *game_history = game_history_create();
+  ErrorStack *error_stack = error_stack_create();
+  
+  printf("Testing %s with identifier: %s\n", test_name, options->source_identifier);
+  
+  download_gcg(options, game_history, error_stack);
+  
+  if (expected_error == ERROR_STATUS_SUCCESS) {
+    if (!error_stack_is_empty(error_stack)) {
+      printf("%s failed: ", test_name);
+      error_stack_print_and_reset(error_stack);
+      printf("(This may be due to network connectivity or service changes)\n");
+    } else {
+      // Assert all success requirements
+      assert(error_stack_is_empty(error_stack));
+      assert(game_history_get_number_of_events(game_history) > 0);
+      assert(game_history_both_players_are_set(game_history));
+      
+      printf("%s passed: loaded %d game events\n", test_name,
+             game_history_get_number_of_events(game_history));
+    }
+  } else {
+    // Expecting an error
+    assert(!error_stack_is_empty(error_stack));
+    error_code_t actual_error = error_stack_top(error_stack);
+    assert(actual_error == expected_error);
+    printf("%s passed: got expected error\n", test_name);
+  }
+  
+  game_history_destroy(game_history);
+  error_stack_destroy(error_stack);
+}
+
 void test_cross_tables_integration(void) {
   // Only run if MAGPIE_INTEGRATION_TESTS environment variable is set
   if (!getenv("MAGPIE_INTEGRATION_TESTS")) {
@@ -19,17 +54,12 @@ void test_cross_tables_integration(void) {
     return;
   }
 
-  GameHistory *game_history = game_history_create();
   ErrorStack *error_stack = error_stack_create();
-
-  // Test with a known working cross-tables game URL
-  // Using a classic game that should be stable on cross-tables
   Config *config = config_create_default_with_data_paths(error_stack, "data");
   
   if (!error_stack_is_empty(error_stack)) {
     printf("Skipping cross-tables integration test - data files not available\n");
     error_stack_destroy(error_stack);
-    game_history_destroy(game_history);
     return;
   }
   
@@ -39,60 +69,24 @@ void test_cross_tables_integration(void) {
     .config = config
   };
 
-  printf("Testing cross-tables download with URL: %s\n", options.source_identifier);
-  
-  download_gcg(&options, game_history, error_stack);
-
-  if (!error_stack_is_empty(error_stack)) {
-    printf("Cross-tables integration test failed: ");
-    error_stack_print_and_reset(error_stack);
-    // Don't assert fail here since network issues are common
-    printf("(This may be due to network connectivity or changes to cross-tables.com)\n");
-  } else {
-    // Basic validation that we got a valid game
-    assert(game_history_get_number_of_events(game_history) > 0);
-    
-    // Check that we have players
-    assert(game_history_both_players_are_set(game_history));
-    
-    printf("Cross-tables integration test passed: loaded %d game events\n",
-           game_history_get_number_of_events(game_history));
-  }
+  validate_download_gcg(&options, ERROR_STATUS_SUCCESS, "Cross-tables integration test");
 
   config_destroy(config);
-  game_history_destroy(game_history);
   error_stack_destroy(error_stack);
 }
 
 void test_cross_tables_url_conversion(void) {
-  // Test URL conversion logic without network calls or parsing
-  // Just test that we get the right GCG content without parsing it
-  
+  // Test URL conversion logic - should succeed in downloading but fail parsing due to no config
   const char *annotated_url = "https://cross-tables.com/annotated.php?u=54938";
-  
-  ErrorStack *error_stack = error_stack_create();
   
   DownloadGCGOptions options = {
     .source_identifier = annotated_url,
     .lexicon = NULL,
-    .config = NULL
+    .config = NULL  // No config means parsing will fail, but download should work
   };
 
-  printf("Testing cross-tables URL conversion (download only): %s\n", annotated_url);
-  
-  // Just get the GCG string without parsing
-  char *gcg_content = get_gcg_string(&options, error_stack);
-  
-  if (gcg_content) {
-    printf("Cross-tables GCG content (first 200 chars):\n%.200s\n", gcg_content);
-    printf("Cross-tables URL recognition test passed (recognized and downloaded)\n");
-    free(gcg_content);
-  } else {
-    printf("Cross-tables test failed: ");
-    error_stack_print_and_reset(error_stack);
-  }
-  
-  error_stack_destroy(error_stack);
+  // This should fail with "missing config" error, proving download worked
+  validate_download_gcg(&options, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG, "Cross-tables URL conversion test");
 }
 
 void test_cross_tables_game_id(void) {
@@ -102,41 +96,24 @@ void test_cross_tables_game_id(void) {
     return;
   }
 
-  GameHistory *game_history = game_history_create();
   ErrorStack *error_stack = error_stack_create();
-
   Config *config = config_create_default_with_data_paths(error_stack, "data");
   
   if (!error_stack_is_empty(error_stack)) {
     printf("Skipping cross-tables game ID test - data files not available\n");
     error_stack_destroy(error_stack);
-    game_history_destroy(game_history);
     return;
   }
   
-  // Test with just a game ID (should construct full URL)
   DownloadGCGOptions options = {
     .source_identifier = "54938", // Just the game ID
     .lexicon = NULL,
     .config = config
   };
 
-  printf("Testing cross-tables download with game ID: %s\n", options.source_identifier);
-  
-  download_gcg(&options, game_history, error_stack);
-
-  if (!error_stack_is_empty(error_stack)) {
-    printf("Cross-tables game ID test failed: ");
-    error_stack_print_and_reset(error_stack);
-    printf("(This may be due to network connectivity or the game ID not existing)\n");
-  } else {
-    assert(game_history_get_number_of_events(game_history) > 0);
-    printf("Cross-tables game ID test passed: loaded %d game events\n",
-           game_history_get_number_of_events(game_history));
-  }
+  validate_download_gcg(&options, ERROR_STATUS_SUCCESS, "Cross-tables game ID test");
 
   config_destroy(config);
-  game_history_destroy(game_history);
   error_stack_destroy(error_stack);
 }
 
@@ -147,128 +124,62 @@ void test_woogles_integration(void) {
     return;
   }
 
-  GameHistory *game_history = game_history_create();
   ErrorStack *error_stack = error_stack_create();
-
   Config *config = config_create_default_with_data_paths(error_stack, "data");
   
   if (!error_stack_is_empty(error_stack)) {
     printf("Skipping woogles integration test - data files not available\n");
     error_stack_destroy(error_stack);
-    game_history_destroy(game_history);
     return;
   }
   
-  // Test with a real woogles game URL
   DownloadGCGOptions options = {
     .source_identifier = "https://woogles.io/game/XuoAntzD",
     .lexicon = NULL,
     .config = config
   };
 
-  printf("Testing woogles download with URL: %s\n", options.source_identifier);
-  
-  download_gcg(&options, game_history, error_stack);
-
-  if (!error_stack_is_empty(error_stack)) {
-    printf("Woogles integration test failed: ");
-    error_stack_print_and_reset(error_stack);
-    printf("(This may be due to network connectivity or invalid game ID)\n");
-  } else {
-    assert(game_history_get_number_of_events(game_history) > 0);
-    assert(game_history_both_players_are_set(game_history));
-    
-    printf("Woogles integration test passed: loaded %d game events\n",
-           game_history_get_number_of_events(game_history));
-  }
+  validate_download_gcg(&options, ERROR_STATUS_SUCCESS, "Woogles integration test");
 
   config_destroy(config);
-  game_history_destroy(game_history);
   error_stack_destroy(error_stack);
 }
 
 void test_woogles_url_recognition(void) {
-  // Test URL recognition and API call without parsing
+  // Test URL recognition and API call - should succeed in downloading but fail parsing due to no config
   const char *woogles_url = "https://woogles.io/game/XuoAntzD";
-  
-  ErrorStack *error_stack = error_stack_create();
   
   DownloadGCGOptions options = {
     .source_identifier = woogles_url,
     .lexicon = NULL,
-    .config = NULL
+    .config = NULL  // No config means parsing will fail, but download should work
   };
 
-  printf("Testing woogles API call (download only): %s\n", woogles_url);
-  
-  // Just get the GCG string without parsing
-  char *gcg_content = get_gcg_string(&options, error_stack);
-  
-  if (gcg_content) {
-    printf("Woogles GCG content (first 500 chars):\n%.500s\n", gcg_content);
-    if (strstr(gcg_content, "File not found") || strstr(gcg_content, "<html>")) {
-      printf("WARNING: Got HTML error page instead of GCG content - API call may be incorrect\n");
-    } else {
-      printf("Woogles URL recognition test passed (recognized and downloaded)\n");
-    }
-    free(gcg_content);
-  } else {
-    printf("Woogles test failed: ");
-    error_stack_print_and_reset(error_stack);
-  }
-  
-  error_stack_destroy(error_stack);
+  // This should fail with "missing config" error, proving download worked
+  validate_download_gcg(&options, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG, "Woogles URL recognition test");
 }
 
 void test_local_file_loading(void) {
-  // Test loading a local GCG file without parsing
-  ErrorStack *error_stack = error_stack_create();
-  
+  // Test loading a local GCG file - should succeed in reading but fail parsing due to no config
   DownloadGCGOptions options = {
     .source_identifier = "/tmp/test_game.gcg",
     .lexicon = NULL,
-    .config = NULL
+    .config = NULL  // No config means parsing will fail, but file reading should work
   };
 
-  printf("Testing local file loading (read only): %s\n", options.source_identifier);
-  
-  // Just get the GCG string without parsing
-  char *gcg_content = get_gcg_string(&options, error_stack);
-  
-  if (gcg_content) {
-    printf("Local file GCG content:\n%s\n", gcg_content);
-    printf("Local file loading test passed (file read successfully)\n");
-    free(gcg_content);
-  } else {
-    printf("Local file test failed: ");
-    error_stack_print_and_reset(error_stack);
-  }
-
-  error_stack_destroy(error_stack);
+  // This should fail with "missing config" error, proving file read worked
+  validate_download_gcg(&options, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG, "Local file loading test");
 }
 
 void test_local_file_not_found(void) {
   // Test handling of non-existent local file
-  GameHistory *game_history = game_history_create();
-  ErrorStack *error_stack = error_stack_create();
-  
   DownloadGCGOptions options = {
     .source_identifier = "/tmp/nonexistent_file.gcg",
     .lexicon = NULL,
     .config = NULL
   };
 
-  printf("Testing local file not found: %s\n", options.source_identifier);
-  
-  download_gcg(&options, game_history, error_stack);
-  
-  // Should get some error for non-existent file
-  assert(!error_stack_is_empty(error_stack));
-  
-  printf("Local file not found test passed\n");
-  
-  game_history_destroy(game_history);
-  error_stack_destroy(error_stack);
+  validate_download_gcg(&options, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND, "Local file not found test");
 }
 
 void test_load(void) {

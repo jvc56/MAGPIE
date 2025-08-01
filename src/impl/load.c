@@ -11,6 +11,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <regex.h>
+#include <unistd.h>
+
+#define WOOGLES_GCG_START "\"gcg\":\""
 
 char *get_xt_gcg_string(const char *identifier, ErrorStack *error_stack) {
   char *game_id_str = NULL;
@@ -23,9 +26,7 @@ char *get_xt_gcg_string(const char *identifier, ErrorStack *error_stack) {
       
       int regex_status = regcomp(&regex, "u=([0-9]+)", REG_EXTENDED);
       if (regex_status != 0) {
-          error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
-                          string_duplicate("Failed to compile regex for cross-tables URL parsing"));
-          return NULL;
+          log_fatal("Failed to compile regex for cross-tables URL parsing");
       }
       
       int match_result = regexec(&regex, identifier, 2, matches, 0);
@@ -39,7 +40,7 @@ char *get_xt_gcg_string(const char *identifier, ErrorStack *error_stack) {
           game_id_str[id_len] = '\0';
       } else {
           regfree(&regex);
-          error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
+          error_stack_push(error_stack, ERROR_STATUS_XT_URL_MALFORMED,
                           get_formatted_string("Failed to extract game ID from cross-tables URL: %s", identifier));
           return NULL;
       }
@@ -53,34 +54,27 @@ char *get_xt_gcg_string(const char *identifier, ErrorStack *error_stack) {
       game_id_str = string_duplicate(identifier);
   }
 
-  char *gcg_content = NULL;
+    char *gcg_content = NULL;
 
-  if (game_id_str) {
-      // Get first 3 digits for the path
-      char first_three[4] = {0};
-      for (int i = 0; i < 3 && game_id_str[i]; i++) {
-          first_three[i] = game_id_str[i];
-      }
-      
-      // Build the curl command directly
-      char *curl_cmd = get_formatted_string("curl -s -L \"https://cross-tables.com/annotated/selfgcg/%s/anno%s.gcg\"", 
-                                           first_three, game_id_str);
-      
-      gcg_content = get_process_output(curl_cmd);
-      
-      free(curl_cmd);
-      free(game_id_str);
-  }
+    // Get first 3 digits for the path
+    char first_three[4] = {0};
+    for (int i = 0; i < 3 && game_id_str[i]; i++) {
+        first_three[i] = game_id_str[i];
+    }
 
-  if (!gcg_content || is_string_empty_or_whitespace(gcg_content) || 
-      strstr(gcg_content, "#player1") == NULL) {
+    // Build the curl command directly
+    char *curl_cmd = get_formatted_string("curl -s -L \"https://cross-tables.com/annotated/selfgcg/%s/anno%s.gcg\"", 
+                                        first_three, game_id_str);
+
+    gcg_content = get_process_output(curl_cmd);
+
+    free(curl_cmd);
+    free(game_id_str);  
+
+  if (!is_valid_gcg_content(gcg_content)) {
       free(gcg_content);
-      // Only push error if this was actually a cross-tables URL
-      if (strstr(identifier, "cross-tables.com") != NULL) {
-          error_stack_push(error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
-                          get_formatted_string("Failed to download valid GCG from cross-tables: %s",
-                                                identifier));
-      }
+        error_stack_push(error_stack, ERROR_STATUS_BAD_XT_GCG,
+                        get_formatted_string("Invalid or missing GCG content from cross-tables ID: %s", identifier));
       return NULL;
   }
   
@@ -99,9 +93,7 @@ char *get_woogles_gcg_string(const char *identifier, ErrorStack *error_stack) {
         // Pattern matches /game/[alphanumeric]
         int regex_status = regcomp(&regex, "/game/([a-zA-Z0-9]+)", REG_EXTENDED);
         if (regex_status != 0) {
-            error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
-                            string_duplicate("Failed to compile regex for woogles URL parsing"));
-            return NULL;
+            log_fatal("Failed to compile regex for woogles URL parsing");
         }
 
         int match_result = regexec(&regex, identifier, 2, matches, 0);
@@ -115,7 +107,7 @@ char *get_woogles_gcg_string(const char *identifier, ErrorStack *error_stack) {
             game_id_str[id_len] = '\0';
         } else {
             regfree(&regex);
-            error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
+            error_stack_push(error_stack, ERROR_STATUS_WOOGLES_URL_MALFORMED,
                             get_formatted_string("Failed to extract game ID from woogles URL: %s", identifier));
             return NULL;
         }
@@ -140,53 +132,49 @@ char *get_woogles_gcg_string(const char *identifier, ErrorStack *error_stack) {
     
     char *gcg_content = NULL;
 
-    if (game_id_str) {
-        // Use woogles API to get GCG content
-        char *curl_cmd = get_formatted_string("curl -s -H 'Content-Type: application/json' "
-                                              "https://woogles.io/api/game_service.GameMetadataService/GetGCG "
-                                              "-d '{\"game_id\":\"%s\"}'", game_id_str);
-        
-        char *response = get_process_output(curl_cmd);
-        free(curl_cmd);
-        free(game_id_str);
-        
-        if (response) {
-            // Parse JSON response to extract GCG content
-            const char *gcg_start = strstr(response, "\"gcg\":\"");
-            if (gcg_start) {
-                gcg_start += 7; // Skip "\"gcg\":\""
-                const char *gcg_end = gcg_start;
-                while (*gcg_end && *gcg_end != '"') {
-                    gcg_end++;
-                }
-                int gcg_len = gcg_end - gcg_start;
-                char *raw_gcg = malloc_or_die(gcg_len + 1);
-                strncpy(raw_gcg, gcg_start, gcg_len);
-                raw_gcg[gcg_len] = '\0';
-                
-                // Unescape JSON string using utility function
-                gcg_content = json_unescape_string(raw_gcg, error_stack);
-                free(raw_gcg);
-                
-                if (!gcg_content) {
-                    free(response);
-                    return NULL;
-                }
-            }
-            
-            free(response);
-        }
+    // Use woogles API to get GCG content
+    char *curl_cmd = get_formatted_string("curl -s -H 'Content-Type: application/json' "
+                                            "https://woogles.io/api/game_service.GameMetadataService/GetGCG "
+                                            "-d '{\"game_id\":\"%s\"}'", game_id_str);
+    
+    char *response = get_process_output(curl_cmd);
+    free(curl_cmd);
+    free(game_id_str);
+    
+    if (!response) {
+        error_stack_push(error_stack, ERROR_STATUS_WOOGLES_URL_MALFORMED,
+                        get_formatted_string("Failed to get response from woogles API for ID: %s", identifier));
+        return NULL;
     }
     
-    if (!gcg_content || is_string_empty_or_whitespace(gcg_content) ||
-        strstr(gcg_content, "#player1") == NULL) {
+    // Parse JSON response to extract GCG content
+    const char *gcg_start = strstr(response, WOOGLES_GCG_START);
+    if (!gcg_start) {
+        error_stack_push(error_stack, ERROR_STATUS_BAD_WOOGLES_GCG,
+                        get_formatted_string("Invalid or missing GCG content from woogles URL: %s", identifier));
+    }
+    gcg_start += string_length(WOOGLES_GCG_START);
+    const char *gcg_end = gcg_start;
+    while (*gcg_end && *gcg_end != '"') {
+        gcg_end++;
+    }
+    int gcg_len = gcg_end - gcg_start;
+    char *raw_gcg = malloc_or_die(gcg_len + 1);
+    strncpy(raw_gcg, gcg_start, gcg_len);
+    raw_gcg[gcg_len] = '\0';
+    
+    // Unescape JSON string using utility function
+    gcg_content = json_unescape_string(raw_gcg);
+    free(raw_gcg);
+    
+    
+    free(response);
+
+    if (!is_valid_gcg_content(gcg_content)) {
         free(gcg_content);
-        // Only push error if this was actually a woogles URL
-        if (strstr(identifier, "woogles.io") != NULL) {
-            error_stack_push(error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
-                            get_formatted_string("Failed to download valid GCG from woogles.io: %s",
-                                                  identifier));
-        }
+        error_stack_push(error_stack, ERROR_STATUS_BAD_WOOGLES_GCG,
+                        get_formatted_string("Invalid or missing GCG content from woogles ID: %s",
+                                                identifier));
         return NULL;
     }
     
@@ -195,20 +183,21 @@ char *get_woogles_gcg_string(const char *identifier, ErrorStack *error_stack) {
 
 char *get_local_gcg_string(const char *identifier, ErrorStack *error_stack) {
     
-    // Try to open as local file
-    FILE *file = fopen(identifier, "r");
-    if (!file) {
+    // Check if file exists and is readable
+    if (access(identifier, R_OK) != 0) {
         return NULL;  // Not a valid local file - not our job
     }
-    fclose(file);
-    
+
+    if (!error_stack_is_empty(error_stack)) {
+        return NULL;
+    }
+
     // Read file content directly
     char *gcg_content = get_string_from_file(identifier, error_stack);
 
-    if (!gcg_content || is_string_empty_or_whitespace(gcg_content) ||
-        strstr(gcg_content, "#player1") == NULL) {
+    if (!is_valid_gcg_content(gcg_content)) {
         free(gcg_content);
-        error_stack_push(error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
+        error_stack_push(error_stack, ERROR_STATUS_BAD_LOCAL_GCG,
                          get_formatted_string("Local file does not contain valid GCG content: %s", identifier));
         return NULL;
     }
@@ -219,9 +208,7 @@ char *get_local_gcg_string(const char *identifier, ErrorStack *error_stack) {
 char *get_gcg_string(const DownloadGCGOptions *options, ErrorStack *error_stack) {
   
     if (!options || !options->source_identifier) {
-        error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
-                         string_duplicate("Invalid options or missing source_identifier"));
-        return NULL;
+        log_fatal("Invalid options or missing source_identifier passed to get_gcg_string");
     }
     const char *identifier = options->source_identifier;
     
@@ -261,9 +248,7 @@ char *get_gcg_string(const DownloadGCGOptions *options, ErrorStack *error_stack)
 
 void download_gcg(const DownloadGCGOptions *options, GameHistory *game_history, ErrorStack *error_stack) {
     if (!options || !game_history) {
-        error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
-                         string_duplicate("Invalid arguments to download_gcg"));
-        return;
+        log_fatal("Missing options or game history");
     }
 
     // Get the GCG content from any available source
@@ -272,7 +257,6 @@ void download_gcg(const DownloadGCGOptions *options, GameHistory *game_history, 
         return;  // Error already pushed to stack by get_gcg_string
     }
 
-    // Validate config is provided for parsing
     Config *config_to_use = options->config;
     if (!config_to_use) {
         error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,

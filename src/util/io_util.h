@@ -187,6 +187,12 @@ typedef enum {
   ERROR_STATUS_STRING_TO_INT_CONVERSION_FAILED,
   ERROR_STATUS_STRING_TO_DOUBLE_CONVERSION_FAILED,
   ERROR_STATUS_FOUND_SIGN_FOR_UNSIGNED_INT,
+  // Load errors
+  ERROR_STATUS_XT_URL_MALFORMED,
+  ERROR_STATUS_BAD_XT_GCG,
+  ERROR_STATUS_WOOGLES_URL_MALFORMED,
+  ERROR_STATUS_BAD_WOOGLES_GCG,
+  ERROR_STATUS_BAD_LOCAL_GCG,
 } error_code_t;
 
 typedef enum {
@@ -268,4 +274,5 @@ void fprintf_or_die(FILE *stream, const char *format, ...);
 
 FILE *popen_or_die(const char *command, const char *mode);
 char *get_process_output(const char *cmd);
+bool is_valid_gcg_content(const char *content);
 #endif

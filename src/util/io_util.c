@@ -481,3 +481,9 @@ char *get_process_output(const char *cmd) {
     string_builder_destroy(content_builder);
     return output; // Returns NULL if command failed
 }
+
+bool is_valid_gcg_content(const char *content) {
+    return content && 
+           !is_string_empty_or_whitespace(content) && 
+           strstr(content, "#player1") != NULL;
+}
