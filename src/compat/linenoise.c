@@ -179,18 +179,10 @@ FILE *linenoise_get_stream_out(void) {
   return stream_out;
 }
 
-int linenoise_get_in_fileno(void) {
-  if (!stream_in) {
-    return fileno(linenoise_get_stream_in());
-  }
-  return fileno(stream_in);
-}
+int linenoise_get_in_fileno(void) { return fileno(linenoise_get_stream_in()); }
 
 int linenoise_get_out_fileno(void) {
-  if (!stream_out) {
-    return STDOUT_FILENO;
-  }
-  return fileno(stream_out);
+  return fileno(linenoise_get_stream_out());
 }
 
 /* =============================================================== */
