@@ -11,6 +11,8 @@ bool execute_command_sync_silent(Config *config, ErrorStack *error_stack,
                                  const char *command);
 void execute_command_async(Config *config, ErrorStack *error_stack,
                            const char *command);
+bool run_str_api_command(Config *config, ErrorStack *error_stack,
+                         const char *command, char** output);
 char *command_search_status(Config *config, bool should_exit);
 void caches_destroy(void);
 void process_command(int argc, char *argv[]);

@@ -564,9 +564,6 @@ void config_load_uint64(const Config *config, arg_token_t arg_token,
 
 // Generic execution and status functions
 
-// Used for string api commands that return nothing
-char *empty_string(void) { return string_duplicate(""); }
-
 // Used for pargs that are not commands.
 void execute_fatal(Config *config,
                    ErrorStack __attribute__((unused)) * error_stack) {
@@ -1954,21 +1951,26 @@ void config_load_command(Config *config, const char *cmd,
   string_splitter_destroy(cmd_split_string);
 }
 
-bool config_execute_command_silent(Config *config, ErrorStack *error_stack) {
+void config_execute_command(Config *config, ErrorStack *error_stack) {
   if (config_exec_parg_is_set(config)) {
     config_get_parg_exec_func(config, config->exec_parg_token)(config,
                                                                error_stack);
-    return true;
-  }
-  return false;
-}
-
-void config_execute_command(Config *config, ErrorStack *error_stack) {
-  if (config_execute_command_silent(config, error_stack)) {
     char *finished_msg = get_status_finished_str(config);
     thread_control_print(config_get_thread_control(config), finished_msg);
     free(finished_msg);
   }
+}
+
+bool config_run_str_api_command(Config *config, ErrorStack *error_stack,
+                                char **output) {
+  if (!config_exec_parg_is_set(config)) {
+    return false;
+  }
+  *output = config_get_parg_api_func(config, config->exec_parg_token)(
+      config, error_stack);
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_FINISHED);
+  return true;
 }
 
 char *config_get_execute_status(Config *config) {

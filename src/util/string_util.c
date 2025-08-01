@@ -533,6 +533,8 @@ char *string_duplicate(const char *str) {
   return duplicate;
 }
 
+char *empty_string() { return string_duplicate(""); }
+
 char *get_substring(const char *input_string, int start_index, int end_index) {
   if (!input_string) {
     log_fatal("cannot get substring of null string");
