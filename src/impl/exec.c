@@ -88,7 +88,7 @@ void execute_command_sync(Config *config, ErrorStack *error_stack,
 }
 
 bool run_str_api_command(Config *config, ErrorStack *error_stack,
-                         const char *command, char** output) {
+                         const char *command, char **output) {
   if (load_command_sync(config, error_stack, command)) {
     return config_run_str_api_command(config, error_stack, output);
   }

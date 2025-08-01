@@ -13,9 +13,9 @@
 //    cmd_exit_code ret;
 //    ret = magpie_run_sync(mp, "set -lex CSW21");
 //    if (!ret == MAGPIE_SUCCESS) { // handle error }
-//    ret = magpie_run_sync(mp, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AQRTUYZ/ 0/0 0");
-//    if (!ret == MAGPIE_SUCCESS) { // handle error }
-//    ret = magpie_run_sync(mp, "generate");
+//    ret = magpie_run_sync(mp, "cgp
+//    15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AQRTUYZ/ 0/0 0"); if (!ret ==
+//    MAGPIE_SUCCESS) { // handle error } ret = magpie_run_sync(mp, "generate");
 //    if (ret == MAGPIE_SUCCESS) {
 //      char* moves = magpie_get_last_command_output(mp);
 //      // parse and handle the returned move list
@@ -24,8 +24,8 @@
 //      // display or handle error
 //    }
 
-#include "config.h"
 #include "../util/io_util.h"
+#include "config.h"
 
 // Opaque struct of magpie internal state
 typedef struct Magpie Magpie;
@@ -36,16 +36,16 @@ typedef enum {
   MAGPIE_DID_NOT_RUN = 2
 } cmd_exit_code;
 
-Magpie* magpie_create(const char* data_paths);
+Magpie *magpie_create(const char *data_paths);
 
-void magpie_destroy(Magpie* mp);
+void magpie_destroy(Magpie *mp);
 
-cmd_exit_code magpie_run_sync(Magpie* mp, const char* command);
+cmd_exit_code magpie_run_sync(Magpie *mp, const char *command);
 
-char* magpie_get_and_clear_error(Magpie* mp);
+char *magpie_get_and_clear_error(Magpie *mp);
 
-char* magpie_get_last_command_status_message(Magpie* mp);
+char *magpie_get_last_command_status_message(Magpie *mp);
 
-char* magpie_get_last_command_output(Magpie* mp);
+char *magpie_get_last_command_output(Magpie *mp);
 
 #endif

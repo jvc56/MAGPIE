@@ -32,7 +32,8 @@ void config_load_command(Config *config, const char *cmd,
 void config_execute_command(Config *config, ErrorStack *error_stack);
 char *config_get_execute_status(Config *config);
 bool config_continue_on_coldstart(const Config *config);
-bool config_run_str_api_command(Config *config, ErrorStack *error_stack, char **output);
+bool config_run_str_api_command(Config *config, ErrorStack *error_stack,
+                                char **output);
 
 // Getters
 const char *config_get_data_paths(const Config *config);
