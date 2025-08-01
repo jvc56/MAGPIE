@@ -46,6 +46,6 @@ char *magpie_get_and_clear_error(Magpie *mp);
 
 char *magpie_get_last_command_status_message(Magpie *mp);
 
-char *magpie_get_last_command_output(Magpie *mp);
+char *magpie_get_last_command_output(const Magpie *mp);
 
 #endif
