@@ -37,13 +37,8 @@ char *command_search_status(Config *config, bool should_exit) {
 }
 
 void execute_command_and_set_status_finished(Config *config,
-                                             ErrorStack *error_stack,
-                                             bool silent) {
-  if (silent) {
-    config_execute_command_silent(config, error_stack);
-  } else {
-    config_execute_command(config, error_stack);
-  }
+                                             ErrorStack *error_stack) {
+  config_execute_command(config, error_stack);
   thread_control_set_status(config_get_thread_control(config),
                             THREAD_CONTROL_STATUS_FINISHED);
 }
@@ -53,7 +48,7 @@ void *execute_command_thread_worker(void *uncasted_args) {
   // Create another error stack so this asynchronous command doesn't
   // interfere with the synchronous error stack on the main thread.
   ErrorStack *error_stack_async = error_stack_create();
-  execute_command_and_set_status_finished(config, error_stack_async, false);
+  execute_command_and_set_status_finished(config, error_stack_async);
   error_stack_print_and_reset(error_stack_async);
   error_stack_destroy(error_stack_async);
   return NULL;
@@ -88,15 +83,14 @@ bool load_command_sync(Config *config, ErrorStack *error_stack,
 void execute_command_sync(Config *config, ErrorStack *error_stack,
                           const char *command) {
   if (load_command_sync(config, error_stack, command)) {
-    execute_command_and_set_status_finished(config, error_stack, false);
+    execute_command_and_set_status_finished(config, error_stack);
   }
 }
 
-bool execute_command_sync_silent(Config *config, ErrorStack *error_stack,
-                                 const char *command) {
+bool run_str_api_command(Config *config, ErrorStack *error_stack,
+                         const char *command, char **output) {
   if (load_command_sync(config, error_stack, command)) {
-    execute_command_and_set_status_finished(config, error_stack, true);
-    return true;
+    return config_run_str_api_command(config, error_stack, output);
   }
   return false;
 }

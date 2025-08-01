@@ -30,9 +30,10 @@ void config_destroy(Config *config);
 void config_load_command(Config *config, const char *cmd,
                          ErrorStack *error_stack);
 void config_execute_command(Config *config, ErrorStack *error_stack);
-bool config_execute_command_silent(Config *config, ErrorStack *error_stack);
 char *config_get_execute_status(Config *config);
 bool config_continue_on_coldstart(const Config *config);
+bool config_run_str_api_command(Config *config, ErrorStack *error_stack,
+                                char **output);
 
 // Getters
 const char *config_get_data_paths(const Config *config);
