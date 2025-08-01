@@ -8,14 +8,15 @@
 // The Magpie struct retains and handles the internal game state, and the
 // caller is responsible for freeing returned strings.
 //
+// clang-format off
 // Example usage:
 //    Magpie *mp = magpie_create("./data");
 //    cmd_exit_code ret;
 //    ret = magpie_run_sync(mp, "set -lex CSW21");
 //    if (!ret == MAGPIE_SUCCESS) { // handle error }
-//    ret = magpie_run_sync(mp, "cgp
-//    15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AQRTUYZ/ 0/0 0"); if (!ret ==
-//    MAGPIE_SUCCESS) { // handle error } ret = magpie_run_sync(mp, "generate");
+//    ret = magpie_run_sync(mp, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AQRTUYZ/ 0/0 0");
+//    if (!ret == MAGPIE_SUCCESS) { // handle error }
+//    ret = magpie_run_sync(mp, "generate");
 //    if (ret == MAGPIE_SUCCESS) {
 //      char* moves = magpie_get_last_command_output(mp);
 //      // parse and handle the returned move list
@@ -23,6 +24,7 @@
 //      char* error = magpie_get_and_clear_error(mp);
 //      // display or handle error
 //    }
+// clang-format on
 
 #include "../util/io_util.h"
 #include "config.h"
