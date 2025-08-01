@@ -565,7 +565,7 @@ void config_load_uint64(const Config *config, arg_token_t arg_token,
 // Generic execution and status functions
 
 // Used for string api commands that return nothing
-char *empty_string() { return string_duplicate(""); }
+char *empty_string(void) { return string_duplicate(""); }
 
 // Used for pargs that are not commands.
 void execute_fatal(Config *config,
@@ -1959,9 +1959,8 @@ bool config_execute_command_silent(Config *config, ErrorStack *error_stack) {
     config_get_parg_exec_func(config, config->exec_parg_token)(config,
                                                                error_stack);
     return true;
-  } else {
-    return false;
   }
+  return false;
 }
 
 void config_execute_command(Config *config, ErrorStack *error_stack) {
