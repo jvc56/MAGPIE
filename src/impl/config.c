@@ -2020,12 +2020,18 @@ char *str_api_set_rack(Config *config, ErrorStack *error_stack) {
 
 void execute_move_gen(Config *config, ErrorStack *error_stack) {
   impl_move_gen(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
   print_ucgi_static_moves(config->game, config->move_list,
                           config->thread_control);
 }
 
 char *str_api_move_gen(Config *config, ErrorStack *error_stack) {
   impl_move_gen(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
   return ucgi_static_moves(config->game, config->move_list);
 }
 
