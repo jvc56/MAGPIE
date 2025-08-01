@@ -46,6 +46,6 @@ char *magpie_get_last_command_status_message(Magpie *mp) {
   return config_get_execute_status(mp->config);
 }
 
-char *magpie_get_last_command_output(Magpie *mp) {
+char *magpie_get_last_command_output(const Magpie *mp) {
   return string_duplicate(mp->output);
 }
