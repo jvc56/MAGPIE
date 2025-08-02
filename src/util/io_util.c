@@ -1,5 +1,5 @@
 #include "io_util.h"
-
+#include "string_util.h"
 #include <assert.h>
 #include <errno.h>
 #include <stdarg.h>
@@ -447,4 +447,43 @@ void fwrite_or_die(const void *ptr, size_t size, size_t nmemb, FILE *stream,
     log_fatal("%s fwrite failure: %s (%d)", description, system_error_message,
               error_number);
   }
+}
+
+FILE *popen_or_die(const char *command, const char *mode) {
+    FILE *pipe = popen(command, mode);
+    if (!pipe) {
+        fprintf(stderr, "Failed to execute command: %s\n", command);
+        exit(EXIT_FAILURE);
+    }
+    return pipe;
+}
+
+char *get_process_output(const char *cmd) {
+    FILE *pipe = popen_or_die(cmd, "r");
+  
+    StringBuilder *content_builder = string_builder_create();
+    char *buffer = NULL;
+    size_t buffer_size = 0;
+    ssize_t line_length;
+    
+    while ((line_length = getline(&buffer, &buffer_size, pipe)) != -1) {
+        string_builder_add_string(content_builder, buffer);
+    }
+    
+    free(buffer);
+    int status = pclose(pipe);
+    char *output = NULL;
+    
+    if (status == 0) {
+        output = string_builder_dump(content_builder, NULL);
+    }
+    
+    string_builder_destroy(content_builder);
+    return output; // Returns NULL if command failed
+}
+
+bool is_valid_gcg_content(const char *content) {
+    return content && 
+           !is_string_empty_or_whitespace(content) && 
+           strstr(content, "#player1") != NULL;
 }
