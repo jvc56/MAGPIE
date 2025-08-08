@@ -5,7 +5,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#ifndef M_PI
 #define M_PI 3.14159265358979323846
+#endif
 
 double z_to_p_cdf(double z) { return (0.5 * (1 + erf(z / sqrt(2.0)))) * 100; }
 

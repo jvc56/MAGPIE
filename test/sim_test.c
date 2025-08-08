@@ -56,7 +56,7 @@ void print_sim_stats(const Game *game, SimResults *sim_results) {
     free(wp_str);
     free(eq_str);
   }
-  printf("Iterations: %lu\n", sim_results_get_iteration_count(sim_results));
+  printf("Iterations: %llu\n", sim_results_get_iteration_count(sim_results));
   string_builder_destroy(move_description);
 }
 
