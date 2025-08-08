@@ -58,7 +58,7 @@ void print_sim_stats(const Game *game, SimResults *sim_results) {
     free(eq_str);
   }
   printf("Iterations: %" PRIu64 "\n",
-         (uint64_t)sim_results_get_iteration_count(sim_results));
+         sim_results_get_iteration_count(sim_results));
   string_builder_destroy(move_description);
 }
 
