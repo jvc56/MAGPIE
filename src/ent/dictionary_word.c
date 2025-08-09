@@ -4,11 +4,11 @@
 #include "../def/letter_distribution_defs.h"
 #include "../ent/data_filepaths.h"
 #include "../ent/letter_distribution.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-
 
 const MachineLetter *
 dictionary_word_get_word(const DictionaryWord *dictionary_word) {
@@ -98,10 +98,12 @@ static inline void dict_quicksort(DictionaryWord *arr, int left, int right) {
     DictionaryWord pivot = arr[mid];
 
     while (i <= j) {
-      while (dictionary_word_compare(&arr[i], &pivot) < 0)
+      while (dictionary_word_compare(&arr[i], &pivot) < 0) {
         i++;
-      while (dictionary_word_compare(&arr[j], &pivot) > 0)
+      }
+      while (dictionary_word_compare(&arr[j], &pivot) > 0) {
         j--;
+      }
       if (i <= j) {
         tmp = arr[i];
         arr[i] = arr[j];
@@ -112,12 +114,14 @@ static inline void dict_quicksort(DictionaryWord *arr, int left, int right) {
     }
 
     if (j - left < right - i) {
-      if (left < j)
+      if (left < j) {
         dict_quicksort(arr, left, j);
+      }
       left = i;
     } else {
-      if (i < right)
+      if (i < right) {
         dict_quicksort(arr, i, right);
+      }
       right = j;
     }
   }
