@@ -33,11 +33,18 @@ typedef struct NodeIndexList {
   size_t capacity;
 } NodeIndexList;
 
-bool node_index_list_is_inline(NodeIndexList *list) {
+bool node_index_list_is_inline(const NodeIndexList *list) {
   return list->capacity <= KWG_NODE_INDEX_LIST_INLINE_CAPACITY;
 }
 
 uint32_t *node_index_list_get_indices(NodeIndexList *list) {
+  if (node_index_list_is_inline(list)) {
+    return list->inline_indices;
+  }
+  return list->indices;
+}
+
+const uint32_t *node_index_list_get_const_indices(const NodeIndexList *list) {
   if (node_index_list_is_inline(list)) {
     return list->inline_indices;
   }
@@ -158,7 +165,7 @@ uint64_t mutable_node_hash_value(MutableNode *node, MutableNodeList *nodes,
   }
   uint64_t hash_with_just_children = 0;
 
-  const uint32_t *indices = node_index_list_get_indices(&node->children);
+  const uint32_t *indices = node_index_list_get_const_indices(&node->children);
   for (size_t i = 0; i < node->children.count; i++) {
     uint64_t child_hash = 0;
     const size_t child_index = indices[i];
@@ -218,9 +225,9 @@ bool mutable_node_equals(const MutableNode *node_a, const MutableNode *node_b,
     return false;
   }
   const uint32_t *indices_a =
-      node_index_list_get_indices((NodeIndexList *)&node_a->children);
+      node_index_list_get_const_indices((NodeIndexList *)&node_a->children);
   const uint32_t *indices_b =
-      node_index_list_get_indices((NodeIndexList *)&node_b->children);
+      node_index_list_get_const_indices((NodeIndexList *)&node_b->children);
   for (MachineLetter i = 0; i < node_a->children.count; i++) {
     const MutableNode *child_a = &nodes->nodes[indices_a[i]];
     const MutableNode *child_b = &nodes->nodes[indices_b[i]];
@@ -306,7 +313,7 @@ MutableNode *node_hash_table_find_or_insert(NodeHashTable *table,
 
 uint32_t get_child_index(const MutableNode *node, size_t idx) {
   const uint32_t *indices =
-      node_index_list_get_indices((NodeIndexList *)&node->children);
+      node_index_list_get_const_indices((NodeIndexList *)&node->children);
   return indices[idx];
 }
 
