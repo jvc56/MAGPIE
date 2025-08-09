@@ -21,30 +21,57 @@
 // pointing midway into the the other's list of children, sharing an end but not
 // a beginning. This extra merging reduces KWG size roughly 3%.
 
-typedef struct NodeIndexList {
-  uint32_t *indices;
+typedef struct __attribute__((__packed__)) NodeIndexList {
+  union {
+    uint32_t inline_indices[KWG_NODE_INDEX_LIST_INLINE_CAPACITY];
+    struct {
+      uint32_t *indices;
+      uint32_t padding_indices[KWG_NODE_INDEX_LIST_INLINE_CAPACITY - 2];
+    };
+  };
   size_t count;
   size_t capacity;
 } NodeIndexList;
 
+bool node_index_list_is_inline(NodeIndexList *list) {
+  return list->capacity <= KWG_NODE_INDEX_LIST_INLINE_CAPACITY;
+}
+
+uint32_t *node_index_list_get_indices(NodeIndexList *list) {
+  if (node_index_list_is_inline(list)) {
+    return list->inline_indices;
+  }
+  return list->indices;
+}
+
 void node_index_list_initialize(NodeIndexList *list) {
-  list->capacity = KWG_NODE_INDEX_LIST_INITIAL_CAPACITY;
-  list->indices =
-      malloc_or_die(sizeof(uint32_t) * KWG_NODE_INDEX_LIST_INITIAL_CAPACITY);
+  list->capacity = KWG_NODE_INDEX_LIST_INLINE_CAPACITY;
   list->count = 0;
 }
 
 void node_index_list_add(NodeIndexList *list, uint32_t index) {
   if (list->count == list->capacity) {
-    list->indices =
-        realloc_or_die(list->indices, sizeof(uint32_t) * list->capacity * 2);
-    list->capacity *= 2;
+    if (node_index_list_is_inline(list)) {
+      list->capacity *= 2;
+      uint32_t *indices = malloc_or_die(sizeof(uint32_t) * list->capacity);
+      memcpy(indices, list->inline_indices, sizeof(uint32_t) * list->count);
+      list->indices = indices;
+    } else {
+      list->capacity *= 2;
+      list->indices =
+          realloc_or_die(list->indices, sizeof(uint32_t) * list->capacity);
+    }
   }
-  list->indices[list->count] = index;
+  uint32_t *indices = node_index_list_get_indices(list);
+  indices[list->count] = index;
   list->count++;
 }
 
-void node_index_list_destroy(NodeIndexList *list) { free(list->indices); }
+void node_index_list_destroy(NodeIndexList *list) {
+  if (!node_index_list_is_inline(list)) {
+    free(list->indices);
+  }
+}
 
 typedef struct MutableNode {
   MachineLetter ml;
@@ -131,11 +158,13 @@ uint64_t mutable_node_hash_value(MutableNode *node, MutableNodeList *nodes,
   }
   uint64_t hash_with_just_children = 0;
 
+  const uint32_t *indices =
+      node_index_list_get_indices((NodeIndexList *)&node->children);
   for (size_t i = 0; i < node->children.count; i++) {
     uint64_t child_hash = 0;
-    const size_t child_index = node->children.indices[i];
+    const size_t child_index = indices[i];
     if (child_index != 0) {
-      MutableNode *child = &nodes->nodes[node->children.indices[i]];
+      MutableNode *child = &nodes->nodes[child_index];
       child_hash = mutable_node_hash_value(child, nodes, true);
     }
     hash_with_just_children ^= child_hash * KWG_HASH_COMBINING_PRIME_1;
@@ -189,9 +218,13 @@ bool mutable_node_equals(const MutableNode *node_a, const MutableNode *node_b,
       (node_a->children.count != node_b->children.count)) {
     return false;
   }
+  const uint32_t *indices_a =
+      node_index_list_get_indices((NodeIndexList *)&node_a->children);
+  const uint32_t *indices_b =
+      node_index_list_get_indices((NodeIndexList *)&node_b->children);
   for (MachineLetter i = 0; i < node_a->children.count; i++) {
-    const MutableNode *child_a = &nodes->nodes[node_a->children.indices[i]];
-    const MutableNode *child_b = &nodes->nodes[node_b->children.indices[i]];
+    const MutableNode *child_a = &nodes->nodes[indices_a[i]];
+    const MutableNode *child_b = &nodes->nodes[indices_b[i]];
     if (!mutable_node_equals(child_a, child_b, nodes, true)) {
       return false;
     }
@@ -272,11 +305,17 @@ MutableNode *node_hash_table_find_or_insert(NodeHashTable *table,
   return node;
 }
 
+uint32_t get_child_index(const MutableNode *node, int idx) {
+  const uint32_t *indices =
+      node_index_list_get_indices((NodeIndexList *)&node->children);
+  return indices[idx];
+}
+
 void set_final_indices(MutableNode *node, MutableNodeList *nodes,
                        NodePointerList *ordered_pointers) {
   // Add the children in a sequence.
   for (size_t i = 0; i < node->children.count; i++) {
-    const uint32_t child_index = node->children.indices[i];
+    const uint32_t child_index = get_child_index(node, i);
     MutableNode *child = &nodes->nodes[child_index];
     child->is_end = (i == (node->children.count - 1));
     child->final_index = ordered_pointers->count;
@@ -284,7 +323,7 @@ void set_final_indices(MutableNode *node, MutableNodeList *nodes,
   }
   // Then add each of their subtries afterwards.
   for (size_t i = 0; i < node->children.count; i++) {
-    const uint32_t child_index = node->children.indices[i];
+    const uint32_t child_index = get_child_index(node, i);
     MutableNode *child = &nodes->nodes[child_index];
     if (child->merged_into != NULL) {
       continue;
@@ -306,8 +345,8 @@ void insert_suffix(uint32_t node_index, MutableNodeList *nodes,
   const uint8_t node_num_children = node->children.count;
   for (MachineLetter i = 0; i < node_num_children; i++) {
     node = &nodes->nodes[node_index];
-    const uint32_t child_index = node->children.indices[i];
-    const MutableNode *child = &nodes->nodes[node->children.indices[i]];
+    const uint32_t child_index = get_child_index(node, i);
+    const MutableNode *child = &nodes->nodes[child_index];
     if (child->ml == ml) {
       insert_suffix(child_index, nodes, word, pos + 1, cached_node_indices);
       return;
@@ -334,7 +373,8 @@ void copy_nodes(NodePointerList *ordered_pointers, MutableNodeList *nodes,
       NodeIndexList *children = (node->merged_into == NULL)
                                     ? &node->children
                                     : &node->merged_into->children;
-      const uint32_t original_child_index = children->indices[0];
+      const uint32_t *indices = node_index_list_get_indices(children);
+      const uint32_t original_child_index = indices[0];
       const uint32_t final_child_index =
           nodes->nodes[original_child_index].final_index;
       serialized_node |= final_child_index;
