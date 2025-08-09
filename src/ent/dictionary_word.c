@@ -55,7 +55,7 @@ static inline int dictionary_word_compare(const DictionaryWord *word_a,
   const int length_b = word_b->length;
   const int min_length = length_a < length_b ? length_a : length_b;
 
-  int cmp_result = memcmp(word_a->word, word_b->word, min_length);
+  int cmp_result = memcmp(word_a->word, word_b->word, min_length * sizeof(MachineLetter));
   if (cmp_result != 0) {
     return cmp_result;
   }
