@@ -21,7 +21,7 @@
 // pointing midway into the the other's list of children, sharing an end but not
 // a beginning. This extra merging reduces KWG size roughly 3%.
 
-typedef struct __attribute__((__packed__)) NodeIndexList {
+typedef struct NodeIndexList {
   union {
     uint32_t inline_indices[KWG_NODE_INDEX_LIST_INLINE_CAPACITY];
     struct {
