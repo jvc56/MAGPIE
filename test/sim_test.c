@@ -21,6 +21,7 @@
 #include "test_util.h"
 #include <assert.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -56,7 +57,8 @@ void print_sim_stats(const Game *game, SimResults *sim_results) {
     free(wp_str);
     free(eq_str);
   }
-  printf("Iterations: %lu\n", sim_results_get_iteration_count(sim_results));
+  printf("Iterations: %" PRIu64 "\n",
+         sim_results_get_iteration_count(sim_results));
   string_builder_destroy(move_description);
 }
 
