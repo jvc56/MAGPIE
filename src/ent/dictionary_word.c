@@ -55,7 +55,8 @@ static inline int dictionary_word_compare(const DictionaryWord *word_a,
   const int length_b = word_b->length;
   const int min_length = length_a < length_b ? length_a : length_b;
 
-  int cmp_result = memcmp(word_a->word, word_b->word, min_length * sizeof(MachineLetter));
+  int cmp_result =
+      memcmp(word_a->word, word_b->word, min_length * sizeof(MachineLetter));
   if (cmp_result != 0) {
     return cmp_result;
   }
@@ -75,8 +76,9 @@ static inline void dict_quicksort(DictionaryWord *arr, int left, int right) {
   while (left < right) {
     int i = left;
     int j = right;
-    // Not worrying about overflow, these are 64-bit integers and the size will never be more than ~millions.
-     int mid = (left + right) / 2;
+    // Not worrying about overflow, these are 64-bit integers and the size will
+    // never be more than ~millions.
+    int mid = (left + right) / 2;
     DictionaryWord tmp; // Used for all swaps
 
     // Median-of-three
