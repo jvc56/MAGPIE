@@ -33,35 +33,38 @@ typedef struct NodeIndexList {
   size_t capacity;
 } NodeIndexList;
 
-bool node_index_list_is_inline(const NodeIndexList *list) {
+static inline bool node_index_list_is_inline(const NodeIndexList *list) {
   return list->capacity <= KWG_NODE_INDEX_LIST_INLINE_CAPACITY;
 }
 
-uint32_t *node_index_list_get_indices(NodeIndexList *list) {
+static inline uint32_t *node_index_list_get_indices(NodeIndexList *list) {
   if (node_index_list_is_inline(list)) {
     return list->inline_indices;
   }
   return list->indices;
 }
 
-const uint32_t *node_index_list_get_const_indices(const NodeIndexList *list) {
+static inline const uint32_t *
+node_index_list_get_const_indices(const NodeIndexList *list) {
   if (node_index_list_is_inline(list)) {
     return list->inline_indices;
   }
   return list->indices;
 }
 
-void node_index_list_initialize(NodeIndexList *list) {
+static inline void node_index_list_initialize(NodeIndexList *list) {
   list->capacity = KWG_NODE_INDEX_LIST_INLINE_CAPACITY;
   list->count = 0;
 }
 
-void node_index_list_add(NodeIndexList *list, uint32_t index) {
+static inline void node_index_list_add(NodeIndexList *list, uint32_t index) {
   if (list->count == list->capacity) {
     if (node_index_list_is_inline(list)) {
       list->capacity *= 2;
-      uint32_t *indices = malloc_or_die(sizeof(uint32_t) * list->capacity);
-      memcpy(indices, list->inline_indices, sizeof(uint32_t) * list->count);
+      uint32_t *indices = malloc_or_die(sizeof(uint32_t) * 2 *
+                                        KWG_NODE_INDEX_LIST_INLINE_CAPACITY);
+      memcpy(indices, list->inline_indices,
+             sizeof(uint32_t) * KWG_NODE_INDEX_LIST_INLINE_CAPACITY);
       list->indices = indices;
     } else {
       list->capacity *= 2;
@@ -74,7 +77,7 @@ void node_index_list_add(NodeIndexList *list, uint32_t index) {
   list->count++;
 }
 
-void node_index_list_destroy(NodeIndexList *list) {
+static inline void node_index_list_destroy(NodeIndexList *list) {
   if (!node_index_list_is_inline(list)) {
     free(list->indices);
   }
@@ -100,7 +103,7 @@ typedef struct MutableNodeList {
   size_t capacity;
 } MutableNodeList;
 
-MutableNodeList *mutable_node_list_create(void) {
+static inline MutableNodeList *mutable_node_list_create(void) {
   MutableNodeList *mutable_node_list = malloc_or_die(sizeof(MutableNodeList));
   mutable_node_list->capacity = KWG_MUTABLE_NODE_LIST_INITIAL_CAPACITY;
   mutable_node_list->nodes =
@@ -109,7 +112,7 @@ MutableNodeList *mutable_node_list_create(void) {
   return mutable_node_list;
 }
 
-MutableNode *mutable_node_list_add(MutableNodeList *nodes) {
+static inline MutableNode *mutable_node_list_add(MutableNodeList *nodes) {
   if (nodes->count == nodes->capacity) {
     nodes->nodes =
         realloc_or_die(nodes->nodes, sizeof(MutableNode) * nodes->capacity * 2);
@@ -127,14 +130,15 @@ MutableNode *mutable_node_list_add(MutableNodeList *nodes) {
   return node;
 }
 
-int mutable_node_list_add_root(MutableNodeList *nodes) {
+static inline int mutable_node_list_add_root(MutableNodeList *nodes) {
   const size_t root_node_index = nodes->count;
   MutableNode *root = mutable_node_list_add(nodes);
   node_index_list_initialize(&root->children);
   return (int)root_node_index;
 }
 
-int add_child(uint32_t node_index, MutableNodeList *nodes, MachineLetter ml) {
+static inline int add_child(uint32_t node_index, MutableNodeList *nodes,
+                            MachineLetter ml) {
   const size_t child_node_index = nodes->count;
   MutableNode *node = &nodes->nodes[node_index];
   node_index_list_add(&node->children, child_node_index);
@@ -144,7 +148,7 @@ int add_child(uint32_t node_index, MutableNodeList *nodes, MachineLetter ml) {
   return (int)child_node_index;
 }
 
-void mutable_node_list_destroy(MutableNodeList *nodes) {
+static inline void mutable_node_list_destroy(MutableNodeList *nodes) {
   for (size_t i = 0; i < nodes->count; i++) {
     node_index_list_destroy(&nodes->nodes[i].children);
   }
@@ -244,7 +248,7 @@ typedef struct NodePointerList {
   size_t capacity;
 } NodePointerList;
 
-NodePointerList *node_pointer_list_create(void) {
+static inline NodePointerList *node_pointer_list_create(void) {
   NodePointerList *node_pointer_list = malloc_or_die(sizeof(NodePointerList));
   node_pointer_list->capacity = KWG_ORDERED_POINTER_LIST_INITIAL_CAPACITY;
   node_pointer_list->nodes = malloc_or_die(
@@ -253,14 +257,15 @@ NodePointerList *node_pointer_list_create(void) {
   return node_pointer_list;
 }
 
-void node_pointer_list_initialize(NodePointerList *list) {
+static inline void node_pointer_list_initialize(NodePointerList *list) {
   list->capacity = KWG_HASH_BUCKET_ITEMS_CAPACITY;
   list->nodes =
       malloc_or_die(sizeof(MutableNode *) * KWG_HASH_BUCKET_ITEMS_CAPACITY);
   list->count = 0;
 }
 
-void node_pointer_list_add(NodePointerList *list, MutableNode *node) {
+static inline void node_pointer_list_add(NodePointerList *list,
+                                         MutableNode *node) {
   if (list->count == list->capacity) {
     list->nodes =
         realloc_or_die(list->nodes, sizeof(MutableNode *) * list->capacity * 2);
@@ -270,7 +275,7 @@ void node_pointer_list_add(NodePointerList *list, MutableNode *node) {
   list->count++;
 }
 
-void node_pointer_list_destroy(NodePointerList *list) {
+static inline void node_pointer_list_destroy(NodePointerList *list) {
   free(list->nodes);
   free(list);
 }
@@ -280,7 +285,8 @@ typedef struct NodeHashTable {
   size_t bucket_count;
 } NodeHashTable;
 
-void node_hash_table_create(NodeHashTable *table, size_t bucket_count) {
+static inline void node_hash_table_create(NodeHashTable *table,
+                                          size_t bucket_count) {
   table->bucket_count = bucket_count;
   table->buckets = malloc_or_die(sizeof(NodePointerList) * bucket_count);
   for (size_t i = 0; i < bucket_count; i++) {
@@ -288,16 +294,16 @@ void node_hash_table_create(NodeHashTable *table, size_t bucket_count) {
   }
 }
 
-void node_hash_table_destroy_buckets(NodeHashTable *table) {
+static inline void node_hash_table_destroy_buckets(NodeHashTable *table) {
   for (size_t i = 0; i < table->bucket_count; i++) {
     free(table->buckets[i].nodes);
   }
   free(table->buckets);
 }
 
-MutableNode *node_hash_table_find_or_insert(NodeHashTable *table,
-                                            MutableNode *node,
-                                            MutableNodeList *nodes) {
+static inline MutableNode *
+node_hash_table_find_or_insert(NodeHashTable *table, MutableNode *node,
+                               MutableNodeList *nodes) {
   const uint64_t hash_value = mutable_node_hash_value(node, nodes, false);
   const size_t bucket_index = hash_value % table->bucket_count;
   NodePointerList *bucket = &table->buckets[bucket_index];
@@ -389,8 +395,9 @@ void copy_nodes(NodePointerList *ordered_pointers, MutableNodeList *nodes,
   }
 }
 
-void add_gaddag_strings_for_word(const DictionaryWord *word,
-                                 DictionaryWordList *gaddag_strings) {
+static inline void
+add_gaddag_strings_for_word(const DictionaryWord *word,
+                            DictionaryWordList *gaddag_strings) {
   const MachineLetter *raw_word = dictionary_word_get_word(word);
   const int length = dictionary_word_get_length(word);
   MachineLetter gaddag_string[MAX_KWG_STRING_LENGTH];
@@ -466,8 +473,9 @@ void kwg_write_gaddag_strings(const KWG *kwg, uint32_t node_index,
                   gaddag_strings, nodes_reached);
 }
 
-int get_letters_in_common(const DictionaryWord *word, MachineLetter *last_word,
-                          int *last_word_length) {
+static inline int get_letters_in_common(const DictionaryWord *word,
+                                        MachineLetter *last_word,
+                                        int *last_word_length) {
   const int length = dictionary_word_get_length(word);
   int min_length = length;
   if (*last_word_length < min_length) {
