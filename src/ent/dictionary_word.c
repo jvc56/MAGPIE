@@ -75,9 +75,8 @@ static inline void dict_quicksort(DictionaryWord *arr, int left, int right) {
   while (left < right) {
     int i = left;
     int j = right;
-    // Assumed that list size never exceeds 1<<30 ~= 1B, so this computation will not
-    // overflow.
-    int mid = (left + right) / 2;
+    // Not worrying about overflow, these are 64-bit integers and the size will never be more than ~millions.
+     int mid = (left + right) / 2;
     DictionaryWord tmp; // Used for all swaps
 
     // Median-of-three
