@@ -75,6 +75,8 @@ static inline void dict_quicksort(DictionaryWord *arr, int left, int right) {
   while (left < right) {
     int i = left;
     int j = right;
+    // Assumed that list size never exceeds 1<<30 ~= 1B, so this computation will not
+    // overflow.
     int mid = (left + right) / 2;
     DictionaryWord tmp; // Used for all swaps
 
