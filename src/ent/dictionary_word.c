@@ -72,70 +72,88 @@ static inline int dictionary_word_compare(const DictionaryWord *word_a,
   return 0;
 }
 
-static inline void dict_quicksort(DictionaryWord *arr, int left, int right) {
-  while (left < right) {
-    int i = left;
-    int j = right;
-    // Not worrying about overflow, these are 64-bit integers and the size will
-    // never be more than ~millions.
-    int mid = (left + right) / 2;
-    DictionaryWord tmp; // Used for all swaps
-
-    // Median-of-three
-    if (dictionary_word_compare(&arr[left], &arr[mid]) > 0) {
-      tmp = arr[left];
-      arr[left] = arr[mid];
-      arr[mid] = tmp;
+static inline void insertion_sort(DictionaryWord *arr, int left, int right) {
+  for (int i = left + 1; i <= right; i++) {
+    DictionaryWord tmp = arr[i];
+    int j = i - 1;
+    while (j >= left && dictionary_word_compare(&arr[j], &tmp) > 0) {
+      arr[j + 1] = arr[j];
+      j--;
     }
-    if (dictionary_word_compare(&arr[left], &arr[right]) > 0) {
-      tmp = arr[left];
-      arr[left] = arr[right];
-      arr[right] = tmp;
-    }
-    if (dictionary_word_compare(&arr[mid], &arr[right]) > 0) {
-      tmp = arr[mid];
-      arr[mid] = arr[right];
-      arr[right] = tmp;
-    }
-
-    DictionaryWord pivot = arr[mid];
-
-    while (i <= j) {
-      while (dictionary_word_compare(&arr[i], &pivot) < 0) {
-        i++;
-      }
-      while (dictionary_word_compare(&arr[j], &pivot) > 0) {
-        j--;
-      }
-      if (i <= j) {
-        tmp = arr[i];
-        arr[i] = arr[j];
-        arr[j] = tmp;
-        i++;
-        j--;
-      }
-    }
-
-    if (j - left < right - i) {
-      if (left < j) {
-        dict_quicksort(arr, left, j);
-      }
-      left = i;
-    } else {
-      if (i < right) {
-        dict_quicksort(arr, i, right);
-      }
-      right = j;
-    }
+    arr[j + 1] = tmp;
   }
 }
 
-void dictionary_word_list_sort(DictionaryWordList *dictionary_word_list) {
-  if (dictionary_word_list->count <= 1) {
-    return;
+// Merge two sorted subarrays into a single sorted array using a buffer
+static inline void merge(DictionaryWord *arr, int left, int mid, int right,
+                         DictionaryWord *temp) {
+  int n1 = mid - left + 1;
+  int n2 = right - mid;
+
+  // Copy data to temporary arrays in temp[]
+  for (int i = 0; i < n1; i++) {
+    temp[i] = arr[left + i];
   }
-  dict_quicksort(dictionary_word_list->dictionary_words, 0,
-                 dictionary_word_list->count - 1);
+  for (int j = 0; j < n2; j++) {
+    temp[n1 + j] = arr[mid + 1 + j];
+  }
+
+  // Merge the temp arrays back into arr[left..right]
+  int i = 0, j = n1, k = left;
+  while (i < n1 && j < n1 + n2) {
+    if (dictionary_word_compare(&temp[i], &temp[j]) <= 0) {
+      arr[k++] = temp[i++];
+    } else {
+      arr[k++] = temp[j++];
+    }
+  }
+
+  // Copy any remaining elements of L[] (if any)
+  while (i < n1) {
+    arr[k++] = temp[i++];
+  }
+
+  // Copy any remaining elements of R[] (if any)
+  while (j < n1 + n2) {
+    arr[k++] = temp[j++];
+  }
+}
+
+static inline void tim_sort(DictionaryWord *arr, int n) {
+  // Step 1: Sort individual runs using insertion sort
+  for (int i = 0; i < n; i += DICTIONARY_TIM_SORT_MIN_RUN_LENGTH) {
+    int right = (i + DICTIONARY_TIM_SORT_MIN_RUN_LENGTH - 1 < n)
+                    ? i + DICTIONARY_TIM_SORT_MIN_RUN_LENGTH - 1
+                    : n - 1;
+    insertion_sort(arr, i, right);
+  }
+
+  // Step 2: Allocate a temporary array to be reused in the merging phase
+  DictionaryWord *temp =
+      (DictionaryWord *)malloc_or_die(sizeof(DictionaryWord) * n);
+
+  // Step 3: Start merging runs
+  for (int size = DICTIONARY_TIM_SORT_MIN_RUN_LENGTH; size < n;
+       size = 2 * size) {
+    // Merge runs in pairs of size 'size'
+    for (int left = 0; left < n; left += 2 * size) {
+      // Find the right index for merging
+      int mid = (left + size - 1 < n) ? left + size - 1 : n - 1;
+      int right = (left + 2 * size - 1 < n) ? left + 2 * size - 1 : n - 1;
+
+      // Merge the two subarrays arr[left..mid] and arr[mid+1..right]
+      if (mid < right) {
+        merge(arr, left, mid, right, temp);
+      }
+    }
+  }
+
+  // Free the temporary array after use
+  free(temp);
+}
+
+void dictionary_word_list_sort(DictionaryWordList *dictionary_word_list) {
+  tim_sort(dictionary_word_list->dictionary_words, dictionary_word_list->count);
 }
 
 void dictionary_word_list_unique(DictionaryWordList *sorted,
