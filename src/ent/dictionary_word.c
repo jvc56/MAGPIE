@@ -155,6 +155,9 @@ static inline void tim_sort(DictionaryWord *arr, int n) {
 }
 
 void dictionary_word_list_sort(DictionaryWordList *dictionary_word_list) {
+  if (dictionary_word_list->count <= 1) {
+    return;
+  }
   tim_sort(dictionary_word_list->dictionary_words, dictionary_word_list->count);
 }
 
