@@ -121,11 +121,11 @@ static inline void merge(DictionaryWord *arr, int left, int mid, int right,
   }
 }
 
-static inline void tim_sort(DictionaryWord *arr, int n) {
+static inline void merge_sort(DictionaryWord *arr, int n) {
   // Step 1: Sort individual runs using insertion sort
-  for (int i = 0; i < n; i += DICTIONARY_TIM_SORT_MIN_RUN_LENGTH) {
-    int right = (i + DICTIONARY_TIM_SORT_MIN_RUN_LENGTH - 1 < n)
-                    ? i + DICTIONARY_TIM_SORT_MIN_RUN_LENGTH - 1
+  for (int i = 0; i < n; i += DICTIONARY_INSERTION_SORT_THRESHOLD) {
+    int right = (i + DICTIONARY_INSERTION_SORT_THRESHOLD - 1 < n)
+                    ? i + DICTIONARY_INSERTION_SORT_THRESHOLD - 1
                     : n - 1;
     insertion_sort(arr, i, right);
   }
@@ -135,7 +135,7 @@ static inline void tim_sort(DictionaryWord *arr, int n) {
       (DictionaryWord *)malloc_or_die(sizeof(DictionaryWord) * n);
 
   // Step 3: Start merging runs
-  for (int size = DICTIONARY_TIM_SORT_MIN_RUN_LENGTH; size < n;
+  for (int size = DICTIONARY_INSERTION_SORT_THRESHOLD; size < n;
        size = 2 * size) {
     // Merge runs in pairs of size 'size'
     for (int left = 0; left < n; left += 2 * size) {
@@ -158,7 +158,7 @@ void dictionary_word_list_sort(DictionaryWordList *dictionary_word_list) {
   if (dictionary_word_list->count <= 1) {
     return;
   }
-  tim_sort(dictionary_word_list->dictionary_words, dictionary_word_list->count);
+  merge_sort(dictionary_word_list->dictionary_words, dictionary_word_list->count);
 }
 
 void dictionary_word_list_unique(DictionaryWordList *sorted,
