@@ -99,7 +99,9 @@ static inline void merge(DictionaryWord *arr, int left, int mid, int right,
   }
 
   // Merge the temp arrays back into arr[left..right]
-  int i = 0, j = n1, k = left;
+  int i = 0;
+  int j = n1;
+  int k = left;
   while (i < n1 && j < n1 + n2) {
     if (dictionary_word_compare(&temp[i], &temp[j]) <= 0) {
       arr[k++] = temp[i++];
