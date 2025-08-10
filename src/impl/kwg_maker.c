@@ -214,7 +214,7 @@ static inline uint64_t mutable_node_hash_value(MutableNode *node,
     const size_t child_index = indices[i];
     if (child_index != 0) {
       MutableNode *child = &nodes[child_index];
-      uint32_t child_hash = subtree_hash_value(child, nodes);
+      uint64_t child_hash = subtree_hash_value(child, nodes);
       hash_with_just_children ^= child_hash * KWG_HASH_COMBINING_PRIME_1;
     }
   }
@@ -229,9 +229,10 @@ static inline uint64_t mutable_node_hash_value(MutableNode *node,
 
 void calculate_node_hash_values(MutableNodeList *node_list) {
   // Traverse the nodes in reverse order (bottom-up)
-  const int count = node_list->count;
+  const size_t count = node_list->count;
   MutableNode *nodes = node_list->nodes;
-  for (int i = count - 1; i >= 0; i--) {
+  assert(count != 0);
+  for (size_t i = count - 1; i-- > 0;) {
     MutableNode *node = &nodes[i];
     if (!node->hash_with_just_children_computed) {
       mutable_node_hash_value(node, nodes);
