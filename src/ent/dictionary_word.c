@@ -1,7 +1,6 @@
 #include "dictionary_word.h"
 
 #include "../def/dictionary_word_defs.h"
-#include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../ent/data_filepaths.h"
 #include "../ent/letter_distribution.h"
@@ -10,17 +9,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-
-struct DictionaryWord {
-  MachineLetter word[MAX_KWG_STRING_LENGTH];
-  uint8_t length;
-};
-
-struct DictionaryWordList {
-  DictionaryWord *dictionary_words;
-  int count;
-  int capacity;
-};
 
 const MachineLetter *
 dictionary_word_get_word(const DictionaryWord *dictionary_word) {
@@ -50,21 +38,6 @@ void dictionary_word_list_clear(DictionaryWordList *dictionary_word_list) {
   dictionary_word_list->count = 0;
 }
 
-void dictionary_word_list_add_word(DictionaryWordList *dictionary_word_list,
-                                   const MachineLetter *word, int word_length) {
-  if (dictionary_word_list->count == dictionary_word_list->capacity) {
-    dictionary_word_list->dictionary_words = realloc_or_die(
-        dictionary_word_list->dictionary_words,
-        sizeof(DictionaryWord) * dictionary_word_list->capacity * 2);
-    dictionary_word_list->capacity *= 2;
-  }
-  DictionaryWord *dictionary_word =
-      &dictionary_word_list->dictionary_words[dictionary_word_list->count];
-  memcpy(dictionary_word->word, word, word_length);
-  dictionary_word->length = word_length;
-  dictionary_word_list->count++;
-}
-
 int dictionary_word_list_get_count(
     const DictionaryWordList *dictionary_word_list) {
   return dictionary_word_list->count;
@@ -76,23 +49,16 @@ dictionary_word_list_get_word(const DictionaryWordList *dictionary_word_list,
   return &dictionary_word_list->dictionary_words[index];
 }
 
-int dictionary_word_compare(const void *a, const void *b) {
-  const DictionaryWord *word_a = (const DictionaryWord *)a;
-  const DictionaryWord *word_b = (const DictionaryWord *)b;
-  const int length_a = dictionary_word_get_length(word_a);
-  const int length_b = dictionary_word_get_length(word_b);
-
-  // Compare the words lexicographically
+static inline int dictionary_word_compare(const DictionaryWord *word_a,
+                                          const DictionaryWord *word_b) {
+  const int length_a = word_a->length;
+  const int length_b = word_b->length;
   const int min_length = length_a < length_b ? length_a : length_b;
-  for (int i = 0; i < min_length; i++) {
-    if (dictionary_word_get_word(word_a)[i] <
-        dictionary_word_get_word(word_b)[i]) {
-      return -1;
-    }
-    if (dictionary_word_get_word(word_a)[i] >
-        dictionary_word_get_word(word_b)[i]) {
-      return 1;
-    }
+
+  int cmp_result =
+      memcmp(word_a->word, word_b->word, min_length * sizeof(MachineLetter));
+  if (cmp_result != 0) {
+    return cmp_result;
   }
 
   // If the words are the same up to the length of the shorter word,
@@ -106,9 +72,70 @@ int dictionary_word_compare(const void *a, const void *b) {
   return 0;
 }
 
+static inline void dict_quicksort(DictionaryWord *arr, int left, int right) {
+  while (left < right) {
+    int i = left;
+    int j = right;
+    // Not worrying about overflow, these are 64-bit integers and the size will
+    // never be more than ~millions.
+    int mid = (left + right) / 2;
+    DictionaryWord tmp; // Used for all swaps
+
+    // Median-of-three
+    if (dictionary_word_compare(&arr[left], &arr[mid]) > 0) {
+      tmp = arr[left];
+      arr[left] = arr[mid];
+      arr[mid] = tmp;
+    }
+    if (dictionary_word_compare(&arr[left], &arr[right]) > 0) {
+      tmp = arr[left];
+      arr[left] = arr[right];
+      arr[right] = tmp;
+    }
+    if (dictionary_word_compare(&arr[mid], &arr[right]) > 0) {
+      tmp = arr[mid];
+      arr[mid] = arr[right];
+      arr[right] = tmp;
+    }
+
+    DictionaryWord pivot = arr[mid];
+
+    while (i <= j) {
+      while (dictionary_word_compare(&arr[i], &pivot) < 0) {
+        i++;
+      }
+      while (dictionary_word_compare(&arr[j], &pivot) > 0) {
+        j--;
+      }
+      if (i <= j) {
+        tmp = arr[i];
+        arr[i] = arr[j];
+        arr[j] = tmp;
+        i++;
+        j--;
+      }
+    }
+
+    if (j - left < right - i) {
+      if (left < j) {
+        dict_quicksort(arr, left, j);
+      }
+      left = i;
+    } else {
+      if (i < right) {
+        dict_quicksort(arr, i, right);
+      }
+      right = j;
+    }
+  }
+}
+
 void dictionary_word_list_sort(DictionaryWordList *dictionary_word_list) {
-  qsort(dictionary_word_list->dictionary_words, dictionary_word_list->count,
-        sizeof(DictionaryWord), dictionary_word_compare);
+  if (dictionary_word_list->count <= 1) {
+    return;
+  }
+  dict_quicksort(dictionary_word_list->dictionary_words, 0,
+                 dictionary_word_list->count - 1);
 }
 
 void dictionary_word_list_unique(DictionaryWordList *sorted,
