@@ -355,9 +355,9 @@ static inline void node_hash_table_destroy_buckets(NodeHashTable *table) {
   free(table->buckets);
 }
 
-static inline MutableNode *node_hash_table_find_or_insert(NodeHashTable *table,
-                                                          MutableNode *node,
-                                                          const MutableNode *nodes) {
+static inline MutableNode *
+node_hash_table_find_or_insert(NodeHashTable *table, MutableNode *node,
+                               const MutableNode *nodes) {
   const uint64_t hash_value = node->hash_with_just_children;
   const size_t bucket_index = hash_value % table->bucket_count;
   NodePointerList *bucket = &table->buckets[bucket_index];
