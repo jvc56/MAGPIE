@@ -231,7 +231,9 @@ void calculate_node_hash_values(MutableNodeList *node_list) {
   // Traverse the nodes in reverse order (bottom-up)
   const size_t count = node_list->count;
   MutableNode *nodes = node_list->nodes;
-  assert(count != 0);
+  if (count == 0) {
+    return;
+  }
   for (size_t i = count - 1; i-- > 0;) {
     MutableNode *node = &nodes[i];
     if (!node->hash_with_just_children_computed) {
