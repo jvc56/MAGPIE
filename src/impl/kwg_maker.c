@@ -234,8 +234,8 @@ void calculate_node_hash_values(MutableNodeList *node_list) {
   if (count == 0) {
     return;
   }
-  for (size_t i = count - 1; i-- > 0;) {
-    MutableNode *node = &nodes[i];
+  for (size_t i = count; i > 0; i--) {
+    MutableNode *node = &nodes[i - 1];
     if (!node->hash_with_just_children_computed) {
       mutable_node_hash_value(node, nodes);
     }
