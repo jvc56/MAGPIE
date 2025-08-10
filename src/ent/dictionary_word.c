@@ -138,14 +138,14 @@ static inline void merge_sort(DictionaryWord *arr, int n) {
   for (int size = DICTIONARY_INSERTION_SORT_THRESHOLD; size < n;
        size = 2 * size) {
     // Merge runs in pairs of size 'size'
-    for (int left = 0; left < n; left += 2 * size) {
+    for (int start = 0; start < n; start += 2 * size) {
       // Find the right index for merging
-      int mid = (left + size - 1 < n) ? left + size - 1 : n - 1;
-      int right = (left + 2 * size - 1 < n) ? left + 2 * size - 1 : n - 1;
+      int mid = (start + size - 1 < n) ? start + size - 1 : n - 1;
+      int end = (start + 2 * size - 1 < n) ? start + 2 * size - 1 : n - 1;
 
-      // Merge the two subarrays arr[left..mid] and arr[mid+1..right]
-      if (mid < right) {
-        merge(arr, left, mid, right, temp);
+      // Merge the two subarrays arr[start..mid] and arr[mid+1..end]
+      if (mid < end) {
+        merge(arr, start, mid, end, temp);
       }
     }
   }
