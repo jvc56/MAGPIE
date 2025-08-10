@@ -115,7 +115,7 @@ static inline void merge(DictionaryWord *arr, int left, int mid, int right,
     arr[k++] = temp[i++];
   }
 
-  // Copy any remaining elements of R[] (if any)
+  // Copy any remaining elements of the right subarray in temp (if any)
   while (j < n1 + n2) {
     arr[k++] = temp[j++];
   }
