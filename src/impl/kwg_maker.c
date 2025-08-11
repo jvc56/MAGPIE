@@ -285,9 +285,9 @@ static inline void node_hash_table_create(NodeHashTable *table,
   table->bucket_heads =
       malloc_or_die(sizeof(uint32_t) * KWG_HASH_NUMBER_OF_BUCKETS);
   table->next_indices = malloc_or_die(sizeof(uint32_t) * table->node_capacity);
-  memset(table->bucket_heads, (uint32_t)HASH_BUCKET_ITEM_LIST_NULL_INDEX,
+  memset(table->bucket_heads, HASH_BUCKET_ITEM_LIST_NULL_INDEX,
          sizeof(uint32_t) * KWG_HASH_NUMBER_OF_BUCKETS);
-  memset(table->next_indices, (uint32_t)HASH_BUCKET_ITEM_LIST_NULL_INDEX,
+  memset(table->next_indices, HASH_BUCKET_ITEM_LIST_NULL_INDEX,
          sizeof(uint32_t) * table->node_capacity);
 }
 
