@@ -318,9 +318,9 @@ node_hash_table_find_or_insert(NodeHashTable *table, MutableNode *node,
   }
 
   if (previous_index == HASH_BUCKET_ITEM_LIST_NULL_INDEX) {
-    table->bucket_heads[bucket_index] = (uint32_t)node_index;
+    table->bucket_heads[bucket_index] = node_index;
   } else {
-    table->next_indices[previous_index] = (uint32_t)node_index;
+    table->next_indices[previous_index] = node_index;
   }
   table->next_indices[node_index] = HASH_BUCKET_ITEM_LIST_NULL_INDEX;
   return node;
