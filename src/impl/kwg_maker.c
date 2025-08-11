@@ -5,7 +5,6 @@
 #include "../ent/dictionary_word.h"
 #include "../ent/kwg.h"
 #include "../util/io_util.h"
-#include <cstddef>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
