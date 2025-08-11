@@ -5,6 +5,7 @@
 #include "../ent/dictionary_word.h"
 #include "../ent/kwg.h"
 #include "../util/io_util.h"
+#include <cstddef>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -284,8 +285,7 @@ static inline void node_hash_table_create(NodeHashTable *table,
   table->node_capacity = node_capacity;
   table->bucket_heads =
       malloc_or_die(sizeof(uint32_t) * KWG_HASH_NUMBER_OF_BUCKETS);
-  table->next_indices =
-      malloc_or_die(sizeof(uint32_t) * table->node_capacity);
+  table->next_indices = malloc_or_die(sizeof(uint32_t) * table->node_capacity);
   memset(table->bucket_heads, HASH_BUCKET_ITEM_LIST_NULL_INDEX,
          sizeof(uint32_t) * KWG_HASH_NUMBER_OF_BUCKETS);
   memset(table->next_indices, HASH_BUCKET_ITEM_LIST_NULL_INDEX,
@@ -516,12 +516,13 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   int cached_node_indices[MAX_KWG_STRING_LENGTH + 1];
   MachineLetter last_word[MAX_KWG_STRING_LENGTH];
   int last_word_length = 0;
-  for (int i = 0; i < MAX_KWG_STRING_LENGTH; i++) {
+  for (size_t i = 0; i < MAX_KWG_STRING_LENGTH; i++) {
     last_word[i] = 0;
   }
   if (output_dawg) {
     cached_node_indices[0] = dawg_root_node_index;
-    for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
+    const size_t words_count = dictionary_word_list_get_count(words);
+    for (size_t i = 0; i < dictionary_word_list_get_count(words); i++) {
       const DictionaryWord *word = dictionary_word_list_get_word(words, i);
       const int letters_in_common =
           get_letters_in_common(word, last_word, &last_word_length);
