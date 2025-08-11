@@ -285,10 +285,12 @@ static inline void node_hash_table_create(NodeHashTable *table,
   table->bucket_heads =
       malloc_or_die(sizeof(uint32_t) * KWG_HASH_NUMBER_OF_BUCKETS);
   table->next_indices = malloc_or_die(sizeof(uint32_t) * table->node_capacity);
-  memset(table->bucket_heads, HASH_BUCKET_ITEM_LIST_NULL_INDEX,
-         sizeof(uint32_t) * KWG_HASH_NUMBER_OF_BUCKETS);
-  memset(table->next_indices, HASH_BUCKET_ITEM_LIST_NULL_INDEX,
-         sizeof(uint32_t) * table->node_capacity);
+  for (size_t i = 0; i < KWG_HASH_NUMBER_OF_BUCKETS; i++) {
+    table->bucket_heads[i] = HASH_BUCKET_ITEM_LIST_NULL_INDEX;
+  }
+  for (size_t i = 0; i < table->node_capacity; i++) {
+    table->next_indices[i] = HASH_BUCKET_ITEM_LIST_NULL_INDEX;
+  }
 }
 
 static inline void node_hash_table_destroy_buckets(NodeHashTable *table) {
