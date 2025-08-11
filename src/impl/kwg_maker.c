@@ -257,13 +257,6 @@ static inline NodePointerList *node_pointer_list_create(void) {
   return node_pointer_list;
 }
 
-static inline void node_pointer_list_initialize(NodePointerList *list) {
-  list->capacity = KWG_HASH_BUCKET_ITEMS_CAPACITY;
-  list->nodes =
-      malloc_or_die(sizeof(MutableNode *) * KWG_HASH_BUCKET_ITEMS_CAPACITY);
-  list->count = 0;
-}
-
 static inline void node_pointer_list_add(NodePointerList *list,
                                          MutableNode *node) {
   if (list->count == list->capacity) {
@@ -281,39 +274,56 @@ static inline void node_pointer_list_destroy(NodePointerList *list) {
 }
 
 typedef struct NodeHashTable {
-  NodePointerList *buckets;
-  size_t bucket_count;
+  uint32_t *bucket_heads;
+  uint32_t *next_indices;
+  size_t node_capacity;
 } NodeHashTable;
 
 static inline void node_hash_table_create(NodeHashTable *table,
-                                          size_t bucket_count) {
-  table->bucket_count = bucket_count;
-  table->buckets = malloc_or_die(sizeof(NodePointerList) * bucket_count);
-  for (size_t i = 0; i < bucket_count; i++) {
-    node_pointer_list_initialize(&table->buckets[i]);
+                                          size_t node_capacity) {
+  table->node_capacity = node_capacity;
+  table->bucket_heads =
+      malloc_or_die(sizeof(uint32_t) * KWG_HASH_NUMBER_OF_BUCKETS);
+  table->next_indices =
+      malloc_or_die(sizeof(uint32_t) * table->node_capacity);
+  for (size_t i = 0; i < KWG_HASH_NUMBER_OF_BUCKETS; i++) {
+    table->bucket_heads[i] = HASH_BUCKET_ITEM_LIST_NULL_INDEX;
+  }
+  for (size_t i = 0; i < table->node_capacity; i++) {
+    table->next_indices[i] = HASH_BUCKET_ITEM_LIST_NULL_INDEX;
   }
 }
 
 static inline void node_hash_table_destroy_buckets(NodeHashTable *table) {
-  for (size_t i = 0; i < table->bucket_count; i++) {
-    free(table->buckets[i].nodes);
-  }
-  free(table->buckets);
+  free(table->bucket_heads);
+  free(table->next_indices);
 }
 
 static inline MutableNode *
 node_hash_table_find_or_insert(NodeHashTable *table, MutableNode *node,
                                MutableNodeList *nodes) {
+  const size_t node_index = (size_t)(node - nodes->nodes);
   const uint64_t hash_value = mutable_node_hash_value(node, nodes, false);
-  const size_t bucket_index = hash_value % table->bucket_count;
-  NodePointerList *bucket = &table->buckets[bucket_index];
-  for (size_t i = 0; i < bucket->count; i++) {
-    MutableNode *candidate = bucket->nodes[i];
+  const size_t bucket_index = hash_value % KWG_HASH_NUMBER_OF_BUCKETS;
+
+  uint32_t current_index = table->bucket_heads[bucket_index];
+  uint32_t previous_index = HASH_BUCKET_ITEM_LIST_NULL_INDEX;
+
+  while (current_index != HASH_BUCKET_ITEM_LIST_NULL_INDEX) {
+    MutableNode *candidate = &nodes->nodes[current_index];
     if (mutable_node_equals(node, candidate, nodes, false)) {
       return candidate;
     }
+    previous_index = current_index;
+    current_index = table->next_indices[current_index];
   }
-  node_pointer_list_add(bucket, node);
+
+  if (previous_index == HASH_BUCKET_ITEM_LIST_NULL_INDEX) {
+    table->bucket_heads[bucket_index] = (uint32_t)node_index;
+  } else {
+    table->next_indices[previous_index] = (uint32_t)node_index;
+  }
+  table->next_indices[node_index] = HASH_BUCKET_ITEM_LIST_NULL_INDEX;
   return node;
 }
 
@@ -543,7 +553,7 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
 
   if (merging == KWG_MAKER_MERGE_EXACT) {
     NodeHashTable table;
-    node_hash_table_create(&table, KWG_HASH_NUMBER_OF_BUCKETS);
+    node_hash_table_create(&table, nodes->count);
     for (size_t i = 0; i < nodes->count; i++) {
       if (!output_dawg && (i == 0)) {
         continue;
