@@ -285,9 +285,9 @@ static inline void node_hash_table_create(NodeHashTable *table,
   table->bucket_heads =
       malloc_or_die(sizeof(uint32_t) * KWG_HASH_NUMBER_OF_BUCKETS);
   table->next_indices = malloc_or_die(sizeof(uint32_t) * table->node_capacity);
-  memset(table->bucket_heads, HASH_BUCKET_ITEM_LIST_NULL_INDEX,
+  memset(table->bucket_heads, (uint32_t)HASH_BUCKET_ITEM_LIST_NULL_INDEX,
          sizeof(uint32_t) * KWG_HASH_NUMBER_OF_BUCKETS);
-  memset(table->next_indices, HASH_BUCKET_ITEM_LIST_NULL_INDEX,
+  memset(table->next_indices, (uint32_t)HASH_BUCKET_ITEM_LIST_NULL_INDEX,
          sizeof(uint32_t) * table->node_capacity);
 }
 
@@ -520,8 +520,8 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   }
   if (output_dawg) {
     cached_node_indices[0] = dawg_root_node_index;
-    const size_t words_count = dictionary_word_list_get_count(words);
-    for (size_t i = 0; i < dictionary_word_list_get_count(words); i++) {
+    const int words_count = dictionary_word_list_get_count(words);
+    for (int i = 0; i < words_count; i++) {
       const DictionaryWord *word = dictionary_word_list_get_word(words, i);
       const int letters_in_common =
           get_letters_in_common(word, last_word, &last_word_length);
