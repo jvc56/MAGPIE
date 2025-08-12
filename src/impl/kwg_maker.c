@@ -156,36 +156,8 @@ static inline void mutable_node_list_destroy(MutableNodeList *nodes) {
   free(nodes);
 }
 
-uint64_t subtree_hash_value(MutableNode *node, MutableNode *nodes) {
-  if (node->hash_with_node_computed) {
-    return node->hash_with_node;
-  }
-
-  if (!node->hash_with_just_children_computed) {
-    uint64_t hash_with_just_children = 0;
-
-    const size_t children_count = node->children.count;
-    const uint32_t *indices =
-        node_index_list_get_const_indices(&node->children);
-    for (size_t i = 0; i < children_count; i++) {
-      const size_t child_index = indices[i];
-      if (child_index != 0) {
-        MutableNode *child = &nodes[child_index];
-        uint64_t child_hash = subtree_hash_value(child, nodes);
-        hash_with_just_children ^= child_hash * KWG_HASH_COMBINING_PRIME_1;
-      }
-    }
-    // rotate by one bit to designate the end of the child list
-    hash_with_just_children =
-        (hash_with_just_children << 1) | (hash_with_just_children >> (64 - 1));
-
-    node->hash_with_just_children = hash_with_just_children;
-    node->hash_with_just_children_computed = true;
-  }
-
-  uint64_t hash_with_node =
-      node->hash_with_just_children * KWG_HASH_COMBINING_PRIME_2;
-
+uint64_t subtree_hash_value(MutableNode *node) {
+  uint64_t hash_with_node = node->hash_with_just_children;
   const MachineLetter ml = node->ml;
   const bool accepts = node->accepts;
   hash_with_node ^= 1 + ml;
@@ -214,7 +186,7 @@ static inline uint64_t mutable_node_hash_value(MutableNode *node,
     const size_t child_index = indices[i];
     if (child_index != 0) {
       MutableNode *child = &nodes[child_index];
-      uint64_t child_hash = subtree_hash_value(child, nodes);
+      uint64_t child_hash = subtree_hash_value(child);
       hash_with_just_children ^= child_hash * KWG_HASH_COMBINING_PRIME_1;
     }
   }
