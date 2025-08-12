@@ -90,8 +90,6 @@ typedef struct MutableNode {
   NodeIndexList children;
   uint64_t hash_with_just_children;
   uint64_t hash_with_node;
-  bool hash_with_just_children_computed;
-  bool hash_with_node_computed;
   struct MutableNode *merged_into;
   uint8_t merge_offset;
   uint32_t final_index;
@@ -124,8 +122,6 @@ static inline MutableNode *mutable_node_list_add(MutableNodeList *nodes) {
   node->is_end = false;
   node->merged_into = NULL;
   node->merge_offset = 0;
-  node->hash_with_just_children_computed = false;
-  node->hash_with_node_computed = false;
   nodes->count++;
   return node;
 }
@@ -169,7 +165,6 @@ uint64_t subtree_hash_value(MutableNode *node) {
     hash_with_node ^= 1 << (ENGLISH_ALPHABET_BITS_USED + 1);
   }
   node->hash_with_node = hash_with_node;
-  node->hash_with_node_computed = true;
   return hash_with_node;
 }
 
@@ -192,7 +187,6 @@ static inline uint64_t mutable_node_hash_value(MutableNode *node,
       (hash_with_just_children << 1) | (hash_with_just_children >> (64 - 1));
 
   node->hash_with_just_children = hash_with_just_children;
-  node->hash_with_just_children_computed = true;
   return hash_with_just_children;
 }
 
@@ -205,9 +199,7 @@ void calculate_node_hash_values(MutableNodeList *node_list) {
   }
   for (size_t i = count; i > 0; i--) {
     MutableNode *node = &nodes[i - 1];
-    if (!node->hash_with_just_children_computed) {
-      mutable_node_hash_value(node, nodes);
-    }
+    mutable_node_hash_value(node, nodes);
   }
 }
 
