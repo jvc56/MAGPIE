@@ -179,7 +179,7 @@ static inline uint64_t mutable_node_hash_value(MutableNode *node,
     if (child_index != 0) {
       MutableNode *child = &nodes[child_index];
       uint64_t child_hash = subtree_hash_value(child);
-      hash_with_just_children ^= child_hash * KWG_HASH_COMBINING_PRIME_1;
+      hash_with_just_children ^= child_hash * KWG_HASH_COMBINING_PRIME;
     }
   }
   // rotate by one bit to designate the end of the child list
