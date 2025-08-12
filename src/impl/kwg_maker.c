@@ -175,9 +175,6 @@ uint64_t subtree_hash_value(MutableNode *node) {
 
 static inline uint64_t mutable_node_hash_value(MutableNode *node,
                                                MutableNode *nodes) {
-  if (node->hash_with_just_children_computed) {
-    return node->hash_with_just_children;
-  }
   uint64_t hash_with_just_children = 0;
 
   const size_t children_count = node->children.count;
