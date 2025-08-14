@@ -90,8 +90,6 @@ typedef struct MutableNode {
   NodeIndexList children;
   uint64_t hash_with_just_children;
   uint64_t hash_with_node;
-  bool hash_with_just_children_computed;
-  bool hash_with_node_computed;
   struct MutableNode *merged_into;
   uint8_t merge_offset;
   uint32_t final_index;
@@ -124,8 +122,6 @@ static inline MutableNode *mutable_node_list_add(MutableNodeList *nodes) {
   node->is_end = false;
   node->merged_into = NULL;
   node->merge_offset = 0;
-  node->hash_with_just_children_computed = false;
-  node->hash_with_node_computed = false;
   nodes->count++;
   return node;
 }
@@ -156,41 +152,8 @@ static inline void mutable_node_list_destroy(MutableNodeList *nodes) {
   free(nodes);
 }
 
-uint64_t mutable_node_hash_value(MutableNode *node, MutableNodeList *nodes,
-                                 bool check_node) {
-  if (check_node) {
-    if (node->hash_with_node_computed) {
-      return node->hash_with_node;
-    }
-  } else {
-    if (node->hash_with_just_children_computed) {
-      return node->hash_with_just_children;
-    }
-  }
-  uint64_t hash_with_just_children = 0;
-
-  const uint32_t *indices = node_index_list_get_const_indices(&node->children);
-  for (size_t i = 0; i < node->children.count; i++) {
-    uint64_t child_hash = 0;
-    const size_t child_index = indices[i];
-    if (child_index != 0) {
-      MutableNode *child = &nodes->nodes[child_index];
-      child_hash = mutable_node_hash_value(child, nodes, true);
-    }
-    hash_with_just_children ^= child_hash * KWG_HASH_COMBINING_PRIME_1;
-  }
-  // rotate by one bit to designate the end of the child list
-  hash_with_just_children =
-      (hash_with_just_children << 1) | (hash_with_just_children >> (64 - 1));
-
-  node->hash_with_just_children = hash_with_just_children;
-  node->hash_with_just_children_computed = true;
-  if (!check_node) {
-    return hash_with_just_children;
-  }
-  uint64_t hash_with_node =
-      hash_with_just_children * KWG_HASH_COMBINING_PRIME_2;
-
+uint64_t subtree_hash_value(MutableNode *node) {
+  uint64_t hash_with_node = node->hash_with_just_children;
   const MachineLetter ml = node->ml;
   const bool accepts = node->accepts;
   hash_with_node ^= 1 + ml;
@@ -202,40 +165,92 @@ uint64_t mutable_node_hash_value(MutableNode *node, MutableNodeList *nodes,
     hash_with_node ^= 1 << (ENGLISH_ALPHABET_BITS_USED + 1);
   }
   node->hash_with_node = hash_with_node;
-  node->hash_with_node_computed = true;
   return hash_with_node;
 }
 
-bool mutable_node_equals(const MutableNode *node_a, const MutableNode *node_b,
-                         const MutableNodeList *nodes, bool check_node) {
-  // check_node is false at the root node of a the comparison, we are looking
-  // for nodes with different prefixes, including the content of this node,
-  // but with identical child subtries. So we only check the letters and accepts
-  // within subtries.
-  if (check_node) {
-    if ((node_a->hash_with_node != node_b->hash_with_node) ||
-        (node_a->ml != node_b->ml) || (node_a->accepts != node_b->accepts)) {
-      return false;
-    }
-  } else {
-    if (node_a->hash_with_just_children != node_b->hash_with_just_children) {
-      // printf("node_a->hash_value: %llu node_b->hash_value: %llu\n",
-      //        node_a->hash_value, node_b->hash_value);
-      return false;
+static inline uint64_t mutable_node_hash_value(MutableNode *node,
+                                               MutableNode *nodes) {
+  uint64_t hash_with_just_children = 0;
+
+  const size_t children_count = node->children.count;
+  const uint32_t *indices = node_index_list_get_const_indices(&node->children);
+  for (size_t i = 0; i < children_count; i++) {
+    const size_t child_index = indices[i];
+    if (child_index != 0) {
+      MutableNode *child = &nodes[child_index];
+      uint64_t child_hash = subtree_hash_value(child);
+      hash_with_just_children ^= child_hash * KWG_HASH_COMBINING_PRIME;
     }
   }
-  if ((node_a->hash_with_just_children != node_b->hash_with_just_children) ||
-      (node_a->children.count != node_b->children.count)) {
+  // rotate by one bit to designate the end of the child list
+  hash_with_just_children =
+      (hash_with_just_children << 1) | (hash_with_just_children >> (64 - 1));
+
+  node->hash_with_just_children = hash_with_just_children;
+  return hash_with_just_children;
+}
+
+void calculate_node_hash_values(MutableNodeList *node_list) {
+  // Traverse the nodes in reverse order (bottom-up)
+  const size_t count = node_list->count;
+  MutableNode *nodes = node_list->nodes;
+  if (count == 0) {
+    return;
+  }
+  for (size_t i = count; i > 0; i--) {
+    MutableNode *node = &nodes[i - 1];
+    mutable_node_hash_value(node, nodes);
+  }
+}
+
+bool subtree_equals(const MutableNode *node_a, const MutableNode *node_b,
+                    const MutableNode *nodes) {
+  // Hashes were already compared, don't check them again.
+  if (node_a->ml != node_b->ml || node_a->accepts != node_b->accepts) {
     return false;
   }
+  if (node_a->children.count != node_b->children.count) {
+    return false;
+  }
+  const size_t count = node_a->children.count;
   const uint32_t *indices_a =
-      node_index_list_get_const_indices((NodeIndexList *)&node_a->children);
+      node_index_list_get_const_indices(&node_a->children);
   const uint32_t *indices_b =
-      node_index_list_get_const_indices((NodeIndexList *)&node_b->children);
-  for (MachineLetter i = 0; i < node_a->children.count; i++) {
-    const MutableNode *child_a = &nodes->nodes[indices_a[i]];
-    const MutableNode *child_b = &nodes->nodes[indices_b[i]];
-    if (!mutable_node_equals(child_a, child_b, nodes, true)) {
+      node_index_list_get_const_indices(&node_b->children);
+  for (size_t idx = 0; idx < count; idx++) {
+    const MutableNode *child_a = &nodes[indices_a[idx]];
+    const MutableNode *child_b = &nodes[indices_b[idx]];
+    if (child_a->hash_with_node != child_b->hash_with_node) {
+      return false;
+    }
+    if (!subtree_equals(child_a, child_b, nodes)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool mutable_node_equals(const MutableNode *node_a, const MutableNode *node_b,
+                         const MutableNode *nodes) {
+  // Ignores node_x->ml and node_x->accepts
+  if (node_a->hash_with_just_children != node_b->hash_with_just_children) {
+    return false;
+  }
+  if (node_a->children.count != node_b->children.count) {
+    return false;
+  }
+  const size_t count = node_a->children.count;
+  const uint32_t *indices_a =
+      node_index_list_get_const_indices(&node_a->children);
+  const uint32_t *indices_b =
+      node_index_list_get_const_indices(&node_b->children);
+  for (size_t idx = 0; idx < count; idx++) {
+    const MutableNode *child_a = &nodes[indices_a[idx]];
+    const MutableNode *child_b = &nodes[indices_b[idx]];
+    if (child_a->hash_with_node != child_b->hash_with_node) {
+      return false;
+    }
+    if (!subtree_equals(child_a, child_b, nodes)) {
       return false;
     }
   }
@@ -300,17 +315,17 @@ static inline void node_hash_table_destroy_buckets(NodeHashTable *table) {
 
 static inline MutableNode *
 node_hash_table_find_or_insert(NodeHashTable *table, MutableNode *node,
-                               MutableNodeList *nodes) {
+                               const MutableNode *nodes) {
   const uint32_t node_index = node - nodes->nodes;
-  const uint64_t hash_value = mutable_node_hash_value(node, nodes, false);
+  const uint64_t hash_value = node->hash_with_just_children;
   const size_t bucket_index = hash_value % KWG_HASH_NUMBER_OF_BUCKETS;
 
   uint32_t current_index = table->bucket_heads[bucket_index];
   uint32_t previous_index = HASH_BUCKET_ITEM_LIST_NULL_INDEX;
 
   while (current_index != HASH_BUCKET_ITEM_LIST_NULL_INDEX) {
-    MutableNode *candidate = &nodes->nodes[current_index];
-    if (mutable_node_equals(node, candidate, nodes, false)) {
+    MutableNode *candidate = &nodes[current_index];
+    if (mutable_node_equals(node, candidate, nodes)) {
       return candidate;
     }
     previous_index = current_index;
@@ -552,17 +567,21 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   }
 
   if (merging == KWG_MAKER_MERGE_EXACT) {
+    calculate_node_hash_values(nodes);
     NodeHashTable table;
     node_hash_table_create(&table, nodes->count);
-    for (size_t i = 0; i < nodes->count; i++) {
+    const size_t count = nodes->count;
+    MutableNode *nodes_array = nodes->nodes;
+    for (size_t i = 0; i < count; i++) {
       if (!output_dawg && (i == 0)) {
         continue;
       }
       if (!output_gaddag && (i == 1)) {
         continue;
       }
-      MutableNode *node = &nodes->nodes[i];
-      MutableNode *match = node_hash_table_find_or_insert(&table, node, nodes);
+      MutableNode *node = &nodes_array[i];
+      MutableNode *match =
+          node_hash_table_find_or_insert(&table, node, nodes_array);
       if (match == node) {
         continue;
       }
