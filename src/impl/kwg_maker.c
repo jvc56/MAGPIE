@@ -315,8 +315,8 @@ static inline void node_hash_table_destroy_buckets(NodeHashTable *table) {
 
 static inline MutableNode *
 node_hash_table_find_or_insert(NodeHashTable *table, MutableNode *node,
-                               const MutableNode *nodes) {
-  const uint32_t node_index = node - nodes->nodes;
+                               MutableNode *nodes) {
+  const uint32_t node_index = node - nodes;
   const uint64_t hash_value = node->hash_with_just_children;
   const size_t bucket_index = hash_value % KWG_HASH_NUMBER_OF_BUCKETS;
 
