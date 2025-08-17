@@ -334,11 +334,7 @@ void add_inference(Inference *inference_to_add,
 
   while (leave_rack_list_get_count(lrl_to_add) > 0) {
     const LeaveRack *leave_rack_to_add = leave_rack_list_pop_rack(lrl_to_add);
-    leave_rack_list_insert_rack(leave_rack_get_leave(leave_rack_to_add),
-                                leave_rack_get_exchanged(leave_rack_to_add),
-                                leave_rack_get_draws(leave_rack_to_add),
-                                leave_rack_get_equity(leave_rack_to_add),
-                                lrl_to_update);
+    leave_rack_list_insert_leave_rack(leave_rack_to_add, lrl_to_update);
   }
 }
 

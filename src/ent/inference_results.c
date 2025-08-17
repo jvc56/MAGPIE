@@ -11,14 +11,12 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-enum { NUMBER_OF_STAT_TYPES = 3 };
-
 struct InferenceResults {
   int subtotals_size;
   // Indexed by inference_stat_t
-  Stat *equity_values[NUMBER_OF_STAT_TYPES];
+  Stat *equity_values[NUMBER_OF_INFER_TYPES];
   // Indexed by inference_stat_t
-  uint64_t *subtotals[NUMBER_OF_STAT_TYPES];
+  uint64_t *subtotals[NUMBER_OF_INFER_TYPES];
   LeaveRackList *leave_rack_list;
 
   // Fields that are finalized at the end of
@@ -36,7 +34,7 @@ int get_subtotals_size(int ld_size) { return ld_size * (RACK_SIZE) * 2; }
 InferenceResults *inference_results_create(void) {
   InferenceResults *results = malloc_or_die(sizeof(InferenceResults));
   results->subtotals_size = 0;
-  for (int i = 0; i < NUMBER_OF_STAT_TYPES; i++) {
+  for (int i = 0; i < NUMBER_OF_INFER_TYPES; i++) {
     results->equity_values[i] = NULL;
     results->subtotals[i] = NULL;
   }
@@ -52,7 +50,7 @@ void inference_results_destroy_internal(InferenceResults *results) {
   if (!results) {
     return;
   }
-  for (int i = 0; i < NUMBER_OF_STAT_TYPES; i++) {
+  for (int i = 0; i < NUMBER_OF_INFER_TYPES; i++) {
     stat_destroy(results->equity_values[i]);
     free(results->subtotals[i]);
   }
@@ -75,7 +73,7 @@ void inference_results_reset(InferenceResults *results, int move_capacity,
   inference_results_destroy_internal(results);
 
   results->subtotals_size = get_subtotals_size(ld_size);
-  for (int i = 0; i < NUMBER_OF_STAT_TYPES; i++) {
+  for (int i = 0; i < NUMBER_OF_INFER_TYPES; i++) {
     results->equity_values[i] = stat_create(false);
     results->subtotals[i] =
         (uint64_t *)malloc_or_die(results->subtotals_size * sizeof(uint64_t));
@@ -84,7 +82,7 @@ void inference_results_reset(InferenceResults *results, int move_capacity,
     }
   }
 
-  results->leave_rack_list = leave_rack_list_create(move_capacity, ld_size);
+  results->leave_rack_list = leave_rack_list_create(move_capacity);
   results->target_played_tiles = NULL;
   results->target_known_unplayed_tiles = NULL;
   results->bag_as_rack = NULL;
@@ -182,7 +180,7 @@ uint64_t inference_results_get_subtotal_sum_with_minimum(
 
 void inference_results_add_subtotals(InferenceResults *result_being_added,
                                      InferenceResults *result_being_updated) {
-  for (int i = 0; i < NUMBER_OF_STAT_TYPES; i++) {
+  for (int i = 0; i < NUMBER_OF_INFER_TYPES; i++) {
     for (int j = 0; j < result_being_updated->subtotals_size; j++) {
       result_being_updated->subtotals[i][j] +=
           result_being_added->subtotals[i][j];

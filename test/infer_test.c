@@ -1,6 +1,7 @@
 #include "../src/def/inference_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/bag.h"
+#include "../src/ent/encoded_rack.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/inference_results.h"
@@ -17,6 +18,22 @@
 #include "test_util.h"
 #include <assert.h>
 #include <stdlib.h>
+
+int leave_rack_get_leave_total_letters(const LeaveRack *leave_rack,
+                                       const LetterDistribution *ld) {
+  Rack rack;
+  rack_set_dist_size(&rack, ld_get_size(ld));
+  leave_rack_get_leave(leave_rack, &rack);
+  return rack_get_total_letters(&rack);
+}
+
+int leave_rack_get_leave_letter(const LeaveRack *leave_rack, MachineLetter ml,
+                                const LetterDistribution *ld) {
+  Rack rack;
+  rack_set_dist_size(&rack, ld_get_size(ld));
+  leave_rack_get_leave(leave_rack, &rack);
+  return rack_get_letter(&rack, ml);
+}
 
 error_code_t infer_for_test(const Config *config, int target_index,
                             int target_score, int target_num_exch,
@@ -251,10 +268,10 @@ void test_infer_nonerror_cases(int number_of_threads) {
   lrl = inference_results_get_leave_rack_list(inference_results);
 
   assert(leave_rack_list_get_count(lrl) == 1);
-  assert(rack_get_total_letters(
-             leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0))) == 1);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0)),
-                         ld_hl_to_ml(ld, "S")) == 1);
+  assert(leave_rack_get_leave_total_letters(leave_rack_list_get_rack(lrl, 0),
+                                            ld) == 1);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 0),
+                                     ld_hl_to_ml(ld, "S"), ld) == 1);
 
   // Both game racks should be empty
   assert(rack_get_total_letters(player0_rack) == 0);
@@ -309,12 +326,12 @@ void test_infer_nonerror_cases(int number_of_threads) {
   lrl = inference_results_get_leave_rack_list(inference_results);
 
   assert(leave_rack_list_get_count(lrl) == 20);
-  assert(rack_get_total_letters(
-             leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0))) == 1);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0)),
-                         ld_hl_to_ml(ld, "E")) == 1);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 1)),
-                         ld_hl_to_ml(ld, "I")) == 1);
+  assert(leave_rack_get_leave_total_letters(leave_rack_list_get_rack(lrl, 0),
+                                            ld) == 1);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 0),
+                                     ld_hl_to_ml(ld, "E"), ld) == 1);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 1),
+                                     ld_hl_to_ml(ld, "I"), ld) == 1);
 
   // Both game racks should be empty
   assert(rack_get_total_letters(player0_rack) == 0);
@@ -465,32 +482,32 @@ void test_infer_nonerror_cases(int number_of_threads) {
 
   assert(leave_rack_list_get_count(lrl) == 3);
 
-  assert(rack_get_total_letters(
-             leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0))) == 3);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0)),
-                         ld_hl_to_ml(ld, "E")) == 1);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0)),
-                         ld_hl_to_ml(ld, "R")) == 1);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0)),
-                         ld_hl_to_ml(ld, "T")) == 1);
+  assert(leave_rack_get_leave_total_letters(leave_rack_list_get_rack(lrl, 0),
+                                            ld) == 3);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 0),
+                                     ld_hl_to_ml(ld, "E"), ld) == 1);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 0),
+                                     ld_hl_to_ml(ld, "R"), ld) == 1);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 0),
+                                     ld_hl_to_ml(ld, "T"), ld) == 1);
 
-  assert(rack_get_total_letters(
-             leave_rack_get_leave(leave_rack_list_get_rack(lrl, 1))) == 3);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 1)),
-                         ld_hl_to_ml(ld, "N")) == 1);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 1)),
-                         ld_hl_to_ml(ld, "R")) == 1);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 1)),
-                         ld_hl_to_ml(ld, "T")) == 1);
+  assert(leave_rack_get_leave_total_letters(leave_rack_list_get_rack(lrl, 1),
+                                            ld) == 3);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 1),
+                                     ld_hl_to_ml(ld, "N"), ld) == 1);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 1),
+                                     ld_hl_to_ml(ld, "R"), ld) == 1);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 1),
+                                     ld_hl_to_ml(ld, "T"), ld) == 1);
 
-  assert(rack_get_total_letters(
-             leave_rack_get_leave(leave_rack_list_get_rack(lrl, 2))) == 3);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 2)),
-                         ld_hl_to_ml(ld, "N")) == 1);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 2)),
-                         ld_hl_to_ml(ld, "R")) == 1);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 2)),
-                         BLANK_MACHINE_LETTER) == 1);
+  assert(leave_rack_get_leave_total_letters(leave_rack_list_get_rack(lrl, 2),
+                                            ld) == 3);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 2),
+                                     ld_hl_to_ml(ld, "N"), ld) == 1);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 2),
+                                     ld_hl_to_ml(ld, "R"), ld) == 1);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 2),
+                                     BLANK_MACHINE_LETTER, ld) == 1);
 
   // Contrive an impossible situation to easily test
   // more combinatorics
