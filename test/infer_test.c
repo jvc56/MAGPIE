@@ -1,7 +1,6 @@
 #include "../src/def/inference_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/bag.h"
-#include "../src/ent/encoded_rack.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/inference_results.h"
