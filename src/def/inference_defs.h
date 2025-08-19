@@ -11,6 +11,7 @@ typedef enum {
 typedef enum {
   INFERENCE_SUBTOTAL_DRAW,
   INFERENCE_SUBTOTAL_LEAVE,
+  NUMBER_OF_INFERENCE_SUBTOTALS,
 } inference_subtotal_t;
 
 #endif

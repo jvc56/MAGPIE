@@ -20,6 +20,7 @@ struct LeaveRack {
 struct LeaveRackList {
   int count;
   int capacity;
+  int max_all_time_capacity;
   LeaveRack *spare_leave_rack;
   LeaveRack **leave_racks;
 };
@@ -61,14 +62,21 @@ void leave_rack_destroy(LeaveRack *leave_rack) {
   free(leave_rack);
 }
 
+size_t leave_rack_get_alloc_size(const int new_capacity) {
+  // Use capacity + 1 to temporarily hold a new insertion
+  // before popping it.
+  return sizeof(LeaveRack *) * (new_capacity + 1);
+}
+
 LeaveRackList *leave_rack_list_create(int capacity) {
   LeaveRackList *lrl = malloc_or_die(sizeof(LeaveRackList));
   lrl->count = 0;
   lrl->capacity = capacity;
+  lrl->max_all_time_capacity = capacity;
   lrl->spare_leave_rack = leave_rack_create();
   // Use capacity + 1 to temporarily hold a new insertion
   // before popping it.
-  lrl->leave_racks = malloc_or_die((sizeof(LeaveRack *)) * (lrl->capacity + 1));
+  lrl->leave_racks = malloc_or_die(leave_rack_get_alloc_size(capacity));
   for (int i = 0; i < lrl->capacity + 1; i++) {
     lrl->leave_racks[i] = leave_rack_create();
   }
@@ -79,12 +87,28 @@ void leave_rack_list_destroy(LeaveRackList *lrl) {
   if (!lrl) {
     return;
   }
-  for (int i = 0; i < lrl->capacity + 1; i++) {
+  for (int i = 0; i < lrl->max_all_time_capacity + 1; i++) {
     leave_rack_destroy(lrl->leave_racks[i]);
   }
   leave_rack_destroy(lrl->spare_leave_rack);
   free(lrl->leave_racks);
   free(lrl);
+}
+
+void leave_rack_list_reset(LeaveRackList *lrl, int capacity) {
+  if (!lrl) {
+    return;
+  }
+  lrl->count = 0;
+  if (lrl->max_all_time_capacity < capacity) {
+    lrl->leave_racks =
+        realloc_or_die(lrl->leave_racks, leave_rack_get_alloc_size(capacity));
+    for (int i = lrl->max_all_time_capacity + 1; i < capacity + 1; i++) {
+      lrl->leave_racks[i] = leave_rack_create();
+    }
+    lrl->max_all_time_capacity = capacity;
+  }
+  lrl->capacity = capacity;
 }
 
 void up_heapify_leave_rack(LeaveRackList *lrl, int index) {

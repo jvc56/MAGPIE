@@ -14,6 +14,7 @@ Equity leave_rack_get_equity(const LeaveRack *leave_rack);
 typedef struct LeaveRackList LeaveRackList;
 
 LeaveRackList *leave_rack_list_create(int capacity);
+void leave_rack_list_reset(LeaveRackList *lrl, int capacity);
 void leave_rack_list_destroy(LeaveRackList *lrl);
 void leave_rack_list_sort(LeaveRackList *lrl);
 

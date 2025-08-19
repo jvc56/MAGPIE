@@ -54,6 +54,38 @@ error_code_t infer_for_test(const Config *config, int target_index,
   return status;
 }
 
+void test_leave_rack_reset(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  const LetterDistribution *ld = config_get_ld(config);
+  int ld_size = ld_get_size(ld);
+
+  Rack rack;
+  rack_set_dist_size(&rack, ld_size);
+  rack_reset(&rack);
+
+  LeaveRackList *lrl = leave_rack_list_create(10);
+
+  int capacities[] = {10, 1, 3, 5, 20, 2, 15, 14, 9, 100, 50, 3, -1};
+  int i = 0;
+  while (true) {
+    const int capacity = capacities[i];
+    if (capacity == -1) {
+      break;
+    }
+    leave_rack_list_reset(lrl, capacity);
+    for (int j = 0; j < capacity; j++) {
+      // The contents of the rack and the count doesn't matter since we are just
+      // testing that the list resizing works.
+      leave_rack_list_insert_rack(&rack, &rack, 0, 0, lrl);
+    }
+    i++;
+  }
+
+  leave_rack_list_destroy(lrl);
+  config_destroy(config);
+}
+
 void test_trivial_random_probability(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
@@ -241,6 +273,9 @@ void test_infer_nonerror_cases(int number_of_threads) {
          klv_get_leave_value(klv, rack));
   for (int i = 0; i < ld_size; i++) {
     if (i == ld_hl_to_ml(ld, "S")) {
+      printf("actual value: %lu\n", inference_results_get_subtotal(
+                                        inference_results, INFERENCE_TYPE_LEAVE,
+                                        i, 1, INFERENCE_SUBTOTAL_DRAW));
       assert(inference_results_get_subtotal(inference_results,
                                             INFERENCE_TYPE_LEAVE, i, 1,
                                             INFERENCE_SUBTOTAL_DRAW) == 3);
@@ -822,6 +857,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
 }
 
 void test_infer(void) {
+  test_leave_rack_reset();
   test_trivial_random_probability();
   test_infer_rack_overflow();
   test_infer_no_tiles_played_rack_empty();
