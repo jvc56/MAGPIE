@@ -3,12 +3,15 @@
 
 #include "../def/inference_defs.h"
 #include "../ent/game.h"
+#include "../ent/game_history.h"
 #include "../ent/inference_results.h"
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
 #include "../util/io_util.h"
 
 typedef struct InferenceArgs {
+  bool use_game_history;
+  GameHistory *game_history;
   int target_index;
   int target_score;
   int target_num_exch;

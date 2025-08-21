@@ -152,6 +152,7 @@ struct Config {
   PlayersData *players_data;
   ThreadControl *thread_control;
   Game *game;
+  GameHistory *game_history;
   MoveList *move_list;
   SimResults *sim_results;
   InferenceResults *inference_results;
@@ -784,6 +785,10 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->move_list = config_get_move_list(config);
   sim_args->known_opp_rack = known_opp_rack;
   sim_args->win_pcts = config_get_win_pcts(config);
+  sim_args->use_inference = false;
+  sim_args->inference_results = config->inference_results;
+  sim_args->game_history = config->game_history;
+  sim_args->equity_margin = config->equity_margin;
   sim_args->thread_control = config->thread_control;
   sim_args->game = config_get_game(config);
   sim_args->move_list = config_get_move_list(config);
@@ -871,6 +876,8 @@ void config_fill_infer_args(const Config *config, int target_index,
   args->move_capacity = config_get_num_plays(config);
   args->equity_margin = config_get_equity_margin(config);
   args->target_played_tiles = target_played_tiles;
+  args->use_game_history = false;
+  args->game_history = config->game_history;
   args->game = config_get_game(config);
   args->thread_control = config->thread_control;
 }
@@ -2205,6 +2212,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->thread_control = thread_control_create();
   config->game = NULL;
   config->move_list = NULL;
+  config->game_history = game_history_create();
   config->sim_results = sim_results_create();
   config->inference_results = inference_results_create();
   config->autoplay_results = autoplay_results_create();

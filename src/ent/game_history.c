@@ -118,6 +118,12 @@ void game_event_set_note(GameEvent *event, const char *note) {
 
 const char *game_event_get_note(const GameEvent *event) { return event->note; }
 
+bool game_event_is_move_type(const GameEvent *event) {
+  return event->event_type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
+         event->event_type == GAME_EVENT_EXCHANGE ||
+         event->event_type == GAME_EVENT_PASS;
+}
+
 // Returns 1 if the game event counts as a turn
 // Returns 0 otherwise
 int game_event_get_turn_value(const GameEvent *event) {
@@ -431,4 +437,16 @@ GameEvent *game_history_create_and_add_game_event(GameHistory *game_history,
       &game_history->events[game_history->number_of_events++];
   game_event_reset(game_event);
   return game_event;
+}
+
+GameEvent *game_history_get_last_move_event(const GameHistory *game_history) {
+  if (game_history->number_of_events == 0) {
+    return NULL;
+  }
+  for (int i = game_history->number_of_events - 1; i >= 0; i--) {
+    if (game_event_is_move_type(&game_history->events[i])) {
+      return game_history_get_event(game_history, i);
+    }
+  }
+  return NULL;
 }

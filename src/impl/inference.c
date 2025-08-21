@@ -6,6 +6,7 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
+#include "../ent/alias_method.h"
 #include "../ent/bag.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -22,6 +23,7 @@
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
+#include "gcg.h"
 #include "move_gen.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -181,6 +183,9 @@ void evaluate_possible_leave(Inference *inference) {
           inference->current_target_leave, inference->current_target_exchanged,
           (int)number_of_draws_for_leave, current_leave_value,
           inference_results_get_leave_rack_list(inference->results));
+      alias_method_add_rack(
+          inference_results_get_alias_method(inference->results),
+          inference->current_target_leave, (int)number_of_draws_for_leave);
       rack_reset(inference->current_target_exchanged);
       for (int exchanged_tile_index = 0; exchanged_tile_index < tiles_played;
            exchanged_tile_index++) {
@@ -193,6 +198,9 @@ void evaluate_possible_leave(Inference *inference) {
                          INFERENCE_TYPE_LEAVE,
                          equity_to_double(current_leave_value),
                          number_of_draws_for_leave);
+      alias_method_add_rack(
+          inference_results_get_alias_method(inference->results),
+          inference->current_target_leave, (int)number_of_draws_for_leave);
       leave_rack_list_insert_rack(
           inference->current_target_leave, NULL, (int)number_of_draws_for_leave,
           current_leave_value,
@@ -564,6 +572,94 @@ void verify_inference(const Inference *inference, ErrorStack *error_stack) {
   }
 }
 
+void infer_with_allocated_inference(InferenceArgs *args, Inference *inference,
+                                    ErrorStack *error_stack) {
+  verify_inference(inference, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  infer_manager(args->thread_control, inference);
+
+  inference_results_finalize(
+      args->target_played_tiles, inference->current_target_leave,
+      inference->bag_as_rack, inference->results, inference->target_score,
+      inference->target_number_of_tiles_exchanged, inference->equity_margin);
+
+  if (thread_control_get_status(args->thread_control) ==
+      THREAD_CONTROL_STATUS_MAX_ITERATIONS) {
+    // Only print if infer was able to finish normally.
+    // If thread_control_set_status status isn't max iterations, it was
+    // interrupted by the user and the results will not be valid.
+    print_ucgi_inference(game_get_ld(inference->game), inference->results,
+                         args->thread_control);
+  }
+
+  // Return the player to infer rack to it's original
+  // state since the inference does not own that struct
+  for (int i = 0; i < rack_get_dist_size(args->target_played_tiles); i++) {
+    for (int j = 0; j < rack_get_letter(args->target_played_tiles, i); j++) {
+      rack_take_letter(inference->current_target_rack, i);
+    }
+  }
+}
+
+void infer_with_game_duplicate(InferenceArgs *args, InferenceResults *results,
+                               Game *game, ErrorStack *error_stack) {
+  Rack target_played_tiles;
+  int target_index = -1;
+  int target_score = -1;
+  int target_num_exch = -1;
+  if (args->use_game_history) {
+    GameHistory *game_history = args->game_history;
+    // FIXME: do not play to end, just get the last move using current move
+    // index
+    game_play_to_end(game_history, game, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    rack_set_dist_size(&target_played_tiles, ld_get_size(game_get_ld(game)));
+    rack_reset(&target_played_tiles);
+    target_num_exch = 0;
+    const GameEvent *last_event =
+        game_history_get_last_move_event(game_history);
+    if (last_event) {
+      const ValidatedMoves *last_move = game_event_get_vms(last_event);
+      const Move *move = validated_moves_get_move(last_move, 0);
+      const int move_tiles_length = move_get_tiles_length(move);
+      for (int i = 0; i < move_tiles_length; i++) {
+        if (move_get_tile(move, i) != PLAYED_THROUGH_MARKER) {
+          if (get_is_blanked(move_get_tile(move, i))) {
+            rack_add_letter(&target_played_tiles, BLANK_MACHINE_LETTER);
+          } else {
+            rack_add_letter(&target_played_tiles, move_get_tile(move, i));
+          }
+        }
+      }
+      target_index = game_event_get_player_index(last_event);
+      target_score = game_event_get_move_score(last_event);
+      target_num_exch = 0;
+      if (move_get_type(move) == GAME_EVENT_EXCHANGE) {
+        target_num_exch = move_get_tiles_played(move);
+      }
+    }
+  } else {
+    rack_copy(&target_played_tiles, args->target_played_tiles);
+    target_index = args->target_index;
+    target_score = args->target_score;
+    target_num_exch = args->target_num_exch;
+  }
+
+  Inference *inference = inference_create(
+      &target_played_tiles, game, args->move_capacity, target_index,
+      target_score, target_num_exch, args->equity_margin, results);
+
+  infer_with_allocated_inference(args, inference, error_stack);
+
+  inference_destroy(inference);
+}
+
 void infer(InferenceArgs *args, InferenceResults *results,
            ErrorStack *error_stack) {
   if (!args->target_played_tiles) {
@@ -572,42 +668,8 @@ void infer(InferenceArgs *args, InferenceResults *results,
                                       "specified for the inference"));
     return;
   }
-
   Game *game = game_duplicate(args->game);
-
-  Inference *inference = inference_create(
-      args->target_played_tiles, game, args->move_capacity, args->target_index,
-      args->target_score, args->target_num_exch, args->equity_margin, results);
-
-  verify_inference(inference, error_stack);
-
-  if (error_stack_is_empty(error_stack)) {
-    infer_manager(args->thread_control, inference);
-
-    inference_results_finalize(
-        args->target_played_tiles, inference->current_target_leave,
-        inference->bag_as_rack, inference->results, inference->target_score,
-        inference->target_number_of_tiles_exchanged, inference->equity_margin);
-
-    if (thread_control_get_status(args->thread_control) ==
-        THREAD_CONTROL_STATUS_MAX_ITERATIONS) {
-      // Only print if infer was able to finish normally.
-      // If thread_control_set_status status isn't max iterations, it was
-      // interrupted by the user and the results will not be valid.
-      print_ucgi_inference(game_get_ld(inference->game), inference->results,
-                           args->thread_control);
-    }
-
-    // Return the player to infer rack to it's original
-    // state since the inference does not own that struct
-    for (int i = 0; i < rack_get_dist_size(args->target_played_tiles); i++) {
-      for (int j = 0; j < rack_get_letter(args->target_played_tiles, i); j++) {
-        rack_take_letter(inference->current_target_rack, i);
-      }
-    }
-  }
-
+  infer_with_game_duplicate(args, results, game, error_stack);
   game_destroy(game);
-  inference_destroy(inference);
   gen_destroy_cache();
 }

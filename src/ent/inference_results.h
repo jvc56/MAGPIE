@@ -2,6 +2,7 @@
 #define INFERENCE_RESULTS_H
 
 #include "../def/inference_defs.h"
+#include "alias_method.h"
 #include "leave_rack.h"
 #include "rack.h"
 #include "stats.h"
@@ -48,6 +49,8 @@ uint64_t inference_results_get_subtotal_sum_with_minimum(
     int subtotal_index_offset);
 LeaveRackList *inference_results_get_leave_rack_list(
     const InferenceResults *inference_results);
+AliasMethod *
+inference_results_get_alias_method(const InferenceResults *inference_results);
 void inference_results_add_subtotals(InferenceResults *result_being_added,
                                      InferenceResults *result_being_updated);
 void inference_results_set_stat_for_letter(InferenceResults *inference_results,

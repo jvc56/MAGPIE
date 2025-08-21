@@ -2,6 +2,7 @@
 
 #include "../def/game_defs.h"
 #include "../def/rack_defs.h"
+#include "../ent/alias_method.h"
 #include "../ent/bag.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -323,6 +324,8 @@ typedef struct Simmer {
   SimmerWorker **workers;
   // Owned by the caller
   const WinPct *win_pcts;
+  bool use_inference;
+  const InferenceResults *inference_results;
   ThreadControl *thread_control;
   SimResults *sim_results;
 } Simmer;
@@ -376,11 +379,21 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
 
   // This will shuffle the bag, so there is no need
   // to call bag_shuffle explicitly.
-  game_seed(game, simmed_play_get_seed(simmed_play));
+  const uint64_t seed = simmed_play_get_seed(simmed_play);
+  game_seed(game, seed);
 
   int player_off_turn_index = 1 - game_get_player_on_turn_index(game);
   // set random rack for opponent (throw in rack, bag_shuffle, draw new tiles).
-  set_random_rack(game, player_off_turn_index, simmer->known_opp_rack);
+  if (simmer->use_inference) {
+    Rack inferred_rack;
+    rack_set_dist_size(&inferred_rack, simmer->dist_size);
+    alias_method_sample(
+        inference_results_get_alias_method(simmer->inference_results), seed,
+        &inferred_rack);
+    set_random_rack(game, player_off_turn_index, &inferred_rack);
+  } else {
+    set_random_rack(game, player_off_turn_index, simmer->known_opp_rack);
+  }
 
   Equity leftover = 0;
   game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
@@ -512,6 +525,8 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   }
 
   simmer->win_pcts = sim_args->win_pcts;
+  simmer->use_inference = sim_args->use_inference;
+  simmer->inference_results = sim_args->inference_results;
 
   simmer->thread_control = thread_control;
 

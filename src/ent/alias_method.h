@@ -24,6 +24,7 @@ typedef struct AliasMethod {
   uint32_t num_items;
   uint32_t capacity;
   uint64_t total_item_count;
+  XoshiroPRNG *prng;
 } AliasMethod;
 
 static inline AliasMethod *alias_method_create(void) {
@@ -33,6 +34,7 @@ static inline AliasMethod *alias_method_create(void) {
       (AliasMethodItem *)malloc_or_die(sizeof(AliasMethodItem) * am->capacity);
   am->num_items = 0;
   am->total_item_count = 0;
+  am->prng = prng_create(0);
   return am;
 }
 
@@ -127,16 +129,17 @@ static inline void alias_method_generate_tables(AliasMethod *am) {
   }
 }
 
-static inline void alias_method_sample(AliasMethod *am, XoshiroPRNG *prng,
+static inline void alias_method_sample(AliasMethod *am, const uint64_t seed,
                                        Rack *rack_to_update) {
   if (am->num_items == 0) {
     log_fatal("cannot sample from an empty alias method");
   }
 
-  // Choose a random bin
-  const uint32_t bin = (uint32_t)prng_get_random_number(prng, am->num_items);
+  prng_seed(am->prng, seed);
+  const uint32_t bin =
+      (uint32_t)prng_get_random_number(am->prng, am->num_items);
   const double rand_between_0_and_1 =
-      (double)prng_get_random_number(prng, XOSHIRO_MAX) / XOSHIRO_MAX;
+      (double)prng_get_random_number(am->prng, XOSHIRO_MAX) / XOSHIRO_MAX;
 
   uint32_t chosen_idx;
   if (rand_between_0_and_1 < am->items[bin].probability) {

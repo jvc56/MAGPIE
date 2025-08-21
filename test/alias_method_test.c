@@ -41,7 +41,7 @@ void test_alias_method_dist(const Config *config, AliasMethod *am,
   const int total_samples = 10000;
 
   for (int i = 0; i < total_samples; i++) {
-    alias_method_sample(am, prng, &rack);
+    alias_method_sample(am, prng_get_random_number(prng, XOSHIRO_MAX), &rack);
     uint32_t klv_index = klv_get_word_index(klv, &rack);
     for (int j = 0; j < num_entries; j++) {
       AliasMethodTestDistEntry *entry = &test_entries[j];
