@@ -59,10 +59,10 @@ struct Game {
   Rack *cross_set_rack;
   game_variant_t variant;
   // Backups
-  MinimalGameBackup *game_backups[MAX_SEARCH_DEPTH];
+  MinimalGameBackup *sim_game_backups[MAX_SEARCH_DEPTH];
   int backup_cursor;
+  MinimalGameBackup *gcg_game_backup;
   backup_mode_t backup_mode;
-  bool backups_preallocated;
 };
 
 game_variant_t game_get_variant(const Game *game) { return game->variant; }
@@ -447,25 +447,34 @@ void game_set_starting_player_index(Game *game, int starting_player_index) {
   game->player_on_turn_index = starting_player_index;
 }
 
-void pre_allocate_backups(Game *game) {
-  // pre-allocate heap backup structures to make backups as fast as possible.
+void pre_allocate_single_game_backup(MinimalGameBackup *mgb, Game *game) {
   const LetterDistribution *ld = game_get_ld(game);
-  int ld_size = ld_get_size(ld);
-  for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
-    game->game_backups[i] = malloc_or_die(sizeof(MinimalGameBackup));
-    game->game_backups[i]->bag = bag_create(ld, 0);
-    game->game_backups[i]->board = board_duplicate(game_get_board(game));
-    game->game_backups[i]->p0rack = rack_create(ld_size);
-    game->game_backups[i]->p1rack = rack_create(ld_size);
-  }
+  const int ld_size = ld_get_size(ld);
+  mgb->bag = bag_create(ld, 0);
+  mgb->board = board_duplicate(game_get_board(game));
+  mgb->p0rack = rack_create(ld_size);
+  mgb->p1rack = rack_create(ld_size);
 }
 
 void game_set_backup_mode(Game *game, backup_mode_t backup_mode) {
   game->backup_mode = backup_mode;
-  if (backup_mode == BACKUP_MODE_SIMULATION && !game->backups_preallocated) {
-    game->backup_cursor = 0;
-    pre_allocate_backups(game);
-    game->backups_preallocated = true;
+  switch (game->backup_mode) {
+  case BACKUP_MODE_OFF:
+    break;
+  case BACKUP_MODE_SIMULATION:
+    if (!game->sim_game_backups[0]) {
+      for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
+        game->sim_game_backups[i] = malloc_or_die(sizeof(MinimalGameBackup));
+        pre_allocate_single_game_backup(game->sim_game_backups[i], game);
+      }
+    }
+    break;
+  case BACKUP_MODE_GCG:
+    if (!game->gcg_game_backup) {
+      game->gcg_game_backup = malloc_or_die(sizeof(MinimalGameBackup));
+      pre_allocate_single_game_backup(game->gcg_game_backup, game);
+    }
+    break;
   }
 }
 
@@ -519,11 +528,11 @@ Game *game_create(const GameArgs *game_args) {
   }
 
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
-    game->game_backups[i] = NULL;
+    game->sim_game_backups[i] = NULL;
   }
   game->backup_cursor = 0;
   game->backup_mode = BACKUP_MODE_OFF;
-  game->backups_preallocated = false;
+  game->gcg_game_backup = NULL;
   return game;
 }
 
@@ -558,47 +567,60 @@ Game *game_duplicate(const Game *game) {
   // note: game backups must be explicitly handled by the caller if they want
   // game copies to have backups.
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
-    new_game->game_backups[i] = NULL;
+    new_game->sim_game_backups[i] = NULL;
   }
   new_game->backup_cursor = 0;
   new_game->backup_mode = BACKUP_MODE_OFF;
-  new_game->backups_preallocated = false;
+  new_game->gcg_game_backup = NULL;
   return new_game;
 }
 
 // Backups do not restore the move list or
 // generator.
 void game_backup(Game *game) {
-  if (game->backup_mode == BACKUP_MODE_OFF) {
+  MinimalGameBackup *state = NULL;
+  switch (game->backup_mode) {
+  case BACKUP_MODE_OFF:
     return;
-  }
-  if (game->backup_mode == BACKUP_MODE_SIMULATION) {
-    MinimalGameBackup *state = game->game_backups[game->backup_cursor];
-    board_copy(state->board, game->board);
-    bag_copy(state->bag, game->bag);
-    state->game_end_reason = game->game_end_reason;
-    state->player_on_turn_index = game->player_on_turn_index;
-    state->starting_player_index = game->starting_player_index;
-    state->consecutive_scoreless_turns = game->consecutive_scoreless_turns;
-    const Player *player0 = game->players[0];
-    const Player *player1 = game->players[1];
-    rack_copy(state->p0rack, player_get_rack(player0));
-    state->p0score = player_get_score(player0);
-    rack_copy(state->p1rack, player_get_rack(player1));
-    state->p1score = player_get_score(player1);
-
+    break;
+  case BACKUP_MODE_SIMULATION:
+    state = game->sim_game_backups[game->backup_cursor];
     game->backup_cursor++;
+    break;
+  case BACKUP_MODE_GCG:
+    state = game->gcg_game_backup;
+    break;
   }
+  board_copy(state->board, game->board);
+  bag_copy(state->bag, game->bag);
+  state->game_end_reason = game->game_end_reason;
+  state->player_on_turn_index = game->player_on_turn_index;
+  state->starting_player_index = game->starting_player_index;
+  state->consecutive_scoreless_turns = game->consecutive_scoreless_turns;
+  const Player *player0 = game->players[0];
+  const Player *player1 = game->players[1];
+  rack_copy(state->p0rack, player_get_rack(player0));
+  state->p0score = player_get_score(player0);
+  rack_copy(state->p1rack, player_get_rack(player1));
+  state->p1score = player_get_score(player1);
 }
 
 void game_unplay_last_move(Game *game) {
   // restore from backup (pop the last element).
-  if (game->backup_cursor == 0) {
-    log_fatal("cannot unplay last move without a game backup");
+  MinimalGameBackup *state = NULL;
+  // Since there are two kinds of backups and a restore from backup can occur
+  // with the backup mode off, we check which kind of backup to perform by
+  // checking for sim backups first.
+  if (game->sim_game_backups[0]) {
+    if (game->backup_cursor == 0) {
+      log_fatal("cannot unplay last move without a game backup");
+    }
+    // cppcheck-suppress negativeIndex
+    state = game->sim_game_backups[game->backup_cursor - 1];
+    game->backup_cursor--;
+  } else {
+    state = game->gcg_game_backup;
   }
-  // cppcheck-suppress negativeIndex
-  const MinimalGameBackup *state = game->game_backups[game->backup_cursor - 1];
-  game->backup_cursor--;
 
   game->consecutive_scoreless_turns = state->consecutive_scoreless_turns;
   game->game_end_reason = state->game_end_reason;
@@ -615,13 +637,22 @@ void game_unplay_last_move(Game *game) {
   board_copy(game->board, state->board);
 }
 
+void single_game_backup_destroy(MinimalGameBackup *mgb) {
+  rack_destroy(mgb->p0rack);
+  rack_destroy(mgb->p1rack);
+  bag_destroy(mgb->bag);
+  board_destroy(mgb->board);
+  free(mgb);
+}
+
 void backups_destroy(Game *game) {
-  for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
-    rack_destroy(game->game_backups[i]->p0rack);
-    rack_destroy(game->game_backups[i]->p1rack);
-    bag_destroy(game->game_backups[i]->bag);
-    board_destroy(game->game_backups[i]->board);
-    free(game->game_backups[i]);
+  if (game->gcg_game_backup) {
+    single_game_backup_destroy(game->gcg_game_backup);
+  }
+  if (game->sim_game_backups[0]) {
+    for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
+      single_game_backup_destroy(game->sim_game_backups[i]);
+    }
   }
 }
 
@@ -636,9 +667,7 @@ void game_destroy(Game *game) {
   player_destroy(game->players[0]);
   player_destroy(game->players[1]);
   rack_destroy(game->cross_set_rack);
-  if (game->backups_preallocated) {
-    backups_destroy(game);
-  }
+  backups_destroy(game);
   free(game);
 }
 

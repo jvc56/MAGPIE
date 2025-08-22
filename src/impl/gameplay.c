@@ -331,9 +331,7 @@ void draw_starting_racks(const Game *game) {
 // the play in the leave rack.
 play_move_status_t play_move(const Move *move, Game *game,
                              const Rack *rack_to_draw, Rack *leave) {
-  if (game_get_backup_mode(game) == BACKUP_MODE_SIMULATION) {
-    game_backup(game);
-  }
+  game_backup(game);
   const LetterDistribution *ld = game_get_ld(game);
   int player_on_turn_index = game_get_player_on_turn_index(game);
   Player *player_on_turn = game_get_player(game, player_on_turn_index);

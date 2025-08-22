@@ -717,7 +717,7 @@ void play_game_history_turn(GameHistory *game_history, Game *game,
       vms = game_event_get_vms(game_event);
     }
 
-    game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
+    game_set_backup_mode(game, BACKUP_MODE_GCG);
     play_move_status_t play_move_status =
         play_move(validated_moves_get_move(vms, 0), game,
                   get_player_next_rack(game_history, game_event_index,
