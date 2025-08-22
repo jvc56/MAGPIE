@@ -20,6 +20,29 @@ char *get_xt_gcg_string(const char *identifier, ErrorStack *error_stack) {
 
   // Check if this is a Cross-tables URL
   if (strstr(identifier, "cross-tables.com") != NULL) {
+      // Check if it's a direct GCG URL first
+      if (strstr(identifier, "cross-tables.com/annotated/selfgcg") != NULL) {
+          // Direct URL to GCG file - download directly
+          char *curl_cmd = get_formatted_string("curl -s -L \"%s\"", identifier);
+          char *gcg_content = get_process_output(curl_cmd);
+          free(curl_cmd);
+          
+          if (!gcg_content) {
+              error_stack_push(error_stack, ERROR_STATUS_BAD_XT_GCG,
+                              get_formatted_string("Failed to get response from cross-tables URL: %s", identifier));
+              return NULL;
+          }
+          
+          if (!is_valid_gcg_content(gcg_content)) {
+              free(gcg_content);
+              error_stack_push(error_stack, ERROR_STATUS_BAD_XT_GCG,
+                              get_formatted_string("Invalid or missing GCG content from cross-tables URL: %s", identifier));
+              return NULL;
+          }
+          
+          return gcg_content;
+      }
+      
       // Extract game ID from URL parameter u=XXXXX using regex
       regex_t regex;
       regmatch_t matches[2];
@@ -181,6 +204,7 @@ char *get_woogles_gcg_string(const char *identifier, ErrorStack *error_stack) {
     return gcg_content;
 }
 
+
 char *get_local_gcg_string(const char *identifier, ErrorStack *error_stack) {
     
     // Check if file exists and is readable
@@ -194,6 +218,10 @@ char *get_local_gcg_string(const char *identifier, ErrorStack *error_stack) {
 
     // Read file content directly
     char *gcg_content = get_string_from_file(identifier, error_stack);
+
+    if (!error_stack_is_empty(error_stack)) {
+        return NULL;
+    }
 
     if (!is_valid_gcg_content(gcg_content)) {
         free(gcg_content);
@@ -212,10 +240,10 @@ char *get_gcg_string(const DownloadGCGOptions *options, ErrorStack *error_stack)
     }
     const char *identifier = options->source_identifier;
     
-    // Try Cross-tables first 
+    // Try cross-tables first 
     char *gcg_string = get_xt_gcg_string(identifier, error_stack);
     if (!error_stack_is_empty(error_stack)) {
-        return NULL;  // Fatal error occurred
+        return NULL; 
     }
     if (gcg_string) {
         return gcg_string;
@@ -224,16 +252,17 @@ char *get_gcg_string(const DownloadGCGOptions *options, ErrorStack *error_stack)
     // Try Woogles
     gcg_string = get_woogles_gcg_string(identifier, error_stack);
     if (!error_stack_is_empty(error_stack)) {
-        return NULL;  // Fatal error occurred
+        return NULL;  
     }
     if (gcg_string) {
         return gcg_string;
     }
 
+
     // Try local file
     gcg_string = get_local_gcg_string(identifier, error_stack);
     if (!error_stack_is_empty(error_stack)) {
-        return NULL;  // Fatal error occurred
+        return NULL; 
     }
     if (gcg_string) {
         return gcg_string;
@@ -257,16 +286,8 @@ void download_gcg(const DownloadGCGOptions *options, GameHistory *game_history, 
         return;  // Error already pushed to stack by get_gcg_string
     }
 
-    Config *config_to_use = options->config;
-    if (!config_to_use) {
-        error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
-                         string_duplicate("GCG content downloaded successfully but parsing requires a valid config"));
-        free(gcg_content);
-        return;
-    }
-
     // Parse the GCG content using the provided parser
-    parse_gcg_string(gcg_content, config_to_use, game_history, error_stack);
+    parse_gcg_string(gcg_content, options->config, game_history, error_stack);
 
     // Clean up
     free(gcg_content);
