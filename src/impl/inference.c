@@ -608,9 +608,9 @@ void infer_with_allocated_inference(InferenceArgs *args, Inference *inference,
 void infer_with_game_duplicate(InferenceArgs *args, InferenceResults *results,
                                Game *game, ErrorStack *error_stack) {
   Rack target_played_tiles;
-  int target_index = -1;
-  int target_score = -1;
-  int target_num_exch = -1;
+  int target_index = 0;
+  int target_score = 0;
+  int target_num_exch = 0;
   if (args->use_game_history) {
     GameHistory *game_history = args->game_history;
     // FIXME: do not play to end, just get the last move using current move

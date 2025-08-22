@@ -15,7 +15,12 @@ struct Stat {
   bool mean_is_estimated;
 };
 
-void stat_reset(Stat *stat) { memset(stat, 0, sizeof(Stat)); }
+void stat_reset(Stat *stat) {
+  stat->num_unique_samples = 0;
+  stat->num_samples = 0;
+  stat->mean = 0;
+  stat->sum_of_mean_differences_squared = 0;
+}
 
 Stat *stat_create(bool mean_is_estimated) {
   Stat *stat = malloc_or_die(sizeof(Stat));

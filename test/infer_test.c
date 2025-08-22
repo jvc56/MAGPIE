@@ -3,6 +3,7 @@
 #include "../src/ent/bag.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
+#include "../src/ent/game_history.h"
 #include "../src/ent/inference_results.h"
 #include "../src/ent/klv.h"
 #include "../src/ent/leave_rack.h"
@@ -11,6 +12,7 @@
 #include "../src/ent/rack.h"
 #include "../src/ent/stats.h"
 #include "../src/impl/config.h"
+#include "../src/impl/gcg.h"
 #include "../src/util/io_util.h"
 #include "../src/util/math_util.h"
 #include "test_constants.h"
@@ -46,8 +48,24 @@ error_code_t infer_for_test(const Config *config, int target_index,
   }
   ErrorStack *error_stack = error_stack_create();
   set_thread_control_status_to_start(config_get_thread_control(config));
-  config_infer(config, target_index, target_score, target_num_exch,
+  config_infer(config, false, target_index, target_score, target_num_exch,
                target_played_tiles, inference_results, error_stack);
+  error_code_t status = error_stack_top(error_stack);
+  rack_destroy(target_played_tiles);
+  error_stack_destroy(error_stack);
+  return status;
+}
+
+// Assumes the config game history has been loaded
+error_code_t infer_for_test_with_history(const Config *config,
+                                         InferenceResults *inference_results) {
+  const Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  Rack *target_played_tiles = rack_create(ld_get_size(ld));
+  ErrorStack *error_stack = error_stack_create();
+  set_thread_control_status_to_start(config_get_thread_control(config));
+  config_infer(config, true, 0, 0, 0, target_played_tiles, inference_results,
+               error_stack);
   error_code_t status = error_stack_top(error_stack);
   rack_destroy(target_played_tiles);
   error_stack_destroy(error_stack);
@@ -159,10 +177,18 @@ void test_infer_no_tiles_played_rack_empty(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
+  ErrorStack *error_stack = error_stack_create();
   InferenceResults *inference_results = inference_results_create();
   error_code_t status = infer_for_test(config, 0, 0, 0, "", inference_results);
   assert(status == ERROR_STATUS_INFERENCE_NO_TILES_PLAYED);
 
+  GameHistory *game_history = config_get_game_history(config);
+  assert(test_parse_gcg("success_just_last_rack_write1", config,
+                        game_history) == ERROR_STATUS_SUCCESS);
+  status = infer_for_test_with_history(config, inference_results);
+  assert(status == ERROR_STATUS_INFERENCE_NO_TILES_PLAYED);
+
+  error_stack_destroy(error_stack);
   inference_results_destroy(inference_results);
   config_destroy(config);
 }

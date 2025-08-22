@@ -325,6 +325,10 @@ ThreadControl *config_get_thread_control(const Config *config) {
 
 Game *config_get_game(const Config *config) { return config->game; }
 
+GameHistory *config_get_game_history(const Config *config) {
+  return config->game_history;
+}
+
 MoveList *config_get_move_list(const Config *config) {
   return config->move_list;
 }
@@ -867,32 +871,42 @@ char *status_sim(Config *config) {
 
 // Inference
 
-void config_fill_infer_args(const Config *config, int target_index,
-                            int target_score, int target_num_exch,
-                            Rack *target_played_tiles, InferenceArgs *args) {
+void config_fill_infer_args(const Config *config, bool use_game_history,
+                            int target_index, int target_score,
+                            int target_num_exch, Rack *target_played_tiles,
+                            InferenceArgs *args) {
   args->target_index = target_index;
   args->target_score = target_score;
   args->target_num_exch = target_num_exch;
   args->move_capacity = config_get_num_plays(config);
   args->equity_margin = config_get_equity_margin(config);
   args->target_played_tiles = target_played_tiles;
-  args->use_game_history = false;
+  args->use_game_history = use_game_history;
   args->game_history = config->game_history;
   args->game = config_get_game(config);
   args->thread_control = config->thread_control;
 }
 
-void config_infer(const Config *config, int target_index, int target_score,
-                  int target_num_exch, Rack *target_played_tiles,
-                  InferenceResults *results, ErrorStack *error_stack) {
+// Use target_index < 0 to infer using the game history
+void config_infer(const Config *config, bool use_game_history, int target_index,
+                  int target_score, int target_num_exch,
+                  Rack *target_played_tiles, InferenceResults *results,
+                  ErrorStack *error_stack) {
   InferenceArgs args;
-  config_fill_infer_args(config, target_index, target_score, target_num_exch,
-                         target_played_tiles, &args);
+  config_fill_infer_args(config, use_game_history, target_index, target_score,
+                         target_num_exch, target_played_tiles, &args);
   return infer(&args, results, error_stack);
 }
 
 void config_infer_with_rack(Config *config, Rack *target_played_tiles,
                             ErrorStack *error_stack) {
+  // FIXME: allow infer to use zero args
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_INFER) == 0) {
+    config_infer(config, true, 0, 0, 0, target_played_tiles,
+                 config->inference_results, error_stack);
+    return;
+  }
+
   const char *target_index_str =
       config_get_parg_value(config, ARG_TOKEN_INFER, 0);
   int target_index;
@@ -949,7 +963,7 @@ void config_infer_with_rack(Config *config, Rack *target_played_tiles,
     }
   }
 
-  config_infer(config, target_index, target_score, target_num_exch,
+  config_infer(config, false, target_index, target_score, target_num_exch,
                target_played_tiles, config->inference_results, error_stack);
 }
 
