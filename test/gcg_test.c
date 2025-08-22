@@ -840,6 +840,27 @@ void test_success_incomplete(GameHistory *game_history) {
   config_destroy(config);
 }
 
+void test_success_long_game(GameHistory *game_history) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = config_get_ld(config);
+  Rack *rack = rack_create(ld_get_size(ld));
+  const char *gcg_filename;
+  error_code_t gcg_parse_status;
+
+  gcg_filename = "success_long_game";
+  gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game);
+
+  game_history_reset(game_history);
+  rack_destroy(rack);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_write_gcg(GameHistory *game_history) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
@@ -954,6 +975,7 @@ void test_gcg(void) {
   test_success_five_point_challenge(game_history);
   test_success_six_pass(game_history);
   test_success_incomplete(game_history);
+  test_success_long_game(game_history);
   test_write_gcg(game_history);
   test_partially_known_rack_from_phonies(game_history);
   game_history_destroy(game_history);
