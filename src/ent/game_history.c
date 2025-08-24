@@ -439,14 +439,14 @@ GameEvent *game_history_create_and_add_game_event(GameHistory *game_history,
   return game_event;
 }
 
-GameEvent *game_history_get_last_move_event(const GameHistory *game_history) {
+int game_history_get_last_move_event_index(const GameHistory *game_history) {
   if (game_history->number_of_events == 0) {
-    return NULL;
+    return -1;
   }
   for (int i = game_history->number_of_events - 1; i >= 0; i--) {
     if (game_event_is_move_type(&game_history->events[i])) {
-      return game_history_get_event(game_history, i);
+      return i;
     }
   }
-  return NULL;
+  return -1;
 }

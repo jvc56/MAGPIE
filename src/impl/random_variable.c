@@ -387,10 +387,11 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   if (simmer->use_inference) {
     Rack inferred_rack;
     rack_set_dist_size(&inferred_rack, simmer->dist_size);
-    alias_method_sample(
-        inference_results_get_alias_method(simmer->inference_results), seed,
-        &inferred_rack);
-    set_random_rack(game, player_off_turn_index, &inferred_rack);
+    if (alias_method_sample(
+            inference_results_get_alias_method(simmer->inference_results), seed,
+            &inferred_rack)) {
+      set_random_rack(game, player_off_turn_index, &inferred_rack);
+    }
   } else {
     set_random_rack(game, player_off_turn_index, simmer->known_opp_rack);
   }

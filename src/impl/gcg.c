@@ -1617,8 +1617,13 @@ void parse_gcg(const char *gcg_filename, Config *config,
   free(gcg_string);
 }
 
-void game_play_to_turn(GameHistory *game_history, Game *game, int turn_index,
-                       ErrorStack *error_stack) {
+// Use turn or event index 0 to go to the start of the game.
+// Calling with turn_or_event_index n will set the game state to after the
+// nth turn has been played where n is 1-indexed.
+void game_play_to_turn_or_event_index(GameHistory *game_history, Game *game,
+                                      const int turn_or_event_index,
+                                      const bool is_turn_index,
+                                      ErrorStack *error_stack) {
   game_reset(game);
   // Draw the initial racks
   draw_initial_racks(game, game_history, error_stack);
@@ -1626,16 +1631,23 @@ void game_play_to_turn(GameHistory *game_history, Game *game, int turn_index,
     return;
   }
   int number_of_game_events = game_history_get_number_of_events(game_history);
-  int current_turn_index = 0;
+  int current_index = 0;
   const int ld_size = ld_get_size(game_get_ld(game));
   game_history_init_player_phony_calc_racks(game_history, ld_size);
   for (int game_event_index = 0; game_event_index < number_of_game_events;
        game_event_index++) {
     const GameEvent *game_event =
         game_history_get_event(game_history, game_event_index);
-    current_turn_index += game_event_get_turn_value(game_event);
-    if (current_turn_index > turn_index && !game_over(game)) {
-      break;
+    if (is_turn_index) {
+      current_index += game_event_get_turn_value(game_event);
+      if (current_index > turn_or_event_index && !game_over(game)) {
+        break;
+      }
+    } else {
+      current_index++;
+      if (current_index > turn_or_event_index) {
+        break;
+      }
     }
     play_game_history_turn(game_history, game, game_event_index, false,
                            error_stack);
@@ -1685,6 +1697,18 @@ void game_play_to_turn(GameHistory *game_history, Game *game, int turn_index,
             player_on_turn_index + 1));
     return;
   }
+}
+
+void game_play_to_turn(GameHistory *game_history, Game *game, int turn_index,
+                       ErrorStack *error_stack) {
+  game_play_to_turn_or_event_index(game_history, game, turn_index, true,
+                                   error_stack);
+}
+
+void game_play_to_event_index(GameHistory *game_history, Game *game,
+                              int event_index, ErrorStack *error_stack) {
+  game_play_to_turn_or_event_index(game_history, game, event_index, false,
+                                   error_stack);
 }
 
 void game_play_to_end(GameHistory *game_history, Game *game,

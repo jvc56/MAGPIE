@@ -1,6 +1,7 @@
 #ifndef ALIAS_METHOD_H
 #define ALIAS_METHOD_H
 
+#include "../compat/cpthread.h"
 #include "../util/io_util.h"
 #include "encoded_rack.h"
 #include "rack.h"
@@ -25,6 +26,7 @@ typedef struct AliasMethod {
   uint32_t capacity;
   uint64_t total_item_count;
   XoshiroPRNG *prng;
+  cpthread_mutex_t mutex;
 } AliasMethod;
 
 static inline AliasMethod *alias_method_create(void) {
@@ -35,11 +37,16 @@ static inline AliasMethod *alias_method_create(void) {
   am->num_items = 0;
   am->total_item_count = 0;
   am->prng = prng_create(0);
+  cpthread_mutex_init(&am->mutex);
   return am;
 }
 
 static inline void alias_method_destroy(AliasMethod *am) {
+  if (!am) {
+    return;
+  }
   free(am->items);
+  prng_destroy(am->prng);
   free(am);
 }
 
@@ -48,27 +55,30 @@ static inline void alias_method_reset(AliasMethod *am) {
   am->total_item_count = 0;
 }
 
+// Thread safe
 static inline void alias_method_add_rack(AliasMethod *am, Rack *rack,
                                          int count) {
+  int new_item_index;
+  cpthread_mutex_lock(&am->mutex);
   if (am->num_items == am->capacity) {
     am->capacity *= 2;
     am->items = (AliasMethodItem *)realloc_or_die(
         am->items, sizeof(AliasMethodItem) * am->capacity);
   }
-  AliasMethodItem *item = &am->items[am->num_items];
-  rack_encode(rack, &item->rack);
-  item->count = (uint32_t)count;
+  new_item_index = am->num_items;
   am->total_item_count += (uint64_t)count;
   am->num_items++;
+  cpthread_mutex_unlock(&am->mutex);
+  AliasMethodItem *item = &am->items[new_item_index];
+  rack_encode(rack, &item->rack);
+  item->count = (uint32_t)count;
 }
 
-static inline void alias_method_generate_tables(AliasMethod *am) {
-  if (am->num_items == 0) {
-    log_fatal("cannot generate tables for an empty alias method");
-  }
-  if (am->total_item_count == 0) {
-    log_fatal(
-        "cannot generate tables for an alias method with a total count of 0");
+// Returns true if there are a nonzero number of items and counts to generate
+// tables for and returns false otherwise.
+static inline bool alias_method_generate_tables(AliasMethod *am) {
+  if (am->num_items == 0 || am->total_item_count == 0) {
+    return false;
   }
 
   uint32_t num_overfull_items = 0;
@@ -127,12 +137,15 @@ static inline void alias_method_generate_tables(AliasMethod *am) {
     am->items[underfull_item_index].probability = 1.0;
     am->items[underfull_item_index].alias = underfull_item_index;
   }
+  return true;
 }
 
-static inline void alias_method_sample(AliasMethod *am, const uint64_t seed,
+// Returns true if there are a nonzero number of items and counts to sample from
+// and returns false otherwise.
+static inline bool alias_method_sample(AliasMethod *am, const uint64_t seed,
                                        Rack *rack_to_update) {
-  if (am->num_items == 0) {
-    log_fatal("cannot sample from an empty alias method");
+  if (am->num_items == 0 || am->total_item_count == 0) {
+    return false;
   }
 
   prng_seed(am->prng, seed);
@@ -148,6 +161,7 @@ static inline void alias_method_sample(AliasMethod *am, const uint64_t seed,
     chosen_idx = am->items[bin].alias;
   }
   rack_decode(&am->items[chosen_idx].rack, rack_to_update);
+  return true;
 }
 
 #endif

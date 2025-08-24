@@ -119,6 +119,7 @@ void game_history_set_player(GameHistory *history, int player_index,
 bool game_history_player_is_set(const GameHistory *game_history,
                                 int player_index);
 bool game_history_both_players_are_set(const GameHistory *game_history);
-GameEvent *game_history_get_last_move_event(const GameHistory *game_history);
+// FIXME: maybe remove this once game history uses current index
+int game_history_get_last_move_event_index(const GameHistory *game_history);
 
 #endif

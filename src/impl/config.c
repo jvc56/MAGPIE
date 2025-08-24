@@ -2228,7 +2228,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->move_list = NULL;
   config->game_history = game_history_create();
   config->sim_results = sim_results_create();
-  config->inference_results = inference_results_create();
+  config->inference_results = inference_results_create(NULL);
   config->autoplay_results = autoplay_results_create();
   config->conversion_results = conversion_results_create();
   config->tt_fraction_of_mem = 0.25;
@@ -2257,6 +2257,7 @@ void config_destroy(Config *config) {
   players_data_destroy(config->players_data);
   thread_control_destroy(config->thread_control);
   game_destroy(config->game);
+  game_history_destroy(config->game_history);
   move_list_destroy(config->move_list);
   sim_results_destroy(config->sim_results);
   inference_results_destroy(config->inference_results);

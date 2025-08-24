@@ -29,6 +29,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+// FIXME: remove
+#include "../str/game_string.h"
+
 typedef struct Inference {
   // KLV used to evaluate leaves to determine
   // which moves are top equity. This should be
@@ -272,23 +275,19 @@ Inference *inference_create(const Rack *target_played_tiles, Game *game,
   for (int i = 0; i < inference->ld_size; i++) {
     // Add any existing tiles on the target's rack
     // to the target's leave for partial inferences
-    for (int j = 0; j < rack_get_letter(inference->current_target_rack, i);
-         j++) {
-      rack_add_letter(inference->current_target_leave, i);
-    }
-
-    for (int j = 0; j < bag_get_letter(bag, i); j++) {
-      rack_add_letter(inference->bag_as_rack, i);
-    }
+    rack_add_letters(inference->current_target_leave, i,
+                     rack_get_letter(inference->current_target_rack, i));
+    rack_add_letters(inference->bag_as_rack, i, bag_get_letter(bag, i));
   }
 
   // Remove the tiles played in the move from the game bag
   // and add them to the target's rack
   for (int i = 0; i < inference->ld_size; i++) {
-    for (int j = 0; j < rack_get_letter(target_played_tiles, i); j++) {
-      rack_take_letter(inference->bag_as_rack, i);
-      rack_add_letter(inference->current_target_rack, i);
-    }
+    const int num_target_played_letter =
+        rack_get_letter(target_played_tiles, i);
+    rack_take_letters(inference->bag_as_rack, i, num_target_played_letter);
+    rack_add_letters(inference->current_target_rack, i,
+                     num_target_played_letter);
   }
 
   return inference;
@@ -320,7 +319,8 @@ Inference *inference_duplicate(const Inference *inference, int thread_index,
       game_get_player(new_inference->game, new_inference->target_index));
   new_inference->bag_as_rack = rack_duplicate(inference->bag_as_rack);
 
-  new_inference->results = inference_results_create();
+  new_inference->results = inference_results_create(
+      inference_results_get_alias_method(inference->results));
   inference_results_reset(new_inference->results, inference->move_capacity,
                           new_inference->ld_size);
 
@@ -613,18 +613,19 @@ void infer_with_game_duplicate(InferenceArgs *args, InferenceResults *results,
   int target_num_exch = 0;
   if (args->use_game_history) {
     GameHistory *game_history = args->game_history;
-    // FIXME: do not play to end, just get the last move using current move
-    // index
-    game_play_to_end(game_history, game, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
-    rack_set_dist_size(&target_played_tiles, ld_get_size(game_get_ld(game)));
+    const int ld_size = ld_get_size(game_get_ld(game));
+    rack_set_dist_size(&target_played_tiles, ld_size);
     rack_reset(&target_played_tiles);
     target_num_exch = 0;
-    const GameEvent *last_event =
-        game_history_get_last_move_event(game_history);
-    if (last_event) {
+    // FIXME: get most recent move event, not the last one in the history
+    const int last_event_index =
+        game_history_get_last_move_event_index(game_history);
+    if (last_event_index >= 0) {
+      const GameEvent *last_event =
+          game_history_get_event(game_history, last_event_index);
       const ValidatedMoves *last_move = game_event_get_vms(last_event);
       const Move *move = validated_moves_get_move(last_move, 0);
       const int move_tiles_length = move_get_tiles_length(move);
@@ -638,11 +639,58 @@ void infer_with_game_duplicate(InferenceArgs *args, InferenceResults *results,
         }
       }
       target_index = game_event_get_player_index(last_event);
-      target_score = game_event_get_move_score(last_event);
+      // FIXME: make inference take an Equity from the config all the way down
+      target_score = equity_to_int(game_event_get_move_score(last_event));
       target_num_exch = 0;
       if (move_get_type(move) == GAME_EVENT_EXCHANGE) {
         target_num_exch = move_get_tiles_played(move);
       }
+
+      // play to penultimate move
+      // FIXME: do not play to end, just get the penultimate move using current
+      // move index
+      game_play_to_event_index(game_history, game, last_event_index - 1,
+                               error_stack);
+
+      // Remove the tiles played in the move from the target's rack
+      // and add them to the game bag
+      Rack *target_game_rack =
+          player_get_rack(game_get_player(game, target_index));
+      Bag *bag = game_get_bag(game);
+      for (int i = 0; i < ld_size; i++) {
+        const int num_target_played_letter =
+            rack_get_letter(&target_played_tiles, i);
+        if (rack_get_letter(target_game_rack, i) < num_target_played_letter) {
+          log_fatal("target played tiles are not in the game history rack");
+        }
+        rack_take_letters(target_game_rack, i, num_target_played_letter);
+        for (int j = 0; j < num_target_played_letter; j++) {
+          bag_add_letter(bag, i, target_index);
+        }
+      }
+
+      printf("target_played_tiles: ");
+      for (int i = 0;
+           i < rack_get_letter(&target_played_tiles, BLANK_MACHINE_LETTER);
+           i++) {
+        printf("?");
+      }
+      for (int i = 1; i < ld_size; i++) {
+        const int8_t num_letter = rack_get_letter(&target_played_tiles, i);
+        for (int8_t j = 0; j < num_letter; j++) {
+          printf("%c", (char)(i + 'A' - 1));
+        }
+      }
+      printf("\n");
+      printf("target_index: %d\n", target_index);
+      printf("target_score: %d\n", target_score);
+      printf("target_num_exch: %d\n", target_num_exch);
+      printf("game state:\n");
+
+      StringBuilder *game_string = string_builder_create();
+      string_builder_add_game(game_string, game, NULL);
+      printf("%s\n", string_builder_peek(game_string));
+      string_builder_destroy(game_string);
     }
   } else {
     rack_copy(&target_played_tiles, args->target_played_tiles);

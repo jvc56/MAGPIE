@@ -1041,3 +1041,22 @@ error_code_t test_parse_gcg(const char *gcg_filename, Config *config,
   free(gcg_filepath);
   return gcg_parse_status;
 }
+
+error_code_t test_parse_gcg_string(const char *gcg_string, Config *config,
+                                   GameHistory *game_history) {
+  ErrorStack *error_stack = error_stack_create();
+  parse_gcg_string(gcg_string, config, game_history, error_stack);
+  error_code_t gcg_parse_status = error_stack_top(error_stack);
+  error_stack_print_and_reset(error_stack);
+  error_stack_destroy(error_stack);
+  return gcg_parse_status;
+}
+
+void load_game_history_with_gcg_string(Config *config, const char *gcg_header,
+                                       const char *gcg_content) {
+  char *gcg_string = get_formatted_string("%s%s", gcg_header, gcg_content);
+  assert(test_parse_gcg_string(gcg_string, config,
+                               config_get_game_history(config)) ==
+         ERROR_STATUS_SUCCESS);
+  free(gcg_string);
+}

@@ -22,6 +22,7 @@ struct InferenceResults {
   uint64_t subtotals[NUMBER_OF_INFER_TYPES][SUBTOTALS_SIZE];
   LeaveRackList *leave_rack_list;
   AliasMethod *alias_method;
+  bool alias_method_created_internally;
 
   // Fields that are finalized at the end of
   // the inference execution
@@ -33,7 +34,7 @@ struct InferenceResults {
   Rack bag_as_rack;
 };
 
-InferenceResults *inference_results_create(void) {
+InferenceResults *inference_results_create(AliasMethod *alias_method) {
   InferenceResults *results = malloc_or_die(sizeof(InferenceResults));
   for (int i = 0; i < NUMBER_OF_INFER_TYPES; i++) {
     results->equity_values[i] = stat_create(false);
@@ -41,7 +42,13 @@ InferenceResults *inference_results_create(void) {
   // Use some dummy capacity which will be set to something else in the reset
   // function.
   results->leave_rack_list = leave_rack_list_create(1);
-  results->alias_method = alias_method_create();
+  if (alias_method) {
+    results->alias_method = alias_method;
+    results->alias_method_created_internally = false;
+  } else {
+    results->alias_method_created_internally = true;
+    results->alias_method = alias_method_create();
+  }
   return results;
 }
 
@@ -53,6 +60,9 @@ void inference_results_destroy(InferenceResults *results) {
     stat_destroy(results->equity_values[i]);
   }
   leave_rack_list_destroy(results->leave_rack_list);
+  if (results->alias_method_created_internally) {
+    alias_method_destroy(results->alias_method);
+  }
   free(results);
 }
 

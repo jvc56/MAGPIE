@@ -10,7 +10,7 @@
 
 typedef struct InferenceResults InferenceResults;
 
-InferenceResults *inference_results_create(void);
+InferenceResults *inference_results_create(AliasMethod *alias_method);
 void inference_results_destroy(InferenceResults *inference_results);
 void inference_results_reset(InferenceResults *results, int move_capacity,
                              int ld_size);
