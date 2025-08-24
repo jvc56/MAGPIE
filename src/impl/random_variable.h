@@ -3,6 +3,8 @@
 
 #include "../def/bai_defs.h"
 #include "../ent/game.h"
+#include "../ent/game_history.h"
+#include "../ent/inference_results.h"
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
@@ -25,6 +27,10 @@ typedef struct SimArgs {
   const MoveList *move_list;
   Rack *known_opp_rack;
   WinPct *win_pcts;
+  bool use_inference;
+  InferenceResults *inference_results;
+  GameHistory *game_history;
+  double equity_margin;
   ThreadControl *thread_control;
   BAIOptions bai_options;
 } SimArgs;

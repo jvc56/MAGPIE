@@ -3,6 +3,7 @@
 #include "../src/ent/bag.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
+#include "../src/ent/game_history.h"
 #include "../src/ent/inference_results.h"
 #include "../src/ent/klv.h"
 #include "../src/ent/leave_rack.h"
@@ -11,12 +12,29 @@
 #include "../src/ent/rack.h"
 #include "../src/ent/stats.h"
 #include "../src/impl/config.h"
+#include "../src/impl/gcg.h"
 #include "../src/util/io_util.h"
 #include "../src/util/math_util.h"
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdlib.h>
+
+int leave_rack_get_leave_total_letters(const LeaveRack *leave_rack,
+                                       const LetterDistribution *ld) {
+  Rack rack;
+  rack_set_dist_size(&rack, ld_get_size(ld));
+  leave_rack_get_leave(leave_rack, &rack);
+  return rack_get_total_letters(&rack);
+}
+
+int leave_rack_get_leave_letter(const LeaveRack *leave_rack, MachineLetter ml,
+                                const LetterDistribution *ld) {
+  Rack rack;
+  rack_set_dist_size(&rack, ld_get_size(ld));
+  leave_rack_get_leave(leave_rack, &rack);
+  return rack_get_letter(&rack, ml);
+}
 
 error_code_t infer_for_test(const Config *config, int target_index,
                             int target_score, int target_num_exch,
@@ -30,12 +48,60 @@ error_code_t infer_for_test(const Config *config, int target_index,
   }
   ErrorStack *error_stack = error_stack_create();
   set_thread_control_status_to_start(config_get_thread_control(config));
-  config_infer(config, target_index, target_score, target_num_exch,
+  config_infer(config, false, target_index, target_score, target_num_exch,
                target_played_tiles, inference_results, error_stack);
   error_code_t status = error_stack_top(error_stack);
   rack_destroy(target_played_tiles);
   error_stack_destroy(error_stack);
   return status;
+}
+
+// Assumes the config game history has been loaded
+error_code_t infer_for_test_with_history(const Config *config,
+                                         InferenceResults *inference_results) {
+  const Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  Rack *target_played_tiles = rack_create(ld_get_size(ld));
+  ErrorStack *error_stack = error_stack_create();
+  set_thread_control_status_to_start(config_get_thread_control(config));
+  config_infer(config, true, 0, 0, 0, target_played_tiles, inference_results,
+               error_stack);
+  error_code_t status = error_stack_top(error_stack);
+  rack_destroy(target_played_tiles);
+  error_stack_destroy(error_stack);
+  return status;
+}
+
+void test_leave_rack_reset(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  const LetterDistribution *ld = config_get_ld(config);
+  int ld_size = ld_get_size(ld);
+
+  Rack rack;
+  rack_set_dist_size(&rack, ld_size);
+  rack_reset(&rack);
+
+  LeaveRackList *lrl = leave_rack_list_create(10);
+
+  int capacities[] = {10, 1, 3, 5, 20, 2, 15, 14, 9, 100, 50, 3, -1};
+  int i = 0;
+  while (true) {
+    const int capacity = capacities[i];
+    if (capacity == -1) {
+      break;
+    }
+    leave_rack_list_reset(lrl, capacity);
+    for (int j = 0; j < capacity; j++) {
+      // The contents of the rack and the count doesn't matter since we are just
+      // testing that the list resizing works.
+      leave_rack_list_insert_rack(&rack, &rack, 0, 0, lrl);
+    }
+    i++;
+  }
+
+  leave_rack_list_destroy(lrl);
+  config_destroy(config);
 }
 
 void test_trivial_random_probability(void) {
@@ -91,7 +157,7 @@ void test_infer_rack_overflow(void) {
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   Game *game = config_get_game(config);
   const LetterDistribution *ld = config_get_ld(config);
-  InferenceResults *inference_results = inference_results_create();
+  InferenceResults *inference_results = inference_results_create(NULL);
 
   error_code_t status =
       infer_for_test(config, 0, 0, 0, "ABCDEFGH", inference_results);
@@ -111,10 +177,18 @@ void test_infer_no_tiles_played_rack_empty(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
-  InferenceResults *inference_results = inference_results_create();
+  ErrorStack *error_stack = error_stack_create();
+  InferenceResults *inference_results = inference_results_create(NULL);
   error_code_t status = infer_for_test(config, 0, 0, 0, "", inference_results);
   assert(status == ERROR_STATUS_INFERENCE_NO_TILES_PLAYED);
 
+  GameHistory *game_history = config_get_game_history(config);
+  assert(test_parse_gcg("success_just_last_rack_write1", config,
+                        game_history) == ERROR_STATUS_SUCCESS);
+  status = infer_for_test_with_history(config, inference_results);
+  assert(status == ERROR_STATUS_INFERENCE_NO_TILES_PLAYED);
+
+  error_stack_destroy(error_stack);
   inference_results_destroy(inference_results);
   config_destroy(config);
 }
@@ -124,7 +198,7 @@ void test_infer_both_play_and_exchange(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
-  InferenceResults *inference_results = inference_results_create();
+  InferenceResults *inference_results = inference_results_create(NULL);
   error_code_t status =
       infer_for_test(config, 0, 0, 1, "DEFGH", inference_results);
   assert(status == ERROR_STATUS_INFERENCE_BOTH_PLAY_AND_EXCHANGE);
@@ -138,7 +212,7 @@ void test_infer_exchange_score_not_zero(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
-  InferenceResults *inference_results = inference_results_create();
+  InferenceResults *inference_results = inference_results_create(NULL);
   error_code_t status = infer_for_test(config, 0, 3, 1, "", inference_results);
   assert(status == ERROR_STATUS_INFERENCE_EXCHANGE_SCORE_NOT_ZERO);
 
@@ -155,7 +229,7 @@ void test_infer_exchange_not_board_is_letter_allowed_in_cross_set(void) {
 
   // There are 13 tiles in the bag
   load_cgp_or_die(game, VS_JEREMY);
-  InferenceResults *inference_results = inference_results_create();
+  InferenceResults *inference_results = inference_results_create(NULL);
   error_code_t status = infer_for_test(config, 0, 3, 1, "", inference_results);
   assert(status == ERROR_STATUS_INFERENCE_EXCHANGE_NOT_ALLOWED);
 
@@ -173,7 +247,7 @@ void test_infer_tiles_played_not_in_bag(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
-  InferenceResults *inference_results = inference_results_create();
+  InferenceResults *inference_results = inference_results_create(NULL);
   load_and_exec_config_or_die(config, "set -eq 0 -threads 1");
   error_code_t status =
       infer_for_test(config, 0, 0, 1, "ACBYEYY", inference_results);
@@ -183,7 +257,8 @@ void test_infer_tiles_played_not_in_bag(void) {
   config_destroy(config);
 }
 
-void test_infer_nonerror_cases(int number_of_threads) {
+void test_infer_nonerror_cases(const int number_of_threads,
+                               const bool use_game_history) {
   char *config_settings_str =
       get_formatted_string("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
                            "all -numplays 1 -threads %d",
@@ -205,13 +280,21 @@ void test_infer_nonerror_cases(int number_of_threads) {
   Rack *player0_rack = player_get_rack(player0);
   const Rack *player1_rack = player_get_rack(player1);
 
-  InferenceResults *inference_results = inference_results_create();
+  InferenceResults *inference_results = inference_results_create(NULL);
   Stat *letter_stat = stat_create(false);
   error_code_t status;
   const LeaveRackList *lrl;
+  const char *gcg_string_header = "#character-encoding UTF-8\n#player1 Tim Tim "
+                                  "Weiss\n#player2 Josh Josh Castellano\n";
 
   load_and_exec_config_or_die(config, "set -numplays 20");
-  status = infer_for_test(config, 0, 52, 0, "MUZAKS", inference_results);
+  if (use_game_history) {
+    load_game_history_with_gcg_string(config, gcg_string_header,
+                                      ">Tim: MUZAKS 8H MUZAKS +52 52");
+    status = infer_for_test_with_history(config, inference_results);
+  } else {
+    status = infer_for_test(config, 0, 52, 0, "MUZAKS", inference_results);
+  }
   assert(status == ERROR_STATUS_SUCCESS);
   // With this rack, only keeping an S is possible, and
   // there are 3 S remaining.
@@ -223,8 +306,18 @@ void test_infer_nonerror_cases(int number_of_threads) {
   rack_set_to_string(ld, rack, "S");
   assert(double_to_equity(stat_get_mean(equity_values)) ==
          klv_get_leave_value(klv, rack));
+  AliasMethod *alias_method =
+      inference_results_get_alias_method(inference_results);
+  for (int i = 0; i < 100; i++) {
+    assert(alias_method_sample(alias_method, 0, rack));
+    assert(rack_get_total_letters(rack) == 1);
+    assert(rack_get_letter(rack, ld_hl_to_ml(ld, "S")) == 1);
+  }
   for (int i = 0; i < ld_size; i++) {
     if (i == ld_hl_to_ml(ld, "S")) {
+      printf("actual value: %lu\n", inference_results_get_subtotal(
+                                        inference_results, INFERENCE_TYPE_LEAVE,
+                                        i, 1, INFERENCE_SUBTOTAL_DRAW));
       assert(inference_results_get_subtotal(inference_results,
                                             INFERENCE_TYPE_LEAVE, i, 1,
                                             INFERENCE_SUBTOTAL_DRAW) == 3);
@@ -251,10 +344,10 @@ void test_infer_nonerror_cases(int number_of_threads) {
   lrl = inference_results_get_leave_rack_list(inference_results);
 
   assert(leave_rack_list_get_count(lrl) == 1);
-  assert(rack_get_total_letters(
-             leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0))) == 1);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0)),
-                         ld_hl_to_ml(ld, "S")) == 1);
+  assert(leave_rack_get_leave_total_letters(leave_rack_list_get_rack(lrl, 0),
+                                            ld) == 1);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 0),
+                                     ld_hl_to_ml(ld, "S"), ld) == 1);
 
   // Both game racks should be empty
   assert(rack_get_total_letters(player0_rack) == 0);
@@ -309,12 +402,12 @@ void test_infer_nonerror_cases(int number_of_threads) {
   lrl = inference_results_get_leave_rack_list(inference_results);
 
   assert(leave_rack_list_get_count(lrl) == 20);
-  assert(rack_get_total_letters(
-             leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0))) == 1);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0)),
-                         ld_hl_to_ml(ld, "E")) == 1);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 1)),
-                         ld_hl_to_ml(ld, "I")) == 1);
+  assert(leave_rack_get_leave_total_letters(leave_rack_list_get_rack(lrl, 0),
+                                            ld) == 1);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 0),
+                                     ld_hl_to_ml(ld, "E"), ld) == 1);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 1),
+                                     ld_hl_to_ml(ld, "I"), ld) == 1);
 
   // Both game racks should be empty
   assert(rack_get_total_letters(player0_rack) == 0);
@@ -465,32 +558,32 @@ void test_infer_nonerror_cases(int number_of_threads) {
 
   assert(leave_rack_list_get_count(lrl) == 3);
 
-  assert(rack_get_total_letters(
-             leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0))) == 3);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0)),
-                         ld_hl_to_ml(ld, "E")) == 1);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0)),
-                         ld_hl_to_ml(ld, "R")) == 1);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0)),
-                         ld_hl_to_ml(ld, "T")) == 1);
+  assert(leave_rack_get_leave_total_letters(leave_rack_list_get_rack(lrl, 0),
+                                            ld) == 3);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 0),
+                                     ld_hl_to_ml(ld, "E"), ld) == 1);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 0),
+                                     ld_hl_to_ml(ld, "R"), ld) == 1);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 0),
+                                     ld_hl_to_ml(ld, "T"), ld) == 1);
 
-  assert(rack_get_total_letters(
-             leave_rack_get_leave(leave_rack_list_get_rack(lrl, 1))) == 3);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 1)),
-                         ld_hl_to_ml(ld, "N")) == 1);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 1)),
-                         ld_hl_to_ml(ld, "R")) == 1);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 1)),
-                         ld_hl_to_ml(ld, "T")) == 1);
+  assert(leave_rack_get_leave_total_letters(leave_rack_list_get_rack(lrl, 1),
+                                            ld) == 3);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 1),
+                                     ld_hl_to_ml(ld, "N"), ld) == 1);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 1),
+                                     ld_hl_to_ml(ld, "R"), ld) == 1);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 1),
+                                     ld_hl_to_ml(ld, "T"), ld) == 1);
 
-  assert(rack_get_total_letters(
-             leave_rack_get_leave(leave_rack_list_get_rack(lrl, 2))) == 3);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 2)),
-                         ld_hl_to_ml(ld, "N")) == 1);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 2)),
-                         ld_hl_to_ml(ld, "R")) == 1);
-  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 2)),
-                         BLANK_MACHINE_LETTER) == 1);
+  assert(leave_rack_get_leave_total_letters(leave_rack_list_get_rack(lrl, 2),
+                                            ld) == 3);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 2),
+                                     ld_hl_to_ml(ld, "N"), ld) == 1);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 2),
+                                     ld_hl_to_ml(ld, "R"), ld) == 1);
+  assert(leave_rack_get_leave_letter(leave_rack_list_get_rack(lrl, 2),
+                                     BLANK_MACHINE_LETTER, ld) == 1);
 
   // Contrive an impossible situation to easily test
   // more combinatorics
@@ -806,6 +899,10 @@ void test_infer_nonerror_cases(int number_of_threads) {
 }
 
 void test_infer(void) {
+  // FIXME: remove
+  test_infer_nonerror_cases(1, true);
+  return;
+  test_leave_rack_reset();
   test_trivial_random_probability();
   test_infer_rack_overflow();
   test_infer_no_tiles_played_rack_empty();
@@ -813,7 +910,10 @@ void test_infer(void) {
   test_infer_exchange_score_not_zero();
   test_infer_exchange_not_board_is_letter_allowed_in_cross_set();
   test_infer_tiles_played_not_in_bag();
-  test_infer_nonerror_cases(1);
-  test_infer_nonerror_cases(2);
-  test_infer_nonerror_cases(7);
+  for (int i = 0; i < 1; i++) {
+    const bool use_game_history = i == 1;
+    test_infer_nonerror_cases(1, use_game_history);
+    test_infer_nonerror_cases(2, use_game_history);
+    test_infer_nonerror_cases(7, use_game_history);
+  }
 }

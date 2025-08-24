@@ -5,11 +5,13 @@ typedef enum {
   INFERENCE_TYPE_LEAVE,
   INFERENCE_TYPE_EXCHANGED,
   INFERENCE_TYPE_RACK,
+  NUMBER_OF_INFER_TYPES,
 } inference_stat_t;
 
 typedef enum {
   INFERENCE_SUBTOTAL_DRAW,
   INFERENCE_SUBTOTAL_LEAVE,
+  NUMBER_OF_INFERENCE_SUBTOTALS,
 } inference_subtotal_t;
 
 #endif

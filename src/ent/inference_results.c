@@ -5,89 +5,81 @@
 #include "../def/rack_defs.h"
 #include "../util/io_util.h"
 #include "../util/math_util.h"
+#include "alias_method.h"
 #include "leave_rack.h"
 #include "rack.h"
 #include "stats.h"
 #include <stdint.h>
 #include <stdlib.h>
 
-enum { NUMBER_OF_STAT_TYPES = 3 };
+#define SUBTOTALS_SIZE                                                         \
+  (MAX_ALPHABET_SIZE * (RACK_SIZE) * NUMBER_OF_INFERENCE_SUBTOTALS)
 
 struct InferenceResults {
-  int subtotals_size;
   // Indexed by inference_stat_t
-  Stat *equity_values[NUMBER_OF_STAT_TYPES];
+  Stat *equity_values[NUMBER_OF_INFER_TYPES];
   // Indexed by inference_stat_t
-  uint64_t *subtotals[NUMBER_OF_STAT_TYPES];
+  uint64_t subtotals[NUMBER_OF_INFER_TYPES][SUBTOTALS_SIZE];
   LeaveRackList *leave_rack_list;
+  AliasMethod *alias_method;
+  bool alias_method_created_internally;
 
   // Fields that are finalized at the end of
   // the inference execution
   int target_number_of_tiles_exchanged;
   int target_score;
   double equity_margin;
-  Rack *target_played_tiles;
-  Rack *target_known_unplayed_tiles;
-  Rack *bag_as_rack;
+  Rack target_played_tiles;
+  Rack target_known_unplayed_tiles;
+  Rack bag_as_rack;
 };
 
-int get_subtotals_size(int ld_size) { return ld_size * (RACK_SIZE) * 2; }
-
-InferenceResults *inference_results_create(void) {
+InferenceResults *inference_results_create(AliasMethod *alias_method) {
   InferenceResults *results = malloc_or_die(sizeof(InferenceResults));
-  results->subtotals_size = 0;
-  for (int i = 0; i < NUMBER_OF_STAT_TYPES; i++) {
-    results->equity_values[i] = NULL;
-    results->subtotals[i] = NULL;
+  for (int i = 0; i < NUMBER_OF_INFER_TYPES; i++) {
+    results->equity_values[i] = stat_create(false);
   }
-  results->leave_rack_list = NULL;
-  results->target_played_tiles = NULL;
-  results->target_known_unplayed_tiles = NULL;
-  results->bag_as_rack = NULL;
-  results->subtotals_size = 0;
+  // Use some dummy capacity which will be set to something else in the reset
+  // function.
+  results->leave_rack_list = leave_rack_list_create(1);
+  if (alias_method) {
+    results->alias_method = alias_method;
+    results->alias_method_created_internally = false;
+  } else {
+    results->alias_method_created_internally = true;
+    results->alias_method = alias_method_create();
+  }
   return results;
-}
-
-void inference_results_destroy_internal(InferenceResults *results) {
-  if (!results) {
-    return;
-  }
-  for (int i = 0; i < NUMBER_OF_STAT_TYPES; i++) {
-    stat_destroy(results->equity_values[i]);
-    free(results->subtotals[i]);
-  }
-  leave_rack_list_destroy(results->leave_rack_list);
-  rack_destroy(results->target_played_tiles);
-  rack_destroy(results->target_known_unplayed_tiles);
-  rack_destroy(results->bag_as_rack);
 }
 
 void inference_results_destroy(InferenceResults *results) {
   if (!results) {
     return;
   }
-  inference_results_destroy_internal(results);
+  for (int i = 0; i < NUMBER_OF_INFER_TYPES; i++) {
+    stat_destroy(results->equity_values[i]);
+  }
+  leave_rack_list_destroy(results->leave_rack_list);
+  if (results->alias_method_created_internally) {
+    alias_method_destroy(results->alias_method);
+  }
   free(results);
 }
 
 void inference_results_reset(InferenceResults *results, int move_capacity,
                              int ld_size) {
-  inference_results_destroy_internal(results);
-
-  results->subtotals_size = get_subtotals_size(ld_size);
-  for (int i = 0; i < NUMBER_OF_STAT_TYPES; i++) {
-    results->equity_values[i] = stat_create(false);
-    results->subtotals[i] =
-        (uint64_t *)malloc_or_die(results->subtotals_size * sizeof(uint64_t));
-    for (int j = 0; j < results->subtotals_size; j++) {
-      results->subtotals[i][j] = 0;
-    }
+  for (int i = 0; i < NUMBER_OF_INFER_TYPES; i++) {
+    stat_reset(results->equity_values[i]);
   }
-
-  results->leave_rack_list = leave_rack_list_create(move_capacity, ld_size);
-  results->target_played_tiles = NULL;
-  results->target_known_unplayed_tiles = NULL;
-  results->bag_as_rack = NULL;
+  memset(results->subtotals, 0, sizeof(results->subtotals));
+  leave_rack_list_reset(results->leave_rack_list, move_capacity);
+  alias_method_reset(results->alias_method);
+  rack_set_dist_size(&results->target_played_tiles, ld_size);
+  rack_reset(&results->target_played_tiles);
+  rack_set_dist_size(&results->target_known_unplayed_tiles, ld_size);
+  rack_reset(&results->target_known_unplayed_tiles);
+  rack_set_dist_size(&results->bag_as_rack, ld_size);
+  rack_reset(&results->bag_as_rack);
 }
 
 void inference_results_finalize(const Rack *target_played_tiles,
@@ -99,12 +91,11 @@ void inference_results_finalize(const Rack *target_played_tiles,
   results->target_score = target_score;
   results->target_number_of_tiles_exchanged = target_number_of_tiles_exchanged;
   results->equity_margin = equity_margin;
-  results->target_played_tiles = rack_duplicate(target_played_tiles);
-  results->target_known_unplayed_tiles =
-      rack_duplicate(target_known_unplayed_tiles);
-  results->bag_as_rack = rack_duplicate(bag_as_rack);
-
+  rack_copy(&results->target_played_tiles, target_played_tiles);
+  rack_copy(&results->target_known_unplayed_tiles, target_known_unplayed_tiles);
+  rack_copy(&results->bag_as_rack, bag_as_rack);
   leave_rack_list_sort(results->leave_rack_list);
+  alias_method_generate_tables(results->alias_method);
 }
 
 int inference_results_get_target_number_of_tiles_exchanged(
@@ -120,18 +111,18 @@ double inference_results_get_equity_margin(const InferenceResults *results) {
   return results->equity_margin;
 }
 
-Rack *
+const Rack *
 inference_results_get_target_played_tiles(const InferenceResults *results) {
-  return results->target_played_tiles;
+  return &results->target_played_tiles;
 }
 
-Rack *inference_results_get_target_known_unplayed_tiles(
+const Rack *inference_results_get_target_known_unplayed_tiles(
     const InferenceResults *results) {
-  return results->target_known_unplayed_tiles;
+  return &results->target_known_unplayed_tiles;
 }
 
-Rack *inference_results_get_bag_as_rack(const InferenceResults *results) {
-  return results->bag_as_rack;
+const Rack *inference_results_get_bag_as_rack(const InferenceResults *results) {
+  return &results->bag_as_rack;
 }
 
 Stat *
@@ -145,9 +136,15 @@ LeaveRackList *inference_results_get_leave_rack_list(
   return inference_results->leave_rack_list;
 }
 
+AliasMethod *
+inference_results_get_alias_method(const InferenceResults *inference_results) {
+  return inference_results->alias_method;
+}
+
 int get_letter_subtotal_index(MachineLetter letter, int number_of_letters,
                               inference_subtotal_t subtotal_type) {
-  return (int)((letter * 2 * (RACK_SIZE)) + ((number_of_letters - 1) * 2) +
+  return (int)((letter * NUMBER_OF_INFERENCE_SUBTOTALS * (RACK_SIZE)) +
+               ((number_of_letters - 1) * NUMBER_OF_INFERENCE_SUBTOTALS) +
                subtotal_type);
 }
 
@@ -182,8 +179,8 @@ uint64_t inference_results_get_subtotal_sum_with_minimum(
 
 void inference_results_add_subtotals(InferenceResults *result_being_added,
                                      InferenceResults *result_being_updated) {
-  for (int i = 0; i < NUMBER_OF_STAT_TYPES; i++) {
-    for (int j = 0; j < result_being_updated->subtotals_size; j++) {
+  for (int i = 0; i < NUMBER_OF_INFER_TYPES; i++) {
+    for (int j = 0; j < SUBTOTALS_SIZE; j++) {
       result_being_updated->subtotals[i][j] +=
           result_being_added->subtotals[i][j];
     }

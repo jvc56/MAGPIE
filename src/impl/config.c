@@ -152,6 +152,7 @@ struct Config {
   PlayersData *players_data;
   ThreadControl *thread_control;
   Game *game;
+  GameHistory *game_history;
   MoveList *move_list;
   SimResults *sim_results;
   InferenceResults *inference_results;
@@ -323,6 +324,10 @@ ThreadControl *config_get_thread_control(const Config *config) {
 }
 
 Game *config_get_game(const Config *config) { return config->game; }
+
+GameHistory *config_get_game_history(const Config *config) {
+  return config->game_history;
+}
 
 MoveList *config_get_move_list(const Config *config) {
   return config->move_list;
@@ -784,6 +789,10 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->move_list = config_get_move_list(config);
   sim_args->known_opp_rack = known_opp_rack;
   sim_args->win_pcts = config_get_win_pcts(config);
+  sim_args->use_inference = false;
+  sim_args->inference_results = config->inference_results;
+  sim_args->game_history = config->game_history;
+  sim_args->equity_margin = config->equity_margin;
   sim_args->thread_control = config->thread_control;
   sim_args->game = config_get_game(config);
   sim_args->move_list = config_get_move_list(config);
@@ -862,30 +871,42 @@ char *status_sim(Config *config) {
 
 // Inference
 
-void config_fill_infer_args(const Config *config, int target_index,
-                            int target_score, int target_num_exch,
-                            Rack *target_played_tiles, InferenceArgs *args) {
+void config_fill_infer_args(const Config *config, bool use_game_history,
+                            int target_index, int target_score,
+                            int target_num_exch, Rack *target_played_tiles,
+                            InferenceArgs *args) {
   args->target_index = target_index;
   args->target_score = target_score;
   args->target_num_exch = target_num_exch;
   args->move_capacity = config_get_num_plays(config);
   args->equity_margin = config_get_equity_margin(config);
   args->target_played_tiles = target_played_tiles;
+  args->use_game_history = use_game_history;
+  args->game_history = config->game_history;
   args->game = config_get_game(config);
   args->thread_control = config->thread_control;
 }
 
-void config_infer(const Config *config, int target_index, int target_score,
-                  int target_num_exch, Rack *target_played_tiles,
-                  InferenceResults *results, ErrorStack *error_stack) {
+// Use target_index < 0 to infer using the game history
+void config_infer(const Config *config, bool use_game_history, int target_index,
+                  int target_score, int target_num_exch,
+                  Rack *target_played_tiles, InferenceResults *results,
+                  ErrorStack *error_stack) {
   InferenceArgs args;
-  config_fill_infer_args(config, target_index, target_score, target_num_exch,
-                         target_played_tiles, &args);
+  config_fill_infer_args(config, use_game_history, target_index, target_score,
+                         target_num_exch, target_played_tiles, &args);
   return infer(&args, results, error_stack);
 }
 
 void config_infer_with_rack(Config *config, Rack *target_played_tiles,
                             ErrorStack *error_stack) {
+  // FIXME: allow infer to use zero args
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_INFER) == 0) {
+    config_infer(config, true, 0, 0, 0, target_played_tiles,
+                 config->inference_results, error_stack);
+    return;
+  }
+
   const char *target_index_str =
       config_get_parg_value(config, ARG_TOKEN_INFER, 0);
   int target_index;
@@ -942,7 +963,7 @@ void config_infer_with_rack(Config *config, Rack *target_played_tiles,
     }
   }
 
-  config_infer(config, target_index, target_score, target_num_exch,
+  config_infer(config, false, target_index, target_score, target_num_exch,
                target_played_tiles, config->inference_results, error_stack);
 }
 
@@ -2205,8 +2226,9 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->thread_control = thread_control_create();
   config->game = NULL;
   config->move_list = NULL;
+  config->game_history = game_history_create();
   config->sim_results = sim_results_create();
-  config->inference_results = inference_results_create();
+  config->inference_results = inference_results_create(NULL);
   config->autoplay_results = autoplay_results_create();
   config->conversion_results = conversion_results_create();
   config->tt_fraction_of_mem = 0.25;
@@ -2235,6 +2257,7 @@ void config_destroy(Config *config) {
   players_data_destroy(config->players_data);
   thread_control_destroy(config->thread_control);
   game_destroy(config->game);
+  game_history_destroy(config->game_history);
   move_list_destroy(config->move_list);
   sim_results_destroy(config->sim_results);
   inference_results_destroy(config->inference_results);

@@ -1023,3 +1023,40 @@ void set_klv_leave_value(const KLV *klv, const LetterDistribution *ld,
   klv_set_indexed_leave_value(klv, klv_word_index, equity);
   rack_destroy(rack);
 }
+
+error_code_t test_parse_gcg(const char *gcg_filename, Config *config,
+                            GameHistory *game_history) {
+  ErrorStack *error_stack = error_stack_create();
+  char *gcg_filepath = data_filepaths_get_readable_filename(
+      config_get_data_paths(config), gcg_filename, DATA_FILEPATH_TYPE_GCG,
+      error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("failed to get gcg filepath for test: %s\n", gcg_filename);
+  }
+  parse_gcg(gcg_filepath, config, game_history, error_stack);
+  error_code_t gcg_parse_status = error_stack_top(error_stack);
+  error_stack_print_and_reset(error_stack);
+  error_stack_destroy(error_stack);
+  free(gcg_filepath);
+  return gcg_parse_status;
+}
+
+error_code_t test_parse_gcg_string(const char *gcg_string, Config *config,
+                                   GameHistory *game_history) {
+  ErrorStack *error_stack = error_stack_create();
+  parse_gcg_string(gcg_string, config, game_history, error_stack);
+  error_code_t gcg_parse_status = error_stack_top(error_stack);
+  error_stack_print_and_reset(error_stack);
+  error_stack_destroy(error_stack);
+  return gcg_parse_status;
+}
+
+void load_game_history_with_gcg_string(Config *config, const char *gcg_header,
+                                       const char *gcg_content) {
+  char *gcg_string = get_formatted_string("%s%s", gcg_header, gcg_content);
+  assert(test_parse_gcg_string(gcg_string, config,
+                               config_get_game_history(config)) ==
+         ERROR_STATUS_SUCCESS);
+  free(gcg_string);
+}

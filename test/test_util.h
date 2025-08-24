@@ -134,4 +134,10 @@ void generate_anchors_for_test(Game *game);
 void extract_sorted_anchors_for_test(AnchorHeap *sorted_anchors);
 void set_klv_leave_value(const KLV *klv, const LetterDistribution *ld,
                          const char *rack_str, Equity equity);
+error_code_t test_parse_gcg(const char *gcg_filename, Config *config,
+                            GameHistory *game_history);
+error_code_t test_parse_gcg_string(const char *gcg_string, Config *config,
+                                   GameHistory *game_history);
+void load_game_history_with_gcg_string(Config *config, const char *gcg_header,
+                                       const char *gcg_content);
 #endif

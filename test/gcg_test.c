@@ -22,24 +22,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-error_code_t test_parse_gcg(const char *gcg_filename, Config *config,
-                            GameHistory *game_history) {
-  ErrorStack *error_stack = error_stack_create();
-  char *gcg_filepath = data_filepaths_get_readable_filename(
-      config_get_data_paths(config), gcg_filename, DATA_FILEPATH_TYPE_GCG,
-      error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_print_and_reset(error_stack);
-    log_fatal("failed to get gcg filepath for test: %s\n", gcg_filename);
-  }
-  parse_gcg(gcg_filepath, config, game_history, error_stack);
-  error_code_t gcg_parse_status = error_stack_top(error_stack);
-  error_stack_print_and_reset(error_stack);
-  error_stack_destroy(error_stack);
-  free(gcg_filepath);
-  return gcg_parse_status;
-}
-
 char *parse_and_write_gcg(const char *gcg_filepath_read,
                           const char *gcg_filepath_write, Config *config,
                           GameHistory *game_history, ErrorStack *error_stack) {

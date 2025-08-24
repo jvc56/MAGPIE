@@ -9,6 +9,7 @@
 #include "../ent/board_layout.h"
 #include "../ent/conversion_results.h"
 #include "../ent/game.h"
+#include "../ent/game_history.h"
 #include "../ent/inference_results.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
@@ -56,6 +57,7 @@ LetterDistribution *config_get_ld(const Config *config);
 ThreadControl *config_get_thread_control(const Config *config);
 exec_mode_t config_get_exec_mode(const Config *config);
 Game *config_get_game(const Config *config);
+GameHistory *config_get_game_history(const Config *config);
 MoveList *config_get_move_list(const Config *config);
 SimResults *config_get_sim_results(const Config *config);
 AutoplayResults *config_get_autoplay_results(const Config *config);
@@ -66,9 +68,10 @@ const char *config_get_current_exec_name(const Config *config);
 Game *config_game_create(const Config *config);
 
 // Impl
-void config_infer(const Config *config, int target_index, int target_score,
-                  int target_num_exch, Rack *target_played_tiles,
-                  InferenceResults *results, ErrorStack *error_stack);
+void config_infer(const Config *config, bool use_game_history, int target_index,
+                  int target_score, int target_num_exch,
+                  Rack *target_played_tiles, InferenceResults *results,
+                  ErrorStack *error_stack);
 void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
                      autoplay_t autoplay_type,
                      const char *num_games_or_min_rack_targets,

@@ -25,8 +25,6 @@ See <http://creativecommons.org/publicdomain/zero/1.0/>. */
    a 64-bit seed, we suggest to seed a splitmix64 generator and use its
    output to fill s. */
 
-#define XOSHIRO_MAX UINT64_C(18446744073709551615)
-
 struct XoshiroPRNG {
   uint64_t xxsplit; /* The state can be seeded with any value. */
   uint64_t s[4];
