@@ -22,29 +22,25 @@ char *get_xt_gcg_string(const char *identifier, ErrorStack *error_stack) {
   // Check if this is a Cross-tables URL first
   regex_t xt_regex;
   int xt_regex_status = regcomp(&xt_regex, "cross-tables\\.com/annotated\\.php\\?u=([0-9]+)", REG_EXTENDED);
-  if (xt_regex_status == 0) {
-      regmatch_t xt_matches[2];
-      int xt_match_result = regexec(&xt_regex, identifier, 2, xt_matches, 0);
-      regfree(&xt_regex);
+  if (xt_regex_status != 0) {
+      log_fatal("Failed to compile regex for cross-tables URL parsing");
+  }
+  
+  regmatch_t xt_matches[2];
+  int xt_match_result = regexec(&xt_regex, identifier, 2, xt_matches, 0);
+  regfree(&xt_regex);
+  
+  if (xt_match_result == 0) {
+      // Extract game ID from the already matched regex
+      int start = xt_matches[1].rm_so;
+      int end = xt_matches[1].rm_eo;
+      int id_len = end - start;
       
-      if (xt_match_result == 0) {
-          // Extract game ID from the already matched regex
-          int start = xt_matches[1].rm_so;
-          int end = xt_matches[1].rm_eo;
-          int id_len = end - start;
-          
-          game_id_str = malloc_or_die(id_len + 1);
-          strncpy(game_id_str, identifier + start, id_len);
-          game_id_str[id_len] = '\0';
-      } else {
-          // Check if it's a numeric game id
-          if (!is_all_digits_or_empty(identifier)){
-            return NULL;
-          }
-          game_id_str = string_duplicate(identifier);
-      }
+      game_id_str = malloc_or_die(id_len + 1);
+      strncpy(game_id_str, identifier + start, id_len);
+      game_id_str[id_len] = '\0';
   } else {
-      // Regex compilation failed, fallback to numeric check
+      // Check if it's a numeric game id
       if (!is_all_digits_or_empty(identifier)){
         return NULL;
       }
@@ -59,7 +55,7 @@ char *get_xt_gcg_string(const char *identifier, ErrorStack *error_stack) {
         first_three[i] = game_id_str[i];
     }
 
-    // Build the curl command directly
+    // Build the curl command
     char *curl_cmd = get_formatted_string("curl -s -L \"https://cross-tables.com/annotated/selfgcg/%s/anno%s.gcg\"", 
                                         first_three, game_id_str);
 
@@ -84,43 +80,25 @@ char *get_woogles_gcg_string(const char *identifier, ErrorStack *error_stack) {
     // Check if this is a Woogles URL first
     regex_t woogles_regex;
     int woogles_regex_status = regcomp(&woogles_regex, "woogles\\.io/game/([a-zA-Z0-9]+)", REG_EXTENDED);
-    if (woogles_regex_status == 0) {
-        regmatch_t woogles_matches[2];
-        int woogles_match_result = regexec(&woogles_regex, identifier, 2, woogles_matches, 0);
-        regfree(&woogles_regex);
+    if (woogles_regex_status != 0) {
+        log_fatal("Failed to compile regex for woogles URL parsing");
+    }
+    
+    regmatch_t woogles_matches[2];
+    int woogles_match_result = regexec(&woogles_regex, identifier, 2, woogles_matches, 0);
+    regfree(&woogles_regex);
+    
+    if (woogles_match_result == 0) {
+        // Extract game ID from the already matched regex
+        int start = woogles_matches[1].rm_so;
+        int end = woogles_matches[1].rm_eo;
+        int id_len = end - start;
         
-        if (woogles_match_result == 0) {
-            // Extract game ID from the already matched regex
-            int start = woogles_matches[1].rm_so;
-            int end = woogles_matches[1].rm_eo;
-            int id_len = end - start;
-            
-            game_id_str = malloc_or_die(id_len + 1);
-            strncpy(game_id_str, identifier + start, id_len);
-            game_id_str[id_len] = '\0';
-        } else {
-            // Check if it's a standalone woogles game ID (alphanumeric, not all digits)
-            if (is_all_digits_or_empty(identifier)) {
-                // All digits likely means cross-tables, not woogles
-                return NULL;
-            }
-            // Check if identifier is alphanumeric only
-            for (int i = 0; identifier[i]; i++) {
-                if (!isalnum(identifier[i])) {
-                    // Contains non-alphanumeric characters, not a woogles game ID
-                    return NULL;
-                }
-            }
-            // It's alphanumeric and not all digits, assume it's a woogles game ID
-            game_id_str = string_duplicate(identifier);
-        }
+        game_id_str = malloc_or_die(id_len + 1);
+        strncpy(game_id_str, identifier + start, id_len);
+        game_id_str[id_len] = '\0';
     } else {
-        // Check if it's a standalone woogles game ID (must be alphanumeric only)
-        if (is_all_digits_or_empty(identifier)) {
-            // All digits likely means cross-tables, not woogles
-            return NULL;
-        }
-        // Check if identifier is alphanumeric only
+        // Check if it's a standalone woogles game ID (alphanumeric, not all digits)
         for (int i = 0; identifier[i]; i++) {
             if (!isalnum(identifier[i])) {
                 // Contains non-alphanumeric characters, not a woogles game ID
@@ -187,7 +165,7 @@ char *get_url_gcg_string(const char *identifier, ErrorStack *error_stack){
     regex_t url_regex;
     int regex_status = regcomp(&url_regex, "^(https?|s?ftp)://", REG_EXTENDED);
     if (regex_status != 0) {
-        return NULL; // If regex fails, skip URL processing
+        log_fatal("Failed to compile regex for URL parsing");
     }
     
     int match_result = regexec(&url_regex, identifier, 0, NULL, 0);
