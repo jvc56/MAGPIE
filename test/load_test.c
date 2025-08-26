@@ -54,76 +54,40 @@ void validate_download_gcg(const char *source_identifier, error_code_t expected_
   config_destroy(config);
 }
 
-
-void test_xt_url_conversion(void) {
-  // Test URL conversion from full cross-tables URL
-  const char *source_identifier = "https://cross-tables.com/annotated.php?u=54938";
-
-  validate_download_gcg(source_identifier, ERROR_STATUS_SUCCESS);
-}
-
-void test_xt_game_id(void) {
-  // Test URL construction from cross-tables numeric identifier
-  const char *source_identifier = "54938";
-
-  validate_download_gcg(source_identifier, ERROR_STATUS_SUCCESS);
-
-}
-
-void test_xt_direct_url(void) {
-  // Test direct URL download
-  const char *source_identifier = "https://www.cross-tables.com/annotated/selfgcg/556/anno55690.gcg";
-
-  validate_download_gcg(source_identifier, ERROR_STATUS_SUCCESS);
-}
-
-void test_woogles_url_conversion(void) {
-  // Test URL conversion from full Woogles URL
-  const char *source_identifier = "https://woogles.io/game/XuoAntzD";
-
-  validate_download_gcg(source_identifier, ERROR_STATUS_SUCCESS);
-}
-
-void test_woogles_game_id(void) {
-  // Test URL construction from Woogles alphanumeric identifier
-  const char *source_identifier = "XuoAntzD";
-
-  validate_download_gcg(source_identifier, ERROR_STATUS_SUCCESS);
-
-}
-
-void test_local_file_loading(void) {
-  // Test loading from local file (that exists) - use testdata file with fewer moves
-  const char *source_identifier = "testdata/gcgs/success_six_pass.gcg";
-
-  validate_download_gcg(source_identifier, ERROR_STATUS_SUCCESS);
-}
-
-void test_local_file_not_found(void) {
-  // Test handling of non-existent local file
-  const char *source_identifier = "/tmp/nonexistent_file.gcg";
-
-  validate_download_gcg(source_identifier, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND);
-}
-
 void test_load(void) {
   printf("Running load tests...\n");
   
   printf("=== Cross-tables Tests ===\n");
-  test_xt_url_conversion();
-  test_xt_game_id();
-  test_xt_direct_url();
+  // Test xt URL download and numerical ID download
+  validate_download_gcg("https://cross-tables.com/annotated.php?u=54938", ERROR_STATUS_SUCCESS);
+  validate_download_gcg("54938", ERROR_STATUS_SUCCESS);
+
   printf("Cross-tables tests completed.\n\n");
   
   printf("=== Woogles Tests ===\n");
-  test_woogles_url_conversion();
-  test_woogles_game_id();
+  // Test Woogles URL download and numerical ID download
+  validate_download_gcg("https://woogles.io/game/XuoAntzD", ERROR_STATUS_SUCCESS);
+  validate_download_gcg("XuoAntzD", ERROR_STATUS_SUCCESS);
+  
   printf("Woogles tests completed.\n\n");
   
   printf("=== Local File Tests ===\n");
-  test_local_file_loading();
-  test_local_file_not_found();
+  // Test local file download and local file failure case
+  validate_download_gcg("testdata/gcgs/success_six_pass.gcg", ERROR_STATUS_SUCCESS);
+  validate_download_gcg("/tmp/nonexistent_file.gcg", ERROR_STATUS_FILEPATH_FILE_NOT_FOUND);
   printf("Local file tests completed.\n\n");
+
+
+  printf("=== URL Download Tests ===\n");
+  // Test direct URL download and failure case
+  validate_download_gcg("https://www.cross-tables.com/annotated/selfgcg/556/anno55690.gcg", ERROR_STATUS_SUCCESS);
+  validate_download_gcg("https://keep.google.com/u/0/", ERROR_STATUS_UNRECOGNIZED_URL);
+  printf("URL download tests completed.\n\n");
+
+   printf("=== Total Failure Test ===\n");
+  // Test total failure case
+  validate_download_gcg("98bfakdna\?\?}}", ERROR_STATUS_FILEPATH_FILE_NOT_FOUND);
   
+
   printf("Load tests completed.\n");
 }

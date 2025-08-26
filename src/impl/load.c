@@ -16,61 +16,35 @@
 #define WOOGLES_GCG_START "\"gcg\":\""
 
 char *get_xt_gcg_string(const char *identifier, ErrorStack *error_stack) {
-  char *game_id_str = NULL;
 
-  // Check if this is a Cross-tables URL
-  if (strstr(identifier, "cross-tables.com") != NULL) {
-      // Check if it's a direct GCG URL first
-      if (strstr(identifier, "cross-tables.com/annotated/selfgcg") != NULL) {
-          // Direct URL to GCG file - download directly
-          char *curl_cmd = get_formatted_string("curl -s -L \"%s\"", identifier);
-          char *gcg_content = get_process_output(curl_cmd);
-          free(curl_cmd);
-          
-          if (!gcg_content) {
-              error_stack_push(error_stack, ERROR_STATUS_BAD_XT_GCG,
-                              get_formatted_string("Failed to get response from cross-tables URL: %s", identifier));
-              return NULL;
-          }
-          
-          if (!is_valid_gcg_content(gcg_content)) {
-              free(gcg_content);
-              error_stack_push(error_stack, ERROR_STATUS_BAD_XT_GCG,
-                              get_formatted_string("Invalid or missing GCG content from cross-tables URL: %s", identifier));
-              return NULL;
-          }
-          
-          return gcg_content;
-      }
+  char *game_id_str = NULL;
+  
+  // Check if this is a Cross-tables URL first
+  regex_t xt_regex;
+  int xt_regex_status = regcomp(&xt_regex, "cross-tables\\.com/annotated\\.php\\?u=([0-9]+)", REG_EXTENDED);
+  if (xt_regex_status == 0) {
+      regmatch_t xt_matches[2];
+      int xt_match_result = regexec(&xt_regex, identifier, 2, xt_matches, 0);
+      regfree(&xt_regex);
       
-      // Extract game ID from URL parameter u=XXXXX using regex
-      regex_t regex;
-      regmatch_t matches[2];
-      
-      int regex_status = regcomp(&regex, "u=([0-9]+)", REG_EXTENDED);
-      if (regex_status != 0) {
-          log_fatal("Failed to compile regex for cross-tables URL parsing");
-      }
-      
-      int match_result = regexec(&regex, identifier, 2, matches, 0);
-      if (match_result == 0) {
-          int start = matches[1].rm_so;
-          int end = matches[1].rm_eo;
+      if (xt_match_result == 0) {
+          // Extract game ID from the already matched regex
+          int start = xt_matches[1].rm_so;
+          int end = xt_matches[1].rm_eo;
           int id_len = end - start;
           
           game_id_str = malloc_or_die(id_len + 1);
           strncpy(game_id_str, identifier + start, id_len);
           game_id_str[id_len] = '\0';
       } else {
-          regfree(&regex);
-          error_stack_push(error_stack, ERROR_STATUS_XT_URL_MALFORMED,
-                          get_formatted_string("Failed to extract game ID from cross-tables URL: %s", identifier));
-          return NULL;
+          // Check if it's a numeric game id
+          if (!is_all_digits_or_empty(identifier)){
+            return NULL;
+          }
+          game_id_str = string_duplicate(identifier);
       }
-      
-      regfree(&regex);
   } else {
-      // Check if it's a numeric game id
+      // Regex compilation failed, fallback to numeric check
       if (!is_all_digits_or_empty(identifier)){
         return NULL;
       }
@@ -107,35 +81,39 @@ char *get_xt_gcg_string(const char *identifier, ErrorStack *error_stack) {
 char *get_woogles_gcg_string(const char *identifier, ErrorStack *error_stack) {
     char *game_id_str = NULL;
 
-    // Check if this is a Woogles URL
-    if (strstr(identifier, "woogles.io") != NULL) {
-        // Extract game ID from Woogles URL using regex
-        regex_t regex;
-        regmatch_t matches[2];
-
-        // Pattern matches /game/[alphanumeric]
-        int regex_status = regcomp(&regex, "/game/([a-zA-Z0-9]+)", REG_EXTENDED);
-        if (regex_status != 0) {
-            log_fatal("Failed to compile regex for woogles URL parsing");
-        }
-
-        int match_result = regexec(&regex, identifier, 2, matches, 0);
-        if (match_result == 0) {
-            int start = matches[1].rm_so;
-            int end = matches[1].rm_eo;
+    // Check if this is a Woogles URL first
+    regex_t woogles_regex;
+    int woogles_regex_status = regcomp(&woogles_regex, "woogles\\.io/game/([a-zA-Z0-9]+)", REG_EXTENDED);
+    if (woogles_regex_status == 0) {
+        regmatch_t woogles_matches[2];
+        int woogles_match_result = regexec(&woogles_regex, identifier, 2, woogles_matches, 0);
+        regfree(&woogles_regex);
+        
+        if (woogles_match_result == 0) {
+            // Extract game ID from the already matched regex
+            int start = woogles_matches[1].rm_so;
+            int end = woogles_matches[1].rm_eo;
             int id_len = end - start;
             
             game_id_str = malloc_or_die(id_len + 1);
             strncpy(game_id_str, identifier + start, id_len);
             game_id_str[id_len] = '\0';
         } else {
-            regfree(&regex);
-            error_stack_push(error_stack, ERROR_STATUS_WOOGLES_URL_MALFORMED,
-                            get_formatted_string("Failed to extract game ID from woogles URL: %s", identifier));
-            return NULL;
+            // Check if it's a standalone woogles game ID (alphanumeric, not all digits)
+            if (is_all_digits_or_empty(identifier)) {
+                // All digits likely means cross-tables, not woogles
+                return NULL;
+            }
+            // Check if identifier is alphanumeric only
+            for (int i = 0; identifier[i]; i++) {
+                if (!isalnum(identifier[i])) {
+                    // Contains non-alphanumeric characters, not a woogles game ID
+                    return NULL;
+                }
+            }
+            // It's alphanumeric and not all digits, assume it's a woogles game ID
+            game_id_str = string_duplicate(identifier);
         }
-
-        regfree(&regex);
     } else {
         // Check if it's a standalone woogles game ID (must be alphanumeric only)
         if (is_all_digits_or_empty(identifier)) {
@@ -204,6 +182,41 @@ char *get_woogles_gcg_string(const char *identifier, ErrorStack *error_stack) {
     return gcg_content;
 }
 
+char *get_url_gcg_string(const char *identifier, ErrorStack *error_stack){
+    // Check if this looks like a URL (http, https, ftp, sftp)
+    regex_t url_regex;
+    int regex_status = regcomp(&url_regex, "^(https?|s?ftp)://", REG_EXTENDED);
+    if (regex_status != 0) {
+        return NULL; // If regex fails, skip URL processing
+    }
+    
+    int match_result = regexec(&url_regex, identifier, 0, NULL, 0);
+    regfree(&url_regex);
+    
+    if (match_result == 0) {
+        // It's a URL - try to download directly
+        char *curl_cmd = get_formatted_string("curl -s -L \"%s\"", identifier);
+        char *gcg_content = get_process_output(curl_cmd);
+        free(curl_cmd);
+        
+        if (!gcg_content) {
+            error_stack_push(error_stack, ERROR_STATUS_UNRECOGNIZED_URL,
+                            get_formatted_string("Failed to get response from URL: %s", identifier));
+            return NULL;
+        }
+        
+        if (!is_valid_gcg_content(gcg_content)) {
+            free(gcg_content);
+            error_stack_push(error_stack, ERROR_STATUS_UNRECOGNIZED_URL,
+                            get_formatted_string("Invalid or missing GCG content from URL: %s", identifier));
+            return NULL;
+        }
+        
+        return gcg_content;
+    }
+    
+    return NULL; // Not a URL
+}
 
 char *get_local_gcg_string(const char *identifier, ErrorStack *error_stack) {
     
@@ -258,11 +271,19 @@ char *get_gcg_string(const DownloadGCGOptions *options, ErrorStack *error_stack)
         return gcg_string;
     }
 
-
     // Try local file
     gcg_string = get_local_gcg_string(identifier, error_stack);
     if (!error_stack_is_empty(error_stack)) {
         return NULL; 
+    }
+    if (gcg_string) {
+        return gcg_string;
+    }
+
+    // Try generic URL download
+    gcg_string = get_url_gcg_string(identifier, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+        return NULL;  
     }
     if (gcg_string) {
         return gcg_string;
