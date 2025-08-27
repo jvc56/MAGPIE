@@ -8,10 +8,10 @@
 #include <stdlib.h>
 
 typedef struct Anchor {
-  // The highest possibly equity
-  // that can be achieved from this
-  // anchor column.
+  // The highest possible equity that can be achieved from this anchor column
   Equity highest_possible_equity;
+  // The highest possible score that can be achieved from this anchor column
+  Equity highest_possible_score;
   // The row of the board for this anchor
   uint8_t row;
   // The column of the board for this anchor
@@ -22,6 +22,11 @@ typedef struct Anchor {
   // The direction of the board for
   // this anchor column.
   uint8_t dir;
+
+  // Only used for WMP move generation
+  uint8_t tiles_to_play;
+  uint8_t playthrough_blocks;
+
 } Anchor;
 
 typedef struct AnchorHeap {
@@ -33,13 +38,34 @@ typedef struct AnchorHeap {
 static inline void
 anchor_heap_add_unheaped_anchor(AnchorHeap *ah, uint8_t row, uint8_t col,
                                 uint8_t last_anchor_col, uint8_t dir,
-                                Equity highest_possible_equity) {
+                                Equity highest_possible_equity,
+                                Equity highest_possible_score) {
   const int i = ah->count;
   ah->anchors[i].row = row;
   ah->anchors[i].col = col;
   ah->anchors[i].last_anchor_col = last_anchor_col;
   ah->anchors[i].dir = dir;
   ah->anchors[i].highest_possible_equity = highest_possible_equity;
+  ah->anchors[i].highest_possible_score = highest_possible_score;
+  ah->count++;
+}
+
+// Appends anchors to the end of the list without any comparisons.
+static inline void
+anchor_heap_add_unheaped_wmp_anchor(AnchorHeap *ah, uint8_t row, uint8_t col,
+                                uint8_t last_anchor_col, uint8_t dir,
+                                Equity highest_possible_equity,
+                                Equity highest_possible_score, int tiles_to_play,
+                                int playthrough_blocks) {
+  const int i = ah->count;
+  ah->anchors[i].row = row;
+  ah->anchors[i].col = col;
+  ah->anchors[i].last_anchor_col = last_anchor_col;
+  ah->anchors[i].dir = dir;
+  ah->anchors[i].highest_possible_equity = highest_possible_equity;
+  ah->anchors[i].highest_possible_score = highest_possible_score;
+  ah->anchors[i].tiles_to_play = tiles_to_play;
+  ah->anchors[i].playthrough_blocks = playthrough_blocks;
   ah->count++;
 }
 

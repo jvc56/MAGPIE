@@ -97,6 +97,7 @@ typedef struct MoveGen {
   int shadow_word_multiplier;
 
   Equity highest_shadow_equity;
+  Equity highest_shadow_score;
   uint64_t rack_cross_set;
   int number_of_letters_on_rack;
   Equity full_rack_descending_tile_scores[WORD_ALIGNING_RACK_SIZE];

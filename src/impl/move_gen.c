@@ -400,6 +400,13 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
   }
 }
 
+void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
+  assert(gen != NULL);
+  assert(anchor != NULL);
+  printf("Anchor at (%d,%d) dir=%d num_tiles=%d highest_possible_equity=%d\n",
+         anchor->row, anchor->col, anchor->dir, anchor->tiles_to_play, anchor->highest_possible_equity);
+}
+
 bool go_on(MoveGen *gen, int current_col, MachineLetter L,
            uint32_t new_node_index, bool accepts, int leftstrip, int rightstrip,
            bool unique_play, int main_word_score, int word_multiplier,
@@ -812,8 +819,15 @@ static inline void shadow_record(MoveGen *gen) {
         gen->full_rack_descending_tile_scores, gen->number_of_tiles_in_bag,
         gen->number_of_letters_on_rack, gen->tiles_played);
   }
+  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    wmp_move_gen_maybe_update_anchor(&gen->wmp_move_gen, gen->tiles_played,
+                                     score, equity);
+  }
   if (equity > gen->highest_shadow_equity) {
     gen->highest_shadow_equity = equity;
+  }
+  if (score > gen->highest_shadow_score) {
+    gen->highest_shadow_score = score;
   }
   if (gen->tiles_played > gen->max_tiles_to_play) {
     gen->max_tiles_to_play = gen->tiles_played;
@@ -1334,7 +1348,7 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
     anchor_heap_add_unheaped_anchor(&gen->anchor_heap, gen->current_row_index,
                                     col, gen->last_anchor_col, gen->dir,
-                                    EQUITY_MAX_VALUE);
+                                    EQUITY_MAX_VALUE, EQUITY_MAX_VALUE);
     return;
   }
 
@@ -1360,8 +1374,9 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   gen->shadow_perpendicular_additional_score = 0;
   gen->shadow_word_multiplier = 1;
 
-  // Reset shadow score
+  // Reset shadow equity/score
   gen->highest_shadow_equity = 0;
+  gen->highest_shadow_score = 0;
 
   // Set the number of letters
   gen->number_of_letters_on_rack = rack_get_total_letters(&gen->player_rack);
@@ -1379,9 +1394,14 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
     return;
   }
 
-  anchor_heap_add_unheaped_anchor(&gen->anchor_heap, gen->current_row_index,
-                                  col, gen->last_anchor_col, gen->dir,
-                                  gen->highest_shadow_equity);
+  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    wmp_move_gen_add_anchors(&gen->wmp_move_gen, gen->current_row_index, col,
+                             gen->last_anchor_col, gen->dir, &gen->anchor_heap);
+  } else {
+    anchor_heap_add_unheaped_anchor(
+        &gen->anchor_heap, gen->current_row_index, col, gen->last_anchor_col,
+        gen->dir, gen->highest_shadow_equity, gen->highest_shadow_score);
+  }
 }
 
 void shadow_by_orientation(MoveGen *gen) {
@@ -1581,9 +1601,13 @@ void gen_record_scoring_plays(MoveGen *gen) {
       recursive_gen_alpha(gen, anchor.col, anchor.col, anchor.col,
                           gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
     } else {
-      recursive_gen(gen, anchor.col, kwg_root_node_index, anchor.col,
-                    anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,
-                    0);
+      if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+        wordmap_gen(gen, &anchor);
+      } else {
+        recursive_gen(gen, anchor.col, kwg_root_node_index, anchor.col,
+                      anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,
+                      0);
+      }
     }
 
     // If a better play has been found than should have been possible for
@@ -1620,6 +1644,7 @@ void gen_record_pass(MoveGen *gen) {
 void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen(args->thread_index);
   gen_load_position(gen, args);
+  printf("Generating moves for player %d\n", gen->player_index);
   gen_look_up_leaves_and_record_exchanges(gen);
 
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {

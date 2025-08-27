@@ -44,7 +44,18 @@ typedef struct WMPMoveGen {
   Equity nonplaythrough_best_leave_values[RACK_SIZE + 1];
   bool nonplaythrough_has_word_of_length[RACK_SIZE + 1];
   uint8_t count_by_size[RACK_SIZE + 1];
+
+  Anchor anchors[MAX_WMP_MOVE_GEN_ANCHORS];
+  int playthrough_blocks;
+  int playthrough_blocks_copy;
 } WMPMoveGen;
+
+static inline void reset_anchors(WMPMoveGen *wmp_move_gen) {
+  for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
+    wmp_move_gen->anchors[i].highest_possible_equity = EQUITY_MIN_VALUE;
+    wmp_move_gen->anchors[i].highest_possible_score = EQUITY_MIN_VALUE;
+  }
+}
 
 static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
                                      const LetterDistribution *ld,
@@ -204,4 +215,49 @@ static inline void wmp_move_gen_reset_playthrough(WMPMoveGen *wmp_move_gen) {
   wmp_move_gen->num_tiles_played_through = 0;
 }
 
+static inline int wmp_move_gen_anchor_index(int playthrough_blocks,
+                                            int tiles_played) {
+  if (tiles_played < MIN_TILES_FOR_WMP_GEN) {
+    return 0;
+  }
+  return playthrough_blocks * (RACK_SIZE + 1) + tiles_played;
+}
+
+static inline Anchor *wmp_move_gen_get_anchor(WMPMoveGen *wmp_move_gen,
+                                              int playthrough_blocks,
+                                              int tiles_played) {
+
+  return &wmp_move_gen->anchors[wmp_move_gen_anchor_index(playthrough_blocks,
+                                                          tiles_played)];
+}
+
+static inline void wmp_move_gen_maybe_update_anchor(WMPMoveGen *wmp_move_gen,
+                                                   int tiles_played,
+                                                   Equity score,
+                                                   Equity equity) {
+  Anchor *anchor = wmp_move_gen_get_anchor(
+      wmp_move_gen, wmp_move_gen->playthrough_blocks, tiles_played);
+  anchor->tiles_to_play = tiles_played;
+  anchor->playthrough_blocks = wmp_move_gen->playthrough_blocks;
+  if (equity > anchor->highest_possible_equity) {
+    anchor->highest_possible_equity = equity;
+  }
+  if (score > anchor->highest_possible_score) {
+    anchor->highest_possible_score = score;
+  }
+}
+
+static inline void wmp_move_gen_add_anchors(WMPMoveGen *wmp_move_gen,
+                                            int row, int col, int last_anchor_col,
+                                            int dir, AnchorHeap* anchor_heap) {
+  for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
+    const Anchor *anchor = &wmp_move_gen->anchors[i];
+    if (anchor->highest_possible_equity > EQUITY_MIN_VALUE) {
+      anchor_heap_add_unheaped_wmp_anchor(
+          anchor_heap, row, col, last_anchor_col, dir,
+          anchor->highest_possible_equity, anchor->highest_possible_score, anchor->tiles_to_play,
+          anchor->playthrough_blocks);
+    }
+  }
+}
 #endif
