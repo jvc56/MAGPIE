@@ -29,6 +29,7 @@
 #include "leave_map_test.h"
 #include "leaves_test.h"
 #include "letter_distribution_test.h"
+#include "load_test.h"
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
@@ -50,7 +51,6 @@
 #include "word_prune_test.h"
 #include "word_test.h"
 #include "zobrist_test.h"
-#include "load_test.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

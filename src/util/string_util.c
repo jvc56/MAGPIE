@@ -802,7 +802,7 @@ double string_to_double(const char *str, ErrorStack *error_stack) {
 }
 
 char *json_unescape_string(const char *json_string) {
-  int input_len = string_length(json_string);
+  size_t input_len = string_length(json_string);
   char *unescaped = malloc_or_die(input_len + 1);
   char *dst = unescaped;
   const char *src = json_string;
@@ -827,4 +827,33 @@ char *json_unescape_string(const char *json_string) {
   *dst = '\0';
   
   return unescaped;
+}
+
+char *get_process_output(const char *cmd) {
+    FILE *pipe = popen_or_die(cmd, "r");
+  
+    StringBuilder *content_builder = string_builder_create();
+    char *buffer = NULL;
+    size_t buffer_size = 0;
+    
+    while (getline(&buffer, &buffer_size, pipe) != -1) {
+        string_builder_add_string(content_builder, buffer);
+    }
+    
+    free(buffer);
+    int status = pclose(pipe);
+    char *output = NULL;
+    
+    if (status == 0) {
+        output = string_builder_dump(content_builder, NULL);
+    }
+    
+    string_builder_destroy(content_builder);
+    return output; // Returns NULL if command failed
+}
+
+bool is_valid_gcg_content(const char *content) {
+    return content && 
+           !is_string_empty_or_whitespace(content) && 
+           strstr(content, "#player1") != NULL;
 }

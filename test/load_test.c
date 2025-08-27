@@ -1,11 +1,7 @@
-#include "../src/def/game_defs.h"
-#include "../src/def/game_history_defs.h"
-#include "../src/ent/game.h"
 #include "../src/ent/game_history.h"
 #include "../src/impl/config.h"
 #include "../src/impl/load.h"
 #include "../src/util/io_util.h"
-#include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdbool.h>
