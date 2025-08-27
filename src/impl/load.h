@@ -6,8 +6,8 @@
 #include "config.h"
 
 typedef struct DownloadGCGOptions {
-  const char *source_identifier;  // Game ID, URL, or local file path
-  const char *lexicon;            // Optional lexicon override
+  const char *source_identifier; // Game ID, URL, or local file path
+  const char *lexicon;           // Optional lexicon override
   Config *config;
 } DownloadGCGOptions;
 

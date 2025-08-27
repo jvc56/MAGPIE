@@ -1,4 +1,5 @@
 #include "io_util.h"
+
 #include <assert.h>
 #include <errno.h>
 #include <stdarg.h>
@@ -449,10 +450,10 @@ void fwrite_or_die(const void *ptr, size_t size, size_t nmemb, FILE *stream,
 }
 
 FILE *popen_or_die(const char *command, const char *mode) {
-    FILE *pipe = popen(command, mode);
-    if (!pipe) {
-        fprintf_or_die(stderr, "Failed to execute command: %s\n", command);
-        exit(EXIT_FAILURE);
-    }
-    return pipe;
+  FILE *pipe = popen(command, mode);
+  if (!pipe) {
+    fprintf_or_die(stderr, "Failed to execute command: %s\n", command);
+    exit(EXIT_FAILURE);
+  }
+  return pipe;
 }
