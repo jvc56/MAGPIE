@@ -29,6 +29,7 @@
 #include "leave_map_test.h"
 #include "leaves_test.h"
 #include "letter_distribution_test.h"
+#include "load_test.h"
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
@@ -110,6 +111,7 @@ static TestEntry test_table[] = {
     {"endgame", test_endgame},
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},
+    {"load", test_load},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

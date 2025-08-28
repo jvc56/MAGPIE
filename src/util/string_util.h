@@ -91,4 +91,8 @@ int string_to_int(const char *str, ErrorStack *error_stack);
 uint64_t string_to_uint64(const char *str, ErrorStack *error_stack);
 double string_to_double(const char *str, ErrorStack *error_stack);
 
+// JSON utilities
+char *json_unescape_string(const char *json_string);
+char *get_process_output(const char *cmd);
+bool is_valid_gcg_content(const char *content);
 #endif

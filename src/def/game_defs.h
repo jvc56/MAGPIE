@@ -16,6 +16,7 @@ typedef enum {
 typedef enum {
   BACKUP_MODE_OFF,
   BACKUP_MODE_SIMULATION,
+  BACKUP_MODE_GCG,
 } backup_mode_t;
 
 typedef enum {
