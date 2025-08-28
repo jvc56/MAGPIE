@@ -447,7 +447,7 @@ void game_set_starting_player_index(Game *game, int starting_player_index) {
   game->player_on_turn_index = starting_player_index;
 }
 
-void pre_allocate_single_game_backup(MinimalGameBackup *mgb, Game *game) {
+void pre_allocate_single_game_backup(MinimalGameBackup *mgb, const Game *game) {
   const LetterDistribution *ld = game_get_ld(game);
   const int ld_size = ld_get_size(ld);
   mgb->bag = bag_create(ld, 0);
@@ -607,7 +607,7 @@ void game_backup(Game *game) {
 
 void game_unplay_last_move(Game *game) {
   // restore from backup (pop the last element).
-  MinimalGameBackup *state = NULL;
+  const MinimalGameBackup *state = NULL;
   // Since there are two kinds of backups and a restore from backup can occur
   // with the backup mode off, we check which kind of backup to perform by
   // checking for sim backups first.

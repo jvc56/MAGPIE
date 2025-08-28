@@ -294,9 +294,6 @@ char *get_gcg_string(const DownloadGCGOptions *options,
 
 void download_gcg(const DownloadGCGOptions *options, GameHistory *game_history,
                   ErrorStack *error_stack) {
-  if (!options || !game_history) {
-    log_fatal("Missing options or game history");
-  }
 
   // Get the GCG content from any available source
   char *gcg_content = get_gcg_string(options, error_stack);
