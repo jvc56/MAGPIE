@@ -3,7 +3,6 @@
 #include "../ent/game_history.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "config.h"
 #include "gcg.h"
 #include <ctype.h>
 #include <regex.h>
@@ -141,17 +140,19 @@ char *get_woogles_gcg_string(const char *identifier, ErrorStack *error_stack) {
   // Parse JSON response to extract GCG content
   const char *gcg_start = strstr(response, WOOGLES_GCG_START);
   if (!gcg_start) {
+    free(response);
     error_stack_push(
         error_stack, ERROR_STATUS_BAD_WOOGLES_GCG,
         get_formatted_string(
             "Invalid or missing GCG content from woogles URL: %s", identifier));
+    return NULL;
   }
   gcg_start += string_length(WOOGLES_GCG_START);
   const char *gcg_end = gcg_start;
   while (*gcg_end && *gcg_end != '"') {
     gcg_end++;
   }
-  int gcg_len = gcg_end - gcg_start;
+  long gcg_len = gcg_end - gcg_start;
   char *raw_gcg = malloc_or_die(gcg_len + 1);
   strncpy(raw_gcg, gcg_start, gcg_len);
   raw_gcg[gcg_len] = '\0';
