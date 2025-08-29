@@ -308,3 +308,11 @@ void download_gcg(const DownloadGCGOptions *options, GameHistory *game_history,
   // Clean up
   free(gcg_content);
 }
+
+void download_gcg_simple(const char *source_identifier, Config *config,
+                         GameHistory *game_history, ErrorStack *error_stack) {
+  DownloadGCGOptions options = {.source_identifier = source_identifier,
+                                .lexicon = NULL,
+                                .config = config};
+  download_gcg(&options, game_history, error_stack);
+}
