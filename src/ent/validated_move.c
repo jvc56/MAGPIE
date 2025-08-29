@@ -53,7 +53,7 @@ int get_letter_coords(const char c) {
 }
 
 bool is_exchange_allowed(const Bag *bag) {
-  return bag_get_tiles(bag) >= RACK_SIZE;
+  return bag_get_letters(bag) >= RACK_SIZE;
 }
 
 void validate_coordinates(Move *move, const char *coords_string,
@@ -610,7 +610,7 @@ void validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
               player_get_rack(game_get_player(game, 1 - player_index)),
               board_get_opening_move_penalties(board),
               board_get_tiles_played(board),
-              bag_get_tiles(game_get_bag(game))));
+              bag_get_letters(game_get_bag(game))));
     } else {
       move_set_equity(vm->move, score);
     }
@@ -756,8 +756,8 @@ void validated_moves_add_to_move_list(const ValidatedMoves *vms, MoveList *ml) {
   free(moves);
 }
 
-void validated_moves_set_rack_to_played_tiles(const ValidatedMoves *vms, int i,
-                                              Rack *rack_to_set) {
+void validated_moves_set_rack_to_played_letters(const ValidatedMoves *vms,
+                                                int i, Rack *rack_to_set) {
   if (i < 0 || i >= vms->number_of_moves) {
     log_fatal("attempted to get out of bounds move when setting rack to played "
               "tiles, have %d moves but tried to get move %d",

@@ -2,7 +2,6 @@
 #include "../def/cross_set_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
-#include "../def/gameplay_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
@@ -323,14 +322,28 @@ void draw_starting_racks(const Game *game) {
   draw_to_full_rack(game, 1);
 }
 
+// FIXME: remove
+#include "../str/game_string.h"
+// FIXME: remove
+#include "../str/rack_string.h"
+
 // Assumes the move has been validated
-// If rack_to_draw is not null, it will attempt to set the
-// player rack to rack_to_draw after the play or will
-// return an error if it is not possible.
 // If the input leave rack is not null, it will record the leave of
 // the play in the leave rack.
-play_move_status_t play_move(const Move *move, Game *game,
-                             const Rack *rack_to_draw, Rack *leave) {
+void play_move(const Move *move, Game *game, Rack *leave) {
+
+  // printf("rack to draw:\n");
+  // StringBuilder *rack_sb = string_builder_create();
+  // string_builder_add_rack(rack_sb, rack_to_draw, game_get_ld(game), false);
+  // printf("%s", string_builder_peek(rack_sb));
+  // string_builder_destroy(rack_sb);
+
+  // printf("\ngame before play move:\n");
+  // StringBuilder *game_string = string_builder_create();
+  // string_builder_add_game(game_string, game, NULL);
+  // printf("%s\n", string_builder_peek(game_string));
+  // string_builder_destroy(game_string);
+
   if (game_get_backup_mode(game) == BACKUP_MODE_SIMULATION) {
     game_backup(game);
   }
@@ -360,16 +373,6 @@ play_move_status_t play_move(const Move *move, Game *game,
     execute_exchange_move(move, game, leave);
     game_increment_consecutive_scoreless_turns(game);
   }
-
-  if (rack_to_draw) {
-    if (rack_is_drawable(game, player_on_turn_index, rack_to_draw)) {
-      return_rack_to_bag(game, player_on_turn_index);
-      draw_rack_from_bag(game, player_on_turn_index, rack_to_draw);
-    } else {
-      return PLAY_MOVE_STATUS_RACK_TO_DRAW_NOT_IN_BAG;
-    }
-  }
-
   if (game_get_consecutive_scoreless_turns(game) ==
       game_get_max_scoreless_turns(game)) {
     Player *player0 = game_get_player(game, 0);
@@ -379,10 +382,9 @@ play_move_status_t play_move(const Move *move, Game *game,
     game_set_game_end_reason(game, GAME_END_REASON_CONSECUTIVE_ZEROS);
   }
   game_start_next_player_turn(game);
-  return PLAY_MOVE_STATUS_SUCCESS;
 }
 
-void return_phony_tiles(Game *game) {
+void return_phony_letters(Game *game) {
   game_unplay_last_move(game);
   game_start_next_player_turn(game);
   game_increment_consecutive_scoreless_turns(game);
@@ -437,8 +439,7 @@ bool moves_are_similar(const Move *move1, const Move *move2, int dist_size) {
   // Create a rack from move1, then subtract the rack from move2. The final
   // rack should have all zeroes.
   Rack similar_plays_rack;
-  rack_set_dist_size(&similar_plays_rack, dist_size);
-  rack_reset(&similar_plays_rack);
+  rack_set_dist_size_and_reset(&similar_plays_rack, dist_size);
   for (int i = 0; i < move_get_tiles_length(move1); i++) {
     MachineLetter tile = move_get_tile(move1, i);
     if (tile == PLAYED_THROUGH_MARKER) {

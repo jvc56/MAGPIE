@@ -18,6 +18,7 @@ typedef struct InferenceArgs {
   int move_capacity;
   double equity_margin;
   Rack *target_played_tiles;
+  Rack *target_known_rack;
   const Game *game;
   ThreadControl *thread_control;
 } InferenceArgs;

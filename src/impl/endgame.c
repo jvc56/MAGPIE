@@ -2,7 +2,6 @@
 
 #include "../compat/cpthread.h"
 #include "../def/game_defs.h"
-#include "../def/gameplay_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/move_defs.h"
 #include "../ent/bag.h"
@@ -85,7 +84,7 @@ StringBuilder *pvline_string(const PVLine *pv_line, const Game *game,
                                         add_line_breaks ? '\n' : ' ');
     // Play the move on the board to make the next small_move_to_move make
     // sense.
-    play_move(temp, game_copy, NULL, NULL);
+    play_move(temp, game_copy, NULL);
   }
   move_destroy(temp);
   game_destroy(game_copy);
@@ -380,9 +379,7 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
 
     int last_consecutive_scoreless_turns =
         game_get_consecutive_scoreless_turns(worker->game_copy);
-    play_move_status_t play_status =
-        play_move(worker->move_list->spare_move, worker->game_copy, NULL, NULL);
-    assert(play_status == PLAY_MOVE_STATUS_SUCCESS);
+    play_move(worker->move_list->spare_move, worker->game_copy, NULL);
 
     // Implementation is currently single-threaded. Keep counts per worker if we
     // want to keep doing this when we have multiple threads.
@@ -559,7 +556,7 @@ void *solver_worker_start(void *uncasted_solver_worker) {
 
 PVLine endgame_solve(EndgameSolver *solver, int plies) {
   // bag must be empty. This should be validated by the caller.
-  assert(!bag_get_tiles(game_get_bag(solver->game)));
+  assert(!bag_get_letters(game_get_bag(solver->game)));
 
   solver->requested_plies = plies;
   // kick-off iterative deepening thread.

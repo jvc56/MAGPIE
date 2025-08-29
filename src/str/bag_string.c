@@ -15,7 +15,7 @@ void string_builder_add_bag(StringBuilder *bag_string_builder, const Bag *bag,
   Rack *bag_as_rack = rack_create(ld_size);
 
   Bag *copied_bag = bag_duplicate(bag);
-  int number_of_tiles = bag_get_tiles(bag);
+  int number_of_tiles = bag_get_letters(bag);
   for (int i = 0; i < number_of_tiles; i++) {
     rack_add_letter(bag_as_rack, bag_draw_random_letter(copied_bag, 0));
   }

@@ -5,7 +5,8 @@
 #define GAME_VARIANT_CLASSIC_NAME "classic"
 #define GAME_VARIANT_WORDSMOG_NAME "wordsmog"
 
-enum { MAX_SEARCH_DEPTH = 25, MAX_SCORELESS_TURNS = 6 };
+// FIXME: revert this to 25
+enum { MAX_SEARCH_DEPTH = 50, MAX_SCORELESS_TURNS = 6 };
 
 typedef enum {
   GAME_VARIANT_UNKNOWN,

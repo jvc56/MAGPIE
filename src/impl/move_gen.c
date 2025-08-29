@@ -1449,7 +1449,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
                     player_get_wmp(player));
 
   gen->bingo_bonus = game_get_bingo_bonus(game);
-  gen->number_of_tiles_in_bag = bag_get_tiles(game_get_bag(game));
+  gen->number_of_tiles_in_bag = bag_get_letters(game_get_bag(game));
   gen->kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
   gen->move_sort_type = move_sort_type;
   gen->move_record_type = move_record_type;

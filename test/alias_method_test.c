@@ -21,8 +21,7 @@ void test_alias_method_dist(const Config *config, AliasMethod *am,
   alias_method_reset(am);
 
   Rack rack;
-  rack_set_dist_size(&rack, ld_size);
-  rack_reset(&rack);
+  rack_set_dist_size_and_reset(&rack, ld_size);
 
   int num_entries = 0;
   int total_count = 0;

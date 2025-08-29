@@ -399,7 +399,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   Equity leftover = 0;
   game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
   // play move
-  play_move(simmed_play_get_move(simmed_play), game, NULL, NULL);
+  play_move(simmed_play_get_move(simmed_play), game, NULL);
   sim_results_increment_node_count(sim_results);
   game_set_backup_mode(game, BACKUP_MODE_OFF);
   // further plies will NOT be backed up.
@@ -415,7 +415,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
     const Move *best_play = get_top_equity_move(game, thread_index, move_list);
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
-    play_move(best_play, game, NULL, NULL);
+    play_move(best_play, game, NULL);
     sim_results_increment_node_count(sim_results);
     if (ply == plies - 2 || ply == plies - 1) {
       Equity this_leftover = get_leave_value_for_move(
@@ -440,7 +440,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       simmer->win_pcts, simmed_play, spread, leftover,
       game_get_game_end_reason(game),
       // number of tiles unseen to us: bag tiles + tiles on opp rack.
-      bag_get_tiles(game_get_bag(game)) +
+      bag_get_letters(game_get_bag(game)) +
           rack_get_total_letters(player_get_rack(
               game_get_player(game, 1 - simmer->initial_player))),
       plies % 2);

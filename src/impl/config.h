@@ -70,8 +70,8 @@ Game *config_game_create(const Config *config);
 // Impl
 void config_infer(const Config *config, bool use_game_history, int target_index,
                   int target_score, int target_num_exch,
-                  Rack *target_played_tiles, InferenceResults *results,
-                  ErrorStack *error_stack);
+                  Rack *target_played_tiles, Rack *target_known_rack,
+                  InferenceResults *results, ErrorStack *error_stack);
 void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
                      autoplay_t autoplay_type,
                      const char *num_games_or_min_rack_targets,

@@ -37,7 +37,7 @@ void test_bag(void) {
     assert((int)ld_get_dist(ld, i) == bag_get_letter(bag, i));
   }
 
-  int number_of_remaining_tiles = bag_get_tiles(bag);
+  int number_of_remaining_tiles = bag_get_letters(bag);
   for (int k = 0; k < number_of_remaining_tiles; k++) {
     MachineLetter letter = bag_draw_random_letter(bag, 0);
     rack_add_letter(rack, letter);
@@ -51,7 +51,7 @@ void test_bag(void) {
   rack_reset(rack);
 
   while (!bag_is_empty(bag)) {
-    bag_draw_random_letter(bag, bag_get_tiles(bag) % 2);
+    bag_draw_random_letter(bag, bag_get_letters(bag) % 2);
   }
 
   // Check adding letters to the bag

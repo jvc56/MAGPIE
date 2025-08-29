@@ -28,8 +28,10 @@ Equity game_event_get_move_score(const GameEvent *event);
 void game_event_set_cgp_move_string(GameEvent *event, char *cgp_move_string);
 const char *game_event_get_cgp_move_string(const GameEvent *event);
 
-void game_event_set_rack(GameEvent *event, Rack *rack);
-Rack *game_event_get_rack(const GameEvent *event);
+Rack *game_event_get_rack(GameEvent *event);
+const Rack *game_event_get_const_rack(const GameEvent *event);
+
+Rack *game_event_get_opp_known_letters(GameEvent *event);
 
 void game_event_set_vms(GameEvent *event, ValidatedMoves *vms);
 ValidatedMoves *game_event_get_vms(const GameEvent *event);
@@ -92,27 +94,11 @@ void game_history_player_set_score(GameHistory *game_history, int player_index,
                                    int score);
 Equity game_history_player_get_score(const GameHistory *game_history,
                                      int player_index);
-
-void game_history_player_set_next_rack_set(GameHistory *game_history,
-                                           int player_index,
-                                           bool next_rack_set);
-bool game_history_player_get_next_rack_set(const GameHistory *game_history,
-                                           int player_index);
-
-void game_history_player_set_last_known_rack(GameHistory *game_history,
-                                             int player_index,
-                                             const Rack *rack);
-Rack *game_history_player_get_last_known_rack(const GameHistory *game_history,
-                                              int player_index);
-
-void game_history_init_player_phony_calc_racks(GameHistory *game_history,
-                                               int ld_size);
-Rack *
-game_history_player_get_known_rack_from_phonies(const GameHistory *game_history,
-                                                int player_index);
-Rack *
-game_history_player_get_previous_played_tiles(const GameHistory *game_history,
-                                              int player_index);
+Rack *game_history_player_get_last_rack(GameHistory *game_history,
+                                        int player_index);
+const Rack *
+game_history_player_get_last_rack_const(const GameHistory *game_history,
+                                        int player_index);
 void game_history_set_player(GameHistory *history, int player_index,
                              const char *player_name,
                              const char *player_nickname);

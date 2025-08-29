@@ -557,7 +557,7 @@ void test_sim_perf(const char *sim_perf_iters) {
   }
   draw_starting_racks(game);
   for (int i = 0; i < num_iters; i++) {
-    if (bag_get_tiles(bag) < RACK_SIZE) {
+    if (bag_get_letters(bag) < RACK_SIZE) {
       game_reset(game);
       draw_starting_racks(game);
     }
@@ -592,7 +592,7 @@ void test_sim_perf(const char *sim_perf_iters) {
     write_stats_to_file(sim_perf_filename, strategies, stats, num_strategies);
     const Move *best_play =
         get_top_equity_move(game, 0, config_get_move_list(config));
-    play_move(best_play, game, NULL, NULL);
+    play_move(best_play, game, NULL);
   }
   for (int i = 0; i < num_strategies; i++) {
     sim_strategy_stats_destroy(stats[i]);

@@ -874,13 +874,14 @@ char *status_sim(Config *config) {
 void config_fill_infer_args(const Config *config, bool use_game_history,
                             int target_index, int target_score,
                             int target_num_exch, Rack *target_played_tiles,
-                            InferenceArgs *args) {
+                            Rack *target_known_rack, InferenceArgs *args) {
   args->target_index = target_index;
   args->target_score = target_score;
   args->target_num_exch = target_num_exch;
   args->move_capacity = config_get_num_plays(config);
   args->equity_margin = config_get_equity_margin(config);
   args->target_played_tiles = target_played_tiles;
+  args->target_known_rack = target_known_rack;
   args->use_game_history = use_game_history;
   args->game_history = config->game_history;
   args->game = config_get_game(config);
@@ -890,19 +891,20 @@ void config_fill_infer_args(const Config *config, bool use_game_history,
 // Use target_index < 0 to infer using the game history
 void config_infer(const Config *config, bool use_game_history, int target_index,
                   int target_score, int target_num_exch,
-                  Rack *target_played_tiles, InferenceResults *results,
-                  ErrorStack *error_stack) {
+                  Rack *target_played_tiles, Rack *target_known_rack,
+                  InferenceResults *results, ErrorStack *error_stack) {
   InferenceArgs args;
   config_fill_infer_args(config, use_game_history, target_index, target_score,
-                         target_num_exch, target_played_tiles, &args);
+                         target_num_exch, target_played_tiles,
+                         target_known_rack, &args);
   return infer(&args, results, error_stack);
 }
 
-void config_infer_with_rack(Config *config, Rack *target_played_tiles,
-                            ErrorStack *error_stack) {
+void config_infer_with_racks(Config *config, Rack *target_played_tiles,
+                             Rack *target_known_rack, ErrorStack *error_stack) {
   // FIXME: allow infer to use zero args
   if (config_get_parg_num_set_values(config, ARG_TOKEN_INFER) == 0) {
-    config_infer(config, true, 0, 0, 0, target_played_tiles,
+    config_infer(config, true, 0, 0, 0, target_played_tiles, target_known_rack,
                  config->inference_results, error_stack);
     return;
   }
@@ -964,7 +966,8 @@ void config_infer_with_rack(Config *config, Rack *target_played_tiles,
   }
 
   config_infer(config, false, target_index, target_score, target_num_exch,
-               target_played_tiles, config->inference_results, error_stack);
+               target_played_tiles, target_known_rack,
+               config->inference_results, error_stack);
 }
 
 void impl_infer(Config *config, ErrorStack *error_stack) {
@@ -977,10 +980,13 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
   }
 
   config_init_game(config);
-  Rack *target_played_tiles =
-      rack_create(ld_get_size(game_get_ld(config->game)));
-  config_infer_with_rack(config, target_played_tiles, error_stack);
-  rack_destroy(target_played_tiles);
+  const int ld_size = ld_get_size(game_get_ld(config->game));
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  Rack target_known_rack;
+  rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+  config_infer_with_racks(config, &target_played_tiles, &target_known_rack,
+                          error_stack);
 }
 
 // Autoplay

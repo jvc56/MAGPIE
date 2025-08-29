@@ -11,16 +11,14 @@
 
 typedef struct Rack {
   // counts must be signed for the sake of inference code checking that
-  // these are nonnegative (ERROR_STATUS_INFERENCE_TILES_PLAYED_NOT_IN_BAG)
+  // these are nonnegative (ERROR_STATUS_INFERENCE_TILES_NOT_IN_BAG)
   uint16_t number_of_letters;
   uint16_t dist_size;
   int8_t array[MAX_ALPHABET_SIZE];
 } Rack;
 
 static inline void rack_reset(Rack *rack) {
-  for (uint16_t i = 0; i < rack->dist_size; i++) {
-    rack->array[i] = 0;
-  }
+  memset(rack->array, 0, sizeof(rack->array));
   rack->number_of_letters = 0;
 }
 
@@ -36,6 +34,11 @@ static inline void rack_copy(Rack *dst, const Rack *src) {
 }
 
 static inline void rack_set_dist_size(Rack *rack, int dist_size) {
+  rack->dist_size = dist_size;
+}
+
+static inline void rack_set_dist_size_and_reset(Rack *rack, int dist_size) {
+  memset(rack->array, 0, sizeof(rack->array));
   rack->dist_size = dist_size;
 }
 
@@ -163,6 +166,7 @@ static inline void rack_add_letters(Rack *rack, MachineLetter letter,
 
 static inline int rack_set_to_string(const LetterDistribution *ld, Rack *rack,
                                      const char *rack_string) {
+  rack->dist_size = ld_get_size(ld);
   rack_reset(rack);
   MachineLetter mls[MAX_RACK_SIZE];
   int num_mls = ld_str_to_mls(ld, rack_string, false, mls, MAX_RACK_SIZE);

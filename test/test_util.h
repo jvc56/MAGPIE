@@ -89,8 +89,8 @@ ValidatedMoves *validated_moves_create_and_assert_status(
 error_code_t config_simulate_and_return_status(const Config *config,
                                                Rack *known_opp_rack,
                                                SimResults *sim_results);
-void game_play_to_turn_or_die(GameHistory *game_history, Game *game,
-                              int turn_index);
+void game_play_to_event_index_or_die(GameHistory *game_history, Game *game,
+                                     int turn_index);
 void game_play_to_end_or_die(GameHistory *game_history, Game *game);
 void assert_validated_and_generated_moves(Game *game, const char *rack_string,
                                           const char *move_position,
@@ -140,4 +140,6 @@ error_code_t test_parse_gcg_string(const char *gcg_string, Config *config,
                                    GameHistory *game_history);
 void load_game_history_with_gcg_string(Config *config, const char *gcg_header,
                                        const char *gcg_content);
+void load_game_history_with_gcg(Config *config, const char *gcg_file);
+
 #endif

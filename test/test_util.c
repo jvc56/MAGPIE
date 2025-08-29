@@ -385,7 +385,7 @@ void play_top_n_equity_move(Game *game, int n) {
 
   generate_moves(&args);
   SortedMoveList *sorted_move_list = sorted_move_list_create(move_list);
-  play_move(sorted_move_list->moves[n], game, NULL, NULL);
+  play_move(sorted_move_list->moves[n], game, NULL);
   sorted_move_list_destroy(sorted_move_list);
   move_list_destroy(move_list);
 }
@@ -400,13 +400,13 @@ void load_cgp_or_die(Game *game, const char *cgp) {
   error_stack_destroy(error_stack);
 }
 
-void game_play_to_turn_or_die(GameHistory *game_history, Game *game,
-                              int turn_index) {
+void game_play_to_event_index_or_die(GameHistory *game_history, Game *game,
+                                     int event_index) {
   ErrorStack *error_stack = error_stack_create();
-  game_play_to_turn(game_history, game, turn_index, error_stack);
+  game_play_to_event_index(game_history, game, event_index, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
-    log_fatal("failed to play to turn %d\n", turn_index);
+    log_fatal("failed to play to event index %d\n", event_index);
   }
   error_stack_destroy(error_stack);
 }
@@ -503,8 +503,8 @@ void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size) {
   Bag *b1_copy = bag_duplicate(b1);
   Bag *b2_copy = bag_duplicate(b2);
 
-  int b1_number_of_tiles_remaining = bag_get_tiles(b1_copy);
-  int b2_number_of_tiles_remaining = bag_get_tiles(b2_copy);
+  int b1_number_of_tiles_remaining = bag_get_letters(b1_copy);
+  int b2_number_of_tiles_remaining = bag_get_letters(b2_copy);
 
   assert(b1_number_of_tiles_remaining == b2_number_of_tiles_remaining);
 
@@ -607,19 +607,19 @@ void assert_games_are_equal(const Game *g1, const Game *g2,
          game_get_consecutive_scoreless_turns(g2));
   assert(game_get_game_end_reason(g1) == game_get_game_end_reason(g2));
 
-  int g1_player_on_turn_index = game_get_player_on_turn_index(g1);
+  int g1_player_on_event_index = game_get_player_on_turn_index(g1);
 
   const Player *g1_player_on_turn =
-      game_get_player(g1, g1_player_on_turn_index);
+      game_get_player(g1, g1_player_on_event_index);
   const Player *g1_player_not_on_turn =
-      game_get_player(g1, 1 - g1_player_on_turn_index);
+      game_get_player(g1, 1 - g1_player_on_event_index);
 
-  int g2_player_on_turn_index = game_get_player_on_turn_index(g2);
+  int g2_player_on_event_index = game_get_player_on_turn_index(g2);
 
   const Player *g2_player_on_turn =
-      game_get_player(g2, g2_player_on_turn_index);
+      game_get_player(g2, g2_player_on_event_index);
   const Player *g2_player_not_on_turn =
-      game_get_player(g2, 1 - g2_player_on_turn_index);
+      game_get_player(g2, 1 - g2_player_on_event_index);
 
   assert_players_are_equal(g1_player_on_turn, g2_player_on_turn, check_scores);
   assert_players_are_equal(g1_player_not_on_turn, g2_player_not_on_turn,
@@ -752,7 +752,7 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
   assert(error_stack_top(error_stack) == ERROR_STATUS_SUCCESS);
 
   if (play_move_on_board) {
-    play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
+    play_move(move_list_get_move(move_list, 0), game, NULL);
   }
 
   validated_moves_destroy(vms);
@@ -1052,11 +1052,41 @@ error_code_t test_parse_gcg_string(const char *gcg_string, Config *config,
   return gcg_parse_status;
 }
 
+error_code_t test_parse_gcg_file(const char *gcg_filename, Config *config,
+                                 GameHistory *game_history) {
+  ErrorStack *error_stack = error_stack_create();
+  parse_gcg(gcg_filename, config, game_history, error_stack);
+  error_code_t gcg_parse_status = error_stack_top(error_stack);
+  error_stack_print_and_reset(error_stack);
+  error_stack_destroy(error_stack);
+  return gcg_parse_status;
+}
+
+// Resets the history before loading the GCG
 void load_game_history_with_gcg_string(Config *config, const char *gcg_header,
                                        const char *gcg_content) {
+  GameHistory *game_history = config_get_game_history(config);
+  game_history_reset(game_history);
   char *gcg_string = get_formatted_string("%s%s", gcg_header, gcg_content);
-  assert(test_parse_gcg_string(gcg_string, config,
-                               config_get_game_history(config)) ==
+  assert(test_parse_gcg_string(gcg_string, config, game_history) ==
          ERROR_STATUS_SUCCESS);
   free(gcg_string);
+}
+
+// Resets the history before loading the GCG
+void load_game_history_with_gcg(Config *config, const char *gcg_file) {
+  ErrorStack *error_stack = error_stack_create();
+  char *gcg_filename = data_filepaths_get_readable_filename(
+      config_get_data_paths(config), gcg_file, DATA_FILEPATH_TYPE_GCG,
+      error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("failed to get gcg filepath for test: %s\n", gcg_filename);
+  }
+  error_stack_destroy(error_stack);
+  GameHistory *game_history = config_get_game_history(config);
+  game_history_reset(game_history);
+  assert(test_parse_gcg_file(gcg_filename, config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+  free(gcg_filename);
 }

@@ -147,7 +147,7 @@ void string_builder_add_game(StringBuilder *game_string, const Game *game,
       string_builder_add_bag(game_string, bag, ld);
 
       string_builder_add_formatted_string(game_string, "  %d",
-                                          bag_get_tiles(bag));
+                                          bag_get_letters(bag));
 
     } else if (i - 2 < number_of_moves) {
       string_builder_add_move_with_rank_and_equity(game_string, game, move_list,

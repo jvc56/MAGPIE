@@ -22,7 +22,8 @@ struct GameEvent {
   // - End rack points
   // - End rack penalty
   Equity score_adjustment;
-  Rack *rack;
+  Rack rack;
+  Rack opp_known_letters;
   ValidatedMoves *vms;
   char *note;
 };
@@ -37,8 +38,6 @@ void game_event_reset(GameEvent *game_event) {
   game_event->cgp_move_string = NULL;
   validated_moves_destroy(game_event->vms);
   game_event->vms = NULL;
-  rack_destroy(game_event->rack);
-  game_event->rack = NULL;
   free(game_event->note);
   game_event->note = NULL;
 }
@@ -95,12 +94,15 @@ Equity game_event_get_score_adjustment(const GameEvent *event) {
   return event->score_adjustment;
 }
 
-void game_event_set_rack(GameEvent *event, Rack *rack) {
-  rack_destroy(event->rack);
-  event->rack = rack;
+Rack *game_event_get_rack(GameEvent *event) { return &event->rack; }
+
+const Rack *game_event_get_const_rack(const GameEvent *event) {
+  return &event->rack;
 }
 
-Rack *game_event_get_rack(const GameEvent *event) { return event->rack; }
+Rack *game_event_get_opp_known_letters(GameEvent *event) {
+  return &event->opp_known_letters;
+}
 
 void game_event_set_vms(GameEvent *event, ValidatedMoves *vms) {
   validated_moves_destroy(event->vms);
@@ -139,11 +141,10 @@ int game_event_get_turn_value(const GameEvent *event) {
 typedef struct GameHistoryPlayer {
   char *name;
   char *nickname;
+  // FIXME: is this field needed?
   Equity score;
-  bool next_rack_set;
-  Rack *last_known_rack;
-  Rack *known_rack_from_phonies;
-  Rack *previous_played_tiles;
+  // A dist size of 0 indicates that the rack has not been set
+  Rack last_rack;
 } GameHistoryPlayer;
 
 struct GameHistory {
@@ -166,10 +167,6 @@ GameHistoryPlayer *game_history_player_create(const char *name,
   player->name = string_duplicate(name);
   player->nickname = string_duplicate(nickname);
   player->score = 0;
-  player->next_rack_set = false;
-  player->last_known_rack = NULL;
-  player->known_rack_from_phonies = NULL;
-  player->previous_played_tiles = NULL;
   return player;
 }
 
@@ -179,9 +176,6 @@ void game_history_player_destroy(GameHistoryPlayer *player) {
   }
   free(player->name);
   free(player->nickname);
-  rack_destroy(player->last_known_rack);
-  rack_destroy(player->known_rack_from_phonies);
-  rack_destroy(player->previous_played_tiles);
   free(player);
 }
 
@@ -220,58 +214,15 @@ int game_history_player_get_score(const GameHistory *game_history,
   return game_history->players[player_index]->score;
 }
 
-void game_history_player_set_next_rack_set(GameHistory *game_history,
-                                           int player_index,
-                                           bool next_rack_set) {
-  GameHistoryPlayer *player = game_history->players[player_index];
-  player->next_rack_set = next_rack_set;
+Rack *game_history_player_get_last_rack(GameHistory *game_history,
+                                        int player_index) {
+  return &game_history->players[player_index]->last_rack;
 }
 
-bool game_history_player_get_next_rack_set(const GameHistory *game_history,
-                                           int player_index) {
-  return game_history->players[player_index]->next_rack_set;
-}
-
-void game_history_player_set_last_known_rack(GameHistory *game_history,
-                                             int player_index,
-                                             const Rack *rack) {
-  GameHistoryPlayer *player = game_history->players[player_index];
-  if (!player->last_known_rack) {
-    player->last_known_rack = rack_duplicate(rack);
-  } else {
-    rack_copy(player->last_known_rack, rack);
-  }
-}
-
-Rack *game_history_player_get_last_known_rack(const GameHistory *game_history,
-                                              int player_index) {
-  return game_history->players[player_index]->last_known_rack;
-}
-
-void game_history_init_player_phony_calc_racks(GameHistory *game_history,
-                                               const int ld_size) {
-  for (int player_index = 0; player_index < 2; player_index++) {
-    GameHistoryPlayer *player = game_history->players[player_index];
-    if (!player->known_rack_from_phonies) {
-      player->known_rack_from_phonies = rack_create(ld_size);
-      player->previous_played_tiles = rack_create(ld_size);
-    } else {
-      rack_reset(player->known_rack_from_phonies);
-      rack_reset(player->previous_played_tiles);
-    }
-  }
-}
-
-Rack *
-game_history_player_get_known_rack_from_phonies(const GameHistory *game_history,
-                                                const int player_index) {
-  return game_history->players[player_index]->known_rack_from_phonies;
-}
-
-Rack *
-game_history_player_get_previous_played_tiles(const GameHistory *game_history,
-                                              const int player_index) {
-  return game_history->players[player_index]->previous_played_tiles;
+const Rack *
+game_history_player_get_last_rack_const(const GameHistory *game_history,
+                                        int player_index) {
+  return &game_history->players[player_index]->last_rack;
 }
 
 bool game_history_player_is_set(const GameHistory *game_history,
@@ -363,6 +314,7 @@ void game_history_set_player(GameHistory *history, int player_index,
                              const char *player_nickname) {
   history->players[player_index] =
       game_history_player_create(player_name, player_nickname);
+  memset(&history->players[player_index]->last_rack, 0, sizeof(Rack));
 }
 
 int game_history_get_number_of_events(const GameHistory *history) {

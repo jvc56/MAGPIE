@@ -270,14 +270,12 @@ void string_builder_add_ucgi_leave_rack(StringBuilder *ucgi_string_builder,
   const int ld_size = ld_get_size(ld);
 
   Rack leave_rack_leave;
-  rack_set_dist_size(&leave_rack_leave, ld_size);
-  rack_reset(&leave_rack_leave);
+  rack_set_dist_size_and_reset(&leave_rack_leave, ld_size);
   leave_rack_get_leave(leave_rack, &leave_rack_leave);
 
   Rack leave_rack_exchanged;
   if (is_exchange) {
-    rack_set_dist_size(&leave_rack_exchanged, ld_size);
-    rack_reset(&leave_rack_exchanged);
+    rack_set_dist_size_and_reset(&leave_rack_exchanged, ld_size);
     leave_rack_get_exchanged(leave_rack, &leave_rack_exchanged);
   }
 
