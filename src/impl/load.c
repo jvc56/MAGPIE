@@ -287,7 +287,7 @@ char *get_gcg_string(const DownloadGCGOptions *options,
 
   // If we get here, nothing worked
   error_stack_push(
-      error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
+      error_stack, ERROR_STATUS_BAD_GCG_SOURCE,
       get_formatted_string("Could not load GCG from any source: %s",
                            options->source_identifier));
   return NULL;

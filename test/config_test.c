@@ -17,6 +17,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+// Forward function declarations
+void assert_command_status_and_output(Config *config, const char *command,
+                                      bool should_exit, int seconds_to_wait,
+                                      int expected_output_line_count,
+                                      int expected_outerror_line_count);
+
 void test_config_load_error(Config *config, const char *cmd,
                             error_code_t expected_status,
                             ErrorStack *error_stack) {
@@ -357,10 +363,20 @@ void assert_config_exec_status(Config *config, const char *cmd,
   ErrorStack *error_stack = error_stack_create();
   set_thread_control_status_to_start(config_get_thread_control(config));
   config_load_command(config, cmd, error_stack);
-  error_code_t status = error_stack_top(error_stack);
-  if (status != ERROR_STATUS_SUCCESS) {
-    log_fatal("load config failed with status %d: %s\n", status, cmd);
+  error_code_t load_status = error_stack_top(error_stack);
+
+  // If we expect an error and got it during load, that's the expected result
+  if (load_status != ERROR_STATUS_SUCCESS) {
+    if (load_status != expected_error_code) {
+      printf("config load error types do not match:\nexpected: %d\nactual: "
+             "%d\n>%s<\n",
+             expected_error_code, load_status, cmd);
+      abort();
+    }
+    error_stack_destroy(error_stack);
+    return;
   }
+
   config_execute_command(config, error_stack);
   error_code_t actual_error_code = error_stack_top(error_stack);
   if (actual_error_code != expected_error_code) {
@@ -521,6 +537,38 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(config,
                             "autoplay winpct,games,leaves 10000 -gp true",
                             ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS);
+
+  // Load
+
+  Config *config2 = config_create_default_test();
+  assert_config_exec_status(
+      config2, "load", ERROR_STATUS_CONFIG_LOAD_INSUFFICIENT_NUMBER_OF_VALUES);
+  assert_config_exec_status(config2, "load sheets.google.com",
+                            ERROR_STATUS_BAD_GCG_SOURCE);
+  assert_config_exec_status(config2, "load 54673",
+                            ERROR_STATUS_GCG_PARSE_LEXICON_NOT_SPECIFIED);
+  assert_config_exec_status(config2, "load 54938", ERROR_STATUS_SUCCESS);
+  config_destroy(config2);
+
+  // Show
+  
+  Config *config3 = config_create_default_test();
+  assert_config_exec_status(config3, "show",
+                            ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
+  assert_config_exec_status(config3, "show 10",
+                            ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
+  config_destroy(config3);
+
+  Config *config4 = config_create_default_test();
+  assert_config_exec_status(config4, "load 54938", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config4, "show", ERROR_STATUS_SUCCESS);
+  config_destroy(config4);
+
+  Config *config5 = config_create_default_test();
+  assert_config_exec_status(config5, "load 54938", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config5, "show 10", ERROR_STATUS_SUCCESS);
+  config_destroy(config5);
+
   config_destroy(config);
 }
 

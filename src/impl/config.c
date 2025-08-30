@@ -1133,14 +1133,14 @@ void impl_create_data(const Config *config, ErrorStack *error_stack) {
 
 // Load GCG
 
-void execute_load(Config *config, ErrorStack *error_stack) {
+char *impl_load(Config *config, ErrorStack *error_stack) {
   const char *source_identifier =
       config_get_parg_value(config, ARG_TOKEN_LOAD, 0);
   if (!source_identifier) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
         string_duplicate("missing source identifier for load command"));
-    return;
+    return empty_string();
   }
 
   GameHistory *game_history = game_history_create();
@@ -1148,7 +1148,7 @@ void execute_load(Config *config, ErrorStack *error_stack) {
 
   if (!error_stack_is_empty(error_stack)) {
     game_history_destroy(game_history);
-    return;
+    return empty_string();
   }
 
   // Load the game history into the current config's game state
@@ -1156,7 +1156,7 @@ void execute_load(Config *config, ErrorStack *error_stack) {
 
   if (!error_stack_is_empty(error_stack)) {
     game_history_destroy(game_history);
-    return;
+    return empty_string();
   }
 
   // Store game history in config for later use (e.g., show command with turns)
@@ -1165,22 +1165,34 @@ void execute_load(Config *config, ErrorStack *error_stack) {
   }
   config->game_history = game_history;
 
-  // Display game information
-  printf("Successfully loaded game: %s vs %s (%d events)\n",
-         game_history_player_get_name(game_history, 0),
-         game_history_player_get_name(game_history, 1),
-         game_history_get_number_of_events(game_history));
+  // Return game information as a string
+  char *result =
+      get_formatted_string("Successfully loaded game: %s vs %s (%d events)",
+                           game_history_player_get_name(game_history, 0),
+                           game_history_player_get_name(game_history, 1),
+                           game_history_get_number_of_events(game_history));
+
+  return result;
+}
+
+void execute_load(Config *config, ErrorStack *error_stack) {
+  char *result = impl_load(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(result);
+    return;
+  }
+
+  printf("%s\n", result);
+  free(result);
 }
 
 // Show game -- optional argument to show specific move state
 
-void execute_show(Config *config, ErrorStack *error_stack) {
+char *impl_show(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-        string_duplicate(
-            "cannot show game without letter distribution and lexicon"));
-    return;
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot show game without loaded game"));
+    return empty_string();
   }
 
   config_init_game(config);
@@ -1194,7 +1206,7 @@ void execute_show(Config *config, ErrorStack *error_stack) {
           error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
           string_duplicate("cannot show specific turn without a loaded game "
                            "history (use load command first)"));
-      return;
+      return empty_string();
     }
 
     int turn_number = atoi(turn_str);
@@ -1205,17 +1217,15 @@ void execute_show(Config *config, ErrorStack *error_stack) {
           get_formatted_string(
               "invalid turn number %d (game has %d events)", turn_number,
               game_history_get_number_of_events(config->game_history)));
-      return;
+      return empty_string();
     }
 
     // Play to the specified turn
     game_play_to_turn(config->game_history, config->game, turn_number,
                       error_stack);
     if (!error_stack_is_empty(error_stack)) {
-      return;
+      return empty_string();
     }
-
-    printf("Game state after turn %d:\n", turn_number);
   }
 
   // Create string builder to hold the game display
@@ -1224,67 +1234,38 @@ void execute_show(Config *config, ErrorStack *error_stack) {
   // Add the game to the string builder
   string_builder_add_game(game_string, config->game, config->move_list);
 
-  // Print the game
-  printf("%s\n", string_builder_peek(game_string));
-
-  string_builder_destroy(game_string);
-}
-
-char *str_api_load(Config *config, ErrorStack *error_stack) {
-  execute_load(config, error_stack);
-  return empty_string();
-}
-
-char *str_api_show(Config *config, ErrorStack *error_stack) {
-  if (!config_has_game_data(config)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-        string_duplicate(
-            "cannot show game without letter distribution and lexicon"));
-    return empty_string();
-  }
-
-  config_init_game(config);
-
-  // Check if a turn number was provided
-  const char *turn_str = config_get_parg_value(config, ARG_TOKEN_SHOW, 0);
-  if (turn_str) {
-    // Turn number provided - play to that turn first
-    if (!config->game_history) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-          string_duplicate(
-              "cannot show specific turn without a loaded game history (use load command first)"));
-      return empty_string();
-    }
-    
-    int turn_number = atoi(turn_str);
-    if (turn_number < 0 || turn_number >= game_history_get_number_of_events(config->game_history)) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_CONFIG_INVALID_ARG_VALUE,
-          get_formatted_string("invalid turn number %d (game has %d events)", 
-                               turn_number, game_history_get_number_of_events(config->game_history)));
-      return empty_string();
-    }
-    
-    // Play to the specified turn
-    game_play_to_turn(config->game_history, config->game, turn_number, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return empty_string();
-    }
-  }
-
-  // Create string builder to hold the game display
-  StringBuilder *game_string = string_builder_create();
-  
-  // Add the game to the string builder
-  string_builder_add_game(game_string, config->game, config->move_list);
-  
   // Get the string and destroy the builder
   char *result = string_duplicate(string_builder_peek(game_string));
   string_builder_destroy(game_string);
-  
+
   return result;
+}
+
+void execute_show(Config *config, ErrorStack *error_stack) {
+  // Check if a turn number was provided for the printf header
+  const char *turn_str = config_get_parg_value(config, ARG_TOKEN_SHOW, 0);
+
+  char *result = impl_show(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(result);
+    return;
+  }
+
+  if (turn_str) {
+    int turn_number = atoi(turn_str);
+    printf("Game state after turn %d:\n", turn_number);
+  }
+
+  printf("%s\n", result);
+  free(result);
+}
+
+char *str_api_load(Config *config, ErrorStack *error_stack) {
+  return impl_load(config, error_stack);
+}
+
+char *str_api_show(Config *config, ErrorStack *error_stack) {
+  return impl_show(config, error_stack);
 }
 
 // Config load helpers
