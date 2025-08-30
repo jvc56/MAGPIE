@@ -143,7 +143,7 @@ void command_scan_loop(Config *config, ErrorStack *error_stack,
 
     const char *prompt = "";
     if (exec_mode == EXEC_MODE_CONSOLE) {
-      prompt = "magpie>";
+      prompt = "magpie> ";
     }
 
     free(input);

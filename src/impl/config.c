@@ -102,6 +102,8 @@ typedef enum {
   ARG_TOKEN_TIME_LIMIT,
   ARG_TOKEN_SAMPLING_RULE,
   ARG_TOKEN_THRESHOLD,
+  ARG_TOKEN_LOAD,
+  ARG_TOKEN_SHOW,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -110,6 +112,14 @@ typedef enum {
 typedef void (*command_exec_func_t)(Config *, ErrorStack *);
 typedef char *(*command_api_func_t)(Config *, ErrorStack *);
 typedef char *(*command_status_func_t)(Config *);
+
+// Forward declarations to avoid circular dependency
+void download_gcg_simple(const char *source_identifier, Config *config,
+                         GameHistory *game_history, ErrorStack *error_stack);
+void load_config_with_game_history(const GameHistory *game_history,
+                                   Config *config, ErrorStack *error_stack);
+void game_play_to_turn(GameHistory *game_history, Game *game, int turn_index,
+                       ErrorStack *error_stack);
 
 typedef struct ParsedArg {
   char *name;
@@ -157,6 +167,7 @@ struct Config {
   InferenceResults *inference_results;
   AutoplayResults *autoplay_results;
   ConversionResults *conversion_results;
+  GameHistory *game_history;
 };
 
 void parsed_arg_create(Config *config, arg_token_t arg_token, const char *name,
@@ -1118,6 +1129,143 @@ void impl_create_data(const Config *config, ErrorStack *error_stack) {
         get_formatted_string("data creation not supported for type %s",
                              create_type_str));
   }
+}
+
+// Load GCG
+
+char *impl_load(Config *config, ErrorStack *error_stack) {
+  const char *source_identifier =
+      config_get_parg_value(config, ARG_TOKEN_LOAD, 0);
+  if (!source_identifier) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
+        string_duplicate("missing source identifier for load command"));
+    return empty_string();
+  }
+
+  GameHistory *game_history = game_history_create();
+  download_gcg_simple(source_identifier, config, game_history, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    game_history_destroy(game_history);
+    return empty_string();
+  }
+
+  // Load the game history into the current config's game state
+  load_config_with_game_history(game_history, config, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    game_history_destroy(game_history);
+    return empty_string();
+  }
+
+  // Store game history in config for later use (e.g., show command with turns)
+  if (config->game_history) {
+    game_history_destroy(config->game_history);
+  }
+  config->game_history = game_history;
+
+  // Return game information as a string
+  char *result =
+      get_formatted_string("Successfully loaded game: %s vs %s (%d events)",
+                           game_history_player_get_name(game_history, 0),
+                           game_history_player_get_name(game_history, 1),
+                           game_history_get_number_of_events(game_history));
+
+  return result;
+}
+
+void execute_load(Config *config, ErrorStack *error_stack) {
+  char *result = impl_load(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(result);
+    return;
+  }
+
+  printf("%s\n", result);
+  free(result);
+}
+
+// Show game -- optional argument to show specific move state
+
+char *impl_show(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot show game without loaded game"));
+    return empty_string();
+  }
+
+  config_init_game(config);
+
+  // Check if a turn number was provided
+  const char *turn_str = config_get_parg_value(config, ARG_TOKEN_SHOW, 0);
+  if (turn_str) {
+    // Turn number provided - play to that turn first
+    if (!config->game_history) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+          string_duplicate("cannot show specific turn without a loaded game "
+                           "history (use load command first)"));
+      return empty_string();
+    }
+
+    int turn_number = atoi(turn_str);
+    if (turn_number < 0 || turn_number >= game_history_get_number_of_events(
+                                              config->game_history)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+          get_formatted_string(
+              "invalid turn number %d (game has %d events)", turn_number,
+              game_history_get_number_of_events(config->game_history)));
+      return empty_string();
+    }
+
+    // Play to the specified turn
+    game_play_to_turn(config->game_history, config->game, turn_number,
+                      error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return empty_string();
+    }
+  }
+
+  // Create string builder to hold the game display
+  StringBuilder *game_string = string_builder_create();
+
+  // Add the game to the string builder
+  string_builder_add_game(game_string, config->game, config->move_list);
+
+  // Get the string and destroy the builder
+  char *result = string_duplicate(string_builder_peek(game_string));
+  string_builder_destroy(game_string);
+
+  return result;
+}
+
+void execute_show(Config *config, ErrorStack *error_stack) {
+  // Check if a turn number was provided for the printf header
+  const char *turn_str = config_get_parg_value(config, ARG_TOKEN_SHOW, 0);
+
+  char *result = impl_show(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(result);
+    return;
+  }
+
+  if (turn_str) {
+    int turn_number = atoi(turn_str);
+    printf("Game state after turn %d:\n", turn_number);
+  }
+
+  printf("%s\n", result);
+  free(result);
+}
+
+char *str_api_load(Config *config, ErrorStack *error_stack) {
+  return impl_load(config, error_stack);
+}
+
+char *str_api_show(Config *config, ErrorStack *error_stack) {
+  return impl_show(config, error_stack);
 }
 
 // Config load helpers
@@ -2126,6 +2274,8 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
 
   cmd(ARG_TOKEN_SET, "setoptions", 0, 0, noop, generic);
   cmd(ARG_TOKEN_CGP, "cgp", 4, 4, cgp_load, generic);
+  cmd(ARG_TOKEN_LOAD, "load", 1, 1, load, generic);
+  cmd(ARG_TOKEN_SHOW, "show", 0, 1, show, generic);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic);
   cmd(ARG_TOKEN_RACK, "rack", 2, 2, set_rack, generic);
   cmd(ARG_TOKEN_GEN, "generate", 0, 0, move_gen, generic);
@@ -2180,7 +2330,6 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
 
 #undef cmd
 #undef arg
-
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
   config->exec_mode = EXEC_MODE_CONSOLE;
