@@ -88,8 +88,7 @@ void test_load(void) {
 
   printf("=== Total Failure Test ===\n");
   // Test total failure case
-  validate_download_gcg("98bfakdna\?\?}}",
-                        ERROR_STATUS_BAD_GCG_SOURCE);
+  validate_download_gcg("98bfakdna\?\?}}", ERROR_STATUS_BAD_GCG_SOURCE);
 
   printf("Load tests completed.\n");
 }

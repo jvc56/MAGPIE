@@ -347,6 +347,10 @@ AutoplayResults *config_get_autoplay_results(const Config *config) {
   return config->autoplay_results;
 }
 
+GameHistory *config_get_game_history(const Config *config) {
+  return config->game_history;
+}
+
 bool config_exec_parg_is_set(const Config *config) {
   return config->exec_parg_token != NUMBER_OF_ARG_TOKENS;
 }
@@ -1143,34 +1147,26 @@ char *impl_load(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
 
-  GameHistory *game_history = game_history_create();
-  download_gcg_simple(source_identifier, config, game_history, error_stack);
+  download_gcg_simple(source_identifier, config, config->game_history,
+                      error_stack);
 
   if (!error_stack_is_empty(error_stack)) {
-    game_history_destroy(game_history);
     return empty_string();
   }
 
   // Load the game history into the current config's game state
-  load_config_with_game_history(game_history, config, error_stack);
+  load_config_with_game_history(config->game_history, config, error_stack);
 
   if (!error_stack_is_empty(error_stack)) {
-    game_history_destroy(game_history);
     return empty_string();
   }
 
-  // Store game history in config for later use (e.g., show command with turns)
-  if (config->game_history) {
-    game_history_destroy(config->game_history);
-  }
-  config->game_history = game_history;
-
   // Return game information as a string
-  char *result =
-      get_formatted_string("Successfully loaded game: %s vs %s (%d events)",
-                           game_history_player_get_name(game_history, 0),
-                           game_history_player_get_name(game_history, 1),
-                           game_history_get_number_of_events(game_history));
+  char *result = get_formatted_string(
+      "Successfully loaded game: %s vs %s (%d events)",
+      game_history_player_get_name(config->game_history, 0),
+      game_history_player_get_name(config->game_history, 1),
+      game_history_get_number_of_events(config->game_history));
 
   return result;
 }
@@ -1184,6 +1180,10 @@ void execute_load(Config *config, ErrorStack *error_stack) {
 
   printf("%s\n", result);
   free(result);
+}
+
+char *str_api_load(Config *config, ErrorStack *error_stack) {
+  return impl_load(config, error_stack);
 }
 
 // Show game -- optional argument to show specific move state
@@ -1258,10 +1258,6 @@ void execute_show(Config *config, ErrorStack *error_stack) {
 
   printf("%s\n", result);
   free(result);
-}
-
-char *str_api_load(Config *config, ErrorStack *error_stack) {
-  return impl_load(config, error_stack);
 }
 
 char *str_api_show(Config *config, ErrorStack *error_stack) {
@@ -2359,6 +2355,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->autoplay_results = autoplay_results_create();
   config->conversion_results = conversion_results_create();
   config->tt_fraction_of_mem = 0.25;
+  config->game_history = game_history_create();
 
   autoplay_results_set_players_data(config->autoplay_results,
                                     config->players_data);
@@ -2383,6 +2380,7 @@ void config_destroy(Config *config) {
   ld_destroy(config->ld);
   players_data_destroy(config->players_data);
   thread_control_destroy(config->thread_control);
+  game_history_destroy(config->game_history);
   game_destroy(config->game);
   move_list_destroy(config->move_list);
   sim_results_destroy(config->sim_results);

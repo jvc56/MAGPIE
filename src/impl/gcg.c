@@ -1603,6 +1603,7 @@ void parse_gcg_string(const char *gcg_string, Config *config,
                      string_duplicate("GCG is empty"));
     return;
   }
+  game_history_reset(game_history);
   GCGParser *gcg_parser = gcg_parser_create(config, game_history);
   parse_gcg_with_parser(gcg_parser, gcg_string, error_stack);
   gcg_parser_destroy(gcg_parser);
