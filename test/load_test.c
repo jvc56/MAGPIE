@@ -74,7 +74,7 @@ void test_load(void) {
   validate_download_gcg("testdata/gcgs/success_six_pass.gcg",
                         ERROR_STATUS_SUCCESS);
   validate_download_gcg("/tmp/nonexistent_file.gcg",
-                        ERROR_STATUS_FILEPATH_FILE_NOT_FOUND);
+                        ERROR_STATUS_BAD_GCG_SOURCE);
   printf("Local file tests completed.\n\n");
 
   printf("=== URL Download Tests ===\n");
@@ -89,7 +89,7 @@ void test_load(void) {
   printf("=== Total Failure Test ===\n");
   // Test total failure case
   validate_download_gcg("98bfakdna\?\?}}",
-                        ERROR_STATUS_FILEPATH_FILE_NOT_FOUND);
+                        ERROR_STATUS_BAD_GCG_SOURCE);
 
   printf("Load tests completed.\n");
 }
