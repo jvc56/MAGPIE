@@ -551,7 +551,7 @@ void test_config_exec_parse_args(void) {
   config_destroy(config2);
 
   // Show
-  
+
   Config *config3 = config_create_default_test();
   assert_config_exec_status(config3, "show",
                             ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
