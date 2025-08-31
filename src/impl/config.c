@@ -1147,21 +1147,21 @@ char *impl_load(Config *config, ErrorStack *error_stack) {
 
   download_gcg(&options, config->game_history, error_stack);
 
-  printf("Downloaded GCG successfully\n");
+  printf("Downloaded GCG\n");
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
 
-  printf("Downloaded GCG successfully\n");
+  printf("Passed error checks after download\n");
 
   // Load the game history into the current config's game state
   load_config_with_game_history(config->game_history, config, error_stack);
-
+  printf("Loaded game history into config\n");
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
 
-  printf("Loaded game history into config successfully\n");
+  printf("Passed error checks after loading\n");
 
   // Return game information as a string
   char *result = get_formatted_string(
