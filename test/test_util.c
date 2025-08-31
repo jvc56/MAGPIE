@@ -405,6 +405,8 @@ void game_play_to_event_index_or_die(GameHistory *game_history, Game *game,
   ErrorStack *error_stack = error_stack_create();
   game_play_to_event_index(game_history, game, event_index, error_stack);
   if (!error_stack_is_empty(error_stack)) {
+    printf("Failed to play to event index %d due to the following error:\n",
+           event_index);
     error_stack_print_and_reset(error_stack);
     log_fatal("failed to play to event index %d\n", event_index);
   }
@@ -499,33 +501,28 @@ void assert_rack_equals_string(const LetterDistribution *ld, const Rack *r1,
   free(r1_str);
 }
 
-void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size) {
-  Bag *b1_copy = bag_duplicate(b1);
-  Bag *b2_copy = bag_duplicate(b2);
+void assert_bags_are_equal(const Bag *b1, const Bag *b2) {
+  int b1_unseen[MAX_ALPHABET_SIZE];
+  memset(b1_unseen, 0, sizeof(b1_unseen));
+  bag_increment_unseen_count(b1, b1_unseen);
 
-  int b1_number_of_tiles_remaining = bag_get_letters(b1_copy);
-  int b2_number_of_tiles_remaining = bag_get_letters(b2_copy);
+  int b2_unseen[MAX_ALPHABET_SIZE];
+  memset(b2_unseen, 0, sizeof(b2_unseen));
+  bag_increment_unseen_count(b2, b2_unseen);
 
-  assert(b1_number_of_tiles_remaining == b2_number_of_tiles_remaining);
-
-  Rack *rack = rack_create(rack_array_size);
-
-  for (int i = 0; i < b1_number_of_tiles_remaining; i++) {
-    MachineLetter letter = bag_draw_random_letter(b1_copy, 0);
-    rack_add_letter(rack, letter);
+  for (int i = 0; i < MAX_ALPHABET_SIZE; i++) {
+    if (b1_unseen[i] != b2_unseen[i]) {
+      printf("Bags to not have the same amount of letter %c: %d != %d\n",
+             i + 'A' - 1, b1_unseen[i], b2_unseen[i]);
+      assert(0);
+    }
   }
 
-  for (int i = 0; i < b2_number_of_tiles_remaining; i++) {
-    MachineLetter letter = bag_draw_random_letter(b2_copy, 0);
-    assert(rack_get_letter(rack, letter) > 0);
-    rack_take_letter(rack, letter);
+  if (bag_get_letters(b1) != bag_get_letters(b2)) {
+    printf("Bags to not have the same number of letters: %d != %d\n",
+           bag_get_letters(b1), bag_get_letters(b2));
+    assert(0);
   }
-
-  assert(rack_is_empty(rack));
-
-  bag_destroy(b1_copy);
-  bag_destroy(b2_copy);
-  rack_destroy(rack);
 }
 
 // Assumes b1 and b2 use the same lexicon and therefore
@@ -632,7 +629,7 @@ void assert_games_are_equal(const Game *g1, const Game *g2,
   const Bag *bag2 = game_get_bag(g2);
 
   assert_boards_are_equal(board1, board2);
-  assert_bags_are_equal(bag1, bag2, ld_get_size(game_get_ld(g1)));
+  assert_bags_are_equal(bag1, bag2);
 }
 
 char *get_test_filename(const char *filename) {

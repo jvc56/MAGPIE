@@ -28,10 +28,12 @@ Equity game_event_get_move_score(const GameEvent *event);
 void game_event_set_cgp_move_string(GameEvent *event, char *cgp_move_string);
 const char *game_event_get_cgp_move_string(const GameEvent *event);
 
+// FIXME: no precedent for separate const getter, plz fix
 Rack *game_event_get_rack(GameEvent *event);
 const Rack *game_event_get_const_rack(const GameEvent *event);
 
-Rack *game_event_get_opp_known_letters(GameEvent *event);
+Rack *game_event_get_after_event_player_on_turn_rack(GameEvent *event);
+Rack *game_event_get_after_event_player_off_turn_rack(GameEvent *event);
 
 void game_event_set_vms(GameEvent *event, ValidatedMoves *vms);
 ValidatedMoves *game_event_get_vms(const GameEvent *event);

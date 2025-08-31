@@ -47,7 +47,7 @@ void assert_rack_equals_string(const LetterDistribution *ld, const Rack *r1,
 void assert_move(const Game *game, const MoveList *move_list,
                  const SortedMoveList *sml, int move_index,
                  const char *expected_move_string);
-void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size);
+void assert_bags_are_equal(const Bag *b1, const Bag *b2);
 void assert_boards_are_equal(Board *b1, Board *b2);
 void assert_games_are_equal(const Game *g1, const Game *g2, bool check_scores);
 void print_game(const Game *game, const MoveList *move_list);

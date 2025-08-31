@@ -38,8 +38,8 @@ static inline void rack_set_dist_size(Rack *rack, int dist_size) {
 }
 
 static inline void rack_set_dist_size_and_reset(Rack *rack, int dist_size) {
-  memset(rack->array, 0, sizeof(rack->array));
   rack->dist_size = dist_size;
+  rack_reset(rack);
 }
 
 static inline Rack *rack_duplicate(const Rack *rack) {
@@ -75,7 +75,8 @@ static inline bool racks_are_equal(const Rack *rack1, const Rack *rack2) {
   if (!rack1 && !rack2) {
     return true;
   }
-  if (!rack1 || !rack2 || rack1->dist_size != rack2->dist_size) {
+  if (!rack1 || !rack2 || rack1->dist_size != rack2->dist_size ||
+      rack1->number_of_letters != rack2->number_of_letters) {
     return false;
   }
   for (int i = 0; i < rack1->dist_size; i++) {
@@ -136,8 +137,8 @@ static inline void rack_union(Rack *rack_to_update,
   for (uint16_t i = 0; i < rack_to_update->dist_size; i++) {
     const int8_t add_value = value_to_union->array[i];
     if (rack_to_update->array[i] < add_value) {
-      rack_to_update->array[i] = add_value;
       rack_to_update->number_of_letters += add_value - rack_to_update->array[i];
+      rack_to_update->array[i] = add_value;
     }
   }
 }

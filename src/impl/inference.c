@@ -643,6 +643,9 @@ void populate_inference_args_with_game_history(InferenceArgs *args, Game *game,
   // move index
   game_play_to_event_index(game_history, game, last_event_index, error_stack);
 
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
   // Remove the tiles played in the move from the target's rack
   // and add them to the game bag
 
@@ -721,6 +724,8 @@ void infer_with_game_duplicate(InferenceArgs *args, InferenceResults *results,
 
 void infer(InferenceArgs *args, InferenceResults *results,
            ErrorStack *error_stack) {
+  // FIXME: this might be NULL if we are using the game history, so check this
+  // later
   if (!args->target_played_tiles) {
     error_stack_push(error_stack, ERROR_STATUS_INFERENCE_NO_TILES_PLAYED,
                      string_duplicate("no tile placement or exchange move was "
@@ -730,5 +735,7 @@ void infer(InferenceArgs *args, InferenceResults *results,
   Game *game = game_duplicate(args->game);
   infer_with_game_duplicate(args, results, game, error_stack);
   game_destroy(game);
+  // FIXME: only destroy cache if this is a stand-alone infer request, keep the
+  // caches for simming with inference
   gen_destroy_cache();
 }

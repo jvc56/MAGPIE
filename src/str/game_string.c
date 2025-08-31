@@ -66,7 +66,8 @@ void string_builder_add_player_row(StringBuilder *game_string,
       25 - string_length(display_player_name), "");
   string_builder_add_rack(game_string, player_rack, ld, false);
   string_builder_add_formatted_string(
-      game_string, "%*s%d", 10 - rack_get_total_letters(player_rack), "",
+      game_string, "%*s%d",
+      (RACK_SIZE + 3) - rack_get_total_letters(player_rack), "",
       equity_to_int(player_get_score(player)));
   free(display_player_name);
 }

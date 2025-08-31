@@ -73,6 +73,8 @@ void simulate(const SimArgs *sim_args, SimResults *sim_results,
           thread_control_get_seconds_elapsed(sim_args->thread_control),
       true);
 
+  // FIXME: once simming is part of autoplay, we will want to prevent these
+  // repeated alloc and deallocs if possible
   rvs_destroy(rvs);
   rvs_destroy(rng);
   gen_destroy_cache();

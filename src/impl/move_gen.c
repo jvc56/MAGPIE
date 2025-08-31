@@ -67,6 +67,9 @@ MoveGen *get_movegen(int thread_index) {
   return cached_gens[thread_index];
 }
 
+// FIXME: is this necessary? the MoveGen struct may not have anymore
+// dist-dependent heap alloc'd fields, so maybe we can now destroy only at
+// program exit.
 void gen_destroy_cache(void) {
   for (int i = 0; i < (MAX_THREADS); i++) {
     generator_destroy(cached_gens[i]);

@@ -123,7 +123,7 @@ void test_bag(void) {
     bag_add_letter(bag, draw_order[tiles_index], player_index);
   }
 
-  assert_bags_are_equal(bag, copy_of_bag, ld_size);
+  assert_bags_are_equal(bag, copy_of_bag);
 
   bag_copy(bag, copy_of_bag);
 
@@ -176,7 +176,7 @@ void test_bag(void) {
     bag_add_letter(bag, draw_order[tiles_index], 1);
   }
 
-  assert_bags_are_equal(bag, copy_of_bag, ld_size);
+  assert_bags_are_equal(bag, copy_of_bag);
 
   bag_destroy(bag);
   bag_destroy(copy_of_bag);

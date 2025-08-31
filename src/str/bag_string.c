@@ -11,6 +11,7 @@ enum { BLANK_SORT_VALUE = 255 };
 
 void string_builder_add_bag(StringBuilder *bag_string_builder, const Bag *bag,
                             const LetterDistribution *ld) {
+  // FIXME: use get unseen bag function
   int ld_size = ld_get_size(ld);
   Rack *bag_as_rack = rack_create(ld_size);
 

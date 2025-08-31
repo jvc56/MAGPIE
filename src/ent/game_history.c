@@ -23,7 +23,8 @@ struct GameEvent {
   // - End rack penalty
   Equity score_adjustment;
   Rack rack;
-  Rack opp_known_letters;
+  Rack after_event_player_on_turn_rack;
+  Rack after_event_player_off_turn_rack;
   ValidatedMoves *vms;
   char *note;
 };
@@ -36,6 +37,9 @@ void game_event_reset(GameEvent *game_event) {
   game_event->move_score = 0;
   free(game_event->cgp_move_string);
   game_event->cgp_move_string = NULL;
+  memset(&game_event->rack, 0, sizeof(Rack));
+  memset(&game_event->after_event_player_on_turn_rack, 0, sizeof(Rack));
+  memset(&game_event->after_event_player_off_turn_rack, 0, sizeof(Rack));
   validated_moves_destroy(game_event->vms);
   game_event->vms = NULL;
   free(game_event->note);
@@ -100,8 +104,12 @@ const Rack *game_event_get_const_rack(const GameEvent *event) {
   return &event->rack;
 }
 
-Rack *game_event_get_opp_known_letters(GameEvent *event) {
-  return &event->opp_known_letters;
+Rack *game_event_get_after_event_player_on_turn_rack(GameEvent *event) {
+  return &event->after_event_player_on_turn_rack;
+}
+
+Rack *game_event_get_after_event_player_off_turn_rack(GameEvent *event) {
+  return &event->after_event_player_off_turn_rack;
 }
 
 void game_event_set_vms(GameEvent *event, ValidatedMoves *vms) {
