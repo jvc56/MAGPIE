@@ -360,6 +360,7 @@ void test_config_lexical_data(void) {
 
 void assert_config_exec_status(Config *config, const char *cmd,
                                error_code_t expected_error_code) {
+  printf("Beginning test:\n");
   ErrorStack *error_stack = error_stack_create();
   set_thread_control_status_to_start(config_get_thread_control(config));
   config_load_command(config, cmd, error_stack);
@@ -385,6 +386,7 @@ void assert_config_exec_status(Config *config, const char *cmd,
            expected_error_code, actual_error_code, cmd);
     abort();
   }
+  printf("Test passed\n");
   error_stack_destroy(error_stack);
 }
 

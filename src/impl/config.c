@@ -1146,7 +1146,7 @@ char *impl_load(Config *config, ErrorStack *error_stack) {
         string_duplicate("missing source identifier for load command"));
     return empty_string();
   }
-
+  printf("Loaded source identifier successfully\n");
   download_gcg_simple(source_identifier, config, config->game_history,
                       error_stack);
 
@@ -1154,12 +1154,16 @@ char *impl_load(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
 
+  printf("Downloaded GCG successfully\n");
+
   // Load the game history into the current config's game state
   load_config_with_game_history(config->game_history, config, error_stack);
 
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
+
+  printf("Loaded game history into config successfully\n");
 
   // Return game information as a string
   char *result = get_formatted_string(
