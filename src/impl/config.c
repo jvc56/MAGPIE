@@ -36,7 +36,9 @@
 #include "cgp.h"
 #include "convert.h"
 #include "gameplay.h"
+#include "gcg.h"
 #include "inference.h"
+#include "load.h"
 #include "move_gen.h"
 #include "random_variable.h"
 #include "simmer.h"
@@ -112,14 +114,6 @@ typedef enum {
 typedef void (*command_exec_func_t)(Config *, ErrorStack *);
 typedef char *(*command_api_func_t)(Config *, ErrorStack *);
 typedef char *(*command_status_func_t)(Config *);
-
-// Forward declarations to avoid circular dependency
-void download_gcg_simple(const char *source_identifier, Config *config,
-                         GameHistory *game_history, ErrorStack *error_stack);
-void load_config_with_game_history(const GameHistory *game_history,
-                                   Config *config, ErrorStack *error_stack);
-void game_play_to_turn(GameHistory *game_history, Game *game, int turn_index,
-                       ErrorStack *error_stack);
 
 typedef struct ParsedArg {
   char *name;
@@ -1147,8 +1141,13 @@ char *impl_load(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
   printf("Loaded source identifier successfully\n");
-  download_gcg_simple(source_identifier, config, config->game_history,
-                      error_stack);
+  DownloadGCGOptions options = {
+    .source_identifier = source_identifier,
+    .lexicon = NULL,
+    .config = config
+  };
+
+  download_gcg(&options, config->game_history, error_stack);
 
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();

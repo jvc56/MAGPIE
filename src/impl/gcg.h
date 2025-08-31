@@ -14,6 +14,8 @@ void game_play_to_turn(GameHistory *game_history, Game *game, int turn_index,
                        ErrorStack *error_stack);
 void game_play_to_end(GameHistory *game_history, Game *game,
                       ErrorStack *error_stack);
+void load_config_with_game_history(const GameHistory *game_history,
+                                   Config *config, ErrorStack *error_stack);                     
 void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
                GameHistory *game_history, ErrorStack *error_stack);
 #endif

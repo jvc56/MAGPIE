@@ -14,7 +14,4 @@ typedef struct DownloadGCGOptions {
 void download_gcg(const DownloadGCGOptions *options, GameHistory *game_history,
                   ErrorStack *error_stack);
 
-void download_gcg_simple(const char *source_identifier, Config *config,
-                         GameHistory *game_history, ErrorStack *error_stack);
-
 #endif
