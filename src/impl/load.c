@@ -301,18 +301,10 @@ void download_gcg(const DownloadGCGOptions *options, GameHistory *game_history,
   if (!gcg_content) {
     return; // Error already pushed to stack by get_gcg_string
   }
-
+  printf("Got gcg string successfully");
   // Parse the GCG content using the provided parser
   parse_gcg_string(gcg_content, options->config, game_history, error_stack);
-
+  printf("Parsed gcg string successfully");
   // Clean up
   free(gcg_content);
-}
-
-void download_gcg_simple(const char *source_identifier, Config *config,
-                         GameHistory *game_history, ErrorStack *error_stack) {
-  DownloadGCGOptions options = {.source_identifier = source_identifier,
-                                .lexicon = NULL,
-                                .config = config};
-  download_gcg(&options, game_history, error_stack);
 }

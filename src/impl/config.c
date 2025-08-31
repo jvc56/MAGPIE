@@ -1141,14 +1141,13 @@ char *impl_load(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
   printf("Loaded source identifier successfully\n");
-  DownloadGCGOptions options = {
-    .source_identifier = source_identifier,
-    .lexicon = NULL,
-    .config = config
-  };
+  DownloadGCGOptions options = {.source_identifier = source_identifier,
+                                .lexicon = NULL,
+                                .config = config};
 
   download_gcg(&options, config->game_history, error_stack);
 
+  printf("Downloaded GCG successfully\n");
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
