@@ -322,28 +322,10 @@ void draw_starting_racks(const Game *game) {
   draw_to_full_rack(game, 1);
 }
 
-// FIXME: remove
-#include "../str/game_string.h"
-// FIXME: remove
-#include "../str/rack_string.h"
-
 // Assumes the move has been validated
 // If the input leave rack is not null, it will record the leave of
 // the play in the leave rack.
 void play_move(const Move *move, Game *game, Rack *leave) {
-
-  // printf("rack to draw:\n");
-  // StringBuilder *rack_sb = string_builder_create();
-  // string_builder_add_rack(rack_sb, rack_to_draw, game_get_ld(game), false);
-  // printf("%s", string_builder_peek(rack_sb));
-  // string_builder_destroy(rack_sb);
-
-  // printf("\ngame before play move:\n");
-  // StringBuilder *game_string = string_builder_create();
-  // string_builder_add_game(game_string, game, NULL);
-  // printf("%s\n", string_builder_peek(game_string));
-  // string_builder_destroy(game_string);
-
   if (game_get_backup_mode(game) == BACKUP_MODE_SIMULATION) {
     game_backup(game);
   }
@@ -379,6 +361,35 @@ void play_move(const Move *move, Game *game, Rack *leave) {
     Player *player1 = game_get_player(game, 1);
     player_add_to_score(player0, -rack_get_score(ld, player_get_rack(player0)));
     player_add_to_score(player1, -rack_get_score(ld, player_get_rack(player1)));
+    game_set_game_end_reason(game, GAME_END_REASON_CONSECUTIVE_ZEROS);
+  }
+  game_start_next_player_turn(game);
+}
+
+void play_move_without_drawing_tiles(const Move *move, Game *game) {
+  if (game_get_backup_mode(game) == BACKUP_MODE_SIMULATION) {
+    game_backup(game);
+  }
+  int player_on_turn_index = game_get_player_on_turn_index(game);
+  Player *player_on_turn = game_get_player(game, player_on_turn_index);
+  const Rack *player_on_turn_rack = player_get_rack(player_on_turn);
+  if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    play_move_on_board(move, game);
+    update_cross_set_for_move(move, game);
+    game_set_consecutive_scoreless_turns(game, 0);
+    player_add_to_score(player_on_turn, move_get_score(move));
+    if (rack_is_empty(player_on_turn_rack) &&
+        bag_get_letters(game_get_bag(game)) <= (RACK_SIZE)) {
+      game_set_game_end_reason(game, GAME_END_REASON_STANDARD);
+    }
+  } else if (move_get_type(move) == GAME_EVENT_PASS) {
+    game_increment_consecutive_scoreless_turns(game);
+  } else if (move_get_type(move) == GAME_EVENT_EXCHANGE) {
+    execute_exchange_move(move, game, NULL);
+    game_increment_consecutive_scoreless_turns(game);
+  }
+  if (game_get_consecutive_scoreless_turns(game) ==
+      game_get_max_scoreless_turns(game)) {
     game_set_game_end_reason(game, GAME_END_REASON_CONSECUTIVE_ZEROS);
   }
   game_start_next_player_turn(game);

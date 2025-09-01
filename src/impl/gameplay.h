@@ -11,10 +11,7 @@
 
 void draw_starting_racks(Game *game);
 void play_move(const Move *move, Game *game, Rack *leave);
-void execute_exchange_move(const Move *move, const Game *game, Rack *leave);
-void standard_end_of_game_calculations(Game *game);
-void play_move_on_board(const Move *move, const Game *game);
-void update_cross_set_for_move(const Move *move, Game *game);
+void play_move_without_drawing_tiles(const Move *move, Game *game);
 void set_random_rack(Game *game, int player_index, const Rack *known_rack);
 Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list);
 void generate_moves_for_game(const MoveGenArgs *args);

@@ -69,7 +69,7 @@ jobs:
             data/*
             testdata/*
           # Increment this whenever the downloaded data changes
-          key: downloaded-data-files-19
+          key: downloaded-data-files-22
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'

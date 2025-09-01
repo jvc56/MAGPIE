@@ -672,17 +672,14 @@ void set_rack_from_bag_or_push_to_error_stack(Game *game,
   return_rack_to_bag(game, player_index);
   if (!draw_rack_from_bag(game, player_index, rack_to_draw)) {
     StringBuilder *sb = string_builder_create();
-    string_builder_add_game(sb, game, NULL);
     string_builder_add_string(sb, "rack of ");
     string_builder_add_rack(sb, rack_to_draw, game_get_ld(game), false);
     string_builder_add_formatted_string(sb, " for player %d not in bag",
                                         player_index + 1);
     char *err_msg = string_builder_dump(sb, NULL);
-    printf("%s\n", err_msg);
     string_builder_destroy(sb);
     error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_RACK_NOT_IN_BAG,
                      err_msg);
-    abort();
   }
 }
 
@@ -845,7 +842,6 @@ void play_game_history_turn(GameHistory *game_history, Game *game,
   case GAME_EVENT_EXCHANGE:
   case GAME_EVENT_PASS:
     if (validate) {
-      // FIXME: F1 vs F2 issue
       vms =
           validated_moves_create(game, game_event_player_index, cgp_move_string,
                                  true, true, true, error_stack);
@@ -892,34 +888,8 @@ void play_game_history_turn(GameHistory *game_history, Game *game,
       vms = game_event_get_vms(game_event);
     }
 
-    const Move *move = validated_moves_get_move(vms, 0);
-    player = game_get_player(game, game_event_player_index);
-    player_rack = player_get_rack(player);
     game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
-    game_backup(game);
-    // FIXME: combine this all into a single function
-    // and redo exposed gameplay.h functions
-    if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-      play_move_on_board(move, game);
-      update_cross_set_for_move(move, game);
-      game_set_consecutive_scoreless_turns(game, 0);
-      player_add_to_score(player, move_get_score(move));
-      if (rack_is_empty(player_rack) &&
-          bag_get_letters(game_get_bag(game)) <= (RACK_SIZE)) {
-        game_set_game_end_reason(game, GAME_END_REASON_STANDARD);
-      }
-    } else if (move_get_type(move) == GAME_EVENT_PASS) {
-      game_increment_consecutive_scoreless_turns(game);
-    } else if (move_get_type(move) == GAME_EVENT_EXCHANGE) {
-      execute_exchange_move(move, game, NULL);
-      game_increment_consecutive_scoreless_turns(game);
-    }
-    if (game_get_consecutive_scoreless_turns(game) ==
-        game_get_max_scoreless_turns(game)) {
-      // FIXME: figure out when to actually end the game
-      game_set_game_end_reason(game, GAME_END_REASON_CONSECUTIVE_ZEROS);
-    }
-    game_start_next_player_turn(game);
+    play_move_without_drawing_tiles(validated_moves_get_move(vms, 0), game);
     game_set_backup_mode(game, BACKUP_MODE_OFF);
     break;
   case GAME_EVENT_CHALLENGE_BONUS:
@@ -927,7 +897,6 @@ void play_game_history_turn(GameHistory *game_history, Game *game,
                         game_event_get_score_adjustment(game_event));
     break;
   case GAME_EVENT_PHONY_TILES_RETURNED:;
-    // FIXME: test phony with 0 tiles in the bag
     if (validate) {
       Rack *previously_played_letters =
           previously_played_letters_racks[game_event_player_index];
@@ -946,27 +915,17 @@ void play_game_history_turn(GameHistory *game_history, Game *game,
   case GAME_EVENT_END_RACK_PENALTY:
     if (game_get_consecutive_scoreless_turns(game) !=
         game_get_max_scoreless_turns(game)) {
-      error_stack_push(
-          // FIXME: trigger this error
-          error_stack, ERROR_STATUS_GCG_PARSE_INVALID_PASS_OUT,
-          get_formatted_string("player %s received end rack penalty without "
-                               "the required %d scoreless turns",
-                               game_history_player_get_nickname(
-                                   game_history, game_event_player_index),
-                               game_get_max_scoreless_turns(game)));
-      return;
+      // This error should have been caught earlier in game event order
+      // validation
+      log_fatal(
+          "encountered unexpected end rack penalty before the end of the game");
     }
     player = game_get_player(game, game_event_player_index);
     player_rack = player_get_rack(player);
     if (rack_is_empty(player_rack)) {
-      error_stack_push(
-          // FIXME: trigger this error
-          error_stack, ERROR_STATUS_GCG_PARSE_PLAYER_RACK_EMPTY_AT_PASS_OUT,
-          get_formatted_string(
-              "player %s received end rack penalty with an empty rack",
-              game_history_player_get_nickname(game_history,
-                                               game_event_player_index)));
-      return;
+      // This should be made impossible by the regex associated with this event
+      log_fatal(
+          "encountered an unexpected empty rack for an end rack penalty event");
     }
     player_add_to_score(player,
                         -rack_get_score(game_get_ld(game), player_rack));
@@ -977,36 +936,15 @@ void play_game_history_turn(GameHistory *game_history, Game *game,
     player_rack = player_get_rack(player);
     opp_rack = player_get_rack(game_get_player(game, game_event_opp_index));
     if (!rack_is_empty(player_rack)) {
-      StringBuilder *rack_error_sb = string_builder_create();
-      string_builder_add_formatted_string(
-          rack_error_sb,
-          "player %s received end rack "
-          "points from an opponent rack of (",
-          game_history_player_get_nickname(game_history,
-                                           game_event_player_index));
-      string_builder_add_rack(rack_error_sb, opp_rack, game_get_ld(game),
-                              false);
-      string_builder_add_string(rack_error_sb,
-                                ") while holding a nonempty rack of (");
-      string_builder_add_rack(rack_error_sb, player_rack, game_get_ld(game),
-                              false);
-      string_builder_add_string(rack_error_sb, ")");
-      error_stack_push(
-          // FIXME: trigger this error
-          error_stack, ERROR_STATUS_GCG_PARSE_PLAYER_RACK_NOT_EMPTY_AT_GAME_END,
-          string_builder_dump(rack_error_sb, NULL));
-      string_builder_destroy(rack_error_sb);
-      return;
+      log_fatal("player %s received end rack points with a nonempty rack "
+                "before the game ended",
+                game_history_player_get_nickname(game_history,
+                                                 game_event_player_index));
     }
     if (rack_is_empty(opp_rack)) {
-      error_stack_push(
-          // FIXME: trigger this error
-          error_stack, ERROR_STATUS_GCG_PARSE_OPP_RACK_EMPTY_AT_GAME_END,
-          get_formatted_string(
-              "player %s received end rack points from an empty opponent rack",
-              game_history_player_get_nickname(game_history,
-                                               game_event_player_index)));
-      return;
+      log_fatal("player %s received end rack points before the game ended",
+                game_history_player_get_nickname(game_history,
+                                                 game_event_player_index));
     }
     player_add_to_score(player,
                         2 * rack_get_score(game_get_ld(game), opp_rack));
@@ -1530,9 +1468,9 @@ void parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
       return;
     }
 
-    const int rack_score =
+    const Equity rack_score =
         rack_get_score(game_get_ld(gcg_parser->game), &penalty_letters);
-    const int game_event_score_adj =
+    const Equity game_event_score_adj =
         game_event_get_score_adjustment(game_event);
 
     if (-rack_score != game_event_score_adj) {
@@ -1540,7 +1478,8 @@ void parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
           error_stack, ERROR_STATUS_GCG_PARSE_END_RACK_PENALTY_INCORRECT,
           get_formatted_string(
               "rack score (%d) does not match end rack penalty (%d): %s",
-              rack_score, -game_event_score_adj, gcg_line));
+              equity_to_int(rack_score), -equity_to_int(game_event_score_adj),
+              gcg_line));
       return;
     }
 
@@ -1649,16 +1588,17 @@ void parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
       return;
     }
 
-    const int end_rack_score = rack_get_score(game_get_ld(gcg_parser->game),
-                                              game_event_get_rack(game_event));
-    const int game_event_rack_points =
+    const Equity end_rack_score = rack_get_score(
+        game_get_ld(gcg_parser->game), game_event_get_rack(game_event));
+    const Equity game_event_rack_points =
         game_event_get_score_adjustment(game_event);
     if (end_rack_score * 2 != game_event_rack_points) {
       error_stack_push(
           error_stack, ERROR_STATUS_GCG_PARSE_RACK_END_POINTS_INCORRECT,
           get_formatted_string(
               "double rack score (%d) does not match end rack points (%d): %s",
-              end_rack_score * 2, game_event_rack_points, gcg_line));
+              equity_to_int(end_rack_score) * 2,
+              equity_to_int(game_event_rack_points), gcg_line));
       return;
     }
 

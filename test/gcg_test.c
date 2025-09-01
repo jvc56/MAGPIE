@@ -819,6 +819,51 @@ void test_success_incomplete(GameHistory *game_history) {
   config_destroy(config);
 }
 
+void test_success_phony_empty_bag(GameHistory *game_history) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+
+  Game *game1 = config_game_create(config);
+  Game *game2 = config_game_create(config);
+
+  assert(test_parse_gcg("phony_with_empty_bag", config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+
+  game_play_to_event_index_or_die(game_history, game1, 25);
+  load_cgp_or_die(
+      game2,
+      "2CHIGOE3T3/3O6NAE2/3M6END2/2AY6UG1G1/2B7MO1L1/1VODKA5i1OD/2R2TANNERS1RE/"
+      "OUTA2ZA3T1IF/2I1CRoWDIE2A1/2V6FEEBS1/1NEWISHLY1LEA2/12N2/12J2/12A2/"
+      "7PROLIX2 IOQSTTU/EEIIPRU 337/481 1");
+  assert_games_are_equal(game1, game2, true);
+
+  game_play_to_event_index_or_die(game_history, game1, 26);
+  load_cgp_or_die(
+      game2, "2CHIGOE3T3/3O6NAE2/3M6END2/2AY6UG1G1/2B7MO1L1/1VODKA5i1OD/"
+             "2R2TANNERS1RE/OUTA2ZA3T1IF/2I1CRoWDIE2A1/2V6FEEBS1/"
+             "1NEWISHLY1LEA2/12N2/12J2/11QATS/7PROLIX2 EEIIPRU/IOTU 481/374 0");
+  assert_games_are_equal(game1, game2, true);
+
+  game_play_to_event_index_or_die(game_history, game1, 31);
+  load_cgp_or_die(
+      game2, "2CHIGOE3T2P/3O6NAE1U/3M6END1R/2AY6UG1GI/2B7MO1L1/1VODKA5i1OD/"
+             "2R2TANNERS1RE/OUTA2ZA3T1IF/2I1CRoWDIE2A1/1IV6FEEBS1/"
+             "1NEWISHLY1LEA2/12N2/12J2/7OUT1QATS/7PROLIX2 EEI/ 506/400 0");
+  assert_games_are_equal(game1, game2, true);
+
+  game_play_to_event_index_or_die(game_history, game1, 32);
+  load_cgp_or_die(
+      game2, "2CHIGOE3T2P/3O6NAE1U/3M6END1R/2AY6UG1GI/2B7MO1L1/1VODKA5i1OD/"
+             "2R2TANNERS1RE/OUTA2ZA3T1IF/2I1CRoWDIE2A1/2V6FEEBS1/"
+             "1NEWISHLY1LEA2/12N2/12J2/7OUT1QATS/7PROLIX2 EEI/I 506/389 1");
+  assert_games_are_equal(game1, game2, true);
+
+  game_history_reset(game_history);
+  game_destroy(game1);
+  game_destroy(game2);
+  config_destroy(config);
+}
+
 void test_write_gcg(GameHistory *game_history) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
@@ -935,16 +980,16 @@ void test_gcg(void) {
   // Use the same game_history for all tests to thoroughly test the
   // game_history_reset function
   GameHistory *game_history = game_history_create();
-  // FIXME: uncomment
-  // test_error_cases(game_history);
-  // test_parse_special_char(game_history);
-  // test_parse_special_utf8_no_header(game_history);
-  // test_parse_special_utf8_with_header(game_history);
-  // test_parse_dos_mode(game_history);
+  test_error_cases(game_history);
+  test_parse_special_char(game_history);
+  test_parse_special_utf8_no_header(game_history);
+  test_parse_special_utf8_with_header(game_history);
+  test_parse_dos_mode(game_history);
   test_success_standard(game_history);
   test_success_five_point_challenge(game_history);
   test_success_six_pass(game_history);
   test_success_incomplete(game_history);
+  test_success_phony_empty_bag(game_history);
   test_vs_jeremy_gcg();
   test_write_gcg(game_history);
   test_partially_known_rack_from_phonies(game_history);
