@@ -206,6 +206,14 @@ void test_validated_move_errors(void) {
       game, WORMROOT_CGP, "ex.4", 0, false, true, false,
       ERROR_STATUS_MOVE_VALIDATION_EXCHANGE_INSUFFICIENT_TILES);
 
+  assert_validated_move_error(
+      game, ION_OPENING_CGP, "8I.IZATION", 0, true, false, true,
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_START_COORDS);
+
+  assert_validated_move_error(
+      game, ION_OPENING_CGP, "H9.OW", 0, true, false, true,
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_START_COORDS);
+
   game_destroy(game);
   config_destroy(config);
 }

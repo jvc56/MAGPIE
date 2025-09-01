@@ -767,8 +767,10 @@ ValidatedMoves *validated_moves_create_and_assert_status(
       allow_unknown_exchanges, allow_playthrough, error_stack);
   const bool ok = error_stack_top(error_stack) == expected_status;
   if (!ok) {
-    printf("validated_moves_create failed for %s\n", ucgi_moves_string);
-    error_stack_reset(error_stack);
+    printf("validated_moves_create return unexpected status for %s: %d != %d\n",
+           ucgi_moves_string, error_stack_top(error_stack), expected_status);
+    error_stack_print_and_reset(error_stack);
+    assert(0);
   }
   error_stack_destroy(error_stack);
   return vms;

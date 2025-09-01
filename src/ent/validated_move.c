@@ -56,8 +56,8 @@ bool is_exchange_allowed(const Bag *bag) {
   return bag_get_letters(bag) >= RACK_SIZE;
 }
 
-void validate_coordinates(Move *move, const char *coords_string,
-                          ErrorStack *error_stack) {
+void validate_coordinates(const Board *board, Move *move,
+                          const char *coords_string, ErrorStack *error_stack) {
   int row_start = 0;
   int col_start = 0;
   size_t coords_string_length = string_length(coords_string);
@@ -117,6 +117,18 @@ void validate_coordinates(Move *move, const char *coords_string,
         ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION,
         get_formatted_string("failed to parse move coordinates: %s",
                              coords_string));
+    return;
+  }
+
+  if ((board_is_dir_vertical(move_get_dir(move)) && row_start > 0 &&
+       !board_is_empty_or_bricked(board, row_start - 1, col_start)) ||
+      (!board_is_dir_vertical(move_get_dir(move)) && col_start > 0 &&
+       !board_is_empty_or_bricked(board, row_start, col_start - 1))) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_MOVE_VALIDATION_INVALID_START_COORDS,
+        get_formatted_string(
+            "move coordinates are not at the start of the play: %s",
+            coords_string));
     return;
   }
 
@@ -326,7 +338,7 @@ void validate_split_move(const StringSplitter *split_move, const Game *game,
   } else {
     // Score and equity are set later for tile placement moves
     move_set_type(vm->move, GAME_EVENT_TILE_PLACEMENT_MOVE);
-    validate_coordinates(vm->move, move_type_or_coords, error_stack);
+    validate_coordinates(board, vm->move, move_type_or_coords, error_stack);
   }
 
   if (!error_stack_is_empty(error_stack)) {
