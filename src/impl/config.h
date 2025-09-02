@@ -41,7 +41,7 @@ const char *config_get_data_paths(const Config *config);
 int config_get_bingo_bonus(const Config *config);
 BoardLayout *config_get_board_layout(const Config *config);
 game_variant_t config_get_game_variant(const Config *config);
-double config_get_equity_margin(const Config *config);
+Equity config_get_equity_margin(const Config *config);
 WinPct *config_get_win_pcts(const Config *config);
 int config_get_num_plays(const Config *config);
 int config_get_num_small_plays(const Config *config);
@@ -69,7 +69,7 @@ Game *config_game_create(const Config *config);
 
 // Impl
 void config_infer(const Config *config, bool use_game_history, int target_index,
-                  int target_score, int target_num_exch,
+                  Equity target_score, int target_num_exch,
                   Rack *target_played_tiles, Rack *target_known_rack,
                   InferenceResults *results, ErrorStack *error_stack);
 void config_autoplay(const Config *config, AutoplayResults *autoplay_results,

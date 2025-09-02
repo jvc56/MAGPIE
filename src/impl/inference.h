@@ -13,10 +13,10 @@ typedef struct InferenceArgs {
   bool use_game_history;
   GameHistory *game_history;
   int target_index;
-  int target_score;
+  Equity target_score;
   int target_num_exch;
   int move_capacity;
-  double equity_margin;
+  Equity equity_margin;
   Rack *target_played_tiles;
   Rack *target_known_rack;
   const Game *game;

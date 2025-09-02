@@ -17,14 +17,14 @@ void inference_results_reset(InferenceResults *results, int move_capacity,
 void inference_results_finalize(const Rack *target_played_tiles,
                                 const Rack *target_known_unplayed_tiles,
                                 const Rack *bag_as_rack,
-                                InferenceResults *results, int target_score,
+                                InferenceResults *results, Equity target_score,
                                 int target_number_of_tiles_exchanged,
-                                double equity_margin);
+                                Equity equity_margin);
 
 int inference_results_get_target_number_of_tiles_exchanged(
     const InferenceResults *results);
-int inference_results_get_target_score(const InferenceResults *results);
-double inference_results_get_equity_margin(const InferenceResults *results);
+Equity inference_results_get_target_score(const InferenceResults *results);
+Equity inference_results_get_equity_margin(const InferenceResults *results);
 const Rack *
 inference_results_get_target_played_tiles(const InferenceResults *results);
 const Rack *inference_results_get_target_known_unplayed_tiles(

@@ -19,6 +19,7 @@
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
 #include "../str/inference_string.h"
+#include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/math_util.h"
 #include "../util/string_util.h"
@@ -28,9 +29,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
-
-// FIXME: remove
-#include "../str/game_string.h"
 
 typedef struct Inference {
   // KLV used to evaluate leaves to determine
@@ -229,22 +227,20 @@ void decrement_letter_for_inference(Inference *inference,
 Inference *inference_create(const Rack *target_played_tiles,
                             const Rack *target_known_rack, Game *game,
                             int move_capacity, int target_index,
-                            int target_score,
+                            Equity target_score,
                             int target_number_of_tiles_exchanged,
-                            double equity_margin, InferenceResults *results) {
-
+                            Equity equity_margin, Rack *nontarget_current_rack,
+                            InferenceResults *results) {
   Inference *inference = malloc_or_die(sizeof(Inference));
-
   inference->game = game;
   inference->klv = player_get_klv(game_get_player(game, target_index));
-
   inference->ld_size = rack_get_dist_size(target_played_tiles);
   inference->move_capacity = move_capacity;
   inference->target_index = target_index;
-  inference->target_score = int_to_equity(target_score);
+  inference->target_score = target_score;
   inference->target_number_of_tiles_exchanged =
       target_number_of_tiles_exchanged;
-  inference->equity_margin = double_to_equity(equity_margin);
+  inference->equity_margin = equity_margin;
   inference->current_rack_index = 0;
   inference->total_racks_evaluated = 0;
   // thread index is only meaningful for
@@ -272,14 +268,54 @@ Inference *inference_create(const Rack *target_played_tiles,
   return_rack_to_bag(game, 0);
   return_rack_to_bag(game, 1);
 
-  rack_union(inference->current_target_rack, target_played_tiles);
-  rack_union(inference->current_target_rack, target_known_rack);
+  Rack temp_target_rack;
+  rack_set_dist_size_and_reset(&temp_target_rack, inference->ld_size);
 
-  // Remove the tiles on the target's rack from the bag
-  for (int i = 0; i < inference->ld_size; i++) {
-    const int num_target_played_letter =
-        rack_get_letter(inference->current_target_rack, i);
-    rack_take_letters(inference->bag_as_rack, i, num_target_played_letter);
+  rack_union(&temp_target_rack, target_played_tiles);
+  rack_union(&temp_target_rack, target_known_rack);
+
+  bool success = draw_rack_from_bag(game, target_index, &temp_target_rack);
+  if (!success) {
+    const LetterDistribution *ld = game_get_ld(game);
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_string(sb, "failed to draw combined (");
+    string_builder_add_rack(sb, &temp_target_rack, ld, false);
+    string_builder_add_string(sb, ") inferred player played letters (");
+    string_builder_add_rack(sb, target_played_tiles, ld, false);
+    string_builder_add_string(sb, ") and inferred player known rack (");
+    string_builder_add_rack(sb, target_known_rack, ld, false);
+    string_builder_add_string(sb, ") from the bag");
+    char *err_msg = string_builder_dump(sb, NULL);
+    string_builder_destroy(sb);
+    log_fatal(err_msg);
+  }
+
+  success = draw_rack_from_bag(game, 1 - target_index, nontarget_current_rack);
+
+  if (!success) {
+    const LetterDistribution *ld = game_get_ld(game);
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_string(sb, "failed to draw nontarget player rack (");
+    string_builder_add_rack(sb, nontarget_current_rack, ld, false);
+    string_builder_add_string(sb, ") from the bag");
+    char *err_msg = string_builder_dump(sb, NULL);
+    string_builder_destroy(sb);
+    log_fatal(err_msg);
+  }
+
+  // Add the letters that are known to have been kept on the rack
+  // for their target inferred play.
+  rack_copy(inference->current_target_leave, target_known_rack);
+  rack_subtract_using_floor_zero(inference->current_target_leave,
+                                 target_played_tiles);
+
+  // Set the bag_as_rack to the bag
+  const Bag *bag = game_get_bag(game);
+  int bag_letters_array[MAX_ALPHABET_SIZE];
+  memset(bag_letters_array, 0, sizeof(bag_letters_array));
+  bag_increment_unseen_count(bag, bag_letters_array);
+  for (int i = 0; i < MAX_ALPHABET_SIZE; i++) {
+    rack_add_letters(inference->bag_as_rack, i, bag_letters_array[i]);
   }
 
   return inference;
@@ -503,41 +539,98 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
   free(worker_ids);
 }
 
-void verify_inference(const Inference *inference, ErrorStack *error_stack) {
-  const Rack *bag_as_rack = inference->bag_as_rack;
-  for (int i = 0; i < inference->ld_size; i++) {
-    if (rack_get_letter(bag_as_rack, i) < 0) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_INFERENCE_TILES_NOT_IN_BAG,
-          string_duplicate("inferred player tiles not available in the "
-                           "bag"));
+void verify_inference_args(const InferenceArgs *args, Game *game_dup,
+                           Rack *nontarget_rack, ErrorStack *error_stack) {
+  const Bag *bag = game_get_bag(game_dup);
+  int bag_letter_counts[MAX_ALPHABET_SIZE];
+  memset(bag_letter_counts, 0, sizeof(bag_letter_counts));
+  bag_increment_unseen_count(bag, bag_letter_counts);
+
+  const int ld_size = ld_get_size(game_get_ld(game_dup));
+
+  // Add the current player racks to the bag letter counts
+  const Rack *player0_rack = player_get_rack(game_get_player(game_dup, 0));
+  const Rack *player1_rack = player_get_rack(game_get_player(game_dup, 1));
+  for (int i = 0; i < ld_size; i++) {
+    bag_letter_counts[i] +=
+        rack_get_letter(player0_rack, i) + rack_get_letter(player1_rack, i);
+  }
+
+  Rack temp_target_rack;
+  rack_set_dist_size_and_reset(&temp_target_rack, ld_size);
+
+  rack_union(&temp_target_rack, args->target_played_tiles);
+  rack_union(&temp_target_rack, args->target_known_rack);
+
+  if (rack_get_total_letters(&temp_target_rack) > (RACK_SIZE)) {
+    const LetterDistribution *ld = game_get_ld(game_dup);
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_string(sb, "inferred player rack (");
+    string_builder_add_rack(sb, &temp_target_rack, ld, false);
+    string_builder_add_string(sb,
+                              ") derived from the union of played letters (");
+    string_builder_add_rack(sb, args->target_played_tiles, ld, false);
+    string_builder_add_string(sb, ") and known letters (");
+    string_builder_add_rack(sb, args->target_known_rack, ld, false);
+    string_builder_add_string(sb,
+                              ") is greater than the maximum rack size of ");
+    string_builder_add_int(sb, RACK_SIZE);
+    error_stack_push(error_stack, ERROR_STATUS_INFERENCE_RACK_OVERFLOW,
+                     string_builder_dump(sb, NULL));
+    string_builder_destroy(sb);
+    return;
+  }
+
+  for (int i = 0; i < ld_size; i++) {
+    bag_letter_counts[i] -= rack_get_letter(&temp_target_rack, i);
+    if (bag_letter_counts[i] < 0) {
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_string(sb, "inferred player played letters (");
+      string_builder_add_rack(sb, &temp_target_rack, game_get_ld(game_dup),
+                              false);
+      string_builder_add_string(sb, ") not available in the bag");
+      error_stack_push(error_stack,
+                       ERROR_STATUS_INFERENCE_TARGET_LETTERS_NOT_IN_BAG,
+                       string_builder_dump(sb, NULL));
+      string_builder_destroy(sb);
       return;
     }
   }
 
-  int infer_rack_number_of_letters =
-      rack_get_total_letters(inference->current_target_rack);
+  for (int i = 0; i < ld_size; i++) {
+    bag_letter_counts[i] -= rack_get_letter(nontarget_rack, i);
+    if (bag_letter_counts[i] < 0) {
+      // FIXME: trigger this
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_string(sb, "noninferred player rack letters (");
+      string_builder_add_rack(sb, nontarget_rack, game_get_ld(game_dup), false);
+      string_builder_add_string(sb, ") not available in the bag");
+      error_stack_push(error_stack,
+                       ERROR_STATUS_INFERENCE_NONTARGET_LETTERS_NOT_IN_BAG,
+                       string_builder_dump(sb, NULL));
+      string_builder_destroy(sb);
+      return;
+    }
+  }
 
-  int number_of_letters_in_bag = rack_get_total_letters(bag_as_rack);
+  const int num_played_letters =
+      rack_get_total_letters(args->target_played_tiles);
 
-  if (infer_rack_number_of_letters == 0 &&
-      inference->target_number_of_tiles_exchanged == 0) {
+  if (num_played_letters == 0 && args->target_num_exch == 0) {
     error_stack_push(
         error_stack, ERROR_STATUS_INFERENCE_NO_TILES_PLAYED,
         string_duplicate("cannot infer when no tiles are played or exchanged"));
     return;
   }
 
-  if (infer_rack_number_of_letters != 0 &&
-      inference->target_number_of_tiles_exchanged != 0) {
+  if (num_played_letters != 0 && args->target_num_exch != 0) {
     error_stack_push(error_stack, ERROR_STATUS_INFERENCE_BOTH_PLAY_AND_EXCHANGE,
                      string_duplicate("cannot infer when both a tile placement "
                                       "and exchange move are specified"));
     return;
   }
 
-  if (inference->target_number_of_tiles_exchanged != 0 &&
-      number_of_letters_in_bag < (RACK_SIZE) * 2) {
+  if (args->target_num_exch != 0 && bag_get_letters(bag) < (RACK_SIZE) * 2) {
     error_stack_push(
         error_stack, ERROR_STATUS_INFERENCE_EXCHANGE_NOT_ALLOWED,
         get_formatted_string("cannot infer an exchange where there are fewer "
@@ -546,31 +639,106 @@ void verify_inference(const Inference *inference, ErrorStack *error_stack) {
     return;
   }
 
-  if (inference->target_number_of_tiles_exchanged != 0 &&
-      inference->target_score != 0) {
+  if (args->target_num_exch != 0 && args->target_score != 0) {
     error_stack_push(
         error_stack, ERROR_STATUS_INFERENCE_EXCHANGE_SCORE_NOT_ZERO,
         string_duplicate("cannot infer an exchange with a nonzero score"));
     return;
   }
 
-  if (infer_rack_number_of_letters > (RACK_SIZE)) {
+  if (num_played_letters > (RACK_SIZE)) {
     error_stack_push(
         error_stack, ERROR_STATUS_INFERENCE_RACK_OVERFLOW,
         get_formatted_string("inferred player played more tiles (%d) "
                              "than can fit in a rack (%d)",
-                             infer_rack_number_of_letters, RACK_SIZE));
+                             num_played_letters, RACK_SIZE));
     return;
   }
 }
 
-void infer_with_allocated_inference(InferenceArgs *args, Inference *inference,
-                                    ErrorStack *error_stack) {
-  verify_inference(inference, error_stack);
+void populate_inference_args_with_game_history(InferenceArgs *args,
+                                               Game *game_dup,
+                                               Rack *nontarget_current_rack,
+                                               ErrorStack *error_stack) {
+  GameHistory *game_history = args->game_history;
+  // FIXME: get most recent move event, not the last one in the history
+  const int last_event_index =
+      game_history_get_last_move_event_index(game_history);
+  if (last_event_index < 0) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_INFERENCE_EMPTY_GAME_HISTORY,
+        get_formatted_string(
+            "cannot infer the previous play for an empty game history"));
+    return;
+  }
+  GameEvent *last_event =
+      game_history_get_event(game_history, last_event_index);
+  const ValidatedMoves *last_move = game_event_get_vms(last_event);
+  const Move *move = validated_moves_get_move(last_move, 0);
+  const int move_tiles_length = move_get_tiles_length(move);
+  rack_reset(args->target_played_tiles);
+  for (int i = 0; i < move_tiles_length; i++) {
+    if (move_get_tile(move, i) != PLAYED_THROUGH_MARKER) {
+      if (get_is_blanked(move_get_tile(move, i))) {
+        rack_add_letter(args->target_played_tiles, BLANK_MACHINE_LETTER);
+      } else {
+        rack_add_letter(args->target_played_tiles, move_get_tile(move, i));
+      }
+    }
+  }
+  args->target_index = game_event_get_player_index(last_event);
+  args->target_score = game_event_get_move_score(last_event);
+  args->target_num_exch = 0;
+  if (move_get_type(move) == GAME_EVENT_EXCHANGE) {
+    args->target_num_exch = move_get_tiles_played(move);
+    rack_reset(args->target_played_tiles);
+  }
+  rack_copy(nontarget_current_rack,
+            game_event_get_after_event_player_on_turn_rack(last_event));
 
+  for (int i = last_event_index - 1; i >= 0; i--) {
+    GameEvent *event = game_history_get_event(game_history, i);
+    if (game_event_get_player_index(event) == args->target_index) {
+      rack_copy(args->target_known_rack,
+                game_event_get_after_event_player_off_turn_rack(event));
+      break;
+    }
+  }
+
+  game_play_to_event_index(game_history, game_dup, last_event_index,
+                           error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+}
+
+void infer_with_game_duplicate(InferenceArgs *args, Game *game_dup,
+                               InferenceResults *results,
+                               ErrorStack *error_stack) {
+  Rack nontarget_current_rack;
+  rack_set_dist_size_and_reset(&nontarget_current_rack,
+                               ld_get_size(game_get_ld(game_dup)));
+  if (args->use_game_history) {
+    populate_inference_args_with_game_history(
+        args, game_dup, &nontarget_current_rack, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  } else {
+    rack_copy(&nontarget_current_rack, player_get_rack(game_get_player(
+                                           game_dup, 1 - args->target_index)));
+  }
+
+  verify_inference_args(args, game_dup, &nontarget_current_rack, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  Inference *inference =
+      inference_create(args->target_played_tiles, args->target_known_rack,
+                       game_dup, args->move_capacity, args->target_index,
+                       args->target_score, args->target_num_exch,
+                       args->equity_margin, &nontarget_current_rack, results);
 
   infer_manager(args->thread_control, inference);
 
@@ -588,152 +756,14 @@ void infer_with_allocated_inference(InferenceArgs *args, Inference *inference,
                          args->thread_control);
   }
 
-  // Return the player to infer rack to it's original
-  // state since the inference does not own that struct
-  for (int i = 0; i < rack_get_dist_size(args->target_played_tiles); i++) {
-    for (int j = 0; j < rack_get_letter(args->target_played_tiles, i); j++) {
-      rack_take_letter(inference->current_target_rack, i);
-    }
-  }
-}
-
-void populate_inference_args_with_game_history(InferenceArgs *args, Game *game,
-                                               ErrorStack *error_stack) {
-  GameHistory *game_history = args->game_history;
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  // FIXME: get most recent move event, not the last one in the history
-  const int last_event_index =
-      game_history_get_last_move_event_index(game_history);
-  if (last_event_index < 0) {
-    // FIXME: test this
-    error_stack_push(
-        error_stack, ERROR_STATUS_INFERENCE_EMPTY_GAME_HISTORY,
-        get_formatted_string(
-            "cannot infer the previous play for an empty game history"));
-    return;
-  }
-  const GameEvent *last_event =
-      game_history_get_event(game_history, last_event_index);
-  const ValidatedMoves *last_move = game_event_get_vms(last_event);
-  const Move *move = validated_moves_get_move(last_move, 0);
-  const int move_tiles_length = move_get_tiles_length(move);
-  rack_reset(args->target_played_tiles);
-  for (int i = 0; i < move_tiles_length; i++) {
-    if (move_get_tile(move, i) != PLAYED_THROUGH_MARKER) {
-      if (get_is_blanked(move_get_tile(move, i))) {
-        rack_add_letter(args->target_played_tiles, BLANK_MACHINE_LETTER);
-      } else {
-        rack_add_letter(args->target_played_tiles, move_get_tile(move, i));
-      }
-    }
-  }
-  args->target_index = game_event_get_player_index(last_event);
-  // FIXME: make inference take an Equity from the config all the way down
-  args->target_score = equity_to_int(game_event_get_move_score(last_event));
-  args->target_num_exch = 0;
-  const bool move_is_exchange = move_get_type(move) == GAME_EVENT_EXCHANGE;
-  if (move_is_exchange) {
-    args->target_num_exch = move_get_tiles_played(move);
-  }
-
-  // play to penultimate move
-  // FIXME: do not play to end, just get the penultimate move using current
-  // move index
-  game_play_to_event_index(game_history, game, last_event_index, error_stack);
-
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  // Remove the tiles played in the move from the target's rack
-  // and add them to the game bag
-
-  Bag *bag = game_get_bag(game);
-
-  if (move_is_exchange) {
-    // Assume no opponent tiles are known
-    return_rack_to_bag(game, args->target_index);
-  } else if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    Rack *target_game_rack =
-        player_get_rack(game_get_player(game, args->target_index));
-    const int ld_size = rack_get_dist_size(target_game_rack);
-    for (int i = 0; i < ld_size; i++) {
-      const int num_target_played_letter =
-          rack_get_letter(args->target_played_tiles, i);
-      if (num_target_played_letter == 0) {
-        continue;
-      }
-      const int num_target_game_rack = rack_get_letter(target_game_rack, i);
-      if (num_target_game_rack == 0) {
-        continue;
-      }
-      int num_to_add_to_bag = num_target_played_letter;
-      if (num_target_game_rack < num_target_played_letter) {
-        num_to_add_to_bag = num_target_game_rack;
-      }
-      rack_take_letters(target_game_rack, i, num_to_add_to_bag);
-      for (int j = 0; j < num_to_add_to_bag; j++) {
-        bag_add_letter(bag, i, args->target_index);
-      }
-    }
-  }
-
-  printf("target_played_tiles: ");
-  for (int i = 0;
-       i < rack_get_letter(args->target_played_tiles, BLANK_MACHINE_LETTER);
-       i++) {
-    printf("?");
-  }
-  for (int i = 1; i < rack_get_dist_size(args->target_played_tiles); i++) {
-    const int8_t num_letter = rack_get_letter(args->target_played_tiles, i);
-    for (int8_t j = 0; j < num_letter; j++) {
-      printf("%c", (char)(i + 'A' - 1));
-    }
-  }
-  printf("\n");
-  printf("target_index: %d\n", args->target_index);
-  printf("target_score: %d\n", args->target_score);
-  printf("target_num_exch: %d\n", args->target_num_exch);
-  printf("game state:\n");
-
-  StringBuilder *game_sb = string_builder_create();
-  string_builder_add_game(game_sb, game, NULL);
-  printf("%s\n", string_builder_peek(game_sb));
-  string_builder_destroy(game_sb);
-}
-
-void infer_with_game_duplicate(InferenceArgs *args, InferenceResults *results,
-                               Game *game, ErrorStack *error_stack) {
-  if (args->use_game_history) {
-    populate_inference_args_with_game_history(args, game, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-  }
-
-  Inference *inference = inference_create(
-      args->target_played_tiles, args->target_known_rack, game,
-      args->move_capacity, args->target_index, args->target_score,
-      args->target_num_exch, args->equity_margin, results);
-
-  infer_with_allocated_inference(args, inference, error_stack);
-
   inference_destroy(inference);
 }
 
 void infer(InferenceArgs *args, InferenceResults *results,
            ErrorStack *error_stack) {
-  // FIXME: this might be NULL if we are using the game history, so check this
-  // later
-  if (!args->target_played_tiles) {
-    error_stack_push(error_stack, ERROR_STATUS_INFERENCE_NO_TILES_PLAYED,
-                     string_duplicate("no tile placement or exchange move was "
-                                      "specified for the inference"));
-    return;
-  }
+  // Overwrite the pass in game with a duplicate that we can modify
   Game *game = game_duplicate(args->game);
-  infer_with_game_duplicate(args, results, game, error_stack);
+  infer_with_game_duplicate(args, game, results, error_stack);
   game_destroy(game);
   // FIXME: only destroy cache if this is a stand-alone infer request, keep the
   // caches for simming with inference

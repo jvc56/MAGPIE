@@ -59,11 +59,13 @@ error_code_t infer_for_test(const Config *config, int target_index,
 
   ErrorStack *error_stack = error_stack_create();
   set_thread_control_status_to_start(config_get_thread_control(config));
-  config_infer(config, false, target_index, target_score, target_num_exch,
-               &target_played_tiles, &target_known_rack, inference_results,
-               error_stack);
+  config_infer(config, false, target_index, int_to_equity(target_score),
+               target_num_exch, &target_played_tiles, &target_known_rack,
+               inference_results, error_stack);
   error_code_t status = error_stack_top(error_stack);
-  rack_destroy(&target_played_tiles);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+  }
   error_stack_destroy(error_stack);
   return status;
 }
@@ -170,7 +172,6 @@ void test_infer_rack_overflow(void) {
                            "all -numplays 1 -threads 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   Game *game = config_get_game(config);
-  const LetterDistribution *ld = config_get_ld(config);
   InferenceResults *inference_results = inference_results_create(NULL);
 
   error_code_t status =
@@ -178,8 +179,7 @@ void test_infer_rack_overflow(void) {
   assert(status == ERROR_STATUS_INFERENCE_RACK_OVERFLOW);
   game_reset(game);
 
-  rack_set_to_string(ld, player_get_rack(game_get_player(game, 0)), "ABC");
-  status = infer_for_test(config, 0, 0, 0, "DEFGH", "", inference_results);
+  status = infer_for_test(config, 0, 0, 0, "DEFGH", "ABC", inference_results);
   assert(status == ERROR_STATUS_INFERENCE_RACK_OVERFLOW);
 
   inference_results_destroy(inference_results);
@@ -195,12 +195,6 @@ void test_infer_no_tiles_played_rack_empty(void) {
   InferenceResults *inference_results = inference_results_create(NULL);
   error_code_t status =
       infer_for_test(config, 0, 0, 0, "", "", inference_results);
-  assert(status == ERROR_STATUS_INFERENCE_NO_TILES_PLAYED);
-
-  GameHistory *game_history = config_get_game_history(config);
-  assert(test_parse_gcg("success_just_last_rack_write1", config,
-                        game_history) == ERROR_STATUS_SUCCESS);
-  status = infer_for_test_with_history(config, inference_results);
   assert(status == ERROR_STATUS_INFERENCE_NO_TILES_PLAYED);
 
   error_stack_destroy(error_stack);
@@ -268,8 +262,20 @@ void test_infer_tiles_played_not_in_bag(void) {
   load_and_exec_config_or_die(config, "set -eq 0 -threads 1");
   error_code_t status =
       infer_for_test(config, 0, 0, 1, "ACBYEYY", "", inference_results);
-  assert(status == ERROR_STATUS_INFERENCE_TILES_NOT_IN_BAG);
+  assert(status == ERROR_STATUS_INFERENCE_TARGET_LETTERS_NOT_IN_BAG);
 
+  inference_results_destroy(inference_results);
+  config_destroy(config);
+}
+
+void test_infer_empty_game_history(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  InferenceResults *inference_results = inference_results_create(NULL);
+  load_and_exec_config_or_die(config, "set -eq 0 -threads 1");
+  error_code_t status = infer_for_test_with_history(config, inference_results);
+  assert(status == ERROR_STATUS_INFERENCE_EMPTY_GAME_HISTORY);
   inference_results_destroy(inference_results);
   config_destroy(config);
 }
@@ -332,9 +338,6 @@ void test_infer_nonerror_cases(const int number_of_threads,
   }
   for (int i = 0; i < ld_size; i++) {
     if (i == ld_hl_to_ml(ld, "S")) {
-      printf("actual value: %lu\n", inference_results_get_subtotal(
-                                        inference_results, INFERENCE_TYPE_LEAVE,
-                                        i, 1, INFERENCE_SUBTOTAL_DRAW));
       assert(inference_results_get_subtotal(inference_results,
                                             INFERENCE_TYPE_LEAVE, i, 1,
                                             INFERENCE_SUBTOTAL_DRAW) == 3);
@@ -831,12 +834,18 @@ void test_infer_nonerror_cases(const int number_of_threads,
 
   load_and_exec_config_or_die(config, "set -eq 0");
   if (use_game_history) {
+    StringBuilder *gcg_builder = string_builder_create();
+    // The phony of IX* should make the X a known tile for the inference of
+    // GRIND
+    string_builder_add_string(gcg_builder, ">Tim: I? 8H Iz +2 2\n");
+    string_builder_add_string(gcg_builder, ">Tim: I? -- -2 0\n");
+    string_builder_add_string(gcg_builder, ">Josh: AAAAAAA -AAAAAAA +0 0\n");
+    string_builder_add_string(gcg_builder, ">Tim: GRIND 8D GRIND +18 18\n");
     load_game_history_with_gcg_string(config, gcg_string_header,
-                                      ">Tim: GRIND? 8D GRIND +18 18");
+                                      string_builder_peek(gcg_builder));
+    string_builder_destroy(gcg_builder);
     status = infer_for_test_with_history(config, inference_results);
   } else {
-    rack_set_to_string(ld, player0_rack, "?");
-    bag_draw_letter(bag, ld_hl_to_ml(ld, "?"), 0);
     status = infer_for_test(config, 0, 18, 0, "GRIND", "?", inference_results);
   }
 
@@ -870,12 +879,18 @@ void test_infer_nonerror_cases(const int number_of_threads,
 
   load_and_exec_config_or_die(config, "set -eq 0");
   if (use_game_history) {
+    StringBuilder *gcg_builder = string_builder_create();
+    // The phony of IH* should make the H a known tile for the inference of
+    // RIN
+    string_builder_add_string(gcg_builder, ">Tim: IH 8H IH +10 10\n");
+    string_builder_add_string(gcg_builder, ">Tim: IH -- -10 0\n");
+    string_builder_add_string(gcg_builder, ">Josh: AAAAAAA -AAAAAAA +0 0\n");
+    string_builder_add_string(gcg_builder, ">Tim: RIN 8G RIN +6 6\n");
     load_game_history_with_gcg_string(config, gcg_string_header,
-                                      ">Tim: HRIN 8D RIN +6 6");
+                                      string_builder_peek(gcg_builder));
+    string_builder_destroy(gcg_builder);
     status = infer_for_test_with_history(config, inference_results);
   } else {
-    rack_set_to_string(ld, player0_rack, "H");
-    bag_draw_letter(bag, ld_hl_to_ml(ld, "H"), 0);
     status = infer_for_test(config, 0, 6, 0, "RIN", "H", inference_results);
   }
 
@@ -907,70 +922,84 @@ void test_infer_nonerror_cases(const int number_of_threads,
                                     mean_rin_leave_value);
 
   // Test exchanges
-  load_cgp_or_die(game, VS_JEREMY);
-  // Take out good letters and throw in bad ones to force certain
-  // racks to have exchange as the best play
-  bag_draw_letter(bag, ld_hl_to_ml(ld, "?"), 0);
-  bag_draw_letter(bag, ld_hl_to_ml(ld, "?"), 0);
-  bag_draw_letter(bag, ld_hl_to_ml(ld, "E"), 0);
-  bag_draw_letter(bag, ld_hl_to_ml(ld, "A"), 0);
-
-  bag_add_letter(bag, ld_hl_to_ml(ld, "Q"), 0);
-  bag_add_letter(bag, ld_hl_to_ml(ld, "W"), 0);
-  bag_add_letter(bag, ld_hl_to_ml(ld, "W"), 0);
-  bag_add_letter(bag, ld_hl_to_ml(ld, "V"), 0);
-  bag_add_letter(bag, ld_hl_to_ml(ld, "V"), 0);
 
   rack_reset(rack);
   load_and_exec_config_or_die(config, "set -eq 0");
   if (use_game_history) {
-    load_game_history_with_gcg_string(config, gcg_string_header,
-                                      ">Tim: EEEEEEE -EEEEEE +0 0");
+    GameHistory *game_history = config_get_game_history(config);
+    test_parse_gcg("exchange_with_seven_in_bag", config, game_history);
     status = infer_for_test_with_history(config, inference_results);
+    assert(status == ERROR_STATUS_SUCCESS);
+    assert(stat_get_num_samples(equity_values) == 10);
+    assert(stat_get_num_unique_samples(equity_values) == 8);
+    // Keeping any one of H, N, or R is valid
+    assert(inference_results_get_subtotal(
+               inference_results, INFERENCE_TYPE_LEAVE, ld_hl_to_ml(ld, "H"), 1,
+               INFERENCE_SUBTOTAL_DRAW) != 0);
+    assert(inference_results_get_subtotal(
+               inference_results, INFERENCE_TYPE_LEAVE, ld_hl_to_ml(ld, "N"), 1,
+               INFERENCE_SUBTOTAL_DRAW) != 0);
+    assert(inference_results_get_subtotal(
+               inference_results, INFERENCE_TYPE_LEAVE, ld_hl_to_ml(ld, "R"), 1,
+               INFERENCE_SUBTOTAL_DRAW) != 0);
   } else {
+    load_cgp_or_die(game, VS_JEREMY);
+    // Take out good letters and throw in bad ones to force certain
+    // racks to have exchange as the best play
+    bag_draw_letter(bag, ld_hl_to_ml(ld, "?"), 0);
+    bag_draw_letter(bag, ld_hl_to_ml(ld, "?"), 0);
+    bag_draw_letter(bag, ld_hl_to_ml(ld, "E"), 0);
+    bag_draw_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+
+    bag_add_letter(bag, ld_hl_to_ml(ld, "Q"), 0);
+    bag_add_letter(bag, ld_hl_to_ml(ld, "W"), 0);
+    bag_add_letter(bag, ld_hl_to_ml(ld, "W"), 0);
+    bag_add_letter(bag, ld_hl_to_ml(ld, "V"), 0);
+    bag_add_letter(bag, ld_hl_to_ml(ld, "V"), 0);
+
     status = infer_for_test(config, 0, 0, 6, "", "", inference_results);
+
+    assert(status == ERROR_STATUS_SUCCESS);
+    // Keeping any one of D, H, R, or S is valid
+    assert(inference_results_get_subtotal(
+               inference_results, INFERENCE_TYPE_LEAVE, ld_hl_to_ml(ld, "D"), 1,
+               INFERENCE_SUBTOTAL_DRAW) != 0);
+    assert(inference_results_get_subtotal(
+               inference_results, INFERENCE_TYPE_LEAVE, ld_hl_to_ml(ld, "H"), 1,
+               INFERENCE_SUBTOTAL_DRAW) != 0);
+    assert(inference_results_get_subtotal(
+               inference_results, INFERENCE_TYPE_LEAVE, ld_hl_to_ml(ld, "R"), 1,
+               INFERENCE_SUBTOTAL_DRAW) != 0);
+    assert(inference_results_get_subtotal(
+               inference_results, INFERENCE_TYPE_LEAVE, ld_hl_to_ml(ld, "S"), 1,
+               INFERENCE_SUBTOTAL_DRAW) != 0);
+
+    // There are exchanges where throwing back at least one
+    // of these is correct
+    assert(inference_results_get_subtotal(
+               inference_results, INFERENCE_TYPE_EXCHANGED,
+               ld_hl_to_ml(ld, "D"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
+    assert(inference_results_get_subtotal(
+               inference_results, INFERENCE_TYPE_EXCHANGED,
+               ld_hl_to_ml(ld, "L"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
+    assert(inference_results_get_subtotal(
+               inference_results, INFERENCE_TYPE_EXCHANGED,
+               ld_hl_to_ml(ld, "Q"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
+    assert(inference_results_get_subtotal(
+               inference_results, INFERENCE_TYPE_EXCHANGED,
+               ld_hl_to_ml(ld, "V"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
+    assert(inference_results_get_subtotal(
+               inference_results, INFERENCE_TYPE_EXCHANGED,
+               ld_hl_to_ml(ld, "W"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
+
+    // Exchanges with the I are never correct
+    assert(inference_results_get_subtotal(
+               inference_results, INFERENCE_TYPE_LEAVE, ld_hl_to_ml(ld, "I"), 1,
+               INFERENCE_SUBTOTAL_DRAW) == 0);
+    assert(inference_results_get_subtotal(
+               inference_results, INFERENCE_TYPE_EXCHANGED,
+               ld_hl_to_ml(ld, "I"), 1, INFERENCE_SUBTOTAL_DRAW) == 0);
   }
-
-  assert(status == ERROR_STATUS_SUCCESS);
-  // Keeping any one of D, H, R, or S is valid
-  assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE,
-                                        ld_hl_to_ml(ld, "D"), 1,
-                                        INFERENCE_SUBTOTAL_DRAW) != 0);
-  assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE,
-                                        ld_hl_to_ml(ld, "H"), 1,
-                                        INFERENCE_SUBTOTAL_DRAW) != 0);
-  assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE,
-                                        ld_hl_to_ml(ld, "R"), 1,
-                                        INFERENCE_SUBTOTAL_DRAW) != 0);
-  assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE,
-                                        ld_hl_to_ml(ld, "S"), 1,
-                                        INFERENCE_SUBTOTAL_DRAW) != 0);
-
-  // There are exchanges where throwing back at least one
-  // of these is correct
-  assert(inference_results_get_subtotal(
-             inference_results, INFERENCE_TYPE_EXCHANGED, ld_hl_to_ml(ld, "D"),
-             1, INFERENCE_SUBTOTAL_DRAW) != 0);
-  assert(inference_results_get_subtotal(
-             inference_results, INFERENCE_TYPE_EXCHANGED, ld_hl_to_ml(ld, "L"),
-             1, INFERENCE_SUBTOTAL_DRAW) != 0);
-  assert(inference_results_get_subtotal(
-             inference_results, INFERENCE_TYPE_EXCHANGED, ld_hl_to_ml(ld, "Q"),
-             1, INFERENCE_SUBTOTAL_DRAW) != 0);
-  assert(inference_results_get_subtotal(
-             inference_results, INFERENCE_TYPE_EXCHANGED, ld_hl_to_ml(ld, "V"),
-             1, INFERENCE_SUBTOTAL_DRAW) != 0);
-  assert(inference_results_get_subtotal(
-             inference_results, INFERENCE_TYPE_EXCHANGED, ld_hl_to_ml(ld, "W"),
-             1, INFERENCE_SUBTOTAL_DRAW) != 0);
-
-  // Exchanges with the I are never correct
-  assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE,
-                                        ld_hl_to_ml(ld, "I"), 1,
-                                        INFERENCE_SUBTOTAL_DRAW) == 0);
-  assert(inference_results_get_subtotal(
-             inference_results, INFERENCE_TYPE_EXCHANGED, ld_hl_to_ml(ld, "I"),
-             1, INFERENCE_SUBTOTAL_DRAW) == 0);
 
   game_reset(game);
 
@@ -981,9 +1010,6 @@ void test_infer_nonerror_cases(const int number_of_threads,
 }
 
 void test_infer(void) {
-  // FIXME: remove
-  test_infer_nonerror_cases(1, true);
-  return;
   test_leave_rack_reset();
   test_trivial_random_probability();
   test_infer_rack_overflow();
@@ -992,6 +1018,7 @@ void test_infer(void) {
   test_infer_exchange_score_not_zero();
   test_infer_exchange_not_board_is_letter_allowed_in_cross_set();
   test_infer_tiles_played_not_in_bag();
+  test_infer_empty_game_history();
   for (int i = 0; i < 1; i++) {
     const bool use_game_history = i == 1;
     test_infer_nonerror_cases(1, use_game_history);

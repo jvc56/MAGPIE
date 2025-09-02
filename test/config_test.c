@@ -246,7 +246,8 @@ void test_config_load_success(void) {
   assert(players_data_get_move_record_type(config_get_players_data(config),
                                            1) == MOVE_RECORD_BEST);
   assert(config_get_bingo_bonus(config) == bingo_bonus);
-  assert(within_epsilon(config_get_equity_margin(config), equity_margin));
+  assert(within_epsilon(equity_to_double(config_get_equity_margin(config)),
+                        equity_margin));
   assert(config_get_num_plays(config) == num_plays);
   assert(config_get_plies(config) == plies);
   assert(config_get_max_iterations(config) == max_iterations);
@@ -295,7 +296,8 @@ void test_config_load_success(void) {
   assert(players_data_get_move_record_type(config_get_players_data(config),
                                            1) == MOVE_RECORD_ALL);
   assert(config_get_bingo_bonus(config) == bingo_bonus);
-  assert(within_epsilon(config_get_equity_margin(config), equity_margin));
+  assert(within_epsilon(equity_to_double(config_get_equity_margin(config)),
+                        equity_margin));
   assert(config_get_num_plays(config) == num_plays);
   assert(config_get_plies(config) == plies);
   assert(config_get_max_iterations(config) == max_iterations);

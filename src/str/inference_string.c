@@ -181,7 +181,7 @@ void string_builder_add_inference(StringBuilder *inference_string,
 
   string_builder_add_formatted_string(
       inference_string, "\nScore:                 %d\n",
-      inference_results_get_target_score(inference_results));
+      equity_to_int(inference_results_get_target_score(inference_results)));
 
   const Rack *target_unplayed_tiles =
       inference_results_get_target_known_unplayed_tiles(inference_results);

@@ -27,8 +27,8 @@ struct InferenceResults {
   // Fields that are finalized at the end of
   // the inference execution
   int target_number_of_tiles_exchanged;
-  int target_score;
-  double equity_margin;
+  Equity target_score;
+  Equity equity_margin;
   Rack target_played_tiles;
   Rack target_known_unplayed_tiles;
   Rack bag_as_rack;
@@ -82,9 +82,9 @@ void inference_results_reset(InferenceResults *results, int move_capacity,
 void inference_results_finalize(const Rack *target_played_tiles,
                                 const Rack *target_known_unplayed_tiles,
                                 const Rack *bag_as_rack,
-                                InferenceResults *results, int target_score,
+                                InferenceResults *results, Equity target_score,
                                 int target_number_of_tiles_exchanged,
-                                double equity_margin) {
+                                Equity equity_margin) {
   results->target_score = target_score;
   results->target_number_of_tiles_exchanged = target_number_of_tiles_exchanged;
   results->equity_margin = equity_margin;
@@ -100,11 +100,11 @@ int inference_results_get_target_number_of_tiles_exchanged(
   return results->target_number_of_tiles_exchanged;
 }
 
-int inference_results_get_target_score(const InferenceResults *results) {
+Equity inference_results_get_target_score(const InferenceResults *results) {
   return results->target_score;
 }
 
-double inference_results_get_equity_margin(const InferenceResults *results) {
+Equity inference_results_get_equity_margin(const InferenceResults *results) {
   return results->equity_margin;
 }
 

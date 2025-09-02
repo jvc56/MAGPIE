@@ -11,7 +11,9 @@
 
 typedef struct Rack {
   // counts must be signed for the sake of inference code checking that
-  // these are nonnegative (ERROR_STATUS_INFERENCE_TILES_NOT_IN_BAG)
+  // these are nonnegative (ERROR_STATUS_INFERENCE_TARGET_LETTERS_NOT_IN_BAG)
+  // FIXME: make array unsigned and change inference code to handle that error
+  // in a better way
   uint16_t number_of_letters;
   uint16_t dist_size;
   int8_t array[MAX_ALPHABET_SIZE];

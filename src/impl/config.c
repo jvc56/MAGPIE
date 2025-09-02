@@ -135,7 +135,7 @@ struct Config {
   int max_iterations;
   int min_play_iterations;
   double stop_cond_pct;
-  double equity_margin;
+  Equity equity_margin;
   Equity max_equity_diff;
   bool use_game_pairs;
   bool human_readable;
@@ -279,7 +279,7 @@ double config_get_stop_cond_pct(const Config *config) {
   return config->stop_cond_pct;
 }
 
-double config_get_equity_margin(const Config *config) {
+Equity config_get_equity_margin(const Config *config) {
   return config->equity_margin;
 }
 
@@ -872,7 +872,7 @@ char *status_sim(Config *config) {
 // Inference
 
 void config_fill_infer_args(const Config *config, bool use_game_history,
-                            int target_index, int target_score,
+                            int target_index, Equity target_score,
                             int target_num_exch, Rack *target_played_tiles,
                             Rack *target_known_rack, InferenceArgs *args) {
   args->target_index = target_index;
@@ -890,7 +890,7 @@ void config_fill_infer_args(const Config *config, bool use_game_history,
 
 // Use target_index < 0 to infer using the game history
 void config_infer(const Config *config, bool use_game_history, int target_index,
-                  int target_score, int target_num_exch,
+                  Equity target_score, int target_num_exch,
                   Rack *target_played_tiles, Rack *target_known_rack,
                   InferenceResults *results, ErrorStack *error_stack) {
   InferenceArgs args;
@@ -957,12 +957,15 @@ void config_infer_with_racks(Config *config, Rack *target_played_tiles,
                        string_duplicate("missing inferred player score"));
       return;
     }
-    string_to_int_or_push_error(
-        "inferred player score", target_score_str, 0, INT_MAX,
-        ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG, &target_score, error_stack);
+    int target_score_int;
+    string_to_int_or_push_error("inferred player score", target_score_str, 0,
+                                INT_MAX,
+                                ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+                                &target_score_int, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
+    target_score = int_to_equity(target_score_int);
   }
 
   config_infer(config, false, target_index, target_score, target_num_exch,
@@ -1773,10 +1776,18 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     }
   }
 
-  config_load_double(config, ARG_TOKEN_EQUITY_MARGIN, 0, 1e100,
-                     &config->equity_margin, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
+  // FIXME: get better names for equity margin and max equity diff
+  const char *new_equity_margin_double =
+      config_get_parg_value(config, ARG_TOKEN_EQUITY_MARGIN, 0);
+  if (new_equity_margin_double) {
+    double equity_margin_double;
+    config_load_double(config, ARG_TOKEN_EQUITY_MARGIN, EQUITY_MIN_DOUBLE,
+                       EQUITY_MAX_DOUBLE, &equity_margin_double, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    assert(!isnan(equity_margin_double));
+    config->equity_margin = double_to_equity(equity_margin_double);
   }
 
   const char *new_max_equity_diff_double =

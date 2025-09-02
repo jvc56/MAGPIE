@@ -29,8 +29,9 @@ typedef struct SimArgs {
   WinPct *win_pcts;
   bool use_inference;
   InferenceResults *inference_results;
+  // FIXME: just use InferenceArgs here
   GameHistory *game_history;
-  double equity_margin;
+  Equity equity_margin;
   ThreadControl *thread_control;
   BAIOptions bai_options;
 } SimArgs;
