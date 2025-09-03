@@ -372,6 +372,7 @@ void assert_config_exec_status(Config *config, const char *cmd,
       printf("config load error types do not match:\nexpected: %d\nactual: "
              "%d\n>%s<\n",
              expected_error_code, load_status, cmd);
+      error_stack_print_and_reset(error_stack);
       abort();
     }
     error_stack_destroy(error_stack);
@@ -384,6 +385,7 @@ void assert_config_exec_status(Config *config, const char *cmd,
     printf("config exec error types do not match:\nexpected: %d\nactual: "
            "%d\n>%s<\n",
            expected_error_code, actual_error_code, cmd);
+    error_stack_print_and_reset(error_stack);
     abort();
   }
   printf("Test passed\n");
