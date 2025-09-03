@@ -9,6 +9,7 @@
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "bai_logger.h"
+#include "inference.h"
 #include <stdint.h>
 
 typedef struct RandomVariables RandomVariables;
@@ -29,9 +30,7 @@ typedef struct SimArgs {
   WinPct *win_pcts;
   bool use_inference;
   InferenceResults *inference_results;
-  // FIXME: just use InferenceArgs here
-  GameHistory *game_history;
-  Equity equity_margin;
+  InferenceArgs inference_args;
   ThreadControl *thread_control;
   BAIOptions bai_options;
 } SimArgs;

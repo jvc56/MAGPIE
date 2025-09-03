@@ -433,6 +433,14 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(config, "gen -numplays 2", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "sim AEIN3R -it 1",
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  assert_config_exec_status(config, "sim AEIN3R -it 1",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  assert_config_exec_status(config, "sim AEIN3R -it 1",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  assert_config_exec_status(config, "sim AEIN3R -it 1",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  assert_config_exec_status(config, "sim AEIN3R -it 1",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   assert_config_exec_status(config, "sim -it 1", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "sim AEINR -it 1", ERROR_STATUS_SUCCESS);
 

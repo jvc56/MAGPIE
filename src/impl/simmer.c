@@ -12,7 +12,7 @@
 #include "random_variable.h"
 #include <stdlib.h>
 
-void simulate(const SimArgs *sim_args, SimResults *sim_results,
+void simulate(SimArgs *sim_args, SimResults *sim_results,
               ErrorStack *error_stack) {
   // The BAI call will reset the thread control.
 
@@ -25,17 +25,8 @@ void simulate(const SimArgs *sim_args, SimResults *sim_results,
 
   if (sim_args->use_inference) {
     // FIXME: reuse inference if it was already computed for this position
-    InferenceArgs infer_args = {
-        .use_game_history = true,
-        .game_history = sim_args->game_history,
-        // FIXME: check if setting this to 0 will work
-        .move_capacity = 0,
-        .equity_margin = sim_args->equity_margin,
-        .game = sim_args->game,
-        .thread_control = sim_args->thread_control,
-    };
     // FIXME: resolve issues in thread control caused by running infer command
-    infer(&infer_args, sim_args->inference_results, error_stack);
+    infer(&sim_args->inference_args, sim_args->inference_results, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }

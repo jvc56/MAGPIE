@@ -600,15 +600,13 @@ void verify_inference_args(const InferenceArgs *args, Game *game_dup,
   for (int i = 0; i < ld_size; i++) {
     bag_letter_counts[i] -= rack_get_letter(nontarget_rack, i);
     if (bag_letter_counts[i] < 0) {
-      // FIXME: trigger this
       StringBuilder *sb = string_builder_create();
       string_builder_add_string(sb, "noninferred player rack letters (");
       string_builder_add_rack(sb, nontarget_rack, game_get_ld(game_dup), false);
       string_builder_add_string(sb, ") not available in the bag");
-      error_stack_push(error_stack,
-                       ERROR_STATUS_INFERENCE_NONTARGET_LETTERS_NOT_IN_BAG,
-                       string_builder_dump(sb, NULL));
+      char *err_msg = string_builder_dump(sb, NULL);
       string_builder_destroy(sb);
+      log_fatal(err_msg);
       return;
     }
   }
@@ -699,8 +697,10 @@ void populate_inference_args_with_game_history(InferenceArgs *args,
   for (int i = last_event_index - 1; i >= 0; i--) {
     GameEvent *event = game_history_get_event(game_history, i);
     if (game_event_get_player_index(event) == args->target_index) {
-      rack_copy(args->target_known_rack,
-                game_event_get_after_event_player_off_turn_rack(event));
+      // FIXME: test this rack_union logic (as opposed to the copy that was
+      // implemented before)
+      rack_union(args->target_known_rack,
+                 game_event_get_after_event_player_off_turn_rack(event));
       break;
     }
   }

@@ -92,6 +92,7 @@ typedef enum {
   ARG_TOKEN_MIN_PLAY_ITERATIONS,
   ARG_TOKEN_USE_GAME_PAIRS,
   ARG_TOKEN_USE_SMALL_PLAYS,
+  ARG_TOKEN_SIM_WITH_INFERENCE,
   ARG_TOKEN_WRITE_BUFFER_SIZE,
   ARG_TOKEN_HUMAN_READABLE,
   ARG_TOKEN_RANDOM_SEED,
@@ -140,6 +141,7 @@ struct Config {
   bool use_game_pairs;
   bool human_readable;
   bool use_small_plays;
+  bool sim_with_inference;
   char *record_filepath;
   double tt_fraction_of_mem;
   int time_limit_seconds;
@@ -781,94 +783,6 @@ void impl_move_gen(Config *config, ErrorStack *error_stack) {
   generate_moves_for_game(&args);
 }
 
-// Sim
-
-void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
-                          SimArgs *sim_args) {
-  sim_args->num_plies = config_get_plies(config);
-  sim_args->move_list = config_get_move_list(config);
-  sim_args->known_opp_rack = known_opp_rack;
-  sim_args->win_pcts = config_get_win_pcts(config);
-  sim_args->use_inference = false;
-  sim_args->inference_results = config->inference_results;
-  sim_args->game_history = config->game_history;
-  sim_args->equity_margin = config->equity_margin;
-  sim_args->thread_control = config->thread_control;
-  sim_args->game = config_get_game(config);
-  sim_args->move_list = config_get_move_list(config);
-  sim_args->bai_options.sample_limit = config_get_max_iterations(config);
-  sim_args->bai_options.sample_minimum = config->min_play_iterations;
-  const double percentile = config_get_stop_cond_pct(config);
-  if (percentile > 100 || config->threshold == BAI_THRESHOLD_NONE) {
-    sim_args->bai_options.threshold = BAI_THRESHOLD_NONE;
-  } else {
-    sim_args->bai_options.delta =
-        1.0 - (config_get_stop_cond_pct(config) / 100.0);
-    sim_args->bai_options.threshold = config->threshold;
-  }
-  sim_args->bai_options.time_limit_seconds =
-      config_get_time_limit_seconds(config);
-  sim_args->bai_options.sampling_rule = config->sampling_rule;
-}
-
-void config_simulate(const Config *config, Rack *known_opp_rack,
-                     SimResults *sim_results, ErrorStack *error_stack) {
-  SimArgs args;
-  config_fill_sim_args(config, known_opp_rack, &args);
-  return simulate(&args, sim_results, error_stack);
-}
-
-void impl_sim(Config *config, ErrorStack *error_stack) {
-  if (!config_has_game_data(config)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-        string_duplicate(
-            "cannot simulate without letter distribution and lexicon"));
-    return;
-  }
-
-  config_init_game(config);
-
-  const char *known_opp_rack_str =
-      config_get_parg_value(config, ARG_TOKEN_SIM, 0);
-  Rack *known_opp_rack = NULL;
-
-  if (known_opp_rack_str) {
-    known_opp_rack = rack_create(ld_get_size(game_get_ld(config->game)));
-    load_rack_or_push_to_error_stack(
-        known_opp_rack_str, game_get_ld(config->game),
-        ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, known_opp_rack,
-        error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      rack_destroy(known_opp_rack);
-      return;
-    }
-  }
-
-  config_simulate(config, known_opp_rack, config->sim_results, error_stack);
-  rack_destroy(known_opp_rack);
-}
-
-char *status_sim(Config *config) {
-  SimResults *sim_results = config->sim_results;
-  if (!sim_results) {
-    return string_duplicate("simmer has not been initialized");
-  }
-  char *status_str = NULL;
-  if (thread_control_is_sim_printable(
-          config->thread_control,
-          sim_results_get_simmed_plays_initialized(sim_results))) {
-    status_str = ucgi_sim_stats(
-        config->game, sim_results,
-        (double)sim_results_get_node_count(sim_results) /
-            thread_control_get_seconds_elapsed(config->thread_control),
-        true);
-  } else {
-    status_str = string_duplicate("simmer status not yet available");
-  }
-  return status_str;
-}
-
 // Inference
 
 void config_fill_infer_args(const Config *config, bool use_game_history,
@@ -900,12 +814,26 @@ void config_infer(const Config *config, bool use_game_history, int target_index,
   return infer(&args, results, error_stack);
 }
 
-void config_infer_with_racks(Config *config, Rack *target_played_tiles,
-                             Rack *target_known_rack, ErrorStack *error_stack) {
+void impl_infer(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate(
+            "cannot infer without letter distribution and lexicon"));
+    return;
+  }
+
+  config_init_game(config);
+  const int ld_size = ld_get_size(game_get_ld(config->game));
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  Rack target_known_rack;
+  rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+
   // FIXME: allow infer to use zero args
   if (config_get_parg_num_set_values(config, ARG_TOKEN_INFER) == 0) {
-    config_infer(config, true, 0, 0, 0, target_played_tiles, target_known_rack,
-                 config->inference_results, error_stack);
+    config_infer(config, true, 0, 0, 0, &target_played_tiles,
+                 &target_known_rack, config->inference_results, error_stack);
     return;
   }
 
@@ -939,7 +867,7 @@ void config_infer_with_racks(Config *config, Rack *target_played_tiles,
     const LetterDistribution *ld = game_get_ld(config->game);
     load_rack_or_push_to_error_stack(
         target_played_tiles_or_num_exch_str, ld,
-        ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, target_played_tiles,
+        ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &target_played_tiles,
         error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
@@ -969,27 +897,100 @@ void config_infer_with_racks(Config *config, Rack *target_played_tiles,
   }
 
   config_infer(config, false, target_index, target_score, target_num_exch,
-               target_played_tiles, target_known_rack,
+               &target_played_tiles, &target_known_rack,
                config->inference_results, error_stack);
 }
 
-void impl_infer(Config *config, ErrorStack *error_stack) {
+// Sim
+
+void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
+                          Rack *target_played_tiles, SimArgs *sim_args) {
+  sim_args->num_plies = config_get_plies(config);
+  sim_args->move_list = config_get_move_list(config);
+  sim_args->known_opp_rack = known_opp_rack;
+  sim_args->win_pcts = config_get_win_pcts(config);
+  sim_args->use_inference = config->sim_with_inference;
+  sim_args->inference_results = config->inference_results;
+  sim_args->thread_control = config->thread_control;
+  sim_args->game = config_get_game(config);
+  sim_args->move_list = config_get_move_list(config);
+  // FIXME: enable sim inferences using data from the last play instead of the
+  // whole history
+  config_fill_infer_args(config, true, 0, 0, 0, target_played_tiles,
+                         known_opp_rack, &sim_args->inference_args);
+  sim_args->bai_options.sample_limit = config_get_max_iterations(config);
+  sim_args->bai_options.sample_minimum = config->min_play_iterations;
+  const double percentile = config_get_stop_cond_pct(config);
+  if (percentile > 100 || config->threshold == BAI_THRESHOLD_NONE) {
+    sim_args->bai_options.threshold = BAI_THRESHOLD_NONE;
+  } else {
+    sim_args->bai_options.delta =
+        1.0 - (config_get_stop_cond_pct(config) / 100.0);
+    sim_args->bai_options.threshold = config->threshold;
+  }
+  sim_args->bai_options.time_limit_seconds =
+      config_get_time_limit_seconds(config);
+  sim_args->bai_options.sampling_rule = config->sampling_rule;
+}
+
+void config_simulate(const Config *config, Rack *known_opp_rack,
+                     SimResults *sim_results, ErrorStack *error_stack) {
+  SimArgs args;
+  const int ld_size = ld_get_size(game_get_ld(config->game));
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  config_fill_sim_args(config, known_opp_rack, &target_played_tiles, &args);
+  return simulate(&args, sim_results, error_stack);
+}
+
+void impl_sim(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
         string_duplicate(
-            "cannot infer without letter distribution and lexicon"));
+            "cannot simulate without letter distribution and lexicon"));
     return;
   }
 
   config_init_game(config);
+
   const int ld_size = ld_get_size(game_get_ld(config->game));
-  Rack target_played_tiles;
-  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
-  Rack target_known_rack;
-  rack_set_dist_size_and_reset(&target_known_rack, ld_size);
-  config_infer_with_racks(config, &target_played_tiles, &target_known_rack,
-                          error_stack);
+  const char *known_opp_rack_str =
+      config_get_parg_value(config, ARG_TOKEN_SIM, 0);
+  Rack known_opp_rack;
+  rack_set_dist_size_and_reset(&known_opp_rack, ld_size);
+
+  if (known_opp_rack_str) {
+    load_rack_or_push_to_error_stack(
+        known_opp_rack_str, game_get_ld(config->game),
+        ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &known_opp_rack,
+        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  config_simulate(config, &known_opp_rack, config->sim_results, error_stack);
+}
+
+char *status_sim(Config *config) {
+  SimResults *sim_results = config->sim_results;
+  if (!sim_results) {
+    return string_duplicate("simmer has not been initialized");
+  }
+  char *status_str = NULL;
+  if (thread_control_is_sim_printable(
+          config->thread_control,
+          sim_results_get_simmed_plays_initialized(sim_results))) {
+    status_str = ucgi_sim_stats(
+        config->game, sim_results,
+        (double)sim_results_get_node_count(sim_results) /
+            thread_control_get_seconds_elapsed(config->thread_control),
+        true);
+  } else {
+    status_str = string_duplicate("simmer status not yet available");
+  }
+  return status_str;
 }
 
 // Autoplay
@@ -1781,8 +1782,8 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       config_get_parg_value(config, ARG_TOKEN_EQUITY_MARGIN, 0);
   if (new_equity_margin_double) {
     double equity_margin_double;
-    config_load_double(config, ARG_TOKEN_EQUITY_MARGIN, EQUITY_MIN_DOUBLE,
-                       EQUITY_MAX_DOUBLE, &equity_margin_double, error_stack);
+    config_load_double(config, ARG_TOKEN_EQUITY_MARGIN, 0, EQUITY_MAX_DOUBLE,
+                       &equity_margin_double, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
@@ -1837,6 +1838,14 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
 
   config_load_bool(config, ARG_TOKEN_USE_SMALL_PLAYS, &config->use_small_plays,
                    error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  // Sim with inference
+
+  config_load_bool(config, ARG_TOKEN_SIM_WITH_INFERENCE,
+                   &config->sim_with_inference, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -2205,6 +2214,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_MAX_EQUITY_DIFF, "maxequitydifference", 1, 1);
   arg(ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1);
   arg(ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1);
+  arg(ARG_TOKEN_SIM_WITH_INFERENCE, "sinfer", 1, 1);
   arg(ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1);
   arg(ARG_TOKEN_WRITE_BUFFER_SIZE, "wb", 1, 1);
   arg(ARG_TOKEN_RANDOM_SEED, "seed", 1, 1);
@@ -2237,6 +2247,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->use_game_pairs = false;
   config->use_small_plays = false;
   config->human_readable = false;
+  config->sim_with_inference = false;
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->ld = NULL;
   config->players_data = players_data_create();
