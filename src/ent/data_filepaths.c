@@ -119,7 +119,6 @@ char *data_filepaths_get_first_valid_filename(const char *data_paths,
         error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
         get_formatted_string("file '%s' not found for data type %s", data_name,
                              filepath_type_names[type]));
-    abort();
     return NULL;
   }
   return ret_val;
