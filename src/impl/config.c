@@ -15,6 +15,7 @@
 #include "../ent/conversion_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/game_history.h"
 #include "../ent/inference_results.h"
 #include "../ent/klv.h"
 #include "../ent/klv_csv.h"
@@ -49,6 +50,7 @@
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 typedef enum {
@@ -1211,7 +1213,10 @@ char *impl_show(Config *config, ErrorStack *error_stack) {
       return empty_string();
     }
 
-    int turn_number = atoi(turn_str);
+    int turn_number = string_to_int(turn_str, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return empty_string();
+    }
     if (turn_number < 0 || turn_number >= game_history_get_number_of_events(
                                               config->game_history)) {
       error_stack_push(
@@ -1254,7 +1259,11 @@ void execute_show(Config *config, ErrorStack *error_stack) {
   }
 
   if (turn_str) {
-    int turn_number = atoi(turn_str);
+    int turn_number = string_to_int(turn_str, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      free(result);
+      return;
+    }
     printf("Game state after turn %d:\n", turn_number);
   }
 

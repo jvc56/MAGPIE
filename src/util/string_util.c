@@ -696,7 +696,7 @@ char *to_lower_case(const char *content) {
   size_t len = strlen(content);
   char *lower_content = (char *)malloc_or_die(len + 1);
   for (size_t i = 0; i < len; ++i) {
-    lower_content[i] = tolower((unsigned char)content[i]);
+    lower_content[i] = (char)tolower((unsigned char)content[i]);
   }
   lower_content[len] = '\0';
   return lower_content;
