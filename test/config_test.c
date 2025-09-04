@@ -557,19 +557,12 @@ void test_config_exec_parse_args(void) {
   Config *config3 = config_create_default_test();
   assert_config_exec_status(config3, "show",
                             ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
-  assert_config_exec_status(config3, "show 10",
-                            ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
   config_destroy(config3);
 
   Config *config4 = config_create_default_test();
   assert_config_exec_status(config4, "load 54938", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config4, "show", ERROR_STATUS_SUCCESS);
   config_destroy(config4);
-
-  Config *config5 = config_create_default_test();
-  assert_config_exec_status(config5, "load 54938", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config5, "show 10", ERROR_STATUS_SUCCESS);
-  config_destroy(config5);
 
   // Next, previous, goto
   Config *config6 = config_create_default_test();

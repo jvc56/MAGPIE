@@ -1194,7 +1194,7 @@ char *str_api_load(Config *config, ErrorStack *error_stack) {
   return impl_load(config, error_stack);
 }
 
-// Show game -- optional argument to show specific move state
+// Show game
 
 char *impl_show(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
@@ -1204,40 +1204,6 @@ char *impl_show(Config *config, ErrorStack *error_stack) {
   }
 
   config_init_game(config);
-
-  // Check if a turn number was provided
-  const char *turn_str = config_get_parg_value(config, ARG_TOKEN_SHOW, 0);
-  if (turn_str) {
-    // Turn number provided - play to that turn first
-    if (!config->game_history) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-          string_duplicate("cannot show specific turn without a loaded game "
-                           "history (use load command first)"));
-      return empty_string();
-    }
-
-    int turn_number = string_to_int(turn_str, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return empty_string();
-    }
-    if (turn_number < 0 || turn_number >= game_history_get_number_of_events(
-                                              config->game_history)) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
-          get_formatted_string(
-              "invalid turn number %d (game has %d events)", turn_number,
-              game_history_get_number_of_events(config->game_history)));
-      return empty_string();
-    }
-
-    // Play to the specified turn
-    game_play_to_turn(config->game_history, config->game, turn_number,
-                      error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return empty_string();
-    }
-  }
 
   // Create string builder to hold the game display
   StringBuilder *game_string = string_builder_create();
@@ -1253,22 +1219,10 @@ char *impl_show(Config *config, ErrorStack *error_stack) {
 }
 
 void execute_show(Config *config, ErrorStack *error_stack) {
-  // Check if a turn number was provided for the printf header
-  const char *turn_str = config_get_parg_value(config, ARG_TOKEN_SHOW, 0);
-
   char *result = impl_show(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     free(result);
     return;
-  }
-
-  if (turn_str) {
-    int turn_number = string_to_int(turn_str, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      free(result);
-      return;
-    }
-    printf("Game state after turn %d:\n", turn_number);
   }
 
   printf("%s\n", result);
@@ -2427,7 +2381,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   cmd(ARG_TOKEN_SET, "setoptions", 0, 0, noop, generic);
   cmd(ARG_TOKEN_CGP, "cgp", 4, 4, cgp_load, generic);
   cmd(ARG_TOKEN_LOAD, "load", 1, 1, load, generic);
-  cmd(ARG_TOKEN_SHOW, "show", 0, 1, show, generic);
+  cmd(ARG_TOKEN_SHOW, "show", 0, 0, show, generic);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic);
   cmd(ARG_TOKEN_RACK, "rack", 2, 2, set_rack, generic);
   cmd(ARG_TOKEN_GEN, "generate", 0, 0, move_gen, generic);
