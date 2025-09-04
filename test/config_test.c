@@ -360,7 +360,6 @@ void test_config_lexical_data(void) {
 
 void assert_config_exec_status(Config *config, const char *cmd,
                                error_code_t expected_error_code) {
-  printf("Beginning test:\n");
   ErrorStack *error_stack = error_stack_create();
   set_thread_control_status_to_start(config_get_thread_control(config));
   config_load_command(config, cmd, error_stack);
@@ -388,7 +387,6 @@ void assert_config_exec_status(Config *config, const char *cmd,
     error_stack_print_and_reset(error_stack);
     abort();
   }
-  printf("Test passed\n");
   error_stack_destroy(error_stack);
 }
 
@@ -572,6 +570,30 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(config5, "load 54938", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config5, "show 10", ERROR_STATUS_SUCCESS);
   config_destroy(config5);
+
+  // Next, previous, goto
+  Config *config6 = config_create_default_test();
+
+  // Failure case: game not loaded
+  assert_config_exec_status(config6, "previous",
+                            ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
+  assert_config_exec_status(config6, "next",
+                            ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
+  assert_config_exec_status(config6, "goto 28",
+                            ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
+
+  // Out-of-range failures and expected success behavior
+  assert_config_exec_status(config6, "load 54938", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(
+      config6, "previous", ERROR_STATUS_CONFIG_LOAD_CURRENT_INDEX_OUT_OF_RANGE);
+  assert_config_exec_status(config6, "next", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(
+      config6, "goto 28", ERROR_STATUS_CONFIG_LOAD_CURRENT_INDEX_OUT_OF_RANGE);
+  assert_config_exec_status(config6, "goto 26", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(
+      config6, "next", ERROR_STATUS_CONFIG_LOAD_CURRENT_INDEX_OUT_OF_RANGE);
+  assert_config_exec_status(config6, "previous", ERROR_STATUS_SUCCESS);
+  config_destroy(config6);
 
   config_destroy(config);
 }

@@ -108,6 +108,9 @@ typedef enum {
   ARG_TOKEN_THRESHOLD,
   ARG_TOKEN_LOAD,
   ARG_TOKEN_SHOW,
+  ARG_TOKEN_NEXT,
+  ARG_TOKEN_PREVIOUS,
+  ARG_TOKEN_GOTO,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -164,6 +167,7 @@ struct Config {
   AutoplayResults *autoplay_results;
   ConversionResults *conversion_results;
   GameHistory *game_history;
+  int current_index;
 };
 
 void parsed_arg_create(Config *config, arg_token_t arg_token, const char *name,
@@ -1275,6 +1279,147 @@ char *str_api_show(Config *config, ErrorStack *error_stack) {
   return impl_show(config, error_stack);
 }
 
+// Game navigation helper and command
+
+void show_turn_from_index(Config *config, ErrorStack *error_stack) {
+  game_play_to_turn(config->game_history, config->game, config->current_index,
+                    error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  execute_show(config, error_stack);
+}
+
+char *impl_next(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot show next without loaded game"));
+    return empty_string();
+  }
+
+  config_init_game(config);
+  int max_events = game_history_get_number_of_events(config->game_history);
+  if (config->current_index < max_events - 1) {
+    config->current_index++;
+    show_turn_from_index(config, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return empty_string();
+    }
+    return string_duplicate("moved to next position");
+  } else {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_CURRENT_INDEX_OUT_OF_RANGE,
+        string_duplicate(
+            "already at latest position; there is no next position"));
+    return empty_string();
+  }
+}
+
+void execute_next(Config *config, ErrorStack *error_stack) {
+  char *result = impl_next(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(result);
+    return;
+  }
+  free(result);
+}
+
+char *str_api_next(Config *config, ErrorStack *error_stack) {
+  return impl_next(config, error_stack);
+}
+
+char *impl_previous(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate("cannot show previous without loaded game"));
+    return empty_string();
+  }
+
+  config_init_game(config);
+  if (config->current_index > 0) {
+    config->current_index--;
+    show_turn_from_index(config, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return empty_string();
+    }
+    return string_duplicate("moved to previous position");
+  } else {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_CURRENT_INDEX_OUT_OF_RANGE,
+        string_duplicate(
+            "already at earliest position; there is no previous position"));
+    return empty_string();
+  }
+}
+
+void execute_previous(Config *config, ErrorStack *error_stack) {
+  char *result = impl_previous(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(result);
+    return;
+  }
+  free(result);
+}
+
+char *str_api_previous(Config *config, ErrorStack *error_stack) {
+  return impl_previous(config, error_stack);
+}
+
+char *impl_goto(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate("cannot show specified turn without loaded game"));
+    return empty_string();
+  }
+
+  const char *turn_index_str = config_get_parg_value(config, ARG_TOKEN_GOTO, 0);
+  if (!turn_index_str) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
+        string_duplicate("missing position argument for goto command"));
+    return empty_string();
+  }
+
+  int turn_index = string_to_int(turn_index_str, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+
+  config_init_game(config);
+  int max_events = game_history_get_number_of_events(config->game_history);
+  if (turn_index >= 0 && turn_index < max_events) {
+    config->current_index = turn_index;
+    show_turn_from_index(config, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return empty_string();
+    }
+    return get_formatted_string("moved to position %d", turn_index);
+  } else {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_CURRENT_INDEX_OUT_OF_RANGE,
+        get_formatted_string(
+            "specified position %d is out of range (must be between 0 and %d)",
+            turn_index, max_events - 1));
+    return empty_string();
+  }
+}
+
+void execute_goto(Config *config, ErrorStack *error_stack) {
+  char *result = impl_goto(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(result);
+    return;
+  }
+  printf("%s\n", result);
+  free(result);
+}
+
+char *str_api_goto(Config *config, ErrorStack *error_stack) {
+  return impl_goto(config, error_stack);
+}
+
 // Config load helpers
 
 void config_load_parsed_args(Config *config,
@@ -2292,6 +2437,9 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic);
   cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic);
   cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic);
+  cmd(ARG_TOKEN_NEXT, "next", 0, 0, next, generic);
+  cmd(ARG_TOKEN_PREVIOUS, "previous", 0, 0, previous, generic);
+  cmd(ARG_TOKEN_GOTO, "goto", 1, 1, goto, generic);
 
   arg(ARG_TOKEN_DATA_PATH, "path", 1, 1);
   arg(ARG_TOKEN_BINGO_BONUS, "bb", 1, 1);
@@ -2367,6 +2515,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->conversion_results = conversion_results_create();
   config->tt_fraction_of_mem = 0.25;
   config->game_history = game_history_create();
+  config->current_index = 0;
 
   autoplay_results_set_players_data(config->autoplay_results,
                                     config->players_data);
