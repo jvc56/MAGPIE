@@ -1253,20 +1253,20 @@ char *impl_next(Config *config, ErrorStack *error_stack) {
 
   config_init_game(config);
   int max_events = game_history_get_number_of_events(config->game_history);
-  if (config->current_index < max_events - 1) {
-    config->current_index++;
-    show_turn_from_index(config, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return empty_string();
-    }
-    return string_duplicate("moved to next position");
-  } else {
+  if (config->current_index >= max_events - 1) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_CURRENT_INDEX_OUT_OF_RANGE,
         string_duplicate(
             "already at latest position; there is no next position"));
     return empty_string();
   }
+
+  config->current_index++;
+  show_turn_from_index(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return string_duplicate("moved to next position");
 }
 
 void execute_next(Config *config, ErrorStack *error_stack) {
@@ -1291,20 +1291,20 @@ char *impl_previous(Config *config, ErrorStack *error_stack) {
   }
 
   config_init_game(config);
-  if (config->current_index > 0) {
-    config->current_index--;
-    show_turn_from_index(config, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return empty_string();
-    }
-    return string_duplicate("moved to previous position");
-  } else {
+  if (config->current_index <= 0) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_CURRENT_INDEX_OUT_OF_RANGE,
         string_duplicate(
             "already at earliest position; there is no previous position"));
     return empty_string();
   }
+
+  config->current_index--;
+  show_turn_from_index(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return string_duplicate("moved to previous position");
 }
 
 void execute_previous(Config *config, ErrorStack *error_stack) {
@@ -1343,14 +1343,7 @@ char *impl_goto(Config *config, ErrorStack *error_stack) {
 
   config_init_game(config);
   int max_events = game_history_get_number_of_events(config->game_history);
-  if (turn_index >= 0 && turn_index < max_events) {
-    config->current_index = turn_index;
-    show_turn_from_index(config, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return empty_string();
-    }
-    return get_formatted_string("moved to position %d", turn_index);
-  } else {
+  if (turn_index < 0 || turn_index >= max_events) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_CURRENT_INDEX_OUT_OF_RANGE,
         get_formatted_string(
@@ -1358,6 +1351,13 @@ char *impl_goto(Config *config, ErrorStack *error_stack) {
             turn_index, max_events - 1));
     return empty_string();
   }
+
+  config->current_index = turn_index;
+  show_turn_from_index(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return get_formatted_string("moved to position %d", turn_index);
 }
 
 void execute_goto(Config *config, ErrorStack *error_stack) {
