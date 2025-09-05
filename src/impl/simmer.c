@@ -14,8 +14,6 @@
 
 void simulate(SimArgs *sim_args, SimResults *sim_results,
               ErrorStack *error_stack) {
-  // The BAI call will reset the thread control.
-
   if (!sim_args->move_list || move_list_get_count(sim_args->move_list) == 0) {
     error_stack_push(error_stack, ERROR_STATUS_SIM_NO_MOVES,
                      string_duplicate("cannot simulate without moves, use the "
@@ -30,6 +28,19 @@ void simulate(SimArgs *sim_args, SimResults *sim_results,
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
+    // A status of THREAD_CONTROL_STATUS_MAX_ITERATIONS is the only normal
+    // exit status for an inference, so any other exit status is an error
+    // or user interrupt, in which case we should not run the sim and return
+    // now.
+    if (thread_control_get_status(sim_args->thread_control) !=
+        THREAD_CONTROL_STATUS_MAX_ITERATIONS) {
+      return;
+    }
+    // FIXME: think of a better way to do this
+    thread_control_set_status(sim_args->thread_control,
+                              THREAD_CONTROL_STATUS_FINISHED);
+    thread_control_set_status(sim_args->thread_control,
+                              THREAD_CONTROL_STATUS_STARTED);
   }
 
   RandomVariablesArgs rv_sim_args = {

@@ -677,7 +677,7 @@ void impl_add_moves(Config *config, ErrorStack *error_stack) {
 
   ValidatedMoves *new_validated_moves =
       validated_moves_create(config->game, player_on_turn_index, moves, true,
-                             false, false, error_stack);
+                             false, true, error_stack);
 
   if (error_stack_is_empty(error_stack)) {
     const LetterDistribution *ld = game_get_ld(config->game);

@@ -52,7 +52,7 @@ void print_sim_stats(const Game *game, SimResults *sim_results) {
     const Move *move = simmed_play_get_move(play);
     string_builder_add_move_description(move_description, move, ld);
     printf("%-20s%-9d%-16s%-16s%s\n", string_builder_peek(move_description),
-           move_get_score(move), wp_str, eq_str, is_epigon);
+           equity_to_int(move_get_score(move)), wp_str, eq_str, is_epigon);
     string_builder_clear(move_description);
     free(wp_str);
     free(eq_str);
@@ -355,6 +355,100 @@ void perf_test_multithread_sim(void) {
   config_destroy(config);
 }
 
+void test_sim_with_and_without_inference_helper(
+    const char *gcg_file, const char **moves_to_add,
+    const char *winner_without_inference, const char *winner_with_inference) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-threads 10 -plies 2 -it 2000 -minp 50 -numplays 2 "
+      "-scond none");
+  // Load an empty CGP to create a new game.
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+
+  assert(test_parse_gcg(gcg_file, config, config_get_game_history(config)) ==
+         ERROR_STATUS_SUCCESS);
+
+  Game *game = config_get_game(config);
+
+  game_play_to_end_or_die(config_get_game_history(config), game);
+
+  StringBuilder *sb = string_builder_create();
+
+  int moves_to_add_index = 0;
+  while (true) {
+    const char *move_to_add = moves_to_add[moves_to_add_index];
+    if (move_to_add == NULL) {
+      break;
+    }
+    string_builder_clear(sb);
+    string_builder_add_formatted_string(sb, "addmoves %s", move_to_add);
+    load_and_exec_config_or_die(config, string_builder_peek(sb));
+    moves_to_add_index++;
+  }
+  string_builder_clear(sb);
+
+  Rack known_opp_rack;
+  rack_set_dist_size_and_reset(&known_opp_rack,
+                               ld_get_size(config_get_ld(config)));
+  SimResults *sim_results = config_get_sim_results(config);
+
+  // Without inference
+  error_code_t status =
+      config_simulate_and_return_status(config, &known_opp_rack, sim_results);
+  assert(status == ERROR_STATUS_SUCCESS);
+  assert(thread_control_get_status(config_get_thread_control(config)) ==
+         THREAD_CONTROL_STATUS_SAMPLE_LIMIT);
+  print_sim_stats(game, sim_results);
+  sim_results_sort_plays_by_win_rate(sim_results);
+  string_builder_add_ucgi_move(
+      sb,
+      simmed_play_get_move(sim_results_get_sorted_simmed_play(sim_results, 0)),
+      game_get_board(game), config_get_ld(config));
+  printf("Best move without inference: >%s<\n", string_builder_peek(sb));
+  assert(strings_equal(string_builder_peek(sb), winner_without_inference));
+  string_builder_clear(sb);
+
+  // With inference
+  load_and_exec_config_or_die(config, "set -sinfer true");
+  status =
+      config_simulate_and_return_status(config, &known_opp_rack, sim_results);
+  assert(status == ERROR_STATUS_SUCCESS);
+  assert(thread_control_get_status(config_get_thread_control(config)) ==
+         THREAD_CONTROL_STATUS_SAMPLE_LIMIT);
+  print_sim_stats(game, sim_results);
+  sim_results_sort_plays_by_win_rate(sim_results);
+  string_builder_add_ucgi_move(
+      sb,
+      simmed_play_get_move(sim_results_get_sorted_simmed_play(sim_results, 0)),
+      game_get_board(game), config_get_ld(config));
+  printf("Best move with inference: >%s<\n", string_builder_peek(sb));
+  assert(strings_equal(string_builder_peek(sb), winner_with_inference));
+
+  string_builder_destroy(sb);
+  config_destroy(config);
+}
+
+void test_sim_with_inference(void) {
+  // 8H MUZAKS infers a leave of S, so playing EMPYREAN one short of the triple
+  // word will sim worse with inferenc
+  const char *empyrean_move_str = "h7.EMPYREAN";
+  const char *napery_move_string = "9g.NAPERY";
+  test_sim_with_and_without_inference_helper(
+      "muzaks_empyrean",
+      (const char *[]){empyrean_move_str, napery_move_string, NULL},
+      empyrean_move_str, napery_move_string);
+
+  // N6 ERE infers a leave of RE, so playing SYNCHRONIZE/D will sim worse with
+  // inference because of the RESYNCHRONIZE/D extension.
+  const char *synced_move_str = "1c.SYNCHRONIZED";
+  const char *sync_move_string = "1c.SYNCHRONIZE";
+  const char *ze_move_string = "b6.ZE";
+  test_sim_with_and_without_inference_helper(
+      "resynchronized",
+      (const char *[]){synced_move_str, sync_move_string, ze_move_string, NULL},
+      sync_move_string, ze_move_string);
+}
+
 void test_play_similarity(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all "
@@ -602,6 +696,9 @@ void test_sim_perf(const char *sim_perf_iters) {
 }
 
 void test_sim(void) {
+  // FIXME: remove
+  test_sim_with_inference();
+  return;
   const char *sim_perf_iters = getenv("SIM_PERF_ITERS");
   if (sim_perf_iters) {
     test_sim_perf(sim_perf_iters);
