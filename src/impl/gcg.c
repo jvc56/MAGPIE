@@ -971,8 +971,6 @@ void play_game_history_turn(GameHistory *game_history, Game *game,
               equity_to_int(player_score_cume)));
       return;
     }
-    game_history_player_set_score(game_history, game_event_player_index,
-                                  game_event_get_cumulative_score(game_event));
     set_after_game_event_racks(game_history, game, game_event_index,
                                known_letters_from_phonies_racks, error_stack);
     if (!error_stack_is_empty(error_stack)) {

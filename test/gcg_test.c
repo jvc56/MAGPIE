@@ -365,12 +365,10 @@ void test_success_standard(GameHistory *game_history) {
                        "standard15"));
   assert(strings_equal(game_history_player_get_nickname(game_history, 0),
                        "HastyBot"));
-  assert(game_history_player_get_score(game_history, 0) == int_to_equity(516));
   assert(racks_are_equal(game_history_player_get_last_rack(game_history, 0),
                          &rack));
   assert(strings_equal(game_history_player_get_nickname(game_history, 1),
                        "RightBehindYou"));
-  assert(game_history_player_get_score(game_history, 1) == int_to_equity(358));
 
   assert(racks_are_equal(game_history_player_get_last_rack(game_history, 1),
                          &rack));

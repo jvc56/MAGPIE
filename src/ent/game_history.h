@@ -92,10 +92,6 @@ void game_history_player_set_nickname(GameHistory *game_history,
                                       int player_index, const char *nickname);
 const char *game_history_player_get_nickname(const GameHistory *game_history,
                                              int player_index);
-void game_history_player_set_score(GameHistory *game_history, int player_index,
-                                   int score);
-Equity game_history_player_get_score(const GameHistory *game_history,
-                                     int player_index);
 Rack *game_history_player_get_last_rack(GameHistory *game_history,
                                         int player_index);
 const Rack *

@@ -149,8 +149,6 @@ int game_event_get_turn_value(const GameEvent *event) {
 typedef struct GameHistoryPlayer {
   char *name;
   char *nickname;
-  // FIXME: is this field needed?
-  Equity score;
   // A dist size of 0 indicates that the rack has not been set
   Rack last_rack;
 } GameHistoryPlayer;
@@ -174,7 +172,6 @@ GameHistoryPlayer *game_history_player_create(const char *name,
   GameHistoryPlayer *player = malloc_or_die(sizeof(GameHistoryPlayer));
   player->name = string_duplicate(name);
   player->nickname = string_duplicate(nickname);
-  player->score = 0;
   return player;
 }
 
@@ -209,17 +206,6 @@ void game_history_player_set_nickname(GameHistory *game_history,
 const char *game_history_player_get_nickname(const GameHistory *game_history,
                                              int player_index) {
   return game_history->players[player_index]->nickname;
-}
-
-void game_history_player_set_score(GameHistory *game_history, int player_index,
-                                   Equity score) {
-  GameHistoryPlayer *player = game_history->players[player_index];
-  player->score = score;
-}
-
-int game_history_player_get_score(const GameHistory *game_history,
-                                  int player_index) {
-  return game_history->players[player_index]->score;
 }
 
 Rack *game_history_player_get_last_rack(GameHistory *game_history,
