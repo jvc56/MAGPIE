@@ -1847,40 +1847,40 @@ void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
   string_builder_destroy(gcg_sb);
 }
 
-char *gcg_next(GameHistory *game_history, Game *game, ErrorStack *error_stack) {
+void gcg_next(GameHistory *game_history, Game *game, ErrorStack *error_stack) {
   int new_index = game_history_next(game_history, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    return string_duplicate("");
+    return;
   }
   game_play_to_turn(game_history, game, new_index, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    return string_duplicate("");
+    return;
   }
-  return string_duplicate("moved to next position");
+  return;
 }
 
-char *gcg_previous(GameHistory *game_history, Game *game,
-                   ErrorStack *error_stack) {
+void gcg_previous(GameHistory *game_history, Game *game,
+                  ErrorStack *error_stack) {
   int new_index = game_history_previous(game_history, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    return string_duplicate("");
+    return;
   }
   game_play_to_turn(game_history, game, new_index, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    return string_duplicate("");
+    return;
   }
-  return string_duplicate("moved to previous position");
+  return;
 }
 
-char *gcg_goto(GameHistory *game_history, Game *game, int index,
-               ErrorStack *error_stack) {
+void gcg_goto(GameHistory *game_history, Game *game, int index,
+              ErrorStack *error_stack) {
   int new_index = game_history_goto(game_history, index, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    return string_duplicate("");
+    return;
   }
   game_play_to_turn(game_history, game, new_index, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    return string_duplicate("");
+    return;
   }
-  return get_formatted_string("moved to position %d", new_index);
+  return;
 }

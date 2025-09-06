@@ -1225,16 +1225,15 @@ char *impl_next(Config *config, ErrorStack *error_stack) {
   }
 
   config_init_game(config);
-  char *result = gcg_next(config->game_history, config->game, error_stack);
+  gcg_next(config->game_history, config->game, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    return result;
+    return empty_string();
   }
   execute_show(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    free(result);
     return empty_string();
   }
-  return result;
+  return empty_string();
 }
 
 void execute_next(Config *config, ErrorStack *error_stack) {
@@ -1258,16 +1257,15 @@ char *impl_previous(Config *config, ErrorStack *error_stack) {
   }
 
   config_init_game(config);
-  char *result = gcg_previous(config->game_history, config->game, error_stack);
+  gcg_previous(config->game_history, config->game, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    return result;
+    return empty_string();
   }
   execute_show(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    free(result);
     return empty_string();
   }
-  return result;
+  return empty_string();
 }
 
 void execute_previous(Config *config, ErrorStack *error_stack) {
@@ -1291,6 +1289,12 @@ char *impl_goto(Config *config, ErrorStack *error_stack) {
   }
 
   const char *turn_index_str = config_get_parg_value(config, ARG_TOKEN_GOTO, 0);
+  if (!turn_index_str) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
+        string_duplicate("missing position argument for goto command"));
+    return empty_string();
+  }
 
   int turn_index = string_to_int(turn_index_str, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -1298,17 +1302,15 @@ char *impl_goto(Config *config, ErrorStack *error_stack) {
   }
 
   config_init_game(config);
-  char *result =
-      gcg_goto(config->game_history, config->game, turn_index, error_stack);
+  gcg_goto(config->game_history, config->game, turn_index, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    return result;
+    return empty_string();
   }
   execute_show(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    free(result);
     return empty_string();
   }
-  return result;
+  return empty_string();
 }
 
 void execute_goto(Config *config, ErrorStack *error_stack) {

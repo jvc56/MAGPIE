@@ -439,10 +439,6 @@ int game_history_get_current_index(const GameHistory *game_history) {
   return game_history->current_index;
 }
 
-void game_history_set_current_index(GameHistory *game_history, int index) {
-  game_history->current_index = index;
-}
-
 int game_history_next(GameHistory *game_history, ErrorStack *error_stack) {
   int max_events = game_history->number_of_events;
   if (game_history->current_index >= max_events - 1) {

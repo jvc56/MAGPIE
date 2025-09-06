@@ -122,7 +122,6 @@ bool game_history_player_is_set(const GameHistory *game_history,
 bool game_history_both_players_are_set(const GameHistory *game_history);
 
 int game_history_get_current_index(const GameHistory *game_history);
-void game_history_set_current_index(GameHistory *game_history, int index);
 int game_history_next(GameHistory *game_history, ErrorStack *error_stack);
 int game_history_previous(GameHistory *game_history, ErrorStack *error_stack);
 int game_history_goto(GameHistory *game_history, int index,
