@@ -17,12 +17,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// Forward function declarations
-void assert_command_status_and_output(Config *config, const char *command,
-                                      bool should_exit, int seconds_to_wait,
-                                      int expected_output_line_count,
-                                      int expected_outerror_line_count);
-
 void test_config_load_error(Config *config, const char *cmd,
                             error_code_t expected_status,
                             ErrorStack *error_stack) {
@@ -577,14 +571,14 @@ void test_config_exec_parse_args(void) {
 
   // Out-of-range failures and expected success behavior
   assert_config_exec_status(config6, "load 54938", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(
-      config6, "previous", ERROR_STATUS_CONFIG_LOAD_CURRENT_INDEX_OUT_OF_RANGE);
+  assert_config_exec_status(config6, "previous",
+                            ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE);
   assert_config_exec_status(config6, "next", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(
-      config6, "goto 28", ERROR_STATUS_CONFIG_LOAD_CURRENT_INDEX_OUT_OF_RANGE);
+  assert_config_exec_status(config6, "goto 28",
+                            ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE);
   assert_config_exec_status(config6, "goto 26", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(
-      config6, "next", ERROR_STATUS_CONFIG_LOAD_CURRENT_INDEX_OUT_OF_RANGE);
+  assert_config_exec_status(config6, "next",
+                            ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE);
   assert_config_exec_status(config6, "previous", ERROR_STATUS_SUCCESS);
   config_destroy(config6);
 

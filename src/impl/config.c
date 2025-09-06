@@ -167,7 +167,6 @@ struct Config {
   AutoplayResults *autoplay_results;
   ConversionResults *conversion_results;
   GameHistory *game_history;
-  int current_index;
 };
 
 void parsed_arg_create(Config *config, arg_token_t arg_token, const char *name,
@@ -1140,34 +1139,22 @@ void impl_create_data(const Config *config, ErrorStack *error_stack) {
 char *impl_load(Config *config, ErrorStack *error_stack) {
   const char *source_identifier =
       config_get_parg_value(config, ARG_TOKEN_LOAD, 0);
-  if (!source_identifier) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
-        string_duplicate("missing source identifier for load command"));
-    return empty_string();
-  }
-  printf("Loaded source identifier successfully\n");
+
   DownloadGCGOptions options = {.source_identifier = source_identifier,
                                 .lexicon = NULL,
                                 .config = config};
 
   download_gcg(&options, config->game_history, error_stack);
-
-  printf("Downloaded GCG\n");
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
-
-  printf("Passed error checks after download\n");
 
   // Load the game history into the current config's game state
   load_config_with_game_history(config->game_history, config, error_stack);
-  printf("Loaded game history into config\n");
+
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
-
-  printf("Passed error checks after loading\n");
 
   // Return game information as a string
   char *result = get_formatted_string(
@@ -1181,12 +1168,10 @@ char *impl_load(Config *config, ErrorStack *error_stack) {
 
 void execute_load(Config *config, ErrorStack *error_stack) {
   char *result = impl_load(config, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    free(result);
-    return;
-  }
 
-  printf("%s\n", result);
+  if (error_stack_is_empty(error_stack)) {
+    printf("%s\n", result);
+  }
   free(result);
 }
 
@@ -1209,10 +1194,10 @@ char *impl_show(Config *config, ErrorStack *error_stack) {
   StringBuilder *game_string = string_builder_create();
 
   // Add the game to the string builder
-  string_builder_add_game(game_string, config->game, config->move_list);
+  string_builder_add_game(game_string, config->game, NULL);
 
   // Get the string and destroy the builder
-  char *result = string_duplicate(string_builder_peek(game_string));
+  char *result = string_builder_dump(game_string, NULL);
   string_builder_destroy(game_string);
 
   return result;
@@ -1220,12 +1205,9 @@ char *impl_show(Config *config, ErrorStack *error_stack) {
 
 void execute_show(Config *config, ErrorStack *error_stack) {
   char *result = impl_show(config, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    free(result);
-    return;
+  if (error_stack_is_empty(error_stack)) {
+    printf("%s\n", result);
   }
-
-  printf("%s\n", result);
   free(result);
 }
 
@@ -1235,15 +1217,6 @@ char *str_api_show(Config *config, ErrorStack *error_stack) {
 
 // Game navigation helper and command
 
-void show_turn_from_index(Config *config, ErrorStack *error_stack) {
-  game_play_to_turn(config->game_history, config->game, config->current_index,
-                    error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  execute_show(config, error_stack);
-}
-
 char *impl_next(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
@@ -1252,28 +1225,22 @@ char *impl_next(Config *config, ErrorStack *error_stack) {
   }
 
   config_init_game(config);
-  int max_events = game_history_get_number_of_events(config->game_history);
-  if (config->current_index >= max_events - 1) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_CURRENT_INDEX_OUT_OF_RANGE,
-        string_duplicate(
-            "already at latest position; there is no next position"));
-    return empty_string();
-  }
-
-  config->current_index++;
-  show_turn_from_index(config, error_stack);
+  char *result = gcg_next(config->game_history, config->game, error_stack);
   if (!error_stack_is_empty(error_stack)) {
+    return result;
+  }
+  execute_show(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(result);
     return empty_string();
   }
-  return string_duplicate("moved to next position");
+  return result;
 }
 
 void execute_next(Config *config, ErrorStack *error_stack) {
   char *result = impl_next(config, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    free(result);
-    return;
+  if (error_stack_is_empty(error_stack)) {
+    printf("%s\n", result);
   }
   free(result);
 }
@@ -1291,27 +1258,22 @@ char *impl_previous(Config *config, ErrorStack *error_stack) {
   }
 
   config_init_game(config);
-  if (config->current_index <= 0) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_CURRENT_INDEX_OUT_OF_RANGE,
-        string_duplicate(
-            "already at earliest position; there is no previous position"));
-    return empty_string();
-  }
-
-  config->current_index--;
-  show_turn_from_index(config, error_stack);
+  char *result = gcg_previous(config->game_history, config->game, error_stack);
   if (!error_stack_is_empty(error_stack)) {
+    return result;
+  }
+  execute_show(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(result);
     return empty_string();
   }
-  return string_duplicate("moved to previous position");
+  return result;
 }
 
 void execute_previous(Config *config, ErrorStack *error_stack) {
   char *result = impl_previous(config, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    free(result);
-    return;
+  if (error_stack_is_empty(error_stack)) {
+    printf("%s\n", result);
   }
   free(result);
 }
@@ -1329,12 +1291,6 @@ char *impl_goto(Config *config, ErrorStack *error_stack) {
   }
 
   const char *turn_index_str = config_get_parg_value(config, ARG_TOKEN_GOTO, 0);
-  if (!turn_index_str) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
-        string_duplicate("missing position argument for goto command"));
-    return empty_string();
-  }
 
   int turn_index = string_to_int(turn_index_str, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -1342,31 +1298,24 @@ char *impl_goto(Config *config, ErrorStack *error_stack) {
   }
 
   config_init_game(config);
-  int max_events = game_history_get_number_of_events(config->game_history);
-  if (turn_index < 0 || turn_index >= max_events) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_CURRENT_INDEX_OUT_OF_RANGE,
-        get_formatted_string(
-            "specified position %d is out of range (must be between 0 and %d)",
-            turn_index, max_events - 1));
-    return empty_string();
-  }
-
-  config->current_index = turn_index;
-  show_turn_from_index(config, error_stack);
+  char *result =
+      gcg_goto(config->game_history, config->game, turn_index, error_stack);
   if (!error_stack_is_empty(error_stack)) {
+    return result;
+  }
+  execute_show(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(result);
     return empty_string();
   }
-  return get_formatted_string("moved to position %d", turn_index);
+  return result;
 }
 
 void execute_goto(Config *config, ErrorStack *error_stack) {
   char *result = impl_goto(config, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    free(result);
-    return;
+  if (error_stack_is_empty(error_stack)) {
+    printf("%s\n", result);
   }
-  printf("%s\n", result);
   free(result);
 }
 
@@ -2469,7 +2418,6 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->conversion_results = conversion_results_create();
   config->tt_fraction_of_mem = 0.25;
   config->game_history = game_history_create();
-  config->current_index = 0;
 
   autoplay_results_set_players_data(config->autoplay_results,
                                     config->players_data);
