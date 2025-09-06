@@ -27,6 +27,7 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/static_eval.h"
+#include "../str/game_string.h"
 #include "../util/io_util.h"
 #include "wmp_move_gen.h"
 #include <assert.h>
@@ -403,8 +404,21 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
 void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   assert(gen != NULL);
   assert(anchor != NULL);
+  gen->max_tiles_to_play = anchor->tiles_to_play;
   printf("Anchor at (%d,%d) dir=%d num_tiles=%d highest_possible_equity=%d\n",
-         anchor->row, anchor->col, anchor->dir, anchor->tiles_to_play, anchor->highest_possible_equity);
+         anchor->row, anchor->col, anchor->dir, anchor->tiles_to_play,
+         anchor->highest_possible_equity);
+  assert(anchor->tiles_to_play <= rack_get_total_letters(&gen->player_rack));
+  WMPMoveGen *wgen = &gen->wmp_move_gen;
+
+  // wmp_move_gen_set_anchor_playthrough returns false if the word length
+  // required for this anchor (tiles_played + num_tiles_played_through)
+  // exceeds BOARD_DIM. It would be better for these anchors never to have
+  // been created, but this prevents us trying to look up words in the WMP
+  // that are longer than BOARD_DIM, which is not supported.
+  if (!wmp_move_gen_set_anchor_playthrough(wgen, anchor, gen->row_cache)) {
+    return;
+  }
 }
 
 bool go_on(MoveGen *gen, int current_col, MachineLetter L,
@@ -1074,12 +1088,14 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
     if (cross_set == TRIVIAL_CROSS_SET) {
       is_unique = true;
     }
+    bool found_playthrough_tile = false;
     while (gen->current_right_col + 1 < BOARD_DIM) {
       const MachineLetter next_letter =
           gen_cache_get_letter(gen, gen->current_right_col + 1);
       if (next_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
         break;
       }
+      found_playthrough_tile = true;
       const MachineLetter unblanked_playthrough_ml =
           get_unblanked_machine_letter(next_letter);
       rack_add_letter(&gen->bingo_alpha_rack, unblanked_playthrough_ml);
@@ -1091,6 +1107,12 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
       }
       gen->shadow_mainword_restricted_score += gen->tile_scores[next_letter];
       gen->current_right_col++;
+    }
+
+    if (wmp_move_gen_is_active(&gen->wmp_move_gen) && found_playthrough_tile) {
+      // wmp_move_gen_print_playthrough(&gen->wmp_move_gen);
+      // printf("incrementing blocks in shadow_play_right\n");
+      wmp_move_gen_increment_playthrough_blocks(&gen->wmp_move_gen);
     }
 
     if (play_is_nonempty_and_nonduplicate(gen->tiles_played, is_unique)) {
@@ -1305,6 +1327,11 @@ static inline void shadow_start_playthrough(MoveGen *gen,
       break;
     }
   }
+  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    // wmp_move_gen_print_playthrough(&gen->wmp_move_gen);
+    // printf("incrementing blocks in shadow_start_playthrough\n");
+    wmp_move_gen_increment_playthrough_blocks(&gen->wmp_move_gen);
+  }
   playthrough_shadow_play_left(gen, !board_is_dir_vertical(gen->dir));
 }
 
@@ -1375,8 +1402,8 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   gen->shadow_word_multiplier = 1;
 
   // Reset shadow equity/score
-  gen->highest_shadow_equity = 0;
-  gen->highest_shadow_score = 0;
+  gen->highest_shadow_equity = EQUITY_INITIAL_VALUE;
+  gen->highest_shadow_score = EQUITY_INITIAL_VALUE;
 
   // Set the number of letters
   gen->number_of_letters_on_rack = rack_get_total_letters(&gen->player_rack);
@@ -1388,6 +1415,7 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   gen->tiles_played = 0;
   gen->max_tiles_to_play = 0;
   wmp_move_gen_reset_playthrough(&gen->wmp_move_gen);
+  wmp_move_gen_reset_anchors(&gen->wmp_move_gen);
 
   shadow_start(gen);
   if (gen->max_tiles_to_play == 0) {
@@ -1645,6 +1673,10 @@ void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen(args->thread_index);
   gen_load_position(gen, args);
   printf("Generating moves for player %d\n", gen->player_index);
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_game(sb, args->game, NULL);
+  printf("%s", string_builder_peek(sb));
+  string_builder_destroy(sb);
   gen_look_up_leaves_and_record_exchanges(gen);
 
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {

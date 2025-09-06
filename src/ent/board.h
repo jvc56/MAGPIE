@@ -150,7 +150,7 @@ static inline int get_square_index(int transposed, int row, int col, int dir,
 
   int row_offset = 0;
   int col_offset = 0;
-  // If the direction is vertical, we need to switch the
+  // If the direction is vertical, we need to swit≈ch the
   // row and col so that the cols in the vertical board
   // are stored in continuous memory, which allows the
   // movegen to access those columns in a memory-compact
