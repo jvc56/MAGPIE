@@ -1853,10 +1853,6 @@ void gcg_next(GameHistory *game_history, Game *game, ErrorStack *error_stack) {
     return;
   }
   game_play_to_turn(game_history, game, new_index, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  return;
 }
 
 void gcg_previous(GameHistory *game_history, Game *game,
@@ -1866,10 +1862,6 @@ void gcg_previous(GameHistory *game_history, Game *game,
     return;
   }
   game_play_to_turn(game_history, game, new_index, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  return;
 }
 
 void gcg_goto(GameHistory *game_history, Game *game, int index,
@@ -1879,8 +1871,4 @@ void gcg_goto(GameHistory *game_history, Game *game, int index,
     return;
   }
   game_play_to_turn(game_history, game, new_index, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  return;
 }
