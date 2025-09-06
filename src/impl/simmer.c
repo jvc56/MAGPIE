@@ -23,24 +23,12 @@ void simulate(SimArgs *sim_args, SimResults *sim_results,
 
   if (sim_args->use_inference) {
     // FIXME: reuse inference if it was already computed for this position
-    // FIXME: resolve issues in thread control caused by running infer command
     infer(&sim_args->inference_args, sim_args->inference_results, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
+    if (!error_stack_is_empty(error_stack) ||
+        thread_control_get_status(sim_args->thread_control) !=
+            THREAD_CONTROL_STATUS_STARTED) {
       return;
     }
-    // A status of THREAD_CONTROL_STATUS_MAX_ITERATIONS is the only normal
-    // exit status for an inference, so any other exit status is an error
-    // or user interrupt, in which case we should not run the sim and return
-    // now.
-    if (thread_control_get_status(sim_args->thread_control) !=
-        THREAD_CONTROL_STATUS_MAX_ITERATIONS) {
-      return;
-    }
-    // FIXME: think of a better way to do this
-    thread_control_set_status(sim_args->thread_control,
-                              THREAD_CONTROL_STATUS_FINISHED);
-    thread_control_set_status(sim_args->thread_control,
-                              THREAD_CONTROL_STATUS_STARTED);
   }
 
   RandomVariablesArgs rv_sim_args = {

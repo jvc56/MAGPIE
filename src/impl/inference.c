@@ -451,7 +451,8 @@ void set_shared_variables_for_inference(
   inference->shared_rack_index_lock = shared_rack_index_lock;
 }
 
-void infer_manager(ThreadControl *thread_control, Inference *inference) {
+void infer_manager(ThreadControl *thread_control, Inference *inference,
+                   bool update_thread_control_status) {
   uint64_t total_racks_evaluated = 0;
 
   get_total_racks_evaluated(
@@ -513,8 +514,10 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
 
   // Infer was able to finish normally, which is when it
   // iterates through every rack
-  thread_control_set_status(thread_control,
-                            THREAD_CONTROL_STATUS_MAX_ITERATIONS);
+  if (update_thread_control_status) {
+    thread_control_set_status(thread_control,
+                              THREAD_CONTROL_STATUS_MAX_ITERATIONS);
+  }
 
   stats_combine(leave_stats, number_of_threads,
                 inference_results_get_equity_values(inference->results,
@@ -740,7 +743,8 @@ void infer_with_game_duplicate(InferenceArgs *args, Game *game_dup,
                        args->target_score, args->target_num_exch,
                        args->equity_margin, &nontarget_current_rack, results);
 
-  infer_manager(args->thread_control, inference);
+  infer_manager(args->thread_control, inference,
+                args->update_thread_control_status);
 
   inference_results_finalize(
       args->target_played_tiles, inference->current_target_leave,
@@ -749,9 +753,10 @@ void infer_with_game_duplicate(InferenceArgs *args, Game *game_dup,
 
   if (thread_control_get_status(args->thread_control) ==
       THREAD_CONTROL_STATUS_MAX_ITERATIONS) {
-    // Only print if infer was able to finish normally.
-    // If thread_control_set_status status isn't max iterations, it was
-    // interrupted by the user and the results will not be valid.
+    // Only print if infer was able to finish normally and the thread control
+    // status was updated. If thread_control_set_status status isn't max
+    // iterations, it was interrupted by the user or it is part of a simulation
+    // and the results should not be printed.
     print_ucgi_inference(game_get_ld(inference->game), inference->results,
                          args->thread_control);
   }

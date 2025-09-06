@@ -696,9 +696,6 @@ void test_sim_perf(const char *sim_perf_iters) {
 }
 
 void test_sim(void) {
-  // FIXME: remove
-  test_sim_with_inference();
-  return;
   const char *sim_perf_iters = getenv("SIM_PERF_ITERS");
   if (sim_perf_iters) {
     test_sim_perf(sim_perf_iters);
@@ -713,6 +710,7 @@ void test_sim(void) {
     test_more_iterations();
     test_play_similarity();
     perf_test_multithread_sim();
+    test_sim_with_inference();
     test_sim_round_robin_consistency();
     test_sim_top_two_consistency();
   }

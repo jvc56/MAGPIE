@@ -798,6 +798,7 @@ void config_fill_infer_args(const Config *config, bool use_game_history,
   args->target_known_rack = target_known_rack;
   args->use_game_history = use_game_history;
   args->game_history = config->game_history;
+  args->update_thread_control_status = true;
   args->game = config_get_game(config);
   args->thread_control = config->thread_control;
 }
@@ -918,6 +919,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   // whole history
   config_fill_infer_args(config, true, 0, 0, 0, target_played_tiles,
                          known_opp_rack, &sim_args->inference_args);
+  sim_args->inference_args.update_thread_control_status = false;
   sim_args->bai_options.sample_limit = config_get_max_iterations(config);
   sim_args->bai_options.sample_minimum = config->min_play_iterations;
   const double percentile = config_get_stop_cond_pct(config);
