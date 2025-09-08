@@ -53,8 +53,11 @@ typedef struct WMPMoveGen {
   int playthrough_blocks;
   int playthrough_blocks_copy;
 
+  uint8_t buffer[WMP_RESULT_BUFFER_SIZE];
   int tiles_to_play;
   int word_length;
+  int num_words;
+  Equity leave_value;
 } WMPMoveGen;
 
 static inline void wmp_move_gen_reset_anchors(WMPMoveGen *wmp_move_gen) {
@@ -501,6 +504,86 @@ wmp_move_gen_set_anchor_playthrough(WMPMoveGen *wmp_move_gen,
   return true;
 }
 
+static inline int
+wmp_move_gen_get_num_subrack_combinations(const WMPMoveGen *wmp_move_gen) {
+  return wmp_move_gen->count_by_size[wmp_move_gen->tiles_to_play];
+}
+
+static inline const BitRack *
+wmp_move_gen_get_nonplaythrough_subrack(const WMPMoveGen *wmp_move_gen,
+                                        int idx_for_size) {
+  const int offset =
+      subracks_get_combination_offset(wmp_move_gen->tiles_to_play);
+  return &wmp_move_gen->nonplaythrough_infos[offset + idx_for_size].subrack;
+}
+
+static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen,
+                                                  int idx_for_size) {
+  //printf("wmp_move_gen_get_subrack_words\n");
+  /*
+      for (int size = 1; size <= wmp_move_gen->full_rack_size; size++) {
+        const int offset = subracks_get_combination_offset(size);
+        const int count = wmp_move_gen->count_by_size[size];
+        for (int idx = 0; idx < count; idx++) {
+          SubrackInfo *subrack_info =
+              &wmp_move_gen->nonplaythrough_infos[offset + idx];
+          for (int i = 0; i < 32; i++) {
+            for (int j = 0; j < bit_rack_get_letter(&subrack_info->subrack, i);
+                 j++) {
+              char c = '?';
+              if (i > 0) {
+                c = 'A' + i - 1;
+              }
+              printf("%c", c);
+            }
+          }
+          printf("\n");
+        }
+      }
+  */
+  //printf("getting subrack words for size %d (idx %d)\n",
+  //       wmp_move_gen->tiles_to_play, idx_for_size);
+  const int offset =
+      subracks_get_combination_offset(wmp_move_gen->tiles_to_play);
+  const int subrack_idx = offset + idx_for_size;
+  // printf("subrack_idx: %d\n", subrack_idx);
+  const bool is_playthrough = wmp_move_gen->num_tiles_played_through > 0;
+  // printf("is_playthrough: %d\n", is_playthrough);
+  SubrackInfo *subrack_info =
+      is_playthrough ? &wmp_move_gen->playthrough_infos[subrack_idx]
+                     : &wmp_move_gen->nonplaythrough_infos[subrack_idx];
+  // Nonplaythrough subracks' wmp entries were already looked up during shadow.
+  if (is_playthrough) {
+    subrack_info->wmp_entry = wmp_get_word_entry(
+        wmp_move_gen->wmp, &subrack_info->subrack, wmp_move_gen->word_length);
+  }
+
+/*
+  printf("subrack_info's bitrack: ");
+  for (int i = 0; i < 32; i++) {
+    for (int j = 0; j < bit_rack_get_letter(&subrack_info->subrack, i); j++) {
+      char c = '?';
+      if (i > 0) {
+        c = 'A' + i - 1;
+      }
+      printf("%c", c);
+    }
+  }
+  printf("\n");
+*/
+
+  if (subrack_info->wmp_entry == NULL) {
+    return false;
+  }
+  const int result_bytes = wmp_entry_write_words_to_buffer(
+      subrack_info->wmp_entry, wmp_move_gen->wmp, &subrack_info->subrack,
+      wmp_move_gen->word_length, wmp_move_gen->buffer);
+  assert(result_bytes > 0);
+  assert(result_bytes % wmp_move_gen->word_length == 0);
+  wmp_move_gen->num_words = result_bytes / wmp_move_gen->word_length;
+  return true;
+}
+
 static inline void wmp_move_gen_add_anchors(WMPMoveGen *wmp_move_gen, int row,
                                             int col, int last_anchor_col,
                                             int dir, AnchorHeap *anchor_heap) {
@@ -520,5 +603,22 @@ static inline void wmp_move_gen_add_anchors(WMPMoveGen *wmp_move_gen, int row,
           anchor->tiles_to_play, anchor->playthrough_blocks);
     }
   }
+}
+
+static inline const uint8_t *
+wmp_move_gen_get_word(const WMPMoveGen *wmp_move_gen, int word_idx) {
+  return wmp_move_gen->buffer + word_idx * wmp_move_gen->word_length;
+}
+
+static inline double
+wmp_move_gen_get_leave_value(WMPMoveGen *wmp_move_gen, int subrack_idx) {
+  const int offset =
+      subracks_get_combination_offset(wmp_move_gen->tiles_to_play);
+  const SubrackInfo *subrack_info =
+      &wmp_move_gen->nonplaythrough_infos[offset + subrack_idx];
+  //printf("wmp_move_gen_get_leave subrack_idx: %d, leave_value: %f\n",
+  //       subrack_idx, subrack_info->leave_value);
+  wmp_move_gen->leave_value = subrack_info->leave_value;
+  return wmp_move_gen->leave_value;
 }
 #endif

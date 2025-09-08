@@ -118,6 +118,13 @@ typedef struct MoveGen {
   MoveList *move_list;
 
   WMPMoveGen wmp_move_gen;
+  // Number of playthrough blocks used by the by current move of recursive_gen
+  // given the rightmost column of the move. Set per anchor because it depends
+  // on the anchor column.
+  uint8_t num_playthrough_blocks[BOARD_DIM];
+  uint8_t max_playthrough_blocks;
+  // Used by wordmap_gen to prepare WMP-generated plays for recording.
+  uint8_t playthrough_marked[BOARD_DIM];
 } MoveGen;
 
 typedef struct MoveGenArgs {
