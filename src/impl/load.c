@@ -244,10 +244,10 @@ char *get_local_gcg_string(const char *identifier, ErrorStack *error_stack) {
   return gcg_content;
 }
 
-char *get_gcg_string(const DownloadGCGOptions *options,
+char *get_gcg_string(const DownloadGCGArgs *download_args,
                      ErrorStack *error_stack) {
 
-  const char *identifier = options->source_identifier;
+  const char *identifier = download_args->source_identifier;
 
   // Try cross-tables first
   char *gcg_string = get_xt_gcg_string(identifier, error_stack);
@@ -289,20 +289,21 @@ char *get_gcg_string(const DownloadGCGOptions *options,
   error_stack_push(
       error_stack, ERROR_STATUS_BAD_GCG_SOURCE,
       get_formatted_string("Could not load GCG from any source: %s",
-                           options->source_identifier));
+                           download_args->source_identifier));
   return NULL;
 }
 
-void download_gcg(const DownloadGCGOptions *options, GameHistory *game_history,
-                  ErrorStack *error_stack) {
+void download_gcg(const DownloadGCGArgs *download_args,
+                  GameHistory *game_history, ErrorStack *error_stack) {
 
   // Get the GCG content from any available source
-  char *gcg_content = get_gcg_string(options, error_stack);
+  char *gcg_content = get_gcg_string(download_args, error_stack);
   if (!gcg_content) {
     return; // Error already pushed to stack by get_gcg_string
   }
   // Parse the GCG content using the provided parser
-  parse_gcg_string(gcg_content, options->config, game_history, error_stack);
+  parse_gcg_string(gcg_content, download_args->config, game_history,
+                   error_stack);
   // Clean up
   free(gcg_content);
 }

@@ -18,10 +18,9 @@ void validate_download_gcg(const char *source_identifier,
       "set -lex CSW21 -s1 score -s2 score -r1 all -r2 all -numplays 1");
 
   printf("Testing with identifier: %s\n", source_identifier);
-  DownloadGCGOptions options = {.source_identifier = source_identifier,
-                                .lexicon = NULL,
-                                .config = config};
-  download_gcg(&options, game_history, error_stack);
+  DownloadGCGArgs download_args = {.source_identifier = source_identifier,
+                                   .config = config};
+  download_gcg(&download_args, game_history, error_stack);
 
   if (expected_error == ERROR_STATUS_SUCCESS) {
     if (!error_stack_is_empty(error_stack)) {

@@ -440,8 +440,7 @@ int game_history_get_current_index(const GameHistory *game_history) {
 }
 
 int game_history_next(GameHistory *game_history, ErrorStack *error_stack) {
-  int max_events = game_history->number_of_events;
-  if (game_history->current_index >= max_events - 1) {
+  if (game_history->current_index >= game_history->number_of_events - 1) {
     error_stack_push(
         error_stack, ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE,
         string_duplicate(
@@ -466,13 +465,12 @@ int game_history_previous(GameHistory *game_history, ErrorStack *error_stack) {
 
 int game_history_goto(GameHistory *game_history, int index,
                       ErrorStack *error_stack) {
-  int max_events = game_history->number_of_events;
-  if (index < 0 || index >= max_events) {
+  if (index < 0 || index >= game_history->number_of_events) {
     error_stack_push(
         error_stack, ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE,
         get_formatted_string(
             "position %d is out of range; the latest position is %d", index,
-            max_events - 1));
+            game_history->number_of_events - 1));
     return -1;
   }
   game_history->current_index = index;

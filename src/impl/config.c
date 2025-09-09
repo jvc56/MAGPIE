@@ -1140,18 +1140,10 @@ char *impl_load(Config *config, ErrorStack *error_stack) {
   const char *source_identifier =
       config_get_parg_value(config, ARG_TOKEN_LOAD, 0);
 
-  DownloadGCGOptions options = {.source_identifier = source_identifier,
-                                .lexicon = NULL,
-                                .config = config};
+  DownloadGCGArgs download_args = {.source_identifier = source_identifier,
+                                   .config = config};
 
-  download_gcg(&options, config->game_history, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return empty_string();
-  }
-
-  // Load the game history into the current config's game state
-  load_config_with_game_history(config->game_history, config, error_stack);
-
+  download_gcg(&download_args, config->game_history, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
@@ -1289,14 +1281,7 @@ char *impl_goto(Config *config, ErrorStack *error_stack) {
   }
 
   const char *turn_index_str = config_get_parg_value(config, ARG_TOKEN_GOTO, 0);
-  if (!turn_index_str) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
-        string_duplicate("missing position argument for goto command"));
-    return empty_string();
-  }
-
-  int turn_index = string_to_int(turn_index_str, error_stack);
+  const int turn_index = string_to_int(turn_index_str, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
