@@ -21,6 +21,7 @@
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
 #include "../ent/xoshiro.h"
+#include "../str/move_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
@@ -452,6 +453,20 @@ void play_autoplay_game_or_game_pair(
     if (!games_are_divergent &&
         (!move1 || !move2 ||
          compare_moves_without_equity(move1, move2, true) != -1)) {
+      printf("divergent moves, move1: ");
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_move(sb, game_get_board(game_runner1->game), move1,
+                              game_get_ld(game_runner1->game));
+      printf("%s", string_builder_peek(sb));
+      string_builder_destroy(sb);
+      printf(" (equity: %f) vs move2: ",
+             equity_to_double(move_get_equity(move1)));
+      sb = string_builder_create();
+      string_builder_add_move(sb, game_get_board(game_runner2->game), move2,
+                              game_get_ld(game_runner2->game));
+      printf("%s (equity: %f)\n", string_builder_peek(sb),
+             equity_to_double(move_get_equity(move2)));
+      string_builder_destroy(sb);
       games_are_divergent = true;
     }
   }

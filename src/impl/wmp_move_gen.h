@@ -15,7 +15,6 @@
 
 enum {
   MAX_POSSIBLE_PLAYTHROUGH_BLOCKS = ((BOARD_DIM / 2) + 1),
-  MIN_TILES_FOR_WMP_GEN = 2,
   MAX_WMP_MOVE_GEN_ANCHORS =
       ((RACK_SIZE + 1) * MAX_POSSIBLE_PLAYTHROUGH_BLOCKS),
 };
@@ -292,9 +291,6 @@ static inline void wmp_move_gen_reset_playthrough(WMPMoveGen *wmp_move_gen) {
 
 static inline int wmp_move_gen_anchor_index(int playthrough_blocks,
                                             int tiles_played) {
-  if (tiles_played < MIN_TILES_FOR_WMP_GEN) {
-    return 0;
-  }
   return playthrough_blocks * (RACK_SIZE + 1) + tiles_played;
 }
 
