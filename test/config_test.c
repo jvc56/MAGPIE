@@ -540,7 +540,7 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(
       config2, "load", ERROR_STATUS_CONFIG_LOAD_INSUFFICIENT_NUMBER_OF_VALUES);
   assert_config_exec_status(config2, "load sheets.google.com",
-                            ERROR_STATUS_BAD_GCG_SOURCE);
+                            ERROR_STATUS_GCG_PARSE_NO_MATCHING_TOKEN);
   assert_config_exec_status(config2, "load 54673",
                             ERROR_STATUS_GCG_PARSE_LEXICON_NOT_SPECIFIED);
   assert_config_exec_status(config2, "load 54938", ERROR_STATUS_SUCCESS);

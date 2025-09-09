@@ -67,6 +67,7 @@ bool strings_equal(const char *str1, const char *str2);
 bool strings_iequal(const char *str1, const char *str2);
 bool is_all_digits_or_empty(const char *str);
 bool has_substring(const char *str, const char *pattern);
+bool is_url(const char *content);
 size_t string_length(const char *str);
 
 // Malloc'ing string functions
@@ -95,5 +96,4 @@ double string_to_double(const char *str, ErrorStack *error_stack);
 // JSON utilities
 char *json_unescape_string(const char *json_string);
 char *get_process_output(const char *cmd);
-bool is_valid_gcg_content(const char *content);
 #endif
