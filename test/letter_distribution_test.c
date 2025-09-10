@@ -25,6 +25,8 @@ void test_ld_score_order(void) {
 void test_ld_str_to_mls(void) {
   Config *nwl_config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
+  // Test case insensitive letter distribution loading
+  load_and_exec_config_or_die(nwl_config, "set -ld EnGlIsH");
   const LetterDistribution *english_ld = config_get_ld(nwl_config);
 
   Config *disc_config = config_create_or_die(

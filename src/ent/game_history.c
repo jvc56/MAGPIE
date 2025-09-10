@@ -161,6 +161,7 @@ struct GameHistory {
   char *lexicon_name;
   char *ld_name;
   char *board_layout_name;
+  int current_index;
   game_variant_t game_variant;
   GameHistoryPlayer *players[2];
   int number_of_events;
@@ -340,6 +341,7 @@ void game_history_reset(GameHistory *game_history) {
   }
   game_history->game_variant = GAME_VARIANT_CLASSIC;
   game_history->number_of_events = 0;
+  game_history->current_index = 0;
 }
 
 GameHistory *game_history_create(void) {
@@ -383,6 +385,48 @@ GameEvent *game_history_create_and_add_game_event(GameHistory *game_history,
       &game_history->events[game_history->number_of_events++];
   game_event_reset(game_event);
   return game_event;
+}
+
+int game_history_get_current_index(const GameHistory *game_history) {
+  return game_history->current_index;
+}
+
+int game_history_next(GameHistory *game_history, ErrorStack *error_stack) {
+  if (game_history->current_index >= game_history->number_of_events - 1) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE,
+        string_duplicate(
+            "already at latest position; there is no next position"));
+    return -1;
+  }
+  game_history->current_index++;
+  return game_history->current_index;
+}
+
+int game_history_previous(GameHistory *game_history, ErrorStack *error_stack) {
+  if (game_history->current_index <= 0) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE,
+        string_duplicate(
+            "already at earliest position; there is no previous position"));
+    return -1;
+  }
+  game_history->current_index--;
+  return game_history->current_index;
+}
+
+int game_history_goto(GameHistory *game_history, int index,
+                      ErrorStack *error_stack) {
+  if (index < 0 || index >= game_history->number_of_events) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE,
+        get_formatted_string(
+            "position %d is out of range; the latest position is %d", index,
+            game_history->number_of_events - 1));
+    return -1;
+  }
+  game_history->current_index = index;
+  return game_history->current_index;
 }
 
 int game_history_get_last_move_event_index(const GameHistory *game_history) {

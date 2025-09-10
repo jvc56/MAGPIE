@@ -512,6 +512,10 @@ bool has_substring(const char *str, const char *pattern) {
   return (ptr != NULL);
 }
 
+bool is_url(const char *content) {
+  return strstr(content, "://") != NULL || strstr(content, ".com") != NULL;
+}
+
 size_t string_length(const char *str) {
   if (!str) {
     log_fatal("cannot get the length of a null string");
@@ -689,6 +693,19 @@ char *insert_before_dot(const char *str, const char *insert) {
   return new_str;
 }
 
+char *to_lower_case(const char *content) {
+  if (!content) {
+    return NULL;
+  }
+  size_t len = strlen(content);
+  char *lower_content = (char *)malloc_or_die(len + 1);
+  for (size_t i = 0; i < len; ++i) {
+    lower_content[i] = (char)tolower((unsigned char)content[i]);
+  }
+  lower_content[len] = '\0';
+  return lower_content;
+}
+
 const char *get_base_filename(const char *filepath) {
   // Find the last occurrence of the Unix directory separator
   const char *base_filename_unix = strrchr(filepath, '/');
@@ -801,4 +818,81 @@ double string_to_double(const char *str, ErrorStack *error_stack) {
     result = 0;
   }
   return result;
+}
+
+char *json_unescape_string(const char *json_string) {
+  size_t input_len = string_length(json_string);
+  char *unescaped = malloc_or_die(input_len + 1);
+  char *dst = unescaped;
+  const char *src = json_string;
+
+  while (*src) {
+    if (*src == '\\' && *(src + 1)) {
+      switch (*(src + 1)) {
+      case 'n':
+        *dst++ = '\n';
+        src += 2;
+        break;
+      case 't':
+        *dst++ = '\t';
+        src += 2;
+        break;
+      case 'r':
+        *dst++ = '\r';
+        src += 2;
+        break;
+      case '\\':
+        *dst++ = '\\';
+        src += 2;
+        break;
+      case '"':
+        *dst++ = '"';
+        src += 2;
+        break;
+      case '/':
+        *dst++ = '/';
+        src += 2;
+        break;
+      case 'b':
+        *dst++ = '\b';
+        src += 2;
+        break;
+      case 'f':
+        *dst++ = '\f';
+        src += 2;
+        break;
+      default:
+        *dst++ = *src++;
+        break; // Copy the backslash if unknown escape
+      }
+    } else {
+      *dst++ = *src++;
+    }
+  }
+  *dst = '\0';
+
+  return unescaped;
+}
+
+char *get_process_output(const char *cmd) {
+  FILE *pipe = popen_or_die(cmd, "r");
+
+  StringBuilder *content_builder = string_builder_create();
+  char *buffer = NULL;
+  size_t buffer_size = 0;
+
+  while (getline(&buffer, &buffer_size, pipe) != -1) {
+    string_builder_add_string(content_builder, buffer);
+  }
+
+  free(buffer);
+  int status = pclose(pipe);
+  char *output = NULL;
+
+  if (status == 0) {
+    output = string_builder_dump(content_builder, NULL);
+  }
+
+  string_builder_destroy(content_builder);
+  return output; // Returns NULL if command failed
 }

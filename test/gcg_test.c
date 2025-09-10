@@ -38,8 +38,6 @@ char *parse_and_write_gcg(const char *gcg_filepath_read,
     log_fatal("failed to write gcg: %s\n", gcg_filepath_write);
   }
 
-  game_history_reset(game_history);
-
   char *gcg_string = get_string_from_file(gcg_filepath_write, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
@@ -94,7 +92,6 @@ void test_single_error_case(const char *gcg_filename, Config *config,
            expected_gcg_parse_status, gcg_parse_status, gcg_filename);
     assert(0);
   }
-  game_history_reset(game_history);
 }
 
 void test_error_cases(GameHistory *game_history) {
@@ -198,7 +195,6 @@ void test_error_cases(GameHistory *game_history) {
                          ERROR_STATUS_GCG_PARSE_LEXICON_NOT_SPECIFIED);
 
   config_destroy(no_lexicon_config);
-  game_history_reset(game_history);
 }
 
 void test_parse_special_char(GameHistory *game_history) {
@@ -211,7 +207,7 @@ void test_parse_special_char(GameHistory *game_history) {
   assert_strings_equal(game_history_player_get_name(game_history, 0), "césar");
   assert_strings_equal(game_history_player_get_name(game_history, 1),
                        "hércules");
-  game_history_reset(game_history);
+
   config_destroy(config);
 }
 
@@ -224,7 +220,7 @@ void test_parse_special_utf8_no_header(GameHistory *game_history) {
   assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
   assert(
       strings_equal(game_history_player_get_name(game_history, 0), "cÃ©sar"));
-  game_history_reset(game_history);
+
   config_destroy(config);
 }
 
@@ -236,7 +232,7 @@ void test_parse_special_utf8_with_header(GameHistory *game_history) {
       test_parse_gcg(gcg_filename, config, game_history);
   assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
   assert(strings_equal(game_history_player_get_name(game_history, 0), "césar"));
-  game_history_reset(game_history);
+
   config_destroy(config);
 }
 
@@ -251,7 +247,7 @@ void test_parse_dos_mode(GameHistory *game_history) {
                        "angwantibo"));
   assert(strings_equal(game_history_player_get_nickname(game_history, 1),
                        "Michal_Josko"));
-  game_history_reset(game_history);
+
   config_destroy(config);
 }
 
@@ -566,7 +562,6 @@ void test_success_five_point_challenge(GameHistory *game_history) {
           NULL,
       });
 
-  game_history_reset(game_history);
   game_destroy(game1);
   game_destroy(game2);
   config_destroy(config);
@@ -653,7 +648,6 @@ void test_success_six_pass(GameHistory *game_history) {
           NULL,
       });
 
-  game_history_reset(game_history);
   game_destroy(game1);
   game_destroy(game2);
   config_destroy(config);
@@ -862,6 +856,26 @@ void test_success_phony_empty_bag(GameHistory *game_history) {
   config_destroy(config);
 }
 
+void test_success_long_game(GameHistory *game_history) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = config_get_ld(config);
+  Rack *rack = rack_create(ld_get_size(ld));
+  const char *gcg_filename;
+  error_code_t gcg_parse_status;
+
+  gcg_filename = "success_long_game";
+  gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game);
+
+  rack_destroy(rack);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_write_gcg(GameHistory *game_history) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
@@ -872,7 +886,6 @@ void test_write_gcg(GameHistory *game_history) {
   assert_gcg_write_cycle("success_just_last_rack", config, game_history);
   assert_gcg_write_cycle("success_six_pass", config, game_history);
 
-  game_history_reset(game_history);
   config_destroy(config);
 }
 
@@ -958,7 +971,6 @@ void test_partially_known_rack_from_phonies(GameHistory *game_history) {
                             "EEIOSVY");
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 1)), "");
 
-  game_history_reset(game_history);
   game_destroy(game);
   config_destroy(config);
 }

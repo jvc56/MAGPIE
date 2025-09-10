@@ -18,4 +18,11 @@ void game_play_to_end(GameHistory *game_history, Game *game,
                       ErrorStack *error_stack);
 void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
                GameHistory *game_history, ErrorStack *error_stack);
+
+char *gcg_next(GameHistory *game_history, Game *game, ErrorStack *error_stack);
+char *gcg_previous(GameHistory *game_history, Game *game,
+                   ErrorStack *error_stack);
+char *gcg_goto(GameHistory *game_history, Game *game, int index,
+               ErrorStack *error_stack);
+
 #endif

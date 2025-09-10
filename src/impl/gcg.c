@@ -1956,3 +1956,29 @@ void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
                        error_stack);
   string_builder_destroy(gcg_sb);
 }
+
+void gcg_next(GameHistory *game_history, Game *game, ErrorStack *error_stack) {
+  const int new_index = game_history_next(game_history, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  game_play_to_turn(game_history, game, new_index, error_stack);
+}
+
+void gcg_previous(GameHistory *game_history, Game *game,
+                  ErrorStack *error_stack) {
+  const int new_index = game_history_previous(game_history, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  game_play_to_turn(game_history, game, new_index, error_stack);
+}
+
+void gcg_goto(GameHistory *game_history, Game *game, int index,
+              ErrorStack *error_stack) {
+  const int new_index = game_history_goto(game_history, index, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  game_play_to_turn(game_history, game, new_index, error_stack);
+}
