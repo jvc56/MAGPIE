@@ -485,7 +485,6 @@ void test_success_standard(GameHistory *game_history) {
           NULL,
       });
 
-  game_history_reset(game_history);
   game_destroy(game1);
   game_destroy(game2);
   config_destroy(config);
@@ -676,7 +675,6 @@ void test_success_incomplete(GameHistory *game_history) {
                          game_history_player_get_last_rack(game_history, 0)));
   assert(racks_are_equal(&rack,
                          game_history_player_get_last_rack(game_history, 1)));
-  game_history_reset(game_history);
 
   gcg_filename = "success_just_last_rack";
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
@@ -691,7 +689,6 @@ void test_success_incomplete(GameHistory *game_history) {
   memset(&rack, 0, sizeof(rack));
   assert(racks_are_equal(&rack,
                          game_history_player_get_last_rack(game_history, 1)));
-  game_history_reset(game_history);
 
   gcg_filename = "incomplete_after_tile_placement";
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
@@ -706,7 +703,6 @@ void test_success_incomplete(GameHistory *game_history) {
                          game_history_player_get_last_rack(game_history, 0)));
   assert(racks_are_equal(&rack,
                          game_history_player_get_last_rack(game_history, 1)));
-  game_history_reset(game_history);
 
   gcg_filename = "incomplete_with_last_rack_after_tile_placement";
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
@@ -722,7 +718,6 @@ void test_success_incomplete(GameHistory *game_history) {
   rack_set_to_string(ld, &rack, "AENNRST");
   assert(racks_are_equal(&rack,
                          game_history_player_get_last_rack(game_history, 1)));
-  game_history_reset(game_history);
 
   gcg_filename = "incomplete_after_five_point_challenge";
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
@@ -738,7 +733,6 @@ void test_success_incomplete(GameHistory *game_history) {
   memset(&rack, 0, sizeof(rack));
   assert(racks_are_equal(&rack,
                          game_history_player_get_last_rack(game_history, 1)));
-  game_history_reset(game_history);
 
   gcg_filename = "incomplete_after_phony_returned";
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
@@ -755,7 +749,6 @@ void test_success_incomplete(GameHistory *game_history) {
   memset(&rack, 0, sizeof(rack));
   assert(racks_are_equal(&rack,
                          game_history_player_get_last_rack(game_history, 1)));
-  game_history_reset(game_history);
 
   gcg_filename = "incomplete_after_pass";
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
@@ -772,7 +765,6 @@ void test_success_incomplete(GameHistory *game_history) {
   memset(&rack, 0, sizeof(rack));
   assert(racks_are_equal(&rack,
                          game_history_player_get_last_rack(game_history, 1)));
-  game_history_reset(game_history);
 
   gcg_filename = "incomplete_after_five_point_challenge";
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
@@ -790,7 +782,6 @@ void test_success_incomplete(GameHistory *game_history) {
   memset(&rack, 0, sizeof(rack));
   assert(racks_are_equal(&rack,
                          game_history_player_get_last_rack(game_history, 1)));
-  game_history_reset(game_history);
 
   gcg_filename = "incomplete_after_exchange";
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
@@ -805,7 +796,6 @@ void test_success_incomplete(GameHistory *game_history) {
   rack_set_to_string(ld, &rack, "AAENRSZ");
   assert(racks_are_equal(&rack,
                          game_history_player_get_last_rack(game_history, 1)));
-  game_history_reset(game_history);
   game_destroy(game1);
   game_destroy(game2);
   config_destroy(config);
@@ -850,7 +840,6 @@ void test_success_phony_empty_bag(GameHistory *game_history) {
              "1NEWISHLY1LEA2/12N2/12J2/7OUT1QATS/7PROLIX2 EEI/I 506/389 1");
   assert_games_are_equal(game1, game2, true);
 
-  game_history_reset(game_history);
   game_destroy(game1);
   game_destroy(game2);
   config_destroy(config);

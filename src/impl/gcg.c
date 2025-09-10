@@ -888,7 +888,7 @@ void play_game_history_turn(GameHistory *game_history, Game *game,
       vms = game_event_get_vms(game_event);
     }
 
-    game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
+    game_set_backup_mode(game, BACKUP_MODE_GCG);
     play_move_without_drawing_tiles(validated_moves_get_move(vms, 0), game);
     game_set_backup_mode(game, BACKUP_MODE_OFF);
     break;
