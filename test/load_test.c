@@ -6,8 +6,6 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 // Helper function to validate GCG download
 void validate_download_gcg(const char *source_identifier,
@@ -18,10 +16,9 @@ void validate_download_gcg(const char *source_identifier,
       "set -lex CSW21 -s1 score -s2 score -r1 all -r2 all -numplays 1");
 
   printf("Testing with identifier: %s\n", source_identifier);
-  DownloadGCGOptions options = {.source_identifier = source_identifier,
-                                .lexicon = NULL,
-                                .config = config};
-  download_gcg(&options, game_history, error_stack);
+  DownloadGCGArgs download_args = {.source_identifier = source_identifier,
+                                   .config = config};
+  download_gcg(&download_args, game_history, error_stack);
 
   if (expected_error == ERROR_STATUS_SUCCESS) {
     if (!error_stack_is_empty(error_stack)) {
@@ -41,7 +38,11 @@ void validate_download_gcg(const char *source_identifier,
     // Expecting an error
     assert(!error_stack_is_empty(error_stack));
     error_code_t actual_error = error_stack_top(error_stack);
-    assert(actual_error == expected_error);
+    if (actual_error != expected_error) {
+      printf("expected: %d\nactual: %d\n", expected_error, actual_error);
+      error_stack_print_and_reset(error_stack);
+      assert(0);
+    }
     printf("Test passed: got expected error\n");
   }
 
@@ -54,6 +55,11 @@ void test_load(void) {
   printf("Running load tests...\n");
 
   printf("=== Cross-tables Tests ===\n");
+  validate_download_gcg("https://cross-tables.com/"
+                        "annotated.php?u=5493899999999999999999999999999999999",
+                        ERROR_STATUS_XT_URL_MALFORMED);
+  validate_download_gcg("5493899999999999999999999999999999999",
+                        ERROR_STATUS_XT_ID_MALFORMED);
   // Test xt URL download and numerical ID download
   validate_download_gcg("https://cross-tables.com/annotated.php?u=54938",
                         ERROR_STATUS_SUCCESS);
@@ -63,6 +69,11 @@ void test_load(void) {
 
   printf("=== Woogles Tests ===\n");
   // Test Woogles URL download and numerical ID download
+  validate_download_gcg(
+      "https://woogles.io/game/XuoAntzDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+      ERROR_STATUS_WOOGLES_URL_MALFORMED);
+  validate_download_gcg("XuoAntzDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+                        ERROR_STATUS_WOOGLES_ID_MALFORMED);
   validate_download_gcg("https://woogles.io/game/XuoAntzD",
                         ERROR_STATUS_SUCCESS);
   validate_download_gcg("XuoAntzD", ERROR_STATUS_SUCCESS);
@@ -74,7 +85,7 @@ void test_load(void) {
   validate_download_gcg("testdata/gcgs/success_six_pass.gcg",
                         ERROR_STATUS_SUCCESS);
   validate_download_gcg("/tmp/nonexistent_file.gcg",
-                        ERROR_STATUS_FILEPATH_FILE_NOT_FOUND);
+                        ERROR_STATUS_INVALID_GCG_SOURCE);
   printf("Local file tests completed.\n\n");
 
   printf("=== URL Download Tests ===\n");
@@ -83,13 +94,12 @@ void test_load(void) {
       "https://www.cross-tables.com/annotated/selfgcg/556/anno55690.gcg",
       ERROR_STATUS_SUCCESS);
   validate_download_gcg("https://keep.google.com/u/0/",
-                        ERROR_STATUS_UNRECOGNIZED_URL);
+                        ERROR_STATUS_GCG_PARSE_NO_MATCHING_TOKEN);
   printf("URL download tests completed.\n\n");
 
   printf("=== Total Failure Test ===\n");
   // Test total failure case
-  validate_download_gcg("98bfakdna\?\?}}",
-                        ERROR_STATUS_FILEPATH_FILE_NOT_FOUND);
+  validate_download_gcg("98bfakdna\?\?}}", ERROR_STATUS_INVALID_GCG_SOURCE);
 
   printf("Load tests completed.\n");
 }

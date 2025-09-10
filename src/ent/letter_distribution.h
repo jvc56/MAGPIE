@@ -197,8 +197,10 @@ static inline void ld_destroy(LetterDistribution *ld) {
 static inline LetterDistribution *ld_create(const char *data_paths,
                                             const char *ld_name,
                                             ErrorStack *error_stack) {
+  char *ld_name_lowercase = to_lower_case(ld_name);
   char *ld_filename = data_filepaths_get_readable_filename(
-      data_paths, ld_name, DATA_FILEPATH_TYPE_LD, error_stack);
+      data_paths, ld_name_lowercase, DATA_FILEPATH_TYPE_LD, error_stack);
+  free(ld_name_lowercase);
   LetterDistribution *ld = NULL;
   if (error_stack_is_empty(error_stack)) {
     StringSplitter *ld_lines = split_file_by_newline(ld_filename, error_stack);

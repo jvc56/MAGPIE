@@ -1603,6 +1603,7 @@ void parse_gcg_string(const char *gcg_string, Config *config,
                      string_duplicate("GCG is empty"));
     return;
   }
+  game_history_reset(game_history);
   GCGParser *gcg_parser = gcg_parser_create(config, game_history);
   parse_gcg_with_parser(gcg_parser, gcg_string, error_stack);
   gcg_parser_destroy(gcg_parser);
@@ -1844,4 +1845,30 @@ void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
   write_string_to_file(gcg_filename, "w", string_builder_peek(gcg_sb),
                        error_stack);
   string_builder_destroy(gcg_sb);
+}
+
+void gcg_next(GameHistory *game_history, Game *game, ErrorStack *error_stack) {
+  const int new_index = game_history_next(game_history, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  game_play_to_turn(game_history, game, new_index, error_stack);
+}
+
+void gcg_previous(GameHistory *game_history, Game *game,
+                  ErrorStack *error_stack) {
+  const int new_index = game_history_previous(game_history, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  game_play_to_turn(game_history, game, new_index, error_stack);
+}
+
+void gcg_goto(GameHistory *game_history, Game *game, int index,
+              ErrorStack *error_stack) {
+  const int new_index = game_history_goto(game_history, index, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  game_play_to_turn(game_history, game, new_index, error_stack);
 }

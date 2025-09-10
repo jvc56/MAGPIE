@@ -5,13 +5,12 @@
 #include "../util/io_util.h"
 #include "config.h"
 
-typedef struct DownloadGCGOptions {
+typedef struct DownloadGCGArgs {
   const char *source_identifier; // Game ID, URL, or local file path
-  const char *lexicon;           // Optional lexicon override
   Config *config;
-} DownloadGCGOptions;
+} DownloadGCGArgs;
 
-void download_gcg(const DownloadGCGOptions *options, GameHistory *game_history,
-                  ErrorStack *error_stack);
+void download_gcg(const DownloadGCGArgs *download_args,
+                  GameHistory *game_history, ErrorStack *error_stack);
 
 #endif

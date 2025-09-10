@@ -512,6 +512,10 @@ bool has_substring(const char *str, const char *pattern) {
   return (ptr != NULL);
 }
 
+bool is_url(const char *content) {
+  return strstr(content, "://") != NULL || strstr(content, ".com") != NULL;
+}
+
 size_t string_length(const char *str) {
   if (!str) {
     log_fatal("cannot get the length of a null string");
@@ -687,6 +691,19 @@ char *insert_before_dot(const char *str, const char *insert) {
   }
 
   return new_str;
+}
+
+char *to_lower_case(const char *content) {
+  if (!content) {
+    return NULL;
+  }
+  size_t len = strlen(content);
+  char *lower_content = (char *)malloc_or_die(len + 1);
+  for (size_t i = 0; i < len; ++i) {
+    lower_content[i] = (char)tolower((unsigned char)content[i]);
+  }
+  lower_content[len] = '\0';
+  return lower_content;
 }
 
 const char *get_base_filename(const char *filepath) {
@@ -878,9 +895,4 @@ char *get_process_output(const char *cmd) {
 
   string_builder_destroy(content_builder);
   return output; // Returns NULL if command failed
-}
-
-bool is_valid_gcg_content(const char *content) {
-  return content && !is_string_empty_or_whitespace(content) &&
-         strstr(content, "#player1") != NULL;
 }
