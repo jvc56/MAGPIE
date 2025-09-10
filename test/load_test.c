@@ -6,8 +6,6 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 // Helper function to validate GCG download
 void validate_download_gcg(const char *source_identifier,

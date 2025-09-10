@@ -13,10 +13,13 @@
 
 #define WOOGLES_GCG_START "\"gcg\":\""
 #define XTABLES_URL "cross-tables.com/annotated.php?u="
-#define XTABLES_URL_LENGTH (sizeof(XTABLES_URL) - 1)
 #define WOOGLES_URL "woogles.io/game/"
-#define WOOGLES_URL_LENGTH (sizeof(WOOGLES_URL) - 1)
-#define MAX_GAME_ID_LENGTH 30
+
+enum {
+  XTABLES_URL_LENGTH = sizeof(XTABLES_URL) - 1,
+  WOOGLES_URL_LENGTH = sizeof(WOOGLES_URL) - 1,
+  MAX_GAME_ID_LENGTH = 30,
+};
 
 char *get_xt_gcg_string(const char *identifier, ErrorStack *error_stack) {
   char game_id_str[MAX_GAME_ID_LENGTH + 1];
