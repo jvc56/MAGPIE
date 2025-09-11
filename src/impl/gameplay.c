@@ -326,9 +326,7 @@ void draw_starting_racks(const Game *game) {
 // If the input leave rack is not null, it will record the leave of
 // the play in the leave rack.
 void play_move(const Move *move, Game *game, Rack *leave) {
-  if (game_get_backup_mode(game) == BACKUP_MODE_SIMULATION) {
-    game_backup(game);
-  }
+  game_backup(game);
   const LetterDistribution *ld = game_get_ld(game);
   int player_on_turn_index = game_get_player_on_turn_index(game);
   Player *player_on_turn = game_get_player(game, player_on_turn_index);
@@ -367,9 +365,7 @@ void play_move(const Move *move, Game *game, Rack *leave) {
 }
 
 void play_move_without_drawing_tiles(const Move *move, Game *game) {
-  if (game_get_backup_mode(game) == BACKUP_MODE_SIMULATION) {
-    game_backup(game);
-  }
+  game_backup(game);
   int player_on_turn_index = game_get_player_on_turn_index(game);
   Player *player_on_turn = game_get_player(game, player_on_turn_index);
   const Rack *player_on_turn_rack = player_get_rack(player_on_turn);

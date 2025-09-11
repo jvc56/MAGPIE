@@ -169,7 +169,6 @@ struct Config {
   InferenceResults *inference_results;
   AutoplayResults *autoplay_results;
   ConversionResults *conversion_results;
-  GameHistory *game_history;
 };
 
 void parsed_arg_create(Config *config, arg_token_t arg_token, const char *name,
@@ -351,10 +350,6 @@ SimResults *config_get_sim_results(const Config *config) {
 
 AutoplayResults *config_get_autoplay_results(const Config *config) {
   return config->autoplay_results;
-}
-
-GameHistory *config_get_game_history(const Config *config) {
-  return config->game_history;
 }
 
 bool config_exec_parg_is_set(const Config *config) {
@@ -2456,7 +2451,6 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->autoplay_results = autoplay_results_create();
   config->conversion_results = conversion_results_create();
   config->tt_fraction_of_mem = 0.25;
-  config->game_history = game_history_create();
 
   autoplay_results_set_players_data(config->autoplay_results,
                                     config->players_data);
@@ -2481,7 +2475,6 @@ void config_destroy(Config *config) {
   ld_destroy(config->ld);
   players_data_destroy(config->players_data);
   thread_control_destroy(config->thread_control);
-  game_history_destroy(config->game_history);
   game_destroy(config->game);
   game_history_destroy(config->game_history);
   move_list_destroy(config->move_list);
