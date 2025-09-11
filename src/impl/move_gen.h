@@ -49,7 +49,6 @@ typedef struct MoveGen {
   int cross_index;
   Move best_move_and_current_move[2];
   int best_move_index;
-  Equity current_anchor_highest_possible_equity;
   // This field is only used for the MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST
   // record type
   Equity best_move_equity_or_score;
