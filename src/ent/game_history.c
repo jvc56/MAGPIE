@@ -429,11 +429,12 @@ int game_history_goto(GameHistory *game_history, int index,
   return game_history->current_index;
 }
 
-int game_history_get_last_move_event_index(const GameHistory *game_history) {
+int game_history_get_most_recent_move_event_index(
+    const GameHistory *game_history) {
   if (game_history->number_of_events == 0) {
     return -1;
   }
-  for (int i = game_history->number_of_events - 1; i >= 0; i--) {
+  for (int i = game_history->current_index; i >= 0; i--) {
     if (game_event_is_move_type(&game_history->events[i])) {
       return i;
     }

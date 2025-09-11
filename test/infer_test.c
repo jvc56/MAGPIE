@@ -72,8 +72,9 @@ error_code_t infer_for_test(const Config *config, int target_index,
 
 // Assumes the config game history has been loaded
 error_code_t infer_for_test_with_history(const Config *config,
-                                         InferenceResults *inference_results) {
-  const Game *game = config_get_game(config);
+                                         InferenceResults *inference_results,
+                                         const int event_index) {
+  Game *game = config_get_game(config);
   const LetterDistribution *ld = game_get_ld(game);
   const int ld_size = ld_get_size(ld);
   Rack target_played_tiles;
@@ -82,6 +83,14 @@ error_code_t infer_for_test_with_history(const Config *config,
   rack_set_dist_size_and_reset(&target_known_rack, ld_size);
   ErrorStack *error_stack = error_stack_create();
   set_thread_control_status_to_start(config_get_thread_control(config));
+  GameHistory *game_history = config_get_game_history(config);
+  if (game_history_get_number_of_events(game_history) != 0) {
+    gcg_goto(game_history, game, event_index, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_print_and_reset(error_stack);
+      assert(0);
+    }
+  }
   config_infer(config, true, 0, 0, 0, &target_played_tiles, &target_known_rack,
                inference_results, error_stack);
   error_code_t status = error_stack_top(error_stack);
@@ -274,7 +283,8 @@ void test_infer_empty_game_history(void) {
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   InferenceResults *inference_results = inference_results_create(NULL);
   load_and_exec_config_or_die(config, "set -eq 0 -threads 1");
-  error_code_t status = infer_for_test_with_history(config, inference_results);
+  error_code_t status =
+      infer_for_test_with_history(config, inference_results, 0);
   assert(status == ERROR_STATUS_INFERENCE_EMPTY_GAME_HISTORY);
   inference_results_destroy(inference_results);
   config_destroy(config);
@@ -314,7 +324,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   if (use_game_history) {
     load_game_history_with_gcg_string(config, gcg_string_header,
                                       ">Tim: MUZAKS 8H MUZAKS +52 52");
-    status = infer_for_test_with_history(config, inference_results);
+    status = infer_for_test_with_history(config, inference_results, 0);
   } else {
     status = infer_for_test(config, 0, 52, 0, "MUZAKS", "", inference_results);
   }
@@ -377,7 +387,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   if (use_game_history) {
     load_game_history_with_gcg_string(config, gcg_string_header,
                                       ">Tim: MUZAKY 8H MUZAKY +58 58");
-    status = infer_for_test_with_history(config, inference_results);
+    status = infer_for_test_with_history(config, inference_results, 0);
   } else {
     status = infer_for_test(config, 0, 58, 0, "MUZAKY", "", inference_results);
   }
@@ -449,7 +459,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   if (use_game_history) {
     load_game_history_with_gcg_string(config, gcg_string_header,
                                       ">Tim: MUZAK 8H MUZAK +50 50");
-    status = infer_for_test_with_history(config, inference_results);
+    status = infer_for_test_with_history(config, inference_results, 0);
   } else {
     status = infer_for_test(config, 0, 50, 0, "MUZAK", "", inference_results);
   }
@@ -493,7 +503,9 @@ void test_infer_nonerror_cases(const int number_of_threads,
   load_and_exec_config_or_die(config, "set -eq 10000");
   if (use_game_history) {
     load_game_history_with_gcg(config, "vs_jeremy");
-    status = infer_for_test_with_history(config, inference_results);
+    status = infer_for_test_with_history(
+        config, inference_results,
+        game_history_get_number_of_events(config_get_game_history(config)) - 1);
   } else {
     status = infer_for_test(config, 0, 32, 0, "DEW??", "", inference_results);
   }
@@ -530,11 +542,38 @@ void test_infer_nonerror_cases(const int number_of_threads,
   }
   game_reset(game);
 
+  if (use_game_history) {
+    // Test that using the game history works for an event in the middle of the
+    // game history
+    load_and_exec_config_or_die(config, "set -eq 0");
+    load_game_history_with_gcg(config, "vs_jeremy");
+    status = infer_for_test_with_history(config, inference_results, 10);
+    assert(status == ERROR_STATUS_SUCCESS);
+    assert(stat_get_num_samples(equity_values) == 7);
+    assert(stat_get_num_unique_samples(equity_values) == 4);
+    alias_method = inference_results_get_alias_method(inference_results);
+    const char *possible_leave_strs[] = {"E", "O", "P", "U"};
+    const int num_possible_leave_strs =
+        sizeof(possible_leave_strs) / sizeof(possible_leave_strs[0]);
+    for (int i = 0; i < 100; i++) {
+      assert(alias_method_sample(alias_method, 0, rack));
+      assert(rack_get_total_letters(rack) == 1);
+      bool has_letter = false;
+      for (int j = 0; j < num_possible_leave_strs; j++) {
+        has_letter =
+            has_letter ||
+            rack_get_letter(rack, ld_hl_to_ml(ld, possible_leave_strs[j])) == 1;
+      }
+      assert(has_letter);
+    }
+    game_reset(game);
+  }
+
   load_and_exec_config_or_die(config, "set -numplays 100 -eq 0");
   if (use_game_history) {
     load_game_history_with_gcg_string(config, gcg_string_header,
                                       ">Tim: ERNT 8G RENT +8 8");
-    status = infer_for_test_with_history(config, inference_results);
+    status = infer_for_test_with_history(config, inference_results, 0);
   } else {
     status = infer_for_test(config, 0, 8, 0, "ENRT", "", inference_results);
   }
@@ -792,7 +831,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   if (use_game_history) {
     load_game_history_with_gcg_string(config, gcg_string_header,
                                       ">Tim: MUZAKY 8H MUZAKY +58 58");
-    status = infer_for_test_with_history(config, inference_results);
+    status = infer_for_test_with_history(config, inference_results, 0);
   } else {
     status = infer_for_test(config, 0, 58, 0, "MUZAKY", "", inference_results);
   }
@@ -844,7 +883,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
     load_game_history_with_gcg_string(config, gcg_string_header,
                                       string_builder_peek(gcg_builder));
     string_builder_destroy(gcg_builder);
-    status = infer_for_test_with_history(config, inference_results);
+    status = infer_for_test_with_history(config, inference_results, 3);
   } else {
     status = infer_for_test(config, 0, 18, 0, "GRIND", "?", inference_results);
   }
@@ -889,7 +928,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
     load_game_history_with_gcg_string(config, gcg_string_header,
                                       string_builder_peek(gcg_builder));
     string_builder_destroy(gcg_builder);
-    status = infer_for_test_with_history(config, inference_results);
+    status = infer_for_test_with_history(config, inference_results, 3);
   } else {
     status = infer_for_test(config, 0, 6, 0, "RIN", "H", inference_results);
   }
@@ -928,7 +967,9 @@ void test_infer_nonerror_cases(const int number_of_threads,
   if (use_game_history) {
     GameHistory *game_history = config_get_game_history(config);
     test_parse_gcg("exchange_with_seven_in_bag", config, game_history);
-    status = infer_for_test_with_history(config, inference_results);
+    status = infer_for_test_with_history(
+        config, inference_results,
+        game_history_get_number_of_events(config_get_game_history(config)) - 1);
     assert(status == ERROR_STATUS_SUCCESS);
     assert(stat_get_num_samples(equity_values) == 10);
     assert(stat_get_num_unique_samples(equity_values) == 8);
@@ -1019,7 +1060,7 @@ void test_infer(void) {
   test_infer_exchange_not_board_is_letter_allowed_in_cross_set();
   test_infer_tiles_played_not_in_bag();
   test_infer_empty_game_history();
-  for (int i = 0; i < 1; i++) {
+  for (int i = 0; i < 2; i++) {
     const bool use_game_history = i == 1;
     test_infer_nonerror_cases(1, use_game_history);
     test_infer_nonerror_cases(2, use_game_history);

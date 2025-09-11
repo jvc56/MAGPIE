@@ -1679,7 +1679,7 @@ void parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
   }
 }
 
-// Use turn or event index 0 to go to the start of the game.
+// Use event index 0 to go to the start of the game.
 // Calling with event index N will set the game state to after the
 // Nth turn has been played where n is 1-indexed.
 void game_play_to_event_index_internal(GameHistory *game_history, Game *game,
@@ -1980,5 +1980,5 @@ void gcg_goto(GameHistory *game_history, Game *game, int index,
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  game_play_to_event_index(game_history, game, new_index, error_stack);
+  game_play_to_event_index(game_history, game, new_index + 1, error_stack);
 }

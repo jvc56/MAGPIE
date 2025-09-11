@@ -662,19 +662,18 @@ void populate_inference_args_with_game_history(InferenceArgs *args,
                                                Rack *nontarget_current_rack,
                                                ErrorStack *error_stack) {
   GameHistory *game_history = args->game_history;
-  // FIXME: get most recent move event, not the last one in the history
-  const int last_event_index =
-      game_history_get_last_move_event_index(game_history);
-  if (last_event_index < 0) {
+  const int most_recent_move_event_index =
+      game_history_get_most_recent_move_event_index(game_history);
+  if (most_recent_move_event_index < 0) {
     error_stack_push(
         error_stack, ERROR_STATUS_INFERENCE_EMPTY_GAME_HISTORY,
         get_formatted_string(
             "cannot infer the previous play for an empty game history"));
     return;
   }
-  GameEvent *last_event =
-      game_history_get_event(game_history, last_event_index);
-  const ValidatedMoves *last_move = game_event_get_vms(last_event);
+  GameEvent *target_move_event =
+      game_history_get_event(game_history, most_recent_move_event_index);
+  const ValidatedMoves *last_move = game_event_get_vms(target_move_event);
   const Move *move = validated_moves_get_move(last_move, 0);
   const int move_tiles_length = move_get_tiles_length(move);
   rack_reset(args->target_played_tiles);
@@ -687,17 +686,17 @@ void populate_inference_args_with_game_history(InferenceArgs *args,
       }
     }
   }
-  args->target_index = game_event_get_player_index(last_event);
-  args->target_score = game_event_get_move_score(last_event);
+  args->target_index = game_event_get_player_index(target_move_event);
+  args->target_score = game_event_get_move_score(target_move_event);
   args->target_num_exch = 0;
   if (move_get_type(move) == GAME_EVENT_EXCHANGE) {
     args->target_num_exch = move_get_tiles_played(move);
     rack_reset(args->target_played_tiles);
   }
   rack_copy(nontarget_current_rack,
-            game_event_get_after_event_player_on_turn_rack(last_event));
+            game_event_get_after_event_player_on_turn_rack(target_move_event));
 
-  for (int i = last_event_index - 1; i >= 0; i--) {
+  for (int i = most_recent_move_event_index - 1; i >= 0; i--) {
     GameEvent *event = game_history_get_event(game_history, i);
     if (game_event_get_player_index(event) == args->target_index) {
       // FIXME: test this rack_union logic (as opposed to the copy that was
@@ -708,7 +707,7 @@ void populate_inference_args_with_game_history(InferenceArgs *args,
     }
   }
 
-  game_play_to_event_index(game_history, game_dup, last_event_index,
+  game_play_to_event_index(game_history, game_dup, most_recent_move_event_index,
                            error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
