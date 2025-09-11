@@ -12,6 +12,7 @@
 #include "../src/ent/thread_control.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/gcg.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
 #include "../src/str/sim_string.h"
@@ -361,7 +362,7 @@ void test_sim_with_and_without_inference_helper(
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-threads 10 -plies 2 -it 2000 -minp 50 -numplays 2 "
-      "-scond none");
+      "-scond none -seed 10");
   // Load an empty CGP to create a new game.
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
@@ -421,7 +422,8 @@ void test_sim_with_and_without_inference_helper(
       sb,
       simmed_play_get_move(sim_results_get_sorted_simmed_play(sim_results, 0)),
       game_get_board(game), config_get_ld(config));
-  printf("Best move with inference: >%s<\n", string_builder_peek(sb));
+  printf("Actual best move:   >%s<\n", string_builder_peek(sb));
+  printf("Expected best move: >%s<\n", winner_with_inference);
   assert(strings_equal(string_builder_peek(sb), winner_with_inference));
 
   string_builder_destroy(sb);

@@ -586,7 +586,7 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(config6, "next", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config6, "goto 28",
                             ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE);
-  assert_config_exec_status(config6, "goto 26", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config6, "goto 27", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config6, "next",
                             ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE);
   assert_config_exec_status(config6, "previous", ERROR_STATUS_SUCCESS);

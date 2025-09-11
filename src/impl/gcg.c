@@ -432,8 +432,7 @@ void finalize_note(GCGParser *gcg_parser) {
     return;
   }
 
-  int number_of_events =
-      game_history_get_number_of_events(gcg_parser->game_history);
+  int number_of_events = game_history_get_num_events(gcg_parser->game_history);
   GameEvent *event =
       game_history_get_event(gcg_parser->game_history, number_of_events - 1);
 
@@ -649,7 +648,7 @@ bool game_event_has_player_rack(const GameEvent *game_event, int player_index) {
 const Rack *get_player_next_rack(GameHistory *game_history,
                                  int initial_game_event_index,
                                  int player_index) {
-  int number_of_game_events = game_history_get_number_of_events(game_history);
+  int number_of_game_events = game_history_get_num_events(game_history);
   for (int game_event_index = initial_game_event_index + 1;
        game_event_index < number_of_game_events; game_event_index++) {
     const GameEvent *game_event =
@@ -716,8 +715,7 @@ void set_after_game_event_racks(GameHistory *game_history, const Game *game,
   rack_set_dist_size_and_reset(after_event_player_off_turn_rack, ld_size);
 
   const int player_on_turn_index = game_get_player_on_turn_index(game);
-  const int number_of_game_events =
-      game_history_get_number_of_events(game_history);
+  const int number_of_game_events = game_history_get_num_events(game_history);
   bool player_on_turn_rack_set = false;
   for (int i = game_event_index + 1; i < number_of_game_events; i++) {
     const GameEvent *game_event_i = game_history_get_event(game_history, i);
@@ -1094,8 +1092,7 @@ void parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
   if (token != GCG_UNKNOWN_TOKEN) {
     gcg_parser->previous_token = token;
   }
-  int number_of_events =
-      game_history_get_number_of_events(gcg_parser->game_history);
+  int number_of_events = game_history_get_num_events(gcg_parser->game_history);
   // Perform logic with previous token here because it
   // is set.
   if (previous_token == GCG_NOTE_TOKEN && token != GCG_NOTE_TOKEN &&
@@ -1682,12 +1679,11 @@ void parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
 // Use event index 0 to go to the start of the game.
 // Calling with event index N will set the game state to after the
 // Nth turn has been played where n is 1-indexed.
-void game_play_to_event_index_internal(GameHistory *game_history, Game *game,
-                                       int target_event_index,
-                                       const bool validate,
-                                       ErrorStack *error_stack) {
+void game_play_n_events_internal(GameHistory *game_history, Game *game,
+                                 int num_events_to_play, const bool validate,
+                                 ErrorStack *error_stack) {
   game_reset(game);
-  if (game_history_get_number_of_events(game_history) == 0) {
+  if (game_history_get_num_events(game_history) == 0) {
     const int player_on_turn_index = game_get_player_on_turn_index(game);
     const Rack *player_on_turn_index_rack =
         game_history_player_get_last_rack(game_history, player_on_turn_index);
@@ -1700,7 +1696,7 @@ void game_play_to_event_index_internal(GameHistory *game_history, Game *game,
     }
     return;
   }
-  if (target_event_index <= 0) {
+  if (num_events_to_play <= 0) {
     const GameEvent *first_game_event = game_history_get_event(game_history, 0);
     set_rack_from_bag_or_push_to_error_stack(
         game, game_event_get_player_index(first_game_event),
@@ -1719,11 +1715,11 @@ void game_play_to_event_index_internal(GameHistory *game_history, Game *game,
                                               &stack_allocated_racks[1]};
   Rack *known_letters_from_phonies_racks[2] = {&stack_allocated_racks[2],
                                                &stack_allocated_racks[3]};
-  int number_of_game_events = game_history_get_number_of_events(game_history);
-  if (target_event_index > number_of_game_events) {
-    target_event_index = number_of_game_events;
+  int number_of_game_events = game_history_get_num_events(game_history);
+  if (num_events_to_play > number_of_game_events) {
+    num_events_to_play = number_of_game_events;
   }
-  for (int game_event_index = 0; game_event_index < target_event_index;
+  for (int game_event_index = 0; game_event_index < num_events_to_play;
        game_event_index++) {
     play_game_history_turn(game_history, game, game_event_index, validate,
                            previously_played_letters_racks,
@@ -1732,19 +1728,6 @@ void game_play_to_event_index_internal(GameHistory *game_history, Game *game,
       return;
     }
   }
-}
-
-void game_play_to_event_index(GameHistory *game_history, Game *game,
-                              int event_index, ErrorStack *error_stack) {
-  game_play_to_event_index_internal(game_history, game, event_index, false,
-                                    error_stack);
-}
-
-void game_play_to_end(GameHistory *game_history, Game *game,
-                      ErrorStack *error_stack) {
-  game_play_to_event_index_internal(
-      game_history, game, game_history_get_number_of_events(game_history),
-      false, error_stack);
 }
 
 void parse_gcg_with_parser(GCGParser *gcg_parser, const char *gcg_string,
@@ -1772,15 +1755,14 @@ void parse_gcg_with_parser(GCGParser *gcg_parser, const char *gcg_string,
   string_splitter_destroy(gcg_lines);
 
   if (!error_stack_is_empty(error_stack) ||
-      game_history_get_number_of_events(gcg_parser->game_history) == 0) {
+      game_history_get_num_events(gcg_parser->game_history) == 0) {
     return;
   }
 
   // Play through the game to detected errors
-  game_play_to_event_index_internal(
+  game_play_n_events_internal(
       gcg_parser->game_history, gcg_parser->game,
-      game_history_get_number_of_events(gcg_parser->game_history), true,
-      error_stack);
+      game_history_get_num_events(gcg_parser->game_history), true, error_stack);
 }
 
 void parse_gcg_string(const char *gcg_string, Config *config,
@@ -1869,7 +1851,7 @@ void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
                                         GCG_PLAYER_STRING, player_index + 1,
                                         player_nickname, player_name);
   }
-  const int number_of_events = game_history_get_number_of_events(game_history);
+  const int number_of_events = game_history_get_num_events(game_history);
   Equity previous_move_score = 0;
   int player_on_turn = 0;
   bool game_is_over = false;
@@ -1957,28 +1939,41 @@ void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
   string_builder_destroy(gcg_sb);
 }
 
+void game_play_n_events(GameHistory *game_history, Game *game,
+                        int num_events_to_play, ErrorStack *error_stack) {
+  game_play_n_events_internal(game_history, game, num_events_to_play, false,
+                              error_stack);
+}
+
 void gcg_next(GameHistory *game_history, Game *game, ErrorStack *error_stack) {
-  const int new_index = game_history_next(game_history, error_stack);
+  const int num_events_to_play = game_history_next(game_history, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  game_play_to_event_index(game_history, game, new_index, error_stack);
+  game_play_n_events(game_history, game, num_events_to_play, error_stack);
 }
 
 void gcg_previous(GameHistory *game_history, Game *game,
                   ErrorStack *error_stack) {
-  const int new_index = game_history_previous(game_history, error_stack);
+  const int num_events_to_play =
+      game_history_previous(game_history, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  game_play_to_event_index(game_history, game, new_index, error_stack);
+  game_play_n_events(game_history, game, num_events_to_play, error_stack);
 }
 
-void gcg_goto(GameHistory *game_history, Game *game, int index,
+void gcg_goto(GameHistory *game_history, Game *game, int num_events_to_play,
               ErrorStack *error_stack) {
-  const int new_index = game_history_goto(game_history, index, error_stack);
+  game_history_goto(game_history, num_events_to_play, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  game_play_to_event_index(game_history, game, new_index + 1, error_stack);
+  game_play_n_events(game_history, game, num_events_to_play, error_stack);
+}
+
+void game_play_to_end(GameHistory *game_history, Game *game,
+                      ErrorStack *error_stack) {
+  gcg_goto(game_history, game, game_history_get_num_events(game_history),
+           error_stack);
 }

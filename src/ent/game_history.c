@@ -161,10 +161,10 @@ struct GameHistory {
   char *lexicon_name;
   char *ld_name;
   char *board_layout_name;
-  int current_index;
+  int num_played_events;
   game_variant_t game_variant;
   GameHistoryPlayer *players[2];
-  int number_of_events;
+  int num_events;
   GameEvent *events;
 };
 
@@ -312,8 +312,12 @@ void game_history_set_player(GameHistory *history, int player_index,
   memset(&history->players[player_index]->last_rack, 0, sizeof(Rack));
 }
 
-int game_history_get_number_of_events(const GameHistory *history) {
-  return history->number_of_events;
+int game_history_get_num_events(const GameHistory *history) {
+  return history->num_events;
+}
+
+int game_history_get_num_played_events(const GameHistory *game_history) {
+  return game_history->num_played_events;
 }
 
 GameEvent *game_history_get_event(const GameHistory *history, int event_index) {
@@ -340,8 +344,8 @@ void game_history_reset(GameHistory *game_history) {
     game_history->players[i] = NULL;
   }
   game_history->game_variant = GAME_VARIANT_CLASSIC;
-  game_history->number_of_events = 0;
-  game_history->current_index = 0;
+  game_history->num_events = 0;
+  game_history->num_played_events = 0;
 }
 
 GameHistory *game_history_create(void) {
@@ -374,67 +378,62 @@ void game_history_destroy(GameHistory *game_history) {
 
 GameEvent *game_history_create_and_add_game_event(GameHistory *game_history,
                                                   ErrorStack *error_stack) {
-  if (game_history->number_of_events == MAX_GAME_EVENTS) {
+  if (game_history->num_events == MAX_GAME_EVENTS) {
     error_stack_push(
         error_stack, ERROR_STATUS_GCG_PARSE_GAME_EVENT_OVERFLOW,
         get_formatted_string("exceeded the maximum number of game events: %d",
                              MAX_GAME_EVENTS));
     return NULL;
   }
-  GameEvent *game_event =
-      &game_history->events[game_history->number_of_events++];
+  GameEvent *game_event = &game_history->events[game_history->num_events++];
   game_event_reset(game_event);
   return game_event;
 }
 
-int game_history_get_current_index(const GameHistory *game_history) {
-  return game_history->current_index;
-}
-
 int game_history_next(GameHistory *game_history, ErrorStack *error_stack) {
-  if (game_history->current_index >= game_history->number_of_events - 1) {
+  if (game_history->num_played_events >= game_history->num_events) {
     error_stack_push(
         error_stack, ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE,
         string_duplicate(
             "already at latest position; there is no next position"));
     return -1;
   }
-  game_history->current_index++;
-  return game_history->current_index;
+  game_history->num_played_events++;
+  return game_history->num_played_events;
 }
 
 int game_history_previous(GameHistory *game_history, ErrorStack *error_stack) {
-  if (game_history->current_index <= 0) {
+  if (game_history->num_played_events <= 0) {
     error_stack_push(
         error_stack, ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE,
         string_duplicate(
             "already at earliest position; there is no previous position"));
     return -1;
   }
-  game_history->current_index--;
-  return game_history->current_index;
+  game_history->num_played_events--;
+  return game_history->num_played_events;
 }
 
-int game_history_goto(GameHistory *game_history, int index,
+int game_history_goto(GameHistory *game_history, int npe,
                       ErrorStack *error_stack) {
-  if (index < 0 || index >= game_history->number_of_events) {
+  if (npe < 0 || npe > game_history->num_events) {
     error_stack_push(
         error_stack, ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE,
         get_formatted_string(
-            "position %d is out of range; the latest position is %d", index,
-            game_history->number_of_events - 1));
+            "position %d is out of range; the latest position is %d", npe,
+            game_history->num_events - 1));
     return -1;
   }
-  game_history->current_index = index;
-  return game_history->current_index;
+  game_history->num_played_events = npe;
+  return game_history->num_played_events;
 }
 
 int game_history_get_most_recent_move_event_index(
     const GameHistory *game_history) {
-  if (game_history->number_of_events == 0) {
+  if (game_history->num_events == 0) {
     return -1;
   }
-  for (int i = game_history->current_index; i >= 0; i--) {
+  for (int i = game_history->num_played_events - 1; i >= 0; i--) {
     if (game_event_is_move_type(&game_history->events[i])) {
       return i;
     }

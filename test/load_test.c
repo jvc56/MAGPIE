@@ -28,11 +28,11 @@ void validate_download_gcg(const char *source_identifier,
     } else {
       // Assert all success requirements
       assert(error_stack_is_empty(error_stack));
-      assert(game_history_get_number_of_events(game_history) > 0);
+      assert(game_history_get_num_events(game_history) > 0);
       assert(game_history_both_players_are_set(game_history));
 
       printf("Test passed: loaded %d game events\n",
-             game_history_get_number_of_events(game_history));
+             game_history_get_num_events(game_history));
     }
   } else {
     // Expecting an error

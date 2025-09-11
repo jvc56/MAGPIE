@@ -10,13 +10,9 @@
 #include <stdlib.h>
 
 typedef struct Rack {
-  // counts must be signed for the sake of inference code checking that
-  // these are nonnegative (ERROR_STATUS_INFERENCE_TARGET_LETTERS_NOT_IN_BAG)
-  // FIXME: make array unsigned and change inference code to handle that error
-  // in a better way
   uint16_t number_of_letters;
   uint16_t dist_size;
-  int8_t array[MAX_ALPHABET_SIZE];
+  uint16_t array[MAX_ALPHABET_SIZE];
 } Rack;
 
 static inline void rack_reset(Rack *rack) {
@@ -61,7 +57,7 @@ static inline uint16_t rack_get_dist_size(const Rack *rack) {
   return rack->dist_size;
 }
 
-static inline int8_t rack_get_letter(const Rack *rack, MachineLetter ml) {
+static inline uint16_t rack_get_letter(const Rack *rack, MachineLetter ml) {
   return rack->array[ml];
 }
 
@@ -99,10 +95,9 @@ static inline bool rack_subtract(Rack *rack_to_update,
       return false;
     }
     rack_to_update->array[i] =
-        (int8_t)(rack_to_update->array[i] - value_to_sub->array[i]);
+        rack_to_update->array[i] - value_to_sub->array[i];
     rack_to_update->number_of_letters =
-        (uint16_t)(rack_to_update->number_of_letters -
-                   (uint16_t)value_to_sub->array[i]);
+        rack_to_update->number_of_letters - value_to_sub->array[i];
   }
   return true;
 }
@@ -112,23 +107,22 @@ static inline bool rack_subtract(Rack *rack_to_update,
 static inline void rack_subtract_using_floor_zero(Rack *rack_to_update,
                                                   const Rack *value_to_sub) {
   for (uint16_t i = 0; i < rack_to_update->dist_size; i++) {
-    int8_t sub_value = value_to_sub->array[i];
+    uint16_t sub_value = value_to_sub->array[i];
     if (rack_to_update->array[i] < sub_value) {
       sub_value = rack_to_update->array[i];
     }
-    rack_to_update->array[i] = (int8_t)(rack_to_update->array[i] - sub_value);
+    rack_to_update->array[i] = rack_to_update->array[i] - sub_value;
     rack_to_update->number_of_letters =
-        (uint16_t)(rack_to_update->number_of_letters - (uint16_t)sub_value);
+        rack_to_update->number_of_letters - sub_value;
   }
 }
 
 static inline void rack_add(Rack *rack_to_update, const Rack *value_to_add) {
   for (uint16_t i = 0; i < rack_to_update->dist_size; i++) {
     rack_to_update->array[i] =
-        (int8_t)(rack_to_update->array[i] + value_to_add->array[i]);
+        rack_to_update->array[i] + value_to_add->array[i];
     rack_to_update->number_of_letters =
-        (uint16_t)(rack_to_update->number_of_letters +
-                   (uint16_t)value_to_add->array[i]);
+        rack_to_update->number_of_letters + value_to_add->array[i];
   }
 }
 
@@ -137,7 +131,7 @@ static inline void rack_add(Rack *rack_to_update, const Rack *value_to_add) {
 static inline void rack_union(Rack *rack_to_update,
                               const Rack *value_to_union) {
   for (uint16_t i = 0; i < rack_to_update->dist_size; i++) {
-    const int8_t add_value = value_to_union->array[i];
+    const uint16_t add_value = value_to_union->array[i];
     if (rack_to_update->array[i] < add_value) {
       rack_to_update->number_of_letters += add_value - rack_to_update->array[i];
       rack_to_update->array[i] = add_value;
@@ -152,8 +146,8 @@ static inline void rack_take_letter(Rack *rack, MachineLetter letter) {
 
 static inline void rack_take_letters(Rack *rack, MachineLetter letter,
                                      int count) {
-  rack->array[letter] = (int8_t)((int)rack->array[letter] - count);
-  rack->number_of_letters = (uint16_t)((int)rack->number_of_letters - count);
+  rack->array[letter] = rack->array[letter] - (uint16_t)count;
+  rack->number_of_letters = rack->number_of_letters - (uint16_t)count;
 }
 
 static inline void rack_add_letter(Rack *rack, MachineLetter letter) {
@@ -163,8 +157,8 @@ static inline void rack_add_letter(Rack *rack, MachineLetter letter) {
 
 static inline void rack_add_letters(Rack *rack, MachineLetter letter,
                                     int count) {
-  rack->array[letter] = (int8_t)((int)rack->array[letter] + count);
-  rack->number_of_letters = (uint16_t)((int)rack->number_of_letters + count);
+  rack->array[letter] = rack->array[letter] + (uint16_t)count;
+  rack->number_of_letters = rack->number_of_letters + (uint16_t)count;
 }
 
 static inline int rack_set_to_string(const LetterDistribution *ld, Rack *rack,

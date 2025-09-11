@@ -73,7 +73,7 @@ error_code_t infer_for_test(const Config *config, int target_index,
 // Assumes the config game history has been loaded
 error_code_t infer_for_test_with_history(const Config *config,
                                          InferenceResults *inference_results,
-                                         const int event_index) {
+                                         const int num_events_to_play) {
   Game *game = config_get_game(config);
   const LetterDistribution *ld = game_get_ld(game);
   const int ld_size = ld_get_size(ld);
@@ -84,8 +84,8 @@ error_code_t infer_for_test_with_history(const Config *config,
   ErrorStack *error_stack = error_stack_create();
   set_thread_control_status_to_start(config_get_thread_control(config));
   GameHistory *game_history = config_get_game_history(config);
-  if (game_history_get_number_of_events(game_history) != 0) {
-    gcg_goto(game_history, game, event_index, error_stack);
+  if (game_history_get_num_events(game_history) != 0) {
+    gcg_goto(game_history, game, num_events_to_play, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       error_stack_print_and_reset(error_stack);
       assert(0);
@@ -324,7 +324,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   if (use_game_history) {
     load_game_history_with_gcg_string(config, gcg_string_header,
                                       ">Tim: MUZAKS 8H MUZAKS +52 52");
-    status = infer_for_test_with_history(config, inference_results, 0);
+    status = infer_for_test_with_history(config, inference_results, 1);
   } else {
     status = infer_for_test(config, 0, 52, 0, "MUZAKS", "", inference_results);
   }
@@ -387,7 +387,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   if (use_game_history) {
     load_game_history_with_gcg_string(config, gcg_string_header,
                                       ">Tim: MUZAKY 8H MUZAKY +58 58");
-    status = infer_for_test_with_history(config, inference_results, 0);
+    status = infer_for_test_with_history(config, inference_results, 1);
   } else {
     status = infer_for_test(config, 0, 58, 0, "MUZAKY", "", inference_results);
   }
@@ -459,7 +459,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   if (use_game_history) {
     load_game_history_with_gcg_string(config, gcg_string_header,
                                       ">Tim: MUZAK 8H MUZAK +50 50");
-    status = infer_for_test_with_history(config, inference_results, 0);
+    status = infer_for_test_with_history(config, inference_results, 1);
   } else {
     status = infer_for_test(config, 0, 50, 0, "MUZAK", "", inference_results);
   }
@@ -505,7 +505,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
     load_game_history_with_gcg(config, "vs_jeremy");
     status = infer_for_test_with_history(
         config, inference_results,
-        game_history_get_number_of_events(config_get_game_history(config)) - 1);
+        game_history_get_num_events(config_get_game_history(config)));
   } else {
     status = infer_for_test(config, 0, 32, 0, "DEW??", "", inference_results);
   }
@@ -547,7 +547,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
     // game history
     load_and_exec_config_or_die(config, "set -eq 0");
     load_game_history_with_gcg(config, "vs_jeremy");
-    status = infer_for_test_with_history(config, inference_results, 10);
+    status = infer_for_test_with_history(config, inference_results, 11);
     assert(status == ERROR_STATUS_SUCCESS);
     assert(stat_get_num_samples(equity_values) == 7);
     assert(stat_get_num_unique_samples(equity_values) == 4);
@@ -573,7 +573,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   if (use_game_history) {
     load_game_history_with_gcg_string(config, gcg_string_header,
                                       ">Tim: ERNT 8G RENT +8 8");
-    status = infer_for_test_with_history(config, inference_results, 0);
+    status = infer_for_test_with_history(config, inference_results, 1);
   } else {
     status = infer_for_test(config, 0, 8, 0, "ENRT", "", inference_results);
   }
@@ -831,7 +831,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   if (use_game_history) {
     load_game_history_with_gcg_string(config, gcg_string_header,
                                       ">Tim: MUZAKY 8H MUZAKY +58 58");
-    status = infer_for_test_with_history(config, inference_results, 0);
+    status = infer_for_test_with_history(config, inference_results, 1);
   } else {
     status = infer_for_test(config, 0, 58, 0, "MUZAKY", "", inference_results);
   }
@@ -883,7 +883,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
     load_game_history_with_gcg_string(config, gcg_string_header,
                                       string_builder_peek(gcg_builder));
     string_builder_destroy(gcg_builder);
-    status = infer_for_test_with_history(config, inference_results, 3);
+    status = infer_for_test_with_history(config, inference_results, 4);
   } else {
     status = infer_for_test(config, 0, 18, 0, "GRIND", "?", inference_results);
   }
@@ -928,7 +928,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
     load_game_history_with_gcg_string(config, gcg_string_header,
                                       string_builder_peek(gcg_builder));
     string_builder_destroy(gcg_builder);
-    status = infer_for_test_with_history(config, inference_results, 3);
+    status = infer_for_test_with_history(config, inference_results, 4);
   } else {
     status = infer_for_test(config, 0, 6, 0, "RIN", "H", inference_results);
   }
@@ -969,7 +969,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
     test_parse_gcg("exchange_with_seven_in_bag", config, game_history);
     status = infer_for_test_with_history(
         config, inference_results,
-        game_history_get_number_of_events(config_get_game_history(config)) - 1);
+        game_history_get_num_events(config_get_game_history(config)));
     assert(status == ERROR_STATUS_SUCCESS);
     assert(stat_get_num_samples(equity_values) == 10);
     assert(stat_get_num_unique_samples(equity_values) == 8);

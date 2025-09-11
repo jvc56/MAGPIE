@@ -11,18 +11,21 @@ void parse_gcg(const char *gcg_filename, Config *config,
 void parse_gcg_string(const char *input_gcg_string, Config *config,
                       GameHistory *game_history, ErrorStack *error_stack);
 // FIXME: move this to gameplay
-void game_play_to_event_index(GameHistory *game_history, Game *game,
-                              int event_index, ErrorStack *error_stack);
+void game_play_n_events(GameHistory *game_history, Game *game, int event_index,
+                        ErrorStack *error_stack);
 // FIXME: move this to gameplay
 void game_play_to_end(GameHistory *game_history, Game *game,
                       ErrorStack *error_stack);
 void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
                GameHistory *game_history, ErrorStack *error_stack);
 
+// FIXME: move this to gameplay
 char *gcg_next(GameHistory *game_history, Game *game, ErrorStack *error_stack);
+// FIXME: move this to gameplay
 char *gcg_previous(GameHistory *game_history, Game *game,
                    ErrorStack *error_stack);
-char *gcg_goto(GameHistory *game_history, Game *game, int index,
+// FIXME: move this to gameplay
+char *gcg_goto(GameHistory *game_history, Game *game, int num_events_to_play,
                ErrorStack *error_stack);
 
 #endif

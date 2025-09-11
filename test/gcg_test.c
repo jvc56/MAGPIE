@@ -322,12 +322,12 @@ void assert_game_event(const GameHistory *game_history, int event_index,
   }
 }
 
-void assert_game_play_to_event_index(GameHistory *game_history, Game *game1,
-                                     Game *game2, const char **cgps) {
+void assert_game_play_n_events(GameHistory *game_history, Game *game1,
+                               Game *game2, const char **cgps) {
   int event_index = 0;
   const char *cgp = cgps[event_index];
   while (cgp) {
-    game_play_to_event_index_or_die(game_history, game1, event_index);
+    game_play_n_events_or_die(game_history, game1, event_index);
     load_cgp_or_die(game2, cgp);
     assert_games_are_equal(game1, game2, true);
     event_index++;
@@ -369,7 +369,7 @@ void test_success_standard(GameHistory *game_history) {
   assert(racks_are_equal(game_history_player_get_last_rack(game_history, 1),
                          &rack));
 
-  assert(game_history_get_number_of_events(game_history) == 29);
+  assert(game_history_get_num_events(game_history) == 29);
   assert_game_event(game_history, 0, GAME_EVENT_EXCHANGE, 0, 0, "DIIIILU", "",
                     GAME_EVENT_EXCHANGE, 0, 0, 0, 0, 5, 5, "IIILU", 0, ld);
   assert_game_event(game_history, 1, GAME_EVENT_TILE_PLACEMENT_MOVE, 1, 22,
@@ -403,7 +403,7 @@ void test_success_standard(GameHistory *game_history) {
                     GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 0, 0, 0, 0, 0, "", -20,
                     ld);
 
-  assert_game_play_to_event_index(
+  assert_game_play_n_events(
       game_history, game1, game2,
       (const char *[]){
           "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 DIIIILU/ 0/0 0",
@@ -512,7 +512,7 @@ void test_success_five_point_challenge(GameHistory *game_history) {
                     "", GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 0, 0, 0, 0, 0, "",
                     -30, ld);
 
-  assert_game_play_to_event_index(
+  assert_game_play_n_events(
       game_history, game1, game2,
       (const char *[]){
           "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 OOQSUY?/ 0/0 0",
@@ -627,7 +627,7 @@ void test_success_six_pass(GameHistory *game_history) {
       "telling this one for years to come.\n",
       GAME_EVENT_END_RACK_PENALTY, 0, 0, 0, 0, 0, 0, "", -16, ld);
 
-  assert_game_play_to_event_index(
+  assert_game_play_n_events(
       game_history, game1, game2,
       (const char *[]){
           "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AEEGTTV/ 0/0 0",
@@ -722,7 +722,7 @@ void test_success_incomplete(GameHistory *game_history) {
   gcg_filename = "incomplete_after_five_point_challenge";
   gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
   assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
-  game_play_to_event_index_or_die(game_history, game1, 2);
+  game_play_n_events_or_die(game_history, game1, 2);
   load_cgp_or_die(
       game2,
       "15/15/15/15/15/15/15/6SUQ6/2VETCH8/15/15/15/15/15/15 ?FIOOTY/ 24/30 0");
@@ -811,7 +811,7 @@ void test_success_phony_empty_bag(GameHistory *game_history) {
   assert(test_parse_gcg("phony_with_empty_bag", config, game_history) ==
          ERROR_STATUS_SUCCESS);
 
-  game_play_to_event_index_or_die(game_history, game1, 25);
+  game_play_n_events_or_die(game_history, game1, 25);
   load_cgp_or_die(
       game2,
       "2CHIGOE3T3/3O6NAE2/3M6END2/2AY6UG1G1/2B7MO1L1/1VODKA5i1OD/2R2TANNERS1RE/"
@@ -819,21 +819,21 @@ void test_success_phony_empty_bag(GameHistory *game_history) {
       "7PROLIX2 IOQSTTU/EEIIPRU 337/481 1");
   assert_games_are_equal(game1, game2, true);
 
-  game_play_to_event_index_or_die(game_history, game1, 26);
+  game_play_n_events_or_die(game_history, game1, 26);
   load_cgp_or_die(
       game2, "2CHIGOE3T3/3O6NAE2/3M6END2/2AY6UG1G1/2B7MO1L1/1VODKA5i1OD/"
              "2R2TANNERS1RE/OUTA2ZA3T1IF/2I1CRoWDIE2A1/2V6FEEBS1/"
              "1NEWISHLY1LEA2/12N2/12J2/11QATS/7PROLIX2 EEIIPRU/IOTU 481/374 0");
   assert_games_are_equal(game1, game2, true);
 
-  game_play_to_event_index_or_die(game_history, game1, 31);
+  game_play_n_events_or_die(game_history, game1, 31);
   load_cgp_or_die(
       game2, "2CHIGOE3T2P/3O6NAE1U/3M6END1R/2AY6UG1GI/2B7MO1L1/1VODKA5i1OD/"
              "2R2TANNERS1RE/OUTA2ZA3T1IF/2I1CRoWDIE2A1/1IV6FEEBS1/"
              "1NEWISHLY1LEA2/12N2/12J2/7OUT1QATS/7PROLIX2 EEI/ 506/400 0");
   assert_games_are_equal(game1, game2, true);
 
-  game_play_to_event_index_or_die(game_history, game1, 32);
+  game_play_n_events_or_die(game_history, game1, 32);
   load_cgp_or_die(
       game2, "2CHIGOE3T2P/3O6NAE1U/3M6END1R/2AY6UG1GI/2B7MO1L1/1VODKA5i1OD/"
              "2R2TANNERS1RE/OUTA2ZA3T1IF/2I1CRoWDIE2A1/2V6FEEBS1/"
@@ -888,74 +888,74 @@ void test_partially_known_rack_from_phonies(GameHistory *game_history) {
   error_code_t gcg_parse_status =
       test_parse_gcg("partially_known_rack_from_phonies", config, game_history);
   assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
-  game_play_to_event_index_or_die(game_history, game, 2);
+  game_play_n_events_or_die(game_history, game, 2);
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 0)),
                             "DEEORUV");
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 1)), "");
 
-  game_play_to_event_index_or_die(game_history, game, 5);
+  game_play_n_events_or_die(game_history, game, 5);
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 0)),
                             "BDFLQRU");
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 1)),
                             "AAAEIST");
 
-  game_play_to_event_index_or_die(game_history, game, 6);
+  game_play_n_events_or_die(game_history, game, 6);
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 0)), "");
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 1)),
                             "AAAEIST");
 
-  game_play_to_event_index_or_die(game_history, game, 7);
+  game_play_n_events_or_die(game_history, game, 7);
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 0)),
                             "BELNQRU");
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 1)),
                             "AAAEST");
 
-  game_play_to_event_index_or_die(game_history, game, 8);
+  game_play_n_events_or_die(game_history, game, 8);
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 0)), "");
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 1)),
                             "AAAELST");
 
-  game_play_to_event_index_or_die(game_history, game, 9);
+  game_play_n_events_or_die(game_history, game, 9);
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 0)),
                             "AHINNRW");
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 1)),
                             "AEST");
 
-  game_play_to_event_index_or_die(game_history, game, 11);
+  game_play_n_events_or_die(game_history, game, 11);
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 0)),
                             "AEEHIMN");
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 1)),
                             "AST");
 
-  game_play_to_event_index_or_die(game_history, game, 14);
+  game_play_n_events_or_die(game_history, game, 14);
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 0)),
                             "AEHIMNR");
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 1)),
                             "AILRST");
 
-  game_play_to_event_index_or_die(game_history, game, 15);
+  game_play_n_events_or_die(game_history, game, 15);
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 0)), "");
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 1)),
                             "AAILRST");
 
-  game_play_to_event_index_or_die(game_history, game, 16);
+  game_play_n_events_or_die(game_history, game, 16);
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 0)),
                             "EINNNX?");
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 1)), "L");
 
-  game_play_to_event_index_or_die(game_history, game, 18);
+  game_play_n_events_or_die(game_history, game, 18);
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 0)),
                             "EFINNN?");
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 1)), "L");
 
-  game_play_to_event_index_or_die(game_history, game, 21);
+  game_play_n_events_or_die(game_history, game, 21);
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 0)),
                             "AGILNO?");
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 1)),
                             "AAGJLOO");
 
   // After an exchange, we cannot be sure of any of the opponent's tiles
-  game_play_to_event_index_or_die(game_history, game, 23);
+  game_play_n_events_or_die(game_history, game, 23);
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 0)),
                             "EEIOSVY");
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game, 1)), "");

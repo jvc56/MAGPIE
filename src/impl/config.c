@@ -1181,7 +1181,7 @@ char *impl_load(Config *config, ErrorStack *error_stack) {
       "Successfully loaded game: %s vs %s (%d events)",
       game_history_player_get_name(config->game_history, 0),
       game_history_player_get_name(config->game_history, 1),
-      game_history_get_number_of_events(config->game_history));
+      game_history_get_num_played_events(config->game_history));
 
   return result;
 }
@@ -1308,14 +1308,16 @@ char *impl_goto(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
 
-  const char *turn_index_str = config_get_parg_value(config, ARG_TOKEN_GOTO, 0);
-  const int turn_index = string_to_int(turn_index_str, error_stack);
+  const char *num_events_to_play_str =
+      config_get_parg_value(config, ARG_TOKEN_GOTO, 0);
+  const int num_events_to_play =
+      string_to_int(num_events_to_play_str, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
 
   config_init_game(config);
-  gcg_goto(config->game_history, config->game, turn_index, error_stack);
+  gcg_goto(config->game_history, config->game, num_events_to_play, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
