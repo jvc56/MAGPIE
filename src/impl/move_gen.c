@@ -676,7 +676,6 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
         if (wordmap_gen_check_playthrough_and_crosses(gen, word_idx,
                                                       start_col)) {
           record_wmp_plays_for_word(gen, subrack_idx, start_col, 0, 0);
-        } else {
         }
       }
     }
@@ -1663,9 +1662,14 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
     return;
   }
 
-  anchor_heap_add_unheaped_anchor(
-      &gen->anchor_heap, gen->current_row_index, col, gen->last_anchor_col,
-      gen->dir, gen->highest_shadow_equity, gen->highest_shadow_score);
+  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    wmp_move_gen_add_anchors(&gen->wmp_move_gen, gen->current_row_index, col,
+                             gen->last_anchor_col, gen->dir, &gen->anchor_heap);
+  } else {
+    anchor_heap_add_unheaped_anchor(
+        &gen->anchor_heap, gen->current_row_index, col, gen->last_anchor_col,
+        gen->dir, gen->highest_shadow_equity, gen->highest_shadow_score);
+  }
 }
 
 void shadow_by_orientation(MoveGen *gen) {
@@ -1864,9 +1868,13 @@ void gen_record_scoring_plays(MoveGen *gen) {
       recursive_gen_alpha(gen, anchor.col, anchor.col, anchor.col,
                           gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
     } else {
-      recursive_gen(gen, anchor.col, kwg_root_node_index, anchor.col,
-                    anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,
-                    0);
+      if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+        wordmap_gen(gen, &anchor);
+      } else {
+        recursive_gen(gen, anchor.col, kwg_root_node_index, anchor.col,
+                      anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,
+                      0);
+      }
     }
 
     // If a better play has been found than should have been possible for
