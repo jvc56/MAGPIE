@@ -568,14 +568,126 @@ void test_shadow_wmp_nonplaythrough_existence(void) {
 
   AnchorHeap anchor_list;
   load_and_shadow(game, player, EMPTY_CGP, "MUZJIKS", &anchor_list);
-  assert(anchor_list.count == 1);
+  assert(anchor_list.count == 7);
+
+  // 7 tiles: MUZJIKS
   assert_anchor_equity_int(&anchor_list, 0, 128);
+  assert_anchor_score(&anchor_list, 0, 128);
+  assert(anchor_list.anchors[0].tiles_to_play == 7);
+  assert(anchor_list.anchors[0].row == 7);
+  assert(anchor_list.anchors[0].col == 7);
+  assert(anchor_list.anchors[0].dir == BOARD_HORIZONTAL_DIRECTION);
+  assert(anchor_list.anchors[0].playthrough_blocks == 0);
+
+  // 6 tiles, ZJKMIS
+  assert_anchor_equity_int(&anchor_list, 1, 76);
+  assert_anchor_score(&anchor_list, 1, 76);
+  assert(anchor_list.anchors[1].tiles_to_play == 6);
+  assert(anchor_list.anchors[1].row == 7);
+  assert(anchor_list.anchors[1].col == 7);
+  assert(anchor_list.anchors[1].dir == BOARD_HORIZONTAL_DIRECTION);
+  assert(anchor_list.anchors[1].playthrough_blocks == 0);
+
+  // 5 tiles, ZJKMI
+  assert_anchor_equity_int(&anchor_list, 2, 74);
+  assert_anchor_score(&anchor_list, 2, 74);
+  assert(anchor_list.anchors[2].tiles_to_play == 5);
+  assert(anchor_list.anchors[2].row == 7);
+  assert(anchor_list.anchors[2].col == 7);
+  assert(anchor_list.anchors[2].dir == BOARD_HORIZONTAL_DIRECTION);
+  assert(anchor_list.anchors[2].playthrough_blocks == 0);
+
+  // 4 tiles, ZJKM
+  assert_anchor_equity_int(&anchor_list, 3, 52);
+  assert_anchor_score(&anchor_list, 3, 52);
+  assert(anchor_list.anchors[3].tiles_to_play == 4);
+  assert(anchor_list.anchors[3].row == 7);
+  assert(anchor_list.anchors[3].col == 7);
+  assert(anchor_list.anchors[3].dir == BOARD_HORIZONTAL_DIRECTION);
+  assert(anchor_list.anchors[3].playthrough_blocks == 0);
+
+  // 3 tiles, ZJK
+  assert_anchor_equity_int(&anchor_list, 4, 46);
+  assert_anchor_score(&anchor_list, 4, 46);
+  assert(anchor_list.anchors[4].tiles_to_play == 3);
+  assert(anchor_list.anchors[4].row == 7);
+  assert(anchor_list.anchors[4].col == 7);
+  assert(anchor_list.anchors[4].dir == BOARD_HORIZONTAL_DIRECTION);
+  assert(anchor_list.anchors[4].playthrough_blocks == 0);
+
+  // 2 tiles, ZJ
+  assert_anchor_equity_int(&anchor_list, 5, 36);
+  assert_anchor_score(&anchor_list, 5, 36);
+  assert(anchor_list.anchors[5].tiles_to_play == 2);
+  assert(anchor_list.anchors[5].row == 7);
+  assert(anchor_list.anchors[5].col == 7);
+  assert(anchor_list.anchors[5].dir == BOARD_HORIZONTAL_DIRECTION);
+  assert(anchor_list.anchors[5].playthrough_blocks == 0);
+
+  // 1 tile, useless anchor. TODO(olaugh): avoid creating this
+  // Harmless though: no plays will be found here.
+  assert_anchor_equity_int(&anchor_list, 6, 0);
+  assert_anchor_score(&anchor_list, 6, 0);
+  assert(anchor_list.anchors[6].tiles_to_play == 1);
+  assert(anchor_list.anchors[6].row == 7);
+  assert(anchor_list.anchors[6].col == 7);
+  assert(anchor_list.anchors[6].dir == BOARD_HORIZONTAL_DIRECTION);
 
   load_and_shadow(game, player, EMPTY_CGP, "TRONGLE", &anchor_list);
-  assert(anchor_list.count == 1);
-  // We know there are sixes with a G, and assume something could put the G on
-  // the DWS even though none do.
+
+  // There are no sevens. We check full rack existence to avoid creating the
+  // bingo anchor.
+  assert(anchor_list.count == 6);
+
+  // 6 tiles, Gxxxxx
   assert_anchor_equity_int(&anchor_list, 0, 18);
+  assert_anchor_score(&anchor_list, 0, 18);
+  assert(anchor_list.anchors[0].tiles_to_play == 6);
+  assert(anchor_list.anchors[0].row == 7);
+  assert(anchor_list.anchors[0].col == 7);
+  assert(anchor_list.anchors[0].dir == BOARD_HORIZONTAL_DIRECTION);
+  assert(anchor_list.anchors[0].playthrough_blocks == 0);
+
+  // 5 tiles, Gxxxx
+  assert_anchor_equity_int(&anchor_list, 1, 16);
+  assert_anchor_score(&anchor_list, 1, 16);
+  assert(anchor_list.anchors[1].tiles_to_play == 5);
+  assert(anchor_list.anchors[1].row == 7);
+  assert(anchor_list.anchors[1].col == 7);
+  assert(anchor_list.anchors[1].dir == BOARD_HORIZONTAL_DIRECTION);
+  assert(anchor_list.anchors[1].playthrough_blocks == 0);
+
+  // 4 tiles, Gxxx
+  assert_anchor_equity_int(&anchor_list, 2, 10);
+  assert_anchor_score(&anchor_list, 2, 10);
+  assert(anchor_list.anchors[2].tiles_to_play == 4);
+  assert(anchor_list.anchors[2].row == 7);
+  assert(anchor_list.anchors[2].col == 7);
+  assert(anchor_list.anchors[2].dir == BOARD_HORIZONTAL_DIRECTION);
+  assert(anchor_list.anchors[2].playthrough_blocks == 0);
+
+  // 3 tiles, Gxx
+  assert_anchor_equity_int(&anchor_list, 3, 8);
+  assert_anchor_score(&anchor_list, 3, 8);
+  assert(anchor_list.anchors[3].tiles_to_play == 3);
+  assert(anchor_list.anchors[3].row == 7);
+  assert(anchor_list.anchors[3].col == 7);
+  assert(anchor_list.anchors[3].dir == BOARD_HORIZONTAL_DIRECTION);
+  assert(anchor_list.anchors[3].playthrough_blocks == 0);
+
+  // 2 tiles, Gx
+  assert_anchor_equity_int(&anchor_list, 4, 6);
+  assert_anchor_score(&anchor_list, 4, 6);
+  assert(anchor_list.anchors[4].tiles_to_play == 2);
+  assert(anchor_list.anchors[4].row == 7);
+  assert(anchor_list.anchors[4].col == 7);
+  assert(anchor_list.anchors[4].dir == BOARD_HORIZONTAL_DIRECTION);
+  assert(anchor_list.anchors[4].playthrough_blocks == 0);
+
+  // useless 1 tile anchor
+  assert_anchor_equity_int(&anchor_list, 5, 0);
+  assert_anchor_score(&anchor_list, 5, 0);
+  assert(anchor_list.anchors[5].tiles_to_play == 1);
 
   load_and_shadow(game, player, EMPTY_CGP, "VVWWXYZ", &anchor_list);
   assert(anchor_list.count == 1);
@@ -602,22 +714,28 @@ void test_shadow_wmp_playthrough_bingo_existence(void) {
 
   AnchorHeap anchor_list;
   load_and_shadow(game, player, qi_qis, "FRUITED", &anchor_list);
-  assert(anchor_list.count == 8);
+  assert(anchor_list.count == 47);
 
   // f9 UFTRIDE for 88, not 8g (QI)DURFITE for 128
   assert_anchor_equity_int(&anchor_list, 0, 88);
+  assert_anchor_score(&anchor_list, 0, 88);
+  assert(anchor_list.anchors[0].tiles_to_play == 7);
   assert(anchor_list.anchors[0].row == 5);
   assert(anchor_list.anchors[0].col == 8);
   assert(anchor_list.anchors[0].dir == BOARD_VERTICAL_DIRECTION);
+  assert(anchor_list.anchors[0].playthrough_blocks == 0);
 
   load_and_shadow(game, player, qi_qis, "AOUNS??", &anchor_list);
-  assert(anchor_list.count == 9);
+  assert(anchor_list.count == 57);
 
   // 8g (QI)NghAOSU
   assert_anchor_equity_int(&anchor_list, 0, 101);
+  assert_anchor_score(&anchor_list, 0, 101);
+  assert(anchor_list.anchors[0].tiles_to_play == 7);
   assert(anchor_list.anchors[0].row == 7);
   assert(anchor_list.anchors[0].col == 7);
   assert(anchor_list.anchors[0].dir == BOARD_HORIZONTAL_DIRECTION);
+  assert(anchor_list.anchors[0].playthrough_blocks == 1);
 
   game_destroy(game);
   config_destroy(config);
