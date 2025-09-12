@@ -14,6 +14,7 @@
 #include "../def/thread_control_defs.h"
 #include "../ent/anchor.h"
 #include "../ent/bag.h"
+#include "../ent/bit_rack.h"
 #include "../ent/board.h"
 #include "../ent/bonus_square.h"
 #include "../ent/equity.h"
@@ -394,7 +395,7 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
   }
 }
 
-bool gen_is_left_of_playthrough(MoveGen *gen, int col) {
+bool gen_is_left_of_playthrough(const MoveGen *gen, int col) {
   if (col == BOARD_DIM - 1) {
     return false;
   }
@@ -437,8 +438,8 @@ static inline void set_play_for_record_wmp(MoveGen *gen, Move *move,
   }
 }
 
-static inline double get_move_equity_for_sort_type_wmp(MoveGen *gen, Move *move,
-                                                       double leave_value) {
+static inline Equity get_move_equity_for_sort_type_wmp(MoveGen *gen, const Move *move,
+                                                       Equity leave_value) {
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     return static_eval_get_move_equity_with_leave_value(
         &gen->ld, move, &gen->leave, &gen->opponent_rack,
@@ -450,7 +451,7 @@ static inline double get_move_equity_for_sort_type_wmp(MoveGen *gen, Move *move,
 
 static inline void
 update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
-                                             int score, double leave_value) {
+                                             int score, Equity leave_value) {
   if (gen->move_record_type == MOVE_RECORD_ALL) {
     Move *move = move_list_get_spare_move(gen->move_list);
     set_play_for_record_wmp(gen, move, start_col, score);
@@ -468,7 +469,7 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
   }
 }
 
-void record_wmp_play(MoveGen *gen, int start_col, double leave_value) {
+void record_wmp_play(MoveGen *gen, int start_col, Equity leave_value) {
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
   const int bingo_bonus =
       gen->max_tiles_to_play == RACK_SIZE ? gen->bingo_bonus : 0;
@@ -645,7 +646,7 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
        subrack_idx++) {
     if (gen->number_of_tiles_in_bag > 0) {
-      const double leave_value =
+      const Equity leave_value =
           wmp_move_gen_get_leave_value(wgen, subrack_idx);
       if (better_play_has_been_found(gen, leave_value +
                                               anchor->highest_possible_score)) {
@@ -656,7 +657,7 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
       continue;
     }
     if (gen->number_of_tiles_in_bag == 0) {
-      wgen->leave_value = 0.0;
+      wgen->leave_value = 0;
       for (int ml = 0; ml < ld_get_size(&gen->ld); ml++) {
         const int leave_num_ml =
             rack_get_letter(&gen->player_rack, ml) -
