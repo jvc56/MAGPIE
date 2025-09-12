@@ -412,7 +412,7 @@ void generate_moves_for_game(const MoveGenArgs *args) {
       .move_sort_type = player_get_move_sort_type(player_on_turn),
       .override_kwg = NULL,
       .thread_index = args->thread_index,
-      .max_equity_diff = args->max_equity_diff,
+      .eq_margin_movegen = args->eq_margin_movegen,
   };
 
   generate_moves(&args_with_overwritten_record_and_sort);
@@ -426,7 +426,7 @@ Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
       .move_sort_type = MOVE_SORT_EQUITY,
       .override_kwg = NULL,
       .thread_index = thread_index,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
   generate_moves(&args);
   return move_list_get_move(move_list, 0);

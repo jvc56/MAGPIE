@@ -53,7 +53,7 @@ typedef struct MoveGen {
   // This field is only used for the MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST
   // record type
   Equity best_move_equity_or_score;
-  Equity max_equity_diff;
+  Equity eq_margin_movegen;
 
   MachineLetter strip[(MOVE_MAX_TILES)];
   MachineLetter exchange_strip[(MOVE_MAX_TILES)];
@@ -123,7 +123,7 @@ typedef struct MoveGenArgs {
   Game *game;
   move_record_t move_record_type;
   move_sort_t move_sort_type;
-  Equity max_equity_diff;
+  Equity eq_margin_movegen;
   int thread_index;
   MoveList *move_list;
   const KWG *override_kwg;

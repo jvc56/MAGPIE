@@ -640,7 +640,7 @@ void test_validated_move_distinct_kwg(void) {
       .game = game,
       .move_list = move_list,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   const Player *player0 = game_get_player(game, 0);

@@ -22,7 +22,6 @@ void simulate(SimArgs *sim_args, SimResults *sim_results,
   }
 
   if (sim_args->use_inference) {
-    // FIXME: reuse inference if it was already computed for this position
     infer(&sim_args->inference_args, sim_args->inference_results, error_stack);
     if (!error_stack_is_empty(error_stack) ||
         thread_control_get_status(sim_args->thread_control) !=

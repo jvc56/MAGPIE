@@ -380,7 +380,7 @@ void play_top_n_equity_move(Game *game, int n) {
       .move_sort_type = MOVE_SORT_EQUITY,
       .override_kwg = NULL,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   generate_moves(&args);
@@ -716,7 +716,7 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
       .game = game,
       .move_list = move_list,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   rack_set_to_string(game_get_ld(game), player_rack, rack_string);
@@ -993,7 +993,7 @@ void generate_anchors_for_test(Game *game) {
       .move_sort_type = player_get_move_sort_type(player_on_turn),
       .override_kwg = NULL,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
   gen_load_position(gen, &args);
   gen_look_up_leaves_and_record_exchanges(gen);

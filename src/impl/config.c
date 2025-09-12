@@ -91,8 +91,8 @@ typedef enum {
   ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,
   ARG_TOKEN_MAX_ITERATIONS,
   ARG_TOKEN_STOP_COND_PCT,
-  ARG_TOKEN_EQUITY_MARGIN,
-  ARG_TOKEN_MAX_EQUITY_DIFF,
+  ARG_TOKEN_EQ_MARGIN_INFERENCE,
+  ARG_TOKEN_EQ_MARGIN_MOVEGEN,
   ARG_TOKEN_MIN_PLAY_ITERATIONS,
   ARG_TOKEN_USE_GAME_PAIRS,
   ARG_TOKEN_USE_SMALL_PLAYS,
@@ -145,8 +145,8 @@ struct Config {
   int max_iterations;
   int min_play_iterations;
   double stop_cond_pct;
-  Equity equity_margin;
-  Equity max_equity_diff;
+  Equity eq_margin_inference;
+  Equity eq_margin_movegen;
   bool use_game_pairs;
   bool human_readable;
   bool use_small_plays;
@@ -288,10 +288,6 @@ int config_get_max_iterations(const Config *config) {
 
 double config_get_stop_cond_pct(const Config *config) {
   return config->stop_cond_pct;
-}
-
-Equity config_get_equity_margin(const Config *config) {
-  return config->equity_margin;
 }
 
 int config_get_time_limit_seconds(const Config *config) {
@@ -787,7 +783,7 @@ void impl_move_gen(Config *config, ErrorStack *error_stack) {
       .game = config->game,
       .move_list = ml,
       .thread_index = 0,
-      .max_equity_diff = config->max_equity_diff,
+      .eq_margin_movegen = config->eq_margin_movegen,
   };
   generate_moves_for_game(&args);
 }
@@ -802,7 +798,7 @@ void config_fill_infer_args(const Config *config, bool use_game_history,
   args->target_score = target_score;
   args->target_num_exch = target_num_exch;
   args->move_capacity = config_get_num_plays(config);
-  args->equity_margin = config_get_equity_margin(config);
+  args->equity_margin = config->eq_margin_inference;
   args->target_played_tiles = target_played_tiles;
   args->target_known_rack = target_known_rack;
   args->use_game_history = use_game_history;
@@ -1965,31 +1961,31 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     }
   }
 
-  // FIXME: get better names for equity margin and max equity diff
-  const char *new_equity_margin_double =
-      config_get_parg_value(config, ARG_TOKEN_EQUITY_MARGIN, 0);
-  if (new_equity_margin_double) {
-    double equity_margin_double;
-    config_load_double(config, ARG_TOKEN_EQUITY_MARGIN, 0, EQUITY_MAX_DOUBLE,
-                       &equity_margin_double, error_stack);
+  const char *new_eq_margin_inference_double =
+      config_get_parg_value(config, ARG_TOKEN_EQ_MARGIN_INFERENCE, 0);
+  if (new_eq_margin_inference_double) {
+    double eq_margin_inference_double;
+    config_load_double(config, ARG_TOKEN_EQ_MARGIN_INFERENCE, 0,
+                       EQUITY_MAX_DOUBLE, &eq_margin_inference_double,
+                       error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
-    assert(!isnan(equity_margin_double));
-    config->equity_margin = double_to_equity(equity_margin_double);
+    assert(!isnan(eq_margin_inference_double));
+    config->eq_margin_inference = double_to_equity(eq_margin_inference_double);
   }
 
-  const char *new_max_equity_diff_double =
-      config_get_parg_value(config, ARG_TOKEN_MAX_EQUITY_DIFF, 0);
-  if (new_max_equity_diff_double) {
-    double max_equity_diff_double = NAN;
-    config_load_double(config, ARG_TOKEN_MAX_EQUITY_DIFF, 0, EQUITY_MAX_DOUBLE,
-                       &max_equity_diff_double, error_stack);
+  const char *new_eq_margin_movegen =
+      config_get_parg_value(config, ARG_TOKEN_EQ_MARGIN_MOVEGEN, 0);
+  if (new_eq_margin_movegen) {
+    double eq_margin_movegen = NAN;
+    config_load_double(config, ARG_TOKEN_EQ_MARGIN_MOVEGEN, 0,
+                       EQUITY_MAX_DOUBLE, &eq_margin_movegen, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
-    assert(!isnan(max_equity_diff_double));
-    config->max_equity_diff = double_to_equity(max_equity_diff_double);
+    assert(!isnan(eq_margin_movegen));
+    config->eq_margin_movegen = double_to_equity(eq_margin_movegen);
   }
 
   config_load_double(config, ARG_TOKEN_TT_FRACTION_OF_MEM, 0, 1,
@@ -2403,8 +2399,8 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_MAX_ITERATIONS, "iterations", 1, 1);
   arg(ARG_TOKEN_MIN_PLAY_ITERATIONS, "minplayiterations", 1, 1);
   arg(ARG_TOKEN_STOP_COND_PCT, "scondition", 1, 1);
-  arg(ARG_TOKEN_EQUITY_MARGIN, "equitymargin", 1, 1);
-  arg(ARG_TOKEN_MAX_EQUITY_DIFF, "maxequitydifference", 1, 1);
+  arg(ARG_TOKEN_EQ_MARGIN_INFERENCE, "equitymargin", 1, 1);
+  arg(ARG_TOKEN_EQ_MARGIN_MOVEGEN, "maxequitydifference", 1, 1);
   arg(ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1);
   arg(ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1);
   arg(ARG_TOKEN_SIM_WITH_INFERENCE, "sinfer", 1, 1);
@@ -2428,8 +2424,8 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->num_plays = DEFAULT_MOVE_LIST_CAPACITY;
   config->num_small_plays = DEFAULT_SMALL_MOVE_LIST_CAPACITY;
   config->plies = 2;
-  config->equity_margin = 0;
-  config->max_equity_diff = int_to_equity(10);
+  config->eq_margin_inference = 0;
+  config->eq_margin_movegen = int_to_equity(10);
   config->min_play_iterations = 100;
   config->max_iterations = 5000;
   config->stop_cond_pct = 99;

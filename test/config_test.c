@@ -211,7 +211,6 @@ void test_config_load_success(void) {
   const char *r1 = "all";
   const char *s2 = "equity";
   const char *r2 = "best";
-  double equity_margin = 4.6;
   int num_plays = 10;
   int plies = 4;
   int max_iterations = 400;
@@ -224,15 +223,15 @@ void test_config_load_success(void) {
   string_builder_add_formatted_string(
       test_string_builder,
       "set -ld %s -bb %d -var %s -l1 %s -l2 %s -s1 %s -r1 "
-      "%s -s2 %s -r2 %s -eq %0.2f -numplays %d "
+      "%s -s2 %s -r2 %s  -numplays %d "
       "-plies %d -it "
       "%d -scond %d -seed %d -threads %d -pfreq %d -gp true -hr true "
       "-p1 %s "
       "-p2 "
       "%s",
-      ld_name, bingo_bonus, game_variant, l1, l2, s1, r1, s2, r2, equity_margin,
-      num_plays, plies, max_iterations, stopping_cond, seed, number_of_threads,
-      print_info, p1, p2);
+      ld_name, bingo_bonus, game_variant, l1, l2, s1, r1, s2, r2, num_plays,
+      plies, max_iterations, stopping_cond, seed, number_of_threads, print_info,
+      p1, p2);
 
   load_and_exec_config_or_die(config, string_builder_peek(test_string_builder));
 
@@ -246,8 +245,6 @@ void test_config_load_success(void) {
   assert(players_data_get_move_record_type(config_get_players_data(config),
                                            1) == MOVE_RECORD_BEST);
   assert(config_get_bingo_bonus(config) == bingo_bonus);
-  assert(within_epsilon(equity_to_double(config_get_equity_margin(config)),
-                        equity_margin));
   assert(config_get_num_plays(config) == num_plays);
   assert(config_get_plies(config) == plies);
   assert(config_get_max_iterations(config) == max_iterations);
@@ -296,8 +293,6 @@ void test_config_load_success(void) {
   assert(players_data_get_move_record_type(config_get_players_data(config),
                                            1) == MOVE_RECORD_ALL);
   assert(config_get_bingo_bonus(config) == bingo_bonus);
-  assert(within_epsilon(equity_to_double(config_get_equity_margin(config)),
-                        equity_margin));
   assert(config_get_num_plays(config) == num_plays);
   assert(config_get_plies(config) == plies);
   assert(config_get_max_iterations(config) == max_iterations);

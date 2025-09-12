@@ -193,7 +193,7 @@ static inline Equity gen_get_cutoff_equity_or_score(const MoveGen *gen) {
 #endif
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
     cutoff_equity_or_score =
-        gen->best_move_equity_or_score - gen->max_equity_diff;
+        gen->best_move_equity_or_score - gen->eq_margin_movegen;
     break;
   case MOVE_RECORD_BEST:;
     const Move *move = gen_get_readonly_best_move(gen);
@@ -1433,7 +1433,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   move_sort_t move_sort_type = args->move_sort_type;
   MoveList *move_list = args->move_list;
   const KWG *override_kwg = args->override_kwg;
-  gen->max_equity_diff = args->max_equity_diff;
+  gen->eq_margin_movegen = args->eq_margin_movegen;
 
   gen->board = game_get_board(game);
   gen->player_index = game_get_player_on_turn_index(game);
