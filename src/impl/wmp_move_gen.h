@@ -228,7 +228,7 @@ wmp_move_gen_save_playthrough_state(WMPMoveGen *wmp_move_gen) {
   wmp_move_gen->playthrough_bit_rack_copy = wmp_move_gen->playthrough_bit_rack;
   wmp_move_gen->num_tiles_played_through_copy =
       wmp_move_gen->num_tiles_played_through;
-  wmp_move_gen->playthrough_blocks_copy = wmp_move_gen->playthrough_blocks;            
+  wmp_move_gen->playthrough_blocks_copy = wmp_move_gen->playthrough_blocks;
 }
 
 static inline void
@@ -460,8 +460,8 @@ wmp_move_gen_get_word(const WMPMoveGen *wmp_move_gen, int word_idx) {
   return wmp_move_gen->buffer + word_idx * wmp_move_gen->word_length;
 }
 
-static inline Equity
-wmp_move_gen_get_leave_value(WMPMoveGen *wmp_move_gen, int subrack_idx) {
+static inline Equity wmp_move_gen_get_leave_value(WMPMoveGen *wmp_move_gen,
+                                                  int subrack_idx) {
   const int offset =
       subracks_get_combination_offset(wmp_move_gen->tiles_to_play);
   const SubrackInfo *subrack_info =

@@ -1597,7 +1597,6 @@ void gen_record_pass(MoveGen *gen) {
   }
 }
 
-
 void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen(args->thread_index);
   gen_load_position(gen, args);

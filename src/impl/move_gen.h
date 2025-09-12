@@ -104,7 +104,7 @@ typedef struct MoveGen {
   Equity descending_tile_scores[WORD_ALIGNING_RACK_SIZE];
   Equity descending_tile_scores_copy[WORD_ALIGNING_RACK_SIZE];
   Equity best_leaves[(RACK_SIZE)];
-  
+
   AnchorHeap anchor_heap;
   LetterDistribution ld;
 
@@ -119,7 +119,7 @@ typedef struct MoveGen {
   MoveList *move_list;
 
   WMPMoveGen wmp_move_gen;
-    // Number of playthrough blocks used by the by current move of recursive_gen
+  // Number of playthrough blocks used by the by current move of recursive_gen
   // given the rightmost column of the move. Set per anchor because it depends
   // on the anchor column.
   uint8_t num_playthrough_blocks[BOARD_DIM];
