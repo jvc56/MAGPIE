@@ -1079,6 +1079,10 @@ static inline void shadow_record(MoveGen *gen) {
         gen->full_rack_descending_tile_scores, gen->number_of_tiles_in_bag,
         gen->number_of_letters_on_rack, gen->tiles_played);
   }
+  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    wmp_move_gen_maybe_update_anchor(&gen->wmp_move_gen, gen->tiles_played,
+                                     score, equity);
+  }
   if (equity > gen->highest_shadow_equity) {
     gen->highest_shadow_equity = equity;
   }
@@ -1330,12 +1334,14 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
     if (cross_set == TRIVIAL_CROSS_SET) {
       is_unique = true;
     }
+    bool found_playthrough_tile = false;
     while (gen->current_right_col + 1 < BOARD_DIM) {
       const MachineLetter next_letter =
           gen_cache_get_letter(gen, gen->current_right_col + 1);
       if (next_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
         break;
       }
+      found_playthrough_tile = true;
       const MachineLetter unblanked_playthrough_ml =
           get_unblanked_machine_letter(next_letter);
       rack_add_letter(&gen->bingo_alpha_rack, unblanked_playthrough_ml);
@@ -1347,6 +1353,10 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
       }
       gen->shadow_mainword_restricted_score += gen->tile_scores[next_letter];
       gen->current_right_col++;
+    }
+
+    if (wmp_move_gen_is_active(&gen->wmp_move_gen) && found_playthrough_tile) {
+      wmp_move_gen_increment_playthrough_blocks(&gen->wmp_move_gen);
     }
 
     if (play_is_nonempty_and_nonduplicate(gen->tiles_played, is_unique)) {
@@ -1561,6 +1571,9 @@ static inline void shadow_start_playthrough(MoveGen *gen,
       break;
     }
   }
+  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    wmp_move_gen_increment_playthrough_blocks(&gen->wmp_move_gen);
+  }
   playthrough_shadow_play_left(gen, !board_is_dir_vertical(gen->dir));
 }
 
@@ -1643,6 +1656,7 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   gen->tiles_played = 0;
   gen->max_tiles_to_play = 0;
   wmp_move_gen_reset_playthrough(&gen->wmp_move_gen);
+  wmp_move_gen_reset_anchors(&gen->wmp_move_gen);
 
   shadow_start(gen);
   if (gen->max_tiles_to_play == 0) {
