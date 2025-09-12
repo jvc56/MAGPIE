@@ -438,7 +438,8 @@ static inline void set_play_for_record_wmp(MoveGen *gen, Move *move,
   }
 }
 
-static inline Equity get_move_equity_for_sort_type_wmp(MoveGen *gen, const Move *move,
+static inline Equity get_move_equity_for_sort_type_wmp(MoveGen *gen,
+                                                       const Move *move,
                                                        Equity leave_value) {
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     return static_eval_get_move_equity_with_leave_value(
