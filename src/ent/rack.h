@@ -198,4 +198,13 @@ static inline void rack_increment_unseen_count(const Rack *rack,
   }
 }
 
+static inline void rack_set_letter(Rack *rack, uint8_t machine_letter,
+                                   int count) {
+  rack->array[machine_letter] = count;
+}
+
+static inline void rack_set_total_letters(Rack *rack, int total_letters) {
+  rack->number_of_letters = total_letters;
+}
+
 #endif

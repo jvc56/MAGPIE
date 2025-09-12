@@ -793,6 +793,9 @@ static inline void shadow_record(MoveGen *gen) {
   if (equity > gen->highest_shadow_equity) {
     gen->highest_shadow_equity = equity;
   }
+  if (score > gen->highest_shadow_score) {
+    gen->highest_shadow_score = score;
+  }
   if (gen->tiles_played > gen->max_tiles_to_play) {
     gen->max_tiles_to_play = gen->tiles_played;
   }
@@ -1301,18 +1304,18 @@ static inline void shadow_start(MoveGen *gen) {
 // https://github.com/andy-k/wolges/blob/main/details.txt
 void shadow_play_for_anchor(MoveGen *gen, int col) {
   // Shadow playing is designed to find the best plays first. When we find plays
-  // for endgame using MOVE_RECORD_ALL_SMALL. we need to find all of the plays,
+  // for endgame using MOVE_RECORD_ALL_SMALL, we need to find all of the plays,
   // and because they are ranked for search in the endgame code rather than
   // here, they're returned unordered.
   //
   // It would be better not to even use these Anchor structs in the first place
   // for MOVE_RECORD_ALL_SMALL (or MOVE_RECORD_ALL and instead to just add moves
-  // while looping over the board, but we'll put that off until after other
+  // while looping over the board), but we'll put that off until after other
   // MoveGen changes land.
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
     anchor_heap_add_unheaped_anchor(&gen->anchor_heap, gen->current_row_index,
                                     col, gen->last_anchor_col, gen->dir,
-                                    EQUITY_MAX_VALUE);
+                                    EQUITY_MAX_VALUE, EQUITY_MAX_VALUE);
     return;
   }
 
@@ -1357,9 +1360,9 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
     return;
   }
 
-  anchor_heap_add_unheaped_anchor(&gen->anchor_heap, gen->current_row_index,
-                                  col, gen->last_anchor_col, gen->dir,
-                                  gen->highest_shadow_equity);
+  anchor_heap_add_unheaped_anchor(
+      &gen->anchor_heap, gen->current_row_index, col, gen->last_anchor_col,
+      gen->dir, gen->highest_shadow_equity, gen->highest_shadow_score);
 }
 
 void shadow_by_orientation(MoveGen *gen) {
@@ -1553,6 +1556,7 @@ void gen_record_scoring_plays(MoveGen *gen) {
     gen->last_anchor_col = anchor.last_anchor_col;
     gen->anchor_right_extension_set =
         gen_cache_get_right_extension_set(gen, gen->current_anchor_col);
+    gen->current_anchor_highest_possible_score = anchor.highest_possible_score;
     if (gen->is_wordsmog) {
       recursive_gen_alpha(gen, anchor.col, anchor.col, anchor.col,
                           gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
@@ -1592,6 +1596,7 @@ void gen_record_pass(MoveGen *gen) {
     break;
   }
 }
+
 
 void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen(args->thread_index);
