@@ -475,8 +475,11 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(config, "infer 1 8",
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
   assert_config_exec_status(config, "infer 1 ABC",
-
                             ERROR_STATUS_CONFIG_LOAD_MISSING_ARG);
+  assert_config_exec_status(config, "load testdata/gcgs/muzaks_empyrean.gcg",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "infer", ERROR_STATUS_SUCCESS);
   // Autoplay
   assert_config_exec_status(config,
                             "autoplay move 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",

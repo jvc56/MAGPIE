@@ -840,7 +840,6 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
   Rack target_known_rack;
   rack_set_dist_size_and_reset(&target_known_rack, ld_size);
 
-  // FIXME: allow infer to use zero args
   if (config_get_parg_num_set_values(config, ARG_TOKEN_INFER) == 0) {
     config_infer(config, true, 0, 0, 0, &target_played_tiles,
                  &target_known_rack, config->inference_results, error_stack);
@@ -2368,7 +2367,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   cmd(ARG_TOKEN_RACK, "rack", 2, 2, set_rack, generic);
   cmd(ARG_TOKEN_GEN, "generate", 0, 0, move_gen, generic);
   cmd(ARG_TOKEN_SIM, "simulate", 0, 1, sim, sim);
-  cmd(ARG_TOKEN_INFER, "infer", 2, 3, infer, generic);
+  cmd(ARG_TOKEN_INFER, "infer", 0, 3, infer, generic);
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, generic);
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic);
   cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic);
