@@ -20,22 +20,29 @@ void string_builder_add_leave_rack(StringBuilder *inference_string,
                                    const LeaveRack *leave_rack,
                                    const LetterDistribution *ld, int index,
                                    uint64_t total_draws) {
+  const int ld_size = ld_get_size(ld);
 
-  const Rack *leave_rack_leave = leave_rack_get_leave(leave_rack);
-  const Rack *leave_rack_exchanged = leave_rack_get_exchanged(leave_rack);
+  Rack leave_rack_leave;
+  rack_set_dist_size(&leave_rack_leave, ld_size);
+  leave_rack_get_leave(leave_rack, &leave_rack_leave);
+
+  Rack leave_rack_exchanged;
+  rack_set_dist_size(&leave_rack_exchanged, ld_size);
+  leave_rack_get_exchanged(leave_rack, &leave_rack_exchanged);
+
   int leave_rack_draws = leave_rack_get_draws(leave_rack);
   double leave_rack_equity = leave_rack_get_equity(leave_rack);
 
-  if (rack_is_empty(leave_rack_exchanged)) {
-    string_builder_add_rack(inference_string, leave_rack_leave, ld, false);
+  if (rack_is_empty(&leave_rack_exchanged)) {
+    string_builder_add_rack(inference_string, &leave_rack_leave, ld, false);
     string_builder_add_formatted_string(
         inference_string, "%-3d %-6.2f %-6d %0.2f\n", index + 1,
         ((double)leave_rack_draws / (double)total_draws) * 100,
         leave_rack_draws, leave_rack_equity);
   } else {
-    string_builder_add_rack(inference_string, leave_rack_leave, ld, false);
+    string_builder_add_rack(inference_string, &leave_rack_leave, ld, false);
     string_builder_add_spaces(inference_string, 1);
-    string_builder_add_rack(inference_string, leave_rack_exchanged, ld, false);
+    string_builder_add_rack(inference_string, &leave_rack_exchanged, ld, false);
     string_builder_add_formatted_string(
         inference_string, "%-3d %-6.2f %-6d\n", index + 1,
         ((double)leave_rack_draws / (double)total_draws) * 100,
@@ -174,7 +181,7 @@ void string_builder_add_inference(StringBuilder *inference_string,
 
   string_builder_add_formatted_string(
       inference_string, "\nScore:                 %d\n",
-      inference_results_get_target_score(inference_results));
+      equity_to_int(inference_results_get_target_score(inference_results)));
 
   const Rack *target_unplayed_tiles =
       inference_results_get_target_known_unplayed_tiles(inference_results);
@@ -260,19 +267,29 @@ void string_builder_add_ucgi_leave_rack(StringBuilder *ucgi_string_builder,
                                         const LetterDistribution *ld, int index,
                                         uint64_t total_draws,
                                         bool is_exchange) {
-  const Rack *leave_rack_leave = leave_rack_get_leave(leave_rack);
-  const Rack *leave_rack_exchanged = leave_rack_get_exchanged(leave_rack);
+  const int ld_size = ld_get_size(ld);
+
+  Rack leave_rack_leave;
+  rack_set_dist_size_and_reset(&leave_rack_leave, ld_size);
+  leave_rack_get_leave(leave_rack, &leave_rack_leave);
+
+  Rack leave_rack_exchanged;
+  if (is_exchange) {
+    rack_set_dist_size_and_reset(&leave_rack_exchanged, ld_size);
+    leave_rack_get_exchanged(leave_rack, &leave_rack_exchanged);
+  }
+
   const int draws = leave_rack_get_draws(leave_rack);
   const double equity = equity_to_double(leave_rack_get_equity(leave_rack));
   if (!is_exchange) {
-    string_builder_add_rack(ucgi_string_builder, leave_rack_leave, ld, false);
+    string_builder_add_rack(ucgi_string_builder, &leave_rack_leave, ld, false);
     string_builder_add_formatted_string(
         ucgi_string_builder, " %-3d %-6.2f %-6d %0.2f\n", index + 1,
         ((double)draws / (double)total_draws) * 100, draws, equity);
   } else {
-    string_builder_add_rack(ucgi_string_builder, leave_rack_leave, ld, false);
+    string_builder_add_rack(ucgi_string_builder, &leave_rack_leave, ld, false);
     string_builder_add_spaces(ucgi_string_builder, 1);
-    string_builder_add_rack(ucgi_string_builder, leave_rack_exchanged, ld,
+    string_builder_add_rack(ucgi_string_builder, &leave_rack_exchanged, ld,
                             false);
     string_builder_add_formatted_string(
         ucgi_string_builder, "%-3d %-6.2f %-6d\n", index + 1,

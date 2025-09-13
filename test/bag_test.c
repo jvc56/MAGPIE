@@ -37,7 +37,7 @@ void test_bag(void) {
     assert((int)ld_get_dist(ld, i) == bag_get_letter(bag, i));
   }
 
-  int number_of_remaining_tiles = bag_get_tiles(bag);
+  int number_of_remaining_tiles = bag_get_letters(bag);
   for (int k = 0; k < number_of_remaining_tiles; k++) {
     MachineLetter letter = bag_draw_random_letter(bag, 0);
     rack_add_letter(rack, letter);
@@ -51,7 +51,7 @@ void test_bag(void) {
   rack_reset(rack);
 
   while (!bag_is_empty(bag)) {
-    bag_draw_random_letter(bag, bag_get_tiles(bag) % 2);
+    bag_draw_random_letter(bag, bag_get_letters(bag) % 2);
   }
 
   // Check adding letters to the bag
@@ -123,7 +123,7 @@ void test_bag(void) {
     bag_add_letter(bag, draw_order[tiles_index], player_index);
   }
 
-  assert_bags_are_equal(bag, copy_of_bag, ld_size);
+  assert_bags_are_equal(bag, copy_of_bag);
 
   bag_copy(bag, copy_of_bag);
 
@@ -176,7 +176,7 @@ void test_bag(void) {
     bag_add_letter(bag, draw_order[tiles_index], 1);
   }
 
-  assert_bags_are_equal(bag, copy_of_bag, ld_size);
+  assert_bags_are_equal(bag, copy_of_bag);
 
   bag_destroy(bag);
   bag_destroy(copy_of_bag);

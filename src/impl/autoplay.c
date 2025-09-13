@@ -323,7 +323,7 @@ void game_runner_start(const AutoplayWorker *autoplay_worker,
 bool game_runner_is_game_over(GameRunner *game_runner) {
   return game_over(game_runner->game) ||
          (game_runner->shared_data->leavegen_shared_data &&
-          bag_get_tiles(game_get_bag(game_runner->game)) < (RACK_SIZE));
+          bag_get_letters(game_get_bag(game_runner->game)) < (RACK_SIZE));
 }
 
 void game_runner_play_move(AutoplayWorker *autoplay_worker,
@@ -372,7 +372,7 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
   get_leave_for_move(*move, game, &rare_rack_or_move_leave);
   autoplay_results_add_move(autoplay_worker->autoplay_results,
                             game_runner->game, *move, &rare_rack_or_move_leave);
-  play_move(*move, game, NULL, NULL);
+  play_move(*move, game, NULL);
   game_runner->turn_number++;
 }
 

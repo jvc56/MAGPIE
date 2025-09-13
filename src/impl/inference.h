@@ -3,18 +3,24 @@
 
 #include "../def/inference_defs.h"
 #include "../ent/game.h"
+#include "../ent/game_history.h"
 #include "../ent/inference_results.h"
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
 #include "../util/io_util.h"
 
 typedef struct InferenceArgs {
+  bool use_game_history;
+  GameHistory *game_history;
   int target_index;
-  int target_score;
+  Equity target_score;
   int target_num_exch;
   int move_capacity;
-  double equity_margin;
+  Equity equity_margin;
   Rack *target_played_tiles;
+  Rack *target_known_rack;
+  Rack *nontarget_known_rack;
+  bool update_thread_control_status;
   const Game *game;
   ThreadControl *thread_control;
 } InferenceArgs;

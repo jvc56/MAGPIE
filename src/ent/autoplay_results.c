@@ -538,7 +538,7 @@ void fj_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   FJData *fj_data = (FJData *)recorder->data;
   const Game *game = args->game;
   const Bag *bag = game_get_bag(game);
-  if (fj_data->move_count >= MAX_NUMBER_OF_MOVES || bag_get_tiles(bag) == 0) {
+  if (fj_data->move_count >= MAX_NUMBER_OF_MOVES || bag_get_letters(bag) == 0) {
     return;
   }
   FJMove *fj_move = &fj_data->moves[fj_data->move_count];
@@ -550,7 +550,7 @@ void fj_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   const Player *opponent = game_get_player(game, 1 - fj_move->player_index);
   fj_move->score_diff =
       equity_to_int(player_get_score(player) - player_get_score(opponent));
-  fj_move->unseen_total = bag_get_tiles(bag) + (RACK_SIZE);
+  fj_move->unseen_total = bag_get_letters(bag) + (RACK_SIZE);
   bag_increment_unseen_count(bag, fj_move->unseen_counts);
   rack_increment_unseen_count(player_get_rack(opponent),
                               fj_move->unseen_counts);
@@ -715,7 +715,7 @@ void win_pct_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   const int spread =
       equity_to_int(player_get_score(player) - player_get_score(opponent));
   const int num_tiles_remaining =
-      bag_get_tiles(game_get_bag(game)) +
+      bag_get_letters(game_get_bag(game)) +
       rack_get_total_letters(player_get_rack(opponent));
   if (num_tiles_remaining > win_pct_data->num_rows || num_tiles_remaining < 1) {
     log_fatal(

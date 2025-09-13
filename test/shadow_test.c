@@ -42,7 +42,7 @@ void load_and_generate_moves(Game *game, MoveList *move_list,
       .game = game,
       .move_list = move_list,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   load_cgp_or_die(game, cgp);

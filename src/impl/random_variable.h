@@ -3,10 +3,13 @@
 
 #include "../def/bai_defs.h"
 #include "../ent/game.h"
+#include "../ent/game_history.h"
+#include "../ent/inference_results.h"
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "bai_logger.h"
+#include "inference.h"
 #include <stdint.h>
 
 typedef struct RandomVariables RandomVariables;
@@ -25,6 +28,9 @@ typedef struct SimArgs {
   const MoveList *move_list;
   Rack *known_opp_rack;
   WinPct *win_pcts;
+  bool use_inference;
+  InferenceResults *inference_results;
+  InferenceArgs inference_args;
   ThreadControl *thread_control;
   BAIOptions bai_options;
 } SimArgs;

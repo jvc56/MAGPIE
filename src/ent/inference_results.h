@@ -2,6 +2,7 @@
 #define INFERENCE_RESULTS_H
 
 #include "../def/inference_defs.h"
+#include "alias_method.h"
 #include "leave_rack.h"
 #include "rack.h"
 #include "stats.h"
@@ -9,26 +10,26 @@
 
 typedef struct InferenceResults InferenceResults;
 
-InferenceResults *inference_results_create(void);
+InferenceResults *inference_results_create(AliasMethod *alias_method);
 void inference_results_destroy(InferenceResults *inference_results);
 void inference_results_reset(InferenceResults *results, int move_capacity,
                              int ld_size);
 void inference_results_finalize(const Rack *target_played_tiles,
                                 const Rack *target_known_unplayed_tiles,
                                 const Rack *bag_as_rack,
-                                InferenceResults *results, int target_score,
+                                InferenceResults *results, Equity target_score,
                                 int target_number_of_tiles_exchanged,
-                                double equity_margin);
+                                Equity equity_margin);
 
 int inference_results_get_target_number_of_tiles_exchanged(
     const InferenceResults *results);
-int inference_results_get_target_score(const InferenceResults *results);
-double inference_results_get_equity_margin(const InferenceResults *results);
-Rack *
+Equity inference_results_get_target_score(const InferenceResults *results);
+Equity inference_results_get_equity_margin(const InferenceResults *results);
+const Rack *
 inference_results_get_target_played_tiles(const InferenceResults *results);
-Rack *inference_results_get_target_known_unplayed_tiles(
+const Rack *inference_results_get_target_known_unplayed_tiles(
     const InferenceResults *results);
-Rack *inference_results_get_bag_as_rack(const InferenceResults *results);
+const Rack *inference_results_get_bag_as_rack(const InferenceResults *results);
 
 Stat *inference_results_get_equity_values(InferenceResults *results,
                                           inference_stat_t inference_stat_type);
@@ -48,6 +49,8 @@ uint64_t inference_results_get_subtotal_sum_with_minimum(
     int subtotal_index_offset);
 LeaveRackList *inference_results_get_leave_rack_list(
     const InferenceResults *inference_results);
+AliasMethod *
+inference_results_get_alias_method(const InferenceResults *inference_results);
 void inference_results_add_subtotals(InferenceResults *result_being_added,
                                      InferenceResults *result_being_updated);
 void inference_results_set_stat_for_letter(InferenceResults *inference_results,

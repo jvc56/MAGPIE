@@ -199,8 +199,7 @@ RackList *rack_list_create(const LetterDistribution *ld,
   rack_list->total_combos_sum = 0;
 
   Rack rack;
-  rack_set_dist_size(&rack, ld_get_size(ld));
-  rack_reset(&rack);
+  rack_set_dist_size_and_reset(&rack, ld_get_size(ld));
 
   DictionaryWordList *dwl = dictionary_word_list_create();
 
@@ -398,8 +397,6 @@ void rack_list_write_to_klv(RackList *rack_list, const LetterDistribution *ld,
                             KLV *klv) {
   double weighted_sum = 0.0;
   const int ld_size = ld_get_size(ld);
-  Rack rack;
-  rack_set_dist_size(&rack, ld_size);
   for (int i = 0; i < rack_list->number_of_racks; i++) {
     const RackListItem *rli = rack_list->racks_ordered_by_index[i];
     weighted_sum += rli->mean * (double)rli->total_combos;
@@ -416,6 +413,8 @@ void rack_list_write_to_klv(RackList *rack_list, const LetterDistribution *ld,
 
   Rack leave;
   rack_set_dist_size(&leave, ld_size);
+  Rack rack;
+  rack_set_dist_size(&rack, ld_size);
   RackListLetterDistribution rl_ld;
   rack_list_ld_init(&rl_ld, ld);
   for (int i = 0; i < rack_list->number_of_racks; i++) {

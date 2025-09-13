@@ -67,6 +67,9 @@ MoveGen *get_movegen(int thread_index) {
   return cached_gens[thread_index];
 }
 
+// FIXME: is this necessary? the MoveGen struct may not have anymore
+// dist-dependent heap alloc'd fields, so maybe we can now destroy only at
+// program exit.
 void gen_destroy_cache(void) {
   for (int i = 0; i < (MAX_THREADS); i++) {
     generator_destroy(cached_gens[i]);
@@ -190,7 +193,7 @@ static inline Equity gen_get_cutoff_equity_or_score(const MoveGen *gen) {
 #endif
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
     cutoff_equity_or_score =
-        gen->best_move_equity_or_score - gen->max_equity_diff;
+        gen->best_move_equity_or_score - gen->eq_margin_movegen;
     break;
   case MOVE_RECORD_BEST:;
     const Move *move = gen_get_readonly_best_move(gen);
@@ -1408,7 +1411,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   move_sort_t move_sort_type = args->move_sort_type;
   MoveList *move_list = args->move_list;
   const KWG *override_kwg = args->override_kwg;
-  gen->max_equity_diff = args->max_equity_diff;
+  gen->eq_margin_movegen = args->eq_margin_movegen;
 
   gen->board = game_get_board(game);
   gen->player_index = game_get_player_on_turn_index(game);
@@ -1427,7 +1430,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
                     player_get_wmp(player));
 
   gen->bingo_bonus = game_get_bingo_bonus(game);
-  gen->number_of_tiles_in_bag = bag_get_tiles(game_get_bag(game));
+  gen->number_of_tiles_in_bag = bag_get_letters(game_get_bag(game));
   gen->kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
   gen->move_sort_type = move_sort_type;
   gen->move_record_type = move_record_type;

@@ -142,7 +142,7 @@ char *static_evaluation(const char *cgpstr, int num_plays) {
       .move_sort_type = MOVE_SORT_EQUITY,
       .override_kwg = NULL,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
   generate_moves(&args);
 

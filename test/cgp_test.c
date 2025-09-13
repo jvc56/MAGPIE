@@ -55,7 +55,7 @@ void play_move_and_validate_cgp(Game *game, const char *move_string,
   assert(validated_moves_get_number_of_moves(vms) == 1);
   const Move *move = validated_moves_get_move(vms, 0);
   int player_on_turn_index = game_get_player_on_turn_index(game);
-  play_move(move, game, NULL, NULL);
+  play_move(move, game, NULL);
 
   // Return the random rack to the bag and then draw
   // the rack specified by the caller.

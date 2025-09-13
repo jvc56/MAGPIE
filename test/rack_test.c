@@ -117,7 +117,7 @@ void test_rack_main(void) {
 
   // Use rack_to_sub as comparison
   rack_set_to_string(ld, rack_to_sub, "ABBBCCCEF");
-  racks_are_equal(rack_to_update, rack_to_sub);
+  assert(racks_are_equal(rack_to_update, rack_to_sub));
 
   Rack *expected_rack = rack_create(ld_get_size(ld));
 
@@ -125,79 +125,91 @@ void test_rack_main(void) {
   rack_set_to_string(ld, rack_to_sub, "BCEIIII");
   rack_set_to_string(ld, expected_rack, "AEU");
   rack_subtract_using_floor_zero(rack_to_update, rack_to_sub);
-  racks_are_equal(rack_to_update, expected_rack);
+  assert(racks_are_equal(rack_to_update, expected_rack));
 
   rack_set_to_string(ld, rack_to_update, "");
   rack_set_to_string(ld, rack_to_sub, "A");
   rack_set_to_string(ld, expected_rack, "");
   rack_subtract_using_floor_zero(rack_to_update, rack_to_sub);
-  racks_are_equal(rack_to_update, expected_rack);
+  assert(racks_are_equal(rack_to_update, expected_rack));
 
   rack_set_to_string(ld, rack_to_update, "A");
   rack_set_to_string(ld, rack_to_sub, "");
   rack_set_to_string(ld, expected_rack, "A");
   rack_subtract_using_floor_zero(rack_to_update, rack_to_sub);
-  racks_are_equal(rack_to_update, expected_rack);
+  assert(racks_are_equal(rack_to_update, expected_rack));
 
   rack_set_to_string(ld, rack_to_update, "");
   rack_set_to_string(ld, rack_to_sub, "");
   rack_set_to_string(ld, expected_rack, "");
   rack_subtract_using_floor_zero(rack_to_update, rack_to_sub);
-  racks_are_equal(rack_to_update, expected_rack);
+  assert(racks_are_equal(rack_to_update, expected_rack));
 
   rack_set_to_string(ld, rack_to_update, "");
   rack_set_to_string(ld, rack_to_sub, "ABCDEFG");
   rack_set_to_string(ld, expected_rack, "");
   rack_subtract_using_floor_zero(rack_to_update, rack_to_sub);
-  racks_are_equal(rack_to_update, expected_rack);
+  assert(racks_are_equal(rack_to_update, expected_rack));
 
   rack_set_to_string(ld, rack_to_update, "ABCDEFG");
   rack_set_to_string(ld, rack_to_sub, "");
   rack_set_to_string(ld, expected_rack, "ABCDEFG");
   rack_subtract_using_floor_zero(rack_to_update, rack_to_sub);
-  racks_are_equal(rack_to_update, expected_rack);
+  assert(racks_are_equal(rack_to_update, expected_rack));
 
   rack_set_to_string(ld, rack_to_update, "ABEEEEG");
   rack_set_to_string(ld, rack_to_sub, "AGE");
   rack_set_to_string(ld, expected_rack, "BEEE");
   rack_subtract_using_floor_zero(rack_to_update, rack_to_sub);
-  racks_are_equal(rack_to_update, expected_rack);
+  assert(racks_are_equal(rack_to_update, expected_rack));
 
   rack_set_to_string(ld, rack_to_update, "");
   rack_set_to_string(ld, rack_to_add, "");
   rack_set_to_string(ld, expected_rack, "");
   rack_union(rack_to_update, rack_to_add);
-  racks_are_equal(rack_to_update, expected_rack);
+  assert(racks_are_equal(rack_to_update, expected_rack));
 
   rack_set_to_string(ld, rack_to_update, "");
   rack_set_to_string(ld, rack_to_add, "ABCDEFG");
   rack_set_to_string(ld, expected_rack, "ABCDEFG");
   rack_union(rack_to_update, rack_to_add);
-  racks_are_equal(rack_to_update, expected_rack);
+  assert(racks_are_equal(rack_to_update, expected_rack));
 
   rack_set_to_string(ld, rack_to_update, "ABCDEFG");
   rack_set_to_string(ld, rack_to_add, "");
   rack_set_to_string(ld, expected_rack, "ABCDEFG");
   rack_union(rack_to_update, rack_to_add);
-  racks_are_equal(rack_to_update, expected_rack);
+  assert(racks_are_equal(rack_to_update, expected_rack));
 
   rack_set_to_string(ld, rack_to_update, "ABCDEFG");
   rack_set_to_string(ld, rack_to_add, "ABCDEFG");
   rack_set_to_string(ld, expected_rack, "ABCDEFG");
   rack_union(rack_to_update, rack_to_add);
-  racks_are_equal(rack_to_update, expected_rack);
+  assert(racks_are_equal(rack_to_update, expected_rack));
 
   rack_set_to_string(ld, rack_to_update, "AABCD");
   rack_set_to_string(ld, rack_to_add, "ABCCE");
   rack_set_to_string(ld, expected_rack, "AABCCDE");
   rack_union(rack_to_update, rack_to_add);
-  racks_are_equal(rack_to_update, expected_rack);
+  assert(racks_are_equal(rack_to_update, expected_rack));
 
   rack_set_to_string(ld, rack_to_update, "RUNION");
   rack_set_to_string(ld, rack_to_add, "ANION");
   rack_set_to_string(ld, expected_rack, "ARUNION");
   rack_union(rack_to_update, rack_to_add);
-  racks_are_equal(rack_to_update, expected_rack);
+  assert(racks_are_equal(rack_to_update, expected_rack));
+
+  rack_set_to_string(ld, rack_to_update, "A");
+  rack_set_to_string(ld, rack_to_add, "AB");
+  rack_set_to_string(ld, expected_rack, "AB");
+  rack_union(rack_to_update, rack_to_add);
+  assert(racks_are_equal(rack_to_update, expected_rack));
+
+  rack_set_to_string(ld, rack_to_update, "AABBC");
+  rack_set_to_string(ld, rack_to_add, "AABCC");
+  rack_set_to_string(ld, expected_rack, "AABBCC");
+  rack_union(rack_to_update, rack_to_add);
+  assert(racks_are_equal(rack_to_update, expected_rack));
 
   rack_destroy(expected_rack);
   rack_destroy(rack_to_update);

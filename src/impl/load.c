@@ -54,7 +54,6 @@ char *get_xt_gcg_string(const char *identifier, ErrorStack *error_stack) {
     const size_t game_id_str_len = string_length(identifier);
     if (game_id_str_len > MAX_GAME_ID_LENGTH) {
       error_stack_push(
-          // FIXME: trigger this
           error_stack, ERROR_STATUS_XT_ID_MALFORMED,
           get_formatted_string(
               "xtables game id cannot be longer than %d characters",
@@ -121,7 +120,6 @@ char *get_woogles_gcg_string(const char *identifier, ErrorStack *error_stack) {
     const size_t game_id_str_len = string_length(identifier);
     if (game_id_str_len > MAX_GAME_ID_LENGTH) {
       error_stack_push(
-          // FIXME: trigger this
           error_stack, ERROR_STATUS_WOOGLES_ID_MALFORMED,
           get_formatted_string(
               "woogles game id cannot be longer than %d characters",

@@ -1,7 +1,6 @@
 
 #include "zobrist_test.h"
 
-#include "../src/def/gameplay_defs.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/player.h"
@@ -45,9 +44,7 @@ void test_hash_after_making_play(void) {
                                  true, 0, 0);
 
   // actually play the move:
-  play_move_status_t play_status =
-      play_move(validated_moves_get_move(vms, 0), game, NULL, NULL);
-  assert(play_status == PLAY_MOVE_STATUS_SUCCESS);
+  play_move(validated_moves_get_move(vms, 0), game, NULL);
 
   uint64_t h2 = zobrist_calculate_hash(
       z, game_get_board(game), player_get_rack(game_get_player(game, 0)),
@@ -91,9 +88,7 @@ void test_hash_after_making_blank_play(void) {
                                  true, 0, 0);
 
   // actually play the move:
-  play_move_status_t play_status =
-      play_move(validated_moves_get_move(vms, 0), game, NULL, NULL);
-  assert(play_status == PLAY_MOVE_STATUS_SUCCESS);
+  play_move(validated_moves_get_move(vms, 0), game, NULL);
 
   uint64_t h2 = zobrist_calculate_hash(
       z, game_get_board(game), player_get_rack(game_get_player(game, 0)),
@@ -134,9 +129,7 @@ void test_hash_after_passing(void) {
                                  true, 1, 0);
 
   // actually play the move:
-  play_move_status_t play_status =
-      play_move(validated_moves_get_move(vms, 0), game, NULL, NULL);
-  assert(play_status == PLAY_MOVE_STATUS_SUCCESS);
+  play_move(validated_moves_get_move(vms, 0), game, NULL);
 
   uint64_t h2 = zobrist_calculate_hash(
       z, game_get_board(game), player_get_rack(game_get_player(game, 0)),
@@ -153,8 +146,7 @@ void test_hash_after_passing(void) {
 
   uint64_t h3 = zobrist_add_move(z, h2, validated_moves_get_move(vms, 0), rack,
                                  false, 2, 1);
-  play_status = play_move(validated_moves_get_move(vms, 0), game, NULL, NULL);
-  assert(play_status == PLAY_MOVE_STATUS_SUCCESS);
+  play_move(validated_moves_get_move(vms, 0), game, NULL);
 
   // should not be equal to the very first hash
   assert(h != h3);
