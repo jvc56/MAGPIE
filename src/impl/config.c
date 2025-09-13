@@ -793,7 +793,8 @@ void impl_move_gen(Config *config, ErrorStack *error_stack) {
 void config_fill_infer_args(const Config *config, bool use_game_history,
                             int target_index, Equity target_score,
                             int target_num_exch, Rack *target_played_tiles,
-                            Rack *target_known_rack, InferenceArgs *args) {
+                            Rack *target_known_rack, Rack *nontarget_known_rack,
+                            InferenceArgs *args) {
   args->target_index = target_index;
   args->target_score = target_score;
   args->target_num_exch = target_num_exch;
@@ -801,6 +802,7 @@ void config_fill_infer_args(const Config *config, bool use_game_history,
   args->equity_margin = config->eq_margin_inference;
   args->target_played_tiles = target_played_tiles;
   args->target_known_rack = target_known_rack;
+  args->nontarget_known_rack = nontarget_known_rack;
   args->use_game_history = use_game_history;
   args->game_history = config->game_history;
   args->update_thread_control_status = true;
@@ -812,11 +814,12 @@ void config_fill_infer_args(const Config *config, bool use_game_history,
 void config_infer(const Config *config, bool use_game_history, int target_index,
                   Equity target_score, int target_num_exch,
                   Rack *target_played_tiles, Rack *target_known_rack,
-                  InferenceResults *results, ErrorStack *error_stack) {
+                  Rack *nontarget_known_rack, InferenceResults *results,
+                  ErrorStack *error_stack) {
   InferenceArgs args;
   config_fill_infer_args(config, use_game_history, target_index, target_score,
                          target_num_exch, target_played_tiles,
-                         target_known_rack, &args);
+                         target_known_rack, nontarget_known_rack, &args);
   return infer(&args, results, error_stack);
 }
 
@@ -830,29 +833,53 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
   }
 
   config_init_game(config);
+  const LetterDistribution *ld = game_get_ld(config->game);
   const int ld_size = ld_get_size(game_get_ld(config->game));
   Rack target_played_tiles;
   rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
   Rack target_known_rack;
   rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+  Rack nontarget_known_rack;
+  rack_set_dist_size_and_reset(&nontarget_known_rack, ld_size);
 
   if (config_get_parg_num_set_values(config, ARG_TOKEN_INFER) == 0) {
     config_infer(config, true, 0, 0, 0, &target_played_tiles,
-                 &target_known_rack, config->inference_results, error_stack);
+                 &target_known_rack, &nontarget_known_rack,
+                 config->inference_results, error_stack);
     return;
   }
 
-  const char *target_index_str =
+  const char *target_name_or_index_str =
       config_get_parg_value(config, ARG_TOKEN_INFER, 0);
   int target_index;
-  string_to_int_or_push_error("inferred player", target_index_str, 1, 2,
-                              ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
-                              &target_index, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
+
+  if (is_all_digits_or_empty(target_name_or_index_str)) {
+    string_to_int_or_push_error("inferred player", target_name_or_index_str, 1,
+                                2, ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+                                &target_index, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    // Convert from 1-indexed to 0-indexed
+    target_index--;
+  } else {
+    target_index = -1;
+    for (int i = 0; i < 2; i++) {
+      const char *player_name =
+          player_get_name(game_get_player(config->game, i));
+      if (strings_iequal(player_name, target_name_or_index_str)) {
+        target_index = i;
+        break;
+      }
+    }
+    if (target_index == -1) {
+      error_stack_push(error_stack,
+                       ERROR_STATUS_CONFIG_LOAD_MALFORMED_PLAYER_NAME,
+                       get_formatted_string("unrecognized player name '%s'",
+                                            target_name_or_index_str));
+      return;
+    }
   }
-  // Convert from 1-indexed to 0-indexed
-  target_index--;
 
   const char *target_played_tiles_or_num_exch_str =
       config_get_parg_value(config, ARG_TOKEN_INFER, 1);
@@ -869,7 +896,6 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
       return;
     }
   } else {
-    const LetterDistribution *ld = game_get_ld(config->game);
     load_rack_or_push_to_error_stack(
         target_played_tiles_or_num_exch_str, ld,
         ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &target_played_tiles,
@@ -881,6 +907,7 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
   }
 
   Equity target_score = 0;
+  int next_arg_index = 2;
 
   if (is_tile_placement_move) {
     const char *target_score_str =
@@ -899,31 +926,68 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
       return;
     }
     target_score = int_to_equity(target_score_int);
+    next_arg_index++;
+  }
+
+  // exch
+  // infer josh 3 ABCD EFG
+  // play
+  // infer josh ABC 13 ABCD EFG
+
+  const char *target_known_rack_str =
+      config_get_parg_value(config, ARG_TOKEN_INFER, next_arg_index);
+  if (target_known_rack_str) {
+    load_rack_or_push_to_error_stack(
+        target_known_rack_str, ld, ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
+        &target_known_rack, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    next_arg_index++;
+    const char *nontarget_known_rack_str =
+        config_get_parg_value(config, ARG_TOKEN_INFER, next_arg_index);
+    if (nontarget_known_rack_str) {
+      load_rack_or_push_to_error_stack(
+          nontarget_known_rack_str, ld,
+          ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &nontarget_known_rack,
+          error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+    }
   }
 
   config_infer(config, false, target_index, target_score, target_num_exch,
-               &target_played_tiles, &target_known_rack,
+               &target_played_tiles, &target_known_rack, &nontarget_known_rack,
                config->inference_results, error_stack);
 }
 
 // Sim
 
 void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
-                          Rack *target_played_tiles, SimArgs *sim_args) {
+                          Rack *target_played_tiles,
+                          Rack *nontarget_known_tiles,
+                          Rack *target_known_inference_tiles,
+                          SimArgs *sim_args) {
   sim_args->num_plies = config_get_plies(config);
   sim_args->move_list = config_get_move_list(config);
   sim_args->known_opp_rack = known_opp_rack;
   sim_args->win_pcts = config_get_win_pcts(config);
-  sim_args->use_inference = config->sim_with_inference;
   sim_args->inference_results = config->inference_results;
   sim_args->thread_control = config->thread_control;
   sim_args->game = config_get_game(config);
   sim_args->move_list = config_get_move_list(config);
-  // FIXME: enable sim inferences using data from the last play instead of the
-  // whole history
-  config_fill_infer_args(config, true, 0, 0, 0, target_played_tiles,
-                         known_opp_rack, &sim_args->inference_args);
-  sim_args->inference_args.update_thread_control_status = false;
+  sim_args->use_inference = config->sim_with_inference;
+  if (sim_args->use_inference) {
+    // FIXME: enable sim inferences using data from the last play instead of the
+    // whole history so that autoplay does not have to keep a whole history
+    // and play to turn for each inference which will probably incur more
+    // overhead than we would like.
+    config_fill_infer_args(config, true, 0, 0, 0, target_played_tiles,
+                           target_known_inference_tiles, nontarget_known_tiles,
+                           &sim_args->inference_args);
+    sim_args->inference_args.update_thread_control_status = false;
+  }
   sim_args->bai_options.sample_limit = config_get_max_iterations(config);
   sim_args->bai_options.sample_minimum = config->min_play_iterations;
   const double percentile = config_get_stop_cond_pct(config);
@@ -945,7 +1009,22 @@ void config_simulate(const Config *config, Rack *known_opp_rack,
   const int ld_size = ld_get_size(game_get_ld(config->game));
   Rack target_played_tiles;
   rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
-  config_fill_sim_args(config, known_opp_rack, &target_played_tiles, &args);
+  Rack nontarget_known_tiles;
+  rack_set_dist_size_and_reset(&nontarget_known_tiles, ld_size);
+  // For inferences in a sim, this will always be empty.
+  Rack target_known_inference_tiles;
+  rack_set_dist_size_and_reset(&target_known_inference_tiles, ld_size);
+  config_fill_sim_args(config, known_opp_rack, &target_played_tiles,
+                       &nontarget_known_tiles, &target_known_inference_tiles,
+                       &args);
+  if (args.use_inference &&
+      game_history_get_num_events(config->game_history) == 0) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_SIM_GAME_HISTORY_MISSING,
+        string_duplicate(
+            "cannot sim with inference with an empty game history"));
+    return;
+  }
   return simulate(&args, sim_results, error_stack);
 }
 
@@ -2363,7 +2442,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   cmd(ARG_TOKEN_RACK, "rack", 2, 2, set_rack, generic);
   cmd(ARG_TOKEN_GEN, "generate", 0, 0, move_gen, generic);
   cmd(ARG_TOKEN_SIM, "simulate", 0, 1, sim, sim);
-  cmd(ARG_TOKEN_INFER, "infer", 0, 3, infer, generic);
+  cmd(ARG_TOKEN_INFER, "infer", 0, 5, infer, generic);
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, generic);
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic);
   cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic);

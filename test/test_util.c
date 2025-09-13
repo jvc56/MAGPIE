@@ -783,6 +783,10 @@ error_code_t config_simulate_and_return_status(const Config *config,
   set_thread_control_status_to_start(config_get_thread_control(config));
   config_simulate(config, known_opp_rack, sim_results, error_stack);
   error_code_t status = error_stack_top(error_stack);
+  if (status != ERROR_STATUS_SUCCESS) {
+    printf("config simulate finished with error: %d\n", status);
+    error_stack_print_and_reset(error_stack);
+  }
   error_stack_destroy(error_stack);
   return status;
 }

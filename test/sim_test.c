@@ -357,8 +357,9 @@ void perf_test_multithread_sim(void) {
 }
 
 void test_sim_with_and_without_inference_helper(
-    const char *gcg_file, const char **moves_to_add,
-    const char *winner_without_inference, const char *winner_with_inference) {
+    const char *gcg_file, const char *known_opp_rack_str,
+    const char **moves_to_add, const char *winner_without_inference,
+    const char *winner_with_inference) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-threads 10 -plies 2 -it 2000 -minp 50 -numplays 2 "
@@ -391,6 +392,8 @@ void test_sim_with_and_without_inference_helper(
   Rack known_opp_rack;
   rack_set_dist_size_and_reset(&known_opp_rack,
                                ld_get_size(config_get_ld(config)));
+  rack_set_to_string(config_get_ld(config), &known_opp_rack,
+                     known_opp_rack_str);
   SimResults *sim_results = config_get_sim_results(config);
 
   // Without inference
@@ -436,7 +439,7 @@ void test_sim_with_inference(void) {
   const char *empyrean_move_str = "h7.EMPYREAN";
   const char *napery_move_string = "9g.NAPERY";
   test_sim_with_and_without_inference_helper(
-      "muzaks_empyrean",
+      "muzaks_empyrean", "",
       (const char *[]){empyrean_move_str, napery_move_string, NULL},
       empyrean_move_str, napery_move_string);
 
@@ -446,9 +449,14 @@ void test_sim_with_inference(void) {
   const char *sync_move_string = "1c.SYNCHRONIZE";
   const char *ze_move_string = "b6.ZE";
   test_sim_with_and_without_inference_helper(
-      "resynchronized",
+      "resynchronized", "",
       (const char *[]){synced_move_str, sync_move_string, ze_move_string, NULL},
       sync_move_string, ze_move_string);
+
+  test_sim_with_and_without_inference_helper(
+      "muzaks_empyrean", "IIIIIII",
+      (const char *[]){empyrean_move_str, napery_move_string, NULL},
+      empyrean_move_str, empyrean_move_str);
 }
 
 void test_play_similarity(void) {

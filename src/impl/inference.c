@@ -229,7 +229,7 @@ Inference *inference_create(const Rack *target_played_tiles,
                             int move_capacity, int target_index,
                             Equity target_score,
                             int target_number_of_tiles_exchanged,
-                            Equity equity_margin, Rack *nontarget_current_rack,
+                            Equity equity_margin, Rack *nontarget_known_rack,
                             InferenceResults *results) {
   Inference *inference = malloc_or_die(sizeof(Inference));
   inference->game = game;
@@ -290,13 +290,13 @@ Inference *inference_create(const Rack *target_played_tiles,
     log_fatal(err_msg);
   }
 
-  success = draw_rack_from_bag(game, 1 - target_index, nontarget_current_rack);
+  success = draw_rack_from_bag(game, 1 - target_index, nontarget_known_rack);
 
   if (!success) {
     const LetterDistribution *ld = game_get_ld(game);
     StringBuilder *sb = string_builder_create();
     string_builder_add_string(sb, "failed to draw nontarget player rack (");
-    string_builder_add_rack(sb, nontarget_current_rack, ld, false);
+    string_builder_add_rack(sb, nontarget_known_rack, ld, false);
     string_builder_add_string(sb, ") from the bag");
     char *err_msg = string_builder_dump(sb, NULL);
     string_builder_destroy(sb);
@@ -543,7 +543,7 @@ void infer_manager(ThreadControl *thread_control, Inference *inference,
 }
 
 void verify_inference_args(const InferenceArgs *args, Game *game_dup,
-                           Rack *nontarget_rack, ErrorStack *error_stack) {
+                           ErrorStack *error_stack) {
   const Bag *bag = game_get_bag(game_dup);
   int bag_letter_counts[MAX_ALPHABET_SIZE];
   memset(bag_letter_counts, 0, sizeof(bag_letter_counts));
@@ -601,11 +601,12 @@ void verify_inference_args(const InferenceArgs *args, Game *game_dup,
   }
 
   for (int i = 0; i < ld_size; i++) {
-    bag_letter_counts[i] -= rack_get_letter(nontarget_rack, i);
+    bag_letter_counts[i] -= rack_get_letter(args->nontarget_known_rack, i);
     if (bag_letter_counts[i] < 0) {
       StringBuilder *sb = string_builder_create();
       string_builder_add_string(sb, "noninferred player rack letters (");
-      string_builder_add_rack(sb, nontarget_rack, game_get_ld(game_dup), false);
+      string_builder_add_rack(sb, args->nontarget_known_rack,
+                              game_get_ld(game_dup), false);
       string_builder_add_string(sb, ") not available in the bag");
       char *err_msg = string_builder_dump(sb, NULL);
       string_builder_destroy(sb);
@@ -659,7 +660,6 @@ void verify_inference_args(const InferenceArgs *args, Game *game_dup,
 
 void populate_inference_args_with_game_history(InferenceArgs *args,
                                                Game *game_dup,
-                                               Rack *nontarget_current_rack,
                                                ErrorStack *error_stack) {
   GameHistory *game_history = args->game_history;
   const int most_recent_move_event_index =
@@ -693,17 +693,17 @@ void populate_inference_args_with_game_history(InferenceArgs *args,
     args->target_num_exch = move_get_tiles_played(move);
     rack_reset(args->target_played_tiles);
   }
-  rack_copy(nontarget_current_rack,
+  rack_copy(args->nontarget_known_rack,
             game_event_get_after_event_player_on_turn_rack(target_move_event));
 
-  for (int i = most_recent_move_event_index - 1; i >= 0; i--) {
-    GameEvent *event = game_history_get_event(game_history, i);
-    if (game_event_get_player_index(event) == args->target_index) {
-      // FIXME: test this rack_union logic (as opposed to the copy that was
-      // implemented before)
-      rack_union(args->target_known_rack,
-                 game_event_get_after_event_player_off_turn_rack(event));
-      break;
+  if (rack_is_empty(args->target_known_rack)) {
+    for (int i = most_recent_move_event_index - 1; i >= 0; i--) {
+      GameEvent *event = game_history_get_event(game_history, i);
+      if (game_event_get_player_index(event) == args->target_index) {
+        rack_copy(args->target_known_rack,
+                  game_event_get_after_event_player_off_turn_rack(event));
+        break;
+      }
     }
   }
 
@@ -719,30 +719,23 @@ void populate_inference_args_with_game_history(InferenceArgs *args,
 void infer_with_game_duplicate(InferenceArgs *args, Game *game_dup,
                                InferenceResults *results,
                                ErrorStack *error_stack) {
-  Rack nontarget_current_rack;
-  rack_set_dist_size_and_reset(&nontarget_current_rack,
-                               ld_get_size(game_get_ld(game_dup)));
   if (args->use_game_history) {
-    populate_inference_args_with_game_history(
-        args, game_dup, &nontarget_current_rack, error_stack);
+    populate_inference_args_with_game_history(args, game_dup, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
-  } else {
-    rack_copy(&nontarget_current_rack, player_get_rack(game_get_player(
-                                           game_dup, 1 - args->target_index)));
   }
 
-  verify_inference_args(args, game_dup, &nontarget_current_rack, error_stack);
+  verify_inference_args(args, game_dup, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
 
-  Inference *inference =
-      inference_create(args->target_played_tiles, args->target_known_rack,
-                       game_dup, args->move_capacity, args->target_index,
-                       args->target_score, args->target_num_exch,
-                       args->equity_margin, &nontarget_current_rack, results);
+  Inference *inference = inference_create(
+      args->target_played_tiles, args->target_known_rack, game_dup,
+      args->move_capacity, args->target_index, args->target_score,
+      args->target_num_exch, args->equity_margin, args->nontarget_known_rack,
+      results);
 
   infer_manager(args->thread_control, inference,
                 args->update_thread_control_status);

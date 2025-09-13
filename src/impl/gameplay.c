@@ -15,6 +15,7 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+#include "../str/rack_string.h"
 #include "move_gen.h"
 #include <assert.h>
 #include <stdbool.h>
@@ -276,7 +277,18 @@ void set_random_rack(const Game *game, const int player_index,
                      const Rack *known_rack) {
   return_rack_to_bag(game, player_index);
   if (known_rack) {
-    draw_rack_from_bag(game, player_index, known_rack);
+    if (!draw_rack_from_bag(game, player_index, known_rack)) {
+      const LetterDistribution *ld = game_get_ld(game);
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_string(sb, "unexpectedly failed to draw rack '");
+      string_builder_add_rack(sb, known_rack, ld, false);
+      string_builder_add_string(sb, "' from the bag");
+      char *err_msg = string_builder_dump(sb, NULL);
+      string_builder_destroy(sb);
+      log_fatal(err_msg);
+      // Unreachable, but will silence static analyzer warnings
+      free(err_msg);
+    }
   }
   draw_to_full_rack(game, player_index);
 }

@@ -383,8 +383,8 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   game_seed(game, seed);
 
   int player_off_turn_index = 1 - game_get_player_on_turn_index(game);
-  // set random rack for opponent (throw in rack, bag_shuffle, draw new tiles).
-  if (simmer->use_inference) {
+  if (simmer->use_inference &&
+      (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack))) {
     Rack inferred_rack;
     rack_set_dist_size(&inferred_rack, simmer->dist_size);
     if (alias_method_sample(
