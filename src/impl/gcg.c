@@ -3,7 +3,9 @@
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
+#include "../def/rack_defs.h"
 #include "../def/validated_move_defs.h"
+#include "../ent/bag.h"
 #include "../ent/board_layout.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -645,7 +647,7 @@ bool game_event_has_player_rack(const GameEvent *game_event, int player_index) {
 }
 
 // Returns NULL if there is no rack for the player
-const Rack *get_player_next_rack(GameHistory *game_history,
+const Rack *get_player_next_rack(const GameHistory *game_history,
                                  int initial_game_event_index,
                                  int player_index) {
   int number_of_game_events = game_history_get_num_events(game_history);
@@ -700,8 +702,8 @@ void validate_challenge_bonus_and_phony_tiles_returned_order(
 }
 
 // Assumes both player racks have been returned to the bag
-void set_after_game_event_racks(GameHistory *game_history, const Game *game,
-                                int game_event_index,
+void set_after_game_event_racks(const GameHistory *game_history,
+                                const Game *game, int game_event_index,
                                 Rack **known_letters_from_phonies_racks,
                                 ErrorStack *error_stack) {
   GameEvent *current_game_event =
@@ -749,7 +751,7 @@ void set_after_game_event_racks(GameHistory *game_history, const Game *game,
     }
   }
 
-  Bag *bag = game_get_bag(game);
+  const Bag *bag = game_get_bag(game);
   const int num_letters_in_bag = bag_get_letters(bag);
 
   if (num_letters_in_bag -
@@ -834,7 +836,7 @@ void play_game_history_turn(GameHistory *game_history, Game *game,
   const Equity move_score = game_event_get_move_score(game_event);
   Player *player;
   Rack *player_rack;
-  Rack *opp_rack;
+  const Rack *opp_rack;
   switch (game_event_type) {
   case GAME_EVENT_TILE_PLACEMENT_MOVE:
   case GAME_EVENT_EXCHANGE:
@@ -896,7 +898,7 @@ void play_game_history_turn(GameHistory *game_history, Game *game,
     break;
   case GAME_EVENT_PHONY_TILES_RETURNED:;
     if (validate) {
-      Rack *previously_played_letters =
+      const Rack *previously_played_letters =
           previously_played_letters_racks[game_event_player_index];
       Rack *known_rack_from_phonies =
           known_letters_from_phonies_racks[game_event_player_index];

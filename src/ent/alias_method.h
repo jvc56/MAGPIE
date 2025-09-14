@@ -56,7 +56,7 @@ static inline void alias_method_reset(AliasMethod *am) {
 }
 
 // Thread safe
-static inline void alias_method_add_rack(AliasMethod *am, Rack *rack,
+static inline void alias_method_add_rack(AliasMethod *am, const Rack *rack,
                                          int count) {
   int new_item_index;
   cpthread_mutex_lock(&am->mutex);

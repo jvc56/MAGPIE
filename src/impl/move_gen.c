@@ -337,8 +337,8 @@ static inline void record_exchange(MoveGen *gen) {
   const uint16_t rack_dist_size = rack_get_dist_size(&gen->player_rack);
 
   for (uint16_t ml = 0; ml < rack_dist_size; ml++) {
-    const int8_t num_this = rack_get_letter(&gen->player_rack, ml);
-    for (int i = 0; i < num_this; i++) {
+    const uint16_t num_this = rack_get_letter(&gen->player_rack, ml);
+    for (uint16_t i = 0; i < num_this; i++) {
       gen->exchange_strip[tiles_exchanged] = ml;
       tiles_exchanged++;
     }
@@ -378,8 +378,8 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
   } else {
     generate_exchange_moves(gen, leave, node_index, word_index, ml + 1,
                             add_exchange);
-    const int8_t num_this = rack_get_letter(&gen->player_rack, ml);
-    for (int8_t i = 0; i < num_this; i++) {
+    const uint16_t num_this = rack_get_letter(&gen->player_rack, ml);
+    for (uint16_t i = 0; i < num_this; i++) {
       rack_add_letter(leave, ml);
       leave_map_take_letter_and_update_complement_index(&gen->leave_map,
                                                         &gen->player_rack, ml);
@@ -453,7 +453,7 @@ bool recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
     for (uint32_t i = node_index;; i++) {
       const uint32_t node = kwg_node(gen->kwg, i);
       const MachineLetter ml = kwg_node_tile(node);
-      const int8_t number_of_ml = rack_get_letter(&gen->player_rack, ml);
+      const uint16_t number_of_ml = rack_get_letter(&gen->player_rack, ml);
       if (ml != 0 &&
           (number_of_ml != 0 ||
            rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&
@@ -633,7 +633,7 @@ void recursive_gen_alpha(MoveGen *gen, int col, int leftstrip, int rightstrip,
              ((possible_letters_here & gen->rack_cross_set) != 0)) {
     const MachineLetter ld_size = ld_get_size(&gen->ld);
     for (MachineLetter ml = 1; ml < ld_size; ml++) {
-      const int8_t number_of_ml = rack_get_letter(&gen->player_rack, ml);
+      const uint16_t number_of_ml = rack_get_letter(&gen->player_rack, ml);
       if ((number_of_ml != 0 ||
            rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&
           board_is_letter_allowed_in_cross_set(possible_letters_here, ml)) {

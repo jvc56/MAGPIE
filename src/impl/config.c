@@ -2039,7 +2039,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   const char *new_eq_margin_inference_double =
       config_get_parg_value(config, ARG_TOKEN_EQ_MARGIN_INFERENCE, 0);
   if (new_eq_margin_inference_double) {
-    double eq_margin_inference_double;
+    double eq_margin_inference_double = 0;
     config_load_double(config, ARG_TOKEN_EQ_MARGIN_INFERENCE, 0,
                        EQUITY_MAX_DOUBLE, &eq_margin_inference_double,
                        error_stack);

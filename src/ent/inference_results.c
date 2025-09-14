@@ -3,6 +3,7 @@
 #include "../def/inference_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
+#include "../ent/equity.h"
 #include "../util/io_util.h"
 #include "../util/math_util.h"
 #include "alias_method.h"
@@ -212,10 +213,10 @@ void inference_results_set_stat_for_letter(InferenceResults *inference_results,
 double get_probability_for_random_minimum_draw(
     const Rack *bag_as_rack, const Rack *target_rack, MachineLetter this_letter,
     int minimum, int number_of_target_played_tiles) {
-  const int8_t number_of_this_letters_already_on_rack =
+  const uint16_t number_of_this_letters_already_on_rack =
       rack_get_letter(target_rack, this_letter);
   int minimum_adjusted_for_partial_rack =
-      minimum - number_of_this_letters_already_on_rack;
+      minimum - (int)number_of_this_letters_already_on_rack;
   // If the partial leave already has the minimum
   // number of letters, the probability is trivially 1.
   if (minimum_adjusted_for_partial_rack <= 0) {

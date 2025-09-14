@@ -5,6 +5,7 @@
 #include "equity.h"
 #include "rack.h"
 #include <stdlib.h>
+#include <string.h>
 
 struct LeaveRack {
   EncodedRack leave;

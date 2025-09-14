@@ -10,14 +10,17 @@
 #include "../ent/bag.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/game_history.h"
 #include "../ent/inference_results.h"
 #include "../ent/klv.h"
 #include "../ent/leave_rack.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
+#include "../ent/validated_move.h"
 #include "../str/inference_string.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
@@ -29,6 +32,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct Inference {
   // KLV used to evaluate leaves to determine
@@ -224,13 +228,12 @@ void decrement_letter_for_inference(Inference *inference,
   rack_take_letter(inference->current_target_leave, letter);
 }
 
-Inference *inference_create(const Rack *target_played_tiles,
-                            const Rack *target_known_rack, Game *game,
-                            int move_capacity, int target_index,
-                            Equity target_score,
-                            int target_number_of_tiles_exchanged,
-                            Equity equity_margin, Rack *nontarget_known_rack,
-                            InferenceResults *results) {
+Inference *
+inference_create(const Rack *target_played_tiles, const Rack *target_known_rack,
+                 Game *game, int move_capacity, int target_index,
+                 Equity target_score, int target_number_of_tiles_exchanged,
+                 Equity equity_margin, const Rack *nontarget_known_rack,
+                 InferenceResults *results) {
   Inference *inference = malloc_or_die(sizeof(Inference));
   inference->game = game;
   inference->klv = player_get_klv(game_get_player(game, target_index));
@@ -288,6 +291,7 @@ Inference *inference_create(const Rack *target_played_tiles,
     char *err_msg = string_builder_dump(sb, NULL);
     string_builder_destroy(sb);
     log_fatal(err_msg);
+    free(err_msg);
   }
 
   success = draw_rack_from_bag(game, 1 - target_index, nontarget_known_rack);
@@ -301,6 +305,7 @@ Inference *inference_create(const Rack *target_played_tiles,
     char *err_msg = string_builder_dump(sb, NULL);
     string_builder_destroy(sb);
     log_fatal(err_msg);
+    free(err_msg);
   }
 
   // Add the letters that are known to have been kept on the rack
@@ -542,7 +547,7 @@ void infer_manager(ThreadControl *thread_control, Inference *inference,
   free(worker_ids);
 }
 
-void verify_inference_args(const InferenceArgs *args, Game *game_dup,
+void verify_inference_args(const InferenceArgs *args, const Game *game_dup,
                            ErrorStack *error_stack) {
   const Bag *bag = game_get_bag(game_dup);
   int bag_letter_counts[MAX_ALPHABET_SIZE];
@@ -611,6 +616,7 @@ void verify_inference_args(const InferenceArgs *args, Game *game_dup,
       char *err_msg = string_builder_dump(sb, NULL);
       string_builder_destroy(sb);
       log_fatal(err_msg);
+      free(err_msg);
       return;
     }
   }

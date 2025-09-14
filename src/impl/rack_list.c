@@ -108,7 +108,7 @@ uint64_t get_total_combos_for_rack(const RackListLetterDistribution *rl_ld,
   uint64_t total_combos = 1;
   const int ld_size = rack_list_ld_get_size(rl_ld);
   for (int ml = 0; ml < ld_size; ml++) {
-    const int8_t num_ml = rack_get_letter(rack, ml);
+    const uint16_t num_ml = rack_get_letter(rack, ml);
     if (num_ml == 0) {
       continue;
     }
@@ -372,8 +372,8 @@ void generate_leaves(RackListLeave *leave_list, const KLV *klv,
   } else {
     generate_leaves(leave_list, klv, rack_equity, full_rack, rl_ld, leave,
                     node_index, word_index, ml + 1);
-    const int8_t num_this = rack_get_letter(full_rack, ml);
-    for (int8_t i = 0; i < num_this; i++) {
+    const uint16_t num_this = rack_get_letter(full_rack, ml);
+    for (uint16_t i = 0; i < num_this; i++) {
       rack_add_letter(leave, ml);
       rack_take_letter(full_rack, ml);
       rack_list_ld_decrement(rl_ld, ml, 1);

@@ -90,7 +90,7 @@ error_code_t config_simulate_and_return_status(const Config *config,
                                                Rack *known_opp_rack,
                                                SimResults *sim_results);
 void game_play_n_events_or_die(GameHistory *game_history, Game *game,
-                               int turn_index);
+                               int event_index);
 void game_play_to_end_or_die(GameHistory *game_history, Game *game);
 void assert_validated_and_generated_moves(Game *game, const char *rack_string,
                                           const char *move_position,

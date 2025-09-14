@@ -1,8 +1,16 @@
 #include "../src/ent/alias_method.h"
+#include "../src/ent/klv.h"
+#include "../src/ent/letter_distribution.h"
+#include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/xoshiro.h"
+#include "../src/impl/config.h"
 #include "../src/util/io_util.h"
 #include "test_util.h"
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 typedef struct AliasMethodTestDistEntry {
   const char *rack_str;

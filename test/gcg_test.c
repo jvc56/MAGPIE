@@ -21,6 +21,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 char *parse_and_write_gcg(const char *gcg_filepath_read,
                           const char *gcg_filepath_write, Config *config,

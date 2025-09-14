@@ -1,5 +1,6 @@
 #include "../src/def/inference_defs.h"
 #include "../src/def/letter_distribution_defs.h"
+#include "../src/ent/alias_method.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -15,6 +16,7 @@
 #include "../src/impl/gcg.h"
 #include "../src/util/io_util.h"
 #include "../src/util/math_util.h"
+#include "../src/util/string_util.h"
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
@@ -118,7 +120,7 @@ void test_leave_rack_reset(void) {
 
   LeaveRackList *lrl = leave_rack_list_create(10);
 
-  int capacities[] = {10, 1, 3, 5, 20, 2, 15, 14, 9, 100, 50, 3, -1};
+  const int capacities[] = {10, 1, 3, 5, 20, 2, 15, 14, 9, 100, 50, 3, -1};
   int i = 0;
   while (true) {
     const int capacity = capacities[i];
@@ -320,7 +322,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   const Player *player1 = game_get_player(game, 1);
   const KLV *klv = player_get_klv(player0);
 
-  Rack *player0_rack = player_get_rack(player0);
+  const Rack *player0_rack = player_get_rack(player0);
   const Rack *player1_rack = player_get_rack(player1);
 
   InferenceResults *inference_results = inference_results_create(NULL);

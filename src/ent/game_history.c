@@ -9,6 +9,7 @@
 #include "rack.h"
 #include "validated_move.h"
 #include <stdlib.h>
+#include <string.h>
 
 struct GameEvent {
   game_event_t event_type;
@@ -414,17 +415,17 @@ int game_history_previous(GameHistory *game_history, ErrorStack *error_stack) {
   return game_history->num_played_events;
 }
 
-int game_history_goto(GameHistory *game_history, int npe,
+int game_history_goto(GameHistory *game_history, int num_events_to_play,
                       ErrorStack *error_stack) {
-  if (npe < 0 || npe > game_history->num_events) {
+  if (num_events_to_play < 0 || num_events_to_play > game_history->num_events) {
     error_stack_push(
         error_stack, ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE,
         get_formatted_string(
-            "position %d is out of range; the latest position is %d", npe,
-            game_history->num_events - 1));
+            "position %d is out of range; the latest position is %d",
+            num_events_to_play, game_history->num_events - 1));
     return -1;
   }
-  game_history->num_played_events = npe;
+  game_history->num_played_events = num_events_to_play;
   return game_history->num_played_events;
 }
 

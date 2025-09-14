@@ -11,6 +11,7 @@
 #include "../src/ent/board.h"
 #include "../src/ent/board_layout.h"
 #include "../src/ent/bonus_square.h"
+#include "../src/ent/data_filepaths.h"
 #include "../src/ent/dictionary_word.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -335,8 +336,8 @@ void print_english_rack(const Rack *rack) {
   }
   const uint16_t ld_size = rack_get_dist_size(rack);
   for (int i = 1; i < ld_size; i++) {
-    const int8_t num_letter = rack_get_letter(rack, i);
-    for (int8_t j = 0; j < num_letter; j++) {
+    const uint16_t num_letter = rack_get_letter(rack, i);
+    for (uint16_t j = 0; j < num_letter; j++) {
       printf("%c", (char)(i + 'A' - 1));
     }
   }

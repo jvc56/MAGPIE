@@ -6,6 +6,7 @@
 #include "../ent/bag.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/inference_results.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"

@@ -82,7 +82,7 @@ void test_rack_list(void) {
       total_combos[rack_index] += draw_combos;
       uint64_t rack_combos = 1;
       for (int j = 0; j < ld_size; j++) {
-        const int8_t num_ml = rack_get_letter(&rack, j);
+        const uint16_t num_ml = rack_get_letter(&rack, j);
         if (num_ml == 0) {
           continue;
         }
