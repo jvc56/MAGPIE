@@ -1314,7 +1314,7 @@ char *impl_next(Config *config, ErrorStack *error_stack) {
   }
 
   config_init_game(config);
-  gcg_next(config->game_history, config->game, error_stack);
+  game_next(config->game_history, config->game, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
@@ -1346,7 +1346,7 @@ char *impl_previous(Config *config, ErrorStack *error_stack) {
   }
 
   config_init_game(config);
-  gcg_previous(config->game_history, config->game, error_stack);
+  game_previous(config->game_history, config->game, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
@@ -1386,7 +1386,8 @@ char *impl_goto(Config *config, ErrorStack *error_stack) {
   }
 
   config_init_game(config);
-  gcg_goto(config->game_history, config->game, num_events_to_play, error_stack);
+  game_goto(config->game_history, config->game, num_events_to_play,
+            error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }

@@ -1945,7 +1945,7 @@ void game_play_n_events(GameHistory *game_history, Game *game,
                               error_stack);
 }
 
-void gcg_next(GameHistory *game_history, Game *game, ErrorStack *error_stack) {
+void game_next(GameHistory *game_history, Game *game, ErrorStack *error_stack) {
   const int num_events_to_play = game_history_next(game_history, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -1953,8 +1953,8 @@ void gcg_next(GameHistory *game_history, Game *game, ErrorStack *error_stack) {
   game_play_n_events(game_history, game, num_events_to_play, error_stack);
 }
 
-void gcg_previous(GameHistory *game_history, Game *game,
-                  ErrorStack *error_stack) {
+void game_previous(GameHistory *game_history, Game *game,
+                   ErrorStack *error_stack) {
   const int num_events_to_play =
       game_history_previous(game_history, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -1963,8 +1963,8 @@ void gcg_previous(GameHistory *game_history, Game *game,
   game_play_n_events(game_history, game, num_events_to_play, error_stack);
 }
 
-void gcg_goto(GameHistory *game_history, Game *game, int num_events_to_play,
-              ErrorStack *error_stack) {
+void game_goto(GameHistory *game_history, Game *game, int num_events_to_play,
+               ErrorStack *error_stack) {
   game_history_goto(game_history, num_events_to_play, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -1974,6 +1974,6 @@ void gcg_goto(GameHistory *game_history, Game *game, int num_events_to_play,
 
 void game_play_to_end(GameHistory *game_history, Game *game,
                       ErrorStack *error_stack) {
-  gcg_goto(game_history, game, game_history_get_num_events(game_history),
-           error_stack);
+  game_goto(game_history, game, game_history_get_num_events(game_history),
+            error_stack);
 }
