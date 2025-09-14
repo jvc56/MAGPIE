@@ -835,7 +835,7 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
   const char *cgp_move_string = game_event_get_cgp_move_string(game_event);
   const Equity move_score = game_event_get_move_score(game_event);
   Player *player;
-  Rack *player_rack;
+  const Rack *player_rack;
   const Rack *opp_rack;
   switch (game_event_type) {
   case GAME_EVENT_TILE_PLACEMENT_MOVE:
