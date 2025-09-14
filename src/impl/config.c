@@ -929,11 +929,6 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
     next_arg_index++;
   }
 
-  // exch
-  // infer josh 3 ABCD EFG
-  // play
-  // infer josh ABC 13 ABCD EFG
-
   const char *target_known_rack_str =
       config_get_parg_value(config, ARG_TOKEN_INFER, next_arg_index);
   if (target_known_rack_str) {

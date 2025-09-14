@@ -457,16 +457,12 @@ void test_config_exec_parse_args(void) {
   // Inference
   assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "infer 0 ABC 14",
-
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
   assert_config_exec_status(config, "infer 3 ABC 14",
-
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
   assert_config_exec_status(config, "infer 1 AB3C 14",
-
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   assert_config_exec_status(config, "infer 1 ABC 1R4",
-
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
   assert_config_exec_status(config, "infer 1 -4",
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
@@ -478,6 +474,16 @@ void test_config_exec_parse_args(void) {
                             ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "infer", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "infer josh ABCDE 13",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "infer josh ABCDE 13 ABCD",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "infer josh ABCDE 13 ABCD EFG",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "infer josh 3 ABCDE", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "infer josh 3 ABCDE", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "infer josh 3 ABCDE EFG",
+                            ERROR_STATUS_SUCCESS);
   // Autoplay
   assert_config_exec_status(config,
                             "autoplay move 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
