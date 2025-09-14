@@ -14,7 +14,6 @@
 #include "../src/ent/thread_control.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
-#include "../src/impl/gcg.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
 #include "../src/str/sim_string.h"

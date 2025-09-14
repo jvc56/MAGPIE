@@ -777,7 +777,7 @@ void set_after_game_event_racks(const GameHistory *game_history,
   }
 }
 
-void play_game_history_turn(GameHistory *game_history, Game *game,
+void play_game_history_turn(const GameHistory *game_history, Game *game,
                             int game_event_index, bool validate,
                             Rack **previously_played_letters_racks,
                             Rack **known_letters_from_phonies_racks,

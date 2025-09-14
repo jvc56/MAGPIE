@@ -12,6 +12,7 @@
 #include "stats.h"
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define SUBTOTALS_SIZE                                                         \
   (MAX_ALPHABET_SIZE * (RACK_SIZE) * NUMBER_OF_INFERENCE_SUBTOTALS)
