@@ -568,7 +568,9 @@ void test_shadow_wmp_nonplaythrough_existence(void) {
 
   AnchorHeap anchor_list;
   load_and_shadow(game, player, EMPTY_CGP, "MUZJIKS", &anchor_list);
-  assert(anchor_list.count == 7);
+
+  // No one tile anchor. The six anchors are for engths 2 to 7.
+  assert(anchor_list.count == 6);
 
   // 7 tiles: MUZJIKS
   assert_anchor_equity_int(&anchor_list, 0, 128);
@@ -624,20 +626,11 @@ void test_shadow_wmp_nonplaythrough_existence(void) {
   assert(anchor_list.anchors[5].dir == BOARD_HORIZONTAL_DIRECTION);
   assert(anchor_list.anchors[5].playthrough_blocks == 0);
 
-  // 1 tile, useless anchor. TODO(olaugh): avoid creating this
-  // Harmless though: no plays will be found here.
-  assert_anchor_equity_int(&anchor_list, 6, 0);
-  assert_anchor_score(&anchor_list, 6, 0);
-  assert(anchor_list.anchors[6].tiles_to_play == 1);
-  assert(anchor_list.anchors[6].row == 7);
-  assert(anchor_list.anchors[6].col == 7);
-  assert(anchor_list.anchors[6].dir == BOARD_HORIZONTAL_DIRECTION);
-
   load_and_shadow(game, player, EMPTY_CGP, "TRONGLE", &anchor_list);
 
   // There are no sevens. We check full rack existence to avoid creating the
-  // bingo anchor.
-  assert(anchor_list.count == 6);
+  // bingo anchor. We do not create a 1-tile anchor.
+  assert(anchor_list.count == 5);
 
   // 6 tiles, Gxxxxx
   assert_anchor_equity_int(&anchor_list, 0, 18);
@@ -684,19 +677,9 @@ void test_shadow_wmp_nonplaythrough_existence(void) {
   assert(anchor_list.anchors[4].dir == BOARD_HORIZONTAL_DIRECTION);
   assert(anchor_list.anchors[4].playthrough_blocks == 0);
 
-  // useless 1 tile anchor
-  assert_anchor_equity_int(&anchor_list, 5, 0);
-  assert_anchor_score(&anchor_list, 5, 0);
-  assert(anchor_list.anchors[5].tiles_to_play == 1);
-
   load_and_shadow(game, player, EMPTY_CGP, "VVWWXYZ", &anchor_list);
-  assert(anchor_list.count == 1);
-  // This is an unusual case. The 0 recorded here is as if for a one tile play
-  // in the vertical direction. We shadow these as if playing horizontally and
-  // do not check for word validity. It scores 0 for main word because the score
-  // would actually come from the vertical direction (as a hook). This doesn't
-  // make sense with an empty board but might not be worth special handling.
-  assert_anchor_equity_int(&anchor_list, 0, 0);
+  // No words
+  assert(anchor_list.count == 0);
 
   game_destroy(game);
   config_destroy(config);
@@ -714,7 +697,7 @@ void test_shadow_wmp_playthrough_bingo_existence(void) {
 
   AnchorHeap anchor_list;
   load_and_shadow(game, player, qi_qis, "FRUITED", &anchor_list);
-  assert(anchor_list.count == 47);
+  assert(anchor_list.count == 46);
 
   // f9 UFTRIDE for 88, not 8g (QI)DURFITE for 128
   assert_anchor_equity_int(&anchor_list, 0, 88);
@@ -726,7 +709,7 @@ void test_shadow_wmp_playthrough_bingo_existence(void) {
   assert(anchor_list.anchors[0].playthrough_blocks == 0);
 
   load_and_shadow(game, player, qi_qis, "AOUNS??", &anchor_list);
-  assert(anchor_list.count == 57);
+  assert(anchor_list.count == 56);
 
   // 8g (QI)NghAOSU
   assert_anchor_equity_int(&anchor_list, 0, 101);
