@@ -59,8 +59,7 @@ void test_rack_list(void) {
 
   Rack rack;
   const int ld_size = ld_get_size(ld);
-  rack_set_dist_size(&rack, ld_size);
-  rack_reset(&rack);
+  rack_set_dist_size_and_reset(&rack, ld_size);
 
   char *rack_strs[] = {"AAAAAA", "AAAABB", "AABBBB", "BBBBBB"};
   const int num_racks = sizeof(rack_strs) / sizeof(rack_strs[0]);
@@ -83,7 +82,7 @@ void test_rack_list(void) {
       total_combos[rack_index] += draw_combos;
       uint64_t rack_combos = 1;
       for (int j = 0; j < ld_size; j++) {
-        const int8_t num_ml = rack_get_letter(&rack, j);
+        const uint16_t num_ml = rack_get_letter(&rack, j);
         if (num_ml == 0) {
           continue;
         }

@@ -91,11 +91,12 @@ typedef enum {
   ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,
   ARG_TOKEN_MAX_ITERATIONS,
   ARG_TOKEN_STOP_COND_PCT,
-  ARG_TOKEN_EQUITY_MARGIN,
-  ARG_TOKEN_MAX_EQUITY_DIFF,
+  ARG_TOKEN_EQ_MARGIN_INFERENCE,
+  ARG_TOKEN_EQ_MARGIN_MOVEGEN,
   ARG_TOKEN_MIN_PLAY_ITERATIONS,
   ARG_TOKEN_USE_GAME_PAIRS,
   ARG_TOKEN_USE_SMALL_PLAYS,
+  ARG_TOKEN_SIM_WITH_INFERENCE,
   ARG_TOKEN_WRITE_BUFFER_SIZE,
   ARG_TOKEN_HUMAN_READABLE,
   ARG_TOKEN_RANDOM_SEED,
@@ -144,11 +145,12 @@ struct Config {
   int max_iterations;
   int min_play_iterations;
   double stop_cond_pct;
-  double equity_margin;
-  Equity max_equity_diff;
+  Equity eq_margin_inference;
+  Equity eq_margin_movegen;
   bool use_game_pairs;
   bool human_readable;
   bool use_small_plays;
+  bool sim_with_inference;
   char *record_filepath;
   double tt_fraction_of_mem;
   int time_limit_seconds;
@@ -161,12 +163,12 @@ struct Config {
   PlayersData *players_data;
   ThreadControl *thread_control;
   Game *game;
+  GameHistory *game_history;
   MoveList *move_list;
   SimResults *sim_results;
   InferenceResults *inference_results;
   AutoplayResults *autoplay_results;
   ConversionResults *conversion_results;
-  GameHistory *game_history;
 };
 
 void parsed_arg_create(Config *config, arg_token_t arg_token, const char *name,
@@ -288,10 +290,6 @@ double config_get_stop_cond_pct(const Config *config) {
   return config->stop_cond_pct;
 }
 
-double config_get_equity_margin(const Config *config) {
-  return config->equity_margin;
-}
-
 int config_get_time_limit_seconds(const Config *config) {
   return config->time_limit_seconds;
 }
@@ -334,6 +332,10 @@ ThreadControl *config_get_thread_control(const Config *config) {
 
 Game *config_get_game(const Config *config) { return config->game; }
 
+GameHistory *config_get_game_history(const Config *config) {
+  return config->game_history;
+}
+
 MoveList *config_get_move_list(const Config *config) {
   return config->move_list;
 }
@@ -344,10 +346,6 @@ SimResults *config_get_sim_results(const Config *config) {
 
 AutoplayResults *config_get_autoplay_results(const Config *config) {
   return config->autoplay_results;
-}
-
-GameHistory *config_get_game_history(const Config *config) {
-  return config->game_history;
 }
 
 bool config_exec_parg_is_set(const Config *config) {
@@ -684,7 +682,7 @@ void impl_add_moves(Config *config, ErrorStack *error_stack) {
 
   ValidatedMoves *new_validated_moves =
       validated_moves_create(config->game, player_on_turn_index, moves, true,
-                             false, false, error_stack);
+                             false, true, error_stack);
 
   if (error_stack_is_empty(error_stack)) {
     const LetterDistribution *ld = game_get_ld(config->game);
@@ -785,22 +783,206 @@ void impl_move_gen(Config *config, ErrorStack *error_stack) {
       .game = config->game,
       .move_list = ml,
       .thread_index = 0,
-      .max_equity_diff = config->max_equity_diff,
+      .eq_margin_movegen = config->eq_margin_movegen,
   };
   generate_moves_for_game(&args);
+}
+
+// Inference
+
+void config_fill_infer_args(const Config *config, bool use_game_history,
+                            int target_index, Equity target_score,
+                            int target_num_exch, Rack *target_played_tiles,
+                            Rack *target_known_rack, Rack *nontarget_known_rack,
+                            InferenceArgs *args) {
+  args->target_index = target_index;
+  args->target_score = target_score;
+  args->target_num_exch = target_num_exch;
+  args->move_capacity = config_get_num_plays(config);
+  args->equity_margin = config->eq_margin_inference;
+  args->target_played_tiles = target_played_tiles;
+  args->target_known_rack = target_known_rack;
+  args->nontarget_known_rack = nontarget_known_rack;
+  args->use_game_history = use_game_history;
+  args->game_history = config->game_history;
+  args->update_thread_control_status = true;
+  args->game = config_get_game(config);
+  args->thread_control = config->thread_control;
+}
+
+// Use target_index < 0 to infer using the game history
+void config_infer(const Config *config, bool use_game_history, int target_index,
+                  Equity target_score, int target_num_exch,
+                  Rack *target_played_tiles, Rack *target_known_rack,
+                  Rack *nontarget_known_rack, InferenceResults *results,
+                  ErrorStack *error_stack) {
+  InferenceArgs args;
+  config_fill_infer_args(config, use_game_history, target_index, target_score,
+                         target_num_exch, target_played_tiles,
+                         target_known_rack, nontarget_known_rack, &args);
+  return infer(&args, results, error_stack);
+}
+
+void impl_infer(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate(
+            "cannot infer without letter distribution and lexicon"));
+    return;
+  }
+
+  config_init_game(config);
+  const LetterDistribution *ld = game_get_ld(config->game);
+  const int ld_size = ld_get_size(game_get_ld(config->game));
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  Rack target_known_rack;
+  rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+  Rack nontarget_known_rack;
+  rack_set_dist_size_and_reset(&nontarget_known_rack, ld_size);
+
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_INFER) == 0) {
+    config_infer(config, true, 0, 0, 0, &target_played_tiles,
+                 &target_known_rack, &nontarget_known_rack,
+                 config->inference_results, error_stack);
+    return;
+  }
+
+  const char *target_name_or_index_str =
+      config_get_parg_value(config, ARG_TOKEN_INFER, 0);
+  int target_index;
+
+  if (is_all_digits_or_empty(target_name_or_index_str)) {
+    string_to_int_or_push_error("inferred player", target_name_or_index_str, 1,
+                                2, ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+                                &target_index, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    // Convert from 1-indexed to 0-indexed
+    target_index--;
+  } else {
+    target_index = -1;
+    for (int i = 0; i < 2; i++) {
+      const char *player_name =
+          player_get_name(game_get_player(config->game, i));
+      if (strings_iequal(player_name, target_name_or_index_str)) {
+        target_index = i;
+        break;
+      }
+    }
+    if (target_index == -1) {
+      error_stack_push(error_stack,
+                       ERROR_STATUS_CONFIG_LOAD_MALFORMED_PLAYER_NAME,
+                       get_formatted_string("unrecognized player name '%s'",
+                                            target_name_or_index_str));
+      return;
+    }
+  }
+
+  const char *target_played_tiles_or_num_exch_str =
+      config_get_parg_value(config, ARG_TOKEN_INFER, 1);
+
+  int target_num_exch = 0;
+  bool is_tile_placement_move = false;
+
+  if (is_all_digits_or_empty(target_played_tiles_or_num_exch_str)) {
+    string_to_int_or_push_error(
+        "inferred player number exchanged", target_played_tiles_or_num_exch_str,
+        0, RACK_SIZE, ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+        &target_num_exch, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  } else {
+    load_rack_or_push_to_error_stack(
+        target_played_tiles_or_num_exch_str, ld,
+        ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &target_played_tiles,
+        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    is_tile_placement_move = true;
+  }
+
+  Equity target_score = 0;
+  int next_arg_index = 2;
+
+  if (is_tile_placement_move) {
+    const char *target_score_str =
+        config_get_parg_value(config, ARG_TOKEN_INFER, 2);
+    if (!target_score_str) {
+      error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
+                       string_duplicate("missing inferred player score"));
+      return;
+    }
+    int target_score_int;
+    string_to_int_or_push_error("inferred player score", target_score_str, 0,
+                                INT_MAX,
+                                ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+                                &target_score_int, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    target_score = int_to_equity(target_score_int);
+    next_arg_index++;
+  }
+
+  const char *target_known_rack_str =
+      config_get_parg_value(config, ARG_TOKEN_INFER, next_arg_index);
+  if (target_known_rack_str) {
+    load_rack_or_push_to_error_stack(
+        target_known_rack_str, ld, ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
+        &target_known_rack, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    next_arg_index++;
+    const char *nontarget_known_rack_str =
+        config_get_parg_value(config, ARG_TOKEN_INFER, next_arg_index);
+    if (nontarget_known_rack_str) {
+      load_rack_or_push_to_error_stack(
+          nontarget_known_rack_str, ld,
+          ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &nontarget_known_rack,
+          error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+    }
+  }
+
+  config_infer(config, false, target_index, target_score, target_num_exch,
+               &target_played_tiles, &target_known_rack, &nontarget_known_rack,
+               config->inference_results, error_stack);
 }
 
 // Sim
 
 void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
+                          Rack *target_played_tiles,
+                          Rack *nontarget_known_tiles,
+                          Rack *target_known_inference_tiles,
                           SimArgs *sim_args) {
   sim_args->num_plies = config_get_plies(config);
   sim_args->move_list = config_get_move_list(config);
   sim_args->known_opp_rack = known_opp_rack;
   sim_args->win_pcts = config_get_win_pcts(config);
+  sim_args->inference_results = config->inference_results;
   sim_args->thread_control = config->thread_control;
   sim_args->game = config_get_game(config);
   sim_args->move_list = config_get_move_list(config);
+  sim_args->use_inference = config->sim_with_inference;
+  if (sim_args->use_inference) {
+    // FIXME: enable sim inferences using data from the last play instead of the
+    // whole history so that autoplay does not have to keep a whole history
+    // and play to turn for each inference which will probably incur more
+    // overhead than we would like.
+    config_fill_infer_args(config, true, 0, 0, 0, target_played_tiles,
+                           target_known_inference_tiles, nontarget_known_tiles,
+                           &sim_args->inference_args);
+    sim_args->inference_args.update_thread_control_status = false;
+  }
   sim_args->bai_options.sample_limit = config_get_max_iterations(config);
   sim_args->bai_options.sample_minimum = config->min_play_iterations;
   const double percentile = config_get_stop_cond_pct(config);
@@ -819,7 +1001,25 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
 void config_simulate(const Config *config, Rack *known_opp_rack,
                      SimResults *sim_results, ErrorStack *error_stack) {
   SimArgs args;
-  config_fill_sim_args(config, known_opp_rack, &args);
+  const int ld_size = ld_get_size(game_get_ld(config->game));
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  Rack nontarget_known_tiles;
+  rack_set_dist_size_and_reset(&nontarget_known_tiles, ld_size);
+  // For inferences in a sim, this will always be empty.
+  Rack target_known_inference_tiles;
+  rack_set_dist_size_and_reset(&target_known_inference_tiles, ld_size);
+  config_fill_sim_args(config, known_opp_rack, &target_played_tiles,
+                       &nontarget_known_tiles, &target_known_inference_tiles,
+                       &args);
+  if (args.use_inference &&
+      game_history_get_num_events(config->game_history) == 0) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_SIM_GAME_HISTORY_MISSING,
+        string_duplicate(
+            "cannot sim with inference with an empty game history"));
+    return;
+  }
   return simulate(&args, sim_results, error_stack);
 }
 
@@ -834,24 +1034,23 @@ void impl_sim(Config *config, ErrorStack *error_stack) {
 
   config_init_game(config);
 
+  const int ld_size = ld_get_size(game_get_ld(config->game));
   const char *known_opp_rack_str =
       config_get_parg_value(config, ARG_TOKEN_SIM, 0);
-  Rack *known_opp_rack = NULL;
+  Rack known_opp_rack;
+  rack_set_dist_size_and_reset(&known_opp_rack, ld_size);
 
   if (known_opp_rack_str) {
-    known_opp_rack = rack_create(ld_get_size(game_get_ld(config->game)));
     load_rack_or_push_to_error_stack(
         known_opp_rack_str, game_get_ld(config->game),
-        ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, known_opp_rack,
+        ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &known_opp_rack,
         error_stack);
     if (!error_stack_is_empty(error_stack)) {
-      rack_destroy(known_opp_rack);
       return;
     }
   }
 
-  config_simulate(config, known_opp_rack, config->sim_results, error_stack);
-  rack_destroy(known_opp_rack);
+  config_simulate(config, &known_opp_rack, config->sim_results, error_stack);
 }
 
 char *status_sim(Config *config) {
@@ -872,108 +1071,6 @@ char *status_sim(Config *config) {
     status_str = string_duplicate("simmer status not yet available");
   }
   return status_str;
-}
-
-// Inference
-
-void config_fill_infer_args(const Config *config, int target_index,
-                            int target_score, int target_num_exch,
-                            Rack *target_played_tiles, InferenceArgs *args) {
-  args->target_index = target_index;
-  args->target_score = target_score;
-  args->target_num_exch = target_num_exch;
-  args->move_capacity = config_get_num_plays(config);
-  args->equity_margin = config_get_equity_margin(config);
-  args->target_played_tiles = target_played_tiles;
-  args->game = config_get_game(config);
-  args->thread_control = config->thread_control;
-}
-
-void config_infer(const Config *config, int target_index, int target_score,
-                  int target_num_exch, Rack *target_played_tiles,
-                  InferenceResults *results, ErrorStack *error_stack) {
-  InferenceArgs args;
-  config_fill_infer_args(config, target_index, target_score, target_num_exch,
-                         target_played_tiles, &args);
-  return infer(&args, results, error_stack);
-}
-
-void config_infer_with_rack(Config *config, Rack *target_played_tiles,
-                            ErrorStack *error_stack) {
-  const char *target_index_str =
-      config_get_parg_value(config, ARG_TOKEN_INFER, 0);
-  int target_index;
-  string_to_int_or_push_error("inferred player", target_index_str, 1, 2,
-                              ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
-                              &target_index, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  // Convert from 1-indexed to 0-indexed
-  target_index--;
-
-  const char *target_played_tiles_or_num_exch_str =
-      config_get_parg_value(config, ARG_TOKEN_INFER, 1);
-
-  int target_num_exch = 0;
-  bool is_tile_placement_move = false;
-
-  if (is_all_digits_or_empty(target_played_tiles_or_num_exch_str)) {
-    string_to_int_or_push_error(
-        "inferred player number exchanged", target_played_tiles_or_num_exch_str,
-        0, RACK_SIZE, ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
-        &target_num_exch, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-  } else {
-    const LetterDistribution *ld = game_get_ld(config->game);
-    load_rack_or_push_to_error_stack(
-        target_played_tiles_or_num_exch_str, ld,
-        ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, target_played_tiles,
-        error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-    is_tile_placement_move = true;
-  }
-
-  Equity target_score = 0;
-
-  if (is_tile_placement_move) {
-    const char *target_score_str =
-        config_get_parg_value(config, ARG_TOKEN_INFER, 2);
-    if (!target_score_str) {
-      error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
-                       string_duplicate("missing inferred player score"));
-      return;
-    }
-    string_to_int_or_push_error(
-        "inferred player score", target_score_str, 0, INT_MAX,
-        ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG, &target_score, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-  }
-
-  config_infer(config, target_index, target_score, target_num_exch,
-               target_played_tiles, config->inference_results, error_stack);
-}
-
-void impl_infer(Config *config, ErrorStack *error_stack) {
-  if (!config_has_game_data(config)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-        string_duplicate(
-            "cannot infer without letter distribution and lexicon"));
-    return;
-  }
-
-  config_init_game(config);
-  Rack *target_played_tiles =
-      rack_create(ld_get_size(game_get_ld(config->game)));
-  config_infer_with_rack(config, target_played_tiles, error_stack);
-  rack_destroy(target_played_tiles);
 }
 
 // Autoplay
@@ -1153,7 +1250,7 @@ char *impl_load(Config *config, ErrorStack *error_stack) {
       "Successfully loaded game: %s vs %s (%d events)",
       game_history_player_get_name(config->game_history, 0),
       game_history_player_get_name(config->game_history, 1),
-      game_history_get_number_of_events(config->game_history));
+      game_history_get_num_played_events(config->game_history));
 
   return result;
 }
@@ -1217,7 +1314,7 @@ char *impl_next(Config *config, ErrorStack *error_stack) {
   }
 
   config_init_game(config);
-  gcg_next(config->game_history, config->game, error_stack);
+  game_next(config->game_history, config->game, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
@@ -1249,7 +1346,7 @@ char *impl_previous(Config *config, ErrorStack *error_stack) {
   }
 
   config_init_game(config);
-  gcg_previous(config->game_history, config->game, error_stack);
+  game_previous(config->game_history, config->game, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
@@ -1280,14 +1377,17 @@ char *impl_goto(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
 
-  const char *turn_index_str = config_get_parg_value(config, ARG_TOKEN_GOTO, 0);
-  const int turn_index = string_to_int(turn_index_str, error_stack);
+  const char *num_events_to_play_str =
+      config_get_parg_value(config, ARG_TOKEN_GOTO, 0);
+  const int num_events_to_play =
+      string_to_int(num_events_to_play_str, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
 
   config_init_game(config);
-  gcg_goto(config->game_history, config->game, turn_index, error_stack);
+  game_goto(config->game_history, config->game, num_events_to_play,
+            error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
@@ -1936,23 +2036,31 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     }
   }
 
-  config_load_double(config, ARG_TOKEN_EQUITY_MARGIN, 0, 1e100,
-                     &config->equity_margin, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
-  const char *new_max_equity_diff_double =
-      config_get_parg_value(config, ARG_TOKEN_MAX_EQUITY_DIFF, 0);
-  if (new_max_equity_diff_double) {
-    double max_equity_diff_double = NAN;
-    config_load_double(config, ARG_TOKEN_MAX_EQUITY_DIFF, 0, EQUITY_MAX_DOUBLE,
-                       &max_equity_diff_double, error_stack);
+  const char *new_eq_margin_inference_double =
+      config_get_parg_value(config, ARG_TOKEN_EQ_MARGIN_INFERENCE, 0);
+  if (new_eq_margin_inference_double) {
+    double eq_margin_inference_double = 0;
+    config_load_double(config, ARG_TOKEN_EQ_MARGIN_INFERENCE, 0,
+                       EQUITY_MAX_DOUBLE, &eq_margin_inference_double,
+                       error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
-    assert(!isnan(max_equity_diff_double));
-    config->max_equity_diff = double_to_equity(max_equity_diff_double);
+    assert(!isnan(eq_margin_inference_double));
+    config->eq_margin_inference = double_to_equity(eq_margin_inference_double);
+  }
+
+  const char *new_eq_margin_movegen =
+      config_get_parg_value(config, ARG_TOKEN_EQ_MARGIN_MOVEGEN, 0);
+  if (new_eq_margin_movegen) {
+    double eq_margin_movegen = NAN;
+    config_load_double(config, ARG_TOKEN_EQ_MARGIN_MOVEGEN, 0,
+                       EQUITY_MAX_DOUBLE, &eq_margin_movegen, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    assert(!isnan(eq_margin_movegen));
+    config->eq_margin_movegen = double_to_equity(eq_margin_movegen);
   }
 
   config_load_double(config, ARG_TOKEN_TT_FRACTION_OF_MEM, 0, 1,
@@ -1989,6 +2097,14 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
 
   config_load_bool(config, ARG_TOKEN_USE_SMALL_PLAYS, &config->use_small_plays,
                    error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  // Sim with inference
+
+  config_load_bool(config, ARG_TOKEN_SIM_WITH_INFERENCE,
+                   &config->sim_with_inference, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -2322,7 +2438,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   cmd(ARG_TOKEN_RACK, "rack", 2, 2, set_rack, generic);
   cmd(ARG_TOKEN_GEN, "generate", 0, 0, move_gen, generic);
   cmd(ARG_TOKEN_SIM, "simulate", 0, 1, sim, sim);
-  cmd(ARG_TOKEN_INFER, "infer", 2, 3, infer, generic);
+  cmd(ARG_TOKEN_INFER, "infer", 0, 5, infer, generic);
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, generic);
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic);
   cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic);
@@ -2358,10 +2474,11 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_MAX_ITERATIONS, "iterations", 1, 1);
   arg(ARG_TOKEN_MIN_PLAY_ITERATIONS, "minplayiterations", 1, 1);
   arg(ARG_TOKEN_STOP_COND_PCT, "scondition", 1, 1);
-  arg(ARG_TOKEN_EQUITY_MARGIN, "equitymargin", 1, 1);
-  arg(ARG_TOKEN_MAX_EQUITY_DIFF, "maxequitydifference", 1, 1);
+  arg(ARG_TOKEN_EQ_MARGIN_INFERENCE, "equitymargin", 1, 1);
+  arg(ARG_TOKEN_EQ_MARGIN_MOVEGEN, "maxequitydifference", 1, 1);
   arg(ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1);
   arg(ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1);
+  arg(ARG_TOKEN_SIM_WITH_INFERENCE, "sinfer", 1, 1);
   arg(ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1);
   arg(ARG_TOKEN_WRITE_BUFFER_SIZE, "wb", 1, 1);
   arg(ARG_TOKEN_RANDOM_SEED, "seed", 1, 1);
@@ -2382,8 +2499,8 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->num_plays = DEFAULT_MOVE_LIST_CAPACITY;
   config->num_small_plays = DEFAULT_SMALL_MOVE_LIST_CAPACITY;
   config->plies = 2;
-  config->equity_margin = 0;
-  config->max_equity_diff = int_to_equity(10);
+  config->eq_margin_inference = 0;
+  config->eq_margin_movegen = int_to_equity(10);
   config->min_play_iterations = 100;
   config->max_iterations = 5000;
   config->stop_cond_pct = 99;
@@ -2393,18 +2510,19 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->use_game_pairs = false;
   config->use_small_plays = false;
   config->human_readable = false;
+  config->sim_with_inference = false;
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->ld = NULL;
   config->players_data = players_data_create();
   config->thread_control = thread_control_create();
   config->game = NULL;
   config->move_list = NULL;
+  config->game_history = game_history_create();
   config->sim_results = sim_results_create();
-  config->inference_results = inference_results_create();
+  config->inference_results = inference_results_create(NULL);
   config->autoplay_results = autoplay_results_create();
   config->conversion_results = conversion_results_create();
   config->tt_fraction_of_mem = 0.25;
-  config->game_history = game_history_create();
 
   autoplay_results_set_players_data(config->autoplay_results,
                                     config->players_data);
@@ -2429,8 +2547,8 @@ void config_destroy(Config *config) {
   ld_destroy(config->ld);
   players_data_destroy(config->players_data);
   thread_control_destroy(config->thread_control);
-  game_history_destroy(config->game_history);
   game_destroy(config->game);
+  game_history_destroy(config->game_history);
   move_list_destroy(config->move_list);
   sim_results_destroy(config->sim_results);
   inference_results_destroy(config->inference_results);

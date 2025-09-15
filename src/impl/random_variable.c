@@ -2,9 +2,11 @@
 
 #include "../def/game_defs.h"
 #include "../def/rack_defs.h"
+#include "../ent/alias_method.h"
 #include "../ent/bag.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/inference_results.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
@@ -323,6 +325,8 @@ typedef struct Simmer {
   SimmerWorker **workers;
   // Owned by the caller
   const WinPct *win_pcts;
+  bool use_inference;
+  const InferenceResults *inference_results;
   ThreadControl *thread_control;
   SimResults *sim_results;
 } Simmer;
@@ -376,16 +380,27 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
 
   // This will shuffle the bag, so there is no need
   // to call bag_shuffle explicitly.
-  game_seed(game, simmed_play_get_seed(simmed_play));
+  const uint64_t seed = simmed_play_get_seed(simmed_play);
+  game_seed(game, seed);
 
   int player_off_turn_index = 1 - game_get_player_on_turn_index(game);
-  // set random rack for opponent (throw in rack, bag_shuffle, draw new tiles).
-  set_random_rack(game, player_off_turn_index, simmer->known_opp_rack);
+  if (simmer->use_inference &&
+      (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack))) {
+    Rack inferred_rack;
+    rack_set_dist_size(&inferred_rack, simmer->dist_size);
+    if (alias_method_sample(
+            inference_results_get_alias_method(simmer->inference_results), seed,
+            &inferred_rack)) {
+      set_random_rack(game, player_off_turn_index, &inferred_rack);
+    }
+  } else {
+    set_random_rack(game, player_off_turn_index, simmer->known_opp_rack);
+  }
 
   Equity leftover = 0;
   game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
   // play move
-  play_move(simmed_play_get_move(simmed_play), game, NULL, NULL);
+  play_move(simmed_play_get_move(simmed_play), game, NULL);
   sim_results_increment_node_count(sim_results);
   game_set_backup_mode(game, BACKUP_MODE_OFF);
   // further plies will NOT be backed up.
@@ -401,7 +416,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
     const Move *best_play = get_top_equity_move(game, thread_index, move_list);
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
-    play_move(best_play, game, NULL, NULL);
+    play_move(best_play, game, NULL);
     sim_results_increment_node_count(sim_results);
     if (ply == plies - 2 || ply == plies - 1) {
       Equity this_leftover = get_leave_value_for_move(
@@ -426,7 +441,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       simmer->win_pcts, simmed_play, spread, leftover,
       game_get_game_end_reason(game),
       // number of tiles unseen to us: bag tiles + tiles on opp rack.
-      bag_get_tiles(game_get_bag(game)) +
+      bag_get_letters(game_get_bag(game)) +
           rack_get_total_letters(player_get_rack(
               game_get_player(game, 1 - simmer->initial_player))),
       plies % 2);
@@ -512,6 +527,8 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   }
 
   simmer->win_pcts = sim_args->win_pcts;
+  simmer->use_inference = sim_args->use_inference;
+  simmer->inference_results = sim_args->inference_results;
 
   simmer->thread_control = thread_control;
 

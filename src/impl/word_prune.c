@@ -340,8 +340,7 @@ void generate_possible_words(const Game *game, const KWG *override_kwg,
 
   const int ld_size = ld_get_size(game_get_ld(game));
   Rack unplayed_as_rack;
-  rack_set_dist_size(&unplayed_as_rack, ld_size);
-  rack_reset(&unplayed_as_rack);
+  rack_set_dist_size_and_reset(&unplayed_as_rack, ld_size);
   const Bag *bag = game_get_bag(game);
   for (int i = 0; i < ld_size; i++) {
     for (int j = 0; j < bag_get_letter(bag, i); j++) {

@@ -47,7 +47,7 @@ void assert_rack_equals_string(const LetterDistribution *ld, const Rack *r1,
 void assert_move(const Game *game, const MoveList *move_list,
                  const SortedMoveList *sml, int move_index,
                  const char *expected_move_string);
-void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size);
+void assert_bags_are_equal(const Bag *b1, const Bag *b2);
 void assert_boards_are_equal(Board *b1, Board *b2);
 void assert_games_are_equal(const Game *g1, const Game *g2, bool check_scores);
 void print_game(const Game *game, const MoveList *move_list);
@@ -89,8 +89,8 @@ ValidatedMoves *validated_moves_create_and_assert_status(
 error_code_t config_simulate_and_return_status(const Config *config,
                                                Rack *known_opp_rack,
                                                SimResults *sim_results);
-void game_play_to_turn_or_die(GameHistory *game_history, Game *game,
-                              int turn_index);
+void game_play_n_events_or_die(GameHistory *game_history, Game *game,
+                               int event_index);
 void game_play_to_end_or_die(GameHistory *game_history, Game *game);
 void assert_validated_and_generated_moves(Game *game, const char *rack_string,
                                           const char *move_position,
@@ -134,4 +134,12 @@ void generate_anchors_for_test(Game *game);
 void extract_sorted_anchors_for_test(AnchorHeap *sorted_anchors);
 void set_klv_leave_value(const KLV *klv, const LetterDistribution *ld,
                          const char *rack_str, Equity equity);
+error_code_t test_parse_gcg(const char *gcg_filename, Config *config,
+                            GameHistory *game_history);
+error_code_t test_parse_gcg_string(const char *gcg_string, Config *config,
+                                   GameHistory *game_history);
+void load_game_history_with_gcg_string(Config *config, const char *gcg_header,
+                                       const char *gcg_content);
+void load_game_history_with_gcg(Config *config, const char *gcg_file);
+
 #endif

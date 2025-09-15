@@ -49,7 +49,7 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
     // so the end of actual_game subtractions are correct. If the bag has less
     // than RACK_SIZE tiles, have the opponent draw the remaining tiles
     // so the endgame adjustments are added to the move equity values.
-    if (i == array_length - 1 || bag_get_tiles(bag) < RACK_SIZE) {
+    if (i == array_length - 1 || bag_get_letters(bag) < RACK_SIZE) {
       draw_to_full_rack(actual_game, 1 - player_on_turn_index);
     }
 
@@ -112,9 +112,9 @@ void test_draw_to_full_rack(void) {
   const Bag *bag = game_get_bag(game);
   // Check drawing from the bag
   int drawing_player_index = 0;
-  int number_of_remaining_tiles = bag_get_tiles(bag);
+  int number_of_remaining_tiles = bag_get_letters(bag);
   Rack *rack;
-  while (bag_get_tiles(bag) > RACK_SIZE) {
+  while (bag_get_letters(bag) > RACK_SIZE) {
     draw_to_full_rack(game, drawing_player_index);
     rack = player_get_rack(game_get_player(game, drawing_player_index));
     number_of_remaining_tiles -= RACK_SIZE;
@@ -151,7 +151,7 @@ void test_rack_is_drawable(void) {
   rack_set_to_string(ld, rack_to_draw, "UUZVVWZ");
   assert(!rack_is_drawable(game, 0, rack_to_draw));
 
-  int number_of_letters = bag_get_tiles(bag);
+  int number_of_letters = bag_get_letters(bag);
   for (int i = 0; i < number_of_letters; i++) {
     bag_draw_random_letter(bag, 0);
   }
@@ -509,7 +509,7 @@ void test_playmove(void) {
   assert(board_get_letter(board, 7, 6) == ld_hl_to_ml(ld, "D"));
   assert(board_get_letter(board, 7, 7) == ld_hl_to_ml(ld, "E"));
   assert(game_get_player_on_turn_index(game) == 1);
-  assert(bag_get_tiles(bag) == 88);
+  assert(bag_get_letters(bag) == 88);
   assert(board_get_tiles_played(board) == 5);
   game_reset(game);
 
@@ -524,7 +524,7 @@ void test_playmove(void) {
   assert(!rack_is_empty(player0_rack));
   assert(rack_get_total_letters(player0_rack) == 7);
   assert(game_get_player_on_turn_index(game) == 1);
-  assert(bag_get_tiles(bag) == 93);
+  assert(bag_get_letters(bag) == 93);
   assert(board_get_tiles_played(board) == 0);
 
   assert(rack_get_letter(player0_rack, ld_hl_to_ml(ld, "V")) == 0);
@@ -582,20 +582,20 @@ void test_set_random_rack(void) {
 
   Rack *player0_rack = player_get_rack(player0);
 
-  assert(bag_get_tiles(bag) == 100);
+  assert(bag_get_letters(bag) == 100);
   // draw some random rack.
   draw_rack_string_from_bag(game, 0, "DEKNRTY");
-  assert(bag_get_tiles(bag) == 93);
+  assert(bag_get_letters(bag) == 93);
 
   set_random_rack(game, 0, NULL);
-  assert(bag_get_tiles(bag) == 93);
+  assert(bag_get_letters(bag) == 93);
   assert(rack_get_total_letters(player0_rack) == 7);
 
   // draw some random rack, but with 5 fixed tiles
   Rack *known_rack = rack_create(ld_get_size(ld));
   rack_set_to_string(ld, known_rack, "CESAR");
   set_random_rack(game, 0, known_rack);
-  assert(bag_get_tiles(bag) == 93);
+  assert(bag_get_letters(bag) == 93);
   assert(rack_get_total_letters(player0_rack) == 7);
 
   // C E S A R
@@ -636,13 +636,13 @@ void test_backups(void) {
   draw_rack_string_from_bag(game, 0, "DEKNRTY");
 
   draw_rack_string_from_bag(game, 1, "AOQRTUZ");
-  assert(bag_get_tiles(bag) == 86);
+  assert(bag_get_letters(bag) == 86);
 
   // backup
   game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
   play_top_n_equity_move(game, 0);
   play_top_n_equity_move(game, 0);
-  assert(bag_get_tiles(bag) == 74);
+  assert(bag_get_letters(bag) == 74);
 
   assert(equity_to_int(player_get_score(player0)) == 36);
   assert(equity_to_int(player_get_score(player1)) == 131);
@@ -664,7 +664,7 @@ void test_backups(void) {
   // was 85 after drawing racks for both players, then was 80 after KYNDE
   // and drawing 5 replacement tiles, then 73 after QUATORZ(E) and 7 replacement
   // tiles, then back to 80 after unplay.
-  assert(bag_get_tiles(bag) == 81);
+  assert(bag_get_letters(bag) == 81);
   game_destroy(game);
   config_destroy(config);
 }
@@ -686,7 +686,7 @@ void test_leave_record(void) {
   vms = validated_moves_create_and_assert_status(game, 0, "8G.KY", false, false,
                                                  false, ERROR_STATUS_SUCCESS);
   move = validated_moves_get_move(vms, 0);
-  play_move(move, game, NULL, actual_leave);
+  play_move(move, game, actual_leave);
   rack_set_to_string(ld, expected_leave, "DENRT");
   assert(racks_are_equal(expected_leave, actual_leave));
   validated_moves_destroy(vms);
@@ -696,7 +696,7 @@ void test_leave_record(void) {
   vms = validated_moves_create_and_assert_status(
       game, 0, "ex.DKY", false, false, false, ERROR_STATUS_SUCCESS);
   move = validated_moves_get_move(vms, 0);
-  play_move(move, game, NULL, actual_leave);
+  play_move(move, game, actual_leave);
   rack_set_to_string(ld, expected_leave, "ENRT");
   assert(racks_are_equal(expected_leave, actual_leave));
   validated_moves_destroy(vms);
@@ -706,7 +706,7 @@ void test_leave_record(void) {
   vms = validated_moves_create_and_assert_status(game, 0, "pass", false, false,
                                                  false, ERROR_STATUS_SUCCESS);
   move = validated_moves_get_move(vms, 0);
-  play_move(move, game, NULL, actual_leave);
+  play_move(move, game, actual_leave);
   rack_set_to_string(ld, expected_leave, "DEKNRTY");
   assert(racks_are_equal(expected_leave, actual_leave));
   validated_moves_destroy(vms);

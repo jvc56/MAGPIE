@@ -2,7 +2,6 @@
 #include "../def/cross_set_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
-#include "../def/gameplay_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
@@ -16,6 +15,9 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+#include "../str/rack_string.h"
+#include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "move_gen.h"
 #include <assert.h>
 #include <stdbool.h>
@@ -207,8 +209,8 @@ bool draw_rack_from_bag(const Game *game, const int player_index,
   const uint16_t dist_size = rack_get_dist_size(player_rack);
   rack_copy(player_rack, rack_to_draw);
   for (int i = 0; i < dist_size; i++) {
-    const int8_t rack_number_of_letter = rack_get_letter(player_rack, i);
-    for (int8_t j = 0; j < rack_number_of_letter; j++) {
+    const uint16_t rack_number_of_letter = rack_get_letter(player_rack, i);
+    for (uint16_t j = 0; j < rack_number_of_letter; j++) {
       if (!bag_draw_letter(bag, i, player_draw_index)) {
         return false;
       }
@@ -224,8 +226,8 @@ void draw_leave_from_bag(Bag *bag, int player_draw_index, Rack *rack_to_update,
                          const Rack *rack_to_draw) {
   const uint16_t dist_size = rack_get_dist_size(rack_to_draw);
   for (int i = 0; i < dist_size; i++) {
-    const int8_t rack_number_of_letter = rack_get_letter(rack_to_draw, i);
-    for (int8_t j = 0; j < rack_number_of_letter; j++) {
+    const uint16_t rack_number_of_letter = rack_get_letter(rack_to_draw, i);
+    for (uint16_t j = 0; j < rack_number_of_letter; j++) {
       if (!bag_draw_letter(bag, i, player_draw_index)) {
         continue;
       }
@@ -265,8 +267,8 @@ void return_rack_to_bag(const Game *game, const int player_index) {
   int player_draw_index = game_get_player_draw_index(game, player_index);
   const uint16_t dist_size = rack_get_dist_size(player_rack);
   for (int i = 0; i < dist_size; i++) {
-    const int8_t rack_number_of_letter = rack_get_letter(player_rack, i);
-    for (int8_t j = 0; j < rack_number_of_letter; j++) {
+    const uint16_t rack_number_of_letter = rack_get_letter(player_rack, i);
+    for (uint16_t j = 0; j < rack_number_of_letter; j++) {
       bag_add_letter(bag, i, player_draw_index);
     }
   }
@@ -277,7 +279,18 @@ void set_random_rack(const Game *game, const int player_index,
                      const Rack *known_rack) {
   return_rack_to_bag(game, player_index);
   if (known_rack) {
-    draw_rack_from_bag(game, player_index, known_rack);
+    if (!draw_rack_from_bag(game, player_index, known_rack)) {
+      const LetterDistribution *ld = game_get_ld(game);
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_string(sb, "unexpectedly failed to draw rack '");
+      string_builder_add_rack(sb, known_rack, ld, false);
+      string_builder_add_string(sb, "' from the bag");
+      char *err_msg = string_builder_dump(sb, NULL);
+      string_builder_destroy(sb);
+      log_fatal(err_msg);
+      // Unreachable, but will silence static analyzer warnings
+      free(err_msg);
+    }
   }
   draw_to_full_rack(game, player_index);
 }
@@ -324,13 +337,9 @@ void draw_starting_racks(const Game *game) {
 }
 
 // Assumes the move has been validated
-// If rack_to_draw is not null, it will attempt to set the
-// player rack to rack_to_draw after the play or will
-// return an error if it is not possible.
 // If the input leave rack is not null, it will record the leave of
 // the play in the leave rack.
-play_move_status_t play_move(const Move *move, Game *game,
-                             const Rack *rack_to_draw, Rack *leave) {
+void play_move(const Move *move, Game *game, Rack *leave) {
   game_backup(game);
   const LetterDistribution *ld = game_get_ld(game);
   int player_on_turn_index = game_get_player_on_turn_index(game);
@@ -358,16 +367,6 @@ play_move_status_t play_move(const Move *move, Game *game,
     execute_exchange_move(move, game, leave);
     game_increment_consecutive_scoreless_turns(game);
   }
-
-  if (rack_to_draw) {
-    if (rack_is_drawable(game, player_on_turn_index, rack_to_draw)) {
-      return_rack_to_bag(game, player_on_turn_index);
-      draw_rack_from_bag(game, player_on_turn_index, rack_to_draw);
-    } else {
-      return PLAY_MOVE_STATUS_RACK_TO_DRAW_NOT_IN_BAG;
-    }
-  }
-
   if (game_get_consecutive_scoreless_turns(game) ==
       game_get_max_scoreless_turns(game)) {
     Player *player0 = game_get_player(game, 0);
@@ -377,10 +376,36 @@ play_move_status_t play_move(const Move *move, Game *game,
     game_set_game_end_reason(game, GAME_END_REASON_CONSECUTIVE_ZEROS);
   }
   game_start_next_player_turn(game);
-  return PLAY_MOVE_STATUS_SUCCESS;
 }
 
-void return_phony_tiles(Game *game) {
+void play_move_without_drawing_tiles(const Move *move, Game *game) {
+  game_backup(game);
+  int player_on_turn_index = game_get_player_on_turn_index(game);
+  Player *player_on_turn = game_get_player(game, player_on_turn_index);
+  const Rack *player_on_turn_rack = player_get_rack(player_on_turn);
+  if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    play_move_on_board(move, game);
+    update_cross_set_for_move(move, game);
+    game_set_consecutive_scoreless_turns(game, 0);
+    player_add_to_score(player_on_turn, move_get_score(move));
+    if (rack_is_empty(player_on_turn_rack) &&
+        bag_get_letters(game_get_bag(game)) <= (RACK_SIZE)) {
+      game_set_game_end_reason(game, GAME_END_REASON_STANDARD);
+    }
+  } else if (move_get_type(move) == GAME_EVENT_PASS) {
+    game_increment_consecutive_scoreless_turns(game);
+  } else if (move_get_type(move) == GAME_EVENT_EXCHANGE) {
+    execute_exchange_move(move, game, NULL);
+    game_increment_consecutive_scoreless_turns(game);
+  }
+  if (game_get_consecutive_scoreless_turns(game) ==
+      game_get_max_scoreless_turns(game)) {
+    game_set_game_end_reason(game, GAME_END_REASON_CONSECUTIVE_ZEROS);
+  }
+  game_start_next_player_turn(game);
+}
+
+void return_phony_letters(Game *game) {
   game_unplay_last_move(game);
   game_start_next_player_turn(game);
   game_increment_consecutive_scoreless_turns(game);
@@ -401,7 +426,7 @@ void generate_moves_for_game(const MoveGenArgs *args) {
       .move_sort_type = player_get_move_sort_type(player_on_turn),
       .override_kwg = NULL,
       .thread_index = args->thread_index,
-      .max_equity_diff = args->max_equity_diff,
+      .eq_margin_movegen = args->eq_margin_movegen,
   };
 
   generate_moves(&args_with_overwritten_record_and_sort);
@@ -415,7 +440,7 @@ Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
       .move_sort_type = MOVE_SORT_EQUITY,
       .override_kwg = NULL,
       .thread_index = thread_index,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
   generate_moves(&args);
   return move_list_get_move(move_list, 0);
@@ -435,8 +460,7 @@ bool moves_are_similar(const Move *move1, const Move *move2, int dist_size) {
   // Create a rack from move1, then subtract the rack from move2. The final
   // rack should have all zeroes.
   Rack similar_plays_rack;
-  rack_set_dist_size(&similar_plays_rack, dist_size);
-  rack_reset(&similar_plays_rack);
+  rack_set_dist_size_and_reset(&similar_plays_rack, dist_size);
   for (int i = 0; i < move_get_tiles_length(move1); i++) {
     MachineLetter tile = move_get_tile(move1, i);
     if (tile == PLAYED_THROUGH_MARKER) {

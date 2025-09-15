@@ -15,7 +15,7 @@ void bag_destroy(Bag *bag);
 void bag_copy(Bag *dst, const Bag *src);
 Bag *bag_duplicate(const Bag *bag);
 
-int bag_get_tiles(const Bag *bag);
+int bag_get_letters(const Bag *bag);
 int bag_get_letter(const Bag *bag, MachineLetter ml);
 bool bag_is_empty(const Bag *bag);
 

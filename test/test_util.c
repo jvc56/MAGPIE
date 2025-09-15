@@ -11,6 +11,7 @@
 #include "../src/ent/board.h"
 #include "../src/ent/board_layout.h"
 #include "../src/ent/bonus_square.h"
+#include "../src/ent/data_filepaths.h"
 #include "../src/ent/dictionary_word.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -335,8 +336,8 @@ void print_english_rack(const Rack *rack) {
   }
   const uint16_t ld_size = rack_get_dist_size(rack);
   for (int i = 1; i < ld_size; i++) {
-    const int8_t num_letter = rack_get_letter(rack, i);
-    for (int8_t j = 0; j < num_letter; j++) {
+    const uint16_t num_letter = rack_get_letter(rack, i);
+    for (uint16_t j = 0; j < num_letter; j++) {
       printf("%c", (char)(i + 'A' - 1));
     }
   }
@@ -380,12 +381,12 @@ void play_top_n_equity_move(Game *game, int n) {
       .move_sort_type = MOVE_SORT_EQUITY,
       .override_kwg = NULL,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   generate_moves(&args);
   SortedMoveList *sorted_move_list = sorted_move_list_create(move_list);
-  play_move(sorted_move_list->moves[n], game, NULL, NULL);
+  play_move(sorted_move_list->moves[n], game, NULL);
   sorted_move_list_destroy(sorted_move_list);
   move_list_destroy(move_list);
 }
@@ -400,13 +401,15 @@ void load_cgp_or_die(Game *game, const char *cgp) {
   error_stack_destroy(error_stack);
 }
 
-void game_play_to_turn_or_die(GameHistory *game_history, Game *game,
-                              int turn_index) {
+void game_play_n_events_or_die(GameHistory *game_history, Game *game,
+                               int event_index) {
   ErrorStack *error_stack = error_stack_create();
-  game_play_to_turn(game_history, game, turn_index, error_stack);
+  game_play_n_events(game_history, game, event_index, error_stack);
   if (!error_stack_is_empty(error_stack)) {
+    printf("Failed to play to event index %d due to the following error:\n",
+           event_index);
     error_stack_print_and_reset(error_stack);
-    log_fatal("failed to play to turn %d\n", turn_index);
+    log_fatal("failed to play to event index %d\n", event_index);
   }
   error_stack_destroy(error_stack);
 }
@@ -499,33 +502,28 @@ void assert_rack_equals_string(const LetterDistribution *ld, const Rack *r1,
   free(r1_str);
 }
 
-void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size) {
-  Bag *b1_copy = bag_duplicate(b1);
-  Bag *b2_copy = bag_duplicate(b2);
+void assert_bags_are_equal(const Bag *b1, const Bag *b2) {
+  int b1_unseen[MAX_ALPHABET_SIZE];
+  memset(b1_unseen, 0, sizeof(b1_unseen));
+  bag_increment_unseen_count(b1, b1_unseen);
 
-  int b1_number_of_tiles_remaining = bag_get_tiles(b1_copy);
-  int b2_number_of_tiles_remaining = bag_get_tiles(b2_copy);
+  int b2_unseen[MAX_ALPHABET_SIZE];
+  memset(b2_unseen, 0, sizeof(b2_unseen));
+  bag_increment_unseen_count(b2, b2_unseen);
 
-  assert(b1_number_of_tiles_remaining == b2_number_of_tiles_remaining);
-
-  Rack *rack = rack_create(rack_array_size);
-
-  for (int i = 0; i < b1_number_of_tiles_remaining; i++) {
-    MachineLetter letter = bag_draw_random_letter(b1_copy, 0);
-    rack_add_letter(rack, letter);
+  for (int i = 0; i < MAX_ALPHABET_SIZE; i++) {
+    if (b1_unseen[i] != b2_unseen[i]) {
+      printf("Bags to not have the same amount of letter %c: %d != %d\n",
+             i + 'A' - 1, b1_unseen[i], b2_unseen[i]);
+      assert(0);
+    }
   }
 
-  for (int i = 0; i < b2_number_of_tiles_remaining; i++) {
-    MachineLetter letter = bag_draw_random_letter(b2_copy, 0);
-    assert(rack_get_letter(rack, letter) > 0);
-    rack_take_letter(rack, letter);
+  if (bag_get_letters(b1) != bag_get_letters(b2)) {
+    printf("Bags to not have the same number of letters: %d != %d\n",
+           bag_get_letters(b1), bag_get_letters(b2));
+    assert(0);
   }
-
-  assert(rack_is_empty(rack));
-
-  bag_destroy(b1_copy);
-  bag_destroy(b2_copy);
-  rack_destroy(rack);
 }
 
 // Assumes b1 and b2 use the same lexicon and therefore
@@ -607,19 +605,19 @@ void assert_games_are_equal(const Game *g1, const Game *g2,
          game_get_consecutive_scoreless_turns(g2));
   assert(game_get_game_end_reason(g1) == game_get_game_end_reason(g2));
 
-  int g1_player_on_turn_index = game_get_player_on_turn_index(g1);
+  int g1_player_on_event_index = game_get_player_on_turn_index(g1);
 
   const Player *g1_player_on_turn =
-      game_get_player(g1, g1_player_on_turn_index);
+      game_get_player(g1, g1_player_on_event_index);
   const Player *g1_player_not_on_turn =
-      game_get_player(g1, 1 - g1_player_on_turn_index);
+      game_get_player(g1, 1 - g1_player_on_event_index);
 
-  int g2_player_on_turn_index = game_get_player_on_turn_index(g2);
+  int g2_player_on_event_index = game_get_player_on_turn_index(g2);
 
   const Player *g2_player_on_turn =
-      game_get_player(g2, g2_player_on_turn_index);
+      game_get_player(g2, g2_player_on_event_index);
   const Player *g2_player_not_on_turn =
-      game_get_player(g2, 1 - g2_player_on_turn_index);
+      game_get_player(g2, 1 - g2_player_on_event_index);
 
   assert_players_are_equal(g1_player_on_turn, g2_player_on_turn, check_scores);
   assert_players_are_equal(g1_player_not_on_turn, g2_player_not_on_turn,
@@ -632,7 +630,7 @@ void assert_games_are_equal(const Game *g1, const Game *g2,
   const Bag *bag2 = game_get_bag(g2);
 
   assert_boards_are_equal(board1, board2);
-  assert_bags_are_equal(bag1, bag2, ld_get_size(game_get_ld(g1)));
+  assert_bags_are_equal(bag1, bag2);
 }
 
 char *get_test_filename(const char *filename) {
@@ -719,7 +717,7 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
       .game = game,
       .move_list = move_list,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   rack_set_to_string(game_get_ld(game), player_rack, rack_string);
@@ -752,7 +750,7 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
   assert(error_stack_top(error_stack) == ERROR_STATUS_SUCCESS);
 
   if (play_move_on_board) {
-    play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
+    play_move(move_list_get_move(move_list, 0), game, NULL);
   }
 
   validated_moves_destroy(vms);
@@ -770,8 +768,10 @@ ValidatedMoves *validated_moves_create_and_assert_status(
       allow_unknown_exchanges, allow_playthrough, error_stack);
   const bool ok = error_stack_top(error_stack) == expected_status;
   if (!ok) {
-    printf("validated_moves_create failed for %s\n", ucgi_moves_string);
-    error_stack_reset(error_stack);
+    printf("validated_moves_create return unexpected status for %s: %d != %d\n",
+           ucgi_moves_string, error_stack_top(error_stack), expected_status);
+    error_stack_print_and_reset(error_stack);
+    assert(0);
   }
   error_stack_destroy(error_stack);
   return vms;
@@ -784,6 +784,10 @@ error_code_t config_simulate_and_return_status(const Config *config,
   set_thread_control_status_to_start(config_get_thread_control(config));
   config_simulate(config, known_opp_rack, sim_results, error_stack);
   error_code_t status = error_stack_top(error_stack);
+  if (status != ERROR_STATUS_SUCCESS) {
+    printf("config simulate finished with error: %d\n", status);
+    error_stack_print_and_reset(error_stack);
+  }
   error_stack_destroy(error_stack);
   return status;
 }
@@ -994,7 +998,7 @@ void generate_anchors_for_test(Game *game) {
       .move_sort_type = player_get_move_sort_type(player_on_turn),
       .override_kwg = NULL,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
   gen_load_position(gen, &args);
   gen_look_up_leaves_and_record_exchanges(gen);
@@ -1022,4 +1026,71 @@ void set_klv_leave_value(const KLV *klv, const LetterDistribution *ld,
   const uint32_t klv_word_index = klv_get_word_index(klv, rack);
   klv_set_indexed_leave_value(klv, klv_word_index, equity);
   rack_destroy(rack);
+}
+
+error_code_t test_parse_gcg(const char *gcg_filename, Config *config,
+                            GameHistory *game_history) {
+  ErrorStack *error_stack = error_stack_create();
+  char *gcg_filepath = data_filepaths_get_readable_filename(
+      config_get_data_paths(config), gcg_filename, DATA_FILEPATH_TYPE_GCG,
+      error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("failed to get gcg filepath for test: %s\n", gcg_filename);
+  }
+  parse_gcg(gcg_filepath, config, game_history, error_stack);
+  error_code_t gcg_parse_status = error_stack_top(error_stack);
+  error_stack_print_and_reset(error_stack);
+  error_stack_destroy(error_stack);
+  free(gcg_filepath);
+  return gcg_parse_status;
+}
+
+error_code_t test_parse_gcg_string(const char *gcg_string, Config *config,
+                                   GameHistory *game_history) {
+  ErrorStack *error_stack = error_stack_create();
+  parse_gcg_string(gcg_string, config, game_history, error_stack);
+  error_code_t gcg_parse_status = error_stack_top(error_stack);
+  error_stack_print_and_reset(error_stack);
+  error_stack_destroy(error_stack);
+  return gcg_parse_status;
+}
+
+error_code_t test_parse_gcg_file(const char *gcg_filename, Config *config,
+                                 GameHistory *game_history) {
+  ErrorStack *error_stack = error_stack_create();
+  parse_gcg(gcg_filename, config, game_history, error_stack);
+  error_code_t gcg_parse_status = error_stack_top(error_stack);
+  error_stack_print_and_reset(error_stack);
+  error_stack_destroy(error_stack);
+  return gcg_parse_status;
+}
+
+// Resets the history before loading the GCG
+void load_game_history_with_gcg_string(Config *config, const char *gcg_header,
+                                       const char *gcg_content) {
+  GameHistory *game_history = config_get_game_history(config);
+  game_history_reset(game_history);
+  char *gcg_string = get_formatted_string("%s%s", gcg_header, gcg_content);
+  assert(test_parse_gcg_string(gcg_string, config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+  free(gcg_string);
+}
+
+// Resets the history before loading the GCG
+void load_game_history_with_gcg(Config *config, const char *gcg_file) {
+  ErrorStack *error_stack = error_stack_create();
+  char *gcg_filename = data_filepaths_get_readable_filename(
+      config_get_data_paths(config), gcg_file, DATA_FILEPATH_TYPE_GCG,
+      error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("failed to get gcg filepath for test: %s\n", gcg_filename);
+  }
+  error_stack_destroy(error_stack);
+  GameHistory *game_history = config_get_game_history(config);
+  game_history_reset(game_history);
+  assert(test_parse_gcg_file(gcg_filename, config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+  free(gcg_filename);
 }

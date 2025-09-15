@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#define XOSHIRO_MAX UINT64_C(18446744073709551615)
+
 typedef struct XoshiroPRNG XoshiroPRNG;
 
 XoshiroPRNG *prng_create(uint64_t seed);
