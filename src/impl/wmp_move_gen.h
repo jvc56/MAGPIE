@@ -447,6 +447,10 @@ static inline void wmp_move_gen_add_anchors(WMPMoveGen *wmp_move_gen, int row,
   for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
     const Anchor *anchor = &wmp_move_gen->anchors[i];
     if (anchor->tiles_to_play > 0) {
+      const int word_length =
+          wmp_move_gen->num_tiles_played_through + anchor->tiles_to_play;
+      assert(word_length >= MINIMUM_WORD_LENGTH);
+      assert(word_length <= wmp_move_gen->wmp->board_dim);
       anchor_heap_add_unheaped_wmp_anchor(
           anchor_heap, row, col, last_anchor_col, dir,
           anchor->highest_possible_equity, anchor->highest_possible_score,

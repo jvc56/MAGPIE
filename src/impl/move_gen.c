@@ -1079,8 +1079,12 @@ static inline void shadow_record(MoveGen *gen) {
         gen->number_of_letters_on_rack, gen->tiles_played);
   }
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
-    wmp_move_gen_maybe_update_anchor(&gen->wmp_move_gen, gen->tiles_played,
-                                     score, equity);
+    const int word_length =
+        gen->wmp_move_gen.num_tiles_played_through + gen->tiles_played;
+    if (word_length >= MINIMUM_WORD_LENGTH) {
+      wmp_move_gen_maybe_update_anchor(&gen->wmp_move_gen, gen->tiles_played,
+                                       score, equity);
+    }
   }
   if (equity > gen->highest_shadow_equity) {
     gen->highest_shadow_equity = equity;
