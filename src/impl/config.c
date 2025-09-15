@@ -1374,11 +1374,10 @@ void config_parse_gcg_string(Config *config, const char *gcg_string,
                         players_data_get_data_name(config->players_data,
                                                    PLAYERS_DATA_TYPE_KWG, 0),
                         error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
+  if (error_stack_is_empty(error_stack)) {
+    config_parse_gcg_string_with_parser(config, gcg_parser, game_history,
+                                        error_stack);
   }
-  config_parse_gcg_string_with_parser(config, gcg_parser, game_history,
-                                      error_stack);
   gcg_parser_destroy(gcg_parser);
 }
 
@@ -1456,6 +1455,7 @@ char *impl_next(Config *config, ErrorStack *error_stack) {
 void execute_next(Config *config, ErrorStack *error_stack) {
   char *result = impl_next(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
+    // FIXME: replace all printfs in config.c
     printf("%s\n", result);
   }
   free(result);

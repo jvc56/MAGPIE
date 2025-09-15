@@ -81,8 +81,8 @@ int game_history_get_num_played_events(const GameHistory *game_history);
 
 GameEvent *game_history_get_event(const GameHistory *history, int event_index);
 
-GameEvent *game_history_create_and_add_game_event(GameHistory *game_history,
-                                                  ErrorStack *error_stack);
+GameEvent *game_history_add_game_event(GameHistory *game_history,
+                                       ErrorStack *error_stack);
 
 void game_history_player_set_name(GameHistory *game_history, int player_index,
                                   const char *name);

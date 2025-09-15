@@ -591,7 +591,8 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
   if (token != GCG_UNKNOWN_TOKEN) {
     gcg_parser->previous_token = token;
   }
-  int number_of_events = game_history_get_num_events(gcg_parser->game_history);
+  const int number_of_events =
+      game_history_get_num_events(gcg_parser->game_history);
   // Perform logic with previous token here because it
   // is set.
   if (previous_token == GCG_NOTE_TOKEN && token != GCG_NOTE_TOKEN &&
@@ -745,8 +746,7 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     return false;
     break;
   case GCG_MOVE_TOKEN:
-    game_event =
-        game_history_create_and_add_game_event(game_history, error_stack);
+    game_event = game_history_add_game_event(game_history, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return false;
     }
@@ -848,8 +848,7 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     break;
   }
   case GCG_PHONY_TILES_RETURNED_TOKEN:
-    game_event =
-        game_history_create_and_add_game_event(game_history, error_stack);
+    game_event = game_history_add_game_event(game_history, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return false;
     }
@@ -872,8 +871,7 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     }
     break;
   case GCG_TIME_PENALTY_TOKEN:
-    game_event =
-        game_history_create_and_add_game_event(game_history, error_stack);
+    game_event = game_history_add_game_event(game_history, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return false;
     }
@@ -911,8 +909,7 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     }
     break;
   case GCG_END_RACK_PENALTY_TOKEN:
-    game_event =
-        game_history_create_and_add_game_event(game_history, error_stack);
+    game_event = game_history_add_game_event(game_history, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return false;
     }
@@ -979,8 +976,7 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
 
     break;
   case GCG_PASS_TOKEN:
-    game_event =
-        game_history_create_and_add_game_event(game_history, error_stack);
+    game_event = game_history_add_game_event(game_history, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return false;
     }
@@ -1017,8 +1013,7 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     }
     break;
   case GCG_CHALLENGE_BONUS_TOKEN:
-    game_event =
-        game_history_create_and_add_game_event(game_history, error_stack);
+    game_event = game_history_add_game_event(game_history, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return false;
     }
@@ -1049,8 +1044,7 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     }
     break;
   case GCG_END_RACK_POINTS_TOKEN:
-    game_event =
-        game_history_create_and_add_game_event(game_history, error_stack);
+    game_event = game_history_add_game_event(game_history, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return false;
     }
@@ -1097,8 +1091,7 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     }
     break;
   case GCG_EXCHANGE_TOKEN:
-    game_event =
-        game_history_create_and_add_game_event(game_history, error_stack);
+    game_event = game_history_add_game_event(game_history, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return false;
     }
@@ -1184,19 +1177,19 @@ void parse_gcg_settings(GCGParser *gcg_parser, ErrorStack *error_stack) {
       string_splitter_get_number_of_items(gcg_parser->gcg_lines);
   for (int i = gcg_parser->current_gcg_line_index; i < number_of_gcg_lines;
        i++) {
-    const bool continue_parsing = parse_gcg_line_and_increment_index(
-        gcg_parser, PARSE_GCG_MODE_SETTINGS, error_stack);
+    const bool continue_parsing = parse_gcg_line(
+        gcg_parser,
+        string_splitter_get_item(gcg_parser->gcg_lines,
+                                 gcg_parser->current_gcg_line_index),
+        PARSE_GCG_MODE_SETTINGS, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
     if (!continue_parsing) {
       break;
     }
+    gcg_parser->current_gcg_line_index++;
   }
-  // The parse encountered a move token and exited normally, so decrement
-  // the current index so the the call to the event processor processes
-  // the encountered move.
-  gcg_parser->current_gcg_line_index--;
 }
 
 void parse_gcg_events(GCGParser *gcg_parser, Game *game,
@@ -1206,21 +1199,21 @@ void parse_gcg_events(GCGParser *gcg_parser, Game *game,
       string_splitter_get_number_of_items(gcg_parser->gcg_lines);
   for (int i = gcg_parser->current_gcg_line_index; i < number_of_gcg_lines;
        i++) {
-    const bool continue_parsing = parse_gcg_line_and_increment_index(
-        gcg_parser, PARSE_GCG_MODE_SETTINGS, error_stack);
+    const bool continue_parsing = parse_gcg_line(
+        gcg_parser,
+        string_splitter_get_item(gcg_parser->gcg_lines,
+                                 gcg_parser->current_gcg_line_index),
+        PARSE_GCG_MODE_EVENTS, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
     if (!continue_parsing) {
       break;
     }
+    gcg_parser->current_gcg_line_index++;
   }
 
   finalize_note(gcg_parser);
-
-  if (game_history_get_num_events(gcg_parser->game_history) == 0) {
-    return;
-  }
 
   // Play through the game to detected errors
   game_play_n_events(gcg_parser->game_history, game,
