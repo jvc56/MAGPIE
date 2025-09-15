@@ -29,4 +29,14 @@ Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack);
 void return_phony_letters(Game *game);
 bool moves_are_similar(const Move *m1, const Move *m2, int dist_size);
 
+void game_play_n_events(GameHistory *game_history, Game *game, int event_index,
+                        bool validate, ErrorStack *error_stack);
+void game_play_to_end(GameHistory *game_history, Game *game,
+                      ErrorStack *error_stack);
+char *game_next(GameHistory *game_history, Game *game, ErrorStack *error_stack);
+char *game_previous(GameHistory *game_history, Game *game,
+                    ErrorStack *error_stack);
+char *game_goto(GameHistory *game_history, Game *game, int num_events_to_play,
+                ErrorStack *error_stack);
+
 #endif

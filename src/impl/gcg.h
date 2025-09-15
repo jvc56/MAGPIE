@@ -10,16 +10,7 @@ void parse_gcg(const char *gcg_filename, Config *config,
                GameHistory *game_history, ErrorStack *error_stack);
 void parse_gcg_string(const char *input_gcg_string, Config *config,
                       GameHistory *game_history, ErrorStack *error_stack);
-void game_play_n_events(GameHistory *game_history, Game *game, int event_index,
-                        ErrorStack *error_stack);
-void game_play_to_end(GameHistory *game_history, Game *game,
-                      ErrorStack *error_stack);
 void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
                GameHistory *game_history, ErrorStack *error_stack);
-char *game_next(GameHistory *game_history, Game *game, ErrorStack *error_stack);
-char *game_previous(GameHistory *game_history, Game *game,
-                    ErrorStack *error_stack);
-char *game_goto(GameHistory *game_history, Game *game, int num_events_to_play,
-                ErrorStack *error_stack);
 
 #endif

@@ -404,7 +404,7 @@ void load_cgp_or_die(Game *game, const char *cgp) {
 void game_play_n_events_or_die(GameHistory *game_history, Game *game,
                                int event_index) {
   ErrorStack *error_stack = error_stack_create();
-  game_play_n_events(game_history, game, event_index, error_stack);
+  game_play_n_events(game_history, game, event_index, false, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     printf("Failed to play to event index %d due to the following error:\n",
            event_index);

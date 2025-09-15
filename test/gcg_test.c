@@ -965,14 +965,12 @@ void test_partially_known_rack_from_phonies(GameHistory *game_history) {
   config_destroy(config);
 }
 
-void test_vs_jeremy_gcg(void) {
+void test_vs_jeremy_gcg(GameHistory *game_history) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
-  GameHistory *game_history = game_history_create();
   error_code_t gcg_parse_status =
       test_parse_gcg("vs_jeremy", config, game_history);
   assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
-  game_history_destroy(game_history);
   config_destroy(config);
 }
 
@@ -990,7 +988,7 @@ void test_gcg(void) {
   test_success_six_pass(game_history);
   test_success_incomplete(game_history);
   test_success_phony_empty_bag(game_history);
-  test_vs_jeremy_gcg();
+  test_vs_jeremy_gcg(game_history);
   test_write_gcg(game_history);
   test_partially_known_rack_from_phonies(game_history);
   game_history_destroy(game_history);
