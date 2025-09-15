@@ -1141,7 +1141,7 @@ void movegen_should_not_gen_exchanges(void) {
   config_destroy(config);
 }
 
-void movegen_correctly_returns_from_anchor(void) {
+void movegen_does_not_return_early_from_anchor(void) {
   Config *config = config_create_or_die("set -lex CSW21 -wmp true");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
@@ -1176,16 +1176,16 @@ void movegen_correctly_returns_from_anchor(void) {
   generate_moves(&move_gen_args);
   assert_move(game, move_list, NULL, 0, "A8 BRR 69");
 
-  // A8 BRR 69 should be equal to A8 BRRR 72, but since the movegen
-  // will record A8 BRR 69 first, it should return immediately
-  // and give A8 BRR 69 as the best move.
+  // A8 BRR 69 is equal to A8 BRRR 72, but we rank them according to canonical
+  // move ordering. Optimization to greedily return the first move with top
+  // equity has been disabled.
   set_klv_leave_value(klv, ld, "NNN", 0);
   set_klv_leave_value(klv, ld, "NNNR", int_to_equity(3));
 
   load_cgp_or_die(game, RATPACK_CGP);
   rack_set_to_string(ld, player_rack, "BRRRNNN");
   generate_moves(&move_gen_args);
-  assert_move(game, move_list, NULL, 0, "A8 BRR 69");
+  assert_move(game, move_list, NULL, 0, "A8 BRRR 72");
 
   move_list_destroy(move_list);
   game_destroy(game);
@@ -1211,5 +1211,5 @@ void test_move_gen(void) {
   movegen_within_x_of_best_test();
   movegen_many_moves();
   movegen_should_not_gen_exchanges();
-  movegen_correctly_returns_from_anchor();
+  movegen_does_not_return_early_from_anchor();
 }
