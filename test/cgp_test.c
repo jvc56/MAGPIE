@@ -40,7 +40,7 @@ void assert_game_matches_cgp_with_options(const Config *config,
   free(expected_cgp_without_options);
 }
 
-void assert_cgp_load_and_write_are_equal(Game *game, const char *load_cgp) {
+void assert_load_cgp_and_write_are_equal(Game *game, const char *load_cgp) {
   load_cgp_or_die(game, load_cgp);
   assert_game_matches_cgp(game, load_cgp, true);
 }
@@ -71,52 +71,52 @@ void test_cgp_english(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
-  assert_cgp_load_and_write_are_equal(game, EMPTY_CGP);
-  assert_cgp_load_and_write_are_equal(game, EMPTY_PLAYER0_RACK_CGP);
-  assert_cgp_load_and_write_are_equal(game, EMPTY_PLAYER1_RACK_CGP);
-  assert_cgp_load_and_write_are_equal(game, OPENING_CGP);
-  assert_cgp_load_and_write_are_equal(game, ONE_CONSECUTIVE_ZERO_CGP);
-  assert_cgp_load_and_write_are_equal(game, EXCESSIVE_WHITESPACE_CGP);
-  assert_cgp_load_and_write_are_equal(game, DOUG_V_EMELY_DOUBLE_CHALLENGE_CGP);
-  assert_cgp_load_and_write_are_equal(game, DOUG_V_EMELY_CGP);
-  assert_cgp_load_and_write_are_equal(game, GUY_VS_BOT_ALMOST_COMPLETE_CGP);
-  assert_cgp_load_and_write_are_equal(game, GUY_VS_BOT_CGP);
-  assert_cgp_load_and_write_are_equal(game, INCOMPLETE_3_CGP);
-  assert_cgp_load_and_write_are_equal(game, INCOMPLETE4_CGP);
-  assert_cgp_load_and_write_are_equal(game, INCOMPLETE_ELISE_CGP);
-  assert_cgp_load_and_write_are_equal(game, INCOMPLETE_CGP);
-  assert_cgp_load_and_write_are_equal(game, JOSH2_CGP);
-  assert_cgp_load_and_write_are_equal(game, NAME_ISO8859_1_CGP);
-  assert_cgp_load_and_write_are_equal(game, NAME_UTF8_NOHEADER_CGP);
-  assert_cgp_load_and_write_are_equal(game, NAME_UTF8_WITH_HEADER_CGP);
-  assert_cgp_load_and_write_are_equal(game, NOAH_VS_MISHU_CGP);
-  assert_cgp_load_and_write_are_equal(game, NOAH_VS_PETER_CGP);
-  assert_cgp_load_and_write_are_equal(game, SOME_ISC_GAME_CGP);
-  assert_cgp_load_and_write_are_equal(game, UTF8_DOS_CGP);
-  assert_cgp_load_and_write_are_equal(game, VS_ANDY_CGP);
-  assert_cgp_load_and_write_are_equal(game, VS_FRENTZ_CGP);
-  assert_cgp_load_and_write_are_equal(game, VS_ED);
-  assert_cgp_load_and_write_are_equal(game, VS_JEREMY);
-  assert_cgp_load_and_write_are_equal(game, VS_JEREMY_WITH_P2_RACK);
-  assert_cgp_load_and_write_are_equal(game, VS_MATT);
-  assert_cgp_load_and_write_are_equal(game, VS_MATT2);
-  assert_cgp_load_and_write_are_equal(game, VS_OXY);
-  assert_cgp_load_and_write_are_equal(game, TEST_DUPE);
-  assert_cgp_load_and_write_are_equal(game, MANY_MOVES);
-  assert_cgp_load_and_write_are_equal(game, KA_OPENING_CGP);
-  assert_cgp_load_and_write_are_equal(game, AA_OPENING_CGP);
-  assert_cgp_load_and_write_are_equal(game, TRIPLE_LETTERS_CGP);
-  assert_cgp_load_and_write_are_equal(game, TRIPLE_DOUBLE_CGP);
-  assert_cgp_load_and_write_are_equal(game, BOTTOM_LEFT_RE_CGP);
-  assert_cgp_load_and_write_are_equal(game, LATER_BETWEEN_DOUBLE_WORDS_CGP);
-  assert_cgp_load_and_write_are_equal(game, ION_OPENING_CGP);
-  assert_cgp_load_and_write_are_equal(game, ZILLION_OPENING_CGP);
-  assert_cgp_load_and_write_are_equal(game, ENTASIS_OPENING_CGP);
-  assert_cgp_load_and_write_are_equal(game, UEY_CGP);
-  assert_cgp_load_and_write_are_equal(game, OOPSYCHOLOGY_CGP);
-  assert_cgp_load_and_write_are_equal(game, DELDAR_VS_HARSHAN_CGP);
-  assert_cgp_load_and_write_are_equal(game, FRAWZEY_CGP);
-  assert_cgp_load_and_write_are_equal(game, THERMOS_CGP);
+  assert_load_cgp_and_write_are_equal(game, EMPTY_CGP);
+  assert_load_cgp_and_write_are_equal(game, EMPTY_PLAYER0_RACK_CGP);
+  assert_load_cgp_and_write_are_equal(game, EMPTY_PLAYER1_RACK_CGP);
+  assert_load_cgp_and_write_are_equal(game, OPENING_CGP);
+  assert_load_cgp_and_write_are_equal(game, ONE_CONSECUTIVE_ZERO_CGP);
+  assert_load_cgp_and_write_are_equal(game, EXCESSIVE_WHITESPACE_CGP);
+  assert_load_cgp_and_write_are_equal(game, DOUG_V_EMELY_DOUBLE_CHALLENGE_CGP);
+  assert_load_cgp_and_write_are_equal(game, DOUG_V_EMELY_CGP);
+  assert_load_cgp_and_write_are_equal(game, GUY_VS_BOT_ALMOST_COMPLETE_CGP);
+  assert_load_cgp_and_write_are_equal(game, GUY_VS_BOT_CGP);
+  assert_load_cgp_and_write_are_equal(game, INCOMPLETE_3_CGP);
+  assert_load_cgp_and_write_are_equal(game, INCOMPLETE4_CGP);
+  assert_load_cgp_and_write_are_equal(game, INCOMPLETE_ELISE_CGP);
+  assert_load_cgp_and_write_are_equal(game, INCOMPLETE_CGP);
+  assert_load_cgp_and_write_are_equal(game, JOSH2_CGP);
+  assert_load_cgp_and_write_are_equal(game, NAME_ISO8859_1_CGP);
+  assert_load_cgp_and_write_are_equal(game, NAME_UTF8_NOHEADER_CGP);
+  assert_load_cgp_and_write_are_equal(game, NAME_UTF8_WITH_HEADER_CGP);
+  assert_load_cgp_and_write_are_equal(game, NOAH_VS_MISHU_CGP);
+  assert_load_cgp_and_write_are_equal(game, NOAH_VS_PETER_CGP);
+  assert_load_cgp_and_write_are_equal(game, SOME_ISC_GAME_CGP);
+  assert_load_cgp_and_write_are_equal(game, UTF8_DOS_CGP);
+  assert_load_cgp_and_write_are_equal(game, VS_ANDY_CGP);
+  assert_load_cgp_and_write_are_equal(game, VS_FRENTZ_CGP);
+  assert_load_cgp_and_write_are_equal(game, VS_ED);
+  assert_load_cgp_and_write_are_equal(game, VS_JEREMY);
+  assert_load_cgp_and_write_are_equal(game, VS_JEREMY_WITH_P2_RACK);
+  assert_load_cgp_and_write_are_equal(game, VS_MATT);
+  assert_load_cgp_and_write_are_equal(game, VS_MATT2);
+  assert_load_cgp_and_write_are_equal(game, VS_OXY);
+  assert_load_cgp_and_write_are_equal(game, TEST_DUPE);
+  assert_load_cgp_and_write_are_equal(game, MANY_MOVES);
+  assert_load_cgp_and_write_are_equal(game, KA_OPENING_CGP);
+  assert_load_cgp_and_write_are_equal(game, AA_OPENING_CGP);
+  assert_load_cgp_and_write_are_equal(game, TRIPLE_LETTERS_CGP);
+  assert_load_cgp_and_write_are_equal(game, TRIPLE_DOUBLE_CGP);
+  assert_load_cgp_and_write_are_equal(game, BOTTOM_LEFT_RE_CGP);
+  assert_load_cgp_and_write_are_equal(game, LATER_BETWEEN_DOUBLE_WORDS_CGP);
+  assert_load_cgp_and_write_are_equal(game, ION_OPENING_CGP);
+  assert_load_cgp_and_write_are_equal(game, ZILLION_OPENING_CGP);
+  assert_load_cgp_and_write_are_equal(game, ENTASIS_OPENING_CGP);
+  assert_load_cgp_and_write_are_equal(game, UEY_CGP);
+  assert_load_cgp_and_write_are_equal(game, OOPSYCHOLOGY_CGP);
+  assert_load_cgp_and_write_are_equal(game, DELDAR_VS_HARSHAN_CGP);
+  assert_load_cgp_and_write_are_equal(game, FRAWZEY_CGP);
+  assert_load_cgp_and_write_are_equal(game, THERMOS_CGP);
 
   game_reset(game);
 
@@ -214,8 +214,8 @@ void test_cgp_catalan(void) {
       "set -lex DISC2 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
-  assert_cgp_load_and_write_are_equal(game, EMPTY_CATALAN_CGP);
-  assert_cgp_load_and_write_are_equal(game, CATALAN_CGP);
+  assert_load_cgp_and_write_are_equal(game, EMPTY_CATALAN_CGP);
+  assert_load_cgp_and_write_are_equal(game, CATALAN_CGP);
 
   game_destroy(game);
   config_destroy(config);
@@ -226,8 +226,8 @@ void test_cgp_polish(void) {
       "set -lex OSPS49 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
-  assert_cgp_load_and_write_are_equal(game, POLISH_CGP);
-  assert_cgp_load_and_write_are_equal(game, EMPTY_POLISH_CGP);
+  assert_load_cgp_and_write_are_equal(game, POLISH_CGP);
+  assert_load_cgp_and_write_are_equal(game, EMPTY_POLISH_CGP);
 
   game_destroy(game);
   config_destroy(config);

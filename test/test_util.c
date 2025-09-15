@@ -1038,7 +1038,7 @@ error_code_t test_parse_gcg(const char *gcg_filename, Config *config,
     error_stack_print_and_reset(error_stack);
     log_fatal("failed to get gcg filepath for test: %s\n", gcg_filename);
   }
-  parse_gcg(gcg_filepath, config, game_history, error_stack);
+  config_parse_gcg(config, gcg_filepath, game_history, error_stack);
   error_code_t gcg_parse_status = error_stack_top(error_stack);
   error_stack_print_and_reset(error_stack);
   error_stack_destroy(error_stack);
@@ -1049,7 +1049,7 @@ error_code_t test_parse_gcg(const char *gcg_filename, Config *config,
 error_code_t test_parse_gcg_string(const char *gcg_string, Config *config,
                                    GameHistory *game_history) {
   ErrorStack *error_stack = error_stack_create();
-  parse_gcg_string(gcg_string, config, game_history, error_stack);
+  config_parse_gcg_string(config, gcg_string, game_history, error_stack);
   error_code_t gcg_parse_status = error_stack_top(error_stack);
   error_stack_print_and_reset(error_stack);
   error_stack_destroy(error_stack);
@@ -1059,7 +1059,7 @@ error_code_t test_parse_gcg_string(const char *gcg_string, Config *config,
 error_code_t test_parse_gcg_file(const char *gcg_filename, Config *config,
                                  GameHistory *game_history) {
   ErrorStack *error_stack = error_stack_create();
-  parse_gcg(gcg_filename, config, game_history, error_stack);
+  config_parse_gcg(config, gcg_filename, game_history, error_stack);
   error_code_t gcg_parse_status = error_stack_top(error_stack);
   error_stack_print_and_reset(error_stack);
   error_stack_destroy(error_stack);
@@ -1093,4 +1093,36 @@ void load_game_history_with_gcg(Config *config, const char *gcg_file) {
   assert(test_parse_gcg_file(gcg_filename, config, game_history) ==
          ERROR_STATUS_SUCCESS);
   free(gcg_filename);
+}
+
+void assert_config_exec_status(Config *config, const char *cmd,
+                               error_code_t expected_error_code) {
+  ErrorStack *error_stack = error_stack_create();
+  set_thread_control_status_to_start(config_get_thread_control(config));
+  config_load_command(config, cmd, error_stack);
+  error_code_t load_status = error_stack_top(error_stack);
+
+  // If we expect an error and got it during load, that's the expected result
+  if (load_status != ERROR_STATUS_SUCCESS) {
+    if (load_status != expected_error_code) {
+      printf("config load error types do not match:\nexpected: %d\nactual: "
+             "%d\n>%s<\n",
+             expected_error_code, load_status, cmd);
+      error_stack_print_and_reset(error_stack);
+      abort();
+    }
+    error_stack_destroy(error_stack);
+    return;
+  }
+
+  config_execute_command(config, error_stack);
+  error_code_t actual_error_code = error_stack_top(error_stack);
+  if (actual_error_code != expected_error_code) {
+    printf("config exec error types do not match:\nexpected: %d\nactual: "
+           "%d\n>%s<\n",
+           expected_error_code, actual_error_code, cmd);
+    error_stack_print_and_reset(error_stack);
+    abort();
+  }
+  error_stack_destroy(error_stack);
 }

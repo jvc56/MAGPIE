@@ -20,7 +20,7 @@ void reset_and_load_game_failure(Game *game, const char *cgp,
   error_stack_destroy(error_stack);
 }
 
-void test_load_cgp(void) {
+void test_load_gcg_cgp(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -218,5 +218,5 @@ void test_game_main(void) {
 
 void test_game(void) {
   test_game_main();
-  test_load_cgp();
+  test_load_gcg_cgp();
 }

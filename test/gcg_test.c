@@ -26,7 +26,7 @@
 char *parse_and_write_gcg(const char *gcg_filepath_read,
                           const char *gcg_filepath_write, Config *config,
                           GameHistory *game_history, ErrorStack *error_stack) {
-  parse_gcg(gcg_filepath_read, config, game_history, error_stack);
+  config_parse_gcg(config, gcg_filepath_read, game_history, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
     log_fatal("failed to parse gcg: %s\n", gcg_filepath_read);

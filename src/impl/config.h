@@ -63,7 +63,6 @@ AutoplayResults *config_get_autoplay_results(const Config *config);
 const char *config_get_current_exec_name(const Config *config);
 
 // Entity creators
-
 Game *config_game_create(const Config *config);
 
 // Impl
@@ -81,4 +80,9 @@ void config_simulate(const Config *config, Rack *known_opp_rack,
                      SimResults *sim_results, ErrorStack *error_stack);
 void config_convert(const Config *config, ConversionResults *results,
                     ErrorStack *error_stack);
+void config_parse_gcg(Config *config, const char *gcg_filename,
+                      GameHistory *game_history, ErrorStack *error_stack);
+void config_parse_gcg_string(Config *config, const char *gcg_string,
+                             GameHistory *game_history,
+                             ErrorStack *error_stack);
 #endif
