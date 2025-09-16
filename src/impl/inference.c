@@ -27,7 +27,6 @@
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
-#include "gcg.h"
 #include "move_gen.h"
 #include <stdbool.h>
 #include <stdint.h>

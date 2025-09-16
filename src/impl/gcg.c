@@ -11,7 +11,6 @@
 #include "../ent/game_history.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
-#include "../ent/players_data.h"
 #include "../ent/rack.h"
 #include "../ent/validated_move.h"
 #include "../impl/gameplay.h"
