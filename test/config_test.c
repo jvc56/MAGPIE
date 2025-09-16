@@ -349,38 +349,6 @@ void test_config_lexical_data(void) {
   config_destroy(config);
 }
 
-void assert_config_exec_status(Config *config, const char *cmd,
-                               error_code_t expected_error_code) {
-  ErrorStack *error_stack = error_stack_create();
-  set_thread_control_status_to_start(config_get_thread_control(config));
-  config_load_command(config, cmd, error_stack);
-  error_code_t load_status = error_stack_top(error_stack);
-
-  // If we expect an error and got it during load, that's the expected result
-  if (load_status != ERROR_STATUS_SUCCESS) {
-    if (load_status != expected_error_code) {
-      printf("config load error types do not match:\nexpected: %d\nactual: "
-             "%d\n>%s<\n",
-             expected_error_code, load_status, cmd);
-      error_stack_print_and_reset(error_stack);
-      abort();
-    }
-    error_stack_destroy(error_stack);
-    return;
-  }
-
-  config_execute_command(config, error_stack);
-  error_code_t actual_error_code = error_stack_top(error_stack);
-  if (actual_error_code != expected_error_code) {
-    printf("config exec error types do not match:\nexpected: %d\nactual: "
-           "%d\n>%s<\n",
-           expected_error_code, actual_error_code, cmd);
-    error_stack_print_and_reset(error_stack);
-    abort();
-  }
-  error_stack_destroy(error_stack);
-}
-
 void test_config_exec_parse_args(void) {
   Config *config = config_create_default_test();
 

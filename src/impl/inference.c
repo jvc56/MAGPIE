@@ -27,7 +27,6 @@
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
-#include "gcg.h"
 #include "move_gen.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -716,7 +715,7 @@ void populate_inference_args_with_game_history(InferenceArgs *args,
   // This will play all of the events right up to but not including the target
   // move event
   game_play_n_events(game_history, game_dup, most_recent_move_event_index,
-                     error_stack);
+                     false, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }

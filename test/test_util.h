@@ -141,5 +141,6 @@ error_code_t test_parse_gcg_string(const char *gcg_string, Config *config,
 void load_game_history_with_gcg_string(Config *config, const char *gcg_header,
                                        const char *gcg_content);
 void load_game_history_with_gcg(Config *config, const char *gcg_file);
-
+void assert_config_exec_status(Config *config, const char *cmd,
+                               error_code_t expected_error_code);
 #endif

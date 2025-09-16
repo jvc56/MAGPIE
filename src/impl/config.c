@@ -38,8 +38,8 @@
 #include "convert.h"
 #include "gameplay.h"
 #include "gcg.h"
+#include "get_gcg.h"
 #include "inference.h"
-#include "load.h"
 #include "move_gen.h"
 #include "random_variable.h"
 #include "simmer.h"
@@ -620,7 +620,7 @@ char *status_generic(Config *config) {
 
 // Load CGP
 
-void impl_cgp_load(Config *config, ErrorStack *error_stack) {
+void impl_load_cgp(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
@@ -1231,43 +1231,6 @@ void impl_create_data(const Config *config, ErrorStack *error_stack) {
   }
 }
 
-// Load GCG
-
-char *impl_load(Config *config, ErrorStack *error_stack) {
-  const char *source_identifier =
-      config_get_parg_value(config, ARG_TOKEN_LOAD, 0);
-
-  DownloadGCGArgs download_args = {.source_identifier = source_identifier,
-                                   .config = config};
-
-  download_gcg(&download_args, config->game_history, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return empty_string();
-  }
-
-  // Return game information as a string
-  char *result = get_formatted_string(
-      "Successfully loaded game: %s vs %s (%d events)",
-      game_history_player_get_name(config->game_history, 0),
-      game_history_player_get_name(config->game_history, 1),
-      game_history_get_num_played_events(config->game_history));
-
-  return result;
-}
-
-void execute_load(Config *config, ErrorStack *error_stack) {
-  char *result = impl_load(config, error_stack);
-
-  if (error_stack_is_empty(error_stack)) {
-    printf("%s\n", result);
-  }
-  free(result);
-}
-
-char *str_api_load(Config *config, ErrorStack *error_stack) {
-  return impl_load(config, error_stack);
-}
-
 // Show game
 
 char *impl_show(Config *config, ErrorStack *error_stack) {
@@ -1304,6 +1267,170 @@ char *str_api_show(Config *config, ErrorStack *error_stack) {
   return impl_show(config, error_stack);
 }
 
+// Load GCG
+
+void config_load_game_history(Config *config, const GameHistory *game_history,
+                              ErrorStack *error_stack) {
+  StringBuilder *cfg_load_cmd_builder = string_builder_create();
+  const char *lexicon = game_history_get_lexicon_name(game_history);
+  const char *ld_name = game_history_get_ld_name(game_history);
+  const char *board_layout_name =
+      game_history_get_board_layout_name(game_history);
+  const game_variant_t game_variant =
+      game_history_get_game_variant(game_history);
+  const char *player_nicknames[2] = {NULL, NULL};
+
+  for (int i = 0; i < 2; i++) {
+    player_nicknames[i] = game_history_player_get_nickname(game_history, i);
+  }
+
+  string_builder_add_formatted_string(cfg_load_cmd_builder, "%s ",
+                                      config->pargs[ARG_TOKEN_SET]->name);
+
+  if (lexicon) {
+    string_builder_add_formatted_string(cfg_load_cmd_builder, "-%s %s ",
+                                        config->pargs[ARG_TOKEN_LEXICON]->name,
+                                        lexicon);
+  } else {
+    log_fatal("missing lexicon for game history");
+  }
+
+  if (ld_name) {
+    string_builder_add_formatted_string(
+        cfg_load_cmd_builder, "-%s %s ",
+        config->pargs[ARG_TOKEN_LETTER_DISTRIBUTION]->name, ld_name);
+  } else {
+    log_fatal("missing letter distribution for game history");
+  }
+
+  if (board_layout_name) {
+    string_builder_add_formatted_string(
+        cfg_load_cmd_builder, "-%s %s ",
+        config->pargs[ARG_TOKEN_BOARD_LAYOUT]->name, board_layout_name);
+  } else {
+    log_fatal("missing board layout for game history");
+  }
+
+  switch (game_variant) {
+  case GAME_VARIANT_CLASSIC:
+    string_builder_add_formatted_string(
+        cfg_load_cmd_builder, "-%s %s ",
+        config->pargs[ARG_TOKEN_GAME_VARIANT]->name, GAME_VARIANT_CLASSIC_NAME);
+    break;
+  case GAME_VARIANT_WORDSMOG:
+    string_builder_add_formatted_string(
+        cfg_load_cmd_builder, "-%s %s ",
+        config->pargs[ARG_TOKEN_GAME_VARIANT]->name,
+        GAME_VARIANT_WORDSMOG_NAME);
+    break;
+  default:
+    log_fatal("game history has unknown game variant enum: %d", game_variant);
+  }
+
+  for (int i = 0; i < 2; i++) {
+    if (!player_nicknames[i]) {
+      continue;
+    }
+    arg_token_t pname_arg_token =
+        i == 0 ? ARG_TOKEN_P1_NAME : ARG_TOKEN_P2_NAME;
+    string_builder_add_formatted_string(cfg_load_cmd_builder, "-%s %s ",
+                                        config->pargs[pname_arg_token]->name,
+                                        player_nicknames[i]);
+  }
+
+  char *cfg_load_cmd = string_builder_dump(cfg_load_cmd_builder, NULL);
+  string_builder_destroy(cfg_load_cmd_builder);
+  config_load_command(config, cfg_load_cmd, error_stack);
+  free(cfg_load_cmd);
+}
+
+void config_parse_gcg_string_with_parser(Config *config, GCGParser *gcg_parser,
+                                         const GameHistory *game_history,
+                                         ErrorStack *error_stack) {
+  parse_gcg_settings(gcg_parser, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_game_history(config, game_history, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  // FIXME: test this
+  config_init_game(config);
+  parse_gcg_events(gcg_parser, config->game, error_stack);
+}
+
+void config_parse_gcg_string(Config *config, const char *gcg_string,
+                             GameHistory *game_history,
+                             ErrorStack *error_stack) {
+  if (is_string_empty_or_whitespace(gcg_string)) {
+    error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_GCG_EMPTY,
+                     string_duplicate("GCG is empty"));
+    return;
+  }
+  game_history_reset(game_history);
+  GCGParser *gcg_parser =
+      gcg_parser_create(gcg_string, game_history,
+                        players_data_get_data_name(config->players_data,
+                                                   PLAYERS_DATA_TYPE_KWG, 0),
+                        error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    config_parse_gcg_string_with_parser(config, gcg_parser, game_history,
+                                        error_stack);
+  }
+  gcg_parser_destroy(gcg_parser);
+}
+
+void config_parse_gcg(Config *config, const char *gcg_filename,
+                      GameHistory *game_history, ErrorStack *error_stack) {
+  char *gcg_string = get_string_from_file(gcg_filename, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    config_parse_gcg_string(config, gcg_string, game_history, error_stack);
+  }
+  free(gcg_string);
+}
+
+char *impl_load_gcg(Config *config, ErrorStack *error_stack) {
+  const char *source_identifier =
+      config_get_parg_value(config, ARG_TOKEN_LOAD, 0);
+  GetGCGArgs download_args = {.source_identifier = source_identifier};
+  char *gcg_string = get_gcg(&download_args, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  config_parse_gcg_string(config, gcg_string, config->game_history,
+                          error_stack);
+  free(gcg_string);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  game_goto(config->game_history, config->game, 0, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  execute_show(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return get_formatted_string(
+      "Successfully loaded game: %s vs %s (%d events)",
+      game_history_player_get_name(config->game_history, 0),
+      game_history_player_get_name(config->game_history, 1),
+      game_history_get_num_events(config->game_history));
+}
+
+void execute_load_gcg(Config *config, ErrorStack *error_stack) {
+  char *result = impl_load_gcg(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    printf("%s\n", result);
+  }
+  free(result);
+}
+
+char *str_api_load_gcg(Config *config, ErrorStack *error_stack) {
+  return impl_load_gcg(config, error_stack);
+}
+
 // Game navigation helper and command
 
 char *impl_next(Config *config, ErrorStack *error_stack) {
@@ -1328,6 +1455,7 @@ char *impl_next(Config *config, ErrorStack *error_stack) {
 void execute_next(Config *config, ErrorStack *error_stack) {
   char *result = impl_next(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
+    // FIXME: replace all printfs in config.c
     printf("%s\n", result);
   }
   free(result);
@@ -2298,12 +2426,12 @@ char *config_get_execute_status(Config *config) {
 //    - uses the same parser as the execute commands, but returns output as a
 //      string
 
-void execute_cgp_load(Config *config, ErrorStack *error_stack) {
-  impl_cgp_load(config, error_stack);
+void execute_load_cgp(Config *config, ErrorStack *error_stack) {
+  impl_load_cgp(config, error_stack);
 }
 
-char *str_api_cgp_load(Config *config, ErrorStack *error_stack) {
-  impl_cgp_load(config, error_stack);
+char *str_api_load_cgp(Config *config, ErrorStack *error_stack) {
+  impl_load_cgp(config, error_stack);
   return empty_string();
 }
 
@@ -2431,8 +2559,8 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
                     str_api_fatal, status_generic)
 
   cmd(ARG_TOKEN_SET, "setoptions", 0, 0, noop, generic);
-  cmd(ARG_TOKEN_CGP, "cgp", 4, 4, cgp_load, generic);
-  cmd(ARG_TOKEN_LOAD, "load", 1, 1, load, generic);
+  cmd(ARG_TOKEN_CGP, "cgp", 4, 4, load_cgp, generic);
+  cmd(ARG_TOKEN_LOAD, "load", 1, 1, load_gcg, generic);
   cmd(ARG_TOKEN_SHOW, "show", 0, 0, show, generic);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic);
   cmd(ARG_TOKEN_RACK, "rack", 2, 2, set_rack, generic);

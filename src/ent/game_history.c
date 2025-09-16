@@ -377,8 +377,8 @@ void game_history_destroy(GameHistory *game_history) {
   free(game_history);
 }
 
-GameEvent *game_history_create_and_add_game_event(GameHistory *game_history,
-                                                  ErrorStack *error_stack) {
+GameEvent *game_history_add_game_event(GameHistory *game_history,
+                                       ErrorStack *error_stack) {
   if (game_history->num_events == MAX_GAME_EVENTS) {
     error_stack_push(
         error_stack, ERROR_STATUS_GCG_PARSE_GAME_EVENT_OVERFLOW,

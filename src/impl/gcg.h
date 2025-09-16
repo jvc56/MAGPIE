@@ -4,22 +4,18 @@
 
 #include "../ent/game_history.h"
 #include "../util/io_util.h"
-#include "config.h"
 
-void parse_gcg(const char *gcg_filename, Config *config,
-               GameHistory *game_history, ErrorStack *error_stack);
-void parse_gcg_string(const char *input_gcg_string, Config *config,
-                      GameHistory *game_history, ErrorStack *error_stack);
-void game_play_n_events(GameHistory *game_history, Game *game, int event_index,
-                        ErrorStack *error_stack);
-void game_play_to_end(GameHistory *game_history, Game *game,
+typedef struct GCGParser GCGParser;
+
+GCGParser *gcg_parser_create(const char *gcg_string, GameHistory *game_history,
+                             const char *existing_p0_lexicon,
+                             ErrorStack *error_stack);
+void gcg_parser_destroy(GCGParser *gcg_parser);
+
+void parse_gcg_settings(GCGParser *gcg_parser, ErrorStack *error_stack);
+void parse_gcg_events(GCGParser *gcg_parser, Game *game,
                       ErrorStack *error_stack);
 void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
-               GameHistory *game_history, ErrorStack *error_stack);
-char *game_next(GameHistory *game_history, Game *game, ErrorStack *error_stack);
-char *game_previous(GameHistory *game_history, Game *game,
-                    ErrorStack *error_stack);
-char *game_goto(GameHistory *game_history, Game *game, int num_events_to_play,
-                ErrorStack *error_stack);
+               const GameHistory *game_history, ErrorStack *error_stack);
 
 #endif

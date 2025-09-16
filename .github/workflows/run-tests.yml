@@ -33,25 +33,23 @@ jobs:
         run: |
           sudo apt-get install -y clang-format-18 && python3 ./format.py
 
-  # FIXME: uncomment this once the circular dependencies with config and load
-  # are fixed
-  # circular-dependencies:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v3
+  circular-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
 
-  #     - name: Set up Python
-  #       uses: actions/setup-python@v4
-  #       with:
-  #         python-version: "3.x"
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
 
-  #     - name: Install dependencies
-  #       run: |
-  #         python -m pip install --upgrade pip
-  #         pip install networkx
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install networkx
 
-  #     - name: Check circular dependencies
-  #       run: python3 find_circ_deps.py
+      - name: Check circular dependencies
+        run: python3 find_circ_deps.py
 
   unit-tests:
     runs-on: ubuntu-latest

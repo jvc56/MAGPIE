@@ -13,7 +13,7 @@
 #include "../src/ent/rack.h"
 #include "../src/ent/stats.h"
 #include "../src/impl/config.h"
-#include "../src/impl/gcg.h"
+#include "../src/impl/gameplay.h"
 #include "../src/util/io_util.h"
 #include "../src/util/math_util.h"
 #include "../src/util/string_util.h"
