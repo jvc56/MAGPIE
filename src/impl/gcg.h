@@ -4,7 +4,6 @@
 
 #include "../ent/game_history.h"
 #include "../util/io_util.h"
-#include "config.h"
 
 typedef struct GCGParser GCGParser;
 

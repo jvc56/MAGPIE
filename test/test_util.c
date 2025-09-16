@@ -32,7 +32,6 @@
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
-#include "../src/impl/gcg.h"
 #include "../src/impl/move_gen.h"
 #include "../src/impl/wmp_move_gen.h"
 #include "../src/str/game_string.h"

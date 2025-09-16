@@ -1,9 +1,7 @@
 #include "get_gcg.h"
 
-#include "../ent/game_history.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "gcg.h"
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -22,7 +20,7 @@ enum {
 };
 
 char *get_xt_gcg_string(const char *identifier, ErrorStack *error_stack) {
-  char game_id_str[MAX_GAME_ID_LENGTH + 1];
+  char game_id_str[MAX_GAME_ID_LENGTH + 1] = {0};
   // Check if this is a Cross-tables URL first
   char *xt_url_start = strstr(identifier, XTABLES_URL);
   if (xt_url_start) {
@@ -41,7 +39,6 @@ char *get_xt_gcg_string(const char *identifier, ErrorStack *error_stack) {
         }
         game_id_str[game_id_str_len++] = url_char;
       } else {
-        game_id_str[game_id_str_len] = '\0';
         break;
       }
       xt_url_start++;
@@ -86,7 +83,7 @@ char *get_xt_gcg_string(const char *identifier, ErrorStack *error_stack) {
 }
 
 char *get_woogles_gcg_string(const char *identifier, ErrorStack *error_stack) {
-  char game_id_str[MAX_GAME_ID_LENGTH + 1];
+  char game_id_str[MAX_GAME_ID_LENGTH + 1] = {0};
 
   char *woogles_url_start = strstr(identifier, WOOGLES_URL);
   if (woogles_url_start) {
@@ -105,7 +102,6 @@ char *get_woogles_gcg_string(const char *identifier, ErrorStack *error_stack) {
         }
         game_id_str[game_id_str_len++] = url_char;
       } else {
-        game_id_str[game_id_str_len] = '\0';
         break;
       }
       woogles_url_start++;

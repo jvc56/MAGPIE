@@ -4,17 +4,13 @@
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
-#include "../def/players_data_defs.h"
-#include "../def/rack_defs.h"
 #include "../def/validated_move_defs.h"
-#include "../ent/bag.h"
 #include "../ent/board_layout.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
-#include "../ent/player.h"
 #include "../ent/players_data.h"
 #include "../ent/rack.h"
 #include "../ent/validated_move.h"
@@ -24,7 +20,6 @@
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "config.h"
 #include <regex.h>
 #include <stdbool.h>
 #include <stdint.h>

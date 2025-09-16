@@ -1345,7 +1345,7 @@ void config_load_game_history(Config *config, const GameHistory *game_history,
 }
 
 void config_parse_gcg_string_with_parser(Config *config, GCGParser *gcg_parser,
-                                         GameHistory *game_history,
+                                         const GameHistory *game_history,
                                          ErrorStack *error_stack) {
   parse_gcg_settings(gcg_parser, error_stack);
   if (!error_stack_is_empty(error_stack)) {

@@ -16,6 +16,7 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+#include "../ent/validated_move.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
@@ -24,6 +25,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
   for (int i = 0; i < move_get_tiles_length(move); i++) {
@@ -715,7 +717,7 @@ void set_after_game_event_racks(const GameHistory *game_history,
   }
 }
 
-void set_rack_from_bag_or_push_to_error_stack(Game *game,
+void set_rack_from_bag_or_push_to_error_stack(const Game *game,
                                               const int player_index,
                                               const Rack *rack_to_draw,
                                               ErrorStack *error_stack) {

@@ -1,11 +1,10 @@
-#include "../src/ent/game_history.h"
 #include "../src/impl/config.h"
-#include "../src/impl/get_gcg.h"
 #include "../src/util/io_util.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 // Helper function to validate GCG download
 void validate_load_gcg(const char *source_identifier,
