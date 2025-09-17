@@ -1192,6 +1192,91 @@ void movegen_does_not_return_early_from_anchor(void) {
   config_destroy(config);
 }
 
+void movegen_one_tile_nonwmp(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp false");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const Player *player = game_get_player(game, 0);
+  Rack *player_rack = player_get_rack(player);
+  MoveList *move_list = move_list_create(10);
+  MoveGenArgs move_gen_args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .thread_index = 0,
+      .max_equity_diff = 0,
+  };
+
+  SortedMoveList *sml = NULL;
+
+  load_cgp_or_die(game, QI_QI_CGP);
+  rack_set_to_string(ld, player_rack, "F");
+  generate_moves(&move_gen_args);
+  assert(move_list->count == 3);
+  sml = sorted_move_list_create(move_list);
+  assert_move(game, NULL, sml, 0, "9G (I)F 10");
+  assert_move(game, NULL, sml, 1, "(exch F)");
+  assert_move(game, NULL, sml, 2, "pass 0");
+  sorted_move_list_destroy(sml);
+
+  load_cgp_or_die(game, IF_IF_CGP);
+  rack_set_to_string(ld, player_rack, "Q");
+  generate_moves(&move_gen_args);
+  assert(move_list->count == 3);
+  sml = sorted_move_list_create(move_list);
+  assert_move(game, NULL, sml, 0, "8G Q(I) 22");
+  assert_move(game, NULL, sml, 1, "(exch Q)");
+  assert_move(game, NULL, sml, 2, "pass 0");
+  sorted_move_list_destroy(sml);
+
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void movegen_one_tile_wmp(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const Player *player = game_get_player(game, 0);
+  Rack *player_rack = player_get_rack(player);
+  MoveList *move_list = move_list_create(10);
+  MoveGenArgs move_gen_args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .thread_index = 0,
+      .max_equity_diff = 0,
+  };
+
+  SortedMoveList *sml = NULL;
+
+  load_cgp_or_die(game, QI_QI_CGP);
+  rack_set_to_string(ld, player_rack, "F");
+  generate_moves(&move_gen_args);
+  assert(move_list->count == 3);
+  sml = sorted_move_list_create(move_list);
+  assert_move(game, NULL, sml, 0, "9G (I)F 10");
+  assert_move(game, NULL, sml, 1, "(exch F)");
+  assert_move(game, NULL, sml, 2, "pass 0");
+
+  load_cgp_or_die(game, IF_IF_CGP);
+  rack_set_to_string(ld, player_rack, "Q");
+  generate_moves(&move_gen_args);
+  assert(move_list->count == 3);
+  sml = sorted_move_list_create(move_list);
+  assert_move(game, NULL, sml, 0, "8G Q(I) 22");
+  assert_move(game, NULL, sml, 1, "(exch Q)");
+  assert_move(game, NULL, sml, 2, "pass 0");
+  
+  sorted_move_list_destroy(sml);
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_move_gen(void) {
   leave_lookup_test();
   unfound_leave_lookup_test();
@@ -1212,4 +1297,6 @@ void test_move_gen(void) {
   movegen_many_moves();
   movegen_should_not_gen_exchanges();
   movegen_does_not_return_early_from_anchor();
+  movegen_one_tile_nonwmp();
+  movegen_one_tile_wmp();
 }

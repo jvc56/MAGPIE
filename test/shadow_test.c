@@ -743,9 +743,48 @@ void test_shadow_top_move(void) {
   config_destroy(config);
 }
 
+void test_shadow_wmp_one_tile(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  Game *game = config_game_create(config);
+  Player *player = game_get_player(game, 0);
+
+  player_set_move_sort_type(player, MOVE_SORT_SCORE);
+
+  AnchorHeap ah;
+  // recursive_gen creates anchors in both directions (because they can extend
+  // to more than one tile) but wordmap_gen can avoid this and only create the
+  // horizontal version.
+  load_and_shadow(game, player, QI_QI_CGP, "D", &ah);
+  assert(ah.count == 2);
+
+  // Max score is 6 for 9F (I)D, can also record D(I) at 9G
+  assert_anchor_score(&ah, 0, 6);
+  assert(ah.anchors[0].row == 8);
+  assert(ah.anchors[0].col == 6);
+  assert(ah.anchors[0].dir == BOARD_HORIZONTAL_DIRECTION);
+  assert(ah.anchors[0].tiles_to_play == 1);
+  assert(ah.anchors[0].playthrough_blocks == 1);
+  assert(ah.anchors[0].leftmost_start_col == 5);
+  assert(ah.anchors[0].rightmost_start_col == 6);
+
+  // Max score is 3 for H7 D(I). Does not allow H8 (I)D
+  assert_anchor_score(&ah, 1, 3);
+  assert(ah.anchors[1].row == 7);
+  assert(ah.anchors[1].col == 7);
+  assert(ah.anchors[1].dir == BOARD_VERTICAL_DIRECTION);
+  assert(ah.anchors[1].tiles_to_play == 1);
+  assert(ah.anchors[1].playthrough_blocks == 1);
+  assert(ah.anchors[1].leftmost_start_col == 6);
+  assert(ah.anchors[1].rightmost_start_col == 6);
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_shadow(void) {
   test_shadow_score();
   test_shadow_wmp_nonplaythrough_existence();
   test_shadow_wmp_playthrough_bingo_existence();
+  test_shadow_wmp_one_tile();
   test_shadow_top_move();
 }

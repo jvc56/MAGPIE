@@ -28,6 +28,7 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/static_eval.h"
+#include "../str/game_string.h"
 #include "../util/io_util.h"
 #include "wmp_move_gen.h"
 #include <assert.h>
@@ -642,6 +643,9 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   if (!wmp_move_gen_set_anchor_playthrough(wgen, anchor, gen->row_cache)) {
     return;
   }
+  assert(anchor->leftmost_start_col <= anchor->rightmost_start_col);
+  assert(anchor->leftmost_start_col <= anchor->col);
+  assert(anchor->rightmost_start_col <= anchor->col);
   const int num_subrack_combinations =
       wmp_move_gen_get_num_subrack_combinations(wgen);
   for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
@@ -671,8 +675,8 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
                                  anchor->tiles_to_play);
     }
     for (int word_idx = 0; word_idx < wgen->num_words; word_idx++) {
-      for (int start_col = wgen->leftmost_start_col;
-           start_col <= wgen->rightmost_start_col; start_col++) {
+      for (int start_col = anchor->leftmost_start_col;
+           start_col <= anchor->rightmost_start_col; start_col++) {
         if (wordmap_gen_check_playthrough_and_crosses(gen, word_idx,
                                                       start_col)) {
           record_wmp_plays_for_word(gen, subrack_idx, start_col, 0, 0);
@@ -1070,6 +1074,12 @@ static inline void shadow_record(MoveGen *gen) {
       tiles_played_score +
       (gen->shadow_mainword_restricted_score * gen->shadow_word_multiplier) +
       gen->shadow_perpendicular_additional_score + bingo_bonus;
+  // printf("tiles_played=%d tiles_played_score=%d restricted_mainword_score=%d "
+  //        "restricted_word_multiplier=%d perpendicular_additional_score=%d "
+  //        "bingo_bonus=%d total_score=%d\n",
+  //        gen->tiles_played, tiles_played_score,
+  //        gen->shadow_mainword_restricted_score, gen->shadow_word_multiplier,
+  //        gen->shadow_perpendicular_additional_score, bingo_bonus, score);
 
   Equity equity = score;
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
@@ -1081,9 +1091,10 @@ static inline void shadow_record(MoveGen *gen) {
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
     const int word_length =
         gen->wmp_move_gen.num_tiles_played_through + gen->tiles_played;
+    // printf("word_length=%d\n", word_length);
     if (word_length >= MINIMUM_WORD_LENGTH) {
       wmp_move_gen_maybe_update_anchor(&gen->wmp_move_gen, gen->tiles_played,
-                                       score, equity);
+                                       gen->current_left_col, score, equity);
     }
   }
   if (equity > gen->highest_shadow_equity) {
@@ -1314,6 +1325,10 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
     if (possible_letters_here == 0) {
       break;
     }
+    if (gen->tiles_played == 1) {
+      gen->first_played_tile_col = gen->current_right_col;
+    }
+
     const BonusSquare bonus_square =
         gen_cache_get_bonus_square(gen, gen->current_right_col);
     const Equity cross_score =
@@ -1428,6 +1443,7 @@ static inline void nonplaythrough_shadow_play_left(MoveGen *gen,
 
     gen->current_left_col--;
     gen->tiles_played++;
+    assert(gen->tiles_played > 1);
     const BonusSquare bonus_square =
         gen_cache_get_bonus_square(gen, gen->current_left_col);
     int letter_multiplier = bonus_square_get_letter_multiplier(bonus_square);
@@ -1481,6 +1497,10 @@ static inline void playthrough_shadow_play_left(MoveGen *gen, bool is_unique) {
     if (possible_tiles_for_shadow_left == 0) {
       break;
     }
+    if (gen->tiles_played == 1) {
+      gen->first_played_tile_col = gen->current_left_col;
+    }
+
     const BonusSquare bonus_square =
         gen_cache_get_bonus_square(gen, gen->current_left_col);
     const Equity cross_score =
@@ -1513,6 +1533,7 @@ static inline void playthrough_shadow_play_left(MoveGen *gen, bool is_unique) {
 static inline void shadow_start_nonplaythrough(MoveGen *gen) {
   const uint64_t cross_set =
       gen_cache_get_cross_set(gen, gen->current_left_col);
+  gen->first_played_tile_col = gen->current_left_col;
   const uint64_t possible_letters_here = cross_set & gen->rack_cross_set;
   // Only play a letter if a letter from the rack fits in the cross set
   if (possible_letters_here == 0) {
@@ -1608,6 +1629,8 @@ static inline void shadow_start(MoveGen *gen) {
 // For more details about the shadow playing algorithm, see
 // https://github.com/andy-k/wolges/blob/main/details.txt
 void shadow_play_for_anchor(MoveGen *gen, int col) {
+  // printf("Shadow play for anchor at row %d col %d dir %d\n",
+  //        gen->current_row_index, col, gen->dir);
   // Shadow playing is designed to find the best plays first. When we find plays
   // for endgame using MOVE_RECORD_ALL_SMALL, we need to find all of the plays,
   // and because they are ranked for search in the endgame code rather than

@@ -16,13 +16,18 @@ typedef struct Anchor {
   unsigned row : 6;
   // The column of the board for this anchor
   unsigned col : 6;
+
   // The the previous anchor column of the
   // move generator for the row.
+  // TODO(olaugh): Replace use of this with leftmost_start_col
   unsigned last_anchor_col : 6;
 
   // Only used for WMP move generation
-  unsigned tiles_to_play : 6;
-  unsigned playthrough_blocks : 6;
+  // Note that WMP currently requires BOARD_DIM <= 16
+  unsigned tiles_to_play : 4;
+  unsigned playthrough_blocks : 4;
+  unsigned leftmost_start_col : 4;
+  unsigned rightmost_start_col : 4;
 
   // The direction of the board for
   // this anchor column.
@@ -53,12 +58,15 @@ anchor_heap_add_unheaped_anchor(AnchorHeap *ah, uint8_t row, uint8_t col,
 // Appends anchors to the end of the list without any comparisons.
 static inline void anchor_heap_add_unheaped_wmp_anchor(
     AnchorHeap *ah, uint8_t row, uint8_t col, uint8_t last_anchor_col,
+    uint8_t leftmost_start_col, uint8_t rightmost_start_col,
     uint8_t dir, Equity highest_possible_equity, Equity highest_possible_score,
     int tiles_to_play, int playthrough_blocks) {
   const int i = ah->count;
   ah->anchors[i].row = row;
   ah->anchors[i].col = col;
   ah->anchors[i].last_anchor_col = last_anchor_col;
+  ah->anchors[i].leftmost_start_col = leftmost_start_col;
+  ah->anchors[i].rightmost_start_col = rightmost_start_col;
   ah->anchors[i].dir = dir;
   ah->anchors[i].highest_possible_equity = highest_possible_equity;
   ah->anchors[i].highest_possible_score = highest_possible_score;

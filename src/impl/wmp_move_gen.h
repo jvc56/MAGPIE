@@ -63,6 +63,8 @@ static inline void wmp_move_gen_reset_anchors(WMPMoveGen *wmp_move_gen) {
   for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
     wmp_move_gen->anchors[i].highest_possible_equity = EQUITY_MIN_VALUE;
     wmp_move_gen->anchors[i].highest_possible_score = EQUITY_MIN_VALUE;
+    wmp_move_gen->anchors[i].rightmost_start_col = 0;
+    wmp_move_gen->anchors[i].leftmost_start_col = BOARD_DIM - 1;
     wmp_move_gen->anchors[i].tiles_to_play = 0;
   }
 }
@@ -265,12 +267,23 @@ static inline Anchor *wmp_move_gen_get_anchor(WMPMoveGen *wmp_move_gen,
 
 static inline void wmp_move_gen_maybe_update_anchor(WMPMoveGen *wmp_move_gen,
                                                     int tiles_played,
-                                                    Equity score,
+                                                    int start_col, Equity score,
                                                     Equity equity) {
+  assert(start_col >= 0 && start_col < BOARD_DIM);
+  // printf("maybe update anchor: blocks %d, tiles %d, start_col %d, score %d, "
+  //        "equity %d\n",
+  //        wmp_move_gen->playthrough_blocks, tiles_played, start_col, score,
+  //        equity);
   Anchor *anchor = wmp_move_gen_get_anchor(
       wmp_move_gen, wmp_move_gen->playthrough_blocks, tiles_played);
   anchor->tiles_to_play = tiles_played;
   anchor->playthrough_blocks = wmp_move_gen->playthrough_blocks;
+  if (start_col < anchor->leftmost_start_col) {
+    anchor->leftmost_start_col = start_col;
+  }
+  if (start_col > anchor->rightmost_start_col) {
+    anchor->rightmost_start_col = start_col;
+  }
   if (equity > anchor->highest_possible_equity) {
     anchor->highest_possible_equity = equity;
   }
@@ -445,17 +458,34 @@ static inline void wmp_move_gen_add_anchors(WMPMoveGen *wmp_move_gen, int row,
                                             int col, int last_anchor_col,
                                             int dir, AnchorHeap *anchor_heap) {
   for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
+    // printf("considering anchor %d: blocks %d, tiles %d, left %d, right %d,
+    // score %d, equity %d\n",
+    //        i,
+    //        wmp_move_gen->anchors[i].playthrough_blocks,
+    //        wmp_move_gen->anchors[i].tiles_to_play,
+    //        wmp_move_gen->anchors[i].leftmost_start_col,
+    //        wmp_move_gen->anchors[i].rightmost_start_col,
+    //        wmp_move_gen->anchors[i].highest_possible_score,
+    //        wmp_move_gen->anchors[i].highest_possible_equity);
     const Anchor *anchor = &wmp_move_gen->anchors[i];
-    if (anchor->tiles_to_play > 0) {
-      const int word_length =
-          wmp_move_gen->num_tiles_played_through + anchor->tiles_to_play;
-      assert(word_length >= MINIMUM_WORD_LENGTH);
-      assert(word_length <= wmp_move_gen->wmp->board_dim);
-      anchor_heap_add_unheaped_wmp_anchor(
-          anchor_heap, row, col, last_anchor_col, dir,
-          anchor->highest_possible_equity, anchor->highest_possible_score,
-          anchor->tiles_to_play, anchor->playthrough_blocks);
+    if (anchor->tiles_to_play == 0) {
+      continue;
     }
+    const int word_length =
+        wmp_move_gen->num_tiles_played_through + anchor->tiles_to_play;
+    assert(word_length >= MINIMUM_WORD_LENGTH);
+    assert(word_length <= wmp_move_gen->wmp->board_dim);
+    // printf("adding anchor: row %d, col %d, last %d, dir %d, blocks %d, tiles "
+    //        "%d, left %d, right %d, score %d, equity %d\n",
+    //        row, col, last_anchor_col, dir, anchor->playthrough_blocks,
+    //        anchor->tiles_to_play, anchor->leftmost_start_col,
+    //        anchor->rightmost_start_col, anchor->highest_possible_score,
+    //        anchor->highest_possible_equity);
+    anchor_heap_add_unheaped_wmp_anchor(
+        anchor_heap, row, col, last_anchor_col, anchor->leftmost_start_col,
+        anchor->rightmost_start_col, dir, anchor->highest_possible_equity,
+        anchor->highest_possible_score, anchor->tiles_to_play,
+        anchor->playthrough_blocks);
   }
 }
 

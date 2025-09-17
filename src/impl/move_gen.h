@@ -23,6 +23,7 @@ typedef struct MoveGen {
   int dir;
   int max_tiles_to_play;
   int tiles_played;
+  int first_played_tile_col;
   int number_of_plays;
   int move_sort_type;
   move_record_t move_record_type;
