@@ -25,7 +25,6 @@ typedef struct AliasMethod {
   uint32_t num_items;
   uint32_t capacity;
   uint64_t total_item_count;
-  XoshiroPRNG *prng;
   cpthread_mutex_t mutex;
 } AliasMethod;
 
@@ -36,7 +35,6 @@ static inline AliasMethod *alias_method_create(void) {
       (AliasMethodItem *)malloc_or_die(sizeof(AliasMethodItem) * am->capacity);
   am->num_items = 0;
   am->total_item_count = 0;
-  am->prng = prng_create(0);
   cpthread_mutex_init(&am->mutex);
   return am;
 }
@@ -46,7 +44,6 @@ static inline void alias_method_destroy(AliasMethod *am) {
     return;
   }
   free(am->items);
-  prng_destroy(am->prng);
   free(am);
 }
 
@@ -142,17 +139,15 @@ static inline bool alias_method_generate_tables(AliasMethod *am) {
 
 // Returns true if there are a nonzero number of items and counts to sample from
 // and returns false otherwise.
-static inline bool alias_method_sample(AliasMethod *am, const uint64_t seed,
+static inline bool alias_method_sample(AliasMethod *am, XoshiroPRNG *prng,
                                        Rack *rack_to_update) {
   if (am->num_items == 0 || am->total_item_count == 0) {
     return false;
   }
 
-  prng_seed(am->prng, seed);
-  const uint32_t bin =
-      (uint32_t)prng_get_random_number(am->prng, am->num_items);
+  const uint32_t bin = (uint32_t)prng_get_random_number(prng, am->num_items);
   const double rand_between_0_and_1 =
-      (double)prng_get_random_number(am->prng, XOSHIRO_MAX) / XOSHIRO_MAX;
+      (double)prng_get_random_number(prng, XOSHIRO_MAX) / XOSHIRO_MAX;
 
   uint32_t chosen_idx;
   if (rand_between_0_and_1 < am->items[bin].probability) {

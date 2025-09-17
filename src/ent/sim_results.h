@@ -4,7 +4,8 @@
 #include "../compat/cpthread.h"
 #include "../def/bai_defs.h"
 #include "../def/game_defs.h"
-#include "../ent/bai_result.h"
+#include "bai_result.h"
+#include "game.h"
 #include "move.h"
 #include "stats.h"
 #include "win_pct.h"
@@ -38,22 +39,20 @@ void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
 void sim_results_destroy(SimResults *sim_results);
 
 int sim_results_get_number_of_plays(const SimResults *sim_results);
-int sim_results_get_max_plies(const SimResults *sim_results);
+int sim_results_get_num_plies(const SimResults *sim_results);
 int sim_results_get_node_count(const SimResults *sim_results);
 uint64_t sim_results_get_iteration_count(const SimResults *sim_results);
 SimmedPlay *sim_results_get_simmed_play(const SimResults *sim_results,
                                         int index);
-SimmedPlay *sim_results_get_sorted_simmed_play(SimResults *sim_results,
-                                               int index);
 BAIResult *sim_results_get_bai_result(const SimResults *sim_results);
 
 void sim_results_set_iteration_count(SimResults *sim_results, uint64_t count);
 void sim_results_lock_simmed_plays(SimResults *sim_results);
 void sim_results_unlock_simmed_plays(SimResults *sim_results);
-bool sim_results_sort_plays_by_win_rate(SimResults *sim_results);
 void sim_results_increment_node_count(SimResults *sim_results);
 bool sim_results_get_simmed_plays_initialized(SimResults *sim_results);
 void sim_results_set_simmed_plays_initialized(SimResults *sim_results,
                                               bool value);
-
+char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
+                     bool print_best_play);
 #endif

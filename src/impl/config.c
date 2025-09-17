@@ -8,6 +8,7 @@
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
+#include "../def/sim_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/autoplay_results.h"
 #include "../ent/board.h"
@@ -2096,13 +2097,13 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_int(config, ARG_TOKEN_PLIES, 0, INT_MAX, &config->plies,
+  config_load_int(config, ARG_TOKEN_PLIES, 1, MAX_PLIES, &config->plies,
                   error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
 
-  config_load_int(config, ARG_TOKEN_NUMBER_OF_PLAYS, 0, INT_MAX,
+  config_load_int(config, ARG_TOKEN_NUMBER_OF_PLAYS, 1, INT_MAX,
                   &config->num_plays, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;

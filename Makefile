@@ -28,6 +28,7 @@ ifeq ($(shell echo "int main() { return 0; }" | $(CC) -x c - -fsanitize=leak -o 
 endif
 
 cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror $(FSAN_ARG)
+cflags.thread := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -fsanitize=thread
 cflags.vlg := -g -O0 -Wall -Wno-trigraphs -Wextra
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
 cflags.release := -O3 -flto -funroll-loops -march=native -Wall -Wno-trigraphs
@@ -37,6 +38,7 @@ cflags.dll_release = -O3 -fpic -flto -funroll-loops -march=native -Wall -Wno-tri
 lflags.cov := --coverage
 
 ldflags.dev := -Llib -pthread $(FSAN_ARG)
+ldflags.thread := -Llib -pthread -fsanitize=thread
 ldflags.vlg := -Llib -pthread
 ldflags.release := -Llib -pthread
 ldflags.cov := -Llib -pthread

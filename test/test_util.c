@@ -866,18 +866,16 @@ void assert_simmed_plays_are_equal(const SimmedPlay *sp1, const SimmedPlay *sp2,
 
 // NOT THREAD SAFE
 void assert_sim_results_equal(SimResults *sr1, SimResults *sr2) {
-  sim_results_sort_plays_by_win_rate(sr1);
-  sim_results_sort_plays_by_win_rate(sr2);
-  assert(sim_results_get_max_plies(sr1) == sim_results_get_max_plies(sr2));
+  assert(sim_results_get_num_plies(sr1) == sim_results_get_num_plies(sr2));
   assert(sim_results_get_number_of_plays(sr1) ==
          sim_results_get_number_of_plays(sr2));
   assert(sim_results_get_iteration_count(sr1) ==
          sim_results_get_iteration_count(sr2));
   assert(sim_results_get_node_count(sr1) == sim_results_get_node_count(sr2));
   for (int i = 0; i < sim_results_get_number_of_plays(sr1); i++) {
-    assert_simmed_plays_are_equal(sim_results_get_sorted_simmed_play(sr1, i),
-                                  sim_results_get_sorted_simmed_play(sr2, i),
-                                  sim_results_get_max_plies(sr1));
+    assert_simmed_plays_are_equal(sim_results_get_simmed_play(sr1, i),
+                                  sim_results_get_simmed_play(sr2, i),
+                                  sim_results_get_num_plies(sr1));
   }
 }
 
