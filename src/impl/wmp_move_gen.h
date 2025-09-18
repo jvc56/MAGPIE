@@ -140,16 +140,6 @@ wmp_move_gen_playthrough_subracks_init(WMPMoveGen *wmp_move_gen,
     playthrough_subrack_info->subrack = nonplaythrough_subrack_info->subrack;
     bit_rack_add_bit_rack(&playthrough_subrack_info->subrack,
                           &wmp_move_gen->playthrough_bit_rack);
-    // printf("Playthrough subrack %d: ", idx_for_size);
-    // for (int ml = 0; ml <= 26; ml++) {
-    //   char c = (ml == 0) ? '?' : 'A' + ml - 1;
-    //   int num_this =
-    //       bit_rack_get_letter(&playthrough_subrack_info->subrack, ml);
-    //   for (int i = 0; i < num_this; i++) {
-    //     printf("%c", c);
-    //   }
-    // }
-    // printf("\n");
   }
   wmp_move_gen->tiles_to_play = subrack_size;
 }
@@ -280,10 +270,6 @@ static inline void wmp_move_gen_maybe_update_anchor(WMPMoveGen *wmp_move_gen,
                                                     int start_col, Equity score,
                                                     Equity equity) {
   assert(start_col >= 0 && start_col < BOARD_DIM);
-  // printf("maybe update anchor: blocks %d, tiles %d, start_col %d, score %d, "
-  //        "equity %d\n",
-  //        wmp_move_gen->playthrough_blocks, tiles_played, start_col, score,
-  //        equity);
   Anchor *anchor = wmp_move_gen_get_anchor(
       wmp_move_gen, wmp_move_gen->playthrough_blocks, tiles_played);
   anchor->tiles_to_play = tiles_played;
@@ -307,8 +293,6 @@ static inline void
 wmp_move_gen_set_playthrough_bit_rack(WMPMoveGen *wmp_move_gen,
                                       const Anchor *anchor,
                                       Square row_cache[BOARD_DIM]) {
-  // printf("Setting playthrough bit rack for anchor with %d blocks\n",
-  //        anchor->playthrough_blocks);
   wmp_move_gen_reset_playthrough(wmp_move_gen);
   if (anchor->playthrough_blocks == 0) {
     return;
@@ -316,7 +300,6 @@ wmp_move_gen_set_playthrough_bit_rack(WMPMoveGen *wmp_move_gen,
   bool in_block = false;
   int blocks_found = 0;
   for (int col = anchor->rightmost_start_col; col < BOARD_DIM; col++) {
-    // printf("considering col %d\n", col);
     const MachineLetter ml = row_cache[col].letter;
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
       if (in_block) {
@@ -328,7 +311,6 @@ wmp_move_gen_set_playthrough_bit_rack(WMPMoveGen *wmp_move_gen,
       continue;
     }
     const MachineLetter unblanked_ml = get_unblanked_machine_letter(ml);
-    // printf(" adding playthrough letter %c\n", unblanked_ml - 1 + 'A');
     wmp_move_gen_add_playthrough_letter(wmp_move_gen, unblanked_ml);
     if (!in_block) {
       in_block = true;
@@ -354,10 +336,6 @@ wmp_move_gen_get_nonplaythrough_subrack(const WMPMoveGen *wmp_move_gen,
 
 static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen,
                                                   int idx_for_size) {
-  // printf("Getting words for subrack %d of size %d\n", idx_for_size,
-  //        wmp_move_gen->tiles_to_play);
-  // printf("  word length %d\n", wmp_move_gen->word_length);
-  // printf(" tiles to play %d\n", wmp_move_gen->tiles_to_play);
   const int offset =
       subracks_get_combination_offset(wmp_move_gen->tiles_to_play);
   const int subrack_idx = offset + idx_for_size;
@@ -393,26 +371,12 @@ static inline void wmp_move_gen_add_anchors(WMPMoveGen *wmp_move_gen, int row,
                                             int col, int last_anchor_col,
                                             int dir, AnchorHeap *anchor_heap) {
   for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
-    // printf("considering anchor %d: blocks %d, tiles %d, left %d, right %d,
-    // score %d, equity %d\n",
-    //        i,
-    //        wmp_move_gen->anchors[i].playthrough_blocks,
-    //        wmp_move_gen->anchors[i].tiles_to_play,
-    //        wmp_move_gen->anchors[i].leftmost_start_col,
-    //        wmp_move_gen->anchors[i].rightmost_start_col,
-    //        wmp_move_gen->anchors[i].highest_possible_score,
-    //        wmp_move_gen->anchors[i].highest_possible_equity);
     const Anchor *anchor = &wmp_move_gen->anchors[i];
     if (anchor->tiles_to_play == 0) {
       continue;
     }
     assert(anchor->word_length >= MINIMUM_WORD_LENGTH);
     assert(anchor->word_length <= wmp_move_gen->wmp->board_dim);
-    // printf("adding anchor: row %d, col %d, last %d, dir %d, blocks %d tiles %d, left %d, right %d, score %d, equity %d len %d\n",
-    //        row, col, last_anchor_col, dir, anchor->playthrough_blocks,
-    //        anchor->tiles_to_play, anchor->leftmost_start_col,
-    //        anchor->rightmost_start_col, anchor->highest_possible_score,
-    //        anchor->highest_possible_equity, anchor->word_length);
     anchor_heap_add_unheaped_wmp_anchor(
         anchor_heap, row, col, last_anchor_col, anchor->leftmost_start_col,
         anchor->rightmost_start_col, dir, anchor->highest_possible_equity,
