@@ -22,6 +22,7 @@ void test_load_gcg(void) {
   printf("Running load GCG tests...\n");
 
   printf("=== Cross-tables Tests ===\n");
+  validate_load_gcg("54938", ERROR_STATUS_SUCCESS);
   validate_load_gcg("https://cross-tables.com/"
                     "annotated.php?u=5493899999999999999999999999999999999",
                     ERROR_STATUS_XT_URL_MALFORMED);

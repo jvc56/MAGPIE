@@ -82,8 +82,7 @@ struct GCGParser {
   const char *existing_p0_lexicon;
   // Owned by the caller
   GameHistory *game_history;
-  // FIXME: make this just letter distribution instead of the whole game
-  Game *game;
+  const LetterDistribution *ld;
 };
 
 #define GCG_TITLE_STRING "title"
@@ -278,7 +277,7 @@ GCGParser *gcg_parser_create(const char *gcg_string, GameHistory *game_history,
                              ErrorStack *error_stack) {
   GCGParser *gcg_parser = malloc_or_die(sizeof(GCGParser));
   gcg_parser->game_history = game_history;
-  gcg_parser->game = NULL;
+  gcg_parser->ld = NULL;
   gcg_parser->note_builder = string_builder_create();
   gcg_parser->token_regex_pairs =
       malloc_or_die(sizeof(TokenRegexPair *) * (NUMBER_OF_GCG_TOKENS));
@@ -385,11 +384,10 @@ bool set_rack_from_matching(const GCGParser *gcg_parser, const char *gcg_line,
   }
   char *player_rack_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
-  const LetterDistribution *ld = game_get_ld(gcg_parser->game);
-  const int ld_size = ld_get_size(ld);
+  const int ld_size = ld_get_size(gcg_parser->ld);
   rack_set_dist_size(rack_to_set, ld_size);
   int number_of_letters_set =
-      rack_set_to_string(ld, rack_to_set, player_rack_string);
+      rack_set_to_string(gcg_parser->ld, rack_to_set, player_rack_string);
   free(player_rack_string);
   return number_of_letters_set > 0;
 }
@@ -875,7 +873,7 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     if (get_matching_group_string_length(gcg_parser, 2) == 0) {
       Rack *time_penalty_rack = game_event_get_rack(game_event);
       rack_set_dist_size_and_reset(time_penalty_rack,
-                                   ld_get_size(game_get_ld(gcg_parser->game)));
+                                   ld_get_size(gcg_parser->ld));
     } else if (!set_rack_from_matching(gcg_parser, gcg_line, 2,
                                        game_event_get_rack(game_event))) {
       error_stack_push(
@@ -944,8 +942,7 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
       return false;
     }
 
-    const Equity rack_score =
-        rack_get_score(game_get_ld(gcg_parser->game), &penalty_letters);
+    const Equity rack_score = rack_get_score(gcg_parser->ld, &penalty_letters);
     const Equity game_event_score_adj =
         game_event_get_score_adjustment(game_event);
 
@@ -1061,8 +1058,8 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
       return false;
     }
 
-    const Equity end_rack_score = rack_get_score(
-        game_get_ld(gcg_parser->game), game_event_get_rack(game_event));
+    const Equity end_rack_score =
+        rack_get_score(gcg_parser->ld, game_event_get_rack(game_event));
     const Equity game_event_rack_points =
         game_event_get_score_adjustment(game_event);
     if (end_rack_score * 2 != game_event_rack_points) {
@@ -1188,7 +1185,7 @@ void parse_gcg_settings(GCGParser *gcg_parser, ErrorStack *error_stack) {
 
 void parse_gcg_events(GCGParser *gcg_parser, Game *game,
                       ErrorStack *error_stack) {
-  gcg_parser->game = game;
+  gcg_parser->ld = game_get_ld(game);
   int number_of_gcg_lines =
       string_splitter_get_number_of_items(gcg_parser->gcg_lines);
   for (int i = gcg_parser->current_gcg_line_index; i < number_of_gcg_lines;

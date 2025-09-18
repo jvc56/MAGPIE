@@ -1356,7 +1356,6 @@ void config_parse_gcg_string_with_parser(Config *config, GCGParser *gcg_parser,
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  // FIXME: test this
   config_init_game(config);
   parse_gcg_events(gcg_parser, config->game, error_stack);
 }
