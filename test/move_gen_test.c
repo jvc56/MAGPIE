@@ -1261,6 +1261,7 @@ void movegen_one_tile_wmp(void) {
   assert_move(game, NULL, sml, 0, "9G (I)F 10");
   assert_move(game, NULL, sml, 1, "(exch F)");
   assert_move(game, NULL, sml, 2, "pass 0");
+  sorted_move_list_destroy(sml);
 
   load_cgp_or_die(game, IF_IF_CGP);
   rack_set_to_string(ld, player_rack, "Q");
@@ -1270,8 +1271,8 @@ void movegen_one_tile_wmp(void) {
   assert_move(game, NULL, sml, 0, "8G Q(I) 22");
   assert_move(game, NULL, sml, 1, "(exch Q)");
   assert_move(game, NULL, sml, 2, "pass 0");
-
   sorted_move_list_destroy(sml);
+
   move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);
