@@ -49,8 +49,6 @@ static MoveGen *cached_gens[MAX_THREADS];
 
 MoveGen *generator_create(void) {
   MoveGen *generator = malloc_or_die(sizeof(MoveGen));
-  generator->tiles_played = 0;
-  generator->dir = BOARD_HORIZONTAL_DIRECTION;
   return generator;
 }
 
