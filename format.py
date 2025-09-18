@@ -171,7 +171,8 @@ def format_c_or_h_file(filepath: str, write_changes: bool) -> Tuple[bool, bool]:
             print(f"No changes needed for '{filepath}'.")
     else: # Default mode: compare only
         if has_diff:
-            print(f"Differences detected in '{filepath}':\n")
+            # Print header without an extra trailing blank line to avoid double-spacing
+            print(f"Differences detected in '{filepath}':")
             original_lines = original_content_str.splitlines(keepends=True)
             final_lines = final_formatted_content_str.splitlines(keepends=True)
             diff_lines = difflib.unified_diff(
@@ -182,8 +183,8 @@ def format_c_or_h_file(filepath: str, write_changes: bool) -> Tuple[bool, bool]:
                 lineterm=""
             )
             for dl in diff_lines:
-                # Write directly so large diffs don't use extra buffering/newlines
-                sys.stdout.write(dl + "\n")
+                # Ensure each diff line is printed with exactly one newline (strip any existing)
+                sys.stdout.write(dl.rstrip("\n") + "\n")
         else:
             print(f"No differences detected in '{filepath}'.")
 
