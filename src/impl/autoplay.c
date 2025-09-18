@@ -454,19 +454,6 @@ void play_autoplay_game_or_game_pair(
     if (!games_are_divergent &&
         (!move1 || !move2 ||
          compare_moves_without_equity(move1, move2, true) != -1)) {
-      StringBuilder *sb = string_builder_create();
-      string_builder_add_game(sb, game_runner1->game, NULL);
-      printf("Divergent games:\n%s\n", string_builder_peek(sb));
-      string_builder_clear(sb);
-      printf("Move 1: ");
-      string_builder_add_move(sb, game_get_board(game_runner1->game), move1,
-                              game_get_ld(game_runner1->game));
-      printf("%s Move 2: ", string_builder_peek(sb));
-      string_builder_clear(sb);
-      string_builder_add_move(sb, game_get_board(game_runner2->game), move2,
-                              game_get_ld(game_runner2->game));
-      printf("%s\n", string_builder_peek(sb));
-      string_builder_destroy(sb);
       games_are_divergent = true;
     }
   }
