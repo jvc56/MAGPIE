@@ -266,7 +266,8 @@ static inline Anchor *wmp_move_gen_get_anchor(WMPMoveGen *wmp_move_gen,
 }
 
 static inline void wmp_move_gen_maybe_update_anchor(WMPMoveGen *wmp_move_gen,
-                                                    int tiles_played, int word_length,
+                                                    int tiles_played,
+                                                    int word_length,
                                                     int start_col, Equity score,
                                                     Equity equity) {
   assert(start_col >= 0 && start_col < BOARD_DIM);

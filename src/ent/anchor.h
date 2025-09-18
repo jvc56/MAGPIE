@@ -23,12 +23,11 @@ typedef struct Anchor {
   unsigned last_anchor_col : 6;
 
   // Only used for WMP move generation
-  // Note that WMP currently requires BOARD_DIM <= 16
-  unsigned tiles_to_play : 4;
-  unsigned playthrough_blocks : 4;
-  unsigned word_length : 4;
-  unsigned leftmost_start_col : 4;
-  unsigned rightmost_start_col : 4;
+  unsigned tiles_to_play : 6;
+  unsigned playthrough_blocks : 6;
+  unsigned word_length : 6;
+  unsigned leftmost_start_col : 6;
+  unsigned rightmost_start_col : 6;
 
   // The direction of the board for
   // this anchor column.
