@@ -266,7 +266,7 @@ void test_config_load_success(void) {
   r1 = "best";
   s2 = "score";
   r2 = "all";
-  plies = 123;
+  plies = 23;
   max_iterations = 6;
   number_of_threads = 9;
   print_info = 850;

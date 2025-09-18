@@ -7,8 +7,6 @@
 #include "../ent/thread_control.h"
 #include "../util/string_util.h"
 
-char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
-                     bool print_best_play);
 void print_ucgi_sim_stats(const Game *game, SimResults *sim_results,
                           ThreadControl *thread_control, double nps,
                           bool print_best_play);

@@ -75,10 +75,12 @@ void inference_results_reset(InferenceResults *results, int move_capacity,
   }
   memset(results->subtotals, 0, sizeof(results->subtotals));
   leave_rack_list_reset(results->leave_rack_list, move_capacity);
-  alias_method_reset(results->alias_method);
   rack_set_dist_size_and_reset(&results->target_played_tiles, ld_size);
   rack_set_dist_size_and_reset(&results->target_known_unplayed_tiles, ld_size);
   rack_set_dist_size_and_reset(&results->bag_as_rack, ld_size);
+  if (results->alias_method_created_internally) {
+    alias_method_reset(results->alias_method);
+  }
 }
 
 void inference_results_finalize(const Rack *target_played_tiles,

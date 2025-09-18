@@ -12,6 +12,7 @@
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/stats.h"
+#include "../src/ent/xoshiro.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/util/io_util.h"
@@ -317,6 +318,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   const LetterDistribution *ld = game_get_ld(game);
   int ld_size = ld_get_size(ld);
   Rack *rack = rack_create(ld_size);
+  XoshiroPRNG *prng = prng_create(0);
 
   const Player *player0 = game_get_player(game, 0);
   const Player *player1 = game_get_player(game, 1);
@@ -355,7 +357,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   AliasMethod *alias_method =
       inference_results_get_alias_method(inference_results);
   for (int i = 0; i < 100; i++) {
-    assert(alias_method_sample(alias_method, 0, rack));
+    assert(alias_method_sample(alias_method, prng, rack));
     assert(rack_get_total_letters(rack) == 1);
     assert(rack_get_letter(rack, ld_hl_to_ml(ld, "S")) == 1);
   }
@@ -421,7 +423,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   assert(stat_get_num_unique_samples(equity_values) == 22);
   alias_method = inference_results_get_alias_method(inference_results);
   for (int i = 0; i < 100; i++) {
-    assert(alias_method_sample(alias_method, 0, rack));
+    assert(alias_method_sample(alias_method, prng, rack));
     assert(rack_get_total_letters(rack) == 1);
   }
   for (int i = 0; i < ld_size; i++) {
@@ -482,7 +484,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   assert(status == ERROR_STATUS_SUCCESS);
   alias_method = inference_results_get_alias_method(inference_results);
   for (int i = 0; i < 100; i++) {
-    assert(alias_method_sample(alias_method, 0, rack));
+    assert(alias_method_sample(alias_method, prng, rack));
     assert(rack_get_total_letters(rack) == 2);
   }
   // Can't have B or Y because of ZAMBUK and MUZAKY
@@ -537,7 +539,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
          klv_get_leave_value(klv, rack));
   alias_method = inference_results_get_alias_method(inference_results);
   for (int i = 0; i < 100; i++) {
-    assert(alias_method_sample(alias_method, 0, rack));
+    assert(alias_method_sample(alias_method, prng, rack));
     assert(rack_get_total_letters(rack) == 2);
     assert(rack_get_letter(rack, ld_hl_to_ml(ld, "D")) == 1);
     assert(rack_get_letter(rack, ld_hl_to_ml(ld, "S")) == 1);
@@ -572,7 +574,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
     const int num_possible_leave_strs =
         sizeof(possible_leave_strs) / sizeof(possible_leave_strs[0]);
     for (int i = 0; i < 100; i++) {
-      assert(alias_method_sample(alias_method, 0, rack));
+      assert(alias_method_sample(alias_method, prng, rack));
       assert(rack_get_total_letters(rack) == 1);
       bool has_letter = false;
       for (int j = 0; j < num_possible_leave_strs; j++) {
@@ -1065,6 +1067,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   stat_destroy(letter_stat);
   rack_destroy(rack);
   inference_results_destroy(inference_results);
+  prng_destroy(prng);
   config_destroy(config);
 }
 

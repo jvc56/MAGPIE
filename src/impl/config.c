@@ -8,6 +8,7 @@
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
+#include "../def/sim_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/autoplay_results.h"
 #include "../ent/board.h"
@@ -30,7 +31,6 @@
 #include "../ent/win_pct.h"
 #include "../str/game_string.h"
 #include "../str/move_string.h"
-#include "../str/sim_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "autoplay.h"
@@ -1258,7 +1258,7 @@ char *impl_show(Config *config, ErrorStack *error_stack) {
 void execute_show(Config *config, ErrorStack *error_stack) {
   char *result = impl_show(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
-    printf("%s\n", result);
+    thread_control_print(config->thread_control, result);
   }
   free(result);
 }
@@ -1355,7 +1355,6 @@ void config_parse_gcg_string_with_parser(Config *config, GCGParser *gcg_parser,
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  // FIXME: test this
   config_init_game(config);
   parse_gcg_events(gcg_parser, config->game, error_stack);
 }
@@ -1422,7 +1421,7 @@ char *impl_load_gcg(Config *config, ErrorStack *error_stack) {
 void execute_load_gcg(Config *config, ErrorStack *error_stack) {
   char *result = impl_load_gcg(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
-    printf("%s\n", result);
+    thread_control_print(config->thread_control, result);
   }
   free(result);
 }
@@ -1455,8 +1454,7 @@ char *impl_next(Config *config, ErrorStack *error_stack) {
 void execute_next(Config *config, ErrorStack *error_stack) {
   char *result = impl_next(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
-    // FIXME: replace all printfs in config.c
-    printf("%s\n", result);
+    thread_control_print(config->thread_control, result);
   }
   free(result);
 }
@@ -1488,7 +1486,7 @@ char *impl_previous(Config *config, ErrorStack *error_stack) {
 void execute_previous(Config *config, ErrorStack *error_stack) {
   char *result = impl_previous(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
-    printf("%s\n", result);
+    thread_control_print(config->thread_control, result);
   }
   free(result);
 }
@@ -1529,7 +1527,7 @@ char *impl_goto(Config *config, ErrorStack *error_stack) {
 void execute_goto(Config *config, ErrorStack *error_stack) {
   char *result = impl_goto(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
-    printf("%s\n", result);
+    thread_control_print(config->thread_control, result);
   }
   free(result);
 }
@@ -2096,13 +2094,13 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_int(config, ARG_TOKEN_PLIES, 0, INT_MAX, &config->plies,
+  config_load_int(config, ARG_TOKEN_PLIES, 1, MAX_PLIES, &config->plies,
                   error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
 
-  config_load_int(config, ARG_TOKEN_NUMBER_OF_PLAYS, 0, INT_MAX,
+  config_load_int(config, ARG_TOKEN_NUMBER_OF_PLAYS, 1, INT_MAX,
                   &config->num_plays, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;

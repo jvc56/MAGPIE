@@ -1,5 +1,6 @@
 #include "random_variable.h"
 
+#include "../compat/cpthread.h"
 #include "../def/game_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/alias_method.h"
@@ -44,12 +45,16 @@ struct RandomVariables {
   void *data;
 };
 
-double uniform_sample(XoshiroPRNG *prng) {
-  return (double)prng_next(prng) / ((double)UINT64_MAX);
+double uniform_sample(XoshiroPRNG *prng, cpthread_mutex_t *mutex) {
+  cpthread_mutex_lock(mutex);
+  double result = (double)prng_next(prng) / ((double)UINT64_MAX);
+  cpthread_mutex_unlock(mutex);
+  return result;
 }
 
 typedef struct RVUniform {
   XoshiroPRNG *xoshiro_prng;
+  cpthread_mutex_t mutex;
 } RVUniform;
 
 double rv_uniform_sample(RandomVariables *rvs,
@@ -58,7 +63,7 @@ double rv_uniform_sample(RandomVariables *rvs,
                          const uint64_t __attribute__((unused)) sample_count,
                          BAILogger __attribute__((unused)) * bai_logger) {
   RVUniform *rv_uniform = (RVUniform *)rvs->data;
-  return uniform_sample(rv_uniform->xoshiro_prng);
+  return uniform_sample(rv_uniform->xoshiro_prng, &rv_uniform->mutex);
 }
 
 bool rv_uniform_mark_as_epigon_if_similar(RandomVariables
@@ -87,6 +92,7 @@ void rv_uniform_create(RandomVariables *rvs, const uint64_t seed) {
   rvs->destroy_data_func = rv_uniform_destroy;
   RVUniform *rv_uniform = malloc_or_die(sizeof(RVUniform));
   rv_uniform->xoshiro_prng = prng_create(seed);
+  cpthread_mutex_init(&rv_uniform->mutex);
   rvs->data = rv_uniform;
 }
 
@@ -94,6 +100,7 @@ typedef struct RVUniformPredetermined {
   uint64_t num_samples;
   uint64_t index;
   double *samples;
+  cpthread_mutex_t mutex;
 } RVUniformPredetermined;
 
 double rv_uniform_predetermined_sample(
@@ -103,13 +110,14 @@ double rv_uniform_predetermined_sample(
     BAILogger __attribute__((unused)) * bai_logger) {
   RVUniformPredetermined *rv_uniform_predetermined =
       (RVUniformPredetermined *)rvs->data;
+  cpthread_mutex_lock(&rv_uniform_predetermined->mutex);
   if (rv_uniform_predetermined->index >=
       rv_uniform_predetermined->num_samples) {
     log_fatal("ran out of uniform predetermined samples");
   }
   const uint64_t index = rv_uniform_predetermined->index++;
-  const double result = rv_uniform_predetermined->samples[index];
-  return result;
+  cpthread_mutex_unlock(&rv_uniform_predetermined->mutex);
+  return rv_uniform_predetermined->samples[index];
 }
 
 bool rv_uniform_predetermined_mark_as_epigon_if_similar(
@@ -147,6 +155,7 @@ void rv_uniform_predetermined_create(RandomVariables *rvs,
       malloc_or_die(rv_uniform_predetermined->num_samples * sizeof(double));
   memcpy(rv_uniform_predetermined->samples, samples,
          rv_uniform_predetermined->num_samples * sizeof(double));
+  cpthread_mutex_init(&rv_uniform_predetermined->mutex);
   rvs->data = rv_uniform_predetermined;
 }
 
@@ -154,6 +163,7 @@ typedef struct RVNormal {
   XoshiroPRNG *xoshiro_prng;
   double *means_and_vars;
   bool *is_epigon;
+  cpthread_mutex_t mutex;
 } RVNormal;
 
 double rv_normal_sample(RandomVariables *rvs, const uint64_t k,
@@ -165,8 +175,9 @@ double rv_normal_sample(RandomVariables *rvs, const uint64_t k,
   double u = 0.0;
   double s = 2.0;
   while (s >= 1.0 || s == 0.0) {
-    u = 2.0 * uniform_sample(rv_normal->xoshiro_prng) - 1.0;
-    const double v = 2.0 * uniform_sample(rv_normal->xoshiro_prng) - 1.0;
+    u = 2.0 * uniform_sample(rv_normal->xoshiro_prng, &rv_normal->mutex) - 1.0;
+    const double v =
+        2.0 * uniform_sample(rv_normal->xoshiro_prng, &rv_normal->mutex) - 1.0;
     s = u * u + v * v;
   }
   s = sqrt(-2.0 * log(s) / s);
@@ -215,6 +226,7 @@ void rv_normal_create(RandomVariables *rvs, const uint64_t seed,
   memcpy(rv_normal->means_and_vars, means_and_vars,
          rvs->num_rvs * 2 * sizeof(double));
   rv_normal->is_epigon = calloc_or_die(rvs->num_rvs, sizeof(bool));
+  cpthread_mutex_init(&rv_normal->mutex);
   rvs->data = rv_normal;
 }
 
@@ -224,6 +236,7 @@ typedef struct RVNormalPredetermined {
   double *samples;
   double *means_and_vars;
   bool *is_epigon;
+  cpthread_mutex_t mutex;
 } RVNormalPredetermined;
 
 double rv_normal_predetermined_sample(RandomVariables *rvs, const uint64_t k,
@@ -234,12 +247,14 @@ double rv_normal_predetermined_sample(RandomVariables *rvs, const uint64_t k,
                                       BAILogger *bai_logger) {
   RVNormalPredetermined *rv_normal_predetermined =
       (RVNormalPredetermined *)rvs->data;
+  cpthread_mutex_lock(&rv_normal_predetermined->mutex);
   if (rv_normal_predetermined->index >= rv_normal_predetermined->num_samples) {
     log_fatal("ran out of normal predetermined samples");
   }
+  const uint64_t index = rv_normal_predetermined->index++;
+  cpthread_mutex_unlock(&rv_normal_predetermined->mutex);
   const double mean = rv_normal_predetermined->means_and_vars[k * 2];
   const double sigma2 = rv_normal_predetermined->means_and_vars[k * 2 + 1];
-  const uint64_t index = rv_normal_predetermined->index++;
   const double sample = rv_normal_predetermined->samples[index];
   const double result = mean + sqrt(sigma2) * sample;
   bai_logger_log_title(bai_logger, "DETERMINISTIC_SAMPLE");
@@ -309,12 +324,14 @@ void rv_normal_predetermined_create(RandomVariables *rvs, const double *samples,
          rvs->num_rvs * 2 * sizeof(double));
   rv_normal_predetermined->is_epigon =
       calloc_or_die(rvs->num_rvs, sizeof(bool));
+  cpthread_mutex_init(&rv_normal_predetermined->mutex);
   rvs->data = rv_normal_predetermined;
 }
 
 typedef struct SimmerWorker {
   Game *game;
   MoveList *move_list;
+  XoshiroPRNG *prng;
 } SimmerWorker;
 
 typedef struct Simmer {
@@ -326,6 +343,7 @@ typedef struct Simmer {
   // Owned by the caller
   const WinPct *win_pcts;
   bool use_inference;
+  bool use_alias_method;
   const InferenceResults *inference_results;
   ThreadControl *thread_control;
   SimResults *sim_results;
@@ -336,6 +354,7 @@ SimmerWorker *simmer_create_worker(const Game *game) {
   simmer_worker->game = game_duplicate(game);
   game_set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
   simmer_worker->move_list = move_list_create(1);
+  simmer_worker->prng = prng_create(0);
   return simmer_worker;
 }
 
@@ -345,6 +364,7 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   }
   game_destroy(simmer_worker->game);
   move_list_destroy(simmer_worker->move_list);
+  prng_destroy(simmer_worker->prng);
   free(simmer_worker);
 }
 
@@ -376,21 +396,21 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   SimmerWorker *simmer_worker = simmer->workers[thread_index];
   Game *game = simmer_worker->game;
   MoveList *move_list = simmer_worker->move_list;
-  int plies = sim_results_get_max_plies(sim_results);
+  const int plies = sim_results_get_num_plies(sim_results);
 
   // This will shuffle the bag, so there is no need
   // to call bag_shuffle explicitly.
   const uint64_t seed = simmed_play_get_seed(simmed_play);
+  prng_seed(simmer_worker->prng, seed);
   game_seed(game, seed);
 
   int player_off_turn_index = 1 - game_get_player_on_turn_index(game);
-  if (simmer->use_inference &&
-      (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack))) {
+  if (simmer->use_alias_method) {
     Rack inferred_rack;
     rack_set_dist_size(&inferred_rack, simmer->dist_size);
     if (alias_method_sample(
-            inference_results_get_alias_method(simmer->inference_results), seed,
-            &inferred_rack)) {
+            inference_results_get_alias_method(simmer->inference_results),
+            simmer_worker->prng, &inferred_rack)) {
       set_random_rack(game, player_off_turn_index, &inferred_rack);
     }
   } else {
@@ -528,6 +548,9 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
 
   simmer->win_pcts = sim_args->win_pcts;
   simmer->use_inference = sim_args->use_inference;
+  simmer->use_alias_method =
+      simmer->use_inference &&
+      (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));
   simmer->inference_results = sim_args->inference_results;
 
   simmer->thread_control = thread_control;

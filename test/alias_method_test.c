@@ -47,8 +47,7 @@ void test_alias_method_dist(const Config *config, AliasMethod *am,
   const int total_samples = 10000;
 
   for (int i = 0; i < total_samples; i++) {
-    assert(alias_method_sample(am, prng_get_random_number(prng, XOSHIRO_MAX),
-                               &rack));
+    assert(alias_method_sample(am, prng, &rack));
     uint32_t klv_index = klv_get_word_index(klv, &rack);
     for (int j = 0; j < num_entries; j++) {
       AliasMethodTestDistEntry *entry = &test_entries[j];
@@ -75,9 +74,10 @@ void test_alias_method(void) {
       config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
                            "all -numplays 1  -gp false -threads 1");
   AliasMethod *am = alias_method_create();
+  XoshiroPRNG *prng = prng_create(0);
 
   assert(!alias_method_generate_tables(am));
-  assert(!alias_method_sample(am, 0, NULL));
+  assert(!alias_method_sample(am, prng, NULL));
 
   test_alias_method_dist(config, am,
                          (AliasMethodTestDistEntry[]){
@@ -141,6 +141,6 @@ void test_alias_method(void) {
                              {NULL, 0, 0, 0},
                          });
   alias_method_destroy(am);
-
+  prng_destroy(prng);
   config_destroy(config);
 }

@@ -2,9 +2,15 @@
 
 #include "../compat/cpthread.h"
 #include "../def/game_defs.h"
+#include "../def/sim_defs.h"
+#include "../str/move_string.h"
 #include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "bai_result.h"
+#include "board.h"
 #include "equity.h"
+#include "game.h"
+#include "letter_distribution.h"
 #include "move.h"
 #include "stats.h"
 #include "win_pct.h"
@@ -13,11 +19,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 struct SimmedPlay {
   Move *move;
-  Stat **score_stat;
-  Stat **bingo_stat;
+  Stat *score_stat[MAX_PLIES];
+  Stat *bingo_stat[MAX_PLIES];
   Stat *equity_stat;
   Stat *leftover_stat;
   Stat *win_pct_stat;
@@ -27,35 +34,51 @@ struct SimmedPlay {
   cpthread_mutex_t mutex;
 };
 
+typedef struct SimmedPlayDisplayInfo {
+  Move move;
+  double score_means[MAX_PLIES];
+  double score_stdevs[MAX_PLIES];
+  double bingo_means[MAX_PLIES];
+  double bingo_stdevs[MAX_PLIES];
+  double equity_mean;
+  double equity_stdev;
+  double win_pct_mean;
+  double win_pct_stdev;
+  bool is_epigon;
+  uint64_t niters;
+} SimmedPlayDisplayInfo;
+
 struct SimResults {
-  int max_plies;
+  int num_plies;
   int num_simmed_plays;
   uint64_t iteration_count;
   bool simmed_plays_initialized;
   cpthread_mutex_t simmed_plays_mutex;
+  cpthread_mutex_t display_mutex;
   atomic_int node_count;
   SimmedPlay **simmed_plays;
-  SimmedPlay **sorted_simmed_plays;
+  SimmedPlayDisplayInfo *simmed_play_display_infos;
+  StringBuilder *display_string_builder;
   BAIResult *bai_result;
 };
 
 SimmedPlay **simmed_plays_create(const MoveList *move_list,
-                                 int num_simmed_plays, int max_plies,
+                                 int num_simmed_plays, int num_plies,
                                  uint64_t seed) {
   SimmedPlay **simmed_plays =
-      malloc_or_die((sizeof(SimmedPlay)) * num_simmed_plays);
+      malloc_or_die((sizeof(SimmedPlay *)) * num_simmed_plays);
 
   for (int i = 0; i < num_simmed_plays; i++) {
     SimmedPlay *simmed_play = malloc_or_die(sizeof(SimmedPlay));
     simmed_play->move = move_create();
     move_copy(simmed_play->move, move_list_get_move(move_list, i));
 
-    simmed_play->score_stat = malloc_or_die(sizeof(Stat *) * max_plies);
-    simmed_play->bingo_stat = malloc_or_die(sizeof(Stat *) * max_plies);
     simmed_play->equity_stat = stat_create(true);
     simmed_play->leftover_stat = stat_create(true);
     simmed_play->win_pct_stat = stat_create(true);
-    for (int j = 0; j < max_plies; j++) {
+    memset(simmed_play->bingo_stat, 0, sizeof(Stat *) * MAX_PLIES);
+    memset(simmed_play->score_stat, 0, sizeof(Stat *) * MAX_PLIES);
+    for (int j = 0; j < num_plies; j++) {
       simmed_play->score_stat[j] = stat_create(true);
       simmed_play->bingo_stat[j] = stat_create(true);
     }
@@ -69,17 +92,15 @@ SimmedPlay **simmed_plays_create(const MoveList *move_list,
 }
 
 void simmed_plays_destroy(SimmedPlay **simmed_plays, int num_simmed_plays,
-                          int max_plies) {
+                          int num_plies) {
   if (!simmed_plays) {
     return;
   }
   for (int i = 0; i < num_simmed_plays; i++) {
-    for (int j = 0; j < max_plies; j++) {
+    for (int j = 0; j < num_plies; j++) {
       stat_destroy(simmed_plays[i]->bingo_stat[j]);
       stat_destroy(simmed_plays[i]->score_stat[j]);
     }
-    free(simmed_plays[i]->bingo_stat);
-    free(simmed_plays[i]->score_stat);
     stat_destroy(simmed_plays[i]->equity_stat);
     stat_destroy(simmed_plays[i]->leftover_stat);
     stat_destroy(simmed_plays[i]->win_pct_stat);
@@ -95,10 +116,10 @@ void sim_results_destroy_internal(SimResults *sim_results) {
     return;
   }
   simmed_plays_destroy(sim_results->simmed_plays, sim_results->num_simmed_plays,
-                       sim_results->max_plies);
+                       sim_results->num_plies);
   sim_results->simmed_plays = NULL;
-  free(sim_results->sorted_simmed_plays);
-  sim_results->sorted_simmed_plays = NULL;
+  free(sim_results->simmed_play_display_infos);
+  sim_results->simmed_play_display_infos = NULL;
 }
 
 void sim_results_destroy(SimResults *sim_results) {
@@ -107,6 +128,7 @@ void sim_results_destroy(SimResults *sim_results) {
   }
   sim_results_destroy_internal(sim_results);
   bai_result_destroy(sim_results->bai_result);
+  string_builder_destroy(sim_results->display_string_builder);
   free(sim_results);
 }
 
@@ -134,23 +156,19 @@ void sim_results_set_simmed_plays_initialized(SimResults *sim_results,
 }
 
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
-                       int max_plies, uint64_t seed) {
+                       int num_plies, uint64_t seed) {
   sim_results_destroy_internal(sim_results);
 
   const int num_simmed_plays = move_list_get_count(move_list);
 
   sim_results->simmed_plays =
-      simmed_plays_create(move_list, num_simmed_plays, max_plies, seed);
+      simmed_plays_create(move_list, num_simmed_plays, num_plies, seed);
 
-  // Copy simmed_plays to sorted_simmed_plays
-  sim_results->sorted_simmed_plays =
-      malloc_or_die(sizeof(SimmedPlay *) * num_simmed_plays);
-  for (int i = 0; i < num_simmed_plays; i++) {
-    sim_results->sorted_simmed_plays[i] = sim_results->simmed_plays[i];
-  }
+  sim_results->simmed_play_display_infos =
+      malloc_or_die(sizeof(SimmedPlayDisplayInfo) * num_simmed_plays);
 
   sim_results->num_simmed_plays = num_simmed_plays;
-  sim_results->max_plies = max_plies;
+  sim_results->num_plies = num_plies;
   sim_results->iteration_count = 0;
   atomic_init(&sim_results->node_count, 0);
   sim_results_set_simmed_plays_initialized(sim_results, true);
@@ -159,13 +177,15 @@ void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
 SimResults *sim_results_create(void) {
   SimResults *sim_results = malloc_or_die(sizeof(SimResults));
   sim_results->num_simmed_plays = 0;
-  sim_results->max_plies = 0;
+  sim_results->num_plies = 0;
   sim_results->iteration_count = 0;
   atomic_init(&sim_results->node_count, 0);
   sim_results->simmed_plays_initialized = false;
   cpthread_mutex_init(&sim_results->simmed_plays_mutex);
+  cpthread_mutex_init(&sim_results->display_mutex);
   sim_results->simmed_plays = NULL;
-  sim_results->sorted_simmed_plays = NULL;
+  sim_results->simmed_play_display_infos = NULL;
+  sim_results->display_string_builder = string_builder_create();
   sim_results->bai_result = bai_result_create();
   return sim_results;
 }
@@ -219,8 +239,8 @@ int sim_results_get_number_of_plays(const SimResults *sim_results) {
   return sim_results->num_simmed_plays;
 }
 
-int sim_results_get_max_plies(const SimResults *sim_results) {
-  return sim_results->max_plies;
+int sim_results_get_num_plies(const SimResults *sim_results) {
+  return sim_results->num_plies;
 }
 
 int sim_results_get_node_count(const SimResults *sim_results) {
@@ -242,11 +262,6 @@ void sim_results_set_iteration_count(SimResults *sim_results, uint64_t count) {
 SimmedPlay *sim_results_get_simmed_play(const SimResults *sim_results,
                                         const int index) {
   return sim_results->simmed_plays[index];
-}
-
-SimmedPlay *sim_results_get_sorted_simmed_play(SimResults *sim_results,
-                                               int index) {
-  return sim_results->sorted_simmed_plays[index];
 }
 
 BAIResult *sim_results_get_bai_result(const SimResults *sim_results) {
@@ -313,9 +328,40 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
   return wpct;
 }
 
-int compare_simmed_plays(const void *a, const void *b) {
-  const SimmedPlay *play_a = *(const SimmedPlay **)a;
-  const SimmedPlay *play_b = *(const SimmedPlay **)b;
+void sim_results_write_to_display_info(SimResults *sim_results,
+                                       const int simmed_play_index) {
+  SimmedPlay *simmed_play =
+      sim_results_get_simmed_play(sim_results, simmed_play_index);
+  SimmedPlayDisplayInfo *simmed_play_display_info =
+      &sim_results->simmed_play_display_infos[simmed_play_index];
+  const int num_plies = sim_results_get_num_plies(sim_results);
+  cpthread_mutex_lock(&simmed_play->mutex);
+  move_copy(&simmed_play_display_info->move, simmed_play->move);
+  for (int i = 0; i < num_plies; i++) {
+    const Stat *bingo_stat = simmed_play_get_bingo_stat(simmed_play, i);
+    const Stat *score_stat = simmed_play_get_score_stat(simmed_play, i);
+    simmed_play_display_info->bingo_means[i] = stat_get_mean(bingo_stat);
+    simmed_play_display_info->bingo_stdevs[i] = stat_get_stdev(bingo_stat);
+    simmed_play_display_info->score_means[i] = stat_get_mean(score_stat);
+    simmed_play_display_info->score_stdevs[i] = stat_get_stdev(score_stat);
+  }
+  simmed_play_display_info->equity_mean =
+      stat_get_mean(simmed_play->equity_stat);
+  simmed_play_display_info->equity_stdev =
+      stat_get_stdev(simmed_play->equity_stat);
+  simmed_play_display_info->win_pct_mean =
+      stat_get_mean(simmed_play->win_pct_stat);
+  simmed_play_display_info->win_pct_stdev =
+      stat_get_stdev(simmed_play->win_pct_stat);
+  simmed_play_display_info->is_epigon = simmed_play->is_epigon;
+  simmed_play_display_info->niters =
+      stat_get_num_samples(simmed_play->equity_stat);
+  cpthread_mutex_unlock(&simmed_play->mutex);
+}
+
+int compare_simmed_play_display_infos(const void *a, const void *b) {
+  const SimmedPlayDisplayInfo *play_a = (const SimmedPlayDisplayInfo *)a;
+  const SimmedPlayDisplayInfo *play_b = (const SimmedPlayDisplayInfo *)b;
 
   if (play_a->is_epigon && !play_b->is_epigon) {
     return 1;
@@ -325,38 +371,83 @@ int compare_simmed_plays(const void *a, const void *b) {
   }
 
   // Compare the mean values of win_pct_stat
-  double mean_a = stat_get_mean(play_a->win_pct_stat);
-  double mean_b = stat_get_mean(play_b->win_pct_stat);
-
-  if (mean_a > mean_b) {
+  if (play_a->win_pct_mean > play_b->win_pct_mean) {
     return -1;
   }
-  if (mean_a < mean_b) {
+  if (play_a->win_pct_mean < play_b->win_pct_mean) {
     return 1;
   }
   // If win_pct_stat->mean values are equal, compare equity_stat->mean
-  double equity_mean_a = stat_get_mean(play_a->equity_stat);
-  double equity_mean_b = stat_get_mean(play_b->equity_stat);
-
-  if (equity_mean_a > equity_mean_b) {
+  if (play_a->equity_mean > play_b->equity_mean) {
     return -1;
   }
-  if (equity_mean_a < equity_mean_b) {
+  if (play_a->equity_mean < play_b->equity_mean) {
     return 1;
   }
   return 0;
 }
 
-// Sorts the sorted_simmed_plays and leaves the simmed_plays unchanged.
-// Returns true if the plays were successfully sorted.
-// Returns false if the plays have not been created yet.
-// Not thread safe. Must be called with a lock on the simmed plays mutex
-// during multithreaded simming.
-bool sim_results_sort_plays_by_win_rate(SimResults *sim_results) {
-  if (!sim_results->simmed_plays || !sim_results->sorted_simmed_plays) {
-    return false;
+char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
+                     bool best_known_play) {
+  bool success = sim_results_get_simmed_plays_initialized(sim_results);
+  if (!success) {
+    return string_duplicate("sim not started yet\n");
   }
-  qsort(sim_results->sorted_simmed_plays, sim_results->num_simmed_plays,
-        sizeof(SimmedPlay *), compare_simmed_plays);
-  return true;
+
+  cpthread_mutex_lock(&sim_results->display_mutex);
+
+  int number_of_simmed_plays = sim_results_get_number_of_plays(sim_results);
+  for (int i = 0; i < number_of_simmed_plays; i++) {
+    sim_results_write_to_display_info(sim_results, i);
+  }
+
+  qsort(sim_results->simmed_play_display_infos, number_of_simmed_plays,
+        sizeof(SimmedPlayDisplayInfo), compare_simmed_play_display_infos);
+
+  const LetterDistribution *ld = game_get_ld(game);
+  const Board *board = game_get_board(game);
+  const int num_plies = sim_results_get_num_plies(sim_results);
+  string_builder_clear(sim_results->display_string_builder);
+  for (int i = 0; i < number_of_simmed_plays; i++) {
+    const SimmedPlayDisplayInfo *sp_dinfo =
+        &sim_results->simmed_play_display_infos[i];
+    const Move *move = &sp_dinfo->move;
+    string_builder_add_string(sim_results->display_string_builder,
+                              "info currmove ");
+    string_builder_add_ucgi_move(sim_results->display_string_builder, move,
+                                 board, ld);
+    const bool is_epigon = sp_dinfo->is_epigon;
+    string_builder_add_formatted_string(
+        sim_results->display_string_builder,
+        " sc %d wp %.3f stdev %.3f eq %.3f eqe %.3f it %llu "
+        "ig %d ",
+        equity_to_int(move_get_score(move)), sp_dinfo->win_pct_mean,
+        sp_dinfo->win_pct_stdev, sp_dinfo->equity_mean, sp_dinfo->equity_stdev,
+        // need cast for WASM:
+        (long long unsigned int)sp_dinfo->niters, is_epigon);
+    for (int j = 0; j < num_plies; j++) {
+      string_builder_add_formatted_string(
+          sim_results->display_string_builder,
+          "ply%d-scm %.3f ply%d-scd %.3f ply%d-bp %.3f ", j + 1,
+          sp_dinfo->score_means[j], j + 1, sp_dinfo->score_stdevs[j], j + 1,
+          sp_dinfo->bingo_means[j] * 100.0);
+    }
+    string_builder_add_string(sim_results->display_string_builder, "\n");
+  }
+
+  if (best_known_play) {
+    string_builder_add_string(sim_results->display_string_builder, "bestmove ");
+  } else {
+    string_builder_add_string(sim_results->display_string_builder,
+                              "bestsofar ");
+  }
+  string_builder_add_ucgi_move(sim_results->display_string_builder,
+                               &sim_results->simmed_play_display_infos[0].move,
+                               board, ld);
+  cpthread_mutex_unlock(&sim_results->display_mutex);
+  string_builder_add_formatted_string(sim_results->display_string_builder,
+                                      "\ninfo nps %f\n", nps);
+  char *sim_stats_string =
+      string_builder_dump(sim_results->display_string_builder, NULL);
+  return sim_stats_string;
 }

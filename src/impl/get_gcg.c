@@ -61,7 +61,6 @@ char *get_xt_gcg_string(const char *identifier, ErrorStack *error_stack) {
     game_id_str[game_id_str_len] = '\0';
   }
 
-  printf("got game id str: >%s<\n", game_id_str);
   char *gcg_content = NULL;
 
   // Get first 3 digits for the path
