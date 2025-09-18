@@ -12,6 +12,7 @@
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/stats.h"
+#include "../src/ent/xoshiro.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/util/io_util.h"

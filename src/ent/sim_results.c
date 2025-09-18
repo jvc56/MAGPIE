@@ -5,9 +5,12 @@
 #include "../def/sim_defs.h"
 #include "../str/move_string.h"
 #include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "bai_result.h"
+#include "board.h"
 #include "equity.h"
 #include "game.h"
+#include "letter_distribution.h"
 #include "move.h"
 #include "stats.h"
 #include "win_pct.h"
@@ -16,6 +19,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 struct SimmedPlay {
   Move *move;

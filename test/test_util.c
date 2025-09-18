@@ -865,7 +865,7 @@ void assert_simmed_plays_are_equal(const SimmedPlay *sp1, const SimmedPlay *sp2,
 }
 
 // NOT THREAD SAFE
-void assert_sim_results_equal(SimResults *sr1, SimResults *sr2) {
+void assert_sim_results_equal(const SimResults *sr1, const SimResults *sr2) {
   assert(sim_results_get_num_plies(sr1) == sim_results_get_num_plies(sr2));
   assert(sim_results_get_number_of_plays(sr1) ==
          sim_results_get_number_of_plays(sr2));

@@ -31,7 +31,6 @@
 #include "../ent/win_pct.h"
 #include "../str/game_string.h"
 #include "../str/move_string.h"
-#include "../str/sim_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "autoplay.h"

@@ -35,7 +35,7 @@ typedef struct SimResults SimResults;
 
 SimResults *sim_results_create(void);
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
-                       int max_plies, uint64_t seed);
+                       int num_plies, uint64_t seed);
 void sim_results_destroy(SimResults *sim_results);
 
 int sim_results_get_number_of_plays(const SimResults *sim_results);
@@ -54,5 +54,5 @@ bool sim_results_get_simmed_plays_initialized(SimResults *sim_results);
 void sim_results_set_simmed_plays_initialized(SimResults *sim_results,
                                               bool value);
 char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
-                     bool print_best_play);
+                     bool best_known_play);
 #endif
