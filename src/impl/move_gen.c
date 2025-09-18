@@ -28,7 +28,6 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/static_eval.h"
-#include "../str/game_string.h"
 #include "../util/io_util.h"
 #include "wmp_move_gen.h"
 #include <assert.h>
