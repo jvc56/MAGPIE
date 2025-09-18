@@ -26,6 +26,7 @@ typedef struct Anchor {
   // Note that WMP currently requires BOARD_DIM <= 16
   unsigned tiles_to_play : 4;
   unsigned playthrough_blocks : 4;
+  unsigned word_length : 4;
   unsigned leftmost_start_col : 4;
   unsigned rightmost_start_col : 4;
 
@@ -60,7 +61,7 @@ static inline void anchor_heap_add_unheaped_wmp_anchor(
     AnchorHeap *ah, uint8_t row, uint8_t col, uint8_t last_anchor_col,
     uint8_t leftmost_start_col, uint8_t rightmost_start_col,
     uint8_t dir, Equity highest_possible_equity, Equity highest_possible_score,
-    int tiles_to_play, int playthrough_blocks) {
+    int tiles_to_play, int playthrough_blocks, int word_length) {
   const int i = ah->count;
   ah->anchors[i].row = row;
   ah->anchors[i].col = col;
@@ -72,6 +73,7 @@ static inline void anchor_heap_add_unheaped_wmp_anchor(
   ah->anchors[i].highest_possible_score = highest_possible_score;
   ah->anchors[i].tiles_to_play = tiles_to_play;
   ah->anchors[i].playthrough_blocks = playthrough_blocks;
+  ah->anchors[i].word_length = word_length;
   ah->count++;
 }
 
