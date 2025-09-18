@@ -1,3 +1,4 @@
+import difflib
 import os
 import re
 import sys
@@ -141,7 +142,7 @@ def format_c_or_h_file(filepath: str, write_changes: bool) -> Tuple[bool, bool]:
             print(f"Warning: 'clang-format-18' not found. Skipping external formatting for '{filepath}'.")
         except subprocess.CalledProcessError as e:
             print(f"Error applying clang-format-18 to temporary file for '{filepath}': {e.stderr.decode().strip()}")
-            # If clang-format fails, we still proceed with my script's output for comparison
+            # If clang-format-18 fails, we still proceed with my script's output for comparison
             # or writing, but log the error. The content of temp_file might be unchanged.
 
         # Read the content back from the temporary file after clang-format has potentially modified it
@@ -170,7 +171,19 @@ def format_c_or_h_file(filepath: str, write_changes: bool) -> Tuple[bool, bool]:
             print(f"No changes needed for '{filepath}'.")
     else: # Default mode: compare only
         if has_diff:
-            print(f"Differences detected in '{filepath}'.")
+            print(f"Differences detected in '{filepath}':\n")
+            original_lines = original_content_str.splitlines(keepends=True)
+            final_lines = final_formatted_content_str.splitlines(keepends=True)
+            diff_lines = difflib.unified_diff(
+                original_lines,
+                final_lines,
+                fromfile=f"{filepath} (original)",
+                tofile=f"{filepath} (formatted)",
+                lineterm=""
+            )
+            for dl in diff_lines:
+                # Write directly so large diffs don't use extra buffering/newlines
+                sys.stdout.write(dl + "\n")
         else:
             print(f"No differences detected in '{filepath}'.")
 

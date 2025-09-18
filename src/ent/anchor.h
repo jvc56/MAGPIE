@@ -58,8 +58,8 @@ anchor_heap_add_unheaped_anchor(AnchorHeap *ah, uint8_t row, uint8_t col,
 // Appends anchors to the end of the list without any comparisons.
 static inline void anchor_heap_add_unheaped_wmp_anchor(
     AnchorHeap *ah, uint8_t row, uint8_t col, uint8_t last_anchor_col,
-    uint8_t leftmost_start_col, uint8_t rightmost_start_col,
-    uint8_t dir, Equity highest_possible_equity, Equity highest_possible_score,
+    uint8_t leftmost_start_col, uint8_t rightmost_start_col, uint8_t dir,
+    Equity highest_possible_equity, Equity highest_possible_score,
     int tiles_to_play, int playthrough_blocks, int word_length) {
   const int i = ah->count;
   ah->anchors[i].row = row;
