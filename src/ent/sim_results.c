@@ -356,8 +356,8 @@ void sim_results_write_to_display_info(SimResults *sim_results,
 }
 
 int compare_simmed_play_display_infos(const void *a, const void *b) {
-  const SimmedPlayDisplayInfo *play_a = *(const SimmedPlayDisplayInfo **)a;
-  const SimmedPlayDisplayInfo *play_b = *(const SimmedPlayDisplayInfo **)b;
+  const SimmedPlayDisplayInfo *play_a = (const SimmedPlayDisplayInfo *)a;
+  const SimmedPlayDisplayInfo *play_b = (const SimmedPlayDisplayInfo *)b;
 
   if (play_a->is_epigon && !play_b->is_epigon) {
     return 1;
@@ -387,7 +387,7 @@ char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
                      bool best_known_play) {
   bool success = sim_results_get_simmed_plays_initialized(sim_results);
   if (!success) {
-    return string_duplicate("sim not started yet");
+    return string_duplicate("sim not started yet\n");
   }
 
   cpthread_mutex_lock(&sim_results->display_mutex);
@@ -403,6 +403,7 @@ char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
   const LetterDistribution *ld = game_get_ld(game);
   const Board *board = game_get_board(game);
   const int num_plies = sim_results_get_num_plies(sim_results);
+  string_builder_clear(sim_results->display_string_builder);
   for (int i = 0; i < number_of_simmed_plays; i++) {
     const SimmedPlayDisplayInfo *sp_dinfo =
         &sim_results->simmed_play_display_infos[i];
@@ -444,6 +445,5 @@ char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
                                       "\ninfo nps %f\n", nps);
   char *sim_stats_string =
       string_builder_dump(sim_results->display_string_builder, NULL);
-  string_builder_destroy(sim_results->display_string_builder);
   return sim_stats_string;
 }

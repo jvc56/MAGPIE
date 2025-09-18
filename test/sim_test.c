@@ -29,21 +29,34 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-const SimmedPlay *get_best_simmed_play(const SimResults *sim_results) {
+int get_best_simmed_play_index(const SimResults *sim_results) {
   const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
   if (num_simmed_plays == 0) {
-    return NULL;
+    return -1;
   }
-  const SimmedPlay *best_simmed_play =
-      sim_results_get_simmed_play(sim_results, 0);
-  for (int i = 1; i < num_simmed_plays; i++) {
+  int best_play_index = -1;
+  const SimmedPlay *best_simmed_play = NULL;
+  for (int i = 0; i < num_simmed_plays; i++) {
     const SimmedPlay *simmed_play = sim_results_get_simmed_play(sim_results, i);
-    if (stat_get_mean(simmed_play_get_win_pct_stat(simmed_play)) >
-        stat_get_mean(simmed_play_get_win_pct_stat(best_simmed_play))) {
+    if (simmed_play_get_is_epigon(simmed_play)) {
+      continue;
+    }
+    if (!best_simmed_play ||
+        stat_get_mean(simmed_play_get_win_pct_stat(simmed_play)) >
+            stat_get_mean(simmed_play_get_win_pct_stat(best_simmed_play))) {
       best_simmed_play = simmed_play;
+      best_play_index = i;
     }
   }
-  return best_simmed_play;
+  return best_play_index;
+}
+
+const SimmedPlay *get_best_simmed_play(const SimResults *sim_results) {
+  const int best_play_index = get_best_simmed_play_index(sim_results);
+  if (best_play_index < 0) {
+    return NULL;
+  }
+  return sim_results_get_simmed_play(sim_results, best_play_index);
 }
 
 void test_sim_error_cases(void) {
@@ -434,7 +447,7 @@ void test_sim_with_inference(void) {
 void test_play_similarity(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all "
-      "-plies 2 -threads 10 -it 1200 -minp 20 -scond none -pfreq 100");
+      "-plies 2 -threads 10 -it 1200 -minp 50 -scond none -pfreq 100");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 ACEIRST");
   load_and_exec_config_or_die(config, "gen");
@@ -447,13 +460,17 @@ void test_play_similarity(void) {
 
   // The BAI should have marked inferior plays in the same position as the best
   // play as epigons.
-  const Move *best_play =
-      simmed_play_get_move(get_best_simmed_play(sim_results));
+  const int best_play_index = get_best_simmed_play_index(sim_results);
+  const Move *best_play = simmed_play_get_move(
+      sim_results_get_simmed_play(sim_results, best_play_index));
   const int best_play_col = move_get_col_start(best_play);
   const int best_play_row = move_get_row_start(best_play);
   const int best_play_length = move_get_tiles_length(best_play);
   const int num_plays = sim_results_get_number_of_plays(sim_results);
-  for (int i = 1; i < num_plays; i++) {
+  for (int i = 0; i < num_plays; i++) {
+    if (i == best_play_index) {
+      continue;
+    }
     const SimmedPlay *play_i = sim_results_get_simmed_play(sim_results, i);
     const Move *move_i = simmed_play_get_move(play_i);
     if (move_get_col_start(move_i) == best_play_col &&

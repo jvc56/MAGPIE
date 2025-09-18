@@ -1259,7 +1259,7 @@ char *impl_show(Config *config, ErrorStack *error_stack) {
 void execute_show(Config *config, ErrorStack *error_stack) {
   char *result = impl_show(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
-    printf("%s\n", result);
+    thread_control_print(config->thread_control, result);
   }
   free(result);
 }
@@ -1423,7 +1423,7 @@ char *impl_load_gcg(Config *config, ErrorStack *error_stack) {
 void execute_load_gcg(Config *config, ErrorStack *error_stack) {
   char *result = impl_load_gcg(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
-    printf("%s\n", result);
+    thread_control_print(config->thread_control, result);
   }
   free(result);
 }
@@ -1456,8 +1456,7 @@ char *impl_next(Config *config, ErrorStack *error_stack) {
 void execute_next(Config *config, ErrorStack *error_stack) {
   char *result = impl_next(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
-    // FIXME: replace all printfs in config.c
-    printf("%s\n", result);
+    thread_control_print(config->thread_control, result);
   }
   free(result);
 }
@@ -1489,7 +1488,7 @@ char *impl_previous(Config *config, ErrorStack *error_stack) {
 void execute_previous(Config *config, ErrorStack *error_stack) {
   char *result = impl_previous(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
-    printf("%s\n", result);
+    thread_control_print(config->thread_control, result);
   }
   free(result);
 }
@@ -1530,7 +1529,7 @@ char *impl_goto(Config *config, ErrorStack *error_stack) {
 void execute_goto(Config *config, ErrorStack *error_stack) {
   char *result = impl_goto(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
-    printf("%s\n", result);
+    thread_control_print(config->thread_control, result);
   }
   free(result);
 }

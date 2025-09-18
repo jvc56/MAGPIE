@@ -169,19 +169,25 @@ void assert_command_status_and_output(Config *config, const char *command,
 
   ErrorStack *error_stack = error_stack_create();
 
+  printf("Running command: %s\n", command);
   execute_command_async(config, error_stack, command);
 
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
   }
 
+  printf("napping\n");
+
   // Let the async command start up
   ctime_nap(DEFAULT_NAP_TIME);
+  printf("done napping\n");
 
   if (should_exit) {
+    printf("attempt to exit, getting stats\n");
     char *status_string = command_search_status(config, true);
     free(status_string);
   }
+  printf("blocking for search\n");
   block_for_search(config, seconds_to_wait);
 
   fclose_or_die(errorout_fh);

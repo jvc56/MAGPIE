@@ -50,18 +50,18 @@ void simulate(SimArgs *sim_args, SimResults *sim_results,
       sim_results_get_bai_result(sim_results));
 
   sim_results_set_iteration_count(sim_results, rvs_get_total_samples(rvs));
-  // The simmed plays are still initialized and can be printed, but
-  // we set this false here in preparation for the next sim command
-  // which may have to free the simmed plays during recreation.
-  // This setting will prevent status queries from accessing NULL
-  // or invalid simmed plays.
-  sim_results_set_simmed_plays_initialized(sim_results, false);
 
   print_ucgi_sim_stats(
       sim_args->game, sim_results, sim_args->thread_control,
       (double)sim_results_get_node_count(sim_results) /
           thread_control_get_seconds_elapsed(sim_args->thread_control),
       true);
+  // The simmed plays are still initialized and can be printed, but
+  // we set this false here in preparation for the next sim command
+  // which may have to free the simmed plays during recreation.
+  // This setting will prevent status queries from accessing NULL
+  // or invalid simmed plays.
+  sim_results_set_simmed_plays_initialized(sim_results, false);
 
   // FIXME: once simming is part of autoplay, we will want to prevent these
   // repeated alloc and deallocs if possible
