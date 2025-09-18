@@ -1,7 +1,6 @@
 
 #include "../ent/game.h"
 #include "../ent/sim_results.h"
-#include "../ent/stats.h"
 #include "../ent/thread_control.h"
 #include <stdbool.h>
 #include <stdint.h>

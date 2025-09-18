@@ -107,7 +107,7 @@ void assert_game_matches_cgp(const Game *game, const char *expected_cgp,
 void assert_stats_are_equal(const Stat *s1, const Stat *s2);
 void assert_simmed_plays_stats_are_equal(const SimmedPlay *sp1,
                                          const SimmedPlay *sp2, int max_plies);
-void assert_sim_results_equal(SimResults *sr1, SimResults *sr2);
+void assert_sim_results_equal(const SimResults *sr1, const SimResults *sr2);
 void assert_klvs_equal(const KLV *klv1, const KLV *klv2);
 void assert_word_count(const LetterDistribution *ld,
                        const DictionaryWordList *words,
