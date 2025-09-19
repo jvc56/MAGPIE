@@ -23,6 +23,7 @@ void test_macondo_opening_equity_adjustments(void) {
   const MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
+      .thread_index = 0,
       .max_equity_diff = 0,
   };
 
@@ -103,6 +104,7 @@ void test_macondo_endgame_equity_adjustments(void) {
   const MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
+      .thread_index = 0,
       .max_equity_diff = 0,
   };
 

@@ -163,5 +163,5 @@ int main(int argc, char *argv[]) {
         BOARD_DIM, DEFAULT_BOARD_DIM, DEFAULT_SUPER_BOARD_DIM);
   }
 
-  fileproxy_destroy_cache();
+  caches_destroy();
 }

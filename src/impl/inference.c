@@ -50,6 +50,7 @@ typedef struct Inference {
   Equity equity_margin;
   uint64_t current_rack_index;
   uint64_t total_racks_evaluated;
+  int thread_index;
   uint64_t *shared_rack_index;
   cpthread_mutex_t *shared_rack_index_lock;
   // Rack containing just the unknown leave, which is
@@ -136,8 +137,8 @@ void evaluate_possible_leave(Inference *inference) {
         klv_get_leave_value(inference->klv, inference->current_target_leave);
   }
 
-  const Move *top_move =
-      get_top_equity_move(inference->game, inference->move_list);
+  const Move *top_move = get_top_equity_move(
+      inference->game, inference->thread_index, inference->move_list);
   const bool is_within_equity_margin = inference->target_score +
                                            current_leave_value +
                                            inference->equity_margin >=
@@ -234,6 +235,9 @@ Inference *inference_create(const Rack *target_played_tiles, Game *game,
   inference->equity_margin = double_to_equity(equity_margin);
   inference->current_rack_index = 0;
   inference->total_racks_evaluated = 0;
+  // thread index is only meaningful for
+  // duplicated inferences used in multithreading
+  inference->thread_index = -1;
   // move_list is only needed for duplicated inferences
   inference->move_list = NULL;
 
@@ -282,7 +286,7 @@ Inference *inference_create(const Rack *target_played_tiles, Game *game,
   return inference;
 }
 
-Inference *inference_duplicate(const Inference *inference,
+Inference *inference_duplicate(const Inference *inference, int thread_index,
                                ThreadControl *thread_control) {
   Inference *new_inference = malloc_or_die(sizeof(Inference));
   new_inference->game = game_duplicate(inference->game);
@@ -314,6 +318,7 @@ Inference *inference_duplicate(const Inference *inference,
 
   // Multithreading
   new_inference->thread_control = thread_control;
+  new_inference->thread_index = thread_index;
 
   return new_inference;
 }
@@ -439,7 +444,7 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
       malloc_or_die((sizeof(cpthread_t)) * (number_of_threads));
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     inferences_for_workers[thread_index] =
-        inference_duplicate(inference, thread_control);
+        inference_duplicate(inference, thread_index, thread_control);
     set_shared_variables_for_inference(inferences_for_workers[thread_index],
                                        &shared_rack_index,
                                        &shared_rack_index_lock);
@@ -608,4 +613,5 @@ void infer(InferenceArgs *args, InferenceResults *results,
 
   game_destroy(game);
   inference_destroy(inference);
+  gen_destroy_cache();
 }

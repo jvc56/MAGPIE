@@ -187,6 +187,7 @@ int generate_stm_plays(EndgameSolverWorker *worker) {
       .move_record_type = MOVE_RECORD_ALL_SMALL,
       .move_sort_type = MOVE_SORT_SCORE,
       .override_kwg = worker->solver->pruned_kwg,
+      .thread_index = worker->thread_index,
       .max_equity_diff = 0,
   };
   generate_moves(&args);

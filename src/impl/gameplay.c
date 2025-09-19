@@ -400,19 +400,21 @@ void generate_moves_for_game(const MoveGenArgs *args) {
       .move_record_type = player_get_move_record_type(player_on_turn),
       .move_sort_type = player_get_move_sort_type(player_on_turn),
       .override_kwg = NULL,
+      .thread_index = args->thread_index,
       .max_equity_diff = args->max_equity_diff,
   };
 
   generate_moves(&args_with_overwritten_record_and_sort);
 }
 
-Move *get_top_equity_move(Game *game, MoveList *move_list) {
+Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
   const MoveGenArgs args = {
       .game = game,
       .move_list = move_list,
       .move_record_type = MOVE_RECORD_BEST,
       .move_sort_type = MOVE_SORT_EQUITY,
       .override_kwg = NULL,
+      .thread_index = thread_index,
       .max_equity_diff = 0,
   };
   generate_moves(&args);

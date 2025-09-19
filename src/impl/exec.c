@@ -192,6 +192,11 @@ char *create_command_from_args(int argc, char *argv[]) {
   return command_string;
 }
 
+void caches_destroy(void) {
+  gen_destroy_cache();
+  fileproxy_destroy_cache();
+}
+
 void process_command_internal(int argc, char *argv[], const char *data_paths) {
   log_set_level(LOG_FATAL);
   ErrorStack *error_stack = error_stack_create();
@@ -201,7 +206,7 @@ void process_command_internal(int argc, char *argv[], const char *data_paths) {
     char *initial_command_string = create_command_from_args(argc, argv);
     command_scan_loop(config, error_stack, initial_command_string);
     free(initial_command_string);
-    fileproxy_destroy_cache();
+    caches_destroy();
   } else {
     error_stack_print_and_reset(error_stack);
   }

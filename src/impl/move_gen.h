@@ -134,15 +134,20 @@ typedef struct MoveGenArgs {
   move_record_t move_record_type;
   move_sort_t move_sort_type;
   Equity max_equity_diff;
+  int thread_index;
   MoveList *move_list;
   const KWG *override_kwg;
 } MoveGenArgs;
+
+void gen_destroy_cache(void);
 
 // If override_kwg is NULL, the full KWG for the on-turn player is used,
 // but if it is nonnull, override_kwg is used. The only use case for this
 // so far is using a reduced wordlist kwg (done with wordprune) for endgame
 // solving.
 void generate_moves(const MoveGenArgs *args);
+
+MoveGen *get_movegen(int thread_index);
 
 void gen_load_position(MoveGen *gen, const MoveGenArgs *args);
 

@@ -784,6 +784,7 @@ void impl_move_gen(Config *config, ErrorStack *error_stack) {
   const MoveGenArgs args = {
       .game = config->game,
       .move_list = ml,
+      .thread_index = 0,
       .max_equity_diff = config->max_equity_diff,
   };
   generate_moves_for_game(&args);

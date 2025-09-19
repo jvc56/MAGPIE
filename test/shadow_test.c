@@ -22,9 +22,8 @@ void load_and_shadow(Game *game, const Player *player, const char *cgp,
 
   load_cgp_or_die(game, cgp);
   rack_set_to_string(ld, player_rack, rack);
-  MoveGen gen;
-  generate_anchors_for_test(game, &gen);
-  extract_sorted_anchors_for_test(sorted_anchors, &gen);
+  generate_anchors_for_test(game);
+  extract_sorted_anchors_for_test(sorted_anchors);
   Equity previous_equity = EQUITY_MAX_VALUE;
   const int number_of_anchors = sorted_anchors->count;
   for (int i = 0; i < number_of_anchors; i++) {
@@ -42,6 +41,7 @@ void load_and_generate_moves(Game *game, MoveList *move_list,
   const MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
+      .thread_index = 0,
       .max_equity_diff = 0,
   };
 

@@ -176,6 +176,7 @@ void postgen_prebroadcast_func(void *data) {
 }
 
 typedef struct AutoplayWorker {
+  int worker_index;
   const AutoplayArgs *args;
   AutoplayResults *autoplay_results;
   AutoplaySharedData *shared_data;
@@ -185,9 +186,11 @@ typedef struct AutoplayWorker {
 
 AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
                                        const AutoplayResults *target,
+                                       int worker_index,
                                        AutoplaySharedData *shared_data) {
   AutoplayWorker *autoplay_worker = malloc_or_die(sizeof(AutoplayWorker));
   autoplay_worker->args = args;
+  autoplay_worker->worker_index = worker_index;
   autoplay_worker->autoplay_results =
       autoplay_results_create_empty_copy(target);
   autoplay_worker->prng = NULL;
@@ -332,6 +335,7 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
   const int player_on_turn_index = game_get_player_on_turn_index(game);
   LeavegenSharedData *lg_shared_data =
       game_runner->shared_data->leavegen_shared_data;
+  const int thread_index = autoplay_worker->worker_index;
   // If we are forcing a draw, we need to draw a rare leave. The drawn
   // leave does not necessarily fit in the bag. If we've reached the
   // target minimum leave count for all leaves, no rare leave can be
@@ -352,13 +356,14 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     // Set the rack to the rare leave
     rack_copy(player_rack, &rare_rack_or_move_leave);
 
-    const Move *forced_move = get_top_equity_move(game, game_runner->move_list);
+    const Move *forced_move =
+        get_top_equity_move(game, thread_index, game_runner->move_list);
     rack_list_add_rack(lg_shared_data->rack_list, &rare_rack_or_move_leave,
                        equity_to_double(move_get_equity(forced_move)));
 
     rack_copy(player_rack, &original_rack);
   }
-  *move = get_top_equity_move(game, game_runner->move_list);
+  *move = get_top_equity_move(game, thread_index, game_runner->move_list);
 
   if (lg_shared_data) {
     rack_list_add_rack(lg_shared_data->rack_list, player_rack,
@@ -633,8 +638,8 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
       malloc_or_die((sizeof(cpthread_t)) * (number_of_threads));
 
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
-    autoplay_workers[thread_index] =
-        autoplay_worker_create(args, autoplay_results, shared_data);
+    autoplay_workers[thread_index] = autoplay_worker_create(
+        args, autoplay_results, thread_index, shared_data);
     autoplay_results_list[thread_index] =
         autoplay_workers[thread_index]->autoplay_results;
     cpthread_create(&worker_ids[thread_index], autoplay_worker,
@@ -674,4 +679,5 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
       autoplay_results, args->human_readable, show_divergent_results);
   thread_control_print(thread_control, autoplay_results_string);
   free(autoplay_results_string);
+  gen_destroy_cache();
 }
