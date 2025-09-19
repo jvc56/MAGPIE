@@ -45,33 +45,9 @@
 // be expensive. The infer and sim functions
 // don't have this problem since they are
 // only called once per command.
-static MoveGen *cached_gens[MAX_THREADS];
+static MoveGen cached_gens[MAX_THREADS];
 
-MoveGen *generator_create(void) {
-  MoveGen *generator = malloc_or_die(sizeof(MoveGen));
-  return generator;
-}
-
-void generator_destroy(MoveGen *gen) {
-  if (!gen) {
-    return;
-  }
-  free(gen);
-}
-
-MoveGen *get_movegen(int thread_index) {
-  if (!cached_gens[thread_index]) {
-    cached_gens[thread_index] = generator_create();
-  }
-  return cached_gens[thread_index];
-}
-
-void gen_destroy_cache(void) {
-  for (int i = 0; i < (MAX_THREADS); i++) {
-    generator_destroy(cached_gens[i]);
-    cached_gens[i] = NULL;
-  }
-}
+MoveGen *get_movegen(int thread_index) { return &cached_gens[thread_index]; }
 
 // Cache getter functions
 

@@ -139,8 +139,6 @@ typedef struct MoveGenArgs {
   const KWG *override_kwg;
 } MoveGenArgs;
 
-void gen_destroy_cache(void);
-
 // If override_kwg is NULL, the full KWG for the on-turn player is used,
 // but if it is nonnull, override_kwg is used. The only use case for this
 // so far is using a reduced wordlist kwg (done with wordprune) for endgame

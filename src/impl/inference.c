@@ -613,5 +613,4 @@ void infer(InferenceArgs *args, InferenceResults *results,
 
   game_destroy(game);
   inference_destroy(inference);
-  gen_destroy_cache();
 }
