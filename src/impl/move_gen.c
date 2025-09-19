@@ -549,8 +549,8 @@ void record_wmp_plays_for_word(MoveGen *gen, int subrack_idx, int start_col,
   }
   bool can_be_unblanked;
   bool can_be_blanked;
-  get_blank_possibilities(gen, nonplaythrough_tiles, pos,
-                          &can_be_unblanked, &can_be_blanked);
+  get_blank_possibilities(gen, nonplaythrough_tiles, pos, &can_be_unblanked,
+                          &can_be_blanked);
   if (can_be_unblanked) {
     record_wmp_plays_for_word(gen, subrack_idx, start_col, blanks_so_far,
                               pos + 1);
