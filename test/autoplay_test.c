@@ -250,8 +250,8 @@ void test_autoplay_wmp_correctness(void) {
   // both the WMP and KWG data lists so we only test lexica that have both.
   StringList *lex_names = string_list_create();
   const int wmp_count = string_list_get_count(wmp_files);
-  for (int wi = 0; wi < wmp_count; wi++) {
-    const char *wmp_path = string_list_get_string(wmp_files, wi);
+  for (int wmp_idx = 0; wmp_idx < wmp_count; wmp_idx++) {
+    const char *wmp_path = string_list_get_string(wmp_files, wmp_idx);
     const char *slash = strrchr(wmp_path, '/');
     const char *wmp_name = slash ? slash + 1 : wmp_path;
     const char *dot = strrchr(wmp_name, '.');
@@ -263,8 +263,8 @@ void test_autoplay_wmp_correctness(void) {
     /* Check if a matching KWG exists for this base name */
     const int kwg_count = string_list_get_count(kwg_files);
     bool found_kwg = false;
-    for (int ki = 0; ki < kwg_count; ki++) {
-      const char *kwg_path = string_list_get_string(kwg_files, ki);
+    for (int kwg_idx = 0; kwg_idx < kwg_count; kwg_idx++) {
+      const char *kwg_path = string_list_get_string(kwg_files, kwg_idx);
       const char *kslash = strrchr(kwg_path, '/');
       const char *kwg_name = kslash ? kslash + 1 : kwg_path;
       const char *kdot = strrchr(kwg_name, '.');
@@ -277,9 +277,8 @@ void test_autoplay_wmp_correctness(void) {
 
     if (found_kwg) {
       string_list_add_string(lex_names, base);
-    } else {
-      free(base);
     }
+    free(base);
   }
 
   // Iterate over lex_names (those that have both .wmp and .kwg)
@@ -303,7 +302,16 @@ void test_autoplay_wmp_correctness(void) {
     char *res =
         autoplay_results_to_string(config_get_autoplay_results(c), false, true);
     const char *expected_zero = "autoplay games 0";
-    assert(has_substring(res, expected_zero));
+    if (!has_substring(res, expected_zero)) {
+      fprintf(stderr, "autoplay divergence detected for lex %s:\n%s\n", lex,
+              res ? res : "(no output)");
+      free(res);
+      string_list_destroy(kwg_files);
+      string_list_destroy(wmp_files);
+      string_list_destroy(lex_names);
+      error_stack_destroy(error_stack);
+      assert(false);
+    }
     free(res);
 
     config_destroy(c);
