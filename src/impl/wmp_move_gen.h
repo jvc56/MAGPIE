@@ -318,7 +318,6 @@ wmp_move_gen_set_playthrough_bit_rack(WMPMoveGen *wmp_move_gen,
       blocks_found++;
     }
   }
-
   assert(blocks_found == anchor->playthrough_blocks);
 }
 
