@@ -1,4 +1,5 @@
 #include "../src/ent/autoplay_results.h"
+#include "../src/ent/data_filepaths.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/klv.h"
@@ -232,11 +233,93 @@ void test_autoplay_leaves_record(void) {
   config_destroy(csw_config);
 }
 
+// Check wmp movegen correctness by comparing results in gamepair autoplay to
+// the legacy recursive_gen algorithm. Auto-discovers .wmp lexica under the
+// configured data paths so the test stays in sync with available data.
+void test_autoplay_wmp_correctness(void) {
+  ErrorStack *error_stack = error_stack_create();
+  StringList *wmp_files = data_filepaths_get_all_data_path_names(
+      DEFAULT_TEST_DATA_PATH, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
+  StringList *kwg_files = data_filepaths_get_all_data_path_names(
+      DEFAULT_TEST_DATA_PATH, DATA_FILEPATH_TYPE_KWG, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const int pairs_per_lex = 1000;
+
+  // Build a list of lexicon names (basename without extension) that exist in
+  // both the WMP and KWG data lists so we only test lexica that have both.
+  StringList *lex_names = string_list_create();
+  const int wmp_count = string_list_get_count(wmp_files);
+  for (int wi = 0; wi < wmp_count; wi++) {
+    const char *wmp_path = string_list_get_string(wmp_files, wi);
+    const char *slash = strrchr(wmp_path, '/');
+    const char *wmp_name = slash ? slash + 1 : wmp_path;
+    const char *dot = strrchr(wmp_name, '.');
+    const int len = dot ? (int)(dot - wmp_name) : (int)strlen(wmp_name);
+    char *base = malloc_or_die(len + 1);
+    memcpy(base, wmp_name, len);
+    base[len] = '\0';
+
+    /* Check if a matching KWG exists for this base name */
+    const int kwg_count = string_list_get_count(kwg_files);
+    bool found_kwg = false;
+    for (int ki = 0; ki < kwg_count; ki++) {
+      const char *kwg_path = string_list_get_string(kwg_files, ki);
+      const char *kslash = strrchr(kwg_path, '/');
+      const char *kwg_name = kslash ? kslash + 1 : kwg_path;
+      const char *kdot = strrchr(kwg_name, '.');
+      const int klen = kdot ? (int)(kdot - kwg_name) : (int)strlen(kwg_name);
+      if (klen == len && strncmp(kwg_name, base, len) == 0) {
+        found_kwg = true;
+        break;
+      }
+    }
+
+    if (found_kwg) {
+      string_list_add_string(lex_names, base);
+    } else {
+      free(base);
+    }
+  }
+
+  // Iterate over lex_names (those that have both .wmp and .kwg)
+  const int num_lexes = string_list_get_count(lex_names);
+  for (int i = 0; i < num_lexes; i++) {
+    const char *lex = string_list_get_string(lex_names, i);
+
+    // Configure player 1 to use WMP and player 2 not to. Use game pairs.
+    char *config_cmd = get_formatted_string(
+        "set -lex %s -s1 equity -s2 equity -r1 all -r2 "
+        "all -numplays 1 -gp true -w1 true -w2 false -threads 4",
+        lex);
+    Config *c = config_create_or_die(config_cmd);
+    free(config_cmd);
+
+    char *autocmd = get_formatted_string("autoplay games %d -seed %d -gp true",
+                                         pairs_per_lex, 1000 + i);
+    load_and_exec_config_or_die(c, autocmd);
+    free(autocmd);
+
+    char *res =
+        autoplay_results_to_string(config_get_autoplay_results(c), false, true);
+    const char *expected_zero = "autoplay games 0";
+    assert(has_substring(res, expected_zero));
+    free(res);
+
+    config_destroy(c);
+  }
+
+  string_list_destroy(kwg_files);
+  string_list_destroy(wmp_files);
+  string_list_destroy(lex_names);
+  error_stack_destroy(error_stack);
+}
+
 void test_autoplay(void) {
   test_odds_that_player_is_better();
   test_autoplay_default();
   test_autoplay_leavegen();
   test_autoplay_divergent_games();
+  test_autoplay_wmp_correctness();
   test_autoplay_win_pct_record();
   test_autoplay_leaves_record();
 }
