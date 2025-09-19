@@ -1232,7 +1232,7 @@ void movegen_one_tile_nonwmp(void) {
       .move_record_type = MOVE_RECORD_ALL,
       .move_sort_type = MOVE_SORT_SCORE,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   SortedMoveList *sml = NULL;
@@ -1275,7 +1275,7 @@ void movegen_one_tile_wmp(void) {
       .move_record_type = MOVE_RECORD_ALL,
       .move_sort_type = MOVE_SORT_SCORE,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   SortedMoveList *sml = NULL;
