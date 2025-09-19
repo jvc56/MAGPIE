@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 void test_odds_that_player_is_better(void) {
   assert(within_epsilon(odds_that_player_is_better(0.6, 10), 73.645537));
