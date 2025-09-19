@@ -44,7 +44,7 @@ set_playthrough_marked_from_string(MoveGen *gen, const LetterDistribution *ld,
     if (c == '.') {
       gen->playthrough_marked[i] = PLAYED_THROUGH_MARKER;
     } else {
-      char tmp[2] = {c, '\0'};
+      const char tmp[2] = {c, '\0'};
       gen->playthrough_marked[i] = ld_hl_to_ml(ld, tmp);
     }
   }
