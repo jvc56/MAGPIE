@@ -20,17 +20,12 @@
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 
-/* Expose internal helper used by tests */
+/* Expose internal helper from move_gen.c to use in tests */
 void get_blank_possibilities(const MoveGen *gen,
                              const BitRack *nonplaythrough_tiles,
                              int current_pos, int blanks_so_far,
                              bool *can_be_unblanked, bool *can_be_blanked);
 
-/* Test helper: set gen->playthrough_marked from a human-readable string.
-   Use '.' in the string to indicate a playthrough tile (PLAYED_THROUGH_MARKER).
-   Example: "NATURAL" or "N.TU.AL" (dots mark played-through squares).
-   This also sets gen->wmp_move_gen.word_length to the string length.
-*/
 static inline void
 set_playthrough_marked_from_string(MoveGen *gen, const LetterDistribution *ld,
                                    const char *s) {
