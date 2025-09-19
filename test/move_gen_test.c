@@ -20,7 +20,6 @@
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 
-/* Expose internal helper from move_gen.c to use in tests */
 void get_blank_possibilities(const MoveGen *gen,
                              const BitRack *nonplaythrough_tiles,
                              int current_pos, int blanks_so_far,
