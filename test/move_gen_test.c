@@ -3,6 +3,7 @@
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/ent/bit_rack.h"
 #include "../src/ent/board.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
