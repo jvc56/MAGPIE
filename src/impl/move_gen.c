@@ -39,40 +39,6 @@
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
-// Cache move generators since destroying
-// and recreating a movegen for
-// every request to generate moves would
-// be expensive. The infer and sim functions
-// don't have this problem since they are
-// only called once per command.
-static MoveGen *cached_gens[MAX_THREADS];
-
-MoveGen *generator_create(void) {
-  MoveGen *generator = malloc_or_die(sizeof(MoveGen));
-  return generator;
-}
-
-void generator_destroy(MoveGen *gen) {
-  if (!gen) {
-    return;
-  }
-  free(gen);
-}
-
-MoveGen *get_movegen(int thread_index) {
-  if (!cached_gens[thread_index]) {
-    cached_gens[thread_index] = generator_create();
-  }
-  return cached_gens[thread_index];
-}
-
-void gen_destroy_cache(void) {
-  for (int i = 0; i < (MAX_THREADS); i++) {
-    generator_destroy(cached_gens[i]);
-    cached_gens[i] = NULL;
-  }
-}
-
 // Cache getter functions
 
 static inline MachineLetter gen_cache_get_letter(const MoveGen *gen, int col) {
@@ -1888,16 +1854,16 @@ void gen_record_pass(MoveGen *gen) {
 }
 
 void generate_moves(const MoveGenArgs *args) {
-  MoveGen *gen = get_movegen(args->thread_index);
-  gen_load_position(gen, args);
-  gen_look_up_leaves_and_record_exchanges(gen);
+  MoveGen gen;
+  gen_load_position(&gen, args);
+  gen_look_up_leaves_and_record_exchanges(&gen);
 
-  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+  if (wmp_move_gen_is_active(&gen.wmp_move_gen)) {
     wmp_move_gen_check_nonplaythrough_existence(
-        &gen->wmp_move_gen, gen->number_of_tiles_in_bag > 0, &gen->leave_map);
+        &gen.wmp_move_gen, gen.number_of_tiles_in_bag > 0, &gen.leave_map);
   }
 
-  gen_shadow(gen);
-  gen_record_scoring_plays(gen);
-  gen_record_pass(gen);
+  gen_shadow(&gen);
+  gen_record_scoring_plays(&gen);
+  gen_record_pass(&gen);
 }

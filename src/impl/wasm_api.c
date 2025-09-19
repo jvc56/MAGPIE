@@ -141,7 +141,6 @@ char *static_evaluation(const char *cgpstr, int num_plays) {
       .move_record_type = MOVE_RECORD_ALL,
       .move_sort_type = MOVE_SORT_EQUITY,
       .override_kwg = NULL,
-      .thread_index = 0,
       .max_equity_diff = 0,
   };
   generate_moves(&args);

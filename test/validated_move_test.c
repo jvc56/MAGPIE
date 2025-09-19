@@ -631,7 +631,6 @@ void test_validated_move_distinct_kwg(void) {
   const MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .max_equity_diff = 0,
   };
 

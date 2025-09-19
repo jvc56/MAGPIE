@@ -15,6 +15,7 @@
 #include "../src/ent/sim_results.h"
 #include "../src/ent/validated_move.h"
 #include "../src/impl/config.h"
+#include "../src/impl/move_gen.h"
 #include <stdbool.h>
 
 #define TRIVIAL_CROSS_SET_STRING "*"
@@ -131,8 +132,8 @@ void assert_validated_moves_challenge_points(const ValidatedMoves *vms, int i,
 void assert_anchor_equity_int(const AnchorHeap *ah, int i, int expected);
 void assert_anchor_equity_exact(const AnchorHeap *ah, int i, Equity expected);
 void assert_anchor_score(const AnchorHeap *ah, int i, int expected);
-void generate_anchors_for_test(Game *game);
-void extract_sorted_anchors_for_test(AnchorHeap *sorted_anchors);
+void generate_anchors_for_test(Game *game, MoveGen *gen);
+void extract_sorted_anchors_for_test(AnchorHeap *sorted_anchors, MoveGen *gen);
 void set_klv_leave_value(const KLV *klv, const LetterDistribution *ld,
                          const char *rack_str, Equity equity);
 #endif

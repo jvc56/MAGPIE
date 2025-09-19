@@ -122,7 +122,6 @@ void assert_opening_penalties(Game *game, const char *data_paths,
   const MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .max_equity_diff = 0,
   };
   generate_moves_for_game(&move_gen_args);
