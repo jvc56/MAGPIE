@@ -456,7 +456,7 @@ void record_wmp_play(MoveGen *gen, int start_col, Equity leave_value) {
   int word_multiplier = 1;
   for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
     const int board_col = letter_idx + start_col;
-    uint8_t ml = gen->playthrough_marked[letter_idx];
+    MachineLetter ml = gen->playthrough_marked[letter_idx];
     if (ml != PLAYED_THROUGH_MARKER) {
       const int tile_score = get_is_blanked(ml) ? 0 : gen->tile_scores[ml];
       const BonusSquare bonus_square =
@@ -489,53 +489,44 @@ void record_wmp_play(MoveGen *gen, int start_col, Equity leave_value) {
 
 void get_blank_possibilities(const MoveGen *gen,
                              const BitRack *nonplaythrough_tiles,
-                             int current_pos, int blanks_so_far,
-                             bool *can_be_unblanked, bool *can_be_blanked) {
-  const uint8_t ml = gen->playthrough_marked[current_pos];
-  assert(ml != PLAYED_THROUGH_MARKER);
-  assert(!get_is_blanked(ml));
-  assert(blanks_so_far >= 0);
-  const int number_of_ml_in_subrack =
-      bit_rack_get_letter(nonplaythrough_tiles, ml);
-  const int num_blanks =
-      bit_rack_get_letter(nonplaythrough_tiles, BLANK_MACHINE_LETTER);
-  int number_of_ml_before_current_pos = 0;
-  for (int pos = 0; pos < current_pos; pos++) {
-    if (gen->playthrough_marked[pos] == PLAYED_THROUGH_MARKER) {
+                             int current_pos, bool *can_be_unblanked,
+                             bool *can_be_blanked) {
+  const MachineLetter target_letter = gen->playthrough_marked[current_pos];
+  const int count_of_target_letter_in_subrack =
+      bit_rack_get_letter(nonplaythrough_tiles, target_letter);
+
+  int count_before_current_pos = 0;
+  int count_at_or_after_current_pos = 0;
+  for (int pos = 0; pos < gen->wmp_move_gen.word_length; pos++) {
+    const MachineLetter playthrough_letter = gen->playthrough_marked[pos];
+    if (playthrough_letter == PLAYED_THROUGH_MARKER ||
+        get_is_blanked(playthrough_letter)) {
+      // Previously placed board tiles and already-blanked letters do not
+      // consume non-blank tiles from the subrack.
       continue;
     }
-    if (get_is_blanked(ml)) {
+    if (playthrough_letter != target_letter) {
       continue;
     }
-    if (gen->playthrough_marked[pos] == ml) {
-      number_of_ml_before_current_pos++;
+    if (pos < current_pos) {
+      count_before_current_pos++;
+    } else {
+      count_at_or_after_current_pos++;
     }
   }
-  assert(number_of_ml_before_current_pos <=
-         (number_of_ml_in_subrack + num_blanks));
-  int number_of_ml_at_or_after_current_pos = 0;
-  for (int pos = current_pos; pos < gen->wmp_move_gen.word_length; pos++) {
-    if (gen->playthrough_marked[pos] == PLAYED_THROUGH_MARKER) {
-      continue;
-    }
-    assert(!get_is_blanked(gen->playthrough_marked[pos]));
-    if (gen->playthrough_marked[pos] == ml) {
-      number_of_ml_at_or_after_current_pos++;
-    }
-  }
-  const int total_ml_in_word =
-      number_of_ml_before_current_pos + number_of_ml_at_or_after_current_pos;
-  assert(total_ml_in_word <= (number_of_ml_in_subrack + num_blanks));
-  const int word_ml_in_excess = total_ml_in_word - number_of_ml_in_subrack;
-  const int ml_remaining_on_rack =
-      number_of_ml_in_subrack - number_of_ml_before_current_pos;
-  const int remaining_ml_in_excess =
-      number_of_ml_at_or_after_current_pos - ml_remaining_on_rack;
-  assert(remaining_ml_in_excess >= 0);
-  *can_be_unblanked =
-      (ml_remaining_on_rack > 0) &&
-      (remaining_ml_in_excess < number_of_ml_at_or_after_current_pos);
-  *can_be_blanked = word_ml_in_excess > 0;
+
+  const int total_nonblank_in_word =
+      count_before_current_pos + count_at_or_after_current_pos;
+
+  // We can place a non-blank tile here if we have one left on the subrack
+  // after accounting for the ones required before this position.
+  const int target_letter_remaining_on_rack =
+      count_of_target_letter_in_subrack - count_before_current_pos;
+  *can_be_unblanked = target_letter_remaining_on_rack > 0;
+
+  // We can (and must) use a blank for this letter if the number of non-blank
+  // tiles required by the word exceeds what is available on the subrack.
+  *can_be_blanked = total_nonblank_in_word > count_of_target_letter_in_subrack;
 }
 
 void record_wmp_plays_for_word(MoveGen *gen, int subrack_idx, int start_col,
@@ -550,7 +541,7 @@ void record_wmp_plays_for_word(MoveGen *gen, int subrack_idx, int start_col,
     return;
   }
   assert(pos < wgen->word_length);
-  const uint8_t ml = gen->playthrough_marked[pos];
+  const MachineLetter ml = gen->playthrough_marked[pos];
   if (ml == PLAYED_THROUGH_MARKER) {
     record_wmp_plays_for_word(gen, subrack_idx, start_col, blanks_so_far,
                               pos + 1);
@@ -558,7 +549,7 @@ void record_wmp_plays_for_word(MoveGen *gen, int subrack_idx, int start_col,
   }
   bool can_be_unblanked;
   bool can_be_blanked;
-  get_blank_possibilities(gen, nonplaythrough_tiles, pos, blanks_so_far,
+  get_blank_possibilities(gen, nonplaythrough_tiles, pos,
                           &can_be_unblanked, &can_be_blanked);
   if (can_be_unblanked) {
     record_wmp_plays_for_word(gen, subrack_idx, start_col, blanks_so_far,
@@ -575,12 +566,12 @@ void record_wmp_plays_for_word(MoveGen *gen, int subrack_idx, int start_col,
 bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
                                                int start_col) {
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
-  const uint8_t *word = wmp_move_gen_get_word(wgen, word_idx);
+  const MachineLetter *word = wmp_move_gen_get_word(wgen, word_idx);
   for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
     const int board_col = start_col + letter_idx;
     assert(board_col < BOARD_DIM);
     assert(board_col >= 0);
-    const uint8_t word_letter = word[letter_idx];
+    const MachineLetter word_letter = word[letter_idx];
     if (gen_cache_is_empty(gen, board_col)) {
       if (!board_is_letter_allowed_in_cross_set(
               gen_cache_get_cross_set(gen, board_col), word_letter)) {
@@ -589,7 +580,7 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
       gen->playthrough_marked[letter_idx] = word_letter;
       continue;
     }
-    const uint8_t board_letter =
+    const MachineLetter board_letter =
         get_unblanked_machine_letter(gen_cache_get_letter(gen, board_col));
     assert(board_letter != ALPHABET_EMPTY_SQUARE_MARKER);
     if (board_letter != word_letter) {

@@ -48,7 +48,7 @@ typedef struct WMPMoveGen {
   int playthrough_blocks;
   int playthrough_blocks_copy;
 
-  uint8_t buffer[WMP_RESULT_BUFFER_SIZE];
+  MachineLetter buffer[WMP_RESULT_BUFFER_SIZE];
   int tiles_to_play;
   int word_length;
   int num_words;
@@ -385,7 +385,7 @@ static inline void wmp_move_gen_add_anchors(WMPMoveGen *wmp_move_gen, int row,
   }
 }
 
-static inline const uint8_t *
+static inline const MachineLetter *
 wmp_move_gen_get_word(const WMPMoveGen *wmp_move_gen, int word_idx) {
   return wmp_move_gen->buffer + word_idx * wmp_move_gen->word_length;
 }

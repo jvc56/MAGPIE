@@ -28,11 +28,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Expose internal helper from move_gen.c to use in tests
-void get_blank_possibilities(const MoveGen *gen,
-                             const BitRack *nonplaythrough_tiles,
-                             int current_pos, int blanks_so_far,
-                             bool *can_be_unblanked, bool *can_be_blanked);
+ // Expose internal helper from move_gen.c to use in tests
+ void get_blank_possibilities(const MoveGen *gen,
+                              const BitRack *nonplaythrough_tiles,
+                              int current_pos,
+                              bool *can_be_unblanked, bool *can_be_blanked);
 
 static inline void
 set_playthrough_marked_from_string(MoveGen *gen, const LetterDistribution *ld,
@@ -1324,8 +1324,8 @@ void wmp_blank_possibilities_natural(void) {
   for (int pos = 0; pos < 7; pos++) {
     bool can_be_unblanked = false;
     bool can_be_blanked = false;
-    get_blank_possibilities(gen, &nonplay_bitrack, pos, 0, &can_be_unblanked,
-                            &can_be_blanked);
+    get_blank_possibilities(gen, &nonplay_bitrack, pos,
+                            &can_be_unblanked, &can_be_blanked);
     // There are no blanks on the rack, so of course none of the letters can be
     // blanked, and all of them can (must) be unblanked.
     assert(can_be_unblanked);
@@ -1355,8 +1355,8 @@ void wmp_blank_possibilities_blanked(void) {
   for (int pos = 0; pos < 7; pos++) {
     bool can_be_unblanked = false;
     bool can_be_blanked = false;
-    get_blank_possibilities(gen, &nonplay_bitrack, pos, 0, &can_be_unblanked,
-                            &can_be_blanked);
+    get_blank_possibilities(gen, &nonplay_bitrack, pos,
+                            &can_be_unblanked, &can_be_blanked);
     // 'D' is at position 6 in "BLANKED"
     if (pos == 6) {
       assert(!can_be_unblanked);
@@ -1390,8 +1390,8 @@ void wmp_blank_possibilities_bananas_1(void) {
   // either unblanked or blanked.
   bool can_be_unblanked = false;
   bool can_be_blanked = false;
-  get_blank_possibilities(gen, &nonplay_bitrack, 1, 0, &can_be_unblanked,
-                          &can_be_blanked);
+  get_blank_possibilities(gen, &nonplay_bitrack, 1,
+                          &can_be_unblanked, &can_be_blanked);
   assert(can_be_unblanked);
   assert(can_be_blanked);
 
@@ -1419,8 +1419,8 @@ void wmp_blank_possibilities_bananas_2(void) {
   // another.
   bool can_be_unblanked = false;
   bool can_be_blanked = false;
-  get_blank_possibilities(gen, &nonplay_bitrack, 3, 0, &can_be_unblanked,
-                          &can_be_blanked);
+  get_blank_possibilities(gen, &nonplay_bitrack, 3,
+                          &can_be_unblanked, &can_be_blanked);
   assert(can_be_unblanked);
   assert(can_be_blanked);
 
@@ -1447,8 +1447,8 @@ void wmp_blank_possibilities_bananas_3(void) {
   // we've already used both blanks for the first two A's.
   bool can_be_unblanked = false;
   bool can_be_blanked = false;
-  get_blank_possibilities(gen, &nonplay_bitrack, 5, 2, &can_be_unblanked,
-                          &can_be_blanked);
+  get_blank_possibilities(gen, &nonplay_bitrack, 5,
+                          &can_be_unblanked, &can_be_blanked);
   assert(can_be_unblanked);
   assert(!can_be_blanked);
 
@@ -1475,8 +1475,8 @@ void wmp_blank_possibilities_bananas_4(void) {
   // We must use the second blank for this A to use all our blanks.
   bool can_be_unblanked = false;
   bool can_be_blanked = false;
-  get_blank_possibilities(gen, &nonplay_bitrack, 5, 1, &can_be_unblanked,
-                          &can_be_blanked);
+  get_blank_possibilities(gen, &nonplay_bitrack, 5,
+                          &can_be_unblanked, &can_be_blanked);
   assert(!can_be_unblanked);
   assert(can_be_blanked);
 
@@ -1503,8 +1503,8 @@ void wmp_blank_possibilities_bananas_5(void) {
   // 2 on our rack. We must make this A blank.
   bool can_be_unblanked = false;
   bool can_be_blanked = false;
-  get_blank_possibilities(gen, &nonplay_bitrack, 3, 0, &can_be_unblanked,
-                          &can_be_blanked);
+  get_blank_possibilities(gen, &nonplay_bitrack, 3,
+                          &can_be_unblanked, &can_be_blanked);
   assert(!can_be_unblanked);
   assert(can_be_blanked);
 

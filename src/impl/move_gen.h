@@ -126,7 +126,7 @@ typedef struct MoveGen {
   uint8_t num_playthrough_blocks[BOARD_DIM];
   uint8_t max_playthrough_blocks;
   // Used by wordmap_gen to prepare WMP-generated plays for recording.
-  uint8_t playthrough_marked[BOARD_DIM];
+  MachineLetter playthrough_marked[BOARD_DIM];
 } MoveGen;
 
 typedef struct MoveGenArgs {
