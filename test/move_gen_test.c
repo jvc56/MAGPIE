@@ -19,7 +19,15 @@
 #include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
+#include "test_constants.h"
+#include "test_util.h"
+#include <assert.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
+// Expose internal helper from move_gen.c to use in tests
 void get_blank_possibilities(const MoveGen *gen,
                              const BitRack *nonplaythrough_tiles,
                              int current_pos, int blanks_so_far,
@@ -44,14 +52,6 @@ set_playthrough_marked_from_string(MoveGen *gen, const LetterDistribution *ld,
     gen->playthrough_marked[i] = 0;
   }
 }
-
-#include "test_constants.h"
-#include "test_util.h"
-#include <assert.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 int count_scoring_plays(const MoveList *ml) {
   int sum = 0;
