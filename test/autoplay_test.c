@@ -303,8 +303,8 @@ void test_autoplay_wmp_correctness(void) {
         autoplay_results_to_string(config_get_autoplay_results(c), false, true);
     const char *expected_zero = "autoplay games 0";
     if (!has_substring(res, expected_zero)) {
-      fprintf(stderr, "autoplay divergence detected for lex %s:\n%s\n", lex,
-              res ? res : "(no output)");
+      (void)fprintf(stderr, "autoplay divergence detected for lex %s:\n%s\n",
+                    lex, res ? res : "(no output)");
       free(res);
       string_list_destroy(kwg_files);
       string_list_destroy(wmp_files);
