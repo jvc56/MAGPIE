@@ -5,7 +5,7 @@
 #include "../util/io_util.h"
 #include "random_variable.h"
 
-void simulate(const SimArgs *sim_args, SimResults *sim_results,
+void simulate(SimArgs *sim_args, SimResults *sim_results,
               ErrorStack *error_stack);
 
 #endif

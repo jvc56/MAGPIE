@@ -24,7 +24,7 @@ void test_macondo_opening_equity_adjustments(void) {
       .game = game,
       .move_list = move_list,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   rack_set_to_string(ld, rack, "EORSTVX");
@@ -105,7 +105,7 @@ void test_macondo_endgame_equity_adjustments(void) {
       .game = game,
       .move_list = move_list,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   load_cgp_or_die(

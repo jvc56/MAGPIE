@@ -1,6 +1,7 @@
 #include "../src/def/board_defs.h"
 #include "../src/impl/exec.h"
 #include "../src/util/io_util.h"
+#include "alias_method_test.h"
 #include "alphabet_test.h"
 #include "autoplay_test.h"
 #include "bag_test.h"
@@ -29,7 +30,7 @@
 #include "leave_map_test.h"
 #include "leaves_test.h"
 #include "letter_distribution_test.h"
-#include "load_test.h"
+#include "load_gcg_test.h"
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
@@ -88,6 +89,7 @@ static TestEntry test_table[] = {
     {"stats", test_stats},
     {"infer", test_infer},
     {"rv", test_random_variable},
+    {"am", test_alias_method},
     {"sim", test_sim},
     {"math", test_math_util},
     {"bai", test_bai},
@@ -111,7 +113,7 @@ static TestEntry test_table[] = {
     {"endgame", test_endgame},
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},
-    {"load", test_load},
+    {"load", test_load_gcg},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

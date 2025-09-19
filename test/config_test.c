@@ -211,7 +211,6 @@ void test_config_load_success(void) {
   const char *r1 = "all";
   const char *s2 = "equity";
   const char *r2 = "best";
-  double equity_margin = 4.6;
   int num_plays = 10;
   int plies = 4;
   int max_iterations = 400;
@@ -224,15 +223,15 @@ void test_config_load_success(void) {
   string_builder_add_formatted_string(
       test_string_builder,
       "set -ld %s -bb %d -var %s -l1 %s -l2 %s -s1 %s -r1 "
-      "%s -s2 %s -r2 %s -eq %0.2f -numplays %d "
+      "%s -s2 %s -r2 %s  -numplays %d "
       "-plies %d -it "
       "%d -scond %d -seed %d -threads %d -pfreq %d -gp true -hr true "
       "-p1 %s "
       "-p2 "
       "%s",
-      ld_name, bingo_bonus, game_variant, l1, l2, s1, r1, s2, r2, equity_margin,
-      num_plays, plies, max_iterations, stopping_cond, seed, number_of_threads,
-      print_info, p1, p2);
+      ld_name, bingo_bonus, game_variant, l1, l2, s1, r1, s2, r2, num_plays,
+      plies, max_iterations, stopping_cond, seed, number_of_threads, print_info,
+      p1, p2);
 
   load_and_exec_config_or_die(config, string_builder_peek(test_string_builder));
 
@@ -246,7 +245,6 @@ void test_config_load_success(void) {
   assert(players_data_get_move_record_type(config_get_players_data(config),
                                            1) == MOVE_RECORD_BEST);
   assert(config_get_bingo_bonus(config) == bingo_bonus);
-  assert(within_epsilon(config_get_equity_margin(config), equity_margin));
   assert(config_get_num_plays(config) == num_plays);
   assert(config_get_plies(config) == plies);
   assert(config_get_max_iterations(config) == max_iterations);
@@ -268,7 +266,7 @@ void test_config_load_success(void) {
   r1 = "best";
   s2 = "score";
   r2 = "all";
-  plies = 123;
+  plies = 23;
   max_iterations = 6;
   number_of_threads = 9;
   print_info = 850;
@@ -295,7 +293,6 @@ void test_config_load_success(void) {
   assert(players_data_get_move_record_type(config_get_players_data(config),
                                            1) == MOVE_RECORD_ALL);
   assert(config_get_bingo_bonus(config) == bingo_bonus);
-  assert(within_epsilon(config_get_equity_margin(config), equity_margin));
   assert(config_get_num_plays(config) == num_plays);
   assert(config_get_plies(config) == plies);
   assert(config_get_max_iterations(config) == max_iterations);
@@ -350,38 +347,6 @@ void test_config_lexical_data(void) {
   assert_lexical_data(config, "set -lex FRA20", "FRA20", "FRA20", "FRA20",
                       "FRA20", "french");
   config_destroy(config);
-}
-
-void assert_config_exec_status(Config *config, const char *cmd,
-                               error_code_t expected_error_code) {
-  ErrorStack *error_stack = error_stack_create();
-  set_thread_control_status_to_start(config_get_thread_control(config));
-  config_load_command(config, cmd, error_stack);
-  error_code_t load_status = error_stack_top(error_stack);
-
-  // If we expect an error and got it during load, that's the expected result
-  if (load_status != ERROR_STATUS_SUCCESS) {
-    if (load_status != expected_error_code) {
-      printf("config load error types do not match:\nexpected: %d\nactual: "
-             "%d\n>%s<\n",
-             expected_error_code, load_status, cmd);
-      error_stack_print_and_reset(error_stack);
-      abort();
-    }
-    error_stack_destroy(error_stack);
-    return;
-  }
-
-  config_execute_command(config, error_stack);
-  error_code_t actual_error_code = error_stack_top(error_stack);
-  if (actual_error_code != expected_error_code) {
-    printf("config exec error types do not match:\nexpected: %d\nactual: "
-           "%d\n>%s<\n",
-           expected_error_code, actual_error_code, cmd);
-    error_stack_print_and_reset(error_stack);
-    abort();
-  }
-  error_stack_destroy(error_stack);
 }
 
 void test_config_exec_parse_args(void) {
@@ -441,6 +406,17 @@ void test_config_exec_parse_args(void) {
 
   // Simulation
   assert_config_exec_status(config, "gen -numplays 2", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "sim -sinfer true",
+                            ERROR_STATUS_SIM_GAME_HISTORY_MISSING);
+  assert_config_exec_status(config, "set -sinfer false", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "sim AEIN3R -it 1",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  assert_config_exec_status(config, "sim AEIN3R -it 1",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  assert_config_exec_status(config, "sim AEIN3R -it 1",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  assert_config_exec_status(config, "sim AEIN3R -it 1",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   assert_config_exec_status(config, "sim AEIN3R -it 1",
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   assert_config_exec_status(config, "sim -it 1", ERROR_STATUS_SUCCESS);
@@ -449,24 +425,33 @@ void test_config_exec_parse_args(void) {
   // Inference
   assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "infer 0 ABC 14",
-
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
   assert_config_exec_status(config, "infer 3 ABC 14",
-
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
   assert_config_exec_status(config, "infer 1 AB3C 14",
-
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   assert_config_exec_status(config, "infer 1 ABC 1R4",
-
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
   assert_config_exec_status(config, "infer 1 -4",
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   assert_config_exec_status(config, "infer 1 8",
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
   assert_config_exec_status(config, "infer 1 ABC",
-
                             ERROR_STATUS_CONFIG_LOAD_MISSING_ARG);
+  assert_config_exec_status(config, "load testdata/gcgs/muzaks_empyrean.gcg",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "infer", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "infer josh ABCDE 13",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "infer josh ABCDE 13 ABCD",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "infer josh ABCDE 13 ABCD EFG",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "infer josh 3 ABCDE", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "infer josh 3 ABCDE", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "infer josh 3 ABCDE EFG",
+                            ERROR_STATUS_SUCCESS);
   // Autoplay
   assert_config_exec_status(config,
                             "autoplay move 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
@@ -576,7 +561,7 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(config6, "next", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config6, "goto 28",
                             ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE);
-  assert_config_exec_status(config6, "goto 26", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config6, "goto 27", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config6, "next",
                             ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE);
   assert_config_exec_status(config6, "previous", ERROR_STATUS_SUCCESS);

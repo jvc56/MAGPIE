@@ -10,17 +10,13 @@
 #include <stdlib.h>
 
 typedef struct Rack {
-  // counts must be signed for the sake of inference code checking that
-  // these are nonnegative (ERROR_STATUS_INFERENCE_TILES_PLAYED_NOT_IN_BAG)
   uint16_t number_of_letters;
   uint16_t dist_size;
-  int8_t array[MAX_ALPHABET_SIZE];
+  uint16_t array[MAX_ALPHABET_SIZE];
 } Rack;
 
 static inline void rack_reset(Rack *rack) {
-  for (uint16_t i = 0; i < rack->dist_size; i++) {
-    rack->array[i] = 0;
-  }
+  memset(rack->array, 0, sizeof(rack->array));
   rack->number_of_letters = 0;
 }
 
@@ -37,6 +33,11 @@ static inline void rack_copy(Rack *dst, const Rack *src) {
 
 static inline void rack_set_dist_size(Rack *rack, int dist_size) {
   rack->dist_size = dist_size;
+}
+
+static inline void rack_set_dist_size_and_reset(Rack *rack, int dist_size) {
+  rack->dist_size = dist_size;
+  rack_reset(rack);
 }
 
 static inline Rack *rack_duplicate(const Rack *rack) {
@@ -56,7 +57,7 @@ static inline uint16_t rack_get_dist_size(const Rack *rack) {
   return rack->dist_size;
 }
 
-static inline int8_t rack_get_letter(const Rack *rack, MachineLetter ml) {
+static inline uint16_t rack_get_letter(const Rack *rack, MachineLetter ml) {
   return rack->array[ml];
 }
 
@@ -72,7 +73,8 @@ static inline bool racks_are_equal(const Rack *rack1, const Rack *rack2) {
   if (!rack1 && !rack2) {
     return true;
   }
-  if (!rack1 || !rack2 || rack1->dist_size != rack2->dist_size) {
+  if (!rack1 || !rack2 || rack1->dist_size != rack2->dist_size ||
+      rack1->number_of_letters != rack2->number_of_letters) {
     return false;
   }
   for (int i = 0; i < rack1->dist_size; i++) {
@@ -93,10 +95,9 @@ static inline bool rack_subtract(Rack *rack_to_update,
       return false;
     }
     rack_to_update->array[i] =
-        (int8_t)(rack_to_update->array[i] - value_to_sub->array[i]);
+        rack_to_update->array[i] - value_to_sub->array[i];
     rack_to_update->number_of_letters =
-        (uint16_t)(rack_to_update->number_of_letters -
-                   (uint16_t)value_to_sub->array[i]);
+        rack_to_update->number_of_letters - value_to_sub->array[i];
   }
   return true;
 }
@@ -106,23 +107,22 @@ static inline bool rack_subtract(Rack *rack_to_update,
 static inline void rack_subtract_using_floor_zero(Rack *rack_to_update,
                                                   const Rack *value_to_sub) {
   for (uint16_t i = 0; i < rack_to_update->dist_size; i++) {
-    int8_t sub_value = value_to_sub->array[i];
+    uint16_t sub_value = value_to_sub->array[i];
     if (rack_to_update->array[i] < sub_value) {
       sub_value = rack_to_update->array[i];
     }
-    rack_to_update->array[i] = (int8_t)(rack_to_update->array[i] - sub_value);
+    rack_to_update->array[i] = rack_to_update->array[i] - sub_value;
     rack_to_update->number_of_letters =
-        (uint16_t)(rack_to_update->number_of_letters - (uint16_t)sub_value);
+        rack_to_update->number_of_letters - sub_value;
   }
 }
 
 static inline void rack_add(Rack *rack_to_update, const Rack *value_to_add) {
   for (uint16_t i = 0; i < rack_to_update->dist_size; i++) {
     rack_to_update->array[i] =
-        (int8_t)(rack_to_update->array[i] + value_to_add->array[i]);
+        rack_to_update->array[i] + value_to_add->array[i];
     rack_to_update->number_of_letters =
-        (uint16_t)(rack_to_update->number_of_letters +
-                   (uint16_t)value_to_add->array[i]);
+        rack_to_update->number_of_letters + value_to_add->array[i];
   }
 }
 
@@ -131,10 +131,10 @@ static inline void rack_add(Rack *rack_to_update, const Rack *value_to_add) {
 static inline void rack_union(Rack *rack_to_update,
                               const Rack *value_to_union) {
   for (uint16_t i = 0; i < rack_to_update->dist_size; i++) {
-    const int8_t add_value = value_to_union->array[i];
+    const uint16_t add_value = value_to_union->array[i];
     if (rack_to_update->array[i] < add_value) {
-      rack_to_update->array[i] = add_value;
       rack_to_update->number_of_letters += add_value - rack_to_update->array[i];
+      rack_to_update->array[i] = add_value;
     }
   }
 }
@@ -146,8 +146,8 @@ static inline void rack_take_letter(Rack *rack, MachineLetter letter) {
 
 static inline void rack_take_letters(Rack *rack, MachineLetter letter,
                                      int count) {
-  rack->array[letter] = (int8_t)((int)rack->array[letter] - count);
-  rack->number_of_letters = (uint16_t)((int)rack->number_of_letters - count);
+  rack->array[letter] = rack->array[letter] - (uint16_t)count;
+  rack->number_of_letters = rack->number_of_letters - (uint16_t)count;
 }
 
 static inline void rack_add_letter(Rack *rack, MachineLetter letter) {
@@ -157,12 +157,13 @@ static inline void rack_add_letter(Rack *rack, MachineLetter letter) {
 
 static inline void rack_add_letters(Rack *rack, MachineLetter letter,
                                     int count) {
-  rack->array[letter] = (int8_t)((int)rack->array[letter] + count);
-  rack->number_of_letters = (uint16_t)((int)rack->number_of_letters + count);
+  rack->array[letter] = rack->array[letter] + (uint16_t)count;
+  rack->number_of_letters = rack->number_of_letters + (uint16_t)count;
 }
 
 static inline int rack_set_to_string(const LetterDistribution *ld, Rack *rack,
                                      const char *rack_string) {
+  rack->dist_size = ld_get_size(ld);
   rack_reset(rack);
   MachineLetter mls[MAX_RACK_SIZE];
   int num_mls = ld_str_to_mls(ld, rack_string, false, mls, MAX_RACK_SIZE);

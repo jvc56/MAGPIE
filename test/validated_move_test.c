@@ -206,6 +206,14 @@ void test_validated_move_errors(void) {
       game, WORMROOT_CGP, "ex.4", 0, false, true, false,
       ERROR_STATUS_MOVE_VALIDATION_EXCHANGE_INSUFFICIENT_TILES);
 
+  assert_validated_move_error(
+      game, ION_OPENING_CGP, "8I.IZATION", 0, true, false, true,
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_START_COORDS);
+
+  assert_validated_move_error(
+      game, ION_OPENING_CGP, "H9.OW", 0, true, false, true,
+      ERROR_STATUS_MOVE_VALIDATION_INVALID_START_COORDS);
+
   game_destroy(game);
   config_destroy(config);
 }
@@ -217,7 +225,7 @@ void assert_validated_move_played_tiles(const Config *config, const char *cgp,
   Rack *played_tiles = rack_create(ld_get_size(ld));
   ValidatedMoves *vms = assert_validated_move_success(
       config_get_game(config), cgp, ucgi_move, 0, false, true);
-  validated_moves_set_rack_to_played_tiles(vms, 0, played_tiles);
+  validated_moves_set_rack_to_played_letters(vms, 0, played_tiles);
   assert_rack_equals_string(ld, played_tiles, expected_played_tiles);
   rack_destroy(played_tiles);
   validated_moves_destroy(vms);
@@ -632,7 +640,7 @@ void test_validated_move_distinct_kwg(void) {
       .game = game,
       .move_list = move_list,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   const Player *player0 = game_get_player(game, 0);
@@ -648,7 +656,7 @@ void test_validated_move_distinct_kwg(void) {
   rack_set_to_string(ld, player0_rack, "KOPRRSS");
   generate_moves_for_game(&move_gen_args);
   assert_move(game, move_list, NULL, 0, "8H SPORK 32");
-  play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
+  play_move(move_list_get_move(move_list, 0), game, NULL);
 
   // Play SCHIZIER, better than best CSW word of SCHERZI
   vms = validated_moves_create_and_assert_status(
@@ -664,7 +672,7 @@ void test_validated_move_distinct_kwg(void) {
   rack_set_to_string(ld, player1_rack, "CEHIIRZ");
   generate_moves_for_game(&move_gen_args);
   assert_move(game, move_list, NULL, 0, "H8 (S)CHIZIER 146");
-  play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
+  play_move(move_list_get_move(move_list, 0), game, NULL);
 
   // Play WIGGLY, not GOLLYWOG because that's NWL only
   vms = validated_moves_create_and_assert_status(
@@ -680,7 +688,7 @@ void test_validated_move_distinct_kwg(void) {
   rack_set_to_string(ld, player0_rack, "GGLLOWY");
   generate_moves_for_game(&move_gen_args);
   assert_move(game, move_list, NULL, 0, "11G W(I)GGLY 28");
-  play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
+  play_move(move_list_get_move(move_list, 0), game, NULL);
 
   // Play 13C QUEAS(I)ER, not L3 SQUEA(K)ER(Y) because that's CSW only
   vms = validated_moves_create_and_assert_status(

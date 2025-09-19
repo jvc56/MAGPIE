@@ -29,8 +29,11 @@ Equity game_event_get_move_score(const GameEvent *event);
 void game_event_set_cgp_move_string(GameEvent *event, char *cgp_move_string);
 const char *game_event_get_cgp_move_string(const GameEvent *event);
 
-void game_event_set_rack(GameEvent *event, Rack *rack);
-Rack *game_event_get_rack(const GameEvent *event);
+Rack *game_event_get_rack(GameEvent *event);
+const Rack *game_event_get_const_rack(const GameEvent *event);
+
+Rack *game_event_get_after_event_player_on_turn_rack(GameEvent *event);
+Rack *game_event_get_after_event_player_off_turn_rack(GameEvent *event);
 
 void game_event_set_vms(GameEvent *event, ValidatedMoves *vms);
 ValidatedMoves *game_event_get_vms(const GameEvent *event);
@@ -73,12 +76,13 @@ void game_history_set_board_layout_name(GameHistory *history,
                                         const char *board_layout);
 const char *game_history_get_board_layout_name(const GameHistory *history);
 
-int game_history_get_number_of_events(const GameHistory *history);
+int game_history_get_num_events(const GameHistory *history);
+int game_history_get_num_played_events(const GameHistory *game_history);
 
 GameEvent *game_history_get_event(const GameHistory *history, int event_index);
 
-GameEvent *game_history_create_and_add_game_event(GameHistory *game_history,
-                                                  ErrorStack *error_stack);
+GameEvent *game_history_add_game_event(GameHistory *game_history,
+                                       ErrorStack *error_stack);
 
 void game_history_player_set_name(GameHistory *game_history, int player_index,
                                   const char *name);
@@ -89,42 +93,23 @@ void game_history_player_set_nickname(GameHistory *game_history,
                                       int player_index, const char *nickname);
 const char *game_history_player_get_nickname(const GameHistory *game_history,
                                              int player_index);
-void game_history_player_set_score(GameHistory *game_history, int player_index,
-                                   int score);
-Equity game_history_player_get_score(const GameHistory *game_history,
-                                     int player_index);
-
-void game_history_player_set_next_rack_set(GameHistory *game_history,
-                                           int player_index,
-                                           bool next_rack_set);
-bool game_history_player_get_next_rack_set(const GameHistory *game_history,
-                                           int player_index);
-
-void game_history_player_set_last_known_rack(GameHistory *game_history,
-                                             int player_index,
-                                             const Rack *rack);
-Rack *game_history_player_get_last_known_rack(const GameHistory *game_history,
-                                              int player_index);
-
-void game_history_init_player_phony_calc_racks(GameHistory *game_history,
-                                               int ld_size);
-Rack *
-game_history_player_get_known_rack_from_phonies(const GameHistory *game_history,
-                                                int player_index);
-Rack *
-game_history_player_get_previous_played_tiles(const GameHistory *game_history,
-                                              int player_index);
+Rack *game_history_player_get_last_rack(GameHistory *game_history,
+                                        int player_index);
+const Rack *
+game_history_player_get_last_rack_const(const GameHistory *game_history,
+                                        int player_index);
 void game_history_set_player(GameHistory *history, int player_index,
                              const char *player_name,
                              const char *player_nickname);
 bool game_history_player_is_set(const GameHistory *game_history,
                                 int player_index);
 bool game_history_both_players_are_set(const GameHistory *game_history);
+int game_history_get_most_recent_move_event_index(
+    const GameHistory *game_history);
 
-int game_history_get_current_index(const GameHistory *game_history);
 int game_history_next(GameHistory *game_history, ErrorStack *error_stack);
 int game_history_previous(GameHistory *game_history, ErrorStack *error_stack);
-int game_history_goto(GameHistory *game_history, int index,
+int game_history_goto(GameHistory *game_history, int num_events_to_play,
                       ErrorStack *error_stack);
 
 #endif

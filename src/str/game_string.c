@@ -2,6 +2,7 @@
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
+#include "../def/rack_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/bonus_square.h"
@@ -66,7 +67,8 @@ void string_builder_add_player_row(StringBuilder *game_string,
       25 - string_length(display_player_name), "");
   string_builder_add_rack(game_string, player_rack, ld, false);
   string_builder_add_formatted_string(
-      game_string, "%*s%d", 10 - rack_get_total_letters(player_rack), "",
+      game_string, "%*s%d",
+      (RACK_SIZE + 3) - rack_get_total_letters(player_rack), "",
       equity_to_int(player_get_score(player)));
   free(display_player_name);
 }
@@ -147,7 +149,7 @@ void string_builder_add_game(StringBuilder *game_string, const Game *game,
       string_builder_add_bag(game_string, bag, ld);
 
       string_builder_add_formatted_string(game_string, "  %d",
-                                          bag_get_tiles(bag));
+                                          bag_get_letters(bag));
 
     } else if (i - 2 < number_of_moves) {
       string_builder_add_move_with_rank_and_equity(game_string, game, move_list,

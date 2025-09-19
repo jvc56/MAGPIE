@@ -9,6 +9,7 @@
 #include "rack.h"
 #include "validated_move.h"
 #include <stdlib.h>
+#include <string.h>
 
 struct GameEvent {
   game_event_t event_type;
@@ -22,7 +23,9 @@ struct GameEvent {
   // - End rack points
   // - End rack penalty
   Equity score_adjustment;
-  Rack *rack;
+  Rack rack;
+  Rack after_event_player_on_turn_rack;
+  Rack after_event_player_off_turn_rack;
   ValidatedMoves *vms;
   char *note;
 };
@@ -35,10 +38,11 @@ void game_event_reset(GameEvent *game_event) {
   game_event->move_score = 0;
   free(game_event->cgp_move_string);
   game_event->cgp_move_string = NULL;
+  memset(&game_event->rack, 0, sizeof(Rack));
+  memset(&game_event->after_event_player_on_turn_rack, 0, sizeof(Rack));
+  memset(&game_event->after_event_player_off_turn_rack, 0, sizeof(Rack));
   validated_moves_destroy(game_event->vms);
   game_event->vms = NULL;
-  rack_destroy(game_event->rack);
-  game_event->rack = NULL;
   free(game_event->note);
   game_event->note = NULL;
 }
@@ -95,12 +99,19 @@ Equity game_event_get_score_adjustment(const GameEvent *event) {
   return event->score_adjustment;
 }
 
-void game_event_set_rack(GameEvent *event, Rack *rack) {
-  rack_destroy(event->rack);
-  event->rack = rack;
+Rack *game_event_get_rack(GameEvent *event) { return &event->rack; }
+
+const Rack *game_event_get_const_rack(const GameEvent *event) {
+  return &event->rack;
 }
 
-Rack *game_event_get_rack(const GameEvent *event) { return event->rack; }
+Rack *game_event_get_after_event_player_on_turn_rack(GameEvent *event) {
+  return &event->after_event_player_on_turn_rack;
+}
+
+Rack *game_event_get_after_event_player_off_turn_rack(GameEvent *event) {
+  return &event->after_event_player_off_turn_rack;
+}
 
 void game_event_set_vms(GameEvent *event, ValidatedMoves *vms) {
   validated_moves_destroy(event->vms);
@@ -118,6 +129,12 @@ void game_event_set_note(GameEvent *event, const char *note) {
 
 const char *game_event_get_note(const GameEvent *event) { return event->note; }
 
+bool game_event_is_move_type(const GameEvent *event) {
+  return event->event_type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
+         event->event_type == GAME_EVENT_EXCHANGE ||
+         event->event_type == GAME_EVENT_PASS;
+}
+
 // Returns 1 if the game event counts as a turn
 // Returns 0 otherwise
 int game_event_get_turn_value(const GameEvent *event) {
@@ -133,11 +150,8 @@ int game_event_get_turn_value(const GameEvent *event) {
 typedef struct GameHistoryPlayer {
   char *name;
   char *nickname;
-  Equity score;
-  bool next_rack_set;
-  Rack *last_known_rack;
-  Rack *known_rack_from_phonies;
-  Rack *previous_played_tiles;
+  // A dist size of 0 indicates that the rack has not been set
+  Rack last_rack;
 } GameHistoryPlayer;
 
 struct GameHistory {
@@ -148,10 +162,10 @@ struct GameHistory {
   char *lexicon_name;
   char *ld_name;
   char *board_layout_name;
-  int current_index;
+  int num_played_events;
   game_variant_t game_variant;
   GameHistoryPlayer *players[2];
-  int number_of_events;
+  int num_events;
   GameEvent *events;
 };
 
@@ -160,11 +174,6 @@ GameHistoryPlayer *game_history_player_create(const char *name,
   GameHistoryPlayer *player = malloc_or_die(sizeof(GameHistoryPlayer));
   player->name = string_duplicate(name);
   player->nickname = string_duplicate(nickname);
-  player->score = 0;
-  player->next_rack_set = false;
-  player->last_known_rack = NULL;
-  player->known_rack_from_phonies = NULL;
-  player->previous_played_tiles = NULL;
   return player;
 }
 
@@ -174,9 +183,6 @@ void game_history_player_destroy(GameHistoryPlayer *player) {
   }
   free(player->name);
   free(player->nickname);
-  rack_destroy(player->last_known_rack);
-  rack_destroy(player->known_rack_from_phonies);
-  rack_destroy(player->previous_played_tiles);
   free(player);
 }
 
@@ -204,69 +210,15 @@ const char *game_history_player_get_nickname(const GameHistory *game_history,
   return game_history->players[player_index]->nickname;
 }
 
-void game_history_player_set_score(GameHistory *game_history, int player_index,
-                                   Equity score) {
-  GameHistoryPlayer *player = game_history->players[player_index];
-  player->score = score;
+Rack *game_history_player_get_last_rack(GameHistory *game_history,
+                                        int player_index) {
+  return &game_history->players[player_index]->last_rack;
 }
 
-int game_history_player_get_score(const GameHistory *game_history,
-                                  int player_index) {
-  return game_history->players[player_index]->score;
-}
-
-void game_history_player_set_next_rack_set(GameHistory *game_history,
-                                           int player_index,
-                                           bool next_rack_set) {
-  GameHistoryPlayer *player = game_history->players[player_index];
-  player->next_rack_set = next_rack_set;
-}
-
-bool game_history_player_get_next_rack_set(const GameHistory *game_history,
-                                           int player_index) {
-  return game_history->players[player_index]->next_rack_set;
-}
-
-void game_history_player_set_last_known_rack(GameHistory *game_history,
-                                             int player_index,
-                                             const Rack *rack) {
-  GameHistoryPlayer *player = game_history->players[player_index];
-  if (!player->last_known_rack) {
-    player->last_known_rack = rack_duplicate(rack);
-  } else {
-    rack_copy(player->last_known_rack, rack);
-  }
-}
-
-Rack *game_history_player_get_last_known_rack(const GameHistory *game_history,
-                                              int player_index) {
-  return game_history->players[player_index]->last_known_rack;
-}
-
-void game_history_init_player_phony_calc_racks(GameHistory *game_history,
-                                               const int ld_size) {
-  for (int player_index = 0; player_index < 2; player_index++) {
-    GameHistoryPlayer *player = game_history->players[player_index];
-    if (!player->known_rack_from_phonies) {
-      player->known_rack_from_phonies = rack_create(ld_size);
-      player->previous_played_tiles = rack_create(ld_size);
-    } else {
-      rack_reset(player->known_rack_from_phonies);
-      rack_reset(player->previous_played_tiles);
-    }
-  }
-}
-
-Rack *
-game_history_player_get_known_rack_from_phonies(const GameHistory *game_history,
-                                                const int player_index) {
-  return game_history->players[player_index]->known_rack_from_phonies;
-}
-
-Rack *
-game_history_player_get_previous_played_tiles(const GameHistory *game_history,
-                                              const int player_index) {
-  return game_history->players[player_index]->previous_played_tiles;
+const Rack *
+game_history_player_get_last_rack_const(const GameHistory *game_history,
+                                        int player_index) {
+  return &game_history->players[player_index]->last_rack;
 }
 
 bool game_history_player_is_set(const GameHistory *game_history,
@@ -358,10 +310,15 @@ void game_history_set_player(GameHistory *history, int player_index,
                              const char *player_nickname) {
   history->players[player_index] =
       game_history_player_create(player_name, player_nickname);
+  memset(&history->players[player_index]->last_rack, 0, sizeof(Rack));
 }
 
-int game_history_get_number_of_events(const GameHistory *history) {
-  return history->number_of_events;
+int game_history_get_num_events(const GameHistory *history) {
+  return history->num_events;
+}
+
+int game_history_get_num_played_events(const GameHistory *game_history) {
+  return game_history->num_played_events;
 }
 
 GameEvent *game_history_get_event(const GameHistory *history, int event_index) {
@@ -388,8 +345,8 @@ void game_history_reset(GameHistory *game_history) {
     game_history->players[i] = NULL;
   }
   game_history->game_variant = GAME_VARIANT_CLASSIC;
-  game_history->number_of_events = 0;
-  game_history->current_index = 0;
+  game_history->num_events = 0;
+  game_history->num_played_events = 0;
 }
 
 GameHistory *game_history_create(void) {
@@ -420,59 +377,67 @@ void game_history_destroy(GameHistory *game_history) {
   free(game_history);
 }
 
-GameEvent *game_history_create_and_add_game_event(GameHistory *game_history,
-                                                  ErrorStack *error_stack) {
-  if (game_history->number_of_events == MAX_GAME_EVENTS) {
+GameEvent *game_history_add_game_event(GameHistory *game_history,
+                                       ErrorStack *error_stack) {
+  if (game_history->num_events == MAX_GAME_EVENTS) {
     error_stack_push(
         error_stack, ERROR_STATUS_GCG_PARSE_GAME_EVENT_OVERFLOW,
         get_formatted_string("exceeded the maximum number of game events: %d",
                              MAX_GAME_EVENTS));
     return NULL;
   }
-  GameEvent *game_event =
-      &game_history->events[game_history->number_of_events++];
+  GameEvent *game_event = &game_history->events[game_history->num_events++];
   game_event_reset(game_event);
   return game_event;
 }
 
-int game_history_get_current_index(const GameHistory *game_history) {
-  return game_history->current_index;
-}
-
 int game_history_next(GameHistory *game_history, ErrorStack *error_stack) {
-  if (game_history->current_index >= game_history->number_of_events - 1) {
+  if (game_history->num_played_events >= game_history->num_events) {
     error_stack_push(
         error_stack, ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE,
         string_duplicate(
             "already at latest position; there is no next position"));
     return -1;
   }
-  game_history->current_index++;
-  return game_history->current_index;
+  game_history->num_played_events++;
+  return game_history->num_played_events;
 }
 
 int game_history_previous(GameHistory *game_history, ErrorStack *error_stack) {
-  if (game_history->current_index <= 0) {
+  if (game_history->num_played_events <= 0) {
     error_stack_push(
         error_stack, ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE,
         string_duplicate(
             "already at earliest position; there is no previous position"));
     return -1;
   }
-  game_history->current_index--;
-  return game_history->current_index;
+  game_history->num_played_events--;
+  return game_history->num_played_events;
 }
 
-int game_history_goto(GameHistory *game_history, int index,
+int game_history_goto(GameHistory *game_history, int num_events_to_play,
                       ErrorStack *error_stack) {
-  if (index < 0 || index >= game_history->number_of_events) {
+  if (num_events_to_play < 0 || num_events_to_play > game_history->num_events) {
     error_stack_push(
         error_stack, ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE,
         get_formatted_string(
-            "position %d is out of range; the latest position is %d", index,
-            game_history->number_of_events - 1));
+            "position %d is out of range; the latest position is %d",
+            num_events_to_play, game_history->num_events - 1));
     return -1;
   }
-  game_history->current_index = index;
-  return game_history->current_index;
+  game_history->num_played_events = num_events_to_play;
+  return game_history->num_played_events;
+}
+
+int game_history_get_most_recent_move_event_index(
+    const GameHistory *game_history) {
+  if (game_history->num_events == 0) {
+    return -1;
+  }
+  for (int i = game_history->num_played_events - 1; i >= 0; i--) {
+    if (game_event_is_move_type(&game_history->events[i])) {
+      return i;
+    }
+  }
+  return -1;
 }

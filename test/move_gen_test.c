@@ -112,7 +112,7 @@ void assert_move_gen_row(Game *game, MoveList *move_list,
       .game = game,
       .move_list = move_list,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   generate_moves_for_game(&move_gen_args);
@@ -165,7 +165,7 @@ void macondo_tests(void) {
       .game = game,
       .move_list = move_list,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   // TestSimpleRowGen
@@ -419,7 +419,7 @@ void unfound_leave_lookup_test(void) {
       .game = game,
       .move_list = move_list,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   const char cgp[300] = "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 "
@@ -463,7 +463,7 @@ void exchange_tests(void) {
       .move_sort_type = MOVE_SORT_EQUITY,
       .override_kwg = NULL,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   generate_moves(&move_gen_args);
@@ -502,7 +502,7 @@ void movegen_many_moves(void) {
       .game = game,
       .move_list = move_list,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   load_cgp_or_die(game, MANY_MOVES);
@@ -528,7 +528,7 @@ void equity_test(void) {
       .game = game,
       .move_list = move_list,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   player_set_move_sort_type(player, MOVE_SORT_EQUITY);
@@ -579,7 +579,7 @@ void top_equity_play_recorder_test(void) {
       .game = game,
       .move_list = move_list,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   player_set_move_record_type(player, MOVE_RECORD_BEST);
@@ -615,7 +615,7 @@ void small_play_recorder_test(void) {
       .game = game,
       .move_list = move_list,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   player_set_move_record_type(player, MOVE_RECORD_ALL_SMALL);
@@ -678,7 +678,7 @@ void distinct_lexica_test(bool w1) {
       .game = game,
       .move_list = move_list,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   const Player *player0 = game_get_player(game, 0);
@@ -691,7 +691,7 @@ void distinct_lexica_test(bool w1) {
   generate_moves_for_game(&move_gen_args);
   assert_move(game, move_list, NULL, 0, "8H SPORK 32");
 
-  play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
+  play_move(move_list_get_move(move_list, 0), game, NULL);
 
   // Play SCHIZIER, better than best CSW word of SCHERZI
   rack_set_to_string(ld, player1_rack, "CEHIIRZ");
@@ -699,7 +699,7 @@ void distinct_lexica_test(bool w1) {
 
   assert_move(game, move_list, NULL, 0, "H8 (S)CHIZIER 146");
 
-  play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
+  play_move(move_list_get_move(move_list, 0), game, NULL);
 
   // Play WIGGLY, not GOLLYWOG because that's NWL only
   rack_set_to_string(ld, player0_rack, "GGLLOWY");
@@ -707,7 +707,7 @@ void distinct_lexica_test(bool w1) {
 
   assert_move(game, move_list, NULL, 0, "11G W(I)GGLY 28");
 
-  play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
+  play_move(move_list_get_move(move_list, 0), game, NULL);
 
   // Play 13C QUEAS(I)ER, not L3 SQUEA(K)ER(Y) because that's CSW only
   rack_set_to_string(ld, player1_rack, "AEEQRSU");
@@ -809,7 +809,7 @@ void consistent_tiebreaking_test(void) {
       .game = game,
       .move_list = move_list,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   const Player *player0 = game_get_player(game, 0);
@@ -821,7 +821,7 @@ void consistent_tiebreaking_test(void) {
   generate_moves_for_game(&move_gen_args);
   assert_move(game, move_list, NULL, 0, "8D FEVER 30");
 
-  play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
+  play_move(move_list_get_move(move_list, 0), game, NULL);
 
   // Should be NUNcLES instead of NoNFUELS
   rack_set_to_string(ld, player1_rack, "ELNNSU?");
@@ -990,7 +990,7 @@ void movegen_within_x_of_best_test(void) {
       .game = game,
       .move_list = move_list,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
   int all_move_list_count = 0;
   int move_list_count = 0;
@@ -999,7 +999,7 @@ void movegen_within_x_of_best_test(void) {
   player_set_move_record_type(player, MOVE_RECORD_ALL);
   load_cgp_or_die(game, EMPTY_CGP);
   rack_set_to_string(ld, player_get_rack(player), "ZILLION");
-  move_gen_args.max_equity_diff = int_to_equity(1);
+  move_gen_args.eq_margin_movegen = int_to_equity(1);
   generate_moves_for_game(&move_gen_args);
   sml = sorted_move_list_create(move_list);
   all_move_list_count = sml->count;
@@ -1011,7 +1011,7 @@ void movegen_within_x_of_best_test(void) {
 
   load_cgp_or_die(game, EMPTY_CGP);
   rack_set_to_string(ld, player_get_rack(player), "ZILLION");
-  move_gen_args.max_equity_diff = int_to_equity(1);
+  move_gen_args.eq_margin_movegen = int_to_equity(1);
   generate_moves_for_game(&move_gen_args);
   sml = sorted_move_list_create(move_list);
   assert_move(game, NULL, sml, 0, "8D ZILLION 102");
@@ -1022,7 +1022,7 @@ void movegen_within_x_of_best_test(void) {
 
   load_cgp_or_die(game, EMPTY_CGP);
   rack_set_to_string(ld, player_get_rack(player), "ZILLION");
-  move_gen_args.max_equity_diff = int_to_equity(15);
+  move_gen_args.eq_margin_movegen = int_to_equity(15);
   generate_moves_for_game(&move_gen_args);
   sml = sorted_move_list_create(move_list);
   assert_move(game, NULL, sml, 0, "8D ZILLION 102");
@@ -1033,7 +1033,7 @@ void movegen_within_x_of_best_test(void) {
 
   load_cgp_or_die(game, EMPTY_CGP);
   rack_set_to_string(ld, player_get_rack(player), "ZILLION");
-  move_gen_args.max_equity_diff = int_to_equity(25);
+  move_gen_args.eq_margin_movegen = int_to_equity(25);
   generate_moves_for_game(&move_gen_args);
   sml = sorted_move_list_create(move_list);
   assert(sml->count == 7);
@@ -1048,7 +1048,7 @@ void movegen_within_x_of_best_test(void) {
 
   load_cgp_or_die(game, EMPTY_CGP);
   rack_set_to_string(ld, player_get_rack(player), "ZILLION");
-  move_gen_args.max_equity_diff = int_to_equity(75);
+  move_gen_args.eq_margin_movegen = int_to_equity(75);
   generate_moves_for_game(&move_gen_args);
   move_list_count = move_list_get_count(move_list);
   // All placements of ZILLIONS and all placements of ZILL are within 75 equity
@@ -1063,14 +1063,14 @@ void movegen_within_x_of_best_test(void) {
   rack_set_to_string(ld, player_get_rack(player), "ZILLION");
   // All moves should be within 1000 equity of the best move
   // except for the pass
-  move_gen_args.max_equity_diff = int_to_equity(1000);
+  move_gen_args.eq_margin_movegen = int_to_equity(1000);
   generate_moves_for_game(&move_gen_args);
   assert(all_move_list_count == move_list_get_count(move_list) + 1);
   rack_reset(player_get_rack(player));
 
   load_cgp_or_die(game, EMPTY_CGP);
   rack_set_to_string(ld, player_get_rack(player), "AUUUUVV");
-  move_gen_args.max_equity_diff = int_to_equity(10);
+  move_gen_args.eq_margin_movegen = int_to_equity(10);
   generate_moves_for_game(&move_gen_args);
   sml = sorted_move_list_create(move_list);
   assert_move(game, NULL, sml, 0, "(exch UUUUVV)");
@@ -1095,7 +1095,7 @@ void movegen_within_x_of_best_test(void) {
 
   load_cgp_or_die(game, PRETZEL_OPENING_CGP);
   rack_set_to_string(ld, player_get_rack(player), "ENTRIES");
-  move_gen_args.max_equity_diff = int_to_equity(0);
+  move_gen_args.eq_margin_movegen = int_to_equity(0);
   generate_moves_for_game(&move_gen_args);
   sml = sorted_move_list_create(move_list);
   assert(sml->count == 6);
@@ -1109,7 +1109,7 @@ void movegen_within_x_of_best_test(void) {
 
   load_cgp_or_die(game, PRETZEL_OPENING_CGP);
   rack_set_to_string(ld, player_get_rack(player), "ENTRIES");
-  move_gen_args.max_equity_diff = int_to_equity(48);
+  move_gen_args.eq_margin_movegen = int_to_equity(48);
   generate_moves_for_game(&move_gen_args);
   sml = sorted_move_list_create(move_list);
   assert(sml->count == 6);
@@ -1123,7 +1123,7 @@ void movegen_within_x_of_best_test(void) {
 
   load_cgp_or_die(game, PRETZEL_OPENING_CGP);
   rack_set_to_string(ld, player_get_rack(player), "ENTRIES");
-  move_gen_args.max_equity_diff = int_to_equity(50);
+  move_gen_args.eq_margin_movegen = int_to_equity(50);
   generate_moves_for_game(&move_gen_args);
   sml = sorted_move_list_create(move_list);
   assert(sml->count == 8);
@@ -1182,7 +1182,7 @@ void movegen_does_not_return_early_from_anchor(void) {
       .move_record_type = MOVE_RECORD_BEST,
       .move_sort_type = MOVE_SORT_EQUITY,
       .thread_index = 0,
-      .max_equity_diff = 0,
+      .eq_margin_movegen = 0,
   };
 
   // A8 BRRR 72 should be 1 equity better than A8 BRR 69

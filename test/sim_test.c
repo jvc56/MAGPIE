@@ -7,6 +7,7 @@
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
+#include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
@@ -14,7 +15,6 @@
 #include "../src/impl/gameplay.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
-#include "../src/str/sim_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_constants.h"
@@ -27,39 +27,34 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-void print_sim_stats(const Game *game, SimResults *sim_results) {
-  sim_results_sort_plays_by_win_rate(sim_results);
-  const LetterDistribution *ld = game_get_ld(game);
-  printf("%-20s%-9s%-16s%-16s\n", "Play", "Score", "Win%", "Equity");
-  StringBuilder *move_description = string_builder_create();
-  for (int i = 0; i < sim_results_get_number_of_plays(sim_results); i++) {
-    const SimmedPlay *play = sim_results_get_sorted_simmed_play(sim_results, i);
-    const Stat *win_pct_stat = simmed_play_get_win_pct_stat(play);
-    const double wp_mean = stat_get_mean(win_pct_stat) * 100.0;
-
-    const Stat *equity_stat = simmed_play_get_equity_stat(play);
-    const double eq_mean = stat_get_mean(equity_stat);
-
-    char *wp_str = NULL;
-    char *eq_str = NULL;
-
-    double wp_stdev = stat_get_stdev(win_pct_stat) * 100.0;
-    double eq_stdev = stat_get_stdev(equity_stat);
-    wp_str = get_formatted_string("%.3f %.3f", wp_mean, wp_stdev);
-    eq_str = get_formatted_string("%.3f %.3f", eq_mean, eq_stdev);
-
-    const char *is_epigon = simmed_play_get_is_epigon(play) ? "❌" : "";
-    const Move *move = simmed_play_get_move(play);
-    string_builder_add_move_description(move_description, move, ld);
-    printf("%-20s%-9d%-16s%-16s%s\n", string_builder_peek(move_description),
-           move_get_score(move), wp_str, eq_str, is_epigon);
-    string_builder_clear(move_description);
-    free(wp_str);
-    free(eq_str);
+int get_best_simmed_play_index(const SimResults *sim_results) {
+  const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
+  if (num_simmed_plays == 0) {
+    return -1;
   }
-  printf("Iterations: %" PRIu64 "\n",
-         sim_results_get_iteration_count(sim_results));
-  string_builder_destroy(move_description);
+  int best_play_index = -1;
+  const SimmedPlay *best_simmed_play = NULL;
+  for (int i = 0; i < num_simmed_plays; i++) {
+    const SimmedPlay *simmed_play = sim_results_get_simmed_play(sim_results, i);
+    if (simmed_play_get_is_epigon(simmed_play)) {
+      continue;
+    }
+    if (!best_simmed_play ||
+        stat_get_mean(simmed_play_get_win_pct_stat(simmed_play)) >
+            stat_get_mean(simmed_play_get_win_pct_stat(best_simmed_play))) {
+      best_simmed_play = simmed_play;
+      best_play_index = i;
+    }
+  }
+  return best_play_index;
+}
+
+const SimmedPlay *get_best_simmed_play(const SimResults *sim_results) {
+  const int best_play_index = get_best_simmed_play_index(sim_results);
+  if (best_play_index < 0) {
+    return NULL;
+  }
+  return sim_results_get_simmed_play(sim_results, best_play_index);
 }
 
 void test_sim_error_cases(void) {
@@ -102,9 +97,8 @@ void test_more_iterations(void) {
   assert(status == ERROR_STATUS_SUCCESS);
   assert(thread_control_get_status(config_get_thread_control(config)) ==
          THREAD_CONTROL_STATUS_SAMPLE_LIMIT);
-  sim_results_sort_plays_by_win_rate(sim_results);
 
-  const SimmedPlay *play = sim_results_get_sorted_simmed_play(sim_results, 0);
+  const SimmedPlay *play = get_best_simmed_play(sim_results);
   StringBuilder *move_string_builder = string_builder_create();
   string_builder_add_move_description(
       move_string_builder, simmed_play_get_move(play), config_get_ld(config));
@@ -168,8 +162,7 @@ void test_sim_threshold(void) {
   assert(thread_control_get_status(config_get_thread_control(config)) ==
          THREAD_CONTROL_STATUS_THRESHOLD);
 
-  sim_results_sort_plays_by_win_rate(sim_results);
-  const SimmedPlay *play = sim_results_get_sorted_simmed_play(sim_results, 0);
+  const SimmedPlay *play = get_best_simmed_play(sim_results);
   StringBuilder *move_string_builder = string_builder_create();
   string_builder_add_move_description(
       move_string_builder, simmed_play_get_move(play), config_get_ld(config));
@@ -341,10 +334,7 @@ void perf_test_multithread_sim(void) {
          THREAD_CONTROL_STATUS_SAMPLE_LIMIT);
   assert(sim_results_get_iteration_count(sim_results) == 2000);
 
-  print_sim_stats(config_get_game(config), sim_results);
-  sim_results_sort_plays_by_win_rate(sim_results);
-
-  const SimmedPlay *play = sim_results_get_sorted_simmed_play(sim_results, 0);
+  const SimmedPlay *play = get_best_simmed_play(sim_results);
   StringBuilder *move_string_builder = string_builder_create();
   string_builder_add_move_description(
       move_string_builder, simmed_play_get_move(play), config_get_ld(config));
@@ -355,10 +345,107 @@ void perf_test_multithread_sim(void) {
   config_destroy(config);
 }
 
+void test_sim_with_and_without_inference_helper(
+    const char *gcg_file, const char *known_opp_rack_str,
+    const char **moves_to_add, const char *winner_without_inference,
+    const char *winner_with_inference) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-threads 10 -plies 2 -it 2000 -minp 50 -numplays 2 "
+      "-scond none -seed 10");
+  // Load an empty CGP to create a new game.
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+
+  assert(test_parse_gcg(gcg_file, config, config_get_game_history(config)) ==
+         ERROR_STATUS_SUCCESS);
+
+  Game *game = config_get_game(config);
+
+  game_play_to_end_or_die(config_get_game_history(config), game);
+
+  StringBuilder *sb = string_builder_create();
+
+  int moves_to_add_index = 0;
+  while (true) {
+    const char *move_to_add = moves_to_add[moves_to_add_index];
+    if (move_to_add == NULL) {
+      break;
+    }
+    string_builder_clear(sb);
+    string_builder_add_formatted_string(sb, "addmoves %s", move_to_add);
+    load_and_exec_config_or_die(config, string_builder_peek(sb));
+    moves_to_add_index++;
+  }
+  string_builder_clear(sb);
+
+  Rack known_opp_rack;
+  rack_set_dist_size_and_reset(&known_opp_rack,
+                               ld_get_size(config_get_ld(config)));
+  rack_set_to_string(config_get_ld(config), &known_opp_rack,
+                     known_opp_rack_str);
+  SimResults *sim_results = config_get_sim_results(config);
+
+  // Without inference
+  error_code_t status =
+      config_simulate_and_return_status(config, &known_opp_rack, sim_results);
+  assert(status == ERROR_STATUS_SUCCESS);
+  assert(thread_control_get_status(config_get_thread_control(config)) ==
+         THREAD_CONTROL_STATUS_SAMPLE_LIMIT);
+  string_builder_add_ucgi_move(
+      sb, simmed_play_get_move(get_best_simmed_play(sim_results)),
+      game_get_board(game), config_get_ld(config));
+  printf("Best move without inference: >%s<\n", string_builder_peek(sb));
+  assert(strings_equal(string_builder_peek(sb), winner_without_inference));
+  string_builder_clear(sb);
+
+  // With inference
+  load_and_exec_config_or_die(config, "set -sinfer true");
+  status =
+      config_simulate_and_return_status(config, &known_opp_rack, sim_results);
+  assert(status == ERROR_STATUS_SUCCESS);
+  assert(thread_control_get_status(config_get_thread_control(config)) ==
+         THREAD_CONTROL_STATUS_SAMPLE_LIMIT);
+  string_builder_add_ucgi_move(
+      sb, simmed_play_get_move(get_best_simmed_play(sim_results)),
+      game_get_board(game), config_get_ld(config));
+  printf("Actual best move:   >%s<\n", string_builder_peek(sb));
+  printf("Expected best move: >%s<\n", winner_with_inference);
+  assert(strings_equal(string_builder_peek(sb), winner_with_inference));
+
+  string_builder_destroy(sb);
+  config_destroy(config);
+}
+
+void test_sim_with_inference(void) {
+  // 8H MUZAKS infers a leave of S, so playing EMPYREAN one short of the triple
+  // word will sim worse with inferenc
+  const char *empyrean_move_str = "h7.EMPYREAN";
+  const char *napery_move_string = "9g.NAPERY";
+  test_sim_with_and_without_inference_helper(
+      "muzaks_empyrean", "",
+      (const char *[]){empyrean_move_str, napery_move_string, NULL},
+      empyrean_move_str, napery_move_string);
+
+  // N6 ERE infers a leave of RE, so playing SYNCHRONIZE/D will sim worse with
+  // inference because of the RESYNCHRONIZE/D extension.
+  const char *synced_move_str = "1c.SYNCHRONIZED";
+  const char *sync_move_string = "1c.SYNCHRONIZE";
+  const char *ze_move_string = "b6.ZE";
+  test_sim_with_and_without_inference_helper(
+      "resynchronized", "",
+      (const char *[]){synced_move_str, sync_move_string, ze_move_string, NULL},
+      sync_move_string, ze_move_string);
+
+  test_sim_with_and_without_inference_helper(
+      "muzaks_empyrean", "IIIIIII",
+      (const char *[]){empyrean_move_str, napery_move_string, NULL},
+      empyrean_move_str, empyrean_move_str);
+}
+
 void test_play_similarity(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all "
-      "-plies 2 -threads 10 -it 1200 -minp 20 -scond none -pfreq 100");
+      "-plies 2 -threads 10 -it 1200 -minp 50 -scond none -pfreq 100");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 ACEIRST");
   load_and_exec_config_or_die(config, "gen");
@@ -371,15 +458,18 @@ void test_play_similarity(void) {
 
   // The BAI should have marked inferior plays in the same position as the best
   // play as epigons.
-  const Move *best_play =
-      simmed_play_get_move(sim_results_get_sorted_simmed_play(sim_results, 0));
+  const int best_play_index = get_best_simmed_play_index(sim_results);
+  const Move *best_play = simmed_play_get_move(
+      sim_results_get_simmed_play(sim_results, best_play_index));
   const int best_play_col = move_get_col_start(best_play);
   const int best_play_row = move_get_row_start(best_play);
   const int best_play_length = move_get_tiles_length(best_play);
   const int num_plays = sim_results_get_number_of_plays(sim_results);
-  for (int i = 1; i < num_plays; i++) {
-    const SimmedPlay *play_i =
-        sim_results_get_sorted_simmed_play(sim_results, i);
+  for (int i = 0; i < num_plays; i++) {
+    if (i == best_play_index) {
+      continue;
+    }
+    const SimmedPlay *play_i = sim_results_get_simmed_play(sim_results, i);
     const Move *move_i = simmed_play_get_move(play_i);
     if (move_get_col_start(move_i) == best_play_col &&
         move_get_row_start(move_i) == best_play_row &&
@@ -557,7 +647,7 @@ void test_sim_perf(const char *sim_perf_iters) {
   }
   draw_starting_racks(game);
   for (int i = 0; i < num_iters; i++) {
-    if (bag_get_tiles(bag) < RACK_SIZE) {
+    if (bag_get_letters(bag) < RACK_SIZE) {
       game_reset(game);
       draw_starting_racks(game);
     }
@@ -592,7 +682,7 @@ void test_sim_perf(const char *sim_perf_iters) {
     write_stats_to_file(sim_perf_filename, strategies, stats, num_strategies);
     const Move *best_play =
         get_top_equity_move(game, 0, config_get_move_list(config));
-    play_move(best_play, game, NULL, NULL);
+    play_move(best_play, game, NULL);
   }
   for (int i = 0; i < num_strategies; i++) {
     sim_strategy_stats_destroy(stats[i]);
@@ -616,6 +706,7 @@ void test_sim(void) {
     test_more_iterations();
     test_play_similarity();
     perf_test_multithread_sim();
+    test_sim_with_inference();
     test_sim_round_robin_consistency();
     test_sim_top_two_consistency();
   }
