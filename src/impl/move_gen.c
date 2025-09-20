@@ -167,7 +167,7 @@ static inline Equity get_move_equity_for_sort_type(const MoveGen *gen,
   case MOVE_SORT_SCORE:
     return score;
   default:
-    // TODO: make move_sort_type an enum and remove default case
+    // TODO(olaugh): make move_sort_type an enum and remove default case
     log_fatal("unhandled move sort type: %d", gen->move_sort_type);
   }
 #if defined(__has_builtin) && __has_builtin(__builtin_unreachable)
@@ -433,7 +433,7 @@ static inline Equity get_move_equity_for_sort_type_wmp(MoveGen *gen,
   case MOVE_SORT_SCORE:
     return move_get_score(move);
   default:
-    // TODO: make move_sort_type an enum and remove default case
+    // TODO(olaugh): make move_sort_type an enum and remove default case
     log_fatal("unhandled move sort type: %d", gen->move_sort_type);
   }
 #if defined(__has_builtin) && __has_builtin(__builtin_unreachable)
