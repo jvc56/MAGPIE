@@ -980,11 +980,13 @@ void movegen_only_one_player_wmp(void) {
 }
 
 void movegen_within_x_of_best_test(bool use_wmp) {
-  Config *config = config_create_or_die(
+  char *config_str =
       get_formatted_string("set -lex CSW21 -wmp %s -s1 equity -s2 equity "
                            "-r1 equity -r2 equity "
                            "-numplays 100",
-                           use_wmp ? "true" : "false"));
+                           use_wmp ? "true" : "false");
+  Config *config = config_create_or_die(config_str);
+  free(config_str);
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   Player *player = game_get_player(game, 0);
