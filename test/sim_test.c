@@ -57,9 +57,10 @@ const SimmedPlay *get_best_simmed_play(const SimResults *sim_results) {
 }
 
 void test_sim_error_cases(void) {
-  Config *config = config_create_or_die(
-      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all -numplays 15 -plies "
-      "2 -threads 1 -iter 1 -scond none");
+  Config *config =
+      config_create_or_die("set -lex NWL20 -wmp true -s1 score -s2 score -r1 "
+                           "all -r2 all -numplays 15 -plies "
+                           "2 -threads 1 -iter 1 -scond none");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 AAADERW");
   error_code_t status = config_simulate_and_return_status(
@@ -69,9 +70,10 @@ void test_sim_error_cases(void) {
 }
 
 void test_sim_single_iteration(void) {
-  Config *config = config_create_or_die(
-      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all -numplays 15 -plies "
-      "2 -threads 1 -iter 1 -scond none");
+  Config *config =
+      config_create_or_die("set -lex NWL20 -wmp true -s1 score -s2 score -r1 "
+                           "all -r2 all -numplays 15 -plies "
+                           "2 -threads 1 -iter 1 -scond none");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 AAADERW");
   load_and_exec_config_or_die(config, "gen");
@@ -84,9 +86,10 @@ void test_sim_single_iteration(void) {
 }
 
 void test_more_iterations(void) {
-  Config *config = config_create_or_die(
-      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all -numplays 15 -plies "
-      "2 -threads 1 -iter 500 -scond none -seed 10");
+  Config *config =
+      config_create_or_die("set -lex NWL20 -wmp true -s1 score -s2 score -r1 "
+                           "all -r2 all -numplays 15 -plies "
+                           "2 -threads 1 -iter 500 -scond none -seed 10");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 AEIQRST");
   load_and_exec_config_or_die(config, "gen");
@@ -244,9 +247,10 @@ void test_sim_one_arm_remaining(void) {
 }
 
 void test_sim_round_robin_consistency(void) {
-  Config *config = config_create_or_die(
-      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all -numplays 3 -plies "
-      "2 -threads 1 -iter 52 -scond none -sr rr");
+  Config *config =
+      config_create_or_die("set -lex NWL20 -wmp true -s1 score -s2 score -r1 "
+                           "all -r2 all -numplays 3 -plies "
+                           "2 -threads 1 -iter 52 -scond none -sr rr");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 AEIQRST");
   load_and_exec_config_or_die(config, "gen");
@@ -284,9 +288,9 @@ void test_sim_round_robin_consistency(void) {
 }
 
 void test_sim_top_two_consistency(void) {
-  Config *config =
-      config_create_or_die("set -lex CSW21 -wmp true -numplays 15 -plies 5 -threads 10 "
-                           "-iter 30 -scond 99 -seed 33 -sr tt");
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -numplays 15 -plies 5 -threads 10 "
+      "-iter 30 -scond 99 -seed 33 -sr tt");
   load_and_exec_config_or_die(config, "cgp " PARRODQ_CGP);
   load_and_exec_config_or_die(config, "gen");
   ThreadControl *thread_control = config_get_thread_control(config);
@@ -615,9 +619,9 @@ void test_sim_perf(const char *sim_perf_iters) {
   if (num_iters < 0) {
     log_fatal("Invalid number of iterations: %s\n", sim_perf_iters);
   }
-  Config *config =
-      config_create_or_die("set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 "
-                           "all -numplays 100 -plies 2 -scond 99");
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 "
+      "all -numplays 100 -plies 2 -scond 99");
   const uint64_t max_samples = 200000;
   char *set_threads_cmd =
       get_formatted_string("set -threads 1 -iter %lu", max_samples);
