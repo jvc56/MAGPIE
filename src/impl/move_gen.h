@@ -23,6 +23,7 @@ typedef struct MoveGen {
   int dir;
   int max_tiles_to_play;
   int tiles_played;
+  int first_played_tile_col;
   int number_of_plays;
   int move_sort_type;
   move_record_t move_record_type;
@@ -49,6 +50,7 @@ typedef struct MoveGen {
   int cross_index;
   Move best_move_and_current_move[2];
   int best_move_index;
+  Equity current_anchor_highest_possible_score;
   // This field is only used for the MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST
   // record type
   Equity best_move_equity_or_score;
@@ -96,12 +98,14 @@ typedef struct MoveGen {
   int shadow_word_multiplier;
 
   Equity highest_shadow_equity;
+  Equity highest_shadow_score;
   uint64_t rack_cross_set;
   int number_of_letters_on_rack;
   Equity full_rack_descending_tile_scores[WORD_ALIGNING_RACK_SIZE];
   Equity descending_tile_scores[WORD_ALIGNING_RACK_SIZE];
   Equity descending_tile_scores_copy[WORD_ALIGNING_RACK_SIZE];
   Equity best_leaves[(RACK_SIZE)];
+
   AnchorHeap anchor_heap;
   LetterDistribution ld;
 
@@ -116,6 +120,13 @@ typedef struct MoveGen {
   MoveList *move_list;
 
   WMPMoveGen wmp_move_gen;
+  // Number of playthrough blocks used by the by current move of recursive_gen
+  // given the rightmost column of the move. Set per anchor because it depends
+  // on the anchor column.
+  uint8_t num_playthrough_blocks[BOARD_DIM];
+  uint8_t max_playthrough_blocks;
+  // Used by wordmap_gen to prepare WMP-generated plays for recording.
+  MachineLetter playthrough_marked[BOARD_DIM];
 } MoveGen;
 
 typedef struct MoveGenArgs {

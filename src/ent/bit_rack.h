@@ -16,11 +16,15 @@
 
 // Arithmetic addition of two BitRacks performs unions of the multisets.
 
-#if defined(__SIZEOF_INT128__)
-#define USE_INT128_INTRINSIC 1
-#else
+// Currently finding that the fallback implementation is faster than using
+// __int128 intrinsics on some hardware. Disabling intrinsics for now but
+// still keeping the code around for possible future use.
+//
+// #if defined(__SIZEOF_INT128__)
+// #define USE_INT128_INTRINSIC 1
+// #else
 #define USE_INT128_INTRINSIC 0
-#endif
+// #endif
 
 #if USE_INT128_INTRINSIC
 typedef unsigned __int128 BitRack;
