@@ -56,9 +56,9 @@ void assert_autoplay_output(const char *output, int expected_newlines,
 }
 
 void test_autoplay_default(void) {
-  Config *csw_config =
-      config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
-                           "all -numplays 1  -gp true -threads 11");
+  Config *csw_config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 "
+      "all -numplays 1 -gp true -threads 11");
 
   load_and_exec_config_or_die(csw_config, "autoplay games 100 -seed 26");
 
@@ -132,7 +132,7 @@ void test_autoplay_leavegen(void) {
 void test_autoplay_divergent_games(void) {
   Config *csw_config =
       config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
-                           "all -numplays 1  -gp true -threads 11");
+                           "all -numplays 1 -gp true -threads 11");
   const Game *game;
 
   AutoplayResults *ar = autoplay_results_create();

@@ -161,10 +161,17 @@ static inline void set_play_for_record(Move *move, game_event_t move_type,
 static inline Equity get_move_equity_for_sort_type(const MoveGen *gen,
                                                    const Move *move,
                                                    Equity score) {
-  if (gen->move_sort_type == MOVE_SORT_EQUITY) {
+  switch (gen->move_sort_type) {
+  case MOVE_SORT_EQUITY:
     return gen_get_static_equity(gen, move);
+  case MOVE_SORT_SCORE:
+    return score;
   }
+#if defined(__has_builtin) && __has_builtin(__builtin_unreachable)
+  __builtin_unreachable();
+#else
   return score;
+#endif
 }
 
 static inline void set_small_play_for_record(SmallMove *move,
@@ -414,32 +421,58 @@ static inline void set_play_for_record_wmp(MoveGen *gen, Move *move,
 static inline Equity get_move_equity_for_sort_type_wmp(MoveGen *gen,
                                                        const Move *move,
                                                        Equity leave_value) {
-  if (gen->move_sort_type == MOVE_SORT_EQUITY) {
+  switch (gen->move_sort_type) {
+  case MOVE_SORT_EQUITY:
     return static_eval_get_move_equity_with_leave_value(
         &gen->ld, move, &gen->leave, &gen->opponent_rack,
         gen->opening_move_penalties, gen->board_number_of_tiles_played,
         gen->number_of_tiles_in_bag, leave_value);
+  case MOVE_SORT_SCORE:
+    return move_get_score(move);
   }
+#if defined(__has_builtin) && __has_builtin(__builtin_unreachable)
+  __builtin_unreachable();
+#else
   return move_get_score(move);
+#endif
 }
 
 static inline void
 update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
                                              int score, Equity leave_value) {
-  if (gen->move_record_type == MOVE_RECORD_ALL) {
+  switch (gen->move_record_type) {
+  case MOVE_RECORD_ALL:
+  case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST: {
     Move *move = move_list_get_spare_move(gen->move_list);
     set_play_for_record_wmp(gen, move, start_col, score);
-    move_list_insert_spare_move(
-        gen->move_list,
-        get_move_equity_for_sort_type_wmp(gen, move, leave_value));
-  } else {
+    const Equity move_equity_or_score =
+        get_move_equity_for_sort_type_wmp(gen, move, leave_value);
+    if (gen->move_record_type == MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST) {
+      gen_insert_spare_move_within_x_equity_of_best(gen, move_equity_or_score);
+    } else {
+      move_list_insert_spare_move(gen->move_list, move_equity_or_score);
+    }
+    break;
+  }
+  case MOVE_RECORD_BEST: {
     Move *current_move = gen_get_current_move(gen);
     set_play_for_record_wmp(gen, current_move, start_col, score);
-    move_set_equity(current_move, get_move_equity_for_sort_type_wmp(
-                                      gen, current_move, leave_value));
+    move_set_equity(current_move,
+                    get_move_equity_for_sort_type_wmp(gen, current_move,
+                                                     leave_value));
     if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
       gen_switch_best_move_and_current_move(gen);
     }
+    break;
+  }
+  case MOVE_RECORD_ALL_SMALL:
+    log_fatal("update_best_move_or_insert_into_movelist_wmp called with "
+              "MOVE_RECORD_ALL_SMALL");
+#if defined(__has_builtin) && __has_builtin(__builtin_unreachable)
+    __builtin_unreachable();
+#else
+    return;
+#endif
   }
 }
 

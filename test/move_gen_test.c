@@ -979,9 +979,12 @@ void movegen_only_one_player_wmp(void) {
   config_destroy(config);
 }
 
-void movegen_within_x_of_best_test(void) {
-  Config *config = config_create_or_die("set -lex CSW21 -s1 equity -s2 equity "
-                                        "-r1 equity -r2 equity -numplays 100");
+void movegen_within_x_of_best_test(bool use_wmp) {
+  Config *config = config_create_or_die(
+      get_formatted_string("set -lex CSW21 -wmp %s -s1 equity -s2 equity "
+                           "-r1 equity -r2 equity "
+                           "-numplays 100",
+                           use_wmp ? "true" : "false"));
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   Player *player = game_get_player(game, 0);
@@ -1529,7 +1532,8 @@ void test_move_gen(void) {
   movegen_var_bingo_bonus_test();
   movegen_no_wmp_by_default_test();
   movegen_only_one_player_wmp();
-  movegen_within_x_of_best_test();
+  movegen_within_x_of_best_test(false);
+  movegen_within_x_of_best_test(true);
   movegen_many_moves();
   movegen_should_not_gen_exchanges();
   movegen_does_not_return_early_from_anchor();
