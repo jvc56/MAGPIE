@@ -457,9 +457,8 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
   case MOVE_RECORD_BEST: {
     Move *current_move = gen_get_current_move(gen);
     set_play_for_record_wmp(gen, current_move, start_col, score);
-    move_set_equity(current_move,
-                    get_move_equity_for_sort_type_wmp(gen, current_move,
-                                                     leave_value));
+    move_set_equity(current_move, get_move_equity_for_sort_type_wmp(
+                                      gen, current_move, leave_value));
     if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
       gen_switch_best_move_and_current_move(gen);
     }
@@ -1876,14 +1875,12 @@ void gen_record_scoring_plays(MoveGen *gen) {
     if (gen->is_wordsmog) {
       recursive_gen_alpha(gen, anchor.col, anchor.col, anchor.col,
                           gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+    } else if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+      wordmap_gen(gen, &anchor);
     } else {
-      if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
-        wordmap_gen(gen, &anchor);
-      } else {
-        recursive_gen(gen, anchor.col, kwg_root_node_index, anchor.col,
-                      anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,
-                      0);
-      }
+      recursive_gen(gen, anchor.col, kwg_root_node_index, anchor.col,
+                    anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,
+                    0);
     }
 
     // If a better play has been found than should have been possible for
