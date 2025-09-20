@@ -616,6 +616,7 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
     const MachineLetter board_letter =
         get_unblanked_machine_letter(gen_cache_get_letter(gen, board_col));
     assert(board_letter != ALPHABET_EMPTY_SQUARE_MARKER);
+    assert(!bonus_square_is_brick(gen_cache_get_bonus_square(gen, board_col)));
     if (board_letter != word_letter) {
       return false;
     }
