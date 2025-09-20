@@ -981,6 +981,10 @@ void assert_anchor_equity_exact(const AnchorHeap *ah, int i, Equity expected) {
   assert(actual == expected);
 }
 
+void assert_anchor_score(const AnchorHeap *ah, int i, int expected) {
+  assert(ah->anchors[i].highest_possible_score == int_to_equity(expected));
+}
+
 void generate_anchors_for_test(Game *game) {
   const Player *player_on_turn =
       game_get_player(game, game_get_player_on_turn_index(game));

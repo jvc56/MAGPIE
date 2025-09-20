@@ -130,6 +130,7 @@ void assert_validated_moves_challenge_points(const ValidatedMoves *vms, int i,
                                              int expected_challenge_points);
 void assert_anchor_equity_int(const AnchorHeap *ah, int i, int expected);
 void assert_anchor_equity_exact(const AnchorHeap *ah, int i, Equity expected);
+void assert_anchor_score(const AnchorHeap *ah, int i, int expected);
 void generate_anchors_for_test(Game *game);
 void extract_sorted_anchors_for_test(AnchorHeap *sorted_anchors);
 void set_klv_leave_value(const KLV *klv, const LetterDistribution *ld,

@@ -142,8 +142,9 @@ void test_leave_rack_reset(void) {
 }
 
 void test_trivial_random_probability(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Config *config =
+      config_create_or_die("set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 "
+                           "all -r2 all -numplays 1");
   const LetterDistribution *ld = config_get_ld(config);
   int ld_size = ld_get_size(ld);
   Game *game = config_game_create(config);
@@ -188,9 +189,9 @@ void test_trivial_random_probability(void) {
 }
 
 void test_infer_rack_overflow(void) {
-  Config *config =
-      config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
-                           "all -numplays 1 -threads 1");
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 "
+      "all -numplays 1 -threads 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   Game *game = config_get_game(config);
   InferenceResults *inference_results = inference_results_create(NULL);
@@ -209,8 +210,9 @@ void test_infer_rack_overflow(void) {
 }
 
 void test_infer_no_tiles_played_rack_empty(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Config *config =
+      config_create_or_die("set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 "
+                           "all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
   ErrorStack *error_stack = error_stack_create();
@@ -225,8 +227,9 @@ void test_infer_no_tiles_played_rack_empty(void) {
 }
 
 void test_infer_both_play_and_exchange(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Config *config =
+      config_create_or_die("set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 "
+                           "all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
   InferenceResults *inference_results = inference_results_create(NULL);
@@ -239,8 +242,9 @@ void test_infer_both_play_and_exchange(void) {
 }
 
 void test_infer_exchange_score_not_zero(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Config *config =
+      config_create_or_die("set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 "
+                           "all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
   InferenceResults *inference_results = inference_results_create(NULL);
@@ -253,8 +257,9 @@ void test_infer_exchange_score_not_zero(void) {
 }
 
 void test_infer_exchange_not_board_is_letter_allowed_in_cross_set(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Config *config =
+      config_create_or_die("set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 "
+                           "all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   Game *game = config_get_game(config);
   Bag *bag = game_get_bag(game);
@@ -276,8 +281,9 @@ void test_infer_exchange_not_board_is_letter_allowed_in_cross_set(void) {
 }
 
 void test_infer_tiles_played_not_in_bag(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Config *config =
+      config_create_or_die("set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 "
+                           "all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
   InferenceResults *inference_results = inference_results_create(NULL);
@@ -291,8 +297,9 @@ void test_infer_tiles_played_not_in_bag(void) {
 }
 
 void test_infer_empty_game_history(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Config *config =
+      config_create_or_die("set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 "
+                           "all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   InferenceResults *inference_results = inference_results_create(NULL);
   load_and_exec_config_or_die(config, "set -eq 0 -threads 1");
@@ -305,10 +312,10 @@ void test_infer_empty_game_history(void) {
 
 void test_infer_nonerror_cases(const int number_of_threads,
                                const bool use_game_history) {
-  char *config_settings_str =
-      get_formatted_string("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
-                           "all -numplays 1 -threads %d",
-                           number_of_threads);
+  char *config_settings_str = get_formatted_string(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 "
+      "all -numplays 1 -threads %d",
+      number_of_threads);
   Config *config = config_create_or_die(config_settings_str);
   free(config_settings_str);
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);

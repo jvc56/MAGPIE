@@ -3,6 +3,7 @@
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/ent/bit_rack.h"
 #include "../src/ent/board.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -26,6 +27,32 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+// Expose internal helper from move_gen.c to use in tests
+void get_blank_possibilities(const MoveGen *gen,
+                             const BitRack *nonplaythrough_tiles,
+                             int current_pos, bool *can_be_unblanked,
+                             bool *can_be_blanked);
+
+static inline void
+set_playthrough_marked_from_string(MoveGen *gen, const LetterDistribution *ld,
+                                   const char *s) {
+  size_t n = strlen(s);
+  gen->wmp_move_gen.word_length = (int)n;
+  for (size_t i = 0; i < n; i++) {
+    char c = s[i];
+    if (c == '.') {
+      gen->playthrough_marked[i] = PLAYED_THROUGH_MARKER;
+    } else {
+      const char tmp[2] = {c, '\0'};
+      gen->playthrough_marked[i] = ld_hl_to_ml(ld, tmp);
+    }
+  }
+  /* Clear any remaining positions to 0 for safety */
+  for (size_t i = n; i < BOARD_DIM; i++) {
+    gen->playthrough_marked[i] = 0;
+  }
+}
 
 int count_scoring_plays(const MoveList *ml) {
   int sum = 0;
@@ -952,9 +979,14 @@ void movegen_only_one_player_wmp(void) {
   config_destroy(config);
 }
 
-void movegen_within_x_of_best_test(void) {
-  Config *config = config_create_or_die("set -lex CSW21 -s1 equity -s2 equity "
-                                        "-r1 equity -r2 equity -numplays 100");
+void movegen_within_x_of_best_test(bool use_wmp) {
+  char *config_str =
+      get_formatted_string("set -lex CSW21 -wmp %s -s1 equity -s2 equity "
+                           "-r1 equity -r2 equity "
+                           "-numplays 100",
+                           use_wmp ? "true" : "false");
+  Config *config = config_create_or_die(config_str);
+  free(config_str);
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   Player *player = game_get_player(game, 0);
@@ -1192,6 +1224,300 @@ void movegen_does_not_return_early_from_anchor(void) {
   config_destroy(config);
 }
 
+void movegen_one_tile_nonwmp(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp false");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const Player *player = game_get_player(game, 0);
+  Rack *player_rack = player_get_rack(player);
+  MoveList *move_list = move_list_create(10);
+  MoveGenArgs move_gen_args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .thread_index = 0,
+      .eq_margin_movegen = 0,
+  };
+
+  SortedMoveList *sml = NULL;
+
+  load_cgp_or_die(game, QI_QI_CGP);
+  rack_set_to_string(ld, player_rack, "F");
+  generate_moves(&move_gen_args);
+  assert(move_list->count == 3);
+  sml = sorted_move_list_create(move_list);
+  assert_move(game, NULL, sml, 0, "9G (I)F 10");
+  assert_move(game, NULL, sml, 1, "(exch F)");
+  assert_move(game, NULL, sml, 2, "pass 0");
+  sorted_move_list_destroy(sml);
+
+  load_cgp_or_die(game, IF_IF_CGP);
+  rack_set_to_string(ld, player_rack, "Q");
+  generate_moves(&move_gen_args);
+  assert(move_list->count == 3);
+  sml = sorted_move_list_create(move_list);
+  assert_move(game, NULL, sml, 0, "8G Q(I) 22");
+  assert_move(game, NULL, sml, 1, "(exch Q)");
+  assert_move(game, NULL, sml, 2, "pass 0");
+  sorted_move_list_destroy(sml);
+
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void movegen_one_tile_wmp(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const Player *player = game_get_player(game, 0);
+  Rack *player_rack = player_get_rack(player);
+  MoveList *move_list = move_list_create(10);
+  MoveGenArgs move_gen_args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .thread_index = 0,
+      .eq_margin_movegen = 0,
+  };
+
+  SortedMoveList *sml = NULL;
+
+  load_cgp_or_die(game, QI_QI_CGP);
+  rack_set_to_string(ld, player_rack, "F");
+  generate_moves(&move_gen_args);
+  assert(move_list->count == 3);
+  sml = sorted_move_list_create(move_list);
+  assert_move(game, NULL, sml, 0, "9G (I)F 10");
+  assert_move(game, NULL, sml, 1, "(exch F)");
+  assert_move(game, NULL, sml, 2, "pass 0");
+  sorted_move_list_destroy(sml);
+
+  load_cgp_or_die(game, IF_IF_CGP);
+  rack_set_to_string(ld, player_rack, "Q");
+  generate_moves(&move_gen_args);
+  assert(move_list->count == 3);
+  sml = sorted_move_list_create(move_list);
+  assert_move(game, NULL, sml, 0, "8G Q(I) 22");
+  assert_move(game, NULL, sml, 1, "(exch Q)");
+  assert_move(game, NULL, sml, 2, "pass 0");
+  sorted_move_list_destroy(sml);
+
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void wmp_blank_possibilities_natural(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+
+  MoveGen *gen = get_movegen(0);
+  memset(gen, 0, sizeof(*gen));
+  gen->wmp_move_gen.word_length = 7;
+
+  // No playthrough tiles. All of these tiles are newly placed.
+  set_playthrough_marked_from_string(gen, ld, "NATURAL");
+
+  Rack *rack = rack_create(ld_get_size(ld));
+  rack_set_to_string(ld, rack, "NATURAL");
+  BitRack nonplay_bitrack = bit_rack_create_from_rack(ld, rack);
+
+  for (int pos = 0; pos < 7; pos++) {
+    bool can_be_unblanked = false;
+    bool can_be_blanked = false;
+    get_blank_possibilities(gen, &nonplay_bitrack, pos, &can_be_unblanked,
+                            &can_be_blanked);
+    // There are no blanks on the rack, so of course none of the letters can be
+    // blanked, and all of them can (must) be unblanked.
+    assert(can_be_unblanked);
+    assert(!can_be_blanked);
+  }
+
+  rack_destroy(rack);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void wmp_blank_possibilities_blanked(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+
+  MoveGen *gen = get_movegen(0);
+  memset(gen, 0, sizeof(*gen));
+
+  // No playthrough tiles. All of these tiles are newly placed.
+  set_playthrough_marked_from_string(gen, ld, "BLANKED");
+
+  Rack *rack = rack_create(ld_get_size(ld));
+  rack_set_to_string(ld, rack, "BLANKE?");
+  BitRack nonplay_bitrack = bit_rack_create_from_rack(ld, rack);
+
+  for (int pos = 0; pos < 7; pos++) {
+    bool can_be_unblanked = false;
+    bool can_be_blanked = false;
+    get_blank_possibilities(gen, &nonplay_bitrack, pos, &can_be_unblanked,
+                            &can_be_blanked);
+    // 'D' is at position 6 in "BLANKED"
+    if (pos == 6) {
+      assert(!can_be_unblanked);
+      assert(can_be_blanked);
+    } else {
+      assert(can_be_unblanked);
+      assert(!can_be_blanked);
+    }
+  }
+
+  rack_destroy(rack);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void wmp_blank_possibilities_bananas_1(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+
+  MoveGen *gen = get_movegen(0);
+  memset(gen, 0, sizeof(*gen));
+
+  set_playthrough_marked_from_string(gen, ld, "BANANAS");
+
+  Rack *rack = rack_create(ld_get_size(ld));
+  rack_set_to_string(ld, rack, "BANNS??");
+  BitRack nonplay_bitrack = bit_rack_create_from_rack(ld, rack);
+
+  // Check position 1 (the first A): it should be possible to be
+  // either unblanked or blanked.
+  bool can_be_unblanked = false;
+  bool can_be_blanked = false;
+  get_blank_possibilities(gen, &nonplay_bitrack, 1, &can_be_unblanked,
+                          &can_be_blanked);
+  assert(can_be_unblanked);
+  assert(can_be_blanked);
+
+  rack_destroy(rack);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void wmp_blank_possibilities_bananas_2(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+
+  MoveGen *gen = get_movegen(0);
+  memset(gen, 0, sizeof(*gen));
+
+  set_playthrough_marked_from_string(gen, ld, "BaNANAS");
+
+  Rack *rack = rack_create(ld_get_size(ld));
+  rack_set_to_string(ld, rack, "BANNS??");
+  BitRack nonplay_bitrack = bit_rack_create_from_rack(ld, rack);
+
+  // Check only position 3 (the second A): it should be possible to be
+  // either unblanked or blanked. We used one blank for the first A, but we have
+  // another.
+  bool can_be_unblanked = false;
+  bool can_be_blanked = false;
+  get_blank_possibilities(gen, &nonplay_bitrack, 3, &can_be_unblanked,
+                          &can_be_blanked);
+  assert(can_be_unblanked);
+  assert(can_be_blanked);
+
+  rack_destroy(rack);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void wmp_blank_possibilities_bananas_3(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+
+  MoveGen *gen = get_movegen(0);
+  memset(gen, 0, sizeof(*gen));
+
+  set_playthrough_marked_from_string(gen, ld, "BaNaNAS");
+
+  Rack *rack = rack_create(ld_get_size(ld));
+  rack_set_to_string(ld, rack, "BANNS??");
+  BitRack nonplay_bitrack = bit_rack_create_from_rack(ld, rack);
+
+  // Check only position 5 (the third A): it can only be unblanked, since
+  // we've already used both blanks for the first two A's.
+  bool can_be_unblanked = false;
+  bool can_be_blanked = false;
+  get_blank_possibilities(gen, &nonplay_bitrack, 5, &can_be_unblanked,
+                          &can_be_blanked);
+  assert(can_be_unblanked);
+  assert(!can_be_blanked);
+
+  rack_destroy(rack);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void wmp_blank_possibilities_bananas_4(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+
+  MoveGen *gen = get_movegen(0);
+  memset(gen, 0, sizeof(*gen));
+
+  set_playthrough_marked_from_string(gen, ld, "B.NaNAS");
+
+  Rack *rack = rack_create(ld_get_size(ld));
+  rack_set_to_string(ld, rack, "BNNS??");
+  BitRack nonplay_bitrack = bit_rack_create_from_rack(ld, rack);
+
+  // Check only position 5 (the third A): only one blank has been used.
+  // We must use the second blank for this A to use all our blanks.
+  bool can_be_unblanked = false;
+  bool can_be_blanked = false;
+  get_blank_possibilities(gen, &nonplay_bitrack, 5, &can_be_unblanked,
+                          &can_be_blanked);
+  assert(!can_be_unblanked);
+  assert(can_be_blanked);
+
+  rack_destroy(rack);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void wmp_blank_possibilities_bananas_5(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+
+  MoveGen *gen = get_movegen(0);
+  memset(gen, 0, sizeof(*gen));
+
+  set_playthrough_marked_from_string(gen, ld, "BA.ANAS");
+
+  Rack *rack = rack_create(ld_get_size(ld));
+  rack_set_to_string(ld, rack, "BANS??");
+  BitRack nonplay_bitrack = bit_rack_create_from_rack(ld, rack);
+
+  // Check only position 3 (the second A): no blanks have been used and we have
+  // 2 on our rack. We must make this A blank.
+  bool can_be_unblanked = false;
+  bool can_be_blanked = false;
+  get_blank_possibilities(gen, &nonplay_bitrack, 3, &can_be_unblanked,
+                          &can_be_blanked);
+  assert(!can_be_unblanked);
+  assert(can_be_blanked);
+
+  rack_destroy(rack);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_move_gen(void) {
   leave_lookup_test();
   unfound_leave_lookup_test();
@@ -1208,8 +1534,18 @@ void test_move_gen(void) {
   movegen_var_bingo_bonus_test();
   movegen_no_wmp_by_default_test();
   movegen_only_one_player_wmp();
-  movegen_within_x_of_best_test();
+  movegen_within_x_of_best_test(false);
+  movegen_within_x_of_best_test(true);
   movegen_many_moves();
   movegen_should_not_gen_exchanges();
   movegen_does_not_return_early_from_anchor();
+  movegen_one_tile_nonwmp();
+  movegen_one_tile_wmp();
+  wmp_blank_possibilities_natural();
+  wmp_blank_possibilities_blanked();
+  wmp_blank_possibilities_bananas_1();
+  wmp_blank_possibilities_bananas_2();
+  wmp_blank_possibilities_bananas_3();
+  wmp_blank_possibilities_bananas_4();
+  wmp_blank_possibilities_bananas_5();
 }
