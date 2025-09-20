@@ -166,6 +166,9 @@ static inline Equity get_move_equity_for_sort_type(const MoveGen *gen,
     return gen_get_static_equity(gen, move);
   case MOVE_SORT_SCORE:
     return score;
+  default:
+    // TODO: make move_sort_type an enum and remove default case
+    log_fatal("unhandled move sort type: %d", gen->move_sort_type);
   }
 #if defined(__has_builtin) && __has_builtin(__builtin_unreachable)
   __builtin_unreachable();
@@ -429,6 +432,9 @@ static inline Equity get_move_equity_for_sort_type_wmp(MoveGen *gen,
         gen->number_of_tiles_in_bag, leave_value);
   case MOVE_SORT_SCORE:
     return move_get_score(move);
+  default:
+    // TODO: make move_sort_type an enum and remove default case
+    log_fatal("unhandled move sort type: %d", gen->move_sort_type);
   }
 #if defined(__has_builtin) && __has_builtin(__builtin_unreachable)
   __builtin_unreachable();
