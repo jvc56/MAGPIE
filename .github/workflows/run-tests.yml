@@ -31,7 +31,7 @@ jobs:
 
       - name: Run python clang-format analysis script
         run: |
-          sudo apt-get install -y clang-format-18 && python3 ./format.py
+          sudo apt-get install -y clang-format-20 && python3 ./format.py
 
   circular-dependencies:
     runs-on: ubuntu-latest
