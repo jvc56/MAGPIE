@@ -7,7 +7,7 @@
  * Dealing with Unknown Variances in Best-Arm Identification
  *   Paper: https://arxiv.org/pdf/2210.00974
  *   Code: https://marcjourdan.netlify.app/publication/baiuv/
- *   (the was kindly provided by Marc Jourdan)
+ *   (the code was kindly provided by Marc Jourdan)
  *
  * Information-Directed Selection for Top-Two Algorithms
  *   Paper: https://arxiv.org/pdf/2205.12086
