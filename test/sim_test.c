@@ -631,8 +631,8 @@ void test_sim_perf(const char *sim_perf_iters) {
   Game *game = config_get_game(config);
   const Bag *bag = game_get_bag(game);
   const char *strategies[] = {
-      "-sr tt -threads 10",
-      "-sr id -threads 10",
+      "-sr tt -threads 12",
+      "-sr id -threads 12",
   };
   const int num_strategies = sizeof(strategies) / sizeof(strategies[0]);
   SimStrategyStats **stats =
@@ -649,21 +649,26 @@ void test_sim_perf(const char *sim_perf_iters) {
     log_fatal("error deleting %s: %s", sim_perf_game_details_filename);
   }
   draw_starting_racks(game);
+  const int details_limit = 100;
   for (int i = 0; i < num_iters; i++) {
     if (bag_get_letters(bag) < RACK_SIZE) {
       game_reset(game);
       draw_starting_racks(game);
     }
     load_and_exec_config_or_die(config, "gen -wmp true");
-    append_game_with_moves_to_file(sim_perf_game_details_filename, game,
-                                   config_get_move_list(config));
+    if (i < details_limit) {
+      append_game_with_moves_to_file(sim_perf_game_details_filename, game,
+                                     config_get_move_list(config));
+    }
     for (int j = 0; j < num_strategies; j++) {
       char *set_strategies_cmd =
           get_formatted_string("set %s -wmp true", strategies[j]);
       load_and_exec_config_or_die(config, set_strategies_cmd);
       free(set_strategies_cmd);
       thread_control_set_seed(thread_control, i);
-      append_content_to_file(sim_perf_game_details_filename, strategies[j]);
+      if (i < details_limit) {
+        append_content_to_file(sim_perf_game_details_filename, strategies[j]);
+      }
       const error_code_t status =
           config_simulate_and_return_status(config, NULL, sim_results);
       assert(status == ERROR_STATUS_SUCCESS);
@@ -673,7 +678,9 @@ void test_sim_perf(const char *sim_perf_iters) {
                          (double)sim_results_get_node_count(sim_results) /
                              thread_control_get_seconds_elapsed(thread_control),
                          false);
-      append_content_to_file(sim_perf_game_details_filename, sim_stats_str);
+      if (i < details_limit) {
+        append_content_to_file(sim_perf_game_details_filename, sim_stats_str);
+      }
       free(sim_stats_str);
       sim_strategy_stats_stage(
           stats, j, (int)sim_results_get_iteration_count(sim_results),
