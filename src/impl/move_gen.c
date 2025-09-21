@@ -235,7 +235,6 @@ gen_insert_spare_move_within_x_equity_of_best(MoveGen *gen,
     // The current move is better than the best move, so update the best move to
     // the current move
     gen->best_move_equity_or_score = move_equity_or_score;
-
     // Update the cutoff now that the best possible equity or score has improved
     gen_update_cutoff_equity_or_score(gen);
     cutoff_equity_or_score = gen_get_cutoff_equity_or_score(gen);
