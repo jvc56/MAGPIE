@@ -50,6 +50,7 @@ typedef struct Inference {
   Equity equity_margin;
   uint64_t current_rack_index;
   uint64_t total_racks_evaluated;
+  int concurrent_game_index;
   int thread_index;
   uint64_t *shared_rack_index;
   cpthread_mutex_t *shared_rack_index_lock;
@@ -431,7 +432,7 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
   print_ucgi_inference_total_racks_evaluated(total_racks_evaluated,
                                              thread_control);
 
-  int number_of_threads = thread_control_get_threads(thread_control);
+  int number_of_threads = thread_control_get_inference_threads(thread_control);
 
   uint64_t shared_rack_index = 0;
   cpthread_mutex_t shared_rack_index_lock;

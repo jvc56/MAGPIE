@@ -92,21 +92,21 @@ void postgen_prebroadcast_func(void *data) {
     log_fatal("leavegen failed to write klv to CSV");
   }
 
-  const int number_of_threads =
-      thread_control_get_threads(shared_data->thread_control);
+  const int num_concurrent_autoplay_games =
+      thread_control_get_concurrent_autoplay_games(shared_data->thread_control);
 
   // Get total game data.
   autoplay_results_finalize(lg_shared_data->autoplay_results_list,
-                            number_of_threads,
+                            num_concurrent_autoplay_games,
                             lg_shared_data->primary_autoplay_results);
 
   // Get generational game data
   autoplay_results_reset(lg_shared_data->gen_autoplay_results);
   autoplay_results_finalize(lg_shared_data->autoplay_results_list,
-                            number_of_threads,
+                            num_concurrent_autoplay_games,
                             lg_shared_data->gen_autoplay_results);
 
-  for (int i = 0; i < number_of_threads; i++) {
+  for (int i = 0; i < num_concurrent_autoplay_games; i++) {
     autoplay_results_reset(lg_shared_data->autoplay_results_list[i]);
   }
 
@@ -215,8 +215,8 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
 LeavegenSharedData *leavegen_shared_data_create(
     AutoplayResults *primary_autoplay_results,
     AutoplayResults **autoplay_results_list, const LetterDistribution *ld,
-    const char *data_paths, KLV *klv, int number_of_threads, int num_gens,
-    int *min_rack_targets) {
+    const char *data_paths, KLV *klv, int concurrent_autoplay_games,
+    int num_gens, int *min_rack_targets) {
   LeavegenSharedData *shared_data = malloc_or_die(sizeof(LeavegenSharedData));
 
   shared_data->num_gens = num_gens;
@@ -232,7 +232,7 @@ LeavegenSharedData *leavegen_shared_data_create(
   shared_data->min_rack_targets = min_rack_targets;
   shared_data->rack_list = rack_list_create(ld, min_rack_targets[0]);
   shared_data->postgen_checkpoint =
-      checkpoint_create(number_of_threads, postgen_prebroadcast_func);
+      checkpoint_create(concurrent_autoplay_games, postgen_prebroadcast_func);
   return shared_data;
 }
 
@@ -241,14 +241,14 @@ AutoplaySharedData *autoplay_shared_data_create(
     AutoplayResults *primary_autoplay_results,
     AutoplayResults **autoplay_results_list, ThreadControl *thread_control,
     const LetterDistribution *ld, const char *data_paths, KLV *klv,
-    int number_of_threads, int num_gens, int *min_rack_targets) {
+    int concurrent_autoplay_games, int num_gens, int *min_rack_targets) {
   AutoplaySharedData *shared_data = malloc_or_die(sizeof(AutoplaySharedData));
   shared_data->thread_control = thread_control;
   shared_data->leavegen_shared_data = NULL;
   if (klv) {
     shared_data->leavegen_shared_data = leavegen_shared_data_create(
         primary_autoplay_results, autoplay_results_list, ld, data_paths, klv,
-        number_of_threads, num_gens, min_rack_targets);
+        concurrent_autoplay_games, num_gens, min_rack_targets);
   }
   return shared_data;
 }
@@ -613,7 +613,8 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
 
   autoplay_results_reset(autoplay_results);
 
-  const int number_of_threads = thread_control_get_threads(thread_control);
+  const int concurrent_autoplay_games =
+      thread_control_get_concurrent_autoplay_games(thread_control);
 
   KLV *klv = NULL;
   bool show_divergent_results = args->use_game_pairs;
@@ -625,19 +626,20 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
   }
 
   AutoplayResults **autoplay_results_list =
-      malloc_or_die((sizeof(AutoplayResults *)) * (number_of_threads));
+      malloc_or_die((sizeof(AutoplayResults *)) * (concurrent_autoplay_games));
 
   AutoplaySharedData *shared_data = autoplay_shared_data_create(
       autoplay_results, autoplay_results_list, thread_control,
-      args->game_args->ld, args->data_paths, klv, number_of_threads, num_gens,
-      min_rack_targets);
+      args->game_args->ld, args->data_paths, klv, concurrent_autoplay_games,
+      num_gens, min_rack_targets);
 
   AutoplayWorker **autoplay_workers =
-      malloc_or_die((sizeof(AutoplayWorker *)) * (number_of_threads));
+      malloc_or_die((sizeof(AutoplayWorker *)) * (concurrent_autoplay_games));
   cpthread_t *worker_ids =
-      malloc_or_die((sizeof(cpthread_t)) * (number_of_threads));
+      malloc_or_die((sizeof(cpthread_t)) * (concurrent_autoplay_games));
 
-  for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
+  for (int thread_index = 0; thread_index < concurrent_autoplay_games;
+       thread_index++) {
     autoplay_workers[thread_index] = autoplay_worker_create(
         args, autoplay_results, thread_index, shared_data);
     autoplay_results_list[thread_index] =
@@ -646,7 +648,8 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
                     autoplay_workers[thread_index]);
   }
 
-  for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
+  for (int thread_index = 0; thread_index < concurrent_autoplay_games;
+       thread_index++) {
     cpthread_join(worker_ids[thread_index]);
   }
 
@@ -657,13 +660,14 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
 
   // The stats have already been combined in leavegen mode
   if (!is_leavegen_mode) {
-    autoplay_results_finalize(autoplay_results_list, number_of_threads,
+    autoplay_results_finalize(autoplay_results_list, concurrent_autoplay_games,
                               autoplay_results);
   }
 
   free(autoplay_results_list);
 
-  for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
+  for (int thread_index = 0; thread_index < concurrent_autoplay_games;
+       thread_index++) {
     autoplay_worker_destroy(autoplay_workers[thread_index]);
   }
 

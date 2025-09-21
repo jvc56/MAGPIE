@@ -31,7 +31,12 @@ bool thread_control_is_sim_printable(ThreadControl *thread_control,
 bool thread_control_is_started(ThreadControl *thread_control);
 
 int thread_control_get_print_info_interval(const ThreadControl *thread_control);
-int thread_control_get_threads(const ThreadControl *thread_control);
+int thread_control_get_concurrent_autoplay_games(
+    const ThreadControl *thread_control);
+int thread_control_get_sim_threads(const ThreadControl *thread_control);
+int thread_control_get_endgame_threads(const ThreadControl *thread_control);
+int thread_control_get_inference_threads(const ThreadControl *thread_control);
+int thread_control_get_max_minor_threads(const ThreadControl *thread_control);
 
 bool thread_control_set_status(ThreadControl *thread_control,
                                thread_control_status_t exit_status);
@@ -41,6 +46,14 @@ void thread_control_set_print_info_interval(ThreadControl *thread_control,
                                             int print_info_interval);
 void thread_control_set_threads(ThreadControl *thread_control,
                                 int number_of_threads);
+void thread_control_set_concurrent_autoplay_games(
+    ThreadControl *thread_control, int concurrent_autoplay_games);
+void thread_control_set_sim_threads(ThreadControl *thread_control,
+                                    int sim_threads_per_game);
+void thread_control_set_endgame_threads(ThreadControl *thread_control,
+                                        int endgame_threads_per_game);
+void thread_control_set_inference_threads(ThreadControl *thread_control,
+                                          int inference_threads_per_game);
 void thread_control_print(ThreadControl *thread_control, const char *content);
 bool thread_control_get_next_iter_output(ThreadControl *thread_control,
                                          ThreadControlIterOutput *iter_output);

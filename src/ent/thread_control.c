@@ -11,7 +11,10 @@
 #include <stdlib.h>
 
 struct ThreadControl {
-  int number_of_threads;
+  int concurrent_autoplay_games;
+  int sim_threads_per_game;
+  int endgame_threads_per_game;
+  int inference_threads_per_game;
   int print_info_interval;
   uint64_t max_iter_count;
   double time_elapsed;
@@ -32,7 +35,10 @@ struct ThreadControl {
 ThreadControl *thread_control_create(void) {
   ThreadControl *thread_control = malloc_or_die(sizeof(ThreadControl));
   thread_control->tc_status = THREAD_CONTROL_STATUS_UNINITIALIZED;
-  thread_control->number_of_threads = 1;
+  thread_control->concurrent_autoplay_games = 1;
+  thread_control->sim_threads_per_game = 1;
+  thread_control->endgame_threads_per_game = 1;
+  thread_control->inference_threads_per_game = 1;
   thread_control->print_info_interval = 0;
   thread_control->iter_count = 0;
   thread_control->iter_count_completed = 0;
@@ -193,17 +199,63 @@ bool thread_control_set_status(ThreadControl *thread_control,
   return success;
 }
 
-// NOT THREAD SAFE: This does not require locking since it is
-// not called during a multithreaded commmand
-int thread_control_get_threads(const ThreadControl *thread_control) {
-  return thread_control->number_of_threads;
-}
-
+// DEPRECATED: prefer concurrent_autoplay_games and foo_threads_per_game
 // NOT THREAD SAFE: This does not require locking since it is
 // not called during a multithreaded commmand
 void thread_control_set_threads(ThreadControl *thread_control,
                                 int number_of_threads) {
-  thread_control->number_of_threads = number_of_threads;
+  thread_control->concurrent_autoplay_games = number_of_threads;
+  thread_control->sim_threads_per_game = number_of_threads;
+  thread_control->endgame_threads_per_game = number_of_threads;
+  thread_control->inference_threads_per_game = number_of_threads;
+}
+
+int thread_control_get_concurrent_autoplay_games(
+    const ThreadControl *thread_control) {
+  return thread_control->concurrent_autoplay_games;
+}
+
+int thread_control_get_sim_threads(const ThreadControl *thread_control) {
+  return thread_control->sim_threads_per_game;
+}
+
+int thread_control_get_endgame_threads(const ThreadControl *thread_control) {
+  return thread_control->endgame_threads_per_game;
+}
+
+int thread_control_get_inference_threads(const ThreadControl *thread_control) {
+  return thread_control->inference_threads_per_game;
+}
+
+int thread_control_get_max_minor_threads(const ThreadControl *thread_control) {
+  int max_minor_threads = thread_control->sim_threads_per_game;
+  if (thread_control->endgame_threads_per_game > max_minor_threads) {
+    max_minor_threads = thread_control->endgame_threads_per_game;
+  }
+  if (thread_control->inference_threads_per_game > max_minor_threads) {
+    max_minor_threads = thread_control->inference_threads_per_game;
+  }
+  return max_minor_threads;
+}
+
+void thread_control_set_concurrent_autoplay_games(
+    ThreadControl *thread_control, int concurrent_autoplay_games) {
+  thread_control->concurrent_autoplay_games = concurrent_autoplay_games;
+}
+
+void thread_control_set_sim_threads(ThreadControl *thread_control,
+                                    int sim_threads_per_game) {
+  thread_control->sim_threads_per_game = sim_threads_per_game;
+}
+
+void thread_control_set_endgame_threads(ThreadControl *thread_control,
+                                        int endgame_threads_per_game) {
+  thread_control->endgame_threads_per_game = endgame_threads_per_game;
+}
+
+void thread_control_set_inference_threads(ThreadControl *thread_control,
+                                          int inference_threads_per_game) {
+  thread_control->inference_threads_per_game = inference_threads_per_game;
 }
 
 void thread_control_print(ThreadControl *thread_control, const char *content) {

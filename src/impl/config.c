@@ -42,7 +42,6 @@
 #include "simmer.h"
 #include <assert.h>
 #include <ctype.h>
-#include <float.h>
 #include <limits.h>
 #include <math.h>
 #include <stdbool.h>
@@ -96,6 +95,10 @@ typedef enum {
   ARG_TOKEN_HUMAN_READABLE,
   ARG_TOKEN_RANDOM_SEED,
   ARG_TOKEN_NUMBER_OF_THREADS,
+  ARG_TOKEN_CONCURRENT_AUTOPLAY_GAMES,
+  ARG_TOKEN_SIM_THREADS_PER_GAME,
+  ARG_TOKEN_ENDGAME_THREADS_PER_GAME,
+  ARG_TOKEN_INFERENCE_THREADS_PER_GAME,
   ARG_TOKEN_PRINT_INFO_INTERVAL,
   ARG_TOKEN_EXEC_MODE,
   ARG_TOKEN_TT_FRACTION_OF_MEM,
@@ -1708,9 +1711,39 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-
   if (number_of_threads > 0) {
     thread_control_set_threads(config->thread_control, number_of_threads);
+  }
+
+  int sim_threads = -1;
+  config_load_int(config, ARG_TOKEN_SIM_THREADS_PER_GAME, 1, MAX_THREADS,
+                  &sim_threads, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (sim_threads > 0) {
+    thread_control_set_sim_threads(config->thread_control, sim_threads);
+  }
+
+  int endgame_threads = -1;
+  config_load_int(config, ARG_TOKEN_ENDGAME_THREADS_PER_GAME, 1, MAX_THREADS,
+                  &endgame_threads, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (endgame_threads > 0) {
+    thread_control_set_endgame_threads(config->thread_control, endgame_threads);
+  }
+
+  int inference_threads = -1;
+  config_load_int(config, ARG_TOKEN_INFERENCE_THREADS_PER_GAME, 1, MAX_THREADS,
+                  &inference_threads, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (inference_threads > 0) {
+    thread_control_set_inference_threads(config->thread_control,
+                                         inference_threads);
   }
 
   int print_info_interval = -1;
@@ -2171,6 +2204,10 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_WRITE_BUFFER_SIZE, "wb", 1, 1);
   arg(ARG_TOKEN_RANDOM_SEED, "seed", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_THREADS, "threads", 1, 1);
+  arg(ARG_TOKEN_CONCURRENT_AUTOPLAY_GAMES, "concurrentautoplay", 1, 1);
+  arg(ARG_TOKEN_SIM_THREADS_PER_GAME, "simthreads", 1, 1);
+  arg(ARG_TOKEN_ENDGAME_THREADS_PER_GAME, "endgamethreads", 1, 1);
+  arg(ARG_TOKEN_INFERENCE_THREADS_PER_GAME, "inferencethreads", 1, 1);
   arg(ARG_TOKEN_PRINT_INFO_INTERVAL, "pfrequency", 1, 1);
   arg(ARG_TOKEN_EXEC_MODE, "mode", 1, 1);
   arg(ARG_TOKEN_TT_FRACTION_OF_MEM, "ttfraction", 1, 1);

@@ -467,7 +467,7 @@ bool rv_sim_is_epigon(const RandomVariables *rvs, const int i) {
 void rv_sim_destroy(RandomVariables *rvs) {
   Simmer *simmer = (Simmer *)rvs->data;
   rack_destroy(simmer->known_opp_rack);
-  const int num_threads = thread_control_get_threads(simmer->thread_control);
+  const int num_threads = thread_control_get_sim_threads(simmer->thread_control);
   for (int thread_index = 0; thread_index < num_threads; thread_index++) {
     simmer_worker_destroy(simmer->workers[thread_index]);
   }
@@ -505,7 +505,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
 
   simmer->dist_size = ld_get_size(game_get_ld(sim_args->game));
 
-  const int num_threads = thread_control_get_threads(thread_control);
+  const int num_threads = thread_control_get_sim_threads(thread_control);
   simmer->workers = malloc_or_die((sizeof(SimmerWorker *)) * (num_threads));
   for (int thread_index = 0; thread_index < num_threads; thread_index++) {
     simmer->workers[thread_index] = simmer_create_worker(sim_args->game);
