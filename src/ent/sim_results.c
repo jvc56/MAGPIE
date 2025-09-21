@@ -52,7 +52,6 @@ struct SimResults {
   int num_plies;
   int num_simmed_plays;
   uint64_t iteration_count;
-  bool simmed_plays_initialized;
   cpthread_mutex_t simmed_plays_mutex;
   cpthread_mutex_t display_mutex;
   atomic_int node_count;
@@ -140,23 +139,9 @@ void sim_results_unlock_simmed_plays(SimResults *sim_results) {
   cpthread_mutex_unlock(&sim_results->simmed_plays_mutex);
 }
 
-bool sim_results_get_simmed_plays_initialized(SimResults *sim_results) {
-  bool value;
-  sim_results_lock_simmed_plays(sim_results);
-  value = sim_results->simmed_plays_initialized;
-  sim_results_unlock_simmed_plays(sim_results);
-  return value;
-}
-
-void sim_results_set_simmed_plays_initialized(SimResults *sim_results,
-                                              bool value) {
-  sim_results_lock_simmed_plays(sim_results);
-  sim_results->simmed_plays_initialized = value;
-  sim_results_unlock_simmed_plays(sim_results);
-}
-
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
                        int num_plies, uint64_t seed) {
+  cpthread_mutex_lock(&sim_results->display_mutex);
   sim_results_destroy_internal(sim_results);
 
   const int num_simmed_plays = move_list_get_count(move_list);
@@ -171,7 +156,7 @@ void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
   sim_results->num_plies = num_plies;
   sim_results->iteration_count = 0;
   atomic_init(&sim_results->node_count, 0);
-  sim_results_set_simmed_plays_initialized(sim_results, true);
+  cpthread_mutex_unlock(&sim_results->display_mutex);
 }
 
 SimResults *sim_results_create(void) {
@@ -180,7 +165,6 @@ SimResults *sim_results_create(void) {
   sim_results->num_plies = 0;
   sim_results->iteration_count = 0;
   atomic_init(&sim_results->node_count, 0);
-  sim_results->simmed_plays_initialized = false;
   cpthread_mutex_init(&sim_results->simmed_plays_mutex);
   cpthread_mutex_init(&sim_results->display_mutex);
   sim_results->simmed_plays = NULL;
@@ -387,14 +371,11 @@ int compare_simmed_play_display_infos(const void *a, const void *b) {
   return 0;
 }
 
-char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
-                     bool best_known_play) {
-  bool success = sim_results_get_simmed_plays_initialized(sim_results);
-  if (!success) {
-    return string_duplicate("sim not started yet\n");
+bool ucgi_sim_stats_with_display_lock(const Game *game, SimResults *sim_results,
+                                      bool best_known_play) {
+  if (!sim_results->simmed_play_display_infos) {
+    return false;
   }
-
-  cpthread_mutex_lock(&sim_results->display_mutex);
 
   int number_of_simmed_plays = sim_results_get_number_of_plays(sim_results);
   for (int i = 0; i < number_of_simmed_plays; i++) {
@@ -444,9 +425,23 @@ char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
   string_builder_add_ucgi_move(sim_results->display_string_builder,
                                &sim_results->simmed_play_display_infos[0].move,
                                board, ld);
+  return true;
+}
+
+char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
+                     bool best_known_play) {
+  bool sim_stats_ready;
+  cpthread_mutex_lock(&sim_results->display_mutex);
+  sim_stats_ready =
+      ucgi_sim_stats_with_display_lock(game, sim_results, best_known_play);
   cpthread_mutex_unlock(&sim_results->display_mutex);
-  string_builder_add_formatted_string(sim_results->display_string_builder,
-                                      "\ninfo nps %f\n", nps);
+  if (!sim_stats_ready) {
+    string_builder_add_string(sim_results->display_string_builder,
+                              "sim results not yet available\n");
+  } else {
+    string_builder_add_formatted_string(sim_results->display_string_builder,
+                                        "\ninfo nps %f\n", nps);
+  }
   char *sim_stats_string =
       string_builder_dump(sim_results->display_string_builder, NULL);
   return sim_stats_string;

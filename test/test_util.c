@@ -782,6 +782,10 @@ error_code_t config_simulate_and_return_status(const Config *config,
   ErrorStack *error_stack = error_stack_create();
   set_thread_control_status_to_start(config_get_thread_control(config));
   config_simulate(config, known_opp_rack, sim_results, error_stack);
+  if (!thread_control_set_status(config_get_thread_control(config),
+                                 THREAD_CONTROL_STATUS_FINISHED)) {
+    log_fatal("failed to set thread control status to FINISHED after sim\n");
+  }
   error_code_t status = error_stack_top(error_stack);
   if (status != ERROR_STATUS_SUCCESS) {
     printf("config simulate finished with error: %d\n", status);

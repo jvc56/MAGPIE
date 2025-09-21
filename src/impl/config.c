@@ -1058,19 +1058,11 @@ char *status_sim(Config *config) {
   if (!sim_results) {
     return string_duplicate("simmer has not been initialized");
   }
-  char *status_str = NULL;
-  if (thread_control_is_sim_printable(
-          config->thread_control,
-          sim_results_get_simmed_plays_initialized(sim_results))) {
-    status_str = ucgi_sim_stats(
-        config->game, sim_results,
-        (double)sim_results_get_node_count(sim_results) /
-            thread_control_get_seconds_elapsed(config->thread_control),
-        true);
-  } else {
-    status_str = string_duplicate("simmer status not yet available");
-  }
-  return status_str;
+  return ucgi_sim_stats(
+      config->game, sim_results,
+      (double)sim_results_get_node_count(sim_results) /
+          thread_control_get_seconds_elapsed(config->thread_control),
+      true);
 }
 
 // Autoplay
@@ -1692,6 +1684,8 @@ void config_load_sampling_rule(Config *config, const char *sampling_rule_str,
     config->sampling_rule = BAI_SAMPLING_RULE_ROUND_ROBIN;
   } else if (has_iprefix(sampling_rule_str, "tt")) {
     config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO;
+  } else if (has_iprefix(sampling_rule_str, "idtt")) {
+    config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
   } else {
     error_stack_push(error_stack,
                      ERROR_STATUS_CONFIG_LOAD_MALFORMED_SAMPLING_RULE,

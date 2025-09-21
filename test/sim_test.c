@@ -632,7 +632,7 @@ void test_sim_perf(const char *sim_perf_iters) {
   const Bag *bag = game_get_bag(game);
   const char *strategies[] = {
       "-sr tt -threads 10",
-      "-sr tf -threads 10",
+      "-sr id -threads 10",
   };
   const int num_strategies = sizeof(strategies) / sizeof(strategies[0]);
   SimStrategyStats **stats =
