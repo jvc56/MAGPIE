@@ -130,6 +130,11 @@ wmp_move_gen_playthrough_subracks_init(WMPMoveGen *wmp_move_gen,
   const int subrack_size = anchor->tiles_to_play;
   wmp_move_gen->word_length = anchor->word_length;
   wmp_move_gen->num_tiles_played_through = anchor->word_length - subrack_size;
+  wmp_move_gen->tiles_to_play = subrack_size;
+  if (wmp_move_gen->num_tiles_played_through == 0) {
+    // We can use nonplaythrough subracks
+    return;
+  }
   const int offset = subracks_get_combination_offset(subrack_size);
   const int count = wmp_move_gen->count_by_size[subrack_size];
   for (int idx_for_size = 0; idx_for_size < count; idx_for_size++) {
@@ -141,7 +146,6 @@ wmp_move_gen_playthrough_subracks_init(WMPMoveGen *wmp_move_gen,
     bit_rack_add_bit_rack(&playthrough_subrack_info->subrack,
                           &wmp_move_gen->playthrough_bit_rack);
   }
-  wmp_move_gen->tiles_to_play = subrack_size;
 }
 
 static inline bool

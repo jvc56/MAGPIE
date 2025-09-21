@@ -190,7 +190,10 @@ static inline void set_small_play_for_record(SmallMove *move,
 }
 
 static inline Equity gen_get_cutoff_equity_or_score(const MoveGen *gen) {
-  Equity cutoff_equity_or_score;
+  return gen->cutoff_equity_or_score;
+}
+
+static inline void gen_update_cutoff_equity_or_score(MoveGen *gen) {
   switch (gen->move_record_type) {
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_ALL_SMALL:
@@ -200,20 +203,18 @@ static inline Equity gen_get_cutoff_equity_or_score(const MoveGen *gen) {
 #if defined(__has_builtin) && __has_builtin(__builtin_unreachable)
     __builtin_unreachable();
 #else
-    return 0;
+    return;
 #endif
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
-    cutoff_equity_or_score =
+    gen->cutoff_equity_or_score =
         gen->best_move_equity_or_score - gen->eq_margin_movegen;
-    break;
+    return;
   case MOVE_RECORD_BEST:;
     const Move *move = gen_get_readonly_best_move(gen);
-    cutoff_equity_or_score = (gen->move_sort_type == MOVE_SORT_EQUITY)
-                                 ? move_get_equity(move)
-                                 : move_get_score(move);
-    break;
+    gen->cutoff_equity_or_score = (gen->move_sort_type == MOVE_SORT_EQUITY)
+                                      ? move_get_equity(move)
+                                      : move_get_score(move);
   }
-  return cutoff_equity_or_score;
 }
 
 static inline void
@@ -221,6 +222,7 @@ gen_insert_spare_move_within_x_equity_of_best(MoveGen *gen,
                                               Equity move_equity_or_score) {
   if (gen->best_move_equity_or_score == EQUITY_INITIAL_VALUE) {
     gen->best_move_equity_or_score = move_equity_or_score;
+    gen_update_cutoff_equity_or_score(gen);
     move_list_insert_spare_move(gen->move_list, move_equity_or_score);
     return;
   }
@@ -234,6 +236,7 @@ gen_insert_spare_move_within_x_equity_of_best(MoveGen *gen,
     // the current move
     gen->best_move_equity_or_score = move_equity_or_score;
     // Update the cutoff now that the best possible equity or score has improved
+    gen_update_cutoff_equity_or_score(gen);
     cutoff_equity_or_score = gen_get_cutoff_equity_or_score(gen);
     while (move_list_get_count(gen->move_list) > 0 &&
            move_list_peek_equity(gen->move_list) < cutoff_equity_or_score) {
@@ -246,6 +249,7 @@ static inline void update_best_move_or_insert_into_movelist(
     MoveGen *gen, int leftstrip, int rightstrip, game_event_t move_type,
     Equity score, int start_row, int start_col, int tiles_played, int dir,
     MachineLetter strip[]) {
+  bool need_to_update_best_move_equity_or_score = false;
   switch (gen->move_record_type) {
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:;
@@ -255,6 +259,8 @@ static inline void update_best_move_or_insert_into_movelist(
     const Equity move_equity_or_score =
         get_move_equity_for_sort_type(gen, move, score);
     if (gen->move_record_type == MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST) {
+      // This updates the cutoff move internally so no update will be pending
+      // afterward.
       gen_insert_spare_move_within_x_equity_of_best(gen, move_equity_or_score);
     } else {
       move_list_insert_spare_move(gen->move_list, move_equity_or_score);
@@ -267,6 +273,7 @@ static inline void update_best_move_or_insert_into_movelist(
     move_set_equity(current_move,
                     get_move_equity_for_sort_type(gen, current_move, score));
     if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
+      need_to_update_best_move_equity_or_score = true;
       gen_switch_best_move_and_current_move(gen);
     }
     break;
@@ -278,6 +285,9 @@ static inline void update_best_move_or_insert_into_movelist(
     // small_move doesn't use equity.
     move_list_insert_spare_small_move(gen->move_list);
     break;
+  }
+  if (need_to_update_best_move_equity_or_score) {
+    gen_update_cutoff_equity_or_score(gen);
   }
 }
 
@@ -446,6 +456,7 @@ static inline Equity get_move_equity_for_sort_type_wmp(MoveGen *gen,
 static inline void
 update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
                                              int score, Equity leave_value) {
+  bool need_to_update_best_move_equity_or_score = false;
   switch (gen->move_record_type) {
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST: {
@@ -454,6 +465,8 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
     const Equity move_equity_or_score =
         get_move_equity_for_sort_type_wmp(gen, move, leave_value);
     if (gen->move_record_type == MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST) {
+      // This updates the cutoff move internally so no update will be pending
+      // afterward.
       gen_insert_spare_move_within_x_equity_of_best(gen, move_equity_or_score);
     } else {
       move_list_insert_spare_move(gen->move_list, move_equity_or_score);
@@ -466,6 +479,7 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
     move_set_equity(current_move, get_move_equity_for_sort_type_wmp(
                                       gen, current_move, leave_value));
     if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
+      need_to_update_best_move_equity_or_score = true;
       gen_switch_best_move_and_current_move(gen);
     }
     break;
@@ -478,6 +492,9 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
 #else
     return;
 #endif
+  }
+  if (need_to_update_best_move_equity_or_score) {
+    gen_update_cutoff_equity_or_score(gen);
   }
 }
 
@@ -1770,6 +1787,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->best_move_index = 0;
   move_set_equity(gen_get_best_move(gen), EQUITY_INITIAL_VALUE);
   gen->best_move_equity_or_score = EQUITY_INITIAL_VALUE;
+  gen->cutoff_equity_or_score = EQUITY_INITIAL_VALUE;
 
   // Set rack cross set and cache ld's tile scores
   gen->rack_cross_set = 0;
