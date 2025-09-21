@@ -217,7 +217,6 @@ static inline void gen_update_cutoff_equity_or_score(MoveGen *gen) {
   }
 }
 
-// Returns true if best_move_equity_or_score was adjusted, false otherwise.
 static inline void
 gen_insert_spare_move_within_x_equity_of_best(MoveGen *gen,
                                               Equity move_equity_or_score) {
@@ -244,7 +243,6 @@ gen_insert_spare_move_within_x_equity_of_best(MoveGen *gen,
            move_list_peek_equity(gen->move_list) < cutoff_equity_or_score) {
       move_list_pop_move(gen->move_list);
     }
-    return;
   }
 }
 
