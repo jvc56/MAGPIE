@@ -50,9 +50,6 @@ void sim_results_set_iteration_count(SimResults *sim_results, uint64_t count);
 void sim_results_lock_simmed_plays(SimResults *sim_results);
 void sim_results_unlock_simmed_plays(SimResults *sim_results);
 void sim_results_increment_node_count(SimResults *sim_results);
-bool sim_results_get_simmed_plays_initialized(SimResults *sim_results);
-void sim_results_set_simmed_plays_initialized(SimResults *sim_results,
-                                              bool value);
 char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
                      bool best_known_play);
 #endif

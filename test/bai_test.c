@@ -21,13 +21,13 @@ enum { NUM_UNIQUE_MEANS = 10000 };
 
 static const int sampling_rules[3] = {
     BAI_SAMPLING_RULE_ROUND_ROBIN,
-    BAI_SAMPLING_RULE_TOP_TWO,
+    BAI_SAMPLING_RULE_TOP_TWO_IDS,
 };
 
 static const int num_sampling_rules = sizeof(sampling_rules) / sizeof(int);
 
 static const int strategies[][3] = {
-    {BAI_SAMPLING_RULE_TOP_TWO, BAI_THRESHOLD_GK16},
+    {BAI_SAMPLING_RULE_TOP_TWO_IDS, BAI_THRESHOLD_GK16},
 };
 static const int num_strategies_entries =
     sizeof(strategies) / sizeof(strategies[0]);
@@ -70,7 +70,7 @@ void test_bai_top_two(int num_threads) {
   RandomVariables *rng = rvs_create(&rng_args);
 
   BAIOptions bai_options = {
-      .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO,
+      .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS,
       .threshold = BAI_THRESHOLD_GK16,
       .delta = 0.05,
       .sample_minimum = 50,
@@ -181,7 +181,7 @@ void test_bai_time_limit(int num_threads) {
   RandomVariables *rng = rvs_create(&rng_args);
 
   BAIOptions bai_options = {
-      .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO,
+      .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS,
       .threshold = BAI_THRESHOLD_NONE,
       .delta = 0.01,
       .sample_minimum = 50,
@@ -374,7 +374,7 @@ void test_bai_from_seed(const char *bai_seed) {
   RandomVariables *rng = rvs_create(&rng_args);
 
   BAIOptions bai_options = {
-      .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO,
+      .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS,
       .threshold = BAI_THRESHOLD_GK16,
       .delta = 0.01,
       .sample_minimum = 50,

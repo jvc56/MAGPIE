@@ -5,10 +5,13 @@
  * Implements algorithms described in
  *
  * Dealing with Unknown Variances in Best-Arm Identification
- * (https://arxiv.org/pdf/2210.00974)
+ *   Paper: https://arxiv.org/pdf/2210.00974
+ *   Code: https://marcjourdan.netlify.app/publication/baiuv/
+ *   (the code was kindly provided by Marc Jourdan)
  *
- * with Julia source code (https://marcjourdan.netlify.app/publication/baiuv/)
- * kindly provided by Marc Jourdan.
+ * Information-Directed Selection for Top-Two Algorithms
+ *   Paper: https://arxiv.org/pdf/2205.12086
+ *   Code: https://github.com/zihaophys/topk_colt23
  */
 
 #include "../compat/cpthread.h"
@@ -158,6 +161,27 @@ bai_sync_data_get_next_bai_sample_index_while_locked(BAISampleArgs *args) {
       arm_index = args->bai_sync_data->challenger_index;
     }
     break;
+  case BAI_SAMPLING_RULE_TOP_TWO_IDS:;
+    const int it = args->bai_sync_data->astar_index;
+    const int jt = args->bai_sync_data->challenger_index;
+    const double psi_it = (double)args->bai_sync_data->arm_data[it].num_samples;
+    const double psi_jt = (double)args->bai_sync_data->arm_data[jt].num_samples;
+    const double emp_mean_it = args->bai_sync_data->arm_data[it].mean;
+    const double emp_mean_jt = args->bai_sync_data->arm_data[jt].mean;
+    const double emp_var_it = args->bai_sync_data->arm_data[it].var;
+    const double emp_var_jt = args->bai_sync_data->arm_data[jt].var;
+    const double theta_bar =
+        (psi_it * emp_mean_it + psi_jt * emp_mean_jt) / (psi_it + psi_jt);
+    const double numerator = psi_it * bai_d(emp_mean_it, emp_var_it, theta_bar);
+    const double denominator =
+        numerator + psi_jt * bai_d(emp_mean_jt, emp_var_jt, theta_bar);
+    const double coin = numerator / denominator;
+    if (rvs_sample(args->bai_sync_data->rng, 0, 0, NULL) < coin) {
+      arm_index = it;
+    } else {
+      arm_index = jt;
+    }
+    break;
   }
   args->bai_sync_data->num_total_samples_requested++;
   return arm_index;
@@ -218,6 +242,7 @@ static inline void bai_update_threshold_and_challenger(
   case BAI_SAMPLING_RULE_ROUND_ROBIN:
     break;
   case BAI_SAMPLING_RULE_TOP_TWO:
+  case BAI_SAMPLING_RULE_TOP_TWO_IDS:
     bai_sync_data->challenger_index = -1;
     break;
   }
@@ -245,7 +270,8 @@ static inline void bai_update_threshold_and_challenger(
     switch (sampling_rule) {
     case BAI_SAMPLING_RULE_ROUND_ROBIN:
       break;
-    case BAI_SAMPLING_RULE_TOP_TWO:;
+    case BAI_SAMPLING_RULE_TOP_TWO:
+    case BAI_SAMPLING_RULE_TOP_TWO_IDS:;
       double arm_challenger_value =
           arm_Z + log((double)bai_sync_data->arm_data[i].num_samples);
       if (bai_sync_data->challenger_index < 0 ||

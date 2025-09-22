@@ -126,29 +126,6 @@ bool thread_control_is_ready_for_new_command(ThreadControl *thread_control) {
   return is_ready;
 }
 
-bool thread_control_is_sim_printable(ThreadControl *thread_control,
-                                     const bool simmed_plays_initialized) {
-  bool is_printable;
-  switch (thread_control_get_status(thread_control)) {
-  case THREAD_CONTROL_STATUS_UNINITIALIZED:
-    is_printable = false;
-    break;
-  case THREAD_CONTROL_STATUS_STARTED:
-    is_printable = simmed_plays_initialized;
-    break;
-  case THREAD_CONTROL_STATUS_MAX_ITERATIONS:
-  case THREAD_CONTROL_STATUS_USER_INTERRUPT:
-  case THREAD_CONTROL_STATUS_THRESHOLD:
-  case THREAD_CONTROL_STATUS_SAMPLE_LIMIT:
-  case THREAD_CONTROL_STATUS_TIMEOUT:
-  case THREAD_CONTROL_STATUS_ONE_ARM_REMAINING:
-  case THREAD_CONTROL_STATUS_FINISHED:
-    is_printable = true;
-    break;
-  }
-  return is_printable;
-}
-
 void thread_control_verify_state_change(thread_control_status_t old_status,
                                         thread_control_status_t new_status) {
   if (new_status == THREAD_CONTROL_STATUS_UNINITIALIZED ||

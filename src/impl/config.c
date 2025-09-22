@@ -1058,19 +1058,11 @@ char *status_sim(Config *config) {
   if (!sim_results) {
     return string_duplicate("simmer has not been initialized");
   }
-  char *status_str = NULL;
-  if (thread_control_is_sim_printable(
-          config->thread_control,
-          sim_results_get_simmed_plays_initialized(sim_results))) {
-    status_str = ucgi_sim_stats(
-        config->game, sim_results,
-        (double)sim_results_get_node_count(sim_results) /
-            thread_control_get_seconds_elapsed(config->thread_control),
-        true);
-  } else {
-    status_str = string_duplicate("simmer status not yet available");
-  }
-  return status_str;
+  return ucgi_sim_stats(
+      config->game, sim_results,
+      (double)sim_results_get_node_count(sim_results) /
+          thread_control_get_seconds_elapsed(config->thread_control),
+      true);
 }
 
 // Autoplay
@@ -1691,6 +1683,8 @@ void config_load_sampling_rule(Config *config, const char *sampling_rule_str,
   if (has_iprefix(sampling_rule_str, "rr")) {
     config->sampling_rule = BAI_SAMPLING_RULE_ROUND_ROBIN;
   } else if (has_iprefix(sampling_rule_str, "tt")) {
+    config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
+  } else if (has_iprefix(sampling_rule_str, "oldtt")) {
     config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO;
   } else {
     error_stack_push(error_stack,
@@ -2631,7 +2625,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->max_iterations = 5000;
   config->stop_cond_pct = 99;
   config->time_limit_seconds = 0;
-  config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO;
+  config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
   config->threshold = BAI_THRESHOLD_GK16;
   config->use_game_pairs = false;
   config->use_small_plays = false;

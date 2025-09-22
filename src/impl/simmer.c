@@ -56,12 +56,6 @@ void simulate(SimArgs *sim_args, SimResults *sim_results,
       (double)sim_results_get_node_count(sim_results) /
           thread_control_get_seconds_elapsed(sim_args->thread_control),
       true);
-  // The simmed plays are still initialized and can be printed, but
-  // we set this false here in preparation for the next sim command
-  // which may have to free the simmed plays during recreation.
-  // This setting will prevent status queries from accessing NULL
-  // or invalid simmed plays.
-  sim_results_set_simmed_plays_initialized(sim_results, false);
 
   // FIXME: once simming is part of autoplay, we will want to prevent these
   // repeated alloc and deallocs if possible
