@@ -2205,9 +2205,9 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_RANDOM_SEED, "seed", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_THREADS, "threads", 1, 1);
   arg(ARG_TOKEN_CONCURRENT_AUTOPLAY_GAMES, "concurrentautoplay", 1, 1);
-  arg(ARG_TOKEN_SIM_THREADS_PER_GAME, "simthreads", 1, 1);
-  arg(ARG_TOKEN_ENDGAME_THREADS_PER_GAME, "endgamethreads", 1, 1);
-  arg(ARG_TOKEN_INFERENCE_THREADS_PER_GAME, "inferencethreads", 1, 1);
+  arg(ARG_TOKEN_SIM_THREADS_PER_GAME, "smthreads", 1, 1);
+  arg(ARG_TOKEN_ENDGAME_THREADS_PER_GAME, "egthreads", 1, 1);
+  arg(ARG_TOKEN_INFERENCE_THREADS_PER_GAME, "inthreads", 1, 1);
   arg(ARG_TOKEN_PRINT_INFO_INTERVAL, "pfrequency", 1, 1);
   arg(ARG_TOKEN_EXEC_MODE, "mode", 1, 1);
   arg(ARG_TOKEN_TT_FRACTION_OF_MEM, "ttfraction", 1, 1);

@@ -34,7 +34,7 @@ void test_config_load_error(Config *config, const char *cmd,
 void test_config_load_error_cases(void) {
   Config *config = config_create_default_test();
   ErrorStack *error_stack = error_stack_create();
-  test_config_load_error(config, "endgame",
+  test_config_load_error(config, "zzzzzzz",
                          ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
                          error_stack);
   test_config_load_error(config, "sim -lex CSW21 -iter 1000 -plies 10 1",
@@ -251,8 +251,8 @@ void test_config_load_success(void) {
   assert(config_get_plies(config) == plies);
   assert(config_get_max_iterations(config) == max_iterations);
   assert(within_epsilon(config_get_stop_cond_pct(config), 98));
-  assert(thread_control_get_concurrent_autoplay_games(config_get_thread_control(config)) ==
-         number_of_threads);
+  assert(thread_control_get_concurrent_autoplay_games(
+             config_get_thread_control(config)) == number_of_threads);
   assert(thread_control_get_print_info_interval(
              config_get_thread_control(config)) == print_info);
   assert(config_get_use_game_pairs(config));
@@ -300,7 +300,7 @@ void test_config_load_success(void) {
   assert(config_get_plies(config) == plies);
   assert(config_get_max_iterations(config) == max_iterations);
   assert(within_epsilon(config_get_stop_cond_pct(config), 98));
-  assert(thread_control_get_threads(config_get_thread_control(config)) ==
+  assert(thread_control_get_sim_threads(config_get_thread_control(config)) ==
          number_of_threads);
   assert(thread_control_get_print_info_interval(
              config_get_thread_control(config)) == print_info);

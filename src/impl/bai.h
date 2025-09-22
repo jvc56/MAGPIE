@@ -420,7 +420,7 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   rvs_reset(rvs);
   bai_result_reset(bai_result);
 
-  const int number_of_threads = thread_control_get_threads(thread_control);
+  const int number_of_threads = thread_control_get_sim_threads(thread_control);
 
   Checkpoint *checkpoint =
       checkpoint_create(number_of_threads, bai_cull_epigons);
