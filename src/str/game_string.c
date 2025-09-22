@@ -182,7 +182,7 @@ char *ucgi_static_moves(const Game *game, const MoveList *move_list) {
     const Move *move = move_list_get_move(sorted_move_list, i);
     string_builder_add_string(moves_string_builder, "info currmove ");
     string_builder_add_ucgi_move(moves_string_builder, move, board, ld);
-    double move_equity = equity_to_double(EQUITY_PASS_VALUE);
+    double move_equity = equity_to_double(EQUITY_MIN_VALUE);
     if (move_get_type(move) != GAME_EVENT_PASS) {
       move_equity = equity_to_double(move_get_equity(move));
     }
