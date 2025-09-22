@@ -30,8 +30,9 @@ void string_builder_add_leave_rack(StringBuilder *inference_string,
   rack_set_dist_size(&leave_rack_exchanged, ld_size);
   leave_rack_get_exchanged(leave_rack, &leave_rack_exchanged);
 
-  int leave_rack_draws = leave_rack_get_draws(leave_rack);
-  double leave_rack_equity = leave_rack_get_equity(leave_rack);
+  const int leave_rack_draws = leave_rack_get_draws(leave_rack);
+  const double leave_rack_equity =
+      equity_to_double(leave_rack_get_equity(leave_rack));
 
   if (rack_is_empty(&leave_rack_exchanged)) {
     string_builder_add_rack(inference_string, &leave_rack_leave, ld, false);
@@ -312,7 +313,7 @@ void string_builder_ucgi_add_letter_minimum(
       ((double)draw_subtotal) /
       (double)stat_get_num_samples(inference_results_get_equity_values(
           inference_results, inference_stat_type));
-  double random_probability = get_probability_for_random_minimum_draw(
+  const double random_probability = get_probability_for_random_minimum_draw(
       bag_as_rack, rack, letter, minimum, number_of_tiles_played_or_exchanged);
   string_builder_add_formatted_string(
       ucgi_string_builder, " %f %f %lu %lu", inference_probability * 100,
