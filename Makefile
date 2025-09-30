@@ -31,9 +31,11 @@ cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -
 cflags.thread := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -fsanitize=thread
 cflags.vlg := -g -O0 -Wall -Wno-trigraphs -Wextra
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
-cflags.release := -O3 -flto -funroll-loops -march=native -Wall -Wno-trigraphs
+cflags.release := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs
+# Test-specific flags: like release but without DNDEBUG (asserts always enabled in tests)
+cflags.test_release := -O3 -flto -march=native -Wall -Wno-trigraphs
 cflags.dll_dev = -g -O0 -fpic -Wall
-cflags.dll_release = -O3 -fpic -flto -funroll-loops -march=native -Wall -Wno-trigraphs
+cflags.dll_release = -O3 -fpic -flto -march=native -Wall -Wno-trigraphs
 
 lflags.cov := --coverage
 
@@ -80,8 +82,9 @@ $(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(S
 $(OBJ_DIR)/$(CMD_DIR)/%.o: $(CMD_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(CMD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# Test files: use test_release flags if BUILD=release, otherwise use dev flags
 $(OBJ_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TEST_DIR) $(TEST_OBJ_SUBDIRS)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(if $(filter release,$(BUILD)),${cflags.test_release},$(CFLAGS)) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) -c $< -o $@
 
 $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(SRC_OBJ_SUBDIRS) $(TEST_OBJ_SUBDIRS):
 	mkdir -p $@

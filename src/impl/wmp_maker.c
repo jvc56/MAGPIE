@@ -464,6 +464,7 @@ uint32_t compute_min_num_buckets(const LetterDistribution *ld) {
   bit_rack_div_mod(&bit_rack, divisor, &actual_quotient, &remainder);
   const uint64_t actual_quotient_high = bit_rack_get_high_64(&actual_quotient);
   assert(actual_quotient_high <= max_quotient_high);
+  (void)actual_quotient_high; // Suppress unused warning when NDEBUG is defined
 
   return next_prime(divisor);
 }
