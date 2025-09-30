@@ -35,7 +35,7 @@ cflags.release := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs
 # Test-specific flags: like release but without DNDEBUG (asserts always enabled in tests)
 cflags.test_release := -O3 -flto -march=native -Wall -Wno-trigraphs
 cflags.dll_dev = -g -O0 -fpic -Wall
-cflags.dll_release = -O3 -fpic -flto -funroll-loops -march=native -Wall -Wno-trigraphs
+cflags.dll_release = -O3 -fpic -flto -march=native -Wall -Wno-trigraphs
 
 lflags.cov := --coverage
 
