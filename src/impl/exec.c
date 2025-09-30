@@ -68,6 +68,7 @@ bool load_command_sync(Config *config, ErrorStack *error_stack,
   const bool reset_result =
       thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
   assert(reset_result);
+  (void)reset_result; // Suppress unused warning when NDEBUG is defined
   // Loading the config should always be done synchronously and then start the
   // execution asynchronously (if enabled)
   config_load_command(config, command, error_stack);
