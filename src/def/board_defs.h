@@ -1,6 +1,8 @@
 #ifndef BOARD_DEFS_H
 #define BOARD_DEFS_H
 
+#include <stdbool.h>
+
 #include "rack_defs.h"
 
 // This should be defined in the Makefile
@@ -10,6 +12,9 @@
 #ifndef BOARD_DIM
 #define BOARD_DIM DEFAULT_BOARD_DIM
 #endif
+
+// In printed board, columns are labeled using A-Z
+#define BOARD_NUM_COLUMN_LABELS 26
 
 enum {
   BOARD_HORIZONTAL_DIRECTION = 0,
