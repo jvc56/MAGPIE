@@ -701,6 +701,32 @@ void test_sim_perf(const char *sim_perf_iters) {
   config_destroy(config);
 }
 
+void test_sim_one_ply(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "-plies 1 -threads 1 -iter 1000 -scond none");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack 1 JIBERRS");
+  load_and_exec_config_or_die(config, "gen");
+
+  SimResults *sim_results = config_get_sim_results(config);
+  error_code_t status =
+      config_simulate_and_return_status(config, NULL, sim_results);
+  assert(status == ERROR_STATUS_SUCCESS);
+  assert(thread_control_get_status(config_get_thread_control(config)) ==
+         THREAD_CONTROL_STATUS_SAMPLE_LIMIT);
+
+  const SimmedPlay *play = get_best_simmed_play(sim_results);
+  StringBuilder *move_string_builder = string_builder_create();
+  string_builder_add_move_description(
+      move_string_builder, simmed_play_get_move(play), config_get_ld(config));
+
+  assert(strings_equal(string_builder_peek(move_string_builder), "8D JIBER"));
+
+  config_destroy(config);
+  string_builder_destroy(move_string_builder);
+}
+
 void test_sim(void) {
   const char *sim_perf_iters = getenv("SIM_PERF_ITERS");
   if (sim_perf_iters) {
@@ -719,5 +745,6 @@ void test_sim(void) {
     test_sim_with_inference();
     test_sim_round_robin_consistency();
     test_sim_top_two_consistency();
+    test_sim_one_ply();
   }
 }
