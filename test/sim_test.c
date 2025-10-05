@@ -596,7 +596,9 @@ void append_game_with_moves_to_file(const char *filename, const Game *game,
                                     const MoveList *move_list) {
   FILE *output_file = fopen_or_die(filename, "a");
   StringBuilder *game_string = string_builder_create();
-  string_builder_add_game(game_string, game, move_list);
+  GameStringOptions *gso = game_string_options_create_default();
+  string_builder_add_game(game, move_list, gso, game_string);
+  game_string_options_destroy(gso);
   fprintf_or_die(output_file, "%s\n", string_builder_peek(game_string));
   string_builder_destroy(game_string);
   fclose_or_die(output_file);
