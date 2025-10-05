@@ -2,27 +2,27 @@ make clean
 # Run unit tests
 # Set $2 to run a specific test
 if [ "$1" == "u" ]; then
-# First run release magpie_test
-echo "Running release magpie_test first..."
+# DO NOT SUBMIT: Temporarily run debug mode first to get better error info on CI
+echo "Running debug magpie_test first..."
 if [[ $2 =~ ^[0-9]+$ ]]; then
-    make magpie_test BUILD=release BOARD_DIM=$2
+    make magpie_test BOARD_DIM=$2
     if ! ./bin/magpie_test; then
-        echo "Release tests failed, not running dev mode tests"
+        echo "Debug tests failed, not running release mode tests"
         exit 1
     fi
-    echo "Release tests passed, now running dev mode tests"
+    echo "Debug tests passed, now running release mode tests"
     make clean
-    make magpie_test BOARD_DIM=$2
+    make magpie_test BUILD=release BOARD_DIM=$2
     ./bin/magpie_test
 else
-    make magpie_test BUILD=release
+    make magpie_test
     if ! ./bin/magpie_test $2; then
-        echo "Release tests failed, not running dev mode tests"
+        echo "Debug tests failed, not running release mode tests"
         exit 1
     fi
-    echo "Release tests passed, now running dev mode tests"
+    echo "Release tests passed, now running release mode tests"
     make clean
-    make magpie_test
+    make magpie_test BUILD=release
     ./bin/magpie_test $2
 fi
 
