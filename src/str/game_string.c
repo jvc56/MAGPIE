@@ -80,7 +80,7 @@ void string_builder_add_player_row(const LetterDistribution *ld,
                                    StringBuilder *game_string,
                                    bool player_on_turn) {
   const char *player_on_turn_marker =
-      use_ascii_on_turn_marker(game_string_options) ? "->" : "  ➤";
+      use_ascii_on_turn_marker(game_string_options) ? "-> " : "  ➤";
   const char *player_off_turn_marker = "   ";
   const char *player_marker = player_on_turn_marker;
   if (!player_on_turn) {
