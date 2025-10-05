@@ -276,6 +276,7 @@ void autoplay_shared_data_destroy(AutoplaySharedData *shared_data) {
 typedef struct GameRunner {
   bool force_draw;
   int turn_number;
+  uint64_t game_number;
   uint64_t seed;
   Game *game;
   MoveList *move_list;
@@ -307,6 +308,7 @@ void game_runner_start(const AutoplayWorker *autoplay_worker,
   Game *game = game_runner->game;
   game_reset(game);
   game_runner->seed = iter_output->seed;
+  game_runner->game_number = iter_output->iter_count;
   game_seed(game, iter_output->seed);
   game_set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
@@ -378,6 +380,9 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
 
   // Print board if requested
   if (autoplay_worker->args->print_boards) {
+    printf("\n=== Game %llu, Turn %d ===\n",
+           (unsigned long long)game_runner->game_number,
+           game_runner->turn_number + 1);
     StringBuilder *game_string = string_builder_create();
     string_builder_add_game(game, NULL, autoplay_worker->args->game_string_options, game_string);
     printf("%s\n", string_builder_peek(game_string));

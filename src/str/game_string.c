@@ -11,6 +11,7 @@
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/bonus_square.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
@@ -110,7 +111,7 @@ void string_builder_add_player_row(const LetterDistribution *ld,
   string_builder_add_rack(game_string, player_rack, ld, false);
   string_builder_add_formatted_string(game_string, "%*s%d",
                                       10 - rack_get_total_letters(player_rack),
-                                      "", player_get_score(player));
+                                      "", equity_to_int(player_get_score(player)));
   free(display_player_name);
 }
 
@@ -256,7 +257,7 @@ void string_builder_add_board_column_header(
   if ((game_string_options == NULL) ||
       game_string_options->board_column_label ==
           GAME_STRING_BOARD_COLUMN_LABEL_ASCII) {
-    string_builder_add_formatted_string(game_string, "%c", col + 65);
+    string_builder_add_formatted_string(game_string, "%c ", col + 65);
   } else {
     if (col < BOARD_NUM_COLUMN_LABELS) {
       string_builder_add_string(game_string,
@@ -362,6 +363,12 @@ void print_ucgi_static_moves(Game *game, MoveList *move_list,
 GameStringOptions *game_string_options_create_default(void) {
   GameStringOptions *gso = malloc_or_die(sizeof(GameStringOptions));
   gso->board_color = GAME_STRING_BOARD_COLOR_NONE;
+  gso->board_tile_glyphs = GAME_STRING_BOARD_TILE_GLYPHS_PRIMARY;
+  gso->board_border = GAME_STRING_BOARD_BORDER_ASCII;
+  gso->board_column_label = GAME_STRING_BOARD_COLUMN_LABEL_ASCII;
+  gso->on_turn_marker = GAME_STRING_ON_TURN_MARKER_ASCII;
+  gso->on_turn_color = GAME_STRING_ON_TURN_COLOR_NONE;
+  gso->on_turn_score_style = GAME_STRING_ON_TURN_SCORE_NORMAL;
   return gso;
 }
 
