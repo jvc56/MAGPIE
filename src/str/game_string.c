@@ -98,7 +98,7 @@ void string_builder_add_player_row(const LetterDistribution *ld,
   if (player_on_turn && should_print_escape_codes(game_string_options)) {
     string_builder_add_player_on_turn_color(game_string, game_string_options);
   }
-  Rack *player_rack = player_get_rack(player);
+  const Rack *player_rack = player_get_rack(player);
   string_builder_add_formatted_string(
       game_string, "%s%s%*s", player_marker, display_player_name,
       25 - string_length(display_player_name), "");
@@ -241,8 +241,8 @@ void string_builder_add_move_with_rank_and_equity(const Game *game,
                                                   const MoveList *move_list,
                                                   StringBuilder *game_string,
                                                   int move_index) {
-  Board *board = game_get_board(game);
-  Move *move = move_list_get_move(move_list, move_index);
+  const Board *board = game_get_board(game);
+  const Move *move = move_list_get_move(move_list, move_index);
   const LetterDistribution *ld = game_get_ld(game);
   string_builder_add_formatted_string(game_string, " %d ", move_index + 1);
   string_builder_add_move(game_string, board, move, ld);
@@ -270,10 +270,10 @@ void string_builder_add_board_column_header(
 void string_builder_add_game(const Game *game, const MoveList *move_list,
                              const GameStringOptions *game_string_options,
                              StringBuilder *game_string) {
-  Board *board = game_get_board(game);
-  Bag *bag = game_get_bag(game);
-  Player *player0 = game_get_player(game, 0);
-  Player *player1 = game_get_player(game, 1);
+  const Board *board = game_get_board(game);
+  const Bag *bag = game_get_bag(game);
+  const Player *player0 = game_get_player(game, 0);
+  const Player *player1 = game_get_player(game, 1);
   const LetterDistribution *ld = game_get_ld(game);
   int number_of_moves = 0;
   if (move_list) {
@@ -328,13 +328,13 @@ char *ucgi_static_moves(const Game *game, const MoveList *move_list) {
   }
   StringBuilder *moves_string_builder = string_builder_create();
   const LetterDistribution *ld = game_get_ld(game);
-  Board *board = game_get_board(game);
+  const Board *board = game_get_board(game);
 
   MoveList *sorted_move_list = move_list_duplicate(move_list);
   move_list_sort_moves(sorted_move_list);
 
   for (int i = 0; i < move_list_get_count(sorted_move_list); i++) {
-    Move *move = move_list_get_move(sorted_move_list, i);
+    const Move *move = move_list_get_move(sorted_move_list, i);
     string_builder_add_string(moves_string_builder, "info currmove ");
     string_builder_add_ucgi_move(moves_string_builder, move, board, ld);
 
@@ -353,7 +353,7 @@ char *ucgi_static_moves(const Game *game, const MoveList *move_list) {
   return ucgi_static_moves_string;
 }
 
-void print_ucgi_static_moves(Game *game, MoveList *move_list,
+void print_ucgi_static_moves(const Game *game, const MoveList *move_list,
                              ThreadControl *thread_control) {
   char *starting_moves_string_pointer = ucgi_static_moves(game, move_list);
   thread_control_print(thread_control, starting_moves_string_pointer);
