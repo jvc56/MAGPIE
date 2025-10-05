@@ -1,9 +1,5 @@
 #include "game_string.h"
 
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <unistd.h>
 #include "../def/board_defs.h"
 #include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
@@ -22,6 +18,10 @@
 #include "letter_distribution_string.h"
 #include "move_string.h"
 #include "rack_string.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 bool should_print_escape_codes(const GameStringOptions *game_string_options) {
   if (game_string_options == NULL) {
@@ -108,9 +108,9 @@ void string_builder_add_player_row(const LetterDistribution *ld,
   }
 
   string_builder_add_rack(game_string, player_rack, ld, false);
-  string_builder_add_formatted_string(game_string, "%*s%d",
-                                      10 - rack_get_total_letters(player_rack),
-                                      "", equity_to_int(player_get_score(player)));
+  string_builder_add_formatted_string(
+      game_string, "%*s%d", 10 - rack_get_total_letters(player_rack), "",
+      equity_to_int(player_get_score(player)));
   free(display_player_name);
 }
 
@@ -119,9 +119,9 @@ void string_builder_add_board_square_color(StringBuilder *game_string,
                                            int col) {
   const uint8_t current_letter = board_get_letter(board, row, col);
   if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
-    string_builder_add_string(game_string,
-                              bonus_square_to_color_code(
-                                  board_get_bonus_square(board, row, col)));
+    string_builder_add_string(
+        game_string,
+        bonus_square_to_color_code(board_get_bonus_square(board, row, col)));
   } else {
     string_builder_add_color_reset(game_string);
     string_builder_add_color_bold(game_string);
@@ -212,9 +212,9 @@ void string_builder_add_board_row(const LetterDistribution *ld,
     const uint8_t current_letter = board_get_letter(board, row, i);
     if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
       if (should_print_alt_tiles(game_string_options)) {
-        string_builder_add_string(game_string,
-                                  bonus_square_to_alt_string(
-                                      board_get_bonus_square(board, row, i)));
+        string_builder_add_string(
+            game_string,
+            bonus_square_to_alt_string(board_get_bonus_square(board, row, i)));
       } else {
         string_builder_add_char(
             game_string,
@@ -343,7 +343,8 @@ char *ucgi_static_moves(const Game *game, const MoveList *move_list) {
         move_get_equity(move));
   }
   string_builder_add_string(moves_string_builder, "bestmove ");
-  string_builder_add_ucgi_move(moves_string_builder, move_list_get_move(sorted_move_list, 0), board, ld);
+  string_builder_add_ucgi_move(
+      moves_string_builder, move_list_get_move(sorted_move_list, 0), board, ld);
   string_builder_add_string(moves_string_builder, "\n");
   char *ucgi_static_moves_string =
       string_builder_dump(moves_string_builder, NULL);
@@ -392,18 +393,19 @@ GameStringOptions *game_string_options_create(
 
 void game_string_options_destroy(GameStringOptions *gso) { free(gso); }
 
-void string_builder_add_game_variant(StringBuilder *sb, game_variant_t variant) {
+void string_builder_add_game_variant(StringBuilder *sb,
+                                     game_variant_t variant) {
   const char *variant_name;
   switch (variant) {
-    case GAME_VARIANT_CLASSIC:
-      variant_name = GAME_VARIANT_CLASSIC_NAME;
-      break;
-    case GAME_VARIANT_WORDSMOG:
-      variant_name = GAME_VARIANT_WORDSMOG_NAME;
-      break;
-    default:
-      variant_name = GAME_VARIANT_UNKNOWN_NAME;
-      break;
+  case GAME_VARIANT_CLASSIC:
+    variant_name = GAME_VARIANT_CLASSIC_NAME;
+    break;
+  case GAME_VARIANT_WORDSMOG:
+    variant_name = GAME_VARIANT_WORDSMOG_NAME;
+    break;
+  default:
+    variant_name = GAME_VARIANT_UNKNOWN_NAME;
+    break;
   }
   string_builder_add_string(sb, variant_name);
 }
