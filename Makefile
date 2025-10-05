@@ -35,6 +35,8 @@ cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
 cflags.release := -O3 -flto -march=native -g -Wall -Wno-trigraphs
 # Test-specific flags: like release but without DNDEBUG (asserts always enabled in tests)
 cflags.test_release := -O3 -flto -march=native -g -Wall -Wno-trigraphs
+# DO NOT SUBMIT: Ultra-defensive build with O3 + all sanitizers to catch bugs
+cflags.paranoid := -O3 -g -Wall -Wno-trigraphs -fsanitize=address,undefined -fno-omit-frame-pointer -fno-optimize-sibling-calls
 cflags.dll_dev = -g -O0 -fpic -Wall
 cflags.dll_release = -O3 -fpic -flto -march=native -Wall -Wno-trigraphs
 
@@ -42,6 +44,7 @@ lflags.cov := --coverage
 
 ldflags.dev := -Llib -pthread $(FSAN_ARG)
 ldflags.thread := -Llib -pthread -fsanitize=thread
+ldflags.paranoid := -Llib -pthread -fsanitize=address,undefined
 ldflags.vlg := -Llib -pthread
 ldflags.release := -Llib -pthread
 ldflags.cov := -Llib -pthread
