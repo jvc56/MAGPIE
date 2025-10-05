@@ -2385,6 +2385,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   }
   if (pretty_mode) {
     config->print_boards = true;
+    config->game_string_options->board_color = GAME_STRING_BOARD_COLOR_ANSI;
     config->game_string_options->board_tile_glyphs = GAME_STRING_BOARD_TILE_GLYPHS_ALT;
     config->game_string_options->board_border = GAME_STRING_BOARD_BORDER_BOX_DRAWING;
     config->game_string_options->board_column_label = GAME_STRING_BOARD_COLUMN_LABEL_FULLWIDTH;
