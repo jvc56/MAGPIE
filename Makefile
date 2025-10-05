@@ -31,9 +31,10 @@ cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -
 cflags.thread := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -fsanitize=thread
 cflags.vlg := -g -O0 -Wall -Wno-trigraphs -Wextra
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
-cflags.release := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs
+# DO NOT SUBMIT: Temporarily add -g and remove -DNDEBUG to get better crash info on CI
+cflags.release := -O3 -flto -march=native -g -Wall -Wno-trigraphs
 # Test-specific flags: like release but without DNDEBUG (asserts always enabled in tests)
-cflags.test_release := -O3 -flto -march=native -Wall -Wno-trigraphs
+cflags.test_release := -O3 -flto -march=native -g -Wall -Wno-trigraphs
 cflags.dll_dev = -g -O0 -fpic -Wall
 cflags.dll_release = -O3 -fpic -flto -march=native -Wall -Wno-trigraphs
 
