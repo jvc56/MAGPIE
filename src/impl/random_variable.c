@@ -420,8 +420,8 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   Equity leftover = 0;
   game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
   // For one-ply sims, we need to account for the candidate move's leave value
-  Rack candidate_rack;
   if (plies == 1) {
+    Rack candidate_rack;
     const Player *player_on_turn =
         game_get_player(game, simmer->initial_player);
     rack_copy(&candidate_rack, player_get_rack(player_on_turn));
