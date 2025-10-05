@@ -121,7 +121,8 @@ static inline void ld_create_internal(const char *ld_name,
                                ld_name, line, num_columns));
       break;
     }
-    // letter, lower case, dist, score, is_vowel[, fullwidth_letter, fullwidth_lower_case]
+    // letter, lower case, dist, score, is_vowel[, fullwidth_letter,
+    // fullwidth_lower_case]
     const char *letter = string_splitter_get_item(single_letter_info, 0);
     const char *lower_case_letter =
         string_splitter_get_item(single_letter_info, 1);
@@ -226,8 +227,8 @@ static inline LetterDistribution *ld_create(const char *data_paths,
   char *ld_filename = NULL;
 
   // Try to find .csv7 file first (7-column format with fullwidth characters)
-  // We need to manually construct the path because data_filepaths_get_readable_filename
-  // appends .csv automatically for LD type
+  // We need to manually construct the path because
+  // data_filepaths_get_readable_filename appends .csv automatically for LD type
   if (data_paths) {
     StringSplitter *split_data_paths = split_string(data_paths, ':', true);
     int number_of_data_paths =
@@ -235,8 +236,8 @@ static inline LetterDistribution *ld_create(const char *data_paths,
 
     for (int i = 0; i < number_of_data_paths && !ld_filename; i++) {
       const char *data_path = string_splitter_get_item(split_data_paths, i);
-      char *csv7_path = get_formatted_string(
-          "%s/letterdistributions/%s.csv7", data_path, ld_name_lowercase);
+      char *csv7_path = get_formatted_string("%s/letterdistributions/%s.csv7",
+                                             data_path, ld_name_lowercase);
       if (access(csv7_path, F_OK | R_OK) == 0) {
         ld_filename = csv7_path;
       } else {
@@ -246,7 +247,8 @@ static inline LetterDistribution *ld_create(const char *data_paths,
     string_splitter_destroy(split_data_paths);
   }
 
-  // If .csv7 doesn't exist, fall back to regular .csv file using the standard function
+  // If .csv7 doesn't exist, fall back to regular .csv file using the standard
+  // function
   if (!ld_filename) {
     ld_filename = data_filepaths_get_readable_filename(
         data_paths, ld_name_lowercase, DATA_FILEPATH_TYPE_LD, error_stack);
