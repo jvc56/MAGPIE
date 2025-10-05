@@ -332,6 +332,7 @@ typedef struct SimmerWorker {
   Game *game;
   MoveList *move_list;
   XoshiroPRNG *prng;
+  int movegen_thread_index;  // Thread index for this worker's move generation
 } SimmerWorker;
 
 typedef struct Simmer {
@@ -347,6 +348,7 @@ typedef struct Simmer {
   const InferenceResults *inference_results;
   ThreadControl *thread_control;
   SimResults *sim_results;
+  int movegen_thread_index;  // Thread index for move generation during playout
 } Simmer;
 
 SimmerWorker *simmer_create_worker(const Game *game) {
@@ -433,7 +435,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       break;
     }
 
-    const Move *best_play = get_top_equity_move(game, thread_index, move_list);
+    const Move *best_play = get_top_equity_move(game, simmer_worker->movegen_thread_index, move_list);
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
     play_move(best_play, game, NULL);
@@ -544,6 +546,10 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->workers = malloc_or_die((sizeof(SimmerWorker *)) * (num_threads));
   for (int thread_index = 0; thread_index < num_threads; thread_index++) {
     simmer->workers[thread_index] = simmer_create_worker(sim_args->game);
+    // In multi-threaded sim mode, each worker uses its own movegen thread
+    // In single-threaded sim mode, all workers use the same movegen thread
+    simmer->workers[thread_index]->movegen_thread_index =
+        (num_threads > 1) ? thread_index : sim_args->movegen_thread_index;
   }
 
   simmer->win_pcts = sim_args->win_pcts;
@@ -554,6 +560,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->inference_results = sim_args->inference_results;
 
   simmer->thread_control = thread_control;
+  simmer->movegen_thread_index = sim_args->movegen_thread_index;
 
   sim_results_reset(sim_args->move_list, sim_results, sim_args->num_plies,
                     thread_control_get_seed(thread_control));

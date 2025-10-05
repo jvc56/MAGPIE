@@ -59,9 +59,9 @@ void simulate(SimArgs *sim_args, SimResults *sim_results,
         true);
   }
 
-  // FIXME: once simming is part of autoplay, we will want to prevent these
-  // repeated alloc and deallocs if possible
+  // Simming is now part of autoplay, so we don't destroy the movegen cache
+  // to avoid use-after-free when multiple concurrent games share movegens.
+  // The cache will be cleaned up when threads exit.
   rvs_destroy(rvs);
   rvs_destroy(rng);
-  gen_destroy_cache();
 }

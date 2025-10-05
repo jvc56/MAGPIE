@@ -19,6 +19,8 @@ typedef struct AutoplayArgs {
   GameArgs *game_args;
   ThreadControl *thread_control;
   WinPct *win_pcts;
+  bool multi_threaded_sims;  // false: concurrent games with single-threaded sims (default)
+                             // true: sequential games with multi-threaded sims
 } AutoplayArgs;
 
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,

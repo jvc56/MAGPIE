@@ -123,6 +123,7 @@ typedef enum {
   ARG_TOKEN_NEXT,
   ARG_TOKEN_PREVIOUS,
   ARG_TOKEN_GOTO,
+  ARG_TOKEN_MULTI_THREADED_SIMS,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -1101,6 +1102,11 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->thread_control = config_get_thread_control(config);
   autoplay_args->data_paths = config_get_data_paths(config);
   autoplay_args->win_pcts = config_get_win_pcts(config);
+  autoplay_args->multi_threaded_sims = false;  // Default to concurrent games mode
+  ErrorStack *error_stack = error_stack_create();
+  config_load_bool(config, ARG_TOKEN_MULTI_THREADED_SIMS,
+                   &autoplay_args->multi_threaded_sims, error_stack);
+  error_stack_destroy(error_stack);
   config_fill_game_args(config, autoplay_args->game_args);
 }
 
@@ -2763,6 +2769,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_WRITE_BUFFER_SIZE, "wb", 1, 1);
   arg(ARG_TOKEN_RANDOM_SEED, "seed", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_THREADS, "threads", 1, 1);
+  arg(ARG_TOKEN_MULTI_THREADED_SIMS, "mts", 1, 1);
   arg(ARG_TOKEN_PRINT_INFO_INTERVAL, "pfrequency", 1, 1);
   arg(ARG_TOKEN_EXEC_MODE, "mode", 1, 1);
   arg(ARG_TOKEN_TT_FRACTION_OF_MEM, "ttfraction", 1, 1);

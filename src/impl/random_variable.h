@@ -34,6 +34,7 @@ typedef struct SimArgs {
   ThreadControl *thread_control;
   BAIOptions bai_options;
   bool print_info;  // Whether to print UCGI sim stats
+  int movegen_thread_index;  // Thread index for move generation during playout
 } SimArgs;
 
 typedef struct RandomVariablesArgs {

@@ -454,14 +454,15 @@ Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
   return move_list_get_move(move_list, 0);
 }
 
-Move *get_top_computer_move(Game *game, int thread_index, MoveList *move_list,
+Move *get_top_computer_move(Game *game, int movegen_thread_index,
+                            int sim_threads, MoveList *move_list,
                             int sim_plies, int sim_num_plays,
                             int sim_max_iterations, int sim_min_play_iterations,
                             double sim_stop_cond_pct, uint64_t sim_seed,
                             WinPct *win_pcts) {
   // If sim_plies is 0 or bag is empty, fall back to equity-based move
   if (sim_plies <= 0 || bag_is_empty(game_get_bag(game))) {
-    return get_top_equity_move(game, thread_index, move_list);
+    return get_top_equity_move(game, movegen_thread_index, move_list);
   }
 
   // Generate moves for simulation
@@ -471,7 +472,7 @@ Move *get_top_computer_move(Game *game, int thread_index, MoveList *move_list,
       .move_record_type = MOVE_RECORD_ALL,
       .move_sort_type = MOVE_SORT_EQUITY,
       .override_kwg = NULL,
-      .thread_index = thread_index,
+      .thread_index = movegen_thread_index,
       .eq_margin_movegen = 0,
   };
   generate_moves(&args);
@@ -501,9 +502,9 @@ Move *get_top_computer_move(Game *game, int thread_index, MoveList *move_list,
   SimResults *sim_results = sim_results_create();
   sim_results_reset(move_list, sim_results, sim_plies, sim_seed);
 
-  // Create a single-threaded ThreadControl for this simulation
+  // Create ThreadControl for this simulation
   ThreadControl *thread_control = thread_control_create();
-  thread_control_set_threads(thread_control, 1);
+  thread_control_set_threads(thread_control, sim_threads);
   thread_control_set_seed(thread_control, sim_seed);
   thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
 
@@ -518,6 +519,7 @@ Move *get_top_computer_move(Game *game, int thread_index, MoveList *move_list,
       .inference_results = NULL,
       .thread_control = thread_control,
       .print_info = false,  // Suppress UCGI output for autoplay
+      .movegen_thread_index = movegen_thread_index,
   };
 
   // Set up BAI options
@@ -630,7 +632,7 @@ Move *get_top_computer_move(Game *game, int thread_index, MoveList *move_list,
   if (best_move) {
     return best_move;
   } else {
-    return get_top_equity_move(game, thread_index, move_list);
+    return get_top_equity_move(game, movegen_thread_index, move_list);
   }
 }
 

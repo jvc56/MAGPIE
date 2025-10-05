@@ -383,7 +383,23 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
   }
   // Create a deterministic seed for this sim from the game seed and turn number
   uint64_t sim_seed = game_runner->seed + (uint64_t)game_runner->turn_number * 1000000ULL;
-  *move = get_top_computer_move(game, thread_index, game_runner->move_list,
+
+  // Determine threading parameters based on autoplay mode
+  int movegen_thread_index, sim_threads;
+  if (args->multi_threaded_sims) {
+    // Mode 2: Sequential games, multi-threaded sims
+    // Use thread 0 for movegen, use all threads for simulation
+    movegen_thread_index = 0;
+    sim_threads = thread_control_get_threads(args->thread_control);
+  } else {
+    // Mode 1 (default): Concurrent games, single-threaded sims
+    // Each worker uses its own movegen, sims are single-threaded
+    movegen_thread_index = thread_index;
+    sim_threads = 1;
+  }
+
+  *move = get_top_computer_move(game, movegen_thread_index, sim_threads,
+                                game_runner->move_list,
                                 sim_plies, sim_num_plays, sim_max_iterations,
                                 sim_min_play_iterations, sim_stop_cond_pct, sim_seed,
                                 args->win_pcts);
@@ -669,7 +685,9 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
 
   autoplay_results_reset(autoplay_results);
 
-  const int number_of_threads = thread_control_get_threads(thread_control);
+  // In multi-threaded sim mode, only run one game at a time
+  const int number_of_threads = args->multi_threaded_sims ? 1
+                                : thread_control_get_threads(thread_control);
 
   KLV *klv = NULL;
   bool show_divergent_results = args->use_game_pairs;
