@@ -21,9 +21,9 @@
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
 #include "../ent/xoshiro.h"
+#include "../str/game_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "../str/game_string.h"
 #include "gameplay.h"
 #include "move_gen.h"
 #include "rack_list.h"
@@ -290,7 +290,8 @@ GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
   game_runner->shared_data = autoplay_worker->shared_data;
   game_runner->game = game_create(args->game_args);
   game_runner->move_list = move_list_create(1);
-  game_runner->pair_game_number = 0; // Will be set in game_runner_start if using pairs
+  game_runner->pair_game_number =
+      0; // Will be set in game_runner_start if using pairs
   return game_runner;
 }
 
@@ -306,8 +307,7 @@ void game_runner_destroy(GameRunner *game_runner) {
 void game_runner_start(const AutoplayWorker *autoplay_worker,
                        GameRunner *game_runner,
                        const ThreadControlIterOutput *iter_output,
-                       int starting_player_index,
-                       int pair_game_number) {
+                       int starting_player_index, int pair_game_number) {
   Game *game = game_runner->game;
   game_reset(game);
   game_runner->seed = iter_output->seed;
@@ -385,20 +385,21 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
   if (autoplay_worker->args->print_boards) {
     StringBuilder *output = string_builder_create();
     if (game_runner->pair_game_number == 0) {
-      string_builder_add_formatted_string(output,
-             "\n=== Game %llu, Turn %d ===\n",
-             (unsigned long long)(game_runner->game_number + 1),
-             game_runner->turn_number + 1);
+      string_builder_add_formatted_string(
+          output, "\n=== Game %llu, Turn %d ===\n",
+          (unsigned long long)(game_runner->game_number + 1),
+          game_runner->turn_number + 1);
     } else {
-      string_builder_add_formatted_string(output,
-             "\n=== Game Pair %llu, Game %d, Turn %d ===\n",
-             (unsigned long long)(game_runner->game_number + 1),
-             game_runner->pair_game_number,
-             game_runner->turn_number + 1);
+      string_builder_add_formatted_string(
+          output, "\n=== Game Pair %llu, Game %d, Turn %d ===\n",
+          (unsigned long long)(game_runner->game_number + 1),
+          game_runner->pair_game_number, game_runner->turn_number + 1);
     }
-    string_builder_add_game(game, game_runner->move_list, autoplay_worker->args->game_string_options, output);
+    string_builder_add_game(game, game_runner->move_list,
+                            autoplay_worker->args->game_string_options, output);
     string_builder_add_string(output, "\n");
-    thread_control_print(autoplay_worker->args->thread_control, string_builder_peek(output));
+    thread_control_print(autoplay_worker->args->thread_control,
+                         string_builder_peek(output));
     string_builder_destroy(output);
   }
 

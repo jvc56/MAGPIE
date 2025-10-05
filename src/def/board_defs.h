@@ -1,8 +1,8 @@
 #ifndef BOARD_DEFS_H
 #define BOARD_DEFS_H
 
-#include <stdbool.h>
 #include "rack_defs.h"
+#include <stdbool.h>
 
 // This should be defined in the Makefile
 // but is conditionally defined here

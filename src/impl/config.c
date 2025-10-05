@@ -2352,10 +2352,9 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       config->game_string_options->on_turn_marker =
           GAME_STRING_ON_TURN_MARKER_ARROWHEAD;
     } else {
-      error_stack_push(
-          error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG,
-          get_formatted_string("invalid on-turn marker: %s",
-                               on_turn_marker_str));
+      error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG,
+                       get_formatted_string("invalid on-turn marker: %s",
+                                            on_turn_marker_str));
       return;
     }
   }
@@ -2374,8 +2373,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     } else {
       error_stack_push(
           error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG,
-          get_formatted_string("invalid on-turn color: %s",
-                               on_turn_color_str));
+          get_formatted_string("invalid on-turn color: %s", on_turn_color_str));
       return;
     }
   }
@@ -2392,10 +2390,9 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       config->game_string_options->on_turn_score_style =
           GAME_STRING_ON_TURN_SCORE_BOLD;
     } else {
-      error_stack_push(
-          error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG,
-          get_formatted_string("invalid on-turn score style: %s",
-                               on_turn_score_str));
+      error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG,
+                       get_formatted_string("invalid on-turn score style: %s",
+                                            on_turn_score_str));
       return;
     }
   }
