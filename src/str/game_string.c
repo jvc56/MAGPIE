@@ -4,7 +4,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <unistd.h>
-
 #include "../def/board_defs.h"
 #include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"

@@ -2,7 +2,6 @@
 #define BOARD_DEFS_H
 
 #include <stdbool.h>
-
 #include "rack_defs.h"
 
 // This should be defined in the Makefile

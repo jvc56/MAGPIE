@@ -2,7 +2,7 @@ make clean
 # Run unit tests
 # Set $2 to run a specific test
 if [ "$1" == "u" ]; then
-# DO NOT SUBMIT: Temporarily run release mode first with debug symbols to reproduce CI issue
+# First run release magpie_test
 echo "Running release magpie_test first..."
 if [[ $2 =~ ^[0-9]+$ ]]; then
     make magpie_test BUILD=release BOARD_DIM=$2
