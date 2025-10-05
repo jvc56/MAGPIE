@@ -23,11 +23,13 @@
 #include "../ent/xoshiro.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "../str/game_string.h"
 #include "gameplay.h"
 #include "move_gen.h"
 #include "rack_list.h"
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 typedef struct LeavegenSharedData {
@@ -373,6 +375,15 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
   autoplay_results_add_move(autoplay_worker->autoplay_results,
                             game_runner->game, *move, &rare_rack_or_move_leave);
   play_move(*move, game, NULL);
+
+  // Print board if requested
+  if (autoplay_worker->args->print_boards) {
+    StringBuilder *game_string = string_builder_create();
+    string_builder_add_game(game, NULL, autoplay_worker->args->game_string_options, game_string);
+    printf("%s\n", string_builder_peek(game_string));
+    string_builder_destroy(game_string);
+  }
+
   game_runner->turn_number++;
 }
 
