@@ -120,6 +120,7 @@ typedef enum {
   ARG_TOKEN_ON_TURN_MARKER,
   ARG_TOKEN_ON_TURN_COLOR,
   ARG_TOKEN_ON_TURN_SCORE_STYLE,
+  ARG_TOKEN_PRETTY,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -2375,6 +2376,22 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     }
   }
 
+  // Pretty mode - sets multiple board options at once
+
+  bool pretty_mode = false;
+  config_load_bool(config, ARG_TOKEN_PRETTY, &pretty_mode, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (pretty_mode) {
+    config->print_boards = true;
+    config->game_string_options->board_tile_glyphs = GAME_STRING_BOARD_TILE_GLYPHS_ALT;
+    config->game_string_options->board_border = GAME_STRING_BOARD_BORDER_BOX_DRAWING;
+    config->game_string_options->board_column_label = GAME_STRING_BOARD_COLUMN_LABEL_FULLWIDTH;
+    config->game_string_options->on_turn_marker = GAME_STRING_ON_TURN_MARKER_ARROWHEAD;
+    config->game_string_options->on_turn_color = GAME_STRING_ON_TURN_COLOR_ANSI_GREEN;
+  }
+
   const char *write_buffer_size_str =
       config_get_parg_value(config, ARG_TOKEN_WRITE_BUFFER_SIZE, 0);
   if (write_buffer_size_str) {
@@ -2755,6 +2772,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_ON_TURN_MARKER, "onturnmarker", 1, 1);
   arg(ARG_TOKEN_ON_TURN_COLOR, "onturncolor", 1, 1);
   arg(ARG_TOKEN_ON_TURN_SCORE_STYLE, "onturnscore", 1, 1);
+  arg(ARG_TOKEN_PRETTY, "pretty", 1, 1);
 
 #undef cmd
 #undef arg
