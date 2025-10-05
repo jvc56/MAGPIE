@@ -11,7 +11,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <unistd.h>
 
 typedef enum {
   LD_TYPE_UNKNOWN,
@@ -42,7 +41,7 @@ typedef struct LetterDistribution {
   int total_tiles;
   size_t max_tile_length;
   char ld_ml_to_hl[MACHINE_LETTER_MAX_VALUE][MAX_LETTER_BYTE_LENGTH];
-  char ld_ml_to_hl_fw[MACHINE_LETTER_MAX_VALUE][MAX_LETTER_BYTE_LENGTH];
+  char ld_ml_to_alt_hl[MACHINE_LETTER_MAX_VALUE][MAX_LETTER_BYTE_LENGTH];
 } LetterDistribution;
 
 static inline MachineLetter get_blanked_machine_letter(MachineLetter ml) {
@@ -102,7 +101,7 @@ static inline void ld_create_internal(const char *ld_name,
 
   for (int i = 0; i < MACHINE_LETTER_MAX_VALUE; i++) {
     ld->ld_ml_to_hl[i][0] = '\0';
-    ld->ld_ml_to_hl_fw[i][0] = '\0';
+    ld->ld_ml_to_alt_hl[i][0] = '\0';
   }
 
   int machine_letter = 0;
@@ -188,15 +187,15 @@ static inline void ld_create_internal(const char *ld_name,
       const char *fullwidth_lower_case_letter =
           string_splitter_get_item(single_letter_info, 6);
 
-      strncpy(ld->ld_ml_to_hl_fw[machine_letter], fullwidth_letter,
-              sizeof(ld->ld_ml_to_hl_fw[machine_letter]));
+      strncpy(ld->ld_ml_to_alt_hl[machine_letter], fullwidth_letter,
+              sizeof(ld->ld_ml_to_alt_hl[machine_letter]));
 
       if (machine_letter > 0) {
         MachineLetter blanked_machine_letter =
             get_blanked_machine_letter(machine_letter);
-        strncpy(ld->ld_ml_to_hl_fw[blanked_machine_letter],
+        strncpy(ld->ld_ml_to_alt_hl[blanked_machine_letter],
                 fullwidth_lower_case_letter,
-                sizeof(ld->ld_ml_to_hl_fw[blanked_machine_letter]));
+                sizeof(ld->ld_ml_to_alt_hl[blanked_machine_letter]));
       }
     }
 
@@ -224,36 +223,8 @@ static inline LetterDistribution *ld_create(const char *data_paths,
                                             const char *ld_name,
                                             ErrorStack *error_stack) {
   char *ld_name_lowercase = to_lower_case(ld_name);
-  char *ld_filename = NULL;
-
-  // Try to find .csv7 file first (7-column format with fullwidth characters)
-  // We need to manually construct the path because
-  // data_filepaths_get_readable_filename appends .csv automatically for LD type
-  if (data_paths) {
-    StringSplitter *split_data_paths = split_string(data_paths, ':', true);
-    int number_of_data_paths =
-        string_splitter_get_number_of_items(split_data_paths);
-
-    for (int i = 0; i < number_of_data_paths && !ld_filename; i++) {
-      const char *data_path = string_splitter_get_item(split_data_paths, i);
-      char *csv7_path = get_formatted_string("%s/letterdistributions/%s.csv7",
-                                             data_path, ld_name_lowercase);
-      if (access(csv7_path, F_OK | R_OK) == 0) {
-        ld_filename = csv7_path;
-      } else {
-        free(csv7_path);
-      }
-    }
-    string_splitter_destroy(split_data_paths);
-  }
-
-  // If .csv7 doesn't exist, fall back to regular .csv file using the standard
-  // function
-  if (!ld_filename) {
-    ld_filename = data_filepaths_get_readable_filename(
-        data_paths, ld_name_lowercase, DATA_FILEPATH_TYPE_LD, error_stack);
-  }
-
+  char *ld_filename = data_filepaths_get_readable_filename(
+      data_paths, ld_name_lowercase, DATA_FILEPATH_TYPE_LD, error_stack);
   free(ld_name_lowercase);
   LetterDistribution *ld = NULL;
   if (error_stack_is_empty(error_stack)) {
@@ -344,17 +315,17 @@ static inline char *ld_ml_to_hl(const LetterDistribution *ld,
   return string_duplicate(human_readable_letter);
 }
 
-static inline char *ld_ml_to_hl_fw(const LetterDistribution *ld,
-                                   MachineLetter ml) {
-  const char *fullwidth_letter = ld->ld_ml_to_hl_fw[ml];
-  // If no fullwidth version is defined, fall back to regular version
-  if (fullwidth_letter[0] == '\0') {
+static inline char *ld_ml_to_alt_hl(const LetterDistribution *ld,
+                                    MachineLetter ml) {
+  const char *alt_letter = ld->ld_ml_to_alt_hl[ml];
+  // If no alt version is defined, fall back to regular version
+  if (alt_letter[0] == '\0') {
     return ld_ml_to_hl(ld, ml);
   }
-  if (is_human_readable_letter_multichar(fullwidth_letter)) {
-    return get_formatted_string("[%s]", fullwidth_letter);
+  if (is_human_readable_letter_multichar(alt_letter)) {
+    return get_formatted_string("[%s]", alt_letter);
   }
-  return string_duplicate(fullwidth_letter);
+  return string_duplicate(alt_letter);
 }
 
 // This is a linear search. This function should not be used for anything
