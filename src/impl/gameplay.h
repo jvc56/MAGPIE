@@ -7,6 +7,7 @@
 #include "../ent/game_history.h"
 #include "../ent/move.h"
 #include "../ent/rack.h"
+#include "../ent/win_pct.h"
 #include "move_gen.h"
 
 void draw_starting_racks(Game *game);
@@ -14,6 +15,11 @@ void play_move(const Move *move, Game *game, Rack *leave);
 void play_move_without_drawing_tiles(const Move *move, Game *game);
 void set_random_rack(Game *game, int player_index, const Rack *known_rack);
 Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list);
+Move *get_top_computer_move(Game *game, int thread_index, MoveList *move_list,
+                            int sim_plies, int sim_num_plays,
+                            int sim_max_iterations, int sim_min_play_iterations,
+                            double sim_stop_cond_pct, uint64_t sim_seed,
+                            WinPct *win_pcts);
 void generate_moves_for_game(const MoveGenArgs *args);
 void draw_to_full_rack(const Game *game, int player_index);
 int draw_rack_string_from_bag(const Game *game, int player_index,

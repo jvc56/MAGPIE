@@ -51,11 +51,13 @@ void simulate(SimArgs *sim_args, SimResults *sim_results,
 
   sim_results_set_iteration_count(sim_results, rvs_get_total_samples(rvs));
 
-  print_ucgi_sim_stats(
-      sim_args->game, sim_results, sim_args->thread_control,
-      (double)sim_results_get_node_count(sim_results) /
-          thread_control_get_seconds_elapsed(sim_args->thread_control),
-      true);
+  if (sim_args->print_info) {
+    print_ucgi_sim_stats(
+        sim_args->game, sim_results, sim_args->thread_control,
+        (double)sim_results_get_node_count(sim_results) /
+            thread_control_get_seconds_elapsed(sim_args->thread_control),
+        true);
+  }
 
   // FIXME: once simming is part of autoplay, we will want to prevent these
   // repeated alloc and deallocs if possible

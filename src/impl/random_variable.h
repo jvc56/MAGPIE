@@ -33,6 +33,7 @@ typedef struct SimArgs {
   InferenceArgs inference_args;
   ThreadControl *thread_control;
   BAIOptions bai_options;
+  bool print_info;  // Whether to print UCGI sim stats
 } SimArgs;
 
 typedef struct RandomVariablesArgs {

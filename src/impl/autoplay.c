@@ -285,7 +285,8 @@ GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
   GameRunner *game_runner = malloc_or_die(sizeof(GameRunner));
   game_runner->shared_data = autoplay_worker->shared_data;
   game_runner->game = game_create(args->game_args);
-  game_runner->move_list = move_list_create(1);
+  // Create move_list with large capacity for move generation (100k moves)
+  game_runner->move_list = move_list_create(100000);
   return game_runner;
 }
 
@@ -336,6 +337,23 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
   LeavegenSharedData *lg_shared_data =
       game_runner->shared_data->leavegen_shared_data;
   const int thread_index = autoplay_worker->worker_index;
+  const AutoplayArgs *args = autoplay_worker->args;
+
+  // Get sim parameters from the player (which gets them from PlayersData)
+  // This ensures sim params work the same way as KLV files in game pairs
+  const Player *player_on_turn = game_get_player(game, player_on_turn_index);
+  const SimParams *sim_params = player_get_sim_params(player_on_turn);
+
+  int sim_plies = sim_params->plies;
+  int sim_num_plays = sim_params->num_plays;
+  int sim_max_iterations = sim_params->max_iterations;
+  int sim_min_play_iterations = sim_params->min_play_iterations;
+  double sim_stop_cond_pct = sim_params->stop_cond_pct;
+
+
+
+
+
   // If we are forcing a draw, we need to draw a rare leave. The drawn
   // leave does not necessarily fit in the bag. If we've reached the
   // target minimum leave count for all leaves, no rare leave can be
@@ -363,7 +381,12 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
 
     rack_copy(player_rack, &original_rack);
   }
-  *move = get_top_equity_move(game, thread_index, game_runner->move_list);
+  // Create a deterministic seed for this sim from the game seed and turn number
+  uint64_t sim_seed = game_runner->seed + (uint64_t)game_runner->turn_number * 1000000ULL;
+  *move = get_top_computer_move(game, thread_index, game_runner->move_list,
+                                sim_plies, sim_num_plays, sim_max_iterations,
+                                sim_min_play_iterations, sim_stop_cond_pct, sim_seed,
+                                args->win_pcts);
 
   if (lg_shared_data) {
     rack_list_add_rack(lg_shared_data->rack_list, player_rack,
@@ -420,11 +443,45 @@ void play_autoplay_game_or_game_pair(
     AutoplayWorker *autoplay_worker, GameRunner *game_runner1,
     GameRunner *game_runner2, const ThreadControlIterOutput *iter_output) {
   const int starting_player_index = (int)(iter_output->iter_count % 2);
+  PlayersData *players_data = autoplay_worker->args->game_args->players_data;
+
+  // Start game1
   game_runner_start(autoplay_worker, game_runner1, iter_output,
                     starting_player_index);
+  Game *game1 = game_runner1->game;
+  Player *game1_p0 = game_get_player(game1, 0);
+  Player *game1_p1 = game_get_player(game1, 1);
+
+  // Update players with data from PlayersData
+  player_update(players_data, game1_p0);
+  player_update(players_data, game1_p1);
+
+  // For game pairs with sim params, assign the same way as KLV:
+  // Both games: p0→sp1, p1→sp2 (NO swapping)
+  // Divergence comes from different starting player, not from swapping params
+  const SimParams *sp1 = players_data_get_sim_params(players_data, 0);
+  const SimParams *sp2 = players_data_get_sim_params(players_data, 1);
+
+  // Game1: p0→sp1, p1→sp2
+  player_set_sim_params(game1_p0, sp1);
+  player_set_sim_params(game1_p1, sp2);
+
   if (game_runner2) {
+    // Start game2 with opposite starting player
     game_runner_start(autoplay_worker, game_runner2, iter_output,
                       1 - starting_player_index);
+
+    Game *game2 = game_runner2->game;
+    Player *game2_p0 = game_get_player(game2, 0);
+    Player *game2_p1 = game_get_player(game2, 1);
+
+    // Update players with data from PlayersData
+    player_update(players_data, game2_p0);
+    player_update(players_data, game2_p1);
+
+    // Game2: SAME assignment as game1 (like KLV files)
+    player_set_sim_params(game2_p0, sp1);
+    player_set_sim_params(game2_p1, sp2);
   }
   bool games_are_divergent = false;
   while (true) {
@@ -447,8 +504,7 @@ void play_autoplay_game_or_game_pair(
       break;
     }
 
-    // It is guaranteed that at least one move is not null
-    // at this point.
+
     if (!games_are_divergent &&
         (!move1 || !move2 ||
          compare_moves_without_equity(move1, move2, true) != -1)) {
