@@ -276,6 +276,7 @@ void autoplay_shared_data_destroy(AutoplaySharedData *shared_data) {
 typedef struct GameRunner {
   bool force_draw;
   int turn_number;
+  int pair_game_number; // 0 for non-paired games, 1 or 2 for game pairs
   uint64_t game_number;
   uint64_t seed;
   Game *game;
@@ -289,6 +290,7 @@ GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
   game_runner->shared_data = autoplay_worker->shared_data;
   game_runner->game = game_create(args->game_args);
   game_runner->move_list = move_list_create(1);
+  game_runner->pair_game_number = 0; // Will be set in game_runner_start if using pairs
   return game_runner;
 }
 
@@ -304,11 +306,13 @@ void game_runner_destroy(GameRunner *game_runner) {
 void game_runner_start(const AutoplayWorker *autoplay_worker,
                        GameRunner *game_runner,
                        const ThreadControlIterOutput *iter_output,
-                       int starting_player_index) {
+                       int starting_player_index,
+                       int pair_game_number) {
   Game *game = game_runner->game;
   game_reset(game);
   game_runner->seed = iter_output->seed;
   game_runner->game_number = iter_output->iter_count;
+  game_runner->pair_game_number = pair_game_number;
   game_seed(game, iter_output->seed);
   game_set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
@@ -376,19 +380,29 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
   get_leave_for_move(*move, game, &rare_rack_or_move_leave);
   autoplay_results_add_move(autoplay_worker->autoplay_results,
                             game_runner->game, *move, &rare_rack_or_move_leave);
-  play_move(*move, game, NULL);
 
-  // Print board if requested
+  // Print board with move about to be played if requested
   if (autoplay_worker->args->print_boards) {
-    printf("\n=== Game %llu, Turn %d ===\n",
-           (unsigned long long)game_runner->game_number,
-           game_runner->turn_number + 1);
-    StringBuilder *game_string = string_builder_create();
-    string_builder_add_game(game, NULL, autoplay_worker->args->game_string_options, game_string);
-    printf("%s\n", string_builder_peek(game_string));
-    string_builder_destroy(game_string);
+    StringBuilder *output = string_builder_create();
+    if (game_runner->pair_game_number == 0) {
+      string_builder_add_formatted_string(output,
+             "\n=== Game %llu, Turn %d ===\n",
+             (unsigned long long)(game_runner->game_number + 1),
+             game_runner->turn_number + 1);
+    } else {
+      string_builder_add_formatted_string(output,
+             "\n=== Game Pair %llu, Game %d, Turn %d ===\n",
+             (unsigned long long)(game_runner->game_number + 1),
+             game_runner->pair_game_number,
+             game_runner->turn_number + 1);
+    }
+    string_builder_add_game(game, game_runner->move_list, autoplay_worker->args->game_string_options, output);
+    string_builder_add_string(output, "\n");
+    thread_control_print(autoplay_worker->args->thread_control, string_builder_peek(output));
+    string_builder_destroy(output);
   }
 
+  play_move(*move, game, NULL);
   game_runner->turn_number++;
 }
 
@@ -437,10 +451,10 @@ void play_autoplay_game_or_game_pair(
     GameRunner *game_runner2, const ThreadControlIterOutput *iter_output) {
   const int starting_player_index = (int)(iter_output->iter_count % 2);
   game_runner_start(autoplay_worker, game_runner1, iter_output,
-                    starting_player_index);
+                    starting_player_index, game_runner2 ? 1 : 0);
   if (game_runner2) {
     game_runner_start(autoplay_worker, game_runner2, iter_output,
-                      1 - starting_player_index);
+                      1 - starting_player_index, 2);
   }
   bool games_are_divergent = false;
   while (true) {
