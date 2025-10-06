@@ -39,7 +39,6 @@ Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
   }
   return klv_get_leave_value(klv, rack);
 }
-
 // Assumes the move hasn't been played yet and is in the rack
 void get_leave_for_move(const Move *move, const Game *game, Rack *leave) {
   rack_copy(leave, player_get_rack(game_get_player(

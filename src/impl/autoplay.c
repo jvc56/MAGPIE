@@ -328,13 +328,15 @@ void game_runner_start(const AutoplayWorker *autoplay_worker,
 }
 
 // Monte Carlo simulation-based move selection for autoplay
-// This function is defined here instead of gameplay.c to avoid circular dependency
+// This function is defined here instead of gameplay.c to avoid circular
+// dependency
 static Move *get_top_computer_move(Game *game, int movegen_thread_index,
-                            int sim_threads, MoveList *move_list,
-                            int sim_plies, int sim_num_plays,
-                            int sim_max_iterations, int sim_min_play_iterations,
-                            double sim_stop_cond_pct, uint64_t sim_seed,
-                            WinPct *win_pcts) {
+                                   int sim_threads, MoveList *move_list,
+                                   int sim_plies, int sim_num_plays,
+                                   int sim_max_iterations,
+                                   int sim_min_play_iterations,
+                                   double sim_stop_cond_pct, uint64_t sim_seed,
+                                   WinPct *win_pcts) {
   // If sim_plies is 0 or bag is empty, fall back to equity-based move
   if (sim_plies <= 0 || bag_is_empty(game_get_bag(game))) {
     return get_top_equity_move(game, movegen_thread_index, move_list);
@@ -355,12 +357,15 @@ static Move *get_top_computer_move(Game *game, int movegen_thread_index,
   // Sort the move list (convert from heap to sorted descending array)
   move_list_sort_moves(move_list);
 
-  // Remove pass move if it exists (it's always first if present due to 0 equity)
+  // Remove pass move if it exists (it's always first if present due to 0
+  // equity)
   int num_moves = move_list_get_count(move_list);
-  if (num_moves > 0 && move_get_type(move_list_get_move(move_list, 0)) == GAME_EVENT_PASS) {
+  if (num_moves > 0 &&
+      move_get_type(move_list_get_move(move_list, 0)) == GAME_EVENT_PASS) {
     // Shift all moves down by one to remove the pass
     for (int i = 0; i < num_moves - 1; i++) {
-      move_copy(move_list_get_move(move_list, i), move_list_get_move(move_list, i + 1));
+      move_copy(move_list_get_move(move_list, i),
+                move_list_get_move(move_list, i + 1));
     }
     move_list->count--;
     num_moves--;
@@ -393,7 +398,7 @@ static Move *get_top_computer_move(Game *game, int movegen_thread_index,
       .use_inference = false,
       .inference_results = NULL,
       .thread_control = thread_control,
-      .print_info = false,  // Suppress UCGI output for autoplay
+      .print_info = false, // Suppress UCGI output for autoplay
       .movegen_thread_index = movegen_thread_index,
   };
 
@@ -414,27 +419,34 @@ static Move *get_top_computer_move(Game *game, int movegen_thread_index,
   simulate(&sim_args, sim_results, error_stack);
   error_stack_destroy(error_stack);
 
-  // Get the best move from simulation results based on win percentage with equity tiebreaker
+  // Get the best move from simulation results based on win percentage with
+  // equity tiebreaker
   Move *best_move = NULL;
   const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
   if (num_simmed_plays > 0) {
-    // Find the simmed play with the highest win percentage (equity as tiebreaker)
+    // Find the simmed play with the highest win percentage (equity as
+    // tiebreaker)
     const SimmedPlay *best_simmed_play = NULL;
     for (int i = 0; i < num_simmed_plays; i++) {
-      const SimmedPlay *simmed_play = sim_results_get_simmed_play(sim_results, i);
+      const SimmedPlay *simmed_play =
+          sim_results_get_simmed_play(sim_results, i);
       if (simmed_play_get_is_epigon(simmed_play)) {
         continue;
       }
       if (!best_simmed_play) {
         best_simmed_play = simmed_play;
       } else {
-        double curr_win = stat_get_mean(simmed_play_get_win_pct_stat(simmed_play));
-        double best_win = stat_get_mean(simmed_play_get_win_pct_stat(best_simmed_play));
+        double curr_win =
+            stat_get_mean(simmed_play_get_win_pct_stat(simmed_play));
+        double best_win =
+            stat_get_mean(simmed_play_get_win_pct_stat(best_simmed_play));
         double curr_eq = stat_get_mean(simmed_play_get_equity_stat(simmed_play));
-        double best_eq = stat_get_mean(simmed_play_get_equity_stat(best_simmed_play));
+        double best_eq =
+            stat_get_mean(simmed_play_get_equity_stat(best_simmed_play));
 
         // Use equity as tiebreaker when win% is equal
-        if (curr_win > best_win || (curr_win == best_win && curr_eq > best_eq)) {
+        if (curr_win > best_win ||
+            (curr_win == best_win && curr_eq > best_eq)) {
           best_simmed_play = simmed_play;
         }
       }
@@ -492,9 +504,6 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
   double sim_stop_cond_pct = sim_params->stop_cond_pct;
 
 
-
-
-
   // If we are forcing a draw, we need to draw a rare leave. The drawn
   // leave does not necessarily fit in the bag. If we've reached the
   // target minimum leave count for all leaves, no rare leave can be
@@ -539,11 +548,10 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     sim_threads = 1;
   }
 
-  *move = get_top_computer_move(game, movegen_thread_index, sim_threads,
-                                game_runner->move_list,
-                                sim_plies, sim_num_plays, sim_max_iterations,
-                                sim_min_play_iterations, sim_stop_cond_pct, sim_seed,
-                                args->win_pcts);
+  *move = get_top_computer_move(
+      game, movegen_thread_index, sim_threads, game_runner->move_list, sim_plies,
+      sim_num_plays, sim_max_iterations, sim_min_play_iterations,
+      sim_stop_cond_pct, sim_seed, args->win_pcts);
 
   if (lg_shared_data) {
     rack_list_add_rack(lg_shared_data->rack_list, player_rack,

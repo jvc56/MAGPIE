@@ -102,12 +102,12 @@ WMP *players_data_get_wmp(const PlayersData *players_data, int player_index) {
 }
 
 const SimParams *players_data_get_sim_params(const PlayersData *players_data,
-                                              int player_index) {
+                                             int player_index) {
   return &players_data->sim_params[player_index];
 }
 
 void players_data_set_sim_params(PlayersData *players_data, int player_index,
-                                  const SimParams *sim_params) {
+                                 const SimParams *sim_params) {
   players_data->sim_params[player_index] = *sim_params;
 }
 

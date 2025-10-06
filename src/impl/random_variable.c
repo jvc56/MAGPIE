@@ -66,11 +66,10 @@ double rv_uniform_sample(RandomVariables *rvs,
   return uniform_sample(rv_uniform->xoshiro_prng, &rv_uniform->mutex);
 }
 
-bool rv_uniform_mark_as_epigon_if_similar(RandomVariables
-                                              __attribute__((unused)) *
-                                              rvs,
-                                          const int __attribute__((unused)) i,
-                                          const int __attribute__((unused)) j) {
+bool rv_uniform_mark_as_epigon_if_similar(
+    RandomVariables __attribute__((unused)) * rvs,
+    const int __attribute__((unused)) i,
+    const int __attribute__((unused)) j) {
   return false;
 }
 

@@ -1005,8 +1005,8 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
                            &sim_args->inference_args);
     sim_args->inference_args.update_thread_control_status = false;
   }
-  sim_args->print_info = true;  // Print UCGI output for sim command
-  sim_args->movegen_thread_index = 0;  // Use thread 0 for non-autoplay sims
+  sim_args->print_info = true;        // Print UCGI output for sim command
+  sim_args->movegen_thread_index = 0; // Use thread 0 for non-autoplay sims
   sim_args->bai_options.sample_limit = config_get_max_iterations(config);
   sim_args->bai_options.sample_minimum = config->min_play_iterations;
   const double percentile = config_get_stop_cond_pct(config);
