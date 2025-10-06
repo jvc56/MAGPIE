@@ -1,5 +1,6 @@
 #include "exec.h"
 
+#include "../def/cpthread_defs.h"
 #include "../compat/cpthread.h"
 #include "../compat/linenoise.h"
 #include "../def/config_defs.h"

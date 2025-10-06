@@ -22,14 +22,14 @@ static cpthread_mutex_t stream_mutex = PTHREAD_MUTEX_INITIALIZER;
 // Local mutex wrappers to avoid circular dependency with cpthread.h
 static inline void stream_mutex_lock(void) {
   if (pthread_mutex_lock(&stream_mutex)) {
-    fprintf(stderr, "FATAL: stream mutex lock failed\n");
+    (void)fprintf(stderr, "FATAL: stream mutex lock failed\n");
     abort();
   }
 }
 
 static inline void stream_mutex_unlock(void) {
   if (pthread_mutex_unlock(&stream_mutex)) {
-    fprintf(stderr, "FATAL: stream mutex unlock failed\n");
+    (void)fprintf(stderr, "FATAL: stream mutex unlock failed\n");
     abort();
   }
 }

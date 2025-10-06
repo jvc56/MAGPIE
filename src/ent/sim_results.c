@@ -1,5 +1,6 @@
 #include "sim_results.h"
 
+#include "../def/cpthread_defs.h"
 #include "../compat/cpthread.h"
 #include "../def/game_defs.h"
 #include "../def/sim_defs.h"

@@ -1,6 +1,7 @@
 
 #include "autoplay.h"
 
+#include "../def/cpthread_defs.h"
 #include "../compat/cpthread.h"
 #include "../def/autoplay_defs.h"
 #include "../def/players_data_defs.h"
