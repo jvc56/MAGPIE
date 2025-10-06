@@ -19,13 +19,19 @@
 #include "../ent/player.h"
 #include "../ent/players_data.h"
 #include "../ent/rack.h"
+#include "../ent/sim_results.h"
+#include "../ent/stats.h"
 #include "../ent/thread_control.h"
 #include "../ent/xoshiro.h"
+#include "../str/game_string.h"
+#include "../str/move_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
 #include "move_gen.h"
 #include "rack_list.h"
+#include "random_variable.h"
+#include "simmer.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -285,7 +291,8 @@ GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
   GameRunner *game_runner = malloc_or_die(sizeof(GameRunner));
   game_runner->shared_data = autoplay_worker->shared_data;
   game_runner->game = game_create(args->game_args);
-  game_runner->move_list = move_list_create(1);
+  // Create move_list with large capacity for move generation (100k moves)
+  game_runner->move_list = move_list_create(100000);
   return game_runner;
 }
 
@@ -320,6 +327,153 @@ void game_runner_start(const AutoplayWorker *autoplay_worker,
   }
 }
 
+// Monte Carlo simulation-based move selection for autoplay
+// This function is defined here instead of gameplay.c to avoid circular
+// dependency
+static Move *get_top_computer_move(Game *game, int movegen_thread_index,
+                                   int sim_threads, MoveList *move_list,
+                                   int sim_plies, int sim_num_plays,
+                                   int sim_max_iterations,
+                                   int sim_min_play_iterations,
+                                   double sim_stop_cond_pct, uint64_t sim_seed,
+                                   WinPct *win_pcts) {
+  // If sim_plies is 0 or bag is empty, fall back to equity-based move
+  if (sim_plies <= 0 || bag_is_empty(game_get_bag(game))) {
+    return get_top_equity_move(game, movegen_thread_index, move_list);
+  }
+
+  // Generate moves for simulation
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .thread_index = movegen_thread_index,
+      .eq_margin_movegen = 0,
+  };
+  generate_moves(&args);
+
+  // Sort the move list (convert from heap to sorted descending array)
+  move_list_sort_moves(move_list);
+
+  // Remove pass move if it exists (it's always first if present due to 0
+  // equity)
+  int num_moves = move_list_get_count(move_list);
+  if (num_moves > 0 &&
+      move_get_type(move_list_get_move(move_list, 0)) == GAME_EVENT_PASS) {
+    // Shift all moves down by one to remove the pass
+    for (int i = 0; i < num_moves - 1; i++) {
+      move_copy(move_list_get_move(move_list, i),
+                move_list_get_move(move_list, i + 1));
+    }
+    move_list->count--;
+    num_moves--;
+  }
+
+  // Limit the number of plays to sim
+  if (num_moves > sim_num_plays) {
+    // Keep only the top sim_num_plays moves by truncating the count
+    // (moves are already sorted by equity from generate_moves)
+    move_list->count = sim_num_plays;
+  }
+
+  // Create sim results for this simulation
+  SimResults *sim_results = sim_results_create();
+  sim_results_reset(move_list, sim_results, sim_plies, sim_seed);
+
+  // Create ThreadControl for this simulation
+  ThreadControl *thread_control = thread_control_create();
+  thread_control_set_threads(thread_control, sim_threads);
+  thread_control_set_seed(thread_control, sim_seed);
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+
+  // Set up simulation arguments
+  SimArgs sim_args = {
+      .num_plies = sim_plies,
+      .game = game,
+      .move_list = move_list,
+      .known_opp_rack = NULL,
+      .win_pcts = win_pcts,
+      .use_inference = false,
+      .inference_results = NULL,
+      .thread_control = thread_control,
+      .print_info = false, // Suppress UCGI output for autoplay
+      .movegen_thread_index = movegen_thread_index,
+  };
+
+  // Set up BAI options
+  if (sim_stop_cond_pct > 100) {
+    sim_args.bai_options.threshold = BAI_THRESHOLD_NONE;
+  } else {
+    sim_args.bai_options.delta = 1.0 - (sim_stop_cond_pct / 100.0);
+    sim_args.bai_options.threshold = BAI_THRESHOLD_GK16;
+  }
+  sim_args.bai_options.sample_limit = sim_max_iterations;
+  sim_args.bai_options.sample_minimum = sim_min_play_iterations;
+  sim_args.bai_options.time_limit_seconds = 0;
+  sim_args.bai_options.sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
+
+  // Run simulation - errors are ignored for autoplay
+  ErrorStack *error_stack = error_stack_create();
+  simulate(&sim_args, sim_results, error_stack);
+  error_stack_destroy(error_stack);
+
+  // Get the best move from simulation results based on win percentage with
+  // equity tiebreaker
+  Move *best_move = NULL;
+  const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
+  if (num_simmed_plays > 0) {
+    // Find the simmed play with the highest win percentage (equity as
+    // tiebreaker)
+    const SimmedPlay *best_simmed_play = NULL;
+    for (int i = 0; i < num_simmed_plays; i++) {
+      const SimmedPlay *simmed_play =
+          sim_results_get_simmed_play(sim_results, i);
+      if (simmed_play_get_is_epigon(simmed_play)) {
+        continue;
+      }
+      if (!best_simmed_play) {
+        best_simmed_play = simmed_play;
+      } else {
+        double curr_win =
+            stat_get_mean(simmed_play_get_win_pct_stat(simmed_play));
+        double best_win =
+            stat_get_mean(simmed_play_get_win_pct_stat(best_simmed_play));
+        double curr_eq = stat_get_mean(simmed_play_get_equity_stat(simmed_play));
+        double best_eq =
+            stat_get_mean(simmed_play_get_equity_stat(best_simmed_play));
+
+        // Use equity as tiebreaker when win% is equal
+        if (curr_win > best_win ||
+            (curr_win == best_win && curr_eq > best_eq)) {
+          best_simmed_play = simmed_play;
+        }
+      }
+    }
+
+    if (best_simmed_play) {
+      // Get the move from the simmed_play and copy it to move_list[0]
+      // (We can't return simmed_play's move directly as it will be freed)
+      const Move *sim_move = simmed_play_get_move(best_simmed_play);
+      Move *move_list_first = move_list_get_move(move_list, 0);
+      move_copy(move_list_first, sim_move);
+      best_move = move_list_first;
+    }
+  }
+
+  // Clean up
+  thread_control_destroy(thread_control);
+  sim_results_destroy(sim_results);
+
+  // If we got a move from the sim, return it; otherwise fall back to equity
+  if (best_move) {
+    return best_move;
+  } else {
+    return get_top_equity_move(game, movegen_thread_index, move_list);
+  }
+}
+
 bool game_runner_is_game_over(GameRunner *game_runner) {
   return game_over(game_runner->game) ||
          (game_runner->shared_data->leavegen_shared_data &&
@@ -336,6 +490,20 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
   LeavegenSharedData *lg_shared_data =
       game_runner->shared_data->leavegen_shared_data;
   const int thread_index = autoplay_worker->worker_index;
+  const AutoplayArgs *args = autoplay_worker->args;
+
+  // Get sim parameters from the player (which gets them from PlayersData)
+  // This ensures sim params work the same way as KLV files in game pairs
+  const Player *player_on_turn = game_get_player(game, player_on_turn_index);
+  const SimParams *sim_params = player_get_sim_params(player_on_turn);
+
+  int sim_plies = sim_params->plies;
+  int sim_num_plays = sim_params->num_plays;
+  int sim_max_iterations = sim_params->max_iterations;
+  int sim_min_play_iterations = sim_params->min_play_iterations;
+  double sim_stop_cond_pct = sim_params->stop_cond_pct;
+
+
   // If we are forcing a draw, we need to draw a rare leave. The drawn
   // leave does not necessarily fit in the bag. If we've reached the
   // target minimum leave count for all leaves, no rare leave can be
@@ -363,7 +531,27 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
 
     rack_copy(player_rack, &original_rack);
   }
-  *move = get_top_equity_move(game, thread_index, game_runner->move_list);
+  // Create a deterministic seed for this sim from the game seed and turn number
+  uint64_t sim_seed = game_runner->seed + (uint64_t)game_runner->turn_number * 1000000ULL;
+
+  // Determine threading parameters based on autoplay mode
+  int movegen_thread_index, sim_threads;
+  if (args->multi_threaded_sims) {
+    // Mode 2: Sequential games, multi-threaded sims
+    // Use thread 0 for movegen, use all threads for simulation
+    movegen_thread_index = 0;
+    sim_threads = thread_control_get_threads(args->thread_control);
+  } else {
+    // Mode 1 (default): Concurrent games, single-threaded sims
+    // Each worker uses its own movegen, sims are single-threaded
+    movegen_thread_index = thread_index;
+    sim_threads = 1;
+  }
+
+  *move = get_top_computer_move(
+      game, movegen_thread_index, sim_threads, game_runner->move_list, sim_plies,
+      sim_num_plays, sim_max_iterations, sim_min_play_iterations,
+      sim_stop_cond_pct, sim_seed, args->win_pcts);
 
   if (lg_shared_data) {
     rack_list_add_rack(lg_shared_data->rack_list, player_rack,
@@ -420,11 +608,45 @@ void play_autoplay_game_or_game_pair(
     AutoplayWorker *autoplay_worker, GameRunner *game_runner1,
     GameRunner *game_runner2, const ThreadControlIterOutput *iter_output) {
   const int starting_player_index = (int)(iter_output->iter_count % 2);
+  PlayersData *players_data = autoplay_worker->args->game_args->players_data;
+
+  // Start game1
   game_runner_start(autoplay_worker, game_runner1, iter_output,
                     starting_player_index);
+  Game *game1 = game_runner1->game;
+  Player *game1_p0 = game_get_player(game1, 0);
+  Player *game1_p1 = game_get_player(game1, 1);
+
+  // Update players with data from PlayersData
+  player_update(players_data, game1_p0);
+  player_update(players_data, game1_p1);
+
+  // For game pairs with sim params, assign the same way as KLV:
+  // Both games: p0→sp1, p1→sp2 (NO swapping)
+  // Divergence comes from different starting player, not from swapping params
+  const SimParams *sp1 = players_data_get_sim_params(players_data, 0);
+  const SimParams *sp2 = players_data_get_sim_params(players_data, 1);
+
+  // Game1: p0→sp1, p1→sp2
+  player_set_sim_params(game1_p0, sp1);
+  player_set_sim_params(game1_p1, sp2);
+
   if (game_runner2) {
+    // Start game2 with opposite starting player
     game_runner_start(autoplay_worker, game_runner2, iter_output,
                       1 - starting_player_index);
+
+    Game *game2 = game_runner2->game;
+    Player *game2_p0 = game_get_player(game2, 0);
+    Player *game2_p1 = game_get_player(game2, 1);
+
+    // Update players with data from PlayersData
+    player_update(players_data, game2_p0);
+    player_update(players_data, game2_p1);
+
+    // Game2: SAME assignment as game1 (like KLV files)
+    player_set_sim_params(game2_p0, sp1);
+    player_set_sim_params(game2_p1, sp2);
   }
   bool games_are_divergent = false;
   while (true) {
@@ -447,8 +669,7 @@ void play_autoplay_game_or_game_pair(
       break;
     }
 
-    // It is guaranteed that at least one move is not null
-    // at this point.
+
     if (!games_are_divergent &&
         (!move1 || !move2 ||
          compare_moves_without_equity(move1, move2, true) != -1)) {
@@ -613,7 +834,9 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
 
   autoplay_results_reset(autoplay_results);
 
-  const int number_of_threads = thread_control_get_threads(thread_control);
+  // In multi-threaded sim mode, only run one game at a time
+  const int number_of_threads = args->multi_threaded_sims ? 1
+                                : thread_control_get_threads(thread_control);
 
   KLV *klv = NULL;
   bool show_divergent_results = args->use_game_pairs;

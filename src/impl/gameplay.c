@@ -39,7 +39,6 @@ Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
   }
   return klv_get_leave_value(klv, rack);
 }
-
 // Assumes the move hasn't been played yet and is in the rack
 void get_leave_for_move(const Move *move, const Game *game, Rack *leave) {
   rack_copy(leave, player_get_rack(game_get_player(
@@ -448,6 +447,7 @@ Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
   generate_moves(&args);
   return move_list_get_move(move_list, 0);
 }
+
 
 bool moves_are_similar(const Move *move1, const Move *move2, int dist_size) {
   if (!(move_get_dir(move1) == move_get_dir(move2) &&

@@ -7,6 +7,7 @@
 #include "../ent/game_history.h"
 #include "../ent/move.h"
 #include "../ent/rack.h"
+#include "../ent/win_pct.h"
 #include "move_gen.h"
 
 void draw_starting_racks(Game *game);

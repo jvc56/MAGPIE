@@ -5,6 +5,7 @@
 #include "../ent/autoplay_results.h"
 #include "../ent/game.h"
 #include "../ent/thread_control.h"
+#include "../ent/win_pct.h"
 #include "../util/io_util.h"
 #include <stdbool.h>
 
@@ -17,6 +18,10 @@ typedef struct AutoplayArgs {
   const char *data_paths;
   GameArgs *game_args;
   ThreadControl *thread_control;
+  WinPct *win_pcts;
+  bool multi_threaded_sims; // false: concurrent games with single-threaded sims
+                            // (default) true: sequential games with
+                            // multi-threaded sims
 } AutoplayArgs;
 
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,

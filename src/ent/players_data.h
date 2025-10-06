@@ -5,6 +5,7 @@
 #include "../def/players_data_defs.h"
 #include "klv.h"
 #include "kwg.h"
+#include "sim_params.h"
 #include "wmp.h"
 #include <stdbool.h>
 
@@ -25,6 +26,8 @@ const char *players_data_get_data_name(const PlayersData *players_data,
 KWG *players_data_get_kwg(const PlayersData *players_data, int player_index);
 KLV *players_data_get_klv(const PlayersData *players_data, int player_index);
 WMP *players_data_get_wmp(const PlayersData *players_data, int player_index);
+const SimParams *players_data_get_sim_params(const PlayersData *players_data,
+                                             int player_index);
 
 void players_data_set_name(PlayersData *players_data, int player_index,
                            const char *player_name);
@@ -34,6 +37,9 @@ void players_data_set_move_sort_type(PlayersData *players_data,
 void players_data_set_move_record_type(PlayersData *players_data,
                                        int player_index,
                                        move_record_t move_record_type);
+void players_data_set_sim_params(PlayersData *players_data, int player_index,
+                                 const SimParams *sim_params);
+void players_data_swap_sim_params(PlayersData *players_data);
 void *players_data_get_data(const PlayersData *players_data,
                             players_data_t players_data_type, int player_index);
 bool players_data_get_is_shared(const PlayersData *players_data,
