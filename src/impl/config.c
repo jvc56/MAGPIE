@@ -2277,7 +2277,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
           GAME_STRING_BOARD_COLOR_TRUECOLOR;
     } else {
       error_stack_push(
-          error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG,
+          error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_BOARD_COLOR,
           get_formatted_string("invalid board color: %s", board_color_str));
       return;
     }
@@ -2296,7 +2296,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
           GAME_STRING_BOARD_TILE_GLYPHS_ALT;
     } else {
       error_stack_push(
-          error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG,
+          error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_BOARD_TILES,
           get_formatted_string("invalid board tiles: %s", board_tiles_str));
       return;
     }
@@ -2315,7 +2315,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
           GAME_STRING_BOARD_BORDER_BOX_DRAWING;
     } else {
       error_stack_push(
-          error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG,
+          error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_BOARD_BORDER,
           get_formatted_string("invalid board border: %s", board_border_str));
       return;
     }
@@ -2334,7 +2334,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
           GAME_STRING_BOARD_COLUMN_LABEL_FULLWIDTH;
     } else {
       error_stack_push(
-          error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG,
+          error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_BOARD_COLUMNS,
           get_formatted_string("invalid board columns: %s", board_columns_str));
       return;
     }
@@ -2352,7 +2352,8 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       config->game_string_options->on_turn_marker =
           GAME_STRING_ON_TURN_MARKER_ARROWHEAD;
     } else {
-      error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG,
+      error_stack_push(error_stack,
+                       ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ON_TURN_MARKER,
                        get_formatted_string("invalid on-turn marker: %s",
                                             on_turn_marker_str));
       return;
@@ -2372,7 +2373,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
           GAME_STRING_ON_TURN_COLOR_ANSI_GREEN;
     } else {
       error_stack_push(
-          error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG,
+          error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ON_TURN_COLOR,
           get_formatted_string("invalid on-turn color: %s", on_turn_color_str));
       return;
     }
@@ -2390,9 +2391,11 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       config->game_string_options->on_turn_score_style =
           GAME_STRING_ON_TURN_SCORE_BOLD;
     } else {
-      error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG,
-                       get_formatted_string("invalid on-turn score style: %s",
-                                            on_turn_score_str));
+      error_stack_push(
+          error_stack,
+          ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ON_TURN_SCORE_STYLE,
+          get_formatted_string("invalid on-turn score style: %s",
+                               on_turn_score_str));
       return;
     }
   }
