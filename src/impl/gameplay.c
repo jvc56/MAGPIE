@@ -558,13 +558,39 @@ Move *get_top_computer_move(Game *game, int movegen_thread_index,
   printf("│  #   │ Move            │ Win%%    │ Equity  │ Iters │ Avg Score/Ply      │\n");
   printf("├──────┼─────────────────┼─────────┼─────────┼───────┼────────────────────┤\n");
 
+  // Create sorted index array by win% (descending) with equity tiebreaker
+  int *sorted_indices = malloc(num_simmed_plays * sizeof(int));
+  for (int i = 0; i < num_simmed_plays; i++) {
+    sorted_indices[i] = i;
+  }
+
+  // Bubble sort by win% descending, then equity descending
+  for (int i = 0; i < num_simmed_plays - 1; i++) {
+    for (int j = 0; j < num_simmed_plays - i - 1; j++) {
+      const SimmedPlay *play1 = sim_results_get_simmed_play(sim_results, sorted_indices[j]);
+      const SimmedPlay *play2 = sim_results_get_simmed_play(sim_results, sorted_indices[j + 1]);
+
+      double win1 = stat_get_mean(simmed_play_get_win_pct_stat(play1));
+      double win2 = stat_get_mean(simmed_play_get_win_pct_stat(play2));
+      double eq1 = stat_get_mean(simmed_play_get_equity_stat(play1));
+      double eq2 = stat_get_mean(simmed_play_get_equity_stat(play2));
+
+      // Sort by win% descending, equity descending as tiebreaker
+      if (win1 < win2 || (win1 == win2 && eq1 < eq2)) {
+        int temp = sorted_indices[j];
+        sorted_indices[j] = sorted_indices[j + 1];
+        sorted_indices[j + 1] = temp;
+      }
+    }
+  }
+
   for (int i = 0; i < num_simmed_plays && i < 10; i++) {
-    const SimmedPlay *simmed_play = sim_results_get_simmed_play(sim_results, i);
+    const SimmedPlay *simmed_play = sim_results_get_simmed_play(sim_results, sorted_indices[i]);
     const Move *move = simmed_play_get_move(simmed_play);
 
-    // Get move string
+    // Get move string (use same format as game display: "2J CL(OO)T")
     string_builder_clear(board_sb);
-    string_builder_add_ucgi_move(board_sb, move, board, ld);
+    string_builder_add_move(board_sb, board, move, ld);
     const char *move_str = string_builder_peek(board_sb);
 
     // Get stats
@@ -597,22 +623,31 @@ Move *get_top_computer_move(Game *game, int movegen_thread_index,
   printf("└──────┴─────────────────┴─────────┴─────────┴───────┴────────────────────┘\n\n");
   string_builder_destroy(board_sb);
 
-  // Get the best move from simulation results based on win percentage
+  // Get the best move from simulation results based on win percentage with equity tiebreaker
   Move *best_move = NULL;
   if (num_simmed_plays > 0) {
-    // Find the simmed play with the highest win percentage
+    // Find the simmed play with the highest win percentage (equity as tiebreaker)
     const SimmedPlay *best_simmed_play = NULL;
     for (int i = 0; i < num_simmed_plays; i++) {
       const SimmedPlay *simmed_play = sim_results_get_simmed_play(sim_results, i);
       if (simmed_play_get_is_epigon(simmed_play)) {
         continue;
       }
-      if (!best_simmed_play ||
-          stat_get_mean(simmed_play_get_win_pct_stat(simmed_play)) >
-              stat_get_mean(simmed_play_get_win_pct_stat(best_simmed_play))) {
+      if (!best_simmed_play) {
         best_simmed_play = simmed_play;
+      } else {
+        double curr_win = stat_get_mean(simmed_play_get_win_pct_stat(simmed_play));
+        double best_win = stat_get_mean(simmed_play_get_win_pct_stat(best_simmed_play));
+        double curr_eq = stat_get_mean(simmed_play_get_equity_stat(simmed_play));
+        double best_eq = stat_get_mean(simmed_play_get_equity_stat(best_simmed_play));
+
+        // Use equity as tiebreaker when win% is equal
+        if (curr_win > best_win || (curr_win == best_win && curr_eq > best_eq)) {
+          best_simmed_play = simmed_play;
+        }
       }
     }
+    free(sorted_indices);
 
     if (best_simmed_play) {
       // Get the move from the simmed_play and copy it to move_list[0]
