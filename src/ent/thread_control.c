@@ -1,6 +1,5 @@
 #include "thread_control.h"
 
-#include "../def/cpthread_defs.h"
 #include "../compat/cpthread.h"
 #include "../compat/ctime.h"
 #include "../def/thread_control_defs.h"

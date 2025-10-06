@@ -1,6 +1,5 @@
 #include "bai_result.h"
 
-#include "../def/cpthread_defs.h"
 #include "../compat/cpthread.h"
 #include "../util/io_util.h"
 #include <stdlib.h>
