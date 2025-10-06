@@ -1,5 +1,6 @@
 #include "rack_list.h"
 
+#include "../def/cpthread_defs.h"
 #include "../compat/cpthread.h"
 #include "../def/klv_defs.h"
 #include "../def/kwg_defs.h"

@@ -1,5 +1,6 @@
 #include "move_gen.h"
 
+#include "../def/cpthread_defs.h"
 #include "../compat/cpthread.h"
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"

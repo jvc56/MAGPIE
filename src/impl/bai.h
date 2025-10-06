@@ -14,6 +14,7 @@
  *   Code: https://github.com/zihaophys/topk_colt23
  */
 
+#include "../def/cpthread_defs.h"
 #include "../compat/cpthread.h"
 #include "../def/bai_defs.h"
 #include "../def/thread_control_defs.h"

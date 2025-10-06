@@ -1,6 +1,7 @@
 #ifndef ALIAS_METHOD_H
 #define ALIAS_METHOD_H
 
+#include "../def/cpthread_defs.h"
 #include "../compat/cpthread.h"
 #include "../util/io_util.h"
 #include "encoded_rack.h"
