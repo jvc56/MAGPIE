@@ -387,12 +387,12 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     if (game_runner->pair_game_number == 0) {
       string_builder_add_formatted_string(
           output, "\n=== Game %llu, Turn %d ===\n",
-          (unsigned long long)(game_runner->game_number + 1),
+          (unsigned long long)game_runner->game_number + 1,
           game_runner->turn_number + 1);
     } else {
       string_builder_add_formatted_string(
           output, "\n=== Game Pair %llu, Game %d, Turn %d ===\n",
-          (unsigned long long)(game_runner->game_number + 1),
+          (unsigned long long)game_runner->game_number + 1,
           game_runner->pair_game_number, game_runner->turn_number + 1);
     }
     string_builder_add_game(game, game_runner->move_list,

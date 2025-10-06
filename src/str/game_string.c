@@ -13,6 +13,7 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "bag_string.h"
 #include "letter_distribution_string.h"
@@ -20,6 +21,7 @@
 #include "rack_string.h"
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
