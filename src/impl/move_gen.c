@@ -1,5 +1,8 @@
 #include "move_gen.h"
 
+#include <pthread.h>
+
+#include "../compat/cpthread.h"
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/equity_defs.h"
@@ -28,7 +31,6 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/static_eval.h"
-#include "../compat/cpthread.h"
 #include "../util/io_util.h"
 #include "wmp_move_gen.h"
 #include <assert.h>
