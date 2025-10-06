@@ -25,12 +25,15 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "move_gen.h"
-#include "simmer.h"
+#include "random_variable.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+// Forward declaration to avoid circular dependency (simmer.h -> random_variable.h -> gameplay.h)
+void simulate(SimArgs *sim_args, SimResults *sim_results, ErrorStack *error_stack);
 
 Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
   for (int i = 0; i < move_get_tiles_length(move); i++) {
