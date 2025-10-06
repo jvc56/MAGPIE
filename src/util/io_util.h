@@ -228,6 +228,9 @@ typedef enum {
 void log_with_info(log_level_t log_level, const char *caller_filename,
                    int caller_line, const char *format, ...);
 
+FILE *get_stream_out(void);
+FILE *get_stream_err(void);
+FILE *get_stream_in(void);
 void write_to_stream_out(const char *fmt, ...);
 void write_to_stream_err(const char *fmt, ...);
 void write_to_stream(FILE *stream, const char *fmt, ...);

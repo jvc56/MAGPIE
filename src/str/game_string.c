@@ -36,7 +36,7 @@ bool should_print_escape_codes(const GameStringOptions *game_string_options) {
   if (game_string_options == NULL) {
     return false;
   }
-  return isatty(fileno(stdout));
+  return isatty(fileno(get_stream_out()));
 }
 
 bool use_ascii_on_turn_marker(const GameStringOptions *game_string_options) {
