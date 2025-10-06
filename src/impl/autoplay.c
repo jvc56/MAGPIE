@@ -703,8 +703,11 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
   autoplay_shared_data_destroy(shared_data);
   free(min_rack_targets);
 
-  players_data_reload(args->game_args->players_data, PLAYERS_DATA_TYPE_KLV,
-                      args->data_paths, error_stack);
+  // Only reload KLV if it was modified during leavegen
+  if (is_leavegen_mode) {
+    players_data_reload(args->game_args->players_data, PLAYERS_DATA_TYPE_KLV,
+                        args->data_paths, error_stack);
+  }
 
   char *autoplay_results_string = autoplay_results_to_string(
       autoplay_results, args->human_readable, show_divergent_results);
