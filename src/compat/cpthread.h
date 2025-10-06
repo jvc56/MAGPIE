@@ -6,11 +6,8 @@
 #include <stddef.h>
 #include <time.h>
 
+#include "cpthread_types.h"
 #include "../util/io_util.h"
-
-typedef pthread_t cpthread_t;
-typedef pthread_mutex_t cpthread_mutex_t;
-typedef pthread_cond_t cpthread_cond_t;
 
 static inline void cpthread_mutex_init(cpthread_mutex_t *mutex) {
   if (pthread_mutex_init(mutex, NULL)) {
