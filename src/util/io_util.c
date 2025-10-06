@@ -22,8 +22,7 @@ static FILE *stream_in = NULL;
 // headers, which is standard POSIX pthread design. We use pthread directly
 // here instead of cpthread wrappers to avoid circular dependency between
 // cpthread.h (which includes io_util.h) and io_util.c.
-// NOLINTNEXTLINE(misc-include-cleaner)
-static pthread_mutex_t stream_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t stream_mutex = PTHREAD_MUTEX_INITIALIZER; // NOLINT
 
 FILE *get_stream_out(void) {
   pthread_mutex_lock(&stream_mutex);
