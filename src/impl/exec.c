@@ -1,9 +1,9 @@
 #include "exec.h"
 
-#include "../def/cpthread_defs.h"
 #include "../compat/cpthread.h"
 #include "../compat/linenoise.h"
 #include "../def/config_defs.h"
+#include "../def/cpthread_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/thread_control.h"
 #include "../util/fileproxy.h"

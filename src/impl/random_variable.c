@@ -1,7 +1,7 @@
 #include "random_variable.h"
 
-#include "../def/cpthread_defs.h"
 #include "../compat/cpthread.h"
+#include "../def/cpthread_defs.h"
 #include "../def/game_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/alias_method.h"

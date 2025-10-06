@@ -1,8 +1,8 @@
 #include "thread_control.h"
 
-#include "../def/cpthread_defs.h"
 #include "../compat/cpthread.h"
 #include "../compat/ctime.h"
+#include "../def/cpthread_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../util/io_util.h"
 #include "xoshiro.h"

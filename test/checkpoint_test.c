@@ -1,5 +1,5 @@
-#include "../src/def/cpthread_defs.h"
 #include "../src/compat/cpthread.h"
+#include "../src/def/cpthread_defs.h"
 #include "../src/ent/checkpoint.h"
 #include <assert.h>
 #include <stdlib.h>
