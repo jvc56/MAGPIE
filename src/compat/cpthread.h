@@ -6,7 +6,7 @@
 #include <stddef.h>
 #include <time.h>
 
-#include "cpthread_types.h"
+#include "../def/cpthread_defs.h"
 #include "../util/io_util.h"
 
 static inline void cpthread_mutex_init(cpthread_mutex_t *mutex) {

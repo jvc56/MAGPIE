@@ -1,5 +1,5 @@
-#ifndef COMPAT_PTHREAD_TYPES_H
-#define COMPAT_PTHREAD_TYPES_H
+#ifndef CPTHREAD_DEFS_H
+#define CPTHREAD_DEFS_H
 
 #include <pthread.h>
 
