@@ -32,7 +32,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Forward declaration to avoid circular dependency (simmer.h -> random_variable.h -> gameplay.h)
+// Forward declaration to avoid circular dependency (simmer.h -> random_variable.h -> inference.h -> gameplay.h)
 void simulate(SimArgs *sim_args, SimResults *sim_results, ErrorStack *error_stack);
 
 Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {

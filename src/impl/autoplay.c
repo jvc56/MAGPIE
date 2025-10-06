@@ -30,6 +30,14 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+// Forward declaration - defined in gameplay.c but not in gameplay.h to avoid circular dependency
+Move *get_top_computer_move(Game *game, int movegen_thread_index,
+                            int sim_threads, MoveList *move_list,
+                            int sim_plies, int sim_num_plays,
+                            int sim_max_iterations, int sim_min_play_iterations,
+                            double sim_stop_cond_pct, uint64_t sim_seed,
+                            WinPct *win_pcts);
+
 typedef struct LeavegenSharedData {
   int num_gens;
   int gens_completed;
