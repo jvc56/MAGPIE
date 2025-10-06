@@ -16,6 +16,12 @@ static log_level_t current_log_level = LOG_FATAL;
 static FILE *stream_out = NULL;
 static FILE *stream_err = NULL;
 static FILE *stream_in = NULL;
+// NOLINTNEXTLINE(misc-include-cleaner)
+// pthread.h is included above (line 5) and is the correct public API header
+// for pthread_mutex_t. The type is provided transitively through internal
+// headers, which is standard POSIX pthread design. We use pthread directly
+// here instead of cpthread wrappers to avoid circular dependency between
+// cpthread.h (which includes io_util.h) and io_util.c.
 static pthread_mutex_t stream_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 FILE *get_stream_out(void) {
