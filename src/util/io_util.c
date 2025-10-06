@@ -1,5 +1,6 @@
 #include "io_util.h"
 
+#include "../compat/cpthread.h"
 #include <assert.h>
 #include <errno.h>
 #include <stdarg.h>
@@ -8,8 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
-#include "../compat/cpthread.h"
 
 enum { ERROR_STACK_CAPACITY = 100 };
 
