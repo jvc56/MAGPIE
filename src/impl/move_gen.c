@@ -47,7 +47,7 @@
 // don't have this problem since they are
 // only called once per command.
 static MoveGen *cached_gens[MAX_THREADS];
-static cpthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER;
+static cpthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER; // NOLINT
 
 MoveGen *generator_create(void) {
   MoveGen *generator = malloc_or_die(sizeof(MoveGen));
