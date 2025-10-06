@@ -25,6 +25,13 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+// Display formatting constants
+enum {
+  PLAYER_NAME_DISPLAY_WIDTH = 25,
+  RACK_DISPLAY_WIDTH = 10,
+  ASCII_UPPERCASE_A = 65,
+};
+
 bool should_print_escape_codes(const GameStringOptions *game_string_options) {
   if (game_string_options == NULL) {
     return false;
@@ -103,7 +110,7 @@ void string_builder_add_player_row(const LetterDistribution *ld,
   const Rack *player_rack = player_get_rack(player);
   string_builder_add_formatted_string(
       game_string, "%s%s%*s", player_marker, display_player_name,
-      25 - string_length(display_player_name), "");
+      PLAYER_NAME_DISPLAY_WIDTH - string_length(display_player_name), "");
   if (player_on_turn && should_print_escape_codes(game_string_options) &&
       game_string_option_has_on_turn_color(game_string_options)) {
     string_builder_add_color_reset(game_string);
@@ -111,7 +118,8 @@ void string_builder_add_player_row(const LetterDistribution *ld,
 
   string_builder_add_rack(game_string, player_rack, ld, false);
   string_builder_add_formatted_string(
-      game_string, "%*s%d", 10 - rack_get_total_letters(player_rack), "",
+      game_string, "%*s%d",
+      RACK_DISPLAY_WIDTH - rack_get_total_letters(player_rack), "",
       equity_to_int(player_get_score(player)));
   free(display_player_name);
 }
@@ -258,7 +266,8 @@ void string_builder_add_board_column_header(
   if ((game_string_options == NULL) ||
       game_string_options->board_column_label ==
           GAME_STRING_BOARD_COLUMN_LABEL_ASCII) {
-    string_builder_add_formatted_string(game_string, "%c ", col + 65);
+    string_builder_add_formatted_string(game_string, "%c ",
+                                        col + ASCII_UPPERCASE_A);
   } else {
     if (col < BOARD_NUM_COLUMN_LABELS) {
       string_builder_add_string(game_string,
