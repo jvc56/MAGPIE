@@ -230,8 +230,9 @@ StringList *data_filepaths_get_all_data_path_names(const char *data_paths,
   if (string_list_get_count(file_path_list) == 0) {
     error_stack_push(
         error_stack, ERROR_STATUS_FILEPATH_NO_MATCHING_FILES,
-        get_formatted_string("no files of type %s matched in any of the data paths: %s",
-                             filepath_type_names[type], data_paths));
+        get_formatted_string(
+            "no files of type %s matched in any of the data paths: %s",
+            filepath_type_names[type], data_paths));
   }
 
   return file_path_list;
