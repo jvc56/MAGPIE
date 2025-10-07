@@ -1,0 +1,115 @@
+name: Validate Versioned Tarballs
+
+on:
+  pull_request:
+    paths:
+      - 'data/versioned/**'
+      - 'testdata/versioned/**'
+      - 'versioned-tarballs/**'
+      - '.github/workflows/validate-versioned-tarballs.yml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate data tarballs
+        run: |
+          echo "Validating data tarballs..."
+
+          for version_dir in data/versioned/*; do
+            if [ -d "$version_dir" ]; then
+              version_name=$(basename "$version_dir")
+              tarball="versioned-tarballs/data-${version_name}.tgz"
+
+              # Check if tarball exists (either as single file or chunks)
+              if [ -f "$tarball" ]; then
+                echo "Checking data-${version_name}.tgz..."
+                temp_extract=$(mktemp -d)
+                tar -xzf "$tarball" -C "$temp_extract"
+              elif ls "${tarball}".* 1> /dev/null 2>&1; then
+                echo "Checking chunked data-${version_name}.tgz.*..."
+                temp_extract=$(mktemp -d)
+                # Reassemble chunks and extract
+                cat "${tarball}".* | tar -xzf - -C "$temp_extract"
+              else
+                echo "❌ ERROR: Tarball $tarball (or chunks) is missing!"
+                echo "Please run ./data/update_versioned_data.sh and commit the result."
+                exit 1
+              fi
+
+              # Copy versioned directory following symlinks for comparison
+              temp_versioned=$(mktemp -d)
+              cp -RL "$version_dir" "$temp_versioned/data"
+
+              # Compare the directories
+              if diff -r "$temp_extract/data" "$temp_versioned/data" > /dev/null; then
+                echo "✅ data-${version_name}.tgz matches versioned source"
+              else
+                echo "❌ ERROR: data-${version_name}.tgz does NOT match versioned source!"
+                echo ""
+                echo "Differences found:"
+                diff -r "$temp_extract/data" "$temp_versioned/data" || true
+                echo ""
+                echo "Please run ./data/update_versioned_data.sh and commit the updated tarball."
+                rm -rf "$temp_extract" "$temp_versioned"
+                exit 1
+              fi
+
+              # Clean up
+              rm -rf "$temp_extract" "$temp_versioned"
+            fi
+          done
+
+      - name: Validate testdata tarballs
+        run: |
+          echo "Validating testdata tarballs..."
+
+          for version_dir in testdata/versioned/*; do
+            if [ -d "$version_dir" ]; then
+              version_name=$(basename "$version_dir")
+              tarball="versioned-tarballs/testdata-${version_name}.tgz"
+
+              # Check if tarball exists (either as single file or chunks)
+              if [ -f "$tarball" ]; then
+                echo "Checking testdata-${version_name}.tgz..."
+                temp_extract=$(mktemp -d)
+                tar -xzf "$tarball" -C "$temp_extract"
+              elif ls "${tarball}".* 1> /dev/null 2>&1; then
+                echo "Checking chunked testdata-${version_name}.tgz.*..."
+                temp_extract=$(mktemp -d)
+                # Reassemble chunks and extract
+                cat "${tarball}".* | tar -xzf - -C "$temp_extract"
+              else
+                echo "❌ ERROR: Tarball $tarball (or chunks) is missing!"
+                echo "Please run ./testdata/update_versioned_testdata.sh and commit the result."
+                exit 1
+              fi
+
+              # Copy versioned directory following symlinks for comparison
+              temp_versioned=$(mktemp -d)
+              cp -RL "$version_dir" "$temp_versioned/testdata"
+
+              # Compare the directories
+              if diff -r "$temp_extract/testdata" "$temp_versioned/testdata" > /dev/null; then
+                echo "✅ testdata-${version_name}.tgz matches versioned source"
+              else
+                echo "❌ ERROR: testdata-${version_name}.tgz does NOT match versioned source!"
+                echo ""
+                echo "Differences found:"
+                diff -r "$temp_extract/testdata" "$temp_versioned/testdata" || true
+                echo ""
+                echo "Please run ./testdata/update_versioned_testdata.sh and commit the updated tarball."
+                rm -rf "$temp_extract" "$temp_versioned"
+                exit 1
+              fi
+
+              # Clean up
+              rm -rf "$temp_extract" "$temp_versioned"
+            fi
+          done
+
+      - name: All validations passed
+        run: echo "✅ All versioned tarballs are up to date!"

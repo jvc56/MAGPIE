@@ -218,15 +218,21 @@ StringList *data_filepaths_get_all_data_path_names(const char *data_paths,
         string_list_add_string(file_path_list,
                                glob_results.gl_pathv[result_idx]);
       }
-    } else {
-      error_stack_push(
-          error_stack, ERROR_STATUS_FILEPATH_NO_MATCHING_FILES,
-          get_formatted_string("no files matched pattern %s for type %s",
-                               glob_pattern, filepath_type_names[type]));
     }
+    // Note: don't push error here - it's OK if some paths don't have matches
+    // as long as at least one path does
     free(glob_pattern);
     globfree(&glob_results);
   }
   string_splitter_destroy(split_data_paths);
+
+  // Only report error if NO paths found ANY files
+  if (string_list_get_count(file_path_list) == 0) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_FILEPATH_NO_MATCHING_FILES,
+        get_formatted_string("no files of type %s matched in any of the data paths: %s",
+                             filepath_type_names[type], data_paths));
+  }
+
   return file_path_list;
 }
