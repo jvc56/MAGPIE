@@ -907,8 +907,7 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
   MutableBlankMap *resized_mbmp = resize_mutable_blank_map(mbmp);
   mutable_blank_map_destroy(mbmp);
 
-  MutableDoubleBlankMap *resized_mdbmp =
-      resize_mutable_double_blank_map(mdbmp);
+  MutableDoubleBlankMap *resized_mdbmp = resize_mutable_double_blank_map(mdbmp);
   mutable_double_blank_map_destroy(mdbmp);
 
   WMP *wmp = make_wmp_from_mutables(resized_mwmp, resized_mbmp, resized_mdbmp);
