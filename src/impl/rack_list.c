@@ -1,6 +1,7 @@
 #include "rack_list.h"
 
 #include "../compat/cpthread.h"
+#include "../def/cpthread_defs.h"
 #include "../def/klv_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"

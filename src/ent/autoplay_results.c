@@ -1,6 +1,7 @@
 #include "autoplay_results.h"
 
 #include "../compat/cpthread.h"
+#include "../def/cpthread_defs.h"
 #include "../def/game_defs.h"
 #include "../def/klv_defs.h"
 #include "../def/letter_distribution_defs.h"

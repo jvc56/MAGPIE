@@ -29,6 +29,13 @@ typedef enum {
   ERROR_STATUS_CONFIG_LOAD_MALFORMED_THRESHOLD,
   ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG,
   ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
+  ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_BOARD_COLOR,
+  ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_BOARD_TILES,
+  ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_BOARD_BORDER,
+  ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_BOARD_COLUMNS,
+  ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ON_TURN_MARKER,
+  ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ON_TURN_COLOR,
+  ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ON_TURN_SCORE_STYLE,
   ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG,
   ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
   ERROR_STATUS_CONFIG_LOAD_INCOMPATIBLE_LEXICONS,
@@ -221,6 +228,9 @@ typedef enum {
 void log_with_info(log_level_t log_level, const char *caller_filename,
                    int caller_line, const char *format, ...);
 
+FILE *get_stream_out(void);
+FILE *get_stream_err(void);
+FILE *get_stream_in(void);
 void write_to_stream_out(const char *fmt, ...);
 void write_to_stream_err(const char *fmt, ...);
 void write_to_stream(FILE *stream, const char *fmt, ...);

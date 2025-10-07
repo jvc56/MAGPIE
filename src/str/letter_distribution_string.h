@@ -8,4 +8,8 @@ void string_builder_add_user_visible_letter(StringBuilder *string_builder,
                                             const LetterDistribution *ld,
                                             MachineLetter ml);
 
+void string_builder_add_user_visible_alt_letter(StringBuilder *string_builder,
+                                                const LetterDistribution *ld,
+                                                MachineLetter ml);
+
 #endif

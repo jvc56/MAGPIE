@@ -41,6 +41,7 @@ typedef struct LetterDistribution {
   int total_tiles;
   size_t max_tile_length;
   char ld_ml_to_hl[MACHINE_LETTER_MAX_VALUE][MAX_LETTER_BYTE_LENGTH];
+  char ld_ml_to_alt_hl[MACHINE_LETTER_MAX_VALUE][MAX_LETTER_BYTE_LENGTH];
 } LetterDistribution;
 
 static inline MachineLetter get_blanked_machine_letter(MachineLetter ml) {
@@ -100,6 +101,7 @@ static inline void ld_create_internal(const char *ld_name,
 
   for (int i = 0; i < MACHINE_LETTER_MAX_VALUE; i++) {
     ld->ld_ml_to_hl[i][0] = '\0';
+    ld->ld_ml_to_alt_hl[i][0] = '\0';
   }
 
   int machine_letter = 0;
@@ -109,14 +111,17 @@ static inline void ld_create_internal(const char *ld_name,
   for (int i = 0; i < number_of_lines; i++) {
     const char *line = string_splitter_get_item(ld_lines, i);
     single_letter_info = split_string(line, ',', true);
-    if (string_splitter_get_number_of_items(single_letter_info) != 5) {
+    int num_columns = string_splitter_get_number_of_items(single_letter_info);
+    if (num_columns != 5 && num_columns != 7) {
       error_stack_push(
           error_stack, ERROR_STATUS_LD_INVALID_ROW,
-          get_formatted_string("invalid row in letter distribution file %s: %s",
-                               ld_name, line));
+          get_formatted_string("invalid row in letter distribution file %s: %s "
+                               "(expected 5 or 7 columns, got %d)",
+                               ld_name, line, num_columns));
       break;
     }
-    // letter, lower case, dist, score, is_vowel
+    // letter, lower case, dist, score, is_vowel[, fullwidth_letter,
+    // fullwidth_lower_case]
     const char *letter = string_splitter_get_item(single_letter_info, 0);
     const char *lower_case_letter =
         string_splitter_get_item(single_letter_info, 1);
@@ -174,6 +179,26 @@ static inline void ld_create_internal(const char *ld_name,
       strncpy(ld->ld_ml_to_hl[blanked_machine_letter], lower_case_letter,
               sizeof(ld->ld_ml_to_hl[blanked_machine_letter]));
     }
+
+    // Parse fullwidth characters if present (7 column format)
+    if (num_columns == 7) {
+      const char *fullwidth_letter =
+          string_splitter_get_item(single_letter_info, 5);
+      const char *fullwidth_lower_case_letter =
+          string_splitter_get_item(single_letter_info, 6);
+
+      strncpy(ld->ld_ml_to_alt_hl[machine_letter], fullwidth_letter,
+              sizeof(ld->ld_ml_to_alt_hl[machine_letter]));
+
+      if (machine_letter > 0) {
+        MachineLetter blanked_machine_letter =
+            get_blanked_machine_letter(machine_letter);
+        strncpy(ld->ld_ml_to_alt_hl[blanked_machine_letter],
+                fullwidth_lower_case_letter,
+                sizeof(ld->ld_ml_to_alt_hl[blanked_machine_letter]));
+      }
+    }
+
     string_splitter_destroy(single_letter_info);
     single_letter_info = NULL;
     machine_letter++;
@@ -288,6 +313,19 @@ static inline char *ld_ml_to_hl(const LetterDistribution *ld,
     return get_formatted_string("[%s]", human_readable_letter);
   }
   return string_duplicate(human_readable_letter);
+}
+
+static inline char *ld_ml_to_alt_hl(const LetterDistribution *ld,
+                                    MachineLetter ml) {
+  const char *alt_letter = ld->ld_ml_to_alt_hl[ml];
+  // If no alt version is defined, fall back to regular version
+  if (alt_letter[0] == '\0') {
+    return ld_ml_to_hl(ld, ml);
+  }
+  if (is_human_readable_letter_multichar(alt_letter)) {
+    return get_formatted_string("[%s]", alt_letter);
+  }
+  return string_duplicate(alt_letter);
 }
 
 // This is a linear search. This function should not be used for anything

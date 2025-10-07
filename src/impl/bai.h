@@ -16,6 +16,7 @@
 
 #include "../compat/cpthread.h"
 #include "../def/bai_defs.h"
+#include "../def/cpthread_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/bai_result.h"
 #include "../ent/checkpoint.h"

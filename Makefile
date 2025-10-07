@@ -19,12 +19,16 @@ TEST_SUBDIRS := $(shell find $(TEST_DIR) -type d)
 TEST_OBJ_SUBDIRS := $(patsubst $(TEST_DIR)/%,$(OBJ_DIR)/$(TEST_DIR)/%,$(TEST_SUBDIRS))
 
 #dev is default, for another flavor : make BUILD=release
-BUILD := dev
+BUILD ?= dev
 
-FSAN_ARG := -fsanitize=address,undefined,pointer-compare,pointer-subtract
-# Test whether the leak flag is supported by the compiler
-ifeq ($(shell echo "int main() { return 0; }" | $(CC) -x c - -fsanitize=leak -o /dev/null >/dev/null 2>&1; echo $$?),0)
-    FSAN_ARG += -fsanitize=leak
+ifeq ($(BUILD),thread)
+    FSAN_ARG := -fsanitize=thread
+else
+    FSAN_ARG := -fsanitize=address,undefined,pointer-compare,pointer-subtract
+    # Test whether the leak flag is supported by the compiler
+    ifeq ($(shell echo "int main() { return 0; }" | $(CC) -x c - -fsanitize=leak -o /dev/null >/dev/null 2>&1; echo $$?),0)
+        FSAN_ARG += -fsanitize=leak
+    endif
 endif
 
 cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror $(FSAN_ARG)

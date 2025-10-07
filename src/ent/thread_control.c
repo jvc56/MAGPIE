@@ -2,6 +2,7 @@
 
 #include "../compat/cpthread.h"
 #include "../compat/ctime.h"
+#include "../def/cpthread_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../util/io_util.h"
 #include "xoshiro.h"
@@ -185,7 +186,7 @@ void thread_control_set_threads(ThreadControl *thread_control,
 
 void thread_control_print(ThreadControl *thread_control, const char *content) {
   cpthread_mutex_lock(&thread_control->print_mutex);
-  write_to_stream_out(content);
+  write_to_stream_out("%s", content);
   cpthread_mutex_unlock(&thread_control->print_mutex);
 }
 

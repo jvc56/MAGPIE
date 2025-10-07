@@ -112,6 +112,15 @@ typedef enum {
   ARG_TOKEN_NEXT,
   ARG_TOKEN_PREVIOUS,
   ARG_TOKEN_GOTO,
+  ARG_TOKEN_PRINT_BOARDS,
+  ARG_TOKEN_BOARD_COLOR,
+  ARG_TOKEN_BOARD_TILE_GLYPHS,
+  ARG_TOKEN_BOARD_BORDER,
+  ARG_TOKEN_BOARD_COLUMN_LABEL,
+  ARG_TOKEN_ON_TURN_MARKER,
+  ARG_TOKEN_ON_TURN_COLOR,
+  ARG_TOKEN_ON_TURN_SCORE_STYLE,
+  ARG_TOKEN_PRETTY,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -151,6 +160,7 @@ struct Config {
   bool human_readable;
   bool use_small_plays;
   bool sim_with_inference;
+  bool print_boards;
   char *record_filepath;
   double tt_fraction_of_mem;
   int time_limit_seconds;
@@ -169,6 +179,7 @@ struct Config {
   InferenceResults *inference_results;
   AutoplayResults *autoplay_results;
   ConversionResults *conversion_results;
+  GameStringOptions *game_string_options;
 };
 
 void parsed_arg_create(Config *config, arg_token_t arg_token, const char *name,
@@ -1077,8 +1088,10 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->games_before_force_draw_start = games_before_force_draw_start;
   autoplay_args->use_game_pairs = config_get_use_game_pairs(config);
   autoplay_args->human_readable = config_get_human_readable(config);
+  autoplay_args->print_boards = config->print_boards;
   autoplay_args->thread_control = config_get_thread_control(config);
   autoplay_args->data_paths = config_get_data_paths(config);
+  autoplay_args->game_string_options = config->game_string_options;
   config_fill_game_args(config, autoplay_args->game_args);
 }
 
@@ -1238,7 +1251,8 @@ char *impl_show(Config *config, ErrorStack *error_stack) {
   StringBuilder *game_string = string_builder_create();
 
   // Add the game to the string builder
-  string_builder_add_game(game_string, config->game, NULL);
+  string_builder_add_game(config->game, NULL, config->game_string_options,
+                          game_string);
 
   // Get the string and destroy the builder
   char *result = string_builder_dump(game_string, NULL);
@@ -2237,6 +2251,176 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  // Print boards
+
+  config_load_bool(config, ARG_TOKEN_PRINT_BOARDS, &config->print_boards,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  // Board color
+
+  const char *board_color_str =
+      config_get_parg_value(config, ARG_TOKEN_BOARD_COLOR, 0);
+  if (board_color_str) {
+    if (strings_iequal(board_color_str, "none")) {
+      config->game_string_options->board_color = GAME_STRING_BOARD_COLOR_NONE;
+    } else if (strings_iequal(board_color_str, "ansi")) {
+      config->game_string_options->board_color = GAME_STRING_BOARD_COLOR_ANSI;
+    } else if (strings_iequal(board_color_str, "xterm256")) {
+      config->game_string_options->board_color =
+          GAME_STRING_BOARD_COLOR_XTERM_256;
+    } else if (strings_iequal(board_color_str, "truecolor")) {
+      config->game_string_options->board_color =
+          GAME_STRING_BOARD_COLOR_TRUECOLOR;
+    } else {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_BOARD_COLOR,
+          get_formatted_string("invalid board color: %s", board_color_str));
+      return;
+    }
+  }
+
+  // Board tile glyphs
+
+  const char *board_tiles_str =
+      config_get_parg_value(config, ARG_TOKEN_BOARD_TILE_GLYPHS, 0);
+  if (board_tiles_str) {
+    if (strings_iequal(board_tiles_str, "primary")) {
+      config->game_string_options->board_tile_glyphs =
+          GAME_STRING_BOARD_TILE_GLYPHS_PRIMARY;
+    } else if (strings_iequal(board_tiles_str, "alt")) {
+      config->game_string_options->board_tile_glyphs =
+          GAME_STRING_BOARD_TILE_GLYPHS_ALT;
+    } else {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_BOARD_TILES,
+          get_formatted_string("invalid board tiles: %s", board_tiles_str));
+      return;
+    }
+  }
+
+  // Board border
+
+  const char *board_border_str =
+      config_get_parg_value(config, ARG_TOKEN_BOARD_BORDER, 0);
+  if (board_border_str) {
+    if (strings_iequal(board_border_str, "ascii")) {
+      config->game_string_options->board_border =
+          GAME_STRING_BOARD_BORDER_ASCII;
+    } else if (strings_iequal(board_border_str, "box")) {
+      config->game_string_options->board_border =
+          GAME_STRING_BOARD_BORDER_BOX_DRAWING;
+    } else {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_BOARD_BORDER,
+          get_formatted_string("invalid board border: %s", board_border_str));
+      return;
+    }
+  }
+
+  // Board column labels
+
+  const char *board_columns_str =
+      config_get_parg_value(config, ARG_TOKEN_BOARD_COLUMN_LABEL, 0);
+  if (board_columns_str) {
+    if (strings_iequal(board_columns_str, "ascii")) {
+      config->game_string_options->board_column_label =
+          GAME_STRING_BOARD_COLUMN_LABEL_ASCII;
+    } else if (strings_iequal(board_columns_str, "fullwidth")) {
+      config->game_string_options->board_column_label =
+          GAME_STRING_BOARD_COLUMN_LABEL_FULLWIDTH;
+    } else {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_BOARD_COLUMNS,
+          get_formatted_string("invalid board columns: %s", board_columns_str));
+      return;
+    }
+  }
+
+  // On-turn marker
+
+  const char *on_turn_marker_str =
+      config_get_parg_value(config, ARG_TOKEN_ON_TURN_MARKER, 0);
+  if (on_turn_marker_str) {
+    if (strings_iequal(on_turn_marker_str, "ascii")) {
+      config->game_string_options->on_turn_marker =
+          GAME_STRING_ON_TURN_MARKER_ASCII;
+    } else if (strings_iequal(on_turn_marker_str, "arrowhead")) {
+      config->game_string_options->on_turn_marker =
+          GAME_STRING_ON_TURN_MARKER_ARROWHEAD;
+    } else {
+      error_stack_push(error_stack,
+                       ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ON_TURN_MARKER,
+                       get_formatted_string("invalid on-turn marker: %s",
+                                            on_turn_marker_str));
+      return;
+    }
+  }
+
+  // On-turn color
+
+  const char *on_turn_color_str =
+      config_get_parg_value(config, ARG_TOKEN_ON_TURN_COLOR, 0);
+  if (on_turn_color_str) {
+    if (strings_iequal(on_turn_color_str, "none")) {
+      config->game_string_options->on_turn_color =
+          GAME_STRING_ON_TURN_COLOR_NONE;
+    } else if (strings_iequal(on_turn_color_str, "green")) {
+      config->game_string_options->on_turn_color =
+          GAME_STRING_ON_TURN_COLOR_ANSI_GREEN;
+    } else {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ON_TURN_COLOR,
+          get_formatted_string("invalid on-turn color: %s", on_turn_color_str));
+      return;
+    }
+  }
+
+  // On-turn score style
+
+  const char *on_turn_score_str =
+      config_get_parg_value(config, ARG_TOKEN_ON_TURN_SCORE_STYLE, 0);
+  if (on_turn_score_str) {
+    if (strings_iequal(on_turn_score_str, "normal")) {
+      config->game_string_options->on_turn_score_style =
+          GAME_STRING_ON_TURN_SCORE_NORMAL;
+    } else if (strings_iequal(on_turn_score_str, "bold")) {
+      config->game_string_options->on_turn_score_style =
+          GAME_STRING_ON_TURN_SCORE_BOLD;
+    } else {
+      error_stack_push(
+          error_stack,
+          ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ON_TURN_SCORE_STYLE,
+          get_formatted_string("invalid on-turn score style: %s",
+                               on_turn_score_str));
+      return;
+    }
+  }
+
+  // Pretty mode - sets multiple board options at once
+
+  bool pretty_mode = false;
+  config_load_bool(config, ARG_TOKEN_PRETTY, &pretty_mode, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (pretty_mode) {
+    config->print_boards = true;
+    config->game_string_options->board_color = GAME_STRING_BOARD_COLOR_ANSI;
+    config->game_string_options->board_tile_glyphs =
+        GAME_STRING_BOARD_TILE_GLYPHS_ALT;
+    config->game_string_options->board_border =
+        GAME_STRING_BOARD_BORDER_BOX_DRAWING;
+    config->game_string_options->board_column_label =
+        GAME_STRING_BOARD_COLUMN_LABEL_FULLWIDTH;
+    config->game_string_options->on_turn_marker =
+        GAME_STRING_ON_TURN_MARKER_ARROWHEAD;
+    config->game_string_options->on_turn_color =
+        GAME_STRING_ON_TURN_COLOR_ANSI_GREEN;
+  }
+
   const char *write_buffer_size_str =
       config_get_parg_value(config, ARG_TOKEN_WRITE_BUFFER_SIZE, 0);
   if (write_buffer_size_str) {
@@ -2609,6 +2793,15 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_TIME_LIMIT, "tlim", 1, 1);
   arg(ARG_TOKEN_SAMPLING_RULE, "sr", 1, 1);
   arg(ARG_TOKEN_THRESHOLD, "threshold", 1, 1);
+  arg(ARG_TOKEN_PRINT_BOARDS, "printboards", 1, 1);
+  arg(ARG_TOKEN_BOARD_COLOR, "boardcolor", 1, 1);
+  arg(ARG_TOKEN_BOARD_TILE_GLYPHS, "boardtiles", 1, 1);
+  arg(ARG_TOKEN_BOARD_BORDER, "boardborder", 1, 1);
+  arg(ARG_TOKEN_BOARD_COLUMN_LABEL, "boardcolumns", 1, 1);
+  arg(ARG_TOKEN_ON_TURN_MARKER, "onturnmarker", 1, 1);
+  arg(ARG_TOKEN_ON_TURN_COLOR, "onturncolor", 1, 1);
+  arg(ARG_TOKEN_ON_TURN_SCORE_STYLE, "onturnscore", 1, 1);
+  arg(ARG_TOKEN_PRETTY, "pretty", 1, 1);
 
 #undef cmd
 #undef arg
@@ -2631,6 +2824,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->use_small_plays = false;
   config->human_readable = false;
   config->sim_with_inference = false;
+  config->print_boards = false;
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->ld = NULL;
   config->players_data = players_data_create();
@@ -2643,6 +2837,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->autoplay_results = autoplay_results_create();
   config->conversion_results = conversion_results_create();
   config->tt_fraction_of_mem = 0.25;
+  config->game_string_options = game_string_options_create_default();
 
   autoplay_results_set_players_data(config->autoplay_results,
                                     config->players_data);
@@ -2674,6 +2869,7 @@ void config_destroy(Config *config) {
   inference_results_destroy(config->inference_results);
   autoplay_results_destroy(config->autoplay_results);
   conversion_results_destroy(config->conversion_results);
+  game_string_options_destroy(config->game_string_options);
   free(config->data_paths);
   free(config);
 }

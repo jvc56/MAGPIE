@@ -1,5 +1,6 @@
 #include "move_gen.h"
 
+#include "../compat/cpthread.h"
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/equity_defs.h"
@@ -46,6 +47,7 @@
 // don't have this problem since they are
 // only called once per command.
 static MoveGen *cached_gens[MAX_THREADS];
+static cpthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER; // NOLINT
 
 MoveGen *generator_create(void) {
   MoveGen *generator = malloc_or_die(sizeof(MoveGen));
@@ -72,10 +74,12 @@ MoveGen *get_movegen(int thread_index) {
 // dist-dependent heap alloc'd fields, so maybe we can now destroy only at
 // program exit.
 void gen_destroy_cache(void) {
+  cpthread_mutex_lock(&cache_mutex);
   for (int i = 0; i < (MAX_THREADS); i++) {
     generator_destroy(cached_gens[i]);
     cached_gens[i] = NULL;
   }
+  cpthread_mutex_unlock(&cache_mutex);
 }
 
 // Cache getter functions

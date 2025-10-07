@@ -2,6 +2,7 @@
 #define ALIAS_METHOD_H
 
 #include "../compat/cpthread.h"
+#include "../def/cpthread_defs.h"
 #include "../util/io_util.h"
 #include "encoded_rack.h"
 #include "rack.h"

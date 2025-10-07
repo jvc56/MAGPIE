@@ -3,6 +3,7 @@
 
 #include "../compat/cpthread.h"
 #include "../def/autoplay_defs.h"
+#include "../def/cpthread_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
@@ -21,6 +22,7 @@
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
 #include "../ent/xoshiro.h"
+#include "../str/game_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
@@ -28,6 +30,7 @@
 #include "rack_list.h"
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 typedef struct LeavegenSharedData {
@@ -274,6 +277,8 @@ void autoplay_shared_data_destroy(AutoplaySharedData *shared_data) {
 typedef struct GameRunner {
   bool force_draw;
   int turn_number;
+  int pair_game_number; // 0 for non-paired games, 1 or 2 for game pairs
+  uint64_t game_number;
   uint64_t seed;
   Game *game;
   MoveList *move_list;
@@ -286,6 +291,8 @@ GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
   game_runner->shared_data = autoplay_worker->shared_data;
   game_runner->game = game_create(args->game_args);
   game_runner->move_list = move_list_create(1);
+  game_runner->pair_game_number =
+      0; // Will be set in game_runner_start if using pairs
   return game_runner;
 }
 
@@ -301,10 +308,12 @@ void game_runner_destroy(GameRunner *game_runner) {
 void game_runner_start(const AutoplayWorker *autoplay_worker,
                        GameRunner *game_runner,
                        const ThreadControlIterOutput *iter_output,
-                       int starting_player_index) {
+                       int starting_player_index, int pair_game_number) {
   Game *game = game_runner->game;
   game_reset(game);
   game_runner->seed = iter_output->seed;
+  game_runner->game_number = iter_output->iter_count;
+  game_runner->pair_game_number = pair_game_number;
   game_seed(game, iter_output->seed);
   game_set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
@@ -372,6 +381,29 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
   get_leave_for_move(*move, game, &rare_rack_or_move_leave);
   autoplay_results_add_move(autoplay_worker->autoplay_results,
                             game_runner->game, *move, &rare_rack_or_move_leave);
+
+  // Print board with move about to be played if requested
+  if (autoplay_worker->args->print_boards) {
+    StringBuilder *output = string_builder_create();
+    if (game_runner->pair_game_number == 0) {
+      string_builder_add_formatted_string(
+          output, "\n=== Game %llu, Turn %d ===\n",
+          (unsigned long long)game_runner->game_number + 1,
+          game_runner->turn_number + 1);
+    } else {
+      string_builder_add_formatted_string(
+          output, "\n=== Game Pair %llu, Game %d, Turn %d ===\n",
+          (unsigned long long)game_runner->game_number + 1,
+          game_runner->pair_game_number, game_runner->turn_number + 1);
+    }
+    string_builder_add_game(game, game_runner->move_list,
+                            autoplay_worker->args->game_string_options, output);
+    string_builder_add_string(output, "\n");
+    thread_control_print(autoplay_worker->args->thread_control,
+                         string_builder_peek(output));
+    string_builder_destroy(output);
+  }
+
   play_move(*move, game, NULL);
   game_runner->turn_number++;
 }
@@ -421,10 +453,10 @@ void play_autoplay_game_or_game_pair(
     GameRunner *game_runner2, const ThreadControlIterOutput *iter_output) {
   const int starting_player_index = (int)(iter_output->iter_count % 2);
   game_runner_start(autoplay_worker, game_runner1, iter_output,
-                    starting_player_index);
+                    starting_player_index, game_runner2 ? 1 : 0);
   if (game_runner2) {
     game_runner_start(autoplay_worker, game_runner2, iter_output,
-                      1 - starting_player_index);
+                      1 - starting_player_index, 2);
   }
   bool games_are_divergent = false;
   while (true) {
@@ -672,8 +704,11 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
   autoplay_shared_data_destroy(shared_data);
   free(min_rack_targets);
 
-  players_data_reload(args->game_args->players_data, PLAYERS_DATA_TYPE_KLV,
-                      args->data_paths, error_stack);
+  // Only reload KLV if it was modified during leavegen
+  if (is_leavegen_mode) {
+    players_data_reload(args->game_args->players_data, PLAYERS_DATA_TYPE_KLV,
+                        args->data_paths, error_stack);
+  }
 
   char *autoplay_results_string = autoplay_results_to_string(
       autoplay_results, args->human_readable, show_divergent_results);

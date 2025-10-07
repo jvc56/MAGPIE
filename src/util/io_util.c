@@ -1,10 +1,11 @@
 #include "io_util.h"
 
+#include "../def/cpthread_defs.h"
 #include <assert.h>
 #include <errno.h>
+#include <pthread.h>
 #include <stdarg.h>
 #include <stdbool.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,28 +17,50 @@ static log_level_t current_log_level = LOG_FATAL;
 static FILE *stream_out = NULL;
 static FILE *stream_err = NULL;
 static FILE *stream_in = NULL;
+static cpthread_mutex_t stream_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+// Local mutex wrappers to avoid circular dependency with cpthread.h
+static inline void stream_mutex_lock(void) {
+  if (pthread_mutex_lock(&stream_mutex)) {
+    (void)fprintf(stderr, "FATAL: stream mutex lock failed\n");
+    abort();
+  }
+}
+
+static inline void stream_mutex_unlock(void) {
+  if (pthread_mutex_unlock(&stream_mutex)) {
+    (void)fprintf(stderr, "FATAL: stream mutex unlock failed\n");
+    abort();
+  }
+}
 
 FILE *get_stream_out(void) {
+  stream_mutex_lock();
   FILE *stream = stream_out;
   if (!stream) {
     stream = stdout;
   }
+  stream_mutex_unlock();
   return stream;
 }
 
 FILE *get_stream_err(void) {
+  stream_mutex_lock();
   FILE *stream = stream_err;
   if (!stream) {
     stream = stderr;
   }
+  stream_mutex_unlock();
   return stream;
 }
 
 FILE *get_stream_in(void) {
+  stream_mutex_lock();
   FILE *stream = stream_in;
   if (!stream) {
     stream = stdin;
   }
+  stream_mutex_unlock();
   return stream;
 }
 
@@ -204,22 +227,46 @@ void log_set_level(log_level_t new_log_level) {
 }
 
 // WARNING: This function should only be used for testing
-void io_set_stream_out(FILE *stream) { stream_out = stream; }
+void io_set_stream_out(FILE *stream) {
+  stream_mutex_lock();
+  stream_out = stream;
+  stream_mutex_unlock();
+}
 
 // WARNING: This function should only be used for testing
-void io_reset_stream_out(void) { stream_out = NULL; }
+void io_reset_stream_out(void) {
+  stream_mutex_lock();
+  stream_out = NULL;
+  stream_mutex_unlock();
+}
 
 // WARNING: This function should only be used for testing
-void io_set_stream_err(FILE *stream) { stream_err = stream; }
+void io_set_stream_err(FILE *stream) {
+  stream_mutex_lock();
+  stream_err = stream;
+  stream_mutex_unlock();
+}
 
 // WARNING: This function should only be used for testing
-void io_reset_stream_err(void) { stream_err = NULL; }
+void io_reset_stream_err(void) {
+  stream_mutex_lock();
+  stream_err = NULL;
+  stream_mutex_unlock();
+}
 
 // WARNING: This function should only be used for testing
-void io_set_stream_in(FILE *stream) { stream_in = stream; }
+void io_set_stream_in(FILE *stream) {
+  stream_mutex_lock();
+  stream_in = stream;
+  stream_mutex_unlock();
+}
 
 // WARNING: This function should only be used for testing
-void io_reset_stream_in(void) { stream_in = NULL; }
+void io_reset_stream_in(void) {
+  stream_mutex_lock();
+  stream_in = NULL;
+  stream_mutex_unlock();
+}
 
 void *malloc_or_die(size_t size) {
   void *uncasted_pointer = malloc(size);
