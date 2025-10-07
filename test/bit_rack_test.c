@@ -97,7 +97,7 @@ void test_high_and_low_64(void) {
 static int popcount64(uint64_t x) {
   int count = 0;
   while (x) {
-    count += x & 1;
+    count += x & 1ULL;
     x >>= 1;
   }
   return count;
