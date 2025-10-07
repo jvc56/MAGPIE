@@ -1251,9 +1251,8 @@ char *impl_show(Config *config, ErrorStack *error_stack) {
   StringBuilder *game_string = string_builder_create();
 
   // Add the game to the string builder
-  GameStringOptions *gso = game_string_options_create_default();
-  string_builder_add_game(config->game, NULL, gso, game_string);
-  game_string_options_destroy(gso);
+  string_builder_add_game(config->game, NULL, config->game_string_options,
+                          game_string);
 
   // Get the string and destroy the builder
   char *result = string_builder_dump(game_string, NULL);
