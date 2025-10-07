@@ -16,6 +16,7 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "bag_string.h"
+#include "equity_string.h"
 #include "letter_distribution_string.h"
 #include "move_string.h"
 #include "rack_string.h"
@@ -28,7 +29,7 @@
 // Display formatting constants
 enum {
   PLAYER_NAME_DISPLAY_WIDTH = 25,
-  RACK_DISPLAY_WIDTH = 10,
+  RACK_DISPLAY_WIDTH = RACK_SIZE + 3,
   ASCII_UPPERCASE_A = 65,
 };
 
@@ -256,8 +257,8 @@ void string_builder_add_move_with_rank_and_equity(const Game *game,
   const LetterDistribution *ld = game_get_ld(game);
   string_builder_add_formatted_string(game_string, " %d ", move_index + 1);
   string_builder_add_move(game_string, board, move, ld);
-  string_builder_add_formatted_string(game_string, " %0.2f",
-                                      equity_to_double(move_get_equity(move)));
+  string_builder_add_string(game_string, " ");
+  string_builder_add_equity(game_string, move_get_equity(move), "%0.2f");
 }
 
 void string_builder_add_board_column_header(
