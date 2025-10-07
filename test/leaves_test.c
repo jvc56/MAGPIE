@@ -18,6 +18,10 @@ void test_leaves(void) {
   Config *config =
       config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 "
                            "all -r2 all -numplays 1");
+
+  // Generate CSW21.csv from CSW21.klv2 before testing
+  load_and_exec_config_or_die(config, "convert klv2csv CSW21");
+
   const KLV *klv = players_data_get_klv(config_get_players_data(config), 0);
   const LetterDistribution *ld = config_get_ld(config);
   Rack *rack = rack_create(ld_get_size(ld));

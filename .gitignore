@@ -13,6 +13,7 @@ perf*
 .env
 data
 testdata
+versioned-tarballs
 quackle
 *.gcg
 oprofile_data

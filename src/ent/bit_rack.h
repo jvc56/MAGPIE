@@ -151,54 +151,6 @@ static inline void bit_rack_add_bit_rack(BitRack *bit_rack,
 #endif
 }
 
-// Long division fallback
-#if !USE_INT128_INTRINSIC
-static inline void bit_rack_div_mod_no_intrinsic(const BitRack *bit_rack,
-                                                 uint32_t divisor,
-                                                 BitRack *quotient,
-                                                 uint32_t *remainder) {
-  const uint64_t highest_32 = bit_rack->high >> 32;
-  uint64_t first_quotient_32 = highest_32 / divisor;
-  const uint64_t first_remainder_32 = highest_32 % divisor;
-
-  const uint64_t second_dividend =
-      (first_remainder_32 << 32) | (bit_rack->high & 0xFFFFFFFF);
-  const uint64_t second_quotient = second_dividend / divisor;
-  first_quotient_32 += second_quotient >> 32;
-  uint64_t second_quotient_32 = second_quotient & 0xFFFFFFFF;
-  const uint64_t second_remainder_32 = second_dividend % divisor;
-
-  const uint64_t third_dividend =
-      (second_remainder_32 << 32) | (bit_rack->low >> 32);
-  const uint64_t third_quotient = third_dividend / divisor;
-  second_quotient_32 += third_quotient >> 32;
-  uint64_t third_quotient_32 = third_quotient & 0xFFFFFFFF;
-  const uint64_t third_remainder_32 = third_dividend % divisor;
-
-  const uint64_t fourth_dividend =
-      (third_remainder_32 << 32) | (bit_rack->low & 0xFFFFFFFF);
-  const uint64_t fourth_quotient = fourth_dividend / divisor;
-  third_quotient_32 += fourth_quotient >> 32;
-  const uint32_t fourth_quotient_32 = fourth_quotient & 0xFFFFFFFF;
-  const uint64_t fourth_remainder_32 = fourth_dividend % divisor;
-
-  *quotient = (BitRack){(third_quotient_32 << 32) | fourth_quotient_32,
-                        (first_quotient_32 << 32) | second_quotient_32};
-  *remainder = fourth_remainder_32;
-}
-#endif
-
-static inline void bit_rack_div_mod(const BitRack *bit_rack, uint32_t divisor,
-                                    BitRack *quotient, uint32_t *remainder) {
-  assert(divisor != 0);
-#if USE_INT128_INTRINSIC
-  *quotient = *bit_rack / divisor;
-  *remainder = *bit_rack % divisor;
-#else
-  bit_rack_div_mod_no_intrinsic(bit_rack, divisor, quotient, remainder);
-#endif
-}
-
 static inline uint64_t bit_rack_get_high_64(const BitRack *bit_rack) {
 #if USE_INT128_INTRINSIC
   return (uint64_t)(*bit_rack >> 64);
@@ -231,17 +183,6 @@ static inline Rack *bit_rack_to_rack(const BitRack *bit_rack) {
     rack->number_of_letters += (uint16_t)num_ml;
   }
   return rack;
-}
-
-static inline void bit_rack_add_uint32(BitRack *bit_rack, uint32_t addend) {
-#if USE_INT128_INTRINSIC
-  *bit_rack += addend;
-#else
-  const uint64_t low_sum = bit_rack->low + addend;
-  bool overflow = low_sum < bit_rack->low;
-  bit_rack->low = low_sum;
-  bit_rack->high += overflow;
-#endif
 }
 
 static inline BitRack bit_rack_mul(const BitRack *bit_rack,
@@ -285,25 +226,6 @@ static inline void bit_rack_set_letter_count(BitRack *bit_rack,
     bit_rack->high |= ((uint64_t)count) << adjusted_shift;
   }
 #endif
-}
-
-static inline BitRack largest_bit_rack_for_ld(const LetterDistribution *ld) {
-  BitRack bit_rack = bit_rack_create_empty();
-  int letters_to_add = BOARD_DIM;
-  for (int ml = ld->size - 1; ml >= 1; ml--) {
-    int letter_count = ld->distribution[ml];
-    if (ml == ld->size - 1) {
-      letter_count += ld->distribution[BLANK_MACHINE_LETTER];
-    }
-    if (letters_to_add >= letter_count) {
-      bit_rack_set_letter_count(&bit_rack, ml, letter_count);
-      letters_to_add -= letter_count;
-    } else {
-      bit_rack_set_letter_count(&bit_rack, ml, letters_to_add);
-      return bit_rack;
-    }
-  }
-  return bit_rack;
 }
 
 static inline void bit_rack_add_letter(BitRack *bit_rack, MachineLetter ml) {
@@ -395,5 +317,34 @@ static inline int bit_rack_num_letters(const BitRack *bit_rack) {
 
 static inline bool bit_rack_fits_in_12_bytes(const BitRack *bit_rack) {
   return (bit_rack_get_high_64(bit_rack) & 0xFFFFFFFF00000000ULL) == 0;
+}
+
+// Mix 128-bit BitRack to 64-bit hash with good avalanche properties
+// This ensures changes in any tile position affect all output bits
+static inline uint64_t bit_rack_mix_to_64(const BitRack *bit_rack) {
+  uint64_t low = bit_rack_get_low_64(bit_rack);
+  uint64_t high = bit_rack_get_high_64(bit_rack);
+
+  // Fold high into low with rotation for better avalanche
+  low ^= high;
+  low ^= (high << BIT_RACK_HASH_ROTATION_SHIFT) |
+         (high >> (64 - BIT_RACK_HASH_ROTATION_SHIFT));
+
+  // MurmurHash3-style mixing for bit diffusion
+  low ^= low >> 33;
+  low *= BIT_RACK_HASH_MIX_CONSTANT_1;
+  low ^= low >> 33;
+  low *= BIT_RACK_HASH_MIX_CONSTANT_2;
+  low ^= low >> 33;
+
+  return low;
+}
+
+// Get bucket index from BitRack using mixing and power-of-2 mask
+// num_buckets must be a power of 2
+static inline uint32_t bit_rack_get_bucket_index(const BitRack *bit_rack,
+                                                 uint32_t num_buckets) {
+  const uint64_t hash = bit_rack_mix_to_64(bit_rack);
+  return (uint32_t)(hash & (num_buckets - 1));
 }
 #endif

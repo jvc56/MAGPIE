@@ -93,48 +93,71 @@ void test_high_and_low_64(void) {
   config_destroy(config);
 }
 
-void test_div_mod(void) {
-  Config *config = config_create_or_die("set -lex NWL20");
-  const LetterDistribution *ld = config_get_ld(config);
-  const int ld_size = ld_get_size(ld);
-  Rack *rack = rack_create(ld_size);
-  rack_set_to_string(ld, rack, "Z"); // 1 << (4*26);
-  const BitRack bit_rack = bit_rack_create_from_rack(ld, rack);
-
-  BitRack quotient;
-  uint32_t remainder;
-  bit_rack_div_mod(&bit_rack, 2, &quotient, &remainder);
-  assert(bit_rack_get_high_64(&quotient) == 1ULL << 39);
-  assert(bit_rack_get_low_64(&quotient) == 0);
-  assert(remainder == 0);
-
-  bit_rack_div_mod(&bit_rack, 3, &quotient, &remainder);
-  assert(bit_rack_get_high_64(&quotient) == 366503875925);
-  assert(bit_rack_get_low_64(&quotient) == 6148914691236517205);
-  assert(remainder == 1);
-
-  rack_set_to_string(ld, rack, "Q"); // 1 << (4*17);
-  const BitRack bit_rack2 = bit_rack_create_from_rack(ld, rack);
-
-  bit_rack_div_mod(&bit_rack2, 1000003, &quotient, &remainder);
-  assert(bit_rack_get_high_64(&quotient) == 0);
-  assert(bit_rack_get_low_64(&quotient) == 295147019738293);
-  assert(remainder == 610977);
-
-  rack_destroy(rack);
-  config_destroy(config);
+// Helper to count set bits (popcount)
+static uint64_t popcount64(uint64_t x) {
+  uint64_t count = 0;
+  while (x) {
+    count += x & 1ULL;
+    x >>= 1;
+  }
+  return count;
 }
 
-void test_add_uint32(void) {
-  BitRack bit_rack = bit_rack_create_empty();
-  for (int ml = 0; ml < 16; ml++) {
-    bit_rack_set_letter_count(&bit_rack, ml, 15);
-  }
-  assert(bit_rack_get_high_64(&bit_rack) == 0ULL);
-  assert(bit_rack_get_low_64(&bit_rack) == ~0ULL);
-  bit_rack_add_uint32(&bit_rack, 0xFFFFFFFF);
-  assert(bit_rack_get_high_64(&bit_rack) == 1ULL);
-  assert(bit_rack_get_low_64(&bit_rack) == 0xFFFFFFFEULL);
+void test_hash_mixing(void) {
+  Config *config = config_create_or_die("set -lex NWL20");
+  const LetterDistribution *ld = config_get_ld(config);
+
+  // Test 1: Different racks should produce different hashes
+  BitRack rack1 = string_to_bit_rack(ld, "AEINRST");
+  BitRack rack2 = string_to_bit_rack(ld, "RETINAS");
+  BitRack rack3 = string_to_bit_rack(ld, "ZZZZZZZ");
+
+  uint64_t hash1 = bit_rack_mix_to_64(&rack1);
+  uint64_t hash2 = bit_rack_mix_to_64(&rack2);
+  uint64_t hash3 = bit_rack_mix_to_64(&rack3);
+
+  // Same letters should produce same hash (anagram property)
+  assert(hash1 == hash2);
+  // Different letters should produce different hash
+  assert(hash1 != hash3);
+
+  // Test 2: Avalanche property - flipping one bit should change ~50% of output
+  // bits: change one letter count (A from 1 to 2)
+  BitRack rack_modified = rack1;
+  bit_rack_add_letter(&rack_modified, ld_hl_to_ml(ld, "A"));
+
+  uint64_t hash_modified = bit_rack_mix_to_64(&rack_modified);
+  uint64_t diff = hash1 ^ hash_modified;
+  uint64_t changed_bits = popcount64(diff);
+
+  // Should change roughly 32 bits (25-39 is reasonable range for good mixing)
+  assert(changed_bits >= 25 && changed_bits <= 39);
+
+  // Test 3: Changing letters in high bits should affect low bits of hash
+  // Z is at position 26*4 = 104 bits (in high 64)
+  BitRack high_bits = string_to_bit_rack(ld, "Z");
+  BitRack high_bits_modified = string_to_bit_rack(ld, "ZZ");
+
+  uint64_t hash_high1 = bit_rack_mix_to_64(&high_bits);
+  uint64_t hash_high2 = bit_rack_mix_to_64(&high_bits_modified);
+
+  // Check that low 32 bits changed significantly
+  uint32_t low1 = (uint32_t)hash_high1;
+  uint32_t low2 = (uint32_t)hash_high2;
+  uint64_t low_changed = popcount64((uint64_t)(low1 ^ low2));
+  assert(low_changed >= 8); // At least some low bits changed
+
+  // Test 4: Bucket index is within bounds
+  const uint32_t num_buckets = 256; // power of 2
+  BitRack test_rack = string_to_bit_rack(ld, "TESTING");
+  uint32_t bucket = bit_rack_get_bucket_index(&test_rack, num_buckets);
+  assert(bucket < num_buckets);
+
+  // Test with different power-of-2 sizes
+  assert(bit_rack_get_bucket_index(&test_rack, 64) < 64);
+  assert(bit_rack_get_bucket_index(&test_rack, 1024) < 1024);
+
+  config_destroy(config);
 }
 
 void test_mul(void) {
@@ -151,35 +174,6 @@ void test_mul(void) {
   assert(bit_rack_get_high_64(&result) == 5);
   assert(bit_rack_get_low_64(&result) == 0);
 
-  // (1 << (4*17)) | (1 << (4*9))
-  BitRack qi = string_to_bit_rack(ld, "QI");
-  assert(bit_rack_get_high_64(&qi) == (1ULL << 4));
-  assert(bit_rack_get_low_64(&qi) == (1ULL << 36));
-
-  BitRack quotient;
-  uint32_t remainder;
-  bit_rack_div_mod(&qi, 2, &quotient, &remainder);
-  assert(bit_rack_get_high_64(&quotient) == (1ULL << 3));
-  assert(bit_rack_get_low_64(&quotient) == (1ULL << 35));
-
-  BitRack result2 = bit_rack_mul(&quotient, 2);
-  assert(bit_rack_equals(&result2, &qi));
-
-  config_destroy(config);
-}
-
-void test_largest_bit_rack_for_ld(void) {
-  Config *config = config_create_or_die("set -lex NWL20");
-  const LetterDistribution *ld = config_get_ld(config);
-  const BitRack bit_rack = largest_bit_rack_for_ld(ld);
-
-  Rack *expected_rack = rack_create(ld_get_size(ld));
-  rack_set_to_string(ld, expected_rack, "ZZZYYXWWVVUUUUT");
-  const BitRack expected_bit_rack =
-      bit_rack_create_from_rack(ld, expected_rack);
-  assert(bit_rack_equals(&bit_rack, &expected_bit_rack));
-
-  rack_destroy(expected_rack);
   config_destroy(config);
 }
 
@@ -192,8 +186,6 @@ void test_bit_rack(void) {
   test_create_from_rack();
   test_add_bit_rack();
   test_high_and_low_64();
-  test_add_uint32();
-  test_div_mod();
+  test_hash_mixing();
   test_mul();
-  test_largest_bit_rack_for_ld();
 }
