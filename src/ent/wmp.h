@@ -63,9 +63,8 @@
 //                8 bytes: zeroes
 //                4 bytes: bitvector for first blank letters with solutions
 //                4 bytes: zeroes
-// 12 bytes: BitRack quotient (96 bits)
-//           (number of word buckets must be high enough that maximum quotient
-//           fits. largest_bit_rack_for_ld(ld) / num_word_buckets < (1 << 96)).
+// 16 bytes: Full BitRack (128 bits) for collision detection
+//           (stored in little-endian byte order)
 
 typedef struct __attribute__((packed)) WMPEntry {
   union {
@@ -89,7 +88,7 @@ typedef struct __attribute__((packed)) WMPEntry {
       };
     };
   };
-  uint8_t quotient[WMP_QUOTIENT_BYTES];
+  uint8_t bit_rack_bytes[WMP_BITRACK_BYTES];
 } WMPEntry;
 
 typedef struct WMPForLength {
@@ -151,6 +150,9 @@ static inline void read_uint32s_from_stream(uint32_t *i, size_t n,
   if (result != n) {
     log_fatal("could not read uint32s from stream");
   }
+  for (size_t idx = 0; idx < n; idx++) {
+    i[idx] = le32toh(i[idx]);
+  }
 }
 
 static inline void read_wmp_entries_from_stream(WMPEntry *entries, uint32_t n,
@@ -162,11 +164,10 @@ static inline void read_wmp_entries_from_stream(WMPEntry *entries, uint32_t n,
     log_fatal("could not read WMPEntries from stream");
   }
   for (uint32_t i = 0; i < n; i++) {
-    for (uint32_t j = 0; j < WMP_QUOTIENT_BYTES; j++) {
-      WMPEntry *entry = &entries[i];
-      entry->word_start = le32toh(entry->word_start);
-      entry->num_words = le32toh(entry->num_words);
-    }
+    WMPEntry *entry = &entries[i];
+    entry->word_start = le32toh(entry->word_start);
+    entry->num_words = le32toh(entry->num_words);
+    // BitRack bytes are already in little-endian format from file
   }
 }
 
@@ -363,17 +364,49 @@ wmp_entry_write_blankless_words_to_buffer(const WMPEntry *entry,
       entry, wfl, word_length, buffer);
 }
 
+// Read full BitRack from WMPEntry
+static inline BitRack wmp_entry_read_bit_rack(const WMPEntry *entry) {
+#if IS_LITTLE_ENDIAN
+  BitRack bit_rack;
+  memcpy(&bit_rack, entry->bit_rack_bytes, WMP_BITRACK_BYTES);
+  return bit_rack;
+#else
+  // Handle big-endian case
+  uint64_t low, high;
+  memcpy(&low, entry->bit_rack_bytes, 8);
+  memcpy(&high, entry->bit_rack_bytes + 8, 8);
+  low = le64toh(low);
+  high = le64toh(high);
+  return (BitRack){.low = low, .high = high};
+#endif
+}
+
+// Write full BitRack to WMPEntry
+static inline void wmp_entry_write_bit_rack(WMPEntry *entry,
+                                            const BitRack *bit_rack) {
+#if IS_LITTLE_ENDIAN
+  memcpy(entry->bit_rack_bytes, bit_rack, WMP_BITRACK_BYTES);
+#else
+  // Handle big-endian case
+  uint64_t low = bit_rack_get_low_64(bit_rack);
+  uint64_t high = bit_rack_get_high_64(bit_rack);
+  low = htole64(low);
+  high = htole64(high);
+  memcpy(entry->bit_rack_bytes, &low, 8);
+  memcpy(entry->bit_rack_bytes + 8, &high, 8);
+#endif
+}
+
 static inline const WMPEntry *wfl_get_word_entry(const WMPForLength *wfl,
                                                  const BitRack *bit_rack) {
-  BitRack quotient;
-  uint32_t bucket_index;
-  bit_rack_div_mod(bit_rack, wfl->num_word_buckets, &quotient, &bucket_index);
+  const uint32_t bucket_index =
+      bit_rack_get_bucket_index(bit_rack, wfl->num_word_buckets);
   const uint32_t start = wfl->word_bucket_starts[bucket_index];
   const uint32_t end = wfl->word_bucket_starts[bucket_index + 1];
   for (uint32_t i = start; i < end; i++) {
     const WMPEntry *entry = &wfl->word_map_entries[i];
-    const BitRack entry_quotient = bit_rack_read_12_bytes(entry->quotient);
-    if (bit_rack_equals(&entry_quotient, &quotient)) {
+    const BitRack entry_bit_rack = wmp_entry_read_bit_rack(entry);
+    if (bit_rack_equals(&entry_bit_rack, bit_rack)) {
       return entry;
     }
   }
@@ -416,15 +449,14 @@ static inline const WMPEntry *wfl_get_blank_entry(const WMPForLength *wfl,
   if (wfl->num_blank_buckets == 0) {
     return NULL;
   }
-  BitRack quotient;
-  uint32_t bucket_index;
-  bit_rack_div_mod(bit_rack, wfl->num_blank_buckets, &quotient, &bucket_index);
+  const uint32_t bucket_index =
+      bit_rack_get_bucket_index(bit_rack, wfl->num_blank_buckets);
   const uint32_t start = wfl->blank_bucket_starts[bucket_index];
   const uint32_t end = wfl->blank_bucket_starts[bucket_index + 1];
   for (uint32_t i = start; i < end; i++) {
     const WMPEntry *entry = &wfl->blank_map_entries[i];
-    const BitRack entry_quotient = bit_rack_read_12_bytes(entry->quotient);
-    if (bit_rack_equals(&entry_quotient, &quotient)) {
+    const BitRack entry_bit_rack = wmp_entry_read_bit_rack(entry);
+    if (bit_rack_equals(&entry_bit_rack, bit_rack)) {
       return entry;
     }
   }
@@ -436,16 +468,14 @@ wfl_get_double_blank_entry(const WMPForLength *wfl, const BitRack *bit_rack) {
   if (wfl->num_double_blank_buckets == 0) {
     return NULL;
   }
-  BitRack quotient;
-  uint32_t bucket_index;
-  bit_rack_div_mod(bit_rack, wfl->num_double_blank_buckets, &quotient,
-                   &bucket_index);
+  const uint32_t bucket_index =
+      bit_rack_get_bucket_index(bit_rack, wfl->num_double_blank_buckets);
   const uint32_t start = wfl->double_blank_bucket_starts[bucket_index];
   const uint32_t end = wfl->double_blank_bucket_starts[bucket_index + 1];
   for (uint32_t i = start; i < end; i++) {
     const WMPEntry *entry = &wfl->double_blank_map_entries[i];
-    const BitRack entry_quotient = bit_rack_read_12_bytes(entry->quotient);
-    if (bit_rack_equals(&entry_quotient, &quotient)) {
+    const BitRack entry_bit_rack = wmp_entry_read_bit_rack(entry);
+    if (bit_rack_equals(&entry_bit_rack, bit_rack)) {
       return entry;
     }
   }

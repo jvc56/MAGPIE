@@ -111,4 +111,10 @@ enum {
       BIT_RACK_OFFSET_7, BIT_RACK_OFFSET_8 #endif
 #endif
 
+// MurmurHash3-style mixing constants for BitRack hashing
+// These provide good avalanche properties and bit diffusion
+#define BIT_RACK_HASH_ROTATION_SHIFT 17
+#define BIT_RACK_HASH_MIX_CONSTANT_1 0xff51afd7ed558ccdULL
+#define BIT_RACK_HASH_MIX_CONSTANT_2 0xc4ceb9fe1a85ec53ULL
+
 #endif // BIT_RACK_DEFS_H

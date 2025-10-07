@@ -17,7 +17,7 @@
 #include <string.h>
 
 typedef struct MutableWordsMapEntry {
-  BitRack quotient;
+  BitRack bit_rack;  // Store full BitRack instead of quotient
   DictionaryWordList *letters;
 } MutableWordMapEntry;
 
@@ -37,7 +37,7 @@ typedef struct MutableWordMap {
 } MutableWordMap;
 
 typedef struct MutableBlankMapEntry {
-  BitRack quotient;
+  BitRack bit_rack;  // Store full BitRack instead of quotient
   uint32_t blank_letters;
 } MutableBlankMapEntry;
 
@@ -57,7 +57,7 @@ typedef struct MutableBlankMap {
 } MutableBlankMap;
 
 typedef struct MutableDoubleBlankMapEntry {
-  BitRack quotient;
+  BitRack bit_rack;  // Store full BitRack instead of quotient
 
   // Stored as if they were two-letter words, not yet in any significant order.
   DictionaryWordList *letter_pairs;
@@ -78,41 +78,28 @@ typedef struct MutableDoubleBlankMap {
   MutableDoubleBlanksForSameLengthMap maps[BOARD_DIM + 1];
 } MutableDoubleBlankMap;
 
-uint32_t next_prime(uint32_t n) {
-  if (n <= 2) {
-    return 2;
+// Round up to next power of 2
+static inline uint32_t next_power_of_2(uint32_t n) {
+  if (n == 0) {
+    return 1;
   }
-  if (n % 2 == 0) {
-    n++;
-  }
-  for (uint32_t i = n;; i += 2) {
-    bool is_prime = true;
-    for (uint32_t j = 3; j * j <= i; j += 2) {
-      if (i % j == 0) {
-        is_prime = false;
-        break;
-      }
-    }
-    if (is_prime) {
-      return i;
-    }
-  }
-#if defined(__has_builtin) && __has_builtin(__builtin_unreachable)
-  __builtin_unreachable();
-#else
-  return 0;
-#endif
+  n--;
+  n |= n >> 1;
+  n |= n >> 2;
+  n |= n >> 4;
+  n |= n >> 8;
+  n |= n >> 16;
+  return n + 1;
 }
 
 uint32_t get_number_of_words(const MutableWordsOfSameLengthMap *map,
                              const BitRack *bit_rack) {
-  BitRack quotient;
-  uint32_t bucket_index;
-  bit_rack_div_mod(bit_rack, map->num_word_buckets, &quotient, &bucket_index);
+  const uint32_t bucket_index =
+      bit_rack_get_bucket_index(bit_rack, map->num_word_buckets);
   const MutableWordMapBucket *bucket = &map->word_buckets[bucket_index];
   for (uint32_t i = 0; i < bucket->num_entries; i++) {
     const MutableWordMapEntry *entry = &bucket->entries[i];
-    if (bit_rack_equals(&entry->quotient, &quotient)) {
+    if (bit_rack_equals(&entry->bit_rack, bit_rack)) {
       return dictionary_word_list_get_count(entry->letters);
     }
   }
@@ -123,8 +110,9 @@ BitRack
 entry_get_bit_rack_without_blanks(const MutableDoubleBlankMapEntry *entry,
                                   uint32_t num_double_blank_buckets,
                                   uint32_t bucket_idx) {
-  BitRack bit_rack = bit_rack_mul(&entry->quotient, num_double_blank_buckets);
-  bit_rack_add_uint32(&bit_rack, bucket_idx);
+  (void)num_double_blank_buckets;  // Unused
+  (void)bucket_idx;                // Unused
+  BitRack bit_rack = entry->bit_rack;
   bit_rack_set_letter_count(&bit_rack, BLANK_MACHINE_LETTER, 0);
   return bit_rack;
 }
@@ -254,8 +242,7 @@ uint32_t write_word_entries(const MutableWordMapBucket *bucket,
                             MachineLetter *letters, uint32_t *word_start) {
   for (uint32_t entry_idx = 0; entry_idx < bucket->num_entries; entry_idx++) {
     const MutableWordMapEntry *entry = &bucket->entries[entry_idx];
-    assert(bit_rack_fits_in_12_bytes(&entry->quotient));
-    bit_rack_write_12_bytes(&entry->quotient, entries[entry_idx].quotient);
+    wmp_entry_write_bit_rack(&entries[entry_idx], &entry->bit_rack);
     const uint32_t num_words = dictionary_word_list_get_count(entry->letters);
     if (num_words <= max_inlined_words(word_length)) {
       write_inlined_word_range(entry->letters,
@@ -305,8 +292,7 @@ void write_blank_wmp_entry(const MutableBlankMapEntry *entry,
                            WMPEntry *wmp_entry) {
   memset(wmp_entry->bucket_or_inline, 0, sizeof(wmp_entry->bucket_or_inline));
   wmp_entry->blank_letters = entry->blank_letters;
-  assert(bit_rack_fits_in_12_bytes(&entry->quotient));
-  bit_rack_write_12_bytes(&entry->quotient, wmp_entry->quotient);
+  wmp_entry_write_bit_rack(wmp_entry, &entry->bit_rack);
 }
 
 void fill_wfl_blanks(const MutableBlanksForSameLengthMap *mbfl,
@@ -345,7 +331,7 @@ mdbfl_get_first_blank_letters(const MutableDoubleBlankMapEntry *entry) {
     const DictionaryWord *pair =
         dictionary_word_list_get_word(entry->letter_pairs, i);
     const MachineLetter *pair_letters = dictionary_word_get_word(pair);
-    first_blank_letters |= 1 << pair_letters[0];
+    first_blank_letters |= 1U << pair_letters[0];
   }
   return first_blank_letters;
 }
@@ -355,8 +341,7 @@ void write_double_blank_wmp_entry(const MutableDoubleBlankMapEntry *entry,
   memset(wmp_entry->bucket_or_inline, 0, sizeof(wmp_entry->bucket_or_inline));
   const uint32_t first_blank_letters = mdbfl_get_first_blank_letters(entry);
   wmp_entry->first_blank_letters = first_blank_letters;
-  assert(bit_rack_fits_in_12_bytes(&entry->quotient));
-  bit_rack_write_12_bytes(&entry->quotient, wmp_entry->quotient);
+  wmp_entry_write_bit_rack(wmp_entry, &entry->bit_rack);
 }
 
 void fill_wfl_double_blanks(const MutableDoubleBlanksForSameLengthMap *mdbl,
@@ -427,11 +412,11 @@ void mutable_word_map_bucket_init(MutableWordMapBucket *bucket) {
 }
 
 void mutable_word_map_bucket_insert_word(MutableWordMapBucket *bucket,
-                                         BitRack quotient,
+                                         const BitRack *bit_rack,
                                          const DictionaryWord *word) {
   for (uint32_t entry_idx = 0; entry_idx < bucket->num_entries; entry_idx++) {
     MutableWordMapEntry *entry = &bucket->entries[entry_idx];
-    if (bit_rack_equals(&entry->quotient, &quotient)) {
+    if (bit_rack_equals(&entry->bit_rack, bit_rack)) {
       dictionary_word_list_add_word(entry->letters,
                                     dictionary_word_get_word(word),
                                     dictionary_word_get_length(word));
@@ -444,7 +429,7 @@ void mutable_word_map_bucket_insert_word(MutableWordMapBucket *bucket,
         bucket->entries, sizeof(MutableWordMapEntry) * bucket->capacity);
   }
   MutableWordMapEntry *entry = &bucket->entries[bucket->num_entries];
-  entry->quotient = quotient;
+  entry->bit_rack = *bit_rack;
   // entry->letters is a DictionaryWordList. Once completed, it will become a
   // contiguous blob of letters like ANESTRIANTSIERNASTIER... in the final WMP
   entry->letters = dictionary_word_list_create_with_capacity(1);
@@ -453,20 +438,11 @@ void mutable_word_map_bucket_insert_word(MutableWordMapBucket *bucket,
   bucket->num_entries++;
 }
 
+// No longer need to worry about quotient fitting since we store full BitRack
+// Just return a reasonable minimum size
 uint32_t compute_min_num_buckets(const LetterDistribution *ld) {
-  const BitRack bit_rack = largest_bit_rack_for_ld(ld);
-  const uint64_t high64 = bit_rack_get_high_64(&bit_rack);
-  const int num_quotient_bits = WMP_QUOTIENT_BYTES * 8;
-  const uint64_t max_quotient_high = (1ULL << (num_quotient_bits - 64)) - 1;
-  const uint32_t divisor = (high64 / max_quotient_high) + 1;
-  BitRack actual_quotient;
-  uint32_t remainder;
-  bit_rack_div_mod(&bit_rack, divisor, &actual_quotient, &remainder);
-  const uint64_t actual_quotient_high = bit_rack_get_high_64(&actual_quotient);
-  assert(actual_quotient_high <= max_quotient_high);
-  (void)actual_quotient_high; // Suppress unused warning when NDEBUG is defined
-
-  return next_prime(divisor);
+  (void)ld;  // Unused in new implementation
+  return 1;  // Can use very small bucket count now
 }
 
 MutableWordMap *make_mwmp_from_words(const DictionaryWordList *words) {
@@ -479,12 +455,8 @@ MutableWordMap *make_mwmp_from_words(const DictionaryWordList *words) {
   }
   for (int len = 2; len <= BOARD_DIM; len++) {
     MutableWordsOfSameLengthMap *mwfl = &mwmp->maps[len];
-    // This is ideally sized based on number of anagram sets rather than number
-    // of words, but we won't know how many anagram sets there are until we
-    // collect them by alphagram. We will resize all the hashtables after we
-    // build these initial versions, and those will be the sizes used in the
-    // final WMP written to disk.
-    mwfl->num_word_buckets = next_prime(num_words_by_length[len]);
+    // Use power-of-2 bucket size for fast modulo via bitwise AND
+    mwfl->num_word_buckets = next_power_of_2(num_words_by_length[len]);
     mwfl->word_buckets =
         malloc_or_die(sizeof(MutableWordMapBucket) * mwfl->num_word_buckets);
     for (uint32_t bucket_idx = 0; bucket_idx < mwfl->num_word_buckets;
@@ -498,12 +470,10 @@ MutableWordMap *make_mwmp_from_words(const DictionaryWordList *words) {
     const uint8_t length = dictionary_word_get_length(word);
     MutableWordsOfSameLengthMap *mwfl = &mwmp->maps[length];
     const BitRack bit_rack = bit_rack_create_from_dictionary_word(word);
-    BitRack quotient;
-    uint32_t bucket_index;
-    bit_rack_div_mod(&bit_rack, mwfl->num_word_buckets, &quotient,
-                     &bucket_index);
+    const uint32_t bucket_index =
+        bit_rack_get_bucket_index(&bit_rack, mwfl->num_word_buckets);
     MutableWordMapBucket *bucket = &mwfl->word_buckets[bucket_index];
-    mutable_word_map_bucket_insert_word(bucket, quotient, word);
+    mutable_word_map_bucket_insert_word(bucket, &bit_rack, word);
   }
   return mwmp;
 }
@@ -514,26 +484,24 @@ void mutable_blank_map_bucket_init(MutableBlankMapBucket *bucket) {
   bucket->entries = malloc_or_die(sizeof(MutableBlankMapEntry));
 }
 
-// This is an annoyance. Because we only store the quotient in the entry rather
-// than the full bit rack, we have to recompute it by reversing the div/mod.
+// Now we store the full bit rack, so just return it directly
 BitRack entry_get_full_bit_rack(const MutableWordMapEntry *entry,
                                 uint32_t num_word_buckets,
                                 uint32_t word_bucket_idx) {
-  BitRack full_bit_rack = bit_rack_mul(&entry->quotient, num_word_buckets);
-  bit_rack_add_uint32(&full_bit_rack, word_bucket_idx);
-  return full_bit_rack;
+  (void)num_word_buckets;  // Unused
+  (void)word_bucket_idx;   // Unused
+  return entry->bit_rack;
 }
 
 void set_blank_map_bit(MutableBlanksForSameLengthMap *mbfl,
                        const BitRack *bit_rack, MachineLetter ml) {
-  BitRack quotient;
-  uint32_t bucket_index;
-  bit_rack_div_mod(bit_rack, mbfl->num_blank_buckets, &quotient, &bucket_index);
+  const uint32_t bucket_index =
+      bit_rack_get_bucket_index(bit_rack, mbfl->num_blank_buckets);
   MutableBlankMapBucket *bucket = &mbfl->blank_buckets[bucket_index];
   for (uint32_t entry_idx = 0; entry_idx < bucket->num_entries; entry_idx++) {
     MutableBlankMapEntry *entry = &bucket->entries[entry_idx];
-    if (bit_rack_equals(&entry->quotient, &quotient)) {
-      entry->blank_letters |= 1 << ml;
+    if (bit_rack_equals(&entry->bit_rack, bit_rack)) {
+      entry->blank_letters |= 1U << ml;
       return;
     }
   }
@@ -543,8 +511,8 @@ void set_blank_map_bit(MutableBlanksForSameLengthMap *mbfl,
         bucket->entries, sizeof(MutableBlankMapEntry) * bucket->capacity);
   }
   MutableBlankMapEntry *entry = &bucket->entries[bucket->num_entries];
-  entry->quotient = quotient;
-  entry->blank_letters = (uint32_t)1 << ml;
+  entry->bit_rack = *bit_rack;
+  entry->blank_letters = 1U << ml;
   bucket->num_entries++;
 }
 
@@ -580,7 +548,7 @@ void insert_blanks_from_word_bucket(const MutableWordMapBucket *mwfl_bucket,
 
 void fill_mbfl_from_mwfl(MutableBlanksForSameLengthMap *mbfl,
                          const MutableWordsOfSameLengthMap *mwfl, int length) {
-  mbfl->num_blank_buckets = next_prime(mwfl->num_word_buckets * length);
+  mbfl->num_blank_buckets = next_power_of_2(mwfl->num_word_buckets * length);
   mbfl->blank_buckets =
       malloc_or_die(sizeof(MutableBlankMapBucket) * mbfl->num_blank_buckets);
   for (uint32_t bucket_idx = 0; bucket_idx < mbfl->num_blank_buckets;
@@ -610,11 +578,11 @@ void mutable_double_blank_map_bucket_init(MutableDoubleBlankMapBucket *bucket) {
 }
 
 void mutable_double_blank_map_bucket_insert_pair(
-    MutableDoubleBlankMapBucket *bucket, BitRack quotient,
+    MutableDoubleBlankMapBucket *bucket, const BitRack *bit_rack,
     const MachineLetter *blanks_as_word) {
   for (uint32_t i = 0; i < bucket->num_entries; i++) {
     MutableDoubleBlankMapEntry *entry = &bucket->entries[i];
-    if (bit_rack_equals(&entry->quotient, &quotient)) {
+    if (bit_rack_equals(&entry->bit_rack, bit_rack)) {
       dictionary_word_list_add_word(entry->letter_pairs, blanks_as_word, 2);
       return;
     }
@@ -625,7 +593,7 @@ void mutable_double_blank_map_bucket_insert_pair(
         bucket->entries, sizeof(MutableDoubleBlankMapEntry) * bucket->capacity);
   }
   MutableDoubleBlankMapEntry *entry = &bucket->entries[bucket->num_entries];
-  entry->quotient = quotient;
+  entry->bit_rack = *bit_rack;
   entry->letter_pairs = dictionary_word_list_create_with_capacity(1);
   dictionary_word_list_add_word(entry->letter_pairs, blanks_as_word, 2);
   bucket->num_entries++;
@@ -649,13 +617,11 @@ void insert_double_blanks_from_word_entry(
           bit_rack_take_letter(&bit_rack, ml2);
           bit_rack_add_letter(&bit_rack, BLANK_MACHINE_LETTER);
           blanks_as_word[1] = ml2;
-          BitRack quotient;
-          uint32_t bucket_index;
-          bit_rack_div_mod(&bit_rack, mdbfl->num_double_blank_buckets,
-                           &quotient, &bucket_index);
+          const uint32_t bucket_index = bit_rack_get_bucket_index(
+              &bit_rack, mdbfl->num_double_blank_buckets);
           MutableDoubleBlankMapBucket *bucket =
               &mdbfl->double_blank_buckets[bucket_index];
-          mutable_double_blank_map_bucket_insert_pair(bucket, quotient,
+          mutable_double_blank_map_bucket_insert_pair(bucket, &bit_rack,
                                                       blanks_as_word);
           bit_rack_take_letter(&bit_rack, BLANK_MACHINE_LETTER);
           bit_rack_add_letter(&bit_rack, ml2);
@@ -680,7 +646,8 @@ void insert_double_blanks_from_word_bucket(
 
 void fill_mdbfl_from_mwfl(MutableDoubleBlanksForSameLengthMap *mdbfl,
                           const MutableWordsOfSameLengthMap *mwfl, int length) {
-  mdbfl->num_double_blank_buckets = next_prime(mwfl->num_word_buckets * length);
+  mdbfl->num_double_blank_buckets =
+      next_power_of_2(mwfl->num_word_buckets * length);
   mdbfl->double_blank_buckets = malloc_or_die(
       sizeof(MutableDoubleBlankMapBucket) * mdbfl->num_double_blank_buckets);
   for (uint32_t bucket_idx = 0; bucket_idx < mdbfl->num_double_blank_buckets;
@@ -774,12 +741,10 @@ void reinsert_word_entry(const MutableWordMapEntry *entry,
     const DictionaryWord *word =
         dictionary_word_list_get_word(entry->letters, word_idx);
     const BitRack bit_rack = bit_rack_create_from_dictionary_word(word);
-    BitRack quotient;
-    uint32_t bucket_index;
-    bit_rack_div_mod(&bit_rack, new_mwfl->num_word_buckets, &quotient,
-                     &bucket_index);
+    const uint32_t bucket_index =
+        bit_rack_get_bucket_index(&bit_rack, new_mwfl->num_word_buckets);
     MutableWordMapBucket *bucket = &new_mwfl->word_buckets[bucket_index];
-    mutable_word_map_bucket_insert_word(bucket, quotient, word);
+    mutable_word_map_bucket_insert_word(bucket, &bit_rack, word);
   }
 }
 
@@ -796,9 +761,9 @@ void fill_resized_mwfl(const MutableWordsOfSameLengthMap *mwfl,
                        MutableWordsOfSameLengthMap *new_mwfl) {
   const uint32_t num_entries = mwfl_get_num_entries(mwfl);
   const uint32_t min_num_buckets = compute_min_num_buckets(ld);
-  new_mwfl->num_word_buckets = next_prime(num_entries);
+  new_mwfl->num_word_buckets = next_power_of_2(num_entries);
   if (new_mwfl->num_word_buckets < min_num_buckets) {
-    new_mwfl->num_word_buckets = min_num_buckets;
+    new_mwfl->num_word_buckets = next_power_of_2(min_num_buckets);
   }
   new_mwfl->word_buckets =
       malloc_or_die(sizeof(MutableWordMapBucket) * new_mwfl->num_word_buckets);
@@ -826,10 +791,8 @@ MutableWordMap *resize_mutable_word_map(const MutableWordMap *mwmp,
 
 void set_blank_map_bits(const BitRack *bit_rack, uint32_t blank_letters,
                         MutableBlanksForSameLengthMap *new_mbfl) {
-  BitRack quotient;
-  uint32_t bucket_idx;
-  bit_rack_div_mod(bit_rack, new_mbfl->num_blank_buckets, &quotient,
-                   &bucket_idx);
+  const uint32_t bucket_idx =
+      bit_rack_get_bucket_index(bit_rack, new_mbfl->num_blank_buckets);
   MutableBlankMapBucket *bucket = &new_mbfl->blank_buckets[bucket_idx];
   // We're always adding a new k/v pair rather than modifying.
   if (bucket->num_entries == bucket->capacity) {
@@ -838,7 +801,7 @@ void set_blank_map_bits(const BitRack *bit_rack, uint32_t blank_letters,
         bucket->entries, sizeof(MutableBlankMapEntry) * bucket->capacity);
   }
   MutableBlankMapEntry *entry = &bucket->entries[bucket->num_entries];
-  entry->quotient = quotient;
+  entry->bit_rack = *bit_rack;
   entry->blank_letters = blank_letters;
   bucket->num_entries++;
 }
@@ -846,9 +809,9 @@ void set_blank_map_bits(const BitRack *bit_rack, uint32_t blank_letters,
 void reinsert_blank_entry(const MutableBlankMapEntry *entry,
                           uint32_t old_num_buckets, uint32_t bucket_idx,
                           MutableBlanksForSameLengthMap *new_mbfl) {
-  BitRack full_bit_rack = bit_rack_mul(&entry->quotient, old_num_buckets);
-  bit_rack_add_uint32(&full_bit_rack, bucket_idx);
-  set_blank_map_bits(&full_bit_rack, entry->blank_letters, new_mbfl);
+  (void)old_num_buckets;  // Unused
+  (void)bucket_idx;       // Unused
+  set_blank_map_bits(&entry->bit_rack, entry->blank_letters, new_mbfl);
 }
 
 void reinsert_entries_from_blank_bucket(
@@ -875,9 +838,9 @@ void fill_resized_mbfl(const MutableBlanksForSameLengthMap *mbfl,
                        MutableBlanksForSameLengthMap *new_mbfl) {
   const uint32_t num_entries = mbfl_get_num_entries(mbfl);
   const uint32_t min_num_buckets = compute_min_num_buckets(ld);
-  new_mbfl->num_blank_buckets = next_prime(num_entries);
+  new_mbfl->num_blank_buckets = next_power_of_2(num_entries);
   if (new_mbfl->num_blank_buckets < min_num_buckets) {
-    new_mbfl->num_blank_buckets = min_num_buckets;
+    new_mbfl->num_blank_buckets = next_power_of_2(min_num_buckets);
   }
   new_mbfl->blank_buckets = malloc_or_die(sizeof(MutableBlankMapBucket) *
                                           new_mbfl->num_blank_buckets);
@@ -919,21 +882,20 @@ mdbfl_get_num_entries(const MutableDoubleBlanksForSameLengthMap *mdbfl) {
 void reinsert_double_blank_entry(
     const MutableDoubleBlankMapEntry *entry, uint32_t old_num_buckets,
     uint32_t bucket_idx, MutableDoubleBlanksForSameLengthMap *new_mdbfl) {
-  BitRack full_bit_rack = bit_rack_mul(&entry->quotient, old_num_buckets);
-  bit_rack_add_uint32(&full_bit_rack, bucket_idx);
+  (void)old_num_buckets;  // Unused
+  (void)bucket_idx;       // Unused
   for (int pair_idx = 0;
        pair_idx < dictionary_word_list_get_count(entry->letter_pairs);
        pair_idx++) {
     const DictionaryWord *pair =
         dictionary_word_list_get_word(entry->letter_pairs, pair_idx);
     const uint8_t *pair_letters = dictionary_word_get_word(pair);
-    BitRack quotient;
-    uint32_t new_bucket_idx;
-    bit_rack_div_mod(&full_bit_rack, new_mdbfl->num_double_blank_buckets,
-                     &quotient, &new_bucket_idx);
+    const uint32_t new_bucket_idx = bit_rack_get_bucket_index(
+        &entry->bit_rack, new_mdbfl->num_double_blank_buckets);
     MutableDoubleBlankMapBucket *bucket =
         &new_mdbfl->double_blank_buckets[new_bucket_idx];
-    mutable_double_blank_map_bucket_insert_pair(bucket, quotient, pair_letters);
+    mutable_double_blank_map_bucket_insert_pair(bucket, &entry->bit_rack,
+                                                pair_letters);
   }
 }
 
@@ -951,9 +913,9 @@ void fill_resized_mdbfl(const MutableDoubleBlanksForSameLengthMap *mdbfl,
                         MutableDoubleBlanksForSameLengthMap *new_mdbfl) {
   const uint32_t num_entries = mdbfl_get_num_entries(mdbfl);
   const uint32_t min_num_buckets = compute_min_num_buckets(ld);
-  new_mdbfl->num_double_blank_buckets = next_prime(num_entries);
+  new_mdbfl->num_double_blank_buckets = next_power_of_2(num_entries);
   if (new_mdbfl->num_double_blank_buckets < min_num_buckets) {
-    new_mdbfl->num_double_blank_buckets = min_num_buckets;
+    new_mdbfl->num_double_blank_buckets = next_power_of_2(min_num_buckets);
   }
   new_mdbfl->double_blank_buckets =
       malloc_or_die(sizeof(MutableDoubleBlankMapBucket) *

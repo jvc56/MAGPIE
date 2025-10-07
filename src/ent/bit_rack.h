@@ -396,4 +396,33 @@ static inline int bit_rack_num_letters(const BitRack *bit_rack) {
 static inline bool bit_rack_fits_in_12_bytes(const BitRack *bit_rack) {
   return (bit_rack_get_high_64(bit_rack) & 0xFFFFFFFF00000000ULL) == 0;
 }
+
+// Mix 128-bit BitRack to 64-bit hash with good avalanche properties
+// This ensures changes in any tile position affect all output bits
+static inline uint64_t bit_rack_mix_to_64(const BitRack *bit_rack) {
+  uint64_t low = bit_rack_get_low_64(bit_rack);
+  uint64_t high = bit_rack_get_high_64(bit_rack);
+
+  // Fold high into low with rotation for better avalanche
+  low ^= high;
+  low ^= (high << BIT_RACK_HASH_ROTATION_SHIFT) |
+         (high >> (64 - BIT_RACK_HASH_ROTATION_SHIFT));
+
+  // MurmurHash3-style mixing for bit diffusion
+  low ^= low >> 33;
+  low *= BIT_RACK_HASH_MIX_CONSTANT_1;
+  low ^= low >> 33;
+  low *= BIT_RACK_HASH_MIX_CONSTANT_2;
+  low ^= low >> 33;
+
+  return low;
+}
+
+// Get bucket index from BitRack using mixing and power-of-2 mask
+// num_buckets must be a power of 2
+static inline uint32_t bit_rack_get_bucket_index(const BitRack *bit_rack,
+                                                  uint32_t num_buckets) {
+  const uint64_t hash = bit_rack_mix_to_64(bit_rack);
+  return (uint32_t)(hash & (num_buckets - 1));
+}
 #endif
