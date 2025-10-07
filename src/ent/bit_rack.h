@@ -185,17 +185,6 @@ static inline Rack *bit_rack_to_rack(const BitRack *bit_rack) {
   return rack;
 }
 
-static inline void bit_rack_add_uint32(BitRack *bit_rack, uint32_t addend) {
-#if USE_INT128_INTRINSIC
-  *bit_rack += addend;
-#else
-  const uint64_t low_sum = bit_rack->low + addend;
-  bool overflow = low_sum < bit_rack->low;
-  bit_rack->low = low_sum;
-  bit_rack->high += overflow;
-#endif
-}
-
 static inline BitRack bit_rack_mul(const BitRack *bit_rack,
                                    uint32_t multiplier) {
 #if USE_INT128_INTRINSIC

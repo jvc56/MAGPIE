@@ -94,16 +94,71 @@ void test_high_and_low_64(void) {
 }
 
 
-void test_add_uint32(void) {
-  BitRack bit_rack = bit_rack_create_empty();
-  for (int ml = 0; ml < 16; ml++) {
-    bit_rack_set_letter_count(&bit_rack, ml, 15);
+// Helper to count set bits (popcount)
+static int popcount64(uint64_t x) {
+  int count = 0;
+  while (x) {
+    count += x & 1;
+    x >>= 1;
   }
-  assert(bit_rack_get_high_64(&bit_rack) == 0ULL);
-  assert(bit_rack_get_low_64(&bit_rack) == ~0ULL);
-  bit_rack_add_uint32(&bit_rack, 0xFFFFFFFF);
-  assert(bit_rack_get_high_64(&bit_rack) == 1ULL);
-  assert(bit_rack_get_low_64(&bit_rack) == 0xFFFFFFFEULL);
+  return count;
+}
+
+void test_hash_mixing(void) {
+  Config *config = config_create_or_die("set -lex NWL20");
+  const LetterDistribution *ld = config_get_ld(config);
+
+  // Test 1: Different racks should produce different hashes
+  BitRack rack1 = string_to_bit_rack(ld, "AEINRST");
+  BitRack rack2 = string_to_bit_rack(ld, "RETINAS");
+  BitRack rack3 = string_to_bit_rack(ld, "ZZZZZZZ");
+
+  uint64_t hash1 = bit_rack_mix_to_64(&rack1);
+  uint64_t hash2 = bit_rack_mix_to_64(&rack2);
+  uint64_t hash3 = bit_rack_mix_to_64(&rack3);
+
+  // Same letters should produce same hash (anagram property)
+  assert(hash1 == hash2);
+  // Different letters should produce different hash
+  assert(hash1 != hash3);
+
+  // Test 2: Avalanche property - flipping one bit should change ~50% of output bits
+  // Change one letter count (A from 1 to 2)
+  BitRack rack_modified = rack1;
+  bit_rack_add_letter(&rack_modified, ld_hl_to_ml(ld, "A"));
+
+  uint64_t hash_modified = bit_rack_mix_to_64(&rack_modified);
+  uint64_t diff = hash1 ^ hash_modified;
+  int changed_bits = popcount64(diff);
+
+  // Should change roughly 32 bits (25-39 is reasonable range for good mixing)
+  assert(changed_bits >= 25 && changed_bits <= 39);
+
+  // Test 3: Changing letters in high bits should affect low bits of hash
+  // Z is at position 26*4 = 104 bits (in high 64)
+  BitRack high_bits = string_to_bit_rack(ld, "Z");
+  BitRack high_bits_modified = string_to_bit_rack(ld, "ZZ");
+
+  uint64_t hash_high1 = bit_rack_mix_to_64(&high_bits);
+  uint64_t hash_high2 = bit_rack_mix_to_64(&high_bits_modified);
+
+  // Check that low 32 bits changed significantly
+  uint32_t low1 = (uint32_t)hash_high1;
+  uint32_t low2 = (uint32_t)hash_high2;
+  int low_changed = popcount64((uint64_t)(low1 ^ low2));
+  assert(low_changed >= 8); // At least some low bits changed
+
+  // Test 4: Bucket index is within bounds
+  const uint32_t num_buckets = 256; // power of 2
+  BitRack test_rack = string_to_bit_rack(ld, "TESTING");
+  uint32_t bucket = bit_rack_get_bucket_index(&test_rack, num_buckets);
+  assert(bucket < num_buckets);
+
+  // Test with different power-of-2 sizes
+  assert(bit_rack_get_bucket_index(&test_rack, 64) < 64);
+  assert(bit_rack_get_bucket_index(&test_rack, 1024) < 1024);
+
+  config_destroy(config);
 }
 
 void test_mul(void) {
@@ -147,7 +202,7 @@ void test_bit_rack(void) {
   test_create_from_rack();
   test_add_bit_rack();
   test_high_and_low_64();
-  test_add_uint32();
+  test_hash_mixing();
   test_mul();
   test_largest_bit_rack_for_ld();
 }
