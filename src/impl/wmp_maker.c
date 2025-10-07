@@ -437,14 +437,6 @@ void mutable_word_map_bucket_insert_word(MutableWordMapBucket *bucket,
                                 dictionary_word_get_length(word));
   bucket->num_entries++;
 }
-
-// No longer need to worry about quotient fitting since we store full BitRack
-// Just return a reasonable minimum size
-uint32_t compute_min_num_buckets(const LetterDistribution *ld) {
-  (void)ld;  // Unused in new implementation
-  return 1;  // Can use very small bucket count now
-}
-
 MutableWordMap *make_mwmp_from_words(const DictionaryWordList *words) {
   MutableWordMap *mwmp = malloc_or_die(sizeof(MutableWordMap));
   int num_words_by_length[BOARD_DIM + 1] = {0};
@@ -759,12 +751,9 @@ void reinsert_entries_from_word_bucket(const MutableWordMapBucket *bucket,
 void fill_resized_mwfl(const MutableWordsOfSameLengthMap *mwfl,
                        const LetterDistribution *ld,
                        MutableWordsOfSameLengthMap *new_mwfl) {
+  (void)ld;  // No longer needed since we don't check quotient fitting
   const uint32_t num_entries = mwfl_get_num_entries(mwfl);
-  const uint32_t min_num_buckets = compute_min_num_buckets(ld);
   new_mwfl->num_word_buckets = next_power_of_2(num_entries);
-  if (new_mwfl->num_word_buckets < min_num_buckets) {
-    new_mwfl->num_word_buckets = next_power_of_2(min_num_buckets);
-  }
   new_mwfl->word_buckets =
       malloc_or_die(sizeof(MutableWordMapBucket) * new_mwfl->num_word_buckets);
   for (uint32_t bucket_idx = 0; bucket_idx < new_mwfl->num_word_buckets;
@@ -836,12 +825,9 @@ uint32_t mbfl_get_num_entries(const MutableBlanksForSameLengthMap *mbfl) {
 void fill_resized_mbfl(const MutableBlanksForSameLengthMap *mbfl,
                        const LetterDistribution *ld,
                        MutableBlanksForSameLengthMap *new_mbfl) {
+  (void)ld;  // No longer needed since we don't check quotient fitting
   const uint32_t num_entries = mbfl_get_num_entries(mbfl);
-  const uint32_t min_num_buckets = compute_min_num_buckets(ld);
   new_mbfl->num_blank_buckets = next_power_of_2(num_entries);
-  if (new_mbfl->num_blank_buckets < min_num_buckets) {
-    new_mbfl->num_blank_buckets = next_power_of_2(min_num_buckets);
-  }
   new_mbfl->blank_buckets = malloc_or_die(sizeof(MutableBlankMapBucket) *
                                           new_mbfl->num_blank_buckets);
   for (uint32_t bucket_idx = 0; bucket_idx < new_mbfl->num_blank_buckets;
@@ -911,12 +897,9 @@ void reinsert_entries_from_double_blank_bucket(
 void fill_resized_mdbfl(const MutableDoubleBlanksForSameLengthMap *mdbfl,
                         const LetterDistribution *ld,
                         MutableDoubleBlanksForSameLengthMap *new_mdbfl) {
+  (void)ld;  // No longer needed since we don't check quotient fitting
   const uint32_t num_entries = mdbfl_get_num_entries(mdbfl);
-  const uint32_t min_num_buckets = compute_min_num_buckets(ld);
   new_mdbfl->num_double_blank_buckets = next_power_of_2(num_entries);
-  if (new_mdbfl->num_double_blank_buckets < min_num_buckets) {
-    new_mdbfl->num_double_blank_buckets = next_power_of_2(min_num_buckets);
-  }
   new_mdbfl->double_blank_buckets =
       malloc_or_die(sizeof(MutableDoubleBlankMapBucket) *
                     new_mdbfl->num_double_blank_buckets);
