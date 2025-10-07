@@ -93,7 +93,6 @@ void test_high_and_low_64(void) {
   config_destroy(config);
 }
 
-
 // Helper to count set bits (popcount)
 static int popcount64(uint64_t x) {
   int count = 0;
@@ -122,8 +121,8 @@ void test_hash_mixing(void) {
   // Different letters should produce different hash
   assert(hash1 != hash3);
 
-  // Test 2: Avalanche property - flipping one bit should change ~50% of output bits
-  // Change one letter count (A from 1 to 2)
+  // Test 2: Avalanche property - flipping one bit should change ~50% of output
+  // bits: change one letter count (A from 1 to 2)
   BitRack rack_modified = rack1;
   bit_rack_add_letter(&rack_modified, ld_hl_to_ml(ld, "A"));
 
@@ -178,21 +177,6 @@ void test_mul(void) {
   config_destroy(config);
 }
 
-void test_largest_bit_rack_for_ld(void) {
-  Config *config = config_create_or_die("set -lex NWL20");
-  const LetterDistribution *ld = config_get_ld(config);
-  const BitRack bit_rack = largest_bit_rack_for_ld(ld);
-
-  Rack *expected_rack = rack_create(ld_get_size(ld));
-  rack_set_to_string(ld, expected_rack, "ZZZYYXWWVVUUUUT");
-  const BitRack expected_bit_rack =
-      bit_rack_create_from_rack(ld, expected_rack);
-  assert(bit_rack_equals(&bit_rack, &expected_bit_rack));
-
-  rack_destroy(expected_rack);
-  config_destroy(config);
-}
-
 void test_bit_rack(void) {
   test_compatibility();
   if (BOARD_DIM > 15) {
@@ -204,5 +188,4 @@ void test_bit_rack(void) {
   test_high_and_low_64();
   test_hash_mixing();
   test_mul();
-  test_largest_bit_rack_for_ld();
 }

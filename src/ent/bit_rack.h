@@ -228,25 +228,6 @@ static inline void bit_rack_set_letter_count(BitRack *bit_rack,
 #endif
 }
 
-static inline BitRack largest_bit_rack_for_ld(const LetterDistribution *ld) {
-  BitRack bit_rack = bit_rack_create_empty();
-  int letters_to_add = BOARD_DIM;
-  for (int ml = ld->size - 1; ml >= 1; ml--) {
-    int letter_count = ld->distribution[ml];
-    if (ml == ld->size - 1) {
-      letter_count += ld->distribution[BLANK_MACHINE_LETTER];
-    }
-    if (letters_to_add >= letter_count) {
-      bit_rack_set_letter_count(&bit_rack, ml, letter_count);
-      letters_to_add -= letter_count;
-    } else {
-      bit_rack_set_letter_count(&bit_rack, ml, letters_to_add);
-      return bit_rack;
-    }
-  }
-  return bit_rack;
-}
-
 static inline void bit_rack_add_letter(BitRack *bit_rack, MachineLetter ml) {
   const int shift = ml * BIT_RACK_BITS_PER_LETTER;
 #if USE_INT128_INTRINSIC
