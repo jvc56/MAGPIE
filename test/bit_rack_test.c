@@ -94,8 +94,8 @@ void test_high_and_low_64(void) {
 }
 
 // Helper to count set bits (popcount)
-static int popcount64(uint64_t x) {
-  int count = 0;
+static uint64_t popcount64(uint64_t x) {
+  uint64_t count = 0;
   while (x) {
     count += x & 1ULL;
     x >>= 1;

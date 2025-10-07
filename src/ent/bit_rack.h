@@ -343,7 +343,7 @@ static inline uint64_t bit_rack_mix_to_64(const BitRack *bit_rack) {
 // Get bucket index from BitRack using mixing and power-of-2 mask
 // num_buckets must be a power of 2
 static inline uint32_t bit_rack_get_bucket_index(const BitRack *bit_rack,
-                                                  uint32_t num_buckets) {
+                                                 uint32_t num_buckets) {
   const uint64_t hash = bit_rack_mix_to_64(bit_rack);
   return (uint32_t)(hash & (num_buckets - 1));
 }
