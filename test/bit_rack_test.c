@@ -128,7 +128,7 @@ void test_hash_mixing(void) {
 
   uint64_t hash_modified = bit_rack_mix_to_64(&rack_modified);
   uint64_t diff = hash1 ^ hash_modified;
-  int changed_bits = popcount64(diff);
+  uint64_t changed_bits = popcount64(diff);
 
   // Should change roughly 32 bits (25-39 is reasonable range for good mixing)
   assert(changed_bits >= 25 && changed_bits <= 39);
@@ -144,7 +144,7 @@ void test_hash_mixing(void) {
   // Check that low 32 bits changed significantly
   uint32_t low1 = (uint32_t)hash_high1;
   uint32_t low2 = (uint32_t)hash_high2;
-  int low_changed = popcount64((uint64_t)(low1 ^ low2));
+  uint64_t low_changed = popcount64((uint64_t)(low1 ^ low2));
   assert(low_changed >= 8); // At least some low bits changed
 
   // Test 4: Bucket index is within bounds
