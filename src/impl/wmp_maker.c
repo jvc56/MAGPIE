@@ -16,7 +16,7 @@
 #include <string.h>
 
 typedef struct MutableWordsMapEntry {
-  BitRack bit_rack;  // Store full BitRack instead of quotient
+  BitRack bit_rack;
   DictionaryWordList *letters;
 } MutableWordMapEntry;
 
@@ -56,7 +56,7 @@ typedef struct MutableBlankMap {
 } MutableBlankMap;
 
 typedef struct MutableDoubleBlankMapEntry {
-  BitRack bit_rack;  // Store full BitRack instead of quotient
+  BitRack bit_rack;
 
   // Stored as if they were two-letter words, not yet in any significant order.
   DictionaryWordList *letter_pairs;
