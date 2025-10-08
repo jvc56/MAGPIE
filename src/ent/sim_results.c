@@ -442,8 +442,8 @@ char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
     string_builder_add_formatted_string(sim_results->display_string_builder,
                                         "\ninfo nps %f\n", nps);
   }
-  cpthread_mutex_unlock(&sim_results->display_mutex);
   char *sim_stats_string =
       string_builder_dump(sim_results->display_string_builder, NULL);
+  cpthread_mutex_unlock(&sim_results->display_mutex);
   return sim_stats_string;
 }
