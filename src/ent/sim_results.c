@@ -435,7 +435,6 @@ char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
   cpthread_mutex_lock(&sim_results->display_mutex);
   sim_stats_ready =
       ucgi_sim_stats_with_display_lock(game, sim_results, best_known_play);
-  cpthread_mutex_unlock(&sim_results->display_mutex);
   if (!sim_stats_ready) {
     string_builder_add_string(sim_results->display_string_builder,
                               "sim results not yet available\n");
@@ -445,5 +444,6 @@ char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
   }
   char *sim_stats_string =
       string_builder_dump(sim_results->display_string_builder, NULL);
+  cpthread_mutex_unlock(&sim_results->display_mutex);
   return sim_stats_string;
 }
