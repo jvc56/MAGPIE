@@ -32,10 +32,6 @@ for path in data/lexica/*.kwg; do
         echo "Skipping $lexicon.txt (Polish not supported)"
         continue
     fi
-    if [[ "$lexicon" == RD* ]]; then
-        echo "Skipping $lexicon.txt (German not supported)"
-        continue
-    fi
     if [[ "$path" == *"_super.kwg" ]]; then
         echo "Skipping $lexicon.txt (super)"
         continue
