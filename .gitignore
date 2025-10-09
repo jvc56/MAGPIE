@@ -21,3 +21,4 @@ cppcheck_*
 TODO
 CLAUDE.md
 *.DS_Store
+._*

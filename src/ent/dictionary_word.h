@@ -63,4 +63,7 @@ void dictionary_word_list_write_to_file(
     const LetterDistribution *ld, const char *data_paths,
     const char *output_name, ErrorStack *error_stack);
 
+bool dictionary_word_list_contains_word_linear_search(
+    const DictionaryWordList *dictionary_word_list, const DictionaryWord *word);
+
 #endif // DICTIONARY_WORD_H

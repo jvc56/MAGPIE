@@ -179,6 +179,16 @@ void dictionary_word_list_destroy(DictionaryWordList *dictionary_word_list) {
   free(dictionary_word_list);
 }
 
+bool dictionary_word_list_contains_word_linear_search(
+    const DictionaryWordList *dictionary_word_list, const DictionaryWord *word) {
+  for (int i = 0; i < dictionary_word_list->count; i++) {
+    if (dictionary_word_compare(&dictionary_word_list->dictionary_words[i], word) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void dictionary_word_list_write_to_file(
     const DictionaryWordList *dictionary_word_list,
     const LetterDistribution *ld, const char *data_paths,
