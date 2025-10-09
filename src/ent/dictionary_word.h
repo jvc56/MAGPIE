@@ -4,6 +4,7 @@
 #include "../def/kwg_defs.h"
 #include "../util/io_util.h"
 #include "letter_distribution.h"
+#include "xoshiro.h"
 #include <stdint.h>
 
 typedef struct DictionaryWord {
@@ -65,5 +66,28 @@ void dictionary_word_list_write_to_file(
 
 bool dictionary_word_list_contains_word_linear_search(
     const DictionaryWordList *dictionary_word_list, const DictionaryWord *word);
+
+static inline void
+dictionary_word_list_shuffle(DictionaryWordList *word_list, uint64_t seed) {
+  int count = dictionary_word_list_get_count(word_list);
+  if (count <= 1) {
+    return;
+  }
+
+  XoshiroPRNG *prng = prng_create(seed);
+
+  // Fisher-Yates shuffle
+  for (int i = count - 1; i > 0; i--) {
+    int j = (int)prng_get_random_number(prng, i + 1);
+
+    // Swap words at positions i and j
+    DictionaryWord temp = *dictionary_word_list_get_word(word_list, i);
+    *dictionary_word_list_get_word(word_list, i) =
+        *dictionary_word_list_get_word(word_list, j);
+    *dictionary_word_list_get_word(word_list, j) = temp;
+  }
+
+  prng_destroy(prng);
+}
 
 #endif // DICTIONARY_WORD_H

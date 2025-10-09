@@ -1950,6 +1950,15 @@ void config_load_lexicon_dependent_data(Config *config,
     return;
   }
 
+  // Load unsorted words from the KWG
+  players_data_set(config->players_data, PLAYERS_DATA_TYPE_UNSORTED_WORDS,
+                   config->data_paths, updated_p1_lexicon_name,
+                   updated_p2_lexicon_name, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // Load lexica (in WMP format)
 
   // For the wmp, we allow non-NULL -> NULL transitions.

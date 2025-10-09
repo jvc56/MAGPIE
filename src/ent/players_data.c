@@ -2,14 +2,18 @@
 
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
+#include "../impl/kwg_maker.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "dictionary_word.h"
 #include "klv.h"
 #include "kwg.h"
 #include "wmp.h"
 #include <stdlib.h>
+#include <time.h>
 
-static const char *const players_data_type_names[] = {"kwg", "klv", "wordmap"};
+static const char *const players_data_type_names[] = {"kwg", "klv", "wordmap",
+                                                      "words"};
 
 // The PlayersData struct holds all of the
 // information that can be set during configuration.
@@ -99,6 +103,13 @@ WMP *players_data_get_wmp(const PlayersData *players_data, int player_index) {
                                       player_index);
 }
 
+DictionaryWordList *
+players_data_get_unsorted_words(const PlayersData *players_data,
+                                int player_index) {
+  return (DictionaryWordList *)players_data_get_data(
+      players_data, PLAYERS_DATA_TYPE_UNSORTED_WORDS, player_index);
+}
+
 void players_data_set_data(PlayersData *players_data,
                            players_data_t players_data_type, int player_index,
                            void *data) {
@@ -125,6 +136,22 @@ void *players_data_create_data(players_data_t players_data_type,
   case PLAYERS_DATA_TYPE_WMP:
     data = wmp_create(data_paths, data_name, error_stack);
     break;
+  case PLAYERS_DATA_TYPE_UNSORTED_WORDS: {
+    // Create KWG, dump to word list, shuffle, and destroy KWG
+    KWG *kwg = kwg_create(data_paths, data_name, error_stack);
+    if (!error_stack_is_empty(error_stack) || !kwg) {
+      return NULL;
+    }
+    DictionaryWordList *word_list = dictionary_word_list_create();
+    kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), word_list, NULL);
+    printf("Lexicon %s has %d words.\n", kwg->name,
+           dictionary_word_list_get_count(word_list));
+    kwg_destroy(kwg);
+    // Use current time as seed for shuffle
+    dictionary_word_list_shuffle(word_list, (uint64_t)time(NULL));
+    data = word_list;
+    break;
+  }
   case NUMBER_OF_DATA:
     log_fatal("cannot create invalid players data type");
     break;
@@ -147,6 +174,9 @@ void players_data_destroy_data(PlayersData *players_data,
       break;
     case PLAYERS_DATA_TYPE_WMP:
       wmp_destroy(players_data->data[data_index]);
+      break;
+    case PLAYERS_DATA_TYPE_UNSORTED_WORDS:
+      dictionary_word_list_destroy(players_data->data[data_index]);
       break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
@@ -188,6 +218,10 @@ const char *players_data_get_data_name(const PlayersData *players_data,
       break;
     case PLAYERS_DATA_TYPE_WMP:
       data_name = wmp_get_name(players_data->data[data_index]);
+      break;
+    case PLAYERS_DATA_TYPE_UNSORTED_WORDS:
+      // UNSORTED_WORDS doesn't have a name - it's derived from KWG
+      data_name = NULL;
       break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
