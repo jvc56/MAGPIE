@@ -351,9 +351,11 @@ char *ucgi_static_moves(const Game *game, const MoveList *move_list) {
     string_builder_add_string(moves_string_builder, "info currmove ");
     string_builder_add_ucgi_move(moves_string_builder, move, board, ld);
 
-    string_builder_add_formatted_string(
-        moves_string_builder, " sc %d eq %.3f it 0\n", move_get_score(move),
-        move_get_equity(move));
+    string_builder_add_formatted_string(moves_string_builder, " sc %d eq ",
+                                        equity_to_int(move_get_score(move)));
+    string_builder_add_equity(moves_string_builder, move_get_equity(move),
+                              "%.3f");
+    string_builder_add_string(moves_string_builder, " it 0\n");
   }
   string_builder_add_string(moves_string_builder, "bestmove ");
   string_builder_add_ucgi_move(
