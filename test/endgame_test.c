@@ -1,14 +1,13 @@
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
-#include "../src/ent/player.h"
-#include "../src/ent/rack.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
 #include "../src/util/io_util.h"
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdio.h>
 
 void test_single_endgame(const char *config_settings, const char *cgp,
                          int initial_small_move_arena_size,

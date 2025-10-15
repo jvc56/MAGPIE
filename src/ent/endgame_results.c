@@ -1,5 +1,7 @@
 #include "endgame_results.h"
+
 #include "../util/io_util.h"
+#include <stdlib.h>
 
 struct EndgameResults {
   PVLine pv_line;
