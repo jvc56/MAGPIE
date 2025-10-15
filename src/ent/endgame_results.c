@@ -3,7 +3,6 @@
 
 struct EndgameResults {
   PVLine pv_line;
-  int score;
 };
 
 EndgameResults *endgame_results_create(void) {

@@ -98,7 +98,7 @@ void test_pass_first(void) {
 }
 
 void test_nonempty_bag(void) {
-  // A standard out-in-two endgame.
+  // The solver should return an error if the bag is not empty.
   test_single_endgame(
       "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 4",
       "cgp " EMPTY_CGP, DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
