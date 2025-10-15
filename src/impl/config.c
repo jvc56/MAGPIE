@@ -14,6 +14,7 @@
 #include "../ent/board.h"
 #include "../ent/board_layout.h"
 #include "../ent/conversion_results.h"
+#include "../ent/endgame_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
@@ -36,6 +37,7 @@
 #include "autoplay.h"
 #include "cgp.h"
 #include "convert.h"
+#include "endgame.h"
 #include "gameplay.h"
 #include "gcg.h"
 #include "get_gcg.h"
@@ -61,6 +63,7 @@ typedef enum {
   ARG_TOKEN_GEN,
   ARG_TOKEN_SIM,
   ARG_TOKEN_INFER,
+  ARG_TOKEN_ENDGAME,
   ARG_TOKEN_AUTOPLAY,
   ARG_TOKEN_CONVERT,
   ARG_TOKEN_LEAVE_GEN,
@@ -87,6 +90,7 @@ typedef enum {
   ARG_TOKEN_P2_MOVE_RECORD_TYPE,
   ARG_TOKEN_WIN_PCT,
   ARG_TOKEN_PLIES,
+  ARG_TOKEN_ENDGAME_PLIES,
   ARG_TOKEN_NUMBER_OF_PLAYS,
   ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,
   ARG_TOKEN_MAX_ITERATIONS,
@@ -151,6 +155,7 @@ struct Config {
   int num_plays;
   int num_small_plays;
   int plies;
+  int endgame_plies;
   int max_iterations;
   int min_play_iterations;
   double stop_cond_pct;
@@ -175,8 +180,10 @@ struct Config {
   Game *game;
   GameHistory *game_history;
   MoveList *move_list;
+  EndgameSolver *endgame_solver;
   SimResults *sim_results;
   InferenceResults *inference_results;
+  EndgameResults *endgame_results;
   AutoplayResults *autoplay_results;
   ConversionResults *conversion_results;
   GameStringOptions *game_string_options;
@@ -293,6 +300,10 @@ int config_get_num_small_plays(const Config *config) {
 }
 int config_get_plies(const Config *config) { return config->plies; }
 
+int config_get_endgame_plies(const Config *config) {
+  return config->endgame_plies;
+}
+
 int config_get_max_iterations(const Config *config) {
   return config->max_iterations;
 }
@@ -353,6 +364,10 @@ MoveList *config_get_move_list(const Config *config) {
 
 SimResults *config_get_sim_results(const Config *config) {
   return config->sim_results;
+}
+
+EndgameResults *config_get_endgame_results(const Config *config) {
+  return config->endgame_results;
 }
 
 AutoplayResults *config_get_autoplay_results(const Config *config) {
@@ -1074,6 +1089,40 @@ char *status_sim(Config *config) {
       (double)sim_results_get_node_count(sim_results) /
           thread_control_get_seconds_elapsed(config->thread_control),
       true);
+}
+
+// Endgame
+
+void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
+  endgame_args->thread_control = config->thread_control;
+  endgame_args->game = config->game;
+  endgame_args->plies = config->endgame_plies;
+  endgame_args->tt_fraction_of_mem = config->tt_fraction_of_mem;
+  endgame_args->initial_small_move_arena_size =
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+}
+
+void config_endgame(Config *config, EndgameResults *endgame_results,
+                    ErrorStack *error_stack) {
+  config_init_game(config);
+  EndgameArgs endgame_args;
+  config_fill_endgame_args(config, &endgame_args);
+  endgame_solve(config->endgame_solver, &endgame_args, endgame_results,
+                error_stack);
+}
+
+void impl_endgame(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate(
+            "cannot endgame without letter distribution and lexicon"));
+    return;
+  }
+  config_endgame(config, config->endgame_results, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 }
 
 // Autoplay
@@ -2108,6 +2157,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_int(config, ARG_TOKEN_ENDGAME_PLIES, 1, MAX_VARIANT_LENGTH,
+                  &config->endgame_plies, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_int(config, ARG_TOKEN_NUMBER_OF_PLAYS, 1, INT_MAX,
                   &config->num_plays, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -2664,6 +2719,15 @@ char *str_api_infer(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
+void execute_endgame(Config *config, ErrorStack *error_stack) {
+  impl_endgame(config, error_stack);
+}
+
+char *str_api_endgame(Config *config, ErrorStack *error_stack) {
+  impl_endgame(config, error_stack);
+  return empty_string();
+}
+
 void execute_autoplay(Config *config, ErrorStack *error_stack) {
   impl_autoplay(config, error_stack);
 }
@@ -2743,6 +2807,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   cmd(ARG_TOKEN_GEN, "generate", 0, 0, move_gen, generic);
   cmd(ARG_TOKEN_SIM, "simulate", 0, 1, sim, sim);
   cmd(ARG_TOKEN_INFER, "infer", 0, 5, infer, generic);
+  cmd(ARG_TOKEN_ENDGAME, "endgame", 0, 0, endgame, generic);
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, generic);
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic);
   cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic);
@@ -2773,6 +2838,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
   arg(ARG_TOKEN_PLIES, "plies", 1, 1);
+  arg(ARG_TOKEN_ENDGAME_PLIES, "eplies", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_SMALL_PLAYS, "numsmallplays", 1, 1);
   arg(ARG_TOKEN_MAX_ITERATIONS, "iterations", 1, 1);
@@ -2812,6 +2878,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->num_plays = DEFAULT_MOVE_LIST_CAPACITY;
   config->num_small_plays = DEFAULT_SMALL_MOVE_LIST_CAPACITY;
   config->plies = 2;
+  config->endgame_plies = 6;
   config->eq_margin_inference = 0;
   config->eq_margin_movegen = int_to_equity(10);
   config->min_play_iterations = 100;
@@ -2832,8 +2899,10 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->game = NULL;
   config->move_list = NULL;
   config->game_history = game_history_create();
+  config->endgame_solver = endgame_solver_create();
   config->sim_results = sim_results_create();
   config->inference_results = inference_results_create(NULL);
+  config->endgame_results = endgame_results_create();
   config->autoplay_results = autoplay_results_create();
   config->conversion_results = conversion_results_create();
   config->tt_fraction_of_mem = 0.25;
@@ -2864,9 +2933,11 @@ void config_destroy(Config *config) {
   thread_control_destroy(config->thread_control);
   game_destroy(config->game);
   game_history_destroy(config->game_history);
+  endgame_solver_destroy(config->endgame_solver);
   move_list_destroy(config->move_list);
   sim_results_destroy(config->sim_results);
   inference_results_destroy(config->inference_results);
+  endgame_results_destroy(config->endgame_results);
   autoplay_results_destroy(config->autoplay_results);
   conversion_results_destroy(config->conversion_results);
   game_string_options_destroy(config->game_string_options);
