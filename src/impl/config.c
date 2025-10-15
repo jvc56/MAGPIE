@@ -1104,7 +1104,6 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
 
 void config_endgame(Config *config, EndgameResults *endgame_results,
                     ErrorStack *error_stack) {
-  config_init_game(config);
   EndgameArgs endgame_args;
   config_fill_endgame_args(config, &endgame_args);
   endgame_solve(config->endgame_solver, &endgame_args, endgame_results,
@@ -1116,9 +1115,10 @@ void impl_endgame(Config *config, ErrorStack *error_stack) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
         string_duplicate(
-            "cannot endgame without letter distribution and lexicon"));
+            "cannot run endgame without letter distribution and lexicon"));
     return;
   }
+  config_init_game(config);
   config_endgame(config, config->endgame_results, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
