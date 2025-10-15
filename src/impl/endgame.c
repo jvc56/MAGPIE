@@ -626,6 +626,7 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
 
   StringBuilder *pvsb =
       pvline_string(&solver->principal_variation, solver->game, true);
+  thread_control_print(solver->thread_control, string_builder_peek(pvsb));
   string_builder_destroy(pvsb);
 
   free(solver_workers);
