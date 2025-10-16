@@ -384,21 +384,13 @@ void test_config_exec_parse_args(void) {
 
   // Setting the rack
   assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "rack 0 ABC",
-                            ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS);
-  assert_config_exec_status(config, "rack 3 ABC",
-                            ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS);
-  assert_config_exec_status(config, "rack 1 AB3C",
-
+  assert_config_exec_status(config, "rack AB3C",
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
-  assert_config_exec_status(config, "rack 1 ABCZZZ",
-
+  assert_config_exec_status(config, "rack ABCZZZ",
                             ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG);
   assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "rack 1 FF", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "rack 1 ZYYABCF", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "rack 2 CC",
-                            ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG);
+  assert_config_exec_status(config, "rack  FF", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack  ZYYABCF", ERROR_STATUS_SUCCESS);
 
   // Generating moves
   assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_SUCCESS);

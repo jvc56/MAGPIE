@@ -112,6 +112,7 @@ typedef enum {
   ARG_TOKEN_SAMPLING_RULE,
   ARG_TOKEN_THRESHOLD,
   ARG_TOKEN_LOAD,
+  ARG_TOKEN_NEW_GAME,
   ARG_TOKEN_SHOW,
   ARG_TOKEN_NEXT,
   ARG_TOKEN_PREVIOUS,
@@ -752,37 +753,30 @@ void impl_set_rack(Config *config, ErrorStack *error_stack) {
 
   config_init_game(config);
 
-  int player_index;
-  config_load_int(config, ARG_TOKEN_RACK, 1, 2, &player_index, error_stack);
+  const int player_index = game_get_player_on_turn_index(config->game);
+
+  Rack new_rack;
+  rack_copy(&new_rack,
+            player_get_rack(game_get_player(config->game, player_index)));
+
+  const char *rack_str = config_get_parg_value(config, ARG_TOKEN_RACK, 0);
+  load_rack_or_push_to_error_stack(rack_str, config->ld,
+                                   ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
+                                   &new_rack, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  // Convert from 1-indexed user input to 0-indexed internal use
-  player_index--;
 
-  Rack *new_rack = rack_duplicate(
-      player_get_rack(game_get_player(config->game, player_index)));
-  rack_reset(new_rack);
-
-  const char *rack_str = config_get_parg_value(config, ARG_TOKEN_RACK, 1);
-  load_rack_or_push_to_error_stack(rack_str, config->ld,
-                                   ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
-                                   new_rack, error_stack);
-
-  if (error_stack_is_empty(error_stack)) {
-    if (rack_is_drawable(config->game, player_index, new_rack)) {
-      return_rack_to_bag(config->game, player_index);
-      if (!draw_rack_from_bag(config->game, player_index, new_rack)) {
-        log_fatal("failed to draw rack from bag in set rack command");
-      }
-    } else {
-      error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG,
-                       get_formatted_string(
-                           "rack %s is not available in the bag", rack_str));
+  if (rack_is_drawable(config->game, player_index, &new_rack)) {
+    return_rack_to_bag(config->game, player_index);
+    if (!draw_rack_from_bag(config->game, player_index, &new_rack)) {
+      log_fatal("failed to draw rack from bag in set rack command");
     }
+  } else {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG,
+        get_formatted_string("rack %s is not available in the bag", rack_str));
   }
-
-  rack_destroy(new_rack);
 }
 
 // Move generation
@@ -1289,8 +1283,10 @@ void impl_create_data(const Config *config, ErrorStack *error_stack) {
 
 char *impl_show(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-                     string_duplicate("cannot show game without loaded game"));
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate(
+            "cannot show game without letter distribution and lexicon"));
     return empty_string();
   }
 
@@ -1467,7 +1463,7 @@ char *impl_load_gcg(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
   return get_formatted_string(
-      "Successfully loaded game: %s vs %s (%d events)",
+      "Successfully loaded game: %s vs %s (%d events)\n",
       game_history_player_get_name(config->game_history, 0),
       game_history_player_get_name(config->game_history, 1),
       game_history_get_num_events(config->game_history));
@@ -1483,6 +1479,72 @@ void execute_load_gcg(Config *config, ErrorStack *error_stack) {
 
 char *str_api_load_gcg(Config *config, ErrorStack *error_stack) {
   return impl_load_gcg(config, error_stack);
+}
+
+// Start new game
+
+void update_history_with_config(Config *config) {
+  if (!config->ld) {
+    return;
+  }
+  const char *ld_name = ld_get_name(config->ld);
+  if (ld_name) {
+    game_history_set_ld_name(config->game_history, ld_name);
+  }
+  const char *existing_p1_lexicon_name = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_KWG, 0);
+  if (existing_p1_lexicon_name) {
+    game_history_set_lexicon_name(config->game_history,
+                                  existing_p1_lexicon_name);
+  }
+  game_history_set_board_layout_name(
+      config->game_history, board_layout_get_name(config->board_layout));
+  game_history_set_game_variant(config->game_history, config->game_variant);
+}
+
+char *impl_new_game(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate(
+            "cannot create new game without letter distribution and lexicon"));
+    return empty_string();
+  }
+  config_init_game(config);
+  game_history_reset(config->game_history);
+  update_history_with_config(config);
+  for (int player_index = 0; player_index < 2; player_index++) {
+    const char *player_nickname =
+        config_get_parg_value(config, ARG_TOKEN_NEW_GAME, player_index);
+    if (!player_nickname) {
+      if (player_index == 0) {
+        player_nickname = "Player 1";
+      } else {
+        player_nickname = "Player 2";
+      }
+    }
+    // Until we support player names with whitespace, the new game command
+    // will only uses nicknames.
+    game_history_set_player(config->game_history, player_index, player_nickname,
+                            player_nickname);
+  }
+  execute_show(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return empty_string();
+}
+
+void execute_new_game(Config *config, ErrorStack *error_stack) {
+  char *result = impl_new_game(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_new_game(Config *config, ErrorStack *error_stack) {
+  return impl_new_game(config, error_stack);
 }
 
 // Game navigation helper and command
@@ -2578,6 +2640,9 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  // Update the game history
+  update_history_with_config(config);
+
   // Set win pct
 
   const char *new_win_pct_name =
@@ -2801,9 +2866,10 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   cmd(ARG_TOKEN_SET, "setoptions", 0, 0, noop, generic);
   cmd(ARG_TOKEN_CGP, "cgp", 4, 4, load_cgp, generic);
   cmd(ARG_TOKEN_LOAD, "load", 1, 1, load_gcg, generic);
+  cmd(ARG_TOKEN_NEW_GAME, "newgame", 0, 2, new_game, generic);
   cmd(ARG_TOKEN_SHOW, "show", 0, 0, show, generic);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic);
-  cmd(ARG_TOKEN_RACK, "rack", 2, 2, set_rack, generic);
+  cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic);
   cmd(ARG_TOKEN_GEN, "generate", 0, 0, move_gen, generic);
   cmd(ARG_TOKEN_SIM, "simulate", 0, 1, sim, sim);
   cmd(ARG_TOKEN_INFER, "infer", 0, 5, infer, generic);
