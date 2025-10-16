@@ -144,6 +144,9 @@ static inline void transposition_table_store(TranspositionTable *tt,
 }
 
 static inline void transposition_table_destroy(TranspositionTable *tt) {
+  if (!tt) {
+    return;
+  }
   zobrist_destroy(tt->zobrist);
   free(tt->table);
   free(tt);

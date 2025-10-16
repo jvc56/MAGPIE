@@ -7,6 +7,7 @@
 #include "../def/move_defs.h"
 #include "../ent/bag.h"
 #include "../ent/dictionary_word.h"
+#include "../ent/endgame_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/kwg.h"
@@ -37,6 +38,45 @@ enum {
   HASH_MOVE_BF = 1 << 28,
   GOING_OUT_BF = 1 << 27,
 };
+
+struct EndgameSolver {
+  int initial_spread;
+  int solving_player;
+  int n_initial_moves;
+
+  int initial_small_move_arena_size;
+  bool iterative_deepening_optim;
+  bool first_win_optim;
+  bool transposition_table_optim;
+  bool negascout_optim;
+  bool lazysmp_optim;
+  bool prevent_slowroll;
+  PVLine principal_variation;
+  PVLine *variations;
+
+  KWG *pruned_kwg;
+  int nodes_searched;
+
+  int solve_multiple_variations;
+  int32_t best_pv_value;
+  int requested_plies;
+  int threads;
+  double tt_fraction_of_mem;
+  TranspositionTable *transposition_table;
+
+  // Owned by the caller:
+  ThreadControl *thread_control;
+  const Game *game;
+};
+
+typedef struct EndgameSolverWorker {
+  int thread_index;
+  Game *game_copy;
+  Arena *small_move_arena;
+  MoveList *move_list;
+  EndgameSolver *solver;
+  int current_iterative_deepening_depth;
+} EndgameSolverWorker;
 
 #ifndef MAX
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -92,48 +132,50 @@ StringBuilder *pvline_string(const PVLine *pv_line, const Game *game,
   return pv_description;
 }
 
-EndgameSolver *endgame_solver_create(ThreadControl *tc, const Game *game,
-                                     double tt_fraction_of_memory) {
-  EndgameSolver *es = malloc_or_die(sizeof(EndgameSolver));
+void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->first_win_optim = false;
   es->transposition_table_optim = true;
   es->iterative_deepening_optim = true;
   es->negascout_optim = true;
-  es->wordprune_optim = true;
   es->solve_multiple_variations = 0;
   es->nodes_searched = 0;
   es->threads = 1; // for now
-  es->solving_player = game_get_player_on_turn_index(game);
-  es->initial_small_move_arena_size = 1024 * 1024;
-  es->pruned_kwg = NULL;
-  const Player *player = game_get_player(game, es->solving_player);
-  const Player *opponent = game_get_player(game, 1 - es->solving_player);
+  es->requested_plies = endgame_args->plies;
+  es->solving_player = game_get_player_on_turn_index(endgame_args->game);
+  es->initial_small_move_arena_size =
+      endgame_args->initial_small_move_arena_size;
+  const Player *player =
+      game_get_player(endgame_args->game, es->solving_player);
+  const Player *opponent =
+      game_get_player(endgame_args->game, 1 - es->solving_player);
 
   es->initial_spread =
       equity_to_int(player_get_score(player) - player_get_score(opponent));
 
-  if (es->wordprune_optim) {
-    DictionaryWordList *possible_word_list = dictionary_word_list_create();
-    generate_possible_words(game, NULL, possible_word_list);
-    log_info("Using pruned kwg with %d words",
-             dictionary_word_list_get_count(possible_word_list));
-    es->pruned_kwg = make_kwg_from_words(
-        possible_word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
-    dictionary_word_list_destroy(possible_word_list);
-    log_info("Pruned KWG created with %d nodes",
-             kwg_get_number_of_nodes(es->pruned_kwg));
-  }
+  kwg_destroy(es->pruned_kwg);
+  DictionaryWordList *possible_word_list = dictionary_word_list_create();
+  generate_possible_words(endgame_args->game, NULL, possible_word_list);
+  es->pruned_kwg = make_kwg_from_words(
+      possible_word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
+  dictionary_word_list_destroy(possible_word_list);
 
   // later, when we have multi-threaded endgame:
   // es->threads = thread_control_get_threads(tc);
-  es->thread_control = tc;
-  es->game = game;
-  if (tt_fraction_of_memory > 0) {
-    es->transposition_table = transposition_table_create(tt_fraction_of_memory);
-  } else {
+  es->thread_control = endgame_args->thread_control;
+  es->game = endgame_args->game;
+  if (endgame_args->tt_fraction_of_mem == 0) {
+    transposition_table_destroy(es->transposition_table);
     es->transposition_table = NULL;
+  } else if (es->tt_fraction_of_mem != endgame_args->tt_fraction_of_mem) {
+    transposition_table_destroy(es->transposition_table);
+    es->transposition_table =
+        transposition_table_create(endgame_args->tt_fraction_of_mem);
   }
-  return es;
+  es->tt_fraction_of_mem = endgame_args->tt_fraction_of_mem;
+}
+
+EndgameSolver *endgame_solver_create(void) {
+  return calloc_or_die(1, sizeof(EndgameSolver));
 }
 
 void endgame_solver_destroy(EndgameSolver *es) {
@@ -141,9 +183,7 @@ void endgame_solver_destroy(EndgameSolver *es) {
     return;
   }
   transposition_table_destroy(es->transposition_table);
-  if (es->pruned_kwg) {
-    kwg_destroy(es->pruned_kwg);
-  }
+  kwg_destroy(es->pruned_kwg);
   free(es);
 }
 
@@ -524,7 +564,6 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   }
 
   for (int p = start; p <= plies; p++) {
-    log_info("Iterative deepening; ply %d", p);
     worker->current_iterative_deepening_depth = p;
     PVLine pv;
     pv.game = worker->game_copy;
@@ -539,8 +578,6 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     //          worker->solver->initial_spread);
     worker->solver->best_pv_value = val - worker->solver->initial_spread;
     worker->solver->principal_variation = pv;
-    log_info("Best value so far: %d", worker->solver->best_pv_value);
-    log_info("Nodes: %ld", worker->solver->nodes_searched);
   }
 }
 
@@ -551,15 +588,23 @@ void *solver_worker_start(void *uncasted_solver_worker) {
   // ThreadControl *thread_control = solver->thread_control;
   // later allow thread control to quit early.
   iterative_deepening(solver_worker, solver->requested_plies);
-  log_trace("thread %d exiting", solver_worker->thread_index);
   return NULL;
 }
 
-PVLine endgame_solve(EndgameSolver *solver, int plies) {
-  // bag must be empty. This should be validated by the caller.
-  assert(!bag_get_letters(game_get_bag(solver->game)));
+void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
+                   EndgameResults *results, ErrorStack *error_stack) {
+  const int bag_size = bag_get_letters(game_get_bag(endgame_args->game));
+  if (bag_size != 0) {
+    error_stack_push(error_stack, ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY,
+                     get_formatted_string(
+                         "bag must be empty to solve an endgame, but have %d "
+                         "letters in the bag",
+                         bag_size));
+    return;
+  }
 
-  solver->requested_plies = plies;
+  endgame_solver_reset(solver, endgame_args);
+
   // kick-off iterative deepening thread.
 
   EndgameSolverWorker **solver_workers =
@@ -581,11 +626,11 @@ PVLine endgame_solve(EndgameSolver *solver, int plies) {
 
   StringBuilder *pvsb =
       pvline_string(&solver->principal_variation, solver->game, true);
-  log_info("winner: %s", string_builder_peek(pvsb));
+  thread_control_print(solver->thread_control, string_builder_peek(pvsb));
   string_builder_destroy(pvsb);
 
   free(solver_workers);
   free(worker_ids);
 
-  return solver->principal_variation;
+  endgame_results_set_pvline(results, &solver->principal_variation);
 }

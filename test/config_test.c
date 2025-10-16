@@ -34,7 +34,7 @@ void test_config_load_error(Config *config, const char *cmd,
 void test_config_load_error_cases(void) {
   Config *config = config_create_default_test();
   ErrorStack *error_stack = error_stack_create();
-  test_config_load_error(config, "endgame",
+  test_config_load_error(config, "playfortricks",
                          ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
                          error_stack);
   test_config_load_error(config, "sim -lex CSW21 -iter 1000 -plies 10 1",

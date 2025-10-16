@@ -8,6 +8,7 @@
 #include "../ent/autoplay_results.h"
 #include "../ent/board_layout.h"
 #include "../ent/conversion_results.h"
+#include "../ent/endgame_results.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/inference_results.h"
@@ -45,6 +46,7 @@ WinPct *config_get_win_pcts(const Config *config);
 int config_get_num_plays(const Config *config);
 int config_get_num_small_plays(const Config *config);
 int config_get_plies(const Config *config);
+int config_get_endgame_plies(const Config *config);
 int config_get_max_iterations(const Config *config);
 double config_get_stop_cond_pct(const Config *config);
 bool config_get_use_game_pairs(const Config *config);
@@ -59,6 +61,7 @@ Game *config_get_game(const Config *config);
 GameHistory *config_get_game_history(const Config *config);
 MoveList *config_get_move_list(const Config *config);
 SimResults *config_get_sim_results(const Config *config);
+EndgameResults *config_get_endgame_results(const Config *config);
 AutoplayResults *config_get_autoplay_results(const Config *config);
 const char *config_get_current_exec_name(const Config *config);
 
@@ -71,6 +74,8 @@ void config_infer(const Config *config, bool use_game_history, int target_index,
                   Rack *target_played_tiles, Rack *target_known_rack,
                   Rack *nontarget_known_rack, InferenceResults *results,
                   ErrorStack *error_stack);
+void config_endgame(Config *config, EndgameResults *endgame_results,
+                    ErrorStack *error_stack);
 void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
                      autoplay_t autoplay_type,
                      const char *num_games_or_min_rack_targets,
