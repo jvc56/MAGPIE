@@ -1483,7 +1483,7 @@ char *str_api_load_gcg(Config *config, ErrorStack *error_stack) {
 
 // Start new game
 
-void update_history_with_config(Config *config) {
+void update_game_history_with_config(Config *config) {
   if (!config->ld) {
     return;
   }
@@ -1500,6 +1500,22 @@ void update_history_with_config(Config *config) {
   game_history_set_board_layout_name(
       config->game_history, board_layout_get_name(config->board_layout));
   game_history_set_game_variant(config->game_history, config->game_variant);
+
+  for (int player_index = 0; player_index < 2; player_index++) {
+    const char *player_name =
+        players_data_get_name(config->players_data, player_index);
+    if (player_name) {
+      if (game_history_player_is_set(config->game_history, player_index)) {
+        game_history_player_set_name(config->game_history, player_index,
+                                     player_name);
+        game_history_player_set_nickname(config->game_history, player_index,
+                                         player_name);
+      } else {
+        game_history_set_player(config->game_history, player_index, player_name,
+                                player_name);
+      }
+    }
+  }
 }
 
 char *impl_new_game(Config *config, ErrorStack *error_stack) {
@@ -1512,7 +1528,7 @@ char *impl_new_game(Config *config, ErrorStack *error_stack) {
   }
   config_init_game(config);
   game_history_reset(config->game_history);
-  update_history_with_config(config);
+  update_game_history_with_config(config);
   for (int player_index = 0; player_index < 2; player_index++) {
     const char *player_nickname =
         config_get_parg_value(config, ARG_TOKEN_NEW_GAME, player_index);
@@ -2641,7 +2657,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   }
 
   // Update the game history
-  update_history_with_config(config);
+  update_game_history_with_config(config);
 
   // Set win pct
 
