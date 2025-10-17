@@ -78,6 +78,7 @@ struct GCGParser {
   int number_of_token_regex_pairs;
   int gcg_token_count[NUMBER_OF_GCG_TOKENS];
   int current_gcg_line_index;
+  bool player_is_reset[2];
   StringSplitter *gcg_lines;
   const char *existing_p0_lexicon;
   // Owned by the caller
@@ -289,6 +290,8 @@ GCGParser *gcg_parser_create(const char *gcg_string, GameHistory *game_history,
                                 token_string_regex_pairs[i].regex_string);
   }
   memset(gcg_parser->gcg_token_count, 0, sizeof(gcg_parser->gcg_token_count));
+  gcg_parser->player_is_reset[0] = false;
+  gcg_parser->player_is_reset[1] = false;
   gcg_parser->existing_p0_lexicon = existing_p0_lexicon;
   gcg_parser->current_gcg_line_index = 0;
   // The gcg_lines StringSplitter is NULL if the error stack is not empty
@@ -657,7 +660,7 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     if (!error_stack_is_empty(error_stack)) {
       log_fatal("encountered unexpected player index: %d", player_index);
     }
-    if (game_history_player_is_set(game_history, player_index)) {
+    if (gcg_parser->player_is_reset[player_index]) {
       error_stack_push(
           error_stack, ERROR_STATUS_GCG_PARSE_PLAYER_NUMBER_REDUNDANT,
           get_formatted_string("redundant player number: %s", gcg_line));
@@ -666,11 +669,12 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     char *player_nickname =
         get_matching_group_as_string(gcg_parser, gcg_line, 2);
     char *player_name = get_matching_group_as_string(gcg_parser, gcg_line, 3);
-    game_history_set_player(game_history, player_index, player_name,
-                            player_nickname);
+    game_history_player_reset(game_history, player_index, player_name,
+                              player_nickname);
+    gcg_parser->player_is_reset[player_index] = true;
     free(player_name);
     free(player_nickname);
-    if (game_history_player_is_set(game_history, 1 - player_index) &&
+    if (gcg_parser->player_is_reset[1 - player_index] &&
         strings_equal(
             game_history_player_get_name(game_history, player_index),
             game_history_player_get_name(game_history, 1 - player_index))) {
@@ -679,7 +683,7 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
           get_formatted_string("duplicate player name: %s", gcg_line));
       return false;
     }
-    if (game_history_player_is_set(game_history, 1 - player_index) &&
+    if (gcg_parser->player_is_reset[1 - player_index] &&
         strings_equal(
             game_history_player_get_nickname(game_history, player_index),
             game_history_player_get_nickname(game_history, 1 - player_index))) {

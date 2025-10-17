@@ -9,6 +9,8 @@
 #include "move.h"
 #include "words.h"
 
+enum { UCGI_DELIMITER = '.' };
+
 typedef struct ValidatedMoves ValidatedMoves;
 
 ValidatedMoves *validated_moves_create(const Game *game, int player_index,
@@ -33,7 +35,8 @@ char *validated_moves_get_phonies_string(const LetterDistribution *ld,
 int validated_moves_get_challenge_points(const ValidatedMoves *vms, int i);
 bool validated_moves_get_challenge_turn_loss(const ValidatedMoves *vms, int i);
 
-void validated_moves_add_to_move_list(const ValidatedMoves *vms, MoveList *ml);
+void validated_moves_add_to_sorted_move_list(const ValidatedMoves *vms,
+                                             MoveList *ml);
 void validated_moves_set_rack_to_played_letters(const ValidatedMoves *vms,
                                                 int i, Rack *rack_to_set);
 #endif

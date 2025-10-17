@@ -32,6 +32,7 @@
 #include "../ent/win_pct.h"
 #include "../str/game_string.h"
 #include "../str/move_string.h"
+#include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "autoplay.h"
@@ -113,6 +114,7 @@ typedef enum {
   ARG_TOKEN_THRESHOLD,
   ARG_TOKEN_LOAD,
   ARG_TOKEN_NEW_GAME,
+  ARG_TOKEN_COMMIT,
   ARG_TOKEN_SHOW,
   ARG_TOKEN_NEXT,
   ARG_TOKEN_PREVIOUS,
@@ -486,10 +488,17 @@ void load_rack_or_push_to_error_stack(const char *rack_str,
                                       const LetterDistribution *ld,
                                       error_code_t error_code, Rack *rack,
                                       ErrorStack *error_stack) {
-  if (rack_set_to_string(ld, rack, rack_str) < 0) {
+  const int num_mls = rack_set_to_string(ld, rack, rack_str);
+  if (num_mls < 0) {
     error_stack_push(
         error_stack, error_code,
-        get_formatted_string("failed to parse rack: %s", rack_str));
+        get_formatted_string("failed to parse rack '%s'", rack_str));
+  } else if (num_mls > RACK_SIZE) {
+    error_stack_push(
+        error_stack, error_code,
+        get_formatted_string(
+            "rack '%s' has %d tiles which exceeds the maximum rack size of %d",
+            rack_str, num_mls, RACK_SIZE));
   }
 }
 
@@ -734,7 +743,8 @@ void impl_add_moves(Config *config, ErrorStack *error_stack) {
     }
     string_builder_destroy(phonies_sb);
     config_init_move_list(config, number_of_new_moves);
-    validated_moves_add_to_move_list(new_validated_moves, config->move_list);
+    validated_moves_add_to_sorted_move_list(new_validated_moves,
+                                            config->move_list);
   }
 
   validated_moves_destroy(new_validated_moves);
@@ -798,14 +808,14 @@ void impl_move_gen(Config *config, ErrorStack *error_stack) {
     config_recreate_move_list(config, config_get_num_small_plays(config),
                               MOVE_LIST_TYPE_SMALL);
   }
-  MoveList *ml = config->move_list;
   const MoveGenArgs args = {
       .game = config->game,
-      .move_list = ml,
+      .move_list = config->move_list,
       .thread_index = 0,
       .eq_margin_movegen = config->eq_margin_movegen,
   };
   generate_moves_for_game(&args);
+  move_list_sort_moves(config->move_list);
 }
 
 // Inference
@@ -1502,19 +1512,11 @@ void update_game_history_with_config(Config *config) {
   game_history_set_game_variant(config->game_history, config->game_variant);
 
   for (int player_index = 0; player_index < 2; player_index++) {
+    // This will have been specified by the CLI and will not have any whitespace
     const char *player_name =
         players_data_get_name(config->players_data, player_index);
-    if (player_name) {
-      if (game_history_player_is_set(config->game_history, player_index)) {
-        game_history_player_set_name(config->game_history, player_index,
-                                     player_name);
-        game_history_player_set_nickname(config->game_history, player_index,
-                                         player_name);
-      } else {
-        game_history_set_player(config->game_history, player_index, player_name,
-                                player_name);
-      }
-    }
+    game_history_player_reset(config->game_history, player_index, player_name,
+                              player_name);
   }
 }
 
@@ -1530,19 +1532,13 @@ char *impl_new_game(Config *config, ErrorStack *error_stack) {
   game_history_reset(config->game_history);
   update_game_history_with_config(config);
   for (int player_index = 0; player_index < 2; player_index++) {
-    const char *player_nickname =
+    const char *player_name =
         config_get_parg_value(config, ARG_TOKEN_NEW_GAME, player_index);
-    if (!player_nickname) {
-      if (player_index == 0) {
-        player_nickname = "Player 1";
-      } else {
-        player_nickname = "Player 2";
-      }
-    }
-    // Until we support player names with whitespace, the new game command
-    // will only uses nicknames.
-    game_history_set_player(config->game_history, player_index, player_nickname,
-                            player_nickname);
+    // Since the player_name is specified by the CLI which guarantees
+    // that it does not contain whitespace, which means we can use it as
+    // the nickname as well as the name.
+    game_history_player_reset(config->game_history, player_index, player_name,
+                              player_name);
   }
   execute_show(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -1561,6 +1557,161 @@ void execute_new_game(Config *config, ErrorStack *error_stack) {
 
 char *str_api_new_game(Config *config, ErrorStack *error_stack) {
   return impl_new_game(config, error_stack);
+}
+
+// Commit move
+
+void parse_commit(Config *config, StringBuilder *move_string_builder,
+                  ValidatedMoves **vms, ErrorStack *error_stack) {
+  const char *commit_pos_arg_1 =
+      config_get_parg_value(config, ARG_TOKEN_COMMIT, 0);
+  const char *commit_pos_arg_2 =
+      config_get_parg_value(config, ARG_TOKEN_COMMIT, 1);
+  // If a second arg is provided, this is either an exchange or a tile placement
+  // move
+  Move move;
+  const int player_on_turn_index = game_get_player_on_turn_index(config->game);
+  const Rack *player_rack =
+      player_get_rack(game_get_player(config->game, player_on_turn_index));
+  if (commit_pos_arg_2) {
+    if (string_length(commit_pos_arg_1) > BOARD_DIM) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_COMMIT_INVALID_POSITION,
+          get_formatted_string("invalid position '%s' in commit command",
+                               commit_pos_arg_1));
+      return;
+    }
+    if (string_length(commit_pos_arg_2) > BOARD_DIM) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_COMMIT_INVALID_TILES_PLAYED,
+          get_formatted_string("invalid played letters '%s' in commit command",
+                               commit_pos_arg_2));
+      return;
+    }
+    string_builder_add_formatted_string(move_string_builder, "%s%c%s%c",
+                                        commit_pos_arg_1, UCGI_DELIMITER,
+                                        commit_pos_arg_2, UCGI_DELIMITER);
+    string_builder_add_rack(move_string_builder, player_rack, config->ld,
+                            false);
+    *vms = validated_moves_create(config->game, player_on_turn_index,
+                                  string_builder_peek(move_string_builder),
+                                  true, false, true, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    move_copy(&move, validated_moves_get_move(*vms, 0));
+  } else if (strings_iequal(commit_pos_arg_1, UCGI_PASS_MOVE)) {
+    move_set_as_pass(&move);
+    string_builder_add_string(move_string_builder, UCGI_PASS_MOVE);
+  } else if (is_all_digits_or_empty(commit_pos_arg_1)) {
+    // If no second arg is provided and the first arg is all digits, the digits
+    // represent the static rank of the move to commit.
+    int commit_move_static_rank = string_to_int(commit_pos_arg_1, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    commit_move_static_rank--;
+    // commit_move_static_rank is necessarily nonnegative since
+    // is_all_digits_or_empty returns false for negative numbers.
+    if (commit_move_static_rank >= move_list_get_count(config->move_list)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE,
+          get_formatted_string(
+              "cannot commit move %d with only %d total generated moves",
+              commit_move_static_rank + 1,
+              move_list_get_count(config->move_list)));
+      return;
+    }
+    move_copy(&move,
+              move_list_get_move(config->move_list, commit_move_static_rank));
+    string_builder_add_ucgi_move(move_string_builder, &move,
+                                 game_get_board(config->game), config->ld);
+  } else {
+    string_builder_add_formatted_string(move_string_builder, "%s%c%s%c",
+                                        UCGI_EXCHANGE_MOVE, UCGI_DELIMITER,
+                                        commit_pos_arg_1, UCGI_DELIMITER);
+    string_builder_add_rack(move_string_builder, player_rack, config->ld,
+                            false);
+    *vms = validated_moves_create(config->game, player_on_turn_index,
+                                  string_builder_peek(move_string_builder),
+                                  true, false, true, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    move_copy(&move, validated_moves_get_move(*vms, 0));
+  }
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  game_history_truncate_to_played_events(config->game_history);
+
+  GameEvent *game_event =
+      game_history_add_game_event(config->game_history, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  game_event_set_player_index(game_event, player_on_turn_index);
+  game_event_set_type(game_event, GAME_EVENT_TILE_PLACEMENT_MOVE);
+  game_event_set_cumulative_score(
+      game_event,
+      player_get_score(game_get_player(config->game, player_on_turn_index)) +
+          move_get_score(&move));
+  game_event_set_cgp_move_string(
+      game_event, string_builder_dump(move_string_builder, NULL));
+  game_event_set_move_score(game_event, move_get_score(&move));
+  rack_copy(game_event_get_rack(game_event), player_rack);
+  // FIXME: set vms, maybe
+
+  game_play_n_events(config->game_history, config->game,
+                     game_history_get_num_events(config->game_history), true,
+                     error_stack);
+}
+
+char *impl_commit(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate(
+            "cannot commit a move without letter distribution and lexicon"));
+    return empty_string();
+  }
+
+  config_init_game(config);
+
+  StringBuilder *move_string_builder = string_builder_create();
+  ValidatedMoves *vms = NULL;
+
+  parse_commit(config, move_string_builder, &vms, error_stack);
+
+  string_builder_destroy(move_string_builder);
+  validated_moves_destroy(vms);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+
+  execute_show(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+
+  return empty_string();
+}
+
+void execute_commit(Config *config, ErrorStack *error_stack) {
+  char *result = impl_commit(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_commit(Config *config, ErrorStack *error_stack) {
+  return impl_commit(config, error_stack);
 }
 
 // Game navigation helper and command
@@ -2883,6 +3034,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   cmd(ARG_TOKEN_CGP, "cgp", 4, 4, load_cgp, generic);
   cmd(ARG_TOKEN_LOAD, "load", 1, 1, load_gcg, generic);
   cmd(ARG_TOKEN_NEW_GAME, "newgame", 0, 2, new_game, generic);
+  cmd(ARG_TOKEN_COMMIT, "commit", 1, 2, commit, generic);
   cmd(ARG_TOKEN_SHOW, "show", 0, 0, show, generic);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic);
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic);

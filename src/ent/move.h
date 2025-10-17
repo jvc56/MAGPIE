@@ -575,6 +575,23 @@ static inline void move_list_sort_moves(MoveList *ml) {
   ml->count = number_of_moves;
 }
 
+// Assumes the move list is sorted and has enough capacity to accept
+// an additional move
+static inline void move_list_add_move_to_sorted_list(MoveList *ml,
+                                                     const Move *move) {
+  move_copy(ml->moves[ml->count], move);
+  ml->count++;
+  int current_index = ml->count - 1;
+  while (current_index > 0 &&
+         compare_moves(ml->moves[current_index - 1], ml->moves[current_index],
+                       false) == 0) {
+    Move *swap = ml->moves[current_index];
+    ml->moves[current_index] = ml->moves[current_index - 1];
+    ml->moves[current_index - 1] = swap;
+    current_index--;
+  }
+}
+
 static inline void move_list_resize(MoveList *ml, int new_capacity) {
   if (new_capacity == ml->capacity) {
     return;

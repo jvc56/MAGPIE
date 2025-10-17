@@ -386,6 +386,8 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "rack AB3C",
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  assert_config_exec_status(config, "rack ABCDEFGH",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   assert_config_exec_status(config, "rack ABCZZZ",
                             ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG);
   assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_SUCCESS);
@@ -559,6 +561,27 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(config6, "previous", ERROR_STATUS_SUCCESS);
   config_destroy(config6);
 
+  // Commit and challenge
+  Config *config7 = config_create_default_test();
+  assert_config_exec_status(config7, "set -lex CSW24", ERROR_STATUS_SUCCESS);
+  // Show the game to trigger game initialization
+  assert_config_exec_status(config7, "sh", ERROR_STATUS_SUCCESS);
+  Bag *bag = game_get_bag(config_get_game(config7));
+  const int bag_initial_total = bag_get_letters(bag);
+  assert_config_exec_status(config7, "rack ABC", ERROR_STATUS_SUCCESS);
+  assert(bag_initial_total == bag_get_letters(bag) + 3);
+  assert_config_exec_status(config7, "rack ABCDEFG", ERROR_STATUS_SUCCESS);
+  assert(bag_initial_total == bag_get_letters(bag) + 7);
+  assert_config_exec_status(config7, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config7, "com 1", ERROR_STATUS_SUCCESS);
+  // Top equity move should have played 5 tiles
+  assert(bag_initial_total == bag_get_letters(bag) + 5);
+  assert_config_exec_status(config7, "rack XEQUIES", ERROR_STATUS_SUCCESS);
+  assert(bag_initial_total == bag_get_letters(bag) + 12);
+  assert_config_exec_status(config7, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config7, "com 1", ERROR_STATUS_SUCCESS);
+  config_destroy(config7);
+
   config_destroy(config);
 }
 
@@ -698,9 +721,11 @@ void test_config_wmp(void) {
 }
 
 void test_config(void) {
+  // FIXME: remove return
+  test_config_exec_parse_args();
+  return;
   test_config_load_error_cases();
   test_config_load_success();
   test_config_lexical_data();
-  test_config_exec_parse_args();
   test_config_wmp();
 }

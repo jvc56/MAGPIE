@@ -74,7 +74,7 @@ void validate_coordinates(const Board *board, Move *move,
           error_stack_push(
               error_stack,
               ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION,
-              get_formatted_string("failed to parse move coordinates: %s",
+              get_formatted_string("failed to parse move coordinates '%s'",
                                    coords_string));
           return;
         }
@@ -91,7 +91,7 @@ void validate_coordinates(const Board *board, Move *move,
           error_stack_push(
               error_stack,
               ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION,
-              get_formatted_string("failed to parse move coordinates: %s",
+              get_formatted_string("failed to parse move coordinates: '%s'",
                                    coords_string));
           return;
         }
@@ -102,7 +102,7 @@ void validate_coordinates(const Board *board, Move *move,
       error_stack_push(
           error_stack,
           ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION,
-          get_formatted_string("failed to parse move coordinates: %s",
+          get_formatted_string("failed to parse move coordinates: '%s'",
                                coords_string));
       return;
     }
@@ -115,7 +115,7 @@ void validate_coordinates(const Board *board, Move *move,
     error_stack_push(
         error_stack,
         ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION,
-        get_formatted_string("failed to parse move coordinates: %s",
+        get_formatted_string("failed to parse move coordinates: '%s'",
                              coords_string));
     return;
   }
@@ -545,7 +545,8 @@ void validate_split_move(const StringSplitter *split_move, const Game *game,
 void validate_move(ValidatedMove *vm, const Game *game, int player_index,
                    const char *ucgi_move_string, bool allow_unknown_exchanges,
                    bool allow_playthrough, ErrorStack *error_stack) {
-  StringSplitter *split_move = split_string(ucgi_move_string, '.', false);
+  StringSplitter *split_move =
+      split_string(ucgi_move_string, UCGI_DELIMITER, false);
   Rack *tiles_played_rack = rack_create(ld_get_size(game_get_ld(game)));
   validate_split_move(split_move, game, vm, player_index, tiles_played_rack,
                       allow_unknown_exchanges, allow_playthrough, error_stack);
@@ -743,7 +744,9 @@ bool validated_moves_get_challenge_turn_loss(const ValidatedMoves *vms, int i) {
 }
 
 // Adds moves in vms to ml that do not already exist in ml
-void validated_moves_add_to_move_list(const ValidatedMoves *vms, MoveList *ml) {
+// Assumes the movelist is sorted
+void validated_moves_add_to_sorted_move_list(const ValidatedMoves *vms,
+                                             MoveList *ml) {
   Move **moves = (Move **)malloc_or_die(sizeof(Move *) * vms->number_of_moves);
   int number_of_new_moves = 0;
   for (int i = 0; i < vms->number_of_moves; i++) {
@@ -759,10 +762,8 @@ void validated_moves_add_to_move_list(const ValidatedMoves *vms, MoveList *ml) {
     move_list_resize(ml, new_capacity);
   }
 
-  for (int i = 0; i < number_of_new_moves; i++) {
-    Move *spare_move = move_list_get_spare_move(ml);
-    move_copy(spare_move, moves[i]);
-    move_list_insert_spare_move(ml, move_get_equity(spare_move));
+  for (int j = 0; j < number_of_new_moves; j++) {
+    move_list_add_move_to_sorted_list(ml, moves[j]);
   }
 
   free(moves);
