@@ -1654,6 +1654,12 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
     return;
   }
 
+  game_history_next(config->game_history, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   game_event_set_player_index(game_event, player_on_turn_index);
   game_event_set_type(game_event, GAME_EVENT_TILE_PLACEMENT_MOVE);
   game_event_set_cumulative_score(
@@ -1664,7 +1670,6 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
       game_event, string_builder_dump(move_string_builder, NULL));
   game_event_set_move_score(game_event, move_get_score(&move));
   rack_copy(game_event_get_rack(game_event), player_rack);
-  // FIXME: set vms, maybe
 
   game_play_n_events(config->game_history, config->game,
                      game_history_get_num_events(config->game_history), true,

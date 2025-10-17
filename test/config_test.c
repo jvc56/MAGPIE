@@ -721,11 +721,9 @@ void test_config_wmp(void) {
 }
 
 void test_config(void) {
-  // FIXME: remove return
-  test_config_exec_parse_args();
-  return;
   test_config_load_error_cases();
   test_config_load_success();
+  test_config_exec_parse_args();
   test_config_lexical_data();
   test_config_wmp();
 }
