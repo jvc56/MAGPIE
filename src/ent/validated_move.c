@@ -794,3 +794,21 @@ void validated_moves_set_rack_to_played_letters(const ValidatedMoves *vms,
     }
   }
 }
+
+// Returns true if the specified validated move contains
+// a phony for the main word and any of the formed words.
+bool validated_moves_is_phony(const ValidatedMoves *vms, int vm_index) {
+  const Move *move = validated_moves_get_move(vms, vm_index);
+  game_event_t move_type = move_get_type(move);
+  if (move_type != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return false;
+  }
+  const FormedWords *fw = validated_moves_get_formed_words(vms, vm_index);
+  int number_of_words = formed_words_get_num_words(fw);
+  for (int i = 0; i < number_of_words; i++) {
+    if (!formed_words_get_word_valid(fw, i)) {
+      return true;
+    }
+  }
+  return false;
+}

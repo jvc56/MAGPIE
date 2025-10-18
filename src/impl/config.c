@@ -33,6 +33,7 @@
 #include "../str/game_string.h"
 #include "../str/move_string.h"
 #include "../str/rack_string.h"
+#include "../str/validated_moves_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "autoplay.h"
@@ -71,6 +72,7 @@ typedef enum {
   ARG_TOKEN_CREATE_DATA,
   ARG_TOKEN_DATA_PATH,
   ARG_TOKEN_BINGO_BONUS,
+  ARG_TOKEN_CHALLENGE_BONUS,
   ARG_TOKEN_BOARD_LAYOUT,
   ARG_TOKEN_GAME_VARIANT,
   ARG_TOKEN_LETTER_DISTRIBUTION,
@@ -115,6 +117,7 @@ typedef enum {
   ARG_TOKEN_LOAD,
   ARG_TOKEN_NEW_GAME,
   ARG_TOKEN_COMMIT,
+  ARG_TOKEN_CHALLENGE,
   ARG_TOKEN_SHOW,
   ARG_TOKEN_NEXT,
   ARG_TOKEN_PREVIOUS,
@@ -155,6 +158,7 @@ struct Config {
   bool ld_changed;
   exec_mode_t exec_mode;
   int bingo_bonus;
+  int challenge_bonus;
   int num_plays;
   int num_small_plays;
   int plies;
@@ -1468,10 +1472,6 @@ char *impl_load_gcg(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
-  execute_show(config, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return empty_string();
-  }
   return get_formatted_string(
       "Successfully loaded game: %s vs %s (%d events)\n",
       game_history_player_get_name(config->game_history, 0),
@@ -1483,6 +1483,7 @@ void execute_load_gcg(Config *config, ErrorStack *error_stack) {
   char *result = impl_load_gcg(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
+    execute_show(config, error_stack);
   }
   free(result);
 }
@@ -1540,10 +1541,6 @@ char *impl_new_game(Config *config, ErrorStack *error_stack) {
     game_history_player_reset(config->game_history, player_index, player_name,
                               player_name);
   }
-  execute_show(config, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return empty_string();
-  }
   return empty_string();
 }
 
@@ -1551,6 +1548,7 @@ void execute_new_game(Config *config, ErrorStack *error_stack) {
   char *result = impl_new_game(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
+    execute_show(config, error_stack);
   }
   free(result);
 }
@@ -1560,6 +1558,81 @@ char *str_api_new_game(Config *config, ErrorStack *error_stack) {
 }
 
 // Commit move
+
+void config_add_game_event_to_history(Config *config,
+                                      const int player_on_turn_index,
+                                      game_event_t game_event_type,
+                                      const Move *move, char *ucgi_move_string,
+                                      const Rack *player_rack,
+                                      const Equity score_adjustment,
+                                      ErrorStack *error_stack) {
+
+  GameEvent *game_event =
+      game_history_add_game_event(config->game_history, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  game_history_next(config->game_history, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  game_event_set_player_index(game_event, player_on_turn_index);
+  game_event_set_type(game_event, game_event_type);
+  game_event_set_cgp_move_string(game_event, ucgi_move_string);
+  game_event_set_score_adjustment(game_event, score_adjustment);
+
+  Equity cumulative_score = EQUITY_INITIAL_VALUE;
+  Equity move_score = EQUITY_INITIAL_VALUE;
+  switch (game_event_type) {
+  case GAME_EVENT_TILE_PLACEMENT_MOVE:
+  case GAME_EVENT_EXCHANGE:
+  case GAME_EVENT_PASS:
+    rack_copy(game_event_get_rack(game_event), player_rack);
+    cumulative_score =
+        player_get_score(game_get_player(config->game, player_on_turn_index)) +
+        move_get_score(move);
+    move_score = move_get_score(move);
+    break;
+  case GAME_EVENT_PHONY_TILES_RETURNED:;
+    GameEvent *previous_game_event = game_history_get_event(
+        config->game_history,
+        game_history_get_num_played_events(config->game_history) - 2);
+    rack_copy(game_event_get_rack(game_event),
+              game_event_get_const_rack(previous_game_event));
+    cumulative_score =
+        player_get_score(game_get_player(config->game, player_on_turn_index)) -
+        game_event_get_move_score(previous_game_event);
+    move_score = 0;
+    break;
+  case GAME_EVENT_CHALLENGE_BONUS:
+    cumulative_score =
+        player_get_score(game_get_player(config->game, player_on_turn_index)) +
+        score_adjustment;
+    move_score = 0;
+    break;
+  case GAME_EVENT_END_RACK_POINTS:
+    break;
+  case GAME_EVENT_TIME_PENALTY:
+    break;
+  case GAME_EVENT_END_RACK_PENALTY:
+    break;
+  case GAME_EVENT_UNKNOWN:
+    log_fatal("got unknown game event type when adding event to game history "
+              "in the config\n");
+    break;
+  }
+
+  game_event_set_cumulative_score(game_event, cumulative_score);
+  game_event_set_move_score(game_event, move_score);
+
+  game_play_n_events(config->game_history, config->game,
+                     game_history_get_num_events(config->game_history), true,
+                     error_stack);
+}
 
 void parse_commit(Config *config, StringBuilder *move_string_builder,
                   ValidatedMoves **vms, ErrorStack *error_stack) {
@@ -1647,33 +1720,10 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
 
   game_history_truncate_to_played_events(config->game_history);
 
-  GameEvent *game_event =
-      game_history_add_game_event(config->game_history, error_stack);
-
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
-  game_history_next(config->game_history, error_stack);
-
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
-  game_event_set_player_index(game_event, player_on_turn_index);
-  game_event_set_type(game_event, GAME_EVENT_TILE_PLACEMENT_MOVE);
-  game_event_set_cumulative_score(
-      game_event,
-      player_get_score(game_get_player(config->game, player_on_turn_index)) +
-          move_get_score(&move));
-  game_event_set_cgp_move_string(
-      game_event, string_builder_dump(move_string_builder, NULL));
-  game_event_set_move_score(game_event, move_get_score(&move));
-  rack_copy(game_event_get_rack(game_event), player_rack);
-
-  game_play_n_events(config->game_history, config->game,
-                     game_history_get_num_events(config->game_history), true,
-                     error_stack);
+  config_add_game_event_to_history(
+      config, player_on_turn_index, GAME_EVENT_TILE_PLACEMENT_MOVE, &move,
+      string_builder_dump(move_string_builder, NULL), player_rack, 0,
+      error_stack);
 }
 
 char *impl_commit(Config *config, ErrorStack *error_stack) {
@@ -1699,11 +1749,6 @@ char *impl_commit(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
 
-  execute_show(config, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return empty_string();
-  }
-
   return empty_string();
 }
 
@@ -1711,12 +1756,86 @@ void execute_commit(Config *config, ErrorStack *error_stack) {
   char *result = impl_commit(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
+    execute_show(config, error_stack);
   }
   free(result);
 }
 
 char *str_api_commit(Config *config, ErrorStack *error_stack) {
   return impl_commit(config, error_stack);
+}
+
+// Challenge
+
+char *impl_challenge(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate(
+            "cannot challenge without letter distribution and lexicon"));
+    return empty_string();
+  }
+
+  config_init_game(config);
+
+  const int num_events = game_history_get_num_events(config->game_history);
+  const int num_played_events =
+      game_history_get_num_played_events(config->game_history);
+  const GameEvent *previously_played_event =
+      game_history_get_event(config->game_history, num_played_events - 1);
+  if (num_events == 0 || num_played_events == 0 ||
+      game_event_get_type(previously_played_event) !=
+          GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CHALLENGE_NO_PREVIOUS_TILE_PLACEMENT_MOVE,
+        string_duplicate(
+            "cannot challenge without a previous tile placement move"));
+    return empty_string();
+  }
+
+  ValidatedMoves *vms = game_event_get_vms(previously_played_event);
+  const int player_on_turn_index = game_get_player_on_turn_index(config->game);
+  if (validated_moves_is_phony(vms, 0)) {
+    game_history_truncate_to_played_events(config->game_history);
+    config_add_game_event_to_history(config, 1 - player_on_turn_index,
+                                     GAME_EVENT_PHONY_TILES_RETURNED, NULL,
+                                     NULL, NULL, 0, error_stack);
+  } else {
+    int challenge_bonus_int = config->challenge_bonus;
+    const char *challenge_bonus_str =
+        config_get_parg_value(config, ARG_TOKEN_CHALLENGE, 0);
+    if (challenge_bonus_str) {
+      string_to_int_or_push_error(
+          "challenge bonus", challenge_bonus_str, 0, INT_MAX,
+          ERROR_STATUS_CGP_PARSE_MALFORMED_CGP_OPCODE_CHALLENGE_BONUS,
+          &challenge_bonus_int, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return empty_string();
+      }
+    }
+    config_add_game_event_to_history(
+        config, 1 - player_on_turn_index, GAME_EVENT_CHALLENGE_BONUS, NULL,
+        NULL, NULL, int_to_equity(challenge_bonus_int), error_stack);
+  }
+
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+
+  return empty_string();
+}
+
+void execute_challenge(Config *config, ErrorStack *error_stack) {
+  char *result = impl_challenge(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+    execute_show(config, error_stack);
+  }
+  free(result);
+}
+
+char *str_api_challenge(Config *config, ErrorStack *error_stack) {
+  return impl_challenge(config, error_stack);
 }
 
 // Game navigation helper and command
@@ -1733,10 +1852,6 @@ char *impl_next(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
-  execute_show(config, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return empty_string();
-  }
   return empty_string();
 }
 
@@ -1744,6 +1859,7 @@ void execute_next(Config *config, ErrorStack *error_stack) {
   char *result = impl_next(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
+    execute_show(config, error_stack);
   }
   free(result);
 }
@@ -1765,10 +1881,6 @@ char *impl_previous(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
-  execute_show(config, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return empty_string();
-  }
   return empty_string();
 }
 
@@ -1776,6 +1888,7 @@ void execute_previous(Config *config, ErrorStack *error_stack) {
   char *result = impl_previous(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
+    execute_show(config, error_stack);
   }
   free(result);
 }
@@ -1806,10 +1919,6 @@ char *impl_goto(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
-  execute_show(config, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return empty_string();
-  }
   return empty_string();
 }
 
@@ -1817,6 +1926,7 @@ void execute_goto(Config *config, ErrorStack *error_stack) {
   char *result = impl_goto(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
+    execute_show(config, error_stack);
   }
   free(result);
 }
@@ -2381,6 +2491,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
 
   config_load_int(config, ARG_TOKEN_BINGO_BONUS, INT_MIN, INT_MAX,
                   &config->bingo_bonus, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_int(config, ARG_TOKEN_CHALLENGE_BONUS, 0, INT_MAX,
+                  &config->challenge_bonus, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -3040,6 +3156,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   cmd(ARG_TOKEN_LOAD, "load", 1, 1, load_gcg, generic);
   cmd(ARG_TOKEN_NEW_GAME, "newgame", 0, 2, new_game, generic);
   cmd(ARG_TOKEN_COMMIT, "commit", 1, 2, commit, generic);
+  cmd(ARG_TOKEN_CHALLENGE, "challenge", 0, 1, challenge, generic);
   cmd(ARG_TOKEN_SHOW, "show", 0, 0, show, generic);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic);
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic);
@@ -3057,6 +3174,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
 
   arg(ARG_TOKEN_DATA_PATH, "path", 1, 1);
   arg(ARG_TOKEN_BINGO_BONUS, "bb", 1, 1);
+  arg(ARG_TOKEN_CHALLENGE_BONUS, "cb", 1, 1);
   arg(ARG_TOKEN_BOARD_LAYOUT, "bdn", 1, 1);
   arg(ARG_TOKEN_GAME_VARIANT, "var", 1, 1);
   arg(ARG_TOKEN_LETTER_DISTRIBUTION, "ld", 1, 1);
@@ -3114,6 +3232,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->ld_changed = false;
   config->exec_mode = EXEC_MODE_CONSOLE;
   config->bingo_bonus = DEFAULT_BINGO_BONUS;
+  config->challenge_bonus = DEFAULT_CHALLENGE_BONUS;
   config->num_plays = DEFAULT_MOVE_LIST_CAPACITY;
   config->num_small_plays = DEFAULT_SMALL_MOVE_LIST_CAPACITY;
   config->plies = 2;

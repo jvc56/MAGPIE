@@ -561,27 +561,6 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(config6, "previous", ERROR_STATUS_SUCCESS);
   config_destroy(config6);
 
-  // Commit and challenge
-  Config *config7 = config_create_default_test();
-  assert_config_exec_status(config7, "set -lex CSW24", ERROR_STATUS_SUCCESS);
-  // Show the game to trigger game initialization
-  assert_config_exec_status(config7, "sh", ERROR_STATUS_SUCCESS);
-  Bag *bag = game_get_bag(config_get_game(config7));
-  const int bag_initial_total = bag_get_letters(bag);
-  assert_config_exec_status(config7, "rack ABC", ERROR_STATUS_SUCCESS);
-  assert(bag_initial_total == bag_get_letters(bag) + 3);
-  assert_config_exec_status(config7, "rack ABCDEFG", ERROR_STATUS_SUCCESS);
-  assert(bag_initial_total == bag_get_letters(bag) + 7);
-  assert_config_exec_status(config7, "gen", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config7, "com 1", ERROR_STATUS_SUCCESS);
-  // Top equity move should have played 5 tiles
-  assert(bag_initial_total == bag_get_letters(bag) + 5);
-  assert_config_exec_status(config7, "rack XEQUIES", ERROR_STATUS_SUCCESS);
-  assert(bag_initial_total == bag_get_letters(bag) + 12);
-  assert_config_exec_status(config7, "gen", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config7, "com 1", ERROR_STATUS_SUCCESS);
-  config_destroy(config7);
-
   config_destroy(config);
 }
 
@@ -720,7 +699,71 @@ void test_config_wmp(void) {
   error_stack_destroy(error_stack);
 }
 
+void test_config_anno(void) {
+  // Commit and challenge
+  Config *config = config_create_default_test();
+
+  assert_config_exec_status(config, "set -lex CSW24", ERROR_STATUS_SUCCESS);
+  // Show the game to trigger game initialization
+  assert_config_exec_status(config, "sh", ERROR_STATUS_SUCCESS);
+  Game *game = config_get_game(config);
+  Bag *bag = game_get_bag(game);
+  const int bag_initial_total = bag_get_letters(bag);
+  assert_config_exec_status(config, "rack ABC", ERROR_STATUS_SUCCESS);
+  assert(bag_initial_total == bag_get_letters(bag) + 3);
+  assert_config_exec_status(config, "rack ABCDEFG", ERROR_STATUS_SUCCESS);
+  assert(bag_initial_total == bag_get_letters(bag) + 7);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 1);
+  // Top equity move should have played 5 tiles
+  assert(bag_initial_total == bag_get_letters(bag) + 5);
+
+  assert_config_exec_status(config, "rack XEQUIES", ERROR_STATUS_SUCCESS);
+  assert(bag_initial_total == bag_get_letters(bag) + 12);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(28));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(125));
+
+  assert_config_exec_status(config, "chal", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(28));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
+
+  assert_config_exec_status(config, "rack JANIZAR", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 1);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(153));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
+
+  assert_config_exec_status(config, "chal 7", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 1);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
+
+  assert_config_exec_status(config, "rack DISLINK", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com i9 IDS", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(159));
+
+  assert_config_exec_status(config, "chal", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
+
+  // FIXME: fully test all commit cases
+  // FIXME: check that challenge bonuses mid-game work
+
+  config_destroy(config);
+}
+
 void test_config(void) {
+  test_config_anno();
   test_config_load_error_cases();
   test_config_load_success();
   test_config_exec_parse_args();
