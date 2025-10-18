@@ -88,9 +88,9 @@ void string_builder_add_space_padded_string(StringBuilder *string_builder,
                                             size_t total_length) {
   // string is a format string potentially containing escape sequences, but must
   // have no arguments.
-  string_builder_add_string(string_builder, string);
   char *formatted_string = get_formatted_string(string);
   const size_t printed_length = strlen(formatted_string);
+  string_builder_add_string(string_builder, formatted_string);
   const size_t number_of_spaces =
       total_length > printed_length ? total_length - printed_length : 0;
   string_builder_add_spaces(string_builder, (int)number_of_spaces);
