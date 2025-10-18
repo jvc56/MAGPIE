@@ -169,12 +169,8 @@ struct GameHistory {
   GameEvent *events;
 };
 
-GameHistoryPlayer *game_history_player_create(const char *name,
-                                              const char *nickname) {
-  GameHistoryPlayer *player = malloc_or_die(sizeof(GameHistoryPlayer));
-  player->name = string_duplicate(name);
-  player->nickname = string_duplicate(nickname);
-  return player;
+GameHistoryPlayer *game_history_player_create(void) {
+  return calloc_or_die(1, sizeof(GameHistoryPlayer));
 }
 
 void game_history_player_destroy(GameHistoryPlayer *player) {
@@ -219,11 +215,6 @@ const Rack *
 game_history_player_get_last_rack_const(const GameHistory *game_history,
                                         int player_index) {
   return &game_history->players[player_index]->last_rack;
-}
-
-bool game_history_player_is_set(const GameHistory *game_history,
-                                int player_index) {
-  return game_history->players[player_index];
 }
 
 bool game_history_both_players_are_set(const GameHistory *game_history) {
@@ -305,12 +296,29 @@ const char *game_history_get_board_layout_name(const GameHistory *history) {
   return history->board_layout_name;
 }
 
-void game_history_set_player(GameHistory *history, int player_index,
-                             const char *player_name,
-                             const char *player_nickname) {
-  history->players[player_index] =
-      game_history_player_create(player_name, player_nickname);
-  memset(&history->players[player_index]->last_rack, 0, sizeof(Rack));
+void game_history_player_reset(GameHistory *history, int player_index,
+                               const char *name, const char *nickname) {
+  GameHistoryPlayer *player = history->players[player_index];
+  if (player_index != 0 && player_index != 1) {
+    log_fatal(
+        "attempted to created game history player with invalid index '%d'",
+        player_index);
+  }
+  free(player->name);
+  if (name) {
+    player->name = string_duplicate(name);
+  } else {
+    player->name = get_formatted_string("Player %d", player_index);
+  }
+  // Nicknames must not have any whitespace, otherwise the GCG output will be
+  // invalid
+  free(player->nickname);
+  if (nickname) {
+    player->nickname = string_duplicate(nickname);
+  } else {
+    player->nickname = get_formatted_string("Player_%d", player_index);
+  }
+  memset(&player->last_rack, 0, sizeof(Rack));
 }
 
 int game_history_get_num_events(const GameHistory *history) {
@@ -341,8 +349,7 @@ void game_history_reset(GameHistory *game_history) {
   free(game_history->board_layout_name);
   game_history->board_layout_name = board_layout_get_default_name();
   for (int i = 0; i < 2; i++) {
-    game_history_player_destroy(game_history->players[i]);
-    game_history->players[i] = NULL;
+    game_history_player_reset(game_history, i, NULL, NULL);
   }
   game_history->game_variant = GAME_VARIANT_CLASSIC;
   game_history->num_events = 0;
@@ -352,6 +359,8 @@ void game_history_reset(GameHistory *game_history) {
 GameHistory *game_history_create(void) {
   GameHistory *game_history = calloc_or_die(sizeof(GameHistory), 1);
   game_history->events = calloc_or_die(sizeof(GameEvent), (MAX_GAME_EVENTS));
+  game_history->players[0] = game_history_player_create();
+  game_history->players[1] = game_history_player_create();
   game_history_reset(game_history);
   return game_history;
 }
@@ -389,6 +398,10 @@ GameEvent *game_history_add_game_event(GameHistory *game_history,
   GameEvent *game_event = &game_history->events[game_history->num_events++];
   game_event_reset(game_event);
   return game_event;
+}
+
+void game_history_truncate_to_played_events(GameHistory *game_history) {
+  game_history->num_events = game_history->num_played_events;
 }
 
 int game_history_next(GameHistory *game_history, ErrorStack *error_stack) {

@@ -84,6 +84,8 @@ GameEvent *game_history_get_event(const GameHistory *history, int event_index);
 GameEvent *game_history_add_game_event(GameHistory *game_history,
                                        ErrorStack *error_stack);
 
+void game_history_truncate_to_played_events(GameHistory *game_history);
+
 void game_history_player_set_name(GameHistory *game_history, int player_index,
                                   const char *name);
 const char *game_history_player_get_name(const GameHistory *game_history,
@@ -98,11 +100,9 @@ Rack *game_history_player_get_last_rack(GameHistory *game_history,
 const Rack *
 game_history_player_get_last_rack_const(const GameHistory *game_history,
                                         int player_index);
-void game_history_set_player(GameHistory *history, int player_index,
-                             const char *player_name,
-                             const char *player_nickname);
-bool game_history_player_is_set(const GameHistory *game_history,
-                                int player_index);
+void game_history_player_reset(GameHistory *history, int player_index,
+                               const char *player_name,
+                               const char *player_nickname);
 bool game_history_both_players_are_set(const GameHistory *game_history);
 int game_history_get_most_recent_move_event_index(
     const GameHistory *game_history);
