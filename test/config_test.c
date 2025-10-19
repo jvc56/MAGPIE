@@ -780,7 +780,172 @@ void test_config_anno(void) {
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(274));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
 
-  // FIXME: check that challenge bonuses mid-game work
+  // Test game nav with challenge bonuses
+
+  // Test next
+  assert_config_exec_status(config, "goto 0", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(0));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
+
+  assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 1);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(28));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
+
+  // The next command should play the turn and the challenge bonus
+  assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(28));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
+
+  // The next command should play the turn and the challenge bonus
+  assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 1);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
+
+  // The next command should play the turn but not the phony tiles returned
+  // event
+  assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(159));
+
+  // The next command should play the phony tiles returned event
+  assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
+
+  assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 1);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(274));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
+
+  // Test previous
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
+
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(159));
+
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 1);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
+
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(28));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
+
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 1);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(28));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
+
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(0));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
+
+  assert_config_exec_status(config, "prev",
+                            ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(0));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
+
+  // Test that goto correctly goes to the challenge bonus
+  // Both goto 2 and goto 3 should go to the same challenge bonus
+  assert_config_exec_status(config, "goto 2", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(28));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
+
+  assert_config_exec_status(config, "goto 3", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(28));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
+
+  // Both goto 4 and goto 5 should go to the same challenge bonus
+  assert_config_exec_status(config, "goto 4", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 1);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
+
+  assert_config_exec_status(config, "goto 5", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 1);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
+
+  // goto the IDS play before it was challenged off
+  assert_config_exec_status(config, "goto 6", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(159));
+
+  // goto the IDS play after it was challenged off
+  assert_config_exec_status(config, "goto 7", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
+
+  // Remove the challenge on EXEQUIES
+  assert_config_exec_status(config, "goto 3", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "unchal", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(28));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(125));
+
+  assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 1);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(125));
+
+  assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(154));
+
+  // Now that a challenge has been removed, the game event indexes
+  // shift down by 1 and goto 3 is now the next play.
+  assert_config_exec_status(config, "goto 3", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 1);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(125));
+
+  assert_config_exec_status(config, "goto 4", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 1);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(125));
+
+  assert_config_exec_status(config, "unchal", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 1);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(153));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(125));
+
+  // Now that another challenge has been removed, the game event indexes
+  // shift down by 1 and goto 3 is now the next play.
+  assert_config_exec_status(config, "goto 3", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 1);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(153));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(125));
+
+  assert_config_exec_status(config, "goto EnD", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(267));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(125));
+
+  assert_config_exec_status(config, "next",
+                            ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE);
+  assert_config_exec_status(config, "goto StARt", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev",
+                            ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE);
 
   config_destroy(config);
 }

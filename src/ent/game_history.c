@@ -514,8 +514,8 @@ void game_history_insert_challenge_bonus_game_event(
 
   // Update the cumulative score for every event after the inserted challenge
   // bonus
-  for (int i = game_history->num_played_events; i < game_history->num_events;
-       i++) {
+  for (int i = game_history->num_played_events + 1;
+       i < game_history->num_events; i++) {
     GameEvent *game_event_i = &game_history->events[i];
     if (game_event_get_player_index(game_event_i) == player_index) {
       game_event_set_cumulative_score(
@@ -529,25 +529,29 @@ void game_history_insert_challenge_bonus_game_event(
 //  - there are a nonzero number of events and played events
 //  - the most recent played event is a challenge bonus
 void game_history_remove_challenge_bonus_game_event(GameHistory *game_history) {
-  const GameEvent *challenge_bonus_event =
-      game_history_get_event(game_history, game_history->num_played_events - 1);
-
+  const int challenge_bonus_event_index = game_history->num_played_events - 1;
+  GameEvent *challenge_bonus_event =
+      game_history_get_event(game_history, challenge_bonus_event_index);
   const int player_index = game_event_get_player_index(challenge_bonus_event);
   const Equity score_adjustment =
       game_event_get_score_adjustment(challenge_bonus_event);
 
+  GameEvent tmp_game_event;
+  memcpy(&tmp_game_event, challenge_bonus_event, sizeof(GameEvent));
   // Shift the game events over by one to subtract the challenge bonus event
-  for (int i = game_history->num_events - 1;
-       i >= game_history->num_played_events; i--) {
+  for (int i = challenge_bonus_event_index; i < game_history->num_events - 1;
+       i++) {
     GameEvent *game_event = &game_history->events[i];
     if (game_event_get_player_index(game_event) == player_index) {
       game_event_set_cumulative_score(
           game_event,
           game_event_get_cumulative_score(game_event) - score_adjustment);
     }
-    memcpy(&game_history->events[i - 1], game_event, sizeof(GameEvent));
+    memcpy(game_event, &game_history->events[i + 1], sizeof(GameEvent));
   }
 
+  memcpy(&game_history->events[game_history->num_events - 1], &tmp_game_event,
+         sizeof(GameEvent));
+
   game_history->num_events--;
-  game_history->num_played_events--;
 }

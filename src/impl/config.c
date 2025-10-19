@@ -1595,7 +1595,7 @@ void config_add_game_event_to_history(Config *config,
   case GAME_EVENT_PHONY_TILES_RETURNED:;
     GameEvent *previous_game_event = game_history_get_event(
         config->game_history,
-        game_history_get_num_played_events(config->game_history) - 2);
+        game_history_get_num_played_events(config->game_history) - 1);
     rack_copy(game_event_get_rack(game_event),
               game_event_get_const_rack(previous_game_event));
     cumulative_score =
@@ -1889,8 +1889,7 @@ char *impl_unchallenge(Config *config, ErrorStack *error_stack) {
                          "move after the phony play"));
     return empty_string();
   }
-  if (game_event_get_type(prev_played_event) !=
-      GAME_EVENT_TILE_PLACEMENT_MOVE) {
+  if (game_event_get_type(prev_played_event) != GAME_EVENT_CHALLENGE_BONUS) {
     error_stack_push(error_stack,
                      ERROR_STATUS_CHALLENGE_NO_PREVIOUS_CHALLENGE_BONUS,
                      string_duplicate("no previous challenge bonus to remove"));
@@ -1993,10 +1992,16 @@ char *impl_goto(Config *config, ErrorStack *error_stack) {
 
   const char *num_events_to_play_str =
       config_get_parg_value(config, ARG_TOKEN_GOTO, 0);
-  const int num_events_to_play =
-      string_to_int(num_events_to_play_str, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return empty_string();
+  int num_events_to_play;
+  if (strings_iequal(num_events_to_play_str, "end")) {
+    num_events_to_play = game_history_get_num_events(config->game_history);
+  } else if (strings_iequal(num_events_to_play_str, "start")) {
+    num_events_to_play = 0;
+  } else {
+    num_events_to_play = string_to_int(num_events_to_play_str, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return empty_string();
+    }
   }
 
   config_init_game(config);
@@ -3243,7 +3248,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   cmd(ARG_TOKEN_NEW_GAME, "newgame", 0, 2, new_game, generic);
   cmd(ARG_TOKEN_COMMIT, "commit", 1, 2, commit, generic);
   cmd(ARG_TOKEN_CHALLENGE, "challenge", 0, 1, challenge, generic);
-  cmd(ARG_TOKEN_UNCHALLENGE, "unchallenge", 0, 1, challenge, generic);
+  cmd(ARG_TOKEN_UNCHALLENGE, "unchallenge", 0, 1, unchallenge, generic);
   cmd(ARG_TOKEN_SHOW, "show", 0, 0, show, generic);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic);
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic);
