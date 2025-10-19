@@ -1025,13 +1025,14 @@ void game_previous(GameHistory *game_history, Game *game,
                      error_stack);
 }
 
-void game_goto(GameHistory *game_history, Game *game, int num_events_to_play,
-               ErrorStack *error_stack) {
-  game_history_goto(game_history, num_events_to_play, error_stack);
+void game_goto(GameHistory *game_history, Game *game,
+               const int num_events_to_play, ErrorStack *error_stack) {
+  const int updated_num_events_to_play =
+      game_history_goto(game_history, num_events_to_play, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  game_play_n_events(game_history, game, num_events_to_play, false,
+  game_play_n_events(game_history, game, updated_num_events_to_play, false,
                      error_stack);
 }
 

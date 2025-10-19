@@ -386,20 +386,6 @@ void game_history_destroy(GameHistory *game_history) {
   free(game_history);
 }
 
-GameEvent *game_history_add_game_event(GameHistory *game_history,
-                                       ErrorStack *error_stack) {
-  if (game_history->num_events == MAX_GAME_EVENTS) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_GCG_PARSE_GAME_EVENT_OVERFLOW,
-        get_formatted_string("exceeded the maximum number of game events: %d",
-                             MAX_GAME_EVENTS));
-    return NULL;
-  }
-  GameEvent *game_event = &game_history->events[game_history->num_events++];
-  game_event_reset(game_event);
-  return game_event;
-}
-
 void game_history_truncate_to_played_events(GameHistory *game_history) {
   game_history->num_events = game_history->num_played_events;
 }
@@ -413,6 +399,14 @@ int game_history_next(GameHistory *game_history, ErrorStack *error_stack) {
     return -1;
   }
   game_history->num_played_events++;
+
+  if (game_history->num_played_events < game_history->num_events &&
+      game_event_get_type(
+          &game_history->events[game_history->num_played_events]) ==
+          GAME_EVENT_CHALLENGE_BONUS) {
+    game_history->num_played_events++;
+  }
+
   return game_history->num_played_events;
 }
 
@@ -424,7 +418,13 @@ int game_history_previous(GameHistory *game_history, ErrorStack *error_stack) {
             "already at earliest position; there is no previous position"));
     return -1;
   }
-  game_history->num_played_events--;
+  if (game_event_get_type(
+          &game_history->events[game_history->num_played_events - 1]) ==
+      GAME_EVENT_CHALLENGE_BONUS) {
+    game_history->num_played_events -= 2;
+  } else {
+    game_history->num_played_events -= 1;
+  }
   return game_history->num_played_events;
 }
 
@@ -439,6 +439,16 @@ int game_history_goto(GameHistory *game_history, int num_events_to_play,
     return -1;
   }
   game_history->num_played_events = num_events_to_play;
+  if (game_history->num_played_events == 0) {
+    return 0;
+  }
+
+  if (num_events_to_play < game_history->num_events &&
+      game_event_get_type(&game_history->events[num_events_to_play]) ==
+          GAME_EVENT_CHALLENGE_BONUS) {
+    game_history->num_played_events++;
+  }
+
   return game_history->num_played_events;
 }
 
@@ -453,4 +463,91 @@ int game_history_get_most_recent_move_event_index(
     }
   }
   return -1;
+}
+
+GameEvent *game_history_add_game_event(GameHistory *game_history,
+                                       ErrorStack *error_stack) {
+  if (game_history->num_events == MAX_GAME_EVENTS) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_GCG_PARSE_GAME_EVENT_OVERFLOW,
+        get_formatted_string("exceeded the maximum number of game events: %d",
+                             MAX_GAME_EVENTS));
+    return NULL;
+  }
+  GameEvent *game_event = &game_history->events[game_history->num_events++];
+  game_event_reset(game_event);
+  return game_event;
+}
+
+// Assumes that
+//  - there are a nonzero number of events and played events
+//  - the most recent played event is a tile placement move
+void game_history_insert_challenge_bonus_game_event(
+    GameHistory *game_history, const int player_index,
+    const Equity score_adjustment, ErrorStack *error_stack) {
+  if (game_history->num_events == MAX_GAME_EVENTS) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_GCG_PARSE_GAME_EVENT_OVERFLOW,
+        get_formatted_string("exceeded the maximum number of game events (%d)",
+                             MAX_GAME_EVENTS));
+    return;
+  }
+
+  game_history->num_events++;
+  // Shift the game events over by one to make room for the new game event
+  for (int i = game_history->num_played_events; i < game_history->num_events;
+       i++) {
+    memcpy(&game_history->events[i + 1], &game_history->events[i],
+           sizeof(GameEvent));
+  }
+  const GameEvent *prev_tile_placement_event =
+      game_history_get_event(game_history, game_history->num_played_events - 1);
+  GameEvent *game_event =
+      &game_history->events[game_history->num_played_events];
+  game_event_reset(game_event);
+  game_event_set_player_index(game_event, player_index);
+  game_event_set_type(game_event, GAME_EVENT_CHALLENGE_BONUS);
+  game_event_set_score_adjustment(game_event, score_adjustment);
+  game_event_set_cumulative_score(
+      game_event, game_event_get_cumulative_score(prev_tile_placement_event) +
+                      game_event_get_score_adjustment(game_event));
+
+  // Update the cumulative score for every event after the inserted challenge
+  // bonus
+  for (int i = game_history->num_played_events; i < game_history->num_events;
+       i++) {
+    GameEvent *game_event_i = &game_history->events[i];
+    if (game_event_get_player_index(game_event_i) == player_index) {
+      game_event_set_cumulative_score(
+          game_event_i, game_event_get_cumulative_score(game_event_i) +
+                            game_event_get_score_adjustment(game_event_i));
+    }
+  }
+}
+
+// Assumes that
+//  - there are a nonzero number of events and played events
+//  - the most recent played event is a challenge bonus
+void game_history_remove_challenge_bonus_game_event(GameHistory *game_history) {
+  const GameEvent *challenge_bonus_event =
+      game_history_get_event(game_history, game_history->num_played_events - 1);
+
+  const int player_index = game_event_get_player_index(challenge_bonus_event);
+  const Equity score_adjustment =
+      game_event_get_score_adjustment(challenge_bonus_event);
+
+  // Shift the game events over by one to subtract the challenge bonus event
+  for (int i = game_history->num_events - 1;
+       i >= game_history->num_played_events; i--) {
+    GameEvent *game_event = &game_history->events[i];
+    if (game_event_get_player_index(game_event) == player_index) {
+      game_event_set_cumulative_score(
+          game_event,
+          game_event_get_cumulative_score(game_event) - score_adjustment);
+    }
+    memcpy(&game_history->events[i - 1], game_event, sizeof(GameEvent));
+  }
+
+  game_history->num_events--;
+  game_history->num_played_events--;
 }

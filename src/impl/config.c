@@ -118,6 +118,7 @@ typedef enum {
   ARG_TOKEN_NEW_GAME,
   ARG_TOKEN_COMMIT,
   ARG_TOKEN_CHALLENGE,
+  ARG_TOKEN_UNCHALLENGE,
   ARG_TOKEN_SHOW,
   ARG_TOKEN_NEXT,
   ARG_TOKEN_PREVIOUS,
@@ -1574,12 +1575,6 @@ void config_add_game_event_to_history(Config *config,
     return;
   }
 
-  game_history_next(config->game_history, error_stack);
-
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
   game_event_set_player_index(game_event, player_on_turn_index);
   game_event_set_type(game_event, game_event_type);
   game_event_set_cgp_move_string(game_event, ucgi_move_string);
@@ -1629,9 +1624,15 @@ void config_add_game_event_to_history(Config *config,
   game_event_set_cumulative_score(game_event, cumulative_score);
   game_event_set_move_score(game_event, move_score);
 
+  game_history_next(config->game_history, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   game_play_n_events(config->game_history, config->game,
-                     game_history_get_num_events(config->game_history), true,
-                     error_stack);
+                     game_history_get_num_played_events(config->game_history),
+                     true, error_stack);
 }
 
 void parse_commit(Config *config, StringBuilder *move_string_builder,
@@ -1646,21 +1647,8 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
   const int player_on_turn_index = game_get_player_on_turn_index(config->game);
   const Rack *player_rack =
       player_get_rack(game_get_player(config->game, player_on_turn_index));
+  game_event_t game_event_type = GAME_EVENT_UNKNOWN;
   if (commit_pos_arg_2) {
-    if (string_length(commit_pos_arg_1) > BOARD_DIM) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_COMMIT_INVALID_POSITION,
-          get_formatted_string("invalid position '%s' in commit command",
-                               commit_pos_arg_1));
-      return;
-    }
-    if (string_length(commit_pos_arg_2) > BOARD_DIM) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_COMMIT_INVALID_TILES_PLAYED,
-          get_formatted_string("invalid played letters '%s' in commit command",
-                               commit_pos_arg_2));
-      return;
-    }
     string_builder_add_formatted_string(move_string_builder, "%s%c%s%c",
                                         commit_pos_arg_1, UCGI_DELIMITER,
                                         commit_pos_arg_2, UCGI_DELIMITER);
@@ -1673,9 +1661,11 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
       return;
     }
     move_copy(&move, validated_moves_get_move(*vms, 0));
+    game_event_type = move_get_type(&move);
   } else if (strings_iequal(commit_pos_arg_1, UCGI_PASS_MOVE)) {
     move_set_as_pass(&move);
     string_builder_add_string(move_string_builder, UCGI_PASS_MOVE);
+    game_event_type = GAME_EVENT_PASS;
   } else if (is_all_digits_or_empty(commit_pos_arg_1)) {
     // If no second arg is provided and the first arg is all digits, the digits
     // represent the static rank of the move to commit.
@@ -1699,6 +1689,7 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
               move_list_get_move(config->move_list, commit_move_static_rank));
     string_builder_add_ucgi_move(move_string_builder, &move,
                                  game_get_board(config->game), config->ld);
+    game_event_type = move_get_type(&move);
   } else {
     string_builder_add_formatted_string(move_string_builder, "%s%c%s%c",
                                         UCGI_EXCHANGE_MOVE, UCGI_DELIMITER,
@@ -1712,6 +1703,7 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
       return;
     }
     move_copy(&move, validated_moves_get_move(*vms, 0));
+    game_event_type = move_get_type(&move);
   }
 
   if (!error_stack_is_empty(error_stack)) {
@@ -1721,7 +1713,7 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
   game_history_truncate_to_played_events(config->game_history);
 
   config_add_game_event_to_history(
-      config, player_on_turn_index, GAME_EVENT_TILE_PLACEMENT_MOVE, &move,
+      config, player_on_turn_index, game_event_type, &move,
       string_builder_dump(move_string_builder, NULL), player_rack, 0,
       error_stack);
 }
@@ -1781,11 +1773,23 @@ char *impl_challenge(Config *config, ErrorStack *error_stack) {
   const int num_events = game_history_get_num_events(config->game_history);
   const int num_played_events =
       game_history_get_num_played_events(config->game_history);
-  const GameEvent *previously_played_event =
+  if (num_events == 0 || num_played_events == 0) {
+    error_stack_push(error_stack, ERROR_STATUS_CHALLENGE_NO_PREVIOUS_MOVE,
+                     string_duplicate("no moves to challenge"));
+    return empty_string();
+  }
+  const GameEvent *prev_played_event =
       game_history_get_event(config->game_history, num_played_events - 1);
-  if (num_events == 0 || num_played_events == 0 ||
-      game_event_get_type(previously_played_event) !=
-          GAME_EVENT_TILE_PLACEMENT_MOVE) {
+  if (game_event_get_type(prev_played_event) == GAME_EVENT_CHALLENGE_BONUS) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CHALLENGE_ALREADY_CHALLENGED,
+        string_duplicate("the previous play already has a challenge bonus, use "
+                         "the 'unchallenge' command to remove the challenge so "
+                         "a new one can be applied"));
+    return empty_string();
+  }
+  if (game_event_get_type(prev_played_event) !=
+      GAME_EVENT_TILE_PLACEMENT_MOVE) {
     error_stack_push(
         error_stack, ERROR_STATUS_CHALLENGE_NO_PREVIOUS_TILE_PLACEMENT_MOVE,
         string_duplicate(
@@ -1793,7 +1797,7 @@ char *impl_challenge(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
 
-  ValidatedMoves *vms = game_event_get_vms(previously_played_event);
+  ValidatedMoves *vms = game_event_get_vms(prev_played_event);
   const int player_on_turn_index = game_get_player_on_turn_index(config->game);
   if (validated_moves_is_phony(vms, 0)) {
     game_history_truncate_to_played_events(config->game_history);
@@ -1813,9 +1817,23 @@ char *impl_challenge(Config *config, ErrorStack *error_stack) {
         return empty_string();
       }
     }
-    config_add_game_event_to_history(
-        config, 1 - player_on_turn_index, GAME_EVENT_CHALLENGE_BONUS, NULL,
-        NULL, NULL, int_to_equity(challenge_bonus_int), error_stack);
+    game_history_insert_challenge_bonus_game_event(
+        config->game_history, 1 - player_on_turn_index,
+        int_to_equity(challenge_bonus_int), error_stack);
+
+    if (!error_stack_is_empty(error_stack)) {
+      return empty_string();
+    }
+
+    game_history_next(config->game_history, error_stack);
+
+    if (!error_stack_is_empty(error_stack)) {
+      return empty_string();
+    }
+
+    game_play_n_events(config->game_history, config->game,
+                       game_history_get_num_played_events(config->game_history),
+                       true, error_stack);
   }
 
   if (!error_stack_is_empty(error_stack)) {
@@ -1836,6 +1854,74 @@ void execute_challenge(Config *config, ErrorStack *error_stack) {
 
 char *str_api_challenge(Config *config, ErrorStack *error_stack) {
   return impl_challenge(config, error_stack);
+}
+
+// Unchallenge (removes challenge bonus)
+
+char *impl_unchallenge(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot remove challenge bonus without "
+                                      "letter distribution and lexicon"));
+    return empty_string();
+  }
+
+  config_init_game(config);
+
+  const int num_events = game_history_get_num_events(config->game_history);
+  const int num_played_events =
+      game_history_get_num_played_events(config->game_history);
+
+  if (num_events == 0 || num_played_events == 0) {
+    error_stack_push(error_stack, ERROR_STATUS_CHALLENGE_NO_PREVIOUS_MOVE,
+                     string_duplicate("no moves to challenge"));
+    return empty_string();
+  }
+  const GameEvent *prev_played_event =
+      game_history_get_event(config->game_history, num_played_events - 1);
+  if (game_event_get_type(prev_played_event) ==
+      GAME_EVENT_PHONY_TILES_RETURNED) {
+    error_stack_push(
+        error_stack,
+        ERROR_STATUS_CHALLENGE_CANNOT_UNCHALLENGE_PHONY_TILES_RETURNED,
+        string_duplicate("only challenge bonuses can be removed, to remove a "
+                         "successful challenge of a phony play, commit another "
+                         "move after the phony play"));
+    return empty_string();
+  }
+  if (game_event_get_type(prev_played_event) !=
+      GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    error_stack_push(error_stack,
+                     ERROR_STATUS_CHALLENGE_NO_PREVIOUS_CHALLENGE_BONUS,
+                     string_duplicate("no previous challenge bonus to remove"));
+    return empty_string();
+  }
+
+  game_history_remove_challenge_bonus_game_event(config->game_history);
+
+  game_history_previous(config->game_history, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+
+  game_play_n_events(config->game_history, config->game,
+                     game_history_get_num_played_events(config->game_history),
+                     true, error_stack);
+  return empty_string();
+}
+
+void execute_unchallenge(Config *config, ErrorStack *error_stack) {
+  char *result = impl_unchallenge(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+    execute_show(config, error_stack);
+  }
+  free(result);
+}
+
+char *str_api_unchallenge(Config *config, ErrorStack *error_stack) {
+  return impl_unchallenge(config, error_stack);
 }
 
 // Game navigation helper and command
@@ -3157,6 +3243,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   cmd(ARG_TOKEN_NEW_GAME, "newgame", 0, 2, new_game, generic);
   cmd(ARG_TOKEN_COMMIT, "commit", 1, 2, commit, generic);
   cmd(ARG_TOKEN_CHALLENGE, "challenge", 0, 1, challenge, generic);
+  cmd(ARG_TOKEN_UNCHALLENGE, "unchallenge", 0, 1, challenge, generic);
   cmd(ARG_TOKEN_SHOW, "show", 0, 0, show, generic);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic);
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic);

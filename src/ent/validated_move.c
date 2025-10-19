@@ -321,9 +321,9 @@ void validate_split_move(const StringSplitter *split_move, const Game *game,
     return;
   }
 
-  if (strings_equal(move_type_or_coords, UCGI_PASS_MOVE)) {
+  if (strings_iequal(move_type_or_coords, UCGI_PASS_MOVE)) {
     move_set_as_pass(vm->move);
-  } else if (strings_equal(move_type_or_coords, UCGI_EXCHANGE_MOVE)) {
+  } else if (strings_iequal(move_type_or_coords, UCGI_EXCHANGE_MOVE)) {
     if (!is_exchange_allowed(bag)) {
       error_stack_push(
           error_stack, ERROR_STATUS_MOVE_VALIDATION_EXCHANGE_INSUFFICIENT_TILES,

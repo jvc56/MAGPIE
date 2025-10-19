@@ -756,7 +756,30 @@ void test_config_anno(void) {
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
 
-  // FIXME: fully test all commit cases
+  assert_config_exec_status(config, "rack SINATE?", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 11d ANTIQuES", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 1);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(274));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
+
+  assert_config_exec_status(config, "rack DISLINK", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com ex LKNSD", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(274));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
+
+  assert_config_exec_status(config, "rack AAEEOT?", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com AAEEOT", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 1);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(274));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
+
+  assert_config_exec_status(config, "rack IIIOOPY", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com PaSs", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(274));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
+
   // FIXME: check that challenge bonuses mid-game work
 
   config_destroy(config);
