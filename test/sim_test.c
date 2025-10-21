@@ -63,7 +63,7 @@ void test_sim_error_cases(void) {
                            "all -r2 all -numplays 15 -plies "
                            "2 -threads 1 -iter 1 -scond none");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
-  load_and_exec_config_or_die(config, "rack 1 AAADERW");
+  load_and_exec_config_or_die(config, "rack AAADERW");
   error_code_t status = config_simulate_and_return_status(
       config, NULL, config_get_sim_results(config));
   assert(status == ERROR_STATUS_SIM_NO_MOVES);
@@ -76,7 +76,7 @@ void test_sim_single_iteration(void) {
                            "all -r2 all -numplays 15 -plies "
                            "2 -threads 1 -iter 1 -scond none");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
-  load_and_exec_config_or_die(config, "rack 1 AAADERW");
+  load_and_exec_config_or_die(config, "rack AAADERW");
   load_and_exec_config_or_die(config, "gen");
   error_code_t status = config_simulate_and_return_status(
       config, NULL, config_get_sim_results(config));
@@ -92,7 +92,7 @@ void test_more_iterations(void) {
                            "all -r2 all -numplays 15 -plies "
                            "2 -threads 1 -iter 500 -scond none -seed 10");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
-  load_and_exec_config_or_die(config, "rack 1 AEIQRST");
+  load_and_exec_config_or_die(config, "rack AEIQRST");
   load_and_exec_config_or_die(config, "gen");
   SimResults *sim_results = config_get_sim_results(config);
   error_code_t status =
@@ -181,7 +181,7 @@ void test_sim_time_limit(void) {
       "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
       "-plies 2 -threads 1 -it 1000000000 -scond none -tlim 2");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
-  load_and_exec_config_or_die(config, "rack 1 ACEIRST");
+  load_and_exec_config_or_die(config, "rack ACEIRST");
   load_and_exec_config_or_die(config, "gen");
 
   SimResults *sim_results = config_get_sim_results(config);
@@ -216,7 +216,7 @@ void test_sim_one_arm_remaining(void) {
       "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
       "-plies 2 -numplays 4 -threads 1 -it 1100 -scond none");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
-  load_and_exec_config_or_die(config, "rack 1 ACEIRST");
+  load_and_exec_config_or_die(config, "rack ACEIRST");
   load_and_exec_config_or_die(
       config, "addmoves 8D.CRISTAE,8D.ATRESIC,8D.STEARIC,8D.RACIEST");
 
@@ -253,7 +253,7 @@ void test_sim_round_robin_consistency(void) {
                            "all -r2 all -numplays 3 -plies "
                            "2 -threads 1 -iter 52 -scond none -sr rr");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
-  load_and_exec_config_or_die(config, "rack 1 AEIQRST");
+  load_and_exec_config_or_die(config, "rack AEIQRST");
   load_and_exec_config_or_die(config, "gen");
 
   uint64_t seed = ctime_get_current_time();
@@ -451,7 +451,7 @@ void test_play_similarity(void) {
       "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
       "-plies 2 -threads 10 -it 1200 -minp 50 -scond none -pfreq 100");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
-  load_and_exec_config_or_die(config, "rack 1 ACEIRST");
+  load_and_exec_config_or_die(config, "rack ACEIRST");
   load_and_exec_config_or_die(config, "gen");
   SimResults *sim_results = config_get_sim_results(config);
   error_code_t status =
@@ -709,7 +709,7 @@ void test_sim_one_ply(void) {
       "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
       "-plies 1 -threads 1 -iter 1000 -scond none");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
-  load_and_exec_config_or_die(config, "rack 1 JIBERRS");
+  load_and_exec_config_or_die(config, "rack JIBERRS");
   load_and_exec_config_or_die(config, "gen");
 
   SimResults *sim_results = config_get_sim_results(config);

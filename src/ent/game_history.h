@@ -103,7 +103,6 @@ game_history_player_get_last_rack_const(const GameHistory *game_history,
 void game_history_player_reset(GameHistory *history, int player_index,
                                const char *player_name,
                                const char *player_nickname);
-bool game_history_both_players_are_set(const GameHistory *game_history);
 int game_history_get_most_recent_move_event_index(
     const GameHistory *game_history);
 

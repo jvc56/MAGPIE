@@ -517,19 +517,6 @@ void validate_challenge_bonus_order(const GameEvent *game_event,
   }
 }
 
-void per(const Rack *rack) {
-  for (int i = 0; i < rack_get_letter(rack, BLANK_MACHINE_LETTER); i++) {
-    printf("?");
-  }
-  const uint16_t ld_size = rack_get_dist_size(rack);
-  for (int i = 1; i < ld_size; i++) {
-    const uint16_t num_letter = rack_get_letter(rack, i);
-    for (uint16_t j = 0; j < num_letter; j++) {
-      printf("%c", (char)(i + 'A' - 1));
-    }
-  }
-}
-
 void validate_phony_tiles_returned_order(const GameEvent *game_event,
                                          const GameEvent *previous_game_event,
                                          ErrorStack *error_stack) {
@@ -556,12 +543,6 @@ void validate_phony_tiles_returned_order(const GameEvent *game_event,
         error_stack, ERROR_STATUS_GCG_PARSE_PHONY_TILES_RETURNED_MISMATCH,
         string_duplicate(
             "phony letters played do not match the phony letters returned"));
-    printf("ge rack: >");
-    per(game_event_get_const_rack(game_event));
-    printf("<\npv rack: >");
-    per(game_event_get_const_rack(previous_game_event));
-    printf("<\n");
-    abort();
     return;
   }
 }

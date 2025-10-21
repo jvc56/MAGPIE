@@ -598,11 +598,11 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
   if (token == GCG_MOVE_TOKEN || token == GCG_PASS_TOKEN ||
       token == GCG_EXCHANGE_TOKEN || token == GCG_RACK1_TOKEN ||
       token == GCG_RACK2_TOKEN) {
-    if (!game_history_both_players_are_set(gcg_parser->game_history)) {
+    if (!gcg_parser->player_is_reset[0] || !gcg_parser->player_is_reset[1]) {
       error_stack_push(
           error_stack, ERROR_STATUS_GCG_PARSE_MOVE_BEFORE_PLAYER,
           get_formatted_string(
-              "encountered a move or rack before both players are set: %s",
+              "encountered a move or rack '%s' before both players were set",
               gcg_line));
       return false;
     }

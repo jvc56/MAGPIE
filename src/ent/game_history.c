@@ -217,10 +217,6 @@ game_history_player_get_last_rack_const(const GameHistory *game_history,
   return &game_history->players[player_index]->last_rack;
 }
 
-bool game_history_both_players_are_set(const GameHistory *game_history) {
-  return game_history->players[0] && game_history->players[1];
-}
-
 void game_history_set_title(GameHistory *history, const char *title) {
   free(history->title);
   history->title = string_duplicate(title);
