@@ -15,6 +15,7 @@
 #include <QSvgRenderer>
 #include <QIcon>
 #include <QGuiApplication>
+#include <QTime>
 #include <algorithm>
 
 RackView::RackView(QWidget *parent)
@@ -350,7 +351,9 @@ void RackView::mouseMoveEvent(QMouseEvent *event) {
 
             // Execute the drag - support both Move and Ignore actions
             // Use IgnoreAction as default to disable snap-back animation on rejected drops
+            emit debugMessage(QString(">>> [%1] About to call drag->exec()").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
             Qt::DropAction dropAction = drag->exec(Qt::MoveAction | Qt::IgnoreAction, Qt::IgnoreAction);
+            emit debugMessage(QString(">>> [%1] drag->exec() returned").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
 
             QString actionName;
             if (dropAction == Qt::MoveAction) actionName = "MoveAction";
@@ -358,10 +361,12 @@ void RackView::mouseMoveEvent(QMouseEvent *event) {
             else if (dropAction == Qt::CopyAction) actionName = "CopyAction";
             else actionName = QString("Unknown(%1)").arg((int)dropAction);
 
-            emit debugMessage(QString("Drag ended with action: %1").arg(actionName));
+            emit debugMessage(QString("[%1] Drag ended with action: %2").arg(QTime::currentTime().toString("HH:mm:ss.zzz")).arg(actionName));
 
             // Notify that drag ended so preview can be hidden or animated
+            emit debugMessage(QString(">>> [%1] About to emit dragEnded signal").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
             emit dragEnded(dropAction);
+            emit debugMessage(QString(">>> [%1] dragEnded signal emitted").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
 
             // Reset drag state and clean up any override cursor
             m_draggedTileIndex = -1;

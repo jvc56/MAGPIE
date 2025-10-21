@@ -16,6 +16,8 @@
 #include <QMimeData>
 #include <QGuiApplication>
 #include <QPropertyAnimation>
+#include <QApplication>
+#include <QTime>
 
 // Helper to create placeholder widgets with light theme.
 static QWidget* createPlaceholder(const QString &text, const QColor &bgColor = QColor(255, 255, 255)) {
@@ -125,9 +127,16 @@ BoardPanelView::BoardPanelView(QWidget *parent)
 
     // Connect rack drag end to hide preview
     connect(rackView, &RackView::dragEnded, this, [this](Qt::DropAction result) {
+        emit debugMessage(QString(">>> [%1] BoardPanelView: received dragEnded from rack").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
         m_currentDragChar = QChar();  // Reset drag char
         // Always hide immediately - no animation delay
+        emit debugMessage(QString(">>> [%1] BoardPanelView: about to emit hideDragPreview").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
         emit hideDragPreview();
+        emit debugMessage(QString(">>> [%1] BoardPanelView: hideDragPreview emitted").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
+
+        // ALSO force immediate update/repaint to ensure preview disappears
+        QApplication::processEvents();
+        emit debugMessage(QString(">>> [%1] BoardPanelView: processEvents() called").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
     });
 
     // Connect board drag start to show preview
@@ -307,11 +316,12 @@ void BoardPanelView::dragMoveEvent(QDragMoveEvent *event) {
                          .arg(globalPos.x()).arg(globalPos.y())
                          .arg(row).arg(col).arg(isEmpty).arg(isSourceSquare).arg(squareChanged));
 
-        if (row >= 0 && col >= 0 && (isEmpty || isSourceSquare)) {
-            // Dragging over an empty square OR the source square - allow drop
-            event->setDropAction(Qt::MoveAction);
-            event->accept();
+        // ALWAYS accept with MoveAction to avoid macOS rejection animation delay
+        // We'll validate in dropEvent instead
+        event->setDropAction(Qt::MoveAction);
+        event->accept();
 
+        if (row >= 0 && col >= 0 && (isEmpty || isSourceSquare)) {
             if (squareChanged) {
                 emit debugMessage("  -> Valid drop: showing green outline");
             }
@@ -319,10 +329,6 @@ void BoardPanelView::dragMoveEvent(QDragMoveEvent *event) {
             // Update board hover square to show green outline
             boardView->setHoverSquare(row, col);
         } else {
-            // Over an occupied square or outside board - don't allow drop
-            event->setDropAction(Qt::IgnoreAction);
-            event->accept();
-
             // Clear board hover square (no visual feedback for invalid drops)
             boardView->setHoverSquare(-1, -1);
         }

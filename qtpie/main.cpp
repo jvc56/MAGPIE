@@ -14,6 +14,8 @@
 #include <QDragLeaveEvent>
 #include <QDropEvent>
 #include <QMimeData>
+#include <QEventLoop>
+#include <QTime>
 
 #include "magpie_wrapper.h"
 #include "board_panel_view.h"
@@ -219,16 +221,27 @@ protected:
 
     void dragLeaveEvent(QDragLeaveEvent *event) override {
         // Hide preview when leaving window entirely
+        debugTextView->append(">>> MainWidget: dragLeave - hiding preview immediately");
         if (dragTilePreview && dragTilePreview->isVisible()) {
             dragTilePreview->setVisible(false);
+            dragTilePreview->hide();  // Extra hide call
+            repaint();  // Force immediate repaint
         }
         QMainWindow::dragLeaveEvent(event);
     }
 
     void dropEvent(QDropEvent *event) override {
-        // Ignore drops at this level - let child widgets handle them
-        event->ignore();
-        QMainWindow::dropEvent(event);
+        // Accept all drops at top level to avoid macOS rejection animation
+        // Child widgets already handled the actual drop logic
+        if (event->mimeData()->hasText()) {
+            event->setDropAction(Qt::MoveAction);
+            event->accept();
+            debugTextView->append(QString(">>> [%1] MainWidget: dropEvent - accepting to avoid animation")
+                                .arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
+        } else {
+            event->ignore();
+            QMainWindow::dropEvent(event);
+        }
     }
 
 private slots:
@@ -252,8 +265,16 @@ private slots:
     }
 
     void onHideDragPreview() {
+        debugTextView->append(QString(">>> [%1] MainWidget: onHideDragPreview called").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
         if (dragTilePreview && dragTilePreview->isVisible()) {
+            debugTextView->append(QString(">>> [%1] MainWidget: hiding preview").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
             dragTilePreview->setVisible(false);
+            dragTilePreview->repaint();  // Force immediate repaint
+            repaint();  // Force repaint of entire window
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);  // Process paint events immediately
+            debugTextView->append(QString(">>> [%1] MainWidget: preview hidden").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
+        } else {
+            debugTextView->append(QString(">>> [%1] MainWidget: preview already hidden or null").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
         }
     }
 
