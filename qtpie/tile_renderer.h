@@ -50,7 +50,7 @@ private:
 
     // Helper drawing functions
     void drawRoundedRect(QPainter& painter, const QRectF& rect, double cornerRadius);
-    void applyGradient(QPixmap& pixmap, const QRectF& rect, double intensity = 0.18);
+    void applyGradient(QImage& image, const QRectF& rect, double intensity = 0.18);
 
     int m_tileSize;
     QString m_letterFontFamily;  // ClearSans-Bold

@@ -100,13 +100,15 @@ QPixmap TileRenderer::renderLetterTile(char letter, bool isBlank) {
     qreal dpr = 2.0;
     int renderSize = m_tileSize * supersample;
 
-    QPixmap pixmap(renderSize, renderSize);
-    pixmap.fill(BG_COLOR);
+    // Create image with explicit alpha channel support (non-premultiplied to avoid black edge artifacts)
+    QImage image(renderSize, renderSize, QImage::Format_ARGB32);
+    image.fill(Qt::transparent);
 
-    QPainter painter(&pixmap);
+    QPainter painter(&image);
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setRenderHint(QPainter::TextAntialiasing);
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
+    painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
 
     // Calculate tile area (centered within the square) - scaled by supersample
     int tilePixelSize = static_cast<int>(m_tileSize * supersample * TILE_FRACTION);
@@ -128,10 +130,10 @@ QPixmap TileRenderer::renderLetterTile(char letter, bool isBlank) {
     int gradientOffset = (tilePixelSize - gradientSize) / 2;
     QRectF gradientRect(margin + gradientOffset, margin + gradientOffset,
                         gradientSize, gradientSize);
-    applyGradient(pixmap, gradientRect, 0.18);
+    applyGradient(image, gradientRect, 0.18);
 
     // Draw letter and value
-    painter.begin(&pixmap);
+    painter.begin(&image);
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setRenderHint(QPainter::TextAntialiasing);
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
@@ -221,11 +223,13 @@ QPixmap TileRenderer::renderLetterTile(char letter, bool isBlank) {
     painter.end();
 
     // Downsample from 4x to final size using high-quality smooth scaling
-    QPixmap finalPixmap = pixmap.scaled(
+    QImage scaledImage = image.scaled(
         m_tileSize * dpr, m_tileSize * dpr,
         Qt::IgnoreAspectRatio,
         Qt::SmoothTransformation  // High-quality Lanczos-like filtering
     );
+
+    QPixmap finalPixmap = QPixmap::fromImage(scaledImage);
     finalPixmap.setDevicePixelRatio(dpr);
 
     return finalPixmap;
@@ -359,8 +363,7 @@ void TileRenderer::drawRoundedRect(QPainter& painter, const QRectF& rect, double
     painter.drawPath(path);
 }
 
-void TileRenderer::applyGradient(QPixmap& pixmap, const QRectF& rect, double intensity) {
-    QImage image = pixmap.toImage();
+void TileRenderer::applyGradient(QImage& image, const QRectF& rect, double intensity) {
     if (image.isNull()) return;
 
     int x1 = static_cast<int>(rect.x());
@@ -389,17 +392,16 @@ void TileRenderer::applyGradient(QPixmap& pixmap, const QRectF& rect, double int
             int r = qRed(pixel);
             int g = qGreen(pixel);
             int b = qBlue(pixel);
+            int a = qAlpha(pixel);  // Preserve alpha channel
 
             double opacity = intensity;
             r = static_cast<int>(r * (1.0 - opacity) + gradientValue * opacity);
             g = static_cast<int>(g * (1.0 - opacity) + gradientValue * opacity);
             b = static_cast<int>(b * (1.0 - opacity) + gradientValue * opacity);
 
-            line[px] = qRgb(r, g, b);
+            line[px] = qRgba(r, g, b, a);  // Use qRgba to preserve alpha
         }
     }
-
-    pixmap = QPixmap::fromImage(image);
 }
 
 const QPixmap& TileRenderer::getLetterTile(char letter) const {
