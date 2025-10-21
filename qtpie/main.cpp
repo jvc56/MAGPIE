@@ -19,6 +19,7 @@
 #include "board_panel_view.h"
 #include "responsive_layout.h"
 #include "colors.h"
+#include "tile_renderer.h"
 
 class MainWidget : public QMainWindow {
     Q_OBJECT
@@ -174,7 +175,43 @@ protected:
     void dragMoveEvent(QDragMoveEvent *event) override {
         if (event->mimeData()->hasText()) {
             event->accept();
-            // The preview will be updated by BoardPanelView's dragMoveEvent
+
+            // Update preview position based on global cursor
+            // Extract tile character from mime data
+            QString mimeText = event->mimeData()->text();
+            QStringList parts = mimeText.split(':');
+
+            QChar tileChar;
+            if (mimeText.startsWith("board:")) {
+                // Board drag format: "board:row:col:char"
+                if (parts.size() >= 4) {
+                    tileChar = parts[3][0];
+                }
+            } else {
+                // Rack drag format: "index:char"
+                if (parts.size() >= 2) {
+                    tileChar = parts[1][0];
+                }
+            }
+
+            if (!tileChar.isNull() && boardPanelView) {
+                // Get a reasonable tile size (use rack size as default)
+                int tileSize = 60;  // Default size
+                if (boardPanelView->getBoardView()) {
+                    int boardSize = boardPanelView->getBoardView()->getSquareSize();
+                    if (boardSize > 0) {
+                        tileSize = boardSize;
+                    }
+                }
+
+                // Render tile at current size
+                QPixmap tilePixmap = renderDragTile(tileChar, tileSize);
+
+                // Update preview at global cursor position
+                QPoint localPos = event->position().toPoint();
+                QPoint globalPos = mapToGlobal(localPos);
+                onUpdateDragPreview(tilePixmap, globalPos);
+            }
         } else {
             QMainWindow::dragMoveEvent(event);
         }
@@ -218,6 +255,24 @@ private slots:
         if (dragTilePreview && dragTilePreview->isVisible()) {
             dragTilePreview->setVisible(false);
         }
+    }
+
+    QPixmap renderDragTile(QChar tileChar, int size) {
+        // Import TileRenderer to render tiles
+        TileRenderer renderer(size, TileRenderer::TileStyle::Rack);
+
+        QPixmap tilePixmap;
+        if (tileChar == '?') {
+            tilePixmap = renderer.getBlankTile('A');
+        } else if (tileChar.isLower() && tileChar >= 'a' && tileChar <= 'z') {
+            tilePixmap = renderer.getBlankTile(tileChar.toLatin1());
+        } else if (tileChar.isUpper() && tileChar >= 'A' && tileChar <= 'Z') {
+            tilePixmap = renderer.getLetterTile(tileChar.toLatin1());
+        } else {
+            // Unknown character - use placeholder
+            tilePixmap = renderer.getLetterTile('?');
+        }
+        return tilePixmap;
     }
 
 private:
