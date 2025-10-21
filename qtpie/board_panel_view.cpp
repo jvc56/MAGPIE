@@ -126,13 +126,8 @@ BoardPanelView::BoardPanelView(QWidget *parent)
     // Connect rack drag end to hide preview
     connect(rackView, &RackView::dragEnded, this, [this](Qt::DropAction result) {
         m_currentDragChar = QChar();  // Reset drag char
-        if (result == Qt::IgnoreAction) {
-            // Failed drop - could animate back, but for now just hide
-            emit hideDragPreview();
-        } else {
-            // Successful drop - hide immediately
-            emit hideDragPreview();
-        }
+        // Always hide immediately - no animation delay
+        emit hideDragPreview();
     });
 
     // Connect board drag start to show preview
@@ -140,6 +135,17 @@ BoardPanelView::BoardPanelView(QWidget *parent)
         dragStartPosition = pos;
         m_currentDragChar = tileChar;
         updateDragTilePreview(pos, tileChar);
+    });
+
+    // Connect board drag end to clean up state
+    connect(boardView, &BoardView::tileDragEnded, this, [this](Qt::DropAction result) {
+        // Clear drag source tracking
+        m_dragSourceRow = -1;
+        m_dragSourceCol = -1;
+        m_currentDragChar = QChar();
+
+        // Hide preview
+        emit hideDragPreview();
     });
 
     // Connect rack accepting board tile to remove it from board
@@ -356,12 +362,8 @@ void BoardPanelView::dragLeaveEvent(QDragLeaveEvent *event) {
     // Clear hover square when drag leaves
     boardView->setHoverSquare(-1, -1);
 
-    // Clear ghost tile
-    boardView->clearGhostTile();
-
-    // Clear drag source tracking
-    m_dragSourceRow = -1;
-    m_dragSourceCol = -1;
+    // Don't clear ghost tile here - it should stay visible until drop completes
+    // This allows dragging over other panels while keeping the source ghosted
 
     // Clear hover tracking
     m_lastHoverRow = -1;

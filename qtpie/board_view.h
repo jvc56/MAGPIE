@@ -53,6 +53,7 @@ public:
 
 signals:
     void tileDragStarted(const QPoint &globalPos, QChar tileChar);
+    void tileDragEnded(Qt::DropAction result);
 
 protected:
     void paintEvent(QPaintEvent *event) override;

@@ -417,6 +417,12 @@ void BoardView::mouseMoveEvent(QMouseEvent *event) {
                 // If drop succeeded, the tile was already removed by the drop handler
                 // If drop failed, tile stays where it is
 
+                // Clear ghost tile now that drag is complete
+                clearGhostTile();
+
+                // Notify that drag ended
+                emit tileDragEnded(dropAction);
+
                 // Reset drag state
                 m_draggedRow = -1;
                 m_draggedCol = -1;
