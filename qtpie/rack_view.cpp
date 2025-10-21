@@ -310,6 +310,7 @@ void RackView::mouseMoveEvent(QMouseEvent *event) {
 
             // Get the tile character
             QChar c = m_rack[m_draggedTileIndex];
+            m_draggedTileChar = c;
 
             // Create tile renderer and get the tile pixmap (using Rack style for green tiles)
             TileRenderer renderer(m_tileSize, TileRenderer::TileStyle::Rack);
@@ -330,8 +331,11 @@ void RackView::mouseMoveEvent(QMouseEvent *event) {
             // Store the tile index and character
             mimeData->setText(QString("%1:%2").arg(m_draggedTileIndex).arg(c));
             drag->setMimeData(mimeData);
-            drag->setPixmap(tilePixmap);
-            drag->setHotSpot(QPoint(m_tileSize / 2, m_tileSize / 2));
+            // Use a 1x1 transparent pixmap to hide the default drag image and tooltip
+            QPixmap invisiblePixmap(1, 1);
+            invisiblePixmap.fill(Qt::transparent);
+            drag->setPixmap(invisiblePixmap);
+            drag->setHotSpot(QPoint(0, 0));
 
             emit debugMessage("Starting drag with MoveAction | IgnoreAction");
 
@@ -345,6 +349,9 @@ void RackView::mouseMoveEvent(QMouseEvent *event) {
             else actionName = QString("Unknown(%1)").arg((int)dropAction);
 
             emit debugMessage(QString("Drag ended with action: %1").arg(actionName));
+
+            // Notify that drag ended so preview can be hidden or animated
+            emit dragEnded(dropAction);
 
             // Reset drag state and clean up any override cursor
             m_draggedTileIndex = -1;
@@ -393,17 +400,11 @@ void RackView::dragMoveEvent(QDragMoveEvent *event) {
     bool inRackArea = (event->position().y() >= 0 && event->position().y() <= height() &&
                        event->position().x() >= 0 && event->position().x() <= width());
 
-    emit debugMessage(QString("dragMove: x=%1 y=%2 width=%3 height=%4 inRackArea=%5 proposedAction=%6")
-                     .arg(event->position().x())
-                     .arg(event->position().y())
-                     .arg(width())
-                     .arg(height())
-                     .arg(inRackArea)
-                     .arg(event->proposedAction()));
+    // Always emit drag position for preview overlay (even when outside rack)
+    emit dragPositionChanged(mapToParent(event->position().toPoint()), m_draggedTileChar);
 
     if (!inRackArea) {
         // Outside rack area - set action to Ignore (forbidden cursor will show)
-        emit debugMessage("Setting IgnoreAction - should show forbidden cursor");
         event->setDropAction(Qt::IgnoreAction);
         event->accept();
 
@@ -415,7 +416,6 @@ void RackView::dragMoveEvent(QDragMoveEvent *event) {
     }
 
     // Inside rack area - accept the drop with MoveAction
-    emit debugMessage("Setting MoveAction - should show normal cursor");
     event->setDropAction(Qt::MoveAction);
     event->accept();
 
@@ -530,4 +530,12 @@ void RackView::dragLeaveEvent(QDragLeaveEvent *event) {
     m_dropIndicatorPosition = -1;
     update();
     QWidget::dragLeaveEvent(event);
+}
+
+void RackView::removeTileAtIndex(int index) {
+    if (index >= 0 && index < m_rack.length()) {
+        m_rack.remove(index, 1);
+        emit rackChanged(m_rack);
+        update();
+    }
 }

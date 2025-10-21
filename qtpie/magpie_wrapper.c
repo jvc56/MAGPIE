@@ -97,6 +97,17 @@ MagpieBonusSquare magpie_get_bonus_square(Board *board, int row, int col) {
     }
 }
 
+int magpie_board_is_square_empty(Board *board, int row, int col) {
+    if (board == NULL) {
+        return 0;
+    }
+
+    // Get the letter at the specified position
+    // Empty squares have letter value of 0 (ALPHABET_EMPTY_SQUARE_MARKER)
+    MachineLetter letter = board_get_letter(board, row, col);
+    return letter == 0;  // 0 is ALPHABET_EMPTY_SQUARE_MARKER
+}
+
 char* magpie_game_to_string(const Config *config, const Game *game) {
     if (game == NULL) {
         return NULL;

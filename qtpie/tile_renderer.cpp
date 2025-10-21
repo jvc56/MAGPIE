@@ -193,13 +193,13 @@ QPixmap TileRenderer::renderLetterTile(char letter, bool isBlank) {
         if (valueStr.length() == 1) {
             // 1-digit values: larger font, further right
             fontScale = 0.76;  // 80% larger than 0.42 for better readability
-            hOffset = 0.88;
+            hOffset = 0.83;  // Moved 0.05 left from 0.88
             adjustX = -2.0;
             adjustY = -2.0;
         } else {
             // 2-digit values: smaller font, more centered
             fontScale = 0.58;  // 80% larger than 0.32 for better readability
-            hOffset = 0.82;
+            hOffset = 0.77;  // Moved 0.05 left from 0.82
             adjustX = 1.0;
             adjustY = -1.0;
         }

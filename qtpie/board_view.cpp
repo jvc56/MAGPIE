@@ -1,5 +1,6 @@
 #include "board_view.h"
 #include "board_renderer.h"
+#include "tile_renderer.h"
 #include <QPainter>
 #include <QResizeEvent>
 
@@ -202,5 +203,121 @@ void BoardView::paintEvent(QPaintEvent *) {
                         labelWidth, m_labelFontSize * 2);
             painter.drawText(rect, Qt::AlignRight | Qt::AlignVCenter, label);
         }
+
+        // Draw uncommitted tiles (placed but not committed) in green
+        if (!m_uncommittedTiles.isEmpty()) {
+            // Use Rack style to render green tiles
+            TileRenderer tileRenderer(m_squareSize, TileRenderer::TileStyle::Rack);
+            for (const UncommittedTile &tile : m_uncommittedTiles) {
+                int x = m_marginX + tile.col * m_squareSize;
+                int y = m_marginY + tile.row * m_squareSize;
+
+                QPixmap tilePixmap;
+                if (tile.letter == '?') {
+                    // Blank tile - need to show designated letter
+                    tilePixmap = tileRenderer.getBlankTile('A');  // Default to 'A' for now
+                } else if (tile.letter.isLower() && tile.letter >= 'a' && tile.letter <= 'z') {
+                    // Lowercase = blank tile with designated letter
+                    tilePixmap = tileRenderer.getBlankTile(tile.letter.toUpper().toLatin1());
+                } else if (tile.letter.isUpper() && tile.letter >= 'A' && tile.letter <= 'Z') {
+                    // Normal tile
+                    tilePixmap = tileRenderer.getLetterTile(tile.letter.toLatin1());
+                }
+
+                painter.drawPixmap(x, y, tilePixmap);
+            }
+        }
+
+        // Draw green hover outline if hovering over a valid empty square
+        if (m_hoverRow >= 0 && m_hoverCol >= 0) {
+            int x = m_marginX + m_hoverCol * m_squareSize;
+            int y = m_marginY + m_hoverRow * m_squareSize;
+
+            // Green outline: thicker (4px), semi-transparent
+            painter.setPen(QPen(QColor(0, 200, 0, 180), 4));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawRect(x, y, m_squareSize, m_squareSize);
+        }
     }
+}
+
+void BoardView::getBoardCoordinates(const QPoint &pos, int &row, int &col) const {
+    row = -1;
+    col = -1;
+
+    if (m_squareSize <= 0) {
+        return;
+    }
+
+    // Convert widget coordinates to board coordinates
+    int x = pos.x() - m_marginX;
+    int y = pos.y() - m_marginY;
+
+    // Check if within board bounds
+    constexpr int BOARD_DIM = 15;
+    if (x >= 0 && y >= 0 && x < BOARD_DIM * m_squareSize && y < BOARD_DIM * m_squareSize) {
+        col = x / m_squareSize;
+        row = y / m_squareSize;
+    }
+}
+
+bool BoardView::isSquareEmpty(int row, int col) const {
+    if (!board || row < 0 || col < 0 || row >= 15 || col >= 15) {
+        return false;
+    }
+
+    // Check if there's an uncommitted tile here
+    if (hasUncommittedTile(row, col)) {
+        return false;
+    }
+
+    return magpie_board_is_square_empty(board, row, col) != 0;
+}
+
+void BoardView::setHoverSquare(int row, int col) {
+    if (m_hoverRow != row || m_hoverCol != col) {
+        m_hoverRow = row;
+        m_hoverCol = col;
+        update();  // Trigger repaint to show hover outline
+    }
+}
+
+void BoardView::placeUncommittedTile(int row, int col, QChar letter) {
+    // Remove any existing uncommitted tile at this position
+    removeUncommittedTile(row, col);
+
+    // Add the new tile
+    UncommittedTile tile;
+    tile.row = row;
+    tile.col = col;
+    tile.letter = letter;
+    m_uncommittedTiles.append(tile);
+
+    update();  // Trigger repaint to show the new tile
+}
+
+void BoardView::removeUncommittedTile(int row, int col) {
+    for (int i = 0; i < m_uncommittedTiles.size(); ++i) {
+        if (m_uncommittedTiles[i].row == row && m_uncommittedTiles[i].col == col) {
+            m_uncommittedTiles.removeAt(i);
+            update();
+            return;
+        }
+    }
+}
+
+void BoardView::clearUncommittedTiles() {
+    if (!m_uncommittedTiles.isEmpty()) {
+        m_uncommittedTiles.clear();
+        update();
+    }
+}
+
+bool BoardView::hasUncommittedTile(int row, int col) const {
+    for (const UncommittedTile &tile : m_uncommittedTiles) {
+        if (tile.row == row && tile.col == col) {
+            return true;
+        }
+    }
+    return false;
 }

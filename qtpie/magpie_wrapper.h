@@ -27,6 +27,7 @@ Game* magpie_get_game_from_config(Config *config);
 // Wrapper functions
 Board* magpie_get_board_from_game(Game *game);
 MagpieBonusSquare magpie_get_bonus_square(Board *board, int row, int col);
+int magpie_board_is_square_empty(Board *board, int row, int col);
 
 // Game string printing
 char* magpie_game_to_string(const Config *config, const Game *game);

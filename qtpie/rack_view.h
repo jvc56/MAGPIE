@@ -14,10 +14,16 @@ public:
 
     void setRack(const QString& rack);
     QSize sizeHint() const override;
+    QString getRack() const { return m_rack; }
+
+    // Remove tile at specific index (for when it's placed on board)
+    void removeTileAtIndex(int index);
 
 signals:
     void debugMessage(const QString &msg);
     void rackChanged(const QString& newRack);
+    void dragPositionChanged(const QPoint &globalPos, QChar tileChar);
+    void dragEnded(Qt::DropAction result);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -45,6 +51,7 @@ private:
 
     // Drag state
     int m_draggedTileIndex = -1;
+    QChar m_draggedTileChar;
     QPoint m_dragStartPos;
     int m_dropIndicatorPosition = -1;  // -1 means no indicator, otherwise index where tile would be inserted
 };
