@@ -22,6 +22,10 @@ public:
     // Set the debug output widget (owned by main window)
     void setDebugOutput(QTextEdit *debugOutput) { this->debugOutput = debugOutput; }
 
+protected:
+    void dragEnterEvent(QDragEnterEvent *event) override;
+    void dragMoveEvent(QDragMoveEvent *event) override;
+
 signals:
     void debugMessage(const QString &msg);
     void boardChanged();  // Emitted when MAGPIE board is updated

@@ -8,6 +8,10 @@
 #include <QFont>
 #include <QFontMetrics>
 #include <QDebug>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QMimeData>
+#include <QGuiApplication>
 
 // Helper to create placeholder widgets with light theme.
 static QWidget* createPlaceholder(const QString &text, const QColor &bgColor = QColor(255, 255, 255)) {
@@ -32,6 +36,9 @@ BoardPanelView::BoardPanelView(QWidget *parent)
     : QWidget(parent)
     , game(nullptr)
 {
+    // Accept drops to act as a catch-all for drags
+    setAcceptDrops(true);
+
     // Enforce minimum size to prevent container from shrinking smaller than board
     // Board minimum: 20px * 15 + margins = 322px
     // Add space for CGP input, rack, controls
@@ -172,4 +179,43 @@ QSize BoardPanelView::minimumSizeHint() const {
     constexpr int MIN_WIDTH = MIN_BOARD_SIZE;
     constexpr int MIN_HEIGHT = MIN_BOARD_SIZE + 200;  // board + other elements
     return QSize(MIN_WIDTH, MIN_HEIGHT);
+}
+
+void BoardPanelView::dragEnterEvent(QDragEnterEvent *event) {
+    emit debugMessage(QString("BoardPanelView::dragEnter - hasText=%1 source=%2")
+                     .arg(event->mimeData()->hasText())
+                     .arg(event->source() ? event->source()->objectName() : "null"));
+
+    // Check if this is a tile drag from RackView
+    if (event->mimeData()->hasText()) {
+        emit debugMessage("BoardPanelView::dragEnter - accepting with IgnoreAction (forbidden cursor)");
+        // Accept but set to IgnoreAction to show forbidden cursor
+        event->setDropAction(Qt::IgnoreAction);
+        event->accept();
+
+        // Set system forbidden cursor immediately on enter
+        QGuiApplication::setOverrideCursor(Qt::ForbiddenCursor);
+        emit debugMessage("Set override cursor to ForbiddenCursor on dragEnter");
+    } else {
+        emit debugMessage("BoardPanelView::dragEnter - ignoring (no text)");
+    }
+}
+
+void BoardPanelView::dragMoveEvent(QDragMoveEvent *event) {
+    // For now, all drags outside the rack are forbidden
+    // In the future, we'll check if the drag is over BoardView and allow it
+    if (event->mimeData()->hasText()) {
+        emit debugMessage(QString("BoardPanelView::dragMove at (%1, %2) - setting IgnoreAction + ForbiddenCursor")
+                         .arg(event->position().x())
+                         .arg(event->position().y()));
+        event->setDropAction(Qt::IgnoreAction);
+        event->accept();
+
+        // Set system forbidden cursor
+        if (!QGuiApplication::overrideCursor() ||
+            QGuiApplication::overrideCursor()->shape() != Qt::ForbiddenCursor) {
+            QGuiApplication::setOverrideCursor(Qt::ForbiddenCursor);
+            emit debugMessage("Set override cursor to ForbiddenCursor");
+        }
+    }
 }

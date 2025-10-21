@@ -28,7 +28,7 @@ public:
       // Create stdout/History text view
       historyTextView = new QTextEdit;
       historyTextView->setReadOnly(true);
-      historyTextView->setFont(QFont("Courier", 10));
+      historyTextView->setFont(QFont("Courier", 8));  // 15% smaller: 10 * 0.85 ≈ 8
       historyTextView->setStyleSheet(
           "QTextEdit {"
           "  background-color: #F5F5F5;"
@@ -42,7 +42,7 @@ public:
       // Create debug text view for Analysis position
       debugTextView = new QTextEdit;
       debugTextView->setReadOnly(true);
-      debugTextView->setFont(QFont("Courier", 10));
+      debugTextView->setFont(QFont("Courier", 8));  // 15% smaller: 10 * 0.85 ≈ 8
       debugTextView->setStyleSheet(
           "QTextEdit {"
           "  background-color: #F5F5F5;"
@@ -79,9 +79,12 @@ public:
       QMenu *debugMenu = menuBar()->addMenu("Debug");
       QAction *toggleOverlayAction = new QAction("Show Layout Overlay", this);
       toggleOverlayAction->setCheckable(true);
-      toggleOverlayAction->setChecked(true);  // Start with overlay enabled
+      toggleOverlayAction->setChecked(false);  // Start with overlay disabled
       connect(toggleOverlayAction, &QAction::toggled, this, &MainWidget::toggleLayoutOverlay);
       debugMenu->addAction(toggleOverlayAction);
+
+      // Actually hide the overlay on startup
+      layout->setDebugOverlayVisible(false);
 
       // Now create MAGPIE config after UI is set up
       historyTextView->append("=== Creating MAGPIE config ===");

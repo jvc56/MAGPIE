@@ -15,10 +15,13 @@ static const double CORNER_RADIUS_FRACTION = 0.25;
 static const double GRADIENT_FRACTION = 0.98;
 
 // Colors (matching light-theme from Python implementation)
-static const QColor TILE_COLOR(245, 230, 190);       // Beige tile background
-static const QColor LETTER_COLOR(0, 0, 0);           // Black text
-static const QColor BG_COLOR(230, 230, 240);         // Board background
-static const QColor EMPTY_SQUARE_COLOR(195, 196, 208); // Empty square fill
+static const QColor BOARD_TILE_COLOR(245, 230, 190);     // Beige tile background for board
+static const QColor BOARD_BORDER_COLOR(180, 170, 140);   // Brownish border for board tiles
+static const QColor RACK_TILE_COLOR(120, 180, 115);      // Green tile background for rack
+static const QColor RACK_BORDER_COLOR(90, 140, 85);      // Greenish border for rack tiles
+static const QColor LETTER_COLOR(0, 0, 0);               // Black text
+static const QColor BG_COLOR(230, 230, 240);             // Board background
+static const QColor EMPTY_SQUARE_COLOR(195, 196, 208);   // Empty square fill
 
 // Premium square colors (light-theme)
 static const QColor DL_COLOR(150, 190, 220);         // Light blue
@@ -47,8 +50,9 @@ static QString loadFontFamily(const QString& fontPath) {
     return QString();
 }
 
-TileRenderer::TileRenderer(int tileSize)
+TileRenderer::TileRenderer(int tileSize, TileStyle style)
     : m_tileSize(tileSize)
+    , m_style(style)
 {
     // Load custom fonts
     QDir fontsDir(QCoreApplication::applicationDirPath() + "/../Resources/fonts");
@@ -116,9 +120,11 @@ QPixmap TileRenderer::renderLetterTile(char letter, bool isBlank) {
     QRectF tileRect(margin, margin, tilePixelSize, tilePixelSize);
 
     // Draw tile background with subtle border
-    painter.setBrush(TILE_COLOR);
-    // Add a subtle dark border around the tile (scaled)
-    QPen borderPen(QColor(180, 170, 140), qMax(1.0, m_tileSize * supersample / 50.0));
+    QColor tileColor = (m_style == TileStyle::Rack) ? RACK_TILE_COLOR : BOARD_TILE_COLOR;
+    QColor borderColor = (m_style == TileStyle::Rack) ? RACK_BORDER_COLOR : BOARD_BORDER_COLOR;
+
+    painter.setBrush(tileColor);
+    QPen borderPen(borderColor, qMax(1.0, m_tileSize * supersample / 50.0));
     painter.setPen(borderPen);
     double cornerRadius = tilePixelSize * CORNER_RADIUS_FRACTION;
     drawRoundedRect(painter, tileRect, cornerRadius);

@@ -30,7 +30,12 @@ enum class PremiumSquare {
  */
 class TileRenderer {
 public:
-    explicit TileRenderer(int tileSize);
+    enum class TileStyle {
+        Board,  // Beige tiles for board
+        Rack    // Green tiles for rack
+    };
+
+    explicit TileRenderer(int tileSize, TileStyle style = TileStyle::Board);
 
     // Get pre-rendered tiles
     const QPixmap& getLetterTile(char letter) const;
@@ -53,6 +58,7 @@ private:
     void applyGradient(QImage& image, const QRectF& rect, double intensity = 0.18);
 
     int m_tileSize;
+    TileStyle m_style;
     QString m_letterFontFamily;  // ClearSans-Bold
     QString m_valueFontFamily;   // Roboto-Bold
     QMap<char, QPixmap> m_letterTiles;    // A-Z
