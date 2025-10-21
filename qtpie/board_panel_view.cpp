@@ -39,16 +39,9 @@ static QWidget* createPlaceholder(const QString &text, const QColor &bgColor = Q
 BoardPanelView::BoardPanelView(QWidget *parent)
     : QWidget(parent)
     , game(nullptr)
-    , dragTilePreview(nullptr)
 {
     // Accept drops to act as a catch-all for drags
     setAcceptDrops(true);
-
-    // Create drag tile preview overlay (initially hidden)
-    dragTilePreview = new QLabel(this);
-    dragTilePreview->setVisible(false);
-    dragTilePreview->setAttribute(Qt::WA_TransparentForMouseEvents);  // Don't interfere with drag events
-    dragTilePreview->raise();  // Always on top
 
     // Enforce minimum size to prevent container from shrinking smaller than board
     // Board minimum: 20px * 15 + margins = 322px
@@ -122,31 +115,30 @@ BoardPanelView::BoardPanelView(QWidget *parent)
 
     // Connect rack drag position updates to show preview overlay
     connect(rackView, &RackView::dragPositionChanged, this, [this](const QPoint &pos, QChar tileChar) {
-        // Store the start position when drag first begins (when preview becomes visible)
-        if (!dragTilePreview->isVisible()) {
+        // Store the start position and char when drag first begins
+        if (m_currentDragChar.isNull()) {
             dragStartPosition = pos;
+            m_currentDragChar = tileChar;
         }
         updateDragTilePreview(pos, tileChar);
     });
 
-    // Connect rack drag end to animate or hide preview
+    // Connect rack drag end to hide preview
     connect(rackView, &RackView::dragEnded, this, [this](Qt::DropAction result) {
-        if (dragTilePreview && dragTilePreview->isVisible()) {
-            if (result == Qt::IgnoreAction) {
-                // Failed drop - animate back to original position
-                animatePreviewBackToRack();
-            } else {
-                // Successful drop - hide immediately
-                QRect previewRect = dragTilePreview->geometry();
-                dragTilePreview->setVisible(false);
-                update(previewRect);
-            }
+        m_currentDragChar = QChar();  // Reset drag char
+        if (result == Qt::IgnoreAction) {
+            // Failed drop - could animate back, but for now just hide
+            emit hideDragPreview();
+        } else {
+            // Successful drop - hide immediately
+            emit hideDragPreview();
         }
     });
 
     // Connect board drag start to show preview
     connect(boardView, &BoardView::tileDragStarted, this, [this](const QPoint &pos, QChar tileChar) {
         dragStartPosition = pos;
+        m_currentDragChar = tileChar;
         updateDragTilePreview(pos, tileChar);
     });
 
@@ -378,12 +370,8 @@ void BoardPanelView::dragLeaveEvent(QDragLeaveEvent *event) {
     // Restore cursor to default
     unsetCursor();
 
-    // Hide drag preview when leaving
-    if (dragTilePreview && dragTilePreview->isVisible()) {
-        QRect previewRect = dragTilePreview->geometry();
-        dragTilePreview->setVisible(false);
-        update(previewRect);
-    }
+    // Note: Don't hide preview here - MainWidget will keep it visible
+    // as long as we're still in the window
     QWidget::dragLeaveEvent(event);
 }
 
@@ -463,16 +451,32 @@ void BoardPanelView::dropEvent(QDropEvent *event) {
     // Restore cursor to default
     unsetCursor();
 
+    // Reset drag char
+    m_currentDragChar = QChar();
+
     // Hide drag preview
-    if (dragTilePreview && dragTilePreview->isVisible()) {
-        QRect previewRect = dragTilePreview->geometry();
-        dragTilePreview->setVisible(false);
-        update(previewRect);
+    emit hideDragPreview();
+}
+
+QPixmap BoardPanelView::renderTilePreview(QChar tileChar, int size) {
+    TileRenderer renderer(size, TileRenderer::TileStyle::Rack);
+
+    QPixmap tilePixmap;
+    if (tileChar == '?') {
+        tilePixmap = renderer.getBlankTile('A');
+    } else if (tileChar.isLower() && tileChar >= 'a' && tileChar <= 'z') {
+        tilePixmap = renderer.getBlankTile(tileChar.toLatin1());
+    } else if (tileChar.isUpper() && tileChar >= 'A' && tileChar <= 'Z') {
+        tilePixmap = renderer.getLetterTile(tileChar.toLatin1());
+    } else {
+        // Unknown character - use a placeholder
+        tilePixmap = renderer.getLetterTile('?');
     }
+    return tilePixmap;
 }
 
 void BoardPanelView::updateDragTilePreview(const QPoint &pos, QChar tileChar) {
-    if (!dragTilePreview || !rackView || !boardView) {
+    if (!rackView || !boardView) {
         return;
     }
 
@@ -540,38 +544,16 @@ void BoardPanelView::updateDragTilePreview(const QPoint &pos, QChar tileChar) {
     }
 
     // Render the actual tile at the interpolated size
-    TileRenderer renderer(interpolatedSize, TileRenderer::TileStyle::Rack);
+    QPixmap tilePixmap = renderTilePreview(tileChar, interpolatedSize);
 
-    QPixmap tilePixmap;
-    if (tileChar == '?') {
-        tilePixmap = renderer.getBlankTile('A');
-    } else if (tileChar.isLower() && tileChar >= 'a' && tileChar <= 'z') {
-        tilePixmap = renderer.getBlankTile(tileChar.toLatin1());
-    } else if (tileChar.isUpper() && tileChar >= 'A' && tileChar <= 'Z') {
-        tilePixmap = renderer.getLetterTile(tileChar.toLatin1());
-    } else {
-        // Unknown character - use a placeholder
-        tilePixmap = renderer.getLetterTile('?');
-    }
+    // Convert local position to global for MainWidget
+    QPoint globalPos = mapToGlobal(pos);
 
-    // Position the preview centered on cursor
-    // IMPORTANT: Resize the QLabel to match the pixmap size to prevent cropping
-    dragTilePreview->setPixmap(tilePixmap);
-    dragTilePreview->resize(interpolatedSize, interpolatedSize);
-    dragTilePreview->move(pos.x() - interpolatedSize / 2, pos.y() - interpolatedSize / 2);
-    dragTilePreview->setVisible(true);
-    dragTilePreview->raise();
+    // Emit signal to update preview at top level
+    emit updateDragPreview(tilePixmap, globalPos);
 }
 
 void BoardPanelView::animatePreviewBackToRack() {
-    if (!dragTilePreview || !dragTilePreview->isVisible()) {
-        return;
-    }
-
-    // Just immediately snap back to rack position without animation
-    // This is simpler and faster than trying to animate both size and position
-    // while also re-rendering the tile at different sizes
-    QRect previewRect = dragTilePreview->geometry();
-    dragTilePreview->setVisible(false);
-    update(previewRect);
+    // Just hide the preview - animation could be added later
+    emit hideDragPreview();
 }

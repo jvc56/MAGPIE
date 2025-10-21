@@ -9,6 +9,11 @@
 #include <QAction>
 #include <QTextEdit>
 #include <QFont>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDragLeaveEvent>
+#include <QDropEvent>
+#include <QMimeData>
 
 #include "magpie_wrapper.h"
 #include "board_panel_view.h"
@@ -21,9 +26,18 @@ public:
     MainWidget(QWidget* parent = nullptr) : QMainWindow(parent) {
       printf("QtPie starting...\n");
 
+      // Accept drops at top level to allow dragging anywhere
+      setAcceptDrops(true);
+
       contentWidget = new QWidget;
 
       boardPanelView = new BoardPanelView(this);
+
+      // Create drag tile preview overlay at top level (initially hidden)
+      dragTilePreview = new QLabel(this);
+      dragTilePreview->setVisible(false);
+      dragTilePreview->setAttribute(Qt::WA_TransparentForMouseEvents);  // Don't interfere with drag events
+      dragTilePreview->raise();  // Always on top
 
       // Create stdout/History text view
       historyTextView = new QTextEdit;
@@ -60,6 +74,12 @@ public:
       // Connect board changes to print updated board
       connect(boardPanelView, &BoardPanelView::boardChanged,
               this, &MainWidget::printBoard);
+
+      // Connect drag preview signals from board panel
+      connect(boardPanelView, &BoardPanelView::updateDragPreview,
+              this, &MainWidget::onUpdateDragPreview);
+      connect(boardPanelView, &BoardPanelView::hideDragPreview,
+              this, &MainWidget::onHideDragPreview);
 
       scrollArea = new QScrollArea(this);
       scrollArea->setWidget(contentWidget);
@@ -142,9 +162,62 @@ protected:
         layout->updateLayout();
     }
 
+    // Drag events to keep preview visible across entire window
+    void dragEnterEvent(QDragEnterEvent *event) override {
+        if (event->mimeData()->hasText()) {
+            event->accept();
+        } else {
+            QMainWindow::dragEnterEvent(event);
+        }
+    }
+
+    void dragMoveEvent(QDragMoveEvent *event) override {
+        if (event->mimeData()->hasText()) {
+            event->accept();
+            // The preview will be updated by BoardPanelView's dragMoveEvent
+        } else {
+            QMainWindow::dragMoveEvent(event);
+        }
+    }
+
+    void dragLeaveEvent(QDragLeaveEvent *event) override {
+        // Hide preview when leaving window entirely
+        if (dragTilePreview && dragTilePreview->isVisible()) {
+            dragTilePreview->setVisible(false);
+        }
+        QMainWindow::dragLeaveEvent(event);
+    }
+
+    void dropEvent(QDropEvent *event) override {
+        // Ignore drops at this level - let child widgets handle them
+        event->ignore();
+        QMainWindow::dropEvent(event);
+    }
+
 private slots:
     void toggleLayoutOverlay(bool show) {
         layout->setDebugOverlayVisible(show);
+    }
+
+    void onUpdateDragPreview(const QPixmap &tilePixmap, const QPoint &globalPos) {
+        if (!dragTilePreview) return;
+
+        // Convert global position to this widget's coordinates
+        QPoint localPos = mapFromGlobal(globalPos);
+
+        // Update preview
+        dragTilePreview->setPixmap(tilePixmap);
+        dragTilePreview->resize(tilePixmap.size());
+        dragTilePreview->move(localPos.x() - tilePixmap.width() / 2,
+                             localPos.y() - tilePixmap.height() / 2);
+        dragTilePreview->setVisible(true);
+        dragTilePreview->raise();
+    }
+
+    void onHideDragPreview() {
+        if (dragTilePreview && dragTilePreview->isVisible()) {
+            dragTilePreview->setVisible(false);
+        }
     }
 
 private:
@@ -155,6 +228,7 @@ private:
     QTextEdit *historyTextView;
     QTextEdit *debugTextView;
     ResponsiveLayout *layout;
+    QLabel *dragTilePreview;  // Top-level drag preview overlay
 
     QWidget* createWidget(const QString &title) {
         QWidget *w = new QWidget;

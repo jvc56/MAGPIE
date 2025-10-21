@@ -32,6 +32,8 @@ protected:
 signals:
     void debugMessage(const QString &msg);
     void boardChanged();  // Emitted when MAGPIE board is updated
+    void updateDragPreview(const QPixmap &tilePixmap, const QPoint &globalPos);  // Update drag preview at global position
+    void hideDragPreview();  // Hide drag preview
 
 private slots:
     void onCgpTextChanged();
@@ -39,6 +41,7 @@ private slots:
 private:
     void updateDragTilePreview(const QPoint &pos, QChar tileChar);
     void animatePreviewBackToRack();
+    QPixmap renderTilePreview(QChar tileChar, int size);
 
     BoardView *boardView;
     RackView *rackView;
@@ -46,9 +49,9 @@ private:
     QTextEdit *debugOutput;
     Game *game;
 
-    // Drag preview overlay
-    QLabel *dragTilePreview;
+    // Drag state
     QPoint dragStartPosition;  // Original position of tile in rack (in BoardPanelView coordinates)
+    QChar m_currentDragChar;  // Character being dragged
 
     // Board-to-board drag tracking
     int m_dragSourceRow = -1;  // Source row for board-to-board drags (-1 if not board drag)
