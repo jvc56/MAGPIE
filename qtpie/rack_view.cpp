@@ -349,7 +349,8 @@ void RackView::mouseMoveEvent(QMouseEvent *event) {
             emit debugMessage("Starting drag with MoveAction | IgnoreAction");
 
             // Execute the drag - support both Move and Ignore actions
-            Qt::DropAction dropAction = drag->exec(Qt::MoveAction | Qt::IgnoreAction);
+            // Use IgnoreAction as default to disable snap-back animation on rejected drops
+            Qt::DropAction dropAction = drag->exec(Qt::MoveAction | Qt::IgnoreAction, Qt::IgnoreAction);
 
             QString actionName;
             if (dropAction == Qt::MoveAction) actionName = "MoveAction";

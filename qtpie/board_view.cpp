@@ -412,7 +412,8 @@ void BoardView::mouseMoveEvent(QMouseEvent *event) {
                 emit tileDragStarted(mapToParent(event->pos()), tileChar);
 
                 // Execute the drag
-                Qt::DropAction dropAction = drag->exec(Qt::MoveAction | Qt::IgnoreAction);
+                // Use IgnoreAction as default to disable snap-back animation on rejected drops
+                Qt::DropAction dropAction = drag->exec(Qt::MoveAction | Qt::IgnoreAction, Qt::IgnoreAction);
 
                 // If drop succeeded, the tile was already removed by the drop handler
                 // If drop failed, tile stays where it is
