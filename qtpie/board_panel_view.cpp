@@ -144,6 +144,17 @@ BoardPanelView::BoardPanelView(QWidget *parent)
         }
     });
 
+    // Connect board drag start to show preview
+    connect(boardView, &BoardView::tileDragStarted, this, [this](const QPoint &pos, QChar tileChar) {
+        dragStartPosition = pos;
+        updateDragTilePreview(pos, tileChar);
+    });
+
+    // Connect rack accepting board tile to remove it from board
+    connect(rackView, &RackView::boardTileReturned, this, [this](int row, int col) {
+        boardView->removeUncommittedTile(row, col);
+    });
+
     // Placeholder for controls beneath the rack
     QWidget *controlsPlaceholder = createPlaceholder("Controls");
     controlsPlaceholder->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -222,24 +233,54 @@ void BoardPanelView::dragEnterEvent(QDragEnterEvent *event) {
                      .arg(event->mimeData()->hasText())
                      .arg(event->source() ? event->source()->objectName() : "null"));
 
-    // Check if this is a tile drag from RackView
+    // Check if this is a tile drag from RackView or BoardView
     if (event->mimeData()->hasText()) {
-        emit debugMessage("BoardPanelView::dragEnter - accepting with IgnoreAction (forbidden cursor)");
+        emit debugMessage("BoardPanelView::dragEnter - accepting drag");
 
-        // Accept with IgnoreAction to receive dragMoveEvents but show forbidden cursor
-        event->setDropAction(Qt::IgnoreAction);
+        // Accept the drag
         event->accept();
-
-        // Set system forbidden cursor immediately on enter
-        QGuiApplication::setOverrideCursor(Qt::ForbiddenCursor);
-        emit debugMessage("Set override cursor to ForbiddenCursor on dragEnter");
 
         // Show drag preview - extract tile character from mime data
         QPoint globalPos = event->position().toPoint();
         QString mimeText = event->mimeData()->text();
         QStringList parts = mimeText.split(':');
-        if (parts.size() >= 2) {
-            updateDragTilePreview(globalPos, parts[1][0]);
+
+        QChar tileChar;
+        if (mimeText.startsWith("board:")) {
+            // Board drag format: "board:row:col:char"
+            if (parts.size() >= 4) {
+                tileChar = parts[3][0];
+                // Set ghost tile at original board position
+                int row = parts[1].toInt();
+                int col = parts[2].toInt();
+                boardView->setGhostTile(row, col, tileChar);
+
+                // Track source position for board-to-board drags
+                // Only set it if not already set (don't update on re-entry)
+                if (m_dragSourceRow == -1 && m_dragSourceCol == -1) {
+                    m_dragSourceRow = row;
+                    m_dragSourceCol = col;
+                    emit debugMessage(QString("  -> Set drag source to (%1,%2)").arg(row).arg(col));
+                } else {
+                    emit debugMessage(QString("  -> Drag source already set to (%1,%2), keeping it")
+                                     .arg(m_dragSourceRow).arg(m_dragSourceCol));
+                }
+            }
+        } else {
+            // Rack drag format: "index:char"
+            if (parts.size() >= 2) {
+                tileChar = parts[1][0];
+            }
+            // Clear source position for rack drags (only if not already cleared)
+            if (m_dragSourceRow != -1 || m_dragSourceCol != -1) {
+                m_dragSourceRow = -1;
+                m_dragSourceCol = -1;
+                emit debugMessage("  -> Cleared drag source (rack drag)");
+            }
+        }
+
+        if (!tileChar.isNull()) {
+            updateDragTilePreview(globalPos, tileChar);
         }
     } else {
         // Not our drag - let it propagate
@@ -256,41 +297,62 @@ void BoardPanelView::dragMoveEvent(QDragMoveEvent *event) {
         int row, col;
         boardView->getBoardCoordinates(boardLocalPos, row, col);
 
-        bool overValidSquare = false;
-        if (row >= 0 && col >= 0 && boardView->isSquareEmpty(row, col)) {
-            // Dragging over an empty square on the board - allow drop
-            overValidSquare = true;
+        // Check if this is the source square (where we picked up the tile from)
+        bool isSourceSquare = (row >= 0 && col >= 0 &&
+                              row == m_dragSourceRow && col == m_dragSourceCol);
+        bool isEmpty = (row >= 0 && col >= 0 && boardView->isSquareEmpty(row, col));
+
+        // Only process cursor changes if we've moved to a different square
+        bool squareChanged = (row != m_lastHoverRow || col != m_lastHoverCol);
+
+        emit debugMessage(QString("dragMove: pos=(%1,%2) row=%3 col=%4 isEmpty=%5 isSource=%6 changed=%7")
+                         .arg(globalPos.x()).arg(globalPos.y())
+                         .arg(row).arg(col).arg(isEmpty).arg(isSourceSquare).arg(squareChanged));
+
+        if (row >= 0 && col >= 0 && (isEmpty || isSourceSquare)) {
+            // Dragging over an empty square OR the source square - allow drop
             event->setDropAction(Qt::MoveAction);
             event->accept();
 
-            // Show normal cursor
-            while (QGuiApplication::overrideCursor()) {
-                QGuiApplication::restoreOverrideCursor();
+            if (squareChanged) {
+                emit debugMessage("  -> Valid drop: showing green outline");
             }
 
             // Update board hover square to show green outline
             boardView->setHoverSquare(row, col);
         } else {
-            // Not over a valid square - forbidden cursor
+            // Over an occupied square or outside board - don't allow drop
             event->setDropAction(Qt::IgnoreAction);
             event->accept();
 
-            // Set forbidden cursor
-            if (!QGuiApplication::overrideCursor() ||
-                QGuiApplication::overrideCursor()->shape() != Qt::ForbiddenCursor) {
-                QGuiApplication::setOverrideCursor(Qt::ForbiddenCursor);
-            }
-
-            // Clear board hover square
+            // Clear board hover square (no visual feedback for invalid drops)
             boardView->setHoverSquare(-1, -1);
         }
+
+        // Update last hover position
+        m_lastHoverRow = row;
+        m_lastHoverCol = col;
 
         // Update drag tile preview with size interpolation
         // Extract the tile character from mime data
         QString mimeText = event->mimeData()->text();
         QStringList parts = mimeText.split(':');
-        if (parts.size() >= 2) {
-            updateDragTilePreview(globalPos, parts[1][0]);
+
+        QChar tileChar;
+        if (mimeText.startsWith("board:")) {
+            // Board drag format: "board:row:col:char"
+            if (parts.size() >= 4) {
+                tileChar = parts[3][0];
+            }
+        } else {
+            // Rack drag format: "index:char"
+            if (parts.size() >= 2) {
+                tileChar = parts[1][0];
+            }
+        }
+
+        if (!tileChar.isNull()) {
+            updateDragTilePreview(globalPos, tileChar);
         }
     } else {
         // Not our drag - let it propagate
@@ -301,6 +363,20 @@ void BoardPanelView::dragMoveEvent(QDragMoveEvent *event) {
 void BoardPanelView::dragLeaveEvent(QDragLeaveEvent *event) {
     // Clear hover square when drag leaves
     boardView->setHoverSquare(-1, -1);
+
+    // Clear ghost tile
+    boardView->clearGhostTile();
+
+    // Clear drag source tracking
+    m_dragSourceRow = -1;
+    m_dragSourceCol = -1;
+
+    // Clear hover tracking
+    m_lastHoverRow = -1;
+    m_lastHoverCol = -1;
+
+    // Restore cursor to default
+    unsetCursor();
 
     // Hide drag preview when leaving
     if (dragTilePreview && dragTilePreview->isVisible()) {
@@ -322,7 +398,31 @@ void BoardPanelView::dropEvent(QDropEvent *event) {
         // Valid drop on empty square
         QString mimeText = event->mimeData()->text();
         QStringList parts = mimeText.split(':');
-        if (parts.size() >= 2) {
+
+        // Handle board-to-board drops
+        if (mimeText.startsWith("board:")) {
+            // Format: "board:row:col:char"
+            if (parts.size() >= 4) {
+                int srcRow = parts[1].toInt();
+                int srcCol = parts[2].toInt();
+                QChar tileChar = parts[3][0];
+
+                emit debugMessage(QString("Moved tile '%1' from (%2,%3) to (%4,%5)")
+                                .arg(tileChar).arg(srcRow).arg(srcCol).arg(row).arg(col));
+
+                // Remove from source position
+                boardView->removeUncommittedTile(srcRow, srcCol);
+
+                // Place at destination
+                boardView->placeUncommittedTile(row, col, tileChar);
+
+                // Accept the drop
+                event->setDropAction(Qt::MoveAction);
+                event->accept();
+            }
+        }
+        // Handle rack-to-board drops
+        else if (parts.size() >= 2) {
             int tileIndex = parts[0].toInt();
             QChar tileChar = parts[1][0];
 
@@ -338,7 +438,6 @@ void BoardPanelView::dropEvent(QDropEvent *event) {
             // Accept the drop
             event->setDropAction(Qt::MoveAction);
             event->accept();
-
         } else {
             event->ignore();
         }
@@ -349,6 +448,20 @@ void BoardPanelView::dropEvent(QDropEvent *event) {
 
     // Clear hover square
     boardView->setHoverSquare(-1, -1);
+
+    // Clear ghost tile
+    boardView->clearGhostTile();
+
+    // Clear drag source tracking
+    m_dragSourceRow = -1;
+    m_dragSourceCol = -1;
+
+    // Clear hover tracking
+    m_lastHoverRow = -1;
+    m_lastHoverCol = -1;
+
+    // Restore cursor to default
+    unsetCursor();
 
     // Hide drag preview
     if (dragTilePreview && dragTilePreview->isVisible()) {

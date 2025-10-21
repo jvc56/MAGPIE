@@ -24,6 +24,7 @@ signals:
     void rackChanged(const QString& newRack);
     void dragPositionChanged(const QPoint &globalPos, QChar tileChar);
     void dragEnded(Qt::DropAction result);
+    void boardTileReturned(int row, int col);  // Emitted when a board tile is dropped on rack
 
 protected:
     void paintEvent(QPaintEvent *event) override;

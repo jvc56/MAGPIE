@@ -47,9 +47,19 @@ public:
     // Check if a square has an uncommitted tile
     bool hasUncommittedTile(int row, int col) const;
 
+    // Set ghost tile position (shows dimmed tile during drag) - (-1, -1) to clear
+    void setGhostTile(int row, int col, QChar letter);
+    void clearGhostTile();
+
+signals:
+    void tileDragStarted(const QPoint &globalPos, QChar tileChar);
+
 protected:
     void paintEvent(QPaintEvent *event) override;
     void resizeEvent(QResizeEvent* event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
 
 private:
     void renderBoard();
@@ -72,6 +82,16 @@ private:
     int m_hoverRow = -1;  // Row of square being hovered over during drag (-1 = none)
     int m_hoverCol = -1;  // Column of square being hovered over during drag (-1 = none)
     QVector<UncommittedTile> m_uncommittedTiles;  // Tiles placed but not committed
+
+    // Drag state for dragging from board
+    int m_draggedRow = -1;
+    int m_draggedCol = -1;
+    QPoint m_dragStartPos;
+
+    // Ghost tile state (shows dimmed tile at original position during drag)
+    int m_ghostRow = -1;
+    int m_ghostCol = -1;
+    QChar m_ghostLetter;
 };
 
 #endif // BOARD_VIEW_H

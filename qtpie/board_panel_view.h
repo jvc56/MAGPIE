@@ -49,6 +49,14 @@ private:
     // Drag preview overlay
     QLabel *dragTilePreview;
     QPoint dragStartPosition;  // Original position of tile in rack (in BoardPanelView coordinates)
+
+    // Board-to-board drag tracking
+    int m_dragSourceRow = -1;  // Source row for board-to-board drags (-1 if not board drag)
+    int m_dragSourceCol = -1;  // Source col for board-to-board drags (-1 if not board drag)
+
+    // Track last hover square to avoid redundant cursor changes
+    int m_lastHoverRow = -1;
+    int m_lastHoverCol = -1;
 };
 
 #endif // BOARD_PANEL_VIEW_H

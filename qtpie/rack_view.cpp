@@ -94,8 +94,9 @@ RackView::RackView(QWidget *parent)
 
 void RackView::setRack(const QString& rack) {
     emit debugMessage(QString("RackView::setRack called with: '%1'").arg(rack));
-    m_rack = rack;
-    emit debugMessage(QString("m_rack is now: '%1', isEmpty: %2").arg(m_rack).arg(m_rack.isEmpty()));
+    // Always maintain rack as exactly 7 characters, padding with spaces if needed
+    m_rack = rack.leftJustified(7, ' ');
+    emit debugMessage(QString("m_rack is now: '%1', isEmpty: %2, length: %3").arg(m_rack).arg(m_rack.isEmpty()).arg(m_rack.length()));
     update();
 }
 
@@ -145,6 +146,8 @@ void RackView::paintEvent(QPaintEvent *) {
     // Center the rack horizontally
     int startX = getStartX();
 
+    emit debugMessage(QString("  Paint: startX=%1, tileSize=%2, tileCount=%3").arg(startX).arg(m_tileSize).arg(tileCount));
+
     // Create tile renderer with current tile size (using Rack style for green tiles)
     TileRenderer renderer(m_tileSize, TileRenderer::TileStyle::Rack);
 
@@ -163,14 +166,16 @@ void RackView::paintEvent(QPaintEvent *) {
             // Regular letter tile
             tilePixmap = renderer.getLetterTile(c.toLatin1());
         } else {
+            emit debugMessage(QString("  Skipping slot %1: char='%2' (space or invalid)").arg(i).arg(c));
             continue;  // Skip invalid characters
         }
 
         int x = startX + i * m_tileSize;
+        emit debugMessage(QString("  Drawing slot %1: char='%2' at x=%3").arg(i).arg(c).arg(x));
 
         // Dim the tile if it's being dragged
         if (m_draggedTileIndex == i) {
-            painter.setOpacity(0.3);
+            painter.setOpacity(0.4);
             painter.drawPixmap(x, 0, tilePixmap);
             painter.setOpacity(1.0);
         } else {
@@ -179,7 +184,7 @@ void RackView::paintEvent(QPaintEvent *) {
     }
 
     // Draw drop indicator (insertion caret) if we're in a drag operation
-    if (m_dropIndicatorPosition >= 0 && m_draggedTileIndex >= 0) {
+    if (m_dropIndicatorPosition >= 0) {
             int caretX;
             if (m_dropIndicatorPosition == 0) {
                 // Before first tile
@@ -312,6 +317,10 @@ void RackView::mouseMoveEvent(QMouseEvent *event) {
             QChar c = m_rack[m_draggedTileIndex];
             m_draggedTileChar = c;
 
+            // Immediately repaint to show the ghost tile
+            update();
+            QCoreApplication::processEvents();  // Force immediate repaint
+
             // Create tile renderer and get the tile pixmap (using Rack style for green tiles)
             TileRenderer renderer(m_tileSize, TileRenderer::TileStyle::Rack);
             QPixmap tilePixmap;
@@ -376,21 +385,37 @@ void RackView::mouseReleaseEvent(QMouseEvent *event) {
 }
 
 void RackView::dragEnterEvent(QDragEnterEvent *event) {
-    // Accept drags from ourselves with MoveAction
-    if (event->source() == this) {
-        emit debugMessage("dragEnter - accepting with MoveAction, restoring cursor");
-        event->setDropAction(Qt::MoveAction);
-        event->accept();
+    // Accept drags from ourselves or from board
+    if (event->mimeData()->hasText()) {
+        QString mimeText = event->mimeData()->text();
 
-        // Restore cursor when re-entering the rack
-        while (QGuiApplication::overrideCursor()) {
-            QGuiApplication::restoreOverrideCursor();
+        // Check if this is a rack drag or board drag
+        if (event->source() == this || mimeText.startsWith("board:")) {
+            emit debugMessage("dragEnter - accepting with MoveAction, restoring cursor");
+            event->setDropAction(Qt::MoveAction);
+            event->accept();
+
+            // Restore cursor when re-entering the rack
+            while (QGuiApplication::overrideCursor()) {
+                QGuiApplication::restoreOverrideCursor();
+            }
+
+            // Clear any existing drop indicator when entering from board
+            // (board drags don't show carets)
+            if (mimeText.startsWith("board:") && m_dropIndicatorPosition != -1) {
+                m_dropIndicatorPosition = -1;
+                update();
+            }
         }
     }
 }
 
 void RackView::dragMoveEvent(QDragMoveEvent *event) {
-    if (event->source() != this) {
+    // Check if this is a board-to-rack drag
+    QString mimeText = event->mimeData()->text();
+    bool isBoardDrag = mimeText.startsWith("board:");
+
+    if (event->source() != this && !isBoardDrag) {
         event->setDropAction(Qt::IgnoreAction);
         event->accept();
         return;
@@ -425,54 +450,145 @@ void RackView::dragMoveEvent(QDragMoveEvent *event) {
     int tileCount = qMin(m_rack.length(), 7);
     int dragX = event->position().x();
 
-    // Calculate what position the dragged tile would be in after sorting by X
-    int newPosition = m_draggedTileIndex;
-    for (int i = 0; i < tileCount; ++i) {
-        if (i == m_draggedTileIndex) continue;
-
-        int tileCenterX = startX + i * m_tileSize + m_tileSize / 2;
-
-        if (dragX < tileCenterX && i < m_draggedTileIndex) {
-            // Dragged tile is left of this tile's center, and this tile is currently before us
-            newPosition = i;
-            break;
-        } else if (dragX > tileCenterX && i > m_draggedTileIndex) {
-            // Dragged tile is right of this tile's center, and this tile is currently after us
-            newPosition = i;
-        }
-    }
-
-    emit debugMessage(QString("dragX=%1, draggedTile=%2, newPosition=%3")
-                     .arg(dragX).arg(m_draggedTileIndex).arg(newPosition));
-
-    // Show caret only if the ordering would change
-    if (newPosition != m_draggedTileIndex) {
-        // Calculate caret position based on where tile would be inserted
-        int caretPos = (newPosition < m_draggedTileIndex) ? newPosition : newPosition + 1;
-
-        if (m_dropIndicatorPosition != caretPos) {
-            m_dropIndicatorPosition = caretPos;
-            emit debugMessage(QString("Showing caret at position: %1").arg(caretPos));
+    if (isBoardDrag) {
+        // Board-to-rack: Don't show caret for board drags (we're filling slots, not inserting)
+        if (m_dropIndicatorPosition != -1) {
+            m_dropIndicatorPosition = -1;
             update();
         }
     } else {
-        // No change in ordering - hide caret
-        if (m_dropIndicatorPosition != -1) {
-            m_dropIndicatorPosition = -1;
-            emit debugMessage("Hiding caret - no position change");
-            update();
+        // Rack-to-rack: Calculate what position the dragged tile would be in after sorting by X
+        // Find which slot we're hovering over
+        int dropIndex = -1;
+        for (int i = 0; i < tileCount; ++i) {
+            int tileX = startX + i * m_tileSize;
+            int tileEndX = tileX + m_tileSize;
+            if (dragX >= tileX && dragX < tileEndX) {
+                dropIndex = i;
+                break;
+            }
+        }
+
+        // Check if the drop spot is empty
+        bool dropOnEmpty = (dropIndex >= 0 && dropIndex < m_rack.length() && m_rack[dropIndex] == ' ');
+
+        if (dropOnEmpty) {
+            // Dropping on an empty spot - no tiles will be pushed, so no caret
+            if (m_dropIndicatorPosition != -1) {
+                m_dropIndicatorPosition = -1;
+                emit debugMessage("Hiding caret - dropping on empty spot");
+                update();
+            }
+        } else {
+            // Dropping on a tile - calculate new position based on sort order
+            int newPosition = m_draggedTileIndex;
+            for (int i = 0; i < tileCount; ++i) {
+                if (i == m_draggedTileIndex) continue;
+
+                int tileCenterX = startX + i * m_tileSize + m_tileSize / 2;
+
+                if (dragX < tileCenterX && i < m_draggedTileIndex) {
+                    // Dragged tile is left of this tile's center, and this tile is currently before us
+                    newPosition = i;
+                    break;
+                } else if (dragX > tileCenterX && i > m_draggedTileIndex) {
+                    // Dragged tile is right of this tile's center, and this tile is currently after us
+                    newPosition = i;
+                }
+            }
+
+            emit debugMessage(QString("dragX=%1, draggedTile=%2, newPosition=%3")
+                             .arg(dragX).arg(m_draggedTileIndex).arg(newPosition));
+
+            // Show caret only if the ordering would change
+            if (newPosition != m_draggedTileIndex) {
+                // Calculate caret position based on where tile would be inserted
+                int caretPos = (newPosition < m_draggedTileIndex) ? newPosition : newPosition + 1;
+
+                if (m_dropIndicatorPosition != caretPos) {
+                    m_dropIndicatorPosition = caretPos;
+                    emit debugMessage(QString("Showing caret at position: %1").arg(caretPos));
+                    update();
+                }
+            } else {
+                // No change in ordering - hide caret
+                if (m_dropIndicatorPosition != -1) {
+                    m_dropIndicatorPosition = -1;
+                    emit debugMessage("Hiding caret - no position change");
+                    update();
+                }
+            }
         }
     }
 }
 
 void RackView::dropEvent(QDropEvent *event) {
+    QString text = event->mimeData()->text();
+    QStringList parts = text.split(':');
+
+    // Handle board-to-rack drops
+    if (text.startsWith("board:")) {
+        // Format: "board:row:col:char"
+        if (parts.size() >= 4) {
+            int srcRow = parts[1].toInt();
+            int srcCol = parts[2].toInt();
+            QChar draggedChar = parts[3][0];
+
+            // Find which tile position was dropped on based on X coordinate
+            int startX = getStartX();
+            int tileCount = qMin(m_rack.length(), 7);
+            int dragX = event->position().x();
+
+            emit debugMessage(QString("Board-to-rack drop: dragX=%1, startX=%2, tileSize=%3, tileCount=%4")
+                            .arg(dragX).arg(startX).arg(m_tileSize).arg(tileCount));
+            emit debugMessage(QString("  Current rack before drop: '%1' (length=%2)").arg(m_rack).arg(m_rack.length()));
+
+            int dropIndex = -1;
+            for (int i = 0; i < tileCount; ++i) {
+                int tileX = startX + i * m_tileSize;
+                int tileEndX = tileX + m_tileSize;
+                emit debugMessage(QString("  Slot %1: tileX=%2 to %3, char='%4'")
+                                .arg(i).arg(tileX).arg(tileEndX).arg(m_rack[i]));
+                if (dragX >= tileX && dragX < tileEndX) {
+                    dropIndex = i;
+                    emit debugMessage(QString("  -> Drop hit slot %1!").arg(i));
+                    break;
+                }
+            }
+
+            if (dropIndex >= 0 && dropIndex < m_rack.length()) {
+                QChar oldChar = m_rack[dropIndex];
+                // Replace the tile at this position (could be empty or another tile)
+                m_rack[dropIndex] = draggedChar;
+                emit rackChanged(m_rack);
+                emit debugMessage(QString("Returned tile '%1' from board to rack position %2 (was '%3')")
+                                .arg(draggedChar).arg(dropIndex).arg(oldChar));
+                emit debugMessage(QString("  Rack after drop: '%1'").arg(m_rack));
+            } else {
+                emit debugMessage(QString("Drop outside valid rack positions (dragX=%1, dropIndex=%2)").arg(dragX).arg(dropIndex));
+            }
+
+            event->setDropAction(Qt::MoveAction);
+            event->accept();
+
+            // Notify that we need to remove the tile from the board
+            emit boardTileReturned(srcRow, srcCol);
+
+            // Emit dragEnded so the preview gets hidden
+            emit dragEnded(Qt::MoveAction);
+        }
+
+        // Clear drop indicator (in case it was set during drag)
+        m_dropIndicatorPosition = -1;
+        update();
+        return;
+    }
+
+    // Handle rack-to-rack reordering
     if (event->source() != this) {
         return;
     }
 
-    // Parse the mime data to get source index
-    QString text = event->mimeData()->text();
-    QStringList parts = text.split(':');
     if (parts.size() != 2) {
         return;
     }
@@ -534,7 +650,8 @@ void RackView::dragLeaveEvent(QDragLeaveEvent *event) {
 
 void RackView::removeTileAtIndex(int index) {
     if (index >= 0 && index < m_rack.length()) {
-        m_rack.remove(index, 1);
+        // Replace tile with space to leave a gap instead of removing
+        m_rack[index] = ' ';
         emit rackChanged(m_rack);
         update();
     }

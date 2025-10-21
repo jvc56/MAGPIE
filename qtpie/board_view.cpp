@@ -3,6 +3,9 @@
 #include "tile_renderer.h"
 #include <QPainter>
 #include <QResizeEvent>
+#include <QMouseEvent>
+#include <QDrag>
+#include <QMimeData>
 
 BoardView::BoardView(QWidget *parent)
     : QWidget(parent)
@@ -209,6 +212,11 @@ void BoardView::paintEvent(QPaintEvent *) {
             // Use Rack style to render green tiles
             TileRenderer tileRenderer(m_squareSize, TileRenderer::TileStyle::Rack);
             for (const UncommittedTile &tile : m_uncommittedTiles) {
+                // Skip this tile if it's the ghost position (being dragged)
+                if (tile.row == m_ghostRow && tile.col == m_ghostCol) {
+                    continue;
+                }
+
                 int x = m_marginX + tile.col * m_squareSize;
                 int y = m_marginY + tile.row * m_squareSize;
 
@@ -228,7 +236,28 @@ void BoardView::paintEvent(QPaintEvent *) {
             }
         }
 
-        // Draw green hover outline if hovering over a valid empty square
+        // Draw ghost tile (dimmed version at original position during drag)
+        if (m_ghostRow >= 0 && m_ghostCol >= 0 && !m_ghostLetter.isNull()) {
+            TileRenderer tileRenderer(m_squareSize, TileRenderer::TileStyle::Rack);
+            int x = m_marginX + m_ghostCol * m_squareSize;
+            int y = m_marginY + m_ghostRow * m_squareSize;
+
+            QPixmap tilePixmap;
+            if (m_ghostLetter.isLower() && m_ghostLetter >= 'a' && m_ghostLetter <= 'z') {
+                // Blank tile with designated letter
+                tilePixmap = tileRenderer.getBlankTile(m_ghostLetter.toUpper().toLatin1());
+            } else if (m_ghostLetter.isUpper() && m_ghostLetter >= 'A' && m_ghostLetter <= 'Z') {
+                // Normal tile
+                tilePixmap = tileRenderer.getLetterTile(m_ghostLetter.toLatin1());
+            }
+
+            // Draw with 45% opacity to make it ghosted/dimmed
+            painter.setOpacity(0.45);
+            painter.drawPixmap(x, y, tilePixmap);
+            painter.setOpacity(1.0);  // Restore full opacity
+        }
+
+        // Draw green hover outline for valid drop target
         if (m_hoverRow >= 0 && m_hoverCol >= 0) {
             int x = m_marginX + m_hoverCol * m_squareSize;
             int y = m_marginY + m_hoverRow * m_squareSize;
@@ -320,4 +349,89 @@ bool BoardView::hasUncommittedTile(int row, int col) const {
         }
     }
     return false;
+}
+
+void BoardView::setGhostTile(int row, int col, QChar letter) {
+    m_ghostRow = row;
+    m_ghostCol = col;
+    m_ghostLetter = letter;
+    update();
+}
+
+void BoardView::clearGhostTile() {
+    m_ghostRow = -1;
+    m_ghostCol = -1;
+    update();
+}
+
+void BoardView::mousePressEvent(QMouseEvent *event) {
+    if (event->button() == Qt::LeftButton) {
+        int row, col;
+        getBoardCoordinates(event->pos(), row, col);
+
+        // Check if clicking on an uncommitted tile
+        if (row >= 0 && col >= 0 && hasUncommittedTile(row, col)) {
+            m_draggedRow = row;
+            m_draggedCol = col;
+            m_dragStartPos = event->pos();
+        }
+    }
+    QWidget::mousePressEvent(event);
+}
+
+void BoardView::mouseMoveEvent(QMouseEvent *event) {
+    if (m_draggedRow >= 0 && m_draggedCol >= 0) {
+        // Start dragging if moved more than a few pixels
+        if ((event->pos() - m_dragStartPos).manhattanLength() > 5) {
+            // Find the tile being dragged
+            QChar tileChar;
+            for (const UncommittedTile &tile : m_uncommittedTiles) {
+                if (tile.row == m_draggedRow && tile.col == m_draggedCol) {
+                    tileChar = tile.letter;
+                    break;
+                }
+            }
+
+            if (!tileChar.isNull()) {
+                // Create drag operation
+                QDrag *drag = new QDrag(this);
+                QMimeData *mimeData = new QMimeData;
+
+                // Store board position and character in format "board:row:col:char"
+                mimeData->setText(QString("board:%1:%2:%3")
+                                .arg(m_draggedRow).arg(m_draggedCol).arg(tileChar));
+                drag->setMimeData(mimeData);
+
+                // Use invisible pixmap (preview will be shown by overlay)
+                QPixmap invisiblePixmap(1, 1);
+                invisiblePixmap.fill(Qt::transparent);
+                drag->setPixmap(invisiblePixmap);
+                drag->setHotSpot(QPoint(0, 0));
+
+                // Emit signal so BoardPanelView can show preview
+                emit tileDragStarted(mapToParent(event->pos()), tileChar);
+
+                // Execute the drag
+                Qt::DropAction dropAction = drag->exec(Qt::MoveAction | Qt::IgnoreAction);
+
+                // If drop succeeded, the tile was already removed by the drop handler
+                // If drop failed, tile stays where it is
+
+                // Reset drag state
+                m_draggedRow = -1;
+                m_draggedCol = -1;
+                update();
+
+                return;
+            }
+        }
+    }
+    QWidget::mouseMoveEvent(event);
+}
+
+void BoardView::mouseReleaseEvent(QMouseEvent *event) {
+    // Reset drag state
+    m_draggedRow = -1;
+    m_draggedCol = -1;
+    QWidget::mouseReleaseEvent(event);
 }
