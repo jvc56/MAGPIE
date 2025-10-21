@@ -4,6 +4,7 @@ CMD_DIR := cmd
 OBJ_DIR := obj
 BIN_DIR := bin
 COV_DIR := cov
+LIB_DIR := lib
 
 SRC  := $(wildcard $(SRC_DIR)/**/*.c)
 TEST := $(wildcard $(TEST_DIR)/*.c)
@@ -11,6 +12,9 @@ CMD := $(wildcard $(CMD_DIR)/*.c)
 OBJ_SRC := $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/$(SRC_DIR)/%.o)
 OBJ_TEST := $(TEST:$(TEST_DIR)/%.c=$(OBJ_DIR)/$(TEST_DIR)/%.o)
 OBJ_CMD := $(CMD:$(CMD_DIR)/%.c=$(OBJ_DIR)/$(CMD_DIR)/%.o)
+
+# Explicitly exclude test.c (which has a main) for library builds
+OBJ_TEST_LIB := $(filter-out $(OBJ_DIR)/$(TEST_DIR)/test.o,$(OBJ_TEST))
 
 SRC_SUBDIRS := $(shell find $(SRC_DIR) -type d)
 SRC_OBJ_SUBDIRS := $(patsubst $(SRC_DIR)/%,$(OBJ_DIR)/$(SRC_DIR)/%,$(SRC_SUBDIRS))
@@ -52,6 +56,8 @@ ldflags.dll_dev := -Llib -pthread
 ldflags.dll_release := -Llib -pthread
 
 CFLAGS := ${cflags.${BUILD}}
+# Force release flags for libmagpie.a
+libmagpie.a: CFLAGS := ${cflags.release}
 
 ifndef BOARD_DIM
 BOARD_DIM = 15
@@ -80,6 +86,9 @@ magpie: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
 magpie_test: $(OBJ_SRC) $(OBJ_TEST) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
 
+libmagpie.a: $(OBJ_SRC) $(OBJ_TEST_LIB) | $(LIB_DIR)
+	ar rcs $(LIB_DIR)/$@ $^
+
 $(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(SRC_OBJ_SUBDIRS)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -90,11 +99,11 @@ $(OBJ_DIR)/$(CMD_DIR)/%.o: $(CMD_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(CMD_DIR)
 $(OBJ_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TEST_DIR) $(TEST_OBJ_SUBDIRS)
 	$(CC) $(if $(filter release,$(BUILD)),${cflags.test_release},$(CFLAGS)) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) -c $< -o $@
 
-$(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(SRC_OBJ_SUBDIRS) $(TEST_OBJ_SUBDIRS):
+$(BIN_DIR) $(OBJ_DIR) $(LIB_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(SRC_OBJ_SUBDIRS) $(TEST_OBJ_SUBDIRS):
 	mkdir -p $@
 
 clean:
-	@$(RM) -rv $(BIN_DIR) $(OBJ_DIR)
+	@$(RM) -rv $(BIN_DIR) $(OBJ_DIR) $(LIB_DIR)
 
 -include $(OBJ_SRC:.o=.d)
 -include $(OBJ_CMD:.o=.d)

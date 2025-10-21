@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" 
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Magpie</string>
+    <key>CFBundleDisplayName</key>
+    <string>Magpie</string>
+    <key>CFBundleIdentifier</key>
+    <string>org.example.Magpie</string>
+    <key>CFBundleExecutable</key>
+    <string>Magpie</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>10.10.0</string>
+</dict>
+</plist>

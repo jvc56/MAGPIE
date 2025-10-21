@@ -1,0 +1,13 @@
+# Qt build artifacts
+*.o
+moc_*.cpp
+moc_*.h
+*.moc
+Makefile
+.qmake.stash
+
+# Qt app bundle
+Magpie.app/
+
+# Build screenshots (keep source files)
+*.png
