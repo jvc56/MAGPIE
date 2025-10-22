@@ -168,10 +168,10 @@ void RackView::paintEvent(QPaintEvent *) {
 
         QPixmap tilePixmap;
         if (c == '?') {
-            // Blank tile (use any letter, e.g. 'A')
-            tilePixmap = m_tileRenderer->getBlankTile('A');
+            // Undesignated blank tile ('?' with 0 subscript)
+            tilePixmap = m_tileRenderer->getUndesignatedBlank();
         } else if (c.isLower() && c >= 'a' && c <= 'z') {
-            // Lowercase = blank tile showing this letter
+            // Lowercase = designated blank tile showing this letter in rounded rect
             tilePixmap = m_tileRenderer->getBlankTile(c.toLatin1());
         } else if (c.isUpper() && c >= 'A' && c <= 'Z') {
             // Regular letter tile
@@ -339,7 +339,7 @@ void RackView::mouseMoveEvent(QMouseEvent *event) {
             QPixmap tilePixmap;
 
             if (c == '?') {
-                tilePixmap = m_tileRenderer->getBlankTile('A');
+                tilePixmap = m_tileRenderer->getUndesignatedBlank();
             } else if (c.isLower() && c >= 'a' && c <= 'z') {
                 tilePixmap = m_tileRenderer->getBlankTile(c.toLatin1());
             } else if (c.isUpper() && c >= 'A' && c <= 'Z') {
@@ -667,6 +667,11 @@ void RackView::removeTileAtIndex(int index) {
 }
 
 void RackView::addTile(QChar tile) {
+    // Convert designated blanks (lowercase) back to undesignated ('?') when returning to rack
+    if (tile.isLower() && tile >= 'a' && tile <= 'z') {
+        tile = '?';
+    }
+
     // Find first empty space and add the tile there
     for (int i = 0; i < m_rack.length(); ++i) {
         if (m_rack[i] == ' ') {
@@ -682,4 +687,43 @@ void RackView::addTile(QChar tile) {
         emit rackChanged(m_rack);
         update();
     }
+}
+
+bool RackView::hasNaturalLetter(QChar letter) const {
+    QChar upperLetter = letter.toUpper();
+    for (const QChar &c : m_rack) {
+        if (c.toUpper() == upperLetter && c != '?') {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool RackView::hasBlank() const {
+    return m_rack.contains('?');
+}
+
+bool RackView::removeNaturalLetter(QChar letter) {
+    QChar upperLetter = letter.toUpper();
+    for (int i = 0; i < m_rack.length(); ++i) {
+        if (m_rack[i].toUpper() == upperLetter && m_rack[i] != '?') {
+            m_rack[i] = ' ';
+            emit rackChanged(m_rack);
+            update();
+            return true;
+        }
+    }
+    return false;
+}
+
+bool RackView::removeBlank() {
+    for (int i = 0; i < m_rack.length(); ++i) {
+        if (m_rack[i] == '?') {
+            m_rack[i] = ' ';
+            emit rackChanged(m_rack);
+            update();
+            return true;
+        }
+    }
+    return false;
 }

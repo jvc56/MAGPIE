@@ -25,6 +25,18 @@ public:
     // Add tile back to rack (for backspace in keyboard entry)
     void addTile(QChar tile);
 
+    // Check if rack has a natural (non-blank) letter
+    bool hasNaturalLetter(QChar letter) const;
+
+    // Check if rack has a blank
+    bool hasBlank() const;
+
+    // Remove first occurrence of natural letter from rack, return true if found
+    bool removeNaturalLetter(QChar letter);
+
+    // Remove first blank from rack, return true if found
+    bool removeBlank();
+
 signals:
     void debugMessage(const QString &msg);
     void rackChanged(const QString& newRack);

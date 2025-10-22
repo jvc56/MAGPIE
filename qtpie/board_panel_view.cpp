@@ -872,62 +872,105 @@ void BoardPanelView::keyPressEvent(QKeyEvent *event) {
                 return;
             }
 
-            // Check if we have this tile in the rack
-            QString rack = rackView->getRack();
-            int tileIndex = rack.indexOf(ch);
+            // Check if shift key is held (forces blank usage if available)
+            bool forceBlank = (event->modifiers() & Qt::ShiftModifier);
 
-            if (tileIndex >= 0) {
-                // Place the tile on the board
-                boardView->placeUncommittedTile(row, col, ch);
-                rackView->removeTileAtIndex(tileIndex);
-                emit debugMessage(QString("Placed '%1' at (%2, %3)").arg(ch).arg(row).arg(col));
-
-                // Move to next empty square (skip over already-placed tiles)
-                int nextRow = row;
-                int nextCol = col;
-                bool foundEmpty = false;
-
-                // Keep advancing until we find an empty square or go past the board edge
-                while (true) {
-                    if (dir == BoardView::Horizontal) {
-                        nextCol++;
+            // Determine which tile to use
+            if (forceBlank) {
+                // Shift held: prefer blank, fallback to natural
+                if (rackView->hasBlank()) {
+                    if (rackView->removeBlank()) {
+                        boardView->placeUncommittedTile(row, col, ch.toLower());
+                        emit debugMessage(QString("Placed blank as '%1' at (%2, %3) [shift]").arg(ch).arg(row).arg(col));
                     } else {
-                        nextRow++;
+                        emit debugMessage(QString("Failed to remove blank from rack"));
+                        event->accept();
+                        return;
                     }
-
-                    // If we've gone past position 15, stop at 15
-                    if (nextRow > 15 || nextCol > 15) {
-                        nextRow = qMin(nextRow, 15);
-                        nextCol = qMin(nextCol, 15);
-                        break;
+                } else if (rackView->hasNaturalLetter(ch)) {
+                    if (rackView->removeNaturalLetter(ch)) {
+                        boardView->placeUncommittedTile(row, col, ch);
+                        emit debugMessage(QString("Placed natural '%1' at (%2, %3) [shift, no blank available]").arg(ch).arg(row).arg(col));
+                    } else {
+                        emit debugMessage(QString("Failed to remove natural '%1' from rack").arg(ch));
+                        event->accept();
+                        return;
                     }
-
-                    // If we're at position 15 (off board edge), stop there with caret
-                    if (nextRow == 15 || nextCol == 15) {
-                        break;
-                    }
-
-                    // If this square is empty, we found our target
-                    if (boardView->isSquareEmpty(nextRow, nextCol)) {
-                        foundEmpty = true;
-                        break;
-                    }
-
-                    // Otherwise, this square has a tile - keep looking
-                }
-
-                // Move cursor to the next position (can be 0-15)
-                boardView->setKeyboardEntry(nextRow, nextCol, dir);
-
-                if (foundEmpty) {
-                    emit debugMessage(QString("Advanced to next empty square (%1, %2)").arg(nextRow).arg(nextCol));
-                } else if (nextRow == 15 || nextCol == 15) {
-                    emit debugMessage(QString("Advanced to position 15 - insertion caret at edge").arg(nextRow).arg(nextCol));
                 } else {
-                    emit debugMessage(QString("Advanced to position (%1, %2) - no empty squares").arg(nextRow).arg(nextCol));
+                    emit debugMessage(QString("Tile '%1' not available in rack").arg(ch));
+                    event->accept();
+                    return;
                 }
             } else {
-                emit debugMessage(QString("Tile '%1' not in rack").arg(ch));
+                // No shift: prefer natural, fallback to blank
+                if (rackView->hasNaturalLetter(ch)) {
+                    if (rackView->removeNaturalLetter(ch)) {
+                        boardView->placeUncommittedTile(row, col, ch);
+                        emit debugMessage(QString("Placed natural '%1' at (%2, %3)").arg(ch).arg(row).arg(col));
+                    } else {
+                        emit debugMessage(QString("Failed to remove natural '%1' from rack").arg(ch));
+                        event->accept();
+                        return;
+                    }
+                } else if (rackView->hasBlank()) {
+                    if (rackView->removeBlank()) {
+                        boardView->placeUncommittedTile(row, col, ch.toLower());
+                        emit debugMessage(QString("Placed blank as '%1' at (%2, %3)").arg(ch).arg(row).arg(col));
+                    } else {
+                        emit debugMessage(QString("Failed to remove blank from rack"));
+                        event->accept();
+                        return;
+                    }
+                } else {
+                    emit debugMessage(QString("Tile '%1' not available in rack").arg(ch));
+                    event->accept();
+                    return;
+                }
+            }
+
+            // Move to next empty square (skip over already-placed tiles)
+            int nextRow = row;
+            int nextCol = col;
+            bool foundEmpty = false;
+
+            // Keep advancing until we find an empty square or go past the board edge
+            while (true) {
+                if (dir == BoardView::Horizontal) {
+                    nextCol++;
+                } else {
+                    nextRow++;
+                }
+
+                // If we've gone past position 15, stop at 15
+                if (nextRow > 15 || nextCol > 15) {
+                    nextRow = qMin(nextRow, 15);
+                    nextCol = qMin(nextCol, 15);
+                    break;
+                }
+
+                // If we're at position 15 (off board edge), stop there with caret
+                if (nextRow == 15 || nextCol == 15) {
+                    break;
+                }
+
+                // If this square is empty, we found our target
+                if (boardView->isSquareEmpty(nextRow, nextCol)) {
+                    foundEmpty = true;
+                    break;
+                }
+
+                // Otherwise, this square has a tile - keep looking
+            }
+
+            // Move cursor to the next position (can be 0-15)
+            boardView->setKeyboardEntry(nextRow, nextCol, dir);
+
+            if (foundEmpty) {
+                emit debugMessage(QString("Advanced to next empty square (%1, %2)").arg(nextRow).arg(nextCol));
+            } else if (nextRow == 15 || nextCol == 15) {
+                emit debugMessage(QString("Advanced to position 15 - insertion caret at edge").arg(nextRow).arg(nextCol));
+            } else {
+                emit debugMessage(QString("Advanced to position (%1, %2) - no empty squares").arg(nextRow).arg(nextCol));
             }
             event->accept();
             return;

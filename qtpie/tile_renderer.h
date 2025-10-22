@@ -40,6 +40,7 @@ public:
     // Get pre-rendered tiles
     const QPixmap& getLetterTile(char letter) const;
     const QPixmap& getBlankTile(char letter) const;
+    const QPixmap& getUndesignatedBlank() const;  // Returns '?' with 0 subscript
     const QPixmap& getPremiumSquare(PremiumSquare type) const;
     const QPixmap& getPremiumSquareNoLabel(PremiumSquare type) const;
     const QPixmap& getEmptySquare() const;
@@ -63,7 +64,8 @@ private:
     QString m_letterFontFamily;  // ClearSans-Bold
     QString m_valueFontFamily;   // Roboto-Bold
     QMap<char, QPixmap> m_letterTiles;    // A-Z
-    QMap<char, QPixmap> m_blankTiles;     // a-z
+    QMap<char, QPixmap> m_blankTiles;     // a-z (designated blanks with rounded rect outline)
+    QPixmap m_undesignatedBlank;          // '?' with 0 subscript for rack
     QMap<PremiumSquare, QPixmap> m_premiumSquares;
     QMap<PremiumSquare, QPixmap> m_premiumSquaresNoLabel;  // Premium squares without labels
     QPixmap m_emptySquare;
