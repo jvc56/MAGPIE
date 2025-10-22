@@ -45,6 +45,7 @@ int game_event_get_turn_value(const GameEvent *event);
 typedef struct GameHistory GameHistory;
 
 GameHistory *game_history_create(void);
+GameHistory *game_history_duplicate(const GameHistory *gh_orig);
 void game_history_destroy(GameHistory *game_history);
 void game_history_reset(GameHistory *game_history);
 
@@ -75,6 +76,11 @@ game_variant_t game_history_get_game_variant(const GameHistory *history);
 void game_history_set_board_layout_name(GameHistory *history,
                                         const char *board_layout);
 const char *game_history_get_board_layout_name(const GameHistory *history);
+
+void game_history_set_waiting_for_final_pass_or_challenge(
+    GameHistory *game_history, bool waiting_for_final_pass_or_challenge);
+bool game_history_get_waiting_for_final_pass_or_challenge(
+    const GameHistory *game_history);
 
 int game_history_get_num_events(const GameHistory *history);
 int game_history_get_num_played_events(const GameHistory *game_history);

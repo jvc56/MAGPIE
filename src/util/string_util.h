@@ -72,6 +72,7 @@ size_t string_length(const char *str);
 
 // Malloc'ing string functions
 char *string_duplicate(const char *str);
+char *string_duplicate_allow_null(const char *str);
 char *empty_string(void);
 char *get_substring(const char *input_string, int start_index, int end_index);
 char *iso_8859_1_to_utf8(const char *iso_8859_1_string);

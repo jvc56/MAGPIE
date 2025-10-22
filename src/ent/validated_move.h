@@ -19,6 +19,7 @@ ValidatedMoves *validated_moves_create(const Game *game, int player_index,
                                        bool allow_unknown_exchanges,
                                        bool allow_playthrough,
                                        ErrorStack *error_stack);
+ValidatedMoves *validated_moves_duplicate(const ValidatedMoves *vms_orig);
 void validated_moves_destroy(ValidatedMoves *vms);
 
 int validated_moves_get_number_of_moves(const ValidatedMoves *vms);

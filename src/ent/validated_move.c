@@ -659,6 +659,36 @@ ValidatedMove *validated_move_create(const Game *game, int player_index,
   return vm;
 }
 
+ValidatedMove *validated_move_duplicate(const ValidatedMove *vm_orig) {
+  ValidatedMove *vm_dupe = malloc_or_die(sizeof(ValidatedMove));
+  if (vm_orig->formed_words) {
+    vm_dupe->formed_words = formed_words_duplicate(vm_orig->formed_words);
+  } else {
+    vm_dupe->formed_words = NULL;
+  }
+  if (vm_orig->rack) {
+    vm_dupe->rack = rack_duplicate(vm_orig->rack);
+  } else {
+    vm_dupe->rack = NULL;
+  }
+  if (vm_orig->leave) {
+    vm_dupe->leave = rack_duplicate(vm_orig->leave);
+  } else {
+    vm_dupe->leave = NULL;
+  }
+  if (vm_orig->move) {
+    vm_dupe->move = move_create();
+    move_copy(vm_dupe->move, vm_orig->move);
+  } else {
+    vm_dupe->move = NULL;
+  }
+  vm_dupe->challenge_points = vm_orig->challenge_points;
+  vm_dupe->challenge_turn_loss = vm_orig->challenge_turn_loss;
+  vm_dupe->leave_value = vm_orig->leave_value;
+  vm_dupe->unknown_exchange = vm_orig->unknown_exchange;
+  return vm_dupe;
+}
+
 void validated_move_destroy(ValidatedMove *vm) {
   if (!vm) {
     return;
@@ -701,6 +731,20 @@ ValidatedMoves *validated_moves_create(const Game *game, int player_index,
   }
 
   return vms;
+}
+
+ValidatedMoves *validated_moves_duplicate(const ValidatedMoves *vms_orig) {
+  if (!vms_orig) {
+    return NULL;
+  }
+  ValidatedMoves *vms_dupe = malloc_or_die(sizeof(ValidatedMoves));
+  vms_dupe->moves = (ValidatedMove **)malloc_or_die(sizeof(ValidatedMove *) *
+                                                    vms_orig->number_of_moves);
+  vms_dupe->number_of_moves = vms_orig->number_of_moves;
+  for (int i = 0; i < vms_orig->number_of_moves; i++) {
+    vms_dupe->moves[i] = validated_move_duplicate(vms_orig->moves[i]);
+  }
+  return vms_dupe;
 }
 
 void validated_moves_destroy(ValidatedMoves *vms) {

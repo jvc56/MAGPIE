@@ -525,16 +525,27 @@ size_t string_length(const char *str) {
   return strlen(str);
 }
 
+char *string_duplicate_internal(const char *str) {
+  char *duplicate = malloc_or_die(sizeof(char) * (string_length(str) + 1));
+  strncpy(duplicate, str, string_length(str));
+  duplicate[string_length(str)] = '\0';
+  return duplicate;
+}
+
+char *string_duplicate_allow_null(const char *str) {
+  if (!str) {
+    return NULL;
+  }
+  return string_duplicate_internal(str);
+}
+
 char *string_duplicate(const char *str) {
   if (!str) {
     log_fatal("cannot duplicate null string");
     // unreachable return, but silences static analyzer warnings
     return NULL;
   }
-  char *duplicate = malloc_or_die(sizeof(char) * (string_length(str) + 1));
-  strncpy(duplicate, str, string_length(str));
-  duplicate[string_length(str)] = '\0';
-  return duplicate;
+  return string_duplicate_internal(str);
 }
 
 char *empty_string(void) { return string_duplicate(""); }

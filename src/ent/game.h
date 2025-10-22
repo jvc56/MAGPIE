@@ -47,6 +47,7 @@ bool game_get_data_is_shared(const Game *game,
 
 void game_set_consecutive_scoreless_turns(Game *game, int value);
 int game_get_max_scoreless_turns(const Game *game);
+bool game_reached_max_scoreless_turns(const Game *game);
 void game_increment_consecutive_scoreless_turns(Game *game);
 void game_set_endgame_solving_mode(Game *game);
 void game_set_game_end_reason(Game *game, game_end_reason_t game_end_reason);

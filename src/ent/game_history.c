@@ -165,6 +165,7 @@ struct GameHistory {
   int num_played_events;
   game_variant_t game_variant;
   GameHistoryPlayer *players[2];
+  bool waiting_for_final_pass_or_challenge;
   int num_events;
   GameEvent *events;
 };
@@ -292,6 +293,17 @@ const char *game_history_get_board_layout_name(const GameHistory *history) {
   return history->board_layout_name;
 }
 
+void game_history_set_waiting_for_final_pass_or_challenge(
+    GameHistory *game_history, const bool waiting_for_final_pass_or_challenge) {
+  game_history->waiting_for_final_pass_or_challenge =
+      waiting_for_final_pass_or_challenge;
+}
+
+bool game_history_get_waiting_for_final_pass_or_challenge(
+    const GameHistory *game_history) {
+  return game_history->waiting_for_final_pass_or_challenge;
+}
+
 void game_history_player_reset(GameHistory *history, int player_index,
                                const char *name, const char *nickname) {
   GameHistoryPlayer *player = history->players[player_index];
@@ -359,6 +371,49 @@ GameHistory *game_history_create(void) {
   game_history->players[1] = game_history_player_create();
   game_history_reset(game_history);
   return game_history;
+}
+
+GameHistory *game_history_duplicate(const GameHistory *gh_orig) {
+  GameHistory *gh_copy = malloc_or_die(sizeof(GameHistory));
+  gh_copy->events = malloc_or_die(sizeof(GameEvent) * (MAX_GAME_EVENTS));
+  gh_copy->title = string_duplicate_allow_null(gh_orig->title);
+  gh_copy->description = string_duplicate_allow_null(gh_orig->description);
+  gh_copy->id_auth = string_duplicate_allow_null(gh_orig->id_auth);
+  gh_copy->uid = string_duplicate_allow_null(gh_orig->uid);
+  gh_copy->lexicon_name = string_duplicate_allow_null(gh_orig->lexicon_name);
+  gh_copy->ld_name = string_duplicate_allow_null(gh_orig->ld_name);
+  gh_copy->board_layout_name =
+      string_duplicate_allow_null(gh_orig->board_layout_name);
+  gh_copy->game_variant = gh_orig->game_variant;
+  gh_copy->num_events = gh_orig->num_events;
+  gh_copy->num_played_events = gh_orig->num_played_events;
+  for (int i = 0; i < 2; i++) {
+    gh_copy->players[i] = malloc_or_die(sizeof(GameHistoryPlayer));
+    gh_copy->players[i]->name =
+        string_duplicate_allow_null(gh_orig->players[i]->name);
+    gh_copy->players[i]->nickname =
+        string_duplicate_allow_null(gh_orig->players[i]->nickname);
+    rack_copy(&gh_copy->players[i]->last_rack, &gh_orig->players[i]->last_rack);
+  }
+  for (int i = 0; i < MAX_GAME_EVENTS; i++) {
+    GameEvent *ge_copy = &gh_copy->events[i];
+    const GameEvent *ge_orig = &gh_orig->events[i];
+    ge_copy->event_type = ge_orig->event_type;
+    ge_copy->player_index = ge_orig->player_index;
+    ge_copy->cumulative_score = ge_orig->cumulative_score;
+    ge_copy->cgp_move_string =
+        string_duplicate_allow_null(ge_orig->cgp_move_string);
+    ge_copy->move_score = ge_orig->move_score;
+    ge_copy->score_adjustment = ge_orig->score_adjustment;
+    rack_copy(&ge_copy->rack, &ge_orig->rack);
+    rack_copy(&ge_copy->after_event_player_on_turn_rack,
+              &ge_orig->after_event_player_on_turn_rack);
+    rack_copy(&ge_copy->after_event_player_off_turn_rack,
+              &ge_orig->after_event_player_off_turn_rack);
+    ge_copy->vms = validated_moves_duplicate(ge_orig->vms);
+    ge_copy->note = string_duplicate_allow_null(ge_orig->note);
+  }
+  return gh_copy;
 }
 
 void game_history_destroy(GameHistory *game_history) {

@@ -9,6 +9,7 @@
 typedef struct FormedWords FormedWords;
 
 FormedWords *formed_words_create(Board *board, const Move *move);
+FormedWords *formed_words_duplicate(const FormedWords *fw);
 void formed_words_destroy(FormedWords *fw);
 
 int formed_words_get_num_words(const FormedWords *fw);

@@ -122,6 +122,12 @@ FormedWords *formed_words_create(Board *board, const Move *move) {
   return ws;
 }
 
+FormedWords *formed_words_duplicate(const FormedWords *fw) {
+  FormedWords *new_fw = malloc_or_die(sizeof(FormedWords));
+  memcpy(new_fw, fw, sizeof(FormedWords));
+  return new_fw;
+}
+
 void formed_words_destroy(FormedWords *fw) {
   if (!fw) {
     return;

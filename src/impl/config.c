@@ -186,7 +186,9 @@ struct Config {
   PlayersData *players_data;
   ThreadControl *thread_control;
   Game *game;
+  Game *game_backup;
   GameHistory *game_history;
+  GameHistory *game_history_backup;
   MoveList *move_list;
   EndgameSolver *endgame_solver;
   SimResults *sim_results;
@@ -1560,44 +1562,149 @@ char *str_api_new_game(Config *config, ErrorStack *error_stack) {
 
 // Commit move
 
-void config_add_game_event_to_history(Config *config,
-                                      const int player_on_turn_index,
-                                      game_event_t game_event_type,
-                                      const Move *move, char *ucgi_move_string,
-                                      const Rack *player_rack,
-                                      const Equity score_adjustment,
-                                      ErrorStack *error_stack) {
+void config_backup_game_and_history(Config *config) {
+  game_destroy(config->game_backup);
+  config->game_backup = game_duplicate(config->game);
+  game_history_destroy(config->game_history_backup);
+  config->game_history_backup = game_history_duplicate(config->game_history);
+}
 
-  GameEvent *game_event =
-      game_history_add_game_event(config->game_history, error_stack);
+void config_restore_game_and_history(Config *config) {
+  game_destroy(config->game);
+  config->game = config->game_backup;
+  config->game_backup = NULL;
+  game_history_destroy(config->game_history);
+  config->game_history = config->game_history_backup;
+  config->game_history_backup = NULL;
+}
 
-  if (!error_stack_is_empty(error_stack)) {
+// Runs game_play_n_events and then calculates if
+// - the consecutive pass game end procedures should be applied
+// - the game history need to wait for the final pass/challenge from the user
+void config_game_play_events(Config *config, ErrorStack *error_stack) {
+  Game *game = config->game;
+  GameHistory *game_history = config->game_history;
+  game_play_n_events(game_history, game,
+                     game_history_get_num_played_events(game_history), true,
+                     error_stack);
+  const int num_events = game_history_get_num_events(game_history);
+  const int num_played_events =
+      game_history_get_num_played_events(game_history);
+
+  if (num_played_events < num_events) {
+    // We have played into the "middle" of the game history with more events
+    // that have yet to be played, which are either more moves are the end
+    // of game events, so there is no need to create the game end events here.
     return;
   }
 
-  game_event_set_player_index(game_event, player_on_turn_index);
-  game_event_set_type(game_event, game_event_type);
-  game_event_set_cgp_move_string(game_event, ucgi_move_string);
-  game_event_set_score_adjustment(game_event, score_adjustment);
+  if (game_reached_max_scoreless_turns(game)) {
+    // Add the consecutive pass rack end penalties for both players
+    int player_index = game_get_player_on_turn_index(game);
+    const LetterDistribution *ld = game_get_ld(game);
+    for (int i = 0; i < 2; i++) {
+      if (i == 1) {
+        player_index = 1 - player_index;
+      }
+      GameEvent *rack_penalty_event =
+          game_history_add_game_event(game_history, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+      const Player *player = game_get_player(game, player_index);
+      const Rack *player_rack = player_get_rack(player);
+      const Equity end_rack_penalty_abs_value = rack_get_score(ld, player_rack);
+      game_event_set_player_index(rack_penalty_event, player_index);
+      game_event_set_type(rack_penalty_event, GAME_EVENT_END_RACK_PENALTY);
+      rack_copy(game_event_get_rack(rack_penalty_event), player_rack);
+      game_event_set_score_adjustment(rack_penalty_event,
+                                      -end_rack_penalty_abs_value);
+      game_event_set_cumulative_score(rack_penalty_event,
+                                      player_get_score(player) -
+                                          end_rack_penalty_abs_value);
+      game_event_set_cgp_move_string(rack_penalty_event, NULL);
+      game_event_set_move_score(rack_penalty_event, 0);
+    }
+    // Replay the game with the added end rack penalties
+    game_play_n_events(game_history, game,
+                       game_history_get_num_played_events(game_history), true,
+                       error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  } else {
+    const int player_on_turn_index = game_get_player_on_turn_index(game);
+    const Rack *player_on_turn_rack =
+        player_get_rack(game_get_player(game, player_on_turn_index));
+    const Rack *player_off_turn_rack =
+        player_get_rack(game_get_player(game, 1 - player_on_turn_index));
+    if (rack_is_empty(player_on_turn_rack) &&
+        ((rack_get_total_letters(player_off_turn_rack) +
+          bag_get_letters(game_get_bag(game))) <= RACK_SIZE)) {
+      game_history_set_waiting_for_final_pass_or_challenge(game_history, true);
+      return;
+    }
+  }
+}
+
+void config_add_game_event(Config *config, const int player_on_turn_index,
+                           game_event_t game_event_type, const Move *move,
+                           char *ucgi_move_string, const Rack *player_rack,
+                           const Equity score_adjustment,
+                           ErrorStack *error_stack) {
+  game_history_truncate_to_played_events(config->game_history);
+
+  const bool waiting_for_final_pass_or_challenge =
+      game_history_get_waiting_for_final_pass_or_challenge(
+          config->game_history);
+  if (waiting_for_final_pass_or_challenge &&
+      (game_event_type != GAME_EVENT_PASS &&
+       game_event_type != GAME_EVENT_CHALLENGE_BONUS)) {
+    error_stack_push(error_stack,
+                     ERROR_STATUS_COMMIT_WAITING_FOR_PASS_OR_CHALLENGE_BONUS,
+                     string_duplicate("waiting for final pass or challenge "
+                                      "bonus but got a different game event"));
+    return;
+  }
 
   Equity cumulative_score = EQUITY_INITIAL_VALUE;
   Equity move_score = EQUITY_INITIAL_VALUE;
+  Rack game_event_rack;
+  rack_set_dist_size_and_reset(&game_event_rack, ld_get_size(config->ld));
+  bool add_event_to_history = true;
+  bool add_rack_end_points = false;
   switch (game_event_type) {
   case GAME_EVENT_TILE_PLACEMENT_MOVE:
   case GAME_EVENT_EXCHANGE:
-  case GAME_EVENT_PASS:
-    rack_copy(game_event_get_rack(game_event), player_rack);
+    rack_copy(&game_event_rack, player_rack);
     cumulative_score =
         player_get_score(game_get_player(config->game, player_on_turn_index)) +
         move_get_score(move);
     move_score = move_get_score(move);
     break;
+  case GAME_EVENT_PASS:
+    if (waiting_for_final_pass_or_challenge) {
+      // End the game by adding an end rack points event
+      add_rack_end_points = true;
+      add_event_to_history = false;
+      game_history_set_waiting_for_final_pass_or_challenge(config->game_history,
+                                                           false);
+      cumulative_score =
+          player_get_score(game_get_player(config->game, player_on_turn_index));
+    } else {
+      // Add an actual pass
+      rack_copy(&game_event_rack, player_rack);
+      cumulative_score = player_get_score(game_get_player(
+                             config->game, player_on_turn_index)) +
+                         move_get_score(move);
+      move_score = move_get_score(move);
+    }
+    break;
   case GAME_EVENT_PHONY_TILES_RETURNED:;
     GameEvent *previous_game_event = game_history_get_event(
         config->game_history,
         game_history_get_num_played_events(config->game_history) - 1);
-    rack_copy(game_event_get_rack(game_event),
-              game_event_get_const_rack(previous_game_event));
+    rack_copy(&game_event_rack, game_event_get_const_rack(previous_game_event));
     cumulative_score =
         player_get_score(game_get_player(config->game, player_on_turn_index)) -
         game_event_get_move_score(previous_game_event);
@@ -1608,12 +1715,21 @@ void config_add_game_event_to_history(Config *config,
         player_get_score(game_get_player(config->game, player_on_turn_index)) +
         score_adjustment;
     move_score = 0;
-    break;
-  case GAME_EVENT_END_RACK_POINTS:
+    if (waiting_for_final_pass_or_challenge) {
+      add_rack_end_points = true;
+      game_history_set_waiting_for_final_pass_or_challenge(config->game_history,
+                                                           false);
+    }
     break;
   case GAME_EVENT_TIME_PENALTY:
     break;
+  case GAME_EVENT_END_RACK_POINTS:
+    log_fatal("got unexpected end rack points game event when adding "
+              "event to game history in the config\n");
+    break;
   case GAME_EVENT_END_RACK_PENALTY:
+    log_fatal("got unexpected end rack penalty game event when adding "
+              "event to game history in the config\n");
     break;
   case GAME_EVENT_UNKNOWN:
     log_fatal("got unknown game event type when adding event to game history "
@@ -1621,18 +1737,62 @@ void config_add_game_event_to_history(Config *config,
     break;
   }
 
-  game_event_set_cumulative_score(game_event, cumulative_score);
-  game_event_set_move_score(game_event, move_score);
+  if (add_event_to_history) {
+    GameEvent *game_event =
+        game_history_add_game_event(config->game_history, error_stack);
 
-  game_history_next(config->game_history, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+
+    game_event_set_player_index(game_event, player_on_turn_index);
+    game_event_set_type(game_event, game_event_type);
+    game_event_set_cgp_move_string(game_event, ucgi_move_string);
+    game_event_set_score_adjustment(game_event, score_adjustment);
+    game_event_set_cumulative_score(game_event, cumulative_score);
+    game_event_set_move_score(game_event, move_score);
+    rack_copy(game_event_get_rack(game_event), &game_event_rack);
+
+    game_history_next(config->game_history, error_stack);
+
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  if (add_rack_end_points) {
+    GameEvent *game_event =
+        game_history_add_game_event(config->game_history, error_stack);
+
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+
+    const Rack *end_rack_points_rack =
+        player_get_rack(game_get_player(config->game, player_on_turn_index));
+    const Equity end_rack_points_equity =
+        rack_get_score(config->ld, end_rack_points_rack);
+    game_event_set_player_index(game_event, 1 - player_on_turn_index);
+    game_event_set_type(game_event, GAME_EVENT_END_RACK_POINTS);
+    game_event_set_cgp_move_string(game_event, NULL);
+    game_event_set_score_adjustment(game_event, end_rack_points_equity);
+    game_event_set_cumulative_score(game_event,
+                                    cumulative_score + end_rack_points_equity);
+    game_event_set_move_score(game_event, 0);
+    rack_copy(game_event_get_rack(game_event), end_rack_points_rack);
+
+    game_history_next(config->game_history, error_stack);
+
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  config_game_play_events(config, error_stack);
 
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-
-  game_play_n_events(config->game_history, config->game,
-                     game_history_get_num_played_events(config->game_history),
-                     true, error_stack);
 }
 
 void parse_commit(Config *config, StringBuilder *move_string_builder,
@@ -1710,12 +1870,9 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
     return;
   }
 
-  game_history_truncate_to_played_events(config->game_history);
-
-  config_add_game_event_to_history(
-      config, player_on_turn_index, game_event_type, &move,
-      string_builder_dump(move_string_builder, NULL), player_rack, 0,
-      error_stack);
+  config_add_game_event(config, player_on_turn_index, game_event_type, &move,
+                        string_builder_dump(move_string_builder, NULL),
+                        player_rack, 0, error_stack);
 }
 
 char *impl_commit(Config *config, ErrorStack *error_stack) {
@@ -1732,12 +1889,15 @@ char *impl_commit(Config *config, ErrorStack *error_stack) {
   StringBuilder *move_string_builder = string_builder_create();
   ValidatedMoves *vms = NULL;
 
+  config_backup_game_and_history(config);
+
   parse_commit(config, move_string_builder, &vms, error_stack);
 
   string_builder_destroy(move_string_builder);
   validated_moves_destroy(vms);
 
   if (!error_stack_is_empty(error_stack)) {
+    config_restore_game_and_history(config);
     return empty_string();
   }
 
@@ -1800,10 +1960,14 @@ char *impl_challenge(Config *config, ErrorStack *error_stack) {
   ValidatedMoves *vms = game_event_get_vms(prev_played_event);
   const int player_on_turn_index = game_get_player_on_turn_index(config->game);
   if (validated_moves_is_phony(vms, 0)) {
-    game_history_truncate_to_played_events(config->game_history);
-    config_add_game_event_to_history(config, 1 - player_on_turn_index,
-                                     GAME_EVENT_PHONY_TILES_RETURNED, NULL,
-                                     NULL, NULL, 0, error_stack);
+    config_backup_game_and_history(config);
+    config_add_game_event(config, 1 - player_on_turn_index,
+                          GAME_EVENT_PHONY_TILES_RETURNED, NULL, NULL, NULL, 0,
+                          error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      config_restore_game_and_history(config);
+      return empty_string();
+    }
   } else {
     int challenge_bonus_int = config->challenge_bonus;
     const char *challenge_bonus_str =
@@ -1817,27 +1981,24 @@ char *impl_challenge(Config *config, ErrorStack *error_stack) {
         return empty_string();
       }
     }
+
+    config_backup_game_and_history(config);
+
     game_history_insert_challenge_bonus_game_event(
         config->game_history, 1 - player_on_turn_index,
         int_to_equity(challenge_bonus_int), error_stack);
 
-    if (!error_stack_is_empty(error_stack)) {
-      return empty_string();
+    if (error_stack_is_empty(error_stack)) {
+      game_history_next(config->game_history, error_stack);
+      if (error_stack_is_empty(error_stack)) {
+        config_game_play_events(config, error_stack);
+      }
     }
 
-    game_history_next(config->game_history, error_stack);
-
     if (!error_stack_is_empty(error_stack)) {
+      config_restore_game_and_history(config);
       return empty_string();
     }
-
-    game_play_n_events(config->game_history, config->game,
-                       game_history_get_num_played_events(config->game_history),
-                       true, error_stack);
-  }
-
-  if (!error_stack_is_empty(error_stack)) {
-    return empty_string();
   }
 
   return empty_string();
@@ -1896,17 +2057,21 @@ char *impl_unchallenge(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
 
+  config_backup_game_and_history(config);
+
   game_history_remove_challenge_bonus_game_event(config->game_history);
 
   game_history_previous(config->game_history, error_stack);
 
+  if (error_stack_is_empty(error_stack)) {
+    config_game_play_events(config, error_stack);
+  }
+
   if (!error_stack_is_empty(error_stack)) {
+    config_restore_game_and_history(config);
     return empty_string();
   }
 
-  game_play_n_events(config->game_history, config->game,
-                     game_history_get_num_played_events(config->game_history),
-                     true, error_stack);
   return empty_string();
 }
 
@@ -3347,8 +3512,10 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->players_data = players_data_create();
   config->thread_control = thread_control_create();
   config->game = NULL;
+  config->game_backup = NULL;
   config->move_list = NULL;
   config->game_history = game_history_create();
+  config->game_history_backup = NULL;
   config->endgame_solver = endgame_solver_create();
   config->sim_results = sim_results_create();
   config->inference_results = inference_results_create(NULL);
@@ -3382,7 +3549,9 @@ void config_destroy(Config *config) {
   players_data_destroy(config->players_data);
   thread_control_destroy(config->thread_control);
   game_destroy(config->game);
+  game_destroy(config->game_backup);
   game_history_destroy(config->game_history);
+  game_history_destroy(config->game_history_backup);
   endgame_solver_destroy(config->endgame_solver);
   move_list_destroy(config->move_list);
   sim_results_destroy(config->sim_results);

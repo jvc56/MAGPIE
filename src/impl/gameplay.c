@@ -370,8 +370,7 @@ void play_move(const Move *move, Game *game, Rack *leave) {
     execute_exchange_move(move, game, leave);
     game_increment_consecutive_scoreless_turns(game);
   }
-  if (game_get_consecutive_scoreless_turns(game) ==
-      game_get_max_scoreless_turns(game)) {
+  if (game_reached_max_scoreless_turns(game)) {
     Player *player0 = game_get_player(game, 0);
     Player *player1 = game_get_player(game, 1);
     player_add_to_score(player0, -rack_get_score(ld, player_get_rack(player0)));
@@ -401,8 +400,7 @@ void play_move_without_drawing_tiles(const Move *move, Game *game) {
     execute_exchange_move(move, game, NULL);
     game_increment_consecutive_scoreless_turns(game);
   }
-  if (game_get_consecutive_scoreless_turns(game) ==
-      game_get_max_scoreless_turns(game)) {
+  if (game_reached_max_scoreless_turns(game)) {
     game_set_game_end_reason(game, GAME_END_REASON_CONSECUTIVE_ZEROS);
   }
   game_start_next_player_turn(game);
@@ -612,6 +610,7 @@ void validate_game_event_order_and_index(const GameEvent *game_event,
     }
     break;
   case GAME_EVENT_END_RACK_PENALTY:
+  // FIXME: ensure time penalty is the last game event
   case GAME_EVENT_TIME_PENALTY:
   case GAME_EVENT_END_RACK_POINTS:
     if (!game_is_over) {
@@ -871,8 +870,7 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
                         game_event_get_score_adjustment(game_event));
     break;
   case GAME_EVENT_END_RACK_PENALTY:
-    if (game_get_consecutive_scoreless_turns(game) !=
-        game_get_max_scoreless_turns(game)) {
+    if (!game_reached_max_scoreless_turns(game)) {
       // This error should have been caught earlier in game event order
       // validation
       log_fatal(
