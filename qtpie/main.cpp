@@ -228,11 +228,8 @@ protected:
 
     void dragLeaveEvent(QDragLeaveEvent *event) override {
         // Hide preview when leaving window entirely
-        debugTextView->append(">>> MainWidget: dragLeave - hiding preview immediately");
         if (dragTilePreview && dragTilePreview->isVisible()) {
             dragTilePreview->setVisible(false);
-            dragTilePreview->hide();  // Extra hide call
-            repaint();  // Force immediate repaint
         }
         QMainWindow::dragLeaveEvent(event);
     }
@@ -243,8 +240,6 @@ protected:
         if (event->mimeData()->hasText()) {
             event->setDropAction(Qt::MoveAction);
             event->accept();
-            debugTextView->append(QString(">>> [%1] MainWidget: dropEvent - accepting to avoid animation")
-                                .arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
         } else {
             event->ignore();
             QMainWindow::dropEvent(event);
@@ -272,20 +267,13 @@ private slots:
     }
 
     void onHideDragPreview() {
-        debugTextView->append(QString(">>> [%1] MainWidget: onHideDragPreview called").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
         if (dragTilePreview && dragTilePreview->isVisible()) {
-            debugTextView->append(QString(">>> [%1] MainWidget: hiding preview").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
             dragTilePreview->setVisible(false);
-            debugTextView->append(QString(">>> [%1] MainWidget: preview hidden").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
-        } else {
-            debugTextView->append(QString(">>> [%1] MainWidget: preview already hidden or null").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
         }
     }
 
+    // Drag preview rendering disabled - would need cached TileRenderer to avoid leaks
     QPixmap renderDragTile(QChar tileChar, int size) {
-        // CRITICAL FIX: Don't create TileRenderer here - causes massive memory leak during dragging!
-        // This is called on every mouse move during drag, hundreds of times per second.
-        // Just return empty pixmap for now - drag preview disabled to prevent leak.
         Q_UNUSED(tileChar);
         Q_UNUSED(size);
         return QPixmap();

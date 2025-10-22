@@ -115,7 +115,7 @@ void RackView::resizeEvent(QResizeEvent* event) {
     // Tile size is the widget height
     m_tileSize = event->size().height();
 
-    // CRITICAL: Recreate tile renderer when size changes to avoid memory leak in paintEvent
+    // Recreate tile renderer when size changes
     delete m_tileRenderer;
     m_tileRenderer = new TileRenderer(m_tileSize, TileRenderer::TileStyle::Rack);
 
@@ -157,9 +157,8 @@ void RackView::paintEvent(QPaintEvent *) {
 
     emit debugMessage(QString("  Paint: startX=%1, tileSize=%2, tileCount=%3").arg(startX).arg(m_tileSize).arg(tileCount));
 
-    // Use cached tile renderer to avoid memory leak
     if (!m_tileRenderer) {
-        emit debugMessage("  WARNING: No tile renderer available");
+        emit debugMessage("WARNING: No tile renderer available");
         return;
     }
 
@@ -332,7 +331,6 @@ void RackView::mouseMoveEvent(QMouseEvent *event) {
             // Immediately repaint to show the ghost tile
             update();
 
-            // Use cached tile renderer to avoid memory leak
             if (!m_tileRenderer) {
                 emit debugMessage("WARNING: No tile renderer for drag");
                 return;
@@ -365,22 +363,13 @@ void RackView::mouseMoveEvent(QMouseEvent *event) {
 
             // Execute the drag - support both Move and Ignore actions
             // Use IgnoreAction as default to disable snap-back animation on rejected drops
-            emit debugMessage(QString(">>> [%1] About to call drag->exec()").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
             Qt::DropAction dropAction = drag->exec(Qt::MoveAction | Qt::IgnoreAction, Qt::IgnoreAction);
-            emit debugMessage(QString(">>> [%1] drag->exec() returned").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
+            emit debugMessage(QString("Drag ended with action: %1").arg(
+                dropAction == Qt::MoveAction ? "MoveAction" :
+                dropAction == Qt::IgnoreAction ? "IgnoreAction" : "Other"));
 
-            QString actionName;
-            if (dropAction == Qt::MoveAction) actionName = "MoveAction";
-            else if (dropAction == Qt::IgnoreAction) actionName = "IgnoreAction";
-            else if (dropAction == Qt::CopyAction) actionName = "CopyAction";
-            else actionName = QString("Unknown(%1)").arg((int)dropAction);
-
-            emit debugMessage(QString("[%1] Drag ended with action: %2").arg(QTime::currentTime().toString("HH:mm:ss.zzz")).arg(actionName));
-
-            // Notify that drag ended so preview can be hidden or animated
-            emit debugMessage(QString(">>> [%1] About to emit dragEnded signal").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
+            // Notify that drag ended so preview can be hidden
             emit dragEnded(dropAction);
-            emit debugMessage(QString(">>> [%1] dragEnded signal emitted").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
 
             // Reset drag state and clean up any override cursor
             m_draggedTileIndex = -1;

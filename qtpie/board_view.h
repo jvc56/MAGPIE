@@ -117,9 +117,10 @@ private:
     int m_keyboardCol = -1;
     Direction m_keyboardDir = Horizontal;
 
-    // Cached tile renderers (created once, reused to avoid memory leak)
+    // Cached tile renderers (reused to avoid memory leak)
     TileRenderer *m_tileRenderer = nullptr;  // Rack style (for green uncommitted tiles)
     TileRenderer *m_boardRenderer = nullptr; // Board style (for premium squares without labels)
+    int m_lastRendererSize = 0;  // Track when to recreate renderers
 };
 
 #endif // BOARD_VIEW_H

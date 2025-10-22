@@ -91,19 +91,13 @@ void BoardView::resizeEvent(QResizeEvent* event) {
     m_marginX = std::max(BOARD_PADDING, labelSpaceLeft) - 2;
     m_marginY = std::max(BOARD_PADDING, labelSpaceTop) - 2;
 
-    // CRITICAL FIX: Don't call setMinimumSize in resizeEvent - causes infinite resize loop!
-    // Each resize creates a new TileRenderer, causing memory explosion
-    // Removed setMinimumSize call to prevent infinite loop
-
-    // CRITICAL: Recreate tile renderers when size changes to avoid memory leak in paintEvent
-    // Only create if size actually changed to avoid unnecessary allocations
-    static int lastSquareSize = 0;
-    if (m_squareSize != lastSquareSize) {
+    // Recreate tile renderers when size changes
+    if (!m_tileRenderer || !m_boardRenderer || m_squareSize != m_lastRendererSize) {
         delete m_tileRenderer;
         delete m_boardRenderer;
         m_tileRenderer = new TileRenderer(m_squareSize, TileRenderer::TileStyle::Rack);
         m_boardRenderer = new TileRenderer(m_squareSize, TileRenderer::TileStyle::Board);
-        lastSquareSize = m_squareSize;
+        m_lastRendererSize = m_squareSize;
     }
 
     // Re-render the board at the new size
@@ -232,7 +226,6 @@ void BoardView::paintEvent(QPaintEvent *) {
 
         // Draw uncommitted tiles (placed but not committed) in green
         if (!m_uncommittedTiles.isEmpty() && m_tileRenderer) {
-            // Use cached tile renderer to avoid memory leak
             for (const UncommittedTile &tile : m_uncommittedTiles) {
                 // Skip this tile if it's the ghost position (being dragged)
                 if (tile.row == m_ghostRow && tile.col == m_ghostCol) {
@@ -283,8 +276,8 @@ void BoardView::paintEvent(QPaintEvent *) {
             int x = m_marginX + m_hoverCol * m_squareSize;
             int y = m_marginY + m_hoverRow * m_squareSize;
 
-            // Green outline: thicker (4px), semi-transparent
-            painter.setPen(QPen(QColor(0, 200, 0, 180), 4));
+            // Green outline
+            painter.setPen(QPen(QColor(0, 200, 0, 200), 3));
             painter.setBrush(Qt::NoBrush);
             painter.drawRect(x, y, m_squareSize, m_squareSize);
         }
@@ -299,7 +292,7 @@ void BoardView::paintEvent(QPaintEvent *) {
                 painter.setRenderHint(QPainter::Antialiasing);
 
                 // Draw insertion caret (green bar with caps)
-                QPen caretPen(QColor(0, 200, 0, 220), 3);
+                QPen caretPen(QColor(0, 200, 0, 200), 3);
                 caretPen.setCapStyle(Qt::RoundCap);
                 painter.setPen(caretPen);
 
@@ -386,7 +379,7 @@ void BoardView::paintEvent(QPaintEvent *) {
                 }
 
                 // Draw green square outline
-                painter.setPen(QPen(QColor(0, 200, 0, 180), 4));
+                painter.setPen(QPen(QColor(0, 200, 0, 200), 3));
                 painter.setBrush(Qt::NoBrush);
                 painter.drawRect(x, y, m_squareSize, m_squareSize);
 

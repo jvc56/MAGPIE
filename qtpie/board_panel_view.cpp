@@ -137,12 +137,8 @@ BoardPanelView::BoardPanelView(QWidget *parent)
 
     // Connect rack drag end to hide preview
     connect(rackView, &RackView::dragEnded, this, [this](Qt::DropAction result) {
-        emit debugMessage(QString(">>> [%1] BoardPanelView: received dragEnded from rack").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
         m_currentDragChar = QChar();  // Reset drag char
-        // Always hide immediately - no animation delay
-        emit debugMessage(QString(">>> [%1] BoardPanelView: about to emit hideDragPreview").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
         emit hideDragPreview();
-        emit debugMessage(QString(">>> [%1] BoardPanelView: hideDragPreview emitted").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
     });
 
     // Connect board drag start to show preview
@@ -479,10 +475,8 @@ void BoardPanelView::dropEvent(QDropEvent *event) {
     emit hideDragPreview();
 }
 
+// Drag preview rendering disabled - would need cached TileRenderer to avoid leaks
 QPixmap BoardPanelView::renderTilePreview(QChar tileChar, int size) {
-    // CRITICAL FIX: Don't create TileRenderer here - causes massive memory leak during dragging!
-    // This is called on every mouse move during drag, hundreds of times per second.
-    // Just return an empty pixmap for now - drag preview disabled to prevent leak.
     Q_UNUSED(tileChar);
     Q_UNUSED(size);
     return QPixmap();
@@ -774,7 +768,7 @@ void BoardPanelView::renderCursorOverlay(QPainter &painter) {
 
     // Draw insertion caret for position 15
     painter.setRenderHint(QPainter::Antialiasing);
-    QPen caretPen(QColor(0, 200, 0, 220), 3);
+    QPen caretPen(QColor(0, 200, 0, 200), 3);
     caretPen.setCapStyle(Qt::RoundCap);
     painter.setPen(caretPen);
 
