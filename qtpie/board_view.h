@@ -5,10 +5,13 @@
 #include <QPixmap>
 #include "magpie_wrapper.h"
 
+class TileRenderer;
+
 class BoardView : public QWidget {
     Q_OBJECT
 public:
     explicit BoardView(QWidget *parent = nullptr);
+    ~BoardView();
     bool hasHeightForWidth() const override;
     int heightForWidth(int w) const override;
     QSize sizeHint() const override;
@@ -35,6 +38,17 @@ public:
     // Set hover square for drop preview (-1, -1 to clear)
     void setHoverSquare(int row, int col);
 
+    // Keyboard entry mode - set active square and direction
+    enum Direction { Horizontal, Vertical };
+    void setKeyboardEntry(int row, int col, Direction dir);
+    void clearKeyboardEntry();
+    bool isKeyboardEntryActive() const { return m_keyboardRow >= 0 && m_keyboardCol >= 0; }
+    void getKeyboardEntry(int &row, int &col, Direction &dir) const {
+        row = m_keyboardRow;
+        col = m_keyboardCol;
+        dir = m_keyboardDir;
+    }
+
     // Place an uncommitted tile on the board
     void placeUncommittedTile(int row, int col, QChar letter);
 
@@ -47,6 +61,16 @@ public:
     // Check if a square has an uncommitted tile
     bool hasUncommittedTile(int row, int col) const;
 
+    // Structure to represent an uncommitted tile placed on the board
+    struct UncommittedTile {
+        int row;
+        int col;
+        QChar letter;  // Uppercase for normal, lowercase for blank
+    };
+
+    // Get all uncommitted tiles (for backspace functionality)
+    const QVector<UncommittedTile>& getUncommittedTiles() const { return m_uncommittedTiles; }
+
     // Set ghost tile position (shows dimmed tile during drag) - (-1, -1) to clear
     void setGhostTile(int row, int col, QChar letter);
     void clearGhostTile();
@@ -54,6 +78,7 @@ public:
 signals:
     void tileDragStarted(const QPoint &globalPos, QChar tileChar);
     void tileDragEnded(Qt::DropAction result);
+    void squareClicked(int row, int col);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -65,13 +90,6 @@ protected:
 private:
     void renderBoard();
     QString parseCgpBoard(const QString& cgp);
-
-    // Structure to represent an uncommitted tile placed on the board
-    struct UncommittedTile {
-        int row;
-        int col;
-        QChar letter;  // Uppercase for normal, lowercase for blank
-    };
 
     Board *board;
     QPixmap m_boardPixmap;
@@ -93,6 +111,15 @@ private:
     int m_ghostRow = -1;
     int m_ghostCol = -1;
     QChar m_ghostLetter;
+
+    // Keyboard entry state
+    int m_keyboardRow = -1;
+    int m_keyboardCol = -1;
+    Direction m_keyboardDir = Horizontal;
+
+    // Cached tile renderers (created once, reused to avoid memory leak)
+    TileRenderer *m_tileRenderer = nullptr;  // Rack style (for green uncommitted tiles)
+    TileRenderer *m_boardRenderer = nullptr; // Board style (for premium squares without labels)
 };
 
 #endif // BOARD_VIEW_H

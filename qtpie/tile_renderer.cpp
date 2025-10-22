@@ -86,12 +86,19 @@ void TileRenderer::renderAllTiles() {
         m_blankTiles[c] = renderLetterTile(c, true);
     }
 
-    // Render premium squares
-    m_premiumSquares[PremiumSquare::DoubleLetter] = renderPremiumSquare(PremiumSquare::DoubleLetter);
-    m_premiumSquares[PremiumSquare::TripleLetter] = renderPremiumSquare(PremiumSquare::TripleLetter);
-    m_premiumSquares[PremiumSquare::DoubleWord] = renderPremiumSquare(PremiumSquare::DoubleWord);
-    m_premiumSquares[PremiumSquare::TripleWord] = renderPremiumSquare(PremiumSquare::TripleWord);
-    m_premiumSquares[PremiumSquare::Star] = renderPremiumSquare(PremiumSquare::Star);
+    // Render premium squares (with labels)
+    m_premiumSquares[PremiumSquare::DoubleLetter] = renderPremiumSquare(PremiumSquare::DoubleLetter, true);
+    m_premiumSquares[PremiumSquare::TripleLetter] = renderPremiumSquare(PremiumSquare::TripleLetter, true);
+    m_premiumSquares[PremiumSquare::DoubleWord] = renderPremiumSquare(PremiumSquare::DoubleWord, true);
+    m_premiumSquares[PremiumSquare::TripleWord] = renderPremiumSquare(PremiumSquare::TripleWord, true);
+    m_premiumSquares[PremiumSquare::Star] = renderPremiumSquare(PremiumSquare::Star, true);
+
+    // Render premium squares without labels
+    m_premiumSquaresNoLabel[PremiumSquare::DoubleLetter] = renderPremiumSquare(PremiumSquare::DoubleLetter, false);
+    m_premiumSquaresNoLabel[PremiumSquare::TripleLetter] = renderPremiumSquare(PremiumSquare::TripleLetter, false);
+    m_premiumSquaresNoLabel[PremiumSquare::DoubleWord] = renderPremiumSquare(PremiumSquare::DoubleWord, false);
+    m_premiumSquaresNoLabel[PremiumSquare::TripleWord] = renderPremiumSquare(PremiumSquare::TripleWord, false);
+    m_premiumSquaresNoLabel[PremiumSquare::Star] = renderPremiumSquare(PremiumSquare::Star, false);
 
     // Render empty square
     m_emptySquare = renderEmptySquare();
@@ -241,7 +248,7 @@ QPixmap TileRenderer::renderLetterTile(char letter, bool isBlank) {
     return finalPixmap;
 }
 
-QPixmap TileRenderer::renderPremiumSquare(PremiumSquare type) {
+QPixmap TileRenderer::renderPremiumSquare(PremiumSquare type, bool includeLabel) {
     // Render at 4x scale for supersampling, then downsample
     qreal supersample = 4.0;
     qreal dpr = 2.0;
@@ -302,14 +309,16 @@ QPixmap TileRenderer::renderPremiumSquare(PremiumSquare type) {
     double cornerRadius = tilePixelSize * CORNER_RADIUS_FRACTION;
     drawRoundedRect(painter, tileRect, cornerRadius);
 
-    // Draw label with white text (scaled)
-    QFont labelFont("Arial", static_cast<int>(m_tileSize * supersample * fontScale), QFont::Bold);
-    labelFont.setHintingPreference(QFont::PreferNoHinting);
-    labelFont.setStyleStrategy(QFont::PreferAntialias);
-    painter.setFont(labelFont);
-    painter.setPen(Qt::white);  // White text instead of black
+    // Draw label with white text (scaled) - only if requested
+    if (includeLabel) {
+        QFont labelFont("Arial", static_cast<int>(m_tileSize * supersample * fontScale), QFont::Bold);
+        labelFont.setHintingPreference(QFont::PreferNoHinting);
+        labelFont.setStyleStrategy(QFont::PreferAntialias);
+        painter.setFont(labelFont);
+        painter.setPen(Qt::white);  // White text instead of black
 
-    painter.drawText(tileRect, Qt::AlignCenter, label);
+        painter.drawText(tileRect, Qt::AlignCenter, label);
+    }
 
     painter.end();
 
@@ -431,6 +440,14 @@ const QPixmap& TileRenderer::getBlankTile(char letter) const {
 const QPixmap& TileRenderer::getPremiumSquare(PremiumSquare type) const {
     auto it = m_premiumSquares.constFind(type);
     if (it != m_premiumSquares.constEnd()) {
+        return it.value();
+    }
+    return m_emptySquare; // Fallback
+}
+
+const QPixmap& TileRenderer::getPremiumSquareNoLabel(PremiumSquare type) const {
+    auto it = m_premiumSquaresNoLabel.constFind(type);
+    if (it != m_premiumSquaresNoLabel.constEnd()) {
         return it.value();
     }
     return m_emptySquare; // Fallback

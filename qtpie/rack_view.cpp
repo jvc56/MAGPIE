@@ -105,11 +105,19 @@ QSize RackView::sizeHint() const {
     return QSize(400, 60);
 }
 
+RackView::~RackView() {
+    delete m_tileRenderer;
+}
+
 void RackView::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
 
     // Tile size is the widget height
     m_tileSize = event->size().height();
+
+    // CRITICAL: Recreate tile renderer when size changes to avoid memory leak in paintEvent
+    delete m_tileRenderer;
+    m_tileRenderer = new TileRenderer(m_tileSize, TileRenderer::TileStyle::Rack);
 
     // Position buttons
     int buttonY = (height() - 40) / 2;  // Center buttons vertically
@@ -149,8 +157,11 @@ void RackView::paintEvent(QPaintEvent *) {
 
     emit debugMessage(QString("  Paint: startX=%1, tileSize=%2, tileCount=%3").arg(startX).arg(m_tileSize).arg(tileCount));
 
-    // Create tile renderer with current tile size (using Rack style for green tiles)
-    TileRenderer renderer(m_tileSize, TileRenderer::TileStyle::Rack);
+    // Use cached tile renderer to avoid memory leak
+    if (!m_tileRenderer) {
+        emit debugMessage("  WARNING: No tile renderer available");
+        return;
+    }
 
     // Draw each tile
     for (int i = 0; i < tileCount; ++i) {
@@ -159,13 +170,13 @@ void RackView::paintEvent(QPaintEvent *) {
         QPixmap tilePixmap;
         if (c == '?') {
             // Blank tile (use any letter, e.g. 'A')
-            tilePixmap = renderer.getBlankTile('A');
+            tilePixmap = m_tileRenderer->getBlankTile('A');
         } else if (c.isLower() && c >= 'a' && c <= 'z') {
             // Lowercase = blank tile showing this letter
-            tilePixmap = renderer.getBlankTile(c.toLatin1());
+            tilePixmap = m_tileRenderer->getBlankTile(c.toLatin1());
         } else if (c.isUpper() && c >= 'A' && c <= 'Z') {
             // Regular letter tile
-            tilePixmap = renderer.getLetterTile(c.toLatin1());
+            tilePixmap = m_tileRenderer->getLetterTile(c.toLatin1());
         } else {
             emit debugMessage(QString("  Skipping slot %1: char='%2' (space or invalid)").arg(i).arg(c));
             continue;  // Skip invalid characters
@@ -320,18 +331,21 @@ void RackView::mouseMoveEvent(QMouseEvent *event) {
 
             // Immediately repaint to show the ghost tile
             update();
-            QCoreApplication::processEvents();  // Force immediate repaint
 
-            // Create tile renderer and get the tile pixmap (using Rack style for green tiles)
-            TileRenderer renderer(m_tileSize, TileRenderer::TileStyle::Rack);
+            // Use cached tile renderer to avoid memory leak
+            if (!m_tileRenderer) {
+                emit debugMessage("WARNING: No tile renderer for drag");
+                return;
+            }
+
             QPixmap tilePixmap;
 
             if (c == '?') {
-                tilePixmap = renderer.getBlankTile('A');
+                tilePixmap = m_tileRenderer->getBlankTile('A');
             } else if (c.isLower() && c >= 'a' && c <= 'z') {
-                tilePixmap = renderer.getBlankTile(c.toLatin1());
+                tilePixmap = m_tileRenderer->getBlankTile(c.toLatin1());
             } else if (c.isUpper() && c >= 'A' && c <= 'Z') {
-                tilePixmap = renderer.getLetterTile(c.toLatin1());
+                tilePixmap = m_tileRenderer->getLetterTile(c.toLatin1());
             }
 
             // Start Qt drag operation
@@ -658,6 +672,24 @@ void RackView::removeTileAtIndex(int index) {
     if (index >= 0 && index < m_rack.length()) {
         // Replace tile with space to leave a gap instead of removing
         m_rack[index] = ' ';
+        emit rackChanged(m_rack);
+        update();
+    }
+}
+
+void RackView::addTile(QChar tile) {
+    // Find first empty space and add the tile there
+    for (int i = 0; i < m_rack.length(); ++i) {
+        if (m_rack[i] == ' ') {
+            m_rack[i] = tile;
+            emit rackChanged(m_rack);
+            update();
+            return;
+        }
+    }
+    // If no empty space, just append (shouldn't happen in normal gameplay)
+    if (m_rack.length() < 7) {
+        m_rack.append(tile);
         emit rackChanged(m_rack);
         update();
     }

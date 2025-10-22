@@ -7,10 +7,13 @@
 #include <QHBoxLayout>
 #include <QPoint>
 
+class TileRenderer;
+
 class RackView : public QWidget {
     Q_OBJECT
 public:
     explicit RackView(QWidget *parent = nullptr);
+    ~RackView();
 
     void setRack(const QString& rack);
     QSize sizeHint() const override;
@@ -18,6 +21,9 @@ public:
 
     // Remove tile at specific index (for when it's placed on board)
     void removeTileAtIndex(int index);
+
+    // Add tile back to rack (for backspace in keyboard entry)
+    void addTile(QChar tile);
 
 signals:
     void debugMessage(const QString &msg);
@@ -55,6 +61,9 @@ private:
     QChar m_draggedTileChar;
     QPoint m_dragStartPos;
     int m_dropIndicatorPosition = -1;  // -1 means no indicator, otherwise index where tile would be inserted
+
+    // Cached tile renderer (created once, reused to avoid memory leak)
+    TileRenderer *m_tileRenderer = nullptr;
 };
 
 #endif // RACK_VIEW_H

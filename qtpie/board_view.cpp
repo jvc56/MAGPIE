@@ -20,6 +20,11 @@ BoardView::BoardView(QWidget *parent)
     setMinimumSize(minSize, minSize);
 }
 
+BoardView::~BoardView() {
+    delete m_tileRenderer;
+    delete m_boardRenderer;
+}
+
 bool BoardView::hasHeightForWidth() const {
     return true;
 }
@@ -30,7 +35,9 @@ int BoardView::heightForWidth(int w) const {
 }
 
 QSize BoardView::sizeHint() const {
-    return QSize(750, 750);
+    // Add extra space for position 15 cursor (one additional square size)
+    int extraSpace = m_squareSize > 0 ? m_squareSize : 50;
+    return QSize(750 + extraSpace, 750 + extraSpace);
 }
 
 QSize BoardView::minimumSizeHint() const {
@@ -46,6 +53,7 @@ void BoardView::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
 
     constexpr int BOARD_DIM = 15;
+    constexpr int EFFECTIVE_DIM = 16;  // Include space for position 15 cursor
     constexpr int MIN_SQUARE_SIZE = 20;  // Minimum readable square size
     constexpr int BOARD_PADDING = 5;     // Fixed padding around board squares (right/bottom)
 
@@ -82,6 +90,21 @@ void BoardView::resizeEvent(QResizeEvent* event) {
     // Reduce top/left margins by 2px for tighter spacing
     m_marginX = std::max(BOARD_PADDING, labelSpaceLeft) - 2;
     m_marginY = std::max(BOARD_PADDING, labelSpaceTop) - 2;
+
+    // CRITICAL FIX: Don't call setMinimumSize in resizeEvent - causes infinite resize loop!
+    // Each resize creates a new TileRenderer, causing memory explosion
+    // Removed setMinimumSize call to prevent infinite loop
+
+    // CRITICAL: Recreate tile renderers when size changes to avoid memory leak in paintEvent
+    // Only create if size actually changed to avoid unnecessary allocations
+    static int lastSquareSize = 0;
+    if (m_squareSize != lastSquareSize) {
+        delete m_tileRenderer;
+        delete m_boardRenderer;
+        m_tileRenderer = new TileRenderer(m_squareSize, TileRenderer::TileStyle::Rack);
+        m_boardRenderer = new TileRenderer(m_squareSize, TileRenderer::TileStyle::Board);
+        lastSquareSize = m_squareSize;
+    }
 
     // Re-render the board at the new size
     renderBoard();
@@ -208,9 +231,8 @@ void BoardView::paintEvent(QPaintEvent *) {
         }
 
         // Draw uncommitted tiles (placed but not committed) in green
-        if (!m_uncommittedTiles.isEmpty()) {
-            // Use Rack style to render green tiles
-            TileRenderer tileRenderer(m_squareSize, TileRenderer::TileStyle::Rack);
+        if (!m_uncommittedTiles.isEmpty() && m_tileRenderer) {
+            // Use cached tile renderer to avoid memory leak
             for (const UncommittedTile &tile : m_uncommittedTiles) {
                 // Skip this tile if it's the ghost position (being dragged)
                 if (tile.row == m_ghostRow && tile.col == m_ghostCol) {
@@ -223,13 +245,13 @@ void BoardView::paintEvent(QPaintEvent *) {
                 QPixmap tilePixmap;
                 if (tile.letter == '?') {
                     // Blank tile - need to show designated letter
-                    tilePixmap = tileRenderer.getBlankTile('A');  // Default to 'A' for now
+                    tilePixmap = m_tileRenderer->getBlankTile('A');  // Default to 'A' for now
                 } else if (tile.letter.isLower() && tile.letter >= 'a' && tile.letter <= 'z') {
                     // Lowercase = blank tile with designated letter
-                    tilePixmap = tileRenderer.getBlankTile(tile.letter.toUpper().toLatin1());
+                    tilePixmap = m_tileRenderer->getBlankTile(tile.letter.toUpper().toLatin1());
                 } else if (tile.letter.isUpper() && tile.letter >= 'A' && tile.letter <= 'Z') {
                     // Normal tile
-                    tilePixmap = tileRenderer.getLetterTile(tile.letter.toLatin1());
+                    tilePixmap = m_tileRenderer->getLetterTile(tile.letter.toLatin1());
                 }
 
                 painter.drawPixmap(x, y, tilePixmap);
@@ -237,18 +259,17 @@ void BoardView::paintEvent(QPaintEvent *) {
         }
 
         // Draw ghost tile (dimmed version at original position during drag)
-        if (m_ghostRow >= 0 && m_ghostCol >= 0 && !m_ghostLetter.isNull()) {
-            TileRenderer tileRenderer(m_squareSize, TileRenderer::TileStyle::Rack);
+        if (m_ghostRow >= 0 && m_ghostCol >= 0 && !m_ghostLetter.isNull() && m_tileRenderer) {
             int x = m_marginX + m_ghostCol * m_squareSize;
             int y = m_marginY + m_ghostRow * m_squareSize;
 
             QPixmap tilePixmap;
             if (m_ghostLetter.isLower() && m_ghostLetter >= 'a' && m_ghostLetter <= 'z') {
                 // Blank tile with designated letter
-                tilePixmap = tileRenderer.getBlankTile(m_ghostLetter.toUpper().toLatin1());
+                tilePixmap = m_tileRenderer->getBlankTile(m_ghostLetter.toUpper().toLatin1());
             } else if (m_ghostLetter.isUpper() && m_ghostLetter >= 'A' && m_ghostLetter <= 'Z') {
                 // Normal tile
-                tilePixmap = tileRenderer.getLetterTile(m_ghostLetter.toLatin1());
+                tilePixmap = m_tileRenderer->getLetterTile(m_ghostLetter.toLatin1());
             }
 
             // Draw with 45% opacity to make it ghosted/dimmed
@@ -266,6 +287,160 @@ void BoardView::paintEvent(QPaintEvent *) {
             painter.setPen(QPen(QColor(0, 200, 0, 180), 4));
             painter.setBrush(Qt::NoBrush);
             painter.drawRect(x, y, m_squareSize, m_squareSize);
+        }
+
+        // Draw keyboard entry indicator
+        if (m_keyboardRow >= 0 && m_keyboardCol >= 0 && m_keyboardRow <= 15 && m_keyboardCol <= 15) {
+            int x = m_marginX + m_keyboardCol * m_squareSize;
+            int y = m_marginY + m_keyboardRow * m_squareSize;
+
+            // Check if we're at position 15 (off board edge) - use insertion caret
+            if (m_keyboardRow == 15 || m_keyboardCol == 15) {
+                painter.setRenderHint(QPainter::Antialiasing);
+
+                // Draw insertion caret (green bar with caps)
+                QPen caretPen(QColor(0, 200, 0, 220), 3);
+                caretPen.setCapStyle(Qt::RoundCap);
+                painter.setPen(caretPen);
+
+                // Disable clipping so caret at edge doesn't get cropped
+                painter.setClipping(false);
+
+                if (m_keyboardDir == Horizontal && m_keyboardCol == 15) {
+                    // Vertical bar for horizontal direction at right edge
+                    int centerX = x;
+                    int topY = y + 2;
+                    int bottomY = y + m_squareSize - 2;
+
+                    // Main vertical line
+                    painter.drawLine(centerX, topY, centerX, bottomY);
+
+                    // Top horizontal cap (narrower)
+                    int capWidth = 4;
+                    painter.drawLine(centerX - capWidth/2, topY, centerX + capWidth/2, topY);
+
+                    // Bottom horizontal cap (narrower)
+                    painter.drawLine(centerX - capWidth/2, bottomY, centerX + capWidth/2, bottomY);
+                } else if (m_keyboardDir == Vertical && m_keyboardRow == 15) {
+                    // Horizontal bar for vertical direction at bottom edge
+                    int centerY = y;
+                    int leftX = x + 2;
+                    int rightX = x + m_squareSize - 2;
+
+                    // Main horizontal line
+                    painter.drawLine(leftX, centerY, rightX, centerY);
+
+                    // Left vertical cap (narrower)
+                    int capHeight = 4;
+                    painter.drawLine(leftX, centerY - capHeight/2, leftX, centerY + capHeight/2);
+
+                    // Right vertical cap (narrower)
+                    painter.drawLine(rightX, centerY - capHeight/2, rightX, centerY + capHeight/2);
+                }
+
+                // Re-enable clipping
+                painter.setClipping(true);
+            } else {
+                // Normal position (0-14): Draw square with arrow
+                // Draw premium square without label (if on empty premium square and we have cached renderer)
+                if (board && m_boardRenderer) {
+                    // Check if square is empty (no tile on board and no uncommitted tile)
+                    bool hasUncommittedTile = false;
+                    for (const UncommittedTile &tile : m_uncommittedTiles) {
+                        if (tile.row == m_keyboardRow && tile.col == m_keyboardCol) {
+                            hasUncommittedTile = true;
+                            break;
+                        }
+                    }
+
+                    bool isEmpty = isSquareEmpty(m_keyboardRow, m_keyboardCol) && !hasUncommittedTile;
+
+                    if (isEmpty) {
+                        MagpieBonusSquare bonus = magpie_get_bonus_square(board, m_keyboardRow, m_keyboardCol);
+                        PremiumSquare premiumType = PremiumSquare::None;
+
+                        switch (bonus) {
+                            case MAGPIE_DOUBLE_LETTER_SCORE:
+                                premiumType = PremiumSquare::DoubleLetter;
+                                break;
+                            case MAGPIE_TRIPLE_LETTER_SCORE:
+                                premiumType = PremiumSquare::TripleLetter;
+                                break;
+                            case MAGPIE_DOUBLE_WORD_SCORE:
+                                premiumType = PremiumSquare::DoubleWord;
+                                break;
+                            case MAGPIE_TRIPLE_WORD_SCORE:
+                                premiumType = PremiumSquare::TripleWord;
+                                break;
+                            default:
+                                premiumType = PremiumSquare::None;
+                                break;
+                        }
+
+                        // Draw premium square without label using cached board renderer
+                        if (premiumType != PremiumSquare::None) {
+                            const QPixmap& premiumSquare = m_boardRenderer->getPremiumSquareNoLabel(premiumType);
+                            painter.drawPixmap(x, y, premiumSquare);
+                        }
+                    }
+                }
+
+                // Draw green square outline
+                painter.setPen(QPen(QColor(0, 200, 0, 180), 4));
+                painter.setBrush(Qt::NoBrush);
+                painter.drawRect(x, y, m_squareSize, m_squareSize);
+
+                // Render arrow at 4x scale for supersampling
+                qreal supersample = 4.0;
+                qreal dpr = 2.0;
+                int renderSize = m_squareSize * supersample;
+
+                // Create image with alpha channel for the arrow
+                QImage arrowImage(renderSize, renderSize, QImage::Format_ARGB32);
+                arrowImage.fill(Qt::transparent);
+
+                QPainter arrowPainter(&arrowImage);
+                arrowPainter.setRenderHint(QPainter::Antialiasing);
+
+                // Draw semi-transparent green arrow at 4x scale
+                arrowPainter.setPen(QPen(QColor(0, 200, 0, 200), 3 * supersample));
+                arrowPainter.setBrush(QColor(0, 200, 0, 150));
+
+                int centerX = renderSize / 2;
+                int centerY = renderSize / 2;
+                int arrowSize = (m_squareSize * supersample) / 3;
+
+                if (m_keyboardDir == Horizontal) {
+                    // Right arrow
+                    QPolygon arrow;
+                    arrow << QPoint(centerX - arrowSize/2, centerY - arrowSize/2)
+                          << QPoint(centerX + arrowSize/2, centerY)
+                          << QPoint(centerX - arrowSize/2, centerY + arrowSize/2);
+                    arrowPainter.drawPolygon(arrow);
+                } else {
+                    // Down arrow
+                    QPolygon arrow;
+                    arrow << QPoint(centerX - arrowSize/2, centerY - arrowSize/2)
+                          << QPoint(centerX, centerY + arrowSize/2)
+                          << QPoint(centerX + arrowSize/2, centerY - arrowSize/2);
+                    arrowPainter.drawPolygon(arrow);
+                }
+
+                arrowPainter.end();
+
+                // Downsample from 4x to final size using high-quality smooth scaling
+                QImage scaledArrowImage = arrowImage.scaled(
+                    m_squareSize * dpr, m_squareSize * dpr,
+                    Qt::IgnoreAspectRatio,
+                    Qt::SmoothTransformation
+                );
+
+                QPixmap arrowPixmap = QPixmap::fromImage(scaledArrowImage);
+                arrowPixmap.setDevicePixelRatio(dpr);
+
+                // Draw the supersampled arrow
+                painter.drawPixmap(x, y, arrowPixmap);
+            }
         }
     }
 }
@@ -364,16 +539,46 @@ void BoardView::clearGhostTile() {
     update();
 }
 
+void BoardView::setKeyboardEntry(int row, int col, Direction dir) {
+    m_keyboardRow = row;
+    m_keyboardCol = col;
+    m_keyboardDir = dir;
+
+    update();
+
+    // If cursor is at position 15, also update parent to draw overlay
+    if ((row == 15 || col == 15) && parentWidget()) {
+        parentWidget()->update();
+    }
+}
+
+void BoardView::clearKeyboardEntry() {
+    m_keyboardRow = -1;
+    m_keyboardCol = -1;
+    update();
+
+    // Also update parent to clear overlay
+    if (parentWidget()) {
+        parentWidget()->update();
+    }
+}
+
 void BoardView::mousePressEvent(QMouseEvent *event) {
     if (event->button() == Qt::LeftButton) {
         int row, col;
         getBoardCoordinates(event->pos(), row, col);
 
-        // Check if clicking on an uncommitted tile
-        if (row >= 0 && col >= 0 && hasUncommittedTile(row, col)) {
-            m_draggedRow = row;
-            m_draggedCol = col;
-            m_dragStartPos = event->pos();
+        if (row >= 0 && col >= 0) {
+            // Check if clicking on an uncommitted tile
+            if (hasUncommittedTile(row, col)) {
+                m_draggedRow = row;
+                m_draggedCol = col;
+                m_dragStartPos = event->pos();
+            }
+            // Check if clicking on empty square (for keyboard entry)
+            else if (isSquareEmpty(row, col)) {
+                emit squareClicked(row, col);
+            }
         }
     }
     QWidget::mousePressEvent(event);

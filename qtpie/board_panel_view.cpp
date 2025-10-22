@@ -18,6 +18,9 @@
 #include <QPropertyAnimation>
 #include <QApplication>
 #include <QTime>
+#include <QKeyEvent>
+#include <QPainter>
+#include <QPaintEvent>
 
 // Helper to create placeholder widgets with light theme.
 static QWidget* createPlaceholder(const QString &text, const QColor &bgColor = QColor(255, 255, 255)) {
@@ -44,6 +47,13 @@ BoardPanelView::BoardPanelView(QWidget *parent)
 {
     // Accept drops to act as a catch-all for drags
     setAcceptDrops(true);
+
+    // Enable keyboard focus for keyboard entry mode
+    setFocusPolicy(Qt::StrongFocus);
+
+    // Don't clip child widgets so BoardView cursor at position 15 can extend beyond bounds
+    setAttribute(Qt::WA_NoSystemBackground, false);
+    setAutoFillBackground(false);
 
     // Enforce minimum size to prevent container from shrinking smaller than board
     // Board minimum: 20px * 15 + margins = 322px
@@ -133,10 +143,6 @@ BoardPanelView::BoardPanelView(QWidget *parent)
         emit debugMessage(QString(">>> [%1] BoardPanelView: about to emit hideDragPreview").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
         emit hideDragPreview();
         emit debugMessage(QString(">>> [%1] BoardPanelView: hideDragPreview emitted").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
-
-        // ALSO force immediate update/repaint to ensure preview disappears
-        QApplication::processEvents();
-        emit debugMessage(QString(">>> [%1] BoardPanelView: processEvents() called").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
     });
 
     // Connect board drag start to show preview
@@ -160,6 +166,13 @@ BoardPanelView::BoardPanelView(QWidget *parent)
     // Connect rack accepting board tile to remove it from board
     connect(rackView, &RackView::boardTileReturned, this, [this](int row, int col) {
         boardView->removeUncommittedTile(row, col);
+    });
+
+    // Connect board square click for keyboard entry
+    connect(boardView, &BoardView::squareClicked, this, [this](int row, int col) {
+        emit debugMessage(QString("Square clicked: (%1, %2) - entering keyboard mode").arg(row).arg(col));
+        boardView->setKeyboardEntry(row, col, BoardView::Horizontal);
+        setFocus();  // Take keyboard focus to receive key events
     });
 
     // Placeholder for controls beneath the rack
@@ -467,20 +480,12 @@ void BoardPanelView::dropEvent(QDropEvent *event) {
 }
 
 QPixmap BoardPanelView::renderTilePreview(QChar tileChar, int size) {
-    TileRenderer renderer(size, TileRenderer::TileStyle::Rack);
-
-    QPixmap tilePixmap;
-    if (tileChar == '?') {
-        tilePixmap = renderer.getBlankTile('A');
-    } else if (tileChar.isLower() && tileChar >= 'a' && tileChar <= 'z') {
-        tilePixmap = renderer.getBlankTile(tileChar.toLatin1());
-    } else if (tileChar.isUpper() && tileChar >= 'A' && tileChar <= 'Z') {
-        tilePixmap = renderer.getLetterTile(tileChar.toLatin1());
-    } else {
-        // Unknown character - use a placeholder
-        tilePixmap = renderer.getLetterTile('?');
-    }
-    return tilePixmap;
+    // CRITICAL FIX: Don't create TileRenderer here - causes massive memory leak during dragging!
+    // This is called on every mouse move during drag, hundreds of times per second.
+    // Just return an empty pixmap for now - drag preview disabled to prevent leak.
+    Q_UNUSED(tileChar);
+    Q_UNUSED(size);
+    return QPixmap();
 }
 
 void BoardPanelView::updateDragTilePreview(const QPoint &pos, QChar tileChar) {
@@ -564,4 +569,294 @@ void BoardPanelView::updateDragTilePreview(const QPoint &pos, QChar tileChar) {
 void BoardPanelView::animatePreviewBackToRack() {
     // Just hide the preview - animation could be added later
     emit hideDragPreview();
+}
+
+void BoardPanelView::keyPressEvent(QKeyEvent *event) {
+    if (!boardView->isKeyboardEntryActive()) {
+        QWidget::keyPressEvent(event);
+        return;
+    }
+
+    int row, col;
+    BoardView::Direction dir;
+    boardView->getKeyboardEntry(row, col, dir);
+
+    // Handle arrow keys to toggle direction
+    if (event->key() == Qt::Key_Right || event->key() == Qt::Key_Down) {
+        BoardView::Direction newDir = (event->key() == Qt::Key_Right) ? BoardView::Horizontal : BoardView::Vertical;
+        boardView->setKeyboardEntry(row, col, newDir);
+        emit debugMessage(QString("Direction changed to %1").arg(newDir == BoardView::Horizontal ? "Horizontal" : "Vertical"));
+        event->accept();
+        return;
+    }
+
+    // Handle Escape to cancel keyboard entry
+    if (event->key() == Qt::Key_Escape) {
+        boardView->clearKeyboardEntry();
+        emit debugMessage("Keyboard entry cancelled");
+        event->accept();
+        return;
+    }
+
+    // Handle backspace to delete last placed tile
+    if (event->key() == Qt::Key_Backspace) {
+        // Search backwards for the last uncommitted tile
+        int searchRow = row;
+        int searchCol = col;
+
+        // If we're at or past position 15, start from 14
+        if (searchRow >= 15 || searchCol >= 15) {
+            searchRow = qMin(searchRow, 14);
+            searchCol = qMin(searchCol, 14);
+        } else {
+            // Move back one position to start searching
+            if (dir == BoardView::Horizontal) {
+                searchCol--;
+            } else {
+                searchRow--;
+            }
+        }
+
+        // Search backwards for an uncommitted tile
+        while (searchRow >= 0 && searchCol >= 0) {
+            if (boardView->hasUncommittedTile(searchRow, searchCol)) {
+                // Found an uncommitted tile - remove it
+                QChar tileChar;
+                const auto& tiles = boardView->getUncommittedTiles();
+                for (const auto& tile : tiles) {
+                    if (tile.row == searchRow && tile.col == searchCol) {
+                        tileChar = tile.letter;
+                        break;
+                    }
+                }
+
+                // Remove from board
+                boardView->removeUncommittedTile(searchRow, searchCol);
+
+                // Return to rack
+                if (!tileChar.isNull()) {
+                    rackView->addTile(tileChar);
+                    emit debugMessage(QString("Removed tile '%1' at (%2, %3) and returned to rack").arg(tileChar).arg(searchRow).arg(searchCol));
+                }
+
+                // Move cursor to where the tile was removed
+                boardView->setKeyboardEntry(searchRow, searchCol, dir);
+                event->accept();
+                return;
+            }
+
+            // Move back one more position
+            if (dir == BoardView::Horizontal) {
+                searchCol--;
+            } else {
+                searchRow--;
+            }
+        }
+
+        // No uncommitted tiles found - do nothing
+        emit debugMessage("No uncommitted tiles to remove");
+        event->accept();
+        return;
+    }
+
+    // Handle letter keys (A-Z)
+    QString text = event->text().toUpper();
+    if (text.length() == 1) {
+        QChar ch = text[0];
+        if (ch >= 'A' && ch <= 'Z') {
+            // Don't allow typing if we're at position 15 (off the board)
+            if (row >= 15 || col >= 15) {
+                emit debugMessage("Cannot place tile at position 15 (off board)");
+                event->accept();
+                return;
+            }
+
+            // Check if we have this tile in the rack
+            QString rack = rackView->getRack();
+            int tileIndex = rack.indexOf(ch);
+
+            if (tileIndex >= 0) {
+                // Place the tile on the board
+                boardView->placeUncommittedTile(row, col, ch);
+                rackView->removeTileAtIndex(tileIndex);
+                emit debugMessage(QString("Placed '%1' at (%2, %3)").arg(ch).arg(row).arg(col));
+
+                // Move to next empty square (skip over already-placed tiles)
+                int nextRow = row;
+                int nextCol = col;
+                bool foundEmpty = false;
+
+                // Keep advancing until we find an empty square or go past the board edge
+                while (true) {
+                    if (dir == BoardView::Horizontal) {
+                        nextCol++;
+                    } else {
+                        nextRow++;
+                    }
+
+                    // If we've gone past position 15, stop at 15
+                    if (nextRow > 15 || nextCol > 15) {
+                        nextRow = qMin(nextRow, 15);
+                        nextCol = qMin(nextCol, 15);
+                        break;
+                    }
+
+                    // If we're at position 15 (off board edge), stop there with caret
+                    if (nextRow == 15 || nextCol == 15) {
+                        break;
+                    }
+
+                    // If this square is empty, we found our target
+                    if (boardView->isSquareEmpty(nextRow, nextCol)) {
+                        foundEmpty = true;
+                        break;
+                    }
+
+                    // Otherwise, this square has a tile - keep looking
+                }
+
+                // Move cursor to the next position (can be 0-15)
+                boardView->setKeyboardEntry(nextRow, nextCol, dir);
+
+                if (foundEmpty) {
+                    emit debugMessage(QString("Advanced to next empty square (%1, %2)").arg(nextRow).arg(nextCol));
+                } else if (nextRow == 15 || nextCol == 15) {
+                    emit debugMessage(QString("Advanced to position 15 - insertion caret at edge").arg(nextRow).arg(nextCol));
+                } else {
+                    emit debugMessage(QString("Advanced to position (%1, %2) - no empty squares").arg(nextRow).arg(nextCol));
+                }
+            } else {
+                emit debugMessage(QString("Tile '%1' not in rack").arg(ch));
+            }
+            event->accept();
+            return;
+        }
+    }
+
+    QWidget::keyPressEvent(event);
+}
+
+void BoardPanelView::paintEvent(QPaintEvent *event) {
+    // Call base class paintEvent first
+    QWidget::paintEvent(event);
+
+    // Draw keyboard cursor overlay if at position 15 (for insertion caret at edge)
+    if (boardView && boardView->isKeyboardEntryActive()) {
+        int row, col;
+        BoardView::Direction dir;
+        boardView->getKeyboardEntry(row, col, dir);
+
+        // Only draw overlay if cursor is at position 15 (caret extends beyond BoardView bounds)
+        if (row == 15 || col == 15) {
+            QPainter painter(this);
+            renderCursorOverlay(painter);
+        }
+    }
+}
+
+void BoardPanelView::renderCursorOverlay(QPainter &painter) {
+    if (!boardView) return;
+
+    int row, col;
+    BoardView::Direction dir;
+    boardView->getKeyboardEntry(row, col, dir);
+
+    int squareSize = boardView->getSquareSize();
+    if (squareSize <= 0) return;
+
+    // Calculate position in BoardPanelView coordinates
+    QPoint boardPos = boardView->pos();
+    int marginX = boardView->getMarginX();
+    int marginY = boardView->getMarginY();
+
+    int x = boardPos.x() + marginX + col * squareSize;
+    int y = boardPos.y() + marginY + row * squareSize;
+
+    // Draw insertion caret for position 15
+    painter.setRenderHint(QPainter::Antialiasing);
+    QPen caretPen(QColor(0, 200, 0, 220), 3);
+    caretPen.setCapStyle(Qt::RoundCap);
+    painter.setPen(caretPen);
+
+    if (dir == BoardView::Horizontal && col == 15) {
+        // Vertical bar for horizontal direction at right edge
+        int centerX = x;
+        int topY = y + 2;
+        int bottomY = y + squareSize - 2;
+
+        // Main vertical line
+        painter.drawLine(centerX, topY, centerX, bottomY);
+
+        // Top horizontal cap (narrower)
+        int capWidth = 4;
+        painter.drawLine(centerX - capWidth/2, topY, centerX + capWidth/2, topY);
+
+        // Bottom horizontal cap (narrower)
+        painter.drawLine(centerX - capWidth/2, bottomY, centerX + capWidth/2, bottomY);
+    } else if (dir == BoardView::Vertical && row == 15) {
+        // Horizontal bar for vertical direction at bottom edge
+        int centerY = y;
+        int leftX = x + 2;
+        int rightX = x + squareSize - 2;
+
+        // Main horizontal line
+        painter.drawLine(leftX, centerY, rightX, centerY);
+
+        // Left vertical cap (narrower)
+        int capHeight = 4;
+        painter.drawLine(leftX, centerY - capHeight/2, leftX, centerY + capHeight/2);
+
+        // Right vertical cap (narrower)
+        painter.drawLine(rightX, centerY - capHeight/2, rightX, centerY + capHeight/2);
+    }
+
+    // Render arrow at 4x scale for supersampling
+    qreal supersample = 4.0;
+    qreal dpr = 2.0;
+    int renderSize = squareSize * supersample;
+
+    QImage arrowImage(renderSize, renderSize, QImage::Format_ARGB32);
+    arrowImage.fill(Qt::transparent);
+
+    QPainter arrowPainter(&arrowImage);
+    arrowPainter.setRenderHint(QPainter::Antialiasing);
+
+    // Draw semi-transparent green arrow at 4x scale
+    arrowPainter.setPen(QPen(QColor(0, 200, 0, 200), 3 * supersample));
+    arrowPainter.setBrush(QColor(0, 200, 0, 150));
+
+    int centerX = renderSize / 2;
+    int centerY = renderSize / 2;
+    int arrowSize = (squareSize * supersample) / 3;
+
+    if (dir == BoardView::Horizontal) {
+        // Right arrow
+        QPolygon arrow;
+        arrow << QPoint(centerX - arrowSize/2, centerY - arrowSize/2)
+              << QPoint(centerX + arrowSize/2, centerY)
+              << QPoint(centerX - arrowSize/2, centerY + arrowSize/2);
+        arrowPainter.drawPolygon(arrow);
+    } else {
+        // Down arrow
+        QPolygon arrow;
+        arrow << QPoint(centerX - arrowSize/2, centerY - arrowSize/2)
+              << QPoint(centerX, centerY + arrowSize/2)
+              << QPoint(centerX + arrowSize/2, centerY - arrowSize/2);
+        arrowPainter.drawPolygon(arrow);
+    }
+
+    arrowPainter.end();
+
+    // Downsample from 4x to final size
+    QImage scaledArrowImage = arrowImage.scaled(
+        squareSize * dpr, squareSize * dpr,
+        Qt::IgnoreAspectRatio,
+        Qt::SmoothTransformation
+    );
+
+    QPixmap arrowPixmap = QPixmap::fromImage(scaledArrowImage);
+    arrowPixmap.setDevicePixelRatio(dpr);
+
+    // Draw the supersampled arrow
+    painter.drawPixmap(x, y, arrowPixmap);
 }

@@ -41,6 +41,7 @@ public:
     const QPixmap& getLetterTile(char letter) const;
     const QPixmap& getBlankTile(char letter) const;
     const QPixmap& getPremiumSquare(PremiumSquare type) const;
+    const QPixmap& getPremiumSquareNoLabel(PremiumSquare type) const;
     const QPixmap& getEmptySquare() const;
 
     int tileSize() const { return m_tileSize; }
@@ -50,7 +51,7 @@ private:
 
     // Render individual tile types
     QPixmap renderLetterTile(char letter, bool isBlank);
-    QPixmap renderPremiumSquare(PremiumSquare type);
+    QPixmap renderPremiumSquare(PremiumSquare type, bool includeLabel = true);
     QPixmap renderEmptySquare();
 
     // Helper drawing functions
@@ -64,6 +65,7 @@ private:
     QMap<char, QPixmap> m_letterTiles;    // A-Z
     QMap<char, QPixmap> m_blankTiles;     // a-z
     QMap<PremiumSquare, QPixmap> m_premiumSquares;
+    QMap<PremiumSquare, QPixmap> m_premiumSquaresNoLabel;  // Premium squares without labels
     QPixmap m_emptySquare;
 };
 

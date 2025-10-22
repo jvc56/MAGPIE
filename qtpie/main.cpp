@@ -8,6 +8,7 @@
 #include <QMenu>
 #include <QAction>
 #include <QTextEdit>
+#include <QTextCursor>
 #include <QFont>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
@@ -133,6 +134,12 @@ public:
       } else {
           historyTextView->append("WARNING: No game from config");
       }
+
+      // Scroll history view to top after initial setup
+      QTextCursor cursor = historyTextView->textCursor();
+      cursor.movePosition(QTextCursor::Start);
+      historyTextView->setTextCursor(cursor);
+      historyTextView->ensureCursorVisible();
     }
 
     void printBoard() {
@@ -269,9 +276,6 @@ private slots:
         if (dragTilePreview && dragTilePreview->isVisible()) {
             debugTextView->append(QString(">>> [%1] MainWidget: hiding preview").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
             dragTilePreview->setVisible(false);
-            dragTilePreview->repaint();  // Force immediate repaint
-            repaint();  // Force repaint of entire window
-            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);  // Process paint events immediately
             debugTextView->append(QString(">>> [%1] MainWidget: preview hidden").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
         } else {
             debugTextView->append(QString(">>> [%1] MainWidget: preview already hidden or null").arg(QTime::currentTime().toString("HH:mm:ss.zzz")));
@@ -279,21 +283,12 @@ private slots:
     }
 
     QPixmap renderDragTile(QChar tileChar, int size) {
-        // Import TileRenderer to render tiles
-        TileRenderer renderer(size, TileRenderer::TileStyle::Rack);
-
-        QPixmap tilePixmap;
-        if (tileChar == '?') {
-            tilePixmap = renderer.getBlankTile('A');
-        } else if (tileChar.isLower() && tileChar >= 'a' && tileChar <= 'z') {
-            tilePixmap = renderer.getBlankTile(tileChar.toLatin1());
-        } else if (tileChar.isUpper() && tileChar >= 'A' && tileChar <= 'Z') {
-            tilePixmap = renderer.getLetterTile(tileChar.toLatin1());
-        } else {
-            // Unknown character - use placeholder
-            tilePixmap = renderer.getLetterTile('?');
-        }
-        return tilePixmap;
+        // CRITICAL FIX: Don't create TileRenderer here - causes massive memory leak during dragging!
+        // This is called on every mouse move during drag, hundreds of times per second.
+        // Just return empty pixmap for now - drag preview disabled to prevent leak.
+        Q_UNUSED(tileChar);
+        Q_UNUSED(size);
+        return QPixmap();
     }
 
 private:
