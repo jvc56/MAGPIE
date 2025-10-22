@@ -217,10 +217,9 @@ protected:
                 // Render tile at current size
                 QPixmap tilePixmap = renderDragTile(tileChar, tileSize);
 
-                // Update preview at global cursor position
-                QPoint localPos = event->position().toPoint();
-                QPoint globalPos = mapToGlobal(localPos);
-                onUpdateDragPreview(tilePixmap, globalPos);
+                // Update preview - event position is already in MainWidget coordinates
+                QPoint mainWidgetPos = event->position().toPoint();
+                onUpdateDragPreview(tilePixmap, mainWidgetPos);
             }
         } else {
             QMainWindow::dragMoveEvent(event);
@@ -252,17 +251,18 @@ private slots:
         layout->setDebugOverlayVisible(show);
     }
 
-    void onUpdateDragPreview(const QPixmap &tilePixmap, const QPoint &globalPos) {
+    void onUpdateDragPreview(const QPixmap &tilePixmap, const QPoint &mainWidgetPos) {
         if (!dragTilePreview) return;
 
-        // Convert global position to this widget's coordinates
-        QPoint localPos = mapFromGlobal(globalPos);
+        // mainWidgetPos is already in this widget's coordinates - no conversion needed!
+        // Calculate where the tile will be drawn (top-left corner)
+        int tileX = mainWidgetPos.x() - tilePixmap.width() / 2;
+        int tileY = mainWidgetPos.y() - tilePixmap.height() / 2;
 
         // Update preview
         dragTilePreview->setPixmap(tilePixmap);
         dragTilePreview->resize(tilePixmap.size());
-        dragTilePreview->move(localPos.x() - tilePixmap.width() / 2,
-                             localPos.y() - tilePixmap.height() / 2);
+        dragTilePreview->move(tileX, tileY);
         dragTilePreview->setVisible(true);
         dragTilePreview->raise();
     }

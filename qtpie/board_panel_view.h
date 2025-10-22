@@ -35,7 +35,7 @@ protected:
 signals:
     void debugMessage(const QString &msg);
     void boardChanged();  // Emitted when MAGPIE board is updated
-    void updateDragPreview(const QPixmap &tilePixmap, const QPoint &globalPos);  // Update drag preview at global position
+    void updateDragPreview(const QPixmap &tilePixmap, const QPoint &mainWidgetPos);  // Update drag preview at MainWidget position
     void hideDragPreview();  // Hide drag preview
 
 private slots:
@@ -69,6 +69,9 @@ private:
     // Cached tile renderer for drag preview
     TileRenderer *m_dragTileRenderer = nullptr;
     int m_lastDragTileSize = 0;
+
+    // Track last preview position (in global coordinates) for drop calculation
+    QPoint m_lastPreviewGlobalPos;
 };
 
 #endif // BOARD_PANEL_VIEW_H

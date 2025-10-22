@@ -463,8 +463,49 @@ void BoardView::getBoardCoordinates(const QPoint &pos, int &row, int &col) const
     // Check if within board bounds
     constexpr int BOARD_DIM = 15;
     if (x >= 0 && y >= 0 && x < BOARD_DIM * m_squareSize && y < BOARD_DIM * m_squareSize) {
-        col = x / m_squareSize;
-        row = y / m_squareSize;
+        // Find which square center is closest
+        // Square k has its center at k * squareSize + squareSize/2
+        // We want k that minimizes |x - (k * squareSize + squareSize/2)|
+        // This is the k closest to (x - squareSize/2) / squareSize
+        // Which is: round((x - squareSize/2) / squareSize)
+        // Simplified: round(x / squareSize - 0.5) = floor(x / squareSize)
+        // Actually, we want: (x + squareSize/2) / squareSize with integer division
+        // NO WAIT: we want k that minimizes |x - (k*size + size/2)|
+        // Setting derivative to 0: k = (x - size/2) / size
+        // Rounding: k = round((x - size/2) / size) = floor(x/size)
+        // Hmm, that's just truncation!
+
+        // Let's think differently: distance from x to center of square k is:
+        // |x - (k * size + size/2)|
+        // We want the k that minimizes this.
+        // Try k = floor(x/size) and k = floor(x/size)+1, pick the closer one.
+        int k_low = x / m_squareSize;
+        int k_high = k_low + 1;
+
+        // Distance to center of k_low
+        double center_low = k_low * m_squareSize + m_squareSize / 2.0;
+        double dist_low = std::abs(x - center_low);
+
+        // Distance to center of k_high
+        double center_high = k_high * m_squareSize + m_squareSize / 2.0;
+        double dist_high = std::abs(x - center_high);
+
+        col = (dist_low < dist_high) ? k_low : k_high;
+
+        // Same for row
+        k_low = y / m_squareSize;
+        k_high = k_low + 1;
+        center_low = k_low * m_squareSize + m_squareSize / 2.0;
+        dist_low = std::abs(y - center_low);
+        center_high = k_high * m_squareSize + m_squareSize / 2.0;
+        dist_high = std::abs(y - center_high);
+        row = (dist_low <= dist_high) ? k_low : k_high;
+
+        // Clamp to valid range
+        if (col < 0) col = 0;
+        if (col >= BOARD_DIM) col = BOARD_DIM - 1;
+        if (row < 0) row = 0;
+        if (row >= BOARD_DIM) row = BOARD_DIM - 1;
     }
 }
 

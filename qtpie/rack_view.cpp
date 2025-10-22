@@ -361,6 +361,18 @@ void RackView::mouseMoveEvent(QMouseEvent *event) {
 
             emit debugMessage("Starting drag with MoveAction | IgnoreAction");
 
+            // Calculate tile center and click offset
+            int startX = getStartX();
+            int tileCenterX = startX + m_draggedTileIndex * m_tileSize + m_tileSize / 2;
+            int tileCenterY = height() / 2;
+
+            // Store the offset from tile center to where user clicked
+            m_dragClickOffset = m_dragStartPos - QPoint(tileCenterX, tileCenterY);
+            emit debugMessage(QString("Drag click offset: (%1,%2)").arg(m_dragClickOffset.x()).arg(m_dragClickOffset.y()));
+
+            // Emit initial drag position at the click position (not tile center)
+            emit dragPositionChanged(mapToParent(m_dragStartPos), m_draggedTileChar);
+
             // Execute the drag - support both Move and Ignore actions
             // Use IgnoreAction as default to disable snap-back animation on rejected drops
             Qt::DropAction dropAction = drag->exec(Qt::MoveAction | Qt::IgnoreAction, Qt::IgnoreAction);
@@ -726,4 +738,16 @@ bool RackView::removeBlank() {
         }
     }
     return false;
+}
+
+QPoint RackView::getTileCenter(int index) const {
+    if (index < 0 || index >= m_rack.length() || m_tileSize <= 0) {
+        return QPoint(-1, -1);
+    }
+
+    int startX = getStartX();
+    int tileCenterX = startX + index * m_tileSize + m_tileSize / 2;
+    int tileCenterY = height() / 2;
+
+    return QPoint(tileCenterX, tileCenterY);
 }

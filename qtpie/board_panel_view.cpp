@@ -18,10 +18,12 @@
 #include <QGuiApplication>
 #include <QPropertyAnimation>
 #include <QApplication>
+#include <QCursor>
 #include <QTime>
 #include <QKeyEvent>
 #include <QPainter>
 #include <QPaintEvent>
+#include <algorithm>
 
 // Helper to create placeholder widgets with light theme.
 static QWidget* createPlaceholder(const QString &text, const QColor &bgColor = QColor(255, 255, 255)) {
@@ -333,13 +335,84 @@ void BoardPanelView::dragEnterEvent(QDragEnterEvent *event) {
 
 void BoardPanelView::dragMoveEvent(QDragMoveEvent *event) {
     if (event->mimeData()->hasText()) {
-        QPoint globalPos = event->position().toPoint();
+        // Get both cursor and event positions for comparison
+        QPoint cursorGlobalPos = QCursor::pos();
+        QPoint cursorInPanel = mapFromGlobal(cursorGlobalPos);
 
-        // TODO: The tile preview is visually centered on the cursor, but coordinate
-        // calculation may need adjustment. For now using cursor position directly.
-        QPoint boardLocalPos = boardView->mapFromParent(globalPos);
-        int row, col;
-        boardView->getBoardCoordinates(boardLocalPos, row, col);
+        QPoint eventPos = event->position().toPoint();
+        QPoint globalPos = mapToGlobal(eventPos);
+
+        emit debugMessage(QString("dragMove COMPARE: cursor global=(%1,%2) inPanel=(%3,%4)")
+                         .arg(cursorGlobalPos.x()).arg(cursorGlobalPos.y())
+                         .arg(cursorInPanel.x()).arg(cursorInPanel.y()));
+        emit debugMessage(QString("                 event  eventPos=(%1,%2) global=(%3,%4)")
+                         .arg(eventPos.x()).arg(eventPos.y())
+                         .arg(globalPos.x()).arg(globalPos.y()));
+
+        QWidget *mainWidget = window();
+        QPoint panelPos = eventPos;  // Already in panel coordinates
+
+        // Calculate tile size for this position
+        int tileSize = calculateDragTileSize(panelPos);
+
+        // Convert event position from panel coordinates to MainWidget coordinates
+        QPoint pixmapCenterInMain = mapTo(mainWidget, eventPos);
+        QPoint pixmapCenterGlobal = mainWidget->mapToGlobal(pixmapCenterInMain);
+        QPoint pixmapCenterInBoard = boardView->mapFromGlobal(pixmapCenterGlobal);
+
+        // Use overlap-based square detection (same as drop)
+        int pixmapLeft = pixmapCenterInMain.x() - tileSize / 2;
+        int pixmapRight = pixmapCenterInMain.x() + tileSize / 2;
+        int pixmapTop = pixmapCenterInMain.y() - tileSize / 2;
+        int pixmapBottom = pixmapCenterInMain.y() + tileSize / 2;
+
+        QPoint pixmapLeftTopGlobal = mainWidget->mapToGlobal(QPoint(pixmapLeft, pixmapTop));
+        QPoint pixmapRightBottomGlobal = mainWidget->mapToGlobal(QPoint(pixmapRight, pixmapBottom));
+        QPoint pixmapLeftTopInBoard = boardView->mapFromGlobal(pixmapLeftTopGlobal);
+        QPoint pixmapRightBottomInBoard = boardView->mapFromGlobal(pixmapRightBottomGlobal);
+
+        int pixmapLeftInBoard = pixmapLeftTopInBoard.x();
+        int pixmapRightInBoard = pixmapRightBottomInBoard.x();
+        int pixmapTopInBoard = pixmapLeftTopInBoard.y();
+        int pixmapBottomInBoard = pixmapRightBottomInBoard.y();
+
+        int marginX = boardView->getMarginX();
+        int marginY = boardView->getMarginY();
+        int squareSize = boardView->getSquareSize();
+
+        // Find which squares the pixmap overlaps
+        int leftCol = std::max(0, (pixmapLeftInBoard - marginX) / squareSize);
+        int rightCol = std::min(14, (pixmapRightInBoard - marginX) / squareSize);
+        int topRow = std::max(0, (pixmapTopInBoard - marginY) / squareSize);
+        int bottomRow = std::min(14, (pixmapBottomInBoard - marginY) / squareSize);
+
+        // Find square with maximum overlap
+        int row = -1, col = -1;
+        int maxOverlap = 0;
+
+        for (int r = topRow; r <= bottomRow; r++) {
+            for (int c = leftCol; c <= rightCol; c++) {
+                int sqLeft = marginX + c * squareSize;
+                int sqRight = sqLeft + squareSize;
+                int sqTop = marginY + r * squareSize;
+                int sqBottom = sqTop + squareSize;
+
+                int overlapLeft = std::max(pixmapLeftInBoard, sqLeft);
+                int overlapRight = std::min(pixmapRightInBoard, sqRight);
+                int overlapTop = std::max(pixmapTopInBoard, sqTop);
+                int overlapBottom = std::min(pixmapBottomInBoard, sqBottom);
+
+                int overlapWidth = std::max(0, overlapRight - overlapLeft);
+                int overlapHeight = std::max(0, overlapBottom - overlapTop);
+                int overlap = overlapWidth * overlapHeight;
+
+                if (overlap > maxOverlap) {
+                    maxOverlap = overlap;
+                    row = r;
+                    col = c;
+                }
+            }
+        }
 
         // Check if this is the source square (where we picked up the tile from)
         bool isSourceSquare = (row >= 0 && col >= 0 &&
@@ -349,8 +422,16 @@ void BoardPanelView::dragMoveEvent(QDragMoveEvent *event) {
         // Only process cursor changes if we've moved to a different square
         bool squareChanged = (row != m_lastHoverRow || col != m_lastHoverCol);
 
-        emit debugMessage(QString("dragMove: pos=(%1,%2) row=%3 col=%4 isEmpty=%5 isSource=%6 changed=%7")
-                         .arg(globalPos.x()).arg(globalPos.y())
+        emit debugMessage(QString("dragMove: eventPos=(%1,%2) globalPos=(%3,%4)")
+                         .arg(eventPos.x()).arg(eventPos.y())
+                         .arg(globalPos.x()).arg(globalPos.y()));
+        emit debugMessage(QString("  tileSize=%1 pixmapCenter in Main=(%2,%3)")
+                         .arg(tileSize)
+                         .arg(pixmapCenterInMain.x()).arg(pixmapCenterInMain.y()));
+        emit debugMessage(QString("  pixmap bounds in Board: [%1,%2] to [%3,%4]")
+                         .arg(pixmapLeftInBoard).arg(pixmapTopInBoard)
+                         .arg(pixmapRightInBoard).arg(pixmapBottomInBoard));
+        emit debugMessage(QString("  calculated: row=%1 col=%2 (isEmpty=%3 isSource=%4 changed=%5)")
                          .arg(row).arg(col).arg(isEmpty).arg(isSourceSquare).arg(squareChanged));
 
         // ALWAYS accept with MoveAction to avoid macOS rejection animation delay
@@ -393,7 +474,8 @@ void BoardPanelView::dragMoveEvent(QDragMoveEvent *event) {
         }
 
         if (!tileChar.isNull()) {
-            updateDragTilePreview(globalPos, tileChar);
+            QPoint eventPos = event->position().toPoint();
+            updateDragTilePreview(eventPos, tileChar);
         }
     } else {
         // Not our drag - let it propagate
@@ -424,12 +506,125 @@ void BoardPanelView::dragLeaveEvent(QDragLeaveEvent *event) {
 }
 
 void BoardPanelView::dropEvent(QDropEvent *event) {
-    // Check if dropping on a valid board square
-    // Mouse position is already at tile center (see main.cpp line 264-265)
-    QPoint globalPos = event->position().toPoint();
-    QPoint boardLocalPos = boardView->mapFromParent(globalPos);
-    int row, col;
-    boardView->getBoardCoordinates(boardLocalPos, row, col);
+    // The drop position should be based on where the preview was ACTUALLY rendered
+    // Use the last preview position that was emitted during dragMove
+    QPoint globalPos = m_lastPreviewGlobalPos;
+    QWidget *mainWidget = window();
+    QPoint panelPos = mapFromGlobal(globalPos);
+    QPoint boardLocalPos = boardView->mapFromParent(panelPos);
+
+    // Get board geometry info for debugging
+    int marginX = boardView->getMarginX();
+    int marginY = boardView->getMarginY();
+    int squareSize = boardView->getSquareSize();
+
+    // Calculate the tile size at this position
+    int tileSize = calculateDragTileSize(panelPos);
+
+    // The pixmap is rendered centered at globalPos in MainWidget coordinates
+    QPoint pixmapCenterInMain = mainWidget->mapFromGlobal(globalPos);
+    int pixmapLeft = pixmapCenterInMain.x() - tileSize / 2;
+    int pixmapRight = pixmapCenterInMain.x() + tileSize / 2;
+    int pixmapTop = pixmapCenterInMain.y() - tileSize / 2;
+    int pixmapBottom = pixmapCenterInMain.y() + tileSize / 2;
+
+    // Map pixmap center from MainWidget coordinates to BoardView coordinates
+    QPoint pixmapCenterGlobal = mainWidget->mapToGlobal(pixmapCenterInMain);
+    QPoint pixmapCenterInBoard = boardView->mapFromGlobal(pixmapCenterGlobal);
+
+    // Map pixmap bounds to BoardView coordinates
+    QPoint pixmapLeftTopGlobal = mainWidget->mapToGlobal(QPoint(pixmapLeft, pixmapTop));
+    QPoint pixmapRightBottomGlobal = mainWidget->mapToGlobal(QPoint(pixmapRight, pixmapBottom));
+    QPoint pixmapLeftTopInBoard = boardView->mapFromGlobal(pixmapLeftTopGlobal);
+    QPoint pixmapRightBottomInBoard = boardView->mapFromGlobal(pixmapRightBottomGlobal);
+
+    // Find which square has the most overlap with the pixmap
+    // Calculate overlap with each square the pixmap touches
+    int pixmapLeftInBoard = pixmapLeftTopInBoard.x();
+    int pixmapRightInBoard = pixmapRightBottomInBoard.x();
+    int pixmapTopInBoard = pixmapLeftTopInBoard.y();
+    int pixmapBottomInBoard = pixmapRightBottomInBoard.y();
+
+    // Determine which squares the pixmap overlaps
+    int leftCol = std::max(0, (pixmapLeftInBoard - marginX) / squareSize);
+    int rightCol = std::min(14, (pixmapRightInBoard - marginX) / squareSize);
+    int topRow = std::max(0, (pixmapTopInBoard - marginY) / squareSize);
+    int bottomRow = std::min(14, (pixmapBottomInBoard - marginY) / squareSize);
+
+    // Find the square with maximum overlap
+    int bestRow = -1, bestCol = -1;
+    int maxOverlap = 0;
+
+    // Store overlap info for debugging
+    QString overlapDebug;
+
+    for (int r = topRow; r <= bottomRow; r++) {
+        for (int c = leftCol; c <= rightCol; c++) {
+            // Calculate square bounds
+            int sqLeft = marginX + c * squareSize;
+            int sqRight = sqLeft + squareSize;
+            int sqTop = marginY + r * squareSize;
+            int sqBottom = sqTop + squareSize;
+
+            // Calculate overlap area
+            int overlapLeft = std::max(pixmapLeftInBoard, sqLeft);
+            int overlapRight = std::min(pixmapRightInBoard, sqRight);
+            int overlapTop = std::max(pixmapTopInBoard, sqTop);
+            int overlapBottom = std::min(pixmapBottomInBoard, sqBottom);
+
+            int overlapWidth = std::max(0, overlapRight - overlapLeft);
+            int overlapHeight = std::max(0, overlapBottom - overlapTop);
+            int overlap = overlapWidth * overlapHeight;
+
+            // Debug info for this square
+            if (overlap > 0) {
+                overlapDebug += QString("    [%1,%2]: %3px² (bounds: [%4,%5] to [%6,%7])\n")
+                    .arg(r).arg(c).arg(overlap)
+                    .arg(sqLeft).arg(sqTop).arg(sqRight).arg(sqBottom);
+            }
+
+            if (overlap > maxOverlap) {
+                maxOverlap = overlap;
+                bestRow = r;
+                bestCol = c;
+            }
+        }
+    }
+
+    int row = bestRow;
+    int col = bestCol;
+
+    // Calculate what the manual calculation would give us
+    int boardRelX = boardLocalPos.x() - marginX;
+    int boardRelY = boardLocalPos.y() - marginY;
+    int manualCol = boardRelX / squareSize;
+    int manualRow = boardRelY / squareSize;
+
+    // Also calculate the column boundaries
+    int col6Start = marginX + 6 * squareSize;
+    int col7Start = marginX + 7 * squareSize;
+    int col8Start = marginX + 8 * squareSize;
+
+    emit debugMessage(QString("=== Drop Analysis ==="));
+    emit debugMessage(QString("Drop event global: (%1,%2)").arg(globalPos.x()).arg(globalPos.y()));
+    emit debugMessage(QString("Pixmap size: %1px").arg(tileSize));
+    emit debugMessage(QString(""));
+    emit debugMessage(QString("Pixmap in MainWidget coords:"));
+    emit debugMessage(QString("  Center: (%1,%2)").arg(pixmapCenterInMain.x()).arg(pixmapCenterInMain.y()));
+    emit debugMessage(QString("  Bounds: [%1,%2] to [%3,%4]").arg(pixmapLeft).arg(pixmapTop).arg(pixmapRight).arg(pixmapBottom));
+    emit debugMessage(QString(""));
+    emit debugMessage(QString("Pixmap in BoardView coords:"));
+    emit debugMessage(QString("  Center: (%1,%2)").arg(pixmapCenterInBoard.x()).arg(pixmapCenterInBoard.y()));
+    emit debugMessage(QString("  Bounds: [%1,%2] to [%3,%4]").arg(pixmapLeftInBoard).arg(pixmapTopInBoard).arg(pixmapRightInBoard).arg(pixmapBottomInBoard));
+    emit debugMessage(QString(""));
+    emit debugMessage(QString("Board geometry:"));
+    emit debugMessage(QString("  Margin: (%1,%2)").arg(marginX).arg(marginY));
+    emit debugMessage(QString("  Square size: %1px").arg(squareSize));
+    emit debugMessage(QString("  Column boundaries: col6=%1 col7=%2 col8=%3").arg(col6Start).arg(col7Start).arg(col8Start));
+    emit debugMessage(QString(""));
+    emit debugMessage(QString("Overlap analysis:"));
+    emit debugMessage(overlapDebug);
+    emit debugMessage(QString("  Max overlap: %1px² → Best square: [%2,%3]").arg(maxOverlap).arg(row).arg(col));
 
     if (row >= 0 && col >= 0 && boardView->isSquareEmpty(row, col)) {
         // Valid drop on empty square
@@ -792,11 +987,36 @@ void BoardPanelView::updateDragTilePreview(const QPoint &pos, QChar tileChar) {
     // Render the actual tile at the interpolated size
     QPixmap tilePixmap = renderTilePreview(tileChar, interpolatedSize);
 
-    // Convert local position to global for MainWidget
-    QPoint globalPos = mapToGlobal(pos);
+    // Convert panel position directly to MainWidget coordinates
+    QWidget *mainWidget = window();
+    QPoint pixmapCenterInMain = mapTo(mainWidget, pos);
 
-    // Emit signal to update preview at top level
-    emit updateDragPreview(tilePixmap, globalPos);
+    // DEBUG: Check coordinate system consistency
+    QPoint globalPos = mapToGlobal(pos);
+    QPoint mainFromGlobal = mainWidget->mapFromGlobal(globalPos);
+
+    // DEBUG: Log where the tile will be rendered
+    QPoint boardLocalPos = boardView->mapFromParent(pos);
+    int row, col;
+    boardView->getBoardCoordinates(boardLocalPos, row, col);
+
+    emit debugMessage(QString("DragPreview: panelPos=(%1,%2) globalPos=(%3,%4) tileSize=%5")
+                     .arg(pos.x()).arg(pos.y())
+                     .arg(globalPos.x()).arg(globalPos.y())
+                     .arg(interpolatedSize));
+    emit debugMessage(QString("  mapTo(main)=(%1,%2) vs mainFromGlobal=(%3,%4) - match=%5")
+                     .arg(pixmapCenterInMain.x()).arg(pixmapCenterInMain.y())
+                     .arg(mainFromGlobal.x()).arg(mainFromGlobal.y())
+                     .arg(pixmapCenterInMain == mainFromGlobal ? "YES" : "NO"));
+    emit debugMessage(QString("  boardPos=(%1,%2) -> row=%3 col=%4")
+                     .arg(boardLocalPos.x()).arg(boardLocalPos.y())
+                     .arg(row).arg(col));
+
+    // Store the global position for later use in drop calculation
+    m_lastPreviewGlobalPos = mainWidget->mapToGlobal(pixmapCenterInMain);
+
+    // Emit signal to update preview at top level with MainWidget coordinates
+    emit updateDragPreview(tilePixmap, pixmapCenterInMain);
 }
 
 void BoardPanelView::animatePreviewBackToRack() {

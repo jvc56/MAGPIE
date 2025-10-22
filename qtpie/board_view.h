@@ -38,6 +38,10 @@ public:
     // Set hover square for drop preview (-1, -1 to clear)
     void setHoverSquare(int row, int col);
 
+    // Get hover square (for testing)
+    int getHoverRow() const { return m_hoverRow; }
+    int getHoverCol() const { return m_hoverCol; }
+
     // Set drag active state (to ghost keyboard cursor during drags)
     void setDragActive(bool active);
 

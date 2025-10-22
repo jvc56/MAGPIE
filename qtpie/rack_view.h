@@ -37,6 +37,9 @@ public:
     // Remove first blank from rack, return true if found
     bool removeBlank();
 
+    // Get center position of tile at index (for testing)
+    QPoint getTileCenter(int index) const;
+
 signals:
     void debugMessage(const QString &msg);
     void rackChanged(const QString& newRack);
@@ -72,6 +75,7 @@ private:
     int m_draggedTileIndex = -1;
     QChar m_draggedTileChar;
     QPoint m_dragStartPos;
+    QPoint m_dragClickOffset;  // Offset from tile center to click position
     int m_dropIndicatorPosition = -1;  // -1 means no indicator, otherwise index where tile would be inserted
 
     // Cached tile renderer (created once, reused to avoid memory leak)
