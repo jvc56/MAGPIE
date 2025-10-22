@@ -44,6 +44,8 @@ static QWidget* createPlaceholder(const QString &text, const QColor &bgColor = Q
 BoardPanelView::BoardPanelView(QWidget *parent)
     : QWidget(parent)
     , game(nullptr)
+    , m_dragTileRenderer(nullptr)
+    , m_lastDragTileSize(0)
 {
     // Accept drops to act as a catch-all for drags
     setAcceptDrops(true);
@@ -166,6 +168,23 @@ BoardPanelView::BoardPanelView(QWidget *parent)
 
     // Connect board square click for keyboard entry
     connect(boardView, &BoardView::squareClicked, this, [this](int row, int col) {
+        // Check if clicking on the current cursor position - if so, toggle direction
+        if (boardView->isKeyboardEntryActive()) {
+            int currentRow, currentCol;
+            BoardView::Direction currentDir;
+            boardView->getKeyboardEntry(currentRow, currentCol, currentDir);
+
+            if (row == currentRow && col == currentCol) {
+                // Clicking on current square - toggle direction
+                BoardView::Direction newDir = (currentDir == BoardView::Horizontal) ? BoardView::Vertical : BoardView::Horizontal;
+                boardView->setKeyboardEntry(row, col, newDir);
+                emit debugMessage(QString("Direction toggled to %1").arg(newDir == BoardView::Horizontal ? "Horizontal" : "Vertical"));
+                setFocus();  // Keep keyboard focus
+                return;
+            }
+        }
+
+        // Clicking on a different square - enter keyboard mode
         emit debugMessage(QString("Square clicked: (%1, %2) - entering keyboard mode").arg(row).arg(col));
         boardView->setKeyboardEntry(row, col, BoardView::Horizontal);
         setFocus();  // Take keyboard focus to receive key events
@@ -179,6 +198,10 @@ BoardPanelView::BoardPanelView(QWidget *parent)
     mainLayout->addWidget(cgpWidget, 0);
     mainLayout->addWidget(rackView, 1);
     mainLayout->addWidget(controlsPlaceholder, 1);
+}
+
+BoardPanelView::~BoardPanelView() {
+    delete m_dragTileRenderer;
 }
 
 void BoardPanelView::setGame(Game *game) {
@@ -475,10 +498,22 @@ void BoardPanelView::dropEvent(QDropEvent *event) {
     emit hideDragPreview();
 }
 
-// Drag preview rendering disabled - would need cached TileRenderer to avoid leaks
 QPixmap BoardPanelView::renderTilePreview(QChar tileChar, int size) {
-    Q_UNUSED(tileChar);
-    Q_UNUSED(size);
+    // Recreate renderer if size changed
+    if (!m_dragTileRenderer || m_lastDragTileSize != size) {
+        delete m_dragTileRenderer;
+        m_dragTileRenderer = new TileRenderer(size, TileRenderer::TileStyle::Rack);
+        m_lastDragTileSize = size;
+    }
+
+    // Render the tile
+    if (tileChar.isLower() && tileChar >= 'a' && tileChar <= 'z') {
+        return m_dragTileRenderer->getBlankTile(tileChar.toUpper().toLatin1());
+    } else if (tileChar.isUpper() && tileChar >= 'A' && tileChar <= 'Z') {
+        return m_dragTileRenderer->getLetterTile(tileChar.toLatin1());
+    } else if (tileChar == '?') {
+        return m_dragTileRenderer->getBlankTile('A');
+    }
     return QPixmap();
 }
 
@@ -566,6 +601,9 @@ void BoardPanelView::animatePreviewBackToRack() {
 }
 
 void BoardPanelView::keyPressEvent(QKeyEvent *event) {
+    emit debugMessage(QString("keyPressEvent: key=%1, keyboardActive=%2")
+                     .arg(event->key()).arg(boardView->isKeyboardEntryActive()));
+
     if (!boardView->isKeyboardEntryActive()) {
         QWidget::keyPressEvent(event);
         return;
@@ -575,11 +613,66 @@ void BoardPanelView::keyPressEvent(QKeyEvent *event) {
     BoardView::Direction dir;
     boardView->getKeyboardEntry(row, col, dir);
 
-    // Handle arrow keys to toggle direction
-    if (event->key() == Qt::Key_Right || event->key() == Qt::Key_Down) {
-        BoardView::Direction newDir = (event->key() == Qt::Key_Right) ? BoardView::Horizontal : BoardView::Vertical;
+    // Handle spacebar to toggle direction
+    if (event->key() == Qt::Key_Space) {
+        BoardView::Direction newDir = (dir == BoardView::Horizontal) ? BoardView::Vertical : BoardView::Horizontal;
         boardView->setKeyboardEntry(row, col, newDir);
-        emit debugMessage(QString("Direction changed to %1").arg(newDir == BoardView::Horizontal ? "Horizontal" : "Vertical"));
+        emit debugMessage(QString("Direction toggled to %1").arg(newDir == BoardView::Horizontal ? "Horizontal" : "Vertical"));
+        event->accept();
+        return;
+    }
+
+    // Handle arrow keys to move to next empty square
+    if (event->key() == Qt::Key_Right || event->key() == Qt::Key_Left ||
+        event->key() == Qt::Key_Down || event->key() == Qt::Key_Up) {
+
+        int newRow = row;
+        int newCol = col;
+        int deltaRow = 0;
+        int deltaCol = 0;
+
+        // Determine movement direction based on arrow key
+        if (event->key() == Qt::Key_Right) {
+            deltaCol = 1;
+        } else if (event->key() == Qt::Key_Left) {
+            deltaCol = -1;
+        } else if (event->key() == Qt::Key_Down) {
+            deltaRow = 1;
+        } else if (event->key() == Qt::Key_Up) {
+            deltaRow = -1;
+        }
+
+        // Move in the arrow direction until we find an empty square or hit the edge
+        bool foundEmpty = false;
+        for (int step = 1; step <= 15; ++step) {
+            newRow = row + deltaRow * step;
+            newCol = col + deltaCol * step;
+
+            // Stop if we've gone off the board (past position 15)
+            if (newRow < 0 || newCol < 0 || newRow > 15 || newCol > 15) {
+                break;
+            }
+
+            // If we're at position 15 (off board edge), stop there
+            if (newRow == 15 || newCol == 15) {
+                foundEmpty = true;
+                break;
+            }
+
+            // If this square is empty, we found our target
+            if (boardView->isSquareEmpty(newRow, newCol)) {
+                foundEmpty = true;
+                break;
+            }
+        }
+
+        if (foundEmpty) {
+            boardView->setKeyboardEntry(newRow, newCol, dir);
+            emit debugMessage(QString("Moved cursor to (%1, %2)").arg(newRow).arg(newCol));
+        } else {
+            emit debugMessage("No empty square found in that direction");
+        }
+
         event->accept();
         return;
     }

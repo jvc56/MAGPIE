@@ -12,6 +12,7 @@ class BoardPanelView : public QWidget {
     Q_OBJECT
 public:
     explicit BoardPanelView(QWidget *parent = nullptr);
+    ~BoardPanelView();
 
     void setGame(Game *game);
     Game* getGame() const { return game; }
@@ -63,6 +64,10 @@ private:
     // Track last hover square to avoid redundant cursor changes
     int m_lastHoverRow = -1;
     int m_lastHoverCol = -1;
+
+    // Cached tile renderer for drag preview
+    TileRenderer *m_dragTileRenderer = nullptr;
+    int m_lastDragTileSize = 0;
 };
 
 #endif // BOARD_PANEL_VIEW_H

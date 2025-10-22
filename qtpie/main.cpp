@@ -160,6 +160,7 @@ public:
       if (config) {
           magpie_destroy_config(config);
       }
+      delete m_dragTileRenderer;
     }
 
 protected:
@@ -272,10 +273,22 @@ private slots:
         }
     }
 
-    // Drag preview rendering disabled - would need cached TileRenderer to avoid leaks
     QPixmap renderDragTile(QChar tileChar, int size) {
-        Q_UNUSED(tileChar);
-        Q_UNUSED(size);
+        // Recreate renderer if size changed
+        if (!m_dragTileRenderer || m_lastDragTileSize != size) {
+            delete m_dragTileRenderer;
+            m_dragTileRenderer = new TileRenderer(size, TileRenderer::TileStyle::Rack);
+            m_lastDragTileSize = size;
+        }
+
+        // Render the tile
+        if (tileChar.isLower() && tileChar >= 'a' && tileChar <= 'z') {
+            return m_dragTileRenderer->getBlankTile(tileChar.toUpper().toLatin1());
+        } else if (tileChar.isUpper() && tileChar >= 'A' && tileChar <= 'Z') {
+            return m_dragTileRenderer->getLetterTile(tileChar.toLatin1());
+        } else if (tileChar == '?') {
+            return m_dragTileRenderer->getBlankTile('A');
+        }
         return QPixmap();
     }
 
@@ -288,6 +301,8 @@ private:
     QTextEdit *debugTextView;
     ResponsiveLayout *layout;
     QLabel *dragTilePreview;  // Top-level drag preview overlay
+    TileRenderer *m_dragTileRenderer = nullptr;  // Cached renderer for drag preview
+    int m_lastDragTileSize = 0;  // Track size to recreate when needed
 
     QWidget* createWidget(const QString &title) {
         QWidget *w = new QWidget;
