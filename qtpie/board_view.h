@@ -38,6 +38,9 @@ public:
     // Set hover square for drop preview (-1, -1 to clear)
     void setHoverSquare(int row, int col);
 
+    // Set drag active state (to ghost keyboard cursor during drags)
+    void setDragActive(bool active);
+
     // Keyboard entry mode - set active square and direction
     enum Direction { Horizontal, Vertical };
     void setKeyboardEntry(int row, int col, Direction dir);
@@ -100,6 +103,7 @@ private:
     int m_marginY = 0;
     int m_hoverRow = -1;  // Row of square being hovered over during drag (-1 = none)
     int m_hoverCol = -1;  // Column of square being hovered over during drag (-1 = none)
+    bool m_dragActive = false;  // True when a drag operation is in progress
     QVector<UncommittedTile> m_uncommittedTiles;  // Tiles placed but not committed
 
     // Drag state for dragging from board

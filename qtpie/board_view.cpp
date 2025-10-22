@@ -284,6 +284,11 @@ void BoardView::paintEvent(QPaintEvent *) {
 
         // Draw keyboard entry indicator
         if (m_keyboardRow >= 0 && m_keyboardCol >= 0 && m_keyboardRow <= 15 && m_keyboardCol <= 15) {
+            // Ghost the cursor (40% opacity) during drag operations
+            if (m_dragActive) {
+                painter.setOpacity(0.4);
+            }
+
             int x = m_marginX + m_keyboardCol * m_squareSize;
             int y = m_marginY + m_keyboardRow * m_squareSize;
 
@@ -434,6 +439,11 @@ void BoardView::paintEvent(QPaintEvent *) {
                 // Draw the supersampled arrow
                 painter.drawPixmap(x, y, arrowPixmap);
             }
+
+            // Restore full opacity after drawing cursor
+            if (m_dragActive) {
+                painter.setOpacity(1.0);
+            }
         }
     }
 }
@@ -476,6 +486,13 @@ void BoardView::setHoverSquare(int row, int col) {
         m_hoverRow = row;
         m_hoverCol = col;
         update();  // Trigger repaint to show hover outline
+    }
+}
+
+void BoardView::setDragActive(bool active) {
+    if (m_dragActive != active) {
+        m_dragActive = active;
+        update();  // Trigger repaint to update cursor opacity
     }
 }
 

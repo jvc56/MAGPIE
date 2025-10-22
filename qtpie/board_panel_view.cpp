@@ -276,6 +276,9 @@ void BoardPanelView::dragEnterEvent(QDragEnterEvent *event) {
     if (event->mimeData()->hasText()) {
         emit debugMessage("BoardPanelView::dragEnter - accepting drag");
 
+        // Ghost the keyboard cursor during drag
+        boardView->setDragActive(true);
+
         // Accept the drag
         event->accept();
 
@@ -400,6 +403,9 @@ void BoardPanelView::dragLeaveEvent(QDragLeaveEvent *event) {
     // Clear hover square when drag leaves
     boardView->setHoverSquare(-1, -1);
 
+    // Restore keyboard cursor to full opacity
+    boardView->setDragActive(false);
+
     // Don't clear ghost tile here - it should stay visible until drop completes
     // This allows dragging over other panels while keeping the source ghosted
 
@@ -444,6 +450,56 @@ void BoardPanelView::dropEvent(QDropEvent *event) {
                 // Place at destination
                 boardView->placeUncommittedTile(row, col, tileChar);
 
+                // If dropped on the keyboard cursor position, advance cursor to next empty square
+                if (boardView->isKeyboardEntryActive()) {
+                    int cursorRow, cursorCol;
+                    BoardView::Direction cursorDir;
+                    boardView->getKeyboardEntry(cursorRow, cursorCol, cursorDir);
+
+                    if (row == cursorRow && col == cursorCol) {
+                        // Dropped on cursor - advance to next empty square
+                        int nextRow = row;
+                        int nextCol = col;
+                        bool foundEmpty = false;
+
+                        // Keep advancing until we find an empty square or go past the board edge
+                        for (int step = 1; step <= 15; ++step) {
+                            if (cursorDir == BoardView::Horizontal) {
+                                nextCol = col + step;
+                            } else {
+                                nextRow = row + step;
+                            }
+
+                            // If we've gone past position 15, stop
+                            if (nextRow > 15 || nextCol > 15) {
+                                nextRow = qMin(nextRow, 15);
+                                nextCol = qMin(nextCol, 15);
+                                break;
+                            }
+
+                            // If we're at position 15 (off board edge), stop there with caret
+                            if (nextRow == 15 || nextCol == 15) {
+                                foundEmpty = true;
+                                break;
+                            }
+
+                            // If this square is empty, we found our target
+                            if (boardView->isSquareEmpty(nextRow, nextCol)) {
+                                foundEmpty = true;
+                                break;
+                            }
+                        }
+
+                        // Move cursor to the next position
+                        boardView->setKeyboardEntry(nextRow, nextCol, cursorDir);
+                        if (foundEmpty) {
+                            emit debugMessage(QString("Advanced cursor to next empty square (%1, %2)").arg(nextRow).arg(nextCol));
+                        } else {
+                            emit debugMessage(QString("Advanced cursor to position (%1, %2)").arg(nextRow).arg(nextCol));
+                        }
+                    }
+                }
+
                 // Accept the drop
                 event->setDropAction(Qt::MoveAction);
                 event->accept();
@@ -463,6 +519,56 @@ void BoardPanelView::dropEvent(QDropEvent *event) {
             // Remove the tile from the rack
             rackView->removeTileAtIndex(tileIndex);
 
+            // If dropped on the keyboard cursor position, advance cursor to next empty square
+            if (boardView->isKeyboardEntryActive()) {
+                int cursorRow, cursorCol;
+                BoardView::Direction cursorDir;
+                boardView->getKeyboardEntry(cursorRow, cursorCol, cursorDir);
+
+                if (row == cursorRow && col == cursorCol) {
+                    // Dropped on cursor - advance to next empty square
+                    int nextRow = row;
+                    int nextCol = col;
+                    bool foundEmpty = false;
+
+                    // Keep advancing until we find an empty square or go past the board edge
+                    for (int step = 1; step <= 15; ++step) {
+                        if (cursorDir == BoardView::Horizontal) {
+                            nextCol = col + step;
+                        } else {
+                            nextRow = row + step;
+                        }
+
+                        // If we've gone past position 15, stop
+                        if (nextRow > 15 || nextCol > 15) {
+                            nextRow = qMin(nextRow, 15);
+                            nextCol = qMin(nextCol, 15);
+                            break;
+                        }
+
+                        // If we're at position 15 (off board edge), stop there with caret
+                        if (nextRow == 15 || nextCol == 15) {
+                            foundEmpty = true;
+                            break;
+                        }
+
+                        // If this square is empty, we found our target
+                        if (boardView->isSquareEmpty(nextRow, nextCol)) {
+                            foundEmpty = true;
+                            break;
+                        }
+                    }
+
+                    // Move cursor to the next position
+                    boardView->setKeyboardEntry(nextRow, nextCol, cursorDir);
+                    if (foundEmpty) {
+                        emit debugMessage(QString("Advanced cursor to next empty square (%1, %2)").arg(nextRow).arg(nextCol));
+                    } else {
+                        emit debugMessage(QString("Advanced cursor to position (%1, %2)").arg(nextRow).arg(nextCol));
+                    }
+                }
+            }
+
             // Accept the drop
             event->setDropAction(Qt::MoveAction);
             event->accept();
@@ -476,6 +582,9 @@ void BoardPanelView::dropEvent(QDropEvent *event) {
 
     // Clear hover square
     boardView->setHoverSquare(-1, -1);
+
+    // Restore keyboard cursor to full opacity
+    boardView->setDragActive(false);
 
     // Clear ghost tile
     boardView->clearGhostTile();
@@ -685,9 +794,8 @@ void BoardPanelView::keyPressEvent(QKeyEvent *event) {
         return;
     }
 
-    // Handle backspace to delete last placed tile
+    // Handle backspace to move backwards and delete uncommitted tile if present
     if (event->key() == Qt::Key_Backspace) {
-        // Search backwards for the last uncommitted tile
         int searchRow = row;
         int searchCol = col;
 
@@ -704,35 +812,41 @@ void BoardPanelView::keyPressEvent(QKeyEvent *event) {
             }
         }
 
-        // Search backwards for an uncommitted tile
+        // Search backwards for the previous non-permanent-tile square
         while (searchRow >= 0 && searchCol >= 0) {
-            if (boardView->hasUncommittedTile(searchRow, searchCol)) {
-                // Found an uncommitted tile - remove it
-                QChar tileChar;
-                const auto& tiles = boardView->getUncommittedTiles();
-                for (const auto& tile : tiles) {
-                    if (tile.row == searchRow && tile.col == searchCol) {
-                        tileChar = tile.letter;
-                        break;
+            // Check if this square is empty or has an uncommitted tile
+            // (i.e., not occupied by a permanent tile)
+            if (boardView->isSquareEmpty(searchRow, searchCol) ||
+                boardView->hasUncommittedTile(searchRow, searchCol)) {
+
+                // If there's an uncommitted tile here, remove it
+                if (boardView->hasUncommittedTile(searchRow, searchCol)) {
+                    QChar tileChar;
+                    const auto& tiles = boardView->getUncommittedTiles();
+                    for (const auto& tile : tiles) {
+                        if (tile.row == searchRow && tile.col == searchCol) {
+                            tileChar = tile.letter;
+                            break;
+                        }
+                    }
+
+                    // Remove from board
+                    boardView->removeUncommittedTile(searchRow, searchCol);
+
+                    // Return to rack
+                    if (!tileChar.isNull()) {
+                        rackView->addTile(tileChar);
+                        emit debugMessage(QString("Removed tile '%1' at (%2, %3) and returned to rack").arg(tileChar).arg(searchRow).arg(searchCol));
                     }
                 }
 
-                // Remove from board
-                boardView->removeUncommittedTile(searchRow, searchCol);
-
-                // Return to rack
-                if (!tileChar.isNull()) {
-                    rackView->addTile(tileChar);
-                    emit debugMessage(QString("Removed tile '%1' at (%2, %3) and returned to rack").arg(tileChar).arg(searchRow).arg(searchCol));
-                }
-
-                // Move cursor to where the tile was removed
+                // Move cursor to this position
                 boardView->setKeyboardEntry(searchRow, searchCol, dir);
                 event->accept();
                 return;
             }
 
-            // Move back one more position
+            // This square has a permanent tile - keep searching backwards
             if (dir == BoardView::Horizontal) {
                 searchCol--;
             } else {
@@ -740,8 +854,8 @@ void BoardPanelView::keyPressEvent(QKeyEvent *event) {
             }
         }
 
-        // No uncommitted tiles found - do nothing
-        emit debugMessage("No uncommitted tiles to remove");
+        // Reached the edge of the board - do nothing
+        emit debugMessage("Reached start of board");
         event->accept();
         return;
     }
