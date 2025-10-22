@@ -22,6 +22,7 @@ RackView::RackView(QWidget *parent)
     : QWidget(parent)
 {
     setAcceptDrops(true);
+    setMouseTracking(true);  // Enable mouse tracking to get mouseMoveEvent even without button pressed
     // Create alphabetize button with SVG icon
     m_alphabetizeButton = new QPushButton(this);
     m_alphabetizeButton->setToolTip("Sort alphabetically");
@@ -319,6 +320,25 @@ void RackView::mousePressEvent(QMouseEvent *event) {
 }
 
 void RackView::mouseMoveEvent(QMouseEvent *event) {
+    // Track only the 'N' tile's screen coordinates
+    int startX = getStartX();
+    int tileCount = qMin(m_rack.length(), 7);
+    for (int i = 0; i < tileCount; ++i) {
+        QChar c = m_rack[i];
+        if (c.toUpper() == 'N') {
+            int tileX = startX + i * m_tileSize;
+            int tileCenterX = tileX + m_tileSize / 2;
+            int tileCenterY = height() / 2;
+            QPoint tileCenter(tileCenterX, tileCenterY);
+            QPoint screenCoords = mapToGlobal(tileCenter);
+            emit debugMessage(QString("N tile (index %1) at screen coords: (%2,%3)")
+                             .arg(i)
+                             .arg(screenCoords.x())
+                             .arg(screenCoords.y()));
+            break;
+        }
+    }
+
     if (m_draggedTileIndex >= 0) {
         // Start dragging if moved more than a few pixels
         if ((event->pos() - m_dragStartPos).manhattanLength() > 5) {
@@ -432,6 +452,25 @@ void RackView::dragEnterEvent(QDragEnterEvent *event) {
 }
 
 void RackView::dragMoveEvent(QDragMoveEvent *event) {
+    // Track only the 'N' tile's screen coordinates during drag
+    int startX = getStartX();
+    int tileCount = qMin(m_rack.length(), 7);
+    for (int i = 0; i < tileCount; ++i) {
+        QChar c = m_rack[i];
+        if (c.toUpper() == 'N') {
+            int tileX = startX + i * m_tileSize;
+            int tileCenterX = tileX + m_tileSize / 2;
+            int tileCenterY = height() / 2;
+            QPoint tileCenter(tileCenterX, tileCenterY);
+            QPoint screenCoords = mapToGlobal(tileCenter);
+            emit debugMessage(QString("DRAG: N tile (index %1) at screen coords: (%2,%3)")
+                             .arg(i)
+                             .arg(screenCoords.x())
+                             .arg(screenCoords.y()));
+            break;
+        }
+    }
+
     // Check if this is a board-to-rack drag
     QString mimeText = event->mimeData()->text();
     bool isBoardDrag = mimeText.startsWith("board:");
