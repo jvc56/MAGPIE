@@ -88,7 +88,7 @@ BoardPanelView::BoardPanelView(QWidget *parent)
     cgpInput = new QTextEdit(cgpWidget);
     cgpInput->setAcceptRichText(false);  // Only accept plain text
     cgpInput->setAcceptDrops(false);  // Don't accept tile drops
-    cgpInput->setPlainText("4AUREOLED3/11O3/11Z3/10FY3/10A4/10C4/10I4/7THANX3/10GUV2/15/15/15/15/15/15 AHMPRTU/ 177/44 0");
+    cgpInput->setPlainText("4AUREOLED3/11O3/11Z3/10FY3/10A4/10C4/10I4/7THANX3/10GUV2/15/15/15/15/15/15 SATINE?/ 177/44 0");
     cgpInput->setPlaceholderText("Enter CGP position (e.g., 15/15/15/... / 0/0 0)");
 
     QFont monoFont("Courier", 11);

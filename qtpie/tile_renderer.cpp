@@ -35,7 +35,7 @@ static const QMap<char, int> LETTER_VALUES = {
     {'A', 1}, {'B', 3}, {'C', 3}, {'D', 2}, {'E', 1}, {'F', 4}, {'G', 2}, {'H', 4},
     {'I', 1}, {'J', 8}, {'K', 5}, {'L', 1}, {'M', 3}, {'N', 1}, {'O', 1}, {'P', 3},
     {'Q', 10}, {'R', 1}, {'S', 1}, {'T', 1}, {'U', 1}, {'V', 4}, {'W', 4}, {'X', 8},
-    {'Y', 4}, {'Z', 10}
+    {'Y', 4}, {'Z', 10}, {'?', 0}  // Blank tile
 };
 
 // Helper to load custom fonts
@@ -164,32 +164,31 @@ QPixmap TileRenderer::renderLetterTile(char letter, bool isBlank) {
                          margin + gradientSize * (0.5 - letterOffsetUp));
 
     if (isBlank) {
-        // Draw blank tile with outlined letter (scaled)
-        painter.save();
-        QPen outlinePen(LETTER_COLOR);
-        outlinePen.setWidth(qMax(2.0, m_tileSize * supersample / 30.0));
-        painter.setPen(outlinePen);
-        painter.setBrush(Qt::NoBrush);
-
-        int blankSize = static_cast<int>(gradientSize * 0.6667);
-        int blankX = letterCenter.x() - blankSize / 2;
-        int blankY = letterCenter.y() - blankSize / 2;
-        int blankRadius = static_cast<int>(blankSize * 0.25);
-
-        painter.drawRoundedRect(blankX, blankY, blankSize, blankSize,
-                                blankRadius, blankRadius);
-        painter.restore();
+        // Draw blank tile: question mark with zero subscript (undesignated)
+        // Don't draw the outlined square - just show ? with value 0
+        // The letter will be drawn as '?' below
+    } else {
+        // Draw the letter (centered) for non-blank tiles
+        QRectF letterRect(letterCenter.x() - gradientSize / 2,
+                          letterCenter.y() - gradientSize / 2,
+                          gradientSize, gradientSize);
+        painter.drawText(letterRect, Qt::AlignCenter, QString(letter));
     }
 
-    // Draw the letter (centered)
-    QRectF letterRect(letterCenter.x() - gradientSize / 2,
-                      letterCenter.y() - gradientSize / 2,
-                      gradientSize, gradientSize);
-    painter.drawText(letterRect, Qt::AlignCenter, QString(letter));
+    // For blank tiles, draw a question mark
+    if (isBlank) {
+        QRectF letterRect(letterCenter.x() - gradientSize / 2,
+                          letterCenter.y() - gradientSize / 2,
+                          gradientSize, gradientSize);
+        painter.drawText(letterRect, Qt::AlignCenter, "?");
+    }
 
-    // Draw point value (bottom-right corner) for non-blank tiles
-    if (!isBlank) {
-        int value = LETTER_VALUES.value(letter, 0);
+    // Draw point value (bottom-right corner)
+    // For blanks, use '?' to get the value (which should be 0)
+    // For regular tiles, use the letter
+    {
+        char valueKey = isBlank ? '?' : letter;
+        int value = LETTER_VALUES.value(valueKey, 0);
         QString valueStr = QString::number(value);
 
         // Font size and position based on digit count (matching Python implementation)
