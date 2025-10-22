@@ -46,6 +46,7 @@ private:
     void animatePreviewBackToRack();
     QPixmap renderTilePreview(QChar tileChar, int size);
     void renderCursorOverlay(QPainter &painter);
+    int calculateDragTileSize(const QPoint &pos);  // Calculate tile size at given position
 
     BoardView *boardView;
     RackView *rackView;

@@ -18,7 +18,8 @@ SOURCES += main.cpp \
            colors.cpp \
            responsive_layout.cpp \
            tile_renderer.cpp \
-           board_renderer.cpp
+           board_renderer.cpp \
+           blank_designation_dialog.cpp
 
 HEADERS += magpie_wrapper.h \
            board_panel_view.h \
@@ -27,7 +28,8 @@ HEADERS += magpie_wrapper.h \
            colors.h \
            responsive_layout.h \
            tile_renderer.h \
-           board_renderer.h
+           board_renderer.h \
+           blank_designation_dialog.h
 
 # Link against libmagpie.a from lib directory
 # Build it first with: cd .. && make BUILD=release

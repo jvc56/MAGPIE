@@ -162,21 +162,26 @@ QPixmap TileRenderer::renderLetterTile(char letter, bool isBlank) {
     painter.setFont(letterFont);
     painter.setPen(LETTER_COLOR);
 
+    // Letter is always offset up to align with natural tiles
     double letterOffsetUp = 0.05;
     QPointF letterCenter(margin + gradientSize / 2.0,
                          margin + gradientSize * (0.5 - letterOffsetUp));
 
     if (isBlank) {
-        // Draw designated blank tile: letter in rounded rectangle outline, no value
+        // Draw designated blank tile: rounded rectangle outline centered in tile
+        // (but letter will be offset up to align with natural tiles)
         painter.save();
         QPen outlinePen(LETTER_COLOR);
         outlinePen.setWidth(qMax(2.0, m_tileSize * supersample / 30.0));
         painter.setPen(outlinePen);
         painter.setBrush(Qt::NoBrush);
 
+        // Center the outline in the tile (no offset)
+        QPointF outlineCenter(margin + gradientSize / 2.0,
+                              margin + gradientSize / 2.0);
         int blankSize = static_cast<int>(gradientSize * 0.6667);
-        int blankX = letterCenter.x() - blankSize / 2;
-        int blankY = letterCenter.y() - blankSize / 2;
+        int blankX = outlineCenter.x() - blankSize / 2;
+        int blankY = outlineCenter.y() - blankSize / 2;
         int blankRadius = static_cast<int>(blankSize * 0.25);
 
         painter.drawRoundedRect(blankX, blankY, blankSize, blankSize,

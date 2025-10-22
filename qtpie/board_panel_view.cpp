@@ -2,6 +2,7 @@
 #include "board_view.h"
 #include "tile_renderer.h"
 #include "magpie_wrapper.h"
+#include "blank_designation_dialog.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -334,7 +335,8 @@ void BoardPanelView::dragMoveEvent(QDragMoveEvent *event) {
     if (event->mimeData()->hasText()) {
         QPoint globalPos = event->position().toPoint();
 
-        // Check if drag is over the board and if so, which square
+        // TODO: The tile preview is visually centered on the cursor, but coordinate
+        // calculation may need adjustment. For now using cursor position directly.
         QPoint boardLocalPos = boardView->mapFromParent(globalPos);
         int row, col;
         boardView->getBoardCoordinates(boardLocalPos, row, col);
@@ -423,6 +425,7 @@ void BoardPanelView::dragLeaveEvent(QDragLeaveEvent *event) {
 
 void BoardPanelView::dropEvent(QDropEvent *event) {
     // Check if dropping on a valid board square
+    // Mouse position is already at tile center (see main.cpp line 264-265)
     QPoint globalPos = event->position().toPoint();
     QPoint boardLocalPos = boardView->mapFromParent(globalPos);
     int row, col;
@@ -447,8 +450,43 @@ void BoardPanelView::dropEvent(QDropEvent *event) {
                 // Remove from source position
                 boardView->removeUncommittedTile(srcRow, srcCol);
 
-                // Place at destination
-                boardView->placeUncommittedTile(row, col, tileChar);
+                // If it's a blank tile (? or lowercase letter), place it first then show designation dialog
+                if (tileChar == '?' || (tileChar.isLower() && tileChar >= 'a' && tileChar <= 'z')) {
+                    // Place the blank tile temporarily as undesignated
+                    boardView->placeUncommittedTile(row, col, '?');
+
+                    // Hide the drag preview
+                    emit hideDragPreview();
+
+                    // Show designation dialog
+                    BlankDesignationDialog dialog(this);
+                    if (dialog.exec() == QDialog::Accepted) {
+                        QChar selectedLetter = dialog.getSelectedLetter();
+                        if (!selectedLetter.isNull()) {
+                            // Update to designated blank (lowercase)
+                            tileChar = selectedLetter.toLower();
+                            boardView->placeUncommittedTile(row, col, tileChar);
+                            emit debugMessage(QString("Designated blank as '%1'").arg(selectedLetter));
+                        } else {
+                            // Dialog was cancelled or no selection - remove the tile
+                            boardView->removeUncommittedTile(row, col);
+                            emit debugMessage("Blank designation cancelled");
+                            event->setDropAction(Qt::IgnoreAction);
+                            event->accept();
+                            return;
+                        }
+                    } else {
+                        // Dialog was cancelled - remove the tile
+                        boardView->removeUncommittedTile(row, col);
+                        emit debugMessage("Blank designation cancelled");
+                        event->setDropAction(Qt::IgnoreAction);
+                        event->accept();
+                        return;
+                    }
+                } else {
+                    // Place regular (non-blank) tile at destination
+                    boardView->placeUncommittedTile(row, col, tileChar);
+                }
 
                 // If dropped on the keyboard cursor position, advance cursor to next empty square
                 if (boardView->isKeyboardEntryActive()) {
@@ -513,11 +551,52 @@ void BoardPanelView::dropEvent(QDropEvent *event) {
             emit debugMessage(QString("Dropped tile '%1' (index %2) at board position (%3, %4)")
                             .arg(tileChar).arg(tileIndex).arg(row).arg(col));
 
-            // Place the tile on the board as uncommitted
-            boardView->placeUncommittedTile(row, col, tileChar);
+            // If it's a blank tile, place it first then show designation dialog
+            if (tileChar == '?') {
+                // Place the blank tile temporarily as undesignated
+                boardView->placeUncommittedTile(row, col, '?');
+                emit debugMessage(QString("Locked blank '?' at (%1, %2) before dialog").arg(row).arg(col));
 
-            // Remove the tile from the rack
-            rackView->removeTileAtIndex(tileIndex);
+                // Remove the tile from the rack immediately
+                rackView->removeTileAtIndex(tileIndex);
+
+                // Hide the drag preview
+                emit hideDragPreview();
+
+                // Show designation dialog
+                BlankDesignationDialog dialog(this);
+                if (dialog.exec() == QDialog::Accepted) {
+                    QChar selectedLetter = dialog.getSelectedLetter();
+                    if (!selectedLetter.isNull()) {
+                        // Update to designated blank (lowercase)
+                        tileChar = selectedLetter.toLower();
+                        boardView->placeUncommittedTile(row, col, tileChar);
+                        emit debugMessage(QString("Designated blank as '%1'").arg(selectedLetter));
+                    } else {
+                        // Dialog was cancelled - remove the tile and return to rack
+                        boardView->removeUncommittedTile(row, col);
+                        rackView->addTile('?');
+                        emit debugMessage("Blank designation cancelled");
+                        event->setDropAction(Qt::IgnoreAction);
+                        event->accept();
+                        return;
+                    }
+                } else {
+                    // Dialog was cancelled - remove the tile and return to rack
+                    boardView->removeUncommittedTile(row, col);
+                    rackView->addTile('?');
+                    emit debugMessage("Blank designation cancelled");
+                    event->setDropAction(Qt::IgnoreAction);
+                    event->accept();
+                    return;
+                }
+            } else {
+                // Place regular (non-blank) tile on the board
+                boardView->placeUncommittedTile(row, col, tileChar);
+
+                // Remove the tile from the rack
+                rackView->removeTileAtIndex(tileIndex);
+            }
 
             // If dropped on the keyboard cursor position, advance cursor to next empty square
             if (boardView->isKeyboardEntryActive()) {
@@ -615,20 +694,22 @@ QPixmap BoardPanelView::renderTilePreview(QChar tileChar, int size) {
         m_lastDragTileSize = size;
     }
 
-    // Render the tile
+    // Render the tile - blanks always show as undesignated ('?' with 0) during drag
     if (tileChar.isLower() && tileChar >= 'a' && tileChar <= 'z') {
-        return m_dragTileRenderer->getBlankTile(tileChar.toUpper().toLatin1());
+        // Designated blank from board - show as undesignated during drag
+        return m_dragTileRenderer->getUndesignatedBlank();
     } else if (tileChar.isUpper() && tileChar >= 'A' && tileChar <= 'Z') {
         return m_dragTileRenderer->getLetterTile(tileChar.toLatin1());
     } else if (tileChar == '?') {
-        return m_dragTileRenderer->getBlankTile('A');
+        // Undesignated blank from rack - show as undesignated
+        return m_dragTileRenderer->getUndesignatedBlank();
     }
     return QPixmap();
 }
 
-void BoardPanelView::updateDragTilePreview(const QPoint &pos, QChar tileChar) {
+int BoardPanelView::calculateDragTileSize(const QPoint &pos) {
     if (!rackView || !boardView) {
-        return;
+        return 0;
     }
 
     // Get rack and board geometries in this widget's coordinates
@@ -640,7 +721,7 @@ void BoardPanelView::updateDragTilePreview(const QPoint &pos, QChar tileChar) {
     int boardSquareSize = boardView->getSquareSize();
 
     if (rackTileSize <= 0 || boardSquareSize <= 0) {
-        return;
+        return 0;
     }
 
     // Calculate what percentage of the tile is over the board vs rack
@@ -692,6 +773,20 @@ void BoardPanelView::updateDragTilePreview(const QPoint &pos, QChar tileChar) {
         interpolatedSize = boardSquareSize;
     } else {
         interpolatedSize = rackTileSize;
+    }
+
+    return interpolatedSize;
+}
+
+void BoardPanelView::updateDragTilePreview(const QPoint &pos, QChar tileChar) {
+    if (!rackView || !boardView) {
+        return;
+    }
+
+    // Calculate tile size at this position
+    int interpolatedSize = calculateDragTileSize(pos);
+    if (interpolatedSize <= 0) {
+        return;
     }
 
     // Render the actual tile at the interpolated size
