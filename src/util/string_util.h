@@ -66,6 +66,7 @@ bool is_string_empty_or_null(const char *str);
 bool strings_equal(const char *str1, const char *str2);
 bool strings_iequal(const char *str1, const char *str2);
 bool is_all_digits_or_empty(const char *str);
+bool contains_digit(const char *str);
 bool has_substring(const char *str, const char *pattern);
 bool is_url(const char *content);
 size_t string_length(const char *str);

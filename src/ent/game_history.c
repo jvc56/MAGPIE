@@ -4,6 +4,7 @@
 #include "../def/game_history_defs.h"
 #include "../ent/board_layout.h"
 #include "../ent/equity.h"
+#include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "rack.h"
@@ -152,6 +153,8 @@ typedef struct GameHistoryPlayer {
   char *nickname;
   // A dist size of 0 indicates that the rack has not been set
   Rack last_rack;
+  // A dist size of 0 indicates that the rack has not been set
+  Rack rack_to_draw_before_pass_out_game_end;
 } GameHistoryPlayer;
 
 struct GameHistory {
@@ -216,6 +219,12 @@ const Rack *
 game_history_player_get_last_rack_const(const GameHistory *game_history,
                                         int player_index) {
   return &game_history->players[player_index]->last_rack;
+}
+
+Rack *game_history_player_get_rack_to_draw_before_pass_out_game_end(
+    GameHistory *game_history, int player_index) {
+  return &game_history->players[player_index]
+              ->rack_to_draw_before_pass_out_game_end;
 }
 
 void game_history_set_title(GameHistory *history, const char *title) {
@@ -394,6 +403,8 @@ GameHistory *game_history_duplicate(const GameHistory *gh_orig) {
     gh_copy->players[i]->nickname =
         string_duplicate_allow_null(gh_orig->players[i]->nickname);
     rack_copy(&gh_copy->players[i]->last_rack, &gh_orig->players[i]->last_rack);
+    rack_copy(&gh_copy->players[i]->rack_to_draw_before_pass_out_game_end,
+              &gh_orig->players[i]->rack_to_draw_before_pass_out_game_end);
   }
   for (int i = 0; i < MAX_GAME_EVENTS; i++) {
     GameEvent *ge_copy = &gh_copy->events[i];
@@ -580,7 +591,11 @@ void game_history_insert_challenge_bonus_game_event(
 //  - there are a nonzero number of events and played events
 //  - the most recent played event is a challenge bonus
 void game_history_remove_challenge_bonus_game_event(GameHistory *game_history) {
+  printf("before removing:\n");
+  game_history_debug_print(game_history, NULL);
   const int challenge_bonus_event_index = game_history->num_played_events - 1;
+  printf("challenge bonus event index: %d\n", challenge_bonus_event_index);
+  printf("num events: %d\n", game_history->num_events);
   GameEvent *challenge_bonus_event =
       game_history_get_event(game_history, challenge_bonus_event_index);
   const int player_index = game_event_get_player_index(challenge_bonus_event);
@@ -592,17 +607,44 @@ void game_history_remove_challenge_bonus_game_event(GameHistory *game_history) {
   // Shift the game events over by one to subtract the challenge bonus event
   for (int i = challenge_bonus_event_index; i < game_history->num_events - 1;
        i++) {
-    GameEvent *game_event = &game_history->events[i];
-    if (game_event_get_player_index(game_event) == player_index) {
+    GameEvent *next_game_event = &game_history->events[i + 1];
+    if (game_event_get_player_index(next_game_event) == player_index) {
       game_event_set_cumulative_score(
-          game_event,
-          game_event_get_cumulative_score(game_event) - score_adjustment);
+          next_game_event,
+          game_event_get_cumulative_score(next_game_event) - score_adjustment);
     }
-    memcpy(game_event, &game_history->events[i + 1], sizeof(GameEvent));
+    memcpy(&game_history->events[i], next_game_event, sizeof(GameEvent));
   }
 
   memcpy(&game_history->events[game_history->num_events - 1], &tmp_game_event,
          sizeof(GameEvent));
 
   game_history->num_events--;
+  printf("after removing:\n");
+  game_history_debug_print(game_history, NULL);
+}
+
+// FIXME: tidy this up
+
+void game_history_debug_print(const GameHistory *game_history,
+                              const LetterDistribution *ld) {
+  StringBuilder *rack_sb = string_builder_create();
+  for (int i = 0; i < game_history_get_num_events(game_history); i++) {
+    char cur_move_char = ' ';
+    if (i == game_history_get_num_played_events(game_history) - 1) {
+      cur_move_char = '*';
+    }
+    GameEvent *gei = game_history_get_event(game_history, i);
+    if (game_event_get_type(gei) == GAME_EVENT_PASS && ld != NULL) {
+      string_builder_add_string(rack_sb, ".");
+      string_builder_add_rack(rack_sb, game_event_get_rack(gei), ld, false);
+    }
+    printf("game event: %d %c%s%s, %d, %d\n", game_event_get_player_index(gei),
+           cur_move_char, game_event_get_cgp_move_string(gei),
+           string_builder_peek(rack_sb),
+           equity_to_int(game_event_get_cumulative_score(gei)),
+           equity_to_int(game_event_get_score_adjustment(gei)));
+    string_builder_clear(rack_sb);
+  }
+  string_builder_destroy(rack_sb);
 }

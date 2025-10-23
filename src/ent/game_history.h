@@ -106,6 +106,8 @@ Rack *game_history_player_get_last_rack(GameHistory *game_history,
 const Rack *
 game_history_player_get_last_rack_const(const GameHistory *game_history,
                                         int player_index);
+Rack *game_history_player_get_rack_to_draw_before_pass_out_game_end(
+    GameHistory *game_history, int player_index);
 void game_history_player_reset(GameHistory *history, int player_index,
                                const char *player_name,
                                const char *player_nickname);
@@ -121,5 +123,8 @@ void game_history_insert_challenge_bonus_game_event(
     GameHistory *game_history, const int player_index,
     const Equity score_adjustment, ErrorStack *error_stack);
 void game_history_remove_challenge_bonus_game_event(GameHistory *game_history);
+// FIXME: remove
+void game_history_debug_print(const GameHistory *game_history,
+                              const LetterDistribution *ld);
 
 #endif

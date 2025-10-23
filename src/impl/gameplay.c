@@ -734,6 +734,9 @@ void set_rack_from_bag_or_push_to_error_stack(const Game *game,
   }
 }
 
+// FIXME: remove
+#include "../../test/test_util.h"
+
 void play_game_history_turn(const GameHistory *game_history, Game *game,
                             int game_event_index, bool validate,
                             Rack **previously_played_letters_racks,
@@ -807,10 +810,14 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
       game_event_set_vms(game_event, vms);
 
       if (!error_stack_is_empty(error_stack)) {
+        printf("got validation error:\n");
+        print_game(game, NULL);
+        printf("move: %s\n", cgp_move_string);
         error_stack_push(
             error_stack, ERROR_STATUS_GCG_PARSE_MOVE_VALIDATION_ERROR,
-            string_duplicate(
-                "encountered a move validation error during GCG parsing"));
+            get_formatted_string("encountered a move validation error when "
+                                 "playing game event '%s'",
+                                 cgp_move_string));
         return;
       }
 
@@ -992,8 +999,15 @@ void game_play_n_events(GameHistory *game_history, Game *game,
   if (num_events_to_play > number_of_game_events) {
     num_events_to_play = number_of_game_events;
   }
+  printf("\n\nSTARTING PLAYING THROUGH GAME\n");
   for (int game_event_index = 0; game_event_index < num_events_to_play;
        game_event_index++) {
+    printf("game before playing %d:\n", game_event_index);
+    printf("move: %s\n", game_event_get_cgp_move_string(game_history_get_event(
+                             game_history, game_event_index)));
+    printf("current game history:\n");
+    game_history_debug_print(game_history, game_get_ld(game));
+    print_game(game, NULL);
     play_game_history_turn(game_history, game, game_event_index, validate,
                            previously_played_letters_racks,
                            known_letters_from_phonies_racks, error_stack);

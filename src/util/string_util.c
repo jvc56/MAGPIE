@@ -501,6 +501,16 @@ bool is_all_digits_or_empty(const char *str) {
   return true;
 }
 
+bool contains_digit(const char *str) {
+  while (*str != '\0') {
+    if (isdigit((unsigned char)*str)) {
+      return true;
+    }
+    str++;
+  }
+  return false;
+}
+
 bool has_substring(const char *str, const char *pattern) {
   // If the pattern is empty or both strings are equal, return true
   if (is_string_empty_or_null(pattern) || strings_equal(str, pattern)) {

@@ -708,6 +708,9 @@ void impl_load_cgp(Config *config, ErrorStack *error_stack) {
 
 // Adding moves
 
+// FIXME: remove
+#include "../../test/test_util.h"
+
 void impl_add_moves(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(
@@ -790,6 +793,7 @@ void impl_set_rack(Config *config, ErrorStack *error_stack) {
       log_fatal("failed to draw rack from bag in set rack command");
     }
   } else {
+    print_game(config->game, NULL);
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG,
         get_formatted_string("rack %s is not available in the bag", rack_str));
@@ -1563,6 +1567,7 @@ char *str_api_new_game(Config *config, ErrorStack *error_stack) {
 // Commit move
 
 void config_backup_game_and_history(Config *config) {
+  return;
   game_destroy(config->game_backup);
   config->game_backup = game_duplicate(config->game);
   game_history_destroy(config->game_history_backup);
@@ -1570,6 +1575,7 @@ void config_backup_game_and_history(Config *config) {
 }
 
 void config_restore_game_and_history(Config *config) {
+  return;
   game_destroy(config->game);
   config->game = config->game_backup;
   config->game_backup = NULL;
@@ -1606,14 +1612,74 @@ void config_game_play_events(Config *config, ErrorStack *error_stack) {
       if (i == 1) {
         player_index = 1 - player_index;
       }
+      const Player *player = game_get_player(game, player_index);
+      const Rack *player_rack = player_get_rack(player);
+      const Rack *rack_to_draw_before_pass_out_game_end =
+          game_history_player_get_rack_to_draw_before_pass_out_game_end(
+              game_history, player_index);
+      if (rack_get_dist_size(rack_to_draw_before_pass_out_game_end) != 0) {
+        if (!rack_is_drawable(game, player_index,
+                              rack_to_draw_before_pass_out_game_end)) {
+          return_rack_to_bag(game, 0);
+          return_rack_to_bag(game, 1);
+          StringBuilder *sb = string_builder_create();
+          string_builder_add_rack(sb, rack_to_draw_before_pass_out_game_end, ld,
+                                  false);
+          error_stack_push(
+              error_stack, ERROR_STATUS_COMMIT_PASS_OUT_RACK_NOT_IN_BAG,
+              get_formatted_string("rack to draw before game end pass out '%s' "
+                                   "is not available in the bag",
+                                   string_builder_peek(sb)));
+          string_builder_destroy(sb);
+          return;
+        }
+        return_rack_to_bag(game, player_index);
+        draw_rack_from_bag(game, player_index,
+                           rack_to_draw_before_pass_out_game_end);
+      } else {
+        // Get the rack from the previous pass
+        bool found_pass = false;
+        for (int j = num_events - 1; j >= 0; j--) {
+          GameEvent *game_event = game_history_get_event(game_history, j);
+          if (game_event_get_type(game_event) == GAME_EVENT_PASS &&
+              game_event_get_player_index(game_event) == player_index) {
+            const Rack *prev_pass_rack = game_event_get_rack(game_event);
+            if (!rack_is_drawable(game, player_index, prev_pass_rack)) {
+              StringBuilder *sb = string_builder_create();
+              string_builder_add_rack(sb, prev_pass_rack, ld, false);
+              error_stack_push(error_stack,
+                               ERROR_STATUS_COMMIT_PASS_OUT_RACK_NOT_IN_BAG,
+                               get_formatted_string(
+                                   "rack to draw before game end pass out '%s' "
+                                   "is not available in the bag",
+                                   string_builder_peek(sb)));
+              string_builder_destroy(sb);
+              return;
+            }
+            return_rack_to_bag(game, player_index);
+            draw_rack_from_bag(game, player_index, prev_pass_rack);
+            found_pass = true;
+            break;
+          }
+        }
+        if (!found_pass) {
+          error_stack_push(
+              error_stack, ERROR_STATUS_COMMIT_PREVIOUS_PASS_NOT_FOUND,
+              get_formatted_string(
+                  "did not find expected previous pass for player '%s' when "
+                  "processing consecutive pass game end penalty",
+                  game_history_player_get_name(game_history, player_index)));
+        }
+      }
+
+      draw_to_full_rack(game, player_index);
+
+      const Equity end_rack_penalty_abs_value = rack_get_score(ld, player_rack);
       GameEvent *rack_penalty_event =
           game_history_add_game_event(game_history, error_stack);
       if (!error_stack_is_empty(error_stack)) {
         return;
       }
-      const Player *player = game_get_player(game, player_index);
-      const Rack *player_rack = player_get_rack(player);
-      const Equity end_rack_penalty_abs_value = rack_get_score(ld, player_rack);
       game_event_set_player_index(rack_penalty_event, player_index);
       game_event_set_type(rack_penalty_event, GAME_EVENT_END_RACK_PENALTY);
       rack_copy(game_event_get_rack(rack_penalty_event), player_rack);
@@ -1624,10 +1690,15 @@ void config_game_play_events(Config *config, ErrorStack *error_stack) {
                                           end_rack_penalty_abs_value);
       game_event_set_cgp_move_string(rack_penalty_event, NULL);
       game_event_set_move_score(rack_penalty_event, 0);
+      game_history_next(game_history, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
     }
     // Replay the game with the added end rack penalties
     game_play_n_events(game_history, game,
-                       game_history_get_num_played_events(game_history), true,
+                       // Play to the end
+                       game_history_get_num_events(game_history), true,
                        error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
@@ -1652,7 +1723,16 @@ void config_add_game_event(Config *config, const int player_on_turn_index,
                            char *ucgi_move_string, const Rack *player_rack,
                            const Equity score_adjustment,
                            ErrorStack *error_stack) {
+
+  printf("game history before config_add_game_event:\n");
+  game_history_debug_print(config_get_game_history(config),
+                           config_get_ld(config));
+
   game_history_truncate_to_played_events(config->game_history);
+
+  printf("game history after truncate:\n");
+  game_history_debug_print(config_get_game_history(config),
+                           config_get_ld(config));
 
   const bool waiting_for_final_pass_or_challenge =
       game_history_get_waiting_for_final_pass_or_challenge(
@@ -1738,6 +1818,7 @@ void config_add_game_event(Config *config, const int player_on_turn_index,
   }
 
   if (add_event_to_history) {
+    printf("adding the event to history\n");
     GameEvent *game_event =
         game_history_add_game_event(config->game_history, error_stack);
 
@@ -1761,6 +1842,7 @@ void config_add_game_event(Config *config, const int player_on_turn_index,
   }
 
   if (add_rack_end_points) {
+    printf("adding end rack points\n");
     GameEvent *game_event =
         game_history_add_game_event(config->game_history, error_stack);
 
@@ -1788,7 +1870,15 @@ void config_add_game_event(Config *config, const int player_on_turn_index,
     }
   }
 
+  printf("game history before config_game_play_events:\n");
+  game_history_debug_print(config_get_game_history(config),
+                           config_get_ld(config));
+
   config_game_play_events(config, error_stack);
+
+  printf("game history after config_game_play_events:\n");
+  game_history_debug_print(config_get_game_history(config),
+                           config_get_ld(config));
 
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -1801,32 +1891,37 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
       config_get_parg_value(config, ARG_TOKEN_COMMIT, 0);
   const char *commit_pos_arg_2 =
       config_get_parg_value(config, ARG_TOKEN_COMMIT, 1);
-  // If a second arg is provided, this is either an exchange or a tile placement
-  // move
+  const char *commit_pos_arg_3 =
+      config_get_parg_value(config, ARG_TOKEN_COMMIT, 2);
   Move move;
   const int player_on_turn_index = game_get_player_on_turn_index(config->game);
   const Rack *player_rack =
       player_get_rack(game_get_player(config->game, player_on_turn_index));
   game_event_t game_event_type = GAME_EVENT_UNKNOWN;
-  if (commit_pos_arg_2) {
-    string_builder_add_formatted_string(move_string_builder, "%s%c%s%c",
-                                        commit_pos_arg_1, UCGI_DELIMITER,
-                                        commit_pos_arg_2, UCGI_DELIMITER);
-    string_builder_add_rack(move_string_builder, player_rack, config->ld,
-                            false);
-    *vms = validated_moves_create(config->game, player_on_turn_index,
-                                  string_builder_peek(move_string_builder),
-                                  true, false, true, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
+  const char *rack_to_draw_before_pass_out_game_end_str = NULL;
+  if (strings_iequal(commit_pos_arg_1, UCGI_PASS_MOVE)) {
+    // Commit pass
+    if (commit_pos_arg_2) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_COMMIT_EXTRANEOUS_ARG,
+          get_formatted_string(
+              "extraneous argument '%s' provided when committing pass move",
+              commit_pos_arg_3));
       return;
     }
-    move_copy(&move, validated_moves_get_move(*vms, 0));
-    game_event_type = move_get_type(&move);
-  } else if (strings_iequal(commit_pos_arg_1, UCGI_PASS_MOVE)) {
     move_set_as_pass(&move);
     string_builder_add_string(move_string_builder, UCGI_PASS_MOVE);
     game_event_type = GAME_EVENT_PASS;
   } else if (is_all_digits_or_empty(commit_pos_arg_1)) {
+    // Commit move by index
+    if (commit_pos_arg_3) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_COMMIT_EXTRANEOUS_ARG,
+          get_formatted_string(
+              "extraneous argument '%s' provided when committing move by index",
+              commit_pos_arg_3));
+      return;
+    }
     // If no second arg is provided and the first arg is all digits, the digits
     // represent the static rank of the move to commit.
     int commit_move_static_rank = string_to_int(commit_pos_arg_1, error_stack);
@@ -1847,10 +1942,60 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
     }
     move_copy(&move,
               move_list_get_move(config->move_list, commit_move_static_rank));
+    if (move_get_type(&move) != GAME_EVENT_EXCHANGE && commit_pos_arg_2) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_COMMIT_EXTRANEOUS_ARG,
+          get_formatted_string("extraneous argument '%s' provided when "
+                               "committing non-exchange move by index",
+                               commit_pos_arg_2));
+      return;
+    }
     string_builder_add_ucgi_move(move_string_builder, &move,
                                  game_get_board(config->game), config->ld);
     game_event_type = move_get_type(&move);
+    rack_to_draw_before_pass_out_game_end_str = commit_pos_arg_2;
+  } else if (strings_iequal(commit_pos_arg_1, UCGI_EXCHANGE_MOVE) ||
+             contains_digit(commit_pos_arg_1)) {
+    // Commit UCGI move
+    if (!commit_pos_arg_2) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_COMMIT_MISSING_EXCHANGE_OR_PLAY,
+          get_formatted_string("missing exchange or play for commit '%s'",
+                               commit_pos_arg_1));
+      return;
+    }
+    string_builder_add_formatted_string(move_string_builder, "%s%c%s%c",
+                                        commit_pos_arg_1, UCGI_DELIMITER,
+                                        commit_pos_arg_2, UCGI_DELIMITER);
+    string_builder_add_rack(move_string_builder, player_rack, config->ld,
+                            false);
+    *vms = validated_moves_create(config->game, player_on_turn_index,
+                                  string_builder_peek(move_string_builder),
+                                  true, false, true, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    move_copy(&move, validated_moves_get_move(*vms, 0));
+    if (move_get_type(&move) != GAME_EVENT_EXCHANGE && commit_pos_arg_3) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_COMMIT_EXTRANEOUS_ARG,
+          get_formatted_string("extraneous argument '%s' provided when "
+                               "committing non-exchange move by index",
+                               commit_pos_arg_3));
+      return;
+    }
+    game_event_type = move_get_type(&move);
+    rack_to_draw_before_pass_out_game_end_str = commit_pos_arg_3;
   } else {
+    if (commit_pos_arg_3) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_COMMIT_EXTRANEOUS_ARG,
+          get_formatted_string(
+              "extraneous argument '%s' provided when committing exchange",
+              commit_pos_arg_3));
+      return;
+    }
+    // Commit exchange
     string_builder_add_formatted_string(move_string_builder, "%s%c%s%c",
                                         UCGI_EXCHANGE_MOVE, UCGI_DELIMITER,
                                         commit_pos_arg_1, UCGI_DELIMITER);
@@ -1864,10 +2009,37 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
     }
     move_copy(&move, validated_moves_get_move(*vms, 0));
     game_event_type = move_get_type(&move);
+    rack_to_draw_before_pass_out_game_end_str = commit_pos_arg_2;
   }
 
   if (!error_stack_is_empty(error_stack)) {
     return;
+  }
+
+  Rack *rack_to_draw_before_pass_out_game_end =
+      game_history_player_get_rack_to_draw_before_pass_out_game_end(
+          config->game_history, player_on_turn_index);
+  if (rack_to_draw_before_pass_out_game_end_str) {
+    int num_mls =
+        rack_set_to_string(config->ld, rack_to_draw_before_pass_out_game_end,
+                           rack_to_draw_before_pass_out_game_end_str);
+    if (num_mls < 0) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_COMMIT_INVALID_PASS_OUT_RACK,
+          string_duplicate("invalid rack '%s' for consecutive pass game end"));
+      return;
+    } else if (num_mls > RACK_SIZE) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_COMMIT_INVALID_PASS_OUT_RACK,
+          get_formatted_string("rack '%s' for consecutive pass game end has %d "
+                               "tiles which exceeds the "
+                               "maximum rack size of %d",
+                               rack_to_draw_before_pass_out_game_end_str,
+                               num_mls, RACK_SIZE));
+      return;
+    }
+  } else {
+    memset(rack_to_draw_before_pass_out_game_end, 0, sizeof(Rack));
   }
 
   config_add_game_event(config, player_on_turn_index, game_event_type, &move,
@@ -1901,6 +2073,9 @@ char *impl_commit(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
 
+  // FIXME: mark all results as outdated here
+  move_list_reset(config->move_list);
+
   return empty_string();
 }
 
@@ -1909,6 +2084,7 @@ void execute_commit(Config *config, ErrorStack *error_stack) {
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
     execute_show(config, error_stack);
+    game_history_debug_print(config->game_history, config->ld);
   }
   free(result);
 }
@@ -2009,6 +2185,7 @@ void execute_challenge(Config *config, ErrorStack *error_stack) {
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
     execute_show(config, error_stack);
+    game_history_debug_print(config->game_history, config->ld);
   }
   free(result);
 }
@@ -2080,6 +2257,7 @@ void execute_unchallenge(Config *config, ErrorStack *error_stack) {
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
     execute_show(config, error_stack);
+    game_history_debug_print(config->game_history, config->ld);
   }
   free(result);
 }
@@ -2110,6 +2288,7 @@ void execute_next(Config *config, ErrorStack *error_stack) {
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
     execute_show(config, error_stack);
+    game_history_debug_print(config->game_history, config->ld);
   }
   free(result);
 }
@@ -2139,6 +2318,7 @@ void execute_previous(Config *config, ErrorStack *error_stack) {
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
     execute_show(config, error_stack);
+    game_history_debug_print(config->game_history, config->ld);
   }
   free(result);
 }
@@ -2170,6 +2350,9 @@ char *impl_goto(Config *config, ErrorStack *error_stack) {
   }
 
   config_init_game(config);
+
+  // FIXME: if no change, return here
+
   game_goto(config->game_history, config->game, num_events_to_play,
             error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -2183,6 +2366,7 @@ void execute_goto(Config *config, ErrorStack *error_stack) {
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
     execute_show(config, error_stack);
+    game_history_debug_print(config->game_history, config->ld);
   }
   free(result);
 }
@@ -3411,7 +3595,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   cmd(ARG_TOKEN_CGP, "cgp", 4, 4, load_cgp, generic);
   cmd(ARG_TOKEN_LOAD, "load", 1, 1, load_gcg, generic);
   cmd(ARG_TOKEN_NEW_GAME, "newgame", 0, 2, new_game, generic);
-  cmd(ARG_TOKEN_COMMIT, "commit", 1, 2, commit, generic);
+  cmd(ARG_TOKEN_COMMIT, "commit", 1, 3, commit, generic);
   cmd(ARG_TOKEN_CHALLENGE, "challenge", 0, 1, challenge, generic);
   cmd(ARG_TOKEN_UNCHALLENGE, "unchallenge", 0, 1, unchallenge, generic);
   cmd(ARG_TOKEN_SHOW, "show", 0, 0, show, generic);
