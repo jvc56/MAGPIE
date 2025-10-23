@@ -6,6 +6,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPushButton>
 #include <QPalette>
 #include <QFont>
 #include <QFontMetrics>
@@ -91,6 +92,7 @@ BoardPanelView::BoardPanelView(QWidget *parent)
     cgpInput = new QTextEdit(cgpWidget);
     cgpInput->setAcceptRichText(false);  // Only accept plain text
     cgpInput->setAcceptDrops(false);  // Don't accept tile drops
+    cgpInput->setReadOnly(true);  // Readonly in gameplay mode
     cgpInput->setPlainText("4AUREOLED3/11O3/11Z3/10FY3/10A4/10C4/10I4/7THANX3/10GUV2/15/15/15/15/15/15 SATINE?/ 177/44 0");
     cgpInput->setPlaceholderText("Enter CGP position (e.g., 15/15/15/... / 0/0 0)");
 
@@ -197,14 +199,55 @@ BoardPanelView::BoardPanelView(QWidget *parent)
         setFocus();  // Take keyboard focus to receive key events
     });
 
-    // Placeholder for controls beneath the rack
-    QWidget *controlsPlaceholder = createPlaceholder("Controls");
-    controlsPlaceholder->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    // Controls panel with gameplay buttons
+    QWidget *controlsPanel = new QWidget(this);
+    controlsPanel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    QHBoxLayout *controlsLayout = new QHBoxLayout(controlsPanel);
+    controlsLayout->setContentsMargins(5, 10, 5, 10);
+    controlsLayout->setSpacing(10);
+
+    // Create buttons with matching light theme style
+    QString buttonStyle =
+        "QPushButton {"
+        "  background-color: #E8E8F0;"
+        "  color: #333333;"
+        "  border: 1px solid #C0C0D0;"
+        "  border-radius: 4px;"
+        "  padding: 8px 16px;"
+        "  font-weight: bold;"
+        "  font-size: 12px;"
+        "}"
+        "QPushButton:hover {"
+        "  background-color: #D8D8E8;"
+        "  border: 1px solid #A0A0C0;"
+        "}"
+        "QPushButton:pressed {"
+        "  background-color: #C8C8D8;"
+        "}";
+
+    QPushButton *passButton = new QPushButton("Pass", controlsPanel);
+    passButton->setStyleSheet(buttonStyle);
+    passButton->setCursor(Qt::PointingHandCursor);
+
+    QPushButton *exchangeButton = new QPushButton("Exchange", controlsPanel);
+    exchangeButton->setStyleSheet(buttonStyle);
+    exchangeButton->setCursor(Qt::PointingHandCursor);
+
+    QPushButton *playButton = new QPushButton("Play", controlsPanel);
+    playButton->setStyleSheet(buttonStyle);
+    playButton->setCursor(Qt::PointingHandCursor);
+
+    // Add buttons to layout with stretch to keep them together
+    controlsLayout->addStretch(1);
+    controlsLayout->addWidget(passButton);
+    controlsLayout->addWidget(exchangeButton);
+    controlsLayout->addWidget(playButton);
+    controlsLayout->addStretch(1);
 
     mainLayout->addWidget(boardView, 0);
     mainLayout->addWidget(cgpWidget, 0);
     mainLayout->addWidget(rackView, 1);
-    mainLayout->addWidget(controlsPlaceholder, 1);
+    mainLayout->addWidget(controlsPanel, 0);
 }
 
 BoardPanelView::~BoardPanelView() {

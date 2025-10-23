@@ -166,6 +166,30 @@ void RackView::paintEvent(QPaintEvent *) {
     // Draw each tile
     for (int i = 0; i < tileCount; ++i) {
         QChar c = m_rack[i];
+        int x = startX + i * m_tileSize;
+
+        // Check if this is an empty slot
+        if (c == ' ' || c.isNull()) {
+            // Draw empty rounded square (matching board empty squares)
+            emit debugMessage(QString("  Drawing empty slot %1 at x=%2").arg(i).arg(x));
+
+            // Calculate rounded rect with same proportions as tiles
+            const double TILE_FRACTION = 0.88;
+            const double CORNER_RADIUS_FRACTION = 0.25;
+
+            int tileDisplaySize = m_tileSize * TILE_FRACTION;
+            int offset = (m_tileSize - tileDisplaySize) / 2;
+            int cornerRadius = tileDisplaySize * CORNER_RADIUS_FRACTION;
+
+            QRect tileRect(x + offset, offset, tileDisplaySize, tileDisplaySize);
+
+            // Draw filled rounded rectangle
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(195, 196, 208));  // EMPTY_SQUARE_COLOR
+            painter.drawRoundedRect(tileRect, cornerRadius, cornerRadius);
+
+            continue;
+        }
 
         QPixmap tilePixmap;
         if (c == '?') {
@@ -178,11 +202,10 @@ void RackView::paintEvent(QPaintEvent *) {
             // Regular letter tile
             tilePixmap = m_tileRenderer->getLetterTile(c.toLatin1());
         } else {
-            emit debugMessage(QString("  Skipping slot %1: char='%2' (space or invalid)").arg(i).arg(c));
+            emit debugMessage(QString("  Skipping slot %1: char='%2' (invalid)").arg(i).arg(c));
             continue;  // Skip invalid characters
         }
 
-        int x = startX + i * m_tileSize;
         emit debugMessage(QString("  Drawing slot %1: char='%2' at x=%3").arg(i).arg(c).arg(x));
 
         // Dim the tile if it's being dragged
@@ -354,13 +377,6 @@ void RackView::mouseMoveEvent(QMouseEvent *event) {
             QPoint tileTopLeft(tileX, tileTopY);
             QPoint tileTopLeftGlobal = mapToGlobal(tileTopLeft);
             QPoint mouseRelToTile = mouseGlobal - tileTopLeftGlobal;
-
-            emit debugMessage(QString("N tile (index %1) at screen coords: (%2,%3), mouse rel to tile TL: (%4,%5)")
-                             .arg(i)
-                             .arg(screenCoords.x())
-                             .arg(screenCoords.y())
-                             .arg(mouseRelToTile.x())
-                             .arg(mouseRelToTile.y()));
             break;
         }
     }
@@ -490,13 +506,6 @@ void RackView::dragMoveEvent(QDragMoveEvent *event) {
                 QPoint tileTopLeft(tileX, tileTopY);
                 QPoint tileTopLeftGlobal = mapToGlobal(tileTopLeft);
                 QPoint mouseRelToTile = mouseGlobal - tileTopLeftGlobal;
-
-                emit debugMessage(QString("DRAG: N tile (index %1) at screen coords: (%2,%3), mouse rel to tile TL: (%4,%5)")
-                                 .arg(i)
-                                 .arg(screenCoords.x())
-                                 .arg(screenCoords.y())
-                                 .arg(mouseRelToTile.x())
-                                 .arg(mouseRelToTile.y()));
                 break;
             }
         }
