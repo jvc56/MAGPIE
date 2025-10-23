@@ -6,6 +6,7 @@
 #include <QFontDatabase>
 #include <QCoreApplication>
 #include <QDir>
+#include <QKeyEvent>
 
 BlankDesignationDialog::BlankDesignationDialog(QWidget *parent)
     : QDialog(parent)
@@ -101,4 +102,20 @@ BlankDesignationDialog::BlankDesignationDialog(QWidget *parent)
 void BlankDesignationDialog::onLetterClicked(QChar letter) {
     m_selectedLetter = letter;
     accept();  // Close dialog with Accepted result
+}
+
+void BlankDesignationDialog::keyPressEvent(QKeyEvent *event) {
+    // Handle letter key presses (A-Z)
+    QString text = event->text().toUpper();
+    if (text.length() == 1) {
+        QChar ch = text[0];
+        if (ch >= 'A' && ch <= 'Z') {
+            // Valid letter - select it and close dialog
+            onLetterClicked(ch);
+            return;
+        }
+    }
+
+    // Let base class handle other keys (Escape, etc.)
+    QDialog::keyPressEvent(event);
 }

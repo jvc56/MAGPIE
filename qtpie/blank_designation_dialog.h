@@ -13,6 +13,9 @@ public:
     // Get the selected letter (uppercase A-Z), or null if cancelled
     QChar getSelectedLetter() const { return m_selectedLetter; }
 
+protected:
+    void keyPressEvent(QKeyEvent *event) override;
+
 private:
     void createLetterGrid();
     void onLetterClicked(QChar letter);
