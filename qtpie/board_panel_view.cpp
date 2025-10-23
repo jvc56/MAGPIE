@@ -681,17 +681,19 @@ void BoardPanelView::dropEvent(QDropEvent *event) {
                             boardView->placeUncommittedTile(row, col, tileChar);
                             emit debugMessage(QString("Designated blank as '%1'").arg(selectedLetter));
                         } else {
-                            // Dialog was cancelled or no selection - remove the tile
+                            // Dialog was cancelled or no selection - remove the tile and return to rack
                             boardView->removeUncommittedTile(row, col);
-                            emit debugMessage("Blank designation cancelled");
+                            rackView->addTile('?');
+                            emit debugMessage("Blank designation cancelled - returned to rack");
                             event->setDropAction(Qt::IgnoreAction);
                             event->accept();
                             return;
                         }
                     } else {
-                        // Dialog was cancelled - remove the tile
+                        // Dialog was cancelled - remove the tile and return to rack
                         boardView->removeUncommittedTile(row, col);
-                        emit debugMessage("Blank designation cancelled");
+                        rackView->addTile('?');
+                        emit debugMessage("Blank designation cancelled - returned to rack");
                         event->setDropAction(Qt::IgnoreAction);
                         event->accept();
                         return;
