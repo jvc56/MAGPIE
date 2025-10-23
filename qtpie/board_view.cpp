@@ -258,7 +258,7 @@ void BoardView::paintEvent(QPaintEvent *) {
 
             QPixmap tilePixmap;
             if (m_ghostLetter.isLower() && m_ghostLetter >= 'a' && m_ghostLetter <= 'z') {
-                // Blank tile with designated letter
+                // Blank tile with designated letter - show the designation during drag
                 tilePixmap = m_tileRenderer->getBlankTile(m_ghostLetter.toUpper().toLatin1());
             } else if (m_ghostLetter.isUpper() && m_ghostLetter >= 'A' && m_ghostLetter <= 'Z') {
                 // Normal tile

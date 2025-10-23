@@ -657,8 +657,13 @@ void RackView::dropEvent(QDropEvent *event) {
 
             if (dropIndex >= 0 && dropIndex < m_rack.length()) {
                 QChar oldChar = m_rack[dropIndex];
+                // Convert designated blanks (lowercase) back to undesignated ('?') when returning to rack
+                QChar tileToAdd = draggedChar;
+                if (tileToAdd.isLower() && tileToAdd >= 'a' && tileToAdd <= 'z') {
+                    tileToAdd = '?';
+                }
                 // Replace the tile at this position (could be empty or another tile)
-                m_rack[dropIndex] = draggedChar;
+                m_rack[dropIndex] = tileToAdd;
                 emit rackChanged(m_rack);
                 emit debugMessage(QString("Returned tile '%1' from board to rack position %2 (was '%3')")
                                 .arg(draggedChar).arg(dropIndex).arg(oldChar));

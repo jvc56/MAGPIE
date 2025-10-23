@@ -665,6 +665,9 @@ void BoardPanelView::dropEvent(QDropEvent *event) {
                     // Place the blank tile temporarily as undesignated
                     boardView->placeUncommittedTile(row, col, '?');
 
+                    // Clear ghost tile immediately (before dialog appears)
+                    boardView->clearGhostTile();
+
                     // Hide the drag preview
                     emit hideDragPreview();
 
@@ -769,6 +772,9 @@ void BoardPanelView::dropEvent(QDropEvent *event) {
 
                 // Remove the tile from the rack immediately
                 rackView->removeTileAtIndex(tileIndex);
+
+                // Clear ghost tile immediately (before dialog appears)
+                boardView->clearGhostTile();
 
                 // Hide the drag preview
                 emit hideDragPreview();
