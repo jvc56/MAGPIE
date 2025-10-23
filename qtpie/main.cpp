@@ -282,12 +282,15 @@ private slots:
         }
 
         // Render the tile
-        if (tileChar.isLower() && tileChar >= 'a' && tileChar <= 'z') {
+        if (tileChar.isLower() && tileChar >= 'a' && tileChar >= 'z') {
+            // Designated blank - show the letter it represents
             return m_dragTileRenderer->getBlankTile(tileChar.toUpper().toLatin1());
         } else if (tileChar.isUpper() && tileChar >= 'A' && tileChar <= 'Z') {
+            // Regular letter tile
             return m_dragTileRenderer->getLetterTile(tileChar.toLatin1());
         } else if (tileChar == '?') {
-            return m_dragTileRenderer->getBlankTile('A');
+            // Undesignated blank - show as '?' with 0 subscript
+            return m_dragTileRenderer->getUndesignatedBlank();
         }
         return QPixmap();
     }

@@ -237,8 +237,8 @@ void BoardView::paintEvent(QPaintEvent *) {
 
                 QPixmap tilePixmap;
                 if (tile.letter == '?') {
-                    // Blank tile - need to show designated letter
-                    tilePixmap = m_tileRenderer->getBlankTile('A');  // Default to 'A' for now
+                    // Undesignated blank - show as '?' with 0 subscript
+                    tilePixmap = m_tileRenderer->getUndesignatedBlank();
                 } else if (tile.letter.isLower() && tile.letter >= 'a' && tile.letter <= 'z') {
                     // Lowercase = blank tile with designated letter
                     tilePixmap = m_tileRenderer->getBlankTile(tile.letter.toUpper().toLatin1());
