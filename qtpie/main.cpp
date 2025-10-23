@@ -11,6 +11,9 @@
 #include <QTextEdit>
 #include <QTextCursor>
 #include <QFont>
+#include <QFontDatabase>
+#include <QDir>
+#include <QCoreApplication>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDragLeaveEvent>
@@ -105,13 +108,57 @@ public:
       dragTilePreview->setAttribute(Qt::WA_TransparentForMouseEvents);  // Don't interfere with drag events
       dragTilePreview->raise();  // Always on top
 
-      // Create game history panel with player timers and move history
-      historyPanel = new GameHistoryPanel(this);
-      historyPanel->setPlayerNames("olaugh", "magpie");
-
       // Connect debug messages from board panel to debug window
       connect(boardPanelView, &BoardPanelView::debugMessage,
               debugWindow->getDebugTextView(), &QTextEdit::append);
+
+      // Create game history panel with player timers and move history
+      historyPanel = new GameHistoryPanel(this);
+
+      // Connect debug messages from history panel to debug window
+      connect(historyPanel, &GameHistoryPanel::debugMessage,
+              debugWindow->getDebugTextView(), &QTextEdit::append);
+
+      historyPanel->setPlayerNames("olaugh", "magpie");
+
+      // Check Consolas font loading after connecting signals
+      debugWindow->getDebugTextView()->append("=== Checking Consolas font ===");
+      debugWindow->getDebugTextView()->append(QString("Current working directory: %1").arg(QDir::currentPath()));
+
+      // Try multiple possible paths
+      QStringList fontPaths = {
+          "fonts/Consolas.ttf",
+          "../fonts/Consolas.ttf",
+          "../../fonts/Consolas.ttf",
+          "../../../fonts/Consolas.ttf",
+          QCoreApplication::applicationDirPath() + "/../../../fonts/Consolas.ttf",
+          QCoreApplication::applicationDirPath() + "/../../fonts/Consolas.ttf"
+      };
+
+      int fontId = -1;
+      QString successPath;
+      for (const QString &path : fontPaths) {
+          debugWindow->getDebugTextView()->append(QString("  Trying: %1").arg(path));
+          fontId = QFontDatabase::addApplicationFont(path);
+          if (fontId != -1) {
+              successPath = path;
+              break;
+          }
+      }
+
+      if (fontId == -1) {
+          debugWindow->getDebugTextView()->append("ERROR: Failed to load Consolas font from any path");
+      } else {
+          QStringList fontFamilies = QFontDatabase::applicationFontFamilies(fontId);
+          if (fontFamilies.isEmpty()) {
+              debugWindow->getDebugTextView()->append("WARNING: Consolas font loaded but no families found");
+          } else {
+              debugWindow->getDebugTextView()->append(QString("SUCCESS: Loaded Consolas font from: %1 (ID: %2, families: %3)")
+                              .arg(successPath)
+                              .arg(fontId)
+                              .arg(fontFamilies.join(", ")));
+          }
+      }
 
       // Connect board changes to print updated board to debug window
       connect(boardPanelView, &BoardPanelView::boardChanged,

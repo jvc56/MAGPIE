@@ -4,6 +4,9 @@
 #include <QSvgRenderer>
 #include <QPainter>
 #include <QPixmap>
+#include <QFontDatabase>
+#include <QDir>
+#include <QCoreApplication>
 
 // PlayerHistoryColumn implementation
 PlayerHistoryColumn::PlayerHistoryColumn(const QString &playerName, QWidget *parent)
@@ -122,6 +125,18 @@ GameHistoryPanel::GameHistoryPanel(QWidget *parent)
     , m_player2TimeSeconds(25 * 60)
     , m_useTwoColumns(false)
 {
+    // Load Consolas font using same pattern as tile_renderer
+    QDir fontsDir(QCoreApplication::applicationDirPath() + "/../Resources/fonts");
+    if (!fontsDir.exists()) {
+        // Try alternate location for development
+        fontsDir.setPath(QCoreApplication::applicationDirPath() + "/fonts");
+    }
+
+    int fontId = QFontDatabase::addApplicationFont(fontsDir.filePath("Consolas.ttf"));
+    if (fontId == -1) {
+        qWarning("Failed to load Consolas font");
+    }
+
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(5, 5, 5, 5);
     mainLayout->setSpacing(5);
@@ -160,12 +175,11 @@ GameHistoryPanel::GameHistoryPanel(QWidget *parent)
     m_player1Column = new PlayerHistoryColumn("olaugh", this);
     m_player1Column->hide();  // Hide the unused widget
     m_player1Column->m_scoreLabel = new QLabel("0", p1Row2);
-    QFont scoreFont = m_player1Column->m_scoreLabel->font();
-    scoreFont.setPointSize(20);
+    QFont scoreFont("Consolas", 24);
     scoreFont.setBold(true);
     m_player1Column->m_scoreLabel->setFont(scoreFont);
     m_player1Column->m_scoreLabel->setStyleSheet("color: #333333;");
-    m_player1Column->m_scoreLabel->setAlignment(Qt::AlignLeft);
+    m_player1Column->m_scoreLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
 
     // Timer + Button container (right side)
     QWidget *timerContainer = new QWidget(p1Row2);
@@ -214,9 +228,7 @@ GameHistoryPanel::GameHistoryPanel(QWidget *parent)
     connect(m_timerButton, &QPushButton::clicked, this, &GameHistoryPanel::onToggleTimer);
 
     m_player1Column->m_timerLabel = new QLabel("25:00", timerContainer);
-    QFont timerFont = m_player1Column->m_timerLabel->font();
-    timerFont.setFamily("Courier");
-    timerFont.setPointSize(16);
+    QFont timerFont("Consolas", 16);
     timerFont.setBold(true);
     m_player1Column->m_timerLabel->setFont(timerFont);
     m_player1Column->m_timerLabel->setStyleSheet("color: #333333;");
@@ -259,16 +271,29 @@ GameHistoryPanel::GameHistoryPanel(QWidget *parent)
     m_player2Column->m_scoreLabel = new QLabel("0", p2Row2);
     m_player2Column->m_scoreLabel->setFont(scoreFont);
     m_player2Column->m_scoreLabel->setStyleSheet("color: #333333;");
-    m_player2Column->m_scoreLabel->setAlignment(Qt::AlignLeft);
+    m_player2Column->m_scoreLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
 
-    m_player2Column->m_timerLabel = new QLabel("25:00", p2Row2);
+    // Timer container (right side) - with invisible spacer for button alignment
+    QWidget *p2TimerContainer = new QWidget(p2Row2);
+    QHBoxLayout *p2TimerLayout = new QHBoxLayout(p2TimerContainer);
+    p2TimerLayout->setContentsMargins(0, 0, 0, 0);
+    p2TimerLayout->setSpacing(8);
+
+    // Invisible spacer to match button size (32px + 8px spacing)
+    QWidget *buttonSpacer = new QWidget(p2TimerContainer);
+    buttonSpacer->setFixedSize(32, 32);
+
+    m_player2Column->m_timerLabel = new QLabel("25:00", p2TimerContainer);
     m_player2Column->m_timerLabel->setFont(timerFont);
     m_player2Column->m_timerLabel->setStyleSheet("color: #333333;");
     m_player2Column->m_timerLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
+    p2TimerLayout->addWidget(buttonSpacer);
+    p2TimerLayout->addWidget(m_player2Column->m_timerLabel);
+
     p2Row2Layout->addWidget(m_player2Column->m_scoreLabel, 0, Qt::AlignLeft);
     p2Row2Layout->addStretch();
-    p2Row2Layout->addWidget(m_player2Column->m_timerLabel, 0, Qt::AlignRight);
+    p2Row2Layout->addWidget(p2TimerContainer, 0, Qt::AlignRight);
 
     p2Layout->addWidget(p2Name);
     p2Layout->addWidget(p2Row2);

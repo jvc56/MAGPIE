@@ -45,6 +45,7 @@ public:
     
 signals:
     void timerToggled(bool running);
+    void debugMessage(const QString &message);
 
 private slots:
     void onTimerTick();
