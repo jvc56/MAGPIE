@@ -43,7 +43,7 @@ public:
 signals:
     void debugMessage(const QString &msg);
     void rackChanged(const QString& newRack);
-    void dragPositionChanged(const QPoint &globalPos, QChar tileChar);
+    void dragPositionChanged(const QPoint &globalPos, QChar tileChar, const QPoint &clickOffset);
     void dragEnded(Qt::DropAction result);
     void boardTileReturned(int row, int col);  // Emitted when a board tile is dropped on rack
 

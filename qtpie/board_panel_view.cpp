@@ -131,11 +131,12 @@ BoardPanelView::BoardPanelView(QWidget *parent)
     connect(rackView, &RackView::debugMessage, this, &BoardPanelView::debugMessage);
 
     // Connect rack drag position updates to show preview overlay
-    connect(rackView, &RackView::dragPositionChanged, this, [this](const QPoint &pos, QChar tileChar) {
+    connect(rackView, &RackView::dragPositionChanged, this, [this](const QPoint &pos, QChar tileChar, const QPoint &clickOffset) {
         // Store the start position and char when drag first begins
         if (m_currentDragChar.isNull()) {
             dragStartPosition = pos;
             m_currentDragChar = tileChar;
+            m_dragClickOffset = clickOffset;
         }
         updateDragTilePreview(pos, tileChar);
     });
@@ -335,7 +336,7 @@ void BoardPanelView::dragEnterEvent(QDragEnterEvent *event) {
 
 void BoardPanelView::dragMoveEvent(QDragMoveEvent *event) {
     if (event->mimeData()->hasText()) {
-        // Get both cursor and event positions for comparison
+        // Use actual cursor position, not event position (which can be offset by hotspot)
         QPoint cursorGlobalPos = QCursor::pos();
         QPoint cursorInPanel = mapFromGlobal(cursorGlobalPos);
 
@@ -350,13 +351,27 @@ void BoardPanelView::dragMoveEvent(QDragMoveEvent *event) {
                          .arg(globalPos.x()).arg(globalPos.y()));
 
         QWidget *mainWidget = window();
-        QPoint panelPos = eventPos;  // Already in panel coordinates
+        // USE CURSOR POSITION instead of event position to avoid hotspot offset issues
+        QPoint panelPos = cursorInPanel;
 
         // Calculate tile size for this position
         int tileSize = calculateDragTileSize(panelPos);
 
-        // Convert event position from panel coordinates to MainWidget coordinates
-        QPoint pixmapCenterInMain = mapTo(mainWidget, eventPos);
+        // Calculate tile center by subtracting click offset from cursor position
+        QPoint tileCenterGlobal = cursorGlobalPos - m_dragClickOffset;
+        QPoint tileCenterInPanel = mapFromGlobal(tileCenterGlobal);
+
+        // DEBUG: Verify preview positioning
+        // Preview top-left = tile center - (size/2, size/2)
+        // Mouse rel to preview TL = cursor - preview_top_left = cursor - (tile_center - size/2) = offset + size/2
+        QPoint expectedMouseRelToPreviewTL = m_dragClickOffset + QPoint(tileSize/2, tileSize/2);
+        emit debugMessage(QString("PREVIEW: cursor=(%1,%2) offset=(%3,%4) => mouse should be at (%5,%6) rel to preview TL")
+                         .arg(cursorGlobalPos.x()).arg(cursorGlobalPos.y())
+                         .arg(m_dragClickOffset.x()).arg(m_dragClickOffset.y())
+                         .arg(expectedMouseRelToPreviewTL.x()).arg(expectedMouseRelToPreviewTL.y()));
+
+        // Convert tile center from panel coordinates to MainWidget coordinates
+        QPoint pixmapCenterInMain = mapTo(mainWidget, tileCenterInPanel);
         QPoint pixmapCenterGlobal = mainWidget->mapToGlobal(pixmapCenterInMain);
         QPoint pixmapCenterInBoard = boardView->mapFromGlobal(pixmapCenterGlobal);
 
@@ -987,36 +1002,25 @@ void BoardPanelView::updateDragTilePreview(const QPoint &pos, QChar tileChar) {
     // Render the actual tile at the interpolated size
     QPixmap tilePixmap = renderTilePreview(tileChar, interpolatedSize);
 
-    // Convert panel position directly to MainWidget coordinates
+    // Use the cursor's actual global position
     QWidget *mainWidget = window();
-    QPoint pixmapCenterInMain = mapTo(mainWidget, pos);
+    QPoint cursorGlobalPos = QCursor::pos();
+    QPoint cursorInMainBeforeOffset = mainWidget->mapFromGlobal(cursorGlobalPos);
 
-    // DEBUG: Check coordinate system consistency
-    QPoint globalPos = mapToGlobal(pos);
-    QPoint mainFromGlobal = mainWidget->mapFromGlobal(globalPos);
+    // Apply click offset in global coords, then convert final position
+    QPoint tileCenterGlobal = cursorGlobalPos - m_dragClickOffset;
+    QPoint pixmapCenterInMain = mainWidget->mapFromGlobal(tileCenterGlobal);
 
-    // DEBUG: Log where the tile will be rendered
-    QPoint boardLocalPos = boardView->mapFromParent(pos);
-    int row, col;
-    boardView->getBoardCoordinates(boardLocalPos, row, col);
+    // Store the cursor global position (with offset applied) for later use in drop calculation
+    m_lastPreviewGlobalPos = cursorGlobalPos - m_dragClickOffset;
 
-    emit debugMessage(QString("DragPreview: panelPos=(%1,%2) globalPos=(%3,%4) tileSize=%5")
-                     .arg(pos.x()).arg(pos.y())
-                     .arg(globalPos.x()).arg(globalPos.y())
-                     .arg(interpolatedSize));
-    emit debugMessage(QString("  mapTo(main)=(%1,%2) vs mainFromGlobal=(%3,%4) - match=%5")
-                     .arg(pixmapCenterInMain.x()).arg(pixmapCenterInMain.y())
-                     .arg(mainFromGlobal.x()).arg(mainFromGlobal.y())
-                     .arg(pixmapCenterInMain == mainFromGlobal ? "YES" : "NO"));
-    emit debugMessage(QString("  boardPos=(%1,%2) -> row=%3 col=%4")
-                     .arg(boardLocalPos.x()).arg(boardLocalPos.y())
-                     .arg(row).arg(col));
-
-    // Store the global position for later use in drop calculation
-    m_lastPreviewGlobalPos = mainWidget->mapToGlobal(pixmapCenterInMain);
+    // BUGFIX: Apply horizontal offset correction of tileSize/2
+    // This compensates for a coordinate system mismatch between how rack tiles
+    // are positioned and how the preview is rendered
+    QPoint correctedPosition = pixmapCenterInMain + QPoint(interpolatedSize/2, 0);
 
     // Emit signal to update preview at top level with MainWidget coordinates
-    emit updateDragPreview(tilePixmap, pixmapCenterInMain);
+    emit updateDragPreview(tilePixmap, correctedPosition);
 }
 
 void BoardPanelView::animatePreviewBackToRack() {

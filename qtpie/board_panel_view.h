@@ -57,6 +57,7 @@ private:
     // Drag state
     QPoint dragStartPosition;  // Original position of tile in rack (in BoardPanelView coordinates)
     QChar m_currentDragChar;  // Character being dragged
+    QPoint m_dragClickOffset;  // Offset from tile center to click position
 
     // Board-to-board drag tracking
     int m_dragSourceRow = -1;  // Source row for board-to-board drags (-1 if not board drag)

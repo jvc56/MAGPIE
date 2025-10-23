@@ -313,7 +313,23 @@ void RackView::mousePressEvent(QMouseEvent *event) {
         if (tileIndex >= 0) {
             m_draggedTileIndex = tileIndex;
             m_dragStartPos = event->pos();
-            emit debugMessage(QString("Pressed tile %1").arg(tileIndex));
+
+            // Calculate click offset in GLOBAL coordinates so it's coordinate-system independent
+            int startX = getStartX();
+            int tileCenterX = startX + tileIndex * m_tileSize + m_tileSize / 2;
+            int tileCenterY = height() / 2;
+            QPoint tileCenter(tileCenterX, tileCenterY);
+
+            // Convert both positions to global coordinates before calculating offset
+            QPoint clickGlobal = mapToGlobal(event->pos());
+            QPoint tileCenterGlobal = mapToGlobal(tileCenter);
+            m_dragClickOffset = clickGlobal - tileCenterGlobal;
+
+            emit debugMessage(QString("Pressed tile %1, click offset: (%2,%3) (clickGlobal=(%4,%5), tileCenterGlobal=(%6,%7))")
+                            .arg(tileIndex)
+                            .arg(m_dragClickOffset.x()).arg(m_dragClickOffset.y())
+                            .arg(clickGlobal.x()).arg(clickGlobal.y())
+                            .arg(tileCenterGlobal.x()).arg(tileCenterGlobal.y()));
         }
     }
     QWidget::mousePressEvent(event);
@@ -331,10 +347,20 @@ void RackView::mouseMoveEvent(QMouseEvent *event) {
             int tileCenterY = height() / 2;
             QPoint tileCenter(tileCenterX, tileCenterY);
             QPoint screenCoords = mapToGlobal(tileCenter);
-            emit debugMessage(QString("N tile (index %1) at screen coords: (%2,%3)")
+
+            // Get mouse position relative to tile's top-left corner
+            QPoint mouseGlobal = mapToGlobal(event->pos());
+            int tileTopY = (height() - m_tileSize) / 2;
+            QPoint tileTopLeft(tileX, tileTopY);
+            QPoint tileTopLeftGlobal = mapToGlobal(tileTopLeft);
+            QPoint mouseRelToTile = mouseGlobal - tileTopLeftGlobal;
+
+            emit debugMessage(QString("N tile (index %1) at screen coords: (%2,%3), mouse rel to tile TL: (%4,%5)")
                              .arg(i)
                              .arg(screenCoords.x())
-                             .arg(screenCoords.y()));
+                             .arg(screenCoords.y())
+                             .arg(mouseRelToTile.x())
+                             .arg(mouseRelToTile.y()));
             break;
         }
     }
@@ -381,17 +407,10 @@ void RackView::mouseMoveEvent(QMouseEvent *event) {
 
             emit debugMessage("Starting drag with MoveAction | IgnoreAction");
 
-            // Calculate tile center and click offset
-            int startX = getStartX();
-            int tileCenterX = startX + m_draggedTileIndex * m_tileSize + m_tileSize / 2;
-            int tileCenterY = height() / 2;
-
-            // Store the offset from tile center to where user clicked
-            m_dragClickOffset = m_dragStartPos - QPoint(tileCenterX, tileCenterY);
-            emit debugMessage(QString("Drag click offset: (%1,%2)").arg(m_dragClickOffset.x()).arg(m_dragClickOffset.y()));
-
-            // Emit initial drag position at the click position (not tile center)
-            emit dragPositionChanged(mapToParent(m_dragStartPos), m_draggedTileChar);
+            // Emit initial drag position using current cursor position
+            // (click offset was already calculated in mousePressEvent)
+            QPoint cursorInRack = mapFromGlobal(QCursor::pos());
+            emit dragPositionChanged(mapToParent(cursorInRack), m_draggedTileChar, m_dragClickOffset);
 
             // Execute the drag - support both Move and Ignore actions
             // Use IgnoreAction as default to disable snap-back animation on rejected drops
@@ -453,21 +472,33 @@ void RackView::dragEnterEvent(QDragEnterEvent *event) {
 
 void RackView::dragMoveEvent(QDragMoveEvent *event) {
     // Track only the 'N' tile's screen coordinates during drag
-    int startX = getStartX();
-    int tileCount = qMin(m_rack.length(), 7);
-    for (int i = 0; i < tileCount; ++i) {
-        QChar c = m_rack[i];
-        if (c.toUpper() == 'N') {
-            int tileX = startX + i * m_tileSize;
-            int tileCenterX = tileX + m_tileSize / 2;
-            int tileCenterY = height() / 2;
-            QPoint tileCenter(tileCenterX, tileCenterY);
-            QPoint screenCoords = mapToGlobal(tileCenter);
-            emit debugMessage(QString("DRAG: N tile (index %1) at screen coords: (%2,%3)")
-                             .arg(i)
-                             .arg(screenCoords.x())
-                             .arg(screenCoords.y()));
-            break;
+    {
+        int startX = getStartX();
+        int tileCount = qMin(m_rack.length(), 7);
+        for (int i = 0; i < tileCount; ++i) {
+            QChar c = m_rack[i];
+            if (c.toUpper() == 'N') {
+                int tileX = startX + i * m_tileSize;
+                int tileCenterX = tileX + m_tileSize / 2;
+                int tileCenterY = height() / 2;
+                QPoint tileCenter(tileCenterX, tileCenterY);
+                QPoint screenCoords = mapToGlobal(tileCenter);
+
+                // Get mouse position relative to tile's top-left corner
+                QPoint mouseGlobal = QCursor::pos();
+                int tileTopY = (height() - m_tileSize) / 2;
+                QPoint tileTopLeft(tileX, tileTopY);
+                QPoint tileTopLeftGlobal = mapToGlobal(tileTopLeft);
+                QPoint mouseRelToTile = mouseGlobal - tileTopLeftGlobal;
+
+                emit debugMessage(QString("DRAG: N tile (index %1) at screen coords: (%2,%3), mouse rel to tile TL: (%4,%5)")
+                                 .arg(i)
+                                 .arg(screenCoords.x())
+                                 .arg(screenCoords.y())
+                                 .arg(mouseRelToTile.x())
+                                 .arg(mouseRelToTile.y()));
+                break;
+            }
         }
     }
 
@@ -486,7 +517,9 @@ void RackView::dragMoveEvent(QDragMoveEvent *event) {
                        event->position().x() >= 0 && event->position().x() <= width());
 
     // Always emit drag position for preview overlay (even when outside rack)
-    emit dragPositionChanged(mapToParent(event->position().toPoint()), m_draggedTileChar);
+    // Use actual cursor position to avoid Qt drag hotspot offset issues
+    QPoint cursorInRack = mapFromGlobal(QCursor::pos());
+    emit dragPositionChanged(mapToParent(cursorInRack), m_draggedTileChar, m_dragClickOffset);
 
     if (!inRackArea) {
         // Outside rack area - set action to Ignore (forbidden cursor will show)
@@ -508,7 +541,10 @@ void RackView::dragMoveEvent(QDragMoveEvent *event) {
     // Based on sorting by X coordinate of tile centers
     int startX = getStartX();
     int tileCount = qMin(m_rack.length(), 7);
-    int dragX = event->position().x();
+    // Use tile center position (cursor - offset) instead of raw cursor position
+    QPoint tileCenterGlobal = QCursor::pos() - m_dragClickOffset;
+    QPoint tileCenterLocal = mapFromGlobal(tileCenterGlobal);
+    int dragX = tileCenterLocal.x();
 
     if (isBoardDrag) {
         // Board-to-rack: Don't show caret for board drags (we're filling slots, not inserting)
@@ -597,7 +633,10 @@ void RackView::dropEvent(QDropEvent *event) {
             // Find which tile position was dropped on based on X coordinate
             int startX = getStartX();
             int tileCount = qMin(m_rack.length(), 7);
-            int dragX = event->position().x();
+            // Use tile center position (cursor - offset) instead of raw cursor position
+            QPoint tileCenterGlobal = QCursor::pos() - m_dragClickOffset;
+            QPoint tileCenterLocal = mapFromGlobal(tileCenterGlobal);
+            int dragX = tileCenterLocal.x();
 
             emit debugMessage(QString("Board-to-rack drop: dragX=%1, startX=%2, tileSize=%3, tileCount=%4")
                             .arg(dragX).arg(startX).arg(m_tileSize).arg(tileCount));
@@ -658,7 +697,10 @@ void RackView::dropEvent(QDropEvent *event) {
 
     int startX = getStartX();
     int tileCount = qMin(m_rack.length(), 7);
-    int dragX = event->position().x();
+    // Use tile center position (cursor - offset) instead of raw cursor position
+    QPoint tileCenterGlobal = QCursor::pos() - m_dragClickOffset;
+    QPoint tileCenterLocal = mapFromGlobal(tileCenterGlobal);
+    int dragX = tileCenterLocal.x();
 
     emit debugMessage(QString("Dropped tile %1 ('%2') at x=%3")
                      .arg(sourceIndex)
