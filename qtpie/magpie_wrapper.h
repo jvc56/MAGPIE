@@ -35,6 +35,18 @@ char* magpie_game_to_string(const Config *config, const Game *game);
 // CGP loading
 void magpie_load_cgp(Game *game, const char *cgp);
 
+// Config command loading
+void magpie_config_load_command(Config *config, const char *cmd);
+
+// Get player rack as string
+char* magpie_get_player_rack_string(Game *game, int player_index);
+
+// Draw starting racks for all players
+void magpie_draw_starting_racks(Game *game);
+
+// Get CGP string for current game state
+char* magpie_get_cgp(const Game *game);
+
 #ifdef __cplusplus
 }
 #endif

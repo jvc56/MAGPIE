@@ -24,6 +24,7 @@
 #include "board_panel_view.h"
 #include "colors.h"
 #include "tile_renderer.h"
+#include "game_history_panel.h"
 
 // Separate debug window for development
 class DebugWindow : public QMainWindow {
@@ -104,15 +105,9 @@ public:
       dragTilePreview->setAttribute(Qt::WA_TransparentForMouseEvents);  // Don't interfere with drag events
       dragTilePreview->raise();  // Always on top
 
-      // Create history panel placeholder (will be replaced with actual game history UI)
-      historyPanel = new QWidget;
-      historyPanel->setStyleSheet("background-color: #FFFFFF; border: 1px solid #C0C0D0; border-radius: 8px;");
-      QVBoxLayout *historyLayout = new QVBoxLayout(historyPanel);
-      historyLayout->setContentsMargins(10, 10, 10, 10);
-      QLabel *historyLabel = new QLabel("History Panel", historyPanel);
-      historyLabel->setStyleSheet("color: #333333; font-weight: bold; font-size: 14px; border: none;");
-      historyLayout->addWidget(historyLabel, 0, Qt::AlignTop | Qt::AlignLeft);
-      historyLayout->addStretch();
+      // Create game history panel with player timers and move history
+      historyPanel = new GameHistoryPanel(this);
+      historyPanel->setPlayerNames("olaugh", "magpie");
 
       // Connect debug messages from board panel to debug window
       connect(boardPanelView, &BoardPanelView::debugMessage,
@@ -183,11 +178,37 @@ public:
       }
       debugWindow->getHistoryTextView()->append("Config created successfully");
 
-      // Get the game from the config and set it on the board panel
+      // Set up game with CSW24, player names, and seed
+      debugWindow->getHistoryTextView()->append("=== Setting up new game ===");
+      magpie_config_load_command(config, "set -lex CSW24");
+      magpie_config_load_command(config, "set -p1 olaugh");
+      magpie_config_load_command(config, "set -p2 magpie");
+      magpie_config_load_command(config, "set -seed 1337");
+      debugWindow->getHistoryTextView()->append("Game settings: CSW24, players: olaugh vs magpie, seed: 1337");
+
+      // Get the game from the config
       Game *game = magpie_get_game_from_config(config);
       if (game) {
           boardPanelView->setGame(game);
-          debugWindow->getHistoryTextView()->append("Game loaded from config");
+          debugWindow->getHistoryTextView()->append("Game created");
+
+          // Draw starting racks for both players
+          magpie_draw_starting_racks(game);
+          debugWindow->getHistoryTextView()->append("Starting racks drawn");
+
+          // Get and display olaugh's rack (player 0)
+          char *rackString = magpie_get_player_rack_string(game, 0);
+          if (rackString) {
+              QString rackQStr = QString::fromUtf8(rackString);
+              debugWindow->getHistoryTextView()->append("olaugh's rack: " + rackQStr);
+              free(rackString);
+
+              // Set the rack on the rack view
+              boardPanelView->getRackView()->setRack(rackQStr);
+          }
+
+          // Update the CGP display to show the current game state
+          boardPanelView->updateCgpDisplay();
 
           // Print the initial board
           printBoard();
@@ -401,7 +422,7 @@ private slots:
 private:
     Config *config;
     BoardPanelView *boardPanelView;
-    QWidget *historyPanel;
+    GameHistoryPanel *historyPanel;
     DebugWindow *debugWindow;
     QLabel *dragTilePreview;  // Top-level drag preview overlay
     QLabel *dimensionOverlay;  // Dimension display overlay

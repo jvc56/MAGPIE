@@ -18,8 +18,12 @@ public:
     Game* getGame() const { return game; }
     QSize minimumSizeHint() const override;
 
-    // Getter for debug info
+    // Getters for child views
     BoardView* getBoardView() const { return boardView; }
+    RackView* getRackView() const { return rackView; }
+
+    // Update CGP display from game state
+    void updateCgpDisplay();
 
     // Set the debug output widget (owned by main window)
     void setDebugOutput(QTextEdit *debugOutput) { this->debugOutput = debugOutput; }

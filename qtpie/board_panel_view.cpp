@@ -95,7 +95,7 @@ BoardPanelView::BoardPanelView(QWidget *parent)
     cgpInput->setAcceptRichText(false);  // Only accept plain text
     cgpInput->setAcceptDrops(false);  // Don't accept tile drops
     cgpInput->setReadOnly(true);  // Readonly in gameplay mode
-    cgpInput->setPlainText("4AUREOLED3/11O3/11Z3/10FY3/10A4/10C4/10I4/7THANX3/10GUV2/15/15/15/15/15/15 SATINE?/ 177/44 0");
+    cgpInput->setPlainText("");  // Start with empty CGP
     cgpInput->setPlaceholderText("Enter CGP position (e.g., 15/15/15/... / 0/0 0)");
 
     QFont monoFont("Courier", 11);
@@ -261,8 +261,50 @@ void BoardPanelView::setGame(Game *game) {
     Board *board = magpie_get_board_from_game(game);
     boardView->setBoard(board);
 
-    // Trigger initial CGP load
-    onCgpTextChanged();
+    // Don't trigger CGP load - game is already set up
+    // onCgpTextChanged();
+}
+
+void BoardPanelView::updateCgpDisplay() {
+    if (!game || !cgpInput) {
+        return;
+    }
+
+    // Get CGP string from game
+    char *cgpString = magpie_get_cgp(game);
+    if (cgpString) {
+        QString cgpQString = QString::fromUtf8(cgpString);
+        free(cgpString);
+
+        // Hide the opponent's rack for privacy
+        // CGP format: "board rack1/rack2 scores turns"
+        // We want to show: "board rack1/ scores turns"
+        QStringList parts = cgpQString.split(' ', Qt::KeepEmptyParts);
+        if (parts.size() >= 3) {
+            // parts[0] = board
+            // parts[1] = rack1/rack2
+            // parts[2] = scores (e.g., "0/0")
+            // parts[3] = consecutive zeros
+
+            QString racksPart = parts[1];
+            QStringList racks = racksPart.split('/', Qt::KeepEmptyParts);
+            if (racks.size() >= 2) {
+                // Keep only the first rack (current player's rack) and hide the second
+                QString hiddenRacksCgp = racks[0] + "/";
+                parts[1] = hiddenRacksCgp;
+                cgpQString = parts.join(' ');
+            }
+        }
+
+        // Temporarily disconnect the textChanged signal to avoid triggering onCgpTextChanged
+        disconnect(cgpInput, &QTextEdit::textChanged, this, &BoardPanelView::onCgpTextChanged);
+
+        // Update the CGP text
+        cgpInput->setPlainText(cgpQString);
+
+        // Reconnect the signal
+        connect(cgpInput, &QTextEdit::textChanged, this, &BoardPanelView::onCgpTextChanged);
+    }
 }
 
 void BoardPanelView::onCgpTextChanged() {

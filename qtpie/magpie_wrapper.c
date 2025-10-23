@@ -4,11 +4,15 @@
 #include "magpie_wrapper.h"
 #include "../src/ent/game.h"
 #include "../src/ent/board.h"
+#include "../src/ent/player.h"
+#include "../src/ent/rack.h"
 #include "../src/impl/config.h"
 #include "../src/impl/cgp.h"
+#include "../src/impl/gameplay.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "../src/str/game_string.h"
+#include "../src/str/rack_string.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -151,4 +155,65 @@ void magpie_load_cgp(Game *game, const char *cgp) {
     }
 
     error_stack_destroy(error_stack);
+}
+
+void magpie_config_load_command(Config *config, const char *cmd) {
+    if (config == NULL || cmd == NULL) {
+        return;
+    }
+
+    ErrorStack *error_stack = error_stack_create();
+    config_load_command(config, cmd, error_stack);
+    config_execute_command(config, error_stack);
+
+    if (!error_stack_is_empty(error_stack)) {
+        fprintf(stderr, "Error executing command: %s\n", cmd);
+        error_stack_print_and_reset(error_stack);
+    }
+
+    error_stack_destroy(error_stack);
+}
+
+char* magpie_get_player_rack_string(Game *game, int player_index) {
+    if (game == NULL) {
+        return NULL;
+    }
+
+    Player *player = game_get_player(game, player_index);
+    if (player == NULL) {
+        return NULL;
+    }
+
+    const Rack *rack = player_get_rack(player);
+    if (rack == NULL) {
+        return NULL;
+    }
+
+    const LetterDistribution *ld = game_get_ld(game);
+    if (ld == NULL) {
+        return NULL;
+    }
+
+    // Convert rack to string
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_rack(sb, rack, ld, false);  // blanks_first = false
+    char *result = string_builder_dump(sb, NULL);
+    string_builder_destroy(sb);
+
+    return result;
+}
+
+void magpie_draw_starting_racks(Game *game) {
+    if (game == NULL) {
+        return;
+    }
+    draw_starting_racks(game);
+}
+
+char* magpie_get_cgp(const Game *game) {
+    if (game == NULL) {
+        return NULL;
+    }
+    // Get CGP with player on turn first = false (standard order)
+    return game_get_cgp(game, false);
 }
