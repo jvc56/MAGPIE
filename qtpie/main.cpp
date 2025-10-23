@@ -3,6 +3,7 @@
 #include <QWidget>
 #include <QLabel>
 #include <QVBoxLayout>
+#include <QHBoxLayout>
 #include <QScrollArea>
 #include <QMenuBar>
 #include <QMenu>
@@ -17,12 +18,71 @@
 #include <QMimeData>
 #include <QEventLoop>
 #include <QTime>
+#include <QSplitter>
 
 #include "magpie_wrapper.h"
 #include "board_panel_view.h"
-#include "responsive_layout.h"
 #include "colors.h"
 #include "tile_renderer.h"
+
+// Separate debug window for development
+class DebugWindow : public QMainWindow {
+    Q_OBJECT
+public:
+    DebugWindow(QWidget *parent = nullptr) : QMainWindow(parent) {
+        setWindowTitle("QtPie Debug");
+        resize(800, 600);
+
+        QWidget *central = new QWidget(this);
+        QVBoxLayout *layout = new QVBoxLayout(central);
+
+        // History text view (board layout logs)
+        QLabel *historyLabel = new QLabel("Board History");
+        historyLabel->setStyleSheet("color: #333333; font-weight: bold; font-size: 12px;");
+        historyTextView = new QTextEdit;
+        historyTextView->setReadOnly(true);
+        historyTextView->setFont(QFont("Courier", 8));
+        historyTextView->setStyleSheet(
+            "QTextEdit {"
+            "  background-color: #F5F5F5;"
+            "  color: #333333;"
+            "  border: 1px solid #C0C0D0;"
+            "  border-radius: 4px;"
+            "  padding: 4px;"
+            "}"
+        );
+
+        // Debug text view (analysis/debug messages)
+        QLabel *debugLabel = new QLabel("Debug Messages");
+        debugLabel->setStyleSheet("color: #333333; font-weight: bold; font-size: 12px;");
+        debugTextView = new QTextEdit;
+        debugTextView->setReadOnly(true);
+        debugTextView->setFont(QFont("Courier", 8));
+        debugTextView->setStyleSheet(
+            "QTextEdit {"
+            "  background-color: #F5F5F5;"
+            "  color: #333333;"
+            "  border: 1px solid #C0C0D0;"
+            "  border-radius: 4px;"
+            "  padding: 4px;"
+            "}"
+        );
+
+        layout->addWidget(historyLabel);
+        layout->addWidget(historyTextView, 1);
+        layout->addWidget(debugLabel);
+        layout->addWidget(debugTextView, 1);
+
+        setCentralWidget(central);
+    }
+
+    QTextEdit *getHistoryTextView() { return historyTextView; }
+    QTextEdit *getDebugTextView() { return debugTextView; }
+
+private:
+    QTextEdit *historyTextView;
+    QTextEdit *debugTextView;
+};
 
 class MainWidget : public QMainWindow {
     Q_OBJECT
@@ -33,7 +93,8 @@ public:
       // Accept drops at top level to allow dragging anywhere
       setAcceptDrops(true);
 
-      contentWidget = new QWidget;
+      // Create debug window (initially hidden)
+      debugWindow = new DebugWindow(this);
 
       boardPanelView = new BoardPanelView(this);
 
@@ -43,39 +104,21 @@ public:
       dragTilePreview->setAttribute(Qt::WA_TransparentForMouseEvents);  // Don't interfere with drag events
       dragTilePreview->raise();  // Always on top
 
-      // Create stdout/History text view
-      historyTextView = new QTextEdit;
-      historyTextView->setReadOnly(true);
-      historyTextView->setFont(QFont("Courier", 8));  // 15% smaller: 10 * 0.85 ≈ 8
-      historyTextView->setStyleSheet(
-          "QTextEdit {"
-          "  background-color: #F5F5F5;"
-          "  color: #333333;"
-          "  border: 1px solid #C0C0D0;"
-          "  border-radius: 4px;"
-          "  padding: 4px;"
-          "}"
-      );
+      // Create history panel placeholder (will be replaced with actual game history UI)
+      historyPanel = new QWidget;
+      historyPanel->setStyleSheet("background-color: #FFFFFF; border: 1px solid #C0C0D0; border-radius: 8px;");
+      QVBoxLayout *historyLayout = new QVBoxLayout(historyPanel);
+      historyLayout->setContentsMargins(10, 10, 10, 10);
+      QLabel *historyLabel = new QLabel("History Panel", historyPanel);
+      historyLabel->setStyleSheet("color: #333333; font-weight: bold; font-size: 14px; border: none;");
+      historyLayout->addWidget(historyLabel, 0, Qt::AlignTop | Qt::AlignLeft);
+      historyLayout->addStretch();
 
-      // Create debug text view for Analysis position
-      debugTextView = new QTextEdit;
-      debugTextView->setReadOnly(true);
-      debugTextView->setFont(QFont("Courier", 8));  // 15% smaller: 10 * 0.85 ≈ 8
-      debugTextView->setStyleSheet(
-          "QTextEdit {"
-          "  background-color: #F5F5F5;"
-          "  color: #333333;"
-          "  border: 1px solid #C0C0D0;"
-          "  border-radius: 4px;"
-          "  padding: 4px;"
-          "}"
-      );
-
-      // Connect debug messages from board panel to text view
+      // Connect debug messages from board panel to debug window
       connect(boardPanelView, &BoardPanelView::debugMessage,
-              debugTextView, &QTextEdit::append);
+              debugWindow->getDebugTextView(), &QTextEdit::append);
 
-      // Connect board changes to print updated board
+      // Connect board changes to print updated board to debug window
       connect(boardPanelView, &BoardPanelView::boardChanged,
               this, &MainWidget::printBoard);
 
@@ -85,73 +128,90 @@ public:
       connect(boardPanelView, &BoardPanelView::hideDragPreview,
               this, &MainWidget::onHideDragPreview);
 
-      scrollArea = new QScrollArea(this);
-      scrollArea->setWidget(contentWidget);
-      scrollArea->setWidgetResizable(true);
-      scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-
-      layout = new ResponsiveLayout(contentWidget, scrollArea, boardPanelView,
-                                    historyTextView, debugTextView, 10, 50);
-      boardPanelView->setParent(contentWidget);
-      historyTextView->setParent(contentWidget);
-      debugTextView->setParent(contentWidget);
+      // Create two-panel layout: board on left, history on right
+      QSplitter *splitter = new QSplitter(Qt::Horizontal, this);
+      splitter->addWidget(boardPanelView);
+      splitter->addWidget(historyPanel);
+      splitter->setStretchFactor(0, 2);  // Board gets 2/3 of space
+      splitter->setStretchFactor(1, 1);  // History gets 1/3 of space
 
       // Set up central widget
-      setCentralWidget(scrollArea);
+      setCentralWidget(splitter);
+
+      // Create dimension overlay (initially hidden)
+      dimensionOverlay = new QLabel(this);
+      dimensionOverlay->setStyleSheet(
+          "QLabel {"
+          "  background-color: rgba(0, 0, 0, 180);"
+          "  color: #00FF00;"
+          "  font-family: 'Courier';"
+          "  font-size: 14px;"
+          "  font-weight: bold;"
+          "  padding: 8px 12px;"
+          "  border-radius: 4px;"
+          "}"
+      );
+      dimensionOverlay->setVisible(false);
+      dimensionOverlay->setAttribute(Qt::WA_TransparentForMouseEvents);
+      dimensionOverlay->raise();
 
       // Create Debug menu
       QMenu *debugMenu = menuBar()->addMenu("Debug");
-      QAction *toggleOverlayAction = new QAction("Show Layout Overlay", this);
-      toggleOverlayAction->setCheckable(true);
-      toggleOverlayAction->setChecked(false);  // Start with overlay disabled
-      connect(toggleOverlayAction, &QAction::toggled, this, &MainWidget::toggleLayoutOverlay);
-      debugMenu->addAction(toggleOverlayAction);
 
-      // Actually hide the overlay on startup
-      layout->setDebugOverlayVisible(false);
+      QAction *showDebugWindowAction = new QAction("Show Debug Window", this);
+      showDebugWindowAction->setCheckable(true);
+      showDebugWindowAction->setChecked(false);
+      connect(showDebugWindowAction, &QAction::toggled, this, &MainWidget::toggleDebugWindow);
+      debugMenu->addAction(showDebugWindowAction);
+
+      QAction *showDimensionsAction = new QAction("Show Window Dimensions", this);
+      showDimensionsAction->setCheckable(true);
+      showDimensionsAction->setChecked(false);
+      connect(showDimensionsAction, &QAction::toggled, this, &MainWidget::toggleDimensionOverlay);
+      debugMenu->addAction(showDimensionsAction);
 
       // Now create MAGPIE config after UI is set up
-      historyTextView->append("=== Creating MAGPIE config ===");
+      debugWindow->getHistoryTextView()->append("=== Creating MAGPIE config ===");
       QString appPath = QCoreApplication::applicationDirPath();
       QString dataPath = appPath + "/../Resources/data";
-      historyTextView->append("Data path: " + dataPath);
+      debugWindow->getHistoryTextView()->append("Data path: " + dataPath);
 
       config = magpie_create_config(dataPath.toUtf8().constData());
       if (!config) {
-          historyTextView->append("ERROR: Failed to create MAGPIE config");
+          debugWindow->getHistoryTextView()->append("ERROR: Failed to create MAGPIE config");
           return;
       }
-      historyTextView->append("Config created successfully");
+      debugWindow->getHistoryTextView()->append("Config created successfully");
 
       // Get the game from the config and set it on the board panel
       Game *game = magpie_get_game_from_config(config);
       if (game) {
           boardPanelView->setGame(game);
-          historyTextView->append("Game loaded from config");
+          debugWindow->getHistoryTextView()->append("Game loaded from config");
 
           // Print the initial board
           printBoard();
       } else {
-          historyTextView->append("WARNING: No game from config");
+          debugWindow->getHistoryTextView()->append("WARNING: No game from config");
       }
 
       // Scroll history view to top after initial setup
-      QTextCursor cursor = historyTextView->textCursor();
+      QTextCursor cursor = debugWindow->getHistoryTextView()->textCursor();
       cursor.movePosition(QTextCursor::Start);
-      historyTextView->setTextCursor(cursor);
-      historyTextView->ensureCursorVisible();
+      debugWindow->getHistoryTextView()->setTextCursor(cursor);
+      debugWindow->getHistoryTextView()->ensureCursorVisible();
     }
 
     void printBoard() {
-        if (!config || !boardPanelView) return;
+        if (!config || !boardPanelView || !debugWindow) return;
 
         Game *game = boardPanelView->getGame();
         if (!game) return;
 
         char *gameString = magpie_game_to_string(config, game);
         if (gameString) {
-            historyTextView->append("=== Board Layout ===");
-            historyTextView->append(QString::fromUtf8(gameString));
+            debugWindow->getHistoryTextView()->append("=== Board Layout ===");
+            debugWindow->getHistoryTextView()->append(QString::fromUtf8(gameString));
             free(gameString);
         }
     }
@@ -161,16 +221,17 @@ public:
           magpie_destroy_config(config);
       }
       delete m_dragTileRenderer;
+      delete debugWindow;
     }
 
 protected:
     void resizeEvent(QResizeEvent* event) override {
-        QWidget::resizeEvent(event);
-        layout->updateLayout();
+        QMainWindow::resizeEvent(event);
+        updateDimensionOverlay();
     }
     void showEvent(QShowEvent* event) override {
-        QWidget::showEvent(event);
-        layout->updateLayout();
+        QMainWindow::showEvent(event);
+        updateDimensionOverlay();
     }
 
     // Drag events to keep preview visible across entire window
@@ -247,8 +308,50 @@ protected:
     }
 
 private slots:
-    void toggleLayoutOverlay(bool show) {
-        layout->setDebugOverlayVisible(show);
+    void toggleDebugWindow(bool show) {
+        if (show) {
+            debugWindow->show();
+        } else {
+            debugWindow->hide();
+        }
+    }
+
+    void toggleDimensionOverlay(bool show) {
+        if (dimensionOverlay) {
+            dimensionOverlay->setVisible(show);
+            if (show) {
+                updateDimensionOverlay();
+            }
+        }
+    }
+
+    void updateDimensionOverlay() {
+        if (!dimensionOverlay || !dimensionOverlay->isVisible()) return;
+
+        // Get window dimensions
+        int windowWidth = width();
+        int windowHeight = height();
+
+        // Get board panel width if available
+        int boardPanelWidth = 0;
+        if (boardPanelView) {
+            boardPanelWidth = boardPanelView->width();
+        }
+
+        // Update overlay text
+        QString text = QString("Window: %1 × %2\nBoard Panel: %3")
+            .arg(windowWidth)
+            .arg(windowHeight)
+            .arg(boardPanelWidth);
+
+        dimensionOverlay->setText(text);
+        dimensionOverlay->adjustSize();
+
+        // Position in top-right corner with margin
+        int x = width() - dimensionOverlay->width() - 10;
+        int y = 10;
+        dimensionOverlay->move(x, y);
+        dimensionOverlay->raise();
     }
 
     void onUpdateDragPreview(const QPixmap &tilePixmap, const QPoint &mainWidgetPos) {
@@ -297,28 +400,13 @@ private slots:
 
 private:
     Config *config;
-    QWidget *contentWidget;
-    QScrollArea *scrollArea;
     BoardPanelView *boardPanelView;
-    QTextEdit *historyTextView;
-    QTextEdit *debugTextView;
-    ResponsiveLayout *layout;
+    QWidget *historyPanel;
+    DebugWindow *debugWindow;
     QLabel *dragTilePreview;  // Top-level drag preview overlay
+    QLabel *dimensionOverlay;  // Dimension display overlay
     TileRenderer *m_dragTileRenderer = nullptr;  // Cached renderer for drag preview
     int m_lastDragTileSize = 0;  // Track size to recreate when needed
-
-    QWidget* createWidget(const QString &title) {
-        QWidget *w = new QWidget;
-        // Light theme - white background with subtle border
-        w->setStyleSheet("background-color: #FFFFFF; border: 1px solid #C0C0D0; border-radius: 8px;");
-        QVBoxLayout *l = new QVBoxLayout(w);
-        l->setContentsMargins(10, 10, 10, 10);
-        QLabel *label = new QLabel(title, w);
-        // Dark text on light background
-        label->setStyleSheet("color: #333333; font-weight: bold; font-size: 14px; border: none;");
-        l->addWidget(label, 0, Qt::AlignTop | Qt::AlignLeft);
-        return w;
-    }
 };
 
 int main(int argc, char** argv) {
@@ -328,6 +416,12 @@ int main(int argc, char** argv) {
 
     MainWidget *mw = new MainWidget;
     mw->setWindowTitle("qtpie prototype");
+
+    // Set minimum window size to ensure comfortable gameplay
+    constexpr int MIN_WINDOW_HEIGHT = 640;
+    constexpr int MIN_WINDOW_WIDTH = 522;  // Board panel min + some history space
+
+    mw->setMinimumSize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT);
     mw->resize(1280, 800);
     mw->show();
 

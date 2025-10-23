@@ -113,17 +113,75 @@ RackView::~RackView() {
 void RackView::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
 
-    // Tile size is the widget height
-    m_tileSize = event->size().height();
+    // Calculate tile size with constraints
+    constexpr int MIN_TILE_SIZE = 20;  // Match board square minimum
+    constexpr int BUTTON_MARGIN = 10;  // Margin for buttons on sides
+    constexpr int DEFAULT_BUTTON_SIZE = 40;
+
+    // Start with widget height as base tile size
+    int availableHeight = event->size().height();
+    m_tileSize = availableHeight;
+
+    // Enforce minimum tile size
+    if (m_tileSize < MIN_TILE_SIZE) {
+        m_tileSize = MIN_TILE_SIZE;
+    }
+
+    // Calculate maximum tile size to prevent overlap with buttons
+    // Need to fit 7 tiles (max rack) plus button space on each side
+    int availableWidth = event->size().width();
+    int widthForButtons = 2 * (DEFAULT_BUTTON_SIZE + BUTTON_MARGIN);  // Space for both buttons
+    int widthForTiles = availableWidth - widthForButtons;
+    int maxTileSizeFromWidth = widthForTiles / 7;  // Max 7 tiles in rack
+
+    // Use the smaller of height-based and width-based tile size
+    if (m_tileSize > maxTileSizeFromWidth && maxTileSizeFromWidth >= MIN_TILE_SIZE) {
+        m_tileSize = maxTileSizeFromWidth;
+    }
+
+    // Determine button size based on available height
+    int buttonSize = DEFAULT_BUTTON_SIZE;
+    if (availableHeight < DEFAULT_BUTTON_SIZE + 4) {
+        // Shrink buttons if rack area is too small
+        buttonSize = qMax(20, availableHeight - 4);  // Minimum button size 20px
+    }
+
+    // Update button sizes
+    m_alphabetizeButton->setFixedSize(buttonSize, buttonSize);
+    m_shuffleButton->setFixedSize(buttonSize, buttonSize);
+
+    // Scale icon size proportionally to button size
+    int iconSize = (buttonSize * 24) / DEFAULT_BUTTON_SIZE;
+    m_alphabetizeButton->setIconSize(QSize(iconSize, iconSize));
+    m_shuffleButton->setIconSize(QSize(iconSize, iconSize));
+
+    // Update border-radius to maintain circular shape (50% of button size)
+    int borderRadius = buttonSize / 2;
+    QString buttonStyle = QString(
+        "QPushButton {"
+        "  background-color: #6496C8;"
+        "  border: none;"
+        "  border-radius: %1px;"
+        "}"
+        "QPushButton:hover {"
+        "  background-color: #5080B0;"
+        "}"
+        "QPushButton:pressed {"
+        "  background-color: #4070A0;"
+        "}"
+    ).arg(borderRadius);
+
+    m_alphabetizeButton->setStyleSheet(buttonStyle);
+    m_shuffleButton->setStyleSheet(buttonStyle);
 
     // Recreate tile renderer when size changes
     delete m_tileRenderer;
     m_tileRenderer = new TileRenderer(m_tileSize, TileRenderer::TileStyle::Rack);
 
     // Position buttons
-    int buttonY = (height() - 40) / 2;  // Center buttons vertically
-    m_alphabetizeButton->move(10, buttonY);  // Left side with margin
-    m_shuffleButton->move(width() - 50, buttonY);  // Right side with margin
+    int buttonY = (height() - buttonSize) / 2;  // Center buttons vertically
+    m_alphabetizeButton->move(BUTTON_MARGIN, buttonY);  // Left side with margin
+    m_shuffleButton->move(width() - buttonSize - BUTTON_MARGIN, buttonY);  // Right side with margin
 
     update();
 }

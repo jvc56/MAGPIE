@@ -24,6 +24,7 @@
 #include <QKeyEvent>
 #include <QPainter>
 #include <QPaintEvent>
+#include <QResizeEvent>
 #include <algorithm>
 
 // Helper to create placeholder widgets with light theme.
@@ -68,6 +69,7 @@ BoardPanelView::BoardPanelView(QWidget *parent)
     constexpr int MIN_WIDTH = MIN_BOARD_SIZE;
     constexpr int MIN_HEIGHT = MIN_BOARD_SIZE + 200;  // board + other elements
     setMinimumSize(MIN_WIDTH, MIN_HEIGHT);
+    setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
 
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(0, 0, 0, 0);
@@ -1369,6 +1371,24 @@ void BoardPanelView::paintEvent(QPaintEvent *event) {
             renderCursorOverlay(painter);
         }
     }
+}
+
+void BoardPanelView::resizeEvent(QResizeEvent *event) {
+    QWidget::resizeEvent(event);
+
+    // Maintain 3:4 aspect ratio (width = 3/4 * height)
+    // Calculate desired width based on available height
+    int availableHeight = event->size().height();
+    int desiredWidth = (availableHeight * 3) / 4;
+
+    // Constrain to minimum width
+    constexpr int MIN_WIDTH = 322;
+    if (desiredWidth < MIN_WIDTH) {
+        desiredWidth = MIN_WIDTH;
+    }
+
+    // Set fixed width to maintain aspect ratio
+    setFixedWidth(desiredWidth);
 }
 
 void BoardPanelView::renderCursorOverlay(QPainter &painter) {
