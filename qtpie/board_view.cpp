@@ -271,8 +271,10 @@ void BoardView::paintEvent(QPaintEvent *) {
             painter.setOpacity(1.0);  // Restore full opacity
         }
 
-        // Draw green hover outline for valid drop target
-        if (m_hoverRow >= 0 && m_hoverCol >= 0) {
+        // Draw green hover outline for valid drop target (only for on-board positions 0-14)
+        if (m_hoverRow >= 0 && m_hoverCol >= 0 && m_hoverRow < 15 && m_hoverCol < 15) {
+            emit const_cast<BoardView*>(this)->debugLog(QString("PAINT: Drawing hover at row=%1 col=%2")
+                .arg(m_hoverRow).arg(m_hoverCol));
             int x = m_marginX + m_hoverCol * m_squareSize;
             int y = m_marginY + m_hoverRow * m_squareSize;
 
@@ -293,7 +295,17 @@ void BoardView::paintEvent(QPaintEvent *) {
             int y = m_marginY + m_keyboardRow * m_squareSize;
 
             // Check if we're at position 15 (off board edge) - use insertion caret
-            if (m_keyboardRow == 15 || m_keyboardCol == 15) {
+            // Only show caret when we're at edge in the direction we're typing
+            bool showCaret = (m_keyboardDir == Horizontal && m_keyboardCol == 15) ||
+                           (m_keyboardDir == Vertical && m_keyboardRow == 15);
+
+            emit const_cast<BoardView*>(this)->debugLog(QString("PAINT: row=%1 col=%2 dir=%3 showCaret=%4")
+                .arg(m_keyboardRow).arg(m_keyboardCol)
+                .arg(m_keyboardDir == Horizontal ? "H" : "V")
+                .arg(showCaret));
+
+            if (showCaret) {
+                emit const_cast<BoardView*>(this)->debugLog("PAINT: Drawing caret");
                 painter.setRenderHint(QPainter::Antialiasing);
 
                 // Draw insertion caret (green bar with caps)
@@ -338,7 +350,8 @@ void BoardView::paintEvent(QPaintEvent *) {
 
                 // Re-enable clipping
                 painter.setClipping(true);
-            } else {
+            } else if (m_keyboardRow < 15 && m_keyboardCol < 15) {
+                emit const_cast<BoardView*>(this)->debugLog("PAINT: Drawing green square + arrow");
                 // Normal position (0-14): Draw square with arrow
                 // Draw premium square without label (if on empty premium square and we have cached renderer)
                 if (board && m_boardRenderer) {

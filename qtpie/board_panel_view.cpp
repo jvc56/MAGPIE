@@ -170,6 +170,9 @@ BoardPanelView::BoardPanelView(QWidget *parent)
         boardView->removeUncommittedTile(row, col);
     });
 
+    // Forward debug log from BoardView
+    connect(boardView, &BoardView::debugLog, this, &BoardPanelView::debugMessage);
+
     // Connect board square click for keyboard entry
     connect(boardView, &BoardView::squareClicked, this, [this](int row, int col) {
         // Check if clicking on the current cursor position - if so, toggle direction
@@ -1380,54 +1383,4 @@ void BoardPanelView::renderCursorOverlay(QPainter &painter) {
         // Right vertical cap (narrower)
         painter.drawLine(rightX, centerY - capHeight/2, rightX, centerY + capHeight/2);
     }
-
-    // Render arrow at 4x scale for supersampling
-    qreal supersample = 4.0;
-    qreal dpr = 2.0;
-    int renderSize = squareSize * supersample;
-
-    QImage arrowImage(renderSize, renderSize, QImage::Format_ARGB32);
-    arrowImage.fill(Qt::transparent);
-
-    QPainter arrowPainter(&arrowImage);
-    arrowPainter.setRenderHint(QPainter::Antialiasing);
-
-    // Draw semi-transparent green arrow at 4x scale
-    arrowPainter.setPen(QPen(QColor(0, 200, 0, 200), 3 * supersample));
-    arrowPainter.setBrush(QColor(0, 200, 0, 150));
-
-    int centerX = renderSize / 2;
-    int centerY = renderSize / 2;
-    int arrowSize = (squareSize * supersample) / 3;
-
-    if (dir == BoardView::Horizontal) {
-        // Right arrow
-        QPolygon arrow;
-        arrow << QPoint(centerX - arrowSize/2, centerY - arrowSize/2)
-              << QPoint(centerX + arrowSize/2, centerY)
-              << QPoint(centerX - arrowSize/2, centerY + arrowSize/2);
-        arrowPainter.drawPolygon(arrow);
-    } else {
-        // Down arrow
-        QPolygon arrow;
-        arrow << QPoint(centerX - arrowSize/2, centerY - arrowSize/2)
-              << QPoint(centerX, centerY + arrowSize/2)
-              << QPoint(centerX + arrowSize/2, centerY - arrowSize/2);
-        arrowPainter.drawPolygon(arrow);
-    }
-
-    arrowPainter.end();
-
-    // Downsample from 4x to final size
-    QImage scaledArrowImage = arrowImage.scaled(
-        squareSize * dpr, squareSize * dpr,
-        Qt::IgnoreAspectRatio,
-        Qt::SmoothTransformation
-    );
-
-    QPixmap arrowPixmap = QPixmap::fromImage(scaledArrowImage);
-    arrowPixmap.setDevicePixelRatio(dpr);
-
-    // Draw the supersampled arrow
-    painter.drawPixmap(x, y, arrowPixmap);
 }

@@ -72,9 +72,8 @@ public:
       );
 
       // Connect debug messages from board panel to text view
-      // DISABLED: Uncomment to enable debug logging
-      // connect(boardPanelView, &BoardPanelView::debugMessage,
-      //         debugTextView, &QTextEdit::append);
+      connect(boardPanelView, &BoardPanelView::debugMessage,
+              debugTextView, &QTextEdit::append);
 
       // Connect board changes to print updated board
       connect(boardPanelView, &BoardPanelView::boardChanged,

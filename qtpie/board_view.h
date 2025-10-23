@@ -86,6 +86,7 @@ signals:
     void tileDragStarted(const QPoint &globalPos, QChar tileChar);
     void tileDragEnded(Qt::DropAction result);
     void squareClicked(int row, int col);
+    void debugLog(const QString &message);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
