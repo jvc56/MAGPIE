@@ -640,6 +640,18 @@ void validate_game_event_order_and_index(const GameEvent *game_event,
   }
 }
 
+void copy_bag_to_rack(const Bag *bag, const Rack *rack_to_sub, Rack *rack) {
+  int remaining_letters[MAX_ALPHABET_SIZE];
+  memset(remaining_letters, 0, sizeof(remaining_letters));
+  bag_increment_unseen_count(bag, remaining_letters);
+  const int ld_size = rack_get_dist_size(rack);
+  rack_set_dist_size_and_reset(rack, ld_size);
+  for (MachineLetter ml = 0; ml < ld_size; ml++) {
+    rack_add_letters(rack, ml,
+                     remaining_letters[ml] - rack_get_letter(rack_to_sub, ml));
+  }
+}
+
 // Assumes both player racks have been returned to the bag
 void set_after_game_event_racks(const GameHistory *game_history,
                                 const Game *game, int game_event_index,
@@ -658,27 +670,41 @@ void set_after_game_event_racks(const GameHistory *game_history,
   const int player_on_turn_index = game_get_player_on_turn_index(game);
   const int number_of_game_events = game_history_get_num_events(game_history);
   bool player_on_turn_rack_set = false;
-  for (int i = game_event_index + 1; i < number_of_game_events; i++) {
-    const GameEvent *game_event_i = game_history_get_event(game_history, i);
-    if (i > 0) {
-      // Since this loop is looking ahead into the game history slightly
-      // it might encountered game event order errors, so we check them
-      // here so the potential errors are more coherent and a side effect
-      // error is not returned later.
-      validate_challenge_bonus_and_phony_tiles_returned_order(
-          game_event_i, game_history_get_event(game_history, i - 1),
-          error_stack);
-      if (!error_stack_is_empty(error_stack)) {
-        return;
+  const Bag *bag = game_get_bag(game);
+  const int num_letters_in_bag = bag_get_letters(bag);
+  if (num_letters_in_bag <= (RACK_SIZE)) {
+    // If the bag has <= RACK_SIZE, then the last play must've been an outplay
+    // and the opp must have all of the remaining letters.
+    // For the call to copy_bag_to_rack, just pass in
+    // after_event_player_off_turn_rack as the rack to sub since we known it's
+    // empty at this point.
+    copy_bag_to_rack(bag, after_event_player_off_turn_rack,
+                     after_event_player_on_turn_rack);
+    player_on_turn_rack_set = true;
+  } else {
+    for (int i = game_event_index + 1; i < number_of_game_events; i++) {
+      const GameEvent *game_event_i = game_history_get_event(game_history, i);
+      if (i > 0) {
+        // Since this loop is looking ahead into the game history slightly
+        // it might encountered game event order errors, so we check them
+        // here so the potential errors are more coherent and a side effect
+        // error is not returned later.
+        validate_challenge_bonus_and_phony_tiles_returned_order(
+            game_event_i, game_history_get_event(game_history, i - 1),
+            error_stack);
+        if (!error_stack_is_empty(error_stack)) {
+          return;
+        }
+      }
+      if (game_event_get_player_index(game_event_i) == player_on_turn_index) {
+        rack_copy(after_event_player_on_turn_rack,
+                  game_event_get_const_rack(game_event_i));
+        player_on_turn_rack_set = true;
+        break;
       }
     }
-    if (game_event_get_player_index(game_event_i) == player_on_turn_index) {
-      rack_copy(after_event_player_on_turn_rack,
-                game_event_get_const_rack(game_event_i));
-      player_on_turn_rack_set = true;
-      break;
-    }
   }
+
   if (!player_on_turn_rack_set) {
     const Rack *player_on_turn_last_rack =
         game_history_player_get_last_rack_const(game_history,
@@ -690,24 +716,14 @@ void set_after_game_event_racks(const GameHistory *game_history,
     }
   }
 
-  const Bag *bag = game_get_bag(game);
-  const int num_letters_in_bag = bag_get_letters(bag);
-
   if (num_letters_in_bag -
           rack_get_total_letters(after_event_player_on_turn_rack) <=
       (RACK_SIZE)) {
-    // If there are fewer than RACK_SIZE tiles in the bag, that means the player
-    // off turn will necessarily have all of them and the actual game bag is
-    // empty.
-    int remaining_letters[MAX_ALPHABET_SIZE];
-    memset(remaining_letters, 0, sizeof(remaining_letters));
-    bag_increment_unseen_count(bag, remaining_letters);
-    for (MachineLetter ml = 0; ml < ld_size; ml++) {
-      rack_add_letters(
-          after_event_player_off_turn_rack, ml,
-          remaining_letters[ml] -
-              rack_get_letter(after_event_player_on_turn_rack, ml));
-    }
+    // If there are no more than RACK_SIZE tiles in the bag, that means the
+    // player off turn will necessarily have all of them and the actual game bag
+    // is empty.
+    copy_bag_to_rack(bag, after_event_player_on_turn_rack,
+                     after_event_player_off_turn_rack);
   } else {
     // Otherwise, the rack is only known from the previous phonies the player
     // made
@@ -733,9 +749,6 @@ void set_rack_from_bag_or_push_to_error_stack(const Game *game,
                      err_msg);
   }
 }
-
-// FIXME: remove
-#include "../../test/test_util.h"
 
 void play_game_history_turn(const GameHistory *game_history, Game *game,
                             int game_event_index, bool validate,
@@ -810,9 +823,6 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
       game_event_set_vms(game_event, vms);
 
       if (!error_stack_is_empty(error_stack)) {
-        printf("got validation error:\n");
-        print_game(game, NULL);
-        printf("move: %s\n", cgp_move_string);
         error_stack_push(
             error_stack, ERROR_STATUS_GCG_PARSE_MOVE_VALIDATION_ERROR,
             get_formatted_string("encountered a move validation error when "
@@ -999,15 +1009,8 @@ void game_play_n_events(GameHistory *game_history, Game *game,
   if (num_events_to_play > number_of_game_events) {
     num_events_to_play = number_of_game_events;
   }
-  printf("\n\nSTARTING PLAYING THROUGH GAME\n");
   for (int game_event_index = 0; game_event_index < num_events_to_play;
        game_event_index++) {
-    printf("game before playing %d:\n", game_event_index);
-    printf("move: %s\n", game_event_get_cgp_move_string(game_history_get_event(
-                             game_history, game_event_index)));
-    printf("current game history:\n");
-    game_history_debug_print(game_history, game_get_ld(game));
-    print_game(game, NULL);
     play_game_history_turn(game_history, game, game_event_index, validate,
                            previously_played_letters_racks,
                            known_letters_from_phonies_racks, error_stack);
@@ -1015,41 +1018,4 @@ void game_play_n_events(GameHistory *game_history, Game *game,
       return;
     }
   }
-}
-
-void game_next(GameHistory *game_history, Game *game, ErrorStack *error_stack) {
-  const int num_events_to_play = game_history_next(game_history, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  game_play_n_events(game_history, game, num_events_to_play, false,
-                     error_stack);
-}
-
-void game_previous(GameHistory *game_history, Game *game,
-                   ErrorStack *error_stack) {
-  const int num_events_to_play =
-      game_history_previous(game_history, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  game_play_n_events(game_history, game, num_events_to_play, false,
-                     error_stack);
-}
-
-void game_goto(GameHistory *game_history, Game *game,
-               const int num_events_to_play, ErrorStack *error_stack) {
-  const int updated_num_events_to_play =
-      game_history_goto(game_history, num_events_to_play, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  game_play_n_events(game_history, game, updated_num_events_to_play, false,
-                     error_stack);
-}
-
-void game_play_to_end(GameHistory *game_history, Game *game,
-                      ErrorStack *error_stack) {
-  game_goto(game_history, game, game_history_get_num_events(game_history),
-            error_stack);
 }

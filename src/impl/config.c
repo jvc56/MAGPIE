@@ -708,9 +708,6 @@ void impl_load_cgp(Config *config, ErrorStack *error_stack) {
 
 // Adding moves
 
-// FIXME: remove
-#include "../../test/test_util.h"
-
 void impl_add_moves(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(
@@ -793,7 +790,6 @@ void impl_set_rack(Config *config, ErrorStack *error_stack) {
       log_fatal("failed to draw rack from bag in set rack command");
     }
   } else {
-    print_game(config->game, NULL);
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG,
         get_formatted_string("rack %s is not available in the bag", rack_str));
@@ -1339,166 +1335,6 @@ char *str_api_show(Config *config, ErrorStack *error_stack) {
   return impl_show(config, error_stack);
 }
 
-// Load GCG
-
-void config_load_game_history(Config *config, const GameHistory *game_history,
-                              ErrorStack *error_stack) {
-  StringBuilder *cfg_load_cmd_builder = string_builder_create();
-  const char *lexicon = game_history_get_lexicon_name(game_history);
-  const char *ld_name = game_history_get_ld_name(game_history);
-  const char *board_layout_name =
-      game_history_get_board_layout_name(game_history);
-  const game_variant_t game_variant =
-      game_history_get_game_variant(game_history);
-  const char *player_nicknames[2] = {NULL, NULL};
-
-  for (int i = 0; i < 2; i++) {
-    player_nicknames[i] = game_history_player_get_nickname(game_history, i);
-  }
-
-  string_builder_add_formatted_string(cfg_load_cmd_builder, "%s ",
-                                      config->pargs[ARG_TOKEN_SET]->name);
-
-  if (lexicon) {
-    string_builder_add_formatted_string(cfg_load_cmd_builder, "-%s %s ",
-                                        config->pargs[ARG_TOKEN_LEXICON]->name,
-                                        lexicon);
-  } else {
-    log_fatal("missing lexicon for game history");
-  }
-
-  if (ld_name) {
-    string_builder_add_formatted_string(
-        cfg_load_cmd_builder, "-%s %s ",
-        config->pargs[ARG_TOKEN_LETTER_DISTRIBUTION]->name, ld_name);
-  } else {
-    log_fatal("missing letter distribution for game history");
-  }
-
-  if (board_layout_name) {
-    string_builder_add_formatted_string(
-        cfg_load_cmd_builder, "-%s %s ",
-        config->pargs[ARG_TOKEN_BOARD_LAYOUT]->name, board_layout_name);
-  } else {
-    log_fatal("missing board layout for game history");
-  }
-
-  switch (game_variant) {
-  case GAME_VARIANT_CLASSIC:
-    string_builder_add_formatted_string(
-        cfg_load_cmd_builder, "-%s %s ",
-        config->pargs[ARG_TOKEN_GAME_VARIANT]->name, GAME_VARIANT_CLASSIC_NAME);
-    break;
-  case GAME_VARIANT_WORDSMOG:
-    string_builder_add_formatted_string(
-        cfg_load_cmd_builder, "-%s %s ",
-        config->pargs[ARG_TOKEN_GAME_VARIANT]->name,
-        GAME_VARIANT_WORDSMOG_NAME);
-    break;
-  default:
-    log_fatal("game history has unknown game variant enum: %d", game_variant);
-  }
-
-  for (int i = 0; i < 2; i++) {
-    if (!player_nicknames[i]) {
-      continue;
-    }
-    arg_token_t pname_arg_token =
-        i == 0 ? ARG_TOKEN_P1_NAME : ARG_TOKEN_P2_NAME;
-    string_builder_add_formatted_string(cfg_load_cmd_builder, "-%s %s ",
-                                        config->pargs[pname_arg_token]->name,
-                                        player_nicknames[i]);
-  }
-
-  char *cfg_load_cmd = string_builder_dump(cfg_load_cmd_builder, NULL);
-  string_builder_destroy(cfg_load_cmd_builder);
-  config_load_command(config, cfg_load_cmd, error_stack);
-  free(cfg_load_cmd);
-}
-
-void config_parse_gcg_string_with_parser(Config *config, GCGParser *gcg_parser,
-                                         const GameHistory *game_history,
-                                         ErrorStack *error_stack) {
-  parse_gcg_settings(gcg_parser, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  config_load_game_history(config, game_history, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  config_init_game(config);
-  parse_gcg_events(gcg_parser, config->game, error_stack);
-}
-
-void config_parse_gcg_string(Config *config, const char *gcg_string,
-                             GameHistory *game_history,
-                             ErrorStack *error_stack) {
-  if (is_string_empty_or_whitespace(gcg_string)) {
-    error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_GCG_EMPTY,
-                     string_duplicate("GCG is empty"));
-    return;
-  }
-  game_history_reset(game_history);
-  GCGParser *gcg_parser =
-      gcg_parser_create(gcg_string, game_history,
-                        players_data_get_data_name(config->players_data,
-                                                   PLAYERS_DATA_TYPE_KWG, 0),
-                        error_stack);
-  if (error_stack_is_empty(error_stack)) {
-    config_parse_gcg_string_with_parser(config, gcg_parser, game_history,
-                                        error_stack);
-  }
-  gcg_parser_destroy(gcg_parser);
-}
-
-void config_parse_gcg(Config *config, const char *gcg_filename,
-                      GameHistory *game_history, ErrorStack *error_stack) {
-  char *gcg_string = get_string_from_file(gcg_filename, error_stack);
-  if (error_stack_is_empty(error_stack)) {
-    config_parse_gcg_string(config, gcg_string, game_history, error_stack);
-  }
-  free(gcg_string);
-}
-
-char *impl_load_gcg(Config *config, ErrorStack *error_stack) {
-  const char *source_identifier =
-      config_get_parg_value(config, ARG_TOKEN_LOAD, 0);
-  GetGCGArgs download_args = {.source_identifier = source_identifier};
-  char *gcg_string = get_gcg(&download_args, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return empty_string();
-  }
-  config_parse_gcg_string(config, gcg_string, config->game_history,
-                          error_stack);
-  free(gcg_string);
-  if (!error_stack_is_empty(error_stack)) {
-    return empty_string();
-  }
-  game_goto(config->game_history, config->game, 0, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return empty_string();
-  }
-  return get_formatted_string(
-      "Successfully loaded game: %s vs %s (%d events)\n",
-      game_history_player_get_name(config->game_history, 0),
-      game_history_player_get_name(config->game_history, 1),
-      game_history_get_num_events(config->game_history));
-}
-
-void execute_load_gcg(Config *config, ErrorStack *error_stack) {
-  char *result = impl_load_gcg(config, error_stack);
-  if (error_stack_is_empty(error_stack)) {
-    thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
-  }
-  free(result);
-}
-
-char *str_api_load_gcg(Config *config, ErrorStack *error_stack) {
-  return impl_load_gcg(config, error_stack);
-}
-
 // Start new game
 
 void update_game_history_with_config(Config *config) {
@@ -1567,7 +1403,6 @@ char *str_api_new_game(Config *config, ErrorStack *error_stack) {
 // Commit move
 
 void config_backup_game_and_history(Config *config) {
-  return;
   game_destroy(config->game_backup);
   config->game_backup = game_duplicate(config->game);
   game_history_destroy(config->game_history_backup);
@@ -1575,7 +1410,6 @@ void config_backup_game_and_history(Config *config) {
 }
 
 void config_restore_game_and_history(Config *config) {
-  return;
   game_destroy(config->game);
   config->game = config->game_backup;
   config->game_backup = NULL;
@@ -1593,147 +1427,195 @@ void config_game_play_events(Config *config, ErrorStack *error_stack) {
   game_play_n_events(game_history, game,
                      game_history_get_num_played_events(game_history), true,
                      error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
   const int num_events = game_history_get_num_events(game_history);
   const int num_played_events =
       game_history_get_num_played_events(game_history);
 
-  if (num_played_events < num_events) {
-    // We have played into the "middle" of the game history with more events
-    // that have yet to be played, which are either more moves are the end
-    // of game events, so there is no need to create the game end events here.
+  const int player_on_turn_index = game_get_player_on_turn_index(game);
+  const Rack *player_off_turn_rack =
+      player_get_rack(game_get_player(game, 1 - player_on_turn_index));
+  game_history_set_waiting_for_final_pass_or_challenge(
+      game_history,
+      game_get_game_end_reason(game) == GAME_END_REASON_STANDARD &&
+          game_event_get_type(
+              game_history_get_event(game_history, num_played_events - 1)) ==
+              GAME_EVENT_TILE_PLACEMENT_MOVE &&
+          rack_is_empty(player_off_turn_rack) &&
+          bag_is_empty(game_get_bag(game)));
+
+  if (num_played_events < num_events ||
+      !game_reached_max_scoreless_turns(game) ||
+      game_history_contains_end_rack_event(game_history)) {
+    // We have either:
+    //
+    //  - played into the "middle" of the game history with more events
+    //    that have yet to be played, which are either more moves are the end
+    //    of game events
+    //
+    //  - the game has not reached the maximum number of scoreless turns
+    //
+    //  - the game already has end rack penalty events
+    //
+    // so there is no need to create the end rack penalty events
     return;
   }
 
-  if (game_reached_max_scoreless_turns(game)) {
-    // Add the consecutive pass rack end penalties for both players
-    int player_index = game_get_player_on_turn_index(game);
-    const LetterDistribution *ld = game_get_ld(game);
-    for (int i = 0; i < 2; i++) {
-      if (i == 1) {
-        player_index = 1 - player_index;
+  // Add the consecutive pass rack end penalties for both players
+  int player_index = game_get_player_on_turn_index(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  for (int i = 0; i < 2; i++) {
+    if (i == 1) {
+      player_index = 1 - player_index;
+    }
+    const Player *player = game_get_player(game, player_index);
+    const Rack *player_rack = player_get_rack(player);
+    const Rack *rack_to_draw_before_pass_out_game_end =
+        game_history_player_get_rack_to_draw_before_pass_out_game_end(
+            game_history, player_index);
+    if (rack_get_dist_size(rack_to_draw_before_pass_out_game_end) != 0) {
+      if (!rack_is_drawable(game, player_index,
+                            rack_to_draw_before_pass_out_game_end)) {
+        return_rack_to_bag(game, 0);
+        return_rack_to_bag(game, 1);
+        StringBuilder *sb = string_builder_create();
+        string_builder_add_rack(sb, rack_to_draw_before_pass_out_game_end, ld,
+                                false);
+        error_stack_push(
+            error_stack, ERROR_STATUS_COMMIT_PASS_OUT_RACK_NOT_IN_BAG,
+            get_formatted_string("rack to draw before game end pass out '%s' "
+                                 "is not available in the bag",
+                                 string_builder_peek(sb)));
+        string_builder_destroy(sb);
+        return;
       }
-      const Player *player = game_get_player(game, player_index);
-      const Rack *player_rack = player_get_rack(player);
-      const Rack *rack_to_draw_before_pass_out_game_end =
-          game_history_player_get_rack_to_draw_before_pass_out_game_end(
-              game_history, player_index);
-      if (rack_get_dist_size(rack_to_draw_before_pass_out_game_end) != 0) {
-        if (!rack_is_drawable(game, player_index,
-                              rack_to_draw_before_pass_out_game_end)) {
-          return_rack_to_bag(game, 0);
-          return_rack_to_bag(game, 1);
-          StringBuilder *sb = string_builder_create();
-          string_builder_add_rack(sb, rack_to_draw_before_pass_out_game_end, ld,
-                                  false);
-          error_stack_push(
-              error_stack, ERROR_STATUS_COMMIT_PASS_OUT_RACK_NOT_IN_BAG,
-              get_formatted_string("rack to draw before game end pass out '%s' "
-                                   "is not available in the bag",
-                                   string_builder_peek(sb)));
-          string_builder_destroy(sb);
-          return;
-        }
-        return_rack_to_bag(game, player_index);
-        draw_rack_from_bag(game, player_index,
-                           rack_to_draw_before_pass_out_game_end);
-      } else {
-        // Get the rack from the previous pass
-        bool found_pass = false;
-        for (int j = num_events - 1; j >= 0; j--) {
-          GameEvent *game_event = game_history_get_event(game_history, j);
-          if (game_event_get_type(game_event) == GAME_EVENT_PASS &&
-              game_event_get_player_index(game_event) == player_index) {
-            const Rack *prev_pass_rack = game_event_get_rack(game_event);
-            if (!rack_is_drawable(game, player_index, prev_pass_rack)) {
-              StringBuilder *sb = string_builder_create();
-              string_builder_add_rack(sb, prev_pass_rack, ld, false);
-              error_stack_push(error_stack,
-                               ERROR_STATUS_COMMIT_PASS_OUT_RACK_NOT_IN_BAG,
-                               get_formatted_string(
-                                   "rack to draw before game end pass out '%s' "
-                                   "is not available in the bag",
-                                   string_builder_peek(sb)));
-              string_builder_destroy(sb);
-              return;
-            }
-            return_rack_to_bag(game, player_index);
-            draw_rack_from_bag(game, player_index, prev_pass_rack);
-            found_pass = true;
-            break;
+      return_rack_to_bag(game, player_index);
+      draw_rack_from_bag(game, player_index,
+                         rack_to_draw_before_pass_out_game_end);
+    } else {
+      // Get the rack from the previous pass
+      bool found_pass = false;
+      for (int j = num_events - 1; j >= 0; j--) {
+        GameEvent *game_event = game_history_get_event(game_history, j);
+        if (game_event_get_type(game_event) == GAME_EVENT_PASS &&
+            game_event_get_player_index(game_event) == player_index) {
+          const Rack *prev_pass_rack = game_event_get_rack(game_event);
+          if (!rack_is_drawable(game, player_index, prev_pass_rack)) {
+            StringBuilder *sb = string_builder_create();
+            string_builder_add_rack(sb, prev_pass_rack, ld, false);
+            error_stack_push(error_stack,
+                             ERROR_STATUS_COMMIT_PASS_OUT_RACK_NOT_IN_BAG,
+                             get_formatted_string(
+                                 "rack to draw before game end pass out '%s' "
+                                 "is not available in the bag",
+                                 string_builder_peek(sb)));
+            string_builder_destroy(sb);
+            return;
           }
-        }
-        if (!found_pass) {
-          error_stack_push(
-              error_stack, ERROR_STATUS_COMMIT_PREVIOUS_PASS_NOT_FOUND,
-              get_formatted_string(
-                  "did not find expected previous pass for player '%s' when "
-                  "processing consecutive pass game end penalty",
-                  game_history_player_get_name(game_history, player_index)));
+          return_rack_to_bag(game, player_index);
+          draw_rack_from_bag(game, player_index, prev_pass_rack);
+          found_pass = true;
+          break;
         }
       }
-
-      draw_to_full_rack(game, player_index);
-
-      const Equity end_rack_penalty_abs_value = rack_get_score(ld, player_rack);
-      GameEvent *rack_penalty_event =
-          game_history_add_game_event(game_history, error_stack);
-      if (!error_stack_is_empty(error_stack)) {
-        return;
-      }
-      game_event_set_player_index(rack_penalty_event, player_index);
-      game_event_set_type(rack_penalty_event, GAME_EVENT_END_RACK_PENALTY);
-      rack_copy(game_event_get_rack(rack_penalty_event), player_rack);
-      game_event_set_score_adjustment(rack_penalty_event,
-                                      -end_rack_penalty_abs_value);
-      game_event_set_cumulative_score(rack_penalty_event,
-                                      player_get_score(player) -
-                                          end_rack_penalty_abs_value);
-      game_event_set_cgp_move_string(rack_penalty_event, NULL);
-      game_event_set_move_score(rack_penalty_event, 0);
-      game_history_next(game_history, error_stack);
-      if (!error_stack_is_empty(error_stack)) {
-        return;
+      if (!found_pass) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_COMMIT_PREVIOUS_PASS_NOT_FOUND,
+            get_formatted_string(
+                "did not find expected previous pass for player '%s' when "
+                "processing consecutive pass game end penalty",
+                game_history_player_get_name(game_history, player_index)));
       }
     }
-    // Replay the game with the added end rack penalties
-    game_play_n_events(game_history, game,
-                       // Play to the end
-                       game_history_get_num_events(game_history), true,
-                       error_stack);
+
+    draw_to_full_rack(game, player_index);
+
+    const Equity end_rack_penalty_abs_value = rack_get_score(ld, player_rack);
+    GameEvent *rack_penalty_event =
+        game_history_add_game_event(game_history, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
-  } else {
-    const int player_on_turn_index = game_get_player_on_turn_index(game);
-    const Rack *player_on_turn_rack =
-        player_get_rack(game_get_player(game, player_on_turn_index));
-    const Rack *player_off_turn_rack =
-        player_get_rack(game_get_player(game, 1 - player_on_turn_index));
-    if (rack_is_empty(player_on_turn_rack) &&
-        ((rack_get_total_letters(player_off_turn_rack) +
-          bag_get_letters(game_get_bag(game))) <= RACK_SIZE)) {
-      game_history_set_waiting_for_final_pass_or_challenge(game_history, true);
+    game_event_set_player_index(rack_penalty_event, player_index);
+    game_event_set_type(rack_penalty_event, GAME_EVENT_END_RACK_PENALTY);
+    rack_copy(game_event_get_rack(rack_penalty_event), player_rack);
+    game_event_set_score_adjustment(rack_penalty_event,
+                                    -end_rack_penalty_abs_value);
+    game_event_set_cumulative_score(rack_penalty_event,
+                                    player_get_score(player) -
+                                        end_rack_penalty_abs_value);
+    game_event_set_cgp_move_string(rack_penalty_event, NULL);
+    game_event_set_move_score(rack_penalty_event, 0);
+    game_history_next(game_history, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
       return;
     }
   }
+  // Replay the game with the added end rack penalties
+  game_play_n_events(game_history, game,
+                     // Play to the end
+                     game_history_get_num_events(game_history), true,
+                     error_stack);
 }
 
-void config_add_game_event(Config *config, const int player_on_turn_index,
-                           game_event_t game_event_type, const Move *move,
-                           char *ucgi_move_string, const Rack *player_rack,
-                           const Equity score_adjustment,
-                           ErrorStack *error_stack) {
-
-  printf("game history before config_add_game_event:\n");
-  game_history_debug_print(config_get_game_history(config),
-                           config_get_ld(config));
-
+// FIXME: do we really need to pass in player_on_turn_index?
+void config_add_end_rack_points(Config *config, const int player_on_turn_index,
+                                ErrorStack *error_stack) {
   game_history_truncate_to_played_events(config->game_history);
 
-  printf("game history after truncate:\n");
-  game_history_debug_print(config_get_game_history(config),
-                           config_get_ld(config));
+  GameEvent *game_event =
+      game_history_add_game_event(config->game_history, error_stack);
 
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  const Rack *end_rack_points_rack =
+      player_get_rack(game_get_player(config->game, player_on_turn_index));
+  const Equity end_rack_points_equity =
+      rack_get_score(config->ld, end_rack_points_rack) * 2;
+  const int end_rack_points_player_index = 1 - player_on_turn_index;
+
+  // Find previous game event for player
+  const int num_events = game_history_get_num_events(config->game_history);
+  // Start at num_events - 2 to avoid the game event that was just added
+  int cumulative_score = 0;
+  bool found_previous_game_event = false;
+  for (int i = num_events - 2; i >= 0; i--) {
+    const GameEvent *gei = game_history_get_event(config->game_history, i);
+    if (game_event_get_player_index(gei) == end_rack_points_player_index) {
+      cumulative_score = game_event_get_cumulative_score(gei);
+      found_previous_game_event = true;
+      break;
+    }
+  }
+  if (!found_previous_game_event) {
+    log_fatal(
+        "failed to find previous game event when adding end rack points\n");
+  }
+
+  game_event_set_player_index(game_event, end_rack_points_player_index);
+  game_event_set_type(game_event, GAME_EVENT_END_RACK_POINTS);
+  game_event_set_cgp_move_string(game_event, NULL);
+  game_event_set_score_adjustment(game_event, end_rack_points_equity);
+  game_event_set_cumulative_score(game_event,
+                                  cumulative_score + end_rack_points_equity);
+  game_event_set_move_score(game_event, 0);
+  rack_copy(game_event_get_rack(game_event), end_rack_points_rack);
+
+  game_history_next(config->game_history, error_stack);
+}
+
+// FIXME: do we really need to pass in player_on_turn_index?
+void config_add_game_event(Config *config, const int player_on_turn_index,
+                           game_event_t game_event_type, const Move *move,
+                           const char *ucgi_move_string,
+                           const Rack *player_rack,
+                           const Equity score_adjustment,
+                           ErrorStack *error_stack) {
+  game_history_truncate_to_played_events(config->game_history);
   const bool waiting_for_final_pass_or_challenge =
       game_history_get_waiting_for_final_pass_or_challenge(
           config->game_history);
@@ -1767,8 +1649,6 @@ void config_add_game_event(Config *config, const int player_on_turn_index,
       // End the game by adding an end rack points event
       add_rack_end_points = true;
       add_event_to_history = false;
-      game_history_set_waiting_for_final_pass_or_challenge(config->game_history,
-                                                           false);
       cumulative_score =
           player_get_score(game_get_player(config->game, player_on_turn_index));
     } else {
@@ -1791,23 +1671,23 @@ void config_add_game_event(Config *config, const int player_on_turn_index,
     move_score = 0;
     break;
   case GAME_EVENT_CHALLENGE_BONUS:
-    cumulative_score =
-        player_get_score(game_get_player(config->game, player_on_turn_index)) +
-        score_adjustment;
-    move_score = 0;
-    if (waiting_for_final_pass_or_challenge) {
-      add_rack_end_points = true;
-      game_history_set_waiting_for_final_pass_or_challenge(config->game_history,
-                                                           false);
-    }
+    // Challenge bonus events are handled elsewhere by inserting, not appending
+    // to the history
+    log_fatal("got unexpected challenge bonus game event when adding "
+              "event to game history in the config\n");
     break;
   case GAME_EVENT_TIME_PENALTY:
+    log_fatal("adding time penalty is unimplemented\n");
     break;
   case GAME_EVENT_END_RACK_POINTS:
+    // End rack points events are never submitted directly by the user and are
+    // handled elsewhere
     log_fatal("got unexpected end rack points game event when adding "
               "event to game history in the config\n");
     break;
   case GAME_EVENT_END_RACK_PENALTY:
+    // End rack penalty events are never submitted directly by the user and are
+    // handled elsewhere
     log_fatal("got unexpected end rack penalty game event when adding "
               "event to game history in the config\n");
     break;
@@ -1818,7 +1698,6 @@ void config_add_game_event(Config *config, const int player_on_turn_index,
   }
 
   if (add_event_to_history) {
-    printf("adding the event to history\n");
     GameEvent *game_event =
         game_history_add_game_event(config->game_history, error_stack);
 
@@ -1828,7 +1707,8 @@ void config_add_game_event(Config *config, const int player_on_turn_index,
 
     game_event_set_player_index(game_event, player_on_turn_index);
     game_event_set_type(game_event, game_event_type);
-    game_event_set_cgp_move_string(game_event, ucgi_move_string);
+    game_event_set_cgp_move_string(
+        game_event, string_duplicate_allow_null(ucgi_move_string));
     game_event_set_score_adjustment(game_event, score_adjustment);
     game_event_set_cumulative_score(game_event, cumulative_score);
     game_event_set_move_score(game_event, move_score);
@@ -1842,43 +1722,10 @@ void config_add_game_event(Config *config, const int player_on_turn_index,
   }
 
   if (add_rack_end_points) {
-    printf("adding end rack points\n");
-    GameEvent *game_event =
-        game_history_add_game_event(config->game_history, error_stack);
-
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-
-    const Rack *end_rack_points_rack =
-        player_get_rack(game_get_player(config->game, player_on_turn_index));
-    const Equity end_rack_points_equity =
-        rack_get_score(config->ld, end_rack_points_rack);
-    game_event_set_player_index(game_event, 1 - player_on_turn_index);
-    game_event_set_type(game_event, GAME_EVENT_END_RACK_POINTS);
-    game_event_set_cgp_move_string(game_event, NULL);
-    game_event_set_score_adjustment(game_event, end_rack_points_equity);
-    game_event_set_cumulative_score(game_event,
-                                    cumulative_score + end_rack_points_equity);
-    game_event_set_move_score(game_event, 0);
-    rack_copy(game_event_get_rack(game_event), end_rack_points_rack);
-
-    game_history_next(config->game_history, error_stack);
-
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
+    config_add_end_rack_points(config, player_on_turn_index, error_stack);
   }
 
-  printf("game history before config_game_play_events:\n");
-  game_history_debug_print(config_get_game_history(config),
-                           config_get_ld(config));
-
   config_game_play_events(config, error_stack);
-
-  printf("game history after config_game_play_events:\n");
-  game_history_debug_print(config_get_game_history(config),
-                           config_get_ld(config));
 
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -2043,8 +1890,8 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
   }
 
   config_add_game_event(config, player_on_turn_index, game_event_type, &move,
-                        string_builder_dump(move_string_builder, NULL),
-                        player_rack, 0, error_stack);
+                        string_builder_peek(move_string_builder), player_rack,
+                        0, error_stack);
 }
 
 char *impl_commit(Config *config, ErrorStack *error_stack) {
@@ -2084,7 +1931,6 @@ void execute_commit(Config *config, ErrorStack *error_stack) {
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
     execute_show(config, error_stack);
-    game_history_debug_print(config->game_history, config->ld);
   }
   free(result);
 }
@@ -2167,6 +2013,10 @@ char *impl_challenge(Config *config, ErrorStack *error_stack) {
     if (error_stack_is_empty(error_stack)) {
       game_history_next(config->game_history, error_stack);
       if (error_stack_is_empty(error_stack)) {
+        if (game_history_get_waiting_for_final_pass_or_challenge(
+                config->game_history)) {
+          config_add_end_rack_points(config, player_on_turn_index, error_stack);
+        }
         config_game_play_events(config, error_stack);
       }
     }
@@ -2185,7 +2035,6 @@ void execute_challenge(Config *config, ErrorStack *error_stack) {
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
     execute_show(config, error_stack);
-    game_history_debug_print(config->game_history, config->ld);
   }
   free(result);
 }
@@ -2257,7 +2106,6 @@ void execute_unchallenge(Config *config, ErrorStack *error_stack) {
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
     execute_show(config, error_stack);
-    game_history_debug_print(config->game_history, config->ld);
   }
   free(result);
 }
@@ -2276,7 +2124,15 @@ char *impl_next(Config *config, ErrorStack *error_stack) {
   }
 
   config_init_game(config);
-  game_next(config->game_history, config->game, error_stack);
+
+  game_history_next(config->game_history, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+
+  config_game_play_events(config, error_stack);
+
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
@@ -2288,7 +2144,6 @@ void execute_next(Config *config, ErrorStack *error_stack) {
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
     execute_show(config, error_stack);
-    game_history_debug_print(config->game_history, config->ld);
   }
   free(result);
 }
@@ -2306,7 +2161,15 @@ char *impl_previous(Config *config, ErrorStack *error_stack) {
   }
 
   config_init_game(config);
-  game_previous(config->game_history, config->game, error_stack);
+
+  game_history_previous(config->game_history, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+
+  config_game_play_events(config, error_stack);
+
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
@@ -2318,7 +2181,6 @@ void execute_previous(Config *config, ErrorStack *error_stack) {
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
     execute_show(config, error_stack);
-    game_history_debug_print(config->game_history, config->ld);
   }
   free(result);
 }
@@ -2353,8 +2215,12 @@ char *impl_goto(Config *config, ErrorStack *error_stack) {
 
   // FIXME: if no change, return here
 
-  game_goto(config->game_history, config->game, num_events_to_play,
-            error_stack);
+  game_history_goto(config->game_history, num_events_to_play, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  config_game_play_events(config, error_stack);
+
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
@@ -2366,13 +2232,180 @@ void execute_goto(Config *config, ErrorStack *error_stack) {
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
     execute_show(config, error_stack);
-    game_history_debug_print(config->game_history, config->ld);
   }
   free(result);
 }
 
 char *str_api_goto(Config *config, ErrorStack *error_stack) {
   return impl_goto(config, error_stack);
+}
+
+// Load GCG
+
+void config_load_game_history(Config *config, const GameHistory *game_history,
+                              ErrorStack *error_stack) {
+  StringBuilder *cfg_load_cmd_builder = string_builder_create();
+  const char *lexicon = game_history_get_lexicon_name(game_history);
+  const char *ld_name = game_history_get_ld_name(game_history);
+  const char *board_layout_name =
+      game_history_get_board_layout_name(game_history);
+  const game_variant_t game_variant =
+      game_history_get_game_variant(game_history);
+  const char *player_nicknames[2] = {NULL, NULL};
+
+  for (int i = 0; i < 2; i++) {
+    player_nicknames[i] = game_history_player_get_nickname(game_history, i);
+  }
+
+  string_builder_add_formatted_string(cfg_load_cmd_builder, "%s ",
+                                      config->pargs[ARG_TOKEN_SET]->name);
+
+  if (lexicon) {
+    string_builder_add_formatted_string(cfg_load_cmd_builder, "-%s %s ",
+                                        config->pargs[ARG_TOKEN_LEXICON]->name,
+                                        lexicon);
+  } else {
+    log_fatal("missing lexicon for game history");
+  }
+
+  if (ld_name) {
+    string_builder_add_formatted_string(
+        cfg_load_cmd_builder, "-%s %s ",
+        config->pargs[ARG_TOKEN_LETTER_DISTRIBUTION]->name, ld_name);
+  } else {
+    log_fatal("missing letter distribution for game history");
+  }
+
+  if (board_layout_name) {
+    string_builder_add_formatted_string(
+        cfg_load_cmd_builder, "-%s %s ",
+        config->pargs[ARG_TOKEN_BOARD_LAYOUT]->name, board_layout_name);
+  } else {
+    log_fatal("missing board layout for game history");
+  }
+
+  switch (game_variant) {
+  case GAME_VARIANT_CLASSIC:
+    string_builder_add_formatted_string(
+        cfg_load_cmd_builder, "-%s %s ",
+        config->pargs[ARG_TOKEN_GAME_VARIANT]->name, GAME_VARIANT_CLASSIC_NAME);
+    break;
+  case GAME_VARIANT_WORDSMOG:
+    string_builder_add_formatted_string(
+        cfg_load_cmd_builder, "-%s %s ",
+        config->pargs[ARG_TOKEN_GAME_VARIANT]->name,
+        GAME_VARIANT_WORDSMOG_NAME);
+    break;
+  default:
+    log_fatal("game history has unknown game variant enum: %d", game_variant);
+  }
+
+  for (int i = 0; i < 2; i++) {
+    if (!player_nicknames[i]) {
+      continue;
+    }
+    arg_token_t pname_arg_token =
+        i == 0 ? ARG_TOKEN_P1_NAME : ARG_TOKEN_P2_NAME;
+    string_builder_add_formatted_string(cfg_load_cmd_builder, "-%s %s ",
+                                        config->pargs[pname_arg_token]->name,
+                                        player_nicknames[i]);
+  }
+
+  char *cfg_load_cmd = string_builder_dump(cfg_load_cmd_builder, NULL);
+  string_builder_destroy(cfg_load_cmd_builder);
+  config_load_command(config, cfg_load_cmd, error_stack);
+  free(cfg_load_cmd);
+}
+
+void config_parse_gcg_string_with_parser(Config *config, GCGParser *gcg_parser,
+                                         const GameHistory *game_history,
+                                         ErrorStack *error_stack) {
+  parse_gcg_settings(gcg_parser, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_game_history(config, game_history, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_init_game(config);
+  parse_gcg_events(gcg_parser, config->game, error_stack);
+}
+
+void config_parse_gcg_string(Config *config, const char *gcg_string,
+                             GameHistory *game_history,
+                             ErrorStack *error_stack) {
+  if (is_string_empty_or_whitespace(gcg_string)) {
+    error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_GCG_EMPTY,
+                     string_duplicate("GCG is empty"));
+    return;
+  }
+  game_history_reset(game_history);
+  GCGParser *gcg_parser =
+      gcg_parser_create(gcg_string, game_history,
+                        players_data_get_data_name(config->players_data,
+                                                   PLAYERS_DATA_TYPE_KWG, 0),
+                        error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    config_parse_gcg_string_with_parser(config, gcg_parser, game_history,
+                                        error_stack);
+  }
+  gcg_parser_destroy(gcg_parser);
+}
+
+void config_parse_gcg(Config *config, const char *gcg_filename,
+                      GameHistory *game_history, ErrorStack *error_stack) {
+  char *gcg_string = get_string_from_file(gcg_filename, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    config_parse_gcg_string(config, gcg_string, game_history, error_stack);
+  }
+  free(gcg_string);
+}
+
+char *impl_load_gcg(Config *config, ErrorStack *error_stack) {
+  const char *source_identifier =
+      config_get_parg_value(config, ARG_TOKEN_LOAD, 0);
+  GetGCGArgs download_args = {.source_identifier = source_identifier};
+  char *gcg_string = get_gcg(&download_args, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  config_parse_gcg_string(config, gcg_string, config->game_history,
+                          error_stack);
+  free(gcg_string);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  game_history_goto(config->game_history, 0, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  config_game_play_events(config, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return get_formatted_string(
+      "Successfully loaded game: %s vs %s (%d events)\n",
+      game_history_player_get_name(config->game_history, 0),
+      game_history_player_get_name(config->game_history, 1),
+      game_history_get_num_events(config->game_history));
+}
+
+void execute_load_gcg(Config *config, ErrorStack *error_stack) {
+  char *result = impl_load_gcg(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+    execute_show(config, error_stack);
+  }
+  free(result);
+}
+
+char *str_api_load_gcg(Config *config, ErrorStack *error_stack) {
+  return impl_load_gcg(config, error_stack);
 }
 
 // Config load helpers

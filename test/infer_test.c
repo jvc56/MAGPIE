@@ -97,7 +97,12 @@ error_code_t infer_for_test_with_history(const Config *config,
   set_thread_control_status_to_start(config_get_thread_control(config));
   GameHistory *game_history = config_get_game_history(config);
   if (game_history_get_num_events(game_history) != 0) {
-    game_goto(game_history, game, num_events_to_play, error_stack);
+    game_history_goto(game_history, num_events_to_play, error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      game_play_n_events(game_history, game,
+                         game_history_get_num_played_events(game_history),
+                         false, error_stack);
+    }
     if (!error_stack_is_empty(error_stack)) {
       error_stack_print_and_reset(error_stack);
       assert(0);

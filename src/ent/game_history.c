@@ -368,6 +368,7 @@ void game_history_reset(GameHistory *game_history) {
   for (int i = 0; i < 2; i++) {
     game_history_player_reset(game_history, i, NULL, NULL);
   }
+  game_history->waiting_for_final_pass_or_challenge = false;
   game_history->game_variant = GAME_VARIANT_CLASSIC;
   game_history->num_events = 0;
   game_history->num_played_events = 0;
@@ -396,6 +397,8 @@ GameHistory *game_history_duplicate(const GameHistory *gh_orig) {
   gh_copy->game_variant = gh_orig->game_variant;
   gh_copy->num_events = gh_orig->num_events;
   gh_copy->num_played_events = gh_orig->num_played_events;
+  gh_copy->waiting_for_final_pass_or_challenge =
+      gh_orig->waiting_for_final_pass_or_challenge;
   for (int i = 0; i < 2; i++) {
     gh_copy->players[i] = malloc_or_die(sizeof(GameHistoryPlayer));
     gh_copy->players[i]->name =
@@ -452,13 +455,13 @@ void game_history_truncate_to_played_events(GameHistory *game_history) {
   game_history->num_events = game_history->num_played_events;
 }
 
-int game_history_next(GameHistory *game_history, ErrorStack *error_stack) {
+void game_history_next(GameHistory *game_history, ErrorStack *error_stack) {
   if (game_history->num_played_events >= game_history->num_events) {
     error_stack_push(
         error_stack, ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE,
         string_duplicate(
             "already at latest position; there is no next position"));
-    return -1;
+    return;
   }
   game_history->num_played_events++;
 
@@ -468,17 +471,15 @@ int game_history_next(GameHistory *game_history, ErrorStack *error_stack) {
           GAME_EVENT_CHALLENGE_BONUS) {
     game_history->num_played_events++;
   }
-
-  return game_history->num_played_events;
 }
 
-int game_history_previous(GameHistory *game_history, ErrorStack *error_stack) {
+void game_history_previous(GameHistory *game_history, ErrorStack *error_stack) {
   if (game_history->num_played_events <= 0) {
     error_stack_push(
         error_stack, ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE,
         string_duplicate(
             "already at earliest position; there is no previous position"));
-    return -1;
+    return;
   }
   if (game_event_get_type(
           &game_history->events[game_history->num_played_events - 1]) ==
@@ -487,22 +488,21 @@ int game_history_previous(GameHistory *game_history, ErrorStack *error_stack) {
   } else {
     game_history->num_played_events -= 1;
   }
-  return game_history->num_played_events;
 }
 
-int game_history_goto(GameHistory *game_history, int num_events_to_play,
-                      ErrorStack *error_stack) {
+void game_history_goto(GameHistory *game_history, int num_events_to_play,
+                       ErrorStack *error_stack) {
   if (num_events_to_play < 0 || num_events_to_play > game_history->num_events) {
     error_stack_push(
         error_stack, ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE,
         get_formatted_string(
             "position %d is out of range; the latest position is %d",
             num_events_to_play, game_history->num_events - 1));
-    return -1;
+    return;
   }
   game_history->num_played_events = num_events_to_play;
   if (game_history->num_played_events == 0) {
-    return 0;
+    return;
   }
 
   if (num_events_to_play < game_history->num_events &&
@@ -510,8 +510,6 @@ int game_history_goto(GameHistory *game_history, int num_events_to_play,
           GAME_EVENT_CHALLENGE_BONUS) {
     game_history->num_played_events++;
   }
-
-  return game_history->num_played_events;
 }
 
 int game_history_get_most_recent_move_event_index(
@@ -545,7 +543,7 @@ GameEvent *game_history_add_game_event(GameHistory *game_history,
 //  - there are a nonzero number of events and played events
 //  - the most recent played event is a tile placement move
 void game_history_insert_challenge_bonus_game_event(
-    GameHistory *game_history, const int player_index,
+    GameHistory *game_history, const int game_event_player_index,
     const Equity score_adjustment, ErrorStack *error_stack) {
   if (game_history->num_events == MAX_GAME_EVENTS) {
     error_stack_push(
@@ -567,7 +565,7 @@ void game_history_insert_challenge_bonus_game_event(
   GameEvent *game_event =
       &game_history->events[game_history->num_played_events];
   game_event_reset(game_event);
-  game_event_set_player_index(game_event, player_index);
+  game_event_set_player_index(game_event, game_event_player_index);
   game_event_set_type(game_event, GAME_EVENT_CHALLENGE_BONUS);
   game_event_set_score_adjustment(game_event, score_adjustment);
   game_event_set_cumulative_score(
@@ -579,7 +577,7 @@ void game_history_insert_challenge_bonus_game_event(
   for (int i = game_history->num_played_events + 1;
        i < game_history->num_events; i++) {
     GameEvent *game_event_i = &game_history->events[i];
-    if (game_event_get_player_index(game_event_i) == player_index) {
+    if (game_event_get_player_index(game_event_i) == game_event_player_index) {
       game_event_set_cumulative_score(
           game_event_i, game_event_get_cumulative_score(game_event_i) +
                             game_event_get_score_adjustment(game_event_i));
@@ -591,11 +589,7 @@ void game_history_insert_challenge_bonus_game_event(
 //  - there are a nonzero number of events and played events
 //  - the most recent played event is a challenge bonus
 void game_history_remove_challenge_bonus_game_event(GameHistory *game_history) {
-  printf("before removing:\n");
-  game_history_debug_print(game_history, NULL);
   const int challenge_bonus_event_index = game_history->num_played_events - 1;
-  printf("challenge bonus event index: %d\n", challenge_bonus_event_index);
-  printf("num events: %d\n", game_history->num_events);
   GameEvent *challenge_bonus_event =
       game_history_get_event(game_history, challenge_bonus_event_index);
   const int player_index = game_event_get_player_index(challenge_bonus_event);
@@ -620,8 +614,16 @@ void game_history_remove_challenge_bonus_game_event(GameHistory *game_history) {
          sizeof(GameEvent));
 
   game_history->num_events--;
-  printf("after removing:\n");
-  game_history_debug_print(game_history, NULL);
+}
+
+bool game_history_contains_end_rack_event(const GameHistory *game_history) {
+  for (int i = 0; i < game_history_get_num_events(game_history); i++) {
+    if (game_event_get_type(game_history_get_event(game_history, i)) ==
+        GAME_EVENT_END_RACK_PENALTY) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // FIXME: tidy this up
@@ -639,9 +641,16 @@ void game_history_debug_print(const GameHistory *game_history,
       string_builder_add_string(rack_sb, ".");
       string_builder_add_rack(rack_sb, game_event_get_rack(gei), ld, false);
     }
+    const char *move_str = game_event_get_cgp_move_string(gei);
+    if (game_event_get_type(gei) == GAME_EVENT_CHALLENGE_BONUS) {
+      move_str = "challenge bonus";
+    } else if (game_event_get_type(gei) == GAME_EVENT_END_RACK_PENALTY) {
+      move_str = "end rack penalty";
+    } else if (game_event_get_type(gei) == GAME_EVENT_END_RACK_POINTS) {
+      move_str = "end rack points";
+    }
     printf("game event: %d %c%s%s, %d, %d\n", game_event_get_player_index(gei),
-           cur_move_char, game_event_get_cgp_move_string(gei),
-           string_builder_peek(rack_sb),
+           cur_move_char, move_str, string_builder_peek(rack_sb),
            equity_to_int(game_event_get_cumulative_score(gei)),
            equity_to_int(game_event_get_score_adjustment(gei)));
     string_builder_clear(rack_sb);

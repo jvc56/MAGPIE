@@ -963,18 +963,22 @@ void test_config_anno(void) {
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(113));
 
   assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_CONSECUTIVE_ZEROS);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(267));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(113));
 
   assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_CONSECUTIVE_ZEROS);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(267));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(125));
 
   assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_CONSECUTIVE_ZEROS);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(267));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(113));
 
   assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_CONSECUTIVE_ZEROS);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(258));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(113));
 
@@ -1008,15 +1012,9 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
 
-  printf("setting rack to BONSOIR\n");
   assert_config_exec_status(config, "rack BONSOIR", ERROR_STATUS_SUCCESS);
-  printf("rack set to BONSOIR\n");
-  printf("\n\nCURRENT GAME HISTORY\n");
-  game_history_debug_print(config_get_game_history(config),
-                           config_get_ld(config));
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
-  printf("committed rack of BONSOIR\n");
 
   assert_config_exec_status(config, "rack DISLINK", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
@@ -1057,29 +1055,42 @@ void test_config_anno(void) {
   assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(595));
+  assert(game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
 
   assert_config_exec_status(config, "rack THIR", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(
       config, "com 1", ERROR_STATUS_COMMIT_WAITING_FOR_PASS_OR_CHALLENGE_BONUS);
+  // This error triggers a restore from backup, so the game pointer and game
+  // history has changed
+  game = config_get_game(config);
   assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(595));
+  assert(game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
 
   assert_config_exec_status(config, "com pass", ERROR_STATUS_SUCCESS);
   assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(609));
+  assert(!game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
 
   assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
   assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(595));
+  assert(game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
 
   assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
   assert(game_get_game_end_reason(game) == GAME_END_REASON_NONE);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(515));
+  assert(!game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
 
   assert_config_exec_status(config, "rack FOOTROE", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
@@ -1087,16 +1098,50 @@ void test_config_anno(void) {
   assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(595));
+  assert(game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
 
   assert_config_exec_status(config, "chal 10", ERROR_STATUS_SUCCESS);
   assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(619));
+  assert(!game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
 
   assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
   assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(605));
+  assert(!game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
+
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_NONE);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(515));
+  assert(!game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
+
+  assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(605));
+  assert(!game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
+
+  assert_config_exec_status(config, "unchal", ERROR_STATUS_SUCCESS);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(595));
+  assert(game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
+
+  assert_config_exec_status(config, "com pass", ERROR_STATUS_SUCCESS);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(609));
+  assert(!game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
 
   // FIXME: hit all of the error cases
 

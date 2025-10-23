@@ -417,7 +417,15 @@ void game_play_n_events_or_die(GameHistory *game_history, Game *game,
 
 void game_play_to_end_or_die(GameHistory *game_history, Game *game) {
   ErrorStack *error_stack = error_stack_create();
-  game_play_to_end(game_history, game, error_stack);
+  game_history_goto(game_history, game_history_get_num_events(game_history),
+                    error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("failed to play to end\n");
+  }
+  game_play_n_events(game_history, game,
+                     game_history_get_num_events(game_history), false,
+                     error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
     log_fatal("failed to play to end\n");
@@ -933,9 +941,9 @@ BitRack string_to_bit_rack(const LetterDistribution *ld,
 }
 
 // This only works on ASCII languages, e.g. English, French. Polish would need
-// to support multibyte user-visible characters, but Polish isn't even supported
-// for BitRack (and therefore for WMP) because the lexicon is >32 letters
-// (including the blank).
+// to support multibyte user-visible characters, but Polish isn't even
+// supported for BitRack (and therefore for WMP) because the lexicon is >32
+// letters (including the blank).
 void assert_word_in_buffer(const MachineLetter *buffer,
                            const char *expected_word,
                            const LetterDistribution *ld, const int word_idx,

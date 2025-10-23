@@ -114,10 +114,10 @@ void game_history_player_reset(GameHistory *history, int player_index,
 int game_history_get_most_recent_move_event_index(
     const GameHistory *game_history);
 
-int game_history_next(GameHistory *game_history, ErrorStack *error_stack);
-int game_history_previous(GameHistory *game_history, ErrorStack *error_stack);
-int game_history_goto(GameHistory *game_history, int num_events_to_play,
-                      ErrorStack *error_stack);
+void game_history_next(GameHistory *game_history, ErrorStack *error_stack);
+void game_history_previous(GameHistory *game_history, ErrorStack *error_stack);
+void game_history_goto(GameHistory *game_history, int num_events_to_play,
+                       ErrorStack *error_stack);
 
 void game_history_insert_challenge_bonus_game_event(
     GameHistory *game_history, const int player_index,
