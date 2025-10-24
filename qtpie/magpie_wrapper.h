@@ -47,6 +47,10 @@ void magpie_draw_starting_racks(Game *game);
 // Get CGP string for current game state
 char* magpie_get_cgp(const Game *game);
 
+// Validate a move in UCGI notation and return error message (or NULL if valid)
+// Caller must free the returned string if non-NULL
+char* magpie_validate_move(Game *game, int player_index, const char *ucgi_move_string);
+
 #ifdef __cplusplus
 }
 #endif

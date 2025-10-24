@@ -6,6 +6,7 @@
 #include "../src/ent/board.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/validated_move.h"
 #include "../src/impl/config.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/gameplay.h"
@@ -216,4 +217,34 @@ char* magpie_get_cgp(const Game *game) {
     }
     // Get CGP with player on turn first = false (standard order)
     return game_get_cgp(game, false);
+}
+
+char* magpie_validate_move(Game *game, int player_index, const char *ucgi_move_string) {
+    if (game == NULL || ucgi_move_string == NULL) {
+        return string_duplicate("Invalid game or move string");
+    }
+
+    ErrorStack *error_stack = error_stack_create();
+
+    // Create validated move with allow_phonies=true (we're only checking well-formedness)
+    ValidatedMoves *vms = validated_moves_create(
+        game,
+        player_index,
+        ucgi_move_string,
+        true,  // allow_phonies (we don't care about dictionary validation)
+        false, // allow_unknown_exchanges
+        true,  // allow_playthrough
+        error_stack
+    );
+
+    // Check if validation failed
+    char *error_msg = NULL;
+    if (!error_stack_is_empty(error_stack)) {
+        error_msg = error_stack_get_string_and_reset(error_stack);
+    }
+
+    validated_moves_destroy(vms);
+    error_stack_destroy(error_stack);
+
+    return error_msg;  // NULL if valid, error message if invalid
 }

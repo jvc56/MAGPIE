@@ -201,6 +201,9 @@ BoardPanelView::BoardPanelView(QWidget *parent)
         setFocus();  // Take keyboard focus to receive key events
     });
 
+    // Connect uncommitted tiles changed signal to validation
+    connect(boardView, &BoardView::uncommittedTilesChanged, this, &BoardPanelView::validateAndLogUncommittedTiles);
+
     // Controls panel with gameplay buttons
     QWidget *controlsPanel = new QWidget(this);
     controlsPanel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -1487,5 +1490,70 @@ void BoardPanelView::renderCursorOverlay(QPainter &painter) {
 
         // Right vertical cap (narrower)
         painter.drawLine(rightX, centerY - capHeight/2, rightX, centerY + capHeight/2);
+    }
+}
+
+void BoardPanelView::validateAndLogUncommittedTiles() {
+    if (!boardView || !game) {
+        return;
+    }
+
+    // Generate move notation from uncommitted tiles
+    QString notation = boardView->generateMoveNotation();
+
+    // If notation is empty, tiles can't form valid notation
+    if (notation.isEmpty()) {
+        const auto& tiles = boardView->getUncommittedTiles();
+        if (tiles.isEmpty()) {
+            emit validationMessage("Move validation: No tiles placed");
+        } else if (tiles.size() == 1) {
+            // Check for undesignated blank
+            if (tiles[0].letter == '?') {
+                emit validationMessage("Move validation: Cannot validate - undesignated blank");
+            } else {
+                emit validationMessage("Move validation: Single tile (need playthrough or more tiles)");
+            }
+        } else {
+            // Check for undesignated blank
+            bool hasUndesignatedBlank = false;
+            for (const auto& tile : tiles) {
+                if (tile.letter == '?') {
+                    hasUndesignatedBlank = true;
+                    break;
+                }
+            }
+
+            if (hasUndesignatedBlank) {
+                emit validationMessage("Move validation: Cannot validate - undesignated blank");
+            } else {
+                emit validationMessage("Move validation: Tiles not in a line or have gaps");
+            }
+        }
+        return;
+    }
+
+    // We have valid notation - attempt to validate it
+    emit validationMessage(QString("Move notation: %1").arg(notation));
+
+    // Call MAGPIE validation (player 0 for now)
+    char *errorMsg = magpie_validate_move(game, 0, notation.toUtf8().constData());
+
+    if (errorMsg) {
+        // Validation failed - log the error
+        QString errorStr = QString::fromUtf8(errorMsg);
+        // Extract just the error type from the full message
+        // Format is typically: "ERROR_STATUS_...: description"
+        QString errorType = errorStr.section(':', 0, 0).trimmed();
+
+        // Make error type human-readable
+        errorType.replace("ERROR_STATUS_MOVE_VALIDATION_", "");
+        errorType.replace('_', ' ');
+        errorType = errorType.toLower();
+
+        emit validationMessage(QString("Validation failed: %1").arg(errorType));
+        free(errorMsg);
+    } else {
+        // Validation succeeded!
+        emit validationMessage("Validation: OK - move is well-formed and connected");
     }
 }

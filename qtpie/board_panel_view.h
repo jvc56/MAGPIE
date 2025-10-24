@@ -28,6 +28,9 @@ public:
     // Set the debug output widget (owned by main window)
     void setDebugOutput(QTextEdit *debugOutput) { this->debugOutput = debugOutput; }
 
+    // Validate uncommitted tiles and log result
+    void validateAndLogUncommittedTiles();
+
 protected:
     void dragEnterEvent(QDragEnterEvent *event) override;
     void dragMoveEvent(QDragMoveEvent *event) override;
@@ -39,6 +42,7 @@ protected:
 
 signals:
     void debugMessage(const QString &msg);
+    void validationMessage(const QString &msg);  // For validation results to Board History
     void boardChanged();  // Emitted when MAGPIE board is updated
     void updateDragPreview(const QPixmap &tilePixmap, const QPoint &mainWidgetPos);  // Update drag preview at MainWidget position
     void hideDragPreview();  // Hide drag preview

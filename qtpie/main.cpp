@@ -10,6 +10,8 @@
 #include <QAction>
 #include <QTextEdit>
 #include <QTextCursor>
+#include <QLineEdit>
+#include <QPushButton>
 #include <QFont>
 #include <QFontDatabase>
 #include <QDir>
@@ -40,9 +42,85 @@ public:
         QWidget *central = new QWidget(this);
         QVBoxLayout *layout = new QVBoxLayout(central);
 
-        // History text view (board layout logs)
+        // Board History section
         QLabel *historyLabel = new QLabel("Board History");
         historyLabel->setStyleSheet("color: #333333; font-weight: bold; font-size: 12px;");
+
+        // History filter bar
+        historyFilter = new QLineEdit;
+        historyFilter->setPlaceholderText("Filter (shows only matching lines)...");
+        historyFilter->setClearButtonEnabled(true);
+        historyFilter->setStyleSheet(
+            "QLineEdit {"
+            "  background-color: white;"
+            "  color: #333333;"
+            "  border: 1px solid #C0C0D0;"
+            "  border-radius: 4px;"
+            "  padding: 4px;"
+            "}"
+        );
+
+        // History search bar with navigation
+        QWidget *historySearchWidget = new QWidget;
+        QHBoxLayout *historySearchLayout = new QHBoxLayout(historySearchWidget);
+        historySearchLayout->setContentsMargins(0, 0, 0, 0);
+        historySearchLayout->setSpacing(4);
+
+        historySearch = new QLineEdit;
+        historySearch->setPlaceholderText("Search (highlights matches)...");
+        historySearch->setClearButtonEnabled(true);
+        historySearch->setStyleSheet(
+            "QLineEdit {"
+            "  background-color: white;"
+            "  color: #333333;"
+            "  border: 1px solid #C0C0D0;"
+            "  border-radius: 4px;"
+            "  padding: 4px;"
+            "}"
+        );
+
+        historyPrevButton = new QPushButton("◀");
+        historyPrevButton->setFixedWidth(30);
+        historyPrevButton->setToolTip("Previous match");
+        historyPrevButton->setStyleSheet(
+            "QPushButton {"
+            "  background-color: #E8E8F0;"
+            "  color: #333333;"
+            "  border: 1px solid #C0C0D0;"
+            "  border-radius: 4px;"
+            "  padding: 4px;"
+            "}"
+            "QPushButton:hover {"
+            "  background-color: #D8D8E8;"
+            "}"
+        );
+
+        historyNextButton = new QPushButton("▶");
+        historyNextButton->setFixedWidth(30);
+        historyNextButton->setToolTip("Next match");
+        historyNextButton->setStyleSheet(
+            "QPushButton {"
+            "  background-color: #E8E8F0;"
+            "  color: #333333;"
+            "  border: 1px solid #C0C0D0;"
+            "  border-radius: 4px;"
+            "  padding: 4px;"
+            "}"
+            "QPushButton:hover {"
+            "  background-color: #D8D8E8;"
+            "}"
+        );
+
+        historyMatchLabel = new QLabel("0/0");
+        historyMatchLabel->setFixedWidth(50);
+        historyMatchLabel->setAlignment(Qt::AlignCenter);
+        historyMatchLabel->setStyleSheet("color: #666666; font-size: 11px;");
+
+        historySearchLayout->addWidget(historySearch, 1);
+        historySearchLayout->addWidget(historyPrevButton);
+        historySearchLayout->addWidget(historyNextButton);
+        historySearchLayout->addWidget(historyMatchLabel);
+
         historyTextView = new QTextEdit;
         historyTextView->setReadOnly(true);
         historyTextView->setFont(QFont("Courier", 8));
@@ -56,9 +134,85 @@ public:
             "}"
         );
 
-        // Debug text view (analysis/debug messages)
+        // Debug Messages section
         QLabel *debugLabel = new QLabel("Debug Messages");
         debugLabel->setStyleSheet("color: #333333; font-weight: bold; font-size: 12px;");
+
+        // Debug filter bar
+        debugFilter = new QLineEdit;
+        debugFilter->setPlaceholderText("Filter (shows only matching lines)...");
+        debugFilter->setClearButtonEnabled(true);
+        debugFilter->setStyleSheet(
+            "QLineEdit {"
+            "  background-color: white;"
+            "  color: #333333;"
+            "  border: 1px solid #C0C0D0;"
+            "  border-radius: 4px;"
+            "  padding: 4px;"
+            "}"
+        );
+
+        // Debug search bar with navigation
+        QWidget *debugSearchWidget = new QWidget;
+        QHBoxLayout *debugSearchLayout = new QHBoxLayout(debugSearchWidget);
+        debugSearchLayout->setContentsMargins(0, 0, 0, 0);
+        debugSearchLayout->setSpacing(4);
+
+        debugSearch = new QLineEdit;
+        debugSearch->setPlaceholderText("Search (highlights matches)...");
+        debugSearch->setClearButtonEnabled(true);
+        debugSearch->setStyleSheet(
+            "QLineEdit {"
+            "  background-color: white;"
+            "  color: #333333;"
+            "  border: 1px solid #C0C0D0;"
+            "  border-radius: 4px;"
+            "  padding: 4px;"
+            "}"
+        );
+
+        debugPrevButton = new QPushButton("◀");
+        debugPrevButton->setFixedWidth(30);
+        debugPrevButton->setToolTip("Previous match");
+        debugPrevButton->setStyleSheet(
+            "QPushButton {"
+            "  background-color: #E8E8F0;"
+            "  color: #333333;"
+            "  border: 1px solid #C0C0D0;"
+            "  border-radius: 4px;"
+            "  padding: 4px;"
+            "}"
+            "QPushButton:hover {"
+            "  background-color: #D8D8E8;"
+            "}"
+        );
+
+        debugNextButton = new QPushButton("▶");
+        debugNextButton->setFixedWidth(30);
+        debugNextButton->setToolTip("Next match");
+        debugNextButton->setStyleSheet(
+            "QPushButton {"
+            "  background-color: #E8E8F0;"
+            "  color: #333333;"
+            "  border: 1px solid #C0C0D0;"
+            "  border-radius: 4px;"
+            "  padding: 4px;"
+            "}"
+            "QPushButton:hover {"
+            "  background-color: #D8D8E8;"
+            "}"
+        );
+
+        debugMatchLabel = new QLabel("0/0");
+        debugMatchLabel->setFixedWidth(50);
+        debugMatchLabel->setAlignment(Qt::AlignCenter);
+        debugMatchLabel->setStyleSheet("color: #666666; font-size: 11px;");
+
+        debugSearchLayout->addWidget(debugSearch, 1);
+        debugSearchLayout->addWidget(debugPrevButton);
+        debugSearchLayout->addWidget(debugNextButton);
+        debugSearchLayout->addWidget(debugMatchLabel);
+
         debugTextView = new QTextEdit;
         debugTextView->setReadOnly(true);
         debugTextView->setFont(QFont("Courier", 8));
@@ -73,19 +227,369 @@ public:
         );
 
         layout->addWidget(historyLabel);
+        layout->addWidget(historyFilter);
+        layout->addWidget(historySearchWidget);
         layout->addWidget(historyTextView, 1);
         layout->addWidget(debugLabel);
+        layout->addWidget(debugFilter);
+        layout->addWidget(debugSearchWidget);
         layout->addWidget(debugTextView, 1);
 
         setCentralWidget(central);
+
+        // Initialize search state
+        historyCurrentMatch = -1;
+        debugCurrentMatch = -1;
+
+        // Connect filter signals
+        connect(historyFilter, &QLineEdit::textChanged, this, &DebugWindow::onHistoryFilterChanged);
+        connect(debugFilter, &QLineEdit::textChanged, this, &DebugWindow::onDebugFilterChanged);
+
+        // Connect search signals
+        connect(historySearch, &QLineEdit::textChanged, this, &DebugWindow::onHistorySearchChanged);
+        connect(historyPrevButton, &QPushButton::clicked, this, &DebugWindow::onHistoryPrevMatch);
+        connect(historyNextButton, &QPushButton::clicked, this, &DebugWindow::onHistoryNextMatch);
+
+        connect(debugSearch, &QLineEdit::textChanged, this, &DebugWindow::onDebugSearchChanged);
+        connect(debugPrevButton, &QPushButton::clicked, this, &DebugWindow::onDebugPrevMatch);
+        connect(debugNextButton, &QPushButton::clicked, this, &DebugWindow::onDebugNextMatch);
     }
 
     QTextEdit *getHistoryTextView() { return historyTextView; }
     QTextEdit *getDebugTextView() { return debugTextView; }
 
+    void appendHistory(const QString &text) {
+        historyLines.append(text);
+        applyHistoryFilter();
+    }
+
+    void appendDebug(const QString &text) {
+        debugLines.append(text);
+        applyDebugFilter();
+    }
+
+private slots:
+    void onHistoryFilterChanged(const QString &filter) {
+        Q_UNUSED(filter);
+        applyHistoryFilter();
+        performHistorySearch();
+    }
+
+    void onDebugFilterChanged(const QString &filter) {
+        Q_UNUSED(filter);
+        applyDebugFilter();
+        performDebugSearch();
+    }
+
+    void onHistorySearchChanged(const QString &text) {
+        Q_UNUSED(text);
+        performHistorySearch();
+    }
+
+    void onDebugSearchChanged(const QString &text) {
+        Q_UNUSED(text);
+        performDebugSearch();
+    }
+
+    void onHistoryPrevMatch() {
+        if (historyCurrentMatch > 0) {
+            historyCurrentMatch--;
+            highlightHistoryMatch();
+        }
+    }
+
+    void onHistoryNextMatch() {
+        if (historyCurrentMatch < historyMatchPositions.size() - 1) {
+            historyCurrentMatch++;
+            highlightHistoryMatch();
+        }
+    }
+
+    void onDebugPrevMatch() {
+        if (debugCurrentMatch > 0) {
+            debugCurrentMatch--;
+            highlightDebugMatch();
+        }
+    }
+
+    void onDebugNextMatch() {
+        if (debugCurrentMatch < debugMatchPositions.size() - 1) {
+            debugCurrentMatch++;
+            highlightDebugMatch();
+        }
+    }
+
 private:
+    void applyHistoryFilter() {
+        QString filterText = historyFilter->text().trimmed();
+        if (filterText.isEmpty()) {
+            historyTextView->setPlainText(historyLines.join("\n"));
+        } else {
+            QStringList filtered;
+            for (const QString &line : historyLines) {
+                if (line.contains(filterText, Qt::CaseInsensitive)) {
+                    filtered.append(line);
+                }
+            }
+            historyTextView->setPlainText(filtered.join("\n"));
+
+            // Highlight filter matches
+            if (!filterText.isEmpty()) {
+                QTextDocument *doc = historyTextView->document();
+                QTextCursor highlightCursor(doc);
+                QTextCharFormat highlightFormat;
+                highlightFormat.setBackground(QColor(200, 255, 200, 150)); // Light green for filter
+
+                while (!highlightCursor.isNull() && !highlightCursor.atEnd()) {
+                    highlightCursor = doc->find(filterText, highlightCursor);  // Case-insensitive by default
+                    if (!highlightCursor.isNull()) {
+                        highlightCursor.mergeCharFormat(highlightFormat);
+                    }
+                }
+            }
+        }
+
+        // Scroll to bottom
+        QTextCursor cursor = historyTextView->textCursor();
+        cursor.movePosition(QTextCursor::End);
+        historyTextView->setTextCursor(cursor);
+        historyTextView->ensureCursorVisible();
+    }
+
+    void applyDebugFilter() {
+        QString filterText = debugFilter->text().trimmed();
+        if (filterText.isEmpty()) {
+            debugTextView->setPlainText(debugLines.join("\n"));
+        } else {
+            QStringList filtered;
+            for (const QString &line : debugLines) {
+                if (line.contains(filterText, Qt::CaseInsensitive)) {
+                    filtered.append(line);
+                }
+            }
+            debugTextView->setPlainText(filtered.join("\n"));
+
+            // Highlight filter matches
+            if (!filterText.isEmpty()) {
+                QTextDocument *doc = debugTextView->document();
+                QTextCursor highlightCursor(doc);
+                QTextCharFormat highlightFormat;
+                highlightFormat.setBackground(QColor(200, 255, 200, 150)); // Light green for filter
+
+                while (!highlightCursor.isNull() && !highlightCursor.atEnd()) {
+                    highlightCursor = doc->find(filterText, highlightCursor);  // Case-insensitive by default
+                    if (!highlightCursor.isNull()) {
+                        highlightCursor.mergeCharFormat(highlightFormat);
+                    }
+                }
+            }
+        }
+
+        // Scroll to bottom
+        QTextCursor cursor = debugTextView->textCursor();
+        cursor.movePosition(QTextCursor::End);
+        debugTextView->setTextCursor(cursor);
+        debugTextView->ensureCursorVisible();
+    }
+
+    void performHistorySearch() {
+        QString searchText = historySearch->text().trimmed();
+        historyMatchPositions.clear();
+        historyCurrentMatch = -1;
+
+        if (searchText.isEmpty()) {
+            // Clear highlighting
+            applyHistoryFilter();
+            historyMatchLabel->setText("0/0");
+            return;
+        }
+
+        // Find all matches in the current text
+        QTextDocument *doc = historyTextView->document();
+        QTextCursor highlightCursor(doc);
+        QTextCursor cursor(doc);
+
+        QTextCharFormat normalFormat;
+        QTextCharFormat highlightFormat;
+        highlightFormat.setBackground(QColor(255, 255, 0, 100)); // Yellow highlight
+
+        // Clear existing highlighting
+        cursor.select(QTextCursor::Document);
+        cursor.setCharFormat(normalFormat);
+
+        // Find and highlight all matches
+        while (!highlightCursor.isNull() && !highlightCursor.atEnd()) {
+            highlightCursor = doc->find(searchText, highlightCursor, QTextDocument::FindCaseSensitively);
+            if (!highlightCursor.isNull()) {
+                historyMatchPositions.append(highlightCursor.position() - searchText.length());
+                highlightCursor.mergeCharFormat(highlightFormat);
+            }
+        }
+
+        // Update match counter
+        if (historyMatchPositions.isEmpty()) {
+            historyMatchLabel->setText("0/0");
+        } else {
+            historyCurrentMatch = 0;
+            historyMatchLabel->setText(QString("%1/%2").arg(1).arg(historyMatchPositions.size()));
+            highlightHistoryMatch();
+        }
+    }
+
+    void performDebugSearch() {
+        QString searchText = debugSearch->text().trimmed();
+        debugMatchPositions.clear();
+        debugCurrentMatch = -1;
+
+        if (searchText.isEmpty()) {
+            // Clear highlighting
+            applyDebugFilter();
+            debugMatchLabel->setText("0/0");
+            return;
+        }
+
+        // Find all matches in the current text
+        QTextDocument *doc = debugTextView->document();
+        QTextCursor highlightCursor(doc);
+        QTextCursor cursor(doc);
+
+        QTextCharFormat normalFormat;
+        QTextCharFormat highlightFormat;
+        highlightFormat.setBackground(QColor(255, 255, 0, 100)); // Yellow highlight
+
+        // Clear existing highlighting
+        cursor.select(QTextCursor::Document);
+        cursor.setCharFormat(normalFormat);
+
+        // Find and highlight all matches
+        while (!highlightCursor.isNull() && !highlightCursor.atEnd()) {
+            highlightCursor = doc->find(searchText, highlightCursor, QTextDocument::FindCaseSensitively);
+            if (!highlightCursor.isNull()) {
+                debugMatchPositions.append(highlightCursor.position() - searchText.length());
+                highlightCursor.mergeCharFormat(highlightFormat);
+            }
+        }
+
+        // Update match counter
+        if (debugMatchPositions.isEmpty()) {
+            debugMatchLabel->setText("0/0");
+        } else {
+            debugCurrentMatch = 0;
+            debugMatchLabel->setText(QString("%1/%2").arg(1).arg(debugMatchPositions.size()));
+            highlightDebugMatch();
+        }
+    }
+
+    void highlightHistoryMatch() {
+        if (historyCurrentMatch < 0 || historyCurrentMatch >= historyMatchPositions.size()) {
+            return;
+        }
+
+        QString searchText = historySearch->text().trimmed();
+        int pos = historyMatchPositions[historyCurrentMatch];
+
+        // Highlight all matches first
+        QTextDocument *doc = historyTextView->document();
+        QTextCursor highlightCursor(doc);
+        QTextCharFormat normalFormat;
+        QTextCharFormat yellowFormat;
+        yellowFormat.setBackground(QColor(255, 255, 0, 100)); // Yellow highlight
+
+        // Clear existing highlighting
+        QTextCursor clearCursor(doc);
+        clearCursor.select(QTextCursor::Document);
+        clearCursor.setCharFormat(normalFormat);
+
+        // Highlight all matches in yellow
+        while (!highlightCursor.isNull() && !highlightCursor.atEnd()) {
+            highlightCursor = doc->find(searchText, highlightCursor, QTextDocument::FindCaseSensitively);
+            if (!highlightCursor.isNull()) {
+                highlightCursor.mergeCharFormat(yellowFormat);
+            }
+        }
+
+        // Highlight current match in orange
+        QTextCursor cursor(doc);
+        cursor.setPosition(pos);
+        cursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, searchText.length());
+        QTextCharFormat currentFormat;
+        currentFormat.setBackground(QColor(255, 165, 0)); // Orange for current match
+        cursor.mergeCharFormat(currentFormat);
+
+        // Scroll to the match
+        historyTextView->setTextCursor(cursor);
+        historyTextView->ensureCursorVisible();
+
+        // Update counter
+        historyMatchLabel->setText(QString("%1/%2")
+            .arg(historyCurrentMatch + 1)
+            .arg(historyMatchPositions.size()));
+    }
+
+    void highlightDebugMatch() {
+        if (debugCurrentMatch < 0 || debugCurrentMatch >= debugMatchPositions.size()) {
+            return;
+        }
+
+        QString searchText = debugSearch->text().trimmed();
+        int pos = debugMatchPositions[debugCurrentMatch];
+
+        // Highlight all matches first
+        QTextDocument *doc = debugTextView->document();
+        QTextCursor highlightCursor(doc);
+        QTextCharFormat normalFormat;
+        QTextCharFormat yellowFormat;
+        yellowFormat.setBackground(QColor(255, 255, 0, 100)); // Yellow highlight
+
+        // Clear existing highlighting
+        QTextCursor clearCursor(doc);
+        clearCursor.select(QTextCursor::Document);
+        clearCursor.setCharFormat(normalFormat);
+
+        // Highlight all matches in yellow
+        while (!highlightCursor.isNull() && !highlightCursor.atEnd()) {
+            highlightCursor = doc->find(searchText, highlightCursor, QTextDocument::FindCaseSensitively);
+            if (!highlightCursor.isNull()) {
+                highlightCursor.mergeCharFormat(yellowFormat);
+            }
+        }
+
+        // Highlight current match in orange
+        QTextCursor cursor(doc);
+        cursor.setPosition(pos);
+        cursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, searchText.length());
+        QTextCharFormat currentFormat;
+        currentFormat.setBackground(QColor(255, 165, 0)); // Orange for current match
+        cursor.mergeCharFormat(currentFormat);
+
+        // Scroll to the match
+        debugTextView->setTextCursor(cursor);
+        debugTextView->ensureCursorVisible();
+
+        // Update counter
+        debugMatchLabel->setText(QString("%1/%2")
+            .arg(debugCurrentMatch + 1)
+            .arg(debugMatchPositions.size()));
+    }
+
     QTextEdit *historyTextView;
     QTextEdit *debugTextView;
+    QLineEdit *historyFilter;
+    QLineEdit *debugFilter;
+    QLineEdit *historySearch;
+    QLineEdit *debugSearch;
+    QPushButton *historyPrevButton;
+    QPushButton *historyNextButton;
+    QPushButton *debugPrevButton;
+    QPushButton *debugNextButton;
+    QLabel *historyMatchLabel;
+    QLabel *debugMatchLabel;
+    QStringList historyLines;
+    QStringList debugLines;
+    QVector<int> historyMatchPositions;
+    QVector<int> debugMatchPositions;
+    int historyCurrentMatch;
+    int debugCurrentMatch;
 };
 
 class MainWidget : public QMainWindow {
@@ -110,20 +614,24 @@ public:
 
       // Connect debug messages from board panel to debug window
       connect(boardPanelView, &BoardPanelView::debugMessage,
-              debugWindow->getDebugTextView(), &QTextEdit::append);
+              debugWindow, &DebugWindow::appendDebug);
 
       // Create game history panel with player timers and move history
       historyPanel = new GameHistoryPanel(this);
 
+      // Connect validation messages from board panel to board history
+      connect(boardPanelView, &BoardPanelView::validationMessage,
+              debugWindow, &DebugWindow::appendHistory);
+
       // Connect debug messages from history panel to debug window
       connect(historyPanel, &GameHistoryPanel::debugMessage,
-              debugWindow->getDebugTextView(), &QTextEdit::append);
+              debugWindow, &DebugWindow::appendDebug);
 
       historyPanel->setPlayerNames("olaugh", "magpie");
 
       // Check Consolas font loading after connecting signals
-      debugWindow->getDebugTextView()->append("=== Checking Consolas font ===");
-      debugWindow->getDebugTextView()->append(QString("Current working directory: %1").arg(QDir::currentPath()));
+      debugWindow->appendDebug("=== Checking Consolas font ===");
+      debugWindow->appendDebug(QString("Current working directory: %1").arg(QDir::currentPath()));
 
       // Try multiple possible paths
       QStringList fontPaths = {
@@ -138,7 +646,7 @@ public:
       int fontId = -1;
       QString successPath;
       for (const QString &path : fontPaths) {
-          debugWindow->getDebugTextView()->append(QString("  Trying: %1").arg(path));
+          debugWindow->appendDebug(QString("  Trying: %1").arg(path));
           fontId = QFontDatabase::addApplicationFont(path);
           if (fontId != -1) {
               successPath = path;
@@ -147,13 +655,13 @@ public:
       }
 
       if (fontId == -1) {
-          debugWindow->getDebugTextView()->append("ERROR: Failed to load Consolas font from any path");
+          debugWindow->appendDebug("ERROR: Failed to load Consolas font from any path");
       } else {
           QStringList fontFamilies = QFontDatabase::applicationFontFamilies(fontId);
           if (fontFamilies.isEmpty()) {
-              debugWindow->getDebugTextView()->append("WARNING: Consolas font loaded but no families found");
+              debugWindow->appendDebug("WARNING: Consolas font loaded but no families found");
           } else {
-              debugWindow->getDebugTextView()->append(QString("SUCCESS: Loaded Consolas font from: %1 (ID: %2, families: %3)")
+              debugWindow->appendDebug(QString("SUCCESS: Loaded Consolas font from: %1 (ID: %2, families: %3)")
                               .arg(successPath)
                               .arg(fontId)
                               .arg(fontFamilies.join(", ")));
@@ -213,41 +721,41 @@ public:
       debugMenu->addAction(showDimensionsAction);
 
       // Now create MAGPIE config after UI is set up
-      debugWindow->getHistoryTextView()->append("=== Creating MAGPIE config ===");
+      debugWindow->appendHistory("=== Creating MAGPIE config ===");
       QString appPath = QCoreApplication::applicationDirPath();
       QString dataPath = appPath + "/../Resources/data";
-      debugWindow->getHistoryTextView()->append("Data path: " + dataPath);
+      debugWindow->appendHistory("Data path: " + dataPath);
 
       config = magpie_create_config(dataPath.toUtf8().constData());
       if (!config) {
-          debugWindow->getHistoryTextView()->append("ERROR: Failed to create MAGPIE config");
+          debugWindow->appendHistory("ERROR: Failed to create MAGPIE config");
           return;
       }
-      debugWindow->getHistoryTextView()->append("Config created successfully");
+      debugWindow->appendHistory("Config created successfully");
 
       // Set up game with CSW24, player names, and seed
-      debugWindow->getHistoryTextView()->append("=== Setting up new game ===");
+      debugWindow->appendHistory("=== Setting up new game ===");
       magpie_config_load_command(config, "set -lex CSW24");
       magpie_config_load_command(config, "set -p1 olaugh");
       magpie_config_load_command(config, "set -p2 magpie");
       magpie_config_load_command(config, "set -seed 1337");
-      debugWindow->getHistoryTextView()->append("Game settings: CSW24, players: olaugh vs magpie, seed: 1337");
+      debugWindow->appendHistory("Game settings: CSW24, players: olaugh vs magpie, seed: 1337");
 
       // Get the game from the config
       Game *game = magpie_get_game_from_config(config);
       if (game) {
           boardPanelView->setGame(game);
-          debugWindow->getHistoryTextView()->append("Game created");
+          debugWindow->appendHistory("Game created");
 
           // Draw starting racks for both players
           magpie_draw_starting_racks(game);
-          debugWindow->getHistoryTextView()->append("Starting racks drawn");
+          debugWindow->appendHistory("Starting racks drawn");
 
           // Get and display olaugh's rack (player 0)
           char *rackString = magpie_get_player_rack_string(game, 0);
           if (rackString) {
               QString rackQStr = QString::fromUtf8(rackString);
-              debugWindow->getHistoryTextView()->append("olaugh's rack: " + rackQStr);
+              debugWindow->appendHistory("olaugh's rack: " + rackQStr);
               free(rackString);
 
               // Set the rack on the rack view
@@ -260,7 +768,7 @@ public:
           // Print the initial board
           printBoard();
       } else {
-          debugWindow->getHistoryTextView()->append("WARNING: No game from config");
+          debugWindow->appendHistory("WARNING: No game from config");
       }
 
       // Scroll history view to top after initial setup
@@ -278,8 +786,8 @@ public:
 
         char *gameString = magpie_game_to_string(config, game);
         if (gameString) {
-            debugWindow->getHistoryTextView()->append("=== Board Layout ===");
-            debugWindow->getHistoryTextView()->append(QString::fromUtf8(gameString));
+            debugWindow->appendHistory("=== Board Layout ===");
+            debugWindow->appendHistory(QString::fromUtf8(gameString));
             free(gameString);
         }
     }

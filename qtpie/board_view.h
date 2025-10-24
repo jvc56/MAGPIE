@@ -78,6 +78,10 @@ public:
     // Get all uncommitted tiles (for backspace functionality)
     const QVector<UncommittedTile>& getUncommittedTiles() const { return m_uncommittedTiles; }
 
+    // Generate UCGI move notation from uncommitted tiles
+    // Returns empty string if tiles can't form valid notation (not in line, blank undesignated, etc.)
+    QString generateMoveNotation() const;
+
     // Set ghost tile position (shows dimmed tile during drag) - (-1, -1) to clear
     void setGhostTile(int row, int col, QChar letter);
     void clearGhostTile();
@@ -87,6 +91,7 @@ signals:
     void tileDragEnded(Qt::DropAction result);
     void squareClicked(int row, int col);
     void debugLog(const QString &message);
+    void uncommittedTilesChanged();  // Emitted when tiles are placed/removed/cleared
 
 protected:
     void paintEvent(QPaintEvent *event) override;

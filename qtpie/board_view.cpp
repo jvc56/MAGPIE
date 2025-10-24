@@ -6,6 +6,7 @@
 #include <QMouseEvent>
 #include <QDrag>
 #include <QMimeData>
+#include <algorithm>
 
 BoardView::BoardView(QWidget *parent)
     : QWidget(parent)
@@ -562,6 +563,7 @@ void BoardView::placeUncommittedTile(int row, int col, QChar letter) {
     m_uncommittedTiles.append(tile);
 
     update();  // Trigger repaint to show the new tile
+    emit uncommittedTilesChanged();  // Notify that tiles changed
 }
 
 void BoardView::removeUncommittedTile(int row, int col) {
@@ -569,6 +571,7 @@ void BoardView::removeUncommittedTile(int row, int col) {
         if (m_uncommittedTiles[i].row == row && m_uncommittedTiles[i].col == col) {
             m_uncommittedTiles.removeAt(i);
             update();
+            emit uncommittedTilesChanged();  // Notify that tiles changed
             return;
         }
     }
@@ -578,6 +581,7 @@ void BoardView::clearUncommittedTiles() {
     if (!m_uncommittedTiles.isEmpty()) {
         m_uncommittedTiles.clear();
         update();
+        emit uncommittedTilesChanged();  // Notify that tiles changed
     }
 }
 
@@ -601,6 +605,106 @@ void BoardView::clearGhostTile() {
     m_ghostRow = -1;
     m_ghostCol = -1;
     update();
+}
+
+QString BoardView::generateMoveNotation() const {
+    // Need at least one tile
+    if (m_uncommittedTiles.isEmpty()) {
+        return QString();
+    }
+
+    // Check for undesignated blanks ('?')
+    for (const UncommittedTile &tile : m_uncommittedTiles) {
+        if (tile.letter == '?') {
+            return QString();  // Can't create notation with undesignated blank
+        }
+    }
+
+    // Sort tiles by position to determine direction and bounds
+    QVector<UncommittedTile> sorted = m_uncommittedTiles;
+    std::sort(sorted.begin(), sorted.end(), [](const UncommittedTile &a, const UncommittedTile &b) {
+        if (a.row != b.row) return a.row < b.row;
+        return a.col < b.col;
+    });
+
+    // Check if all tiles are in a line (either same row or same column)
+    bool sameRow = true;
+    bool sameCol = true;
+    int firstRow = sorted[0].row;
+    int firstCol = sorted[0].col;
+
+    for (int i = 1; i < sorted.size(); ++i) {
+        if (sorted[i].row != firstRow) sameRow = false;
+        if (sorted[i].col != firstCol) sameCol = false;
+    }
+
+    if (!sameRow && !sameCol) {
+        return QString();  // Tiles not in a line
+    }
+
+    // Determine direction and starting position
+    bool isHorizontal = sameRow;
+    int startRow = sorted[0].row;
+    int startCol = sorted[0].col;
+
+    // Build the word string, filling in playthrough markers for existing tiles
+    QString word;
+    if (isHorizontal) {
+        int endCol = sorted.last().col;
+        for (int col = startCol; col <= endCol; ++col) {
+            // Check if we have an uncommitted tile at this position
+            bool found = false;
+            for (const UncommittedTile &tile : sorted) {
+                if (tile.col == col) {
+                    word += tile.letter;
+                    found = true;
+                    break;
+                }
+            }
+            // If no uncommitted tile, check if there's a tile on the board
+            if (!found) {
+                if (board && !magpie_board_is_square_empty(board, startRow, col)) {
+                    word += '.';  // Playthrough marker
+                } else {
+                    return QString();  // Gap in the word
+                }
+            }
+        }
+    } else {  // Vertical
+        int endRow = sorted.last().row;
+        for (int row = startRow; row <= endRow; ++row) {
+            // Check if we have an uncommitted tile at this position
+            bool found = false;
+            for (const UncommittedTile &tile : sorted) {
+                if (tile.row == row) {
+                    word += tile.letter;
+                    found = true;
+                    break;
+                }
+            }
+            // If no uncommitted tile, check if there's a tile on the board
+            if (!found) {
+                if (board && !magpie_board_is_square_empty(board, row, startCol)) {
+                    word += '.';  // Playthrough marker
+                } else {
+                    return QString();  // Gap in the word
+                }
+            }
+        }
+    }
+
+    // Generate position notation (e.g., "8D" or "D8")
+    QString position;
+    if (isHorizontal) {
+        // Format: row then column (e.g., "8D")
+        position = QString::number(startRow + 1) + QString(QChar('A' + startCol));
+    } else {
+        // Format: column then row (e.g., "D8")
+        position = QString(QChar('A' + startCol)) + QString::number(startRow + 1);
+    }
+
+    // Return UCGI notation: position.word
+    return position + "." + word;
 }
 
 void BoardView::setKeyboardEntry(int row, int col, Direction dir) {
