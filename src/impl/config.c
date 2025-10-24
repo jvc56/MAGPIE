@@ -1478,8 +1478,6 @@ void config_game_play_events(Config *config, ErrorStack *error_stack) {
     if (rack_get_dist_size(rack_to_draw_before_pass_out_game_end) != 0) {
       if (!rack_is_drawable(game, player_index,
                             rack_to_draw_before_pass_out_game_end)) {
-        return_rack_to_bag(game, 0);
-        return_rack_to_bag(game, 1);
         StringBuilder *sb = string_builder_create();
         string_builder_add_rack(sb, rack_to_draw_before_pass_out_game_end, ld,
                                 false);
@@ -1505,13 +1503,12 @@ void config_game_play_events(Config *config, ErrorStack *error_stack) {
           if (!rack_is_drawable(game, player_index, prev_pass_rack)) {
             StringBuilder *sb = string_builder_create();
             string_builder_add_rack(sb, prev_pass_rack, ld, false);
-            error_stack_push(error_stack,
-                             ERROR_STATUS_COMMIT_PASS_OUT_RACK_NOT_IN_BAG,
-                             get_formatted_string(
-                                 "rack to draw before game end pass out '%s' "
-                                 "is not available in the bag",
-                                 string_builder_peek(sb)));
+            char *err_msg =
+                get_formatted_string("rack on game end pass out '%s' is "
+                                     "unexpectedly not available in the bag",
+                                     string_builder_peek(sb));
             string_builder_destroy(sb);
+            log_fatal(err_msg);
             return;
           }
           return_rack_to_bag(game, player_index);
@@ -1778,13 +1775,17 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
     commit_move_static_rank--;
     // commit_move_static_rank is necessarily nonnegative since
     // is_all_digits_or_empty returns false for negative numbers.
-    if (commit_move_static_rank >= move_list_get_count(config->move_list)) {
+    if (!config->move_list ||
+        commit_move_static_rank >= move_list_get_count(config->move_list)) {
+      int move_list_count = 0;
+      if (config->move_list) {
+        move_list_count = move_list_get_count(config->move_list);
+      }
       error_stack_push(
           error_stack, ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE,
           get_formatted_string(
               "cannot commit move %d with only %d total generated moves",
-              commit_move_static_rank + 1,
-              move_list_get_count(config->move_list)));
+              commit_move_static_rank + 1, move_list_count));
       return;
     }
     move_copy(&move,
@@ -1801,8 +1802,7 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
                                  game_get_board(config->game), config->ld);
     game_event_type = move_get_type(&move);
     rack_to_draw_before_pass_out_game_end_str = commit_pos_arg_2;
-  } else if (strings_iequal(commit_pos_arg_1, UCGI_EXCHANGE_MOVE) ||
-             contains_digit(commit_pos_arg_1)) {
+  } else {
     // Commit UCGI move
     if (!commit_pos_arg_2) {
       error_stack_push(
@@ -1833,30 +1833,6 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
     }
     game_event_type = move_get_type(&move);
     rack_to_draw_before_pass_out_game_end_str = commit_pos_arg_3;
-  } else {
-    if (commit_pos_arg_3) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_COMMIT_EXTRANEOUS_ARG,
-          get_formatted_string(
-              "extraneous argument '%s' provided when committing exchange",
-              commit_pos_arg_3));
-      return;
-    }
-    // Commit exchange
-    string_builder_add_formatted_string(move_string_builder, "%s%c%s%c",
-                                        UCGI_EXCHANGE_MOVE, UCGI_DELIMITER,
-                                        commit_pos_arg_1, UCGI_DELIMITER);
-    string_builder_add_rack(move_string_builder, player_rack, config->ld,
-                            false);
-    *vms = validated_moves_create(config->game, player_on_turn_index,
-                                  string_builder_peek(move_string_builder),
-                                  true, false, true, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-    move_copy(&move, validated_moves_get_move(*vms, 0));
-    game_event_type = move_get_type(&move);
-    rack_to_draw_before_pass_out_game_end_str = commit_pos_arg_2;
   }
 
   if (!error_stack_is_empty(error_stack)) {

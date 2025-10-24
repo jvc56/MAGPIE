@@ -704,8 +704,8 @@ void test_config_anno(void) {
   Config *config = config_create_default_test();
 
   assert_config_exec_status(config, "set -lex CSW24", ERROR_STATUS_SUCCESS);
-  // Show the game to trigger game initialization
-  assert_config_exec_status(config, "sh", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+
   Game *game = config_get_game(config);
   Bag *bag = game_get_bag(game);
   const int bag_initial_total = bag_get_letters(bag);
@@ -713,7 +713,29 @@ void test_config_anno(void) {
   assert(bag_initial_total == bag_get_letters(bag) + 3);
   assert_config_exec_status(config, "rack ABCDEFG", ERROR_STATUS_SUCCESS);
   assert(bag_initial_total == bag_get_letters(bag) + 7);
+
+  // Test error cases
+  assert_config_exec_status(config, "com 1",
+                            ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
+  assert_config_exec_status(config, "com pass ABC",
+                            ERROR_STATUS_COMMIT_EXTRANEOUS_ARG);
+  assert_config_exec_status(config, "com pass ABC EFG",
+                            ERROR_STATUS_COMMIT_EXTRANEOUS_ARG);
+  assert_config_exec_status(config, "com 8d FADGE XYZ",
+                            ERROR_STATUS_COMMIT_EXTRANEOUS_ARG);
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 1 ABC",
+                            ERROR_STATUS_COMMIT_EXTRANEOUS_ARG);
+  assert_config_exec_status(config, "com 1 ABC DEF",
+                            ERROR_STATUS_COMMIT_EXTRANEOUS_ARG);
+  assert_config_exec_status(config, "com ex",
+                            ERROR_STATUS_COMMIT_MISSING_EXCHANGE_OR_PLAY);
+  assert_config_exec_status(config, "com 8d",
+                            ERROR_STATUS_COMMIT_MISSING_EXCHANGE_OR_PLAY);
+
+  game = config_get_game(config);
+  bag = game_get_bag(game);
+
   assert(game_get_player_on_turn_index(game) == 0);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 1);
@@ -769,7 +791,7 @@ void test_config_anno(void) {
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
 
   assert_config_exec_status(config, "rack AAEEOT?", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "com AAEEOT", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com ex AAEEOT", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 1);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(274));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
@@ -990,11 +1012,30 @@ void test_config_anno(void) {
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(267));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(125));
 
-  // Exchange to end the game with a six pass and specify the rack that
-  // was drawn after the exchange.
+  // **************************************
+  // *** Test some six pass error cases ***
+  // **************************************
   assert_config_exec_status(config, "rack DISLINK", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com ex DISLINK OVERHOTB",
+                            ERROR_STATUS_COMMIT_INVALID_PASS_OUT_RACK);
+  assert_config_exec_status(config, "com ex DISLINK OVE4OTB",
+                            ERROR_STATUS_COMMIT_INVALID_PASS_OUT_RACK);
+  assert_config_exec_status(config, "com ex DISLINK ZZZZZZZ",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack BONSOIR", ERROR_STATUS_SUCCESS);
+  // This error is from trying to draw ZZZZZZZ after the previous exchange
+  assert_config_exec_status(config, "com ex BONSOIR EEEEGGP",
+                            ERROR_STATUS_COMMIT_PASS_OUT_RACK_NOT_IN_BAG);
+  // Go back one turn to redo the exchange
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+
+  // **************************************
+  // ********* Resume normal play *********
+  // **************************************
   assert_config_exec_status(config, "com ex DISLINK ?BFHUVY",
                             ERROR_STATUS_SUCCESS);
+  // Game was restored from backup after errors
+  game = config_get_game(config);
   assert(game_get_game_end_reason(game) == GAME_END_REASON_NONE);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(267));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(125));
@@ -1142,8 +1183,6 @@ void test_config_anno(void) {
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(609));
   assert(!game_history_get_waiting_for_final_pass_or_challenge(
       config_get_game_history(config)));
-
-  // FIXME: hit all of the error cases
 
   config_destroy(config);
 }

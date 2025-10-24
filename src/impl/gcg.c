@@ -452,38 +452,6 @@ void finalize_note(GCGParser *gcg_parser) {
   string_builder_clear(gcg_parser->note_builder);
 }
 
-bool game_event_has_player_rack(const GameEvent *game_event, int player_index) {
-  game_event_t game_event_type = game_event_get_type(game_event);
-  int game_event_player_index = game_event_get_player_index(game_event);
-  if (game_event_player_index == player_index) {
-    return game_event_type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
-           game_event_type == GAME_EVENT_PASS ||
-           game_event_type == GAME_EVENT_EXCHANGE ||
-           game_event_type == GAME_EVENT_END_RACK_PENALTY;
-  }
-  return game_event_type == GAME_EVENT_END_RACK_POINTS;
-}
-
-// Returns NULL if there is no rack for the player
-const Rack *get_player_next_rack(const GameHistory *game_history,
-                                 int initial_game_event_index,
-                                 int player_index) {
-  int number_of_game_events = game_history_get_num_events(game_history);
-  for (int game_event_index = initial_game_event_index + 1;
-       game_event_index < number_of_game_events; game_event_index++) {
-    const GameEvent *game_event =
-        game_history_get_event(game_history, game_event_index);
-    if (game_event_index == initial_game_event_index + 1 &&
-        game_event_get_type(game_event) == GAME_EVENT_PHONY_TILES_RETURNED) {
-      return NULL;
-    }
-    if (game_event_has_player_rack(game_event, player_index)) {
-      return game_event_get_const_rack(game_event);
-    }
-  }
-  return NULL;
-}
-
 // Perform GCG token validations and operations that are shared
 // across many GCG tokens, including:
 // - Ensuring pragmas uniqueness
