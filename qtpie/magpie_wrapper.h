@@ -51,6 +51,16 @@ char* magpie_get_cgp(const Game *game);
 // Caller must free the returned string if non-NULL
 char* magpie_validate_move(Game *game, int player_index, const char *ucgi_move_string);
 
+// Get player score
+int magpie_get_player_score(Game *game, int player_index);
+
+// Get player on turn index (0 or 1)
+int magpie_get_player_on_turn_index(Game *game);
+
+// Get move score from validated move notation
+// Returns -1 if move is invalid
+int magpie_get_move_score(Game *game, int player_index, const char *ucgi_move_string);
+
 #ifdef __cplusplus
 }
 #endif

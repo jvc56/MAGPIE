@@ -248,3 +248,61 @@ char* magpie_validate_move(Game *game, int player_index, const char *ucgi_move_s
 
     return error_msg;  // NULL if valid, error message if invalid
 }
+
+int magpie_get_player_score(Game *game, int player_index) {
+    if (game == NULL) {
+        return 0;
+    }
+
+    Player *player = game_get_player(game, player_index);
+    if (player == NULL) {
+        return 0;
+    }
+
+    Equity score_equity = player_get_score(player);
+    return equity_to_int(score_equity);
+}
+
+int magpie_get_player_on_turn_index(Game *game) {
+    if (game == NULL) {
+        return 0;
+    }
+
+    return game_get_player_on_turn_index(game);
+}
+
+int magpie_get_move_score(Game *game, int player_index, const char *ucgi_move_string) {
+    if (game == NULL || ucgi_move_string == NULL) {
+        return -1;
+    }
+
+    ErrorStack *error_stack = error_stack_create();
+
+    ValidatedMoves *vms = validated_moves_create(
+        game,
+        player_index,
+        ucgi_move_string,
+        true,  // allow_phonies
+        false, // allow_unknown_exchanges
+        true,  // allow_playthrough
+        error_stack
+    );
+
+    int score = -1;
+    if (error_stack_is_empty(error_stack) && vms != NULL) {
+        // Get the first validated move
+        int num_moves = validated_moves_get_number_of_moves(vms);
+        if (num_moves > 0) {
+            const Move *move = validated_moves_get_move(vms, 0);
+            if (move != NULL) {
+                Equity score_equity = move_get_score(move);
+                score = equity_to_int(score_equity);
+            }
+        }
+    }
+
+    validated_moves_destroy(vms);
+    error_stack_destroy(error_stack);
+
+    return score;
+}

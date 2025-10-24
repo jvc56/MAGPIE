@@ -20,7 +20,8 @@ SOURCES += main.cpp \
            tile_renderer.cpp \
            board_renderer.cpp \
            blank_designation_dialog.cpp \
-           game_history_panel.cpp
+           game_history_panel.cpp \
+           turn_entry_widget.cpp
 
 HEADERS += magpie_wrapper.h \
            board_panel_view.h \
@@ -31,7 +32,8 @@ HEADERS += magpie_wrapper.h \
            tile_renderer.h \
            board_renderer.h \
            blank_designation_dialog.h \
-           game_history_panel.h
+           game_history_panel.h \
+           turn_entry_widget.h
 
 # Link against libmagpie.a from lib directory
 # Build it first with: cd .. && make BUILD=release
@@ -51,6 +53,11 @@ macx {
     APP_FONTS.files = $$PWD/fonts/ClearSans-Bold.ttf $$PWD/fonts/Roboto-Bold.ttf
     APP_FONTS.path = Contents/Resources/fonts
     QMAKE_BUNDLE_DATA += APP_FONTS
+
+    # Copy avatars to app bundle Resources directory
+    APP_AVATARS.files = $$PWD/avatars/olaugh.png $$PWD/avatars/magpie.png
+    APP_AVATARS.path = Contents/Resources/avatars
+    QMAKE_BUNDLE_DATA += APP_AVATARS
 
     # Create symlink to data directory in app bundle Resources
     # Use local data directory (run ../download_data.sh first if it doesn't exist)

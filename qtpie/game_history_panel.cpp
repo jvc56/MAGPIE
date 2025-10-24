@@ -3,86 +3,32 @@
 #include <QFrame>
 #include <QSvgRenderer>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPixmap>
 #include <QFontDatabase>
 #include <QDir>
 #include <QCoreApplication>
 
-// PlayerHistoryColumn implementation
+// PlayerHistoryColumn implementation - just a container for turn entries
 PlayerHistoryColumn::PlayerHistoryColumn(const QString &playerName, QWidget *parent)
     : QWidget(parent)
     , m_playerName(playerName)
     , m_timeSeconds(25 * 60)  // Start at 25:00
+    , m_currentTurnEntry(nullptr)
 {
-    QVBoxLayout *mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(8, 8, 8, 8);
-    mainLayout->setSpacing(6);
-
-    // Header section with player info in a horizontal layout
-    QWidget *headerWidget = new QWidget(this);
-    QHBoxLayout *headerLayout = new QHBoxLayout(headerWidget);
-    headerLayout->setContentsMargins(0, 0, 0, 0);
-    headerLayout->setSpacing(8);
-
-    // Left side: Player name and score vertically stacked
-    QWidget *nameScoreWidget = new QWidget(headerWidget);
-    QVBoxLayout *nameScoreLayout = new QVBoxLayout(nameScoreWidget);
-    nameScoreLayout->setContentsMargins(0, 0, 0, 0);
-    nameScoreLayout->setSpacing(2);
-
-    // Player name (bold, larger)
-    m_nameLabel = new QLabel(playerName, nameScoreWidget);
-    QFont nameFont = m_nameLabel->font();
-    nameFont.setBold(true);
-    nameFont.setPointSize(14);
-    m_nameLabel->setFont(nameFont);
-    m_nameLabel->setStyleSheet("color: #333333;");
-
-    // Score label
-    m_scoreLabel = new QLabel("Score: 0", nameScoreWidget);
-    m_scoreLabel->setStyleSheet("color: #555555; font-size: 11px;");
-
-    nameScoreLayout->addWidget(m_nameLabel);
-    nameScoreLayout->addWidget(m_scoreLabel);
-
-    // Right side: Timer
-    m_timerLabel = new QLabel("25:00", headerWidget);
-    QFont timerFont = m_timerLabel->font();
-    timerFont.setFamily("Courier");
-    timerFont.setPointSize(14);
-    timerFont.setBold(true);
-    m_timerLabel->setFont(timerFont);
-    m_timerLabel->setStyleSheet("color: #333333;");
-    m_timerLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-
-    headerLayout->addWidget(nameScoreWidget, 1);
-    headerLayout->addWidget(m_timerLabel, 0);
-
-    mainLayout->addWidget(headerWidget);
-
-    // Separator line
-    QFrame *separator = new QFrame(this);
-    separator->setFrameShape(QFrame::HLine);
-    separator->setFrameShadow(QFrame::Sunken);
-    separator->setStyleSheet("color: #C0C0D0;");
-    mainLayout->addWidget(separator);
-
-    // Moves container
-    QWidget *movesWidget = new QWidget(this);
-    m_movesLayout = new QVBoxLayout(movesWidget);
-    m_movesLayout->setContentsMargins(0, 0, 0, 0);
-    m_movesLayout->setSpacing(2);
+    // Simple vertical layout for turn entries
+    m_movesLayout = new QVBoxLayout(this);
+    m_movesLayout->setContentsMargins(8, 8, 8, 8);
+    m_movesLayout->setSpacing(4);
     m_movesLayout->addStretch();
 
-    QScrollArea *scrollArea = new QScrollArea(this);
-    scrollArea->setWidget(movesWidget);
-    scrollArea->setWidgetResizable(true);
-    scrollArea->setFrameShape(QFrame::NoFrame);
-    scrollArea->setStyleSheet("QScrollArea { background-color: transparent; }");
-
-    mainLayout->addWidget(scrollArea, 1);
-
-    setStyleSheet("QWidget { background-color: #FFFFFF; border: 1px solid #C0C0D0; border-radius: 8px; }");
+    // Create dummy labels for compatibility (will be reassigned by GameHistoryPanel)
+    m_nameLabel = new QLabel(playerName, this);
+    m_scoreLabel = new QLabel("0", this);
+    m_timerLabel = new QLabel("25:00", this);
+    m_nameLabel->hide();
+    m_scoreLabel->hide();
+    m_timerLabel->hide();
 }
 
 void PlayerHistoryColumn::setScore(int score) {
@@ -114,6 +60,25 @@ void PlayerHistoryColumn::clearHistory() {
         }
         delete item;
     }
+    m_currentTurnEntry = nullptr;
+}
+
+TurnEntryWidget* PlayerHistoryColumn::addTurnEntry() {
+    TurnEntryWidget *entry = new TurnEntryWidget(this);
+    // Insert before the stretch
+    m_movesLayout->insertWidget(m_movesLayout->count() - 1, entry);
+    m_currentTurnEntry = entry;
+    return entry;
+}
+
+TurnEntryWidget* PlayerHistoryColumn::getCurrentTurnEntry() {
+    return m_currentTurnEntry;
+}
+
+void PlayerHistoryColumn::clearCurrentTurnEntry() {
+    if (m_currentTurnEntry) {
+        m_currentTurnEntry->clear();
+    }
 }
 
 // GameHistoryPanel implementation
@@ -124,6 +89,9 @@ GameHistoryPanel::GameHistoryPanel(QWidget *parent)
     , m_player1TimeSeconds(25 * 60)
     , m_player2TimeSeconds(25 * 60)
     , m_useTwoColumns(false)
+    , m_player1HeaderWidget(nullptr)
+    , m_player2HeaderWidget(nullptr)
+    , m_playerOnTurn(0)
 {
     // Load Consolas font using same pattern as tile_renderer
     QDir fontsDir(QCoreApplication::applicationDirPath() + "/../Resources/fonts");
@@ -148,16 +116,54 @@ GameHistoryPanel::GameHistoryPanel(QWidget *parent)
     headerLayout->setSpacing(5);
 
     // Left: Player 1 (olaugh)
-    QWidget *player1Widget = new QWidget(headerContainer);
-    player1Widget->setFixedHeight(80);
-    player1Widget->setStyleSheet("background-color: #FFFFFF; border-radius: 8px;");
+    m_player1HeaderWidget = new QWidget(headerContainer);
+    m_player1HeaderWidget->setObjectName("player1Header");
+    m_player1HeaderWidget->setFixedHeight(80);
 
-    QVBoxLayout *p1Layout = new QVBoxLayout(player1Widget);
-    p1Layout->setContentsMargins(12, 12, 12, 12);
+    QHBoxLayout *p1MainLayout = new QHBoxLayout(m_player1HeaderWidget);
+    p1MainLayout->setContentsMargins(12, 12, 12, 12);
+    p1MainLayout->setSpacing(12);
+
+    // Avatar
+    QLabel *p1Avatar = new QLabel(m_player1HeaderWidget);
+    QDir avatarsDir(QCoreApplication::applicationDirPath() + "/../Resources/avatars");
+    if (!avatarsDir.exists()) {
+        avatarsDir.setPath(QCoreApplication::applicationDirPath() + "/avatars");
+    }
+    QPixmap p1AvatarPixmap(avatarsDir.filePath("olaugh.png"));
+    if (!p1AvatarPixmap.isNull()) {
+        // Create circular masked avatar
+        QPixmap circularAvatar(56, 56);
+        circularAvatar.fill(Qt::transparent);
+
+        QPainter painter(&circularAvatar);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform);
+
+        // Create circular clipping path
+        QPainterPath path;
+        path.addEllipse(0, 0, 56, 56);
+        painter.setClipPath(path);
+
+        // Draw scaled avatar
+        QPixmap scaled = p1AvatarPixmap.scaled(56, 56, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+        // Center the image if it's larger than the circle
+        int x = (56 - scaled.width()) / 2;
+        int y = (56 - scaled.height()) / 2;
+        painter.drawPixmap(x, y, scaled);
+
+        painter.end();
+        p1Avatar->setPixmap(circularAvatar);
+    }
+    p1Avatar->setFixedSize(56, 56);
+    p1Avatar->setStyleSheet("background-color: #FFFFFF; border-radius: 28px;");
+
+    // Info section (name, score, timer)
+    QVBoxLayout *p1Layout = new QVBoxLayout();
     p1Layout->setSpacing(6);
 
     // Row 1: Player name
-    QLabel *p1Name = new QLabel("olaugh", player1Widget);
+    QLabel *p1Name = new QLabel("olaugh", m_player1HeaderWidget);
     QFont nameFont = p1Name->font();
     nameFont.setBold(true);
     nameFont.setPointSize(16);
@@ -166,7 +172,7 @@ GameHistoryPanel::GameHistoryPanel(QWidget *parent)
     p1Name->setAlignment(Qt::AlignLeft);
 
     // Row 2: Score (left) and Timer + Button (right)
-    QWidget *p1Row2 = new QWidget(player1Widget);
+    QWidget *p1Row2 = new QWidget(m_player1HeaderWidget);
     p1Row2->setMinimumHeight(36);  // Ensure button isn't cropped
     QHBoxLayout *p1Row2Layout = new QHBoxLayout(p1Row2);
     p1Row2Layout->setContentsMargins(0, 0, 0, 0);
@@ -244,23 +250,61 @@ GameHistoryPanel::GameHistoryPanel(QWidget *parent)
     p1Layout->addWidget(p1Name);
     p1Layout->addWidget(p1Row2);
 
-    // Right: Player 2 (magpie)
-    QWidget *player2Widget = new QWidget(headerContainer);
-    player2Widget->setFixedHeight(80);
-    player2Widget->setStyleSheet("background-color: #FFFFFF; border-radius: 8px;");
+    // Add avatar and info section to main layout
+    p1MainLayout->addWidget(p1Avatar);
+    p1MainLayout->addLayout(p1Layout);
 
-    QVBoxLayout *p2Layout = new QVBoxLayout(player2Widget);
-    p2Layout->setContentsMargins(12, 12, 12, 12);
+    // Right: Player 2 (magpie)
+    m_player2HeaderWidget = new QWidget(headerContainer);
+    m_player2HeaderWidget->setObjectName("player2Header");
+    m_player2HeaderWidget->setFixedHeight(80);
+
+    QHBoxLayout *p2MainLayout = new QHBoxLayout(m_player2HeaderWidget);
+    p2MainLayout->setContentsMargins(12, 12, 12, 12);
+    p2MainLayout->setSpacing(12);
+
+    // Avatar
+    QLabel *p2Avatar = new QLabel(m_player2HeaderWidget);
+    QPixmap p2AvatarPixmap(avatarsDir.filePath("magpie.png"));
+    if (!p2AvatarPixmap.isNull()) {
+        // Create circular masked avatar
+        QPixmap circularAvatar(56, 56);
+        circularAvatar.fill(Qt::transparent);
+
+        QPainter painter(&circularAvatar);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform);
+
+        // Create circular clipping path
+        QPainterPath path;
+        path.addEllipse(0, 0, 56, 56);
+        painter.setClipPath(path);
+
+        // Draw scaled avatar
+        QPixmap scaled = p2AvatarPixmap.scaled(56, 56, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+        // Center the image if it's larger than the circle
+        int x = (56 - scaled.width()) / 2;
+        int y = (56 - scaled.height()) / 2;
+        painter.drawPixmap(x, y, scaled);
+
+        painter.end();
+        p2Avatar->setPixmap(circularAvatar);
+    }
+    p2Avatar->setFixedSize(56, 56);
+    p2Avatar->setStyleSheet("background-color: #FFFFFF; border-radius: 28px;");
+
+    // Info section (name, score, timer)
+    QVBoxLayout *p2Layout = new QVBoxLayout();
     p2Layout->setSpacing(6);
 
     // Row 1: Player name
-    QLabel *p2Name = new QLabel("magpie", player2Widget);
+    QLabel *p2Name = new QLabel("magpie", m_player2HeaderWidget);
     p2Name->setFont(nameFont);
     p2Name->setStyleSheet("color: #333333;");
     p2Name->setAlignment(Qt::AlignLeft);
 
     // Row 2: Score (left) and Timer (right)
-    QWidget *p2Row2 = new QWidget(player2Widget);
+    QWidget *p2Row2 = new QWidget(m_player2HeaderWidget);
     p2Row2->setMinimumHeight(36);  // Consistent height with player 1
     QHBoxLayout *p2Row2Layout = new QHBoxLayout(p2Row2);
     p2Row2Layout->setContentsMargins(0, 0, 0, 0);
@@ -298,14 +342,45 @@ GameHistoryPanel::GameHistoryPanel(QWidget *parent)
     p2Layout->addWidget(p2Name);
     p2Layout->addWidget(p2Row2);
 
-    headerLayout->addWidget(player1Widget, 1);
-    headerLayout->addWidget(player2Widget, 1);
+    // Add avatar and info section to main layout
+    p2MainLayout->addWidget(p2Avatar);
+    p2MainLayout->addLayout(p2Layout);
+
+    headerLayout->addWidget(m_player1HeaderWidget, 1);
+    headerLayout->addWidget(m_player2HeaderWidget, 1);
+
+    // Initialize border styling
+    updatePlayerHeaderBorders();
 
     mainLayout->addWidget(headerContainer, 0);
 
-    // Move history area (will be added later)
+    // Move history area - two columns side by side
     QWidget *historyWidget = new QWidget(this);
-    historyWidget->setStyleSheet("background-color: #FFFFFF; border: 1px solid #C0C0D0; border-radius: 8px;");
+    historyWidget->setStyleSheet("background-color: transparent;");
+    QHBoxLayout *historyLayout = new QHBoxLayout(historyWidget);
+    historyLayout->setContentsMargins(0, 0, 0, 0);
+    historyLayout->setSpacing(5);
+
+    // Create scrollable areas for each player's turn entries
+    QScrollArea *p1ScrollArea = new QScrollArea(historyWidget);
+    p1ScrollArea->setWidget(m_player1Column);
+    p1ScrollArea->setWidgetResizable(true);
+    p1ScrollArea->setFrameShape(QFrame::NoFrame);
+    p1ScrollArea->setStyleSheet("QScrollArea { background-color: transparent; }");
+    m_player1Column->setStyleSheet("QWidget { background-color: #FFFFFF; border: 1px solid #C0C0D0; border-radius: 8px; }");
+    m_player1Column->show();
+
+    QScrollArea *p2ScrollArea = new QScrollArea(historyWidget);
+    p2ScrollArea->setWidget(m_player2Column);
+    p2ScrollArea->setWidgetResizable(true);
+    p2ScrollArea->setFrameShape(QFrame::NoFrame);
+    p2ScrollArea->setStyleSheet("QScrollArea { background-color: transparent; }");
+    m_player2Column->setStyleSheet("QWidget { background-color: #FFFFFF; border: 1px solid #C0C0D0; border-radius: 8px; }");
+    m_player2Column->show();
+
+    historyLayout->addWidget(p1ScrollArea, 1);
+    historyLayout->addWidget(p2ScrollArea, 1);
+
     mainLayout->addWidget(historyWidget, 1);
 
     // Create game timer
@@ -393,15 +468,27 @@ void GameHistoryPanel::pauseTimer() {
 
 void GameHistoryPanel::onTimerTick() {
     if (!m_timerRunning) return;
-    
+
     if (m_currentTimerPlayer == 0) {
         m_player1TimeSeconds--;
         if (m_player1TimeSeconds < 0) m_player1TimeSeconds = 0;
         m_player1Column->setTimeRemaining(m_player1TimeSeconds);
+
+        // Update current turn entry's time
+        TurnEntryWidget *turnEntry = m_player1Column->getCurrentTurnEntry();
+        if (turnEntry) {
+            turnEntry->updateTime(formatTime(m_player1TimeSeconds));
+        }
     } else {
         m_player2TimeSeconds--;
         if (m_player2TimeSeconds < 0) m_player2TimeSeconds = 0;
         m_player2Column->setTimeRemaining(m_player2TimeSeconds);
+
+        // Update current turn entry's time
+        TurnEntryWidget *turnEntry = m_player2Column->getCurrentTurnEntry();
+        if (turnEntry) {
+            turnEntry->updateTime(formatTime(m_player2TimeSeconds));
+        }
     }
 }
 
@@ -418,4 +505,83 @@ QString GameHistoryPanel::formatTime(int seconds) const {
     int minutes = seconds / 60;
     int secs = seconds % 60;
     return QString("%1:%2").arg(minutes).arg(secs, 2, 10, QChar('0'));
+}
+
+void GameHistoryPanel::updateCurrentTurn(int playerIndex, const QString &notation, bool isValidated,
+                                         int prevScore, int playScore, const QString &rack, Game *game)
+{
+    PlayerHistoryColumn *column = (playerIndex == 0) ? m_player1Column : m_player2Column;
+    if (!column) return;
+
+    // Get or create current turn entry
+    TurnEntryWidget *turnEntry = column->getCurrentTurnEntry();
+    if (!turnEntry) {
+        turnEntry = column->addTurnEntry();
+    }
+
+    // Get current time for this player
+    int timeSeconds = (playerIndex == 0) ? m_player1TimeSeconds : m_player2TimeSeconds;
+    QString timeStr = formatTime(timeSeconds);
+
+    if (isValidated) {
+        // Validated move - show scores
+        turnEntry->setValidatedMove(prevScore, playScore, notation, timeStr, rack);
+    } else {
+        // Unvalidated move - notation only
+        turnEntry->setUnvalidatedMove(notation, timeStr, rack);
+    }
+}
+
+void GameHistoryPanel::clearCurrentTurn(int playerIndex) {
+    PlayerHistoryColumn *column = (playerIndex == 0) ? m_player1Column : m_player2Column;
+    if (!column) return;
+
+    column->clearCurrentTurnEntry();
+}
+
+void GameHistoryPanel::initializePlaceholderTurn(int playerIndex, int currentScore, const QString &rack, Game *game) {
+    Q_UNUSED(game);
+
+    PlayerHistoryColumn *column = (playerIndex == 0) ? m_player1Column : m_player2Column;
+    if (!column) return;
+
+    // Get or create current turn entry
+    TurnEntryWidget *turnEntry = column->getCurrentTurnEntry();
+    if (!turnEntry) {
+        turnEntry = column->addTurnEntry();
+    }
+
+    // Get current time for this player
+    int timeSeconds = (playerIndex == 0) ? m_player1TimeSeconds : m_player2TimeSeconds;
+    QString timeStr = formatTime(timeSeconds);
+
+    // Show placeholder with current state: score, time, and rack
+    turnEntry->setUnvalidatedMove("", timeStr, rack);
+}
+
+void GameHistoryPanel::setPlayerOnTurn(int playerIndex) {
+    m_playerOnTurn = playerIndex;
+    updatePlayerHeaderBorders();
+}
+
+void GameHistoryPanel::updatePlayerHeaderBorders() {
+    if (!m_player1HeaderWidget || !m_player2HeaderWidget) return;
+
+    // Player on turn gets green border, other gets default white background
+    // Use direct selector (>) to only style the immediate widget, not children
+    if (m_playerOnTurn == 0) {
+        m_player1HeaderWidget->setStyleSheet(
+            "#player1Header { background-color: #FFFFFF; border: 3px solid #4CAF50; border-radius: 8px; }"
+        );
+        m_player2HeaderWidget->setStyleSheet(
+            "#player2Header { background-color: #FFFFFF; border-radius: 8px; }"
+        );
+    } else {
+        m_player1HeaderWidget->setStyleSheet(
+            "#player1Header { background-color: #FFFFFF; border-radius: 8px; }"
+        );
+        m_player2HeaderWidget->setStyleSheet(
+            "#player2Header { background-color: #FFFFFF; border: 3px solid #4CAF50; border-radius: 8px; }"
+        );
+    }
 }

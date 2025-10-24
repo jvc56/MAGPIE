@@ -672,6 +672,10 @@ public:
       connect(boardPanelView, &BoardPanelView::boardChanged,
               this, &MainWidget::printBoard);
 
+      // Connect uncommitted move changes to update game history
+      connect(boardPanelView, &BoardPanelView::uncommittedMoveChanged,
+              this, &MainWidget::onUncommittedMoveChanged);
+
       // Connect drag preview signals from board panel
       connect(boardPanelView, &BoardPanelView::updateDragPreview,
               this, &MainWidget::onUpdateDragPreview);
@@ -764,6 +768,19 @@ public:
 
           // Update the CGP display to show the current game state
           boardPanelView->updateCgpDisplay();
+
+          // Initialize placeholder turn entry for the player on turn only
+          int playerOnTurn = magpie_get_player_on_turn_index(game);
+
+          // Set visual indicator for player on turn
+          historyPanel->setPlayerOnTurn(playerOnTurn);
+
+          char *rack = magpie_get_player_rack_string(game, playerOnTurn);
+          QString rackStr = rack ? QString::fromUtf8(rack) : QString();
+          if (rack) free(rack);
+
+          int score = magpie_get_player_score(game, playerOnTurn);
+          historyPanel->initializePlaceholderTurn(playerOnTurn, score, rackStr, game);
 
           // Print the initial board
           printBoard();
@@ -950,6 +967,55 @@ private slots:
         if (dragTilePreview && dragTilePreview->isVisible()) {
             dragTilePreview->setVisible(false);
         }
+    }
+
+    void onUncommittedMoveChanged() {
+        if (!boardPanelView || !historyPanel) return;
+
+        Game *game = boardPanelView->getGame();
+        if (!game) return;
+
+        // Get current player on turn
+        int playerIndex = magpie_get_player_on_turn_index(game);
+
+        // Update visual indicator for player on turn
+        historyPanel->setPlayerOnTurn(playerIndex);
+
+        // Get move notation
+        QString notation = boardPanelView->getBoardView()->generateMoveNotation();
+
+        // Get rack string for current player only (don't show opponent's rack)
+        char *rackCStr = magpie_get_player_rack_string(game, playerIndex);
+        QString rack = rackCStr ? QString::fromUtf8(rackCStr) : QString();
+        if (rackCStr) free(rackCStr);
+
+        if (notation.isEmpty()) {
+            // No tiles placed - show placeholder with current state
+            int currentScore = magpie_get_player_score(game, playerIndex);
+            historyPanel->initializePlaceholderTurn(playerIndex, currentScore, rack, game);
+            return;
+        }
+
+        // Check if move is validated
+        char *errorMsg = magpie_validate_move(game, playerIndex, notation.toUtf8().constData());
+        bool isValidated = (errorMsg == NULL);
+
+        int prevScore = 0;
+        int playScore = 0;
+
+        if (isValidated) {
+            // Get scores
+            prevScore = magpie_get_player_score(game, playerIndex);
+            playScore = magpie_get_move_score(game, playerIndex, notation.toUtf8().constData());
+        }
+
+        if (errorMsg) {
+            free(errorMsg);
+        }
+
+        // Update game history panel with current turn
+        historyPanel->updateCurrentTurn(playerIndex, notation, isValidated,
+                                       prevScore, playScore, rack, game);
     }
 
     QPixmap renderDragTile(QChar tileChar, int size) {

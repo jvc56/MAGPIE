@@ -1529,6 +1529,7 @@ void BoardPanelView::validateAndLogUncommittedTiles() {
                 emit validationMessage("Move validation: Tiles not in a line or have gaps");
             }
         }
+        emit uncommittedMoveChanged();  // Notify game history
         return;
     }
 
@@ -1556,4 +1557,6 @@ void BoardPanelView::validateAndLogUncommittedTiles() {
         // Validation succeeded!
         emit validationMessage("Validation: OK - move is well-formed and connected");
     }
+
+    emit uncommittedMoveChanged();  // Notify game history
 }

@@ -46,6 +46,7 @@ signals:
     void boardChanged();  // Emitted when MAGPIE board is updated
     void updateDragPreview(const QPixmap &tilePixmap, const QPoint &mainWidgetPos);  // Update drag preview at MainWidget position
     void hideDragPreview();  // Hide drag preview
+    void uncommittedMoveChanged();  // Emitted when uncommitted tiles change (for updating game history)
 
 private slots:
     void onCgpTextChanged();
