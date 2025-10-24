@@ -9,10 +9,8 @@
 
 // Widget to display a single turn's information
 // Format:
-//   Row 1: [PREVIOUS SCORE]  [+PLAY SCORE]
-//   Row 2: [CUMULATIVE SCORE]
-//   Row 3: [MOVE NOTATION]
-//   Row 4: [TIME]  [RACK]
+//   Top row: [MOVE NOTATION] (left)    [PREV SCORE +PLAY SCORE] (right)
+//   Bottom row: [TIME RACK] (left)     [empty] (right)
 class TurnEntryWidget : public QWidget {
     Q_OBJECT
 public:
@@ -36,10 +34,12 @@ public:
     void clear();
 
 private:
-    QLabel *m_prevScoreLabel;    // Previous score (left)
-    QLabel *m_playScoreLabel;    // +Play score (right)
-    QLabel *m_cumulativeLabel;   // Cumulative score
-    QLabel *m_notationLabel;     // Move notation (e.g., "8D ZOEAE")
+    QString convertToStandardNotation(const QString &ucgiNotation);
+
+    QLabel *m_prevScoreLabel;    // Previous score
+    QLabel *m_playScoreLabel;    // +Play score
+    QLabel *m_cumulativeLabel;   // Cumulative score (hidden)
+    QLabel *m_notationLabel;     // Move notation (e.g., "8D FEVER")
     QLabel *m_timeLabel;         // Time at end of turn (e.g., "24:55")
     QLabel *m_rackLabel;         // Full rack (e.g., "AEEHOVZ")
 

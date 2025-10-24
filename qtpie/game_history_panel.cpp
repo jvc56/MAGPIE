@@ -8,6 +8,7 @@
 #include <QFontDatabase>
 #include <QDir>
 #include <QCoreApplication>
+#include <QPalette>
 
 // PlayerHistoryColumn implementation - just a container for turn entries
 PlayerHistoryColumn::PlayerHistoryColumn(const QString &playerName, QWidget *parent)
@@ -16,6 +17,8 @@ PlayerHistoryColumn::PlayerHistoryColumn(const QString &playerName, QWidget *par
     , m_timeSeconds(25 * 60)  // Start at 25:00
     , m_currentTurnEntry(nullptr)
 {
+    setObjectName("playerHistoryColumn");
+
     // Simple vertical layout for turn entries
     m_movesLayout = new QVBoxLayout(this);
     m_movesLayout->setContentsMargins(8, 8, 8, 8);
@@ -367,7 +370,7 @@ GameHistoryPanel::GameHistoryPanel(QWidget *parent)
     p1ScrollArea->setWidgetResizable(true);
     p1ScrollArea->setFrameShape(QFrame::NoFrame);
     p1ScrollArea->setStyleSheet("QScrollArea { background-color: transparent; }");
-    m_player1Column->setStyleSheet("QWidget { background-color: #FFFFFF; border: 1px solid #C0C0D0; border-radius: 8px; }");
+    // No stylesheet on PlayerHistoryColumn - let children control their own appearance
     m_player1Column->show();
 
     QScrollArea *p2ScrollArea = new QScrollArea(historyWidget);
@@ -375,7 +378,7 @@ GameHistoryPanel::GameHistoryPanel(QWidget *parent)
     p2ScrollArea->setWidgetResizable(true);
     p2ScrollArea->setFrameShape(QFrame::NoFrame);
     p2ScrollArea->setStyleSheet("QScrollArea { background-color: transparent; }");
-    m_player2Column->setStyleSheet("QWidget { background-color: #FFFFFF; border: 1px solid #C0C0D0; border-radius: 8px; }");
+    // No stylesheet on PlayerHistoryColumn - let children control their own appearance
     m_player2Column->show();
 
     historyLayout->addWidget(p1ScrollArea, 1);
