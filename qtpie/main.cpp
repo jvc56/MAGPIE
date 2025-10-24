@@ -793,6 +793,9 @@ public:
       cursor.movePosition(QTextCursor::Start);
       debugWindow->getHistoryTextView()->setTextCursor(cursor);
       debugWindow->getHistoryTextView()->ensureCursorVisible();
+
+      // Install event filter on application to redirect all keyboard input to board
+      qApp->installEventFilter(this);
     }
 
     void printBoard() {
@@ -815,6 +818,32 @@ public:
       }
       delete m_dragTileRenderer;
       delete debugWindow;
+    }
+
+    // Event filter to redirect keyboard events to board
+    bool eventFilter(QObject *obj, QEvent *event) override {
+        if (event->type() == QEvent::KeyPress) {
+            // If event is already being sent to boardPanelView, don't redirect
+            // to avoid infinite recursion
+            if (obj == boardPanelView) {
+                return QMainWindow::eventFilter(obj, event);
+            }
+
+            // Check if obj is a child widget of boardPanelView
+            if (obj->isWidgetType()) {
+                QWidget *widget = static_cast<QWidget*>(obj);
+                if (widget->isAncestorOf(boardPanelView) || boardPanelView->isAncestorOf(widget)) {
+                    // Event is within board panel widget tree, let it through
+                    return QMainWindow::eventFilter(obj, event);
+                }
+            }
+
+            // Event is going somewhere else, redirect to board panel
+            QKeyEvent *keyEvent = static_cast<QKeyEvent*>(event);
+            QCoreApplication::sendEvent(boardPanelView, keyEvent);
+            return true;  // Event handled
+        }
+        return QMainWindow::eventFilter(obj, event);
     }
 
 protected:
