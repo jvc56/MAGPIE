@@ -24,8 +24,8 @@ public:
     void setValidatedMove(int prevScore, int playScore,
                          const QString &notation, const QString &timeStr, const QString &rack);
 
-    // Update with unvalidated/invalid move (notation only, no scores)
-    void setUnvalidatedMove(const QString &notation, const QString &timeStr, const QString &rack);
+    // Update with unvalidated/invalid move (shows prevScore but no play score)
+    void setUnvalidatedMove(int prevScore, const QString &notation, const QString &timeStr, const QString &rack);
 
     // Update just the timer (for live ticking during turn)
     void updateTime(const QString &timeStr);

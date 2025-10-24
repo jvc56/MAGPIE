@@ -530,8 +530,8 @@ void GameHistoryPanel::updateCurrentTurn(int playerIndex, const QString &notatio
         // Validated move - show scores
         turnEntry->setValidatedMove(prevScore, playScore, notation, timeStr, rack);
     } else {
-        // Unvalidated move - notation only
-        turnEntry->setUnvalidatedMove(notation, timeStr, rack);
+        // Unvalidated move - show prevScore only
+        turnEntry->setUnvalidatedMove(prevScore, notation, timeStr, rack);
     }
 }
 
@@ -559,7 +559,7 @@ void GameHistoryPanel::initializePlaceholderTurn(int playerIndex, int currentSco
     QString timeStr = formatTime(timeSeconds);
 
     // Show placeholder with current state: score, time, and rack
-    turnEntry->setUnvalidatedMove("", timeStr, rack);
+    turnEntry->setUnvalidatedMove(currentScore, "", timeStr, rack);
 }
 
 void GameHistoryPanel::setPlayerOnTurn(int playerIndex) {

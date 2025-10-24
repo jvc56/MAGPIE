@@ -135,13 +135,13 @@ void TurnEntryWidget::setValidatedMove(int prevScore, int playScore,
     );
 }
 
-void TurnEntryWidget::setUnvalidatedMove(const QString &notation, const QString &timeStr, const QString &rack)
+void TurnEntryWidget::setUnvalidatedMove(int prevScore, const QString &notation, const QString &timeStr, const QString &rack)
 {
     m_isCommitted = false;
     m_isValidated = false;
 
-    m_prevScoreLabel->setText("");
-    m_playScoreLabel->setText("");
+    m_prevScoreLabel->setText(QString::number(prevScore));
+    m_playScoreLabel->setText("");  // No play score for unvalidated moves
     m_notationLabel->setText(convertToStandardNotation(notation));
     m_timeLabel->setText(timeStr);
     m_rackLabel->setText(rack);
