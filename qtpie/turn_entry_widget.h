@@ -14,7 +14,12 @@
 class TurnEntryWidget : public QWidget {
     Q_OBJECT
 public:
-    explicit TurnEntryWidget(QWidget *parent = nullptr);
+    enum RenderMode {
+        USE_QPUSHBUTTON,  // LEFT: Use QPushButton widgets (always render text)
+        USE_MANUAL_PAINT  // RIGHT: Manual painting with QPainter (no child widgets)
+    };
+
+    explicit TurnEntryWidget(QWidget *parent = nullptr, RenderMode mode = USE_QPUSHBUTTON, int variant = 0);
 
     // Update with committed move data
     void setCommittedMove(int prevScore, int playScore, int cumulativeScore,
@@ -33,8 +38,14 @@ public:
     // Clear the entry
     void clear();
 
+protected:
+    void paintEvent(QPaintEvent *event) override;
+
 private:
     QString convertToStandardNotation(const QString &ucgiNotation);
+
+    RenderMode m_renderMode;
+    int m_variant;  // 0-5 for testing different approaches
 
     QLabel *m_prevScoreLabel;    // Previous score
     QLabel *m_playScoreLabel;    // +Play score
@@ -45,6 +56,15 @@ private:
 
     bool m_isCommitted;
     bool m_isValidated;
+
+    // For manual painting mode (USE_MANUAL_PAINT)
+    QString m_paintNotation;
+    QString m_paintPrevScore;
+    QString m_paintPlayScore;
+    QString m_paintCumulative;
+    QString m_paintTime;
+    QString m_paintRack;
+    bool m_showCumulative;
 };
 
 #endif // TURN_ENTRY_WIDGET_H

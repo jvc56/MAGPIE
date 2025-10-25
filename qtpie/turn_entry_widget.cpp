@@ -1,16 +1,32 @@
 #include "turn_entry_widget.h"
 #include <QFont>
+#include <QPalette>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPaintEvent>
+#include <QDebug>
+#include <cstdio>
 
-TurnEntryWidget::TurnEntryWidget(QWidget *parent)
+TurnEntryWidget::TurnEntryWidget(QWidget *parent, RenderMode mode, int variant)
     : QWidget(parent)
+    , m_renderMode(mode)
+    , m_variant(variant % 6)
     , m_isCommitted(false)
     , m_isValidated(false)
+    , m_showCumulative(false)
 {
-    setObjectName("turnEntry");  // Must have object name for ID selector
-    setFixedHeight(80);  // Match header height
-    setAttribute(Qt::WA_StyledBackground, true);  // Force Qt to respect stylesheet background
+    setObjectName("turnEntry");
+    setFixedHeight(80);
 
-    // ID selector + WA_StyledBackground (Test 2 approach - confirmed working)
+    // No child widgets needed
+    m_notationLabel = nullptr;
+    m_prevScoreLabel = nullptr;
+    m_playScoreLabel = nullptr;
+    m_cumulativeLabel = nullptr;
+    m_timeLabel = nullptr;
+    m_rackLabel = nullptr;
+
+    // Start with yellow placeholder background (will change on commit)
     setStyleSheet(
         "#turnEntry {"
         "  background-color: #FFF9E6;"
@@ -18,92 +34,55 @@ TurnEntryWidget::TurnEntryWidget(QWidget *parent)
         "  border-radius: 8px;"
         "}"
     );
+    setAttribute(Qt::WA_StyledBackground, true);
+}
 
-    QVBoxLayout *mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(12, 12, 12, 12);
-    mainLayout->setSpacing(6);
+void TurnEntryWidget::paintEvent(QPaintEvent *event)
+{
+    // CRITICAL: Call base paintEvent FIRST - draws stylesheet background
+    QWidget::paintEvent(event);
 
-    // Row 1: Move notation (left) and Score arithmetic (right)
-    QHBoxLayout *topRow = new QHBoxLayout();
-    topRow->setSpacing(8);
+    // Now paint text on top
+    QPainter painter(this);
+    painter.setClipRect(rect());
+    painter.setClipping(true);
 
-    m_notationLabel = new QLabel("", this);
-    // 80% of header score size (24pt) = 19pt
-    QFont notationFont("Consolas", 19);
-    notationFont.setBold(true);
-    m_notationLabel->setFont(notationFont);
-    m_notationLabel->setAlignment(Qt::AlignLeft);
+    // Use Consolas font - monospaced for Scrabble
+    QFont notationFont("Consolas", 19, QFont::Bold);
+    painter.setFont(notationFont);
+    painter.setPen(QColor(0, 0, 0));  // Black text
 
-    // Score arithmetic container
-    QWidget *scoreWidget = new QWidget(this);
-    QHBoxLayout *scoreLayout = new QHBoxLayout(scoreWidget);
-    scoreLayout->setContentsMargins(0, 0, 0, 0);
-    scoreLayout->setSpacing(8);
+    // Draw move notation (e.g., "8D FEVER")
+    painter.drawText(15, 35, m_paintNotation);
 
-    m_prevScoreLabel = new QLabel("", scoreWidget);
-    // 80% of header score size (24pt) = 19pt
+    // Draw scores on right side
     QFont scoreFont("Consolas", 19);
-    m_prevScoreLabel->setFont(scoreFont);
-    m_prevScoreLabel->setAlignment(Qt::AlignRight);
+    painter.setFont(scoreFont);
+    painter.drawText(width() - 140, 35, m_paintPrevScore);
+    painter.drawText(width() - 70, 35, m_paintPlayScore);
 
-    m_playScoreLabel = new QLabel("", scoreWidget);
-    m_playScoreLabel->setFont(scoreFont);
-    m_playScoreLabel->setAlignment(Qt::AlignRight);
-
-    scoreLayout->addWidget(m_prevScoreLabel);
-    scoreLayout->addWidget(m_playScoreLabel);
-
-    topRow->addWidget(m_notationLabel, 1, Qt::AlignLeft);
-    topRow->addStretch();
-    topRow->addWidget(scoreWidget, 0, Qt::AlignRight);
-
-    // Row 2: Time and rack (left), empty (right)
-    QHBoxLayout *bottomRow = new QHBoxLayout();
-    bottomRow->setSpacing(8);
-
-    QWidget *timeRackWidget = new QWidget(this);
-    QHBoxLayout *timeRackLayout = new QHBoxLayout(timeRackWidget);
-    timeRackLayout->setContentsMargins(0, 0, 0, 0);
-    timeRackLayout->setSpacing(8);
-
-    m_timeLabel = new QLabel("", timeRackWidget);
-    // 60% of header score size (24pt) = 14pt
-    QFont monoFont("Consolas", 14);
-    m_timeLabel->setFont(monoFont);
-    m_timeLabel->setAlignment(Qt::AlignLeft);
-
-    m_rackLabel = new QLabel("", timeRackWidget);
-    m_rackLabel->setFont(monoFont);
-    m_rackLabel->setAlignment(Qt::AlignLeft);
-
-    timeRackLayout->addWidget(m_timeLabel);
-    timeRackLayout->addWidget(m_rackLabel);
-
-    // Cumulative score label (hidden for now, kept for compatibility)
-    m_cumulativeLabel = new QLabel("", this);
-    m_cumulativeLabel->hide();
-
-    bottomRow->addWidget(timeRackWidget, 1, Qt::AlignLeft);
-    bottomRow->addStretch();
-
-    mainLayout->addLayout(topRow);
-    mainLayout->addLayout(bottomRow);
+    // Draw cumulative score
+    if (m_showCumulative) {
+        painter.setFont(scoreFont);
+        painter.drawText(width() - 70, 60, m_paintCumulative);
+    }
 }
 
 void TurnEntryWidget::setCommittedMove(int prevScore, int playScore, int cumulativeScore,
                                         const QString &notation, const QString &timeStr, const QString &rack)
 {
-    Q_UNUSED(cumulativeScore);
     m_isCommitted = true;
     m_isValidated = true;
+    m_showCumulative = true;
 
-    m_prevScoreLabel->setText(QString::number(prevScore));
-    m_playScoreLabel->setText(QString("+%1").arg(playScore));
-    m_notationLabel->setText(convertToStandardNotation(notation));
-    m_timeLabel->setText(timeStr);
-    m_rackLabel->setText(rack);
+    m_paintNotation = convertToStandardNotation(notation);
+    m_paintPrevScore = QString::number(prevScore);
+    m_paintPlayScore = QString("+%1").arg(playScore);
+    m_paintCumulative = QString::number(cumulativeScore);
+    m_paintTime = timeStr;
+    m_paintRack = rack;
 
-    // Committed moves have white background
+    // Change to white background via stylesheet
     setStyleSheet(
         "#turnEntry {"
         "  background-color: #FFFFFF;"
@@ -111,6 +90,8 @@ void TurnEntryWidget::setCommittedMove(int prevScore, int playScore, int cumulat
         "  border-radius: 8px;"
         "}"
     );
+
+    update();  // Trigger repaint
 }
 
 void TurnEntryWidget::setValidatedMove(int prevScore, int playScore,
@@ -118,14 +99,15 @@ void TurnEntryWidget::setValidatedMove(int prevScore, int playScore,
 {
     m_isCommitted = false;
     m_isValidated = true;
+    m_showCumulative = false;
 
-    m_prevScoreLabel->setText(QString::number(prevScore));
-    m_playScoreLabel->setText(QString("+%1").arg(playScore));
-    m_notationLabel->setText(convertToStandardNotation(notation));
-    m_timeLabel->setText(timeStr);
-    m_rackLabel->setText(rack);
+    m_paintNotation = convertToStandardNotation(notation);
+    m_paintPrevScore = QString::number(prevScore);
+    m_paintPlayScore = QString("+%1").arg(playScore);
+    m_paintTime = timeStr;
+    m_paintRack = rack;
 
-    // Validated but uncommitted: green background
+    // Green background for validated
     setStyleSheet(
         "#turnEntry {"
         "  background-color: #E8F5E9;"
@@ -133,20 +115,23 @@ void TurnEntryWidget::setValidatedMove(int prevScore, int playScore,
         "  border-radius: 8px;"
         "}"
     );
+
+    update();
 }
 
 void TurnEntryWidget::setUnvalidatedMove(int prevScore, const QString &notation, const QString &timeStr, const QString &rack)
 {
     m_isCommitted = false;
     m_isValidated = false;
+    m_showCumulative = false;
 
-    m_prevScoreLabel->setText(QString::number(prevScore));
-    m_playScoreLabel->setText("");  // No play score for unvalidated moves
-    m_notationLabel->setText(convertToStandardNotation(notation));
-    m_timeLabel->setText(timeStr);
-    m_rackLabel->setText(rack);
+    m_paintNotation = convertToStandardNotation(notation);
+    m_paintPrevScore = QString::number(prevScore);
+    m_paintPlayScore = "";  // No play score for unvalidated
+    m_paintTime = timeStr;
+    m_paintRack = rack;
 
-    // Unvalidated: yellow background
+    // Yellow background for unvalidated placeholder
     setStyleSheet(
         "#turnEntry {"
         "  background-color: #FFF9E6;"
@@ -154,34 +139,34 @@ void TurnEntryWidget::setUnvalidatedMove(int prevScore, const QString &notation,
         "  border-radius: 8px;"
         "}"
     );
-}
 
-QString TurnEntryWidget::convertToStandardNotation(const QString &ucgiNotation)
-{
-    // Convert from UCGI format (8D.FEVER) to standard format (8D FEVER)
-    if (ucgiNotation.isEmpty()) {
-        return "";
-    }
-
-    QString result = ucgiNotation;
-    // Replace the dot with a space
-    result.replace('.', ' ');
-    return result;
+    update();
 }
 
 void TurnEntryWidget::updateTime(const QString &timeStr)
 {
-    m_timeLabel->setText(timeStr);
+    m_paintTime = timeStr;
+    update();
 }
 
 void TurnEntryWidget::clear()
 {
-    m_prevScoreLabel->clear();
-    m_playScoreLabel->clear();
-    m_cumulativeLabel->clear();
-    m_notationLabel->clear();
-    m_timeLabel->clear();
-    m_rackLabel->clear();
-    m_isCommitted = false;
-    m_isValidated = false;
+    m_paintNotation = "";
+    m_paintPrevScore = "";
+    m_paintPlayScore = "";
+    m_paintCumulative = "";
+    m_paintTime = "";
+    m_paintRack = "";
+    m_showCumulative = false;
+    update();
+}
+
+QString TurnEntryWidget::convertToStandardNotation(const QString &ucgiNotation)
+{
+    if (ucgiNotation.isEmpty()) {
+        return "";
+    }
+    QString result = ucgiNotation;
+    result.replace('.', ' ');
+    return result;
 }

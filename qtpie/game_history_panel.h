@@ -14,7 +14,7 @@
 class PlayerHistoryColumn : public QWidget {
     Q_OBJECT
 public:
-    explicit PlayerHistoryColumn(const QString &playerName, QWidget *parent = nullptr);
+    explicit PlayerHistoryColumn(const QString &playerName, TurnEntryWidget::RenderMode renderMode, QWidget *parent = nullptr);
 
     void setScore(int score);
     void setTimeRemaining(int seconds);
@@ -25,8 +25,11 @@ public:
     TurnEntryWidget* addTurnEntry();
     TurnEntryWidget* getCurrentTurnEntry();
     void clearCurrentTurnEntry();
+    int getTurnEntryCount() const { return m_movesLayout->count() - 1; } // -1 for stretch
 
+public:
     QString m_playerName;
+    TurnEntryWidget::RenderMode m_renderMode;
     QLabel *m_nameLabel;
     QLabel *m_scoreLabel;
     QLabel *m_timerLabel;
@@ -59,10 +62,14 @@ public:
     void clearCurrentTurn(int playerIndex);
 
     // Initialize placeholder turn entry for a player
-    void initializePlaceholderTurn(int playerIndex, int currentScore, const QString &rack, Game *game);
+    void initializePlaceholderTurn(int playerIndex, int currentScore, const QString &rack, Game *game, bool showRack = true, bool forceNew = false);
 
     // Set which player is on turn (updates visual indicator)
     void setPlayerOnTurn(int playerIndex);
+
+    // Commit the current turn for a player and create a new turn entry
+    void commitTurnAndCreateNext(int playerIndex, int prevScore, int playScore, int newScore,
+                                  const QString &notation, const QString &rack, Game *game);
 
 signals:
     void timerToggled(bool running);

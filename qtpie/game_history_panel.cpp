@@ -11,9 +11,10 @@
 #include <QPalette>
 
 // PlayerHistoryColumn implementation - just a container for turn entries
-PlayerHistoryColumn::PlayerHistoryColumn(const QString &playerName, QWidget *parent)
+PlayerHistoryColumn::PlayerHistoryColumn(const QString &playerName, TurnEntryWidget::RenderMode renderMode, QWidget *parent)
     : QWidget(parent)
     , m_playerName(playerName)
+    , m_renderMode(renderMode)
     , m_timeSeconds(25 * 60)  // Start at 25:00
     , m_currentTurnEntry(nullptr)
 {
@@ -23,6 +24,7 @@ PlayerHistoryColumn::PlayerHistoryColumn(const QString &playerName, QWidget *par
     m_movesLayout = new QVBoxLayout(this);
     m_movesLayout->setContentsMargins(8, 8, 8, 8);
     m_movesLayout->setSpacing(4);
+    // Add stretch at the end to push all entries to the top
     m_movesLayout->addStretch();
 
     // Create dummy labels for compatibility (will be reassigned by GameHistoryPanel)
@@ -49,13 +51,13 @@ void PlayerHistoryColumn::addMoveEntry(const QString &moveText) {
     QLabel *moveLabel = new QLabel(moveText, this);
     moveLabel->setStyleSheet("color: #333333; padding: 2px;");
     moveLabel->setWordWrap(true);
-    
+
     // Insert before the stretch
     m_movesLayout->insertWidget(m_movesLayout->count() - 1, moveLabel);
 }
 
 void PlayerHistoryColumn::clearHistory() {
-    // Remove all move labels except the stretch
+    // Remove all turn entry widgets but keep the stretch at the end
     while (m_movesLayout->count() > 1) {
         QLayoutItem *item = m_movesLayout->takeAt(0);
         if (item->widget()) {
@@ -67,10 +69,29 @@ void PlayerHistoryColumn::clearHistory() {
 }
 
 TurnEntryWidget* PlayerHistoryColumn::addTurnEntry() {
-    TurnEntryWidget *entry = new TurnEntryWidget(this);
-    // Insert before the stretch
-    m_movesLayout->insertWidget(m_movesLayout->count() - 1, entry);
+    // Use entry count as variant number for testing (cycles through 0-5)
+    int variant = getTurnEntryCount();
+    TurnEntryWidget *entry = new TurnEntryWidget(this, m_renderMode, variant);
+
+    // Insert before the stretch (which is always at the end)
+    // This makes entries appear top-to-bottom in chronological order
+    int insertPos = m_movesLayout->count() - 1;
+    m_movesLayout->insertWidget(insertPos, entry);
+    entry->show();  // Explicitly show the widget
     m_currentTurnEntry = entry;
+
+    // THEORY 2: Force repaint on all previous entries
+    // When a new entry is added, existing entries might need explicit update() to repaint text
+    for (int i = 0; i < insertPos; i++) {
+        QLayoutItem *item = m_movesLayout->itemAt(i);
+        if (item && item->widget()) {
+            TurnEntryWidget *prevEntry = qobject_cast<TurnEntryWidget*>(item->widget());
+            if (prevEntry) {
+                prevEntry->update();  // Force repaint
+            }
+        }
+    }
+
     return entry;
 }
 
@@ -79,9 +100,9 @@ TurnEntryWidget* PlayerHistoryColumn::getCurrentTurnEntry() {
 }
 
 void PlayerHistoryColumn::clearCurrentTurnEntry() {
-    if (m_currentTurnEntry) {
-        m_currentTurnEntry->clear();
-    }
+    // Just clear the pointer - DON'T clear the widget's data!
+    // The widget now contains committed move data that should be displayed.
+    m_currentTurnEntry = nullptr;
 }
 
 // GameHistoryPanel implementation
@@ -181,8 +202,9 @@ GameHistoryPanel::GameHistoryPanel(QWidget *parent)
     p1Row2Layout->setContentsMargins(0, 0, 0, 0);
     p1Row2Layout->setSpacing(0);
 
-    m_player1Column = new PlayerHistoryColumn("olaugh", this);
-    m_player1Column->hide();  // Hide the unused widget
+    // LEFT COLUMN: Use QPushButton/QLabel approach with forced palettes
+    m_player1Column = new PlayerHistoryColumn("olaugh", TurnEntryWidget::USE_QPUSHBUTTON, this);
+
     m_player1Column->m_scoreLabel = new QLabel("0", p1Row2);
     QFont scoreFont("Consolas", 24);
     scoreFont.setBold(true);
@@ -313,8 +335,9 @@ GameHistoryPanel::GameHistoryPanel(QWidget *parent)
     p2Row2Layout->setContentsMargins(0, 0, 0, 0);
     p2Row2Layout->setSpacing(0);
 
-    m_player2Column = new PlayerHistoryColumn("magpie", this);
-    m_player2Column->hide();  // Hide the unused widget
+    // RIGHT COLUMN: Use manual painting with QPainter (no child widgets)
+    m_player2Column = new PlayerHistoryColumn("magpie", TurnEntryWidget::USE_MANUAL_PAINT, this);
+
     m_player2Column->m_scoreLabel = new QLabel("0", p2Row2);
     m_player2Column->m_scoreLabel->setFont(scoreFont);
     m_player2Column->m_scoreLabel->setStyleSheet("color: #333333;");
@@ -364,25 +387,27 @@ GameHistoryPanel::GameHistoryPanel(QWidget *parent)
     historyLayout->setContentsMargins(0, 0, 0, 0);
     historyLayout->setSpacing(5);
 
+    // THEORY 6: Test without scroll areas to see if viewport clipping affects text
     // Create scrollable areas for each player's turn entries
-    QScrollArea *p1ScrollArea = new QScrollArea(historyWidget);
-    p1ScrollArea->setWidget(m_player1Column);
-    p1ScrollArea->setWidgetResizable(true);
-    p1ScrollArea->setFrameShape(QFrame::NoFrame);
-    p1ScrollArea->setStyleSheet("QScrollArea { background-color: transparent; }");
+    // QScrollArea *p1ScrollArea = new QScrollArea(historyWidget);
+    // p1ScrollArea->setWidget(m_player1Column);
+    // p1ScrollArea->setWidgetResizable(true);
+    // p1ScrollArea->setFrameShape(QFrame::NoFrame);
+    // p1ScrollArea->setStyleSheet("QScrollArea { background-color: transparent; }");
     // No stylesheet on PlayerHistoryColumn - let children control their own appearance
     m_player1Column->show();
 
-    QScrollArea *p2ScrollArea = new QScrollArea(historyWidget);
-    p2ScrollArea->setWidget(m_player2Column);
-    p2ScrollArea->setWidgetResizable(true);
-    p2ScrollArea->setFrameShape(QFrame::NoFrame);
-    p2ScrollArea->setStyleSheet("QScrollArea { background-color: transparent; }");
+    // QScrollArea *p2ScrollArea = new QScrollArea(historyWidget);
+    // p2ScrollArea->setWidget(m_player2Column);
+    // p2ScrollArea->setWidgetResizable(true);
+    // p2ScrollArea->setFrameShape(QFrame::NoFrame);
+    // p2ScrollArea->setStyleSheet("QScrollArea { background-color: transparent; }");
     // No stylesheet on PlayerHistoryColumn - let children control their own appearance
     m_player2Column->show();
 
-    historyLayout->addWidget(p1ScrollArea, 1);
-    historyLayout->addWidget(p2ScrollArea, 1);
+    // Add columns directly without scroll areas
+    historyLayout->addWidget(m_player1Column, 1);
+    historyLayout->addWidget(m_player2Column, 1);
 
     mainLayout->addWidget(historyWidget, 1);
 
@@ -542,29 +567,96 @@ void GameHistoryPanel::clearCurrentTurn(int playerIndex) {
     column->clearCurrentTurnEntry();
 }
 
-void GameHistoryPanel::initializePlaceholderTurn(int playerIndex, int currentScore, const QString &rack, Game *game) {
+void GameHistoryPanel::initializePlaceholderTurn(int playerIndex, int currentScore, const QString &rack, Game *game, bool showRack, bool forceNew) {
     Q_UNUSED(game);
 
     PlayerHistoryColumn *column = (playerIndex == 0) ? m_player1Column : m_player2Column;
+    QString playerName = (playerIndex == 0) ? "olaugh" : "magpie";
     if (!column) return;
 
+    emit debugMessage(QString("[%1] initializePlaceholderTurn: score=%2 rack='%3' showRack=%4 forceNew=%5")
+                      .arg(playerName).arg(currentScore).arg(rack).arg(showRack ? "true" : "false").arg(forceNew ? "true" : "false"));
+
     // Get or create current turn entry
-    TurnEntryWidget *turnEntry = column->getCurrentTurnEntry();
-    if (!turnEntry) {
+    TurnEntryWidget *turnEntry = nullptr;
+
+    if (forceNew) {
+        // Starting a new turn - always create a fresh entry
+        emit debugMessage(QString("[%1] Force creating new entry at position %2")
+                          .arg(playerName).arg(column->getTurnEntryCount()));
         turnEntry = column->addTurnEntry();
+        emit debugMessage(QString("[%1] Created new entry, total entries now: %2")
+                          .arg(playerName).arg(column->getTurnEntryCount()));
+    } else {
+        // During current turn - reuse existing entry if it exists
+        turnEntry = column->getCurrentTurnEntry();
+        if (!turnEntry) {
+            emit debugMessage(QString("[%1] Creating new placeholder at position %2")
+                              .arg(playerName).arg(column->getTurnEntryCount()));
+            turnEntry = column->addTurnEntry();
+            emit debugMessage(QString("[%1] Created placeholder, total entries now: %2")
+                              .arg(playerName).arg(column->getTurnEntryCount()));
+        } else {
+            emit debugMessage(QString("[%1] Updating existing placeholder entry").arg(playerName));
+        }
     }
 
     // Get current time for this player
     int timeSeconds = (playerIndex == 0) ? m_player1TimeSeconds : m_player2TimeSeconds;
     QString timeStr = formatTime(timeSeconds);
 
-    // Show placeholder with current state: score, time, and rack
-    turnEntry->setUnvalidatedMove(currentScore, "", timeStr, rack);
+    // Show placeholder with current state: score, time, and optionally rack
+    QString rackToShow = showRack ? rack : QString();
+    emit debugMessage(QString("[%1] Setting placeholder: prevScore=%2 time=%3 rack='%4'")
+                      .arg(playerName).arg(currentScore).arg(timeStr).arg(rackToShow));
+    turnEntry->setUnvalidatedMove(currentScore, "", timeStr, rackToShow);
 }
 
 void GameHistoryPanel::setPlayerOnTurn(int playerIndex) {
     m_playerOnTurn = playerIndex;
     updatePlayerHeaderBorders();
+}
+
+void GameHistoryPanel::commitTurnAndCreateNext(int playerIndex, int prevScore, int playScore, int newScore,
+                                                const QString &notation, const QString &rack, Game *game) {
+    Q_UNUSED(game);
+
+    PlayerHistoryColumn *column = (playerIndex == 0) ? m_player1Column : m_player2Column;
+    QString playerName = (playerIndex == 0) ? "olaugh" : "magpie";
+    if (!column) return;
+
+    emit debugMessage(QString("[%1] commitTurnAndCreateNext: %2 (%3+%4=%5)")
+                      .arg(playerName).arg(notation).arg(prevScore).arg(playScore).arg(newScore));
+
+    // Get current turn entry (or create one if it doesn't exist - for computer moves)
+    TurnEntryWidget *turnEntry = column->getCurrentTurnEntry();
+    if (!turnEntry) {
+        // No existing turn entry (happens for computer player)
+        // Create one directly for this committed move
+        emit debugMessage(QString("[%1] No placeholder exists, creating new entry at position %2")
+                          .arg(playerName).arg(column->getTurnEntryCount()));
+        turnEntry = column->addTurnEntry();
+        emit debugMessage(QString("[%1] Created entry, total entries now: %2")
+                          .arg(playerName).arg(column->getTurnEntryCount()));
+    } else {
+        emit debugMessage(QString("[%1] Using existing placeholder entry").arg(playerName));
+    }
+
+    // Get current time for this player (this is when the move was committed)
+    int timeSeconds = (playerIndex == 0) ? m_player1TimeSeconds : m_player2TimeSeconds;
+    QString timeStr = formatTime(timeSeconds);
+
+    // For computer (player 1), don't show rack. For human (player 0), rack is already in the placeholder
+    QString rackToShow = (playerIndex == 1) ? QString() : rack;
+
+    // Commit the move with white background
+    emit debugMessage(QString("[%1] Setting entry: notation='%2' prevScore=%3 playScore=%4 newScore=%5 time=%6 rack='%7'")
+                      .arg(playerName).arg(notation).arg(prevScore).arg(playScore).arg(newScore).arg(timeStr).arg(rackToShow));
+    turnEntry->setCommittedMove(prevScore, playScore, newScore, notation, timeStr, rackToShow);
+
+    // Clear the current turn entry pointer
+    column->clearCurrentTurnEntry();
+    emit debugMessage(QString("[%1] Entry committed and pointer cleared").arg(playerName));
 }
 
 void GameHistoryPanel::updatePlayerHeaderBorders() {
