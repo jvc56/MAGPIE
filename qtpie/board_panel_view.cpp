@@ -47,6 +47,21 @@ static QWidget* createPlaceholder(const QString &text, const QColor &bgColor = Q
     return widget;
 }
 
+// Helper to convert UCGI move notation to uppercase for display
+// UCGI may use lowercase letters (e.g., "8h.WORD"), but for display we want uppercase (e.g., "8H.WORD")
+static QString toUppercaseNotation(const QString &notation) {
+    QString result = notation;
+    // Find the position coordinate part (before the dot)
+    int dotPos = notation.indexOf('.');
+    if (dotPos > 0) {
+        // Convert only the position part to uppercase
+        for (int i = 0; i < dotPos; ++i) {
+            result[i] = result[i].toUpper();
+        }
+    }
+    return result;
+}
+
 BoardPanelView::BoardPanelView(QWidget *parent)
     : QWidget(parent)
     , game(nullptr)
@@ -1775,7 +1790,7 @@ void BoardPanelView::makeComputerMove() {
             return;
         }
 
-        QString computerMove = QString::fromUtf8(moveNotation);
+        QString computerMove = toUppercaseNotation(QString::fromUtf8(moveNotation));
         emit debugMessage(QString("Computer plays: %1").arg(computerMove));
 
         // Get score before the move
