@@ -109,7 +109,7 @@ void test_error_cases(GameHistory *game_history) {
   test_single_error_case("description_after_events", config, game_history,
                          ERROR_STATUS_GCG_PARSE_PRAGMA_SUCCEEDED_EVENT);
   test_single_error_case("move_before_player", config, game_history,
-                         ERROR_STATUS_GCG_PARSE_MOVE_BEFORE_PLAYER);
+                         ERROR_STATUS_GCG_PARSE_GAME_EVENT_BEFORE_PLAYER);
   test_single_error_case("player_number_redundant", config, game_history,
                          ERROR_STATUS_GCG_PARSE_PLAYER_NUMBER_REDUNDANT);
   test_single_error_case("encoding_wrong_place", config, game_history,
@@ -187,6 +187,21 @@ void test_error_cases(GameHistory *game_history) {
                          ERROR_STATUS_GCG_PARSE_RACK_NOT_IN_BAG);
   test_single_error_case("last_rack2_not_in_bag", config, game_history,
                          ERROR_STATUS_GCG_PARSE_RACK_NOT_IN_BAG);
+  test_single_error_case("time_penalty_first_event", config, game_history,
+                         ERROR_STATUS_GCG_PARSE_END_GAME_EVENT_BEFORE_GAME_END);
+  test_single_error_case("time_penalty_midgame", config, game_history,
+                         ERROR_STATUS_GCG_PARSE_END_GAME_EVENT_BEFORE_GAME_END);
+  test_single_error_case("time_penalty_before_rack_points", config,
+                         game_history,
+                         ERROR_STATUS_GCG_PARSE_PREMATURE_TIME_PENALTY);
+  test_single_error_case("time_penalty_between_rack_penalties", config,
+                         game_history,
+                         ERROR_STATUS_GCG_PARSE_PREMATURE_TIME_PENALTY);
+  test_single_error_case("time_penalty_before_rack_penalties", config,
+                         game_history,
+                         ERROR_STATUS_GCG_PARSE_PREMATURE_TIME_PENALTY);
+  test_single_error_case("time_penalty_duplicate", config, game_history,
+                         ERROR_STATUS_GCG_PARSE_GAME_REDUNDANT_TIME_PENALTY);
   config_destroy(config);
 
   Config *no_lexicon_config = config_create_or_die(

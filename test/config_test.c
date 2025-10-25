@@ -519,7 +519,7 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(
       config2, "load", ERROR_STATUS_CONFIG_LOAD_INSUFFICIENT_NUMBER_OF_VALUES);
   assert_config_exec_status(config2, "load sheets.google.com",
-                            ERROR_STATUS_GCG_PARSE_NO_MATCHING_TOKEN);
+                            ERROR_STATUS_GCG_PARSE_GAME_EVENT_BEFORE_PLAYER);
   assert_config_exec_status(config2, "load 54673",
                             ERROR_STATUS_GCG_PARSE_LEXICON_NOT_SPECIFIED);
   assert_config_exec_status(config2, "load 54938", ERROR_STATUS_SUCCESS);
@@ -705,6 +705,7 @@ void test_config_anno(void) {
 
   assert_config_exec_status(config, "set -lex CSW24", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "set -p1 a -p2 b", ERROR_STATUS_SUCCESS);
 
   Game *game = config_get_game(config);
   Bag *bag = game_get_bag(game);
@@ -732,6 +733,9 @@ void test_config_anno(void) {
                             ERROR_STATUS_COMMIT_MISSING_EXCHANGE_OR_PLAY);
   assert_config_exec_status(config, "com 8d",
                             ERROR_STATUS_COMMIT_MISSING_EXCHANGE_OR_PLAY);
+  assert_config_exec_status(
+      config, "ov a -10",
+      ERROR_STATUS_TIME_PENALTY_NO_PREVIOUS_CUMULATIVE_SCORE);
 
   game = config_get_game(config);
   bag = game_get_bag(game);
@@ -741,6 +745,14 @@ void test_config_anno(void) {
   assert(game_get_player_on_turn_index(game) == 1);
   // Top equity move should have played 5 tiles
   assert(bag_initial_total == bag_get_letters(bag) + 5);
+
+  // Test an overtime error case
+  assert_config_exec_status(
+      config, "ov a -10",
+      ERROR_STATUS_GCG_PARSE_END_GAME_EVENT_BEFORE_GAME_END);
+
+  game = config_get_game(config);
+  bag = game_get_bag(game);
 
   assert_config_exec_status(config, "rack XEQUIES", ERROR_STATUS_SUCCESS);
   assert(bag_initial_total == bag_get_letters(bag) + 12);
@@ -983,7 +995,18 @@ void test_config_anno(void) {
   assert(game_get_game_end_reason(game) == GAME_END_REASON_CONSECUTIVE_ZEROS);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(258));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(113));
+  assert(!game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
 
+  // Make sure time penalty works after six pass
+  assert_config_exec_status(config, "ov a -8", ERROR_STATUS_SUCCESS);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_CONSECUTIVE_ZEROS);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(250));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(113));
+  assert(!game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
+
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
   assert(game_get_game_end_reason(game) == GAME_END_REASON_CONSECUTIVE_ZEROS);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(267));
@@ -1171,6 +1194,82 @@ void test_config_anno(void) {
       config_get_game_history(config)));
 
   assert_config_exec_status(config, "unchal", ERROR_STATUS_SUCCESS);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(595));
+  assert(game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
+
+  // Test an overtime error case
+  assert_config_exec_status(config, "ov a -10",
+                            ERROR_STATUS_GCG_PARSE_PREMATURE_TIME_PENALTY);
+
+  assert_config_exec_status(config, "com pass", ERROR_STATUS_SUCCESS);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(609));
+  assert(!game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
+
+  // Test overtime cases
+  assert_config_exec_status(
+      config, "ov c -10",
+      ERROR_STATUS_TIME_PENALTY_UNRECOGNIZED_PLAYER_NICKNAME);
+  assert_config_exec_status(config, "ov a 10",
+                            ERROR_STATUS_TIME_PENALTY_INVALID_VALUE);
+
+  assert_config_exec_status(config, "ov a -11", ERROR_STATUS_SUCCESS);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(720));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(609));
+  assert(!game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
+
+  assert_config_exec_status(config, "ov a -10",
+                            ERROR_STATUS_GCG_PARSE_GAME_REDUNDANT_TIME_PENALTY);
+  assert_config_exec_status(config, "ov a -100",
+                            ERROR_STATUS_GCG_PARSE_GAME_REDUNDANT_TIME_PENALTY);
+
+  assert_config_exec_status(config, "ov b -9", ERROR_STATUS_SUCCESS);
+  game = config_get_game(config);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(720));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(600));
+  assert(!game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
+
+  assert_config_exec_status(config, "ov a -10",
+                            ERROR_STATUS_GCG_PARSE_GAME_REDUNDANT_TIME_PENALTY);
+  assert_config_exec_status(config, "ov a -100",
+                            ERROR_STATUS_GCG_PARSE_GAME_REDUNDANT_TIME_PENALTY);
+  assert_config_exec_status(config, "ov b -10",
+                            ERROR_STATUS_GCG_PARSE_GAME_REDUNDANT_TIME_PENALTY);
+  assert_config_exec_status(config, "ov b -100",
+                            ERROR_STATUS_GCG_PARSE_GAME_REDUNDANT_TIME_PENALTY);
+
+  // Go backwards 3 times (past 2 time penalty and one rack end points)
+  // to re-commit and remove the time penalties
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  game = config_get_game(config);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(720));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(609));
+  assert(!game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
+
+  // Overtime penalties can only be added at the very end of the game
+  assert_config_exec_status(config, "ov a -10",
+                            ERROR_STATUS_GCG_PARSE_GAME_REDUNDANT_TIME_PENALTY);
+  game = config_get_game(config);
+
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(609));
+  assert(!game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
+
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
   assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(595));

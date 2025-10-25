@@ -625,35 +625,3 @@ bool game_history_contains_end_rack_event(const GameHistory *game_history) {
   }
   return false;
 }
-
-// FIXME: tidy this up
-
-void game_history_debug_print(const GameHistory *game_history,
-                              const LetterDistribution *ld) {
-  StringBuilder *rack_sb = string_builder_create();
-  for (int i = 0; i < game_history_get_num_events(game_history); i++) {
-    char cur_move_char = ' ';
-    if (i == game_history_get_num_played_events(game_history) - 1) {
-      cur_move_char = '*';
-    }
-    GameEvent *gei = game_history_get_event(game_history, i);
-    if (game_event_get_type(gei) == GAME_EVENT_PASS && ld != NULL) {
-      string_builder_add_string(rack_sb, ".");
-      string_builder_add_rack(rack_sb, game_event_get_rack(gei), ld, false);
-    }
-    const char *move_str = game_event_get_cgp_move_string(gei);
-    if (game_event_get_type(gei) == GAME_EVENT_CHALLENGE_BONUS) {
-      move_str = "challenge bonus";
-    } else if (game_event_get_type(gei) == GAME_EVENT_END_RACK_PENALTY) {
-      move_str = "end rack penalty";
-    } else if (game_event_get_type(gei) == GAME_EVENT_END_RACK_POINTS) {
-      move_str = "end rack points";
-    }
-    printf("game event: %d %c%s%s, %d, %d\n", game_event_get_player_index(gei),
-           cur_move_char, move_str, string_builder_peek(rack_sb),
-           equity_to_int(game_event_get_cumulative_score(gei)),
-           equity_to_int(game_event_get_score_adjustment(gei)));
-    string_builder_clear(rack_sb);
-  }
-  string_builder_destroy(rack_sb);
-}

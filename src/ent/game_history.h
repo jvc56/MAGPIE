@@ -123,8 +123,5 @@ void game_history_insert_challenge_bonus_game_event(
     GameHistory *game_history, const int player_index,
     const Equity score_adjustment, ErrorStack *error_stack);
 void game_history_remove_challenge_bonus_game_event(GameHistory *game_history);
-// FIXME: remove
-void game_history_debug_print(const GameHistory *game_history,
-                              const LetterDistribution *ld);
 
 #endif

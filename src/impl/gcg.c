@@ -545,6 +545,24 @@ void common_gcg_token_validation(GCGParser *gcg_parser, gcg_token_t token,
   gcg_parser->gcg_token_count[token]++;
 }
 
+bool token_is_pragma(const gcg_token_t token) {
+  switch (token) {
+  case GCG_PLAYER_TOKEN:
+  case GCG_TITLE_TOKEN:
+  case GCG_DESCRIPTION_TOKEN:
+  case GCG_ID_TOKEN:
+  case GCG_ENCODING_TOKEN:
+  case GCG_LEXICON_TOKEN:
+  case GCG_GAME_TYPE_TOKEN:
+  case GCG_TILE_SET_TOKEN:
+  case GCG_BOARD_LAYOUT_TOKEN:
+  case GCG_TILE_DISTRIBUTION_NAME_TOKEN:
+    return true;
+  default:
+    return false;
+  }
+}
+
 // Returns true if processing should continue
 bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
                     parse_gcg_mode_t parse_gcg_mode, ErrorStack *error_stack) {
@@ -563,14 +581,12 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     finalize_note(gcg_parser);
   }
 
-  if (token == GCG_MOVE_TOKEN || token == GCG_PASS_TOKEN ||
-      token == GCG_EXCHANGE_TOKEN || token == GCG_RACK1_TOKEN ||
-      token == GCG_RACK2_TOKEN) {
+  if (!token_is_pragma(token)) {
     if (!gcg_parser->player_is_reset[0] || !gcg_parser->player_is_reset[1]) {
       error_stack_push(
-          error_stack, ERROR_STATUS_GCG_PARSE_MOVE_BEFORE_PLAYER,
+          error_stack, ERROR_STATUS_GCG_PARSE_GAME_EVENT_BEFORE_PLAYER,
           get_formatted_string(
-              "encountered a move or rack '%s' before both players were set",
+              "encountered game event '%s' before both players were set",
               gcg_line));
       return false;
     }
@@ -1184,10 +1200,9 @@ void parse_gcg_events(GCGParser *gcg_parser, Game *game,
                      true, error_stack);
 }
 
-// Assumes the game history is valid
-void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
-               const GameHistory *game_history, ErrorStack *error_stack) {
-  StringBuilder *gcg_sb = string_builder_create();
+void string_builder_add_gcg(StringBuilder *gcg_sb, const LetterDistribution *ld,
+                            const GameHistory *game_history,
+                            const bool star_last_played_move) {
   string_builder_add_formatted_string(gcg_sb, "#%s UTF-8\n",
                                       GCG_CHAR_ENCODING_STRING);
   string_builder_add_formatted_string(gcg_sb, "#%s Created with MAGPIE\n",
@@ -1252,13 +1267,19 @@ void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
   Equity previous_move_score = 0;
   int player_on_turn = 0;
   bool game_is_over = false;
+  const int last_played_move_index = number_of_events - 1;
   for (int event_index = 0; event_index < number_of_events; event_index++) {
     const GameEvent *event = game_history_get_event(game_history, event_index);
     const Rack *rack = game_event_get_const_rack(event);
+    char is_last_played_move_char = ' ';
+    if (star_last_played_move && event_index == last_played_move_index) {
+      is_last_played_move_char = '*';
+    }
     string_builder_add_formatted_string(
-        gcg_sb, ">%s: ",
+        gcg_sb, ">%s:%c",
         game_history_player_get_nickname(game_history,
-                                         game_event_get_player_index(event)));
+                                         game_event_get_player_index(event)),
+        is_last_played_move_char);
     switch (game_event_get_type(event)) {
     case GAME_EVENT_PASS:
     case GAME_EVENT_TILE_PLACEMENT_MOVE:
@@ -1331,6 +1352,13 @@ void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
       string_builder_add_rack(gcg_sb, last_rack, ld, true);
     }
   }
+}
+
+// Assumes the game history is valid
+void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
+               const GameHistory *game_history, ErrorStack *error_stack) {
+  StringBuilder *gcg_sb = string_builder_create();
+  string_builder_add_gcg(gcg_sb, ld, game_history, false);
   write_string_to_file(gcg_filename, "w", string_builder_peek(gcg_sb),
                        error_stack);
   string_builder_destroy(gcg_sb);

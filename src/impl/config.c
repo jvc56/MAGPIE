@@ -119,6 +119,7 @@ typedef enum {
   ARG_TOKEN_COMMIT,
   ARG_TOKEN_CHALLENGE,
   ARG_TOKEN_UNCHALLENGE,
+  ARG_TOKEN_OVERTIME,
   ARG_TOKEN_SHOW,
   ARG_TOKEN_NEXT,
   ARG_TOKEN_PREVIOUS,
@@ -478,15 +479,16 @@ void string_to_int_or_push_error(const char *int_str_name, const char *int_str,
                                  int *dest, ErrorStack *error_stack) {
   *dest = string_to_int(int_str, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    error_stack_push(error_stack, error_code,
-                     get_formatted_string("failed to parse value for %s: %s",
-                                          int_str_name, int_str));
+    error_stack_push(
+        error_stack, error_code,
+        get_formatted_string("failed to parse value '%s' for argument %s",
+                             int_str_name, int_str));
   }
   if (*dest < min || *dest > max) {
     error_stack_push(
         error_stack, error_code,
         get_formatted_string(
-            "value for %s must be between %d and %d inclusive, but got %s",
+            "value for %s must be between %d and %d inclusive, but got '%s'",
             int_str_name, min, max, int_str));
   }
 }
@@ -1557,8 +1559,7 @@ void config_game_play_events(Config *config, ErrorStack *error_stack) {
                      error_stack);
 }
 
-// FIXME: do we really need to pass in player_on_turn_index?
-void config_add_end_rack_points(Config *config, const int player_on_turn_index,
+void config_add_end_rack_points(Config *config, const int player_index,
                                 ErrorStack *error_stack) {
   game_history_truncate_to_played_events(config->game_history);
 
@@ -1570,10 +1571,10 @@ void config_add_end_rack_points(Config *config, const int player_on_turn_index,
   }
 
   const Rack *end_rack_points_rack =
-      player_get_rack(game_get_player(config->game, player_on_turn_index));
+      player_get_rack(game_get_player(config->game, player_index));
   const Equity end_rack_points_equity =
       rack_get_score(config->ld, end_rack_points_rack) * 2;
-  const int end_rack_points_player_index = 1 - player_on_turn_index;
+  const int end_rack_points_player_index = 1 - player_index;
 
   // Find previous game event for player
   const int num_events = game_history_get_num_events(config->game_history);
@@ -1605,8 +1606,7 @@ void config_add_end_rack_points(Config *config, const int player_on_turn_index,
   game_history_next(config->game_history, error_stack);
 }
 
-// FIXME: do we really need to pass in player_on_turn_index?
-void config_add_game_event(Config *config, const int player_on_turn_index,
+void config_add_game_event(Config *config, const int player_index,
                            game_event_t game_event_type, const Move *move,
                            const char *ucgi_move_string,
                            const Rack *player_rack,
@@ -1637,7 +1637,7 @@ void config_add_game_event(Config *config, const int player_on_turn_index,
   case GAME_EVENT_EXCHANGE:
     rack_copy(&game_event_rack, player_rack);
     cumulative_score =
-        player_get_score(game_get_player(config->game, player_on_turn_index)) +
+        player_get_score(game_get_player(config->game, player_index)) +
         move_get_score(move);
     move_score = move_get_score(move);
     break;
@@ -1647,13 +1647,13 @@ void config_add_game_event(Config *config, const int player_on_turn_index,
       add_rack_end_points = true;
       add_event_to_history = false;
       cumulative_score =
-          player_get_score(game_get_player(config->game, player_on_turn_index));
+          player_get_score(game_get_player(config->game, player_index));
     } else {
       // Add an actual pass
       rack_copy(&game_event_rack, player_rack);
-      cumulative_score = player_get_score(game_get_player(
-                             config->game, player_on_turn_index)) +
-                         move_get_score(move);
+      cumulative_score =
+          player_get_score(game_get_player(config->game, player_index)) +
+          move_get_score(move);
       move_score = move_get_score(move);
     }
     break;
@@ -1663,7 +1663,7 @@ void config_add_game_event(Config *config, const int player_on_turn_index,
         game_history_get_num_played_events(config->game_history) - 1);
     rack_copy(&game_event_rack, game_event_get_const_rack(previous_game_event));
     cumulative_score =
-        player_get_score(game_get_player(config->game, player_on_turn_index)) -
+        player_get_score(game_get_player(config->game, player_index)) -
         game_event_get_move_score(previous_game_event);
     move_score = 0;
     break;
@@ -1702,7 +1702,7 @@ void config_add_game_event(Config *config, const int player_on_turn_index,
       return;
     }
 
-    game_event_set_player_index(game_event, player_on_turn_index);
+    game_event_set_player_index(game_event, player_index);
     game_event_set_type(game_event, game_event_type);
     game_event_set_cgp_move_string(
         game_event, string_duplicate_allow_null(ucgi_move_string));
@@ -1719,7 +1719,7 @@ void config_add_game_event(Config *config, const int player_on_turn_index,
   }
 
   if (add_rack_end_points) {
-    config_add_end_rack_points(config, player_on_turn_index, error_stack);
+    config_add_end_rack_points(config, player_index, error_stack);
   }
 
   config_game_play_events(config, error_stack);
@@ -2040,10 +2040,9 @@ char *impl_unchallenge(Config *config, ErrorStack *error_stack) {
                      string_duplicate("no moves to challenge"));
     return empty_string();
   }
-  const GameEvent *prev_played_event =
+  const GameEvent *current_event =
       game_history_get_event(config->game_history, num_played_events - 1);
-  if (game_event_get_type(prev_played_event) ==
-      GAME_EVENT_PHONY_TILES_RETURNED) {
+  if (game_event_get_type(current_event) == GAME_EVENT_PHONY_TILES_RETURNED) {
     error_stack_push(
         error_stack,
         ERROR_STATUS_CHALLENGE_CANNOT_UNCHALLENGE_PHONY_TILES_RETURNED,
@@ -2052,10 +2051,10 @@ char *impl_unchallenge(Config *config, ErrorStack *error_stack) {
                          "move after the phony play"));
     return empty_string();
   }
-  if (game_event_get_type(prev_played_event) != GAME_EVENT_CHALLENGE_BONUS) {
-    error_stack_push(error_stack,
-                     ERROR_STATUS_CHALLENGE_NO_PREVIOUS_CHALLENGE_BONUS,
-                     string_duplicate("no previous challenge bonus to remove"));
+  if (game_event_get_type(current_event) != GAME_EVENT_CHALLENGE_BONUS) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CHALLENGE_NO_PREVIOUS_CHALLENGE_BONUS,
+        string_duplicate("the current event is not a challenge bonus"));
     return empty_string();
   }
 
@@ -2088,6 +2087,127 @@ void execute_unchallenge(Config *config, ErrorStack *error_stack) {
 
 char *str_api_unchallenge(Config *config, ErrorStack *error_stack) {
   return impl_unchallenge(config, error_stack);
+}
+
+// Overtime penalty command
+
+char *impl_overtime(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot add overtime penalty without "
+                                      "letter distribution and lexicon"));
+    return empty_string();
+  }
+
+  config_init_game(config);
+
+  if (game_history_get_waiting_for_final_pass_or_challenge(
+          config->game_history)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_GCG_PARSE_PREMATURE_TIME_PENALTY,
+        string_duplicate("cannot apply a time penalty while waiting for "
+                         "the final pass or challenge"));
+    return empty_string();
+  }
+
+  const char *player_nickname =
+      config_get_parg_value(config, ARG_TOKEN_OVERTIME, 0);
+  int player_index = -1;
+  for (int i = 0; i < 2; i++) {
+    if (strings_equal(game_history_player_get_nickname(config->game_history, i),
+                      player_nickname)) {
+      player_index = i;
+      break;
+    }
+  }
+  if (player_index == -1) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_TIME_PENALTY_UNRECOGNIZED_PLAYER_NICKNAME,
+        get_formatted_string(
+            "player nickname '%s' specified for overtime penalty does not "
+            "match either existing player '%s' or '%s'",
+            player_nickname,
+            game_history_player_get_nickname(config->game_history, 0),
+            game_history_player_get_nickname(config->game_history, 1)));
+    return empty_string();
+  }
+
+  int overtime_penalty_int;
+  string_to_int_or_push_error(
+      config_get_parg_name(config, ARG_TOKEN_OVERTIME),
+      config_get_parg_value(config, ARG_TOKEN_OVERTIME, 1), INT_MIN, -1,
+      ERROR_STATUS_TIME_PENALTY_INVALID_VALUE, &overtime_penalty_int,
+      error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+
+  config_backup_game_and_history(config);
+
+  GameEvent *time_penalty_event =
+      game_history_add_game_event(config->game_history, error_stack);
+
+  if (error_stack_is_empty(error_stack)) {
+    // Find the previous cumulative score for this player.
+    const int last_event_index =
+        game_history_get_num_events(config->game_history) - 1;
+    Equity cumulative_score = EQUITY_INITIAL_VALUE;
+    for (int i = last_event_index; i >= 0; i--) {
+      const GameEvent *gei = game_history_get_event(config->game_history, i);
+      if (game_event_get_player_index(gei) == player_index) {
+        cumulative_score = game_event_get_cumulative_score(gei);
+        break;
+      }
+    }
+
+    if (cumulative_score == EQUITY_INITIAL_VALUE) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_TIME_PENALTY_NO_PREVIOUS_CUMULATIVE_SCORE,
+          get_formatted_string(
+              "no prior game event has a cumulative score for player '%s' when "
+              "applying time panelty",
+              player_nickname));
+      return empty_string();
+    } else {
+      const Equity overtime_penalty = int_to_equity(overtime_penalty_int);
+      game_event_set_player_index(time_penalty_event, player_index);
+      game_event_set_type(time_penalty_event, GAME_EVENT_TIME_PENALTY);
+      game_event_set_cgp_move_string(time_penalty_event, NULL);
+      game_event_set_score_adjustment(time_penalty_event, overtime_penalty);
+      // Add the overtime penalty since the value is already negative
+      game_event_set_cumulative_score(time_penalty_event,
+                                      cumulative_score + overtime_penalty);
+      game_event_set_move_score(time_penalty_event, 0);
+
+      // When adding an overtime event, always advance to the end of the
+      // history so that the game play module can play through the entire
+      // game and catch any duplicate time penalty errors.
+      game_history_goto(config->game_history,
+                        game_history_get_num_events(config->game_history),
+                        error_stack);
+      if (error_stack_is_empty(error_stack)) {
+        config_game_play_events(config, error_stack);
+      }
+    }
+  }
+  if (!error_stack_is_empty(error_stack)) {
+    config_restore_game_and_history(config);
+    return empty_string();
+  }
+  return empty_string();
+}
+
+void execute_overtime(Config *config, ErrorStack *error_stack) {
+  char *result = impl_overtime(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+    execute_show(config, error_stack);
+  }
+  free(result);
+}
+
+char *str_api_overtime(Config *config, ErrorStack *error_stack) {
+  return impl_overtime(config, error_stack);
 }
 
 // Game navigation helper and command
@@ -2189,12 +2309,18 @@ char *impl_goto(Config *config, ErrorStack *error_stack) {
 
   config_init_game(config);
 
-  // FIXME: if no change, return here
-
+  const int old_num_played_events =
+      game_history_get_num_played_events(config->game_history);
   game_history_goto(config->game_history, num_events_to_play, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
+
+  if (game_history_get_num_played_events(config->game_history) ==
+      old_num_played_events) {
+    return empty_string();
+  }
+
   config_game_play_events(config, error_stack);
 
   if (!error_stack_is_empty(error_stack)) {
@@ -2344,31 +2470,33 @@ char *impl_load_gcg(Config *config, ErrorStack *error_stack) {
   GetGCGArgs download_args = {.source_identifier = source_identifier};
   char *gcg_string = get_gcg(&download_args, error_stack);
   if (!error_stack_is_empty(error_stack)) {
+    // It is guaranteed that gcg_string will be NULL here
     return empty_string();
   }
+
+  const bool use_backup = !!config->game;
+  if (use_backup) {
+    config_backup_game_and_history(config);
+  }
+
   config_parse_gcg_string(config, gcg_string, config->game_history,
                           error_stack);
   free(gcg_string);
-  if (!error_stack_is_empty(error_stack)) {
-    return empty_string();
+  if (error_stack_is_empty(error_stack)) {
+    game_history_goto(config->game_history, 0, error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      config_game_play_events(config, error_stack);
+    }
   }
-  game_history_goto(config->game_history, 0, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return empty_string();
-  }
-  config_game_play_events(config, error_stack);
 
   if (!error_stack_is_empty(error_stack)) {
+    if (use_backup) {
+      config_restore_game_and_history(config);
+    }
     return empty_string();
   }
-  if (!error_stack_is_empty(error_stack)) {
-    return empty_string();
-  }
-  return get_formatted_string(
-      "Successfully loaded game: %s vs %s (%d events)\n",
-      game_history_player_get_name(config->game_history, 0),
-      game_history_player_get_name(config->game_history, 1),
-      game_history_get_num_events(config->game_history));
+
+  return empty_string();
 }
 
 void execute_load_gcg(Config *config, ErrorStack *error_stack) {
@@ -3607,6 +3735,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   cmd(ARG_TOKEN_COMMIT, "commit", 1, 3, commit, generic);
   cmd(ARG_TOKEN_CHALLENGE, "challenge", 0, 1, challenge, generic);
   cmd(ARG_TOKEN_UNCHALLENGE, "unchallenge", 0, 1, unchallenge, generic);
+  cmd(ARG_TOKEN_OVERTIME, "overtimepenalty", 2, 2, overtime, generic);
   cmd(ARG_TOKEN_SHOW, "show", 0, 0, show, generic);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic);
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic);
