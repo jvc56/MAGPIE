@@ -55,17 +55,45 @@ void TurnEntryWidget::paintEvent(QPaintEvent *event)
     // Draw move notation (e.g., "8D FEVER")
     painter.drawText(15, 35, m_paintNotation);
 
-    // Draw scores on right side
+    // Draw scores on right side as a single compact string
+    // Format: "0" (unvalidated) or "0 +30" (validated/committed)
     QFont scoreFont("Consolas", 19);
     painter.setFont(scoreFont);
-    painter.drawText(width() - 140, 35, m_paintPrevScore);
-    painter.drawText(width() - 70, 35, m_paintPlayScore);
 
-    // Draw cumulative score
-    if (m_showCumulative) {
-        painter.setFont(scoreFont);
-        painter.drawText(width() - 70, 60, m_paintCumulative);
+    QString scoreText;
+    if (m_paintPlayScore.isEmpty()) {
+        // Unvalidated - show just previous score
+        scoreText = m_paintPrevScore;
+    } else {
+        // Validated or committed - show "prevScore +playScore"
+        scoreText = m_paintPrevScore + " " + m_paintPlayScore;
     }
+
+    // Right-align the score text
+    QFontMetrics fm(scoreFont);
+    int scoreWidth = fm.horizontalAdvance(scoreText);
+    painter.drawText(width() - scoreWidth - 15, 35, scoreText);
+
+    // Draw cumulative score directly under the play score (right-aligned)
+    if (!m_paintCumulative.isEmpty() && !m_paintPlayScore.isEmpty()) {
+        int cumulativeWidth = fm.horizontalAdvance(m_paintCumulative);
+        painter.drawText(width() - cumulativeWidth - 15, 60, m_paintCumulative);
+    }
+
+    // Draw bottom row: TIME and RACK on the left
+    QFont timeRackFont("Consolas", 14);  // Slightly smaller font
+    painter.setFont(timeRackFont);
+    painter.setPen(QColor(102, 102, 102));  // Grey text for time/rack
+
+    // Draw time and rack together on bottom row (e.g., "24:55 AEEHOVZ")
+    QString bottomRow = m_paintTime;
+    if (!m_paintRack.isEmpty()) {
+        if (!bottomRow.isEmpty()) {
+            bottomRow += " ";
+        }
+        bottomRow += m_paintRack;
+    }
+    painter.drawText(15, 65, bottomRow);
 }
 
 void TurnEntryWidget::setCommittedMove(int prevScore, int playScore, int cumulativeScore,
@@ -99,11 +127,11 @@ void TurnEntryWidget::setValidatedMove(int prevScore, int playScore,
 {
     m_isCommitted = false;
     m_isValidated = true;
-    m_showCumulative = false;
 
     m_paintNotation = convertToStandardNotation(notation);
     m_paintPrevScore = QString::number(prevScore);
     m_paintPlayScore = QString("+%1").arg(playScore);
+    m_paintCumulative = QString::number(prevScore + playScore);  // Show cumulative for validated moves too
     m_paintTime = timeStr;
     m_paintRack = rack;
 
