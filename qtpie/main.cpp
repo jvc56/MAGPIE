@@ -24,6 +24,8 @@
 #include <QEventLoop>
 #include <QTime>
 #include <QSplitter>
+#include <QClipboard>
+#include <QGuiApplication>
 
 #include "magpie_wrapper.h"
 #include "board_panel_view.h"
@@ -134,9 +136,34 @@ public:
             "}"
         );
 
-        // Debug Messages section
+        // Debug Messages section with copy button
+        QWidget *debugHeaderWidget = new QWidget;
+        QHBoxLayout *debugHeaderLayout = new QHBoxLayout(debugHeaderWidget);
+        debugHeaderLayout->setContentsMargins(0, 0, 0, 0);
+
         QLabel *debugLabel = new QLabel("Debug Messages");
         debugLabel->setStyleSheet("color: #333333; font-weight: bold; font-size: 12px;");
+
+        QPushButton *copyDebugButton = new QPushButton("Copy All");
+        copyDebugButton->setFixedWidth(80);
+        copyDebugButton->setToolTip("Copy all debug output to clipboard");
+        copyDebugButton->setStyleSheet(
+            "QPushButton {"
+            "  background-color: #E8E8F0;"
+            "  color: #333333;"
+            "  border: 1px solid #C0C0D0;"
+            "  border-radius: 4px;"
+            "  padding: 4px;"
+            "  font-size: 11px;"
+            "}"
+            "QPushButton:hover {"
+            "  background-color: #D8D8E8;"
+            "}"
+        );
+
+        debugHeaderLayout->addWidget(debugLabel);
+        debugHeaderLayout->addStretch();
+        debugHeaderLayout->addWidget(copyDebugButton);
 
         // Debug filter bar
         debugFilter = new QLineEdit;
@@ -230,7 +257,7 @@ public:
         layout->addWidget(historyFilter);
         layout->addWidget(historySearchWidget);
         layout->addWidget(historyTextView, 1);
-        layout->addWidget(debugLabel);
+        layout->addWidget(debugHeaderWidget);
         layout->addWidget(debugFilter);
         layout->addWidget(debugSearchWidget);
         layout->addWidget(debugTextView, 1);
@@ -253,6 +280,12 @@ public:
         connect(debugSearch, &QLineEdit::textChanged, this, &DebugWindow::onDebugSearchChanged);
         connect(debugPrevButton, &QPushButton::clicked, this, &DebugWindow::onDebugPrevMatch);
         connect(debugNextButton, &QPushButton::clicked, this, &DebugWindow::onDebugNextMatch);
+
+        // Connect copy button
+        connect(copyDebugButton, &QPushButton::clicked, this, [this]() {
+            QClipboard *clipboard = QGuiApplication::clipboard();
+            clipboard->setText(this->debugTextView->toPlainText());
+        });
     }
 
     QTextEdit *getHistoryTextView() { return historyTextView; }
@@ -627,6 +660,43 @@ public:
       connect(historyPanel, &GameHistoryPanel::debugMessage,
               debugWindow, &DebugWindow::appendDebug);
 
+      // Connect turn changes to timer control and player indicator
+      connect(boardPanelView, &BoardPanelView::playerTurnChanged,
+              this, [this](int playerIndex) {
+          Game *game = this->boardPanelView->getGame();
+          if (!game) return;
+
+          // Start timer for new player
+          this->historyPanel->startTimer(playerIndex);
+
+          // Set visual indicator for player on turn
+          this->historyPanel->setPlayerOnTurn(playerIndex);
+
+          // Only create placeholder for human player (player 0)
+          // Computer turn entries are created directly when the move is committed
+          // Note: For future delayed computer moves, you can create a placeholder with:
+          //   historyPanel->initializePlaceholderTurn(1, score, "", game, false, true);
+          if (playerIndex == 0) {
+              char *rack = magpie_get_player_rack_string(game, playerIndex);
+              QString rackStr = rack ? QString::fromUtf8(rack) : QString();
+              if (rack) free(rack);
+
+              int score = magpie_get_player_score(game, playerIndex);
+              // forceNew=true because this is a NEW turn, not updating an existing turn
+              this->historyPanel->initializePlaceholderTurn(playerIndex, score, rackStr, game, true, true);
+          }
+      });
+
+      // Connect move committed to history panel
+      connect(boardPanelView, &BoardPanelView::moveCommitted,
+              this, [this](int playerIndex, int prevScore, int playScore, int newScore,
+                          QString notation, QString rack) {
+          this->historyPanel->commitTurnAndCreateNext(playerIndex, prevScore, playScore, newScore,
+                                                      notation, rack, this->boardPanelView->getGame());
+          // Update the player's score in the header
+          this->historyPanel->setPlayerScore(playerIndex, newScore);
+      });
+
       historyPanel->setPlayerNames("olaugh", "magpie");
 
       // Check Consolas font loading after connecting signals
@@ -822,6 +892,15 @@ public:
 
     // Event filter to redirect keyboard events to board
     bool eventFilter(QObject *obj, QEvent *event) override {
+        // Track debug window focus changes
+        if (obj == debugWindow->getDebugTextView()) {
+            if (event->type() == QEvent::FocusIn) {
+                boardPanelView->setDebugWindowFocused(true);
+            } else if (event->type() == QEvent::FocusOut) {
+                boardPanelView->setDebugWindowFocused(false);
+            }
+        }
+
         if (event->type() == QEvent::KeyPress) {
             // If event is already being sent to boardPanelView, don't redirect
             // to avoid infinite recursion
@@ -1006,6 +1085,12 @@ private slots:
 
         // Get current player on turn
         int playerIndex = magpie_get_player_on_turn_index(game);
+
+        // Only update turn entries for the human player (player 0)
+        // Computer moves are handled by the moveCommitted signal
+        if (playerIndex != 0) {
+            return;
+        }
 
         // Update visual indicator for player on turn
         historyPanel->setPlayerOnTurn(playerIndex);
