@@ -672,19 +672,18 @@ public:
           // Set visual indicator for player on turn
           this->historyPanel->setPlayerOnTurn(playerIndex);
 
-          // Only create placeholder for human player (player 0)
-          // Computer turn entries are created directly when the move is committed
-          // Note: For future delayed computer moves, you can create a placeholder with:
-          //   historyPanel->initializePlaceholderTurn(1, score, "", game, false, true);
-          if (playerIndex == 0) {
-              char *rack = magpie_get_player_rack_string(game, playerIndex);
-              QString rackStr = rack ? QString::fromUtf8(rack) : QString();
-              if (rack) free(rack);
+          // Create placeholder for both players
+          // For human (player 0): show rack
+          // For computer (player 1): hide rack, shows yellow "thinking" placeholder
+          char *rack = magpie_get_player_rack_string(game, playerIndex);
+          QString rackStr = rack ? QString::fromUtf8(rack) : QString();
+          if (rack) free(rack);
 
-              int score = magpie_get_player_score(game, playerIndex);
-              // forceNew=true because this is a NEW turn, not updating an existing turn
-              this->historyPanel->initializePlaceholderTurn(playerIndex, score, rackStr, game, true, true);
-          }
+          int score = magpie_get_player_score(game, playerIndex);
+          // forceNew=true because this is a NEW turn, not updating an existing turn
+          // showRack=true for player 0, false for player 1 (computer)
+          bool showRack = (playerIndex == 0);
+          this->historyPanel->initializePlaceholderTurn(playerIndex, score, rackStr, game, showRack, true);
       });
 
       // Connect move committed to history panel

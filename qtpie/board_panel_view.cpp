@@ -21,6 +21,7 @@
 #include <QApplication>
 #include <QCursor>
 #include <QTime>
+#include <QTimer>
 #include <QKeyEvent>
 #include <QPainter>
 #include <QPaintEvent>
@@ -230,17 +231,22 @@ BoardPanelView::BoardPanelView(QWidget *parent)
         "  background-color: #C8C8D8;"
         "}";
 
-    QPushButton *passButton = new QPushButton("Pass", controlsPanel);
-    passButton->setStyleSheet(buttonStyle);
+    passButton = new QPushButton("Pass", controlsPanel);
     passButton->setCursor(Qt::PointingHandCursor);
+    connect(passButton, &QPushButton::clicked, this, &BoardPanelView::onPassClicked);
 
-    QPushButton *exchangeButton = new QPushButton("Exchange", controlsPanel);
-    exchangeButton->setStyleSheet(buttonStyle);
+    exchangeButton = new QPushButton("Exchange", controlsPanel);
     exchangeButton->setCursor(Qt::PointingHandCursor);
+    connect(exchangeButton, &QPushButton::clicked, this, &BoardPanelView::onExchangeClicked);
 
-    QPushButton *playButton = new QPushButton("Play", controlsPanel);
-    playButton->setStyleSheet(buttonStyle);
+    playButton = new QPushButton("Play", controlsPanel);
     playButton->setCursor(Qt::PointingHandCursor);
+    connect(playButton, &QPushButton::clicked, this, &BoardPanelView::onPlayClicked);
+
+    // Initialize button states (Pass always enabled, Exchange enabled, Play disabled until valid move)
+    setButtonEnabled(passButton, true);
+    setButtonEnabled(exchangeButton, true);
+    setButtonEnabled(playButton, false);
 
     // Add buttons to layout with stretch to keep them together
     controlsLayout->addStretch(1);
@@ -263,6 +269,9 @@ void BoardPanelView::setGame(Game *game) {
     this->game = game;
     Board *board = magpie_get_board_from_game(game);
     boardView->setBoard(board);
+
+    // Start player 0's timer (game begins with player 0's turn)
+    emit playerTurnChanged(0);
 
     // Don't trigger CGP load - game is already set up
     // onCgpTextChanged();
@@ -304,6 +313,11 @@ void BoardPanelView::updateCgpDisplay() {
 
         // Update the CGP text
         cgpInput->setPlainText(cgpQString);
+
+        // Update the board view to render the new position
+        if (boardView) {
+            boardView->setCgpPosition(cgpQString);
+        }
 
         // Reconnect the signal
         connect(cgpInput, &QTextEdit::textChanged, this, &BoardPanelView::onCgpTextChanged);
@@ -1133,6 +1147,12 @@ void BoardPanelView::keyPressEvent(QKeyEvent *event) {
     emit debugMessage(QString("keyPressEvent: key=%1, keyboardActive=%2")
                      .arg(event->key()).arg(boardView->isKeyboardEntryActive()));
 
+    // Block keyboard input if not allowed (not player's turn or debug window focused)
+    if (!shouldAllowKeyboardInput()) {
+        QWidget::keyPressEvent(event);
+        return;
+    }
+
     if (!boardView->isKeyboardEntryActive()) {
         QWidget::keyPressEvent(event);
         return;
@@ -1529,6 +1549,8 @@ void BoardPanelView::validateAndLogUncommittedTiles() {
                 emit validationMessage("Move validation: Tiles not in a line or have gaps");
             }
         }
+        m_moveIsValid = false;
+        updateButtonStates();
         emit uncommittedMoveChanged();  // Notify game history
         return;
     }
@@ -1553,10 +1575,262 @@ void BoardPanelView::validateAndLogUncommittedTiles() {
 
         emit validationMessage(QString("Validation failed: %1").arg(errorType));
         free(errorMsg);
+        m_moveIsValid = false;
     } else {
         // Validation succeeded!
         emit validationMessage("Validation: OK - move is well-formed and connected");
+        m_moveIsValid = true;
     }
 
+    updateButtonStates();
     emit uncommittedMoveChanged();  // Notify game history
+}
+
+void BoardPanelView::setButtonEnabled(QPushButton *button, bool enabled) {
+    if (!button) return;
+
+    button->setEnabled(enabled);
+
+    // Update styling based on state
+    if (enabled) {
+        // Blue enabled state
+        button->setStyleSheet(
+            "QPushButton {"
+            "  background-color: #6B9BD1;"  // Blue
+            "  color: white;"
+            "  border: 1px solid #5A8AC0;"
+            "  border-radius: 4px;"
+            "  padding: 8px 16px;"
+            "  font-weight: bold;"
+            "  font-size: 12px;"
+            "}"
+            "QPushButton:hover {"
+            "  background-color: #5A8AC0;"
+            "  border: 1px solid #4A7AB0;"
+            "}"
+            "QPushButton:pressed {"
+            "  background-color: #4A7AB0;"
+            "}"
+        );
+    } else {
+        // Grey disabled state
+        button->setStyleSheet(
+            "QPushButton {"
+            "  background-color: #D0D0D0;"  // Grey
+            "  color: #888888;"
+            "  border: 1px solid #C0C0C0;"
+            "  border-radius: 4px;"
+            "  padding: 8px 16px;"
+            "  font-weight: bold;"
+            "  font-size: 12px;"
+            "}"
+        );
+    }
+}
+
+bool BoardPanelView::shouldAllowKeyboardInput() const {
+    // Disable keyboard input if it's not the player's turn or if debug window has focus
+    return m_isPlayerTurn && !m_debugWindowHasFocus;
+}
+
+void BoardPanelView::setPlayerTurn(bool isPlayerTurn) {
+    m_isPlayerTurn = isPlayerTurn;
+    updateButtonStates();
+
+    // Clear keyboard entry mode when not player's turn
+    if (!isPlayerTurn && boardView) {
+        boardView->clearKeyboardEntry();
+    }
+
+    // Emit turn changed signal (0 = player, 1 = computer)
+    int playerIndex = isPlayerTurn ? 0 : 1;
+    emit playerTurnChanged(playerIndex);
+
+    emit debugMessage(QString("Turn changed: %1").arg(isPlayerTurn ? "Player" : "Computer"));
+}
+
+void BoardPanelView::setDebugWindowFocused(bool focused) {
+    m_debugWindowHasFocus = focused;
+    emit debugMessage(QString("Debug window focus: %1").arg(focused ? "true" : "false"));
+}
+
+void BoardPanelView::updateButtonStates() {
+    // All buttons disabled when not player's turn
+    if (!m_isPlayerTurn) {
+        setButtonEnabled(passButton, false);
+        setButtonEnabled(exchangeButton, false);
+        setButtonEnabled(playButton, false);
+        return;
+    }
+
+    // Pass: always enabled in gameplay mode when it's player's turn
+    setButtonEnabled(passButton, true);
+
+    // Exchange: enabled if exchanges are allowed (assume always for now)
+    setButtonEnabled(exchangeButton, true);
+
+    // Play: enabled only if move is valid
+    setButtonEnabled(playButton, m_moveIsValid);
+}
+
+void BoardPanelView::onPassClicked() {
+    emit debugMessage("Pass button clicked");
+    // TODO: Implement pass logic
+}
+
+void BoardPanelView::onExchangeClicked() {
+    emit debugMessage("Exchange button clicked");
+    // TODO: Implement exchange logic
+}
+
+void BoardPanelView::onPlayClicked() {
+    if (!game || !boardView || !m_moveIsValid) {
+        return;
+    }
+
+    emit debugMessage("Play button clicked - submitting move");
+
+    // Get the move notation
+    QString notation = boardView->generateMoveNotation();
+    if (notation.isEmpty()) {
+        emit debugMessage("ERROR: No valid move notation");
+        return;
+    }
+
+    emit debugMessage(QString("Submitting move: %1").arg(notation));
+
+    // Get score before the move
+    int prevScore = magpie_get_player_score(game, 0);
+
+    // Get the move score
+    int playScore = magpie_get_move_score(game, 0, notation.toUtf8().constData());
+
+    // Submit the player's move (player 0)
+    char *errorMsg = magpie_play_move(game, 0, notation.toUtf8().constData());
+    if (errorMsg) {
+        emit debugMessage(QString("ERROR: Failed to play move: %1").arg(QString::fromUtf8(errorMsg)));
+        free(errorMsg);
+        return;
+    }
+
+    // Get score after the move
+    int newScore = magpie_get_player_score(game, 0);
+
+    emit debugMessage(QString("Move played successfully: %1 pts (%2 + %3 = %4)")
+                     .arg(playScore).arg(prevScore).arg(playScore).arg(newScore));
+
+    // Update the board display FIRST (before clearing uncommitted)
+    Board *board = magpie_get_board_from_game(game);
+    boardView->setBoard(board);
+    emit debugMessage(QString("Board updated after player move (board ptr: %1)").arg((quintptr)board, 0, 16));
+
+    // Clear uncommitted tiles from board (now that committed tiles are on the board)
+    boardView->clearUncommittedTiles();
+
+    // Update CGP display
+    updateCgpDisplay();
+
+    // Update rack with new tiles
+    char *rackStr = magpie_get_rack(game, 0);
+    QString rackQString;
+    if (rackStr) {
+        rackQString = QString::fromUtf8(rackStr);
+        rackView->setRack(rackQString);
+        free(rackStr);
+    }
+
+    // Emit move committed signal for game history to freeze this turn and create new one
+    emit moveCommitted(0, prevScore, playScore, newScore, notation, rackQString);
+
+    // Reset validation state
+    m_moveIsValid = false;
+
+    // Switch to computer's turn
+    setPlayerTurn(false);
+
+    // Emit board changed signal (this will create computer's placeholder turn entry)
+    emit boardChanged();
+
+    // Make computer move immediately (delay happens inside)
+    makeComputerMove();
+}
+
+void BoardPanelView::makeComputerMove() {
+    if (!game) {
+        return;
+    }
+
+    emit debugMessage("Computer is thinking...");
+
+    // Delay for 3 seconds to simulate thinking, then make the move
+    QTimer::singleShot(3000, this, [this]() {
+        if (!game) {
+            return;
+        }
+
+        // Get top equity move for player 1 (computer)
+        char *moveNotation = magpie_get_top_equity_move(game, 1);
+        if (!moveNotation) {
+            emit debugMessage("ERROR: Computer failed to generate move");
+            return;
+        }
+
+        QString computerMove = QString::fromUtf8(moveNotation);
+        emit debugMessage(QString("Computer plays: %1").arg(computerMove));
+
+        // Get score before the move
+        int prevScore = magpie_get_player_score(game, 1);
+
+        // Get the move score
+        int playScore = magpie_get_move_score(game, 1, moveNotation);
+
+        // Play the computer's move
+        char *errorMsg = magpie_play_move(game, 1, moveNotation);
+        free(moveNotation);
+
+        if (errorMsg) {
+            emit debugMessage(QString("ERROR: Computer move failed: %1").arg(QString::fromUtf8(errorMsg)));
+            free(errorMsg);
+            return;
+        }
+
+        // Get score after the move
+        int newScore = magpie_get_player_score(game, 1);
+
+        emit debugMessage(QString("Computer move played successfully: %1 pts (%2 + %3 = %4)")
+                         .arg(playScore).arg(prevScore).arg(playScore).arg(newScore));
+
+        // Update the board display
+        Board *board = magpie_get_board_from_game(game);
+        boardView->setBoard(board);
+        emit debugMessage(QString("Board updated after computer move (board ptr: %1)").arg((quintptr)board, 0, 16));
+
+        // Update CGP display
+        updateCgpDisplay();
+
+        // Get computer's rack for history (but don't display it)
+        char *computerRackStr = magpie_get_rack(game, 1);
+        QString computerRack = computerRackStr ? QString::fromUtf8(computerRackStr) : QString();
+        if (computerRackStr) {
+            free(computerRackStr);
+        }
+
+        // Emit move committed signal for computer's move
+        emit moveCommitted(1, prevScore, playScore, newScore, computerMove, computerRack);
+
+        // Update player's rack (player 0, not computer's rack)
+        char *rackStr = magpie_get_rack(game, 0);
+        if (rackStr) {
+            rackView->setRack(QString::fromUtf8(rackStr));
+            free(rackStr);
+        }
+
+        // Emit board changed signal to update game history
+        emit boardChanged();
+
+        // Switch back to player's turn (this will start player's timer)
+        setPlayerTurn(true);
+
+        emit debugMessage("Player's turn");
+    });
 }
