@@ -1,6 +1,16 @@
-# Turn Entry Text Visibility Issue - ✅ SOLVED
+# Turn Entry Widget - Complete Implementation ✅
 
-## Problem
+## Summary
+
+Turn entry widgets now display complete move information with proper formatting:
+- **Move notation** (e.g., "8D FEVER") with time and rack on bottom row
+- **Compact right-aligned scores** ("0" or "0 +30")
+- **Cumulative scores** shown for validated and committed moves
+- **Color-coded backgrounds**: Yellow (unvalidated), Green (validated), White (committed)
+- **Player header scores** update after each move
+- **Computer thinking delay**: 3-second non-blocking delay with yellow placeholder
+
+## Original Problem
 Turn entry widgets showed blank white rectangles for committed moves. **ONLY the bottommost/active entry showed text** - all entries above were blank.
 
 ## ✅ SOLUTION (Fixed!)
