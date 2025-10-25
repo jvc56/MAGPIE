@@ -80,7 +80,8 @@ public:
 
     // Generate UCGI move notation from uncommitted tiles
     // Returns empty string if tiles can't form valid notation (not in line, blank undesignated, etc.)
-    QString generateMoveNotation() const;
+    // Game parameter is needed to convert board letters to user-visible form
+    QString generateMoveNotation(Game *game) const;
 
     // Set ghost tile position (shows dimmed tile during drag) - (-1, -1) to clear
     void setGhostTile(int row, int col, QChar letter);

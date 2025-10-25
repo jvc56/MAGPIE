@@ -61,6 +61,22 @@ int magpie_get_player_on_turn_index(Game *game);
 // Returns -1 if move is invalid
 int magpie_get_move_score(Game *game, int player_index, const char *ucgi_move_string);
 
+// Play a move and return error message (or NULL if successful)
+// Caller must free the returned string if non-NULL
+char* magpie_play_move(Game *game, int player_index, const char *ucgi_move_string);
+
+// Get the top equity move for a player
+// Returns UCGI move string (caller must free), or NULL on error
+char* magpie_get_top_equity_move(Game *game, int player_index);
+
+// Get player rack as string (same as magpie_get_player_rack_string but with shorter name)
+char* magpie_get_rack(Game *game, int player_index);
+
+// Get the user-visible letter at a board position
+// Returns the letter as a string (caller must free)
+// Returns NULL if position is empty or out of bounds
+char* magpie_board_get_letter_at(Board *board, Game *game, int row, int col);
+
 #ifdef __cplusplus
 }
 #endif

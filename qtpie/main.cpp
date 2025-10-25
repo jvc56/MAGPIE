@@ -1095,7 +1095,7 @@ private slots:
         historyPanel->setPlayerOnTurn(playerIndex);
 
         // Get move notation
-        QString notation = boardPanelView->getBoardView()->generateMoveNotation();
+        QString notation = boardPanelView->getBoardView()->generateMoveNotation(game);
 
         // Get rack string for current player only (don't show opponent's rack)
         char *rackCStr = magpie_get_player_rack_string(game, playerIndex);

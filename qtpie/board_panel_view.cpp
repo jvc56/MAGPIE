@@ -1519,7 +1519,7 @@ void BoardPanelView::validateAndLogUncommittedTiles() {
     }
 
     // Generate move notation from uncommitted tiles
-    QString notation = boardView->generateMoveNotation();
+    QString notation = boardView->generateMoveNotation(game);
 
     // If notation is empty, tiles can't form valid notation
     if (notation.isEmpty()) {
@@ -1691,7 +1691,7 @@ void BoardPanelView::onPlayClicked() {
     emit debugMessage("Play button clicked - submitting move");
 
     // Get the move notation
-    QString notation = boardView->generateMoveNotation();
+    QString notation = boardView->generateMoveNotation(game);
     if (notation.isEmpty()) {
         emit debugMessage("ERROR: No valid move notation");
         return;

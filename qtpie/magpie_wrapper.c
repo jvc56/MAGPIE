@@ -7,13 +7,17 @@
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/validated_move.h"
+#include "../src/ent/move.h"
 #include "../src/impl/config.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "../src/str/game_string.h"
 #include "../src/str/rack_string.h"
+#include "../src/str/move_string.h"
+#include "../src/str/letter_distribution_string.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -305,4 +309,126 @@ int magpie_get_move_score(Game *game, int player_index, const char *ucgi_move_st
     error_stack_destroy(error_stack);
 
     return score;
+}
+
+char* magpie_play_move(Game *game, int player_index, const char *ucgi_move_string) {
+    if (game == NULL || ucgi_move_string == NULL) {
+        return string_duplicate("Invalid game or move string");
+    }
+
+    ErrorStack *error_stack = error_stack_create();
+
+    // Validate and play the move
+    ValidatedMoves *vms = validated_moves_create(
+        game,
+        player_index,
+        ucgi_move_string,
+        true,  // allow_phonies
+        false, // allow_unknown_exchanges
+        true,  // allow_playthrough
+        error_stack
+    );
+
+    char *error_msg = NULL;
+    if (!error_stack_is_empty(error_stack) || vms == NULL) {
+        error_msg = error_stack_get_string_and_reset(error_stack);
+        validated_moves_destroy(vms);
+        error_stack_destroy(error_stack);
+        return error_msg;
+    }
+
+    // Get the first validated move and play it
+    int num_moves = validated_moves_get_number_of_moves(vms);
+    if (num_moves == 0) {
+        validated_moves_destroy(vms);
+        error_stack_destroy(error_stack);
+        return string_duplicate("No valid move found");
+    }
+
+    const Move *move = validated_moves_get_move(vms, 0);
+    if (move == NULL) {
+        validated_moves_destroy(vms);
+        error_stack_destroy(error_stack);
+        return string_duplicate("Failed to get move");
+    }
+
+    // Play the move without drawing tiles
+    play_move_without_drawing_tiles(move, game);
+
+    // Draw tiles to refill the player's rack
+    draw_to_full_rack(game, player_index);
+
+    validated_moves_destroy(vms);
+    error_stack_destroy(error_stack);
+
+    return NULL;  // Success
+}
+
+char* magpie_get_top_equity_move(Game *game, int player_index) {
+    if (game == NULL) {
+        return NULL;
+    }
+
+    // Create move list to hold generated moves
+    MoveList *move_list = move_list_create(1);  // Initial capacity of 1
+    if (move_list == NULL) {
+        return NULL;
+    }
+
+    // Get top equity move using the gameplay helper
+    Move *top_move = get_top_equity_move(game, 0, move_list);  // thread_index = 0
+
+    if (top_move == NULL) {
+        move_list_destroy(move_list);
+        return NULL;
+    }
+
+    // Build UCGI notation string using StringBuilder
+    StringBuilder *sb = string_builder_create();
+    Board *board = game_get_board(game);
+    const LetterDistribution *ld = game_get_ld(game);
+    string_builder_add_ucgi_move(sb, top_move, board, ld);
+    char *move_string = string_builder_dump(sb, NULL);
+
+    string_builder_destroy(sb);
+    move_list_destroy(move_list);
+
+    return move_string;  // Caller must free
+}
+
+char* magpie_get_rack(Game *game, int player_index) {
+    return magpie_get_player_rack_string(game, player_index);
+}
+
+char* magpie_board_get_letter_at(Board *board, Game *game, int row, int col) {
+    if (board == NULL || game == NULL) {
+        return NULL;
+    }
+
+    // Check bounds
+    if (row < 0 || row >= BOARD_DIM || col < 0 || col >= BOARD_DIM) {
+        return NULL;
+    }
+
+    // Get the machine letter at this position
+    MachineLetter ml = board_get_letter(board, row, col);
+
+    // Check if square is empty
+    if (ml == 0) {  // 0 is ALPHABET_EMPTY_SQUARE_MARKER
+        return NULL;
+    }
+
+    // Convert to user-visible letter using the game's letter distribution
+    const LetterDistribution *ld = game_get_ld(game);
+    if (ld == NULL) {
+        return NULL;
+    }
+
+    // Use StringBuilder to get the human-readable letter
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_user_visible_letter(sb, ld, ml);
+    char *result = string_builder_dump(sb, NULL);
+    string_builder_destroy(sb);
+
+    return result;
 }

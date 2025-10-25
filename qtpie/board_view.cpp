@@ -607,7 +607,7 @@ void BoardView::clearGhostTile() {
     update();
 }
 
-QString BoardView::generateMoveNotation() const {
+QString BoardView::generateMoveNotation(Game *game) const {
     // Need at least one tile
     if (m_uncommittedTiles.isEmpty()) {
         return QString();
@@ -647,11 +647,28 @@ QString BoardView::generateMoveNotation() const {
     int startRow = sorted[0].row;
     int startCol = sorted[0].col;
 
-    // Build the word string, filling in playthrough markers for existing tiles
+    // Build the word string, filling in playthrough letters for existing tiles
     QString word;
     if (isHorizontal) {
-        int endCol = sorted.last().col;
-        for (int col = startCol; col <= endCol; ++col) {
+        // Find the actual start and end of the word by checking for contiguous tiles
+        int actualStartCol = startCol;
+        int actualEndCol = sorted.last().col;
+
+        if (board) {
+            // Extend backwards to include any existing tiles before our first played tile
+            while (actualStartCol > 0 && !magpie_board_is_square_empty(board, startRow, actualStartCol - 1)) {
+                actualStartCol--;
+            }
+            // Extend forwards to include any existing tiles after our last played tile
+            while (actualEndCol < 14 && !magpie_board_is_square_empty(board, startRow, actualEndCol + 1)) {
+                actualEndCol++;
+            }
+        }
+
+        // Update starting position for the move notation
+        startCol = actualStartCol;
+
+        for (int col = actualStartCol; col <= actualEndCol; ++col) {
             // Check if we have an uncommitted tile at this position
             bool found = false;
             for (const UncommittedTile &tile : sorted) {
@@ -664,15 +681,39 @@ QString BoardView::generateMoveNotation() const {
             // If no uncommitted tile, check if there's a tile on the board
             if (!found) {
                 if (board && !magpie_board_is_square_empty(board, startRow, col)) {
-                    word += '.';  // Playthrough marker
+                    // Get the actual letter from the board for playthrough (in UCGI format)
+                    char *boardLetter = magpie_board_get_letter_at(board, game, startRow, col);
+                    if (boardLetter) {
+                        word += QString::fromUtf8(boardLetter);
+                        free(boardLetter);
+                    } else {
+                        return QString();  // Failed to get letter
+                    }
                 } else {
                     return QString();  // Gap in the word
                 }
             }
         }
     } else {  // Vertical
-        int endRow = sorted.last().row;
-        for (int row = startRow; row <= endRow; ++row) {
+        // Find the actual start and end of the word by checking for contiguous tiles
+        int actualStartRow = startRow;
+        int actualEndRow = sorted.last().row;
+
+        if (board) {
+            // Extend backwards to include any existing tiles before our first played tile
+            while (actualStartRow > 0 && !magpie_board_is_square_empty(board, actualStartRow - 1, startCol)) {
+                actualStartRow--;
+            }
+            // Extend forwards to include any existing tiles after our last played tile
+            while (actualEndRow < 14 && !magpie_board_is_square_empty(board, actualEndRow + 1, startCol)) {
+                actualEndRow++;
+            }
+        }
+
+        // Update starting position for the move notation
+        startRow = actualStartRow;
+
+        for (int row = actualStartRow; row <= actualEndRow; ++row) {
             // Check if we have an uncommitted tile at this position
             bool found = false;
             for (const UncommittedTile &tile : sorted) {
@@ -685,7 +726,14 @@ QString BoardView::generateMoveNotation() const {
             // If no uncommitted tile, check if there's a tile on the board
             if (!found) {
                 if (board && !magpie_board_is_square_empty(board, row, startCol)) {
-                    word += '.';  // Playthrough marker
+                    // Get the actual letter from the board for playthrough (in UCGI format)
+                    char *boardLetter = magpie_board_get_letter_at(board, game, row, startCol);
+                    if (boardLetter) {
+                        word += QString::fromUtf8(boardLetter);
+                        free(boardLetter);
+                    } else {
+                        return QString();  // Failed to get letter
+                    }
                 } else {
                     return QString();  // Gap in the word
                 }
