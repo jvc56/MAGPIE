@@ -376,7 +376,7 @@ void string_builder_add_gcg_filename(StringBuilder *sb,
 void game_history_set_gcg_filename(GameHistory *game_history,
                                    const char *user_provided_gcg_filename) {
   if (user_provided_gcg_filename) {
-    // The user has explicited passed in a GCG filename
+    // The user has explicitly passed in a GCG filename
     game_history->user_provided_gcg_filename = true;
     free(game_history->gcg_filename);
     game_history->gcg_filename = string_duplicate(user_provided_gcg_filename);
@@ -393,10 +393,7 @@ void game_history_set_gcg_filename(GameHistory *game_history,
                   i < MAX_GCG_FILENAME_ATTEMPTS;
        i++) {
     string_builder_clear(sb);
-    string_builder_add_formatted_string(
-        sb, "%s-vs-%s-%d%s", game_history_player_get_nickname(game_history, 0),
-        game_history_player_get_nickname(game_history, 1), i + 1,
-        GCG_EXTENSION);
+    string_builder_add_gcg_filename(sb, game_history, i + 1);
   }
   free(game_history->gcg_filename);
   game_history->gcg_filename = string_duplicate(string_builder_peek(sb));
