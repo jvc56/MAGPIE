@@ -23,9 +23,10 @@ public:
 
     // Add turn entry widget for current/uncommitted turn
     TurnEntryWidget* addTurnEntry();
+    TurnEntryWidget* addEmptyPlaceholder();  // Add empty placeholder to sync column heights
     TurnEntryWidget* getCurrentTurnEntry();
     void clearCurrentTurnEntry();
-    int getTurnEntryCount() const { return m_movesLayout->count() - 1; } // -1 for stretch
+    int getTurnEntryCount() const { return m_movesLayout->count(); }
 
 public:
     QString m_playerName;
@@ -82,6 +83,8 @@ private slots:
 private:
     QString formatTime(int seconds) const;
     void updatePlayerHeaderBorders();
+    void scrollToBottom(int playerIndex);
+    void synchronizeColumnHeights();
 
     PlayerHistoryColumn *m_player1Column;
     PlayerHistoryColumn *m_player2Column;
@@ -101,6 +104,10 @@ private:
     QWidget *m_player1HeaderWidget;
     QWidget *m_player2HeaderWidget;
     int m_playerOnTurn;  // 0 or 1
+
+    // Scroll areas for player columns
+    QScrollArea *m_player1ScrollArea;
+    QScrollArea *m_player2ScrollArea;
 };
 
 #endif // GAME_HISTORY_PANEL_H

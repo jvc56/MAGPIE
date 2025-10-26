@@ -1162,6 +1162,16 @@ void BoardPanelView::keyPressEvent(QKeyEvent *event) {
     emit debugMessage(QString("keyPressEvent: key=%1, keyboardActive=%2")
                      .arg(event->key()).arg(boardView->isKeyboardEntryActive()));
 
+    // Handle Enter/Return key to submit play if enabled
+    if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+        if (playButton && playButton->isEnabled()) {
+            emit debugMessage("Enter key pressed - triggering play button");
+            onPlayClicked();
+            event->accept();
+            return;
+        }
+    }
+
     // Block keyboard input if not allowed (not player's turn or debug window focused)
     if (!shouldAllowKeyboardInput()) {
         QWidget::keyPressEvent(event);
@@ -1675,6 +1685,7 @@ void BoardPanelView::updateButtonStates() {
         setButtonEnabled(passButton, false);
         setButtonEnabled(exchangeButton, false);
         setButtonEnabled(playButton, false);
+        playButton->setText("Play");
         return;
     }
 
@@ -1686,6 +1697,13 @@ void BoardPanelView::updateButtonStates() {
 
     // Play: enabled only if move is valid
     setButtonEnabled(playButton, m_moveIsValid);
+
+    // Update button text to show ⏎ symbol when enabled
+    if (m_moveIsValid) {
+        playButton->setText("Play \u23ce");
+    } else {
+        playButton->setText("Play");
+    }
 }
 
 void BoardPanelView::onPassClicked() {

@@ -1,5 +1,6 @@
 #include "game_history_panel.h"
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QFrame>
 #include <QSvgRenderer>
 #include <QPainter>
@@ -20,12 +21,16 @@ PlayerHistoryColumn::PlayerHistoryColumn(const QString &playerName, TurnEntryWid
 {
     setObjectName("playerHistoryColumn");
 
+    // Set size policy - minimum vertical size, don't expand
+    setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+
     // Simple vertical layout for turn entries
     m_movesLayout = new QVBoxLayout(this);
     m_movesLayout->setContentsMargins(8, 8, 8, 8);
     m_movesLayout->setSpacing(4);
-    // Add stretch at the end to push all entries to the top
-    m_movesLayout->addStretch();
+    m_movesLayout->setSizeConstraint(QLayout::SetMinimumSize);
+    // Set alignment to top - no stretch needed since scroll area handles overflow
+    m_movesLayout->setAlignment(Qt::AlignTop);
 
     // Create dummy labels for compatibility (will be reassigned by GameHistoryPanel)
     m_nameLabel = new QLabel(playerName, this);
@@ -52,13 +57,13 @@ void PlayerHistoryColumn::addMoveEntry(const QString &moveText) {
     moveLabel->setStyleSheet("color: #333333; padding: 2px;");
     moveLabel->setWordWrap(true);
 
-    // Insert before the stretch
-    m_movesLayout->insertWidget(m_movesLayout->count() - 1, moveLabel);
+    // Add to the end of the layout
+    m_movesLayout->addWidget(moveLabel);
 }
 
 void PlayerHistoryColumn::clearHistory() {
-    // Remove all turn entry widgets but keep the stretch at the end
-    while (m_movesLayout->count() > 1) {
+    // Remove all turn entry widgets
+    while (m_movesLayout->count() > 0) {
         QLayoutItem *item = m_movesLayout->takeAt(0);
         if (item->widget()) {
             delete item->widget();
@@ -73,16 +78,16 @@ TurnEntryWidget* PlayerHistoryColumn::addTurnEntry() {
     int variant = getTurnEntryCount();
     TurnEntryWidget *entry = new TurnEntryWidget(this, m_renderMode, variant);
 
-    // Insert before the stretch (which is always at the end)
+    // Add to the end of the layout
     // This makes entries appear top-to-bottom in chronological order
-    int insertPos = m_movesLayout->count() - 1;
-    m_movesLayout->insertWidget(insertPos, entry);
+    m_movesLayout->addWidget(entry);
     entry->show();  // Explicitly show the widget
     m_currentTurnEntry = entry;
 
     // THEORY 2: Force repaint on all previous entries
     // When a new entry is added, existing entries might need explicit update() to repaint text
-    for (int i = 0; i < insertPos; i++) {
+    int entryCount = m_movesLayout->count();
+    for (int i = 0; i < entryCount - 1; i++) {
         QLayoutItem *item = m_movesLayout->itemAt(i);
         if (item && item->widget()) {
             TurnEntryWidget *prevEntry = qobject_cast<TurnEntryWidget*>(item->widget());
@@ -92,6 +97,19 @@ TurnEntryWidget* PlayerHistoryColumn::addTurnEntry() {
         }
     }
 
+    return entry;
+}
+
+TurnEntryWidget* PlayerHistoryColumn::addEmptyPlaceholder() {
+    // Create an empty placeholder entry that won't be tracked as current
+    int variant = getTurnEntryCount();
+    TurnEntryWidget *entry = new TurnEntryWidget(this, m_renderMode, variant);
+
+    // Add to the end of the layout
+    m_movesLayout->addWidget(entry);
+    entry->show();
+
+    // Don't set as current turn entry - this is just a placeholder
     return entry;
 }
 
@@ -116,6 +134,8 @@ GameHistoryPanel::GameHistoryPanel(QWidget *parent)
     , m_player1HeaderWidget(nullptr)
     , m_player2HeaderWidget(nullptr)
     , m_playerOnTurn(0)
+    , m_player1ScrollArea(nullptr)
+    , m_player2ScrollArea(nullptr)
 {
     // Load Consolas font using same pattern as tile_renderer
     QDir fontsDir(QCoreApplication::applicationDirPath() + "/../Resources/fonts");
@@ -380,36 +400,32 @@ GameHistoryPanel::GameHistoryPanel(QWidget *parent)
 
     mainLayout->addWidget(headerContainer, 0);
 
-    // Move history area - two columns side by side
-    QWidget *historyWidget = new QWidget(this);
+    // Move history area - two columns side by side inside a single scroll area
+    QWidget *historyWidget = new QWidget();
     historyWidget->setStyleSheet("background-color: transparent;");
     QHBoxLayout *historyLayout = new QHBoxLayout(historyWidget);
     historyLayout->setContentsMargins(0, 0, 0, 0);
     historyLayout->setSpacing(5);
 
-    // THEORY 6: Test without scroll areas to see if viewport clipping affects text
-    // Create scrollable areas for each player's turn entries
-    // QScrollArea *p1ScrollArea = new QScrollArea(historyWidget);
-    // p1ScrollArea->setWidget(m_player1Column);
-    // p1ScrollArea->setWidgetResizable(true);
-    // p1ScrollArea->setFrameShape(QFrame::NoFrame);
-    // p1ScrollArea->setStyleSheet("QScrollArea { background-color: transparent; }");
-    // No stylesheet on PlayerHistoryColumn - let children control their own appearance
+    // Add both columns directly to the layout
     m_player1Column->show();
-
-    // QScrollArea *p2ScrollArea = new QScrollArea(historyWidget);
-    // p2ScrollArea->setWidget(m_player2Column);
-    // p2ScrollArea->setWidgetResizable(true);
-    // p2ScrollArea->setFrameShape(QFrame::NoFrame);
-    // p2ScrollArea->setStyleSheet("QScrollArea { background-color: transparent; }");
-    // No stylesheet on PlayerHistoryColumn - let children control their own appearance
     m_player2Column->show();
-
-    // Add columns directly without scroll areas
     historyLayout->addWidget(m_player1Column, 1);
     historyLayout->addWidget(m_player2Column, 1);
 
-    mainLayout->addWidget(historyWidget, 1);
+    // Create a single scroll area containing both columns
+    m_player1ScrollArea = new QScrollArea(this);
+    m_player1ScrollArea->setWidget(historyWidget);
+    m_player1ScrollArea->setWidgetResizable(true);
+    m_player1ScrollArea->setFrameShape(QFrame::NoFrame);
+    m_player1ScrollArea->setStyleSheet("QScrollArea { background-color: transparent; border: none; }");
+    m_player1ScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_player1ScrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+
+    // Set player2 scroll area to nullptr since we're only using one scroll area now
+    m_player2ScrollArea = nullptr;
+
+    mainLayout->addWidget(m_player1ScrollArea, 1);
 
     // Create game timer
     m_gameTimer = new QTimer(this);
@@ -558,6 +574,9 @@ void GameHistoryPanel::updateCurrentTurn(int playerIndex, const QString &notatio
         // Unvalidated move - show prevScore only
         turnEntry->setUnvalidatedMove(prevScore, notation, timeStr, rack);
     }
+
+    // Scroll to bottom to show the updated entry
+    scrollToBottom(playerIndex);
 }
 
 void GameHistoryPanel::clearCurrentTurn(int playerIndex) {
@@ -610,6 +629,9 @@ void GameHistoryPanel::initializePlaceholderTurn(int playerIndex, int currentSco
     emit debugMessage(QString("[%1] Setting placeholder: prevScore=%2 time=%3 rack='%4'")
                       .arg(playerName).arg(currentScore).arg(timeStr).arg(rackToShow));
     turnEntry->setUnvalidatedMove(currentScore, "", timeStr, rackToShow);
+
+    // Scroll to bottom to show the new entry
+    scrollToBottom(playerIndex);
 }
 
 void GameHistoryPanel::setPlayerOnTurn(int playerIndex) {
@@ -657,6 +679,9 @@ void GameHistoryPanel::commitTurnAndCreateNext(int playerIndex, int prevScore, i
     // Clear the current turn entry pointer
     column->clearCurrentTurnEntry();
     emit debugMessage(QString("[%1] Entry committed and pointer cleared").arg(playerName));
+
+    // Scroll to bottom to show the committed entry
+    scrollToBottom(playerIndex);
 }
 
 void GameHistoryPanel::updatePlayerHeaderBorders() {
@@ -679,4 +704,36 @@ void GameHistoryPanel::updatePlayerHeaderBorders() {
             "#player2Header { background-color: #FFFFFF; border: 3px solid #4CAF50; border-radius: 8px; }"
         );
     }
+}
+
+void GameHistoryPanel::synchronizeColumnHeights() {
+    if (!m_player1Column || !m_player2Column) return;
+
+    int count1 = m_player1Column->getTurnEntryCount();
+    int count2 = m_player2Column->getTurnEntryCount();
+
+    // Add empty placeholders to the shorter column
+    if (count1 < count2) {
+        for (int i = count1; i < count2; i++) {
+            m_player1Column->addEmptyPlaceholder();
+        }
+    } else if (count2 < count1) {
+        for (int i = count2; i < count1; i++) {
+            m_player2Column->addEmptyPlaceholder();
+        }
+    }
+}
+
+void GameHistoryPanel::scrollToBottom(int playerIndex) {
+    Q_UNUSED(playerIndex);  // Both columns share the same scroll area
+
+    if (!m_player1ScrollArea) return;
+
+    // Use QTimer::singleShot to defer scrolling until after layout updates
+    QTimer::singleShot(0, [this]() {
+        QScrollBar *vbar = m_player1ScrollArea->verticalScrollBar();
+        if (vbar) {
+            vbar->setValue(vbar->maximum());
+        }
+    });
 }

@@ -4,6 +4,7 @@
 #include <QWidget>
 #include <QTextEdit>
 #include <QLabel>
+#include <QPushButton>
 #include "magpie_wrapper.h"
 #include "board_view.h"
 #include "rack_view.h"
@@ -31,6 +32,9 @@ public:
     // Validate uncommitted tiles and log result
     void validateAndLogUncommittedTiles();
 
+    // Notify when debug window focus changes
+    void setDebugWindowFocused(bool focused);
+
 protected:
     void dragEnterEvent(QDragEnterEvent *event) override;
     void dragMoveEvent(QDragMoveEvent *event) override;
@@ -47,6 +51,9 @@ signals:
     void updateDragPreview(const QPixmap &tilePixmap, const QPoint &mainWidgetPos);  // Update drag preview at MainWidget position
     void hideDragPreview();  // Hide drag preview
     void uncommittedMoveChanged();  // Emitted when uncommitted tiles change (for updating game history)
+    void playerTurnChanged(int playerIndex);  // Emitted when turn changes (0 = player, 1 = computer)
+    void moveCommitted(int playerIndex, int prevScore, int playScore, int newScore,
+                       QString notation, QString rack);  // Emitted when a move is committed
 
 private slots:
     void onCgpTextChanged();
@@ -83,6 +90,34 @@ private:
 
     // Track last preview position (in global coordinates) for drop calculation
     QPoint m_lastPreviewGlobalPos;
+
+    // Gameplay buttons
+    QPushButton *passButton = nullptr;
+    QPushButton *exchangeButton = nullptr;
+    QPushButton *playButton = nullptr;
+
+    // Current move validation state
+    bool m_moveIsValid = false;
+
+    // Turn tracking
+    bool m_isPlayerTurn = true;  // true when it's player 0's turn
+    bool m_debugWindowHasFocus = false;
+
+    // Input control
+    bool shouldAllowKeyboardInput() const;
+    void setPlayerTurn(bool isPlayerTurn);
+
+    // Button state management
+    void updateButtonStates();
+    void setButtonEnabled(QPushButton *button, bool enabled);
+
+    // Button handlers
+    void onPassClicked();
+    void onExchangeClicked();
+    void onPlayClicked();
+
+    // Computer play
+    void makeComputerMove();
 };
 
 #endif // BOARD_PANEL_VIEW_H
