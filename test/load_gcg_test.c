@@ -60,7 +60,7 @@ void test_load_gcg(void) {
       "https://www.cross-tables.com/annotated/selfgcg/556/anno55690.gcg",
       ERROR_STATUS_SUCCESS);
   validate_load_gcg("https://keep.google.com/u/0/",
-                    ERROR_STATUS_GCG_PARSE_NO_MATCHING_TOKEN);
+                    ERROR_STATUS_GCG_PARSE_GAME_EVENT_BEFORE_PLAYER);
   printf("URL download tests completed.\n\n");
 
   printf("=== Total Failure Test ===\n");
