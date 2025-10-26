@@ -382,7 +382,7 @@ void game_history_set_gcg_filename(GameHistory *game_history,
     game_history->gcg_filename = string_duplicate(user_provided_gcg_filename);
     return;
   } else if (game_history->user_provided_gcg_filename) {
-    // The user has not passed in a GCG filename, but they have already does so
+    // The user has not passed in a GCG filename, but they have already done so
     // before, so do not overwrite the current user provided GCG filename
     // with the default GCG filename.
     return;
