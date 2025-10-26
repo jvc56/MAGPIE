@@ -702,10 +702,31 @@ void test_config_wmp(void) {
 void test_config_anno(void) {
   // Commit and challenge
   Config *config = config_create_default_test();
+  assert_config_exec_status(config, "sw",
+                            ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
 
   assert_config_exec_status(config, "set -lex CSW24", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "sw", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "set -p1 a -p2 b", ERROR_STATUS_SUCCESS);
+
+  const PlayersData *players_data = config_get_players_data(config);
+  const GameHistory *game_history = config_get_game_history(config);
+  assert_config_exec_status(config, "sw", ERROR_STATUS_SUCCESS);
+  assert_strings_equal(players_data_get_name(players_data, 0), "b");
+  assert_strings_equal(game_history_player_get_name(game_history, 0), "b");
+  assert_strings_equal(game_history_player_get_nickname(game_history, 0), "b");
+  assert_strings_equal(players_data_get_name(players_data, 1), "a");
+  assert_strings_equal(game_history_player_get_name(game_history, 1), "a");
+  assert_strings_equal(game_history_player_get_nickname(game_history, 1), "a");
+
+  assert_config_exec_status(config, "sw", ERROR_STATUS_SUCCESS);
+  assert_strings_equal(players_data_get_name(players_data, 0), "a");
+  assert_strings_equal(game_history_player_get_name(game_history, 0), "a");
+  assert_strings_equal(game_history_player_get_nickname(game_history, 0), "a");
+  assert_strings_equal(players_data_get_name(players_data, 1), "b");
+  assert_strings_equal(game_history_player_get_name(game_history, 1), "b");
+  assert_strings_equal(game_history_player_get_nickname(game_history, 1), "b");
 
   Game *game = config_get_game(config);
   Bag *bag = game_get_bag(game);

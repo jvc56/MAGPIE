@@ -4,6 +4,7 @@
 #include "../def/game_history_defs.h"
 #include "../ent/board_layout.h"
 #include "../ent/equity.h"
+#include "../ent/players_data.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
@@ -325,7 +326,7 @@ void game_history_player_reset(GameHistory *history, int player_index,
   if (name) {
     player->name = string_duplicate(name);
   } else {
-    player->name = get_formatted_string("Player %d", player_index);
+    player->name = players_data_get_default_name(player_index);
   }
   // Nicknames must not have any whitespace, otherwise the GCG output will be
   // invalid
@@ -333,7 +334,7 @@ void game_history_player_reset(GameHistory *history, int player_index,
   if (nickname) {
     player->nickname = string_duplicate(nickname);
   } else {
-    player->nickname = get_formatted_string("Player_%d", player_index);
+    player->nickname = players_data_get_default_nickname(player_index);
   }
   memset(&player->last_rack, 0, sizeof(Rack));
 }

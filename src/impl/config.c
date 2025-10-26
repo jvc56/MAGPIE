@@ -120,6 +120,7 @@ typedef enum {
   ARG_TOKEN_CHALLENGE,
   ARG_TOKEN_UNCHALLENGE,
   ARG_TOKEN_OVERTIME,
+  ARG_TOKEN_SWITCH_NAMES,
   ARG_TOKEN_SHOW,
   ARG_TOKEN_NEXT,
   ARG_TOKEN_PREVIOUS,
@@ -2210,6 +2211,40 @@ char *str_api_overtime(Config *config, ErrorStack *error_stack) {
   return impl_overtime(config, error_stack);
 }
 
+// Switch names command
+
+char *impl_switch_names(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot switch names without a lexicon"));
+    return empty_string();
+  }
+
+  config_init_game(config);
+
+  PlayersData *players_data = config_get_players_data(config);
+  char *p1_name = string_duplicate(players_data_get_name(players_data, 0));
+  const char *p2_name = players_data_get_name(players_data, 1);
+  players_data_set_name(players_data, 0, p2_name);
+  players_data_set_name(players_data, 1, p1_name);
+  free(p1_name);
+  update_game_history_with_config(config);
+  return empty_string();
+}
+
+void execute_switch_names(Config *config, ErrorStack *error_stack) {
+  char *result = impl_switch_names(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+    execute_show(config, error_stack);
+  }
+  free(result);
+}
+
+char *str_api_switch_names(Config *config, ErrorStack *error_stack) {
+  return impl_switch_names(config, error_stack);
+}
+
 // Game navigation helper and command
 
 char *impl_next(Config *config, ErrorStack *error_stack) {
@@ -3736,6 +3771,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   cmd(ARG_TOKEN_CHALLENGE, "challenge", 0, 1, challenge, generic);
   cmd(ARG_TOKEN_UNCHALLENGE, "unchallenge", 0, 1, unchallenge, generic);
   cmd(ARG_TOKEN_OVERTIME, "overtimepenalty", 2, 2, overtime, generic);
+  cmd(ARG_TOKEN_SWITCH_NAMES, "switchnames", 0, 0, switch_names, generic);
   cmd(ARG_TOKEN_SHOW, "show", 0, 0, show, generic);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic);
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic);
