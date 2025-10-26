@@ -124,4 +124,8 @@ void game_history_insert_challenge_bonus_game_event(
     const Equity score_adjustment, ErrorStack *error_stack);
 void game_history_remove_challenge_bonus_game_event(GameHistory *game_history);
 
+void game_history_set_gcg_filename(GameHistory *game_history,
+                                   const char *user_provided_gcg_filename);
+const char *game_history_get_gcg_filename(const GameHistory *game_history);
+
 #endif

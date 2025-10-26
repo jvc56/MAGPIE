@@ -3,6 +3,7 @@
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 #include "../ent/board_layout.h"
+#include "../ent/data_filepaths.h"
 #include "../ent/equity.h"
 #include "../ent/players_data.h"
 #include "../str/rack_string.h"
@@ -12,6 +13,11 @@
 #include "validated_move.h"
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+enum {
+  MAX_GCG_FILENAME_ATTEMPTS = 10000,
+};
 
 struct GameEvent {
   game_event_t event_type;
@@ -166,6 +172,8 @@ struct GameHistory {
   char *lexicon_name;
   char *ld_name;
   char *board_layout_name;
+  char *gcg_filename;
+  bool user_provided_gcg_filename;
   int num_played_events;
   game_variant_t game_variant;
   GameHistoryPlayer *players[2];
@@ -351,6 +359,54 @@ GameEvent *game_history_get_event(const GameHistory *history, int event_index) {
   return &history->events[event_index];
 }
 
+void string_builder_add_gcg_filename(StringBuilder *sb,
+                                     const GameHistory *game_history,
+                                     const int i) {
+  if (i == 0) {
+    string_builder_add_formatted_string(
+        sb, "%s-vs-%s%s", game_history_player_get_nickname(game_history, 0),
+        game_history_player_get_nickname(game_history, 1), GCG_EXTENSION);
+  } else {
+    string_builder_add_formatted_string(
+        sb, "%s-vs-%s-%d%s", game_history_player_get_nickname(game_history, 0),
+        game_history_player_get_nickname(game_history, 1), i, GCG_EXTENSION);
+  }
+}
+
+void game_history_set_gcg_filename(GameHistory *game_history,
+                                   const char *user_provided_gcg_filename) {
+  if (user_provided_gcg_filename) {
+    // The user has explicited passed in a GCG filename
+    game_history->user_provided_gcg_filename = true;
+    free(game_history->gcg_filename);
+    game_history->gcg_filename = string_duplicate(user_provided_gcg_filename);
+    return;
+  } else if (game_history->user_provided_gcg_filename) {
+    // The user has not passed in a GCG filename, but they have already does so
+    // before, so do not overwrite the current user provided GCG filename
+    // with the default GCG filename.
+    return;
+  }
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_gcg_filename(sb, game_history, 0);
+  for (int i = 0; access(string_builder_peek(sb), F_OK) == 0 &&
+                  i < MAX_GCG_FILENAME_ATTEMPTS;
+       i++) {
+    string_builder_clear(sb);
+    string_builder_add_formatted_string(
+        sb, "%s-vs-%s-%d%s", game_history_player_get_nickname(game_history, 0),
+        game_history_player_get_nickname(game_history, 1), i + 1,
+        GCG_EXTENSION);
+  }
+  free(game_history->gcg_filename);
+  game_history->gcg_filename = string_duplicate(string_builder_peek(sb));
+  string_builder_destroy(sb);
+}
+
+const char *game_history_get_gcg_filename(const GameHistory *game_history) {
+  return game_history->gcg_filename;
+}
+
 void game_history_reset(GameHistory *game_history) {
   free(game_history->title);
   game_history->title = NULL;
@@ -366,6 +422,9 @@ void game_history_reset(GameHistory *game_history) {
   game_history->ld_name = NULL;
   free(game_history->board_layout_name);
   game_history->board_layout_name = board_layout_get_default_name();
+  free(game_history->gcg_filename);
+  game_history->gcg_filename = NULL;
+  game_history->user_provided_gcg_filename = false;
   for (int i = 0; i < 2; i++) {
     game_history_player_reset(game_history, i, NULL, NULL);
   }
@@ -395,6 +454,8 @@ GameHistory *game_history_duplicate(const GameHistory *gh_orig) {
   gh_copy->ld_name = string_duplicate_allow_null(gh_orig->ld_name);
   gh_copy->board_layout_name =
       string_duplicate_allow_null(gh_orig->board_layout_name);
+  gh_copy->gcg_filename = string_duplicate_allow_null(gh_orig->gcg_filename);
+  gh_copy->user_provided_gcg_filename = gh_orig->user_provided_gcg_filename;
   gh_copy->game_variant = gh_orig->game_variant;
   gh_copy->num_events = gh_orig->num_events;
   gh_copy->num_played_events = gh_orig->num_played_events;
@@ -442,6 +503,7 @@ void game_history_destroy(GameHistory *game_history) {
   free(game_history->lexicon_name);
   free(game_history->ld_name);
   free(game_history->board_layout_name);
+  free(game_history->gcg_filename);
   for (int i = 0; i < 2; i++) {
     game_history_player_destroy(game_history->players[i]);
   }

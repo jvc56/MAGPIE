@@ -42,6 +42,12 @@ const char *players_data_get_name(const PlayersData *players_data,
   return players_data->player_names[player_index];
 }
 
+void players_data_switch_names(PlayersData *players_data) {
+  char *const temp = players_data->player_names[0];
+  players_data->player_names[0] = players_data->player_names[1];
+  players_data->player_names[1] = temp;
+}
+
 char *players_data_get_default_name(int player_index) {
   return get_formatted_string("Player %d", player_index + 1);
 }

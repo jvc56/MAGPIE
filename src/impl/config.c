@@ -116,6 +116,7 @@ typedef enum {
   ARG_TOKEN_THRESHOLD,
   ARG_TOKEN_LOAD,
   ARG_TOKEN_NEW_GAME,
+  ARG_TOKEN_EXPORT,
   ARG_TOKEN_COMMIT,
   ARG_TOKEN_CHALLENGE,
   ARG_TOKEN_UNCHALLENGE,
@@ -668,10 +669,8 @@ char *status_generic(Config *config) {
 
 void impl_load_cgp(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-        string_duplicate(
-            "cannot load cgp without letter distribution and lexicon"));
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot load cgp without lexicon"));
     return;
   }
 
@@ -713,10 +712,8 @@ void impl_load_cgp(Config *config, ErrorStack *error_stack) {
 
 void impl_add_moves(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-        string_duplicate(
-            "cannot add moves without letter distribution and lexicon"));
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot add moves without lexicon"));
     return;
   }
 
@@ -766,8 +763,7 @@ void impl_set_rack(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-        string_duplicate(
-            "cannot set player rack without letter distribution and lexicon"));
+        string_duplicate("cannot set player rack without lexicon"));
     return;
   }
 
@@ -803,10 +799,8 @@ void impl_set_rack(Config *config, ErrorStack *error_stack) {
 
 void impl_move_gen(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-        string_duplicate(
-            "cannot generate moves without letter distribution and lexicon"));
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot generate moves without lexicon"));
     return;
   }
 
@@ -865,10 +859,8 @@ void config_infer(const Config *config, bool use_game_history, int target_index,
 
 void impl_infer(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-        string_duplicate(
-            "cannot infer without letter distribution and lexicon"));
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot infer without lexicon"));
     return;
   }
 
@@ -1065,10 +1057,8 @@ void config_simulate(const Config *config, Rack *known_opp_rack,
 
 void impl_sim(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-        string_duplicate(
-            "cannot simulate without letter distribution and lexicon"));
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot simulate without lexicon"));
     return;
   }
 
@@ -1126,10 +1116,8 @@ void config_endgame(Config *config, EndgameResults *endgame_results,
 
 void impl_endgame(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-        string_duplicate(
-            "cannot run endgame without letter distribution and lexicon"));
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot run endgame without lexicon"));
     return;
   }
   config_init_game(config);
@@ -1174,10 +1162,8 @@ void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
 
 void impl_autoplay(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-        string_duplicate(
-            "cannot autoplay without letter distribution and lexicon"));
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot autoplay without lexicon"));
     return;
   }
 
@@ -1224,8 +1210,7 @@ void impl_leave_gen(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-        string_duplicate(
-            "cannot generate leaves without letter distribution and lexicon"));
+        string_duplicate("cannot generate leaves without lexicon"));
     return;
   }
 
@@ -1303,10 +1288,8 @@ void impl_create_data(const Config *config, ErrorStack *error_stack) {
 
 char *impl_show(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-        string_duplicate(
-            "cannot show game without letter distribution and lexicon"));
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot show game without lexicon"));
     return empty_string();
   }
 
@@ -1371,11 +1354,11 @@ char *impl_new_game(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-        string_duplicate(
-            "cannot create new game without letter distribution and lexicon"));
+        string_duplicate("cannot create new game without lexicon"));
     return empty_string();
   }
   config_init_game(config);
+  game_reset(config->game);
   game_history_reset(config->game_history);
   update_game_history_with_config(config);
   for (int player_index = 0; player_index < 2; player_index++) {
@@ -1401,6 +1384,48 @@ void execute_new_game(Config *config, ErrorStack *error_stack) {
 
 char *str_api_new_game(Config *config, ErrorStack *error_stack) {
   return impl_new_game(config, error_stack);
+}
+
+// Export GCG
+
+char *impl_export(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot export game without lexicon"));
+    return empty_string();
+  }
+  if (game_history_get_num_events(config->game_history) == 0) {
+    error_stack_push(error_stack, ERROR_STATUS_EXPORT_NO_GAME_EVENTS,
+                     string_duplicate("cannot export an empty game history"));
+    return empty_string();
+  }
+  config_init_game(config);
+
+  game_history_set_gcg_filename(
+      config->game_history, config_get_parg_value(config, ARG_TOKEN_EXPORT, 0));
+
+  write_gcg(game_history_get_gcg_filename(config->game_history), config->ld,
+            config->game_history, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+
+  return get_formatted_string(
+      "Saved GCG file to %s\n",
+      game_history_get_gcg_filename(config->game_history));
+}
+
+void execute_export(Config *config, ErrorStack *error_stack) {
+  char *result = impl_export(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_export(Config *config, ErrorStack *error_stack) {
+  return impl_export(config, error_stack);
 }
 
 // Commit move
@@ -1873,10 +1898,8 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
 
 char *impl_commit(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-        string_duplicate(
-            "cannot commit a move without letter distribution and lexicon"));
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot commit a move without lexicon"));
     return empty_string();
   }
 
@@ -1920,10 +1943,8 @@ char *str_api_commit(Config *config, ErrorStack *error_stack) {
 
 char *impl_challenge(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-        string_duplicate(
-            "cannot challenge without letter distribution and lexicon"));
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot challenge without lexicon"));
     return empty_string();
   }
 
@@ -2219,15 +2240,11 @@ char *impl_switch_names(Config *config, ErrorStack *error_stack) {
                      string_duplicate("cannot switch names without a lexicon"));
     return empty_string();
   }
-
+  // The players_data_switch_names function needs to be called before
+  // config_init_game so that the const char * player names in the
+  // game are updated to the new pointers.
+  players_data_switch_names(config->players_data);
   config_init_game(config);
-
-  PlayersData *players_data = config_get_players_data(config);
-  char *p1_name = string_duplicate(players_data_get_name(players_data, 0));
-  const char *p2_name = players_data_get_name(players_data, 1);
-  players_data_set_name(players_data, 0, p2_name);
-  players_data_set_name(players_data, 1, p1_name);
-  free(p1_name);
   update_game_history_with_config(config);
   return empty_string();
 }
@@ -2916,7 +2933,7 @@ void config_load_lexicon_dependent_data(Config *config,
                             p1_use_wmp, p2_use_wmp)) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING,
-          string_duplicate("cannot set leaves, letter distribition, or word "
+          string_duplicate("cannot set leaves, letter distribution, or word "
                            "maps without a lexicon"));
     }
     return;
@@ -3767,6 +3784,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   cmd(ARG_TOKEN_CGP, "cgp", 4, 4, load_cgp, generic);
   cmd(ARG_TOKEN_LOAD, "load", 1, 1, load_gcg, generic);
   cmd(ARG_TOKEN_NEW_GAME, "newgame", 0, 2, new_game, generic);
+  cmd(ARG_TOKEN_EXPORT, "export", 0, 1, export, generic);
   cmd(ARG_TOKEN_COMMIT, "commit", 1, 3, commit, generic);
   cmd(ARG_TOKEN_CHALLENGE, "challenge", 0, 1, challenge, generic);
   cmd(ARG_TOKEN_UNCHALLENGE, "unchallenge", 0, 1, unchallenge, generic);

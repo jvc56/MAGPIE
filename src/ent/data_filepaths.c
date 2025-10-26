@@ -6,14 +6,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#define KWG_EXTENSION ".kwg"
-#define WORDMAP_EXTENSION ".wmp"
-#define KLV_EXTENSION ".klv2"
-#define TXT_EXTENSION ".txt"
-#define CSV_EXTENSION ".csv"
-#define GCG_EXTENSION ".gcg"
-#define LEXICON_EXTENSION ".txt"
-
 static const char *const filepath_type_names[] = {
     "kwg", "klv",    "board layout", "win percentage", "letter distribution",
     "gcg", "leaves", "lexicon",      "wordmap"};

@@ -16,6 +16,9 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
+
+#define TEST_GCG_FILENAME "a.gcg"
 
 void test_config_load_error(Config *config, const char *cmd,
                             error_code_t expected_status,
@@ -1307,8 +1310,161 @@ void test_config_anno(void) {
   config_destroy(config);
 }
 
+void test_config_export(void) {
+  Config *config = config_create_default_test();
+  assert_config_exec_status(config, "ex",
+                            ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
+  assert_config_exec_status(config, "ex " TEST_GCG_FILENAME,
+                            ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
+
+  assert_config_exec_status(config, "set -lex CSW24", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "ex", ERROR_STATUS_EXPORT_NO_GAME_EVENTS);
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "ex", ERROR_STATUS_EXPORT_NO_GAME_EVENTS);
+  assert_config_exec_status(config, "set -p1 Alice -p2 Bob",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "ex", ERROR_STATUS_EXPORT_NO_GAME_EVENTS);
+
+  assert_config_exec_status(config, "rack ABCDEFG", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
+
+  assert(player_get_score(game_get_player(config_get_game(config), 0)) ==
+         int_to_equity(28));
+  assert(player_get_score(game_get_player(config_get_game(config), 1)) ==
+         int_to_equity(0));
+
+  assert_config_exec_status(config, "ex " TEST_GCG_FILENAME,
+                            ERROR_STATUS_SUCCESS);
+
+  assert(access(game_history_get_gcg_filename(config_get_game_history(config)),
+                F_OK) == 0);
+
+  assert_config_exec_status(config, "rack HIJKLMN", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
+
+  assert(player_get_score(game_get_player(config_get_game(config), 0)) ==
+         int_to_equity(28));
+  assert(player_get_score(game_get_player(config_get_game(config), 1)) ==
+         int_to_equity(32));
+
+  // This should export with the same "a.gcg" name
+  assert_config_exec_status(config, "ex", ERROR_STATUS_SUCCESS);
+
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(config_get_game(config), 0)) ==
+         int_to_equity(0));
+  assert(player_get_score(game_get_player(config_get_game(config), 1)) ==
+         int_to_equity(0));
+
+  assert_config_exec_status(config, "load " TEST_GCG_FILENAME,
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "goto end", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(config_get_game(config), 0)) ==
+         int_to_equity(28));
+  assert(player_get_score(game_get_player(config_get_game(config), 1)) ==
+         int_to_equity(32));
+
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack OPQRSTU", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(config_get_game(config), 0)) ==
+         int_to_equity(52));
+  assert(player_get_score(game_get_player(config_get_game(config), 1)) ==
+         int_to_equity(0));
+
+  // This should use a default name
+  assert_config_exec_status(config, "ex", ERROR_STATUS_SUCCESS);
+
+  char *default_name_1 = string_duplicate(
+      game_history_get_gcg_filename(config_get_game_history(config)));
+  assert(access(default_name_1, F_OK) == 0);
+
+  // Names has not updated, so the "first try" default name will clash with the
+  // existing file and it will have to be incremented.
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack ATALAYA", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(config_get_game(config), 0)) ==
+         int_to_equity(78));
+  assert(player_get_score(game_get_player(config_get_game(config), 1)) ==
+         int_to_equity(0));
+
+  // This should use a default name
+  assert_config_exec_status(config, "ex", ERROR_STATUS_SUCCESS);
+
+  char *default_name_2 = string_duplicate(
+      game_history_get_gcg_filename(config_get_game_history(config)));
+  assert(access(default_name_2, F_OK) == 0);
+
+  // Names has not updated, so the "first try" and "second try" default names
+  // will clash with the existing files and it will have to be incremented.
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack BEZIQUE", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(config_get_game(config), 0)) ==
+         int_to_equity(124));
+  assert(player_get_score(game_get_player(config_get_game(config), 1)) ==
+         int_to_equity(0));
+
+  // This should use a default name
+  assert_config_exec_status(config, "ex", ERROR_STATUS_SUCCESS);
+
+  char *default_name_3 = string_duplicate(
+      game_history_get_gcg_filename(config_get_game_history(config)));
+  assert(access(default_name_3, F_OK) == 0);
+
+  StringBuilder *sb_load_cmd = string_builder_create();
+
+  string_builder_add_formatted_string(sb_load_cmd, "load %s", default_name_1);
+  assert_config_exec_status(config, string_builder_peek(sb_load_cmd),
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "goto end", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(config_get_game(config), 0)) ==
+         int_to_equity(52));
+  assert(player_get_score(game_get_player(config_get_game(config), 1)) ==
+         int_to_equity(0));
+  string_builder_clear(sb_load_cmd);
+
+  string_builder_add_formatted_string(sb_load_cmd, "load %s", default_name_2);
+  assert_config_exec_status(config, string_builder_peek(sb_load_cmd),
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "goto end", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(config_get_game(config), 0)) ==
+         int_to_equity(78));
+  assert(player_get_score(game_get_player(config_get_game(config), 1)) ==
+         int_to_equity(0));
+  string_builder_clear(sb_load_cmd);
+
+  string_builder_add_formatted_string(sb_load_cmd, "load %s", default_name_3);
+  assert_config_exec_status(config, string_builder_peek(sb_load_cmd),
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "goto end", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(config_get_game(config), 0)) ==
+         int_to_equity(124));
+  assert(player_get_score(game_get_player(config_get_game(config), 1)) ==
+         int_to_equity(0));
+  string_builder_clear(sb_load_cmd);
+
+  remove(TEST_GCG_FILENAME);
+  remove(default_name_3);
+  remove(default_name_2);
+  remove(default_name_1);
+
+  string_builder_destroy(sb_load_cmd);
+  free(default_name_3);
+  free(default_name_2);
+  free(default_name_1);
+  config_destroy(config);
+}
+
 void test_config(void) {
   test_config_anno();
+  test_config_export();
   test_config_load_error_cases();
   test_config_load_success();
   test_config_exec_parse_args();

@@ -15,6 +15,7 @@ void players_data_destroy(PlayersData *players_data);
 
 const char *players_data_get_name(const PlayersData *players_data,
                                   int player_index);
+void players_data_switch_names(PlayersData *players_data);
 char *players_data_get_default_name(int player_index);
 char *players_data_get_default_nickname(int player_index);
 
