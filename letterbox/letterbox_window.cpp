@@ -9,11 +9,14 @@
 #include <QDir>
 #include <QCoreApplication>
 #include <QDebug>
+#include <QFont>
+#include <QFontMetrics>
 #include <algorithm>
 #include <unordered_map>
 
 LetterboxWindow::LetterboxWindow(QWidget *parent)
-    : QMainWindow(parent), config(nullptr), kwg(nullptr), ld(nullptr), currentIndex(0)
+    : QMainWindow(parent), config(nullptr), kwg(nullptr), ld(nullptr), currentIndex(0),
+      globalMaxFrontWidth(0), globalMaxBackWidth(0), globalMaxWordWidth(0)
 {
     setupUI();
 
@@ -60,7 +63,7 @@ LetterboxWindow::~LetterboxWindow()
 
 void LetterboxWindow::setupUI()
 {
-    setWindowTitle("Letterbox - Word Study Tool");
+    setWindowTitle("Letterbox");
     resize(800, 800);
 
     centralWidget = new QWidget(this);
@@ -78,14 +81,14 @@ void LetterboxWindow::setupUI()
     solvedWidget = new QWidget();
     solvedLayout = new QVBoxLayout(solvedWidget);
     solvedLayout->setAlignment(Qt::AlignBottom | Qt::AlignHCenter);
-    solvedLayout->setSpacing(15);
+    solvedLayout->setSpacing(4);  // 4px vertical spacing between boxes
 
     solvedScrollArea->setWidget(solvedWidget);
     mainLayout->addWidget(solvedScrollArea, 2);
 
     // Middle: Input field (full width)
     inputField = new QLineEdit(this);
-    inputField->setPlaceholderText("Type answer here...");
+    inputField->setPlaceholderText("...");
     inputField->setAlignment(Qt::AlignCenter);
     inputField->setStyleSheet("QLineEdit { padding: 15px; font-size: 20px; font-weight: bold; margin: 2px 0px; }");
     connect(inputField, &QLineEdit::textChanged, this, &LetterboxWindow::onTextChanged);
@@ -311,6 +314,19 @@ void LetterboxWindow::updateDisplay()
         delete item;
     }
 
+    // First pass: collect all boxes and calculate global maximum hook widths
+    std::vector<AlphagramBox*> boxes;
+    QFont hookFont;
+    hookFont.setPixelSize(12);
+    QFontMetrics hookMetrics(hookFont);
+
+    QFont wordFont("Jost", 18, QFont::Bold);
+    QFontMetrics wordMetrics(wordFont);
+
+    int globalMaxFrontWidth = 0;
+    int globalMaxBackWidth = 0;
+    int globalMaxWordWidth = 0;
+
     // Add all studied alphagrams (fully revealed) - oldest first
     for (int i = 0; i < currentIndex; i++) {
         if (alphagrams[i].studied) {
@@ -322,12 +338,20 @@ void LetterboxWindow::updateDisplay()
                 QString frontStr = QString::fromUtf8(frontHooks ? frontHooks : "");
                 QString backStr = QString::fromUtf8(backHooks ? backHooks : "");
 
+                // Calculate widths for global max
+                int frontWidth = hookMetrics.horizontalAdvance(frontStr);
+                int backWidth = hookMetrics.horizontalAdvance(backStr);
+                int wordWidth = wordMetrics.horizontalAdvance(QString::fromStdString(entry.word));
+                globalMaxFrontWidth = std::max(globalMaxFrontWidth, frontWidth);
+                globalMaxBackWidth = std::max(globalMaxBackWidth, backWidth);
+                globalMaxWordWidth = std::max(globalMaxWordWidth, wordWidth);
+
                 free(frontHooks);
                 free(backHooks);
 
                 box->addWord(QString::fromStdString(entry.word), frontStr, backStr);
             }
-            solvedLayout->addWidget(box, 0, Qt::AlignCenter);
+            boxes.push_back(box);
         }
     }
 
@@ -342,6 +366,14 @@ void LetterboxWindow::updateDisplay()
             QString frontStr = QString::fromUtf8(frontHooks ? frontHooks : "");
             QString backStr = QString::fromUtf8(backHooks ? backHooks : "");
 
+            // Calculate widths for global max
+            int frontWidth = hookMetrics.horizontalAdvance(frontStr);
+            int backWidth = hookMetrics.horizontalAdvance(backStr);
+            int wordWidth = wordMetrics.horizontalAdvance(QString::fromStdString(entry.word));
+            globalMaxFrontWidth = std::max(globalMaxFrontWidth, frontWidth);
+            globalMaxBackWidth = std::max(globalMaxBackWidth, backWidth);
+            globalMaxWordWidth = std::max(globalMaxWordWidth, wordWidth);
+
             free(frontHooks);
             free(backHooks);
 
@@ -352,10 +384,18 @@ void LetterboxWindow::updateDisplay()
             for (size_t i = 0; i < entry.word.length(); i++) {
                 placeholder += "-";
             }
+            int wordWidth = wordMetrics.horizontalAdvance(placeholder);
+            globalMaxWordWidth = std::max(globalMaxWordWidth, wordWidth);
             currentBox->addWord(placeholder, "", "");
         }
     }
-    solvedLayout->addWidget(currentBox, 0, Qt::AlignCenter);
+    boxes.push_back(currentBox);
+
+    // Finalize and add all boxes to layout
+    for (auto* box : boxes) {
+        box->finalize();
+        solvedLayout->addWidget(box, 0, Qt::AlignCenter);
+    }
 
     // Bottom: Show queue of UPCOMING alphagrams (not including current) - starts with current alphagram
     QString queueHtml = "<div style='text-align: center;'>";
@@ -379,7 +419,9 @@ void LetterboxWindow::updateDisplay()
     inputField->setFocus();
 
     // Scroll to bottom to keep the current alphagram visible
-    QTimer::singleShot(0, this, [this]() {
+    // Need a small delay to ensure layout is fully calculated
+    QTimer::singleShot(50, this, [this]() {
+        solvedWidget->updateGeometry();
         solvedScrollArea->verticalScrollBar()->setValue(
             solvedScrollArea->verticalScrollBar()->maximum()
         );

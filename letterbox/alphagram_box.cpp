@@ -5,50 +5,80 @@
 #include <QFontMetrics>
 
 AlphagramBox::AlphagramBox(QWidget *parent)
-    : QWidget(parent)
+    : QWidget(parent), tableLabel(nullptr)
 {
     layout = new QVBoxLayout(this);
-    layout->setContentsMargins(20, 15, 20, 15);
-    layout->setSpacing(5);
+    // Add margins to keep table content inside the painted border
+    layout->setContentsMargins(4, 4, 4, 4);
+    layout->setSpacing(0);
     setLayout(layout);
 }
 
 void AlphagramBox::addWord(const QString& word, const QString& frontHooks, const QString& backHooks)
 {
-    QLabel* label = new QLabel(this);
+    words.push_back({word, frontHooks, backHooks});
+}
 
-    // Create HTML with hooks and word using Jost Bold
-    QString html = "<div style='white-space: nowrap;'>";
+void AlphagramBox::finalize()
+{
+    if (words.empty()) {
+        return;
+    }
 
-    // Front hooks (smaller, gray)
-    html += QString("<span style='font-size: 12px; color: #666; margin-right: 8px;'>%1</span>")
-            .arg(frontHooks);
+    // Check if any word has hooks
+    bool hasAnyFrontHooks = false;
+    bool hasAnyBackHooks = false;
+    for (const auto& wordData : words) {
+        if (!wordData.frontHooks.isEmpty()) hasAnyFrontHooks = true;
+        if (!wordData.backHooks.isEmpty()) hasAnyBackHooks = true;
+    }
 
-    // Word (Jost Bold, larger, black)
-    html += QString("<span style='font-family: \"Jost\", sans-serif; font-size: 18px; font-weight: bold; letter-spacing: 1px; color: #000;'>%1</span>")
-            .arg(word);
+    // Create a single table for all words
+    tableLabel = new QLabel(this);
 
-    // Back hooks (smaller, gray)
-    html += QString("<span style='font-size: 12px; color: #666; margin-left: 8px;'>%1</span>")
-            .arg(backHooks);
+    QString html = "<table style='width: 100%; border-collapse: collapse;'>";
 
-    html += "</div>";
+    for (const auto& wordData : words) {
+        html += "<tr>";
 
-    label->setText(html);
-    label->setAlignment(Qt::AlignCenter);
-    label->setTextFormat(Qt::RichText);
+        // Always add front hooks cell if any word in the group has front hooks
+        if (hasAnyFrontHooks) {
+            html += QString("<td style='font-size: 12px; color: #666; padding: 8px 4px; text-align: right; border-right: 1px solid #000;'>%1</td>")
+                    .arg(wordData.frontHooks);
+        }
 
-    layout->addWidget(label);
-    wordLabels.push_back(label);
+        // Word (Jost Bold, larger, black)
+        QString wordBorder = hasAnyBackHooks ? "border-right: 1px solid #000;" : "";
+        html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: 18px; font-weight: bold; letter-spacing: 1px; color: #000; text-align: center; padding: 8px 4px; %1'>%2</td>")
+                .arg(wordBorder)
+                .arg(wordData.word);
+
+        // Always add back hooks cell if any word in the group has back hooks
+        if (hasAnyBackHooks) {
+            html += QString("<td style='font-size: 12px; color: #666; padding: 8px 4px; text-align: left;'>%1</td>")
+                    .arg(wordData.backHooks);
+        }
+
+        html += "</tr>";
+    }
+
+    html += "</table>";
+
+    tableLabel->setText(html);
+    tableLabel->setAlignment(Qt::AlignCenter);
+    tableLabel->setTextFormat(Qt::RichText);
+
+    layout->addWidget(tableLabel);
 }
 
 void AlphagramBox::clear()
 {
-    for (auto label : wordLabels) {
-        layout->removeWidget(label);
-        delete label;
+    if (tableLabel) {
+        layout->removeWidget(tableLabel);
+        delete tableLabel;
+        tableLabel = nullptr;
     }
-    wordLabels.clear();
+    words.clear();
 }
 
 void AlphagramBox::paintEvent(QPaintEvent *event)
@@ -58,15 +88,11 @@ void AlphagramBox::paintEvent(QPaintEvent *event)
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
 
-    // Draw rounded rectangle border
-    QPainterPath path;
-    path.addRoundedRect(rect().adjusted(2, 2, -2, -2), 10, 10);
-
     // Fill background
-    painter.fillPath(path, QColor(248, 248, 248));
+    painter.fillRect(rect(), QColor(248, 248, 248));
 
     // Draw border
-    QPen pen(Qt::black, 3);
+    QPen pen(Qt::black, 1);
     painter.setPen(pen);
-    painter.drawPath(path);
+    painter.drawRect(rect().adjusted(0, 0, -1, -1));
 }

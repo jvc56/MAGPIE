@@ -45,6 +45,7 @@ private:
     void setupUI();
     void updateDisplay();
     void updateProgress();
+    void calculateGlobalMaxWidths();
     std::string sortVowelsFirst(const std::string& word);
     QString formatAlphagramSet(const AlphagramSet& set, bool showAll);
 
@@ -53,6 +54,11 @@ private:
     LetterDistribution* ld;
     std::vector<AlphagramSet> alphagrams;
     int currentIndex;
+
+    // Global maximum widths for alignment (calculated once at startup)
+    int globalMaxFrontWidth;
+    int globalMaxBackWidth;
+    int globalMaxWordWidth;
 
     // UI elements
     QWidget* centralWidget;
