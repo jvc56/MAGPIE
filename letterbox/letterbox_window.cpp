@@ -13,13 +13,15 @@
 #include <QFontMetrics>
 #include <algorithm>
 #include <unordered_map>
+#include <chrono>
 
 LetterboxWindow::LetterboxWindow(QWidget *parent)
     : QMainWindow(parent), config(nullptr), kwg(nullptr), ld(nullptr), currentIndex(0),
       globalMaxFrontWidth(0), globalMaxBackWidth(0), globalMaxWordWidth(0),
+      renderWindowSize(15), userScrolledUp(false),
       scaleFactor(1.0), scaledWordSize(36), scaledHookSize(24), scaledExtensionSize(14),
       scaledInputSize(20), scaledQueueCurrentSize(24), scaledQueueUpcomingSize(16),
-      showDebugInfo(false)
+      showDebugInfo(false), showComputeTime(false), showRenderTime(false), lastRenderTimeMicros(0)
 {
     setupUI();
     setupMenuBar();
@@ -185,6 +187,9 @@ void LetterboxWindow::setupUI()
     debugLabel->setVisible(false);
     debugLabel->raise(); // Keep it on top
 
+    // Render time label (created on demand in updateDisplay)
+    renderTimeLabel = nullptr;
+
     // Progress info (keep but don't add buttons)
     progressLabel = new QLabel("", this);
     progressLabel->setAlignment(Qt::AlignCenter);
@@ -202,6 +207,10 @@ void LetterboxWindow::setupUI()
     pal.setColor(QPalette::Window, QColor(220, 220, 220));
     setPalette(pal);
     setAutoFillBackground(true);
+
+    // Connect scroll bar to detect when user scrolls up
+    connect(solvedScrollArea->verticalScrollBar(), &QScrollBar::valueChanged,
+            this, &LetterboxWindow::onScrollChanged);
 }
 
 std::string LetterboxWindow::sortVowelsFirst(const std::string& word)
@@ -363,6 +372,9 @@ QString LetterboxWindow::formatAlphagramSet(const AlphagramSet& set, bool showAl
 
 void LetterboxWindow::updateDisplay()
 {
+    auto renderStartTime = std::chrono::high_resolution_clock::now();
+    auto t0 = renderStartTime;
+
     if (currentIndex >= alphagrams.size()) {
         // Clear solved layout and show "Done!" message
         QLayoutItem* item;
@@ -385,6 +397,8 @@ void LetterboxWindow::updateDisplay()
         delete item->widget();
         delete item;
     }
+    auto t1 = std::chrono::high_resolution_clock::now();
+    int clearLayoutMicros = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
 
     // First pass: collect all boxes and calculate global maximum hook widths
     std::vector<AlphagramBox*> boxes;
@@ -400,19 +414,22 @@ void LetterboxWindow::updateDisplay()
     int globalMaxWordWidth = 0;
 
     // Add all studied alphagrams (fully revealed) - oldest first
-    for (int i = 0; i < currentIndex; i++) {
+    // Only render the last N solved alphagrams to keep performance constant
+    // renderWindowSize increases if user scrolls up to see more history
+    auto t2 = std::chrono::high_resolution_clock::now();
+    int startIndex = std::max(0, currentIndex - renderWindowSize);
+
+    for (int i = startIndex; i < currentIndex; i++) {
         if (alphagrams[i].studied) {
             AlphagramBox* box = new AlphagramBox(solvedWidget);
             for (const auto& entry : alphagrams[i].words) {
-                char* frontHooks = letterbox_find_front_hooks(kwg, ld, entry.word.c_str());
-                char* backHooks = letterbox_find_back_hooks(kwg, ld, entry.word.c_str());
-                char* frontExts = letterbox_find_front_extensions(kwg, ld, entry.word.c_str(), 7);
-                char* backExts = letterbox_find_back_extensions(kwg, ld, entry.word.c_str(), 7);
+                // Get cached or compute hook/extension data
+                const HookExtensionCache& cache = getOrComputeHookExtensions(entry.word);
 
-                QString frontStr = QString::fromUtf8(frontHooks ? frontHooks : "");
-                QString backStr = QString::fromUtf8(backHooks ? backHooks : "");
-                QString frontExtStr = QString::fromUtf8(frontExts ? frontExts : "");
-                QString backExtStr = QString::fromUtf8(backExts ? backExts : "");
+                QString frontStr = QString::fromStdString(cache.frontHooks);
+                QString backStr = QString::fromStdString(cache.backHooks);
+                QString frontExtStr = QString::fromStdString(cache.frontExtensions);
+                QString backExtStr = QString::fromStdString(cache.backExtensions);
 
                 // Calculate widths for global max
                 int frontWidth = hookMetrics.horizontalAdvance(frontStr);
@@ -422,13 +439,8 @@ void LetterboxWindow::updateDisplay()
                 globalMaxBackWidth = std::max(globalMaxBackWidth, backWidth);
                 globalMaxWordWidth = std::max(globalMaxWordWidth, wordWidth);
 
-                free(frontHooks);
-                free(backHooks);
-                free(frontExts);
-                free(backExts);
-
                 box->addWord(QString::fromStdString(entry.word), frontStr, backStr,
-                           frontExtStr, backExtStr);
+                           frontExtStr, backExtStr, false, cache.computeTimeMicros);
             }
             boxes.push_back(box);
         }
@@ -438,16 +450,13 @@ void LetterboxWindow::updateDisplay()
     AlphagramBox* currentBox = new AlphagramBox(solvedWidget);
     for (const auto& entry : alphagrams[currentIndex].words) {
         if (entry.revealed) {
-            // Show the actual word with hooks and extensions
-            char* frontHooks = letterbox_find_front_hooks(kwg, ld, entry.word.c_str());
-            char* backHooks = letterbox_find_back_hooks(kwg, ld, entry.word.c_str());
-            char* frontExts = letterbox_find_front_extensions(kwg, ld, entry.word.c_str(), 7);
-            char* backExts = letterbox_find_back_extensions(kwg, ld, entry.word.c_str(), 7);
+            // Show the actual word with hooks and extensions (cached)
+            const HookExtensionCache& cache = getOrComputeHookExtensions(entry.word);
 
-            QString frontStr = QString::fromUtf8(frontHooks ? frontHooks : "");
-            QString backStr = QString::fromUtf8(backHooks ? backHooks : "");
-            QString frontExtStr = QString::fromUtf8(frontExts ? frontExts : "");
-            QString backExtStr = QString::fromUtf8(backExts ? backExts : "");
+            QString frontStr = QString::fromStdString(cache.frontHooks);
+            QString backStr = QString::fromStdString(cache.backHooks);
+            QString frontExtStr = QString::fromStdString(cache.frontExtensions);
+            QString backExtStr = QString::fromStdString(cache.backExtensions);
 
             // Calculate widths for global max
             int frontWidth = hookMetrics.horizontalAdvance(frontStr);
@@ -457,13 +466,8 @@ void LetterboxWindow::updateDisplay()
             globalMaxBackWidth = std::max(globalMaxBackWidth, backWidth);
             globalMaxWordWidth = std::max(globalMaxWordWidth, wordWidth);
 
-            free(frontHooks);
-            free(backHooks);
-            free(frontExts);
-            free(backExts);
-
             currentBox->addWord(QString::fromStdString(entry.word), frontStr, backStr,
-                              frontExtStr, backExtStr);
+                              frontExtStr, backExtStr, false, cache.computeTimeMicros);
         } else {
             // Show placeholder dashes (one dash per letter) - gray and regular weight
             QString placeholder;
@@ -476,14 +480,29 @@ void LetterboxWindow::updateDisplay()
         }
     }
     boxes.push_back(currentBox);
+    auto t3 = std::chrono::high_resolution_clock::now();
+    int createWidgetsMicros = std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count();
 
     // Finalize and add all boxes to layout
+    auto t4 = std::chrono::high_resolution_clock::now();
     for (auto* box : boxes) {
-        box->finalize(scaledWordSize, scaledHookSize, scaledExtensionSize);
+        box->finalize(scaledWordSize, scaledHookSize, scaledExtensionSize, showComputeTime);
         solvedLayout->addWidget(box, 0, Qt::AlignCenter);
+    }
+    auto t5 = std::chrono::high_resolution_clock::now();
+    int finalizeAndAddMicros = std::chrono::duration_cast<std::chrono::microseconds>(t5 - t4).count();
+
+    // Add placeholder timing label now (will be updated at the end)
+    if (showRenderTime) {
+        renderTimeLabel = new QLabel(solvedWidget);
+        renderTimeLabel->setStyleSheet("QLabel { color: #666; font-family: monospace; font-size: 9px; padding: 5px; line-height: 1.4; }");
+        renderTimeLabel->setAlignment(Qt::AlignCenter);
+        renderTimeLabel->setText("Calculating...");
+        solvedLayout->addWidget(renderTimeLabel, 0, Qt::AlignCenter);
     }
 
     // Bottom: Show queue of UPCOMING alphagrams (not including current) - starts with current alphagram
+    auto t6 = std::chrono::high_resolution_clock::now();
     QString queueHtml = "";
 
     // Show current alphagram at top of queue (Jost Bold, white)
@@ -500,21 +519,82 @@ void LetterboxWindow::updateDisplay()
                 .arg(QString::fromStdString(set.alphagram));
     }
     queueLabel->setText(queueHtml);
+    auto t7 = std::chrono::high_resolution_clock::now();
+    int queueHtmlMicros = std::chrono::duration_cast<std::chrono::microseconds>(t7 - t6).count();
 
     // Clear and focus input field
+    auto t8 = std::chrono::high_resolution_clock::now();
     inputField->clear();
     inputField->setFocus();
+    auto t9 = std::chrono::high_resolution_clock::now();
+    int inputClearMicros = std::chrono::duration_cast<std::chrono::microseconds>(t9 - t8).count();
 
     // Scroll to bottom to keep the current alphagram visible
-    // Need a small delay to ensure layout is fully calculated
-    QTimer::singleShot(50, this, [this]() {
-        solvedWidget->updateGeometry();
-        solvedScrollArea->verticalScrollBar()->setValue(
-            solvedScrollArea->verticalScrollBar()->maximum()
-        );
-    });
+    auto t10 = std::chrono::high_resolution_clock::now();
+    auto t11 = std::chrono::high_resolution_clock::now();
+    int scrollMicros = std::chrono::duration_cast<std::chrono::microseconds>(t11 - t10).count();
 
+    auto t12 = std::chrono::high_resolution_clock::now();
     updateProgress();
+    auto t13 = std::chrono::high_resolution_clock::now();
+    int updateProgressMicros = std::chrono::duration_cast<std::chrono::microseconds>(t13 - t12).count();
+
+    // Capture render time at the end
+    auto renderEndTime = std::chrono::high_resolution_clock::now();
+    lastRenderTimeMicros = std::chrono::duration_cast<std::chrono::microseconds>(renderEndTime - renderStartTime).count();
+
+    // Update timing label with final values
+    if (showRenderTime && renderTimeLabel) {
+        QString timingText = QString(
+            "Total: %1μs | Clear: %2μs | Create: %3μs | Finalize: %4μs | Queue: %5μs | Input: %6μs | Scroll: %7μs | Progress: %8μs"
+        ).arg(lastRenderTimeMicros)
+         .arg(clearLayoutMicros)
+         .arg(createWidgetsMicros)
+         .arg(finalizeAndAddMicros)
+         .arg(queueHtmlMicros)
+         .arg(inputClearMicros)
+         .arg(scrollMicros)
+         .arg(updateProgressMicros);
+
+        renderTimeLabel->setText(timingText);
+    }
+
+    // Force layout update and scroll to bottom (only if user hasn't manually scrolled)
+    // Use a very small delay (10ms) to ensure layout is complete but still feel responsive
+    solvedWidget->updateGeometry();
+    solvedLayout->update();
+
+    if (!userScrolledUp) {
+        // Only auto-scroll if user hasn't manually scrolled up
+        QTimer::singleShot(10, this, [this]() {
+            solvedScrollArea->verticalScrollBar()->setValue(
+                solvedScrollArea->verticalScrollBar()->maximum()
+            );
+        });
+    } else {
+        // User has scrolled up, expand window and don't auto-scroll
+        renderWindowSize = std::min(50, currentIndex);
+    }
+}
+
+void LetterboxWindow::onScrollChanged(int value)
+{
+    QScrollBar* vbar = solvedScrollArea->verticalScrollBar();
+
+    // Detect if user scrolled up (not at maximum)
+    if (value < vbar->maximum() - 10) {  // 10px threshold to avoid jitter
+        if (!userScrolledUp) {
+            userScrolledUp = true;
+            // Expand window size to show more history
+            renderWindowSize = std::min(50, currentIndex);
+        }
+    } else {
+        // User scrolled back to bottom, reset to normal mode
+        if (userScrolledUp) {
+            userScrolledUp = false;
+            renderWindowSize = 15;
+        }
+    }
 }
 
 void LetterboxWindow::onTextChanged(const QString& text)
@@ -607,11 +687,24 @@ void LetterboxWindow::setupMenuBar()
     setMenuBar(menuBar);
 
     QMenu* debugMenu = menuBar->addMenu("Debug");
+
     debugAction = new QAction("Show Debug Info", this);
     debugAction->setCheckable(true);
     debugAction->setChecked(false);
     connect(debugAction, &QAction::triggered, this, &LetterboxWindow::toggleDebugInfo);
     debugMenu->addAction(debugAction);
+
+    computeTimeAction = new QAction("Show Compute Time", this);
+    computeTimeAction->setCheckable(true);
+    computeTimeAction->setChecked(false);
+    connect(computeTimeAction, &QAction::triggered, this, &LetterboxWindow::toggleComputeTime);
+    debugMenu->addAction(computeTimeAction);
+
+    renderTimeAction = new QAction("Show Render Time", this);
+    renderTimeAction->setCheckable(true);
+    renderTimeAction->setChecked(false);
+    connect(renderTimeAction, &QAction::triggered, this, &LetterboxWindow::toggleRenderTime);
+    debugMenu->addAction(renderTimeAction);
 }
 
 void LetterboxWindow::toggleDebugInfo()
@@ -621,6 +714,18 @@ void LetterboxWindow::toggleDebugInfo()
     if (showDebugInfo) {
         updateDebugInfo();
     }
+}
+
+void LetterboxWindow::toggleComputeTime()
+{
+    showComputeTime = computeTimeAction->isChecked();
+    updateDisplay();
+}
+
+void LetterboxWindow::toggleRenderTime()
+{
+    showRenderTime = renderTimeAction->isChecked();
+    updateDisplay();
 }
 
 void LetterboxWindow::updateDebugInfo()
@@ -696,4 +801,43 @@ void LetterboxWindow::updateScaledFontSizes()
     QFont inputFont = inputField->font();
     inputFont.setPixelSize(scaledInputSize);
     inputField->setFont(inputFont);
+}
+
+const HookExtensionCache& LetterboxWindow::getOrComputeHookExtensions(const std::string& word)
+{
+    // Check if already cached
+    auto it = hookExtensionCache.find(word);
+    if (it != hookExtensionCache.end()) {
+        return it->second;
+    }
+
+    // Not cached, compute now
+    HookExtensionCache cache;
+
+    auto startTime = std::chrono::high_resolution_clock::now();
+
+    char* frontHooks = nullptr;
+    char* frontExts = nullptr;
+    char* backHooks = nullptr;
+    char* backExts = nullptr;
+    letterbox_find_front_hooks_and_extensions(kwg, ld, word.c_str(), 7, &frontHooks, &frontExts);
+    letterbox_find_back_hooks_and_extensions(kwg, ld, word.c_str(), 7, &backHooks, &backExts);
+
+    auto endTime = std::chrono::high_resolution_clock::now();
+    cache.computeTimeMicros = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count();
+
+    cache.frontHooks = frontHooks ? frontHooks : "";
+    cache.backHooks = backHooks ? backHooks : "";
+    cache.frontExtensions = frontExts ? frontExts : "";
+    cache.backExtensions = backExts ? backExts : "";
+    cache.cached = true;
+
+    free(frontHooks);
+    free(backHooks);
+    free(frontExts);
+    free(backExts);
+
+    // Store in cache and return reference
+    hookExtensionCache[word] = cache;
+    return hookExtensionCache[word];
 }

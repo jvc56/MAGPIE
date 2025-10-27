@@ -25,6 +25,15 @@ struct WordEntry {
     bool revealed;
 };
 
+struct HookExtensionCache {
+    std::string frontHooks;
+    std::string backHooks;
+    std::string frontExtensions;
+    std::string backExtensions;
+    int computeTimeMicros;
+    bool cached;
+};
+
 struct AlphagramSet {
     std::string alphagram;  // Vowels-first sorted
     std::vector<WordEntry> words;
@@ -45,6 +54,9 @@ private slots:
     void loadWordList();
     void onTextChanged(const QString& text);
     void toggleDebugInfo();
+    void toggleComputeTime();
+    void toggleRenderTime();
+    void onScrollChanged(int value);
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
@@ -59,6 +71,7 @@ private:
     void updateScaledFontSizes();
     std::string sortVowelsFirst(const std::string& word);
     QString formatAlphagramSet(const AlphagramSet& set, bool showAll);
+    const HookExtensionCache& getOrComputeHookExtensions(const std::string& word);
 
     Config* config;
     KWG* kwg;
@@ -66,10 +79,17 @@ private:
     std::vector<AlphagramSet> alphagrams;
     int currentIndex;
 
+    // Cache for hook/extension computations
+    std::unordered_map<std::string, HookExtensionCache> hookExtensionCache;
+
     // Global maximum widths for alignment (calculated once at startup)
     int globalMaxFrontWidth;
     int globalMaxBackWidth;
     int globalMaxWordWidth;
+
+    // Rendering window control
+    int renderWindowSize;
+    bool userScrolledUp;
 
     // Responsive font scaling
     double scaleFactor;
@@ -95,8 +115,14 @@ private:
 
     // Debug UI
     QLabel* debugLabel;
+    QLabel* renderTimeLabel;
     QAction* debugAction;
+    QAction* computeTimeAction;
+    QAction* renderTimeAction;
     bool showDebugInfo;
+    bool showComputeTime;
+    bool showRenderTime;
+    int lastRenderTimeMicros;
 };
 
 #endif // LETTERBOX_WINDOW_H

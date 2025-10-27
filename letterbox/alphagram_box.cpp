@@ -25,12 +25,12 @@ AlphagramBox::AlphagramBox(QWidget *parent)
 
 void AlphagramBox::addWord(const QString& word, const QString& frontHooks, const QString& backHooks,
                            const QString& frontExtensions, const QString& backExtensions,
-                           bool isPlaceholder)
+                           bool isPlaceholder, int computeTimeMicros)
 {
-    words.push_back({word, frontHooks, backHooks, frontExtensions, backExtensions, isPlaceholder});
+    words.push_back({word, frontHooks, backHooks, frontExtensions, backExtensions, isPlaceholder, computeTimeMicros});
 }
 
-void AlphagramBox::finalize(int wordSize, int hookSize, int extensionSize)
+void AlphagramBox::finalize(int wordSize, int hookSize, int extensionSize, bool showComputeTime)
 {
     if (words.empty()) {
         return;
@@ -87,12 +87,19 @@ void AlphagramBox::finalize(int wordSize, int hookSize, int extensionSize)
         QString wordBorder = hasAnyBackHooks ? "border-right: 1px solid #666;" : "";
         QString color = wordData.isPlaceholder ? "#888" : "#fff";
         int fontWeight = wordData.isPlaceholder ? 400 : 600;
+
+        QString wordCellContent = wordData.word;
+        if (showComputeTime && !wordData.isPlaceholder && wordData.computeTimeMicros > 0) {
+            wordCellContent += QString("<div style='font-size: 10px; color: #666; margin-top: 2px;'>%1μs</div>")
+                    .arg(wordData.computeTimeMicros);
+        }
+
         html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: %2; letter-spacing: 1px; color: %3; text-align: center; padding: 8px 4px; %4'>%5</td>")
                 .arg(wordSize)
                 .arg(fontWeight)
                 .arg(color)
                 .arg(wordBorder)
-                .arg(wordData.word);
+                .arg(wordCellContent);
 
         // Always add back hooks cell if any word in the group has back hooks
         if (hasAnyBackHooks) {

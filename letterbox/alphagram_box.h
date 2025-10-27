@@ -15,6 +15,7 @@ struct WordData {
     QString frontExtensions;  // Multi-line, one line per length
     QString backExtensions;   // Multi-line, one line per length
     bool isPlaceholder;       // If true, render with gray color and regular weight
+    int computeTimeMicros;    // Time to compute hooks/extensions in microseconds
 };
 
 class AlphagramBox : public QWidget {
@@ -25,8 +26,8 @@ public:
 
     void addWord(const QString& word, const QString& frontHooks, const QString& backHooks,
                  const QString& frontExtensions = "", const QString& backExtensions = "",
-                 bool isPlaceholder = false);
-    void finalize(int wordSize = 36, int hookSize = 24, int extensionSize = 14);
+                 bool isPlaceholder = false, int computeTimeMicros = 0);
+    void finalize(int wordSize = 36, int hookSize = 24, int extensionSize = 14, bool showComputeTime = false);
     void clear();
 
 protected:
