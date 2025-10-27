@@ -2,10 +2,17 @@
 # Monitor script to launch Magpie.app and kill if memory exceeds 1GB
 
 MAX_MEM_MB=1024  # 1GB limit
+APP_NAME="Magpie"
+
+# Kill any existing instances
+if pgrep -x "$APP_NAME" > /dev/null; then
+    echo "Killing existing $APP_NAME instances..."
+    killall "$APP_NAME"
+    sleep 1
+fi
 
 # Launch the app in background
 open Magpie.app &
-APP_NAME="Magpie"
 
 echo "Launched Magpie.app - monitoring memory usage (max: ${MAX_MEM_MB}MB)"
 echo "Press Ctrl-C to stop monitoring and quit the app"

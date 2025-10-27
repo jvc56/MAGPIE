@@ -29,7 +29,7 @@ void AlphagramBox::addWord(const QString& word, const QString& frontHooks, const
     words.push_back({word, frontHooks, backHooks, frontExtensions, backExtensions});
 }
 
-void AlphagramBox::finalize()
+void AlphagramBox::finalize(int wordSize, int hookSize, int extensionSize)
 {
     if (words.empty()) {
         return;
@@ -68,13 +68,13 @@ void AlphagramBox::finalize()
 
             // Build content: hooks on top, extensions below
             // TODO: Add tooltip with full word for each hook
-            cellContent = QString("<div style='font-size: 24px; font-weight: 500;'>%1</div>").arg(spacedFrontHooks);
+            cellContent = QString("<div style='font-size: %1px; font-weight: 500;'>%2</div>").arg(hookSize).arg(spacedFrontHooks);
 
             // Add extensions (one line per length)
             if (!wordData.frontExtensions.isEmpty()) {
                 QStringList extLines = wordData.frontExtensions.split('\n', Qt::SkipEmptyParts);
                 for (const QString& line : extLines) {
-                    cellContent += QString("<div style='font-size: 14px; font-weight: 400;'>%1</div>").arg(line);
+                    cellContent += QString("<div style='font-size: %1px; font-weight: 400;'>%2</div>").arg(extensionSize).arg(line);
                 }
             }
 
@@ -84,7 +84,8 @@ void AlphagramBox::finalize()
 
         // Word (Jost Semibold, larger, white)
         QString wordBorder = hasAnyBackHooks ? "border-right: 1px solid #666;" : "";
-        html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: 36px; font-weight: 600; letter-spacing: 1px; color: #fff; text-align: center; padding: 8px 4px; %1'>%2</td>")
+        html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; color: #fff; text-align: center; padding: 8px 4px; %2'>%3</td>")
+                .arg(wordSize)
                 .arg(wordBorder)
                 .arg(wordData.word);
 
@@ -104,13 +105,13 @@ void AlphagramBox::finalize()
             }
 
             // Build content: hooks on top, extensions below
-            cellContent = QString("<div style='font-size: 24px; font-weight: 500;'>%1</div>").arg(spacedBackHooks);
+            cellContent = QString("<div style='font-size: %1px; font-weight: 500;'>%2</div>").arg(hookSize).arg(spacedBackHooks);
 
             // Add extensions (one line per length)
             if (!wordData.backExtensions.isEmpty()) {
                 QStringList extLines = wordData.backExtensions.split('\n', Qt::SkipEmptyParts);
                 for (const QString& line : extLines) {
-                    cellContent += QString("<div style='font-size: 14px; font-weight: 400;'>%1</div>").arg(line);
+                    cellContent += QString("<div style='font-size: %1px; font-weight: 400;'>%2</div>").arg(extensionSize).arg(line);
                 }
             }
 

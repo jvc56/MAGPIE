@@ -16,9 +16,14 @@
 
 LetterboxWindow::LetterboxWindow(QWidget *parent)
     : QMainWindow(parent), config(nullptr), kwg(nullptr), ld(nullptr), currentIndex(0),
-      globalMaxFrontWidth(0), globalMaxBackWidth(0), globalMaxWordWidth(0)
+      globalMaxFrontWidth(0), globalMaxBackWidth(0), globalMaxWordWidth(0),
+      scaleFactor(1.0), scaledWordSize(36), scaledHookSize(24), scaledExtensionSize(14),
+      scaledInputSize(20), scaledQueueCurrentSize(24), scaledQueueUpcomingSize(16),
+      showDebugInfo(false)
 {
     setupUI();
+    setupMenuBar();
+    updateScaledFontSizes();
 
     // Initialize MAGPIE
     // Get the application directory (where the .app bundle is)
@@ -159,6 +164,13 @@ void LetterboxWindow::setupUI()
 
     queueScrollArea->setWidget(queueWidget);
     mainLayout->addWidget(queueScrollArea, 1);
+
+    // Debug info label (initially hidden)
+    debugLabel = new QLabel(this);
+    debugLabel->setStyleSheet("QLabel { color: #00ff00; background-color: rgba(0, 0, 0, 180); padding: 10px; font-family: monospace; font-size: 12px; }");
+    debugLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    debugLabel->setVisible(false);
+    debugLabel->raise(); // Keep it on top
 
     // Progress info (keep but don't add buttons)
     progressLabel = new QLabel("", this);
@@ -447,7 +459,7 @@ void LetterboxWindow::updateDisplay()
 
     // Finalize and add all boxes to layout
     for (auto* box : boxes) {
-        box->finalize();
+        box->finalize(scaledWordSize, scaledHookSize, scaledExtensionSize);
         solvedLayout->addWidget(box, 0, Qt::AlignCenter);
     }
 
@@ -455,14 +467,16 @@ void LetterboxWindow::updateDisplay()
     QString queueHtml = "<div style='text-align: center;'>";
 
     // Show current alphagram at top of queue (Jost Bold, white)
-    queueHtml += QString("<div style='font-family: \"Jost\", sans-serif; font-size: 24px; margin: 5px 0; letter-spacing: 3px; font-weight: bold; color: #fff;'>%1</div>")
+    queueHtml += QString("<div style='font-family: \"Jost\", sans-serif; font-size: %1px; margin: 5px 0; letter-spacing: 3px; font-weight: bold; color: #fff;'>%2</div>")
+            .arg(scaledQueueCurrentSize)
             .arg(QString::fromStdString(alphagrams[currentIndex].alphagram));
 
     // Show upcoming alphagrams (Jost Regular - normal weight, gray)
     int queueCount = std::min(10, (int)alphagrams.size() - currentIndex - 1);
     for (int i = 1; i <= queueCount; i++) {
         const AlphagramSet& set = alphagrams[currentIndex + i];
-        queueHtml += QString("<div style='font-family: \"Jost\", sans-serif; font-size: 16px; margin: 5px 0; letter-spacing: 2px; font-weight: normal; color: #888;'>%1</div>")
+        queueHtml += QString("<div style='font-family: \"Jost\", sans-serif; font-size: %1px; margin: 5px 0; letter-spacing: 2px; font-weight: normal; color: #888;'>%2</div>")
+                .arg(scaledQueueUpcomingSize)
                 .arg(QString::fromStdString(set.alphagram));
     }
     queueHtml += "</div>";
@@ -566,4 +580,101 @@ void LetterboxWindow::markStudied()
         updateProgress();
         nextWord();
     }
+}
+
+void LetterboxWindow::setupMenuBar()
+{
+    QMenuBar* menuBar = new QMenuBar(this);
+    setMenuBar(menuBar);
+
+    QMenu* debugMenu = menuBar->addMenu("Debug");
+    debugAction = new QAction("Show Debug Info", this);
+    debugAction->setCheckable(true);
+    debugAction->setChecked(false);
+    connect(debugAction, &QAction::triggered, this, &LetterboxWindow::toggleDebugInfo);
+    debugMenu->addAction(debugAction);
+}
+
+void LetterboxWindow::toggleDebugInfo()
+{
+    showDebugInfo = debugAction->isChecked();
+    debugLabel->setVisible(showDebugInfo);
+    if (showDebugInfo) {
+        updateDebugInfo();
+    }
+}
+
+void LetterboxWindow::updateDebugInfo()
+{
+    if (!showDebugInfo) return;
+
+    QString debugText;
+    debugText += QString("Window Size: %1 x %2\n").arg(width()).arg(height());
+    debugText += QString("Central Widget: %1 x %2\n").arg(centralWidget->width()).arg(centralWidget->height());
+    debugText += QString("\nScale Factor: %1\n").arg(scaleFactor, 0, 'f', 2);
+    debugText += QString("\nFont Sizes:\n");
+    debugText += QString("  Input Field: %1px\n").arg(scaledInputSize);
+    debugText += QString("  Word (Main): %1px (semibold)\n").arg(scaledWordSize);
+    debugText += QString("  Hooks: %1px (medium)\n").arg(scaledHookSize);
+    debugText += QString("  Extensions: %1px (regular)\n").arg(scaledExtensionSize);
+    debugText += QString("  Queue Current: %1px (bold)\n").arg(scaledQueueCurrentSize);
+    debugText += QString("  Queue Upcoming: %1px (regular)\n").arg(scaledQueueUpcomingSize);
+
+    debugLabel->setText(debugText);
+    debugLabel->setGeometry(10, 30, 350, 250);
+}
+
+void LetterboxWindow::resizeEvent(QResizeEvent *event)
+{
+    QMainWindow::resizeEvent(event);
+
+    double oldScaleFactor = scaleFactor;
+
+    updateScaledFontSizes();
+    updateDebugInfo();
+
+    // Only redraw if scale factor actually changed
+    if (oldScaleFactor != scaleFactor && currentIndex < static_cast<int>(alphagrams.size())) {
+        updateDisplay();
+    }
+}
+
+void LetterboxWindow::updateScaledFontSizes()
+{
+    int windowWidth = width();
+
+    // Calculate scale factor: 1.0 at 1200px and above, proportional below
+    if (windowWidth >= 1200) {
+        scaleFactor = 1.0;
+    } else {
+        scaleFactor = static_cast<double>(windowWidth) / 1200.0;
+    }
+
+    // Base sizes and minimums
+    const int baseWordSize = 36;
+    const int baseHookSize = 24;
+    const int baseExtensionSize = 14;
+    const int baseInputSize = 20;
+    const int baseQueueCurrentSize = 24;
+    const int baseQueueUpcomingSize = 16;
+
+    const int minWordSize = 16;
+    const int minHookSize = 9;
+    const int minExtensionSize = 7;
+    const int minInputSize = 10;
+    const int minQueueCurrentSize = 10;
+    const int minQueueUpcomingSize = 8;
+
+    // Calculate scaled sizes with minimums
+    scaledWordSize = std::max(minWordSize, static_cast<int>(baseWordSize * scaleFactor));
+    scaledHookSize = std::max(minHookSize, static_cast<int>(baseHookSize * scaleFactor));
+    scaledExtensionSize = std::max(minExtensionSize, static_cast<int>(baseExtensionSize * scaleFactor));
+    scaledInputSize = std::max(minInputSize, static_cast<int>(baseInputSize * scaleFactor));
+    scaledQueueCurrentSize = std::max(minQueueCurrentSize, static_cast<int>(baseQueueCurrentSize * scaleFactor));
+    scaledQueueUpcomingSize = std::max(minQueueUpcomingSize, static_cast<int>(baseQueueUpcomingSize * scaleFactor));
+
+    // Update input field font size
+    QFont inputFont = inputField->font();
+    inputFont.setPixelSize(scaledInputSize);
+    inputField->setFont(inputFont);
 }

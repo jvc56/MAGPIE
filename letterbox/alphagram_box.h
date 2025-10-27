@@ -24,7 +24,7 @@ public:
 
     void addWord(const QString& word, const QString& frontHooks, const QString& backHooks,
                  const QString& frontExtensions = "", const QString& backExtensions = "");
-    void finalize();
+    void finalize(int wordSize = 36, int hookSize = 24, int extensionSize = 14);
     void clear();
 
 protected:

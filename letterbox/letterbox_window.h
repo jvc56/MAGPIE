@@ -8,6 +8,10 @@
 #include <QPushButton>
 #include <QLineEdit>
 #include <QScrollArea>
+#include <QMenuBar>
+#include <QMenu>
+#include <QAction>
+#include <QResizeEvent>
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -40,12 +44,19 @@ private slots:
     void markStudied();
     void loadWordList();
     void onTextChanged(const QString& text);
+    void toggleDebugInfo();
+
+protected:
+    void resizeEvent(QResizeEvent *event) override;
 
 private:
     void setupUI();
+    void setupMenuBar();
     void updateDisplay();
     void updateProgress();
+    void updateDebugInfo();
     void calculateGlobalMaxWidths();
+    void updateScaledFontSizes();
     std::string sortVowelsFirst(const std::string& word);
     QString formatAlphagramSet(const AlphagramSet& set, bool showAll);
 
@@ -60,6 +71,15 @@ private:
     int globalMaxBackWidth;
     int globalMaxWordWidth;
 
+    // Responsive font scaling
+    double scaleFactor;
+    int scaledWordSize;
+    int scaledHookSize;
+    int scaledExtensionSize;
+    int scaledInputSize;
+    int scaledQueueCurrentSize;
+    int scaledQueueUpcomingSize;
+
     // UI elements
     QWidget* centralWidget;
     QVBoxLayout* mainLayout;
@@ -72,6 +92,11 @@ private:
     QProgressBar* progressBar;
     QPushButton* nextButton;
     QPushButton* studiedButton;
+
+    // Debug UI
+    QLabel* debugLabel;
+    QAction* debugAction;
+    bool showDebugInfo;
 };
 
 #endif // LETTERBOX_WINDOW_H

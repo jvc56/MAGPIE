@@ -105,9 +105,12 @@ TurnEntryWidget* PlayerHistoryColumn::addEmptyPlaceholder() {
     int variant = getTurnEntryCount();
     TurnEntryWidget *entry = new TurnEntryWidget(this, m_renderMode, variant);
 
+    // Make it invisible - just a spacer to keep column heights synchronized
+    entry->setVisible(false);
+    entry->setFixedHeight(80);  // Keep the height for layout purposes
+
     // Add to the end of the layout
     m_movesLayout->addWidget(entry);
-    entry->show();
 
     // Don't set as current turn entry - this is just a placeholder
     return entry;
