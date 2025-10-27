@@ -11,6 +11,7 @@
 #include "../def/rack_defs.h"
 #include "../def/sim_defs.h"
 #include "../def/thread_control_defs.h"
+#include "../def/validated_move_defs.h"
 #include "../ent/autoplay_results.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"

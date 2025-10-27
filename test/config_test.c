@@ -1455,10 +1455,14 @@ void test_config_export(void) {
          int_to_equity(0));
   string_builder_clear(sb_load_cmd);
 
-  assert(remove(TEST_GCG_FILENAME) == 0);
-  assert(remove(default_name_3) == 0);
-  assert(remove(default_name_2) == 0);
-  assert(remove(default_name_1) == 0);
+  int remove_result = remove(TEST_GCG_FILENAME);
+  assert(remove_result == 0);
+  remove_result = remove(default_name_3);
+  assert(remove_result == 0);
+  remove_result = remove(default_name_2);
+  assert(remove_result == 0);
+  remove_result = remove(default_name_1);
+  assert(remove_result == 0);
 
   string_builder_destroy(sb_load_cmd);
   free(default_name_3);
