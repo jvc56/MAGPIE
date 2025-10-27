@@ -114,19 +114,31 @@ void LetterboxWindow::setupUI()
     solvedLayout->setSpacing(10);  // 10px vertical spacing between boxes (2.5x more than 4px)
 
     solvedScrollArea->setWidget(solvedWidget);
-    mainLayout->addWidget(solvedScrollArea, 3);
+    mainLayout->addWidget(solvedScrollArea, 4);
 
     // Middle: Input field (full width)
     inputField = new QLineEdit(this);
     inputField->setPlaceholderText("...");
     inputField->setAlignment(Qt::AlignCenter);
-    inputField->setStyleSheet("QLineEdit { padding: 15px; font-size: 20px; font-weight: bold; margin: 2px 0px; background-color: rgb(40, 40, 40); color: white; border: 2px solid #3a7f9f; }");
-    connect(inputField, &QLineEdit::textChanged, this, &LetterboxWindow::onTextChanged);
+    inputField->setStyleSheet("QLineEdit { padding: 15px; font-family: 'Jost', sans-serif; font-size: 20px; font-weight: bold; margin: 2px 0px; background-color: rgb(40, 40, 40); color: white; border: 2px solid #3a7f9f; text-transform: uppercase; }");
+    connect(inputField, &QLineEdit::textChanged, this, [this](const QString& text) {
+        // Force uppercase without triggering another textChanged signal
+        if (text != text.toUpper()) {
+            int cursorPos = inputField->cursorPosition();
+            inputField->blockSignals(true);
+            inputField->setText(text.toUpper());
+            inputField->setCursorPosition(cursorPos);
+            inputField->blockSignals(false);
+        }
+        onTextChanged(text.toUpper());
+    });
     mainLayout->addWidget(inputField);
 
-    // Bottom: Queue of upcoming alphagrams (scrollable, ~25% of space)
+    // Bottom: Queue of upcoming alphagrams (scrollable, ~20% of space, 4:1 ratio)
     QScrollArea* queueScrollArea = new QScrollArea(this);
     queueScrollArea->setWidgetResizable(true);
+    queueScrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    queueScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     queueScrollArea->setStyleSheet(
         "QScrollArea { border: none; background: transparent; }"
         "QScrollBar:vertical {"
@@ -154,6 +166,7 @@ void LetterboxWindow::setupUI()
     QWidget* queueWidget = new QWidget();
     QVBoxLayout* queueLayout = new QVBoxLayout(queueWidget);
     queueLayout->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
+    queueLayout->setContentsMargins(0, 0, 0, 0);
 
     queueLabel = new QLabel("", queueWidget);
     queueLabel->setAlignment(Qt::AlignCenter | Qt::AlignTop);
@@ -393,8 +406,8 @@ void LetterboxWindow::updateDisplay()
             for (const auto& entry : alphagrams[i].words) {
                 char* frontHooks = letterbox_find_front_hooks(kwg, ld, entry.word.c_str());
                 char* backHooks = letterbox_find_back_hooks(kwg, ld, entry.word.c_str());
-                char* frontExts = letterbox_find_front_extensions(kwg, ld, entry.word.c_str(), 3);
-                char* backExts = letterbox_find_back_extensions(kwg, ld, entry.word.c_str(), 3);
+                char* frontExts = letterbox_find_front_extensions(kwg, ld, entry.word.c_str(), 7);
+                char* backExts = letterbox_find_back_extensions(kwg, ld, entry.word.c_str(), 7);
 
                 QString frontStr = QString::fromUtf8(frontHooks ? frontHooks : "");
                 QString backStr = QString::fromUtf8(backHooks ? backHooks : "");
@@ -425,12 +438,16 @@ void LetterboxWindow::updateDisplay()
     AlphagramBox* currentBox = new AlphagramBox(solvedWidget);
     for (const auto& entry : alphagrams[currentIndex].words) {
         if (entry.revealed) {
-            // Show the actual word with hooks
+            // Show the actual word with hooks and extensions
             char* frontHooks = letterbox_find_front_hooks(kwg, ld, entry.word.c_str());
             char* backHooks = letterbox_find_back_hooks(kwg, ld, entry.word.c_str());
+            char* frontExts = letterbox_find_front_extensions(kwg, ld, entry.word.c_str(), 7);
+            char* backExts = letterbox_find_back_extensions(kwg, ld, entry.word.c_str(), 7);
 
             QString frontStr = QString::fromUtf8(frontHooks ? frontHooks : "");
             QString backStr = QString::fromUtf8(backHooks ? backHooks : "");
+            QString frontExtStr = QString::fromUtf8(frontExts ? frontExts : "");
+            QString backExtStr = QString::fromUtf8(backExts ? backExts : "");
 
             // Calculate widths for global max
             int frontWidth = hookMetrics.horizontalAdvance(frontStr);
@@ -442,17 +459,20 @@ void LetterboxWindow::updateDisplay()
 
             free(frontHooks);
             free(backHooks);
+            free(frontExts);
+            free(backExts);
 
-            currentBox->addWord(QString::fromStdString(entry.word), frontStr, backStr);
+            currentBox->addWord(QString::fromStdString(entry.word), frontStr, backStr,
+                              frontExtStr, backExtStr);
         } else {
-            // Show placeholder dashes (one dash per letter)
+            // Show placeholder dashes (one dash per letter) - gray and regular weight
             QString placeholder;
             for (size_t i = 0; i < entry.word.length(); i++) {
                 placeholder += "-";
             }
             int wordWidth = wordMetrics.horizontalAdvance(placeholder);
             globalMaxWordWidth = std::max(globalMaxWordWidth, wordWidth);
-            currentBox->addWord(placeholder, "", "");
+            currentBox->addWord(placeholder, "", "", "", "", true);  // true = isPlaceholder
         }
     }
     boxes.push_back(currentBox);
@@ -464,10 +484,10 @@ void LetterboxWindow::updateDisplay()
     }
 
     // Bottom: Show queue of UPCOMING alphagrams (not including current) - starts with current alphagram
-    QString queueHtml = "<div style='text-align: center;'>";
+    QString queueHtml = "";
 
     // Show current alphagram at top of queue (Jost Bold, white)
-    queueHtml += QString("<div style='font-family: \"Jost\", sans-serif; font-size: %1px; margin: 5px 0; letter-spacing: 3px; font-weight: bold; color: #fff;'>%2</div>")
+    queueHtml += QString("<div style='font-family: \"Jost\", sans-serif; font-size: %1px; margin: 5px 0; font-weight: bold; color: #fff; text-align: center;'>%2</div>")
             .arg(scaledQueueCurrentSize)
             .arg(QString::fromStdString(alphagrams[currentIndex].alphagram));
 
@@ -475,11 +495,10 @@ void LetterboxWindow::updateDisplay()
     int queueCount = std::min(10, (int)alphagrams.size() - currentIndex - 1);
     for (int i = 1; i <= queueCount; i++) {
         const AlphagramSet& set = alphagrams[currentIndex + i];
-        queueHtml += QString("<div style='font-family: \"Jost\", sans-serif; font-size: %1px; margin: 5px 0; letter-spacing: 2px; font-weight: normal; color: #888;'>%2</div>")
+        queueHtml += QString("<div style='font-family: \"Jost\", sans-serif; font-size: %1px; margin: 5px 0; font-weight: normal; color: #888; text-align: center;'>%2</div>")
                 .arg(scaledQueueUpcomingSize)
                 .arg(QString::fromStdString(set.alphagram));
     }
-    queueHtml += "</div>";
     queueLabel->setText(queueHtml);
 
     // Clear and focus input field

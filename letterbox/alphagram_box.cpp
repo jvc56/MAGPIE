@@ -24,9 +24,10 @@ AlphagramBox::AlphagramBox(QWidget *parent)
 }
 
 void AlphagramBox::addWord(const QString& word, const QString& frontHooks, const QString& backHooks,
-                           const QString& frontExtensions, const QString& backExtensions)
+                           const QString& frontExtensions, const QString& backExtensions,
+                           bool isPlaceholder)
 {
-    words.push_back({word, frontHooks, backHooks, frontExtensions, backExtensions});
+    words.push_back({word, frontHooks, backHooks, frontExtensions, backExtensions, isPlaceholder});
 }
 
 void AlphagramBox::finalize(int wordSize, int hookSize, int extensionSize)
@@ -82,10 +83,14 @@ void AlphagramBox::finalize(int wordSize, int hookSize, int extensionSize)
                     .arg(cellContent);
         }
 
-        // Word (Jost Semibold, larger, white)
+        // Word (Jost Semibold for revealed, Regular gray for placeholders)
         QString wordBorder = hasAnyBackHooks ? "border-right: 1px solid #666;" : "";
-        html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; color: #fff; text-align: center; padding: 8px 4px; %2'>%3</td>")
+        QString color = wordData.isPlaceholder ? "#888" : "#fff";
+        int fontWeight = wordData.isPlaceholder ? 400 : 600;
+        html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: %2; letter-spacing: 1px; color: %3; text-align: center; padding: 8px 4px; %4'>%5</td>")
                 .arg(wordSize)
+                .arg(fontWeight)
+                .arg(color)
                 .arg(wordBorder)
                 .arg(wordData.word);
 
