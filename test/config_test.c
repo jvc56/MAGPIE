@@ -3,7 +3,12 @@
 #include "../src/def/game_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/players_data_defs.h"
+#include "../src/ent/bag.h"
+#include "../src/ent/equity.h"
+#include "../src/ent/game.h"
+#include "../src/ent/game_history.h"
 #include "../src/ent/letter_distribution.h"
+#include "../src/ent/player.h"
 #include "../src/ent/players_data.h"
 #include "../src/ent/thread_control.h"
 #include "../src/ent/wmp.h"
@@ -731,8 +736,8 @@ void test_config_anno(void) {
   assert_strings_equal(game_history_player_get_name(game_history, 1), "b");
   assert_strings_equal(game_history_player_get_nickname(game_history, 1), "b");
 
-  Game *game = config_get_game(config);
-  Bag *bag = game_get_bag(game);
+  const Game *game = config_get_game(config);
+  const Bag *bag = game_get_bag(game);
   const int bag_initial_total = bag_get_letters(bag);
   assert_config_exec_status(config, "rack ABC", ERROR_STATUS_SUCCESS);
   assert(bag_initial_total == bag_get_letters(bag) + 3);
@@ -1450,10 +1455,10 @@ void test_config_export(void) {
          int_to_equity(0));
   string_builder_clear(sb_load_cmd);
 
-  remove(TEST_GCG_FILENAME);
-  remove(default_name_3);
-  remove(default_name_2);
-  remove(default_name_1);
+  assert(remove(TEST_GCG_FILENAME) == 0);
+  assert(remove(default_name_3) == 0);
+  assert(remove(default_name_2) == 0);
+  assert(remove(default_name_1) == 0);
 
   string_builder_destroy(sb_load_cmd);
   free(default_name_3);

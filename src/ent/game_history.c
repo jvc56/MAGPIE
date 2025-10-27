@@ -6,7 +6,6 @@
 #include "../ent/data_filepaths.h"
 #include "../ent/equity.h"
 #include "../ent/players_data.h"
-#include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "rack.h"
@@ -381,7 +380,8 @@ void game_history_set_gcg_filename(GameHistory *game_history,
     free(game_history->gcg_filename);
     game_history->gcg_filename = string_duplicate(user_provided_gcg_filename);
     return;
-  } else if (game_history->user_provided_gcg_filename) {
+  }
+  if (game_history->user_provided_gcg_filename) {
     // The user has not passed in a GCG filename, but they have already done so
     // before, so do not overwrite the current user provided GCG filename
     // with the default GCG filename.
@@ -650,7 +650,7 @@ void game_history_insert_challenge_bonus_game_event(
 //  - the most recent played event is a challenge bonus
 void game_history_remove_challenge_bonus_game_event(GameHistory *game_history) {
   const int challenge_bonus_event_index = game_history->num_played_events - 1;
-  GameEvent *challenge_bonus_event =
+  const GameEvent *challenge_bonus_event =
       game_history_get_event(game_history, challenge_bonus_event_index);
   const int player_index = game_event_get_player_index(challenge_bonus_event);
   const Equity score_adjustment =

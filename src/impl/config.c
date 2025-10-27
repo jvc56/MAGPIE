@@ -5,12 +5,14 @@
 #include "../def/config_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
+#include "../def/game_history_defs.h"
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/sim_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/autoplay_results.h"
+#include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/board_layout.h"
 #include "../ent/conversion_results.h"
@@ -56,6 +58,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef enum {
   ARG_TOKEN_SET,
@@ -1531,7 +1534,7 @@ void config_game_play_events(Config *config, ErrorStack *error_stack) {
           if (!rack_is_drawable(game, player_index, prev_pass_rack)) {
             StringBuilder *sb = string_builder_create();
             string_builder_add_rack(sb, prev_pass_rack, ld, false);
-            char *err_msg =
+            const char *err_msg =
                 get_formatted_string("rack on game end pass out '%s' is "
                                      "unexpectedly not available in the bag",
                                      string_builder_peek(sb));
@@ -1684,7 +1687,7 @@ void config_add_game_event(Config *config, const int player_index,
     }
     break;
   case GAME_EVENT_PHONY_TILES_RETURNED:;
-    GameEvent *previous_game_event = game_history_get_event(
+    const GameEvent *previous_game_event = game_history_get_event(
         config->game_history,
         game_history_get_num_played_events(config->game_history) - 1);
     rack_copy(&game_event_rack, game_event_get_const_rack(previous_game_event));
@@ -1877,7 +1880,8 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
           error_stack, ERROR_STATUS_COMMIT_INVALID_PASS_OUT_RACK,
           string_duplicate("invalid rack '%s' for consecutive pass game end"));
       return;
-    } else if (num_mls > RACK_SIZE) {
+    }
+    if (num_mls > RACK_SIZE) {
       error_stack_push(
           error_stack, ERROR_STATUS_COMMIT_INVALID_PASS_OUT_RACK,
           get_formatted_string("rack '%s' for consecutive pass game end has %d "
@@ -1977,7 +1981,7 @@ char *impl_challenge(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
 
-  ValidatedMoves *vms = game_event_get_vms(prev_played_event);
+  const ValidatedMoves *vms = game_event_get_vms(prev_played_event);
   const int player_on_turn_index = game_get_player_on_turn_index(config->game);
   if (validated_moves_is_phony(vms, 0)) {
     config_backup_game_and_history(config);
@@ -2190,26 +2194,25 @@ char *impl_overtime(Config *config, ErrorStack *error_stack) {
               "applying time panelty",
               player_nickname));
       return empty_string();
-    } else {
-      const Equity overtime_penalty = int_to_equity(overtime_penalty_int);
-      game_event_set_player_index(time_penalty_event, player_index);
-      game_event_set_type(time_penalty_event, GAME_EVENT_TIME_PENALTY);
-      game_event_set_cgp_move_string(time_penalty_event, NULL);
-      game_event_set_score_adjustment(time_penalty_event, overtime_penalty);
-      // Add the overtime penalty since the value is already negative
-      game_event_set_cumulative_score(time_penalty_event,
-                                      cumulative_score + overtime_penalty);
-      game_event_set_move_score(time_penalty_event, 0);
+    }
+    const Equity overtime_penalty = int_to_equity(overtime_penalty_int);
+    game_event_set_player_index(time_penalty_event, player_index);
+    game_event_set_type(time_penalty_event, GAME_EVENT_TIME_PENALTY);
+    game_event_set_cgp_move_string(time_penalty_event, NULL);
+    game_event_set_score_adjustment(time_penalty_event, overtime_penalty);
+    // Add the overtime penalty since the value is already negative
+    game_event_set_cumulative_score(time_penalty_event,
+                                    cumulative_score + overtime_penalty);
+    game_event_set_move_score(time_penalty_event, 0);
 
-      // When adding an overtime event, always advance to the end of the
-      // history so that the game play module can play through the entire
-      // game and catch any duplicate time penalty errors.
-      game_history_goto(config->game_history,
-                        game_history_get_num_events(config->game_history),
-                        error_stack);
-      if (error_stack_is_empty(error_stack)) {
-        config_game_play_events(config, error_stack);
-      }
+    // When adding an overtime event, always advance to the end of the
+    // history so that the game play module can play through the entire
+    // game and catch any duplicate time penalty errors.
+    game_history_goto(config->game_history,
+                      game_history_get_num_events(config->game_history),
+                      error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      config_game_play_events(config, error_stack);
     }
   }
   if (!error_stack_is_empty(error_stack)) {
