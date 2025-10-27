@@ -12,6 +12,8 @@ struct WordData {
     QString word;
     QString frontHooks;
     QString backHooks;
+    QString frontExtensions;  // Multi-line, one line per length
+    QString backExtensions;   // Multi-line, one line per length
 };
 
 class AlphagramBox : public QWidget {
@@ -20,7 +22,8 @@ class AlphagramBox : public QWidget {
 public:
     explicit AlphagramBox(QWidget *parent = nullptr);
 
-    void addWord(const QString& word, const QString& frontHooks, const QString& backHooks);
+    void addWord(const QString& word, const QString& frontHooks, const QString& backHooks,
+                 const QString& frontExtensions = "", const QString& backExtensions = "");
     void finalize();
     void clear();
 

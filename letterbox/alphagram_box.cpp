@@ -3,6 +3,7 @@
 #include <QPainterPath>
 #include <QFont>
 #include <QFontMetrics>
+#include <QGraphicsDropShadowEffect>
 
 AlphagramBox::AlphagramBox(QWidget *parent)
     : QWidget(parent), tableLabel(nullptr)
@@ -12,11 +13,20 @@ AlphagramBox::AlphagramBox(QWidget *parent)
     layout->setContentsMargins(4, 4, 4, 4);
     layout->setSpacing(0);
     setLayout(layout);
+
+    // Add drop shadow effect
+    QGraphicsDropShadowEffect* shadow = new QGraphicsDropShadowEffect(this);
+    shadow->setBlurRadius(8);
+    shadow->setXOffset(0);
+    shadow->setYOffset(2);
+    shadow->setColor(QColor(0, 0, 0, 120));
+    setGraphicsEffect(shadow);
 }
 
-void AlphagramBox::addWord(const QString& word, const QString& frontHooks, const QString& backHooks)
+void AlphagramBox::addWord(const QString& word, const QString& frontHooks, const QString& backHooks,
+                           const QString& frontExtensions, const QString& backExtensions)
 {
-    words.push_back({word, frontHooks, backHooks});
+    words.push_back({word, frontHooks, backHooks, frontExtensions, backExtensions});
 }
 
 void AlphagramBox::finalize()
@@ -43,20 +53,69 @@ void AlphagramBox::finalize()
 
         // Always add front hooks cell if any word in the group has front hooks
         if (hasAnyFrontHooks) {
-            html += QString("<td style='font-size: 12px; color: #666; padding: 8px 4px; text-align: right; border-right: 1px solid #000;'>%1</td>")
-                    .arg(wordData.frontHooks);
+            QString cellContent;
+
+            // Add spaces between hook letters
+            QString spacedFrontHooks = wordData.frontHooks;
+            if (!spacedFrontHooks.isEmpty()) {
+                QString spaced;
+                for (int i = 0; i < spacedFrontHooks.length(); i++) {
+                    if (i > 0) spaced += " ";
+                    spaced += spacedFrontHooks[i];
+                }
+                spacedFrontHooks = spaced;
+            }
+
+            // Build content: hooks on top, extensions below
+            // TODO: Add tooltip with full word for each hook
+            cellContent = QString("<div style='font-size: 24px; font-weight: 500;'>%1</div>").arg(spacedFrontHooks);
+
+            // Add extensions (one line per length)
+            if (!wordData.frontExtensions.isEmpty()) {
+                QStringList extLines = wordData.frontExtensions.split('\n', Qt::SkipEmptyParts);
+                for (const QString& line : extLines) {
+                    cellContent += QString("<div style='font-size: 14px; font-weight: 400;'>%1</div>").arg(line);
+                }
+            }
+
+            html += QString("<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: right; border-right: 1px solid #666; vertical-align: top;'>%1</td>")
+                    .arg(cellContent);
         }
 
-        // Word (Jost Bold, larger, black)
-        QString wordBorder = hasAnyBackHooks ? "border-right: 1px solid #000;" : "";
-        html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: 18px; font-weight: bold; letter-spacing: 1px; color: #000; text-align: center; padding: 8px 4px; %1'>%2</td>")
+        // Word (Jost Semibold, larger, white)
+        QString wordBorder = hasAnyBackHooks ? "border-right: 1px solid #666;" : "";
+        html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: 36px; font-weight: 600; letter-spacing: 1px; color: #fff; text-align: center; padding: 8px 4px; %1'>%2</td>")
                 .arg(wordBorder)
                 .arg(wordData.word);
 
         // Always add back hooks cell if any word in the group has back hooks
         if (hasAnyBackHooks) {
-            html += QString("<td style='font-size: 12px; color: #666; padding: 8px 4px; text-align: left;'>%1</td>")
-                    .arg(wordData.backHooks);
+            QString cellContent;
+
+            // Add spaces between hook letters
+            QString spacedBackHooks = wordData.backHooks;
+            if (!spacedBackHooks.isEmpty()) {
+                QString spaced;
+                for (int i = 0; i < spacedBackHooks.length(); i++) {
+                    if (i > 0) spaced += " ";
+                    spaced += spacedBackHooks[i];
+                }
+                spacedBackHooks = spaced;
+            }
+
+            // Build content: hooks on top, extensions below
+            cellContent = QString("<div style='font-size: 24px; font-weight: 500;'>%1</div>").arg(spacedBackHooks);
+
+            // Add extensions (one line per length)
+            if (!wordData.backExtensions.isEmpty()) {
+                QStringList extLines = wordData.backExtensions.split('\n', Qt::SkipEmptyParts);
+                for (const QString& line : extLines) {
+                    cellContent += QString("<div style='font-size: 14px; font-weight: 400;'>%1</div>").arg(line);
+                }
+            }
+
+            html += QString("<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: left; vertical-align: top;'>%1</td>")
+                    .arg(cellContent);
         }
 
         html += "</tr>";
@@ -88,11 +147,11 @@ void AlphagramBox::paintEvent(QPaintEvent *event)
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
 
-    // Fill background
-    painter.fillRect(rect(), QColor(248, 248, 248));
+    // Fill background - dark gray (50, 50, 50)
+    painter.fillRect(rect(), QColor(50, 50, 50));
 
-    // Draw border
-    QPen pen(Qt::black, 1);
+    // Draw border - lighter gray (90, 90, 90)
+    QPen pen(QColor(90, 90, 90), 1);
     painter.setPen(pen);
     painter.drawRect(rect().adjusted(0, 0, -1, -1));
 }

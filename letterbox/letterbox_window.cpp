@@ -69,6 +69,9 @@ void LetterboxWindow::setupUI()
     centralWidget = new QWidget(this);
     setCentralWidget(centralWidget);
 
+    // Dark theme background
+    centralWidget->setStyleSheet("background-color: #2b2b2b;");
+
     mainLayout = new QVBoxLayout(centralWidget);
     mainLayout->setSpacing(0);
     mainLayout->setContentsMargins(20, 20, 20, 20);
@@ -76,28 +79,72 @@ void LetterboxWindow::setupUI()
     // Top 2/3: Solved alphagrams (scrollable, most recent at bottom)
     solvedScrollArea = new QScrollArea(this);
     solvedScrollArea->setWidgetResizable(true);
-    solvedScrollArea->setStyleSheet("QScrollArea { border: none; background: transparent; }");
+    solvedScrollArea->setStyleSheet(
+        "QScrollArea { border: none; background: transparent; }"
+        "QScrollBar:vertical {"
+        "    border: none;"
+        "    background: transparent;"
+        "    width: 8px;"
+        "    margin: 0px;"
+        "}"
+        "QScrollBar::handle:vertical {"
+        "    background: rgba(100, 100, 100, 0);"
+        "    border-radius: 4px;"
+        "    min-height: 20px;"
+        "}"
+        "QScrollBar::handle:vertical:hover {"
+        "    background: rgba(150, 150, 150, 200);"
+        "}"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {"
+        "    height: 0px;"
+        "}"
+        "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {"
+        "    background: none;"
+        "}"
+    );
 
     solvedWidget = new QWidget();
     solvedLayout = new QVBoxLayout(solvedWidget);
     solvedLayout->setAlignment(Qt::AlignBottom | Qt::AlignHCenter);
-    solvedLayout->setSpacing(4);  // 4px vertical spacing between boxes
+    solvedLayout->setSpacing(10);  // 10px vertical spacing between boxes (2.5x more than 4px)
 
     solvedScrollArea->setWidget(solvedWidget);
-    mainLayout->addWidget(solvedScrollArea, 2);
+    mainLayout->addWidget(solvedScrollArea, 3);
 
     // Middle: Input field (full width)
     inputField = new QLineEdit(this);
     inputField->setPlaceholderText("...");
     inputField->setAlignment(Qt::AlignCenter);
-    inputField->setStyleSheet("QLineEdit { padding: 15px; font-size: 20px; font-weight: bold; margin: 2px 0px; }");
+    inputField->setStyleSheet("QLineEdit { padding: 15px; font-size: 20px; font-weight: bold; margin: 2px 0px; background-color: rgb(40, 40, 40); color: white; border: 2px solid #3a7f9f; }");
     connect(inputField, &QLineEdit::textChanged, this, &LetterboxWindow::onTextChanged);
     mainLayout->addWidget(inputField);
 
-    // Bottom 1/3: Queue of upcoming alphagrams (scrollable)
+    // Bottom: Queue of upcoming alphagrams (scrollable, ~25% of space)
     QScrollArea* queueScrollArea = new QScrollArea(this);
     queueScrollArea->setWidgetResizable(true);
-    queueScrollArea->setStyleSheet("QScrollArea { border: none; background: transparent; }");
+    queueScrollArea->setStyleSheet(
+        "QScrollArea { border: none; background: transparent; }"
+        "QScrollBar:vertical {"
+        "    border: none;"
+        "    background: transparent;"
+        "    width: 8px;"
+        "    margin: 0px;"
+        "}"
+        "QScrollBar::handle:vertical {"
+        "    background: rgba(100, 100, 100, 0);"
+        "    border-radius: 4px;"
+        "    min-height: 20px;"
+        "}"
+        "QScrollBar::handle:vertical:hover {"
+        "    background: rgba(150, 150, 150, 200);"
+        "}"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {"
+        "    height: 0px;"
+        "}"
+        "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {"
+        "    background: none;"
+        "}"
+    );
 
     QWidget* queueWidget = new QWidget();
     QVBoxLayout* queueLayout = new QVBoxLayout(queueWidget);
@@ -107,7 +154,7 @@ void LetterboxWindow::setupUI()
     queueLabel->setAlignment(Qt::AlignCenter | Qt::AlignTop);
     queueLabel->setWordWrap(true);
     queueLabel->setTextFormat(Qt::RichText);
-    queueLabel->setStyleSheet("QLabel { padding: 0px; margin: 0px; }");
+    queueLabel->setStyleSheet("QLabel { padding: 0px; margin: 0px; color: #888; }");
     queueLayout->addWidget(queueLabel);
 
     queueScrollArea->setWidget(queueWidget);
@@ -334,9 +381,13 @@ void LetterboxWindow::updateDisplay()
             for (const auto& entry : alphagrams[i].words) {
                 char* frontHooks = letterbox_find_front_hooks(kwg, ld, entry.word.c_str());
                 char* backHooks = letterbox_find_back_hooks(kwg, ld, entry.word.c_str());
+                char* frontExts = letterbox_find_front_extensions(kwg, ld, entry.word.c_str(), 3);
+                char* backExts = letterbox_find_back_extensions(kwg, ld, entry.word.c_str(), 3);
 
                 QString frontStr = QString::fromUtf8(frontHooks ? frontHooks : "");
                 QString backStr = QString::fromUtf8(backHooks ? backHooks : "");
+                QString frontExtStr = QString::fromUtf8(frontExts ? frontExts : "");
+                QString backExtStr = QString::fromUtf8(backExts ? backExts : "");
 
                 // Calculate widths for global max
                 int frontWidth = hookMetrics.horizontalAdvance(frontStr);
@@ -348,8 +399,11 @@ void LetterboxWindow::updateDisplay()
 
                 free(frontHooks);
                 free(backHooks);
+                free(frontExts);
+                free(backExts);
 
-                box->addWord(QString::fromStdString(entry.word), frontStr, backStr);
+                box->addWord(QString::fromStdString(entry.word), frontStr, backStr,
+                           frontExtStr, backExtStr);
             }
             boxes.push_back(box);
         }
@@ -400,15 +454,15 @@ void LetterboxWindow::updateDisplay()
     // Bottom: Show queue of UPCOMING alphagrams (not including current) - starts with current alphagram
     QString queueHtml = "<div style='text-align: center;'>";
 
-    // Show current alphagram at top of queue (Jost Bold)
-    queueHtml += QString("<div style='font-family: \"Jost\", sans-serif; font-size: 24px; margin: 5px 0; letter-spacing: 3px; font-weight: bold; color: #000;'>%1</div>")
+    // Show current alphagram at top of queue (Jost Bold, white)
+    queueHtml += QString("<div style='font-family: \"Jost\", sans-serif; font-size: 24px; margin: 5px 0; letter-spacing: 3px; font-weight: bold; color: #fff;'>%1</div>")
             .arg(QString::fromStdString(alphagrams[currentIndex].alphagram));
 
-    // Show upcoming alphagrams (Jost Regular - normal weight)
+    // Show upcoming alphagrams (Jost Regular - normal weight, gray)
     int queueCount = std::min(10, (int)alphagrams.size() - currentIndex - 1);
     for (int i = 1; i <= queueCount; i++) {
         const AlphagramSet& set = alphagrams[currentIndex + i];
-        queueHtml += QString("<div style='font-family: \"Jost\", sans-serif; font-size: 16px; margin: 5px 0; letter-spacing: 2px; font-weight: normal; color: #000;'>%1</div>")
+        queueHtml += QString("<div style='font-family: \"Jost\", sans-serif; font-size: 16px; margin: 5px 0; letter-spacing: 2px; font-weight: normal; color: #888;'>%1</div>")
                 .arg(QString::fromStdString(set.alphagram));
     }
     queueHtml += "</div>";
