@@ -714,6 +714,8 @@ void test_config_anno(void) {
                             ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
 
   assert_config_exec_status(config, "set -lex CSW24", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 1",
+                            ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
   assert_config_exec_status(config, "sw", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "set -p1 a -p2 b", ERROR_STATUS_SUCCESS);
@@ -754,6 +756,10 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "com 8d FADGE XYZ",
                             ERROR_STATUS_COMMIT_EXTRANEOUS_ARG);
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 0",
+                            ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
+  assert_config_exec_status(config, "com 100",
+                            ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
   assert_config_exec_status(config, "com 1 ABC",
                             ERROR_STATUS_COMMIT_EXTRANEOUS_ARG);
   assert_config_exec_status(config, "com 1 ABC DEF",
@@ -1077,6 +1083,17 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "rack BONSOIR", ERROR_STATUS_SUCCESS);
   // This error is from trying to draw ZZZZZZZ after the previous exchange
   assert_config_exec_status(config, "com ex BONSOIR EEEEGGP",
+                            ERROR_STATUS_COMMIT_PASS_OUT_RACK_NOT_IN_BAG);
+  // Go back one turn to redo the exchange
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack DISLINK", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com pass", ERROR_STATUS_SUCCESS);
+  // In this scenario where the 5th 0 score turn is a pass with DISLINK
+  // and the 6th 0 score turn is an exchange drawing into the K, there
+  // should be an error thrown because the K is always on the rack
+  // of the player who passed holding DISLINK.
+  assert_config_exec_status(config, "rack BONSOIR", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com ex BONSOIR EEEEGGK",
                             ERROR_STATUS_COMMIT_PASS_OUT_RACK_NOT_IN_BAG);
   // Go back one turn to redo the exchange
   assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);

@@ -790,12 +790,13 @@ void impl_set_rack(Config *config, ErrorStack *error_stack) {
   if (rack_is_drawable(config->game, player_index, &new_rack)) {
     return_rack_to_bag(config->game, player_index);
     if (!draw_rack_from_bag(config->game, player_index, &new_rack)) {
-      log_fatal("failed to draw rack from bag in set rack command");
+      log_fatal(
+          "unexpectedly failed to draw rack from bag in set rack command");
     }
   } else {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG,
-        get_formatted_string("rack %s is not available in the bag", rack_str));
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG,
+                     get_formatted_string(
+                         "rack '%s' is not available in the bag", rack_str));
   }
 }
 
@@ -1452,7 +1453,7 @@ void config_restore_game_and_history(Config *config) {
 
 // Runs game_play_n_events and then calculates if
 // - the consecutive pass game end procedures should be applied
-// - the game history need to wait for the final pass/challenge from the user
+// - the game history needs to wait for the final pass/challenge from the user
 void config_game_play_events(Config *config, ErrorStack *error_stack) {
   Game *game = config->game;
   GameHistory *game_history = config->game_history;
@@ -1480,11 +1481,11 @@ void config_game_play_events(Config *config, ErrorStack *error_stack) {
 
   if (num_played_events < num_events ||
       !game_reached_max_scoreless_turns(game) ||
-      game_history_contains_end_rack_event(game_history)) {
+      game_history_contains_end_rack_penalty_event(game_history)) {
     // We have either:
     //
     //  - played into the "middle" of the game history with more events
-    //    that have yet to be played, which are either more moves are the end
+    //    that have yet to be played, which are either more moves or other end
     //    of game events
     //
     //  - the game has not reached the maximum number of scoreless turns
@@ -1515,9 +1516,11 @@ void config_game_play_events(Config *config, ErrorStack *error_stack) {
                                 false);
         error_stack_push(
             error_stack, ERROR_STATUS_COMMIT_PASS_OUT_RACK_NOT_IN_BAG,
-            get_formatted_string("rack to draw before game end pass out '%s' "
-                                 "is not available in the bag",
-                                 string_builder_peek(sb)));
+            get_formatted_string(
+                "rack to draw before game end pass out '%s' for player '%s'"
+                "is not available in the bag",
+                string_builder_peek(sb),
+                game_history_player_get_name(game_history, player_index)));
         string_builder_destroy(sb);
         return;
       }
@@ -1535,12 +1538,14 @@ void config_game_play_events(Config *config, ErrorStack *error_stack) {
           if (!rack_is_drawable(game, player_index, prev_pass_rack)) {
             StringBuilder *sb = string_builder_create();
             string_builder_add_rack(sb, prev_pass_rack, ld, false);
-            const char *err_msg =
-                get_formatted_string("rack on game end pass out '%s' is "
-                                     "unexpectedly not available in the bag",
-                                     string_builder_peek(sb));
+            error_stack_push(
+                error_stack, ERROR_STATUS_COMMIT_PASS_OUT_RACK_NOT_IN_BAG,
+                get_formatted_string(
+                    "rack to draw before game end pass out '%s' for player '%s'"
+                    "is not available in the bag",
+                    string_builder_peek(sb),
+                    game_history_player_get_name(game_history, player_index)));
             string_builder_destroy(sb);
-            log_fatal(err_msg);
             return;
           }
           return_rack_to_bag(game, player_index);
@@ -1602,6 +1607,8 @@ void config_add_end_rack_points(Config *config, const int player_index,
 
   const Rack *end_rack_points_rack =
       player_get_rack(game_get_player(config->game, player_index));
+  // FIXME: consolidate existing end rack points and end rack penalty
+  // calculations
   const Equity end_rack_points_equity =
       rack_get_score(config->ld, end_rack_points_rack) * 2;
   const int end_rack_points_player_index = 1 - player_index;
@@ -1704,7 +1711,10 @@ void config_add_game_event(Config *config, const int player_index,
               "event to game history in the config\n");
     break;
   case GAME_EVENT_TIME_PENALTY:
-    log_fatal("adding time penalty is unimplemented\n");
+    // Time penalty events are never submitted directly by the user and
+    // should have been handled automatically
+    log_fatal("got unexpected time penalty game event when adding "
+              "event to game history in the config\n");
     break;
   case GAME_EVENT_END_RACK_POINTS:
     // End rack points events are never submitted directly by the user and are
@@ -1796,30 +1806,32 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
               commit_pos_arg_3));
       return;
     }
-    // If no second arg is provided and the first arg is all digits, the digits
-    // represent the static rank of the move to commit.
-    int commit_move_static_rank = string_to_int(commit_pos_arg_1, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
+    int move_list_count = 0;
+    if (config->move_list) {
+      move_list_count = move_list_get_count(config->move_list);
     }
-    commit_move_static_rank--;
-    // commit_move_static_rank is necessarily nonnegative since
-    // is_all_digits_or_empty returns false for negative numbers.
-    if (!config->move_list ||
-        commit_move_static_rank >= move_list_get_count(config->move_list)) {
-      int move_list_count = 0;
-      if (config->move_list) {
-        move_list_count = move_list_get_count(config->move_list);
-      }
+    if (move_list_count == 0) {
       error_stack_push(
           error_stack, ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE,
           get_formatted_string(
-              "cannot commit move %d with only %d total generated moves",
-              commit_move_static_rank + 1, move_list_count));
+              "cannot commit move with index '%s' with no generated moves",
+              commit_pos_arg_1));
       return;
     }
-    move_copy(&move,
-              move_list_get_move(config->move_list, commit_move_static_rank));
+    // If no second arg is provided and the first arg is all digits, the digits
+    // represent the rank of the move to commit.
+
+    int commit_move_index;
+    string_to_int_or_push_error("move index", commit_pos_arg_1, 1,
+                                move_list_count,
+                                ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE,
+                                &commit_move_index, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    // Convert from 1-indexed user input to 0-indexed internal representation
+    commit_move_index--;
+    move_copy(&move, move_list_get_move(config->move_list, commit_move_index));
     if (move_get_type(&move) != GAME_EVENT_EXCHANGE && commit_pos_arg_2) {
       error_stack_push(
           error_stack, ERROR_STATUS_COMMIT_EXTRANEOUS_ARG,
@@ -2120,9 +2132,9 @@ char *str_api_unchallenge(Config *config, ErrorStack *error_stack) {
 
 char *impl_overtime(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-                     string_duplicate("cannot add overtime penalty without "
-                                      "letter distribution and lexicon"));
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate("cannot add overtime penalty without lexicon"));
     return empty_string();
   }
 

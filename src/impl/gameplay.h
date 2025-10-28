@@ -31,6 +31,7 @@ bool moves_are_similar(const Move *m1, const Move *m2, int dist_size);
 
 void game_play_n_events(GameHistory *game_history, Game *game, int event_index,
                         bool validate, ErrorStack *error_stack);
-bool game_history_contains_end_rack_event(const GameHistory *game_history);
+bool game_history_contains_end_rack_penalty_event(
+    const GameHistory *game_history);
 
 #endif

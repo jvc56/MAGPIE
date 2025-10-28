@@ -791,26 +791,27 @@ bool validated_moves_get_challenge_turn_loss(const ValidatedMoves *vms, int i) {
 // Assumes the movelist is sorted
 void validated_moves_add_to_sorted_move_list(const ValidatedMoves *vms,
                                              MoveList *ml) {
-  Move **moves = (Move **)malloc_or_die(sizeof(Move *) * vms->number_of_moves);
-  int number_of_new_moves = 0;
+  Move **moves_to_add =
+      (Move **)malloc_or_die(sizeof(Move *) * vms->number_of_moves);
+  int number_of_moves_to_add = 0;
   for (int i = 0; i < vms->number_of_moves; i++) {
     if (!move_list_move_exists(ml, vms->moves[i]->move)) {
-      moves[number_of_new_moves++] = vms->moves[i]->move;
+      moves_to_add[number_of_moves_to_add++] = vms->moves[i]->move;
     }
   }
 
   int current_capacity = move_list_get_capacity(ml);
   int current_number_of_moves = move_list_get_count(ml);
-  int new_capacity = current_number_of_moves + number_of_new_moves;
+  int new_capacity = current_number_of_moves + number_of_moves_to_add;
   if (new_capacity > current_capacity) {
     move_list_resize(ml, new_capacity);
   }
 
-  for (int j = 0; j < number_of_new_moves; j++) {
-    move_list_add_move_to_sorted_list(ml, moves[j]);
+  for (int j = 0; j < number_of_moves_to_add; j++) {
+    move_list_add_move_to_sorted_list(ml, moves_to_add[j]);
   }
 
-  free(moves);
+  free(moves_to_add);
 }
 
 void validated_moves_set_rack_to_played_letters(const ValidatedMoves *vms,

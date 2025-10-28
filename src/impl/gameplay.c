@@ -733,7 +733,7 @@ void set_after_game_event_racks(const GameHistory *game_history,
     // If the bag has <= RACK_SIZE, then the last play must've been an outplay
     // and the opp must have all of the remaining letters.
     // For the call to copy_bag_to_rack, just pass in
-    // after_event_player_off_turn_rack as the rack to sub since we known it's
+    // after_event_player_off_turn_rack as the rack to sub since we know it's
     // empty at this point.
     copy_bag_to_rack(bag, after_event_player_off_turn_rack,
                      after_event_player_on_turn_rack);
@@ -743,7 +743,7 @@ void set_after_game_event_racks(const GameHistory *game_history,
       const GameEvent *game_event_i = game_history_get_event(game_history, i);
       if (i > 0) {
         // Since this loop is looking ahead into the game history slightly
-        // it might encountered game event order errors, so we check them
+        // it might encounter game event order errors, so we check them
         // here so the potential errors are more coherent and a side effect
         // error is not returned later.
         validate_challenge_bonus_and_phony_tiles_returned_order(

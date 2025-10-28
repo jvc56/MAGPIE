@@ -557,7 +557,7 @@ void game_history_goto(GameHistory *game_history, int num_events_to_play,
         error_stack, ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE,
         get_formatted_string(
             "position %d is out of range; the latest position is %d",
-            num_events_to_play, game_history->num_events - 1));
+            num_events_to_play, game_history->num_events));
     return;
   }
   game_history->num_played_events = num_events_to_play;
@@ -590,7 +590,7 @@ GameEvent *game_history_add_game_event(GameHistory *game_history,
   if (game_history->num_events == MAX_GAME_EVENTS) {
     error_stack_push(
         error_stack, ERROR_STATUS_GCG_PARSE_GAME_EVENT_OVERFLOW,
-        get_formatted_string("exceeded the maximum number of game events: %d",
+        get_formatted_string("exceeded the maximum number of game events (%d)",
                              MAX_GAME_EVENTS));
     return NULL;
   }
@@ -676,7 +676,8 @@ void game_history_remove_challenge_bonus_game_event(GameHistory *game_history) {
   game_history->num_events--;
 }
 
-bool game_history_contains_end_rack_event(const GameHistory *game_history) {
+bool game_history_contains_end_rack_penalty_event(
+    const GameHistory *game_history) {
   for (int i = 0; i < game_history_get_num_events(game_history); i++) {
     if (game_event_get_type(game_history_get_event(game_history, i)) ==
         GAME_EVENT_END_RACK_PENALTY) {
