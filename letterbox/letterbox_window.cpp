@@ -31,12 +31,11 @@ LetterboxWindow::LetterboxWindow(QWidget *parent)
     // Initialize MAGPIE
     // Get the application directory (where the .app bundle is)
     QString appDir = QCoreApplication::applicationDirPath();
-    // On macOS, go up from Letterbox.app/Contents/MacOS to letterbox/
+    // On macOS, look for data in the app bundle Resources directory
+    // Path: Letterbox.app/Contents/MacOS -> ../Resources/data
     QDir dir(appDir);
     dir.cdUp();  // Contents
-    dir.cdUp();  // Letterbox.app
-    dir.cdUp();  // letterbox (or wherever the .app is)
-    QString dataPath = dir.absolutePath() + "/data";
+    QString dataPath = dir.absolutePath() + "/Resources/data";
 
     qDebug() << "App dir:" << appDir;
     qDebug() << "Data path:" << dataPath;
