@@ -40,7 +40,8 @@ LetterboxWindow::LetterboxWindow(QWidget *parent)
       renderWindowSize(15), userScrolledUp(false),
       scaleFactor(1.0), zoomLevelIndex(7), scaledWordSize(36), scaledHookSize(24), scaledExtensionSize(14),
       scaledInputSize(20), scaledQueueCurrentSize(24), scaledQueueUpcomingSize(16),
-      showDebugInfo(false), showComputeTime(false), showRenderTime(false), lastRenderTimeMicros(0)
+      showDebugInfo(false), showComputeTime(false), showRenderTime(false), showHoverDebugInfo(false),
+      lastRenderTimeMicros(0)
 {
     setupUI();
     setupMenuBar();
@@ -183,7 +184,7 @@ void LetterboxWindow::setupUI()
     wordHoverOverlay->setFixedWidth(200);
     wordHoverOverlay->hide();
 
-    // Debug label for hover detection (top-left corner)
+    // Debug label for hover detection (bottom-left corner)
     hoverDebugLabel = new QLabel(solvedContainer);
     hoverDebugLabel->setStyleSheet(
         "background-color: rgba(0, 0, 0, 180); "
@@ -192,9 +193,9 @@ void LetterboxWindow::setupUI()
         "font-family: 'Courier', monospace; "
         "font-size: 10px;"
     );
-    hoverDebugLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    hoverDebugLabel->setAlignment(Qt::AlignLeft | Qt::AlignBottom);
     hoverDebugLabel->setText("Hover debug");
-    hoverDebugLabel->show();
+    hoverDebugLabel->hide();  // Start hidden, toggled by Debug menu
     hoverDebugLabel->raise();
 
     mainLayout->addWidget(solvedContainer, 4);
@@ -1051,6 +1052,12 @@ void LetterboxWindow::setupMenuBar()
     renderTimeAction->setChecked(false);
     connect(renderTimeAction, &QAction::triggered, this, &LetterboxWindow::toggleRenderTime);
     debugMenu->addAction(renderTimeAction);
+
+    hoverDebugAction = new QAction("Show Hover Debug Info", this);
+    hoverDebugAction->setCheckable(true);
+    hoverDebugAction->setChecked(false);  // Disabled by default
+    connect(hoverDebugAction, &QAction::triggered, this, &LetterboxWindow::toggleHoverDebugInfo);
+    debugMenu->addAction(hoverDebugAction);
 }
 
 void LetterboxWindow::toggleFullscreen()
@@ -1129,6 +1136,15 @@ void LetterboxWindow::toggleRenderTime()
 {
     showRenderTime = renderTimeAction->isChecked();
     updateDisplay();
+}
+
+void LetterboxWindow::toggleHoverDebugInfo()
+{
+    showHoverDebugInfo = hoverDebugAction->isChecked();
+    // Show or hide the hover debug label
+    if (hoverDebugLabel) {
+        hoverDebugLabel->setVisible(showHoverDebugInfo);
+    }
 }
 
 void LetterboxWindow::updateDebugInfo()
@@ -1709,12 +1725,16 @@ void LetterboxWindow::hideWordHoverOverlay()
 
 void LetterboxWindow::updateHoverDebug(const QString& debugInfo)
 {
-    if (hoverDebugLabel) {
-        hoverDebugLabel->setText(debugInfo);
-        hoverDebugLabel->adjustSize();
-        hoverDebugLabel->move(0, 0);  // Top-left corner
-        hoverDebugLabel->raise();
+    if (!showHoverDebugInfo || !hoverDebugLabel || !solvedContainer) {
+        return;
     }
+
+    hoverDebugLabel->setText(debugInfo);
+    hoverDebugLabel->adjustSize();
+    // Position at bottom-left corner
+    int y = solvedContainer->height() - hoverDebugLabel->height();
+    hoverDebugLabel->move(0, y);
+    hoverDebugLabel->raise();
 }
 
 void LetterboxWindow::checkForCompletion()

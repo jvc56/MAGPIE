@@ -66,6 +66,7 @@ private slots:
     void toggleDebugInfo();
     void toggleComputeTime();
     void toggleRenderTime();
+    void toggleHoverDebugInfo();
     void onScrollChanged(int value);
 
 protected:
@@ -173,10 +174,12 @@ private:
     QAction* debugAction;
     QAction* computeTimeAction;
     QAction* renderTimeAction;
+    QAction* hoverDebugAction;
     QAction* skipAction;
     bool showDebugInfo;
     bool showComputeTime;
     bool showRenderTime;
+    bool showHoverDebugInfo;
     int lastRenderTimeMicros;
 
     // Resize debounce timer
