@@ -333,7 +333,7 @@ char* letterbox_find_back_extensions(const KWG *kwg, const LetterDistribution *l
     StringBuilder *sb = string_builder_create();
     int count = dictionary_word_list_get_count(ext_list);
 
-    const int MAX_CHARS_PER_LINE = 40;
+    const int MAX_CHARS_PER_LINE = 10000;  // Get all extensions, truncation done in Qt
 
     // Group by length (shorter extensions are more playable)
     // Skip length 1 since those are shown as hooks
@@ -439,7 +439,7 @@ char* letterbox_find_front_extensions(const KWG *kwg, const LetterDistribution *
     StringBuilder *sb = string_builder_create();
     int count = dictionary_word_list_get_count(ext_list);
 
-    const int MAX_CHARS_PER_LINE = 40;
+    const int MAX_CHARS_PER_LINE = 10000;  // Get all extensions, truncation done in Qt
 
     // Group by length (shorter extensions are more playable)
     // Skip length 1 since those are shown as hooks

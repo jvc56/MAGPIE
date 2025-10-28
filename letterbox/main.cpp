@@ -3,9 +3,19 @@
 #include <QFontDatabase>
 #include <QDebug>
 
+#ifdef Q_OS_MACOS
+extern "C" {
+    void setDarkModeAppearance();
+}
+#endif
+
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
+
+#ifdef Q_OS_MACOS
+    setDarkModeAppearance();
+#endif
 
     // Load Jost fonts
     int fontIdBold = QFontDatabase::addApplicationFont(":/fonts/Jost/static/Jost-Bold.ttf");

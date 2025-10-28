@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <unordered_map>
 #include <chrono>
+#include <vector>
 
 LetterboxWindow::LetterboxWindow(QWidget *parent)
     : QMainWindow(parent), config(nullptr), kwg(nullptr), ld(nullptr), currentIndex(0),
@@ -263,9 +264,12 @@ void LetterboxWindow::loadWordList()
         QStringList parts = line.split(' ', Qt::SkipEmptyParts);
         if (parts.size() != 2) continue;
 
-        int pb = parts[0].toInt();
+        int pb = (int)parts[0].toDouble();  // Use toDouble() because scores can be floats like "86374.7"
         std::string word = parts[1].toStdString();
         std::string alphagram = sortVowelsFirst(word);
+
+        // Store playability score for this word
+        playabilityScores[word] = pb;
 
         alphagramPlayability[alphagram] += pb;
         alphagramWords[alphagram].push_back(word);
@@ -273,6 +277,15 @@ void LetterboxWindow::loadWordList()
     file.close();
 
     qDebug() << "Found" << alphagramWords.size() << "unique alphagrams";
+    qDebug() << "Loaded" << playabilityScores.size() << "playability scores";
+
+    // Debug: Check if specific words are loaded
+    if (playabilityScores.count("JEER")) {
+        qDebug() << "JEER score:" << playabilityScores["JEER"];
+    }
+    if (playabilityScores.count("EWER")) {
+        qDebug() << "EWER score:" << playabilityScores["EWER"];
+    }
 
     // Create alphagram sets from the words we already have (no KWG lookup needed!)
     for (auto& [alphagram, words] : alphagramWords) {
@@ -816,12 +829,10 @@ const HookExtensionCache& LetterboxWindow::getOrComputeHookExtensions(const std:
 
     auto startTime = std::chrono::high_resolution_clock::now();
 
-    char* frontHooks = nullptr;
-    char* frontExts = nullptr;
-    char* backHooks = nullptr;
-    char* backExts = nullptr;
-    letterbox_find_front_hooks_and_extensions(kwg, ld, word.c_str(), 7, &frontHooks, &frontExts);
-    letterbox_find_back_hooks_and_extensions(kwg, ld, word.c_str(), 7, &backHooks, &backExts);
+    char* frontHooks = letterbox_find_front_hooks(kwg, ld, word.c_str());
+    char* backHooks = letterbox_find_back_hooks(kwg, ld, word.c_str());
+    char* frontExts = letterbox_find_front_extensions(kwg, ld, word.c_str(), 7);
+    char* backExts = letterbox_find_back_extensions(kwg, ld, word.c_str(), 7);
 
     auto endTime = std::chrono::high_resolution_clock::now();
     cache.computeTimeMicros = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count();
@@ -837,7 +848,92 @@ const HookExtensionCache& LetterboxWindow::getOrComputeHookExtensions(const std:
     free(frontExts);
     free(backExts);
 
+    // Sort extensions by playability before caching
+    QString qWord = QString::fromStdString(word);
+    cache.frontExtensions = sortExtensionsByPlayability(QString::fromStdString(cache.frontExtensions), qWord, true).toStdString();
+    cache.backExtensions = sortExtensionsByPlayability(QString::fromStdString(cache.backExtensions), qWord, false).toStdString();
+
     // Store in cache and return reference
     hookExtensionCache[word] = cache;
     return hookExtensionCache[word];
+}
+
+QString LetterboxWindow::sortExtensionsByPlayability(const QString& extensions, const QString& baseWord, bool isFront)
+{
+    if (extensions.isEmpty()) {
+        return extensions;
+    }
+
+    // Split by newlines (one line per extension length)
+    QStringList lines = extensions.split('\n', Qt::SkipEmptyParts);
+    QString result;
+
+    for (const QString& line : lines) {
+        // Split words by spaces (these are extension parts, not full words)
+        QStringList extensionParts = line.split(' ', Qt::SkipEmptyParts);
+
+        // Remove ellipsis if present
+        bool hadEllipsis = false;
+        if (!extensionParts.isEmpty() && extensionParts.last().contains("…")) {
+            hadEllipsis = true;
+            extensionParts.last().remove("…");
+            if (extensionParts.last().isEmpty()) {
+                extensionParts.removeLast();
+            }
+        }
+
+        // Sort by playability (descending)
+        std::vector<std::pair<QString, int>> extensionsWithScores;
+        for (const QString& ext : extensionParts) {
+            // Construct the full word by combining base word with extension
+            QString fullWord;
+            if (isFront) {
+                fullWord = ext + baseWord;  // Front extension: EXT + WORD
+            } else {
+                fullWord = baseWord + ext;  // Back extension: WORD + EXT
+            }
+
+            std::string stdFullWord = fullWord.toStdString();
+            int score = playabilityScores.count(stdFullWord) ? playabilityScores[stdFullWord] : 0;
+            extensionsWithScores.push_back({ext, score});  // Store the extension part with the full word's score
+
+            // Debug: print specific cases for ER
+            if (baseWord == "ER" && isFront && (ext == "JE" || ext == "EW" || ext == "OY" || extensionsWithScores.size() <= 5)) {
+                qDebug() << "Extension:" << ext << "-> Full word:" << fullWord << "-> Score:" << score;
+            }
+        }
+
+        std::sort(extensionsWithScores.begin(), extensionsWithScores.end(),
+                  [](const auto& a, const auto& b) {
+                      return a.second > b.second; // Descending order
+                  });
+
+        // Rebuild the line with sorted extension parts, truncating at 40 characters
+        QStringList sortedExtensions;
+        int letterCount = 0;
+        const int MAX_CHARS_PER_LINE = 40;
+        bool truncated = false;
+
+        for (const auto& pair : extensionsWithScores) {
+            int extLen = pair.first.length();
+            if (letterCount + extLen > MAX_CHARS_PER_LINE) {
+                truncated = true;
+                break;
+            }
+            sortedExtensions.append(pair.first);
+            letterCount += extLen;
+        }
+
+        QString sortedLine = sortedExtensions.join(' ');
+        if (truncated) {
+            sortedLine += "…";
+        }
+
+        if (!result.isEmpty()) {
+            result += '\n';
+        }
+        result += sortedLine;
+    }
+
+    return result;
 }

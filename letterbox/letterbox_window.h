@@ -69,15 +69,20 @@ private:
     void updateDebugInfo();
     void calculateGlobalMaxWidths();
     void updateScaledFontSizes();
+    void loadPlayabilityScores(const QString& filepath);
     std::string sortVowelsFirst(const std::string& word);
     QString formatAlphagramSet(const AlphagramSet& set, bool showAll);
     const HookExtensionCache& getOrComputeHookExtensions(const std::string& word);
+    QString sortExtensionsByPlayability(const QString& extensions, const QString& baseWord, bool isFront);
 
     Config* config;
     KWG* kwg;
     LetterDistribution* ld;
     std::vector<AlphagramSet> alphagrams;
     int currentIndex;
+
+    // Playability scores for sorting extensions
+    std::unordered_map<std::string, int> playabilityScores;
 
     // Cache for hook/extension computations
     std::unordered_map<std::string, HookExtensionCache> hookExtensionCache;

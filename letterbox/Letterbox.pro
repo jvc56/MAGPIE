@@ -12,6 +12,12 @@ INCLUDEPATH += ..
 # C wrapper for MAGPIE
 SOURCES += magpie_wrapper.c
 
+# Objective-C for macOS dark mode
+macx {
+    OBJECTIVE_SOURCES += dark_mode.m
+    LIBS += -framework Cocoa
+}
+
 # Qt C++ sources
 SOURCES += \
     main.cpp \
