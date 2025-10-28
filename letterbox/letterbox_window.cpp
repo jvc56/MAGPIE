@@ -145,6 +145,10 @@ void LetterboxWindow::setupUI()
     inputField->setPlaceholderText("...");
     inputField->setAlignment(Qt::AlignCenter);
     inputField->setStyleSheet("QLineEdit { padding: 15px; font-family: 'Jost', sans-serif; font-size: 20px; font-weight: bold; margin: 2px 0px; background-color: rgb(40, 40, 40); color: white; border: 2px solid #3a7f9f; text-transform: uppercase; }");
+
+    // Install event filter to intercept Cmd-Z before the text field gets it
+    inputField->installEventFilter(this);
+
     connect(inputField, &QLineEdit::textChanged, this, [this](const QString& text) {
         // Force uppercase without triggering another textChanged signal
         if (text != text.toUpper()) {
@@ -1053,6 +1057,24 @@ void LetterboxWindow::resizeEvent(QResizeEvent *event)
 
     // Restart the debounce timer - only process resize after user stops resizing
     resizeTimer->start();
+}
+
+bool LetterboxWindow::eventFilter(QObject *obj, QEvent *event)
+{
+    // Intercept Cmd-Z on the input field and handle it ourselves
+    if (obj == inputField && event->type() == QEvent::KeyPress) {
+        QKeyEvent *keyEvent = static_cast<QKeyEvent*>(event);
+        // Check for Cmd-Z (Ctrl on macOS is actually Command key)
+        if (keyEvent->matches(QKeySequence::Undo)) {
+            // Trigger our undo action if it's enabled
+            if (undoAction && undoAction->isEnabled()) {
+                undoMarkAsMissed();
+                return true;  // Event handled, don't pass to input field
+            }
+        }
+    }
+    // Pass event to base class
+    return QMainWindow::eventFilter(obj, event);
 }
 
 void LetterboxWindow::handleResizeComplete()
