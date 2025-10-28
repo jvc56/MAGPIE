@@ -125,7 +125,14 @@ void LetterboxWindow::setupUI()
     mainLayout->setContentsMargins(20, 20, 20, 20);
 
     // Top 2/3: Solved alphagrams (scrollable, most recent at bottom)
-    solvedScrollArea = new QScrollArea(this);
+    // Wrap in a container to allow absolute positioning of word hover overlay
+    solvedContainer = new QWidget(this);
+    solvedContainer->setMouseTracking(true);  // Enable mouse tracking for the container
+    QVBoxLayout* solvedContainerLayout = new QVBoxLayout(solvedContainer);
+    solvedContainerLayout->setContentsMargins(0, 0, 0, 0);
+    solvedContainerLayout->setSpacing(0);
+
+    solvedScrollArea = new QScrollArea(solvedContainer);
     solvedScrollArea->setWidgetResizable(true);
     solvedScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     solvedScrollArea->setStyleSheet(
@@ -153,12 +160,44 @@ void LetterboxWindow::setupUI()
     );
 
     solvedWidget = new QWidget();
+    solvedWidget->setMouseTracking(true);  // Enable mouse tracking for event propagation
     solvedLayout = new QVBoxLayout(solvedWidget);
     solvedLayout->setAlignment(Qt::AlignBottom | Qt::AlignHCenter);
     solvedLayout->setSpacing(10);  // 10px vertical spacing between boxes (2.5x more than 4px)
 
     solvedScrollArea->setWidget(solvedWidget);
-    mainLayout->addWidget(solvedScrollArea, 4);
+    solvedScrollArea->setMouseTracking(true);  // Enable mouse tracking on scroll area
+    solvedContainerLayout->addWidget(solvedScrollArea);
+
+    // Word hover overlay (top-left or top-right corner)
+    wordHoverOverlay = new QLabel(solvedContainer);
+    wordHoverOverlay->setStyleSheet(
+        "background-color: black; "
+        "color: white; "
+        "padding: 10px 15px; "
+        "font-family: 'Jost', sans-serif; "
+        "font-size: 18px; "
+        "font-weight: bold;"
+    );
+    wordHoverOverlay->setAlignment(Qt::AlignCenter);
+    wordHoverOverlay->setFixedWidth(200);
+    wordHoverOverlay->hide();
+
+    // Debug label for hover detection (top-left corner)
+    hoverDebugLabel = new QLabel(solvedContainer);
+    hoverDebugLabel->setStyleSheet(
+        "background-color: rgba(0, 0, 0, 180); "
+        "color: yellow; "
+        "padding: 5px; "
+        "font-family: 'Courier', monospace; "
+        "font-size: 10px;"
+    );
+    hoverDebugLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    hoverDebugLabel->setText("Hover debug");
+    hoverDebugLabel->show();
+    hoverDebugLabel->raise();
+
+    mainLayout->addWidget(solvedContainer, 4);
 
     // Middle: Input field (full width)
     inputField = new QLineEdit(this);
@@ -525,6 +564,12 @@ void LetterboxWindow::updateDisplay()
     for (int i = startIndex; i < currentIndex; i++) {
         if (alphagrams[i].studied) {
             AlphagramBox* box = new AlphagramBox(solvedWidget);
+
+            // Connect hover signals
+            connect(box, &AlphagramBox::wordHovered, this, &LetterboxWindow::showWordHoverOverlay);
+            connect(box, &AlphagramBox::hoverLeft, this, &LetterboxWindow::hideWordHoverOverlay);
+            connect(box, &AlphagramBox::hoverDebug, this, &LetterboxWindow::updateHoverDebug);
+
             for (const auto& entry : alphagrams[i].words) {
                 // Get cached or compute hook/extension data
                 const HookExtensionCache& cache = getOrComputeHookExtensions(entry.word);
@@ -553,6 +598,12 @@ void LetterboxWindow::updateDisplay()
     // Only if we haven't completed all alphagrams yet
     if (currentIndex < static_cast<int>(alphagrams.size())) {
         AlphagramBox* currentBox = new AlphagramBox(solvedWidget);
+
+        // Connect hover signals
+        connect(currentBox, &AlphagramBox::wordHovered, this, &LetterboxWindow::showWordHoverOverlay);
+        connect(currentBox, &AlphagramBox::hoverLeft, this, &LetterboxWindow::hideWordHoverOverlay);
+        connect(currentBox, &AlphagramBox::hoverDebug, this, &LetterboxWindow::updateHoverDebug);
+
         for (const auto& entry : alphagrams[currentIndex].words) {
             if (entry.revealed) {
                 // Show the actual word with hooks and extensions (cached)
@@ -1627,6 +1678,42 @@ void LetterboxWindow::updateWindowTitle()
         setWindowTitle("Letterbox");
     } else {
         setWindowTitle(currentListName + " - Letterbox");
+    }
+}
+
+void LetterboxWindow::showWordHoverOverlay(const QString& word, bool alignLeft)
+{
+    if (!wordHoverOverlay || !solvedContainer) {
+        return;
+    }
+
+    wordHoverOverlay->setText(word);
+    wordHoverOverlay->adjustSize();
+    wordHoverOverlay->setFixedWidth(200);  // Keep fixed width
+
+    // Position in corner (top-left or top-right)
+    int x = alignLeft ? 0 : (solvedContainer->width() - wordHoverOverlay->width());
+    int y = 0;  // Top of container
+
+    wordHoverOverlay->move(x, y);
+    wordHoverOverlay->show();
+    wordHoverOverlay->raise();  // Ensure it's on top
+}
+
+void LetterboxWindow::hideWordHoverOverlay()
+{
+    if (wordHoverOverlay) {
+        wordHoverOverlay->hide();
+    }
+}
+
+void LetterboxWindow::updateHoverDebug(const QString& debugInfo)
+{
+    if (hoverDebugLabel) {
+        hoverDebugLabel->setText(debugInfo);
+        hoverDebugLabel->adjustSize();
+        hoverDebugLabel->move(0, 0);  // Top-left corner
+        hoverDebugLabel->raise();
     }
 }
 

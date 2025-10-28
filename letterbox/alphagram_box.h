@@ -31,13 +31,24 @@ public:
     void finalize(int wordSize = 36, int hookSize = 24, int extensionSize = 14, bool showComputeTime = false);
     void clear();
 
+signals:
+    void wordHovered(const QString& word, bool alignLeft);
+    void hoverLeft();
+    void hoverDebug(const QString& debugInfo);
+
 protected:
     void paintEvent(QPaintEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void leaveEvent(QEvent *event) override;
 
 private:
+    void updateHover(const QPoint& pos);
+
     QVBoxLayout* layout;
     QLabel* tableLabel;
     std::vector<WordData> words;
+    bool hasAnyFrontHooks;
+    bool hasAnyBackHooks;
 };
 
 #endif // ALPHAGRAM_BOX_H

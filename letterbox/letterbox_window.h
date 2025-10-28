@@ -97,6 +97,11 @@ private:
     void createMissedWordsList();
     void updateWindowTitle();
 
+    // Word hover overlay
+    void showWordHoverOverlay(const QString& word, bool alignLeft);
+    void hideWordHoverOverlay();
+    void updateHoverDebug(const QString& debugInfo);
+
     Config* config;
     KWG* kwg;
     LetterDistribution* ld;
@@ -148,6 +153,9 @@ private:
     QWidget* solvedWidget;         // Container for solved alphagrams
     QVBoxLayout* solvedLayout;     // Layout for solved alphagrams
     QScrollArea* solvedScrollArea; // Scroll area for solved section
+    QWidget* solvedContainer;      // Container for solved area with word hover overlay
+    QLabel* wordHoverOverlay;      // Word hover overlay (top-left or top-right corner)
+    QLabel* hoverDebugLabel;       // Debug info for hover detection (top-left corner)
     QLineEdit* inputField;         // Middle: answer input
     QWidget* queueContainer;       // Container for queue area with counter overlay
     QLabel* queueLabel;            // Bottom: upcoming alphagrams

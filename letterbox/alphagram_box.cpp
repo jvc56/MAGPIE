@@ -4,9 +4,11 @@
 #include <QFont>
 #include <QFontMetrics>
 #include <QGraphicsDropShadowEffect>
+#include <QMouseEvent>
 
 AlphagramBox::AlphagramBox(QWidget *parent)
-    : QWidget(parent), tableLabel(nullptr)
+    : QWidget(parent), tableLabel(nullptr),
+      hasAnyFrontHooks(false), hasAnyBackHooks(false)
 {
     layout = new QVBoxLayout(this);
     // Add margins to keep table content inside the painted border
@@ -14,13 +16,16 @@ AlphagramBox::AlphagramBox(QWidget *parent)
     layout->setSpacing(0);
     setLayout(layout);
 
-    // Add drop shadow effect
-    QGraphicsDropShadowEffect* shadow = new QGraphicsDropShadowEffect(this);
-    shadow->setBlurRadius(8);
-    shadow->setXOffset(0);
-    shadow->setYOffset(2);
-    shadow->setColor(QColor(0, 0, 0, 120));
-    setGraphicsEffect(shadow);
+    // TEMPORARILY DISABLED: Drop shadow effect interferes with mouse tracking
+    // QGraphicsDropShadowEffect* shadow = new QGraphicsDropShadowEffect(this);
+    // shadow->setBlurRadius(8);
+    // shadow->setXOffset(0);
+    // shadow->setYOffset(2);
+    // shadow->setColor(QColor(0, 0, 0, 120));
+    // setGraphicsEffect(shadow);
+
+    // Enable mouse tracking for hover events
+    setMouseTracking(true);
 }
 
 void AlphagramBox::addWord(const QString& word, const QString& frontHooks, const QString& backHooks,
@@ -37,8 +42,8 @@ void AlphagramBox::finalize(int wordSize, int hookSize, int extensionSize, bool 
     }
 
     // Check if any word has hooks or extensions
-    bool hasAnyFrontHooks = false;
-    bool hasAnyBackHooks = false;
+    hasAnyFrontHooks = false;
+    hasAnyBackHooks = false;
     for (const auto& wordData : words) {
         if (!wordData.frontHooks.isEmpty() || !wordData.frontExtensions.isEmpty()) hasAnyFrontHooks = true;
         if (!wordData.backHooks.isEmpty() || !wordData.backExtensions.isEmpty()) hasAnyBackHooks = true;
@@ -46,6 +51,7 @@ void AlphagramBox::finalize(int wordSize, int hookSize, int extensionSize, bool 
 
     // Create a single table for all words
     tableLabel = new QLabel(this);
+    tableLabel->setAttribute(Qt::WA_TransparentForMouseEvents, true);  // Let mouse events pass through to parent
 
     QString html = "<table style='width: 100%; border-collapse: collapse;'>";
 
@@ -184,4 +190,91 @@ void AlphagramBox::paintEvent(QPaintEvent *event)
     QPen pen(QColor(90, 90, 90), 1);
     painter.setPen(pen);
     painter.drawRect(rect().adjusted(0, 0, -1, -1));
+}
+
+void AlphagramBox::mouseMoveEvent(QMouseEvent *event)
+{
+    // Always emit debug to show we're receiving events
+    emit hoverDebug(QString("mouseMoveEvent: pos(%1,%2) hasLabel=%3")
+                    .arg(event->pos().x())
+                    .arg(event->pos().y())
+                    .arg(tableLabel != nullptr ? "yes" : "no"));
+
+    if (!tableLabel) {
+        return;
+    }
+
+    updateHover(event->pos());
+}
+
+void AlphagramBox::leaveEvent(QEvent *event)
+{
+    Q_UNUSED(event);
+    emit hoverLeft();
+}
+
+void AlphagramBox::updateHover(const QPoint& pos)
+{
+    if (words.empty() || !tableLabel) {
+        emit hoverDebug("No words or label");
+        return;
+    }
+
+    // Get the table label's geometry
+    QRect labelRect = tableLabel->geometry();
+
+    // Check if mouse is within the label
+    if (!labelRect.contains(pos)) {
+        emit hoverDebug(QString("Outside label: pos(%1,%2) label(%3,%4 %5x%6)")
+                        .arg(pos.x()).arg(pos.y())
+                        .arg(labelRect.x()).arg(labelRect.y())
+                        .arg(labelRect.width()).arg(labelRect.height()));
+        emit hoverLeft();
+        return;
+    }
+
+    // Calculate relative position within the table
+    int relX = pos.x() - labelRect.x();
+    int labelWidth = labelRect.width();
+
+    // Rough column detection based on width distribution
+    // This is a stub - we'll show the overlay for any hover for now
+    // Left third = front hooks, middle third = word, right third = back hooks
+    int columnWidth = labelWidth / 3;
+
+    QString hoverWord;
+    bool alignLeft = false;
+    QString column;
+
+    if (hasAnyFrontHooks && relX < columnWidth) {
+        // Front hooks column - show on left
+        hoverWord = "FRONT HOOK";  // Stub: will calculate actual extension word
+        alignLeft = true;
+        column = "FRONT";
+    } else if (hasAnyBackHooks && relX > labelWidth - columnWidth) {
+        // Back hooks column - show on right
+        hoverWord = "BACK HOOK";  // Stub: will calculate actual extension word
+        alignLeft = false;
+        column = "BACK";
+    } else {
+        // Word column - show on right
+        if (!words.empty()) {
+            hoverWord = words[0].word;  // Stub: will detect actual word row
+        }
+        alignLeft = false;
+        column = "WORD";
+    }
+
+    // Emit debug info
+    emit hoverDebug(QString("pos(%1,%2) rel(%3/%4) col=%5 word='%6'")
+                    .arg(pos.x()).arg(pos.y())
+                    .arg(relX).arg(labelWidth)
+                    .arg(column)
+                    .arg(hoverWord));
+
+    if (!hoverWord.isEmpty()) {
+        emit wordHovered(hoverWord, alignLeft);
+    } else {
+        emit hoverLeft();
+    }
 }
