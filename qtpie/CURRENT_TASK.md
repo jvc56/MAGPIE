@@ -1,9 +1,30 @@
-# Current Task: Gameplay Functionality Implementation
+# Current Task: UI Polish & Letterbox Enhancements
 
 ## Status: In Progress
 
+## Recent Updates (Oct 27, 2025)
+
+### QtPie - Keyboard Input Fix ✅
+- Fixed infinite recursion crash when typing without clicking board first
+- Added event filter that redirects all keyboard input to board panel
+- Event filter checks if events are already within board panel widget tree to prevent infinite loops
+- Allows typing anywhere in app to control the board
+
+### Letterbox - Word List Filtering ✅
+- Added "Words" menu with "Create Word List..." option
+- Implemented dialog for filtering anagrams by pattern and count
+- **Pattern Matching** (multiset-based, case-insensitive):
+  - Wildcards: `.` or `?` match any single letter
+  - Character classes: `[JQXZ]` requires at least one from the set
+  - Explicit letters: `AA` requires at least two A's
+  - Examples: `.......` (7-letter words), `[jqxz]......` (7-letter with J/Q/X/Z), `a??e???` (7-letter with A and E)
+- **Anagram Count Filters**: Min/max range
+- **Live Preview**: Shows up to 100 matching anagram groups
+- **Unit Tests**: Created `test_pattern.cpp` to verify multiset matching logic
+- Automatically updates data symlink in app bundle Resources directory
+
 ## Overview
-Implementing full gameplay functionality for QtPie including move submission, computer play, turn management, and game history tracking.
+Core gameplay functionality for QtPie including move submission, computer play, turn management, and game history tracking.
 
 ## Completed Features
 
