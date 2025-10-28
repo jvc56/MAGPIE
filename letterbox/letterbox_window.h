@@ -53,6 +53,7 @@ private slots:
     void nextWord();
     void markStudied();
     void skipCurrentAlphagram();
+    void undoMarkAsMissed();
     void loadWordList();
     void createCustomWordList();
     void onTextChanged(const QString& text);
@@ -87,6 +88,10 @@ private:
     std::vector<AlphagramSet> allAlphagrams;  // All loaded alphagrams (before filtering)
     std::vector<AlphagramSet> alphagrams;      // Current working set (possibly filtered)
     int currentIndex;
+
+    // Undo state for "Mark as missed" action
+    int lastMissedIndex;  // Index of last alphagram marked as missed (-1 if none)
+    QAction* undoAction;  // Reference to undo menu action for enabling/disabling
 
     // Playability scores for sorting extensions
     std::unordered_map<std::string, int> playabilityScores;

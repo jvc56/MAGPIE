@@ -26,6 +26,7 @@ const std::vector<double> LetterboxWindow::zoomLevels = {
 
 LetterboxWindow::LetterboxWindow(QWidget *parent)
     : QMainWindow(parent), config(nullptr), kwg(nullptr), ld(nullptr), currentIndex(0),
+      lastMissedIndex(-1), undoAction(nullptr),
       globalMaxFrontWidth(0), globalMaxBackWidth(0), globalMaxWordWidth(0),
       renderWindowSize(15), userScrolledUp(false),
       scaleFactor(1.0), zoomLevelIndex(7), scaledWordSize(36), scaledHookSize(24), scaledExtensionSize(14),
@@ -392,6 +393,12 @@ void LetterboxWindow::loadWordList()
     // Store a copy of all alphagrams for filtering
     allAlphagrams = alphagrams;
 
+    // Clear undo state when loading new word list
+    lastMissedIndex = -1;
+    if (undoAction) {
+        undoAction->setEnabled(false);
+    }
+
     updateProgress();
 }
 
@@ -724,6 +731,12 @@ void LetterboxWindow::onTextChanged(const QString& text)
         if (!entry.revealed && QString::fromStdString(entry.word) == upper) {
             entry.revealed = true;
 
+            // Clear undo state when revealing a word
+            lastMissedIndex = -1;
+            if (undoAction) {
+                undoAction->setEnabled(false);
+            }
+
             // Check if all words are revealed
             bool allRevealed = true;
             for (const auto& e : set.words) {
@@ -811,6 +824,12 @@ void LetterboxWindow::skipCurrentAlphagram()
         }
     }
 
+    // Save this index for undo
+    lastMissedIndex = currentIndex;
+    if (undoAction) {
+        undoAction->setEnabled(true);
+    }
+
     // Mark as studied and advance
     set.studied = true;
     currentIndex++;
@@ -821,6 +840,35 @@ void LetterboxWindow::skipCurrentAlphagram()
             e.revealed = false;
             e.missed = false;
         }
+    }
+
+    updateDisplay();
+}
+
+void LetterboxWindow::undoMarkAsMissed()
+{
+    // Can only undo if we're one step ahead of the last missed index
+    if (lastMissedIndex < 0 || currentIndex != lastMissedIndex + 1) {
+        return;
+    }
+
+    // Go back to the missed alphagram
+    currentIndex = lastMissedIndex;
+    AlphagramSet& set = alphagrams[currentIndex];
+
+    // Reset all words to unrevealed and not missed
+    for (auto& entry : set.words) {
+        entry.revealed = false;
+        entry.missed = false;
+    }
+
+    // Mark as not studied
+    set.studied = false;
+
+    // Clear undo state
+    lastMissedIndex = -1;
+    if (undoAction) {
+        undoAction->setEnabled(false);
     }
 
     updateDisplay();
@@ -838,10 +886,16 @@ void LetterboxWindow::setupMenuBar()
     connect(createListAction, &QAction::triggered, this, &LetterboxWindow::createCustomWordList);
     wordsMenu->addAction(createListAction);
 
-    skipAction = new QAction("Skip", this);
-    skipAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_S));  // Cmd-S on macOS
+    skipAction = new QAction("Mark as missed", this);
+    skipAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_M));  // Cmd-M on macOS
     connect(skipAction, &QAction::triggered, this, &LetterboxWindow::skipCurrentAlphagram);
     wordsMenu->addAction(skipAction);
+
+    undoAction = new QAction("Undo Mark as missed", this);
+    undoAction->setShortcut(QKeySequence::Undo);  // Cmd-Z on macOS
+    undoAction->setEnabled(false);  // Disabled until there's something to undo
+    connect(undoAction, &QAction::triggered, this, &LetterboxWindow::undoMarkAsMissed);
+    wordsMenu->addAction(undoAction);
 
     // View menu
     QMenu* viewMenu = menuBar->addMenu("View");
@@ -1178,6 +1232,12 @@ void LetterboxWindow::createCustomWordList()
         // Get filtered list and update current alphagrams
         alphagrams = dialog.getFilteredList();
         currentIndex = 0;
+
+        // Clear undo state when creating new word list
+        lastMissedIndex = -1;
+        if (undoAction) {
+            undoAction->setEnabled(false);
+        }
 
         // Reset progress and update display
         for (auto& set : alphagrams) {
