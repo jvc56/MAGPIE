@@ -704,7 +704,8 @@ void LetterboxWindow::setupMenuBar()
 
     // Words menu
     QMenu* wordsMenu = menuBar->addMenu("Words");
-    QAction* createListAction = new QAction("Create Word List...", this);
+    QAction* createListAction = new QAction("Create New Word List...", this);
+    createListAction->setShortcut(QKeySequence::New);  // Command-N on macOS
     connect(createListAction, &QAction::triggered, this, &LetterboxWindow::createCustomWordList);
     wordsMenu->addAction(createListAction);
 

@@ -19,7 +19,7 @@ WordListDialog::WordListDialog(const std::vector<AlphagramSet>& allAlphagrams,
     : QDialog(parent), allAlphagrams(allAlphagrams), playabilityScores(playabilityScores),
       kwg(kwg), ld(ld), maxAnagramCount(0)
 {
-    setWindowTitle("Create Word List");
+    setWindowTitle("Create New Word List");
     setMinimumSize(800, 600);
 
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
@@ -81,7 +81,7 @@ WordListDialog::WordListDialog(const std::vector<AlphagramSet>& allAlphagrams,
     connect(cancelButton, &QPushButton::clicked, this, &QDialog::reject);
     buttonLayout->addWidget(cancelButton);
 
-    applyButton = new QPushButton("Apply");
+    applyButton = new QPushButton("Study");
     applyButton->setEnabled(false);
     connect(applyButton, &QPushButton::clicked, this, &WordListDialog::applyFilter);
     buttonLayout->addWidget(applyButton);
