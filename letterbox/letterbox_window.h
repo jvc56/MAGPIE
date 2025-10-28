@@ -52,6 +52,7 @@ private slots:
     void nextWord();
     void markStudied();
     void loadWordList();
+    void createCustomWordList();
     void onTextChanged(const QString& text);
     void toggleDebugInfo();
     void toggleComputeTime();
@@ -78,7 +79,8 @@ private:
     Config* config;
     KWG* kwg;
     LetterDistribution* ld;
-    std::vector<AlphagramSet> alphagrams;
+    std::vector<AlphagramSet> allAlphagrams;  // All loaded alphagrams (before filtering)
+    std::vector<AlphagramSet> alphagrams;      // Current working set (possibly filtered)
     int currentIndex;
 
     // Playability scores for sorting extensions

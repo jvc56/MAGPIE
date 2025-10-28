@@ -1,5 +1,6 @@
 #include "letterbox_window.h"
 #include "alphagram_box.h"
+#include "word_list_dialog.h"
 #include <QFile>
 #include <QTextStream>
 #include <QScrollArea>
@@ -316,6 +317,9 @@ void LetterboxWindow::loadWordList()
               });
 
     qDebug() << "Loaded" << alphagrams.size() << "alphagram sets";
+
+    // Store a copy of all alphagrams for filtering
+    allAlphagrams = alphagrams;
 
     updateProgress();
 }
@@ -698,6 +702,13 @@ void LetterboxWindow::setupMenuBar()
     QMenuBar* menuBar = new QMenuBar(this);
     setMenuBar(menuBar);
 
+    // Words menu
+    QMenu* wordsMenu = menuBar->addMenu("Words");
+    QAction* createListAction = new QAction("Create Word List...", this);
+    connect(createListAction, &QAction::triggered, this, &LetterboxWindow::createCustomWordList);
+    wordsMenu->addAction(createListAction);
+
+    // Debug menu
     QMenu* debugMenu = menuBar->addMenu("Debug");
 
     debugAction = new QAction("Show Debug Info", this);
@@ -935,4 +946,34 @@ QString LetterboxWindow::sortExtensionsByPlayability(const QString& extensions, 
     }
 
     return result;
+}
+
+void LetterboxWindow::createCustomWordList()
+{
+    // Open dialog with all alphagrams
+    WordListDialog dialog(allAlphagrams, playabilityScores, this);
+
+    if (dialog.exec() == QDialog::Accepted) {
+        // Get filtered list and update current alphagrams
+        alphagrams = dialog.getFilteredList();
+        currentIndex = 0;
+
+        // Reset progress and update display
+        for (auto& set : alphagrams) {
+            set.studied = false;
+            for (auto& word : set.words) {
+                word.revealed = false;
+            }
+        }
+
+        // Clear solved section
+        QLayoutItem* item;
+        while ((item = solvedLayout->takeAt(0)) != nullptr) {
+            delete item->widget();
+            delete item;
+        }
+
+        updateProgress();
+        updateDisplay();
+    }
 }

@@ -31,12 +31,14 @@ macx {
 SOURCES += \
     main.cpp \
     letterbox_window.cpp \
-    alphagram_box.cpp
+    alphagram_box.cpp \
+    word_list_dialog.cpp
 
 HEADERS += \
     magpie_wrapper.h \
     letterbox_window.h \
-    alphagram_box.h
+    alphagram_box.h \
+    word_list_dialog.h
 
 # Resources (fonts)
 RESOURCES += letterbox.qrc
