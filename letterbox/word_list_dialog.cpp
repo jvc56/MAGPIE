@@ -223,3 +223,18 @@ std::vector<AlphagramSet> WordListDialog::getFilteredList() const
 {
     return filteredList;
 }
+
+QString WordListDialog::getPattern() const
+{
+    return patternInput->text();
+}
+
+int WordListDialog::getMinAnagramCount() const
+{
+    return minAnagramSpin->value();
+}
+
+int WordListDialog::getMaxAnagramCount() const
+{
+    return maxAnagramSpin->value();
+}

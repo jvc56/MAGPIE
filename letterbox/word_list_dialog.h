@@ -25,6 +25,9 @@ public:
                            QWidget *parent = nullptr);
 
     std::vector<AlphagramSet> getFilteredList() const;
+    QString getPattern() const;
+    int getMinAnagramCount() const;
+    int getMaxAnagramCount() const;
 
 private slots:
     void updatePreview();

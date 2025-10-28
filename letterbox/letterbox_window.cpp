@@ -1,6 +1,7 @@
 #include "letterbox_window.h"
 #include "alphagram_box.h"
 #include "word_list_dialog.h"
+#include "completion_stats_dialog.h"
 #include <QFile>
 #include <QTextStream>
 #include <QScrollArea>
@@ -14,6 +15,12 @@
 #include <QFontMetrics>
 #include <QKeyEvent>
 #include <QShortcut>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QSettings>
+#include <QStandardPaths>
+#include <QRegularExpression>
 #include <algorithm>
 #include <unordered_map>
 #include <chrono>
@@ -28,6 +35,7 @@ const std::vector<double> LetterboxWindow::zoomLevels = {
 LetterboxWindow::LetterboxWindow(QWidget *parent)
     : QMainWindow(parent), config(nullptr), kwg(nullptr), ld(nullptr), currentIndex(0),
       lastMissedIndex(-1), undoAction(nullptr),
+      currentMinAnagrams(1), currentMaxAnagrams(999), recentListsMenu(nullptr),
       globalMaxFrontWidth(0), globalMaxBackWidth(0), globalMaxWordWidth(0),
       renderWindowSize(15), userScrolledUp(false),
       scaleFactor(1.0), zoomLevelIndex(7), scaledWordSize(36), scaledHookSize(24), scaledExtensionSize(14),
@@ -78,6 +86,17 @@ LetterboxWindow::LetterboxWindow(QWidget *parent)
     }
 
     loadWordList();
+
+    // Automatically load the most recently used list on startup
+    QSettings settings("Letterbox", "Letterbox");
+    QStringList recentLists = settings.value("recentLists").toStringList();
+    if (!recentLists.isEmpty()) {
+        QString mostRecentList = recentLists.first();
+        if (QFile::exists(mostRecentList)) {
+            loadSavedListFromFile(mostRecentList);
+        }
+    }
+
     if (!alphagrams.empty()) {
         updateDisplay();
     }
@@ -108,6 +127,7 @@ void LetterboxWindow::setupUI()
     // Top 2/3: Solved alphagrams (scrollable, most recent at bottom)
     solvedScrollArea = new QScrollArea(this);
     solvedScrollArea->setWidgetResizable(true);
+    solvedScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     solvedScrollArea->setStyleSheet(
         "QScrollArea { border: none; background: transparent; }"
         "QScrollBar:vertical {"
@@ -691,6 +711,14 @@ void LetterboxWindow::updateDisplay()
     solvedWidget->updateGeometry();
     solvedLayout->update();
 
+    // Center the scroll area horizontally
+    QTimer::singleShot(10, this, [this]() {
+        QScrollBar* hbar = solvedScrollArea->horizontalScrollBar();
+        if (hbar) {
+            hbar->setValue((hbar->minimum() + hbar->maximum()) / 2);
+        }
+    });
+
     if (!userScrolledUp) {
         // Only auto-scroll if user hasn't manually scrolled up
         QTimer::singleShot(10, this, [this]() {
@@ -765,6 +793,13 @@ void LetterboxWindow::onTextChanged(const QString& text)
             }
 
             updateDisplay();
+
+            // Auto-save after revealing a word
+            saveCurrentList();
+
+            // Check for completion after advancing
+            checkForCompletion();
+
             break;
         }
     }
@@ -848,6 +883,12 @@ void LetterboxWindow::skipCurrentAlphagram()
     }
 
     updateDisplay();
+
+    // Auto-save after marking as missed
+    saveCurrentList();
+
+    // Check for completion after advancing
+    checkForCompletion();
 }
 
 void LetterboxWindow::undoMarkAsMissed()
@@ -895,6 +936,14 @@ void LetterboxWindow::setupMenuBar()
     createListAction->setShortcut(QKeySequence::New);  // Command-N on macOS
     connect(createListAction, &QAction::triggered, this, &LetterboxWindow::createCustomWordList);
     wordsMenu->addAction(createListAction);
+
+    wordsMenu->addSeparator();
+
+    // Recent Lists submenu
+    recentListsMenu = wordsMenu->addMenu("Recent Lists");
+    updateRecentListsMenu();
+
+    wordsMenu->addSeparator();
 
     skipAction = new QAction("Mark as missed", this);
     skipAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_M));  // Cmd-M on macOS
@@ -1261,9 +1310,29 @@ void LetterboxWindow::createCustomWordList()
     WordListDialog dialog(allAlphagrams, playabilityScores, kwg, ld, this);
 
     if (dialog.exec() == QDialog::Accepted) {
-        // Get filtered list and update current alphagrams
+        // Get filtered list and filter parameters
         alphagrams = dialog.getFilteredList();
+        currentPattern = dialog.getPattern();
+        currentMinAnagrams = dialog.getMinAnagramCount();
+        currentMaxAnagrams = dialog.getMaxAnagramCount();
         currentIndex = 0;
+
+        // Generate list name
+        QDateTime now = QDateTime::currentDateTime();
+        currentListName = generateListName(currentPattern, currentMinAnagrams,
+                                          currentMaxAnagrams, alphagrams.size(), QDateTime());
+
+        // Create filepath for saving
+        QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/saved_lists";
+        QDir dir;
+        if (!dir.exists(dataDir)) {
+            dir.mkpath(dataDir);
+        }
+
+        QString sanitizedName = currentListName;
+        sanitizedName.replace(QRegularExpression("[^a-zA-Z0-9_-]"), "_");
+        QString filename = QString("%1_%2.json").arg(sanitizedName).arg(now.toString("yyyyMMdd_HHmmss"));
+        currentListFilepath = dataDir + "/" + filename;
 
         // Clear undo state when creating new word list
         lastMissedIndex = -1;
@@ -1276,6 +1345,7 @@ void LetterboxWindow::createCustomWordList()
             set.studied = false;
             for (auto& word : set.words) {
                 word.revealed = false;
+                word.missed = false;
             }
         }
 
@@ -1286,7 +1356,396 @@ void LetterboxWindow::createCustomWordList()
             delete item;
         }
 
+        // Update UI
+        updateWindowTitle();
         updateProgress();
         updateDisplay();
+
+        // Save the new list
+        saveCurrentList();
+
+        // Add to recent lists
+        addToRecentLists(currentListFilepath);
     }
+}
+
+QString LetterboxWindow::generateListName(const QString& pattern, int minCount, int maxCount, int totalSets, const QDateTime& timestamp)
+{
+    QStringList nameParts;
+
+    // Pattern part
+    if (!pattern.isEmpty()) {
+        // Check if pattern is all wildcards
+        bool allWildcards = true;
+        for (const QChar& c : pattern) {
+            if (c != '.' && c != '?') {
+                allWildcards = false;
+                break;
+            }
+        }
+
+        if (allWildcards) {
+            nameParts << QString("%1-letter words").arg(pattern.length());
+        } else {
+            nameParts << QString("%1 pattern").arg(pattern);
+        }
+    }
+
+    // Anagram count part
+    if (minCount == maxCount) {
+        if (minCount == 1) {
+            nameParts << "single anagram";
+        } else {
+            nameParts << QString("%1 anagrams").arg(minCount);
+        }
+    } else {
+        nameParts << QString("%1-%2 anagrams").arg(minCount).arg(maxCount);
+    }
+
+    // Total sets part
+    nameParts << QString("%1 sets").arg(totalSets);
+
+    QString name = nameParts.join(", ");
+
+    // Add timestamp if provided (for disambiguation)
+    if (timestamp.isValid()) {
+        name += QString(" (%1)").arg(timestamp.toString("MMM d, h:mm AP"));
+    }
+
+    return name;
+}
+
+void LetterboxWindow::saveCurrentList()
+{
+    // Don't save if no active custom list
+    if (currentListFilepath.isEmpty()) {
+        return;
+    }
+
+    // Create JSON object
+    QJsonObject root;
+    root["name"] = currentListName;
+    root["created"] = QDateTime::currentDateTime().toString(Qt::ISODate);
+    root["lastAccessed"] = QDateTime::currentDateTime().toString(Qt::ISODate);
+    root["pattern"] = currentPattern;
+    root["minAnagrams"] = currentMinAnagrams;
+    root["maxAnagrams"] = currentMaxAnagrams;
+    root["currentIndex"] = currentIndex;
+
+    // Save alphagrams array
+    QJsonArray alphagramsArray;
+    for (const auto& set : alphagrams) {
+        QJsonObject alphagramObj;
+        alphagramObj["alphagram"] = QString::fromStdString(set.alphagram);
+        alphagramObj["studied"] = set.studied;
+
+        QJsonArray wordsArray;
+        for (const auto& entry : set.words) {
+            QJsonObject wordObj;
+            wordObj["word"] = QString::fromStdString(entry.word);
+            wordObj["revealed"] = entry.revealed;
+            wordObj["missed"] = entry.missed;
+            wordsArray.append(wordObj);
+        }
+        alphagramObj["words"] = wordsArray;
+
+        alphagramsArray.append(alphagramObj);
+    }
+    root["alphagrams"] = alphagramsArray;
+
+    // Write to file
+    QJsonDocument doc(root);
+    QFile file(currentListFilepath);
+    if (file.open(QIODevice::WriteOnly)) {
+        file.write(doc.toJson());
+        file.close();
+        qDebug() << "Saved list to:" << currentListFilepath;
+    } else {
+        qWarning() << "Failed to save list to:" << currentListFilepath;
+    }
+}
+
+void LetterboxWindow::loadSavedListFromFile(const QString& filepath)
+{
+    QFile file(filepath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        QMessageBox::critical(this, "Error", QString("Cannot open saved list: %1").arg(filepath));
+        return;
+    }
+
+    QByteArray data = file.readAll();
+    file.close();
+
+    QJsonDocument doc = QJsonDocument::fromJson(data);
+    if (doc.isNull() || !doc.isObject()) {
+        QMessageBox::critical(this, "Error", "Invalid saved list format");
+        return;
+    }
+
+    QJsonObject root = doc.object();
+
+    // Load metadata
+    currentListName = root["name"].toString();
+    currentPattern = root["pattern"].toString();
+    currentMinAnagrams = root["minAnagrams"].toInt(1);
+    currentMaxAnagrams = root["maxAnagrams"].toInt(999);
+    currentIndex = root["currentIndex"].toInt(0);
+    currentListFilepath = filepath;
+
+    // Load alphagrams
+    alphagrams.clear();
+    QJsonArray alphagramsArray = root["alphagrams"].toArray();
+    for (const QJsonValue& val : alphagramsArray) {
+        QJsonObject alphagramObj = val.toObject();
+
+        AlphagramSet set;
+        set.alphagram = alphagramObj["alphagram"].toString().toStdString();
+        set.studied = alphagramObj["studied"].toBool();
+        set.totalPlayability = 0;  // Will recalculate if needed
+
+        QJsonArray wordsArray = alphagramObj["words"].toArray();
+        for (const QJsonValue& wordVal : wordsArray) {
+            QJsonObject wordObj = wordVal.toObject();
+
+            WordEntry entry;
+            entry.word = wordObj["word"].toString().toStdString();
+            entry.revealed = wordObj["revealed"].toBool();
+            entry.missed = wordObj["missed"].toBool();
+
+            // Recalculate total playability
+            if (playabilityScores.count(entry.word)) {
+                set.totalPlayability += playabilityScores[entry.word];
+            }
+
+            set.words.push_back(entry);
+        }
+
+        alphagrams.push_back(set);
+    }
+
+    // Clear undo state
+    lastMissedIndex = -1;
+    if (undoAction) {
+        undoAction->setEnabled(false);
+    }
+
+    // Clear solved section
+    QLayoutItem* item;
+    while ((item = solvedLayout->takeAt(0)) != nullptr) {
+        delete item->widget();
+        delete item;
+    }
+
+    // Update UI
+    updateWindowTitle();
+    updateProgress();
+    updateDisplay();
+    addToRecentLists(filepath);
+
+    qDebug() << "Loaded list:" << currentListName << "from:" << filepath;
+}
+
+void LetterboxWindow::addToRecentLists(const QString& filepath)
+{
+    QSettings settings("Letterbox", "Letterbox");
+    QStringList recentLists = settings.value("recentLists").toStringList();
+
+    // Remove if already in list
+    recentLists.removeAll(filepath);
+
+    // Add to front
+    recentLists.prepend(filepath);
+
+    // Keep only last 10
+    while (recentLists.size() > 10) {
+        recentLists.removeLast();
+    }
+
+    settings.setValue("recentLists", recentLists);
+    updateRecentListsMenu();
+}
+
+void LetterboxWindow::updateRecentListsMenu()
+{
+    if (!recentListsMenu) return;
+
+    // Clear existing items (except separator and "Clear Recent Lists")
+    recentListsMenu->clear();
+
+    QSettings settings("Letterbox", "Letterbox");
+    QStringList recentLists = settings.value("recentLists").toStringList();
+
+    // Add menu items for each recent list
+    for (const QString& filepath : recentLists) {
+        // Extract just the list name from JSON file
+        QFile file(filepath);
+        if (file.open(QIODevice::ReadOnly)) {
+            QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+            file.close();
+
+            if (!doc.isNull() && doc.isObject()) {
+                QString name = doc.object()["name"].toString();
+                QAction* action = new QAction(name, this);
+                action->setData(filepath);  // Store filepath in action
+                connect(action, &QAction::triggered, this, [this, filepath]() {
+                    loadSavedListFromFile(filepath);
+                });
+                recentListsMenu->addAction(action);
+            }
+        }
+    }
+
+    // Add separator and "Clear Recent Lists" if there are items
+    if (!recentLists.isEmpty()) {
+        recentListsMenu->addSeparator();
+        QAction* clearAction = new QAction("Clear Recent Lists", this);
+        connect(clearAction, &QAction::triggered, this, &LetterboxWindow::clearRecentLists);
+        recentListsMenu->addAction(clearAction);
+    }
+}
+
+void LetterboxWindow::clearRecentLists()
+{
+    QSettings settings("Letterbox", "Letterbox");
+    settings.remove("recentLists");
+    updateRecentListsMenu();
+}
+
+void LetterboxWindow::loadSavedList()
+{
+    // This slot is called by menu actions with filepath in their data
+    QAction* action = qobject_cast<QAction*>(sender());
+    if (action) {
+        QString filepath = action->data().toString();
+        loadSavedListFromFile(filepath);
+    }
+}
+
+void LetterboxWindow::updateWindowTitle()
+{
+    if (currentListName.isEmpty()) {
+        setWindowTitle("Letterbox");
+    } else {
+        setWindowTitle(currentListName + " - Letterbox");
+    }
+}
+
+void LetterboxWindow::checkForCompletion()
+{
+    // Check if we've completed all alphagrams
+    if (currentIndex >= static_cast<int>(alphagrams.size())) {
+        showCompletionStats();
+    }
+}
+
+void LetterboxWindow::showCompletionStats()
+{
+    // Calculate stats
+    int totalAlphagrams = alphagrams.size();
+    int totalWords = 0;
+    int revealedWords = 0;
+    int missedWords = 0;
+
+    for (const auto& set : alphagrams) {
+        for (const auto& entry : set.words) {
+            totalWords++;
+            if (entry.revealed && !entry.missed) {
+                revealedWords++;
+            }
+            if (entry.missed) {
+                missedWords++;
+            }
+        }
+    }
+
+    // Show dialog
+    CompletionStatsDialog dialog(totalAlphagrams, totalWords, revealedWords, missedWords, this);
+    dialog.exec();
+
+    // Check if user wants to create missed words list
+    if (dialog.shouldCreateMissedList()) {
+        createMissedWordsList();
+    }
+}
+
+void LetterboxWindow::createMissedWordsList()
+{
+    // Filter alphagrams to only those with at least one missed word
+    std::vector<AlphagramSet> missedAlphagrams;
+    for (const auto& set : alphagrams) {
+        bool hasMissed = false;
+        for (const auto& entry : set.words) {
+            if (entry.missed) {
+                hasMissed = true;
+                break;
+            }
+        }
+        if (hasMissed) {
+            // Copy the alphagram set
+            AlphagramSet missedSet = set;
+            // Reset studied flag so it can be studied again
+            missedSet.studied = false;
+            // Keep revealed/missed states intact
+            missedAlphagrams.push_back(missedSet);
+        }
+    }
+
+    if (missedAlphagrams.empty()) {
+        QMessageBox::information(this, "No Missed Words", "No missed words to create a list from.");
+        return;
+    }
+
+    // Generate name for missed list
+    QString missedListName = QString("Missed from %1").arg(currentListName);
+
+    // Create filepath
+    QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/saved_lists";
+    QDir dir;
+    if (!dir.exists(dataDir)) {
+        dir.mkpath(dataDir);
+    }
+
+    QDateTime now = QDateTime::currentDateTime();
+    QString sanitizedName = missedListName;
+    sanitizedName.replace(QRegularExpression("[^a-zA-Z0-9_-]"), "_");
+    QString filename = QString("%1_%2.json").arg(sanitizedName).arg(now.toString("yyyyMMdd_HHmmss"));
+    QString filepath = dataDir + "/" + filename;
+
+    // Save current state first (to preserve progress on original list)
+    if (!currentListFilepath.isEmpty()) {
+        saveCurrentList();
+    }
+
+    // Update state for new missed list
+    alphagrams = missedAlphagrams;
+    currentIndex = 0;
+    currentListName = missedListName;
+    currentListFilepath = filepath;
+
+    // Save the new missed list
+    saveCurrentList();
+
+    // Add to recent lists
+    addToRecentLists(filepath);
+
+    // Clear undo state
+    lastMissedIndex = -1;
+    if (undoAction) {
+        undoAction->setEnabled(false);
+    }
+
+    // Clear solved section
+    QLayoutItem* item;
+    while ((item = solvedLayout->takeAt(0)) != nullptr) {
+        delete item->widget();
+        delete item;
+    }
+
+    // Update UI
+    updateWindowTitle();
+    updateProgress();
+    updateDisplay();
+
+    QMessageBox::information(this, "Missed Words List Created",
+                            QString("Created new list with %1 alphagram(s) containing missed words.").arg(alphagrams.size()));
 }

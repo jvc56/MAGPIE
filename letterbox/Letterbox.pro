@@ -32,13 +32,15 @@ SOURCES += \
     main.cpp \
     letterbox_window.cpp \
     alphagram_box.cpp \
-    word_list_dialog.cpp
+    word_list_dialog.cpp \
+    completion_stats_dialog.cpp
 
 HEADERS += \
     magpie_wrapper.h \
     letterbox_window.h \
     alphagram_box.h \
-    word_list_dialog.h
+    word_list_dialog.h \
+    completion_stats_dialog.h
 
 # Resources (fonts)
 RESOURCES += letterbox.qrc

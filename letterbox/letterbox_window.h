@@ -12,6 +12,7 @@
 #include <QMenu>
 #include <QAction>
 #include <QResizeEvent>
+#include <QDateTime>
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -56,6 +57,8 @@ private slots:
     void undoMarkAsMissed();
     void loadWordList();
     void createCustomWordList();
+    void loadSavedList();  // Load from Recent Lists menu
+    void clearRecentLists();
     void onTextChanged(const QString& text);
     void toggleFullscreen();
     void zoomIn();
@@ -83,6 +86,17 @@ private:
     const HookExtensionCache& getOrComputeHookExtensions(const std::string& word);
     QString sortExtensionsByPlayability(const QString& extensions, const QString& baseWord, bool isFront);
 
+    // Word list persistence
+    QString generateListName(const QString& pattern, int minCount, int maxCount, int totalSets, const QDateTime& timestamp);
+    void saveCurrentList();
+    void loadSavedListFromFile(const QString& filepath);
+    void updateRecentListsMenu();
+    void addToRecentLists(const QString& filepath);
+    void checkForCompletion();
+    void showCompletionStats();
+    void createMissedWordsList();
+    void updateWindowTitle();
+
     Config* config;
     KWG* kwg;
     LetterDistribution* ld;
@@ -93,6 +107,14 @@ private:
     // Undo state for "Mark as missed" action
     int lastMissedIndex;  // Index of last alphagram marked as missed (-1 if none)
     QAction* undoAction;  // Reference to undo menu action for enabling/disabling
+
+    // Word list persistence state
+    QString currentListName;       // Human-readable name of current list
+    QString currentListFilepath;   // Full path to saved list file
+    QString currentPattern;        // Filter pattern used
+    int currentMinAnagrams;        // Min anagram count filter
+    int currentMaxAnagrams;        // Max anagram count filter
+    QMenu* recentListsMenu;        // Recent Lists submenu
 
     // Playability scores for sorting extensions
     std::unordered_map<std::string, int> playabilityScores;
