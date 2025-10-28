@@ -48,6 +48,19 @@ char* letterbox_find_back_extensions(const KWG *kwg, const LetterDistribution *l
 char* letterbox_find_front_extensions(const KWG *kwg, const LetterDistribution *ld,
                                       const char *word, int max_extension_length);
 
+// Find anagrams matching a pattern with wildcards and character classes
+// Pattern syntax:
+//   - Letters (A-Z): required letters
+//   - . or ?: wildcard (any letter)
+//   - [ABC]: character class (at least one of A, B, or C must be used)
+// Examples:
+//   - "......." = all 7-letter words
+//   - "A??E???" = 7-letter words with A and E
+//   - "[JQXZ]......" = 7-letter words with at least one of J, Q, X, Z
+// Returns WordList with all alphagrams (sorted letter combinations) matching the pattern
+WordList* letterbox_find_anagrams_by_pattern(const KWG *kwg, const LetterDistribution *ld,
+                                             const char *pattern);
+
 #ifdef __cplusplus
 }
 #endif

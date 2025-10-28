@@ -13,12 +13,15 @@
 
 // Include the structs from letterbox_window.h without including the whole QMainWindow
 #include "letterbox_window.h"
+#include "magpie_wrapper.h"
 
 class WordListDialog : public QDialog {
     Q_OBJECT
 public:
     explicit WordListDialog(const std::vector<AlphagramSet>& allAlphagrams,
                            const std::unordered_map<std::string, int>& playabilityScores,
+                           KWG* kwg,
+                           LetterDistribution* ld,
                            QWidget *parent = nullptr);
 
     std::vector<AlphagramSet> getFilteredList() const;
@@ -28,11 +31,13 @@ private slots:
     void applyFilter();
 
 private:
-    bool matchesPattern(const std::string& alphagram, const QString& pattern);
     QString formatAlphagramPreview(const AlphagramSet& set);
+    std::string sortVowelsFirst(const std::string& word);
 
     const std::vector<AlphagramSet>& allAlphagrams;
     const std::unordered_map<std::string, int>& playabilityScores;
+    KWG* kwg;
+    LetterDistribution* ld;
     std::vector<AlphagramSet> filteredList;
     int maxAnagramCount;
 

@@ -951,7 +951,7 @@ QString LetterboxWindow::sortExtensionsByPlayability(const QString& extensions, 
 void LetterboxWindow::createCustomWordList()
 {
     // Open dialog with all alphagrams
-    WordListDialog dialog(allAlphagrams, playabilityScores, this);
+    WordListDialog dialog(allAlphagrams, playabilityScores, kwg, ld, this);
 
     if (dialog.exec() == QDialog::Accepted) {
         // Get filtered list and update current alphagrams

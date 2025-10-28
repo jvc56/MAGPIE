@@ -2,5 +2,6 @@
     <qresource prefix="/">
         <file>fonts/Jost/static/Jost-Bold.ttf</file>
         <file>fonts/Jost/static/Jost-Regular.ttf</file>
+        <file>fonts/Consolas.ttf</file>
     </qresource>
 </RCC>

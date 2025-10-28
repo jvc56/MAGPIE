@@ -32,6 +32,14 @@ int main(int argc, char *argv[])
         qDebug() << "Loaded Jost Regular font";
     }
 
+    // Load Consolas font
+    int fontIdConsolas = QFontDatabase::addApplicationFont(":/fonts/Consolas.ttf");
+    if (fontIdConsolas == -1) {
+        qWarning() << "Failed to load Consolas.ttf font";
+    } else {
+        qDebug() << "Loaded Consolas font";
+    }
+
     LetterboxWindow window;
     window.show();
 

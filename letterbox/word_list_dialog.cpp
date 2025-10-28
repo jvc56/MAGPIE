@@ -1,5 +1,6 @@
 #include "word_list_dialog.h"
 #include "letterbox_window.h"
+#include "magpie_wrapper.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
@@ -8,11 +9,15 @@
 #include <QFont>
 #include <QScrollBar>
 #include <algorithm>
+#include <unordered_set>
 
 WordListDialog::WordListDialog(const std::vector<AlphagramSet>& allAlphagrams,
                                const std::unordered_map<std::string, int>& playabilityScores,
+                               KWG* kwg,
+                               LetterDistribution* ld,
                                QWidget *parent)
-    : QDialog(parent), allAlphagrams(allAlphagrams), playabilityScores(playabilityScores), maxAnagramCount(0)
+    : QDialog(parent), allAlphagrams(allAlphagrams), playabilityScores(playabilityScores),
+      kwg(kwg), ld(ld), maxAnagramCount(0)
 {
     setWindowTitle("Create Word List");
     setMinimumSize(800, 600);
@@ -65,7 +70,7 @@ WordListDialog::WordListDialog(const std::vector<AlphagramSet>& allAlphagrams,
 
     previewText = new QTextEdit();
     previewText->setReadOnly(true);
-    previewText->setFont(QFont("Jost", 14));
+    previewText->setFont(QFont("Consolas", 13));
     mainLayout->addWidget(previewText);
 
     // Buttons
@@ -87,82 +92,6 @@ WordListDialog::WordListDialog(const std::vector<AlphagramSet>& allAlphagrams,
     updatePreview();
 }
 
-bool WordListDialog::matchesPattern(const std::string& alphagram, const QString& pattern)
-{
-    if (pattern.isEmpty()) {
-        return true;  // Empty pattern matches everything
-    }
-
-    // Convert to uppercase for case-insensitive matching
-    QString patternUpper = pattern.toUpper();
-    QString alphagramStr = QString::fromStdString(alphagram).toUpper();
-
-    // Build multiset (letter counts) for the alphagram
-    std::unordered_map<QChar, int> alphagramCounts;
-    for (QChar c : alphagramStr) {
-        alphagramCounts[c]++;
-    }
-
-    // Parse pattern and count required letters
-    int patternLength = 0;
-    std::unordered_map<QChar, int> requiredLetters;
-    std::vector<QString> characterClasses;
-
-    // Extract character classes like [JQXZ]
-    QRegularExpression classRegex("\\[([A-Za-z]+)\\]");
-    QRegularExpressionMatchIterator it = classRegex.globalMatch(patternUpper);
-
-    while (it.hasNext()) {
-        QRegularExpressionMatch match = it.next();
-        characterClasses.push_back(match.captured(1).toUpper());
-        patternLength++;
-    }
-
-    // Remove character classes from pattern
-    QString patternWithoutClasses = patternUpper;
-    patternWithoutClasses.remove(classRegex);
-
-    // Process remaining characters
-    for (QChar c : patternWithoutClasses) {
-        if (c == '.' || c == '?') {
-            // Wildcard - just counts toward length
-            patternLength++;
-        } else if (c.isLetter()) {
-            requiredLetters[c.toUpper()]++;
-            patternLength++;
-        }
-        // Skip non-letter, non-wildcard characters
-    }
-
-    // Check total length
-    if (alphagramStr.length() != patternLength) {
-        return false;
-    }
-
-    // Check that alphagram contains required letters
-    for (const auto& [letter, count] : requiredLetters) {
-        if (alphagramCounts[letter] < count) {
-            return false;
-        }
-    }
-
-    // Check character classes - alphagram must contain at least one letter from each class
-    for (const QString& charClass : characterClasses) {
-        bool found = false;
-        for (QChar c : charClass) {
-            if (alphagramCounts[c.toUpper()] > 0) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
 QString WordListDialog::formatAlphagramPreview(const AlphagramSet& set)
 {
     QString result;
@@ -178,33 +107,80 @@ QString WordListDialog::formatAlphagramPreview(const AlphagramSet& set)
     return result;
 }
 
+std::string WordListDialog::sortVowelsFirst(const std::string& word)
+{
+    std::string vowels;
+    std::string consonants;
+
+    for (char c : word) {
+        char upper = toupper(c);
+        if (upper == 'A' || upper == 'E' || upper == 'I' || upper == 'O' || upper == 'U') {
+            vowels += upper;
+        } else {
+            consonants += upper;
+        }
+    }
+
+    std::sort(vowels.begin(), vowels.end());
+    std::sort(consonants.begin(), consonants.end());
+
+    return vowels + consonants;
+}
+
 void WordListDialog::updatePreview()
 {
     QString pattern = patternInput->text();
     int minCount = minAnagramSpin->value();
     int maxCount = maxAnagramSpin->value();
 
-    // Filter alphagrams
+    // Filter alphagrams using KWG-based pattern search
     filteredList.clear();
     int currentMaxAnagramCount = 0;
 
-    for (const auto& set : allAlphagrams) {
-        // Check pattern match
-        if (!matchesPattern(set.alphagram, pattern)) {
-            continue;
+    if (pattern.isEmpty()) {
+        // No pattern - use all alphagrams
+        for (const auto& set : allAlphagrams) {
+            int anagramCount = set.words.size();
+
+            if (anagramCount > currentMaxAnagramCount) {
+                currentMaxAnagramCount = anagramCount;
+            }
+
+            if (anagramCount >= minCount && anagramCount <= maxCount) {
+                filteredList.push_back(set);
+            }
+        }
+    } else {
+        // Use KWG-based pattern search
+        WordList* patternResults = letterbox_find_anagrams_by_pattern(kwg, ld, pattern.toUtf8().constData());
+
+        if (patternResults && patternResults->count > 0) {
+            // Create a set of matching alphagrams for fast lookup
+            // Convert from alphabetical sorting to vowels-first sorting
+            std::unordered_set<std::string> matchingAlphagrams;
+            for (int i = 0; i < patternResults->count; i++) {
+                // Pattern search returns alphabetically sorted, convert to vowels-first
+                std::string vowelsFirst = sortVowelsFirst(patternResults->words[i]);
+                matchingAlphagrams.insert(vowelsFirst);
+            }
+
+            // Find matching alphagram sets in our full list
+            for (const auto& set : allAlphagrams) {
+                if (matchingAlphagrams.count(set.alphagram) > 0) {
+                    int anagramCount = set.words.size();
+
+                    if (anagramCount > currentMaxAnagramCount) {
+                        currentMaxAnagramCount = anagramCount;
+                    }
+
+                    if (anagramCount >= minCount && anagramCount <= maxCount) {
+                        filteredList.push_back(set);
+                    }
+                }
+            }
         }
 
-        int anagramCount = set.words.size();
-
-        // Track max anagram count in filtered results
-        if (anagramCount > currentMaxAnagramCount) {
-            currentMaxAnagramCount = anagramCount;
-        }
-
-        // Check anagram count range
-        if (anagramCount >= minCount && anagramCount <= maxCount) {
-            filteredList.push_back(set);
-        }
+        word_list_destroy(patternResults);
     }
 
     // Update max anagram count and adjust spinner
@@ -214,21 +190,21 @@ void WordListDialog::updatePreview()
     }
 
     // Update status
-    statusLabel->setText(QString("Found %1 alphagram(s) matching pattern (max %2 anagrams)")
-                        .arg(filteredList.size())
-                        .arg(maxAnagramCount));
+    int resultCount = filteredList.size();
+    QString resultText = (resultCount == 1) ? "result" : "results";
+    statusLabel->setText(QString("Found %1 %2").arg(resultCount).arg(resultText));
 
     // Update preview
     QString preview;
     int previewLimit = 100;  // Show first 100 alphagram sets
-    for (int i = 0; i < std::min(previewLimit, (int)filteredList.size()); i++) {
+    for (size_t i = 0; i < std::min((size_t)previewLimit, filteredList.size()); i++) {
         const auto& set = filteredList[i];
         preview += QString::fromStdString(set.alphagram) + ": ";
         preview += formatAlphagramPreview(set);
         preview += "\n";
     }
 
-    if (filteredList.size() > previewLimit) {
+    if (filteredList.size() > (size_t)previewLimit) {
         preview += QString("\n... and %1 more alphagram(s)").arg(filteredList.size() - previewLimit);
     }
 

@@ -495,3 +495,345 @@ char* letterbox_find_front_extensions(const KWG *kwg, const LetterDistribution *
     dictionary_word_list_destroy(ext_list);
     return result;
 }
+
+// Pattern constraint structure
+typedef struct {
+    int required_letters[27];      // Count of each required letter (A=1, B=2, ...)
+    uint64_t char_classes[10];     // Bitsets for character classes [ABC] etc
+    int num_char_classes;          // Number of character classes
+    int num_wildcards;             // Number of wildcard positions
+    int pattern_length;            // Total pattern length
+} PatternConstraints;
+
+// Parse pattern string into constraints
+static bool parse_pattern(const char *pattern, const LetterDistribution *ld,
+                         PatternConstraints *constraints) {
+    memset(constraints, 0, sizeof(PatternConstraints));
+
+    int i = 0;
+    while (pattern[i]) {
+        if (pattern[i] == '[') {
+            // Character class
+            if (constraints->num_char_classes >= 10) {
+                return false;  // Too many character classes
+            }
+
+            i++;  // Skip '['
+            uint64_t char_class = 0;
+            while (pattern[i] && pattern[i] != ']') {
+                char c = pattern[i];
+                if (c >= 'A' && c <= 'Z') {
+                    char letter_str[2] = {c, '\0'};
+                    MachineLetter ml = ld_hl_to_ml(ld, letter_str);
+                    if (ml > 0) {
+                        char_class |= (1ULL << ml);
+                    }
+                } else if (c >= 'a' && c <= 'z') {
+                    char letter_str[2] = {c - 'a' + 'A', '\0'};
+                    MachineLetter ml = ld_hl_to_ml(ld, letter_str);
+                    if (ml > 0) {
+                        char_class |= (1ULL << ml);
+                    }
+                }
+                i++;
+            }
+            if (pattern[i] == ']') {
+                constraints->char_classes[constraints->num_char_classes++] = char_class;
+                constraints->pattern_length++;
+                i++;
+            }
+        } else if (pattern[i] == '.' || pattern[i] == '?') {
+            // Wildcard
+            constraints->num_wildcards++;
+            constraints->pattern_length++;
+            i++;
+        } else if ((pattern[i] >= 'A' && pattern[i] <= 'Z') ||
+                   (pattern[i] >= 'a' && pattern[i] <= 'z')) {
+            // Required letter
+            char c = pattern[i];
+            if (c >= 'a' && c <= 'z') {
+                c = c - 'a' + 'A';
+            }
+            char letter_str[2] = {c, '\0'};
+            MachineLetter ml = ld_hl_to_ml(ld, letter_str);
+            if (ml > 0 && ml < 27) {
+                constraints->required_letters[ml]++;
+                constraints->pattern_length++;
+            }
+            i++;
+        } else {
+            // Skip unknown characters
+            i++;
+        }
+    }
+
+    return constraints->pattern_length > 0;
+}
+
+// Check if a rack satisfies the pattern constraints
+static bool satisfies_constraints(const Rack *rack, const PatternConstraints *constraints) {
+    // Check required letters
+    for (int i = 1; i < 27; i++) {
+        if (rack_get_letter(rack, i) < constraints->required_letters[i]) {
+            return false;
+        }
+    }
+
+    // Check character classes
+    for (int i = 0; i < constraints->num_char_classes; i++) {
+        bool found = false;
+        for (int j = 1; j < 27; j++) {
+            if ((constraints->char_classes[i] & (1ULL << j)) && rack_get_letter(rack, j) > 0) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Recursive pattern-based anagram finder
+static void find_pattern_anagrams_recursive(const KWG *kwg, uint32_t node_index,
+                                           Rack *rack, const LetterDistribution *ld,
+                                           const PatternConstraints *constraints,
+                                           MachineLetter *word, int tiles_played,
+                                           bool accepts,
+                                           DictionaryWordList *result_list) {
+    // Safety check: prevent buffer overflow
+    if (tiles_played >= BOARD_DIM) {
+        return;
+    }
+
+    // If we've found a valid word of the right length, add it
+    if (accepts && tiles_played == constraints->pattern_length) {
+        // Final check: ensure all constraints are satisfied
+        Rack temp_rack;
+        rack_set_dist_size_and_reset(&temp_rack, ld_get_size(ld));
+
+        // Build rack from used tiles
+        for (int i = 0; i < tiles_played; i++) {
+            rack_add_letter(&temp_rack, word[i]);
+        }
+
+        if (satisfies_constraints(&temp_rack, constraints)) {
+            dictionary_word_list_add_word(result_list, word, tiles_played);
+        }
+    }
+
+    // Don't continue if we've already used all tiles for this pattern length
+    if (tiles_played >= constraints->pattern_length || node_index == 0) {
+        return;
+    }
+
+    // Iterate through all possible letters at this node
+    for (uint32_t i = node_index;; i++) {
+        const uint32_t node = kwg_node(kwg, i);
+        const MachineLetter ml = kwg_node_tile(node);
+        const uint32_t new_node_index = kwg_node_arc_index_prefetch(node, kwg);
+
+        if (rack_get_letter(rack, ml) > 0) {
+            bool node_accepts = kwg_node_accepts(node);
+            rack_take_letter(rack, ml);
+            word[tiles_played] = ml;
+            find_pattern_anagrams_recursive(kwg, new_node_index, rack, ld, constraints,
+                                           word, tiles_played + 1, node_accepts, result_list);
+            rack_add_letter(rack, ml);
+        }
+
+        if (kwg_node_is_end(node)) {
+            break;
+        }
+    }
+}
+
+// Maximum number of results to prevent memory overflow
+#define MAX_PATTERN_RESULTS 100000
+
+// Simpler recursive function for pure wildcard patterns (no constraints)
+// Just enumerate all words of a given length
+static void find_words_by_length_recursive(const KWG *kwg, uint32_t node_index,
+                                          MachineLetter *word, int depth,
+                                          int target_length,
+                                          DictionaryWordList *result_list,
+                                          int *result_count) {
+    // Safety checks
+    if (node_index == 0 || *result_count >= MAX_PATTERN_RESULTS || depth >= BOARD_DIM) {
+        return;
+    }
+
+    // Iterate through all possible letters at this node
+    for (uint32_t i = node_index;; i++) {
+        const uint32_t node = kwg_node(kwg, i);
+        const MachineLetter ml = kwg_node_tile(node);
+        const bool accepts = kwg_node_accepts(node);
+        const uint32_t new_node_index = kwg_node_arc_index_prefetch(node, kwg);
+
+        word[depth] = ml;
+
+        // If this forms a word of the target length, add it
+        if (accepts && depth + 1 == target_length) {
+            dictionary_word_list_add_word(result_list, word, depth + 1);
+            (*result_count)++;
+            if (*result_count >= MAX_PATTERN_RESULTS) {
+                return;
+            }
+        }
+
+        // Continue searching if we haven't reached the target length
+        if (depth + 1 < target_length) {
+            find_words_by_length_recursive(kwg, new_node_index, word, depth + 1,
+                                          target_length, result_list, result_count);
+        }
+
+        if (kwg_node_is_end(node)) {
+            break;
+        }
+    }
+}
+
+WordList* letterbox_find_anagrams_by_pattern(const KWG *kwg, const LetterDistribution *ld,
+                                             const char *pattern) {
+    if (!kwg || !ld || !pattern) {
+        return word_list_create();
+    }
+
+    // Parse the pattern
+    PatternConstraints constraints;
+    if (!parse_pattern(pattern, ld, &constraints)) {
+        return word_list_create();
+    }
+
+    // Validate pattern length to prevent buffer overflows
+    if (constraints.pattern_length > BOARD_DIM) {
+        fprintf(stderr, "Pattern too long (%d chars). Maximum length is %d\n",
+                constraints.pattern_length, BOARD_DIM);
+        return word_list_create();
+    }
+
+    if (constraints.pattern_length == 0) {
+        return word_list_create();
+    }
+
+    // Create dictionary word list to collect results
+    DictionaryWordList *dict_list = dictionary_word_list_create();
+
+    // Check if this is a pure wildcard pattern (no required letters or character classes)
+    bool is_pure_wildcard = (constraints.num_wildcards == constraints.pattern_length &&
+                             constraints.num_char_classes == 0);
+
+    bool has_required_letters = false;
+    for (int i = 1; i < 27; i++) {
+        if (constraints.required_letters[i] > 0) {
+            has_required_letters = true;
+            break;
+        }
+    }
+    is_pure_wildcard = is_pure_wildcard && !has_required_letters;
+
+    MachineLetter word[BOARD_DIM];  // Use BOARD_DIM instead of RACK_SIZE to support longer patterns
+
+    if (is_pure_wildcard) {
+        // For pure wildcard patterns, just enumerate all words of the target length
+        // This is much more efficient than the rack-based approach
+        int result_count = 0;
+        find_words_by_length_recursive(kwg, kwg_get_dawg_root_node_index(kwg),
+                                       word, 0, constraints.pattern_length, dict_list,
+                                       &result_count);
+    } else {
+        // For patterns with constraints, use the rack-based approach
+        // Create a rack with enough of each letter to form any word of the pattern length
+        Rack rack;
+        rack_set_dist_size_and_reset(&rack, ld_get_size(ld));
+
+        // Only add enough tiles to satisfy the pattern
+        for (int i = 1; i < 27; i++) {
+            // Add required letters
+            for (int j = 0; j < constraints.required_letters[i]; j++) {
+                rack_add_letter(&rack, i);
+            }
+            // Add one extra of each letter for wildcards and character classes
+            if (constraints.num_wildcards > 0 || constraints.num_char_classes > 0) {
+                rack_add_letter(&rack, i);
+            }
+        }
+
+        find_pattern_anagrams_recursive(kwg, kwg_get_dawg_root_node_index(kwg),
+                                       &rack, ld, &constraints, word, 0, false, dict_list);
+    }
+
+    // Sort the words
+    dictionary_word_list_sort(dict_list);
+
+    // Get unique words
+    DictionaryWordList *unique_list = dictionary_word_list_create();
+    dictionary_word_list_unique(dict_list, unique_list);
+    dictionary_word_list_destroy(dict_list);
+
+    // Convert dictionary words to alphagrams (sorted letter strings)
+    // Group by alphagram
+    DictionaryWordList *alphagram_list = dictionary_word_list_create();
+
+    int count = dictionary_word_list_get_count(unique_list);
+    for (int i = 0; i < count; i++) {
+        const DictionaryWord *dw = dictionary_word_list_get_word(unique_list, i);
+        int len = dictionary_word_get_length(dw);
+
+        // Safety check: skip words that are too long
+        if (len > BOARD_DIM) {
+            continue;
+        }
+
+        // Create sorted version (alphagram)
+        MachineLetter alphagram[BOARD_DIM];  // Use BOARD_DIM to support longer patterns
+        memcpy(alphagram, dictionary_word_get_word(dw), len);
+
+        // Sort the letters
+        for (int j = 0; j < len - 1; j++) {
+            for (int k = j + 1; k < len; k++) {
+                if (alphagram[j] > alphagram[k]) {
+                    MachineLetter temp = alphagram[j];
+                    alphagram[j] = alphagram[k];
+                    alphagram[k] = temp;
+                }
+            }
+        }
+
+        dictionary_word_list_add_word(alphagram_list, alphagram, len);
+    }
+
+    // Sort and get unique alphagrams
+    dictionary_word_list_sort(alphagram_list);
+    DictionaryWordList *unique_alphagrams = dictionary_word_list_create();
+    dictionary_word_list_unique(alphagram_list, unique_alphagrams);
+    dictionary_word_list_destroy(alphagram_list);
+    dictionary_word_list_destroy(unique_list);
+
+    // Convert to WordList format
+    WordList *result = word_list_create();
+    int alphagram_count = dictionary_word_list_get_count(unique_alphagrams);
+
+    if (alphagram_count > 0) {
+        result->words = malloc(alphagram_count * sizeof(char*));
+        result->count = alphagram_count;
+
+        StringBuilder *sb = string_builder_create();
+        for (int i = 0; i < alphagram_count; i++) {
+            const DictionaryWord *dw = dictionary_word_list_get_word(unique_alphagrams, i);
+            string_builder_clear(sb);
+            // Convert each machine letter to user visible
+            for (int j = 0; j < dictionary_word_get_length(dw); j++) {
+                MachineLetter ml = dictionary_word_get_word(dw)[j];
+                string_builder_add_user_visible_letter(sb, ld, ml);
+            }
+            result->words[i] = string_builder_dump(sb, NULL);
+        }
+        string_builder_destroy(sb);
+    }
+
+    dictionary_word_list_destroy(unique_alphagrams);
+    return result;
+}
