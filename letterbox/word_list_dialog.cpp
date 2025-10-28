@@ -30,7 +30,7 @@ WordListDialog::WordListDialog(const std::vector<AlphagramSet>& allAlphagrams,
 
     // Pattern input
     patternInput = new QLineEdit();
-    patternInput->setPlaceholderText("e.g., .......  or  [JQXZ]......  or  A??E???");
+    patternInput->setPlaceholderText("...");
     connect(patternInput, &QLineEdit::textChanged, this, &WordListDialog::updatePreview);
     filterLayout->addRow("Anagram Pattern:", patternInput);
 

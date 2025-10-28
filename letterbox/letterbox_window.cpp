@@ -138,7 +138,13 @@ void LetterboxWindow::setupUI()
     mainLayout->addWidget(inputField);
 
     // Bottom: Queue of upcoming alphagrams (scrollable, ~20% of space, 4:1 ratio)
-    QScrollArea* queueScrollArea = new QScrollArea(this);
+    // Wrap in a container to allow absolute positioning of progress counter
+    queueContainer = new QWidget(this);
+    QVBoxLayout* queueContainerLayout = new QVBoxLayout(queueContainer);
+    queueContainerLayout->setContentsMargins(0, 0, 0, 0);
+    queueContainerLayout->setSpacing(0);
+
+    QScrollArea* queueScrollArea = new QScrollArea(queueContainer);
     queueScrollArea->setWidgetResizable(true);
     queueScrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     queueScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -179,7 +185,27 @@ void LetterboxWindow::setupUI()
     queueLayout->addWidget(queueLabel);
 
     queueScrollArea->setWidget(queueWidget);
-    mainLayout->addWidget(queueScrollArea, 1);
+    queueContainerLayout->addWidget(queueScrollArea);
+
+    // Progress counter overlay (bottom right corner)
+    progressCounterLabel = new QLabel(queueContainer);
+    progressCounterLabel->setStyleSheet(
+        "QLabel { "
+        "  color: #fff; "
+        "  background-color: rgb(28, 28, 28); "
+        "  font-family: 'Jost', sans-serif; "
+        "  font-size: 14px; "
+        "  font-weight: bold; "
+        "  padding: 4px 8px; "
+        "  border-radius: 4px; "
+        "}"
+    );
+    progressCounterLabel->setAlignment(Qt::AlignCenter);
+    progressCounterLabel->setAttribute(Qt::WA_TransparentForMouseEvents);  // Don't block mouse events
+    progressCounterLabel->raise();  // Keep on top
+    progressCounterLabel->hide();  // Start hidden, will be shown in updateDisplay()
+
+    mainLayout->addWidget(queueContainer, 1);
 
     // Debug info label (initially hidden)
     debugLabel = new QLabel(this);
@@ -391,22 +417,6 @@ void LetterboxWindow::updateDisplay()
     auto renderStartTime = std::chrono::high_resolution_clock::now();
     auto t0 = renderStartTime;
 
-    if (currentIndex >= alphagrams.size()) {
-        // Clear solved layout and show "Done!" message
-        QLayoutItem* item;
-        while ((item = solvedLayout->takeAt(0)) != nullptr) {
-            delete item->widget();
-            delete item;
-        }
-        QLabel* doneLabel = new QLabel("Done!");
-        doneLabel->setAlignment(Qt::AlignCenter);
-        doneLabel->setStyleSheet("font-size: 24px; padding: 20px;");
-        solvedLayout->addWidget(doneLabel);
-        queueLabel->clear();
-        inputField->setEnabled(false);
-        return;
-    }
-
     // Clear the solved layout
     QLayoutItem* item;
     while ((item = solvedLayout->takeAt(0)) != nullptr) {
@@ -463,39 +473,42 @@ void LetterboxWindow::updateDisplay()
     }
 
     // Add current alphagram at the bottom (with placeholders for unrevealed words)
-    AlphagramBox* currentBox = new AlphagramBox(solvedWidget);
-    for (const auto& entry : alphagrams[currentIndex].words) {
-        if (entry.revealed) {
-            // Show the actual word with hooks and extensions (cached)
-            const HookExtensionCache& cache = getOrComputeHookExtensions(entry.word);
+    // Only if we haven't completed all alphagrams yet
+    if (currentIndex < static_cast<int>(alphagrams.size())) {
+        AlphagramBox* currentBox = new AlphagramBox(solvedWidget);
+        for (const auto& entry : alphagrams[currentIndex].words) {
+            if (entry.revealed) {
+                // Show the actual word with hooks and extensions (cached)
+                const HookExtensionCache& cache = getOrComputeHookExtensions(entry.word);
 
-            QString frontStr = QString::fromStdString(cache.frontHooks);
-            QString backStr = QString::fromStdString(cache.backHooks);
-            QString frontExtStr = QString::fromStdString(cache.frontExtensions);
-            QString backExtStr = QString::fromStdString(cache.backExtensions);
+                QString frontStr = QString::fromStdString(cache.frontHooks);
+                QString backStr = QString::fromStdString(cache.backHooks);
+                QString frontExtStr = QString::fromStdString(cache.frontExtensions);
+                QString backExtStr = QString::fromStdString(cache.backExtensions);
 
-            // Calculate widths for global max
-            int frontWidth = hookMetrics.horizontalAdvance(frontStr);
-            int backWidth = hookMetrics.horizontalAdvance(backStr);
-            int wordWidth = wordMetrics.horizontalAdvance(QString::fromStdString(entry.word));
-            globalMaxFrontWidth = std::max(globalMaxFrontWidth, frontWidth);
-            globalMaxBackWidth = std::max(globalMaxBackWidth, backWidth);
-            globalMaxWordWidth = std::max(globalMaxWordWidth, wordWidth);
+                // Calculate widths for global max
+                int frontWidth = hookMetrics.horizontalAdvance(frontStr);
+                int backWidth = hookMetrics.horizontalAdvance(backStr);
+                int wordWidth = wordMetrics.horizontalAdvance(QString::fromStdString(entry.word));
+                globalMaxFrontWidth = std::max(globalMaxFrontWidth, frontWidth);
+                globalMaxBackWidth = std::max(globalMaxBackWidth, backWidth);
+                globalMaxWordWidth = std::max(globalMaxWordWidth, wordWidth);
 
-            currentBox->addWord(QString::fromStdString(entry.word), frontStr, backStr,
-                              frontExtStr, backExtStr, false, cache.computeTimeMicros);
-        } else {
-            // Show placeholder dashes (one dash per letter) - gray and regular weight
-            QString placeholder;
-            for (size_t i = 0; i < entry.word.length(); i++) {
-                placeholder += "-";
+                currentBox->addWord(QString::fromStdString(entry.word), frontStr, backStr,
+                                  frontExtStr, backExtStr, false, cache.computeTimeMicros);
+            } else {
+                // Show placeholder dashes (one dash per letter) - gray and regular weight
+                QString placeholder;
+                for (size_t i = 0; i < entry.word.length(); i++) {
+                    placeholder += "-";
+                }
+                int wordWidth = wordMetrics.horizontalAdvance(placeholder);
+                globalMaxWordWidth = std::max(globalMaxWordWidth, wordWidth);
+                currentBox->addWord(placeholder, "", "", "", "", true);  // true = isPlaceholder
             }
-            int wordWidth = wordMetrics.horizontalAdvance(placeholder);
-            globalMaxWordWidth = std::max(globalMaxWordWidth, wordWidth);
-            currentBox->addWord(placeholder, "", "", "", "", true);  // true = isPlaceholder
         }
+        boxes.push_back(currentBox);
     }
-    boxes.push_back(currentBox);
     auto t3 = std::chrono::high_resolution_clock::now();
     int createWidgetsMicros = std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count();
 
@@ -521,20 +534,51 @@ void LetterboxWindow::updateDisplay()
     auto t6 = std::chrono::high_resolution_clock::now();
     QString queueHtml = "";
 
-    // Show current alphagram at top of queue (Jost Bold, white)
-    queueHtml += QString("<div style='font-family: \"Jost\", sans-serif; font-size: %1px; margin: 5px 0; font-weight: bold; color: #fff; text-align: center;'>%2</div>")
-            .arg(scaledQueueCurrentSize)
-            .arg(QString::fromStdString(alphagrams[currentIndex].alphagram));
+    if (currentIndex >= static_cast<int>(alphagrams.size())) {
+        // Quiz complete! Show completion message
+        queueHtml = QString("<div style='font-family: \"Jost\", sans-serif; font-size: %1px; margin: 20px 0; font-weight: bold; color: #4CAF50; text-align: center;'>Complete!</div>")
+                .arg(scaledQueueCurrentSize + 4);  // Slightly larger font
 
-    // Show upcoming alphagrams (Jost Regular - normal weight, gray)
-    int queueCount = std::min(10, (int)alphagrams.size() - currentIndex - 1);
-    for (int i = 1; i <= queueCount; i++) {
-        const AlphagramSet& set = alphagrams[currentIndex + i];
-        queueHtml += QString("<div style='font-family: \"Jost\", sans-serif; font-size: %1px; margin: 5px 0; font-weight: normal; color: #888; text-align: center;'>%2</div>")
-                .arg(scaledQueueUpcomingSize)
-                .arg(QString::fromStdString(set.alphagram));
+        // Disable input field and clear placeholder
+        inputField->setEnabled(false);
+        inputField->clear();
+        inputField->setPlaceholderText("");
+    } else {
+        // Show current alphagram at top of queue (Jost Bold, white)
+        queueHtml += QString("<div style='font-family: \"Jost\", sans-serif; font-size: %1px; margin: 5px 0; font-weight: bold; color: #fff; text-align: center;'>%2</div>")
+                .arg(scaledQueueCurrentSize)
+                .arg(QString::fromStdString(alphagrams[currentIndex].alphagram));
+
+        // Show upcoming alphagrams (Jost Regular - normal weight, gray)
+        int queueCount = std::min(10, (int)alphagrams.size() - currentIndex - 1);
+        for (int i = 1; i <= queueCount; i++) {
+            const AlphagramSet& set = alphagrams[currentIndex + i];
+            queueHtml += QString("<div style='font-family: \"Jost\", sans-serif; font-size: %1px; margin: 5px 0; font-weight: normal; color: #888; text-align: center;'>%2</div>")
+                    .arg(scaledQueueUpcomingSize)
+                    .arg(QString::fromStdString(set.alphagram));
+        }
     }
     queueLabel->setText(queueHtml);
+
+    // Update progress counter (e.g., "1 / 50" or "50 / 50" when complete)
+    int totalAlphagrams = alphagrams.size();
+    int displayIndex = std::min(currentIndex + 1, totalAlphagrams);  // Cap at total
+    QString counterText = QString("%1 / %2").arg(displayIndex).arg(totalAlphagrams);
+    progressCounterLabel->setText(counterText);
+    progressCounterLabel->adjustSize();
+    progressCounterLabel->show();
+
+    // Position counter after layout is complete (use timer to ensure geometry is final)
+    // Align flush with container edges (0 margin)
+    QTimer::singleShot(10, this, [this]() {
+        if (progressCounterLabel && queueContainer) {
+            progressCounterLabel->adjustSize();
+            int x = queueContainer->width() - progressCounterLabel->width();
+            int y = queueContainer->height() - progressCounterLabel->height();
+            progressCounterLabel->move(x, y);
+        }
+    });
+
     auto t7 = std::chrono::high_resolution_clock::now();
     int queueHtmlMicros = std::chrono::duration_cast<std::chrono::microseconds>(t7 - t6).count();
 
@@ -637,9 +681,10 @@ void LetterboxWindow::onTextChanged(const QString& text)
             // If all revealed, mark as studied and advance
             if (allRevealed) {
                 set.studied = true;
-                if (currentIndex < alphagrams.size() - 1) {
-                    currentIndex++;
-                    // Reset revealed states for new alphagram
+                currentIndex++;
+
+                // Reset revealed states for new alphagram (if not at end)
+                if (currentIndex < alphagrams.size()) {
                     for (auto& e : alphagrams[currentIndex].words) {
                         e.revealed = false;
                     }
@@ -780,6 +825,15 @@ void LetterboxWindow::resizeEvent(QResizeEvent *event)
 
     updateScaledFontSizes();
     updateDebugInfo();
+
+    // Position progress counter in bottom right corner of queue container
+    // Align flush with container edges (0 margin)
+    if (progressCounterLabel && queueContainer) {
+        progressCounterLabel->adjustSize();
+        int x = queueContainer->width() - progressCounterLabel->width();
+        int y = queueContainer->height() - progressCounterLabel->height();
+        progressCounterLabel->move(x, y);
+    }
 
     // Only redraw if scale factor actually changed
     if (oldScaleFactor != scaleFactor && currentIndex < static_cast<int>(alphagrams.size())) {

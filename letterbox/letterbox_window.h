@@ -114,7 +114,9 @@ private:
     QVBoxLayout* solvedLayout;     // Layout for solved alphagrams
     QScrollArea* solvedScrollArea; // Scroll area for solved section
     QLineEdit* inputField;         // Middle: answer input
+    QWidget* queueContainer;       // Container for queue area with counter overlay
     QLabel* queueLabel;            // Bottom: upcoming alphagrams
+    QLabel* progressCounterLabel;  // Progress counter overlay (e.g., "1 / 50")
     QLabel* progressLabel;
     QProgressBar* progressBar;
     QPushButton* nextButton;
