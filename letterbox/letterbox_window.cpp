@@ -13,6 +13,7 @@
 #include <QFont>
 #include <QFontMetrics>
 #include <QKeyEvent>
+#include <QShortcut>
 #include <algorithm>
 #include <unordered_map>
 #include <chrono>
@@ -847,6 +848,11 @@ void LetterboxWindow::skipCurrentAlphagram()
 
 void LetterboxWindow::undoMarkAsMissed()
 {
+    // Check if undo is currently available
+    if (!undoAction || !undoAction->isEnabled()) {
+        return;
+    }
+
     // Can only undo if we're one step ahead of the last missed index
     if (lastMissedIndex < 0 || currentIndex != lastMissedIndex + 1) {
         return;
@@ -892,10 +898,14 @@ void LetterboxWindow::setupMenuBar()
     wordsMenu->addAction(skipAction);
 
     undoAction = new QAction("Undo Mark as missed", this);
-    undoAction->setShortcut(QKeySequence::Undo);  // Cmd-Z on macOS
     undoAction->setEnabled(false);  // Disabled until there's something to undo
     connect(undoAction, &QAction::triggered, this, &LetterboxWindow::undoMarkAsMissed);
     wordsMenu->addAction(undoAction);
+
+    // Create a global shortcut for undo that works even when input has focus
+    QShortcut* undoShortcut = new QShortcut(QKeySequence::Undo, this);
+    undoShortcut->setContext(Qt::ApplicationShortcut);
+    connect(undoShortcut, &QShortcut::activated, this, &LetterboxWindow::undoMarkAsMissed);
 
     // View menu
     QMenu* viewMenu = menuBar->addMenu("View");
