@@ -135,6 +135,10 @@ private:
     bool showComputeTime;
     bool showRenderTime;
     int lastRenderTimeMicros;
+
+    // Resize debounce timer
+    QTimer* resizeTimer;
+    void handleResizeComplete();
 };
 
 #endif // LETTERBOX_WINDOW_H

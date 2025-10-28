@@ -34,6 +34,12 @@ LetterboxWindow::LetterboxWindow(QWidget *parent)
         skipAction->setEnabled(false);
     }
 
+    // Setup resize debounce timer
+    resizeTimer = new QTimer(this);
+    resizeTimer->setSingleShot(true);
+    resizeTimer->setInterval(100);  // 100ms delay after resize stops
+    connect(resizeTimer, &QTimer::timeout, this, &LetterboxWindow::handleResizeComplete);
+
     updateScaledFontSizes();
 
     // Initialize MAGPIE
@@ -873,6 +879,12 @@ void LetterboxWindow::resizeEvent(QResizeEvent *event)
 {
     QMainWindow::resizeEvent(event);
 
+    // Restart the debounce timer - only process resize after user stops resizing
+    resizeTimer->start();
+}
+
+void LetterboxWindow::handleResizeComplete()
+{
     double oldScaleFactor = scaleFactor;
 
     updateScaledFontSizes();
