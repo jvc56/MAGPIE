@@ -16,6 +16,15 @@ SOURCES += magpie_wrapper.c
 macx {
     OBJECTIVE_SOURCES += dark_mode.m
     LIBS += -framework Cocoa
+
+    CONFIG += app_bundle
+
+    # Create symlink to data directory in app bundle Resources
+    # Use local data directory (run ../download_data.sh first if it doesn't exist)
+    DATA_SOURCE = $$PWD/../data
+
+    # Post-link command to create Resources directory and symlink
+    QMAKE_POST_LINK += mkdir -p Letterbox.app/Contents/Resources && ln -sfn $$DATA_SOURCE Letterbox.app/Contents/Resources/data
 }
 
 # Qt C++ sources
