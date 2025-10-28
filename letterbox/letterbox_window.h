@@ -23,6 +23,7 @@ extern "C" {
 struct WordEntry {
     std::string word;
     bool revealed;
+    bool missed;  // True if word was skipped without being revealed
 };
 
 struct HookExtensionCache {
@@ -51,6 +52,7 @@ public:
 private slots:
     void nextWord();
     void markStudied();
+    void skipCurrentAlphagram();
     void loadWordList();
     void createCustomWordList();
     void onTextChanged(const QString& text);
@@ -128,6 +130,7 @@ private:
     QAction* debugAction;
     QAction* computeTimeAction;
     QAction* renderTimeAction;
+    QAction* skipAction;
     bool showDebugInfo;
     bool showComputeTime;
     bool showRenderTime;

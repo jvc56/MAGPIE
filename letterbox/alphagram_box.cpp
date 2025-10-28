@@ -25,9 +25,9 @@ AlphagramBox::AlphagramBox(QWidget *parent)
 
 void AlphagramBox::addWord(const QString& word, const QString& frontHooks, const QString& backHooks,
                            const QString& frontExtensions, const QString& backExtensions,
-                           bool isPlaceholder, int computeTimeMicros)
+                           bool isPlaceholder, bool isMissed, int computeTimeMicros)
 {
-    words.push_back({word, frontHooks, backHooks, frontExtensions, backExtensions, isPlaceholder, computeTimeMicros});
+    words.push_back({word, frontHooks, backHooks, frontExtensions, backExtensions, isPlaceholder, isMissed, computeTimeMicros});
 }
 
 void AlphagramBox::finalize(int wordSize, int hookSize, int extensionSize, bool showComputeTime)
@@ -83,12 +83,29 @@ void AlphagramBox::finalize(int wordSize, int hookSize, int extensionSize, bool 
                     .arg(cellContent);
         }
 
-        // Word (Jost Semibold for revealed, Regular gray for placeholders)
+        // Word (Jost Semibold for revealed, Regular gray for placeholders, lighter gray for missed)
         QString wordBorder = hasAnyBackHooks ? "border-right: 1px solid #666;" : "";
-        QString color = wordData.isPlaceholder ? "#888" : "#fff";
-        int fontWeight = wordData.isPlaceholder ? 400 : 600;
+        QString color;
+        int fontWeight;
+
+        if (wordData.isMissed) {
+            color = "rgb(196, 196, 196)";  // Lighter gray for missed words
+            fontWeight = 600;
+        } else if (wordData.isPlaceholder) {
+            color = "#888";
+            fontWeight = 400;
+        } else {
+            color = "#fff";
+            fontWeight = 600;
+        }
 
         QString wordCellContent = wordData.word;
+
+        // Add red X emoji for missed words
+        if (wordData.isMissed) {
+            wordCellContent += " ❌";
+        }
+
         if (showComputeTime && !wordData.isPlaceholder && wordData.computeTimeMicros > 0) {
             wordCellContent += QString("<div style='font-size: 10px; color: #666; margin-top: 2px;'>%1μs</div>")
                     .arg(wordData.computeTimeMicros);

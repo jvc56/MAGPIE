@@ -25,7 +25,7 @@ WordListDialog::WordListDialog(const std::vector<AlphagramSet>& allAlphagrams,
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
 
     // Filter controls group
-    QGroupBox *filterGroup = new QGroupBox("Filter Options");
+    QGroupBox *filterGroup = new QGroupBox();
     QFormLayout *filterLayout = new QFormLayout(filterGroup);
 
     // Pattern input
@@ -64,10 +64,6 @@ WordListDialog::WordListDialog(const std::vector<AlphagramSet>& allAlphagrams,
     mainLayout->addWidget(statusLabel);
 
     // Preview area
-    QLabel *previewLabel = new QLabel("Preview:");
-    previewLabel->setStyleSheet("font-weight: bold; margin-top: 10px;");
-    mainLayout->addWidget(previewLabel);
-
     previewText = new QTextEdit();
     previewText->setReadOnly(true);
     previewText->setFont(QFont("Consolas", 13));
@@ -102,7 +98,7 @@ QString WordListDialog::formatAlphagramPreview(const AlphagramSet& set)
     // Show words in a simple table format (no hooks)
     for (const auto& entry : set.words) {
         if (!result.isEmpty()) {
-            result += "  ";  // Space between words
+            result += " ";  // Space between words
         }
         result += QString::fromStdString(entry.word);
     }

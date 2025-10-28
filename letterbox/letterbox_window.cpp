@@ -12,6 +12,7 @@
 #include <QDebug>
 #include <QFont>
 #include <QFontMetrics>
+#include <QKeyEvent>
 #include <algorithm>
 #include <unordered_map>
 #include <chrono>
@@ -27,6 +28,12 @@ LetterboxWindow::LetterboxWindow(QWidget *parent)
 {
     setupUI();
     setupMenuBar();
+
+    // Initially disable skip action until a word list is loaded
+    if (skipAction) {
+        skipAction->setEnabled(false);
+    }
+
     updateScaledFontSizes();
 
     // Initialize MAGPIE
@@ -324,6 +331,7 @@ void LetterboxWindow::loadWordList()
             WordEntry entry;
             entry.word = word;
             entry.revealed = false;
+            entry.missed = false;
             set.words.push_back(entry);
         }
 
@@ -466,7 +474,7 @@ void LetterboxWindow::updateDisplay()
                 globalMaxWordWidth = std::max(globalMaxWordWidth, wordWidth);
 
                 box->addWord(QString::fromStdString(entry.word), frontStr, backStr,
-                           frontExtStr, backExtStr, false, cache.computeTimeMicros);
+                           frontExtStr, backExtStr, false, entry.missed, cache.computeTimeMicros);
             }
             boxes.push_back(box);
         }
@@ -495,7 +503,7 @@ void LetterboxWindow::updateDisplay()
                 globalMaxWordWidth = std::max(globalMaxWordWidth, wordWidth);
 
                 currentBox->addWord(QString::fromStdString(entry.word), frontStr, backStr,
-                                  frontExtStr, backExtStr, false, cache.computeTimeMicros);
+                                  frontExtStr, backExtStr, false, entry.missed, cache.computeTimeMicros);
             } else {
                 // Show placeholder dashes (one dash per letter) - gray and regular weight
                 QString placeholder;
@@ -504,7 +512,7 @@ void LetterboxWindow::updateDisplay()
                 }
                 int wordWidth = wordMetrics.horizontalAdvance(placeholder);
                 globalMaxWordWidth = std::max(globalMaxWordWidth, wordWidth);
-                currentBox->addWord(placeholder, "", "", "", "", true);  // true = isPlaceholder
+                currentBox->addWord(placeholder, "", "", "", "", true, false);  // isPlaceholder=true, isMissed=false
             }
         }
         boxes.push_back(currentBox);
@@ -543,7 +551,17 @@ void LetterboxWindow::updateDisplay()
         inputField->setEnabled(false);
         inputField->clear();
         inputField->setPlaceholderText("");
+
+        // Disable skip action when quiz is complete
+        if (skipAction) {
+            skipAction->setEnabled(false);
+        }
     } else {
+        // Enable skip action when quiz is active
+        if (skipAction) {
+            skipAction->setEnabled(true);
+        }
+
         // Show current alphagram at top of queue (Jost Bold, white)
         queueHtml += QString("<div style='font-family: \"Jost\", sans-serif; font-size: %1px; margin: 5px 0; font-weight: bold; color: #fff; text-align: center;'>%2</div>")
                 .arg(scaledQueueCurrentSize)
@@ -742,6 +760,35 @@ void LetterboxWindow::markStudied()
     }
 }
 
+void LetterboxWindow::skipCurrentAlphagram()
+{
+    if (currentIndex >= alphagrams.size()) return;
+
+    AlphagramSet& set = alphagrams[currentIndex];
+
+    // Mark all unrevealed words as missed
+    for (auto& entry : set.words) {
+        if (!entry.revealed) {
+            entry.missed = true;
+            entry.revealed = true;  // Mark as revealed so they show up
+        }
+    }
+
+    // Mark as studied and advance
+    set.studied = true;
+    currentIndex++;
+
+    // Reset revealed/missed states for new alphagram (if not at end)
+    if (currentIndex < alphagrams.size()) {
+        for (auto& e : alphagrams[currentIndex].words) {
+            e.revealed = false;
+            e.missed = false;
+        }
+    }
+
+    updateDisplay();
+}
+
 void LetterboxWindow::setupMenuBar()
 {
     QMenuBar* menuBar = new QMenuBar(this);
@@ -753,6 +800,11 @@ void LetterboxWindow::setupMenuBar()
     createListAction->setShortcut(QKeySequence::New);  // Command-N on macOS
     connect(createListAction, &QAction::triggered, this, &LetterboxWindow::createCustomWordList);
     wordsMenu->addAction(createListAction);
+
+    skipAction = new QAction("Skip", this);
+    skipAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_S));  // Cmd-S on macOS
+    connect(skipAction, &QAction::triggered, this, &LetterboxWindow::skipCurrentAlphagram);
+    wordsMenu->addAction(skipAction);
 
     // Debug menu
     QMenu* debugMenu = menuBar->addMenu("Debug");
