@@ -78,11 +78,14 @@ WordListDialog::WordListDialog(const std::vector<AlphagramSet>& allAlphagrams,
     buttonLayout->addStretch();
 
     cancelButton = new QPushButton("Cancel");
+    cancelButton->setAutoDefault(false);  // Don't make this the default button
+    cancelButton->setShortcut(Qt::Key_Escape);  // Esc key closes dialog
     connect(cancelButton, &QPushButton::clicked, this, &QDialog::reject);
     buttonLayout->addWidget(cancelButton);
 
     applyButton = new QPushButton("Study");
     applyButton->setEnabled(false);
+    applyButton->setDefault(true);  // Make this the default button (Enter key activates)
     connect(applyButton, &QPushButton::clicked, this, &WordListDialog::applyFilter);
     buttonLayout->addWidget(applyButton);
 
