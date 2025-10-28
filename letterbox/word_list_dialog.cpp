@@ -93,58 +93,69 @@ bool WordListDialog::matchesPattern(const std::string& alphagram, const QString&
         return true;  // Empty pattern matches everything
     }
 
-    // Convert pattern to uppercase and alphagram to QString for easier comparison
+    // Convert to uppercase for case-insensitive matching
     QString patternUpper = pattern.toUpper();
     QString alphagramStr = QString::fromStdString(alphagram).toUpper();
 
-    // Check if pattern has character class like [JQXZ]
-    if (patternUpper.contains('[')) {
-        // Extract character classes
-        QRegularExpression classRegex("\\[([A-Z]+)\\]");
-        QRegularExpressionMatchIterator it = classRegex.globalMatch(patternUpper);
+    // Build multiset (letter counts) for the alphagram
+    std::unordered_map<QChar, int> alphagramCounts;
+    for (QChar c : alphagramStr) {
+        alphagramCounts[c]++;
+    }
 
-        while (it.hasNext()) {
-            QRegularExpressionMatch match = it.next();
-            QString chars = match.captured(1);
+    // Parse pattern and count required letters
+    int patternLength = 0;
+    std::unordered_map<QChar, int> requiredLetters;
+    std::vector<QString> characterClasses;
 
-            // Check if alphagram contains at least one of these characters
-            bool found = false;
-            for (QChar c : chars) {
-                if (alphagramStr.contains(c)) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                return false;
-            }
+    // Extract character classes like [JQXZ]
+    QRegularExpression classRegex("\\[([A-Za-z]+)\\]");
+    QRegularExpressionMatchIterator it = classRegex.globalMatch(patternUpper);
+
+    while (it.hasNext()) {
+        QRegularExpressionMatch match = it.next();
+        characterClasses.push_back(match.captured(1).toUpper());
+        patternLength++;
+    }
+
+    // Remove character classes from pattern
+    QString patternWithoutClasses = patternUpper;
+    patternWithoutClasses.remove(classRegex);
+
+    // Process remaining characters
+    for (QChar c : patternWithoutClasses) {
+        if (c == '.' || c == '?') {
+            // Wildcard - just counts toward length
+            patternLength++;
+        } else if (c.isLetter()) {
+            requiredLetters[c.toUpper()]++;
+            patternLength++;
         }
-
-        // Remove character classes from pattern for length/wildcard matching
-        patternUpper.remove(classRegex);
+        // Skip non-letter, non-wildcard characters
     }
 
-    // Now check length and wildcard matches
-    // Replace ? with . for consistency
-    patternUpper.replace('?', '.');
-
-    // If pattern has only wildcards or is empty after removing character classes, just check length
-    QString patternNoWildcards = patternUpper;
-    patternNoWildcards.remove('.');
-
-    if (patternNoWildcards.isEmpty() && !patternUpper.isEmpty()) {
-        // Pure wildcard pattern, just check length
-        return alphagramStr.length() == patternUpper.length();
-    }
-
-    // Check length first
-    if (alphagramStr.length() != patternUpper.length()) {
+    // Check total length
+    if (alphagramStr.length() != patternLength) {
         return false;
     }
 
-    // Match character by character
-    for (int i = 0; i < patternUpper.length(); i++) {
-        if (patternUpper[i] != '.' && patternUpper[i] != alphagramStr[i]) {
+    // Check that alphagram contains required letters
+    for (const auto& [letter, count] : requiredLetters) {
+        if (alphagramCounts[letter] < count) {
+            return false;
+        }
+    }
+
+    // Check character classes - alphagram must contain at least one letter from each class
+    for (const QString& charClass : characterClasses) {
+        bool found = false;
+        for (QChar c : charClass) {
+            if (alphagramCounts[c.toUpper()] > 0) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
             return false;
         }
     }
