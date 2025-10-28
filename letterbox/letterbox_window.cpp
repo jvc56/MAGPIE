@@ -18,11 +18,17 @@
 #include <chrono>
 #include <vector>
 
+// Chrome-like zoom levels (in percentages converted to scale factors)
+const std::vector<double> LetterboxWindow::zoomLevels = {
+    0.25, 0.33, 0.50, 0.67, 0.75, 0.80, 0.90, 1.00,  // 25% to 100%
+    1.10, 1.25, 1.50, 1.75, 2.00, 2.50, 3.00, 4.00, 5.00  // 110% to 500%
+};
+
 LetterboxWindow::LetterboxWindow(QWidget *parent)
     : QMainWindow(parent), config(nullptr), kwg(nullptr), ld(nullptr), currentIndex(0),
       globalMaxFrontWidth(0), globalMaxBackWidth(0), globalMaxWordWidth(0),
       renderWindowSize(15), userScrolledUp(false),
-      scaleFactor(1.0), scaledWordSize(36), scaledHookSize(24), scaledExtensionSize(14),
+      scaleFactor(1.0), zoomLevelIndex(7), scaledWordSize(36), scaledHookSize(24), scaledExtensionSize(14),
       scaledInputSize(20), scaledQueueCurrentSize(24), scaledQueueUpcomingSize(16),
       showDebugInfo(false), showComputeTime(false), showRenderTime(false), lastRenderTimeMicros(0)
 {
@@ -217,6 +223,31 @@ void LetterboxWindow::setupUI()
     progressCounterLabel->setAttribute(Qt::WA_TransparentForMouseEvents);  // Don't block mouse events
     progressCounterLabel->raise();  // Keep on top
     progressCounterLabel->hide();  // Start hidden, will be shown in updateDisplay()
+
+    // Zoom indicator overlay (above progress counter, bottom right corner)
+    zoomIndicatorLabel = new QLabel(queueContainer);
+    zoomIndicatorLabel->setStyleSheet(
+        "QLabel { "
+        "  color: #fff; "
+        "  background-color: rgb(28, 28, 28); "
+        "  font-family: 'Jost', sans-serif; "
+        "  font-size: 18px; "
+        "  font-weight: bold; "
+        "  padding: 8px 12px; "
+        "  border-radius: 4px; "
+        "}"
+    );
+    zoomIndicatorLabel->setAlignment(Qt::AlignCenter);
+    zoomIndicatorLabel->setAttribute(Qt::WA_TransparentForMouseEvents);  // Don't block mouse events
+    zoomIndicatorLabel->raise();  // Keep on top
+    zoomIndicatorLabel->hide();  // Start hidden
+
+    // Setup zoom indicator fade-out timer
+    zoomIndicatorTimer = new QTimer(this);
+    zoomIndicatorTimer->setSingleShot(true);
+    connect(zoomIndicatorTimer, &QTimer::timeout, [this]() {
+        zoomIndicatorLabel->hide();
+    });
 
     mainLayout->addWidget(queueContainer, 1);
 
@@ -812,6 +843,26 @@ void LetterboxWindow::setupMenuBar()
     connect(skipAction, &QAction::triggered, this, &LetterboxWindow::skipCurrentAlphagram);
     wordsMenu->addAction(skipAction);
 
+    // View menu
+    QMenu* viewMenu = menuBar->addMenu("View");
+
+    QAction* fullscreenAction = new QAction("Toggle Fullscreen", this);
+    fullscreenAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_F));  // Cmd-F on macOS
+    connect(fullscreenAction, &QAction::triggered, this, &LetterboxWindow::toggleFullscreen);
+    viewMenu->addAction(fullscreenAction);
+
+    viewMenu->addSeparator();
+
+    QAction* zoomInAction = new QAction("Zoom In", this);
+    zoomInAction->setShortcut(QKeySequence::ZoomIn);  // Cmd-+ on macOS
+    connect(zoomInAction, &QAction::triggered, this, &LetterboxWindow::zoomIn);
+    viewMenu->addAction(zoomInAction);
+
+    QAction* zoomOutAction = new QAction("Zoom Out", this);
+    zoomOutAction->setShortcut(QKeySequence::ZoomOut);  // Cmd-- on macOS
+    connect(zoomOutAction, &QAction::triggered, this, &LetterboxWindow::zoomOut);
+    viewMenu->addAction(zoomOutAction);
+
     // Debug menu
     QMenu* debugMenu = menuBar->addMenu("Debug");
 
@@ -832,6 +883,63 @@ void LetterboxWindow::setupMenuBar()
     renderTimeAction->setChecked(false);
     connect(renderTimeAction, &QAction::triggered, this, &LetterboxWindow::toggleRenderTime);
     debugMenu->addAction(renderTimeAction);
+}
+
+void LetterboxWindow::toggleFullscreen()
+{
+    if (isFullScreen()) {
+        showNormal();
+    } else {
+        showFullScreen();
+    }
+}
+
+void LetterboxWindow::zoomIn()
+{
+    // Move to next zoom level (Chrome-style discrete levels)
+    if (zoomLevelIndex < static_cast<int>(zoomLevels.size()) - 1) {
+        zoomLevelIndex++;
+        scaleFactor = zoomLevels[zoomLevelIndex];
+        updateScaledFontSizes();
+        if (currentIndex < static_cast<int>(alphagrams.size())) {
+            updateDisplay();
+        }
+        showZoomIndicator();
+    }
+}
+
+void LetterboxWindow::zoomOut()
+{
+    // Move to previous zoom level (Chrome-style discrete levels)
+    if (zoomLevelIndex > 0) {
+        zoomLevelIndex--;
+        scaleFactor = zoomLevels[zoomLevelIndex];
+        updateScaledFontSizes();
+        if (currentIndex < static_cast<int>(alphagrams.size())) {
+            updateDisplay();
+        }
+        showZoomIndicator();
+    }
+}
+
+void LetterboxWindow::showZoomIndicator()
+{
+    // Format zoom level as percentage
+    int zoomPercent = static_cast<int>(scaleFactor * 100);
+    zoomIndicatorLabel->setText(QString("%1%").arg(zoomPercent));
+    zoomIndicatorLabel->adjustSize();
+
+    // Position above progress counter (with 10px gap)
+    if (queueContainer) {
+        int x = queueContainer->width() - zoomIndicatorLabel->width();
+        int y = queueContainer->height() - zoomIndicatorLabel->height() -
+                (progressCounterLabel->isVisible() ? progressCounterLabel->height() + 10 : 10);
+        zoomIndicatorLabel->move(x, y);
+    }
+
+    // Show and start fade-out timer (1 second)
+    zoomIndicatorLabel->show();
+    zoomIndicatorTimer->start(1000);
 }
 
 void LetterboxWindow::toggleDebugInfo()
@@ -907,14 +1015,8 @@ void LetterboxWindow::handleResizeComplete()
 
 void LetterboxWindow::updateScaledFontSizes()
 {
-    int windowWidth = width();
-
-    // Calculate scale factor: 1.0 at 1200px and above, proportional below
-    if (windowWidth >= 1200) {
-        scaleFactor = 1.0;
-    } else {
-        scaleFactor = static_cast<double>(windowWidth) / 1200.0;
-    }
+    // scaleFactor is now controlled by zoom level (zoomLevels[zoomLevelIndex])
+    // Don't recalculate it based on window width
 
     // Base sizes and minimums
     const int baseWordSize = 36;

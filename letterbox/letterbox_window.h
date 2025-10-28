@@ -56,6 +56,9 @@ private slots:
     void loadWordList();
     void createCustomWordList();
     void onTextChanged(const QString& text);
+    void toggleFullscreen();
+    void zoomIn();
+    void zoomOut();
     void toggleDebugInfo();
     void toggleComputeTime();
     void toggleRenderTime();
@@ -102,6 +105,8 @@ private:
 
     // Responsive font scaling
     double scaleFactor;
+    int zoomLevelIndex;  // Index into zoomLevels array
+    static const std::vector<double> zoomLevels;  // Chrome-like zoom levels
     int scaledWordSize;
     int scaledHookSize;
     int scaledExtensionSize;
@@ -119,6 +124,8 @@ private:
     QWidget* queueContainer;       // Container for queue area with counter overlay
     QLabel* queueLabel;            // Bottom: upcoming alphagrams
     QLabel* progressCounterLabel;  // Progress counter overlay (e.g., "1 / 50")
+    QLabel* zoomIndicatorLabel;    // Zoom level indicator (e.g., "125%")
+    QTimer* zoomIndicatorTimer;    // Timer for fading zoom indicator
     QLabel* progressLabel;
     QProgressBar* progressBar;
     QPushButton* nextButton;
@@ -139,6 +146,9 @@ private:
     // Resize debounce timer
     QTimer* resizeTimer;
     void handleResizeComplete();
+
+    // Zoom indicator
+    void showZoomIndicator();
 };
 
 #endif // LETTERBOX_WINDOW_H

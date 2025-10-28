@@ -43,10 +43,19 @@ template <> constexpr inline auto LetterboxWindow::qt_create_metaobjectdata<qt_m
         "nextWord",
         "",
         "markStudied",
+        "skipCurrentAlphagram",
         "loadWordList",
+        "createCustomWordList",
         "onTextChanged",
         "text",
-        "toggleDebugInfo"
+        "toggleFullscreen",
+        "zoomIn",
+        "zoomOut",
+        "toggleDebugInfo",
+        "toggleComputeTime",
+        "toggleRenderTime",
+        "onScrollChanged",
+        "value"
     };
 
     QtMocHelpers::UintData qt_methods {
@@ -54,14 +63,32 @@ template <> constexpr inline auto LetterboxWindow::qt_create_metaobjectdata<qt_m
         QtMocHelpers::SlotData<void()>(1, 2, QMC::AccessPrivate, QMetaType::Void),
         // Slot 'markStudied'
         QtMocHelpers::SlotData<void()>(3, 2, QMC::AccessPrivate, QMetaType::Void),
-        // Slot 'loadWordList'
+        // Slot 'skipCurrentAlphagram'
         QtMocHelpers::SlotData<void()>(4, 2, QMC::AccessPrivate, QMetaType::Void),
+        // Slot 'loadWordList'
+        QtMocHelpers::SlotData<void()>(5, 2, QMC::AccessPrivate, QMetaType::Void),
+        // Slot 'createCustomWordList'
+        QtMocHelpers::SlotData<void()>(6, 2, QMC::AccessPrivate, QMetaType::Void),
         // Slot 'onTextChanged'
-        QtMocHelpers::SlotData<void(const QString &)>(5, 2, QMC::AccessPrivate, QMetaType::Void, {{
-            { QMetaType::QString, 6 },
+        QtMocHelpers::SlotData<void(const QString &)>(7, 2, QMC::AccessPrivate, QMetaType::Void, {{
+            { QMetaType::QString, 8 },
         }}),
+        // Slot 'toggleFullscreen'
+        QtMocHelpers::SlotData<void()>(9, 2, QMC::AccessPrivate, QMetaType::Void),
+        // Slot 'zoomIn'
+        QtMocHelpers::SlotData<void()>(10, 2, QMC::AccessPrivate, QMetaType::Void),
+        // Slot 'zoomOut'
+        QtMocHelpers::SlotData<void()>(11, 2, QMC::AccessPrivate, QMetaType::Void),
         // Slot 'toggleDebugInfo'
-        QtMocHelpers::SlotData<void()>(7, 2, QMC::AccessPrivate, QMetaType::Void),
+        QtMocHelpers::SlotData<void()>(12, 2, QMC::AccessPrivate, QMetaType::Void),
+        // Slot 'toggleComputeTime'
+        QtMocHelpers::SlotData<void()>(13, 2, QMC::AccessPrivate, QMetaType::Void),
+        // Slot 'toggleRenderTime'
+        QtMocHelpers::SlotData<void()>(14, 2, QMC::AccessPrivate, QMetaType::Void),
+        // Slot 'onScrollChanged'
+        QtMocHelpers::SlotData<void(int)>(15, 2, QMC::AccessPrivate, QMetaType::Void, {{
+            { QMetaType::Int, 16 },
+        }}),
     };
     QtMocHelpers::UintData qt_properties {
     };
@@ -87,9 +114,17 @@ void LetterboxWindow::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int 
         switch (_id) {
         case 0: _t->nextWord(); break;
         case 1: _t->markStudied(); break;
-        case 2: _t->loadWordList(); break;
-        case 3: _t->onTextChanged((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1]))); break;
-        case 4: _t->toggleDebugInfo(); break;
+        case 2: _t->skipCurrentAlphagram(); break;
+        case 3: _t->loadWordList(); break;
+        case 4: _t->createCustomWordList(); break;
+        case 5: _t->onTextChanged((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1]))); break;
+        case 6: _t->toggleFullscreen(); break;
+        case 7: _t->zoomIn(); break;
+        case 8: _t->zoomOut(); break;
+        case 9: _t->toggleDebugInfo(); break;
+        case 10: _t->toggleComputeTime(); break;
+        case 11: _t->toggleRenderTime(); break;
+        case 12: _t->onScrollChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
         default: ;
         }
     }
@@ -114,14 +149,14 @@ int LetterboxWindow::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
     if (_id < 0)
         return _id;
     if (_c == QMetaObject::InvokeMetaMethod) {
-        if (_id < 5)
+        if (_id < 13)
             qt_static_metacall(this, _c, _id, _a);
-        _id -= 5;
+        _id -= 13;
     }
     if (_c == QMetaObject::RegisterMethodArgumentMetaType) {
-        if (_id < 5)
+        if (_id < 13)
             *reinterpret_cast<QMetaType *>(_a[0]) = QMetaType();
-        _id -= 5;
+        _id -= 13;
     }
     return _id;
 }
