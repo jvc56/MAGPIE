@@ -36,12 +36,12 @@ void AlphagramBox::finalize(int wordSize, int hookSize, int extensionSize, bool 
         return;
     }
 
-    // Check if any word has hooks
+    // Check if any word has hooks or extensions
     bool hasAnyFrontHooks = false;
     bool hasAnyBackHooks = false;
     for (const auto& wordData : words) {
-        if (!wordData.frontHooks.isEmpty()) hasAnyFrontHooks = true;
-        if (!wordData.backHooks.isEmpty()) hasAnyBackHooks = true;
+        if (!wordData.frontHooks.isEmpty() || !wordData.frontExtensions.isEmpty()) hasAnyFrontHooks = true;
+        if (!wordData.backHooks.isEmpty() || !wordData.backExtensions.isEmpty()) hasAnyBackHooks = true;
     }
 
     // Create a single table for all words
