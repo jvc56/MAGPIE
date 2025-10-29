@@ -1566,7 +1566,7 @@ void config_game_play_events(Config *config, ErrorStack *error_stack) {
 
     draw_to_full_rack(game, player_index);
 
-    const Equity end_rack_penalty_abs_value = rack_get_score(ld, player_rack);
+    const Equity end_rack_penalty = calculate_end_rack_penalty(player_rack, ld);
     GameEvent *rack_penalty_event =
         game_history_add_game_event(game_history, error_stack);
     if (!error_stack_is_empty(error_stack)) {
@@ -1575,11 +1575,9 @@ void config_game_play_events(Config *config, ErrorStack *error_stack) {
     game_event_set_player_index(rack_penalty_event, player_index);
     game_event_set_type(rack_penalty_event, GAME_EVENT_END_RACK_PENALTY);
     rack_copy(game_event_get_rack(rack_penalty_event), player_rack);
-    game_event_set_score_adjustment(rack_penalty_event,
-                                    -end_rack_penalty_abs_value);
-    game_event_set_cumulative_score(rack_penalty_event,
-                                    player_get_score(player) -
-                                        end_rack_penalty_abs_value);
+    game_event_set_score_adjustment(rack_penalty_event, end_rack_penalty);
+    game_event_set_cumulative_score(
+        rack_penalty_event, player_get_score(player) + end_rack_penalty);
     game_event_set_cgp_move_string(rack_penalty_event, NULL);
     game_event_set_move_score(rack_penalty_event, 0);
     game_history_next(game_history, error_stack);
@@ -1607,10 +1605,8 @@ void config_add_end_rack_points(Config *config, const int player_index,
 
   const Rack *end_rack_points_rack =
       player_get_rack(game_get_player(config->game, player_index));
-  // FIXME: consolidate existing end rack points and end rack penalty
-  // calculations
   const Equity end_rack_points_equity =
-      rack_get_score(config->ld, end_rack_points_rack) * 2;
+      calculate_end_rack_points(end_rack_points_rack, config->ld);
   const int end_rack_points_player_index = 1 - player_index;
 
   // Find previous game event for player

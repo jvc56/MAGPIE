@@ -930,17 +930,18 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
       return false;
     }
 
-    const Equity rack_score = rack_get_score(gcg_parser->ld, &penalty_letters);
+    const Equity end_rack_penalty_equity =
+        calculate_end_rack_penalty(&penalty_letters, gcg_parser->ld);
     const Equity game_event_score_adj =
         game_event_get_score_adjustment(game_event);
 
-    if (-rack_score != game_event_score_adj) {
+    if (end_rack_penalty_equity != game_event_score_adj) {
       error_stack_push(
           error_stack, ERROR_STATUS_GCG_PARSE_END_RACK_PENALTY_INCORRECT,
           get_formatted_string(
               "rack score (%d) does not match end rack penalty (%d): %s",
-              equity_to_int(rack_score), -equity_to_int(game_event_score_adj),
-              gcg_line));
+              equity_to_int(end_rack_penalty_equity),
+              equity_to_int(game_event_score_adj), gcg_line));
       return false;
     }
 
@@ -1046,17 +1047,17 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
       return false;
     }
 
-    const Equity end_rack_score =
-        rack_get_score(gcg_parser->ld, game_event_get_rack(game_event));
-    const Equity game_event_rack_points =
+    const Equity end_rack_score_equity = calculate_end_rack_points(
+        game_event_get_rack(game_event), gcg_parser->ld);
+    const Equity game_event_rack_points_equity =
         game_event_get_score_adjustment(game_event);
-    if (end_rack_score * 2 != game_event_rack_points) {
+    if (end_rack_score_equity != game_event_rack_points_equity) {
       error_stack_push(
           error_stack, ERROR_STATUS_GCG_PARSE_RACK_END_POINTS_INCORRECT,
           get_formatted_string(
               "double rack score (%d) does not match end rack points (%d): %s",
-              equity_to_int(end_rack_score) * 2,
-              equity_to_int(game_event_rack_points), gcg_line));
+              equity_to_int(end_rack_score_equity),
+              equity_to_int(game_event_rack_points_equity), gcg_line));
       return false;
     }
 

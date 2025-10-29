@@ -330,6 +330,20 @@ void execute_exchange_move(const Move *move, const Game *game, Rack *leave) {
   }
 }
 
+Equity calculate_end_rack_points(const Rack *rack,
+                                 const LetterDistribution *ld) {
+  // Note: updating this function will require updates to the endgame adjustment
+  // functions in static_eval.h
+  return 2 * rack_get_score(ld, rack);
+}
+
+Equity calculate_end_rack_penalty(const Rack *rack,
+                                  const LetterDistribution *ld) {
+  // Note: updating this function will require updates to the endgame adjustment
+  // functions in static_eval.h
+  return -rack_get_score(ld, rack);
+}
+
 void standard_end_of_game_calculations(Game *game) {
   int player_on_turn_index = game_get_player_on_turn_index(game);
 
@@ -338,7 +352,7 @@ void standard_end_of_game_calculations(Game *game) {
   const LetterDistribution *ld = game_get_ld(game);
 
   player_add_to_score(player_on_turn,
-                      2 * rack_get_score(ld, player_get_rack(opponent)));
+                      calculate_end_rack_points(player_get_rack(opponent), ld));
   game_set_game_end_reason(game, GAME_END_REASON_STANDARD);
 }
 
@@ -381,8 +395,10 @@ void play_move(const Move *move, Game *game, Rack *leave) {
   if (game_reached_max_scoreless_turns(game)) {
     Player *player0 = game_get_player(game, 0);
     Player *player1 = game_get_player(game, 1);
-    player_add_to_score(player0, -rack_get_score(ld, player_get_rack(player0)));
-    player_add_to_score(player1, -rack_get_score(ld, player_get_rack(player1)));
+    player_add_to_score(
+        player0, calculate_end_rack_penalty(player_get_rack(player0), ld));
+    player_add_to_score(
+        player1, calculate_end_rack_penalty(player_get_rack(player1), ld));
     game_set_game_end_reason(game, GAME_END_REASON_CONSECUTIVE_ZEROS);
   }
   game_start_next_player_turn(game);
@@ -995,8 +1011,8 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
       log_fatal(
           "encountered an unexpected empty rack for an end rack penalty event");
     }
-    player_add_to_score(player,
-                        -rack_get_score(game_get_ld(game), player_rack));
+    player_add_to_score(
+        player, calculate_end_rack_penalty(player_rack, game_get_ld(game)));
     game_start_next_player_turn(game);
     break;
   case GAME_EVENT_END_RACK_POINTS:
@@ -1025,7 +1041,7 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
     }
     play_events_data->played_end_rack_points = true;
     player_add_to_score(player,
-                        2 * rack_get_score(game_get_ld(game), opp_rack));
+                        calculate_end_rack_points(opp_rack, game_get_ld(game)));
     break;
   case GAME_EVENT_UNKNOWN:
     log_fatal("encountered unknown game event when playing game history turn");

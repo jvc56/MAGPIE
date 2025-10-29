@@ -269,8 +269,8 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
       small_move_set_estimated_value(
           current_move,
           equity_to_int(int_to_equity(small_move_get_score(current_move)) +
-                        (2 * rack_get_score(game_get_ld(worker->game_copy),
-                                            other_rack))) |
+                        (calculate_end_rack_points(
+                            other_rack, game_get_ld(worker->game_copy)))) |
               GOING_OUT_BF);
     } else if (depth > 2) {
       // some more jitter for lazysmp (to be implemented)
