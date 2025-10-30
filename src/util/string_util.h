@@ -24,6 +24,7 @@ void string_builder_add_spaces(StringBuilder *string_builder,
                                int number_of_spaces);
 void string_builder_add_int(StringBuilder *string_builder, int64_t n);
 void string_builder_add_char(StringBuilder *string_builder, char c);
+void string_builder_truncate(StringBuilder *string_builder, size_t len);
 void string_builder_clear(StringBuilder *string_builder);
 size_t string_builder_length(const StringBuilder *string_builder);
 const char *string_builder_peek(const StringBuilder *string_builder);

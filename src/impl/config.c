@@ -2623,19 +2623,37 @@ void config_load_parsed_args(Config *config,
         arg_name = input_str;
       }
 
+      bool parg_has_prefix[NUMBER_OF_ARG_TOKENS] = {false};
+      bool ambiguous_arg_name = false;
       for (int k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
         if (has_prefix(arg_name, config->pargs[k]->name)) {
+          parg_has_prefix[k] = true;
           if (current_parg) {
-            error_stack_push(
-                error_stack, ERROR_STATUS_CONFIG_LOAD_AMBIGUOUS_COMMAND,
-                get_formatted_string("ambiguous command %s, could be %s or %s",
-                                     arg_name, current_parg->name,
-                                     config->pargs[k]->name));
-            return;
+            ambiguous_arg_name = true;
+          } else {
+            current_parg = config->pargs[k];
+            current_arg_token = k;
           }
-          current_parg = config->pargs[k];
-          current_arg_token = k;
         }
+      }
+
+      if (ambiguous_arg_name) {
+        StringBuilder *sb = string_builder_create();
+        string_builder_add_formatted_string(
+            sb, "ambiguous command '%s' could be:", arg_name);
+        for (int k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
+          if (parg_has_prefix[k]) {
+            string_builder_add_formatted_string(sb, " %s,",
+                                                config->pargs[k]->name);
+          }
+        }
+        // Remove the trailing comma
+        string_builder_truncate(sb, string_builder_length(sb) - 1);
+        error_stack_push(error_stack,
+                         ERROR_STATUS_CONFIG_LOAD_AMBIGUOUS_COMMAND,
+                         string_builder_dump(sb, NULL));
+        string_builder_destroy(sb);
+        return;
       }
 
       if (!current_parg) {
