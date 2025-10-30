@@ -487,8 +487,8 @@ void string_to_int_or_push_error(const char *int_str_name, const char *int_str,
   if (!error_stack_is_empty(error_stack)) {
     error_stack_push(
         error_stack, error_code,
-        get_formatted_string("failed to parse value '%s' for argument %s",
-                             int_str_name, int_str));
+        get_formatted_string("failed to parse value '%s' for argument '%s'",
+                             int_str, int_str_name));
   }
   if (*dest < min || *dest > max) {
     error_stack_push(

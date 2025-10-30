@@ -119,9 +119,10 @@ void game_history_previous(GameHistory *game_history, ErrorStack *error_stack);
 void game_history_goto(GameHistory *game_history, int num_events_to_play,
                        ErrorStack *error_stack);
 
-void game_history_insert_challenge_bonus_game_event(
-    GameHistory *game_history, const int player_index,
-    const Equity score_adjustment, ErrorStack *error_stack);
+void game_history_insert_challenge_bonus_game_event(GameHistory *game_history,
+                                                    int player_index,
+                                                    Equity score_adjustment,
+                                                    ErrorStack *error_stack);
 void game_history_remove_challenge_bonus_game_event(GameHistory *game_history);
 
 void game_history_set_gcg_filename(GameHistory *game_history,
