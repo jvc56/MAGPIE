@@ -45,6 +45,7 @@ int game_event_get_turn_value(const GameEvent *event);
 typedef struct GameHistory GameHistory;
 
 GameHistory *game_history_create(void);
+GameHistory *game_history_duplicate(const GameHistory *gh_orig);
 void game_history_destroy(GameHistory *game_history);
 void game_history_reset(GameHistory *game_history);
 
@@ -76,6 +77,11 @@ void game_history_set_board_layout_name(GameHistory *history,
                                         const char *board_layout);
 const char *game_history_get_board_layout_name(const GameHistory *history);
 
+void game_history_set_waiting_for_final_pass_or_challenge(
+    GameHistory *game_history, bool waiting_for_final_pass_or_challenge);
+bool game_history_get_waiting_for_final_pass_or_challenge(
+    const GameHistory *game_history);
+
 int game_history_get_num_events(const GameHistory *history);
 int game_history_get_num_played_events(const GameHistory *game_history);
 
@@ -83,6 +89,8 @@ GameEvent *game_history_get_event(const GameHistory *history, int event_index);
 
 GameEvent *game_history_add_game_event(GameHistory *game_history,
                                        ErrorStack *error_stack);
+
+void game_history_truncate_to_played_events(GameHistory *game_history);
 
 void game_history_player_set_name(GameHistory *game_history, int player_index,
                                   const char *name);
@@ -98,18 +106,27 @@ Rack *game_history_player_get_last_rack(GameHistory *game_history,
 const Rack *
 game_history_player_get_last_rack_const(const GameHistory *game_history,
                                         int player_index);
-void game_history_set_player(GameHistory *history, int player_index,
-                             const char *player_name,
-                             const char *player_nickname);
-bool game_history_player_is_set(const GameHistory *game_history,
-                                int player_index);
-bool game_history_both_players_are_set(const GameHistory *game_history);
+Rack *game_history_player_get_rack_to_draw_before_pass_out_game_end(
+    GameHistory *game_history, int player_index);
+void game_history_player_reset(GameHistory *history, int player_index,
+                               const char *player_name,
+                               const char *player_nickname);
 int game_history_get_most_recent_move_event_index(
     const GameHistory *game_history);
 
-int game_history_next(GameHistory *game_history, ErrorStack *error_stack);
-int game_history_previous(GameHistory *game_history, ErrorStack *error_stack);
-int game_history_goto(GameHistory *game_history, int num_events_to_play,
-                      ErrorStack *error_stack);
+void game_history_next(GameHistory *game_history, ErrorStack *error_stack);
+void game_history_previous(GameHistory *game_history, ErrorStack *error_stack);
+void game_history_goto(GameHistory *game_history, int num_events_to_play,
+                       ErrorStack *error_stack);
+
+void game_history_insert_challenge_bonus_game_event(GameHistory *game_history,
+                                                    int player_index,
+                                                    Equity score_adjustment,
+                                                    ErrorStack *error_stack);
+void game_history_remove_challenge_bonus_game_event(GameHistory *game_history);
+
+void game_history_set_gcg_filename(GameHistory *game_history,
+                                   const char *user_provided_gcg_filename);
+const char *game_history_get_gcg_filename(const GameHistory *game_history);
 
 #endif

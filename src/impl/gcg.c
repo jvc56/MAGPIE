@@ -78,6 +78,7 @@ struct GCGParser {
   int number_of_token_regex_pairs;
   int gcg_token_count[NUMBER_OF_GCG_TOKENS];
   int current_gcg_line_index;
+  bool player_is_reset[2];
   StringSplitter *gcg_lines;
   const char *existing_p0_lexicon;
   // Owned by the caller
@@ -289,6 +290,8 @@ GCGParser *gcg_parser_create(const char *gcg_string, GameHistory *game_history,
                                 token_string_regex_pairs[i].regex_string);
   }
   memset(gcg_parser->gcg_token_count, 0, sizeof(gcg_parser->gcg_token_count));
+  gcg_parser->player_is_reset[0] = false;
+  gcg_parser->player_is_reset[1] = false;
   gcg_parser->existing_p0_lexicon = existing_p0_lexicon;
   gcg_parser->current_gcg_line_index = 0;
   // The gcg_lines StringSplitter is NULL if the error stack is not empty
@@ -449,38 +452,6 @@ void finalize_note(GCGParser *gcg_parser) {
   string_builder_clear(gcg_parser->note_builder);
 }
 
-bool game_event_has_player_rack(const GameEvent *game_event, int player_index) {
-  game_event_t game_event_type = game_event_get_type(game_event);
-  int game_event_player_index = game_event_get_player_index(game_event);
-  if (game_event_player_index == player_index) {
-    return game_event_type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
-           game_event_type == GAME_EVENT_PASS ||
-           game_event_type == GAME_EVENT_EXCHANGE ||
-           game_event_type == GAME_EVENT_END_RACK_PENALTY;
-  }
-  return game_event_type == GAME_EVENT_END_RACK_POINTS;
-}
-
-// Returns NULL if there is no rack for the player
-const Rack *get_player_next_rack(const GameHistory *game_history,
-                                 int initial_game_event_index,
-                                 int player_index) {
-  int number_of_game_events = game_history_get_num_events(game_history);
-  for (int game_event_index = initial_game_event_index + 1;
-       game_event_index < number_of_game_events; game_event_index++) {
-    const GameEvent *game_event =
-        game_history_get_event(game_history, game_event_index);
-    if (game_event_index == initial_game_event_index + 1 &&
-        game_event_get_type(game_event) == GAME_EVENT_PHONY_TILES_RETURNED) {
-      return NULL;
-    }
-    if (game_event_has_player_rack(game_event, player_index)) {
-      return game_event_get_const_rack(game_event);
-    }
-  }
-  return NULL;
-}
-
 // Perform GCG token validations and operations that are shared
 // across many GCG tokens, including:
 // - Ensuring pragmas uniqueness
@@ -574,6 +545,24 @@ void common_gcg_token_validation(GCGParser *gcg_parser, gcg_token_t token,
   gcg_parser->gcg_token_count[token]++;
 }
 
+bool token_is_pragma(const gcg_token_t token) {
+  switch (token) {
+  case GCG_PLAYER_TOKEN:
+  case GCG_TITLE_TOKEN:
+  case GCG_DESCRIPTION_TOKEN:
+  case GCG_ID_TOKEN:
+  case GCG_ENCODING_TOKEN:
+  case GCG_LEXICON_TOKEN:
+  case GCG_GAME_TYPE_TOKEN:
+  case GCG_TILE_SET_TOKEN:
+  case GCG_BOARD_LAYOUT_TOKEN:
+  case GCG_TILE_DISTRIBUTION_NAME_TOKEN:
+    return true;
+  default:
+    return false;
+  }
+}
+
 // Returns true if processing should continue
 bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
                     parse_gcg_mode_t parse_gcg_mode, ErrorStack *error_stack) {
@@ -592,14 +581,12 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     finalize_note(gcg_parser);
   }
 
-  if (token == GCG_MOVE_TOKEN || token == GCG_PASS_TOKEN ||
-      token == GCG_EXCHANGE_TOKEN || token == GCG_RACK1_TOKEN ||
-      token == GCG_RACK2_TOKEN) {
-    if (!game_history_both_players_are_set(gcg_parser->game_history)) {
+  if (!token_is_pragma(token)) {
+    if (!gcg_parser->player_is_reset[0] || !gcg_parser->player_is_reset[1]) {
       error_stack_push(
-          error_stack, ERROR_STATUS_GCG_PARSE_MOVE_BEFORE_PLAYER,
+          error_stack, ERROR_STATUS_GCG_PARSE_GAME_EVENT_BEFORE_PLAYER,
           get_formatted_string(
-              "encountered a move or rack before both players are set: %s",
+              "encountered game event '%s' before both players were set",
               gcg_line));
       return false;
     }
@@ -657,7 +644,7 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     if (!error_stack_is_empty(error_stack)) {
       log_fatal("encountered unexpected player index: %d", player_index);
     }
-    if (game_history_player_is_set(game_history, player_index)) {
+    if (gcg_parser->player_is_reset[player_index]) {
       error_stack_push(
           error_stack, ERROR_STATUS_GCG_PARSE_PLAYER_NUMBER_REDUNDANT,
           get_formatted_string("redundant player number: %s", gcg_line));
@@ -666,11 +653,12 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     char *player_nickname =
         get_matching_group_as_string(gcg_parser, gcg_line, 2);
     char *player_name = get_matching_group_as_string(gcg_parser, gcg_line, 3);
-    game_history_set_player(game_history, player_index, player_name,
-                            player_nickname);
+    game_history_player_reset(game_history, player_index, player_name,
+                              player_nickname);
+    gcg_parser->player_is_reset[player_index] = true;
     free(player_name);
     free(player_nickname);
-    if (game_history_player_is_set(game_history, 1 - player_index) &&
+    if (gcg_parser->player_is_reset[1 - player_index] &&
         strings_equal(
             game_history_player_get_name(game_history, player_index),
             game_history_player_get_name(game_history, 1 - player_index))) {
@@ -679,7 +667,7 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
           get_formatted_string("duplicate player name: %s", gcg_line));
       return false;
     }
-    if (game_history_player_is_set(game_history, 1 - player_index) &&
+    if (gcg_parser->player_is_reset[1 - player_index] &&
         strings_equal(
             game_history_player_get_nickname(game_history, player_index),
             game_history_player_get_nickname(game_history, 1 - player_index))) {
@@ -942,17 +930,18 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
       return false;
     }
 
-    const Equity rack_score = rack_get_score(gcg_parser->ld, &penalty_letters);
+    const Equity end_rack_penalty_equity =
+        calculate_end_rack_penalty(&penalty_letters, gcg_parser->ld);
     const Equity game_event_score_adj =
         game_event_get_score_adjustment(game_event);
 
-    if (-rack_score != game_event_score_adj) {
+    if (end_rack_penalty_equity != game_event_score_adj) {
       error_stack_push(
           error_stack, ERROR_STATUS_GCG_PARSE_END_RACK_PENALTY_INCORRECT,
           get_formatted_string(
               "rack score (%d) does not match end rack penalty (%d): %s",
-              equity_to_int(rack_score), -equity_to_int(game_event_score_adj),
-              gcg_line));
+              equity_to_int(end_rack_penalty_equity),
+              equity_to_int(game_event_score_adj), gcg_line));
       return false;
     }
 
@@ -1058,17 +1047,17 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
       return false;
     }
 
-    const Equity end_rack_score =
-        rack_get_score(gcg_parser->ld, game_event_get_rack(game_event));
-    const Equity game_event_rack_points =
+    const Equity end_rack_score_equity = calculate_end_rack_points(
+        game_event_get_rack(game_event), gcg_parser->ld);
+    const Equity game_event_rack_points_equity =
         game_event_get_score_adjustment(game_event);
-    if (end_rack_score * 2 != game_event_rack_points) {
+    if (end_rack_score_equity != game_event_rack_points_equity) {
       error_stack_push(
           error_stack, ERROR_STATUS_GCG_PARSE_RACK_END_POINTS_INCORRECT,
           get_formatted_string(
               "double rack score (%d) does not match end rack points (%d): %s",
-              equity_to_int(end_rack_score) * 2,
-              equity_to_int(game_event_rack_points), gcg_line));
+              equity_to_int(end_rack_score_equity),
+              equity_to_int(game_event_rack_points_equity), gcg_line));
       return false;
     }
 
@@ -1212,10 +1201,9 @@ void parse_gcg_events(GCGParser *gcg_parser, Game *game,
                      true, error_stack);
 }
 
-// Assumes the game history is valid
-void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
-               const GameHistory *game_history, ErrorStack *error_stack) {
-  StringBuilder *gcg_sb = string_builder_create();
+void string_builder_add_gcg(StringBuilder *gcg_sb, const LetterDistribution *ld,
+                            const GameHistory *game_history,
+                            const bool star_last_played_move) {
   string_builder_add_formatted_string(gcg_sb, "#%s UTF-8\n",
                                       GCG_CHAR_ENCODING_STRING);
   string_builder_add_formatted_string(gcg_sb, "#%s Created with MAGPIE\n",
@@ -1280,13 +1268,19 @@ void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
   Equity previous_move_score = 0;
   int player_on_turn = 0;
   bool game_is_over = false;
+  const int last_played_move_index = number_of_events - 1;
   for (int event_index = 0; event_index < number_of_events; event_index++) {
     const GameEvent *event = game_history_get_event(game_history, event_index);
     const Rack *rack = game_event_get_const_rack(event);
+    char is_last_played_move_char = ' ';
+    if (star_last_played_move && event_index == last_played_move_index) {
+      is_last_played_move_char = '*';
+    }
     string_builder_add_formatted_string(
-        gcg_sb, ">%s: ",
+        gcg_sb, ">%s:%c",
         game_history_player_get_nickname(game_history,
-                                         game_event_get_player_index(event)));
+                                         game_event_get_player_index(event)),
+        is_last_played_move_char);
     switch (game_event_get_type(event)) {
     case GAME_EVENT_PASS:
     case GAME_EVENT_TILE_PLACEMENT_MOVE:
@@ -1359,6 +1353,13 @@ void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
       string_builder_add_rack(gcg_sb, last_rack, ld, true);
     }
   }
+}
+
+// Assumes the game history is valid
+void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
+               const GameHistory *game_history, ErrorStack *error_stack) {
+  StringBuilder *gcg_sb = string_builder_create();
+  string_builder_add_gcg(gcg_sb, ld, game_history, false);
   write_string_to_file(gcg_filename, "w", string_builder_peek(gcg_sb),
                        error_stack);
   string_builder_destroy(gcg_sb);

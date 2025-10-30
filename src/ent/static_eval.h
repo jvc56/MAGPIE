@@ -47,9 +47,7 @@ placement_adjustment(const LetterDistribution *ld, const Move *move,
 }
 
 static inline Equity endgame_nonoutplay_adjustment(Equity player_rack_score) {
-  return (equity_negate(player_rack_score) *
-          NON_OUTPLAY_LEAVE_SCORE_MULTIPLIER_PENALTY) -
-         NON_OUTPLAY_CONSTANT_PENALTY;
+  return (equity_negate(player_rack_score) * 2) - NON_OUTPLAY_CONSTANT_PENALTY;
 }
 
 static inline Equity endgame_outplay_adjustment(Equity opponent_rack_score) {

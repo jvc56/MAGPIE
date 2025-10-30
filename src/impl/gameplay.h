@@ -10,6 +10,10 @@
 #include "move_gen.h"
 
 void draw_starting_racks(Game *game);
+Equity calculate_end_rack_points(const Rack *rack,
+                                 const LetterDistribution *ld);
+Equity calculate_end_rack_penalty(const Rack *rack,
+                                  const LetterDistribution *ld);
 void play_move(const Move *move, Game *game, Rack *leave);
 void play_move_without_drawing_tiles(const Move *move, Game *game);
 void set_random_rack(Game *game, int player_index, const Rack *known_rack);
@@ -31,12 +35,7 @@ bool moves_are_similar(const Move *m1, const Move *m2, int dist_size);
 
 void game_play_n_events(GameHistory *game_history, Game *game, int event_index,
                         bool validate, ErrorStack *error_stack);
-void game_play_to_end(GameHistory *game_history, Game *game,
-                      ErrorStack *error_stack);
-char *game_next(GameHistory *game_history, Game *game, ErrorStack *error_stack);
-char *game_previous(GameHistory *game_history, Game *game,
-                    ErrorStack *error_stack);
-char *game_goto(GameHistory *game_history, Game *game, int num_events_to_play,
-                ErrorStack *error_stack);
+bool game_history_contains_end_rack_penalty_event(
+    const GameHistory *game_history);
 
 #endif

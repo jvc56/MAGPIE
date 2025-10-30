@@ -15,6 +15,10 @@ void players_data_destroy(PlayersData *players_data);
 
 const char *players_data_get_name(const PlayersData *players_data,
                                   int player_index);
+void players_data_switch_names(PlayersData *players_data);
+char *players_data_get_default_name(int player_index);
+char *players_data_get_default_nickname(int player_index);
+
 move_sort_t players_data_get_move_sort_type(const PlayersData *players_data,
                                             int player_index);
 move_record_t players_data_get_move_record_type(const PlayersData *players_data,

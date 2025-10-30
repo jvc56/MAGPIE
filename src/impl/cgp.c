@@ -264,8 +264,7 @@ void game_load_cgp(Game *game, const char *cgp, ErrorStack *error_stack) {
   game_gen_all_cross_sets(game);
   board_update_all_anchors(game_get_board(game));
 
-  if (game_get_consecutive_scoreless_turns(game) >=
-      game_get_max_scoreless_turns(game)) {
+  if (game_reached_max_scoreless_turns(game)) {
     game_set_game_end_reason(game, GAME_END_REASON_CONSECUTIVE_ZEROS);
   } else if (bag_is_empty(game_get_bag(game)) &&
              (rack_is_empty(player_get_rack(game_get_player(game, 0))) ||

@@ -305,7 +305,7 @@ static inline void small_move_destroy(SmallMove *move) {
 // Returns 1 if move_1 is "better" than move_2
 // Returns 0 if move_2 is "better" than move_1
 // Returns -1 if the moves are equivalent
-// Dies if moves are equivalent and duplicates
+// Raises a fatal error if moves are equivalent and duplicates
 // are not allowed
 // Assumes the moves are not null
 static inline int compare_moves(const Move *move_1, const Move *move_2,
@@ -340,7 +340,8 @@ static inline int compare_moves(const Move *move_1, const Move *move_2,
     }
   }
   if (!allow_duplicates) {
-    log_fatal("duplicate move in move list detected: %d", move_1->move_type);
+    log_fatal("duplicate move type '%d' in move list detected",
+              move_1->move_type);
   }
   return -1;
 }
@@ -573,6 +574,23 @@ static inline void move_list_sort_moves(MoveList *ml) {
   }
   // Reset the count
   ml->count = number_of_moves;
+}
+
+// Assumes the move list is sorted and has enough capacity to accept
+// an additional move
+static inline void move_list_add_move_to_sorted_list(MoveList *ml,
+                                                     const Move *move) {
+  move_copy(ml->moves[ml->count], move);
+  ml->count++;
+  int current_index = ml->count - 1;
+  while (current_index > 0 &&
+         compare_moves(ml->moves[current_index - 1], ml->moves[current_index],
+                       false) == 0) {
+    Move *swap = ml->moves[current_index];
+    ml->moves[current_index] = ml->moves[current_index - 1];
+    ml->moves[current_index - 1] = swap;
+    current_index--;
+  }
 }
 
 static inline void move_list_resize(MoveList *ml, int new_capacity) {

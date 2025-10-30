@@ -28,8 +28,8 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
   Game *actual_game = config_game_create(config);
   Game *expected_game = config_game_create(config);
 
-  int player0_last_score_on_rack = -1;
-  int player1_last_score_on_rack = -1;
+  int player0_end_rack_penalty = -1;
+  int player1_end_rack_penalty = -1;
   int player0_final_score = -1;
   int player1_final_score = -1;
   int player0_score_before_last_move = -1;
@@ -67,8 +67,8 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
     play_top_n_equity_move(actual_game, 0);
 
     if (i == array_length - 1) {
-      player0_last_score_on_rack = rack_get_score(ld, player0_rack);
-      player1_last_score_on_rack = rack_get_score(ld, player1_rack);
+      player0_end_rack_penalty = calculate_end_rack_penalty(player0_rack, ld);
+      player1_end_rack_penalty = calculate_end_rack_penalty(player1_rack, ld);
       player0_final_score = player_get_score(player0);
       player1_final_score = player_get_score(player1);
     }
@@ -94,9 +94,9 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
 
   if (game_get_game_end_reason(actual_game) ==
       GAME_END_REASON_CONSECUTIVE_ZEROS) {
-    assert(player0_score_before_last_move - player0_last_score_on_rack ==
+    assert(player0_score_before_last_move + player0_end_rack_penalty ==
            player0_final_score);
-    assert(player1_score_before_last_move - player1_last_score_on_rack ==
+    assert(player1_score_before_last_move + player1_end_rack_penalty ==
            player1_final_score);
   }
 
@@ -557,9 +557,9 @@ void test_playmove(void) {
   assert(game_get_consecutive_scoreless_turns(game) == 6);
   assert(game_get_game_end_reason(game) == GAME_END_REASON_CONSECUTIVE_ZEROS);
   assert(player_get_score(player0) ==
-         player0_score - rack_get_score(ld, player0_rack));
+         player0_score + calculate_end_rack_penalty(player0_rack, ld));
   assert(player_get_score(player1) ==
-         player1_score - rack_get_score(ld, player1_rack));
+         player1_score + calculate_end_rack_penalty(player1_rack, ld));
   assert(!rack_is_empty(player0_rack));
   assert(rack_get_total_letters(player0_rack) == 1);
   assert(rack_get_total_letters(player1_rack) == 1);

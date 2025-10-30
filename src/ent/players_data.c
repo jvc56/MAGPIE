@@ -42,6 +42,20 @@ const char *players_data_get_name(const PlayersData *players_data,
   return players_data->player_names[player_index];
 }
 
+void players_data_switch_names(PlayersData *players_data) {
+  char *const temp = players_data->player_names[0];
+  players_data->player_names[0] = players_data->player_names[1];
+  players_data->player_names[1] = temp;
+}
+
+char *players_data_get_default_name(int player_index) {
+  return get_formatted_string("Player %d", player_index + 1);
+}
+
+char *players_data_get_default_nickname(int player_index) {
+  return get_formatted_string("Player_%d", player_index + 1);
+}
+
 void players_data_set_move_sort_type(PlayersData *players_data,
                                      int player_index,
                                      move_sort_t move_sort_type) {
@@ -210,7 +224,8 @@ PlayersData *players_data_create(void) {
                                     DEFAULT_MOVE_SORT_TYPE);
     players_data_set_move_record_type(players_data, player_index,
                                       DEFAULT_MOVE_RECORD_TYPE);
-    players_data->player_names[player_index] = NULL;
+    players_data->player_names[player_index] =
+        players_data_get_default_name(player_index);
   }
   return players_data;
 }

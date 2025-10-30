@@ -27,6 +27,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef struct PlayEventsData {
+  Rack previously_played_letters_racks[2];
+  Rack known_letters_from_phonies_racks[2];
+  bool played_end_rack_penalty[2];
+  bool played_time_penalty[2];
+  bool played_end_rack_points;
+} PlayEventsData;
+
 Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
   for (int i = 0; i < move_get_tiles_length(move); i++) {
     if (move_get_tile(move, i) != PLAYED_THROUGH_MARKER) {
@@ -322,6 +330,20 @@ void execute_exchange_move(const Move *move, const Game *game, Rack *leave) {
   }
 }
 
+Equity calculate_end_rack_points(const Rack *rack,
+                                 const LetterDistribution *ld) {
+  // Note: updating this function will require updates to the endgame adjustment
+  // functions in static_eval.h
+  return 2 * rack_get_score(ld, rack);
+}
+
+Equity calculate_end_rack_penalty(const Rack *rack,
+                                  const LetterDistribution *ld) {
+  // Note: updating this function will require updates to the endgame adjustment
+  // functions in static_eval.h
+  return -rack_get_score(ld, rack);
+}
+
 void standard_end_of_game_calculations(Game *game) {
   int player_on_turn_index = game_get_player_on_turn_index(game);
 
@@ -330,7 +352,7 @@ void standard_end_of_game_calculations(Game *game) {
   const LetterDistribution *ld = game_get_ld(game);
 
   player_add_to_score(player_on_turn,
-                      2 * rack_get_score(ld, player_get_rack(opponent)));
+                      calculate_end_rack_points(player_get_rack(opponent), ld));
   game_set_game_end_reason(game, GAME_END_REASON_STANDARD);
 }
 
@@ -370,12 +392,13 @@ void play_move(const Move *move, Game *game, Rack *leave) {
     execute_exchange_move(move, game, leave);
     game_increment_consecutive_scoreless_turns(game);
   }
-  if (game_get_consecutive_scoreless_turns(game) ==
-      game_get_max_scoreless_turns(game)) {
+  if (game_reached_max_scoreless_turns(game)) {
     Player *player0 = game_get_player(game, 0);
     Player *player1 = game_get_player(game, 1);
-    player_add_to_score(player0, -rack_get_score(ld, player_get_rack(player0)));
-    player_add_to_score(player1, -rack_get_score(ld, player_get_rack(player1)));
+    player_add_to_score(
+        player0, calculate_end_rack_penalty(player_get_rack(player0), ld));
+    player_add_to_score(
+        player1, calculate_end_rack_penalty(player_get_rack(player1), ld));
     game_set_game_end_reason(game, GAME_END_REASON_CONSECUTIVE_ZEROS);
   }
   game_start_next_player_turn(game);
@@ -401,8 +424,7 @@ void play_move_without_drawing_tiles(const Move *move, Game *game) {
     execute_exchange_move(move, game, NULL);
     game_increment_consecutive_scoreless_turns(game);
   }
-  if (game_get_consecutive_scoreless_turns(game) ==
-      game_get_max_scoreless_turns(game)) {
+  if (game_reached_max_scoreless_turns(game)) {
     game_set_game_end_reason(game, GAME_END_REASON_CONSECUTIVE_ZEROS);
   }
   game_start_next_player_turn(game);
@@ -564,11 +586,54 @@ void validate_challenge_bonus_and_phony_tiles_returned_order(
   }
 }
 
+void validate_time_penalty_order(const GameEvent *game_event,
+                                 const GameEvent *previous_game_event,
+                                 const GameEvent *next_game_event,
+                                 ErrorStack *error_stack) {
+
+  if (game_event_get_type(game_event) != GAME_EVENT_TIME_PENALTY) {
+    return;
+  }
+
+  if (!previous_game_event) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_GCG_PARSE_PREMATURE_TIME_PENALTY,
+        string_duplicate(
+            "encountered a time penalty event before the end rack event(s)"));
+    return;
+  }
+
+  const game_event_t prev_ge_type = game_event_get_type(previous_game_event);
+  if (prev_ge_type != GAME_EVENT_END_RACK_POINTS &&
+      prev_ge_type != GAME_EVENT_END_RACK_PENALTY &&
+      prev_ge_type != GAME_EVENT_TIME_PENALTY) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_GCG_PARSE_PREMATURE_TIME_PENALTY,
+        string_duplicate(
+            "encountered a time penalty event before the end rack event(s)"));
+    return;
+  }
+
+  if (!next_game_event) {
+    return;
+  }
+
+  const game_event_t next_ge_type = game_event_get_type(next_game_event);
+  if (next_ge_type != GAME_EVENT_TIME_PENALTY) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_GCG_PARSE_PREMATURE_TIME_PENALTY,
+        string_duplicate(
+            "encountered a time penalty event before the end rack event(s)"));
+    return;
+  }
+}
+
 // Validates that the game event player indexes are
 // aligned with the game and enforces game event sequence
 // logic
 void validate_game_event_order_and_index(const GameEvent *game_event,
                                          const GameEvent *previous_game_event,
+                                         const GameEvent *next_game_event,
                                          int game_player_on_turn_index,
                                          bool game_is_over,
                                          ErrorStack *error_stack) {
@@ -611,9 +676,9 @@ void validate_game_event_order_and_index(const GameEvent *game_event,
       return;
     }
     break;
+  case GAME_EVENT_END_RACK_POINTS:
   case GAME_EVENT_END_RACK_PENALTY:
   case GAME_EVENT_TIME_PENALTY:
-  case GAME_EVENT_END_RACK_POINTS:
     if (!game_is_over) {
       char *err_str;
       if (game_event_type == GAME_EVENT_END_RACK_PENALTY) {
@@ -633,6 +698,13 @@ void validate_game_event_order_and_index(const GameEvent *game_event,
                        ERROR_STATUS_GCG_PARSE_END_GAME_EVENT_BEFORE_GAME_END,
                        err_str);
       return;
+    } else {
+      validate_time_penalty_order(game_event, previous_game_event,
+                                  next_game_event, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+      break;
     }
     break;
   case GAME_EVENT_UNKNOWN:
@@ -641,10 +713,22 @@ void validate_game_event_order_and_index(const GameEvent *game_event,
   }
 }
 
+void copy_bag_to_rack(const Bag *bag, const Rack *rack_to_sub, Rack *rack) {
+  int remaining_letters[MAX_ALPHABET_SIZE];
+  memset(remaining_letters, 0, sizeof(remaining_letters));
+  bag_increment_unseen_count(bag, remaining_letters);
+  const int ld_size = rack_get_dist_size(rack);
+  rack_set_dist_size_and_reset(rack, ld_size);
+  for (MachineLetter ml = 0; ml < ld_size; ml++) {
+    rack_add_letters(rack, ml,
+                     remaining_letters[ml] - rack_get_letter(rack_to_sub, ml));
+  }
+}
+
 // Assumes both player racks have been returned to the bag
 void set_after_game_event_racks(const GameHistory *game_history,
                                 const Game *game, int game_event_index,
-                                Rack **known_letters_from_phonies_racks,
+                                PlayEventsData *play_events_data,
                                 ErrorStack *error_stack) {
   GameEvent *current_game_event =
       game_history_get_event(game_history, game_event_index);
@@ -659,27 +743,41 @@ void set_after_game_event_racks(const GameHistory *game_history,
   const int player_on_turn_index = game_get_player_on_turn_index(game);
   const int number_of_game_events = game_history_get_num_events(game_history);
   bool player_on_turn_rack_set = false;
-  for (int i = game_event_index + 1; i < number_of_game_events; i++) {
-    const GameEvent *game_event_i = game_history_get_event(game_history, i);
-    if (i > 0) {
-      // Since this loop is looking ahead into the game history slightly
-      // it might encountered game event order errors, so we check them
-      // here so the potential errors are more coherent and a side effect
-      // error is not returned later.
-      validate_challenge_bonus_and_phony_tiles_returned_order(
-          game_event_i, game_history_get_event(game_history, i - 1),
-          error_stack);
-      if (!error_stack_is_empty(error_stack)) {
-        return;
+  const Bag *bag = game_get_bag(game);
+  const int num_letters_in_bag = bag_get_letters(bag);
+  if (num_letters_in_bag <= (RACK_SIZE)) {
+    // If the bag has <= RACK_SIZE, then the last play must've been an outplay
+    // and the opp must have all of the remaining letters.
+    // For the call to copy_bag_to_rack, just pass in
+    // after_event_player_off_turn_rack as the rack to sub since we know it's
+    // empty at this point.
+    copy_bag_to_rack(bag, after_event_player_off_turn_rack,
+                     after_event_player_on_turn_rack);
+    player_on_turn_rack_set = true;
+  } else {
+    for (int i = game_event_index + 1; i < number_of_game_events; i++) {
+      const GameEvent *game_event_i = game_history_get_event(game_history, i);
+      if (i > 0) {
+        // Since this loop is looking ahead into the game history slightly
+        // it might encounter game event order errors, so we check them
+        // here so the potential errors are more coherent and a side effect
+        // error is not returned later.
+        validate_challenge_bonus_and_phony_tiles_returned_order(
+            game_event_i, game_history_get_event(game_history, i - 1),
+            error_stack);
+        if (!error_stack_is_empty(error_stack)) {
+          return;
+        }
+      }
+      if (game_event_get_player_index(game_event_i) == player_on_turn_index) {
+        rack_copy(after_event_player_on_turn_rack,
+                  game_event_get_const_rack(game_event_i));
+        player_on_turn_rack_set = true;
+        break;
       }
     }
-    if (game_event_get_player_index(game_event_i) == player_on_turn_index) {
-      rack_copy(after_event_player_on_turn_rack,
-                game_event_get_const_rack(game_event_i));
-      player_on_turn_rack_set = true;
-      break;
-    }
   }
+
   if (!player_on_turn_rack_set) {
     const Rack *player_on_turn_last_rack =
         game_history_player_get_last_rack_const(game_history,
@@ -691,29 +789,21 @@ void set_after_game_event_racks(const GameHistory *game_history,
     }
   }
 
-  const Bag *bag = game_get_bag(game);
-  const int num_letters_in_bag = bag_get_letters(bag);
-
   if (num_letters_in_bag -
           rack_get_total_letters(after_event_player_on_turn_rack) <=
       (RACK_SIZE)) {
-    // If there are fewer than RACK_SIZE tiles in the bag, that means the player
-    // off turn will necessarily have all of them and the actual game bag is
-    // empty.
-    int remaining_letters[MAX_ALPHABET_SIZE];
-    memset(remaining_letters, 0, sizeof(remaining_letters));
-    bag_increment_unseen_count(bag, remaining_letters);
-    for (MachineLetter ml = 0; ml < ld_size; ml++) {
-      rack_add_letters(
-          after_event_player_off_turn_rack, ml,
-          remaining_letters[ml] -
-              rack_get_letter(after_event_player_on_turn_rack, ml));
-    }
+    // If there are no more than RACK_SIZE tiles in the bag, that means the
+    // player off turn will necessarily have all of them and the actual game bag
+    // is empty.
+    copy_bag_to_rack(bag, after_event_player_on_turn_rack,
+                     after_event_player_off_turn_rack);
   } else {
     // Otherwise, the rack is only known from the previous phonies the player
     // made
-    rack_copy(after_event_player_off_turn_rack,
-              known_letters_from_phonies_racks[1 - player_on_turn_index]);
+    rack_copy(
+        after_event_player_off_turn_rack,
+        &play_events_data
+             ->known_letters_from_phonies_racks[1 - player_on_turn_index]);
   }
 }
 
@@ -737,8 +827,7 @@ void set_rack_from_bag_or_push_to_error_stack(const Game *game,
 
 void play_game_history_turn(const GameHistory *game_history, Game *game,
                             int game_event_index, bool validate,
-                            Rack **previously_played_letters_racks,
-                            Rack **known_letters_from_phonies_racks,
+                            PlayEventsData *play_events_data,
                             ErrorStack *error_stack) {
   GameEvent *game_event =
       game_history_get_event(game_history, game_event_index);
@@ -748,14 +837,20 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
         game_history_get_event(game_history, game_event_index - 1);
   }
 
+  const GameEvent *next_game_event = NULL;
+  if (game_event_index < game_history_get_num_events(game_history) - 1) {
+    next_game_event =
+        game_history_get_event(game_history, game_event_index + 1);
+  }
+
   int game_player_on_turn_index = game_get_player_on_turn_index(game);
   const int game_event_player_index = game_event_get_player_index(game_event);
   const int game_event_opp_index = 1 - game_event_player_index;
 
   if (validate) {
-    validate_game_event_order_and_index(game_event, previous_game_event,
-                                        game_player_on_turn_index,
-                                        game_over(game), error_stack);
+    validate_game_event_order_and_index(
+        game_event, previous_game_event, next_game_event,
+        game_player_on_turn_index, game_over(game), error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
@@ -810,8 +905,9 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
       if (!error_stack_is_empty(error_stack)) {
         error_stack_push(
             error_stack, ERROR_STATUS_GCG_PARSE_MOVE_VALIDATION_ERROR,
-            string_duplicate(
-                "encountered a move validation error during GCG parsing"));
+            get_formatted_string("encountered a move validation error when "
+                                 "playing game event '%s'",
+                                 cgp_move_string));
         return;
       }
 
@@ -829,11 +925,13 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
       }
 
       Rack *known_rack_from_phonies =
-          known_letters_from_phonies_racks[game_event_player_index];
+          &play_events_data
+               ->known_letters_from_phonies_racks[game_event_player_index];
 
       if (game_event_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
         Rack *previously_played_letters =
-            previously_played_letters_racks[game_event_player_index];
+            &play_events_data
+                 ->previously_played_letters_racks[game_event_player_index];
         validated_moves_set_rack_to_played_letters(vms, 0,
                                                    previously_played_letters);
         rack_subtract_using_floor_zero(known_rack_from_phonies,
@@ -857,9 +955,11 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
   case GAME_EVENT_PHONY_TILES_RETURNED:;
     if (validate) {
       const Rack *previously_played_letters =
-          previously_played_letters_racks[game_event_player_index];
+          &play_events_data
+               ->previously_played_letters_racks[game_event_player_index];
       Rack *known_rack_from_phonies =
-          known_letters_from_phonies_racks[game_event_player_index];
+          &play_events_data
+               ->known_letters_from_phonies_racks[game_event_player_index];
       rack_union(known_rack_from_phonies, previously_played_letters);
     }
     // This event is guaranteed to immediately succeed
@@ -867,17 +967,43 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
     return_phony_letters(game);
     break;
   case GAME_EVENT_TIME_PENALTY:
+    if (play_events_data->played_time_penalty[game_event_player_index]) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_GCG_PARSE_GAME_REDUNDANT_TIME_PENALTY,
+          get_formatted_string(
+              "encountered a time penalty event '%s' for player '%s' when "
+              "a previous time penalty event for that player has already been "
+              "played",
+              cgp_move_string,
+              game_history_player_get_nickname(game_history,
+                                               game_event_player_index)));
+      return;
+    }
+    play_events_data->played_time_penalty[game_event_player_index] = true;
     player_add_to_score(game_get_player(game, game_event_player_index),
                         game_event_get_score_adjustment(game_event));
     break;
   case GAME_EVENT_END_RACK_PENALTY:
-    if (game_get_consecutive_scoreless_turns(game) !=
-        game_get_max_scoreless_turns(game)) {
+    if (!game_reached_max_scoreless_turns(game)) {
       // This error should have been caught earlier in game event order
       // validation
       log_fatal(
           "encountered unexpected end rack penalty before the end of the game");
     }
+    if (validate &&
+        play_events_data->played_end_rack_penalty[game_event_player_index]) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_GCG_PARSE_GAME_REDUNDANT_END_RACK_PENALTY,
+          get_formatted_string(
+              "encountered an end rack penalty event '%s' for player '%s' when "
+              "a previous end rack event for that player has already been "
+              "played",
+              cgp_move_string,
+              game_history_player_get_nickname(game_history,
+                                               game_event_player_index)));
+      return;
+    }
+    play_events_data->played_end_rack_penalty[game_event_player_index] = true;
     player = game_get_player(game, game_event_player_index);
     player_rack = player_get_rack(player);
     if (rack_is_empty(player_rack)) {
@@ -885,8 +1011,8 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
       log_fatal(
           "encountered an unexpected empty rack for an end rack penalty event");
     }
-    player_add_to_score(player,
-                        -rack_get_score(game_get_ld(game), player_rack));
+    player_add_to_score(
+        player, calculate_end_rack_penalty(player_rack, game_get_ld(game)));
     game_start_next_player_turn(game);
     break;
   case GAME_EVENT_END_RACK_POINTS:
@@ -904,8 +1030,18 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
                 game_history_player_get_nickname(game_history,
                                                  game_event_player_index));
     }
+    if (validate && play_events_data->played_end_rack_points) {
+      error_stack_push(error_stack,
+                       ERROR_STATUS_GCG_PARSE_GAME_REDUNDANT_END_RACK_POINTS,
+                       get_formatted_string(
+                           "encountered an end rack points event when a "
+                           "previous end rack event has already been played",
+                           cgp_move_string));
+      return;
+    }
+    play_events_data->played_end_rack_points = true;
     player_add_to_score(player,
-                        2 * rack_get_score(game_get_ld(game), opp_rack));
+                        calculate_end_rack_points(opp_rack, game_get_ld(game)));
     break;
   case GAME_EVENT_UNKNOWN:
     log_fatal("encountered unknown game event when playing game history turn");
@@ -930,7 +1066,7 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
       return;
     }
     set_after_game_event_racks(game_history, game, game_event_index,
-                               known_letters_from_phonies_racks, error_stack);
+                               play_events_data, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
@@ -986,57 +1122,33 @@ void game_play_n_events(GameHistory *game_history, Game *game,
   for (size_t i = 0; i < sizeof(stack_allocated_racks) / sizeof(Rack); i++) {
     rack_set_dist_size_and_reset(&stack_allocated_racks[i], ld_size);
   }
-  Rack *previously_played_letters_racks[2] = {&stack_allocated_racks[0],
-                                              &stack_allocated_racks[1]};
-  Rack *known_letters_from_phonies_racks[2] = {&stack_allocated_racks[2],
-                                               &stack_allocated_racks[3]};
+
+  PlayEventsData play_events_data;
+  rack_set_dist_size_and_reset(
+      &play_events_data.previously_played_letters_racks[0], ld_size);
+  rack_set_dist_size_and_reset(
+      &play_events_data.previously_played_letters_racks[1], ld_size);
+  rack_set_dist_size_and_reset(
+      &play_events_data.known_letters_from_phonies_racks[0], ld_size);
+  rack_set_dist_size_and_reset(
+      &play_events_data.known_letters_from_phonies_racks[1], ld_size);
+  play_events_data.played_end_rack_penalty[0] = false;
+  play_events_data.played_end_rack_penalty[1] = false;
+  play_events_data.played_time_penalty[0] = false;
+  play_events_data.played_time_penalty[1] = false;
+  play_events_data.played_end_rack_points = false;
+
   int number_of_game_events = game_history_get_num_events(game_history);
   if (num_events_to_play > number_of_game_events) {
     num_events_to_play = number_of_game_events;
   }
+
   for (int game_event_index = 0; game_event_index < num_events_to_play;
        game_event_index++) {
     play_game_history_turn(game_history, game, game_event_index, validate,
-                           previously_played_letters_racks,
-                           known_letters_from_phonies_racks, error_stack);
+                           &play_events_data, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
   }
-}
-
-void game_next(GameHistory *game_history, Game *game, ErrorStack *error_stack) {
-  const int num_events_to_play = game_history_next(game_history, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  game_play_n_events(game_history, game, num_events_to_play, false,
-                     error_stack);
-}
-
-void game_previous(GameHistory *game_history, Game *game,
-                   ErrorStack *error_stack) {
-  const int num_events_to_play =
-      game_history_previous(game_history, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  game_play_n_events(game_history, game, num_events_to_play, false,
-                     error_stack);
-}
-
-void game_goto(GameHistory *game_history, Game *game, int num_events_to_play,
-               ErrorStack *error_stack) {
-  game_history_goto(game_history, num_events_to_play, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  game_play_n_events(game_history, game, num_events_to_play, false,
-                     error_stack);
-}
-
-void game_play_to_end(GameHistory *game_history, Game *game,
-                      ErrorStack *error_stack) {
-  game_goto(game_history, game, game_history_get_num_events(game_history),
-            error_stack);
 }
