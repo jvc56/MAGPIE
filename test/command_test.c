@@ -514,7 +514,7 @@ void test_exec_ucgi_command(void) {
   command_test_set_stream_in(input_reader);
 
   ProcessArgs *process_args = process_args_create(
-      "set -mode ucgi -printonfinish true", 6, "autoplay", 1, "still running");
+      "set -mode async -printonfinish true", 6, "autoplay", 1, "still running");
 
   cpthread_t cmd_execution_thread;
   cpthread_create(&cmd_execution_thread, test_process_command_async,
@@ -561,7 +561,7 @@ void test_exec_ucgi_command(void) {
   command_test_reset_stream_in();
 }
 
-void test_exec_console_command(void) {
+void test_exec_sync_command(void) {
   char *test_input_filename = get_test_filename("input");
 
   // Reset the contents of input
@@ -613,7 +613,7 @@ void test_command(void) {
   test_exec_single_command();
   test_command_execution();
   test_exec_ucgi_command();
-  test_exec_console_command();
+  test_exec_sync_command();
   command_test_reset_stream_out();
   command_test_reset_stream_err();
   command_test_reset_stream_in();

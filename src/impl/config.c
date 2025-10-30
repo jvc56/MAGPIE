@@ -2845,10 +2845,10 @@ char *get_default_klv_name(const char *lexicon_name) {
 
 exec_mode_t get_exec_mode_type_from_name(const char *exec_mode_str) {
   exec_mode_t exec_mode = EXEC_MODE_UNKNOWN;
-  if (has_iprefix(exec_mode_str, "console")) {
-    exec_mode = EXEC_MODE_CONSOLE;
-  } else if (has_iprefix(exec_mode_str, "ucgi")) {
-    exec_mode = EXEC_MODE_UCGI;
+  if (has_iprefix(exec_mode_str, "sync")) {
+    exec_mode = EXEC_MODE_SYNC;
+  } else if (has_iprefix(exec_mode_str, "async")) {
+    exec_mode = EXEC_MODE_ASYNC;
   }
   return exec_mode;
 }
@@ -3906,7 +3906,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
 #undef arg
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
-  config->exec_mode = EXEC_MODE_CONSOLE;
+  config->exec_mode = EXEC_MODE_SYNC;
   config->bingo_bonus = DEFAULT_BINGO_BONUS;
   config->challenge_bonus = DEFAULT_CHALLENGE_BONUS;
   config->num_plays = DEFAULT_MOVE_LIST_CAPACITY;

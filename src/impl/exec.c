@@ -15,10 +15,8 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
-#define UCGI_COMMAND_STRING "ucgi"
 #define QUIT_COMMAND_STRING "quit"
 #define STOP_COMMAND_STRING "stop"
-#define FILE_COMMAND_STRING "file"
 
 char *command_search_status(Config *config, bool should_exit) {
   if (!config) {
@@ -111,10 +109,7 @@ void process_ucgi_command(Config *config, ErrorStack *error_stack,
                           const char *command) {
   // Assume cmd is already trimmed of whitespace
   ThreadControl *thread_control = config_get_thread_control(config);
-  if (strings_equal(command, UCGI_COMMAND_STRING)) {
-    // More of a formality to align with UCI
-    thread_control_print(thread_control, "id name MAGPIE 0.1\nucgiok\n");
-  } else if (strings_equal(command, STOP_COMMAND_STRING)) {
+  if (strings_equal(command, STOP_COMMAND_STRING)) {
     if (thread_control_is_started(thread_control)) {
       thread_control_set_status(thread_control,
                                 THREAD_CONTROL_STATUS_USER_INTERRUPT);
@@ -144,7 +139,7 @@ void command_scan_loop(Config *config, ErrorStack *error_stack,
     exec_mode_t exec_mode = config_get_exec_mode(config);
 
     const char *prompt = "";
-    if (exec_mode == EXEC_MODE_CONSOLE) {
+    if (exec_mode == EXEC_MODE_SYNC) {
       prompt = "magpie> ";
     }
 
@@ -167,10 +162,10 @@ void command_scan_loop(Config *config, ErrorStack *error_stack,
     }
     linenoiseHistoryAdd(input);
     switch (exec_mode) {
-    case EXEC_MODE_CONSOLE:
+    case EXEC_MODE_SYNC:
       execute_command_sync(config, error_stack, input);
       break;
-    case EXEC_MODE_UCGI:
+    case EXEC_MODE_ASYNC:
       process_ucgi_command(config, error_stack, input);
       break;
     case EXEC_MODE_UNKNOWN:

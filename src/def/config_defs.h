@@ -17,8 +17,8 @@ enum {
 
 typedef enum {
   EXEC_MODE_UNKNOWN,
-  EXEC_MODE_CONSOLE,
-  EXEC_MODE_UCGI,
+  EXEC_MODE_SYNC,
+  EXEC_MODE_ASYNC,
 } exec_mode_t;
 
 #endif
