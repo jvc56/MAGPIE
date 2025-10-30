@@ -139,6 +139,7 @@ typedef enum {
   ARG_TOKEN_ON_TURN_COLOR,
   ARG_TOKEN_ON_TURN_SCORE_STYLE,
   ARG_TOKEN_PRETTY,
+  ARG_TOKEN_PRINT_ON_FINISH,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -181,6 +182,7 @@ struct Config {
   bool use_small_plays;
   bool sim_with_inference;
   bool print_boards;
+  bool print_on_finish;
   char *record_filepath;
   double tt_fraction_of_mem;
   int time_limit_seconds;
@@ -3323,6 +3325,14 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  // Print on finish
+
+  config_load_bool(config, ARG_TOKEN_PRINT_ON_FINISH, &config->print_on_finish,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // Board color
 
   const char *board_color_str =
@@ -3632,9 +3642,11 @@ void config_execute_command(Config *config, ErrorStack *error_stack) {
   if (config_exec_parg_is_set(config)) {
     config_get_parg_exec_func(config, config->exec_parg_token)(config,
                                                                error_stack);
-    char *finished_msg = get_status_finished_str(config);
-    thread_control_print(config_get_thread_control(config), finished_msg);
-    free(finished_msg);
+    if (config->print_on_finish) {
+      char *finished_msg = get_status_finished_str(config);
+      thread_control_print(config_get_thread_control(config), finished_msg);
+      free(finished_msg);
+    }
   }
 }
 
@@ -3888,6 +3900,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_ON_TURN_COLOR, "onturncolor", 1, 1);
   arg(ARG_TOKEN_ON_TURN_SCORE_STYLE, "onturnscore", 1, 1);
   arg(ARG_TOKEN_PRETTY, "pretty", 1, 1);
+  arg(ARG_TOKEN_PRINT_ON_FINISH, "printonfinish", 1, 1);
 
 #undef cmd
 #undef arg
@@ -3913,6 +3926,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->human_readable = false;
   config->sim_with_inference = false;
   config->print_boards = false;
+  config->print_on_finish = false;
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->ld = NULL;
   config->players_data = players_data_create();

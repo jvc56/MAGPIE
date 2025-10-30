@@ -223,6 +223,9 @@ void assert_command_status_and_output(Config *config, const char *command,
 void test_command_execution(void) {
   Config *config = config_create_default_test();
 
+  assert_command_status_and_output(config, "set -printonfinish true", false, 5,
+                                   1, 0);
+
   assert_command_status_and_output(config, "sim -lex CSW21 -it 1000 -plies 2h3",
                                    false, 5, 0, 2);
 
@@ -476,11 +479,12 @@ void test_process_command(const char *arg_string,
 void test_exec_single_command(void) {
   char *plies_error_substr = get_formatted_string(
       "error %d", ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
-  test_process_command("sim -lex CSW21 -it 10 -plies 2h3", 0, NULL, 2,
-                       plies_error_substr);
+  test_process_command("sim -lex CSW21 -it 10 -plies 2h3 -printonfinish true",
+                       0, NULL, 2, plies_error_substr);
   free(plies_error_substr);
 
-  test_process_command("infer 1 MUZAKY 58 -numplays 20 -threads 4 -lex CSW21",
+  test_process_command("infer 1 MUZAKY 58 -numplays 20 -threads 4 -lex CSW21 "
+                       "-printonfinish true",
                        53, "infertile leave Z", 0, NULL);
 }
 
@@ -509,8 +513,8 @@ void test_exec_ucgi_command(void) {
   FILE *input_reader = fopen_or_die(test_input_filename, "r");
   command_test_set_stream_in(input_reader);
 
-  ProcessArgs *process_args =
-      process_args_create("set -mode ucgi", 6, "autoplay", 1, "still running");
+  ProcessArgs *process_args = process_args_create(
+      "set -mode ucgi -printonfinish true", 6, "autoplay", 1, "still running");
 
   cpthread_t cmd_execution_thread;
   cpthread_create(&cmd_execution_thread, test_process_command_async,
@@ -567,7 +571,8 @@ void test_exec_console_command(void) {
   FILE *input_reader = fopen_or_die(test_input_filename, "r");
   command_test_set_stream_in(input_reader);
 
-  char *initial_command = get_formatted_string("cgp %s", EMPTY_CGP);
+  char *initial_command =
+      get_formatted_string("cgp %s -printonfinish true", EMPTY_CGP);
 
   char *config_load_error_substr = get_formatted_string(
       "error %d", ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
@@ -580,12 +585,13 @@ void test_exec_console_command(void) {
                   process_args);
   cpthread_detach(cmd_execution_thread);
 
-  write_to_stream(input_writer,
-                  "infer 1 DGINR 18 -numplays 7 -threads 4 -pfreq 1000000\n");
-  write_to_stream(input_writer, "set -r1 best -r2 b -nump 1 -threads 4\n");
+  write_to_stream(input_writer, "infer 1 DGINR 18 -numplays 7 -threads 4 "
+                                "-pfreq 1000000 -printonfinish true\n");
   write_to_stream(
       input_writer,
-      "autoplay game 10 -lex CSW21 -s1 equity -s2 equity -gp true \n");
+      "set -r1 best -r2 b -nump 1 -threads 4  -printonfinish true\n");
+  write_to_stream(input_writer, "autoplay game 10 -lex CSW21 -s1 equity -s2 "
+                                "equity -gp true  -printonfinish true\n");
   // Stop should have no effect and appear as an error
   write_to_stream(input_writer, "stop\n");
   write_to_stream(input_writer, "quit\n");
