@@ -19,6 +19,9 @@ macx {
 
     CONFIG += app_bundle
 
+    # Set app icon
+    ICON = Letterbox.icns
+
     # Create symlink to data directory in app bundle Resources
     # Use local data directory (run ../download_data.sh first if it doesn't exist)
     DATA_SOURCE = $$PWD/../data
