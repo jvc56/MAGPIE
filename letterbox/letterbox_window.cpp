@@ -173,7 +173,7 @@ void LetterboxWindow::setupUI()
     // Word hover overlay (top-left or top-right corner)
     wordHoverOverlay = new QLabel(solvedContainer);
     wordHoverOverlay->setStyleSheet(
-        "background-color: black; "
+        "background-color: rgb(28, 28, 28); "
         "color: white; "
         "padding: 10px 15px; "
         "font-family: 'Jost', sans-serif; "
