@@ -140,6 +140,7 @@ typedef enum {
   ARG_TOKEN_ON_TURN_SCORE_STYLE,
   ARG_TOKEN_PRETTY,
   ARG_TOKEN_PRINT_ON_FINISH,
+  ARG_TOKEN_SHOW_PROMPT,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -183,6 +184,7 @@ struct Config {
   bool sim_with_inference;
   bool print_boards;
   bool print_on_finish;
+  bool show_prompt;
   char *record_filepath;
   double tt_fraction_of_mem;
   int time_limit_seconds;
@@ -359,6 +361,10 @@ bool config_get_use_small_plays(const Config *config) {
 
 bool config_get_human_readable(const Config *config) {
   return config->human_readable;
+}
+
+bool config_get_show_prompt(const Config *config) {
+  return config->show_prompt;
 }
 
 PlayersData *config_get_players_data(const Config *config) {
@@ -3333,6 +3339,14 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  // Show prompt
+
+  config_load_bool(config, ARG_TOKEN_SHOW_PROMPT, &config->show_prompt,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // Board color
 
   const char *board_color_str =
@@ -3901,6 +3915,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_ON_TURN_SCORE_STYLE, "onturnscore", 1, 1);
   arg(ARG_TOKEN_PRETTY, "pretty", 1, 1);
   arg(ARG_TOKEN_PRINT_ON_FINISH, "printonfinish", 1, 1);
+  arg(ARG_TOKEN_SHOW_PROMPT, "shprompt", 1, 1);
 
 #undef cmd
 #undef arg
@@ -3927,6 +3942,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->sim_with_inference = false;
   config->print_boards = false;
   config->print_on_finish = false;
+  config->show_prompt = true;
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->ld = NULL;
   config->players_data = players_data_create();

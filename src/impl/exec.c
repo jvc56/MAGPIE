@@ -35,11 +35,20 @@ char *command_search_status(Config *config, bool should_exit) {
   return config_get_execute_status(config);
 }
 
+void print_prompt(Config *config) {
+  thread_control_print(config_get_thread_control(config), "magpie> ");
+}
+
 void execute_command_and_set_status_finished(Config *config,
-                                             ErrorStack *error_stack) {
+                                             ErrorStack *error_stack,
+                                             const bool is_initial_command) {
   config_execute_command(config, error_stack);
   thread_control_set_status(config_get_thread_control(config),
                             THREAD_CONTROL_STATUS_FINISHED);
+  error_stack_print_and_reset(error_stack);
+  if (!is_initial_command && config_get_show_prompt(config)) {
+    print_prompt(config);
+  }
 }
 
 void *execute_command_thread_worker(void *uncasted_args) {
@@ -47,8 +56,7 @@ void *execute_command_thread_worker(void *uncasted_args) {
   // Create another error stack so this asynchronous command doesn't
   // interfere with the synchronous error stack on the main thread.
   ErrorStack *error_stack_async = error_stack_create();
-  execute_command_and_set_status_finished(config, error_stack_async);
-  error_stack_print_and_reset(error_stack_async);
+  execute_command_and_set_status_finished(config, error_stack_async, false);
   error_stack_destroy(error_stack_async);
   return NULL;
 }
@@ -56,6 +64,10 @@ void *execute_command_thread_worker(void *uncasted_args) {
 bool load_command_sync(Config *config, ErrorStack *error_stack,
                        const char *command) {
   ThreadControl *thread_control = config_get_thread_control(config);
+  StringBuilder *status_string = string_builder_create();
+  string_builder_add_formatted_string(
+      status_string, "%d \n", thread_control_get_status(thread_control));
+  string_builder_destroy(status_string);
   if (!thread_control_is_ready_for_new_command(thread_control)) {
     error_stack_push(
         error_stack, ERROR_STATUS_COMMAND_STILL_RUNNING,
@@ -81,9 +93,10 @@ bool load_command_sync(Config *config, ErrorStack *error_stack,
 }
 
 void execute_command_sync(Config *config, ErrorStack *error_stack,
-                          const char *command) {
+                          const char *command, const bool is_initial_command) {
   if (load_command_sync(config, error_stack, command)) {
-    execute_command_and_set_status_finished(config, error_stack);
+    execute_command_and_set_status_finished(config, error_stack,
+                                            is_initial_command);
   }
 }
 
@@ -105,8 +118,8 @@ void execute_command_async(Config *config, ErrorStack *error_stack,
   }
 }
 
-void process_ucgi_command(Config *config, ErrorStack *error_stack,
-                          const char *command) {
+void process_async_command(Config *config, ErrorStack *error_stack,
+                           const char *command) {
   // Assume cmd is already trimmed of whitespace
   ThreadControl *thread_control = config_get_thread_control(config);
   if (strings_equal(command, STOP_COMMAND_STRING)) {
@@ -125,7 +138,7 @@ void process_ucgi_command(Config *config, ErrorStack *error_stack,
 
 void command_scan_loop(Config *config, ErrorStack *error_stack,
                        const char *initial_command_string) {
-  execute_command_sync(config, error_stack, initial_command_string);
+  execute_command_sync(config, error_stack, initial_command_string, true);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
     return;
@@ -135,17 +148,13 @@ void command_scan_loop(Config *config, ErrorStack *error_stack,
   }
   char *input = NULL;
   linenoiseHistorySetMaxLen(1000);
+  if (config_get_show_prompt(config)) {
+    print_prompt(config);
+  } else {
+  }
   while (1) {
-    exec_mode_t exec_mode = config_get_exec_mode(config);
-
-    const char *prompt = "";
-    if (exec_mode == EXEC_MODE_SYNC) {
-      prompt = "magpie> ";
-    }
-
     free(input);
-
-    input = linenoise(prompt);
+    input = linenoise("");
     if (!input) {
       // NULL input indicates an EOF
       break;
@@ -153,7 +162,7 @@ void command_scan_loop(Config *config, ErrorStack *error_stack,
 
     trim_whitespace(input);
 
-    if (strings_iequal(input, QUIT_COMMAND_STRING)) {
+    if (has_iprefix(QUIT_COMMAND_STRING, input)) {
       break;
     }
 
@@ -161,20 +170,18 @@ void command_scan_loop(Config *config, ErrorStack *error_stack,
       continue;
     }
     linenoiseHistoryAdd(input);
-    switch (exec_mode) {
+    switch (config_get_exec_mode(config)) {
     case EXEC_MODE_SYNC:
-      execute_command_sync(config, error_stack, input);
+      execute_command_sync(config, error_stack, input, false);
       break;
     case EXEC_MODE_ASYNC:
-      process_ucgi_command(config, error_stack, input);
+      process_async_command(config, error_stack, input);
       break;
     case EXEC_MODE_UNKNOWN:
       log_fatal("attempted to execute command in unknown mode");
       break;
     }
-    if (!error_stack_is_empty(error_stack)) {
-      error_stack_print_and_reset(error_stack);
-    }
+    error_stack_print_and_reset(error_stack);
   }
   free(input);
 }

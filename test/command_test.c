@@ -498,7 +498,7 @@ void *test_process_command_async(void *uncasted_process_args) {
   return NULL;
 }
 
-void test_exec_ucgi_command(void) {
+void test_async_command(void) {
   char *test_input_filename = get_test_filename("input");
 
   // Reset the contents of input
@@ -612,7 +612,7 @@ void test_exec_sync_command(void) {
 void test_command(void) {
   test_exec_single_command();
   test_command_execution();
-  test_exec_ucgi_command();
+  test_async_command();
   test_exec_sync_command();
   command_test_reset_stream_out();
   command_test_reset_stream_err();
