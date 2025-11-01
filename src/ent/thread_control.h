@@ -35,6 +35,7 @@ bool thread_control_set_status(ThreadControl *thread_control,
                                thread_control_status_t exit_status);
 thread_control_status_t
 thread_control_get_status(ThreadControl *thread_control);
+void thread_control_wait_for_status_change(ThreadControl *thread_control);
 void thread_control_set_print_info_interval(ThreadControl *thread_control,
                                             int print_info_interval);
 void thread_control_set_threads(ThreadControl *thread_control,

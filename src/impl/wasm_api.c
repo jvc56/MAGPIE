@@ -63,7 +63,7 @@ void load_cgp_into_iso_config(const char *cgp, int num_plays) {
   // a game for static_eval_get_move_score and static_evaluation
   char *cgp_command =
       get_formatted_string("cgp %s -numplays %d", cgp, num_plays);
-  execute_command_sync(iso_config, iso_error_stack, cgp_command, false);
+  execute_command_sync(iso_config, iso_error_stack, cgp_command);
   free(cgp_command);
 }
 
@@ -153,7 +153,7 @@ char *static_evaluation(const char *cgpstr, int num_plays) {
 }
 
 int process_command_wasm(const char *cmd) {
-  execute_command_sync(wasm_config, wasm_error_stack, cmd, false);
+  execute_command_sync(wasm_config, wasm_error_stack, cmd);
   if (!error_stack_is_empty(wasm_error_stack)) {
     error_stack_print_and_reset(wasm_error_stack);
   }

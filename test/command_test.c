@@ -29,6 +29,12 @@ typedef struct ProcessArgs {
   cpthread_mutex_t finished_mutex;
 } ProcessArgs;
 
+typedef struct AsyncArgs {
+  Config *config;
+  ErrorStack *error_stack;
+  const char *cmd;
+} AsyncArgs;
+
 typedef struct MainArgs {
   int argc;
   char **argv;
@@ -152,6 +158,12 @@ void block_for_process_command(ProcessArgs *process_args, int max_seconds) {
   }
 }
 
+void *command_async_thread_worker(void *uncasted_args) {
+  AsyncArgs *args = (AsyncArgs *)uncasted_args;
+  execute_command_async(args->config, args->error_stack, args->cmd);
+  return NULL;
+}
+
 void assert_command_status_and_output(Config *config, const char *command,
                                       bool should_exit, int seconds_to_wait,
                                       int expected_output_line_count,
@@ -170,11 +182,13 @@ void assert_command_status_and_output(Config *config, const char *command,
 
   ErrorStack *error_stack = error_stack_create();
 
-  execute_command_async(config, error_stack, command);
-
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_print_and_reset(error_stack);
-  }
+  AsyncArgs async_args;
+  async_args.config = config;
+  async_args.error_stack = error_stack;
+  async_args.cmd = command;
+  cpthread_t cmd_async_thread;
+  cpthread_create(&cmd_async_thread, command_async_thread_worker, &async_args);
+  cpthread_detach(cmd_async_thread);
 
   // Let the async command start up
   ctime_nap(DEFAULT_NAP_TIME);
@@ -184,6 +198,10 @@ void assert_command_status_and_output(Config *config, const char *command,
     free(status_string);
   }
   block_for_search(config, seconds_to_wait);
+
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+  }
 
   fclose_or_die(errorout_fh);
 

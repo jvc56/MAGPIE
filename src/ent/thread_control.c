@@ -27,6 +27,7 @@ struct ThreadControl {
   cpthread_mutex_t iter_completed_mutex;
   thread_control_status_t tc_status;
   cpthread_mutex_t tc_status_mutex;
+  cpthread_cond_t tc_status_cond;
   cpthread_mutex_t print_mutex;
 };
 
@@ -43,6 +44,7 @@ ThreadControl *thread_control_create(void) {
   cpthread_mutex_init(&thread_control->iter_mutex);
   cpthread_mutex_init(&thread_control->iter_completed_mutex);
   cpthread_mutex_init(&thread_control->print_mutex);
+  cpthread_cond_init(&thread_control->tc_status_cond);
   thread_control->timer = ctimer_create_monotonic();
   thread_control->seed = ctime_get_current_time();
   thread_control->prng = prng_create(thread_control->seed);
@@ -165,10 +167,21 @@ bool thread_control_set_status(ThreadControl *thread_control,
       thread_control->iter_count_completed = 0;
       thread_control->time_elapsed = 0;
       ctimer_start(thread_control->timer);
+    } else {
+      cpthread_cond_broadcast(&thread_control->tc_status_cond);
     }
   }
   cpthread_mutex_unlock(&thread_control->tc_status_mutex);
   return success;
+}
+
+void thread_control_wait_for_status_change(ThreadControl *thread_control) {
+  cpthread_mutex_lock(&thread_control->tc_status_mutex);
+  if (thread_control->tc_status != THREAD_CONTROL_STATUS_FINISHED) {
+    cpthread_cond_wait(&thread_control->tc_status_cond,
+                       &thread_control->tc_status_mutex);
+  }
+  cpthread_mutex_unlock(&thread_control->tc_status_mutex);
 }
 
 // NOT THREAD SAFE: This does not require locking since it is

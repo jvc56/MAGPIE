@@ -2797,9 +2797,15 @@ bool lex_lex_compat(const char *p1_lexicon_name, const char *p2_lexicon_name,
   if (!p1_lexicon_name || !p2_lexicon_name) {
     return false;
   }
-  return ld_types_compat(
-      ld_get_type_from_lex_name(p1_lexicon_name, error_stack),
-      ld_get_type_from_lex_name(p2_lexicon_name, error_stack));
+  ld_t p1_ld_type = ld_get_type_from_lex_name(p1_lexicon_name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return false;
+  }
+  ld_t p2_ld_type = ld_get_type_from_lex_name(p2_lexicon_name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return false;
+  }
+  return ld_types_compat(p1_ld_type, p2_ld_type);
 }
 
 bool lex_ld_compat(const char *lexicon_name, const char *ld_name,
@@ -2810,8 +2816,15 @@ bool lex_ld_compat(const char *lexicon_name, const char *ld_name,
   if (!lexicon_name || !ld_name) {
     return false;
   }
-  return ld_types_compat(ld_get_type_from_lex_name(lexicon_name, error_stack),
-                         ld_get_type_from_ld_name(ld_name, error_stack));
+  ld_t lexicon_ld_type = ld_get_type_from_lex_name(lexicon_name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return false;
+  }
+  ld_t ld_ld_type = ld_get_type_from_ld_name(ld_name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return false;
+  }
+  return ld_types_compat(lexicon_ld_type, ld_ld_type);
 }
 
 bool lexicons_and_leaves_compat(const char *updated_p1_lexicon_name,
