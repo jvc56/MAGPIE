@@ -207,21 +207,24 @@ void assert_command_status_and_output(Config *config, const char *command,
 
   char *test_output = get_string_from_file_or_die(test_output_filename);
   int newlines_in_output = count_newlines(test_output);
+
+  char *test_outerror = get_string_from_file_or_die(test_outerror_filename);
+  int newlines_in_outerror = count_newlines(test_outerror);
+
   bool fail_test = false;
   if (newlines_in_output != expected_output_line_count) {
     printf("%s\nassert output: output counts do not match %d != %d\n", command,
            newlines_in_output, expected_output_line_count);
-    printf("got:>%s<\n", test_output);
+    printf("got output:>%s<\n", test_output);
+    printf("got outerror:>%s<\n", test_output);
     fail_test = true;
   }
 
-  char *test_outerror = get_string_from_file_or_die(test_outerror_filename);
-  int newlines_in_outerror = count_newlines(test_outerror);
   if (newlines_in_outerror != expected_outerror_line_count) {
     printf(
         "assert output: error counts do not match %d != %d\nfor command: %s\n",
         newlines_in_outerror, expected_outerror_line_count, command);
-    printf("got: >%s<\n", test_outerror);
+    printf("got outerror: >%s<\n", test_outerror);
     fail_test = true;
   }
 
