@@ -156,65 +156,69 @@ void *execute_async_input_worker(void *uncasted_args) {
 void execute_command_async(Config *config, ErrorStack *error_stack,
                            const char *command) {
   printf("ecs: executing '%s'\n", command);
-  if (load_command_sync(config, error_stack, command)) {
-    int pipefds[2];
-    if (pipe(pipefds) == -1) {
-      perror("pipe");
-      log_fatal("failed to create pipe for async command");
-    }
+  if (!load_command_sync(config, error_stack, command)) {
+    printf("ecs: load command sync failed\n");
+    return;
+  }
 
-    printf("ecs: launching worker\n");
-    cpthread_t cmd_execution_thread;
-    cpthread_create(&cmd_execution_thread, execute_async_command_worker,
-                    config);
-    printf("ecs: done launching worker\n");
+  printf("ecs: creating pipe\n");
 
-    // FIXME: wrap pollfd
-    struct pollfd fds[2];
-    fds[0].fd = fileno(get_stream_in());
-    fds[0].events = POLLIN;
-    fds[1].fd = pipefds[0];
-    fds[1].events = POLLIN;
+  int pipefds[2];
+  if (pipe(pipefds) == -1) {
+    perror("pipe");
+    log_fatal("failed to create pipe for async command");
+  }
 
-    AsyncCommandInputArgs async_args;
-    async_args.pipefds = pipefds;
-    async_args.fds = fds;
-    async_args.config = config;
+  printf("ecs: launching worker\n");
+  cpthread_t cmd_execution_thread;
+  cpthread_create(&cmd_execution_thread, execute_async_command_worker, config);
+  printf("ecs: done launching worker\n");
 
-    printf("ecs: launching input listener\n");
-    cpthread_t cmd_input_thread;
-    cpthread_create(&cmd_input_thread, execute_async_input_worker, &async_args);
-    printf("ecs: done launching input listener\n");
+  // FIXME: wrap pollfd
+  struct pollfd fds[2];
+  fds[0].fd = fileno(get_stream_in());
+  fds[0].events = POLLIN;
+  fds[1].fd = pipefds[0];
+  fds[1].events = POLLIN;
 
-    ThreadControl *thread_control = config_get_thread_control(config);
-    while (thread_control_is_started(thread_control)) {
-      printf("ecs: waiting for status change\n");
-      thread_control_wait_for_status_change(thread_control);
-      printf("ecs: got some status change\n");
-      if (thread_control_is_finished(thread_control)) {
-        printf("ecs: thread control finished, writing to pipe\n");
-        if (write(pipefds[1], "x", 1) == -1) {
-          log_fatal("failed to write to async command input pipe");
-        }
+  AsyncCommandInputArgs async_args;
+  async_args.pipefds = pipefds;
+  async_args.fds = fds;
+  async_args.config = config;
+
+  printf("ecs: launching input listener\n");
+  cpthread_t cmd_input_thread;
+  cpthread_create(&cmd_input_thread, execute_async_input_worker, &async_args);
+  printf("ecs: done launching input listener\n");
+
+  ThreadControl *thread_control = config_get_thread_control(config);
+  while (thread_control_is_started(thread_control)) {
+    printf("ecs: waiting for status change\n");
+    thread_control_wait_for_status_change(thread_control);
+    printf("ecs: got some status change\n");
+    if (thread_control_is_finished(thread_control)) {
+      printf("ecs: thread control finished, writing to pipe\n");
+      if (write(pipefds[1], "x", 1) == -1) {
+        log_fatal("failed to write to async command input pipe");
       }
     }
-
-    printf("ecs: joining on execution thread\n");
-    cpthread_join(cmd_execution_thread);
-
-    // Do to race conditions, the async input thread might still
-    // be blocked on polling, so send a signal here to wake it up
-    printf("ecs: execution thread joined, writing to pipe\n");
-    if (write(pipefds[1], "x", 1) == -1) {
-      log_fatal("final write to async command input pipe failed");
-    }
-
-    printf("ecs: joining on input thread\n");
-    cpthread_join(cmd_input_thread);
-    printf("ecs: input thread joined\n");
-    close(pipefds[0]);
-    close(pipefds[1]);
   }
+
+  printf("ecs: joining on execution thread\n");
+  cpthread_join(cmd_execution_thread);
+
+  // Do to race conditions, the async input thread might still
+  // be blocked on polling, so send a signal here to wake it up
+  printf("ecs: execution thread joined, writing to pipe\n");
+  if (write(pipefds[1], "x", 1) == -1) {
+    log_fatal("final write to async command input pipe failed");
+  }
+
+  printf("ecs: joining on input thread\n");
+  cpthread_join(cmd_input_thread);
+  printf("ecs: input thread joined\n");
+  close(pipefds[0]);
+  close(pipefds[1]);
   printf("ecs: finished\n");
 }
 

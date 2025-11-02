@@ -158,9 +158,9 @@ void block_for_process_command(ProcessArgs *process_args, int max_seconds) {
   }
 }
 
-void *command_async_thread_worker(void *uncasted_args) {
+void *sync_cmd_thread_worker(void *uncasted_args) {
   AsyncArgs *args = (AsyncArgs *)uncasted_args;
-  execute_command_async(args->config, args->error_stack, args->cmd);
+  execute_command_sync(args->config, args->error_stack, args->cmd);
   return NULL;
 }
 
@@ -187,10 +187,10 @@ void assert_command_status_and_output(Config *config, const char *command,
   async_args.error_stack = error_stack;
   async_args.cmd = command;
   printf("main: asserting '%s'\n", command);
-  printf("main: launching async thread\n");
-  cpthread_t cmd_async_thread;
-  cpthread_create(&cmd_async_thread, command_async_thread_worker, &async_args);
-  cpthread_detach(cmd_async_thread);
+  printf("main: launching sync thread\n");
+  cpthread_t sync_cmd_thread;
+  cpthread_create(&sync_cmd_thread, sync_cmd_thread_worker, &async_args);
+  cpthread_detach(sync_cmd_thread);
   printf("main: launched async thread, napping...\n");
 
   // Let the async command start up
