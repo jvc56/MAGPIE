@@ -186,25 +186,18 @@ void assert_command_status_and_output(Config *config, const char *command,
   async_args.config = config;
   async_args.error_stack = error_stack;
   async_args.cmd = command;
-  printf("main: asserting '%s'\n", command);
-  printf("main: launching sync thread\n");
   cpthread_t sync_cmd_thread;
   cpthread_create(&sync_cmd_thread, sync_cmd_thread_worker, &async_args);
   cpthread_detach(sync_cmd_thread);
-  printf("main: launched async thread, napping...\n");
 
   // Let the async command start up
   ctime_nap(DEFAULT_NAP_TIME);
-  printf("main: done napping\n");
 
   if (should_exit) {
-    printf("main: should exit, sending stop signal\n");
     char *status_string = command_search_status(config, true);
     free(status_string);
   }
-  printf("main: blocking for search\n");
   block_for_search(config, seconds_to_wait);
-  printf("main: done blocking\n");
 
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
