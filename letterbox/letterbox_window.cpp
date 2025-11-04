@@ -202,7 +202,7 @@ void LetterboxWindow::setupUI()
 
     // Middle: Input field (full width)
     inputField = new QLineEdit(this);
-    inputField->setPlaceholderText("...");
+    inputField->setPlaceholderText("·······");  // Default placeholder with middle dots
     inputField->setAlignment(Qt::AlignCenter);
     inputField->setStyleSheet("QLineEdit { padding: 15px; font-family: 'Jost', sans-serif; font-size: 20px; font-weight: bold; margin: 2px 0px; background-color: rgb(40, 40, 40); color: white; border: 2px solid #3a7f9f; text-transform: uppercase; }");
 
@@ -626,10 +626,10 @@ void LetterboxWindow::updateDisplay()
                 currentBox->addWord(QString::fromStdString(entry.word), frontStr, backStr,
                                   frontExtStr, backExtStr, false, entry.missed, cache.computeTimeMicros);
             } else {
-                // Show placeholder dashes (one dash per letter) - gray and regular weight
+                // Show placeholder dots (one dot per letter) - gray and regular weight
                 QString placeholder;
                 for (size_t i = 0; i < entry.word.length(); i++) {
-                    placeholder += "-";
+                    placeholder += "·";  // Middle dot (U+00B7)
                 }
                 int wordWidth = wordMetrics.horizontalAdvance(placeholder);
                 globalMaxWordWidth = std::max(globalMaxWordWidth, wordWidth);
@@ -724,6 +724,21 @@ void LetterboxWindow::updateDisplay()
     // Clear and focus input field
     auto t8 = std::chrono::high_resolution_clock::now();
     inputField->clear();
+
+    // Update placeholder to show dots for the first unrevealed word
+    if (currentIndex < static_cast<int>(alphagrams.size())) {
+        QString placeholderText;
+        for (const auto& entry : alphagrams[currentIndex].words) {
+            if (!entry.revealed) {
+                for (size_t i = 0; i < entry.word.length(); i++) {
+                    placeholderText += "·";  // Middle dot (U+00B7)
+                }
+                break;  // Only use the first unrevealed word
+            }
+        }
+        inputField->setPlaceholderText(placeholderText);
+    }
+
     inputField->setFocus();
     auto t9 = std::chrono::high_resolution_clock::now();
     int inputClearMicros = std::chrono::duration_cast<std::chrono::microseconds>(t9 - t8).count();
