@@ -534,8 +534,9 @@ void test_async_command(void) {
   FILE *input_reader = fopen_or_die(test_input_filename, "r");
   command_test_set_stream_in(input_reader);
 
-  ProcessArgs *process_args = process_args_create(
-      "set -mode async -printonfinish true", 6, "autoplay", 1, "still running");
+  ProcessArgs *process_args =
+      process_args_create("set -mode async -printonfinish true", 7, "autoplay",
+                          1, "unrecognized async command");
 
   cpthread_t cmd_execution_thread;
   cpthread_create(&cmd_execution_thread, test_process_command_async,
@@ -560,7 +561,11 @@ void test_async_command(void) {
   // is still running. This should give a warning.
   fprintf_or_die(
       input_writer,
-      "autoplay game 1 -lex CSW21 -s1 equity -s2 equity  -gp false\n");
+      "autoplay game 1 -lex CSW21 -s1 equity -s2 equity -gp false\n");
+  fflush_or_die(input_writer);
+  ctime_nap(1.0);
+  // Make sure the status command doesn't crash anything
+  fprintf_or_die(input_writer, "status\n");
   fflush_or_die(input_writer);
   ctime_nap(1.0);
   // Interrupt the autoplay which won't finish in 1 second

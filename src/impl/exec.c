@@ -19,8 +19,17 @@
 #include <string.h>
 #include <unistd.h>
 
-#define QUIT_COMMAND_STRING "quit"
-#define STOP_COMMAND_STRING "stop"
+typedef enum {
+  ASYNC_STOP_COMMAND_TOKEN,
+  ASYNC_STATUS_COMMAND_TOKEN,
+  NUMBER_OF_ASYNC_COMMAND_TOKENS,
+} async_token_t;
+
+// The order of these strings must match the order of the tokens
+static const char *async_command_strings[] = {
+    "stop",
+    "status",
+};
 
 typedef struct AsyncCommandInputArgs {
   int *pipefds;
@@ -101,11 +110,35 @@ bool run_str_api_command(Config *config, ErrorStack *error_stack,
   return false;
 }
 
+// Returns the async token of the command, or NUMBER_OF_ASYNC_COMMAND_TOKENS
+// if the command was not recognized.
+// Clears the string builder at the beginning of the function
+async_token_t parse_async_command(const char *command, StringBuilder *sb) {
+  async_token_t token = NUMBER_OF_ASYNC_COMMAND_TOKENS;
+  string_builder_clear(sb);
+  for (int i = 0; i < NUMBER_OF_ASYNC_COMMAND_TOKENS; i++) {
+    const char *token_to_eval_string = async_command_strings[i];
+    if (has_iprefix(command, token_to_eval_string)) {
+      if (token == NUMBER_OF_ASYNC_COMMAND_TOKENS) {
+        token = i;
+      } else if (string_builder_length(sb) == 0) {
+        string_builder_add_formatted_string(
+            sb, "ambiguous async command '%s' could be: %s, %s", command,
+            async_command_strings[token], token_to_eval_string);
+      } else {
+        string_builder_add_formatted_string(sb, ", %s", token_to_eval_string);
+      }
+    }
+  }
+  return token;
+}
+
 void *execute_async_input_worker(void *uncasted_args) {
   AsyncCommandInputArgs *args = (AsyncCommandInputArgs *)uncasted_args;
   Config *config = args->config;
   ThreadControl *thread_control = config_get_thread_control(config);
   ErrorStack *error_stack = error_stack_create();
+  StringBuilder *err_msg_sb = string_builder_create();
   char *input = NULL;
   while (thread_control_is_started(thread_control)) {
     int ret = poll(args->fds, 2, -1); // wait indefinitely
@@ -124,21 +157,35 @@ void *execute_async_input_worker(void *uncasted_args) {
       break;
     }
 
-    if (strings_iequal(input, STOP_COMMAND_STRING)) {
-      thread_control_set_status(thread_control,
-                                THREAD_CONTROL_STATUS_USER_INTERRUPT);
-      break;
-    } else {
-      error_stack_push(
-          error_stack, ERROR_STATUS_COMMAND_STILL_RUNNING,
-          string_duplicate(
-              "cannot execute a new command while the previous command "
-              "is still running, only the 'stop' command can be issued while a "
-              "command is running"));
+    async_token_t input_token = parse_async_command(input, err_msg_sb);
+    if (string_builder_length(err_msg_sb) > 0) {
+      error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_AMBIGUOUS_COMMAND,
+                       string_builder_dump(err_msg_sb, NULL));
       error_stack_print_and_reset(error_stack);
+    } else if (input_token == NUMBER_OF_ASYNC_COMMAND_TOKENS) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
+          get_formatted_string("unrecognized async command '%s'", input));
+      error_stack_print_and_reset(error_stack);
+    } else {
+      switch (input_token) {
+      case ASYNC_STOP_COMMAND_TOKEN:
+        thread_control_set_status(thread_control,
+                                  THREAD_CONTROL_STATUS_USER_INTERRUPT);
+        break;
+      case ASYNC_STATUS_COMMAND_TOKEN:;
+        char *status_str = config_get_execute_status(config);
+        thread_control_print(config_get_thread_control(config), status_str);
+        free(status_str);
+        break;
+      case NUMBER_OF_ASYNC_COMMAND_TOKENS:
+        log_fatal("found unexpected async command token");
+        break;
+      }
     }
   }
   free(input);
+  string_builder_destroy(err_msg_sb);
   error_stack_destroy(error_stack);
   return NULL;
 }
@@ -227,11 +274,12 @@ void sync_command_scan_loop(Config *config, ErrorStack *error_stack,
       continue;
     }
 
-    if (strings_iequal(QUIT_COMMAND_STRING, input)) {
+    if (strings_iequal("quit", input)) {
       break;
     }
 
-    if (strings_iequal(input, STOP_COMMAND_STRING)) {
+    if (strings_iequal(input,
+                       async_command_strings[ASYNC_STOP_COMMAND_TOKEN])) {
       error_stack_push(
           error_stack, ERROR_STATUS_COMMAND_NOTHING_TO_STOP,
           string_duplicate("no currently running command to stop"));
