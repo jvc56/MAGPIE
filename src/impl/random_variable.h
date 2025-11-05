@@ -31,6 +31,9 @@ typedef struct SimArgs {
   bool use_inference;
   InferenceResults *inference_results;
   InferenceArgs inference_args;
+  int num_threads;
+  int print_interval;
+  uint64_t seed;
   ThreadControl *thread_control;
   BAIOptions bai_options;
 } SimArgs;

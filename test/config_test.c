@@ -257,10 +257,6 @@ void test_config_load_success(void) {
   assert(config_get_plies(config) == plies);
   assert(config_get_max_iterations(config) == max_iterations);
   assert(within_epsilon(config_get_stop_cond_pct(config), 98));
-  assert(thread_control_get_threads(config_get_thread_control(config)) ==
-         number_of_threads);
-  assert(thread_control_get_print_info_interval(
-             config_get_thread_control(config)) == print_info);
   assert(config_get_use_game_pairs(config));
   assert(config_get_human_readable(config));
 
@@ -305,10 +301,6 @@ void test_config_load_success(void) {
   assert(config_get_plies(config) == plies);
   assert(config_get_max_iterations(config) == max_iterations);
   assert(within_epsilon(config_get_stop_cond_pct(config), 98));
-  assert(thread_control_get_threads(config_get_thread_control(config)) ==
-         number_of_threads);
-  assert(thread_control_get_print_info_interval(
-             config_get_thread_control(config)) == print_info);
   assert(!config_get_use_game_pairs(config));
   assert(!config_get_human_readable(config));
 

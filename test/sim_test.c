@@ -81,8 +81,9 @@ void test_sim_single_iteration(void) {
   error_code_t status = config_simulate_and_return_status(
       config, NULL, config_get_sim_results(config));
   assert(status == ERROR_STATUS_SUCCESS);
-  assert(thread_control_get_status(config_get_thread_control(config)) ==
-         THREAD_CONTROL_STATUS_SAMPLE_LIMIT);
+  assert(bai_result_get_status(
+             sim_results_get_bai_result(config_get_sim_results(config))) ==
+         BAI_RESULT_STATUS_SAMPLE_LIMIT);
   config_destroy(config);
 }
 
@@ -98,8 +99,9 @@ void test_more_iterations(void) {
   error_code_t status =
       config_simulate_and_return_status(config, NULL, sim_results);
   assert(status == ERROR_STATUS_SUCCESS);
-  assert(thread_control_get_status(config_get_thread_control(config)) ==
-         THREAD_CONTROL_STATUS_SAMPLE_LIMIT);
+  assert(bai_result_get_status(
+             sim_results_get_bai_result(config_get_sim_results(config))) ==
+         BAI_RESULT_STATUS_SAMPLE_LIMIT);
 
   const SimmedPlay *play = get_best_simmed_play(sim_results);
   StringBuilder *move_string_builder = string_builder_create();
@@ -162,8 +164,8 @@ void test_sim_threshold(void) {
   cpthread_join(thread);
 
   assert(status == ERROR_STATUS_SUCCESS);
-  assert(thread_control_get_status(config_get_thread_control(config)) ==
-         THREAD_CONTROL_STATUS_THRESHOLD);
+  assert(bai_result_get_status(sim_results_get_bai_result(
+             config_get_sim_results(config))) == BAI_RESULT_STATUS_THRESHOLD);
 
   const SimmedPlay *play = get_best_simmed_play(sim_results);
   StringBuilder *move_string_builder = string_builder_create();
@@ -206,8 +208,8 @@ void test_sim_time_limit(void) {
   cpthread_join(thread);
 
   assert(status == ERROR_STATUS_SUCCESS);
-  assert(thread_control_get_status(config_get_thread_control(config)) ==
-         THREAD_CONTROL_STATUS_TIMEOUT);
+  assert(bai_result_get_status(sim_results_get_bai_result(
+             config_get_sim_results(config))) == BAI_RESULT_STATUS_TIMEOUT);
   config_destroy(config);
 }
 
@@ -242,8 +244,9 @@ void test_sim_one_arm_remaining(void) {
   cpthread_join(thread);
 
   assert(status == ERROR_STATUS_SUCCESS);
-  assert(thread_control_get_status(config_get_thread_control(config)) ==
-         THREAD_CONTROL_STATUS_ONE_ARM_REMAINING);
+  assert(bai_result_get_status(
+             sim_results_get_bai_result(config_get_sim_results(config))) ==
+         BAI_RESULT_STATUS_ONE_ARM_REMAINING);
   config_destroy(config);
 }
 
@@ -276,8 +279,9 @@ void test_sim_round_robin_consistency(void) {
     error_code_t status =
         config_simulate_and_return_status(config, NULL, sim_results);
     assert(status == ERROR_STATUS_SUCCESS);
-    assert(thread_control_get_status(config_get_thread_control(config)) ==
-           THREAD_CONTROL_STATUS_SAMPLE_LIMIT);
+    assert(bai_result_get_status(
+               sim_results_get_bai_result(config_get_sim_results(config))) ==
+           BAI_RESULT_STATUS_SAMPLE_LIMIT);
 
     if (i != 0) {
       assert_sim_results_equal(sim_results_single_threaded, sim_results);
@@ -294,21 +298,20 @@ void test_sim_top_two_consistency(void) {
       "-iter 30 -scond 99 -seed 33 -sr tt");
   load_and_exec_config_or_die(config, "cgp " PARRODQ_CGP);
   load_and_exec_config_or_die(config, "gen");
-  ThreadControl *thread_control = config_get_thread_control(config);
 
   // Get the initial reference results.
   SimResults *expected_sim_results = config_get_sim_results(config);
   assert(config_simulate_and_return_status(
              config, NULL, expected_sim_results) == ERROR_STATUS_SUCCESS);
-  thread_control_status_t expected_exit_status =
-      thread_control_get_status(thread_control);
+  bai_result_status_t expected_exit_status = bai_result_get_status(
+      sim_results_get_bai_result(config_get_sim_results(config)));
 
   SimResults *actual_sim_results = sim_results_create();
   for (int i = 0; i < 2; i++) {
     assert(config_simulate_and_return_status(
                config, NULL, actual_sim_results) == ERROR_STATUS_SUCCESS);
-    thread_control_status_t actual_exit_status =
-        thread_control_get_status(thread_control);
+    bai_result_status_t actual_exit_status = bai_result_get_status(
+        sim_results_get_bai_result(config_get_sim_results(config)));
     assert(actual_exit_status == expected_exit_status);
     assert_sim_results_equal(expected_sim_results, actual_sim_results);
   }
@@ -334,8 +337,9 @@ void perf_test_multithread_sim(void) {
   error_code_t status =
       config_simulate_and_return_status(config, NULL, sim_results);
   assert(status == ERROR_STATUS_SUCCESS);
-  assert(thread_control_get_status(config_get_thread_control(config)) ==
-         THREAD_CONTROL_STATUS_SAMPLE_LIMIT);
+  assert(bai_result_get_status(
+             sim_results_get_bai_result(config_get_sim_results(config))) ==
+         BAI_RESULT_STATUS_SAMPLE_LIMIT);
   assert(sim_results_get_iteration_count(sim_results) == 2000);
 
   const SimmedPlay *play = get_best_simmed_play(sim_results);
@@ -393,8 +397,9 @@ void test_sim_with_and_without_inference_helper(
   error_code_t status =
       config_simulate_and_return_status(config, &known_opp_rack, sim_results);
   assert(status == ERROR_STATUS_SUCCESS);
-  assert(thread_control_get_status(config_get_thread_control(config)) ==
-         THREAD_CONTROL_STATUS_SAMPLE_LIMIT);
+  assert(bai_result_get_status(
+             sim_results_get_bai_result(config_get_sim_results(config))) ==
+         BAI_RESULT_STATUS_SAMPLE_LIMIT);
   string_builder_add_ucgi_move(
       sb, simmed_play_get_move(get_best_simmed_play(sim_results)),
       game_get_board(game), config_get_ld(config));
@@ -407,8 +412,9 @@ void test_sim_with_and_without_inference_helper(
   status =
       config_simulate_and_return_status(config, &known_opp_rack, sim_results);
   assert(status == ERROR_STATUS_SUCCESS);
-  assert(thread_control_get_status(config_get_thread_control(config)) ==
-         THREAD_CONTROL_STATUS_SAMPLE_LIMIT);
+  assert(bai_result_get_status(
+             sim_results_get_bai_result(config_get_sim_results(config))) ==
+         BAI_RESULT_STATUS_SAMPLE_LIMIT);
   string_builder_add_ucgi_move(
       sb, simmed_play_get_move(get_best_simmed_play(sim_results)),
       game_get_board(game), config_get_ld(config));
@@ -457,8 +463,9 @@ void test_play_similarity(void) {
   error_code_t status =
       config_simulate_and_return_status(config, NULL, sim_results);
   assert(status == ERROR_STATUS_SUCCESS);
-  assert(thread_control_get_status(config_get_thread_control(config)) ==
-         THREAD_CONTROL_STATUS_SAMPLE_LIMIT);
+  assert(bai_result_get_status(
+             sim_results_get_bai_result(config_get_sim_results(config))) ==
+         BAI_RESULT_STATUS_SAMPLE_LIMIT);
 
   // The BAI should have marked inferior plays in the same position as the best
   // play as epigons.
@@ -516,8 +523,9 @@ void test_similar_play_consistency(const int num_threads) {
   error_code_t status =
       config_simulate_and_return_status(config, NULL, sim_results);
   assert(status == ERROR_STATUS_SUCCESS);
-  assert(thread_control_get_status(config_get_thread_control(config)) ==
-         THREAD_CONTROL_STATUS_SAMPLE_LIMIT);
+  assert(bai_result_get_status(
+             sim_results_get_bai_result(config_get_sim_results(config))) ==
+         BAI_RESULT_STATUS_SAMPLE_LIMIT);
   const SimmedPlay *p1 = sim_results_get_simmed_play(sim_results, 0);
   const Move *m1 = simmed_play_get_move(p1);
   const SimmedPlay *p2 = sim_results_get_simmed_play(sim_results, 1);
@@ -645,7 +653,6 @@ void test_sim_perf(const char *sim_perf_iters) {
   }
   SimResults *sim_results = config_get_sim_results(config);
   const BAIResult *bai_result = sim_results_get_bai_result(sim_results);
-  ThreadControl *thread_control = config_get_thread_control(config);
   const char *sim_perf_filename = "sim_perf_stats.txt";
   const char *sim_perf_game_details_filename = "sim_perf_game_details.txt";
   if (remove(sim_perf_game_details_filename) != 0 && errno != ENOENT) {
@@ -665,10 +672,9 @@ void test_sim_perf(const char *sim_perf_iters) {
     }
     for (int j = 0; j < num_strategies; j++) {
       char *set_strategies_cmd =
-          get_formatted_string("set %s -wmp true", strategies[j]);
+          get_formatted_string("set %s -wmp true -seed %d", strategies[j], i);
       load_and_exec_config_or_die(config, set_strategies_cmd);
       free(set_strategies_cmd);
-      thread_control_set_seed(thread_control, i);
       if (i < details_limit) {
         append_content_to_file(sim_perf_game_details_filename, strategies[j]);
       }
@@ -679,7 +685,8 @@ void test_sim_perf(const char *sim_perf_iters) {
       char *sim_stats_str =
           ucgi_sim_stats(game, sim_results,
                          (double)sim_results_get_node_count(sim_results) /
-                             thread_control_get_seconds_elapsed(thread_control),
+                             bai_result_get_elapsed_seconds(
+                                 sim_results_get_bai_result(sim_results)),
                          false);
       if (i < details_limit) {
         append_content_to_file(sim_perf_game_details_filename, sim_stats_str);
@@ -687,7 +694,7 @@ void test_sim_perf(const char *sim_perf_iters) {
       free(sim_stats_str);
       sim_strategy_stats_stage(
           stats, j, (int)sim_results_get_iteration_count(sim_results),
-          bai_result_get_total_time(bai_result));
+          bai_result_get_elapsed_seconds(bai_result));
     }
     for (int j = 0; j < num_strategies; j++) {
       sim_strategy_stats_commit(stats, j);
@@ -716,8 +723,9 @@ void test_sim_one_ply(void) {
   error_code_t status =
       config_simulate_and_return_status(config, NULL, sim_results);
   assert(status == ERROR_STATUS_SUCCESS);
-  assert(thread_control_get_status(config_get_thread_control(config)) ==
-         THREAD_CONTROL_STATUS_SAMPLE_LIMIT);
+  assert(bai_result_get_status(
+             sim_results_get_bai_result(config_get_sim_results(config))) ==
+         BAI_RESULT_STATUS_SAMPLE_LIMIT);
 
   const SimmedPlay *play = get_best_simmed_play(sim_results);
   StringBuilder *move_string_builder = string_builder_create();

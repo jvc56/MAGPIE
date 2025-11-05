@@ -24,6 +24,7 @@ typedef struct BAIOptions {
   int sample_limit;
   int sample_minimum;
   int time_limit_seconds;
+  int num_threads;
 } BAIOptions;
 
 #endif

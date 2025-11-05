@@ -136,7 +136,8 @@ void *execute_async_input_worker(void *uncasted_args) {
   ErrorStack *error_stack = error_stack_create();
   StringBuilder *err_msg_sb = string_builder_create();
   char *input = NULL;
-  while (thread_control_is_started(thread_control)) {
+  while (thread_control_get_status(thread_control) ==
+         THREAD_CONTROL_STATUS_STARTED) {
     int ret = poll(args->fds, 2, -1); // wait indefinitely
     if (ret == -1) {
       perror("poll");
@@ -218,9 +219,11 @@ void execute_command_async(Config *config, ErrorStack *error_stack,
   cpthread_create(&cmd_input_thread, execute_async_input_worker, &async_args);
 
   ThreadControl *thread_control = config_get_thread_control(config);
-  while (thread_control_is_started(thread_control)) {
+  while (thread_control_get_status(thread_control) ==
+         THREAD_CONTROL_STATUS_STARTED) {
     thread_control_wait_for_status_change(thread_control);
-    if (thread_control_status_is_finished(thread_control)) {
+    if (thread_control_get_status(thread_control) ==
+        THREAD_CONTROL_STATUS_FINISHED) {
       if (write(pipefds[1], "x", 1) == -1) {
         log_fatal("failed to write to async command input pipe");
       }

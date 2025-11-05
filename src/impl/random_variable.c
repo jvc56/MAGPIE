@@ -1,6 +1,7 @@
 #include "random_variable.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
 #include "../def/game_defs.h"
 #include "../def/rack_defs.h"
@@ -346,6 +347,8 @@ typedef struct Simmer {
   bool use_inference;
   bool use_alias_method;
   const InferenceResults *inference_results;
+  int num_threads;
+  int print_interval;
   ThreadControl *thread_control;
   SimResults *sim_results;
 } Simmer;
@@ -480,13 +483,13 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   game_unplay_last_move(game);
   return_rack_to_bag(game, player_off_turn_index);
 
-  const int print_interval =
-      thread_control_get_print_info_interval(simmer->thread_control);
-  if (print_interval > 0 && sample_count % print_interval == 0) {
+  if (simmer->print_interval > 0 &&
+      sample_count % simmer->print_interval == 0) {
     print_ucgi_sim_stats(
         simmer_worker->game, simmer->sim_results, simmer->thread_control,
         (double)sim_results_get_node_count(simmer->sim_results) /
-            thread_control_get_seconds_elapsed(simmer->thread_control),
+            bai_result_get_elapsed_seconds(
+                sim_results_get_bai_result(simmer->sim_results)),
         false);
   }
 
@@ -513,8 +516,8 @@ bool rv_sim_is_epigon(const RandomVariables *rvs, const int i) {
 void rv_sim_destroy(RandomVariables *rvs) {
   Simmer *simmer = (Simmer *)rvs->data;
   rack_destroy(simmer->known_opp_rack);
-  const int num_threads = thread_control_get_threads(simmer->thread_control);
-  for (int thread_index = 0; thread_index < num_threads; thread_index++) {
+  for (int thread_index = 0; thread_index < simmer->num_threads;
+       thread_index++) {
     simmer_worker_destroy(simmer->workers[thread_index]);
   }
   free(simmer->workers);
@@ -551,9 +554,13 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
 
   simmer->dist_size = ld_get_size(game_get_ld(sim_args->game));
 
-  const int num_threads = thread_control_get_threads(thread_control);
-  simmer->workers = malloc_or_die((sizeof(SimmerWorker *)) * (num_threads));
-  for (int thread_index = 0; thread_index < num_threads; thread_index++) {
+  simmer->num_threads = sim_args->num_threads;
+  simmer->print_interval = sim_args->print_interval;
+
+  simmer->workers =
+      malloc_or_die((sizeof(SimmerWorker *)) * (simmer->num_threads));
+  for (int thread_index = 0; thread_index < simmer->num_threads;
+       thread_index++) {
     simmer->workers[thread_index] = simmer_create_worker(sim_args->game);
   }
 
@@ -567,7 +574,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->thread_control = thread_control;
 
   sim_results_reset(sim_args->move_list, sim_results, sim_args->num_plies,
-                    thread_control_get_seed(thread_control));
+                    sim_args->seed);
   simmer->sim_results = sim_results;
 
   rvs->data = simmer;

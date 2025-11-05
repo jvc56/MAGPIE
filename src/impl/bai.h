@@ -54,9 +54,11 @@ typedef struct BAISyncData {
   RandomVariables *rng;
   cpthread_mutex_t mutex;
   ThreadControl *thread_control;
+  BAIResult *bai_result;
 } BAISyncData;
 
-static inline BAISyncData *bai_sync_data_create(ThreadControl *thread_control,
+static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
+                                                ThreadControl *thread_control,
                                                 const int num_initial_arms,
                                                 RandomVariables *rng) {
   BAISyncData *bai_sync_data = malloc_or_die(sizeof(BAISyncData));
@@ -76,6 +78,7 @@ static inline BAISyncData *bai_sync_data_create(ThreadControl *thread_control,
   bai_sync_data->rng = rng;
   cpthread_mutex_init(&bai_sync_data->mutex);
   bai_sync_data->thread_control = thread_control;
+  bai_sync_data->bai_result = bai_result;
   return bai_sync_data;
 }
 
@@ -146,8 +149,8 @@ static inline int
 bai_sync_data_get_next_bai_sample_index_while_locked(BAISampleArgs *args) {
   if (bai_sync_data_sample_limit_reached(args->bai_sync_data,
                                          args->sample_limit)) {
-    thread_control_set_status(args->bai_sync_data->thread_control,
-                              THREAD_CONTROL_STATUS_SAMPLE_LIMIT);
+    bai_result_set_status(args->bai_sync_data->bai_result,
+                          BAI_RESULT_STATUS_SAMPLE_LIMIT);
     return -1;
   }
   int arm_index;
@@ -285,8 +288,8 @@ static inline void bai_update_threshold_and_challenger(
   }
   if (!bai_sync_data->initial_phase &&
       num_arms_at_threshold == bai_sync_data->num_arms) {
-    thread_control_set_status(bai_sync_data->thread_control,
-                              THREAD_CONTROL_STATUS_THRESHOLD);
+    bai_result_set_status(bai_sync_data->bai_result,
+                          BAI_RESULT_STATUS_THRESHOLD);
   }
 }
 
@@ -341,7 +344,6 @@ static inline void bai_sync_data_add_sample(BAISampleArgs *args,
 }
 
 typedef struct BAIWorkerArgs {
-  ThreadControl *thread_control;
   BAISyncData *sync_data;
   RandomVariables *rvs;
   const BAIOptions *bai_options;
@@ -350,18 +352,26 @@ typedef struct BAIWorkerArgs {
   int thread_index;
 } BAIWorkerArgs;
 
+static inline bool bai_should_stop(BAIResult *bai_result,
+                                   ThreadControl *thread_control) {
+  return bai_result_get_status(bai_result) != BAI_RESULT_STATUS_NONE ||
+         thread_control_get_status(thread_control) ==
+             THREAD_CONTROL_STATUS_USER_INTERRUPT;
+}
+
 static inline void bai_cull_epigons(void *uncasted_bai_worker_args) {
   BAIWorkerArgs *bai_worker_args = (BAIWorkerArgs *)uncasted_bai_worker_args;
   BAISyncData *bai_sync_data = bai_worker_args->sync_data;
   bai_sync_data->initial_phase = false;
-  if (thread_control_is_winding_down(bai_worker_args->thread_control)) {
+  if (bai_should_stop(bai_sync_data->bai_result,
+                      bai_worker_args->sync_data->thread_control)) {
     return;
   }
   assert(bai_sync_data->astar_index != -1);
   if (bai_sync_data_sample_limit_reached(
           bai_sync_data, bai_worker_args->bai_options->sample_limit)) {
-    thread_control_set_status(bai_worker_args->thread_control,
-                              THREAD_CONTROL_STATUS_SAMPLE_LIMIT);
+    bai_result_set_status(bai_sync_data->bai_result,
+                          BAI_RESULT_STATUS_SAMPLE_LIMIT);
     return;
   }
   RandomVariables *rvs = bai_worker_args->rvs;
@@ -388,8 +398,8 @@ static inline void bai_cull_epigons(void *uncasted_bai_worker_args) {
     }
   }
   if (num_epigons == bai_sync_data->num_arms - 1) {
-    thread_control_set_status(bai_worker_args->thread_control,
-                              THREAD_CONTROL_STATUS_ONE_ARM_REMAINING);
+    bai_result_set_status(bai_sync_data->bai_result,
+                          BAI_RESULT_STATUS_ONE_ARM_REMAINING);
     return;
   }
   assert(!bai_sync_data->arm_data[bai_sync_data->astar_index].is_epigon);
@@ -401,7 +411,7 @@ static inline void bai_cull_epigons(void *uncasted_bai_worker_args) {
 
 static inline void bai_worker_sample_loop(BAIWorkerArgs *bai_worker_args) {
   BAISyncData *sync_data = bai_worker_args->sync_data;
-  ThreadControl *thread_control = bai_worker_args->thread_control;
+  ThreadControl *thread_control = bai_worker_args->sync_data->thread_control;
   const BAIOptions *bai_options = bai_worker_args->bai_options;
   RandomVariables *rvs = bai_worker_args->rvs;
   const int thread_index = bai_worker_args->thread_index;
@@ -415,13 +425,7 @@ static inline void bai_worker_sample_loop(BAIWorkerArgs *bai_worker_args) {
       .threshold = bai_options->threshold,
   };
 
-  while (!thread_control_is_winding_down(thread_control)) {
-    if (bai_options->time_limit_seconds > 0 &&
-        thread_control_get_seconds_elapsed(thread_control) >=
-            bai_options->time_limit_seconds) {
-      thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_TIMEOUT);
-      break;
-    }
+  while (!bai_should_stop(sync_data->bai_result, thread_control)) {
     const int arm_index = bai_sync_data_get_next_sample_index(&sample_args);
     if (arm_index < 0) {
       break;
@@ -445,18 +449,15 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
                        RandomVariables *rng, ThreadControl *thread_control,
                        BAILogger *bai_logger, BAIResult *bai_result) {
   rvs_reset(rvs);
-  bai_result_reset(bai_result);
-
-  const int number_of_threads = thread_control_get_threads(thread_control);
+  bai_result_reset(bai_result, bai_options->time_limit_seconds);
 
   Checkpoint *checkpoint =
-      checkpoint_create(number_of_threads, bai_cull_epigons);
+      checkpoint_create(bai_options->num_threads, bai_cull_epigons);
 
-  BAISyncData *sync_data =
-      bai_sync_data_create(thread_control, (int)rvs_get_num_rvs(rvs), rng);
+  BAISyncData *sync_data = bai_sync_data_create(bai_result, thread_control,
+                                                (int)rvs_get_num_rvs(rvs), rng);
 
   BAIWorkerArgs bai_worker_args = {
-      .thread_control = thread_control,
       .sync_data = sync_data,
       .rvs = rvs,
       .bai_options = bai_options,
@@ -465,20 +466,21 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   };
 
   cpthread_t *worker_ids =
-      malloc_or_die((sizeof(cpthread_t)) * number_of_threads);
+      malloc_or_die((sizeof(cpthread_t)) * bai_options->num_threads);
   BAIWorkerArgs *bai_worker_args_array =
-      malloc_or_die((sizeof(BAIWorkerArgs)) * number_of_threads);
-  for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
+      malloc_or_die((sizeof(BAIWorkerArgs)) * bai_options->num_threads);
+  for (int thread_index = 0; thread_index < bai_options->num_threads;
+       thread_index++) {
     bai_worker_args_array[thread_index] = bai_worker_args;
     bai_worker_args_array[thread_index].thread_index = thread_index;
     cpthread_create(&worker_ids[thread_index], bai_worker,
                     &bai_worker_args_array[thread_index]);
   }
-  for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
+  for (int thread_index = 0; thread_index < bai_options->num_threads;
+       thread_index++) {
     cpthread_join(worker_ids[thread_index]);
   }
-  bai_result_set_all(bai_result, sync_data->astar_index,
-                     thread_control_get_seconds_elapsed(thread_control));
+  bai_result_set_best_arm(bai_result, sync_data->astar_index);
   free(bai_worker_args_array);
   free(worker_ids);
   bai_sync_data_destroy(sync_data);

@@ -48,7 +48,7 @@ void assert_num_epigons(const RandomVariables *rvs,
 void bai_wrapper(const BAIOptions *bai_options, RandomVariables *rvs,
                  RandomVariables *rng, ThreadControl *thread_control,
                  BAILogger *bai_logger, BAIResult *bai_result) {
-  set_thread_control_status_to_start(thread_control);
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
   bai(bai_options, rvs, rng, thread_control, bai_logger, bai_result);
 }
 
@@ -77,14 +77,13 @@ void test_bai_top_two(int num_threads) {
       .sample_minimum = 50,
       .sample_limit = 200,
       .time_limit_seconds = 0,
+      .num_threads = num_threads,
   };
 
   ThreadControl *thread_control = thread_control_create();
-  thread_control_set_threads(thread_control, num_threads);
   BAIResult *bai_result = bai_result_create();
   bai_wrapper(&bai_options, rvs, rng, thread_control, NULL, bai_result);
-  assert(thread_control_get_status(thread_control) ==
-         THREAD_CONTROL_STATUS_THRESHOLD);
+  assert(bai_result_get_status(bai_result) == BAI_RESULT_STATUS_THRESHOLD);
   assert(bai_result_get_best_arm(bai_result) == 1);
   thread_control_destroy(thread_control);
   bai_result_destroy(bai_result);
@@ -116,15 +115,14 @@ void test_bai_sample_limit(int num_threads) {
       .sample_minimum = 37,
       .sample_limit = 200,
       .time_limit_seconds = 0,
+      .num_threads = num_threads,
   };
   ThreadControl *thread_control = thread_control_create();
-  thread_control_set_threads(thread_control, num_threads);
   BAIResult *bai_result = bai_result_create();
   for (int i = 0; i < num_sampling_rules; i++) {
     bai_options.sampling_rule = sampling_rules[i];
     bai_wrapper(&bai_options, rvs, rng, thread_control, NULL, bai_result);
-    assert(thread_control_get_status(thread_control) ==
-           THREAD_CONTROL_STATUS_SAMPLE_LIMIT);
+    assert(bai_result_get_status(bai_result) == BAI_RESULT_STATUS_SAMPLE_LIMIT);
     assert(bai_result_get_best_arm(bai_result) == 1);
     int expected_num_samples = bai_options.sample_limit;
     if (expected_num_samples < num_rvs * bai_options.sample_minimum) {
@@ -188,10 +186,10 @@ void test_bai_time_limit(int num_threads) {
       .sample_minimum = 50,
       .sample_limit = 100000000,
       .time_limit_seconds = 2,
+      .num_threads = num_threads,
   };
 
   ThreadControl *thread_control = thread_control_create();
-  thread_control_set_threads(thread_control, num_threads);
   BAIResult *bai_result = bai_result_create();
   int done = 0;
 
@@ -214,8 +212,7 @@ void test_bai_time_limit(int num_threads) {
   cpthread_cond_timedwait_loop(&cond, &mutex, 10, &done);
   cpthread_join(thread);
 
-  assert(thread_control_get_status(thread_control) ==
-         THREAD_CONTROL_STATUS_TIMEOUT);
+  assert(bai_result_get_status(bai_result) == BAI_RESULT_STATUS_TIMEOUT);
 
   bai_result_destroy(bai_result);
   thread_control_destroy(thread_control);
@@ -266,17 +263,16 @@ void test_bai_epigons(int num_threads) {
       .sample_minimum = 50,
       .sample_limit = num_samples,
       .time_limit_seconds = 0,
+      .num_threads = num_threads,
   };
 
   ThreadControl *thread_control = thread_control_create();
-  thread_control_set_threads(thread_control, num_threads);
   BAIResult *bai_result = bai_result_create();
 
   for (int max_classes = 1; max_classes <= 3; max_classes++) {
-    thread_control_status_t expected_exit_status =
-        THREAD_CONTROL_STATUS_THRESHOLD;
+    bai_result_status_t expected_exit_status = BAI_RESULT_STATUS_THRESHOLD;
     if (max_classes == 1) {
-      expected_exit_status = THREAD_CONTROL_STATUS_ONE_ARM_REMAINING;
+      expected_exit_status = BAI_RESULT_STATUS_ONE_ARM_REMAINING;
     }
     for (int num_rvs = 2; num_rvs <= 10; num_rvs++) {
       double *means_and_vars =
@@ -306,8 +302,7 @@ void test_bai_epigons(int num_threads) {
         bai_logger_flush(bai_logger);
         bai_logger_destroy(bai_logger);
         assert(bai_result_get_best_arm(bai_result) % max_classes == 0);
-        assert(thread_control_get_status(thread_control) ==
-               expected_exit_status);
+        assert(bai_result_get_status(bai_result) == expected_exit_status);
         assert_num_epigons(rvs, expected_epigons);
         rvs_destroy(rvs);
         rvs_destroy(rng);
@@ -381,6 +376,7 @@ void test_bai_from_seed(const char *bai_seed) {
       .sample_minimum = 50,
       .sample_limit = 100000,
       .time_limit_seconds = 0,
+      .num_threads = 1,
   };
   ThreadControl *thread_control = thread_control_create();
   BAIResult *bai_result = bai_result_create();

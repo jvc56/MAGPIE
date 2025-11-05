@@ -57,6 +57,8 @@ typedef struct Inference {
   Equity equity_margin;
   uint64_t current_rack_index;
   uint64_t total_racks_evaluated;
+  int num_threads;
+  int print_interval;
   int thread_index;
   uint64_t *shared_rack_index;
   cpthread_mutex_t *shared_rack_index_lock;
@@ -228,24 +230,21 @@ void decrement_letter_for_inference(Inference *inference,
   rack_take_letter(inference->current_target_leave, letter);
 }
 
-Inference *
-inference_create(const Rack *target_played_tiles, const Rack *target_known_rack,
-                 Game *game, int move_capacity, int target_index,
-                 Equity target_score, int target_number_of_tiles_exchanged,
-                 Equity equity_margin, const Rack *nontarget_known_rack,
-                 InferenceResults *results) {
+Inference *inference_create(Game *game, const InferenceArgs *args,
+                            InferenceResults *results) {
   Inference *inference = malloc_or_die(sizeof(Inference));
   inference->game = game;
-  inference->klv = player_get_klv(game_get_player(game, target_index));
-  inference->ld_size = rack_get_dist_size(target_played_tiles);
-  inference->move_capacity = move_capacity;
-  inference->target_index = target_index;
-  inference->target_score = target_score;
-  inference->target_number_of_tiles_exchanged =
-      target_number_of_tiles_exchanged;
-  inference->equity_margin = equity_margin;
+  inference->klv = player_get_klv(game_get_player(game, args->target_index));
+  inference->ld_size = rack_get_dist_size(args->target_played_tiles);
+  inference->move_capacity = args->move_capacity;
+  inference->target_index = args->target_index;
+  inference->target_score = args->target_score;
+  inference->target_number_of_tiles_exchanged = args->target_num_exch;
+  inference->equity_margin = args->equity_margin;
   inference->current_rack_index = 0;
   inference->total_racks_evaluated = 0;
+  inference->num_threads = args->num_threads;
+  inference->print_interval = args->print_interval;
   // thread index is only meaningful for
   // duplicated inferences used in multithreading
   inference->thread_index = -1;
@@ -259,7 +258,7 @@ inference_create(const Rack *target_played_tiles, const Rack *target_known_rack,
   inference->current_target_leave = rack_create(inference->ld_size);
   inference->current_target_exchanged = rack_create(inference->ld_size);
   inference->current_target_rack =
-      player_get_rack(game_get_player(game, target_index));
+      player_get_rack(game_get_player(game, args->target_index));
   inference->bag_as_rack = rack_create(inference->ld_size);
 
   inference_results_reset(results, inference->move_capacity,
@@ -274,19 +273,20 @@ inference_create(const Rack *target_played_tiles, const Rack *target_known_rack,
   Rack temp_target_rack;
   rack_set_dist_size_and_reset(&temp_target_rack, inference->ld_size);
 
-  rack_union(&temp_target_rack, target_played_tiles);
-  rack_union(&temp_target_rack, target_known_rack);
+  rack_union(&temp_target_rack, args->target_played_tiles);
+  rack_union(&temp_target_rack, args->target_known_rack);
 
-  bool success = draw_rack_from_bag(game, target_index, &temp_target_rack);
+  bool success =
+      draw_rack_from_bag(game, args->target_index, &temp_target_rack);
   if (!success) {
     const LetterDistribution *ld = game_get_ld(game);
     StringBuilder *sb = string_builder_create();
     string_builder_add_string(sb, "failed to draw combined (");
     string_builder_add_rack(sb, &temp_target_rack, ld, false);
     string_builder_add_string(sb, ") inferred player played letters (");
-    string_builder_add_rack(sb, target_played_tiles, ld, false);
+    string_builder_add_rack(sb, args->target_played_tiles, ld, false);
     string_builder_add_string(sb, ") and inferred player known rack (");
-    string_builder_add_rack(sb, target_known_rack, ld, false);
+    string_builder_add_rack(sb, args->target_known_rack, ld, false);
     string_builder_add_string(sb, ") from the bag");
     char *err_msg = string_builder_dump(sb, NULL);
     string_builder_destroy(sb);
@@ -294,13 +294,14 @@ inference_create(const Rack *target_played_tiles, const Rack *target_known_rack,
     free(err_msg);
   }
 
-  success = draw_rack_from_bag(game, 1 - target_index, nontarget_known_rack);
+  success = draw_rack_from_bag(game, 1 - args->target_index,
+                               args->nontarget_known_rack);
 
   if (!success) {
     const LetterDistribution *ld = game_get_ld(game);
     StringBuilder *sb = string_builder_create();
     string_builder_add_string(sb, "failed to draw nontarget player rack (");
-    string_builder_add_rack(sb, nontarget_known_rack, ld, false);
+    string_builder_add_rack(sb, args->nontarget_known_rack, ld, false);
     string_builder_add_string(sb, ") from the bag");
     char *err_msg = string_builder_dump(sb, NULL);
     string_builder_destroy(sb);
@@ -310,9 +311,9 @@ inference_create(const Rack *target_played_tiles, const Rack *target_known_rack,
 
   // Add the letters that are known to have been kept on the rack
   // for their target inferred play.
-  rack_copy(inference->current_target_leave, target_known_rack);
+  rack_copy(inference->current_target_leave, args->target_known_rack);
   rack_subtract_using_floor_zero(inference->current_target_leave,
-                                 target_played_tiles);
+                                 args->target_played_tiles);
 
   // Set the bag_as_rack to the bag
   const Bag *bag = game_get_bag(game);
@@ -358,6 +359,8 @@ Inference *inference_duplicate(const Inference *inference, int thread_index,
                           new_inference->ld_size);
 
   // Multithreading
+  new_inference->num_threads = inference->num_threads;
+  new_inference->print_interval = inference->print_interval;
   new_inference->thread_control = thread_control;
   new_inference->thread_index = thread_index;
 
@@ -397,15 +400,14 @@ void get_total_racks_evaluated(Inference *inference, int tiles_to_infer,
 }
 
 bool should_print_info(const Inference *inference) {
-  int print_info_interval =
-      thread_control_get_print_info_interval(inference->thread_control);
-  return print_info_interval > 0 && inference->current_rack_index > 0 &&
-         inference->current_rack_index % print_info_interval == 0;
+  return inference->print_interval > 0 && inference->current_rack_index > 0 &&
+         inference->current_rack_index % inference->print_interval == 0;
 }
 
 void iterate_through_all_possible_leaves(Inference *inference,
                                          int tiles_to_infer, int start_letter) {
-  if (thread_control_is_winding_down(inference->thread_control)) {
+  if (thread_control_get_status(inference->thread_control) ==
+      THREAD_CONTROL_STATUS_USER_INTERRUPT) {
     return;
   }
   if (tiles_to_infer == 0) {
@@ -456,8 +458,7 @@ void set_shared_variables_for_inference(
   inference->shared_rack_index_lock = shared_rack_index_lock;
 }
 
-void infer_manager(ThreadControl *thread_control, Inference *inference,
-                   bool update_thread_control_status) {
+void infer_manager(ThreadControl *thread_control, Inference *inference) {
   uint64_t total_racks_evaluated = 0;
 
   get_total_racks_evaluated(
@@ -469,12 +470,12 @@ void infer_manager(ThreadControl *thread_control, Inference *inference,
   print_ucgi_inference_total_racks_evaluated(total_racks_evaluated,
                                              thread_control);
 
-  int number_of_threads = thread_control_get_threads(thread_control);
-
   uint64_t shared_rack_index = 0;
   cpthread_mutex_t shared_rack_index_lock;
 
   cpthread_mutex_init(&shared_rack_index_lock);
+
+  const int number_of_threads = inference->num_threads;
 
   Inference **inferences_for_workers =
       malloc_or_die((sizeof(Inference *)) * (number_of_threads));
@@ -515,13 +516,6 @@ void infer_manager(ThreadControl *thread_control, Inference *inference,
       rack_stats[thread_index] = inference_results_get_equity_values(
           inference_worker->results, INFERENCE_TYPE_RACK);
     }
-  }
-
-  // Infer was able to finish normally, which is when it
-  // iterates through every rack
-  if (update_thread_control_status) {
-    thread_control_set_status(thread_control,
-                              THREAD_CONTROL_STATUS_MAX_ITERATIONS);
   }
 
   stats_combine(leave_stats, number_of_threads,
@@ -737,26 +731,17 @@ void infer_with_game_duplicate(InferenceArgs *args, Game *game_dup,
     return;
   }
 
-  Inference *inference = inference_create(
-      args->target_played_tiles, args->target_known_rack, game_dup,
-      args->move_capacity, args->target_index, args->target_score,
-      args->target_num_exch, args->equity_margin, args->nontarget_known_rack,
-      results);
+  Inference *inference = inference_create(game_dup, args, results);
 
-  infer_manager(args->thread_control, inference,
-                args->update_thread_control_status);
+  infer_manager(args->thread_control, inference);
 
   inference_results_finalize(
       args->target_played_tiles, inference->current_target_leave,
       inference->bag_as_rack, inference->results, inference->target_score,
       inference->target_number_of_tiles_exchanged, inference->equity_margin);
 
-  if (thread_control_get_status(args->thread_control) ==
-      THREAD_CONTROL_STATUS_MAX_ITERATIONS) {
-    // Only print if infer was able to finish normally and the thread control
-    // status was updated. If thread_control_set_status status isn't max
-    // iterations, it was interrupted by the user or it is part of a simulation
-    // and the results should not be printed.
+  if (thread_control_get_status(args->thread_control) !=
+      THREAD_CONTROL_STATUS_USER_INTERRUPT) {
     print_ucgi_inference(game_get_ld(inference->game), inference->results,
                          args->thread_control);
   }

@@ -102,18 +102,10 @@ uint64_t string_to_cross_set(const LetterDistribution *ld,
   return c;
 }
 
-void set_thread_control_status_to_start(ThreadControl *thread_control) {
-  if (!thread_control_is_ready_for_new_command(thread_control)) {
-    thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_FINISHED);
-  }
-  if (!thread_control_is_started(thread_control)) {
-    thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
-  }
-}
-
 void load_and_exec_config_or_die(Config *config, const char *cmd) {
   ErrorStack *error_stack = error_stack_create();
-  set_thread_control_status_to_start(config_get_thread_control(config));
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
   config_load_command(config, cmd, error_stack);
   error_code_t status = error_stack_top(error_stack);
   if (status != ERROR_STATUS_SUCCESS) {
@@ -127,8 +119,7 @@ void load_and_exec_config_or_die(Config *config, const char *cmd) {
   }
   error_stack_destroy(error_stack);
   printf("loaded config with command: %s\n", cmd);
-  printf("seed: %" PRIu64 "\n",
-         thread_control_get_seed(config_get_thread_control(config)));
+  printf("seed: %" PRIu64 "\n", config_get_seed(config));
 }
 
 void timeout_handler(int __attribute__((unused)) signum) {
@@ -790,7 +781,8 @@ error_code_t config_simulate_and_return_status(const Config *config,
                                                Rack *known_opp_rack,
                                                SimResults *sim_results) {
   ErrorStack *error_stack = error_stack_create();
-  set_thread_control_status_to_start(config_get_thread_control(config));
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
   config_simulate(config, known_opp_rack, sim_results, error_stack);
   error_code_t status = error_stack_top(error_stack);
   if (status != ERROR_STATUS_SUCCESS) {
@@ -1109,7 +1101,8 @@ void load_game_history_with_gcg(Config *config, const char *gcg_file) {
 void assert_config_exec_status(Config *config, const char *cmd,
                                error_code_t expected_error_code) {
   ErrorStack *error_stack = error_stack_create();
-  set_thread_control_status_to_start(config_get_thread_control(config));
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
   config_load_command(config, cmd, error_stack);
   error_code_t load_status = error_stack_top(error_stack);
 

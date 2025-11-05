@@ -50,10 +50,9 @@ bool thread_control_set_status(ThreadControl *thread_control,
   bool success = false;
   cpthread_mutex_lock(&thread_control->status_mutex);
   const thread_control_status_t old_status = thread_control->status;
-  thread_control_verify_state_change(old_status, new_status);
   // Only set the status to some specific exit reason if it is not already set
   // to some other winding down reason.
-  if (!thread_control_is_noop_state_change(old_status, new_status)) {
+  if (new_status != old_status) {
     thread_control->status = new_status;
     success = true;
     // Reset the thread control

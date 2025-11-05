@@ -68,7 +68,8 @@ error_code_t infer_for_test(const Config *config, int target_index,
   }
 
   ErrorStack *error_stack = error_stack_create();
-  set_thread_control_status_to_start(config_get_thread_control(config));
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
   config_infer(config, false, target_index, int_to_equity(target_score),
                target_num_exch, &target_played_tiles, &target_known_rack,
                &nontarget_known_rack, inference_results, error_stack);
@@ -94,7 +95,8 @@ error_code_t infer_for_test_with_history(const Config *config,
   Rack nontarget_known_rack;
   rack_set_dist_size_and_reset(&nontarget_known_rack, ld_size);
   ErrorStack *error_stack = error_stack_create();
-  set_thread_control_status_to_start(config_get_thread_control(config));
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
   GameHistory *game_history = config_get_game_history(config);
   if (game_history_get_num_events(game_history) != 0) {
     game_history_goto(game_history, num_events_to_play, error_stack);

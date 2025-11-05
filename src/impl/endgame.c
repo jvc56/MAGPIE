@@ -160,7 +160,7 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   dictionary_word_list_destroy(possible_word_list);
 
   // later, when we have multi-threaded endgame:
-  // es->threads = thread_control_get_threads(tc);
+  // es->threads =endgame_args->num_threads;
   es->thread_control = endgame_args->thread_control;
   es->game = endgame_args->game;
   if (endgame_args->tt_fraction_of_mem == 0) {
