@@ -220,7 +220,7 @@ void execute_command_async(Config *config, ErrorStack *error_stack,
   ThreadControl *thread_control = config_get_thread_control(config);
   while (thread_control_is_started(thread_control)) {
     thread_control_wait_for_status_change(thread_control);
-    if (thread_control_is_finished(thread_control)) {
+    if (thread_control_status_is_finished(thread_control)) {
       if (write(pipefds[1], "x", 1) == -1) {
         log_fatal("failed to write to async command input pipe");
       }

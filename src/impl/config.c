@@ -669,7 +669,7 @@ char *get_status_running_str(const Config *config) {
 
 char *status_generic(Config *config) {
   char *status_str = NULL;
-  if (thread_control_is_finished(config->thread_control)) {
+  if (thread_control_status_is_finished(config->thread_control)) {
     status_str = get_status_finished_str(config);
   } else {
     status_str = get_status_running_str(config);

@@ -132,7 +132,7 @@ void block_for_search(const Config *config, int max_seconds) {
   double seconds_elapsed = 0;
   ThreadControl *thread_control = config_get_thread_control(config);
   while (true) {
-    if (thread_control_is_finished(thread_control)) {
+    if (thread_control_status_is_finished(thread_control)) {
       break;
     }
     ctime_nap(DEFAULT_NAP_TIME);
