@@ -139,6 +139,8 @@ typedef enum {
   ARG_TOKEN_ON_TURN_COLOR,
   ARG_TOKEN_ON_TURN_SCORE_STYLE,
   ARG_TOKEN_PRETTY,
+  ARG_TOKEN_PRINT_ON_FINISH,
+  ARG_TOKEN_SHOW_PROMPT,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -181,6 +183,8 @@ struct Config {
   bool use_small_plays;
   bool sim_with_inference;
   bool print_boards;
+  bool print_on_finish;
+  bool show_prompt;
   char *record_filepath;
   double tt_fraction_of_mem;
   int time_limit_seconds;
@@ -357,6 +361,10 @@ bool config_get_use_small_plays(const Config *config) {
 
 bool config_get_human_readable(const Config *config) {
   return config->human_readable;
+}
+
+bool config_get_show_prompt(const Config *config) {
+  return config->show_prompt;
 }
 
 PlayersData *config_get_players_data(const Config *config) {
@@ -2623,19 +2631,37 @@ void config_load_parsed_args(Config *config,
         arg_name = input_str;
       }
 
+      bool parg_has_prefix[NUMBER_OF_ARG_TOKENS] = {false};
+      bool ambiguous_arg_name = false;
       for (int k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
         if (has_prefix(arg_name, config->pargs[k]->name)) {
+          parg_has_prefix[k] = true;
           if (current_parg) {
-            error_stack_push(
-                error_stack, ERROR_STATUS_CONFIG_LOAD_AMBIGUOUS_COMMAND,
-                get_formatted_string("ambiguous command %s, could be %s or %s",
-                                     arg_name, current_parg->name,
-                                     config->pargs[k]->name));
-            return;
+            ambiguous_arg_name = true;
+          } else {
+            current_parg = config->pargs[k];
+            current_arg_token = k;
           }
-          current_parg = config->pargs[k];
-          current_arg_token = k;
         }
+      }
+
+      if (ambiguous_arg_name) {
+        StringBuilder *sb = string_builder_create();
+        string_builder_add_formatted_string(
+            sb, "ambiguous command '%s' could be:", arg_name);
+        for (int k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
+          if (parg_has_prefix[k]) {
+            string_builder_add_formatted_string(sb, " %s,",
+                                                config->pargs[k]->name);
+          }
+        }
+        // Remove the trailing comma
+        string_builder_truncate(sb, string_builder_length(sb) - 1);
+        error_stack_push(error_stack,
+                         ERROR_STATUS_CONFIG_LOAD_AMBIGUOUS_COMMAND,
+                         string_builder_dump(sb, NULL));
+        string_builder_destroy(sb);
+        return;
       }
 
       if (!current_parg) {
@@ -2771,9 +2797,15 @@ bool lex_lex_compat(const char *p1_lexicon_name, const char *p2_lexicon_name,
   if (!p1_lexicon_name || !p2_lexicon_name) {
     return false;
   }
-  return ld_types_compat(
-      ld_get_type_from_lex_name(p1_lexicon_name, error_stack),
-      ld_get_type_from_lex_name(p2_lexicon_name, error_stack));
+  ld_t p1_ld_type = ld_get_type_from_lex_name(p1_lexicon_name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return false;
+  }
+  ld_t p2_ld_type = ld_get_type_from_lex_name(p2_lexicon_name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return false;
+  }
+  return ld_types_compat(p1_ld_type, p2_ld_type);
 }
 
 bool lex_ld_compat(const char *lexicon_name, const char *ld_name,
@@ -2784,8 +2816,15 @@ bool lex_ld_compat(const char *lexicon_name, const char *ld_name,
   if (!lexicon_name || !ld_name) {
     return false;
   }
-  return ld_types_compat(ld_get_type_from_lex_name(lexicon_name, error_stack),
-                         ld_get_type_from_ld_name(ld_name, error_stack));
+  ld_t lexicon_ld_type = ld_get_type_from_lex_name(lexicon_name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return false;
+  }
+  ld_t ld_ld_type = ld_get_type_from_ld_name(ld_name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return false;
+  }
+  return ld_types_compat(lexicon_ld_type, ld_ld_type);
 }
 
 bool lexicons_and_leaves_compat(const char *updated_p1_lexicon_name,
@@ -2825,10 +2864,10 @@ char *get_default_klv_name(const char *lexicon_name) {
 
 exec_mode_t get_exec_mode_type_from_name(const char *exec_mode_str) {
   exec_mode_t exec_mode = EXEC_MODE_UNKNOWN;
-  if (has_iprefix(exec_mode_str, "console")) {
-    exec_mode = EXEC_MODE_CONSOLE;
-  } else if (has_iprefix(exec_mode_str, "ucgi")) {
-    exec_mode = EXEC_MODE_UCGI;
+  if (has_iprefix(exec_mode_str, "sync")) {
+    exec_mode = EXEC_MODE_SYNC;
+  } else if (has_iprefix(exec_mode_str, "async")) {
+    exec_mode = EXEC_MODE_ASYNC;
   }
   return exec_mode;
 }
@@ -3305,6 +3344,22 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  // Print on finish
+
+  config_load_bool(config, ARG_TOKEN_PRINT_ON_FINISH, &config->print_on_finish,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  // Show prompt
+
+  config_load_bool(config, ARG_TOKEN_SHOW_PROMPT, &config->show_prompt,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // Board color
 
   const char *board_color_str =
@@ -3614,9 +3669,11 @@ void config_execute_command(Config *config, ErrorStack *error_stack) {
   if (config_exec_parg_is_set(config)) {
     config_get_parg_exec_func(config, config->exec_parg_token)(config,
                                                                error_stack);
-    char *finished_msg = get_status_finished_str(config);
-    thread_control_print(config_get_thread_control(config), finished_msg);
-    free(finished_msg);
+    if (config->print_on_finish) {
+      char *finished_msg = get_status_finished_str(config);
+      thread_control_print(config_get_thread_control(config), finished_msg);
+      free(finished_msg);
+    }
   }
 }
 
@@ -3870,12 +3927,14 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_ON_TURN_COLOR, "onturncolor", 1, 1);
   arg(ARG_TOKEN_ON_TURN_SCORE_STYLE, "onturnscore", 1, 1);
   arg(ARG_TOKEN_PRETTY, "pretty", 1, 1);
+  arg(ARG_TOKEN_PRINT_ON_FINISH, "printonfinish", 1, 1);
+  arg(ARG_TOKEN_SHOW_PROMPT, "shprompt", 1, 1);
 
 #undef cmd
 #undef arg
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
-  config->exec_mode = EXEC_MODE_CONSOLE;
+  config->exec_mode = EXEC_MODE_SYNC;
   config->bingo_bonus = DEFAULT_BINGO_BONUS;
   config->challenge_bonus = DEFAULT_CHALLENGE_BONUS;
   config->num_plays = DEFAULT_MOVE_LIST_CAPACITY;
@@ -3895,6 +3954,8 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->human_readable = false;
   config->sim_with_inference = false;
   config->print_boards = false;
+  config->print_on_finish = false;
+  config->show_prompt = true;
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->ld = NULL;
   config->players_data = players_data_create();

@@ -30,6 +30,7 @@ CLANG_TIDY_CHECKS="*,
                   -bugprone-multi-level-implicit-pointer-conversion,
                   -misc-no-recursion,
                   -llvm-header-guard,
+                  -android-cloexec-pipe,
                   -cppcoreguidelines-avoid-non-const-global-variables"
 CLANG_TIDY_EXCLUDE_HEADER_FILTER="^(?!.*linenoise\.(c|h)).*"
 C_COMPILER_FLAGS="-std=c99 -Wno-trigraphs -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -D__linux__ -U_WIN32 -U__APPLE__ "

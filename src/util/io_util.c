@@ -198,16 +198,16 @@ void write_to_stream(FILE *stream, const char *fmt, ...) {
   va_end(args);
 }
 
-char *read_line_from_stream_in(void) {
+char *read_line_from_stream(FILE *stream) {
   char *line = NULL;
   size_t len = 0;
   ssize_t read;
   errno = 0;
-  read = getline(&line, &len, get_stream_in());
+  read = getline(&line, &len, stream);
   if (read == -1) {
     int error_number = errno;
     if (error_number) {
-      perror("error");
+      perror("getline");
       log_fatal("failed to read from input stream with error: %d",
                 error_number);
     } else {
@@ -219,6 +219,10 @@ char *read_line_from_stream_in(void) {
     line[read - 1] = '\0';
   }
   return line;
+}
+
+char *read_line_from_stream_in(void) {
+  return read_line_from_stream(get_stream_in());
 }
 
 // WARNING: This function should only be called once at startup or for testing

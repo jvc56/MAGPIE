@@ -259,7 +259,6 @@ FILE *get_stream_out(void);
 FILE *get_stream_err(void);
 FILE *get_stream_in(void);
 void write_to_stream_out(const char *fmt, ...);
-void write_to_stream_err(const char *fmt, ...);
 void write_to_stream(FILE *stream, const char *fmt, ...);
 char *read_line_from_stream_in(void);
 

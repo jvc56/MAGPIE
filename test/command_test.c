@@ -29,6 +29,12 @@ typedef struct ProcessArgs {
   cpthread_mutex_t finished_mutex;
 } ProcessArgs;
 
+typedef struct AsyncArgs {
+  Config *config;
+  ErrorStack *error_stack;
+  const char *cmd;
+} AsyncArgs;
+
 typedef struct MainArgs {
   int argc;
   char **argv;
@@ -152,6 +158,12 @@ void block_for_process_command(ProcessArgs *process_args, int max_seconds) {
   }
 }
 
+void *sync_cmd_thread_worker(void *uncasted_args) {
+  AsyncArgs *args = (AsyncArgs *)uncasted_args;
+  execute_command_sync(args->config, args->error_stack, args->cmd);
+  return NULL;
+}
+
 void assert_command_status_and_output(Config *config, const char *command,
                                       bool should_exit, int seconds_to_wait,
                                       int expected_output_line_count,
@@ -170,11 +182,13 @@ void assert_command_status_and_output(Config *config, const char *command,
 
   ErrorStack *error_stack = error_stack_create();
 
-  execute_command_async(config, error_stack, command);
-
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_print_and_reset(error_stack);
-  }
+  AsyncArgs async_args;
+  async_args.config = config;
+  async_args.error_stack = error_stack;
+  async_args.cmd = command;
+  cpthread_t sync_cmd_thread;
+  cpthread_create(&sync_cmd_thread, sync_cmd_thread_worker, &async_args);
+  cpthread_detach(sync_cmd_thread);
 
   // Let the async command start up
   ctime_nap(DEFAULT_NAP_TIME);
@@ -185,25 +199,32 @@ void assert_command_status_and_output(Config *config, const char *command,
   }
   block_for_search(config, seconds_to_wait);
 
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+  }
+
   fclose_or_die(errorout_fh);
 
   char *test_output = get_string_from_file_or_die(test_output_filename);
   int newlines_in_output = count_newlines(test_output);
+
+  char *test_outerror = get_string_from_file_or_die(test_outerror_filename);
+  int newlines_in_outerror = count_newlines(test_outerror);
+
   bool fail_test = false;
   if (newlines_in_output != expected_output_line_count) {
     printf("%s\nassert output: output counts do not match %d != %d\n", command,
            newlines_in_output, expected_output_line_count);
-    printf("got:>%s<\n", test_output);
+    printf("got output:>%s<\n", test_output);
+    printf("got outerror:>%s<\n", test_output);
     fail_test = true;
   }
 
-  char *test_outerror = get_string_from_file_or_die(test_outerror_filename);
-  int newlines_in_outerror = count_newlines(test_outerror);
   if (newlines_in_outerror != expected_outerror_line_count) {
     printf(
         "assert output: error counts do not match %d != %d\nfor command: %s\n",
         newlines_in_outerror, expected_outerror_line_count, command);
-    printf("got: >%s<\n", test_outerror);
+    printf("got outerror: >%s<\n", test_outerror);
     fail_test = true;
   }
 
@@ -222,6 +243,9 @@ void assert_command_status_and_output(Config *config, const char *command,
 
 void test_command_execution(void) {
   Config *config = config_create_default_test();
+
+  assert_command_status_and_output(config, "set -printonfinish true", false, 5,
+                                   1, 0);
 
   assert_command_status_and_output(config, "sim -lex CSW21 -it 1000 -plies 2h3",
                                    false, 5, 0, 2);
@@ -476,11 +500,12 @@ void test_process_command(const char *arg_string,
 void test_exec_single_command(void) {
   char *plies_error_substr = get_formatted_string(
       "error %d", ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
-  test_process_command("sim -lex CSW21 -it 10 -plies 2h3", 0, NULL, 2,
-                       plies_error_substr);
+  test_process_command("sim -lex CSW21 -it 10 -plies 2h3 -printonfinish true",
+                       0, NULL, 2, plies_error_substr);
   free(plies_error_substr);
 
-  test_process_command("infer 1 MUZAKY 58 -numplays 20 -threads 4 -lex CSW21",
+  test_process_command("infer 1 MUZAKY 58 -numplays 20 -threads 4 -lex CSW21 "
+                       "-printonfinish true",
                        53, "infertile leave Z", 0, NULL);
 }
 
@@ -494,7 +519,7 @@ void *test_process_command_async(void *uncasted_process_args) {
   return NULL;
 }
 
-void test_exec_ucgi_command(void) {
+void test_async_command(void) {
   char *test_input_filename = get_test_filename("input");
 
   // Reset the contents of input
@@ -510,7 +535,8 @@ void test_exec_ucgi_command(void) {
   command_test_set_stream_in(input_reader);
 
   ProcessArgs *process_args =
-      process_args_create("set -mode ucgi", 6, "autoplay", 1, "still running");
+      process_args_create("set -mode async -printonfinish true", 7, "autoplay",
+                          1, "unrecognized async command");
 
   cpthread_t cmd_execution_thread;
   cpthread_create(&cmd_execution_thread, test_process_command_async,
@@ -535,7 +561,11 @@ void test_exec_ucgi_command(void) {
   // is still running. This should give a warning.
   fprintf_or_die(
       input_writer,
-      "autoplay game 1 -lex CSW21 -s1 equity -s2 equity  -gp false\n");
+      "autoplay game 1 -lex CSW21 -s1 equity -s2 equity -gp false\n");
+  fflush_or_die(input_writer);
+  ctime_nap(1.0);
+  // Make sure the status command doesn't crash anything
+  fprintf_or_die(input_writer, "status\n");
   fflush_or_die(input_writer);
   ctime_nap(1.0);
   // Interrupt the autoplay which won't finish in 1 second
@@ -557,7 +587,7 @@ void test_exec_ucgi_command(void) {
   command_test_reset_stream_in();
 }
 
-void test_exec_console_command(void) {
+void test_exec_sync_command(void) {
   char *test_input_filename = get_test_filename("input");
 
   // Reset the contents of input
@@ -567,7 +597,8 @@ void test_exec_console_command(void) {
   FILE *input_reader = fopen_or_die(test_input_filename, "r");
   command_test_set_stream_in(input_reader);
 
-  char *initial_command = get_formatted_string("cgp %s", EMPTY_CGP);
+  char *initial_command =
+      get_formatted_string("cgp %s -printonfinish true", EMPTY_CGP);
 
   char *config_load_error_substr = get_formatted_string(
       "error %d", ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
@@ -580,12 +611,13 @@ void test_exec_console_command(void) {
                   process_args);
   cpthread_detach(cmd_execution_thread);
 
-  write_to_stream(input_writer,
-                  "infer 1 DGINR 18 -numplays 7 -threads 4 -pfreq 1000000\n");
-  write_to_stream(input_writer, "set -r1 best -r2 b -nump 1 -threads 4\n");
+  write_to_stream(input_writer, "infer 1 DGINR 18 -numplays 7 -threads 4 "
+                                "-pfreq 1000000 -printonfinish true\n");
   write_to_stream(
       input_writer,
-      "autoplay game 10 -lex CSW21 -s1 equity -s2 equity -gp true \n");
+      "set -r1 best -r2 b -nump 1 -threads 4  -printonfinish true\n");
+  write_to_stream(input_writer, "autoplay game 10 -lex CSW21 -s1 equity -s2 "
+                                "equity -gp true  -printonfinish true\n");
   // Stop should have no effect and appear as an error
   write_to_stream(input_writer, "stop\n");
   write_to_stream(input_writer, "quit\n");
@@ -606,8 +638,8 @@ void test_exec_console_command(void) {
 void test_command(void) {
   test_exec_single_command();
   test_command_execution();
-  test_exec_ucgi_command();
-  test_exec_console_command();
+  test_async_command();
+  test_exec_sync_command();
   command_test_reset_stream_out();
   command_test_reset_stream_err();
   command_test_reset_stream_in();
