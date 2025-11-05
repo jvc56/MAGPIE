@@ -12,6 +12,7 @@
 #include "config.h"
 #include "move_gen.h"
 #include <assert.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -75,10 +76,6 @@ void *execute_async_command_worker(void *uncasted_args) {
 bool load_command_sync(Config *config, ErrorStack *error_stack,
                        const char *command) {
   ThreadControl *thread_control = config_get_thread_control(config);
-  StringBuilder *status_string = string_builder_create();
-  string_builder_add_formatted_string(
-      status_string, "%d \n", thread_control_get_status(thread_control));
-  string_builder_destroy(status_string);
   const bool reset_result =
       thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
   assert(reset_result);
