@@ -12,12 +12,11 @@
 #include "config.h"
 #include "move_gen.h"
 #include <assert.h>
-#include <fcntl.h>
-#include <poll.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/poll.h>
 #include <unistd.h>
 
 typedef enum {
