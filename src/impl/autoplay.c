@@ -2,6 +2,7 @@
 #include "autoplay.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/ctime.h"
 #include "../def/autoplay_defs.h"
 #include "../def/cpthread_defs.h"
 #include "../def/players_data_defs.h"
@@ -305,7 +306,7 @@ LeavegenSharedData *leavegen_shared_data_create(
 // Use NULL for the KLV when not running in leave gen mode.
 AutoplaySharedData *
 autoplay_shared_data_create(const AutoplayArgs *args,
-                            const int first_gen_num_games,
+                            const uint64_t first_gen_num_games,
                             AutoplayResults *primary_autoplay_results,
                             AutoplayResults **autoplay_results_list, KLV *klv,
                             int num_gens, int *min_rack_targets) {

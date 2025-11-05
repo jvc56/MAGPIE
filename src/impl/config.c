@@ -1,5 +1,6 @@
 #include "config.h"
 
+#include "../compat/ctime.h"
 #include "../def/autoplay_defs.h"
 #include "../def/bai_defs.h"
 #include "../def/config_defs.h"
@@ -14,6 +15,7 @@
 #include "../def/validated_move_defs.h"
 #include "../ent/autoplay_results.h"
 #include "../ent/bag.h"
+#include "../ent/bai_result.h"
 #include "../ent/board.h"
 #include "../ent/board_layout.h"
 #include "../ent/conversion_results.h"

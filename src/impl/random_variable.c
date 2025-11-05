@@ -1,12 +1,12 @@
 #include "random_variable.h"
 
 #include "../compat/cpthread.h"
-#include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
 #include "../def/game_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
+#include "../ent/bai_result.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"

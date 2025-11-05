@@ -1,14 +1,11 @@
 #include "thread_control.h"
 
 #include "../compat/cpthread.h"
-#include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../util/io_util.h"
-#include "xoshiro.h"
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 
 struct ThreadControl {
@@ -50,12 +47,9 @@ bool thread_control_set_status(ThreadControl *thread_control,
   bool success = false;
   cpthread_mutex_lock(&thread_control->status_mutex);
   const thread_control_status_t old_status = thread_control->status;
-  // Only set the status to some specific exit reason if it is not already set
-  // to some other winding down reason.
   if (new_status != old_status) {
     thread_control->status = new_status;
     success = true;
-    // Reset the thread control
     if (new_status != THREAD_CONTROL_STATUS_STARTED) {
       cpthread_cond_broadcast(&thread_control->status_cond);
     }

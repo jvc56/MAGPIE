@@ -10,7 +10,6 @@
 #include "../src/impl/random_variable.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
-#include "test_util.h"
 #include <assert.h>
 #include <inttypes.h>
 #include <stddef.h>

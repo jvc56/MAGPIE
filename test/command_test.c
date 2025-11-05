@@ -2,6 +2,7 @@
 #include "../src/compat/ctime.h"
 #include "../src/compat/linenoise.h"
 #include "../src/def/cpthread_defs.h"
+#include "../src/def/thread_control_defs.h"
 #include "../src/ent/move.h"
 #include "../src/ent/thread_control.h"
 #include "../src/impl/config.h"
