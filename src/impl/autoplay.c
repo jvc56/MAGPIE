@@ -344,6 +344,7 @@ void autoplay_shared_data_destroy(AutoplaySharedData *shared_data) {
   if (!shared_data) {
     return;
   }
+  prng_destroy(shared_data->prng);
   leavegen_shared_data_destroy(shared_data->leavegen_shared_data);
   free(shared_data);
 }

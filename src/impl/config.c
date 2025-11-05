@@ -1050,6 +1050,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->bai_options.time_limit_seconds =
       config_get_time_limit_seconds(config);
   sim_args->bai_options.sampling_rule = config->sampling_rule;
+  sim_args->bai_options.num_threads = config->num_threads;
 }
 
 void config_simulate(const Config *config, Rack *known_opp_rack,
