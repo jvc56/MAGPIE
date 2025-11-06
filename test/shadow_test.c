@@ -75,244 +75,232 @@ void test_shadow_score(void) {
   assert_anchor_equity_int(&anchor_list, 0, 18);
 
   load_and_shadow(game, player, EMPTY_CGP, "BD", &anchor_list);
-  assert(anchor_list.count == 1);
-  assert_anchor_equity_int(&anchor_list, 0, 10);
+  assert(anchor_list.count == 0);
 
   load_and_shadow(game, player, EMPTY_CGP, "QK", &anchor_list);
-  assert(anchor_list.count == 1);
-  assert_anchor_equity_int(&anchor_list, 0, 30);
+  assert(anchor_list.count == 0);
 
   load_and_shadow(game, player, EMPTY_CGP, "AESR", &anchor_list);
-  assert(anchor_list.count == 1);
+  assert(anchor_list.count == 3);
   assert_anchor_equity_int(&anchor_list, 0, 8);
 
   load_and_shadow(game, player, EMPTY_CGP, "TNCL", &anchor_list);
-  assert(anchor_list.count == 1);
-  assert_anchor_equity_int(&anchor_list, 0, 12);
+  assert(anchor_list.count == 0);
 
   load_and_shadow(game, player, EMPTY_CGP, "AAAAA", &anchor_list);
   assert(anchor_list.count == 1);
-  assert_anchor_equity_int(&anchor_list, 0, 12);
+  assert_anchor_equity_int(&anchor_list, 0, 4);
 
   load_and_shadow(game, player, EMPTY_CGP, "CAAAA", &anchor_list);
-  assert(anchor_list.count == 1);
-  assert_anchor_equity_int(&anchor_list, 0, 20);
+  assert(anchor_list.count == 2);
+  assert_anchor_equity_int(&anchor_list, 0, 10);
 
   load_and_shadow(game, player, EMPTY_CGP, "CAKAA", &anchor_list);
-  assert(anchor_list.count == 1);
-  assert_anchor_equity_int(&anchor_list, 0, 32);
+  assert(anchor_list.count == 2);
+  // ACK is not in CSW21, but shadow_record does not improve score bounds
+  // using subrack info, only leaves
+  assert_anchor_equity_int(&anchor_list, 0, 18);
 
   load_and_shadow(game, player, EMPTY_CGP, "AIERZ", &anchor_list);
-  assert(anchor_list.count == 1);
+  assert(anchor_list.count == 4);
   assert_anchor_equity_int(&anchor_list, 0, 48);
 
   load_and_shadow(game, player, EMPTY_CGP, "AIERZN", &anchor_list);
-  assert(anchor_list.count == 1);
+  assert(anchor_list.count == 5);
   assert_anchor_equity_int(&anchor_list, 0, 50);
 
   load_and_shadow(game, player, EMPTY_CGP, "AIERZNL", &anchor_list);
-  assert(anchor_list.count == 1);
-  assert_anchor_equity_int(&anchor_list, 0, 102);
+  assert(anchor_list.count == 5);
+  assert_anchor_equity_int(&anchor_list, 0, 50);
 
   load_and_shadow(game, player, EMPTY_CGP, "?", &anchor_list);
-  assert(anchor_list.count == 1);
-  assert_anchor_equity_int(&anchor_list, 0, 0);
+  assert(anchor_list.count == 0);
 
   load_and_shadow(game, player, EMPTY_CGP, "??", &anchor_list);
   assert(anchor_list.count == 1);
   assert_anchor_equity_int(&anchor_list, 0, 0);
 
   load_and_shadow(game, player, EMPTY_CGP, "??OU", &anchor_list);
-  assert(anchor_list.count == 1);
+  assert(anchor_list.count == 3);
   assert_anchor_equity_int(&anchor_list, 0, 4);
 
   load_and_shadow(game, player, EMPTY_CGP, "??OUA", &anchor_list);
-  assert(anchor_list.count == 1);
+  assert(anchor_list.count == 4);
   assert_anchor_equity_int(&anchor_list, 0, 8);
 
   load_and_shadow(game, player, KA_OPENING_CGP, "EE", &anchor_list);
-  assert(anchor_list.count == 6);
+  assert(anchor_list.count == 8);
 
-  // KAE and EE
+  // (KA)E and EE
   assert_anchor_equity_int(&anchor_list, 0, 10);
-  // EKE
+  // E(K)E
   assert_anchor_equity_int(&anchor_list, 1, 9);
-  // KAEE
+  // (KA)EE
   assert_anchor_equity_int(&anchor_list, 2, 8);
+  // (KA)E
+  assert_anchor_equity_int(&anchor_list, 3, 7);
+  // (K)E (playthrough subrack not checked)
+  assert_anchor_equity_int(&anchor_list, 4, 7);
   // EE and E(A)
-  assert_anchor_equity_int(&anchor_list, 3, 5);
-  // EE and E(A)
-  assert_anchor_equity_int(&anchor_list, 4, 5);
-  // EEE
-  assert_anchor_equity_int(&anchor_list, 5, 3);
+  assert_anchor_equity_int(&anchor_list, 5, 5);
+  // EE and (A)E
+  assert_anchor_equity_int(&anchor_list, 6, 5);
+  // (A)E
+  assert_anchor_equity_int(&anchor_list, 7, 2);
   // The rest are prevented by invalid cross sets
 
   load_and_shadow(game, player, KA_OPENING_CGP, "E?", &anchor_list);
+  assert(anchor_list.count == 12);
   // 7G oE
   assert_anchor_equity_int(&anchor_list, 0, 8);
   // 9G aE
   assert_anchor_equity_int(&anchor_list, 1, 8);
   // I7 Ee
   assert_anchor_equity_int(&anchor_list, 2, 8);
-  // F7 Es (only the blank can hook to the left with sKA or aKA or oKA)
+  // 8H (KA)Ee
   assert_anchor_equity_int(&anchor_list, 3, 7);
-  // KAEe
+  // G7 E(K) (nonplaythrough subrack not checked)
   assert_anchor_equity_int(&anchor_list, 4, 7);
-  // E(K)e
+  // G7 E(K)e
   assert_anchor_equity_int(&anchor_list, 5, 7);
-  // Ea, EA
-  assert_anchor_equity_int(&anchor_list, 6, 3);
-  // Ae, eE
-  assert_anchor_equity_int(&anchor_list, 7, 3);
-  // E(A)a
-  assert_anchor_equity_int(&anchor_list, 8, 2);
+  // F7 Es (only the blank can hook to the left with sKA or aKA or oKA)
+  assert_anchor_equity_int(&anchor_list, 6, 7);
+  // 8H (KA)E
+  assert_anchor_equity_int(&anchor_list, 7, 7);
+  // 7H Ee
+  assert_anchor_equity_int(&anchor_list, 8, 3);
+  // 9H Ee
+  assert_anchor_equity_int(&anchor_list, 9, 3);
+  // H8 (A)xE
+  assert_anchor_equity_int(&anchor_list, 10, 2);
+  // H8 (A)E
+  assert_anchor_equity_int(&anchor_list, 11, 2);
 
   load_and_shadow(game, player, KA_OPENING_CGP, "J", &anchor_list);
-  assert(anchor_list.count == 4);
-  // J(K) vertically
-  assert_anchor_equity_int(&anchor_list, 0, 21);
-  // J(KA) or (KA)J
-  assert_anchor_equity_int(&anchor_list, 1, 14);
-  // J(A) horitizontally
-  assert_anchor_equity_int(&anchor_list, 2, 9);
-  // J(A) vertically
-  assert_anchor_equity_int(&anchor_list, 3, 9);
+  assert(anchor_list.count == 2);
+  // 8H (KA)J 
+  assert_anchor_equity_int(&anchor_list, 0, 14);
+  // H7 J(A) 
+  assert_anchor_equity_int(&anchor_list, 1, 9);
 
   load_and_shadow(game, player, AA_OPENING_CGP, "JF", &anchor_list);
-  assert(anchor_list.count == 6);
+  assert(anchor_list.count == 4);
+  // G7 J(A)
+  assert_anchor_equity_int(&anchor_list, 0, 17);
+  // 8H (AA)FJ
+  assert_anchor_equity_int(&anchor_list, 1, 14);
+  // 9H (AA)J (playthrough subrack not checked)
+  assert_anchor_equity_int(&anchor_list, 2, 10);
+  // H7 J(A)
+  assert_anchor_equity_int(&anchor_list, 3, 9);
 
-  // JF, JA, and FA
-  assert_anchor_equity_int(&anchor_list, 0, 42);
-  // JA and JF or FA and FJ
-  assert_anchor_equity_int(&anchor_list, 1, 25);
-  // JAF with J and F doubled
-  assert_anchor_equity_int(&anchor_list, 2, 25);
-  // F7 JF (only F can hook AA)
-  assert_anchor_equity_int(&anchor_list, 3, 18);
-  // AAJF
-  assert_anchor_equity_int(&anchor_list, 4, 14);
-  // AJF
-  assert_anchor_equity_int(&anchor_list, 5, 13);
-  // Remaining anchors are prevented by invalid cross sets
-
-  // Making JA, FA, and JFU, doubling the U on the double letter
   load_and_shadow(game, player, AA_OPENING_CGP, "JFU", &anchor_list);
-  assert_anchor_equity_int(&anchor_list, 0, 44);
+  // H7 F(A)J
+  assert_anchor_equity_int(&anchor_list, 0, 25);
 
-  // Making KAU (allowed by F in rack cross set)
-  // and JUF, doubling the F and J.
   load_and_shadow(game, player, KA_OPENING_CGP, "JFU", &anchor_list);
-  assert_anchor_equity_int(&anchor_list, 0, 32);
+  // H7 F(K)J
+  assert_anchor_equity_int(&anchor_list, 0, 29);
 
   load_and_shadow(game, player, AA_OPENING_CGP, "JFUG", &anchor_list);
-  assert_anchor_equity_int(&anchor_list, 0, 47);
+  // 7G JFG (3 letter nonplaythrough allowed because of JUG/GJU)
+  assert_anchor_equity_int(&anchor_list, 0, 46);
 
   load_and_shadow(game, player, AA_OPENING_CGP, "JFUGX", &anchor_list);
-  assert_anchor_equity_int(&anchor_list, 0, 61);
+  // 7G JXF (3 letter nonplaythrough allowed because of JUG/GJU)
+  assert_anchor_equity_int(&anchor_list, 0, 58);
 
-  // Reaches the triple word
   load_and_shadow(game, player, AA_OPENING_CGP, "JFUGXL", &anchor_list);
-  assert_anchor_equity_int(&anchor_list, 0, 102);
+  // 7G JXFG (4 letter nonplaythrough allowed because of GULF)
+  assert_anchor_equity_int(&anchor_list, 0, 60);
 
   load_and_shadow(game, player, DOUG_V_EMELY_CGP, "Q", &anchor_list);
-  // WINDY is not extendable, so there is no 22 for WINDYQ.
-  // The highest anchor is through the W in WINDY, recording 14 for QW, as W is
-  // extendable with a Q to the left for Q(W)ERTY. Note there is no 22 for DQ
-  // or 14 for YQ despite HINDQUARTER and TRIPTYQUE. Since no on the rack
-  // extends D or Y to the left, the right_extension_set is applied, filtering
-  // these anchors because no words _begin_ with DQ or YQ.
-  assert_anchor_equity_int(&anchor_list, 0, 14);
-  // The next highest anchor is through the I in WINDY: 11 for QI.
-  assert_anchor_equity_int(&anchor_list, 1, 11);
+  // E7 Q(I)
+  assert_anchor_equity_int(&anchor_list, 0, 11);
 
   load_and_shadow(game, player, DOUG_V_EMELY_CGP, "BD", &anchor_list);
-  // WINDY is not extendable, so there is no 17 for WINDYBD.
-  // The highest anchor is 14 for 7H BD.
-  assert_anchor_equity_int(&anchor_list, 0, 14);
+  // (WINDY)BD is checked (full rack subrack)
+  // WINDY is not extendable, so there is no 15 for WINDYB.
+  // G7 B(D) (playthrough subrack not checked)
+  assert_anchor_equity_int(&anchor_list, 0, 8);
 
   load_and_shadow(game, player, DOUG_V_EMELY_CGP, "BOH", &anchor_list);
-  // WINDY is not extendable, so there is no 60 for BOHWINDY.
   // The highest anchor is 24 for 7G OBH.
   //   only B can hook Y for BY
   //   only O can hook D for OD
   assert_anchor_equity_int(&anchor_list, 0, 24);
 
   load_and_shadow(game, player, DOUG_V_EMELY_CGP, "BOHGX", &anchor_list);
-  // WINDY is not extendable, so there is no 90 for BOHWINDYGX.
-  // The highest anchor is 44 for D8 (W)BOHXG.
-  //   using restricted hooks the highest horizontal plays are at 7A for 36.
-  assert_anchor_equity_int(&anchor_list, 0, 44);
+  // WINDY is not extendable, so there are no plays to the TWS.
+  // 44 for D8 (W)BOHXG not allowed because we check full rack
+  // Best is 42 for D8 (W)BHGX
+  assert_anchor_equity_int(&anchor_list, 0, 42);
 
   load_and_shadow(game, player, DOUG_V_EMELY_CGP, "BOHGXZ", &anchor_list);
-  // WINDY is not extendable, so there is no 120 for BOHWINDYGXZ.
-  // The highest anchor is 116 for the 2x2 E5 BOH(I)GXZ.
-  assert_anchor_equity_int(&anchor_list, 0, 116);
+  // WINDY is not extendable, no plays to the TWS.
+  // No 116 for the 2x2 E5 BOH(I)GXZ, we check full rack.
+  // Best is 64 for F6 XB(N)GZH
+  assert_anchor_equity_int(&anchor_list, 0, 64);
 
   load_and_shadow(game, player, DOUG_V_EMELY_CGP, "BOHGXZQ", &anchor_list);
-  // WINDY is not extendable, so there is no 230 for BOHWINDYGXZQ.
-  // The highest anchor is 206 for the 2x2 E5 BOH(I)GXZQ.
-  assert_anchor_equity_int(&anchor_list, 0, 206);
+  // WINDY is not extendable, no plays to the TWS
+  // Full rack is checked (even with playthrough) so no bingo.
+  // Best is 152 for 2x2 E5 BGH(I)QXZ
+  assert_anchor_equity_int(&anchor_list, 0, 152);
 
   load_and_shadow(game, player, TRIPLE_LETTERS_CGP, "A", &anchor_list);
-
-  // WINDY is not extendable, so there is no 13 for WINDYA.
-  // H6 A(NY) vertical
-  // H6 A(NY) horizontal
   // B6 A(P)
-  // D6 A(OW)
+  // H6 A(NY)
   // F6 A(EN)
-
+  // E5 A(TI)
+  // C6 A(R)
   assert_anchor_equity_int(&anchor_list, 0, 6);
   assert_anchor_equity_int(&anchor_list, 1, 6);
-  assert_anchor_equity_int(&anchor_list, 1, 6);
-  assert_anchor_equity_int(&anchor_list, 3, 6);
-  assert_anchor_equity_int(&anchor_list, 4, 5);
+  assert_anchor_equity_int(&anchor_list, 2, 5);
+  assert_anchor_equity_int(&anchor_list, 3, 3);
+  assert_anchor_equity_int(&anchor_list, 4, 2);
 
   load_and_shadow(game, player, TRIPLE_LETTERS_CGP, "Z", &anchor_list);
-  // Z(P) vertically
-  assert_anchor_equity_int(&anchor_list, 0, 33);
-  // Z(EN) vert
-  // Z(EN) horiz
-  assert_anchor_equity_int(&anchor_list, 1, 32);
-  assert_anchor_equity_int(&anchor_list, 2, 32);
+  // Z(EN)
+  assert_anchor_equity_int(&anchor_list, 0, 32);
   // (AD)Z
-  assert_anchor_equity_int(&anchor_list, 3, 23);
+  assert_anchor_equity_int(&anchor_list, 1, 23);
 
   load_and_shadow(game, player, TRIPLE_LETTERS_CGP, "ZLW", &anchor_list);
-  // ZEN, ZW, WAD
-  assert_anchor_equity_int(&anchor_list, 0, 73);
-  // ZENLW
-  assert_anchor_equity_int(&anchor_list, 1, 45);
-  // ZLWOW
-  assert_anchor_equity_int(&anchor_list, 2, 40);
+  // B6 Z(P)W
+  assert_anchor_equity_int(&anchor_list, 0, 37);
+  // F6 Z(EN)W
+  assert_anchor_equity_int(&anchor_list, 1, 36);
+  // B6 Z(P)
+  assert_anchor_equity_int(&anchor_list, 2, 33);
 
   load_and_shadow(game, player, TRIPLE_LETTERS_CGP, "ZLW?", &anchor_list);
-  // 6F ZWaL
-  assert_anchor_equity_int(&anchor_list, 0, 79);
+  // 6F ZWa
+  assert_anchor_equity_int(&anchor_list, 0, 78);
 
   load_and_shadow(game, player, TRIPLE_LETTERS_CGP, "QZLW", &anchor_list);
-  // 6G ZQ making ZEN and QAD. Only L and W are in the AD cross set, but score
-  // it using the Q. This is a limitation of tile restriction in shadow. L and W
-  // give multiple possibilities for this square so we can't restrict it to a
-  // single tile.
-  assert_anchor_equity_int(&anchor_list, 0, 85);
+  // F6 Z(EN)WQ
+  assert_anchor_equity_int(&anchor_list, 0, 66);
 
   load_and_shadow(game, player, TRIPLE_DOUBLE_CGP, "K", &anchor_list);
-  assert_anchor_equity_int(&anchor_list, 0, 13);
+  // D9 K(A)
+  assert_anchor_equity_int(&anchor_list, 0, 6);
 
   load_and_shadow(game, player, TRIPLE_DOUBLE_CGP, "KT", &anchor_list);
-  // KPAVT
-  assert_anchor_equity_int(&anchor_list, 0, 20);
+  // D10 (A)KT
+  assert_anchor_equity_int(&anchor_list, 0, 14);
 
   load_and_shadow(game, player, TRIPLE_DOUBLE_CGP, "KT?", &anchor_list);
-  // 10A TsPAVK. only the blank can left-extend PAV.
-  assert_anchor_equity_int(&anchor_list, 0, 24);
+  // Only the blank can left-extend PAV.
+  // Full rack makes no word through PAV.
+  // 10B sPAVK
+  assert_anchor_equity_int(&anchor_list, 0, 23);
 
   load_and_shadow(game, player, BOTTOM_LEFT_RE_CGP, "M", &anchor_list);
   assert_anchor_equity_int(&anchor_list, 0, 8);
 
   load_and_shadow(game, player, BOTTOM_LEFT_RE_CGP, "MN", &anchor_list);
-  assert_anchor_equity_int(&anchor_list, 0, 16);
+  assert_anchor_equity_int(&anchor_list, 0, 10);
 
   load_and_shadow(game, player, BOTTOM_LEFT_RE_CGP, "MNA", &anchor_list);
   assert_anchor_equity_int(&anchor_list, 0, 20);
@@ -321,67 +309,43 @@ void test_shadow_score(void) {
   assert_anchor_equity_int(&anchor_list, 0, 22);
 
   load_and_shadow(game, player, BOTTOM_LEFT_RE_CGP, "MNAUT", &anchor_list);
-  assert_anchor_equity_int(&anchor_list, 0, 30);
+  assert_anchor_equity_int(&anchor_list, 0, 28);
 
   load_and_shadow(game, player, BOTTOM_LEFT_RE_CGP, "MNAUTE", &anchor_list);
   assert_anchor_equity_int(&anchor_list, 0, 39);
 
   load_and_shadow(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "Z",
                   &anchor_list);
-  // Z(T)
-  assert_anchor_equity_int(&anchor_list, 0, 21);
   // (A)Z
-  assert_anchor_equity_int(&anchor_list, 1, 11);
+  assert_anchor_equity_int(&anchor_list, 0, 11);
   // Z(E)
-  assert_anchor_equity_int(&anchor_list, 2, 11);
-  // Z(A)
-  assert_anchor_equity_int(&anchor_list, 3, 11);
+  assert_anchor_equity_int(&anchor_list, 1, 11);
 
   load_and_shadow(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZL",
                   &anchor_list);
-  assert_anchor_equity_int(&anchor_list, 0, 64);
+  assert_anchor_equity_int(&anchor_list, 0, 22);
 
   load_and_shadow(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZLI",
                   &anchor_list);
-  assert_anchor_equity_int(&anchor_list, 0, 68);
-
-  load_and_shadow(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZLIE",
-                  &anchor_list);
-  assert_anchor_equity_int(&anchor_list, 0, 72);
-
-  load_and_shadow(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZLIER",
-                  &anchor_list);
-  // 5D ZE(LATER)RIL (not 6F ZLERI: there's no TLS Z hotspots)
-  assert_anchor_equity_int(&anchor_list, 0, 76);
-
-  load_and_shadow(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZLIERA",
-                  &anchor_list);
-  assert_anchor_equity_int(&anchor_list, 0, 80);
-
-  load_and_shadow(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZL",
-                  &anchor_list);
   assert_anchor_equity_int(&anchor_list, 0, 64);
 
-  load_and_shadow(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZLI",
+  load_and_shadow(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZLIE",
                   &anchor_list);
   assert_anchor_equity_int(&anchor_list, 0, 68);
 
-  load_and_shadow(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZLIE",
-                  &anchor_list);
-  assert_anchor_equity_int(&anchor_list, 0, 72);
-
   load_and_shadow(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZLIER",
                   &anchor_list);
-  // 5D ZE(LATER)RIL (not 6F ZLERI: there's no TLS Z hotspots)
-  assert_anchor_equity_int(&anchor_list, 0, 76);
+  // 5D ZE(LATER)RI (not 6F ZLERI: there's no TLS Z hotspots)
+  assert_anchor_equity_int(&anchor_list, 0, 72);
 
   load_and_shadow(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZLIERA",
                   &anchor_list);
-  assert_anchor_equity_int(&anchor_list, 0, 80);
+  assert_anchor_equity_int(&anchor_list, 0, 78);
 
   load_and_shadow(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZLIERAI",
                   &anchor_list);
-  assert_anchor_equity_int(&anchor_list, 0, 212);
+  // No 2x2 bingos. This is 4F AIZELIR, we can't restrict the Z out of the DLS
+  assert_anchor_equity_int(&anchor_list, 0, 131);
 
   load_and_shadow(game, player, VS_OXY, "A", &anchor_list);
   // No APACIFYING: PACIFYING not extendable with an A.
@@ -397,47 +361,32 @@ void test_shadow_score(void) {
   assert_anchor_equity_int(&anchor_list, 0, 72);
 
   load_and_shadow(game, player, VS_OXY, "PB", &anchor_list);
-  assert_anchor_equity_int(&anchor_list, 0, 156);
+  assert_anchor_equity_int(&anchor_list, 0, 54);
 
   load_and_shadow(game, player, VS_OXY, "PA", &anchor_list);
-  // No B6 DORMPWOOAJ for 76. Only the A fits in the cross sets of T and N,
-  // and it can't be in both of those squares.
-  // Best is A3 (Y)P(HEN) hooking P(REQUALIFIED) for 50
-  assert_anchor_equity_int(&anchor_list, 0, 50);
+  assert_anchor_equity_int(&anchor_list, 0, 18);
 
   load_and_shadow(game, player, VS_OXY, "PBA", &anchor_list);
-  assert_anchor_equity_int(&anchor_list, 0, 174);
+  assert_anchor_equity_int(&anchor_list, 0, 156);
 
   load_and_shadow(game, player, VS_OXY, "Z", &anchor_list);
-  // No ZPACIFYING
-  // TZ/ZA
-  assert_anchor_equity_int(&anchor_list, 0, 42);
+  assert_anchor_equity_int(&anchor_list, 0, 22);
 
   load_and_shadow(game, player, VS_OXY, "ZE", &anchor_list);
   // ZONE
   assert_anchor_equity_int(&anchor_list, 0, 160);
 
   load_and_shadow(game, player, VS_OXY, "AZE", &anchor_list);
-  // UTAZONE
-  assert_anchor_equity_int(&anchor_list, 0, 184);
+  assert_anchor_equity_int(&anchor_list, 0, 160);
 
   load_and_shadow(game, player, VS_OXY, "AZEB", &anchor_list);
-  // HENBUTAZONE
-  assert_anchor_equity_int(&anchor_list, 0, 484);
+  assert_anchor_equity_int(&anchor_list, 0, 208);
 
   load_and_shadow(game, player, VS_OXY, "AZEBP", &anchor_list);
-  // YPHENBUTAZONE
-  assert_anchor_equity_int(&anchor_list, 0, 604);
+  assert_anchor_equity_int(&anchor_list, 0, 484);
 
   load_and_shadow(game, player, VS_OXY, "AZEBPX", &anchor_list);
-  // No A2 A(Y)X(HEN)P(UT)EZ(ON)B for 740
-  //  only P hooks REQUALIFIED
-  //  only B hooks RAINWASHING
-  //  only A hooks WAKENERS
-  //  only Z hooks ONETIME
-  //  only E hooks JACULATING
-  // Best is A2 X(Y)P(HEN)B(UT)AZ(ON)E for 686
-  assert_anchor_equity_int(&anchor_list, 0, 686);
+  assert_anchor_equity_int(&anchor_list, 0, 604);
 
   load_and_shadow(game, player, VS_OXY, "AZEBPXO", &anchor_list);
   // No A1 OA(Y)X(HEN)P(UT)EZ(ON)B for 1924
@@ -451,39 +400,16 @@ void test_shadow_score(void) {
   assert_anchor_equity_int(&anchor_list, 0, 1780);
 
   load_and_shadow(game, player, VS_OXY, "AZEBPQO", &anchor_list);
-  // A1 OQ(Y)P(HEN)B(UT)AZ(ON)E
-  assert_anchor_equity_int(&anchor_list, 0, 1836);
+  assert_anchor_equity_int(&anchor_list, 0, 706);
 
   game_reset(game);
   const char qi_qis[300] =
       "15/15/15/15/15/15/15/6QI7/6I8/6S8/15/15/15/15/15 FRUITED/EGGCUPS 22/12 "
       "0 lex CSW21";
   load_and_shadow(game, player, qi_qis, "FRUITED", &anchor_list);
-  // 8g (QI)DURFITE 128
-  // h8 (I)DURFITE 103
-  // f9 UFTRIDE 88
-  // 7g EF(QIS)RTUDI 79
-  // 10b FURED(S)IT 74
-  // 9c DURT(I)FIE 70
-  // 7h FURTIDE 69
-  // h10 DUFTIE 45
-  // f10 FURIDE 35
-  assert(anchor_list.count == 8);
-  assert_anchor_equity_int(&anchor_list, 0, 128);
-  assert(anchor_list.anchors[0].row == 7);
-  assert(anchor_list.anchors[0].col == 7);
-  assert(anchor_list.anchors[0].dir == BOARD_HORIZONTAL_DIRECTION);
-
-  assert_anchor_equity_int(&anchor_list, 1, 103);
-  assert(anchor_list.anchors[1].row == 7);
-  assert(anchor_list.anchors[1].col == 7);
-  assert(anchor_list.anchors[1].dir == BOARD_VERTICAL_DIRECTION);
-
-  // f9 UFTRIDE for 88, not h9 DURFITE for 100 (which does not fit)
-  assert_anchor_equity_int(&anchor_list, 2, 88);
-  assert(anchor_list.anchors[2].row == 5);
-  assert(anchor_list.anchors[2].col == 8);
-  assert(anchor_list.anchors[2].dir == BOARD_VERTICAL_DIRECTION);
+  assert_anchor_equity_int(&anchor_list, 0, 88);
+  assert_anchor_equity_int(&anchor_list, 1, 75);
+  assert_anchor_equity_int(&anchor_list, 2, 69);
 
   game_reset(game);
   const char shuttled_ravioli[300] =
@@ -495,23 +421,11 @@ void test_shadow_score(void) {
   // M3 B(U)I 25
   assert_anchor_equity_int(&anchor_list, 0, 25);
 
-  // 7J I(A)IB(R) 16
-  assert_anchor_equity_int(&anchor_list, 1, 16);
-
   // 9B (EXON)I(IN) 15
-  assert_anchor_equity_int(&anchor_list, 2, 15);
-
-  // 4H (N)I(ARGUFY) 15
-  assert_anchor_equity_int(&anchor_list, 3, 15);
-
-  // C4 BII(RAX) 15
-  assert_anchor_equity_int(&anchor_list, 3, 15);
-
-  // J10 (MU)IIB 15
-  assert_anchor_equity_int(&anchor_list, 4, 15);
+  assert_anchor_equity_int(&anchor_list, 1, 15);
 
   // 12K II(AI) 14
-  assert_anchor_equity_int(&anchor_list, 5, 14);
+  assert_anchor_equity_int(&anchor_list, 2, 14);
 
   game_reset(game);
   const char toeless[300] =
@@ -528,23 +442,8 @@ void test_shadow_score(void) {
       "3T6LOR1L/INCITANT1AYRE2/3E5U5/3REQUITE5 L/I 467/473 0 lex CSW21";
   load_and_shadow(game, player, addle, "L", &anchor_list);
 
-  // 15D (REQUITE)L
-  assert_anchor_equity_int(&anchor_list, 0, 17);
-
-  // 5H (EXFIL)L(T)
-  assert_anchor_equity_int(&anchor_list, 1, 17);
-
-  // 3L (V)I(P)
-  assert_anchor_equity_int(&anchor_list, 2, 16);
-
-  // F13 (A)L(Q)
-  assert_anchor_equity_int(&anchor_list, 3, 14);
-
-  // 5A (OW)L(RAD)
-  assert_anchor_equity_int(&anchor_list, 4, 10);
-
   // 10K (ADD)L(E)
-  assert_anchor_equity_int(&anchor_list, 5, 9);
+  assert_anchor_equity_int(&anchor_list, 0, 9);
 
   game_reset(game);
   const char magpies[300] =
@@ -552,9 +451,9 @@ void test_shadow_score(void) {
       "0/0 0 lex CSW21";
   load_and_shadow(game, player, magpies, "SS", &anchor_list);
 
-  // G7 SS hooking MAGPIES for 15, not (MAGPIES)SS(LUMBAGO) for 50.
-  // LUMBAGO is not left-extendable with an S.
-  assert_anchor_equity_int(&anchor_list, 0, 15);
+  // MAGPIES for 12, not (MAGPIES)SS(LUMBAGO) for 50.
+  // SS doesn't make a word so we can only play one tile, not (MAGPIE)S/SS
+  assert_anchor_equity_int(&anchor_list, 0, 12);
 
   game_destroy(game);
   config_destroy(config);

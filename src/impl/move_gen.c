@@ -1826,7 +1826,9 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
     gen->best_leaves[i] = EQUITY_INITIAL_VALUE;
   }
 
-  if (gen->number_of_tiles_in_bag > 0) {
+  const bool check_leaves = (gen->number_of_tiles_in_bag > 0) &&
+                            (gen->move_sort_type != MOVE_SORT_SCORE);
+  if (check_leaves) {
     // Set the best leaves and maybe add exchanges.
     // gen->leave_map.current_index moves differently when filling
     // leave_values than when reading from it to generate plays. Start at 0,
@@ -1841,6 +1843,10 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
         gen->number_of_tiles_in_bag +
                 rack_get_total_letters(&gen->opponent_rack) >=
             (RACK_SIZE * 2));
+  } else {
+    for (int i = 0; i < RACK_SIZE; i++) {
+      gen->best_leaves[i] = 0;
+    }
   }
 }
 
@@ -1945,8 +1951,10 @@ void generate_moves(const MoveGenArgs *args) {
   gen_look_up_leaves_and_record_exchanges(gen);
 
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
-    wmp_move_gen_check_nonplaythrough_existence(
-        &gen->wmp_move_gen, gen->number_of_tiles_in_bag > 0, &gen->leave_map);
+    const bool check_leaves = (gen->number_of_tiles_in_bag > 0) &&
+                              (gen->move_sort_type != MOVE_SORT_SCORE);
+    wmp_move_gen_check_nonplaythrough_existence(&gen->wmp_move_gen,
+                                                check_leaves, &gen->leave_map);
   }
 
   gen_shadow(gen);
