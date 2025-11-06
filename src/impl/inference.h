@@ -20,8 +20,9 @@ typedef struct InferenceArgs {
   Rack *target_played_tiles;
   Rack *target_known_rack;
   Rack *nontarget_known_rack;
-  bool update_thread_control_status;
   const Game *game;
+  int num_threads;
+  int print_interval;
   ThreadControl *thread_control;
 } InferenceArgs;
 

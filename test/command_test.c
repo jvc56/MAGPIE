@@ -2,6 +2,7 @@
 #include "../src/compat/ctime.h"
 #include "../src/compat/linenoise.h"
 #include "../src/def/cpthread_defs.h"
+#include "../src/def/thread_control_defs.h"
 #include "../src/ent/move.h"
 #include "../src/ent/thread_control.h"
 #include "../src/impl/config.h"
@@ -132,7 +133,8 @@ void block_for_search(const Config *config, int max_seconds) {
   double seconds_elapsed = 0;
   ThreadControl *thread_control = config_get_thread_control(config);
   while (true) {
-    if (thread_control_is_finished(thread_control)) {
+    if (thread_control_get_status(thread_control) ==
+        THREAD_CONTROL_STATUS_FINISHED) {
       break;
     }
     ctime_nap(DEFAULT_NAP_TIME);

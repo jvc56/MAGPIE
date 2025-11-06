@@ -1,5 +1,6 @@
 #include "config.h"
 
+#include "../compat/ctime.h"
 #include "../def/autoplay_defs.h"
 #include "../def/bai_defs.h"
 #include "../def/config_defs.h"
@@ -14,6 +15,7 @@
 #include "../def/validated_move_defs.h"
 #include "../ent/autoplay_results.h"
 #include "../ent/bag.h"
+#include "../ent/bai_result.h"
 #include "../ent/board.h"
 #include "../ent/board_layout.h"
 #include "../ent/conversion_results.h"
@@ -188,6 +190,9 @@ struct Config {
   char *record_filepath;
   double tt_fraction_of_mem;
   int time_limit_seconds;
+  int num_threads;
+  int print_interval;
+  uint64_t seed;
   bai_sampling_rule_t sampling_rule;
   bai_threshold_t threshold;
   game_variant_t game_variant;
@@ -337,6 +342,8 @@ int config_get_time_limit_seconds(const Config *config) {
   return config->time_limit_seconds;
 }
 
+uint64_t config_get_seed(const Config *config) { return config->seed; }
+
 double config_get_tt_fraction_of_mem(const Config *config) {
   return config->tt_fraction_of_mem;
 }
@@ -424,7 +431,7 @@ void config_fill_game_args(const Config *config, GameArgs *game_args) {
   game_args->ld = config->ld;
   game_args->bingo_bonus = config->bingo_bonus;
   game_args->game_variant = config->game_variant;
-  game_args->seed = thread_control_get_seed(config->thread_control);
+  game_args->seed = config->seed;
 }
 
 Game *config_game_create(const Config *config) {
@@ -669,7 +676,8 @@ char *get_status_running_str(const Config *config) {
 
 char *status_generic(Config *config) {
   char *status_str = NULL;
-  if (thread_control_is_finished(config->thread_control)) {
+  if (thread_control_get_status(config->thread_control) ==
+      THREAD_CONTROL_STATUS_FINISHED) {
     status_str = get_status_finished_str(config);
   } else {
     status_str = get_status_running_str(config);
@@ -852,8 +860,9 @@ void config_fill_infer_args(const Config *config, bool use_game_history,
   args->nontarget_known_rack = nontarget_known_rack;
   args->use_game_history = use_game_history;
   args->game_history = config->game_history;
-  args->update_thread_control_status = true;
   args->game = config_get_game(config);
+  args->num_threads = config->num_threads;
+  args->print_interval = config->print_interval;
   args->thread_control = config->thread_control;
 }
 
@@ -1018,6 +1027,9 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->game = config_get_game(config);
   sim_args->move_list = config_get_move_list(config);
   sim_args->use_inference = config->sim_with_inference;
+  sim_args->num_threads = config->num_threads;
+  sim_args->print_interval = config->print_interval;
+  sim_args->seed = config->seed;
   if (sim_args->use_inference) {
     // FIXME: enable sim inferences using data from the last play instead of the
     // whole history so that autoplay does not have to keep a whole history
@@ -1026,7 +1038,6 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
     config_fill_infer_args(config, true, 0, 0, 0, target_played_tiles,
                            target_known_inference_tiles, nontarget_known_tiles,
                            &sim_args->inference_args);
-    sim_args->inference_args.update_thread_control_status = false;
   }
   sim_args->bai_options.sample_limit = config_get_max_iterations(config);
   sim_args->bai_options.sample_minimum = config->min_play_iterations;
@@ -1041,6 +1052,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->bai_options.time_limit_seconds =
       config_get_time_limit_seconds(config);
   sim_args->bai_options.sampling_rule = config->sampling_rule;
+  sim_args->bai_options.num_threads = config->num_threads;
 }
 
 void config_simulate(const Config *config, Rack *known_opp_rack,
@@ -1101,11 +1113,11 @@ char *status_sim(Config *config) {
   if (!sim_results) {
     return string_duplicate("simmer has not been initialized");
   }
-  return ucgi_sim_stats(
-      config->game, sim_results,
-      (double)sim_results_get_node_count(sim_results) /
-          thread_control_get_seconds_elapsed(config->thread_control),
-      true);
+  return ucgi_sim_stats(config->game, sim_results,
+                        (double)sim_results_get_node_count(sim_results) /
+                            bai_result_get_elapsed_seconds(
+                                sim_results_get_bai_result(sim_results)),
+                        true);
 }
 
 // Endgame
@@ -1153,6 +1165,9 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->use_game_pairs = config_get_use_game_pairs(config);
   autoplay_args->human_readable = config_get_human_readable(config);
   autoplay_args->print_boards = config->print_boards;
+  autoplay_args->num_threads = config->num_threads;
+  autoplay_args->print_interval = config->print_interval;
+  autoplay_args->seed = config->seed;
   autoplay_args->thread_control = config_get_thread_control(config);
   autoplay_args->data_paths = config_get_data_paths(config);
   autoplay_args->game_string_options = config->game_string_options;
@@ -3211,27 +3226,16 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  int number_of_threads = -1;
   config_load_int(config, ARG_TOKEN_NUMBER_OF_THREADS, 1, MAX_THREADS,
-                  &number_of_threads, error_stack);
+                  &config->num_threads, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
 
-  if (number_of_threads > 0) {
-    thread_control_set_threads(config->thread_control, number_of_threads);
-  }
-
-  int print_info_interval = -1;
   config_load_int(config, ARG_TOKEN_PRINT_INFO_INTERVAL, 0, INT_MAX,
-                  &print_info_interval, error_stack);
+                  &config->print_interval, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
-  }
-
-  if (print_info_interval >= 0) {
-    thread_control_set_print_info_interval(config->thread_control,
-                                           print_info_interval);
   }
 
   config_load_int(config, ARG_TOKEN_TIME_LIMIT, 0, INT_MAX,
@@ -3537,16 +3541,9 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
 
   // Seed
 
-  uint64_t seed = 0;
-  config_load_uint64(config, ARG_TOKEN_RANDOM_SEED, &seed, error_stack);
+  config_load_uint64(config, ARG_TOKEN_RANDOM_SEED, &config->seed, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
-  }
-
-  if (!config_get_parg_value(config, ARG_TOKEN_RANDOM_SEED, 0)) {
-    thread_control_increment_seed(config->thread_control);
-  } else {
-    thread_control_set_seed(config->thread_control, seed);
   }
 
   // Board layout
@@ -3947,6 +3944,9 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->max_iterations = 5000;
   config->stop_cond_pct = 99;
   config->time_limit_seconds = 0;
+  config->num_threads = 1;
+  config->print_interval = 0;
+  config->seed = ctime_get_current_time();
   config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
   config->threshold = BAI_THRESHOLD_GK16;
   config->use_game_pairs = false;

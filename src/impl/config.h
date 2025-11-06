@@ -48,6 +48,7 @@ int config_get_num_small_plays(const Config *config);
 int config_get_plies(const Config *config);
 int config_get_endgame_plies(const Config *config);
 int config_get_max_iterations(const Config *config);
+uint64_t config_get_seed(const Config *config);
 double config_get_stop_cond_pct(const Config *config);
 bool config_get_use_game_pairs(const Config *config);
 bool config_get_use_small_plays(const Config *config);

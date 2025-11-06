@@ -1,6 +1,7 @@
 #include "simmer.h"
 
 #include "../def/thread_control_defs.h"
+#include "../ent/bai_result.h"
 #include "../ent/move.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
@@ -41,7 +42,7 @@ void simulate(SimArgs *sim_args, SimResults *sim_results,
 
   RandomVariablesArgs rng_args = {
       .type = RANDOM_VARIABLES_UNIFORM,
-      .seed = thread_control_get_seed(sim_args->thread_control),
+      .seed = sim_args->seed,
   };
 
   RandomVariables *rng = rvs_create(&rng_args);
@@ -51,11 +52,11 @@ void simulate(SimArgs *sim_args, SimResults *sim_results,
 
   sim_results_set_iteration_count(sim_results, rvs_get_total_samples(rvs));
 
-  print_ucgi_sim_stats(
-      sim_args->game, sim_results, sim_args->thread_control,
-      (double)sim_results_get_node_count(sim_results) /
-          thread_control_get_seconds_elapsed(sim_args->thread_control),
-      true);
+  print_ucgi_sim_stats(sim_args->game, sim_results, sim_args->thread_control,
+                       (double)sim_results_get_node_count(sim_results) /
+                           bai_result_get_elapsed_seconds(
+                               sim_results_get_bai_result(sim_results)),
+                       true);
 
   // FIXME: once simming is part of autoplay, we will want to prevent these
   // repeated alloc and deallocs if possible

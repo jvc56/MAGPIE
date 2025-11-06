@@ -2,6 +2,7 @@
 #include "autoplay.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/ctime.h"
 #include "../def/autoplay_defs.h"
 #include "../def/cpthread_defs.h"
 #include "../def/players_data_defs.h"
@@ -49,9 +50,76 @@ typedef struct LeavegenSharedData {
 } LeavegenSharedData;
 
 typedef struct AutoplaySharedData {
+  int num_threads;
+  int print_interval;
+  Timer timer;
+  uint64_t max_iter_count;
+  uint64_t seed;
+  XoshiroPRNG *prng;
+  uint64_t iter_count;
+  cpthread_mutex_t iter_mutex;
+  uint64_t iter_count_completed;
+  cpthread_mutex_t iter_completed_mutex;
   ThreadControl *thread_control;
   LeavegenSharedData *leavegen_shared_data;
 } AutoplaySharedData;
+
+typedef struct AutoplayIterOutput {
+  uint64_t seed;
+  uint64_t iter_count;
+} AutoplayIterOutput;
+
+typedef struct AutoplayIterCompletedOutput {
+  uint64_t iter_count_completed;
+  double time_elapsed;
+  bool print_info;
+} AutoplayIterCompletedOutput;
+
+// Returns true if the iter_count is already greater than or equal to
+// stop_iter_count and does nothing else.
+// Returns false if the iter_count is less than the stop_iter_count
+// and increments the iter_count and sets the next seed.
+bool autoplay_get_next_iter_output(AutoplaySharedData *shared_data,
+                                   AutoplayIterOutput *iter_output) {
+  bool at_stop_count = false;
+  cpthread_mutex_lock(&shared_data->iter_mutex);
+  if (shared_data->iter_count >= shared_data->max_iter_count) {
+    at_stop_count = true;
+  } else {
+    iter_output->seed = prng_next(shared_data->prng);
+    iter_output->iter_count = shared_data->iter_count++;
+  }
+  cpthread_mutex_unlock(&shared_data->iter_mutex);
+  return at_stop_count;
+}
+
+// This function should be called when a thread has completed computation
+// for an iteration given by autoplay_get_next_iter_output.
+// It increments the count completed and records the elapsed time.
+void autoplay_complete_iter(
+    AutoplaySharedData *shared_data,
+    AutoplayIterCompletedOutput *iter_completed_output) {
+  cpthread_mutex_lock(&shared_data->iter_completed_mutex);
+  // Update internal fields
+  shared_data->iter_count_completed++;
+  // Set output
+  iter_completed_output->iter_count_completed =
+      shared_data->iter_count_completed;
+  iter_completed_output->time_elapsed =
+      ctimer_elapsed_seconds(&shared_data->timer);
+  iter_completed_output->print_info =
+      shared_data->print_interval > 0 &&
+      shared_data->iter_count_completed % shared_data->print_interval == 0;
+  cpthread_mutex_unlock(&shared_data->iter_completed_mutex);
+}
+
+// Copies the thread control PRNG to the other PRNG and performs a PRNG
+// jump on the thread control PRNG.
+void autoplay_shared_data_copy_to_dst_and_jump(AutoplaySharedData *shared_data,
+                                               XoshiroPRNG *dst) {
+  prng_copy(dst, shared_data->prng);
+  prng_jump(shared_data->prng);
+}
 
 void postgen_prebroadcast_func(void *data) {
   AutoplaySharedData *shared_data = (AutoplaySharedData *)data;
@@ -95,21 +163,18 @@ void postgen_prebroadcast_func(void *data) {
     log_fatal("leavegen failed to write klv to CSV");
   }
 
-  const int number_of_threads =
-      thread_control_get_threads(shared_data->thread_control);
-
   // Get total game data.
   autoplay_results_finalize(lg_shared_data->autoplay_results_list,
-                            number_of_threads,
+                            shared_data->num_threads,
                             lg_shared_data->primary_autoplay_results);
 
   // Get generational game data
   autoplay_results_reset(lg_shared_data->gen_autoplay_results);
   autoplay_results_finalize(lg_shared_data->autoplay_results_list,
-                            number_of_threads,
+                            shared_data->num_threads,
                             lg_shared_data->gen_autoplay_results);
 
-  for (int i = 0; i < number_of_threads; i++) {
+  for (int i = 0; i < shared_data->num_threads; i++) {
     autoplay_results_reset(lg_shared_data->autoplay_results_list[i]);
   }
 
@@ -122,7 +187,7 @@ void postgen_prebroadcast_func(void *data) {
 
   string_builder_add_formatted_string(
       leave_gen_sb, "Seconds: %f\n",
-      thread_control_get_seconds_elapsed(shared_data->thread_control));
+      ctimer_elapsed_seconds(&shared_data->timer));
   char *cumul_game_data_str = autoplay_results_to_string(
       lg_shared_data->primary_autoplay_results, true, false);
   string_builder_add_string(leave_gen_sb, cumul_game_data_str);
@@ -173,8 +238,7 @@ void postgen_prebroadcast_func(void *data) {
     rack_list_reset(
         lg_shared_data->rack_list,
         lg_shared_data->min_rack_targets[lg_shared_data->gens_completed]);
-    lg_shared_data->gen_start_games =
-        thread_control_get_iter_count(shared_data->thread_control);
+    lg_shared_data->gen_start_games = shared_data->iter_count;
   }
 }
 
@@ -199,8 +263,8 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   autoplay_worker->prng = NULL;
   if (shared_data->leavegen_shared_data) {
     autoplay_worker->prng = prng_create(0);
-    thread_control_copy_to_dst_and_jump(args->thread_control,
-                                        autoplay_worker->prng);
+    autoplay_shared_data_copy_to_dst_and_jump(shared_data,
+                                              autoplay_worker->prng);
   }
   autoplay_worker->shared_data = shared_data;
   return autoplay_worker;
@@ -240,18 +304,29 @@ LeavegenSharedData *leavegen_shared_data_create(
 }
 
 // Use NULL for the KLV when not running in leave gen mode.
-AutoplaySharedData *autoplay_shared_data_create(
-    AutoplayResults *primary_autoplay_results,
-    AutoplayResults **autoplay_results_list, ThreadControl *thread_control,
-    const LetterDistribution *ld, const char *data_paths, KLV *klv,
-    int number_of_threads, int num_gens, int *min_rack_targets) {
+AutoplaySharedData *
+autoplay_shared_data_create(const AutoplayArgs *args,
+                            const uint64_t first_gen_num_games,
+                            AutoplayResults *primary_autoplay_results,
+                            AutoplayResults **autoplay_results_list, KLV *klv,
+                            int num_gens, int *min_rack_targets) {
   AutoplaySharedData *shared_data = malloc_or_die(sizeof(AutoplaySharedData));
-  shared_data->thread_control = thread_control;
+  shared_data->num_threads = args->num_threads;
+  shared_data->print_interval = args->print_interval;
+  ctimer_start(&shared_data->timer);
+  shared_data->max_iter_count = first_gen_num_games;
+  shared_data->seed = args->seed;
+  shared_data->prng = prng_create(args->seed);
+  shared_data->iter_count = 0;
+  cpthread_mutex_init(&shared_data->iter_mutex);
+  shared_data->iter_count_completed = 0;
+  cpthread_mutex_init(&shared_data->iter_completed_mutex);
+  shared_data->thread_control = args->thread_control;
   shared_data->leavegen_shared_data = NULL;
   if (klv) {
     shared_data->leavegen_shared_data = leavegen_shared_data_create(
-        primary_autoplay_results, autoplay_results_list, ld, data_paths, klv,
-        number_of_threads, num_gens, min_rack_targets);
+        primary_autoplay_results, autoplay_results_list, args->game_args->ld,
+        args->data_paths, klv, args->num_threads, num_gens, min_rack_targets);
   }
   return shared_data;
 }
@@ -270,6 +345,7 @@ void autoplay_shared_data_destroy(AutoplaySharedData *shared_data) {
   if (!shared_data) {
     return;
   }
+  prng_destroy(shared_data->prng);
   leavegen_shared_data_destroy(shared_data->leavegen_shared_data);
   free(shared_data);
 }
@@ -307,7 +383,7 @@ void game_runner_destroy(GameRunner *game_runner) {
 
 void game_runner_start(const AutoplayWorker *autoplay_worker,
                        GameRunner *game_runner,
-                       const ThreadControlIterOutput *iter_output,
+                       const AutoplayIterOutput *iter_output,
                        int starting_player_index, int pair_game_number) {
   Game *game = game_runner->game;
   game_reset(game);
@@ -408,9 +484,8 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
   game_runner->turn_number++;
 }
 
-void print_current_status(
-    AutoplayWorker *autoplay_worker,
-    ThreadControlIterCompletedOutput *iter_completed_output) {
+void print_current_status(AutoplayWorker *autoplay_worker,
+                          AutoplayIterCompletedOutput *iter_completed_output) {
   StringBuilder *status_sb = string_builder_create();
   AutoplaySharedData *shared_data = autoplay_worker->shared_data;
   string_builder_add_formatted_string(
@@ -440,17 +515,17 @@ void autoplay_add_game(AutoplayWorker *autoplay_worker,
   autoplay_results_add_game(autoplay_worker->autoplay_results,
                             game_runner->game, game_runner->turn_number,
                             divergent, game_runner->seed);
-  ThreadControlIterCompletedOutput iter_completed_output;
-  thread_control_complete_iter(autoplay_worker->args->thread_control,
-                               &iter_completed_output);
+  AutoplayIterCompletedOutput iter_completed_output;
+  autoplay_complete_iter(autoplay_worker->shared_data, &iter_completed_output);
   if (iter_completed_output.print_info) {
     print_current_status(autoplay_worker, &iter_completed_output);
   }
 }
 
-void play_autoplay_game_or_game_pair(
-    AutoplayWorker *autoplay_worker, GameRunner *game_runner1,
-    GameRunner *game_runner2, const ThreadControlIterOutput *iter_output) {
+void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
+                                     GameRunner *game_runner1,
+                                     GameRunner *game_runner2,
+                                     const AutoplayIterOutput *iter_output) {
   const int starting_player_index = (int)(iter_output->iter_count % 2);
   game_runner_start(autoplay_worker, game_runner1, iter_output,
                     starting_player_index, game_runner2 ? 1 : 0);
@@ -507,12 +582,14 @@ void autoplay_single_generation(AutoplayWorker *autoplay_worker,
                                 GameRunner *game_runner1,
                                 GameRunner *game_runner2) {
   ThreadControl *thread_control = autoplay_worker->args->thread_control;
-  ThreadControlIterOutput iter_output;
+  AutoplayIterOutput iter_output;
   while (
       // Check if autoplay was exited by the user.
-      !thread_control_is_winding_down(thread_control) &&
+      thread_control_get_status(thread_control) !=
+          THREAD_CONTROL_STATUS_USER_INTERRUPT &&
       // Check if the maximum iteration has been reached.
-      !thread_control_get_next_iter_output(thread_control, &iter_output) &&
+      !autoplay_get_next_iter_output(autoplay_worker->shared_data,
+                                     &iter_output) &&
       // Check if the target minimum leave count has been reached.
       // This will never be true for the default autoplay mode.
       !target_min_leave_count_reached(autoplay_worker)) {
@@ -523,13 +600,13 @@ void autoplay_single_generation(AutoplayWorker *autoplay_worker,
 
 void autoplay_leave_gen(AutoplayWorker *autoplay_worker,
                         GameRunner *game_runner) {
-  const AutoplayArgs *args = autoplay_worker->args;
   AutoplaySharedData *shared_data = autoplay_worker->shared_data;
   LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
   for (int i = 0; i < lg_shared_data->num_gens; i++) {
     autoplay_single_generation(autoplay_worker, game_runner, NULL);
     checkpoint_wait(lg_shared_data->postgen_checkpoint, shared_data);
-    if (thread_control_is_winding_down(args->thread_control)) {
+    if (thread_control_get_status(shared_data->thread_control) ==
+        THREAD_CONTROL_STATUS_USER_INTERRUPT) {
       break;
     }
   }
@@ -641,11 +718,7 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
 
   ThreadControl *thread_control = args->thread_control;
 
-  thread_control_set_max_iter_count(thread_control, first_gen_num_games);
-
   autoplay_results_reset(autoplay_results);
-
-  const int number_of_threads = thread_control_get_threads(thread_control);
 
   KLV *klv = NULL;
   bool show_divergent_results = args->use_game_pairs;
@@ -657,19 +730,18 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
   }
 
   AutoplayResults **autoplay_results_list =
-      malloc_or_die((sizeof(AutoplayResults *)) * (number_of_threads));
+      malloc_or_die((sizeof(AutoplayResults *)) * (args->num_threads));
 
   AutoplaySharedData *shared_data = autoplay_shared_data_create(
-      autoplay_results, autoplay_results_list, thread_control,
-      args->game_args->ld, args->data_paths, klv, number_of_threads, num_gens,
-      min_rack_targets);
+      args, first_gen_num_games, autoplay_results, autoplay_results_list, klv,
+      num_gens, min_rack_targets);
 
   AutoplayWorker **autoplay_workers =
-      malloc_or_die((sizeof(AutoplayWorker *)) * (number_of_threads));
+      malloc_or_die((sizeof(AutoplayWorker *)) * (args->num_threads));
   cpthread_t *worker_ids =
-      malloc_or_die((sizeof(cpthread_t)) * (number_of_threads));
+      malloc_or_die((sizeof(cpthread_t)) * (args->num_threads));
 
-  for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
+  for (int thread_index = 0; thread_index < args->num_threads; thread_index++) {
     autoplay_workers[thread_index] = autoplay_worker_create(
         args, autoplay_results, thread_index, shared_data);
     autoplay_results_list[thread_index] =
@@ -678,24 +750,19 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
                     autoplay_workers[thread_index]);
   }
 
-  for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
+  for (int thread_index = 0; thread_index < args->num_threads; thread_index++) {
     cpthread_join(worker_ids[thread_index]);
   }
 
-  // If autoplay was interrupted by the user,
-  // this will not change the status.
-  thread_control_set_status(thread_control,
-                            THREAD_CONTROL_STATUS_MAX_ITERATIONS);
-
   // The stats have already been combined in leavegen mode
   if (!is_leavegen_mode) {
-    autoplay_results_finalize(autoplay_results_list, number_of_threads,
+    autoplay_results_finalize(autoplay_results_list, args->num_threads,
                               autoplay_results);
   }
 
   free(autoplay_results_list);
 
-  for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
+  for (int thread_index = 0; thread_index < args->num_threads; thread_index++) {
     autoplay_worker_destroy(autoplay_workers[thread_index]);
   }
 
