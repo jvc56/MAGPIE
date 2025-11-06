@@ -420,7 +420,7 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
 }
 
 static inline void set_play_for_record_wmp(MoveGen *gen, Move *move,
-                                           int start_col, int score) {
+                                           int start_col, Equity score) {
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
   move_set_all_except_equity(
       move, gen->playthrough_marked, 0, wgen->word_length - 1, score,
@@ -456,7 +456,7 @@ static inline Equity get_move_equity_for_sort_type_wmp(MoveGen *gen,
 
 static inline void
 update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
-                                             int score, Equity leave_value) {
+                                             Equity score, Equity leave_value) {
   bool need_to_update_best_move_equity_or_score = false;
   switch (gen->move_record_type) {
   case MOVE_RECORD_ALL:
@@ -501,25 +501,25 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
 
 void record_wmp_play(MoveGen *gen, int start_col, Equity leave_value) {
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
-  const int bingo_bonus =
+  const Equity bingo_bonus =
       gen->max_tiles_to_play == RACK_SIZE ? gen->bingo_bonus : 0;
-  int played_score_total = 0;
-  int playthrough_score_total = 0;
+  Equity played_score_total = 0;
+  Equity playthrough_score_total = 0;
   // from already played letters hooked
-  int hooked_cross_total = 0;
+  Equity hooked_cross_total = 0;
   // from newly played tiles counting both ways due to crossing
-  int played_cross_total = 0;
+  Equity played_cross_total = 0;
   int word_multiplier = 1;
   for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
     const int board_col = letter_idx + start_col;
     MachineLetter ml = gen->playthrough_marked[letter_idx];
     if (ml != PLAYED_THROUGH_MARKER) {
-      const int tile_score = get_is_blanked(ml) ? 0 : gen->tile_scores[ml];
+      const Equity tile_score = gen->tile_scores[ml];
       const BonusSquare bonus_square =
           gen_cache_get_bonus_square(gen, board_col);
       const int this_word_multiplier =
           bonus_square_get_word_multiplier(bonus_square);
-      const int hooked_cross_score =
+      const Equity hooked_cross_score =
           gen_cache_get_cross_score(gen, board_col) * this_word_multiplier;
       hooked_cross_total += hooked_cross_score;
       const int is_cross_word =
@@ -532,11 +532,10 @@ void record_wmp_play(MoveGen *gen, int start_col, Equity leave_value) {
       word_multiplier *= this_word_multiplier;
     } else {
       ml = gen_cache_get_letter(gen, board_col);
-      const int tile_score = get_is_blanked(ml) ? 0 : gen->tile_scores[ml];
-      playthrough_score_total += tile_score;
+      playthrough_score_total += gen->tile_scores[ml];
     }
   }
-  const int score =
+  const Equity score =
       (played_score_total + playthrough_score_total) * word_multiplier +
       hooked_cross_total + played_cross_total + bingo_bonus;
   update_best_move_or_insert_into_movelist_wmp(gen, start_col, score,
@@ -703,11 +702,11 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
 void go_on(MoveGen *gen, int current_col, MachineLetter L,
            uint32_t new_node_index, bool accepts, int leftstrip, int rightstrip,
            bool unique_play, int main_word_score, int word_multiplier,
-           int cross_score);
+           Equity cross_score);
 
 void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
                    int rightstrip, bool unique_play, int main_word_score,
-                   int word_multiplier, int cross_score) {
+                   int word_multiplier, Equity cross_score) {
   const MachineLetter current_letter = gen_cache_get_letter(gen, col);
   // If current_letter is nonempty, leftx is the set of letters that could go
   // immediately left of the current block of played tiles.
@@ -793,8 +792,8 @@ static inline bool play_is_nonempty_and_nonduplicate(int tiles_played,
 
 void go_on(MoveGen *gen, int current_col, MachineLetter L,
            uint32_t new_node_index, bool accepts, int leftstrip, int rightstrip,
-           bool unique_play, int main_word_score, int word_multiplier,
-           int cross_score) {
+           bool unique_play, Equity main_word_score, int word_multiplier,
+           Equity cross_score) {
   // Handle incremental scoring
   const BonusSquare bonus_square = gen_cache_get_bonus_square(gen, current_col);
   uint8_t letter_multiplier = 1;
@@ -814,13 +813,13 @@ void go_on(MoveGen *gen, int current_col, MachineLetter L,
     letter_multiplier = bonus_square_get_letter_multiplier(bonus_square);
   }
 
-  int inc_word_multiplier = this_word_multiplier * word_multiplier;
+  const int inc_word_multiplier = this_word_multiplier * word_multiplier;
 
-  const int lsm = gen->tile_scores[ml] * letter_multiplier;
+  const Equity lsm = gen->tile_scores[ml] * letter_multiplier;
 
-  int inc_main_word_score = lsm + main_word_score;
+  const Equity inc_main_word_score = lsm + main_word_score;
 
-  int inc_cross_scores = cross_score;
+  Equity inc_cross_scores = cross_score;
 
   if (fresh_tile && gen_cache_get_is_cross_word(gen, current_col)) {
     inc_cross_scores += (lsm + gen_cache_get_cross_score(gen, current_col)) *
@@ -894,11 +893,11 @@ void go_on(MoveGen *gen, int current_col, MachineLetter L,
 
 void go_on_alpha(MoveGen *gen, int current_col, MachineLetter L, int leftstrip,
                  int rightstrip, bool unique_play, int main_word_score,
-                 int word_multiplier, int cross_score);
+                 int word_multiplier, Equity cross_score);
 
 void recursive_gen_alpha(MoveGen *gen, int col, int leftstrip, int rightstrip,
-                         bool unique_play, int main_word_score,
-                         int word_multiplier, int cross_score) {
+                         bool unique_play, Equity main_word_score,
+                         int word_multiplier, Equity cross_score) {
   const MachineLetter current_letter = gen_cache_get_letter(gen, col);
   uint64_t possible_letters_here = gen_cache_get_cross_set(gen, col);
   if (possible_letters_here == 1) {
@@ -950,8 +949,8 @@ void recursive_gen_alpha(MoveGen *gen, int col, int leftstrip, int rightstrip,
 }
 
 void go_on_alpha(MoveGen *gen, int current_col, MachineLetter L, int leftstrip,
-                 int rightstrip, bool unique_play, int main_word_score,
-                 int word_multiplier, int cross_score) {
+                 int rightstrip, bool unique_play, Equity main_word_score,
+                 int word_multiplier, Equity cross_score) {
   // Handle incremental scoring
   const BonusSquare bonus_square = gen_cache_get_bonus_square(gen, current_col);
   int letter_multiplier = 1;
@@ -971,13 +970,13 @@ void go_on_alpha(MoveGen *gen, int current_col, MachineLetter L, int leftstrip,
     letter_multiplier = bonus_square_get_letter_multiplier(bonus_square);
   }
 
-  int inc_word_multiplier = this_word_multiplier * word_multiplier;
+  const int inc_word_multiplier = this_word_multiplier * word_multiplier;
 
-  const int lsm = gen->tile_scores[ml] * letter_multiplier;
+  const Equity lsm = gen->tile_scores[ml] * letter_multiplier;
 
-  int inc_main_word_score = lsm + main_word_score;
+  const Equity inc_main_word_score = lsm + main_word_score;
 
-  int inc_cross_scores = cross_score;
+  Equity inc_cross_scores = cross_score;
 
   if (fresh_tile && gen_cache_get_is_cross_word(gen, current_col)) {
     inc_cross_scores += (lsm + gen_cache_get_cross_score(gen, current_col)) *

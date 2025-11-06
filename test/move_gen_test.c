@@ -604,9 +604,11 @@ void top_equity_play_recorder_test(void) {
 }
 
 void small_play_recorder_test(void) {
+  // TODO(olaugh): WMP doesn't support small move. Still under analysis whether
+  // it would be better than recursive_gen for endgame.
   Config *config =
       config_create_or_die("set -lex NWL20 -s1 score -s2 score -r1 small -r2 "
-                           "small -numsmallplays 100000");
+                           "small -numsmallplays 100000 -wmp false");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   Player *player = game_get_player(game, 0);
@@ -835,10 +837,11 @@ void consistent_tiebreaking_test(void) {
 }
 
 void movegen_game_update_test(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Config *config =
+      config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
+                           "all -numplays 1");
 
-  // Check that ld udpates and that blanks can be any score
+  // Check that ld updates and that blanks can be any score
   load_and_exec_config_or_die(config, "set -ld english_blank_is_5");
   load_and_exec_config_or_die(
       config,
@@ -946,19 +949,8 @@ void movegen_var_bingo_bonus_test(void) {
   config_destroy(config);
 }
 
-void movegen_no_wmp_by_default_test(void) {
-  Config *config = config_create_or_die("set -lex CSW21");
-  Game *game = config_game_create(config);
-  const WMP *wmp1 = player_get_wmp(game_get_player(game, 0));
-  assert(wmp1 == NULL);
-  const WMP *wmp2 = player_get_wmp(game_get_player(game, 1));
-  assert(wmp2 == NULL);
-  game_destroy(game);
-  config_destroy(config);
-}
-
 void movegen_only_one_player_wmp(void) {
-  Config *config = config_create_or_die("set -lex CSW21 -w1 true");
+  Config *config = config_create_or_die("set -lex CSW21 -w1 true -w2 false");
   Game *game = config_game_create(config);
   const WMP *wmp1 = player_get_wmp(game_get_player(game, 0));
   assert(wmp1 != NULL);
@@ -968,7 +960,7 @@ void movegen_only_one_player_wmp(void) {
   game_destroy(game);
   config_destroy(config);
 
-  config = config_create_or_die("set -lex CSW21 -w2 true");
+  config = config_create_or_die("set -lex CSW21 -w1 false -w2 true");
   game = config_game_create(config);
   wmp1 = player_get_wmp(game_get_player(game, 0));
   assert(wmp1 == NULL);
@@ -1532,7 +1524,6 @@ void test_move_gen(void) {
   wordsmog_test();
   movegen_game_update_test();
   movegen_var_bingo_bonus_test();
-  movegen_no_wmp_by_default_test();
   movegen_only_one_player_wmp();
   movegen_within_x_of_best_test(false);
   movegen_within_x_of_best_test(true);
