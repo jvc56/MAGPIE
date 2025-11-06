@@ -1828,22 +1828,26 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
 
   const bool check_leaves = (gen->number_of_tiles_in_bag > 0) &&
                             (gen->move_sort_type != MOVE_SORT_SCORE);
-  if (check_leaves) {
-    // Set the best leaves and maybe add exchanges.
-    // gen->leave_map.current_index moves differently when filling
-    // leave_values than when reading from it to generate plays. Start at 0,
-    // which represents using (exchanging) gen->player_rack->number_of_letters
-    // tiles and keeping 0 tiles.
-    leave_map_set_current_index(&gen->leave_map, 0);
-    uint32_t node_index = kwg_get_dawg_root_node_index(gen->klv->kwg);
-    rack_reset(&gen->leave);
-    // Assumes the player has drawn a full rack but not the opponent.
-    generate_exchange_moves(
-        gen, &gen->leave, node_index, 0, 0,
-        gen->number_of_tiles_in_bag +
-                rack_get_total_letters(&gen->opponent_rack) >=
-            (RACK_SIZE * 2));
-  } else {
+  // TODO(olaugh): This is looking up leaves even when the sort is by score.
+  // We should pass check_leaves to generate_exchange_moves because if we sort
+  // by score we should still generate all exchanges. However this is an actual
+  // waste performance-wise for endgame, unless we want to somehow incorporate
+  // something like heuristic "endgame leaves" to use in estimates for negamax.
+  //                            
+  // Set the best leaves and maybe add exchanges.
+  // gen->leave_map.current_index moves differently when filling
+  // leave_values than when reading from it to generate plays. Start at 0,
+  // which represents using (exchanging) gen->player_rack->number_of_letters
+  // tiles and keeping 0 tiles.
+  leave_map_set_current_index(&gen->leave_map, 0);
+  uint32_t node_index = kwg_get_dawg_root_node_index(gen->klv->kwg);
+  rack_reset(&gen->leave);
+  // Assumes the player has drawn a full rack but not the opponent.
+  generate_exchange_moves(gen, &gen->leave, node_index, 0, 0,
+                          gen->number_of_tiles_in_bag +
+                                  rack_get_total_letters(&gen->opponent_rack) >=
+                              (RACK_SIZE * 2));
+  if (!check_leaves) {
     for (int i = 0; i < RACK_SIZE; i++) {
       gen->best_leaves[i] = 0;
     }
