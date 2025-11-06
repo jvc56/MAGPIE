@@ -759,9 +759,9 @@ void distinct_lexica_test(bool w1) {
 }
 
 void wordsmog_test(void) {
-  Config *config =
-      config_create_or_die("set -lex CSW21_alpha -s1 equity -s2 equity "
-                           "-r1 best -r2 best -numplays 1 -var wordsmog");
+  Config *config = config_create_or_die(
+      "set -lex CSW21_alpha -wmp false -s1 equity -s2 equity "
+      "-r1 best -r2 best -numplays 1 -var wordsmog");
   load_and_exec_config_or_die(
       config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
   Game *game = config_get_game(config);
@@ -883,7 +883,7 @@ void movegen_game_update_test(void) {
 
   // Check that the variant updates
   load_and_exec_config_or_die(
-      config, "set -lex CSW21_alpha -var wordsmog -bdn standard15");
+      config, "set -lex CSW21_alpha -wmp false -var wordsmog -bdn standard15");
   load_and_exec_config_or_die(
       config,
       "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 DITZIER/ 0/0 0");

@@ -37,7 +37,7 @@ void test_compatibility(void) {
   config_destroy(french_config);
 
   // Alphabet size is 33, 33*4 > 128
-  Config *polish_config = config_create_or_die("set -lex OSPS49");
+  Config *polish_config = config_create_or_die("set -lex OSPS49 -wmp false");
   const LetterDistribution *polish_ld = config_get_ld(polish_config);
   assert(!bit_rack_is_compatible_with_ld(polish_ld));
   config_destroy(polish_config);

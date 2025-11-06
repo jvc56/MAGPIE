@@ -710,9 +710,9 @@ void test_validated_move_distinct_kwg(void) {
 }
 
 void test_validated_move_wordsmog_phonies(void) {
-  Config *config =
-      config_create_or_die("set -lex CSW21_alpha -s1 equity -s2 equity "
-                           "-r1 best -r2 best -numplays 1 -var wordsmog");
+  Config *config = config_create_or_die(
+      "set -lex CSW21_alpha -wmp false -s1 equity -s2 equity "
+      "-r1 best -r2 best -numplays 1 -var wordsmog");
   Game *game = config_game_create(config);
 
   ValidatedMoves *vms = validated_moves_create_and_assert_status(
