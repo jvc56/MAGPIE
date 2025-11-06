@@ -1745,8 +1745,8 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
 
 void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   const Game *game = args->game;
-  move_record_t move_record_type = args->move_record_type;
-  move_sort_t move_sort_type = args->move_sort_type;
+  gen->move_record_type = args->move_record_type;
+  gen->move_sort_type = args->move_sort_type;
   MoveList *move_list = args->move_list;
   const KWG *override_kwg = args->override_kwg;
   gen->eq_margin_movegen = args->eq_margin_movegen;
@@ -1767,17 +1767,19 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   wmp_move_gen_init(&gen->wmp_move_gen, &gen->ld, &gen->player_rack,
                     player_get_wmp(player));
 
+  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
+    gen->wmp_move_gen.wmp = NULL;
+  }                    
+
   gen->bingo_bonus = game_get_bingo_bonus(game);
   gen->number_of_tiles_in_bag = bag_get_letters(game_get_bag(game));
   gen->kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
-  gen->move_sort_type = move_sort_type;
-  gen->move_record_type = move_record_type;
   gen->move_list = move_list;
   gen->cross_index =
       board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index);
 
   // Reset the move list
-  if (move_record_type == MOVE_RECORD_ALL_SMALL) {
+  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
     small_move_list_reset(gen->move_list);
   } else {
     move_list_reset(gen->move_list);
