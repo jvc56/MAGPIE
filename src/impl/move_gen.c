@@ -1061,11 +1061,9 @@ static inline void shadow_record(MoveGen *gen) {
       if (gen->number_of_tiles_in_bag > 0) {
         best_leaves = wmp_move_gen_get_nonplaythrough_best_leave_values(
             &gen->wmp_move_gen);
-        for (int leave_size = 0;
-             leave_size < gen->number_of_letters_on_rack - gen->tiles_played;
-             leave_size++) {
-          assert(best_leaves[leave_size] <= gen->best_leaves[leave_size]);
-        }
+        const int leave_size =
+            gen->number_of_letters_on_rack - gen->tiles_played;
+        assert(best_leaves[leave_size] <= gen->best_leaves[leave_size]);
       }
     }
   }
