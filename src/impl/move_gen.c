@@ -1061,8 +1061,10 @@ static inline void shadow_record(MoveGen *gen) {
       if (gen->number_of_tiles_in_bag > 0) {
         best_leaves = wmp_move_gen_get_nonplaythrough_best_leave_values(
             &gen->wmp_move_gen);
-        for (int i = 0; i < RACK_SIZE - gen->tiles_played; i++) {
-          assert(best_leaves[i] <= gen->best_leaves[i]);
+        for (int leave_size = 0;
+             leave_size < gen->number_of_letters_on_rack - gen->tiles_played;
+             leave_size++) {
+          assert(best_leaves[leave_size] <= gen->best_leaves[leave_size]);
         }
       }
     }
@@ -1769,7 +1771,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
 
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
     gen->wmp_move_gen.wmp = NULL;
-  }                    
+  }
 
   gen->bingo_bonus = game_get_bingo_bonus(game);
   gen->number_of_tiles_in_bag = bag_get_letters(game_get_bag(game));
@@ -1834,7 +1836,7 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
   // by score we should still generate all exchanges. However this is an actual
   // waste performance-wise for endgame, unless we want to somehow incorporate
   // something like heuristic "endgame leaves" to use in estimates for negamax.
-  //                            
+  //
   // Set the best leaves and maybe add exchanges.
   // gen->leave_map.current_index moves differently when filling
   // leave_values than when reading from it to generate plays. Start at 0,
