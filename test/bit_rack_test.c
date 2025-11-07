@@ -11,7 +11,7 @@
 void test_compatibility(void) {
   assert(bit_rack_type_has_expected_size());
 
-  Config *english_config = config_create_or_die("set -lex NWL20");
+  Config *english_config = config_create_or_die("set -lex NWL20 -wmp false");
   const LetterDistribution *english_ld = config_get_ld(english_config);
   if (BOARD_DIM <= 15) {
     // Could have at most 14 E's in a row (designating 2 blanks)
