@@ -178,9 +178,9 @@ void test_shadow_score(void) {
 
   load_and_shadow(game, player, KA_OPENING_CGP, "J", &anchor_list);
   assert(anchor_list.count == 2);
-  // 8H (KA)J 
+  // 8H (KA)J
   assert_anchor_equity_int(&anchor_list, 0, 14);
-  // H7 J(A) 
+  // H7 J(A)
   assert_anchor_equity_int(&anchor_list, 1, 9);
 
   load_and_shadow(game, player, AA_OPENING_CGP, "JF", &anchor_list);
