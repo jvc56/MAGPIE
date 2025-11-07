@@ -57,11 +57,11 @@ void test_config_load_error_cases(void) {
                          error_stack);
   test_config_load_error(config, "sim -it 1000 -l2 CSW21",
                          ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING, error_stack);
-  test_config_load_error(config, "set -wmp true",
+  test_config_load_error(config, "set -leaves FRA20",
                          ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING, error_stack);
-  test_config_load_error(config, "set -w1 true",
+  test_config_load_error(config, "set -k1 NWL20",
                          ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING, error_stack);
-  test_config_load_error(config, "set -w2 true",
+  test_config_load_error(config, "set -k2 CSW21",
                          ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING, error_stack);
   test_config_load_error(config, "set -mode uci",
                          ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_EXEC_MODE,
@@ -307,45 +307,145 @@ void test_config_load_success(void) {
   config_destroy(config);
 }
 
-void assert_lexical_data(Config *config, const char *cmd, const char *l1,
-                         const char *l2, const char *k1, const char *k2,
-                         const char *ld) {
+void assert_lexical_data(Config *config, const char *cmd, const char *l1_name,
+                         const char *l2_name, const char *k1_name,
+                         const char *k2_name, const char *w1_name,
+                         const char *w2_name, const char *ld_name) {
   load_and_exec_config_or_die(config, cmd);
   const PlayersData *pd = config_get_players_data(config);
   assert_strings_equal(players_data_get_data_name(pd, PLAYERS_DATA_TYPE_KWG, 0),
-                       l1);
+                       l1_name);
   assert_strings_equal(players_data_get_data_name(pd, PLAYERS_DATA_TYPE_KWG, 1),
-                       l2);
+                       l2_name);
   assert_strings_equal(players_data_get_data_name(pd, PLAYERS_DATA_TYPE_KLV, 0),
-                       k1);
+                       k1_name);
   assert_strings_equal(players_data_get_data_name(pd, PLAYERS_DATA_TYPE_KLV, 1),
-                       k2);
-  assert_strings_equal(ld_get_name(config_get_ld(config)), ld);
+                       k2_name);
+  assert_strings_equal(players_data_get_data_name(pd, PLAYERS_DATA_TYPE_WMP, 0),
+                       w1_name);
+  assert_strings_equal(players_data_get_data_name(pd, PLAYERS_DATA_TYPE_WMP, 1),
+                       w2_name);
+  const LetterDistribution *ld = config_get_ld(config);
+  if (!ld) {
+    assert_strings_equal(ld_name, NULL);
+  } else {
+    assert_strings_equal(ld_get_name(ld), ld_name);
+  }
 }
 
 void test_config_lexical_data(void) {
   Config *config = config_create_default_test();
   // Check that defaults are set correctly
   assert_lexical_data(config, "set -lex CSW21", "CSW21", "CSW21", "CSW21",
-                      "CSW21", "english");
+                      "CSW21", "CSW21", "CSW21", "english");
   // Check that lexicons, leaves, and ld change change
   // successfully if they belong to the same ld type.
   assert_lexical_data(config, "set -l2 NWL20 -ld english_blank_is_5 -k1 NWL20",
-                      "CSW21", "NWL20", "NWL20", "CSW21", "english_blank_is_5");
+                      "CSW21", "NWL20", "NWL20", "CSW21", "CSW21", "NWL20",
+                      "english_blank_is_5");
   // The leaves and ld should stay the same since they are
   // the same ld type.
   assert_lexical_data(config, "set -lex CSW21", "CSW21", "CSW21", "NWL20",
-                      "CSW21", "english_blank_is_5");
+                      "CSW21", "CSW21", "CSW21", "english_blank_is_5");
   // Check that the leaves arg behaves as expected
   assert_lexical_data(config, "set -leaves CSW21", "CSW21", "CSW21", "CSW21",
-                      "CSW21", "english_blank_is_5");
+                      "CSW21", "CSW21", "CSW21", "english_blank_is_5");
   // Check that the leaves arg behaves as expected
   assert_lexical_data(config, "set -leaves NWL20", "CSW21", "CSW21", "NWL20",
-                      "NWL20", "english_blank_is_5");
+                      "NWL20", "CSW21", "CSW21", "english_blank_is_5");
   // Check that defaults are set correctly when switching to a new language
+  // and that settings are preserved across commands
   assert_lexical_data(config, "set -lex FRA20", "FRA20", "FRA20", "FRA20",
-                      "FRA20", "french");
+                      "FRA20", "FRA20", "FRA20", "french");
+  assert_lexical_data(config, "set -minp 10", "FRA20", "FRA20", "FRA20",
+                      "FRA20", "FRA20", "FRA20", "french");
+  assert_lexical_data(config, "set -wmp false", "FRA20", "FRA20", "FRA20",
+                      "FRA20", NULL, NULL, "french");
+  assert_lexical_data(config, "set -minp 100", "FRA20", "FRA20", "FRA20",
+                      "FRA20", NULL, NULL, "french");
+  assert_lexical_data(config, "set -wmp false -w1 true", "FRA20", "FRA20",
+                      "FRA20", "FRA20", "FRA20", NULL, "french");
+  assert_lexical_data(config, "set -minp 20", "FRA20", "FRA20", "FRA20",
+                      "FRA20", "FRA20", NULL, "french");
+  assert_lexical_data(config, "set -wmp true -w1 false", "FRA20", "FRA20",
+                      "FRA20", "FRA20", NULL, "FRA20", "french");
+  assert_lexical_data(config, "set -minp 30", "FRA20", "FRA20", "FRA20",
+                      "FRA20", NULL, "FRA20", "french");
+  assert_lexical_data(config, "set -w1 true -w2 false", "FRA20", "FRA20",
+                      "FRA20", "FRA20", "FRA20", NULL, "french");
+  assert_lexical_data(config, "set -minp 40", "FRA20", "FRA20", "FRA20",
+                      "FRA20", "FRA20", NULL, "french");
+  assert_lexical_data(config, "set -wmp true", "FRA20", "FRA20", "FRA20",
+                      "FRA20", "FRA20", "FRA20", "french");
+  assert_lexical_data(config, "set -minp 50", "FRA20", "FRA20", "FRA20",
+                      "FRA20", "FRA20", "FRA20", "french");
   config_destroy(config);
+
+  // Test default use when available settings for WMP
+  Config *config2 = config_create_default_test();
+  assert_lexical_data(config2, "set -wmp true", NULL, NULL, NULL, NULL, NULL,
+                      NULL, NULL);
+  assert_lexical_data(config2, "set -lex CSW21", "CSW21", "CSW21", "CSW21",
+                      "CSW21", "CSW21", "CSW21", "english");
+  config_destroy(config2);
+
+  Config *config3 = config_create_default_test();
+  assert_lexical_data(config3, "set -wmp false", NULL, NULL, NULL, NULL, NULL,
+                      NULL, NULL);
+  assert_lexical_data(config3, "set -lex CSW21", "CSW21", "CSW21", "CSW21",
+                      "CSW21", NULL, NULL, "english");
+  config_destroy(config3);
+
+  Config *config4 = config_create_default_test();
+  assert_lexical_data(config4, "set -wmp true", NULL, NULL, NULL, NULL, NULL,
+                      NULL, NULL);
+  assert_lexical_data(config4, "set -wmp false", NULL, NULL, NULL, NULL, NULL,
+                      NULL, NULL);
+  assert_lexical_data(config4, "set -lex CSW21", "CSW21", "CSW21", "CSW21",
+                      "CSW21", NULL, NULL, "english");
+  config_destroy(config4);
+
+  Config *config5 = config_create_default_test();
+  assert_lexical_data(config5, "set -wmp false", NULL, NULL, NULL, NULL, NULL,
+                      NULL, NULL);
+  assert_lexical_data(config5, "set -wmp true", NULL, NULL, NULL, NULL, NULL,
+                      NULL, NULL);
+  assert_lexical_data(config5, "set -lex CSW21", "CSW21", "CSW21", "CSW21",
+                      "CSW21", "CSW21", "CSW21", "english");
+  config_destroy(config5);
+
+  Config *config6 = config_create_default_test();
+  assert_lexical_data(config6, "set -wmp true", NULL, NULL, NULL, NULL, NULL,
+                      NULL, NULL);
+  assert_lexical_data(config6, "set -wmp false", NULL, NULL, NULL, NULL, NULL,
+                      NULL, NULL);
+  assert_lexical_data(config6, "set -wmp true", NULL, NULL, NULL, NULL, NULL,
+                      NULL, NULL);
+  assert_lexical_data(config6, "set -lex CSW21", "CSW21", "CSW21", "CSW21",
+                      "CSW21", "CSW21", "CSW21", "english");
+  config_destroy(config6);
+
+  Config *config7 = config_create_default_test();
+  assert_lexical_data(config7, "set -wmp false", NULL, NULL, NULL, NULL, NULL,
+                      NULL, NULL);
+  assert_lexical_data(config7, "set -wmp true", NULL, NULL, NULL, NULL, NULL,
+                      NULL, NULL);
+  assert_lexical_data(config7, "set -wmp false", NULL, NULL, NULL, NULL, NULL,
+                      NULL, NULL);
+  assert_lexical_data(config7, "set -lex CSW21", "CSW21", "CSW21", "CSW21",
+                      "CSW21", NULL, NULL, "english");
+  config_destroy(config7);
+
+  Config *config8 = config_create_default_test();
+  assert_lexical_data(config8, "set -wmp false -w1 true", NULL, NULL, NULL,
+                      NULL, NULL, NULL, NULL);
+  assert_lexical_data(config8, "set -w2 true", NULL, NULL, NULL, NULL, NULL,
+                      NULL, NULL);
+  assert_lexical_data(config8, "set -w2 false", NULL, NULL, NULL, NULL, NULL,
+                      NULL, NULL);
+  assert_lexical_data(config8, "set -lex CSW21", "CSW21", "CSW21", "CSW21",
+                      "CSW21", "CSW21", NULL, "english");
+  config_destroy(config8);
 }
 
 void test_config_exec_parse_args(void) {
@@ -572,19 +672,35 @@ void test_config_wmp(void) {
   const WMP *wmp2 = NULL;
   const char *invalid_wmp_name = "invalid wmp name";
 
-  // Players start off with no wmp
+  // Players start off with wmp by default
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) != NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) != NULL);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) ==
+         players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1));
+  wmp1 = players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0);
+  wmp2 = players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1);
+
+  // Setting some unrelated fields shouldn't change the status of wmp
+  test_config_load_error(config, "set -pfreq 1000", ERROR_STATUS_SUCCESS,
+                         error_stack);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) == wmp1);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) == wmp2);
+
+  // Turn off the wmp for both players
+  test_config_load_error(config, "set -wmp false", ERROR_STATUS_SUCCESS,
+                         error_stack);
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) == NULL);
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) == NULL);
 
   // Setting some unrelated fields shouldn't change the status of wmp
-  test_config_load_error(config, "set -pfreq 1000", ERROR_STATUS_SUCCESS,
+  test_config_load_error(config, "set -pfreq 500", ERROR_STATUS_SUCCESS,
                          error_stack);
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) == NULL);
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) == NULL);
 
   // Both players should share the same wmp
-  test_config_load_error(config, "set -wmp true", ERROR_STATUS_SUCCESS,
-                         error_stack);
+  test_config_load_error(config, "set -wmp true -pfreq 1000",
+                         ERROR_STATUS_SUCCESS, error_stack);
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) != NULL);
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 1) != NULL);
   assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP, 0) ==

@@ -18,6 +18,7 @@ static const char *const players_data_type_names[] = {"kwg", "klv", "wordmap"};
 struct PlayersData {
   bool data_is_shared[NUMBER_OF_DATA];
   void *data[(NUMBER_OF_DATA * 2)];
+  bool use_when_available[(NUMBER_OF_DATA * 2)];
   move_sort_t move_sort_types[2];
   move_record_t move_record_types[2];
   char *player_names[2];
@@ -98,6 +99,21 @@ void *players_data_get_data(const PlayersData *players_data,
   return players_data->data[data_index];
 }
 
+bool players_data_get_use_when_available(const PlayersData *players_data,
+                                         players_data_t players_data_type,
+                                         int player_index) {
+  return players_data->use_when_available[players_data_get_player_data_index(
+      players_data_type, player_index)];
+}
+
+void players_data_set_use_when_available(PlayersData *players_data,
+                                         players_data_t players_data_type,
+                                         int player_index,
+                                         bool use_when_available) {
+  players_data->use_when_available[players_data_get_player_data_index(
+      players_data_type, player_index)] = use_when_available;
+}
+
 KWG *players_data_get_kwg(const PlayersData *players_data, int player_index) {
   return (KWG *)players_data_get_data(players_data, PLAYERS_DATA_TYPE_KWG,
                                       player_index);
@@ -120,6 +136,7 @@ void players_data_set_data(PlayersData *players_data,
   int data_index =
       players_data_get_player_data_index(players_data_type, player_index);
   players_data->data[data_index] = data;
+  players_data->use_when_available[data_index] = !!data;
 }
 
 void *players_data_create_data(players_data_t players_data_type,
@@ -219,6 +236,8 @@ PlayersData *players_data_create(void) {
           (players_data_t)data_index, player_index);
       players_data->data_is_shared[data_index] = false;
       players_data->data[player_data_index] = NULL;
+      players_data_set_use_when_available(players_data, data_index,
+                                          player_index, true);
     }
     players_data_set_move_sort_type(players_data, player_index,
                                     DEFAULT_MOVE_SORT_TYPE);

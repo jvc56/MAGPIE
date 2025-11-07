@@ -29,7 +29,7 @@ typedef struct MoveGen {
   move_record_t move_record_type;
   int number_of_tiles_in_bag;
   int player_index;
-  int bingo_bonus;
+  Equity bingo_bonus;
   bool kwgs_are_shared;
   bool is_wordsmog;
   Rack player_rack;

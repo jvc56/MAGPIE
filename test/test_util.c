@@ -1006,8 +1006,10 @@ void generate_anchors_for_test(Game *game) {
   gen_load_position(gen, &args);
   gen_look_up_leaves_and_record_exchanges(gen);
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
-    wmp_move_gen_check_nonplaythrough_existence(
-        &gen->wmp_move_gen, gen->number_of_tiles_in_bag > 0, &gen->leave_map);
+    const bool check_leaves = (gen->number_of_tiles_in_bag > 0) &&
+                              (gen->move_sort_type != MOVE_SORT_SCORE);
+    wmp_move_gen_check_nonplaythrough_existence(&gen->wmp_move_gen,
+                                                check_leaves, &gen->leave_map);
   }
   gen_shadow(gen);
   move_list_destroy(move_list);

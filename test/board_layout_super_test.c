@@ -14,8 +14,9 @@ void test_board_layout_error_super(void) {
 void test_board_layout_correctness_super(void) {
   // Use the CEL lexicon since it can support words longer than 15
   // which we need to test here.
-  Config *config = config_create_or_die(
-      "set -lex CEL_super -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Config *config =
+      config_create_or_die("set -lex CEL_super -wmp false -s1 equity -s2 "
+                           "equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
   // Verify the opening play score

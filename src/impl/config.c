@@ -2796,14 +2796,6 @@ void config_load_threshold(Config *config, const char *threshold_str,
   }
 }
 
-bool is_lexicon_required(const char *new_p1_leaves_name,
-                         const char *new_p2_leaves_name,
-                         const char *new_ld_name, const bool use_wmp1,
-                         const bool use_wmp2) {
-  return new_p1_leaves_name || new_p2_leaves_name || new_ld_name || use_wmp1 ||
-         use_wmp2;
-}
-
 bool lex_lex_compat(const char *p1_lexicon_name, const char *p2_lexicon_name,
                     ErrorStack *error_stack) {
   if (!p1_lexicon_name && !p2_lexicon_name) {
@@ -2961,33 +2953,43 @@ void config_load_lexicon_dependent_data(Config *config,
 
   // Determine the status of the wmp for both players
   // Start by assuming we are just using whatever the existing wmp settings are
-  bool p1_use_wmp = !!players_data_get_data_name(config->players_data,
-                                                 PLAYERS_DATA_TYPE_WMP, 0);
-  bool p2_use_wmp = !!players_data_get_data_name(config->players_data,
-                                                 PLAYERS_DATA_TYPE_WMP, 1);
+  bool p1_wmp_use_when_available = players_data_get_use_when_available(
+      config->players_data, PLAYERS_DATA_TYPE_WMP, 0);
+  bool p2_wmp_use_when_available = players_data_get_use_when_available(
+      config->players_data, PLAYERS_DATA_TYPE_WMP, 1);
 
   if (config_get_parg_value(config, ARG_TOKEN_USE_WMP, 0)) {
-    config_load_bool(config, ARG_TOKEN_USE_WMP, &p1_use_wmp, error_stack);
+    config_load_bool(config, ARG_TOKEN_USE_WMP, &p1_wmp_use_when_available,
+                     error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
-    p2_use_wmp = p1_use_wmp;
+    p2_wmp_use_when_available = p1_wmp_use_when_available;
   }
 
   // The "w1" and "w2" args override the "use_wmp" arg
   if (config_get_parg_value(config, ARG_TOKEN_P1_USE_WMP, 0)) {
-    config_load_bool(config, ARG_TOKEN_P1_USE_WMP, &p1_use_wmp, error_stack);
+    config_load_bool(config, ARG_TOKEN_P1_USE_WMP, &p1_wmp_use_when_available,
+                     error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
   }
 
   if (config_get_parg_value(config, ARG_TOKEN_P2_USE_WMP, 0)) {
-    config_load_bool(config, ARG_TOKEN_P2_USE_WMP, &p2_use_wmp, error_stack);
+    config_load_bool(config, ARG_TOKEN_P2_USE_WMP, &p2_wmp_use_when_available,
+                     error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
   }
+
+  players_data_set_use_when_available(config->players_data,
+                                      PLAYERS_DATA_TYPE_WMP, 0,
+                                      p1_wmp_use_when_available);
+  players_data_set_use_when_available(config->players_data,
+                                      PLAYERS_DATA_TYPE_WMP, 1,
+                                      p2_wmp_use_when_available);
 
   // Both lexicons are not specified, so we don't
   // load any of the lexicon dependent data
@@ -2995,12 +2997,11 @@ void config_load_lexicon_dependent_data(Config *config,
     // We can use the new_* variables here since if lexicons
     // are null, it is guaranteed that there are no leaves or ld
     // since they are all set after this if check.
-    if (is_lexicon_required(new_p1_leaves_name, new_p2_leaves_name, new_ld_name,
-                            p1_use_wmp, p2_use_wmp)) {
+    if (new_p1_leaves_name || new_p2_leaves_name || new_ld_name) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING,
-          string_duplicate("cannot set leaves, letter distribution, or word "
-                           "maps without a lexicon"));
+          string_duplicate(
+              "cannot set leaves or letter distribution without a lexicon"));
     }
     return;
   }
@@ -3043,12 +3044,12 @@ void config_load_lexicon_dependent_data(Config *config,
   // For the wmp, we allow non-NULL -> NULL transitions.
 
   const char *p1_wmp_name = NULL;
-  if (p1_use_wmp) {
+  if (p1_wmp_use_when_available) {
     p1_wmp_name = updated_p1_lexicon_name;
   }
 
   const char *p2_wmp_name = NULL;
-  if (p2_use_wmp) {
+  if (p2_wmp_use_when_available) {
     p2_wmp_name = updated_p2_lexicon_name;
   }
 

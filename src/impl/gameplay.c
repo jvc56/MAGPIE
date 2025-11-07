@@ -439,7 +439,7 @@ void return_phony_letters(Game *game) {
 // Overwrites the passed in values for the following MoveGenArgs fields:
 // - move_record_type (with the player on turn's record type)
 // - move_sort_type (with the player on turn's sort type)
-// - overrride_kwg (with NULL)
+// - override_kwg (with NULL)
 void generate_moves_for_game(const MoveGenArgs *args) {
   const Player *player_on_turn =
       game_get_player(args->game, game_get_player_on_turn_index(args->game));

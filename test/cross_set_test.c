@@ -153,7 +153,8 @@ void test_classic_cross_set(void) {
 }
 
 void test_alpha_cross_set(void) {
-  Config *config = config_create_or_die("set -lex CSW21_alpha -var wordsmog");
+  Config *config =
+      config_create_or_die("set -lex CSW21_alpha -wmp false -var wordsmog");
   Game *game = config_game_create(config);
   Board *board = game_get_board(game);
 

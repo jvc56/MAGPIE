@@ -407,6 +407,8 @@ void test_command_execution(void) {
       "-r1 best -r2 best -numplays 1 -gp false ",
       false, 30, 2, 0);
   // Polish
+  // Turn off word maps for Polish
+  assert_command_status_and_output(config, "set -wmp false", false, 5, 1, 0);
   assert_command_status_and_output(config, "cgp " POLISH_CGP, false, 5, 1, 0);
   assert_command_status_and_output(config, "gen -r1 all -r2 all -numplays 15",
                                    false, 5, 17, 0);

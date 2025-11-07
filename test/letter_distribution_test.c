@@ -33,8 +33,9 @@ void test_ld_str_to_mls(void) {
       "set -lex DISC2 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const LetterDistribution *catalan_ld = config_get_ld(disc_config);
 
-  Config *osps_config = config_create_or_die(
-      "set -lex OSPS49 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Config *osps_config =
+      config_create_or_die("set -lex OSPS49 -wmp false -s1 equity -s2 equity "
+                           "-r1 all -r2 all -numplays 1");
   const LetterDistribution *polish_ld = config_get_ld(osps_config);
 
   MachineLetter mls[4];
