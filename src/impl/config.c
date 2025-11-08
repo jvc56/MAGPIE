@@ -91,12 +91,24 @@ typedef enum {
   ARG_TOKEN_P1_LEAVES,
   ARG_TOKEN_P1_MOVE_SORT_TYPE,
   ARG_TOKEN_P1_MOVE_RECORD_TYPE,
+  ARG_TOKEN_P1_SIM_PLIES,
+  ARG_TOKEN_P1_SIM_NUM_PLAYS,
+  ARG_TOKEN_P1_SIM_MAX_ITERATIONS,
+  ARG_TOKEN_P1_SIM_STOP_COND_PCT,
+  ARG_TOKEN_P1_SIM_MIN_PLAY_ITERATIONS,
+  ARG_TOKEN_P1_SIM_USE_INFERENCE,
   ARG_TOKEN_P2_NAME,
   ARG_TOKEN_P2_LEXICON,
   ARG_TOKEN_P2_USE_WMP,
   ARG_TOKEN_P2_LEAVES,
   ARG_TOKEN_P2_MOVE_SORT_TYPE,
   ARG_TOKEN_P2_MOVE_RECORD_TYPE,
+  ARG_TOKEN_P2_SIM_PLIES,
+  ARG_TOKEN_P2_SIM_NUM_PLAYS,
+  ARG_TOKEN_P2_SIM_MAX_ITERATIONS,
+  ARG_TOKEN_P2_SIM_STOP_COND_PCT,
+  ARG_TOKEN_P2_SIM_MIN_PLAY_ITERATIONS,
+  ARG_TOKEN_P2_SIM_USE_INFERENCE,
   ARG_TOKEN_WIN_PCT,
   ARG_TOKEN_PLIES,
   ARG_TOKEN_ENDGAME_PLIES,
@@ -114,6 +126,7 @@ typedef enum {
   ARG_TOKEN_HUMAN_READABLE,
   ARG_TOKEN_RANDOM_SEED,
   ARG_TOKEN_NUMBER_OF_THREADS,
+  ARG_TOKEN_MULTI_THREADED_SIMS,
   ARG_TOKEN_PRINT_INFO_INTERVAL,
   ARG_TOKEN_EXEC_MODE,
   ARG_TOKEN_TT_FRACTION_OF_MEM,
@@ -172,12 +185,24 @@ struct Config {
   int bingo_bonus;
   int challenge_bonus;
   int num_plays;
+  int p1_sim_num_plays;
+  int p2_sim_num_plays;
   int num_small_plays;
   int plies;
+  int p1_sim_plies;
+  int p2_sim_plies;
   int endgame_plies;
   int max_iterations;
+  int p1_sim_max_iterations;
+  int p2_sim_max_iterations;
   int min_play_iterations;
+  int p1_sim_min_play_iterations;
+  int p2_sim_min_play_iterations;
   double stop_cond_pct;
+  double p1_sim_stop_cond_pct;
+  double p2_sim_stop_cond_pct;
+  bool p1_sim_use_inference;
+  bool p2_sim_use_inference;
   Equity eq_margin_inference;
   Equity eq_margin_movegen;
   bool use_game_pairs;
@@ -1028,6 +1053,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->move_list = config_get_move_list(config);
   sim_args->use_inference = config->sim_with_inference;
   sim_args->num_threads = config->num_threads;
+  sim_args->movegen_thread_index = 0; // Standalone sim always uses base index 0
   sim_args->print_interval = config->print_interval;
   sim_args->seed = config->seed;
   if (sim_args->use_inference) {
@@ -1168,6 +1194,12 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->num_threads = config->num_threads;
   autoplay_args->print_interval = config->print_interval;
   autoplay_args->seed = config->seed;
+  autoplay_args->win_pcts = config_get_win_pcts(config);
+  autoplay_args->multi_threaded_sims = false; // Default to concurrent games mode
+  ErrorStack *error_stack = error_stack_create();
+  config_load_bool(config, ARG_TOKEN_MULTI_THREADED_SIMS,
+                   &autoplay_args->multi_threaded_sims, error_stack);
+  error_stack_destroy(error_stack);
   autoplay_args->thread_control = config_get_thread_control(config);
   autoplay_args->data_paths = config_get_data_paths(config);
   autoplay_args->game_string_options = config->game_string_options;
@@ -3638,6 +3670,178 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       return;
     }
   }
+
+  // Load per-player sim params (default to 0 plies = no sims)
+  config->p1_sim_plies = 0;
+  config->p2_sim_plies = 0;
+
+  if (config_get_parg_value(config, ARG_TOKEN_P1_SIM_PLIES, 0)) {
+    config_load_int(config, ARG_TOKEN_P1_SIM_PLIES, 0, MAX_PLIES,
+                    &config->p1_sim_plies, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  if (config_get_parg_value(config, ARG_TOKEN_P2_SIM_PLIES, 0)) {
+    config_load_int(config, ARG_TOKEN_P2_SIM_PLIES, 0, MAX_PLIES,
+                    &config->p2_sim_plies, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  // Default per-player num_plays to global value
+  config->p1_sim_num_plays = config->num_plays;
+  config->p2_sim_num_plays = config->num_plays;
+
+  if (config_get_parg_value(config, ARG_TOKEN_P1_SIM_NUM_PLAYS, 0)) {
+    config_load_int(config, ARG_TOKEN_P1_SIM_NUM_PLAYS, 1, INT_MAX,
+                    &config->p1_sim_num_plays, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  if (config_get_parg_value(config, ARG_TOKEN_P2_SIM_NUM_PLAYS, 0)) {
+    config_load_int(config, ARG_TOKEN_P2_SIM_NUM_PLAYS, 1, INT_MAX,
+                    &config->p2_sim_num_plays, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  // Default per-player max_iterations to global value
+  config->p1_sim_max_iterations = config->max_iterations;
+  config->p2_sim_max_iterations = config->max_iterations;
+
+  if (config_get_parg_value(config, ARG_TOKEN_P1_SIM_MAX_ITERATIONS, 0)) {
+    config_load_int(config, ARG_TOKEN_P1_SIM_MAX_ITERATIONS, 1, INT_MAX,
+                    &config->p1_sim_max_iterations, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  if (config_get_parg_value(config, ARG_TOKEN_P2_SIM_MAX_ITERATIONS, 0)) {
+    config_load_int(config, ARG_TOKEN_P2_SIM_MAX_ITERATIONS, 1, INT_MAX,
+                    &config->p2_sim_max_iterations, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  // Default per-player min_play_iterations to global value
+  config->p1_sim_min_play_iterations = config->min_play_iterations;
+  config->p2_sim_min_play_iterations = config->min_play_iterations;
+
+  if (config_get_parg_value(config, ARG_TOKEN_P1_SIM_MIN_PLAY_ITERATIONS, 0)) {
+    config_load_int(config, ARG_TOKEN_P1_SIM_MIN_PLAY_ITERATIONS, 2, INT_MAX,
+                    &config->p1_sim_min_play_iterations, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  if (config_get_parg_value(config, ARG_TOKEN_P2_SIM_MIN_PLAY_ITERATIONS, 0)) {
+    config_load_int(config, ARG_TOKEN_P2_SIM_MIN_PLAY_ITERATIONS, 2, INT_MAX,
+                    &config->p2_sim_min_play_iterations, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  // Cap per-player min_play_iterations to ensure BAI can run
+  if (config->p1_sim_num_plays > 0) {
+    int max_min_play_iters =
+        config->p1_sim_max_iterations / config->p1_sim_num_plays;
+    if (config->p1_sim_min_play_iterations > max_min_play_iters) {
+      config->p1_sim_min_play_iterations =
+          max_min_play_iters < 2 ? 2 : max_min_play_iters;
+    }
+  }
+  if (config->p2_sim_num_plays > 0) {
+    int max_min_play_iters =
+        config->p2_sim_max_iterations / config->p2_sim_num_plays;
+    if (config->p2_sim_min_play_iterations > max_min_play_iters) {
+      config->p2_sim_min_play_iterations =
+          max_min_play_iters < 2 ? 2 : max_min_play_iters;
+    }
+  }
+
+  // Default per-player stop_cond_pct to global value
+  config->p1_sim_stop_cond_pct = config->stop_cond_pct;
+  config->p2_sim_stop_cond_pct = config->stop_cond_pct;
+
+  const char *new_p1_stop_cond_str =
+      config_get_parg_value(config, ARG_TOKEN_P1_SIM_STOP_COND_PCT, 0);
+  if (new_p1_stop_cond_str) {
+    if (has_iprefix(new_p1_stop_cond_str, "none")) {
+      config->p1_sim_stop_cond_pct = 1000;
+    } else {
+      config_load_double(config, ARG_TOKEN_P1_SIM_STOP_COND_PCT, 1e-10,
+                         100 - 1e-10, &config->p1_sim_stop_cond_pct,
+                         error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+    }
+  }
+
+  const char *new_p2_stop_cond_str =
+      config_get_parg_value(config, ARG_TOKEN_P2_SIM_STOP_COND_PCT, 0);
+  if (new_p2_stop_cond_str) {
+    if (has_iprefix(new_p2_stop_cond_str, "none")) {
+      config->p2_sim_stop_cond_pct = 1000;
+    } else {
+      config_load_double(config, ARG_TOKEN_P2_SIM_STOP_COND_PCT, 1e-10,
+                         100 - 1e-10, &config->p2_sim_stop_cond_pct,
+                         error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+    }
+  }
+
+  // Default per-player use_inference to global sim_with_inference value
+  config->p1_sim_use_inference = config->sim_with_inference;
+  config->p2_sim_use_inference = config->sim_with_inference;
+
+  if (config_get_parg_value(config, ARG_TOKEN_P1_SIM_USE_INFERENCE, 0)) {
+    config_load_bool(config, ARG_TOKEN_P1_SIM_USE_INFERENCE,
+                     &config->p1_sim_use_inference, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  if (config_get_parg_value(config, ARG_TOKEN_P2_SIM_USE_INFERENCE, 0)) {
+    config_load_bool(config, ARG_TOKEN_P2_SIM_USE_INFERENCE,
+                     &config->p2_sim_use_inference, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  // Set sim params for each player
+  SimParams p1_params = {
+      .plies = config->p1_sim_plies,
+      .num_plays = config->p1_sim_num_plays,
+      .max_iterations = config->p1_sim_max_iterations,
+      .min_play_iterations = config->p1_sim_min_play_iterations,
+      .stop_cond_pct = config->p1_sim_stop_cond_pct,
+      .use_inference = config->p1_sim_use_inference,
+  };
+  SimParams p2_params = {
+      .plies = config->p2_sim_plies,
+      .num_plays = config->p2_sim_num_plays,
+      .max_iterations = config->p2_sim_max_iterations,
+      .min_play_iterations = config->p2_sim_min_play_iterations,
+      .stop_cond_pct = config->p2_sim_stop_cond_pct,
+      .use_inference = config->p2_sim_use_inference,
+  };
+  players_data_set_sim_params(config->players_data, 0, &p1_params);
+  players_data_set_sim_params(config->players_data, 1, &p2_params);
 }
 
 // Parses the arguments given by the cmd string and updates the state of
@@ -3887,12 +4091,24 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_P1_LEAVES, "k1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1);
+  arg(ARG_TOKEN_P1_SIM_PLIES, "sp1", 1, 1);
+  arg(ARG_TOKEN_P1_SIM_NUM_PLAYS, "np1", 1, 1);
+  arg(ARG_TOKEN_P1_SIM_MAX_ITERATIONS, "ip1", 1, 1);
+  arg(ARG_TOKEN_P1_SIM_STOP_COND_PCT, "scp1", 1, 1);
+  arg(ARG_TOKEN_P1_SIM_MIN_PLAY_ITERATIONS, "mpi1", 1, 1);
+  arg(ARG_TOKEN_P1_SIM_USE_INFERENCE, "sinfer1", 1, 1);
   arg(ARG_TOKEN_P2_NAME, "p2", 1, 1);
   arg(ARG_TOKEN_P2_LEXICON, "l2", 1, 1);
   arg(ARG_TOKEN_P2_USE_WMP, "w2", 1, 1);
   arg(ARG_TOKEN_P2_LEAVES, "k2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
+  arg(ARG_TOKEN_P2_SIM_PLIES, "sp2", 1, 1);
+  arg(ARG_TOKEN_P2_SIM_NUM_PLAYS, "np2", 1, 1);
+  arg(ARG_TOKEN_P2_SIM_MAX_ITERATIONS, "ip2", 1, 1);
+  arg(ARG_TOKEN_P2_SIM_STOP_COND_PCT, "scp2", 1, 1);
+  arg(ARG_TOKEN_P2_SIM_MIN_PLAY_ITERATIONS, "mpi2", 1, 1);
+  arg(ARG_TOKEN_P2_SIM_USE_INFERENCE, "sinfer2", 1, 1);
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
   arg(ARG_TOKEN_PLIES, "plies", 1, 1);
   arg(ARG_TOKEN_ENDGAME_PLIES, "eplies", 1, 1);
@@ -3910,6 +4126,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_WRITE_BUFFER_SIZE, "wb", 1, 1);
   arg(ARG_TOKEN_RANDOM_SEED, "seed", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_THREADS, "threads", 1, 1);
+  arg(ARG_TOKEN_MULTI_THREADED_SIMS, "mts", 1, 1);
   arg(ARG_TOKEN_PRINT_INFO_INTERVAL, "pfrequency", 1, 1);
   arg(ARG_TOKEN_EXEC_MODE, "mode", 1, 1);
   arg(ARG_TOKEN_TT_FRACTION_OF_MEM, "ttfraction", 1, 1);

@@ -52,15 +52,18 @@ void simulate(SimArgs *sim_args, SimResults *sim_results,
 
   sim_results_set_iteration_count(sim_results, rvs_get_total_samples(rvs));
 
-  print_ucgi_sim_stats(sim_args->game, sim_results, sim_args->thread_control,
-                       (double)sim_results_get_node_count(sim_results) /
-                           bai_result_get_elapsed_seconds(
-                               sim_results_get_bai_result(sim_results)),
-                       true);
+  // Only print stats if print_interval > 0 (enabled for interactive sims)
+  if (sim_args->print_interval > 0) {
+    print_ucgi_sim_stats(sim_args->game, sim_results, sim_args->thread_control,
+                         (double)sim_results_get_node_count(sim_results) /
+                             bai_result_get_elapsed_seconds(
+                                 sim_results_get_bai_result(sim_results)),
+                         true);
+  }
 
-  // FIXME: once simming is part of autoplay, we will want to prevent these
-  // repeated alloc and deallocs if possible
+  // Note: MoveGen cache cleanup is handled by the caller (autoplay.c, exec.c, etc.)
+  // to avoid destroying caches that are still in use by other threads in
+  // concurrent execution modes
   rvs_destroy(rvs);
   rvs_destroy(rng);
-  gen_destroy_cache();
 }

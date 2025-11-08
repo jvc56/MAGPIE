@@ -21,14 +21,22 @@
 #include "../ent/player.h"
 #include "../ent/players_data.h"
 #include "../ent/rack.h"
+#include "../ent/sim_params.h"
+#include "../ent/sim_results.h"
+#include "../ent/stats.h"
 #include "../ent/thread_control.h"
+#include "../ent/win_pct.h"
 #include "../ent/xoshiro.h"
 #include "../str/game_string.h"
+#include "../str/move_string.h"
+#include "../str/sim_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
 #include "move_gen.h"
 #include "rack_list.h"
+#include "random_variable.h"
+#include "simmer.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -244,6 +252,7 @@ void postgen_prebroadcast_func(void *data) {
 
 typedef struct AutoplayWorker {
   int worker_index;
+  int sim_threads; // Number of threads to use for simulations
   const AutoplayArgs *args;
   AutoplayResults *autoplay_results;
   AutoplaySharedData *shared_data;
@@ -253,11 +262,12 @@ typedef struct AutoplayWorker {
 
 AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
                                        const AutoplayResults *target,
-                                       int worker_index,
+                                       int worker_index, int sim_threads,
                                        AutoplaySharedData *shared_data) {
   AutoplayWorker *autoplay_worker = malloc_or_die(sizeof(AutoplayWorker));
   autoplay_worker->args = args;
   autoplay_worker->worker_index = worker_index;
+  autoplay_worker->sim_threads = sim_threads;
   autoplay_worker->autoplay_results =
       autoplay_results_create_empty_copy(target);
   autoplay_worker->prng = NULL;
@@ -366,7 +376,9 @@ GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
   GameRunner *game_runner = malloc_or_die(sizeof(GameRunner));
   game_runner->shared_data = autoplay_worker->shared_data;
   game_runner->game = game_create(args->game_args);
-  game_runner->move_list = move_list_create(1);
+  // Use capacity of 200 to support simulations with many top moves
+  // (previously was 1, which only worked for equity-only move selection)
+  game_runner->move_list = move_list_create(200);
   game_runner->pair_game_number =
       0; // Will be set in game_runner_start if using pairs
   return game_runner;
@@ -411,6 +423,162 @@ bool game_runner_is_game_over(GameRunner *game_runner) {
           bag_get_letters(game_get_bag(game_runner->game)) < (RACK_SIZE));
 }
 
+// Monte Carlo simulation-based move selection for autoplay
+// This function is defined here instead of gameplay.c to avoid circular
+// dependency
+static Move *get_top_computer_move(Game *game, int movegen_thread_index,
+                                    int sim_threads, int num_autoplay_workers,
+                                    MoveList *move_list,
+                                    const SimParams *sim_params,
+                                    uint64_t sim_seed, WinPct *win_pcts,
+                                    ThreadControl *thread_control) {
+  // If sim_plies is 0 or bag is empty, fall back to equity-based move
+  if (sim_params->plies <= 0 || bag_is_empty(game_get_bag(game))) {
+    return get_top_equity_move(game, movegen_thread_index, move_list);
+  }
+
+  // Generate moves for simulation
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .thread_index = movegen_thread_index,
+      .eq_margin_movegen = 0,
+  };
+  generate_moves(&args);
+
+  // Sort the move list (convert from heap to sorted descending array)
+  move_list_sort_moves(move_list);
+
+  // Remove pass move if it exists (it's always last after sorting if present
+  // due to 0 equity)
+  int num_moves = move_list_get_count(move_list);
+  if (num_moves > 0 &&
+      move_get_type(move_list_get_move(move_list, num_moves - 1)) ==
+          GAME_EVENT_PASS) {
+    move_list->count--;
+    num_moves--;
+  }
+
+  // Limit the number of plays to sim
+  if (num_moves > sim_params->num_plays) {
+    // Keep only the top sim_num_plays moves by truncating the count
+    // (moves are already sorted by equity from generate_moves)
+    move_list->count = sim_params->num_plays;
+  }
+
+  // Create sim results for this simulation
+  SimResults *sim_results = sim_results_create();
+  sim_results_reset(move_list, sim_results, sim_params->plies, sim_seed);
+
+  // Calculate MoveGen offset for simulations to avoid conflicts
+  // In Mode 1 (concurrent games with single-threaded sims), each autoplay worker
+  // uses its own MoveGen for initial generation. Simulations must use separate
+  // MoveGen indices to avoid reusing the same MoveGen that's already in use.
+  // In Mode 2 (multi-threaded sims with one game), no offset needed since only
+  // one game runs at a time.
+  const int sim_movegen_base =
+      (sim_threads > 1) ? movegen_thread_index
+                        : movegen_thread_index + num_autoplay_workers;
+
+  // TODO: Inference in autoplay requires additional infrastructure:
+  // - InferenceResults allocation and management
+  // - Setting up inference_args (target_played_tiles, nontarget_known_tiles, etc.)
+  // - Game history tracking for proper inference context
+  // For now, disable inference even if requested until this is implemented
+  const bool use_inference_in_autoplay = false; // sim_params->use_inference;
+
+  // Set up simulation arguments
+  SimArgs sim_args = {
+      .num_plies = sim_params->plies,
+      .game = game,
+      .move_list = move_list,
+      .known_opp_rack = NULL,
+      .win_pcts = win_pcts,
+      .use_inference = use_inference_in_autoplay,
+      .inference_results = NULL,
+      .thread_control = thread_control,
+      .num_threads = sim_threads,
+      .movegen_thread_index = sim_movegen_base,
+      .print_interval = 0, // Disable sim output for autoplay
+      .seed = sim_seed,
+  };
+
+  // Set up BAI options
+  if (sim_params->stop_cond_pct > 100) {
+    sim_args.bai_options.threshold = BAI_THRESHOLD_NONE;
+  } else {
+    sim_args.bai_options.delta = 1.0 - (sim_params->stop_cond_pct / 100.0);
+    sim_args.bai_options.threshold = BAI_THRESHOLD_GK16;
+  }
+  sim_args.bai_options.sample_limit = sim_params->max_iterations;
+  sim_args.bai_options.sample_minimum = sim_params->min_play_iterations;
+  sim_args.bai_options.num_threads = sim_threads;
+  sim_args.bai_options.time_limit_seconds = 0;
+  sim_args.bai_options.sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
+
+  // Run simulation - errors are ignored for autoplay
+  ErrorStack *error_stack = error_stack_create();
+  simulate(&sim_args, sim_results, error_stack);
+  error_stack_destroy(error_stack);
+
+  // Get the best move from simulation results based on win percentage with
+  // equity tiebreaker
+  Move *best_move = NULL;
+  const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
+  if (num_simmed_plays > 0) {
+    // Find the simmed play with the highest win percentage (equity as
+    // tiebreaker)
+    const SimmedPlay *best_simmed_play = NULL;
+    for (int i = 0; i < num_simmed_plays; i++) {
+      const SimmedPlay *simmed_play =
+          sim_results_get_simmed_play(sim_results, i);
+      if (simmed_play_get_is_epigon(simmed_play)) {
+        continue;
+      }
+      if (!best_simmed_play) {
+        best_simmed_play = simmed_play;
+      } else {
+        double curr_win =
+            stat_get_mean(simmed_play_get_win_pct_stat(simmed_play));
+        double best_win =
+            stat_get_mean(simmed_play_get_win_pct_stat(best_simmed_play));
+        double curr_eq =
+            stat_get_mean(simmed_play_get_equity_stat(simmed_play));
+        double best_eq =
+            stat_get_mean(simmed_play_get_equity_stat(best_simmed_play));
+
+        // Use equity as tiebreaker when win% is equal
+        if (curr_win > best_win ||
+            (curr_win == best_win && curr_eq > best_eq)) {
+          best_simmed_play = simmed_play;
+        }
+      }
+    }
+
+    if (best_simmed_play) {
+      // Get the move from the simmed_play and copy it to move_list[0]
+      // (We can't return simmed_play's move directly as it will be freed)
+      const Move *sim_move = simmed_play_get_move(best_simmed_play);
+      Move *move_list_first = move_list_get_move(move_list, 0);
+      move_copy(move_list_first, sim_move);
+      best_move = move_list_first;
+    }
+  }
+
+  // Clean up
+  sim_results_destroy(sim_results);
+
+  // If we got a move from the sim, return it; otherwise fall back to equity
+  if (best_move) {
+    return best_move;
+  } else {
+    return get_top_equity_move(game, movegen_thread_index, move_list);
+  }
+}
+
 void game_runner_play_move(AutoplayWorker *autoplay_worker,
                            GameRunner *game_runner, Move **move) {
   if (game_runner_is_game_over(game_runner)) {
@@ -421,12 +589,22 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
   LeavegenSharedData *lg_shared_data =
       game_runner->shared_data->leavegen_shared_data;
   const int thread_index = autoplay_worker->worker_index;
+  const AutoplayArgs *args = autoplay_worker->args;
+
+  // Get sim parameters from the player (which gets them from PlayersData)
+  const Player *player_on_turn = game_get_player(game, player_on_turn_index);
+  const SimParams *sim_params = player_get_sim_params(player_on_turn);
+
+  // Create a deterministic seed for this sim from the game seed and turn
+  // number
+  uint64_t sim_seed =
+      game_runner->seed + (uint64_t)game_runner->turn_number * 1000000ULL;
+
   // If we are forcing a draw, we need to draw a rare leave. The drawn
   // leave does not necessarily fit in the bag. If we've reached the
   // target minimum leave count for all leaves, no rare leave can be
   // drawn.
-  Rack *player_rack =
-      player_get_rack(game_get_player(game, player_on_turn_index));
+  Rack *player_rack = player_get_rack(player_on_turn);
   const int ld_size = ld_get_size(game_get_ld(game));
   Rack rare_rack_or_move_leave;
   rack_set_dist_size(&rare_rack_or_move_leave, ld_size);
@@ -448,7 +626,12 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
 
     rack_copy(player_rack, &original_rack);
   }
-  *move = get_top_equity_move(game, thread_index, game_runner->move_list);
+
+  // Use simulation-based move selection if sim_plies > 0
+  *move = get_top_computer_move(game, thread_index,
+                                 autoplay_worker->sim_threads, args->num_threads,
+                                 game_runner->move_list, sim_params, sim_seed,
+                                 args->win_pcts, args->thread_control);
 
   if (lg_shared_data) {
     rack_list_add_rack(lg_shared_data->rack_list, player_rack,
@@ -729,40 +912,56 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
     show_divergent_results = false;
   }
 
+  // Determine threading mode based on multi_threaded_sims flag
+  int num_autoplay_workers;
+  int sim_threads_per_worker;
+
+  if (args->multi_threaded_sims) {
+    // Mode 2: One game at a time, multi-threaded sims
+    // Single autoplay worker, all threads available for simulation
+    num_autoplay_workers = 1;
+    sim_threads_per_worker = args->num_threads;
+  } else {
+    // Mode 1 (default): Concurrent games, single-threaded sims
+    // Multiple autoplay workers, each with single-threaded sims
+    num_autoplay_workers = args->num_threads;
+    sim_threads_per_worker = 1;
+  }
+
   AutoplayResults **autoplay_results_list =
-      malloc_or_die((sizeof(AutoplayResults *)) * (args->num_threads));
+      malloc_or_die((sizeof(AutoplayResults *)) * (num_autoplay_workers));
 
   AutoplaySharedData *shared_data = autoplay_shared_data_create(
       args, first_gen_num_games, autoplay_results, autoplay_results_list, klv,
       num_gens, min_rack_targets);
 
   AutoplayWorker **autoplay_workers =
-      malloc_or_die((sizeof(AutoplayWorker *)) * (args->num_threads));
+      malloc_or_die((sizeof(AutoplayWorker *)) * (num_autoplay_workers));
   cpthread_t *worker_ids =
-      malloc_or_die((sizeof(cpthread_t)) * (args->num_threads));
+      malloc_or_die((sizeof(cpthread_t)) * (num_autoplay_workers));
 
-  for (int thread_index = 0; thread_index < args->num_threads; thread_index++) {
+  for (int thread_index = 0; thread_index < num_autoplay_workers; thread_index++) {
     autoplay_workers[thread_index] = autoplay_worker_create(
-        args, autoplay_results, thread_index, shared_data);
+        args, autoplay_results, thread_index, sim_threads_per_worker, shared_data);
     autoplay_results_list[thread_index] =
         autoplay_workers[thread_index]->autoplay_results;
     cpthread_create(&worker_ids[thread_index], autoplay_worker,
                     autoplay_workers[thread_index]);
   }
 
-  for (int thread_index = 0; thread_index < args->num_threads; thread_index++) {
+  for (int thread_index = 0; thread_index < num_autoplay_workers; thread_index++) {
     cpthread_join(worker_ids[thread_index]);
   }
 
   // The stats have already been combined in leavegen mode
   if (!is_leavegen_mode) {
-    autoplay_results_finalize(autoplay_results_list, args->num_threads,
+    autoplay_results_finalize(autoplay_results_list, num_autoplay_workers,
                               autoplay_results);
   }
 
   free(autoplay_results_list);
 
-  for (int thread_index = 0; thread_index < args->num_threads; thread_index++) {
+  for (int thread_index = 0; thread_index < num_autoplay_workers; thread_index++) {
     autoplay_worker_destroy(autoplay_workers[thread_index]);
   }
 

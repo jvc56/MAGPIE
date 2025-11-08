@@ -32,6 +32,7 @@ typedef struct SimArgs {
   InferenceResults *inference_results;
   InferenceArgs inference_args;
   int num_threads;
+  int movegen_thread_index; // Base thread index for MoveGen cache access
   int print_interval;
   uint64_t seed;
   ThreadControl *thread_control;

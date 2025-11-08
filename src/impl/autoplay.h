@@ -9,6 +9,7 @@
 #include <stdbool.h>
 
 typedef struct GameStringOptions GameStringOptions;
+typedef struct WinPct WinPct;
 
 typedef struct AutoplayArgs {
   const char *num_games_or_min_rack_targets;
@@ -16,12 +17,14 @@ typedef struct AutoplayArgs {
   bool use_game_pairs;
   bool human_readable;
   bool print_boards;
+  bool multi_threaded_sims;
   autoplay_t type;
   const char *data_paths;
   GameArgs *game_args;
   int num_threads;
   int print_interval;
   uint64_t seed;
+  WinPct *win_pcts;
   ThreadControl *thread_control;
   const GameStringOptions *game_string_options;
 } AutoplayArgs;

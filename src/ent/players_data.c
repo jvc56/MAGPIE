@@ -6,6 +6,7 @@
 #include "../util/string_util.h"
 #include "klv.h"
 #include "kwg.h"
+#include "sim_params.h"
 #include "wmp.h"
 #include <stdlib.h>
 
@@ -22,6 +23,7 @@ struct PlayersData {
   move_sort_t move_sort_types[2];
   move_record_t move_record_types[2];
   char *player_names[2];
+  SimParams sim_params[2];
 };
 
 #define DEFAULT_MOVE_SORT_TYPE MOVE_SORT_EQUITY
@@ -127,6 +129,16 @@ KLV *players_data_get_klv(const PlayersData *players_data, int player_index) {
 WMP *players_data_get_wmp(const PlayersData *players_data, int player_index) {
   return (WMP *)players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP,
                                       player_index);
+}
+
+const SimParams *players_data_get_sim_params(const PlayersData *players_data,
+                                              int player_index) {
+  return &players_data->sim_params[player_index];
+}
+
+void players_data_set_sim_params(PlayersData *players_data, int player_index,
+                                  const SimParams *sim_params) {
+  players_data->sim_params[player_index] = *sim_params;
 }
 
 void players_data_set_data(PlayersData *players_data,
