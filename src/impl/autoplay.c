@@ -483,6 +483,13 @@ static Move *get_top_computer_move(Game *game, int movegen_thread_index,
       (sim_threads > 1) ? movegen_thread_index
                         : movegen_thread_index + num_autoplay_workers;
 
+  // TODO: Inference in autoplay requires additional infrastructure:
+  // - InferenceResults allocation and management
+  // - Setting up inference_args (target_played_tiles, nontarget_known_tiles, etc.)
+  // - Game history tracking for proper inference context
+  // For now, disable inference even if requested until this is implemented
+  const bool use_inference_in_autoplay = false; // sim_params->use_inference;
+
   // Set up simulation arguments
   SimArgs sim_args = {
       .num_plies = sim_params->plies,
@@ -490,7 +497,7 @@ static Move *get_top_computer_move(Game *game, int movegen_thread_index,
       .move_list = move_list,
       .known_opp_rack = NULL,
       .win_pcts = win_pcts,
-      .use_inference = false,
+      .use_inference = use_inference_in_autoplay,
       .inference_results = NULL,
       .thread_control = thread_control,
       .num_threads = sim_threads,

@@ -96,6 +96,7 @@ typedef enum {
   ARG_TOKEN_P1_SIM_MAX_ITERATIONS,
   ARG_TOKEN_P1_SIM_STOP_COND_PCT,
   ARG_TOKEN_P1_SIM_MIN_PLAY_ITERATIONS,
+  ARG_TOKEN_P1_SIM_USE_INFERENCE,
   ARG_TOKEN_P2_NAME,
   ARG_TOKEN_P2_LEXICON,
   ARG_TOKEN_P2_USE_WMP,
@@ -107,6 +108,7 @@ typedef enum {
   ARG_TOKEN_P2_SIM_MAX_ITERATIONS,
   ARG_TOKEN_P2_SIM_STOP_COND_PCT,
   ARG_TOKEN_P2_SIM_MIN_PLAY_ITERATIONS,
+  ARG_TOKEN_P2_SIM_USE_INFERENCE,
   ARG_TOKEN_WIN_PCT,
   ARG_TOKEN_PLIES,
   ARG_TOKEN_ENDGAME_PLIES,
@@ -199,6 +201,8 @@ struct Config {
   double stop_cond_pct;
   double p1_sim_stop_cond_pct;
   double p2_sim_stop_cond_pct;
+  bool p1_sim_use_inference;
+  bool p2_sim_use_inference;
   Equity eq_margin_inference;
   Equity eq_margin_movegen;
   bool use_game_pairs;
@@ -3799,6 +3803,26 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     }
   }
 
+  // Default per-player use_inference to global sim_with_inference value
+  config->p1_sim_use_inference = config->sim_with_inference;
+  config->p2_sim_use_inference = config->sim_with_inference;
+
+  if (config_get_parg_value(config, ARG_TOKEN_P1_SIM_USE_INFERENCE, 0)) {
+    config_load_bool(config, ARG_TOKEN_P1_SIM_USE_INFERENCE,
+                     &config->p1_sim_use_inference, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  if (config_get_parg_value(config, ARG_TOKEN_P2_SIM_USE_INFERENCE, 0)) {
+    config_load_bool(config, ARG_TOKEN_P2_SIM_USE_INFERENCE,
+                     &config->p2_sim_use_inference, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
   // Set sim params for each player
   SimParams p1_params = {
       .plies = config->p1_sim_plies,
@@ -3806,6 +3830,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       .max_iterations = config->p1_sim_max_iterations,
       .min_play_iterations = config->p1_sim_min_play_iterations,
       .stop_cond_pct = config->p1_sim_stop_cond_pct,
+      .use_inference = config->p1_sim_use_inference,
   };
   SimParams p2_params = {
       .plies = config->p2_sim_plies,
@@ -3813,6 +3838,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       .max_iterations = config->p2_sim_max_iterations,
       .min_play_iterations = config->p2_sim_min_play_iterations,
       .stop_cond_pct = config->p2_sim_stop_cond_pct,
+      .use_inference = config->p2_sim_use_inference,
   };
   players_data_set_sim_params(config->players_data, 0, &p1_params);
   players_data_set_sim_params(config->players_data, 1, &p2_params);
@@ -4070,6 +4096,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_P1_SIM_MAX_ITERATIONS, "ip1", 1, 1);
   arg(ARG_TOKEN_P1_SIM_STOP_COND_PCT, "scp1", 1, 1);
   arg(ARG_TOKEN_P1_SIM_MIN_PLAY_ITERATIONS, "mpi1", 1, 1);
+  arg(ARG_TOKEN_P1_SIM_USE_INFERENCE, "sinfer1", 1, 1);
   arg(ARG_TOKEN_P2_NAME, "p2", 1, 1);
   arg(ARG_TOKEN_P2_LEXICON, "l2", 1, 1);
   arg(ARG_TOKEN_P2_USE_WMP, "w2", 1, 1);
@@ -4081,6 +4108,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_P2_SIM_MAX_ITERATIONS, "ip2", 1, 1);
   arg(ARG_TOKEN_P2_SIM_STOP_COND_PCT, "scp2", 1, 1);
   arg(ARG_TOKEN_P2_SIM_MIN_PLAY_ITERATIONS, "mpi2", 1, 1);
+  arg(ARG_TOKEN_P2_SIM_USE_INFERENCE, "sinfer2", 1, 1);
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
   arg(ARG_TOKEN_PLIES, "plies", 1, 1);
   arg(ARG_TOKEN_ENDGAME_PLIES, "eplies", 1, 1);
