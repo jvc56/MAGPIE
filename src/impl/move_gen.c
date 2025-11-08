@@ -65,7 +65,12 @@ void generator_destroy(MoveGen *gen) {
 
 MoveGen *get_movegen(int thread_index) {
   if (!cached_gens[thread_index]) {
-    cached_gens[thread_index] = generator_create();
+    cpthread_mutex_lock(&cache_mutex);
+    // Double-check after acquiring lock (another thread may have initialized)
+    if (!cached_gens[thread_index]) {
+      cached_gens[thread_index] = generator_create();
+    }
+    cpthread_mutex_unlock(&cache_mutex);
   }
   return cached_gens[thread_index];
 }

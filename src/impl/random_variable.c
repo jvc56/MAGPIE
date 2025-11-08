@@ -348,6 +348,7 @@ typedef struct Simmer {
   bool use_alias_method;
   const InferenceResults *inference_results;
   int num_threads;
+  int movegen_base_index; // Base thread index for MoveGen cache access
   int print_interval;
   ThreadControl *thread_control;
   SimResults *sim_results;
@@ -447,7 +448,8 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       break;
     }
 
-    const Move *best_play = get_top_equity_move(game, thread_index, move_list);
+    const Move *best_play = get_top_equity_move(
+        game, simmer->movegen_base_index + thread_index, move_list);
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
     play_move(best_play, game, NULL);
@@ -555,6 +557,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->dist_size = ld_get_size(game_get_ld(sim_args->game));
 
   simmer->num_threads = sim_args->num_threads;
+  simmer->movegen_base_index = sim_args->movegen_thread_index;
   simmer->print_interval = sim_args->print_interval;
 
   simmer->workers =

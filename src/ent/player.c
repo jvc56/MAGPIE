@@ -8,6 +8,7 @@
 #include "letter_distribution.h"
 #include "players_data.h"
 #include "rack.h"
+#include "sim_params.h"
 #include "wmp.h"
 #include <stdlib.h>
 
@@ -24,6 +25,7 @@ struct Player {
   const KWG *kwg;
   const KLV *klv;
   const WMP *wmp;
+  const SimParams *sim_params;
 };
 
 void player_reset(Player *player) {
@@ -40,6 +42,7 @@ void player_update(const PlayersData *players_data, Player *player) {
   player->kwg = players_data_get_kwg(players_data, player->index);
   player->klv = players_data_get_klv(players_data, player->index);
   player->wmp = players_data_get_wmp(players_data, player->index);
+  player->sim_params = players_data_get_sim_params(players_data, player->index);
 }
 
 Player *player_create(const PlayersData *players_data,
@@ -65,6 +68,7 @@ Player *player_duplicate(const Player *player) {
   new_player->kwg = player->kwg;
   new_player->klv = player->klv;
   new_player->wmp = player->wmp;
+  new_player->sim_params = player->sim_params;
   return new_player;
 }
 
@@ -98,6 +102,10 @@ const KLV *player_get_klv(const Player *player) { return player->klv; }
 
 const WMP *player_get_wmp(const Player *player) { return player->wmp; }
 
+const SimParams *player_get_sim_params(const Player *player) {
+  return player->sim_params;
+}
+
 void player_set_score(Player *player, Equity score) { player->score = score; }
 
 void player_add_to_score(Player *player, Equity score) {
@@ -111,4 +119,8 @@ void player_set_move_sort_type(Player *player, move_sort_t move_sort_type) {
 void player_set_move_record_type(Player *player,
                                  move_record_t move_record_type) {
   player->move_record_type = move_record_type;
+}
+
+void player_set_sim_params(Player *player, const SimParams *sim_params) {
+  player->sim_params = sim_params;
 }
