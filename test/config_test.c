@@ -210,8 +210,6 @@ void test_config_load_success(void) {
   const char *ld_name = "english";
   int bingo_bonus = 73;
   const char *game_variant = "wordsmog";
-  const char *p1 = "Alice";
-  const char *p2 = "Bob";
   const char *l1 = "CSW21";
   const char *l2 = "NWL20";
   const char *s1 = "score";
@@ -232,13 +230,10 @@ void test_config_load_success(void) {
       "set -ld %s -bb %d -var %s -l1 %s -l2 %s -s1 %s -r1 "
       "%s -s2 %s -r2 %s  -numplays %d "
       "-plies %d -it "
-      "%d -scond %d -seed %d -threads %d -pfreq %d -gp true -hr true "
-      "-p1 %s "
-      "-p2 "
-      "%s",
+      "%d -scond %d -seed %d -threads %d -pfreq %d -gp true -hr true ",
       ld_name, bingo_bonus, game_variant, l1, l2, s1, r1, s2, r2, num_plays,
-      plies, max_iterations, stopping_cond, seed, number_of_threads, print_info,
-      p1, p2);
+      plies, max_iterations, stopping_cond, seed, number_of_threads,
+      print_info);
 
   load_and_exec_config_or_die(config, string_builder_peek(test_string_builder));
 
@@ -817,7 +812,20 @@ void test_config_wmp(void) {
 void test_config_anno(void) {
   // Commit and challenge
   Config *config = config_create_default_test();
+  const char *p1_name = "Alice Lastname-Jones";
+  const char *p1_nickname = "Alice_Lastname-Jones";
+  const char *p2_name = "Bob Lastname-Jones";
+  const char *p2_nickname = "Bob_Lastname-Jones";
+  StringBuilder *name_sb = string_builder_create();
   assert_config_exec_status(config, "sw",
+                            ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
+  assert_config_exec_status(config, "note",
+                            ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
+  assert_config_exec_status(config, "note ",
+                            ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
+  assert_config_exec_status(config, "note a",
+                            ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
+  assert_config_exec_status(config, "note a b",
                             ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
 
   assert_config_exec_status(config, "set -lex CSW24", ERROR_STATUS_SUCCESS);
@@ -825,25 +833,48 @@ void test_config_anno(void) {
                             ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
   assert_config_exec_status(config, "sw", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "set -p1 a -p2 b", ERROR_STATUS_SUCCESS);
 
-  const PlayersData *players_data = config_get_players_data(config);
+  string_builder_add_formatted_string(name_sb, "p1 %s", p1_name);
+  assert_config_exec_status(config, string_builder_peek(name_sb),
+                            ERROR_STATUS_SUCCESS);
+  string_builder_clear(name_sb);
+  string_builder_add_formatted_string(name_sb, "p2 %s", p2_name);
+  assert_config_exec_status(config, string_builder_peek(name_sb),
+                            ERROR_STATUS_SUCCESS);
+  string_builder_clear(name_sb);
+
+  assert_config_exec_status(config, "note a b",
+                            ERROR_STATUS_NOTE_NO_GAME_EVENTS);
+
   const GameHistory *game_history = config_get_game_history(config);
   assert_config_exec_status(config, "sw", ERROR_STATUS_SUCCESS);
-  assert_strings_equal(players_data_get_name(players_data, 0), "b");
-  assert_strings_equal(game_history_player_get_name(game_history, 0), "b");
-  assert_strings_equal(game_history_player_get_nickname(game_history, 0), "b");
-  assert_strings_equal(players_data_get_name(players_data, 1), "a");
-  assert_strings_equal(game_history_player_get_name(game_history, 1), "a");
-  assert_strings_equal(game_history_player_get_nickname(game_history, 1), "a");
+  assert_strings_equal(game_history_player_get_name(game_history, 0), p2_name);
+  assert_strings_equal(game_history_player_get_nickname(game_history, 0),
+                       p2_nickname);
+  assert_strings_equal(game_history_player_get_name(game_history, 1), p1_name);
+  assert_strings_equal(game_history_player_get_nickname(game_history, 1),
+                       p1_nickname);
 
   assert_config_exec_status(config, "sw", ERROR_STATUS_SUCCESS);
-  assert_strings_equal(players_data_get_name(players_data, 0), "a");
-  assert_strings_equal(game_history_player_get_name(game_history, 0), "a");
-  assert_strings_equal(game_history_player_get_nickname(game_history, 0), "a");
-  assert_strings_equal(players_data_get_name(players_data, 1), "b");
-  assert_strings_equal(game_history_player_get_name(game_history, 1), "b");
-  assert_strings_equal(game_history_player_get_nickname(game_history, 1), "b");
+  assert_strings_equal(game_history_player_get_name(game_history, 0), p1_name);
+  assert_strings_equal(game_history_player_get_nickname(game_history, 0),
+                       p1_nickname);
+  assert_strings_equal(game_history_player_get_name(game_history, 1), p2_name);
+  assert_strings_equal(game_history_player_get_nickname(game_history, 1),
+                       p2_nickname);
+
+  p1_name = "a";
+  p1_nickname = "a";
+  p2_name = "b";
+  p2_nickname = "b";
+  string_builder_add_formatted_string(name_sb, "p1 %s", p1_name);
+  assert_config_exec_status(config, string_builder_peek(name_sb),
+                            ERROR_STATUS_SUCCESS);
+  string_builder_clear(name_sb);
+  string_builder_add_formatted_string(name_sb, "p2 %s", p2_name);
+  assert_config_exec_status(config, string_builder_peek(name_sb),
+                            ERROR_STATUS_SUCCESS);
+  string_builder_clear(name_sb);
 
   const Game *game = config_get_game(config);
   const Bag *bag = game_get_bag(game);
@@ -887,6 +918,37 @@ void test_config_anno(void) {
   assert(game_get_player_on_turn_index(game) == 1);
   // Top equity move should have played 5 tiles
   assert(bag_initial_total == bag_get_letters(bag) + 5);
+
+  // Check that the note command works
+
+  game_history = config_get_game_history(config);
+  assert_config_exec_status(config, "note a", ERROR_STATUS_SUCCESS);
+  assert_strings_equal(
+      game_history_get_note_for_most_recent_event(game_history), "a");
+
+  assert_config_exec_status(config, "note", ERROR_STATUS_SUCCESS);
+  assert_strings_equal(
+      game_history_get_note_for_most_recent_event(game_history), NULL);
+
+  assert_config_exec_status(config, "note  a b", ERROR_STATUS_SUCCESS);
+  assert_strings_equal(
+      game_history_get_note_for_most_recent_event(game_history), " a b");
+
+  assert_config_exec_status(config, "note  a b ", ERROR_STATUS_SUCCESS);
+  assert_strings_equal(
+      game_history_get_note_for_most_recent_event(game_history), " a b ");
+
+  assert_config_exec_status(config, "note", ERROR_STATUS_SUCCESS);
+  assert_strings_equal(
+      game_history_get_note_for_most_recent_event(game_history), NULL);
+
+  assert_config_exec_status(config, "note  ", ERROR_STATUS_SUCCESS);
+  assert_strings_equal(
+      game_history_get_note_for_most_recent_event(game_history), " ");
+
+  assert_config_exec_status(config, "note ", ERROR_STATUS_SUCCESS);
+  assert_strings_equal(
+      game_history_get_note_for_most_recent_event(game_history), NULL);
 
   // Test an overtime error case
   assert_config_exec_status(
@@ -1436,6 +1498,7 @@ void test_config_anno(void) {
   assert(!game_history_get_waiting_for_final_pass_or_challenge(
       config_get_game_history(config)));
 
+  string_builder_destroy(name_sb);
   config_destroy(config);
 }
 
@@ -1450,8 +1513,8 @@ void test_config_export(void) {
   assert_config_exec_status(config, "ex", ERROR_STATUS_EXPORT_NO_GAME_EVENTS);
   assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "ex", ERROR_STATUS_EXPORT_NO_GAME_EVENTS);
-  assert_config_exec_status(config, "set -p1 Alice -p2 Bob",
-                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p1 Alice A", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p2 Bob B", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "ex", ERROR_STATUS_EXPORT_NO_GAME_EVENTS);
 
   assert_config_exec_status(config, "rack ABCDEFG", ERROR_STATUS_SUCCESS);

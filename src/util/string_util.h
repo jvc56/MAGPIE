@@ -83,6 +83,7 @@ char *cut_off_after_last_char(const char *str, char ch);
 char *cut_off_after_first_char(const char *str, char ch);
 char *insert_before_dot(const char *str, const char *insert);
 char *to_lower_case(const char *content);
+char *replace_whitespace_with_underscore(const char *str);
 
 // Non-malloc'ing string functions
 const char *get_base_filename(const char *filepath);

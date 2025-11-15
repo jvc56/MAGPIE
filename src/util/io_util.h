@@ -236,6 +236,8 @@ typedef enum {
   ERROR_STATUS_TIME_PENALTY_NO_PREVIOUS_CUMULATIVE_SCORE,
   // Export errors
   ERROR_STATUS_EXPORT_NO_GAME_EVENTS,
+  // Note errors
+  ERROR_STATUS_NOTE_NO_GAME_EVENTS,
 } error_code_t;
 
 typedef enum {

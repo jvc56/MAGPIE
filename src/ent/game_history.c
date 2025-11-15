@@ -131,7 +131,11 @@ ValidatedMoves *game_event_get_vms(const GameEvent *event) {
 
 void game_event_set_note(GameEvent *event, const char *note) {
   free(event->note);
-  event->note = string_duplicate(note);
+  if (is_string_empty_or_null(note)) {
+    event->note = NULL;
+  } else {
+    event->note = string_duplicate(note);
+  }
 }
 
 const char *game_event_get_note(const GameEvent *event) { return event->note; }
@@ -194,23 +198,9 @@ void game_history_player_destroy(GameHistoryPlayer *player) {
   free(player);
 }
 
-void game_history_player_set_name(GameHistory *game_history, int player_index,
-                                  const char *name) {
-  GameHistoryPlayer *player = game_history->players[player_index];
-  free(player->name);
-  player->name = string_duplicate(name);
-}
-
 const char *game_history_player_get_name(const GameHistory *game_history,
                                          int player_index) {
   return game_history->players[player_index]->name;
-}
-
-void game_history_player_set_nickname(GameHistory *game_history,
-                                      int player_index, const char *nickname) {
-  GameHistoryPlayer *player = game_history->players[player_index];
-  free(player->nickname);
-  player->nickname = string_duplicate(nickname);
 }
 
 const char *game_history_player_get_nickname(const GameHistory *game_history,
@@ -321,8 +311,14 @@ bool game_history_get_waiting_for_final_pass_or_challenge(
   return game_history->waiting_for_final_pass_or_challenge;
 }
 
-void game_history_player_reset(GameHistory *history, int player_index,
-                               const char *name, const char *nickname) {
+void game_history_player_reset_last_rack(GameHistory *history,
+                                         int player_index) {
+  GameHistoryPlayer *player = history->players[player_index];
+  memset(&player->last_rack, 0, sizeof(Rack));
+}
+
+void game_history_player_reset_names(GameHistory *history, int player_index,
+                                     const char *name, const char *nickname) {
   GameHistoryPlayer *player = history->players[player_index];
   if (player_index != 0 && player_index != 1) {
     log_fatal(
@@ -332,8 +328,10 @@ void game_history_player_reset(GameHistory *history, int player_index,
   free(player->name);
   if (name) {
     player->name = string_duplicate(name);
+  } else if (player_index == 0) {
+    player->name = string_duplicate(PLAYER_ONE_DEFAULT_NAME);
   } else {
-    player->name = players_data_get_default_name(player_index);
+    player->name = string_duplicate(PLAYER_TWO_DEFAULT_NAME);
   }
   // Nicknames must not have any whitespace, otherwise the GCG output will be
   // invalid
@@ -341,9 +339,23 @@ void game_history_player_reset(GameHistory *history, int player_index,
   if (nickname) {
     player->nickname = string_duplicate(nickname);
   } else {
-    player->nickname = players_data_get_default_nickname(player_index);
+    player->nickname = replace_whitespace_with_underscore(player->name);
   }
-  memset(&player->last_rack, 0, sizeof(Rack));
+}
+
+void game_history_player_reset(GameHistory *history, int player_index,
+                               const char *name, const char *nickname) {
+  game_history_player_reset_names(history, player_index, name, nickname);
+  game_history_player_reset_last_rack(history, player_index);
+}
+
+void game_history_switch_names(GameHistory *history) {
+  char *temp = history->players[0]->name;
+  history->players[0]->name = history->players[1]->name;
+  history->players[1]->name = temp;
+  temp = history->players[0]->nickname;
+  history->players[0]->nickname = history->players[1]->nickname;
+  history->players[1]->nickname = temp;
 }
 
 int game_history_get_num_events(const GameHistory *history) {
@@ -685,4 +697,19 @@ bool game_history_contains_end_rack_penalty_event(
     }
   }
   return false;
+}
+
+// Assumes the history is nonempty
+void game_history_set_note_for_most_recent_event(GameHistory *game_history,
+                                                 const char *note) {
+  game_event_set_note(
+      game_history_get_event(
+          game_history, game_history_get_num_played_events(game_history) - 1),
+      note);
+}
+
+const char *
+game_history_get_note_for_most_recent_event(const GameHistory *game_history) {
+  return game_event_get_note(game_history_get_event(
+      game_history, game_history_get_num_played_events(game_history) - 1));
 }

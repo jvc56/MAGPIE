@@ -22,4 +22,12 @@ typedef enum {
   MOVE_RECORD_ALL_SMALL,
 } move_record_t;
 
+#define MOVE_SORT_EQUITY_STRING "equity"
+#define MOVE_SORT_SCORE_STRING "score"
+
+#define MOVE_RECORD_ALL_STRING "all"
+#define MOVE_RECORD_BEST_STRING "best"
+#define MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST_STRING "equity"
+#define MOVE_RECORD_ALL_SMALL_STRING "small"
+
 #endif

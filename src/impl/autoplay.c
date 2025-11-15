@@ -473,7 +473,8 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
           game_runner->pair_game_number, game_runner->turn_number + 1);
     }
     string_builder_add_game(game, game_runner->move_list,
-                            autoplay_worker->args->game_string_options, output);
+                            autoplay_worker->args->game_string_options, NULL,
+                            output);
     string_builder_add_string(output, "\n");
     thread_control_print(autoplay_worker->args->thread_control,
                          string_builder_peek(output));

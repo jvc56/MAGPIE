@@ -1336,6 +1336,11 @@ void autoplay_results_set_write_buffer_size(AutoplayResults *autoplay_results,
   autoplay_results->recorder_context->write_buffer_size = write_buffer_size;
 }
 
+size_t
+autoplay_results_get_write_buffer_size(AutoplayResults *autoplay_results) {
+  return autoplay_results->recorder_context->write_buffer_size;
+}
+
 void autoplay_results_set_data_paths(AutoplayResults *autoplay_results,
                                      const char *data_paths) {
   free(autoplay_results->recorder_context->data_paths);
