@@ -9,6 +9,7 @@
 #include "../ent/bonus_square.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/game_history.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
@@ -87,6 +88,7 @@ bool use_bold_for_score(const GameStringOptions *game_string_options) {
 void string_builder_add_player_row(const LetterDistribution *ld,
                                    const Player *player,
                                    const GameStringOptions *game_string_options,
+                                   const char *player_name,
                                    StringBuilder *game_string,
                                    bool player_on_turn) {
   const char *player_on_turn_marker =
@@ -97,22 +99,13 @@ void string_builder_add_player_row(const LetterDistribution *ld,
     player_marker = player_off_turn_marker;
   }
 
-  char *display_player_name;
-  const char *player_name = player_get_name(player);
-  if (player_name) {
-    display_player_name = string_duplicate(player_name);
-  } else {
-    display_player_name =
-        get_formatted_string("Player %d", player_get_index(player) + 1);
-  }
-
   if (player_on_turn && should_print_escape_codes(game_string_options)) {
     string_builder_add_player_on_turn_color(game_string, game_string_options);
   }
   const Rack *player_rack = player_get_rack(player);
   string_builder_add_formatted_string(
-      game_string, "%s%s%*s", player_marker, display_player_name,
-      PLAYER_NAME_DISPLAY_WIDTH - string_length(display_player_name), "");
+      game_string, "%s%s%*s", player_marker, player_name,
+      PLAYER_NAME_DISPLAY_WIDTH - string_length(player_name), "");
   if (player_on_turn && should_print_escape_codes(game_string_options) &&
       game_string_option_has_on_turn_color(game_string_options)) {
     string_builder_add_color_reset(game_string);
@@ -123,7 +116,6 @@ void string_builder_add_player_row(const LetterDistribution *ld,
       game_string, "%*s%d",
       RACK_DISPLAY_WIDTH - rack_get_total_letters(player_rack), "",
       equity_to_int(player_get_score(player)));
-  free(display_player_name);
 }
 
 void string_builder_add_board_square_color(StringBuilder *game_string,
@@ -282,6 +274,7 @@ void string_builder_add_board_column_header(
 
 void string_builder_add_game(const Game *game, const MoveList *move_list,
                              const GameStringOptions *game_string_options,
+                             const GameHistory *game_history,
                              StringBuilder *game_string) {
   const Board *board = game_get_board(game);
   const Bag *bag = game_get_bag(game);
@@ -302,13 +295,20 @@ void string_builder_add_game(const Game *game, const MoveList *move_list,
 
   string_builder_add_string(game_string, "  ");
 
-  string_builder_add_player_row(ld, player0, game_string_options, game_string,
-                                player_on_turn_index == 0);
+  const char *player1_name = PLAYER_ONE_DEFAULT_NAME;
+  const char *player2_name = PLAYER_TWO_DEFAULT_NAME;
+  if (game_history) {
+    player1_name = game_history_player_get_name(game_history, 0);
+    player2_name = game_history_player_get_name(game_history, 1);
+  }
+
+  string_builder_add_player_row(ld, player0, game_string_options, player1_name,
+                                game_string, player_on_turn_index == 0);
   string_builder_add_string(game_string, "\n");
 
   string_builder_add_board_top_border(game_string_options, game_string);
-  string_builder_add_player_row(ld, player1, game_string_options, game_string,
-                                player_on_turn_index == 1);
+  string_builder_add_player_row(ld, player1, game_string_options, player2_name,
+                                game_string, player_on_turn_index == 1);
   string_builder_add_string(game_string, "\n");
 
   for (int i = 0; i < BOARD_DIM; i++) {

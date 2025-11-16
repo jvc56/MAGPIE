@@ -16,7 +16,6 @@ struct Player {
   // by the caller and are
   // treated as read-only
   int index;
-  const char *name;
   Rack *rack;
   Equity score;
   move_sort_t move_sort_type;
@@ -32,7 +31,6 @@ void player_reset(Player *player) {
 }
 
 void player_update(const PlayersData *players_data, Player *player) {
-  player->name = players_data_get_name(players_data, player->index);
   player->move_sort_type =
       players_data_get_move_sort_type(players_data, player->index);
   player->move_record_type =
@@ -57,7 +55,6 @@ Player *player_create(const PlayersData *players_data,
 Player *player_duplicate(const Player *player) {
   Player *new_player = malloc_or_die(sizeof(Player));
   new_player->index = player->index;
-  new_player->name = player->name;
   new_player->rack = rack_duplicate(player->rack);
   new_player->score = player->score;
   new_player->move_sort_type = player->move_sort_type;
@@ -77,8 +74,6 @@ void player_destroy(Player *player) {
 }
 
 int player_get_index(const Player *player) { return player->index; }
-
-const char *player_get_name(const Player *player) { return player->name; }
 
 Rack *player_get_rack(const Player *player) { return player->rack; }
 

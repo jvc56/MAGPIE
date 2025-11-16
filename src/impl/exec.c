@@ -243,8 +243,49 @@ void execute_command_async(Config *config, ErrorStack *error_stack,
   close(pipefds[1]);
 }
 
+void save_config_settings(const Config *config, ErrorStack *error_stack) {
+  if (!config_get_save_settings(config)) {
+    return;
+  }
+  StringBuilder *sb = string_builder_create();
+  config_add_settings_to_string_builder(config, sb);
+  write_string_to_file(CONFIG_SETTINGS_FILENAME_WITH_EXTENSION, "w",
+                       string_builder_peek(sb), error_stack);
+  string_builder_destroy(sb);
+}
+
+void load_config_settings(Config *config, ErrorStack *error_stack) {
+  // if file does not exist, just return
+  if (access(CONFIG_SETTINGS_FILENAME_WITH_EXTENSION, F_OK) != 0) {
+    return;
+  }
+  char *settings_string = get_string_from_file(
+      CONFIG_SETTINGS_FILENAME_WITH_EXTENSION, error_stack);
+  StringSplitter *settings_split_by_newline =
+      split_string_by_newline(settings_string, true);
+  const int num_lines =
+      string_splitter_get_number_of_items(settings_split_by_newline);
+  for (int i = 0; i < num_lines; i++) {
+    const char *line = string_splitter_get_item(settings_split_by_newline, i);
+    execute_command_sync(config, error_stack, line);
+    if (!error_stack_is_empty(error_stack)) {
+      break;
+    }
+  }
+  string_splitter_destroy(settings_split_by_newline);
+  free(settings_string);
+}
+
 void sync_command_scan_loop(Config *config, ErrorStack *error_stack,
                             const char *initial_command_string) {
+  // To suppress 'finished' for internal load settings commands
+  config_set_loaded_settings(config, false);
+  load_config_settings(config, error_stack);
+  config_set_loaded_settings(config, true);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    return;
+  }
   execute_command_sync(config, error_stack, initial_command_string);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
@@ -295,6 +336,9 @@ void sync_command_scan_loop(Config *config, ErrorStack *error_stack,
         log_fatal("attempted to execute command in unknown mode");
         break;
       }
+    }
+    if (error_stack_is_empty(error_stack)) {
+      save_config_settings(config, error_stack);
     }
     error_stack_print_and_reset(error_stack);
   }

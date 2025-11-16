@@ -1,6 +1,8 @@
 #ifndef CONFIG_DEFS_H
 #define CONFIG_DEFS_H
 
+#define CONFIG_SETTINGS_FILENAME_WITH_EXTENSION "settings.txt"
+
 enum {
   DEFAULT_BINGO_BONUS = 50,
   DEFAULT_CHALLENGE_BONUS = 5,
@@ -20,5 +22,8 @@ typedef enum {
   EXEC_MODE_SYNC,
   EXEC_MODE_ASYNC,
 } exec_mode_t;
+
+#define EXEC_MODE_SYNC_STRING "sync"
+#define EXEC_MODE_ASYNC_STRING "async"
 
 #endif

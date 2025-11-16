@@ -74,6 +74,8 @@ typedef enum {
   ARG_TOKEN_ENDGAME,
   ARG_TOKEN_AUTOPLAY,
   ARG_TOKEN_CONVERT,
+  ARG_TOKEN_P1_NAME,
+  ARG_TOKEN_P2_NAME,
   ARG_TOKEN_LEAVE_GEN,
   ARG_TOKEN_CREATE_DATA,
   ARG_TOKEN_DATA_PATH,
@@ -85,13 +87,11 @@ typedef enum {
   ARG_TOKEN_LEXICON,
   ARG_TOKEN_USE_WMP,
   ARG_TOKEN_LEAVES,
-  ARG_TOKEN_P1_NAME,
   ARG_TOKEN_P1_LEXICON,
   ARG_TOKEN_P1_USE_WMP,
   ARG_TOKEN_P1_LEAVES,
   ARG_TOKEN_P1_MOVE_SORT_TYPE,
   ARG_TOKEN_P1_MOVE_RECORD_TYPE,
-  ARG_TOKEN_P2_NAME,
   ARG_TOKEN_P2_LEXICON,
   ARG_TOKEN_P2_USE_WMP,
   ARG_TOKEN_P2_LEAVES,
@@ -114,7 +114,7 @@ typedef enum {
   ARG_TOKEN_HUMAN_READABLE,
   ARG_TOKEN_RANDOM_SEED,
   ARG_TOKEN_NUMBER_OF_THREADS,
-  ARG_TOKEN_PRINT_INFO_INTERVAL,
+  ARG_TOKEN_PRINT_INTERVAL,
   ARG_TOKEN_EXEC_MODE,
   ARG_TOKEN_TT_FRACTION_OF_MEM,
   ARG_TOKEN_TIME_LIMIT,
@@ -132,6 +132,7 @@ typedef enum {
   ARG_TOKEN_NEXT,
   ARG_TOKEN_PREVIOUS,
   ARG_TOKEN_GOTO,
+  ARG_TOKEN_NOTE,
   ARG_TOKEN_PRINT_BOARDS,
   ARG_TOKEN_BOARD_COLOR,
   ARG_TOKEN_BOARD_TILE_GLYPHS,
@@ -143,6 +144,7 @@ typedef enum {
   ARG_TOKEN_PRETTY,
   ARG_TOKEN_PRINT_ON_FINISH,
   ARG_TOKEN_SHOW_PROMPT,
+  ARG_TOKEN_SAVE_SETTINGS,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -187,6 +189,8 @@ struct Config {
   bool print_boards;
   bool print_on_finish;
   bool show_prompt;
+  bool save_settings;
+  bool loaded_settings;
   char *record_filepath;
   double tt_fraction_of_mem;
   int time_limit_seconds;
@@ -372,6 +376,18 @@ bool config_get_human_readable(const Config *config) {
 
 bool config_get_show_prompt(const Config *config) {
   return config->show_prompt;
+}
+
+bool config_get_save_settings(const Config *config) {
+  return config->save_settings;
+}
+
+bool config_get_loaded_settings(const Config *config) {
+  return config->loaded_settings;
+}
+
+void config_set_loaded_settings(Config *config, const bool value) {
+  config->loaded_settings = value;
 }
 
 PlayersData *config_get_players_data(const Config *config) {
@@ -919,9 +935,9 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
   } else {
     target_index = -1;
     for (int i = 0; i < 2; i++) {
-      const char *player_name =
-          player_get_name(game_get_player(config->game, i));
-      if (strings_iequal(player_name, target_name_or_index_str)) {
+      if (strings_iequal(
+              game_history_player_get_nickname(config->game_history, i),
+              target_name_or_index_str)) {
         target_index = i;
         break;
       }
@@ -929,7 +945,7 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
     if (target_index == -1) {
       error_stack_push(error_stack,
                        ERROR_STATUS_CONFIG_LOAD_MALFORMED_PLAYER_NAME,
-                       get_formatted_string("unrecognized player name '%s'",
+                       get_formatted_string("unrecognized player nickname '%s'",
                                             target_name_or_index_str));
       return;
     }
@@ -1328,7 +1344,7 @@ char *impl_show(Config *config, ErrorStack *error_stack) {
 
   // Add the game to the string builder
   string_builder_add_game(config->game, NULL, config->game_string_options,
-                          game_string);
+                          config->game_history, game_string);
 
   // Get the string and destroy the builder
   char *result = string_builder_dump(game_string, NULL);
@@ -1370,11 +1386,7 @@ void update_game_history_with_config(Config *config) {
   game_history_set_game_variant(config->game_history, config->game_variant);
 
   for (int player_index = 0; player_index < 2; player_index++) {
-    // This will have been specified by the CLI and will not have any whitespace
-    const char *player_name =
-        players_data_get_name(config->players_data, player_index);
-    game_history_player_reset(config->game_history, player_index, player_name,
-                              player_name);
+    game_history_player_reset_last_rack(config->game_history, player_index);
   }
 }
 
@@ -1390,13 +1402,9 @@ char *impl_new_game(Config *config, ErrorStack *error_stack) {
   game_history_reset(config->game_history);
   update_game_history_with_config(config);
   for (int player_index = 0; player_index < 2; player_index++) {
-    const char *player_name =
-        config_get_parg_value(config, ARG_TOKEN_NEW_GAME, player_index);
-    // Since the player_name is specified by the CLI which guarantees
-    // that it does not contain whitespace, which means we can use it as
-    // the nickname as well as the name.
-    game_history_player_reset(config->game_history, player_index, player_name,
-                              player_name);
+    game_history_player_reset(
+        config->game_history, player_index,
+        config_get_parg_value(config, ARG_TOKEN_NEW_GAME, player_index), NULL);
   }
   return empty_string();
 }
@@ -2275,12 +2283,7 @@ char *impl_switch_names(Config *config, ErrorStack *error_stack) {
                      string_duplicate("cannot switch names without a lexicon"));
     return empty_string();
   }
-  // The players_data_switch_names function needs to be called before
-  // config_init_game so that the const char * player names in the
-  // game are updated to the new pointers.
-  players_data_switch_names(config->players_data);
-  config_init_game(config);
-  update_game_history_with_config(config);
+  game_history_switch_names(config->game_history);
   return empty_string();
 }
 
@@ -2429,6 +2432,97 @@ char *str_api_goto(Config *config, ErrorStack *error_stack) {
   return impl_goto(config, error_stack);
 }
 
+// Note
+
+char *impl_note(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot add a note without loaded game"));
+    return empty_string();
+  }
+
+  if (game_history_get_num_events(config->game_history) == 0) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_NOTE_NO_GAME_EVENTS,
+        string_duplicate("cannot add a note to an empty game history"));
+    return empty_string();
+  }
+
+  config_init_game(config);
+
+  game_history_set_note_for_most_recent_event(
+      config->game_history, config_get_parg_value(config, ARG_TOKEN_NOTE, 0));
+  return empty_string();
+}
+
+void execute_note(Config *config, ErrorStack *error_stack) {
+  char *result = impl_note(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+    execute_show(config, error_stack);
+  }
+  free(result);
+}
+
+char *str_api_note(Config *config, ErrorStack *error_stack) {
+  return impl_note(config, error_stack);
+}
+
+// Set player names
+
+char *impl_set_player_name(Config *config, arg_token_t arg_token) {
+  const char *new_player_name = config_get_parg_value(config, arg_token, 0);
+  int player_index = -1;
+  switch (arg_token) {
+  case ARG_TOKEN_P1_NAME:
+    player_index = 0;
+    break;
+  case ARG_TOKEN_P2_NAME:
+    player_index = 1;
+    break;
+  default:
+    log_fatal("encountered unexpected arg token when setting player name");
+    break;
+  }
+  game_history_player_reset_names(config->game_history, player_index,
+                                  new_player_name, NULL);
+  return empty_string();
+}
+
+void execute_set_player_name(Config *config, arg_token_t arg_token) {
+  char *result = impl_set_player_name(config, arg_token);
+  thread_control_print(config->thread_control, result);
+  free(result);
+}
+
+void execute_set_player_one_name(Config *config, ErrorStack
+                                                     __attribute__((unused)) *
+                                                     error_stack) {
+  execute_set_player_name(config, ARG_TOKEN_P1_NAME);
+}
+
+void execute_set_player_two_name(Config *config, ErrorStack
+                                                     __attribute__((unused)) *
+                                                     error_stack) {
+  execute_set_player_name(config, ARG_TOKEN_P2_NAME);
+}
+
+char *str_api_set_player_name(Config *config, arg_token_t arg_token) {
+  return impl_set_player_name(config, arg_token);
+}
+
+char *str_api_set_player_one_name(Config *config, ErrorStack
+                                                      __attribute__((unused)) *
+                                                      error_stack) {
+  return impl_set_player_name(config, ARG_TOKEN_P1_NAME);
+}
+
+char *str_api_set_player_two_name(Config *config, ErrorStack
+                                                      __attribute__((unused)) *
+                                                      error_stack) {
+  return impl_set_player_name(config, ARG_TOKEN_P2_NAME);
+}
+
 // Load GCG
 
 void config_load_game_history(Config *config, const GameHistory *game_history,
@@ -2440,11 +2534,6 @@ void config_load_game_history(Config *config, const GameHistory *game_history,
       game_history_get_board_layout_name(game_history);
   const game_variant_t game_variant =
       game_history_get_game_variant(game_history);
-  const char *player_nicknames[2] = {NULL, NULL};
-
-  for (int i = 0; i < 2; i++) {
-    player_nicknames[i] = game_history_player_get_nickname(game_history, i);
-  }
 
   string_builder_add_formatted_string(cfg_load_cmd_builder, "%s ",
                                       config->pargs[ARG_TOKEN_SET]->name);
@@ -2487,17 +2576,6 @@ void config_load_game_history(Config *config, const GameHistory *game_history,
     break;
   default:
     log_fatal("game history has unknown game variant enum: %d", game_variant);
-  }
-
-  for (int i = 0; i < 2; i++) {
-    if (!player_nicknames[i]) {
-      continue;
-    }
-    arg_token_t pname_arg_token =
-        i == 0 ? ARG_TOKEN_P1_NAME : ARG_TOKEN_P2_NAME;
-    string_builder_add_formatted_string(cfg_load_cmd_builder, "-%s %s ",
-                                        config->pargs[pname_arg_token]->name,
-                                        player_nicknames[i]);
   }
 
   char *cfg_load_cmd = string_builder_dump(cfg_load_cmd_builder, NULL);
@@ -2599,11 +2677,24 @@ char *str_api_load_gcg(Config *config, ErrorStack *error_stack) {
   return impl_load_gcg(config, error_stack);
 }
 
+// The pargs takes ownership of the value
+void add_value_to_parg(ParsedArg *current_parg, int *current_value_index,
+                       const char *value) {
+  free(current_parg->values[*current_value_index]);
+  if (!value) {
+    current_parg->values[*current_value_index] = empty_string();
+  } else {
+    current_parg->values[*current_value_index] = string_duplicate(value);
+  }
+  *current_value_index = *current_value_index + 1;
+  current_parg->num_set_values = *current_value_index;
+}
+
 // Config load helpers
 
 void config_load_parsed_args(Config *config,
                              const StringSplitter *cmd_split_string,
-                             ErrorStack *error_stack) {
+                             const char *cmd, ErrorStack *error_stack) {
   int number_of_input_strs =
       string_splitter_get_number_of_items(cmd_split_string);
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
@@ -2706,6 +2797,19 @@ void config_load_parsed_args(Config *config,
         config->exec_parg_token = current_arg_token;
       }
       current_value_index = 0;
+      if (current_arg_token == ARG_TOKEN_NOTE ||
+          current_arg_token == ARG_TOKEN_P1_NAME ||
+          current_arg_token == ARG_TOKEN_P2_NAME) {
+        // Add the rest of the remaining string to the next parg value,
+        // which basically treats the rest of the string after the command
+        // as a single argument.
+        char *cmd_content = strchr(cmd, ' ');
+        if (cmd_content) {
+          cmd_content = cmd_content + 1;
+        }
+        add_value_to_parg(current_parg, &current_value_index, cmd_content);
+        return;
+      }
     } else {
       if (!current_parg || current_value_index >= current_parg->num_values) {
         error_stack_push(
@@ -2714,10 +2818,7 @@ void config_load_parsed_args(Config *config,
                                  input_str));
         return;
       }
-      free(current_parg->values[current_value_index]);
-      current_parg->values[current_value_index] = string_duplicate(input_str);
-      current_value_index++;
-      current_parg->num_set_values = current_value_index;
+      add_value_to_parg(current_parg, &current_value_index, input_str);
     }
   }
   if (current_parg && current_value_index < current_parg->num_req_values) {
@@ -2732,10 +2833,10 @@ void config_load_parsed_args(Config *config,
 
 void config_load_sort_type(Config *config, const char *sort_type_str,
                            int player_index, ErrorStack *error_stack) {
-  if (has_iprefix(sort_type_str, "equity")) {
+  if (has_iprefix(sort_type_str, MOVE_SORT_EQUITY_STRING)) {
     players_data_set_move_sort_type(config->players_data, player_index,
                                     MOVE_SORT_EQUITY);
-  } else if (has_iprefix(sort_type_str, "score")) {
+  } else if (has_iprefix(sort_type_str, MOVE_SORT_SCORE_STRING)) {
     players_data_set_move_sort_type(config->players_data, player_index,
                                     MOVE_SORT_SCORE);
   } else {
@@ -2745,18 +2846,31 @@ void config_load_sort_type(Config *config, const char *sort_type_str,
   }
 }
 
+void string_builder_add_move_sort_type(StringBuilder *sb,
+                                       const move_sort_t sort_type) {
+  switch (sort_type) {
+  case MOVE_SORT_EQUITY:
+    string_builder_add_string(sb, MOVE_SORT_EQUITY_STRING);
+    break;
+  case MOVE_SORT_SCORE:
+    string_builder_add_string(sb, MOVE_SORT_SCORE_STRING);
+    break;
+  }
+}
+
 void config_load_record_type(Config *config, const char *record_type_str,
                              int player_index, ErrorStack *error_stack) {
-  if (has_iprefix(record_type_str, "best")) {
+  if (has_iprefix(record_type_str, MOVE_RECORD_BEST_STRING)) {
     players_data_set_move_record_type(config->players_data, player_index,
                                       MOVE_RECORD_BEST);
-  } else if (has_iprefix(record_type_str, "equity")) {
+  } else if (has_iprefix(record_type_str,
+                         MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST_STRING)) {
     players_data_set_move_record_type(config->players_data, player_index,
                                       MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST);
-  } else if (has_iprefix(record_type_str, "all")) {
+  } else if (has_iprefix(record_type_str, MOVE_RECORD_ALL_STRING)) {
     players_data_set_move_record_type(config->players_data, player_index,
                                       MOVE_RECORD_ALL);
-  } else if (has_iprefix(record_type_str, "small")) {
+  } else if (has_iprefix(record_type_str, MOVE_RECORD_ALL_SMALL_STRING)) {
     players_data_set_move_record_type(config->players_data, player_index,
                                       MOVE_RECORD_ALL_SMALL);
   } else {
@@ -2767,13 +2881,47 @@ void config_load_record_type(Config *config, const char *record_type_str,
   }
 }
 
+void string_builder_add_move_record_type(StringBuilder *sb,
+                                         const move_record_t record_type) {
+  switch (record_type) {
+  case MOVE_RECORD_BEST:
+    string_builder_add_string(sb, MOVE_RECORD_BEST_STRING);
+    break;
+  case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
+    string_builder_add_string(sb, MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST_STRING);
+    break;
+  case MOVE_RECORD_ALL:
+    string_builder_add_string(sb, MOVE_RECORD_ALL_STRING);
+    break;
+  case MOVE_RECORD_ALL_SMALL:
+    string_builder_add_string(sb, MOVE_RECORD_ALL_SMALL_STRING);
+    break;
+  }
+}
+
+void string_builder_add_exec_mode_type(StringBuilder *sb,
+                                       const exec_mode_t exec_mode) {
+  switch (exec_mode) {
+  case EXEC_MODE_SYNC:
+    string_builder_add_string(sb, EXEC_MODE_SYNC_STRING);
+    break;
+  case EXEC_MODE_ASYNC:
+    string_builder_add_string(sb, EXEC_MODE_ASYNC_STRING);
+    break;
+  case EXEC_MODE_UNKNOWN:
+    log_fatal("cannot convert unknown exec mode to string");
+    break;
+  }
+}
+
 void config_load_sampling_rule(Config *config, const char *sampling_rule_str,
                                ErrorStack *error_stack) {
-  if (has_iprefix(sampling_rule_str, "rr")) {
+  if (has_iprefix(sampling_rule_str, BAI_SAMPLING_RULE_ROUND_ROBIN_STRING)) {
     config->sampling_rule = BAI_SAMPLING_RULE_ROUND_ROBIN;
-  } else if (has_iprefix(sampling_rule_str, "tt")) {
+  } else if (has_iprefix(sampling_rule_str,
+                         BAI_SAMPLING_RULE_TOP_TWO_IDS_STRING)) {
     config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
-  } else if (has_iprefix(sampling_rule_str, "oldtt")) {
+  } else if (has_iprefix(sampling_rule_str, BAI_SAMPLING_RULE_TOP_TWO_STRING)) {
     config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO;
   } else {
     error_stack_push(error_stack,
@@ -2783,16 +2931,141 @@ void config_load_sampling_rule(Config *config, const char *sampling_rule_str,
   }
 }
 
+void string_builder_add_sampling_rule(StringBuilder *sb,
+                                      const bai_sampling_rule_t sampling_rule) {
+  switch (sampling_rule) {
+  case BAI_SAMPLING_RULE_ROUND_ROBIN:
+    string_builder_add_string(sb, BAI_SAMPLING_RULE_ROUND_ROBIN_STRING);
+    break;
+  case BAI_SAMPLING_RULE_TOP_TWO_IDS:
+    string_builder_add_string(sb, BAI_SAMPLING_RULE_TOP_TWO_IDS_STRING);
+    break;
+  case BAI_SAMPLING_RULE_TOP_TWO:
+    string_builder_add_string(sb, BAI_SAMPLING_RULE_TOP_TWO_STRING);
+    break;
+  }
+}
+
 void config_load_threshold(Config *config, const char *threshold_str,
                            ErrorStack *error_stack) {
-  if (has_iprefix(threshold_str, "none")) {
+  if (has_iprefix(threshold_str, BAI_THRESHOLD_NONE_STRING)) {
     config->threshold = BAI_THRESHOLD_NONE;
-  } else if (has_iprefix(threshold_str, "gk16")) {
+  } else if (has_iprefix(threshold_str, BAI_THRESHOLD_GK16_STRING)) {
     config->threshold = BAI_THRESHOLD_GK16;
   } else {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_THRESHOLD,
         get_formatted_string("unrecognized threshold type: %s", threshold_str));
+  }
+}
+
+void string_builder_add_threshold(StringBuilder *sb,
+                                  const bai_threshold_t threshold) {
+  switch (threshold) {
+  case BAI_THRESHOLD_NONE:
+    string_builder_add_string(sb, BAI_THRESHOLD_NONE_STRING);
+    break;
+  case BAI_THRESHOLD_GK16:
+    string_builder_add_string(sb, BAI_THRESHOLD_GK16_STRING);
+    break;
+  }
+}
+
+void string_builder_add_game_string_board_color_type(
+    StringBuilder *sb,
+    const game_string_board_color_t game_string_board_color) {
+  switch (game_string_board_color) {
+  case GAME_STRING_BOARD_COLOR_NONE:
+    string_builder_add_string(sb, GAME_STRING_BOARD_COLOR_NONE_STRING);
+    break;
+  case GAME_STRING_BOARD_COLOR_ANSI:
+    string_builder_add_string(sb, GAME_STRING_BOARD_COLOR_ANSI_STRING);
+    break;
+  case GAME_STRING_BOARD_COLOR_XTERM_256:
+    string_builder_add_string(sb, GAME_STRING_BOARD_COLOR_XTERM_256_STRING);
+    break;
+  case GAME_STRING_BOARD_COLOR_TRUECOLOR:
+    string_builder_add_string(sb, GAME_STRING_BOARD_COLOR_TRUECOLOR_STRING);
+    break;
+  }
+}
+
+void string_builder_add_game_string_board_tile_glyphs_type(
+    StringBuilder *sb,
+    const game_string_board_tile_glyphs_t game_string_board_tile_glyphs) {
+  switch (game_string_board_tile_glyphs) {
+  case GAME_STRING_BOARD_TILE_GLYPHS_PRIMARY:
+    string_builder_add_string(sb, GAME_STRING_BOARD_TILE_GLYPHS_PRIMARY_STRING);
+    break;
+  case GAME_STRING_BOARD_TILE_GLYPHS_ALT:
+    string_builder_add_string(sb, GAME_STRING_BOARD_TILE_GLYPHS_ALT_STRING);
+    break;
+  }
+}
+
+void string_builder_add_game_string_board_border_type(
+    StringBuilder *sb,
+    const game_string_board_border_t game_string_board_border) {
+  switch (game_string_board_border) {
+  case GAME_STRING_BOARD_BORDER_ASCII:
+    string_builder_add_string(sb, GAME_STRING_BOARD_BORDER_ASCII_STRING);
+    break;
+  case GAME_STRING_BOARD_BORDER_BOX_DRAWING:
+    string_builder_add_string(sb, GAME_STRING_BOARD_BORDER_BOX_DRAWING_STRING);
+    break;
+  }
+}
+
+void string_builder_add_game_string_board_column_label_type(
+    StringBuilder *sb,
+    const game_string_board_column_label_t game_string_board_column_label) {
+  switch (game_string_board_column_label) {
+  case GAME_STRING_BOARD_COLUMN_LABEL_ASCII:
+    string_builder_add_string(sb, GAME_STRING_BOARD_COLUMN_LABEL_ASCII_STRING);
+    break;
+  case GAME_STRING_BOARD_COLUMN_LABEL_FULLWIDTH:
+    string_builder_add_string(sb,
+                              GAME_STRING_BOARD_COLUMN_LABEL_FULLWIDTH_STRING);
+    break;
+  }
+}
+
+void string_builder_add_game_string_on_turn_marker_type(
+    StringBuilder *sb,
+    const game_string_on_turn_marker_t game_string_on_turn_marker) {
+  switch (game_string_on_turn_marker) {
+  case GAME_STRING_ON_TURN_MARKER_ASCII:
+    string_builder_add_string(sb, GAME_STRING_ON_TURN_MARKER_ASCII_STRING);
+    break;
+  case GAME_STRING_ON_TURN_MARKER_ARROWHEAD:
+    string_builder_add_string(sb, GAME_STRING_ON_TURN_MARKER_ARROWHEAD_STRING);
+    break;
+  }
+}
+
+void string_builder_add_game_string_on_turn_color_type(
+    StringBuilder *sb,
+    const game_string_on_turn_color_t game_string_on_turn_color) {
+  switch (game_string_on_turn_color) {
+  case GAME_STRING_ON_TURN_COLOR_NONE:
+    string_builder_add_string(sb, GAME_STRING_ON_TURN_COLOR_NONE_STRING);
+    break;
+  case GAME_STRING_ON_TURN_COLOR_ANSI_GREEN:
+    string_builder_add_string(sb, GAME_STRING_ON_TURN_COLOR_ANSI_GREEN_STRING);
+    break;
+  }
+}
+
+void string_builder_add_game_string_on_turn_score_style_type(
+    StringBuilder *sb,
+    const game_string_on_turn_score_style_t game_string_on_turn_score_style) {
+  switch (game_string_on_turn_score_style) {
+  case GAME_STRING_ON_TURN_SCORE_NORMAL:
+    string_builder_add_string(sb, GAME_STRING_ON_TURN_SCORE_NORMAL_STRING);
+    break;
+  case GAME_STRING_ON_TURN_SCORE_BOLD:
+    string_builder_add_string(sb, GAME_STRING_ON_TURN_SCORE_BOLD_STRING);
+    break;
   }
 }
 
@@ -2871,9 +3144,9 @@ char *get_default_klv_name(const char *lexicon_name) {
 
 exec_mode_t get_exec_mode_type_from_name(const char *exec_mode_str) {
   exec_mode_t exec_mode = EXEC_MODE_UNKNOWN;
-  if (has_iprefix(exec_mode_str, "sync")) {
+  if (has_iprefix(exec_mode_str, EXEC_MODE_SYNC_STRING)) {
     exec_mode = EXEC_MODE_SYNC;
-  } else if (has_iprefix(exec_mode_str, "async")) {
+  } else if (has_iprefix(exec_mode_str, EXEC_MODE_ASYNC_STRING)) {
     exec_mode = EXEC_MODE_ASYNC;
   }
   return exec_mode;
@@ -3233,7 +3506,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_int(config, ARG_TOKEN_PRINT_INFO_INTERVAL, 0, INT_MAX,
+  config_load_int(config, ARG_TOKEN_PRINT_INTERVAL, 0, INT_MAX,
                   &config->print_interval, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -3365,19 +3638,30 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  // Save settings
+
+  config_load_bool(config, ARG_TOKEN_SAVE_SETTINGS, &config->save_settings,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // Board color
 
   const char *board_color_str =
       config_get_parg_value(config, ARG_TOKEN_BOARD_COLOR, 0);
   if (board_color_str) {
-    if (strings_iequal(board_color_str, "none")) {
+    if (strings_iequal(board_color_str, GAME_STRING_BOARD_COLOR_NONE_STRING)) {
       config->game_string_options->board_color = GAME_STRING_BOARD_COLOR_NONE;
-    } else if (strings_iequal(board_color_str, "ansi")) {
+    } else if (strings_iequal(board_color_str,
+                              GAME_STRING_BOARD_COLOR_ANSI_STRING)) {
       config->game_string_options->board_color = GAME_STRING_BOARD_COLOR_ANSI;
-    } else if (strings_iequal(board_color_str, "xterm256")) {
+    } else if (strings_iequal(board_color_str,
+                              GAME_STRING_BOARD_COLOR_XTERM_256_STRING)) {
       config->game_string_options->board_color =
           GAME_STRING_BOARD_COLOR_XTERM_256;
-    } else if (strings_iequal(board_color_str, "truecolor")) {
+    } else if (strings_iequal(board_color_str,
+                              GAME_STRING_BOARD_COLOR_TRUECOLOR_STRING)) {
       config->game_string_options->board_color =
           GAME_STRING_BOARD_COLOR_TRUECOLOR;
     } else {
@@ -3586,7 +3870,6 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
                                          ARG_TOKEN_P2_MOVE_SORT_TYPE};
   const arg_token_t record_type_args[2] = {ARG_TOKEN_P1_MOVE_RECORD_TYPE,
                                            ARG_TOKEN_P2_MOVE_RECORD_TYPE};
-  const arg_token_t pname_args[2] = {ARG_TOKEN_P1_NAME, ARG_TOKEN_P2_NAME};
 
   for (int player_index = 0; player_index < 2; player_index++) {
     const char *new_player_sort_type_str =
@@ -3607,13 +3890,6 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       if (!error_stack_is_empty(error_stack)) {
         return;
       }
-    }
-
-    const char *new_player_name =
-        config_get_parg_value(config, pname_args[player_index], 0);
-    if (new_player_name) {
-      players_data_set_name(config->players_data, player_index,
-                            new_player_name);
     }
   }
 
@@ -3654,7 +3930,7 @@ void config_load_command(Config *config, const char *cmd,
   // CGP data can have semicolons at the end, so
   // we trim these off to make loading easier.
   string_splitter_trim_char(cmd_split_string, ';');
-  config_load_parsed_args(config, cmd_split_string, error_stack);
+  config_load_parsed_args(config, cmd_split_string, cmd, error_stack);
 
   if (error_stack_is_empty(error_stack)) {
     config_load_data(config, error_stack);
@@ -3667,7 +3943,7 @@ void config_execute_command(Config *config, ErrorStack *error_stack) {
   if (config_exec_parg_is_set(config)) {
     config_get_parg_exec_func(config, config->exec_parg_token)(config,
                                                                error_stack);
-    if (config->print_on_finish) {
+    if (config->print_on_finish && config->loaded_settings) {
       char *finished_msg = get_status_finished_str(config);
       thread_control_print(config_get_thread_control(config), finished_msg);
       free(finished_msg);
@@ -3871,6 +4147,9 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   cmd(ARG_TOKEN_NEXT, "next", 0, 0, next, generic);
   cmd(ARG_TOKEN_PREVIOUS, "previous", 0, 0, previous, generic);
   cmd(ARG_TOKEN_GOTO, "goto", 1, 1, goto, generic);
+  cmd(ARG_TOKEN_NOTE, "note", 1, 1, note, generic);
+  cmd(ARG_TOKEN_P1_NAME, "p1", 1, 1, set_player_one_name, generic);
+  cmd(ARG_TOKEN_P2_NAME, "p2", 1, 1, set_player_two_name, generic);
 
   arg(ARG_TOKEN_DATA_PATH, "path", 1, 1);
   arg(ARG_TOKEN_BINGO_BONUS, "bb", 1, 1);
@@ -3881,13 +4160,11 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_LEXICON, "lex", 1, 1);
   arg(ARG_TOKEN_USE_WMP, "wmp", 1, 1);
   arg(ARG_TOKEN_LEAVES, "leaves", 1, 1);
-  arg(ARG_TOKEN_P1_NAME, "p1", 1, 1);
   arg(ARG_TOKEN_P1_LEXICON, "l1", 1, 1);
   arg(ARG_TOKEN_P1_USE_WMP, "w1", 1, 1);
   arg(ARG_TOKEN_P1_LEAVES, "k1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1);
-  arg(ARG_TOKEN_P2_NAME, "p2", 1, 1);
   arg(ARG_TOKEN_P2_LEXICON, "l2", 1, 1);
   arg(ARG_TOKEN_P2_USE_WMP, "w2", 1, 1);
   arg(ARG_TOKEN_P2_LEAVES, "k2", 1, 1);
@@ -3910,7 +4187,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_WRITE_BUFFER_SIZE, "wb", 1, 1);
   arg(ARG_TOKEN_RANDOM_SEED, "seed", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_THREADS, "threads", 1, 1);
-  arg(ARG_TOKEN_PRINT_INFO_INTERVAL, "pfrequency", 1, 1);
+  arg(ARG_TOKEN_PRINT_INTERVAL, "pfrequency", 1, 1);
   arg(ARG_TOKEN_EXEC_MODE, "mode", 1, 1);
   arg(ARG_TOKEN_TT_FRACTION_OF_MEM, "ttfraction", 1, 1);
   arg(ARG_TOKEN_TIME_LIMIT, "tlim", 1, 1);
@@ -3927,6 +4204,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_PRETTY, "pretty", 1, 1);
   arg(ARG_TOKEN_PRINT_ON_FINISH, "printonfinish", 1, 1);
   arg(ARG_TOKEN_SHOW_PROMPT, "shprompt", 1, 1);
+  arg(ARG_TOKEN_SAVE_SETTINGS, "savesettings", 1, 1);
 
 #undef cmd
 #undef arg
@@ -3957,6 +4235,8 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->print_boards = false;
   config->print_on_finish = false;
   config->show_prompt = true;
+  config->save_settings = true;
+  config->loaded_settings = true;
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->ld = NULL;
   config->players_data = players_data_create();
@@ -4012,4 +4292,347 @@ void config_destroy(Config *config) {
   game_string_options_destroy(config->game_string_options);
   free(config->data_paths);
   free(config);
+}
+
+void config_add_string_setting_to_string_builder(const Config *config,
+                                                 StringBuilder *sb,
+                                                 arg_token_t arg_token,
+                                                 const char *value) {
+  if (value) {
+    string_builder_add_formatted_string(sb, " -%s %s",
+                                        config->pargs[arg_token]->name, value);
+  }
+}
+
+void config_add_int_setting_to_string_builder(const Config *config,
+                                              StringBuilder *sb,
+                                              arg_token_t arg_token,
+                                              int value) {
+  string_builder_add_formatted_string(sb, " -%s %d",
+                                      config->pargs[arg_token]->name, value);
+}
+
+void config_add_uint64_setting_to_string_builder(const Config *config,
+                                                 StringBuilder *sb,
+                                                 arg_token_t arg_token,
+                                                 uint64_t value) {
+  string_builder_add_formatted_string(sb, " -%s %lu",
+                                      config->pargs[arg_token]->name, value);
+}
+
+void config_add_double_setting_to_string_builder(const Config *config,
+                                                 StringBuilder *sb,
+                                                 arg_token_t arg_token,
+                                                 double value) {
+  string_builder_add_formatted_string(sb, " -%s %.15f",
+                                      config->pargs[arg_token]->name, value);
+}
+
+void config_add_bool_setting_to_string_builder(const Config *config,
+                                               StringBuilder *sb,
+                                               arg_token_t arg_token,
+                                               bool value) {
+  string_builder_add_formatted_string(
+      sb, " -%s %s", config->pargs[arg_token]->name, value ? "true" : "false");
+}
+
+void config_add_settings_to_string_builder(const Config *config,
+                                           StringBuilder *sb) {
+  string_builder_add_string(sb, config->pargs[ARG_TOKEN_SET]->name);
+  for (arg_token_t arg_token = 0; arg_token < NUMBER_OF_ARG_TOKENS;
+       arg_token++) {
+    switch (arg_token) {
+    case ARG_TOKEN_SET:
+    case ARG_TOKEN_CGP:
+    case ARG_TOKEN_MOVES:
+    case ARG_TOKEN_RACK:
+    case ARG_TOKEN_GEN:
+    case ARG_TOKEN_SIM:
+    case ARG_TOKEN_INFER:
+    case ARG_TOKEN_ENDGAME:
+    case ARG_TOKEN_AUTOPLAY:
+    case ARG_TOKEN_CONVERT:
+    case ARG_TOKEN_LEAVE_GEN:
+    case ARG_TOKEN_CREATE_DATA:
+    case ARG_TOKEN_LOAD:
+    case ARG_TOKEN_NEW_GAME:
+    case ARG_TOKEN_EXPORT:
+    case ARG_TOKEN_COMMIT:
+    case ARG_TOKEN_CHALLENGE:
+    case ARG_TOKEN_UNCHALLENGE:
+    case ARG_TOKEN_OVERTIME:
+    case ARG_TOKEN_SWITCH_NAMES:
+    case ARG_TOKEN_SHOW:
+    case ARG_TOKEN_NEXT:
+    case ARG_TOKEN_PREVIOUS:
+    case ARG_TOKEN_GOTO:
+    case ARG_TOKEN_NOTE:
+    case ARG_TOKEN_P1_NAME:
+    case ARG_TOKEN_P2_NAME:
+      break;
+    case ARG_TOKEN_DATA_PATH:
+      config_add_string_setting_to_string_builder(config, sb, arg_token,
+                                                  config->data_paths);
+      break;
+    case ARG_TOKEN_BINGO_BONUS:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->bingo_bonus);
+      break;
+    case ARG_TOKEN_CHALLENGE_BONUS:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->challenge_bonus);
+      break;
+    case ARG_TOKEN_BOARD_LAYOUT:
+      config_add_string_setting_to_string_builder(
+          config, sb, arg_token, board_layout_get_name(config->board_layout));
+      break;
+    case ARG_TOKEN_GAME_VARIANT:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_game_variant(sb, config->game_variant);
+
+      break;
+    case ARG_TOKEN_LETTER_DISTRIBUTION:
+      if (config->ld) {
+        config_add_string_setting_to_string_builder(config, sb, arg_token,
+                                                    ld_get_name(config->ld));
+      }
+      break;
+    case ARG_TOKEN_LEXICON:
+    case ARG_TOKEN_USE_WMP:
+    case ARG_TOKEN_LEAVES:
+      // Set these values on a per-player basis
+      break;
+    case ARG_TOKEN_P1_LEXICON:
+      config_add_string_setting_to_string_builder(
+          config, sb, arg_token,
+          players_data_get_data_name(config->players_data,
+                                     PLAYERS_DATA_TYPE_KWG, 0));
+      break;
+    case ARG_TOKEN_P1_USE_WMP:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token,
+          players_data_get_use_when_available(config->players_data,
+                                              PLAYERS_DATA_TYPE_WMP, 0));
+      break;
+    case ARG_TOKEN_P1_LEAVES:
+      config_add_string_setting_to_string_builder(
+          config, sb, arg_token,
+          players_data_get_data_name(config->players_data,
+                                     PLAYERS_DATA_TYPE_KLV, 0));
+      break;
+    case ARG_TOKEN_P1_MOVE_SORT_TYPE:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_move_sort_type(
+          sb, players_data_get_move_sort_type(config->players_data, 0));
+      break;
+    case ARG_TOKEN_P1_MOVE_RECORD_TYPE:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_move_record_type(
+          sb, players_data_get_move_record_type(config->players_data, 0));
+      break;
+    case ARG_TOKEN_P2_LEXICON:
+      config_add_string_setting_to_string_builder(
+          config, sb, arg_token,
+          players_data_get_data_name(config->players_data,
+                                     PLAYERS_DATA_TYPE_KWG, 1));
+      break;
+    case ARG_TOKEN_P2_USE_WMP:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token,
+          players_data_get_use_when_available(config->players_data,
+                                              PLAYERS_DATA_TYPE_WMP, 1));
+      break;
+    case ARG_TOKEN_P2_LEAVES:
+      config_add_string_setting_to_string_builder(
+          config, sb, arg_token,
+          players_data_get_data_name(config->players_data,
+                                     PLAYERS_DATA_TYPE_KLV, 1));
+      break;
+    case ARG_TOKEN_P2_MOVE_SORT_TYPE:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_move_sort_type(
+          sb, players_data_get_move_sort_type(config->players_data, 1));
+      break;
+    case ARG_TOKEN_P2_MOVE_RECORD_TYPE:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_move_record_type(
+          sb, players_data_get_move_record_type(config->players_data, 1));
+      break;
+    case ARG_TOKEN_WIN_PCT:
+      config_add_string_setting_to_string_builder(
+          config, sb, arg_token, win_pct_get_name(config->win_pcts));
+      break;
+    case ARG_TOKEN_PLIES:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->plies);
+      break;
+    case ARG_TOKEN_ENDGAME_PLIES:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->endgame_plies);
+      break;
+    case ARG_TOKEN_NUMBER_OF_PLAYS:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->num_plays);
+      break;
+    case ARG_TOKEN_NUMBER_OF_SMALL_PLAYS:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->num_small_plays);
+      break;
+    case ARG_TOKEN_MAX_ITERATIONS:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->max_iterations);
+      break;
+    case ARG_TOKEN_STOP_COND_PCT:
+      config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                  config->stop_cond_pct);
+      break;
+    case ARG_TOKEN_EQ_MARGIN_INFERENCE:
+      if (config->eq_margin_inference != 0) {
+        config_add_double_setting_to_string_builder(
+            config, sb, arg_token,
+            equity_to_double(config->eq_margin_inference));
+      }
+      break;
+    case ARG_TOKEN_EQ_MARGIN_MOVEGEN:
+      if (config->eq_margin_movegen != 0) {
+        config_add_double_setting_to_string_builder(
+            config, sb, arg_token, equity_to_double(config->eq_margin_movegen));
+      }
+      break;
+    case ARG_TOKEN_MIN_PLAY_ITERATIONS:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->min_play_iterations);
+      break;
+    case ARG_TOKEN_USE_GAME_PAIRS:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->use_game_pairs);
+      break;
+    case ARG_TOKEN_USE_SMALL_PLAYS:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->use_small_plays);
+      break;
+    case ARG_TOKEN_SIM_WITH_INFERENCE:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->sim_with_inference);
+      break;
+    case ARG_TOKEN_WRITE_BUFFER_SIZE:
+      config_add_uint64_setting_to_string_builder(
+          config, sb, arg_token,
+          (uint64_t)autoplay_results_get_write_buffer_size(
+              config->autoplay_results));
+      break;
+    case ARG_TOKEN_HUMAN_READABLE:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->human_readable);
+      break;
+    case ARG_TOKEN_RANDOM_SEED:
+      // Do not save the seed in the settings.
+      // The seed should be explicitly set by the user if they want to reproduce
+      // certain behaviors.
+      break;
+    case ARG_TOKEN_NUMBER_OF_THREADS:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->num_threads);
+      break;
+    case ARG_TOKEN_PRINT_INTERVAL:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->print_interval);
+      break;
+    case ARG_TOKEN_EXEC_MODE:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_exec_mode_type(sb, config->exec_mode);
+      break;
+    case ARG_TOKEN_TT_FRACTION_OF_MEM:
+      config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                  config->tt_fraction_of_mem);
+      break;
+    case ARG_TOKEN_TIME_LIMIT:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->time_limit_seconds);
+      break;
+    case ARG_TOKEN_SAMPLING_RULE:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_sampling_rule(sb, config->sampling_rule);
+      break;
+    case ARG_TOKEN_THRESHOLD:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_threshold(sb, config->threshold);
+      break;
+    case ARG_TOKEN_PRINT_BOARDS:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->print_boards);
+      break;
+    case ARG_TOKEN_BOARD_COLOR:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_game_string_board_color_type(
+          sb, config->game_string_options->board_color);
+      break;
+    case ARG_TOKEN_BOARD_TILE_GLYPHS:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_game_string_board_tile_glyphs_type(
+          sb, config->game_string_options->board_tile_glyphs);
+      break;
+    case ARG_TOKEN_BOARD_BORDER:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_game_string_board_border_type(
+          sb, config->game_string_options->board_border);
+      break;
+    case ARG_TOKEN_BOARD_COLUMN_LABEL:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_game_string_board_column_label_type(
+          sb, config->game_string_options->board_column_label);
+      break;
+    case ARG_TOKEN_ON_TURN_MARKER:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_game_string_on_turn_marker_type(
+          sb, config->game_string_options->on_turn_marker);
+      break;
+    case ARG_TOKEN_ON_TURN_COLOR:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_game_string_on_turn_color_type(
+          sb, config->game_string_options->on_turn_color);
+      break;
+    case ARG_TOKEN_ON_TURN_SCORE_STYLE:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_game_string_on_turn_score_style_type(
+          sb, config->game_string_options->on_turn_score_style);
+      break;
+    case ARG_TOKEN_PRETTY:
+      break;
+    case ARG_TOKEN_PRINT_ON_FINISH:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->print_on_finish);
+      break;
+    case ARG_TOKEN_SHOW_PROMPT:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->show_prompt);
+      break;
+    case ARG_TOKEN_SAVE_SETTINGS:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->save_settings);
+      break;
+    case NUMBER_OF_ARG_TOKENS:
+      log_fatal("encountered invalid arg token when saving settings");
+      break;
+    }
+  }
+  string_builder_add_formatted_string(
+      sb, "\np1 %s\np2 %s",
+      game_history_player_get_name(config->game_history, 0),
+      game_history_player_get_name(config->game_history, 1));
 }

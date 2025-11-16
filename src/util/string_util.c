@@ -727,6 +727,23 @@ char *to_lower_case(const char *content) {
   return lower_content;
 }
 
+char *replace_whitespace_with_underscore(const char *str) {
+  if (str == NULL) {
+    return NULL;
+  }
+  size_t len = strlen(str);
+  char *new_str = (char *)malloc_or_die(len + 1);
+  for (size_t i = 0; i < len; i++) {
+    if (isspace((unsigned char)str[i])) {
+      new_str[i] = '_';
+    } else {
+      new_str[i] = str[i];
+    }
+  }
+  new_str[len] = '\0';
+  return new_str;
+}
+
 const char *get_base_filename(const char *filepath) {
   // Find the last occurrence of the Unix directory separator
   const char *base_filename_unix = strrchr(filepath, '/');

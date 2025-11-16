@@ -54,6 +54,9 @@ bool config_get_use_game_pairs(const Config *config);
 bool config_get_use_small_plays(const Config *config);
 bool config_get_human_readable(const Config *config);
 bool config_get_show_prompt(const Config *config);
+bool config_get_save_settings(const Config *config);
+bool config_get_loaded_settings(const Config *config);
+void config_set_loaded_settings(Config *config, const bool value);
 double config_get_tt_fraction_of_mem(const Config *config);
 PlayersData *config_get_players_data(const Config *config);
 LetterDistribution *config_get_ld(const Config *config);
@@ -92,4 +95,8 @@ void config_parse_gcg(Config *config, const char *gcg_filename,
 void config_parse_gcg_string(Config *config, const char *gcg_string,
                              GameHistory *game_history,
                              ErrorStack *error_stack);
+// Settings
+void config_add_settings_to_string_builder(const Config *config,
+                                           StringBuilder *sb);
+
 #endif

@@ -15,7 +15,6 @@ Player *player_create(const PlayersData *players_data,
 void player_destroy(Player *player);
 
 int player_get_index(const Player *player);
-const char *player_get_name(const Player *player);
 Rack *player_get_rack(const Player *player);
 Equity player_get_score(const Player *player);
 move_sort_t player_get_move_sort_type(const Player *player);

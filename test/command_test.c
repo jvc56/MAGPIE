@@ -1,6 +1,7 @@
 #include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
 #include "../src/compat/linenoise.h"
+#include "../src/def/config_defs.h"
 #include "../src/def/cpthread_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/move.h"
@@ -464,6 +465,7 @@ void test_process_command(const char *arg_string,
   if (!has_substring(test_output, output_substr)) {
     printf("pattern not found in output:\n%s\n***\n%s\n", test_output,
            output_substr);
+    printf("***\nerrorout:\n%s\n", test_outerror);
     assert(0);
   }
 
@@ -523,7 +525,7 @@ void *test_process_command_async(void *uncasted_process_args) {
   return NULL;
 }
 
-void test_async_command(void) {
+void test_exec_async_command(void) {
   char *test_input_filename = get_test_filename("input");
 
   // Reset the contents of input
@@ -602,7 +604,7 @@ void test_exec_sync_command(void) {
   command_test_set_stream_in(input_reader);
 
   char *initial_command =
-      get_formatted_string("cgp %s -printonfinish true", EMPTY_CGP);
+      get_formatted_string("cgp %s -printonfinish true -mode sync", EMPTY_CGP);
 
   char *config_load_error_substr = get_formatted_string(
       "error %d", ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
@@ -639,11 +641,59 @@ void test_exec_sync_command(void) {
   command_test_reset_stream_in();
 }
 
+void test_save_settings(void) {
+  // Retrieve saved settings from previous command tests
+  char *save1 =
+      get_string_from_file_or_die(CONFIG_SETTINGS_FILENAME_WITH_EXTENSION);
+
+  // Run the executable with a single command that doesn't change any settings
+  // so that when the process finishes it will write to settings.txt file again
+  // with the same settings
+  char *test_input_filename = get_test_filename("input");
+
+  // Reset the contents of input
+  unlink(test_input_filename);
+
+  FILE *input_writer = fopen_or_die(test_input_filename, "w+");
+  FILE *input_reader = fopen_or_die(test_input_filename, "r");
+  command_test_set_stream_in(input_reader);
+
+  ProcessArgs *process_args =
+      process_args_create("set -mode sync", 4, "autoplay games 2", 0, "");
+
+  cpthread_t cmd_execution_thread;
+  cpthread_create(&cmd_execution_thread, test_process_command_async,
+                  process_args);
+  cpthread_detach(cmd_execution_thread);
+
+  write_to_stream(input_writer, "autoplay games 1\n");
+  write_to_stream(input_writer, "quit\n");
+  fclose_or_die(input_writer);
+
+  // Wait for magpie to quit
+  block_for_process_command(process_args, 5);
+
+  fclose_or_die(input_reader);
+  delete_fifo(test_input_filename);
+  process_args_destroy(process_args);
+  free(test_input_filename);
+  command_test_reset_stream_in();
+
+  char *save2 =
+      get_string_from_file_or_die(CONFIG_SETTINGS_FILENAME_WITH_EXTENSION);
+
+  assert_strings_equal(save1, save2);
+
+  free(save1);
+  free(save2);
+}
+
 void test_command(void) {
   test_exec_single_command();
   test_command_execution();
-  test_async_command();
+  test_exec_async_command();
   test_exec_sync_command();
+  test_save_settings();
   command_test_reset_stream_out();
   command_test_reset_stream_err();
   command_test_reset_stream_in();
