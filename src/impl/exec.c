@@ -339,9 +339,8 @@ void sync_command_scan_loop(Config *config, ErrorStack *error_stack,
     }
     if (error_stack_is_empty(error_stack)) {
       save_config_settings(config, error_stack);
-    } else {
-      error_stack_print_and_reset(error_stack);
     }
+    error_stack_print_and_reset(error_stack);
   }
   free(input);
 }
