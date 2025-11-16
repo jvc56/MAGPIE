@@ -455,8 +455,8 @@ void test_process_command(const char *arg_string,
 
   MainArgs *main_args = get_main_args_from_string(arg_string_with_exec);
 
-  process_command_with_data_paths(
-      main_args->argc, (const char **)main_args->argv, DEFAULT_TEST_DATA_PATH);
+  process_command_with_data_paths(main_args->argc, main_args->argv,
+                                  DEFAULT_TEST_DATA_PATH);
   main_args_destroy(main_args);
 
   char *test_output = get_string_from_file_or_die(test_output_filename);

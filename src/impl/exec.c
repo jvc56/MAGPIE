@@ -346,7 +346,7 @@ void sync_command_scan_loop(Config *config, ErrorStack *error_stack,
   free(input);
 }
 
-char *create_command_from_args(const int argc, const char *argv[]) {
+char *create_command_from_args(int argc, char *argv[]) {
   StringBuilder *command_string_builder = string_builder_create();
   for (int i = 1; i < argc; i++) {
     string_builder_add_formatted_string(command_string_builder, "%s ", argv[i]);
@@ -361,8 +361,7 @@ void caches_destroy(void) {
   fileproxy_destroy_cache();
 }
 
-void process_command_internal(const int argc, const char *argv[],
-                              const char *data_paths) {
+void process_command_internal(int argc, char *argv[], const char *data_paths) {
   log_set_level(LOG_FATAL);
   ErrorStack *error_stack = error_stack_create();
   Config *config =
@@ -379,11 +378,11 @@ void process_command_internal(const int argc, const char *argv[],
   error_stack_destroy(error_stack);
 }
 
-void process_command(const int argc, const char *argv[]) {
+void process_command(int argc, char *argv[]) {
   process_command_internal(argc, argv, DEFAULT_DATA_PATHS);
 }
 
-void process_command_with_data_paths(const int argc, const char *argv[],
+void process_command_with_data_paths(int argc, char *argv[],
                                      const char *data_paths) {
   process_command_internal(argc, argv, data_paths);
 }
