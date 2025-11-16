@@ -2472,7 +2472,7 @@ char *str_api_note(Config *config, ErrorStack *error_stack) {
 
 char *impl_set_player_name(Config *config, arg_token_t arg_token) {
   const char *new_player_name = config_get_parg_value(config, arg_token, 0);
-  int player_index;
+  int player_index = -1;
   switch (arg_token) {
   case ARG_TOKEN_P1_NAME:
     player_index = 0;
@@ -4339,7 +4339,8 @@ void config_add_bool_setting_to_string_builder(const Config *config,
 void config_add_settings_to_string_builder(const Config *config,
                                            StringBuilder *sb) {
   string_builder_add_string(sb, config->pargs[ARG_TOKEN_SET]->name);
-  for (int arg_token = 0; arg_token < NUMBER_OF_ARG_TOKENS; arg_token++) {
+  for (arg_token_t arg_token = 0; arg_token < NUMBER_OF_ARG_TOKENS;
+       arg_token++) {
     switch (arg_token) {
     case ARG_TOKEN_SET:
     case ARG_TOKEN_CGP:
@@ -4520,9 +4521,10 @@ void config_add_settings_to_string_builder(const Config *config,
                                                 config->sim_with_inference);
       break;
     case ARG_TOKEN_WRITE_BUFFER_SIZE:
-      config_add_int_setting_to_string_builder(
+      config_add_uint64_setting_to_string_builder(
           config, sb, arg_token,
-          autoplay_results_get_write_buffer_size(config->autoplay_results));
+          (uint64_t)autoplay_results_get_write_buffer_size(
+              config->autoplay_results));
       break;
     case ARG_TOKEN_HUMAN_READABLE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,

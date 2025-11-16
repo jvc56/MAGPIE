@@ -864,9 +864,7 @@ void test_config_anno(void) {
                        p2_nickname);
 
   p1_name = "a";
-  p1_nickname = "a";
   p2_name = "b";
-  p2_nickname = "b";
   string_builder_add_formatted_string(name_sb, "p1 %s", p1_name);
   assert_config_exec_status(config, string_builder_peek(name_sb),
                             ERROR_STATUS_SUCCESS);

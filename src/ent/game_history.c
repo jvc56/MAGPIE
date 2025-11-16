@@ -700,8 +700,8 @@ bool game_history_contains_end_rack_penalty_event(
 }
 
 // Assumes the history is nonempty
-void game_history_set_note_for_most_recent_event(GameHistory *game_history,
-                                                 const char *note) {
+void game_history_set_note_for_most_recent_event(
+    const GameHistory *game_history, const char *note) {
   game_event_set_note(
       game_history_get_event(
           game_history, game_history_get_num_played_events(game_history) - 1),

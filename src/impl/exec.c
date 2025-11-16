@@ -243,7 +243,7 @@ void execute_command_async(Config *config, ErrorStack *error_stack,
   close(pipefds[1]);
 }
 
-void save_config_settings(Config *config, ErrorStack *error_stack) {
+void save_config_settings(const Config *config, ErrorStack *error_stack) {
   if (!config_get_save_settings(config)) {
     return;
   }
@@ -361,7 +361,7 @@ void caches_destroy(void) {
   fileproxy_destroy_cache();
 }
 
-void process_command_internal(int argc, const char *argv[],
+void process_command_internal(const int argc, const char *argv[],
                               const char *data_paths) {
   log_set_level(LOG_FATAL);
   ErrorStack *error_stack = error_stack_create();
