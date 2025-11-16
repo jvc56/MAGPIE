@@ -5,7 +5,6 @@
 #include "../ent/board_layout.h"
 #include "../ent/data_filepaths.h"
 #include "../ent/equity.h"
-#include "../ent/players_data.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "rack.h"
