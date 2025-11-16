@@ -524,7 +524,7 @@ void *test_process_command_async(void *uncasted_process_args) {
   return NULL;
 }
 
-void test_async_command(void) {
+void test_exec_async_command(void) {
   char *test_input_filename = get_test_filename("input");
 
   // Reset the contents of input
@@ -657,8 +657,8 @@ void test_save_settings(void) {
   FILE *input_reader = fopen_or_die(test_input_filename, "r");
   command_test_set_stream_in(input_reader);
 
-  ProcessArgs *process_args = process_args_create(
-      "cgp " EMPTY_CGP_WITHOUT_OPTIONS, 1, "autoplay games 1", 1, "");
+  ProcessArgs *process_args =
+      process_args_create("set -mode sync", 4, "autoplay games 2", 0, "");
 
   cpthread_t cmd_execution_thread;
   cpthread_create(&cmd_execution_thread, test_process_command_async,
@@ -682,12 +682,15 @@ void test_save_settings(void) {
       get_string_from_file_or_die(CONFIG_SETTINGS_FILENAME_WITH_EXTENSION);
 
   assert_strings_equal(save1, save2);
+
+  free(save1);
+  free(save2);
 }
 
 void test_command(void) {
   test_exec_single_command();
   test_command_execution();
-  test_async_command();
+  test_exec_async_command();
   test_exec_sync_command();
   test_save_settings();
   command_test_reset_stream_out();
