@@ -562,7 +562,7 @@ static Move *get_top_computer_move(Game *game, const GameArgs *game_args,
     sim_args.inference_args.game = inference_base_game;
     // Note: game_seed field removed from InferenceArgs - seed is set via game_seed() function instead
     sim_args.inference_args.num_threads = sim_threads;
-    sim_args.inference_args.print_interval = 0; // Disable inference logging
+    sim_args.inference_args.print_interval = 1000; // Log inference results every 1000 samples
     sim_args.inference_args.thread_control = thread_control;
     sim_args.inference_args.movegen_thread_offset = sim_movegen_base;
     sim_args.inference_args.skip_return_racks_to_bag = false; // Will be set to true in infer_with_game_duplicate if needed
