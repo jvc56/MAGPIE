@@ -549,13 +549,13 @@ static Move *get_top_computer_move(Game *game, const GameArgs *game_args,
                                     game_get_starting_player_index(game));
     // NOTE: Don't seed here - game_duplicate will lose the seed anyway
     // Instead, pass the seed in InferenceArgs for use after duplication
-    inference_results_reset(inference_results, (num_leaves == 0) ? 4000000 : num_leaves, ld_get_size(game_get_ld(game)));
+    inference_results_reset(inference_results, (num_leaves == 0) ? 100000 : num_leaves, ld_get_size(game_get_ld(game)));
     sim_args.inference_args.use_game_history = true;
     sim_args.inference_args.game_history = game_history;
     // Use num_leaves for inference capacity (0 means unlimited, use 100000)
     // Note: Can't use INT_MAX as leave_rack_list does capacity+1 which would overflow
     // 100000 is large enough for most inferences without consuming excessive memory
-    sim_args.inference_args.move_capacity = (num_leaves == 0) ? 4000000 : num_leaves;
+    sim_args.inference_args.move_capacity = (num_leaves == 0) ? 100000 : num_leaves;
     sim_args.inference_args.equity_margin = equity_margin;
     sim_args.inference_args.game = inference_base_game;
     // Note: game_seed field removed from InferenceArgs - seed is set via game_seed() function instead
