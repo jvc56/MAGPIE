@@ -4,7 +4,9 @@
 # Known issue: bag overflow error - debugging in progress
 # Seed 1337 chosen to trigger ZERK/ZEX rack early
 
-./bin/magpie autoplay games 1 -lex TWL98 \
+export MAGPIE_LOG_ROLLOUTS=1
+
+./bin/magpie autoplay games 4 -lex TWL98 \
   -sp2 5 -np2 30 -ip2 50000 -is2 false \  -numleaves 0 \
   -gp true \
   -mts true \

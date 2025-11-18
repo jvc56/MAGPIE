@@ -512,6 +512,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   return_rack_to_bag(game, player_off_turn_index);
 
   if (rollout_sb) {
+    string_builder_add_char(rollout_sb, '\n');
     thread_control_print(simmer->thread_control, string_builder_peek(rollout_sb));
     string_builder_destroy(rollout_sb);
   }
