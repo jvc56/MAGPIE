@@ -420,6 +420,13 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
             inference_results_get_alias_method(simmer->inference_results),
             simmer_worker->prng, &inferred_rack)) {
       set_random_rack(game, player_off_turn_index, &inferred_rack);
+    } else {
+      // Inference sampling failed - this shouldn't happen!
+      // Log error and fall back to random rack from bag
+      thread_control_print(simmer->thread_control,
+                          "WARNING: alias_method_sample failed during inference, "
+                          "falling back to random rack from bag");
+      set_random_rack(game, player_off_turn_index, NULL);
     }
   } else {
     set_random_rack(game, player_off_turn_index, simmer->known_opp_rack);
