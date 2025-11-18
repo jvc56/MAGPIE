@@ -416,9 +416,19 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   if (simmer->use_alias_method) {
     Rack inferred_rack;
     rack_set_dist_size(&inferred_rack, simmer->dist_size);
-    if (alias_method_sample(
-            inference_results_get_alias_method(simmer->inference_results),
-            simmer_worker->prng, &inferred_rack)) {
+    AliasMethod *am = inference_results_get_alias_method(simmer->inference_results);
+
+    // Debug: Check alias method state
+    if (am->num_items == 0 || am->total_item_count == 0) {
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_formatted_string(sb,
+          "ERROR: AliasMethod is empty! num_items=%u total_count=%lu",
+          am->num_items, am->total_item_count);
+      thread_control_print(simmer->thread_control, string_builder_peek(sb));
+      string_builder_destroy(sb);
+    }
+
+    if (alias_method_sample(am, simmer_worker->prng, &inferred_rack)) {
       set_random_rack(game, player_off_turn_index, &inferred_rack);
     } else {
       // Inference sampling failed - this shouldn't happen!
