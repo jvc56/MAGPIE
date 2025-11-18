@@ -503,7 +503,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       simmer->win_pcts, simmed_play, spread, leftover,
       game_get_game_end_reason(game),
       // number of tiles unseen to us: bag tiles + tiles on opp rack.
-      rack_get_total_letters(&simmer->inference_results->bag_as_rack) +
+      bag_get_letters(game_get_bag(game)) +
           rack_get_total_letters(player_get_rack(
               game_get_player(game, 1 - simmer->initial_player))),
       plies % 2);
