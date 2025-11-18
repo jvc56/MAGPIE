@@ -11,7 +11,6 @@ lldb ./bin/magpie -- autoplay games 4 -lex TWL98 \
   -numleaves 0 \
   -gp true \
   -mts true \
-
   -seed 1337 \
   -printboard true \
   -threads 1

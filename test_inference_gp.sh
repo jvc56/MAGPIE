@@ -11,7 +11,6 @@ export MAGPIE_LOG_ROLLOUTS=1
   -numleaves 0 \
   -gp true \
   -mts true \
-
   -seed 1337 \
   -pfrequency 0 \
   -printboard true \
