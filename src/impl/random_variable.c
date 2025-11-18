@@ -18,8 +18,11 @@
 #include "../ent/thread_control.h"
 #include "../ent/win_pct.h"
 #include "../ent/xoshiro.h"
+#include "../str/move_string.h"
+#include "../str/rack_string.h"
 #include "../str/sim_string.h"
 #include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "bai_logger.h"
 #include "gameplay.h"
 #include <math.h>
@@ -422,6 +425,13 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
     set_random_rack(game, player_off_turn_index, simmer->known_opp_rack);
   }
 
+  const char *log_rollouts_env = getenv("MAGPIE_LOG_ROLLOUTS");
+  StringBuilder *rollout_sb = NULL;
+  if (log_rollouts_env != NULL && atoi(log_rollouts_env) == 1) {
+    rollout_sb = string_builder_create();
+    string_builder_add_string(rollout_sb, "rollout: ");
+  }
+
   Equity leftover = 0;
   game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
   // For one-ply sims, we need to account for the candidate move's leave value
@@ -436,6 +446,11 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   }
   // play move
   play_move(simmed_play_get_move(simmed_play), game, NULL);
+  if (rollout_sb) {
+    string_builder_add_move_description(
+        rollout_sb, simmed_play_get_move(simmed_play), game_get_ld(game));
+    string_builder_add_string(rollout_sb, " | ");
+  }
   sim_results_increment_node_count(sim_results);
   game_set_backup_mode(game, BACKUP_MODE_OFF);
   // further plies will NOT be backed up.
@@ -448,11 +463,22 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       break;
     }
 
+    if (rollout_sb) {
+      string_builder_add_rack(rollout_sb, player_get_rack(player_on_turn),
+                              game_get_ld(game), false);
+      string_builder_add_string(rollout_sb, " ");
+    }
+
     const Move *best_play = get_top_equity_move(
         game, simmer->movegen_base_index + thread_index, move_list);
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
     play_move(best_play, game, NULL);
+    if (rollout_sb) {
+      string_builder_add_move_description(rollout_sb, best_play,
+                                          game_get_ld(game));
+      string_builder_add_string(rollout_sb, " | ");
+    }
     sim_results_increment_node_count(sim_results);
     if (ply == plies - 2 || ply == plies - 1) {
       Equity this_leftover = get_leave_value_for_move(
@@ -485,7 +511,10 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   game_unplay_last_move(game);
   return_rack_to_bag(game, player_off_turn_index);
 
-
+  if (rollout_sb) {
+    thread_control_print(simmer->thread_control, string_builder_peek(rollout_sb));
+    string_builder_destroy(rollout_sb);
+  }
 
   return wpct;
 }

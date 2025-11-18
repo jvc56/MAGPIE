@@ -32,6 +32,7 @@
 #include "../ent/xoshiro.h"
 #include "../str/game_string.h"
 #include "../str/move_string.h"
+#include "../str/rack_string.h"
 #include "../str/sim_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
@@ -450,6 +451,7 @@ static Move *get_top_computer_move(Game *game, const GameArgs *game_args,
                                     double equity_margin,
                                     GameHistory *game_history,
                                     int num_leaves) {
+  (void)actual_game_seed; // Reserved for future use in inference
   // If sim_plies is 0 or bag is completely empty, fall back to equity-based move
   // Simulations with few tiles work fine as they detect game endings
   const int tiles_in_bag = bag_get_letters(game_get_bag(game));
@@ -556,7 +558,7 @@ static Move *get_top_computer_move(Game *game, const GameArgs *game_args,
     sim_args.inference_args.move_capacity = (num_leaves == 0) ? 4000000 : num_leaves;
     sim_args.inference_args.equity_margin = equity_margin;
     sim_args.inference_args.game = inference_base_game;
-    sim_args.inference_args.game_seed = actual_game_seed;
+    // Note: game_seed field removed from InferenceArgs - seed is set via game_seed() function instead
     sim_args.inference_args.num_threads = sim_threads;
     sim_args.inference_args.print_interval = 0; // Disable inference logging
     sim_args.inference_args.thread_control = thread_control;
@@ -566,7 +568,7 @@ static Move *get_top_computer_move(Game *game, const GameArgs *game_args,
     sim_args.inference_args.target_played_tiles = &target_played_tiles;
     sim_args.inference_args.target_known_rack = &target_known_rack;
     sim_args.inference_args.nontarget_known_rack = &nontarget_known_rack;
-    sim_args.inference_args.target_actual_move = target_actual_move;
+    sim_args.inference_args.target_actual_move = *target_actual_move;
   }
 
   // Set up BAI options
@@ -862,11 +864,32 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
                       1 - starting_player_index, 2);
   }
   bool games_are_divergent = false;
+
+  StringBuilder *rollout_log_sb = NULL;
+  if (getenv("MAGPIE_LOG_ROLLOUTS")) {
+    rollout_log_sb = string_builder_create();
+  }
+
   while (true) {
     Move *move1 = NULL;
     bool game1_is_over = game_runner_is_game_over(game_runner1);
     if (!game1_is_over) {
+      if (rollout_log_sb) {
+        string_builder_add_rack(
+            rollout_log_sb,
+            player_get_rack(game_get_player(
+                game_runner1->game,
+                game_get_player_on_turn_index(game_runner1->game))),
+            game_get_ld(game_runner1->game), true);
+        string_builder_add_char(rollout_log_sb, ' ');
+      }
       game_runner_play_move(autoplay_worker, game_runner1, &move1);
+      if (rollout_log_sb) {
+        string_builder_add_move(rollout_log_sb,
+                                game_get_board(game_runner1->game), move1,
+                                game_get_ld(game_runner1->game));
+        string_builder_add_char(rollout_log_sb, ' ');
+      }
     }
 
     Move *move2 = NULL;
@@ -890,6 +913,14 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
       games_are_divergent = true;
     }
   }
+
+  if (rollout_log_sb) {
+    string_builder_add_char(rollout_log_sb, '\n');
+    thread_control_print(autoplay_worker->args->thread_control,
+                         string_builder_peek(rollout_log_sb));
+    string_builder_destroy(rollout_log_sb);
+  }
+
   autoplay_add_game(autoplay_worker, game_runner1, games_are_divergent);
   if (game_runner2) {
     // We do not check for min leave counts here because leave gen
