@@ -25,8 +25,11 @@ void simulate(SimArgs *sim_args, SimResults *sim_results,
 
   if (sim_args->use_inference) {
     infer(&sim_args->inference_args, sim_args->inference_results, error_stack);
-    if (!error_stack_is_empty(error_stack) ||
-        thread_control_get_status(sim_args->thread_control) !=
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_print_and_reset(error_stack);
+      return;
+    }
+    if (thread_control_get_status(sim_args->thread_control) !=
             THREAD_CONTROL_STATUS_STARTED) {
       return;
     }
@@ -52,14 +55,11 @@ void simulate(SimArgs *sim_args, SimResults *sim_results,
 
   sim_results_set_iteration_count(sim_results, rvs_get_total_samples(rvs));
 
-  // Only print stats if print_interval > 0 (enabled for interactive sims)
-  if (sim_args->print_interval > 0) {
-    print_ucgi_sim_stats(sim_args->game, sim_results, sim_args->thread_control,
-                         (double)sim_results_get_node_count(sim_results) /
-                             bai_result_get_elapsed_seconds(
-                                 sim_results_get_bai_result(sim_results)),
-                         true);
-  }
+  print_sim_results_table(sim_args->game, sim_results, sim_args->thread_control,
+                          (double)sim_results_get_node_count(sim_results) /
+                              bai_result_get_elapsed_seconds(
+                                  sim_results_get_bai_result(sim_results)),
+                          true);
 
   // Note: MoveGen cache cleanup is handled by the caller (autoplay.c, exec.c, etc.)
   // to avoid destroying caches that are still in use by other threads in

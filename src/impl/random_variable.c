@@ -389,7 +389,7 @@ bool simmer_plays_are_similar(const Simmer *simmer,
 }
 
 double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
-                     const int thread_index, const uint64_t sample_count,
+                     const int thread_index, const uint64_t sample_count __attribute__((unused)),
                      BAILogger __attribute__((unused)) * bai_logger) {
   Simmer *simmer = (Simmer *)rvs->data;
   SimResults *sim_results = simmer->sim_results;
@@ -477,7 +477,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       simmer->win_pcts, simmed_play, spread, leftover,
       game_get_game_end_reason(game),
       // number of tiles unseen to us: bag tiles + tiles on opp rack.
-      bag_get_letters(game_get_bag(game)) +
+      rack_get_total_letters(&simmer->inference_results->bag_as_rack) +
           rack_get_total_letters(player_get_rack(
               game_get_player(game, 1 - simmer->initial_player))),
       plies % 2);
@@ -485,15 +485,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   game_unplay_last_move(game);
   return_rack_to_bag(game, player_off_turn_index);
 
-  if (simmer->print_interval > 0 &&
-      sample_count % simmer->print_interval == 0) {
-    print_ucgi_sim_stats(
-        simmer_worker->game, simmer->sim_results, simmer->thread_control,
-        (double)sim_results_get_node_count(simmer->sim_results) /
-            bai_result_get_elapsed_seconds(
-                sim_results_get_bai_result(simmer->sim_results)),
-        false);
-  }
+
 
   return wpct;
 }

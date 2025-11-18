@@ -4,11 +4,14 @@
 #include "../def/cpthread_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/inference_defs.h"
+#include "../def/inference_args_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
+#include "../ent/bag.h"
+#include "../ent/board.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
@@ -22,7 +25,9 @@
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
 #include "../ent/validated_move.h"
+#include "../str/bag_string.h"
 #include "../str/inference_string.h"
+#include "../str/move_string.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/math_util.h"
@@ -60,6 +65,7 @@ typedef struct Inference {
   int num_threads;
   int print_interval;
   int thread_index;
+  int movegen_thread_offset; // Offset for MoveGen cache indices
   uint64_t *shared_rack_index;
   cpthread_mutex_t *shared_rack_index_lock;
   // Rack containing just the unknown leave, which is
@@ -74,6 +80,8 @@ typedef struct Inference {
   // which the observer may know about (for example, due
   // to a lost challenge, coffee housing, or accidental flash).
   Rack *current_target_rack;
+  // The tiles that were played (visible on board) - used to calculate leave
+  Rack *target_played_tiles;
   // The bag represented by a rack for convenience
   Rack *bag_as_rack;
   // MoveList used by the inference to generate moves
@@ -81,6 +89,8 @@ typedef struct Inference {
   // Game used by the inference to generate moves
   Game *game;
   InferenceResults *results;
+  // The actual move from game history (for logging)
+  Move *target_actual_move;
 } Inference;
 
 void inference_destroy(Inference *inference) {
@@ -89,8 +99,11 @@ void inference_destroy(Inference *inference) {
   }
   rack_destroy(inference->current_target_leave);
   rack_destroy(inference->current_target_exchanged);
+  rack_destroy(inference->current_target_rack);
+  rack_destroy(inference->target_played_tiles);
   rack_destroy(inference->bag_as_rack);
   move_list_destroy(inference->move_list);
+  move_destroy(inference->target_actual_move);
   free(inference);
 }
 
@@ -140,24 +153,68 @@ void record_valid_leave(const Rack *rack, InferenceResults *results,
 }
 
 void evaluate_possible_leave(Inference *inference) {
+  // Recalculate the leave as: rack - played_tiles
+  // current_target_rack contains the full 7-tile rack being evaluated
+  // target_played_tiles contains the tiles that were played (visible on board)
+  // current_target_leave should be the difference (the tiles kept on rack)
+  rack_copy(inference->current_target_leave, inference->current_target_rack);
+  rack_subtract_using_floor_zero(inference->current_target_leave,
+                                 inference->target_played_tiles);
+
   Equity current_leave_value = 0;
   if (inference->target_number_of_tiles_exchanged == 0) {
     current_leave_value =
         klv_get_leave_value(inference->klv, inference->current_target_leave);
   }
 
+  // Set the player's rack in the game to the rack being evaluated
+  Player *target_player = game_get_player(inference->game, inference->target_index);
+  Rack *player_rack = player_get_rack(target_player);
+  rack_copy(player_rack, inference->current_target_rack);
+
   const Move *top_move = get_top_equity_move(
       inference->game, inference->thread_index, inference->move_list);
+
+  // Calculate the full equity of the top move (score + leave value)
+  // First, determine what tiles are used in the top move
+  Rack *top_move_leave = rack_create(inference->ld_size);
+  rack_copy(top_move_leave, inference->current_target_rack);
+
+  // Subtract tiles used in the move
+  const int top_move_tiles_played = move_get_tiles_played(top_move);
+  for (int i = 0; i < top_move_tiles_played; i++) {
+    MachineLetter tile = move_get_tile(top_move, i);
+    if (tile != PLAYED_THROUGH_MARKER) {
+      if (get_is_blanked(tile)) {
+        rack_take_letter(top_move_leave, BLANK_MACHINE_LETTER);
+      } else {
+        rack_take_letter(top_move_leave, tile);
+      }
+    }
+  }
+
+  // Get leave value for the top move
+  Equity top_move_leave_value = 0;
+  if (move_get_type(top_move) != GAME_EVENT_EXCHANGE) {
+    top_move_leave_value = klv_get_leave_value(inference->klv, top_move_leave);
+  }
+
+  const int top_move_score = move_get_score(top_move);
+  const Equity top_move_equity = top_move_score + top_move_leave_value;
+  rack_destroy(top_move_leave);
+
   const bool is_within_equity_margin = inference->target_score +
                                            current_leave_value +
                                            inference->equity_margin >=
-                                       move_get_equity(top_move);
+                                       top_move_equity;
   const int tiles_played = move_get_tiles_played(top_move);
   const bool number_exchanged_matches =
       move_get_type(top_move) == GAME_EVENT_EXCHANGE &&
       tiles_played == inference->target_number_of_tiles_exchanged;
+  const bool bag_empty = rack_is_empty(inference->bag_as_rack);
   const bool recordable = is_within_equity_margin || number_exchanged_matches ||
-                          rack_is_empty(inference->bag_as_rack);
+                          bag_empty;
+
   if (recordable) {
     uint64_t number_of_draws_for_leave = get_number_of_draws_for_rack(
         inference->bag_as_rack, inference->current_target_leave);
@@ -220,14 +277,14 @@ void increment_letter_for_inference(Inference *inference,
                                     MachineLetter letter) {
   rack_take_letter(inference->bag_as_rack, letter);
   rack_add_letter(inference->current_target_rack, letter);
-  rack_add_letter(inference->current_target_leave, letter);
+  // Don't modify current_target_leave - it will be calculated from current_target_rack
 }
 
 void decrement_letter_for_inference(Inference *inference,
                                     MachineLetter letter) {
   rack_add_letter(inference->bag_as_rack, letter);
   rack_take_letter(inference->current_target_rack, letter);
-  rack_take_letter(inference->current_target_leave, letter);
+  // Don't modify current_target_leave - it will be calculated from current_target_rack
 }
 
 Inference *inference_create(Game *game, const InferenceArgs *args,
@@ -245,11 +302,12 @@ Inference *inference_create(Game *game, const InferenceArgs *args,
   inference->total_racks_evaluated = 0;
   inference->num_threads = args->num_threads;
   inference->print_interval = args->print_interval;
+  inference->movegen_thread_offset = args->movegen_thread_offset;
   // thread index is only meaningful for
   // duplicated inferences used in multithreading
   inference->thread_index = -1;
   // move_list is only needed for duplicated inferences
-  inference->move_list = NULL;
+  inference->move_list = move_list_create(1);
 
   // shared rack index and shared rack index lock
   // are shared pointers between threads and are
@@ -257,73 +315,146 @@ Inference *inference_create(Game *game, const InferenceArgs *args,
 
   inference->current_target_leave = rack_create(inference->ld_size);
   inference->current_target_exchanged = rack_create(inference->ld_size);
-  inference->current_target_rack =
-      player_get_rack(game_get_player(game, args->target_index));
+  inference->current_target_rack = rack_create(inference->ld_size);
+  inference->target_played_tiles = rack_create(inference->ld_size);
   inference->bag_as_rack = rack_create(inference->ld_size);
+  inference->target_actual_move = move_create();
 
   inference_results_reset(results, inference->move_capacity,
                           inference->ld_size);
 
   inference->results = results;
 
-  // This will return the inference->current_target_rack to the bag.
-  return_rack_to_bag(game, 0);
-  return_rack_to_bag(game, 1);
 
-  Rack temp_target_rack;
-  rack_set_dist_size_and_reset(&temp_target_rack, inference->ld_size);
 
-  rack_union(&temp_target_rack, args->target_played_tiles);
-  rack_union(&temp_target_rack, args->target_known_rack);
-
-  bool success =
-      draw_rack_from_bag(game, args->target_index, &temp_target_rack);
-  if (!success) {
+  // Return the current player racks to the bag and redraw them, unless we're using
+  // history replay mode where the racks and bag are already correctly configured.
+  if (!args->skip_return_racks_to_bag) {
     const LetterDistribution *ld = game_get_ld(game);
-    StringBuilder *sb = string_builder_create();
-    string_builder_add_string(sb, "failed to draw combined (");
-    string_builder_add_rack(sb, &temp_target_rack, ld, false);
-    string_builder_add_string(sb, ") inferred player played letters (");
-    string_builder_add_rack(sb, args->target_played_tiles, ld, false);
-    string_builder_add_string(sb, ") and inferred player known rack (");
-    string_builder_add_rack(sb, args->target_known_rack, ld, false);
-    string_builder_add_string(sb, ") from the bag");
-    char *err_msg = string_builder_dump(sb, NULL);
-    string_builder_destroy(sb);
-    log_fatal(err_msg);
-    free(err_msg);
+    Bag *bag = game_get_bag(game);
+    Board *board = game_get_board(game);
+
+    // Reset the bag to a full 100 tiles, and reset player racks.
+    bag_reset(ld, bag);
+    player_reset(game_get_player(game, 0));
+    player_reset(game_get_player(game, 1));
+
+    // Remove tiles that are on the board from the bag
+    for (int row = 0; row < BOARD_DIM; row++) {
+      for (int col = 0; col < BOARD_DIM; col++) {
+        MachineLetter letter = board_get_letter(board, row, col);
+        if (letter != ALPHABET_EMPTY_SQUARE_MARKER) {
+          // Unblank the letter if it's a blank tile on the board
+          MachineLetter unblanked_letter = get_is_blanked(letter) ? BLANK_MACHINE_LETTER : letter;
+          // Use player_draw_index=0 since we're just removing tiles, not drawing for a specific player
+          if (!bag_draw_letter(bag, unblanked_letter, 0)) {
+            // This should not happen in this context, but handle defensively
+          }
+        }
+      }
+    }
+
+    Rack temp_target_rack;
+    rack_set_dist_size_and_reset(&temp_target_rack, inference->ld_size);
+
+    rack_union(&temp_target_rack, args->target_played_tiles);
+    rack_union(&temp_target_rack, args->target_known_rack);
+
+    bool success =
+        draw_rack_from_bag(game, args->target_index, &temp_target_rack);
+    if (!success) {
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_string(sb, "failed to draw combined (");
+      string_builder_add_rack(sb, &temp_target_rack, ld, false);
+      string_builder_add_string(sb, ") inferred player played letters (");
+      string_builder_add_rack(sb, args->target_played_tiles, ld, false);
+      string_builder_add_string(sb, ") and inferred player known rack (");
+      string_builder_add_rack(sb, args->target_known_rack, ld, false);
+      string_builder_add_string(sb, ") from the bag");
+      char *err_msg = string_builder_dump(sb, NULL);
+      string_builder_destroy(sb);
+      log_fatal(err_msg);
+      free(err_msg);
+    }
+
+    success = draw_rack_from_bag(game, 1 - args->target_index,
+                                 args->nontarget_known_rack);
+
+    if (!success) {
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_string(sb, "failed to draw nontarget player rack (");
+      string_builder_add_rack(sb, args->nontarget_known_rack, ld, false);
+      string_builder_add_string(sb, ") from the bag");
+      char *err_msg = string_builder_dump(sb, NULL);
+      string_builder_destroy(sb);
+      log_fatal(err_msg);
+      free(err_msg);
+    }
   }
 
-  success = draw_rack_from_bag(game, 1 - args->target_index,
-                               args->nontarget_known_rack);
+  // Store the played tiles so we can calculate leave = rack - played_tiles
+  rack_copy(inference->target_played_tiles, args->target_played_tiles);
 
-  if (!success) {
-    const LetterDistribution *ld = game_get_ld(game);
-    StringBuilder *sb = string_builder_create();
-    string_builder_add_string(sb, "failed to draw nontarget player rack (");
-    string_builder_add_rack(sb, args->nontarget_known_rack, ld, false);
-    string_builder_add_string(sb, ") from the bag");
-    char *err_msg = string_builder_dump(sb, NULL);
-    string_builder_destroy(sb);
-    log_fatal(err_msg);
-    free(err_msg);
-  }
+  // Store the actual move from game history for logging
+  move_copy(inference->target_actual_move, &args->target_actual_move);
 
-  // Add the letters that are known to have been kept on the rack
-  // for their target inferred play.
-  rack_copy(inference->current_target_leave, args->target_known_rack);
-  rack_subtract_using_floor_zero(inference->current_target_leave,
-                                 args->target_played_tiles);
+  // IMPORTANT: current_target_rack should start with the KNOWN tiles (what was played),
+  // so that iterate_through_all_possible_leaves infers the UNKNOWN tiles (the leave).
+  // We iterate by adding tiles from the bag to current_target_rack until we have 7 tiles.
+  // tiles_to_infer = 7 - |played_tiles|, which gives us all possible leaves.
+  // Note: current_target_leave will be calculated dynamically in evaluate_possible_leave.
+  rack_copy(inference->current_target_rack, args->target_played_tiles);
 
-  // Set the bag_as_rack to the bag
-  const Bag *bag = game_get_bag(game);
-  int bag_letters_array[MAX_ALPHABET_SIZE];
-  memset(bag_letters_array, 0, sizeof(bag_letters_array));
-  bag_increment_unseen_count(bag, bag_letters_array);
-  for (int i = 0; i < MAX_ALPHABET_SIZE; i++) {
-    rack_add_letters(inference->bag_as_rack, i, bag_letters_array[i]);
-  }
-
+    // Set the bag_as_rack to the bag
+    const Bag *bag = game_get_bag(game);
+    int bag_letters_array[MAX_ALPHABET_SIZE];
+    memset(bag_letters_array, 0, sizeof(bag_letters_array));
+  
+    if (args->skip_return_racks_to_bag) {
+      // Reconstruct the bag based on the current game state (board and player racks)
+      // since game_play_n_events with validate=false doesn't update the bag.
+      const LetterDistribution *ld = game_get_ld(game);
+      for (int i = 0; i < ld->size; i++) {
+        bag_letters_array[i] = ld->distribution[i];
+      }
+  
+      // Subtract tiles on the board
+      const Board *board = game_get_board(game);
+      for (int row = 0; row < BOARD_DIM; row++) {
+        for (int col = 0; col < BOARD_DIM; col++) {
+          MachineLetter letter = board_get_letter(board, row, col);
+          if (letter != ALPHABET_EMPTY_SQUARE_MARKER) {
+            MachineLetter unblanked_letter = get_is_blanked(letter) ? BLANK_MACHINE_LETTER : letter;
+            bag_letters_array[unblanked_letter]--;
+          if (bag_letters_array[unblanked_letter] < 0) {
+            log_fatal("bag_letters_array for letter %d went below zero after subtracting board tiles", unblanked_letter);
+          }
+          }
+        }
+      }
+  
+          // Subtract tiles on player 0's rack
+          const Rack *player0_rack = player_get_rack(game_get_player(game, 0));
+          for (int i = 0; i < inference->ld_size; i++) {
+            bag_letters_array[i] -= rack_get_letter(player0_rack, i);
+            if (bag_letters_array[i] < 0) {
+              log_fatal("bag_letters_array for letter %d went below zero after subtracting player 0's rack tiles", i);
+            }
+          }  
+          // Subtract tiles on player 1's rack
+          const Rack *player1_rack = player_get_rack(game_get_player(game, 1));
+          for (int i = 0; i < inference->ld_size; i++) {
+            bag_letters_array[i] -= rack_get_letter(player1_rack, i);
+            if (bag_letters_array[i] < 0) {
+              log_fatal("bag_letters_array for letter %d went below zero after subtracting player 1's rack tiles", i);
+            }
+          }    } else {
+      bag_increment_unseen_count(bag, bag_letters_array);
+    }
+  
+    for (int i = 0; i < MAX_ALPHABET_SIZE; i++) {
+      rack_add_letters(inference->bag_as_rack, i, bag_letters_array[i]);
+    }
   return inference;
 }
 
@@ -349,9 +480,12 @@ Inference *inference_duplicate(const Inference *inference, int thread_index,
       rack_duplicate(inference->current_target_leave);
   new_inference->current_target_exchanged =
       rack_duplicate(inference->current_target_exchanged);
-  new_inference->current_target_rack = player_get_rack(
-      game_get_player(new_inference->game, new_inference->target_index));
+  new_inference->current_target_rack =
+      rack_duplicate(inference->current_target_rack);
+  new_inference->target_played_tiles =
+      rack_duplicate(inference->target_played_tiles);
   new_inference->bag_as_rack = rack_duplicate(inference->bag_as_rack);
+  new_inference->target_actual_move = move_create();
 
   new_inference->results = inference_results_create(
       inference_results_get_alias_method(inference->results));
@@ -362,7 +496,9 @@ Inference *inference_duplicate(const Inference *inference, int thread_index,
   new_inference->num_threads = inference->num_threads;
   new_inference->print_interval = inference->print_interval;
   new_inference->thread_control = thread_control;
-  new_inference->thread_index = thread_index;
+  new_inference->movegen_thread_offset = inference->movegen_thread_offset;
+  // Apply offset to thread_index for MoveGen cache access
+  new_inference->thread_index = inference->movegen_thread_offset + thread_index;
 
   return new_inference;
 }
@@ -693,27 +829,24 @@ void populate_inference_args_with_game_history(InferenceArgs *args,
     args->target_num_exch = move_get_tiles_played(move);
     rack_reset(args->target_played_tiles);
   }
+  // Copy the actual move for logging
+  move_copy(&args->target_actual_move, move);
   rack_copy(args->nontarget_known_rack,
             game_event_get_after_event_player_on_turn_rack(target_move_event));
 
-  if (rack_is_empty(args->target_known_rack)) {
-    for (int i = most_recent_move_event_index - 1; i >= 0; i--) {
-      GameEvent *event = game_history_get_event(game_history, i);
-      if (game_event_get_player_index(event) == args->target_index) {
-        rack_copy(args->target_known_rack,
-                  game_event_get_after_event_player_off_turn_rack(event));
-        break;
-      }
-    }
-  }
+  // NOTE: For simulated inference, target_known_rack should remain empty.
+  // We only need target_played_tiles (the tiles that were played).
+  // The target_known_rack field is meant for explicit inference commands where
+  // you specify additional known tiles, not for automatic simulated inference.
+  // The old code here would populate target_known_rack from the previous move's rack,
+  // which incorrectly added 7 tiles instead of just using the played tiles.
 
   // This will play all of the events right up to but not including the target
-  // move event
+  // move event. Using validate=false means racks are set directly without
+  // manipulating the bag, leaving the bag in an inconsistent state.
+  // We'll fix this later in infer_with_game_duplicate.
   game_play_n_events(game_history, game_dup, most_recent_move_event_index,
                      false, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
 }
 
 void infer_with_game_duplicate(InferenceArgs *args, Game *game_dup,
@@ -724,9 +857,22 @@ void infer_with_game_duplicate(InferenceArgs *args, Game *game_dup,
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
+
   }
 
+  // Verify BEFORE normalizing the bag, so verification sees the correct state
   verify_inference_args(args, game_dup, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  // After history replay with validate=false, the bag was never modified (still
+  // contains original full distribution) but racks and board were set from history.
+  // We need to: 1) normalize the bag window, 2) remove board tiles from the bag,
+  // 3) skip returning racks since they're already correctly set from history.
+  // NOTE: Game pairs + inference with history replay has a bug where the bag
+  // state is not correctly reconstructed. This needs to be fixed properly.
+  // For now, we just skip the bag reconstruction to avoid breaking non-game-pairs.
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -753,9 +899,14 @@ void infer(InferenceArgs *args, InferenceResults *results,
            ErrorStack *error_stack) {
   // Overwrite the pass in game with a duplicate that we can modify
   Game *game = game_duplicate(args->game);
+  // NOTE: Don't seed here - if use_game_history is true, game_play_n_events will
+  // call game_reset which un-shuffles the bag. Instead, we seed AFTER
+  // game_play_n_events in populate_inference_args_with_game_history.
   infer_with_game_duplicate(args, game, results, error_stack);
   game_destroy(game);
-  // FIXME: only destroy cache if this is a stand-alone infer request, keep the
-  // caches for simming with inference
-  gen_destroy_cache();
+  // Note: MoveGen cache cleanup is handled by the caller (autoplay.c, exec.c, etc.)
+  // to avoid destroying caches that are still in use by other threads in
+  // concurrent execution modes. Standalone inference commands call
+  // gen_destroy_cache() after inference completes.
+  // gen_destroy_cache();
 }

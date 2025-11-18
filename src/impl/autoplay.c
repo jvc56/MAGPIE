@@ -14,6 +14,8 @@
 #include "../ent/data_filepaths.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/game_history.h"
+#include "../ent/inference_results.h"
 #include "../ent/klv.h"
 #include "../ent/klv_csv.h"
 #include "../ent/letter_distribution.h"
@@ -25,6 +27,7 @@
 #include "../ent/sim_results.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
+#include "../ent/validated_move.h"
 #include "../ent/win_pct.h"
 #include "../ent/xoshiro.h"
 #include "../str/game_string.h"
@@ -258,6 +261,7 @@ typedef struct AutoplayWorker {
   AutoplaySharedData *shared_data;
   XoshiroPRNG *prng;
   int *min_rack_targets;
+  InferenceResults *inference_results; // Per-worker inference results to avoid concurrent access
 } AutoplayWorker;
 
 AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
@@ -277,6 +281,8 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
                                               autoplay_worker->prng);
   }
   autoplay_worker->shared_data = shared_data;
+  // Create per-worker InferenceResults to avoid concurrent access issues
+  autoplay_worker->inference_results = inference_results_create(NULL);
   return autoplay_worker;
 }
 
@@ -286,6 +292,7 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   }
   autoplay_results_destroy(autoplay_worker->autoplay_results);
   prng_destroy(autoplay_worker->prng);
+  inference_results_destroy(autoplay_worker->inference_results);
   free(autoplay_worker);
 }
 
@@ -369,6 +376,7 @@ typedef struct GameRunner {
   Game *game;
   MoveList *move_list;
   AutoplaySharedData *shared_data;
+  GameHistory *game_history; // Track game history for inference
 } GameRunner;
 
 GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
@@ -381,6 +389,7 @@ GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
   game_runner->move_list = move_list_create(200);
   game_runner->pair_game_number =
       0; // Will be set in game_runner_start if using pairs
+  game_runner->game_history = game_history_create();
   return game_runner;
 }
 
@@ -390,6 +399,7 @@ void game_runner_destroy(GameRunner *game_runner) {
   }
   game_destroy(game_runner->game);
   move_list_destroy(game_runner->move_list);
+  game_history_destroy(game_runner->game_history);
   free(game_runner);
 }
 
@@ -407,6 +417,8 @@ void game_runner_start(const AutoplayWorker *autoplay_worker,
   draw_starting_racks(game);
   game_runner->turn_number = 0;
   game_runner->force_draw = false;
+  // Reset game history for new game
+  game_history_reset(game_runner->game_history);
   if (game_runner->shared_data->leavegen_shared_data &&
       // We only force draws if we've played enough games for this
       // generation.
@@ -426,14 +438,22 @@ bool game_runner_is_game_over(GameRunner *game_runner) {
 // Monte Carlo simulation-based move selection for autoplay
 // This function is defined here instead of gameplay.c to avoid circular
 // dependency
-static Move *get_top_computer_move(Game *game, int movegen_thread_index,
+static Move *get_top_computer_move(Game *game, const GameArgs *game_args,
+                                    uint64_t actual_game_seed,
+                                    int movegen_thread_index,
                                     int sim_threads, int num_autoplay_workers,
                                     MoveList *move_list,
                                     const SimParams *sim_params,
                                     uint64_t sim_seed, WinPct *win_pcts,
-                                    ThreadControl *thread_control) {
-  // If sim_plies is 0 or bag is empty, fall back to equity-based move
-  if (sim_params->plies <= 0 || bag_is_empty(game_get_bag(game))) {
+                                    ThreadControl *thread_control,
+                                    InferenceResults *inference_results,
+                                    double equity_margin,
+                                    GameHistory *game_history,
+                                    int num_leaves) {
+  // If sim_plies is 0 or bag is completely empty, fall back to equity-based move
+  // Simulations with few tiles work fine as they detect game endings
+  const int tiles_in_bag = bag_get_letters(game_get_bag(game));
+  if (sim_params->plies <= 0 || tiles_in_bag == 0) {
     return get_top_equity_move(game, movegen_thread_index, move_list);
   }
 
@@ -483,12 +503,21 @@ static Move *get_top_computer_move(Game *game, int movegen_thread_index,
       (sim_threads > 1) ? movegen_thread_index
                         : movegen_thread_index + num_autoplay_workers;
 
-  // TODO: Inference in autoplay requires additional infrastructure:
-  // - InferenceResults allocation and management
-  // - Setting up inference_args (target_played_tiles, nontarget_known_tiles, etc.)
-  // - Game history tracking for proper inference context
-  // For now, disable inference even if requested until this is implemented
-  const bool use_inference_in_autoplay = false; // sim_params->use_inference;
+  // Check if we can use inference (need game history with at least one move AND non-empty bag AND plies > 0)
+  const int num_events = game_history_get_num_events(game_history);
+  const bool can_use_inference = sim_params->use_inference && inference_results &&
+                                   (num_events > 0) && (tiles_in_bag > 0) &&
+                                   (sim_params->plies > 0);
+
+  // Allocate inference racks (needed by populate_inference_args_with_game_history)
+  const int ld_size = ld_get_size(game_get_ld(game));
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  Rack target_known_rack;
+  rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+  Rack nontarget_known_rack;
+  rack_set_dist_size_and_reset(&nontarget_known_rack, ld_size);
+  Move *target_actual_move = move_create();
 
   // Set up simulation arguments
   SimArgs sim_args = {
@@ -497,14 +526,48 @@ static Move *get_top_computer_move(Game *game, int movegen_thread_index,
       .move_list = move_list,
       .known_opp_rack = NULL,
       .win_pcts = win_pcts,
-      .use_inference = use_inference_in_autoplay,
-      .inference_results = NULL,
+      .use_inference = can_use_inference,
+      .inference_results = inference_results,
       .thread_control = thread_control,
       .num_threads = sim_threads,
       .movegen_thread_index = sim_movegen_base,
       .print_interval = 0, // Disable sim output for autoplay
       .seed = sim_seed,
   };
+
+  // Set up inference using GameHistory if enabled
+  // IMPORTANT: Create a fresh game for inference, not the current game state
+  // The inference code will duplicate this and replay GameHistory events on it
+  Game *inference_base_game = NULL;
+  if (can_use_inference) {
+    inference_base_game = game_create(game_args);
+    // Copy starting_player_index from actual game to ensure draw indices match
+    // In game pairs, this determines which player draws from which end of the bag
+    game_set_starting_player_index(inference_base_game,
+                                    game_get_starting_player_index(game));
+    // NOTE: Don't seed here - game_duplicate will lose the seed anyway
+    // Instead, pass the seed in InferenceArgs for use after duplication
+    inference_results_reset(inference_results, (num_leaves == 0) ? 4000000 : num_leaves, ld_get_size(game_get_ld(game)));
+    sim_args.inference_args.use_game_history = true;
+    sim_args.inference_args.game_history = game_history;
+    // Use num_leaves for inference capacity (0 means unlimited, use 100000)
+    // Note: Can't use INT_MAX as leave_rack_list does capacity+1 which would overflow
+    // 100000 is large enough for most inferences without consuming excessive memory
+    sim_args.inference_args.move_capacity = (num_leaves == 0) ? 4000000 : num_leaves;
+    sim_args.inference_args.equity_margin = equity_margin;
+    sim_args.inference_args.game = inference_base_game;
+    sim_args.inference_args.game_seed = actual_game_seed;
+    sim_args.inference_args.num_threads = sim_threads;
+    sim_args.inference_args.print_interval = 0; // Disable inference logging
+    sim_args.inference_args.thread_control = thread_control;
+    sim_args.inference_args.movegen_thread_offset = sim_movegen_base;
+    sim_args.inference_args.skip_return_racks_to_bag = false; // Will be set to true in infer_with_game_duplicate if needed
+    // Set rack pointers (populated by populate_inference_args_with_game_history)
+    sim_args.inference_args.target_played_tiles = &target_played_tiles;
+    sim_args.inference_args.target_known_rack = &target_known_rack;
+    sim_args.inference_args.nontarget_known_rack = &nontarget_known_rack;
+    sim_args.inference_args.target_actual_move = target_actual_move;
+  }
 
   // Set up BAI options
   if (sim_params->stop_cond_pct > 100) {
@@ -559,17 +622,34 @@ static Move *get_top_computer_move(Game *game, int movegen_thread_index,
     }
 
     if (best_simmed_play) {
-      // Get the move from the simmed_play and copy it to move_list[0]
-      // (We can't return simmed_play's move directly as it will be freed)
-      const Move *sim_move = simmed_play_get_move(best_simmed_play);
-      Move *move_list_first = move_list_get_move(move_list, 0);
-      move_copy(move_list_first, sim_move);
-      best_move = move_list_first;
+      // Get the index of the best simmed play
+      const int best_index = simmed_play_get_id(best_simmed_play);
+
+      // Swap the moves so the best move is at index 0
+      // This avoids duplicates that would occur if we just copied the best move
+      if (best_index != 0 && best_index < move_list_get_count(move_list)) {
+        Move *temp_move = move_create();
+        Move *first_move = move_list_get_move(move_list, 0);
+        Move *move_at_best_index = move_list_get_move(move_list, best_index);
+
+        // Swap using temporary move
+        move_copy(temp_move, first_move);
+        move_copy(first_move, move_at_best_index);
+        move_copy(move_at_best_index, temp_move);
+
+        move_destroy(temp_move);
+      }
+
+      best_move = move_list_get_move(move_list, 0);
     }
   }
 
   // Clean up
   sim_results_destroy(sim_results);
+  if (inference_base_game) {
+    game_destroy(inference_base_game);
+  }
+  move_destroy(target_actual_move);
 
   // If we got a move from the sim, return it; otherwise fall back to equity
   if (best_move) {
@@ -628,10 +708,14 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
   }
 
   // Use simulation-based move selection if sim_plies > 0
-  *move = get_top_computer_move(game, thread_index,
+  *move = get_top_computer_move(game, args->game_args, game_runner->seed,
+                                 thread_index,
                                  autoplay_worker->sim_threads, args->num_threads,
                                  game_runner->move_list, sim_params, sim_seed,
-                                 args->win_pcts, args->thread_control);
+                                 args->win_pcts, args->thread_control,
+                                 autoplay_worker->inference_results,
+                                 args->equity_margin, game_runner->game_history,
+                                 args->num_leaves);
 
   if (lg_shared_data) {
     rack_list_add_rack(lg_shared_data->rack_list, player_rack,
@@ -663,7 +747,68 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     string_builder_destroy(output);
   }
 
+  // Get player's rack before playing the move (needed for GameEvent)
+  const Player *player = game_get_player(game, player_on_turn_index);
+  const Rack *player_rack_before_move = player_get_rack(player);
+
+  // Create UCGI move string before playing (needed for GameEvent)
+  StringBuilder *move_sb = string_builder_create();
+  const Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  string_builder_add_ucgi_move(move_sb, *move, board, ld);
+  char *ucgi_move_string = string_builder_dump(move_sb, NULL);
+  string_builder_destroy(move_sb);
+
+  // Add to game history BEFORE playing the move (so ValidatedMoves can be created with current board state)
+  ErrorStack *history_error_stack = error_stack_create();
+  GameEvent *game_event = game_history_add_game_event(game_runner->game_history, history_error_stack);
+  if (!error_stack_is_empty(history_error_stack)) {
+    // If we can't add to history, just continue - inference won't work but game continues
+    error_stack_destroy(history_error_stack);
+    free(ucgi_move_string);
+  } else {
+    // Set up the game event
+    game_event_set_player_index(game_event, player_on_turn_index);
+    game_event_set_type(game_event, move_get_type(*move));
+    game_event_set_move_score(game_event, move_get_score(*move));
+
+    // Set the rack before the move
+    rack_copy(game_event_get_rack(game_event), player_rack_before_move);
+
+    // Set the CGP move string
+    game_event_set_cgp_move_string(game_event, ucgi_move_string);
+
+    // Create and set ValidatedMoves (needed for inference) - must be done BEFORE playing the move
+    ValidatedMoves *vms = validated_moves_create(game, player_on_turn_index,
+                                                  ucgi_move_string, false, false, false,
+                                                  history_error_stack);
+    if (!error_stack_is_empty(history_error_stack)) {
+      // Validation failed - continue without history
+      error_stack_destroy(history_error_stack);
+    } else {
+      game_event_set_vms(game_event, vms);
+      error_stack_destroy(history_error_stack);
+    }
+  }
+
+  // Play the move
   play_move(*move, game, NULL);
+
+  // Set after-event racks for both players (must be done AFTER playing the move)
+  if (game_event) {
+    const Player *player_after_move_on_turn = game_get_player(game, game_get_player_on_turn_index(game));
+    const Player *player_after_move_off_turn = game_get_player(game, 1 - game_get_player_on_turn_index(game));
+    rack_copy(game_event_get_after_event_player_on_turn_rack(game_event),
+              player_get_rack(player_after_move_on_turn));
+    rack_copy(game_event_get_after_event_player_off_turn_rack(game_event),
+              player_get_rack(player_after_move_off_turn));
+
+    // Mark the event as "played" so it's visible to game_history_get_most_recent_move_event_index()
+    ErrorStack *next_error_stack = error_stack_create();
+    game_history_next(game_runner->game_history, next_error_stack);
+    error_stack_destroy(next_error_stack);
+  }
+
   game_runner->turn_number++;
 }
 

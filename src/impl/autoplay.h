@@ -10,6 +10,7 @@
 
 typedef struct GameStringOptions GameStringOptions;
 typedef struct WinPct WinPct;
+typedef struct InferenceResults InferenceResults;
 
 typedef struct AutoplayArgs {
   const char *num_games_or_min_rack_targets;
@@ -27,6 +28,9 @@ typedef struct AutoplayArgs {
   WinPct *win_pcts;
   ThreadControl *thread_control;
   const GameStringOptions *game_string_options;
+  InferenceResults *inference_results;
+  double equity_margin;
+  int num_leaves;
 } AutoplayArgs;
 
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,

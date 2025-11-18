@@ -12,20 +12,20 @@
 // from which players draw letters. This
 // reduces the variance of game pair
 // results.
-struct Bag {
-  // The total number of letters
-  // in the bag for the initial state.
-  int size;
-  MachineLetter *letters;
-  // Inclusive start index for when
-  // letters start in the 'letters' array.
-  int start_tile_index;
-  // Exclusive end index for when
-  // letters end in the 'letters' array.
-  int end_tile_index;
-  // Deterministic PRNG for the bag.
-  XoshiroPRNG *prng;
-};
+// struct Bag {
+//   // The total number of letters
+//   // in the bag for the initial state.
+//   int size;
+//   MachineLetter *letters;
+//   // Inclusive start index for when
+//   // letters start in the 'letters' array.
+//   int start_tile_index;
+//   // Exclusive end index for when
+//   // letters end in the 'letters' array.
+//   int end_tile_index;
+//   // Deterministic PRNG for the bag.
+//   XoshiroPRNG *prng;
+// };
 
 // Returns the number of letters in the bag
 int bag_get_letters(const Bag *bag) {
@@ -89,6 +89,29 @@ void bag_seed(Bag *bag, uint64_t seed) {
   bag_shuffle(bag);
 }
 
+// Normalizes the bag sliding window for simulation compatibility.
+// In game pairs, bags use a sliding window with varying start/end indices.
+// For simulation, we need to reset the bag to start from a small fixed index
+// with buffer space on the left for bag_add_letter() operations.
+void bag_normalize_window(Bag *bag) {
+  int num_tiles = bag->end_tile_index - bag->start_tile_index;
+  // Start at index 1 to provide buffer space for player draw index 1
+  // (bag_add_letter uses start_tile_index - 1, which would be -1 if start==0)
+  const int target_start = 1;
+
+  if (bag->start_tile_index == target_start) {
+    return; // Already normalized
+  }
+
+  // Move all tiles to start at target_start
+  for (int i = 0; i < num_tiles; i++) {
+    bag->letters[target_start + i] = bag->letters[bag->start_tile_index + i];
+  }
+
+  bag->start_tile_index = target_start;
+  bag->end_tile_index = target_start + num_tiles;
+}
+
 Bag *bag_create(const LetterDistribution *ld, uint64_t seed) {
   Bag *bag = malloc_or_die(sizeof(Bag));
   bag->prng = prng_create(seed);
@@ -107,10 +130,10 @@ void bag_copy(Bag *dst, const Bag *src) {
   prng_copy(dst->prng, src->prng);
 }
 
-Bag *bag_duplicate(const Bag *bag) {
+Bag *bag_duplicate(const Bag *bag, const LetterDistribution *ld) {
   Bag *new_bag = malloc_or_die(sizeof(Bag));
   new_bag->prng = prng_create(0);
-  new_bag->size = bag->size;
+  new_bag->size = ld_get_total_tiles(ld);
   new_bag->letters = malloc_or_die(sizeof(MachineLetter) * new_bag->size);
   bag_copy(new_bag, bag);
   return new_bag;
@@ -190,11 +213,11 @@ void bag_add_letter(Bag *bag, MachineLetter letter, int player_draw_index) {
   // to the player's respective "side" of the bag.
   // Note: this assumes player index is only 0 or 1.
   if (player_draw_index == 0) {
-    bag->letters[bag->end_tile_index] = bag->letters[insert_index];
     bag->end_tile_index++;
+    bag->letters[bag->end_tile_index - 1] = bag->letters[insert_index];
   } else {
-    bag->letters[bag->start_tile_index - 1] = bag->letters[insert_index];
     bag->start_tile_index--;
+    bag->letters[bag->start_tile_index] = bag->letters[insert_index];
   }
   bag->letters[insert_index] = letter;
 }
@@ -216,4 +239,20 @@ void bag_increment_unseen_count(const Bag *bag, int *unseen_count) {
   for (int i = bag->start_tile_index; i < bag->end_tile_index; i++) {
     unseen_count[bag->letters[i]]++;
   }
+}
+
+void bag_set_letter(Bag *bag, int index, MachineLetter ml) {
+  bag->letters[index] = ml;
+}
+
+void bag_set_start_tile_index(Bag *bag, int start) {
+  bag->start_tile_index = start;
+}
+
+void bag_set_end_tile_index(Bag *bag, int end) {
+  bag->end_tile_index = end;
+}
+
+XoshiroPRNG *bag_get_prng(Bag *bag) {
+  return bag->prng;
 }

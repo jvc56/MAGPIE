@@ -384,6 +384,9 @@ void test_sim_with_and_without_inference_helper(
   }
   string_builder_clear(sb);
 
+  // ADD THIS LINE:
+  load_and_exec_config_or_die(config, "gen"); // Generate moves before simulating
+
   Rack known_opp_rack;
   rack_set_dist_size_and_reset(&known_opp_rack,
                                ld_get_size(config_get_ld(config)));
@@ -448,6 +451,21 @@ void test_sim_with_inference(void) {
       "muzaks_empyrean", "IIIIIII",
       (const char *[]){empyrean_move_str, napery_move_string, NULL},
       empyrean_move_str, empyrean_move_str);
+}
+
+void test_sim_geck_oboe_inference(void) {
+  // The expected best moves will need to be determined by running the simulation
+  // first and observing the output. For now, I'll use placeholders.
+  // These placeholders will be updated after the first run.
+  const char *expected_best_move_without_inference = "PLACEHOLDER_WITHOUT_INFERENCE";
+  const char *expected_best_move_with_inference = "PLACEHOLDER_WITH_INFERENCE";
+
+  test_sim_with_and_without_inference_helper(
+      "geck_oboe_history", // The new GCG file
+      "", // No known opponent rack string for now
+      (const char *[]){NULL}, // No additional moves to add
+      expected_best_move_without_inference,
+      expected_best_move_with_inference);
 }
 
 void test_play_similarity(void) {
@@ -752,6 +770,7 @@ void test_sim(void) {
     test_play_similarity();
     perf_test_multithread_sim();
     test_sim_with_inference();
+    test_sim_geck_oboe_inference();
     test_sim_round_robin_consistency();
     test_sim_top_two_consistency();
     test_sim_one_ply();

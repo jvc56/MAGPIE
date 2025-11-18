@@ -388,34 +388,112 @@ bool ucgi_sim_stats_with_display_lock(const Game *game, SimResults *sim_results,
 
   const LetterDistribution *ld = game_get_ld(game);
   const Board *board = game_get_board(game);
-  const int num_plies = sim_results_get_num_plies(sim_results);
   string_builder_clear(sim_results->display_string_builder);
+
+  // Determine column widths
+  int max_move_len = 4; // "Move"
   for (int i = 0; i < number_of_simmed_plays; i++) {
     const SimmedPlayDisplayInfo *sp_dinfo =
         &sim_results->simmed_play_display_infos[i];
     const Move *move = &sp_dinfo->move;
-    string_builder_add_string(sim_results->display_string_builder,
-                              "info currmove ");
-    string_builder_add_ucgi_move(sim_results->display_string_builder, move,
-                                 board, ld);
-    const bool is_epigon = sp_dinfo->is_epigon;
-    string_builder_add_formatted_string(
-        sim_results->display_string_builder,
-        " sc %d wp %.3f stdev %.3f eq %.3f eqe %.3f it %llu "
-        "ig %d ",
-        equity_to_int(move_get_score(move)), sp_dinfo->win_pct_mean,
-        sp_dinfo->win_pct_stdev, sp_dinfo->equity_mean, sp_dinfo->equity_stdev,
-        // need cast for WASM:
-        (long long unsigned int)sp_dinfo->niters, is_epigon);
-    for (int j = 0; j < num_plies; j++) {
-      string_builder_add_formatted_string(
-          sim_results->display_string_builder,
-          "ply%d-scm %.3f ply%d-scd %.3f ply%d-bp %.3f ", j + 1,
-          sp_dinfo->score_means[j], j + 1, sp_dinfo->score_stdevs[j], j + 1,
-          sp_dinfo->bingo_means[j] * 100.0);
+    StringBuilder *temp_sb = string_builder_create();
+    string_builder_add_ucgi_move(temp_sb, move, board, ld);
+    int move_len = string_length(string_builder_peek(temp_sb));
+    if (move_len > max_move_len) {
+      max_move_len = move_len;
     }
-    string_builder_add_string(sim_results->display_string_builder, "\n");
+    string_builder_destroy(temp_sb);
   }
+
+  // Define column headers
+  const char *move_header = "Move";
+  const char *win_pct_header = "Win %";
+  const char *equity_header = "Equity";
+  const char *iters_header = "Iters";
+  const char *score_header = "Score";
+  const char *epigon_header = "Epigon";
+
+  // Fixed widths for non-move columns
+  const int win_pct_width = 7;
+  const int equity_width = 7;
+  const int iters_width = 7;
+  const int score_width = 6;
+  const int epigon_width = 6;
+
+  // Total width of the table
+  // int total_width = max_move_len + win_pct_width + equity_width + iters_width +
+  //                   score_width + epigon_width + (6 * 3) + 1; // Columns + separators
+
+  // Helper to draw a horizontal line
+  string_builder_add_char(sim_results->display_string_builder, '+');
+  for (int i = 0; i < max_move_len + 2; i++) string_builder_add_char(sim_results->display_string_builder, '-');
+  string_builder_add_char(sim_results->display_string_builder, '+');
+  for (int i = 0; i < win_pct_width + 2; i++) string_builder_add_char(sim_results->display_string_builder, '-');
+  string_builder_add_char(sim_results->display_string_builder, '+');
+  for (int i = 0; i < equity_width + 2; i++) string_builder_add_char(sim_results->display_string_builder, '-');
+  string_builder_add_char(sim_results->display_string_builder, '+');
+  for (int i = 0; i < iters_width + 2; i++) string_builder_add_char(sim_results->display_string_builder, '-');
+  string_builder_add_char(sim_results->display_string_builder, '+');
+  for (int i = 0; i < score_width + 2; i++) string_builder_add_char(sim_results->display_string_builder, '-');
+  string_builder_add_char(sim_results->display_string_builder, '+');
+  for (int i = 0; i < epigon_width + 2; i++) string_builder_add_char(sim_results->display_string_builder, '-');
+  string_builder_add_string(sim_results->display_string_builder, "+\n");
+
+  // Table Header
+  string_builder_add_formatted_string(
+      sim_results->display_string_builder, "| %-*s | %-*s | %-*s | %-*s | %-*s | %-*s |\n",
+      max_move_len, move_header, win_pct_width, win_pct_header, equity_width,
+      equity_header, iters_width, iters_header, score_width, score_header,
+      epigon_width, epigon_header);
+
+  string_builder_add_char(sim_results->display_string_builder, '+');
+  for (int i = 0; i < max_move_len + 2; i++) string_builder_add_char(sim_results->display_string_builder, '-');
+  string_builder_add_char(sim_results->display_string_builder, '+');
+  for (int i = 0; i < win_pct_width + 2; i++) string_builder_add_char(sim_results->display_string_builder, '-');
+  string_builder_add_char(sim_results->display_string_builder, '+');
+  for (int i = 0; i < equity_width + 2; i++) string_builder_add_char(sim_results->display_string_builder, '-');
+  string_builder_add_char(sim_results->display_string_builder, '+');
+  for (int i = 0; i < iters_width + 2; i++) string_builder_add_char(sim_results->display_string_builder, '-');
+  string_builder_add_char(sim_results->display_string_builder, '+');
+  for (int i = 0; i < score_width + 2; i++) string_builder_add_char(sim_results->display_string_builder, '-');
+  string_builder_add_char(sim_results->display_string_builder, '+');
+  for (int i = 0; i < epigon_width + 2; i++) string_builder_add_char(sim_results->display_string_builder, '-');
+  string_builder_add_string(sim_results->display_string_builder, "+\n");
+
+  // Table Rows
+  for (int i = 0; i < number_of_simmed_plays; i++) {
+    const SimmedPlayDisplayInfo *sp_dinfo =
+        &sim_results->simmed_play_display_infos[i];
+    const Move *move = &sp_dinfo->move;
+    StringBuilder *move_sb = string_builder_create();
+    string_builder_add_ucgi_move(move_sb, move, board, ld);
+    char *move_str = string_builder_dump(move_sb, NULL);
+
+    string_builder_add_formatted_string(
+        sim_results->display_string_builder, "| %-*s | %*.3f | %*.3f | %*llu | %*d | %-*s |\n",
+        max_move_len, move_str, win_pct_width, sp_dinfo->win_pct_mean * 100.0,
+        equity_width, sp_dinfo->equity_mean, iters_width,
+        (long long unsigned int)sp_dinfo->niters, score_width,
+        equity_to_int(move_get_score(move)), epigon_width,
+        sp_dinfo->is_epigon ? "Yes" : "No");
+
+    free(move_str);
+    string_builder_destroy(move_sb);
+  }
+
+  string_builder_add_char(sim_results->display_string_builder, '+');
+  for (int i = 0; i < max_move_len + 2; i++) string_builder_add_char(sim_results->display_string_builder, '-');
+  string_builder_add_char(sim_results->display_string_builder, '+');
+  for (int i = 0; i < win_pct_width + 2; i++) string_builder_add_char(sim_results->display_string_builder, '-');
+  string_builder_add_char(sim_results->display_string_builder, '+');
+  for (int i = 0; i < equity_width + 2; i++) string_builder_add_char(sim_results->display_string_builder, '-');
+  string_builder_add_char(sim_results->display_string_builder, '+');
+  for (int i = 0; i < iters_width + 2; i++) string_builder_add_char(sim_results->display_string_builder, '-');
+  string_builder_add_char(sim_results->display_string_builder, '+');
+  for (int i = 0; i < score_width + 2; i++) string_builder_add_char(sim_results->display_string_builder, '-');
+  string_builder_add_char(sim_results->display_string_builder, '+');
+  for (int i = 0; i < epigon_width + 2; i++) string_builder_add_char(sim_results->display_string_builder, '-');
+  string_builder_add_string(sim_results->display_string_builder, "+\n");
 
   if (best_known_play) {
     string_builder_add_string(sim_results->display_string_builder, "bestmove ");

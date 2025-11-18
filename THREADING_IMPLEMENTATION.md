@@ -417,3 +417,181 @@ This implementation provides a clean, thread-safe, and flexible system for runni
 **Key Achievement**: Successfully integrated Monte Carlo simulation into autoplay without breaking existing functionality, with proper thread safety and configurable per-player parameters.
 
 **Status**: Production-ready, fully functional, tested and documented.
+
+---
+
+# KNOWN ISSUE: Bag Overflow with Game Pairs + Simulated Inference
+
+**Date:** 2025-11-10
+**Status:** 🔴 UNRESOLVED - Requires further investigation
+
+## Problem Statement
+
+Game pairs with simulated inference fail with "rack not in bag" errors:
+```bash
+./bin/magpie autoplay games 1 -gp true -lex CSW21 \
+  -sp1 1 -sp2 1 -is1 true -is2 true -seed 456
+# Error: (error 96) rack of AEINRRT for player 1 not in bag
+```
+
+## What Works ✅
+
+- Game pairs WITHOUT inference (`-gp true`)
+- Single games WITH simulated inference (`-is1 true -is2 true`)
+- Game pairs WITH regular inference (`-gp true -ip1 100 -ip2 100`)
+
+## What Fails ❌
+
+- Game pairs WITH simulated inference (`-gp true -is1 true -is2 true`)
+
+## Root Cause
+
+### Bag Architecture for Game Pairs
+
+The bag uses a **double-ended sliding window** (src/ent/bag.c:15-28):
+```c
+struct Bag {
+  int size;                // Total tiles in initial bag
+  MachineLetter *letters;  // Array of all tiles
+  int start_tile_index;    // Inclusive start of available tiles
+  int end_tile_index;      // Exclusive end of available tiles
+  XoshiroPRNG *prng;
+};
+```
+
+For game pairs:
+- **Player 0** draws from END: `bag->end_tile_index--`
+- **Player 1** draws from START: `bag->start_tile_index++`
+
+This reduces variance by having both players draw from opposite ends of the same shuffled bag.
+
+### The Overflow Problem
+
+During simulated inference:
+1. Each trial duplicates the game via `game_duplicate()` (inference.c:435)
+2. The duplicate gets its own bag via `bag_duplicate()` (game.c:543)
+3. History is replayed with `validate=false` (inference.c:822-823)
+4. Each history replay:
+   - **Start of turn**: Returns empty racks to bag (no-op, racks already empty)
+   - **Mid-turn**: Draws tiles from bag (moves sliding window)
+   - **End of turn**: Returns tiles to bag (moves window back)
+5. After many iterations, the sliding window reaches array edge and can't accept more returns
+
+The error occurs because:
+- Window starts centered: `start=0, end=100`
+- Player 0 draws from end: `start=0, end=93` (drew 7 tiles)
+- Player 1 draws from start: `start=7, end=93` (drew 7 tiles)
+- After many inference trials replaying history, window becomes: `start=85, end=15`
+- **Window is now empty and inverted** - can't draw or return tiles
+
+## Current Implementation (Partial Fix)
+
+### Modified Files
+
+**src/impl/gameplay.c**
+
+gameplay.c:814-820 (conditional return in set_rack_from_bag):
+```c
+// Only return rack if it's not already empty, to avoid double-returns
+const Player *player = game_get_player(game, player_index);
+const Rack *current_rack = player_get_rack(player);
+if (rack_get_total_letters(current_rack) > 0) {
+  return_rack_to_bag(game, player_index);
+}
+```
+
+gameplay.c:859-860 (unconditional start-of-turn returns):
+```c
+return_rack_to_bag(game, 0);
+return_rack_to_bag(game, 1);
+```
+
+gameplay.c:1057-1058 (unconditional end-of-turn returns):
+```c
+return_rack_to_bag(game, 0);
+return_rack_to_bag(game, 1);
+```
+
+**src/ent/game.c**
+
+game.c:587-590 (backup_cursor bounds check):
+```c
+if (game->backup_cursor >= MAX_SEARCH_DEPTH) {
+  log_fatal("backup_cursor (%d) exceeded MAX_SEARCH_DEPTH (%d)",
+            game->backup_cursor, MAX_SEARCH_DEPTH);
+}
+```
+
+### Why This Doesn't Fully Fix It
+
+The conditional return prevents double-returns **within a single turn**, but doesn't address:
+1. The cumulative effect of many inference trials
+2. The bag window progressively shifting toward one end
+3. The fact that each inference duplicate has its own bag that gets corrupted independently
+
+## Debug Information Needed
+
+1. How many inference trials run before failure?
+2. What is bag state (start/end indices) when error occurs?
+3. Is error in main game's bag or inference duplicate's bag?
+4. Does error occur during history replay or inference evaluation?
+
+## Potential Solutions
+
+### Option 1: Reset Bag Window Periodically
+Re-center the sliding window when it approaches edges:
+```c
+// In bag.c, after draws/returns
+if (start_tile_index > size/4 || end_tile_index < 3*size/4) {
+  // Recenter by shifting tiles to start of array
+  memmove(&letters[0], &letters[start_tile_index],
+          (end_tile_index - start_tile_index) * sizeof(MachineLetter));
+  end_tile_index -= start_tile_index;
+  start_tile_index = 0;
+}
+```
+
+### Option 2: Track Validation State per Turn
+Only return racks if they were set during validation:
+```c
+// Add to Game struct
+bool rack_set_during_validation[2];
+
+// Set when setting after-event racks
+// Only return at turn boundaries if flag is true
+```
+
+### Option 3: Fresh Bag for Each Inference Trial
+Don't duplicate bag, create new one with same seed:
+```c
+// In inference duplicate
+new_bag = bag_create(ld, original_seed);
+// Instead of:
+new_bag = bag_duplicate(original_bag);
+```
+
+### Option 4: Disable Simulated Inference for Game Pairs
+Simplest workaround:
+```c
+if (use_game_pairs && player_get_sim_use_inference(player)) {
+  log_warn("Simulated inference not supported with game pairs");
+  // Use inference without simulation
+}
+```
+
+## Impact
+
+- **Severity**: Medium - only affects specific combination of features
+- **Workaround**: Don't use `-gp true` with `-is1`/`-is2` flags together
+- **Scope**: Does NOT affect:
+  - Normal autoplay
+  - Game pairs without inference
+  - Single games with simulated inference
+  - Regular (non-simulated) inference in any mode
+
+## Next Steps
+
+1. Add debug logging to track bag window state
+2. Determine exact failure point in inference
+3. Choose and implement appropriate fix
+4. Add regression test for game pairs + simulated inference

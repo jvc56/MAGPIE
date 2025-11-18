@@ -7,6 +7,7 @@
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
+#include "../def/inference_args_defs.h"
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
@@ -114,6 +115,7 @@ typedef enum {
   ARG_TOKEN_ENDGAME_PLIES,
   ARG_TOKEN_NUMBER_OF_PLAYS,
   ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,
+  ARG_TOKEN_NUM_LEAVES,
   ARG_TOKEN_MAX_ITERATIONS,
   ARG_TOKEN_STOP_COND_PCT,
   ARG_TOKEN_EQ_MARGIN_INFERENCE,
@@ -188,6 +190,7 @@ struct Config {
   int p1_sim_num_plays;
   int p2_sim_num_plays;
   int num_small_plays;
+  int num_leaves;
   int plies;
   int p1_sim_plies;
   int p2_sim_plies;
@@ -345,6 +348,8 @@ exec_mode_t config_get_exec_mode(const Config *config) {
 int config_get_bingo_bonus(const Config *config) { return config->bingo_bonus; }
 
 int config_get_num_plays(const Config *config) { return config->num_plays; }
+
+int config_get_num_leaves(const Config *config) { return config->num_leaves; }
 
 int config_get_num_small_plays(const Config *config) {
   return config->num_small_plays;
@@ -878,7 +883,7 @@ void config_fill_infer_args(const Config *config, bool use_game_history,
   args->target_index = target_index;
   args->target_score = target_score;
   args->target_num_exch = target_num_exch;
-  args->move_capacity = config_get_num_plays(config);
+  args->move_capacity = config_get_num_leaves(config);
   args->equity_margin = config->eq_margin_inference;
   args->target_played_tiles = target_played_tiles;
   args->target_known_rack = target_known_rack;
@@ -889,6 +894,8 @@ void config_fill_infer_args(const Config *config, bool use_game_history,
   args->num_threads = config->num_threads;
   args->print_interval = config->print_interval;
   args->thread_control = config->thread_control;
+  args->movegen_thread_offset = 0; // No offset for standalone inference
+  args->skip_return_racks_to_bag = use_game_history; // Set to true if using game history
 }
 
 // Use target_index < 0 to infer using the game history
@@ -1195,6 +1202,7 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->print_interval = config->print_interval;
   autoplay_args->seed = config->seed;
   autoplay_args->win_pcts = config_get_win_pcts(config);
+  autoplay_args->num_leaves = config_get_num_leaves(config);
   autoplay_args->multi_threaded_sims = false; // Default to concurrent games mode
   ErrorStack *error_stack = error_stack_create();
   config_load_bool(config, ARG_TOKEN_MULTI_THREADED_SIMS,
@@ -1203,6 +1211,8 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->thread_control = config_get_thread_control(config);
   autoplay_args->data_paths = config_get_data_paths(config);
   autoplay_args->game_string_options = config->game_string_options;
+  autoplay_args->inference_results = config->inference_results;
+  autoplay_args->equity_margin = config->eq_margin_inference;
   config_fill_game_args(config, autoplay_args->game_args);
 }
 
@@ -3247,6 +3257,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_int(config, ARG_TOKEN_NUM_LEAVES, 0, INT_MAX,
+                  &config->num_leaves, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_int(config, ARG_TOKEN_MAX_ITERATIONS, 1, INT_MAX,
                   &config->max_iterations, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -3965,10 +3981,12 @@ char *str_api_sim(Config *config, ErrorStack *error_stack) {
 
 void execute_infer(Config *config, ErrorStack *error_stack) {
   impl_infer(config, error_stack);
+  gen_destroy_cache();
 }
 
 char *str_api_infer(Config *config, ErrorStack *error_stack) {
   impl_infer(config, error_stack);
+  gen_destroy_cache();
   return empty_string();
 }
 
@@ -4096,7 +4114,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_P1_SIM_MAX_ITERATIONS, "ip1", 1, 1);
   arg(ARG_TOKEN_P1_SIM_STOP_COND_PCT, "scp1", 1, 1);
   arg(ARG_TOKEN_P1_SIM_MIN_PLAY_ITERATIONS, "mpi1", 1, 1);
-  arg(ARG_TOKEN_P1_SIM_USE_INFERENCE, "sinfer1", 1, 1);
+  arg(ARG_TOKEN_P1_SIM_USE_INFERENCE, "is1", 1, 1);
   arg(ARG_TOKEN_P2_NAME, "p2", 1, 1);
   arg(ARG_TOKEN_P2_LEXICON, "l2", 1, 1);
   arg(ARG_TOKEN_P2_USE_WMP, "w2", 1, 1);
@@ -4108,12 +4126,13 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_P2_SIM_MAX_ITERATIONS, "ip2", 1, 1);
   arg(ARG_TOKEN_P2_SIM_STOP_COND_PCT, "scp2", 1, 1);
   arg(ARG_TOKEN_P2_SIM_MIN_PLAY_ITERATIONS, "mpi2", 1, 1);
-  arg(ARG_TOKEN_P2_SIM_USE_INFERENCE, "sinfer2", 1, 1);
+  arg(ARG_TOKEN_P2_SIM_USE_INFERENCE, "is2", 1, 1);
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
   arg(ARG_TOKEN_PLIES, "plies", 1, 1);
   arg(ARG_TOKEN_ENDGAME_PLIES, "eplies", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_SMALL_PLAYS, "numsmallplays", 1, 1);
+  arg(ARG_TOKEN_NUM_LEAVES, "numleaves", 1, 1);
   arg(ARG_TOKEN_MAX_ITERATIONS, "iterations", 1, 1);
   arg(ARG_TOKEN_MIN_PLAY_ITERATIONS, "minplayiterations", 1, 1);
   arg(ARG_TOKEN_STOP_COND_PCT, "scondition", 1, 1);
@@ -4154,6 +4173,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->challenge_bonus = DEFAULT_CHALLENGE_BONUS;
   config->num_plays = DEFAULT_MOVE_LIST_CAPACITY;
   config->num_small_plays = DEFAULT_SMALL_MOVE_LIST_CAPACITY;
+  config->num_leaves = DEFAULT_MOVE_LIST_CAPACITY;
   config->plies = 2;
   config->endgame_plies = 6;
   config->eq_margin_inference = 0;

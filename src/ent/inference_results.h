@@ -8,7 +8,29 @@
 #include "stats.h"
 #include <stdint.h>
 
+#define SUBTOTALS_SIZE                                                         \
+  (MAX_ALPHABET_SIZE * (RACK_SIZE) * NUMBER_OF_INFERENCE_SUBTOTALS)
+
 typedef struct InferenceResults InferenceResults;
+
+struct InferenceResults {
+  // Indexed by inference_stat_t
+  Stat *equity_values[NUMBER_OF_INFER_TYPES];
+  // Indexed by inference_stat_t
+  uint64_t subtotals[NUMBER_OF_INFER_TYPES][SUBTOTALS_SIZE];
+  LeaveRackList *leave_rack_list;
+  AliasMethod *alias_method;
+  bool alias_method_created_internally;
+
+  // Fields that are finalized at the end of
+  // the inference execution
+  int target_number_of_tiles_exchanged;
+  Equity target_score;
+  Equity equity_margin;
+  Rack target_played_tiles;
+  Rack target_known_unplayed_tiles;
+  Rack bag_as_rack;
+};
 
 InferenceResults *inference_results_create(AliasMethod *alias_method);
 void inference_results_destroy(InferenceResults *inference_results);

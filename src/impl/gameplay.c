@@ -198,7 +198,7 @@ bool rack_is_drawable(const Game *game, const int player_index,
   const Bag *bag = game_get_bag(game);
   const Rack *player_rack =
       player_get_rack(game_get_player(game, player_index));
-  const uint16_t dist_size = rack_get_dist_size(player_rack);
+  const uint16_t dist_size = rack_get_dist_size(rack_to_draw);
   for (int i = 0; i < dist_size; i++) {
     if (bag_get_letter(bag, i) + rack_get_letter(player_rack, i) <
         rack_get_letter(rack_to_draw, i)) {
@@ -218,6 +218,7 @@ bool draw_rack_from_bag(const Game *game, const int player_index,
   Rack *player_rack = player_get_rack(game_get_player(game, player_index));
   int player_draw_index = game_get_player_draw_index(game, player_index);
   const uint16_t dist_size = rack_get_dist_size(player_rack);
+
   rack_copy(player_rack, rack_to_draw);
   for (int i = 0; i < dist_size; i++) {
     const uint16_t rack_number_of_letter = rack_get_letter(player_rack, i);
@@ -288,6 +289,22 @@ void return_rack_to_bag(const Game *game, const int player_index) {
 
 void set_random_rack(const Game *game, const int player_index,
                      const Rack *known_rack) {
+
+  if (known_rack) {
+    if (!rack_is_drawable(game, player_index, known_rack)) {
+      const LetterDistribution *ld = game_get_ld(game);
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_string(sb, "unexpectedly failed to draw rack '");
+      string_builder_add_rack(sb, known_rack, ld, false);
+      string_builder_add_string(sb, "' from the bag");
+      char *err_msg = string_builder_dump(sb, NULL);
+      string_builder_destroy(sb);
+      log_fatal(err_msg);
+      // Unreachable, but will silence static analyzer warnings
+      free(err_msg);
+    }
+  }
+
   return_rack_to_bag(game, player_index);
   if (known_rack) {
     if (!draw_rack_from_bag(game, player_index, known_rack)) {
@@ -713,16 +730,19 @@ void validate_game_event_order_and_index(const GameEvent *game_event,
   }
 }
 
-void copy_bag_to_rack(const Bag *bag, const Rack *rack_to_sub, Rack *rack) {
-  int remaining_letters[MAX_ALPHABET_SIZE];
-  memset(remaining_letters, 0, sizeof(remaining_letters));
-  bag_increment_unseen_count(bag, remaining_letters);
-  const int ld_size = rack_get_dist_size(rack);
-  rack_set_dist_size_and_reset(rack, ld_size);
-  for (MachineLetter ml = 0; ml < ld_size; ml++) {
-    rack_add_letters(rack, ml,
-                     remaining_letters[ml] - rack_get_letter(rack_to_sub, ml));
+Rack *calculate_player_rack_from_bag(const LetterDistribution *ld,
+                                     const Bag *bag, int player_index) {
+  Rack *player_rack = rack_create(ld_get_size(ld));
+  const int player_draw_index = player_index; // Assuming player_index is also the draw index
+  int num_to_draw = RACK_SIZE - rack_get_total_letters(player_rack);
+  Bag *temp_bag = bag_duplicate(bag, ld); // Duplicate the bag to draw from it
+  while (num_to_draw > 0 && !bag_is_empty(temp_bag)) {
+    rack_add_letter(player_rack,
+                    bag_draw_random_letter(temp_bag, player_draw_index));
+    num_to_draw--;
   }
+  bag_destroy(temp_bag);
+  return player_rack;
 }
 
 // Assumes both player racks have been returned to the bag
@@ -748,11 +768,12 @@ void set_after_game_event_racks(const GameHistory *game_history,
   if (num_letters_in_bag <= (RACK_SIZE)) {
     // If the bag has <= RACK_SIZE, then the last play must've been an outplay
     // and the opp must have all of the remaining letters.
-    // For the call to copy_bag_to_rack, just pass in
+    // For the call to calculate_player_rack_from_bag, just pass in
     // after_event_player_off_turn_rack as the rack to sub since we know it's
     // empty at this point.
-    copy_bag_to_rack(bag, after_event_player_off_turn_rack,
-                     after_event_player_on_turn_rack);
+    Rack *calculated_rack = calculate_player_rack_from_bag(game_get_ld(game), bag, player_on_turn_index);
+    rack_copy(after_event_player_on_turn_rack, calculated_rack);
+    rack_destroy(calculated_rack);
     player_on_turn_rack_set = true;
   } else {
     for (int i = game_event_index + 1; i < number_of_game_events; i++) {
@@ -795,8 +816,9 @@ void set_after_game_event_racks(const GameHistory *game_history,
     // If there are no more than RACK_SIZE tiles in the bag, that means the
     // player off turn will necessarily have all of them and the actual game bag
     // is empty.
-    copy_bag_to_rack(bag, after_event_player_on_turn_rack,
-                     after_event_player_off_turn_rack);
+    Rack *calculated_rack = calculate_player_rack_from_bag(game_get_ld(game), bag, 1 - player_on_turn_index);
+    rack_copy(after_event_player_off_turn_rack, calculated_rack);
+    rack_destroy(calculated_rack);
   } else {
     // Otherwise, the rack is only known from the previous phonies the player
     // made
@@ -811,7 +833,13 @@ void set_rack_from_bag_or_push_to_error_stack(const Game *game,
                                               const int player_index,
                                               const Rack *rack_to_draw,
                                               ErrorStack *error_stack) {
-  return_rack_to_bag(game, player_index);
+  // Only return rack if it's not already empty, to avoid double-returns
+  // that cause bag overflow in game pairs
+  const Player *player = game_get_player(game, player_index);
+  const Rack *current_rack = player_get_rack(player);
+  if (rack_get_total_letters(current_rack) > 0) {
+    return_rack_to_bag(game, player_index);
+  }
   if (!draw_rack_from_bag(game, player_index, rack_to_draw)) {
     StringBuilder *sb = string_builder_create();
     string_builder_add_string(sb, "rack of ");
@@ -854,10 +882,13 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
-  }
 
-  return_rack_to_bag(game, 0);
-  return_rack_to_bag(game, 1);
+    // Only manipulate bag during validation mode.
+    // During history replay (validate=false), racks are set directly
+    // from history events and bag operations would corrupt the window.
+    return_rack_to_bag(game, 0);
+    return_rack_to_bag(game, 1);
+  }
 
   const game_event_t game_event_type = game_event_get_type(game_event);
 
@@ -865,22 +896,34 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
     // For this game event, the rack field is the rack of the opponent
     // that the player receives as the end rack points bonus. The actual player
     // rack is assumed to be empty.
-    set_rack_from_bag_or_push_to_error_stack(
-        game, 1 - game_event_player_index,
-        game_event_get_const_rack(game_event), error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
+    if (validate) {
+      set_rack_from_bag_or_push_to_error_stack(
+          game, 1 - game_event_player_index,
+          game_event_get_const_rack(game_event), error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+    } else {
+      rack_copy(
+          player_get_rack(game_get_player(game, 1 - game_event_player_index)),
+          game_event_get_const_rack(game_event));
     }
   } else if (game_event_type != GAME_EVENT_PHONY_TILES_RETURNED) {
     // Since the previous play is already on the board, attempting to draw the
     // rack from this event might result in an error since this rack is
     // identical to the previous rack in the GCG and the rack tiles might not
     // be in the bag (for example if the phony played had an J, X, Q, or Z).
-    set_rack_from_bag_or_push_to_error_stack(
-        game, game_event_player_index, game_event_get_const_rack(game_event),
-        error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
+    if (validate) {
+      set_rack_from_bag_or_push_to_error_stack(
+          game, game_event_player_index, game_event_get_const_rack(game_event),
+          error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+    } else {
+      rack_copy(
+          player_get_rack(game_get_player(game, game_event_player_index)),
+          game_event_get_const_rack(game_event));
     }
   }
 
@@ -1048,10 +1091,13 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
     break;
   }
 
-  return_rack_to_bag(game, 0);
-  return_rack_to_bag(game, 1);
-
   if (validate) {
+    // Only manipulate bag during validation mode.
+    // During history replay (validate=false), racks are set directly
+    // from history events and bag operations would corrupt the window.
+    return_rack_to_bag(game, 0);
+    return_rack_to_bag(game, 1);
+
     const Equity game_event_cume = game_event_get_cumulative_score(game_event);
     const Equity player_score_cume =
         player_get_score(game_get_player(game, game_event_player_index));
@@ -1073,17 +1119,30 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
   }
 
   game_player_on_turn_index = game_get_player_on_turn_index(game);
-  set_rack_from_bag_or_push_to_error_stack(
-      game, game_player_on_turn_index,
-      game_event_get_after_event_player_on_turn_rack(game_event), error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  set_rack_from_bag_or_push_to_error_stack(
-      game, 1 - game_player_on_turn_index,
-      game_event_get_after_event_player_off_turn_rack(game_event), error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
+
+  if (validate) {
+    // When validating, draw racks from bag to ensure tiles exist
+    set_rack_from_bag_or_push_to_error_stack(
+        game, game_player_on_turn_index,
+        game_event_get_after_event_player_on_turn_rack(game_event), error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    set_rack_from_bag_or_push_to_error_stack(
+        game, 1 - game_player_on_turn_index,
+        game_event_get_after_event_player_off_turn_rack(game_event), error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  } else {
+    // When replaying history (validate=false), just set racks directly
+    // without touching the bag to avoid corrupting the sliding window
+    rack_copy(
+        player_get_rack(game_get_player(game, game_player_on_turn_index)),
+        game_event_get_after_event_player_on_turn_rack(game_event));
+    rack_copy(
+        player_get_rack(game_get_player(game, 1 - game_player_on_turn_index)),
+        game_event_get_after_event_player_off_turn_rack(game_event));
   }
 }
 
@@ -1099,21 +1158,33 @@ void game_play_n_events(GameHistory *game_history, Game *game,
     const Rack *player_on_turn_index_rack =
         game_history_player_get_last_rack(game_history, player_on_turn_index);
     if (rack_get_dist_size(player_on_turn_index_rack) != 0) {
-      set_rack_from_bag_or_push_to_error_stack(
-          game, player_on_turn_index, player_on_turn_index_rack, error_stack);
-      if (!error_stack_is_empty(error_stack)) {
-        return;
+      if (validate) {
+        set_rack_from_bag_or_push_to_error_stack(
+            game, player_on_turn_index, player_on_turn_index_rack, error_stack);
+        if (!error_stack_is_empty(error_stack)) {
+          return;
+        }
+      } else {
+        rack_copy(
+            player_get_rack(game_get_player(game, player_on_turn_index)),
+            player_on_turn_index_rack);
       }
     }
     return;
   }
   if (num_events_to_play <= 0) {
     const GameEvent *first_game_event = game_history_get_event(game_history, 0);
-    set_rack_from_bag_or_push_to_error_stack(
-        game, game_event_get_player_index(first_game_event),
-        game_event_get_const_rack(first_game_event), error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
+    if (validate) {
+      set_rack_from_bag_or_push_to_error_stack(
+          game, game_event_get_player_index(first_game_event),
+          game_event_get_const_rack(first_game_event), error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+    } else {
+      rack_copy(
+          player_get_rack(game_get_player(game, game_event_get_player_index(first_game_event))),
+          game_event_get_const_rack(first_game_event));
     }
   }
   const int ld_size = ld_get_size(game_get_ld(game));

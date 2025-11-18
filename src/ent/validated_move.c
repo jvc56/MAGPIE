@@ -709,12 +709,15 @@ ValidatedMoves *validated_moves_create(const Game *game, int player_index,
   ValidatedMoves *vms = malloc_or_die(sizeof(ValidatedMoves));
   vms->moves = NULL;
   vms->number_of_moves = 0;
+  StringSplitter *split_moves = NULL;
 
   if (is_string_empty_or_whitespace(ucgi_moves_string)) {
     error_stack_push(error_stack, ERROR_STATUS_MOVE_VALIDATION_EMPTY_MOVE,
                      string_duplicate("expected move to be nonempty"));
+    free(vms);
+    return NULL;
   } else {
-    StringSplitter *split_moves = split_string(ucgi_moves_string, ',', true);
+    split_moves = split_string(ucgi_moves_string, ',', true);
     vms->number_of_moves = string_splitter_get_number_of_items(split_moves);
 
     vms->moves = (ValidatedMove **)malloc_or_die(sizeof(ValidatedMove *) *
@@ -725,6 +728,20 @@ ValidatedMoves *validated_moves_create(const Game *game, int player_index,
           game, player_index, string_splitter_get_item(split_moves, i),
           allow_phonies, allow_unknown_exchanges, allow_playthrough,
           error_stack);
+
+      if (!error_stack_is_empty(error_stack)) {
+        // An error occurred during the creation of a ValidatedMove.
+        // Clean up all ValidatedMove objects created so far in this ValidatedMoves instance.
+        for (int j = 0; j <= i; j++) {
+          if (vms->moves[j]) {
+            validated_move_destroy(vms->moves[j]);
+          }
+        }
+        free(vms->moves);
+        free(vms);
+        string_splitter_destroy(split_moves);
+        return NULL;
+      }
     }
 
     string_splitter_destroy(split_moves);

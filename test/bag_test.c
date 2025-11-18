@@ -67,7 +67,7 @@ void test_bag(void) {
   bag_reset(ld, bag);
   rack_reset(rack);
 
-  Bag *copy_of_bag = bag_duplicate(bag);
+  Bag *copy_of_bag = bag_duplicate(bag, ld);
 
   // The first (TEST_BAG_SIZE) / 2 tiles
   // are drawn by player 0 and the next (TEST_BAG_SIZE) / 2

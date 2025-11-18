@@ -540,7 +540,7 @@ Game *game_create(const GameArgs *game_args) {
 // not copy them from game.
 Game *game_duplicate(const Game *game) {
   Game *new_game = malloc_or_die(sizeof(Game));
-  new_game->bag = bag_duplicate(game->bag);
+  new_game->bag = bag_duplicate(game->bag, game->ld);
   new_game->board = board_duplicate(game->board);
   new_game->ld = game->ld;
   new_game->bingo_bonus = game->bingo_bonus;
@@ -584,6 +584,10 @@ void game_backup(Game *game) {
     return;
     break;
   case BACKUP_MODE_SIMULATION:
+    if (game->backup_cursor >= MAX_SEARCH_DEPTH) {
+      log_fatal("backup_cursor (%d) exceeded MAX_SEARCH_DEPTH (%d)",
+                game->backup_cursor, MAX_SEARCH_DEPTH);
+    }
     state = game->sim_game_backups[game->backup_cursor];
     game->backup_cursor++;
     break;

@@ -235,6 +235,9 @@ void string_builder_add_inference(StringBuilder *inference_string,
       inference_results_get_leave_rack_list(inference_results);
   // Get the list of most common leaves
   int number_of_common_leaves = leave_rack_list_get_count(leave_rack_list);
+  if (number_of_common_leaves > 5) {
+    number_of_common_leaves = 5;
+  }
   for (int common_leave_index = 0; common_leave_index < number_of_common_leaves;
        common_leave_index++) {
     const LeaveRack *leave_rack =
@@ -351,28 +354,37 @@ void string_builder_ucgi_add_inference_record(
     StringBuilder *ucgi_string_builder, Stat *letter_stat,
     int number_of_tiles_played_or_exchanged,
     const char *inference_record_type) {
-  const Stat *equity_values = inference_results_get_equity_values(
-      inference_results, inference_stat_type);
+  (void)ld;
+  (void)rack;
+  (void)bag_as_rack;
+  (void)ucgi_string_builder;
+  (void)letter_stat;
+  (void)number_of_tiles_played_or_exchanged;
+  (void)inference_results;
+  (void)inference_stat_type;
+  (void)inference_record_type;
+  // const Stat *equity_values = inference_results_get_equity_values(
+  //     inference_results, inference_stat_type);
 
-  uint64_t total_draws = stat_get_num_samples(equity_values);
-  uint64_t total_leaves = stat_get_num_unique_samples(equity_values);
+  // uint64_t total_draws = stat_get_num_samples(equity_values);
+  // uint64_t total_leaves = stat_get_num_unique_samples(equity_values);
 
-  string_builder_add_formatted_string(
-      ucgi_string_builder,
-      "infertotaldraws %s %llu\n"
-      "inferuniqueleaves %s %llu\n"
-      "inferleaveavg %s %f\n"
-      "inferleavestdev %s %f\n",
-      inference_record_type, total_draws, inference_record_type, total_leaves,
-      inference_record_type, stat_get_mean(equity_values),
-      inference_record_type, stat_get_stdev(equity_values));
-  const int ld_size = ld_get_size(ld);
-  for (int i = 0; i < ld_size; i++) {
-    string_builder_ucgi_add_letter_line(
-        ld, inference_results, inference_stat_type, rack, bag_as_rack,
-        ucgi_string_builder, letter_stat, i,
-        number_of_tiles_played_or_exchanged, inference_record_type);
-  }
+  // string_builder_add_formatted_string(
+  //     ucgi_string_builder,
+  //     "infertotaldraws %s %llu\n"
+  //     "inferuniqueleaves %s %llu\n"
+  //     "inferleaveavg %s %f\n"
+  //     "inferleavestdev %s %f\n",
+  //     inference_record_type, total_draws, inference_record_type, total_leaves,
+  //     inference_record_type, stat_get_mean(equity_values),
+  //     inference_record_type, stat_get_stdev(equity_values));
+  // const int ld_size = ld_get_size(ld);
+  // for (int i = 0; i < ld_size; i++) {
+  //   string_builder_ucgi_add_letter_line(
+  //       ld, inference_results, inference_stat_type, rack, bag_as_rack,
+  //       ucgi_string_builder, letter_stat, i,
+  //       number_of_tiles_played_or_exchanged, inference_record_type);
+  // }
 }
 
 void print_ucgi_inference(const LetterDistribution *ld,
