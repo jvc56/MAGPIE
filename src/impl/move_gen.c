@@ -41,6 +41,8 @@
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
+static inline void gen_prepare_simd_row_cache(MoveGen *gen);
+
 // Cache move generators since destroying
 // and recreating a movegen for
 // every request to generate moves would
@@ -69,6 +71,18 @@ MoveGen *get_movegen(int thread_index) {
     cached_gens[thread_index] = generator_create();
   }
   return cached_gens[thread_index];
+}
+
+static inline void gen_prepare_simd_row_cache(MoveGen *gen) {
+  for (int i = 0; i < BOARD_DIM; i++) {
+    gen->simd_row_letters[i] = square_get_letter(&gen->row_cache[i]);
+    gen->simd_row_cross_sets[i] = square_get_cross_set(&gen->row_cache[i]);
+  }
+  // Padding for safe SIMD loads
+  memset(gen->simd_row_letters + BOARD_DIM, ALPHABET_EMPTY_SQUARE_MARKER,
+         32 - BOARD_DIM);
+  memset(gen->simd_row_cross_sets + BOARD_DIM, 0,
+         (BOARD_DIM + 1 - BOARD_DIM) * sizeof(uint64_t));
 }
 
 void gen_destroy_cache(void) {
