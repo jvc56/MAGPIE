@@ -30,25 +30,14 @@
 #include "../ent/rack.h"
 #include "../ent/static_eval.h"
 #include "../util/io_util.h"
-#include "wmp_move_gen.h"
 #include "simd_defs.h"
+#include "wmp_move_gen.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
-
-// ...
-
-static inline void gen_prepare_simd_row_cache(MoveGen *gen) {
-  for (int i = 0; i < BOARD_DIM; i++) {
-    gen->simd_row_letters[i] = square_get_letter(&gen->row_cache[i]);
-    gen->simd_row_cross_sets[i] = square_get_cross_set(&gen->row_cache[i]);
-  }
-  // Padding for safe SIMD loads
-  memset(gen->simd_row_letters + BOARD_DIM, ALPHABET_EMPTY_SQUARE_MARKER,
-         32 - BOARD_DIM);
-  memset(gen->simd_row_cross_sets + BOARD_DIM, 0,
-         (BOARD_DIM + 1 - BOARD_DIM) * sizeof(uint64_t));
-}
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 

@@ -44,12 +44,13 @@ typedef struct MoveGen {
   Rack leave;
   Square lanes_cache[BOARD_DIM * BOARD_DIM * 2];
   Square row_cache[BOARD_DIM];
-  
+
   // SIMD-optimized row cache
-  // Aligned for efficient vector loads. Size 32 to allow safe unaligned loads up to BOARD_DIM.
+  // Aligned for efficient vector loads. Size 32 to allow safe unaligned loads
+  // up to BOARD_DIM.
   uint8_t simd_row_letters[32] __attribute__((aligned(16)));
   uint64_t simd_row_cross_sets[BOARD_DIM + 1] __attribute__((aligned(16)));
-  
+
   uint8_t row_number_of_anchors_cache[(BOARD_DIM) * 2];
   Equity opening_move_penalties[(BOARD_DIM) * 2];
   int board_number_of_tiles_played;
