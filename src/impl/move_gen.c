@@ -31,12 +31,24 @@
 #include "../ent/static_eval.h"
 #include "../util/io_util.h"
 #include "wmp_move_gen.h"
+#include "simd_defs.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+
+// ...
+
+static inline void gen_prepare_simd_row_cache(MoveGen *gen) {
+  for (int i = 0; i < BOARD_DIM; i++) {
+    gen->simd_row_letters[i] = square_get_letter(&gen->row_cache[i]);
+    gen->simd_row_cross_sets[i] = square_get_cross_set(&gen->row_cache[i]);
+  }
+  // Padding for safe SIMD loads
+  memset(gen->simd_row_letters + BOARD_DIM, ALPHABET_EMPTY_SQUARE_MARKER,
+         32 - BOARD_DIM);
+  memset(gen->simd_row_cross_sets + BOARD_DIM, 0,
+         (BOARD_DIM + 1 - BOARD_DIM) * sizeof(uint64_t));
+}
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
@@ -622,27 +634,40 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
                                                int start_col) {
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
   const MachineLetter *word = wmp_move_gen_get_word(wgen, word_idx);
-  for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
-    const int board_col = start_col + letter_idx;
-    assert(board_col < BOARD_DIM);
-    assert(board_col >= 0);
-    const MachineLetter word_letter = word[letter_idx];
-    if (gen_cache_is_empty(gen, board_col)) {
-      if (!board_is_letter_allowed_in_cross_set(
-              gen_cache_get_cross_set(gen, board_col), word_letter)) {
-        return false;
-      }
-      gen->playthrough_marked[letter_idx] = word_letter;
-      continue;
-    }
-    const MachineLetter board_letter =
-        get_unblanked_machine_letter(gen_cache_get_letter(gen, board_col));
-    assert(board_letter != ALPHABET_EMPTY_SQUARE_MARKER);
-    assert(!bonus_square_is_brick(gen_cache_get_bonus_square(gen, board_col)));
-    if (board_letter != word_letter) {
+  const int word_len = wgen->word_length;
+
+  // SIMD Load
+  v16u8 board_raw = load_v16u8(&gen->simd_row_letters[start_col]);
+  v16u8 board_unblanked = board_raw & (uint8_t)UNBLANK_MASK;
+
+  // Load word (assuming safe to load 16 bytes from word ptr)
+  v16u8 word_chars = load_v16u8(word);
+
+  // Compare
+  typedef int8_t v16s8 __attribute__((vector_size(16)));
+  v16s8 cmp_match = (v16s8)(board_unblanked == word_chars);
+  v16s8 is_empty = (v16s8)(board_raw == 0);
+
+  // Valid if (is_empty | match)
+  v16s8 valid_mask = is_empty | cmp_match;
+
+  // Update playthrough_marked
+  // If empty: word_char. If occupied: 0 (PLAYED_THROUGH_MARKER).
+  // is_empty is -1 (0xFF) if empty, 0 if occupied.
+  v16u8 marked = word_chars & (v16u8)is_empty;
+  store_v16u8(gen->playthrough_marked, marked);
+
+  // Loop for validation and cross-set checks
+  for (int i = 0; i < word_len; i++) {
+    if (!valid_mask[i]) {
       return false;
     }
-    gen->playthrough_marked[letter_idx] = PLAYED_THROUGH_MARKER;
+    if (is_empty[i]) {
+      if (!board_is_letter_allowed_in_cross_set(
+              gen->simd_row_cross_sets[start_col + i], word[i])) {
+        return false;
+      }
+    }
   }
   return true;
 }
@@ -1712,6 +1737,7 @@ void shadow_by_orientation(MoveGen *gen) {
     gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
     board_copy_row_cache(gen->lanes_cache, gen->row_cache,
                          gen->current_row_index, gen->dir);
+    gen_prepare_simd_row_cache(gen);
     for (int col = 0; col < BOARD_DIM; col++) {
       if (gen_cache_get_is_anchor(gen, col)) {
         shadow_play_for_anchor(gen, col);
@@ -1903,6 +1929,7 @@ void gen_record_scoring_plays(MoveGen *gen) {
       gen->dir = anchor.dir;
       board_copy_row_cache(gen->lanes_cache, gen->row_cache, anchor.row,
                            anchor.dir);
+      gen_prepare_simd_row_cache(gen);
     }
     gen->last_anchor_col = anchor.last_anchor_col;
     gen->anchor_right_extension_set =
