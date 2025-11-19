@@ -1,0 +1,37 @@
+#include <QDebug>
+#include <QApplication>
+#include <QQmlApplicationEngine>
+#include <QtCore/QString>
+#include <QFontDatabase>
+#include "models/GameHistoryModel.h"
+
+using namespace Qt::StringLiterals;
+
+int main(int argc, char *argv[])
+{
+    QApplication app(argc, argv);
+
+    // Register custom fonts
+    QString fontPath = QCoreApplication::applicationDirPath() + "/../Resources/fonts/";
+    QFontDatabase::addApplicationFont(fontPath + "ClearSans-Bold.ttf");
+    QFontDatabase::addApplicationFont(fontPath + "Consolas.ttf");
+    QFontDatabase::addApplicationFont(fontPath + "Roboto-Bold.ttf");
+
+    qmlRegisterType<GameHistoryModel>("QtPie", 1, 0, "GameHistoryModel");
+
+    QQmlApplicationEngine engine;
+    // URL matches the URI defined in CMakeLists.txt + the file path
+    const QUrl url(u"qrc:/QtPie/src/qt/views/Main.qml"_s);
+    QObject::connect(
+        &engine,
+        &QQmlApplicationEngine::objectCreated,
+        &app,
+        [url](QObject *obj, const QUrl &objUrl) {
+            if (!obj && url == objUrl)
+                QCoreApplication::exit(-1);
+        },
+        Qt::QueuedConnection);
+    engine.load(url);
+
+    return app.exec();
+}
