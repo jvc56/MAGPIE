@@ -22,3 +22,4 @@ TODO
 CLAUDE.md
 *.DS_Store
 settings.txt
+build/

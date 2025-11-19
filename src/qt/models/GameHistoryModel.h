@@ -1,0 +1,63 @@
+#ifndef GAMEHISTORYMODEL_H
+#define GAMEHISTORYMODEL_H
+
+#include <QAbstractListModel>
+#include <QObject>
+#include <QString>
+#include <QUrl>
+#include <cstdint>
+#include <vector>
+
+#include "../bridge/qt_bridge.h"
+#include "BoardSquare.h"
+
+// Forward declarations for C structs
+// (None needed as we use opaque handles from bridge)
+
+class GameHistoryModel : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(QString player1Name READ player1Name NOTIFY gameChanged)
+    Q_PROPERTY(QString player2Name READ player2Name NOTIFY gameChanged)
+    Q_PROPERTY(int player1Score READ player1Score NOTIFY gameChanged)
+    Q_PROPERTY(int player2Score READ player2Score NOTIFY gameChanged)
+    Q_PROPERTY(int currentEventIndex READ currentEventIndex NOTIFY gameChanged)
+    Q_PROPERTY(int totalEvents READ totalEvents NOTIFY gameChanged)
+    Q_PROPERTY(QList<QObject*> board READ board NOTIFY boardChanged)
+
+public:
+    explicit GameHistoryModel(QObject *parent = nullptr);
+    ~GameHistoryModel();
+
+    Q_INVOKABLE void loadGame(const QString &gcgContent);
+    Q_INVOKABLE void loadGameFromFile(const QUrl &fileUrl);
+    Q_INVOKABLE void openGameDialog();
+    Q_INVOKABLE void next();
+    Q_INVOKABLE void previous();
+    Q_INVOKABLE void jumpTo(int index);
+
+    QString player1Name() const;
+    QString player2Name() const;
+    int player1Score() const;
+    int player2Score() const;
+    int currentEventIndex() const;
+    int totalEvents() const;
+    QList<QObject*> board() const;
+
+signals:
+    void gameChanged();
+    void boardChanged();
+    void gameLoadedFromFile(const QUrl &fileUrl);
+
+private:
+    void updateGameState();
+    void cleanup();
+
+    BridgeGameHistory *m_gameHistory = nullptr;
+    BridgeGame *m_game = nullptr;
+    
+    int m_currentIndex = 0;
+    QList<QObject*> m_boardCache;
+};
+
+#endif // GAMEHISTORYMODEL_H
