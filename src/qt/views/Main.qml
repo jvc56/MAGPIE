@@ -329,8 +329,8 @@ ApplicationWindow {
                 // Go to First Button
                 Button { 
                     id: goToFirstButton
-                    implicitWidth: gridContainer.cellSize
-                    implicitHeight: gridContainer.cellSize
+                    Layout.preferredWidth: gridContainer.cellSize
+                    Layout.preferredHeight: gridContainer.cellSize
                     enabled: gameModel.currentEventIndex > 0
                     onClicked: gameModel.jumpTo(0)
                     background: Rectangle {
@@ -370,8 +370,8 @@ ApplicationWindow {
                 // Previous Button
                 Button { 
                     id: previousButton
-                    implicitWidth: gridContainer.cellSize
-                    implicitHeight: gridContainer.cellSize
+                    Layout.preferredWidth: gridContainer.cellSize
+                    Layout.preferredHeight: gridContainer.cellSize
                     enabled: gameModel.currentEventIndex > 0
                     onClicked: gameModel.previous()
                     background: Rectangle {
@@ -418,8 +418,8 @@ ApplicationWindow {
                 // Next Button
                 Button { 
                     id: nextButton
-                    implicitWidth: gridContainer.cellSize
-                    implicitHeight: gridContainer.cellSize
+                    Layout.preferredWidth: gridContainer.cellSize
+                    Layout.preferredHeight: gridContainer.cellSize
                     enabled: gameModel.currentEventIndex < gameModel.totalEvents - 1
                     onClicked: gameModel.next()
                     background: Rectangle {
@@ -457,8 +457,8 @@ ApplicationWindow {
                 // Go to Last Button
                 Button { 
                     id: goToLastButton
-                    implicitWidth: gridContainer.cellSize
-                    implicitHeight: gridContainer.cellSize
+                    Layout.preferredWidth: gridContainer.cellSize
+                    Layout.preferredHeight: gridContainer.cellSize
                     enabled: gameModel.currentEventIndex < gameModel.totalEvents - 1
                     onClicked: gameModel.jumpTo(gameModel.totalEvents - 1)
                     background: Rectangle {
@@ -529,12 +529,14 @@ ApplicationWindow {
                             Text {
                                 text: gameModel.player1Name
                                 color: gameModel.playerOnTurnIndex === 0 ? "#CDD6F4" : "#7F849C"
-                                font.pixelSize: 24
+                                font.pixelSize: 20 // Reduced max font size
                                 fontSizeMode: Text.Fit
                                 minimumPixelSize: 10
                                 Layout.fillWidth: true
                                 horizontalAlignment: Text.AlignHCenter
                                 font.bold: gameModel.playerOnTurnIndex === 0
+                                leftPadding: 5 // Added padding
+                                rightPadding: 5 // Added padding
                             }
                             Text { 
                                 text: gameModel.player1Score
@@ -568,12 +570,14 @@ ApplicationWindow {
                             Text { 
                                 text: gameModel.player2Name
                                 color: gameModel.playerOnTurnIndex === 1 ? "#CDD6F4" : "#7F849C"
-                                font.pixelSize: 24
+                                font.pixelSize: 20 // Reduced max font size
                                 fontSizeMode: Text.Fit
                                 minimumPixelSize: 10
                                 Layout.fillWidth: true
                                 horizontalAlignment: Text.AlignHCenter
                                 font.bold: gameModel.playerOnTurnIndex === 1
+                                leftPadding: 5 // Added padding
+                                rightPadding: 5 // Added padding
                             }
                             Text { 
                                 text: gameModel.player2Score
