@@ -14,7 +14,7 @@ Item {
     property int draggingIndex: -1
     
     // Constants
-    readonly property int tileSpacing: 4
+    readonly property int tileSpacing: Math.max(2, tileSize * 0.1)
 
     // Sync external rack to internal rack (padding to 7)
     onRackChanged: {
@@ -31,13 +31,13 @@ Item {
         internalRack = r;
     }
     
-    width: 400
-    height: 60
+    implicitWidth: (7 * tileSize) + (6 * tileSpacing) + (tileSize * 0.5)
+    implicitHeight: tileSize * 1.4
     
     Rectangle {
         anchors.fill: parent
         color: "#232433" // Slightly lighter than main background
-        radius: 8
+        radius: tileSize * 0.2
     }
     
     function getSlotX(index) {
@@ -51,8 +51,8 @@ Item {
         id: caret
         visible: root.dropIndex !== -1
         
-        width: 14 // Width of caps
-        height: root.tileSize + 8 // Taller than tile
+        width: Math.max(4, root.tileSize * 0.1) // Width of caps
+        height: root.tileSize + (root.tileSize * 0.2) // Taller than tile
         z: 50
         
         y: (root.height - height) / 2
@@ -72,10 +72,10 @@ Item {
         // Vertical Line
         Rectangle {
             anchors.centerIn: parent
-            width: 3
+            width: Math.max(2, parent.width * 0.2)
             height: parent.height
             color: "#6496FF"
-            radius: 1.5
+            radius: width / 2
         }
         
         // Top Cap
@@ -83,9 +83,9 @@ Item {
             anchors.top: parent.top
             anchors.horizontalCenter: parent.horizontalCenter
             width: parent.width
-            height: 3
+            height: Math.max(2, parent.width * 0.2)
             color: "#6496FF"
-            radius: 1.5
+            radius: height / 2
         }
         
         // Bottom Cap
@@ -93,9 +93,9 @@ Item {
             anchors.bottom: parent.bottom
             anchors.horizontalCenter: parent.horizontalCenter
             width: parent.width
-            height: 3
+            height: Math.max(2, parent.width * 0.2)
             color: "#6496FF"
-            radius: 1.5
+            radius: height / 2
         }
 
         // Animate appearance
@@ -134,16 +134,16 @@ Item {
             // Tile Visual
             Rectangle {
                 anchors.fill: parent
-                radius: 4
+                radius: root.tileSize * 0.1
                 
                 // Shadow for dragged tile
                 Rectangle {
                     anchors.fill: parent
-                    anchors.topMargin: 4
-                    anchors.leftMargin: 4
+                    anchors.topMargin: root.tileSize * 0.1
+                    anchors.leftMargin: root.tileSize * 0.1
                     color: "black"
                     opacity: 0.2
-                    radius: 4
+                    radius: parent.radius
                     z: -1
                     visible: tileDelegate.isHeld
                 }
@@ -165,7 +165,7 @@ Item {
                         return charStr.toUpperCase();
                     }
                     font.family: "Clear Sans"
-                    font.pixelSize: 24
+                    font.pixelSize: root.tileSize * 0.6
                     font.bold: true
                     color: "#1E1E2E"
                     visible: charStr !== " "
@@ -188,7 +188,7 @@ Item {
                     anchors.centerIn: parent
                     text: "?"
                     font.family: "Clear Sans"
-                    font.pixelSize: 24
+                    font.pixelSize: root.tileSize * 0.6
                     font.bold: true
                     color: "#1E1E2E"
                     visible: charStr === "?"
@@ -198,10 +198,10 @@ Item {
                 Text {
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
-                    anchors.rightMargin: 3
-                    anchors.bottomMargin: 2
+                    anchors.rightMargin: root.tileSize * 0.08
+                    anchors.bottomMargin: root.tileSize * 0.05
                     font.family: "Clear Sans"
-                    font.pixelSize: 10
+                    font.pixelSize: root.tileSize * 0.25
                     color: "#1E1E2E"
                     text: {
                         if (charStr === " ") return "";
@@ -293,45 +293,52 @@ Item {
     Button {
         anchors.right: parent.left
         anchors.verticalCenter: parent.verticalCenter
-        anchors.rightMargin: 10
-        width: 40
-        height: 40
+        anchors.rightMargin: root.tileSpacing * 2.5
+        width: root.tileSize
+        height: root.tileSize
         
         background: Rectangle {
             color: parent.down ? "#4070A0" : (parent.hovered ? "#5080B0" : "#6496C8")
-            radius: 20
+            radius: width / 2
         }
         
         contentItem: Item {
             Canvas {
                 anchors.centerIn: parent
-                width: 24
-                height: 24
+                width: parent.parent.width * 0.6
+                height: parent.parent.height * 0.6
                 onPaint: {
                     var ctx = getContext("2d");
                     ctx.strokeStyle = "white";
-                    ctx.lineWidth = 2;
+                    ctx.lineWidth = width * 0.08;
                     ctx.lineCap = "round";
                     
+                    var s = width;
+                    ctx.clearRect(0, 0, width, height);
+
                     ctx.beginPath();
-                    ctx.moveTo(4, 4);
-                    ctx.lineTo(20, 20);
-                    ctx.moveTo(20, 4);
-                    ctx.lineTo(4, 20);
+                    ctx.moveTo(s*0.2, s*0.2);
+                    ctx.lineTo(s*0.8, s*0.8);
+                    ctx.moveTo(s*0.8, s*0.2);
+                    ctx.lineTo(s*0.2, s*0.8);
+                    ctx.stroke();
+                    
+                    // Arrowheads
+                    // (Simplified shuffle icon)
+                    ctx.beginPath();
+                    ctx.moveTo(s*0.65, s*0.8);
+                    ctx.lineTo(s*0.8, s*0.8);
+                    ctx.lineTo(s*0.8, s*0.65);
                     ctx.stroke();
                     
                     ctx.beginPath();
-                    ctx.moveTo(16, 20);
-                    ctx.lineTo(20, 20);
-                    ctx.lineTo(20, 16);
-                    ctx.stroke();
-                    
-                    ctx.beginPath();
-                    ctx.moveTo(16, 4);
-                    ctx.lineTo(20, 4);
-                    ctx.lineTo(20, 8);
+                    ctx.moveTo(s*0.65, s*0.2);
+                    ctx.lineTo(s*0.8, s*0.2);
+                    ctx.lineTo(s*0.8, s*0.35);
                     ctx.stroke();
                 }
+                // Repaint when size changes
+                onWidthChanged: requestPaint()
             }
         }
         onClicked: {
@@ -352,28 +359,33 @@ Item {
     Button {
         anchors.left: parent.right
         anchors.verticalCenter: parent.verticalCenter
-        anchors.leftMargin: 10
-        width: 40
-        height: 40
+        anchors.leftMargin: root.tileSpacing * 2.5
+        width: root.tileSize
+        height: root.tileSize
         
         background: Rectangle {
             color: parent.down ? "#4070A0" : (parent.hovered ? "#5080B0" : "#6496C8")
-            radius: 20
+            radius: width / 2
         }
         
         contentItem: Item {
             Canvas {
                 anchors.centerIn: parent
-                width: 24
-                height: 24
+                width: parent.parent.width * 0.6
+                height: parent.parent.height * 0.6
                 onPaint: {
                     var ctx = getContext("2d");
                     ctx.fillStyle = "white";
+                    ctx.clearRect(0, 0, width, height);
                     
-                    ctx.fillRect(4, 16, 4, 4);
-                    ctx.fillRect(10, 12, 4, 8);
-                    ctx.fillRect(16, 8, 4, 12);
+                    var w = width;
+                    var h = height;
+                    
+                    ctx.fillRect(w*0.2, h*0.65, w*0.15, h*0.15);
+                    ctx.fillRect(w*0.45, h*0.5, w*0.15, h*0.30);
+                    ctx.fillRect(w*0.7, h*0.35, w*0.15, h*0.45);
                 }
+                onWidthChanged: requestPaint()
             }
         }
         onClicked: {
