@@ -3,6 +3,7 @@
 #include <QQmlApplicationEngine>
 #include <QtCore/QString>
 #include <QFontDatabase>
+#include <QQuickStyle>
 #include "models/GameHistoryModel.h"
 
 using namespace Qt::StringLiterals;
@@ -10,6 +11,7 @@ using namespace Qt::StringLiterals;
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
+    QQuickStyle::setStyle("Basic");
 
     // Register custom fonts
     QString fontPath = QCoreApplication::applicationDirPath() + "/../Resources/fonts/";

@@ -213,3 +213,12 @@ QList<QObject*> GameHistoryModel::board() const
 {
     return m_boardCache;
 }
+
+QString GameHistoryModel::currentRack() const
+{
+    if (!m_game) return "";
+    char* rackStr = bridge_get_current_rack(m_game);
+    QString result = QString::fromUtf8(rackStr);
+    free(rackStr);
+    return result;
+}

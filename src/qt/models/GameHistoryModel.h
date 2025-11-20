@@ -24,6 +24,7 @@ class GameHistoryModel : public QObject
     Q_PROPERTY(int currentEventIndex READ currentEventIndex NOTIFY gameChanged)
     Q_PROPERTY(int totalEvents READ totalEvents NOTIFY gameChanged)
     Q_PROPERTY(QList<QObject*> board READ board NOTIFY boardChanged)
+    Q_PROPERTY(QString currentRack READ currentRack NOTIFY gameChanged)
 
 public:
     explicit GameHistoryModel(QObject *parent = nullptr);
@@ -43,6 +44,7 @@ public:
     int currentEventIndex() const;
     int totalEvents() const;
     QList<QObject*> board() const;
+    QString currentRack() const;
 
 signals:
     void gameChanged();

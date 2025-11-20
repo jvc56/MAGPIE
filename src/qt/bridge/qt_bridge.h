@@ -48,6 +48,9 @@ int bridge_get_letter_score(BridgeGame* game, uint8_t ml);
 // Returns true if the machine letter is a blank.
 bool bridge_is_blank(uint8_t ml);
 
+// Returns a newly allocated string for the current player's rack. Caller must free.
+char* bridge_get_current_rack(BridgeGame* game);
+
 #ifdef __cplusplus
 }
 #endif
