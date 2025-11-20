@@ -324,22 +324,175 @@ ApplicationWindow {
             // Controls
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
-                spacing: 20
+                spacing: 15
                 
+                // Go to First Button
                 Button { 
-                    text: "Previous" 
-                    onClicked: gameModel.previous()
+                    id: goToFirstButton
+                    implicitWidth: gridContainer.cellSize
+                    implicitHeight: gridContainer.cellSize
                     enabled: gameModel.currentEventIndex > 0
+                    onClicked: gameModel.jumpTo(0)
+                    background: Rectangle {
+                        width: parent.width
+                        height: parent.height
+                        color: parent.down ? "#4070A0" : (parent.hovered ? "#5080B0" : "#6496C8")
+                        radius: width / 2
+                        opacity: goToFirstButton.enabled ? 1.0 : 0.5
+                    }
+                    contentItem: Item {
+                        anchors.fill: parent
+                        Canvas {
+                            anchors.centerIn: parent
+                            width: parent.width * 0.5
+                            height: parent.height * 0.5
+                            onPaint: {
+                                var ctx = getContext("2d");
+                                ctx.clearRect(0, 0, width, height);
+                                ctx.fillStyle = "white";
+                                
+                                var s = Math.min(width, height);
+                                // Vertical bar
+                                ctx.fillRect(0, s * 0.2, s * 0.15, s * 0.6);
+                                // Left arrow
+                                ctx.beginPath();
+                                ctx.moveTo(s * 0.9, s * 0.2);
+                                ctx.lineTo(s * 0.3, s * 0.5);
+                                ctx.lineTo(s * 0.9, s * 0.8);
+                                ctx.closePath();
+                                ctx.fill();
+                            }
+                            onWidthChanged: requestPaint()
+                        }
+                    }
                 }
-                Text { 
-                    text: gameModel.currentEventIndex + " / " + gameModel.totalEvents 
-                    color: "#CDD6F4"
-                    font.pixelSize: 16
-                }
+
+                // Previous Button
                 Button { 
-                    text: "Next" 
+                    id: previousButton
+                    implicitWidth: gridContainer.cellSize
+                    implicitHeight: gridContainer.cellSize
+                    enabled: gameModel.currentEventIndex > 0
+                    onClicked: gameModel.previous()
+                    background: Rectangle {
+                        width: parent.width
+                        height: parent.height
+                        color: parent.down ? "#4070A0" : (parent.hovered ? "#5080B0" : "#6496C8")
+                        radius: width / 2
+                        opacity: previousButton.enabled ? 1.0 : 0.5
+                    }
+                    contentItem: Item {
+                        anchors.fill: parent
+                        Canvas {
+                            anchors.centerIn: parent
+                            width: parent.width * 0.5
+                            height: parent.height * 0.5
+                            onPaint: {
+                                var ctx = getContext("2d");
+                                ctx.clearRect(0, 0, width, height);
+                                ctx.fillStyle = "white";
+                                
+                                var s = Math.min(width, height);
+                                // Left arrow
+                                ctx.beginPath();
+                                ctx.moveTo(s * 0.8, s * 0.2);
+                                ctx.lineTo(s * 0.2, s * 0.5);
+                                ctx.lineTo(s * 0.8, s * 0.8);
+                                ctx.closePath();
+                                ctx.fill();
+                            }
+                            onWidthChanged: requestPaint()
+                        }
+                    }
+                }
+
+                Text { 
+                    text: "Turn " + (gameModel.currentEventIndex + 1) + " of " + gameModel.totalEvents 
+                    color: "#CDD6F4"
+                    font.pixelSize: 18
+                    font.bold: true
+                    Layout.alignment: Qt.AlignVCenter
+                    Layout.margins: 10
+                }
+
+                // Next Button
+                Button { 
+                    id: nextButton
+                    implicitWidth: gridContainer.cellSize
+                    implicitHeight: gridContainer.cellSize
+                    enabled: gameModel.currentEventIndex < gameModel.totalEvents - 1
                     onClicked: gameModel.next()
-                    enabled: gameModel.currentEventIndex < gameModel.totalEvents
+                    background: Rectangle {
+                        width: parent.width
+                        height: parent.height
+                        color: parent.down ? "#4070A0" : (parent.hovered ? "#5080B0" : "#6496C8")
+                        radius: width / 2
+                        opacity: nextButton.enabled ? 1.0 : 0.5
+                    }
+                    contentItem: Item {
+                        anchors.fill: parent
+                        Canvas {
+                            anchors.centerIn: parent
+                            width: parent.width * 0.5
+                            height: parent.height * 0.5
+                            onPaint: {
+                                var ctx = getContext("2d");
+                                ctx.clearRect(0, 0, width, height);
+                                ctx.fillStyle = "white";
+                                
+                                var s = Math.min(width, height);
+                                // Right arrow
+                                ctx.beginPath();
+                                ctx.moveTo(s * 0.2, s * 0.2);
+                                ctx.lineTo(s * 0.8, s * 0.5);
+                                ctx.lineTo(s * 0.2, s * 0.8);
+                                ctx.closePath();
+                                ctx.fill();
+                            }
+                            onWidthChanged: requestPaint()
+                        }
+                    }
+                }
+
+                // Go to Last Button
+                Button { 
+                    id: goToLastButton
+                    implicitWidth: gridContainer.cellSize
+                    implicitHeight: gridContainer.cellSize
+                    enabled: gameModel.currentEventIndex < gameModel.totalEvents - 1
+                    onClicked: gameModel.jumpTo(gameModel.totalEvents - 1)
+                    background: Rectangle {
+                        width: parent.width
+                        height: parent.height
+                        color: parent.down ? "#4070A0" : (parent.hovered ? "#5080B0" : "#6496C8")
+                        radius: width / 2
+                        opacity: goToLastButton.enabled ? 1.0 : 0.5
+                    }
+                    contentItem: Item {
+                        anchors.fill: parent
+                        Canvas {
+                            anchors.centerIn: parent
+                            width: parent.width * 0.5
+                            height: parent.height * 0.5
+                            onPaint: {
+                                var ctx = getContext("2d");
+                                ctx.clearRect(0, 0, width, height);
+                                ctx.fillStyle = "white";
+                                
+                                var s = Math.min(width, height);
+                                // Vertical bar
+                                ctx.fillRect(s * 0.85, s * 0.2, s * 0.15, s * 0.6);
+                                // Right arrow
+                                ctx.beginPath();
+                                ctx.moveTo(s * 0.1, s * 0.2);
+                                ctx.lineTo(s * 0.7, s * 0.5);
+                                ctx.lineTo(s * 0.1, s * 0.8);
+                                ctx.closePath();
+                                ctx.fill();
+                            }
+                            onWidthChanged: requestPaint()
+                        }
+                    }
                 }
             }
         }
