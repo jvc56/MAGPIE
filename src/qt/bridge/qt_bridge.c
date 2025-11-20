@@ -38,7 +38,7 @@ void bridge_game_history_destroy(BridgeGameHistory* gh) {
 int bridge_load_gcg(BridgeGameHistory* gh, const char* gcg_content, const char* data_path, char* error_msg, int error_msg_len) {
     ErrorStack *err = error_stack_create();
     
-    GCGParser *parser = gcg_parser_create(gcg_content, TO_GH(gh), NULL, err);
+    GCGParser *parser = gcg_parser_create(gcg_content, TO_GH(gh), "CSW21", err);
     if (!error_stack_is_empty(err)) {
         char *msg = error_stack_get_string_and_reset(err);
         snprintf(error_msg, error_msg_len, "Parser create failed: %s", msg);
@@ -228,6 +228,9 @@ uint8_t bridge_get_machine_letter(BridgeGame* game, int row, int col) {
 int bridge_get_letter_score(BridgeGame* game, uint8_t ml) {
     if (!game) return 0;
     const LetterDistribution *ld = game_get_ld(TO_GAME(game));
+    if (bridge_is_blank(ml)) {
+        return equity_to_int(ld_get_score(ld, BLANK_MACHINE_LETTER));
+    }
     return equity_to_int(ld_get_score(ld, ml));
 }
 
