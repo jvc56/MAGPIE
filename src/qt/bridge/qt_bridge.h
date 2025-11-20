@@ -28,6 +28,7 @@ void bridge_game_play_to_index(BridgeGameHistory* gh, BridgeGame* game, int inde
 // Accessors
 const char* bridge_get_player_name(BridgeGameHistory* gh, int player_index);
 int bridge_get_player_score(BridgeGame* game, int player_index);
+int bridge_get_player_on_turn_index(BridgeGame* game);
 int bridge_get_num_events(BridgeGameHistory* gh);
 
 // Board

@@ -198,6 +198,12 @@ int GameHistoryModel::player2Score() const
     return bridge_get_player_score(m_game, 1);
 }
 
+int GameHistoryModel::playerOnTurnIndex() const
+{
+    if (!m_game) return 0;
+    return bridge_get_player_on_turn_index(m_game);
+}
+
 int GameHistoryModel::currentEventIndex() const
 {
     return m_currentIndex;

@@ -196,6 +196,11 @@ int bridge_get_player_score(BridgeGame* game, int player_index) {
     return equity_to_int(player_get_score(game_get_player(TO_GAME(game), player_index)));
 }
 
+int bridge_get_player_on_turn_index(BridgeGame* game) {
+    if (!game) return 0;
+    return game_get_player_on_turn_index(TO_GAME(game));
+}
+
 int bridge_get_num_events(BridgeGameHistory* gh) {
     if (!gh) return 0;
     return game_history_get_num_events(TO_GH(gh));
