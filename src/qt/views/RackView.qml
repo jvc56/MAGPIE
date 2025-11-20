@@ -159,13 +159,17 @@ Item {
                 Behavior on scale { NumberAnimation { duration: 100 } }
 
                 Text {
-                    anchors.centerIn: parent
+                    anchors.fill: parent
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    // Slight vertical adjustment to visually center Caps
+                    bottomPadding: root.tileSize * 0.1
                     text: {
                         if (charStr === "?" || charStr === " ") return "";
                         return charStr.toUpperCase();
                     }
                     font.family: "Clear Sans"
-                    font.pixelSize: root.tileSize * 0.6
+                    font.pixelSize: root.tileSize * 0.5
                     font.bold: true
                     color: "#1E1E2E"
                     visible: charStr !== " "
@@ -176,6 +180,7 @@ Item {
                     width: parent.width * 0.5
                     height: parent.height * 0.5
                     anchors.centerIn: parent
+                    anchors.verticalCenterOffset: -root.tileSize * 0.05
                     color: "transparent"
                     border.color: "black"
                     border.width: 1
@@ -185,10 +190,13 @@ Item {
 
                 // Undesignated blank
                 Text {
-                    anchors.centerIn: parent
+                    anchors.fill: parent
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    bottomPadding: root.tileSize * 0.1
                     text: "?"
                     font.family: "Clear Sans"
-                    font.pixelSize: root.tileSize * 0.6
+                    font.pixelSize: root.tileSize * 0.5
                     font.bold: true
                     color: "#1E1E2E"
                     visible: charStr === "?"
@@ -196,12 +204,13 @@ Item {
                 
                 // Score
                 Text {
+                    id: scoreText
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
-                    anchors.rightMargin: root.tileSize * 0.08
+                    anchors.rightMargin: text.length > 1 ? root.tileSize * 0.05 : root.tileSize * 0.12
                     anchors.bottomMargin: root.tileSize * 0.05
                     font.family: "Clear Sans"
-                    font.pixelSize: root.tileSize * 0.25
+                    font.pixelSize: scoreText.text.length > 1 ? root.tileSize * 0.22 : root.tileSize * 0.25
                     color: "#1E1E2E"
                     text: {
                         if (charStr === " ") return "";
