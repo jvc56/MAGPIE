@@ -21,6 +21,7 @@ class GameHistoryModel : public QObject
     Q_PROPERTY(QString player2Name READ player2Name NOTIFY gameChanged)
     Q_PROPERTY(int player1Score READ player1Score NOTIFY gameChanged)
     Q_PROPERTY(int player2Score READ player2Score NOTIFY gameChanged)
+    Q_PROPERTY(int playerOnTurnIndex READ playerOnTurnIndex NOTIFY gameChanged)
     Q_PROPERTY(int currentEventIndex READ currentEventIndex NOTIFY gameChanged)
     Q_PROPERTY(int totalEvents READ totalEvents NOTIFY gameChanged)
     Q_PROPERTY(QList<QObject*> board READ board NOTIFY boardChanged)
@@ -41,6 +42,7 @@ public:
     QString player2Name() const;
     int player1Score() const;
     int player2Score() const;
+    int playerOnTurnIndex() const;
     int currentEventIndex() const;
     int totalEvents() const;
     QList<QObject*> board() const;
