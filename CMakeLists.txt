@@ -56,6 +56,7 @@ qt_add_qml_module(qtpie
     VERSION 1.0
     RESOURCE_PREFIX "/"
     QML_FILES src/qt/views/Main.qml
+    src/qt/views/RackView.qml
 )
 
 target_link_libraries(qtpie

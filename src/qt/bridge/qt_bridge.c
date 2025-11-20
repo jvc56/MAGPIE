@@ -237,3 +237,33 @@ int bridge_get_letter_score(BridgeGame* game, uint8_t ml) {
 bool bridge_is_blank(uint8_t ml) {
     return get_is_blanked(ml);
 }
+
+char* bridge_get_current_rack(BridgeGame* game) {
+    if (!game) return string_duplicate("");
+    
+    int playerIdx = game_get_player_on_turn_index(TO_GAME(game));
+    Player *p = game_get_player(TO_GAME(game), playerIdx);
+    Rack *r = player_get_rack(p);
+    const LetterDistribution *ld = game_get_ld(TO_GAME(game));
+    
+    // Estimate buffer size: max 7 tiles * max 4 bytes per char + null
+    char buffer[64] = {0}; 
+    int pos = 0;
+    
+    for (int i = 0; i < ld_get_size(ld); i++) {
+        int count = rack_get_letter(r, i);
+        if (count > 0) {
+            char *hl = ld_ml_to_hl(ld, i);
+            for (int c = 0; c < count; c++) {
+                // Check buffer safety
+                if (pos + strlen(hl) < sizeof(buffer) - 1) {
+                    strcpy(buffer + pos, hl);
+                    pos += strlen(hl);
+                }
+            }
+            free(hl);
+        }
+    }
+    
+    return string_duplicate(buffer);
+}

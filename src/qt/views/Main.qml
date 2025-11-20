@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
-import Qt.labs.settings
+import QtCore
 import QtPie 1.0
 
 ApplicationWindow {
@@ -83,174 +83,166 @@ ApplicationWindow {
 
     RowLayout {
         anchors.fill: parent
+        anchors.margins: 20
         spacing: 20
         
-        // Left Panel: Board
-        Rectangle {
-            id: boardContainer
+        // Left Column: Board, Rack, Controls
+        ColumnLayout {
             Layout.fillHeight: true
-            Layout.preferredWidth: parent.width * 0.7
-            color: "#313244"
-            radius: 10
-            
-            Item {
-                id: gridContainer
-                width: Math.min(parent.width, parent.height) - 20
-                height: width
-                anchors.centerIn: parent
+            Layout.preferredWidth: parent.width * 0.65 // Slightly less than 0.7 to make room
+            spacing: 20
 
-                property int cellSize: width / 15
-                property var bonusStyles: {
-                    "1,2": { color: "#FA8072", text: "2W", textColor: "#1E1E2E" }, // DWS - Salmon
-                    "1,3": { color: "#FF0000", text: "3W", textColor: "#FFFFFF" }, // TWS - Red
-                    "2,1": { color: "#ADD8E6", text: "2L", textColor: "#1E1E2E" }, // DLS - Light Blue
-                    "3,1": { color: "#00008B", text: "3L", textColor: "#FFFFFF" }, // TLS - Dark Blue
-                    "1,1": { color: "#45475A", text: "", textColor: "#CDD6F4" }     // Normal
-                }
+            // Board
+            Rectangle {
+                id: boardContainer
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                color: "#313244"
+                radius: 10
+                
+                Item {
+                    id: gridContainer
+                    // Constrain to be square and fit within the container
+                    height: Math.min(parent.width, parent.height) - 20
+                    width: height
+                    anchors.centerIn: parent
 
-                Canvas {
-                    id: boardCanvas
-                    anchors.fill: parent
-                    
-                    onPaint: {
-                        var ctx = getContext("2d");
-                        ctx.save();
-                        ctx.clearRect(0, 0, width, height);
+                    property int cellSize: width / 15
+                    property var bonusStyles: {
+                        "1,2": { color: "#FA8072", text: "2W", textColor: "#1E1E2E" }, // DWS - Salmon
+                        "1,3": { color: "#FF0000", text: "3W", textColor: "#FFFFFF" }, // TWS - Red
+                        "2,1": { color: "#ADD8E6", text: "2L", textColor: "#1E1E2E" }, // DLS - Light Blue
+                        "3,1": { color: "#00008B", text: "3L", textColor: "#FFFFFF" }, // TLS - Dark Blue
+                        "1,1": { color: "#45475A", text: "", textColor: "#CDD6F4" }     // Normal
+                    }
 
-                        for (var i = 0; i < gameModel.board.length; i++) {
-                            var modelData = gameModel.board[i];
-                            var r = Math.floor(i / 15);
-                            var c = i % 15;
-                            var x = c * gridContainer.cellSize;
-                            var y = r * gridContainer.cellSize;
-                            var hasLetter = modelData.letter !== "";
-                            
-                            if (hasLetter) {
-                                // Draw tile background
-                                ctx.fillStyle = "#F9E2AF"; // Beige
-                                // Rounded rectangle drawing
-                                var tileX = x + 1;
-                                var tileY = y + 1;
-                                var tileW = gridContainer.cellSize - 2;
-                                var tileH = gridContainer.cellSize - 2;
-                                var radius = 6;
-                                ctx.beginPath();
-                                ctx.moveTo(tileX + radius, tileY);
-                                ctx.arcTo(tileX + tileW, tileY, tileX + tileW, tileY + tileH, radius);
-                                ctx.arcTo(tileX + tileW, tileY + tileH, tileX, tileY + tileH, radius);
-                                ctx.arcTo(tileX, tileY + tileH, tileX, tileY, radius);
-                                ctx.arcTo(tileX, tileY, tileX + tileW, tileY, radius);
-                                ctx.closePath();
-                                ctx.fill();
+                    Canvas {
+                        id: boardCanvas
+                        anchors.fill: parent
+                        
+                        onPaint: {
+                            var ctx = getContext("2d");
+                            ctx.save();
+                            ctx.clearRect(0, 0, width, height);
 
-                                // Draw letter
-                                ctx.font = "900 " + (modelData.isBlank ? gridContainer.cellSize * 0.4 : gridContainer.cellSize * 0.5) + "px 'Clear Sans'";
-                                ctx.fillStyle = "#1E1E2E";
-                                ctx.textAlign = "center";
-                                ctx.textBaseline = "middle";
-                                var letterText = modelData.isBlank ? modelData.letter.toUpperCase() : modelData.letter;
-                                ctx.fillText(letterText, x + gridContainer.cellSize / 2, y + gridContainer.cellSize / 2);
-
-                                // Draw score
-                                if (modelData.score > 0) {
-                                    ctx.font = (gridContainer.cellSize * 0.25) + "px 'Clear Sans'";
-                                    ctx.textAlign = "right";
-                                    ctx.textBaseline = "bottom";
-                                    ctx.fillText(modelData.score, x + gridContainer.cellSize - 3, y + gridContainer.cellSize - 2);
-                                }
-
-                                // Draw blank border
-                                if (modelData.isBlank) {
-                                    ctx.strokeStyle = "black";
-                                    ctx.lineWidth = 1;
-                                    ctx.strokeRect(x + gridContainer.cellSize * 0.25, y + gridContainer.cellSize * 0.25, gridContainer.cellSize * 0.5, gridContainer.cellSize * 0.5);
-                                }
-                            } else {
-                                // Draw bonus square (rounded rectangle)
-                                var style = gridContainer.bonusStyles[modelData.letterMultiplier + "," + modelData.wordMultiplier];
-                                ctx.fillStyle = style.color;
+                            for (var i = 0; i < gameModel.board.length; i++) {
+                                var modelData = gameModel.board[i];
+                                var r = Math.floor(i / 15);
+                                var c = i % 15;
+                                var x = c * gridContainer.cellSize;
+                                var y = r * gridContainer.cellSize;
+                                var hasLetter = modelData.letter !== "";
                                 
-                                var tileX = x + 1;
-                                var tileY = y + 1;
-                                var tileW = gridContainer.cellSize - 2;
-                                var tileH = gridContainer.cellSize - 2;
-                                var radius = 6; // Same radius as tiles
-                                ctx.beginPath();
-                                ctx.moveTo(tileX + radius, tileY);
-                                ctx.arcTo(tileX + tileW, tileY, tileX + tileW, tileY + tileH, radius);
-                                ctx.arcTo(tileX + tileW, tileY + tileH, tileX, tileY + tileH, radius);
-                                ctx.arcTo(tileX, tileY + tileH, tileX, tileY, radius);
-                                ctx.arcTo(tileX, tileY, tileX + tileW, tileY, radius);
-                                ctx.closePath();
-                                ctx.fill();
+                                if (hasLetter) {
+                                    // Draw tile background
+                                    ctx.fillStyle = "#F9E2AF"; // Beige
+                                    // Rounded rectangle drawing
+                                    var tileX = x + 1;
+                                    var tileY = y + 1;
+                                    var tileW = gridContainer.cellSize - 2;
+                                    var tileH = gridContainer.cellSize - 2;
+                                    var radius = 6;
+                                    ctx.beginPath();
+                                    ctx.moveTo(tileX + radius, tileY);
+                                    ctx.arcTo(tileX + tileW, tileY, tileX + tileW, tileY + tileH, radius);
+                                    ctx.arcTo(tileX + tileW, tileY + tileH, tileX, tileY + tileH, radius);
+                                    ctx.arcTo(tileX, tileY + tileH, tileX, tileY, radius);
+                                    ctx.arcTo(tileX, tileY, tileX + tileW, tileY, radius);
+                                    ctx.closePath();
+                                    ctx.fill();
 
-                                if (style.text !== "") {
-                                    ctx.font = "bold " + (gridContainer.cellSize * 0.35) + "px 'Clear Sans'";
-                                    ctx.fillStyle = style.textColor;
+                                    // Draw letter
+                                    ctx.font = "900 " + (modelData.isBlank ? gridContainer.cellSize * 0.4 : gridContainer.cellSize * 0.5) + "px 'Clear Sans'";
+                                    ctx.fillStyle = "#1E1E2E";
                                     ctx.textAlign = "center";
                                     ctx.textBaseline = "middle";
-                                    ctx.globalAlpha = 0.75;
-                                    ctx.fillText(style.text, x + gridContainer.cellSize / 2, y + gridContainer.cellSize / 2);
-                                    ctx.globalAlpha = 1.0;
+                                    var letterText = modelData.isBlank ? modelData.letter.toUpperCase() : modelData.letter;
+                                    ctx.fillText(letterText, x + gridContainer.cellSize / 2, y + gridContainer.cellSize / 2);
+
+                                    // Draw score
+                                    if (modelData.score > 0) {
+                                        ctx.font = (gridContainer.cellSize * 0.25) + "px 'Clear Sans'";
+                                        ctx.textAlign = "right";
+                                        ctx.textBaseline = "bottom";
+                                        ctx.fillText(modelData.score, x + gridContainer.cellSize - 3, y + gridContainer.cellSize - 2);
+                                    }
+
+                                    // Draw blank border
+                                    if (modelData.isBlank) {
+                                        ctx.strokeStyle = "black";
+                                        ctx.lineWidth = 1;
+                                        ctx.strokeRect(x + gridContainer.cellSize * 0.25, y + gridContainer.cellSize * 0.25, gridContainer.cellSize * 0.5, gridContainer.cellSize * 0.5);
+                                    }
+                                } else {
+                                    // Draw bonus square (rounded rectangle)
+                                    var style = gridContainer.bonusStyles[modelData.letterMultiplier + "," + modelData.wordMultiplier];
+                                    ctx.fillStyle = style.color;
+                                    
+                                    var tileX = x + 1;
+                                    var tileY = y + 1;
+                                    var tileW = gridContainer.cellSize - 2;
+                                    var tileH = gridContainer.cellSize - 2;
+                                    var radius = 6; // Same radius as tiles
+                                    ctx.beginPath();
+                                    ctx.moveTo(tileX + radius, tileY);
+                                    ctx.arcTo(tileX + tileW, tileY, tileX + tileW, tileY + tileH, radius);
+                                    ctx.arcTo(tileX + tileW, tileY + tileH, tileX, tileY + tileH, radius);
+                                    ctx.arcTo(tileX, tileY + tileH, tileX, tileY, radius);
+                                    ctx.arcTo(tileX, tileY, tileX + tileW, tileY, radius);
+                                    ctx.closePath();
+                                    ctx.fill();
+
+                                    if (style.text !== "") {
+                                        ctx.font = "bold " + (gridContainer.cellSize * 0.35) + "px 'Clear Sans'";
+                                        ctx.fillStyle = style.textColor;
+                                        ctx.textAlign = "center";
+                                        ctx.textBaseline = "middle";
+                                        ctx.globalAlpha = 0.75;
+                                        ctx.fillText(style.text, x + gridContainer.cellSize / 2, y + gridContainer.cellSize / 2);
+                                        ctx.globalAlpha = 1.0;
+                                    }
                                 }
                             }
+                            
+                            // Main grid lines (draw after bonus squares)
+                            ctx.strokeStyle = "#1E1E2E";
+                            ctx.lineWidth = 1;
+                            for (var j = 1; j < 15; j++) {
+                                ctx.beginPath();
+                                ctx.moveTo(j * gridContainer.cellSize, 0);
+                                ctx.lineTo(j * gridContainer.cellSize, height);
+                                ctx.stroke();
+                                ctx.beginPath();
+                                ctx.moveTo(0, j * gridContainer.cellSize);
+                                ctx.lineTo(width, j * gridContainer.cellSize);
+                                ctx.stroke();
+                            }
+
+                            ctx.restore();
                         }
                         
-                        // Main grid lines (draw after bonus squares)
-                        ctx.strokeStyle = "#1E1E2E";
-                        ctx.lineWidth = 1;
-                        for (var j = 1; j < 15; j++) {
-                            ctx.beginPath();
-                            ctx.moveTo(j * gridContainer.cellSize, 0);
-                            ctx.lineTo(j * gridContainer.cellSize, height);
-                            ctx.stroke();
-                            ctx.beginPath();
-                            ctx.moveTo(0, j * gridContainer.cellSize);
-                            ctx.lineTo(width, j * gridContainer.cellSize);
-                            ctx.stroke();
+                        // Request a repaint whenever the size changes or the board model is reset
+                        onWidthChanged: requestPaint()
+                        onHeightChanged: requestPaint()
+                        Connections {
+                            target: gameModel
+                            function onBoardChanged() { boardCanvas.requestPaint(); }
                         }
-
-                        ctx.restore();
-                    }
-                    
-                    // Request a repaint whenever the size changes or the board model is reset
-                    onWidthChanged: requestPaint()
-                    onHeightChanged: requestPaint()
-                    Connections {
-                        target: gameModel
-                        function onBoardChanged() { boardCanvas.requestPaint(); }
                     }
                 }
             }
-        }
 
-        // Right Panel: Info & Controls
-        ColumnLayout {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            spacing: 20
-
-            // Scoreboard
-            RowLayout {
+            // Rack
+            RackView {
                 Layout.alignment: Qt.AlignHCenter
-                spacing: 40
-                
-                ColumnLayout {
-                    Text { text: gameModel.player1Name; color: "#CDD6F4"; font.pixelSize: 24 }
-                    Text { text: gameModel.player1Score; color: "#A6ADC8"; font.pixelSize: 36; font.bold: true }
-                }
-                
-                Text { text: "VS"; color: "#585B70"; font.pixelSize: 24 }
-                
-                ColumnLayout {
-                    Text { text: gameModel.player2Name; color: "#CDD6F4"; font.pixelSize: 24 }
-                    Text { text: gameModel.player2Score; color: "#A6ADC8"; font.pixelSize: 36; font.bold: true }
-                }
+                rack: gameModel.currentRack
             }
 
             // Controls
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
+                spacing: 20
+                
                 Button { 
                     text: "Previous" 
                     onClicked: gameModel.previous()
@@ -259,11 +251,84 @@ ApplicationWindow {
                 Text { 
                     text: gameModel.currentEventIndex + " / " + gameModel.totalEvents 
                     color: "#CDD6F4"
+                    font.pixelSize: 16
                 }
                 Button { 
                     text: "Next" 
                     onClicked: gameModel.next()
                     enabled: gameModel.currentEventIndex < gameModel.totalEvents
+                }
+            }
+        }
+
+        // Right Column: Scoreboard
+        ColumnLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.alignment: Qt.AlignTop
+            spacing: 20
+
+            // Scoreboard
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 10
+                
+                // Player 1
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 1 // Equal weight
+                    spacing: 0
+                    
+                    Text { 
+                        text: gameModel.player1Name
+                        color: "#CDD6F4"
+                        font.pixelSize: 24
+                        Layout.fillWidth: true
+                        horizontalAlignment: Text.AlignHCenter
+                        fontSizeMode: Text.HorizontalFit
+                        minimumPixelSize: 14
+                        elide: Text.ElideRight
+                    }
+                    Text { 
+                        text: gameModel.player1Score
+                        color: "#A6ADC8"
+                        font.pixelSize: 36
+                        font.bold: true 
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+                }
+                
+                // Separator (replacing "VS")
+                Rectangle {
+                    width: 1
+                    height: 40
+                    color: "#585B70"
+                    Layout.alignment: Qt.AlignVCenter
+                }
+                
+                // Player 2
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 1 // Equal weight
+                    spacing: 0
+
+                    Text { 
+                        text: gameModel.player2Name
+                        color: "#CDD6F4"
+                        font.pixelSize: 24
+                        Layout.fillWidth: true
+                        horizontalAlignment: Text.AlignHCenter
+                        fontSizeMode: Text.HorizontalFit
+                        minimumPixelSize: 14
+                        elide: Text.ElideRight
+                    }
+                    Text { 
+                        text: gameModel.player2Score
+                        color: "#A6ADC8"
+                        font.pixelSize: 36
+                        font.bold: true
+                        Layout.alignment: Qt.AlignHCenter
+                    }
                 }
             }
             
