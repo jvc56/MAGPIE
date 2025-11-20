@@ -244,6 +244,7 @@ ApplicationWindow {
             RackView {
                 Layout.alignment: Qt.AlignHCenter
                 rack: gameModel.currentRack
+                tileSize: gridContainer.cellSize
             }
 
             // Controls
@@ -298,10 +299,12 @@ ApplicationWindow {
                             anchors.fill: parent
                             spacing: 0
                             
-                            Text { 
+                            Text {
                                 text: gameModel.player1Name
                                 color: gameModel.playerOnTurnIndex === 0 ? "#CDD6F4" : "#7F849C"
                                 font.pixelSize: 24
+                                fontSizeMode: Text.Fit
+                                minimumPixelSize: 10
                                 Layout.fillWidth: true
                                 horizontalAlignment: Text.AlignHCenter
                                 font.bold: gameModel.playerOnTurnIndex === 0
@@ -339,6 +342,8 @@ ApplicationWindow {
                                 text: gameModel.player2Name
                                 color: gameModel.playerOnTurnIndex === 1 ? "#CDD6F4" : "#7F849C"
                                 font.pixelSize: 24
+                                fontSizeMode: Text.Fit
+                                minimumPixelSize: 10
                                 Layout.fillWidth: true
                                 horizontalAlignment: Text.AlignHCenter
                                 font.bold: gameModel.playerOnTurnIndex === 1
