@@ -62,6 +62,16 @@ ApplicationWindow {
                         onTriggered: gameModel.loadGameFromFile(modelData)
                     }
                 }
+                
+                MenuSeparator {
+                    visible: JSON.parse(appSettings.recentFilesJson).length > 0
+                }
+                
+                MenuItem {
+                    text: "Clear Recent Games"
+                    enabled: JSON.parse(appSettings.recentFilesJson).length > 0
+                    onTriggered: appSettings.recentFilesJson = "[]"
+                }
             }
             MenuSeparator {}
             MenuItem {
