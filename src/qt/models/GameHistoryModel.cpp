@@ -160,8 +160,7 @@ void GameHistoryModel::updateGameState()
                 if (isBlank) {
                     letterStr = letterStr.toUpper();
                 }
-                uint8_t unblanked_ml = ml & 0x7F; // Remove blank bit
-                score = bridge_get_letter_score(m_game, unblanked_ml);
+                score = bridge_get_letter_score(m_game, ml);
             }
 
             uint8_t bonusRaw = bridge_get_board_bonus(m_game, r, c);
