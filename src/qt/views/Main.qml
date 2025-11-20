@@ -158,29 +158,93 @@ ApplicationWindow {
                                         ctx.closePath();
                                         ctx.fill();
 
-                                        // Draw letter
-                                        ctx.font = "900 " + (modelData.isBlank ? gridContainer.cellSize * 0.4 : gridContainer.cellSize * 0.5) + "px 'Clear Sans'";
-                                        ctx.fillStyle = "#1E1E2E";
-                                        ctx.textAlign = "center";
-                                        ctx.textBaseline = "middle";
-                                        var letterText = modelData.isBlank ? modelData.letter.toUpperCase() : modelData.letter;
-                                        ctx.fillText(letterText, x + gridContainer.cellSize / 2, y + gridContainer.cellSize / 2);
+                                                                                                                // Draw letter
 
-                                        // Draw score
-                                        if (modelData.score > 0) {
-                                            ctx.font = (gridContainer.cellSize * 0.25) + "px 'Clear Sans'";
-                                            ctx.textAlign = "right";
-                                            ctx.textBaseline = "bottom";
-                                            ctx.fillText(modelData.score, x + gridContainer.cellSize - 3, y + gridContainer.cellSize - 2);
-                                        }
+                                                                                                                ctx.font = "900 " + (modelData.isBlank ? gridContainer.cellSize * 0.4 : gridContainer.cellSize * 0.5) + "px 'Clear Sans'";
 
-                                        // Draw blank border
-                                        if (modelData.isBlank) {
-                                            ctx.strokeStyle = "black";
-                                            ctx.lineWidth = 1;
-                                            ctx.strokeRect(x + gridContainer.cellSize * 0.25, y + gridContainer.cellSize * 0.25, gridContainer.cellSize * 0.5, gridContainer.cellSize * 0.5);
-                                        }
-                                    } else {
+                                                                                                                ctx.fillStyle = "#1E1E2E";
+
+                                                                                                                ctx.textAlign = "center";
+
+                                                                                                                ctx.textBaseline = "middle";
+
+                                                                                                                var letterText = modelData.isBlank ? modelData.letter.toUpperCase() : modelData.letter;
+
+                                                                                                                ctx.fillText(letterText, x + gridContainer.cellSize / 2, y + gridContainer.cellSize * 0.52);
+
+                                                                                                                
+
+                                                                                                                                                // Draw score
+
+                                                                                                                
+
+                                                                                                                                                if (modelData.score > 0) {
+
+                                                                                                                
+
+                                                                                                                                                    var scoreStr = modelData.score.toString();
+
+                                                                                                                
+
+                                                                                                                                                    var scoreFontSize = scoreStr.length > 1 ? (gridContainer.cellSize * 0.22) : (gridContainer.cellSize * 0.25);
+
+                                                                                                                
+
+                                                                                                                                                    ctx.font = scoreFontSize + "px 'Clear Sans'";
+
+                                                                                                                
+
+                                                                                                                                                    ctx.textAlign = "right";
+
+                                                                                                                
+
+                                                                                                                                                                                        ctx.textBaseline = "bottom";
+
+                                                                                                                
+
+                                                                                                                                                                                        
+
+                                                                                                                
+
+                                                                                                                                                                                        var rightOffset = scoreStr.length > 1 ? 0.95 : 0.88;
+
+                                                                                                                
+
+                                                                                                                                                                                        
+
+                                                                                                                
+
+                                                                                                                                                                                        // Move up to 0.90 to match RackView appearance
+
+                                                                                                                
+
+                                                                                                                                                                                        ctx.fillText(modelData.score, x + gridContainer.cellSize * rightOffset, y + gridContainer.cellSize * 0.90);
+
+                                                                                                                
+
+                                                                                                                                                                                    }
+
+                                                                                                                
+
+                                                                                                                // Draw blank border
+
+                                                                                                                if (modelData.isBlank) {
+
+                                                                                                                    ctx.strokeStyle = "black";
+
+                                                                                                                    ctx.lineWidth = 1;
+
+                                                                                                                    // Center around the new letter vertical position (0.52)
+
+                                                                                                                    var blankSize = gridContainer.cellSize * 0.5;
+
+                                                                                                                    var blankX = x + (gridContainer.cellSize - blankSize) / 2;
+
+                                                                                                                    var blankY = y + gridContainer.cellSize * 0.52 - blankSize / 2;
+
+                                                                                                                    ctx.strokeRect(blankX, blankY, blankSize, blankSize);
+
+                                                                                                                }                                    } else {
                                         // Draw bonus square (rounded rectangle)
                                         var style = gridContainer.bonusStyles[modelData.letterMultiplier + "," + modelData.wordMultiplier];
                                         ctx.fillStyle = style.color;
