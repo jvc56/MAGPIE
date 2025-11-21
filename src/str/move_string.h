@@ -35,4 +35,8 @@ char *move_list_get_string(const MoveList *move_list, const Board *board,
                            const LetterDistribution *ld,
                            int max_num_display_plays, bool use_ucgi_format);
 
+void string_builder_add_human_readable_move(StringBuilder *move_string_builder,
+                                            const Move *move,
+                                            const Board *board,
+                                            const LetterDistribution *ld);
 #endif

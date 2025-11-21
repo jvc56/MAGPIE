@@ -329,3 +329,10 @@ char *move_list_get_string(const MoveList *move_list, const Board *board,
   string_builder_destroy(sb);
   return move_list_string;
 }
+
+void string_builder_add_human_readable_move(StringBuilder *string_builder,
+                                            const Move *move,
+                                            const Board *board,
+                                            const LetterDistribution *ld) {
+  string_builder_add_move(string_builder, board, move, ld, false);
+}

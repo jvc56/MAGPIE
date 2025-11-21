@@ -52,6 +52,18 @@ bool bridge_is_blank(uint8_t ml);
 // Returns a newly allocated string for the current player's rack. Caller must free.
 char* bridge_get_current_rack(BridgeGame* game);
 
+// History Details
+// Populates the provided pointers with details about the event at index.
+// move_str and rack_str are newly allocated strings that caller must free.
+void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index, 
+                              int* player_index, int* type, char** move_str, char** rack_str, 
+                              int* score, int* cumulative_score);
+
+// Populates rows and cols arrays with the coordinates of tiles placed in the event at index.
+// Returns the number of tiles found (up to max_count).
+// Pass NULL for rows/cols to just query the count.
+int bridge_get_last_move_tiles(BridgeGameHistory* gh, int index, int* rows, int* cols, int max_count);
+
 #ifdef __cplusplus
 }
 #endif

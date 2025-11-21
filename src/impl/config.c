@@ -3134,8 +3134,18 @@ void config_add_game_event(Config *config, const int player_index,
 
     game_event_set_player_index(game_event, player_index);
     game_event_set_type(game_event, game_event_type);
-    game_event_set_cgp_move_string(
-        game_event, string_duplicate_allow_null(ucgi_move_string));
+                                    if (game_event_type == GAME_EVENT_TILE_PLACEMENT_MOVE || 
+        game_event_type == GAME_EVENT_EXCHANGE || 
+        game_event_type == GAME_EVENT_PASS) {
+        StringBuilder *sb = string_builder_create();
+        string_builder_add_human_readable_move(sb, move, game_get_board(config->game), config->ld);
+        // string_builder_dump allocates new string and we pass ownership to game_event
+        game_event_set_cgp_move_string(game_event, string_builder_dump(sb, NULL));
+        string_builder_destroy(sb);
+    } else {
+        game_event_set_cgp_move_string(
+            game_event, string_duplicate_allow_null(ucgi_move_string));
+    }
     game_event_set_score_adjustment(game_event, score_adjustment);
     game_event_set_cumulative_score(game_event, cumulative_score);
     game_event_set_move_score(game_event, move_score);

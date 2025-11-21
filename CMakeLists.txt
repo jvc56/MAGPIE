@@ -39,6 +39,10 @@ set(QT_SOURCES
     src/qt/models/GameHistoryModel.h
     src/qt/models/BoardSquare.cpp
     src/qt/models/BoardSquare.h
+    src/qt/models/HistoryItem.cpp
+    src/qt/models/HistoryItem.h
+    src/qt/models/ScoreLineItem.cpp
+    src/qt/models/ScoreLineItem.h
     src/qt/bridge/qt_bridge.c
     src/qt/bridge/qt_bridge.h
 )
