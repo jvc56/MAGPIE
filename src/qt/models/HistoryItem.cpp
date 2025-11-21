@@ -2,7 +2,7 @@
 #include "ScoreLineItem.h" // Renamed from MoveLineItem
 
 HistoryItem::HistoryItem(int playerIndex, int type, const QList<QObject*> &scoreLines, const QString &rackString, int score, int cumulativeScore, int eventIndex,
-                         const QString &unseenTiles, int bagCount, int vowelCount, int consonantCount,
+                         const QString &unseenTiles, int bagCount, int vowelCount, int consonantCount, int blankCount,
                          QObject *parent)
     : QObject(parent),
       m_playerIndex(playerIndex),
@@ -15,7 +15,8 @@ HistoryItem::HistoryItem(int playerIndex, int type, const QList<QObject*> &score
       m_unseenTiles(unseenTiles),
       m_bagCount(bagCount),
       m_vowelCount(vowelCount),
-      m_consonantCount(consonantCount)
+      m_consonantCount(consonantCount),
+      m_blankCount(blankCount)
 {
     // Take ownership of score lines
     for (QObject *obj : m_scoreLines) {
@@ -76,4 +77,9 @@ int HistoryItem::vowelCount() const
 int HistoryItem::consonantCount() const
 {
     return m_consonantCount;
+}
+
+int HistoryItem::blankCount() const
+{
+    return m_blankCount;
 }

@@ -24,6 +24,8 @@ struct _BridgeGame {
     LetterDistribution *ld;
     PlayersData *pd;
     BoardLayout *bl;
+    int bingo_bonus;
+    int game_variant;
 };
 
 // Cast opaque handles to actual types
@@ -158,13 +160,16 @@ BridgeGame* bridge_game_create_from_history(BridgeGameHistory* gh, const char* d
         return NULL;
     }
     
+    b_game->bingo_bonus = 50;
+    b_game->game_variant = (int)game_history_get_game_variant(TO_GH(gh));
+
     GameArgs gameArgs;
     memset(&gameArgs, 0, sizeof(GameArgs));
     gameArgs.players_data = b_game->pd;
     gameArgs.board_layout = b_game->bl;
     gameArgs.ld = b_game->ld;
-    gameArgs.bingo_bonus = 50;
-    gameArgs.game_variant = game_history_get_game_variant(TO_GH(gh));
+    gameArgs.bingo_bonus = b_game->bingo_bonus;
+    gameArgs.game_variant = (game_variant_t)b_game->game_variant;
 
     b_game->game = game_create(&gameArgs);
     
@@ -184,7 +189,21 @@ void bridge_game_destroy(BridgeGame* game) {
 void bridge_game_play_to_index(BridgeGameHistory* gh, BridgeGame* game, int index) {
     if (!game) return;
     ErrorStack *err = error_stack_create();
-    game_reset(TO_GAME(game));
+    
+    if (game->game) {
+        game_destroy(game->game);
+    }
+
+    GameArgs gameArgs;
+    memset(&gameArgs, 0, sizeof(GameArgs));
+    gameArgs.players_data = game->pd;
+    gameArgs.board_layout = game->bl;
+    gameArgs.ld = game->ld;
+    gameArgs.bingo_bonus = game->bingo_bonus;
+    gameArgs.game_variant = (game_variant_t)game->game_variant;
+
+    game->game = game_create(&gameArgs);
+
     game_play_n_events(TO_GH(gh), TO_GAME(game), index, true, err);
     error_stack_destroy(err);
 }
@@ -276,12 +295,51 @@ char* bridge_get_current_rack(BridgeGame* game) {
     return internal_format_rack(r, ld);
 }
 
+// Get number of tiles in bag
 int bridge_get_bag_count(BridgeGame* game) {
     if (!game) return 0;
-    return bag_get_letters(game_get_bag(TO_GAME(game)));
+    Bag *bag = game_get_bag(TO_GAME(game));
+    int actual_bag = bag_get_letters(bag);
+    
+    // Correction for incomplete racks in annotated games.
+    // Ghost tiles (tiles belonging to opponent but not in their rack) reside in the bag.
+    // We subtract them to show the "True" bag count.
+    
+    int playerIdx = game_get_player_on_turn_index(TO_GAME(game));
+    int opponentIdx = 1 - playerIdx;
+    Player *p1 = game_get_player(TO_GAME(game), playerIdx);
+    Player *p2 = game_get_player(TO_GAME(game), opponentIdx);
+    Board *board = game_get_board(TO_GAME(game));
+    const LetterDistribution *ld = game_get_ld(TO_GAME(game));
+    
+    int total_tiles = ld_get_total_tiles(ld);
+    int tiles_on_board = board_get_tiles_played(board);
+    int p1_tiles = rack_get_total_letters(player_get_rack(p1));
+    int p2_tiles = rack_get_total_letters(player_get_rack(p2)); // Actual opponent rack
+    
+    int remaining_off_board_p1 = total_tiles - tiles_on_board - p1_tiles;
+    
+    // Expected opponent tiles is usually 7, but capped by what's remaining
+    int expected_p2_tiles = 7;
+    if (expected_p2_tiles > remaining_off_board_p1) {
+        expected_p2_tiles = remaining_off_board_p1;
+    }
+    
+    int missing_p2_tiles = expected_p2_tiles - p2_tiles;
+    if (missing_p2_tiles < 0) missing_p2_tiles = 0;
+    
+    int corrected_bag = actual_bag - missing_p2_tiles;
+    if (corrected_bag < 0) corrected_bag = 0;
+    
+    printf("BAG_DEBUG: Actual=%d, P1=%d, P2_Actual=%d, Board=%d, Total=%d, Expected_P2=%d, Missing_P2=%d, Corrected=%d\n", 
+           actual_bag, p1_tiles, p2_tiles, tiles_on_board, total_tiles, expected_p2_tiles, missing_p2_tiles, corrected_bag);
+
+    return corrected_bag;
 }
 
-void bridge_get_unseen_tiles(BridgeGame* game, char** tiles, int* vowel_count, int* consonant_count) {
+// Get unseen tiles (bag + opponent rack)
+// Returns string in *tiles (caller must free), and counts
+void bridge_get_unseen_tiles(BridgeGame* game, char** tiles, int* vowel_count, int* consonant_count, int* blank_count) {
     if (!game) return;
     
     int playerIdx = game_get_player_on_turn_index(TO_GAME(game));
@@ -291,7 +349,8 @@ void bridge_get_unseen_tiles(BridgeGame* game, char** tiles, int* vowel_count, i
     Player *opponent = game_get_player(TO_GAME(game), opponentIdx);
     Rack *opponentRack = player_get_rack(opponent);
     const LetterDistribution *ld = game_get_ld(TO_GAME(game));
-    
+    Board *board = game_get_board(TO_GAME(game));
+
     int unseen_counts[MAX_ALPHABET_SIZE];
     memset(unseen_counts, 0, sizeof(unseen_counts));
     
@@ -306,26 +365,23 @@ void bridge_get_unseen_tiles(BridgeGame* game, char** tiles, int* vowel_count, i
     StringBuilder *sb = string_builder_create();
     int v = 0;
     int c = 0;
+    int b = 0;
     
     for (int i = 0; i < ld_get_size(ld); i++) {
         if (unseen_counts[i] > 0) {
-            if (ld_get_is_vowel(ld, i)) {
+            // Check if blank
+            if (bridge_is_blank((uint8_t)i) || i == BLANK_MACHINE_LETTER) {
+                b += unseen_counts[i];
+            }
+            else if (ld_get_is_vowel(ld, i)) {
                 v += unseen_counts[i];
             } else {
-                // Assume consonant if not vowel and not blank (usually index 0 or ? string)
-                // We check if it is the blank tile by checking if score is 0 and it's not a vowel?
-                // Better: check if it is BLANK_MACHINE_LETTER
-                if (i != BLANK_MACHINE_LETTER) {
-                    c += unseen_counts[i];
-                }
+                c += unseen_counts[i];
             }
             
             char *hl = ld_ml_to_hl(ld, i);
             for (int k = 0; k < unseen_counts[i]; k++) {
                 string_builder_add_string(sb, hl);
-                // Add a space between different letter groups? No, usually "AAAB..."
-                // But user screenshot has spaces. "? AAAAA D EEE..."
-                // We can add space after each group.
             }
             free(hl);
             
@@ -334,10 +390,28 @@ void bridge_get_unseen_tiles(BridgeGame* game, char** tiles, int* vowel_count, i
     }
     
     if (tiles) *tiles = string_duplicate(string_builder_peek(sb));
+    string_builder_destroy(sb);
+
+    // Invariant Calculation for Unknowns
+    int total_tiles = ld_get_total_tiles(ld);
+    int tiles_on_board = board_get_tiles_played(board);
+    int p1_tiles = rack_get_total_letters(player_get_rack(game_get_player(TO_GAME(game), playerIdx)));
+    int bag_tiles = bag_get_letters(bag);
+    int opp_tiles = rack_get_total_letters(opponentRack);
+
+    int true_unseen = total_tiles - tiles_on_board - p1_tiles;
+    int visible_unseen = bag_tiles + opp_tiles;
+    int unknown = true_unseen - visible_unseen;
+    
+    if (unknown < 0) unknown = 0; 
+    
+    printf("UNSEEN_DEBUG: Total=%d, Board=%d, P1=%d, Bag=%d, Opp=%d, True_Unseen=%d, Visible=%d, Unknown=%d\n",
+           total_tiles, tiles_on_board, p1_tiles, bag_tiles, opp_tiles, true_unseen, visible_unseen, unknown);
+
     if (vowel_count) *vowel_count = v;
     if (consonant_count) *consonant_count = c;
-    
-    string_builder_destroy(sb);
+    if (blank_count) *blank_count = b + unknown; 
+
 }
 
 void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index,
@@ -377,19 +451,9 @@ void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index
                 const LetterDistribution *ld = game_get_ld(temp_game);
 
                 StringBuilder *sb = string_builder_create();
-                string_builder_add_move(sb, board, move, ld);
+                string_builder_add_human_readable_move(sb, move, board, ld);
                 
-                // Get the string and remove trailing score
-                const char *full_str = string_builder_peek(sb);
-                // Find last space (before score) and truncate there
-                // Format is typically "COORDS WORD SCORE" e.g. "8H QI 11"
-                char *result = string_duplicate(full_str);
-                char *last_space = strrchr(result, ' ');
-                if (last_space && (last_space - result > 0)) {
-                    *last_space = '\0';
-                }
-                human_readable = result;
-                
+                human_readable = string_duplicate(string_builder_peek(sb));
                 string_builder_destroy(sb);
             }
         }
