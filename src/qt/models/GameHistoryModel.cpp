@@ -211,7 +211,12 @@ void GameHistoryModel::updateHistory()
         if (current.valid && current.playerIndex == playerIndex && isSecondary) {
             // Merge: append new ScoreLineItem
             current.scoreLines.append(new ScoreLineItem(moveText, formattedScore, type));
-            current.rackStr = rackText; // Update rack to latest state
+            
+            // Update rack to latest state, UNLESS it's end rack points (which shows opponent's tiles)
+            if (type != GAME_EVENT_END_RACK_POINTS) {
+                current.rackStr = rackText;
+            }
+            
             current.totalTurnScore += turnScore; // Sum scores
             current.cumulativeScore = cumulativeScore;
             current.eventIndex = i; // Last event index in this merged item
