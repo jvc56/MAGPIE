@@ -649,55 +649,73 @@ ApplicationWindow {
                                 anchors.fill: parent
                                 anchors.margins: 8
                                 
-                                                                ColumnLayout {
+                                                                                                ColumnLayout {
                                 
-                                                                    anchors.left: parent.left
+                                                                                                    anchors.left: parent.left
                                 
-                                                                    anchors.verticalCenter: parent.verticalCenter
+                                                                                                    anchors.verticalCenter: parent.verticalCenter
                                 
-                                                                    spacing: 2 // Reduced spacing
+                                                                                                    spacing: 2 // Spacing between move lines
                                 
-                                                                    
+                                                                                                    
                                 
-                                                                                                                                            Text { 
+                                                                                                    Repeater {
                                 
-                                                                    
+                                                                                                        model: model.modelData.scoreLines // Iterate over scoreLines
                                 
-                                                                                                                                                text: model.modelData.moveString
+                                                                                                        delegate: RowLayout {
                                 
-                                                                    
+                                                                                                            spacing: 4 // Space between move part and score part
                                 
-                                                                                                                                                color: "#CDD6F4"
+                                                                                                            
                                 
-                                                                    
+                                                                                                            Text { 
                                 
-                                                                                                                                                font.pixelSize: 14
+                                                                                                                text: modelData.text
                                 
-                                                                    
+                                                                                                                color: "#CDD6F4"
                                 
-                                                                                                                                                textFormat: Text.StyledText
+                                                                                                                // Apply bold only for primary moves (TILE, EXCHANGE, PASS)
                                 
-                                                                    
+                                                                                                                font.bold: modelData.type == 1 || modelData.type == 3 || modelData.type == 5 // Corresponding enum values
                                 
-                                                                                                                                                lineHeight: 0.8
+                                                                                                                font.pixelSize: 14
                                 
-                                                                    
+                                                                                                                Layout.alignment: Qt.AlignVCenter
                                 
-                                                                                                                                            }
+                                                                                                            }
                                 
-                                                                    Text { 
+                                                                                                            Text { 
                                 
-                                                                        text: model.modelData.rackString
+                                                                                                                text: modelData.scoreText
                                 
-                                                                        color: "#A6ADC8"
+                                                                                                                color: "#CDD6F4" // Using same color, but can be customized
                                 
-                                                                        font.family: "Consolas"
+                                                                                                                font.pixelSize: 10 // Smaller font size
                                 
-                                                                        font.pixelSize: 12
+                                                                                                                font.bold: false
                                 
-                                                                    }
+                                                                                                                Layout.alignment: Qt.AlignVCenter
                                 
-                                                                }
+                                                                                                            }
+                                
+                                                                                                        }
+                                
+                                                                                                    }
+                                
+                                                                                                    Text { 
+                                
+                                                                                                        text: model.modelData.rackString
+                                
+                                                                                                        color: "#A6ADC8"
+                                
+                                                                                                        font.family: "Consolas"
+                                
+                                                                                                        font.pixelSize: 12
+                                
+                                                                                                    }
+                                
+                                                                                                }
                                 
                                 Text {
                                     text: model.modelData.cumulativeScore

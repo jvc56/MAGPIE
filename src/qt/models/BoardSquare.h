@@ -12,15 +12,17 @@ class BoardSquare : public QObject
     Q_PROPERTY(bool isBlank READ isBlank CONSTANT)
     Q_PROPERTY(int letterMultiplier READ letterMultiplier CONSTANT)
     Q_PROPERTY(int wordMultiplier READ wordMultiplier CONSTANT)
+    Q_PROPERTY(bool isLastMove READ isLastMove CONSTANT)
 
 public:
-    explicit BoardSquare(const QString &letter, int score, bool isBlank, int letterMultiplier, int wordMultiplier, QObject *parent = nullptr);
+    explicit BoardSquare(const QString &letter, int score, bool isBlank, int letterMultiplier, int wordMultiplier, bool isLastMove, QObject *parent = nullptr);
 
     QString letter() const;
     int score() const;
     bool isBlank() const;
     int letterMultiplier() const;
     int wordMultiplier() const;
+    bool isLastMove() const;
 
 private:
     QString m_letter;
@@ -28,6 +30,7 @@ private:
     bool m_isBlank;
     int m_letterMultiplier;
     int m_wordMultiplier;
+    bool m_isLastMove;
 };
 
 #endif // BOARDSQUARE_H

@@ -1,12 +1,13 @@
 #include "BoardSquare.h"
 
-BoardSquare::BoardSquare(const QString &letter, int score, bool isBlank, int letterMultiplier, int wordMultiplier, QObject *parent)
+BoardSquare::BoardSquare(const QString &letter, int score, bool isBlank, int letterMultiplier, int wordMultiplier, bool isLastMove, QObject *parent)
     : QObject{parent},
       m_letter(letter),
       m_score(score),
       m_isBlank(isBlank),
       m_letterMultiplier(letterMultiplier),
-      m_wordMultiplier(wordMultiplier)
+      m_wordMultiplier(wordMultiplier),
+      m_isLastMove(isLastMove)
 {
 }
 
@@ -33,4 +34,9 @@ int BoardSquare::letterMultiplier() const
 int BoardSquare::wordMultiplier() const
 {
     return m_wordMultiplier;
+}
+
+bool BoardSquare::isLastMove() const
+{
+    return m_isLastMove;
 }

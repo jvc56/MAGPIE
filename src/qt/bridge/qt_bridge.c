@@ -1,12 +1,15 @@
 #include "qt_bridge.h"
 
-#include "../../ent/equity.h"
 #include "../../ent/game_history.h"
 #include "../../ent/game.h"
 #include "../../ent/board.h"
 #include "../../ent/board_layout.h"
 #include "../../ent/letter_distribution.h"
 #include "../../ent/players_data.h"
+#include "../../ent/validated_move.h"
+#include "../../ent/move.h"
+#include "../../ent/rack.h"
+#include "../../str/move_string.h"
 #include "../../impl/gcg.h"
 #include "../../impl/gameplay.h"
 #include "../../util/io_util.h"
@@ -15,17 +18,16 @@
 #include <stdlib.h>
 
 // Wrapper struct to manage lifetime of game and its dependencies
-typedef struct _BridgeGame {
+struct _BridgeGame {
     Game *game;
     LetterDistribution *ld;
     PlayersData *pd;
     BoardLayout *bl;
-} _BridgeGame;
-
+};
 
 // Cast opaque handles to actual types
 #define TO_GH(x) ((GameHistory*)(x))
-#define TO_GAME(x) (((_BridgeGame*)(x))->game)
+#define TO_GAME(x) (((BridgeGame*)(x))->game)
 
 BridgeGameHistory* bridge_game_history_create(void) {
     return (BridgeGameHistory*)game_history_create();
@@ -123,7 +125,7 @@ int bridge_load_gcg(BridgeGameHistory* gh, const char* gcg_content, const char* 
 
 BridgeGame* bridge_game_create_from_history(BridgeGameHistory* gh, const char* data_path) {
     ErrorStack *err = error_stack_create();
-    _BridgeGame *b_game = calloc(1, sizeof(_BridgeGame));
+    BridgeGame *b_game = calloc(1, sizeof(BridgeGame));
 
     const char *lexiconName = game_history_get_lexicon_name(TO_GH(gh));
     if (!lexiconName) lexiconName = "CSW24"; // Default lexicon
@@ -131,7 +133,7 @@ BridgeGame* bridge_game_create_from_history(BridgeGameHistory* gh, const char* d
     
     b_game->ld = ld_create(data_path, ldName ? ldName : "CSW24", err);
     if (!error_stack_is_empty(err)) {
-        bridge_game_destroy((BridgeGame*)b_game);
+        bridge_game_destroy(b_game);
         error_stack_destroy(err);
         return NULL;
     }
@@ -139,7 +141,7 @@ BridgeGame* bridge_game_create_from_history(BridgeGameHistory* gh, const char* d
     b_game->pd = players_data_create();
     players_data_set(b_game->pd, PLAYERS_DATA_TYPE_KWG, data_path, lexiconName, lexiconName, err);
     if (!error_stack_is_empty(err)) {
-        bridge_game_destroy((BridgeGame*)b_game);
+        bridge_game_destroy(b_game);
         error_stack_destroy(err);
         return NULL;
     }
@@ -150,7 +152,7 @@ BridgeGame* bridge_game_create_from_history(BridgeGameHistory* gh, const char* d
     b_game->bl = board_layout_create();
     board_layout_load(b_game->bl, data_path, layoutName, err);
     if (!error_stack_is_empty(err)) {
-        bridge_game_destroy((BridgeGame*)b_game);
+        bridge_game_destroy(b_game);
         error_stack_destroy(err);
         return NULL;
     }
@@ -166,17 +168,16 @@ BridgeGame* bridge_game_create_from_history(BridgeGameHistory* gh, const char* d
     b_game->game = game_create(&gameArgs);
     
     error_stack_destroy(err);
-    return (BridgeGame*)b_game;
+    return b_game;
 }
 
 void bridge_game_destroy(BridgeGame* game) {
     if (!game) return;
-    _BridgeGame *b_game = (_BridgeGame*)game;
-    if(b_game->game) game_destroy(b_game->game);
-    if(b_game->ld) ld_destroy(b_game->ld);
-    if(b_game->pd) players_data_destroy(b_game->pd);
-    if(b_game->bl) board_layout_destroy(b_game->bl);
-    free(b_game);
+    if(game->game) game_destroy(game->game);
+    if(game->ld) ld_destroy(game->ld);
+    if(game->pd) players_data_destroy(game->pd);
+    if(game->bl) board_layout_destroy(game->bl);
+    free(game);
 }
 
 void bridge_game_play_to_index(BridgeGameHistory* gh, BridgeGame* game, int index) {
@@ -271,4 +272,127 @@ char* bridge_get_current_rack(BridgeGame* game) {
     }
     
     return string_duplicate(buffer);
+}
+
+void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index, 
+                              int* player_index, int* type, char** move_str, char** rack_str, 
+                              int* score, int* cumulative_score) {
+    if (!gh || !game) return;
+    
+    GameEvent *event = game_history_get_event(TO_GH(gh), index);
+    if (!event) return;
+    
+    if (player_index) *player_index = game_event_get_player_index(event);
+    if (type) *type = (int)game_event_get_type(event);
+    if (score) *score = equity_to_int(game_event_get_move_score(event));
+    if (cumulative_score) *cumulative_score = equity_to_int(game_event_get_cumulative_score(event));
+    
+    if (move_str) {
+        char *human_readable = NULL;
+        
+        ValidatedMoves *vms = game_event_get_vms(event);
+        if (vms && validated_moves_get_number_of_moves(vms) > 0) {
+            const Move *move = validated_moves_get_move(vms, 0);
+            game_event_t type = move_get_type(move);
+            
+            if (type == GAME_EVENT_TILE_PLACEMENT_MOVE || 
+                type == GAME_EVENT_EXCHANGE || 
+                type == GAME_EVENT_PASS) {
+                
+                StringBuilder *sb = string_builder_create();
+                string_builder_add_human_readable_move(sb, move, game_get_board(TO_GAME(game)), game_get_ld(TO_GAME(game)));
+                human_readable = string_builder_dump(sb, NULL);
+                string_builder_destroy(sb);
+            }
+        }
+        
+        if (!human_readable) {
+            game_event_t type = game_event_get_type(event);
+            switch (type) {
+                case GAME_EVENT_CHALLENGE_BONUS:
+                    human_readable = string_duplicate("(challenge)");
+                    break;
+                case GAME_EVENT_PHONY_TILES_RETURNED:
+                    human_readable = string_duplicate("(phony)");
+                    break;
+                case GAME_EVENT_TIME_PENALTY:
+                    human_readable = string_duplicate("(time)");
+                    break;
+                case GAME_EVENT_END_RACK_POINTS:
+                case GAME_EVENT_END_RACK_PENALTY:
+                    human_readable = string_duplicate("(end rack)");
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        if (human_readable) {
+            *move_str = human_readable;
+        } else {
+            const char *s = game_event_get_cgp_move_string(event);
+            *move_str = s ? string_duplicate(s) : string_duplicate("");
+        }
+    }
+    
+    if (rack_str) {
+        const Rack *r = game_event_get_const_rack(event);
+        if (r) {
+            const LetterDistribution *ld = game_get_ld(TO_GAME(game));
+            char buffer[64] = {0}; 
+            int pos = 0;
+            for (int i = 0; i < ld_get_size(ld); i++) {
+                int count = rack_get_letter(r, i);
+                if (count > 0) {
+                    char *hl = ld_ml_to_hl(ld, i);
+                    for (int c = 0; c < count; c++) {
+                        if (pos + strlen(hl) < sizeof(buffer) - 1) {
+                            strcpy(buffer + pos, hl);
+                            pos += strlen(hl);
+                        }
+                    }
+                    free(hl);
+                }
+            }
+            *rack_str = string_duplicate(buffer);
+        } else {
+            *rack_str = string_duplicate("");
+        }
+    }
+}
+
+int bridge_get_last_move_tiles(BridgeGameHistory* gh, int index, int* rows, int* cols, int max_count) {
+    if (!gh) return 0;
+    
+    GameEvent *event = game_history_get_event(TO_GH(gh), index);
+    if (!event) return 0;
+    
+    ValidatedMoves *vms = game_event_get_vms(event);
+    if (!vms || validated_moves_get_number_of_moves(vms) == 0) return 0;
+    
+    const Move *move = validated_moves_get_move(vms, 0);
+    if (!move) return 0;
+    
+    if (move->move_type != GAME_EVENT_TILE_PLACEMENT_MOVE) return 0;
+    
+    int count = 0;
+    int r = move->row_start;
+    int c = move->col_start;
+    int ri = (move->dir == BOARD_VERTICAL_DIRECTION) ? 1 : 0;
+    int ci = (move->dir == BOARD_HORIZONTAL_DIRECTION) ? 1 : 0;
+    
+    for (int i = 0; i < move->tiles_length; i++) {
+        // Check if tile is placed. Assuming 0 means existing tile.
+        if (move->tiles[i] != 0) {
+            if (rows && cols && count < max_count) {
+                rows[count] = r;
+                cols[count] = c;
+            }
+            count++;
+        }
+        r += ri;
+        c += ci;
+    }
+    
+    return count;
 }

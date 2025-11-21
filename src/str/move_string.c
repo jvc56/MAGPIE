@@ -208,3 +208,74 @@ void string_builder_add_gcg_move(StringBuilder *move_string_builder,
   string_builder_add_formatted_string(move_string_builder, " +%d",
                                       equity_to_int(move_get_score(move)));
 }
+
+void string_builder_add_human_readable_move(StringBuilder *string_builder,
+                                            const Move *move,
+                                            const Board *board,
+                                            const LetterDistribution *ld) {
+  if (move_get_type(move) == GAME_EVENT_PASS) {
+    string_builder_add_string(string_builder, "pass");
+    return;
+  }
+
+  if (move_get_type(move) == GAME_EVENT_EXCHANGE) {
+    string_builder_add_string(string_builder, "(exch ");
+    for (int i = 0; i < move_get_tiles_played(move); i++) {
+      string_builder_add_user_visible_letter(string_builder, ld,
+                                             move_get_tile(move, i));
+    }
+    string_builder_add_string(string_builder, ")");
+    return;
+  }
+
+  if (board_is_dir_vertical(move_get_dir(move))) {
+    string_builder_add_char(string_builder,
+                            (char)(move_get_col_start(move) + 'A'));
+    string_builder_add_int(string_builder, move_get_row_start(move) + 1);
+  } else {
+    string_builder_add_int(string_builder, move_get_row_start(move) + 1);
+    string_builder_add_char(string_builder,
+                            (char)(move_get_col_start(move) + 'A'));
+  }
+
+  string_builder_add_spaces(string_builder, 1);
+  int current_row = move_get_row_start(move);
+  int current_col = move_get_col_start(move);
+  for (int i = 0; i < move_get_tiles_length(move); i++) {
+    MachineLetter tile = move_get_tile(move, i);
+    MachineLetter print_tile = tile;
+    if (tile == PLAYED_THROUGH_MARKER) {
+      if (board) {
+        print_tile = board_get_letter(board, current_row, current_col);
+      }
+      if (i == 0 && board) {
+        string_builder_add_string(string_builder, "(");
+      }
+    }
+
+    if (tile == PLAYED_THROUGH_MARKER && !board) {
+      string_builder_add_string(string_builder, ".");
+    } else {
+      string_builder_add_user_visible_letter(string_builder, ld, print_tile);
+    }
+
+    if (board && (tile == PLAYED_THROUGH_MARKER) &&
+        (i == move_get_tiles_length(move) - 1 ||
+         move_get_tile(move, i + 1) != PLAYED_THROUGH_MARKER)) {
+      string_builder_add_string(string_builder, ")");
+    }
+
+    if (board && (tile != PLAYED_THROUGH_MARKER) &&
+        (i + 1 < move_get_tiles_length(move)) &&
+        move_get_tile(move, i + 1) == PLAYED_THROUGH_MARKER) {
+      string_builder_add_string(string_builder, "(");
+    }
+
+    if (board_is_dir_vertical(move_get_dir(move))) {
+      current_row++;
+    } else {
+      current_col++;
+    }
+  }
+  // Score intentionally omitted
+}

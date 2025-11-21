@@ -159,11 +159,11 @@ void GameHistoryModel::updateHistory()
     struct ItemBuilder {
         int playerIndex;
         int type;
-        QString moveStr;
+        QList<QObject*> scoreLines; // List of ScoreLineItem*
         QString rackStr;
-        int turnScore;
+        int totalTurnScore; // Aggregated score for this merged entry
         int cumulativeScore;
-        int eventIndex;
+        int eventIndex; // Index of the last event in this merged item
         bool valid = false;
     } current;
 
@@ -172,12 +172,14 @@ void GameHistoryModel::updateHistory()
         m_historyCache.append(new HistoryItem(
             current.playerIndex, 
             current.type, 
-            current.moveStr, 
+            current.scoreLines, // Pass the list
             current.rackStr, 
-            current.turnScore, 
+            current.totalTurnScore, 
             current.cumulativeScore, 
             current.eventIndex
         ));
+        // Clear the list for next usage, but DO NOT delete the items as they are now owned by HistoryItem (conceptually)
+        current.scoreLines.clear();
         current.valid = false;
     };
 
@@ -188,76 +190,42 @@ void GameHistoryModel::updateHistory()
 
         bridge_get_event_details(m_gameHistory, m_game, i, &playerIndex, &type, &moveStrC, &rackStrC, &score, &cumulativeScore);
         
-        QString moveStr = QString::fromUtf8(moveStrC);
-        QString rackStr = QString::fromUtf8(rackStrC);
+        QString moveText = QString::fromUtf8(moveStrC);
+        QString rackText = QString::fromUtf8(rackStrC);
         if (moveStrC) free(moveStrC);
         if (rackStrC) free(rackStrC);
 
-                        int turnScore = cumulativeScore - lastScores[playerIndex];
+        int turnScore = cumulativeScore - lastScores[playerIndex];
+        lastScores[playerIndex] = cumulativeScore;
+        
+        QString formattedScore = QString("(%1%2)")
+            .arg(turnScore >= 0 ? "+" : "")
+            .arg(turnScore);
 
-                        lastScores[playerIndex] = cumulativeScore;
+        bool isSecondary = (type == GAME_EVENT_PHONY_TILES_RETURNED ||
+                            type == GAME_EVENT_CHALLENGE_BONUS ||
+                            type == GAME_EVENT_TIME_PENALTY ||
+                            type == GAME_EVENT_END_RACK_POINTS ||
+                            type == GAME_EVENT_END_RACK_PENALTY);
 
-                
-
-                        QString lineScore = QString(" <span style=\"font-size: 12px; font-weight: normal;\">(%1%2)</span>")
-
-                            .arg(turnScore >= 0 ? "+" : "")
-
-                            .arg(turnScore);
-
-                        
-
-                        // Wrap move string in bold for the main part
-
-                        QString line = QString("<b>%1</b>%2").arg(moveStr).arg(lineScore);
-
-                
-
-                        bool isSecondary = (type == GAME_EVENT_PHONY_TILES_RETURNED ||
-
-                                            type == GAME_EVENT_CHALLENGE_BONUS ||
-
-                                            type == GAME_EVENT_TIME_PENALTY ||
-
-                                            type == GAME_EVENT_END_RACK_POINTS ||
-
-                                            type == GAME_EVENT_END_RACK_PENALTY);
-
-                
-
-                        if (current.valid && current.playerIndex == playerIndex && isSecondary) {
-
-                            // Merge
-
-                            current.moveStr += "<br>" + line;
-
-                            current.rackStr = rackStr; // Update rack to latest state
-
-                            current.turnScore += turnScore;
-
-                            current.cumulativeScore = cumulativeScore;
-
-                        } else {
-
-                            flush();
-
-                            current.playerIndex = playerIndex;
-
-                            current.type = type;
-
-                            current.moveStr = line;
-
-                            current.rackStr = rackStr;
-
-                            current.turnScore = turnScore;
-
-                            current.cumulativeScore = cumulativeScore;
-
-                            current.eventIndex = i;
-
-                            current.valid = true;
-
-                        }
+        if (current.valid && current.playerIndex == playerIndex && isSecondary) {
+            // Merge: append new ScoreLineItem
+            current.scoreLines.append(new ScoreLineItem(moveText, formattedScore, type));
+            current.rackStr = rackText; // Update rack to latest state
+            current.totalTurnScore += turnScore; // Sum scores
+            current.cumulativeScore = cumulativeScore;
+            current.eventIndex = i; // Last event index in this merged item
+        } else {
+            flush(); // Flush previous item
+            current.playerIndex = playerIndex;
+            current.type = type; // Type of the primary event
+            current.scoreLines.append(new ScoreLineItem(moveText, formattedScore, type)); // Add first ScoreLineItem
+            current.rackStr = rackText;
+            current.totalTurnScore = turnScore;
+            current.cumulativeScore = cumulativeScore;
+            current.eventIndex = i;
+            current.valid = true;
+        }
     }
     flush(true);
     

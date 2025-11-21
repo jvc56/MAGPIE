@@ -18,4 +18,8 @@ void string_builder_add_ucgi_move(StringBuilder *move_string_builder,
 void string_builder_add_gcg_move(StringBuilder *move_string_builder,
                                  const Move *move,
                                  const LetterDistribution *ld);
+void string_builder_add_human_readable_move(StringBuilder *move_string_builder,
+                                            const Move *move,
+                                            const Board *board,
+                                            const LetterDistribution *ld);
 #endif

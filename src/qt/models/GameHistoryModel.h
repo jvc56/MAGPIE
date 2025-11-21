@@ -10,6 +10,7 @@
 
 #include "../bridge/qt_bridge.h"
 #include "BoardSquare.h"
+#include "HistoryItem.h"
 
 // Forward declarations for C structs
 // (None needed as we use opaque handles from bridge)
@@ -26,6 +27,7 @@ class GameHistoryModel : public QObject
     Q_PROPERTY(int totalEvents READ totalEvents NOTIFY gameChanged)
     Q_PROPERTY(QList<QObject*> board READ board NOTIFY boardChanged)
     Q_PROPERTY(QString currentRack READ currentRack NOTIFY gameChanged)
+    Q_PROPERTY(QList<QObject*> history READ history NOTIFY historyChanged)
 
 public:
     explicit GameHistoryModel(QObject *parent = nullptr);
@@ -47,14 +49,17 @@ public:
     int totalEvents() const;
     QList<QObject*> board() const;
     QString currentRack() const;
+    QList<QObject*> history() const;
 
 signals:
     void gameChanged();
     void boardChanged();
+    void historyChanged();
     void gameLoadedFromFile(const QUrl &fileUrl);
 
 private:
     void updateGameState();
+    void updateHistory();
     void cleanup();
 
     BridgeGameHistory *m_gameHistory = nullptr;
@@ -62,6 +67,7 @@ private:
     
     int m_currentIndex = 0;
     QList<QObject*> m_boardCache;
+    QList<QObject*> m_historyCache;
 };
 
 #endif // GAMEHISTORYMODEL_H
