@@ -71,7 +71,7 @@ qt_add_executable(qtpie
     ${QT_SOURCES}
 )
 
-set_target_properties(qtpie PROPERTIES MACOSX_BUNDLE_ICON_FILE AppIcon.icns)
+set_target_properties(qtpie PROPERTIES MACOSX_BUNDLE_ICON_FILE AppIcon)
 
 # Use qt_add_qml_module for proper QML integration
 qt_add_qml_module(qtpie
