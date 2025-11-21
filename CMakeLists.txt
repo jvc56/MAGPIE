@@ -30,6 +30,22 @@ list(FILTER MAGPIE_SOURCES EXCLUDE REGEX "src/qt/.*")
 add_library(magpie_core STATIC ${MAGPIE_SOURCES})
 target_include_directories(magpie_core PUBLIC src)
 
+# --- Icon Generator ---
+add_executable(icon_gen src/qt/icon_gen.cpp)
+target_link_libraries(icon_gen PRIVATE Qt6::Gui Qt6::Core)
+
+# Generate Icon Custom Command
+add_custom_command(
+    OUTPUT ${CMAKE_BINARY_DIR}/AppIcon.icns
+    COMMAND icon_gen ${CMAKE_SOURCE_DIR}/src/qt/fonts/ClearSans-Bold.ttf
+    COMMAND iconutil -c icns AppIcon.iconset -o ${CMAKE_BINARY_DIR}/AppIcon.icns
+    DEPENDS icon_gen ${CMAKE_SOURCE_DIR}/src/qt/fonts/ClearSans-Bold.ttf
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Generating AppIcon.icns"
+)
+
+set_source_files_properties(${CMAKE_BINARY_DIR}/AppIcon.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+
 # --- QtPie (Frontend) ---
 qt_standard_project_setup()
 
@@ -45,6 +61,7 @@ set(QT_SOURCES
     src/qt/models/ScoreLineItem.h
     src/qt/bridge/qt_bridge.c
     src/qt/bridge/qt_bridge.h
+    ${CMAKE_BINARY_DIR}/AppIcon.icns
 )
 
 # Create the executable
@@ -53,6 +70,8 @@ qt_add_executable(qtpie
     MACOSX_BUNDLE
     ${QT_SOURCES}
 )
+
+set_target_properties(qtpie PROPERTIES MACOSX_BUNDLE_ICON_FILE AppIcon.icns)
 
 # Use qt_add_qml_module for proper QML integration
 qt_add_qml_module(qtpie
