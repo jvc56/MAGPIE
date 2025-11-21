@@ -1,4 +1,5 @@
 #include "GameHistoryModel.h"
+#include "../../def/game_history_defs.h"
 
 #include <QDebug>
 #include <QDir>
@@ -6,6 +7,7 @@
 #include <QFile>
 #include <QTextStream>
 #include <QFileDialog>
+#include <QSet>
 
 GameHistoryModel::GameHistoryModel(QObject *parent) : QObject(parent)
 {
@@ -21,6 +23,8 @@ void GameHistoryModel::cleanup()
 {
     qDeleteAll(m_boardCache);
     m_boardCache.clear();
+    qDeleteAll(m_historyCache);
+    m_historyCache.clear();
     if (m_game) {
         bridge_game_destroy(m_game);
         m_game = nullptr;
@@ -51,6 +55,12 @@ void GameHistoryModel::loadGame(const QString &gcgContent)
         qWarning() << "Error creating game from history";
         return;
     }
+
+    // Play to end to populate board for string formatting
+    int total = bridge_get_num_events(m_gameHistory);
+    bridge_game_play_to_index(m_gameHistory, m_game, total);
+    
+    updateHistory();
 
     // Reset to start
     m_currentIndex = 0;
@@ -136,12 +146,142 @@ void GameHistoryModel::jumpTo(int index)
     emit gameChanged();
 }
 
+void GameHistoryModel::updateHistory()
+{
+    qDeleteAll(m_historyCache);
+    m_historyCache.clear();
+
+    if (!m_gameHistory || !m_game) return;
+
+    int lastScores[2] = {0, 0};
+    int total = bridge_get_num_events(m_gameHistory);
+    
+    struct ItemBuilder {
+        int playerIndex;
+        int type;
+        QString moveStr;
+        QString rackStr;
+        int turnScore;
+        int cumulativeScore;
+        int eventIndex;
+        bool valid = false;
+    } current;
+
+    auto flush = [&](bool isEnd = false) {
+        if (!current.valid) return;
+        m_historyCache.append(new HistoryItem(
+            current.playerIndex, 
+            current.type, 
+            current.moveStr, 
+            current.rackStr, 
+            current.turnScore, 
+            current.cumulativeScore, 
+            current.eventIndex
+        ));
+        current.valid = false;
+    };
+
+    for (int i = 0; i < total; i++) {
+        int playerIndex, type, score, cumulativeScore;
+        char *moveStrC = nullptr;
+        char *rackStrC = nullptr;
+
+        bridge_get_event_details(m_gameHistory, m_game, i, &playerIndex, &type, &moveStrC, &rackStrC, &score, &cumulativeScore);
+        
+        QString moveStr = QString::fromUtf8(moveStrC);
+        QString rackStr = QString::fromUtf8(rackStrC);
+        if (moveStrC) free(moveStrC);
+        if (rackStrC) free(rackStrC);
+
+                        int turnScore = cumulativeScore - lastScores[playerIndex];
+
+                        lastScores[playerIndex] = cumulativeScore;
+
+                
+
+                        QString lineScore = QString(" <span style=\"font-size: 12px; font-weight: normal;\">(%1%2)</span>")
+
+                            .arg(turnScore >= 0 ? "+" : "")
+
+                            .arg(turnScore);
+
+                        
+
+                        // Wrap move string in bold for the main part
+
+                        QString line = QString("<b>%1</b>%2").arg(moveStr).arg(lineScore);
+
+                
+
+                        bool isSecondary = (type == GAME_EVENT_PHONY_TILES_RETURNED ||
+
+                                            type == GAME_EVENT_CHALLENGE_BONUS ||
+
+                                            type == GAME_EVENT_TIME_PENALTY ||
+
+                                            type == GAME_EVENT_END_RACK_POINTS ||
+
+                                            type == GAME_EVENT_END_RACK_PENALTY);
+
+                
+
+                        if (current.valid && current.playerIndex == playerIndex && isSecondary) {
+
+                            // Merge
+
+                            current.moveStr += "<br>" + line;
+
+                            current.rackStr = rackStr; // Update rack to latest state
+
+                            current.turnScore += turnScore;
+
+                            current.cumulativeScore = cumulativeScore;
+
+                        } else {
+
+                            flush();
+
+                            current.playerIndex = playerIndex;
+
+                            current.type = type;
+
+                            current.moveStr = line;
+
+                            current.rackStr = rackStr;
+
+                            current.turnScore = turnScore;
+
+                            current.cumulativeScore = cumulativeScore;
+
+                            current.eventIndex = i;
+
+                            current.valid = true;
+
+                        }
+    }
+    flush(true);
+    
+    emit historyChanged();
+}
+
 void GameHistoryModel::updateGameState()
 {
     if (!m_game) return;
 
     qDeleteAll(m_boardCache);
     m_boardCache.clear();
+
+    // Identify last move tiles
+    QSet<int> lastMoveIndices;
+    if (m_currentIndex > 0) {
+        // Get tiles for the event that just happened (index - 1)
+        int rows[15]; // Max 7 tiles usually, but up to 15
+        int cols[15];
+        int count = bridge_get_last_move_tiles(m_gameHistory, m_currentIndex - 1, rows, cols, 15);
+        for (int i = 0; i < count; i++) {
+            lastMoveIndices.insert(rows[i] * 15 + cols[i]);
+        }
+    }
 
     for (int r = 0; r < 15; r++) {
         for (int c = 0; c < 15; c++) {
@@ -160,6 +300,8 @@ void GameHistoryModel::updateGameState()
                 if (isBlank) {
                     letterStr = letterStr.toUpper();
                 }
+                uint8_t unblanked_ml = ml & 0x7F; // Remove blank bit if any? Bridge logic handles it.
+                // bridge_get_letter_score takes ml directly.
                 score = bridge_get_letter_score(m_game, ml);
             }
 
@@ -167,7 +309,9 @@ void GameHistoryModel::updateGameState()
             int letterMultiplier = bonusRaw & 0x0F;
             int wordMultiplier = (bonusRaw >> 4) & 0x0F;
 
-            m_boardCache.append(new BoardSquare(letterStr, score, isBlank, letterMultiplier, wordMultiplier));
+            bool isLastMove = lastMoveIndices.contains(r * 15 + c);
+
+            m_boardCache.append(new BoardSquare(letterStr, score, isBlank, letterMultiplier, wordMultiplier, isLastMove));
         }
     }
     
@@ -227,4 +371,9 @@ QString GameHistoryModel::currentRack() const
     QString result = QString::fromUtf8(rackStr);
     free(rackStr);
     return result;
+}
+
+QList<QObject*> GameHistoryModel::history() const
+{
+    return m_historyCache;
 }
