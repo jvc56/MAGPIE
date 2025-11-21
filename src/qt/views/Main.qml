@@ -566,9 +566,31 @@ ApplicationWindow {
                         Layout.fillHeight: true
                         model: gameModel.history
                         clip: true
-                        cellWidth: width / 2
+                        
+                        // Adjust layout for scrollbar
+                        cellWidth: (width - 14) / 2
                         cellHeight: 80 // Increased height for more clearance
                         flow: GridView.FlowLeftToRight
+                        
+                        ScrollBar.vertical: ScrollBar {
+                            id: vbar
+                            active: true
+                            width: 12
+                            anchors.right: parent.right
+                            
+                            contentItem: Rectangle {
+                                implicitWidth: 8
+                                implicitHeight: 100
+                                radius: 4
+                                color: vbar.pressed ? "#89B4FA" : (vbar.hovered ? "#6C7086" : "#585B70")
+                            }
+                            
+                            background: Rectangle {
+                                color: "#1E1E2E"
+                                opacity: 0.2
+                                radius: 4
+                            }
+                        }
                         
                         // Auto-scroll to selection
                         onCountChanged: if (gameModel.currentEventIndex > 0) positionViewAtIndex(gameModel.currentEventIndex - 1, GridView.Visible)
