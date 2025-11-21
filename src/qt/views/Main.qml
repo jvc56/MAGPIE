@@ -100,29 +100,23 @@ ApplicationWindow {
         anchors.margins: 20
         spacing: 20
         
-        // Left Column: Board, Rack, Controls
-        ColumnLayout {
+        // Left Column: Board, Tracking, Rack, Controls
+        Item {
             id: leftColumn
             Layout.fillHeight: true
             Layout.preferredWidth: parent.width * 0.4
-            spacing: 20
-            
-            // Calculate cell size to fit both width and height constraints to avoid binding loops
-            // Height breakdown:
-            // Board: 15*S + 20 (margin)
-            // Rack: 1.4*S
-            // Controls: 1.0*S
-            // Spacing: 2 * 20 = 40
-            // Total Height = 17.4*S + 60
-            // Total Width = 15*S + 20
-            property double availableH: height - 60
-            property double availableW: width - 20
-            property int computedCellSize: Math.max(10, Math.floor(Math.min(availableW / 15, availableH / 17.4)))
 
-            // Board Area
+            // Cell size based on width only (board is square)
+            property double availableW: width - 20
+            property int computedCellSize: Math.max(10, Math.floor(availableW / 15))
+
+            // Board Area (anchored to top)
             Item {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
+                id: boardArea
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: boardBackground.height
                 
                 // Background for Board (tight fit)
                 Rectangle {
@@ -278,16 +272,21 @@ ApplicationWindow {
                 }
             }
 
-            // Rack
+            // Rack (above controls)
             RackView {
-                Layout.alignment: Qt.AlignHCenter
+                id: rackView
+                anchors.bottom: controlsRow.top
+                anchors.bottomMargin: 10
+                anchors.horizontalCenter: parent.horizontalCenter
                 rack: gameModel.currentRack
                 tileSize: leftColumn.computedCellSize
             }
 
-            // Controls
+            // Controls (anchored to bottom)
             RowLayout {
-                Layout.alignment: Qt.AlignHCenter
+                id: controlsRow
+                anchors.bottom: parent.bottom
+                anchors.horizontalCenter: parent.horizontalCenter
                 spacing: 15
                 
                 // Go to First Button
@@ -295,8 +294,8 @@ ApplicationWindow {
                     id: goToFirstButton
                     Layout.preferredWidth: leftColumn.computedCellSize
                     Layout.preferredHeight: leftColumn.computedCellSize
-                    enabled: gameModel.currentEventIndex > 0
-                    onClicked: gameModel.jumpTo(0)
+                    enabled: gameModel.currentHistoryIndex > 0
+                    onClicked: gameModel.jumpToHistoryIndex(0)
                     background: Rectangle {
                         width: parent.width
                         height: parent.height
@@ -336,7 +335,7 @@ ApplicationWindow {
                     id: previousButton
                     Layout.preferredWidth: leftColumn.computedCellSize
                     Layout.preferredHeight: leftColumn.computedCellSize
-                    enabled: gameModel.currentEventIndex > 0
+                    enabled: gameModel.currentHistoryIndex > 0
                     onClicked: gameModel.previous()
                     background: Rectangle {
                         width: parent.width
@@ -371,7 +370,7 @@ ApplicationWindow {
                 }
 
                 Text {
-                    text: "Turn " + (gameModel.currentEventIndex + 1) + " of " + gameModel.totalEvents
+                    text: "Turn " + (gameModel.currentHistoryIndex + 1) + " of " + gameModel.totalHistoryItems
                     color: "#CDD6F4"
                     font.pixelSize: 18
                     font.bold: true
@@ -384,7 +383,7 @@ ApplicationWindow {
                     id: nextButton
                     Layout.preferredWidth: leftColumn.computedCellSize
                     Layout.preferredHeight: leftColumn.computedCellSize
-                    enabled: gameModel.currentEventIndex < gameModel.totalEvents - 1
+                    enabled: gameModel.currentHistoryIndex < gameModel.totalHistoryItems - 1
                     onClicked: gameModel.next()
                     background: Rectangle {
                         width: parent.width
@@ -423,8 +422,8 @@ ApplicationWindow {
                     id: goToLastButton
                     Layout.preferredWidth: leftColumn.computedCellSize
                     Layout.preferredHeight: leftColumn.computedCellSize
-                    enabled: gameModel.currentEventIndex < gameModel.totalEvents - 1
-                    onClicked: gameModel.jumpTo(gameModel.totalEvents - 1)
+                    enabled: gameModel.currentHistoryIndex < gameModel.totalHistoryItems - 1
+                    onClicked: gameModel.jumpToHistoryIndex(gameModel.totalHistoryItems - 1)
                     background: Rectangle {
                         width: parent.width
                         height: parent.height
@@ -460,26 +459,110 @@ ApplicationWindow {
                 }
             }
 
-            // Saturation Control (Temporary)
-            RowLayout {
-                visible: false // Hide temporary slider
-                Layout.alignment: Qt.AlignHCenter
-                spacing: 10
-                
-                Text {
-                    text: "Saturation: " + saturationLevel.toFixed(2)
-                    color: "#CDD6F4"
-                }
-                
-                Slider {
-                    from: 0.0
-                    to: 1.0
-                    value: saturationLevel
-                    onValueChanged: {
-                        saturationLevel = value
-                        boardCanvas.requestPaint()
+            // Tile Tracking (fills space between board and rack)
+            Rectangle {
+                id: tileTrackingArea
+                anchors.top: boardArea.bottom
+                anchors.topMargin: 10
+                anchors.bottom: rackView.top
+                anchors.bottomMargin: 10
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.leftMargin: (parent.width - boardBackground.width) / 2
+                anchors.rightMargin: (parent.width - boardBackground.width) / 2
+                color: "#313244"
+                radius: 10
+                clip: true
+
+                // Header (Bag/Unseen counts)
+                Row {
+                    id: bagUnseenHeader
+                    height: 20
+                    spacing: 0
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.topMargin: 8
+
+                    Text {
+                        text: gameModel.bagCount + " IN BAG"
+                        color: "#CDD6F4"
+                        font.pixelSize: 10
+                        font.bold: true
+                        horizontalAlignment: Text.AlignHCenter
+                        width: parent.width / 2
+                        verticalAlignment: Text.AlignVCenter
                     }
-                    Layout.preferredWidth: 200
+
+                    Text {
+                        text: (gameModel.vowelCount + gameModel.consonantCount) + " UNSEEN"
+                        color: "#CDD6F4"
+                        font.pixelSize: 10
+                        font.bold: true
+                        horizontalAlignment: Text.AlignHCenter
+                        width: parent.width / 2
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                // Tiles Body (fills remaining space)
+                Rectangle {
+                    id: tilesBody
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: bagUnseenHeader.bottom
+                    anchors.bottom: tileCountsFooter.top
+                    anchors.leftMargin: 5
+                    anchors.rightMargin: 5
+                    anchors.topMargin: 4
+                    anchors.bottomMargin: 4
+                    color: "transparent"
+                    clip: true
+
+                    Text {
+                        text: gameModel.unseenTiles
+                        color: "#FFFFFF"
+                        font.family: "Consolas"
+                        font.pixelSize: 48
+                        font.bold: false
+                        wrapMode: Text.Wrap
+                        anchors.fill: parent
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        fontSizeMode: Text.Fit
+                        minimumPixelSize: 8
+                    }
+                }
+
+                // Footer (Vowels/Consonants)
+                Row {
+                    id: tileCountsFooter
+                    height: 20
+                    spacing: 0
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 0
+
+                    Text {
+                        text: gameModel.vowelCount + " VOWELS"
+                        color: "#CDD6F4"
+                        font.pixelSize: 10
+                        font.bold: true
+                        horizontalAlignment: Text.AlignHCenter
+                        width: parent.width / 2
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    Text {
+                        text: gameModel.consonantCount + " CONSONANTS"
+                        color: "#CDD6F4"
+                        font.pixelSize: 10
+                        font.bold: true
+                        horizontalAlignment: Text.AlignHCenter
+                        width: parent.width / 2
+                        verticalAlignment: Text.AlignVCenter
+                    }
                 }
             }
         }
@@ -624,13 +707,13 @@ ApplicationWindow {
                         }
                         
                         // Auto-scroll to selection
-                        onCountChanged: if (gameModel.currentEventIndex > 0) positionViewAtIndex(gameModel.currentEventIndex - 1, GridView.Visible)
-                        
+                        onCountChanged: if (gameModel.currentHistoryIndex >= 0) positionViewAtIndex(gameModel.currentHistoryIndex, GridView.Visible)
+
                         Connections {
                             target: gameModel
-                            function onCurrentEventIndexChanged() {
-                                if (gameModel.currentEventIndex > 0) {
-                                    historyList.positionViewAtIndex(gameModel.currentEventIndex - 1, GridView.Visible)
+                            function onGameChanged() {
+                                if (gameModel.currentHistoryIndex >= 0) {
+                                    historyList.positionViewAtIndex(gameModel.currentHistoryIndex, GridView.Visible)
                                 } else {
                                     historyList.positionViewAtBeginning()
                                 }
@@ -640,7 +723,7 @@ ApplicationWindow {
                         delegate: Rectangle {
                             width: historyList.cellWidth
                             height: historyList.cellHeight
-                            color: (index === gameModel.currentEventIndex - 1) ? "#585B70" : "transparent"
+                            color: (index === gameModel.currentHistoryIndex) ? "#585B70" : "transparent"
                             
                             // Content Container
                             Item {

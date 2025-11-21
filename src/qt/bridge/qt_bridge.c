@@ -276,6 +276,70 @@ char* bridge_get_current_rack(BridgeGame* game) {
     return internal_format_rack(r, ld);
 }
 
+int bridge_get_bag_count(BridgeGame* game) {
+    if (!game) return 0;
+    return bag_get_letters(game_get_bag(TO_GAME(game)));
+}
+
+void bridge_get_unseen_tiles(BridgeGame* game, char** tiles, int* vowel_count, int* consonant_count) {
+    if (!game) return;
+    
+    int playerIdx = game_get_player_on_turn_index(TO_GAME(game));
+    int opponentIdx = 1 - playerIdx;
+    
+    Bag *bag = game_get_bag(TO_GAME(game));
+    Player *opponent = game_get_player(TO_GAME(game), opponentIdx);
+    Rack *opponentRack = player_get_rack(opponent);
+    const LetterDistribution *ld = game_get_ld(TO_GAME(game));
+    
+    int unseen_counts[MAX_ALPHABET_SIZE];
+    memset(unseen_counts, 0, sizeof(unseen_counts));
+    
+    // Add bag tiles
+    bag_increment_unseen_count(bag, unseen_counts);
+    
+    // Add opponent rack tiles
+    for (int i = 0; i < ld_get_size(ld); i++) {
+        unseen_counts[i] += rack_get_letter(opponentRack, i);
+    }
+    
+    StringBuilder *sb = string_builder_create();
+    int v = 0;
+    int c = 0;
+    
+    for (int i = 0; i < ld_get_size(ld); i++) {
+        if (unseen_counts[i] > 0) {
+            if (ld_get_is_vowel(ld, i)) {
+                v += unseen_counts[i];
+            } else {
+                // Assume consonant if not vowel and not blank (usually index 0 or ? string)
+                // We check if it is the blank tile by checking if score is 0 and it's not a vowel?
+                // Better: check if it is BLANK_MACHINE_LETTER
+                if (i != BLANK_MACHINE_LETTER) {
+                    c += unseen_counts[i];
+                }
+            }
+            
+            char *hl = ld_ml_to_hl(ld, i);
+            for (int k = 0; k < unseen_counts[i]; k++) {
+                string_builder_add_string(sb, hl);
+                // Add a space between different letter groups? No, usually "AAAB..."
+                // But user screenshot has spaces. "? AAAAA D EEE..."
+                // We can add space after each group.
+            }
+            free(hl);
+            
+            string_builder_add_string(sb, " ");
+        }
+    }
+    
+    if (tiles) *tiles = string_duplicate(string_builder_peek(sb));
+    if (vowel_count) *vowel_count = v;
+    if (consonant_count) *consonant_count = c;
+    
+    string_builder_destroy(sb);
+}
+
 void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index,
                               int* player_index, int* type, char** move_str, char** rack_str,
                               int* score, int* cumulative_score) {

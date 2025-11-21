@@ -28,6 +28,12 @@ class GameHistoryModel : public QObject
     Q_PROPERTY(QList<QObject*> board READ board NOTIFY boardChanged)
     Q_PROPERTY(QString currentRack READ currentRack NOTIFY gameChanged)
     Q_PROPERTY(QList<QObject*> history READ history NOTIFY historyChanged)
+    Q_PROPERTY(int currentHistoryIndex READ currentHistoryIndex NOTIFY gameChanged)
+    Q_PROPERTY(int totalHistoryItems READ totalHistoryItems NOTIFY historyChanged)
+    Q_PROPERTY(QString unseenTiles READ unseenTiles NOTIFY gameChanged)
+    Q_PROPERTY(int bagCount READ bagCount NOTIFY gameChanged)
+    Q_PROPERTY(int vowelCount READ vowelCount NOTIFY gameChanged)
+    Q_PROPERTY(int consonantCount READ consonantCount NOTIFY gameChanged)
 
 public:
     explicit GameHistoryModel(QObject *parent = nullptr);
@@ -39,6 +45,7 @@ public:
     Q_INVOKABLE void next();
     Q_INVOKABLE void previous();
     Q_INVOKABLE void jumpTo(int index);
+    Q_INVOKABLE void jumpToHistoryIndex(int index);
 
     QString player1Name() const;
     QString player2Name() const;
@@ -46,10 +53,16 @@ public:
     int player2Score() const;
     int playerOnTurnIndex() const;
     int currentEventIndex() const;
+    int currentHistoryIndex() const;
     int totalEvents() const;
+    int totalHistoryItems() const;
     QList<QObject*> board() const;
     QString currentRack() const;
     QList<QObject*> history() const;
+    QString unseenTiles() const;
+    int bagCount() const;
+    int vowelCount() const;
+    int consonantCount() const;
 
 signals:
     void gameChanged();
@@ -68,6 +81,7 @@ private:
     int m_currentIndex = 0;
     QList<QObject*> m_boardCache;
     QList<QObject*> m_historyCache;
+    QList<int> m_historyItemEndIndices;
 };
 
 #endif // GAMEHISTORYMODEL_H

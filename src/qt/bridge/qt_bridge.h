@@ -49,14 +49,19 @@ int bridge_get_letter_score(BridgeGame* game, uint8_t ml);
 // Returns true if the machine letter is a blank.
 bool bridge_is_blank(uint8_t ml);
 
-// Returns a newly allocated string for the current player's rack. Caller must free.
+// Helper to get current rack string
 char* bridge_get_current_rack(BridgeGame* game);
 
-// History Details
-// Populates the provided pointers with details about the event at index.
-// move_str and rack_str are newly allocated strings that caller must free.
-void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index, 
-                              int* player_index, int* type, char** move_str, char** rack_str, 
+// Get number of tiles in bag
+int bridge_get_bag_count(BridgeGame* game);
+
+// Get unseen tiles (bag + opponent rack)
+// Returns string in *tiles (caller must free), and counts
+void bridge_get_unseen_tiles(BridgeGame* game, char** tiles, int* vowel_count, int* consonant_count);
+
+// Get details for a specific event index
+void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index,
+                              int* player_index, int* type, char** move_str, char** rack_str,
                               int* score, int* cumulative_score);
 
 // Populates rows and cols arrays with the coordinates of tiles placed in the event at index.
