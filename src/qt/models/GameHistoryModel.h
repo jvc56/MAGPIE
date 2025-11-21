@@ -34,6 +34,7 @@ class GameHistoryModel : public QObject
     Q_PROPERTY(int bagCount READ bagCount NOTIFY gameChanged)
     Q_PROPERTY(int vowelCount READ vowelCount NOTIFY gameChanged)
     Q_PROPERTY(int consonantCount READ consonantCount NOTIFY gameChanged)
+    Q_PROPERTY(int blankCount READ blankCount NOTIFY gameChanged)
 
 public:
     explicit GameHistoryModel(QObject *parent = nullptr);
@@ -63,6 +64,7 @@ public:
     int bagCount() const;
     int vowelCount() const;
     int consonantCount() const;
+    int blankCount() const;
 
 signals:
     void gameChanged();

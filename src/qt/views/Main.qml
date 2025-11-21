@@ -495,7 +495,7 @@ ApplicationWindow {
                     }
 
                     Text {
-                        text: (gameModel.vowelCount + gameModel.consonantCount) + " UNSEEN"
+                        text: (gameModel.vowelCount + gameModel.consonantCount + gameModel.blankCount) + " UNSEEN"
                         color: "#CDD6F4"
                         font.pixelSize: 10
                         font.bold: true

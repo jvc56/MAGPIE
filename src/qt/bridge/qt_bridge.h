@@ -57,7 +57,7 @@ int bridge_get_bag_count(BridgeGame* game);
 
 // Get unseen tiles (bag + opponent rack)
 // Returns string in *tiles (caller must free), and counts
-void bridge_get_unseen_tiles(BridgeGame* game, char** tiles, int* vowel_count, int* consonant_count);
+void bridge_get_unseen_tiles(BridgeGame* game, char** tiles, int* vowel_count, int* consonant_count, int* blank_count);
 
 // Get details for a specific event index
 void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index,

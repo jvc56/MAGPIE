@@ -1520,11 +1520,35 @@ void game_play_n_events(GameHistory *game_history, Game *game,
   }
   if (num_events_to_play <= 0) {
     const GameEvent *first_game_event = game_history_get_event(game_history, 0);
+    const int p1_index = game_event_get_player_index(first_game_event);
     set_rack_from_bag_or_push_to_error_stack(
-        game, game_event_get_player_index(first_game_event),
+        game, p1_index,
         game_event_get_const_rack(first_game_event), error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
+    }
+
+    // Also set the opponent's rack to ensure correct bag counts at start of game
+    const int p2_index = 1 - p1_index;
+    const int total_events = game_history_get_num_events(game_history);
+    const Rack *p2_rack = NULL;
+
+    for (int i = 0; i < total_events; i++) {
+      const GameEvent *ev = game_history_get_event(game_history, i);
+      if (game_event_get_player_index(ev) == p2_index) {
+        p2_rack = game_event_get_const_rack(ev);
+        break;
+      }
+    }
+
+    if (p2_rack) {
+      set_rack_from_bag_or_push_to_error_stack(game, p2_index, p2_rack, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+    } else {
+      // If opponent never moves, draw a random rack to ensure bag count is correct
+      draw_to_full_rack(game, p2_index);
     }
   }
   const int ld_size = ld_get_size(game_get_ld(game));
