@@ -6,6 +6,7 @@ import QtCore
 import QtPie 1.0
 
 ApplicationWindow {
+    id: mainWindow
     width: 1280
     height: 800
     minimumWidth: 800
@@ -14,20 +15,23 @@ ApplicationWindow {
     title: "QtPie - MAGPIE Frontend"
     color: "#1E1E2E"
     font.family: "Clear Sans"
+    
+    property real saturationLevel: 0.7 // Set to 70%
+    property string recentFilesJson: "[]"
 
     Settings {
         id: appSettings
-        property string recentFilesJson: "[]"
+        property alias recentFilesJson: mainWindow.recentFilesJson
     }
 
     function addToRecentFiles(fileUrl) {
         var urlStr = fileUrl.toString();
-        var files = JSON.parse(appSettings.recentFilesJson);
+        var files = JSON.parse(mainWindow.recentFilesJson);
         var index = files.indexOf(urlStr);
         if (index !== -1) files.splice(index, 1);
         files.unshift(urlStr);
         if (files.length > 10) files.pop();
-        appSettings.recentFilesJson = JSON.stringify(files);
+        mainWindow.recentFilesJson = JSON.stringify(files);
     }
 
     Connections {
@@ -53,10 +57,10 @@ ApplicationWindow {
             }
             Menu {
                 title: "Recent Games"
-                enabled: JSON.parse(appSettings.recentFilesJson).length > 0
+                enabled: JSON.parse(mainWindow.recentFilesJson).length > 0
                 
                 Repeater {
-                    model: JSON.parse(appSettings.recentFilesJson)
+                    model: JSON.parse(mainWindow.recentFilesJson)
                     MenuItem {
                         text: decodeURIComponent(modelData.toString().split('/').pop())
                         onTriggered: gameModel.loadGameFromFile(modelData)
@@ -64,13 +68,13 @@ ApplicationWindow {
                 }
                 
                 MenuSeparator {
-                    visible: JSON.parse(appSettings.recentFilesJson).length > 0
+                    visible: JSON.parse(mainWindow.recentFilesJson).length > 0
                 }
                 
                 MenuItem {
                     text: "Clear Recent Games"
-                    enabled: JSON.parse(appSettings.recentFilesJson).length > 0
-                    onTriggered: appSettings.recentFilesJson = "[]"
+                    enabled: JSON.parse(mainWindow.recentFilesJson).length > 0
+                    onTriggered: mainWindow.recentFilesJson = "[]"
                 }
             }
             MenuSeparator {}
@@ -137,11 +141,15 @@ ApplicationWindow {
 
                         property int cellSize: leftColumn.computedCellSize
                         property var bonusStyles: {
-                            "1,2": { color: "#FA8072", text: "2W", textColor: "#1E1E2E" }, // DWS - Salmon
-                            "1,3": { color: "#FF0000", text: "3W", textColor: "#FFFFFF" }, // TWS - Red
-                            "2,1": { color: "#ADD8E6", text: "2L", textColor: "#1E1E2E" }, // DLS - Light Blue
-                            "3,1": { color: "#00008B", text: "3L", textColor: "#FFFFFF" }, // TLS - Dark Blue
-                            "1,1": { color: "#45475A", text: "", textColor: "#CDD6F4" }     // Normal
+                            // Force dependency on saturationLevel so this re-evaluates
+                            var s = saturationLevel;
+                            return {
+                                "1,2": { color: Qt.hsla(0.017, 0.9 * s, 0.71, 1.0), text: "2W", textColor: "#1E1E2E" }, // DWS - Salmon (#FA8072)
+                                "1,3": { color: Qt.hsla(0.0, 1.0 * s, 0.5, 1.0), text: "3W", textColor: "#FFFFFF" }, // TWS - Red (#FF0000)
+                                "2,1": { color: Qt.hsla(0.54, 0.53 * s, 0.79, 1.0), text: "2L", textColor: "#1E1E2E" }, // DLS - Light Blue (#ADD8E6)
+                                "3,1": { color: Qt.hsla(0.66, 1.0 * s, 0.27, 1.0), text: "3L", textColor: "#FFFFFF" }, // TLS - Dark Blue (#00008B)
+                                "1,1": { color: "#45475A", text: "", textColor: "#CDD6F4" }     // Normal
+                            }
                         }
 
                         Canvas {
@@ -163,7 +171,7 @@ ApplicationWindow {
                                     
                                     if (hasLetter) {
                                         // Draw tile background
-                                        ctx.fillStyle = modelData.isLastMove ? "#FAB387" : "#F9E2AF"; // Peach for last move, Beige normal
+                                        ctx.fillStyle = modelData.isLastMove ? "#FF9933" : "#F9E2AF"; // Orange for last move, Beige normal
                                         // Rounded rectangle drawing
                                         var tileX = x + 1;
                                         var tileY = y + 1;
@@ -451,6 +459,29 @@ ApplicationWindow {
                     }
                 }
             }
+
+            // Saturation Control (Temporary)
+            RowLayout {
+                visible: false // Hide temporary slider
+                Layout.alignment: Qt.AlignHCenter
+                spacing: 10
+                
+                Text {
+                    text: "Saturation: " + saturationLevel.toFixed(2)
+                    color: "#CDD6F4"
+                }
+                
+                Slider {
+                    from: 0.0
+                    to: 1.0
+                    value: saturationLevel
+                    onValueChanged: {
+                        saturationLevel = value
+                        boardCanvas.requestPaint()
+                    }
+                    Layout.preferredWidth: 200
+                }
+            }
         }
 
         // Middle Column: Status & History
@@ -636,7 +667,11 @@ ApplicationWindow {
                                             }
                                             Text {
                                                 text: modelData.scoreText
-                                                color: "#CDD6F4"
+                                                color: {
+                                                    if (modelData.type === 4 || modelData.type === 6) return "#A6E3A1"
+                                                    if (modelData.type === 2 || modelData.type === 7 || modelData.type === 8) return "#F38BA8"
+                                                    return "#89B4FA"
+                                                }
                                                 font.pixelSize: 10 // Smaller font size
                                                 font.bold: false
                                                 Layout.alignment: Qt.AlignVCenter

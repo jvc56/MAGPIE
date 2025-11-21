@@ -14,6 +14,8 @@ using namespace Qt::StringLiterals;
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
+    app.setOrganizationName("QtPie");
+    app.setApplicationName("QtPie");
     QQuickStyle::setStyle("Basic");
 
     // Register custom fonts
