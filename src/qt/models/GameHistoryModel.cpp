@@ -174,9 +174,16 @@ void GameHistoryModel::updateHistory()
 
     if (!m_gameHistory || !m_game) return;
 
-    int lastScores[2] = {0, 0};
+    // Reset game to index 1 first (after first move), then back to 0
+    // This ensures both players' racks are properly initialized
     int total = bridge_get_num_events(m_gameHistory);
-    
+    if (total > 0) {
+        bridge_game_play_to_index(m_gameHistory, m_game, 1);
+    }
+    bridge_game_play_to_index(m_gameHistory, m_game, 0);
+
+    int lastScores[2] = {0, 0};
+
     struct ItemBuilder {
         int playerIndex;
         int type;
@@ -185,19 +192,28 @@ void GameHistoryModel::updateHistory()
         int totalTurnScore; // Aggregated score for this merged entry
         int cumulativeScore;
         int eventIndex; // Index of the last event in this merged item
+        // Pre-move tile tracking state (captured when starting a new item)
+        QString unseenTiles;
+        int bagCount;
+        int vowelCount;
+        int consonantCount;
         bool valid = false;
     } current;
 
     auto flush = [&](bool /*isEnd*/ = false) {
         if (!current.valid) return;
         m_historyCache.append(new HistoryItem(
-            current.playerIndex, 
-            current.type, 
+            current.playerIndex,
+            current.type,
             current.scoreLines, // Pass the list
-            current.rackStr, 
-            current.totalTurnScore, 
-            current.cumulativeScore, 
-            current.eventIndex
+            current.rackStr,
+            current.totalTurnScore,
+            current.cumulativeScore,
+            current.eventIndex,
+            current.unseenTiles,
+            current.bagCount,
+            current.vowelCount,
+            current.consonantCount
         ));
         // Store the end index (event index + 1) for this history item
         m_historyItemEndIndices.append(current.eventIndex + 1);
@@ -213,7 +229,7 @@ void GameHistoryModel::updateHistory()
         char *rackStrC = nullptr;
 
         bridge_get_event_details(m_gameHistory, m_game, i, &playerIndex, &type, &moveStrC, &rackStrC, &score, &cumulativeScore);
-        
+
         QString moveText = QString::fromUtf8(moveStrC);
         QString rackText = QString::fromUtf8(rackStrC);
         if (moveStrC) free(moveStrC);
@@ -221,7 +237,7 @@ void GameHistoryModel::updateHistory()
 
         int turnScore = cumulativeScore - lastScores[playerIndex];
         lastScores[playerIndex] = cumulativeScore;
-        
+
         QString formattedScore = QString("%1%2")
             .arg(turnScore >= 0 ? "+" : "")
             .arg(turnScore);
@@ -235,17 +251,28 @@ void GameHistoryModel::updateHistory()
         if (current.valid && current.playerIndex == playerIndex && isSecondary) {
             // Merge: append new ScoreLineItem
             current.scoreLines.append(new ScoreLineItem(moveText, formattedScore, type));
-            
+
             // Update rack to latest state, UNLESS it's end rack points (which shows opponent's tiles)
             if (type != GAME_EVENT_END_RACK_POINTS) {
                 current.rackStr = rackText;
             }
-            
+
             current.totalTurnScore += turnScore; // Sum scores
             current.cumulativeScore = cumulativeScore;
             current.eventIndex = i; // Last event index in this merged item
         } else {
             flush(); // Flush previous item
+
+            // Capture pre-move tile tracking state (game is at position before event i)
+            char *tilesC = nullptr;
+            int vowels = 0, consonants = 0;
+            bridge_get_unseen_tiles(m_game, &tilesC, &vowels, &consonants);
+            current.unseenTiles = tilesC ? QString::fromUtf8(tilesC) : "";
+            if (tilesC) free(tilesC);
+            current.bagCount = bridge_get_bag_count(m_game);
+            current.vowelCount = vowels;
+            current.consonantCount = consonants;
+
             current.playerIndex = playerIndex;
             current.type = type; // Type of the primary event
             current.scoreLines.append(new ScoreLineItem(moveText, formattedScore, type)); // Add first ScoreLineItem
@@ -255,9 +282,12 @@ void GameHistoryModel::updateHistory()
             current.eventIndex = i;
             current.valid = true;
         }
+
+        // Advance game state after processing this event
+        bridge_game_play_to_index(m_gameHistory, m_game, i + 1);
     }
     flush(true);
-    
+
     emit historyChanged();
 }
 
@@ -403,6 +433,15 @@ QList<QObject*> GameHistoryModel::history() const
 
 QString GameHistoryModel::unseenTiles() const
 {
+    int hIndex = currentHistoryIndex();
+    if (hIndex >= 0 && hIndex < m_historyCache.size()) {
+        HistoryItem *item = qobject_cast<HistoryItem*>(m_historyCache.at(hIndex));
+        if (item) {
+            return item->unseenTiles();
+        }
+    }
+
+    // Fallback for initial state
     if (!m_game) return "";
     char* tiles = nullptr;
     bridge_get_unseen_tiles(m_game, &tiles, nullptr, nullptr);
@@ -413,12 +452,30 @@ QString GameHistoryModel::unseenTiles() const
 
 int GameHistoryModel::bagCount() const
 {
+    int hIndex = currentHistoryIndex();
+    if (hIndex >= 0 && hIndex < m_historyCache.size()) {
+        HistoryItem *item = qobject_cast<HistoryItem*>(m_historyCache.at(hIndex));
+        if (item) {
+            return item->bagCount();
+        }
+    }
+
+    // Fallback for initial state
     if (!m_game) return 0;
     return bridge_get_bag_count(m_game);
 }
 
 int GameHistoryModel::vowelCount() const
 {
+    int hIndex = currentHistoryIndex();
+    if (hIndex >= 0 && hIndex < m_historyCache.size()) {
+        HistoryItem *item = qobject_cast<HistoryItem*>(m_historyCache.at(hIndex));
+        if (item) {
+            return item->vowelCount();
+        }
+    }
+
+    // Fallback for initial state
     if (!m_game) return 0;
     int v = 0;
     bridge_get_unseen_tiles(m_game, nullptr, &v, nullptr);
@@ -427,6 +484,15 @@ int GameHistoryModel::vowelCount() const
 
 int GameHistoryModel::consonantCount() const
 {
+    int hIndex = currentHistoryIndex();
+    if (hIndex >= 0 && hIndex < m_historyCache.size()) {
+        HistoryItem *item = qobject_cast<HistoryItem*>(m_historyCache.at(hIndex));
+        if (item) {
+            return item->consonantCount();
+        }
+    }
+
+    // Fallback for initial state
     if (!m_game) return 0;
     int c = 0;
     bridge_get_unseen_tiles(m_game, nullptr, nullptr, &c);

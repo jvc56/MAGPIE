@@ -1,7 +1,9 @@
 #include "HistoryItem.h"
 #include "ScoreLineItem.h" // Renamed from MoveLineItem
 
-HistoryItem::HistoryItem(int playerIndex, int type, const QList<QObject*> &scoreLines, const QString &rackString, int score, int cumulativeScore, int eventIndex, QObject *parent)
+HistoryItem::HistoryItem(int playerIndex, int type, const QList<QObject*> &scoreLines, const QString &rackString, int score, int cumulativeScore, int eventIndex,
+                         const QString &unseenTiles, int bagCount, int vowelCount, int consonantCount,
+                         QObject *parent)
     : QObject(parent),
       m_playerIndex(playerIndex),
       m_type(type),
@@ -9,7 +11,11 @@ HistoryItem::HistoryItem(int playerIndex, int type, const QList<QObject*> &score
       m_rackString(rackString),
       m_score(score),
       m_cumulativeScore(cumulativeScore),
-      m_eventIndex(eventIndex)
+      m_eventIndex(eventIndex),
+      m_unseenTiles(unseenTiles),
+      m_bagCount(bagCount),
+      m_vowelCount(vowelCount),
+      m_consonantCount(consonantCount)
 {
     // Take ownership of score lines
     for (QObject *obj : m_scoreLines) {
@@ -50,4 +56,24 @@ int HistoryItem::cumulativeScore() const
 int HistoryItem::eventIndex() const
 {
     return m_eventIndex;
+}
+
+QString HistoryItem::unseenTiles() const
+{
+    return m_unseenTiles;
+}
+
+int HistoryItem::bagCount() const
+{
+    return m_bagCount;
+}
+
+int HistoryItem::vowelCount() const
+{
+    return m_vowelCount;
+}
+
+int HistoryItem::consonantCount() const
+{
+    return m_consonantCount;
 }
