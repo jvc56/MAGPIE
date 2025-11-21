@@ -98,9 +98,22 @@ ApplicationWindow {
         
         // Left Column: Board, Rack, Controls
         ColumnLayout {
+            id: leftColumn
             Layout.fillHeight: true
             Layout.preferredWidth: parent.width * 0.4
             spacing: 20
+            
+            // Calculate cell size to fit both width and height constraints to avoid binding loops
+            // Height breakdown:
+            // Board: 15*S + 20 (margin)
+            // Rack: 1.4*S
+            // Controls: 1.0*S
+            // Spacing: 2 * 20 = 40
+            // Total Height = 17.4*S + 60
+            // Total Width = 15*S + 20
+            property double availableH: height - 60
+            property double availableW: width - 20
+            property int computedCellSize: Math.max(10, Math.floor(Math.min(availableW / 15, availableH / 17.4)))
 
             // Board Area
             Item {
@@ -118,13 +131,11 @@ ApplicationWindow {
                     
                     Item {
                         id: gridContainer
-                        // Size based on available space in the parent Item
-                        property int availableSpace: Math.min(parent.parent.width, parent.parent.height)
-                        width: availableSpace > 20 ? availableSpace - 20 : 0
+                        width: leftColumn.computedCellSize * 15
                         height: width
                         anchors.centerIn: parent
 
-                        property int cellSize: width / 15
+                        property int cellSize: leftColumn.computedCellSize
                         property var bonusStyles: {
                             "1,2": { color: "#FA8072", text: "2W", textColor: "#1E1E2E" }, // DWS - Salmon
                             "1,3": { color: "#FF0000", text: "3W", textColor: "#FFFFFF" }, // TWS - Red
@@ -152,7 +163,7 @@ ApplicationWindow {
                                     
                                     if (hasLetter) {
                                         // Draw tile background
-                                        ctx.fillStyle = "#F9E2AF"; // Beige
+                                        ctx.fillStyle = modelData.isLastMove ? "#FAB387" : "#F9E2AF"; // Peach for last move, Beige normal
                                         // Rounded rectangle drawing
                                         var tileX = x + 1;
                                         var tileY = y + 1;
@@ -318,7 +329,7 @@ ApplicationWindow {
             RackView {
                 Layout.alignment: Qt.AlignHCenter
                 rack: gameModel.currentRack
-                tileSize: gridContainer.cellSize
+                tileSize: leftColumn.computedCellSize
             }
 
             // Controls
@@ -329,8 +340,8 @@ ApplicationWindow {
                 // Go to First Button
                 Button { 
                     id: goToFirstButton
-                    Layout.preferredWidth: gridContainer.cellSize
-                    Layout.preferredHeight: gridContainer.cellSize
+                    Layout.preferredWidth: leftColumn.computedCellSize
+                    Layout.preferredHeight: leftColumn.computedCellSize
                     enabled: gameModel.currentEventIndex > 0
                     onClicked: gameModel.jumpTo(0)
                     background: Rectangle {
@@ -370,8 +381,8 @@ ApplicationWindow {
                 // Previous Button
                 Button { 
                     id: previousButton
-                    Layout.preferredWidth: gridContainer.cellSize
-                    Layout.preferredHeight: gridContainer.cellSize
+                    Layout.preferredWidth: leftColumn.computedCellSize
+                    Layout.preferredHeight: leftColumn.computedCellSize
                     enabled: gameModel.currentEventIndex > 0
                     onClicked: gameModel.previous()
                     background: Rectangle {
@@ -418,8 +429,8 @@ ApplicationWindow {
                 // Next Button
                 Button { 
                     id: nextButton
-                    Layout.preferredWidth: gridContainer.cellSize
-                    Layout.preferredHeight: gridContainer.cellSize
+                    Layout.preferredWidth: leftColumn.computedCellSize
+                    Layout.preferredHeight: leftColumn.computedCellSize
                     enabled: gameModel.currentEventIndex < gameModel.totalEvents - 1
                     onClicked: gameModel.next()
                     background: Rectangle {
@@ -457,8 +468,8 @@ ApplicationWindow {
                 // Go to Last Button
                 Button { 
                     id: goToLastButton
-                    Layout.preferredWidth: gridContainer.cellSize
-                    Layout.preferredHeight: gridContainer.cellSize
+                    Layout.preferredWidth: leftColumn.computedCellSize
+                    Layout.preferredHeight: leftColumn.computedCellSize
                     enabled: gameModel.currentEventIndex < gameModel.totalEvents - 1
                     onClicked: gameModel.jumpTo(gameModel.totalEvents - 1)
                     background: Rectangle {
@@ -591,18 +602,134 @@ ApplicationWindow {
                 }
             }
             
-            // History Placeholder
+            // History
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 color: "#313244"
                 radius: 10
+                clip: true
                 
-                Text {
-                    text: "Game History"
-                    color: "#585B70"
-                    font.pixelSize: 18
-                    anchors.centerIn: parent
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 0
+                    
+                    // List
+                    GridView {
+                        id: historyList
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        model: gameModel.history
+                        clip: true
+                        cellWidth: width / 2
+                        cellHeight: 80 // Increased height for more clearance
+                        flow: GridView.FlowLeftToRight
+                        
+                        // Auto-scroll to selection
+                        onCountChanged: if (gameModel.currentEventIndex > 0) positionViewAtIndex(gameModel.currentEventIndex - 1, GridView.Visible)
+                        
+                        Connections {
+                            target: gameModel
+                            function onCurrentEventIndexChanged() {
+                                if (gameModel.currentEventIndex > 0) {
+                                    historyList.positionViewAtIndex(gameModel.currentEventIndex - 1, GridView.Visible)
+                                } else {
+                                    historyList.positionViewAtBeginning()
+                                }
+                            }
+                        }
+
+                        delegate: Rectangle {
+                            width: historyList.cellWidth
+                            height: historyList.cellHeight
+                            color: (index === gameModel.currentEventIndex - 1) ? "#585B70" : "transparent"
+                            
+                            // Content Container
+                            Item {
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                
+                                                                ColumnLayout {
+                                
+                                                                    anchors.left: parent.left
+                                
+                                                                    anchors.verticalCenter: parent.verticalCenter
+                                
+                                                                    spacing: 2 // Reduced spacing
+                                
+                                                                    
+                                
+                                                                                                                                            Text { 
+                                
+                                                                    
+                                
+                                                                                                                                                text: model.modelData.moveString
+                                
+                                                                    
+                                
+                                                                                                                                                color: "#CDD6F4"
+                                
+                                                                    
+                                
+                                                                                                                                                font.pixelSize: 14
+                                
+                                                                    
+                                
+                                                                                                                                                textFormat: Text.StyledText
+                                
+                                                                    
+                                
+                                                                                                                                                lineHeight: 0.8
+                                
+                                                                    
+                                
+                                                                                                                                            }
+                                
+                                                                    Text { 
+                                
+                                                                        text: model.modelData.rackString
+                                
+                                                                        color: "#A6ADC8"
+                                
+                                                                        font.family: "Consolas"
+                                
+                                                                        font.pixelSize: 12
+                                
+                                                                    }
+                                
+                                                                }
+                                
+                                Text {
+                                    text: model.modelData.cumulativeScore
+                                    color: "#89B4FA"
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom // Move to bottom
+                                    anchors.bottomMargin: 5 // Add margin
+                                    font.bold: true
+                                    font.pixelSize: 16
+                                }
+                            }
+                            
+                            // Vertical Separator (only for left column / even index)
+                            Rectangle {
+                                visible: index % 2 === 0
+                                width: 1
+                                height: parent.height
+                                color: "#585B70"
+                                opacity: 0.3
+                                anchors.right: parent.right
+                            }
+                            
+                            // Horizontal Separator line
+                            Rectangle {
+                                anchors.bottom: parent.bottom
+                                width: parent.width
+                                height: 1
+                                color: "#313244"
+                                opacity: 0.5
+                            }
+                        }
+                    }
                 }
             }
         }
