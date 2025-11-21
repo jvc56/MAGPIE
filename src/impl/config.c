@@ -2749,7 +2749,8 @@ void config_load_parsed_args(Config *config,
           current_parg = config->pargs[k];
           current_arg_token = k;
           break;
-        } else if (has_prefix(arg_name, config->pargs[k]->name)) {
+        }
+        if (has_prefix(arg_name, config->pargs[k]->name)) {
           parg_has_prefix[k] = true;
           if (current_parg) {
             is_ambiguous = true;
