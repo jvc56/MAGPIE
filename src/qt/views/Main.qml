@@ -607,8 +607,9 @@ ApplicationWindow {
                                             Text {
                                                 text: modelData.text
                                                 color: "#CDD6F4"
-                                                font.pixelSize: 12
-                                                textFormat: Text.StyledText
+                                                font.pixelSize: modelData.type === 1 ? 14 : 10
+                                                font.bold: modelData.type === 1
+                                                textFormat: Text.PlainText
                                                 Layout.alignment: Qt.AlignVCenter
                                             }
                                             Text {
