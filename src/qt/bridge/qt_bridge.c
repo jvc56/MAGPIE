@@ -245,24 +245,15 @@ bool bridge_is_blank(uint8_t ml) {
     return get_is_blanked(ml);
 }
 
-char* bridge_get_current_rack(BridgeGame* game) {
-    if (!game) return string_duplicate("");
-    
-    int playerIdx = game_get_player_on_turn_index(TO_GAME(game));
-    Player *p = game_get_player(TO_GAME(game), playerIdx);
-    Rack *r = player_get_rack(p);
-    const LetterDistribution *ld = game_get_ld(TO_GAME(game));
-    
-    // Estimate buffer size: max 7 tiles * max 4 bytes per char + null
-    char buffer[64] = {0}; 
+static char* internal_format_rack(const Rack *r, const LetterDistribution *ld) {
+    if (!r || !ld) return string_duplicate("");
+    char buffer[64] = {0};
     int pos = 0;
-    
     for (int i = 0; i < ld_get_size(ld); i++) {
         int count = rack_get_letter(r, i);
         if (count > 0) {
             char *hl = ld_ml_to_hl(ld, i);
             for (int c = 0; c < count; c++) {
-                // Check buffer safety
                 if (pos + strlen(hl) < sizeof(buffer) - 1) {
                     strcpy(buffer + pos, hl);
                     pos += strlen(hl);
@@ -271,8 +262,18 @@ char* bridge_get_current_rack(BridgeGame* game) {
             free(hl);
         }
     }
-    
     return string_duplicate(buffer);
+}
+
+char* bridge_get_current_rack(BridgeGame* game) {
+    if (!game) return string_duplicate("");
+    
+    int playerIdx = game_get_player_on_turn_index(TO_GAME(game));
+    Player *p = game_get_player(TO_GAME(game), playerIdx);
+    Rack *r = player_get_rack(p);
+    const LetterDistribution *ld = game_get_ld(TO_GAME(game));
+    
+    return internal_format_rack(r, ld);
 }
 
 void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index,
@@ -341,9 +342,15 @@ void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index
                 case GAME_EVENT_TIME_PENALTY:
                     human_readable = string_duplicate("time");
                     break;
-                case GAME_EVENT_END_RACK_POINTS:
-                    human_readable = string_duplicate("rack bonus");
+                case GAME_EVENT_END_RACK_POINTS: {
+                    const Rack *r = game_event_get_const_rack(event);
+                    char *tiles = internal_format_rack(r, game_get_ld(TO_GAME(game)));
+                    char buf[128];
+                    snprintf(buf, sizeof(buf), "2x %s", tiles);
+                    free(tiles);
+                    human_readable = string_duplicate(buf);
                     break;
+                }
                 case GAME_EVENT_END_RACK_PENALTY:
                     human_readable = string_duplicate("rack penalty");
                     break;
@@ -362,25 +369,8 @@ void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index
     
     if (rack_str) {
         const Rack *r = game_event_get_const_rack(event);
-
         if (r) {
-            const LetterDistribution *ld = game_get_ld(TO_GAME(game));
-            char buffer[64] = {0};
-            int pos = 0;
-            for (int i = 0; i < ld_get_size(ld); i++) {
-                int count = rack_get_letter(r, i);
-                if (count > 0) {
-                    char *hl = ld_ml_to_hl(ld, i);
-                    for (int c = 0; c < count; c++) {
-                        if (pos + strlen(hl) < sizeof(buffer) - 1) {
-                            strcpy(buffer + pos, hl);
-                            pos += strlen(hl);
-                        }
-                    }
-                    free(hl);
-                }
-            }
-            *rack_str = string_duplicate(buffer);
+            *rack_str = internal_format_rack(r, game_get_ld(TO_GAME(game)));
         } else {
             *rack_str = string_duplicate("");
         }
