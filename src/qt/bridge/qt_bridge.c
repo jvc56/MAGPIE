@@ -275,14 +275,14 @@ char* bridge_get_current_rack(BridgeGame* game) {
     return string_duplicate(buffer);
 }
 
-void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index, 
-                              int* player_index, int* type, char** move_str, char** rack_str, 
+void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index,
+                              int* player_index, int* type, char** move_str, char** rack_str,
                               int* score, int* cumulative_score) {
     if (!gh || !game) return;
-    
+
     GameEvent *event = game_history_get_event(TO_GH(gh), index);
     if (!event) return;
-    
+
     if (player_index) *player_index = game_event_get_player_index(event);
     if (type) *type = (int)game_event_get_type(event);
     if (score) *score = equity_to_int(game_event_get_move_score(event));
@@ -295,14 +295,36 @@ void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index
         if (vms && validated_moves_get_number_of_moves(vms) > 0) {
             const Move *move = validated_moves_get_move(vms, 0);
             game_event_t type = move_get_type(move);
-            
+
             if (type == GAME_EVENT_TILE_PLACEMENT_MOVE || 
                 type == GAME_EVENT_EXCHANGE || 
                 type == GAME_EVENT_PASS) {
                 
+                // Temporarily rewind game to state before this move to get proper board state
+                // This is inefficient (O(N^2)) but ensures accurate notation generation
+                Game *temp_game = TO_GAME(game);
+                ErrorStack *err = error_stack_create();
+                game_reset(temp_game);
+                game_play_n_events(TO_GH(gh), temp_game, index, true, err);
+                error_stack_destroy(err);
+                
+                Board *board = game_get_board(temp_game);
+                const LetterDistribution *ld = game_get_ld(temp_game);
+
                 StringBuilder *sb = string_builder_create();
-                string_builder_add_human_readable_move(sb, move, game_get_board(TO_GAME(game)), game_get_ld(TO_GAME(game)));
-                human_readable = string_builder_dump(sb, NULL);
+                string_builder_add_move(sb, board, move, ld);
+                
+                // Get the string and remove trailing score
+                const char *full_str = string_builder_peek(sb);
+                // Find last space (before score) and truncate there
+                // Format is typically "COORDS WORD SCORE" e.g. "8H QI 11"
+                char *result = string_duplicate(full_str);
+                char *last_space = strrchr(result, ' ');
+                if (last_space && (last_space - result > 0)) {
+                    *last_space = '\0';
+                }
+                human_readable = result;
+                
                 string_builder_destroy(sb);
             }
         }
@@ -330,28 +352,20 @@ void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index
             }
         }
 
-        char *final_str = NULL;
         if (human_readable) {
-            final_str = human_readable;
+            *move_str = human_readable;
         } else {
             const char *s = game_event_get_cgp_move_string(event);
-            final_str = s ? string_duplicate(s) : string_duplicate("");
+            *move_str = s ? string_duplicate(s) : string_duplicate("");
         }
-        
-        // Apply styling
-        char buffer[512];
-        snprintf(buffer, sizeof(buffer), "<span style=\"font-size: 12px; font-weight: normal; display: inline-block; margin-top: 2px; margin-bottom: 2px;\">%s</span>", final_str);
-        *move_str = string_duplicate(buffer);
-        free(final_str);
     }
     
     if (rack_str) {
         const Rack *r = game_event_get_const_rack(event);
-        char *content_str = NULL;
-        
+
         if (r) {
             const LetterDistribution *ld = game_get_ld(TO_GAME(game));
-            char buffer[64] = {0}; 
+            char buffer[64] = {0};
             int pos = 0;
             for (int i = 0; i < ld_get_size(ld); i++) {
                 int count = rack_get_letter(r, i);
@@ -366,16 +380,10 @@ void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index
                     free(hl);
                 }
             }
-            content_str = string_duplicate(buffer);
+            *rack_str = string_duplicate(buffer);
         } else {
-            content_str = string_duplicate("");
+            *rack_str = string_duplicate("");
         }
-        
-        // Apply styling
-        char buffer[512];
-        snprintf(buffer, sizeof(buffer), "<span style=\"font-size: 12px; display: inline-block; margin-top: 2px; margin-bottom: 2px;\">%s</span>", content_str);
-        *rack_str = string_duplicate(buffer);
-        free(content_str);
     }
 }
 

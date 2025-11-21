@@ -5,6 +5,9 @@
 #include <QFontDatabase>
 #include <QQuickStyle>
 #include "models/GameHistoryModel.h"
+#include "models/BoardSquare.h"
+#include "models/HistoryItem.h"
+#include "models/ScoreLineItem.h"
 
 using namespace Qt::StringLiterals;
 
@@ -20,6 +23,9 @@ int main(int argc, char *argv[])
     QFontDatabase::addApplicationFont(fontPath + "Roboto-Bold.ttf");
 
     qmlRegisterType<GameHistoryModel>("QtPie", 1, 0, "GameHistoryModel");
+    qmlRegisterType<BoardSquare>("QtPie", 1, 0, "BoardSquare");
+    qmlRegisterType<HistoryItem>("QtPie", 1, 0, "HistoryItem");
+    qmlRegisterType<ScoreLineItem>("QtPie", 1, 0, "ScoreLineItem");
 
     QQmlApplicationEngine engine;
     // URL matches the URI defined in CMakeLists.txt + the file path

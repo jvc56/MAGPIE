@@ -600,7 +600,7 @@ ApplicationWindow {
                                     spacing: 2 // Spacing between move lines
                                     
                                     Repeater {
-                                        model: model.modelData.scoreLines // Iterate over scoreLines
+                                        model: modelData.scoreLines // Iterate over scoreLines
                                         delegate: RowLayout {
                                             spacing: 4 // Space between move part and score part
                                             
@@ -622,7 +622,7 @@ ApplicationWindow {
                                     }
 
                                     Text {
-                                        text: model.modelData.rackString
+                                        text: modelData.rackString
                                         color: "#A6ADC8"
                                         font.family: "Consolas"
                                         font.pixelSize: 12
@@ -631,7 +631,7 @@ ApplicationWindow {
                                 }
                                 
                                 Text {
-                                    text: model.modelData.cumulativeScore
+                                    text: modelData.cumulativeScore
                                     color: "#89B4FA"
                                     anchors.right: parent.right
                                     anchors.bottom: parent.bottom // Move to bottom
