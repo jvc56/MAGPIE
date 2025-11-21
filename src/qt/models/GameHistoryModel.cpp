@@ -198,7 +198,7 @@ void GameHistoryModel::updateHistory()
         int turnScore = cumulativeScore - lastScores[playerIndex];
         lastScores[playerIndex] = cumulativeScore;
         
-        QString formattedScore = QString("(%1%2)")
+        QString formattedScore = QString("%1%2")
             .arg(turnScore >= 0 ? "+" : "")
             .arg(turnScore);
 
