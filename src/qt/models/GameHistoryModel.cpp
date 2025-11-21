@@ -25,6 +25,7 @@ void GameHistoryModel::cleanup()
     m_boardCache.clear();
     qDeleteAll(m_historyCache);
     m_historyCache.clear();
+    m_historyItemEndIndices.clear();
     if (m_game) {
         bridge_game_destroy(m_game);
         m_game = nullptr;
@@ -62,12 +63,12 @@ void GameHistoryModel::loadGame(const QString &gcgContent)
     
     updateHistory();
 
-    // Reset to start
-    m_currentIndex = 0;
-    bridge_game_play_to_index(m_gameHistory, m_game, 0);
-
-    updateGameState();
-    emit gameChanged();
+    // Set initial state (Jump to first move if available)
+    if (!m_historyItemEndIndices.isEmpty()) {
+        jumpToHistoryIndex(0);
+    } else {
+        jumpTo(0);
+    }
 }
 
 void GameHistoryModel::loadGameFromFile(const QUrl &fileUrl)
@@ -113,22 +114,18 @@ void GameHistoryModel::openGameDialog()
 void GameHistoryModel::next()
 {
     if (!m_gameHistory || !m_game) return;
-    
-    int total = bridge_get_num_events(m_gameHistory);
-    if (m_currentIndex >= total) return;
-
-    m_currentIndex++;
-    bridge_game_play_to_index(m_gameHistory, m_game, m_currentIndex);
-
-    updateGameState();
-    emit gameChanged();
+    int currentHIdx = currentHistoryIndex();
+    if (currentHIdx < m_historyItemEndIndices.size() - 1) {
+        jumpToHistoryIndex(currentHIdx + 1);
+    }
 }
 
 void GameHistoryModel::previous()
 {
     if (!m_game) return;
-    if (m_currentIndex > 0) {
-        jumpTo(m_currentIndex - 1);
+    int currentHIdx = currentHistoryIndex();
+    if (currentHIdx > 0) {
+        jumpToHistoryIndex(currentHIdx - 1);
     }
 }
 
@@ -146,10 +143,34 @@ void GameHistoryModel::jumpTo(int index)
     emit gameChanged();
 }
 
+void GameHistoryModel::jumpToHistoryIndex(int index)
+{
+    if (index < 0 || index >= m_historyItemEndIndices.size()) return;
+    jumpTo(m_historyItemEndIndices[index]);
+}
+
+int GameHistoryModel::currentHistoryIndex() const
+{
+    if (m_currentIndex == 0) return -1;
+    // Find the index i such that m_historyItemEndIndices[i] == m_currentIndex
+    // Or if m_currentIndex is intermediate, map it to the containing item
+    for (int i = 0; i < m_historyItemEndIndices.size(); ++i) {
+        // Since we always jump to end indices, exact match is likely.
+        // If we are at an intermediate index (e.g. 1 when item covers 0,1 -> end index 2),
+        // we should probably return i.
+        // m_historyItemEndIndices contains EXCLUSIVE upper bounds (e.g. 2 means events 0,1 are played).
+        if (m_currentIndex <= m_historyItemEndIndices[i]) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 void GameHistoryModel::updateHistory()
 {
     qDeleteAll(m_historyCache);
     m_historyCache.clear();
+    m_historyItemEndIndices.clear();
 
     if (!m_gameHistory || !m_game) return;
 
@@ -178,6 +199,9 @@ void GameHistoryModel::updateHistory()
             current.cumulativeScore, 
             current.eventIndex
         ));
+        // Store the end index (event index + 1) for this history item
+        m_historyItemEndIndices.append(current.eventIndex + 1);
+
         // Clear the list for next usage, but DO NOT delete the items as they are now owned by HistoryItem (conceptually)
         current.scoreLines.clear();
         current.valid = false;
@@ -306,6 +330,11 @@ QString GameHistoryModel::player2Name() const
 int GameHistoryModel::player1Score() const
 {
     if (!m_game) return 0;
+    // If the current index is inside a merged turn, we need to look ahead to the end of that turn
+    // to get the score that includes bonuses.
+    // However, bridge_get_player_score uses the current game state.
+    // We rely on the navigation (next/jumpTo) to place us at the *end* of merged turns.
+    // See updateHistory() and jumpToHistoryIndex() logic.
     return bridge_get_player_score(m_game, 0);
 }
 
@@ -317,6 +346,12 @@ int GameHistoryModel::player2Score() const
 
 int GameHistoryModel::playerOnTurnIndex() const
 {
+    if (m_currentIndex > 0 && m_gameHistory) {
+        int playerIndex;
+        bridge_get_event_details(m_gameHistory, m_game, m_currentIndex - 1, &playerIndex, nullptr, nullptr, nullptr, nullptr, nullptr);
+        return playerIndex;
+    }
+
     if (!m_game) return 0;
     return bridge_get_player_on_turn_index(m_game);
 }
@@ -332,6 +367,11 @@ int GameHistoryModel::totalEvents() const
     return bridge_get_num_events(m_gameHistory);
 }
 
+int GameHistoryModel::totalHistoryItems() const
+{
+    return m_historyItemEndIndices.size();
+}
+
 QList<QObject*> GameHistoryModel::board() const
 {
     return m_boardCache;
@@ -340,6 +380,16 @@ QList<QObject*> GameHistoryModel::board() const
 QString GameHistoryModel::currentRack() const
 {
     if (!m_game) return "";
+
+    int hIndex = currentHistoryIndex();
+    if (hIndex >= 0 && hIndex < m_historyCache.size()) {
+        HistoryItem *item = qobject_cast<HistoryItem*>(m_historyCache.at(hIndex));
+        if (item) {
+            return item->rackString();
+        }
+    }
+    
+    // Fallback for m_currentIndex == 0 (no history item selected, start of game)
     char* rackStr = bridge_get_current_rack(m_game);
     QString result = QString::fromUtf8(rackStr);
     free(rackStr);
@@ -349,4 +399,36 @@ QString GameHistoryModel::currentRack() const
 QList<QObject*> GameHistoryModel::history() const
 {
     return m_historyCache;
+}
+
+QString GameHistoryModel::unseenTiles() const
+{
+    if (!m_game) return "";
+    char* tiles = nullptr;
+    bridge_get_unseen_tiles(m_game, &tiles, nullptr, nullptr);
+    QString s = QString::fromUtf8(tiles);
+    if (tiles) free(tiles);
+    return s;
+}
+
+int GameHistoryModel::bagCount() const
+{
+    if (!m_game) return 0;
+    return bridge_get_bag_count(m_game);
+}
+
+int GameHistoryModel::vowelCount() const
+{
+    if (!m_game) return 0;
+    int v = 0;
+    bridge_get_unseen_tiles(m_game, nullptr, &v, nullptr);
+    return v;
+}
+
+int GameHistoryModel::consonantCount() const
+{
+    if (!m_game) return 0;
+    int c = 0;
+    bridge_get_unseen_tiles(m_game, nullptr, nullptr, &c);
+    return c;
 }
