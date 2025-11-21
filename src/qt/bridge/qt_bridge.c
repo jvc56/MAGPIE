@@ -13,6 +13,7 @@
 #include "../../impl/gcg.h"
 #include "../../impl/gameplay.h"
 #include "../../util/io_util.h"
+#include "../../util/string_util.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -310,33 +311,44 @@ void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index
             game_event_t type = game_event_get_type(event);
             switch (type) {
                 case GAME_EVENT_CHALLENGE_BONUS:
-                    human_readable = string_duplicate("(challenge)");
+                    human_readable = string_duplicate("challenged");
                     break;
                 case GAME_EVENT_PHONY_TILES_RETURNED:
-                    human_readable = string_duplicate("(phony)");
+                    human_readable = string_duplicate("phony");
                     break;
                 case GAME_EVENT_TIME_PENALTY:
-                    human_readable = string_duplicate("(time)");
+                    human_readable = string_duplicate("time");
                     break;
                 case GAME_EVENT_END_RACK_POINTS:
+                    human_readable = string_duplicate("rack bonus");
+                    break;
                 case GAME_EVENT_END_RACK_PENALTY:
-                    human_readable = string_duplicate("(end rack)");
+                    human_readable = string_duplicate("rack penalty");
                     break;
                 default:
                     break;
             }
         }
 
+        char *final_str = NULL;
         if (human_readable) {
-            *move_str = human_readable;
+            final_str = human_readable;
         } else {
             const char *s = game_event_get_cgp_move_string(event);
-            *move_str = s ? string_duplicate(s) : string_duplicate("");
+            final_str = s ? string_duplicate(s) : string_duplicate("");
         }
+        
+        // Apply styling
+        char buffer[512];
+        snprintf(buffer, sizeof(buffer), "<span style=\"font-size: 12px; font-weight: normal; display: inline-block; margin-top: 2px; margin-bottom: 2px;\">%s</span>", final_str);
+        *move_str = string_duplicate(buffer);
+        free(final_str);
     }
     
     if (rack_str) {
         const Rack *r = game_event_get_const_rack(event);
+        char *content_str = NULL;
+        
         if (r) {
             const LetterDistribution *ld = game_get_ld(TO_GAME(game));
             char buffer[64] = {0}; 
@@ -354,10 +366,16 @@ void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index
                     free(hl);
                 }
             }
-            *rack_str = string_duplicate(buffer);
+            content_str = string_duplicate(buffer);
         } else {
-            *rack_str = string_duplicate("");
+            content_str = string_duplicate("");
         }
+        
+        // Apply styling
+        char buffer[512];
+        snprintf(buffer, sizeof(buffer), "<span style=\"font-size: 12px; display: inline-block; margin-top: 2px; margin-bottom: 2px;\">%s</span>", content_str);
+        *rack_str = string_duplicate(buffer);
+        free(content_str);
     }
 }
 

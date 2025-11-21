@@ -179,93 +179,38 @@ ApplicationWindow {
                                         ctx.closePath();
                                         ctx.fill();
 
-                                                                                                                // Draw letter
+                                        // Draw letter
+                                        ctx.font = "900 " + (modelData.isBlank ? gridContainer.cellSize * 0.4 : gridContainer.cellSize * 0.5) + "px 'Clear Sans'";
+                                        ctx.fillStyle = "#1E1E2E";
+                                        ctx.textAlign = "center";
+                                        ctx.textBaseline = "middle";
+                                        var letterText = modelData.isBlank ? modelData.letter.toUpperCase() : modelData.letter;
+                                        ctx.fillText(letterText, x + gridContainer.cellSize / 2, y + gridContainer.cellSize * 0.52);
 
-                                                                                                                ctx.font = "900 " + (modelData.isBlank ? gridContainer.cellSize * 0.4 : gridContainer.cellSize * 0.5) + "px 'Clear Sans'";
+                                        // Draw score
+                                        if (modelData.score > 0) {
+                                            var scoreStr = modelData.score.toString();
+                                            var scoreFontSize = scoreStr.length > 1 ? (gridContainer.cellSize * 0.22) : (gridContainer.cellSize * 0.25);
+                                            ctx.font = scoreFontSize + "px 'Clear Sans'";
+                                            ctx.textAlign = "right";
+                                            ctx.textBaseline = "bottom";
+                                            
+                                            var rightOffset = scoreStr.length > 1 ? 0.95 : 0.88;
+                                            
+                                            // Move up to 0.90 to match RackView appearance
+                                            ctx.fillText(modelData.score, x + gridContainer.cellSize * rightOffset, y + gridContainer.cellSize * 0.90);
+                                        }
 
-                                                                                                                ctx.fillStyle = "#1E1E2E";
-
-                                                                                                                ctx.textAlign = "center";
-
-                                                                                                                ctx.textBaseline = "middle";
-
-                                                                                                                var letterText = modelData.isBlank ? modelData.letter.toUpperCase() : modelData.letter;
-
-                                                                                                                ctx.fillText(letterText, x + gridContainer.cellSize / 2, y + gridContainer.cellSize * 0.52);
-
-                                                                                                                
-
-                                                                                                                                                // Draw score
-
-                                                                                                                
-
-                                                                                                                                                if (modelData.score > 0) {
-
-                                                                                                                
-
-                                                                                                                                                    var scoreStr = modelData.score.toString();
-
-                                                                                                                
-
-                                                                                                                                                    var scoreFontSize = scoreStr.length > 1 ? (gridContainer.cellSize * 0.22) : (gridContainer.cellSize * 0.25);
-
-                                                                                                                
-
-                                                                                                                                                    ctx.font = scoreFontSize + "px 'Clear Sans'";
-
-                                                                                                                
-
-                                                                                                                                                    ctx.textAlign = "right";
-
-                                                                                                                
-
-                                                                                                                                                                                        ctx.textBaseline = "bottom";
-
-                                                                                                                
-
-                                                                                                                                                                                        
-
-                                                                                                                
-
-                                                                                                                                                                                        var rightOffset = scoreStr.length > 1 ? 0.95 : 0.88;
-
-                                                                                                                
-
-                                                                                                                                                                                        
-
-                                                                                                                
-
-                                                                                                                                                                                        // Move up to 0.90 to match RackView appearance
-
-                                                                                                                
-
-                                                                                                                                                                                        ctx.fillText(modelData.score, x + gridContainer.cellSize * rightOffset, y + gridContainer.cellSize * 0.90);
-
-                                                                                                                
-
-                                                                                                                                                                                    }
-
-                                                                                                                
-
-                                                                                                                // Draw blank border
-
-                                                                                                                if (modelData.isBlank) {
-
-                                                                                                                    ctx.strokeStyle = "black";
-
-                                                                                                                    ctx.lineWidth = 1;
-
-                                                                                                                    // Center around the new letter vertical position (0.52)
-
-                                                                                                                    var blankSize = gridContainer.cellSize * 0.5;
-
-                                                                                                                    var blankX = x + (gridContainer.cellSize - blankSize) / 2;
-
-                                                                                                                    var blankY = y + gridContainer.cellSize * 0.52 - blankSize / 2;
-
-                                                                                                                    ctx.strokeRect(blankX, blankY, blankSize, blankSize);
-
-                                                                                                                }                                    } else {
+                                        // Draw blank border
+                                        if (modelData.isBlank) {
+                                            ctx.strokeStyle = "black";
+                                            ctx.lineWidth = 1;
+                                            // Center around the new letter vertical position (0.52)
+                                            var blankSize = gridContainer.cellSize * 0.5;
+                                            var blankX = x + (gridContainer.cellSize - blankSize) / 2;
+                                            var blankY = y + gridContainer.cellSize * 0.52 - blankSize / 2;
+                                            ctx.strokeRect(blankX, blankY, blankSize, blankSize);
+                                        }                                    } else {
                                         // Draw bonus square (rounded rectangle)
                                         var style = gridContainer.bonusStyles[modelData.letterMultiplier + "," + modelData.wordMultiplier];
                                         ctx.fillStyle = style.color;
@@ -338,7 +283,7 @@ ApplicationWindow {
                 spacing: 15
                 
                 // Go to First Button
-                Button { 
+                Button {
                     id: goToFirstButton
                     Layout.preferredWidth: leftColumn.computedCellSize
                     Layout.preferredHeight: leftColumn.computedCellSize
@@ -379,7 +324,7 @@ ApplicationWindow {
                 }
 
                 // Previous Button
-                Button { 
+                Button {
                     id: previousButton
                     Layout.preferredWidth: leftColumn.computedCellSize
                     Layout.preferredHeight: leftColumn.computedCellSize
@@ -417,8 +362,8 @@ ApplicationWindow {
                     }
                 }
 
-                Text { 
-                    text: "Turn " + (gameModel.currentEventIndex + 1) + " of " + gameModel.totalEvents 
+                Text {
+                    text: "Turn " + (gameModel.currentEventIndex + 1) + " of " + gameModel.totalEvents
                     color: "#CDD6F4"
                     font.pixelSize: 18
                     font.bold: true
@@ -427,7 +372,7 @@ ApplicationWindow {
                 }
 
                 // Next Button
-                Button { 
+                Button {
                     id: nextButton
                     Layout.preferredWidth: leftColumn.computedCellSize
                     Layout.preferredHeight: leftColumn.computedCellSize
@@ -466,7 +411,7 @@ ApplicationWindow {
                 }
 
                 // Go to Last Button
-                Button { 
+                Button {
                     id: goToLastButton
                     Layout.preferredWidth: leftColumn.computedCellSize
                     Layout.preferredHeight: leftColumn.computedCellSize
@@ -549,7 +494,7 @@ ApplicationWindow {
                                 leftPadding: 5 // Added padding
                                 rightPadding: 5 // Added padding
                             }
-                            Text { 
+                            Text {
                                 text: gameModel.player1Score
                                 color: gameModel.playerOnTurnIndex === 0 ? "#89B4FA" : "#7F849C"
                                 font.pixelSize: 36
@@ -578,7 +523,7 @@ ApplicationWindow {
                             anchors.fill: parent
                             spacing: 0
 
-                            Text { 
+                            Text {
                                 text: gameModel.player2Name
                                 color: gameModel.playerOnTurnIndex === 1 ? "#CDD6F4" : "#7F849C"
                                 font.pixelSize: 20 // Reduced max font size
@@ -590,7 +535,7 @@ ApplicationWindow {
                                 leftPadding: 5 // Added padding
                                 rightPadding: 5 // Added padding
                             }
-                            Text { 
+                            Text {
                                 text: gameModel.player2Score
                                 color: gameModel.playerOnTurnIndex === 1 ? "#89B4FA" : "#7F849C"
                                 font.pixelSize: 36
@@ -649,73 +594,41 @@ ApplicationWindow {
                                 anchors.fill: parent
                                 anchors.margins: 8
                                 
-                                                                                                ColumnLayout {
-                                
-                                                                                                    anchors.left: parent.left
-                                
-                                                                                                    anchors.verticalCenter: parent.verticalCenter
-                                
-                                                                                                    spacing: 2 // Spacing between move lines
-                                
-                                                                                                    
-                                
-                                                                                                    Repeater {
-                                
-                                                                                                        model: model.modelData.scoreLines // Iterate over scoreLines
-                                
-                                                                                                        delegate: RowLayout {
-                                
-                                                                                                            spacing: 4 // Space between move part and score part
-                                
-                                                                                                            
-                                
-                                                                                                            Text { 
-                                
-                                                                                                                text: modelData.text
-                                
-                                                                                                                color: "#CDD6F4"
-                                
-                                                                                                                // Apply bold only for primary moves (TILE, EXCHANGE, PASS)
-                                
-                                                                                                                font.bold: modelData.type == 1 || modelData.type == 3 || modelData.type == 5 // Corresponding enum values
-                                
-                                                                                                                font.pixelSize: 14
-                                
-                                                                                                                Layout.alignment: Qt.AlignVCenter
-                                
-                                                                                                            }
-                                
-                                                                                                            Text { 
-                                
-                                                                                                                text: modelData.scoreText
-                                
-                                                                                                                color: "#CDD6F4" // Using same color, but can be customized
-                                
-                                                                                                                font.pixelSize: 10 // Smaller font size
-                                
-                                                                                                                font.bold: false
-                                
-                                                                                                                Layout.alignment: Qt.AlignVCenter
-                                
-                                                                                                            }
-                                
-                                                                                                        }
-                                
-                                                                                                    }
-                                
-                                                                                                    Text { 
-                                
-                                                                                                        text: model.modelData.rackString
-                                
-                                                                                                        color: "#A6ADC8"
-                                
-                                                                                                        font.family: "Consolas"
-                                
-                                                                                                        font.pixelSize: 12
-                                
-                                                                                                    }
-                                
-                                                                                                }
+                                ColumnLayout {
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    spacing: 2 // Spacing between move lines
+                                    
+                                    Repeater {
+                                        model: model.modelData.scoreLines // Iterate over scoreLines
+                                        delegate: RowLayout {
+                                            spacing: 4 // Space between move part and score part
+                                            
+                                            Text {
+                                                text: modelData.text
+                                                color: "#CDD6F4"
+                                                font.pixelSize: 12
+                                                textFormat: Text.StyledText
+                                                Layout.alignment: Qt.AlignVCenter
+                                            }
+                                            Text {
+                                                text: modelData.scoreText
+                                                color: "#CDD6F4"
+                                                font.pixelSize: 10 // Smaller font size
+                                                font.bold: false
+                                                Layout.alignment: Qt.AlignVCenter
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: model.modelData.rackString
+                                        color: "#A6ADC8"
+                                        font.family: "Consolas"
+                                        font.pixelSize: 12
+                                        textFormat: Text.StyledText
+                                    }
+                                }
                                 
                                 Text {
                                     text: model.modelData.cumulativeScore
