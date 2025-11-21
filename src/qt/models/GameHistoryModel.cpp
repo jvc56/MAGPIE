@@ -167,7 +167,7 @@ void GameHistoryModel::updateHistory()
         bool valid = false;
     } current;
 
-    auto flush = [&](bool isEnd = false) {
+    auto flush = [&](bool /*isEnd*/ = false) {
         if (!current.valid) return;
         m_historyCache.append(new HistoryItem(
             current.playerIndex, 
@@ -268,7 +268,7 @@ void GameHistoryModel::updateGameState()
                 if (isBlank) {
                     letterStr = letterStr.toUpper();
                 }
-                uint8_t unblanked_ml = ml & 0x7F; // Remove blank bit if any? Bridge logic handles it.
+                // uint8_t unblanked_ml = ml & 0x7F; // Remove blank bit if any? Bridge logic handles it.
                 // bridge_get_letter_score takes ml directly.
                 score = bridge_get_letter_score(m_game, ml);
             }
