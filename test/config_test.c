@@ -956,7 +956,7 @@ void test_config_anno(void) {
   game = config_get_game(config);
   bag = game_get_bag(game);
 
-  assert_config_exec_status(config, "rack XEQUIES", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r XEQUIES", ERROR_STATUS_SUCCESS);
   assert(bag_initial_total == bag_get_letters(bag) + 12);
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
@@ -982,7 +982,7 @@ void test_config_anno(void) {
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
 
   assert_config_exec_status(config, "rack DISLINK", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "com i9 IDS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "c i9 IDS", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 0);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(159));
@@ -992,13 +992,13 @@ void test_config_anno(void) {
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
 
-  assert_config_exec_status(config, "rack SINATE?", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "com 11d ANTIQuES", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r SINATE?", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "c 11d ANTIQuES", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 1);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(274));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
 
-  assert_config_exec_status(config, "rack DISLINK", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r DISLINK", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com ex LKNSD", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 0);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(274));
@@ -1024,73 +1024,73 @@ void test_config_anno(void) {
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(0));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
 
-  assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "n", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 1);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(28));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
 
   // The next command should play the turn and the challenge bonus
-  assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "n", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 0);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(28));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
 
   // The next command should play the turn and the challenge bonus
-  assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "n", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 1);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
 
   // The next command should play the turn but not the phony tiles returned
   // event
-  assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "n", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 0);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(159));
 
   // The next command should play the phony tiles returned event
-  assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "n", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 0);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
 
-  assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "n", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 1);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(274));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
 
   // Test previous
-  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 0);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
 
-  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 0);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(159));
 
-  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 1);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
 
-  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 0);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(28));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(130));
 
-  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 1);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(28));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
 
-  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 0);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(0));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
 
-  assert_config_exec_status(config, "prev",
+  assert_config_exec_status(config, "p",
                             ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE);
   assert(game_get_player_on_turn_index(game) == 0);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(0));
@@ -1290,39 +1290,39 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
 
   assert_config_exec_status(config, "rack BONSOIR", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "g", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
 
   assert_config_exec_status(config, "rack DISLINK", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "g", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
 
   assert_config_exec_status(config, "rack UNDEWAY", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "g", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
 
   assert_config_exec_status(config, "rack CCTTUU?", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "g", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
 
   assert_config_exec_status(config, "rack GVEAWAY", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "g", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
 
   assert_config_exec_status(config, "rack BERLEED", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "g", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
 
   assert_config_exec_status(config, "rack OVERHOT", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "g", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
 
   assert_config_exec_status(config, "rack PLENIPO", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "g", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
 
   assert_config_exec_status(config, "rack MAMALIG", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "g", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
   assert(game_get_game_end_reason(game) == GAME_END_REASON_NONE);
 
@@ -1539,8 +1539,8 @@ void test_config_export(void) {
   assert(player_get_score(game_get_player(config_get_game(config), 1)) ==
          int_to_equity(32));
 
-  // This should export with the same "a.gcg" name
-  assert_config_exec_status(config, "ex", ERROR_STATUS_SUCCESS);
+  // This should export with the same "a.gcg" name using the export hotkey
+  assert_config_exec_status(config, "e", ERROR_STATUS_SUCCESS);
 
   assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
   assert(player_get_score(game_get_player(config_get_game(config), 0)) ==

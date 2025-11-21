@@ -163,6 +163,7 @@ typedef struct ParsedArg {
   command_exec_func_t exec_func;
   command_api_func_t api_func;
   command_status_func_t status_func;
+  bool is_hotkey;
 } ParsedArg;
 
 struct Config {
@@ -223,7 +224,8 @@ void parsed_arg_create(Config *config, arg_token_t arg_token, const char *name,
                        int num_req_values, int num_values,
                        command_exec_func_t command_exec_func,
                        command_api_func_t command_api_func,
-                       command_status_func_t command_status_func) {
+                       command_status_func_t command_status_func,
+                       const bool is_hotkey) {
   ParsedArg *parsed_arg = malloc_or_die(sizeof(ParsedArg));
   parsed_arg->num_req_values = num_req_values;
   parsed_arg->num_values = num_values;
@@ -236,6 +238,7 @@ void parsed_arg_create(Config *config, arg_token_t arg_token, const char *name,
   parsed_arg->exec_func = command_exec_func;
   parsed_arg->api_func = command_api_func;
   parsed_arg->status_func = command_status_func;
+  parsed_arg->is_hotkey = is_hotkey;
 
   config->pargs[arg_token] = parsed_arg;
 }
@@ -2721,7 +2724,7 @@ void config_load_parsed_args(Config *config,
               error_stack,
               ERROR_STATUS_CONFIG_LOAD_INSUFFICIENT_NUMBER_OF_VALUES,
               get_formatted_string("insufficient number of values for argument "
-                                   "%s, expected %d, got %d",
+                                   "'%s', expected %d but got %d",
                                    current_parg->name,
                                    current_parg->num_req_values,
                                    current_value_index));
@@ -2738,12 +2741,19 @@ void config_load_parsed_args(Config *config,
       }
 
       bool parg_has_prefix[NUMBER_OF_ARG_TOKENS] = {false};
-      bool ambiguous_arg_name = false;
+      bool is_ambiguous = false;
       for (int k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
+        if (string_length(arg_name) == 1 && config->pargs[k]->is_hotkey &&
+            arg_name[0] == config->pargs[k]->name[0]) {
+          is_ambiguous = false;
+          current_parg = config->pargs[k];
+          current_arg_token = k;
+          break;
+        }
         if (has_prefix(arg_name, config->pargs[k]->name)) {
           parg_has_prefix[k] = true;
           if (current_parg) {
-            ambiguous_arg_name = true;
+            is_ambiguous = true;
           } else {
             current_parg = config->pargs[k];
             current_arg_token = k;
@@ -2751,7 +2761,7 @@ void config_load_parsed_args(Config *config,
         }
       }
 
-      if (ambiguous_arg_name) {
+      if (is_ambiguous) {
         StringBuilder *sb = string_builder_create();
         string_builder_add_formatted_string(
             sb, "ambiguous command '%s' could be:", arg_name);
@@ -4114,42 +4124,43 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   }
 
   // Command parsed from string input
-#define cmd(token, name, n_req, n_val, func, stat)                             \
+#define cmd(token, name, n_req, n_val, func, stat, hotkey)                     \
   parsed_arg_create(config, token, name, n_req, n_val, execute_##func,         \
-                    str_api_##func, status_##stat)
+                    str_api_##func, status_##stat, hotkey)
 
   // Non-command arg
 #define arg(token, name, n_req, n_val)                                         \
   parsed_arg_create(config, token, name, n_req, n_val, execute_fatal,          \
-                    str_api_fatal, status_generic)
+                    str_api_fatal, status_generic, false)
 
-  cmd(ARG_TOKEN_SET, "setoptions", 0, 0, noop, generic);
-  cmd(ARG_TOKEN_CGP, "cgp", 4, 4, load_cgp, generic);
-  cmd(ARG_TOKEN_LOAD, "load", 1, 1, load_gcg, generic);
-  cmd(ARG_TOKEN_NEW_GAME, "newgame", 0, 2, new_game, generic);
-  cmd(ARG_TOKEN_EXPORT, "export", 0, 1, export, generic);
-  cmd(ARG_TOKEN_COMMIT, "commit", 1, 3, commit, generic);
-  cmd(ARG_TOKEN_CHALLENGE, "challenge", 0, 1, challenge, generic);
-  cmd(ARG_TOKEN_UNCHALLENGE, "unchallenge", 0, 1, unchallenge, generic);
-  cmd(ARG_TOKEN_OVERTIME, "overtimepenalty", 2, 2, overtime, generic);
-  cmd(ARG_TOKEN_SWITCH_NAMES, "switchnames", 0, 0, switch_names, generic);
-  cmd(ARG_TOKEN_SHOW, "show", 0, 0, show, generic);
-  cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic);
-  cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic);
-  cmd(ARG_TOKEN_GEN, "generate", 0, 0, move_gen, generic);
-  cmd(ARG_TOKEN_SIM, "simulate", 0, 1, sim, sim);
-  cmd(ARG_TOKEN_INFER, "infer", 0, 5, infer, generic);
-  cmd(ARG_TOKEN_ENDGAME, "endgame", 0, 0, endgame, generic);
-  cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, generic);
-  cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic);
-  cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic);
-  cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic);
-  cmd(ARG_TOKEN_NEXT, "next", 0, 0, next, generic);
-  cmd(ARG_TOKEN_PREVIOUS, "previous", 0, 0, previous, generic);
-  cmd(ARG_TOKEN_GOTO, "goto", 1, 1, goto, generic);
-  cmd(ARG_TOKEN_NOTE, "note", 1, 1, note, generic);
-  cmd(ARG_TOKEN_P1_NAME, "p1", 1, 1, set_player_one_name, generic);
-  cmd(ARG_TOKEN_P2_NAME, "p2", 1, 1, set_player_two_name, generic);
+  cmd(ARG_TOKEN_SET, "setoptions", 0, 0, noop, generic, false);
+  cmd(ARG_TOKEN_CGP, "cgp", 4, 4, load_cgp, generic, false);
+  cmd(ARG_TOKEN_LOAD, "load", 1, 1, load_gcg, generic, false);
+  cmd(ARG_TOKEN_NEW_GAME, "newgame", 0, 2, new_game, generic, false);
+  cmd(ARG_TOKEN_EXPORT, "export", 0, 1, export, generic, true);
+  cmd(ARG_TOKEN_COMMIT, "commit", 1, 3, commit, generic, true);
+  cmd(ARG_TOKEN_CHALLENGE, "challenge", 0, 1, challenge, generic, false);
+  cmd(ARG_TOKEN_UNCHALLENGE, "unchallenge", 0, 1, unchallenge, generic, false);
+  cmd(ARG_TOKEN_OVERTIME, "overtimepenalty", 2, 2, overtime, generic, false);
+  cmd(ARG_TOKEN_SWITCH_NAMES, "switchnames", 0, 0, switch_names, generic,
+      false);
+  cmd(ARG_TOKEN_SHOW, "show", 0, 0, show, generic, true);
+  cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic, true);
+  cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic, true);
+  cmd(ARG_TOKEN_GEN, "generate", 0, 0, move_gen, generic, true);
+  cmd(ARG_TOKEN_SIM, "simulate", 0, 1, sim, sim, false);
+  cmd(ARG_TOKEN_INFER, "infer", 0, 5, infer, generic, false);
+  cmd(ARG_TOKEN_ENDGAME, "endgame", 0, 0, endgame, generic, false);
+  cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, generic, false);
+  cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic, false);
+  cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic, false);
+  cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic, false);
+  cmd(ARG_TOKEN_NEXT, "next", 0, 0, next, generic, true);
+  cmd(ARG_TOKEN_PREVIOUS, "previous", 0, 0, previous, generic, true);
+  cmd(ARG_TOKEN_GOTO, "goto", 1, 1, goto, generic, false);
+  cmd(ARG_TOKEN_NOTE, "note", 1, 1, note, generic, false);
+  cmd(ARG_TOKEN_P1_NAME, "p1", 1, 1, set_player_one_name, generic, false);
+  cmd(ARG_TOKEN_P2_NAME, "p2", 1, 1, set_player_two_name, generic, false);
 
   arg(ARG_TOKEN_DATA_PATH, "path", 1, 1);
   arg(ARG_TOKEN_BINGO_BONUS, "bb", 1, 1);
