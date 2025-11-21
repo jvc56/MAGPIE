@@ -657,8 +657,8 @@ ApplicationWindow {
                                 anchors.bottom: parent.bottom
                                 width: parent.width
                                 height: 1
-                                color: "#313244"
-                                opacity: 0.5
+                                color: "#585B70"
+                                opacity: 0.3
                             }
                         }
                     }
