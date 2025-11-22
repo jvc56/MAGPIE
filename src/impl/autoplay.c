@@ -782,5 +782,4 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
       autoplay_results, args->human_readable, show_divergent_results);
   thread_control_print(thread_control, autoplay_results_string);
   free(autoplay_results_string);
-  gen_destroy_cache();
 }

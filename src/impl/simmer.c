@@ -62,5 +62,4 @@ void simulate(SimArgs *sim_args, SimResults *sim_results,
   // repeated alloc and deallocs if possible
   rvs_destroy(rvs);
   rvs_destroy(rng);
-  gen_destroy_cache();
 }
