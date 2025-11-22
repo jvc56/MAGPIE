@@ -53,6 +53,8 @@ set(QT_SOURCES
     src/qt/main.cpp
     src/qt/models/GameHistoryModel.cpp
     src/qt/models/GameHistoryModel.h
+    src/qt/models/AnalysisModel.cpp
+    src/qt/models/AnalysisModel.h
     src/qt/models/BoardSquare.cpp
     src/qt/models/BoardSquare.h
     src/qt/models/HistoryItem.cpp
@@ -80,6 +82,7 @@ qt_add_qml_module(qtpie
     RESOURCE_PREFIX "/"
     QML_FILES src/qt/views/Main.qml
     src/qt/views/RackView.qml
+    src/qt/views/AnalysisPanel.qml
 )
 
 target_link_libraries(qtpie

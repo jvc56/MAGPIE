@@ -245,6 +245,7 @@ static inline void bai_update_threshold_and_challenger(
     bai_sync_data->challenger_index = -1;
     break;
   }
+  double min_Z = INFINITY;
   for (int i = 0; i < bai_sync_data->num_arms; i++) {
     if (i == bai_sync_data->astar_index ||
         rvs_are_similar(rvs, bai_sync_data->astar_index, i)) {
@@ -257,6 +258,9 @@ static inline void bai_update_threshold_and_challenger(
           bai_get_arm_z(bai_sync_data, bai_sync_data->astar_index, i);
     }
     double arm_Z = astar_arm_datum->Zs[i];
+    if (arm_Z < min_Z) {
+        min_Z = arm_Z;
+    }
     switch (threshold) {
     case BAI_THRESHOLD_NONE:
       break;
@@ -280,6 +284,23 @@ static inline void bai_update_threshold_and_challenger(
       break;
     }
   }
+  
+  // Calculate confidence
+  if (min_Z != INFINITY && bai_sync_data->num_total_samples_completed > 0) {
+      // beta(N, delta) = log((log(N) + 1) / delta)
+      // Z = log((log(N) + 1) / delta)
+      // exp(Z) = (log(N) + 1) / delta
+      // delta = (log(N) + 1) / exp(Z)
+      double N = (double)bai_sync_data->num_total_samples_completed;
+      double calculated_delta = (log(N) + 1.0) / exp(min_Z);
+      
+      // printf("BAI_DEBUG: N=%.0f min_Z=%.4f delta=%.4f\n", N, min_Z, calculated_delta);
+
+      if (calculated_delta > 1.0) calculated_delta = 1.0;
+      if (calculated_delta < 0.0) calculated_delta = 0.0;
+      bai_result_set_confidence(bai_sync_data->bai_result, 1.0 - calculated_delta);
+  }
+
   if (!bai_sync_data->initial_phase &&
       num_arms_at_threshold == bai_sync_data->num_arms) {
     bai_result_set_status(bai_sync_data->bai_result,

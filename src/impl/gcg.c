@@ -1211,6 +1211,33 @@ void parse_gcg_settings(GCGParser *gcg_parser, ErrorStack *error_stack) {
     }
     gcg_parser->current_gcg_line_index++;
   }
+
+  // Infer defaults if not already set (e.g. for empty games with just settings)
+  GameHistory *game_history = gcg_parser->game_history;
+  const char *lexicon_name = game_history_get_lexicon_name(game_history);
+  if (!lexicon_name) {
+    if (gcg_parser->existing_p0_lexicon) {
+      lexicon_name = gcg_parser->existing_p0_lexicon;
+      game_history_set_lexicon_name(game_history, lexicon_name);
+    }
+  }
+
+  if (lexicon_name) {
+    if (!game_history_get_ld_name(game_history)) {
+      char *default_ld_name =
+          ld_get_default_name_from_lexicon_name(lexicon_name, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+      game_history_set_ld_name(game_history, default_ld_name);
+      free(default_ld_name);
+    }
+    if (!game_history_get_board_layout_name(game_history)) {
+      char *default_layout = board_layout_get_default_name();
+      game_history_set_board_layout_name(game_history, default_layout);
+      free(default_layout);
+    }
+  }
 }
 
 void parse_gcg_events(GCGParser *gcg_parser, Game *game,

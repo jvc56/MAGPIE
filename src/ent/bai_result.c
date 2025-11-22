@@ -10,6 +10,7 @@
 struct BAIResult {
   bai_result_status_t status;
   int best_arm;
+  double confidence;
   Timer timer;
   uint64_t time_limit_seconds;
   cpthread_mutex_t mutex;
@@ -18,6 +19,7 @@ struct BAIResult {
 void bai_result_reset(BAIResult *bai_result, uint64_t time_limit_seconds) {
   bai_result->status = BAI_RESULT_STATUS_NONE;
   bai_result->best_arm = -1;
+  bai_result->confidence = 0.0;
   bai_result->time_limit_seconds = time_limit_seconds;
   ctimer_start(&bai_result->timer);
 }
@@ -28,6 +30,10 @@ BAIResult *bai_result_create(void) {
   bai_result_reset(bai_result, 0);
   return bai_result;
 }
+
+// We can repurpose best_arm to double as a place to store confidence if we wanted to save space,
+// but let's just add a field. Wait, struct definition is in .c file.
+// I need to update struct BAIResult first.
 
 void bai_result_destroy(BAIResult *bai_result) { free(bai_result); }
 
@@ -83,4 +89,19 @@ void bai_result_set_status(BAIResult *bai_result,
   cpthread_mutex_lock(&bai_result->mutex);
   bai_result->status = status;
   cpthread_mutex_unlock(&bai_result->mutex);
+}
+
+void bai_result_set_confidence(BAIResult *bai_result, double confidence) {
+  // No mutex needed if only called from main BAI loop which owns the result updates
+  // But for safety in threaded context:
+  cpthread_mutex_lock(&bai_result->mutex);
+  bai_result->confidence = confidence;
+  cpthread_mutex_unlock(&bai_result->mutex);
+}
+
+double bai_result_get_confidence(BAIResult *bai_result) {
+  cpthread_mutex_lock(&bai_result->mutex);
+  double conf = bai_result->confidence;
+  cpthread_mutex_unlock(&bai_result->mutex);
+  return conf;
 }

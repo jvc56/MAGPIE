@@ -11,6 +11,7 @@
 #include "../bridge/qt_bridge.h"
 #include "BoardSquare.h"
 #include "HistoryItem.h"
+#include "AnalysisModel.h"
 
 // Forward declarations for C structs
 // (None needed as we use opaque handles from bridge)
@@ -35,6 +36,8 @@ class GameHistoryModel : public QObject
     Q_PROPERTY(int vowelCount READ vowelCount NOTIFY gameChanged)
     Q_PROPERTY(int consonantCount READ consonantCount NOTIFY gameChanged)
     Q_PROPERTY(int blankCount READ blankCount NOTIFY gameChanged)
+    Q_PROPERTY(AnalysisModel* analysisModel READ analysisModel CONSTANT)
+    Q_PROPERTY(QString lexiconName READ lexiconName NOTIFY gameChanged)
 
 public:
     explicit GameHistoryModel(QObject *parent = nullptr);
@@ -65,6 +68,8 @@ public:
     int vowelCount() const;
     int consonantCount() const;
     int blankCount() const;
+    AnalysisModel* analysisModel() const;
+    QString lexiconName() const;
 
 signals:
     void gameChanged();
@@ -79,6 +84,7 @@ private:
 
     BridgeGameHistory *m_gameHistory = nullptr;
     BridgeGame *m_game = nullptr;
+    AnalysisModel *m_analysisModel = nullptr;
     
     int m_currentIndex = 0;
     QList<QObject*> m_boardCache;

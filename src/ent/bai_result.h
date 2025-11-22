@@ -29,4 +29,7 @@ double bai_result_get_elapsed_seconds(const BAIResult *bai_result);
 void bai_result_stop_timer(BAIResult *bai_result);
 uint64_t bai_result_get_time_limit_seconds(const BAIResult *bai_result);
 
+void bai_result_set_confidence(BAIResult *bai_result, double confidence);
+double bai_result_get_confidence(BAIResult *bai_result);
+
 #endif

@@ -44,8 +44,8 @@ ApplicationWindow {
     GameHistoryModel {
         id: gameModel
         Component.onCompleted: {
-            // Sample GCG
-            loadGame("#lexicon CSW24\n#player1 olaugh olaugh\n#player2 magpie magpie\n>olaugh: AEIOUQI 8H QI +11 11\n>magpie: AB CDE 9G BE +4 4");
+            // Load default empty game
+            loadGame("#lexicon CSW24\n#player1 Player1 PlayerOne\n#player2 Player2 PlayerTwo");
         }
     }
 
@@ -812,18 +812,11 @@ ApplicationWindow {
             Layout.preferredWidth: parent.width * 0.3
             spacing: 20
             
-            Rectangle {
+            AnalysisPanel {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                color: "#313244"
-                radius: 10
-                
-                Text {
-                    text: "Analysis"
-                    color: "#585B70"
-                    font.pixelSize: 18
-                    anchors.centerIn: parent
-                }
+                analysisModel: gameModel.analysisModel
+                lexiconName: gameModel.lexiconName
             }
         }
     }

@@ -5,6 +5,7 @@
 #include <QFontDatabase>
 #include <QQuickStyle>
 #include "models/GameHistoryModel.h"
+#include "models/AnalysisModel.h"
 #include "models/BoardSquare.h"
 #include "models/HistoryItem.h"
 #include "models/ScoreLineItem.h"
@@ -25,6 +26,7 @@ int main(int argc, char *argv[])
     QFontDatabase::addApplicationFont(fontPath + "Roboto-Bold.ttf");
 
     qmlRegisterType<GameHistoryModel>("QtPie", 1, 0, "GameHistoryModel");
+    qmlRegisterType<AnalysisModel>("QtPie", 1, 0, "AnalysisModel");
     qmlRegisterType<BoardSquare>("QtPie", 1, 0, "BoardSquare");
     qmlRegisterType<HistoryItem>("QtPie", 1, 0, "HistoryItem");
     qmlRegisterType<ScoreLineItem>("QtPie", 1, 0, "ScoreLineItem");

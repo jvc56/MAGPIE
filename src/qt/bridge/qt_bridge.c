@@ -1,5 +1,8 @@
 #include "qt_bridge.h"
 
+#include "../../impl/config.h"
+#include "../../impl/move_gen.h"
+#include "../../impl/simmer.h"
 #include "../../ent/game_history.h"
 #include "../../ent/game.h"
 #include "../../ent/board.h"
@@ -9,6 +12,8 @@
 #include "../../ent/validated_move.h"
 #include "../../ent/move.h"
 #include "../../ent/rack.h"
+#include "../../ent/thread_control.h"
+#include "../../ent/sim_results.h"
 #include "../../str/move_string.h"
 #include "../../impl/gcg.h"
 #include "../../impl/gameplay.h"
@@ -18,242 +23,210 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// Wrapper struct to manage lifetime of game and its dependencies
-struct _BridgeGame {
-    Game *game;
-    LetterDistribution *ld;
-    PlayersData *pd;
-    BoardLayout *bl;
-    int bingo_bonus;
-    int game_variant;
+struct _BridgeGameHistory {
+    Config *config;
 };
 
-// Cast opaque handles to actual types
-#define TO_GH(x) ((GameHistory*)(x))
+struct _BridgeGame {
+    Game *game;
+    Config *config; // Reference
+};
+
+// Cast opaque handles
+#define TO_GH(x) (((BridgeGameHistory*)(x))->config ? config_get_game_history(((BridgeGameHistory*)(x))->config) : NULL)
+#define TO_CONFIG(x) (((BridgeGameHistory*)(x))->config)
 #define TO_GAME(x) (((BridgeGame*)(x))->game)
 
 BridgeGameHistory* bridge_game_history_create(void) {
-    return (BridgeGameHistory*)game_history_create();
+    BridgeGameHistory *gh = calloc(1, sizeof(BridgeGameHistory));
+    return gh;
 }
 
 void bridge_game_history_destroy(BridgeGameHistory* gh) {
-    game_history_destroy(TO_GH(gh));
+    if (gh) {
+        if (gh->config) {
+            config_destroy(gh->config);
+        }
+        free(gh);
+    }
 }
 
 int bridge_load_gcg(BridgeGameHistory* gh, const char* gcg_content, const char* data_path, char* error_msg, int error_msg_len) {
+    if (!gh) return 1;
+    
+    if (gh->config) {
+        config_destroy(gh->config);
+        gh->config = NULL;
+    }
+
     ErrorStack *err = error_stack_create();
-    
-    GCGParser *parser = gcg_parser_create(gcg_content, TO_GH(gh), "CSW21", err);
+    gh->config = config_create_default_with_data_paths(err, data_path);
     if (!error_stack_is_empty(err)) {
         char *msg = error_stack_get_string_and_reset(err);
-        snprintf(error_msg, error_msg_len, "Parser create failed: %s", msg);
+        snprintf(error_msg, error_msg_len, "Config create failed: %s", msg);
         free(msg);
         error_stack_destroy(err);
         return 1;
     }
 
-    parse_gcg_settings(parser, err);
+    // Pre-load default lexicon (CSW24) to allow loading GCGs without headers
+    PlayersData *pd = config_get_players_data(gh->config);
+    players_data_set(pd, PLAYERS_DATA_TYPE_KWG, data_path, "CSW24", "CSW24", err);
     if (!error_stack_is_empty(err)) {
         char *msg = error_stack_get_string_and_reset(err);
-        snprintf(error_msg, error_msg_len, "Settings parse failed: %s", msg);
+        snprintf(error_msg, error_msg_len, "Default KWG load failed: %s", msg);
         free(msg);
-        gcg_parser_destroy(parser);
-        error_stack_destroy(err);
-        return 1;
-    }
-
-    // We need to temporarily create a game to parse events, even if we destroy it later.
-    // But we need dependencies.
-    const char *lexiconName = game_history_get_lexicon_name(TO_GH(gh));
-    if (!lexiconName) lexiconName = "CSW24"; // Default lexicon
-    const char *ldName = game_history_get_ld_name(TO_GH(gh));
-    
-    LetterDistribution *ld = ld_create(data_path, ldName ? ldName : "CSW24", err);
-    if (!error_stack_is_empty(err)) {
-        char *msg = error_stack_get_string_and_reset(err);
-        snprintf(error_msg, error_msg_len, "LD load failed: %s", msg);
-        free(msg);
-        gcg_parser_destroy(parser);
-        error_stack_destroy(err);
-        return 1;
-    }
-
-    PlayersData *pd = players_data_create();
-    players_data_set(pd, PLAYERS_DATA_TYPE_KWG, data_path, lexiconName, lexiconName, err);
-    if (!error_stack_is_empty(err)) {
-        char *msg = error_stack_get_string_and_reset(err);
-        snprintf(error_msg, error_msg_len, "KWG load failed: %s", msg);
-        free(msg);
-        ld_destroy(ld);
-        gcg_parser_destroy(parser);
         error_stack_destroy(err);
         return 1;
     }
     
-    const char *layoutName = game_history_get_board_layout_name(TO_GH(gh));
-    if (!layoutName) layoutName = board_layout_get_default_name();
-    
-    BoardLayout *bl = board_layout_create();
-    board_layout_load(bl, data_path, layoutName, err);
-    
-    GameArgs gameArgs;
-    memset(&gameArgs, 0, sizeof(GameArgs));
-    gameArgs.players_data = pd;
-    gameArgs.board_layout = bl;
-    gameArgs.ld = ld;
-    gameArgs.bingo_bonus = 50;
-    gameArgs.game_variant = game_history_get_game_variant(TO_GH(gh));
+    // Debug verify
+    const char* loaded_kwg = players_data_get_data_name(pd, PLAYERS_DATA_TYPE_KWG, 0);
+    printf("BRIDGE_DEBUG: Pre-loaded KWG: %s\n", loaded_kwg ? loaded_kwg : "NULL");
 
-    Game *game = game_create(&gameArgs);
-
-    parse_gcg_events(parser, game, err);
+    players_data_set(pd, PLAYERS_DATA_TYPE_KLV, data_path, "CSW24", "CSW24", err);
     if (!error_stack_is_empty(err)) {
         char *msg = error_stack_get_string_and_reset(err);
-        snprintf(error_msg, error_msg_len, "Event parse failed: %s", msg);
+        snprintf(error_msg, error_msg_len, "Default KLV load failed: %s", msg);
         free(msg);
-        // cleanup
+        error_stack_destroy(err);
+        return 1;
     }
 
-    game_destroy(game);
-    players_data_destroy(pd);
-    board_layout_destroy(bl);
-    ld_destroy(ld);
-
-    gcg_parser_destroy(parser);
+    config_parse_gcg_string(gh->config, gcg_content, config_get_game_history(gh->config), err);
+    if (!error_stack_is_empty(err)) {
+        char *msg = error_stack_get_string_and_reset(err);
+        snprintf(error_msg, error_msg_len, "GCG parse failed: %s", msg);
+        free(msg);
+        error_stack_destroy(err);
+        return 1;
+    }
     
-    bool failed = !error_stack_is_empty(err); // Should be empty if we handled it above, but check again
     error_stack_destroy(err);
-    return failed ? 1 : 0;
+    return 0;
 }
 
-BridgeGame* bridge_game_create_from_history(BridgeGameHistory* gh, const char* data_path) {
-    ErrorStack *err = error_stack_create();
+BridgeGame* bridge_game_create_from_history(BridgeGameHistory* gh) {
+    if (!gh || !gh->config) return NULL;
+    
     BridgeGame *b_game = calloc(1, sizeof(BridgeGame));
-
-    const char *lexiconName = game_history_get_lexicon_name(TO_GH(gh));
-    if (!lexiconName) lexiconName = "CSW24"; // Default lexicon
-    const char *ldName = game_history_get_ld_name(TO_GH(gh));
+    b_game->config = gh->config;
     
-    b_game->ld = ld_create(data_path, ldName ? ldName : "CSW24", err);
-    if (!error_stack_is_empty(err)) {
-        bridge_game_destroy(b_game);
-        error_stack_destroy(err);
-        return NULL;
-    }
+    // We create a new game using the config's factory, which links it to PlayersData etc.
+    // config_game_create initializes a new game with config settings.
+    b_game->game = config_game_create(gh->config);
     
-    b_game->pd = players_data_create();
-    players_data_set(b_game->pd, PLAYERS_DATA_TYPE_KWG, data_path, lexiconName, lexiconName, err);
-    if (!error_stack_is_empty(err)) {
-        bridge_game_destroy(b_game);
-        error_stack_destroy(err);
-        return NULL;
-    }
-    
-    const char *layoutName = game_history_get_board_layout_name(TO_GH(gh));
-    if (!layoutName) layoutName = board_layout_get_default_name();
-    
-    b_game->bl = board_layout_create();
-    board_layout_load(b_game->bl, data_path, layoutName, err);
-    if (!error_stack_is_empty(err)) {
-        bridge_game_destroy(b_game);
-        error_stack_destroy(err);
-        return NULL;
-    }
-    
-    b_game->bingo_bonus = 50;
-    b_game->game_variant = (int)game_history_get_game_variant(TO_GH(gh));
-
-    GameArgs gameArgs;
-    memset(&gameArgs, 0, sizeof(GameArgs));
-    gameArgs.players_data = b_game->pd;
-    gameArgs.board_layout = b_game->bl;
-    gameArgs.ld = b_game->ld;
-    gameArgs.bingo_bonus = b_game->bingo_bonus;
-    gameArgs.game_variant = (game_variant_t)b_game->game_variant;
-
-    b_game->game = game_create(&gameArgs);
-    
-    error_stack_destroy(err);
     return b_game;
+}
+
+BridgeGame* bridge_game_clone(BridgeGame* game) {
+    if (!game || !game->game) return NULL;
+    
+    BridgeGame *clone = calloc(1, sizeof(BridgeGame));
+    clone->config = game->config; // Share config ref
+    clone->game = game_duplicate(game->game);
+    
+    return clone;
+}
+
+int bridge_game_get_history_num_events(BridgeGame* game) {
+    if (!game || !game->config) return 0;
+    GameHistory *hist = config_get_game_history(game->config);
+    if (!hist) return 0;
+    return game_history_get_num_events(hist);
 }
 
 void bridge_game_destroy(BridgeGame* game) {
     if (!game) return;
-    if(game->game) game_destroy(game->game);
-    if(game->ld) ld_destroy(game->ld);
-    if(game->pd) players_data_destroy(game->pd);
-    if(game->bl) board_layout_destroy(game->bl);
+    if (game->game) game_destroy(game->game);
+    // config is owned by BridgeGameHistory
     free(game);
 }
 
 void bridge_game_play_to_index(BridgeGameHistory* gh, BridgeGame* game, int index) {
-    if (!game) return;
+    if (!game || !gh || !gh->config) return;
+    
     ErrorStack *err = error_stack_create();
     
     if (game->game) {
         game_destroy(game->game);
     }
 
-    GameArgs gameArgs;
-    memset(&gameArgs, 0, sizeof(GameArgs));
-    gameArgs.players_data = game->pd;
-    gameArgs.board_layout = game->bl;
-    gameArgs.ld = game->ld;
-    gameArgs.bingo_bonus = game->bingo_bonus;
-    gameArgs.game_variant = (game_variant_t)game->game_variant;
-
-    game->game = game_create(&gameArgs);
+    // Re-create game to ensure clean state
+    game->game = config_game_create(gh->config);
 
     game_play_n_events(TO_GH(gh), TO_GAME(game), index, true, err);
+    if (!error_stack_is_empty(err)) {
+        char *msg = error_stack_get_string_and_reset(err);
+        printf("BRIDGE_DEBUG: game_play_n_events failed: %s\n", msg);
+        free(msg);
+    }
     error_stack_destroy(err);
 }
 
 const char* bridge_get_player_name(BridgeGameHistory* gh, int player_index) {
-    return game_history_player_get_name(TO_GH(gh), player_index);
+    GameHistory *hist = TO_GH(gh);
+    if (!hist) return "Unknown";
+    return game_history_player_get_name(hist, player_index);
 }
 
 int bridge_get_player_score(BridgeGame* game, int player_index) {
-    if (!game) return 0;
-    return equity_to_int(player_get_score(game_get_player(TO_GAME(game), player_index)));
+    Game *g = TO_GAME(game);
+    if (!g) return 0;
+    return equity_to_int(player_get_score(game_get_player(g, player_index)));
 }
 
 int bridge_get_player_on_turn_index(BridgeGame* game) {
-    if (!game) return 0;
-    return game_get_player_on_turn_index(TO_GAME(game));
+    Game *g = TO_GAME(game);
+    if (!g) return 0;
+    return game_get_player_on_turn_index(g);
 }
 
 int bridge_get_num_events(BridgeGameHistory* gh) {
-    if (!gh) return 0;
-    return game_history_get_num_events(TO_GH(gh));
+    GameHistory *hist = TO_GH(gh);
+    if (!hist) return 0;
+    return game_history_get_num_events(hist);
+}
+
+const char* bridge_get_lexicon(BridgeGameHistory* gh) {
+    if (!gh) return "CSW24";
+    GameHistory *hist = TO_GH(gh);
+    if (!hist) return "CSW24";
+    const char *lex = game_history_get_lexicon_name(hist);
+    return lex ? lex : "CSW24";
 }
 
 char* bridge_get_board_square_string(BridgeGame* game, int row, int col) {
-    if (!game) return string_duplicate("");
-    Board *b = game_get_board(TO_GAME(game));
+    Game *g = TO_GAME(game);
+    if (!g) return string_duplicate("");
+    Board *b = game_get_board(g);
     MachineLetter ml = board_get_letter(b, row, col);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
         return string_duplicate("");
     }
-    const LetterDistribution *ld = game_get_ld(TO_GAME(game));
+    const LetterDistribution *ld = game_get_ld(g);
     return ld_ml_to_hl(ld, ml);
 }
 
 uint8_t bridge_get_board_bonus(BridgeGame* game, int row, int col) {
-    if (!game) return 0x11; // Default to normal square
-    Board *b = game_get_board(TO_GAME(game));
+    Game *g = TO_GAME(game);
+    if (!g) return 0x11; // Default to normal square
+    Board *b = game_get_board(g);
     BonusSquare bonus = board_get_bonus_square(b, row, col);
     return bonus.raw;
 }
 
 uint8_t bridge_get_machine_letter(BridgeGame* game, int row, int col) {
-    if (!game) return ALPHABET_EMPTY_SQUARE_MARKER;
-    Board *b = game_get_board(TO_GAME(game));
+    Game *g = TO_GAME(game);
+    if (!g) return ALPHABET_EMPTY_SQUARE_MARKER;
+    Board *b = game_get_board(g);
     return board_get_letter(b, row, col);
 }
 
 int bridge_get_letter_score(BridgeGame* game, uint8_t ml) {
-    if (!game) return 0;
-    const LetterDistribution *ld = game_get_ld(TO_GAME(game));
+    Game *g = TO_GAME(game);
+    if (!g) return 0;
+    const LetterDistribution *ld = game_get_ld(g);
     if (bridge_is_blank(ml)) {
         return equity_to_int(ld_get_score(ld, BLANK_MACHINE_LETTER));
     }
@@ -285,32 +258,34 @@ static char* internal_format_rack(const Rack *r, const LetterDistribution *ld) {
 }
 
 char* bridge_get_current_rack(BridgeGame* game) {
-    if (!game) return string_duplicate("");
+    Game *g = TO_GAME(game);
+    if (!g) return string_duplicate("");
     
-    int playerIdx = game_get_player_on_turn_index(TO_GAME(game));
-    Player *p = game_get_player(TO_GAME(game), playerIdx);
+    int playerIdx = game_get_player_on_turn_index(g);
+    Player *p = game_get_player(g, playerIdx);
     Rack *r = player_get_rack(p);
-    const LetterDistribution *ld = game_get_ld(TO_GAME(game));
+    const LetterDistribution *ld = game_get_ld(g);
     
     return internal_format_rack(r, ld);
 }
 
 // Get number of tiles in bag
 int bridge_get_bag_count(BridgeGame* game) {
-    if (!game) return 0;
-    Bag *bag = game_get_bag(TO_GAME(game));
+    Game *g = TO_GAME(game);
+    if (!g) return 0;
+    Bag *bag = game_get_bag(g);
     int actual_bag = bag_get_letters(bag);
     
     // Correction for incomplete racks in annotated games.
     // Ghost tiles (tiles belonging to opponent but not in their rack) reside in the bag.
     // We subtract them to show the "True" bag count.
     
-    int playerIdx = game_get_player_on_turn_index(TO_GAME(game));
+    int playerIdx = game_get_player_on_turn_index(g);
     int opponentIdx = 1 - playerIdx;
-    Player *p1 = game_get_player(TO_GAME(game), playerIdx);
-    Player *p2 = game_get_player(TO_GAME(game), opponentIdx);
-    Board *board = game_get_board(TO_GAME(game));
-    const LetterDistribution *ld = game_get_ld(TO_GAME(game));
+    Player *p1 = game_get_player(g, playerIdx);
+    Player *p2 = game_get_player(g, opponentIdx);
+    Board *board = game_get_board(g);
+    const LetterDistribution *ld = game_get_ld(g);
     
     int total_tiles = ld_get_total_tiles(ld);
     int tiles_on_board = board_get_tiles_played(board);
@@ -331,25 +306,23 @@ int bridge_get_bag_count(BridgeGame* game) {
     int corrected_bag = actual_bag - missing_p2_tiles;
     if (corrected_bag < 0) corrected_bag = 0;
     
-    printf("BAG_DEBUG: Actual=%d, P1=%d, P2_Actual=%d, Board=%d, Total=%d, Expected_P2=%d, Missing_P2=%d, Corrected=%d\n", 
-           actual_bag, p1_tiles, p2_tiles, tiles_on_board, total_tiles, expected_p2_tiles, missing_p2_tiles, corrected_bag);
-
     return corrected_bag;
 }
 
 // Get unseen tiles (bag + opponent rack)
 // Returns string in *tiles (caller must free), and counts
 void bridge_get_unseen_tiles(BridgeGame* game, char** tiles, int* vowel_count, int* consonant_count, int* blank_count) {
-    if (!game) return;
+    Game *g = TO_GAME(game);
+    if (!g) return;
     
-    int playerIdx = game_get_player_on_turn_index(TO_GAME(game));
+    int playerIdx = game_get_player_on_turn_index(g);
     int opponentIdx = 1 - playerIdx;
     
-    Bag *bag = game_get_bag(TO_GAME(game));
-    Player *opponent = game_get_player(TO_GAME(game), opponentIdx);
+    Bag *bag = game_get_bag(g);
+    Player *opponent = game_get_player(g, opponentIdx);
     Rack *opponentRack = player_get_rack(opponent);
-    const LetterDistribution *ld = game_get_ld(TO_GAME(game));
-    Board *board = game_get_board(TO_GAME(game));
+    const LetterDistribution *ld = game_get_ld(g);
+    Board *board = game_get_board(g);
 
     int unseen_counts[MAX_ALPHABET_SIZE];
     memset(unseen_counts, 0, sizeof(unseen_counts));
@@ -395,7 +368,7 @@ void bridge_get_unseen_tiles(BridgeGame* game, char** tiles, int* vowel_count, i
     // Invariant Calculation for Unknowns
     int total_tiles = ld_get_total_tiles(ld);
     int tiles_on_board = board_get_tiles_played(board);
-    int p1_tiles = rack_get_total_letters(player_get_rack(game_get_player(TO_GAME(game), playerIdx)));
+    int p1_tiles = rack_get_total_letters(player_get_rack(game_get_player(g, playerIdx)));
     int bag_tiles = bag_get_letters(bag);
     int opp_tiles = rack_get_total_letters(opponentRack);
 
@@ -405,21 +378,71 @@ void bridge_get_unseen_tiles(BridgeGame* game, char** tiles, int* vowel_count, i
     
     if (unknown < 0) unknown = 0; 
     
-    printf("UNSEEN_DEBUG: Total=%d, Board=%d, P1=%d, Bag=%d, Opp=%d, True_Unseen=%d, Visible=%d, Unknown=%d\n",
-           total_tiles, tiles_on_board, p1_tiles, bag_tiles, opp_tiles, true_unseen, visible_unseen, unknown);
-
     if (vowel_count) *vowel_count = v;
     if (consonant_count) *consonant_count = c;
     if (blank_count) *blank_count = b + unknown; 
 
 }
 
+int bridge_get_board_tiles_played(BridgeGame* game) {
+    Game *g = TO_GAME(game);
+    if (!g) return 0;
+    return board_get_tiles_played(game_get_board(g));
+}
+
+int bridge_get_current_event_index(BridgeGame* game) {
+    if (!game || !game->config) return 0;
+    // We can get the current index from the game history attached to the config.
+    // But wait, BridgeGame creates a new Game.
+    // The UI tracks `currentEventIndex`. 
+    // Actually, the bridge doesn't inherently know the "current event index" of the UI state
+    // unless we pass it or track it in BridgeGame.
+    // However, `game_history` object knows how many events have been *played* onto the `Game` object?
+    // No, `Game` object stores state, `GameHistory` stores events.
+    // `game_play_n_events` replays history.
+    
+    // BUT, AnalysisModel needs to know if there are *any* events in the history to decide whether to sim.
+    // "empty board is not the condition... it's whether the game history has events in it."
+    // So we actually want `bridge_get_num_events(gh)`.
+    
+    // The user said "sim shouldn't happen on default empty game state".
+    // Default empty game state has 0 events.
+    // So `bridge_get_num_events` > 0 check in AnalysisModel should suffice?
+    
+    // Wait, "loaded a game and didn't get any analysis".
+    // If we load a game, num_events > 0.
+    // But if we jump to index 0 (start of game), we might still want analysis for the opening move?
+    // MAGPIE's `generate_moves` works for the opening move (empty board).
+    // The issue was "win_pct shouldn't be called with > 93".
+    // At start of game, unseen is 100 (bag 86 + opp 14? No, bag + opp rack).
+    // Standard bag 100 tiles. 7 on rack. 93 unseen.
+    // Wait, `win_pct` usually goes up to 100 or more?
+    // `src/ent/win_pct.c` checks `wp->max_tiles_unseen`.
+    // If the `win_pct` file only has data up to 93 tiles (common for endgame tables), then it fails for start of game.
+    // BUT, opening book / static eval should handle start of game without looking up win pct for endgame?
+    
+    // If we are at the start of the game (index 0), we want to generate moves for the *first* move.
+    // The board is empty.
+    // If we are at index N, we want to generate moves for the (N+1)th move? Or the move that *was* played at N?
+    // Analysis usually shows "what is the best move here?".
+    // So if we are at state 0, we want best moves for player 1's first turn.
+    
+    // The crash `cannot get win percentage value for 94 unseen tiles` implies we ARE trying to sim.
+    // And `win_pct` lookup is failing.
+    // If `win_pct` data is limited, we shouldn't sim if unseen > max.
+    // OR, we should rely on static evaluation (score) instead of win % for early game.
+    
+    return 0; // Placeholder if needed, but logic above suggests check elsewhere.
+}
+
 void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index,
                               int* player_index, int* type, char** move_str, char** rack_str,
                               int* score, int* cumulative_score) {
-    if (!gh || !game) return;
+    GameHistory *hist = TO_GH(gh);
+    Game *g = TO_GAME(game);
+    if (!hist || !g) return;
 
-    GameEvent *event = game_history_get_event(TO_GH(gh), index);
+    GameEvent *event = game_history_get_event(hist, index);
     if (!event) return;
 
     if (player_index) *player_index = game_event_get_player_index(event);
@@ -441,10 +464,12 @@ void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index
                 
                 // Temporarily rewind game to state before this move to get proper board state
                 // This is inefficient (O(N^2)) but ensures accurate notation generation
-                Game *temp_game = TO_GAME(game);
+                // Since we are using Config factory, we can create a temp game easily.
+                
+                Game *temp_game = config_game_create(gh->config);
                 ErrorStack *err = error_stack_create();
-                game_reset(temp_game);
-                game_play_n_events(TO_GH(gh), temp_game, index, true, err);
+                // We don't reset because it's fresh.
+                game_play_n_events(hist, temp_game, index, true, err);
                 error_stack_destroy(err);
                 
                 Board *board = game_get_board(temp_game);
@@ -455,6 +480,7 @@ void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index
                 
                 human_readable = string_duplicate(string_builder_peek(sb));
                 string_builder_destroy(sb);
+                game_destroy(temp_game);
             }
         }
         
@@ -472,7 +498,7 @@ void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index
                     break;
                 case GAME_EVENT_END_RACK_POINTS: {
                     const Rack *r = game_event_get_const_rack(event);
-                    char *tiles = internal_format_rack(r, game_get_ld(TO_GAME(game)));
+                    char *tiles = internal_format_rack(r, game_get_ld(g));
                     char buf[128];
                     snprintf(buf, sizeof(buf), "2x %s", tiles);
                     free(tiles);
@@ -498,7 +524,7 @@ void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index
     if (rack_str) {
         const Rack *r = game_event_get_const_rack(event);
         if (r) {
-            *rack_str = internal_format_rack(r, game_get_ld(TO_GAME(game)));
+            *rack_str = internal_format_rack(r, game_get_ld(g));
         } else {
             *rack_str = string_duplicate("");
         }
@@ -506,9 +532,10 @@ void bridge_get_event_details(BridgeGameHistory* gh, BridgeGame* game, int index
 }
 
 int bridge_get_last_move_tiles(BridgeGameHistory* gh, int index, int* rows, int* cols, int max_count) {
-    if (!gh) return 0;
+    GameHistory *hist = TO_GH(gh);
+    if (!hist) return 0;
     
-    GameEvent *event = game_history_get_event(TO_GH(gh), index);
+    GameEvent *event = game_history_get_event(hist, index);
     if (!event) return 0;
     
     ValidatedMoves *vms = game_event_get_vms(event);
@@ -539,4 +566,186 @@ int bridge_get_last_move_tiles(BridgeGameHistory* gh, int index, int* rows, int*
     }
     
     return count;
+}
+
+// -----------------------------------------------------------------------------
+// Analysis Implementation
+// -----------------------------------------------------------------------------
+
+#include "../../impl/move_gen.h"
+#include "../../impl/simmer.h"
+#include "../../ent/thread_control.h"
+#include "../../ent/sim_results.h"
+
+BridgeMoveList* bridge_generate_moves(BridgeGame* game) {
+    if (!game || !game->game || !game->config) return NULL;
+
+    // MoveList *move_list_create(int capacity);
+    MoveList *ml = move_list_create(100); 
+
+    MoveGenArgs args;
+    memset(&args, 0, sizeof(MoveGenArgs));
+    args.game = TO_GAME(game);
+    
+    // Use config settings
+    Config *cfg = game->config;
+    PlayersData *pd = config_get_players_data(cfg);
+    int playerIdx = game_get_player_on_turn_index(TO_GAME(game));
+    
+    args.move_record_type = players_data_get_move_record_type(pd, playerIdx);
+    // Force record all for analysis? Or respect config?
+    // Usually we want all moves for analysis.
+    args.move_record_type = MOVE_RECORD_ALL; 
+    
+    args.move_sort_type = players_data_get_move_sort_type(pd, playerIdx);
+    
+    // Ensure eq margin is set if needed
+    // args.eq_margin_movegen = ...
+    
+    args.thread_index = 0;
+    args.move_list = ml;
+    // args.override_kwg = NULL;
+
+    generate_moves(&args);
+    
+    // Sort by equity/score? generate_moves usually leaves them in heap or sorted depending on impl.
+    // Let's ensure sorted.
+    move_list_sort_moves(ml);
+
+    return (BridgeMoveList*)ml;
+}
+
+void bridge_move_list_destroy(BridgeMoveList* ml) {
+    if (ml) {
+        move_list_destroy((MoveList*)ml);
+    }
+}
+
+BridgeSimResults* bridge_sim_results_create(void) {
+    return (BridgeSimResults*)sim_results_create();
+}
+
+void bridge_sim_results_destroy(BridgeSimResults* sr) {
+    if (sr) {
+        sim_results_destroy((SimResults*)sr);
+    }
+}
+
+BridgeThreadControl* bridge_thread_control_create(void) {
+    return (BridgeThreadControl*)thread_control_create();
+}
+
+void bridge_thread_control_destroy(BridgeThreadControl* tc) {
+    if (tc) {
+        thread_control_destroy((ThreadControl*)tc);
+    }
+}
+
+void bridge_thread_control_stop(BridgeThreadControl* tc) {
+    if (tc) {
+        thread_control_set_status((ThreadControl*)tc, THREAD_CONTROL_STATUS_USER_INTERRUPT);
+    }
+}
+
+void bridge_simulate(BridgeGame* game, BridgeMoveList* moves, BridgeSimResults* results, BridgeThreadControl* tc, int plies) {
+    if (!game || !game->config || !moves || !results || !tc) return;
+
+    SimArgs args;
+    memset(&args, 0, sizeof(SimArgs));
+    args.num_plies = plies;
+    // Use the game from BridgeGame (which reflects UI state), not config->game
+    args.game = TO_GAME(game);
+    args.move_list = (MoveList*)moves;
+    args.thread_control = (ThreadControl*)tc;
+    args.num_threads = 10;
+    
+    // Inherit settings from config
+    Config *cfg = game->config;
+    args.seed = config_get_seed(cfg);
+    args.win_pcts = config_get_win_pcts(cfg);
+    
+    // BAI Options
+    args.bai_options.threshold = BAI_THRESHOLD_GK16; 
+    args.bai_options.sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
+    
+    // Force high sample limit for GUI analysis (default 5000 is too low for deep analysis)
+    args.bai_options.sample_limit = 500000;
+    args.bai_options.sample_minimum = 100; // Default
+    args.bai_options.num_threads = 10;
+
+    ErrorStack *err = error_stack_create();
+    
+    // Initialize results
+    sim_results_reset((MoveList*)moves, (SimResults*)results, plies, 0);
+
+    // Start the thread control
+    thread_control_set_status((ThreadControl*)tc, THREAD_CONTROL_STATUS_STARTED);
+
+    simulate(&args, (SimResults*)results, err);
+
+    if (!error_stack_is_empty(err)) {
+        char *msg = error_stack_get_string_and_reset(err);
+        printf("Simulation Error: %s\n", msg);
+        free(msg);
+    }
+    error_stack_destroy(err);
+}
+
+int bridge_sim_results_get_num_plays(BridgeSimResults* results) {
+    if (!results) return 0;
+    return sim_results_get_number_of_plays((SimResults*)results);
+}
+
+int bridge_sim_results_get_play_info(BridgeGame* game, BridgeSimResults* results, int index, 
+                                      char** notation, double* win_pct, double* spread, int* iterations) {
+    if (!results || !game) return 1;
+    
+    SimResults *sr = (SimResults*)results;
+    
+    sim_results_lock_simmed_plays(sr);
+    
+    if (index < 0 || index >= sim_results_get_number_of_plays(sr)) {
+        sim_results_unlock_simmed_plays(sr);
+        return 1;
+    }
+
+    SimmedPlay *sp = sim_results_get_simmed_play(sr, index);
+    
+    if (win_pct) {
+        Stat *wp = simmed_play_get_win_pct_stat(sp);
+        *win_pct = stat_get_mean(wp);
+        if (iterations) {
+            *iterations = (int)stat_get_num_samples(wp);
+        }
+    }
+    if (spread) {
+        Stat *eq = simmed_play_get_equity_stat(sp);
+        *spread = stat_get_mean(eq);
+    }
+    
+    if (notation) {
+        Move *m = simmed_play_get_move(sp);
+        Board *board = game_get_board(TO_GAME(game));
+        const LetterDistribution *ld = game_get_ld(TO_GAME(game));
+        
+        StringBuilder *sb = string_builder_create();
+        string_builder_add_human_readable_move(sb, m, board, ld);
+        *notation = string_duplicate(string_builder_peek(sb));
+        string_builder_destroy(sb);
+    }
+
+    sim_results_unlock_simmed_plays(sr);
+    return 0;
+}
+
+uint64_t bridge_sim_results_get_iterations(BridgeSimResults* results) {
+    if (!results) return 0;
+    return sim_results_get_iteration_count((SimResults*)results);
+}
+
+double bridge_sim_results_get_confidence(BridgeSimResults* results) {
+    if (!results) return 0.0;
+    SimResults *sr = (SimResults*)results;
+    BAIResult *bai = sim_results_get_bai_result(sr);
+    return bai_result_get_confidence(bai);
 }
