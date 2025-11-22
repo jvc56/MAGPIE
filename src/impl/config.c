@@ -63,7 +63,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+enum {
+  HELP_INDENT = 10,
+};
+
 typedef enum {
+  ARG_TOKEN_HELP,
   ARG_TOKEN_SET,
   ARG_TOKEN_CGP,
   ARG_TOKEN_MOVES,
@@ -164,6 +169,7 @@ typedef struct ParsedArg {
   command_api_func_t api_func;
   command_status_func_t status_func;
   bool is_hotkey;
+  bool is_command;
 } ParsedArg;
 
 struct Config {
@@ -225,7 +231,7 @@ void parsed_arg_create(Config *config, arg_token_t arg_token, const char *name,
                        command_exec_func_t command_exec_func,
                        command_api_func_t command_api_func,
                        command_status_func_t command_status_func,
-                       const bool is_hotkey) {
+                       const bool is_hotkey, const bool is_command) {
   ParsedArg *parsed_arg = malloc_or_die(sizeof(ParsedArg));
   parsed_arg->num_req_values = num_req_values;
   parsed_arg->num_values = num_values;
@@ -239,6 +245,7 @@ void parsed_arg_create(Config *config, arg_token_t arg_token, const char *name,
   parsed_arg->api_func = command_api_func;
   parsed_arg->status_func = command_status_func;
   parsed_arg->is_hotkey = is_hotkey;
+  parsed_arg->is_command = is_command;
 
   config->pargs[arg_token] = parsed_arg;
 }
@@ -704,6 +711,432 @@ char *status_generic(Config *config) {
   return status_str;
 }
 
+// Returns NUMBER_OF_ARG_TOKENS if there was an error or no token was found
+arg_token_t get_token_from_string(Config *config, const char *arg_name,
+                                  ErrorStack *error_stack) {
+  arg_token_t current_arg_token = NUMBER_OF_ARG_TOKENS;
+  bool parg_has_prefix[NUMBER_OF_ARG_TOKENS] = {false};
+  bool is_ambiguous = false;
+  for (int k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
+    if (string_length(arg_name) == 1 && config->pargs[k]->is_hotkey &&
+        arg_name[0] == config->pargs[k]->name[0]) {
+      return k;
+    }
+    if (has_prefix(arg_name, config->pargs[k]->name)) {
+      parg_has_prefix[k] = true;
+      if (current_arg_token != NUMBER_OF_ARG_TOKENS) {
+        is_ambiguous = true;
+      } else {
+        current_arg_token = k;
+      }
+    }
+  }
+
+  if (current_arg_token == NUMBER_OF_ARG_TOKENS) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
+                     get_formatted_string(
+                         "unrecognized command or argument '%s'", arg_name));
+    return current_arg_token;
+  }
+
+  if (!is_ambiguous) {
+    return current_arg_token;
+  }
+
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_formatted_string(
+      sb, "ambiguous command '%s' could be:", arg_name);
+  for (int k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
+    if (parg_has_prefix[k]) {
+      string_builder_add_formatted_string(sb, " %s,", config->pargs[k]->name);
+    }
+  }
+  // Remove the trailing comma
+  string_builder_truncate(sb, string_builder_length(sb) - 1);
+  error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_AMBIGUOUS_COMMAND,
+                   string_builder_dump(sb, NULL));
+  string_builder_destroy(sb);
+  return NUMBER_OF_ARG_TOKENS;
+}
+
+// Help
+
+void add_help_arg_to_string_builder(const Config *config, arg_token_t arg_token,
+                                    StringBuilder *sb) {
+  const char *examples[10] = {NULL};
+  const char *usages[10] = {NULL};
+  const char *text = NULL;
+  switch (arg_token) {
+  case ARG_TOKEN_HELP:
+    usages[0] = "[<command_or_arg>]";
+    examples[0] = "";
+    examples[1] = "infer";
+    text = "Prints a help message for the given command or argument. If no "
+           "argument is "
+           "given, prints help messages for all commands and arguments.";
+    break;
+  case ARG_TOKEN_SET:
+    usages[0] = "<option1> <value1> <option2> <value2> ...";
+    examples[0] = "-numplays 15 -minp 100";
+    text = "Sets any number of specified options.";
+    break;
+  case ARG_TOKEN_CGP:
+    usages[0] = "<board> <racks> <scores> <consecutive_zeros>";
+    examples[0] = "15/15/15/15/14V/14A/14N/6GUM5N/7PEW4E/9EF3R/9BEVELS/15/15/"
+                  "15/15 AEEIILZ/CDGKNOR 56/117 0";
+    text = "Loads the specified CGP into the game.";
+    break;
+  case ARG_TOKEN_MOVES:
+    usages[0] = "<move>";
+    usages[1] = "<move>,<move>,...";
+    examples[0] = " 8F.LIN";
+    examples[1] = " 8F.LIN,8D.ZILLION,8F.ZILLION";
+    text = "Adds the CGP moves to the move list. Multiple moves must be "
+           "delimited by commas as opposed to spaces.";
+    break;
+  case ARG_TOKEN_RACK:
+    usages[0] = "<rack>";
+    text = "Sets the rack for the player on turn.";
+    break;
+  case ARG_TOKEN_GEN:
+    usages[0] = "";
+    text = "Generates moves for the current position.";
+    break;
+  case ARG_TOKEN_SIM:
+    usages[0] = "[<opponent_known_rack>]";
+    examples[0] = "";
+    examples[1] = "ABCD";
+    examples[2] = "-";
+    text = "Runs a Monte Carlo simulation for the current position using the "
+           "specified opponent rack. If no rack is specified, the opponent "
+           "known rack from the game history is used. If the game history "
+           "has a known rack for the opponent, you can use '-' to force the "
+           "sim to use a completely random rack.";
+    break;
+  case ARG_TOKEN_INFER:
+    usages[0] = "";
+    usages[1] = "<target_nickname> <target_played_tiles> <target_score> "
+                "[<target_known_rack>] [<nontarget_known_rack>]";
+    usages[2] = "<target_nickname> <target_num_exchanged> "
+                "[<target_known_rack>] [<nontarget_known_rack>]";
+    examples[0] = "";
+    examples[1] = "josh ABCDE 13";
+    examples[2] = "josh ABCDE 13 ABCD";
+    examples[3] = "josh ABCDE 13 ABCD EFG";
+    examples[4] = "josh 3 ABCDE";
+    examples[5] = "josh 3 ABCDE EFG";
+    text = "Runs an exhaustive inference for what the opponent could have kept "
+           "based on their previous play. If no arguments are specified, the "
+           "inference will use the previous play in the game history.";
+    break;
+  case ARG_TOKEN_ENDGAME:
+    usages[0] = "";
+    text = "Runs the endgame solver.";
+    break;
+  case ARG_TOKEN_AUTOPLAY:
+    usages[0] = "<type1> <num_games>";
+    usages[1] = "<type1>,<type2>,... <num_games>";
+    examples[0] = "games 100";
+    examples[1] = "games,winpct 1000";
+    examples[2] = "leave,winpct 2000";
+    text = "Runs the autoplay command with the specified recorder(s). If the "
+           "game pairs option is set to true, autoplay will run <num_games> "
+           "game pairs resulting in a total of 2 * <num_games> games.";
+    break;
+  case ARG_TOKEN_CONVERT:
+    usages[0] = "<type> <input_name_without_extension> "
+                "[<output_name_without_extension>]";
+    examples[0] = "klv2csv CSW21";
+    examples[1] = "klv2csv CSW21 CSW21_new";
+    examples[2] = "text2wordmap NWL20";
+    text = "Runs the convert command for the specified type with the given "
+           "input and output names. If no output name is specified, the input "
+           "name will be used. Note that this will not overwrite the input "
+           "since the output filename will have a different extension.";
+    break;
+  case ARG_TOKEN_LEAVE_GEN:
+    usages[0] = "<gen1_min_rack_target>,<gen1_min_rack_target>,... "
+                "[<games_before_force_draw>]";
+    examples[0] = "100,200,500,1000,1000,1000 100000000";
+    text =
+        "Generates leaves for the current lexicon. The minimum rack targets "
+        "specify the required minimum number of rack occurrences for all "
+        "racks before the next generation can start. The games before force "
+        "draw argument specifies the number of 'normal' games to play before "
+        "rare racks are 'forced' to occur so that they reach the minimum. The "
+        "example shows the currently recommended values. Emperical testing has "
+        "show that there is little improvement after the 5th generation. The "
+        "files produced by each generation are labeled *_gen_<gen_number>, so "
+        "if the command is stopped early, reinvoke it with using leaves of the "
+        "last generation, otherwise the leavegen command will start over at "
+        "the first generation. It is recommended to use the autoplay command "
+        "with game pairs to evaluate the resulting leaves. Depending on your "
+        "hardware, this command could take days or weeks.";
+    break;
+  case ARG_TOKEN_CREATE_DATA:
+    usages[0] = "<type> <output_name> [<letter_distribution>]";
+    examples[0] = "klv CSW50";
+    examples[1] = "klv CSW50 english";
+    text = "Creates a zeroed or empty data file of the specified type. If no "
+           "letter distribution is specified, the current letter distribution "
+           "is used. Currently, only the 'klv' type is supported.";
+    break;
+  case ARG_TOKEN_LOAD:
+    usages[0] = "<source_identifier>";
+    examples[0] = "54938";
+    examples[1] = "https://cross-tables.com/annotated.php?u=54938";
+    examples[2] = "XuoAntzD";
+    examples[3] = "https://woogles.io/game/XuoAntzD";
+    examples[4] =
+        "https://www.cross-tables.com/annotated/selfgcg/556/anno55690.gcg";
+    examples[5] = "testdata/gcgs/success_six_pass.gcg";
+    examples[6] = "some_game.gcg";
+    text =
+        "Loads the game using the specified GCG. The source identifier can "
+        "be a cross-tables ID or game URL, a woogles.io ID or game URL, a URL "
+        "to the GCG file, or a local GCG file.";
+    break;
+  case ARG_TOKEN_NEW_GAME:
+    usages[0] = "[<player_one_name>] [<player_two_name>]";
+    examples[0] = "";
+    examples[1] = "Alice";
+    examples[2] = "Alice Bob";
+    text = "Starts a new game, resetting the previous game and game history. "
+           "Player names without whitespace can be optionally specified.";
+    break;
+  case ARG_TOKEN_EXPORT:
+    usages[0] = "[<output_gcg_filename>]";
+    examples[0] = "";
+    examples[1] = "my_game";
+    examples[2] = "other_game.gcg";
+    text = "Saves the current game history to the specified GCG file. If no "
+           "GCG file is specified, a default name will be used. If no '.gcg' "
+           "extension is specified, it will be added to the filename "
+           "automatically.";
+    break;
+  case ARG_TOKEN_COMMIT:
+    usages[0] = "<move_index>";
+    usages[1] = "<position> <tiles>";
+    usages[2] = "ex <exchanged_tiles> [<rack_after_exchange>]";
+    usages[3] = "pass";
+    examples[0] = "2";
+    examples[1] = "11d ANTIQuES";
+    examples[2] = "ex ABC";
+    examples[2] = "ex ABC HIJKLMN";
+    examples[3] = "pass";
+    text = "Commits the move to the game history. When committing an exchange, "
+           "the rack after the exchange can be specified so that six passes "
+           "can be correctly scored.";
+    break;
+  case ARG_TOKEN_CHALLENGE:
+    usages[0] = "[<challenge_bonus_points>]";
+    examples[0] = "";
+    examples[1] = "7";
+    text = "Adds a challenge bonus to the previous tile placement move. "
+           "Challenges can be added mid-game without truncating the game "
+           "history. If no challenge bonus is specified, the current value "
+           "will be used.";
+    break;
+  case ARG_TOKEN_UNCHALLENGE:
+    usages[0] = "";
+    text = "Removes the challenge bonus from the previous tile placement move. "
+           "Challenges can be removed mid-game without truncating the game "
+           "history.";
+    break;
+  case ARG_TOKEN_OVERTIME:
+    usages[0] = "<player_nickname> <overtime_penalty>";
+    examples[0] = "josh";
+    examples[1] = "josh 5";
+    examples[2] = "josh 9";
+    text = "Adds an overtime penalty for the given player. Overtime penalties "
+           "can only be applied after the game is over.";
+    break;
+  case ARG_TOKEN_SWITCH_NAMES:
+    usages[0] = "";
+    text = "Switches the names of the players.";
+    break;
+  case ARG_TOKEN_SHOW:
+    usages[0] = "";
+    text = "Shows the current game.";
+    break;
+  case ARG_TOKEN_NEXT:
+    usages[0] = "";
+    text = "Goes to the next move of the game if possible. Skips over "
+           "challenge bonus events.";
+    break;
+  case ARG_TOKEN_PREVIOUS:
+    usages[0] = "";
+    text = "Goes to the previous move of the game if possible. Skips over "
+           "challenge bonus events.";
+    break;
+  case ARG_TOKEN_GOTO:
+    usages[0] = "<turn_number_or_end_or_start>";
+    examples[0] = "1";
+    examples[1] = "end";
+    examples[2] = "start";
+    text =
+        "Goes to the game state after the specified turn number. Use 'start' "
+        "and 'end' to go to the start and end of the game, respectively.";
+    break;
+  case ARG_TOKEN_NOTE:
+    usages[0] = "<content_with_possible_whitespace>";
+    examples[0] = "#knowledgesaddest";
+    examples[1] = "this is a valid note with whitespace";
+    text = "Specifies the note for the most recently added move. If there is "
+           "an existing note it will be overwritten.";
+    break;
+  case ARG_TOKEN_P1_NAME:
+    usages[0] = "<player_name_with_possible_whitespace>";
+    examples[0] = "Bob";
+    examples[1] = "Bob Smith";
+    text = "Specifies the name of the first player.";
+    break;
+  case ARG_TOKEN_P2_NAME:
+    usages[0] = "<player_name_with_possible_whitespace>";
+    examples[0] = "Bob";
+    examples[1] = "Bob Smith";
+    text = "Specifies the name of the second player.";
+    break;
+  case ARG_TOKEN_DATA_PATH:
+  case ARG_TOKEN_BINGO_BONUS:
+  case ARG_TOKEN_CHALLENGE_BONUS:
+  case ARG_TOKEN_BOARD_LAYOUT:
+  case ARG_TOKEN_GAME_VARIANT:
+  case ARG_TOKEN_LETTER_DISTRIBUTION:
+  case ARG_TOKEN_LEXICON:
+  case ARG_TOKEN_USE_WMP:
+  case ARG_TOKEN_LEAVES:
+  case ARG_TOKEN_P1_LEXICON:
+  case ARG_TOKEN_P1_USE_WMP:
+  case ARG_TOKEN_P1_LEAVES:
+  case ARG_TOKEN_P1_MOVE_SORT_TYPE:
+  case ARG_TOKEN_P1_MOVE_RECORD_TYPE:
+  case ARG_TOKEN_P2_LEXICON:
+  case ARG_TOKEN_P2_USE_WMP:
+  case ARG_TOKEN_P2_LEAVES:
+  case ARG_TOKEN_P2_MOVE_SORT_TYPE:
+  case ARG_TOKEN_P2_MOVE_RECORD_TYPE:
+  case ARG_TOKEN_WIN_PCT:
+  case ARG_TOKEN_PLIES:
+  case ARG_TOKEN_ENDGAME_PLIES:
+  case ARG_TOKEN_NUMBER_OF_PLAYS:
+  case ARG_TOKEN_NUMBER_OF_SMALL_PLAYS:
+  case ARG_TOKEN_MAX_ITERATIONS:
+  case ARG_TOKEN_STOP_COND_PCT:
+  case ARG_TOKEN_EQ_MARGIN_INFERENCE:
+  case ARG_TOKEN_EQ_MARGIN_MOVEGEN:
+  case ARG_TOKEN_MIN_PLAY_ITERATIONS:
+  case ARG_TOKEN_USE_GAME_PAIRS:
+  case ARG_TOKEN_USE_SMALL_PLAYS:
+  case ARG_TOKEN_SIM_WITH_INFERENCE:
+  case ARG_TOKEN_WRITE_BUFFER_SIZE:
+  case ARG_TOKEN_HUMAN_READABLE:
+  case ARG_TOKEN_RANDOM_SEED:
+  case ARG_TOKEN_NUMBER_OF_THREADS:
+  case ARG_TOKEN_PRINT_INTERVAL:
+  case ARG_TOKEN_EXEC_MODE:
+  case ARG_TOKEN_TT_FRACTION_OF_MEM:
+  case ARG_TOKEN_TIME_LIMIT:
+  case ARG_TOKEN_SAMPLING_RULE:
+  case ARG_TOKEN_THRESHOLD:
+  case ARG_TOKEN_PRINT_BOARDS:
+  case ARG_TOKEN_BOARD_COLOR:
+  case ARG_TOKEN_BOARD_TILE_GLYPHS:
+  case ARG_TOKEN_BOARD_BORDER:
+  case ARG_TOKEN_BOARD_COLUMN_LABEL:
+  case ARG_TOKEN_ON_TURN_MARKER:
+  case ARG_TOKEN_ON_TURN_COLOR:
+  case ARG_TOKEN_ON_TURN_SCORE_STYLE:
+  case ARG_TOKEN_PRETTY:
+  case ARG_TOKEN_PRINT_ON_FINISH:
+  case ARG_TOKEN_SHOW_PROMPT:
+  case ARG_TOKEN_SAVE_SETTINGS:
+    break;
+  case NUMBER_OF_ARG_TOKENS:
+    log_fatal("encountered invalid arg token in help command");
+    break;
+  }
+  // FIXME: remove this once help command is fully implemented
+  if (!usages[0]) {
+    return;
+  }
+  const ParsedArg *parg = config_get_parg(config, arg_token);
+  if (parg->is_command) {
+    if (parg->is_hotkey) {
+      string_builder_add_formatted_string(sb, "%c, ", parg->name[0]);
+    }
+    string_builder_add_string(sb, parg->name);
+  } else {
+    string_builder_add_formatted_string(sb, "-%s", parg->name);
+  }
+  string_builder_add_formatted_string(sb, "\n\n%*sUsage:\n\n", HELP_INDENT, "");
+
+  int usages_index = 0;
+  while (usages[usages_index]) {
+    string_builder_add_formatted_string(sb, "%*s%s %s\n", HELP_INDENT + 2, "",
+                                        parg->name, usages[usages_index]);
+    usages_index++;
+  }
+
+  if (examples[0]) {
+    string_builder_add_formatted_string(sb, "\n%*sExamples:\n\n", HELP_INDENT,
+                                        "");
+    int example_index = 0;
+    while (examples[example_index]) {
+      string_builder_add_formatted_string(sb, "%*s%s %s\n", HELP_INDENT + 2, "",
+                                          parg->name, examples[example_index]);
+      example_index++;
+    }
+  }
+
+  string_builder_add_formatted_string(sb, "\n%*s%s\n\n", HELP_INDENT, "", text);
+}
+
+char *impl_help(Config *config, ErrorStack *error_stack) {
+  const char *help_arg = config_get_parg_value(config, ARG_TOKEN_HELP, 0);
+  arg_token_t help_arg_token = NUMBER_OF_ARG_TOKENS;
+  if (help_arg) {
+    help_arg_token = get_token_from_string(config, help_arg, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return empty_string();
+    }
+  }
+
+  StringBuilder *sb = string_builder_create();
+  if (help_arg_token == NUMBER_OF_ARG_TOKENS) {
+    // Show the full help command
+    // Show help for the commands first
+    for (arg_token_t k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
+      if (config->pargs[k]->is_command) {
+        add_help_arg_to_string_builder(config, k, sb);
+      }
+    }
+    // Then show help for the settings
+    for (arg_token_t k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
+      if (!config->pargs[k]->is_command) {
+        add_help_arg_to_string_builder(config, k, sb);
+      }
+    }
+  } else {
+    add_help_arg_to_string_builder(config, help_arg_token, sb);
+  }
+  char *result = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return result;
+}
+
+void execute_help(Config *config, ErrorStack *error_stack) {
+  char *result = impl_help(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_help(Config *config, ErrorStack *error_stack) {
+  return impl_help(config, error_stack);
+}
+
 // Load CGP
 
 void impl_load_cgp(Config *config, ErrorStack *error_stack) {
@@ -1114,7 +1547,8 @@ void impl_sim(Config *config, ErrorStack *error_stack) {
   Rack known_opp_rack;
   rack_set_dist_size_and_reset(&known_opp_rack, ld_size);
 
-  if (known_opp_rack_str) {
+  // Set setting empty opp rack with '-'
+  if (known_opp_rack_str && !strings_equal(known_opp_rack_str, "-")) {
     load_rack_or_push_to_error_stack(
         known_opp_rack_str, game_get_ld(config->game),
         ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &known_opp_rack,
@@ -1301,6 +1735,7 @@ void impl_leave_gen(Config *config, ErrorStack *error_stack) {
 // Create
 
 // This only implements creating a klv for now.
+// FIXME: need to check for existing letter distribution
 void impl_create_data(const Config *config, ErrorStack *error_stack) {
   const char *create_type_str =
       config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 0);
@@ -2707,7 +3142,6 @@ void config_load_parsed_args(Config *config,
   }
 
   ParsedArg *current_parg = NULL;
-  arg_token_t current_arg_token;
   int current_value_index = 0;
 
   for (int i = 0; i < number_of_input_strs; i++) {
@@ -2740,53 +3174,14 @@ void config_load_parsed_args(Config *config,
         arg_name = input_str;
       }
 
-      bool parg_has_prefix[NUMBER_OF_ARG_TOKENS] = {false};
-      bool is_ambiguous = false;
-      for (int k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
-        if (string_length(arg_name) == 1 && config->pargs[k]->is_hotkey &&
-            arg_name[0] == config->pargs[k]->name[0]) {
-          is_ambiguous = false;
-          current_parg = config->pargs[k];
-          current_arg_token = k;
-          break;
-        }
-        if (has_prefix(arg_name, config->pargs[k]->name)) {
-          parg_has_prefix[k] = true;
-          if (current_parg) {
-            is_ambiguous = true;
-          } else {
-            current_parg = config->pargs[k];
-            current_arg_token = k;
-          }
-        }
-      }
+      arg_token_t current_arg_token =
+          get_token_from_string(config, arg_name, error_stack);
 
-      if (is_ambiguous) {
-        StringBuilder *sb = string_builder_create();
-        string_builder_add_formatted_string(
-            sb, "ambiguous command '%s' could be:", arg_name);
-        for (int k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
-          if (parg_has_prefix[k]) {
-            string_builder_add_formatted_string(sb, " %s,",
-                                                config->pargs[k]->name);
-          }
-        }
-        // Remove the trailing comma
-        string_builder_truncate(sb, string_builder_length(sb) - 1);
-        error_stack_push(error_stack,
-                         ERROR_STATUS_CONFIG_LOAD_AMBIGUOUS_COMMAND,
-                         string_builder_dump(sb, NULL));
-        string_builder_destroy(sb);
+      if (!error_stack_is_empty(error_stack)) {
         return;
       }
 
-      if (!current_parg) {
-        error_stack_push(
-            error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
-            get_formatted_string("unrecognized command or argument '%s'",
-                                 arg_name));
-        return;
-      }
+      current_parg = config->pargs[current_arg_token];
 
       if (current_parg->num_set_values > 0) {
         error_stack_push(
@@ -2796,7 +3191,7 @@ void config_load_parsed_args(Config *config,
         return;
       }
 
-      if (current_parg->exec_func != execute_fatal) {
+      if (current_parg->is_command) {
         if (i > 0) {
           error_stack_push(error_stack,
                            ERROR_STATUS_CONFIG_LOAD_MISPLACED_COMMAND,
@@ -4126,13 +4521,14 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   // Command parsed from string input
 #define cmd(token, name, n_req, n_val, func, stat, hotkey)                     \
   parsed_arg_create(config, token, name, n_req, n_val, execute_##func,         \
-                    str_api_##func, status_##stat, hotkey)
+                    str_api_##func, status_##stat, hotkey, true)
 
   // Non-command arg
 #define arg(token, name, n_req, n_val)                                         \
   parsed_arg_create(config, token, name, n_req, n_val, execute_fatal,          \
-                    str_api_fatal, status_generic, false)
+                    str_api_fatal, status_generic, false, false)
 
+  cmd(ARG_TOKEN_HELP, "help", 0, 1, help, generic, false);
   cmd(ARG_TOKEN_SET, "setoptions", 0, 0, noop, generic, false);
   cmd(ARG_TOKEN_CGP, "cgp", 4, 4, load_cgp, generic, false);
   cmd(ARG_TOKEN_LOAD, "load", 1, 1, load_gcg, generic, false);
@@ -4353,6 +4749,7 @@ void config_add_settings_to_string_builder(const Config *config,
   for (arg_token_t arg_token = 0; arg_token < NUMBER_OF_ARG_TOKENS;
        arg_token++) {
     switch (arg_token) {
+    case ARG_TOKEN_HELP:
     case ARG_TOKEN_SET:
     case ARG_TOKEN_CGP:
     case ARG_TOKEN_MOVES:

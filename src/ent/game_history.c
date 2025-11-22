@@ -383,6 +383,7 @@ void string_builder_add_gcg_filename(StringBuilder *sb,
   }
 }
 
+// FIXME: set the extension if the user has not
 void game_history_set_gcg_filename(GameHistory *game_history,
                                    const char *user_provided_gcg_filename) {
   if (user_provided_gcg_filename) {

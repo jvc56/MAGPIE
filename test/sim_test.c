@@ -511,8 +511,8 @@ void test_similar_play_consistency(const int num_threads) {
   // which only differ in which C is the blank. There are no words in the
   // lexicon which fit the following patterns:
   //
-  // C.OES
-  // C.GOO
+  // C.OES*
+  // C.GOO*
   //
   // and since all plays start with the same seed and are sampled the exact
   // same number of times by the round robin sampling method, the sim results
