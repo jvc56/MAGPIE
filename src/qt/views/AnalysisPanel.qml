@@ -51,7 +51,7 @@ Rectangle {
             }
             
             Text {
-                text: analysisModel ? (!analysisModel.isRunning ? "Ready" : "") : ""
+                text: analysisModel ? (!analysisModel.isRunning ? (analysisModel.iterations > 0 ? "Ready" : "Not Ready") : "") : ""
                 color: "#A6ADC8"
                 font.pixelSize: 12
                 font.family: "Consolas"
@@ -171,7 +171,7 @@ Rectangle {
                     Text {
                         text: model.notation
                         color: "#CDD6F4"
-                        font.pixelSize: 13
+                        font.pixelSize: 12 // Changed from 13
                         font.family: "Consolas"
                         Layout.fillWidth: true
                         Layout.minimumWidth: 80
@@ -187,7 +187,7 @@ Rectangle {
                         horizontalAlignment: Text.AlignRight
                     }
                     Text {
-                        text: model.spread.toFixed(2)
+                        text: (model.spread > 0 ? "+" : "") + model.spread.toFixed(2)
                         color: "#CDD6F4"
                         font.pixelSize: 12
                         font.family: "Consolas"

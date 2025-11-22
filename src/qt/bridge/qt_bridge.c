@@ -80,10 +80,6 @@ int bridge_load_gcg(BridgeGameHistory* gh, const char* gcg_content, const char* 
         return 1;
     }
     
-    // Debug verify
-    const char* loaded_kwg = players_data_get_data_name(pd, PLAYERS_DATA_TYPE_KWG, 0);
-    printf("BRIDGE_DEBUG: Pre-loaded KWG: %s\n", loaded_kwg ? loaded_kwg : "NULL");
-
     players_data_set(pd, PLAYERS_DATA_TYPE_KLV, data_path, "CSW24", "CSW24", err);
     if (!error_stack_is_empty(err)) {
         char *msg = error_stack_get_string_and_reset(err);
