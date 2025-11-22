@@ -75,6 +75,9 @@ qt_add_executable(qtpie
 
 set_target_properties(qtpie PROPERTIES MACOSX_BUNDLE_ICON_FILE AppIcon)
 
+# Ensure icon is generated before qtpie is built
+add_dependencies(qtpie icon_gen)
+
 # Use qt_add_qml_module for proper QML integration
 qt_add_qml_module(qtpie
     URI QtPie
