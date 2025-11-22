@@ -9,7 +9,7 @@ void AnalysisWorker::run() {
 }
 
 AnalysisModel::AnalysisModel(QObject *parent)
-    : QAbstractListModel(parent)
+    : QAbstractListModel(parent), m_plies(6) // Initialize m_plies to 6 (default)
 {
     m_updateTimer = new QTimer(this);
     m_updateTimer->setInterval(100); // 0.1 second
@@ -202,12 +202,24 @@ void AnalysisModel::stopAnalysis() {
     if (m_isRunning) qDebug() << "AnalysisModel::stopAnalysis called";
     m_updateTimer->stop();
     
+    // Clear data immediately to reflect "stop" state visually
+    beginResetModel();
+    m_displayCache.clear();
+    m_rowCount = 0;
+    m_iterations = 0;
+    m_confidence = 0.0;
+    endResetModel();
+    emit iterationsChanged();
+    emit confidenceChanged();
+
     if (m_tc) {
         bridge_thread_control_stop(m_tc);
     }
     
     if (m_thread) {
-        // Wait for thread to finish
+        // Prevent old thread from triggering slots (like onWorkerFinished)
+        disconnect(m_thread, nullptr, this, nullptr);
+        
         m_thread->quit();
         m_thread->wait(2000); // Wait up to 2s
         if (m_thread->isRunning()) {
@@ -240,18 +252,8 @@ void AnalysisModel::stopAnalysis() {
         m_tc = nullptr;
     }
     
-    m_game = nullptr;
     m_isRunning = false;
     emit isRunningChanged();
-    
-    beginResetModel();
-    m_displayCache.clear();
-    m_rowCount = 0;
-    m_iterations = 0;
-    m_confidence = 0.0;
-    endResetModel();
-    emit iterationsChanged();
-    emit confidenceChanged();
 }
 
 bool AnalysisModel::isRunning() const {
