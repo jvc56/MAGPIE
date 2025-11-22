@@ -33,5 +33,10 @@ cmake ..
 echo "Building qtpie..."
 cmake --build .
 
+# Touch the app to force Finder to update the icon
+if [ -d "qtpie.app" ]; then
+    touch "qtpie.app"
+fi
+
 echo "Build complete!"
 echo "You can run the application using: open build/qtpie.app"
