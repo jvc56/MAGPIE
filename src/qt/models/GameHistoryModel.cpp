@@ -11,6 +11,7 @@
 
 GameHistoryModel::GameHistoryModel(QObject *parent) : QObject(parent)
 {
+    m_analysisModel = new AnalysisModel(this);
 }
 
 
@@ -21,6 +22,9 @@ GameHistoryModel::~GameHistoryModel()
 
 void GameHistoryModel::cleanup()
 {
+    if (m_analysisModel) {
+        m_analysisModel->stopAnalysis();
+    }
     qDeleteAll(m_boardCache);
     m_boardCache.clear();
     qDeleteAll(m_historyCache);
@@ -38,6 +42,7 @@ void GameHistoryModel::cleanup()
 
 void GameHistoryModel::loadGame(const QString &gcgContent)
 {
+    qDebug() << "Loading GCG content:" << gcgContent;
     cleanup();
 
     m_gameHistory = bridge_game_history_create();
@@ -51,7 +56,7 @@ void GameHistoryModel::loadGame(const QString &gcgContent)
     }
 
     // Create Game from History
-    m_game = bridge_game_create_from_history(m_gameHistory, dataPath.toUtf8().constData());
+    m_game = bridge_game_create_from_history(m_gameHistory);
     if (!m_game) {
         qWarning() << "Error creating game from history";
         return;
@@ -295,6 +300,29 @@ void GameHistoryModel::updateGameState()
 {
     if (!m_game) return;
 
+    // Calculate start index of the current history item for analysis
+    int hIndex = currentHistoryIndex();
+    int analysisIndex = 0;
+    if (hIndex > 0) {
+        analysisIndex = m_historyItemEndIndices[hIndex - 1];
+    }
+    
+    // Create a game state for analysis corresponding to the *start* of the turn
+    // We need a way to get that state efficiently.
+    // Replaying from scratch to analysisIndex is safest but potentially slow.
+    // Since we don't have arbitrary state cache, let's try it.
+    // Ideally, we would clone m_game if it was at the right state, but m_game is at m_currentIndex (end of turn).
+    
+    BridgeGame* analysisGame = bridge_game_create_from_history(m_gameHistory);
+    bridge_game_play_to_index(m_gameHistory, analysisGame, analysisIndex);
+
+    // Trigger analysis
+    if (m_analysisModel) {
+        m_analysisModel->startAnalysis(analysisGame);
+    } else {
+        bridge_game_destroy(analysisGame);
+    }
+
     qDeleteAll(m_boardCache);
     m_boardCache.clear();
 
@@ -327,8 +355,6 @@ void GameHistoryModel::updateGameState()
                 if (isBlank) {
                     letterStr = letterStr.toUpper();
                 }
-                // uint8_t unblanked_ml = ml & 0x7F; // Remove blank bit if any? Bridge logic handles it.
-                // bridge_get_letter_score takes ml directly.
                 score = bridge_get_letter_score(m_game, ml);
             }
 
@@ -360,11 +386,6 @@ QString GameHistoryModel::player2Name() const
 int GameHistoryModel::player1Score() const
 {
     if (!m_game) return 0;
-    // If the current index is inside a merged turn, we need to look ahead to the end of that turn
-    // to get the score that includes bonuses.
-    // However, bridge_get_player_score uses the current game state.
-    // We rely on the navigation (next/jumpTo) to place us at the *end* of merged turns.
-    // See updateHistory() and jumpToHistoryIndex() logic.
     return bridge_get_player_score(m_game, 0);
 }
 
@@ -514,4 +535,14 @@ int GameHistoryModel::blankCount() const
     int b = 0;
     bridge_get_unseen_tiles(m_game, nullptr, nullptr, nullptr, &b);
     return b;
+}
+
+AnalysisModel* GameHistoryModel::analysisModel() const
+{
+    return m_analysisModel;
+}
+
+QString GameHistoryModel::lexiconName() const
+{
+    return QString::fromUtf8(bridge_get_lexicon(m_gameHistory));
 }
