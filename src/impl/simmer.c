@@ -10,7 +10,6 @@
 #include "../util/string_util.h"
 #include "bai.h"
 #include "inference.h"
-#include "move_gen.h"
 #include "random_variable.h"
 #include <stdlib.h>
 

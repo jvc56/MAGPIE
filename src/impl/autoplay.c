@@ -27,7 +27,6 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
-#include "move_gen.h"
 #include "rack_list.h"
 #include <stdbool.h>
 #include <stdint.h>
