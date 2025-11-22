@@ -10,7 +10,6 @@
 #include "../util/string_util.h"
 #include "bai.h"
 #include "inference.h"
-#include "move_gen.h"
 #include "random_variable.h"
 #include <stdlib.h>
 
@@ -62,5 +61,4 @@ void simulate(SimArgs *sim_args, SimResults *sim_results,
   // repeated alloc and deallocs if possible
   rvs_destroy(rvs);
   rvs_destroy(rng);
-  gen_destroy_cache();
 }

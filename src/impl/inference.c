@@ -28,7 +28,6 @@
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
-#include "move_gen.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -755,7 +754,4 @@ void infer(InferenceArgs *args, InferenceResults *results,
   Game *game = game_duplicate(args->game);
   infer_with_game_duplicate(args, game, results, error_stack);
   game_destroy(game);
-  // FIXME: only destroy cache if this is a stand-alone infer request, keep the
-  // caches for simming with inference
-  gen_destroy_cache();
 }
