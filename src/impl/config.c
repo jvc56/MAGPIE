@@ -33,6 +33,7 @@
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
+#include "../ent/trie.h"
 #include "../ent/validated_move.h"
 #include "../ent/win_pct.h"
 #include "../str/game_string.h"
@@ -161,6 +162,7 @@ typedef char *(*command_status_func_t)(Config *);
 
 typedef struct ParsedArg {
   char *name;
+  char *shortest_unambiguous_name;
   char **values;
   int num_req_values;
   int num_values;
@@ -256,6 +258,7 @@ void parsed_arg_destroy(ParsedArg *parsed_arg) {
   }
 
   free(parsed_arg->name);
+  free(parsed_arg->shortest_unambiguous_name);
 
   if (parsed_arg->values) {
     for (int i = 0; i < parsed_arg->num_values; i++) {
@@ -1364,14 +1367,20 @@ void add_help_arg_to_string_builder(const Config *config, arg_token_t arg_token,
     break;
   }
   const ParsedArg *parg = config_get_parg(config, arg_token);
+  const char *is_arg_char = "-";
   if (parg->is_command) {
-    if (parg->is_hotkey) {
-      string_builder_add_formatted_string(sb, "%c, ", parg->name[0]);
-    }
-    string_builder_add_string(sb, parg->name);
-  } else {
-    string_builder_add_formatted_string(sb, "-%s", parg->name);
+    is_arg_char = "";
   }
+
+  if (parg->is_hotkey) {
+    string_builder_add_formatted_string(sb, "%s%c, %s%s", is_arg_char,
+                                        parg->name[0], is_arg_char, parg->name);
+  } else {
+    string_builder_add_formatted_string(sb, "%s%s, %s%s", is_arg_char,
+                                        parg->shortest_unambiguous_name,
+                                        is_arg_char, parg->name);
+  }
+
   string_builder_add_formatted_string(sb, "\n\n%*sUsage:\n\n", HELP_INDENT, "");
 
   int usages_index = 0;
@@ -4928,6 +4937,21 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
 
 #undef cmd
 #undef arg
+
+  // Set shortest disambiguous command hints
+  Trie *trie = trie_create();
+  for (size_t i = 0; i < NUMBER_OF_ARG_TOKENS; i++) {
+    const char *name = config->pargs[i]->name;
+    trie_add_word(trie, name);
+    config->pargs[i]->shortest_unambiguous_name = string_duplicate(name);
+  }
+  for (size_t i = 0; i < NUMBER_OF_ARG_TOKENS; i++) {
+    const int su_index =
+        trie_get_shortest_unambiguous_index(trie, config->pargs[i]->name);
+    config->pargs[i]->shortest_unambiguous_name[su_index] = '\0';
+  }
+  trie_destroy(trie);
+
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
   config->exec_mode = EXEC_MODE_SYNC;

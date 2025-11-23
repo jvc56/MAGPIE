@@ -10,6 +10,7 @@
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/player.h"
 #include "../src/ent/players_data.h"
+#include "../src/ent/trie.h"
 #include "../src/ent/wmp.h"
 #include "../src/impl/config.h"
 #include "../src/util/io_util.h"
@@ -807,6 +808,26 @@ void test_config_wmp(void) {
 
   config_destroy(config);
   error_stack_destroy(error_stack);
+}
+
+void test_trie(void) {
+  // The Trie struct is used to find the shortest unambiguous strings for each
+  // command
+  Trie *trie = trie_create();
+  assert(trie_get_shortest_unambiguous_index(trie, "anything") == 0);
+  assert(trie_get_shortest_unambiguous_index(trie, "apron") == 0);
+  assert(trie_get_shortest_unambiguous_index(trie, "banana") == 0);
+  trie_add_word(trie, "apple");
+  trie_add_word(trie, "banana");
+  trie_add_word(trie, "apron");
+  trie_add_word(trie, "carrot");
+  assert(trie_get_shortest_unambiguous_index(trie, "apron") == 3);
+  assert(trie_get_shortest_unambiguous_index(trie, "apple") == 3);
+  assert(trie_get_shortest_unambiguous_index(trie, "banana") == 1);
+  assert(trie_get_shortest_unambiguous_index(trie, "carrot") == 1);
+  trie_add_word(trie, "carry");
+  assert(trie_get_shortest_unambiguous_index(trie, "carrot") == 5);
+  trie_destroy(trie);
 }
 
 void test_config_anno(void) {
@@ -1681,6 +1702,7 @@ void test_config_export(void) {
 }
 
 void test_config(void) {
+  test_trie();
   test_config_anno();
   test_config_export();
   test_config_load_error_cases();
