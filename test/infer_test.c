@@ -296,7 +296,7 @@ void test_infer_tiles_played_not_in_bag(void) {
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
   InferenceResults *inference_results = inference_results_create(NULL);
-  load_and_exec_config_or_die(config, "set -eq 0 -threads 1");
+  load_and_exec_config_or_die(config, "set -im 0 -threads 1");
   error_code_t status =
       infer_for_test(config, 0, 0, 1, "ACBYEYY", "", "", inference_results);
   assert(status == ERROR_STATUS_INFERENCE_TARGET_LETTERS_NOT_IN_BAG);
@@ -311,7 +311,7 @@ void test_infer_empty_game_history(void) {
                            "all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   InferenceResults *inference_results = inference_results_create(NULL);
-  load_and_exec_config_or_die(config, "set -eq 0 -threads 1");
+  load_and_exec_config_or_die(config, "set -im 0 -threads 1");
   error_code_t status =
       infer_for_test_with_history(config, inference_results, 0);
   assert(status == ERROR_STATUS_INFERENCE_EMPTY_GAME_HISTORY);
@@ -533,7 +533,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   // the remaining tiles exactly. Since the played
   // tiles contain an E, the inferred leave should not
   // contain an E.
-  load_and_exec_config_or_die(config, "set -eq 10000");
+  load_and_exec_config_or_die(config, "set -im 10000");
   if (use_game_history) {
     load_game_history_with_gcg(config, "vs_jeremy");
     status = infer_for_test_with_history(
@@ -579,7 +579,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   if (use_game_history) {
     // Test that using the game history works for an event in the middle of the
     // game history
-    load_and_exec_config_or_die(config, "set -eq 0");
+    load_and_exec_config_or_die(config, "set -im 0");
     load_game_history_with_gcg(config, "vs_jeremy");
     status = infer_for_test_with_history(config, inference_results, 11);
     assert(status == ERROR_STATUS_SUCCESS);
@@ -603,7 +603,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
     game_reset(game);
   }
 
-  load_and_exec_config_or_die(config, "set -numplays 100 -eq 0");
+  load_and_exec_config_or_die(config, "set -numplays 100 -im 0");
   if (use_game_history) {
     load_game_history_with_gcg_string(config, gcg_string_header,
                                       ">Tim: ERNT 8G RENT +8 8");
@@ -740,7 +740,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   // Z(OOPSYCHOLOGY) is over 100 points so keeping the Z will never be
   // inferred
   // for plays scoring 50.
-  load_and_exec_config_or_die(config, "set -eq 0");
+  load_and_exec_config_or_die(config, "set -im 0");
   status = infer_for_test(config, 0, 50, 0, "IIII", "", "", inference_results);
   assert(status == ERROR_STATUS_SUCCESS);
   // There are only 4 racks for which not playing Z(OOPSYCHOLOGY) is
@@ -861,7 +861,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   game_reset(game);
 
   // Check that the equity margin works
-  load_and_exec_config_or_die(config, "set -eq 5");
+  load_and_exec_config_or_die(config, "set -im 5");
   if (use_game_history) {
     load_game_history_with_gcg_string(config, gcg_string_header,
                                       ">Tim: MUZAKY 8H MUZAKY +58 58");
@@ -906,7 +906,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   // before the inference_results are not removed from the bag, so
   // we have to remove it here.
 
-  load_and_exec_config_or_die(config, "set -eq 0");
+  load_and_exec_config_or_die(config, "set -im 0");
   if (use_game_history) {
     StringBuilder *gcg_builder = string_builder_create();
     // The phony of IX* should make the X a known tile for the inference of
@@ -952,7 +952,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   }
   game_reset(game);
 
-  load_and_exec_config_or_die(config, "set -eq 0");
+  load_and_exec_config_or_die(config, "set -im 0");
   if (use_game_history) {
     StringBuilder *gcg_builder = string_builder_create();
     // The phony of IH* should make the H a known tile for the inference of
@@ -999,7 +999,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   // Test exchanges
 
   rack_reset(rack);
-  load_and_exec_config_or_die(config, "set -eq 0");
+  load_and_exec_config_or_die(config, "set -im 0");
   if (use_game_history) {
     GameHistory *game_history = config_get_game_history(config);
     test_parse_gcg("exchange_with_seven_in_bag", config, game_history);

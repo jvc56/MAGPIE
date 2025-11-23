@@ -13,12 +13,10 @@ typedef enum {
 
 typedef enum {
   BAI_SAMPLING_RULE_ROUND_ROBIN,
-  BAI_SAMPLING_RULE_TOP_TWO,
   BAI_SAMPLING_RULE_TOP_TWO_IDS,
 } bai_sampling_rule_t;
 
 #define BAI_SAMPLING_RULE_ROUND_ROBIN_STRING "rr"
-#define BAI_SAMPLING_RULE_TOP_TWO_STRING "oldtt"
 #define BAI_SAMPLING_RULE_TOP_TWO_IDS_STRING "tt"
 
 typedef struct BAIOptions {

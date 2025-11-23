@@ -327,6 +327,7 @@ void game_history_player_reset_names(GameHistory *history, int player_index,
   free(player->name);
   if (name) {
     player->name = string_duplicate(name);
+    trim_whitespace(player->name);
   } else if (player_index == 0) {
     player->name = string_duplicate(PLAYER_ONE_DEFAULT_NAME);
   } else {
@@ -383,14 +384,22 @@ void string_builder_add_gcg_filename(StringBuilder *sb,
   }
 }
 
-// FIXME: set the extension if the user has not
 void game_history_set_gcg_filename(GameHistory *game_history,
                                    const char *user_provided_gcg_filename) {
   if (user_provided_gcg_filename) {
     // The user has explicitly passed in a GCG filename
     game_history->user_provided_gcg_filename = true;
     free(game_history->gcg_filename);
-    game_history->gcg_filename = string_duplicate(user_provided_gcg_filename);
+
+    if (!has_suffix(GCG_EXTENSION, user_provided_gcg_filename)) {
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_formatted_string(
+          sb, "%s%s", user_provided_gcg_filename, GCG_EXTENSION);
+      game_history->gcg_filename = string_builder_dump(sb, NULL);
+      string_builder_destroy(sb);
+    } else {
+      game_history->gcg_filename = string_duplicate(user_provided_gcg_filename);
+    }
     return;
   }
   if (game_history->user_provided_gcg_filename) {

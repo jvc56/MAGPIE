@@ -1141,7 +1141,7 @@ void movegen_should_not_gen_exchanges(void) {
   Config *config = config_create_default_test();
   load_and_exec_config_or_die(
       config,
-      "set -lex NWL23 -ld english -r2 equity -numplays 40 -maxequitydiff 30 "
+      "set -lex NWL23 -ld english -r2 equity -numplays 40 -mmargin 30 "
       "-sr tt -threads 16 -scond "
       "95 "
       "-s2 equity -plies 5 -minp 100 -thres gk16 -it 1000000 -wmp true -s1 "

@@ -95,6 +95,34 @@ void test_single_error_case(const char *gcg_filename, Config *config,
   }
 }
 
+void test_game_history(GameHistory *game_history) {
+  // Check that whitespace is trimmed from the name
+  game_history_player_reset_names(game_history, 0,
+                                  " \n  \r  first  last\n  \n\r\n", NULL);
+  assert_strings_equal(game_history_player_get_name(game_history, 0),
+                       "first  last");
+  assert_strings_equal(game_history_player_get_nickname(game_history, 0),
+                       "first__last");
+
+  // Check that the GCG extension is properly added
+  game_history_set_gcg_filename(game_history,
+                                "player_one_vs_player_two" GCG_EXTENSION);
+  assert_strings_equal(game_history_get_gcg_filename(game_history),
+                       "player_one_vs_player_two" GCG_EXTENSION);
+
+  game_history_set_gcg_filename(game_history, "a" GCG_EXTENSION);
+  assert_strings_equal(game_history_get_gcg_filename(game_history),
+                       "a" GCG_EXTENSION);
+
+  game_history_set_gcg_filename(game_history, "b");
+  assert_strings_equal(game_history_get_gcg_filename(game_history),
+                       "b" GCG_EXTENSION);
+
+  game_history_set_gcg_filename(game_history, "some_game");
+  assert_strings_equal(game_history_get_gcg_filename(game_history),
+                       "some_game" GCG_EXTENSION);
+}
+
 void test_error_cases(GameHistory *game_history) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
@@ -993,6 +1021,7 @@ void test_gcg(void) {
   // Use the same game_history for all tests to thoroughly test the
   // game_history_reset function
   GameHistory *game_history = game_history_create();
+  test_game_history(game_history);
   test_error_cases(game_history);
   test_parse_special_char(game_history);
   test_parse_special_utf8_no_header(game_history);

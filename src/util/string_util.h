@@ -62,6 +62,7 @@ void string_list_destroy(StringList *string_list);
 // Boolean string functions
 bool has_prefix(const char *pre, const char *str);
 bool has_iprefix(const char *pre, const char *str);
+bool has_suffix(const char *suf, const char *str);
 bool is_string_empty_or_whitespace(const char *str);
 bool is_string_empty_or_null(const char *str);
 bool strings_equal(const char *str1, const char *str2);

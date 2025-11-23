@@ -147,16 +147,16 @@ void test_config_load_error_cases(void) {
   test_config_load_error(config, "sim -scond F",
                          ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
                          error_stack);
-  test_config_load_error(config, "sim -eq 23434.32433.4324",
+  test_config_load_error(config, "sim -im 23434.32433.4324",
                          ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
                          error_stack);
-  test_config_load_error(config, "sim -eq -3",
+  test_config_load_error(config, "sim -im -3",
                          ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS,
                          error_stack);
-  test_config_load_error(config, "sim -eq -4.5",
+  test_config_load_error(config, "sim -im -4.5",
                          ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS,
                          error_stack);
-  test_config_load_error(config, "sim -eq none",
+  test_config_load_error(config, "sim -im none",
                          ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
                          error_stack);
   test_config_load_error(config, "sim -seed zero",
@@ -820,9 +820,7 @@ void test_config_anno(void) {
                             ERROR_STATUS_CONFIG_LOAD_AMBIGUOUS_COMMAND);
   assert_config_exec_status(config, "help set", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "help", ERROR_STATUS_SUCCESS);
-  // FIXME: remove
-  config_destroy(config);
-  return;
+
   const char *p1_name = "Alice Lastname-Jones";
   const char *p1_nickname = "Alice_Lastname-Jones";
   const char *p2_name = "Bob Lastname-Jones";
@@ -903,6 +901,16 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "com 8d FADGE XYZ",
                             ERROR_STATUS_COMMIT_EXTRANEOUS_ARG);
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 100",
+                            ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
+  assert_config_exec_status(config, "com pass ABC",
+                            ERROR_STATUS_COMMIT_EXTRANEOUS_ARG);
+  assert_config_exec_status(config, "com pass ABC EFG",
+                            ERROR_STATUS_COMMIT_EXTRANEOUS_ARG);
+  assert_config_exec_status(config, "com 8d FADGE XYZ",
+                            ERROR_STATUS_COMMIT_EXTRANEOUS_ARG);
+  // Sim should work normally even after commit errors
+  assert_config_exec_status(config, "sim", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 0",
                             ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
   assert_config_exec_status(config, "com 100",
@@ -970,10 +978,12 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "r XEQUIES", ERROR_STATUS_SUCCESS);
   assert(bag_initial_total == bag_get_letters(bag) + 12);
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "sim", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 0);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(28));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(125));
+  assert_config_exec_status(config, "sim", ERROR_STATUS_SIM_NO_MOVES);
 
   assert_config_exec_status(config, "chal", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 0);
@@ -1150,11 +1160,14 @@ void test_config_anno(void) {
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(125));
 
   assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "sim", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 1);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(125));
 
   assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "sim", ERROR_STATUS_SIM_NO_MOVES);
   assert(game_get_player_on_turn_index(game) == 0);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(154));
@@ -1669,8 +1682,6 @@ void test_config_export(void) {
 
 void test_config(void) {
   test_config_anno();
-  // FIXME: remove
-  return;
   test_config_export();
   test_config_load_error_cases();
   test_config_load_success();

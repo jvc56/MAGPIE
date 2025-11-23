@@ -446,6 +446,15 @@ bool has_iprefix(const char *pre, const char *str) {
   return strncasecmp(pre, str, string_length(pre)) == 0;
 }
 
+bool has_suffix(const char *suf, const char *str) {
+  size_t suf_len = string_length(suf);
+  size_t str_len = string_length(str);
+  if (suf_len > str_len) {
+    return false;
+  }
+  return strncmp(suf, str + str_len - suf_len, suf_len) == 0;
+}
+
 // Raises a fatal error if str is null
 bool is_string_empty_or_whitespace(const char *str) {
   if (!str) {

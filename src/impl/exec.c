@@ -299,7 +299,7 @@ void sync_command_scan_loop(Config *config, ErrorStack *error_stack,
   while (1) {
     const char *prompt_text = "";
     if (config_get_show_prompt(config)) {
-      prompt_text = "magpie> ";
+      prompt_text = MAGPIE_PROMPT " ";
     }
     free(input);
     input = linenoise(prompt_text);

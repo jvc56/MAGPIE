@@ -2,6 +2,7 @@
 #define CONFIG_DEFS_H
 
 #define CONFIG_SETTINGS_FILENAME_WITH_EXTENSION "settings.txt"
+#define MAGPIE_PROMPT "magpie>"
 
 enum {
   DEFAULT_BINGO_BONUS = 50,
