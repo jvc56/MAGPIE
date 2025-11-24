@@ -833,6 +833,8 @@ void test_trie(void) {
 void test_config_anno(void) {
   // Commit and challenge
   Config *config = config_create_default_test();
+  assert_config_exec_status(config, "set -iterations 100",
+                            ERROR_STATUS_SUCCESS);
 
   // Test the help command
   assert_config_exec_status(config, "help holp",
@@ -932,6 +934,7 @@ void test_config_anno(void) {
                             ERROR_STATUS_COMMIT_EXTRANEOUS_ARG);
   // Sim should work normally even after commit errors
   assert_config_exec_status(config, "sim", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gsim", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 0",
                             ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
   assert_config_exec_status(config, "com 100",
@@ -1000,6 +1003,7 @@ void test_config_anno(void) {
   assert(bag_initial_total == bag_get_letters(bag) + 12);
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "sim", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gsim", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 0);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(28));

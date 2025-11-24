@@ -76,6 +76,7 @@ typedef enum {
   ARG_TOKEN_RACK,
   ARG_TOKEN_GEN,
   ARG_TOKEN_SIM,
+  ARG_TOKEN_GEN_AND_SIM,
   ARG_TOKEN_INFER,
   ARG_TOKEN_ENDGAME,
   ARG_TOKEN_AUTOPLAY,
@@ -815,6 +816,13 @@ void add_help_arg_to_string_builder(const Config *config, arg_token_t arg_token,
            "known rack from the game history is used. If the game history "
            "has a known rack for the opponent, you can use '-' to force the "
            "sim to use a completely random rack.";
+    break;
+  case ARG_TOKEN_GEN_AND_SIM:
+    usages[0] = "[<opponent_known_rack>]";
+    examples[0] = "";
+    examples[1] = "ABCD";
+    examples[2] = "-";
+    text = "Generates moves for the current position and runs a simulation.";
     break;
   case ARG_TOKEN_INFER:
     usages[0] = "";
@@ -1884,6 +1892,18 @@ char *status_sim(Config *config) {
                                 sim_results_get_bai_result(sim_results)),
                         true);
 }
+
+// Gen and Sim
+
+void impl_gen_and_sim(Config *config, ErrorStack *error_stack) {
+  impl_move_gen(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  impl_sim(config, error_stack);
+}
+
+char *status_gen_and_sim(Config *config) { return status_sim(config); }
 
 // Endgame
 
@@ -4762,6 +4782,15 @@ char *str_api_sim(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
+void execute_gen_and_sim(Config *config, ErrorStack *error_stack) {
+  impl_gen_and_sim(config, error_stack);
+}
+
+char *str_api_gen_and_sim(Config *config, ErrorStack *error_stack) {
+  impl_gen_and_sim(config, error_stack);
+  return empty_string();
+}
+
 void execute_infer(Config *config, ErrorStack *error_stack) {
   impl_infer(config, error_stack);
 }
@@ -4867,6 +4896,8 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic, true);
   cmd(ARG_TOKEN_GEN, "generate", 0, 0, move_gen, generic, true);
   cmd(ARG_TOKEN_SIM, "simulate", 0, 1, sim, sim, false);
+  cmd(ARG_TOKEN_GEN_AND_SIM, "gsimulate", 0, 1, gen_and_sim, gen_and_sim,
+      false);
   cmd(ARG_TOKEN_INFER, "infer", 0, 5, infer, generic, false);
   cmd(ARG_TOKEN_ENDGAME, "endgame", 0, 0, endgame, generic, false);
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, generic, false);
@@ -5093,6 +5124,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_RACK:
     case ARG_TOKEN_GEN:
     case ARG_TOKEN_SIM:
+    case ARG_TOKEN_GEN_AND_SIM:
     case ARG_TOKEN_INFER:
     case ARG_TOKEN_ENDGAME:
     case ARG_TOKEN_AUTOPLAY:
