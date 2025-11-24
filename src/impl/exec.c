@@ -1,5 +1,6 @@
 #include "exec.h"
 
+#include "../compat/async_command_control.h"
 #include "../compat/cpthread.h"
 #include "../compat/linenoise.h"
 #include "../def/config_defs.h"
@@ -32,8 +33,7 @@ static const char *async_command_strings[] = {
 };
 
 typedef struct AsyncCommandInputArgs {
-  int *pipefds;
-  struct pollfd *fds;
+  AsyncCommandControl *acc;
   Config *config;
 } AsyncCommandInputArgs;
 
@@ -138,19 +138,9 @@ void *execute_async_input_worker(void *uncasted_args) {
   char *input = NULL;
   while (thread_control_get_status(thread_control) ==
          THREAD_CONTROL_STATUS_STARTED) {
-    int ret = poll(args->fds, 2, -1); // wait indefinitely
-    if (ret == -1) {
-      perror("poll");
-      log_fatal("unexpected error while polling in async input worker");
-    }
     free(input);
-    input = NULL;
-    if (args->fds[0].revents) {
-      input = read_line_from_stream_in();
-    } else {
-      // Since there are only 2 pipes, fds[1] has necessarily been written to,
-      // indicating that the async command has finished and we can stop
-      // listening for async inputs
+    input = async_command_control_wait_for_input_or_finished_signal(args->acc);
+    if (input == NULL) {
       break;
     }
 
@@ -194,25 +184,13 @@ void execute_command_async(Config *config, ErrorStack *error_stack,
     return;
   }
 
-  int pipefds[2];
-  if (pipe(pipefds) == -1) {
-    perror("pipe");
-    log_fatal("failed to create pipe for async command");
-  }
-
   cpthread_t cmd_execution_thread;
   cpthread_create(&cmd_execution_thread, execute_async_command_worker, config);
 
-  // FIXME: wrap pollfd
-  struct pollfd fds[2];
-  fds[0].fd = fileno(get_stream_in());
-  fds[0].events = POLLIN;
-  fds[1].fd = pipefds[0];
-  fds[1].events = POLLIN;
+  AsyncCommandControl *acc = async_command_control_create();
 
   AsyncCommandInputArgs async_args;
-  async_args.pipefds = pipefds;
-  async_args.fds = fds;
+  async_args.acc = acc;
   async_args.config = config;
 
   cpthread_t cmd_input_thread;
@@ -224,9 +202,7 @@ void execute_command_async(Config *config, ErrorStack *error_stack,
     thread_control_wait_for_status_change(thread_control);
     if (thread_control_get_status(thread_control) ==
         THREAD_CONTROL_STATUS_FINISHED) {
-      if (write(pipefds[1], "x", 1) == -1) {
-        log_fatal("failed to write to async command input pipe");
-      }
+      async_command_control_send_finished_signal(acc);
     }
   }
 
@@ -234,13 +210,10 @@ void execute_command_async(Config *config, ErrorStack *error_stack,
 
   // Do to race conditions, the async input thread might still
   // be blocked on polling, so send a signal here to wake it up
-  if (write(pipefds[1], "x", 1) == -1) {
-    log_fatal("final write to async command input pipe failed");
-  }
+  async_command_control_send_finished_signal(acc);
 
   cpthread_join(cmd_input_thread);
-  close(pipefds[0]);
-  close(pipefds[1]);
+  async_command_control_destroy(acc);
 }
 
 void save_config_settings(const Config *config, ErrorStack *error_stack) {
