@@ -21,6 +21,12 @@ static inline void cpthread_mutex_lock(cpthread_mutex_t *mutex) {
   }
 }
 
+static inline void cpthread_mutex_destroy(cpthread_mutex_t *mutex) {
+  if (pthread_mutex_destroy(mutex)) {
+    log_fatal("mutex destroy failed");
+  }
+}
+
 static inline void cpthread_mutex_unlock(cpthread_mutex_t *mutex) {
   if (pthread_mutex_unlock(mutex)) {
     log_fatal("mutex unlock failed");

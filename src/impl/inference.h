@@ -17,6 +17,7 @@ typedef struct InferenceArgs {
   int target_num_exch;
   int move_capacity;
   Equity equity_margin;
+  bool all_unseen_inference_movegen;
   Rack *target_played_tiles;
   Rack *target_known_rack;
   Rack *nontarget_known_rack;

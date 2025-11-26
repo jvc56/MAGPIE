@@ -1,6 +1,9 @@
 #include "inference.h"
 
+#include "inference_move_gen.h"
+
 #include "../compat/cpthread.h"
+#include "../def/bit_rack_defs.h"
 #include "../def/cpthread_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/inference_defs.h"
@@ -9,6 +12,7 @@
 #include "../def/thread_control_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
+#include "../ent/bit_rack.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
@@ -16,6 +20,7 @@
 #include "../ent/klv.h"
 #include "../ent/leave_rack.h"
 #include "../ent/letter_distribution.h"
+#include "../ent/rack_hash_table.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
@@ -54,6 +59,7 @@ typedef struct Inference {
   // lose while still being considered
   // the top move.
   Equity equity_margin;
+  bool all_unseen_inference_movegen;
   uint64_t current_rack_index;
   uint64_t total_racks_evaluated;
   int num_threads;
@@ -75,6 +81,8 @@ typedef struct Inference {
   Rack *current_target_rack;
   // The bag represented by a rack for convenience
   Rack *bag_as_rack;
+  // The tiles played by the target (must be subset of any valid rack)
+  Rack *target_played_tiles;
   // MoveList used by the inference to generate moves
   MoveList *move_list;
   // Game used by the inference to generate moves
@@ -89,6 +97,7 @@ void inference_destroy(Inference *inference) {
   rack_destroy(inference->current_target_leave);
   rack_destroy(inference->current_target_exchanged);
   rack_destroy(inference->bag_as_rack);
+  rack_destroy(inference->target_played_tiles);
   move_list_destroy(inference->move_list);
   free(inference);
 }
@@ -139,6 +148,41 @@ void record_valid_leave(const Rack *rack, InferenceResults *results,
 }
 
 void evaluate_possible_leave(Inference *inference) {
+  if (inference->all_unseen_inference_movegen) {
+    // Populate hash table with possible racks and their BitRacks and leave
+    // values. Just worry about the scoring play case first.
+    if (inference->target_number_of_tiles_exchanged == 0) {
+      const LetterDistribution *ld = game_get_ld(inference->game);
+      // Key by full rack (not just leave) for correct inference filtering
+      BitRack bit_rack =
+          bit_rack_create_from_rack(ld, inference->current_target_rack);
+      Equity leave_value =
+          klv_get_leave_value(inference->klv, inference->current_target_leave);
+      RackHashTable *rht =
+          inference_results_get_rack_hash_table(inference->results);
+      if (!rht) {
+        // Initialize if not exists.
+        // Use reasonably large size. 2^16 buckets?
+        // num_stripes 4096 as per RFC?
+        rht = rack_hash_table_create(1 << 16, inference->move_capacity, 4096);
+        inference_results_set_rack_hash_table(inference->results, rht);
+      }
+      uint64_t number_of_draws_for_leave = get_number_of_draws_for_rack(
+          inference->bag_as_rack, inference->current_target_leave);
+      
+      // Create a dummy move for now since we are not doing movegen yet
+      Move *dummy_move = move_create();
+      move_set_score(dummy_move, 0);
+      move_set_equity(dummy_move, EQUITY_MIN_VALUE);
+
+      // We use 1.0 as weight for now as we are just populating
+      rack_hash_table_add_move(rht, &bit_rack, leave_value,
+                               (int)number_of_draws_for_leave, 1.0f, dummy_move);
+      move_destroy(dummy_move);
+    }
+    return;
+  }
+
   Equity current_leave_value = 0;
   if (inference->target_number_of_tiles_exchanged == 0) {
     current_leave_value =
@@ -240,6 +284,7 @@ Inference *inference_create(Game *game, const InferenceArgs *args,
   inference->target_score = args->target_score;
   inference->target_number_of_tiles_exchanged = args->target_num_exch;
   inference->equity_margin = args->equity_margin;
+  inference->all_unseen_inference_movegen = args->all_unseen_inference_movegen;
   inference->current_rack_index = 0;
   inference->total_racks_evaluated = 0;
   inference->num_threads = args->num_threads;
@@ -259,6 +304,7 @@ Inference *inference_create(Game *game, const InferenceArgs *args,
   inference->current_target_rack =
       player_get_rack(game_get_player(game, args->target_index));
   inference->bag_as_rack = rack_create(inference->ld_size);
+  inference->target_played_tiles = rack_duplicate(args->target_played_tiles);
 
   inference_results_reset(results, inference->move_capacity,
                           inference->ld_size);
@@ -341,6 +387,8 @@ Inference *inference_duplicate(const Inference *inference, int thread_index,
   new_inference->target_number_of_tiles_exchanged =
       inference->target_number_of_tiles_exchanged;
   new_inference->equity_margin = inference->equity_margin;
+  new_inference->all_unseen_inference_movegen =
+      inference->all_unseen_inference_movegen;
   new_inference->current_rack_index = inference->current_rack_index;
   new_inference->total_racks_evaluated = inference->total_racks_evaluated;
 
@@ -351,6 +399,8 @@ Inference *inference_duplicate(const Inference *inference, int thread_index,
   new_inference->current_target_rack = player_get_rack(
       game_get_player(new_inference->game, new_inference->target_index));
   new_inference->bag_as_rack = rack_duplicate(inference->bag_as_rack);
+  new_inference->target_played_tiles =
+      rack_duplicate(inference->target_played_tiles);
 
   new_inference->results = inference_results_create(
       inference_results_get_alias_method(inference->results));
@@ -378,6 +428,24 @@ void add_inference(Inference *inference_to_add,
   while (leave_rack_list_get_count(lrl_to_add) > 0) {
     const LeaveRack *leave_rack_to_add = leave_rack_list_pop_rack(lrl_to_add);
     leave_rack_list_insert_leave_rack(leave_rack_to_add, lrl_to_update);
+  }
+
+  // Transfer rack hash table from worker to main results
+  // For now, just take the first non-NULL rht (works for single-threaded case)
+  // TODO: For multi-threaded, need to merge multiple RHTs
+  RackHashTable *rht_to_add =
+      inference_results_take_rack_hash_table(inference_to_add->results);
+  if (rht_to_add != NULL) {
+    RackHashTable *rht_to_update =
+        inference_results_get_rack_hash_table(inference_to_update->results);
+    if (rht_to_update == NULL) {
+      // Transfer ownership to main results
+      inference_results_set_rack_hash_table(inference_to_update->results,
+                                            rht_to_add);
+    } else {
+      // Already have one, destroy the extra
+      rack_hash_table_destroy(rht_to_add);
+    }
   }
 }
 
@@ -458,6 +526,80 @@ void set_shared_variables_for_inference(
 }
 
 void infer_manager(ThreadControl *thread_control, Inference *inference) {
+  // If using all-unseen inference movegen, use the bag-based approach
+  if (inference->all_unseen_inference_movegen) {
+    // Create RackHashTable if it doesn't exist
+    RackHashTable *rht = inference_results_get_rack_hash_table(inference->results);
+    if (!rht) {
+      rht = rack_hash_table_create(1 << 16, inference->move_capacity, 4096);
+      inference_results_set_rack_hash_table(inference->results, rht);
+    }
+
+    // Set up arguments for bag-based move generation
+    InferenceMoveGenArgs movegen_args;
+    memset(&movegen_args, 0, sizeof(movegen_args));
+    movegen_args.game = inference->game;
+    movegen_args.bag_as_rack = inference->bag_as_rack;
+    movegen_args.target_played_tiles = inference->target_played_tiles;
+    movegen_args.move_list_capacity = inference->move_capacity;
+    movegen_args.eq_margin_movegen = inference->equity_margin;
+    movegen_args.rack_hash_table = rht;
+    movegen_args.override_kwg = NULL;
+
+    // Generate all rack moves from bag
+    generate_rack_moves_from_bag(&movegen_args);
+
+    // Now populate the alias_method from passing RHT entries for sim inference
+    AliasMethod *am = inference_results_get_alias_method(inference->results);
+
+    // Iterate through all RHT entries and add passing ones to alias_method
+    for (size_t bucket_idx = 0; bucket_idx < rht->num_buckets; bucket_idx++) {
+      InferredRackMoveList *entry = rht->buckets[bucket_idx];
+      while (entry != NULL) {
+        // Check if this rack passes the filter
+        // Filter: target_score + target_leave_value >= top_equity - margin
+        if (move_list_get_count(entry->moves) > 0) {
+          // Compute target_leave = full_rack - target_played_tiles
+          Rack *full_rack = bit_rack_to_rack(&entry->rack);
+          Rack target_leave;
+          rack_set_dist_size_and_reset(&target_leave, inference->ld_size);
+          rack_copy(&target_leave, full_rack);
+          rack_subtract_using_floor_zero(&target_leave,
+                                         inference->target_played_tiles);
+
+          // Get leave value for the TARGET leave (not the entry's move leave)
+          Equity target_leave_value =
+              klv_get_leave_value(inference->klv, &target_leave);
+
+          // Find max equity move
+          Move *top_move = move_list_get_move(entry->moves, 0);
+          Equity top_eq = move_get_equity(top_move);
+          for (int i = 1; i < move_list_get_count(entry->moves); i++) {
+            Move *m = move_list_get_move(entry->moves, i);
+            if (move_get_equity(m) > top_eq) {
+              top_eq = move_get_equity(m);
+            }
+          }
+
+          // Check if target play passes filter
+          bool passes = inference->target_score + target_leave_value >=
+                        top_eq - inference->equity_margin;
+
+          if (passes) {
+            // Add to alias method for sampling during simulation
+            alias_method_add_rack(am, &target_leave, entry->draws);
+          }
+          rack_destroy(full_rack);
+        }
+        entry = entry->next;
+      }
+    }
+
+    // Print summary
+    print_ucgi_inference_total_racks_evaluated(0, thread_control);
+    return;
+  }
+
   uint64_t total_racks_evaluated = 0;
 
   get_total_racks_evaluated(

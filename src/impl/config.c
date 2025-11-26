@@ -106,6 +106,7 @@ typedef enum {
   ARG_TOKEN_STOP_COND_PCT,
   ARG_TOKEN_EQ_MARGIN_INFERENCE,
   ARG_TOKEN_EQ_MARGIN_MOVEGEN,
+  ARG_TOKEN_ALL_UNSEEN_INFERENCE_MOVEGEN,
   ARG_TOKEN_MIN_PLAY_ITERATIONS,
   ARG_TOKEN_USE_GAME_PAIRS,
   ARG_TOKEN_USE_SMALL_PLAYS,
@@ -183,6 +184,7 @@ struct Config {
   double stop_cond_pct;
   Equity eq_margin_inference;
   Equity eq_margin_movegen;
+  bool all_unseen_inference_movegen;
   bool use_game_pairs;
   bool human_readable;
   bool use_small_plays;
@@ -874,6 +876,7 @@ void config_fill_infer_args(const Config *config, bool use_game_history,
   args->target_num_exch = target_num_exch;
   args->move_capacity = config_get_num_plays(config);
   args->equity_margin = config->eq_margin_inference;
+  args->all_unseen_inference_movegen = config->all_unseen_inference_movegen;
   args->target_played_tiles = target_played_tiles;
   args->target_known_rack = target_known_rack;
   args->nontarget_known_rack = nontarget_known_rack;
@@ -3608,6 +3611,14 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  // All unseen inference movegen
+
+  config_load_bool(config, ARG_TOKEN_ALL_UNSEEN_INFERENCE_MOVEGEN,
+                   &config->all_unseen_inference_movegen, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // Sim with inference
 
   config_load_bool(config, ARG_TOKEN_SIM_WITH_INFERENCE,
@@ -4191,6 +4202,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_STOP_COND_PCT, "scondition", 1, 1);
   arg(ARG_TOKEN_EQ_MARGIN_INFERENCE, "equitymargin", 1, 1);
   arg(ARG_TOKEN_EQ_MARGIN_MOVEGEN, "maxequitydifference", 1, 1);
+  arg(ARG_TOKEN_ALL_UNSEEN_INFERENCE_MOVEGEN, "allunseen", 1, 1);
   arg(ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1);
   arg(ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1);
   arg(ARG_TOKEN_SIM_WITH_INFERENCE, "sinfer", 1, 1);
@@ -4514,6 +4526,10 @@ void config_add_settings_to_string_builder(const Config *config,
         config_add_double_setting_to_string_builder(
             config, sb, arg_token, equity_to_double(config->eq_margin_movegen));
       }
+      break;
+    case ARG_TOKEN_ALL_UNSEEN_INFERENCE_MOVEGEN:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token, config->all_unseen_inference_movegen);
       break;
     case ARG_TOKEN_MIN_PLAY_ITERATIONS:
       config_add_int_setting_to_string_builder(config, sb, arg_token,

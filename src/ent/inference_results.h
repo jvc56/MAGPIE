@@ -6,6 +6,7 @@
 #include "leave_rack.h"
 #include "rack.h"
 #include "stats.h"
+#include "rack_hash_table.h"
 #include <stdint.h>
 
 typedef struct InferenceResults InferenceResults;
@@ -59,5 +60,12 @@ void inference_results_set_stat_for_letter(InferenceResults *inference_results,
 double get_probability_for_random_minimum_draw(
     const Rack *bag_as_rack, const Rack *target_rack, MachineLetter this_letter,
     int minimum, int number_of_target_played_tiles);
+
+void inference_results_set_rack_hash_table(InferenceResults *results,
+                                           RackHashTable *rht);
+RackHashTable *
+inference_results_get_rack_hash_table(const InferenceResults *results);
+RackHashTable *
+inference_results_take_rack_hash_table(InferenceResults *results);
 
 #endif

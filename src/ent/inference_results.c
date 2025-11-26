@@ -25,6 +25,7 @@ struct InferenceResults {
   LeaveRackList *leave_rack_list;
   AliasMethod *alias_method;
   bool alias_method_created_internally;
+  RackHashTable *rack_hash_table;
 
   // Fields that are finalized at the end of
   // the inference execution
@@ -51,6 +52,7 @@ InferenceResults *inference_results_create(AliasMethod *alias_method) {
     results->alias_method_created_internally = true;
     results->alias_method = alias_method_create();
   }
+  results->rack_hash_table = NULL;
   return results;
 }
 
@@ -64,6 +66,9 @@ void inference_results_destroy(InferenceResults *results) {
   leave_rack_list_destroy(results->leave_rack_list);
   if (results->alias_method_created_internally) {
     alias_method_destroy(results->alias_method);
+  }
+  if (results->rack_hash_table) {
+    rack_hash_table_destroy(results->rack_hash_table);
   }
   free(results);
 }
@@ -81,6 +86,11 @@ void inference_results_reset(InferenceResults *results, int move_capacity,
   if (results->alias_method_created_internally) {
     alias_method_reset(results->alias_method);
   }
+  // Do not destroy rack hash table here, it is managed externally
+  // or recreated if needed.
+  // Actually, if we reset, we probably want to clear or destroy/recreate RHT?
+  // The caller usually handles creation/assignment.
+  // Let's leave it as is for now.
 }
 
 void inference_results_finalize(const Rack *target_played_tiles,
@@ -265,4 +275,24 @@ double get_probability_for_random_minimum_draw(
   }
 
   return ((double)total_draws_for_this_letter_minimum) / (double)total_draws;
+}
+
+void inference_results_set_rack_hash_table(InferenceResults *results,
+                                           RackHashTable *rht) {
+  if (results->rack_hash_table) {
+    rack_hash_table_destroy(results->rack_hash_table);
+  }
+  results->rack_hash_table = rht;
+}
+
+RackHashTable *
+inference_results_get_rack_hash_table(const InferenceResults *results) {
+  return results->rack_hash_table;
+}
+
+RackHashTable *
+inference_results_take_rack_hash_table(InferenceResults *results) {
+  RackHashTable *rht = results->rack_hash_table;
+  results->rack_hash_table = NULL;
+  return rht;
 }
