@@ -54,6 +54,7 @@
 #include "zobrist_test.h"
 #include "rack_hash_table_test.h"
 #include "inference_all_racks_test.h"
+#include "inference_comparison_test.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -118,6 +119,7 @@ static TestEntry test_table[] = {
     {"load", test_load_gcg},
     {"rht", rack_hash_table_test},
     {"inferallracks", inference_all_racks_test},
+    {"infercmp", inference_comparison_test},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

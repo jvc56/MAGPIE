@@ -121,6 +121,111 @@ uint64_t get_number_of_draws_for_rack(const Rack *bag_as_rack,
   return number_of_ways;
 }
 
+// Helper struct for recursive leave enumeration
+typedef struct LeaveEnumContext {
+  const Rack *remaining_bag;  // Original bag minus target_played_tiles (for reference)
+  const Rack *target_played_tiles;  // The tiles the target played
+  Game *game;  // Game state for move generation
+  MoveList *move_list;  // Move list for move generation
+  const KLV *klv;
+  AliasMethod *am;
+  InferenceResults *results;  // For recording stats and leave rack list
+  Equity target_score;
+  Equity equity_margin;
+  int target_index;  // Target player index for setting rack
+  int ld_size;
+  int *leaves_enumerated;
+  int *leaves_passing;
+} LeaveEnumContext;
+
+// Forward declaration
+void record_valid_leave(const Rack *rack, InferenceResults *results,
+                        inference_stat_t inference_stat_type,
+                        double current_leave_value,
+                        uint64_t number_of_draws_for_leave);
+
+// Recursive leave enumeration: enumerate all multisets of size `remaining_size`
+// from remaining_bag, starting from letter `start_ml`.
+// Note: current_leave is built incrementally, and remaining_bag is reduced
+// in sync (remaining_bag tracks bag - current_leave at all times).
+static void enumerate_leaves_recursive(LeaveEnumContext *ctx, Rack *current_leave,
+                                       Rack *current_remaining, int start_ml,
+                                       int remaining_size) {
+  if (remaining_size == 0) {
+    // Complete leave - build full rack and generate moves for equity filter
+    (*ctx->leaves_enumerated)++;
+
+    // Build full rack = target_played_tiles + current_leave
+    Rack full_rack;
+    rack_set_dist_size(&full_rack, ctx->ld_size);
+    rack_copy(&full_rack, ctx->target_played_tiles);
+    for (int ml = 0; ml < ctx->ld_size; ml++) {
+      int count = rack_get_letter(current_leave, ml);
+      if (count > 0) {
+        rack_add_letters(&full_rack, ml, count);
+      }
+    }
+
+    // Set target player's rack and generate moves to get rack-specific top equity
+    Player *target_player = game_get_player(ctx->game, ctx->target_index);
+    Rack *player_rack = player_get_rack(target_player);
+    Rack saved_rack;
+    rack_set_dist_size(&saved_rack, ctx->ld_size);
+    rack_copy(&saved_rack, player_rack);
+    rack_copy(player_rack, &full_rack);
+
+    // Generate moves for this specific rack
+    const Move *top_move = get_top_equity_move(ctx->game, 0, ctx->move_list);
+    Equity top_eq = move_get_equity(top_move);
+
+    // Restore original rack
+    rack_copy(player_rack, &saved_rack);
+
+    // Apply equity filter
+    Equity leave_value = klv_get_leave_value(ctx->klv, current_leave);
+    bool passes = ctx->target_score + leave_value >= top_eq - ctx->equity_margin;
+    if (passes) {
+      (*ctx->leaves_passing)++;
+      // get_number_of_draws_for_rack expects bag AFTER leave removed
+      // current_remaining = remaining_bag - current_leave, which is what we need
+      uint64_t draw_count = get_number_of_draws_for_rack(current_remaining, current_leave);
+
+      // Record to stat and subtotals (like legacy code)
+      record_valid_leave(current_leave, ctx->results, INFERENCE_TYPE_LEAVE,
+                         equity_to_double(leave_value), draw_count);
+
+      // Add to alias method for sampling
+      alias_method_add_rack(ctx->am, current_leave, (int)draw_count);
+
+      // Add to leave rack list for "most common leaves" display
+      leave_rack_list_insert_rack(current_leave, NULL, (int)draw_count,
+                                  leave_value,
+                                  inference_results_get_leave_rack_list(ctx->results));
+    }
+    return;
+  }
+
+  // Enumerate by choosing how many of each letter (from start_ml onwards) to include
+  for (int ml = start_ml; ml < ctx->ld_size; ml++) {
+    // Use current_remaining for availability (tracks bag - current_leave)
+    int available = rack_get_letter(current_remaining, ml);
+    if (available == 0) {
+      continue;
+    }
+    // Try each count from 1 to min(available, remaining_size)
+    int max_count = available < remaining_size ? available : remaining_size;
+    for (int count = 1; count <= max_count; count++) {
+      rack_add_letters(current_leave, ml, count);
+      rack_take_letters(current_remaining, ml, count);
+      // Recurse to choose from later letters (ml+1 onwards to avoid duplicates)
+      enumerate_leaves_recursive(ctx, current_leave, current_remaining, ml + 1,
+                                 remaining_size - count);
+      rack_take_letters(current_leave, ml, count);
+      rack_add_letters(current_remaining, ml, count);
+    }
+  }
+}
+
 void increment_subtotals_for_results(const Rack *rack,
                                      InferenceResults *results,
                                      inference_stat_t inference_stat_type,
@@ -545,58 +650,65 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
     movegen_args.eq_margin_movegen = inference->equity_margin;
     movegen_args.rack_hash_table = rht;
     movegen_args.override_kwg = NULL;
+    movegen_args.target_index = inference->target_index;
 
     // Generate all rack moves from bag
     generate_rack_moves_from_bag(&movegen_args);
 
-    // Now populate the alias_method from passing RHT entries for sim inference
+    // Populate the alias_method by enumerating all possible leaves
     AliasMethod *am = inference_results_get_alias_method(inference->results);
 
-    // Iterate through all RHT entries and add passing ones to alias_method
-    for (size_t bucket_idx = 0; bucket_idx < rht->num_buckets; bucket_idx++) {
-      InferredRackMoveList *entry = rht->buckets[bucket_idx];
-      while (entry != NULL) {
-        // Check if this rack passes the filter
-        // Filter: target_score + target_leave_value >= top_equity - margin
-        if (move_list_get_count(entry->moves) > 0) {
-          // Compute target_leave = full_rack - target_played_tiles
-          Rack *full_rack = bit_rack_to_rack(&entry->rack);
-          Rack target_leave;
-          rack_set_dist_size_and_reset(&target_leave, inference->ld_size);
-          rack_copy(&target_leave, full_rack);
-          rack_subtract_using_floor_zero(&target_leave,
-                                         inference->target_played_tiles);
+    // Debug counters
+    int leaves_enumerated = 0;
+    int leaves_passing = 0;
 
-          // Get leave value for the TARGET leave (not the entry's move leave)
-          Equity target_leave_value =
-              klv_get_leave_value(inference->klv, &target_leave);
+    // remaining_bag = bag_as_rack (target_played_tiles already drawn during setup)
+    // Note: bag_as_rack already has target_played_tiles removed during inference setup
+    // when temp_target_rack was drawn from the bag, so we don't subtract again.
+    Rack remaining_bag;
+    rack_set_dist_size_and_reset(&remaining_bag, inference->ld_size);
+    rack_copy(&remaining_bag, inference->bag_as_rack);
 
-          // Find max equity move
-          Move *top_move = move_list_get_move(entry->moves, 0);
-          Equity top_eq = move_get_equity(top_move);
-          for (int i = 1; i < move_list_get_count(entry->moves); i++) {
-            Move *m = move_list_get_move(entry->moves, i);
-            if (move_get_equity(m) > top_eq) {
-              top_eq = move_get_equity(m);
-            }
-          }
+    int target_tiles_played = rack_get_total_letters(inference->target_played_tiles);
+    int leave_size = RACK_SIZE - target_tiles_played;
 
-          // Check if target play passes filter
-          bool passes = inference->target_score + target_leave_value >=
-                        top_eq - inference->equity_margin;
+    // Enumerate all possible leaves from remaining_bag using recursive helper
+    // For each leave, we generate moves per-rack to get the correct top_eq
+    Rack current_leave;
+    rack_set_dist_size_and_reset(&current_leave, inference->ld_size);
 
-          if (passes) {
-            // Add to alias method for sampling during simulation
-            alias_method_add_rack(am, &target_leave, entry->draws);
-          }
-          rack_destroy(full_rack);
-        }
-        entry = entry->next;
-      }
-    }
+    // Make a working copy for enumeration (remaining_bag - current_leave as we go)
+    // This is also used for draw count computation.
+    Rack current_remaining;
+    rack_set_dist_size(&current_remaining, inference->ld_size);
+    rack_copy(&current_remaining, &remaining_bag);
+
+    // Create move_list for move generation (inference->move_list is NULL for new algo)
+    MoveList *local_move_list = move_list_create(1);
+
+    LeaveEnumContext ctx = {
+        .remaining_bag = &remaining_bag,
+        .target_played_tiles = inference->target_played_tiles,
+        .game = inference->game,
+        .move_list = local_move_list,
+        .klv = inference->klv,
+        .am = am,
+        .results = inference->results,
+        .target_score = inference->target_score,
+        .equity_margin = inference->equity_margin,
+        .target_index = inference->target_index,
+        .ld_size = inference->ld_size,
+        .leaves_enumerated = &leaves_enumerated,
+        .leaves_passing = &leaves_passing,
+    };
+
+    enumerate_leaves_recursive(&ctx, &current_leave, &current_remaining, 0, leave_size);
+
+    // Clean up
+    move_list_destroy(local_move_list);
 
     // Print summary
-    print_ucgi_inference_total_racks_evaluated(0, thread_control);
+    print_ucgi_inference_total_racks_evaluated(leaves_enumerated, thread_control);
     return;
   }
 

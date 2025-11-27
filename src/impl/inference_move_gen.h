@@ -16,6 +16,8 @@ typedef struct InferenceMoveGenArgs {
   Equity eq_margin_movegen;
   RackHashTable *rack_hash_table;
   const KWG *override_kwg;
+  // Index of the target player (whose rack we're inferring)
+  int target_index;
 } InferenceMoveGenArgs;
 
 // Main entry point: generates moves for all possible racks derivable from
