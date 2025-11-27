@@ -52,4 +52,10 @@ void sim_results_unlock_simmed_plays(SimResults *sim_results);
 void sim_results_increment_node_count(SimResults *sim_results);
 char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
                      bool best_known_play);
+void sim_results_get_nth_best_move(const SimResults *sim_results, int n,
+                                   Move *move);
+void sim_results_set_valid_for_current_game_state(SimResults *sim_results,
+                                                  bool valid);
+bool sim_results_get_valid_for_current_game_state(SimResults *sim_results);
+
 #endif

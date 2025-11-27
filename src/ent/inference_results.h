@@ -59,5 +59,9 @@ void inference_results_set_stat_for_letter(InferenceResults *inference_results,
 double get_probability_for_random_minimum_draw(
     const Rack *bag_as_rack, const Rack *target_rack, MachineLetter this_letter,
     int minimum, int number_of_target_played_tiles);
+void inference_results_set_valid_for_current_game_state(
+    InferenceResults *results, bool valid);
+bool inference_results_get_valid_for_current_game_state(
+    const InferenceResults *results);
 
 #endif

@@ -34,6 +34,7 @@ struct InferenceResults {
   Rack target_played_tiles;
   Rack target_known_unplayed_tiles;
   Rack bag_as_rack;
+  bool valid_for_current_game_state;
 };
 
 InferenceResults *inference_results_create(AliasMethod *alias_method) {
@@ -81,6 +82,7 @@ void inference_results_reset(InferenceResults *results, int move_capacity,
   if (results->alias_method_created_internally) {
     alias_method_reset(results->alias_method);
   }
+  results->valid_for_current_game_state = false;
 }
 
 void inference_results_finalize(const Rack *target_played_tiles,
@@ -97,6 +99,7 @@ void inference_results_finalize(const Rack *target_played_tiles,
   rack_copy(&results->bag_as_rack, bag_as_rack);
   leave_rack_list_sort(results->leave_rack_list);
   alias_method_generate_tables(results->alias_method);
+  results->valid_for_current_game_state = true;
 }
 
 int inference_results_get_target_number_of_tiles_exchanged(
@@ -265,4 +268,14 @@ double get_probability_for_random_minimum_draw(
   }
 
   return ((double)total_draws_for_this_letter_minimum) / (double)total_draws;
+}
+
+void inference_results_set_valid_for_current_game_state(
+    InferenceResults *results, bool valid) {
+  results->valid_for_current_game_state = valid;
+}
+
+bool inference_results_get_valid_for_current_game_state(
+    const InferenceResults *results) {
+  return results->valid_for_current_game_state;
 }

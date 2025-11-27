@@ -28,4 +28,7 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack);
 void endgame_solver_destroy(EndgameSolver *es);
 
+void string_builder_add_pvline(const PVLine *pv_line, const Game *game,
+                               bool add_line_breaks,
+                               StringBuilder *pv_description);
 #endif

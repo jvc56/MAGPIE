@@ -37,6 +37,7 @@
 #include "../ent/validated_move.h"
 #include "../ent/win_pct.h"
 #include "../str/game_string.h"
+#include "../str/inference_string.h"
 #include "../str/move_string.h"
 #include "../str/rack_string.h"
 #include "../str/validated_moves_string.h"
@@ -131,11 +132,15 @@ typedef enum {
   ARG_TOKEN_NEW_GAME,
   ARG_TOKEN_EXPORT,
   ARG_TOKEN_COMMIT,
+  ARG_TOKEN_TOP_COMMIT,
   ARG_TOKEN_CHALLENGE,
   ARG_TOKEN_UNCHALLENGE,
   ARG_TOKEN_OVERTIME,
   ARG_TOKEN_SWITCH_NAMES,
-  ARG_TOKEN_SHOW,
+  ARG_TOKEN_SHOW_GAME,
+  ARG_TOKEN_SHOW_MOVES,
+  ARG_TOKEN_SHOW_INFERENCE,
+  ARG_TOKEN_SHOW_ENDGAME,
   ARG_TOKEN_NEXT,
   ARG_TOKEN_PREVIOUS,
   ARG_TOKEN_GOTO,
@@ -939,6 +944,14 @@ void add_help_arg_to_string_builder(const Config *config, arg_token_t arg_token,
            "the rack after the exchange can be specified so that six passes "
            "can be correctly scored.";
     break;
+  case ARG_TOKEN_TOP_COMMIT:
+    usages[0] = "[<rack>]";
+    examples[0] = "";
+    examples[1] = "RETINAS";
+    text = "Commits the static best move if a rack is specified or no sim "
+           "results are available. Otherwise, commits the best move by win "
+           "percentage according to the sim results.";
+    break;
   case ARG_TOKEN_CHALLENGE:
     usages[0] = "[<challenge_bonus_points>]";
     examples[0] = "";
@@ -966,9 +979,21 @@ void add_help_arg_to_string_builder(const Config *config, arg_token_t arg_token,
     usages[0] = "";
     text = "Switches the names of the players.";
     break;
-  case ARG_TOKEN_SHOW:
+  case ARG_TOKEN_SHOW_GAME:
     usages[0] = "";
     text = "Shows the current game.";
+    break;
+  case ARG_TOKEN_SHOW_MOVES:
+    usages[0] = "";
+    text = "Shows the moves or the sim results if available.";
+    break;
+  case ARG_TOKEN_SHOW_INFERENCE:
+    usages[0] = "";
+    text = "Shows the inference result.";
+    break;
+  case ARG_TOKEN_SHOW_ENDGAME:
+    usages[0] = "";
+    text = "Shows the endgame solver result.";
     break;
   case ARG_TOKEN_NEXT:
     usages[0] = "";
@@ -1551,7 +1576,8 @@ void impl_add_moves(Config *config, ErrorStack *error_stack) {
 
 // Setting player rack
 
-void impl_set_rack(Config *config, ErrorStack *error_stack) {
+void impl_set_rack_internal(Config *config, const char *rack_str,
+                            ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
@@ -1567,7 +1593,6 @@ void impl_set_rack(Config *config, ErrorStack *error_stack) {
   rack_copy(&new_rack,
             player_get_rack(game_get_player(config->game, player_index)));
 
-  const char *rack_str = config_get_parg_value(config, ARG_TOKEN_RACK, 0);
   load_rack_or_push_to_error_stack(rack_str, config->ld,
                                    ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
                                    &new_rack, error_stack);
@@ -1588,16 +1613,15 @@ void impl_set_rack(Config *config, ErrorStack *error_stack) {
   }
 }
 
+void impl_set_rack(Config *config, ErrorStack *error_stack) {
+  const char *rack_str = config_get_parg_value(config, ARG_TOKEN_RACK, 0);
+  impl_set_rack_internal(config, rack_str, error_stack);
+}
+
 // Move generation
 
-void impl_move_gen(Config *config, ErrorStack *error_stack) {
-  if (!config_has_game_data(config)) {
-    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-                     string_duplicate("cannot generate moves without lexicon"));
-    return;
-  }
-
-  config_init_game(config);
+void impl_move_gen_override_record_type(Config *config,
+                                        move_record_t move_record_type) {
   if (!config_get_use_small_plays(config)) {
     config_recreate_move_list(config, config_get_num_plays(config),
                               MOVE_LIST_TYPE_DEFAULT);
@@ -1611,8 +1635,23 @@ void impl_move_gen(Config *config, ErrorStack *error_stack) {
       .thread_index = 0,
       .eq_margin_movegen = config->eq_margin_movegen,
   };
-  generate_moves_for_game(&args);
+  generate_moves_for_game_override_record_type(&args, move_record_type);
   move_list_sort_moves(config->move_list);
+  sim_results_set_valid_for_current_game_state(config->sim_results, false);
+}
+
+void impl_move_gen(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot generate moves without lexicon"));
+    return;
+  }
+
+  config_init_game(config);
+
+  impl_move_gen_override_record_type(
+      config, player_get_move_record_type(game_get_player(
+                  config->game, game_get_player_on_turn_index(config->game))));
 }
 
 // Inference
@@ -1781,6 +1820,10 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
   config_infer(config, false, target_index, target_score, target_num_exch,
                &target_played_tiles, &target_known_rack, &nontarget_known_rack,
                config->inference_results, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 }
 
 // Sim
@@ -2108,7 +2151,7 @@ void impl_create_data(const Config *config, ErrorStack *error_stack) {
 
 // Show game
 
-char *impl_show(Config *config, ErrorStack *error_stack) {
+char *impl_show_game(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
                      string_duplicate("cannot show game without lexicon"));
@@ -2131,16 +2174,104 @@ char *impl_show(Config *config, ErrorStack *error_stack) {
   return result;
 }
 
-void execute_show(Config *config, ErrorStack *error_stack) {
-  char *result = impl_show(config, error_stack);
+void execute_show_game(Config *config, ErrorStack *error_stack) {
+  char *result = impl_show_game(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
   }
   free(result);
 }
 
-char *str_api_show(Config *config, ErrorStack *error_stack) {
-  return impl_show(config, error_stack);
+char *str_api_show_game(Config *config, ErrorStack *error_stack) {
+  return impl_show_game(config, error_stack);
+}
+
+// Show moves
+
+char *impl_show_moves(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot show game without lexicon"));
+    return empty_string();
+  }
+  if (!config->game || !config->move_list ||
+      move_list_get_count(config->move_list) == 0) {
+    error_stack_push(error_stack, ERROR_STATUS_NO_MOVES_TO_SHOW,
+                     string_duplicate("no moves to show"));
+    return empty_string();
+  }
+  // FIXME: make this human readable
+  // FIXME: possibly show simmed moves
+  return ucgi_static_moves(config->game, config->move_list);
+}
+
+void execute_show_moves(Config *config, ErrorStack *error_stack) {
+  char *result = impl_show_moves(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_show_moves(Config *config, ErrorStack *error_stack) {
+  return impl_show_moves(config, error_stack);
+}
+
+// Show inference results
+
+char *impl_show_inference(Config *config, ErrorStack *error_stack) {
+  if (!config->game || !inference_results_get_valid_for_current_game_state(
+                           config->inference_results)) {
+    error_stack_push(error_stack, ERROR_STATUS_NO_INFERENCE_TO_SHOW,
+                     string_duplicate("no inference results to show"));
+    return empty_string();
+  }
+  StringBuilder *sb_infer = string_builder_create();
+  string_builder_add_inference(sb_infer, config->ld, config->inference_results);
+  char *result = string_builder_dump(sb_infer, NULL);
+  string_builder_destroy(sb_infer);
+  return result;
+}
+
+void execute_show_inference(Config *config, ErrorStack *error_stack) {
+  char *result = impl_show_inference(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_show_inference(Config *config, ErrorStack *error_stack) {
+  return impl_show_inference(config, error_stack);
+}
+
+// Show endgame
+
+char *impl_show_endgame(Config *config, ErrorStack *error_stack) {
+  if (!config->game || !endgame_results_get_valid_for_current_game_state(
+                           config->endgame_results)) {
+    error_stack_push(error_stack, ERROR_STATUS_NO_ENDGAME_TO_SHOW,
+                     string_duplicate("no endgame results to show"));
+    return empty_string();
+  }
+  StringBuilder *pvsb = string_builder_create();
+  string_builder_add_pvline(endgame_results_get_pvline(config->endgame_results),
+                            config->game, true, pvsb);
+  char *result = string_builder_dump(pvsb, NULL);
+  string_builder_destroy(pvsb);
+  return result;
+}
+
+void execute_show_endgame(Config *config, ErrorStack *error_stack) {
+  char *result = impl_show_endgame(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_show_endgame(Config *config, ErrorStack *error_stack) {
+  return impl_show_endgame(config, error_stack);
 }
 
 // Start new game
@@ -2191,7 +2322,7 @@ void execute_new_game(Config *config, ErrorStack *error_stack) {
   char *result = impl_new_game(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
@@ -2404,8 +2535,10 @@ void config_game_play_events_internal(Config *config, ErrorStack *error_stack) {
 // If there are no resulting errors, the move list is reset if it exists
 void config_game_play_events(Config *config, ErrorStack *error_stack) {
   config_game_play_events_internal(config, error_stack);
+  // Invalidate the moves when moving to a new position
   if (error_stack_is_empty(error_stack) && config->move_list != NULL) {
     move_list_reset(config->move_list);
+    sim_results_set_valid_for_current_game_state(config->sim_results, false);
   }
 }
 
@@ -2586,13 +2719,9 @@ void config_add_game_event(Config *config, const int player_index,
 }
 
 void parse_commit(Config *config, StringBuilder *move_string_builder,
-                  ValidatedMoves **vms, ErrorStack *error_stack) {
-  const char *commit_pos_arg_1 =
-      config_get_parg_value(config, ARG_TOKEN_COMMIT, 0);
-  const char *commit_pos_arg_2 =
-      config_get_parg_value(config, ARG_TOKEN_COMMIT, 1);
-  const char *commit_pos_arg_3 =
-      config_get_parg_value(config, ARG_TOKEN_COMMIT, 2);
+                  ValidatedMoves **vms, ErrorStack *error_stack,
+                  const char *commit_pos_arg_1, const char *commit_pos_arg_2,
+                  const char *commit_pos_arg_3) {
   Move move;
   const int player_on_turn_index = game_get_player_on_turn_index(config->game);
   const Rack *player_rack =
@@ -2622,11 +2751,11 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
               commit_pos_arg_3));
       return;
     }
-    int move_list_count = 0;
+    int num_moves = 0;
     if (config->move_list) {
-      move_list_count = move_list_get_count(config->move_list);
+      num_moves = move_list_get_count(config->move_list);
     }
-    if (move_list_count == 0) {
+    if (num_moves == 0) {
       error_stack_push(
           error_stack, ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE,
           get_formatted_string(
@@ -2638,8 +2767,7 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
     // represent the rank of the move to commit.
 
     int commit_move_index;
-    string_to_int_or_push_error("move index", commit_pos_arg_1, 1,
-                                move_list_count,
+    string_to_int_or_push_error("move index", commit_pos_arg_1, 1, num_moves,
                                 ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE,
                                 &commit_move_index, error_stack);
     if (!error_stack_is_empty(error_stack)) {
@@ -2647,7 +2775,22 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
     }
     // Convert from 1-indexed user input to 0-indexed internal representation
     commit_move_index--;
-    move_copy(&move, move_list_get_move(config->move_list, commit_move_index));
+    // If there are valid sim results, prefer to use them for the move index
+    // lookup.
+    if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
+      const SimResults *sim_results = config->sim_results;
+      const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
+      if (num_simmed_plays != num_moves) {
+        log_fatal("encountered unexpected discrepancy between number of "
+                  "generated plays (%d) and the number of simmed plays (%d)\n",
+                  num_moves, num_simmed_plays);
+      }
+      sim_results_get_nth_best_move(sim_results, commit_move_index, &move);
+    } else {
+      move_copy(&move,
+                move_list_get_move(config->move_list, commit_move_index));
+    }
+
     if (move_get_type(&move) != GAME_EVENT_EXCHANGE && commit_pos_arg_2) {
       error_stack_push(
           error_stack, ERROR_STATUS_COMMIT_EXTRANEOUS_ARG,
@@ -2729,7 +2872,10 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
                         0, error_stack);
 }
 
-char *impl_commit(Config *config, ErrorStack *error_stack) {
+char *impl_commit_with_pos_args(Config *config, ErrorStack *error_stack,
+                                const char *commit_pos_arg_1,
+                                const char *commit_pos_arg_2,
+                                const char *commit_pos_arg_3) {
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
                      string_duplicate("cannot commit a move without lexicon"));
@@ -2743,7 +2889,8 @@ char *impl_commit(Config *config, ErrorStack *error_stack) {
 
   config_backup_game_and_history(config);
 
-  parse_commit(config, move_string_builder, &vms, error_stack);
+  parse_commit(config, move_string_builder, &vms, error_stack, commit_pos_arg_1,
+               commit_pos_arg_2, commit_pos_arg_3);
 
   string_builder_destroy(move_string_builder);
   validated_moves_destroy(vms);
@@ -2756,17 +2903,63 @@ char *impl_commit(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
+char *impl_commit(Config *config, ErrorStack *error_stack) {
+  const char *commit_pos_arg_1 =
+      config_get_parg_value(config, ARG_TOKEN_COMMIT, 0);
+  const char *commit_pos_arg_2 =
+      config_get_parg_value(config, ARG_TOKEN_COMMIT, 1);
+  const char *commit_pos_arg_3 =
+      config_get_parg_value(config, ARG_TOKEN_COMMIT, 2);
+  return impl_commit_with_pos_args(config, error_stack, commit_pos_arg_1,
+                                   commit_pos_arg_2, commit_pos_arg_3);
+}
+
 void execute_commit(Config *config, ErrorStack *error_stack) {
   char *result = impl_commit(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
 
 char *str_api_commit(Config *config, ErrorStack *error_stack) {
   return impl_commit(config, error_stack);
+}
+
+// Top commit
+
+char *impl_top_commit(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot generate moves without lexicon"));
+    return empty_string();
+  }
+
+  config_init_game(config);
+
+  const char *rack_str = config_get_parg_value(config, ARG_TOKEN_TOP_COMMIT, 0);
+  if (rack_str) {
+    impl_set_rack_internal(config, rack_str, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return empty_string();
+    }
+    impl_move_gen_override_record_type(config, MOVE_RECORD_BEST);
+  }
+  return impl_commit_with_pos_args(config, error_stack, "1", NULL, NULL);
+}
+
+void execute_top_commit(Config *config, ErrorStack *error_stack) {
+  char *result = impl_top_commit(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+    execute_show_game(config, error_stack);
+  }
+  free(result);
+}
+
+char *str_api_top_commit(Config *config, ErrorStack *error_stack) {
+  return impl_top_commit(config, error_stack);
 }
 
 // Challenge
@@ -2862,7 +3055,7 @@ void execute_challenge(Config *config, ErrorStack *error_stack) {
   char *result = impl_challenge(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
@@ -2932,7 +3125,7 @@ void execute_unchallenge(Config *config, ErrorStack *error_stack) {
   char *result = impl_unchallenge(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
@@ -3052,7 +3245,7 @@ void execute_overtime(Config *config, ErrorStack *error_stack) {
   char *result = impl_overtime(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
@@ -3077,7 +3270,7 @@ void execute_switch_names(Config *config, ErrorStack *error_stack) {
   char *result = impl_switch_names(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
@@ -3115,7 +3308,7 @@ void execute_next(Config *config, ErrorStack *error_stack) {
   char *result = impl_next(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
@@ -3152,7 +3345,7 @@ void execute_previous(Config *config, ErrorStack *error_stack) {
   char *result = impl_previous(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
@@ -3209,7 +3402,7 @@ void execute_goto(Config *config, ErrorStack *error_stack) {
   char *result = impl_goto(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
@@ -3245,7 +3438,7 @@ void execute_note(Config *config, ErrorStack *error_stack) {
   char *result = impl_note(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
@@ -3454,7 +3647,7 @@ void execute_load_gcg(Config *config, ErrorStack *error_stack) {
   char *result = impl_load_gcg(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
@@ -4172,9 +4365,20 @@ void config_load_lexicon_dependent_data(Config *config,
             ld_create(config->data_paths, updated_ld_name, error_stack);
         if (error_stack_is_empty(error_stack)) {
           config->ld_changed = true;
+          if (config->move_list) {
+            move_list_reset(config->move_list);
+          }
+          sim_results_set_valid_for_current_game_state(config->sim_results,
+                                                       false);
+          inference_results_set_valid_for_current_game_state(
+              config->inference_results, false);
+          endgame_results_set_valid_for_current_game_state(
+              config->endgame_results, false);
         }
       }
-      autoplay_results_set_ld(config->autoplay_results, config->ld);
+      if (error_stack_is_empty(error_stack)) {
+        autoplay_results_set_ld(config->autoplay_results, config->ld);
+      }
     }
   }
   free(updated_ld_name);
@@ -4886,12 +5090,17 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   cmd(ARG_TOKEN_NEW_GAME, "newgame", 0, 2, new_game, generic, false);
   cmd(ARG_TOKEN_EXPORT, "export", 0, 1, export, generic, true);
   cmd(ARG_TOKEN_COMMIT, "commit", 1, 3, commit, generic, true);
+  cmd(ARG_TOKEN_TOP_COMMIT, "tcommit", 0, 1, top_commit, generic, true);
   cmd(ARG_TOKEN_CHALLENGE, "challenge", 0, 1, challenge, generic, false);
   cmd(ARG_TOKEN_UNCHALLENGE, "unchallenge", 0, 1, unchallenge, generic, false);
   cmd(ARG_TOKEN_OVERTIME, "overtimepenalty", 2, 2, overtime, generic, false);
   cmd(ARG_TOKEN_SWITCH_NAMES, "switchnames", 0, 0, switch_names, generic,
       false);
-  cmd(ARG_TOKEN_SHOW, "show", 0, 0, show, generic, true);
+  cmd(ARG_TOKEN_SHOW_GAME, "shgame", 0, 0, show_game, generic, true);
+  cmd(ARG_TOKEN_SHOW_MOVES, "shmoves", 0, 0, show_moves, generic, false);
+  cmd(ARG_TOKEN_SHOW_INFERENCE, "shinference", 0, 0, show_inference, generic,
+      false);
+  cmd(ARG_TOKEN_SHOW_ENDGAME, "shendgame", 0, 0, show_endgame, generic, false);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic, true);
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic, true);
   cmd(ARG_TOKEN_GEN, "generate", 0, 0, move_gen, generic, true);
@@ -5135,11 +5344,15 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_NEW_GAME:
     case ARG_TOKEN_EXPORT:
     case ARG_TOKEN_COMMIT:
+    case ARG_TOKEN_TOP_COMMIT:
     case ARG_TOKEN_CHALLENGE:
     case ARG_TOKEN_UNCHALLENGE:
     case ARG_TOKEN_OVERTIME:
     case ARG_TOKEN_SWITCH_NAMES:
-    case ARG_TOKEN_SHOW:
+    case ARG_TOKEN_SHOW_GAME:
+    case ARG_TOKEN_SHOW_MOVES:
+    case ARG_TOKEN_SHOW_INFERENCE:
+    case ARG_TOKEN_SHOW_ENDGAME:
     case ARG_TOKEN_NEXT:
     case ARG_TOKEN_PREVIOUS:
     case ARG_TOKEN_GOTO:

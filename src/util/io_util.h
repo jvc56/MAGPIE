@@ -240,6 +240,10 @@ typedef enum {
   ERROR_STATUS_EXPORT_NO_GAME_EVENTS,
   // Note errors
   ERROR_STATUS_NOTE_NO_GAME_EVENTS,
+  // Show errors
+  ERROR_STATUS_NO_MOVES_TO_SHOW,
+  ERROR_STATUS_NO_INFERENCE_TO_SHOW,
+  ERROR_STATUS_NO_ENDGAME_TO_SHOW,
 } error_code_t;
 
 typedef enum {

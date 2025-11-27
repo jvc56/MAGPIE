@@ -160,14 +160,14 @@ void string_builder_add_inference_type(
 
 void string_builder_add_inference(StringBuilder *inference_string,
                                   const LetterDistribution *ld,
-                                  InferenceResults *inference_results,
-                                  const Rack *target_played_tiles) {
+                                  InferenceResults *inference_results) {
   int target_number_of_tiles_exchanged =
       inference_results_get_target_number_of_tiles_exchanged(inference_results);
 
   bool is_exchange = target_number_of_tiles_exchanged > 0;
   int number_of_tiles_played_or_exchanged;
-
+  const Rack *target_played_tiles =
+      inference_results_get_target_played_tiles(inference_results);
   if (!is_exchange) {
     string_builder_add_string(inference_string, "Played tiles:          ");
     string_builder_add_rack(inference_string, target_played_tiles, ld, false);

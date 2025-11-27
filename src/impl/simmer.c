@@ -57,6 +57,8 @@ void simulate(SimArgs *sim_args, SimResults *sim_results,
                                sim_results_get_bai_result(sim_results)),
                        true);
 
+  sim_results_set_valid_for_current_game_state(sim_results, true);
+
   // FIXME: once simming is part of autoplay, we will want to prevent these
   // repeated alloc and deallocs if possible
   rvs_destroy(rvs);

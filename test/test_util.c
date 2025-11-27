@@ -347,11 +347,9 @@ void print_rack(const Rack *rack, const LetterDistribution *ld) {
 }
 
 void print_inference(const LetterDistribution *ld,
-                     const Rack *target_played_tiles,
                      InferenceResults *inference_results) {
   StringBuilder *inference_string = string_builder_create();
-  string_builder_add_inference(inference_string, ld, inference_results,
-                               target_played_tiles);
+  string_builder_add_inference(inference_string, ld, inference_results);
   printf("%s\n", string_builder_peek(inference_string));
   string_builder_destroy(inference_string);
 }

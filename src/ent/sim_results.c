@@ -60,6 +60,7 @@ struct SimResults {
   SimmedPlayDisplayInfo *simmed_play_display_infos;
   StringBuilder *display_string_builder;
   BAIResult *bai_result;
+  bool valid_for_current_game_state;
 };
 
 SimmedPlay **simmed_plays_create(const MoveList *move_list,
@@ -157,6 +158,7 @@ void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
   sim_results->num_plies = num_plies;
   sim_results->iteration_count = 0;
   atomic_init(&sim_results->node_count, 0);
+  sim_results->valid_for_current_game_state = false;
   cpthread_mutex_unlock(&sim_results->display_mutex);
 }
 
@@ -172,6 +174,7 @@ SimResults *sim_results_create(void) {
   sim_results->simmed_play_display_infos = NULL;
   sim_results->display_string_builder = string_builder_create();
   sim_results->bai_result = bai_result_create();
+  sim_results->valid_for_current_game_state = false;
   return sim_results;
 }
 
@@ -446,4 +449,20 @@ char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
       string_builder_dump(sim_results->display_string_builder, NULL);
   cpthread_mutex_unlock(&sim_results->display_mutex);
   return sim_stats_string;
+}
+
+// NOT THREAD SAFE: Assumes no sim is in progress, the sim display info is
+// updated and sorted, and n is in bounds.
+void sim_results_get_nth_best_move(const SimResults *sim_results, int n,
+                                   Move *move) {
+  *move = sim_results->simmed_play_display_infos[n].move;
+}
+
+void sim_results_set_valid_for_current_game_state(SimResults *sim_results,
+                                                  bool valid) {
+  sim_results->valid_for_current_game_state = valid;
+}
+
+bool sim_results_get_valid_for_current_game_state(SimResults *sim_results) {
+  return sim_results->valid_for_current_game_state;
 }

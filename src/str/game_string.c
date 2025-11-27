@@ -7,6 +7,7 @@
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/bonus_square.h"
+#include "../ent/endgame_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
