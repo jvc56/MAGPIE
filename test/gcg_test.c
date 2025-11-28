@@ -390,6 +390,9 @@ void assert_game_play_n_events(GameHistory *game_history, Game *game1,
   while (cgp) {
     game_play_n_events_or_die(game_history, game1, event_index);
     load_cgp_or_die(game2, cgp);
+    printf("cgp: %s\n", cgp);
+    print_game(game1, NULL);
+    print_game(game2, NULL);
     assert_games_are_equal(game1, game2, true);
     event_index++;
     cgp = cgps[event_index];
@@ -948,6 +951,21 @@ void test_success_out_in_many(GameHistory *game_history) {
                             "N");
 
   game_play_n_events_or_die(game_history, game1, 27);
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 0)),
+                            "S");
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 1)), "");
+
+  game_play_n_events_or_die(game_history, game1, 28);
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 0)),
+                            "S");
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 1)), "");
+
+  game_play_n_events_or_die(game_history, game1, 29);
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 0)),
+                            "S");
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 1)), "");
+
+  game_play_n_events_or_die(game_history, game1, 30);
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 0)),
                             "S");
   assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 1)), "");

@@ -2346,8 +2346,13 @@ char *impl_export(Config *config, ErrorStack *error_stack) {
   }
   config_init_game(config);
 
-  game_history_set_gcg_filename(
-      config->game_history, config_get_parg_value(config, ARG_TOKEN_EXPORT, 0));
+  const char *user_provided_filename =
+      config_get_parg_value(config, ARG_TOKEN_EXPORT, 0);
+
+  if (user_provided_filename ||
+      !game_history_get_gcg_filename(config->game_history)) {
+    game_history_set_gcg_filename(config->game_history, user_provided_filename);
+  }
 
   write_gcg(game_history_get_gcg_filename(config->game_history), config->ld,
             config->game_history, error_stack);

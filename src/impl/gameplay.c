@@ -727,8 +727,11 @@ void copy_bag_to_rack(const Bag *bag, const Rack *rack_to_sub, Rack *rack) {
   const int ld_size = rack_get_dist_size(rack);
   rack_set_dist_size_and_reset(rack, ld_size);
   for (MachineLetter ml = 0; ml < ld_size; ml++) {
-    rack_add_letters(rack, ml,
-                     remaining_letters[ml] - rack_get_letter(rack_to_sub, ml));
+    int letters_to_sub = 0;
+    if (rack_to_sub) {
+      letters_to_sub = rack_get_letter(rack_to_sub, ml);
+    }
+    rack_add_letters(rack, ml, remaining_letters[ml] - letters_to_sub);
   }
 }
 
@@ -756,11 +759,7 @@ void set_after_game_event_racks(const GameHistory *game_history,
   if (all_letters_on_rack_played && num_letters_in_bag <= (RACK_SIZE)) {
     // If the bag has <= RACK_SIZE, then the last play must've been an outplay
     // and the opp must have all of the remaining letters.
-    // For the call to copy_bag_to_rack, just pass in
-    // after_event_player_off_turn_rack as the rack to sub since we know it's
-    // empty at this point.
-    copy_bag_to_rack(bag, after_event_player_off_turn_rack,
-                     after_event_player_on_turn_rack);
+    copy_bag_to_rack(bag, NULL, after_event_player_on_turn_rack);
     player_on_turn_rack_set = true;
   } else {
     for (int i = game_event_index + 1; i < number_of_game_events; i++) {
@@ -777,10 +776,11 @@ void set_after_game_event_racks(const GameHistory *game_history,
           return;
         }
       }
-      const Rack *gei_rack = game_event_get_const_rack(game_event_i);
       if (game_event_get_player_index(game_event_i) == player_on_turn_index &&
-          rack_get_dist_size(gei_rack) != 0) {
-        rack_copy(after_event_player_on_turn_rack, gei_rack);
+          game_event_get_type(game_event_i) != GAME_EVENT_END_RACK_POINTS &&
+          rack_get_dist_size(game_event_get_const_rack(game_event_i)) != 0) {
+        rack_copy(after_event_player_on_turn_rack,
+                  game_event_get_const_rack(game_event_i));
         player_on_turn_rack_set = true;
         break;
       }
@@ -1054,6 +1054,7 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
     play_events_data->played_end_rack_points = true;
     player_add_to_score(player,
                         calculate_end_rack_points(opp_rack, game_get_ld(game)));
+    all_letters_on_rack_played = true;
     break;
   case GAME_EVENT_UNKNOWN:
     log_fatal("encountered unknown game event when playing game history turn");

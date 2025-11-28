@@ -1342,7 +1342,7 @@ void string_builder_add_gcg(StringBuilder *gcg_sb, const LetterDistribution *ld,
       string_builder_add_formatted_string(gcg_sb, "#%s %s", GCG_NOTE_STRING,
                                           note);
       // If note does not end with newline, add one
-      if (note[strlen(note) - 1] != '\n') {
+      if (note[string_length(note) - 1] != '\n') {
         string_builder_add_char(gcg_sb, '\n');
       }
     }
