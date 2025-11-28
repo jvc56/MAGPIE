@@ -88,6 +88,8 @@ static TestEntry test_table[] = {
     {"gameplay", test_gameplay},
     {"stats", test_stats},
     {"infer", test_infer},
+    {"inferrepro", test_infer_cutoff_repro},
+    {"infercmp", test_infer_cutoff_optimization_comparison},
     {"rv", test_random_variable},
     {"am", test_alias_method},
     {"sim", test_sim},

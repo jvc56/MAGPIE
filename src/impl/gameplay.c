@@ -452,6 +452,7 @@ void generate_moves_for_game(const MoveGenArgs *args) {
       .override_kwg = NULL,
       .thread_index = args->thread_index,
       .eq_margin_movegen = args->eq_margin_movegen,
+      .initial_best_equity = EQUITY_INITIAL_VALUE,
   };
 
   generate_moves(&args_with_overwritten_record_and_sort);
@@ -466,9 +467,33 @@ Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
       .override_kwg = NULL,
       .thread_index = thread_index,
       .eq_margin_movegen = 0,
+      .initial_best_equity = EQUITY_INITIAL_VALUE,
   };
   generate_moves(&args);
   return move_list_get_move(move_list, 0);
+}
+
+bool get_top_equity_move_with_cutoff(Game *game, int thread_index,
+                                     MoveList *move_list,
+                                     Equity cutoff_threshold) {
+  // Use early termination optimization: stop as soon as ANY move exceeds
+  // the cutoff threshold. This is much faster than finding the best move
+  // when we only need to know if the threshold is exceeded.
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_BEST,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .thread_index = thread_index,
+      .eq_margin_movegen = 0,
+      .initial_best_equity = cutoff_threshold,
+      .stop_on_exceeding_threshold = true,
+  };
+  generate_moves(&args);
+  // Check if the threshold was exceeded (early termination may have occurred)
+  const MoveGen *gen = get_movegen(thread_index);
+  return gen->threshold_exceeded;
 }
 
 bool moves_are_similar(const Move *move1, const Move *move2, int dist_size) {

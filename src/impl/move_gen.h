@@ -57,6 +57,18 @@ typedef struct MoveGen {
   // record type
   Equity best_move_equity_or_score;
   Equity eq_margin_movegen;
+  // If set to a non-EQUITY_INITIAL_VALUE, this is used as the initial value
+  // for best_move_equity_or_score. This allows anchor pruning to skip anchors
+  // that can't possibly beat this equity threshold. Used by inference to avoid
+  // exploring moves that can't beat target_score + leave + margin.
+  Equity initial_best_equity;
+  // When true, movegen will terminate as soon as any move exceeds
+  // initial_best_equity. Used by inference to quickly determine if a rack
+  // is invalid (has a move better than what was played).
+  bool stop_on_exceeding_threshold;
+  // Set to true when a move exceeding initial_best_equity is found and
+  // stop_on_exceeding_threshold is enabled.
+  bool threshold_exceeded;
 
   MachineLetter strip[(MOVE_MAX_TILES)];
   MachineLetter exchange_strip[(MOVE_MAX_TILES)];
@@ -139,9 +151,21 @@ typedef struct MoveGenArgs {
   int thread_index;
   MoveList *move_list;
   const KWG *override_kwg;
+  // If set to a non-EQUITY_INITIAL_VALUE, this is used as the initial value
+  // for best_move_equity_or_score. This allows anchor pruning to skip anchors
+  // that can't possibly beat this equity threshold.
+  Equity initial_best_equity;
+  // When true, movegen will terminate as soon as any move exceeds
+  // initial_best_equity. Used by inference to quickly determine if a rack
+  // is invalid (has a move better than what was played).
+  bool stop_on_exceeding_threshold;
 } MoveGenArgs;
 
 void gen_destroy_cache(void);
+
+void gen_reset_anchor_stats(void);
+void gen_get_anchor_stats(uint64_t *available, uint64_t *processed,
+                          uint64_t *skipped);
 
 // If override_kwg is NULL, the full KWG for the on-turn player is used,
 // but if it is nonnull, override_kwg is used. The only use case for this

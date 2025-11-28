@@ -229,6 +229,7 @@ int generate_stm_plays(EndgameSolverWorker *worker) {
       .override_kwg = worker->solver->pruned_kwg,
       .thread_index = worker->thread_index,
       .eq_margin_movegen = 0,
+      .initial_best_equity = EQUITY_INITIAL_VALUE,
   };
   generate_moves(&args);
   SmallMove *arena_small_moves = (SmallMove *)arena_alloc(

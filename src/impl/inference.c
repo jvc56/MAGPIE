@@ -1,5 +1,7 @@
 #include "inference.h"
 
+#include <stdio.h>
+
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"
 #include "../def/game_history_defs.h"
@@ -32,6 +34,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+// Debug counters for cutoff optimization
+static uint64_t cutoff_total_calls = 0;
+static uint64_t cutoff_triggered_count = 0;
 
 typedef struct Inference {
   // KLV used to evaluate leaves to determine
@@ -80,6 +86,8 @@ typedef struct Inference {
   // Game used by the inference to generate moves
   Game *game;
   InferenceResults *results;
+  // If true, use early cutoff optimization during movegen
+  bool use_cutoff_optimization;
 } Inference;
 
 void inference_destroy(Inference *inference) {
@@ -145,12 +153,34 @@ void evaluate_possible_leave(Inference *inference) {
         klv_get_leave_value(inference->klv, inference->current_target_leave);
   }
 
-  const Move *top_move = get_top_equity_move(
-      inference->game, inference->thread_index, inference->move_list);
-  const bool is_within_equity_margin = inference->target_score +
-                                           current_leave_value +
-                                           inference->equity_margin >=
-                                       move_get_equity(top_move);
+  // Calculate the cutoff threshold: if any move exceeds this, the leave is
+  // not within the equity margin (unless it's a matching exchange).
+  const Equity cutoff_threshold = inference->target_score + current_leave_value +
+                                  inference->equity_margin;
+
+  bool is_within_equity_margin;
+  const Move *top_move;
+
+  if (inference->use_cutoff_optimization &&
+      inference->target_number_of_tiles_exchanged == 0) {
+    // Use early cutoff: if we find a move exceeding the threshold, we know
+    // is_within_equity_margin is false and we don't need to find the true best.
+    // The exchange check is skipped since target_number_of_tiles_exchanged == 0.
+    cutoff_total_calls++;
+    const bool cutoff_exceeded = get_top_equity_move_with_cutoff(
+        inference->game, inference->thread_index, inference->move_list,
+        cutoff_threshold);
+    if (cutoff_exceeded) {
+      cutoff_triggered_count++;
+    }
+    is_within_equity_margin = !cutoff_exceeded;
+    top_move = move_list_get_move(inference->move_list, 0);
+  } else {
+    // Fall back to finding the true best move
+    top_move = get_top_equity_move(inference->game, inference->thread_index,
+                                   inference->move_list);
+    is_within_equity_margin = cutoff_threshold >= move_get_equity(top_move);
+  }
   const int tiles_played = move_get_tiles_played(top_move);
   const bool number_exchanged_matches =
       move_get_type(top_move) == GAME_EVENT_EXCHANGE &&
@@ -264,6 +294,7 @@ Inference *inference_create(Game *game, const InferenceArgs *args,
                           inference->ld_size);
 
   inference->results = results;
+  inference->use_cutoff_optimization = args->use_cutoff_optimization;
 
   // This will return the inference->current_target_rack to the bag.
   return_rack_to_bag(game, 0);
@@ -362,6 +393,7 @@ Inference *inference_duplicate(const Inference *inference, int thread_index,
   new_inference->print_interval = inference->print_interval;
   new_inference->thread_control = thread_control;
   new_inference->thread_index = thread_index;
+  new_inference->use_cutoff_optimization = inference->use_cutoff_optimization;
 
   return new_inference;
 }
@@ -754,4 +786,26 @@ void infer(InferenceArgs *args, InferenceResults *results,
   Game *game = game_duplicate(args->game);
   infer_with_game_duplicate(args, game, results, error_stack);
   game_destroy(game);
+}
+
+// Debug functions for cutoff optimization statistics
+void inference_reset_cutoff_stats(void) {
+  cutoff_total_calls = 0;
+  cutoff_triggered_count = 0;
+}
+
+void inference_get_cutoff_stats(uint64_t *total_calls, uint64_t *triggered) {
+  *total_calls = cutoff_total_calls;
+  *triggered = cutoff_triggered_count;
+}
+
+void inference_print_cutoff_stats(void) {
+  if (cutoff_total_calls > 0) {
+    double pct = 100.0 * (double)cutoff_triggered_count / (double)cutoff_total_calls;
+    printf("Cutoff stats: %llu triggered / %llu total (%.2f%%)\n",
+           (unsigned long long)cutoff_triggered_count,
+           (unsigned long long)cutoff_total_calls, pct);
+  } else {
+    printf("Cutoff stats: no calls\n");
+  }
 }
