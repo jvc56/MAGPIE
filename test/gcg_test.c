@@ -32,6 +32,25 @@ char *parse_and_write_gcg(const char *gcg_filepath_read,
     log_fatal("failed to parse gcg: %s\n", gcg_filepath_read);
   }
 
+  // Remove the newline from a comment to test that the write function adds it
+  // back
+  const int num_events = game_history_get_num_events(game_history);
+  for (int i = 0; i < num_events; i++) {
+    GameEvent *event = game_history_get_event(game_history, i);
+    const char *note = game_event_get_note(event);
+    if (note != NULL) {
+      // Remove the trailing newline
+      char *trimmed_note = string_duplicate(note);
+      size_t note_length = string_length(trimmed_note);
+      if (note_length > 0 && trimmed_note[note_length - 1] == '\n') {
+        trimmed_note[note_length - 1] = '\0';
+      }
+      game_event_set_note(event, trimmed_note);
+      free(trimmed_note);
+      break;
+    }
+  }
+
   write_gcg(gcg_filepath_write, config_get_ld(config), game_history,
             error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -70,9 +89,7 @@ void assert_gcg_write_cycle(const char *gcg_filename_readonly, Config *config,
       parse_and_write_gcg(gcg_filepath_write1, gcg_filepath_write2, config,
                           game_history, error_stack);
 
-  if (!strings_equal(iter_1_gcg_string, iter_2_gcg_string)) {
-    log_fatal("gcg strings are not equal for file '%s'\n", gcg_filepath_read);
-  }
+  assert_strings_equal(iter_1_gcg_string, iter_2_gcg_string);
   free(iter_1_gcg_string);
   free(iter_2_gcg_string);
   free(gcg_filepath_read);

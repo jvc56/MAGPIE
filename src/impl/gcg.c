@@ -1339,9 +1339,12 @@ void string_builder_add_gcg(StringBuilder *gcg_sb, const LetterDistribution *ld,
         gcg_sb, " %d\n", equity_to_int(game_event_get_cumulative_score(event)));
     const char *note = game_event_get_note(event);
     if (note) {
-      // The note already contains a trailing newline
       string_builder_add_formatted_string(gcg_sb, "#%s %s", GCG_NOTE_STRING,
                                           note);
+      // If note does not end with newline, add one
+      if (note[strlen(note) - 1] != '\n') {
+        string_builder_add_char(gcg_sb, '\n');
+      }
     }
   }
   if (!game_is_over) {
