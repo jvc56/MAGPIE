@@ -40,6 +40,7 @@
 #include "../str/inference_string.h"
 #include "../str/move_string.h"
 #include "../str/rack_string.h"
+#include "../str/sim_string.h"
 #include "../str/validated_moves_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
@@ -1558,7 +1559,7 @@ void impl_add_moves(Config *config, ErrorStack *error_stack) {
         string_builder_add_string(phonies_sb, "invalid words formed from ");
         string_builder_add_move(
             phonies_sb, board, validated_moves_get_move(new_validated_moves, i),
-            ld);
+            ld, false);
         string_builder_add_string(phonies_sb, ": ");
         string_builder_add_string(phonies_sb, phonies_formed);
         write_to_stream_out(string_builder_peek(phonies_sb));
@@ -1929,11 +1930,8 @@ char *status_sim(Config *config) {
   if (!sim_results) {
     return string_duplicate("simmer has not been initialized");
   }
-  return ucgi_sim_stats(config->game, sim_results,
-                        (double)sim_results_get_node_count(sim_results) /
-                            bai_result_get_elapsed_seconds(
-                                sim_results_get_bai_result(sim_results)),
-                        true);
+  return sim_results_get_string(config->game, sim_results,
+                                !config->human_readable);
 }
 
 // Gen and Sim
@@ -1944,6 +1942,11 @@ void impl_gen_and_sim(Config *config, ErrorStack *error_stack) {
     return;
   }
   impl_sim(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  sim_results_print(config->thread_control, config->game, config->sim_results,
+                    !config->human_readable);
 }
 
 char *status_gen_and_sim(Config *config) { return status_sim(config); }
@@ -2200,9 +2203,16 @@ char *impl_show_moves(Config *config, ErrorStack *error_stack) {
                      string_duplicate("no moves to show"));
     return empty_string();
   }
-  // FIXME: make this human readable
-  // FIXME: possibly show simmed moves
-  return ucgi_static_moves(config->game, config->move_list);
+  char *result = NULL;
+  if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
+    result = sim_results_get_string(config->game, config->sim_results,
+                                    !config->human_readable);
+  } else {
+    result =
+        move_list_get_string(config->move_list, game_get_board(config->game),
+                             config->ld, !config->human_readable);
+  }
+  return result;
 }
 
 void execute_show_moves(Config *config, ErrorStack *error_stack) {
@@ -2782,6 +2792,7 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
     commit_move_index--;
     // If there are valid sim results, prefer to use them for the move index
     // lookup.
+    // FIXME: setting valid might need to move to config
     if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
       const SimResults *sim_results = config->sim_results;
       const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
@@ -4970,8 +4981,9 @@ void execute_move_gen(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  print_ucgi_static_moves(config->game, config->move_list,
-                          config->thread_control);
+  move_list_print(config->thread_control, config->move_list,
+                  game_get_board(config->game), config->ld,
+                  !config->human_readable);
 }
 
 char *str_api_move_gen(Config *config, ErrorStack *error_stack) {
@@ -4979,11 +4991,17 @@ char *str_api_move_gen(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
-  return ucgi_static_moves(config->game, config->move_list);
+  return move_list_get_string(config->move_list, game_get_board(config->game),
+                              config->ld, !config->human_readable);
 }
 
 void execute_sim(Config *config, ErrorStack *error_stack) {
   impl_sim(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  sim_results_print(config->thread_control, config->game, config->sim_results,
+                    !config->human_readable);
 }
 
 char *str_api_sim(Config *config, ErrorStack *error_stack) {

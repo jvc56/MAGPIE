@@ -219,7 +219,7 @@ void assert_command_status_and_output(Config *config, const char *command,
     printf("%s\nassert output: output counts do not match %d != %d\n", command,
            newlines_in_output, expected_output_line_count);
     printf("got output:>%s<\n", test_output);
-    printf("got outerror:>%s<\n", test_output);
+    printf("got outerror:>%s<\n", test_outerror);
     fail_test = true;
   }
 
@@ -276,7 +276,7 @@ void test_command_execution(void) {
   assert_command_status_and_output(
       config,
       "sim -plies 2 -scond 95 -threads 8 -it 100000 -minp 50 -pfreq 5000000",
-      false, 60, 6, 0);
+      false, 60, 1, 0);
 
   assert(move_list_get_count(ml) == 3);
 
@@ -305,7 +305,7 @@ void test_command_execution(void) {
       config, "addmoves 8f.NIL,8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 1, 0);
   assert_command_status_and_output(
       config, "sim -plies 2 -scond none -threads 8 -it 1 -pfreq 70", false, 60,
-      331, 0);
+      309, 0);
 
   // Sim finishes with max iterations
   // Add user input moves that will be
@@ -318,15 +318,15 @@ void test_command_execution(void) {
   assert_command_status_and_output(config, "gen -numplays 15", false, 5, 17, 0);
   assert_command_status_and_output(
       config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ", false,
-      60, 222, 0);
+      60, 205, 0);
 
   assert_command_status_and_output(config, "cgp " DELDAR_VS_HARSHAN_CGP, false,
                                    5, 1, 0);
   // Sim interrupted by user
   assert_command_status_and_output(config, "gen -numplays 15", false, 5, 17, 0);
   assert_command_status_and_output(
-      config, "sim -plies 2 -threads 10 -it 1000000 -pfreq 1000000", true, 5,
-      18, 0);
+      config, "sim -plies 2 -threads 10 -it 1000000 -pfreq 1000000", true, 5, 1,
+      0);
 
   // Infer finishes normally
   assert_command_status_and_output(config, "cgp " EMPTY_CGP, false, 5, 1, 0);
@@ -373,10 +373,10 @@ void test_command_execution(void) {
   // Catalan
   assert_command_status_and_output(config, "cgp " CATALAN_CGP, false, 5, 1, 0);
   assert_command_status_and_output(config, "gen -r1 all -r2 all -numplays 15",
-                                   false, 5, 17, 0);
+                                   false, 5, 35, 0);
   assert_command_status_and_output(
       config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ", false,
-      60, 222, 0);
+      60, 205, 0);
   assert_command_status_and_output(config, "cgp " EMPTY_CATALAN_CGP, false, 5,
                                    1, 0);
   assert_command_status_and_output(
@@ -395,7 +395,7 @@ void test_command_execution(void) {
                                    false, 5, 17, 0);
   assert_command_status_and_output(
       config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ", false,
-      60, 222, 0);
+      60, 205, 0);
 
   assert_command_status_and_output(config, "cgp " EMPTY_CGP, false, 5, 1, 0);
   assert_command_status_and_output(
@@ -415,7 +415,7 @@ void test_command_execution(void) {
                                    false, 5, 17, 0);
   assert_command_status_and_output(
       config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ", false,
-      60, 222, 0);
+      60, 205, 0);
 
   assert_command_status_and_output(config, "cgp " EMPTY_POLISH_CGP, false, 5, 1,
                                    0);

@@ -580,7 +580,7 @@ void string_builder_add_pvline(const PVLine *pv_line, const Game *game,
     small_move_to_move(temp, &(pv_line->moves[i]), game_get_board(game_copy));
 
     string_builder_add_move(pv_description, game_get_board(game_copy), temp,
-                            game_get_ld(game_copy));
+                            game_get_ld(game_copy), true);
     string_builder_add_formatted_string(pv_description, "%c",
                                         add_line_breaks ? '\n' : ' ');
     // Play the move on the board to make the next small_move_to_move make

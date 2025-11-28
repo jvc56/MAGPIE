@@ -250,7 +250,7 @@ void string_builder_add_move_with_rank_and_equity(const Game *game,
   const Move *move = move_list_get_move(move_list, move_index);
   const LetterDistribution *ld = game_get_ld(game);
   string_builder_add_formatted_string(game_string, " %d ", move_index + 1);
-  string_builder_add_move(game_string, board, move, ld);
+  string_builder_add_move(game_string, board, move, ld, true);
   string_builder_add_string(game_string, " ");
   string_builder_add_equity(game_string, move_get_equity(move), "%0.2f");
 }
@@ -334,42 +334,6 @@ void string_builder_add_game(const Game *game, const MoveList *move_list,
 
   string_builder_add_board_bottom_border(game_string_options, game_string);
   string_builder_add_string(game_string, "\n");
-}
-
-char *ucgi_static_moves(const Game *game, const MoveList *move_list) {
-  if (move_list_get_count(move_list) == 0) {
-    return string_duplicate("no moves to print\n");
-  }
-  StringBuilder *moves_string_builder = string_builder_create();
-  const LetterDistribution *ld = game_get_ld(game);
-  const Board *board = game_get_board(game);
-  const int num_moves = move_list_get_count(move_list);
-  for (int i = 0; i < num_moves; i++) {
-    const Move *move = move_list_get_move(move_list, i);
-    string_builder_add_string(moves_string_builder, "info currmove ");
-    string_builder_add_ucgi_move(moves_string_builder, move, board, ld);
-
-    string_builder_add_formatted_string(moves_string_builder, " sc %d eq ",
-                                        equity_to_int(move_get_score(move)));
-    string_builder_add_equity(moves_string_builder, move_get_equity(move),
-                              "%.3f");
-    string_builder_add_string(moves_string_builder, " it 0\n");
-  }
-  string_builder_add_string(moves_string_builder, "bestmove ");
-  string_builder_add_ucgi_move(moves_string_builder,
-                               move_list_get_move(move_list, 0), board, ld);
-  string_builder_add_string(moves_string_builder, "\n");
-  char *ucgi_static_moves_string =
-      string_builder_dump(moves_string_builder, NULL);
-  string_builder_destroy(moves_string_builder);
-  return ucgi_static_moves_string;
-}
-
-void print_ucgi_static_moves(const Game *game, const MoveList *move_list,
-                             ThreadControl *thread_control) {
-  char *starting_moves_string_pointer = ucgi_static_moves(game, move_list);
-  thread_control_print(thread_control, starting_moves_string_pointer);
-  free(starting_moves_string_pointer);
 }
 
 GameStringOptions *game_string_options_create_default(void) {

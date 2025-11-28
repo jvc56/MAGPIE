@@ -943,3 +943,135 @@ char *get_process_output(const char *cmd) {
   string_builder_destroy(content_builder);
   return output; // Returns NULL if command failed
 }
+
+// ****************************************************************************
+// ***************************** String Grid **********************************
+// ****************************************************************************
+
+struct StringGrid {
+  int rows;
+  int cols;
+  int *max_col_widths;
+  char **cells;
+};
+
+StringGrid *string_grid_create(int rows, int cols) {
+  StringGrid *string_grid = malloc_or_die(sizeof(StringGrid));
+  string_grid->rows = rows;
+  string_grid->cols = cols;
+  string_grid->max_col_widths = calloc_or_die(cols, sizeof(int));
+  string_grid->cells = calloc_or_die(rows * cols, sizeof(char *));
+  return string_grid;
+}
+
+void string_grid_destroy(StringGrid *string_grid) {
+  if (!string_grid) {
+    return;
+  }
+  for (int i = 0; i < string_grid->rows * string_grid->cols; i++) {
+    free(string_grid->cells[i]);
+  }
+  free(string_grid->max_col_widths);
+  free(string_grid->cells);
+  free(string_grid);
+}
+
+int string_grid_get_cell_index(const StringGrid *string_grid, int row,
+                               int col) {
+  if (row < 0 || row >= string_grid->rows || col < 0 ||
+      col >= string_grid->cols) {
+    log_fatal("string grid cell index out of range: (%d, %d)", row, col);
+  }
+  return row * string_grid->cols + col;
+}
+
+// Takes ownership of the value
+void string_grid_set_cell(StringGrid *string_grid, int row, int col,
+                          char *value) {
+  const int index = string_grid_get_cell_index(string_grid, row, col);
+  free(string_grid->cells[index]);
+  string_grid->cells[index] = value;
+}
+
+static void
+string_builder_draw_horizontal_border(StringBuilder *string_builder,
+                                      const StringGrid *string_grid) {
+  string_builder_add_string(string_builder, "+");
+  for (int c = 0; c < string_grid->cols; c++) {
+    // Add dashes corresponding to the max column width
+    for (int i = 0; i < string_grid->max_col_widths[c]; i++) {
+      string_builder_add_string(string_builder, "-");
+    }
+    string_builder_add_string(string_builder, "+");
+  }
+  string_builder_add_string(string_builder, "\n");
+}
+
+void string_builder_add_string_grid(StringBuilder *string_builder,
+                                    const StringGrid *string_grid,
+                                    const bool add_border) {
+  // First find the max widths
+  // NOTE: This part must be modified to include space for padding if the
+  // original string_builder_add_space_padded_string was padding with ' '. For
+  // the new version, let's assume max_col_widths[c] is the minimum width
+  // required for the content *only*.
+  // A minimum width of 1 is enforced here for the dashes.
+  for (int c = 0; c < string_grid->cols; c++) {
+    string_grid->max_col_widths[c] = 0; // Initialize to 0 or 1
+    for (int r = 0; r < string_grid->rows; r++) {
+      const int index = string_grid_get_cell_index(string_grid, r, c);
+      const char *cell_value = string_grid->cells[index];
+      if (cell_value) {
+        const size_t cell_value_length = string_length(cell_value) + 1;
+        if (cell_value_length > (size_t)string_grid->max_col_widths[c]) {
+          string_grid->max_col_widths[c] = (int)cell_value_length;
+        }
+      }
+    }
+    // Ensure minimum width for the border to look good
+    if (string_grid->max_col_widths[c] < 1) {
+      string_grid->max_col_widths[c] = 1;
+    }
+  }
+
+  // --- Grid Drawing ---
+
+  if (add_border) {
+    string_builder_draw_horizontal_border(string_builder,
+                                          string_grid); // Top border
+  }
+
+  for (int r = 0; r < string_grid->rows; r++) {
+    // Start of row vertical border
+    if (add_border) {
+      string_builder_add_string(string_builder, "|");
+    }
+
+    for (int c = 0; c < string_grid->cols; c++) {
+      const int index = string_grid_get_cell_index(string_grid, r, c);
+      const char *cell_value = string_grid->cells[index];
+      if (!cell_value) {
+        cell_value = "";
+      }
+
+      // Add cell content (left-justified padding for text)
+      // Assuming string_builder_add_string_with_padding takes the string,
+      // the total width, and a bool for whether to pad on the right (true for
+      // left-justified text)
+      string_builder_add_formatted_string(
+          string_builder, "%-*s", string_grid->max_col_widths[c], cell_value);
+
+      // Vertical border between cells and at the end of the row
+      if (add_border) {
+        string_builder_add_string(string_builder, "|");
+      }
+    }
+
+    string_builder_add_string(string_builder, "\n"); // End of row newline
+
+    // Draw horizontal border *between* rows and *after* the last row
+    if (add_border) {
+      string_builder_draw_horizontal_border(string_builder, string_grid);
+    }
+  }
+}

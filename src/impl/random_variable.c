@@ -485,12 +485,8 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
 
   if (simmer->print_interval > 0 &&
       sample_count % simmer->print_interval == 0) {
-    print_ucgi_sim_stats(
-        simmer_worker->game, simmer->sim_results, simmer->thread_control,
-        (double)sim_results_get_node_count(simmer->sim_results) /
-            bai_result_get_elapsed_seconds(
-                sim_results_get_bai_result(simmer->sim_results)),
-        false);
+    sim_results_print(simmer->thread_control, simmer_worker->game,
+                      simmer->sim_results, true);
   }
 
   return wpct;

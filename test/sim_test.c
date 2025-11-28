@@ -14,6 +14,7 @@
 #include "../src/impl/gameplay.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
+#include "../src/str/sim_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_constants.h"
@@ -680,12 +681,7 @@ void test_sim_perf(const char *sim_perf_iters) {
           config_simulate_and_return_status(config, NULL, sim_results);
       assert(status == ERROR_STATUS_SUCCESS);
 
-      char *sim_stats_str =
-          ucgi_sim_stats(game, sim_results,
-                         (double)sim_results_get_node_count(sim_results) /
-                             bai_result_get_elapsed_seconds(
-                                 sim_results_get_bai_result(sim_results)),
-                         false);
+      char *sim_stats_str = sim_results_get_string(game, sim_results, true);
       if (i < details_limit) {
         append_content_to_file(sim_perf_game_details_filename, sim_stats_str);
       }

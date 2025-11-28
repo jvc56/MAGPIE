@@ -6,6 +6,7 @@
 #include "../def/move_defs.h"
 #include "../ent/equity.h"
 #include "../ent/letter_distribution.h"
+#include "../ent/rack.h"
 #include "../util/io_util.h"
 #include "board.h"
 #include <math.h>
@@ -94,6 +95,7 @@ typedef struct MoveList {
   Move **moves;
   SmallMove *spare_small_move;
   SmallMove **small_moves;
+  Rack rack;
 } MoveList;
 
 static inline Move *move_create(void) {
@@ -227,6 +229,14 @@ static inline int move_list_get_count(const MoveList *ml) { return ml->count; }
 
 static inline int move_list_get_capacity(const MoveList *ml) {
   return ml->capacity;
+}
+
+static inline void move_list_set_rack(MoveList *ml, const Rack *rack) {
+  ml->rack = *rack;
+}
+
+static inline const Rack *move_list_get_rack(const MoveList *ml) {
+  return &(ml->rack);
 }
 
 static inline Move *move_list_get_move(const MoveList *ml, int move_index) {

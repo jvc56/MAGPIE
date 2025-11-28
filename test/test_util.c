@@ -300,7 +300,7 @@ void print_move_list(const Board *board, const LetterDistribution *ld,
                      const SortedMoveList *sml, int move_list_length) {
   StringBuilder *move_list_string = string_builder_create();
   for (int i = 0; i < move_list_length; i++) {
-    string_builder_add_move(move_list_string, board, sml->moves[i], ld);
+    string_builder_add_move(move_list_string, board, sml->moves[i], ld, true);
     string_builder_add_string(move_list_string, "\n");
   }
   printf("%s\n", string_builder_peek(move_list_string));
@@ -580,7 +580,7 @@ void assert_move(const Game *game, const MoveList *move_list,
   } else {
     move = move_list_get_move(move_list, move_index);
   }
-  string_builder_add_move(move_string, board, move, ld);
+  string_builder_add_move(move_string, board, move, ld, true);
   if (!strings_equal(string_builder_peek(move_string), expected_move_string)) {
     fprintf_or_die(stderr, "moves are not equal\ngot: >%s<\nexp: >%s<\n",
                    string_builder_peek(move_string), expected_move_string);
