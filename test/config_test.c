@@ -1648,7 +1648,6 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(516));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(362));
-  // FIXME: game history sets the wrong racks
   assert_config_exec_status(config, "endgame", ERROR_STATUS_SUCCESS);
 
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);

@@ -889,6 +889,57 @@ void test_success_phony_empty_bag(GameHistory *game_history) {
   config_destroy(config);
 }
 
+void test_success_out_in_many(GameHistory *game_history) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game1 = config_game_create(config);
+  Game *game2 = config_game_create(config);
+
+  assert(test_parse_gcg("out_in_many", config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+
+  // Ensure that the racks are set correctly
+  game_play_n_events_or_die(game_history, game1, 22);
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 0)), "");
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 1)),
+                            "DEOX");
+
+  game_play_n_events_or_die(game_history, game1, 23);
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 0)),
+                            "BIJSSUV");
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 1)),
+                            "ABLN");
+
+  game_play_n_events_or_die(game_history, game1, 24);
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 0)),
+                            "JSU");
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 1)),
+                            "ABLN");
+
+  game_play_n_events_or_die(game_history, game1, 25);
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 0)),
+                            "JSU");
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 1)),
+                            "N");
+
+  game_play_n_events_or_die(game_history, game1, 26);
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 0)),
+                            "S");
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 1)),
+                            "N");
+
+  game_play_n_events_or_die(game_history, game1, 27);
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 0)),
+                            "S");
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 1)), "");
+
+  game_destroy(game1);
+  game_destroy(game2);
+  config_destroy(config);
+}
+
 void test_success_long_game(GameHistory *game_history) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
@@ -1032,6 +1083,7 @@ void test_gcg(void) {
   test_success_six_pass(game_history);
   test_success_incomplete(game_history);
   test_success_phony_empty_bag(game_history);
+  test_success_out_in_many(game_history);
   test_vs_jeremy_gcg(game_history);
   test_write_gcg(game_history);
   test_partially_known_rack_from_phonies(game_history);

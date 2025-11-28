@@ -3212,26 +3212,26 @@ char *impl_overtime(Config *config, ErrorStack *error_stack) {
               "no prior game event has a cumulative score for player '%s' when "
               "applying time panelty",
               player_nickname));
-      return empty_string();
-    }
-    const Equity overtime_penalty = int_to_equity(overtime_penalty_int);
-    game_event_set_player_index(time_penalty_event, player_index);
-    game_event_set_type(time_penalty_event, GAME_EVENT_TIME_PENALTY);
-    game_event_set_cgp_move_string(time_penalty_event, NULL);
-    game_event_set_score_adjustment(time_penalty_event, overtime_penalty);
-    // Add the overtime penalty since the value is already negative
-    game_event_set_cumulative_score(time_penalty_event,
-                                    cumulative_score + overtime_penalty);
-    game_event_set_move_score(time_penalty_event, 0);
+    } else {
+      const Equity overtime_penalty = int_to_equity(overtime_penalty_int);
+      game_event_set_player_index(time_penalty_event, player_index);
+      game_event_set_type(time_penalty_event, GAME_EVENT_TIME_PENALTY);
+      game_event_set_cgp_move_string(time_penalty_event, NULL);
+      game_event_set_score_adjustment(time_penalty_event, overtime_penalty);
+      // Add the overtime penalty since the value is already negative
+      game_event_set_cumulative_score(time_penalty_event,
+                                      cumulative_score + overtime_penalty);
+      game_event_set_move_score(time_penalty_event, 0);
 
-    // When adding an overtime event, always advance to the end of the
-    // history so that the game play module can play through the entire
-    // game and catch any duplicate time penalty errors.
-    game_history_goto(config->game_history,
-                      game_history_get_num_events(config->game_history),
-                      error_stack);
-    if (error_stack_is_empty(error_stack)) {
-      config_game_play_events(config, error_stack);
+      // When adding an overtime event, always advance to the end of the
+      // history so that the game play module can play through the entire
+      // game and catch any duplicate time penalty errors.
+      game_history_goto(config->game_history,
+                        game_history_get_num_events(config->game_history),
+                        error_stack);
+      if (error_stack_is_empty(error_stack)) {
+        config_game_play_events(config, error_stack);
+      }
     }
   }
   if (!error_stack_is_empty(error_stack)) {

@@ -736,6 +736,7 @@ void copy_bag_to_rack(const Bag *bag, const Rack *rack_to_sub, Rack *rack) {
 void set_after_game_event_racks(const GameHistory *game_history,
                                 const Game *game, int game_event_index,
                                 PlayEventsData *play_events_data,
+                                const bool all_letters_on_rack_played,
                                 ErrorStack *error_stack) {
   GameEvent *current_game_event =
       game_history_get_event(game_history, game_event_index);
@@ -752,7 +753,7 @@ void set_after_game_event_racks(const GameHistory *game_history,
   bool player_on_turn_rack_set = false;
   const Bag *bag = game_get_bag(game);
   const int num_letters_in_bag = bag_get_letters(bag);
-  if (num_letters_in_bag <= (RACK_SIZE)) {
+  if (all_letters_on_rack_played && num_letters_in_bag <= (RACK_SIZE)) {
     // If the bag has <= RACK_SIZE, then the last play must've been an outplay
     // and the opp must have all of the remaining letters.
     // For the call to copy_bag_to_rack, just pass in
@@ -776,9 +777,10 @@ void set_after_game_event_racks(const GameHistory *game_history,
           return;
         }
       }
-      if (game_event_get_player_index(game_event_i) == player_on_turn_index) {
-        rack_copy(after_event_player_on_turn_rack,
-                  game_event_get_const_rack(game_event_i));
+      const Rack *gei_rack = game_event_get_const_rack(game_event_i);
+      if (game_event_get_player_index(game_event_i) == player_on_turn_index &&
+          rack_get_dist_size(gei_rack) != 0) {
+        rack_copy(after_event_player_on_turn_rack, gei_rack);
         player_on_turn_rack_set = true;
         break;
       }
@@ -897,6 +899,7 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
   Player *player;
   const Rack *player_rack;
   const Rack *opp_rack;
+  bool all_letters_on_rack_played = false;
   switch (game_event_type) {
   case GAME_EVENT_TILE_PLACEMENT_MOVE:
   case GAME_EVENT_EXCHANGE:
@@ -946,14 +949,16 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
       } else if (game_event_type == GAME_EVENT_EXCHANGE) {
         rack_reset(known_rack_from_phonies);
       }
-
     } else {
       vms = game_event_get_vms(game_event);
     }
 
+    const int player_on_turn_index = game_get_player_on_turn_index(game);
     game_set_backup_mode(game, BACKUP_MODE_GCG);
     play_move_without_drawing_tiles(validated_moves_get_move(vms, 0), game);
     game_set_backup_mode(game, BACKUP_MODE_OFF);
+    all_letters_on_rack_played = rack_is_empty(
+        player_get_rack(game_get_player(game, player_on_turn_index)));
     break;
   case GAME_EVENT_CHALLENGE_BONUS:
     player_add_to_score(game_get_player(game, game_event_player_index),
@@ -1073,7 +1078,8 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
       return;
     }
     set_after_game_event_racks(game_history, game, game_event_index,
-                               play_events_data, error_stack);
+                               play_events_data, all_letters_on_rack_played,
+                               error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
