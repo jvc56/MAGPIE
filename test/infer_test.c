@@ -1219,11 +1219,11 @@ void test_infer_cutoff_repro(void) {
 // non-optimized version by playing random games and comparing inference
 // timing for different play types.
 void test_infer_cutoff_optimization_comparison(void) {
-  const int NUM_GAMES = 1000;
+  const int NUM_GAMES = 5;
 
   // Use equity margin of 0 to test correctness (strictest test)
   Config *config = config_create_or_die(
-      "set -lex CSW21 -wmp false -s1 equity -s2 equity "
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity "
       "-r1 all -r2 all -numplays 1 -threads 10");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 

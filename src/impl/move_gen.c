@@ -519,6 +519,12 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
   if (need_to_update_best_move_equity_or_score) {
     gen_update_cutoff_equity_or_score(gen);
   }
+
+  // Check if this move exceeds the threshold for early termination
+  if (gen->stop_on_exceeding_threshold &&
+      move_equity_or_score > gen->initial_best_equity) {
+    gen->threshold_exceeded = true;
+  }
 }
 
 void record_wmp_play(MoveGen *gen, int start_col, Equity leave_value) {
