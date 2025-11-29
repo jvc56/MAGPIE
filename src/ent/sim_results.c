@@ -159,6 +159,7 @@ SimResults *sim_results_create(void) {
   sim_results->simmed_play_display_infos = NULL;
   sim_results->bai_result = bai_result_create();
   sim_results->valid_for_current_game_state = false;
+  rack_set_dist_size_and_reset(&sim_results->rack, 0);
   return sim_results;
 }
 

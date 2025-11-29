@@ -20,7 +20,7 @@ bool string_builder_add_sim_stats_with_display_lock(StringBuilder *sb,
   }
   const int num_plies = sim_results_get_num_plies(sim_results);
   const int num_cols = 8 + num_plies * 2;
-  StringGrid *sg = string_grid_create(num_rows, num_cols);
+  StringGrid *sg = string_grid_create(num_rows, num_cols, 1);
 
   int curr_row = 0;
   int curr_col = 0;
@@ -47,6 +47,7 @@ bool string_builder_add_sim_stats_with_display_lock(StringBuilder *sb,
   const Board *board = game_get_board(game);
   StringBuilder *move_sb = string_builder_create();
   const Rack *rack = sim_results_get_rack(sim_results);
+  const uint16_t rack_dist_size = rack_get_dist_size(rack);
   for (int i = 0; i < number_of_simmed_plays; i++) {
     curr_col = 0;
     const SimmedPlayDisplayInfo *sp_dinfo =
@@ -61,10 +62,16 @@ bool string_builder_add_sim_stats_with_display_lock(StringBuilder *sb,
                          string_builder_dump(move_sb, NULL));
     string_builder_clear(move_sb);
 
-    string_builder_add_move_leave(move_sb, rack, move, ld);
-    string_grid_set_cell(sg, curr_row, curr_col++,
-                         string_builder_dump(move_sb, NULL));
-    string_builder_clear(move_sb);
+    // The rack from which the move is made should always
+    // be set, but in case it isn't, skip leave display
+    if (rack_dist_size > 0) {
+      string_builder_add_move_leave(move_sb, rack, move, ld);
+      string_grid_set_cell(sg, curr_row, curr_col++,
+                           string_builder_dump(move_sb, NULL));
+      string_builder_clear(move_sb);
+    } else {
+      curr_col++;
+    }
 
     string_grid_set_cell(
         sg, curr_row, curr_col++,

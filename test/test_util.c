@@ -346,14 +346,6 @@ void print_rack(const Rack *rack, const LetterDistribution *ld) {
   string_builder_destroy(rack_sb);
 }
 
-void print_inference(const LetterDistribution *ld,
-                     InferenceResults *inference_results) {
-  StringBuilder *inference_string = string_builder_create();
-  string_builder_add_inference(inference_string, ld, inference_results);
-  printf("%s\n", string_builder_peek(inference_string));
-  string_builder_destroy(inference_string);
-}
-
 void sort_and_print_move_list(const Board *board, const LetterDistribution *ld,
                               MoveList *ml) {
   SortedMoveList *sml = sorted_move_list_create(ml);

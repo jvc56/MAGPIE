@@ -19,12 +19,16 @@ void inference_results_finalize(const Rack *target_played_tiles,
                                 const Rack *bag_as_rack,
                                 InferenceResults *results, Equity target_score,
                                 int target_number_of_tiles_exchanged,
-                                Equity equity_margin);
+                                Equity equity_margin, bool interrupted);
 
 int inference_results_get_target_number_of_tiles_exchanged(
     const InferenceResults *results);
 Equity inference_results_get_target_score(const InferenceResults *results);
 Equity inference_results_get_equity_margin(const InferenceResults *results);
+void inference_results_set_valid_for_current_game_state(
+    InferenceResults *results, bool valid);
+bool inference_results_get_valid_for_current_game_state(
+    const InferenceResults *results);
 const Rack *
 inference_results_get_target_played_tiles(const InferenceResults *results);
 const Rack *inference_results_get_target_known_unplayed_tiles(
@@ -59,9 +63,5 @@ void inference_results_set_stat_for_letter(InferenceResults *inference_results,
 double get_probability_for_random_minimum_draw(
     const Rack *bag_as_rack, const Rack *target_rack, MachineLetter this_letter,
     int minimum, int number_of_target_played_tiles);
-void inference_results_set_valid_for_current_game_state(
-    InferenceResults *results, bool valid);
-bool inference_results_get_valid_for_current_game_state(
-    const InferenceResults *results);
 
 #endif

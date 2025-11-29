@@ -448,6 +448,7 @@ static inline MoveList *move_list_create(int capacity) {
   ml->spare_move = move_create();
   move_list_load_with_empty_moves(ml, capacity);
   ml->moves[0]->equity = EQUITY_INITIAL_VALUE;
+  rack_set_dist_size_and_reset(&ml->rack, 0);
   return ml;
 }
 

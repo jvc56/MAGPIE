@@ -501,10 +501,19 @@ void config_init_game(Config *config) {
   }
 }
 
-void config_reset_move_list(Config *config) {
+void config_reset_move_list_and_invalidate_sim_results(Config *config) {
   if (config->move_list) {
     move_list_reset(config->move_list);
+    Rack new_move_list_rack;
+    rack_set_dist_size_and_reset(&new_move_list_rack, 0);
+    if (config->game) {
+      const Rack *player_on_turn_rack = player_get_rack(game_get_player(
+          config->game, game_get_player_on_turn_index(config->game)));
+      new_move_list_rack = *player_on_turn_rack;
+    }
+    move_list_set_rack(config->move_list, &new_move_list_rack);
   }
+  sim_results_set_valid_for_current_game_state(config->sim_results, false);
 }
 
 void config_init_move_list(Config *config, int capacity) {
@@ -518,7 +527,7 @@ void config_recreate_move_list(Config *config, int capacity,
   if (list_type == MOVE_LIST_TYPE_DEFAULT) {
     config_init_move_list(config, capacity);
     if (move_list_get_capacity(config->move_list) == capacity) {
-      move_list_reset(config->move_list);
+      config_reset_move_list_and_invalidate_sim_results(config);
     } else {
       move_list_destroy(config->move_list);
       config->move_list = move_list_create(capacity);
@@ -526,7 +535,7 @@ void config_recreate_move_list(Config *config, int capacity,
   } else if (list_type == MOVE_LIST_TYPE_SMALL) {
     if (!config->move_list) {
       config->move_list = move_list_create_small(capacity);
-      move_list_reset(config->move_list);
+      config_reset_move_list_and_invalidate_sim_results(config);
     }
   }
 }
@@ -1521,7 +1530,7 @@ void impl_load_cgp(Config *config, ErrorStack *error_stack) {
       error_stack_print_and_reset(error_stack);
       log_fatal("cgp load unexpected failed");
     }
-    config_reset_move_list(config);
+    config_reset_move_list_and_invalidate_sim_results(config);
   }
   string_builder_destroy(cgp_builder);
 }
@@ -1612,6 +1621,7 @@ void impl_set_rack_internal(Config *config, const char *rack_str,
                      get_formatted_string(
                          "rack '%s' is not available in the bag", rack_str));
   }
+  config_reset_move_list_and_invalidate_sim_results(config);
 }
 
 void impl_set_rack(Config *config, ErrorStack *error_stack) {
@@ -1921,7 +1931,6 @@ void impl_sim(Config *config, ErrorStack *error_stack) {
       return;
     }
   }
-
   config_simulate(config, &known_opp_rack, config->sim_results, error_stack);
 }
 
@@ -1945,8 +1954,6 @@ void impl_gen_and_sim(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  sim_results_print(config->thread_control, config->game, config->sim_results,
-                    !config->human_readable);
 }
 
 char *status_gen_and_sim(Config *config) { return status_sim(config); }
@@ -2236,11 +2243,8 @@ char *impl_show_inference(Config *config, ErrorStack *error_stack) {
                      string_duplicate("no inference results to show"));
     return empty_string();
   }
-  StringBuilder *sb_infer = string_builder_create();
-  string_builder_add_inference(sb_infer, config->ld, config->inference_results);
-  char *result = string_builder_dump(sb_infer, NULL);
-  string_builder_destroy(sb_infer);
-  return result;
+  return inference_result_get_string(config->inference_results, config->ld,
+                                     !config->human_readable);
 }
 
 void execute_show_inference(Config *config, ErrorStack *error_stack) {
@@ -2550,11 +2554,11 @@ void config_game_play_events_internal(Config *config, ErrorStack *error_stack) {
 // If there are no resulting errors, the move list is reset if it exists
 void config_game_play_events(Config *config, ErrorStack *error_stack) {
   config_game_play_events_internal(config, error_stack);
-  // Invalidate the moves when moving to a new position
-  if (error_stack_is_empty(error_stack) && config->move_list != NULL) {
-    move_list_reset(config->move_list);
-    sim_results_set_valid_for_current_game_state(config->sim_results, false);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
+  // Invalidate the moves when moving to a new position
+  config_reset_move_list_and_invalidate_sim_results(config);
 }
 
 void config_add_end_rack_points(Config *config, const int player_index,
@@ -4381,11 +4385,7 @@ void config_load_lexicon_dependent_data(Config *config,
             ld_create(config->data_paths, updated_ld_name, error_stack);
         if (error_stack_is_empty(error_stack)) {
           config->ld_changed = true;
-          if (config->move_list) {
-            move_list_reset(config->move_list);
-          }
-          sim_results_set_valid_for_current_game_state(config->sim_results,
-                                                       false);
+          config_reset_move_list_and_invalidate_sim_results(config);
           inference_results_set_valid_for_current_game_state(
               config->inference_results, false);
           endgame_results_set_valid_for_current_game_state(
@@ -5011,6 +5011,11 @@ char *str_api_sim(Config *config, ErrorStack *error_stack) {
 
 void execute_gen_and_sim(Config *config, ErrorStack *error_stack) {
   impl_gen_and_sim(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  sim_results_print(config->thread_control, config->game, config->sim_results,
+                    !config->human_readable);
 }
 
 char *str_api_gen_and_sim(Config *config, ErrorStack *error_stack) {
@@ -5020,6 +5025,13 @@ char *str_api_gen_and_sim(Config *config, ErrorStack *error_stack) {
 
 void execute_infer(Config *config, ErrorStack *error_stack) {
   impl_infer(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  char *inference_str = inference_result_get_string(
+      config->inference_results, config->ld, !config->human_readable);
+  thread_control_print(config->thread_control, inference_str);
+  free(inference_str);
 }
 
 char *str_api_infer(Config *config, ErrorStack *error_stack) {

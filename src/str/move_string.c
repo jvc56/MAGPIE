@@ -242,7 +242,7 @@ void string_builder_add_move_list(StringBuilder *string_builder,
     num_rows += 1;
   }
   const int num_cols = 5;
-  StringGrid *string_grid = string_grid_create(num_rows, num_cols);
+  StringGrid *string_grid = string_grid_create(num_rows, num_cols, 1);
 
   int curr_row = 0;
   int curr_col = 0;
@@ -258,6 +258,7 @@ void string_builder_add_move_list(StringBuilder *string_builder,
 
   StringBuilder *tmp_sb = string_builder_create();
   const Rack *rack = move_list_get_rack(move_list);
+  const uint16_t rack_dist_size = rack_get_dist_size(rack);
   for (int i = 0; i < num_moves; i++) {
     curr_col = 0;
     Move *move = move_list_get_move(move_list, i);
@@ -274,10 +275,16 @@ void string_builder_add_move_list(StringBuilder *string_builder,
                          string_builder_dump(tmp_sb, NULL));
     string_builder_clear(tmp_sb);
 
-    string_builder_add_move_leave(tmp_sb, rack, move, ld);
-    string_grid_set_cell(string_grid, curr_row, curr_col++,
-                         string_builder_dump(tmp_sb, NULL));
-    string_builder_clear(tmp_sb);
+    // The rack from which the move is made should always
+    // be set, but in case it isn't, skip leave display
+    if (rack_dist_size > 0) {
+      string_builder_add_move_leave(tmp_sb, rack, move, ld);
+      string_grid_set_cell(string_grid, curr_row, curr_col++,
+                           string_builder_dump(tmp_sb, NULL));
+      string_builder_clear(tmp_sb);
+    } else {
+      curr_col++;
+    }
 
     string_grid_set_cell(
         string_grid, curr_row, curr_col++,

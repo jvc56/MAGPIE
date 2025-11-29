@@ -90,7 +90,7 @@ void inference_results_finalize(const Rack *target_played_tiles,
                                 const Rack *bag_as_rack,
                                 InferenceResults *results, Equity target_score,
                                 int target_number_of_tiles_exchanged,
-                                Equity equity_margin) {
+                                Equity equity_margin, bool interrupted) {
   results->target_score = target_score;
   results->target_number_of_tiles_exchanged = target_number_of_tiles_exchanged;
   results->equity_margin = equity_margin;
@@ -99,7 +99,7 @@ void inference_results_finalize(const Rack *target_played_tiles,
   rack_copy(&results->bag_as_rack, bag_as_rack);
   leave_rack_list_sort(results->leave_rack_list);
   alias_method_generate_tables(results->alias_method);
-  results->valid_for_current_game_state = true;
+  results->valid_for_current_game_state = !interrupted;
 }
 
 int inference_results_get_target_number_of_tiles_exchanged(
@@ -113,6 +113,16 @@ Equity inference_results_get_target_score(const InferenceResults *results) {
 
 Equity inference_results_get_equity_margin(const InferenceResults *results) {
   return results->equity_margin;
+}
+
+void inference_results_set_valid_for_current_game_state(
+    InferenceResults *results, bool valid) {
+  results->valid_for_current_game_state = valid;
+}
+
+bool inference_results_get_valid_for_current_game_state(
+    const InferenceResults *results) {
+  return results->valid_for_current_game_state;
 }
 
 const Rack *
@@ -268,14 +278,4 @@ double get_probability_for_random_minimum_draw(
   }
 
   return ((double)total_draws_for_this_letter_minimum) / (double)total_draws;
-}
-
-void inference_results_set_valid_for_current_game_state(
-    InferenceResults *results, bool valid) {
-  results->valid_for_current_game_state = valid;
-}
-
-bool inference_results_get_valid_for_current_game_state(
-    const InferenceResults *results) {
-  return results->valid_for_current_game_state;
 }
