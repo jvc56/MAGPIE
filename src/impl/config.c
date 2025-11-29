@@ -2198,7 +2198,7 @@ char *str_api_show_game(Config *config, ErrorStack *error_stack) {
 
 // Show moves
 
-char *impl_show_moves(Config *config, ErrorStack *error_stack) {
+char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
                      string_duplicate("cannot show game without lexicon"));
@@ -2222,16 +2222,18 @@ char *impl_show_moves(Config *config, ErrorStack *error_stack) {
   return result;
 }
 
-void execute_show_moves(Config *config, ErrorStack *error_stack) {
-  char *result = impl_show_moves(config, error_stack);
+void execute_show_moves_or_sim_results(Config *config,
+                                       ErrorStack *error_stack) {
+  char *result = impl_show_moves_or_sim_results(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
   }
   free(result);
 }
 
-char *str_api_show_moves(Config *config, ErrorStack *error_stack) {
-  return impl_show_moves(config, error_stack);
+char *str_api_show_moves_or_sim_results(Config *config,
+                                        ErrorStack *error_stack) {
+  return impl_show_moves_or_sim_results(config, error_stack);
 }
 
 // Show inference results
@@ -2268,12 +2270,9 @@ char *impl_show_endgame(Config *config, ErrorStack *error_stack) {
                      string_duplicate("no endgame results to show"));
     return empty_string();
   }
-  StringBuilder *pvsb = string_builder_create();
-  string_builder_add_pvline(endgame_results_get_pvline(config->endgame_results),
-                            config->game, true, pvsb);
-  char *result = string_builder_dump(pvsb, NULL);
-  string_builder_destroy(pvsb);
-  return result;
+  return endgame_results_get_string(config->endgame_results, config->game,
+                                    config->game_history,
+                                    config->human_readable);
 }
 
 void execute_show_endgame(Config *config, ErrorStack *error_stack) {
@@ -4981,9 +4980,7 @@ void execute_move_gen(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  move_list_print(config->thread_control, config->move_list,
-                  game_get_board(config->game), config->ld,
-                  !config->human_readable);
+  execute_show_moves_or_sim_results(config, error_stack);
 }
 
 char *str_api_move_gen(Config *config, ErrorStack *error_stack) {
@@ -4991,8 +4988,7 @@ char *str_api_move_gen(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
-  return move_list_get_string(config->move_list, game_get_board(config->game),
-                              config->ld, !config->human_readable);
+  return impl_show_moves_or_sim_results(config, error_stack);
 }
 
 void execute_sim(Config *config, ErrorStack *error_stack) {
@@ -5000,8 +4996,7 @@ void execute_sim(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  sim_results_print(config->thread_control, config->game, config->sim_results,
-                    !config->human_readable);
+  execute_show_moves_or_sim_results(config, error_stack);
 }
 
 char *str_api_sim(Config *config, ErrorStack *error_stack) {
@@ -5014,8 +5009,7 @@ void execute_gen_and_sim(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  sim_results_print(config->thread_control, config->game, config->sim_results,
-                    !config->human_readable);
+  execute_show_moves_or_sim_results(config, error_stack);
 }
 
 char *str_api_gen_and_sim(Config *config, ErrorStack *error_stack) {
@@ -5028,10 +5022,7 @@ void execute_infer(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  char *inference_str = inference_result_get_string(
-      config->inference_results, config->ld, !config->human_readable);
-  thread_control_print(config->thread_control, inference_str);
-  free(inference_str);
+  execute_show_inference(config, error_stack);
 }
 
 char *str_api_infer(Config *config, ErrorStack *error_stack) {
@@ -5041,6 +5032,10 @@ char *str_api_infer(Config *config, ErrorStack *error_stack) {
 
 void execute_endgame(Config *config, ErrorStack *error_stack) {
   impl_endgame(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  execute_show_endgame(config, error_stack);
 }
 
 char *str_api_endgame(Config *config, ErrorStack *error_stack) {
@@ -5132,7 +5127,8 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   cmd(ARG_TOKEN_SWITCH_NAMES, "switchnames", 0, 0, switch_names, generic,
       false);
   cmd(ARG_TOKEN_SHOW_GAME, "shgame", 0, 0, show_game, generic, true);
-  cmd(ARG_TOKEN_SHOW_MOVES, "shmoves", 0, 0, show_moves, generic, false);
+  cmd(ARG_TOKEN_SHOW_MOVES, "shmoves", 0, 0, show_moves_or_sim_results, generic,
+      false);
   cmd(ARG_TOKEN_SHOW_INFERENCE, "shinference", 0, 0, show_inference, generic,
       false);
   cmd(ARG_TOKEN_SHOW_ENDGAME, "shendgame", 0, 0, show_endgame, generic, false);

@@ -318,7 +318,7 @@ void test_command_execution(void) {
   // Infer interrupted
   assert_command_status_and_output(config, "cgp " EMPTY_CGP, false, 5, 0);
   assert_command_status_and_output(config, "infer 1 3 -numplays 20 -threads 3 ",
-                                   true, 5, 0);
+                                   true, 5, 1);
 
   // Autoplay finishes normally
   assert_command_status_and_output(
