@@ -230,6 +230,7 @@ int generate_stm_plays(EndgameSolverWorker *worker) {
       .thread_index = worker->thread_index,
       .eq_margin_movegen = 0,
       .initial_best_equity = EQUITY_INITIAL_VALUE,
+      .target_leave_size_for_exchange_cutoff = -1,
   };
   generate_moves(&args);
   SmallMove *arena_small_moves = (SmallMove *)arena_alloc(

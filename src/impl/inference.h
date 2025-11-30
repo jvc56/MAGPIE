@@ -38,4 +38,10 @@ void inference_reset_cutoff_stats(void);
 void inference_get_cutoff_stats(uint64_t *total_calls, uint64_t *triggered);
 void inference_print_cutoff_stats(void);
 
+// Debug functions for exchange inference analysis
+void inference_reset_exchange_stats(void);
+void inference_get_exchange_stats(uint64_t *total, uint64_t *by_margin,
+                                   uint64_t *by_match, uint64_t *by_empty,
+                                   uint64_t *prunable);
+
 #endif

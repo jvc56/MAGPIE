@@ -8,6 +8,11 @@
 static uint64_t total_anchors_available = 0;
 static uint64_t total_anchors_processed = 0;
 static uint64_t total_anchors_skipped = 0;
+
+// Debug counters for subrack pruning
+static uint64_t total_subracks_available = 0;
+static uint64_t total_subracks_processed = 0;
+static uint64_t total_subracks_skipped = 0;
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/equity_defs.h"
@@ -90,6 +95,19 @@ void gen_get_anchor_stats(uint64_t *available, uint64_t *processed,
   *available = total_anchors_available;
   *processed = total_anchors_processed;
   *skipped = total_anchors_skipped;
+}
+
+void gen_reset_subrack_stats(void) {
+  total_subracks_available = 0;
+  total_subracks_processed = 0;
+  total_subracks_skipped = 0;
+}
+
+void gen_get_subrack_stats(uint64_t *available, uint64_t *processed,
+                           uint64_t *skipped) {
+  *available = total_subracks_available;
+  *processed = total_subracks_processed;
+  *skipped = total_subracks_skipped;
 }
 
 // Cache getter functions
@@ -301,14 +319,34 @@ static inline void update_best_move_or_insert_into_movelist(
     move_list_insert_spare_small_move(gen->move_list);
     break;
   }
-  if (need_to_update_best_move_equity_or_score) {
+
+  // Check if this move is an exchange in exchange cutoff mode.
+  // In exchange cutoff mode, exchanges should not raise the cutoff because
+  // we still need to search for scoring plays that might exceed the threshold.
+  const bool is_exchange_in_exchange_cutoff_mode =
+      (move_type == GAME_EVENT_EXCHANGE) &&
+      (gen->target_leave_size_for_exchange_cutoff >= 0);
+
+  if (need_to_update_best_move_equity_or_score &&
+      !is_exchange_in_exchange_cutoff_mode) {
     gen_update_cutoff_equity_or_score(gen);
   }
 
-  // Check if this move exceeds the threshold for early termination
+  // Check if this move exceeds the threshold for early termination.
+  // In exchange cutoff mode, we only set threshold_exceeded if this move also
+  // became the best move. This prevents a low-equity scoring play (that exceeds
+  // the threshold but is worse than the best exchange) from triggering early
+  // termination before we've found the true best scoring play.
+  const bool in_exchange_cutoff_mode =
+      gen->target_leave_size_for_exchange_cutoff >= 0;
   if (gen->stop_on_exceeding_threshold &&
-      move_equity_or_score > gen->initial_best_equity) {
-    gen->threshold_exceeded = true;
+      move_equity_or_score > gen->initial_best_equity &&
+      !is_exchange_in_exchange_cutoff_mode) {
+    // In exchange cutoff mode, only set threshold_exceeded if this move
+    // became the new best move (meaning it beats any exchange we found)
+    if (!in_exchange_cutoff_mode || need_to_update_best_move_equity_or_score) {
+      gen->threshold_exceeded = true;
+    }
   }
 }
 
@@ -520,10 +558,20 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
     gen_update_cutoff_equity_or_score(gen);
   }
 
-  // Check if this move exceeds the threshold for early termination
+  // Check if this move exceeds the threshold for early termination.
+  // In exchange cutoff mode, we only set threshold_exceeded if this move also
+  // became the best move. This prevents a low-equity scoring play (that exceeds
+  // the threshold but is worse than the best exchange) from triggering early
+  // termination before we've found the true best scoring play.
+  const bool in_exchange_cutoff_mode =
+      gen->target_leave_size_for_exchange_cutoff >= 0;
   if (gen->stop_on_exceeding_threshold &&
       move_equity_or_score > gen->initial_best_equity) {
-    gen->threshold_exceeded = true;
+    // In exchange cutoff mode, only set threshold_exceeded if this move
+    // became the new best move (meaning it beats any exchange we found)
+    if (!in_exchange_cutoff_mode || need_to_update_best_move_equity_or_score) {
+      gen->threshold_exceeded = true;
+    }
   }
 }
 
@@ -689,6 +737,9 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   assert(anchor->rightmost_start_col <= anchor->col);
   const int num_subrack_combinations =
       wmp_move_gen_get_num_subrack_combinations(wgen);
+  int subracks_processed = 0;
+  int subracks_skipped = 0;
+  total_subracks_available += num_subrack_combinations;
   for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
        subrack_idx++) {
     if (gen->number_of_tiles_in_bag > 0) {
@@ -696,12 +747,14 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
           wmp_move_gen_get_leave_value(wgen, subrack_idx);
       if (better_play_has_been_found(gen, leave_value +
                                               anchor->highest_possible_score)) {
+        subracks_skipped++;
         continue;
       }
     }
     if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx)) {
       continue;
     }
+    subracks_processed++;
     if (gen->number_of_tiles_in_bag == 0) {
       wgen->leave_value = 0;
       for (int ml = 0; ml < ld_get_size(&gen->ld); ml++) {
@@ -724,7 +777,15 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
         }
       }
     }
+    // Early exit from subrack loop if threshold exceeded
+    if (gen->threshold_exceeded) {
+      // Count remaining subracks as skipped
+      subracks_skipped += num_subrack_combinations - subrack_idx - 1;
+      break;
+    }
   }
+  total_subracks_processed += subracks_processed;
+  total_subracks_skipped += subracks_skipped;
 }
 
 void go_on(MoveGen *gen, int current_col, MachineLetter L,
@@ -1781,6 +1842,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->initial_best_equity = args->initial_best_equity;
   gen->stop_on_exceeding_threshold = args->stop_on_exceeding_threshold;
   gen->threshold_exceeded = false;
+  gen->target_leave_size_for_exchange_cutoff =
+      args->target_leave_size_for_exchange_cutoff;
 
   gen->board = game_get_board(game);
   gen->player_index = game_get_player_on_turn_index(game);
@@ -1824,9 +1887,22 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   // threshold. Otherwise start with no threshold (EQUITY_INITIAL_VALUE).
   // Note: zero-initialized MoveGenArgs will have initial_best_equity = 0,
   // which we treat as "no cutoff" by mapping to EQUITY_INITIAL_VALUE.
-  const Equity effective_initial_equity =
-      (gen->initial_best_equity == 0) ? EQUITY_INITIAL_VALUE
-                                      : gen->initial_best_equity;
+  //
+  // SPECIAL CASE: For exchange inference cutoff (target_leave_size_for_exchange_cutoff >= 0),
+  // we need to track the actual best move (starting from EQUITY_INITIAL_VALUE) because
+  // we need to check if the top_move is a matching exchange. The initial_best_equity
+  // is only used for the threshold_exceeded early termination check, not for filtering
+  // which moves become best_move. The threshold will be updated after best_leaves is
+  // computed to include best_leaves[target_leave_size].
+  Equity effective_initial_equity;
+  if (gen->target_leave_size_for_exchange_cutoff >= 0) {
+    // Exchange cutoff: track actual best move, use initial_best_equity only for threshold
+    effective_initial_equity = EQUITY_INITIAL_VALUE;
+  } else if (gen->initial_best_equity == 0) {
+    effective_initial_equity = EQUITY_INITIAL_VALUE;
+  } else {
+    effective_initial_equity = gen->initial_best_equity;
+  }
   gen->best_move_equity_or_score = effective_initial_equity;
   gen->cutoff_equity_or_score = effective_initial_equity;
 
@@ -2008,6 +2084,23 @@ void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen(args->thread_index);
   gen_load_position(gen, args);
   gen_look_up_leaves_and_record_exchanges(gen);
+
+  // For exchange inference cutoff: now that best_leaves is populated,
+  // update the threshold for early termination to include best_leaves[target_leave_size].
+  // This raises the bar for what constitutes "exceeding the threshold".
+  // We only update initial_best_equity (used for threshold_exceeded check).
+  // We do NOT update best_move_equity_or_score (which tracks the actual best move found).
+  if (gen->target_leave_size_for_exchange_cutoff >= 0 &&
+      gen->target_leave_size_for_exchange_cutoff < RACK_SIZE) {
+    const Equity best_exch_leave =
+        gen->best_leaves[gen->target_leave_size_for_exchange_cutoff];
+    // Add best_exch_leave to the initial_best_equity (which holds target_score + margin)
+    // to get the final cutoff threshold for early termination.
+    if (best_exch_leave > EQUITY_INITIAL_VALUE) {
+      const Equity exchange_cutoff = gen->initial_best_equity + best_exch_leave;
+      gen->initial_best_equity = exchange_cutoff;
+    }
+  }
 
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
     const bool check_leaves = (gen->number_of_tiles_in_bag > 0) &&

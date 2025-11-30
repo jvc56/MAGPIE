@@ -867,6 +867,7 @@ void impl_move_gen(Config *config, ErrorStack *error_stack) {
       .thread_index = 0,
       .eq_margin_movegen = config->eq_margin_movegen,
       .initial_best_equity = EQUITY_INITIAL_VALUE,
+      .target_leave_size_for_exchange_cutoff = -1,
   };
   generate_moves_for_game(&args);
   move_list_sort_moves(config->move_list);

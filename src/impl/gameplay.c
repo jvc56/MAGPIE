@@ -453,6 +453,7 @@ void generate_moves_for_game(const MoveGenArgs *args) {
       .thread_index = args->thread_index,
       .eq_margin_movegen = args->eq_margin_movegen,
       .initial_best_equity = EQUITY_INITIAL_VALUE,
+      .target_leave_size_for_exchange_cutoff = -1,
   };
 
   generate_moves(&args_with_overwritten_record_and_sort);
@@ -468,6 +469,7 @@ Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
       .thread_index = thread_index,
       .eq_margin_movegen = 0,
       .initial_best_equity = EQUITY_INITIAL_VALUE,
+      .target_leave_size_for_exchange_cutoff = -1,
   };
   generate_moves(&args);
   return move_list_get_move(move_list, 0);
@@ -489,11 +491,98 @@ bool get_top_equity_move_with_cutoff(Game *game, int thread_index,
       .eq_margin_movegen = 0,
       .initial_best_equity = cutoff_threshold,
       .stop_on_exceeding_threshold = true,
+      .target_leave_size_for_exchange_cutoff = -1,
   };
   generate_moves(&args);
   // Check if the threshold was exceeded (early termination may have occurred)
   const MoveGen *gen = get_movegen(thread_index);
   return gen->threshold_exceeded;
+}
+
+bool get_top_equity_move_with_exchange_cutoff(
+    Game *game, int thread_index, MoveList *move_list, Equity target_score,
+    Equity equity_margin, int target_tiles_exchanged) {
+  // Check for blanks. If the rack has a blank, we cannot trust best_leaves
+  // due to potential underestimation in KLV lookup for blanks.
+  // In this case, fallback to full search without optimization.
+  int player_index = game_get_player_on_turn_index(game);
+  Rack *rack = player_get_rack(game_get_player(game, player_index));
+  bool has_blank = rack_get_letter(rack, BLANK_MACHINE_LETTER) > 0;
+
+  if (has_blank) {
+    // For racks with blanks, we cannot trust best_leaves optimization.
+    // Fall back to the same logic as the baseline: get_top_equity_move
+    // then compare against threshold.
+    const Move *top_move = get_top_equity_move(game, thread_index, move_list);
+
+    const bool top_is_matching_exchange =
+        move_get_type(top_move) == GAME_EVENT_EXCHANGE &&
+        move_get_tiles_played(top_move) == target_tiles_exchanged;
+
+    if (top_is_matching_exchange) {
+      return false;
+    }
+    return move_get_equity(top_move) > (target_score + equity_margin);
+  }
+
+  // For exchange inference, we use best_leaves[target_leave_size] as the
+  // cutoff. The cutoff threshold = target_score + best_exch_leave + equity_margin
+  // where best_exch_leave = best_leaves[RACK_SIZE - target_tiles_exchanged]
+  //
+  // We use target_leave_size_for_exchange_cutoff to tell movegen to update
+  // the cutoff threshold after computing best_leaves. This enables early
+  // termination via anchor pruning.
+  //
+  // We can prune if a scoring play exceeds target_score + margin, UNLESS
+  // the top move is itself an exchange of the right size.
+  //
+  // The optimization is that we use a HIGHER threshold (target_score + margin +
+  // best_leaves[target_leave_size]) for early termination. If a move exceeds
+  // this higher threshold, we know it also exceeds the original threshold, so
+  // we can skip remaining anchors. But if no move exceeds the higher threshold,
+  // we still have the true best move and need to check it against the original
+  // threshold.
+
+  const int target_leave_size = RACK_SIZE - target_tiles_exchanged;
+
+  // Pass target_score + equity_margin as initial_best_equity.
+  // movegen will add best_leaves[target_leave_size] after computing best_leaves.
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_BEST,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .thread_index = thread_index,
+      .eq_margin_movegen = 0,
+      .initial_best_equity = target_score + equity_margin,
+      .stop_on_exceeding_threshold = true,
+      .target_leave_size_for_exchange_cutoff = target_leave_size,
+  };
+  generate_moves(&args);
+
+  const Move *top_move = move_list_get_move(move_list, 0);
+
+  // Check if top move is a matching exchange - if so, rack is always valid.
+  // This check must come FIRST before any pruning logic.
+  const bool top_is_matching_exchange =
+      move_get_type(top_move) == GAME_EVENT_EXCHANGE &&
+      move_get_tiles_played(top_move) == target_tiles_exchanged;
+
+  if (top_is_matching_exchange) {
+    return false;
+  }
+
+  // For non-exchange top moves: check against the ORIGINAL threshold.
+  // If threshold_exceeded=true, the top_move should be the move that triggered it
+  // (or a better move), and we need to check if it exceeds the original threshold.
+  // If threshold_exceeded=false, we completed movegen normally and still need
+  // to check the top_move against the original threshold.
+  const Equity original_threshold = target_score + equity_margin;
+  const bool exceeds_original = move_get_equity(top_move) > original_threshold;
+
+  // Prune if top move exceeds original threshold
+  return exceeds_original;
 }
 
 bool moves_are_similar(const Move *move1, const Move *move2, int dist_size) {

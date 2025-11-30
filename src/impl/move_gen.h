@@ -69,6 +69,10 @@ typedef struct MoveGen {
   // Set to true when a move exceeding initial_best_equity is found and
   // stop_on_exceeding_threshold is enabled.
   bool threshold_exceeded;
+  // For exchange inference cutoff: if >= 0, after computing best_leaves,
+  // the cutoff threshold will be updated to use best_leaves[target_leave_size].
+  // Set to -1 to disable (default behavior).
+  int target_leave_size_for_exchange_cutoff;
 
   MachineLetter strip[(MOVE_MAX_TILES)];
   MachineLetter exchange_strip[(MOVE_MAX_TILES)];
@@ -159,13 +163,21 @@ typedef struct MoveGenArgs {
   // initial_best_equity. Used by inference to quickly determine if a rack
   // is invalid (has a move better than what was played).
   bool stop_on_exceeding_threshold;
+  // For exchange inference cutoff: if >= 0, after computing best_leaves,
+  // the cutoff threshold will be updated to use best_leaves[target_leave_size].
+  // This enables early termination for exchange inference.
+  // Set to -1 to disable (default behavior).
+  int target_leave_size_for_exchange_cutoff;
 } MoveGenArgs;
 
 void gen_destroy_cache(void);
 
 void gen_reset_anchor_stats(void);
+void gen_reset_subrack_stats(void);
 void gen_get_anchor_stats(uint64_t *available, uint64_t *processed,
                           uint64_t *skipped);
+void gen_get_subrack_stats(uint64_t *available, uint64_t *processed,
+                           uint64_t *skipped);
 
 // If override_kwg is NULL, the full KWG for the on-turn player is used,
 // but if it is nonnull, override_kwg is used. The only use case for this

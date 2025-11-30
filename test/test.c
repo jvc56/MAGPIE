@@ -90,6 +90,7 @@ static TestEntry test_table[] = {
     {"infer", test_infer},
     {"inferrepro", test_infer_cutoff_repro},
     {"infercmp", test_infer_cutoff_optimization_comparison},
+    {"inferreprowmp", test_infer_cutoff_repro_wmp},
     {"rv", test_random_variable},
     {"am", test_alias_method},
     {"sim", test_sim},

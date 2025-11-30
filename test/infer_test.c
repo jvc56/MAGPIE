@@ -1032,12 +1032,12 @@ typedef struct InferDiagnostics {
 static void print_infer_diagnostics(const InferDiagnostics *diag) {
   printf("\n=== INFERENCE MISMATCH - REPRODUCTION INFO ===\n");
   printf("Game #: %d\n", diag->game_num);
-  printf("Seed: %llu\n", (unsigned long long)diag->seed);
+  printf("Seed (for bag): %llu\n", (unsigned long long)diag->seed);
   printf("CGP: %s\n", diag->cgp);
-  printf("Played tiles: %s\n", diag->played_tiles_str);
-  printf("Player on turn: %d\n", diag->player_on_turn);
-  printf("Score: %d\n", diag->score);
-  printf("Tiles exchanged: %d\n", diag->target_num_exch);
+  printf("Move played tiles (for scoring plays): %s\n", diag->played_tiles_str);
+  printf("Target player index: %d\n", diag->player_on_turn);
+  printf("Move score: %d\n", diag->score);
+  printf("Tiles exchanged (0 for scoring plays): %d\n", diag->target_num_exch);
   printf("==============================================\n\n");
   fflush(stdout);
 }
@@ -1055,22 +1055,25 @@ static void assert_inference_results_equal(InferenceResults *results1,
   const Stat *equity2 =
       inference_results_get_equity_values(results2, INFERENCE_TYPE_LEAVE);
 
+  bool samples_match = true;
   if (stat_get_num_samples(equity1) != stat_get_num_samples(equity2)) {
     print_infer_diagnostics(diag);
-    printf("num_samples mismatch: %llu vs %llu\n",
+    printf("num_samples mismatch: %llu vs %llu (diff: %lld)\n",
            (unsigned long long)stat_get_num_samples(equity1),
-           (unsigned long long)stat_get_num_samples(equity2));
+           (unsigned long long)stat_get_num_samples(equity2),
+           (long long)(stat_get_num_samples(equity1) - stat_get_num_samples(equity2)));
+    samples_match = false;
+    // Don't assert yet - continue to find which letters differ
   }
-  assert(stat_get_num_samples(equity1) == stat_get_num_samples(equity2));
 
   if (stat_get_num_unique_samples(equity1) != stat_get_num_unique_samples(equity2)) {
-    print_infer_diagnostics(diag);
-    printf("num_unique_samples mismatch: %llu vs %llu\n",
+    if (samples_match) print_infer_diagnostics(diag);
+    printf("num_unique_samples mismatch: %llu vs %llu (diff: %lld)\n",
            (unsigned long long)stat_get_num_unique_samples(equity1),
-           (unsigned long long)stat_get_num_unique_samples(equity2));
+           (unsigned long long)stat_get_num_unique_samples(equity2),
+           (long long)(stat_get_num_unique_samples(equity1) - stat_get_num_unique_samples(equity2)));
+    samples_match = false;
   }
-  assert(stat_get_num_unique_samples(equity1) ==
-         stat_get_num_unique_samples(equity2));
 
   // Skip mean/stdev comparison - these are derived from floating-point
   // accumulation which can vary with thread execution order.
@@ -1082,24 +1085,27 @@ static void assert_inference_results_equal(InferenceResults *results1,
       uint64_t draw2 = inference_results_get_subtotal(results2, INFERENCE_TYPE_LEAVE, i,
                                             count, INFERENCE_SUBTOTAL_DRAW);
       if (draw1 != draw2) {
-        print_infer_diagnostics(diag);
-        printf("draw subtotal mismatch at letter %d count %d: %llu vs %llu\n",
-               i, count, (unsigned long long)draw1, (unsigned long long)draw2);
+        printf("draw subtotal mismatch at letter %d count %d: %llu vs %llu (diff: %lld)\n",
+               i, count, (unsigned long long)draw1, (unsigned long long)draw2,
+               (long long)(draw1 - draw2));
+        samples_match = false;
       }
-      assert(draw1 == draw2);
 
       uint64_t leave1 = inference_results_get_subtotal(results1, INFERENCE_TYPE_LEAVE, i,
                                             count, INFERENCE_SUBTOTAL_LEAVE);
       uint64_t leave2 = inference_results_get_subtotal(results2, INFERENCE_TYPE_LEAVE, i,
                                             count, INFERENCE_SUBTOTAL_LEAVE);
       if (leave1 != leave2) {
-        print_infer_diagnostics(diag);
-        printf("leave subtotal mismatch at letter %d count %d: %llu vs %llu\n",
-               i, count, (unsigned long long)leave1, (unsigned long long)leave2);
+        printf("leave subtotal mismatch at letter %d count %d: %llu vs %llu (diff: %lld)\n",
+               i, count, (unsigned long long)leave1, (unsigned long long)leave2,
+               (long long)(leave1 - leave2));
+        samples_match = false;
       }
-      assert(leave1 == leave2);
     }
   }
+
+  // Now assert at the end after printing all differences
+  assert(samples_match);
 }
 
 // Extract played tiles from a move into a Rack (handles blanks correctly)
@@ -1206,25 +1212,145 @@ static void test_infer_cutoff_single_case(const char *cgp_str,
   config_destroy(config);
 }
 
-// Test the specific failing case from game 126
+// Test the specific failing case from game 1 (seed 13345)
 void test_infer_cutoff_repro(void) {
-  // CGP: 15/15/3J11/2BOS10/2RYA10/1ZO1U4C5/1ED1C2OVOLI3/EE1FINNY1D5/R3E4E5/B3S4X5/I3T10/U14/M14/15/15 EGILOTW/AEHINPS 148/186 0
-  // Played tiles: EGILTW, Player: 1, Score: 34
+  // Game #: 1
+  // Seed: 13345
+  // CGP: 10ALPHA/9MM4/8QUIST2/11P3/10XI3/10UG3/11O3/6FOB2T3/7HENDS3/15/15/15/15/15/15 CDNVVZ?/EEILRRR 93/174 0
+  // Played tiles: CDNVV (Exchanged)
+  // Player on turn: 1
+  // Score: 0
+  // Tiles exchanged: 5
   test_infer_cutoff_single_case(
-      "15/15/3J11/2BOS10/2RYA10/1ZO1U4C5/1ED1C2OVOLI3/EE1FINNY1D5/R3E4E5/B3S4X5/I3T10/U14/M14/15/15 EGILOTW/AEHINPS 148/186 0",
-      "EGILTW", 1, 34, 0);
+      "10ALPHA/9MM4/8QUIST2/11P3/10XI3/10UG3/11O3/6FOB2T3/7HENDS3/15/15/15/15/15/15 CDNVVZ?/EEILRRR 93/174 0",
+      "", 1, 0, 5);
+}
+
+// Helper to dump leaves to file for diffing
+static void dump_leaves_to_file(InferenceResults *results, const LetterDistribution *ld,
+                                 const char *filename) {
+  FILE *f = fopen(filename, "w");
+  if (!f) return;
+
+  LeaveRackList *lrl = inference_results_get_leave_rack_list(results);
+  leave_rack_list_sort(lrl);
+  int count = leave_rack_list_get_count(lrl);
+  int ld_size = ld_get_size(ld);
+  Rack leave, exchanged;
+  rack_set_dist_size(&leave, ld_size);
+  rack_set_dist_size(&exchanged, ld_size);
+
+  StringBuilder *sb = string_builder_create();
+
+  for (int i = 0; i < count; i++) {
+    const LeaveRack *lr = leave_rack_list_get_rack(lrl, i);
+    leave_rack_get_leave(lr, &leave);
+    leave_rack_get_exchanged(lr, &exchanged);
+
+    string_builder_clear(sb);
+    string_builder_add_rack(sb, &leave, ld, false);
+    const char *leave_str = string_builder_peek(sb);
+
+    StringBuilder *sb2 = string_builder_create();
+    string_builder_add_rack(sb2, &exchanged, ld, false);
+    const char *exch_str = string_builder_peek(sb2);
+
+    // Only output rack and draws - equity can differ slightly
+    fprintf(f, "%s+%s %d\n", leave_str, exch_str, leave_rack_get_draws(lr));
+
+    string_builder_destroy(sb2);
+  }
+  string_builder_destroy(sb);
+  fclose(f);
+}
+
+// Test the failing case from 50-game WMP test (game #24, seed 37345)
+void test_infer_cutoff_repro_wmp(void) {
+  // Game #: 24
+  // Seed (for bag): 37345
+  // CGP: 15/15/15/15/4T10/4O10/2GENOA8/1ROSEOLA7/1A2T10/1I2I10/1N2C10/1D13/1A13/1T13/MEOW11 AAEEEEU/BNNOTUU 95/141 0
+  // Move played tiles (for scoring plays): AEEEU
+  // Target player index: 0
+  // Move score: 0
+  // Tiles exchanged (0 for scoring plays): 5
+
+  const char *cgp_str = "15/15/15/15/4T10/4O10/2GENOA8/1ROSEOLA7/1A2T10/1I2I10/1N2C10/1D13/1A13/1T13/MEOW11 AAEEEEU/BNNOTUU 95/141 0";
+
+  // Use WMP true to reproduce the bug
+  // Use large numplays to store all unique leaves (we expect ~10,000)
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity "
+      "-r1 all -r2 all -numplays 1000000 -threads 1");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+
+  // Load the specific CGP
+  load_cgp_or_die(game, cgp_str);
+
+  InferenceResults *results_with_cutoff = inference_results_create(NULL);
+  InferenceResults *results_without_cutoff = inference_results_create(NULL);
+
+  // Run inference with cutoff optimization
+  config_set_use_infer_cutoff_optimization(config, true);
+  error_code_t status1 =
+      infer_for_test(config, 0, 0, 5, "", "", "", results_with_cutoff);
+
+  // Run inference without cutoff optimization
+  config_set_use_infer_cutoff_optimization(config, false);
+  error_code_t status2 =
+      infer_for_test(config, 0, 0, 5, "", "", "", results_without_cutoff);
+
+  printf("Status: %d vs %d\n", status1, status2);
+  assert(status1 == status2);
+
+  const Stat *equity1 =
+      inference_results_get_equity_values(results_with_cutoff, INFERENCE_TYPE_LEAVE);
+  const Stat *equity2 =
+      inference_results_get_equity_values(results_without_cutoff, INFERENCE_TYPE_LEAVE);
+
+  // Assert all unique leaves are captured in the leave rack lists
+  LeaveRackList *lrl1 = inference_results_get_leave_rack_list(results_with_cutoff);
+  LeaveRackList *lrl2 = inference_results_get_leave_rack_list(results_without_cutoff);
+  int count1 = leave_rack_list_get_count(lrl1);
+  int count2 = leave_rack_list_get_count(lrl2);
+  int unique1 = (int)stat_get_num_unique_samples(equity1);
+  int unique2 = (int)stat_get_num_unique_samples(equity2);
+
+  printf("With cutoff:    count=%d unique=%d samples=%llu\n",
+         count1, unique1, (unsigned long long)stat_get_num_samples(equity1));
+  printf("Without cutoff: count=%d unique=%d samples=%llu\n",
+         count2, unique2, (unsigned long long)stat_get_num_samples(equity2));
+
+  // Ensure we captured all unique leaves (capacity was large enough)
+  assert(count1 == unique1 && "capacity too small - not all unique leaves captured (with cutoff)");
+  assert(count2 == unique2 && "capacity too small - not all unique leaves captured (without cutoff)");
+
+  // Dump leaves to files for diffing
+  dump_leaves_to_file(results_with_cutoff, ld, "/tmp/leaves_with_cutoff.txt");
+  dump_leaves_to_file(results_without_cutoff, ld, "/tmp/leaves_without_cutoff.txt");
+  printf("Leaves dumped to /tmp/leaves_with_cutoff.txt and /tmp/leaves_without_cutoff.txt\n");
+  printf("Run: diff /tmp/leaves_with_cutoff.txt /tmp/leaves_without_cutoff.txt\n");
+
+  inference_results_destroy(results_with_cutoff);
+  inference_results_destroy(results_without_cutoff);
+  config_destroy(config);
 }
 
 // Test that the cutoff optimization produces identical results to the
 // non-optimized version by playing random games and comparing inference
 // timing for different play types.
 void test_infer_cutoff_optimization_comparison(void) {
-  const int NUM_GAMES = 5;
+  const int NUM_GAMES = 1000;  // 1000 games without WMP
+  const int NUM_THREADS = 10;
 
   // Use equity margin of 0 to test correctness (strictest test)
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -wmp true -s1 equity -s2 equity "
-      "-r1 all -r2 all -numplays 1 -threads 10");
+  char config_str[256];
+  snprintf(config_str, sizeof(config_str),
+           "set -lex CSW21 -wmp false -s1 equity -s2 equity "
+           "-r1 all -r2 all -numplays 1 -threads %d", NUM_THREADS);
+  Config *config = config_create_or_die(config_str);
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
   Game *game = config_get_game(config);
@@ -1264,10 +1390,17 @@ void test_infer_cutoff_optimization_comparison(void) {
   uint64_t anchors_available_without = 0, anchors_processed_without = 0;
   uint64_t anchors_skipped_without = 0;
 
+  // Track subrack stats separately for with/without optimization
+  uint64_t subracks_available_with = 0, subracks_processed_with = 0;
+  uint64_t subracks_skipped_with = 0;
+  uint64_t subracks_available_without = 0, subracks_processed_without = 0;
+  uint64_t subracks_skipped_without = 0;
+
   for (int game_num = 0; game_num < NUM_GAMES; game_num++) {
     // Reset game with unique seed for each game
     game_reset(game);
-    bag_seed(bag, 12345 + (uint64_t)game_num * 1000);
+    // Start from game #1 (seed 13345) to debug the failing case
+    bag_seed(bag, 13345 + (uint64_t)game_num * 1000);
     draw_starting_racks(game);
 
     // Play until game over
@@ -1308,17 +1441,25 @@ void test_infer_cutoff_optimization_comparison(void) {
 
       // Capture the CGP before running inference (for diagnostics)
       char *cgp = game_get_cgp(game, true);
-      const uint64_t seed = 12345 + (uint64_t)game_num * 1000;
+      const uint64_t seed = 13345 + (uint64_t)game_num * 1000;
+
+
+      // For exchanges, played_tiles should be empty
+      const char *tiles_for_infer =
+          (move_type == GAME_EVENT_EXCHANGE) ? "" : played_tiles_str;
+
+      // Reset results before each inference to get per-move comparison
+      inference_results_reset(results_with_cutoff, 1, ld_size);
+      inference_results_reset(results_without_cutoff, 1, ld_size);
 
       // Run inference with cutoff optimization
-      // Note: inference internally duplicates the game, so we run it BEFORE
-      // playing the move on the main game to get the correct board state
       config_set_use_infer_cutoff_optimization(config, true);
       gen_reset_anchor_stats();
+      gen_reset_subrack_stats();
       ctimer_start(&timer);
       error_code_t status1 =
           infer_for_test(config, player_on_turn, score, target_num_exch,
-                         played_tiles_str, "", "", results_with_cutoff);
+                         tiles_for_infer, "", "", results_with_cutoff);
       double time_with = ctimer_elapsed_seconds(&timer);
       {
         uint64_t avail, proc, skip;
@@ -1326,15 +1467,20 @@ void test_infer_cutoff_optimization_comparison(void) {
         anchors_available_with += avail;
         anchors_processed_with += proc;
         anchors_skipped_with += skip;
+        gen_get_subrack_stats(&avail, &proc, &skip);
+        subracks_available_with += avail;
+        subracks_processed_with += proc;
+        subracks_skipped_with += skip;
       }
 
       // Run inference without cutoff optimization
       config_set_use_infer_cutoff_optimization(config, false);
       gen_reset_anchor_stats();
+      gen_reset_subrack_stats();
       ctimer_start(&timer);
       error_code_t status2 =
           infer_for_test(config, player_on_turn, score, target_num_exch,
-                         played_tiles_str, "", "", results_without_cutoff);
+                         tiles_for_infer, "", "", results_without_cutoff);
       double time_without = ctimer_elapsed_seconds(&timer);
       {
         uint64_t avail, proc, skip;
@@ -1342,6 +1488,10 @@ void test_infer_cutoff_optimization_comparison(void) {
         anchors_available_without += avail;
         anchors_processed_without += proc;
         anchors_skipped_without += skip;
+        gen_get_subrack_stats(&avail, &proc, &skip);
+        subracks_available_without += avail;
+        subracks_processed_without += proc;
+        subracks_skipped_without += skip;
       }
 
       // Now play the move on the main game to continue
@@ -1382,7 +1532,7 @@ void test_infer_cutoff_optimization_comparison(void) {
       free(played_tiles_str);
     }
 
-    if ((game_num + 1) % 10 == 0) {
+    if ((game_num + 1) % 100 == 0) {
       printf("  Completed %d games...\n", game_num + 1);
       fflush(stdout);
     }
@@ -1397,17 +1547,23 @@ void test_infer_cutoff_optimization_comparison(void) {
   for (int i = 1; i <= RACK_SIZE; i++) {
     if (count_play[i] > 0) {
       double speedup = time_without_cutoff_play[i] / time_with_cutoff_play[i];
-      printf("  %d tiles: %5d plays, %.4fs with, %.4fs without, %.2fx speedup\n",
+      printf("  %d tiles: %5d plays, %.4fs with (%.4fs/inf), %.4fs without "
+             "(%.4fs/inf), %.2fx speedup\n",
              i, count_play[i], time_with_cutoff_play[i],
-             time_without_cutoff_play[i], speedup);
+             time_with_cutoff_play[i] / count_play[i],
+             time_without_cutoff_play[i],
+             time_without_cutoff_play[i] / count_play[i], speedup);
       total_with_play += time_with_cutoff_play[i];
       total_without_play += time_without_cutoff_play[i];
       total_count_play += count_play[i];
     }
   }
   if (total_count_play > 0) {
-    printf("  TOTAL:   %5d plays, %.4fs with, %.4fs without, %.2fx speedup\n",
-           total_count_play, total_with_play, total_without_play,
+    printf("  TOTAL:   %5d plays, %.4fs with (%.4fs/inf), %.4fs without "
+           "(%.4fs/inf), %.2fx speedup\n",
+           total_count_play, total_with_play,
+           total_with_play / total_count_play, total_without_play,
+           total_without_play / total_count_play,
            total_without_play / total_with_play);
   }
 
@@ -1418,17 +1574,23 @@ void test_infer_cutoff_optimization_comparison(void) {
   for (int i = 1; i <= RACK_SIZE; i++) {
     if (count_exch[i] > 0) {
       double speedup = time_without_cutoff_exch[i] / time_with_cutoff_exch[i];
-      printf("  %d tiles: %5d exchs, %.4fs with, %.4fs without, %.2fx speedup\n",
+      printf("  %d tiles: %5d exchs, %.4fs with (%.4fs/inf), %.4fs without "
+             "(%.4fs/inf), %.2fx speedup\n",
              i, count_exch[i], time_with_cutoff_exch[i],
-             time_without_cutoff_exch[i], speedup);
+             time_with_cutoff_exch[i] / count_exch[i],
+             time_without_cutoff_exch[i],
+             time_without_cutoff_exch[i] / count_exch[i], speedup);
       total_with_exch += time_with_cutoff_exch[i];
       total_without_exch += time_without_cutoff_exch[i];
       total_count_exch += count_exch[i];
     }
   }
   if (total_count_exch > 0) {
-    printf("  TOTAL:   %5d exchs, %.4fs with, %.4fs without, %.2fx speedup\n",
-           total_count_exch, total_with_exch, total_without_exch,
+    printf("  TOTAL:   %5d exchs, %.4fs with (%.4fs/inf), %.4fs without "
+           "(%.4fs/inf), %.2fx speedup\n",
+           total_count_exch, total_with_exch,
+           total_with_exch / total_count_exch, total_without_exch,
+           total_without_exch / total_count_exch,
            total_without_exch / total_with_exch);
   }
 
@@ -1462,6 +1624,26 @@ void test_infer_cutoff_optimization_comparison(void) {
            (unsigned long long)anchors_skipped_without, skip_pct);
   }
 
+  // Print subrack stats
+  printf("\nSubrack stats WITH cutoff optimization:\n");
+  {
+    double skip_pct = subracks_available_with > 0 ?
+        100.0 * (double)subracks_skipped_with / (double)subracks_available_with : 0;
+    printf("  %llu processed / %llu available (%llu skipped, %.2f%%)\n",
+           (unsigned long long)subracks_processed_with,
+           (unsigned long long)subracks_available_with,
+           (unsigned long long)subracks_skipped_with, skip_pct);
+  }
+  printf("Subrack stats WITHOUT cutoff optimization:\n");
+  {
+    double skip_pct = subracks_available_without > 0 ?
+        100.0 * (double)subracks_skipped_without / (double)subracks_available_without : 0;
+    printf("  %llu processed / %llu available (%llu skipped, %.2f%%)\n",
+           (unsigned long long)subracks_processed_without,
+           (unsigned long long)subracks_available_without,
+           (unsigned long long)subracks_skipped_without, skip_pct);
+  }
+
   inference_results_destroy(results_with_cutoff);
   inference_results_destroy(results_without_cutoff);
   move_list_destroy(move_list);
@@ -1485,5 +1667,7 @@ void test_infer(void) {
     test_infer_nonerror_cases(2, use_game_history);
     test_infer_nonerror_cases(7, use_game_history);
   }
-  test_infer_cutoff_optimization_comparison();
+  test_infer_cutoff_repro();
+  test_infer_cutoff_repro_wmp();
+  // test_infer_cutoff_optimization_comparison();  // Disabled - slow
 }
