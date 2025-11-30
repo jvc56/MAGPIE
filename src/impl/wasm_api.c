@@ -38,13 +38,14 @@ void wasm_load_command(const char *cmd) {
 
 void wasm_init_configs(const char *paths) {
   iso_error_stack = error_stack_create();
-  iso_config = config_create_default_with_data_paths(iso_error_stack, paths);
+  ConfigArgs args = {.data_paths = paths, .settings_filename = NULL};
+  iso_config = config_create(&args, iso_error_stack);
   if (!error_stack_is_empty(iso_error_stack)) {
     error_stack_print_and_reset(iso_error_stack);
     return;
   }
   wasm_error_stack = error_stack_create();
-  wasm_config = config_create_default_with_data_paths(wasm_error_stack, paths);
+  wasm_config = config_create(&args, wasm_error_stack);
   if (!error_stack_is_empty(wasm_error_stack)) {
     error_stack_print_and_reset(wasm_error_stack);
     return;

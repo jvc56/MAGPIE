@@ -19,6 +19,7 @@
 
 #define TRIVIAL_CROSS_SET_STRING "*"
 #define DEFAULT_TEST_DATA_PATH "./testdata:./data"
+#define DEFAULT_TEST_SETTINGS_FILENAME "test_settings_12345678901.txt"
 
 typedef struct SortedMoveList {
   int count;

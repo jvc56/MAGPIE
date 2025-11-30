@@ -208,6 +208,7 @@ struct Config {
   bool save_settings;
   bool loaded_settings;
   char *record_filepath;
+  char *settings_filename;
   double tt_fraction_of_mem;
   int time_limit_seconds;
   int num_threads;
@@ -442,13 +443,20 @@ AutoplayResults *config_get_autoplay_results(const Config *config) {
   return config->autoplay_results;
 }
 
+const char *config_get_settings_filename(const Config *config) {
+  return config->settings_filename;
+}
+
 bool config_exec_parg_is_set(const Config *config) {
   return config->exec_parg_token != NUMBER_OF_ARG_TOKENS;
 }
 
 bool config_continue_on_coldstart(const Config *config) {
-  return !config_exec_parg_is_set(config) ||
+  // Each of these conditions indicates that the user wants to continue running
+  // commands
+  return config->exec_parg_token == ARG_TOKEN_SET ||
          config->exec_parg_token == ARG_TOKEN_CGP ||
+         !config_exec_parg_is_set(config) ||
          config_get_parg_num_set_values(config, ARG_TOKEN_EXEC_MODE) > 0;
 }
 
@@ -5079,10 +5087,21 @@ char *str_api_create_data(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
-void config_create_default_internal(Config *config, ErrorStack *error_stack,
-                                    const char *data_paths) {
+Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
+  Config *config = calloc_or_die(1, sizeof(Config));
+  // Set the values specified by the args first
+  if (!config_args || !config_args->data_paths) {
+    config->data_paths = string_duplicate(DEFAULT_DATA_PATHS);
+  } else {
+    config->data_paths = string_duplicate(config_args->data_paths);
+  }
+  if (!config_args || !config_args->settings_filename) {
+    config->settings_filename = string_duplicate(DEFAULT_SETTINGS_FILENAME);
+  } else {
+    config->settings_filename =
+        string_duplicate(config_args->settings_filename);
+  }
   // Attempt to load fields that might fail first
-  config->data_paths = string_duplicate(data_paths);
   config->board_layout =
       board_layout_create_default(config->data_paths, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -5090,7 +5109,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
         error_stack, ERROR_STATUS_CONFIG_LOAD_BOARD_LAYOUT_ERROR,
         string_duplicate(
             "encountered an error loading the default board layout"));
-    return;
+    return NULL;
   }
 
   config->win_pcts =
@@ -5100,7 +5119,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
         error_stack, ERROR_STATUS_CONFIG_LOAD_WIN_PCT_ERROR,
         string_duplicate(
             "encountered an error loading the default win percentage file"));
-    return;
+    return NULL;
   }
 
   // Command parsed from string input
@@ -5272,12 +5291,6 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
 
   autoplay_results_set_players_data(config->autoplay_results,
                                     config->players_data);
-}
-
-Config *config_create_default_with_data_paths(ErrorStack *error_stack,
-                                              const char *data_paths) {
-  Config *config = calloc_or_die(1, sizeof(Config));
-  config_create_default_internal(config, error_stack, data_paths);
   return config;
 }
 
@@ -5305,6 +5318,7 @@ void config_destroy(Config *config) {
   autoplay_results_destroy(config->autoplay_results);
   conversion_results_destroy(config->conversion_results);
   game_string_options_destroy(config->game_string_options);
+  free(config->settings_filename);
   free(config->data_paths);
   free(config);
 }

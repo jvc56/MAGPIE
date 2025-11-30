@@ -1,7 +1,7 @@
 #ifndef CONFIG_DEFS_H
 #define CONFIG_DEFS_H
 
-#define CONFIG_SETTINGS_FILENAME_WITH_EXTENSION "settings.txt"
+#define DEFAULT_SETTINGS_FILENAME "settings.txt"
 #define MAGPIE_PROMPT "magpie>"
 
 enum {

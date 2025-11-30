@@ -118,6 +118,8 @@ void load_and_exec_config_or_die(Config *config, const char *cmd) {
     abort();
   }
   error_stack_destroy(error_stack);
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_FINISHED);
   printf("loaded config with command: %s\n", cmd);
   printf("seed: %" PRIu64 "\n", config_get_seed(config));
 }
@@ -166,19 +168,26 @@ char *cross_set_to_string(const LetterDistribution *ld, uint64_t input) {
   return result;
 }
 
+Config *config_create_default_test(void) {
+  ErrorStack *error_stack = error_stack_create();
+  ConfigArgs args = {.data_paths = DEFAULT_TEST_DATA_PATH,
+                     .settings_filename = DEFAULT_TEST_SETTINGS_FILENAME};
+  Config *config = config_create(&args, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_reset(error_stack);
+    abort();
+  }
+  error_stack_destroy(error_stack);
+  load_and_exec_config_or_die(config, "set -threads 1 -savesettings false");
+  return config;
+}
+
 // Loads path with a default test data path value.
 // To specify a different path, use load_and_exec_config_or_die
 // after calling this function.
 Config *config_create_or_die(const char *cmd) {
-  ErrorStack *error_stack = error_stack_create();
-  Config *config = config_create_default_with_data_paths(
-      error_stack, DEFAULT_TEST_DATA_PATH);
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_print_and_reset(error_stack);
-    abort();
-  }
+  Config *config = config_create_default_test();
   load_and_exec_config_or_die(config, cmd);
-  error_stack_destroy(error_stack);
   return config;
 }
 
@@ -247,18 +256,6 @@ char *get_string_from_file_or_die(const char *filename) {
   }
   error_stack_destroy(error_stack);
   return result;
-}
-
-Config *config_create_default_test(void) {
-  ErrorStack *error_stack = error_stack_create();
-  Config *config = config_create_default_with_data_paths(
-      error_stack, DEFAULT_TEST_DATA_PATH);
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_reset(error_stack);
-    abort();
-  }
-  error_stack_destroy(error_stack);
-  return config;
 }
 
 // Comparison function for qsort

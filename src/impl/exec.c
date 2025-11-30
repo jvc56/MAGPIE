@@ -222,18 +222,18 @@ void save_config_settings(const Config *config, ErrorStack *error_stack) {
   }
   StringBuilder *sb = string_builder_create();
   config_add_settings_to_string_builder(config, sb);
-  write_string_to_file(CONFIG_SETTINGS_FILENAME_WITH_EXTENSION, "w",
+  write_string_to_file(config_get_settings_filename(config), "w",
                        string_builder_peek(sb), error_stack);
   string_builder_destroy(sb);
 }
 
 void load_config_settings(Config *config, ErrorStack *error_stack) {
   // if file does not exist, just return
-  if (access(CONFIG_SETTINGS_FILENAME_WITH_EXTENSION, F_OK) != 0) {
+  if (access(config_get_settings_filename(config), F_OK) != 0) {
     return;
   }
-  char *settings_string = get_string_from_file(
-      CONFIG_SETTINGS_FILENAME_WITH_EXTENSION, error_stack);
+  char *settings_string =
+      get_string_from_file(config_get_settings_filename(config), error_stack);
   StringSplitter *settings_split_by_newline =
       split_string_by_newline(settings_string, true);
   const int num_lines =
@@ -333,11 +333,11 @@ void caches_destroy(void) {
   fileproxy_destroy_cache();
 }
 
-void process_command_internal(int argc, char *argv[], const char *data_paths) {
+void process_command_internal(int argc, char *argv[],
+                              const ConfigArgs *config_args) {
   log_set_level(LOG_FATAL);
   ErrorStack *error_stack = error_stack_create();
-  Config *config =
-      config_create_default_with_data_paths(error_stack, data_paths);
+  Config *config = config_create(config_args, error_stack);
   if (error_stack_is_empty(error_stack)) {
     char *initial_command_string = create_command_from_args(argc, argv);
     sync_command_scan_loop(config, error_stack, initial_command_string);
@@ -350,11 +350,11 @@ void process_command_internal(int argc, char *argv[], const char *data_paths) {
   error_stack_destroy(error_stack);
 }
 
-void process_command(int argc, char *argv[]) {
-  process_command_internal(argc, argv, DEFAULT_DATA_PATHS);
+void process_command_default(int argc, char *argv[]) {
+  process_command_internal(argc, argv, NULL);
 }
 
-void process_command_with_data_paths(int argc, char *argv[],
-                                     const char *data_paths) {
-  process_command_internal(argc, argv, data_paths);
+void process_command_with_config_args(int argc, char *argv[],
+                                      const ConfigArgs *config_args) {
+  process_command_internal(argc, argv, config_args);
 }

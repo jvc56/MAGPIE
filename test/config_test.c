@@ -898,7 +898,7 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "note a b",
                             ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
 
-  assert_config_exec_status(config, "set -lex CSW24", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "set -lex CSW21", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1",
                             ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
   assert_config_exec_status(config, "sw", ERROR_STATUS_SUCCESS);
@@ -1720,7 +1720,7 @@ void test_config_export(void) {
   assert_config_exec_status(config, "ex " TEST_GCG_FILENAME,
                             ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
 
-  assert_config_exec_status(config, "set -lex CSW24", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "set -lex CSW21", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "ex", ERROR_STATUS_EXPORT_NO_GAME_EVENTS);
   assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "ex", ERROR_STATUS_EXPORT_NO_GAME_EVENTS);

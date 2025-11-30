@@ -421,8 +421,13 @@ void test_process_command(const char *arg_string, const char *output_substr,
   char *test_output_filename = get_test_filename("output");
   char *test_outerror_filename = get_test_filename("outerror");
 
-  char *arg_string_with_exec =
-      get_formatted_string("./bin/magpie %s", arg_string);
+  const char *disable_save_settings = "";
+  if (!has_substring(arg_string, "-saves")) {
+    disable_save_settings = "-savesettings false";
+  }
+
+  char *arg_string_with_exec = get_formatted_string(
+      "./bin/magpie %s %s", arg_string, disable_save_settings);
 
   // Reset the contents of output
   fclose_or_die(fopen_or_die(test_output_filename, "w"));
@@ -434,9 +439,12 @@ void test_process_command(const char *arg_string, const char *output_substr,
   command_test_set_stream_err(errorout_fh);
 
   MainArgs *main_args = get_main_args_from_string(arg_string_with_exec);
+  ConfigArgs config_args = {.data_paths = DEFAULT_TEST_DATA_PATH,
+                            .settings_filename =
+                                DEFAULT_TEST_SETTINGS_FILENAME};
 
-  process_command_with_data_paths(main_args->argc, main_args->argv,
-                                  DEFAULT_TEST_DATA_PATH);
+  process_command_with_config_args(main_args->argc, main_args->argv,
+                                   &config_args);
   main_args_destroy(main_args);
 
   char *test_output = get_string_from_file_or_die(test_output_filename);
@@ -612,11 +620,7 @@ void test_exec_sync_command(void) {
   command_test_reset_stream_in();
 }
 
-void test_save_settings(void) {
-  // Retrieve saved settings from previous command tests
-  char *save1 =
-      get_string_from_file_or_die(CONFIG_SETTINGS_FILENAME_WITH_EXTENSION);
-
+void run_short_autoplay(const char *initial_cmd) {
   // Run the executable with a single command that doesn't change any settings
   // so that when the process finishes it will write to settings.txt file again
   // with the same settings
@@ -630,7 +634,7 @@ void test_save_settings(void) {
   command_test_set_stream_in(input_reader);
 
   ProcessArgs *process_args =
-      process_args_create("set -mode sync", "autoplay games 2", 0, "");
+      process_args_create(initial_cmd, "autoplay games 2", 0, "");
 
   cpthread_t cmd_execution_thread;
   cpthread_create(&cmd_execution_thread, test_process_command_async,
@@ -649,9 +653,21 @@ void test_save_settings(void) {
   process_args_destroy(process_args);
   free(test_input_filename);
   command_test_reset_stream_in();
+}
 
-  char *save2 =
-      get_string_from_file_or_die(CONFIG_SETTINGS_FILENAME_WITH_EXTENSION);
+void test_save_settings(void) {
+  remove(DEFAULT_TEST_SETTINGS_FILENAME);
+
+  run_short_autoplay(
+      "set -mode sync -lex CSW21 -bb 73 -gp true -savesettings true");
+
+  char *save1 = get_string_from_file_or_die(DEFAULT_TEST_SETTINGS_FILENAME);
+
+  run_short_autoplay("set -savesettings true");
+
+  char *save2 = get_string_from_file_or_die(DEFAULT_TEST_SETTINGS_FILENAME);
+
+  remove(DEFAULT_TEST_SETTINGS_FILENAME);
 
   assert_strings_equal(save1, save2);
 
