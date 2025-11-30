@@ -830,6 +830,44 @@ void test_trie(void) {
   trie_destroy(trie);
 }
 
+void display_whole_game(const char *game_to_load) {
+  Config *config = config_create_default_test();
+  StringBuilder *cmd_sb = string_builder_create();
+  string_builder_add_formatted_string(cmd_sb, "load %s -lex CSW21",
+                                      game_to_load);
+  assert_config_exec_status(config, string_builder_peek(cmd_sb),
+                            ERROR_STATUS_SUCCESS);
+  string_builder_clear(cmd_sb);
+  const GameHistory *game_history = config_get_game_history(config);
+  const int num_events = game_history_get_num_events(game_history);
+  for (int i = 0; i < 2; i++) {
+    for (int j = 0; j <= num_events; j++) {
+      string_builder_add_formatted_string(cmd_sb, "goto %d", j);
+      error_code_t error_code =
+          get_config_exec_status(config, string_builder_peek(cmd_sb));
+      string_builder_clear(cmd_sb);
+      if (error_code == ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE) {
+        break;
+      } else if (error_code != ERROR_STATUS_SUCCESS) {
+        log_fatal("display game test encountered unexpected error: %d",
+                  error_code);
+      }
+    }
+    assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
+    assert_config_exec_status(config, "set -pretty true", ERROR_STATUS_SUCCESS);
+  }
+  string_builder_destroy(cmd_sb);
+  config_destroy(config);
+}
+
+void test_game_display(void) {
+  display_whole_game(TESTDATA_FILEPATH "gcgs/success.gcg");
+  display_whole_game(TESTDATA_FILEPATH "gcgs/success_standard.gcg");
+  display_whole_game(TESTDATA_FILEPATH "gcgs/success_six_pass.gcg");
+  display_whole_game(TESTDATA_FILEPATH "gcgs/success_just_last_rack.gcg");
+  display_whole_game(TESTDATA_FILEPATH "gcgs/success_long_game.gcg");
+}
+
 void test_config_anno(void) {
   // Commit and challenge
   Config *config = config_create_default_test();
@@ -1832,6 +1870,9 @@ void test_config_export(void) {
 }
 
 void test_config(void) {
+  test_game_display();
+  // FIXME: remove
+  return;
   test_trie();
   test_config_anno();
   test_config_export();

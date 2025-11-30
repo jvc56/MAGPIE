@@ -1122,3 +1122,22 @@ void assert_config_exec_status(Config *config, const char *cmd,
   }
   error_stack_destroy(error_stack);
 }
+
+error_code_t get_config_exec_status(Config *config, const char *cmd) {
+  ErrorStack *error_stack = error_stack_create();
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  config_load_command(config, cmd, error_stack);
+  error_code_t error_code = error_stack_top(error_stack);
+
+  // If we expect an error and got it during load, that's the expected result
+  if (error_code != ERROR_STATUS_SUCCESS) {
+    error_stack_destroy(error_stack);
+    return error_code;
+  }
+
+  config_execute_command(config, error_stack);
+  error_code = error_stack_top(error_stack);
+  error_stack_destroy(error_stack);
+  return error_code;
+}
