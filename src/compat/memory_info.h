@@ -11,14 +11,16 @@
 #if defined(_WIN32) || defined(_WIN64)
 #include <windows.h>
 #elif defined(__APPLE__) || defined(__MACH__)
+#include <sys/param.h>
 #include <sys/sysctl.h>
 #include <sys/types.h>
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__unix__) || defined(__posix__)
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #endif
 
-static uint64_t get_total_memory(void) {
+static inline uint64_t get_total_memory(void) {
   uint64_t total_memory = 0;
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -83,14 +85,43 @@ static uint64_t get_total_memory(void) {
   return total_memory;
 }
 
-// int main() {
-//     uint64_t memory = get_total_memory();
-//     if (memory > 0) {
-//         printf("Total Physical Memory: %llu MB\n", memory / (1024 * 1024));
-//     } else {
-//         printf("Failed to retrieve total memory.\n");
-//     }
-//     return 0;
-// }
+static inline int get_num_cores(void) {
+  int core_count = 1; // Default fallback value
+
+#if defined(_WIN32) || defined(_WIN64)
+                      // === Implementation for Windows ===
+  SYSTEM_INFO sys_info;
+  GetSystemInfo(&sys_info);
+  core_count = (int)sys_info.dwNumberOfProcessors;
+  // The core_count will be at least 1, as GetSystemInfo will succeed.
+
+#elif defined(__APPLE__) || defined(__MACH__)
+                      // === Implementation for macOS (Darwin) ===
+  int name[] = {CTL_HW, HW_NCPU};
+  size_t size = sizeof(core_count);
+
+  if (sysctl(name, 2, &core_count, &size, NULL, 0) == -1) {
+    // sysctl failed, return default
+    core_count = 1;
+  }
+
+#elif defined(__linux__) || defined(__unix__) || defined(__posix__)
+                      // === Implementation for Linux and other POSIX-compatible
+                      // systems ===
+  long num_cores = sysconf(_SC_NPROCESSORS_ONLN);
+  if (num_cores > 0) {
+    core_count = (int)num_cores;
+  }
+
+#else
+                      // If the OS is not recognized, a warning is printed and
+                      // the default value (1) is used.
+  fprintf(stderr, "Warning: Unknown operating system. Returning 1 core.\n");
+  core_count = 1;
+
+#endif
+
+  return core_count > 0 ? core_count : 1;
+}
 
 #endif

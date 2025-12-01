@@ -178,7 +178,8 @@ Config *config_create_default_test(void) {
     abort();
   }
   error_stack_destroy(error_stack);
-  load_and_exec_config_or_die(config, "set -threads 1 -savesettings false");
+  load_and_exec_config_or_die(config,
+                              "set -threads 1 -savesettings false -hr false");
   return config;
 }
 

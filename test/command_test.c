@@ -659,7 +659,7 @@ void test_save_settings(void) {
   remove(DEFAULT_TEST_SETTINGS_FILENAME);
 
   run_short_autoplay(
-      "set -mode sync -lex CSW21 -bb 73 -gp true -savesettings true");
+      "set -mode sync -lex CSW21 -bb 73 -gp true -savesettings true -hr false");
 
   char *save1 = get_string_from_file_or_die(DEFAULT_TEST_SETTINGS_FILENAME);
 

@@ -2,6 +2,7 @@
 #define BAI_DEFS_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 typedef enum {
   BAI_THRESHOLD_NONE,
@@ -26,9 +27,9 @@ typedef struct BAIOptions {
   // If the sampling rule is round robin, the sample limit
   // refers to the total number of round robins instead
   // of the total number of samples.
-  int sample_limit;
-  int sample_minimum;
-  int time_limit_seconds;
+  uint64_t sample_limit;
+  uint64_t sample_minimum;
+  uint64_t time_limit_seconds;
   int num_threads;
 } BAIOptions;
 

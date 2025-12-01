@@ -455,8 +455,6 @@ void validate_split_move(const StringSplitter *split_move, const Game *game,
       player_get_rack(game_get_player(game, player_index));
   for (int i = 0; i < dist_size; i++) {
     if (rack_get_letter(vm->rack, i) >
-        // FIXME: enforce vm rack as a strict subset of game player rack not
-        // including the bag
         bag_get_letter(bag, i) + rack_get_letter(game_player_rack, i)) {
       error_stack_push(
           error_stack, ERROR_STATUS_MOVE_VALIDATION_RACK_NOT_IN_BAG,

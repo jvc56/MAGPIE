@@ -45,8 +45,8 @@ typedef struct BAIArmDatum {
 typedef struct BAISyncData {
   int num_arms;
   int num_arms_reached_threshold;
-  int num_total_samples_completed;
-  int num_total_samples_requested;
+  uint64_t num_total_samples_completed;
+  uint64_t num_total_samples_requested;
   int astar_index;
   int challenger_index;
   bool initial_phase;
@@ -93,8 +93,8 @@ static inline void bai_sync_data_destroy(BAISyncData *bai_sync_data) {
 typedef struct BAISampleArgs {
   BAISyncData *bai_sync_data;
   double delta;
-  int sample_limit;
-  int sample_minimum;
+  uint64_t sample_limit;
+  uint64_t sample_minimum;
   bai_sampling_rule_t sampling_rule;
   bai_threshold_t threshold;
 } BAISampleArgs;
@@ -140,7 +140,7 @@ static inline double bai_get_arm_z(BAISyncData *bai_sync_data,
 
 static inline int
 bai_sync_data_sample_limit_reached(const BAISyncData *bai_sync_data,
-                                   int sample_limit) {
+                                   uint64_t sample_limit) {
   return bai_sync_data->num_total_samples_requested >= sample_limit;
 }
 
@@ -157,7 +157,7 @@ bai_sync_data_get_next_bai_sample_index_while_locked(BAISampleArgs *args) {
   switch (args->sampling_rule) {
   case BAI_SAMPLING_RULE_ROUND_ROBIN:
     arm_index = args->bai_sync_data->num_total_samples_requested %
-                args->bai_sync_data->num_arms;
+                (uint64_t)args->bai_sync_data->num_arms;
     break;
   case BAI_SAMPLING_RULE_TOP_TWO_IDS:;
     const int it = args->bai_sync_data->astar_index;

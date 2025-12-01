@@ -219,7 +219,7 @@ void test_config_load_success(void) {
   const char *r2 = "best";
   int num_plays = 10;
   int plies = 4;
-  int max_iterations = 400;
+  uint64_t max_iterations = 400;
   int stopping_cond = 98;
   int seed = 101;
   int number_of_threads = 6;
@@ -231,7 +231,7 @@ void test_config_load_success(void) {
       "set -ld %s -bb %d -var %s -l1 %s -l2 %s -s1 %s -r1 "
       "%s -s2 %s -r2 %s  -numplays %d "
       "-plies %d -it "
-      "%d -scond %d -seed %d -threads %d -pfreq %d -gp true -hr true ",
+      "%lu -scond %d -seed %d -threads %d -pfreq %d -gp true -hr true ",
       ld_name, bingo_bonus, game_variant, l1, l2, s1, r1, s2, r2, num_plays,
       plies, max_iterations, stopping_cond, seed, number_of_threads,
       print_info);

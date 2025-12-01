@@ -10,11 +10,11 @@ struct BAIResult {
   bai_result_status_t status;
   int best_arm;
   Timer timer;
-  int time_limit_seconds;
+  uint64_t time_limit_seconds;
   cpthread_mutex_t mutex;
 };
 
-void bai_result_reset(BAIResult *bai_result, int time_limit_seconds) {
+void bai_result_reset(BAIResult *bai_result, uint64_t time_limit_seconds) {
   bai_result->status = BAI_RESULT_STATUS_NONE;
   bai_result->best_arm = -1;
   bai_result->time_limit_seconds = time_limit_seconds;

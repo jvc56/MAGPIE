@@ -92,7 +92,7 @@ void test_bai_top_two(int num_threads) {
 
 void test_bai_sample_limit(int num_threads) {
   const double means_and_vars[] = {-10, 1, 100, 10, -20, 5};
-  const int num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
+  const uint64_t num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
   RandomVariablesArgs rv_args = {
       .type = RANDOM_VARIABLES_NORMAL,
       .num_rvs = num_rvs,
@@ -123,11 +123,11 @@ void test_bai_sample_limit(int num_threads) {
     bai_wrapper(&bai_options, rvs, rng, thread_control, NULL, bai_result);
     assert(bai_result_get_status(bai_result) == BAI_RESULT_STATUS_SAMPLE_LIMIT);
     assert(bai_result_get_best_arm(bai_result) == 1);
-    int expected_num_samples = bai_options.sample_limit;
+    uint64_t expected_num_samples = bai_options.sample_limit;
     if (expected_num_samples < num_rvs * bai_options.sample_minimum) {
       expected_num_samples = num_rvs * bai_options.sample_minimum;
     }
-    assert(rvs_get_total_samples(rvs) == (uint64_t)expected_num_samples);
+    assert(rvs_get_total_samples(rvs) == expected_num_samples);
     assert_num_epigons(rvs, 0);
   }
   thread_control_destroy(thread_control);

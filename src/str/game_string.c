@@ -486,6 +486,17 @@ GameStringOptions *game_string_options_create_default(void) {
   return gso;
 }
 
+GameStringOptions *game_string_options_create_pretty(void) {
+  GameStringOptions *gso = malloc_or_die(sizeof(GameStringOptions));
+  gso->board_color = GAME_STRING_BOARD_COLOR_ANSI;
+  gso->board_tile_glyphs = GAME_STRING_BOARD_TILE_GLYPHS_ALT;
+  gso->board_border = GAME_STRING_BOARD_BORDER_BOX_DRAWING;
+  gso->board_column_label = GAME_STRING_BOARD_COLUMN_LABEL_FULLWIDTH;
+  gso->on_turn_marker = GAME_STRING_ON_TURN_MARKER_ARROWHEAD;
+  gso->on_turn_color = GAME_STRING_ON_TURN_COLOR_ANSI_GREEN;
+  return gso;
+}
+
 GameStringOptions *game_string_options_create(
     game_string_board_color_t board_color,
     game_string_board_tile_glyphs_t board_tile_glyphs,

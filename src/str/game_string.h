@@ -86,6 +86,7 @@ void string_builder_add_game(const Game *game, const MoveList *move_list,
                              StringBuilder *game_string);
 
 GameStringOptions *game_string_options_create_default(void);
+GameStringOptions *game_string_options_create_pretty(void);
 
 GameStringOptions *game_string_options_create(
     game_string_board_color_t board_color,

@@ -1,6 +1,7 @@
 #include "config.h"
 
 #include "../compat/ctime.h"
+#include "../compat/memory_info.h"
 #include "../def/autoplay_defs.h"
 #include "../def/bai_defs.h"
 #include "../def/config_defs.h"
@@ -193,8 +194,8 @@ struct Config {
   int num_small_plays;
   int plies;
   int endgame_plies;
-  int max_iterations;
-  int min_play_iterations;
+  uint64_t max_iterations;
+  uint64_t min_play_iterations;
   double stop_cond_pct;
   Equity eq_margin_inference;
   Equity eq_margin_movegen;
@@ -210,7 +211,7 @@ struct Config {
   char *record_filepath;
   char *settings_filename;
   double tt_fraction_of_mem;
-  int time_limit_seconds;
+  uint64_t time_limit_seconds;
   int num_threads;
   int print_interval;
   uint64_t seed;
@@ -355,7 +356,7 @@ int config_get_endgame_plies(const Config *config) {
   return config->endgame_plies;
 }
 
-int config_get_max_iterations(const Config *config) {
+uint64_t config_get_max_iterations(const Config *config) {
   return config->max_iterations;
 }
 
@@ -1873,7 +1874,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
                            target_known_inference_tiles, nontarget_known_tiles,
                            &sim_args->inference_args);
   }
-  sim_args->bai_options.sample_limit = config_get_max_iterations(config);
+  sim_args->bai_options.sample_limit = config->max_iterations;
   sim_args->bai_options.sample_minimum = config->min_play_iterations;
   const double percentile = config_get_stop_cond_pct(config);
   if (percentile > 100 || config->threshold == BAI_THRESHOLD_NONE) {
@@ -1883,8 +1884,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
         1.0 - (config_get_stop_cond_pct(config) / 100.0);
     sim_args->bai_options.threshold = config->threshold;
   }
-  sim_args->bai_options.time_limit_seconds =
-      config_get_time_limit_seconds(config);
+  sim_args->bai_options.time_limit_seconds = config->time_limit_seconds;
   sim_args->bai_options.sampling_rule = config->sampling_rule;
   sim_args->bai_options.num_threads = config->num_threads;
 }
@@ -4463,14 +4463,14 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_int(config, ARG_TOKEN_MAX_ITERATIONS, 1, INT_MAX,
-                  &config->max_iterations, error_stack);
+  config_load_uint64(config, ARG_TOKEN_MAX_ITERATIONS, &config->max_iterations,
+                     error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
 
-  config_load_int(config, ARG_TOKEN_MIN_PLAY_ITERATIONS, 2, INT_MAX,
-                  &config->min_play_iterations, error_stack);
+  config_load_uint64(config, ARG_TOKEN_MIN_PLAY_ITERATIONS,
+                     &config->min_play_iterations, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -4487,9 +4487,8 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_int(config, ARG_TOKEN_TIME_LIMIT, 0, INT_MAX,
-                  &config->time_limit_seconds, error_stack);
-
+  config_load_uint64(config, ARG_TOKEN_TIME_LIMIT, &config->time_limit_seconds,
+                     error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -5249,22 +5248,22 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->challenge_bonus = DEFAULT_CHALLENGE_BONUS;
   config->num_plays = DEFAULT_MOVE_LIST_CAPACITY;
   config->num_small_plays = DEFAULT_SMALL_MOVE_LIST_CAPACITY;
-  config->plies = 2;
+  config->plies = 5;
   config->endgame_plies = 6;
-  config->eq_margin_inference = 0;
-  config->eq_margin_movegen = int_to_equity(10);
-  config->min_play_iterations = 100;
-  config->max_iterations = 5000;
+  config->eq_margin_inference = int_to_equity(5);
+  config->eq_margin_movegen = int_to_equity(5);
+  config->min_play_iterations = 500;
+  config->max_iterations = 1000000000000;
   config->stop_cond_pct = 99;
   config->time_limit_seconds = 0;
-  config->num_threads = 1;
+  config->num_threads = get_num_cores();
   config->print_interval = 0;
   config->seed = ctime_get_current_time();
   config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
   config->threshold = BAI_THRESHOLD_GK16;
   config->use_game_pairs = false;
   config->use_small_plays = false;
-  config->human_readable = false;
+  config->human_readable = true;
   config->sim_with_inference = false;
   config->print_boards = false;
   config->print_on_finish = false;
@@ -5519,8 +5518,8 @@ void config_add_settings_to_string_builder(const Config *config,
                                                config->num_small_plays);
       break;
     case ARG_TOKEN_MAX_ITERATIONS:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->max_iterations);
+      config_add_uint64_setting_to_string_builder(config, sb, arg_token,
+                                                  config->max_iterations);
       break;
     case ARG_TOKEN_STOP_COND_PCT:
       config_add_double_setting_to_string_builder(config, sb, arg_token,
@@ -5540,8 +5539,8 @@ void config_add_settings_to_string_builder(const Config *config,
       }
       break;
     case ARG_TOKEN_MIN_PLAY_ITERATIONS:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->min_play_iterations);
+      config_add_uint64_setting_to_string_builder(config, sb, arg_token,
+                                                  config->min_play_iterations);
       break;
     case ARG_TOKEN_USE_GAME_PAIRS:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
@@ -5588,8 +5587,8 @@ void config_add_settings_to_string_builder(const Config *config,
                                                   config->tt_fraction_of_mem);
       break;
     case ARG_TOKEN_TIME_LIMIT:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->time_limit_seconds);
+      config_add_uint64_setting_to_string_builder(config, sb, arg_token,
+                                                  config->time_limit_seconds);
       break;
     case ARG_TOKEN_SAMPLING_RULE:
       string_builder_add_formatted_string(sb, " -%s ",
