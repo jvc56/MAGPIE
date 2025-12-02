@@ -131,6 +131,10 @@ void test_bai_sample_limit(int num_threads) {
     assert_num_epigons(rvs, 0);
   }
   thread_control_destroy(thread_control);
+  // The timer should stop once the BAI has finished.
+  const double bai_time_elapsed = bai_result_get_elapsed_seconds(bai_result);
+  ctime_nap(0.2);
+  assert(bai_time_elapsed == bai_result_get_elapsed_seconds(bai_result));
   bai_result_destroy(bai_result);
   rvs_destroy(rng);
   rvs_destroy(rvs);

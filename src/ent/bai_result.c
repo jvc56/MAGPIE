@@ -44,6 +44,10 @@ double bai_result_get_elapsed_seconds(const BAIResult *bai_result) {
   return ctimer_elapsed_seconds(&bai_result->timer);
 }
 
+void bai_result_stop_timer(BAIResult *bai_result) {
+  ctimer_stop(&bai_result->timer);
+}
+
 uint64_t bai_result_get_time_limit_seconds(const BAIResult *bai_result) {
   return bai_result->time_limit_seconds;
 }

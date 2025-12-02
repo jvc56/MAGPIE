@@ -28,6 +28,11 @@ static inline void ctimer_start(Timer *timer) {
   timer->is_running = true;
 }
 
+static inline void ctimer_stop(Timer *timer) {
+  clock_gettime(CLOCK_MONOTONIC, &timer->end_time);
+  timer->is_running = false;
+}
+
 static inline double ctimer_elapsed_seconds(const Timer *timer) {
   TimeSpec finish_time;
   if (timer->is_running) {

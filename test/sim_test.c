@@ -215,7 +215,7 @@ void test_sim_time_limit(void) {
 void test_sim_one_arm_remaining(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
-      "-plies 2 -numplays 4 -threads 1 -it 1100 -scond none");
+      "-plies 2 -numplays 4 -minp 100 -threads 1 -it 1100 -scond none");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack ACEIRST");
   load_and_exec_config_or_die(
@@ -242,7 +242,11 @@ void test_sim_one_arm_remaining(void) {
   cpthread_cond_timedwait_loop(&cond, &mutex, 10, &done);
   cpthread_join(thread);
 
+  printf("actual status: %d\n", status);
   assert(status == ERROR_STATUS_SUCCESS);
+  printf("actual result: %d\n",
+         bai_result_get_status(
+             sim_results_get_bai_result(config_get_sim_results(config))));
   assert(bai_result_get_status(
              sim_results_get_bai_result(config_get_sim_results(config))) ==
          BAI_RESULT_STATUS_ONE_ARM_REMAINING);
@@ -359,7 +363,7 @@ void test_sim_with_and_without_inference_helper(
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-threads 10 -plies 2 -it 2000 -minp 50 -numplays 2 "
-      "-scond none -seed 10");
+      "-scond none -im 0 -seed 10");
   // Load an empty CGP to create a new game.
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
@@ -681,7 +685,8 @@ void test_sim_perf(const char *sim_perf_iters) {
           config_simulate_and_return_status(config, NULL, sim_results);
       assert(status == ERROR_STATUS_SUCCESS);
 
-      char *sim_stats_str = sim_results_get_string(game, sim_results, true);
+      char *sim_stats_str =
+          sim_results_get_string(game, sim_results, 100, true);
       if (i < details_limit) {
         append_content_to_file(sim_perf_game_details_filename, sim_stats_str);
       }

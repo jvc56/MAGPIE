@@ -256,6 +256,7 @@ void string_builder_add_inference_description(
 void string_builder_add_inference(StringBuilder *inference_string,
                                   InferenceResults *inference_results,
                                   const LetterDistribution *ld,
+                                  int max_num_leaves_to_display,
                                   bool use_ucgi_format) {
   StringBuilder *tmp_sb = string_builder_create();
 
@@ -310,9 +311,12 @@ void string_builder_add_inference(StringBuilder *inference_string,
   const LeaveRackList *leave_rack_list =
       inference_results_get_leave_rack_list(inference_results);
   // Get the list of most common leaves
-  int number_of_common_leaves = leave_rack_list_get_count(leave_rack_list);
+  int num_leaves_to_display = leave_rack_list_get_count(leave_rack_list);
+  if (num_leaves_to_display > max_num_leaves_to_display) {
+    num_leaves_to_display = max_num_leaves_to_display;
+  }
   StringGrid *sg_common_leaves =
-      string_grid_create(number_of_common_leaves + 1, 5, 2);
+      string_grid_create(num_leaves_to_display + 1, 5, 2);
   int curr_row = 0;
   int curr_col = 0;
   // The first column which designates the rank can be blank
@@ -338,7 +342,7 @@ void string_builder_add_inference(StringBuilder *inference_string,
 
   curr_row++;
 
-  for (int common_leave_index = 0; common_leave_index < number_of_common_leaves;
+  for (int common_leave_index = 0; common_leave_index < num_leaves_to_display;
        common_leave_index++) {
     const LeaveRack *leave_rack =
         leave_rack_list_get_rack(leave_rack_list, common_leave_index);
@@ -408,10 +412,11 @@ void string_builder_add_inference(StringBuilder *inference_string,
 
 char *inference_result_get_string(InferenceResults *inference_results,
                                   const LetterDistribution *ld,
+                                  int max_num_leaves_to_display,
                                   bool use_ucgi_format) {
   StringBuilder *inference_string = string_builder_create();
   string_builder_add_inference(inference_string, inference_results, ld,
-                               use_ucgi_format);
+                               max_num_leaves_to_display, use_ucgi_format);
   char *result_string = string_builder_dump(inference_string, NULL);
   string_builder_destroy(inference_string);
   return result_string;

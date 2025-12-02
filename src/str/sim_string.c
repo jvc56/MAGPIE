@@ -10,10 +10,14 @@
 bool string_builder_add_sim_stats_with_display_lock(StringBuilder *sb,
                                                     const Game *game,
                                                     SimResults *sim_results,
+                                                    int max_num_display_plays,
                                                     bool use_ucgi_format) {
-  const int number_of_simmed_plays =
-      sim_results_get_number_of_plays(sim_results);
-  int num_rows = number_of_simmed_plays;
+  const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
+  int num_display_plays = num_simmed_plays;
+  if (num_display_plays > max_num_display_plays) {
+    num_display_plays = max_num_display_plays;
+  }
+  int num_rows = num_display_plays;
   if (!use_ucgi_format) {
     // +1 for header
     num_rows += 1;
@@ -48,7 +52,7 @@ bool string_builder_add_sim_stats_with_display_lock(StringBuilder *sb,
   StringBuilder *move_sb = string_builder_create();
   const Rack *rack = sim_results_get_rack(sim_results);
   const uint16_t rack_dist_size = rack_get_dist_size(rack);
-  for (int i = 0; i < number_of_simmed_plays; i++) {
+  for (int i = 0; i < num_display_plays; i++) {
     curr_col = 0;
     const SimmedPlayDisplayInfo *sp_dinfo =
         sim_results_get_display_info(sim_results, i);
@@ -56,7 +60,7 @@ bool string_builder_add_sim_stats_with_display_lock(StringBuilder *sb,
     string_builder_add_move(move_sb, board, move, ld, false);
 
     string_grid_set_cell(sg, curr_row, curr_col++,
-                         get_formatted_string("%d: ", i + 1));
+                         get_formatted_string("%d:", i + 1));
 
     string_grid_set_cell(sg, curr_row, curr_col++,
                          string_builder_dump(move_sb, NULL));
@@ -110,39 +114,65 @@ bool string_builder_add_sim_stats_with_display_lock(StringBuilder *sb,
   string_builder_add_string_grid(sb, sg, false);
   string_grid_destroy(sg);
 
-  BAIResult *bai_result = sim_results_get_bai_result(sim_results);
-  string_builder_add_formatted_string(
-      sb, "\nIterations:   %lu\nTime Elapsed: %.2f seconds\nStatus:       ",
-      bai_result_get_elapsed_seconds(bai_result),
-      sim_results_get_iteration_count(sim_results));
+  string_builder_add_formatted_string(sb, "\nShowing %d of %d simmed plays\n",
+                                      num_display_plays, num_simmed_plays);
 
+  StringGrid *summary_sg = string_grid_create(3, 2, 1);
+  BAIResult *bai_result = sim_results_get_bai_result(sim_results);
+
+  curr_row = 0;
+
+  string_grid_set_cell(summary_sg, curr_row, 0, string_duplicate("Iters:"));
+  string_grid_set_cell(
+      summary_sg, curr_row, 1,
+      get_formatted_string("%lu",
+                           sim_results_get_iteration_count(sim_results)));
+  curr_row++;
+
+  string_grid_set_cell(summary_sg, curr_row, 0, string_duplicate("Time:"));
+  string_grid_set_cell(
+      summary_sg, curr_row, 1,
+      get_formatted_string("%.2f seconds",
+                           bai_result_get_elapsed_seconds(bai_result)));
+  curr_row++;
+
+  string_grid_set_cell(summary_sg, curr_row, 0, string_duplicate("Status:"));
+
+  char *status_str = NULL;
   switch (bai_result_get_status(bai_result)) {
   case BAI_RESULT_STATUS_THRESHOLD:
-    string_builder_add_string(sb,
-                              "Finished (statistical threshold achieved)\n");
+    status_str =
+        get_formatted_string("Finished (statistical threshold achieved)\n");
     break;
   case BAI_RESULT_STATUS_SAMPLE_LIMIT:
-    string_builder_add_string(sb, "Finished (max iterations reached)\n");
+    status_str = get_formatted_string("Finished (max iterations reached)\n");
     break;
   case BAI_RESULT_STATUS_TIMEOUT:
-    string_builder_add_string(sb, "Finished (time limit exceeded)\n");
+    status_str = get_formatted_string("Finished (time limit exceeded)\n");
     break;
   case BAI_RESULT_STATUS_ONE_ARM_REMAINING:
-    string_builder_add_string(sb, "Finished (all plays are similar)\n");
+    status_str = get_formatted_string("Finished (all plays are similar)\n");
     break;
   case BAI_RESULT_STATUS_USER_INTERRUPT:
-    string_builder_add_string(sb, "Finished (user interrupt)\n");
+    status_str = get_formatted_string("Finished (user interrupt)\n");
     break;
   case BAI_RESULT_STATUS_NONE:
-    string_builder_add_string(sb, "Running\n");
+    status_str = get_formatted_string("Running\n");
     break;
   }
+
+  string_grid_set_cell(summary_sg, curr_row, 1, status_str);
+  curr_row++;
+
+  string_builder_add_string_grid(sb, summary_sg, false);
+  string_grid_destroy(summary_sg);
 
   return true;
 }
 
 void string_builder_add_sim_stats(StringBuilder *sb, const Game *game,
                                   SimResults *sim_results,
+                                  int max_num_display_plays,
                                   bool use_ucgi_format) {
   // Only locks on success
   bool sim_stats_ready = sim_results_lock_and_sort_display_infos(sim_results);
@@ -150,8 +180,8 @@ void string_builder_add_sim_stats(StringBuilder *sb, const Game *game,
     string_builder_add_string(sb, "sim results not yet available\n");
     return;
   }
-  string_builder_add_sim_stats_with_display_lock(sb, game, sim_results,
-                                                 use_ucgi_format);
+  string_builder_add_sim_stats_with_display_lock(
+      sb, game, sim_results, max_num_display_plays, use_ucgi_format);
   if (use_ucgi_format) {
     string_builder_add_formatted_string(
         sb, "\ninfo nps %f\n",
@@ -163,18 +193,20 @@ void string_builder_add_sim_stats(StringBuilder *sb, const Game *game,
 }
 
 char *sim_results_get_string(const Game *game, SimResults *sim_results,
-                             bool use_ucgi_format) {
+                             int max_num_display_plays, bool use_ucgi_format) {
   StringBuilder *sb = string_builder_create();
-  string_builder_add_sim_stats(sb, game, sim_results, use_ucgi_format);
+  string_builder_add_sim_stats(sb, game, sim_results, max_num_display_plays,
+                               use_ucgi_format);
   char *str = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
   return str;
 }
 
 void sim_results_print(ThreadControl *thread_control, const Game *game,
-                       SimResults *sim_results, bool use_ucgi_format) {
-  char *sim_stats_string =
-      sim_results_get_string(game, sim_results, use_ucgi_format);
+                       SimResults *sim_results, int max_num_display_plays,
+                       bool use_ucgi_format) {
+  char *sim_stats_string = sim_results_get_string(
+      game, sim_results, max_num_display_plays, use_ucgi_format);
   thread_control_print(thread_control, sim_stats_string);
   free(sim_stats_string);
 }

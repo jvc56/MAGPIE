@@ -622,7 +622,7 @@ void string_builder_endgame_results(StringBuilder *pv_description,
       play_move(&move, game_copy, NULL);
     }
   }
-
+  string_builder_add_string(pv_description, "\n");
   game_destroy(game_copy);
 }
 

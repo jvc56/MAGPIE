@@ -55,18 +55,18 @@ void sim_results_destroy(SimResults *sim_results);
 
 int sim_results_get_number_of_plays(const SimResults *sim_results);
 int sim_results_get_num_plies(const SimResults *sim_results);
-int sim_results_get_node_count(const SimResults *sim_results);
+uint64_t sim_results_get_node_count(const SimResults *sim_results);
+void sim_results_increment_node_count(SimResults *sim_results);
 uint64_t sim_results_get_iteration_count(const SimResults *sim_results);
+void sim_results_increment_iteration_count(SimResults *sim_results);
 SimmedPlay *sim_results_get_simmed_play(const SimResults *sim_results,
                                         int index);
 const Rack *sim_results_get_rack(const SimResults *sim_results);
 void sim_results_set_rack(SimResults *sim_results, const Rack *rack);
 BAIResult *sim_results_get_bai_result(const SimResults *sim_results);
 
-void sim_results_set_iteration_count(SimResults *sim_results, uint64_t count);
 void sim_results_lock_simmed_plays(SimResults *sim_results);
 void sim_results_unlock_simmed_plays(SimResults *sim_results);
-void sim_results_increment_node_count(SimResults *sim_results);
 void sim_results_get_nth_best_move(const SimResults *sim_results, int n,
                                    Move *move);
 void sim_results_set_valid_for_current_game_state(SimResults *sim_results,

@@ -149,8 +149,9 @@ char *static_evaluation(const char *cgpstr, int num_plays) {
   generate_moves(&args);
 
   // This pointer needs to be freed by the caller:
-  char *val = move_list_get_string(move_list, game_get_board(game),
-                                   game_get_ld(game), true);
+  char *val =
+      move_list_get_string(move_list, game_get_board(game), game_get_ld(game),
+                           move_list_get_capacity(move_list), true);
   return val;
 }
 

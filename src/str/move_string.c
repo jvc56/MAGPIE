@@ -234,10 +234,15 @@ void string_builder_add_move_leave(StringBuilder *sb, const Rack *rack,
 void string_builder_add_move_list(StringBuilder *string_builder,
                                   const MoveList *move_list, const Board *board,
                                   const LetterDistribution *ld,
+                                  int max_num_display_plays,
                                   bool use_ucgi_format) {
   // Use +1 for the header
   const int num_moves = move_list_get_count(move_list);
-  int num_rows = num_moves;
+  int num_moves_to_display = num_moves;
+  if (num_moves_to_display > max_num_display_plays) {
+    num_moves_to_display = max_num_display_plays;
+  }
+  int num_rows = num_moves_to_display;
   if (!use_ucgi_format) {
     num_rows += 1;
   }
@@ -247,11 +252,15 @@ void string_builder_add_move_list(StringBuilder *string_builder,
   int curr_row = 0;
   int curr_col = 0;
   if (!use_ucgi_format) {
-    string_grid_set_cell(string_grid, 0, curr_col++, string_duplicate(""));
-    string_grid_set_cell(string_grid, 0, curr_col++, string_duplicate("Move"));
-    string_grid_set_cell(string_grid, 0, curr_col++, string_duplicate("Leave"));
-    string_grid_set_cell(string_grid, 0, curr_col++, string_duplicate("Score"));
-    string_grid_set_cell(string_grid, 0, curr_col++,
+    string_grid_set_cell(string_grid, curr_row, curr_col++,
+                         string_duplicate(""));
+    string_grid_set_cell(string_grid, curr_row, curr_col++,
+                         string_duplicate("Move"));
+    string_grid_set_cell(string_grid, curr_row, curr_col++,
+                         string_duplicate("Leave"));
+    string_grid_set_cell(string_grid, curr_row, curr_col++,
+                         string_duplicate("Score"));
+    string_grid_set_cell(string_grid, curr_row, curr_col++,
                          string_duplicate("Static Eq"));
     curr_row++;
   }
@@ -259,7 +268,7 @@ void string_builder_add_move_list(StringBuilder *string_builder,
   StringBuilder *tmp_sb = string_builder_create();
   const Rack *rack = move_list_get_rack(move_list);
   const uint16_t rack_dist_size = rack_get_dist_size(rack);
-  for (int i = 0; i < num_moves; i++) {
+  for (int i = 0; i < num_moves_to_display; i++) {
     curr_col = 0;
     Move *move = move_list_get_move(move_list, i);
 
@@ -302,25 +311,20 @@ void string_builder_add_move_list(StringBuilder *string_builder,
     curr_row++;
   }
   string_builder_add_string_grid(string_builder, string_grid, false);
-  string_builder_add_string(string_builder, "\n");
+  string_builder_add_formatted_string(string_builder,
+                                      "\nShowing %d of %d generated plays\n",
+                                      num_moves_to_display, num_moves);
   string_grid_destroy(string_grid);
   string_builder_destroy(tmp_sb);
 }
 
 char *move_list_get_string(const MoveList *move_list, const Board *board,
-                           const LetterDistribution *ld, bool use_ucgi_format) {
+                           const LetterDistribution *ld,
+                           int max_num_display_plays, bool use_ucgi_format) {
   StringBuilder *sb = string_builder_create();
-  string_builder_add_move_list(sb, move_list, board, ld, use_ucgi_format);
+  string_builder_add_move_list(sb, move_list, board, ld, max_num_display_plays,
+                               use_ucgi_format);
   char *move_list_string = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
   return move_list_string;
-}
-
-void move_list_print(ThreadControl *thread_control, const MoveList *move_list,
-                     const Board *board, const LetterDistribution *ld,
-                     bool use_ucgi_format) {
-  char *move_list_string =
-      move_list_get_string(move_list, board, ld, use_ucgi_format);
-  thread_control_print(thread_control, move_list_string);
-  free(move_list_string);
 }

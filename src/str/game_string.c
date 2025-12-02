@@ -288,7 +288,7 @@ void string_builder_add_game(const Game *game, const MoveList *move_list,
   const Player *player1 = game_get_player(game, 1);
   const LetterDistribution *ld = game_get_ld(game);
 
-  string_builder_add_string(game_string, "   ");
+  string_builder_add_string(game_string, "\n   ");
 
   for (int i = 0; i < BOARD_DIM; i++) {
     string_builder_add_board_column_header(game_string_options, i, game_string);
@@ -425,7 +425,7 @@ void string_builder_add_game(const Game *game, const MoveList *move_list,
                                        0),
               ld, true);
           string_builder_add_formatted_string(
-              game_string, "+ %d = %d ",
+              game_string, " + %d = %d ",
               equity_to_int(game_event_get_score_adjustment(game_event)),
               equity_to_int(game_event_get_move_score(previous_game_event)));
           string_builder_add_rack(

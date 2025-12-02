@@ -474,6 +474,7 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
     cpthread_join(worker_ids[thread_index]);
   }
   bai_result_set_best_arm(bai_result, sync_data->astar_index);
+  bai_result_stop_timer(bai_result);
   free(bai_worker_args_array);
   free(worker_ids);
   bai_sync_data_destroy(sync_data);

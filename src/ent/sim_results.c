@@ -38,10 +38,10 @@ struct SimmedPlay {
 struct SimResults {
   int num_plies;
   int num_simmed_plays;
-  uint64_t iteration_count;
+  atomic_uint_least64_t iteration_count;
+  atomic_uint_least64_t node_count;
   cpthread_mutex_t simmed_plays_mutex;
   cpthread_mutex_t display_mutex;
-  atomic_int node_count;
   SimmedPlay **simmed_plays;
   SimmedPlayDisplayInfo *simmed_play_display_infos;
   Rack rack;
@@ -141,8 +141,8 @@ void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
 
   sim_results->num_simmed_plays = num_simmed_plays;
   sim_results->num_plies = num_plies;
-  sim_results->iteration_count = 0;
   atomic_init(&sim_results->node_count, 0);
+  atomic_init(&sim_results->iteration_count, 0);
   sim_results->valid_for_current_game_state = false;
   cpthread_mutex_unlock(&sim_results->display_mutex);
 }
@@ -151,8 +151,8 @@ SimResults *sim_results_create(void) {
   SimResults *sim_results = malloc_or_die(sizeof(SimResults));
   sim_results->num_simmed_plays = 0;
   sim_results->num_plies = 0;
-  sim_results->iteration_count = 0;
   atomic_init(&sim_results->node_count, 0);
+  atomic_init(&sim_results->iteration_count, 0);
   cpthread_mutex_init(&sim_results->simmed_plays_mutex);
   cpthread_mutex_init(&sim_results->display_mutex);
   sim_results->simmed_plays = NULL;
@@ -216,20 +216,20 @@ int sim_results_get_num_plies(const SimResults *sim_results) {
   return sim_results->num_plies;
 }
 
-int sim_results_get_node_count(const SimResults *sim_results) {
+uint64_t sim_results_get_node_count(const SimResults *sim_results) {
   return atomic_load(&sim_results->node_count);
 }
 
-// Not thread safe. Caller is responsible for ensuring thread
-// safety
-uint64_t sim_results_get_iteration_count(const SimResults *sim_results) {
-  return sim_results->iteration_count;
+void sim_results_increment_node_count(SimResults *sim_results) {
+  atomic_fetch_add(&sim_results->node_count, 1);
 }
 
-// Not thread safe. Caller is responsible for ensuring thread
-// safety
-void sim_results_set_iteration_count(SimResults *sim_results, uint64_t count) {
-  sim_results->iteration_count = count;
+uint64_t sim_results_get_iteration_count(const SimResults *sim_results) {
+  return atomic_load(&sim_results->iteration_count);
+}
+
+void sim_results_increment_iteration_count(SimResults *sim_results) {
+  atomic_fetch_add(&sim_results->iteration_count, 1);
 }
 
 SimmedPlay *sim_results_get_simmed_play(const SimResults *sim_results,
@@ -247,10 +247,6 @@ void sim_results_set_rack(SimResults *sim_results, const Rack *rack) {
 
 BAIResult *sim_results_get_bai_result(const SimResults *sim_results) {
   return sim_results->bai_result;
-}
-
-void sim_results_increment_node_count(SimResults *sim_results) {
-  atomic_fetch_add(&sim_results->node_count, 1);
 }
 
 void simmed_play_add_score_stat(SimmedPlay *simmed_play, Equity score,

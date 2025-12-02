@@ -33,6 +33,7 @@ typedef struct SimArgs {
   InferenceArgs inference_args;
   int num_threads;
   int print_interval;
+  int max_num_display_plays;
   uint64_t seed;
   ThreadControl *thread_control;
   BAIOptions bai_options;

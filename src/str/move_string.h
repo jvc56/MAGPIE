@@ -28,13 +28,11 @@ void string_builder_add_move_leave(StringBuilder *sb, const Rack *rack,
 void string_builder_add_move_list(StringBuilder *string_builder,
                                   const MoveList *move_list, const Board *board,
                                   const LetterDistribution *ld,
+                                  int max_num_display_plays,
                                   bool use_ucgi_format);
 
 char *move_list_get_string(const MoveList *move_list, const Board *board,
-                           const LetterDistribution *ld, bool use_ucgi_format);
-
-void move_list_print(ThreadControl *thread_control, const MoveList *move_list,
-                     const Board *board, const LetterDistribution *ld,
-                     bool use_ucgi_format);
+                           const LetterDistribution *ld,
+                           int max_num_display_plays, bool use_ucgi_format);
 
 #endif
