@@ -131,12 +131,12 @@ void test_config_load_error_cases(void) {
                          ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
                          error_stack);
   test_config_load_error(config, "sim -it -6",
-                         ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
                          error_stack);
   test_config_load_error(config, "sim -it 0",
                          ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
                          error_stack);
-  test_config_load_error(config, "sim -minp 1",
+  test_config_load_error(config, "sim -minp 0",
                          ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
                          error_stack);
   test_config_load_error(config, "sim -scond -95",
@@ -947,6 +947,20 @@ void test_config_anno(void) {
   const Game *game = config_get_game(config);
   const Bag *bag = game_get_bag(game);
   const int bag_initial_total = bag_get_letters(bag);
+
+  // Generating moves with 0, 1, and 2 letters should complete without error
+  assert_config_exec_status(config, "set -numplays 15", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "s", ERROR_STATUS_SUCCESS);
+
+  assert_config_exec_status(config, "r A", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "s", ERROR_STATUS_SUCCESS);
+
+  assert_config_exec_status(config, "r AB", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "s", ERROR_STATUS_SUCCESS);
+
   assert_config_exec_status(config, "rack ABC", ERROR_STATUS_SUCCESS);
   assert(bag_initial_total == bag_get_letters(bag) + 3);
   assert_config_exec_status(config, "rack ABCDEFG", ERROR_STATUS_SUCCESS);
@@ -971,7 +985,8 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "com 8d FADGE XYZ",
                             ERROR_STATUS_COMMIT_EXTRANEOUS_ARG);
   // Sim should work normally even after commit errors
-  assert_config_exec_status(config, "sim -seed 1", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "sim -seed 1 -iterations 100 -minp 50",
+                            ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "gsim -seed 1", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 0",
                             ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
@@ -995,7 +1010,8 @@ void test_config_anno(void) {
   assert(game_get_player_on_turn_index(game) == 0);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 1);
-  // Top equity move should have played 5 tiles
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 8d FADGE", ERROR_STATUS_SUCCESS);
   assert(bag_initial_total == bag_get_letters(bag) + 5);
 
   // Check that the note command works
@@ -1612,7 +1628,7 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "rack BARCHAN", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
   // Allow the sim to hit the stopping threshold
-  assert_config_exec_status(config, "sim -iterations 100",
+  assert_config_exec_status(config, "sim -seed 1 -iterations 100 -threads 10",
                             ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "t", ERROR_STATUS_SUCCESS);
   // No rack was given to the top commit command, so it should commit the best
@@ -1624,7 +1640,7 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "rack BARCHAN", ERROR_STATUS_SUCCESS);
   // Generate and sim
-  assert_config_exec_status(config, "gsim", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gsim -seed 1", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "t", ERROR_STATUS_SUCCESS);
   // No rack was given to the top commit command, so it should commit the best
   // simmed play 8D BARCHAN should sim best
@@ -1871,8 +1887,6 @@ void test_config_export(void) {
 
 void test_config(void) {
   test_game_display();
-  // FIXME: remove
-  return;
   test_trie();
   test_config_anno();
   test_config_export();

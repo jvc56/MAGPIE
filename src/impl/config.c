@@ -618,7 +618,7 @@ void config_load_int(const Config *config, arg_token_t arg_token, int min,
   if (new_value < min || new_value > max) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
-        get_formatted_string("int value for %s must be between %d and %d "
+        get_formatted_string("integer value for %s must be between %d and %d "
                              "inclusive, but got %s",
                              config_get_parg_name(config, arg_token), min, max,
                              int_str));
@@ -645,7 +645,7 @@ void config_load_double(const Config *config, arg_token_t arg_token, double min,
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS,
         get_formatted_string(
-            "double value for %s must be between %f and %f inclusive, but "
+            "decimal value for %s must be between %f and %f inclusive, but "
             "got %s",
             config_get_parg_name(config, arg_token), min, max, double_str));
     return;
@@ -672,7 +672,8 @@ void config_load_bool(const Config *config, arg_token_t arg_token, bool *value,
 }
 
 void config_load_uint64(const Config *config, arg_token_t arg_token,
-                        uint64_t *value, ErrorStack *error_stack) {
+                        uint64_t min, uint64_t *value,
+                        ErrorStack *error_stack) {
   const char *int_str = config_get_parg_value(config, arg_token, 0);
   if (!int_str) {
     return;
@@ -689,6 +690,13 @@ void config_load_uint64(const Config *config, arg_token_t arg_token,
                      get_formatted_string(
                          "failed to parse nonnegative integer value for %s: %s",
                          config_get_parg_name(config, arg_token), int_str));
+  } else if (new_value < min) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+        get_formatted_string(
+            "integer value for %s must be at least %lu, but got %s",
+            config_get_parg_name(config, arg_token), min, int_str));
+    return;
   } else {
     *value = new_value;
   }
@@ -2803,7 +2811,7 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
     commit_move_index--;
     // If there are valid sim results, prefer to use them for the move index
     // lookup.
-    // FIXME: setting valid might need to move to config
+    // FIXME: setting valid should be moved to the config
     if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
       const SimResults *sim_results = config->sim_results;
       const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
@@ -4463,13 +4471,13 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_uint64(config, ARG_TOKEN_MAX_ITERATIONS, &config->max_iterations,
-                     error_stack);
+  config_load_uint64(config, ARG_TOKEN_MAX_ITERATIONS, 1,
+                     &config->max_iterations, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
 
-  config_load_uint64(config, ARG_TOKEN_MIN_PLAY_ITERATIONS,
+  config_load_uint64(config, ARG_TOKEN_MIN_PLAY_ITERATIONS, 1,
                      &config->min_play_iterations, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -4487,8 +4495,8 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_uint64(config, ARG_TOKEN_TIME_LIMIT, &config->time_limit_seconds,
-                     error_stack);
+  config_load_uint64(config, ARG_TOKEN_TIME_LIMIT, 0,
+                     &config->time_limit_seconds, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -4799,7 +4807,8 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
 
   // Seed
 
-  config_load_uint64(config, ARG_TOKEN_RANDOM_SEED, &config->seed, error_stack);
+  config_load_uint64(config, ARG_TOKEN_RANDOM_SEED, 0, &config->seed,
+                     error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -5243,7 +5252,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
 
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
-  config->exec_mode = EXEC_MODE_SYNC;
+  config->exec_mode = EXEC_MODE_ASYNC;
   config->bingo_bonus = DEFAULT_BINGO_BONUS;
   config->challenge_bonus = DEFAULT_CHALLENGE_BONUS;
   config->num_plays = DEFAULT_MOVE_LIST_CAPACITY;
@@ -5253,7 +5262,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->eq_margin_inference = int_to_equity(5);
   config->eq_margin_movegen = int_to_equity(5);
   config->min_play_iterations = 500;
-  config->max_iterations = 1000000000000;
+  config->max_iterations = 10000000;
   config->stop_cond_pct = 99;
   config->time_limit_seconds = 0;
   config->num_threads = get_num_cores();
@@ -5286,7 +5295,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->autoplay_results = autoplay_results_create();
   config->conversion_results = conversion_results_create();
   config->tt_fraction_of_mem = 0.25;
-  config->game_string_options = game_string_options_create_default();
+  config->game_string_options = game_string_options_create_pretty();
 
   autoplay_results_set_players_data(config->autoplay_results,
                                     config->players_data);

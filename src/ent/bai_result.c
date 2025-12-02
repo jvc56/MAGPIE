@@ -44,16 +44,29 @@ double bai_result_get_elapsed_seconds(const BAIResult *bai_result) {
   return ctimer_elapsed_seconds(&bai_result->timer);
 }
 
-bai_result_status_t bai_result_get_status(BAIResult *bai_result) {
+uint64_t bai_result_get_time_limit_seconds(const BAIResult *bai_result) {
+  return bai_result->time_limit_seconds;
+}
+
+bai_result_status_t bai_result_set_and_get_status(BAIResult *bai_result,
+                                                  const bool user_interrupt) {
   cpthread_mutex_lock(&bai_result->mutex);
   if (bai_result->status == BAI_RESULT_STATUS_NONE) {
-    // Check for timeout
-    if (bai_result->time_limit_seconds > 0 &&
-        bai_result_get_elapsed_seconds(bai_result) >=
-            bai_result->time_limit_seconds) {
+    if (user_interrupt) {
+      bai_result->status = BAI_RESULT_STATUS_USER_INTERRUPT;
+    } else if (bai_result->time_limit_seconds > 0 &&
+               bai_result_get_elapsed_seconds(bai_result) >=
+                   bai_result->time_limit_seconds) {
       bai_result->status = BAI_RESULT_STATUS_TIMEOUT;
     }
   }
+  bai_result_status_t status = bai_result->status;
+  cpthread_mutex_unlock(&bai_result->mutex);
+  return status;
+}
+
+bai_result_status_t bai_result_get_status(BAIResult *bai_result) {
+  cpthread_mutex_lock(&bai_result->mutex);
   bai_result_status_t status = bai_result->status;
   cpthread_mutex_unlock(&bai_result->mutex);
   return status;

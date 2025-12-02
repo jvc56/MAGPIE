@@ -77,9 +77,14 @@ bool string_builder_add_sim_stats_with_display_lock(StringBuilder *sb,
         sg, curr_row, curr_col++,
         get_formatted_string("%d", equity_to_int(move_get_score(move))));
 
-    string_grid_set_cell(
-        sg, curr_row, curr_col++,
-        get_formatted_string("%.2f", equity_to_double(move_get_equity(move))));
+    double move_equity;
+    if (move_get_type(move) == GAME_EVENT_PASS) {
+      move_equity = EQUITY_PASS_DISPLAY_DOUBLE;
+    } else {
+      move_equity = equity_to_double(move_get_equity(move));
+    }
+    string_grid_set_cell(sg, curr_row, curr_col++,
+                         get_formatted_string("%.2f", move_equity));
 
     string_grid_set_cell(sg, curr_row, curr_col++,
                          get_formatted_string("%.2f", sp_dinfo->equity_mean));
@@ -104,6 +109,35 @@ bool string_builder_add_sim_stats_with_display_lock(StringBuilder *sb,
   string_builder_destroy(move_sb);
   string_builder_add_string_grid(sb, sg, false);
   string_grid_destroy(sg);
+
+  BAIResult *bai_result = sim_results_get_bai_result(sim_results);
+  string_builder_add_formatted_string(
+      sb, "\nIterations:   %lu\nTime Elapsed: %.2f seconds\nStatus:       ",
+      bai_result_get_elapsed_seconds(bai_result),
+      sim_results_get_iteration_count(sim_results));
+
+  switch (bai_result_get_status(bai_result)) {
+  case BAI_RESULT_STATUS_THRESHOLD:
+    string_builder_add_string(sb,
+                              "Finished (statistical threshold achieved)\n");
+    break;
+  case BAI_RESULT_STATUS_SAMPLE_LIMIT:
+    string_builder_add_string(sb, "Finished (max iterations reached)\n");
+    break;
+  case BAI_RESULT_STATUS_TIMEOUT:
+    string_builder_add_string(sb, "Finished (time limit exceeded)\n");
+    break;
+  case BAI_RESULT_STATUS_ONE_ARM_REMAINING:
+    string_builder_add_string(sb, "Finished (all plays are similar)\n");
+    break;
+  case BAI_RESULT_STATUS_USER_INTERRUPT:
+    string_builder_add_string(sb, "Finished (user interrupt)\n");
+    break;
+  case BAI_RESULT_STATUS_NONE:
+    string_builder_add_string(sb, "Running\n");
+    break;
+  }
+
   return true;
 }
 

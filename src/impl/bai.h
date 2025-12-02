@@ -346,9 +346,10 @@ typedef struct BAIWorkerArgs {
 
 static inline bool bai_should_stop(BAIResult *bai_result,
                                    ThreadControl *thread_control) {
-  return bai_result_get_status(bai_result) != BAI_RESULT_STATUS_NONE ||
-         thread_control_get_status(thread_control) ==
-             THREAD_CONTROL_STATUS_USER_INTERRUPT;
+  return bai_result_set_and_get_status(
+             bai_result, thread_control_get_status(thread_control) ==
+                             THREAD_CONTROL_STATUS_USER_INTERRUPT) !=
+         BAI_RESULT_STATUS_NONE;
 }
 
 static inline void bai_cull_epigons(void *uncasted_bai_worker_args) {

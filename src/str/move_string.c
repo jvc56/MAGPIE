@@ -53,7 +53,7 @@ void string_builder_add_move(StringBuilder *string_builder, const Board *board,
                              const Move *move, const LetterDistribution *ld,
                              bool add_score) {
   if (move_get_type(move) == GAME_EVENT_PASS) {
-    string_builder_add_string(string_builder, "pass 0");
+    string_builder_add_string(string_builder, "pass");
     return;
   }
 
@@ -290,9 +290,14 @@ void string_builder_add_move_list(StringBuilder *string_builder,
         string_grid, curr_row, curr_col++,
         get_formatted_string("%d", equity_to_int(move_get_score(move))));
 
-    string_grid_set_cell(
-        string_grid, curr_row, curr_col++,
-        get_formatted_string("%.2f", equity_to_double(move_get_equity(move))));
+    double move_equity;
+    if (move_get_type(move) == GAME_EVENT_PASS) {
+      move_equity = EQUITY_PASS_DISPLAY_DOUBLE;
+    } else {
+      move_equity = equity_to_double(move_get_equity(move));
+    }
+    string_grid_set_cell(string_grid, curr_row, curr_col++,
+                         get_formatted_string("%.2f", move_equity));
 
     curr_row++;
   }

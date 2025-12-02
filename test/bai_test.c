@@ -219,6 +219,68 @@ void test_bai_time_limit(int num_threads) {
   rvs_destroy(rvs);
 }
 
+void test_bai_interrupt(int num_threads) {
+  const double means_and_vars[] = {-10, 1, 0, 1, 100, 10, -20, 5};
+  const int num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
+  RandomVariablesArgs rv_args = {
+      .type = RANDOM_VARIABLES_NORMAL,
+      .num_rvs = num_rvs,
+      .means_and_vars = means_and_vars,
+      .seed = 10,
+  };
+  RandomVariables *rvs = rvs_create(&rv_args);
+
+  RandomVariablesArgs rng_args = {
+      .type = RANDOM_VARIABLES_UNIFORM,
+      .num_rvs = num_rvs,
+      .seed = 10,
+  };
+  RandomVariables *rng = rvs_create(&rng_args);
+
+  BAIOptions bai_options = {
+      .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS,
+      .threshold = BAI_THRESHOLD_NONE,
+      .delta = 0.01,
+      .sample_minimum = 50,
+      .sample_limit = 100000000,
+      .time_limit_seconds = 20,
+      .num_threads = num_threads,
+  };
+
+  ThreadControl *thread_control = thread_control_create();
+  BAIResult *bai_result = bai_result_create();
+  int done = 0;
+
+  cpthread_mutex_t mutex;
+  cpthread_mutex_init(&mutex);
+  cpthread_cond_t cond;
+  cpthread_cond_init(&cond);
+
+  BAITestArgs args = {.options = &bai_options,
+                      .rvs = rvs,
+                      .rng = rng,
+                      .thread_control = thread_control,
+                      .result = bai_result,
+                      .mutex = &mutex,
+                      .cond = &cond,
+                      .done = &done};
+
+  cpthread_t thread;
+  cpthread_create(&thread, bai_thread_func, &args);
+  ctime_nap(2.0);
+  thread_control_set_status(thread_control,
+                            THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  cpthread_cond_timedwait_loop(&cond, &mutex, 5, &done);
+  cpthread_join(thread);
+
+  assert(bai_result_get_status(bai_result) == BAI_RESULT_STATUS_USER_INTERRUPT);
+
+  bai_result_destroy(bai_result);
+  thread_control_destroy(thread_control);
+  rvs_destroy(rng);
+  rvs_destroy(rvs);
+}
+
 // Assumes rv_args are normal predetermined
 // Assumes rng_args are uniform
 void write_bai_input(const double delta, const RandomVariablesArgs *rv_args,
@@ -406,6 +468,7 @@ void test_bai(void) {
       const int num_threads_i = num_threads[i];
       test_bai_sample_limit(num_threads_i);
       test_bai_time_limit(num_threads_i);
+      test_bai_interrupt(num_threads_i);
       test_bai_top_two(num_threads_i);
       test_bai_epigons(num_threads_i);
     }

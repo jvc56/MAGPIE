@@ -143,6 +143,9 @@ void *execute_async_input_worker(void *uncasted_args) {
     if (input == NULL) {
       break;
     }
+    if (is_string_empty_or_whitespace(input)) {
+      continue;
+    }
 
     async_token_t input_token = parse_async_command(input, err_msg_sb);
     if (string_builder_length(err_msg_sb) > 0) {
