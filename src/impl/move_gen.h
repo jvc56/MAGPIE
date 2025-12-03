@@ -57,6 +57,22 @@ typedef struct MoveGen {
   // record type
   Equity best_move_equity_or_score;
   Equity eq_margin_movegen;
+  // If set to a non-EQUITY_INITIAL_VALUE, this is used as the initial value
+  // for best_move_equity_or_score. This allows anchor pruning to skip anchors
+  // that can't possibly beat this equity threshold. Used by inference to avoid
+  // exploring moves that can't beat target_score + leave + margin.
+  Equity initial_best_equity;
+  // When true, movegen will terminate as soon as any move exceeds
+  // initial_best_equity. Used by inference to quickly determine if a rack
+  // is invalid (has a move better than what was played).
+  bool stop_on_exceeding_threshold;
+  // Set to true when a move exceeding initial_best_equity is found and
+  // stop_on_exceeding_threshold is enabled.
+  bool threshold_exceeded;
+  // For exchange inference cutoff: if >= 0, after computing best_leaves,
+  // the cutoff threshold will be updated to use best_leaves[target_leave_size].
+  // Set to -1 to disable (default behavior).
+  int target_leave_size_for_exchange_cutoff;
 
   MachineLetter strip[(MOVE_MAX_TILES)];
   MachineLetter exchange_strip[(MOVE_MAX_TILES)];
@@ -139,9 +155,38 @@ typedef struct MoveGenArgs {
   int thread_index;
   MoveList *move_list;
   const KWG *override_kwg;
+  // If set to a non-EQUITY_INITIAL_VALUE, this is used as the initial value
+  // for best_move_equity_or_score. This allows anchor pruning to skip anchors
+  // that can't possibly beat this equity threshold.
+  Equity initial_best_equity;
+  // When true, movegen will terminate as soon as any move exceeds
+  // initial_best_equity. Used by inference to quickly determine if a rack
+  // is invalid (has a move better than what was played).
+  bool stop_on_exceeding_threshold;
+  // For exchange inference cutoff: if >= 0, after computing best_leaves,
+  // the cutoff threshold will be updated to use best_leaves[target_leave_size].
+  // This enables early termination for exchange inference.
+  // Set to -1 to disable (default behavior).
+  int target_leave_size_for_exchange_cutoff;
 } MoveGenArgs;
 
 void gen_destroy_cache(void);
+
+void gen_reset_anchor_stats(void);
+void gen_reset_subrack_stats(void);
+void gen_reset_early_cutoff_stats(void);
+void gen_get_anchor_stats(uint64_t *available, uint64_t *processed,
+                          uint64_t *skipped);
+void gen_get_subrack_stats(uint64_t *available, uint64_t *processed,
+                           uint64_t *skipped);
+void gen_get_early_cutoff_stats(uint64_t *movegen_calls,
+                                 uint64_t *shadow_skipped_by_exch,
+                                 uint64_t *anchors_filtered,
+                                 uint64_t *anchors_total);
+void gen_reset_wmp_subanchor_stats(void);
+void gen_get_wmp_subanchor_stats(uint64_t *total, uint64_t *skippable);
+void gen_print_wmp_subanchor_breakdown(void);
+void gen_record_wmp_subanchor(int tiles, int blocks, bool skippable);
 
 // If override_kwg is NULL, the full KWG for the on-turn player is used,
 // but if it is nonnull, override_kwg is used. The only use case for this

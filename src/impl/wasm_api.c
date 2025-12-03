@@ -144,6 +144,8 @@ char *static_evaluation(const char *cgpstr, int num_plays) {
       .override_kwg = NULL,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .initial_best_equity = EQUITY_INITIAL_VALUE,
+      .target_leave_size_for_exchange_cutoff = -1,
   };
   generate_moves(&args);
 

@@ -57,6 +57,8 @@ bool config_get_show_prompt(const Config *config);
 bool config_get_save_settings(const Config *config);
 bool config_get_loaded_settings(const Config *config);
 void config_set_loaded_settings(Config *config, const bool value);
+bool config_get_use_infer_cutoff_optimization(const Config *config);
+void config_set_use_infer_cutoff_optimization(Config *config, bool value);
 double config_get_tt_fraction_of_mem(const Config *config);
 PlayersData *config_get_players_data(const Config *config);
 LetterDistribution *config_get_ld(const Config *config);

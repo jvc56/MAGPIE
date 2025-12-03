@@ -1,6 +1,30 @@
 #include "move_gen.h"
 
+#include <stdio.h>
+
 #include "../compat/cpthread.h"
+
+// Debug counters for anchor pruning
+static uint64_t total_anchors_available = 0;
+static uint64_t total_anchors_processed = 0;
+static uint64_t total_anchors_skipped = 0;
+
+// Debug counters for subrack pruning
+static uint64_t total_subracks_available = 0;
+static uint64_t total_subracks_processed = 0;
+static uint64_t total_subracks_skipped = 0;
+
+// Debug counters for early cutoff optimizations
+static uint64_t total_movegen_calls = 0;
+static uint64_t skipped_shadow_by_exchange = 0;
+static uint64_t anchors_filtered_by_shadow_equity = 0;
+static uint64_t anchors_total_in_shadow = 0;
+
+// WMP subanchor instrumentation counters
+static uint64_t wmp_subanchor_total_count = 0;
+static uint64_t wmp_subanchor_skippable_count = 0;
+static uint64_t
+    wmp_subanchor_by_tiles_blocks_count[RACK_SIZE + 1][MAX_POSSIBLE_PLAYTHROUGH_BLOCKS][2];
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/equity_defs.h"
@@ -70,6 +94,89 @@ void gen_destroy_cache(void) {
     cached_gens[i] = NULL;
   }
   cpthread_mutex_unlock(&cache_mutex);
+}
+
+void gen_reset_anchor_stats(void) {
+  total_anchors_available = 0;
+  total_anchors_processed = 0;
+  total_anchors_skipped = 0;
+}
+
+void gen_get_anchor_stats(uint64_t *available, uint64_t *processed,
+                          uint64_t *skipped) {
+  *available = total_anchors_available;
+  *processed = total_anchors_processed;
+  *skipped = total_anchors_skipped;
+}
+
+void gen_reset_subrack_stats(void) {
+  total_subracks_available = 0;
+  total_subracks_processed = 0;
+  total_subracks_skipped = 0;
+}
+
+void gen_get_subrack_stats(uint64_t *available, uint64_t *processed,
+                           uint64_t *skipped) {
+  *available = total_subracks_available;
+  *processed = total_subracks_processed;
+  *skipped = total_subracks_skipped;
+}
+
+void gen_reset_early_cutoff_stats(void) {
+  total_movegen_calls = 0;
+  skipped_shadow_by_exchange = 0;
+  anchors_filtered_by_shadow_equity = 0;
+  anchors_total_in_shadow = 0;
+}
+
+void gen_get_early_cutoff_stats(uint64_t *movegen_calls,
+                                 uint64_t *shadow_skipped_by_exch,
+                                 uint64_t *anchors_filtered,
+                                 uint64_t *anchors_total) {
+  *movegen_calls = total_movegen_calls;
+  *shadow_skipped_by_exch = skipped_shadow_by_exchange;
+  *anchors_filtered = anchors_filtered_by_shadow_equity;
+  *anchors_total = anchors_total_in_shadow;
+}
+
+void gen_reset_wmp_subanchor_stats(void) {
+  wmp_subanchor_total_count = 0;
+  wmp_subanchor_skippable_count = 0;
+  for (int t = 0; t <= RACK_SIZE; t++) {
+    for (int b = 0; b < MAX_POSSIBLE_PLAYTHROUGH_BLOCKS; b++) {
+      wmp_subanchor_by_tiles_blocks_count[t][b][0] = 0;
+      wmp_subanchor_by_tiles_blocks_count[t][b][1] = 0;
+    }
+  }
+}
+
+void gen_get_wmp_subanchor_stats(uint64_t *total, uint64_t *skippable) {
+  *total = wmp_subanchor_total_count;
+  *skippable = wmp_subanchor_skippable_count;
+}
+
+void gen_print_wmp_subanchor_breakdown(void) {
+  printf("WMP subanchor breakdown (tiles, blocks -> total / skippable):\n");
+  for (int t = 1; t <= RACK_SIZE; t++) {
+    for (int b = 0; b < MAX_POSSIBLE_PLAYTHROUGH_BLOCKS; b++) {
+      uint64_t tot = wmp_subanchor_by_tiles_blocks_count[t][b][0];
+      uint64_t skip = wmp_subanchor_by_tiles_blocks_count[t][b][1];
+      if (tot > 0) {
+        printf("  %d tiles, %d blocks: %llu total, %llu skippable (%.2f%%)\n",
+               t, b, (unsigned long long)tot, (unsigned long long)skip,
+               100.0 * skip / tot);
+      }
+    }
+  }
+}
+
+void gen_record_wmp_subanchor(int tiles, int blocks, bool skippable) {
+  wmp_subanchor_total_count++;
+  wmp_subanchor_by_tiles_blocks_count[tiles][blocks][0]++;
+  if (skippable) {
+    wmp_subanchor_skippable_count++;
+    wmp_subanchor_by_tiles_blocks_count[tiles][blocks][1]++;
+  }
 }
 
 // Cache getter functions
@@ -244,14 +351,14 @@ static inline void update_best_move_or_insert_into_movelist(
     Equity score, int start_row, int start_col, int tiles_played, int dir,
     MachineLetter strip[]) {
   bool need_to_update_best_move_equity_or_score = false;
+  Equity move_equity_or_score = EQUITY_INITIAL_VALUE;
   switch (gen->move_record_type) {
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:;
     Move *move = move_list_get_spare_move(gen->move_list);
     set_play_for_record(move, move_type, leftstrip, rightstrip, score,
                         start_row, start_col, tiles_played, dir, strip);
-    const Equity move_equity_or_score =
-        get_move_equity_for_sort_type(gen, move, score);
+    move_equity_or_score = get_move_equity_for_sort_type(gen, move, score);
     if (gen->move_record_type == MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST) {
       // This updates the cutoff move internally so no update will be pending
       // afterward.
@@ -264,8 +371,9 @@ static inline void update_best_move_or_insert_into_movelist(
     Move *current_move = gen_get_current_move(gen);
     set_play_for_record(current_move, move_type, leftstrip, rightstrip, score,
                         start_row, start_col, tiles_played, dir, strip);
-    move_set_equity(current_move,
-                    get_move_equity_for_sort_type(gen, current_move, score));
+    move_equity_or_score =
+        get_move_equity_for_sort_type(gen, current_move, score);
+    move_set_equity(current_move, move_equity_or_score);
     if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
       need_to_update_best_move_equity_or_score = true;
       gen_switch_best_move_and_current_move(gen);
@@ -280,8 +388,34 @@ static inline void update_best_move_or_insert_into_movelist(
     move_list_insert_spare_small_move(gen->move_list);
     break;
   }
-  if (need_to_update_best_move_equity_or_score) {
+
+  // Check if this move is an exchange in exchange cutoff mode.
+  // In exchange cutoff mode, exchanges should not raise the cutoff because
+  // we still need to search for scoring plays that might exceed the threshold.
+  const bool is_exchange_in_exchange_cutoff_mode =
+      (move_type == GAME_EVENT_EXCHANGE) &&
+      (gen->target_leave_size_for_exchange_cutoff >= 0);
+
+  if (need_to_update_best_move_equity_or_score &&
+      !is_exchange_in_exchange_cutoff_mode) {
     gen_update_cutoff_equity_or_score(gen);
+  }
+
+  // Check if this move exceeds the threshold for early termination.
+  // In exchange cutoff mode, we only set threshold_exceeded if this move also
+  // became the best move. This prevents a low-equity scoring play (that exceeds
+  // the threshold but is worse than the best exchange) from triggering early
+  // termination before we've found the true best scoring play.
+  const bool in_exchange_cutoff_mode =
+      gen->target_leave_size_for_exchange_cutoff >= 0;
+  if (gen->stop_on_exceeding_threshold &&
+      move_equity_or_score > gen->initial_best_equity &&
+      !is_exchange_in_exchange_cutoff_mode) {
+    // In exchange cutoff mode, only set threshold_exceeded if this move
+    // became the new best move (meaning it beats any exchange we found)
+    if (!in_exchange_cutoff_mode || need_to_update_best_move_equity_or_score) {
+      gen->threshold_exceeded = true;
+    }
   }
 }
 
@@ -322,7 +456,14 @@ static inline bool better_play_has_been_found(const MoveGen *gen,
   case MOVE_RECORD_BEST:
     break;
   }
-  return highest_possible_value < gen_get_cutoff_equity_or_score(gen);
+  // In inference mode with stop_on_exceeding_threshold, use the fixed
+  // initial_best_equity cutoff for consistent anchor filtering (matching
+  // the WMP subanchor filtering behavior). Otherwise use the dynamic cutoff.
+  const Equity cutoff = (gen->stop_on_exceeding_threshold &&
+                         gen->initial_best_equity > EQUITY_INITIAL_VALUE)
+                            ? gen->initial_best_equity
+                            : gen_get_cutoff_equity_or_score(gen);
+  return highest_possible_value < cutoff;
 }
 
 static inline void record_exchange(MoveGen *gen) {
@@ -451,12 +592,13 @@ static inline void
 update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
                                              Equity score, Equity leave_value) {
   bool need_to_update_best_move_equity_or_score = false;
+  Equity move_equity_or_score = EQUITY_INITIAL_VALUE;
   switch (gen->move_record_type) {
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST: {
     Move *move = move_list_get_spare_move(gen->move_list);
     set_play_for_record_wmp(gen, move, start_col, score);
-    const Equity move_equity_or_score =
+    move_equity_or_score =
         get_move_equity_for_sort_type_wmp(gen, move, leave_value);
     if (gen->move_record_type == MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST) {
       // This updates the cutoff move internally so no update will be pending
@@ -470,8 +612,9 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
   case MOVE_RECORD_BEST: {
     Move *current_move = gen_get_current_move(gen);
     set_play_for_record_wmp(gen, current_move, start_col, score);
-    move_set_equity(current_move, get_move_equity_for_sort_type_wmp(
-                                      gen, current_move, leave_value));
+    move_equity_or_score =
+        get_move_equity_for_sort_type_wmp(gen, current_move, leave_value);
+    move_set_equity(current_move, move_equity_or_score);
     if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
       need_to_update_best_move_equity_or_score = true;
       gen_switch_best_move_and_current_move(gen);
@@ -489,6 +632,22 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
   }
   if (need_to_update_best_move_equity_or_score) {
     gen_update_cutoff_equity_or_score(gen);
+  }
+
+  // Check if this move exceeds the threshold for early termination.
+  // In exchange cutoff mode, we only set threshold_exceeded if this move also
+  // became the best move. This prevents a low-equity scoring play (that exceeds
+  // the threshold but is worse than the best exchange) from triggering early
+  // termination before we've found the true best scoring play.
+  const bool in_exchange_cutoff_mode =
+      gen->target_leave_size_for_exchange_cutoff >= 0;
+  if (gen->stop_on_exceeding_threshold &&
+      move_equity_or_score > gen->initial_best_equity) {
+    // In exchange cutoff mode, only set threshold_exceeded if this move
+    // became the new best move (meaning it beats any exchange we found)
+    if (!in_exchange_cutoff_mode || need_to_update_best_move_equity_or_score) {
+      gen->threshold_exceeded = true;
+    }
   }
 }
 
@@ -654,6 +813,9 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   assert(anchor->rightmost_start_col <= anchor->col);
   const int num_subrack_combinations =
       wmp_move_gen_get_num_subrack_combinations(wgen);
+  int subracks_processed = 0;
+  int subracks_skipped = 0;
+  total_subracks_available += num_subrack_combinations;
   for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
        subrack_idx++) {
     if (gen->number_of_tiles_in_bag > 0) {
@@ -661,12 +823,14 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
           wmp_move_gen_get_leave_value(wgen, subrack_idx);
       if (better_play_has_been_found(gen, leave_value +
                                               anchor->highest_possible_score)) {
+        subracks_skipped++;
         continue;
       }
     }
     if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx)) {
       continue;
     }
+    subracks_processed++;
     if (gen->number_of_tiles_in_bag == 0) {
       wgen->leave_value = 0;
       for (int ml = 0; ml < ld_get_size(&gen->ld); ml++) {
@@ -689,7 +853,15 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
         }
       }
     }
+    // Early exit from subrack loop if threshold exceeded
+    if (gen->threshold_exceeded) {
+      // Count remaining subracks as skipped
+      subracks_skipped += num_subrack_combinations - subrack_idx - 1;
+      break;
+    }
   }
+  total_subracks_processed += subracks_processed;
+  total_subracks_skipped += subracks_skipped;
 }
 
 void go_on(MoveGen *gen, int current_col, MachineLetter L,
@@ -1054,9 +1226,9 @@ static inline void shadow_record(MoveGen *gen) {
       if (gen->number_of_tiles_in_bag > 0) {
         best_leaves = wmp_move_gen_get_nonplaythrough_best_leave_values(
             &gen->wmp_move_gen);
-        const int leave_size =
-            gen->number_of_letters_on_rack - gen->tiles_played;
-        assert(best_leaves[leave_size] <= gen->best_leaves[leave_size]);
+        assert(best_leaves[gen->number_of_letters_on_rack - gen->tiles_played] <=
+               gen->best_leaves[gen->number_of_letters_on_rack -
+                                gen->tiles_played]);
       }
     }
   }
@@ -1686,9 +1858,26 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
     return;
   }
 
+  // Instrumentation: Track anchors whose shadow equity can't beat the threshold.
+  // These COULD potentially be skipped, but for now we just count them.
+  // The actual anchor filtering must be done carefully to not break movegen.
+  anchors_total_in_shadow++;
+  if (gen->stop_on_exceeding_threshold &&
+      gen->initial_best_equity > EQUITY_INITIAL_VALUE &&
+      gen->highest_shadow_equity <= gen->initial_best_equity) {
+    anchors_filtered_by_shadow_equity++;
+    // NOTE: We do NOT skip here - that would break movegen's anchor heap.
+    // The filtering must happen in the anchor loop, not in shadow_play_for_anchor.
+  }
+
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    // Pass cutoff for instrumentation (not actual filtering)
+    const Equity wmp_cutoff = gen->stop_on_exceeding_threshold
+                                  ? gen->initial_best_equity
+                                  : EQUITY_INITIAL_VALUE;
     wmp_move_gen_add_anchors(&gen->wmp_move_gen, gen->current_row_index, col,
-                             gen->last_anchor_col, gen->dir, &gen->anchor_heap);
+                             gen->last_anchor_col, gen->dir, &gen->anchor_heap,
+                             wmp_cutoff);
   } else {
     anchor_heap_add_unheaped_anchor(
         &gen->anchor_heap, gen->current_row_index, col, gen->last_anchor_col,
@@ -1743,6 +1932,11 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   MoveList *move_list = args->move_list;
   const KWG *override_kwg = args->override_kwg;
   gen->eq_margin_movegen = args->eq_margin_movegen;
+  gen->initial_best_equity = args->initial_best_equity;
+  gen->stop_on_exceeding_threshold = args->stop_on_exceeding_threshold;
+  gen->threshold_exceeded = false;
+  gen->target_leave_size_for_exchange_cutoff =
+      args->target_leave_size_for_exchange_cutoff;
 
   gen->board = game_get_board(game);
   gen->player_index = game_get_player_on_turn_index(game);
@@ -1781,8 +1975,29 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   // Reset the best and current moves
   gen->best_move_index = 0;
   move_set_equity(gen_get_best_move(gen), EQUITY_INITIAL_VALUE);
-  gen->best_move_equity_or_score = EQUITY_INITIAL_VALUE;
-  gen->cutoff_equity_or_score = EQUITY_INITIAL_VALUE;
+  // If initial_best_equity is set (non-zero and non-EQUITY_INITIAL_VALUE),
+  // use it to allow anchor pruning to skip anchors that can't beat this
+  // threshold. Otherwise start with no threshold (EQUITY_INITIAL_VALUE).
+  // Note: zero-initialized MoveGenArgs will have initial_best_equity = 0,
+  // which we treat as "no cutoff" by mapping to EQUITY_INITIAL_VALUE.
+  //
+  // SPECIAL CASE: For exchange inference cutoff (target_leave_size_for_exchange_cutoff >= 0),
+  // we need to track the actual best move (starting from EQUITY_INITIAL_VALUE) because
+  // we need to check if the top_move is a matching exchange. The initial_best_equity
+  // is only used for the threshold_exceeded early termination check, not for filtering
+  // which moves become best_move. The threshold will be updated after best_leaves is
+  // computed to include best_leaves[target_leave_size].
+  Equity effective_initial_equity;
+  if (gen->target_leave_size_for_exchange_cutoff >= 0) {
+    // Exchange cutoff: track actual best move, use initial_best_equity only for threshold
+    effective_initial_equity = EQUITY_INITIAL_VALUE;
+  } else if (gen->initial_best_equity == 0) {
+    effective_initial_equity = EQUITY_INITIAL_VALUE;
+  } else {
+    effective_initial_equity = gen->initial_best_equity;
+  }
+  gen->best_move_equity_or_score = effective_initial_equity;
+  gen->cutoff_equity_or_score = effective_initial_equity;
 
   // Set rack cross set and cache ld's tile scores
   gen->rack_cross_set = 0;
@@ -1881,11 +2096,22 @@ void gen_record_scoring_plays(MoveGen *gen) {
   if (gen->is_wordsmog) {
     rack_reset(&gen->full_player_rack);
   }
+  int anchors_processed = 0;
+  int anchors_total = gen->anchor_heap.count;
+  int anchors_skipped = 0;
   while (gen->anchor_heap.count > 0) {
-    const Anchor anchor = anchor_heap_extract_max(&gen->anchor_heap);
-    if (better_play_has_been_found(gen, anchor.highest_possible_equity)) {
+    // Early termination if a move exceeding threshold has been found
+    if (gen->threshold_exceeded) {
+      anchors_skipped = gen->anchor_heap.count;
       break;
     }
+    const Anchor anchor = anchor_heap_extract_max(&gen->anchor_heap);
+    if (better_play_has_been_found(gen, anchor.highest_possible_equity)) {
+      // Count the current anchor plus all remaining as skipped
+      anchors_skipped = gen->anchor_heap.count + 1;
+      break;
+    }
+    anchors_processed++;
     gen->current_anchor_col = anchor.col;
     // Don't recopy the row cache if we're working on the same board lane
     // as the previous anchor. When anchors have been sorted by descending
@@ -1916,6 +2142,10 @@ void gen_record_scoring_plays(MoveGen *gen) {
     // this anchor, highest_possible_equity was invalid.
     assert(!better_play_has_been_found(gen, anchor.highest_possible_equity));
   }
+  total_anchors_available += anchors_total;
+  total_anchors_processed += anchors_processed;
+  total_anchors_skipped += anchors_skipped;
+
 }
 
 void gen_record_pass(MoveGen *gen) {
@@ -1947,6 +2177,37 @@ void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen(args->thread_index);
   gen_load_position(gen, args);
   gen_look_up_leaves_and_record_exchanges(gen);
+
+  total_movegen_calls++;
+
+  // For exchange inference cutoff: now that best_leaves is populated,
+  // update the threshold for early termination to include best_leaves[target_leave_size].
+  // This raises the bar for what constitutes "exceeding the threshold".
+  // We only update initial_best_equity (used for threshold_exceeded check).
+  // We do NOT update best_move_equity_or_score (which tracks the actual best move found).
+  if (gen->target_leave_size_for_exchange_cutoff >= 0 &&
+      gen->target_leave_size_for_exchange_cutoff < RACK_SIZE) {
+    const Equity best_exch_leave =
+        gen->best_leaves[gen->target_leave_size_for_exchange_cutoff];
+    // Add best_exch_leave to the initial_best_equity (which holds target_score + margin)
+    // to get the final cutoff threshold for early termination.
+    if (best_exch_leave > EQUITY_INITIAL_VALUE) {
+      const Equity exchange_cutoff = gen->initial_best_equity + best_exch_leave;
+      gen->initial_best_equity = exchange_cutoff;
+
+      // EXCHANGE OPTIMIZATION: For exchange inference, if ANY exchange leave
+      // beats the threshold, we can skip shadow and scoring plays entirely.
+      // The exchanges are already recorded, so move_list[0] has a valid move.
+      for (int k = 0; k < RACK_SIZE; k++) {
+        if (gen->best_leaves[k] > exchange_cutoff) {
+          skipped_shadow_by_exchange++;
+          gen->threshold_exceeded = true;
+          gen_record_pass(gen);
+          return;
+        }
+      }
+    }
+  }
 
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
     const bool check_leaves = (gen->number_of_tiles_in_bag > 0) &&

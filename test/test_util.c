@@ -376,7 +376,7 @@ void play_top_n_equity_move(Game *game, int n) {
       .eq_margin_movegen = 0,
   };
 
-  generate_moves(&args);
+  generate_moves_for_game(&args);
   SortedMoveList *sorted_move_list = sorted_move_list_create(move_list);
   play_move(sorted_move_list->moves[n], game, NULL);
   sorted_move_list_destroy(sorted_move_list);
@@ -661,7 +661,7 @@ void assert_board_layout_error(const char *data_paths,
   error_code_t actual_status = error_stack_top(error_stack);
   board_layout_destroy(bl);
   if (actual_status != expected_status) {
-    printf("board layout load statuses do not match: %d != %d", expected_status,
+    printf("board layout load failure for %s: %d\n", board_layout_name,
            actual_status);
   }
   assert(actual_status == expected_status);
@@ -1131,4 +1131,82 @@ void assert_config_exec_status(Config *config, const char *cmd,
     abort();
   }
   error_stack_destroy(error_stack);
+}
+
+error_code_t infer_for_test(const Config *config, int target_index,
+                            int target_score, int target_num_exch,
+                            const char *target_played_tiles_str,
+                            const char *target_known_rack_str,
+                            const char *nontarget_known_rack_str,
+                            InferenceResults *inference_results) {
+  const Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const int ld_size = ld_get_size(ld);
+
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  if (target_played_tiles_str != NULL) {
+    rack_set_to_string(ld, &target_played_tiles, target_played_tiles_str);
+  }
+
+  Rack target_known_rack;
+  rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+  if (target_known_rack_str != NULL) {
+    rack_set_to_string(ld, &target_known_rack, target_known_rack_str);
+  }
+
+  Rack nontarget_known_rack;
+  rack_set_dist_size_and_reset(&nontarget_known_rack, ld_size);
+  if (nontarget_known_rack_str != NULL) {
+    rack_set_to_string(ld, &nontarget_known_rack, nontarget_known_rack_str);
+  }
+
+  ErrorStack *error_stack = error_stack_create();
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  config_infer(config, false, target_index, int_to_equity(target_score),
+               target_num_exch, &target_played_tiles, &target_known_rack,
+               &nontarget_known_rack, inference_results, error_stack);
+  error_code_t status = error_stack_top(error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+  }
+  error_stack_destroy(error_stack);
+  return status;
+}
+
+// Assumes the config game history has been loaded
+error_code_t infer_for_test_with_history(const Config *config,
+                                         InferenceResults *inference_results,
+                                         const int num_events_to_play) {
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const int ld_size = ld_get_size(ld);
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  Rack target_known_rack;
+  rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+  Rack nontarget_known_rack;
+  rack_set_dist_size_and_reset(&nontarget_known_rack, ld_size);
+  ErrorStack *error_stack = error_stack_create();
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  GameHistory *game_history = config_get_game_history(config);
+  if (game_history_get_num_events(game_history) != 0) {
+    game_history_goto(game_history, num_events_to_play, error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      game_play_n_events(game_history, game,
+                         game_history_get_num_played_events(game_history),
+                         false, error_stack);
+    }
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_print_and_reset(error_stack);
+      assert(0);
+    }
+  }
+  config_infer(config, true, 0, 0, 0, &target_played_tiles, &target_known_rack,
+               &nontarget_known_rack, inference_results, error_stack);
+  error_code_t status = error_stack_top(error_stack);
+  error_stack_destroy(error_stack);
+  return status;
 }

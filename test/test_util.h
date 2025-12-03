@@ -111,6 +111,15 @@ void assert_klvs_equal(const KLV *klv1, const KLV *klv2);
 void assert_word_count(const LetterDistribution *ld,
                        const DictionaryWordList *words,
                        const char *human_readable_word, int expected_count);
+error_code_t infer_for_test(const Config *config, int target_index,
+                            int target_score, int target_num_exch,
+                            const char *target_played_tiles_str,
+                            const char *target_known_rack_str,
+                            const char *nontarget_known_rack_str,
+                            InferenceResults *inference_results);
+error_code_t infer_for_test_with_history(const Config *config,
+                                         InferenceResults *inference_results,
+                                         const int num_events_to_play);
 
 BitRack string_to_bit_rack(const LetterDistribution *ld,
                            const char *rack_string);
