@@ -452,6 +452,8 @@ void generate_moves_for_game_override_record_type(
       .override_kwg = NULL,
       .thread_index = args->thread_index,
       .eq_margin_movegen = args->eq_margin_movegen,
+      .initial_best_equity = EQUITY_INITIAL_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   generate_moves(&args_with_overwritten_record_and_sort);
@@ -468,15 +470,33 @@ void generate_moves_for_game(const MoveGenArgs *args) {
 }
 
 Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
-  const MoveGenArgs args = {
-      .game = game,
-      .move_list = move_list,
-      .move_record_type = MOVE_RECORD_BEST,
-      .move_sort_type = MOVE_SORT_EQUITY,
-      .override_kwg = NULL,
-      .thread_index = thread_index,
-      .eq_margin_movegen = 0,
-  };
+  const MoveGenArgs args = {.game = game,
+                            .move_list = move_list,
+                            .move_record_type = MOVE_RECORD_BEST,
+                            .move_sort_type = MOVE_SORT_EQUITY,
+                            .override_kwg = NULL,
+                            .thread_index = thread_index,
+                            .eq_margin_movegen = 0,
+                            .initial_best_equity = EQUITY_INITIAL_VALUE,
+                            .target_leave_size_for_exchange_cutoff =
+                                UNSET_LEAVE_SIZE};
+  generate_moves(&args);
+  return move_list_get_move(move_list, 0);
+}
+
+Move *get_top_equity_move_for_inferences(
+    Game *game, int thread_index, MoveList *move_list,
+    Equity initial_best_equity, int target_leave_size_for_exchange_cutoff) {
+  const MoveGenArgs args = {.game = game,
+                            .move_list = move_list,
+                            .move_record_type = MOVE_RECORD_BEST,
+                            .move_sort_type = MOVE_SORT_EQUITY,
+                            .override_kwg = NULL,
+                            .thread_index = thread_index,
+                            .eq_margin_movegen = 0,
+                            .initial_best_equity = initial_best_equity,
+                            .target_leave_size_for_exchange_cutoff =
+                                target_leave_size_for_exchange_cutoff};
   generate_moves(&args);
   return move_list_get_move(move_list, 0);
 }

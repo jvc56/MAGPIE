@@ -1744,6 +1744,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   MoveList *move_list = args->move_list;
   const KWG *override_kwg = args->override_kwg;
   gen->eq_margin_movegen = args->eq_margin_movegen;
+  gen->target_equity_cutoff = args->initial_best_equity;
+  gen->target_leave_size = args->target_leave_size_for_exchange_cutoff;
 
   gen->board = game_get_board(game);
   gen->player_index = game_get_player_on_turn_index(game);
@@ -1847,6 +1849,10 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
     for (int i = 0; i < RACK_SIZE; i++) {
       gen->best_leaves[i] = 0;
     }
+  }
+
+  if (gen->target_leave_size != UNSET_LEAVE_SIZE) {
+    gen->target_equity_cutoff = gen->best_leaves[gen->target_leave_size];
   }
 }
 
@@ -1955,6 +1961,11 @@ void generate_moves(const MoveGenArgs *args) {
                               (gen->move_sort_type != MOVE_SORT_SCORE);
     wmp_move_gen_check_nonplaythrough_existence(&gen->wmp_move_gen,
                                                 check_leaves, &gen->leave_map);
+  }
+
+  if ((gen->target_equity_cutoff != EQUITY_INITIAL_VALUE) &&
+      better_play_has_been_found(gen, gen->target_equity_cutoff)) {
+    return;
   }
 
   gen_shadow(gen);

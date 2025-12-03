@@ -210,6 +210,7 @@ struct Config {
   double cutoff;
   Equity eq_margin_inference;
   Equity eq_margin_movegen;
+  bool use_infer_cutoff_optimization;  // TEST-ONLY, NO COMMAND LINE ARG SUPPORT
   bool use_game_pairs;
   bool human_readable;
   bool use_small_plays;
@@ -419,6 +420,14 @@ bool config_get_loaded_settings(const Config *config) {
 
 void config_set_loaded_settings(Config *config, const bool value) {
   config->loaded_settings = value;
+}
+
+bool config_get_use_infer_cutoff_optimization(const Config *config) {
+  return config->use_infer_cutoff_optimization;
+}
+
+void config_set_use_infer_cutoff_optimization(Config *config, bool value) {
+  config->use_infer_cutoff_optimization = value;
 }
 
 PlayersData *config_get_players_data(const Config *config) {
@@ -1807,6 +1816,8 @@ void impl_move_gen_override_record_type(Config *config,
       .move_list = config->move_list,
       .thread_index = 0,
       .eq_margin_movegen = config->eq_margin_movegen,
+      .initial_best_equity = EQUITY_INITIAL_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,      
   };
   generate_moves_for_game_override_record_type(&args, move_record_type);
   move_list_sort_moves(config->move_list);
