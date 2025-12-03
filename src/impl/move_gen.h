@@ -53,6 +53,11 @@ typedef struct MoveGen {
   Equity current_anchor_highest_possible_score;
   // Updated every time a play is recorded
   Equity cutoff_equity_or_score;
+  // Equity of target play + eq_margin_movegen
+  // Inference movegen can ignore anchors which can't beat this
+  Equity target_equity_cutoff;
+  // Using UNSET (-1) value for non-exchanges
+  int target_leave_size;
   // This field is only used for the MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST
   // record type
   Equity best_move_equity_or_score;
@@ -136,6 +141,22 @@ typedef struct MoveGenArgs {
   move_record_t move_record_type;
   move_sort_t move_sort_type;
   Equity eq_margin_movegen;
+
+  // In movegen for inferences after scoring plays this is the equity of the
+  // actual played moved with the leave value for its complement in the rack.
+  // We know this will move will be found by movegen, so we can use it to skip
+  // anchors that can't surpass it (surpassing means exceeding the target move
+  // by eq_margin_movegen).
+  Equity initial_best_equity;
+
+  // Movegen for inferences after exchanges will need to know the number of
+  // tiles exchanged so that it can determine the target equity value after
+  // generating exchanges to skip anchors that can't surpass it, or potentially
+  // return early without calling shadow_gen or generating scoring plays, if a
+  // different exchange size exceeds the target exchange value by
+  // eq_margin_movegen. Value is UNSET_LEAVE_SIZE for non-exchange scenarios.
+  int target_leave_size_for_exchange_cutoff;
+
   int thread_index;
   MoveList *move_list;
   const KWG *override_kwg;
