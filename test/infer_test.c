@@ -1342,13 +1342,14 @@ void test_infer_cutoff_repro_wmp(void) {
 // non-optimized version by playing random games and comparing inference
 // timing for different play types.
 void test_infer_cutoff_optimization_comparison(void) {
-  const int NUM_GAMES = 1000;  // 1000 games without WMP
-  const int NUM_THREADS = 10;
+  const int NUM_GAMES = 500;   // 500 games, plays 1-6 and exchanges 1-7
+  const int NUM_THREADS = 10;  // Full cores available
 
   // Use equity margin of 0 to test correctness (strictest test)
+  // Use CSW21 with WMP for full WMP instrumentation
   char config_str[256];
   snprintf(config_str, sizeof(config_str),
-           "set -lex CSW21 -wmp false -s1 equity -s2 equity "
+           "set -lex CSW21 -wmp true -s1 equity -s2 equity "
            "-r1 all -r2 all -numplays 1 -threads %d", NUM_THREADS);
   Config *config = config_create_or_die(config_str);
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
@@ -1376,13 +1377,18 @@ void test_infer_cutoff_optimization_comparison(void) {
   Rack played_tiles;
   rack_set_dist_size(&played_tiles, ld_size);
 
-  printf("\nPlaying %d random games for inference cutoff comparison...\n",
+  // Counter for 7-tile exchanges found
+  int num_seven_tile_exchanges_found = 0;
+
+  printf("\nPlaying %d random games, inference for plays 1-6 and exchanges 1-7...\n",
          NUM_GAMES);
   fflush(stdout);
 
   // Reset stats before the test
   inference_reset_cutoff_stats();
   gen_reset_anchor_stats();
+  gen_reset_early_cutoff_stats();
+  gen_reset_wmp_subanchor_stats();
 
   // Track anchor stats separately for with/without optimization
   uint64_t anchors_available_with = 0, anchors_processed_with = 0;
@@ -1395,6 +1401,22 @@ void test_infer_cutoff_optimization_comparison(void) {
   uint64_t subracks_skipped_with = 0;
   uint64_t subracks_available_without = 0, subracks_processed_without = 0;
   uint64_t subracks_skipped_without = 0;
+
+  // Track per-size stats for anchors (index 0-7 for play sizes 1-7 and exch 1-7)
+  // play_anchors_with[i] = anchors processed for i-tile plays WITH cutoff
+  uint64_t play_anchors_with[RACK_SIZE + 1] = {0};
+  uint64_t play_anchors_without[RACK_SIZE + 1] = {0};
+  uint64_t exch_anchors_with[RACK_SIZE + 1] = {0};
+  uint64_t exch_anchors_without[RACK_SIZE + 1] = {0};
+  // Track early cutoff potential per size
+  uint64_t play_movegen_calls[RACK_SIZE + 1] = {0};
+  uint64_t play_shadow_skippable[RACK_SIZE + 1] = {0};
+  uint64_t play_anchor_filterable[RACK_SIZE + 1] = {0};
+  uint64_t play_anchor_total[RACK_SIZE + 1] = {0};
+  uint64_t exch_movegen_calls[RACK_SIZE + 1] = {0};
+  uint64_t exch_shadow_skippable[RACK_SIZE + 1] = {0};
+  uint64_t exch_anchor_filterable[RACK_SIZE + 1] = {0};
+  uint64_t exch_anchor_total[RACK_SIZE + 1] = {0};
 
   for (int game_num = 0; game_num < NUM_GAMES; game_num++) {
     // Reset game with unique seed for each game
@@ -1430,6 +1452,21 @@ void test_infer_cutoff_optimization_comparison(void) {
         continue;
       }
 
+      // FILTER: Run inference for plays 1-6 and exchanges 1-7
+      const bool is_scoring_play_1_to_6 =
+          (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) &&
+          (tiles_played >= 1 && tiles_played <= 6);
+      const bool is_exchange_1_to_7 =
+          (move_type == GAME_EVENT_EXCHANGE) &&
+          (tiles_played >= 1 && tiles_played <= 7);
+      if (!is_scoring_play_1_to_6 && !is_exchange_1_to_7) {
+        play_move(move, game, NULL);
+        continue;
+      }
+      if (is_exchange_1_to_7 && tiles_played == 7) {
+        num_seven_tile_exchanges_found++;
+      }
+
       // Build played tiles string for inference using StringBuilder
       StringBuilder *sb = string_builder_create();
       string_builder_add_rack(sb, &played_tiles, ld, false);
@@ -1456,6 +1493,7 @@ void test_infer_cutoff_optimization_comparison(void) {
       config_set_use_infer_cutoff_optimization(config, true);
       gen_reset_anchor_stats();
       gen_reset_subrack_stats();
+      gen_reset_early_cutoff_stats();
       ctimer_start(&timer);
       error_code_t status1 =
           infer_for_test(config, player_on_turn, score, target_num_exch,
@@ -1471,6 +1509,26 @@ void test_infer_cutoff_optimization_comparison(void) {
         subracks_available_with += avail;
         subracks_processed_with += proc;
         subracks_skipped_with += skip;
+        // Per-size anchor tracking
+        if (move_type == GAME_EVENT_EXCHANGE) {
+          exch_anchors_with[tiles_played] += proc;
+        } else {
+          play_anchors_with[tiles_played] += proc;
+        }
+        // Per-size early cutoff potential
+        uint64_t mg_calls, shadow_skip, anch_filt, anch_tot;
+        gen_get_early_cutoff_stats(&mg_calls, &shadow_skip, &anch_filt, &anch_tot);
+        if (move_type == GAME_EVENT_EXCHANGE) {
+          exch_movegen_calls[tiles_played] += mg_calls;
+          exch_shadow_skippable[tiles_played] += shadow_skip;
+          exch_anchor_filterable[tiles_played] += anch_filt;
+          exch_anchor_total[tiles_played] += anch_tot;
+        } else {
+          play_movegen_calls[tiles_played] += mg_calls;
+          play_shadow_skippable[tiles_played] += shadow_skip;
+          play_anchor_filterable[tiles_played] += anch_filt;
+          play_anchor_total[tiles_played] += anch_tot;
+        }
       }
 
       // Run inference without cutoff optimization
@@ -1492,6 +1550,12 @@ void test_infer_cutoff_optimization_comparison(void) {
         subracks_available_without += avail;
         subracks_processed_without += proc;
         subracks_skipped_without += skip;
+        // Per-size anchor tracking
+        if (move_type == GAME_EVENT_EXCHANGE) {
+          exch_anchors_without[tiles_played] += proc;
+        } else {
+          play_anchors_without[tiles_played] += proc;
+        }
       }
 
       // Now play the move on the main game to continue
@@ -1533,13 +1597,17 @@ void test_infer_cutoff_optimization_comparison(void) {
     }
 
     if ((game_num + 1) % 100 == 0) {
-      printf("  Completed %d games...\n", game_num + 1);
+      printf("  Completed %d games, found %d 7-tile exchanges so far...\n",
+             game_num + 1, num_seven_tile_exchanges_found);
       fflush(stdout);
     }
   }
 
   // Print results
-  printf("\n=== Inference Cutoff Optimization Results ===\n");
+  printf("\n=== 7-Tile Exchange Search Results ===\n");
+  printf("Found %d 7-tile exchanges in %d games\n\n",
+         num_seven_tile_exchanges_found, NUM_GAMES);
+  printf("=== Inference Cutoff Optimization Results ===\n");
   printf("\nScoring plays (tiles played -> count, with cutoff, without cutoff, "
          "speedup):\n");
   double total_with_play = 0, total_without_play = 0;
@@ -1642,6 +1710,92 @@ void test_infer_cutoff_optimization_comparison(void) {
            (unsigned long long)subracks_processed_without,
            (unsigned long long)subracks_available_without,
            (unsigned long long)subracks_skipped_without, skip_pct);
+  }
+
+  // Print early cutoff optimization potential (aggregate)
+  {
+    uint64_t tot_mg = 0, tot_shadow = 0, tot_filt = 0, tot_anch = 0;
+    for (int i = 1; i <= RACK_SIZE; i++) {
+      tot_mg += play_movegen_calls[i] + exch_movegen_calls[i];
+      tot_shadow += play_shadow_skippable[i] + exch_shadow_skippable[i];
+      tot_filt += play_anchor_filterable[i] + exch_anchor_filterable[i];
+      tot_anch += play_anchor_total[i] + exch_anchor_total[i];
+    }
+    printf("\nEarly cutoff optimization potential (aggregate):\n");
+    if (tot_mg > 0) {
+      double shadow_skip_pct = 100.0 * (double)tot_shadow / (double)tot_mg;
+      printf("  Shadow skippable by exchange: %llu / %llu (%.2f%%)\n",
+             (unsigned long long)tot_shadow, (unsigned long long)tot_mg, shadow_skip_pct);
+    }
+    if (tot_anch > 0) {
+      double anchor_filter_pct = 100.0 * (double)tot_filt / (double)tot_anch;
+      printf("  Anchors filterable by shadow equity: %llu / %llu (%.2f%%)\n",
+             (unsigned long long)tot_filt, (unsigned long long)tot_anch, anchor_filter_pct);
+    }
+  }
+
+  // Print per-size anchor breakdown
+  printf("\nPer-size anchor breakdown (tiles -> anchors with cutoff / without / ratio):\n");
+  printf("Scoring plays:\n");
+  for (int i = 1; i <= RACK_SIZE; i++) {
+    if (play_anchors_with[i] > 0 || play_anchors_without[i] > 0) {
+      double ratio = play_anchors_without[i] > 0 ?
+          (double)play_anchors_with[i] / (double)play_anchors_without[i] : 0;
+      // Compute hypothetical anchors if we skip shadow + filter by shadow equity
+      uint64_t hypo_anchors = play_anchors_with[i];
+      if (play_movegen_calls[i] > 0 && play_shadow_skippable[i] > 0) {
+        // Shadow skip would eliminate all anchors for those calls
+        double frac_skippable = (double)play_shadow_skippable[i] / (double)play_movegen_calls[i];
+        hypo_anchors = (uint64_t)((1.0 - frac_skippable) * (double)play_anchors_with[i]);
+      }
+      // Further reduce by filterable anchors
+      if (play_anchor_total[i] > 0 && play_anchor_filterable[i] > 0) {
+        double frac_filt = (double)play_anchor_filterable[i] / (double)play_anchor_total[i];
+        hypo_anchors = (uint64_t)((1.0 - frac_filt) * (double)hypo_anchors);
+      }
+      double hypo_ratio = play_anchors_without[i] > 0 ?
+          (double)hypo_anchors / (double)play_anchors_without[i] : 0;
+      printf("  %d tiles: %12llu / %12llu (%.2fx) -> hypo: %12llu (%.2fx)\n",
+             i, (unsigned long long)play_anchors_with[i],
+             (unsigned long long)play_anchors_without[i], ratio,
+             (unsigned long long)hypo_anchors, hypo_ratio);
+    }
+  }
+  printf("Exchanges:\n");
+  for (int i = 1; i <= RACK_SIZE; i++) {
+    if (exch_anchors_with[i] > 0 || exch_anchors_without[i] > 0) {
+      double ratio = exch_anchors_without[i] > 0 ?
+          (double)exch_anchors_with[i] / (double)exch_anchors_without[i] : 0;
+      uint64_t hypo_anchors = exch_anchors_with[i];
+      if (exch_movegen_calls[i] > 0 && exch_shadow_skippable[i] > 0) {
+        double frac_skippable = (double)exch_shadow_skippable[i] / (double)exch_movegen_calls[i];
+        hypo_anchors = (uint64_t)((1.0 - frac_skippable) * (double)exch_anchors_with[i]);
+      }
+      if (exch_anchor_total[i] > 0 && exch_anchor_filterable[i] > 0) {
+        double frac_filt = (double)exch_anchor_filterable[i] / (double)exch_anchor_total[i];
+        hypo_anchors = (uint64_t)((1.0 - frac_filt) * (double)hypo_anchors);
+      }
+      double hypo_ratio = exch_anchors_without[i] > 0 ?
+          (double)hypo_anchors / (double)exch_anchors_without[i] : 0;
+      printf("  %d tiles: %12llu / %12llu (%.2fx) -> hypo: %12llu (%.2fx)\n",
+             i, (unsigned long long)exch_anchors_with[i],
+             (unsigned long long)exch_anchors_without[i], ratio,
+             (unsigned long long)hypo_anchors, hypo_ratio);
+    }
+  }
+
+  // Print WMP subanchor statistics
+  {
+    uint64_t wmp_total, wmp_skippable;
+    gen_get_wmp_subanchor_stats(&wmp_total, &wmp_skippable);
+    if (wmp_total > 0) {
+      printf("\nWMP subanchor skip analysis (instrumentation only, no actual filtering):\n");
+      printf("  Total subanchors: %llu\n", (unsigned long long)wmp_total);
+      printf("  Skippable (equity < cutoff): %llu (%.2f%%)\n",
+             (unsigned long long)wmp_skippable,
+             100.0 * (double)wmp_skippable / (double)wmp_total);
+      gen_print_wmp_subanchor_breakdown();
+    }
   }
 
   inference_results_destroy(results_with_cutoff);

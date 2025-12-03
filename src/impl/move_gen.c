@@ -13,6 +13,18 @@ static uint64_t total_anchors_skipped = 0;
 static uint64_t total_subracks_available = 0;
 static uint64_t total_subracks_processed = 0;
 static uint64_t total_subracks_skipped = 0;
+
+// Debug counters for early cutoff optimizations
+static uint64_t total_movegen_calls = 0;
+static uint64_t skipped_shadow_by_exchange = 0;
+static uint64_t anchors_filtered_by_shadow_equity = 0;
+static uint64_t anchors_total_in_shadow = 0;
+
+// WMP subanchor instrumentation counters
+static uint64_t wmp_subanchor_total_count = 0;
+static uint64_t wmp_subanchor_skippable_count = 0;
+static uint64_t
+    wmp_subanchor_by_tiles_blocks_count[RACK_SIZE + 1][MAX_POSSIBLE_PLAYTHROUGH_BLOCKS][2];
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/equity_defs.h"
@@ -108,6 +120,63 @@ void gen_get_subrack_stats(uint64_t *available, uint64_t *processed,
   *available = total_subracks_available;
   *processed = total_subracks_processed;
   *skipped = total_subracks_skipped;
+}
+
+void gen_reset_early_cutoff_stats(void) {
+  total_movegen_calls = 0;
+  skipped_shadow_by_exchange = 0;
+  anchors_filtered_by_shadow_equity = 0;
+  anchors_total_in_shadow = 0;
+}
+
+void gen_get_early_cutoff_stats(uint64_t *movegen_calls,
+                                 uint64_t *shadow_skipped_by_exch,
+                                 uint64_t *anchors_filtered,
+                                 uint64_t *anchors_total) {
+  *movegen_calls = total_movegen_calls;
+  *shadow_skipped_by_exch = skipped_shadow_by_exchange;
+  *anchors_filtered = anchors_filtered_by_shadow_equity;
+  *anchors_total = anchors_total_in_shadow;
+}
+
+void gen_reset_wmp_subanchor_stats(void) {
+  wmp_subanchor_total_count = 0;
+  wmp_subanchor_skippable_count = 0;
+  for (int t = 0; t <= RACK_SIZE; t++) {
+    for (int b = 0; b < MAX_POSSIBLE_PLAYTHROUGH_BLOCKS; b++) {
+      wmp_subanchor_by_tiles_blocks_count[t][b][0] = 0;
+      wmp_subanchor_by_tiles_blocks_count[t][b][1] = 0;
+    }
+  }
+}
+
+void gen_get_wmp_subanchor_stats(uint64_t *total, uint64_t *skippable) {
+  *total = wmp_subanchor_total_count;
+  *skippable = wmp_subanchor_skippable_count;
+}
+
+void gen_print_wmp_subanchor_breakdown(void) {
+  printf("WMP subanchor breakdown (tiles, blocks -> total / skippable):\n");
+  for (int t = 1; t <= RACK_SIZE; t++) {
+    for (int b = 0; b < MAX_POSSIBLE_PLAYTHROUGH_BLOCKS; b++) {
+      uint64_t tot = wmp_subanchor_by_tiles_blocks_count[t][b][0];
+      uint64_t skip = wmp_subanchor_by_tiles_blocks_count[t][b][1];
+      if (tot > 0) {
+        printf("  %d tiles, %d blocks: %llu total, %llu skippable (%.2f%%)\n",
+               t, b, (unsigned long long)tot, (unsigned long long)skip,
+               100.0 * skip / tot);
+      }
+    }
+  }
+}
+
+void gen_record_wmp_subanchor(int tiles, int blocks, bool skippable) {
+  wmp_subanchor_total_count++;
+  wmp_subanchor_by_tiles_blocks_count[tiles][blocks][0]++;
+  if (skippable) {
+    wmp_subanchor_skippable_count++;
+    wmp_subanchor_by_tiles_blocks_count[tiles][blocks][1]++;
+  }
 }
 
 // Cache getter functions
@@ -387,7 +456,14 @@ static inline bool better_play_has_been_found(const MoveGen *gen,
   case MOVE_RECORD_BEST:
     break;
   }
-  return highest_possible_value < gen_get_cutoff_equity_or_score(gen);
+  // In inference mode with stop_on_exceeding_threshold, use the fixed
+  // initial_best_equity cutoff for consistent anchor filtering (matching
+  // the WMP subanchor filtering behavior). Otherwise use the dynamic cutoff.
+  const Equity cutoff = (gen->stop_on_exceeding_threshold &&
+                         gen->initial_best_equity > EQUITY_INITIAL_VALUE)
+                            ? gen->initial_best_equity
+                            : gen_get_cutoff_equity_or_score(gen);
+  return highest_possible_value < cutoff;
 }
 
 static inline void record_exchange(MoveGen *gen) {
@@ -1782,9 +1858,26 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
     return;
   }
 
+  // Instrumentation: Track anchors whose shadow equity can't beat the threshold.
+  // These COULD potentially be skipped, but for now we just count them.
+  // The actual anchor filtering must be done carefully to not break movegen.
+  anchors_total_in_shadow++;
+  if (gen->stop_on_exceeding_threshold &&
+      gen->initial_best_equity > EQUITY_INITIAL_VALUE &&
+      gen->highest_shadow_equity <= gen->initial_best_equity) {
+    anchors_filtered_by_shadow_equity++;
+    // NOTE: We do NOT skip here - that would break movegen's anchor heap.
+    // The filtering must happen in the anchor loop, not in shadow_play_for_anchor.
+  }
+
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    // Pass cutoff for instrumentation (not actual filtering)
+    const Equity wmp_cutoff = gen->stop_on_exceeding_threshold
+                                  ? gen->initial_best_equity
+                                  : EQUITY_INITIAL_VALUE;
     wmp_move_gen_add_anchors(&gen->wmp_move_gen, gen->current_row_index, col,
-                             gen->last_anchor_col, gen->dir, &gen->anchor_heap);
+                             gen->last_anchor_col, gen->dir, &gen->anchor_heap,
+                             wmp_cutoff);
   } else {
     anchor_heap_add_unheaped_anchor(
         &gen->anchor_heap, gen->current_row_index, col, gen->last_anchor_col,
@@ -2085,6 +2178,8 @@ void generate_moves(const MoveGenArgs *args) {
   gen_load_position(gen, args);
   gen_look_up_leaves_and_record_exchanges(gen);
 
+  total_movegen_calls++;
+
   // For exchange inference cutoff: now that best_leaves is populated,
   // update the threshold for early termination to include best_leaves[target_leave_size].
   // This raises the bar for what constitutes "exceeding the threshold".
@@ -2099,6 +2194,18 @@ void generate_moves(const MoveGenArgs *args) {
     if (best_exch_leave > EQUITY_INITIAL_VALUE) {
       const Equity exchange_cutoff = gen->initial_best_equity + best_exch_leave;
       gen->initial_best_equity = exchange_cutoff;
+
+      // EXCHANGE OPTIMIZATION: For exchange inference, if ANY exchange leave
+      // beats the threshold, we can skip shadow and scoring plays entirely.
+      // The exchanges are already recorded, so move_list[0] has a valid move.
+      for (int k = 0; k < RACK_SIZE; k++) {
+        if (gen->best_leaves[k] > exchange_cutoff) {
+          skipped_shadow_by_exchange++;
+          gen->threshold_exceeded = true;
+          gen_record_pass(gen);
+          return;
+        }
+      }
     }
   }
 
