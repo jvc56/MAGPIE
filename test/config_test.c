@@ -1436,6 +1436,43 @@ void test_config_anno(void) {
   assert(game_get_game_end_reason(game) == GAME_END_REASON_NONE);
 
   assert_config_exec_status(config, "rack FOOTROE", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "s", ERROR_STATUS_SUCCESS);
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 0)), "HIRT");
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 1)),
+                            "EFOOORT");
+  assert_config_exec_status(config, "com 2K FOP", ERROR_STATUS_SUCCESS);
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 0)), "HIRT");
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 1)), "EOORT");
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 0)), "HIRT");
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 1)),
+                            "EFOOORT");
+  assert_config_exec_status(config, "com C1 FORDO", ERROR_STATUS_SUCCESS);
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 0)), "HIRT");
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 1)), "EOT");
+  assert_config_exec_status(config, "com N1 HI", ERROR_STATUS_SUCCESS);
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 0)), "RT");
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 1)), "EOT");
+  assert_config_exec_status(config, "com J3 TO", ERROR_STATUS_SUCCESS);
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 0)), "RT");
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 1)), "E");
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
+
+  // Commit FOOTROPE
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
   assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);

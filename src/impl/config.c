@@ -1639,6 +1639,9 @@ void impl_set_rack_internal(Config *config, const char *rack_str,
       log_fatal(
           "unexpectedly failed to draw rack from bag in set rack command");
     }
+    if (bag_get_letters(game_get_bag(config->game)) <= (RACK_SIZE)) {
+      draw_to_full_rack(config->game, 1 - player_index);
+    }
   } else {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG,
                      get_formatted_string(
@@ -2980,6 +2983,13 @@ char *impl_commit_with_pos_args(Config *config, ErrorStack *error_stack,
 
   config_backup_game_and_history(config);
 
+  const bool bag_empty_before_commit = bag_is_empty(game_get_bag(config->game));
+  const int noncommit_player_index =
+      1 - game_get_player_on_turn_index(config->game);
+  Rack noncommit_player_rack;
+  rack_copy(&noncommit_player_rack, player_get_rack(game_get_player(
+                                        config->game, noncommit_player_index)));
+
   parse_commit(config, move_string_builder, &vms, error_stack, commit_pos_arg_1,
                commit_pos_arg_2, commit_pos_arg_3);
 
@@ -2989,6 +2999,14 @@ char *impl_commit_with_pos_args(Config *config, ErrorStack *error_stack,
   if (!error_stack_is_empty(error_stack)) {
     config_restore_game_and_history(config);
     return empty_string();
+  }
+
+  if (bag_empty_before_commit) {
+    return_rack_to_bag(config->game, 0);
+    return_rack_to_bag(config->game, 1);
+    draw_rack_from_bag(config->game, noncommit_player_index,
+                       &noncommit_player_rack);
+    draw_to_full_rack(config->game, 1 - noncommit_player_index);
   }
 
   return empty_string();

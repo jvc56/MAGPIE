@@ -534,6 +534,10 @@ void game_history_destroy(GameHistory *game_history) {
 }
 
 void game_history_truncate_to_played_events(GameHistory *game_history) {
+  for (int i = game_history->num_played_events; i < game_history->num_events;
+       i++) {
+    game_event_reset(&game_history->events[i]);
+  }
   game_history->num_events = game_history->num_played_events;
 }
 

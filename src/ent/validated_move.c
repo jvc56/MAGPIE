@@ -196,7 +196,8 @@ void validate_tiles_played_with_mls(const Board *board,
         if (!connected && play_connects(board, current_row, current_col)) {
           connected = true;
         }
-      } else if (board_letter == ml || allow_playthrough) {
+      } else if (board_letter == ml ||
+                 (allow_playthrough && ml == PLAYED_THROUGH_MARKER)) {
         move_set_tile(move, PLAYED_THROUGH_MARKER, i);
         if (ml != PLAYED_THROUGH_MARKER) {
           if (get_is_blanked(board_letter)) {
