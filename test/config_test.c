@@ -481,6 +481,12 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "rack AB3C",
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  assert_config_exec_status(config, "rack .ABC",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  assert_config_exec_status(config, "rack AB.C",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  assert_config_exec_status(config, "rack ABC.",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   assert_config_exec_status(config, "rack ABCDEFGH",
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   assert_config_exec_status(config, "rack ABCZZZ",
@@ -1392,23 +1398,23 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
 
-  assert_config_exec_status(config, "rack BONSOIR", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack bonSOIR", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "g", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
 
-  assert_config_exec_status(config, "rack DISLINK", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack DISlink", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "g", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
 
-  assert_config_exec_status(config, "rack UNDEWAY", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack undeway", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "g", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
 
-  assert_config_exec_status(config, "rack CCTTUU?", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack ccttuu?", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "g", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
 
-  assert_config_exec_status(config, "rack GVEAWAY", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack gveaway", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "g", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
 
@@ -1613,6 +1619,16 @@ void test_config_anno(void) {
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
 
+  // if a rack is present but there are no moves, moves should be automatically
+  // generated to find the top play
+  assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+  assert_config_exec_status(config, "rack BARCHAN", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "t", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(86));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+
   assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
   assert_config_exec_status(config, "rack BARCHAN -numplays 7",
@@ -1651,8 +1667,7 @@ void test_config_anno(void) {
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
 
   // The generated plays from the previous turn should be cleared.
-  assert_config_exec_status(config, "t",
-                            ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
+  assert_config_exec_status(config, "t", ERROR_STATUS_COMMIT_EMPTY_RACK);
   assert_config_exec_status(config, "com 1",
                             ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
   assert_config_exec_status(config, "com 10",

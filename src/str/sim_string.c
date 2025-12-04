@@ -23,7 +23,7 @@ bool string_builder_add_sim_stats_with_display_lock(StringBuilder *sb,
     num_rows += 1;
   }
   const int num_plies = sim_results_get_num_plies(sim_results);
-  const int num_cols = 8 + num_plies * 2;
+  const int num_cols = 9 + num_plies * 2;
   StringGrid *sg = string_grid_create(num_rows, num_cols, 1);
 
   int curr_row = 0;
@@ -33,10 +33,10 @@ bool string_builder_add_sim_stats_with_display_lock(StringBuilder *sb,
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Move"));
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Leave"));
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Score"));
-    string_grid_set_cell(sg, curr_row, curr_col++,
-                         string_duplicate("Static Eq"));
-    string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Equity"));
-    string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("WinPct"));
+    string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Ig"));
+    string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Win%"));
+    string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Eq"));
+    string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("StEq"));
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Iters"));
     for (int j = 0; j < num_plies; j++) {
       string_grid_set_cell(sg, curr_row, curr_col++,
@@ -52,6 +52,9 @@ bool string_builder_add_sim_stats_with_display_lock(StringBuilder *sb,
   StringBuilder *move_sb = string_builder_create();
   const Rack *rack = sim_results_get_rack(sim_results);
   const uint16_t rack_dist_size = rack_get_dist_size(rack);
+  BAIResult *bai_result = sim_results_get_bai_result(sim_results);
+  const bai_result_status_t bai_result_status =
+      bai_result_get_status(bai_result);
   for (int i = 0; i < num_display_plays; i++) {
     curr_col = 0;
     const SimmedPlayDisplayInfo *sp_dinfo =
@@ -81,6 +84,19 @@ bool string_builder_add_sim_stats_with_display_lock(StringBuilder *sb,
         sg, curr_row, curr_col++,
         get_formatted_string("%d", equity_to_int(move_get_score(move))));
 
+    if (bai_result_status == BAI_RESULT_STATUS_THRESHOLD && i > 0 &&
+        sim_results_plays_are_similar(sim_results, 0, i)) {
+      string_grid_set_cell(sg, curr_row, curr_col, string_duplicate("X"));
+    }
+    curr_col++;
+
+    string_grid_set_cell(
+        sg, curr_row, curr_col++,
+        get_formatted_string("%.2f", sp_dinfo->win_pct_mean * 100));
+
+    string_grid_set_cell(sg, curr_row, curr_col++,
+                         get_formatted_string("%.2f", sp_dinfo->equity_mean));
+
     double move_equity;
     if (move_get_type(move) == GAME_EVENT_PASS) {
       move_equity = EQUITY_PASS_DISPLAY_DOUBLE;
@@ -89,13 +105,6 @@ bool string_builder_add_sim_stats_with_display_lock(StringBuilder *sb,
     }
     string_grid_set_cell(sg, curr_row, curr_col++,
                          get_formatted_string("%.2f", move_equity));
-
-    string_grid_set_cell(sg, curr_row, curr_col++,
-                         get_formatted_string("%.2f", sp_dinfo->equity_mean));
-
-    string_grid_set_cell(
-        sg, curr_row, curr_col++,
-        get_formatted_string("%.2f", sp_dinfo->win_pct_mean * 100));
 
     string_grid_set_cell(sg, curr_row, curr_col++,
                          get_formatted_string("%lu", sp_dinfo->niters));
@@ -118,7 +127,6 @@ bool string_builder_add_sim_stats_with_display_lock(StringBuilder *sb,
                                       num_display_plays, num_simmed_plays);
 
   StringGrid *summary_sg = string_grid_create(3, 2, 1);
-  BAIResult *bai_result = sim_results_get_bai_result(sim_results);
 
   curr_row = 0;
 
@@ -139,7 +147,7 @@ bool string_builder_add_sim_stats_with_display_lock(StringBuilder *sb,
   string_grid_set_cell(summary_sg, curr_row, 0, string_duplicate("Status:"));
 
   char *status_str = NULL;
-  switch (bai_result_get_status(bai_result)) {
+  switch (bai_result_status) {
   case BAI_RESULT_STATUS_THRESHOLD:
     status_str =
         get_formatted_string("Finished (statistical threshold achieved)\n");
@@ -149,9 +157,6 @@ bool string_builder_add_sim_stats_with_display_lock(StringBuilder *sb,
     break;
   case BAI_RESULT_STATUS_TIMEOUT:
     status_str = get_formatted_string("Finished (time limit exceeded)\n");
-    break;
-  case BAI_RESULT_STATUS_ONE_ARM_REMAINING:
-    status_str = get_formatted_string("Finished (all plays are similar)\n");
     break;
   case BAI_RESULT_STATUS_USER_INTERRUPT:
     status_str = get_formatted_string("Finished (user interrupt)\n");

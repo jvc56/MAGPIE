@@ -29,7 +29,7 @@ struct SimmedPlay {
   Stat *equity_stat;
   Stat *leftover_stat;
   Stat *win_pct_stat;
-  bool is_epigon;
+  uint64_t similarity_key;
   int play_id;
   XoshiroPRNG *prng;
   cpthread_mutex_t mutex;
@@ -69,7 +69,7 @@ SimmedPlay **simmed_plays_create(const MoveList *move_list,
       simmed_play->score_stat[j] = stat_create(true);
       simmed_play->bingo_stat[j] = stat_create(true);
     }
-    simmed_play->is_epigon = false;
+    simmed_play->similarity_key = 0;
     simmed_play->play_id = i;
     simmed_play->prng = prng_create(seed);
     cpthread_mutex_init(&simmed_play->mutex);
@@ -185,18 +185,8 @@ Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play) {
   return simmed_play->win_pct_stat;
 }
 
-bool simmed_play_get_is_epigon(const SimmedPlay *simmed_play) {
-  return simmed_play->is_epigon;
-}
-
 int simmed_play_get_id(const SimmedPlay *simmed_play) {
   return simmed_play->play_id;
-}
-
-void simmed_play_set_is_epigon(SimmedPlay *simmed_play) {
-  cpthread_mutex_lock(&simmed_play->mutex);
-  simmed_play->is_epigon = true;
-  cpthread_mutex_unlock(&simmed_play->mutex);
 }
 
 // Returns the current seed and updates the seed using prng_next
@@ -346,7 +336,6 @@ void sim_results_write_to_display_info(SimResults *sim_results,
       stat_get_mean(simmed_play->win_pct_stat);
   simmed_play_display_info->win_pct_stdev =
       stat_get_stdev(simmed_play->win_pct_stat);
-  simmed_play_display_info->is_epigon = simmed_play->is_epigon;
   simmed_play_display_info->niters =
       stat_get_num_samples(simmed_play->equity_stat);
   cpthread_mutex_unlock(&simmed_play->mutex);
@@ -355,13 +344,6 @@ void sim_results_write_to_display_info(SimResults *sim_results,
 int compare_simmed_play_display_infos(const void *a, const void *b) {
   const SimmedPlayDisplayInfo *play_a = (const SimmedPlayDisplayInfo *)a;
   const SimmedPlayDisplayInfo *play_b = (const SimmedPlayDisplayInfo *)b;
-
-  if (play_a->is_epigon && !play_b->is_epigon) {
-    return 1;
-  }
-  if (play_b->is_epigon && !play_a->is_epigon) {
-    return -1;
-  }
 
   // Compare the mean values of win_pct_stat
   if (play_a->win_pct_mean > play_b->win_pct_mean) {
@@ -407,4 +389,19 @@ void sim_results_unlock_display_infos(SimResults *sim_results) {
 SimmedPlayDisplayInfo *
 sim_results_get_display_info(const SimResults *sim_results, int index) {
   return &sim_results->simmed_play_display_infos[index];
+}
+
+bool sim_results_plays_are_similar(SimResults *sim_results, const int sp1_index,
+                                   const int sp2_index) {
+  SimmedPlay *sp1 = sim_results_get_simmed_play(sim_results, sp1_index);
+  if (sp1->similarity_key == 0) {
+    sp1->similarity_key = move_get_similarity_key(
+        simmed_play_get_move(sp1), sim_results_get_rack(sim_results));
+  }
+  SimmedPlay *sp2 = sim_results_get_simmed_play(sim_results, sp2_index);
+  if (sp2->similarity_key == 0) {
+    sp2->similarity_key = move_get_similarity_key(
+        simmed_play_get_move(sp2), sim_results_get_rack(sim_results));
+  }
+  return sp1->similarity_key == sp2->similarity_key;
 }

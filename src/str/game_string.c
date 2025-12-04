@@ -385,7 +385,7 @@ void string_builder_add_game(const Game *game, const MoveList *move_list,
           string_builder_add_rack(game_string, player_rack, ld, false);
           break;
         case GAME_EVENT_PASS:
-          string_builder_add_string(game_string, "pass ");
+          string_builder_add_string(game_string, "(pass) ");
           string_builder_add_rack(game_string, player_rack, ld, false);
           break;
         case GAME_EVENT_EXCHANGE:;
@@ -397,9 +397,9 @@ void string_builder_add_game(const Game *game, const MoveList *move_list,
           for (int j = 0; j < num_exch; j++) {
             rack_add_letter(&exchanged_tiles, move_get_tile(move, j));
           }
-          string_builder_add_string(game_string, "exch ");
+          string_builder_add_string(game_string, "(exch ");
           string_builder_add_rack(game_string, &exchanged_tiles, ld, false);
-          string_builder_add_string(game_string, " ");
+          string_builder_add_string(game_string, ") ");
           string_builder_add_rack(game_string, player_rack, ld, false);
           break;
         case GAME_EVENT_PHONY_TILES_RETURNED:;

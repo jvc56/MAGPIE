@@ -398,6 +398,59 @@ static inline int compare_moves_without_equity(const Move *move_1,
   return -1;
 }
 
+static inline void move_key_set_field(uint64_t *key, int *bit_index,
+                                      uint64_t value, int bits_per_value) {
+  uint64_t masked_value = value & (((uint64_t)1 << bits_per_value) - 1);
+  *key |= masked_value << *bit_index;
+  *bit_index += bits_per_value;
+}
+
+static inline uint64_t move_get_similarity_key(const Move *m,
+                                               const Rack *move_rack) {
+  uint64_t key = 0;
+  int shift = 0;
+  move_key_set_field(&key, &shift, 1, 1);
+  int type = 0;
+  if (move_get_type(m) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    type = 1;
+  } else if (move_get_type(m) == GAME_EVENT_EXCHANGE) {
+    type = 2;
+  }
+  move_key_set_field(&key, &shift, type, 2);
+  move_key_set_field(&key, &shift, m->dir, 1);
+  move_key_set_field(&key, &shift, m->row_start, BITS_PER_BOARD_DIM);
+  move_key_set_field(&key, &shift, m->col_start, BITS_PER_BOARD_DIM);
+  move_key_set_field(&key, &shift, m->tiles_length, BITS_PER_BOARD_DIM);
+  Rack move_tiles_played;
+  rack_set_dist_size_and_reset(&move_tiles_played,
+                               rack_get_dist_size(move_rack));
+  for (int i = 0; i < m->tiles_length; i++) {
+    MachineLetter tile = move_get_tile(m, i);
+    if (tile == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    MachineLetter ml = tile;
+    if (get_is_blanked(ml)) {
+      ml = BLANK_MACHINE_LETTER;
+    }
+    rack_add_letter(&move_tiles_played, ml);
+  }
+  const int rack_dist_size = rack_get_dist_size(&move_tiles_played);
+  for (MachineLetter i = 0; i < rack_dist_size; i++) {
+    const int rack_tiles = rack_get_letter(move_rack, i);
+    const int played_tiles = rack_get_letter(&move_tiles_played, i);
+    for (int j = 1; j <= rack_tiles; j++) {
+      if (played_tiles >= j) {
+        move_key_set_field(&key, &shift, 1, 1);
+      } else {
+        move_key_set_field(&key, &shift, 0, 1);
+      }
+    }
+  }
+  move_key_set_field(&key, &shift, (uint64_t)m->score, 64 - shift);
+  return key;
+}
+
 static inline void move_list_insert_spare_move_top_equity(MoveList *ml,
                                                           Equity equity) {
   ml->spare_move->equity = equity;

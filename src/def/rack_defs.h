@@ -10,7 +10,7 @@
 #endif
 
 enum {
-  MAX_RACK_SIZE = 10000,
+  MAX_RACK_SIZE = 100,
   WORD_ALIGNING_RACK_SIZE = (((RACK_SIZE) + 7) & ~7)
 };
 

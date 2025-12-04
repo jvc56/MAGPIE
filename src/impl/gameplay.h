@@ -33,7 +33,6 @@ bool rack_is_drawable(const Game *game, int player_index,
                       const Rack *rack_to_draw);
 Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack);
 void return_phony_letters(Game *game);
-bool moves_are_similar(const Move *m1, const Move *m2, int dist_size);
 
 void game_play_n_events(GameHistory *game_history, Game *game, int event_index,
                         bool validate, ErrorStack *error_stack);

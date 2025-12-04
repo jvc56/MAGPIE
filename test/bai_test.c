@@ -32,18 +32,6 @@ static const int strategies[][3] = {
 static const int num_strategies_entries =
     sizeof(strategies) / sizeof(strategies[0]);
 
-void assert_num_epigons(const RandomVariables *rvs,
-                        const int expected_num_epigons) {
-  const int num_rvs = (int)rvs_get_num_rvs(rvs);
-  int actual_num_epigons = 0;
-  for (int k = 0; k < num_rvs; k++) {
-    if (rvs_is_epigon(rvs, k)) {
-      actual_num_epigons++;
-    }
-  }
-  assert(expected_num_epigons == actual_num_epigons);
-}
-
 void bai_wrapper(const BAIOptions *bai_options, RandomVariables *rvs,
                  RandomVariables *rng, ThreadControl *thread_control,
                  BAILogger *bai_logger, BAIResult *bai_result) {
@@ -128,7 +116,6 @@ void test_bai_sample_limit(int num_threads) {
       expected_num_samples = num_rvs * bai_options.sample_minimum;
     }
     assert(rvs_get_total_samples(rvs) == expected_num_samples);
-    assert_num_epigons(rvs, 0);
   }
   thread_control_destroy(thread_control);
   // The timer should stop once the BAI has finished.
@@ -308,7 +295,7 @@ void write_bai_input(const double delta, const RandomVariablesArgs *rv_args,
   fclose_or_die(file);
 }
 
-void test_bai_epigons(int num_threads) {
+void test_bai_similarity(int num_threads) {
   const int num_samples = 1000;
   double *samples = (double *)malloc_or_die(num_samples * sizeof(double));
   for (int i = 0; i < num_samples; i++) {
@@ -335,10 +322,6 @@ void test_bai_epigons(int num_threads) {
   BAIResult *bai_result = bai_result_create();
 
   for (int max_classes = 1; max_classes <= 3; max_classes++) {
-    bai_result_status_t expected_exit_status = BAI_RESULT_STATUS_THRESHOLD;
-    if (max_classes == 1) {
-      expected_exit_status = BAI_RESULT_STATUS_ONE_ARM_REMAINING;
-    }
     for (int num_rvs = 2; num_rvs <= 10; num_rvs++) {
       double *means_and_vars =
           (double *)malloc_or_die((size_t)num_rvs * 2 * sizeof(double));
@@ -348,17 +331,12 @@ void test_bai_epigons(int num_threads) {
         means_and_vars[(ptrdiff_t)(i * 2 + 1)] =
             5 * (max_classes - (i % max_classes));
       }
-      int expected_epigons = num_rvs - max_classes;
-      if (expected_epigons < 0) {
-        expected_epigons = 0;
-      }
       rv_args.num_rvs = num_rvs;
       rv_args.means_and_vars = means_and_vars;
       rng_args.num_rvs = num_rvs;
       for (int i = 0; i < num_strategies_entries; i++) {
         RandomVariables *rvs = rvs_create(&rv_args);
         RandomVariables *rng = rvs_create(&rng_args);
-        assert_num_epigons(rvs, 0);
         BAILogger *bai_logger = NULL;
         bai_options.sampling_rule = strategies[i][0];
         bai_options.threshold = strategies[i][1];
@@ -367,14 +345,102 @@ void test_bai_epigons(int num_threads) {
         bai_logger_flush(bai_logger);
         bai_logger_destroy(bai_logger);
         assert(bai_result_get_best_arm(bai_result) % max_classes == 0);
-        assert(bai_result_get_status(bai_result) == expected_exit_status);
-        assert_num_epigons(rvs, expected_epigons);
+        assert(bai_result_get_status(bai_result) ==
+               BAI_RESULT_STATUS_THRESHOLD);
         rvs_destroy(rvs);
         rvs_destroy(rng);
       }
       free(means_and_vars);
     }
   }
+  bai_result_destroy(bai_result);
+  free(samples);
+  thread_control_destroy(thread_control);
+}
+
+void test_bai_similar_play_comeback(int num_threads) {
+  const int num_rvs = 3;
+  const int sample_minimum = 50;
+  const int num_samples = (num_rvs + 100) * sample_minimum;
+
+  double *means_and_vars =
+      (double *)malloc_or_die((size_t)num_rvs * 2 * sizeof(double));
+  means_and_vars[0] = 10;
+  means_and_vars[1] = 100;
+  means_and_vars[2] = 10;
+  means_and_vars[3] = 100;
+  means_and_vars[4] = 5;
+  means_and_vars[5] = 100;
+
+  double *samples = (double *)malloc_or_die(num_samples * sizeof(double));
+  int sample_index = 0;
+  // Initial phase samples
+  // These are setup so that arm 0 is slightly worse than arm 1
+  for (; sample_index < sample_minimum; sample_index++) {
+    if (sample_index % 2 == 0) {
+      samples[sample_index] = 0.1;
+    } else {
+      samples[sample_index] = 0.9;
+    }
+  }
+  for (; sample_index < sample_minimum * 2; sample_index++) {
+    if (sample_index % 2 == 0) {
+      samples[sample_index] = 0.101;
+    } else {
+      samples[sample_index] = 0.9;
+    }
+  }
+  for (; sample_index < sample_minimum * 3; sample_index++) {
+    if (sample_index % 2 == 0) {
+      samples[sample_index] = 0.2;
+    } else {
+      samples[sample_index] = 1.3;
+    }
+  }
+  // Round robin phase samples
+  // These are setup so that arm 0 is better than arm 1
+  for (; sample_index < num_samples; sample_index++) {
+    if (sample_index % 3 == 0) {
+      samples[sample_index] = 1.0;
+    } else if (sample_index % 3 == 1) {
+      samples[sample_index] = 0.4;
+    } else {
+      samples[sample_index] = 0.5;
+    }
+  }
+  RandomVariablesArgs rv_args = {
+      .type = RANDOM_VARIABLES_NORMAL_PREDETERMINED,
+      .num_samples = num_samples,
+      .samples = samples,
+      .num_rvs = num_rvs,
+      .means_and_vars = means_and_vars,
+  };
+  RandomVariablesArgs rng_args = {
+      .type = RANDOM_VARIABLES_UNIFORM,
+      .seed = 10,
+      .num_rvs = num_rvs,
+  };
+  BAIOptions bai_options = {
+      .delta = 0.01,
+      .sample_minimum = sample_minimum,
+      .sample_limit = num_samples,
+      .time_limit_seconds = 0,
+      .num_threads = num_threads,
+      .sampling_rule = BAI_SAMPLING_RULE_ROUND_ROBIN,
+      .threshold = BAI_THRESHOLD_GK16,
+  };
+
+  ThreadControl *thread_control = thread_control_create();
+  BAIResult *bai_result = bai_result_create();
+  RandomVariables *rvs = rvs_create(&rv_args);
+  RandomVariables *rng = rvs_create(&rng_args);
+  bai_wrapper(&bai_options, rvs, rng, thread_control, NULL, bai_result);
+  assert(bai_result_get_best_arm(bai_result) == 0);
+  assert(bai_result_get_status(bai_result) == BAI_RESULT_STATUS_THRESHOLD);
+  rvs_destroy(rvs);
+  rvs_destroy(rng);
+  free(means_and_vars);
+
   bai_result_destroy(bai_result);
   free(samples);
   thread_control_destroy(thread_control);
@@ -474,7 +540,8 @@ void test_bai(void) {
       test_bai_time_limit(num_threads_i);
       test_bai_interrupt(num_threads_i);
       test_bai_top_two(num_threads_i);
-      test_bai_epigons(num_threads_i);
+      test_bai_similarity(num_threads_i);
+      test_bai_similar_play_comeback(num_threads_i);
     }
   }
 }

@@ -35,5 +35,4 @@ const PVLine *endgame_results_get_pvline(const EndgameResults *endgame_result) {
 void endgame_results_set_pvline(EndgameResults *endgame_result,
                                 const PVLine *pv_line) {
   endgame_result->pv_line = *pv_line;
-  endgame_results_set_valid_for_current_game_state(endgame_result, true);
 }

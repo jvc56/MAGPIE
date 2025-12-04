@@ -477,53 +477,6 @@ Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
   return move_list_get_move(move_list, 0);
 }
 
-bool moves_are_similar(const Move *move1, const Move *move2, int dist_size) {
-  if (!(move_get_dir(move1) == move_get_dir(move2) &&
-        move_get_col_start(move1) == move_get_col_start(move2) &&
-        move_get_row_start(move1) == move_get_row_start(move2))) {
-    return false;
-  }
-  if (!(move_get_tiles_played(move1) == move_get_tiles_played(move2) &&
-        move_get_tiles_length(move1) == move_get_tiles_length(move2))) {
-    return false;
-  }
-
-  // Create a rack from move1, then subtract the rack from move2. The final
-  // rack should have all zeroes.
-  Rack similar_plays_rack;
-  rack_set_dist_size_and_reset(&similar_plays_rack, dist_size);
-  for (int i = 0; i < move_get_tiles_length(move1); i++) {
-    MachineLetter tile = move_get_tile(move1, i);
-    if (tile == PLAYED_THROUGH_MARKER) {
-      continue;
-    }
-    int ml = tile;
-    if (get_is_blanked(ml)) {
-      ml = BLANK_MACHINE_LETTER;
-    }
-    rack_add_letter(&similar_plays_rack, ml);
-  }
-
-  for (int i = 0; i < move_get_tiles_length(move2); i++) {
-    MachineLetter tile = move_get_tile(move2, i);
-    if (tile == PLAYED_THROUGH_MARKER) {
-      continue;
-    }
-    int ml = tile;
-    if (get_is_blanked(ml)) {
-      ml = BLANK_MACHINE_LETTER;
-    }
-    rack_take_letter(&similar_plays_rack, ml);
-  }
-
-  for (int i = 0; i < dist_size; i++) {
-    if (rack_get_letter(&similar_plays_rack, i) != 0) {
-      return false;
-    }
-  }
-  return true;
-}
-
 void validate_challenge_bonus_order(const GameEvent *game_event,
                                     const GameEvent *previous_game_event,
                                     ErrorStack *error_stack) {

@@ -574,7 +574,7 @@ void load_rack_or_push_to_error_stack(const char *rack_str,
                                       const LetterDistribution *ld,
                                       error_code_t error_code, Rack *rack,
                                       ErrorStack *error_stack) {
-  const int num_mls = rack_set_to_string(ld, rack, rack_str);
+  const int num_mls = rack_set_to_string_unblanked(ld, rack, rack_str);
   if (num_mls < 0) {
     error_stack_push(
         error_stack, error_code,
@@ -1721,7 +1721,12 @@ void config_infer(const Config *config, bool use_game_history, int target_index,
   config_fill_infer_args(config, use_game_history, target_index, target_score,
                          target_num_exch, target_played_tiles,
                          target_known_rack, nontarget_known_rack, &args);
-  return infer(&args, results, error_stack);
+  infer(&args, results, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  inference_results_set_valid_for_current_game_state(config->inference_results,
+                                                     true);
 }
 
 void impl_infer(Config *config, ErrorStack *error_stack) {
@@ -1854,10 +1859,6 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
   config_infer(config, false, target_index, target_score, target_num_exch,
                &target_played_tiles, &target_known_rack, &nontarget_known_rack,
                config->inference_results, error_stack);
-
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
 }
 
 // Sim
@@ -1955,6 +1956,20 @@ void impl_sim(Config *config, ErrorStack *error_stack) {
     }
   }
   config_simulate(config, &known_opp_rack, config->sim_results, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  bool sim_results_valid = true;
+  if (config->sim_with_inference) {
+    // This will always set the state to false if it was interrupted
+    inference_results_set_valid_for_current_game_state(
+        config->inference_results, true);
+    // If the inference was interrupted, the sim results will be invalid
+    sim_results_valid = inference_results_get_valid_for_current_game_state(
+        config->inference_results);
+  }
+  sim_results_set_valid_for_current_game_state(config->sim_results,
+                                               sim_results_valid);
 }
 
 char *status_sim(Config *config) {
@@ -2012,6 +2027,8 @@ void impl_endgame(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  endgame_results_set_valid_for_current_game_state(config->endgame_results,
+                                                   true);
 }
 
 // Autoplay
@@ -3016,6 +3033,17 @@ char *impl_top_commit(Config *config, ErrorStack *error_stack) {
   if (rack_str) {
     impl_set_rack_internal(config, rack_str, error_stack);
     if (!error_stack_is_empty(error_stack)) {
+      return empty_string();
+    }
+    impl_move_gen_override_record_type(config, MOVE_RECORD_BEST);
+  } else if (!config->move_list ||
+             move_list_get_count(config->move_list) == 0) {
+    const Rack *player_rack = player_get_rack(game_get_player(
+        config->game, game_get_player_on_turn_index(config->game)));
+    if (rack_is_empty(player_rack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_COMMIT_EMPTY_RACK,
+          string_duplicate("cannot generate best play with an empty rack"));
       return empty_string();
     }
     impl_move_gen_override_record_type(config, MOVE_RECORD_BEST);

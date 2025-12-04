@@ -52,6 +52,7 @@ uint64_t bai_result_get_time_limit_seconds(const BAIResult *bai_result) {
   return bai_result->time_limit_seconds;
 }
 
+// Sets user interrupt or timeout status if the conditions for either are met
 bai_result_status_t bai_result_set_and_get_status(BAIResult *bai_result,
                                                   const bool user_interrupt) {
   cpthread_mutex_lock(&bai_result->mutex);
