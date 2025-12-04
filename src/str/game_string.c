@@ -38,6 +38,7 @@ enum {
   MAX_MOVES = 20,
   UNSEEN_START_ROW = 1,
   GAME_EVENT_START_ROW = 10,
+  FINAL_PASS_PROMPT_ROW = BOARD_DIM - 1,
 };
 
 bool should_print_escape_codes(const GameStringOptions *game_string_options) {
@@ -361,6 +362,13 @@ void string_builder_add_game(const Game *game, const MoveList *move_list,
                                                bag_letters[letter_index++]);
         string_builder_add_spaces(game_string, 1);
       }
+    } else if (i == FINAL_PASS_PROMPT_ROW &&
+               game_history_get_waiting_for_final_pass_or_challenge(
+                   game_history) &&
+               game_history_get_num_events(game_history) ==
+                   game_history_get_num_played_events(game_history)) {
+      string_builder_add_string(game_string,
+                                "Waiting for final pass or challenge...");
     } else if (add_game_event) {
       if (i == GAME_EVENT_START_ROW) {
         game_event_index = game_history_get_num_played_events(game_history) - 1;
