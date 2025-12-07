@@ -366,10 +366,6 @@ double config_get_stop_cond_pct(const Config *config) {
   return config->stop_cond_pct;
 }
 
-int config_get_time_limit_seconds(const Config *config) {
-  return config->time_limit_seconds;
-}
-
 uint64_t config_get_seed(const Config *config) { return config->seed; }
 
 double config_get_tt_fraction_of_mem(const Config *config) {
@@ -2395,7 +2391,7 @@ char *str_api_show_inference(Config *config, ErrorStack *error_stack) {
 
 // Show endgame
 
-char *impl_show_endgame(Config *config, ErrorStack *error_stack) {
+char *impl_show_endgame(const Config *config, ErrorStack *error_stack) {
   if (!config->game || !endgame_results_get_valid_for_current_game_state(
                            config->endgame_results)) {
     error_stack_push(error_stack, ERROR_STATUS_NO_ENDGAME_TO_SHOW,

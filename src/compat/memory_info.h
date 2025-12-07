@@ -121,8 +121,7 @@ static inline int get_num_cores(void) {
 
 #endif
 
-  // cppcheck-suppress knownConditionTrueFalse
-  return core_count > 0 ? core_count : 1;
+  return core_count;
 }
 
 #endif

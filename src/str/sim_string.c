@@ -1,22 +1,24 @@
 
+#include "../def/equity_defs.h"
+#include "../def/game_history_defs.h"
 #include "../ent/bai_result.h"
 #include "../ent/board.h"
 #include "../ent/game.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "move_string.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 
-bool string_builder_add_sim_stats_with_display_lock(StringBuilder *sb,
-                                                    const Game *game,
-                                                    SimResults *sim_results,
-                                                    int max_num_display_plays,
-                                                    bool use_ucgi_format) {
+bool string_builder_add_sim_stats_with_display_lock(
+    StringBuilder *sb, const Game *game, const SimResults *sim_results,
+    int max_num_display_plays, bool use_ucgi_format) {
   const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
   int num_display_plays = num_simmed_plays;
   if (num_display_plays > max_num_display_plays) {

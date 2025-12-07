@@ -66,9 +66,16 @@ will play 50 games in the CSW21 lexicon with 4 threads and print the results in 
 All commands and settings can be specified by the shortest unambiguous string. For example, the generate command can be specified by any of the following strings:
 
 ```
-generat
-genera
-gen
+magpie> generat
+magpie> genera
+magpie> gen
+```
+
+Some commands have one character shortcuts such as the `generate` and `shgame` commands:
+
+```
+magpie> g
+magpie> s
 ```
 
 To print more details about commands and settings, run the 'help' command:
@@ -147,7 +154,7 @@ Currently, the API library has no clients, so if you are interested in this feat
 
 ## Data
 
-The `setup.sh` command will download the necessary lexical data for several common lexica into the `./data` directory organized into 4 subdirectories:
+The `setup.sh` command will download the necessary lexical data for several common lexica into the `./data` directory organized into 4 subdirectories. All lexical, board layout, and strategy data must be saved in their respective directories for MAGPIE to find them. When specifying input data in MAGPIE, always use the basename without the file extension.
 
 ### layouts
 
@@ -243,7 +250,7 @@ sim the generated moves:
 magpie> sim
 ```
 
-to generate and sim at the same time, use the `gsim` command:
+to generate moves and then sim them in a single command, use the `gsim` command:
 
 ```
 magpie> gsim
@@ -318,7 +325,7 @@ To play two lexica against each other to see which is stronger, you can create t
 magpie> set -ld english
 ```
 
-then convert the text files to the KWG and WMP:
+then convert the text files to the KWG and WMP. The following example assumes a text file called `CSW50.txt` is saved to `./data/lexica`:
 
 ```
 magpie> convert txt2kwg CSW50

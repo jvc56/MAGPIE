@@ -62,7 +62,7 @@ bai_result_status_t bai_result_set_and_get_status(BAIResult *bai_result,
       bai_result->status = BAI_RESULT_STATUS_USER_INTERRUPT;
     } else if (bai_result->time_limit_seconds > 0 &&
                bai_result_get_elapsed_seconds(bai_result) >=
-                   bai_result->time_limit_seconds) {
+                   (double)bai_result->time_limit_seconds) {
       bai_result->status = BAI_RESULT_STATUS_TIMEOUT;
     }
   }

@@ -257,7 +257,10 @@ char *get_string_from_file_or_die(const char *filename) {
   return result;
 }
 
-void remove_or_die(const char *filename) { assert(remove(filename) == 0); }
+void remove_or_die(const char *filename) {
+  const int remove_result = remove(filename);
+  assert(remove_result);
+}
 
 // Comparison function for qsort
 int compare_moves_for_sml(const void *a, const void *b) {

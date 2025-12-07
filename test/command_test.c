@@ -659,10 +659,15 @@ void run_short_autoplay(const char *initial_cmd) {
 }
 
 void test_save_settings(void) {
-  remove_or_die(DEFAULT_TEST_SETTINGS_FILENAME);
+  const int remove_result = remove(DEFAULT_TEST_SETTINGS_FILENAME);
+  if (remove_result != 0) {
+    printf("no existing test settings file\n");
+  } else {
+    printf("removed existing test settings file\n");
+  }
 
-  run_short_autoplay(
-      "set -mode sync -lex CSW21 -bb 73 -gp true -savesettings true -hr false");
+  run_short_autoplay("set -mode sync -lex CSW21 -bb 73 -gp true "
+                     "-savesettings true -hr false");
 
   char *save1 = get_string_from_file_or_die(DEFAULT_TEST_SETTINGS_FILENAME);
 

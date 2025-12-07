@@ -962,7 +962,8 @@ StringGrid *string_grid_create(int rows, int cols, int col_padding) {
   string_grid->cols = cols;
   string_grid->col_padding = col_padding;
   string_grid->max_col_widths = calloc_or_die(cols, sizeof(int));
-  string_grid->cells = calloc_or_die((size_t)(rows * cols), sizeof(char *));
+  string_grid->cells =
+      calloc_or_die((size_t)rows * (size_t)cols, sizeof(char *));
   return string_grid;
 }
 
