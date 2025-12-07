@@ -1,7 +1,6 @@
 #include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
 #include "../src/compat/linenoise.h"
-#include "../src/def/config_defs.h"
 #include "../src/def/cpthread_defs.h"
 #include "../src/def/exec_defs.h"
 #include "../src/def/thread_control_defs.h"
@@ -660,7 +659,7 @@ void run_short_autoplay(const char *initial_cmd) {
 }
 
 void test_save_settings(void) {
-  remove(DEFAULT_TEST_SETTINGS_FILENAME);
+  remove_or_die(DEFAULT_TEST_SETTINGS_FILENAME);
 
   run_short_autoplay(
       "set -mode sync -lex CSW21 -bb 73 -gp true -savesettings true -hr false");
@@ -671,7 +670,7 @@ void test_save_settings(void) {
 
   char *save2 = get_string_from_file_or_die(DEFAULT_TEST_SETTINGS_FILENAME);
 
-  remove(DEFAULT_TEST_SETTINGS_FILENAME);
+  remove_or_die(DEFAULT_TEST_SETTINGS_FILENAME);
 
   assert_strings_equal(save1, save2);
 

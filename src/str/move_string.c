@@ -1,3 +1,4 @@
+#include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../ent/board.h"
@@ -5,11 +6,11 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/rack.h"
-#include "../ent/thread_control.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "letter_distribution_string.h"
 #include "rack_string.h"
+#include <stddef.h>
 #include <stdint.h>
 
 void string_builder_add_move_description(StringBuilder *move_string_builder,
@@ -270,7 +271,7 @@ void string_builder_add_move_list(StringBuilder *string_builder,
   const uint16_t rack_dist_size = rack_get_dist_size(rack);
   for (int i = 0; i < num_moves_to_display; i++) {
     curr_col = 0;
-    Move *move = move_list_get_move(move_list, i);
+    const Move *move = move_list_get_move(move_list, i);
 
     string_grid_set_cell(string_grid, curr_row, curr_col++,
                          get_formatted_string("%d: ", i + 1));

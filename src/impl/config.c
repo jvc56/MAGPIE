@@ -17,7 +17,6 @@
 #include "../def/validated_move_defs.h"
 #include "../ent/autoplay_results.h"
 #include "../ent/bag.h"
-#include "../ent/bai_result.h"
 #include "../ent/board.h"
 #include "../ent/board_layout.h"
 #include "../ent/conversion_results.h"
@@ -799,21 +798,18 @@ arg_token_t get_token_from_string(Config *config, const char *arg_name,
 }
 
 // Help
-
-void add_help_arg_to_string_builder(const Config *config, uint token,
+void add_help_arg_to_string_builder(const Config *config, int token,
                                     StringBuilder *sb,
                                     const bool show_async_commands) {
   const char *examples[10] = {NULL};
   const char *usages[10] = {NULL};
   const char *text = NULL;
-  arg_token_t arg_token;
-  async_token_t async_token;
   bool is_command = false;
   bool is_hotkey = false;
   const char *name = NULL;
   const char *shortest_unambiguous_name = NULL;
   if (show_async_commands) {
-    async_token = token;
+    async_token_t async_token = token;
     switch (async_token) {
     case ASYNC_STOP_COMMAND_TOKEN:
       usages[0] = "";
@@ -832,7 +828,7 @@ void add_help_arg_to_string_builder(const Config *config, uint token,
       break;
     }
   } else {
-    arg_token = token;
+    arg_token_t arg_token = token;
     const ParsedArg *parg = config_get_parg(config, arg_token);
     is_command = parg->is_command;
     is_hotkey = parg->is_hotkey;
@@ -1009,8 +1005,8 @@ void add_help_arg_to_string_builder(const Config *config, uint token,
       examples[0] = "2";
       examples[1] = "11d ANTIQuES";
       examples[2] = "ex ABC";
-      examples[2] = "ex ABC HIJKLMN";
-      examples[3] = "pass";
+      examples[3] = "ex ABC HIJKLMN";
+      examples[4] = "pass";
       text =
           "Commits the move to the game history. When committing an exchange, "
           "the rack after the exchange can be specified so that six passes "
@@ -1321,8 +1317,8 @@ void add_help_arg_to_string_builder(const Config *config, uint token,
       usages[0] = "<true_or_false>";
       examples[0] = "true";
       examples[1] = "false";
-      text =
-          "Specifies whether or not to use the small move format for endgames.";
+      text = "Specifies whether or not to run and use the inference result "
+             "when simulating.";
       break;
     case ARG_TOKEN_WRITE_BUFFER_SIZE:
       usages[0] = "<write_buffer_size>";

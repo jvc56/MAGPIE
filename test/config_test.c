@@ -854,7 +854,8 @@ void display_whole_game(const char *game_to_load) {
       string_builder_clear(cmd_sb);
       if (error_code == ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE) {
         break;
-      } else if (error_code != ERROR_STATUS_SUCCESS) {
+      }
+      if (error_code != ERROR_STATUS_SUCCESS) {
         log_fatal("display game test encountered unexpected error: %d",
                   error_code);
       }
@@ -1924,14 +1925,10 @@ void test_config_export(void) {
          int_to_equity(0));
   string_builder_clear(sb_load_cmd);
 
-  int remove_result = remove(TEST_GCG_FILENAME);
-  assert(remove_result == 0);
-  remove_result = remove(default_name_3);
-  assert(remove_result == 0);
-  remove_result = remove(default_name_2);
-  assert(remove_result == 0);
-  remove_result = remove(default_name_1);
-  assert(remove_result == 0);
+  remove_or_die(TEST_GCG_FILENAME);
+  remove_or_die(default_name_3);
+  remove_or_die(default_name_2);
+  remove_or_die(default_name_1);
 
   string_builder_destroy(sb_load_cmd);
   free(default_name_3);

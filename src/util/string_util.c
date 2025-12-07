@@ -962,7 +962,7 @@ StringGrid *string_grid_create(int rows, int cols, int col_padding) {
   string_grid->cols = cols;
   string_grid->col_padding = col_padding;
   string_grid->max_col_widths = calloc_or_die(cols, sizeof(int));
-  string_grid->cells = calloc_or_die(rows * cols, sizeof(char *));
+  string_grid->cells = calloc_or_die((size_t)(rows * cols), sizeof(char *));
   return string_grid;
 }
 
@@ -1008,55 +1008,54 @@ string_builder_draw_horizontal_border(StringBuilder *string_builder,
   string_builder_add_string(string_builder, "\n");
 }
 
-void string_builder_add_string_grid(StringBuilder *string_builder,
-                                    const StringGrid *string_grid,
+void string_builder_add_string_grid(StringBuilder *sb, const StringGrid *sg,
                                     const bool add_border) {
-  for (int c = 0; c < string_grid->cols; c++) {
-    string_grid->max_col_widths[c] = 0; // Initialize to 0 or 1
-    for (int r = 0; r < string_grid->rows; r++) {
-      const int index = string_grid_get_cell_index(string_grid, r, c);
-      const char *cell_value = string_grid->cells[index];
+  for (int c = 0; c < sg->cols; c++) {
+    sg->max_col_widths[c] = 0; // Initialize to 0 or 1
+    for (int r = 0; r < sg->rows; r++) {
+      const int index = string_grid_get_cell_index(sg, r, c);
+      const char *cell_value = sg->cells[index];
       if (cell_value) {
         const size_t cell_value_length =
-            string_length(cell_value) + string_grid->col_padding;
-        if (cell_value_length > (size_t)string_grid->max_col_widths[c]) {
-          string_grid->max_col_widths[c] = (int)cell_value_length;
+            string_length(cell_value) + sg->col_padding;
+        if (cell_value_length > (size_t)sg->max_col_widths[c]) {
+          sg->max_col_widths[c] = (int)cell_value_length;
         }
       }
     }
-    if (string_grid->max_col_widths[c] < 1) {
-      string_grid->max_col_widths[c] = 1;
+    if (sg->max_col_widths[c] < 1) {
+      sg->max_col_widths[c] = 1;
     }
   }
 
   if (add_border) {
-    string_builder_draw_horizontal_border(string_builder, string_grid);
+    string_builder_draw_horizontal_border(sb, sg);
   }
 
-  for (int r = 0; r < string_grid->rows; r++) {
+  for (int r = 0; r < sg->rows; r++) {
     if (add_border) {
-      string_builder_add_string(string_builder, "|");
+      string_builder_add_string(sb, "|");
     }
 
-    for (int c = 0; c < string_grid->cols; c++) {
-      const int index = string_grid_get_cell_index(string_grid, r, c);
-      const char *cell_value = string_grid->cells[index];
+    for (int c = 0; c < sg->cols; c++) {
+      const int index = string_grid_get_cell_index(sg, r, c);
+      const char *cell_value = sg->cells[index];
       if (!cell_value) {
         cell_value = "";
       }
 
-      string_builder_add_formatted_string(
-          string_builder, "%-*s", string_grid->max_col_widths[c], cell_value);
+      string_builder_add_formatted_string(sb, "%-*s", sg->max_col_widths[c],
+                                          cell_value);
 
       if (add_border) {
-        string_builder_add_string(string_builder, "|");
+        string_builder_add_string(sb, "|");
       }
     }
 
-    string_builder_add_string(string_builder, "\n");
+    string_builder_add_string(sb, "\n");
 
     if (add_border) {
-      string_builder_draw_horizontal_border(string_builder, string_grid);
+      string_builder_draw_horizontal_border(sb, sg);
     }
   }
 }

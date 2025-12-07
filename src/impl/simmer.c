@@ -1,11 +1,9 @@
 #include "simmer.h"
 
 #include "../def/thread_control_defs.h"
-#include "../ent/bai_result.h"
 #include "../ent/move.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
-#include "../str/sim_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "bai.h"

@@ -255,7 +255,7 @@ to commit a play, use the commit command:
 magpie> c 1
 ```
 
-alternatively, the current best move can be commited with the `topcommit` command:
+alternatively, the current best move can be commited with the `tcommit` command:
 
 ```
 magpie> t

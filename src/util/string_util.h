@@ -111,7 +111,6 @@ void string_grid_destroy(StringGrid *string_grid);
 int string_grid_get_cell_index(const StringGrid *string_grid, int row, int col);
 void string_grid_set_cell(StringGrid *string_grid, int row, int col,
                           char *value);
-void string_builder_add_string_grid(StringBuilder *sb,
-                                    const StringGrid *string_grid,
+void string_builder_add_string_grid(StringBuilder *sb, const StringGrid *sg,
                                     bool add_border);
 #endif

@@ -2,12 +2,12 @@
 
 #include "../def/board_defs.h"
 #include "../def/game_defs.h"
+#include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/bonus_square.h"
-#include "../ent/endgame_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
@@ -15,10 +15,9 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
-#include "../ent/thread_control.h"
+#include "../ent/validated_move.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "bag_string.h"
 #include "equity_string.h"
 #include "letter_distribution_string.h"
 #include "move_string.h"
@@ -27,6 +26,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 // Display formatting constants
@@ -312,16 +312,17 @@ void string_builder_add_game(const Game *game, const MoveList *move_list,
   }
 
   int player_on_turn_index = game_get_player_on_turn_index(game);
-  const bool game_over = game_get_game_end_reason(game) != GAME_END_REASON_NONE;
+  const bool game_is_over =
+      game_get_game_end_reason(game) != GAME_END_REASON_NONE;
   string_builder_add_player_row(ld, player0, game_string_options, player1_name,
                                 game_string, player_name_max_length,
-                                player_on_turn_index == 0, game_over);
+                                player_on_turn_index == 0, game_is_over);
   string_builder_add_string(game_string, "\n");
 
   string_builder_add_board_top_border(game_string_options, game_string);
   string_builder_add_player_row(ld, player1, game_string_options, player2_name,
                                 game_string, player_name_max_length,
-                                player_on_turn_index == 1, game_over);
+                                player_on_turn_index == 1, game_is_over);
   string_builder_add_string(game_string, "\n");
 
   const int num_bag_letters = bag_get_letters(bag);
@@ -470,7 +471,7 @@ void string_builder_add_game(const Game *game, const MoveList *move_list,
   string_builder_add_string(game_string, "\n");
   int num_moves_to_display = 0;
   if (move_list) {
-    move_list_get_count(move_list);
+    num_moves_to_display = move_list_get_count(move_list);
     if (num_moves_to_display > MAX_MOVES) {
       num_moves_to_display = MAX_MOVES;
     }

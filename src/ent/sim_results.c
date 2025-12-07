@@ -4,15 +4,11 @@
 #include "../def/cpthread_defs.h"
 #include "../def/game_defs.h"
 #include "../def/sim_defs.h"
-#include "../str/move_string.h"
 #include "../util/io_util.h"
-#include "../util/string_util.h"
 #include "bai_result.h"
-#include "board.h"
 #include "equity.h"
-#include "game.h"
-#include "letter_distribution.h"
 #include "move.h"
+#include "rack.h"
 #include "stats.h"
 #include "win_pct.h"
 #include "xoshiro.h"
@@ -307,7 +303,8 @@ void sim_results_set_valid_for_current_game_state(SimResults *sim_results,
   sim_results->valid_for_current_game_state = valid;
 }
 
-bool sim_results_get_valid_for_current_game_state(SimResults *sim_results) {
+bool sim_results_get_valid_for_current_game_state(
+    const SimResults *sim_results) {
   return sim_results->valid_for_current_game_state;
 }
 
@@ -391,8 +388,8 @@ sim_results_get_display_info(const SimResults *sim_results, int index) {
   return &sim_results->simmed_play_display_infos[index];
 }
 
-bool sim_results_plays_are_similar(SimResults *sim_results, const int sp1_index,
-                                   const int sp2_index) {
+bool sim_results_plays_are_similar(const SimResults *sim_results,
+                                   const int sp1_index, const int sp2_index) {
   SimmedPlay *sp1 = sim_results_get_simmed_play(sim_results, sp1_index);
   if (sp1->similarity_key == 0) {
     sp1->similarity_key = move_get_similarity_key(

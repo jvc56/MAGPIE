@@ -16,7 +16,6 @@
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/game_history.h"
-#include "../src/ent/inference_results.h"
 #include "../src/ent/klv.h"
 #include "../src/ent/klv_csv.h"
 #include "../src/ent/kwg.h"
@@ -35,7 +34,6 @@
 #include "../src/impl/move_gen.h"
 #include "../src/impl/wmp_move_gen.h"
 #include "../src/str/game_string.h"
-#include "../src/str/inference_string.h"
 #include "../src/str/move_string.h"
 #include "../src/str/rack_string.h"
 #include "../src/util/io_util.h"
@@ -258,6 +256,8 @@ char *get_string_from_file_or_die(const char *filename) {
   error_stack_destroy(error_stack);
   return result;
 }
+
+void remove_or_die(const char *filename) { assert(remove(filename) == 0); }
 
 // Comparison function for qsort
 int compare_moves_for_sml(const void *a, const void *b) {

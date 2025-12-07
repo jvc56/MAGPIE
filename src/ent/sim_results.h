@@ -69,11 +69,12 @@ void sim_results_get_nth_best_move(const SimResults *sim_results, int n,
                                    Move *move);
 void sim_results_set_valid_for_current_game_state(SimResults *sim_results,
                                                   bool valid);
-bool sim_results_get_valid_for_current_game_state(SimResults *sim_results);
+bool sim_results_get_valid_for_current_game_state(
+    const SimResults *sim_results);
 bool sim_results_lock_and_sort_display_infos(SimResults *sim_results);
 void sim_results_unlock_display_infos(SimResults *sim_results);
 SimmedPlayDisplayInfo *
 sim_results_get_display_info(const SimResults *sim_results, int index);
-bool sim_results_plays_are_similar(SimResults *sim_results, int i, int j);
+bool sim_results_plays_are_similar(const SimResults *sim_results, int i, int j);
 
 #endif

@@ -199,10 +199,10 @@ void string_builder_add_inference_type(
 
 void string_builder_add_inference_description(
     StringBuilder *inference_string, const LetterDistribution *ld,
-    InferenceResults *inference_results, StringBuilder *tmp_sb) {
-  int target_number_of_tiles_exchanged =
+    const InferenceResults *inference_results, StringBuilder *tmp_sb) {
+  const int target_number_of_tiles_exchanged =
       inference_results_get_target_number_of_tiles_exchanged(inference_results);
-  bool is_exchange = target_number_of_tiles_exchanged > 0;
+  const bool is_exchange = target_number_of_tiles_exchanged > 0;
   const Rack *target_played_tiles =
       inference_results_get_target_played_tiles(inference_results);
   const Rack *target_unplayed_tiles =

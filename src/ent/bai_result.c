@@ -4,6 +4,7 @@
 #include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
 #include "../util/io_util.h"
+#include <stdint.h>
 #include <stdlib.h>
 
 struct BAIResult {

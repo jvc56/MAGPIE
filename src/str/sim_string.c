@@ -1,7 +1,12 @@
 
+#include "../ent/bai_result.h"
+#include "../ent/board.h"
 #include "../ent/game.h"
+#include "../ent/move.h"
+#include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
+#include "../util/string_util.h"
 #include "move_string.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -167,8 +172,6 @@ bool string_builder_add_sim_stats_with_display_lock(StringBuilder *sb,
   }
 
   string_grid_set_cell(summary_sg, curr_row, 1, status_str);
-  curr_row++;
-
   string_builder_add_string_grid(sb, summary_sg, false);
   string_grid_destroy(summary_sg);
 

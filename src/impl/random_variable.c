@@ -6,7 +6,6 @@
 #include "../def/rack_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
-#include "../ent/bai_result.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
@@ -174,7 +173,7 @@ bool rv_normal_are_similar(RandomVariables *rvs, const int i, const int j) {
   if (i == j) {
     return false;
   }
-  RVNormal *rv_normal = (RVNormal *)rvs->data;
+  const RVNormal *rv_normal = (RVNormal *)rvs->data;
   return fabs(rv_normal->means_and_vars[(ptrdiff_t)(i * 2)] -
               rv_normal->means_and_vars[(ptrdiff_t)(j * 2)]) <
              SIMILARITY_EPSILON &&
@@ -246,7 +245,7 @@ bool rv_normal_predetermined_are_similar(RandomVariables *rvs, const int i,
   if (i == j) {
     return false;
   }
-  RVNormalPredetermined *rv_normal_predetermined =
+  const RVNormalPredetermined *rv_normal_predetermined =
       (RVNormalPredetermined *)rvs->data;
   return fabs(rv_normal_predetermined->means_and_vars[(ptrdiff_t)(i * 2)] -
               rv_normal_predetermined->means_and_vars[(ptrdiff_t)(j * 2)]) <
