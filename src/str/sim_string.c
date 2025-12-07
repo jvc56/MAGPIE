@@ -3,6 +3,7 @@
 #include "../def/game_history_defs.h"
 #include "../ent/bai_result.h"
 #include "../ent/board.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"

@@ -259,7 +259,12 @@ char *get_string_from_file_or_die(const char *filename) {
 
 void remove_or_die(const char *filename) {
   const int remove_result = remove(filename);
-  assert(remove_result);
+  if (remove_result != 0) {
+    int error_number = errno;
+    const char *system_error_message = strerror(error_number);
+    log_fatal("failed to remove file '%s': %s (%d)", filename,
+              system_error_message, error_number);
+  }
 }
 
 // Comparison function for qsort
