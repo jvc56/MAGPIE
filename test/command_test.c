@@ -3,6 +3,7 @@
 #include "../src/compat/linenoise.h"
 #include "../src/def/config_defs.h"
 #include "../src/def/cpthread_defs.h"
+#include "../src/def/exec_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/move.h"
 #include "../src/ent/thread_control.h"
@@ -550,14 +551,16 @@ void test_exec_async_command(void) {
   fflush_or_die(input_writer);
   ctime_nap(1.0);
   // Make sure the status command doesn't crash anything
-  fprintf_or_die(input_writer, "status\n");
+  fprintf_or_die(input_writer, ASYNC_STATUS_COMMAND_STRING);
+  fprintf_or_die(input_writer, "\n");
   fflush_or_die(input_writer);
   ctime_nap(1.0);
   // Interrupt the autoplay which won't finish in 1 second
-  fprintf_or_die(input_writer, "stop\n");
+  fprintf_or_die(input_writer, ASYNC_STOP_COMMAND_STRING);
+  fprintf_or_die(input_writer, "\n");
   fflush_or_die(input_writer);
   ctime_nap(1.0);
-  fprintf_or_die(input_writer, "quit\n");
+  fprintf_or_die(input_writer, TERMINATE_KEYWORD "\n");
   fflush_or_die(input_writer);
   ctime_nap(1.0);
 
@@ -604,8 +607,9 @@ void test_exec_sync_command(void) {
   write_to_stream(input_writer, "autoplay game 10 -lex CSW21 -s1 equity -s2 "
                                 "equity -gp true  -printonfinish true\n");
   // Stop should have no effect and appear as an error
-  write_to_stream(input_writer, "stop\n");
-  write_to_stream(input_writer, "quit\n");
+  write_to_stream(input_writer, ASYNC_STOP_COMMAND_STRING);
+  fprintf_or_die(input_writer, "\n");
+  write_to_stream(input_writer, TERMINATE_KEYWORD "\n");
   fclose_or_die(input_writer);
 
   // Wait for magpie to quit
@@ -642,7 +646,7 @@ void run_short_autoplay(const char *initial_cmd) {
   cpthread_detach(cmd_execution_thread);
 
   write_to_stream(input_writer, "autoplay games 1\n");
-  write_to_stream(input_writer, "quit\n");
+  write_to_stream(input_writer, TERMINATE_KEYWORD "\n");
   fclose_or_die(input_writer);
 
   // Wait for magpie to quit

@@ -6,6 +6,7 @@
 #include "../def/bai_defs.h"
 #include "../def/config_defs.h"
 #include "../def/equity_defs.h"
+#include "../def/exec_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/move_defs.h"
@@ -799,652 +800,705 @@ arg_token_t get_token_from_string(Config *config, const char *arg_name,
 
 // Help
 
-void add_help_arg_to_string_builder(const Config *config, arg_token_t arg_token,
-                                    StringBuilder *sb) {
+void add_help_arg_to_string_builder(const Config *config, uint token,
+                                    StringBuilder *sb,
+                                    const bool show_async_commands) {
   const char *examples[10] = {NULL};
   const char *usages[10] = {NULL};
   const char *text = NULL;
-  switch (arg_token) {
-  case ARG_TOKEN_HELP:
-    usages[0] = "[<command_or_arg>]";
-    examples[0] = "";
-    examples[1] = "infer";
-    text = "Prints a help message for the given command or argument. If no "
-           "argument is "
-           "given, prints help messages for all commands and arguments.";
-    break;
-  case ARG_TOKEN_SET:
-    usages[0] = "<option1> <value1> <option2> <value2> ...";
-    examples[0] = "-numplays 15 -minp 100";
-    text = "Sets any number of specified options.";
-    break;
-  case ARG_TOKEN_CGP:
-    usages[0] = "<board> <racks> <scores> <consecutive_zeros>";
-    examples[0] = "15/15/15/15/14V/14A/14N/6GUM5N/7PEW4E/9EF3R/9BEVELS/15/15/"
-                  "15/15 AEEIILZ/CDGKNOR 56/117 0";
-    text = "Loads the specified CGP into the game.";
-    break;
-  case ARG_TOKEN_MOVES:
-    usages[0] = "<move>";
-    usages[1] = "<move>,<move>,...";
-    examples[0] = " 8F.LIN";
-    examples[1] = " 8F.LIN,8D.ZILLION,8F.ZILLION";
-    text = "Adds the CGP moves to the move list. Multiple moves must be "
-           "delimited by commas as opposed to spaces.";
-    break;
-  case ARG_TOKEN_RACK:
-    usages[0] = "<rack>";
-    text = "Sets the rack for the player on turn.";
-    break;
-  case ARG_TOKEN_GEN:
-    usages[0] = "";
-    text = "Generates moves for the current position.";
-    break;
-  case ARG_TOKEN_SIM:
-    usages[0] = "[<opponent_known_rack>]";
-    examples[0] = "";
-    examples[1] = "ABCD";
-    examples[2] = "-";
-    text = "Runs a Monte Carlo simulation for the current position using the "
-           "specified opponent rack. If no rack is specified, the opponent "
-           "known rack from the game history is used. If the game history "
-           "has a known rack for the opponent, you can use '-' to force the "
-           "sim to use a completely random rack.";
-    break;
-  case ARG_TOKEN_GEN_AND_SIM:
-    usages[0] = "[<opponent_known_rack>]";
-    examples[0] = "";
-    examples[1] = "ABCD";
-    examples[2] = "-";
-    text = "Generates moves for the current position and runs a simulation.";
-    break;
-  case ARG_TOKEN_INFER:
-    usages[0] = "";
-    usages[1] = "<target_nickname> <target_played_tiles> <target_score> "
-                "[<target_known_rack>] [<nontarget_known_rack>]";
-    usages[2] = "<target_nickname> <target_num_exchanged> "
-                "[<target_known_rack>] [<nontarget_known_rack>]";
-    examples[0] = "";
-    examples[1] = "josh ABCDE 13";
-    examples[2] = "josh ABCDE 13 ABCD";
-    examples[3] = "josh ABCDE 13 ABCD EFG";
-    examples[4] = "josh 3 ABCDE";
-    examples[5] = "josh 3 ABCDE EFG";
-    text = "Runs an exhaustive inference for what the opponent could have kept "
-           "based on their previous play. If no arguments are specified, the "
-           "inference will use the previous play in the game history.";
-    break;
-  case ARG_TOKEN_ENDGAME:
-    usages[0] = "";
-    text = "Runs the endgame solver.";
-    break;
-  case ARG_TOKEN_AUTOPLAY:
-    usages[0] = "<type1> <num_games>";
-    usages[1] = "<type1>,<type2>,... <num_games>";
-    examples[0] = "games 100";
-    examples[1] = "games,winpct 1000";
-    examples[2] = "leave,winpct 2000";
-    text = "Runs the autoplay command with the specified recorder(s). If the "
-           "game pairs option is set to true, autoplay will run <num_games> "
-           "game pairs resulting in a total of 2 * <num_games> games.";
-    break;
-  case ARG_TOKEN_CONVERT:
-    usages[0] = "<type> <input_name_without_extension> "
-                "[<output_name_without_extension>]";
-    examples[0] = "klv2csv CSW21";
-    examples[1] = "klv2csv CSW21 CSW21_new";
-    examples[2] = "text2wordmap NWL20";
-    text = "Runs the convert command for the specified type with the given "
-           "input and output names. If no output name is specified, the input "
-           "name will be used. Note that this will not overwrite the input "
-           "since the output filename will have a different extension.";
-    break;
-  case ARG_TOKEN_LEAVE_GEN:
-    usages[0] = "<gen1_min_rack_target>,<gen1_min_rack_target>,... "
-                "[<games_before_force_draw>]";
-    examples[0] = "100,200,500,1000,1000,1000 100000000";
-    text =
-        "Generates leaves for the current lexicon. The minimum rack targets "
-        "specify the required minimum number of rack occurrences for all "
-        "racks before the next generation can start. The games before force "
-        "draw argument specifies the number of 'normal' games to play before "
-        "rare racks are 'forced' to occur so that they reach the minimum. The "
-        "example shows the currently recommended values. Emperical testing has "
-        "show that there is little improvement after the 5th generation. The "
-        "files produced by each generation are labeled *_gen_<gen_number>, so "
-        "if the command is stopped early, reinvoke it with using leaves of the "
-        "last generation, otherwise the leavegen command will start over at "
-        "the first generation. It is recommended to use the autoplay command "
-        "with game pairs to evaluate the resulting leaves. Depending on your "
-        "hardware, this command could take days or weeks.";
-    break;
-  case ARG_TOKEN_CREATE_DATA:
-    usages[0] = "<type> <output_name> [<letter_distribution>]";
-    examples[0] = "klv CSW50";
-    examples[1] = "klv CSW50 english";
-    text = "Creates a zeroed or empty data file of the specified type. If no "
-           "letter distribution is specified, the current letter distribution "
-           "is used. Currently, only the 'klv' type is supported.";
-    break;
-  case ARG_TOKEN_LOAD:
-    usages[0] = "<source_identifier>";
-    examples[0] = "54938";
-    examples[1] = "https://cross-tables.com/annotated.php?u=54938";
-    examples[2] = "XuoAntzD";
-    examples[3] = "https://woogles.io/game/XuoAntzD";
-    examples[4] =
-        "https://www.cross-tables.com/annotated/selfgcg/556/anno55690.gcg";
-    examples[5] = "testdata/gcgs/success_six_pass.gcg";
-    examples[6] = "some_game.gcg";
-    text =
-        "Loads the game using the specified GCG. The source identifier can "
-        "be a cross-tables ID or game URL, a woogles.io ID or game URL, a URL "
-        "to the GCG file, or a local GCG file.";
-    break;
-  case ARG_TOKEN_NEW_GAME:
-    usages[0] = "[<player_one_name>] [<player_two_name>]";
-    examples[0] = "";
-    examples[1] = "Alice";
-    examples[2] = "Alice Bob";
-    text = "Starts a new game, resetting the previous game and game history. "
-           "Player names without whitespace can be optionally specified.";
-    break;
-  case ARG_TOKEN_EXPORT:
-    usages[0] = "[<output_gcg_filename>]";
-    examples[0] = "";
-    examples[1] = "my_game";
-    examples[2] = "other_game.gcg";
-    text = "Saves the current game history to the specified GCG file. If no "
-           "GCG file is specified, a default name will be used. If no '.gcg' "
-           "extension is specified, it will be added to the filename "
-           "automatically.";
-    break;
-  case ARG_TOKEN_COMMIT:
-    usages[0] = "<move_index>";
-    usages[1] = "<position> <tiles>";
-    usages[2] = "ex <exchanged_tiles> [<rack_after_exchange>]";
-    usages[3] = "pass";
-    examples[0] = "2";
-    examples[1] = "11d ANTIQuES";
-    examples[2] = "ex ABC";
-    examples[2] = "ex ABC HIJKLMN";
-    examples[3] = "pass";
-    text = "Commits the move to the game history. When committing an exchange, "
-           "the rack after the exchange can be specified so that six passes "
-           "can be correctly scored.";
-    break;
-  case ARG_TOKEN_TOP_COMMIT:
-    usages[0] = "[<rack>]";
-    examples[0] = "";
-    examples[1] = "RETINAS";
-    text = "Commits the static best move if a rack is specified or no sim "
-           "results are available. Otherwise, commits the best move by win "
-           "percentage according to the sim results.";
-    break;
-  case ARG_TOKEN_CHALLENGE:
-    usages[0] = "[<challenge_bonus_points>]";
-    examples[0] = "";
-    examples[1] = "7";
-    text = "Adds a challenge bonus to the previous tile placement move. "
-           "Challenges can be added mid-game without truncating the game "
-           "history. If no challenge bonus is specified, the current value "
-           "will be used.";
-    break;
-  case ARG_TOKEN_UNCHALLENGE:
-    usages[0] = "";
-    text = "Removes the challenge bonus from the previous tile placement move. "
-           "Challenges can be removed mid-game without truncating the game "
-           "history.";
-    break;
-  case ARG_TOKEN_OVERTIME:
-    usages[0] = "<player_nickname> <overtime_penalty>";
-    examples[0] = "josh 5";
-    examples[1] = "josh 9";
-    text = "Adds an overtime penalty for the given player. Overtime penalties "
-           "can only be applied after the game is over.";
-    break;
-  case ARG_TOKEN_SWITCH_NAMES:
-    usages[0] = "";
-    text = "Switches the names of the players.";
-    break;
-  case ARG_TOKEN_SHOW_GAME:
-    usages[0] = "";
-    text = "Shows the current game.";
-    break;
-  case ARG_TOKEN_SHOW_MOVES:
-    usages[0] = "";
-    text = "Shows the moves or the sim results if available.";
-    break;
-  case ARG_TOKEN_SHOW_INFERENCE:
-    usages[0] = "";
-    text = "Shows the inference result.";
-    break;
-  case ARG_TOKEN_SHOW_ENDGAME:
-    usages[0] = "";
-    text = "Shows the endgame solver result.";
-    break;
-  case ARG_TOKEN_NEXT:
-    usages[0] = "";
-    text = "Goes to the next move of the game if possible. Skips over "
-           "challenge bonus events.";
-    break;
-  case ARG_TOKEN_PREVIOUS:
-    usages[0] = "";
-    text = "Goes to the previous move of the game if possible. Skips over "
-           "challenge bonus events.";
-    break;
-  case ARG_TOKEN_GOTO:
-    usages[0] = "<turn_number_or_end_or_start>";
-    examples[0] = "1";
-    examples[1] = "end";
-    examples[2] = "start";
-    text =
-        "Goes to the game state after the specified turn number. Use 'start' "
-        "and 'end' to go to the start and end of the game, respectively.";
-    break;
-  case ARG_TOKEN_NOTE:
-    usages[0] = "<content_with_possible_whitespace>";
-    examples[0] = "#knowledgesaddest";
-    examples[1] = "this is a valid note with whitespace";
-    text = "Specifies the note for the most recently added move. If there is "
-           "an existing note it will be overwritten.";
-    break;
-  case ARG_TOKEN_P1_NAME:
-    usages[0] = "<player_name_with_possible_whitespace>";
-    examples[0] = "Bob";
-    examples[1] = "Bob Smith";
-    text = "Specifies the name of the first player.";
-    break;
-  case ARG_TOKEN_P2_NAME:
-    usages[0] = "<player_name_with_possible_whitespace>";
-    examples[0] = "Bob";
-    examples[1] = "Bob Smith";
-    text = "Specifies the name of the second player.";
-    break;
-  case ARG_TOKEN_DATA_PATH:
-    usages[0] = "<data_paths>";
-    examples[0] = "./data";
-    examples[1] = "./data:./testdata:./other_dir";
-    text = "Designates the data file directories ordered by search precedence. "
-           "Directories listed earlier are preferred when locating files.";
-    break;
-  case ARG_TOKEN_BINGO_BONUS:
-    usages[0] = "<bingo_bonus>";
-    examples[0] = "50";
-    examples[1] = "30";
-    text = "Specifies the number of additional points plays receive when all "
-           "tiles on the rack are played.";
-    break;
-  case ARG_TOKEN_CHALLENGE_BONUS:
-    usages[0] = "<challenge_bonus>";
-    examples[0] = "5";
-    examples[1] = "10";
-    text = "Specifies the number of additional points plays receive when they "
-           "are unsuccessfully challenged.";
-    break;
-  case ARG_TOKEN_BOARD_LAYOUT:
-    usages[0] = "<board_layout>";
-    examples[0] = "standard15";
-    examples[1] = "standard21";
-    text = "Specifies the bonus square layout for the board.";
-    break;
-  case ARG_TOKEN_GAME_VARIANT:
-    usages[0] = "<game_variant>";
-    examples[0] = "classic";
-    examples[1] = "wordsmog";
-    text = "Specifies the game variant.";
-    break;
-  case ARG_TOKEN_LETTER_DISTRIBUTION:
-    usages[0] = "<letter_distribution>";
-    examples[0] = "english";
-    examples[1] = "french";
-    text = "Specifies the letter distribution.";
-    break;
-  case ARG_TOKEN_LEXICON:
-    usages[0] = "<lexicon>";
-    examples[0] = "CSW21";
-    examples[1] = "NWL20";
-    text = "Specifies the lexicon for both players, unless overridden by the "
-           "'l1' or 'l2' options.";
-    break;
-  case ARG_TOKEN_USE_WMP:
-    usages[0] = "<true_or_false>";
-    examples[0] = "true";
-    examples[1] = "false";
-    text = "Specifies whether to use word maps as opposed to KWGs when "
-           "generating moves. Word maps are much faster but use more memory "
-           "and are on by default.";
-    break;
-  case ARG_TOKEN_LEAVES:
-    usages[0] = "<leaves>";
-    examples[0] = "CSW21";
-    examples[1] = "TWL98";
-    text = "Specifies the leaves for both players, unless overridden by the "
-           "'k1' or 'k2' options.";
-    break;
-  case ARG_TOKEN_P1_LEXICON:
-  case ARG_TOKEN_P2_LEXICON:
-    usages[0] = "<lexicon>";
-    examples[0] = "CSW21";
-    examples[1] = "TWL98";
-    text = "Specifies the lexicon for the given player. This can be used with "
-           "the autoplay command to compare different lexicons.";
-    break;
-  case ARG_TOKEN_P1_USE_WMP:
-  case ARG_TOKEN_P2_USE_WMP:
-    usages[0] = "<true_or_false>";
-    examples[0] = "true";
-    examples[1] = "false";
-    text = "Specifies whether to use word maps as opposed to KWGs when "
-           "generating moves for the given player.";
-    break;
-  case ARG_TOKEN_P1_LEAVES:
-  case ARG_TOKEN_P2_LEAVES:
-    usages[0] = "<leaves>";
-    examples[0] = "CSW21";
-    examples[1] = "TWL98";
-    text = "Specifies the leaves for the given player, This can can be used "
-           "with the autoplay command to compare different leaves.";
-    break;
-  case ARG_TOKEN_P1_MOVE_SORT_TYPE:
-  case ARG_TOKEN_P2_MOVE_SORT_TYPE:
-    usages[0] = "<sort_type>";
-    examples[0] = "score";
-    examples[1] = "equity";
-    text = "Specifies how the generated moves for the given player should be "
-           "sorted.";
-    break;
-  case ARG_TOKEN_P1_MOVE_RECORD_TYPE:
-  case ARG_TOKEN_P2_MOVE_RECORD_TYPE:
-    usages[0] = "<record_type>";
-    examples[0] = "best";
-    examples[1] = "equity";
-    examples[2] = "all";
-    text = "Specifies how the generated moves for the given player should be "
-           "recorded. The 'best' record type will only record the best move "
-           "according the the sort type and is the fastest to compute. This "
-           "option is ideal for autoplay. The 'all' record type will record "
-           "all moves. The 'equity' record type will record all moves with X "
-           "equity of the best move, where X is specified by the 'mmargin' "
-           "option.";
-    break;
-  case ARG_TOKEN_WIN_PCT:
-    usages[0] = "<win_percentage>";
-    examples[0] = "winpct";
-    text = "Specifies which win percentage file to use for simulations.";
-    break;
-  case ARG_TOKEN_PLIES:
-    usages[0] = "<plies>";
-    examples[0] = "2";
-    examples[1] = "4";
-    text = "Specifies the number of plies to use for simulations.";
-    break;
-  case ARG_TOKEN_ENDGAME_PLIES:
-    usages[0] = "<endgame_plies>";
-    examples[0] = "4";
-    examples[1] = "8";
-    text = "Specifies the number of plies to use for solving endgames.";
-    break;
-  case ARG_TOKEN_NUMBER_OF_PLAYS:
-    usages[0] = "<number_of_plays>";
-    examples[0] = "150";
-    examples[1] = "300";
-    text = "Specifies the number of plays generated by the move generation "
-           "command.";
-    break;
-  case ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS:
-    usages[0] = "<max_number_of_display_plays>";
-    examples[0] = "15";
-    examples[1] = "30";
-    text = "Specifies the maximum number of plays to display.";
-    break;
-  case ARG_TOKEN_NUMBER_OF_SMALL_PLAYS:
-    usages[0] = "<number_of_small_plays>";
-    examples[0] = "15";
-    examples[1] = "30";
-    text = "Specifies the number of plays generated by the move generation "
-           "command for endgames.";
-    break;
-  case ARG_TOKEN_MAX_ITERATIONS:
-    usages[0] = "<max_iterations>";
-    examples[0] = "100";
-    examples[1] = "1000";
-    text = "Specifies the maximum total number of iterations across all "
-           "simulated plays to perform before stopping.";
-    break;
-  case ARG_TOKEN_STOP_COND_PCT:
-    usages[0] = "<stop_cond_pct>";
-    examples[0] = "95";
-    examples[1] = "98.5";
-    examples[2] = "99";
-    examples[3] = "99.9999";
-    text = "Specifies the statistical confidence level for the simulations, "
-           "ranging from 0 to 100 exclusive. A higher confidence level "
-           "improves the accuracy of the results, but takes longer to run.";
-    break;
-  case ARG_TOKEN_INFERENCE_MARGIN:
-    usages[0] = "<inference_equity_margin>";
-    examples[0] = "1";
-    examples[1] = "2.4";
-    examples[2] = "10.0";
-    text = "Specifies the tolerance, in terms of equity, for how much worse a "
-           "move can be than the best equity move and still be considered a "
-           "possible rack from which the opponent played.";
-    break;
-  case ARG_TOKEN_MOVEGEN_MARGIN:
-    usages[0] = "<movegen_equity_margin>";
-    examples[0] = "1";
-    examples[1] = "5.5";
-    examples[2] = "10.0";
-    text = "Specifies the tolerance, in terms of equity, for how much worse a "
-           "move can be than the best equity move and still be generated by "
-           "the move generation command.";
-    break;
-  case ARG_TOKEN_MIN_PLAY_ITERATIONS:
-    usages[0] = "<min_play_iterations>";
-    examples[0] = "100";
-    examples[1] = "500";
-    text = "Specifies the minimum number of iterations a candidate move must "
-           "receive when running simulations.";
-    break;
-  case ARG_TOKEN_USE_GAME_PAIRS:
-    usages[0] = "<true_or_false>";
-    examples[0] = "true";
-    examples[1] = "false";
-    text = "Specifies whether or not to use game pairs when running the "
-           "autoplay command. Using game pairs reduces statistical noise in "
-           "the autoplay results by playing games in pairs using the same "
-           "seed, with player one going first in one game and player two going "
-           "first in the other game. Since the games are deterministic for a "
-           "given starting seed, if both players make the exact same decision "
-           "for each corresponding play, the games will be identical.";
-    break;
-  case ARG_TOKEN_USE_SMALL_PLAYS:
-    usages[0] = "<true_or_false>";
-    examples[0] = "true";
-    examples[1] = "false";
-    text =
-        "Specifies whether or not to use the small move format for endgames.";
-    break;
-  case ARG_TOKEN_SIM_WITH_INFERENCE:
-    usages[0] = "<true_or_false>";
-    examples[0] = "true";
-    examples[1] = "false";
-    text =
-        "Specifies whether or not to use the small move format for endgames.";
-    break;
-  case ARG_TOKEN_WRITE_BUFFER_SIZE:
-    usages[0] = "<write_buffer_size>";
-    examples[0] = "10000";
-    examples[1] = "100000";
-    text = "Specifies the size of the write buffer for the autoplay recorder.";
-    break;
-  case ARG_TOKEN_HUMAN_READABLE:
-    usages[0] = "<true_or_false>";
-    examples[0] = "true";
-    examples[1] = "false";
-    text = "Specifies whether or not to use a human readable move format for "
-           "printing results.";
-    break;
-  case ARG_TOKEN_RANDOM_SEED:
-    usages[0] = "<random_seed>";
-    examples[0] = "0";
-    examples[1] = "42";
-    text = "Specifies the random seed to use for any gameplay that uses RNG.";
-    break;
-  case ARG_TOKEN_NUMBER_OF_THREADS:
-    usages[0] = "<number_of_threads>";
-    examples[0] = "1";
-    examples[1] = "4";
-    text = "Specifies the number of threads to use when running commands.";
-    break;
-  case ARG_TOKEN_PRINT_INTERVAL:
-    usages[0] = "<print_interval>";
-    examples[0] = "100";
-    examples[1] = "1000";
-    text = "Specifies the iteration or game interval at which to print the "
-           "current command status.";
-    break;
-  case ARG_TOKEN_EXEC_MODE:
-    usages[0] = "<exec_mode>";
-    examples[0] = "sync";
-    examples[1] = "async";
-    text = "Specifies the execution mode to use when running commands. Running "
-           "in sync mode will block on the main thread until the command is "
-           "complete. Running in async mode will run the command in the "
-           "background allowing the user to query the status of the command or "
-           "stop it at any time.";
-    break;
-  case ARG_TOKEN_TT_FRACTION_OF_MEM:
-    usages[0] = "<fraction_of_mem>";
-    examples[0] = "0.25";
-    examples[1] = "0.5";
-    text = "Specifies the fraction of memory to use for the transposition "
-           "table.";
-    break;
-  case ARG_TOKEN_TIME_LIMIT:
-    usages[0] = "<time_limit>";
-    examples[0] = "10";
-    examples[1] = "30";
-    text = "Specifies the time limit in seconds for simulations.";
-    break;
-  case ARG_TOKEN_SAMPLING_RULE:
-    usages[0] = "<sampling_rule>";
-    examples[0] = "rr";
-    examples[1] = "tt";
-    text =
-        "Specifies the sampling rule to use when running simulations. The "
-        "rr option implements a round robin where every play receives the same "
-        "number of iterations. The tt option implements the Top Two "
-        "sampling rule which attempts to minimize the number of total "
-        "iterations needed to find the best move.";
-    break;
-  case ARG_TOKEN_THRESHOLD:
-    usages[0] = "<threshold>";
-    examples[0] = "gk16";
-    examples[1] = "none";
-    text =
-        "Specifies the threshold to use when running simulations. The gk16 "
-        "option implements the GK16 threshold which attempts to minimize the "
-        "number of total iterations needed to find the best move. The none "
-        "option will make the simulation run until it hits the max total "
-        "iterations or time limit.";
-    break;
-  case ARG_TOKEN_PRINT_BOARDS:
-    usages[0] = "<true_or_false>";
-    examples[0] = "true";
-    examples[1] = "false";
-    text = "Specifies whether or not to print the boards for each play.";
-    break;
-  case ARG_TOKEN_BOARD_COLOR:
-    usages[0] = "<board_color>";
-    examples[0] = "none";
-    examples[1] = "ansi";
-    examples[2] = "xterm";
-    examples[3] = "truecolour";
-    text = "Specifies the color of the board.";
-    break;
-  case ARG_TOKEN_BOARD_TILE_GLYPHS:
-    usages[0] = "<board_tile_glyphs>";
-    examples[0] = "primary";
-    examples[1] = "alt";
-    text = "Specifies the glyphs to use for the board tiles.";
-    break;
-  case ARG_TOKEN_BOARD_BORDER:
-    usages[0] = "<board_border>";
-    examples[0] = "ascii";
-    examples[1] = "box";
-    text = "Specifies the border type to use for the board.";
-    break;
-  case ARG_TOKEN_BOARD_COLUMN_LABEL:
-    usages[0] = "<board_column_label>";
-    examples[0] = "ascii";
-    examples[1] = "fullwidth";
-    text = "Specifies the column label type to use for the board.";
-    break;
-  case ARG_TOKEN_ON_TURN_MARKER:
-    usages[0] = "<on_turn_marker>";
-    examples[0] = "ascii";
-    examples[1] = "arrowhead";
-    text = "Specifies the marker to use for the current player.";
-    break;
-  case ARG_TOKEN_ON_TURN_COLOR:
-    usages[0] = "<on_turn_color>";
-    examples[0] = "none";
-    examples[1] = "green";
-    text = "Specifies the color of the marker for the current player.";
-    break;
-  case ARG_TOKEN_ON_TURN_SCORE_STYLE:
-    usages[0] = "<on_turn_score_style>";
-    examples[0] = "normal";
-    examples[1] = "bold";
-    text = "Specifies the style of the score for the current player.";
-    break;
-  case ARG_TOKEN_PRETTY:
-    usages[0] = "<true_or_false>";
-    examples[0] = "true";
-    examples[1] = "false";
-    text = "Specifies whether or not to use a preset collection of options to "
-           "pretty print the board.";
-    break;
-  case ARG_TOKEN_PRINT_ON_FINISH:
-    usages[0] = "<true_or_false>";
-    examples[0] = "true";
-    examples[1] = "false";
-    text = "Specifies whether or not to print a finished message when a "
-           "command completes execution.";
-    break;
-  case ARG_TOKEN_SHOW_PROMPT:
-    usages[0] = "<true_or_false>";
-    examples[0] = "true";
-    examples[1] = "false";
-    text = "Specifies whether or not to show the '" MAGPIE_PROMPT "' prompt.";
-    break;
-  case ARG_TOKEN_SAVE_SETTINGS:
-    usages[0] = "<true_or_false>";
-    examples[0] = "true";
-    examples[1] = "false";
-    text = "Specifies whether or not to save the current settings to file "
-           "after every command. If settings are saved, they will be "
-           "automatically loaded on the next startup.";
-    break;
-  case NUMBER_OF_ARG_TOKENS:
-    log_fatal("encountered invalid arg token in help command");
-    break;
+  arg_token_t arg_token;
+  async_token_t async_token;
+  bool is_command = false;
+  bool is_hotkey = false;
+  const char *name = NULL;
+  const char *shortest_unambiguous_name = NULL;
+  if (show_async_commands) {
+    async_token = token;
+    switch (async_token) {
+    case ASYNC_STOP_COMMAND_TOKEN:
+      usages[0] = "";
+      text = "Stops the currently running command.";
+      name = ASYNC_STOP_COMMAND_STRING;
+      shortest_unambiguous_name = ASYNC_STOP_COMMAND_STRING_SHORT;
+      break;
+    case ASYNC_STATUS_COMMAND_TOKEN:;
+      usages[0] = "";
+      text = "Prints the status of the currently running command.";
+      name = ASYNC_STATUS_COMMAND_STRING;
+      shortest_unambiguous_name = ASYNC_STATUS_COMMAND_STRING_SHORT;
+      break;
+    case NUMBER_OF_ASYNC_COMMAND_TOKENS:
+      log_fatal("encountered unexpected async command token in help command");
+      break;
+    }
+  } else {
+    arg_token = token;
+    const ParsedArg *parg = config_get_parg(config, arg_token);
+    is_command = parg->is_command;
+    is_hotkey = parg->is_hotkey;
+    name = parg->name;
+    shortest_unambiguous_name = parg->shortest_unambiguous_name;
+    switch (arg_token) {
+    case ARG_TOKEN_HELP:
+      usages[0] = "[<command_or_arg>]";
+      examples[0] = "";
+      examples[1] = "infer";
+      text = "Prints a help message for the given command or argument. If no "
+             "argument is "
+             "given, prints help messages for all commands and arguments.";
+      break;
+    case ARG_TOKEN_SET:
+      usages[0] = "<option1> <value1> <option2> <value2> ...";
+      examples[0] = "-numplays 15 -minp 100";
+      text = "Sets any number of specified options.";
+      break;
+    case ARG_TOKEN_CGP:
+      usages[0] = "<board> <racks> <scores> <consecutive_zeros>";
+      examples[0] = "15/15/15/15/14V/14A/14N/6GUM5N/7PEW4E/9EF3R/9BEVELS/15/15/"
+                    "15/15 AEEIILZ/CDGKNOR 56/117 0";
+      text = "Loads the specified CGP into the game.";
+      break;
+    case ARG_TOKEN_MOVES:
+      usages[0] = "<move>";
+      usages[1] = "<move>,<move>,...";
+      examples[0] = " 8F.LIN";
+      examples[1] = " 8F.LIN,8D.ZILLION,8F.ZILLION";
+      text = "Adds the CGP moves to the move list. Multiple moves must be "
+             "delimited by commas as opposed to spaces.";
+      break;
+    case ARG_TOKEN_RACK:
+      usages[0] = "<rack>";
+      text = "Sets the rack for the player on turn.";
+      break;
+    case ARG_TOKEN_GEN:
+      usages[0] = "";
+      text = "Generates moves for the current position.";
+      break;
+    case ARG_TOKEN_SIM:
+      usages[0] = "[<opponent_known_rack>]";
+      examples[0] = "";
+      examples[1] = "ABCD";
+      examples[2] = "-";
+      text = "Runs a Monte Carlo simulation for the current position using the "
+             "specified opponent rack. If no rack is specified, the opponent "
+             "known rack from the game history is used. If the game history "
+             "has a known rack for the opponent, you can use '-' to force the "
+             "sim to use a completely random rack.";
+      break;
+    case ARG_TOKEN_GEN_AND_SIM:
+      usages[0] = "[<opponent_known_rack>]";
+      examples[0] = "";
+      examples[1] = "ABCD";
+      examples[2] = "-";
+      text = "Generates moves for the current position and runs a simulation.";
+      break;
+    case ARG_TOKEN_INFER:
+      usages[0] = "";
+      usages[1] = "<target_nickname> <target_played_tiles> <target_score> "
+                  "[<target_known_rack>] [<nontarget_known_rack>]";
+      usages[2] = "<target_nickname> <target_num_exchanged> "
+                  "[<target_known_rack>] [<nontarget_known_rack>]";
+      examples[0] = "";
+      examples[1] = "josh ABCDE 13";
+      examples[2] = "josh ABCDE 13 ABCD";
+      examples[3] = "josh ABCDE 13 ABCD EFG";
+      examples[4] = "josh 3 ABCDE";
+      examples[5] = "josh 3 ABCDE EFG";
+      text =
+          "Runs an exhaustive inference for what the opponent could have kept "
+          "based on their previous play. If no arguments are specified, the "
+          "inference will use the previous play in the game history.";
+      break;
+    case ARG_TOKEN_ENDGAME:
+      usages[0] = "";
+      text = "Runs the endgame solver.";
+      break;
+    case ARG_TOKEN_AUTOPLAY:
+      usages[0] = "<type1> <num_games>";
+      usages[1] = "<type1>,<type2>,... <num_games>";
+      examples[0] = "games 100";
+      examples[1] = "games,winpct 1000";
+      examples[2] = "leave,winpct 2000";
+      text = "Runs the autoplay command with the specified recorder(s). If the "
+             "game pairs option is set to true, autoplay will run <num_games> "
+             "game pairs resulting in a total of 2 * <num_games> games.";
+      break;
+    case ARG_TOKEN_CONVERT:
+      usages[0] = "<type> <input_name_without_extension> "
+                  "[<output_name_without_extension>]";
+      examples[0] = "klv2csv CSW21";
+      examples[1] = "klv2csv CSW21 CSW21_new";
+      examples[2] = "text2wordmap NWL20";
+      text =
+          "Runs the convert command for the specified type with the given "
+          "input and output names. If no output name is specified, the input "
+          "name will be used. Note that this will not overwrite the input "
+          "since the output filename will have a different extension.";
+      break;
+    case ARG_TOKEN_LEAVE_GEN:
+      usages[0] = "<gen1_min_rack_target>,<gen1_min_rack_target>,... "
+                  "[<games_before_force_draw>]";
+      examples[0] = "100,200,500,1000,1000,1000 100000000";
+      text =
+          "Generates leaves for the current lexicon. The minimum rack targets "
+          "specify the required minimum number of rack occurrences for all "
+          "racks before the next generation can start. The games before force "
+          "draw argument specifies the number of 'normal' games to play before "
+          "rare racks are 'forced' to occur so that they reach the minimum. "
+          "The "
+          "example shows the currently recommended values. Emperical testing "
+          "has "
+          "show that there is little improvement after the 5th generation. The "
+          "files produced by each generation are labeled *_gen_<gen_number>, "
+          "so "
+          "if the command is stopped early, reinvoke it with using leaves of "
+          "the "
+          "last generation, otherwise the leavegen command will start over at "
+          "the first generation. It is recommended to use the autoplay command "
+          "with game pairs to evaluate the resulting leaves. Depending on your "
+          "hardware, this command could take days or weeks.";
+      break;
+    case ARG_TOKEN_CREATE_DATA:
+      usages[0] = "<type> <output_name> [<letter_distribution>]";
+      examples[0] = "klv CSW50";
+      examples[1] = "klv CSW50 english";
+      text =
+          "Creates a zeroed or empty data file of the specified type. If no "
+          "letter distribution is specified, the current letter distribution "
+          "is used. Currently, only the 'klv' type is supported.";
+      break;
+    case ARG_TOKEN_LOAD:
+      usages[0] = "<source_identifier>";
+      examples[0] = "54938";
+      examples[1] = "https://cross-tables.com/annotated.php?u=54938";
+      examples[2] = "XuoAntzD";
+      examples[3] = "https://woogles.io/game/XuoAntzD";
+      examples[4] =
+          "https://www.cross-tables.com/annotated/selfgcg/556/anno55690.gcg";
+      examples[5] = "testdata/gcgs/success_six_pass.gcg";
+      examples[6] = "some_game.gcg";
+      text =
+          "Loads the game using the specified GCG. The source identifier can "
+          "be a cross-tables ID or game URL, a woogles.io ID or game URL, a "
+          "URL "
+          "to the GCG file, or a local GCG file.";
+      break;
+    case ARG_TOKEN_NEW_GAME:
+      usages[0] = "[<player_one_name>] [<player_two_name>]";
+      examples[0] = "";
+      examples[1] = "Alice";
+      examples[2] = "Alice Bob";
+      text = "Starts a new game, resetting the previous game and game history. "
+             "Player names without whitespace can be optionally specified.";
+      break;
+    case ARG_TOKEN_EXPORT:
+      usages[0] = "[<output_gcg_filename>]";
+      examples[0] = "";
+      examples[1] = "my_game";
+      examples[2] = "other_game.gcg";
+      text = "Saves the current game history to the specified GCG file. If no "
+             "GCG file is specified, a default name will be used. If no '.gcg' "
+             "extension is specified, it will be added to the filename "
+             "automatically.";
+      break;
+    case ARG_TOKEN_COMMIT:
+      usages[0] = "<move_index>";
+      usages[1] = "<position> <tiles>";
+      usages[2] = "ex <exchanged_tiles> [<rack_after_exchange>]";
+      usages[3] = "pass";
+      examples[0] = "2";
+      examples[1] = "11d ANTIQuES";
+      examples[2] = "ex ABC";
+      examples[2] = "ex ABC HIJKLMN";
+      examples[3] = "pass";
+      text =
+          "Commits the move to the game history. When committing an exchange, "
+          "the rack after the exchange can be specified so that six passes "
+          "can be correctly scored.";
+      break;
+    case ARG_TOKEN_TOP_COMMIT:
+      usages[0] = "[<rack>]";
+      examples[0] = "";
+      examples[1] = "RETINAS";
+      text = "Commits the static best move if a rack is specified or no sim "
+             "results are available. Otherwise, commits the best move by win "
+             "percentage according to the sim results.";
+      break;
+    case ARG_TOKEN_CHALLENGE:
+      usages[0] = "[<challenge_bonus_points>]";
+      examples[0] = "";
+      examples[1] = "7";
+      text = "Adds a challenge bonus to the previous tile placement move. "
+             "Challenges can be added mid-game without truncating the game "
+             "history. If no challenge bonus is specified, the current value "
+             "will be used.";
+      break;
+    case ARG_TOKEN_UNCHALLENGE:
+      usages[0] = "";
+      text =
+          "Removes the challenge bonus from the previous tile placement move. "
+          "Challenges can be removed mid-game without truncating the game "
+          "history.";
+      break;
+    case ARG_TOKEN_OVERTIME:
+      usages[0] = "<player_nickname> <overtime_penalty>";
+      examples[0] = "josh 5";
+      examples[1] = "josh 9";
+      text =
+          "Adds an overtime penalty for the given player. Overtime penalties "
+          "can only be applied after the game is over.";
+      break;
+    case ARG_TOKEN_SWITCH_NAMES:
+      usages[0] = "";
+      text = "Switches the names of the players.";
+      break;
+    case ARG_TOKEN_SHOW_GAME:
+      usages[0] = "";
+      text = "Shows the current game.";
+      break;
+    case ARG_TOKEN_SHOW_MOVES:
+      usages[0] = "";
+      text = "Shows the moves or the sim results if available.";
+      break;
+    case ARG_TOKEN_SHOW_INFERENCE:
+      usages[0] = "";
+      text = "Shows the inference result.";
+      break;
+    case ARG_TOKEN_SHOW_ENDGAME:
+      usages[0] = "";
+      text = "Shows the endgame solver result.";
+      break;
+    case ARG_TOKEN_NEXT:
+      usages[0] = "";
+      text = "Goes to the next move of the game if possible. Skips over "
+             "challenge bonus events.";
+      break;
+    case ARG_TOKEN_PREVIOUS:
+      usages[0] = "";
+      text = "Goes to the previous move of the game if possible. Skips over "
+             "challenge bonus events.";
+      break;
+    case ARG_TOKEN_GOTO:
+      usages[0] = "<turn_number_or_end_or_start>";
+      examples[0] = "1";
+      examples[1] = "end";
+      examples[2] = "start";
+      text =
+          "Goes to the game state after the specified turn number. Use 'start' "
+          "and 'end' to go to the start and end of the game, respectively.";
+      break;
+    case ARG_TOKEN_NOTE:
+      usages[0] = "<content_with_possible_whitespace>";
+      examples[0] = "#knowledgesaddest";
+      examples[1] = "this is a valid note with whitespace";
+      text = "Specifies the note for the most recently added move. If there is "
+             "an existing note it will be overwritten.";
+      break;
+    case ARG_TOKEN_P1_NAME:
+      usages[0] = "<player_name_with_possible_whitespace>";
+      examples[0] = "Bob";
+      examples[1] = "Bob Smith";
+      text = "Specifies the name of the first player.";
+      break;
+    case ARG_TOKEN_P2_NAME:
+      usages[0] = "<player_name_with_possible_whitespace>";
+      examples[0] = "Bob";
+      examples[1] = "Bob Smith";
+      text = "Specifies the name of the second player.";
+      break;
+    case ARG_TOKEN_DATA_PATH:
+      usages[0] = "<data_paths>";
+      examples[0] = "./data";
+      examples[1] = "./data:./testdata:./other_dir";
+      text =
+          "Designates the data file directories ordered by search precedence. "
+          "Directories listed earlier are preferred when locating files.";
+      break;
+    case ARG_TOKEN_BINGO_BONUS:
+      usages[0] = "<bingo_bonus>";
+      examples[0] = "50";
+      examples[1] = "30";
+      text = "Specifies the number of additional points plays receive when all "
+             "tiles on the rack are played.";
+      break;
+    case ARG_TOKEN_CHALLENGE_BONUS:
+      usages[0] = "<challenge_bonus>";
+      examples[0] = "5";
+      examples[1] = "10";
+      text =
+          "Specifies the number of additional points plays receive when they "
+          "are unsuccessfully challenged.";
+      break;
+    case ARG_TOKEN_BOARD_LAYOUT:
+      usages[0] = "<board_layout>";
+      examples[0] = "standard15";
+      examples[1] = "standard21";
+      text = "Specifies the bonus square layout for the board.";
+      break;
+    case ARG_TOKEN_GAME_VARIANT:
+      usages[0] = "<game_variant>";
+      examples[0] = "classic";
+      examples[1] = "wordsmog";
+      text = "Specifies the game variant.";
+      break;
+    case ARG_TOKEN_LETTER_DISTRIBUTION:
+      usages[0] = "<letter_distribution>";
+      examples[0] = "english";
+      examples[1] = "french";
+      text = "Specifies the letter distribution.";
+      break;
+    case ARG_TOKEN_LEXICON:
+      usages[0] = "<lexicon>";
+      examples[0] = "CSW21";
+      examples[1] = "NWL20";
+      text = "Specifies the lexicon for both players, unless overridden by the "
+             "'l1' or 'l2' options.";
+      break;
+    case ARG_TOKEN_USE_WMP:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether to use word maps as opposed to KWGs when "
+             "generating moves. Word maps are much faster but use more memory "
+             "and are on by default.";
+      break;
+    case ARG_TOKEN_LEAVES:
+      usages[0] = "<leaves>";
+      examples[0] = "CSW21";
+      examples[1] = "TWL98";
+      text = "Specifies the leaves for both players, unless overridden by the "
+             "'k1' or 'k2' options.";
+      break;
+    case ARG_TOKEN_P1_LEXICON:
+    case ARG_TOKEN_P2_LEXICON:
+      usages[0] = "<lexicon>";
+      examples[0] = "CSW21";
+      examples[1] = "TWL98";
+      text =
+          "Specifies the lexicon for the given player. This can be used with "
+          "the autoplay command to compare different lexicons.";
+      break;
+    case ARG_TOKEN_P1_USE_WMP:
+    case ARG_TOKEN_P2_USE_WMP:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether to use word maps as opposed to KWGs when "
+             "generating moves for the given player.";
+      break;
+    case ARG_TOKEN_P1_LEAVES:
+    case ARG_TOKEN_P2_LEAVES:
+      usages[0] = "<leaves>";
+      examples[0] = "CSW21";
+      examples[1] = "TWL98";
+      text = "Specifies the leaves for the given player, This can can be used "
+             "with the autoplay command to compare different leaves.";
+      break;
+    case ARG_TOKEN_P1_MOVE_SORT_TYPE:
+    case ARG_TOKEN_P2_MOVE_SORT_TYPE:
+      usages[0] = "<sort_type>";
+      examples[0] = "score";
+      examples[1] = "equity";
+      text = "Specifies how the generated moves for the given player should be "
+             "sorted.";
+      break;
+    case ARG_TOKEN_P1_MOVE_RECORD_TYPE:
+    case ARG_TOKEN_P2_MOVE_RECORD_TYPE:
+      usages[0] = "<record_type>";
+      examples[0] = "best";
+      examples[1] = "equity";
+      examples[2] = "all";
+      text = "Specifies how the generated moves for the given player should be "
+             "recorded. The 'best' record type will only record the best move "
+             "according the the sort type and is the fastest to compute. This "
+             "option is ideal for autoplay. The 'all' record type will record "
+             "all moves. The 'equity' record type will record all moves with X "
+             "equity of the best move, where X is specified by the 'mmargin' "
+             "option.";
+      break;
+    case ARG_TOKEN_WIN_PCT:
+      usages[0] = "<win_percentage>";
+      examples[0] = "winpct";
+      text = "Specifies which win percentage file to use for simulations.";
+      break;
+    case ARG_TOKEN_PLIES:
+      usages[0] = "<plies>";
+      examples[0] = "2";
+      examples[1] = "4";
+      text = "Specifies the number of plies to use for simulations.";
+      break;
+    case ARG_TOKEN_ENDGAME_PLIES:
+      usages[0] = "<endgame_plies>";
+      examples[0] = "4";
+      examples[1] = "8";
+      text = "Specifies the number of plies to use for solving endgames.";
+      break;
+    case ARG_TOKEN_NUMBER_OF_PLAYS:
+      usages[0] = "<number_of_plays>";
+      examples[0] = "150";
+      examples[1] = "300";
+      text = "Specifies the number of plays generated by the move generation "
+             "command.";
+      break;
+    case ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS:
+      usages[0] = "<max_number_of_display_plays>";
+      examples[0] = "15";
+      examples[1] = "30";
+      text = "Specifies the maximum number of plays to display.";
+      break;
+    case ARG_TOKEN_NUMBER_OF_SMALL_PLAYS:
+      usages[0] = "<number_of_small_plays>";
+      examples[0] = "15";
+      examples[1] = "30";
+      text = "Specifies the number of plays generated by the move generation "
+             "command for endgames.";
+      break;
+    case ARG_TOKEN_MAX_ITERATIONS:
+      usages[0] = "<max_iterations>";
+      examples[0] = "100";
+      examples[1] = "1000";
+      text = "Specifies the maximum total number of iterations across all "
+             "simulated plays to perform before stopping.";
+      break;
+    case ARG_TOKEN_STOP_COND_PCT:
+      usages[0] = "<stop_cond_pct>";
+      examples[0] = "95";
+      examples[1] = "98.5";
+      examples[2] = "99";
+      examples[3] = "99.9999";
+      text = "Specifies the statistical confidence level for the simulations, "
+             "ranging from 0 to 100 exclusive. A higher confidence level "
+             "improves the accuracy of the results, but takes longer to run.";
+      break;
+    case ARG_TOKEN_INFERENCE_MARGIN:
+      usages[0] = "<inference_equity_margin>";
+      examples[0] = "1";
+      examples[1] = "2.4";
+      examples[2] = "10.0";
+      text =
+          "Specifies the tolerance, in terms of equity, for how much worse a "
+          "move can be than the best equity move and still be considered a "
+          "possible rack from which the opponent played.";
+      break;
+    case ARG_TOKEN_MOVEGEN_MARGIN:
+      usages[0] = "<movegen_equity_margin>";
+      examples[0] = "1";
+      examples[1] = "5.5";
+      examples[2] = "10.0";
+      text =
+          "Specifies the tolerance, in terms of equity, for how much worse a "
+          "move can be than the best equity move and still be generated by "
+          "the move generation command.";
+      break;
+    case ARG_TOKEN_MIN_PLAY_ITERATIONS:
+      usages[0] = "<min_play_iterations>";
+      examples[0] = "100";
+      examples[1] = "500";
+      text = "Specifies the minimum number of iterations a candidate move must "
+             "receive when running simulations.";
+      break;
+    case ARG_TOKEN_USE_GAME_PAIRS:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text =
+          "Specifies whether or not to use game pairs when running the "
+          "autoplay command. Using game pairs reduces statistical noise in "
+          "the autoplay results by playing games in pairs using the same "
+          "seed, with player one going first in one game and player two going "
+          "first in the other game. Since the games are deterministic for a "
+          "given starting seed, if both players make the exact same decision "
+          "for each corresponding play, the games will be identical.";
+      break;
+    case ARG_TOKEN_USE_SMALL_PLAYS:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text =
+          "Specifies whether or not to use the small move format for endgames.";
+      break;
+    case ARG_TOKEN_SIM_WITH_INFERENCE:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text =
+          "Specifies whether or not to use the small move format for endgames.";
+      break;
+    case ARG_TOKEN_WRITE_BUFFER_SIZE:
+      usages[0] = "<write_buffer_size>";
+      examples[0] = "10000";
+      examples[1] = "100000";
+      text =
+          "Specifies the size of the write buffer for the autoplay recorder.";
+      break;
+    case ARG_TOKEN_HUMAN_READABLE:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether or not to use a human readable move format for "
+             "printing results.";
+      break;
+    case ARG_TOKEN_RANDOM_SEED:
+      usages[0] = "<random_seed>";
+      examples[0] = "0";
+      examples[1] = "42";
+      text = "Specifies the random seed to use for any gameplay that uses RNG.";
+      break;
+    case ARG_TOKEN_NUMBER_OF_THREADS:
+      usages[0] = "<number_of_threads>";
+      examples[0] = "1";
+      examples[1] = "4";
+      text = "Specifies the number of threads to use when running commands.";
+      break;
+    case ARG_TOKEN_PRINT_INTERVAL:
+      usages[0] = "<print_interval>";
+      examples[0] = "100";
+      examples[1] = "1000";
+      text = "Specifies the iteration or game interval at which to print the "
+             "current command status.";
+      break;
+    case ARG_TOKEN_EXEC_MODE:
+      usages[0] = "<exec_mode>";
+      examples[0] = "sync";
+      examples[1] = "async";
+      text =
+          "Specifies the execution mode to use when running commands. Running "
+          "in sync mode will block on the main thread until the command is "
+          "complete. Running in async mode will run the command in the "
+          "background allowing the user to query the status of the command or "
+          "stop it at any time.";
+      break;
+    case ARG_TOKEN_TT_FRACTION_OF_MEM:
+      usages[0] = "<fraction_of_mem>";
+      examples[0] = "0.25";
+      examples[1] = "0.5";
+      text = "Specifies the fraction of memory to use for the transposition "
+             "table.";
+      break;
+    case ARG_TOKEN_TIME_LIMIT:
+      usages[0] = "<time_limit>";
+      examples[0] = "10";
+      examples[1] = "30";
+      text = "Specifies the time limit in seconds for simulations.";
+      break;
+    case ARG_TOKEN_SAMPLING_RULE:
+      usages[0] = "<sampling_rule>";
+      examples[0] = "rr";
+      examples[1] = "tt";
+      text = "Specifies the sampling rule to use when running simulations. The "
+             "rr option implements a round robin where every play receives the "
+             "same "
+             "number of iterations. The tt option implements the Top Two "
+             "sampling rule which attempts to minimize the number of total "
+             "iterations needed to find the best move.";
+      break;
+    case ARG_TOKEN_THRESHOLD:
+      usages[0] = "<threshold>";
+      examples[0] = "gk16";
+      examples[1] = "none";
+      text =
+          "Specifies the threshold to use when running simulations. The gk16 "
+          "option implements the GK16 threshold which attempts to minimize the "
+          "number of total iterations needed to find the best move. The none "
+          "option will make the simulation run until it hits the max total "
+          "iterations or time limit.";
+      break;
+    case ARG_TOKEN_PRINT_BOARDS:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether or not to print the boards for each play.";
+      break;
+    case ARG_TOKEN_BOARD_COLOR:
+      usages[0] = "<board_color>";
+      examples[0] = "none";
+      examples[1] = "ansi";
+      examples[2] = "xterm";
+      examples[3] = "truecolour";
+      text = "Specifies the color of the board.";
+      break;
+    case ARG_TOKEN_BOARD_TILE_GLYPHS:
+      usages[0] = "<board_tile_glyphs>";
+      examples[0] = "primary";
+      examples[1] = "alt";
+      text = "Specifies the glyphs to use for the board tiles.";
+      break;
+    case ARG_TOKEN_BOARD_BORDER:
+      usages[0] = "<board_border>";
+      examples[0] = "ascii";
+      examples[1] = "box";
+      text = "Specifies the border type to use for the board.";
+      break;
+    case ARG_TOKEN_BOARD_COLUMN_LABEL:
+      usages[0] = "<board_column_label>";
+      examples[0] = "ascii";
+      examples[1] = "fullwidth";
+      text = "Specifies the column label type to use for the board.";
+      break;
+    case ARG_TOKEN_ON_TURN_MARKER:
+      usages[0] = "<on_turn_marker>";
+      examples[0] = "ascii";
+      examples[1] = "arrowhead";
+      text = "Specifies the marker to use for the current player.";
+      break;
+    case ARG_TOKEN_ON_TURN_COLOR:
+      usages[0] = "<on_turn_color>";
+      examples[0] = "none";
+      examples[1] = "green";
+      text = "Specifies the color of the marker for the current player.";
+      break;
+    case ARG_TOKEN_ON_TURN_SCORE_STYLE:
+      usages[0] = "<on_turn_score_style>";
+      examples[0] = "normal";
+      examples[1] = "bold";
+      text = "Specifies the style of the score for the current player.";
+      break;
+    case ARG_TOKEN_PRETTY:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text =
+          "Specifies whether or not to use a preset collection of options to "
+          "pretty print the board.";
+      break;
+    case ARG_TOKEN_PRINT_ON_FINISH:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether or not to print a finished message when a "
+             "command completes execution.";
+      break;
+    case ARG_TOKEN_SHOW_PROMPT:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether or not to show the '" MAGPIE_PROMPT "' prompt.";
+      break;
+    case ARG_TOKEN_SAVE_SETTINGS:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether or not to save the current settings to file "
+             "after every command. If settings are saved, they will be "
+             "automatically loaded on the next startup.";
+      break;
+    case NUMBER_OF_ARG_TOKENS:
+      log_fatal("encountered invalid arg token in help command");
+      break;
+    }
   }
-  const ParsedArg *parg = config_get_parg(config, arg_token);
   const char *is_arg_char = "-";
-  if (parg->is_command) {
+  if (is_command) {
     is_arg_char = "";
   }
 
-  if (parg->is_hotkey) {
-    string_builder_add_formatted_string(sb, "%s%c, %s%s", is_arg_char,
-                                        parg->name[0], is_arg_char, parg->name);
+  if (is_hotkey) {
+    string_builder_add_formatted_string(sb, "%s%c, %s%s", is_arg_char, name[0],
+                                        is_arg_char, name);
   } else {
     string_builder_add_formatted_string(sb, "%s%s, %s%s", is_arg_char,
-                                        parg->shortest_unambiguous_name,
-                                        is_arg_char, parg->name);
+                                        shortest_unambiguous_name, is_arg_char,
+                                        name);
   }
 
   string_builder_add_formatted_string(sb, "\n\n%*sUsage:\n\n", HELP_INDENT, "");
@@ -1452,7 +1506,7 @@ void add_help_arg_to_string_builder(const Config *config, arg_token_t arg_token,
   int usages_index = 0;
   while (usages[usages_index]) {
     string_builder_add_formatted_string(sb, "%*s%s %s\n", HELP_INDENT + 2, "",
-                                        parg->name, usages[usages_index]);
+                                        name, usages[usages_index]);
     usages_index++;
   }
 
@@ -1462,7 +1516,7 @@ void add_help_arg_to_string_builder(const Config *config, arg_token_t arg_token,
     int example_index = 0;
     while (examples[example_index]) {
       string_builder_add_formatted_string(sb, "%*s%s %s\n", HELP_INDENT + 2, "",
-                                          parg->name, examples[example_index]);
+                                          name, examples[example_index]);
       example_index++;
     }
   }
@@ -1484,19 +1538,26 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
   if (help_arg_token == NUMBER_OF_ARG_TOKENS) {
     // Show the full help command
     // Show help for the commands first
+    string_builder_add_string(sb, "Commands\n\n");
     for (arg_token_t k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
       if (config->pargs[k]->is_command) {
-        add_help_arg_to_string_builder(config, k, sb);
+        add_help_arg_to_string_builder(config, k, sb, false);
       }
     }
+    // Show help for async commands
+    string_builder_add_string(sb, "\n\nAsync commands\n\n");
+    for (async_token_t k = 0; k < NUMBER_OF_ASYNC_COMMAND_TOKENS; k++) {
+      add_help_arg_to_string_builder(config, k, sb, true);
+    }
     // Then show help for the settings
+    string_builder_add_string(sb, "\n\nSettings\n\n");
     for (arg_token_t k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
       if (!config->pargs[k]->is_command) {
-        add_help_arg_to_string_builder(config, k, sb);
+        add_help_arg_to_string_builder(config, k, sb, false);
       }
     }
   } else {
-    add_help_arg_to_string_builder(config, help_arg_token, sb);
+    add_help_arg_to_string_builder(config, help_arg_token, sb, false);
   }
   char *result = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
@@ -1885,10 +1946,10 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->max_num_display_plays = config->max_num_display_plays;
   sim_args->seed = config->seed;
   if (sim_args->use_inference) {
-    // FIXME: enable sim inferences using data from the last play instead of the
-    // whole history so that autoplay does not have to keep a whole history
-    // and play to turn for each inference which will probably incur more
-    // overhead than we would like.
+    // FIXME: enable sim inferences using data from the last play instead of
+    // the whole history so that autoplay does not have to keep a whole
+    // history and play to turn for each inference which will probably incur
+    // more overhead than we would like.
     config_fill_infer_args(config, true, 0, 0, 0, target_played_tiles,
                            target_known_inference_tiles, nontarget_known_tiles,
                            &sim_args->inference_args);
@@ -2571,7 +2632,8 @@ void config_game_play_events_internal(Config *config, ErrorStack *error_stack) {
             error_stack_push(
                 error_stack, ERROR_STATUS_COMMIT_PASS_OUT_RACK_NOT_IN_BAG,
                 get_formatted_string(
-                    "rack to draw before game end pass out '%s' for player '%s'"
+                    "rack to draw before game end pass out "
+                    "'%s' for player '%s'"
                     "is not available in the bag",
                     string_builder_peek(sb),
                     game_history_player_get_name(game_history, player_index)));
@@ -2744,8 +2806,8 @@ void config_add_game_event(Config *config, const int player_index,
     move_score = 0;
     break;
   case GAME_EVENT_CHALLENGE_BONUS:
-    // Challenge bonus events are handled elsewhere by inserting, not appending
-    // to the history
+    // Challenge bonus events are handled elsewhere by inserting, not
+    // appending to the history
     log_fatal("got unexpected challenge bonus game event when adding "
               "event to game history in the config\n");
     break;
@@ -2762,8 +2824,8 @@ void config_add_game_event(Config *config, const int player_index,
               "event to game history in the config\n");
     break;
   case GAME_EVENT_END_RACK_PENALTY:
-    // End rack penalty events are never submitted directly by the user and are
-    // handled elsewhere
+    // End rack penalty events are never submitted directly by the user and
+    // are handled elsewhere
     log_fatal("got unexpected end rack penalty game event when adding "
               "event to game history in the config\n");
     break;
@@ -2839,9 +2901,9 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
     if (commit_pos_arg_3) {
       error_stack_push(
           error_stack, ERROR_STATUS_COMMIT_EXTRANEOUS_ARG,
-          get_formatted_string(
-              "extraneous argument '%s' provided when committing move by index",
-              commit_pos_arg_3));
+          get_formatted_string("extraneous argument '%s' provided when "
+                               "committing move by index",
+                               commit_pos_arg_3));
       return;
     }
     int num_moves = 0;
@@ -2856,8 +2918,8 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
               commit_pos_arg_1));
       return;
     }
-    // If no second arg is provided and the first arg is all digits, the digits
-    // represent the rank of the move to commit.
+    // If no second arg is provided and the first arg is all digits, the
+    // digits represent the rank of the move to commit.
 
     int commit_move_index;
     string_to_int_or_push_error("move index", commit_pos_arg_1, 1, num_moves,
@@ -3328,10 +3390,10 @@ char *impl_overtime(Config *config, ErrorStack *error_stack) {
     if (cumulative_score == EQUITY_INITIAL_VALUE) {
       error_stack_push(
           error_stack, ERROR_STATUS_TIME_PENALTY_NO_PREVIOUS_CUMULATIVE_SCORE,
-          get_formatted_string(
-              "no prior game event has a cumulative score for player '%s' when "
-              "applying time panelty",
-              player_nickname));
+          get_formatted_string("no prior game event has a cumulative score "
+                               "for player '%s' when "
+                               "applying time panelty",
+                               player_nickname));
     } else {
       const Equity overtime_penalty = int_to_equity(overtime_penalty_int);
       game_event_set_player_index(time_penalty_event, player_index);
@@ -4286,7 +4348,8 @@ void config_load_lexicon_dependent_data(Config *config,
   }
 
   // Determine the status of the wmp for both players
-  // Start by assuming we are just using whatever the existing wmp settings are
+  // Start by assuming we are just using whatever the existing wmp settings
+  // are
   bool p1_wmp_use_when_available = players_data_get_use_when_available(
       config->players_data, PLAYERS_DATA_TYPE_WMP, 0);
   bool p2_wmp_use_when_available = players_data_get_use_when_available(
@@ -5672,8 +5735,8 @@ void config_add_settings_to_string_builder(const Config *config,
       break;
     case ARG_TOKEN_RANDOM_SEED:
       // Do not save the seed in the settings.
-      // The seed should be explicitly set by the user if they want to reproduce
-      // certain behaviors.
+      // The seed should be explicitly set by the user if they want to
+      // reproduce certain behaviors.
       break;
     case ARG_TOKEN_NUMBER_OF_THREADS:
       config_add_int_setting_to_string_builder(config, sb, arg_token,

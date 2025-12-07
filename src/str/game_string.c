@@ -362,7 +362,7 @@ void string_builder_add_game(const Game *game, const MoveList *move_list,
                                                bag_letters[letter_index++]);
         string_builder_add_spaces(game_string, 1);
       }
-    } else if (i == FINAL_PASS_PROMPT_ROW &&
+    } else if (i == FINAL_PASS_PROMPT_ROW && game_history &&
                game_history_get_waiting_for_final_pass_or_challenge(
                    game_history) &&
                game_history_get_num_events(game_history) ==
@@ -502,6 +502,7 @@ GameStringOptions *game_string_options_create_pretty(void) {
   gso->board_column_label = GAME_STRING_BOARD_COLUMN_LABEL_FULLWIDTH;
   gso->on_turn_marker = GAME_STRING_ON_TURN_MARKER_ARROWHEAD;
   gso->on_turn_color = GAME_STRING_ON_TURN_COLOR_ANSI_GREEN;
+  gso->on_turn_score_style = GAME_STRING_ON_TURN_SCORE_BOLD;
   return gso;
 }
 

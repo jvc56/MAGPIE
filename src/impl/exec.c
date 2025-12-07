@@ -5,6 +5,7 @@
 #include "../compat/linenoise.h"
 #include "../def/config_defs.h"
 #include "../def/cpthread_defs.h"
+#include "../def/exec_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/thread_control.h"
 #include "../util/fileproxy.h"
@@ -19,18 +20,6 @@
 #include <string.h>
 #include <sys/poll.h>
 #include <unistd.h>
-
-typedef enum {
-  ASYNC_STOP_COMMAND_TOKEN,
-  ASYNC_STATUS_COMMAND_TOKEN,
-  NUMBER_OF_ASYNC_COMMAND_TOKENS,
-} async_token_t;
-
-// The order of these strings must match the order of the tokens
-static const char *async_command_strings[] = {
-    "stop",
-    "status",
-};
 
 typedef struct AsyncCommandInputArgs {
   AsyncCommandControl *acc;
@@ -112,15 +101,29 @@ bool run_str_api_command(Config *config, ErrorStack *error_stack,
 async_token_t parse_async_command(const char *command, StringBuilder *sb) {
   async_token_t token = NUMBER_OF_ASYNC_COMMAND_TOKENS;
   string_builder_clear(sb);
-  for (int i = 0; i < NUMBER_OF_ASYNC_COMMAND_TOKENS; i++) {
-    const char *token_to_eval_string = async_command_strings[i];
+  for (async_token_t i = 0; i < NUMBER_OF_ASYNC_COMMAND_TOKENS; i++) {
+    const char *token_to_eval_string;
+    switch (i) {
+    case ASYNC_STOP_COMMAND_TOKEN:
+      token_to_eval_string = ASYNC_STOP_COMMAND_STRING;
+      break;
+    case ASYNC_STATUS_COMMAND_TOKEN:;
+      token_to_eval_string = ASYNC_STATUS_COMMAND_STRING;
+      break;
+    case NUMBER_OF_ASYNC_COMMAND_TOKENS:
+      log_fatal(
+          "encountered unexpected async command token when processing command");
+      break;
+    }
     if (has_iprefix(command, token_to_eval_string)) {
       if (token == NUMBER_OF_ASYNC_COMMAND_TOKENS) {
         token = i;
       } else if (string_builder_length(sb) == 0) {
+        // This only works because there are two valid async commands, if we add
+        // more, this whole scheme will need to be refactored
         string_builder_add_formatted_string(
             sb, "ambiguous async command '%s' could be: %s, %s", command,
-            async_command_strings[token], token_to_eval_string);
+            ASYNC_STOP_COMMAND_STRING, ASYNC_STATUS_COMMAND_STRING);
       } else {
         string_builder_add_formatted_string(sb, ", %s", token_to_eval_string);
       }
@@ -290,12 +293,11 @@ void sync_command_scan_loop(Config *config, ErrorStack *error_stack,
       continue;
     }
 
-    if (strings_iequal("quit", input)) {
+    if (strings_iequal(TERMINATE_KEYWORD, input)) {
       break;
     }
 
-    if (strings_iequal(input,
-                       async_command_strings[ASYNC_STOP_COMMAND_TOKEN])) {
+    if (strings_iequal(input, ASYNC_STOP_COMMAND_STRING)) {
       error_stack_push(
           error_stack, ERROR_STATUS_COMMAND_NOTHING_TO_STOP,
           string_duplicate("no currently running command to stop"));

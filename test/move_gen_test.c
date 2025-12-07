@@ -1241,7 +1241,7 @@ void movegen_one_tile_nonwmp(void) {
   sml = sorted_move_list_create(move_list);
   assert_move(game, NULL, sml, 0, "9G (I)F 10");
   assert_move(game, NULL, sml, 1, "(exch F)");
-  assert_move(game, NULL, sml, 2, "pass 0");
+  assert_move(game, NULL, sml, 2, "pass");
   sorted_move_list_destroy(sml);
 
   load_cgp_or_die(game, IF_IF_CGP);
@@ -1251,7 +1251,7 @@ void movegen_one_tile_nonwmp(void) {
   sml = sorted_move_list_create(move_list);
   assert_move(game, NULL, sml, 0, "8G Q(I) 22");
   assert_move(game, NULL, sml, 1, "(exch Q)");
-  assert_move(game, NULL, sml, 2, "pass 0");
+  assert_move(game, NULL, sml, 2, "pass");
   sorted_move_list_destroy(sml);
 
   move_list_destroy(move_list);
@@ -1284,7 +1284,7 @@ void movegen_one_tile_wmp(void) {
   sml = sorted_move_list_create(move_list);
   assert_move(game, NULL, sml, 0, "9G (I)F 10");
   assert_move(game, NULL, sml, 1, "(exch F)");
-  assert_move(game, NULL, sml, 2, "pass 0");
+  assert_move(game, NULL, sml, 2, "pass");
   sorted_move_list_destroy(sml);
 
   load_cgp_or_die(game, IF_IF_CGP);
@@ -1294,7 +1294,7 @@ void movegen_one_tile_wmp(void) {
   sml = sorted_move_list_create(move_list);
   assert_move(game, NULL, sml, 0, "8G Q(I) 22");
   assert_move(game, NULL, sml, 1, "(exch Q)");
-  assert_move(game, NULL, sml, 2, "pass 0");
+  assert_move(game, NULL, sml, 2, "pass");
   sorted_move_list_destroy(sml);
 
   move_list_destroy(move_list);
