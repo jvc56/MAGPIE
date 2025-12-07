@@ -2,7 +2,7 @@
 
 **Macondo Accordant Game Program and Inference Engine**
 
-MAGPIE is a crossword game playing and analysis program that currently supports the following features:
+MAGPIE is a crossword game playing and analysis program that supports the following features:
 
 - Static move generation
 - Montecarlo simulation
@@ -13,337 +13,324 @@ MAGPIE is a crossword game playing and analysis program that currently supports 
 
 MAGPIE started as a C rewrite of [Macondo](https://github.com/domino14/macondo) but has since incorporated a variety of new features, algorithms, and data strctures. It uses several concepts originally developed in [wolges](https://github.com/andy-k/wolges), including shadow playing and the KWG and KLV data structures.
 
-## Setup
+## Getting Started
+
 From this page, download and unzip the MAGPIE repo or use git clone:
+
 ```
 git clone https://github.com/jvc56/MAGPIE.git
 ```
-Navigate into the MAGPIE directory:
+
+then navigate into the MAGPIE directory
+
 ```
 cd MAGPIE
 ```
-Compile the MAGPIE executable:
+
+and run the setup command
+
 ```
-make magpie BUILD=release
+./setup.sh
 ```
-Download the required input data for common lexicons:
+
+You should now be able to run MAGPIE by running the executable:
+
 ```
-./download_data.sh
+./bin/magpie
 ```
+
+This will start MAGPIE in async interactive mode by default. For more details on different ways to run MAGPIE, see [Execution Modes](#execution-modes).
+
 ## Usage
 
-MAGPIE has four different execution modes:
+### Commands and Settings
 
-### Single one-off command
+MAGPIE accepts two different kinds of arguments: commands and settings.
 
-To run a single command and exit immediately, invoke the MAGPIE executable with the desired command and all necessary arguments. For example, the following command:
+Commands perform a specific action and settings affect how the actions are performed. Some commands can take positional arguments that could be required or optional. Command arguments only apply to the given command. Settings persist between commands and only change when overwritten by a new specified value. Settings are always denoted by a '-' character. Any number of settings can be specified for any command.
 
-```
-./bin/magpie autoplay games 100 -lex CSW21 -s1 equity -s2 equity -r1 best -r2 best -threads 4 -hr true
-```
-
-will run 100 autoplay games in the CSW21 lexicon, print the result in a human-readable format, and exit immediately.
-
-#### Single one-off command conditions
-
-MAGPIE will exit immediately after completing the command if the following conditions are met:
-
-- A command is specified
-- The specified command is not a CGP load
-- No infile is specified
-- No execution mode is specified
-
-Otherwise, MAGPIE will not exit immediately.
-
-### Console mode
-
-To enter console mode, use the `console` argument:
+For example, in the following command:
 
 ```
-./bin/magpie set -mode console
+magpie> autoplay games 100 -lex CSW21 -threads 4 -hr true
 ```
 
-Console mode is also the default mode if the one-off command conditions are not met, so you can also enter console mode by running
+The 'autoplay' text is the command and the 'games' and '100' text are the positional arguments. Everything else is a setting which will apply to the next command, so running the subsequent command:
 
 ```
-./bin/magpie
+magpie> autoplay games 50 -lex CSW21 -threads 4 -hr true
 ```
 
-In console mode, the arguments used to specify the configuration persist across commands, so the following commands
+will play 50 games in the CSW21 lexicon with 4 threads and print the results in a human readable format.
 
-```
-./bin/magpie
-magpie>set -lex CSW21
-magpie>set -s1 equity -s2 equity
-magpie>set -r1 best -r2 best
-magpie>set -threads 4
-magpie>autoplay games 100
-```
+All commands and settings can be specified by the shortest unambiguous string. For example, the generate command can be specified by any of the following strings:
 
-are equivalent to
-
-```
-./bin/magpie
-magpie>autoplay games 100 -lex CSW21 -s1 equity -s2 equity -r1 best -r2 best -threads 4
-```
-
-### UCGI mode
-
-UCGI mode operates exactly the same as console mode with the following exceptions:
-
-- All commands are asynchronous. This means they will immediately start running in the background while MAGPIE continues to listen for user input.
-- The `stop` command will halt any ongoing commands.
-
-To enter UCGI mode, specify the `ucgi` argument:
-
-```
-./bin/magpie set -mode ucgi
-```
-
-### Command file mode
-
-To execute commands in a file, you can specify the `infile` argument:
-
-`./bin/magpie set -infile some_file_with_commands`
-
-For example, if the contents of `some_file_with_commands` were:
-
-```
-autoplay games 100 -lex CSW21 -s1 equity -s2 equity -r1 best -r2 best -numplays 1 -threads 4
-autoplay games 50 -lex NWL20 -s1 equity -s2 equity -r1 best -r2 best -numplays 1 -threads 4
-```
-
-MAGPIE would play autoplay 100 CSW21 games and then autoplay 20 NWL20 games.
-
-## Commands and Options
-All commands can be specified by the shortest unambiguous string. For example, the generate command can be specified by any of the following strings:
 ```
 generat
 genera
 gen
 ```
-Commands can take required positional arguments followed by optional positional arguments.
 
-Options are stateful variables that persist between commands. Options can be specified for any command by listing them after the command's positional arguments in the form.
-```
--<option> <value>
-```
-For example, autoplay takes 2 positional arguments. To specify the lexicon, use the lexicon option after the positional arguments:
-```
-autoplay games 100 -lex CSW21
-```
-### Commands
-#### cgp
-Loads the given CGP. The CGP must have the four required components:
-```
-cgp <board> <racks> <scores> <consecutive_zeros>
-```
-##### Examples
-Load an empty CGP:
-```
-cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0
-```
-Load a game in progress while specifying the lexicon and letter distribution options:
-```
-cgp 4AUREOLED3/11O3/11Z3/10FY3/10A4/10C4/10I4/7THANX3/10GUV2/15/15/15/15/15/15 AHMPRTU/ 177/44 0 -lex CSW21; -ld english;
-```
-#### generate
-Generates plays for the position. The generate command takes no arguments as its behavior is mediated by the options. Generating plays completely resets the move list, discarding any moves that may have be added manually.
-##### Examples
-Generate moves for the current position:
-```
-gen
-```
-Generate at most 17 moves for the current position:
-```
-gen -numplays 17
-```
-#### addmoves
-Adds moves to the move list if they do not already exist. Moves added manually will be discarded by the move generation command. Multiple moves are delimited by a comma and do not have any whitespace. All added moves must adhere to the [UCGI format](https://github.com/woogles-io/open-protocols/blob/main/ucgi/ucgi.md).
-##### Examples
-Add a play:
-```
-addmoves 8D.REASON
-```
-Add an exchange:
-```
-addmoves ex.QV
-```
-Add a pass:
-```
-addmoves pass
-```
-Add multiple moves:
-```
-addmoves pass,8f.NIL,8F.LIN,8D.ZILLION,8F.ZILLION,ex.ILN
-```
-#### rack
-Specifies the rack for one of the players. The rack command requires the player index followed by the rack:
-```
-rack <player_index> <rack>
-```
-If no rack is given, the rack will be set to the empty rack.
-##### Examples
-Set player one's rack to ABCD:
-```
-rack 1 ABCD
-```
-Set player two's rack to EFGHI?:
-```
-rack 2 EFGHI?
-```
-Set player one's rack to empty:
-```
-rack 1
-```
-#### simulate
-Run a montecarlo simulation of the given position with the given on turn player rack. The simulate command takes an optional argument specifying the partially known tiles of the opponent.
-##### Examples
-Simulate the current position:
-```
-sim
-```
-Simulate the current position with a partially known oppopent rack of ES:
-```
-sim ES
-```
-#### infer
-Run an inference of the given position. Inferences are exhaustive (iterate through all possible racks) and based on static equity. Inferences require the the target player (the player being inferred) index and either the number exchanged or the played tiles and the score.
-##### Examples
-Infer what player 2 had when they played the letters ABC for 20 points:
-```
-infer 2 ABC 20
-```
-Infer what player 1 had when they exchanged 3 tiles:
-```
-infer 1 3
-```
-#### autoplay
-Run autoplay games where player one plays player two. When evaluating which player is better, it is recommended to use the game pairs option (specified by "-gp") to reduce the noise in the result.
-##### Running autoplay with game pairs
-The game pairs option removes some noise from the autoplay results by playing games in pairs using the same seed, with player one going first in one game and player two going first in the other game. Since MAGPIE games are deterministic for a given starting seed, if both players make the exact same decision for each corresponding play, the games will be identical. The final results are aggregated into two statistics, all games and divergent games. A pair of games is only added to the divergent games statistic if the players made a different play for the exact same position.
+To print more details about commands and settings, run the 'help' command:
 
-MAGPIE also implements double sided tile drawing to reduce the noise introduced by making a different play. At the start of each game, the bag is preshuffled, and each player draws from their own "end" of the bag. Player one would draw from the bag starting at index 0 and player two would draw from the bag starting at index 99 (assuming the bag started with 100 tiles). Exchanged tiles for both players are returned completely randomly. When a player makes a different decision and perhaps plays a different number of tiles, the difference between all of the tiles they will end up drawing is greatly reduced.
-
-By using game pairs with double sided tile drawing, the noise of the final result will be much lower and a statsig signal can be derived from fewer games.
-#### convert
-Convert one data format to another.
-##### Examples
-Convert a text file to a dawg (stored as a KWG):
 ```
-convert text2dawg CSW21 CSW21
-```
-Convert a KLV file to a human readable CSV:
-```
-convert klv2csv CSW21 CSW21
-```
-#### leavegen
-Generates superleaves for the given lexicon. The leavegen command requires the minimum target leave count for each generation and the number of games to play before it starts forcing rare draws.
-##### Examples
-Generate leaves for the CSW21 lexicon with 4 generations with a minimum of 100, 200, 500, and 1000 minimum leave target counts, while only forcing rare leaves after playing 10,000,000 games:
-```
-leavegen 100,200,500,1000 10000000
-```
-#### setoptions
-Sets the specified options. Note that options can be set together with any command.
-```
-setoptions -numplays 5 -it 6
+magpie> help
 ```
 
-### Options
-#### bb
+To see details for a specific command or setting, provide the command or setting when invoking the help command:
 
-Specifies the bingo bonus. The default value is 50.
+```
+magpie> help autoplay
+magpie> help lex
+```
 
-#### bdn
+### Load and Save Settings
 
-Specifies the board layout.
+On startup, MAGPIE will check for a 'settings.txt' file in the current directory and will load the settings saved in that file if it exists. By default, after every successful command that is not invoked in script mode, MAGPIE will save the current settings to 'settings.txt' so they do not have to be reentered on the next startup. To disable this feature, set the "savesettings" setting to false.
 
-#### var
+### Execution Modes
 
-Specifies the game variant.
+MAGPIE can operate in multiple modes, which are described below:
 
-#### ld
+#### Script Mode
 
-Specifies the letter distribution.
+Script mode executes a single command and then exits immediately. To run in script mode, the following conditions must be met:
 
-#### lex
+- A command which is not 'set' or 'cgp' is given
+- No execution mode is specified with the '-mode' setting.
 
-Specifies the lexicon for both players
+If the conditions above are not met, MAGPIE will run in interative mode and wait for user input.
 
-#### p1, p2
+For example, the following command:
 
-Specifies the name for the given player.
+```
+./bin/magpie autoplay games 100 -lex CSW21 -s1 equity -s2 equity -r1 best -r2 best -threads 4 -hr true
+```
 
-#### l1, l2
+#### Interactive Modes (REPL)
 
-Specifies the lexicon for the given player.
+The interactive modes of MAGPIE implement a Read-Evaluate-Print-Loop which continuously listens for and executes user input.
 
-#### k1, k2
+##### Asynchronous Interactive Mode
 
-Specifies the leaves for the given player.
+Asynchronous mode allows the user to either stop or query the status of the currently running command, with the 'stop' and 'status' asynchronous commands respectively. This mode is enabled by default and can be set with the '-mode async' setting.
 
-#### s1, s2
+In async mode a long running sim and be checked for progress and stopped at anytime during execution:
 
-Specifies the move sort type for the given player. The valid sort options are `equity` and `score`.
+```
+magpie> new
+(... game output ...)
+magpie> r AEEINNR
+magpie> gs
+sta
+(... current sim results ...)
 
-#### r1, r2
+sto
+(... final sim results ...)
 
-Specifies the move record type for the given player. The valid record options are `best` and `all`.
-The `best` option will only record the best move according to the sorting type and the `all` option will record the number of plays specified by `numplays`.
+magpie>
+```
 
-#### winpct
+The asynchronous commands can also be specified by their shortest unambiguous strings.
 
-Specifies the win percentage filename.
+##### Synchronous Interactive Mode
 
-#### plies
+Synchronous mode blocks while a command is running and does will not accept new commands until the previous command has completed. This mode can be set with the '-mode sync' setting. It is not recommended for human users to run in sync mode.
 
-Specifies the number of plies the simulation runs.
+For running many commands programatically from another process, it is recommended to use sync mode instead of script mode to avoid the overhead startup costs.
 
-#### numplays
+### API Library
 
-Specifies the number of plays that the move generator will record.
+For programs embedding magpie as a library, all commands have a corresponding `str_api_*` function. The `str_api_*` functions all have the signature `char* func(Config*, ErrorStack*, char* cmd)` and use the same parser as the `execute` commands, but return the output as a string instead of printing the output to `stdout`.
 
-#### iterations
+Currently, the API library has no clients, so if you are interested in this feature, please feel free to reach out to the developers if you run into any issues.
 
-Specifies the number of simulations or the number of games or game pairs.
+## Data
 
-#### scond
+The `setup.sh` command will download the necessary lexical data for several common lexica into the `./data` directory organized into 4 subdirectories:
 
-Specifies the stopping condition of the simulation. Valid options are `95`, `98`, and `99`.
+### layouts
 
-#### eq
+This directory contains the layout files which specify the start square and bonus squares for the board. The start square is denoted by the `row, column` integers on the first row, followed by the board layout bonus square. Only the following bonus squares are valid:
 
-Specifies the equity margin for the player to infer. If the play made by the player to infer is within the equity margin, it is considered a possible rack.
+- ` ` (no bonus)
+- `'` (double letter)
+- `-` (double word)
+- `"` (triple letter)
+- `=` (triple word)
+- `^` (quadruple letter)
+- `~` (quadruple word)
+- `#` (brick, an unplayable square)
 
-#### gp
+The height and width of the board are denoted by the compile time constant `BOARD_DIM` which can be overwritten during compilation. For example, compiling with:
 
-Specifies whether autoplay should run with game pairs or not.
+```
+make magpie BUILD=release BOARD_DIM=21
+```
 
-#### seed
+will compile a MAGPIE executable that only accepts layouts of 21x21.
 
-Specifies the random seed
+### letterdistributions
 
-#### threads
+This directory contains the letter distribution CSV files which specify the frequency, score, and display of each tile. The format is:
 
-Specifies the number of threads with which to run the command.
+```
+<uppercase_letter>,<lowercase_letter>,<frequency>,<score>,<is_vowel>,[<fullwidth_uppercase_letter>,<full_width_lowercase_letter>]
 
-#### pfreq
+```
 
-Specifies the interval of iterations to print the current info for the command.
+The full width display characters can be optionally specified at the end of the row.
 
-#### cfreq
+### lexica
 
-Specifies the interval of iterations to check the stopping condition for a simulation.
+This directory contains the following file types:
 
-#### infile
+- .txt (plain text lexica files)
+- .kwg (Kurnia Word Graph (KWG), courtesy of [wolges](https://github.com/andy-k/wolges))
+- .klv (KWG that stores leave values, , courtesy of [wolges](https://github.com/andy-k/wolges))
+- .wmp (Word Maps)
 
-Specifies the input file for the MAGPIE execution. This can be a regular file or a pipe. By default, infile is `stdin`.
+### strategy
 
-#### outfile
+This directory contains win percentage lookup tables used in Monte Carlo simulations.
 
-Specifies the output file for the MAGPIE execution. Warnings and errors still get printed to `stderr`.
+## Examples
 
-#### mode
+### Annotating a game
 
-Specifies that MAGPIE should run in console or UCGI mode.
+The following example demonstrates some of the more common game annotation commands. To see all of the available commands, invoke the `help` command.
+
+First, set the lexicon:
+
+```
+magpie> set -lex CSW24
+```
+
+then start a new game:
+
+```
+magpie> new
+```
+
+player names can be specified with the `p1` and `p2` commands:
+
+```
+magpie> p1 Adam Logan
+magpie> p2 Nigel Richards
+```
+
+at any point in the game, player names can be switched with the `switchnames` command:
+
+```
+magpie> sw
+```
+
+specify the rack for the player on turn:
+
+```
+magpie> r EEIJNP?
+```
+
+generate moves with the given rack:
+
+```
+magpie> g
+```
+
+sim the generated moves:
+
+```
+magpie> sim
+```
+
+to generate and sim at the same time, use the `gsim` command:
+
+```
+magpie> gsim
+```
+
+to commit a play, use the commit command:
+
+```
+magpie> c 1
+```
+
+alternatively, the current best move can be commited with the `topcommit` command:
+
+```
+magpie> t
+```
+
+which commits the top simming move if there are sim results available, otherwise it will commit the top static move. To challenge the previous play, use the `challenge` command:
+
+```
+magpie> chal
+```
+
+this will either remove the previous play if it formed a phony word or add a challenge bonus if not. Challenge bonuses for any play can be removed at any point in the game without affecting the subsequent move with the `unchallenge` command:
+
+```
+magpie> unchal
+```
+
+To save the game as a GCG file, use the `export` command:
+
+```
+magpie> e
+```
+
+The export command will give the file a default name if no name is provided.
+
+### Analyzing a game from xtables or woogles.io
+
+First, set the lexicon:
+
+```
+magpie> set -lex CSW24
+```
+
+then import the game
+
+```
+magpie> load 54515
+```
+
+the `load` command can take several different types of input which are explained in further detail in the `help` command.
+
+To navigate through the game, use `goto`
+
+```
+magpie> goto end
+magpie> gsim
+magpie> goto start
+magpie> gsim
+magpie> goto 10
+magpie> gsim
+magpie> goto 3
+magpie> infer
+```
+
+### Comparing lexica
+
+To play two lexica against each other to see which is stronger, you can create the required lexical data from text files and run the autoplay command. First, set the letter distribution:
+
+```
+magpie> set -ld english
+```
+
+then convert the text files to the KWG and WMP:
+
+```
+magpie> convert txt2kwg CSW50
+magpie> convert text2wordmap CSW50
+magpie> convert txt2kwg CSW60
+magpie> convert text2wordmap CSW60
+```
+
+both text file must contain one word per line in all uppercase. Once converted, you can run the `autoplay` command
+
+```
+magpie> autoplay games 10000 -l1 CSW50 -l2 CSW60 -leaves CSW21 -gp true -hr true -pfreq 10000
+```
+
+It is highly recommended to run with game pairs to reduce statistical noise. To see more details about game pairs, use `help gp`.
