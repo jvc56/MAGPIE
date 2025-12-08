@@ -108,12 +108,6 @@ Script mode executes a single command and then exits immediately. To run in scri
 
 If the conditions above are not met, MAGPIE will run in interative mode and wait for user input.
 
-For example, the following command:
-
-```
-./bin/magpie autoplay games 100 -lex CSW21 -s1 equity -s2 equity -r1 best -r2 best -threads 4 -hr true
-```
-
 #### Interactive Modes (REPL)
 
 The interactive modes of MAGPIE implement a Read-Evaluate-Print-Loop which continuously listens for and executes user input.
