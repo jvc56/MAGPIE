@@ -33,7 +33,7 @@ and run the setup command
 ./setup.sh
 ```
 
-You should now be able to run MAGPIE by running the executable:
+You should now be able to run the compiled MAGPIE executable:
 
 ```
 ./bin/magpie
@@ -186,7 +186,15 @@ This directory contains the letter distribution CSV files which specify the freq
 
 ```
 
-The full width display characters can be optionally specified at the end of the row.
+The full width display characters can be optionally specified at the end of the row. Setting a new lexicon with the `lexicon` setting will set a default letter distribution if the lexicon name has a known prefix. Below is a list of lexicon prefixes and their default letter distributions:
+
+- CSW, NWL, OSPD, OSW, America, CEL -> english
+- RD -> german
+- NSF -> norwegian
+- DISC -> catalan
+- FRA -> french
+- OSPS -> polish
+- DSW -> dutch
 
 ### lexica
 

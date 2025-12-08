@@ -13,7 +13,6 @@ typedef struct Trie {
   struct Trie *children[TRIE_NUMBER_OF_CHILDREN];
 } Trie;
 
-// Used when loading KLV data and in tests.
 static inline Trie *trie_create(void) {
   return (Trie *)calloc_or_die(1, sizeof(Trie));
 }

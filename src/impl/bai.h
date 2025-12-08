@@ -402,31 +402,7 @@ static inline void *bai_worker(void *args) {
   BAIWorkerArgs *bai_worker_args = (BAIWorkerArgs *)args;
   bai_worker_sample_loop(bai_worker_args);
   checkpoint_wait(bai_worker_args->checkpoint, bai_worker_args);
-
-  // BAISyncData *bai_sync_data = bai_worker_args->sync_data;
-  // int astar_index = bai_sync_data->astar_index;
-  // double astar_mean = bai_sync_data->arm_data[astar_index].mean;
-  // printf("finished initial phase at %lu, astar index and mean: %d, %f\n",
-  //        bai_sync_data->num_total_samples_completed, astar_index,
-  //        astar_mean);
-  // for (int i = 0; i < bai_sync_data->num_arms; i++) {
-  //   printf("%d,  %0.4f, %0.4f, %lu\n", i, bai_sync_data->arm_data[i].mean,
-  //          bai_sync_data->arm_data[i].var,
-  //          bai_sync_data->arm_data[i].num_samples);
-  // }
-
   bai_worker_sample_loop(bai_worker_args);
-
-  // astar_index = bai_sync_data->astar_index;
-  // astar_mean = bai_sync_data->arm_data[astar_index].mean;
-  // printf("finished bai phase at %lu, astar index and mean: %d, %f\n",
-  //        bai_sync_data->num_total_samples_completed, astar_index,
-  //        astar_mean);
-  // for (int i = 0; i < bai_sync_data->num_arms; i++) {
-  //   printf("%d,  %0.4f, %0.4f, %lu\n", i, bai_sync_data->arm_data[i].mean,
-  //          bai_sync_data->arm_data[i].var,
-  //          bai_sync_data->arm_data[i].num_samples);
-  // }
   return NULL;
 }
 

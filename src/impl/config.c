@@ -2924,7 +2924,6 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
     commit_move_index--;
     // If there are valid sim results, prefer to use them for the move index
     // lookup.
-    // FIXME: setting valid should be moved to the config
     if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
       const SimResults *sim_results = config->sim_results;
       const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
