@@ -30,7 +30,7 @@ long get_file_size(const char *filename) {
   error_stack_destroy(error_stack);
   fseek_or_die(stream, 0L, SEEK_END);
   const long file_size = ftell(stream);
-  fseek_or_die(stream, 0L, SEEK_SET);
+  fclose_or_die(stream);
   return file_size;
 }
 
