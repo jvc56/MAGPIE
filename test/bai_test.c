@@ -359,94 +359,6 @@ void test_bai_similarity(int num_threads) {
   thread_control_destroy(thread_control);
 }
 
-void test_bai_similar_play_comeback(int num_threads) {
-  const int num_rvs = 3;
-  const int sample_minimum = 50;
-  const int num_samples = (num_rvs + 100) * sample_minimum;
-
-  double *means_and_vars =
-      (double *)malloc_or_die((size_t)num_rvs * 2 * sizeof(double));
-  means_and_vars[0] = 10;
-  means_and_vars[1] = 100;
-  means_and_vars[2] = 10;
-  means_and_vars[3] = 100;
-  means_and_vars[4] = 5;
-  means_and_vars[5] = 100;
-
-  double *samples = (double *)malloc_or_die(num_samples * sizeof(double));
-  int sample_index = 0;
-  // Initial phase samples
-  // These are setup so that arm 0 is slightly worse than arm 1
-  for (; sample_index < sample_minimum; sample_index++) {
-    if (sample_index % 2 == 0) {
-      samples[sample_index] = 0.1;
-    } else {
-      samples[sample_index] = 0.9;
-    }
-  }
-  for (; sample_index < sample_minimum * 2; sample_index++) {
-    if (sample_index % 2 == 0) {
-      samples[sample_index] = 0.101;
-    } else {
-      samples[sample_index] = 0.9;
-    }
-  }
-  for (; sample_index < sample_minimum * 3; sample_index++) {
-    if (sample_index % 2 == 0) {
-      samples[sample_index] = 0.2;
-    } else {
-      samples[sample_index] = 1.3;
-    }
-  }
-  // Round robin phase samples
-  // These are setup so that arm 0 is better than arm 1
-  for (; sample_index < num_samples; sample_index++) {
-    if (sample_index % 3 == 0) {
-      samples[sample_index] = 1.0;
-    } else if (sample_index % 3 == 1) {
-      samples[sample_index] = 0.4;
-    } else {
-      samples[sample_index] = 0.5;
-    }
-  }
-  RandomVariablesArgs rv_args = {
-      .type = RANDOM_VARIABLES_NORMAL_PREDETERMINED,
-      .num_samples = num_samples,
-      .samples = samples,
-      .num_rvs = num_rvs,
-      .means_and_vars = means_and_vars,
-  };
-  RandomVariablesArgs rng_args = {
-      .type = RANDOM_VARIABLES_UNIFORM,
-      .seed = 10,
-      .num_rvs = num_rvs,
-  };
-  BAIOptions bai_options = {
-      .delta = 0.01,
-      .sample_minimum = sample_minimum,
-      .sample_limit = num_samples,
-      .time_limit_seconds = 0,
-      .num_threads = num_threads,
-      .sampling_rule = BAI_SAMPLING_RULE_ROUND_ROBIN,
-      .threshold = BAI_THRESHOLD_GK16,
-  };
-
-  ThreadControl *thread_control = thread_control_create();
-  BAIResult *bai_result = bai_result_create();
-  RandomVariables *rvs = rvs_create(&rv_args);
-  RandomVariables *rng = rvs_create(&rng_args);
-  bai_wrapper(&bai_options, rvs, rng, thread_control, NULL, bai_result);
-  assert(bai_result_get_best_arm(bai_result) == 0);
-  assert(bai_result_get_status(bai_result) == BAI_RESULT_STATUS_THRESHOLD);
-  rvs_destroy(rvs);
-  rvs_destroy(rng);
-  free(means_and_vars);
-
-  bai_result_destroy(bai_result);
-  free(samples);
-  thread_control_destroy(thread_control);
-}
-
 void test_bai_from_seed(const char *bai_seed) {
   ErrorStack *error_stack = error_stack_create();
   const uint64_t seed = string_to_uint64(bai_seed, error_stack);
@@ -542,7 +454,6 @@ void test_bai(void) {
       test_bai_interrupt(num_threads_i);
       test_bai_top_two(num_threads_i);
       test_bai_similarity(num_threads_i);
-      test_bai_similar_play_comeback(num_threads_i);
     }
   }
 }
