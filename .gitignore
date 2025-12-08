@@ -1,23 +1,66 @@
+# IDE and Editor
 .vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build directories
 bin
 obj
 cov
 covhtml
+lib
+
+# MAGPIE executables and libraries
+magpie*
+*.a
+*.so
+*.dylib
+
+# Coverage files
 *.gcda
 *.gcno
 *.info
+
+# Generic build artifacts
 *.out
-magpie*
-dev/*.txt
-perf*
-.env
+*.o
+
+# Qt generated files
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*.moc
+.qmake.stash
+Makefile
+Makefile.*
+!Makefile.orig
+!Makefile-wasm
+
+# Qt application bundles
+*.app
+
+# Data and test data
 data
 testdata
 versioned-tarballs
-quackle
-*.gcg
-oprofile_data
-cppcheck_*
+
+# Development files
+dev/*.txt
+perf*
+.env
 TODO
 CLAUDE.md
-*.DS_Store
+
+# Game files
+*.gcg
+
+# Profiling
+oprofile_data
+cppcheck_*
+
+# External dependencies
+quackle
