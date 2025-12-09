@@ -67,6 +67,12 @@ WordList* letterbox_find_anagrams_by_pattern(const KWG *kwg, const LetterDistrib
 WordList* letterbox_find_anagrams_with_blank(const KWG *kwg, const LetterDistribution *ld,
                                              const char *letters);
 
+// Find words that are exactly two letters longer than the input letters
+// This is an optimized version for finding double blank extensions (word + two wild tiles)
+// Returns WordList with all alphagrams of length strlen(letters) + 2
+WordList* letterbox_find_anagrams_with_two_blanks(const KWG *kwg, const LetterDistribution *ld,
+                                                  const char *letters);
+
 #ifdef __cplusplus
 }
 #endif

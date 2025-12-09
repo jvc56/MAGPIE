@@ -102,7 +102,8 @@ private:
     void showWordHoverOverlay(const QString& word, bool alignLeft, bool isHookOrExtension);
     void hideWordHoverOverlay();
     void updateHoverDebug(const QString& debugInfo);
-    QString generateSidebarTable(const QString& word, bool isHookOrExtension);
+    void refreshWordHoverOverlay();  // Refresh overlay with current zoom level
+    QString generateSidebarTable(const QString& word, bool isHookOrExtension, int sidebarWordSize, int sidebarBlankSize, int sidebarHeaderSize);
 
     Config* config;
     KWG* kwg;
@@ -189,6 +190,11 @@ private:
 
     // Zoom indicator
     void showZoomIndicator();
+
+    // Current hover state (for refreshing overlay on zoom)
+    QString currentHoveredWord;
+    bool currentHoverAlignLeft;
+    bool currentHoverIsHookOrExtension;
 };
 
 #endif // LETTERBOX_WINDOW_H

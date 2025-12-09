@@ -41,7 +41,8 @@ LetterboxWindow::LetterboxWindow(QWidget *parent)
       scaleFactor(1.0), zoomLevelIndex(7), scaledWordSize(36), scaledHookSize(24), scaledExtensionSize(14),
       scaledInputSize(20), scaledQueueCurrentSize(24), scaledQueueUpcomingSize(16),
       showDebugInfo(false), showComputeTime(false), showRenderTime(false), showHoverDebugInfo(false),
-      lastRenderTimeMicros(0)
+      lastRenderTimeMicros(0),
+      currentHoverAlignLeft(false), currentHoverIsHookOrExtension(false)
 {
     setupUI();
     setupMenuBar();
@@ -68,9 +69,9 @@ LetterboxWindow::LetterboxWindow(QWidget *parent)
     dir.cdUp();  // Contents
     QString dataPath = dir.absolutePath() + "/Resources/data";
 
-    qDebug() << "App dir:" << appDir;
-    qDebug() << "Data path:" << dataPath;
-    qDebug() << "Data exists:" << QDir(dataPath).exists();
+    // qDebug() << "App dir:" << appDir;
+    // qDebug() << "Data path:" << dataPath;
+    // qDebug() << "Data exists:" << QDir(dataPath).exists();
 
     config = letterbox_create_config(dataPath.toUtf8().constData(), "CSW24");
 
@@ -181,6 +182,7 @@ void LetterboxWindow::setupUI()
     );
     wordHoverOverlay->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
     wordHoverOverlay->setTextFormat(Qt::RichText);
+    wordHoverOverlay->setWordWrap(true);
     wordHoverOverlay->setFixedWidth(200);
     wordHoverOverlay->hide();
 
@@ -380,7 +382,7 @@ void LetterboxWindow::loadWordList()
     dir.cdUp();  // letterbox directory
     QString filePath = dir.absolutePath() + "/csw24-pb.txt";
 
-    qDebug() << "Looking for word list at:" << filePath;
+    // qDebug() << "Looking for word list at:" << filePath;
 
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
@@ -412,16 +414,16 @@ void LetterboxWindow::loadWordList()
     }
     file.close();
 
-    qDebug() << "Found" << alphagramWords.size() << "unique alphagrams";
-    qDebug() << "Loaded" << playabilityScores.size() << "playability scores";
+    // qDebug() << "Found" << alphagramWords.size() << "unique alphagrams";
+    // qDebug() << "Loaded" << playabilityScores.size() << "playability scores";
 
     // Debug: Check if specific words are loaded
-    if (playabilityScores.count("JEER")) {
-        qDebug() << "JEER score:" << playabilityScores["JEER"];
-    }
-    if (playabilityScores.count("EWER")) {
-        qDebug() << "EWER score:" << playabilityScores["EWER"];
-    }
+    // if (playabilityScores.count("JEER")) {
+    //     qDebug() << "JEER score:" << playabilityScores["JEER"];
+    // }
+    // if (playabilityScores.count("EWER")) {
+    //     qDebug() << "EWER score:" << playabilityScores["EWER"];
+    // }
 
     // Create alphagram sets from the words we already have (no KWG lookup needed!)
     for (auto& [alphagram, words] : alphagramWords) {
@@ -453,7 +455,7 @@ void LetterboxWindow::loadWordList()
                   return a.totalPlayability > b.totalPlayability;
               });
 
-    qDebug() << "Loaded" << alphagrams.size() << "alphagram sets";
+    // qDebug() << "Loaded" << alphagrams.size() << "alphagram sets";
 
     // Store a copy of all alphagrams for filtering
     allAlphagrams = alphagrams;
@@ -1096,6 +1098,7 @@ void LetterboxWindow::zoomIn()
         if (currentIndex < static_cast<int>(alphagrams.size())) {
             updateDisplay();
         }
+        refreshWordHoverOverlay();  // Refresh hover overlay with new zoom
         showZoomIndicator();
     }
 }
@@ -1110,6 +1113,7 @@ void LetterboxWindow::zoomOut()
         if (currentIndex < static_cast<int>(alphagrams.size())) {
             updateDisplay();
         }
+        refreshWordHoverOverlay();  // Refresh hover overlay with new zoom
         showZoomIndicator();
     }
 }
@@ -1374,7 +1378,7 @@ QString LetterboxWindow::sortExtensionsByPlayability(const QString& extensions, 
 
             // Debug: print specific cases for ER
             if (baseWord == "ER" && isFront && (ext == "JE" || ext == "EW" || ext == "OY" || extensionsWithScores.size() <= 5)) {
-                qDebug() << "Extension:" << ext << "-> Full word:" << fullWord << "-> Score:" << score;
+                // qDebug() << "Extension:" << ext << "-> Full word:" << fullWord << "-> Score:" << score;
             }
         }
 
@@ -1568,7 +1572,7 @@ void LetterboxWindow::saveCurrentList()
     if (file.open(QIODevice::WriteOnly)) {
         file.write(doc.toJson());
         file.close();
-        qDebug() << "Saved list to:" << currentListFilepath;
+        // qDebug() << "Saved list to:" << currentListFilepath;
     } else {
         qWarning() << "Failed to save list to:" << currentListFilepath;
     }
@@ -1651,7 +1655,7 @@ void LetterboxWindow::loadSavedListFromFile(const QString& filepath)
     updateDisplay();
     addToRecentLists(filepath);
 
-    qDebug() << "Loaded list:" << currentListName << "from:" << filepath;
+    // qDebug() << "Loaded list:" << currentListName << "from:" << filepath;
 }
 
 void LetterboxWindow::addToRecentLists(const QString& filepath)
@@ -1745,20 +1749,37 @@ void LetterboxWindow::showWordHoverOverlay(const QString& word, bool alignLeft, 
         return;
     }
 
+    // Save current hover state for refreshing on zoom
+    currentHoveredWord = word;
+    currentHoverAlignLeft = alignLeft;
+    currentHoverIsHookOrExtension = isHookOrExtension;
+
     QString html;
     QString wordUpper = word.toUpper();
 
-    // Show the word header for main words (not hooks/extensions)
-    if (!isHookOrExtension) {
-        html += QString("<div style='font-size: 24px; font-weight: 600; text-align: center; margin-bottom: 8px; letter-spacing: 1px;'>%1</div>")
-                .arg(wordUpper);
-    }
+    // Calculate scaled sizes for sidebar elements
+    int sidebarWordSize = scaledWordSize;
+    int sidebarBlankSize = static_cast<int>(scaledWordSize * 0.8);
+    // Scale equation text to 67% of previous size with 10px minimum
+    // Previous: 20px at 100% zoom → New: ~13px at 100% zoom (20 * 0.67 ≈ 13)
+    int sidebarHeaderSize = std::max(10, static_cast<int>(20 * 0.67 * scaleFactor));
+
+    qDebug() << "Zoom sizes - scaledWordSize:" << scaledWordSize
+             << "sidebarHeaderSize:" << sidebarHeaderSize
+             << "scaleFactor:" << scaleFactor;
 
     // Always add the sidebar table (shows anagrams/hooks for hooks/extensions, blank extensions for all)
-    QString tableHtml = generateSidebarTable(word, isHookOrExtension);
+    // Use scaled sizes: sidebarWordSize for main table, sidebarBlankSize for blank tables, sidebarHeaderSize for equations
+    QString tableHtml = generateSidebarTable(word, isHookOrExtension, sidebarWordSize, sidebarBlankSize, sidebarHeaderSize);
     html += tableHtml;
 
+    // Force QLabel to re-render by clearing first
+    wordHoverOverlay->clear();
     wordHoverOverlay->setText(html);
+
+    // Force update of the label's internal document
+    wordHoverOverlay->setTextFormat(Qt::RichText);
+    wordHoverOverlay->updateGeometry();
     wordHoverOverlay->adjustSize();
 
     // Make it wider to accommodate the table
@@ -1772,9 +1793,10 @@ void LetterboxWindow::showWordHoverOverlay(const QString& word, bool alignLeft, 
     wordHoverOverlay->move(x, y);
     wordHoverOverlay->show();
     wordHoverOverlay->raise();  // Ensure it's on top
+    wordHoverOverlay->update();  // Force repaint
 }
 
-QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOrExtension)
+QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOrExtension, int sidebarWordSize, int sidebarBlankSize, int sidebarHeaderSize)
 {
     QString html;
     QString wordUpper = word.toUpper();
@@ -1858,6 +1880,9 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
         html += "<div style='text-align: center;'>";
         html += "<table style='border-collapse: collapse; background-color: rgb(50, 50, 50); border: 1px solid rgb(90, 90, 90); display: inline-block;'>";
 
+        // Calculate hook size once (80% of main word size)
+        int hookSize = static_cast<int>(sidebarWordSize * 0.8);
+
         for (const auto& row : rows) {
             QString frontHooks = std::get<0>(row);
             QString anagram = std::get<1>(row);
@@ -1867,20 +1892,23 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
 
             // Front hooks column (right-aligned) - only show if any word has front hooks
             if (anyHasFrontHooks) {
-                html += "<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: right; border-right: 1px solid #666; vertical-align: top; font-size: 16px; font-weight: 500; white-space: nowrap;'>";
+                html += QString("<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: right; border-right: 1px solid #666; vertical-align: top; font-size: %1px; font-weight: 500; white-space: nowrap;'>")
+                        .arg(hookSize);
                 html += frontHooks;
                 html += "</td>";
             }
 
             // Word column (centered, bold, larger)
             QString wordBorder = anyHasBackHooks ? "border-right: 1px solid #666;" : "";
-            html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: 20px; font-weight: 600; letter-spacing: 1px; color: #fff; text-align: center; padding: 8px 4px; white-space: nowrap; %1'>%2</td>")
+            html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; color: #fff; text-align: center; padding: 8px 4px; white-space: nowrap; %2'>%3</td>")
+                    .arg(sidebarWordSize)
                     .arg(wordBorder)
                     .arg(anagram);
 
             // Back hooks column (left-aligned) - only show if any word has back hooks
             if (anyHasBackHooks) {
-                html += "<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: left; vertical-align: top; font-size: 16px; font-weight: 500; white-space: nowrap;'>";
+                html += QString("<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: left; vertical-align: top; font-size: %1px; font-weight: 500; white-space: nowrap;'>")
+                        .arg(hookSize);
                 html += backHooks;
                 html += "</td>";
             }
@@ -1965,14 +1993,24 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
             blankLetterList = "∅";
         }
 
-        html += QString("<div style='font-family: \"Jost\", sans-serif; font-size: 16px; font-weight: 500; text-align: center; color: #fff; margin-bottom: 8px;'>%1 + ? = %2</div>")
+        // Add counts (N alphagrams / M words)
+        int numAlphagrams = blankLetters.size();
+        int numWords = blankWords.size();
+        QString counts = QString(" (%1/%2)").arg(numAlphagrams).arg(numWords);
+
+        qDebug() << "Single blank equation:" << wordUpper << "+ ? =" << "using sidebarHeaderSize:" << sidebarHeaderSize << "px";
+
+        // Create a QFont and set it via setStyleSheet approach - wrap in p tag with explicit font
+        html += QString("<p style='font-family: Jost; font-size: %1px; font-weight: 500; text-align: center; color: #fff; margin: 0px 0px 8px 0px;'>%2 + ? = %3%4</p>")
+                .arg(sidebarHeaderSize)
                 .arg(wordUpper)
-                .arg(blankLetterList);
+                .arg(blankLetterList)
+                .arg(counts);
 
-        qDebug() << "Blank extensions for" << wordUpper << ":" << blankWords.size() << "words";
+        // qDebug() << "Blank extensions for" << wordUpper << ":" << blankWords.size() << "words";
 
-        // If 10 or fewer blank extension words, show table
-        if (blankWords.size() > 0 && blankWords.size() <= 10) {
+        // If 10 or fewer blank extension alphagrams, show table
+        if (blankLetters.size() > 0 && blankLetters.size() <= 10) {
             html += "<div style='text-align: center;'>";
             html += "<table style='border-collapse: collapse; background-color: rgb(50, 50, 50); border: 1px solid rgb(90, 90, 90); display: inline-block;'>";
 
@@ -1985,24 +2023,22 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
                 QString displayWord = std::get<0>(wordPair);
                 QChar blankLetter = std::get<1>(wordPair);
 
-                // Build the display word with blank letter in gold
+                // Build the display word with only the first occurrence of blank letter in gold
                 QString styledWord;
+                bool foundBlank = false;
                 for (QChar ch : displayWord) {
-                    if (ch == blankLetter) {
+                    if (!foundBlank && ch == blankLetter) {
                         // First occurrence of the blank letter - show in gold
                         styledWord += QString("<span style='color: #FFD700;'>%1</span>").arg(ch);
-                        // Replace blank letter with a marker so we only color the first one
-                        displayWord.replace(displayWord.indexOf(blankLetter), 1, QChar(0x01));
-                    } else if (ch == QChar(0x01)) {
-                        // This was already processed, show in white
-                        styledWord += QString("<span style='color: #fff;'>%1</span>").arg(blankLetter);
+                        foundBlank = true;
                     } else {
                         styledWord += QString("<span style='color: #fff;'>%1</span>").arg(ch);
                     }
                 }
 
                 html += "<tr>";
-                html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: 20px; font-weight: 600; letter-spacing: 1px; text-align: center; padding: 8px 4px; white-space: nowrap;'>%1</td>")
+                html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 0.8px; text-align: center; padding: 6px 3px; white-space: nowrap;'>%2</td>")
+                        .arg(sidebarBlankSize)
                         .arg(styledWord);
                 html += "</tr>";
             }
@@ -2013,16 +2049,165 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
     } else {
         // No blank extensions found - show the empty set symbol
         html += "<div style='margin-top: 12px;'></div>";
-        html += QString("<div style='font-family: \"Jost\", sans-serif; font-size: 16px; font-weight: 500; text-align: center; color: #fff;'>%1 + ? = ∅</div>")
+        html += QString("<div style='font-family: \"Jost\", sans-serif; font-size: 16px; font-weight: 500; text-align: center; color: #fff; max-width: 100%%; white-space: normal; word-wrap: break-word; overflow-wrap: anywhere;'>%1 + ? = ∅ (0/0)</div>")
+                .arg(wordUpper);
+    }
+
+    // Add double blank extensions section (word + ??)
+    WordList* twoBlankAlphagrams = letterbox_find_anagrams_with_two_blanks(kwg, ld, wordStr.c_str());
+
+    // Collect all double blank letter pairs that form valid words
+    QSet<QString> twoBlankPairs;  // Store as "AB", "CD", etc.
+    std::vector<std::tuple<QString, QString>> twoBlankWords;  // (word, blank pair like "AB")
+
+    if (twoBlankAlphagrams && twoBlankAlphagrams->count > 0) {
+        for (int i = 0; i < twoBlankAlphagrams->count; i++) {
+            QString alphagram = QString(twoBlankAlphagrams->words[i]).toUpper();
+
+            // Find actual words for this alphagram
+            WordList* wordsForAlphagram = letterbox_find_anagrams(kwg, ld, alphagram.toStdString().c_str());
+
+            if (wordsForAlphagram && wordsForAlphagram->count > 0) {
+                // Find which two letters are the "blanks" by counting letter frequencies
+                QMap<QChar, int> originalFreq;
+                for (QChar ch : wordUpper) {
+                    originalFreq[ch]++;
+                }
+
+                QMap<QChar, int> alphagramFreq;
+                for (QChar ch : alphagram) {
+                    alphagramFreq[ch]++;
+                }
+
+                // Find the two letters that appear more frequently in the alphagram
+                QString blankPair;
+                for (auto it = alphagramFreq.begin(); it != alphagramFreq.end(); ++it) {
+                    int extraCount = it.value() - originalFreq[it.key()];
+                    for (int j = 0; j < extraCount; j++) {
+                        blankPair += it.key();
+                    }
+                }
+
+                // Sort the blank pair alphabetically for consistent display
+                if (blankPair.length() == 2) {
+                    if (blankPair[0] > blankPair[1]) {
+                        blankPair = QString(blankPair[1]) + blankPair[0];
+                    }
+                }
+
+                if (blankPair.length() == 2) {
+                    twoBlankPairs.insert(blankPair);
+
+                    // Add only words of exact target length (wordLength + 2)
+                    int targetLength = wordLength + 2;
+                    for (int j = 0; j < wordsForAlphagram->count; j++) {
+                        QString actualWord = QString(wordsForAlphagram->words[j]).toUpper();
+                        if (actualWord.length() == targetLength) {
+                            twoBlankWords.push_back(std::make_tuple(actualWord, blankPair));
+                        }
+                    }
+                }
+            }
+
+            if (wordsForAlphagram) {
+                word_list_destroy(wordsForAlphagram);
+            }
+        }
+
+        // Convert to sorted list for display
+        QList<QString> sortedTwoBlankPairs = twoBlankPairs.values();
+        std::sort(sortedTwoBlankPairs.begin(), sortedTwoBlankPairs.end());
+
+        // Add spacing and section header
+        html += "<div style='margin-top: 12px;'></div>";
+
+        // Show the summary line: WORD + ?? = AB CD EF ...
+        QString twoBlankPairList;
+        for (const QString& pair : sortedTwoBlankPairs) {
+            if (!twoBlankPairList.isEmpty()) twoBlankPairList += " ";
+            twoBlankPairList += pair;
+        }
+
+        if (twoBlankPairList.isEmpty()) {
+            twoBlankPairList = "∅";
+        }
+
+        // Add counts (N alphagrams / M words)
+        int numTwoBlankAlphagrams = twoBlankPairs.size();
+        int numTwoBlankWords = twoBlankWords.size();
+        QString twoBlankCounts = QString(" (%1/%2)").arg(numTwoBlankAlphagrams).arg(numTwoBlankWords);
+
+        qDebug() << "Double blank equation:" << wordUpper << "+ ?? =" << "using sidebarHeaderSize:" << sidebarHeaderSize << "px";
+
+        // Create a QFont and set it via setStyleSheet approach - wrap in p tag with explicit font
+        html += QString("<p style='font-family: Jost; font-size: %1px; font-weight: 500; text-align: center; color: #fff; margin: 0px 0px 8px 0px;'>%2 + ?? = %3%4</p>")
+                .arg(sidebarHeaderSize)
+                .arg(wordUpper)
+                .arg(twoBlankPairList)
+                .arg(twoBlankCounts);
+
+        // If 10 or fewer double blank extension alphagrams, show table
+        if (twoBlankPairs.size() > 0 && twoBlankPairs.size() <= 10) {
+            html += "<div style='text-align: center;'>";
+            html += "<table style='border-collapse: collapse; background-color: rgb(50, 50, 50); border: 1px solid rgb(90, 90, 90); display: inline-block;'>";
+
+            // Sort words alphabetically
+            std::sort(twoBlankWords.begin(), twoBlankWords.end(), [](const auto& a, const auto& b) {
+                return std::get<0>(a) < std::get<0>(b);
+            });
+
+            for (const auto& wordPair : twoBlankWords) {
+                QString displayWord = std::get<0>(wordPair);
+                QString blankPair = std::get<1>(wordPair);
+                QChar blank1 = blankPair[0];
+                QChar blank2 = blankPair[1];
+
+                // Build the display word with both blank letters in gold
+                QString styledWord;
+                bool foundFirst = false;
+                bool foundSecond = false;
+
+                for (int k = 0; k < displayWord.length(); k++) {
+                    QChar ch = displayWord[k];
+
+                    // Check if this is one of the blank letters and hasn't been colored yet
+                    if (!foundFirst && ch == blank1) {
+                        styledWord += QString("<span style='color: #FFD700;'>%1</span>").arg(ch);
+                        foundFirst = true;
+                    } else if (!foundSecond && ch == blank2 && (blank1 != blank2 || foundFirst)) {
+                        styledWord += QString("<span style='color: #FFD700;'>%1</span>").arg(ch);
+                        foundSecond = true;
+                    } else {
+                        styledWord += QString("<span style='color: #fff;'>%1</span>").arg(ch);
+                    }
+                }
+
+                html += "<tr>";
+                html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 0.8px; text-align: center; padding: 6px 3px; white-space: nowrap;'>%2</td>")
+                        .arg(sidebarBlankSize)
+                        .arg(styledWord);
+                html += "</tr>";
+            }
+
+            html += "</table>";
+            html += "</div>";
+        }
+    } else {
+        // No double blank extensions found - show the empty set symbol
+        html += "<div style='margin-top: 12px;'></div>";
+        html += QString("<div style='font-family: \"Jost\", sans-serif; font-size: 16px; font-weight: 500; text-align: center; color: #fff; max-width: 100%%; white-space: normal; word-wrap: break-word; overflow-wrap: anywhere;'>%1 + ?? = ∅ (0/0)</div>")
                 .arg(wordUpper);
     }
 
     // Debug output
     if (showDebugInfo) {
-        qDebug() << "Sidebar for" << wordUpper << ":" << totalAnagrams << "total anagrams," << exactAnagrams << "exact anagrams";
-        if (blankAlphagrams) {
-            qDebug() << "  Blank alphagrams:" << blankAlphagrams->count << "total words:" << blankWords.size();
-        }
+        // qDebug() << "Sidebar for" << wordUpper << ":" << totalAnagrams << "total anagrams," << exactAnagrams << "exact anagrams";
+        // if (blankAlphagrams) {
+        //     qDebug() << "  Blank alphagrams:" << blankAlphagrams->count << "total words:" << blankWords.size();
+        // }
+        // if (twoBlankAlphagrams) {
+        //     qDebug() << "  Two-blank alphagrams:" << twoBlankAlphagrams->count << "total words:" << twoBlankWords.size();
+        // }
     }
 
     // Clean up
@@ -2032,6 +2217,9 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
     if (blankAlphagrams) {
         word_list_destroy(blankAlphagrams);
     }
+    if (twoBlankAlphagrams) {
+        word_list_destroy(twoBlankAlphagrams);
+    }
 
     return html;
 }
@@ -2040,6 +2228,16 @@ void LetterboxWindow::hideWordHoverOverlay()
 {
     if (wordHoverOverlay) {
         wordHoverOverlay->hide();
+    }
+    // Clear hover state
+    currentHoveredWord.clear();
+}
+
+void LetterboxWindow::refreshWordHoverOverlay()
+{
+    // If there's a currently hovered word, refresh it with new scaled sizes
+    if (!currentHoveredWord.isEmpty() && wordHoverOverlay && wordHoverOverlay->isVisible()) {
+        showWordHoverOverlay(currentHoveredWord, currentHoverAlignLeft, currentHoverIsHookOrExtension);
     }
 }
 

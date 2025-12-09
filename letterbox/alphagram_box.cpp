@@ -204,7 +204,7 @@ void AlphagramBox::calculateBoundingBoxes()
     // A properly laid out label with HTML table content should be at least 120 pixels wide
     if (tableLabel->width() <= 1 || tableLabel->height() <= 1 ||
         (tableLabel->width() < 120 && tableLabel->height() < 60)) {
-        qDebug() << "calculateBoundingBoxes: label not laid out yet, width=" << tableLabel->width() << "height=" << tableLabel->height();
+        // qDebug() << "calculateBoundingBoxes: label not laid out yet, width=" << tableLabel->width() << "height=" << tableLabel->height();
         // Retry after layout is complete
         QTimer::singleShot(10, this, [this]() {
             calculateBoundingBoxes();
@@ -225,7 +225,7 @@ void AlphagramBox::calculateBoundingBoxes()
         doc->setTextWidth(tableLabel->width());
         doc->setDocumentMargin(0);
     } else {
-        qDebug() << "calculateBoundingBoxes: label is not using RichText format!";
+        // qDebug() << "calculateBoundingBoxes: label is not using RichText format!";
         return;
     }
 
@@ -251,14 +251,14 @@ void AlphagramBox::calculateBoundingBoxes()
     }
 
     if (!table) {
-        qDebug() << "calculateBoundingBoxes: no table found in document!";
-        qDebug() << "  HTML:" << tableLabel->text().left(200);
+        // qDebug() << "calculateBoundingBoxes: no table found in document!";
+        // qDebug() << "  HTML:" << tableLabel->text().left(200);
         delete doc;
         return;
     }
 
-    qDebug() << "calculateBoundingBoxes: found table with" << table->rows() << "rows," << table->columns() << "cols, processing" << words.size() << "words";
-    qDebug() << "  labelOffset:" << labelOffset << "labelSize:" << tableLabel->size() << "docWidth:" << doc->textWidth();
+    // qDebug() << "calculateBoundingBoxes: found table with" << table->rows() << "rows," << table->columns() << "cols, processing" << words.size() << "words";
+    // qDebug() << "  labelOffset:" << labelOffset << "labelSize:" << tableLabel->size() << "docWidth:" << doc->textWidth();
 
     for (size_t row = 0; row < words.size() && row < static_cast<size_t>(table->rows()); row++) {
         const WordData& wordData = words[row];
@@ -308,13 +308,13 @@ void AlphagramBox::calculateBoundingBoxes()
     }
 
     // Debug: output bounding box count and details
-    qDebug() << "calculateBoundingBoxes: calculated" << boundingBoxes.size() << "boxes";
-    for (size_t i = 0; i < boundingBoxes.size() && i < 10; i++) {
-        const auto& bbox = boundingBoxes[i];
-        qDebug() << "  bbox[" << i << "]:" << bbox.text << "->" << bbox.fullWord
-                 << "rect=(" << bbox.rect.x() << "," << bbox.rect.y() << ","
-                 << bbox.rect.width() << "x" << bbox.rect.height() << ")";
-    }
+    // qDebug() << "calculateBoundingBoxes: calculated" << boundingBoxes.size() << "boxes";
+    // for (size_t i = 0; i < boundingBoxes.size() && i < 10; i++) {
+    //     const auto& bbox = boundingBoxes[i];
+    //     qDebug() << "  bbox[" << i << "]:" << bbox.text << "->" << bbox.fullWord
+    //              << "rect=(" << bbox.rect.x() << "," << bbox.rect.y() << ","
+    //              << bbox.rect.width() << "x" << bbox.rect.height() << ")";
+    // }
 
     delete doc;
 }
@@ -323,7 +323,7 @@ void AlphagramBox::processCellForBoundingBoxes(QTextDocument& doc, QTextTable* t
                                                 const WordData& wordData, int row,
                                                 bool isFront, const QPoint& labelOffset, bool isMainWord)
 {
-    qDebug() << "processCellForBoundingBoxes: row=" << row << "col=" << cell.column() << "isFront=" << isFront << "isMainWord=" << isMainWord << "wordData.word=" << wordData.word;
+    // qDebug() << "processCellForBoundingBoxes: row=" << row << "col=" << cell.column() << "isFront=" << isFront << "isMainWord=" << isMainWord << "wordData.word=" << wordData.word;
 
     // Get cell's bounding rect
     QTextCursor cellCursor = cell.firstCursorPosition();
@@ -334,17 +334,17 @@ void AlphagramBox::processCellForBoundingBoxes(QTextDocument& doc, QTextTable* t
     int cellStart = cell.firstPosition();
     int cellEnd = cell.lastPosition();
 
-    qDebug() << "  Starting block iteration, block.isValid()=" << block.isValid() << "cellStart=" << cellStart << "cellEnd=" << cellEnd;
+    // qDebug() << "  Starting block iteration, block.isValid()=" << block.isValid() << "cellStart=" << cellStart << "cellEnd=" << cellEnd;
     int blockCount = 0;
     while (block.isValid() && block.position() >= cellStart && block.position() < cellEnd) {
         blockCount++;
         QString blockText = block.text().trimmed();
-        qDebug() << "  Block" << blockCount << "text:" << blockText;
+        // qDebug() << "  Block" << blockCount << "text:" << blockText;
 
         if (!blockText.isEmpty()) {
             QRectF blockRect = doc.documentLayout()->blockBoundingRect(block);
 
-            qDebug() << "  blockRect:" << blockRect << "labelOffset:" << labelOffset;
+            // qDebug() << "  blockRect:" << blockRect << "labelOffset:" << labelOffset;
 
             // Split by spaces to get individual words/extensions
             QStringList words = blockText.split(' ', Qt::SkipEmptyParts);
@@ -364,7 +364,7 @@ void AlphagramBox::processCellForBoundingBoxes(QTextDocument& doc, QTextTable* t
             // Calculate total width of all text in this block
             int totalTextWidth = fm.horizontalAdvance(blockText);
 
-            qDebug() << "  alignment:" << alignment << "isRightAligned:" << isRightAligned << "totalTextWidth:" << totalTextWidth;
+            // qDebug() << "  alignment:" << alignment << "isRightAligned:" << isRightAligned << "totalTextWidth:" << totalTextWidth;
 
             // Calculate x offset based on cell alignment
             qreal currentX;
@@ -376,7 +376,7 @@ void AlphagramBox::processCellForBoundingBoxes(QTextDocument& doc, QTextTable* t
                 currentX = blockRect.x();
             }
 
-            qDebug() << "  currentX:" << currentX;
+            // qDebug() << "  currentX:" << currentX;
 
             // For each word in the block, calculate its individual bounding box
             for (int i = 0; i < words.size(); i++) {
