@@ -267,6 +267,7 @@ static inline void wmp_load_from_filename(WMP *wmp, const char *wmp_name,
   for (uint32_t len = 2; len <= BOARD_DIM; len++) {
     read_wmp_for_length(wmp, len, stream);
   }
+  fclose_or_die(stream);
 }
 
 static inline void wmp_load(WMP *wmp, const char *data_paths,

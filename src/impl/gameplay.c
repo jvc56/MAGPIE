@@ -255,19 +255,18 @@ void draw_leave_from_bag(Bag *bag, int player_draw_index, Rack *rack_to_update,
 int draw_rack_string_from_bag(const Game *game, const int player_index,
                               const char *rack_string) {
   const LetterDistribution *ld = game_get_ld(game);
-  Rack *player_rack_copy = rack_create(ld_get_size(ld));
+  Rack player_rack_copy;
+  rack_set_dist_size_and_reset(&player_rack_copy, ld_get_size(ld));
   int number_of_letters_set =
-      rack_set_to_string(ld, player_rack_copy, rack_string);
+      rack_set_to_string(ld, &player_rack_copy, rack_string);
 
   if (number_of_letters_set != -1) {
-    if (!rack_is_drawable(game, player_index, player_rack_copy)) {
+    if (!rack_is_drawable(game, player_index, &player_rack_copy)) {
       number_of_letters_set = -2;
     } else {
-      draw_rack_from_bag(game, player_index, player_rack_copy);
+      draw_rack_from_bag(game, player_index, &player_rack_copy);
     }
   }
-
-  rack_destroy(player_rack_copy);
 
   return number_of_letters_set;
 }
@@ -436,18 +435,15 @@ void return_phony_letters(Game *game) {
   game_increment_consecutive_scoreless_turns(game);
 }
 
-// Overwrites the passed in values for the following MoveGenArgs fields:
-// - move_record_type (with the player on turn's record type)
-// - move_sort_type (with the player on turn's sort type)
-// - override_kwg (with NULL)
-void generate_moves_for_game(const MoveGenArgs *args) {
+void generate_moves_for_game_override_record_type(
+    const MoveGenArgs *args, move_record_t move_record_type) {
   const Player *player_on_turn =
       game_get_player(args->game, game_get_player_on_turn_index(args->game));
 
   const MoveGenArgs args_with_overwritten_record_and_sort = {
       .game = args->game,
       .move_list = args->move_list,
-      .move_record_type = player_get_move_record_type(player_on_turn),
+      .move_record_type = move_record_type,
       .move_sort_type = player_get_move_sort_type(player_on_turn),
       .override_kwg = NULL,
       .thread_index = args->thread_index,
@@ -455,6 +451,16 @@ void generate_moves_for_game(const MoveGenArgs *args) {
   };
 
   generate_moves(&args_with_overwritten_record_and_sort);
+}
+
+// Overwrites the passed in values for the following MoveGenArgs fields:
+// - move_record_type (with the player on turn's record type)
+// - move_sort_type (with the player on turn's sort type)
+// - override_kwg (with NULL)
+void generate_moves_for_game(const MoveGenArgs *args) {
+  generate_moves_for_game_override_record_type(
+      args, player_get_move_record_type(game_get_player(
+                args->game, game_get_player_on_turn_index(args->game))));
 }
 
 Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
@@ -469,53 +475,6 @@ Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
   };
   generate_moves(&args);
   return move_list_get_move(move_list, 0);
-}
-
-bool moves_are_similar(const Move *move1, const Move *move2, int dist_size) {
-  if (!(move_get_dir(move1) == move_get_dir(move2) &&
-        move_get_col_start(move1) == move_get_col_start(move2) &&
-        move_get_row_start(move1) == move_get_row_start(move2))) {
-    return false;
-  }
-  if (!(move_get_tiles_played(move1) == move_get_tiles_played(move2) &&
-        move_get_tiles_length(move1) == move_get_tiles_length(move2))) {
-    return false;
-  }
-
-  // Create a rack from move1, then subtract the rack from move2. The final
-  // rack should have all zeroes.
-  Rack similar_plays_rack;
-  rack_set_dist_size_and_reset(&similar_plays_rack, dist_size);
-  for (int i = 0; i < move_get_tiles_length(move1); i++) {
-    MachineLetter tile = move_get_tile(move1, i);
-    if (tile == PLAYED_THROUGH_MARKER) {
-      continue;
-    }
-    int ml = tile;
-    if (get_is_blanked(ml)) {
-      ml = BLANK_MACHINE_LETTER;
-    }
-    rack_add_letter(&similar_plays_rack, ml);
-  }
-
-  for (int i = 0; i < move_get_tiles_length(move2); i++) {
-    MachineLetter tile = move_get_tile(move2, i);
-    if (tile == PLAYED_THROUGH_MARKER) {
-      continue;
-    }
-    int ml = tile;
-    if (get_is_blanked(ml)) {
-      ml = BLANK_MACHINE_LETTER;
-    }
-    rack_take_letter(&similar_plays_rack, ml);
-  }
-
-  for (int i = 0; i < dist_size; i++) {
-    if (rack_get_letter(&similar_plays_rack, i) != 0) {
-      return false;
-    }
-  }
-  return true;
 }
 
 void validate_challenge_bonus_order(const GameEvent *game_event,
@@ -720,8 +679,11 @@ void copy_bag_to_rack(const Bag *bag, const Rack *rack_to_sub, Rack *rack) {
   const int ld_size = rack_get_dist_size(rack);
   rack_set_dist_size_and_reset(rack, ld_size);
   for (MachineLetter ml = 0; ml < ld_size; ml++) {
-    rack_add_letters(rack, ml,
-                     remaining_letters[ml] - rack_get_letter(rack_to_sub, ml));
+    int letters_to_sub = 0;
+    if (rack_to_sub) {
+      letters_to_sub = rack_get_letter(rack_to_sub, ml);
+    }
+    rack_add_letters(rack, ml, remaining_letters[ml] - letters_to_sub);
   }
 }
 
@@ -729,6 +691,7 @@ void copy_bag_to_rack(const Bag *bag, const Rack *rack_to_sub, Rack *rack) {
 void set_after_game_event_racks(const GameHistory *game_history,
                                 const Game *game, int game_event_index,
                                 PlayEventsData *play_events_data,
+                                const bool all_letters_on_rack_played,
                                 ErrorStack *error_stack) {
   GameEvent *current_game_event =
       game_history_get_event(game_history, game_event_index);
@@ -745,14 +708,10 @@ void set_after_game_event_racks(const GameHistory *game_history,
   bool player_on_turn_rack_set = false;
   const Bag *bag = game_get_bag(game);
   const int num_letters_in_bag = bag_get_letters(bag);
-  if (num_letters_in_bag <= (RACK_SIZE)) {
+  if (all_letters_on_rack_played && num_letters_in_bag <= (RACK_SIZE)) {
     // If the bag has <= RACK_SIZE, then the last play must've been an outplay
     // and the opp must have all of the remaining letters.
-    // For the call to copy_bag_to_rack, just pass in
-    // after_event_player_off_turn_rack as the rack to sub since we know it's
-    // empty at this point.
-    copy_bag_to_rack(bag, after_event_player_off_turn_rack,
-                     after_event_player_on_turn_rack);
+    copy_bag_to_rack(bag, NULL, after_event_player_on_turn_rack);
     player_on_turn_rack_set = true;
   } else {
     for (int i = game_event_index + 1; i < number_of_game_events; i++) {
@@ -769,7 +728,9 @@ void set_after_game_event_racks(const GameHistory *game_history,
           return;
         }
       }
-      if (game_event_get_player_index(game_event_i) == player_on_turn_index) {
+      if (game_event_get_player_index(game_event_i) == player_on_turn_index &&
+          game_event_get_type(game_event_i) != GAME_EVENT_END_RACK_POINTS &&
+          rack_get_dist_size(game_event_get_const_rack(game_event_i)) != 0) {
         rack_copy(after_event_player_on_turn_rack,
                   game_event_get_const_rack(game_event_i));
         player_on_turn_rack_set = true;
@@ -890,6 +851,7 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
   Player *player;
   const Rack *player_rack;
   const Rack *opp_rack;
+  bool all_letters_on_rack_played = false;
   switch (game_event_type) {
   case GAME_EVENT_TILE_PLACEMENT_MOVE:
   case GAME_EVENT_EXCHANGE:
@@ -939,14 +901,16 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
       } else if (game_event_type == GAME_EVENT_EXCHANGE) {
         rack_reset(known_rack_from_phonies);
       }
-
     } else {
       vms = game_event_get_vms(game_event);
     }
 
+    const int player_on_turn_index = game_get_player_on_turn_index(game);
     game_set_backup_mode(game, BACKUP_MODE_GCG);
     play_move_without_drawing_tiles(validated_moves_get_move(vms, 0), game);
     game_set_backup_mode(game, BACKUP_MODE_OFF);
+    all_letters_on_rack_played = rack_is_empty(
+        player_get_rack(game_get_player(game, player_on_turn_index)));
     break;
   case GAME_EVENT_CHALLENGE_BONUS:
     player_add_to_score(game_get_player(game, game_event_player_index),
@@ -1042,6 +1006,7 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
     play_events_data->played_end_rack_points = true;
     player_add_to_score(player,
                         calculate_end_rack_points(opp_rack, game_get_ld(game)));
+    all_letters_on_rack_played = true;
     break;
   case GAME_EVENT_UNKNOWN:
     log_fatal("encountered unknown game event when playing game history turn");
@@ -1066,7 +1031,8 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
       return;
     }
     set_after_game_event_racks(game_history, game, game_event_index,
-                               play_events_data, error_stack);
+                               play_events_data, all_letters_on_rack_played,
+                               error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }

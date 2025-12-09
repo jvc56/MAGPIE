@@ -1,6 +1,7 @@
 #ifndef BOARD_DEFS_H
 #define BOARD_DEFS_H
 
+#include "bit_defs.h"
 #include "rack_defs.h"
 #include <stdbool.h>
 
@@ -20,7 +21,8 @@ enum {
   BOARD_VERTICAL_DIRECTION = 1,
   DEFAULT_BOARD_DIM = 15,
   DEFAULT_SUPER_BOARD_DIM = 21,
-  ANCHOR_HEAP_CAPACITY = BOARD_DIM * BOARD_DIM * RACK_SIZE * RACK_SIZE
+  ANCHOR_HEAP_CAPACITY = BOARD_DIM * BOARD_DIM * RACK_SIZE * RACK_SIZE,
+  BITS_PER_BOARD_DIM = BITS_TO_REPRESENT(BOARD_DIM)
 };
 
 #endif

@@ -6,11 +6,14 @@
 #include "../def/kwg_defs.h"
 #include "../def/move_defs.h"
 #include "../ent/bag.h"
+#include "../ent/board.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/endgame_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/game_history.h"
 #include "../ent/kwg.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
@@ -103,33 +106,6 @@ void pvline_update(PVLine *pv_line, const PVLine *new_pv_line,
   }
   pv_line->num_moves = new_pv_line->num_moves + 1;
   pv_line->score = score;
-}
-
-StringBuilder *pvline_string(const PVLine *pv_line, const Game *game,
-                             bool add_line_breaks) {
-  StringBuilder *pv_description = string_builder_create();
-  Move *temp = move_create();
-  string_builder_add_formatted_string(
-      pv_description, "<PV (Value %d, seqlen %d)>%c", pv_line->score,
-      pv_line->num_moves, add_line_breaks ? '\n' : ' ');
-
-  Game *game_copy = game_duplicate(game);
-
-  for (int i = 0; i < pv_line->num_moves; i++) {
-    string_builder_add_formatted_string(pv_description, "%d: ", i + 1);
-    small_move_to_move(temp, &(pv_line->moves[i]), game_get_board(game_copy));
-
-    string_builder_add_move(pv_description, game_get_board(game_copy), temp,
-                            game_get_ld(game_copy));
-    string_builder_add_formatted_string(pv_description, "%c",
-                                        add_line_breaks ? '\n' : ' ');
-    // Play the move on the board to make the next small_move_to_move make
-    // sense.
-    play_move(temp, game_copy, NULL);
-  }
-  move_destroy(temp);
-  game_destroy(game_copy);
-  return pv_description;
 }
 
 void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
@@ -591,6 +567,79 @@ void *solver_worker_start(void *uncasted_solver_worker) {
   return NULL;
 }
 
+void string_builder_endgame_results(StringBuilder *pv_description,
+                                    const EndgameResults *results,
+                                    const Game *game,
+                                    const GameHistory *game_history,
+                                    bool add_line_breaks) {
+  const PVLine *pv_line = endgame_results_get_pvline(results);
+  Move move;
+  string_builder_add_formatted_string(
+      pv_description, "Principal Variation (value: %d, length: %d)%c",
+      pv_line->score, pv_line->num_moves, add_line_breaks ? '\n' : ' ');
+
+  Game *game_copy = game_duplicate(game);
+  const Board *board = game_get_board(game_copy);
+  const LetterDistribution *ld = game_get_ld(game_copy);
+
+  if (add_line_breaks) {
+    StringGrid *sg = string_grid_create(pv_line->num_moves, 3, 1);
+    StringBuilder *tmp_sb = string_builder_create();
+    for (int i = 0; i < pv_line->num_moves; i++) {
+      int curr_col = 0;
+      // Set the player name
+      string_grid_set_cell(
+          sg, i, curr_col++,
+          get_formatted_string(
+              "(%s)",
+              game_history_player_get_name(
+                  game_history, game_get_player_on_turn_index(game_copy))));
+
+      // Set the play sequence index and player name
+      string_grid_set_cell(sg, i, curr_col++,
+                           get_formatted_string("%d:", i + 1));
+
+      // Set the move string
+      small_move_to_move(&move, &(pv_line->moves[i]), board);
+      string_builder_add_move(tmp_sb, board, &move, ld, true);
+      string_grid_set_cell(sg, i, curr_col++,
+                           string_builder_dump(tmp_sb, NULL));
+      string_builder_clear(tmp_sb);
+      // Play the move on the board to make the next small_move_to_move make
+      // sense.
+      play_move(&move, game_copy, NULL);
+    }
+    string_builder_add_string_grid(pv_description, sg, false);
+    string_grid_destroy(sg);
+  } else {
+    for (int i = 0; i < pv_line->num_moves; i++) {
+      string_builder_add_formatted_string(pv_description, "%d: ", i + 1);
+      small_move_to_move(&move, &(pv_line->moves[i]), board);
+      string_builder_add_move(pv_description, board, &move, ld, true);
+      if (i != pv_line->num_moves - 1) {
+        string_builder_add_string(pv_description, " -> ");
+      }
+      // Play the move on the board to make the next small_move_to_move make
+      // sense.
+      play_move(&move, game_copy, NULL);
+    }
+  }
+  string_builder_add_string(pv_description, "\n");
+  game_destroy(game_copy);
+}
+
+char *endgame_results_get_string(const EndgameResults *results,
+                                 const Game *game,
+                                 const GameHistory *game_history,
+                                 bool add_line_breaks) {
+  StringBuilder *pv_description = string_builder_create();
+  string_builder_endgame_results(pv_description, results, game, game_history,
+                                 add_line_breaks);
+  char *pvline_string = string_builder_dump(pv_description, NULL);
+  string_builder_destroy(pv_description);
+  return pvline_string;
+}
+
 void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack) {
   const int bag_size = bag_get_letters(game_get_bag(endgame_args->game));
@@ -623,11 +672,6 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
     cpthread_join(worker_ids[thread_index]);
     solver_worker_destroy(solver_workers[thread_index]);
   }
-
-  StringBuilder *pvsb =
-      pvline_string(&solver->principal_variation, solver->game, true);
-  thread_control_print(solver->thread_control, string_builder_peek(pvsb));
-  string_builder_destroy(pvsb);
 
   free(solver_workers);
   free(worker_ids);

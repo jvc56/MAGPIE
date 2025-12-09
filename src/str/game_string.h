@@ -1,6 +1,7 @@
 #ifndef GAME_STRING_H
 #define GAME_STRING_H
 
+#include "../ent/endgame_results.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/move.h"
@@ -84,12 +85,8 @@ void string_builder_add_game(const Game *game, const MoveList *move_list,
                              const GameHistory *game_history,
                              StringBuilder *game_string);
 
-char *ucgi_static_moves(const Game *game, const MoveList *move_list);
-
-void print_ucgi_static_moves(const Game *game, const MoveList *move_list,
-                             ThreadControl *thread_control);
-
 GameStringOptions *game_string_options_create_default(void);
+GameStringOptions *game_string_options_create_pretty(void);
 
 GameStringOptions *game_string_options_create(
     game_string_board_color_t board_color,

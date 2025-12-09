@@ -1,12 +1,16 @@
+#include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../ent/board.h"
 #include "../ent/equity.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/rack.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "letter_distribution_string.h"
+#include "rack_string.h"
+#include <stddef.h>
 #include <stdint.h>
 
 void string_builder_add_move_description(StringBuilder *move_string_builder,
@@ -47,9 +51,10 @@ void string_builder_add_move_description(StringBuilder *move_string_builder,
 }
 
 void string_builder_add_move(StringBuilder *string_builder, const Board *board,
-                             const Move *move, const LetterDistribution *ld) {
+                             const Move *move, const LetterDistribution *ld,
+                             bool add_score) {
   if (move_get_type(move) == GAME_EVENT_PASS) {
-    string_builder_add_string(string_builder, "pass 0");
+    string_builder_add_string(string_builder, "pass");
     return;
   }
 
@@ -112,8 +117,8 @@ void string_builder_add_move(StringBuilder *string_builder, const Board *board,
       current_col++;
     }
   }
-  string_builder_add_spaces(string_builder, 1);
-  if (board) {
+  if (board && add_score) {
+    string_builder_add_spaces(string_builder, 1);
     string_builder_add_int(string_builder, equity_to_int(move_get_score(move)));
   }
 }
@@ -207,4 +212,120 @@ void string_builder_add_gcg_move(StringBuilder *move_string_builder,
   }
   string_builder_add_formatted_string(move_string_builder, " +%d",
                                       equity_to_int(move_get_score(move)));
+}
+
+void string_builder_add_move_leave(StringBuilder *sb, const Rack *rack,
+                                   const Move *move,
+                                   const LetterDistribution *ld) {
+  Rack leave = *rack;
+  const int move_tiles_length = move_get_tiles_length(move);
+  for (int i = 0; i < move_tiles_length; i++) {
+    if (move_get_tile(move, i) != PLAYED_THROUGH_MARKER) {
+      if (get_is_blanked(move_get_tile(move, i))) {
+        rack_take_letter(&leave, BLANK_MACHINE_LETTER);
+      } else {
+        rack_take_letter(&leave, move_get_tile(move, i));
+      }
+    }
+  }
+  string_builder_add_rack(sb, &leave, ld, false);
+}
+
+// Board can be null
+void string_builder_add_move_list(StringBuilder *string_builder,
+                                  const MoveList *move_list, const Board *board,
+                                  const LetterDistribution *ld,
+                                  int max_num_display_plays,
+                                  bool use_ucgi_format) {
+  // Use +1 for the header
+  const int num_moves = move_list_get_count(move_list);
+  int num_moves_to_display = num_moves;
+  if (num_moves_to_display > max_num_display_plays) {
+    num_moves_to_display = max_num_display_plays;
+  }
+  int num_rows = num_moves_to_display;
+  if (!use_ucgi_format) {
+    num_rows += 1;
+  }
+  const int num_cols = 5;
+  StringGrid *string_grid = string_grid_create(num_rows, num_cols, 1);
+
+  int curr_row = 0;
+  int curr_col = 0;
+  if (!use_ucgi_format) {
+    string_grid_set_cell(string_grid, curr_row, curr_col++,
+                         string_duplicate(""));
+    string_grid_set_cell(string_grid, curr_row, curr_col++,
+                         string_duplicate("Move"));
+    string_grid_set_cell(string_grid, curr_row, curr_col++,
+                         string_duplicate("Leave"));
+    string_grid_set_cell(string_grid, curr_row, curr_col++,
+                         string_duplicate("Score"));
+    string_grid_set_cell(string_grid, curr_row, curr_col++,
+                         string_duplicate("Static Eq"));
+    curr_row++;
+  }
+
+  StringBuilder *tmp_sb = string_builder_create();
+  const Rack *rack = move_list_get_rack(move_list);
+  const uint16_t rack_dist_size = rack_get_dist_size(rack);
+  for (int i = 0; i < num_moves_to_display; i++) {
+    curr_col = 0;
+    const Move *move = move_list_get_move(move_list, i);
+
+    string_grid_set_cell(string_grid, curr_row, curr_col++,
+                         get_formatted_string("%d: ", i + 1));
+
+    if (board) {
+      string_builder_add_move(tmp_sb, board, move, ld, false);
+    } else {
+      string_builder_add_move_description(tmp_sb, move, ld);
+    }
+    string_grid_set_cell(string_grid, curr_row, curr_col++,
+                         string_builder_dump(tmp_sb, NULL));
+    string_builder_clear(tmp_sb);
+
+    // The rack from which the move is made should always
+    // be set, but in case it isn't, skip leave display
+    if (rack_dist_size > 0) {
+      string_builder_add_move_leave(tmp_sb, rack, move, ld);
+      string_grid_set_cell(string_grid, curr_row, curr_col++,
+                           string_builder_dump(tmp_sb, NULL));
+      string_builder_clear(tmp_sb);
+    } else {
+      curr_col++;
+    }
+
+    string_grid_set_cell(
+        string_grid, curr_row, curr_col++,
+        get_formatted_string("%d", equity_to_int(move_get_score(move))));
+
+    double move_equity;
+    if (move_get_type(move) == GAME_EVENT_PASS) {
+      move_equity = EQUITY_PASS_DISPLAY_DOUBLE;
+    } else {
+      move_equity = equity_to_double(move_get_equity(move));
+    }
+    string_grid_set_cell(string_grid, curr_row, curr_col++,
+                         get_formatted_string("%.2f", move_equity));
+
+    curr_row++;
+  }
+  string_builder_add_string_grid(string_builder, string_grid, false);
+  string_builder_add_formatted_string(string_builder,
+                                      "\nShowing %d of %d generated plays\n",
+                                      num_moves_to_display, num_moves);
+  string_grid_destroy(string_grid);
+  string_builder_destroy(tmp_sb);
+}
+
+char *move_list_get_string(const MoveList *move_list, const Board *board,
+                           const LetterDistribution *ld,
+                           int max_num_display_plays, bool use_ucgi_format) {
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_move_list(sb, move_list, board, ld, max_num_display_plays,
+                               use_ucgi_format);
+  char *move_list_string = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return move_list_string;
 }

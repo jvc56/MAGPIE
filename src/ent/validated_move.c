@@ -196,7 +196,8 @@ void validate_tiles_played_with_mls(const Board *board,
         if (!connected && play_connects(board, current_row, current_col)) {
           connected = true;
         }
-      } else if (board_letter == ml || allow_playthrough) {
+      } else if (board_letter == ml ||
+                 (allow_playthrough && ml == PLAYED_THROUGH_MARKER)) {
         move_set_tile(move, PLAYED_THROUGH_MARKER, i);
         if (ml != PLAYED_THROUGH_MARKER) {
           if (get_is_blanked(board_letter)) {
@@ -458,7 +459,8 @@ void validate_split_move(const StringSplitter *split_move, const Game *game,
         bag_get_letter(bag, i) + rack_get_letter(game_player_rack, i)) {
       error_stack_push(
           error_stack, ERROR_STATUS_MOVE_VALIDATION_RACK_NOT_IN_BAG,
-          get_formatted_string("rack not available in bag: %s", rack_string));
+          get_formatted_string("rack '%s' is not available in the bag",
+                               rack_string));
       return;
     }
   }
@@ -468,10 +470,10 @@ void validate_split_move(const StringSplitter *split_move, const Game *game,
   // Check if the play is in the rack and
   // set the leave value if it is.
   if (!rack_subtract(vm->leave, tiles_played_rack)) {
-    error_stack_push(error_stack,
-                     ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_NOT_IN_RACK,
-                     get_formatted_string("tiles played not in bag: %s",
-                                          tiles_or_exchange_or_pass_rack));
+    error_stack_push(
+        error_stack, ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_NOT_IN_RACK,
+        get_formatted_string("tiles played '%s' are not on the rack '%s'",
+                             tiles_or_exchange_or_pass_rack, rack_string));
   } else {
     vm->leave_value = klv_get_leave_value(
         player_get_klv(game_get_player(game, player_index)), vm->leave);

@@ -1,9 +1,11 @@
 #include "exec.h"
 
+#include "../compat/async_command_control.h"
 #include "../compat/cpthread.h"
 #include "../compat/linenoise.h"
 #include "../def/config_defs.h"
 #include "../def/cpthread_defs.h"
+#include "../def/exec_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/thread_control.h"
 #include "../util/fileproxy.h"
@@ -16,24 +18,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/poll.h>
 #include <unistd.h>
 
-typedef enum {
-  ASYNC_STOP_COMMAND_TOKEN,
-  ASYNC_STATUS_COMMAND_TOKEN,
-  NUMBER_OF_ASYNC_COMMAND_TOKENS,
-} async_token_t;
-
-// The order of these strings must match the order of the tokens
-static const char *async_command_strings[] = {
-    "stop",
-    "status",
-};
-
 typedef struct AsyncCommandInputArgs {
-  int *pipefds;
-  struct pollfd *fds;
+  AsyncCommandControl *acc;
   Config *config;
 } AsyncCommandInputArgs;
 
@@ -112,15 +100,29 @@ bool run_str_api_command(Config *config, ErrorStack *error_stack,
 async_token_t parse_async_command(const char *command, StringBuilder *sb) {
   async_token_t token = NUMBER_OF_ASYNC_COMMAND_TOKENS;
   string_builder_clear(sb);
-  for (int i = 0; i < NUMBER_OF_ASYNC_COMMAND_TOKENS; i++) {
-    const char *token_to_eval_string = async_command_strings[i];
+  for (async_token_t i = 0; i < NUMBER_OF_ASYNC_COMMAND_TOKENS; i++) {
+    const char *token_to_eval_string;
+    switch (i) {
+    case ASYNC_STOP_COMMAND_TOKEN:
+      token_to_eval_string = ASYNC_STOP_COMMAND_STRING;
+      break;
+    case ASYNC_STATUS_COMMAND_TOKEN:;
+      token_to_eval_string = ASYNC_STATUS_COMMAND_STRING;
+      break;
+    case NUMBER_OF_ASYNC_COMMAND_TOKENS:
+      log_fatal(
+          "encountered unexpected async command token when processing command");
+      break;
+    }
     if (has_iprefix(command, token_to_eval_string)) {
       if (token == NUMBER_OF_ASYNC_COMMAND_TOKENS) {
         token = i;
       } else if (string_builder_length(sb) == 0) {
+        // This only works because there are two valid async commands, if we add
+        // more, this whole scheme will need to be refactored
         string_builder_add_formatted_string(
             sb, "ambiguous async command '%s' could be: %s, %s", command,
-            async_command_strings[token], token_to_eval_string);
+            ASYNC_STOP_COMMAND_STRING, ASYNC_STATUS_COMMAND_STRING);
       } else {
         string_builder_add_formatted_string(sb, ", %s", token_to_eval_string);
       }
@@ -138,20 +140,13 @@ void *execute_async_input_worker(void *uncasted_args) {
   char *input = NULL;
   while (thread_control_get_status(thread_control) ==
          THREAD_CONTROL_STATUS_STARTED) {
-    int ret = poll(args->fds, 2, -1); // wait indefinitely
-    if (ret == -1) {
-      perror("poll");
-      log_fatal("unexpected error while polling in async input worker");
-    }
     free(input);
-    input = NULL;
-    if (args->fds[0].revents) {
-      input = read_line_from_stream_in();
-    } else {
-      // Since there are only 2 pipes, fds[1] has necessarily been written to,
-      // indicating that the async command has finished and we can stop
-      // listening for async inputs
+    input = async_command_control_wait_for_input_or_finished_signal(args->acc);
+    if (input == NULL) {
       break;
+    }
+    if (is_string_empty_or_whitespace(input)) {
+      continue;
     }
 
     async_token_t input_token = parse_async_command(input, err_msg_sb);
@@ -194,25 +189,13 @@ void execute_command_async(Config *config, ErrorStack *error_stack,
     return;
   }
 
-  int pipefds[2];
-  if (pipe(pipefds) == -1) {
-    perror("pipe");
-    log_fatal("failed to create pipe for async command");
-  }
-
   cpthread_t cmd_execution_thread;
   cpthread_create(&cmd_execution_thread, execute_async_command_worker, config);
 
-  // FIXME: wrap pollfd
-  struct pollfd fds[2];
-  fds[0].fd = fileno(get_stream_in());
-  fds[0].events = POLLIN;
-  fds[1].fd = pipefds[0];
-  fds[1].events = POLLIN;
+  AsyncCommandControl *acc = async_command_control_create();
 
   AsyncCommandInputArgs async_args;
-  async_args.pipefds = pipefds;
-  async_args.fds = fds;
+  async_args.acc = acc;
   async_args.config = config;
 
   cpthread_t cmd_input_thread;
@@ -224,9 +207,7 @@ void execute_command_async(Config *config, ErrorStack *error_stack,
     thread_control_wait_for_status_change(thread_control);
     if (thread_control_get_status(thread_control) ==
         THREAD_CONTROL_STATUS_FINISHED) {
-      if (write(pipefds[1], "x", 1) == -1) {
-        log_fatal("failed to write to async command input pipe");
-      }
+      async_command_control_send_finished_signal(acc);
     }
   }
 
@@ -234,13 +215,10 @@ void execute_command_async(Config *config, ErrorStack *error_stack,
 
   // Do to race conditions, the async input thread might still
   // be blocked on polling, so send a signal here to wake it up
-  if (write(pipefds[1], "x", 1) == -1) {
-    log_fatal("final write to async command input pipe failed");
-  }
+  async_command_control_send_finished_signal(acc);
 
   cpthread_join(cmd_input_thread);
-  close(pipefds[0]);
-  close(pipefds[1]);
+  async_command_control_destroy(acc);
 }
 
 void save_config_settings(const Config *config, ErrorStack *error_stack) {
@@ -249,18 +227,18 @@ void save_config_settings(const Config *config, ErrorStack *error_stack) {
   }
   StringBuilder *sb = string_builder_create();
   config_add_settings_to_string_builder(config, sb);
-  write_string_to_file(CONFIG_SETTINGS_FILENAME_WITH_EXTENSION, "w",
+  write_string_to_file(config_get_settings_filename(config), "w",
                        string_builder_peek(sb), error_stack);
   string_builder_destroy(sb);
 }
 
 void load_config_settings(Config *config, ErrorStack *error_stack) {
   // if file does not exist, just return
-  if (access(CONFIG_SETTINGS_FILENAME_WITH_EXTENSION, F_OK) != 0) {
+  if (access(config_get_settings_filename(config), F_OK) != 0) {
     return;
   }
-  char *settings_string = get_string_from_file(
-      CONFIG_SETTINGS_FILENAME_WITH_EXTENSION, error_stack);
+  char *settings_string =
+      get_string_from_file(config_get_settings_filename(config), error_stack);
   StringSplitter *settings_split_by_newline =
       split_string_by_newline(settings_string, true);
   const int num_lines =
@@ -299,7 +277,7 @@ void sync_command_scan_loop(Config *config, ErrorStack *error_stack,
   while (1) {
     const char *prompt_text = "";
     if (config_get_show_prompt(config)) {
-      prompt_text = "magpie> ";
+      prompt_text = MAGPIE_PROMPT " ";
     }
     free(input);
     input = linenoise(prompt_text);
@@ -314,12 +292,11 @@ void sync_command_scan_loop(Config *config, ErrorStack *error_stack,
       continue;
     }
 
-    if (strings_iequal("quit", input)) {
+    if (strings_iequal(TERMINATE_KEYWORD, input)) {
       break;
     }
 
-    if (strings_iequal(input,
-                       async_command_strings[ASYNC_STOP_COMMAND_TOKEN])) {
+    if (strings_iequal(input, ASYNC_STOP_COMMAND_STRING)) {
       error_stack_push(
           error_stack, ERROR_STATUS_COMMAND_NOTHING_TO_STOP,
           string_duplicate("no currently running command to stop"));
@@ -360,11 +337,11 @@ void caches_destroy(void) {
   fileproxy_destroy_cache();
 }
 
-void process_command_internal(int argc, char *argv[], const char *data_paths) {
+void process_command_internal(int argc, char *argv[],
+                              const ConfigArgs *config_args) {
   log_set_level(LOG_FATAL);
   ErrorStack *error_stack = error_stack_create();
-  Config *config =
-      config_create_default_with_data_paths(error_stack, data_paths);
+  Config *config = config_create(config_args, error_stack);
   if (error_stack_is_empty(error_stack)) {
     char *initial_command_string = create_command_from_args(argc, argv);
     sync_command_scan_loop(config, error_stack, initial_command_string);
@@ -377,11 +354,11 @@ void process_command_internal(int argc, char *argv[], const char *data_paths) {
   error_stack_destroy(error_stack);
 }
 
-void process_command(int argc, char *argv[]) {
-  process_command_internal(argc, argv, DEFAULT_DATA_PATHS);
+void process_command_default(int argc, char *argv[]) {
+  process_command_internal(argc, argv, NULL);
 }
 
-void process_command_with_data_paths(int argc, char *argv[],
-                                     const char *data_paths) {
-  process_command_internal(argc, argv, data_paths);
+void process_command_with_config_args(int argc, char *argv[],
+                                      const ConfigArgs *config_args) {
+  process_command_internal(argc, argv, config_args);
 }

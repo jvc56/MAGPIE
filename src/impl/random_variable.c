@@ -6,7 +6,6 @@
 #include "../def/rack_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
-#include "../ent/bai_result.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
@@ -34,7 +33,6 @@
 typedef double (*rvs_sample_func_t)(RandomVariables *, const uint64_t,
                                     const int, const uint64_t, BAILogger *);
 typedef bool (*rvs_similar_func_t)(RandomVariables *, const int, const int);
-typedef bool (*rvs_is_epigon_func_t)(const RandomVariables *, const int);
 typedef void (*rvs_destroy_data_func_t)(RandomVariables *);
 
 struct RandomVariables {
@@ -42,7 +40,6 @@ struct RandomVariables {
   atomic_uint_fast64_t total_samples;
   rvs_sample_func_t sample_func;
   rvs_similar_func_t similar_func;
-  rvs_is_epigon_func_t is_epigon_func;
   rvs_destroy_data_func_t destroy_data_func;
   void *data;
 };
@@ -68,16 +65,9 @@ double rv_uniform_sample(RandomVariables *rvs,
   return uniform_sample(rv_uniform->xoshiro_prng, &rv_uniform->mutex);
 }
 
-bool rv_uniform_mark_as_epigon_if_similar(RandomVariables
-                                              __attribute__((unused)) *
-                                              rvs,
-                                          const int __attribute__((unused)) i,
-                                          const int __attribute__((unused)) j) {
-  return false;
-}
-
-bool rv_uniform_is_epigon(const RandomVariables __attribute__((unused)) * rvs,
-                          const int __attribute__((unused)) i) {
+bool rv_uniform_are_similar(RandomVariables __attribute__((unused)) * rvs,
+                            const int __attribute__((unused)) i,
+                            const int __attribute__((unused)) j) {
   return false;
 }
 
@@ -89,8 +79,7 @@ void rv_uniform_destroy(RandomVariables *rvs) {
 
 void rv_uniform_create(RandomVariables *rvs, const uint64_t seed) {
   rvs->sample_func = rv_uniform_sample;
-  rvs->similar_func = rv_uniform_mark_as_epigon_if_similar;
-  rvs->is_epigon_func = rv_uniform_is_epigon;
+  rvs->similar_func = rv_uniform_are_similar;
   rvs->destroy_data_func = rv_uniform_destroy;
   RVUniform *rv_uniform = malloc_or_die(sizeof(RVUniform));
   rv_uniform->xoshiro_prng = prng_create(seed);
@@ -122,16 +111,11 @@ double rv_uniform_predetermined_sample(
   return rv_uniform_predetermined->samples[index];
 }
 
-bool rv_uniform_predetermined_mark_as_epigon_if_similar(
-    RandomVariables __attribute__((unused)) * rvs,
-    const int __attribute__((unused)) i, const int __attribute__((unused)) j) {
-  return false;
-}
-
-bool rv_uniform_predetermined_is_epigon(const RandomVariables
-                                            __attribute__((unused)) *
-                                            rvs,
-                                        const int __attribute__((unused)) i) {
+bool rv_uniform_predetermined_are_similar(RandomVariables
+                                              __attribute__((unused)) *
+                                              rvs,
+                                          const int __attribute__((unused)) i,
+                                          const int __attribute__((unused)) j) {
   return false;
 }
 
@@ -146,8 +130,7 @@ void rv_uniform_predetermined_create(RandomVariables *rvs,
                                      const double *samples,
                                      const uint64_t num_samples) {
   rvs->sample_func = rv_uniform_predetermined_sample;
-  rvs->similar_func = rv_uniform_predetermined_mark_as_epigon_if_similar;
-  rvs->is_epigon_func = rv_uniform_predetermined_is_epigon;
+  rvs->similar_func = rv_uniform_predetermined_are_similar;
   rvs->destroy_data_func = rv_uniform_predetermined_destroy;
   RVUniformPredetermined *rv_uniform_predetermined =
       malloc_or_die(sizeof(RVUniformPredetermined));
@@ -164,7 +147,6 @@ void rv_uniform_predetermined_create(RandomVariables *rvs,
 typedef struct RVNormal {
   XoshiroPRNG *xoshiro_prng;
   double *means_and_vars;
-  bool *is_epigon;
   cpthread_mutex_t mutex;
 } RVNormal;
 
@@ -187,47 +169,36 @@ double rv_normal_sample(RandomVariables *rvs, const uint64_t k,
          rv_normal->means_and_vars[k * 2 + 1] * u * s;
 }
 
-bool rv_normal_mark_as_epigon_if_similar(RandomVariables *rvs, const int leader,
-                                         const int i) {
-  if (leader == i) {
+bool rv_normal_are_similar(RandomVariables *rvs, const int i, const int j) {
+  if (i == j) {
     return false;
   }
-  RVNormal *rv_normal = (RVNormal *)rvs->data;
-  rv_normal->is_epigon[i] =
-      fabs(rv_normal->means_and_vars[(ptrdiff_t)(leader * 2)] -
-           rv_normal->means_and_vars[(ptrdiff_t)(i * 2)]) <
-          SIMILARITY_EPSILON &&
-      fabs(rv_normal->means_and_vars[(ptrdiff_t)(leader * 2 + 1)] -
-           rv_normal->means_and_vars[(ptrdiff_t)(i * 2 + 1)]) <
-          SIMILARITY_EPSILON;
-  return rv_normal->is_epigon[i];
-}
-
-bool rv_normal_is_epigon(const RandomVariables *rvs, const int i) {
-  RVNormal *rv_normal = (RVNormal *)rvs->data;
-  return rv_normal->is_epigon[i];
+  const RVNormal *rv_normal = (RVNormal *)rvs->data;
+  return fabs(rv_normal->means_and_vars[(ptrdiff_t)(i * 2)] -
+              rv_normal->means_and_vars[(ptrdiff_t)(j * 2)]) <
+             SIMILARITY_EPSILON &&
+         fabs(rv_normal->means_and_vars[(ptrdiff_t)(i * 2 + 1)] -
+              rv_normal->means_and_vars[(ptrdiff_t)(j * 2 + 1)]) <
+             SIMILARITY_EPSILON;
 }
 
 void rv_normal_destroy(RandomVariables *rvs) {
   RVNormal *rv_normal = (RVNormal *)rvs->data;
   prng_destroy(rv_normal->xoshiro_prng);
   free(rv_normal->means_and_vars);
-  free(rv_normal->is_epigon);
   free(rv_normal);
 }
 
 void rv_normal_create(RandomVariables *rvs, const uint64_t seed,
                       const double *means_and_vars) {
   rvs->sample_func = rv_normal_sample;
-  rvs->similar_func = rv_normal_mark_as_epigon_if_similar;
-  rvs->is_epigon_func = rv_normal_is_epigon;
+  rvs->similar_func = rv_normal_are_similar;
   rvs->destroy_data_func = rv_normal_destroy;
   RVNormal *rv_normal = malloc_or_die(sizeof(RVNormal));
   rv_normal->xoshiro_prng = prng_create(seed);
   rv_normal->means_and_vars = malloc_or_die(rvs->num_rvs * 2 * sizeof(double));
   memcpy(rv_normal->means_and_vars, means_and_vars,
          rvs->num_rvs * 2 * sizeof(double));
-  rv_normal->is_epigon = calloc_or_die(rvs->num_rvs, sizeof(bool));
   cpthread_mutex_init(&rv_normal->mutex);
   rvs->data = rv_normal;
 }
@@ -237,7 +208,6 @@ typedef struct RVNormalPredetermined {
   uint64_t index;
   double *samples;
   double *means_and_vars;
-  bool *is_epigon;
   cpthread_mutex_t mutex;
 } RVNormalPredetermined;
 
@@ -270,30 +240,19 @@ double rv_normal_predetermined_sample(RandomVariables *rvs, const uint64_t k,
   return result;
 }
 
-bool rv_normal_predetermined_mark_as_epigon_if_similar(RandomVariables *rvs,
-                                                       const int leader,
-                                                       const int i) {
-  if (leader == i) {
+bool rv_normal_predetermined_are_similar(RandomVariables *rvs, const int i,
+                                         const int j) {
+  if (i == j) {
     return false;
   }
-  RVNormalPredetermined *rv_normal_predetermined =
+  const RVNormalPredetermined *rv_normal_predetermined =
       (RVNormalPredetermined *)rvs->data;
-  rv_normal_predetermined->is_epigon[i] =
-      fabs(rv_normal_predetermined->means_and_vars[(ptrdiff_t)(leader * 2)] -
-           rv_normal_predetermined->means_and_vars[(ptrdiff_t)(i * 2)]) <
-          SIMILARITY_EPSILON &&
-      fabs(
-          rv_normal_predetermined->means_and_vars[(ptrdiff_t)(leader * 2 + 1)] -
-          rv_normal_predetermined->means_and_vars[(ptrdiff_t)(i * 2 + 1)]) <
-          SIMILARITY_EPSILON;
-  return rv_normal_predetermined->is_epigon[i];
-}
-
-bool rv_normal_predetermined_is_epigon(const RandomVariables *rvs,
-                                       const int i) {
-  RVNormalPredetermined *rv_normal_predetermined =
-      (RVNormalPredetermined *)rvs->data;
-  return rv_normal_predetermined->is_epigon[i];
+  return fabs(rv_normal_predetermined->means_and_vars[(ptrdiff_t)(i * 2)] -
+              rv_normal_predetermined->means_and_vars[(ptrdiff_t)(j * 2)]) <
+             SIMILARITY_EPSILON &&
+         fabs(rv_normal_predetermined->means_and_vars[(ptrdiff_t)(i * 2 + 1)] -
+              rv_normal_predetermined->means_and_vars[(ptrdiff_t)(j * 2 + 1)]) <
+             SIMILARITY_EPSILON;
 }
 
 void rv_normal_predetermined_destroy(RandomVariables *rvs) {
@@ -301,7 +260,6 @@ void rv_normal_predetermined_destroy(RandomVariables *rvs) {
       (RVNormalPredetermined *)rvs->data;
   free(rv_normal_predetermined->samples);
   free(rv_normal_predetermined->means_and_vars);
-  free(rv_normal_predetermined->is_epigon);
   free(rv_normal_predetermined);
 }
 
@@ -309,8 +267,7 @@ void rv_normal_predetermined_create(RandomVariables *rvs, const double *samples,
                                     const uint64_t num_samples,
                                     const double *means_and_vars) {
   rvs->sample_func = rv_normal_predetermined_sample;
-  rvs->similar_func = rv_normal_predetermined_mark_as_epigon_if_similar;
-  rvs->is_epigon_func = rv_normal_predetermined_is_epigon;
+  rvs->similar_func = rv_normal_predetermined_are_similar;
   rvs->destroy_data_func = rv_normal_predetermined_destroy;
   RVNormalPredetermined *rv_normal_predetermined =
       malloc_or_die(sizeof(RVNormalPredetermined));
@@ -324,8 +281,6 @@ void rv_normal_predetermined_create(RandomVariables *rvs, const double *samples,
       malloc_or_die(rvs->num_rvs * 2 * sizeof(double));
   memcpy(rv_normal_predetermined->means_and_vars, means_and_vars,
          rvs->num_rvs * 2 * sizeof(double));
-  rv_normal_predetermined->is_epigon =
-      calloc_or_die(rvs->num_rvs, sizeof(bool));
   cpthread_mutex_init(&rv_normal_predetermined->mutex);
   rvs->data = rv_normal_predetermined;
 }
@@ -349,6 +304,7 @@ typedef struct Simmer {
   const InferenceResults *inference_results;
   int num_threads;
   int print_interval;
+  int max_num_display_plays;
   ThreadControl *thread_control;
   SimResults *sim_results;
 } Simmer;
@@ -372,21 +328,6 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   free(simmer_worker);
 }
 
-bool simmer_plays_are_similar(const Simmer *simmer,
-                              const int current_best_play_index,
-                              const int other_play_index) {
-  const SimResults *sim_results = simmer->sim_results;
-  const SimmedPlay *m1 =
-      sim_results_get_simmed_play(sim_results, current_best_play_index);
-  const SimmedPlay *m2 =
-      sim_results_get_simmed_play(sim_results, other_play_index);
-
-  const Move *m1_move = simmed_play_get_move(m1);
-  const Move *m2_move = simmed_play_get_move(m2);
-
-  return moves_are_similar(m1_move, m2_move, simmer->dist_size);
-}
-
 double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
                      const int thread_index, const uint64_t sample_count,
                      BAILogger __attribute__((unused)) * bai_logger) {
@@ -394,9 +335,6 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   SimResults *sim_results = simmer->sim_results;
   SimmedPlay *simmed_play =
       sim_results_get_simmed_play(sim_results, (int)play_index);
-  if (simmed_play_get_is_epigon(simmed_play)) {
-    return INFINITY;
-  }
   SimmerWorker *simmer_worker = simmer->workers[thread_index];
   Game *game = simmer_worker->game;
   MoveList *move_list = simmer_worker->move_list;
@@ -485,32 +423,17 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
 
   if (simmer->print_interval > 0 &&
       sample_count % simmer->print_interval == 0) {
-    print_ucgi_sim_stats(
-        simmer_worker->game, simmer->sim_results, simmer->thread_control,
-        (double)sim_results_get_node_count(simmer->sim_results) /
-            bai_result_get_elapsed_seconds(
-                sim_results_get_bai_result(simmer->sim_results)),
-        false);
+    sim_results_print(simmer->thread_control, simmer_worker->game,
+                      simmer->sim_results, simmer->max_num_display_plays, true);
   }
+  sim_results_increment_iteration_count(sim_results);
 
   return wpct;
 }
 
-bool rv_sim_mark_as_epigon_if_similar(RandomVariables *rvs, const int leader,
-                                      const int i) {
+bool rv_sim_are_similar(RandomVariables *rvs, const int i, const int j) {
   const Simmer *simmer = (Simmer *)rvs->data;
-  const bool plays_are_similar = simmer_plays_are_similar(simmer, leader, i);
-  if (plays_are_similar) {
-    simmed_play_set_is_epigon(
-        sim_results_get_simmed_play(simmer->sim_results, i));
-  }
-  return plays_are_similar;
-}
-
-bool rv_sim_is_epigon(const RandomVariables *rvs, const int i) {
-  const Simmer *simmer = (Simmer *)rvs->data;
-  return simmed_play_get_is_epigon(
-      sim_results_get_simmed_play(simmer->sim_results, i));
+  return sim_results_plays_are_similar(simmer->sim_results, i, j);
 }
 
 void rv_sim_destroy(RandomVariables *rvs) {
@@ -527,8 +450,7 @@ void rv_sim_destroy(RandomVariables *rvs) {
 RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
                                SimResults *sim_results) {
   rvs->sample_func = rv_sim_sample;
-  rvs->similar_func = rv_sim_mark_as_epigon_if_similar;
-  rvs->is_epigon_func = rv_sim_is_epigon;
+  rvs->similar_func = rv_sim_are_similar;
   rvs->destroy_data_func = rv_sim_destroy;
 
   rvs->num_rvs = move_list_get_count(sim_args->move_list);
@@ -556,6 +478,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
 
   simmer->num_threads = sim_args->num_threads;
   simmer->print_interval = sim_args->print_interval;
+  simmer->max_num_display_plays = sim_args->max_num_display_plays;
 
   simmer->workers =
       malloc_or_die((sizeof(SimmerWorker *)) * (simmer->num_threads));
@@ -625,15 +548,8 @@ double rvs_sample(RandomVariables *rvs, const uint64_t k,
 
 void rvs_reset(RandomVariables *rvs) { rvs->total_samples = 0; }
 
-// Returns the similarity between the leader and the i-th arm and marks
-// the arm accordingly.
-bool rvs_mark_as_epigon_if_similar(RandomVariables *rvs, const int leader,
-                                   const int i) {
-  return rvs->similar_func(rvs, leader, i);
-}
-
-bool rvs_is_epigon(const RandomVariables *rvs, const int i) {
-  return rvs->is_epigon_func(rvs, i);
+bool rvs_are_similar(RandomVariables *rvs, const int i, const int j) {
+  return rvs->similar_func(rvs, i, j);
 }
 
 uint64_t rvs_get_num_rvs(const RandomVariables *rvs) { return rvs->num_rvs; }

@@ -33,20 +33,19 @@
 // Internal BAI structs
 
 typedef struct BAIArmDatum {
-  int num_samples;
+  uint64_t num_samples;
   double samples_sum;
   double samples_squared_sum;
   double mean;
   double var;
-  bool is_epigon;
   double *Zs;
 } BAIArmDatum;
 
 typedef struct BAISyncData {
   int num_arms;
   int num_arms_reached_threshold;
-  int num_total_samples_completed;
-  int num_total_samples_requested;
+  uint64_t num_total_samples_completed;
+  uint64_t num_total_samples_requested;
   int astar_index;
   int challenger_index;
   bool initial_phase;
@@ -92,9 +91,10 @@ static inline void bai_sync_data_destroy(BAISyncData *bai_sync_data) {
 
 typedef struct BAISampleArgs {
   BAISyncData *bai_sync_data;
+  RandomVariables *rvs;
   double delta;
-  int sample_limit;
-  int sample_minimum;
+  uint64_t sample_limit;
+  uint64_t sample_minimum;
   bai_sampling_rule_t sampling_rule;
   bai_threshold_t threshold;
 } BAISampleArgs;
@@ -140,7 +140,7 @@ static inline double bai_get_arm_z(BAISyncData *bai_sync_data,
 
 static inline int
 bai_sync_data_sample_limit_reached(const BAISyncData *bai_sync_data,
-                                   int sample_limit) {
+                                   uint64_t sample_limit) {
   return bai_sync_data->num_total_samples_requested >= sample_limit;
 }
 
@@ -157,13 +157,7 @@ bai_sync_data_get_next_bai_sample_index_while_locked(BAISampleArgs *args) {
   switch (args->sampling_rule) {
   case BAI_SAMPLING_RULE_ROUND_ROBIN:
     arm_index = args->bai_sync_data->num_total_samples_requested %
-                args->bai_sync_data->num_arms;
-    break;
-  case BAI_SAMPLING_RULE_TOP_TWO:
-    arm_index = args->bai_sync_data->astar_index;
-    if (rvs_sample(args->bai_sync_data->rng, 0, 0, NULL) > 0.5) {
-      arm_index = args->bai_sync_data->challenger_index;
-    }
+                (uint64_t)args->bai_sync_data->num_arms;
     break;
   case BAI_SAMPLING_RULE_TOP_TWO_IDS:;
     const int it = args->bai_sync_data->astar_index;
@@ -219,7 +213,7 @@ static inline int bai_sync_data_get_next_sample_index(BAISampleArgs *args) {
 
 // Assumes the caller has locked bai_sync_data or is the only thread running
 static inline void bai_update_threshold_and_challenger(
-    BAISyncData *bai_sync_data, bai_threshold_t threshold,
+    BAISyncData *bai_sync_data, RandomVariables *rvs, bai_threshold_t threshold,
     bai_sampling_rule_t sampling_rule, const double delta, const int arm_index,
     const bool update_all) {
   if (threshold == BAI_THRESHOLD_NONE &&
@@ -245,14 +239,13 @@ static inline void bai_update_threshold_and_challenger(
   switch (sampling_rule) {
   case BAI_SAMPLING_RULE_ROUND_ROBIN:
     break;
-  case BAI_SAMPLING_RULE_TOP_TWO:
   case BAI_SAMPLING_RULE_TOP_TWO_IDS:
     bai_sync_data->challenger_index = -1;
     break;
   }
   for (int i = 0; i < bai_sync_data->num_arms; i++) {
     if (i == bai_sync_data->astar_index ||
-        bai_sync_data->arm_data[i].is_epigon) {
+        rvs_are_similar(rvs, bai_sync_data->astar_index, i)) {
       num_arms_at_threshold++;
       astar_arm_datum->Zs[i] = INFINITY;
       continue;
@@ -274,7 +267,6 @@ static inline void bai_update_threshold_and_challenger(
     switch (sampling_rule) {
     case BAI_SAMPLING_RULE_ROUND_ROBIN:
       break;
-    case BAI_SAMPLING_RULE_TOP_TWO:
     case BAI_SAMPLING_RULE_TOP_TWO_IDS:;
       double arm_challenger_value =
           arm_Z + log((double)bai_sync_data->arm_data[i].num_samples);
@@ -299,9 +291,6 @@ bai_sync_data_add_sample_while_locked(BAISampleArgs *args, const int arm_index,
                                       const double sample_value) {
   BAISyncData *bai_sync_data = args->bai_sync_data;
   BAIArmDatum *arm_data = bai_sync_data->arm_data;
-  if (arm_data[arm_index].is_epigon) {
-    return;
-  }
   bai_sync_data->num_total_samples_completed++;
   BAIArmDatum *sample_arm_datum = &arm_data[arm_index];
   sample_arm_datum->num_samples++;
@@ -330,7 +319,7 @@ bai_sync_data_add_sample_while_locked(BAISampleArgs *args, const int arm_index,
                           old_astar_index != bai_sync_data->astar_index ||
                           bai_sync_data->astar_index == arm_index;
 
-  bai_update_threshold_and_challenger(bai_sync_data, args->threshold,
+  bai_update_threshold_and_challenger(bai_sync_data, args->rvs, args->threshold,
                                       args->sampling_rule, args->delta,
                                       arm_index, update_all);
 }
@@ -354,12 +343,13 @@ typedef struct BAIWorkerArgs {
 
 static inline bool bai_should_stop(BAIResult *bai_result,
                                    ThreadControl *thread_control) {
-  return bai_result_get_status(bai_result) != BAI_RESULT_STATUS_NONE ||
-         thread_control_get_status(thread_control) ==
-             THREAD_CONTROL_STATUS_USER_INTERRUPT;
+  return bai_result_set_and_get_status(
+             bai_result, thread_control_get_status(thread_control) ==
+                             THREAD_CONTROL_STATUS_USER_INTERRUPT) !=
+         BAI_RESULT_STATUS_NONE;
 }
 
-static inline void bai_cull_epigons(void *uncasted_bai_worker_args) {
+static inline void bai_finish_initial_phase(void *uncasted_bai_worker_args) {
   BAIWorkerArgs *bai_worker_args = (BAIWorkerArgs *)uncasted_bai_worker_args;
   BAISyncData *bai_sync_data = bai_worker_args->sync_data;
   bai_sync_data->initial_phase = false;
@@ -374,37 +364,9 @@ static inline void bai_cull_epigons(void *uncasted_bai_worker_args) {
                           BAI_RESULT_STATUS_SAMPLE_LIMIT);
     return;
   }
-  RandomVariables *rvs = bai_worker_args->rvs;
-  int num_epigons = 0;
-  for (int i = 0; i < bai_sync_data->num_arms; i++) {
-    for (int j = i + 1; j < bai_sync_data->num_arms; j++) {
-      if (bai_sync_data->arm_data[i].is_epigon ||
-          bai_sync_data->arm_data[j].is_epigon) {
-        continue;
-      }
-      int better_arm = i;
-      int worse_arm = j;
-      if (bai_sync_data->arm_data[j].mean > bai_sync_data->arm_data[i].mean) {
-        better_arm = j;
-        worse_arm = i;
-      }
-      if (rvs_mark_as_epigon_if_similar(rvs, better_arm, worse_arm)) {
-        bai_sync_data->arm_data[worse_arm].is_epigon = true;
-        num_epigons++;
-        if (num_epigons == bai_sync_data->num_arms - 1) {
-          break;
-        }
-      }
-    }
-  }
-  if (num_epigons == bai_sync_data->num_arms - 1) {
-    bai_result_set_status(bai_sync_data->bai_result,
-                          BAI_RESULT_STATUS_ONE_ARM_REMAINING);
-    return;
-  }
-  assert(!bai_sync_data->arm_data[bai_sync_data->astar_index].is_epigon);
   bai_update_threshold_and_challenger(
-      bai_sync_data, bai_worker_args->bai_options->threshold,
+      bai_sync_data, bai_worker_args->rvs,
+      bai_worker_args->bai_options->threshold,
       bai_worker_args->bai_options->sampling_rule,
       bai_worker_args->bai_options->delta, bai_sync_data->astar_index, true);
 }
@@ -418,6 +380,7 @@ static inline void bai_worker_sample_loop(BAIWorkerArgs *bai_worker_args) {
 
   BAISampleArgs sample_args = {
       .bai_sync_data = sync_data,
+      .rvs = rvs,
       .delta = bai_options->delta,
       .sample_limit = bai_options->sample_limit,
       .sample_minimum = bai_options->sample_minimum,
@@ -452,7 +415,7 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   bai_result_reset(bai_result, bai_options->time_limit_seconds);
 
   Checkpoint *checkpoint =
-      checkpoint_create(bai_options->num_threads, bai_cull_epigons);
+      checkpoint_create(bai_options->num_threads, bai_finish_initial_phase);
 
   BAISyncData *sync_data = bai_sync_data_create(bai_result, thread_control,
                                                 (int)rvs_get_num_rvs(rvs), rng);
@@ -481,6 +444,7 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
     cpthread_join(worker_ids[thread_index]);
   }
   bai_result_set_best_arm(bai_result, sync_data->astar_index);
+  bai_result_stop_timer(bai_result);
   free(bai_worker_args_array);
   free(worker_ids);
   bai_sync_data_destroy(sync_data);

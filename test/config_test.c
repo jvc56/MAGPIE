@@ -10,6 +10,7 @@
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/player.h"
 #include "../src/ent/players_data.h"
+#include "../src/ent/trie.h"
 #include "../src/ent/wmp.h"
 #include "../src/impl/config.h"
 #include "../src/util/io_util.h"
@@ -130,12 +131,12 @@ void test_config_load_error_cases(void) {
                          ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
                          error_stack);
   test_config_load_error(config, "sim -it -6",
-                         ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
                          error_stack);
   test_config_load_error(config, "sim -it 0",
                          ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
                          error_stack);
-  test_config_load_error(config, "sim -minp 1",
+  test_config_load_error(config, "sim -minp 0",
                          ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
                          error_stack);
   test_config_load_error(config, "sim -scond -95",
@@ -147,16 +148,16 @@ void test_config_load_error_cases(void) {
   test_config_load_error(config, "sim -scond F",
                          ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
                          error_stack);
-  test_config_load_error(config, "sim -eq 23434.32433.4324",
+  test_config_load_error(config, "sim -im 23434.32433.4324",
                          ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
                          error_stack);
-  test_config_load_error(config, "sim -eq -3",
+  test_config_load_error(config, "sim -im -3",
                          ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS,
                          error_stack);
-  test_config_load_error(config, "sim -eq -4.5",
+  test_config_load_error(config, "sim -im -4.5",
                          ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS,
                          error_stack);
-  test_config_load_error(config, "sim -eq none",
+  test_config_load_error(config, "sim -im none",
                          ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
                          error_stack);
   test_config_load_error(config, "sim -seed zero",
@@ -218,7 +219,7 @@ void test_config_load_success(void) {
   const char *r2 = "best";
   int num_plays = 10;
   int plies = 4;
-  int max_iterations = 400;
+  uint64_t max_iterations = 400;
   int stopping_cond = 98;
   int seed = 101;
   int number_of_threads = 6;
@@ -230,7 +231,7 @@ void test_config_load_success(void) {
       "set -ld %s -bb %d -var %s -l1 %s -l2 %s -s1 %s -r1 "
       "%s -s2 %s -r2 %s  -numplays %d "
       "-plies %d -it "
-      "%d -scond %d -seed %d -threads %d -pfreq %d -gp true -hr true ",
+      "%lu -scond %d -seed %d -threads %d -pfreq %d -gp true -hr true ",
       ld_name, bingo_bonus, game_variant, l1, l2, s1, r1, s2, r2, num_plays,
       plies, max_iterations, stopping_cond, seed, number_of_threads,
       print_info);
@@ -480,6 +481,12 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "rack AB3C",
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  assert_config_exec_status(config, "rack .ABC",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  assert_config_exec_status(config, "rack AB.C",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  assert_config_exec_status(config, "rack ABC.",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   assert_config_exec_status(config, "rack ABCDEFGH",
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   assert_config_exec_status(config, "rack ABCZZZ",
@@ -622,13 +629,13 @@ void test_config_exec_parse_args(void) {
   // Show
 
   Config *config3 = config_create_default_test();
-  assert_config_exec_status(config3, "show",
+  assert_config_exec_status(config3, "shgame",
                             ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
   config_destroy(config3);
 
   Config *config4 = config_create_default_test();
   assert_config_exec_status(config4, "load 54938", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config4, "show", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config4, "shgame", ERROR_STATUS_SUCCESS);
   config_destroy(config4);
 
   // Next, previous, goto
@@ -809,9 +816,79 @@ void test_config_wmp(void) {
   error_stack_destroy(error_stack);
 }
 
+void test_trie(void) {
+  // The Trie struct is used to find the shortest unambiguous strings for each
+  // command
+  Trie *trie = trie_create();
+  assert(trie_get_shortest_unambiguous_index(trie, "anything") == 0);
+  assert(trie_get_shortest_unambiguous_index(trie, "apron") == 0);
+  assert(trie_get_shortest_unambiguous_index(trie, "banana") == 0);
+  trie_add_word(trie, "apple");
+  trie_add_word(trie, "banana");
+  trie_add_word(trie, "apron");
+  trie_add_word(trie, "carrot");
+  assert(trie_get_shortest_unambiguous_index(trie, "apron") == 3);
+  assert(trie_get_shortest_unambiguous_index(trie, "apple") == 3);
+  assert(trie_get_shortest_unambiguous_index(trie, "banana") == 1);
+  assert(trie_get_shortest_unambiguous_index(trie, "carrot") == 1);
+  trie_add_word(trie, "carry");
+  assert(trie_get_shortest_unambiguous_index(trie, "carrot") == 5);
+  trie_destroy(trie);
+}
+
+void display_whole_game(const char *game_to_load) {
+  Config *config = config_create_default_test();
+  StringBuilder *cmd_sb = string_builder_create();
+  string_builder_add_formatted_string(cmd_sb, "load %s -lex CSW21",
+                                      game_to_load);
+  assert_config_exec_status(config, string_builder_peek(cmd_sb),
+                            ERROR_STATUS_SUCCESS);
+  string_builder_clear(cmd_sb);
+  const GameHistory *game_history = config_get_game_history(config);
+  const int num_events = game_history_get_num_events(game_history);
+  for (int i = 0; i < 2; i++) {
+    for (int j = 0; j <= num_events; j++) {
+      string_builder_add_formatted_string(cmd_sb, "goto %d", j);
+      error_code_t error_code =
+          get_config_exec_status(config, string_builder_peek(cmd_sb));
+      string_builder_clear(cmd_sb);
+      if (error_code == ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE) {
+        break;
+      }
+      if (error_code != ERROR_STATUS_SUCCESS) {
+        log_fatal("display game test encountered unexpected error: %d",
+                  error_code);
+      }
+    }
+    assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
+    assert_config_exec_status(config, "set -pretty true", ERROR_STATUS_SUCCESS);
+  }
+  string_builder_destroy(cmd_sb);
+  config_destroy(config);
+}
+
+void test_game_display(void) {
+  display_whole_game(TESTDATA_FILEPATH "gcgs/success.gcg");
+  display_whole_game(TESTDATA_FILEPATH "gcgs/success_standard.gcg");
+  display_whole_game(TESTDATA_FILEPATH "gcgs/success_six_pass.gcg");
+  display_whole_game(TESTDATA_FILEPATH "gcgs/success_just_last_rack.gcg");
+  display_whole_game(TESTDATA_FILEPATH "gcgs/success_long_game.gcg");
+}
+
 void test_config_anno(void) {
   // Commit and challenge
   Config *config = config_create_default_test();
+  assert_config_exec_status(config, "set -iterations 100",
+                            ERROR_STATUS_SUCCESS);
+
+  // Test the help command
+  assert_config_exec_status(config, "help holp",
+                            ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
+  assert_config_exec_status(config, "help l",
+                            ERROR_STATUS_CONFIG_LOAD_AMBIGUOUS_COMMAND);
+  assert_config_exec_status(config, "help set", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "help", ERROR_STATUS_SUCCESS);
+
   const char *p1_name = "Alice Lastname-Jones";
   const char *p1_nickname = "Alice_Lastname-Jones";
   const char *p2_name = "Bob Lastname-Jones";
@@ -828,7 +905,7 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "note a b",
                             ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
 
-  assert_config_exec_status(config, "set -lex CSW24", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "set -lex CSW21", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1",
                             ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
   assert_config_exec_status(config, "sw", ERROR_STATUS_SUCCESS);
@@ -877,6 +954,20 @@ void test_config_anno(void) {
   const Game *game = config_get_game(config);
   const Bag *bag = game_get_bag(game);
   const int bag_initial_total = bag_get_letters(bag);
+
+  // Generating moves with 0, 1, and 2 letters should complete without error
+  assert_config_exec_status(config, "set -numplays 15", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "s", ERROR_STATUS_SUCCESS);
+
+  assert_config_exec_status(config, "r A", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "s", ERROR_STATUS_SUCCESS);
+
+  assert_config_exec_status(config, "r AB", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "s", ERROR_STATUS_SUCCESS);
+
   assert_config_exec_status(config, "rack ABC", ERROR_STATUS_SUCCESS);
   assert(bag_initial_total == bag_get_letters(bag) + 3);
   assert_config_exec_status(config, "rack ABCDEFG", ERROR_STATUS_SUCCESS);
@@ -892,6 +983,18 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "com 8d FADGE XYZ",
                             ERROR_STATUS_COMMIT_EXTRANEOUS_ARG);
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 100",
+                            ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
+  assert_config_exec_status(config, "com pass ABC",
+                            ERROR_STATUS_COMMIT_EXTRANEOUS_ARG);
+  assert_config_exec_status(config, "com pass ABC EFG",
+                            ERROR_STATUS_COMMIT_EXTRANEOUS_ARG);
+  assert_config_exec_status(config, "com 8d FADGE XYZ",
+                            ERROR_STATUS_COMMIT_EXTRANEOUS_ARG);
+  // Sim should work normally even after commit errors
+  assert_config_exec_status(config, "sim -seed 1 -iterations 100 -minp 50",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gsim -seed 1", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 0",
                             ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
   assert_config_exec_status(config, "com 100",
@@ -914,7 +1017,8 @@ void test_config_anno(void) {
   assert(game_get_player_on_turn_index(game) == 0);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 1);
-  // Top equity move should have played 5 tiles
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 8d FADGE", ERROR_STATUS_SUCCESS);
   assert(bag_initial_total == bag_get_letters(bag) + 5);
 
   // Check that the note command works
@@ -959,10 +1063,13 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "r XEQUIES", ERROR_STATUS_SUCCESS);
   assert(bag_initial_total == bag_get_letters(bag) + 12);
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "sim", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gsim", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 0);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(28));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(125));
+  assert_config_exec_status(config, "sim", ERROR_STATUS_SIM_NO_MOVES);
 
   assert_config_exec_status(config, "chal", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 0);
@@ -1139,11 +1246,14 @@ void test_config_anno(void) {
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(125));
 
   assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "sim", ERROR_STATUS_SUCCESS);
   assert(game_get_player_on_turn_index(game) == 1);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(125));
 
   assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "sim", ERROR_STATUS_SIM_NO_MOVES);
   assert(game_get_player_on_turn_index(game) == 0);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(160));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(154));
@@ -1289,23 +1399,23 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
 
-  assert_config_exec_status(config, "rack BONSOIR", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack bonSOIR", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "g", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
 
-  assert_config_exec_status(config, "rack DISLINK", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack DISlink", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "g", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
 
-  assert_config_exec_status(config, "rack UNDEWAY", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack undeway", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "g", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
 
-  assert_config_exec_status(config, "rack CCTTUU?", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack ccttuu?", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "g", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
 
-  assert_config_exec_status(config, "rack GVEAWAY", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack gveaway", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "g", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
 
@@ -1327,6 +1437,43 @@ void test_config_anno(void) {
   assert(game_get_game_end_reason(game) == GAME_END_REASON_NONE);
 
   assert_config_exec_status(config, "rack FOOTROE", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "s", ERROR_STATUS_SUCCESS);
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 0)), "HIRT");
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 1)),
+                            "EFOOORT");
+  assert_config_exec_status(config, "com 2K FOP", ERROR_STATUS_SUCCESS);
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 0)), "HIRT");
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 1)), "EOORT");
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 0)), "HIRT");
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 1)),
+                            "EFOOORT");
+  assert_config_exec_status(config, "com C1 FORDO", ERROR_STATUS_SUCCESS);
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 0)), "HIRT");
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 1)), "EOT");
+  assert_config_exec_status(config, "com N1 HI", ERROR_STATUS_SUCCESS);
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 0)), "RT");
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 1)), "EOT");
+  assert_config_exec_status(config, "com J3 TO", ERROR_STATUS_SUCCESS);
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 0)), "RT");
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 1)), "E");
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
+
+  // Commit FOOTROPE
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
   assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
@@ -1496,6 +1643,144 @@ void test_config_anno(void) {
   assert(!game_history_get_waiting_for_final_pass_or_challenge(
       config_get_game_history(config)));
 
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+  game = config_get_game(config);
+
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+  assert_config_exec_status(config, "shinfer",
+                            ERROR_STATUS_NO_INFERENCE_TO_SHOW);
+  assert_config_exec_status(config, "shendgame",
+                            ERROR_STATUS_NO_ENDGAME_TO_SHOW);
+  // Passing a rack to the top commit should commit the best static move
+  assert_config_exec_status(config, "t BARCHAN", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(86));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+
+  // if a rack is present but there are no moves, moves should be automatically
+  // generated to find the top play
+  assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+  assert_config_exec_status(config, "rack BARCHAN", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "t", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(86));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+
+  assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+  assert_config_exec_status(config, "rack BARCHAN -numplays 7",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "t BARCHAN", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(86));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
+
+  assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack BARCHAN", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  // Allow the sim to hit the stopping threshold
+  assert_config_exec_status(config, "sim -seed 1 -iterations 100 -threads 10",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "t", ERROR_STATUS_SUCCESS);
+  // No rack was given to the top commit command, so it should commit the best
+  // simmed play which should be anything except for 8H BARCHAN.
+  const Equity p0_score = player_get_score(game_get_player(game, 0));
+  assert(p0_score > int_to_equity(80) && p0_score < int_to_equity(86));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
+
+  assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack BARCHAN", ERROR_STATUS_SUCCESS);
+  // Generate and sim
+  assert_config_exec_status(config, "gsim -seed 1", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shm 1", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shm 2", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shm 5", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "t", ERROR_STATUS_SUCCESS);
+  // No rack was given to the top commit command, so it should commit the best
+  // simmed play 8D BARCHAN should sim best
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(84));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
+
+  // The generated plays from the previous turn should be cleared.
+  assert_config_exec_status(config, "t", ERROR_STATUS_COMMIT_EMPTY_RACK);
+  assert_config_exec_status(config, "com 1",
+                            ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
+  assert_config_exec_status(config, "com 10",
+                            ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
+
+  assert_config_exec_status(config, "rack VVWUUUI -s2 score",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "t", ERROR_STATUS_SUCCESS);
+  game = config_get_game(config);
+  // This tests that
+  // - the previously simmed plays are not used
+  // - the top commit command uses the player sort type
+  // Since player two is sorting by score, they will play E5 VIV(A)
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(84));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(20));
+
+  // Test that E5 VIV(A) is committed using the commit command
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack VVWUUUI -s2 score",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(84));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(20));
+
+  assert_config_exec_status(config, "rack EIINOOX -iterations 100",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com K4 NIXIE", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(123));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(20));
+
+  assert_config_exec_status(config, "rack CEEUUUW", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "infer", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+  assert_config_exec_status(config, "shinfer", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shendgame",
+                            ERROR_STATUS_NO_ENDGAME_TO_SHOW);
+  assert_config_exec_status(config, "gsim", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shinfer", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shendgame",
+                            ERROR_STATUS_NO_ENDGAME_TO_SHOW);
+
+  assert_config_exec_status(config, "load testdata/gcgs/success_standard.gcg",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "goto end", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(516));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(362));
+  assert_config_exec_status(config, "endgame", ERROR_STATUS_SUCCESS);
+
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+  assert_config_exec_status(config, "shinfer", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shendgame", ERROR_STATUS_SUCCESS);
+
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+  assert_config_exec_status(config, "shinfer", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shendgame", ERROR_STATUS_SUCCESS);
+
+  assert_config_exec_status(config, "rack ABCDEFG", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "set -lex FRA20 -ld french",
+                            ERROR_STATUS_SUCCESS);
+  // Changing the letter distribution to invalidate all of the results
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+  assert_config_exec_status(config, "shinfer",
+                            ERROR_STATUS_NO_INFERENCE_TO_SHOW);
+  assert_config_exec_status(config, "shendgame",
+                            ERROR_STATUS_NO_ENDGAME_TO_SHOW);
+
   string_builder_destroy(name_sb);
   config_destroy(config);
 }
@@ -1507,7 +1792,7 @@ void test_config_export(void) {
   assert_config_exec_status(config, "ex " TEST_GCG_FILENAME,
                             ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
 
-  assert_config_exec_status(config, "set -lex CSW24", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "set -lex CSW21", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "ex", ERROR_STATUS_EXPORT_NO_GAME_EVENTS);
   assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "ex", ERROR_STATUS_EXPORT_NO_GAME_EVENTS);
@@ -1640,14 +1925,10 @@ void test_config_export(void) {
          int_to_equity(0));
   string_builder_clear(sb_load_cmd);
 
-  int remove_result = remove(TEST_GCG_FILENAME);
-  assert(remove_result == 0);
-  remove_result = remove(default_name_3);
-  assert(remove_result == 0);
-  remove_result = remove(default_name_2);
-  assert(remove_result == 0);
-  remove_result = remove(default_name_1);
-  assert(remove_result == 0);
+  remove_or_die(TEST_GCG_FILENAME);
+  remove_or_die(default_name_3);
+  remove_or_die(default_name_2);
+  remove_or_die(default_name_1);
 
   string_builder_destroy(sb_load_cmd);
   free(default_name_3);
@@ -1657,6 +1938,8 @@ void test_config_export(void) {
 }
 
 void test_config(void) {
+  test_game_display();
+  test_trie();
   test_config_anno();
   test_config_export();
   test_config_load_error_cases();

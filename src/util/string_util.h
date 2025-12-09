@@ -62,6 +62,7 @@ void string_list_destroy(StringList *string_list);
 // Boolean string functions
 bool has_prefix(const char *pre, const char *str);
 bool has_iprefix(const char *pre, const char *str);
+bool has_suffix(const char *suf, const char *str);
 bool is_string_empty_or_whitespace(const char *str);
 bool is_string_empty_or_null(const char *str);
 bool strings_equal(const char *str1, const char *str2);
@@ -100,4 +101,16 @@ double string_to_double(const char *str, ErrorStack *error_stack);
 // JSON utilities
 char *json_unescape_string(const char *json_string);
 char *get_process_output(const char *cmd);
+
+// String Grid functions
+
+typedef struct StringGrid StringGrid;
+
+StringGrid *string_grid_create(int rows, int cols, int col_padding);
+void string_grid_destroy(StringGrid *string_grid);
+int string_grid_get_cell_index(const StringGrid *string_grid, int row, int col);
+void string_grid_set_cell(StringGrid *string_grid, int row, int col,
+                          char *value);
+void string_builder_add_string_grid(StringBuilder *sb, const StringGrid *sg,
+                                    bool add_border);
 #endif

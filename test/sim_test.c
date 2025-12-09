@@ -14,6 +14,7 @@
 #include "../src/impl/gameplay.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
+#include "../src/str/sim_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_constants.h"
@@ -34,9 +35,6 @@ int get_best_simmed_play_index(const SimResults *sim_results) {
   const SimmedPlay *best_simmed_play = NULL;
   for (int i = 0; i < num_simmed_plays; i++) {
     const SimmedPlay *simmed_play = sim_results_get_simmed_play(sim_results, i);
-    if (simmed_play_get_is_epigon(simmed_play)) {
-      continue;
-    }
     if (!best_simmed_play ||
         stat_get_mean(simmed_play_get_win_pct_stat(simmed_play)) >
             stat_get_mean(simmed_play_get_win_pct_stat(best_simmed_play))) {
@@ -211,14 +209,14 @@ void test_sim_time_limit(void) {
   config_destroy(config);
 }
 
-void test_sim_one_arm_remaining(void) {
+void test_all_plays_are_similar(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
-      "-plies 2 -numplays 4 -threads 1 -it 1100 -scond none");
+      "-plies 2 -numplays 4 -minp 100 -threads 1 -it 1100 -scond none");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack ACEIRST");
-  load_and_exec_config_or_die(
-      config, "addmoves 8D.CRISTAE,8D.ATRESIC,8D.STEARIC,8D.RACIEST");
+  load_and_exec_config_or_die(config,
+                              "addmoves 8D.ATRESIC,8D.STEARIC,8D.RACIEST");
 
   SimResults *sim_results = config_get_sim_results(config);
   error_code_t status;
@@ -242,9 +240,8 @@ void test_sim_one_arm_remaining(void) {
   cpthread_join(thread);
 
   assert(status == ERROR_STATUS_SUCCESS);
-  assert(bai_result_get_status(
-             sim_results_get_bai_result(config_get_sim_results(config))) ==
-         BAI_RESULT_STATUS_ONE_ARM_REMAINING);
+  assert(bai_result_get_status(sim_results_get_bai_result(
+             config_get_sim_results(config))) == BAI_RESULT_STATUS_THRESHOLD);
   config_destroy(config);
 }
 
@@ -358,7 +355,7 @@ void test_sim_with_and_without_inference_helper(
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-threads 10 -plies 2 -it 2000 -minp 50 -numplays 2 "
-      "-scond none -seed 10");
+      "-scond none -im 0 -seed 10");
   // Load an empty CGP to create a new game.
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
@@ -464,29 +461,6 @@ void test_play_similarity(void) {
   assert(bai_result_get_status(
              sim_results_get_bai_result(config_get_sim_results(config))) ==
          BAI_RESULT_STATUS_SAMPLE_LIMIT);
-
-  // The BAI should have marked inferior plays in the same position as the best
-  // play as epigons.
-  const int best_play_index = get_best_simmed_play_index(sim_results);
-  const Move *best_play = simmed_play_get_move(
-      sim_results_get_simmed_play(sim_results, best_play_index));
-  const int best_play_col = move_get_col_start(best_play);
-  const int best_play_row = move_get_row_start(best_play);
-  const int best_play_length = move_get_tiles_length(best_play);
-  const int num_plays = sim_results_get_number_of_plays(sim_results);
-  for (int i = 0; i < num_plays; i++) {
-    if (i == best_play_index) {
-      continue;
-    }
-    const SimmedPlay *play_i = sim_results_get_simmed_play(sim_results, i);
-    const Move *move_i = simmed_play_get_move(play_i);
-    if (move_get_col_start(move_i) == best_play_col &&
-        move_get_row_start(move_i) == best_play_row &&
-        move_get_tiles_length(move_i) == best_play_length) {
-      assert(simmed_play_get_is_epigon(play_i));
-    }
-  }
-
   config_destroy(config);
 }
 
@@ -511,8 +485,8 @@ void test_similar_play_consistency(const int num_threads) {
   // which only differ in which C is the blank. There are no words in the
   // lexicon which fit the following patterns:
   //
-  // C.OES
-  // C.GOO
+  // C.OES*
+  // C.GOO*
   //
   // and since all plays start with the same seed and are sampled the exact
   // same number of times by the round robin sampling method, the sim results
@@ -681,11 +655,7 @@ void test_sim_perf(const char *sim_perf_iters) {
       assert(status == ERROR_STATUS_SUCCESS);
 
       char *sim_stats_str =
-          ucgi_sim_stats(game, sim_results,
-                         (double)sim_results_get_node_count(sim_results) /
-                             bai_result_get_elapsed_seconds(
-                                 sim_results_get_bai_result(sim_results)),
-                         false);
+          sim_results_get_string(game, sim_results, 100, true);
       if (i < details_limit) {
         append_content_to_file(sim_perf_game_details_filename, sim_stats_str);
       }
@@ -747,7 +717,7 @@ void test_sim(void) {
     test_sim_single_iteration();
     test_sim_threshold();
     test_sim_time_limit();
-    test_sim_one_arm_remaining();
+    test_all_plays_are_similar();
     test_more_iterations();
     test_play_similarity();
     perf_test_multithread_sim();

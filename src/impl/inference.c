@@ -466,9 +466,6 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
       BLANK_MACHINE_LETTER, &total_racks_evaluated);
   inference->total_racks_evaluated = total_racks_evaluated;
 
-  print_ucgi_inference_total_racks_evaluated(total_racks_evaluated,
-                                             thread_control);
-
   uint64_t shared_rack_index = 0;
   cpthread_mutex_t shared_rack_index_lock;
 
@@ -737,13 +734,9 @@ void infer_with_game_duplicate(InferenceArgs *args, Game *game_dup,
   inference_results_finalize(
       args->target_played_tiles, inference->current_target_leave,
       inference->bag_as_rack, inference->results, inference->target_score,
-      inference->target_number_of_tiles_exchanged, inference->equity_margin);
-
-  if (thread_control_get_status(args->thread_control) !=
-      THREAD_CONTROL_STATUS_USER_INTERRUPT) {
-    print_ucgi_inference(game_get_ld(inference->game), inference->results,
-                         args->thread_control);
-  }
+      inference->target_number_of_tiles_exchanged, inference->equity_margin,
+      thread_control_get_status(args->thread_control) ==
+          THREAD_CONTROL_STATUS_USER_INTERRUPT);
 
   inference_destroy(inference);
 }

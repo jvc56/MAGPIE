@@ -4,17 +4,18 @@
 #include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
 #include "../util/io_util.h"
+#include <stdint.h>
 #include <stdlib.h>
 
 struct BAIResult {
   bai_result_status_t status;
   int best_arm;
   Timer timer;
-  int time_limit_seconds;
+  uint64_t time_limit_seconds;
   cpthread_mutex_t mutex;
 };
 
-void bai_result_reset(BAIResult *bai_result, int time_limit_seconds) {
+void bai_result_reset(BAIResult *bai_result, uint64_t time_limit_seconds) {
   bai_result->status = BAI_RESULT_STATUS_NONE;
   bai_result->best_arm = -1;
   bai_result->time_limit_seconds = time_limit_seconds;
@@ -44,16 +45,34 @@ double bai_result_get_elapsed_seconds(const BAIResult *bai_result) {
   return ctimer_elapsed_seconds(&bai_result->timer);
 }
 
-bai_result_status_t bai_result_get_status(BAIResult *bai_result) {
+void bai_result_stop_timer(BAIResult *bai_result) {
+  ctimer_stop(&bai_result->timer);
+}
+
+uint64_t bai_result_get_time_limit_seconds(const BAIResult *bai_result) {
+  return bai_result->time_limit_seconds;
+}
+
+// Sets user interrupt or timeout status if the conditions for either are met
+bai_result_status_t bai_result_set_and_get_status(BAIResult *bai_result,
+                                                  const bool user_interrupt) {
   cpthread_mutex_lock(&bai_result->mutex);
   if (bai_result->status == BAI_RESULT_STATUS_NONE) {
-    // Check for timeout
-    if (bai_result->time_limit_seconds > 0 &&
-        bai_result_get_elapsed_seconds(bai_result) >=
-            bai_result->time_limit_seconds) {
+    if (user_interrupt) {
+      bai_result->status = BAI_RESULT_STATUS_USER_INTERRUPT;
+    } else if (bai_result->time_limit_seconds > 0 &&
+               bai_result_get_elapsed_seconds(bai_result) >=
+                   (double)bai_result->time_limit_seconds) {
       bai_result->status = BAI_RESULT_STATUS_TIMEOUT;
     }
   }
+  bai_result_status_t status = bai_result->status;
+  cpthread_mutex_unlock(&bai_result->mutex);
+  return status;
+}
+
+bai_result_status_t bai_result_get_status(BAIResult *bai_result) {
+  cpthread_mutex_lock(&bai_result->mutex);
   bai_result_status_t status = bai_result->status;
   cpthread_mutex_unlock(&bai_result->mutex);
   return status;

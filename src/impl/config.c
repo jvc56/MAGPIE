@@ -1,10 +1,12 @@
 #include "config.h"
 
 #include "../compat/ctime.h"
+#include "../compat/memory_info.h"
 #include "../def/autoplay_defs.h"
 #include "../def/bai_defs.h"
 #include "../def/config_defs.h"
 #include "../def/equity_defs.h"
+#include "../def/exec_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/move_defs.h"
@@ -15,7 +17,6 @@
 #include "../def/validated_move_defs.h"
 #include "../ent/autoplay_results.h"
 #include "../ent/bag.h"
-#include "../ent/bai_result.h"
 #include "../ent/board.h"
 #include "../ent/board_layout.h"
 #include "../ent/conversion_results.h"
@@ -33,11 +34,14 @@
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
+#include "../ent/trie.h"
 #include "../ent/validated_move.h"
 #include "../ent/win_pct.h"
 #include "../str/game_string.h"
+#include "../str/inference_string.h"
 #include "../str/move_string.h"
 #include "../str/rack_string.h"
+#include "../str/sim_string.h"
 #include "../str/validated_moves_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
@@ -63,13 +67,19 @@
 #include <stdlib.h>
 #include <string.h>
 
+enum {
+  HELP_INDENT = 10,
+};
+
 typedef enum {
+  ARG_TOKEN_HELP,
   ARG_TOKEN_SET,
   ARG_TOKEN_CGP,
   ARG_TOKEN_MOVES,
   ARG_TOKEN_RACK,
   ARG_TOKEN_GEN,
   ARG_TOKEN_SIM,
+  ARG_TOKEN_GEN_AND_SIM,
   ARG_TOKEN_INFER,
   ARG_TOKEN_ENDGAME,
   ARG_TOKEN_AUTOPLAY,
@@ -101,11 +111,12 @@ typedef enum {
   ARG_TOKEN_PLIES,
   ARG_TOKEN_ENDGAME_PLIES,
   ARG_TOKEN_NUMBER_OF_PLAYS,
+  ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS,
   ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,
   ARG_TOKEN_MAX_ITERATIONS,
   ARG_TOKEN_STOP_COND_PCT,
-  ARG_TOKEN_EQ_MARGIN_INFERENCE,
-  ARG_TOKEN_EQ_MARGIN_MOVEGEN,
+  ARG_TOKEN_INFERENCE_MARGIN,
+  ARG_TOKEN_MOVEGEN_MARGIN,
   ARG_TOKEN_MIN_PLAY_ITERATIONS,
   ARG_TOKEN_USE_GAME_PAIRS,
   ARG_TOKEN_USE_SMALL_PLAYS,
@@ -124,11 +135,15 @@ typedef enum {
   ARG_TOKEN_NEW_GAME,
   ARG_TOKEN_EXPORT,
   ARG_TOKEN_COMMIT,
+  ARG_TOKEN_TOP_COMMIT,
   ARG_TOKEN_CHALLENGE,
   ARG_TOKEN_UNCHALLENGE,
   ARG_TOKEN_OVERTIME,
   ARG_TOKEN_SWITCH_NAMES,
-  ARG_TOKEN_SHOW,
+  ARG_TOKEN_SHOW_GAME,
+  ARG_TOKEN_SHOW_MOVES,
+  ARG_TOKEN_SHOW_INFERENCE,
+  ARG_TOKEN_SHOW_ENDGAME,
   ARG_TOKEN_NEXT,
   ARG_TOKEN_PREVIOUS,
   ARG_TOKEN_GOTO,
@@ -156,6 +171,7 @@ typedef char *(*command_status_func_t)(Config *);
 
 typedef struct ParsedArg {
   char *name;
+  char *shortest_unambiguous_name;
   char **values;
   int num_req_values;
   int num_values;
@@ -164,6 +180,7 @@ typedef struct ParsedArg {
   command_api_func_t api_func;
   command_status_func_t status_func;
   bool is_hotkey;
+  bool is_command;
 } ParsedArg;
 
 struct Config {
@@ -175,11 +192,12 @@ struct Config {
   int bingo_bonus;
   int challenge_bonus;
   int num_plays;
+  int max_num_display_plays;
   int num_small_plays;
   int plies;
   int endgame_plies;
-  int max_iterations;
-  int min_play_iterations;
+  uint64_t max_iterations;
+  uint64_t min_play_iterations;
   double stop_cond_pct;
   Equity eq_margin_inference;
   Equity eq_margin_movegen;
@@ -193,8 +211,9 @@ struct Config {
   bool save_settings;
   bool loaded_settings;
   char *record_filepath;
+  char *settings_filename;
   double tt_fraction_of_mem;
-  int time_limit_seconds;
+  uint64_t time_limit_seconds;
   int num_threads;
   int print_interval;
   uint64_t seed;
@@ -225,7 +244,7 @@ void parsed_arg_create(Config *config, arg_token_t arg_token, const char *name,
                        command_exec_func_t command_exec_func,
                        command_api_func_t command_api_func,
                        command_status_func_t command_status_func,
-                       const bool is_hotkey) {
+                       const bool is_hotkey, const bool is_command) {
   ParsedArg *parsed_arg = malloc_or_die(sizeof(ParsedArg));
   parsed_arg->num_req_values = num_req_values;
   parsed_arg->num_values = num_values;
@@ -239,6 +258,7 @@ void parsed_arg_create(Config *config, arg_token_t arg_token, const char *name,
   parsed_arg->api_func = command_api_func;
   parsed_arg->status_func = command_status_func;
   parsed_arg->is_hotkey = is_hotkey;
+  parsed_arg->is_command = is_command;
 
   config->pargs[arg_token] = parsed_arg;
 }
@@ -249,6 +269,7 @@ void parsed_arg_destroy(ParsedArg *parsed_arg) {
   }
 
   free(parsed_arg->name);
+  free(parsed_arg->shortest_unambiguous_name);
 
   if (parsed_arg->values) {
     for (int i = 0; i < parsed_arg->num_values; i++) {
@@ -337,16 +358,12 @@ int config_get_endgame_plies(const Config *config) {
   return config->endgame_plies;
 }
 
-int config_get_max_iterations(const Config *config) {
+uint64_t config_get_max_iterations(const Config *config) {
   return config->max_iterations;
 }
 
 double config_get_stop_cond_pct(const Config *config) {
   return config->stop_cond_pct;
-}
-
-int config_get_time_limit_seconds(const Config *config) {
-  return config->time_limit_seconds;
 }
 
 uint64_t config_get_seed(const Config *config) { return config->seed; }
@@ -425,13 +442,20 @@ AutoplayResults *config_get_autoplay_results(const Config *config) {
   return config->autoplay_results;
 }
 
+const char *config_get_settings_filename(const Config *config) {
+  return config->settings_filename;
+}
+
 bool config_exec_parg_is_set(const Config *config) {
   return config->exec_parg_token != NUMBER_OF_ARG_TOKENS;
 }
 
 bool config_continue_on_coldstart(const Config *config) {
-  return !config_exec_parg_is_set(config) ||
+  // Each of these conditions indicates that the user wants to continue running
+  // commands
+  return config->exec_parg_token == ARG_TOKEN_SET ||
          config->exec_parg_token == ARG_TOKEN_CGP ||
+         !config_exec_parg_is_set(config) ||
          config_get_parg_num_set_values(config, ARG_TOKEN_EXEC_MODE) > 0;
 }
 
@@ -484,10 +508,19 @@ void config_init_game(Config *config) {
   }
 }
 
-void config_reset_move_list(Config *config) {
+void config_reset_move_list_and_invalidate_sim_results(Config *config) {
   if (config->move_list) {
     move_list_reset(config->move_list);
+    Rack new_move_list_rack;
+    rack_set_dist_size_and_reset(&new_move_list_rack, 0);
+    if (config->game) {
+      const Rack *player_on_turn_rack = player_get_rack(game_get_player(
+          config->game, game_get_player_on_turn_index(config->game)));
+      new_move_list_rack = *player_on_turn_rack;
+    }
+    move_list_set_rack(config->move_list, &new_move_list_rack);
   }
+  sim_results_set_valid_for_current_game_state(config->sim_results, false);
 }
 
 void config_init_move_list(Config *config, int capacity) {
@@ -501,7 +534,7 @@ void config_recreate_move_list(Config *config, int capacity,
   if (list_type == MOVE_LIST_TYPE_DEFAULT) {
     config_init_move_list(config, capacity);
     if (move_list_get_capacity(config->move_list) == capacity) {
-      move_list_reset(config->move_list);
+      config_reset_move_list_and_invalidate_sim_results(config);
     } else {
       move_list_destroy(config->move_list);
       config->move_list = move_list_create(capacity);
@@ -509,7 +542,7 @@ void config_recreate_move_list(Config *config, int capacity,
   } else if (list_type == MOVE_LIST_TYPE_SMALL) {
     if (!config->move_list) {
       config->move_list = move_list_create_small(capacity);
-      move_list_reset(config->move_list);
+      config_reset_move_list_and_invalidate_sim_results(config);
     }
   }
 }
@@ -537,7 +570,7 @@ void load_rack_or_push_to_error_stack(const char *rack_str,
                                       const LetterDistribution *ld,
                                       error_code_t error_code, Rack *rack,
                                       ErrorStack *error_stack) {
-  const int num_mls = rack_set_to_string(ld, rack, rack_str);
+  const int num_mls = rack_set_to_string_unblanked(ld, rack, rack_str);
   if (num_mls < 0) {
     error_stack_push(
         error_stack, error_code,
@@ -583,7 +616,7 @@ void config_load_int(const Config *config, arg_token_t arg_token, int min,
   if (new_value < min || new_value > max) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
-        get_formatted_string("int value for %s must be between %d and %d "
+        get_formatted_string("integer value for %s must be between %d and %d "
                              "inclusive, but got %s",
                              config_get_parg_name(config, arg_token), min, max,
                              int_str));
@@ -610,7 +643,7 @@ void config_load_double(const Config *config, arg_token_t arg_token, double min,
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS,
         get_formatted_string(
-            "double value for %s must be between %f and %f inclusive, but "
+            "decimal value for %s must be between %f and %f inclusive, but "
             "got %s",
             config_get_parg_name(config, arg_token), min, max, double_str));
     return;
@@ -637,7 +670,8 @@ void config_load_bool(const Config *config, arg_token_t arg_token, bool *value,
 }
 
 void config_load_uint64(const Config *config, arg_token_t arg_token,
-                        uint64_t *value, ErrorStack *error_stack) {
+                        uint64_t min, uint64_t *value,
+                        ErrorStack *error_stack) {
   const char *int_str = config_get_parg_value(config, arg_token, 0);
   if (!int_str) {
     return;
@@ -654,6 +688,13 @@ void config_load_uint64(const Config *config, arg_token_t arg_token,
                      get_formatted_string(
                          "failed to parse nonnegative integer value for %s: %s",
                          config_get_parg_name(config, arg_token), int_str));
+  } else if (new_value < min) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+        get_formatted_string(
+            "integer value for %s must be at least %lu, but got %s",
+            config_get_parg_name(config, arg_token), min, int_str));
+    return;
   } else {
     *value = new_value;
   }
@@ -704,6 +745,829 @@ char *status_generic(Config *config) {
   return status_str;
 }
 
+// Returns NUMBER_OF_ARG_TOKENS if there was an error or no token was found
+arg_token_t get_token_from_string(Config *config, const char *arg_name,
+                                  ErrorStack *error_stack) {
+  arg_token_t current_arg_token = NUMBER_OF_ARG_TOKENS;
+  bool parg_has_prefix[NUMBER_OF_ARG_TOKENS] = {false};
+  bool is_ambiguous = false;
+  for (int k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
+    if (string_length(arg_name) == 1 && config->pargs[k]->is_hotkey &&
+        arg_name[0] == config->pargs[k]->name[0]) {
+      return k;
+    }
+    if (has_prefix(arg_name, config->pargs[k]->name)) {
+      parg_has_prefix[k] = true;
+      if (current_arg_token != NUMBER_OF_ARG_TOKENS) {
+        is_ambiguous = true;
+      } else {
+        current_arg_token = k;
+      }
+    }
+  }
+
+  if (current_arg_token == NUMBER_OF_ARG_TOKENS) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
+                     get_formatted_string(
+                         "unrecognized command or argument '%s'", arg_name));
+    return current_arg_token;
+  }
+
+  if (!is_ambiguous) {
+    return current_arg_token;
+  }
+
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_formatted_string(
+      sb, "ambiguous command '%s' could be:", arg_name);
+  for (int k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
+    if (parg_has_prefix[k]) {
+      string_builder_add_formatted_string(sb, " %s,", config->pargs[k]->name);
+    }
+  }
+  // Remove the trailing comma
+  string_builder_truncate(sb, string_builder_length(sb) - 1);
+  error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_AMBIGUOUS_COMMAND,
+                   string_builder_dump(sb, NULL));
+  string_builder_destroy(sb);
+  return NUMBER_OF_ARG_TOKENS;
+}
+
+// Help
+void add_help_arg_to_string_builder(const Config *config, int token,
+                                    StringBuilder *sb,
+                                    const bool show_async_commands) {
+  const char *examples[10] = {NULL};
+  const char *usages[10] = {NULL};
+  const char *text = NULL;
+  bool is_command = false;
+  bool is_hotkey = false;
+  const char *name = NULL;
+  const char *shortest_unambiguous_name = NULL;
+  if (show_async_commands) {
+    async_token_t async_token = token;
+    switch (async_token) {
+    case ASYNC_STOP_COMMAND_TOKEN:
+      usages[0] = "";
+      text = "Stops the currently running command.";
+      name = ASYNC_STOP_COMMAND_STRING;
+      shortest_unambiguous_name = ASYNC_STOP_COMMAND_STRING_SHORT;
+      break;
+    case ASYNC_STATUS_COMMAND_TOKEN:;
+      usages[0] = "";
+      text = "Prints the status of the currently running command.";
+      name = ASYNC_STATUS_COMMAND_STRING;
+      shortest_unambiguous_name = ASYNC_STATUS_COMMAND_STRING_SHORT;
+      break;
+    case NUMBER_OF_ASYNC_COMMAND_TOKENS:
+      log_fatal("encountered unexpected async command token in help command");
+      break;
+    }
+  } else {
+    arg_token_t arg_token = token;
+    const ParsedArg *parg = config_get_parg(config, arg_token);
+    is_command = parg->is_command;
+    is_hotkey = parg->is_hotkey;
+    name = parg->name;
+    shortest_unambiguous_name = parg->shortest_unambiguous_name;
+    switch (arg_token) {
+    case ARG_TOKEN_HELP:
+      usages[0] = "[<command_or_arg>]";
+      examples[0] = "";
+      examples[1] = "infer";
+      text = "Prints a help message for the given command or argument. If no "
+             "argument is "
+             "given, prints help messages for all commands and arguments.";
+      break;
+    case ARG_TOKEN_SET:
+      usages[0] = "<option1> <value1> <option2> <value2> ...";
+      examples[0] = "-numplays 15 -minp 100";
+      text = "Sets any number of specified options.";
+      break;
+    case ARG_TOKEN_CGP:
+      usages[0] = "<board> <racks> <scores> <consecutive_zeros>";
+      examples[0] = "15/15/15/15/14V/14A/14N/6GUM5N/7PEW4E/9EF3R/9BEVELS/15/15/"
+                    "15/15 AEEIILZ/CDGKNOR 56/117 0";
+      text = "Loads the specified CGP into the game.";
+      break;
+    case ARG_TOKEN_MOVES:
+      usages[0] = "<move>";
+      usages[1] = "<move>,<move>,...";
+      examples[0] = " 8F.LIN";
+      examples[1] = " 8F.LIN,8D.ZILLION,8F.ZILLION";
+      text = "Adds the CGP moves to the move list. Multiple moves must be "
+             "delimited by commas as opposed to spaces.";
+      break;
+    case ARG_TOKEN_RACK:
+      usages[0] = "<rack>";
+      text = "Sets the rack for the player on turn.";
+      break;
+    case ARG_TOKEN_GEN:
+      usages[0] = "";
+      text = "Generates moves for the current position.";
+      break;
+    case ARG_TOKEN_SIM:
+      usages[0] = "[<opponent_known_rack>]";
+      examples[0] = "";
+      examples[1] = "ABCD";
+      examples[2] = "-";
+      text = "Runs a Monte Carlo simulation for the current position using the "
+             "specified opponent rack. If no rack is specified, the opponent "
+             "known rack from the game history is used. If the game history "
+             "has a known rack for the opponent, you can use '-' to force the "
+             "sim to use a completely random rack.";
+      break;
+    case ARG_TOKEN_GEN_AND_SIM:
+      usages[0] = "[<opponent_known_rack>]";
+      examples[0] = "";
+      examples[1] = "ABCD";
+      examples[2] = "-";
+      text = "Generates moves for the current position and runs a simulation.";
+      break;
+    case ARG_TOKEN_INFER:
+      usages[0] = "";
+      usages[1] = "<target_nickname> <target_played_tiles> <target_score> "
+                  "[<target_known_rack>] [<nontarget_known_rack>]";
+      usages[2] = "<target_nickname> <target_num_exchanged> "
+                  "[<target_known_rack>] [<nontarget_known_rack>]";
+      examples[0] = "";
+      examples[1] = "josh ABCDE 13";
+      examples[2] = "josh ABCDE 13 ABCD";
+      examples[3] = "josh ABCDE 13 ABCD EFG";
+      examples[4] = "josh 3 ABCDE";
+      examples[5] = "josh 3 ABCDE EFG";
+      text =
+          "Runs an exhaustive inference for what the opponent could have kept "
+          "based on their previous play. If no arguments are specified, the "
+          "inference will use the previous play in the game history.";
+      break;
+    case ARG_TOKEN_ENDGAME:
+      usages[0] = "";
+      text = "Runs the endgame solver.";
+      break;
+    case ARG_TOKEN_AUTOPLAY:
+      usages[0] = "<type1> <num_games>";
+      usages[1] = "<type1>,<type2>,... <num_games>";
+      examples[0] = "games 100";
+      examples[1] = "games,winpct 1000";
+      examples[2] = "leave,winpct 2000";
+      text = "Runs the autoplay command with the specified recorder(s). If the "
+             "game pairs option is set to true, autoplay will run <num_games> "
+             "game pairs resulting in a total of 2 * <num_games> games.";
+      break;
+    case ARG_TOKEN_CONVERT:
+      usages[0] = "<type> <input_name_without_extension> "
+                  "[<output_name_without_extension>]";
+      examples[0] = "klv2csv CSW21";
+      examples[1] = "klv2csv CSW21 CSW21_new";
+      examples[2] = "text2wordmap NWL20";
+      text =
+          "Runs the convert command for the specified type with the given "
+          "input and output names. If no output name is specified, the input "
+          "name will be used. Note that this will not overwrite the input "
+          "since the output filename will have a different extension.";
+      break;
+    case ARG_TOKEN_LEAVE_GEN:
+      usages[0] = "<gen1_min_rack_target>,<gen1_min_rack_target>,... "
+                  "[<games_before_force_draw>]";
+      examples[0] = "100,200,500,1000,1000,1000 100000000";
+      text =
+          "Generates leaves for the current lexicon. The minimum rack targets "
+          "specify the required minimum number of rack occurrences for all "
+          "racks before the next generation can start. The games before force "
+          "draw argument specifies the number of 'normal' games to play before "
+          "rare racks are 'forced' to occur so that they reach the minimum. "
+          "The "
+          "example shows the currently recommended values. Emperical testing "
+          "has "
+          "show that there is little improvement after the 5th generation. The "
+          "files produced by each generation are labeled *_gen_<gen_number>, "
+          "so "
+          "if the command is stopped early, reinvoke it with using leaves of "
+          "the "
+          "last generation, otherwise the leavegen command will start over at "
+          "the first generation. It is recommended to use the autoplay command "
+          "with game pairs to evaluate the resulting leaves. Depending on your "
+          "hardware, this command could take days or weeks.";
+      break;
+    case ARG_TOKEN_CREATE_DATA:
+      usages[0] = "<type> <output_name> [<letter_distribution>]";
+      examples[0] = "klv CSW50";
+      examples[1] = "klv CSW50 english";
+      text =
+          "Creates a zeroed or empty data file of the specified type. If no "
+          "letter distribution is specified, the current letter distribution "
+          "is used. Currently, only the 'klv' type is supported.";
+      break;
+    case ARG_TOKEN_LOAD:
+      usages[0] = "<source_identifier>";
+      examples[0] = "54938";
+      examples[1] = "https://cross-tables.com/annotated.php?u=54938";
+      examples[2] = "XuoAntzD";
+      examples[3] = "https://woogles.io/game/XuoAntzD";
+      examples[4] =
+          "https://www.cross-tables.com/annotated/selfgcg/556/anno55690.gcg";
+      examples[5] = "testdata/gcgs/success_six_pass.gcg";
+      examples[6] = "some_game.gcg";
+      text =
+          "Loads the game using the specified GCG. The source identifier can "
+          "be a cross-tables ID or game URL, a woogles.io ID or game URL, a "
+          "URL "
+          "to the GCG file, or a local GCG file.";
+      break;
+    case ARG_TOKEN_NEW_GAME:
+      usages[0] = "[<player_one_name>] [<player_two_name>]";
+      examples[0] = "";
+      examples[1] = "Alice";
+      examples[2] = "Alice Bob";
+      text = "Starts a new game, resetting the previous game and game history. "
+             "Player names without whitespace can be optionally specified.";
+      break;
+    case ARG_TOKEN_EXPORT:
+      usages[0] = "[<output_gcg_filename>]";
+      examples[0] = "";
+      examples[1] = "my_game";
+      examples[2] = "other_game.gcg";
+      text = "Saves the current game history to the specified GCG file. If no "
+             "GCG file is specified, a default name will be used. If no '.gcg' "
+             "extension is specified, it will be added to the filename "
+             "automatically.";
+      break;
+    case ARG_TOKEN_COMMIT:
+      usages[0] = "<move_index>";
+      usages[1] = "<position> <tiles>";
+      usages[2] = "ex <exchanged_tiles> [<rack_after_exchange>]";
+      usages[3] = "pass";
+      examples[0] = "2";
+      examples[1] = "11d ANTIQuES";
+      examples[2] = "ex ABC";
+      examples[3] = "ex ABC HIJKLMN";
+      examples[4] = "pass";
+      text =
+          "Commits the move to the game history. When committing an exchange, "
+          "the rack after the exchange can be specified so that six passes "
+          "can be correctly scored.";
+      break;
+    case ARG_TOKEN_TOP_COMMIT:
+      usages[0] = "[<rack>]";
+      examples[0] = "";
+      examples[1] = "RETINAS";
+      text = "Commits the static best move if a rack is specified or no sim "
+             "results are available. Otherwise, commits the best move by win "
+             "percentage according to the sim results.";
+      break;
+    case ARG_TOKEN_CHALLENGE:
+      usages[0] = "[<challenge_bonus_points>]";
+      examples[0] = "";
+      examples[1] = "7";
+      text = "Adds a challenge bonus to the previous tile placement move. "
+             "Challenges can be added mid-game without truncating the game "
+             "history. If no challenge bonus is specified, the current value "
+             "will be used.";
+      break;
+    case ARG_TOKEN_UNCHALLENGE:
+      usages[0] = "";
+      text =
+          "Removes the challenge bonus from the previous tile placement move. "
+          "Challenges can be removed mid-game without truncating the game "
+          "history.";
+      break;
+    case ARG_TOKEN_OVERTIME:
+      usages[0] = "<player_nickname> <overtime_penalty>";
+      examples[0] = "josh 5";
+      examples[1] = "josh 9";
+      text =
+          "Adds an overtime penalty for the given player. Overtime penalties "
+          "can only be applied after the game is over.";
+      break;
+    case ARG_TOKEN_SWITCH_NAMES:
+      usages[0] = "";
+      text = "Switches the names of the players.";
+      break;
+    case ARG_TOKEN_SHOW_GAME:
+      usages[0] = "";
+      text = "Shows the current game.";
+      break;
+    case ARG_TOKEN_SHOW_MOVES:
+      usages[0] = "";
+      text = "Shows the moves or the sim results if available.";
+      break;
+    case ARG_TOKEN_SHOW_INFERENCE:
+      usages[0] = "";
+      text = "Shows the inference result.";
+      break;
+    case ARG_TOKEN_SHOW_ENDGAME:
+      usages[0] = "";
+      text = "Shows the endgame solver result.";
+      break;
+    case ARG_TOKEN_NEXT:
+      usages[0] = "";
+      text = "Goes to the next move of the game if possible. Skips over "
+             "challenge bonus events.";
+      break;
+    case ARG_TOKEN_PREVIOUS:
+      usages[0] = "";
+      text = "Goes to the previous move of the game if possible. Skips over "
+             "challenge bonus events.";
+      break;
+    case ARG_TOKEN_GOTO:
+      usages[0] = "<turn_number_or_end_or_start>";
+      examples[0] = "1";
+      examples[1] = "end";
+      examples[2] = "start";
+      text =
+          "Goes to the game state after the specified turn number. Use 'start' "
+          "and 'end' to go to the start and end of the game, respectively.";
+      break;
+    case ARG_TOKEN_NOTE:
+      usages[0] = "<content_with_possible_whitespace>";
+      examples[0] = "#knowledgesaddest";
+      examples[1] = "this is a valid note with whitespace";
+      text = "Specifies the note for the most recently added move. If there is "
+             "an existing note it will be overwritten.";
+      break;
+    case ARG_TOKEN_P1_NAME:
+      usages[0] = "<player_name_with_possible_whitespace>";
+      examples[0] = "Bob";
+      examples[1] = "Bob Smith";
+      text = "Specifies the name of the first player.";
+      break;
+    case ARG_TOKEN_P2_NAME:
+      usages[0] = "<player_name_with_possible_whitespace>";
+      examples[0] = "Bob";
+      examples[1] = "Bob Smith";
+      text = "Specifies the name of the second player.";
+      break;
+    case ARG_TOKEN_DATA_PATH:
+      usages[0] = "<data_paths>";
+      examples[0] = "./data";
+      examples[1] = "./data:./testdata:./other_dir";
+      text =
+          "Designates the data file directories ordered by search precedence. "
+          "Directories listed earlier are preferred when locating files.";
+      break;
+    case ARG_TOKEN_BINGO_BONUS:
+      usages[0] = "<bingo_bonus>";
+      examples[0] = "50";
+      examples[1] = "30";
+      text = "Specifies the number of additional points plays receive when all "
+             "tiles on the rack are played.";
+      break;
+    case ARG_TOKEN_CHALLENGE_BONUS:
+      usages[0] = "<challenge_bonus>";
+      examples[0] = "5";
+      examples[1] = "10";
+      text =
+          "Specifies the number of additional points plays receive when they "
+          "are unsuccessfully challenged.";
+      break;
+    case ARG_TOKEN_BOARD_LAYOUT:
+      usages[0] = "<board_layout>";
+      examples[0] = "standard15";
+      examples[1] = "standard21";
+      text = "Specifies the bonus square layout for the board.";
+      break;
+    case ARG_TOKEN_GAME_VARIANT:
+      usages[0] = "<game_variant>";
+      examples[0] = "classic";
+      examples[1] = "wordsmog";
+      text = "Specifies the game variant.";
+      break;
+    case ARG_TOKEN_LETTER_DISTRIBUTION:
+      usages[0] = "<letter_distribution>";
+      examples[0] = "english";
+      examples[1] = "french";
+      text = "Specifies the letter distribution.";
+      break;
+    case ARG_TOKEN_LEXICON:
+      usages[0] = "<lexicon>";
+      examples[0] = "CSW21";
+      examples[1] = "NWL20";
+      text = "Specifies the lexicon for both players, unless overridden by the "
+             "'l1' or 'l2' options.";
+      break;
+    case ARG_TOKEN_USE_WMP:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether to use word maps as opposed to KWGs when "
+             "generating moves. Word maps are much faster but use more memory "
+             "and are on by default.";
+      break;
+    case ARG_TOKEN_LEAVES:
+      usages[0] = "<leaves>";
+      examples[0] = "CSW21";
+      examples[1] = "TWL98";
+      text = "Specifies the leaves for both players, unless overridden by the "
+             "'k1' or 'k2' options.";
+      break;
+    case ARG_TOKEN_P1_LEXICON:
+    case ARG_TOKEN_P2_LEXICON:
+      usages[0] = "<lexicon>";
+      examples[0] = "CSW21";
+      examples[1] = "TWL98";
+      text =
+          "Specifies the lexicon for the given player. This can be used with "
+          "the autoplay command to compare different lexicons.";
+      break;
+    case ARG_TOKEN_P1_USE_WMP:
+    case ARG_TOKEN_P2_USE_WMP:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether to use word maps as opposed to KWGs when "
+             "generating moves for the given player.";
+      break;
+    case ARG_TOKEN_P1_LEAVES:
+    case ARG_TOKEN_P2_LEAVES:
+      usages[0] = "<leaves>";
+      examples[0] = "CSW21";
+      examples[1] = "TWL98";
+      text = "Specifies the leaves for the given player, This can can be used "
+             "with the autoplay command to compare different leaves.";
+      break;
+    case ARG_TOKEN_P1_MOVE_SORT_TYPE:
+    case ARG_TOKEN_P2_MOVE_SORT_TYPE:
+      usages[0] = "<sort_type>";
+      examples[0] = "score";
+      examples[1] = "equity";
+      text = "Specifies how the generated moves for the given player should be "
+             "sorted.";
+      break;
+    case ARG_TOKEN_P1_MOVE_RECORD_TYPE:
+    case ARG_TOKEN_P2_MOVE_RECORD_TYPE:
+      usages[0] = "<record_type>";
+      examples[0] = "best";
+      examples[1] = "equity";
+      examples[2] = "all";
+      text = "Specifies how the generated moves for the given player should be "
+             "recorded. The 'best' record type will only record the best move "
+             "according the the sort type and is the fastest to compute. This "
+             "option is ideal for autoplay. The 'all' record type will record "
+             "all moves. The 'equity' record type will record all moves with X "
+             "equity of the best move, where X is specified by the 'mmargin' "
+             "option.";
+      break;
+    case ARG_TOKEN_WIN_PCT:
+      usages[0] = "<win_percentage>";
+      examples[0] = "winpct";
+      text = "Specifies which win percentage file to use for simulations.";
+      break;
+    case ARG_TOKEN_PLIES:
+      usages[0] = "<plies>";
+      examples[0] = "2";
+      examples[1] = "4";
+      text = "Specifies the number of plies to use for simulations.";
+      break;
+    case ARG_TOKEN_ENDGAME_PLIES:
+      usages[0] = "<endgame_plies>";
+      examples[0] = "4";
+      examples[1] = "8";
+      text = "Specifies the number of plies to use for solving endgames.";
+      break;
+    case ARG_TOKEN_NUMBER_OF_PLAYS:
+      usages[0] = "<number_of_plays>";
+      examples[0] = "150";
+      examples[1] = "300";
+      text = "Specifies the number of plays generated by the move generation "
+             "command.";
+      break;
+    case ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS:
+      usages[0] = "<max_number_of_display_plays>";
+      examples[0] = "15";
+      examples[1] = "30";
+      text = "Specifies the maximum number of plays to display.";
+      break;
+    case ARG_TOKEN_NUMBER_OF_SMALL_PLAYS:
+      usages[0] = "<number_of_small_plays>";
+      examples[0] = "15";
+      examples[1] = "30";
+      text = "Specifies the number of plays generated by the move generation "
+             "command for endgames.";
+      break;
+    case ARG_TOKEN_MAX_ITERATIONS:
+      usages[0] = "<max_iterations>";
+      examples[0] = "100";
+      examples[1] = "1000";
+      text = "Specifies the maximum total number of iterations across all "
+             "simulated plays to perform before stopping.";
+      break;
+    case ARG_TOKEN_STOP_COND_PCT:
+      usages[0] = "<stop_cond_pct>";
+      examples[0] = "95";
+      examples[1] = "98.5";
+      examples[2] = "99";
+      examples[3] = "99.9999";
+      text = "Specifies the statistical confidence level for the simulations, "
+             "ranging from 0 to 100 exclusive. A higher confidence level "
+             "improves the accuracy of the results, but takes longer to run.";
+      break;
+    case ARG_TOKEN_INFERENCE_MARGIN:
+      usages[0] = "<inference_equity_margin>";
+      examples[0] = "1";
+      examples[1] = "2.4";
+      examples[2] = "10.0";
+      text =
+          "Specifies the tolerance, in terms of equity, for how much worse a "
+          "move can be than the best equity move and still be considered a "
+          "possible rack from which the opponent played.";
+      break;
+    case ARG_TOKEN_MOVEGEN_MARGIN:
+      usages[0] = "<movegen_equity_margin>";
+      examples[0] = "1";
+      examples[1] = "5.5";
+      examples[2] = "10.0";
+      text =
+          "Specifies the tolerance, in terms of equity, for how much worse a "
+          "move can be than the best equity move and still be generated by "
+          "the move generation command.";
+      break;
+    case ARG_TOKEN_MIN_PLAY_ITERATIONS:
+      usages[0] = "<min_play_iterations>";
+      examples[0] = "100";
+      examples[1] = "500";
+      text = "Specifies the minimum number of iterations a candidate move must "
+             "receive when running simulations.";
+      break;
+    case ARG_TOKEN_USE_GAME_PAIRS:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text =
+          "Specifies whether or not to use game pairs when running the "
+          "autoplay command. Using game pairs reduces statistical noise in "
+          "the autoplay results by playing games in pairs using the same "
+          "seed, with player one going first in one game and player two going "
+          "first in the other game. Since the games are deterministic for a "
+          "given starting seed, if both players make the exact same decision "
+          "for each corresponding play, the games will be identical.";
+      break;
+    case ARG_TOKEN_USE_SMALL_PLAYS:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text =
+          "Specifies whether or not to use the small move format for endgames.";
+      break;
+    case ARG_TOKEN_SIM_WITH_INFERENCE:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether or not to run and use the inference result "
+             "when simulating.";
+      break;
+    case ARG_TOKEN_WRITE_BUFFER_SIZE:
+      usages[0] = "<write_buffer_size>";
+      examples[0] = "10000";
+      examples[1] = "100000";
+      text =
+          "Specifies the size of the write buffer for the autoplay recorder.";
+      break;
+    case ARG_TOKEN_HUMAN_READABLE:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether or not to use a human readable move format for "
+             "printing results.";
+      break;
+    case ARG_TOKEN_RANDOM_SEED:
+      usages[0] = "<random_seed>";
+      examples[0] = "0";
+      examples[1] = "42";
+      text = "Specifies the random seed to use for any gameplay that uses RNG.";
+      break;
+    case ARG_TOKEN_NUMBER_OF_THREADS:
+      usages[0] = "<number_of_threads>";
+      examples[0] = "1";
+      examples[1] = "4";
+      text = "Specifies the number of threads to use when running commands.";
+      break;
+    case ARG_TOKEN_PRINT_INTERVAL:
+      usages[0] = "<print_interval>";
+      examples[0] = "100";
+      examples[1] = "1000";
+      text = "Specifies the iteration or game interval at which to print the "
+             "current command status.";
+      break;
+    case ARG_TOKEN_EXEC_MODE:
+      usages[0] = "<exec_mode>";
+      examples[0] = "sync";
+      examples[1] = "async";
+      text =
+          "Specifies the execution mode to use when running commands. Running "
+          "in sync mode will block on the main thread until the command is "
+          "complete. Running in async mode will run the command in the "
+          "background allowing the user to query the status of the command or "
+          "stop it at any time.";
+      break;
+    case ARG_TOKEN_TT_FRACTION_OF_MEM:
+      usages[0] = "<fraction_of_mem>";
+      examples[0] = "0.25";
+      examples[1] = "0.5";
+      text = "Specifies the fraction of memory to use for the transposition "
+             "table.";
+      break;
+    case ARG_TOKEN_TIME_LIMIT:
+      usages[0] = "<time_limit>";
+      examples[0] = "10";
+      examples[1] = "30";
+      text = "Specifies the time limit in seconds for simulations.";
+      break;
+    case ARG_TOKEN_SAMPLING_RULE:
+      usages[0] = "<sampling_rule>";
+      examples[0] = "rr";
+      examples[1] = "tt";
+      text = "Specifies the sampling rule to use when running simulations. The "
+             "rr option implements a round robin where every play receives the "
+             "same "
+             "number of iterations. The tt option implements the Top Two "
+             "sampling rule which attempts to minimize the number of total "
+             "iterations needed to find the best move.";
+      break;
+    case ARG_TOKEN_THRESHOLD:
+      usages[0] = "<threshold>";
+      examples[0] = "gk16";
+      examples[1] = "none";
+      text =
+          "Specifies the threshold to use when running simulations. The gk16 "
+          "option implements the GK16 threshold which attempts to minimize the "
+          "number of total iterations needed to find the best move. The none "
+          "option will make the simulation run until it hits the max total "
+          "iterations or time limit.";
+      break;
+    case ARG_TOKEN_PRINT_BOARDS:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether or not to print the boards for each play.";
+      break;
+    case ARG_TOKEN_BOARD_COLOR:
+      usages[0] = "<board_color>";
+      examples[0] = "none";
+      examples[1] = "ansi";
+      examples[2] = "xterm";
+      examples[3] = "truecolour";
+      text = "Specifies the color of the board.";
+      break;
+    case ARG_TOKEN_BOARD_TILE_GLYPHS:
+      usages[0] = "<board_tile_glyphs>";
+      examples[0] = "primary";
+      examples[1] = "alt";
+      text = "Specifies the glyphs to use for the board tiles.";
+      break;
+    case ARG_TOKEN_BOARD_BORDER:
+      usages[0] = "<board_border>";
+      examples[0] = "ascii";
+      examples[1] = "box";
+      text = "Specifies the border type to use for the board.";
+      break;
+    case ARG_TOKEN_BOARD_COLUMN_LABEL:
+      usages[0] = "<board_column_label>";
+      examples[0] = "ascii";
+      examples[1] = "fullwidth";
+      text = "Specifies the column label type to use for the board.";
+      break;
+    case ARG_TOKEN_ON_TURN_MARKER:
+      usages[0] = "<on_turn_marker>";
+      examples[0] = "ascii";
+      examples[1] = "arrowhead";
+      text = "Specifies the marker to use for the current player.";
+      break;
+    case ARG_TOKEN_ON_TURN_COLOR:
+      usages[0] = "<on_turn_color>";
+      examples[0] = "none";
+      examples[1] = "green";
+      text = "Specifies the color of the marker for the current player.";
+      break;
+    case ARG_TOKEN_ON_TURN_SCORE_STYLE:
+      usages[0] = "<on_turn_score_style>";
+      examples[0] = "normal";
+      examples[1] = "bold";
+      text = "Specifies the style of the score for the current player.";
+      break;
+    case ARG_TOKEN_PRETTY:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text =
+          "Specifies whether or not to use a preset collection of options to "
+          "pretty print the board.";
+      break;
+    case ARG_TOKEN_PRINT_ON_FINISH:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether or not to print a finished message when a "
+             "command completes execution.";
+      break;
+    case ARG_TOKEN_SHOW_PROMPT:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether or not to show the '" MAGPIE_PROMPT "' prompt.";
+      break;
+    case ARG_TOKEN_SAVE_SETTINGS:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether or not to save the current settings to file "
+             "after every command. If settings are saved, they will be "
+             "automatically loaded on the next startup.";
+      break;
+    case NUMBER_OF_ARG_TOKENS:
+      log_fatal("encountered invalid arg token in help command");
+      break;
+    }
+  }
+  const char *is_arg_char = "-";
+  if (is_command) {
+    is_arg_char = "";
+  }
+
+  if (is_hotkey) {
+    string_builder_add_formatted_string(sb, "%s%c, %s%s", is_arg_char, name[0],
+                                        is_arg_char, name);
+  } else {
+    string_builder_add_formatted_string(sb, "%s%s, %s%s", is_arg_char,
+                                        shortest_unambiguous_name, is_arg_char,
+                                        name);
+  }
+
+  string_builder_add_formatted_string(sb, "\n\n%*sUsage:\n\n", HELP_INDENT, "");
+
+  int usages_index = 0;
+  while (usages[usages_index]) {
+    string_builder_add_formatted_string(sb, "%*s%s %s\n", HELP_INDENT + 2, "",
+                                        name, usages[usages_index]);
+    usages_index++;
+  }
+
+  if (examples[0]) {
+    string_builder_add_formatted_string(sb, "\n%*sExamples:\n\n", HELP_INDENT,
+                                        "");
+    int example_index = 0;
+    while (examples[example_index]) {
+      string_builder_add_formatted_string(sb, "%*s%s %s\n", HELP_INDENT + 2, "",
+                                          name, examples[example_index]);
+      example_index++;
+    }
+  }
+
+  string_builder_add_formatted_string(sb, "\n%*s%s\n\n", HELP_INDENT, "", text);
+}
+
+char *impl_help(Config *config, ErrorStack *error_stack) {
+  const char *help_arg = config_get_parg_value(config, ARG_TOKEN_HELP, 0);
+  arg_token_t help_arg_token = NUMBER_OF_ARG_TOKENS;
+  if (help_arg) {
+    help_arg_token = get_token_from_string(config, help_arg, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return empty_string();
+    }
+  }
+
+  StringBuilder *sb = string_builder_create();
+  if (help_arg_token == NUMBER_OF_ARG_TOKENS) {
+    // Show the full help command
+    // Show help for the commands first
+    string_builder_add_string(sb, "Commands\n\n");
+    for (arg_token_t k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
+      if (config->pargs[k]->is_command) {
+        add_help_arg_to_string_builder(config, k, sb, false);
+      }
+    }
+    // Show help for async commands
+    string_builder_add_string(sb, "\n\nAsync commands\n\n");
+    for (async_token_t k = 0; k < NUMBER_OF_ASYNC_COMMAND_TOKENS; k++) {
+      add_help_arg_to_string_builder(config, k, sb, true);
+    }
+    // Then show help for the settings
+    string_builder_add_string(sb, "\n\nSettings\n\n");
+    for (arg_token_t k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
+      if (!config->pargs[k]->is_command) {
+        add_help_arg_to_string_builder(config, k, sb, false);
+      }
+    }
+  } else {
+    add_help_arg_to_string_builder(config, help_arg_token, sb, false);
+  }
+  char *result = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return result;
+}
+
+void execute_help(Config *config, ErrorStack *error_stack) {
+  char *result = impl_help(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_help(Config *config, ErrorStack *error_stack) {
+  return impl_help(config, error_stack);
+}
+
 // Load CGP
 
 void impl_load_cgp(Config *config, ErrorStack *error_stack) {
@@ -742,7 +1606,7 @@ void impl_load_cgp(Config *config, ErrorStack *error_stack) {
       error_stack_print_and_reset(error_stack);
       log_fatal("cgp load unexpected failed");
     }
-    config_reset_move_list(config);
+    config_reset_move_list_and_invalidate_sim_results(config);
   }
   string_builder_destroy(cgp_builder);
 }
@@ -780,7 +1644,7 @@ void impl_add_moves(Config *config, ErrorStack *error_stack) {
         string_builder_add_string(phonies_sb, "invalid words formed from ");
         string_builder_add_move(
             phonies_sb, board, validated_moves_get_move(new_validated_moves, i),
-            ld);
+            ld, false);
         string_builder_add_string(phonies_sb, ": ");
         string_builder_add_string(phonies_sb, phonies_formed);
         write_to_stream_out(string_builder_peek(phonies_sb));
@@ -798,7 +1662,8 @@ void impl_add_moves(Config *config, ErrorStack *error_stack) {
 
 // Setting player rack
 
-void impl_set_rack(Config *config, ErrorStack *error_stack) {
+void impl_set_rack_internal(Config *config, const char *rack_str,
+                            ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
@@ -814,7 +1679,6 @@ void impl_set_rack(Config *config, ErrorStack *error_stack) {
   rack_copy(&new_rack,
             player_get_rack(game_get_player(config->game, player_index)));
 
-  const char *rack_str = config_get_parg_value(config, ARG_TOKEN_RACK, 0);
   load_rack_or_push_to_error_stack(rack_str, config->ld,
                                    ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
                                    &new_rack, error_stack);
@@ -828,23 +1692,26 @@ void impl_set_rack(Config *config, ErrorStack *error_stack) {
       log_fatal(
           "unexpectedly failed to draw rack from bag in set rack command");
     }
+    if (bag_get_letters(game_get_bag(config->game)) <= (RACK_SIZE)) {
+      draw_to_full_rack(config->game, 1 - player_index);
+    }
   } else {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG,
                      get_formatted_string(
                          "rack '%s' is not available in the bag", rack_str));
   }
+  config_reset_move_list_and_invalidate_sim_results(config);
+}
+
+void impl_set_rack(Config *config, ErrorStack *error_stack) {
+  const char *rack_str = config_get_parg_value(config, ARG_TOKEN_RACK, 0);
+  impl_set_rack_internal(config, rack_str, error_stack);
 }
 
 // Move generation
 
-void impl_move_gen(Config *config, ErrorStack *error_stack) {
-  if (!config_has_game_data(config)) {
-    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-                     string_duplicate("cannot generate moves without lexicon"));
-    return;
-  }
-
-  config_init_game(config);
+void impl_move_gen_override_record_type(Config *config,
+                                        move_record_t move_record_type) {
   if (!config_get_use_small_plays(config)) {
     config_recreate_move_list(config, config_get_num_plays(config),
                               MOVE_LIST_TYPE_DEFAULT);
@@ -858,8 +1725,23 @@ void impl_move_gen(Config *config, ErrorStack *error_stack) {
       .thread_index = 0,
       .eq_margin_movegen = config->eq_margin_movegen,
   };
-  generate_moves_for_game(&args);
+  generate_moves_for_game_override_record_type(&args, move_record_type);
   move_list_sort_moves(config->move_list);
+  sim_results_set_valid_for_current_game_state(config->sim_results, false);
+}
+
+void impl_move_gen(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot generate moves without lexicon"));
+    return;
+  }
+
+  config_init_game(config);
+
+  impl_move_gen_override_record_type(
+      config, player_get_move_record_type(game_get_player(
+                  config->game, game_get_player_on_turn_index(config->game))));
 }
 
 // Inference
@@ -895,7 +1777,12 @@ void config_infer(const Config *config, bool use_game_history, int target_index,
   config_fill_infer_args(config, use_game_history, target_index, target_score,
                          target_num_exch, target_played_tiles,
                          target_known_rack, nontarget_known_rack, &args);
-  return infer(&args, results, error_stack);
+  infer(&args, results, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  inference_results_set_valid_for_current_game_state(config->inference_results,
+                                                     true);
 }
 
 void impl_infer(Config *config, ErrorStack *error_stack) {
@@ -1048,17 +1935,18 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->use_inference = config->sim_with_inference;
   sim_args->num_threads = config->num_threads;
   sim_args->print_interval = config->print_interval;
+  sim_args->max_num_display_plays = config->max_num_display_plays;
   sim_args->seed = config->seed;
   if (sim_args->use_inference) {
-    // FIXME: enable sim inferences using data from the last play instead of the
-    // whole history so that autoplay does not have to keep a whole history
-    // and play to turn for each inference which will probably incur more
-    // overhead than we would like.
+    // FIXME: enable sim inferences using data from the last play instead of
+    // the whole history so that autoplay does not have to keep a whole
+    // history and play to turn for each inference which will probably incur
+    // more overhead than we would like.
     config_fill_infer_args(config, true, 0, 0, 0, target_played_tiles,
                            target_known_inference_tiles, nontarget_known_tiles,
                            &sim_args->inference_args);
   }
-  sim_args->bai_options.sample_limit = config_get_max_iterations(config);
+  sim_args->bai_options.sample_limit = config->max_iterations;
   sim_args->bai_options.sample_minimum = config->min_play_iterations;
   const double percentile = config_get_stop_cond_pct(config);
   if (percentile > 100 || config->threshold == BAI_THRESHOLD_NONE) {
@@ -1068,8 +1956,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
         1.0 - (config_get_stop_cond_pct(config) / 100.0);
     sim_args->bai_options.threshold = config->threshold;
   }
-  sim_args->bai_options.time_limit_seconds =
-      config_get_time_limit_seconds(config);
+  sim_args->bai_options.time_limit_seconds = config->time_limit_seconds;
   sim_args->bai_options.sampling_rule = config->sampling_rule;
   sim_args->bai_options.num_threads = config->num_threads;
 }
@@ -1114,7 +2001,8 @@ void impl_sim(Config *config, ErrorStack *error_stack) {
   Rack known_opp_rack;
   rack_set_dist_size_and_reset(&known_opp_rack, ld_size);
 
-  if (known_opp_rack_str) {
+  // Set setting empty opp rack with '-'
+  if (known_opp_rack_str && !strings_equal(known_opp_rack_str, "-")) {
     load_rack_or_push_to_error_stack(
         known_opp_rack_str, game_get_ld(config->game),
         ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &known_opp_rack,
@@ -1123,8 +2011,21 @@ void impl_sim(Config *config, ErrorStack *error_stack) {
       return;
     }
   }
-
   config_simulate(config, &known_opp_rack, config->sim_results, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  bool sim_results_valid = true;
+  if (config->sim_with_inference) {
+    // This will always set the state to false if it was interrupted
+    inference_results_set_valid_for_current_game_state(
+        config->inference_results, true);
+    // If the inference was interrupted, the sim results will be invalid
+    sim_results_valid = inference_results_get_valid_for_current_game_state(
+        config->inference_results);
+  }
+  sim_results_set_valid_for_current_game_state(config->sim_results,
+                                               sim_results_valid);
 }
 
 char *status_sim(Config *config) {
@@ -1132,12 +2033,25 @@ char *status_sim(Config *config) {
   if (!sim_results) {
     return string_duplicate("simmer has not been initialized");
   }
-  return ucgi_sim_stats(config->game, sim_results,
-                        (double)sim_results_get_node_count(sim_results) /
-                            bai_result_get_elapsed_seconds(
-                                sim_results_get_bai_result(sim_results)),
-                        true);
+  return sim_results_get_string(config->game, sim_results,
+                                config->max_num_display_plays,
+                                !config->human_readable);
 }
+
+// Gen and Sim
+
+void impl_gen_and_sim(Config *config, ErrorStack *error_stack) {
+  impl_move_gen(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  impl_sim(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+}
+
+char *status_gen_and_sim(Config *config) { return status_sim(config); }
 
 // Endgame
 
@@ -1169,6 +2083,8 @@ void impl_endgame(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  endgame_results_set_valid_for_current_game_state(config->endgame_results,
+                                                   true);
 }
 
 // Autoplay
@@ -1317,6 +2233,15 @@ void impl_create_data(const Config *config, ErrorStack *error_stack) {
         return;
       }
     }
+
+    if (!ld) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CREATE_DATA_MISSING_LETTER_DISTRIBUTION,
+          get_formatted_string("cannot create %s without letter distribution",
+                               create_type_str));
+      return;
+    }
+
     KLV *klv = klv_create_empty(ld, klv_name_str);
     klv_write(klv, config_get_data_paths(config), klv_name_str, error_stack);
     klv_destroy(klv);
@@ -1333,7 +2258,7 @@ void impl_create_data(const Config *config, ErrorStack *error_stack) {
 
 // Show game
 
-char *impl_show(Config *config, ErrorStack *error_stack) {
+char *impl_show_game(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
                      string_duplicate("cannot show game without lexicon"));
@@ -1356,16 +2281,138 @@ char *impl_show(Config *config, ErrorStack *error_stack) {
   return result;
 }
 
-void execute_show(Config *config, ErrorStack *error_stack) {
-  char *result = impl_show(config, error_stack);
+void execute_show_game(Config *config, ErrorStack *error_stack) {
+  char *result = impl_show_game(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
   }
   free(result);
 }
 
-char *str_api_show(Config *config, ErrorStack *error_stack) {
-  return impl_show(config, error_stack);
+char *str_api_show_game(Config *config, ErrorStack *error_stack) {
+  return impl_show_game(config, error_stack);
+}
+
+// Show moves
+
+char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot show game without lexicon"));
+    return empty_string();
+  }
+  if (!config->game || !config->move_list ||
+      move_list_get_count(config->move_list) == 0) {
+    error_stack_push(error_stack, ERROR_STATUS_NO_MOVES_TO_SHOW,
+                     string_duplicate("no moves to show"));
+    return empty_string();
+  }
+  const char *max_num_display_plays_str =
+      config_get_parg_value(config, ARG_TOKEN_SHOW_MOVES, 0);
+
+  int max_num_display_plays = config->max_num_display_plays;
+  if (max_num_display_plays_str) {
+    string_to_int_or_push_error("max num display plays",
+                                max_num_display_plays_str, 1, INT_MAX,
+                                ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+                                &max_num_display_plays, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return empty_string();
+    }
+  }
+
+  char *result = NULL;
+  if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
+    result =
+        sim_results_get_string(config->game, config->sim_results,
+                               max_num_display_plays, !config->human_readable);
+  } else {
+    result = move_list_get_string(
+        config->move_list, game_get_board(config->game), config->ld,
+        max_num_display_plays, !config->human_readable);
+  }
+  return result;
+}
+
+void execute_show_moves_or_sim_results(Config *config,
+                                       ErrorStack *error_stack) {
+  char *result = impl_show_moves_or_sim_results(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_show_moves_or_sim_results(Config *config,
+                                        ErrorStack *error_stack) {
+  return impl_show_moves_or_sim_results(config, error_stack);
+}
+
+// Show inference results
+
+char *impl_show_inference(Config *config, ErrorStack *error_stack) {
+  if (!config->game || !inference_results_get_valid_for_current_game_state(
+                           config->inference_results)) {
+    error_stack_push(error_stack, ERROR_STATUS_NO_INFERENCE_TO_SHOW,
+                     string_duplicate("no inference results to show"));
+    return empty_string();
+  }
+
+  const char *max_num_display_leaves_str =
+      config_get_parg_value(config, ARG_TOKEN_SHOW_INFERENCE, 0);
+
+  int max_num_display_leaves = config->max_num_display_plays;
+  if (max_num_display_leaves_str) {
+    string_to_int_or_push_error("max num display leaves",
+                                max_num_display_leaves_str, 1, INT_MAX,
+                                ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+                                &max_num_display_leaves, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return empty_string();
+    }
+  }
+
+  return inference_result_get_string(config->inference_results, config->ld,
+                                     max_num_display_leaves,
+                                     !config->human_readable);
+}
+
+void execute_show_inference(Config *config, ErrorStack *error_stack) {
+  char *result = impl_show_inference(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_show_inference(Config *config, ErrorStack *error_stack) {
+  return impl_show_inference(config, error_stack);
+}
+
+// Show endgame
+
+char *impl_show_endgame(const Config *config, ErrorStack *error_stack) {
+  if (!config->game || !endgame_results_get_valid_for_current_game_state(
+                           config->endgame_results)) {
+    error_stack_push(error_stack, ERROR_STATUS_NO_ENDGAME_TO_SHOW,
+                     string_duplicate("no endgame results to show"));
+    return empty_string();
+  }
+  return endgame_results_get_string(config->endgame_results, config->game,
+                                    config->game_history,
+                                    config->human_readable);
+}
+
+void execute_show_endgame(Config *config, ErrorStack *error_stack) {
+  char *result = impl_show_endgame(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_show_endgame(Config *config, ErrorStack *error_stack) {
+  return impl_show_endgame(config, error_stack);
 }
 
 // Start new game
@@ -1416,7 +2463,7 @@ void execute_new_game(Config *config, ErrorStack *error_stack) {
   char *result = impl_new_game(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
@@ -1440,8 +2487,13 @@ char *impl_export(Config *config, ErrorStack *error_stack) {
   }
   config_init_game(config);
 
-  game_history_set_gcg_filename(
-      config->game_history, config_get_parg_value(config, ARG_TOKEN_EXPORT, 0));
+  const char *user_provided_filename =
+      config_get_parg_value(config, ARG_TOKEN_EXPORT, 0);
+
+  if (user_provided_filename ||
+      !game_history_get_gcg_filename(config->game_history)) {
+    game_history_set_gcg_filename(config->game_history, user_provided_filename);
+  }
 
   write_gcg(game_history_get_gcg_filename(config->game_history), config->ld,
             config->game_history, error_stack);
@@ -1485,10 +2537,7 @@ void config_restore_game_and_history(Config *config) {
   config->game_history_backup = NULL;
 }
 
-// Runs game_play_n_events and then calculates if
-// - the consecutive pass game end procedures should be applied
-// - the game history needs to wait for the final pass/challenge from the user
-void config_game_play_events(Config *config, ErrorStack *error_stack) {
+void config_game_play_events_internal(Config *config, ErrorStack *error_stack) {
   Game *game = config->game;
   GameHistory *game_history = config->game_history;
   game_play_n_events(game_history, game,
@@ -1575,7 +2624,8 @@ void config_game_play_events(Config *config, ErrorStack *error_stack) {
             error_stack_push(
                 error_stack, ERROR_STATUS_COMMIT_PASS_OUT_RACK_NOT_IN_BAG,
                 get_formatted_string(
-                    "rack to draw before game end pass out '%s' for player '%s'"
+                    "rack to draw before game end pass out "
+                    "'%s' for player '%s'"
                     "is not available in the bag",
                     string_builder_peek(sb),
                     game_history_player_get_name(game_history, player_index)));
@@ -1624,6 +2674,19 @@ void config_game_play_events(Config *config, ErrorStack *error_stack) {
                      // Play to the end
                      game_history_get_num_events(game_history), true,
                      error_stack);
+}
+
+// Runs game_play_n_events and then calculates if
+// - the consecutive pass game end procedures should be applied
+// - the game history needs to wait for the final pass/challenge from the user
+// If there are no resulting errors, the move list is reset if it exists
+void config_game_play_events(Config *config, ErrorStack *error_stack) {
+  config_game_play_events_internal(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  // Invalidate the moves when moving to a new position
+  config_reset_move_list_and_invalidate_sim_results(config);
 }
 
 void config_add_end_rack_points(Config *config, const int player_index,
@@ -1735,8 +2798,8 @@ void config_add_game_event(Config *config, const int player_index,
     move_score = 0;
     break;
   case GAME_EVENT_CHALLENGE_BONUS:
-    // Challenge bonus events are handled elsewhere by inserting, not appending
-    // to the history
+    // Challenge bonus events are handled elsewhere by inserting, not
+    // appending to the history
     log_fatal("got unexpected challenge bonus game event when adding "
               "event to game history in the config\n");
     break;
@@ -1753,8 +2816,8 @@ void config_add_game_event(Config *config, const int player_index,
               "event to game history in the config\n");
     break;
   case GAME_EVENT_END_RACK_PENALTY:
-    // End rack penalty events are never submitted directly by the user and are
-    // handled elsewhere
+    // End rack penalty events are never submitted directly by the user and
+    // are handled elsewhere
     log_fatal("got unexpected end rack penalty game event when adding "
               "event to game history in the config\n");
     break;
@@ -1790,6 +2853,9 @@ void config_add_game_event(Config *config, const int player_index,
 
   if (add_rack_end_points) {
     config_add_end_rack_points(config, player_index, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
   }
 
   config_game_play_events(config, error_stack);
@@ -1800,13 +2866,9 @@ void config_add_game_event(Config *config, const int player_index,
 }
 
 void parse_commit(Config *config, StringBuilder *move_string_builder,
-                  ValidatedMoves **vms, ErrorStack *error_stack) {
-  const char *commit_pos_arg_1 =
-      config_get_parg_value(config, ARG_TOKEN_COMMIT, 0);
-  const char *commit_pos_arg_2 =
-      config_get_parg_value(config, ARG_TOKEN_COMMIT, 1);
-  const char *commit_pos_arg_3 =
-      config_get_parg_value(config, ARG_TOKEN_COMMIT, 2);
+                  ValidatedMoves **vms, ErrorStack *error_stack,
+                  const char *commit_pos_arg_1, const char *commit_pos_arg_2,
+                  const char *commit_pos_arg_3) {
   Move move;
   const int player_on_turn_index = game_get_player_on_turn_index(config->game);
   const Rack *player_rack =
@@ -1831,16 +2893,16 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
     if (commit_pos_arg_3) {
       error_stack_push(
           error_stack, ERROR_STATUS_COMMIT_EXTRANEOUS_ARG,
-          get_formatted_string(
-              "extraneous argument '%s' provided when committing move by index",
-              commit_pos_arg_3));
+          get_formatted_string("extraneous argument '%s' provided when "
+                               "committing move by index",
+                               commit_pos_arg_3));
       return;
     }
-    int move_list_count = 0;
+    int num_moves = 0;
     if (config->move_list) {
-      move_list_count = move_list_get_count(config->move_list);
+      num_moves = move_list_get_count(config->move_list);
     }
-    if (move_list_count == 0) {
+    if (num_moves == 0) {
       error_stack_push(
           error_stack, ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE,
           get_formatted_string(
@@ -1848,12 +2910,11 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
               commit_pos_arg_1));
       return;
     }
-    // If no second arg is provided and the first arg is all digits, the digits
-    // represent the rank of the move to commit.
+    // If no second arg is provided and the first arg is all digits, the
+    // digits represent the rank of the move to commit.
 
     int commit_move_index;
-    string_to_int_or_push_error("move index", commit_pos_arg_1, 1,
-                                move_list_count,
+    string_to_int_or_push_error("move index", commit_pos_arg_1, 1, num_moves,
                                 ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE,
                                 &commit_move_index, error_stack);
     if (!error_stack_is_empty(error_stack)) {
@@ -1861,7 +2922,22 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
     }
     // Convert from 1-indexed user input to 0-indexed internal representation
     commit_move_index--;
-    move_copy(&move, move_list_get_move(config->move_list, commit_move_index));
+    // If there are valid sim results, prefer to use them for the move index
+    // lookup.
+    if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
+      const SimResults *sim_results = config->sim_results;
+      const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
+      if (num_simmed_plays != num_moves) {
+        log_fatal("encountered unexpected discrepancy between number of "
+                  "generated plays (%d) and the number of simmed plays (%d)\n",
+                  num_moves, num_simmed_plays);
+      }
+      sim_results_get_nth_best_move(sim_results, commit_move_index, &move);
+    } else {
+      move_copy(&move,
+                move_list_get_move(config->move_list, commit_move_index));
+    }
+
     if (move_get_type(&move) != GAME_EVENT_EXCHANGE && commit_pos_arg_2) {
       error_stack_push(
           error_stack, ERROR_STATUS_COMMIT_EXTRANEOUS_ARG,
@@ -1943,7 +3019,10 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
                         0, error_stack);
 }
 
-char *impl_commit(Config *config, ErrorStack *error_stack) {
+char *impl_commit_with_pos_args(Config *config, ErrorStack *error_stack,
+                                const char *commit_pos_arg_1,
+                                const char *commit_pos_arg_2,
+                                const char *commit_pos_arg_3) {
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
                      string_duplicate("cannot commit a move without lexicon"));
@@ -1957,7 +3036,15 @@ char *impl_commit(Config *config, ErrorStack *error_stack) {
 
   config_backup_game_and_history(config);
 
-  parse_commit(config, move_string_builder, &vms, error_stack);
+  const bool bag_empty_before_commit = bag_is_empty(game_get_bag(config->game));
+  const int noncommit_player_index =
+      1 - game_get_player_on_turn_index(config->game);
+  Rack noncommit_player_rack;
+  rack_copy(&noncommit_player_rack, player_get_rack(game_get_player(
+                                        config->game, noncommit_player_index)));
+
+  parse_commit(config, move_string_builder, &vms, error_stack, commit_pos_arg_1,
+               commit_pos_arg_2, commit_pos_arg_3);
 
   string_builder_destroy(move_string_builder);
   validated_moves_destroy(vms);
@@ -1967,23 +3054,85 @@ char *impl_commit(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
 
-  // FIXME: mark all results as outdated here
-  move_list_reset(config->move_list);
+  if (bag_empty_before_commit) {
+    return_rack_to_bag(config->game, 0);
+    return_rack_to_bag(config->game, 1);
+    draw_rack_from_bag(config->game, noncommit_player_index,
+                       &noncommit_player_rack);
+    draw_to_full_rack(config->game, 1 - noncommit_player_index);
+  }
 
   return empty_string();
+}
+
+char *impl_commit(Config *config, ErrorStack *error_stack) {
+  const char *commit_pos_arg_1 =
+      config_get_parg_value(config, ARG_TOKEN_COMMIT, 0);
+  const char *commit_pos_arg_2 =
+      config_get_parg_value(config, ARG_TOKEN_COMMIT, 1);
+  const char *commit_pos_arg_3 =
+      config_get_parg_value(config, ARG_TOKEN_COMMIT, 2);
+  return impl_commit_with_pos_args(config, error_stack, commit_pos_arg_1,
+                                   commit_pos_arg_2, commit_pos_arg_3);
 }
 
 void execute_commit(Config *config, ErrorStack *error_stack) {
   char *result = impl_commit(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
 
 char *str_api_commit(Config *config, ErrorStack *error_stack) {
   return impl_commit(config, error_stack);
+}
+
+// Top commit
+
+char *impl_top_commit(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot generate moves without lexicon"));
+    return empty_string();
+  }
+
+  config_init_game(config);
+
+  const char *rack_str = config_get_parg_value(config, ARG_TOKEN_TOP_COMMIT, 0);
+  if (rack_str) {
+    impl_set_rack_internal(config, rack_str, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return empty_string();
+    }
+    impl_move_gen_override_record_type(config, MOVE_RECORD_BEST);
+  } else if (!config->move_list ||
+             move_list_get_count(config->move_list) == 0) {
+    const Rack *player_rack = player_get_rack(game_get_player(
+        config->game, game_get_player_on_turn_index(config->game)));
+    if (rack_is_empty(player_rack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_COMMIT_EMPTY_RACK,
+          string_duplicate("cannot generate best play with an empty rack"));
+      return empty_string();
+    }
+    impl_move_gen_override_record_type(config, MOVE_RECORD_BEST);
+  }
+  return impl_commit_with_pos_args(config, error_stack, "1", NULL, NULL);
+}
+
+void execute_top_commit(Config *config, ErrorStack *error_stack) {
+  char *result = impl_top_commit(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+    execute_show_game(config, error_stack);
+  }
+  free(result);
+}
+
+char *str_api_top_commit(Config *config, ErrorStack *error_stack) {
+  return impl_top_commit(config, error_stack);
 }
 
 // Challenge
@@ -2079,7 +3228,7 @@ void execute_challenge(Config *config, ErrorStack *error_stack) {
   char *result = impl_challenge(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
@@ -2149,7 +3298,7 @@ void execute_unchallenge(Config *config, ErrorStack *error_stack) {
   char *result = impl_unchallenge(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
@@ -2232,30 +3381,30 @@ char *impl_overtime(Config *config, ErrorStack *error_stack) {
     if (cumulative_score == EQUITY_INITIAL_VALUE) {
       error_stack_push(
           error_stack, ERROR_STATUS_TIME_PENALTY_NO_PREVIOUS_CUMULATIVE_SCORE,
-          get_formatted_string(
-              "no prior game event has a cumulative score for player '%s' when "
-              "applying time panelty",
-              player_nickname));
-      return empty_string();
-    }
-    const Equity overtime_penalty = int_to_equity(overtime_penalty_int);
-    game_event_set_player_index(time_penalty_event, player_index);
-    game_event_set_type(time_penalty_event, GAME_EVENT_TIME_PENALTY);
-    game_event_set_cgp_move_string(time_penalty_event, NULL);
-    game_event_set_score_adjustment(time_penalty_event, overtime_penalty);
-    // Add the overtime penalty since the value is already negative
-    game_event_set_cumulative_score(time_penalty_event,
-                                    cumulative_score + overtime_penalty);
-    game_event_set_move_score(time_penalty_event, 0);
+          get_formatted_string("no prior game event has a cumulative score "
+                               "for player '%s' when "
+                               "applying time panelty",
+                               player_nickname));
+    } else {
+      const Equity overtime_penalty = int_to_equity(overtime_penalty_int);
+      game_event_set_player_index(time_penalty_event, player_index);
+      game_event_set_type(time_penalty_event, GAME_EVENT_TIME_PENALTY);
+      game_event_set_cgp_move_string(time_penalty_event, NULL);
+      game_event_set_score_adjustment(time_penalty_event, overtime_penalty);
+      // Add the overtime penalty since the value is already negative
+      game_event_set_cumulative_score(time_penalty_event,
+                                      cumulative_score + overtime_penalty);
+      game_event_set_move_score(time_penalty_event, 0);
 
-    // When adding an overtime event, always advance to the end of the
-    // history so that the game play module can play through the entire
-    // game and catch any duplicate time penalty errors.
-    game_history_goto(config->game_history,
-                      game_history_get_num_events(config->game_history),
-                      error_stack);
-    if (error_stack_is_empty(error_stack)) {
-      config_game_play_events(config, error_stack);
+      // When adding an overtime event, always advance to the end of the
+      // history so that the game play module can play through the entire
+      // game and catch any duplicate time penalty errors.
+      game_history_goto(config->game_history,
+                        game_history_get_num_events(config->game_history),
+                        error_stack);
+      if (error_stack_is_empty(error_stack)) {
+        config_game_play_events(config, error_stack);
+      }
     }
   }
   if (!error_stack_is_empty(error_stack)) {
@@ -2269,7 +3418,7 @@ void execute_overtime(Config *config, ErrorStack *error_stack) {
   char *result = impl_overtime(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
@@ -2294,7 +3443,7 @@ void execute_switch_names(Config *config, ErrorStack *error_stack) {
   char *result = impl_switch_names(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
@@ -2332,7 +3481,7 @@ void execute_next(Config *config, ErrorStack *error_stack) {
   char *result = impl_next(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
@@ -2369,7 +3518,7 @@ void execute_previous(Config *config, ErrorStack *error_stack) {
   char *result = impl_previous(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
@@ -2426,7 +3575,7 @@ void execute_goto(Config *config, ErrorStack *error_stack) {
   char *result = impl_goto(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
@@ -2462,7 +3611,7 @@ void execute_note(Config *config, ErrorStack *error_stack) {
   char *result = impl_note(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
@@ -2671,7 +3820,7 @@ void execute_load_gcg(Config *config, ErrorStack *error_stack) {
   char *result = impl_load_gcg(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
     thread_control_print(config->thread_control, result);
-    execute_show(config, error_stack);
+    execute_show_game(config, error_stack);
   }
   free(result);
 }
@@ -2707,7 +3856,6 @@ void config_load_parsed_args(Config *config,
   }
 
   ParsedArg *current_parg = NULL;
-  arg_token_t current_arg_token;
   int current_value_index = 0;
 
   for (int i = 0; i < number_of_input_strs; i++) {
@@ -2740,53 +3888,14 @@ void config_load_parsed_args(Config *config,
         arg_name = input_str;
       }
 
-      bool parg_has_prefix[NUMBER_OF_ARG_TOKENS] = {false};
-      bool is_ambiguous = false;
-      for (int k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
-        if (string_length(arg_name) == 1 && config->pargs[k]->is_hotkey &&
-            arg_name[0] == config->pargs[k]->name[0]) {
-          is_ambiguous = false;
-          current_parg = config->pargs[k];
-          current_arg_token = k;
-          break;
-        }
-        if (has_prefix(arg_name, config->pargs[k]->name)) {
-          parg_has_prefix[k] = true;
-          if (current_parg) {
-            is_ambiguous = true;
-          } else {
-            current_parg = config->pargs[k];
-            current_arg_token = k;
-          }
-        }
-      }
+      arg_token_t current_arg_token =
+          get_token_from_string(config, arg_name, error_stack);
 
-      if (is_ambiguous) {
-        StringBuilder *sb = string_builder_create();
-        string_builder_add_formatted_string(
-            sb, "ambiguous command '%s' could be:", arg_name);
-        for (int k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
-          if (parg_has_prefix[k]) {
-            string_builder_add_formatted_string(sb, " %s,",
-                                                config->pargs[k]->name);
-          }
-        }
-        // Remove the trailing comma
-        string_builder_truncate(sb, string_builder_length(sb) - 1);
-        error_stack_push(error_stack,
-                         ERROR_STATUS_CONFIG_LOAD_AMBIGUOUS_COMMAND,
-                         string_builder_dump(sb, NULL));
-        string_builder_destroy(sb);
+      if (!error_stack_is_empty(error_stack)) {
         return;
       }
 
-      if (!current_parg) {
-        error_stack_push(
-            error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
-            get_formatted_string("unrecognized command or argument '%s'",
-                                 arg_name));
-        return;
-      }
+      current_parg = config->pargs[current_arg_token];
 
       if (current_parg->num_set_values > 0) {
         error_stack_push(
@@ -2796,7 +3905,7 @@ void config_load_parsed_args(Config *config,
         return;
       }
 
-      if (current_parg->exec_func != execute_fatal) {
+      if (current_parg->is_command) {
         if (i > 0) {
           error_stack_push(error_stack,
                            ERROR_STATUS_CONFIG_LOAD_MISPLACED_COMMAND,
@@ -2931,8 +4040,6 @@ void config_load_sampling_rule(Config *config, const char *sampling_rule_str,
   } else if (has_iprefix(sampling_rule_str,
                          BAI_SAMPLING_RULE_TOP_TWO_IDS_STRING)) {
     config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
-  } else if (has_iprefix(sampling_rule_str, BAI_SAMPLING_RULE_TOP_TWO_STRING)) {
-    config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO;
   } else {
     error_stack_push(error_stack,
                      ERROR_STATUS_CONFIG_LOAD_MALFORMED_SAMPLING_RULE,
@@ -2949,9 +4056,6 @@ void string_builder_add_sampling_rule(StringBuilder *sb,
     break;
   case BAI_SAMPLING_RULE_TOP_TWO_IDS:
     string_builder_add_string(sb, BAI_SAMPLING_RULE_TOP_TWO_IDS_STRING);
-    break;
-  case BAI_SAMPLING_RULE_TOP_TWO:
-    string_builder_add_string(sb, BAI_SAMPLING_RULE_TOP_TWO_STRING);
     break;
   }
 }
@@ -3235,7 +4339,8 @@ void config_load_lexicon_dependent_data(Config *config,
   }
 
   // Determine the status of the wmp for both players
-  // Start by assuming we are just using whatever the existing wmp settings are
+  // Start by assuming we are just using whatever the existing wmp settings
+  // are
   bool p1_wmp_use_when_available = players_data_get_use_when_available(
       config->players_data, PLAYERS_DATA_TYPE_WMP, 0);
   bool p2_wmp_use_when_available = players_data_get_use_when_available(
@@ -3434,9 +4539,16 @@ void config_load_lexicon_dependent_data(Config *config,
             ld_create(config->data_paths, updated_ld_name, error_stack);
         if (error_stack_is_empty(error_stack)) {
           config->ld_changed = true;
+          config_reset_move_list_and_invalidate_sim_results(config);
+          inference_results_set_valid_for_current_game_state(
+              config->inference_results, false);
+          endgame_results_set_valid_for_current_game_state(
+              config->endgame_results, false);
         }
       }
-      autoplay_results_set_ld(config->autoplay_results, config->ld);
+      if (error_stack_is_empty(error_stack)) {
+        autoplay_results_set_ld(config->autoplay_results, config->ld);
+      }
     }
   }
   free(updated_ld_name);
@@ -3498,14 +4610,20 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_int(config, ARG_TOKEN_MAX_ITERATIONS, 1, INT_MAX,
-                  &config->max_iterations, error_stack);
+  config_load_int(config, ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS, 1, INT_MAX,
+                  &config->max_num_display_plays, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
 
-  config_load_int(config, ARG_TOKEN_MIN_PLAY_ITERATIONS, 2, INT_MAX,
-                  &config->min_play_iterations, error_stack);
+  config_load_uint64(config, ARG_TOKEN_MAX_ITERATIONS, 1,
+                     &config->max_iterations, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_uint64(config, ARG_TOKEN_MIN_PLAY_ITERATIONS, 1,
+                     &config->min_play_iterations, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -3522,9 +4640,8 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_int(config, ARG_TOKEN_TIME_LIMIT, 0, INT_MAX,
-                  &config->time_limit_seconds, error_stack);
-
+  config_load_uint64(config, ARG_TOKEN_TIME_LIMIT, 0,
+                     &config->time_limit_seconds, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -3544,12 +4661,11 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   }
 
   const char *new_eq_margin_inference_double =
-      config_get_parg_value(config, ARG_TOKEN_EQ_MARGIN_INFERENCE, 0);
+      config_get_parg_value(config, ARG_TOKEN_INFERENCE_MARGIN, 0);
   if (new_eq_margin_inference_double) {
     double eq_margin_inference_double = 0;
-    config_load_double(config, ARG_TOKEN_EQ_MARGIN_INFERENCE, 0,
-                       EQUITY_MAX_DOUBLE, &eq_margin_inference_double,
-                       error_stack);
+    config_load_double(config, ARG_TOKEN_INFERENCE_MARGIN, 0, EQUITY_MAX_DOUBLE,
+                       &eq_margin_inference_double, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
@@ -3558,11 +4674,11 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   }
 
   const char *new_eq_margin_movegen =
-      config_get_parg_value(config, ARG_TOKEN_EQ_MARGIN_MOVEGEN, 0);
+      config_get_parg_value(config, ARG_TOKEN_MOVEGEN_MARGIN, 0);
   if (new_eq_margin_movegen) {
     double eq_margin_movegen = NAN;
-    config_load_double(config, ARG_TOKEN_EQ_MARGIN_MOVEGEN, 0,
-                       EQUITY_MAX_DOUBLE, &eq_margin_movegen, error_stack);
+    config_load_double(config, ARG_TOKEN_MOVEGEN_MARGIN, 0, EQUITY_MAX_DOUBLE,
+                       &eq_margin_movegen, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
@@ -3836,7 +4952,8 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
 
   // Seed
 
-  config_load_uint64(config, ARG_TOKEN_RANDOM_SEED, &config->seed, error_stack);
+  config_load_uint64(config, ARG_TOKEN_RANDOM_SEED, 0, &config->seed,
+                     error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -4024,8 +5141,7 @@ void execute_move_gen(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  print_ucgi_static_moves(config->game, config->move_list,
-                          config->thread_control);
+  execute_show_moves_or_sim_results(config, error_stack);
 }
 
 char *str_api_move_gen(Config *config, ErrorStack *error_stack) {
@@ -4033,11 +5149,15 @@ char *str_api_move_gen(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
-  return ucgi_static_moves(config->game, config->move_list);
+  return impl_show_moves_or_sim_results(config, error_stack);
 }
 
 void execute_sim(Config *config, ErrorStack *error_stack) {
   impl_sim(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  execute_show_moves_or_sim_results(config, error_stack);
 }
 
 char *str_api_sim(Config *config, ErrorStack *error_stack) {
@@ -4045,8 +5165,25 @@ char *str_api_sim(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
+void execute_gen_and_sim(Config *config, ErrorStack *error_stack) {
+  impl_gen_and_sim(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  execute_show_moves_or_sim_results(config, error_stack);
+}
+
+char *str_api_gen_and_sim(Config *config, ErrorStack *error_stack) {
+  impl_gen_and_sim(config, error_stack);
+  return empty_string();
+}
+
 void execute_infer(Config *config, ErrorStack *error_stack) {
   impl_infer(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  execute_show_inference(config, error_stack);
 }
 
 char *str_api_infer(Config *config, ErrorStack *error_stack) {
@@ -4056,6 +5193,10 @@ char *str_api_infer(Config *config, ErrorStack *error_stack) {
 
 void execute_endgame(Config *config, ErrorStack *error_stack) {
   impl_endgame(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  execute_show_endgame(config, error_stack);
 }
 
 char *str_api_endgame(Config *config, ErrorStack *error_stack) {
@@ -4099,10 +5240,21 @@ char *str_api_create_data(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
-void config_create_default_internal(Config *config, ErrorStack *error_stack,
-                                    const char *data_paths) {
+Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
+  Config *config = calloc_or_die(1, sizeof(Config));
+  // Set the values specified by the args first
+  if (!config_args || !config_args->data_paths) {
+    config->data_paths = string_duplicate(DEFAULT_DATA_PATHS);
+  } else {
+    config->data_paths = string_duplicate(config_args->data_paths);
+  }
+  if (!config_args || !config_args->settings_filename) {
+    config->settings_filename = string_duplicate(DEFAULT_SETTINGS_FILENAME);
+  } else {
+    config->settings_filename =
+        string_duplicate(config_args->settings_filename);
+  }
   // Attempt to load fields that might fail first
-  config->data_paths = string_duplicate(data_paths);
   config->board_layout =
       board_layout_create_default(config->data_paths, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -4110,7 +5262,7 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
         error_stack, ERROR_STATUS_CONFIG_LOAD_BOARD_LAYOUT_ERROR,
         string_duplicate(
             "encountered an error loading the default board layout"));
-    return;
+    return NULL;
   }
 
   config->win_pcts =
@@ -4120,35 +5272,44 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
         error_stack, ERROR_STATUS_CONFIG_LOAD_WIN_PCT_ERROR,
         string_duplicate(
             "encountered an error loading the default win percentage file"));
-    return;
+    return NULL;
   }
 
   // Command parsed from string input
 #define cmd(token, name, n_req, n_val, func, stat, hotkey)                     \
   parsed_arg_create(config, token, name, n_req, n_val, execute_##func,         \
-                    str_api_##func, status_##stat, hotkey)
+                    str_api_##func, status_##stat, hotkey, true)
 
   // Non-command arg
 #define arg(token, name, n_req, n_val)                                         \
   parsed_arg_create(config, token, name, n_req, n_val, execute_fatal,          \
-                    str_api_fatal, status_generic, false)
+                    str_api_fatal, status_generic, false, false)
 
+  cmd(ARG_TOKEN_HELP, "help", 0, 1, help, generic, false);
   cmd(ARG_TOKEN_SET, "setoptions", 0, 0, noop, generic, false);
   cmd(ARG_TOKEN_CGP, "cgp", 4, 4, load_cgp, generic, false);
   cmd(ARG_TOKEN_LOAD, "load", 1, 1, load_gcg, generic, false);
   cmd(ARG_TOKEN_NEW_GAME, "newgame", 0, 2, new_game, generic, false);
   cmd(ARG_TOKEN_EXPORT, "export", 0, 1, export, generic, true);
   cmd(ARG_TOKEN_COMMIT, "commit", 1, 3, commit, generic, true);
+  cmd(ARG_TOKEN_TOP_COMMIT, "tcommit", 0, 1, top_commit, generic, true);
   cmd(ARG_TOKEN_CHALLENGE, "challenge", 0, 1, challenge, generic, false);
   cmd(ARG_TOKEN_UNCHALLENGE, "unchallenge", 0, 1, unchallenge, generic, false);
   cmd(ARG_TOKEN_OVERTIME, "overtimepenalty", 2, 2, overtime, generic, false);
   cmd(ARG_TOKEN_SWITCH_NAMES, "switchnames", 0, 0, switch_names, generic,
       false);
-  cmd(ARG_TOKEN_SHOW, "show", 0, 0, show, generic, true);
+  cmd(ARG_TOKEN_SHOW_GAME, "shgame", 0, 0, show_game, generic, true);
+  cmd(ARG_TOKEN_SHOW_MOVES, "shmoves", 0, 1, show_moves_or_sim_results, generic,
+      false);
+  cmd(ARG_TOKEN_SHOW_INFERENCE, "shinference", 0, 1, show_inference, generic,
+      false);
+  cmd(ARG_TOKEN_SHOW_ENDGAME, "shendgame", 0, 0, show_endgame, generic, false);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic, true);
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic, true);
   cmd(ARG_TOKEN_GEN, "generate", 0, 0, move_gen, generic, true);
   cmd(ARG_TOKEN_SIM, "simulate", 0, 1, sim, sim, false);
+  cmd(ARG_TOKEN_GEN_AND_SIM, "gsimulate", 0, 1, gen_and_sim, gen_and_sim,
+      false);
   cmd(ARG_TOKEN_INFER, "infer", 0, 5, infer, generic, false);
   cmd(ARG_TOKEN_ENDGAME, "endgame", 0, 0, endgame, generic, false);
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, generic, false);
@@ -4185,12 +5346,13 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   arg(ARG_TOKEN_PLIES, "plies", 1, 1);
   arg(ARG_TOKEN_ENDGAME_PLIES, "eplies", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1);
+  arg(ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS, "maxnumdplays", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_SMALL_PLAYS, "numsmallplays", 1, 1);
   arg(ARG_TOKEN_MAX_ITERATIONS, "iterations", 1, 1);
   arg(ARG_TOKEN_MIN_PLAY_ITERATIONS, "minplayiterations", 1, 1);
   arg(ARG_TOKEN_STOP_COND_PCT, "scondition", 1, 1);
-  arg(ARG_TOKEN_EQ_MARGIN_INFERENCE, "equitymargin", 1, 1);
-  arg(ARG_TOKEN_EQ_MARGIN_MOVEGEN, "maxequitydifference", 1, 1);
+  arg(ARG_TOKEN_INFERENCE_MARGIN, "imargin", 1, 1);
+  arg(ARG_TOKEN_MOVEGEN_MARGIN, "mmargin", 1, 1);
   arg(ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1);
   arg(ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1);
   arg(ARG_TOKEN_SIM_WITH_INFERENCE, "sinfer", 1, 1);
@@ -4219,29 +5381,45 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
 
 #undef cmd
 #undef arg
+
+  // Set shortest disambiguous command hints
+  Trie *trie = trie_create();
+  for (size_t i = 0; i < NUMBER_OF_ARG_TOKENS; i++) {
+    const char *name = config->pargs[i]->name;
+    trie_add_word(trie, name);
+    config->pargs[i]->shortest_unambiguous_name = string_duplicate(name);
+  }
+  for (size_t i = 0; i < NUMBER_OF_ARG_TOKENS; i++) {
+    const int su_index =
+        trie_get_shortest_unambiguous_index(trie, config->pargs[i]->name);
+    config->pargs[i]->shortest_unambiguous_name[su_index] = '\0';
+  }
+  trie_destroy(trie);
+
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
-  config->exec_mode = EXEC_MODE_SYNC;
+  config->exec_mode = EXEC_MODE_ASYNC;
   config->bingo_bonus = DEFAULT_BINGO_BONUS;
   config->challenge_bonus = DEFAULT_CHALLENGE_BONUS;
-  config->num_plays = DEFAULT_MOVE_LIST_CAPACITY;
+  config->num_plays = 100;
+  config->max_num_display_plays = 15;
   config->num_small_plays = DEFAULT_SMALL_MOVE_LIST_CAPACITY;
-  config->plies = 2;
+  config->plies = 5;
   config->endgame_plies = 6;
-  config->eq_margin_inference = 0;
-  config->eq_margin_movegen = int_to_equity(10);
-  config->min_play_iterations = 100;
-  config->max_iterations = 5000;
+  config->eq_margin_inference = int_to_equity(5);
+  config->eq_margin_movegen = int_to_equity(5);
+  config->min_play_iterations = 500;
+  config->max_iterations = 1000000000000;
   config->stop_cond_pct = 99;
   config->time_limit_seconds = 0;
-  config->num_threads = 1;
+  config->num_threads = get_num_cores();
   config->print_interval = 0;
   config->seed = ctime_get_current_time();
   config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
   config->threshold = BAI_THRESHOLD_GK16;
   config->use_game_pairs = false;
   config->use_small_plays = false;
-  config->human_readable = false;
+  config->human_readable = true;
   config->sim_with_inference = false;
   config->print_boards = false;
   config->print_on_finish = false;
@@ -4264,16 +5442,10 @@ void config_create_default_internal(Config *config, ErrorStack *error_stack,
   config->autoplay_results = autoplay_results_create();
   config->conversion_results = conversion_results_create();
   config->tt_fraction_of_mem = 0.25;
-  config->game_string_options = game_string_options_create_default();
+  config->game_string_options = game_string_options_create_pretty();
 
   autoplay_results_set_players_data(config->autoplay_results,
                                     config->players_data);
-}
-
-Config *config_create_default_with_data_paths(ErrorStack *error_stack,
-                                              const char *data_paths) {
-  Config *config = calloc_or_die(1, sizeof(Config));
-  config_create_default_internal(config, error_stack, data_paths);
   return config;
 }
 
@@ -4301,6 +5473,7 @@ void config_destroy(Config *config) {
   autoplay_results_destroy(config->autoplay_results);
   conversion_results_destroy(config->conversion_results);
   game_string_options_destroy(config->game_string_options);
+  free(config->settings_filename);
   free(config->data_paths);
   free(config);
 }
@@ -4353,12 +5526,14 @@ void config_add_settings_to_string_builder(const Config *config,
   for (arg_token_t arg_token = 0; arg_token < NUMBER_OF_ARG_TOKENS;
        arg_token++) {
     switch (arg_token) {
+    case ARG_TOKEN_HELP:
     case ARG_TOKEN_SET:
     case ARG_TOKEN_CGP:
     case ARG_TOKEN_MOVES:
     case ARG_TOKEN_RACK:
     case ARG_TOKEN_GEN:
     case ARG_TOKEN_SIM:
+    case ARG_TOKEN_GEN_AND_SIM:
     case ARG_TOKEN_INFER:
     case ARG_TOKEN_ENDGAME:
     case ARG_TOKEN_AUTOPLAY:
@@ -4369,11 +5544,15 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_NEW_GAME:
     case ARG_TOKEN_EXPORT:
     case ARG_TOKEN_COMMIT:
+    case ARG_TOKEN_TOP_COMMIT:
     case ARG_TOKEN_CHALLENGE:
     case ARG_TOKEN_UNCHALLENGE:
     case ARG_TOKEN_OVERTIME:
     case ARG_TOKEN_SWITCH_NAMES:
-    case ARG_TOKEN_SHOW:
+    case ARG_TOKEN_SHOW_GAME:
+    case ARG_TOKEN_SHOW_MOVES:
+    case ARG_TOKEN_SHOW_INFERENCE:
+    case ARG_TOKEN_SHOW_ENDGAME:
     case ARG_TOKEN_NEXT:
     case ARG_TOKEN_PREVIOUS:
     case ARG_TOKEN_GOTO:
@@ -4490,34 +5669,38 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->num_plays);
       break;
+    case ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->max_num_display_plays);
+      break;
     case ARG_TOKEN_NUMBER_OF_SMALL_PLAYS:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->num_small_plays);
       break;
     case ARG_TOKEN_MAX_ITERATIONS:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->max_iterations);
+      config_add_uint64_setting_to_string_builder(config, sb, arg_token,
+                                                  config->max_iterations);
       break;
     case ARG_TOKEN_STOP_COND_PCT:
       config_add_double_setting_to_string_builder(config, sb, arg_token,
                                                   config->stop_cond_pct);
       break;
-    case ARG_TOKEN_EQ_MARGIN_INFERENCE:
+    case ARG_TOKEN_INFERENCE_MARGIN:
       if (config->eq_margin_inference != 0) {
         config_add_double_setting_to_string_builder(
             config, sb, arg_token,
             equity_to_double(config->eq_margin_inference));
       }
       break;
-    case ARG_TOKEN_EQ_MARGIN_MOVEGEN:
+    case ARG_TOKEN_MOVEGEN_MARGIN:
       if (config->eq_margin_movegen != 0) {
         config_add_double_setting_to_string_builder(
             config, sb, arg_token, equity_to_double(config->eq_margin_movegen));
       }
       break;
     case ARG_TOKEN_MIN_PLAY_ITERATIONS:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->min_play_iterations);
+      config_add_uint64_setting_to_string_builder(config, sb, arg_token,
+                                                  config->min_play_iterations);
       break;
     case ARG_TOKEN_USE_GAME_PAIRS:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
@@ -4543,8 +5726,8 @@ void config_add_settings_to_string_builder(const Config *config,
       break;
     case ARG_TOKEN_RANDOM_SEED:
       // Do not save the seed in the settings.
-      // The seed should be explicitly set by the user if they want to reproduce
-      // certain behaviors.
+      // The seed should be explicitly set by the user if they want to
+      // reproduce certain behaviors.
       break;
     case ARG_TOKEN_NUMBER_OF_THREADS:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
@@ -4564,8 +5747,8 @@ void config_add_settings_to_string_builder(const Config *config,
                                                   config->tt_fraction_of_mem);
       break;
     case ARG_TOKEN_TIME_LIMIT:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->time_limit_seconds);
+      config_add_uint64_setting_to_string_builder(config, sb, arg_token,
+                                                  config->time_limit_seconds);
       break;
     case ARG_TOKEN_SAMPLING_RULE:
       string_builder_add_formatted_string(sb, " -%s ",
@@ -4642,8 +5825,4 @@ void config_add_settings_to_string_builder(const Config *config,
       break;
     }
   }
-  string_builder_add_formatted_string(
-      sb, "\np1 %s\np2 %s",
-      game_history_player_get_name(config->game_history, 0),
-      game_history_player_get_name(config->game_history, 1));
 }

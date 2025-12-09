@@ -127,7 +127,7 @@ void test_validated_move_errors(void) {
       game, ION_OPENING_CGP, "8A.AERATINGS", 0, false, false, false,
       ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_BOARD_MISMATCH);
   assert_validated_move_error(
-      game, ION_OPENING_CGP, "h8.QAT", 0, false, true, false,
+      game, ION_OPENING_CGP, "h8.COT.ABCDEFO", 0, false, true, true,
       ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_BOARD_MISMATCH);
   assert_validated_move_error(
       game, EMPTY_CGP, "1A.QAT", 0, false, true, false,

@@ -1756,6 +1756,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->board_number_of_tiles_played = board_get_tiles_played(gen->board);
   rack_copy(&gen->opponent_rack, player_get_rack(opponent));
   rack_copy(&gen->player_rack, player_get_rack(player));
+  move_list_set_rack(move_list, &gen->player_rack);
   rack_set_dist_size(&gen->leave, ld_get_size(&gen->ld));
   wmp_move_gen_init(&gen->wmp_move_gen, &gen->ld, &gen->player_rack,
                     player_get_wmp(player));

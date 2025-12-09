@@ -2,6 +2,7 @@
 
 #include "../def/board_defs.h"
 #include "../def/game_defs.h"
+#include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/bag.h"
@@ -14,10 +15,9 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
-#include "../ent/thread_control.h"
+#include "../ent/validated_move.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "bag_string.h"
 #include "equity_string.h"
 #include "letter_distribution_string.h"
 #include "move_string.h"
@@ -26,13 +26,19 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 // Display formatting constants
 enum {
-  PLAYER_NAME_DISPLAY_WIDTH = 25,
-  RACK_DISPLAY_WIDTH = RACK_SIZE + 3,
+  RACK_DISPLAY_WIDTH = RACK_SIZE + 2,
   ASCII_UPPERCASE_A = 65,
+  UNSEEN_LETTER_ROWS = 5,
+  MIN_UNSEEN_LETTERS_PER_ROW = 20,
+  MAX_MOVES = 20,
+  UNSEEN_START_ROW = 1,
+  GAME_EVENT_START_ROW = 10,
+  FINAL_PASS_PROMPT_ROW = BOARD_DIM - 1,
 };
 
 bool should_print_escape_codes(const GameStringOptions *game_string_options) {
@@ -90,27 +96,28 @@ void string_builder_add_player_row(const LetterDistribution *ld,
                                    const GameStringOptions *game_string_options,
                                    const char *player_name,
                                    StringBuilder *game_string,
-                                   bool player_on_turn) {
-  const char *player_on_turn_marker =
-      use_ascii_on_turn_marker(game_string_options) ? "-> " : "  ➤";
-  const char *player_off_turn_marker = "   ";
-  const char *player_marker = player_on_turn_marker;
-  if (!player_on_turn) {
-    player_marker = player_off_turn_marker;
+                                   size_t player_name_max_length,
+                                   bool player_on_turn, bool game_over) {
+
+  const char *player_marker = " ";
+  if (player_on_turn && !game_over) {
+    player_marker = use_ascii_on_turn_marker(game_string_options) ? ">" : "➤";
   }
 
-  if (player_on_turn && should_print_escape_codes(game_string_options)) {
+  if (player_on_turn && should_print_escape_codes(game_string_options) &&
+      !game_over) {
     string_builder_add_player_on_turn_color(game_string, game_string_options);
   }
-  const Rack *player_rack = player_get_rack(player);
-  string_builder_add_formatted_string(
-      game_string, "%s%s%*s", player_marker, player_name,
-      PLAYER_NAME_DISPLAY_WIDTH - string_length(player_name), "");
+
+  string_builder_add_formatted_string(game_string, "%s %-*s", player_marker,
+                                      player_name_max_length + 2, player_name);
+
   if (player_on_turn && should_print_escape_codes(game_string_options) &&
-      game_string_option_has_on_turn_color(game_string_options)) {
+      game_string_option_has_on_turn_color(game_string_options) && !game_over) {
     string_builder_add_color_reset(game_string);
   }
 
+  const Rack *player_rack = player_get_rack(player);
   string_builder_add_rack(game_string, player_rack, ld, false);
   string_builder_add_formatted_string(
       game_string, "%*s%d",
@@ -249,7 +256,7 @@ void string_builder_add_move_with_rank_and_equity(const Game *game,
   const Move *move = move_list_get_move(move_list, move_index);
   const LetterDistribution *ld = game_get_ld(game);
   string_builder_add_formatted_string(game_string, " %d ", move_index + 1);
-  string_builder_add_move(game_string, board, move, ld);
+  string_builder_add_move(game_string, board, move, ld, true);
   string_builder_add_string(game_string, " ");
   string_builder_add_equity(game_string, move_get_equity(move), "%0.2f");
 }
@@ -281,13 +288,8 @@ void string_builder_add_game(const Game *game, const MoveList *move_list,
   const Player *player0 = game_get_player(game, 0);
   const Player *player1 = game_get_player(game, 1);
   const LetterDistribution *ld = game_get_ld(game);
-  int number_of_moves = 0;
-  if (move_list) {
-    number_of_moves = move_list_get_count(move_list);
-  }
-  int player_on_turn_index = game_get_player_on_turn_index(game);
 
-  string_builder_add_string(game_string, "   ");
+  string_builder_add_string(game_string, "\n   ");
 
   for (int i = 0; i < BOARD_DIM; i++) {
     string_builder_add_board_column_header(game_string_options, i, game_string);
@@ -302,77 +304,183 @@ void string_builder_add_game(const Game *game, const MoveList *move_list,
     player2_name = game_history_player_get_name(game_history, 1);
   }
 
+  const size_t player1_name_length = string_length(player1_name);
+  const size_t player2_name_length = string_length(player2_name);
+  size_t player_name_max_length = player1_name_length;
+  if (player2_name_length > player_name_max_length) {
+    player_name_max_length = player2_name_length;
+  }
+
+  int player_on_turn_index = game_get_player_on_turn_index(game);
+  const bool game_is_over =
+      game_get_game_end_reason(game) != GAME_END_REASON_NONE;
   string_builder_add_player_row(ld, player0, game_string_options, player1_name,
-                                game_string, player_on_turn_index == 0);
+                                game_string, player_name_max_length,
+                                player_on_turn_index == 0, game_is_over);
   string_builder_add_string(game_string, "\n");
 
   string_builder_add_board_top_border(game_string_options, game_string);
   string_builder_add_player_row(ld, player1, game_string_options, player2_name,
-                                game_string, player_on_turn_index == 1);
+                                game_string, player_name_max_length,
+                                player_on_turn_index == 1, game_is_over);
   string_builder_add_string(game_string, "\n");
 
+  const int num_bag_letters = bag_get_letters(bag);
+  int letters_per_row =
+      (num_bag_letters + UNSEEN_LETTER_ROWS - 1) / UNSEEN_LETTER_ROWS;
+  if (letters_per_row < MIN_UNSEEN_LETTERS_PER_ROW) {
+    letters_per_row = MIN_UNSEEN_LETTERS_PER_ROW;
+  }
+  int bag_letter_count[MAX_ALPHABET_SIZE];
+  memset(bag_letter_count, 0, sizeof(bag_letter_count));
+  bag_increment_unseen_count(bag, bag_letter_count);
+  MachineLetter bag_letters[MAX_BAG_SIZE];
+
+  int letter_index = 0;
+  for (int i = 0; i < MAX_ALPHABET_SIZE; i++) {
+    for (int j = 0; j < bag_letter_count[i]; j++) {
+      bag_letters[letter_index++] = i;
+    }
+  }
+  letter_index = 0;
+
+  const bool add_game_event =
+      game_history && game_history_get_num_played_events(game_history) > 0;
+
+  int game_event_index = -1;
+  const GameEvent *game_event = NULL;
   for (int i = 0; i < BOARD_DIM; i++) {
     string_builder_add_board_row(ld, board, game_string_options, game_string,
                                  i);
-    if (i == 0) {
-      string_builder_add_string(
-          game_string, " --Tracking-----------------------------------");
-    } else if (i == 1) {
-      string_builder_add_string(game_string, " ");
-      string_builder_add_bag(game_string, bag, ld);
-
-      string_builder_add_formatted_string(game_string, "  %d",
-                                          bag_get_letters(bag));
-
-    } else if (i - 2 < number_of_moves) {
-      string_builder_add_move_with_rank_and_equity(game, move_list, game_string,
-                                                   i - 2);
+    string_builder_add_spaces(game_string, 3);
+    if (i == UNSEEN_START_ROW) {
+      string_builder_add_formatted_string(game_string, "Unseen: (%d)",
+                                          num_bag_letters);
+    } else if (i > UNSEEN_START_ROW + 1 && letter_index < num_bag_letters) {
+      for (int j = 0; j < letters_per_row && letter_index < num_bag_letters;
+           j++) {
+        string_builder_add_user_visible_letter(game_string, ld,
+                                               bag_letters[letter_index++]);
+        string_builder_add_spaces(game_string, 1);
+      }
+    } else if (i == FINAL_PASS_PROMPT_ROW && game_history &&
+               game_history_get_waiting_for_final_pass_or_challenge(
+                   game_history) &&
+               game_history_get_num_events(game_history) ==
+                   game_history_get_num_played_events(game_history)) {
+      string_builder_add_string(game_string,
+                                "Waiting for final pass or challenge...");
+    } else if (add_game_event) {
+      if (i == GAME_EVENT_START_ROW) {
+        game_event_index = game_history_get_num_played_events(game_history) - 1;
+        game_event = game_history_get_event(game_history, game_event_index);
+        string_builder_add_formatted_string(game_string,
+                                            "Event %d:", game_event_index + 1);
+      } else if (i == GAME_EVENT_START_ROW + 1) {
+        string_builder_add_string(
+            game_string,
+            game_history_player_get_name(
+                game_history, game_event_get_player_index(game_event)));
+      } else if (i == GAME_EVENT_START_ROW + 2) {
+        const Rack *player_rack = game_event_get_const_rack(game_event);
+        const GameEvent *previous_game_event = NULL;
+        switch (game_event_get_type(game_event)) {
+        case GAME_EVENT_TILE_PLACEMENT_MOVE:
+          string_builder_add_move(
+              game_string, board,
+              validated_moves_get_move(game_event_get_vms(game_event), 0), ld,
+              true);
+          string_builder_add_string(game_string, " ");
+          string_builder_add_rack(game_string, player_rack, ld, false);
+          break;
+        case GAME_EVENT_PASS:
+          string_builder_add_string(game_string, "(pass) ");
+          string_builder_add_rack(game_string, player_rack, ld, false);
+          break;
+        case GAME_EVENT_EXCHANGE:;
+          Rack exchanged_tiles;
+          rack_set_dist_size_and_reset(&exchanged_tiles, ld_get_size(ld));
+          const Move *move =
+              validated_moves_get_move(game_event_get_vms(game_event), 0);
+          const int num_exch = move_get_tiles_played(move);
+          for (int j = 0; j < num_exch; j++) {
+            rack_add_letter(&exchanged_tiles, move_get_tile(move, j));
+          }
+          string_builder_add_string(game_string, "(exch ");
+          string_builder_add_rack(game_string, &exchanged_tiles, ld, false);
+          string_builder_add_string(game_string, ") ");
+          string_builder_add_rack(game_string, player_rack, ld, false);
+          break;
+        case GAME_EVENT_PHONY_TILES_RETURNED:;
+          previous_game_event =
+              game_history_get_event(game_history, game_event_index - 1);
+          string_builder_add_move(
+              game_string, board,
+              validated_moves_get_move(game_event_get_vms(previous_game_event),
+                                       0),
+              ld, true);
+          string_builder_add_string(game_string, " ");
+          string_builder_add_rack(
+              game_string, game_event_get_const_rack(previous_game_event), ld,
+              false);
+          string_builder_add_string(game_string, " (challenged off)");
+          break;
+        case GAME_EVENT_CHALLENGE_BONUS:;
+          previous_game_event =
+              game_history_get_event(game_history, game_event_index - 1);
+          string_builder_add_move(
+              game_string, board,
+              validated_moves_get_move(game_event_get_vms(previous_game_event),
+                                       0),
+              ld, true);
+          string_builder_add_formatted_string(
+              game_string, " + %d = %d ",
+              equity_to_int(game_event_get_score_adjustment(game_event)),
+              equity_to_int(game_event_get_move_score(previous_game_event)));
+          string_builder_add_rack(
+              game_string, game_event_get_const_rack(previous_game_event), ld,
+              false);
+          break;
+        case GAME_EVENT_END_RACK_POINTS:
+          string_builder_add_rack(game_string, player_rack, ld, false);
+          string_builder_add_formatted_string(
+              game_string, " +%d (end rack points)",
+              equity_to_int(game_event_get_score_adjustment(game_event)));
+          break;
+        case GAME_EVENT_TIME_PENALTY:
+          string_builder_add_formatted_string(
+              game_string, " %d (overtime penalty)",
+              equity_to_int(game_event_get_score_adjustment(game_event)));
+          break;
+        case GAME_EVENT_END_RACK_PENALTY:
+          string_builder_add_rack(game_string, player_rack, ld, false);
+          string_builder_add_formatted_string(
+              game_string, " %d (end rack penalty)",
+              equity_to_int(game_event_get_score_adjustment(game_event)));
+          break;
+        case GAME_EVENT_UNKNOWN:
+          log_fatal("encountered unknown game event type when generating game "
+                    "string\n");
+          break;
+        }
+      }
     }
     string_builder_add_string(game_string, "\n");
   }
-
   string_builder_add_board_bottom_border(game_string_options, game_string);
   string_builder_add_string(game_string, "\n");
-}
-
-char *ucgi_static_moves(const Game *game, const MoveList *move_list) {
-  if (move_list_get_count(move_list) == 0) {
-    return string_duplicate("no moves to print\n");
+  int num_moves_to_display = 0;
+  if (move_list) {
+    num_moves_to_display = move_list_get_count(move_list);
+    if (num_moves_to_display > MAX_MOVES) {
+      num_moves_to_display = MAX_MOVES;
+    }
   }
-  StringBuilder *moves_string_builder = string_builder_create();
-  const LetterDistribution *ld = game_get_ld(game);
-  const Board *board = game_get_board(game);
-
-  MoveList *sorted_move_list = move_list_duplicate(move_list);
-  move_list_sort_moves(sorted_move_list);
-
-  for (int i = 0; i < move_list_get_count(sorted_move_list); i++) {
-    const Move *move = move_list_get_move(sorted_move_list, i);
-    string_builder_add_string(moves_string_builder, "info currmove ");
-    string_builder_add_ucgi_move(moves_string_builder, move, board, ld);
-
-    string_builder_add_formatted_string(moves_string_builder, " sc %d eq ",
-                                        equity_to_int(move_get_score(move)));
-    string_builder_add_equity(moves_string_builder, move_get_equity(move),
-                              "%.3f");
-    string_builder_add_string(moves_string_builder, " it 0\n");
+  for (int i = 0; i < num_moves_to_display; i++) {
+    string_builder_add_move_with_rank_and_equity(game, move_list, game_string,
+                                                 i);
   }
-  string_builder_add_string(moves_string_builder, "bestmove ");
-  string_builder_add_ucgi_move(
-      moves_string_builder, move_list_get_move(sorted_move_list, 0), board, ld);
-  string_builder_add_string(moves_string_builder, "\n");
-  char *ucgi_static_moves_string =
-      string_builder_dump(moves_string_builder, NULL);
-  string_builder_destroy(moves_string_builder);
-  move_list_destroy(sorted_move_list);
-  return ucgi_static_moves_string;
-}
-
-void print_ucgi_static_moves(const Game *game, const MoveList *move_list,
-                             ThreadControl *thread_control) {
-  char *starting_moves_string_pointer = ucgi_static_moves(game, move_list);
-  thread_control_print(thread_control, starting_moves_string_pointer);
-  free(starting_moves_string_pointer);
+  string_builder_add_string(game_string, "\n");
 }
 
 GameStringOptions *game_string_options_create_default(void) {
@@ -384,6 +492,18 @@ GameStringOptions *game_string_options_create_default(void) {
   gso->on_turn_marker = GAME_STRING_ON_TURN_MARKER_ASCII;
   gso->on_turn_color = GAME_STRING_ON_TURN_COLOR_NONE;
   gso->on_turn_score_style = GAME_STRING_ON_TURN_SCORE_NORMAL;
+  return gso;
+}
+
+GameStringOptions *game_string_options_create_pretty(void) {
+  GameStringOptions *gso = malloc_or_die(sizeof(GameStringOptions));
+  gso->board_color = GAME_STRING_BOARD_COLOR_ANSI;
+  gso->board_tile_glyphs = GAME_STRING_BOARD_TILE_GLYPHS_ALT;
+  gso->board_border = GAME_STRING_BOARD_BORDER_BOX_DRAWING;
+  gso->board_column_label = GAME_STRING_BOARD_COLUMN_LABEL_FULLWIDTH;
+  gso->on_turn_marker = GAME_STRING_ON_TURN_MARKER_ARROWHEAD;
+  gso->on_turn_color = GAME_STRING_ON_TURN_COLOR_ANSI_GREEN;
+  gso->on_turn_score_style = GAME_STRING_ON_TURN_SCORE_BOLD;
   return gso;
 }
 

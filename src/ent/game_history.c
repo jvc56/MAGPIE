@@ -327,6 +327,7 @@ void game_history_player_reset_names(GameHistory *history, int player_index,
   free(player->name);
   if (name) {
     player->name = string_duplicate(name);
+    trim_whitespace(player->name);
   } else if (player_index == 0) {
     player->name = string_duplicate(PLAYER_ONE_DEFAULT_NAME);
   } else {
@@ -379,17 +380,27 @@ void string_builder_add_gcg_filename(StringBuilder *sb,
   } else {
     string_builder_add_formatted_string(
         sb, "%s-vs-%s-%d%s", game_history_player_get_nickname(game_history, 0),
-        game_history_player_get_nickname(game_history, 1), i, GCG_EXTENSION);
+        game_history_player_get_nickname(game_history, 1), i + 1,
+        GCG_EXTENSION);
   }
 }
 
 void game_history_set_gcg_filename(GameHistory *game_history,
-                                   const char *user_provided_gcg_filename) {
-  if (user_provided_gcg_filename) {
+                                   const char *new_gcg_filename) {
+  if (new_gcg_filename) {
     // The user has explicitly passed in a GCG filename
     game_history->user_provided_gcg_filename = true;
     free(game_history->gcg_filename);
-    game_history->gcg_filename = string_duplicate(user_provided_gcg_filename);
+
+    if (!has_suffix(GCG_EXTENSION, new_gcg_filename)) {
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_formatted_string(sb, "%s%s", new_gcg_filename,
+                                          GCG_EXTENSION);
+      game_history->gcg_filename = string_builder_dump(sb, NULL);
+      string_builder_destroy(sb);
+    } else {
+      game_history->gcg_filename = string_duplicate(new_gcg_filename);
+    }
     return;
   }
   if (game_history->user_provided_gcg_filename) {
@@ -404,7 +415,7 @@ void game_history_set_gcg_filename(GameHistory *game_history,
                   i < MAX_GCG_FILENAME_ATTEMPTS;
        i++) {
     string_builder_clear(sb);
-    string_builder_add_gcg_filename(sb, game_history, i + 1);
+    string_builder_add_gcg_filename(sb, game_history, i);
   }
   free(game_history->gcg_filename);
   game_history->gcg_filename = string_duplicate(string_builder_peek(sb));
@@ -523,6 +534,10 @@ void game_history_destroy(GameHistory *game_history) {
 }
 
 void game_history_truncate_to_played_events(GameHistory *game_history) {
+  for (int i = game_history->num_played_events; i < game_history->num_events;
+       i++) {
+    game_event_reset(&game_history->events[i]);
+  }
   game_history->num_events = game_history->num_played_events;
 }
 

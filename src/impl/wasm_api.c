@@ -5,7 +5,6 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/validated_move.h"
-#include "../str/game_string.h"
 #include "../str/move_string.h"
 #include "../str/validated_moves_string.h"
 #include "../util/io_util.h"
@@ -38,13 +37,14 @@ void wasm_load_command(const char *cmd) {
 
 void wasm_init_configs(const char *paths) {
   iso_error_stack = error_stack_create();
-  iso_config = config_create_default_with_data_paths(iso_error_stack, paths);
+  ConfigArgs args = {.data_paths = paths, .settings_filename = NULL};
+  iso_config = config_create(&args, iso_error_stack);
   if (!error_stack_is_empty(iso_error_stack)) {
     error_stack_print_and_reset(iso_error_stack);
     return;
   }
   wasm_error_stack = error_stack_create();
-  wasm_config = config_create_default_with_data_paths(wasm_error_stack, paths);
+  wasm_config = config_create(&args, wasm_error_stack);
   if (!error_stack_is_empty(wasm_error_stack)) {
     error_stack_print_and_reset(wasm_error_stack);
     return;
@@ -148,7 +148,9 @@ char *static_evaluation(const char *cgpstr, int num_plays) {
   generate_moves(&args);
 
   // This pointer needs to be freed by the caller:
-  char *val = ucgi_static_moves(game, move_list);
+  char *val =
+      move_list_get_string(move_list, game_get_board(game), game_get_ld(game),
+                           move_list_get_capacity(move_list), true);
   return val;
 }
 
