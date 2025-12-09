@@ -1804,6 +1804,18 @@ void LetterboxWindow::showWordHoverOverlay(const QString& word, bool alignLeft, 
         return;
     }
 
+    // Ignore non-alphabetical content (like unicode symbols, numbers, etc.)
+    bool hasAlpha = false;
+    for (const QChar& ch : word) {
+        if (ch.isLetter()) {
+            hasAlpha = true;
+            break;
+        }
+    }
+    if (!hasAlpha) {
+        return;  // Don't show overlay for non-word content
+    }
+
     // Save current hover state for refreshing on zoom
     currentHoveredWord = word;
     currentHoverAlignLeft = alignLeft;
