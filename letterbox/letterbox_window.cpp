@@ -1237,6 +1237,20 @@ void LetterboxWindow::handleResizeComplete()
         progressCounterLabel->move(x, y);
     }
 
+    // Recalculate bounding boxes for all AlphagramBox widgets after resize
+    for (int i = 0; i < solvedLayout->count(); i++) {
+        QLayoutItem* item = solvedLayout->itemAt(i);
+        if (item && item->widget()) {
+            AlphagramBox* box = qobject_cast<AlphagramBox*>(item->widget());
+            if (box) {
+                // Use a timer to recalculate after the widget has been resized and rendered
+                QTimer::singleShot(0, box, [box]() {
+                    box->calculateBoundingBoxes();
+                });
+            }
+        }
+    }
+
     // Only redraw if scale factor actually changed
     if (oldScaleFactor != scaleFactor && currentIndex < static_cast<int>(alphagrams.size())) {
         updateDisplay();
@@ -1834,11 +1848,10 @@ QString LetterboxWindow::generateSidebarTable(const QString& word)
         return std::get<1>(a) < std::get<1>(b);
     });
 
-    // Wrap table in a centered container div
-    html += "<div style='display: flex; justify-content: center; width: 100%;'>";
-
     // Build HTML table in AlphagramBox style with matching borders and tight cells
-    html += "<table style='border-collapse: collapse; background-color: rgb(50, 50, 50); border: 1px solid rgb(90, 90, 90);'>";
+    // Wrap in centered div
+    html += "<div style='text-align: center;'>";
+    html += "<table style='border-collapse: collapse; background-color: rgb(50, 50, 50); border: 1px solid rgb(90, 90, 90); display: inline-block;'>";
 
     for (const auto& row : rows) {
         QString frontHooks = std::get<0>(row);

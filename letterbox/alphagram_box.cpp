@@ -199,6 +199,19 @@ void AlphagramBox::calculateBoundingBoxes()
         return;
     }
 
+    // Make sure the label has been laid out properly
+    // Qt may initially report small default sizes (like 100x30) before actual layout
+    // A properly laid out label with HTML table content should be at least 120 pixels wide
+    if (tableLabel->width() <= 1 || tableLabel->height() <= 1 ||
+        (tableLabel->width() < 120 && tableLabel->height() < 60)) {
+        qDebug() << "calculateBoundingBoxes: label not laid out yet, width=" << tableLabel->width() << "height=" << tableLabel->height();
+        // Retry after layout is complete
+        QTimer::singleShot(10, this, [this]() {
+            calculateBoundingBoxes();
+        });
+        return;
+    }
+
     // Get the QLabel's actual document for accurate positioning
     // QLabel internally uses a QTextDocument for rich text rendering
     QTextDocument* doc = nullptr;

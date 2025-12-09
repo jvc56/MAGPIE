@@ -44,6 +44,7 @@ public:
     void finalize(int wordSize = 36, int hookSize = 24, int extensionSize = 14, bool showComputeTime = false);
     void clear();
     void setShowHoverDebug(bool show) { showHoverDebug = show; update(); }
+    void calculateBoundingBoxes();  // Public so it can be called on resize
 
 signals:
     void wordHovered(const QString& word, bool alignLeft, bool isHookOrExtension);
@@ -57,7 +58,6 @@ protected:
 
 private:
     void updateHover(const QPoint& pos);
-    void calculateBoundingBoxes();
     void processCellForBoundingBoxes(QTextDocument& doc, QTextTable* table, QTextTableCell& cell,
                                      const WordData& wordData, int row,
                                      bool isFront, const QPoint& labelOffset, bool isMainWord = false);
