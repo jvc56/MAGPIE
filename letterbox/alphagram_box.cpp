@@ -10,6 +10,10 @@
 #include <QTextBlock>
 #include <QTextCursor>
 #include <QTextTable>
+#include <QTextFrame>
+#include <QRegularExpression>
+#include <QTimer>
+#include <QDebug>
 
 AlphagramBox::AlphagramBox(QWidget *parent)
     : QWidget(parent), tableLabel(nullptr),
@@ -169,6 +173,11 @@ void AlphagramBox::finalize(int wordSize, int hookSize, int extensionSize, bool 
     tableLabel->setTextFormat(Qt::RichText);
 
     layout->addWidget(tableLabel);
+
+    // Calculate bounding boxes after the label is added and sized
+    QTimer::singleShot(0, this, [this]() {
+        calculateBoundingBoxes();
+    });
 }
 
 void AlphagramBox::clear()
@@ -179,6 +188,236 @@ void AlphagramBox::clear()
         tableLabel = nullptr;
     }
     words.clear();
+    boundingBoxes.clear();
+}
+
+void AlphagramBox::calculateBoundingBoxes()
+{
+    boundingBoxes.clear();
+
+    if (!tableLabel || words.empty()) {
+        return;
+    }
+
+    // Get the QLabel's actual document for accurate positioning
+    // QLabel internally uses a QTextDocument for rich text rendering
+    QTextDocument* doc = nullptr;
+
+    // Access the label's internal document if it's using rich text
+    if (tableLabel->textFormat() == Qt::RichText) {
+        // We need to create our own document that matches the label's rendering
+        doc = new QTextDocument();
+        doc->setHtml(tableLabel->text());
+        doc->setDefaultFont(tableLabel->font());
+        doc->setTextWidth(tableLabel->width());
+        doc->setDocumentMargin(0);
+    } else {
+        qDebug() << "calculateBoundingBoxes: label is not using RichText format!";
+        return;
+    }
+
+    // Get the tableLabel's position within the widget
+    QPoint labelOffset = tableLabel->pos();
+
+    // Parse the document structure to find text positions
+    // Move cursor to the beginning and search for the table
+    QTextCursor cursor(doc);
+    cursor.movePosition(QTextCursor::Start);
+
+    // Find the table by iterating through the document
+    QTextTable* table = nullptr;
+    QTextFrame* rootFrame = doc->rootFrame();
+    for (QTextFrame::iterator it = rootFrame->begin(); !it.atEnd(); ++it) {
+        QTextFrame* childFrame = it.currentFrame();
+        if (childFrame) {
+            table = qobject_cast<QTextTable*>(childFrame);
+            if (table) {
+                break;
+            }
+        }
+    }
+
+    if (!table) {
+        qDebug() << "calculateBoundingBoxes: no table found in document!";
+        qDebug() << "  HTML:" << tableLabel->text().left(200);
+        delete doc;
+        return;
+    }
+
+    qDebug() << "calculateBoundingBoxes: found table with" << table->rows() << "rows," << table->columns() << "cols, processing" << words.size() << "words";
+    qDebug() << "  labelOffset:" << labelOffset << "labelSize:" << tableLabel->size() << "docWidth:" << doc->textWidth();
+
+    for (size_t row = 0; row < words.size() && row < static_cast<size_t>(table->rows()); row++) {
+        const WordData& wordData = words[row];
+
+        // Process front hooks/extensions (column 0 if present)
+        int frontCol = -1;
+        int wordCol = -1;
+        int backCol = -1;
+
+        if (hasAnyFrontHooks && hasAnyBackHooks) {
+            frontCol = 0;
+            wordCol = 1;
+            backCol = 2;
+        } else if (hasAnyFrontHooks) {
+            frontCol = 0;
+            wordCol = 1;
+        } else if (hasAnyBackHooks) {
+            wordCol = 0;
+            backCol = 1;
+        } else {
+            wordCol = 0;
+        }
+
+        // Process main word column
+        if (wordCol >= 0) {
+            QTextTableCell cell = table->cellAt(row, wordCol);
+            if (cell.isValid()) {
+                processCellForBoundingBoxes(*doc, table, cell, wordData, row, false, labelOffset, true);
+            }
+        }
+
+        // Process front column (only if this word actually has front hooks/extensions)
+        if (frontCol >= 0 && (!wordData.frontHooks.isEmpty() || !wordData.frontExtensions.isEmpty())) {
+            QTextTableCell cell = table->cellAt(row, frontCol);
+            if (cell.isValid()) {
+                processCellForBoundingBoxes(*doc, table, cell, wordData, row, true, labelOffset, false);
+            }
+        }
+
+        // Process back column (only if this word actually has back hooks/extensions)
+        if (backCol >= 0 && (!wordData.backHooks.isEmpty() || !wordData.backExtensions.isEmpty())) {
+            QTextTableCell cell = table->cellAt(row, backCol);
+            if (cell.isValid()) {
+                processCellForBoundingBoxes(*doc, table, cell, wordData, row, false, labelOffset, false);
+            }
+        }
+    }
+
+    // Debug: output bounding box count and details
+    qDebug() << "calculateBoundingBoxes: calculated" << boundingBoxes.size() << "boxes";
+    for (size_t i = 0; i < boundingBoxes.size() && i < 10; i++) {
+        const auto& bbox = boundingBoxes[i];
+        qDebug() << "  bbox[" << i << "]:" << bbox.text << "->" << bbox.fullWord
+                 << "rect=(" << bbox.rect.x() << "," << bbox.rect.y() << ","
+                 << bbox.rect.width() << "x" << bbox.rect.height() << ")";
+    }
+
+    delete doc;
+}
+
+void AlphagramBox::processCellForBoundingBoxes(QTextDocument& doc, QTextTable* table, QTextTableCell& cell,
+                                                const WordData& wordData, int row,
+                                                bool isFront, const QPoint& labelOffset, bool isMainWord)
+{
+    qDebug() << "processCellForBoundingBoxes: row=" << row << "col=" << cell.column() << "isFront=" << isFront << "isMainWord=" << isMainWord << "wordData.word=" << wordData.word;
+
+    // Get cell's bounding rect
+    QTextCursor cellCursor = cell.firstCursorPosition();
+    QRectF cellRect = doc.documentLayout()->blockBoundingRect(cellCursor.block());
+
+    // Get all the text blocks (divs) in this cell
+    QTextBlock block = cellCursor.block();
+    int cellStart = cell.firstPosition();
+    int cellEnd = cell.lastPosition();
+
+    qDebug() << "  Starting block iteration, block.isValid()=" << block.isValid() << "cellStart=" << cellStart << "cellEnd=" << cellEnd;
+    int blockCount = 0;
+    while (block.isValid() && block.position() >= cellStart && block.position() < cellEnd) {
+        blockCount++;
+        QString blockText = block.text().trimmed();
+        qDebug() << "  Block" << blockCount << "text:" << blockText;
+
+        if (!blockText.isEmpty()) {
+            QRectF blockRect = doc.documentLayout()->blockBoundingRect(block);
+
+            qDebug() << "  blockRect:" << blockRect << "labelOffset:" << labelOffset;
+
+            // Split by spaces to get individual words/extensions
+            QStringList words = blockText.split(' ', Qt::SkipEmptyParts);
+
+            // Use font metrics to calculate individual word positions
+            QFont font = block.charFormat().font();
+            if (font.family().isEmpty()) {
+                font = doc.defaultFont();
+            }
+            QFontMetrics fm(font);
+
+            // Check if text is right-aligned (front hooks/extensions)
+            // For right-aligned text, we need to start from the right edge and work backwards
+            Qt::Alignment alignment = block.blockFormat().alignment();
+            bool isRightAligned = (alignment & Qt::AlignRight) || isFront;
+
+            // Calculate total width of all text in this block
+            int totalTextWidth = fm.horizontalAdvance(blockText);
+
+            qDebug() << "  alignment:" << alignment << "isRightAligned:" << isRightAligned << "totalTextWidth:" << totalTextWidth;
+
+            // Calculate x offset based on cell alignment
+            qreal currentX;
+            if (isRightAligned) {
+                // Start from right edge of block minus total text width
+                currentX = blockRect.right() - totalTextWidth;
+            } else {
+                // Start from left edge of block
+                currentX = blockRect.x();
+            }
+
+            qDebug() << "  currentX:" << currentX;
+
+            // For each word in the block, calculate its individual bounding box
+            for (int i = 0; i < words.size(); i++) {
+                QString word = words[i];
+                QString cleanWord = word;
+                cleanWord.remove("…");
+
+                if (cleanWord.isEmpty()) {
+                    continue;
+                }
+
+                // Skip if this is a hook/extension cell and the word matches the main word
+                // (The main word appears in hook/extension cells but shouldn't be clickable there)
+                if (!isMainWord && cleanWord.compare(wordData.word, Qt::CaseInsensitive) == 0) {
+                    currentX += fm.horizontalAdvance((i < words.size() - 1) ? word + " " : word);
+                    continue;
+                }
+
+                // Calculate width for this specific word (including the space after it)
+                QString wordWithSpace = (i < words.size() - 1) ? word + " " : word;
+                int wordWidth = fm.horizontalAdvance(wordWithSpace);
+                int cleanWordWidth = fm.horizontalAdvance(cleanWord);
+
+                TextBoundingBox bbox;
+                bbox.rect = QRectF(
+                    currentX + labelOffset.x(),
+                    blockRect.y() + labelOffset.y(),
+                    cleanWordWidth,
+                    blockRect.height()
+                );
+                bbox.text = cleanWord;
+                bbox.isMainWord = isMainWord;
+
+                // For main words, fullWord is just the word itself
+                // For hooks/extensions, combine with the base word
+                if (isMainWord) {
+                    bbox.fullWord = cleanWord.toUpper();
+                } else {
+                    bbox.fullWord = isFront ?
+                        cleanWord.toUpper() + wordData.word.toUpper() :
+                        wordData.word.toUpper() + cleanWord.toUpper();
+                }
+
+                bbox.row = row;
+                bbox.isFront = isFront;
+                boundingBoxes.push_back(bbox);
+
+                // Move x position for next word
+                currentX += wordWidth;
+            }
+        }
+
+        block = block.next();
+    }
 }
 
 void AlphagramBox::paintEvent(QPaintEvent *event)
@@ -195,15 +434,42 @@ void AlphagramBox::paintEvent(QPaintEvent *event)
     QPen pen(QColor(90, 90, 90), 1);
     painter.setPen(pen);
     painter.drawRect(rect().adjusted(0, 0, -1, -1));
+
+    // Draw debug overlays if enabled
+    if (showHoverDebug && !boundingBoxes.empty()) {
+        QList<QColor> colors = {
+            QColor(255, 0, 0, 80),     // Red
+            QColor(0, 255, 0, 80),     // Green
+            QColor(0, 0, 255, 80),     // Blue
+            QColor(255, 255, 0, 80),   // Yellow
+            QColor(255, 0, 255, 80),   // Magenta
+            QColor(0, 255, 255, 80),   // Cyan
+        };
+
+        for (size_t i = 0; i < boundingBoxes.size(); i++) {
+            const TextBoundingBox& bbox = boundingBoxes[i];
+            QColor color = colors[i % colors.size()];
+
+            // Highlight the hovered box differently
+            if (static_cast<int>(i) == hoveredBoxIndex) {
+                color.setAlpha(150);  // Make it more opaque
+            }
+
+            painter.fillRect(bbox.rect, color);
+            painter.setPen(Qt::white);
+            painter.drawRect(bbox.rect);
+        }
+    }
 }
 
 void AlphagramBox::mouseMoveEvent(QMouseEvent *event)
 {
     // Always emit debug to show we're receiving events
-    emit hoverDebug(QString("mouseMoveEvent: pos(%1,%2) hasLabel=%3")
+    emit hoverDebug(QString("mouseMoveEvent: pos(%1,%2) hasLabel=%3 bboxCount=%4")
                     .arg(event->pos().x())
                     .arg(event->pos().y())
-                    .arg(tableLabel != nullptr ? "yes" : "no"));
+                    .arg(tableLabel != nullptr ? "yes" : "no")
+                    .arg(boundingBoxes.size()));
 
     if (!tableLabel) {
         return;
@@ -220,181 +486,43 @@ void AlphagramBox::leaveEvent(QEvent *event)
 
 void AlphagramBox::updateHover(const QPoint& pos)
 {
-    if (words.empty() || !tableLabel) {
-        emit hoverDebug("No words or label");
-        return;
-    }
+    // Simple bounding-box based hover detection
+    hoveredBoxIndex = -1;
 
-    // Get the table label's geometry
-    QRect labelRect = tableLabel->geometry();
-
-    // Check if mouse is within the label
-    if (!labelRect.contains(pos)) {
+    if (boundingBoxes.empty()) {
         emit hoverLeft();
         return;
     }
 
-    // Calculate relative position within the label
-    QPoint relPos = pos - labelRect.topLeft();
+    // Check which bounding box contains the mouse
+    for (size_t i = 0; i < boundingBoxes.size(); i++) {
+        if (boundingBoxes[i].rect.contains(pos)) {
+            hoveredBoxIndex = i;
+            const TextBoundingBox& bbox = boundingBoxes[i];
 
-    // Create a QTextDocument from the label's HTML to do hit-testing
-    QTextDocument doc;
-    doc.setHtml(tableLabel->text());
-    doc.setTextWidth(tableLabel->width());
+            emit hoverDebug(QString("bbox[%1]: '%2' -> '%3' row=%4 front=%5 main=%6 pos=(%7,%8)")
+                .arg(i)
+                .arg(bbox.text)
+                .arg(bbox.fullWord)
+                .arg(bbox.row)
+                .arg(bbox.isFront ? "yes" : "no")
+                .arg(bbox.isMainWord ? "yes" : "no")
+                .arg(pos.x())
+                .arg(pos.y()));
 
-    // Hit test to find cursor position at mouse coordinates
-    int cursorPos = doc.documentLayout()->hitTest(relPos, Qt::FuzzyHit);
-
-    if (cursorPos < 0) {
-        emit hoverLeft();
-        return;
-    }
-
-    // Get the cursor and find which table cell we're in
-    QTextCursor cursor(&doc);
-    cursor.setPosition(cursorPos);
-
-    // Get the table at this position
-    QTextTable* table = cursor.currentTable();
-    if (!table) {
-        emit hoverDebug("Not in table");
-        emit hoverLeft();
-        return;
-    }
-
-    // Get the cell at the cursor position
-    QTextTableCell cell = table->cellAt(cursor);
-    if (!cell.isValid()) {
-        emit hoverDebug("Invalid cell");
-        emit hoverLeft();
-        return;
-    }
-
-    int row = cell.row();
-    int col = cell.column();
-    int numCols = table->columns();
-
-    // Get cell content
-    QTextCursor cellCursor = cell.firstCursorPosition();
-    cellCursor.movePosition(QTextCursor::NextCell, QTextCursor::KeepAnchor);
-    QString cellText = cellCursor.selectedText().trimmed();
-
-    // Get the word/text block under the cursor for hook/extension detection
-    cursor.setPosition(cursorPos);
-    QString wordAtPos;
-    if (!cursor.atEnd()) {
-        int savedPos = cursor.position();
-        cursor.select(QTextCursor::WordUnderCursor);
-        wordAtPos = cursor.selectedText().trimmed();
-        cursor.setPosition(savedPos);
-    }
-
-    // Find which word this row belongs to
-    const WordData* matchedWord = nullptr;
-    if (row < static_cast<int>(words.size())) {
-        matchedWord = &words[row];
-    }
-
-    if (!matchedWord) {
-        emit hoverDebug(QString("No word for row %1").arg(row));
-        emit hoverLeft();
-        return;
-    }
-
-    QString baseWord = matchedWord->word;
-    QString hoverResult;
-    bool alignLeft = false;
-    QString column;
-
-    // Determine column type based on table structure
-    // If we have 3 columns: 0=front, 1=word, 2=back
-    // If we have 2 columns with front hooks: 0=front, 1=word
-    // If we have 2 columns with back hooks: 0=word, 1=back
-    // If we have 1 column: 0=word
-
-    if (numCols == 3) {
-        if (col == 0) {
-            column = "FRONT";
-            alignLeft = true;
-        } else if (col == 1) {
-            column = "CENTER";
-            alignLeft = false;
-        } else {
-            column = "BACK";
-            alignLeft = false;
+            bool alignLeft = bbox.isFront;
+            bool isHookOrExtension = !bbox.isMainWord;
+            emit wordHovered(bbox.fullWord, alignLeft, isHookOrExtension);
+            update();  // Trigger repaint to show highlighted box
+            return;
         }
-    } else if (numCols == 2) {
-        if (hasAnyFrontHooks && !hasAnyBackHooks) {
-            column = (col == 0) ? "FRONT" : "CENTER";
-            alignLeft = (col == 0);
-        } else if (!hasAnyFrontHooks && hasAnyBackHooks) {
-            column = (col == 0) ? "CENTER" : "BACK";
-            alignLeft = false;
-        } else {
-            column = "CENTER";
-            alignLeft = false;
-        }
-    } else {
-        column = "CENTER";
-        alignLeft = false;
     }
 
-    // Now determine what to show based on column and content
-    if (column == "FRONT") {
-        // Front hooks/extensions column
-        // Check if wordAtPos is a single-letter hook (must be in frontHooks)
-        if (wordAtPos.length() == 1 && wordAtPos[0].isLetter() &&
-            matchedWord->frontHooks.contains(wordAtPos, Qt::CaseInsensitive)) {
-            hoverResult = wordAtPos.toUpper() + baseWord;  // Hook + word
-        } else {
-            // Try to match as extension - exact match on the word under cursor
-            QStringList extLines = matchedWord->frontExtensions.split('\n', Qt::SkipEmptyParts);
-            for (const QString& line : extLines) {
-                QString ext = line.trimmed();
-                // Exact match on the extension word
-                if (ext.compare(wordAtPos, Qt::CaseInsensitive) == 0) {
-                    // Front extension: add extension before base word
-                    hoverResult = ext + baseWord;
-                    break;
-                }
-            }
-        }
-    } else if (column == "BACK") {
-        // Back hooks/extensions column
-        // Check if wordAtPos is a single-letter hook (must be in backHooks)
-        if (wordAtPos.length() == 1 && wordAtPos[0].isLetter() &&
-            matchedWord->backHooks.contains(wordAtPos, Qt::CaseInsensitive)) {
-            hoverResult = baseWord + wordAtPos.toUpper();  // Word + hook
-        } else {
-            // Try to match as extension - exact match on the word under cursor
-            QStringList extLines = matchedWord->backExtensions.split('\n', Qt::SkipEmptyParts);
-            for (const QString& line : extLines) {
-                QString ext = line.trimmed();
-                // Exact match on the extension word
-                if (ext.compare(wordAtPos, Qt::CaseInsensitive) == 0) {
-                    // Back extension: add base word before extension
-                    hoverResult = baseWord + ext;
-                    break;
-                }
-            }
-        }
-    } else {
-        // Center column - just show the word
-        hoverResult = baseWord;
-    }
-
-    // Emit debug info
-    emit hoverDebug(QString("row=%1 col=%2/%3 type=%4 word='%5' result='%6'")
-                    .arg(row)
-                    .arg(col)
-                    .arg(numCols)
-                    .arg(column)
-                    .arg(wordAtPos)
-                    .arg(hoverResult));
-
-    if (!hoverResult.isEmpty()) {
-        emit wordHovered(hoverResult, alignLeft);
-    } else {
-        emit hoverLeft();
-    }
+    // No box contains mouse
+    emit hoverDebug(QString("No bbox hit: pos=(%1,%2) totalBoxes=%3")
+                    .arg(pos.x())
+                    .arg(pos.y())
+                    .arg(boundingBoxes.size()));
+    emit hoverLeft();
+    update();
 }

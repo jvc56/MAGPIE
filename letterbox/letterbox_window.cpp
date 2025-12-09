@@ -173,14 +173,14 @@ void LetterboxWindow::setupUI()
     // Word hover overlay (top-left or top-right corner)
     wordHoverOverlay = new QLabel(solvedContainer);
     wordHoverOverlay->setStyleSheet(
-        "background-color: rgb(28, 28, 28); "
+        "background-color: rgb(27, 27, 27); "
         "color: white; "
-        "padding: 10px 15px; "
+        "padding: 8px; "
         "font-family: 'Jost', sans-serif; "
-        "font-size: 18px; "
-        "font-weight: bold;"
+        "border: 1px solid rgb(90, 90, 90);"
     );
-    wordHoverOverlay->setAlignment(Qt::AlignCenter);
+    wordHoverOverlay->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
+    wordHoverOverlay->setTextFormat(Qt::RichText);
     wordHoverOverlay->setFixedWidth(200);
     wordHoverOverlay->hide();
 
@@ -565,6 +565,7 @@ void LetterboxWindow::updateDisplay()
     for (int i = startIndex; i < currentIndex; i++) {
         if (alphagrams[i].studied) {
             AlphagramBox* box = new AlphagramBox(solvedWidget);
+            box->setShowHoverDebug(showHoverDebugInfo);
 
             // Connect hover signals
             connect(box, &AlphagramBox::wordHovered, this, &LetterboxWindow::showWordHoverOverlay);
@@ -599,6 +600,7 @@ void LetterboxWindow::updateDisplay()
     // Only if we haven't completed all alphagrams yet
     if (currentIndex < static_cast<int>(alphagrams.size())) {
         AlphagramBox* currentBox = new AlphagramBox(solvedWidget);
+        currentBox->setShowHoverDebug(showHoverDebugInfo);
 
         // Connect hover signals
         connect(currentBox, &AlphagramBox::wordHovered, this, &LetterboxWindow::showWordHoverOverlay);
@@ -1160,6 +1162,17 @@ void LetterboxWindow::toggleHoverDebugInfo()
     if (hoverDebugLabel) {
         hoverDebugLabel->setVisible(showHoverDebugInfo);
     }
+
+    // Update all existing AlphagramBox widgets
+    for (int i = 0; i < solvedLayout->count(); i++) {
+        QLayoutItem* item = solvedLayout->itemAt(i);
+        if (item && item->widget()) {
+            AlphagramBox* box = qobject_cast<AlphagramBox*>(item->widget());
+            if (box) {
+                box->setShowHoverDebug(showHoverDebugInfo);
+            }
+        }
+    }
 }
 
 void LetterboxWindow::updateDebugInfo()
@@ -1712,15 +1725,31 @@ void LetterboxWindow::updateWindowTitle()
     }
 }
 
-void LetterboxWindow::showWordHoverOverlay(const QString& word, bool alignLeft)
+void LetterboxWindow::showWordHoverOverlay(const QString& word, bool alignLeft, bool isHookOrExtension)
 {
     if (!wordHoverOverlay || !solvedContainer) {
         return;
     }
 
-    wordHoverOverlay->setText(word);
+    QString html;
+    QString wordUpper = word.toUpper();
+
+    // Only show the word header for main words (not hooks/extensions)
+    if (!isHookOrExtension) {
+        html += QString("<div style='font-size: 24px; font-weight: 600; text-align: center; margin-bottom: 8px; letter-spacing: 1px;'>%1</div>")
+                .arg(wordUpper);
+    } else {
+        // For hooks/extensions, add the anagram/hooks table
+        QString tableHtml = generateSidebarTable(word);
+        html += tableHtml;
+    }
+
+    wordHoverOverlay->setText(html);
     wordHoverOverlay->adjustSize();
-    wordHoverOverlay->setFixedWidth(200);  // Keep fixed width
+
+    // Make it wider to accommodate the table
+    int overlayWidth = std::min(400, solvedContainer->width() / 3);
+    wordHoverOverlay->setFixedWidth(overlayWidth);
 
     // Position in corner (top-left or top-right)
     int x = alignLeft ? 0 : (solvedContainer->width() - wordHoverOverlay->width());
@@ -1729,6 +1758,132 @@ void LetterboxWindow::showWordHoverOverlay(const QString& word, bool alignLeft)
     wordHoverOverlay->move(x, y);
     wordHoverOverlay->show();
     wordHoverOverlay->raise();  // Ensure it's on top
+}
+
+QString LetterboxWindow::generateSidebarTable(const QString& word)
+{
+    QString html;
+    QString wordUpper = word.toUpper();
+    std::string wordStr = wordUpper.toStdString();
+    int wordLength = wordUpper.length();
+
+    // Find anagrams
+    WordList* anagrams = letterbox_find_anagrams(kwg, ld, wordStr.c_str());
+
+    // Debug: log anagram count
+    int totalAnagrams = anagrams ? anagrams->count : 0;
+    int exactAnagrams = 0;
+
+    // Build rows: for each anagram (including the word itself), show its hooks
+    std::vector<std::tuple<QString, QString, QString, bool, bool>> rows;  // (frontHooks, word, backHooks, hasFrontHooks, hasBackHooks)
+    bool anyHasFrontHooks = false;
+    bool anyHasBackHooks = false;
+
+    if (anagrams && anagrams->count > 0) {
+        for (int i = 0; i < anagrams->count; i++) {
+            QString anagram = QString(anagrams->words[i]).toUpper();
+
+            // Only include exact anagrams (same length)
+            if (anagram.length() != wordLength) {
+                continue;
+            }
+            exactAnagrams++;
+
+            // Find hooks for this anagram
+            std::string anagramStr = anagram.toStdString();
+            char* frontHooksStr = letterbox_find_front_hooks(kwg, ld, anagramStr.c_str());
+            char* backHooksStr = letterbox_find_back_hooks(kwg, ld, anagramStr.c_str());
+
+            QString frontHooks = frontHooksStr ? QString(frontHooksStr) : QString();
+            QString backHooks = backHooksStr ? QString(backHooksStr) : QString();
+
+            // Add spaces between hook letters (like in AlphagramBox)
+            QString spacedFrontHooks;
+            if (!frontHooks.isEmpty()) {
+                for (int j = 0; j < frontHooks.length(); j++) {
+                    if (j > 0) spacedFrontHooks += " ";
+                    spacedFrontHooks += frontHooks[j];
+                }
+            }
+
+            QString spacedBackHooks;
+            if (!backHooks.isEmpty()) {
+                for (int j = 0; j < backHooks.length(); j++) {
+                    if (j > 0) spacedBackHooks += " ";
+                    spacedBackHooks += backHooks[j];
+                }
+            }
+
+            bool hasFront = !spacedFrontHooks.isEmpty();
+            bool hasBack = !spacedBackHooks.isEmpty();
+
+            if (hasFront) anyHasFrontHooks = true;
+            if (hasBack) anyHasBackHooks = true;
+
+            rows.push_back(std::make_tuple(spacedFrontHooks, anagram, spacedBackHooks, hasFront, hasBack));
+
+            if (frontHooksStr) free(frontHooksStr);
+            if (backHooksStr) free(backHooksStr);
+        }
+    }
+
+    // Sort rows: put the original word first, then alphabetically
+    std::sort(rows.begin(), rows.end(), [&wordUpper](const auto& a, const auto& b) {
+        if (std::get<1>(a) == wordUpper) return true;
+        if (std::get<1>(b) == wordUpper) return false;
+        return std::get<1>(a) < std::get<1>(b);
+    });
+
+    // Wrap table in a centered container div
+    html += "<div style='display: flex; justify-content: center; width: 100%;'>";
+
+    // Build HTML table in AlphagramBox style with matching borders and tight cells
+    html += "<table style='border-collapse: collapse; background-color: rgb(50, 50, 50); border: 1px solid rgb(90, 90, 90);'>";
+
+    for (const auto& row : rows) {
+        QString frontHooks = std::get<0>(row);
+        QString anagram = std::get<1>(row);
+        QString backHooks = std::get<2>(row);
+
+        html += "<tr>";
+
+        // Front hooks column (right-aligned) - only show if any word has front hooks
+        if (anyHasFrontHooks) {
+            html += "<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: right; border-right: 1px solid #666; vertical-align: top; font-size: 16px; font-weight: 500; white-space: nowrap;'>";
+            html += frontHooks;
+            html += "</td>";
+        }
+
+        // Word column (centered, bold, larger)
+        QString wordBorder = anyHasBackHooks ? "border-right: 1px solid #666;" : "";
+        html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: 20px; font-weight: 600; letter-spacing: 1px; color: #fff; text-align: center; padding: 8px 4px; white-space: nowrap; %1'>%2</td>")
+                .arg(wordBorder)
+                .arg(anagram);
+
+        // Back hooks column (left-aligned) - only show if any word has back hooks
+        if (anyHasBackHooks) {
+            html += "<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: left; vertical-align: top; font-size: 16px; font-weight: 500; white-space: nowrap;'>";
+            html += backHooks;
+            html += "</td>";
+        }
+
+        html += "</tr>";
+    }
+
+    html += "</table>";
+    html += "</div>";  // Close centering div
+
+    // Debug output
+    if (showDebugInfo) {
+        qDebug() << "Sidebar for" << wordUpper << ":" << totalAnagrams << "total anagrams," << exactAnagrams << "exact anagrams";
+    }
+
+    // Clean up
+    if (anagrams) {
+        word_list_destroy(anagrams);
+    }
+
+    return html;
 }
 
 void LetterboxWindow::hideWordHoverOverlay()

@@ -99,9 +99,10 @@ private:
     void updateWindowTitle();
 
     // Word hover overlay
-    void showWordHoverOverlay(const QString& word, bool alignLeft);
+    void showWordHoverOverlay(const QString& word, bool alignLeft, bool isHookOrExtension);
     void hideWordHoverOverlay();
     void updateHoverDebug(const QString& debugInfo);
+    QString generateSidebarTable(const QString& word);
 
     Config* config;
     KWG* kwg;
