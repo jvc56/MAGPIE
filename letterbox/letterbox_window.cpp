@@ -1748,15 +1748,15 @@ void LetterboxWindow::showWordHoverOverlay(const QString& word, bool alignLeft, 
     QString html;
     QString wordUpper = word.toUpper();
 
-    // Only show the word header for main words (not hooks/extensions)
+    // Show the word header for main words (not hooks/extensions)
     if (!isHookOrExtension) {
         html += QString("<div style='font-size: 24px; font-weight: 600; text-align: center; margin-bottom: 8px; letter-spacing: 1px;'>%1</div>")
                 .arg(wordUpper);
-    } else {
-        // For hooks/extensions, add the anagram/hooks table
-        QString tableHtml = generateSidebarTable(word);
-        html += tableHtml;
     }
+
+    // Always add the sidebar table (shows anagrams/hooks for hooks/extensions, blank extensions for all)
+    QString tableHtml = generateSidebarTable(word, isHookOrExtension);
+    html += tableHtml;
 
     wordHoverOverlay->setText(html);
     wordHoverOverlay->adjustSize();
@@ -1774,15 +1774,18 @@ void LetterboxWindow::showWordHoverOverlay(const QString& word, bool alignLeft, 
     wordHoverOverlay->raise();  // Ensure it's on top
 }
 
-QString LetterboxWindow::generateSidebarTable(const QString& word)
+QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOrExtension)
 {
     QString html;
     QString wordUpper = word.toUpper();
     std::string wordStr = wordUpper.toStdString();
     int wordLength = wordUpper.length();
 
-    // Find anagrams
-    WordList* anagrams = letterbox_find_anagrams(kwg, ld, wordStr.c_str());
+    // Only show anagrams table for hooks/extensions
+    WordList* anagrams = nullptr;
+    if (isHookOrExtension) {
+        anagrams = letterbox_find_anagrams(kwg, ld, wordStr.c_str());
+    }
 
     // Debug: log anagram count
     int totalAnagrams = anagrams ? anagrams->count : 0;
@@ -1841,59 +1844,193 @@ QString LetterboxWindow::generateSidebarTable(const QString& word)
         }
     }
 
-    // Sort rows: put the original word first, then alphabetically
-    std::sort(rows.begin(), rows.end(), [&wordUpper](const auto& a, const auto& b) {
-        if (std::get<1>(a) == wordUpper) return true;
-        if (std::get<1>(b) == wordUpper) return false;
-        return std::get<1>(a) < std::get<1>(b);
-    });
+    // Only show anagrams table if we have anagrams (for hooks/extensions)
+    if (isHookOrExtension && !rows.empty()) {
+        // Sort rows: put the original word first, then alphabetically
+        std::sort(rows.begin(), rows.end(), [&wordUpper](const auto& a, const auto& b) {
+            if (std::get<1>(a) == wordUpper) return true;
+            if (std::get<1>(b) == wordUpper) return false;
+            return std::get<1>(a) < std::get<1>(b);
+        });
 
-    // Build HTML table in AlphagramBox style with matching borders and tight cells
-    // Wrap in centered div
-    html += "<div style='text-align: center;'>";
-    html += "<table style='border-collapse: collapse; background-color: rgb(50, 50, 50); border: 1px solid rgb(90, 90, 90); display: inline-block;'>";
+        // Build HTML table in AlphagramBox style with matching borders and tight cells
+        // Wrap in centered div
+        html += "<div style='text-align: center;'>";
+        html += "<table style='border-collapse: collapse; background-color: rgb(50, 50, 50); border: 1px solid rgb(90, 90, 90); display: inline-block;'>";
 
-    for (const auto& row : rows) {
-        QString frontHooks = std::get<0>(row);
-        QString anagram = std::get<1>(row);
-        QString backHooks = std::get<2>(row);
+        for (const auto& row : rows) {
+            QString frontHooks = std::get<0>(row);
+            QString anagram = std::get<1>(row);
+            QString backHooks = std::get<2>(row);
 
-        html += "<tr>";
+            html += "<tr>";
 
-        // Front hooks column (right-aligned) - only show if any word has front hooks
-        if (anyHasFrontHooks) {
-            html += "<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: right; border-right: 1px solid #666; vertical-align: top; font-size: 16px; font-weight: 500; white-space: nowrap;'>";
-            html += frontHooks;
-            html += "</td>";
+            // Front hooks column (right-aligned) - only show if any word has front hooks
+            if (anyHasFrontHooks) {
+                html += "<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: right; border-right: 1px solid #666; vertical-align: top; font-size: 16px; font-weight: 500; white-space: nowrap;'>";
+                html += frontHooks;
+                html += "</td>";
+            }
+
+            // Word column (centered, bold, larger)
+            QString wordBorder = anyHasBackHooks ? "border-right: 1px solid #666;" : "";
+            html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: 20px; font-weight: 600; letter-spacing: 1px; color: #fff; text-align: center; padding: 8px 4px; white-space: nowrap; %1'>%2</td>")
+                    .arg(wordBorder)
+                    .arg(anagram);
+
+            // Back hooks column (left-aligned) - only show if any word has back hooks
+            if (anyHasBackHooks) {
+                html += "<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: left; vertical-align: top; font-size: 16px; font-weight: 500; white-space: nowrap;'>";
+                html += backHooks;
+                html += "</td>";
+            }
+
+            html += "</tr>";
         }
 
-        // Word column (centered, bold, larger)
-        QString wordBorder = anyHasBackHooks ? "border-right: 1px solid #666;" : "";
-        html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: 20px; font-weight: 600; letter-spacing: 1px; color: #fff; text-align: center; padding: 8px 4px; white-space: nowrap; %1'>%2</td>")
-                .arg(wordBorder)
-                .arg(anagram);
-
-        // Back hooks column (left-aligned) - only show if any word has back hooks
-        if (anyHasBackHooks) {
-            html += "<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: left; vertical-align: top; font-size: 16px; font-weight: 500; white-space: nowrap;'>";
-            html += backHooks;
-            html += "</td>";
-        }
-
-        html += "</tr>";
+        html += "</table>";
+        html += "</div>";  // Close centering div
     }
 
-    html += "</table>";
-    html += "</div>";  // Close centering div
+    // Add blank extensions section (word + ?)
+    // Use optimized function that only finds words exactly one letter longer
+    WordList* blankAlphagrams = letterbox_find_anagrams_with_blank(kwg, ld, wordStr.c_str());
+
+    // Collect all blank letters that form valid words
+    QSet<QChar> blankLetters;
+    std::vector<std::tuple<QString, QChar>> blankWords;  // (word, blank letter)
+
+    if (blankAlphagrams && blankAlphagrams->count > 0) {
+        for (int i = 0; i < blankAlphagrams->count; i++) {
+            QString alphagram = QString(blankAlphagrams->words[i]).toUpper();
+
+            // Find actual words for this alphagram
+            WordList* wordsForAlphagram = letterbox_find_anagrams(kwg, ld, alphagram.toStdString().c_str());
+
+            if (wordsForAlphagram && wordsForAlphagram->count > 0) {
+                // Find which letter is the "blank" by counting letter frequencies
+                QMap<QChar, int> originalFreq;
+                for (QChar ch : wordUpper) {
+                    originalFreq[ch]++;
+                }
+
+                QMap<QChar, int> alphagramFreq;
+                for (QChar ch : alphagram) {
+                    alphagramFreq[ch]++;
+                }
+
+                // Find the letter that appears more frequently in the alphagram
+                QChar blankLetter;
+                for (auto it = alphagramFreq.begin(); it != alphagramFreq.end(); ++it) {
+                    if (it.value() > originalFreq[it.key()]) {
+                        blankLetter = it.key();
+                        break;
+                    }
+                }
+
+                if (!blankLetter.isNull()) {
+                    blankLetters.insert(blankLetter);
+
+                    // Add only words of exact target length (wordLength + 1)
+                    int targetLength = wordLength + 1;
+                    for (int j = 0; j < wordsForAlphagram->count; j++) {
+                        QString actualWord = QString(wordsForAlphagram->words[j]).toUpper();
+                        if (actualWord.length() == targetLength) {
+                            blankWords.push_back(std::make_tuple(actualWord, blankLetter));
+                        }
+                    }
+                }
+            }
+
+            if (wordsForAlphagram) {
+                word_list_destroy(wordsForAlphagram);
+            }
+        }
+
+        // Convert to sorted list for display
+        QList<QChar> sortedBlankLetters = blankLetters.values();
+        std::sort(sortedBlankLetters.begin(), sortedBlankLetters.end());
+
+        // Add spacing and section header
+        html += "<div style='margin-top: 12px;'></div>";
+
+        // Show the summary line: WORD + ? = A B C D ...
+        QString blankLetterList;
+        for (QChar letter : sortedBlankLetters) {
+            if (!blankLetterList.isEmpty()) blankLetterList += " ";
+            blankLetterList += letter;
+        }
+
+        if (blankLetterList.isEmpty()) {
+            blankLetterList = "∅";
+        }
+
+        html += QString("<div style='font-family: \"Jost\", sans-serif; font-size: 16px; font-weight: 500; text-align: center; color: #fff; margin-bottom: 8px;'>%1 + ? = %2</div>")
+                .arg(wordUpper)
+                .arg(blankLetterList);
+
+        qDebug() << "Blank extensions for" << wordUpper << ":" << blankWords.size() << "words";
+
+        // If 10 or fewer blank extension words, show table
+        if (blankWords.size() > 0 && blankWords.size() <= 10) {
+            html += "<div style='text-align: center;'>";
+            html += "<table style='border-collapse: collapse; background-color: rgb(50, 50, 50); border: 1px solid rgb(90, 90, 90); display: inline-block;'>";
+
+            // Sort words alphabetically
+            std::sort(blankWords.begin(), blankWords.end(), [](const auto& a, const auto& b) {
+                return std::get<0>(a) < std::get<0>(b);
+            });
+
+            for (const auto& wordPair : blankWords) {
+                QString displayWord = std::get<0>(wordPair);
+                QChar blankLetter = std::get<1>(wordPair);
+
+                // Build the display word with blank letter in gold
+                QString styledWord;
+                for (QChar ch : displayWord) {
+                    if (ch == blankLetter) {
+                        // First occurrence of the blank letter - show in gold
+                        styledWord += QString("<span style='color: #FFD700;'>%1</span>").arg(ch);
+                        // Replace blank letter with a marker so we only color the first one
+                        displayWord.replace(displayWord.indexOf(blankLetter), 1, QChar(0x01));
+                    } else if (ch == QChar(0x01)) {
+                        // This was already processed, show in white
+                        styledWord += QString("<span style='color: #fff;'>%1</span>").arg(blankLetter);
+                    } else {
+                        styledWord += QString("<span style='color: #fff;'>%1</span>").arg(ch);
+                    }
+                }
+
+                html += "<tr>";
+                html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: 20px; font-weight: 600; letter-spacing: 1px; text-align: center; padding: 8px 4px; white-space: nowrap;'>%1</td>")
+                        .arg(styledWord);
+                html += "</tr>";
+            }
+
+            html += "</table>";
+            html += "</div>";
+        }
+    } else {
+        // No blank extensions found - show the empty set symbol
+        html += "<div style='margin-top: 12px;'></div>";
+        html += QString("<div style='font-family: \"Jost\", sans-serif; font-size: 16px; font-weight: 500; text-align: center; color: #fff;'>%1 + ? = ∅</div>")
+                .arg(wordUpper);
+    }
 
     // Debug output
     if (showDebugInfo) {
         qDebug() << "Sidebar for" << wordUpper << ":" << totalAnagrams << "total anagrams," << exactAnagrams << "exact anagrams";
+        if (blankAlphagrams) {
+            qDebug() << "  Blank alphagrams:" << blankAlphagrams->count << "total words:" << blankWords.size();
+        }
     }
 
     // Clean up
     if (anagrams) {
         word_list_destroy(anagrams);
+    }
+    if (blankAlphagrams) {
+        word_list_destroy(blankAlphagrams);
     }
 
     return html;

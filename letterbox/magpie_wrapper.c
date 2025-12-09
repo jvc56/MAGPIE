@@ -837,3 +837,126 @@ WordList* letterbox_find_anagrams_by_pattern(const KWG *kwg, const LetterDistrib
     dictionary_word_list_destroy(unique_alphagrams);
     return result;
 }
+
+// Optimized function to find words exactly one letter longer than input
+// This avoids the subanagram problem by only searching for exact length matches
+WordList* letterbox_find_anagrams_with_blank(const KWG *kwg, const LetterDistribution *ld,
+                                             const char *letters) {
+    if (!kwg || !ld || !letters) {
+        return word_list_create();
+    }
+
+    int base_length = strlen(letters);
+    int target_length = base_length + 1;
+
+    // Safety check
+    if (target_length > BOARD_DIM) {
+        return word_list_create();
+    }
+
+    // Create a rack from the input letters
+    Rack base_rack;
+    rack_set_dist_size_and_reset(&base_rack, ld_get_size(ld));
+    int num_letters = rack_set_to_string(ld, &base_rack, letters);
+    if (num_letters < 0) {
+        return word_list_create();
+    }
+
+    // Dictionary list to collect all matching words
+    DictionaryWordList *dict_list = dictionary_word_list_create();
+    MachineLetter word[BOARD_DIM];
+
+    // Try adding each possible letter (1-26) to the rack
+    for (MachineLetter blank_letter = 1; blank_letter < 27; blank_letter++) {
+        Rack search_rack = base_rack;
+        rack_add_letter(&search_rack, blank_letter);
+
+        // Find all anagrams using this rack, but only keep those of exact target length
+        // Use a temporary list for this letter's results
+        DictionaryWordList *temp_list = dictionary_word_list_create();
+        find_anagrams_recursive(kwg, kwg_get_dawg_root_node_index(kwg),
+                               &search_rack, ld, word, 0, false, temp_list);
+
+        // Filter to only words of target length
+        int temp_count = dictionary_word_list_get_count(temp_list);
+        for (int i = 0; i < temp_count; i++) {
+            const DictionaryWord *dw = dictionary_word_list_get_word(temp_list, i);
+            if (dictionary_word_get_length(dw) == target_length) {
+                dictionary_word_list_add_word(dict_list,
+                                            dictionary_word_get_word(dw),
+                                            dictionary_word_get_length(dw));
+            }
+        }
+
+        dictionary_word_list_destroy(temp_list);
+    }
+
+    // Sort and get unique words
+    dictionary_word_list_sort(dict_list);
+    DictionaryWordList *unique_list = dictionary_word_list_create();
+    dictionary_word_list_unique(dict_list, unique_list);
+    dictionary_word_list_destroy(dict_list);
+
+    // Convert dictionary words to alphagrams
+    DictionaryWordList *alphagram_list = dictionary_word_list_create();
+    int count = dictionary_word_list_get_count(unique_list);
+
+    for (int i = 0; i < count; i++) {
+        const DictionaryWord *dw = dictionary_word_list_get_word(unique_list, i);
+        int len = dictionary_word_get_length(dw);
+
+        // Create sorted version (alphagram)
+        MachineLetter alphagram[BOARD_DIM];
+        memcpy(alphagram, dictionary_word_get_word(dw), len);
+
+        // Sort the letters
+        for (int j = 0; j < len - 1; j++) {
+            for (int k = j + 1; k < len; k++) {
+                if (alphagram[j] > alphagram[k]) {
+                    MachineLetter temp = alphagram[j];
+                    alphagram[j] = alphagram[k];
+                    alphagram[k] = temp;
+                }
+            }
+        }
+
+        dictionary_word_list_add_word(alphagram_list, alphagram, len);
+    }
+
+    // Sort and get unique alphagrams
+    dictionary_word_list_sort(alphagram_list);
+    DictionaryWordList *unique_alphagrams = dictionary_word_list_create();
+    dictionary_word_list_unique(alphagram_list, unique_alphagrams);
+    dictionary_word_list_destroy(alphagram_list);
+    dictionary_word_list_destroy(unique_list);
+
+    // Convert to WordList format
+    WordList *result = word_list_create();
+    int alphagram_count = dictionary_word_list_get_count(unique_alphagrams);
+
+    fprintf(stderr, "[C] letterbox_find_anagrams_with_blank('%s'): found %d alphagrams\n",
+            letters, alphagram_count);
+
+    if (alphagram_count > 0) {
+        result->words = malloc(alphagram_count * sizeof(char*));
+        result->count = alphagram_count;
+
+        StringBuilder *sb = string_builder_create();
+        for (int i = 0; i < alphagram_count; i++) {
+            const DictionaryWord *dw = dictionary_word_list_get_word(unique_alphagrams, i);
+            string_builder_clear(sb);
+            for (int j = 0; j < dictionary_word_get_length(dw); j++) {
+                MachineLetter ml = dictionary_word_get_word(dw)[j];
+                string_builder_add_user_visible_letter(sb, ld, ml);
+            }
+            result->words[i] = string_builder_dump(sb, NULL);
+            if (i < 5) {  // Print first few for debugging
+                fprintf(stderr, "[C]   alphagram[%d]: %s\n", i, result->words[i]);
+            }
+        }
+        string_builder_destroy(sb);
+    }
+
+    dictionary_word_list_destroy(unique_alphagrams);
+    return result;
+}

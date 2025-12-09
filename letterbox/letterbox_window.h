@@ -102,7 +102,7 @@ private:
     void showWordHoverOverlay(const QString& word, bool alignLeft, bool isHookOrExtension);
     void hideWordHoverOverlay();
     void updateHoverDebug(const QString& debugInfo);
-    QString generateSidebarTable(const QString& word);
+    QString generateSidebarTable(const QString& word, bool isHookOrExtension);
 
     Config* config;
     KWG* kwg;

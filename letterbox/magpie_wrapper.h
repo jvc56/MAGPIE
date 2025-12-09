@@ -61,6 +61,12 @@ char* letterbox_find_front_extensions(const KWG *kwg, const LetterDistribution *
 WordList* letterbox_find_anagrams_by_pattern(const KWG *kwg, const LetterDistribution *ld,
                                              const char *pattern);
 
+// Find words that are exactly one letter longer than the input letters
+// This is an optimized version for finding blank extensions (word + one wild tile)
+// Returns WordList with all alphagrams of length strlen(letters) + 1
+WordList* letterbox_find_anagrams_with_blank(const KWG *kwg, const LetterDistribution *ld,
+                                             const char *letters);
+
 #ifdef __cplusplus
 }
 #endif
