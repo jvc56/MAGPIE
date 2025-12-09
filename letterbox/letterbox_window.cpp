@@ -1845,8 +1845,9 @@ void LetterboxWindow::showWordHoverOverlay(const QString& word, bool alignLeft, 
     wordHoverOverlayContent->setText(html);
     wordHoverOverlayContent->adjustSize();
 
-    // Make it wider to accommodate the table
-    int overlayWidth = std::min(400, solvedContainer->width() / 3);
+    // Set a generous fixed width to accommodate tables with extensions
+    // Allow it to overlap answers rather than restricting based on container width
+    int overlayWidth = 450;
     wordHoverOverlay->setFixedWidth(overlayWidth);
 
     // Set maximum height to 100% of container, but allow it to be smaller if content fits
