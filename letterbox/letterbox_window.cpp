@@ -1268,13 +1268,9 @@ bool LetterboxWindow::eventFilter(QObject *obj, QEvent *event)
         QScrollBar* scrollBar = wordHoverOverlay->verticalScrollBar();
         if (scrollBar && scrollBar->maximum() > 0) {
             int delta = wheelEvent->angleDelta().y();
-            int newValue = scrollBar->value() - delta / 8;  // Standard wheel delta divisor
+            // Use full delta for faster scrolling (no divisor)
+            int newValue = scrollBar->value() - delta;
             scrollBar->setValue(newValue);
-
-            qDebug() << "Scrolling sidebar - delta:" << delta
-                     << "current:" << scrollBar->value()
-                     << "min:" << scrollBar->minimum()
-                     << "max:" << scrollBar->maximum();
 
             return true;  // Event handled, don't pass to solved scroll area
         }
