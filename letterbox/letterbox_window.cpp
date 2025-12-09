@@ -2091,17 +2091,84 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
 
         // Show table for all blank extensions (no limit)
         if (blankLetters.size() > 0) {
-            html += "<div style='text-align: center;'>";
-            html += "<table style='border-collapse: collapse; background-color: rgb(50, 50, 50); border: 1px solid rgb(90, 90, 90); display: inline-block;'>";
-
-            // Sort words alphabetically
-            std::sort(blankWords.begin(), blankWords.end(), [](const auto& a, const auto& b) {
-                return std::get<0>(a) < std::get<0>(b);
-            });
+            // First pass: collect hook/extension data for all words
+            std::vector<std::tuple<QString, QChar, QString, QString, QString, QString, bool, bool>> blankWordData;  // (word, blankLetter, frontHooks, frontExts, backHooks, backExts, hasFront, hasBack)
+            bool anyHasFront = false;
+            bool anyHasBack = false;
 
             for (const auto& wordPair : blankWords) {
                 QString displayWord = std::get<0>(wordPair);
                 QChar blankLetter = std::get<1>(wordPair);
+
+                // Get hooks and extensions from cache
+                const HookExtensionCache& cache = getOrComputeHookExtensions(displayWord.toStdString());
+
+                QString frontHooksExts = QString::fromStdString(cache.frontHooks);
+                if (!cache.frontExtensions.empty()) {
+                    if (!frontHooksExts.isEmpty()) frontHooksExts += " ";
+                    frontHooksExts += QString::fromStdString(cache.frontExtensions).replace('\n', ' ');
+                }
+
+                QString backHooksExts = QString::fromStdString(cache.backHooks);
+                if (!cache.backExtensions.empty()) {
+                    if (!backHooksExts.isEmpty()) backHooksExts += " ";
+                    backHooksExts += QString::fromStdString(cache.backExtensions).replace('\n', ' ');
+                }
+
+                // Add spaces between letters for hooks
+                QString spacedFrontHooks;
+                QString frontHooks = QString::fromStdString(cache.frontHooks);
+                if (!frontHooks.isEmpty()) {
+                    for (int j = 0; j < frontHooks.length(); j++) {
+                        if (j > 0) spacedFrontHooks += " ";
+                        spacedFrontHooks += frontHooks[j];
+                    }
+                }
+
+                QString spacedBackHooks;
+                QString backHooks = QString::fromStdString(cache.backHooks);
+                if (!backHooks.isEmpty()) {
+                    for (int j = 0; j < backHooks.length(); j++) {
+                        if (j > 0) spacedBackHooks += " ";
+                        spacedBackHooks += backHooks[j];
+                    }
+                }
+
+                // Get extensions (keep newlines to separate by length)
+                QString frontExts = QString::fromStdString(cache.frontExtensions);
+                QString backExts = QString::fromStdString(cache.backExtensions);
+
+                bool hasFront = !spacedFrontHooks.isEmpty() || !frontExts.isEmpty();
+                bool hasBack = !spacedBackHooks.isEmpty() || !backExts.isEmpty();
+
+                if (hasFront) anyHasFront = true;
+                if (hasBack) anyHasBack = true;
+
+                blankWordData.push_back(std::make_tuple(displayWord, blankLetter, spacedFrontHooks, frontExts, spacedBackHooks, backExts, hasFront, hasBack));
+            }
+
+            // Sort words alphabetically
+            std::sort(blankWordData.begin(), blankWordData.end(), [](const auto& a, const auto& b) {
+                return std::get<0>(a) < std::get<0>(b);
+            });
+
+            html += "<div style='text-align: center;'>";
+            html += "<table style='border-collapse: collapse; background-color: rgb(50, 50, 50); border: 1px solid rgb(90, 90, 90); display: inline-block;'>";
+
+            // Calculate hook/extension sizes to match alphagram_box ratios (24/36 and 14/36)
+            // Use same minimums as main answer tables (baseHookSize=24, baseExtensionSize=14)
+            int hookSize = std::max(24, static_cast<int>(sidebarBlankSize * 24.0 / 36.0));
+            int extensionSize = std::max(14, static_cast<int>(sidebarBlankSize * 14.0 / 36.0));
+
+            for (const auto& wordData : blankWordData) {
+                QString displayWord = std::get<0>(wordData);
+                QChar blankLetter = std::get<1>(wordData);
+                QString spacedFrontHooks = std::get<2>(wordData);
+                QString frontExts = std::get<3>(wordData);
+                QString spacedBackHooks = std::get<4>(wordData);
+                QString backExts = std::get<5>(wordData);
+                bool hasFront = std::get<6>(wordData);
+                bool hasBack = std::get<7>(wordData);
 
                 // Build the display word with only the first occurrence of blank letter in gold
                 QString styledWord;
@@ -2117,9 +2184,52 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
                 }
 
                 html += "<tr>";
-                html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 0.8px; text-align: center; padding: 6px 3px; white-space: nowrap;'>%2</td>")
+
+                // Front hooks/extensions column (only if any word has front hooks/exts)
+                if (anyHasFront) {
+                    QString cellContent;
+
+                    // Build content: hooks on top, extensions below (matching alphagram_box.cpp)
+                    cellContent = QString("<div style='font-size: %1px; font-weight: 500;'>%2</div>").arg(hookSize).arg(spacedFrontHooks);
+
+                    // Add extensions (one line per length)
+                    if (!frontExts.isEmpty()) {
+                        QStringList extLines = frontExts.split('\n', Qt::SkipEmptyParts);
+                        for (const QString& line : extLines) {
+                            cellContent += QString("<div style='font-size: %1px; font-weight: 400;'>%2</div>").arg(extensionSize).arg(line);
+                        }
+                    }
+
+                    html += QString("<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: right; border-right: 1px solid #666; vertical-align: top;'>%1</td>")
+                            .arg(cellContent);
+                }
+
+                // Word column
+                QString wordBorder = anyHasBack ? "border-right: 1px solid #666;" : "";
+                html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; text-align: center; padding: 8px 4px; %2'>%3</td>")
                         .arg(sidebarBlankSize)
+                        .arg(wordBorder)
                         .arg(styledWord);
+
+                // Back hooks/extensions column (only if any word has back hooks/exts)
+                if (anyHasBack) {
+                    QString cellContent;
+
+                    // Build content: hooks on top, extensions below (matching alphagram_box.cpp)
+                    cellContent = QString("<div style='font-size: %1px; font-weight: 500;'>%2</div>").arg(hookSize).arg(spacedBackHooks);
+
+                    // Add extensions (one line per length)
+                    if (!backExts.isEmpty()) {
+                        QStringList extLines = backExts.split('\n', Qt::SkipEmptyParts);
+                        for (const QString& line : extLines) {
+                            cellContent += QString("<div style='font-size: %1px; font-weight: 400;'>%2</div>").arg(extensionSize).arg(line);
+                        }
+                    }
+
+                    html += QString("<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: left; vertical-align: top;'>%1</td>")
+                            .arg(cellContent);
+                }
+
                 html += "</tr>";
             }
 
@@ -2228,17 +2338,73 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
 
         // Show table for all double blank extensions (no limit)
         if (twoBlankPairs.size() > 0) {
-            html += "<div style='text-align: center;'>";
-            html += "<table style='border-collapse: collapse; background-color: rgb(50, 50, 50); border: 1px solid rgb(90, 90, 90); display: inline-block;'>";
-
-            // Sort words alphabetically
-            std::sort(twoBlankWords.begin(), twoBlankWords.end(), [](const auto& a, const auto& b) {
-                return std::get<0>(a) < std::get<0>(b);
-            });
+            // First pass: collect hook/extension data for all words
+            std::vector<std::tuple<QString, QString, QString, QString, QString, QString, bool, bool>> twoBlankWordData;  // (word, blankPair, frontHooks, frontExts, backHooks, backExts, hasFront, hasBack)
+            bool anyHasFront = false;
+            bool anyHasBack = false;
 
             for (const auto& wordPair : twoBlankWords) {
                 QString displayWord = std::get<0>(wordPair);
                 QString blankPair = std::get<1>(wordPair);
+
+                // Get hooks and extensions from cache
+                const HookExtensionCache& cache = getOrComputeHookExtensions(displayWord.toStdString());
+
+                // Add spaces between letters for hooks
+                QString spacedFrontHooks;
+                QString frontHooks = QString::fromStdString(cache.frontHooks);
+                if (!frontHooks.isEmpty()) {
+                    for (int j = 0; j < frontHooks.length(); j++) {
+                        if (j > 0) spacedFrontHooks += " ";
+                        spacedFrontHooks += frontHooks[j];
+                    }
+                }
+
+                QString spacedBackHooks;
+                QString backHooks = QString::fromStdString(cache.backHooks);
+                if (!backHooks.isEmpty()) {
+                    for (int j = 0; j < backHooks.length(); j++) {
+                        if (j > 0) spacedBackHooks += " ";
+                        spacedBackHooks += backHooks[j];
+                    }
+                }
+
+                // Get extensions (keep newlines to separate by length)
+                QString frontExts = QString::fromStdString(cache.frontExtensions);
+                QString backExts = QString::fromStdString(cache.backExtensions);
+
+                bool hasFront = !spacedFrontHooks.isEmpty() || !frontExts.isEmpty();
+                bool hasBack = !spacedBackHooks.isEmpty() || !backExts.isEmpty();
+
+                if (hasFront) anyHasFront = true;
+                if (hasBack) anyHasBack = true;
+
+                twoBlankWordData.push_back(std::make_tuple(displayWord, blankPair, spacedFrontHooks, frontExts, spacedBackHooks, backExts, hasFront, hasBack));
+            }
+
+            // Sort words alphabetically
+            std::sort(twoBlankWordData.begin(), twoBlankWordData.end(), [](const auto& a, const auto& b) {
+                return std::get<0>(a) < std::get<0>(b);
+            });
+
+            // Calculate hook/extension sizes to match alphagram_box ratios (24/36 and 14/36)
+            // Use same minimums as main answer tables (baseHookSize=24, baseExtensionSize=14)
+            int hookSize = std::max(24, static_cast<int>(sidebarBlankSize * 24.0 / 36.0));
+            int extensionSize = std::max(14, static_cast<int>(sidebarBlankSize * 14.0 / 36.0));
+
+            html += "<div style='text-align: center;'>";
+            html += "<table style='border-collapse: collapse; background-color: rgb(50, 50, 50); border: 1px solid rgb(90, 90, 90); display: inline-block;'>";
+
+            for (const auto& wordData : twoBlankWordData) {
+                QString displayWord = std::get<0>(wordData);
+                QString blankPair = std::get<1>(wordData);
+                QString spacedFrontHooks = std::get<2>(wordData);
+                QString frontExts = std::get<3>(wordData);
+                QString spacedBackHooks = std::get<4>(wordData);
+                QString backExts = std::get<5>(wordData);
+                bool hasFront = std::get<6>(wordData);
+                bool hasBack = std::get<7>(wordData);
+
                 QChar blank1 = blankPair[0];
                 QChar blank2 = blankPair[1];
 
@@ -2263,9 +2429,52 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
                 }
 
                 html += "<tr>";
-                html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 0.8px; text-align: center; padding: 6px 3px; white-space: nowrap;'>%2</td>")
+
+                // Front hooks/extensions column (only if any word has front hooks or extensions)
+                if (anyHasFront) {
+                    QString cellContent;
+
+                    // Build content: hooks on top, extensions below (matching alphagram_box.cpp)
+                    cellContent = QString("<div style='font-size: %1px; font-weight: 500;'>%2</div>").arg(hookSize).arg(spacedFrontHooks);
+
+                    // Add extensions (one line per length)
+                    if (!frontExts.isEmpty()) {
+                        QStringList extLines = frontExts.split('\n', Qt::SkipEmptyParts);
+                        for (const QString& line : extLines) {
+                            cellContent += QString("<div style='font-size: %1px; font-weight: 400;'>%2</div>").arg(extensionSize).arg(line);
+                        }
+                    }
+
+                    html += QString("<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: right; border-right: 1px solid #666; vertical-align: top;'>%1</td>")
+                            .arg(cellContent);
+                }
+
+                // Word column
+                QString wordBorder = anyHasBack ? "border-right: 1px solid #666;" : "";
+                html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; text-align: center; padding: 8px 4px; %2'>%3</td>")
                         .arg(sidebarBlankSize)
+                        .arg(wordBorder)
                         .arg(styledWord);
+
+                // Back hooks/extensions column (only if any word has back hooks or extensions)
+                if (anyHasBack) {
+                    QString cellContent;
+
+                    // Build content: hooks on top, extensions below (matching alphagram_box.cpp)
+                    cellContent = QString("<div style='font-size: %1px; font-weight: 500;'>%2</div>").arg(hookSize).arg(spacedBackHooks);
+
+                    // Add extensions (one line per length)
+                    if (!backExts.isEmpty()) {
+                        QStringList extLines = backExts.split('\n', Qt::SkipEmptyParts);
+                        for (const QString& line : extLines) {
+                            cellContent += QString("<div style='font-size: %1px; font-weight: 400;'>%2</div>").arg(extensionSize).arg(line);
+                        }
+                    }
+
+                    html += QString("<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: left; vertical-align: top;'>%1</td>")
+                            .arg(cellContent);
+                }
+
                 html += "</tr>";
             }
 
