@@ -10,6 +10,7 @@
 #include <QMessageBox>
 #include <QDir>
 #include <QCoreApplication>
+#include <QApplication>
 #include <QDebug>
 #include <QFont>
 #include <QFontMetrics>
@@ -172,19 +173,51 @@ void LetterboxWindow::setupUI()
     solvedContainerLayout->addWidget(solvedScrollArea);
 
     // Word hover overlay (top-left or top-right corner)
-    wordHoverOverlay = new QLabel(solvedContainer);
+    // Create word hover overlay as a scroll area
+    wordHoverOverlay = new QScrollArea(solvedContainer);
     wordHoverOverlay->setStyleSheet(
+        "QScrollArea { "
         "background-color: rgb(27, 27, 27); "
-        "color: white; "
-        "padding: 8px; "
-        "font-family: 'Jost', sans-serif; "
-        "border: 1px solid rgb(90, 90, 90);"
+        "border: 1px solid rgb(90, 90, 90); "
+        "} "
+        "QScrollBar:vertical { "
+        "background: rgb(40, 40, 40); "
+        "width: 10px; "
+        "margin: 0px; "
+        "} "
+        "QScrollBar::handle:vertical { "
+        "background: rgb(80, 80, 80); "
+        "min-height: 20px; "
+        "border-radius: 5px; "
+        "} "
+        "QScrollBar::handle:vertical:hover { "
+        "background: rgb(100, 100, 100); "
+        "} "
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { "
+        "height: 0px; "
+        "} "
+        "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { "
+        "background: none; "
+        "}"
     );
-    wordHoverOverlay->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
-    wordHoverOverlay->setTextFormat(Qt::RichText);
-    wordHoverOverlay->setWordWrap(true);
+    wordHoverOverlay->setWidgetResizable(true);
+    wordHoverOverlay->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    wordHoverOverlay->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     wordHoverOverlay->setFixedWidth(200);
     wordHoverOverlay->hide();
+
+    // Create content label inside scroll area
+    wordHoverOverlayContent = new QLabel();
+    wordHoverOverlayContent->setStyleSheet(
+        "background-color: transparent; "
+        "color: white; "
+        "padding: 8px; "
+        "font-family: 'Jost', sans-serif;"
+    );
+    wordHoverOverlayContent->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
+    wordHoverOverlayContent->setTextFormat(Qt::RichText);
+    wordHoverOverlayContent->setWordWrap(true);
+    wordHoverOverlay->setWidget(wordHoverOverlayContent);
 
     // Debug label for hover detection (bottom-left corner)
     hoverDebugLabel = new QLabel(solvedContainer);
@@ -210,6 +243,10 @@ void LetterboxWindow::setupUI()
 
     // Install event filter to intercept Cmd-Z before the text field gets it
     inputField->installEventFilter(this);
+
+    // Install event filter on solvedScrollArea to intercept wheel events for overlay
+    solvedScrollArea->installEventFilter(this);
+    solvedScrollArea->viewport()->installEventFilter(this);
 
     connect(inputField, &QLineEdit::textChanged, this, [this](const QString& text) {
         // Force uppercase without triggering another textChanged signal
@@ -1221,6 +1258,28 @@ bool LetterboxWindow::eventFilter(QObject *obj, QEvent *event)
             }
         }
     }
+
+    // Intercept wheel events when word hover overlay is visible
+    // Scroll the overlay instead of the main content when overlay is shown
+    if (event->type() == QEvent::Wheel && wordHoverOverlay->isVisible()) {
+        QWheelEvent *wheelEvent = static_cast<QWheelEvent*>(event);
+
+        // Get the scroll bar
+        QScrollBar* scrollBar = wordHoverOverlay->verticalScrollBar();
+        if (scrollBar && scrollBar->maximum() > 0) {
+            int delta = wheelEvent->angleDelta().y();
+            int newValue = scrollBar->value() - delta / 8;  // Standard wheel delta divisor
+            scrollBar->setValue(newValue);
+
+            qDebug() << "Scrolling sidebar - delta:" << delta
+                     << "current:" << scrollBar->value()
+                     << "min:" << scrollBar->minimum()
+                     << "max:" << scrollBar->maximum();
+
+            return true;  // Event handled, don't pass to solved scroll area
+        }
+    }
+
     // Pass event to base class
     return QMainWindow::eventFilter(obj, event);
 }
@@ -1773,27 +1832,40 @@ void LetterboxWindow::showWordHoverOverlay(const QString& word, bool alignLeft, 
     QString tableHtml = generateSidebarTable(word, isHookOrExtension, sidebarWordSize, sidebarBlankSize, sidebarHeaderSize);
     html += tableHtml;
 
-    // Force QLabel to re-render by clearing first
-    wordHoverOverlay->clear();
-    wordHoverOverlay->setText(html);
-
-    // Force update of the label's internal document
-    wordHoverOverlay->setTextFormat(Qt::RichText);
-    wordHoverOverlay->updateGeometry();
-    wordHoverOverlay->adjustSize();
+    // Update the content label
+    wordHoverOverlayContent->clear();
+    wordHoverOverlayContent->setText(html);
+    wordHoverOverlayContent->adjustSize();
 
     // Make it wider to accommodate the table
     int overlayWidth = std::min(400, solvedContainer->width() / 3);
     wordHoverOverlay->setFixedWidth(overlayWidth);
 
+    // Set maximum height to 100% of container, but allow it to be smaller if content fits
+    int maxHeight = solvedContainer->height();
+    int contentHeight = wordHoverOverlayContent->sizeHint().height();
+
+    // Use the smaller of content height or max height
+    int finalHeight = std::min(contentHeight + 20, maxHeight);  // +20 for some padding
+    wordHoverOverlay->setFixedHeight(finalHeight);
+
+    qDebug() << "Sidebar sizing - contentHeight:" << contentHeight
+             << "maxHeight:" << maxHeight
+             << "finalHeight:" << finalHeight;
+
     // Position in corner (top-left or top-right)
     int x = alignLeft ? 0 : (solvedContainer->width() - wordHoverOverlay->width());
     int y = 0;  // Top of container
 
+    qDebug() << "Positioning overlay - alignLeft:" << alignLeft
+             << "x:" << x << "y:" << y
+             << "overlayWidth:" << wordHoverOverlay->width()
+             << "containerWidth:" << solvedContainer->width()
+             << "overlayGlobalPos:" << wordHoverOverlay->mapToGlobal(QPoint(0, 0));
+
     wordHoverOverlay->move(x, y);
     wordHoverOverlay->show();
     wordHoverOverlay->raise();  // Ensure it's on top
-    wordHoverOverlay->update();  // Force repaint
 }
 
 QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOrExtension, int sidebarWordSize, int sidebarBlankSize, int sidebarHeaderSize)
@@ -2009,8 +2081,8 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
 
         // qDebug() << "Blank extensions for" << wordUpper << ":" << blankWords.size() << "words";
 
-        // If 10 or fewer blank extension alphagrams, show table
-        if (blankLetters.size() > 0 && blankLetters.size() <= 10) {
+        // Show table for all blank extensions (no limit)
+        if (blankLetters.size() > 0) {
             html += "<div style='text-align: center;'>";
             html += "<table style='border-collapse: collapse; background-color: rgb(50, 50, 50); border: 1px solid rgb(90, 90, 90); display: inline-block;'>";
 
@@ -2146,8 +2218,8 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
                 .arg(twoBlankPairList)
                 .arg(twoBlankCounts);
 
-        // If 10 or fewer double blank extension alphagrams, show table
-        if (twoBlankPairs.size() > 0 && twoBlankPairs.size() <= 10) {
+        // Show table for all double blank extensions (no limit)
+        if (twoBlankPairs.size() > 0) {
             html += "<div style='text-align: center;'>";
             html += "<table style='border-collapse: collapse; background-color: rgb(50, 50, 50); border: 1px solid rgb(90, 90, 90); display: inline-block;'>";
 

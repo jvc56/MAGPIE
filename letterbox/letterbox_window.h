@@ -157,7 +157,8 @@ private:
     QVBoxLayout* solvedLayout;     // Layout for solved alphagrams
     QScrollArea* solvedScrollArea; // Scroll area for solved section
     QWidget* solvedContainer;      // Container for solved area with word hover overlay
-    QLabel* wordHoverOverlay;      // Word hover overlay (top-left or top-right corner)
+    QScrollArea* wordHoverOverlay; // Word hover overlay (top-left or top-right corner)
+    QLabel* wordHoverOverlayContent; // Content label inside the scroll area
     QLabel* hoverDebugLabel;       // Debug info for hover detection (top-left corner)
     QLineEdit* inputField;         // Middle: answer input
     QWidget* queueContainer;       // Container for queue area with counter overlay
