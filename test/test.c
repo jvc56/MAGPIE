@@ -52,6 +52,7 @@
 #include "word_prune_test.h"
 #include "word_test.h"
 #include "zobrist_test.h"
+#include "letterbox_extensions_test.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -114,6 +115,7 @@ static TestEntry test_table[] = {
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},
     {"load", test_load_gcg},
+    {"lbext", test_letterbox_extensions},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

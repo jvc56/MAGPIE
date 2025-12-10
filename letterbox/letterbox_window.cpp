@@ -2193,12 +2193,11 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
                     // Build content: hooks on top, extensions below (matching alphagram_box.cpp)
                     cellContent = QString("<div style='font-size: %1px; font-weight: 500;'>%2</div>").arg(hookSize).arg(spacedFrontHooks);
 
-                    // Add extensions (one line per length)
+                    // Add extensions in a single div with line breaks
                     if (!frontExts.isEmpty()) {
-                        QStringList extLines = frontExts.split('\n', Qt::SkipEmptyParts);
-                        for (const QString& line : extLines) {
-                            cellContent += QString("<div style='font-size: %1px; font-weight: 400;'>%2</div>").arg(extensionSize).arg(line);
-                        }
+                        QString formattedExts = frontExts;
+                        formattedExts.replace('\n', "<br>");
+                        cellContent += QString("<div style='font-size: %1px; font-weight: 400;'>%2</div>").arg(extensionSize).arg(formattedExts);
                     }
 
                     html += QString("<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: right; border-right: 1px solid #666; vertical-align: top;'>%1</td>")
@@ -2219,12 +2218,11 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
                     // Build content: hooks on top, extensions below (matching alphagram_box.cpp)
                     cellContent = QString("<div style='font-size: %1px; font-weight: 500;'>%2</div>").arg(hookSize).arg(spacedBackHooks);
 
-                    // Add extensions (one line per length)
+                    // Add extensions in a single div with line breaks
                     if (!backExts.isEmpty()) {
-                        QStringList extLines = backExts.split('\n', Qt::SkipEmptyParts);
-                        for (const QString& line : extLines) {
-                            cellContent += QString("<div style='font-size: %1px; font-weight: 400;'>%2</div>").arg(extensionSize).arg(line);
-                        }
+                        QString formattedExts = backExts;
+                        formattedExts.replace('\n', "<br>");
+                        cellContent += QString("<div style='font-size: %1px; font-weight: 400;'>%2</div>").arg(extensionSize).arg(formattedExts);
                     }
 
                     html += QString("<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: left; vertical-align: top;'>%1</td>")
@@ -2243,6 +2241,9 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
         html += QString("<div style='font-family: \"Jost\", sans-serif; font-size: 16px; font-weight: 500; text-align: center; color: #fff; max-width: 100%%; white-space: normal; word-wrap: break-word; overflow-wrap: anywhere;'>%1 + ? = ∅ (0/0)</div>")
                 .arg(wordUpper);
     }
+
+    // Add spacing between single and double blank sections
+    html += "<div style='margin-top: 20px;'></div>";
 
     // Add double blank extensions section (word + ??)
     WordList* twoBlankAlphagrams = letterbox_find_anagrams_with_two_blanks(kwg, ld, wordStr.c_str());
@@ -2438,12 +2439,11 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
                     // Build content: hooks on top, extensions below (matching alphagram_box.cpp)
                     cellContent = QString("<div style='font-size: %1px; font-weight: 500;'>%2</div>").arg(hookSize).arg(spacedFrontHooks);
 
-                    // Add extensions (one line per length)
+                    // Add extensions in a single div with line breaks
                     if (!frontExts.isEmpty()) {
-                        QStringList extLines = frontExts.split('\n', Qt::SkipEmptyParts);
-                        for (const QString& line : extLines) {
-                            cellContent += QString("<div style='font-size: %1px; font-weight: 400;'>%2</div>").arg(extensionSize).arg(line);
-                        }
+                        QString formattedExts = frontExts;
+                        formattedExts.replace('\n', "<br>");
+                        cellContent += QString("<div style='font-size: %1px; font-weight: 400;'>%2</div>").arg(extensionSize).arg(formattedExts);
                     }
 
                     html += QString("<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: right; border-right: 1px solid #666; vertical-align: top;'>%1</td>")
@@ -2464,12 +2464,11 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
                     // Build content: hooks on top, extensions below (matching alphagram_box.cpp)
                     cellContent = QString("<div style='font-size: %1px; font-weight: 500;'>%2</div>").arg(hookSize).arg(spacedBackHooks);
 
-                    // Add extensions (one line per length)
+                    // Add extensions in a single div with line breaks
                     if (!backExts.isEmpty()) {
-                        QStringList extLines = backExts.split('\n', Qt::SkipEmptyParts);
-                        for (const QString& line : extLines) {
-                            cellContent += QString("<div style='font-size: %1px; font-weight: 400;'>%2</div>").arg(extensionSize).arg(line);
-                        }
+                        QString formattedExts = backExts;
+                        formattedExts.replace('\n', "<br>");
+                        cellContent += QString("<div style='font-size: %1px; font-weight: 400;'>%2</div>").arg(extensionSize).arg(formattedExts);
                     }
 
                     html += QString("<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: left; vertical-align: top;'>%1</td>")

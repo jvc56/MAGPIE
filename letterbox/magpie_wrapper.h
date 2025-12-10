@@ -23,7 +23,7 @@ typedef struct {
 } WordList;
 
 // Create/destroy word lists
-WordList* word_list_create();
+WordList* word_list_create(void);
 void word_list_destroy(WordList *list);
 
 // Find all anagrams of the given letters (uses DAWG root)

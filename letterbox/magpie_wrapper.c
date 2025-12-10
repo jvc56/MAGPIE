@@ -14,6 +14,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Maximum word length for anagram search (should match or exceed dictionary max word length)
+#define MAX_WORD_LENGTH 20
+
 Config* letterbox_create_config(const char *data_path, const char *lexicon) {
     ErrorStack *error_stack = error_stack_create();
 
@@ -70,7 +73,7 @@ LetterDistribution* letterbox_get_ld(Config *config) {
     return config_get_ld(config);
 }
 
-WordList* word_list_create() {
+WordList* word_list_create(void) {
     WordList *list = malloc(sizeof(WordList));
     list->words = NULL;
     list->count = 0;
@@ -140,7 +143,7 @@ WordList* letterbox_find_anagrams(const KWG *kwg, const LetterDistribution *ld, 
     DictionaryWordList *dict_list = dictionary_word_list_create();
 
     // Find all anagrams using DAWG root
-    MachineLetter word[RACK_SIZE];
+    MachineLetter word[MAX_WORD_LENGTH];
     find_anagrams_recursive(kwg, kwg_get_dawg_root_node_index(kwg),
                           &rack, ld, word, 0, false, dict_list);
 
@@ -266,9 +269,10 @@ char* letterbox_find_back_hooks(const KWG *kwg, const LetterDistribution *ld, co
 }
 
 // Helper to recursively find all extensions from a given node
+// base_word_length: length of the word being extended (to enforce 15-letter max)
 static void find_extensions_recursive(const KWG *kwg, const LetterDistribution *ld,
                                      uint32_t node_index, MachineLetter *extension,
-                                     int depth, int max_depth,
+                                     int depth, int max_depth, int base_word_length,
                                      DictionaryWordList *result_list) {
     if (depth >= max_depth || node_index == 0) {
         return;
@@ -283,13 +287,14 @@ static void find_extensions_recursive(const KWG *kwg, const LetterDistribution *
             extension[depth] = ml;
 
             // If this node accepts, we have a valid extension
-            if (kwg_node_accepts(node)) {
+            // Only add if total word length (base + extension) <= 15
+            if (kwg_node_accepts(node) && (base_word_length + depth + 1) <= 15) {
                 dictionary_word_list_add_word(result_list, extension, depth + 1);
             }
 
             // Continue searching deeper
             find_extensions_recursive(kwg, ld, next_node_index, extension,
-                                    depth + 1, max_depth, result_list);
+                                    depth + 1, max_depth, base_word_length, result_list);
         }
 
         if (kwg_node_is_end(node)) {
@@ -324,7 +329,7 @@ char* letterbox_find_back_extensions(const KWG *kwg, const LetterDistribution *l
     MachineLetter extension[BOARD_DIM];
     DictionaryWordList *ext_list = dictionary_word_list_create();
     find_extensions_recursive(kwg, ld, node_index, extension, 0,
-                             max_extension_length, ext_list);
+                             max_extension_length, word_len, ext_list);
 
     // Sort alphabetically
     dictionary_word_list_sort(ext_list);
@@ -416,7 +421,7 @@ char* letterbox_find_front_extensions(const KWG *kwg, const LetterDistribution *
     MachineLetter extension[BOARD_DIM];
     DictionaryWordList *ext_list = dictionary_word_list_create();
     find_extensions_recursive(kwg, ld, node_index, extension, 0,
-                             max_extension_length, ext_list);
+                             max_extension_length, word_len, ext_list);
 
     // Reverse all extensions (they come out backwards from GADDAG)
     int ext_count = dictionary_word_list_get_count(ext_list);
