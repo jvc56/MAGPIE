@@ -8,6 +8,8 @@
 #include <QPushButton>
 #include <QLineEdit>
 #include <QScrollArea>
+#include <QTextBrowser>
+#include "hover_aware_text_browser.h"
 #include <QMenuBar>
 #include <QMenu>
 #include <QAction>
@@ -15,7 +17,9 @@
 #include <QDateTime>
 #include <vector>
 #include <string>
-#include <unordered_map>
+#include <QFutureWatcher>
+#include <QMutex>
+#include <QHash>
 
 extern "C" {
     #include "magpie_wrapper.h"
@@ -68,6 +72,8 @@ private slots:
     void toggleRenderTime();
     void toggleHoverDebugInfo();
     void onScrollChanged(int value);
+    void onSidebarHtmlReady();
+    void onHideTimer();
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
@@ -104,6 +110,7 @@ private:
     void updateHoverDebug(const QString& debugInfo);
     void refreshWordHoverOverlay();  // Refresh overlay with current zoom level
     QString generateSidebarTable(const QString& word, bool isHookOrExtension, int sidebarWordSize, int sidebarBlankSize, int sidebarHeaderSize);
+    QString generateSidebarSkeletonHtml(const QString& word, bool isHookOrExtension, int sidebarHeaderSize);
 
     Config* config;
     KWG* kwg;
@@ -157,8 +164,7 @@ private:
     QVBoxLayout* solvedLayout;     // Layout for solved alphagrams
     QScrollArea* solvedScrollArea; // Scroll area for solved section
     QWidget* solvedContainer;      // Container for solved area with word hover overlay
-    QScrollArea* wordHoverOverlay; // Word hover overlay (top-left or top-right corner)
-    QLabel* wordHoverOverlayContent; // Content label inside the scroll area
+    HoverAwareTextBrowser* wordHoverOverlay; // Word hover overlay (now a HoverAwareTextBrowser)
     QLabel* hoverDebugLabel;       // Debug info for hover detection (top-left corner)
     QLineEdit* inputField;         // Middle: answer input
     QWidget* queueContainer;       // Container for queue area with counter overlay
@@ -196,6 +202,13 @@ private:
     QString currentHoveredWord;
     bool currentHoverAlignLeft;
     bool currentHoverIsHookOrExtension;
+
+    // For async sidebar generation
+    QFutureWatcher<QString> m_sidebarFutureWatcher;
+    QMutex m_cacheMutex;
+    QHash<QString, QString> m_sidebarHtmlCache;
+    QTimer* m_hideTimer;
+    QString m_currentlyGeneratingWord;
 };
 
 #endif // LETTERBOX_WINDOW_H

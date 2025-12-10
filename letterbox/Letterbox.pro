@@ -1,4 +1,4 @@
-QT += core gui widgets
+QT += core gui widgets concurrent
 
 TARGET = Letterbox
 TEMPLATE = app
@@ -36,14 +36,16 @@ SOURCES += \
     letterbox_window.cpp \
     alphagram_box.cpp \
     word_list_dialog.cpp \
-    completion_stats_dialog.cpp
+    completion_stats_dialog.cpp \
+    hover_aware_text_browser.cpp
 
 HEADERS += \
     magpie_wrapper.h \
     letterbox_window.h \
     alphagram_box.h \
     word_list_dialog.h \
-    completion_stats_dialog.h
+    completion_stats_dialog.h \
+    hover_aware_text_browser.h
 
 # Resources (fonts)
 RESOURCES += letterbox.qrc

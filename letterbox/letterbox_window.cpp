@@ -26,6 +26,9 @@
 #include <unordered_map>
 #include <chrono>
 #include <vector>
+#include <QtConcurrent>
+#include <QFuture>
+#include <QMutexLocker>
 
 // Chrome-like zoom levels (in percentages converted to scale factors)
 const std::vector<double> LetterboxWindow::zoomLevels = {
@@ -172,13 +175,14 @@ void LetterboxWindow::setupUI()
     solvedScrollArea->setMouseTracking(true);  // Enable mouse tracking on scroll area
     solvedContainerLayout->addWidget(solvedScrollArea);
 
-    // Word hover overlay (top-left or top-right corner)
-    // Create word hover overlay as a scroll area
-    wordHoverOverlay = new QScrollArea(solvedContainer);
+    // Word hover overlay (custom text browser to detect mouse enter/leave)
+    wordHoverOverlay = new HoverAwareTextBrowser(solvedContainer);
     wordHoverOverlay->setStyleSheet(
-        "QScrollArea { "
-        "background-color: rgb(27, 27, 27); "
+        "QTextBrowser { "
+        "background-color: rgba(27, 27, 27, 220); "
+        "color: white; "
         "border: 1px solid rgb(90, 90, 90); "
+        "font-family: 'Jost', sans-serif;"
         "} "
         "QScrollBar:vertical { "
         "background: rgb(40, 40, 40); "
@@ -200,24 +204,15 @@ void LetterboxWindow::setupUI()
         "background: none; "
         "}"
     );
-    wordHoverOverlay->setWidgetResizable(true);
     wordHoverOverlay->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     wordHoverOverlay->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     wordHoverOverlay->setFixedWidth(200);
     wordHoverOverlay->hide();
 
-    // Create content label inside scroll area
-    wordHoverOverlayContent = new QLabel();
-    wordHoverOverlayContent->setStyleSheet(
-        "background-color: transparent; "
-        "color: white; "
-        "padding: 8px; "
-        "font-family: 'Jost', sans-serif;"
-    );
-    wordHoverOverlayContent->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
-    wordHoverOverlayContent->setTextFormat(Qt::RichText);
-    wordHoverOverlayContent->setWordWrap(true);
-    wordHoverOverlay->setWidget(wordHoverOverlayContent);
+    connect(wordHoverOverlay, &HoverAwareTextBrowser::mouseEntered, this, [this]() {
+        m_hideTimer->stop();
+    });
+    connect(wordHoverOverlay, &HoverAwareTextBrowser::mouseLeft, this, &LetterboxWindow::hideWordHoverOverlay);
 
     // Debug label for hover detection (bottom-left corner)
     hoverDebugLabel = new QLabel(solvedContainer);
@@ -387,6 +382,15 @@ void LetterboxWindow::setupUI()
     // Connect scroll bar to detect when user scrolls up
     connect(solvedScrollArea->verticalScrollBar(), &QScrollBar::valueChanged,
             this, &LetterboxWindow::onScrollChanged);
+
+    // Connect future watcher for async sidebar generation
+    connect(&m_sidebarFutureWatcher, &QFutureWatcher<QString>::finished, this, &LetterboxWindow::onSidebarHtmlReady);
+
+    // Timer for delayed hiding of the sidebar overlay
+    m_hideTimer = new QTimer(this);
+    m_hideTimer->setSingleShot(true);
+    m_hideTimer->setInterval(1000); // 1 second delay
+    connect(m_hideTimer, &QTimer::timeout, this, &LetterboxWindow::onHideTimer);
 }
 
 std::string LetterboxWindow::sortVowelsFirst(const std::string& word)
@@ -1259,20 +1263,21 @@ bool LetterboxWindow::eventFilter(QObject *obj, QEvent *event)
         }
     }
 
-    // Intercept wheel events when word hover overlay is visible
-    // Scroll the overlay instead of the main content when overlay is shown
-    if (event->type() == QEvent::Wheel && wordHoverOverlay->isVisible()) {
+    // Intercept wheel events on the main scroll area to scroll the overlay instead
+    // if the overlay is visible. This makes the entire main view area act as a
+    // scroll area for the sidebar when it's open.
+    if ((obj == solvedScrollArea || obj == solvedScrollArea->viewport()) &&
+        event->type() == QEvent::Wheel &&
+        wordHoverOverlay->isVisible())
+    {
         QWheelEvent *wheelEvent = static_cast<QWheelEvent*>(event);
-
-        // Get the scroll bar
         QScrollBar* scrollBar = wordHoverOverlay->verticalScrollBar();
-        if (scrollBar && scrollBar->maximum() > 0) {
-            int delta = wheelEvent->angleDelta().y();
-            // Use full delta for faster scrolling (no divisor)
-            int newValue = scrollBar->value() - delta;
-            scrollBar->setValue(newValue);
 
-            return true;  // Event handled, don't pass to solved scroll area
+        // Only handle if the overlay is actually scrollable
+        if (scrollBar && scrollBar->maximum() > 0) {
+            m_hideTimer->stop(); // Scrolling should prevent the sidebar from hiding
+            scrollBar->setValue(scrollBar->value() - wheelEvent->angleDelta().y());
+            return true; // Event handled, do not pass to the main scroll area
         }
     }
 
@@ -1352,6 +1357,8 @@ void LetterboxWindow::updateScaledFontSizes()
 
 const HookExtensionCache& LetterboxWindow::getOrComputeHookExtensions(const std::string& word)
 {
+    QMutexLocker locker(&m_cacheMutex);
+
     // Check if already cached
     auto it = hookExtensionCache.find(word);
     if (it != hookExtensionCache.end()) {
@@ -1799,83 +1806,265 @@ void LetterboxWindow::updateWindowTitle()
 }
 
 void LetterboxWindow::showWordHoverOverlay(const QString& word, bool alignLeft, bool isHookOrExtension)
+
 {
-    if (!wordHoverOverlay || !solvedContainer) {
+
+    // If we get a hover for the same word while the overlay is already visible, do nothing.
+
+    // This prevents scrolling from being reset.
+
+    if (word == currentHoveredWord && wordHoverOverlay->isVisible()) {
+
         return;
+
     }
 
-    // Ignore non-alphabetical content (like unicode symbols, numbers, etc.)
-    bool hasAlpha = false;
-    for (const QChar& ch : word) {
-        if (ch.isLetter()) {
-            hasAlpha = true;
-            break;
+
+
+    if (!wordHoverOverlay || !solvedContainer || word.isEmpty()) {
+
+        return;
+
+    }
+
+
+
+    if (m_sidebarFutureWatcher.isRunning() && m_currentlyGeneratingWord == word) {
+
+        return;
+
+    }
+
+
+
+        if (m_sidebarFutureWatcher.isRunning()) {
+
+
+
+            m_sidebarFutureWatcher.cancel();
+
+
+
         }
-    }
-    if (!hasAlpha) {
-        return;  // Don't show overlay for non-word content
-    }
 
-    // Save current hover state for refreshing on zoom
-    currentHoveredWord = word;
+
+
+        m_hideTimer->stop();
+
+
+
+    
+
+
+
+        currentHoveredWord = word;
+
     currentHoverAlignLeft = alignLeft;
+
     currentHoverIsHookOrExtension = isHookOrExtension;
 
-    QString html;
-    QString wordUpper = word.toUpper();
+    m_currentlyGeneratingWord = word;
 
-    // Calculate scaled sizes for sidebar elements
-    int sidebarWordSize = scaledWordSize;
-    int sidebarBlankSize = static_cast<int>(scaledWordSize * 0.8);
-    // Scale equation text to 67% of previous size with 10px minimum
-    // Previous: 20px at 100% zoom → New: ~13px at 100% zoom (20 * 0.67 ≈ 13)
+
+
+    {
+
+        QMutexLocker locker(&m_cacheMutex);
+
+        if (m_sidebarHtmlCache.contains(word)) {
+
+            QString cachedHtml = m_sidebarHtmlCache.value(word);
+
+            wordHoverOverlay->setHtml(cachedHtml);
+
+            int maxHeight = solvedContainer->height();
+
+            int contentHeight = wordHoverOverlay->document()->size().toSize().height();
+
+            int finalHeight = std::min(contentHeight + 20, maxHeight);
+
+            wordHoverOverlay->setFixedHeight(finalHeight);
+
+            int x = alignLeft ? 0 : (solvedContainer->width() - wordHoverOverlay->width());
+
+            wordHoverOverlay->move(x, 0);
+
+            wordHoverOverlay->show();
+
+            wordHoverOverlay->raise();
+
+            m_currentlyGeneratingWord.clear();
+
+            return;
+
+        }
+
+    }
+
+
+
     int sidebarHeaderSize = std::max(10, static_cast<int>(20 * 0.67 * scaleFactor));
 
-    qDebug() << "Zoom sizes - scaledWordSize:" << scaledWordSize
-             << "sidebarHeaderSize:" << sidebarHeaderSize
-             << "scaleFactor:" << scaleFactor;
+    QString skeletonHtml = generateSidebarSkeletonHtml(word, isHookOrExtension, sidebarHeaderSize);
 
-    // Always add the sidebar table (shows anagrams/hooks for hooks/extensions, blank extensions for all)
-    // Use scaled sizes: sidebarWordSize for main table, sidebarBlankSize for blank tables, sidebarHeaderSize for equations
-    QString tableHtml = generateSidebarTable(word, isHookOrExtension, sidebarWordSize, sidebarBlankSize, sidebarHeaderSize);
-    html += tableHtml;
+    wordHoverOverlay->setHtml(skeletonHtml);
 
-    // Update the content label
-    wordHoverOverlayContent->clear();
-    wordHoverOverlayContent->setText(html);
-    wordHoverOverlayContent->adjustSize();
 
-    // Set a generous fixed width to accommodate tables with extensions
-    // Allow it to overlap answers rather than restricting based on container width
+
     int overlayWidth = 450;
+
     wordHoverOverlay->setFixedWidth(overlayWidth);
 
-    // Set maximum height to 100% of container, but allow it to be smaller if content fits
-    int maxHeight = solvedContainer->height();
-    int contentHeight = wordHoverOverlayContent->sizeHint().height();
+    wordHoverOverlay->setFixedHeight(150);
 
-    // Use the smaller of content height or max height
-    int finalHeight = std::min(contentHeight + 20, maxHeight);  // +20 for some padding
-    wordHoverOverlay->setFixedHeight(finalHeight);
 
-    qDebug() << "Sidebar sizing - contentHeight:" << contentHeight
-             << "maxHeight:" << maxHeight
-             << "finalHeight:" << finalHeight;
 
-    // Position in corner (top-left or top-right)
     int x = alignLeft ? 0 : (solvedContainer->width() - wordHoverOverlay->width());
-    int y = 0;  // Top of container
 
-    qDebug() << "Positioning overlay - alignLeft:" << alignLeft
-             << "x:" << x << "y:" << y
-             << "overlayWidth:" << wordHoverOverlay->width()
-             << "containerWidth:" << solvedContainer->width()
-             << "overlayGlobalPos:" << wordHoverOverlay->mapToGlobal(QPoint(0, 0));
+    wordHoverOverlay->move(x, 0);
 
-    wordHoverOverlay->move(x, y);
     wordHoverOverlay->show();
-    wordHoverOverlay->raise();  // Ensure it's on top
+
+    wordHoverOverlay->raise();
+
+
+
+    int sidebarWordSize = scaledWordSize;
+
+    int sidebarBlankSize = static_cast<int>(scaledWordSize * 0.8);
+
+
+
+    QFuture<QString> future = QtConcurrent::run([this, word, isHookOrExtension, sidebarWordSize, sidebarBlankSize, sidebarHeaderSize]() {
+
+        return generateSidebarTable(word, isHookOrExtension, sidebarWordSize, sidebarBlankSize, sidebarHeaderSize);
+
+    });
+
+
+
+    m_sidebarFutureWatcher.setFuture(future);
+
 }
+
+
+
+void LetterboxWindow::onSidebarHtmlReady()
+
+{
+
+    if (m_sidebarFutureWatcher.isCanceled()) {
+
+        m_currentlyGeneratingWord.clear();
+
+        return;
+
+    }
+
+
+
+    QString finalHtml = m_sidebarFutureWatcher.result();
+
+
+
+    {
+
+        QMutexLocker locker(&m_cacheMutex);
+
+        m_sidebarHtmlCache.insert(currentHoveredWord, finalHtml);
+
+    }
+
+
+
+    if (m_currentlyGeneratingWord == currentHoveredWord) {
+
+        wordHoverOverlay->setHtml(finalHtml);
+
+
+
+        int maxHeight = solvedContainer->height();
+
+        int contentHeight = wordHoverOverlay->document()->size().toSize().height();
+
+        int finalHeight = std::min(contentHeight + 20, maxHeight);
+
+        wordHoverOverlay->setFixedHeight(finalHeight);
+
+
+
+        int x = currentHoverAlignLeft ? 0 : (solvedContainer->width() - wordHoverOverlay->width());
+
+        wordHoverOverlay->move(x, 0);
+
+    }
+
+    
+
+    m_currentlyGeneratingWord.clear();
+
+}
+
+
+
+QString LetterboxWindow::generateSidebarSkeletonHtml(const QString& word, bool isHookOrExtension, int sidebarHeaderSize)
+
+{
+
+    QString html;
+
+    QString wordUpper = word.toUpper();
+
+
+
+    const char* paleGray = "#888";
+
+
+
+    if (isHookOrExtension) {
+
+        html += "<div style='text-align: center;'>";
+
+        html += "<table style='border-collapse: collapse; background-color: rgb(50, 50, 50); border: 1px solid rgb(90, 90, 90); display: inline-block;'>";
+
+        html += QString("<tr><td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; color: %2; text-align: center; padding: 8px 4px;'>%3</td></tr>")
+
+                .arg(scaledWordSize)
+
+                .arg(paleGray)
+
+                .arg(wordUpper);
+
+        html += "</table></div>";
+
+    }
+
+
+
+    html += "<div style='height: 20px;'></div>";
+
+
+
+    QString equationStyle = QString("font-family: Jost; font-size: %1px; font-weight: 500; text-align: center; color: %2; margin: 0px 0px 8px 0px;").arg(sidebarHeaderSize).arg(paleGray);
+
+    html += QString("<p style='%1'>%2 + ?</p>").arg(equationStyle).arg(wordUpper);
+
+
+
+    html += "<div style='height: 20px;'></div>";
+
+
+
+    html += QString("<p style='%1'>%2 + ??</p>").arg(equationStyle).arg(wordUpper);
+
+
+
+    return html;
+
+}
+
+
+
 
 QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOrExtension, int sidebarWordSize, int sidebarBlankSize, int sidebarHeaderSize)
 {
@@ -2061,7 +2250,7 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
         std::sort(sortedBlankLetters.begin(), sortedBlankLetters.end());
 
         // Add spacing and section header
-        html += "<div style='margin-top: 12px;'></div>";
+        html += "<div style='height: 20px;'></div>";
 
         // Show the summary line: WORD + ? = A B C D ...
         QString blankLetterList;
@@ -2161,7 +2350,10 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
             int hookSize = std::max(24, static_cast<int>(sidebarBlankSize * 24.0 / 36.0));
             int extensionSize = std::max(14, static_cast<int>(sidebarBlankSize * 14.0 / 36.0));
 
+            const int max_rows = 100;
+            int rows_rendered = 0;
             for (const auto& wordData : blankWordData) {
+                if (rows_rendered++ >= max_rows) break;
                 QString displayWord = std::get<0>(wordData);
                 QChar blankLetter = std::get<1>(wordData);
                 QString spacedFrontHooks = std::get<2>(wordData);
@@ -2232,6 +2424,15 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
                 html += "</tr>";
             }
 
+            if (blankWordData.size() > 100) {
+                int colspan = 1;
+                if (anyHasFront) colspan++;
+                if (anyHasBack) colspan++;
+                html += QString("<tr><td colspan='%1' style='text-align: center; padding: 10px; color: #888; font-family: Jost; font-size: 14px;'>").arg(colspan);
+                html += QString("Showing 100 of %1 words...").arg(blankWordData.size());
+                html += "</td></tr>";
+            }
+
             html += "</table>";
             html += "</div>";
         }
@@ -2243,7 +2444,7 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
     }
 
     // Add spacing between single and double blank sections
-    html += "<div style='margin-top: 20px;'></div>";
+    html += "<div style='height: 20px;'></div>";
 
     // Add double blank extensions section (word + ??)
     WordList* twoBlankAlphagrams = letterbox_find_anagrams_with_two_blanks(kwg, ld, wordStr.c_str());
@@ -2309,9 +2510,6 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
         // Convert to sorted list for display
         QList<QString> sortedTwoBlankPairs = twoBlankPairs.values();
         std::sort(sortedTwoBlankPairs.begin(), sortedTwoBlankPairs.end());
-
-        // Add spacing and section header
-        html += "<div style='margin-top: 12px;'></div>";
 
         // Show the summary line: WORD + ?? = AB CD EF ...
         QString twoBlankPairList;
@@ -2397,7 +2595,10 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
             html += "<div style='text-align: center;'>";
             html += "<table style='border-collapse: collapse; background-color: rgb(50, 50, 50); border: 1px solid rgb(90, 90, 90); display: inline-block;'>";
 
+            const int max_rows_double = 100;
+            int rows_rendered_double = 0;
             for (const auto& wordData : twoBlankWordData) {
+                if (rows_rendered_double++ >= max_rows_double) break;
                 QString displayWord = std::get<0>(wordData);
                 QString blankPair = std::get<1>(wordData);
                 QString spacedFrontHooks = std::get<2>(wordData);
@@ -2478,12 +2679,19 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
                 html += "</tr>";
             }
 
+            if (twoBlankWordData.size() > 100) {
+                int colspan = 1;
+                if (anyHasFront) colspan++;
+                if (anyHasBack) colspan++;
+                html += QString("<tr><td colspan='%1' style='text-align: center; padding: 10px; color: #888; font-family: Jost; font-size: 14px;'>").arg(colspan);
+                html += QString("Showing 100 of %1 words...").arg(twoBlankWordData.size());
+                html += "</td></tr>";
+            }
             html += "</table>";
             html += "</div>";
         }
     } else {
         // No double blank extensions found - show the empty set symbol
-        html += "<div style='margin-top: 12px;'></div>";
         html += QString("<div style='font-family: \"Jost\", sans-serif; font-size: 16px; font-weight: 500; text-align: center; color: #fff; max-width: 100%%; white-space: normal; word-wrap: break-word; overflow-wrap: anywhere;'>%1 + ?? = ∅ (0/0)</div>")
                 .arg(wordUpper);
     }
@@ -2515,10 +2723,16 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
 
 void LetterboxWindow::hideWordHoverOverlay()
 {
+    // Don't hide immediately; start a timer.
+    // If the mouse enters the overlay itself, the timer will be stopped.
+    m_hideTimer->start();
+}
+
+void LetterboxWindow::onHideTimer()
+{
     if (wordHoverOverlay) {
         wordHoverOverlay->hide();
     }
-    // Clear hover state
     currentHoveredWord.clear();
 }
 
