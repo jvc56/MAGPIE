@@ -215,7 +215,7 @@ void LetterboxWindow::setupUI()
     wordHoverOverlay->setGraphicsEffect(m_sidebarOpacity);
 
     m_fadeAnimation = new QPropertyAnimation(m_sidebarOpacity, "opacity", this);
-    m_fadeAnimation->setDuration(200);  // 200ms fade
+    m_fadeAnimation->setDuration(500);  // 500ms fade
     m_fadeAnimation->setStartValue(1.0);
     m_fadeAnimation->setEndValue(0.0);
     m_fadeAnimation->setEasingCurve(QEasingCurve::OutQuad);
@@ -411,7 +411,7 @@ void LetterboxWindow::setupUI()
     // Timer for delayed hiding of the sidebar overlay
     m_hideTimer = new QTimer(this);
     m_hideTimer->setSingleShot(true);
-    m_hideTimer->setInterval(1000); // 1 second delay
+    m_hideTimer->setInterval(700); // 700ms delay before fade starts
     connect(m_hideTimer, &QTimer::timeout, this, &LetterboxWindow::onHideTimer);
 }
 
