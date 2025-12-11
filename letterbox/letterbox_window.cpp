@@ -1943,7 +1943,7 @@ void LetterboxWindow::showWordHoverOverlay(const QString& word, bool alignLeft, 
 
 
 
-    int overlayWidth = 450;
+    int overlayWidth = 540;  // 20% wider than original 450
 
     wordHoverOverlay->setFixedWidth(overlayWidth);
 
@@ -1963,9 +1963,9 @@ void LetterboxWindow::showWordHoverOverlay(const QString& word, bool alignLeft, 
 
     wordHoverOverlay->raise();
 
-    int sidebarWordSize = scaledWordSize;
+    int sidebarWordSize = static_cast<int>(scaledWordSize * 0.85);  // 15% smaller
 
-    int sidebarBlankSize = static_cast<int>(scaledWordSize * 0.8);
+    int sidebarBlankSize = static_cast<int>(scaledWordSize * 0.68);  // 0.8 * 0.85 = 15% smaller
 
 
 
@@ -2773,6 +2773,11 @@ void LetterboxWindow::refreshWordHoverOverlay()
 {
     // If there's a currently hovered word, refresh it with new scaled sizes
     if (!currentHoveredWord.isEmpty() && wordHoverOverlay && wordHoverOverlay->isVisible()) {
+        // Clear cache since font sizes have changed with zoom
+        {
+            QMutexLocker locker(&m_cacheMutex);
+            m_sidebarHtmlCache.clear();
+        }
         showWordHoverOverlay(currentHoveredWord, currentHoverAlignLeft, currentHoverIsHookOrExtension);
     }
 }
