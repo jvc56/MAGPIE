@@ -2284,14 +2284,25 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
         QList<QChar> sortedBlankLetters = blankLetters.values();
         std::sort(sortedBlankLetters.begin(), sortedBlankLetters.end());
 
+        // Count how many anagrams each blank letter produces
+        QMap<QChar, int> blankLetterAnagramCounts;
+        for (const auto& wordPair : blankWords) {
+            QChar blankLetter = std::get<1>(wordPair);
+            blankLetterAnagramCounts[blankLetter]++;
+        }
+
         // Add spacing and section header
         html += "<div style='height: 20px;'></div>";
 
-        // Show the summary line: WORD + ? = A B C D ...
+        // Show the summary line: WORD + ? = A B C D ... (bold letters with multiple anagrams)
         QString blankLetterList;
         for (QChar letter : sortedBlankLetters) {
             if (!blankLetterList.isEmpty()) blankLetterList += " ";
-            blankLetterList += letter;
+            if (blankLetterAnagramCounts[letter] > 1) {
+                blankLetterList += QString("<b>%1</b>").arg(letter);
+            } else {
+                blankLetterList += letter;
+            }
         }
 
         if (blankLetterList.isEmpty()) {
@@ -2545,11 +2556,22 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
         QList<QString> sortedTwoBlankPairs = twoBlankPairs.values();
         std::sort(sortedTwoBlankPairs.begin(), sortedTwoBlankPairs.end());
 
-        // Show the summary line: WORD + ?? = AB CD EF ...
+        // Count how many anagrams each blank pair produces
+        QMap<QString, int> blankPairAnagramCounts;
+        for (const auto& wordPair : twoBlankWords) {
+            QString blankPair = std::get<1>(wordPair);
+            blankPairAnagramCounts[blankPair]++;
+        }
+
+        // Show the summary line: WORD + ?? = AB CD EF ... (bold pairs with multiple anagrams)
         QString twoBlankPairList;
         for (const QString& pair : sortedTwoBlankPairs) {
             if (!twoBlankPairList.isEmpty()) twoBlankPairList += " ";
-            twoBlankPairList += pair;
+            if (blankPairAnagramCounts[pair] > 1) {
+                twoBlankPairList += QString("<b>%1</b>").arg(pair);
+            } else {
+                twoBlankPairList += pair;
+            }
         }
 
         if (twoBlankPairList.isEmpty()) {
