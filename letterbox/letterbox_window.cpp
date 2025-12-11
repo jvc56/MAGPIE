@@ -1244,6 +1244,12 @@ void LetterboxWindow::resizeEvent(QResizeEvent *event)
 {
     QMainWindow::resizeEvent(event);
 
+    // Immediately reposition sidebar if visible
+    if (wordHoverOverlay && wordHoverOverlay->isVisible() && solvedContainer) {
+        int x = currentHoverAlignLeft ? 0 : (solvedContainer->width() - wordHoverOverlay->width());
+        wordHoverOverlay->move(x, 0);
+    }
+
     // Restart the debounce timer - only process resize after user stops resizing
     resizeTimer->start();
 }
