@@ -2169,15 +2169,13 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
             }
 
             // Word column (centered, bold, larger)
-            QString wordBorder = anyHasBackHooks ? "border-right: 1px solid #666;" : "";
-            html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; color: #fff; text-align: center; padding: 8px 4px; white-space: nowrap; %2'>%3</td>")
+            html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; color: #fff; text-align: center; padding: 8px 4px; white-space: nowrap; border-right: 1px solid #666;'>%2</td>")
                     .arg(sidebarWordSize)
-                    .arg(wordBorder)
                     .arg(anagram);
 
             // Back hooks column (left-aligned) - only show if any word has back hooks
             if (anyHasBackHooks) {
-                html += QString("<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: left; vertical-align: top; font-size: %1px; font-weight: 500; white-space: nowrap;'>")
+                html += QString("<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: left; vertical-align: top; font-size: %1px; font-weight: 500; white-space: nowrap; border-right: 1px solid #666;'>")
                         .arg(hookSize);
                 html += backHooks;
                 html += "</td>";
@@ -2397,10 +2395,8 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
                 }
 
                 // Word column
-                QString wordBorder = anyHasBack ? "border-right: 1px solid #666;" : "";
-                html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; text-align: center; padding: 8px 4px; %2'>%3</td>")
+                html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; text-align: center; padding: 8px 4px; border-right: 1px solid #666;'>%2</td>")
                         .arg(sidebarBlankSize)
-                        .arg(wordBorder)
                         .arg(styledWord);
 
                 // Back hooks/extensions column (only if any word has back hooks/exts)
@@ -2417,7 +2413,7 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
                         cellContent += QString("<div style='font-size: %1px; font-weight: 400;'>%2</div>").arg(extensionSize).arg(formattedExts);
                     }
 
-                    html += QString("<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: left; vertical-align: top;'>%1</td>")
+                    html += QString("<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: left; vertical-align: top; border-right: 1px solid #666;'>%1</td>")
                             .arg(cellContent);
                 }
 
@@ -2652,10 +2648,8 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
                 }
 
                 // Word column
-                QString wordBorder = anyHasBack ? "border-right: 1px solid #666;" : "";
-                html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; text-align: center; padding: 8px 4px; %2'>%3</td>")
+                html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; text-align: center; padding: 8px 4px; border-right: 1px solid #666;'>%2</td>")
                         .arg(sidebarBlankSize)
-                        .arg(wordBorder)
                         .arg(styledWord);
 
                 // Back hooks/extensions column (only if any word has back hooks or extensions)
@@ -2672,7 +2666,7 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
                         cellContent += QString("<div style='font-size: %1px; font-weight: 400;'>%2</div>").arg(extensionSize).arg(formattedExts);
                     }
 
-                    html += QString("<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: left; vertical-align: top;'>%1</td>")
+                    html += QString("<td style='font-family: \"Jost\", sans-serif; color: #fff; padding: 8px 4px; text-align: left; vertical-align: top; border-right: 1px solid #666;'>%1</td>")
                             .arg(cellContent);
                 }
 

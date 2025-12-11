@@ -382,7 +382,9 @@ void AlphagramBox::processCellForBoundingBoxes(QTextDocument& doc, QTextTable* t
             for (int i = 0; i < words.size(); i++) {
                 QString word = words[i];
                 QString cleanWord = word;
-                cleanWord.remove("…");
+                cleanWord.remove("…");  // Remove ellipsis
+                cleanWord.remove("·");  // Remove middle dots (placeholder characters)
+                cleanWord.remove("❌");  // Remove red cross (incorrect answer marker)
 
                 if (cleanWord.isEmpty()) {
                     continue;
