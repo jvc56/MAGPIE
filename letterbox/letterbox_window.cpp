@@ -2186,10 +2186,10 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
 
         html += "</table>";
         html += "</div>";  // Close centering div
-    }
 
-    // Add spacing between anagram table and single blank section
-    html += "<br>";
+        // Add spacing between anagram table and single blank section
+        html += "<br>";
+    }
 
     // Add blank extensions section (word + ?)
     // Use optimized function that only finds words exactly one letter longer
