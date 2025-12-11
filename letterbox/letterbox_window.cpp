@@ -2381,9 +2381,9 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
             html += "<table style='border-collapse: collapse; background-color: rgb(50, 50, 50); border: 1px solid rgb(90, 90, 90); display: inline-block;'>";
 
             // Calculate hook/extension sizes to match alphagram_box ratios (24/36 and 14/36)
-            // Use same minimums as main answer tables (baseHookSize=24, baseExtensionSize=14)
-            int hookSize = std::max(24, static_cast<int>(sidebarBlankSize * 24.0 / 36.0));
-            int extensionSize = std::max(14, static_cast<int>(sidebarBlankSize * 14.0 / 36.0));
+            // Use proportionally smaller minimums for blank tables (16 and 10 instead of 24 and 14)
+            int hookSize = std::max(16, static_cast<int>(sidebarBlankSize * 24.0 / 36.0));
+            int extensionSize = std::max(10, static_cast<int>(sidebarBlankSize * 14.0 / 36.0));
 
             const int max_rows = 100;
             int rows_rendered = 0;
@@ -2622,9 +2622,9 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
             });
 
             // Calculate hook/extension sizes to match alphagram_box ratios (24/36 and 14/36)
-            // Use same minimums as main answer tables (baseHookSize=24, baseExtensionSize=14)
-            int hookSize = std::max(24, static_cast<int>(sidebarBlankSize * 24.0 / 36.0));
-            int extensionSize = std::max(14, static_cast<int>(sidebarBlankSize * 14.0 / 36.0));
+            // Use proportionally smaller minimums for blank tables (16 and 10 instead of 24 and 14)
+            int hookSize = std::max(16, static_cast<int>(sidebarBlankSize * 24.0 / 36.0));
+            int extensionSize = std::max(10, static_cast<int>(sidebarBlankSize * 14.0 / 36.0));
 
             html += "<div style='text-align: center;'>";
             html += "<table style='border-collapse: collapse; background-color: rgb(50, 50, 50); border: 1px solid rgb(90, 90, 90); display: inline-block;'>";
