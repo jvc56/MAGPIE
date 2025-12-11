@@ -20,6 +20,8 @@
 #include <QFutureWatcher>
 #include <QMutex>
 #include <QHash>
+#include <QGraphicsOpacityEffect>
+#include <QPropertyAnimation>
 
 extern "C" {
     #include "magpie_wrapper.h"
@@ -209,6 +211,10 @@ private:
     QHash<QString, QString> m_sidebarHtmlCache;
     QTimer* m_hideTimer;
     QString m_currentlyGeneratingWord;
+
+    // Sidebar fade animation
+    QGraphicsOpacityEffect* m_sidebarOpacity;
+    QPropertyAnimation* m_fadeAnimation;
 };
 
 #endif // LETTERBOX_WINDOW_H

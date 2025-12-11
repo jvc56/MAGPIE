@@ -209,8 +209,30 @@ void LetterboxWindow::setupUI()
     wordHoverOverlay->setFixedWidth(200);
     wordHoverOverlay->hide();
 
+    // Setup fade animation for sidebar
+    m_sidebarOpacity = new QGraphicsOpacityEffect(wordHoverOverlay);
+    m_sidebarOpacity->setOpacity(1.0);
+    wordHoverOverlay->setGraphicsEffect(m_sidebarOpacity);
+
+    m_fadeAnimation = new QPropertyAnimation(m_sidebarOpacity, "opacity", this);
+    m_fadeAnimation->setDuration(200);  // 200ms fade
+    m_fadeAnimation->setStartValue(1.0);
+    m_fadeAnimation->setEndValue(0.0);
+    m_fadeAnimation->setEasingCurve(QEasingCurve::OutQuad);
+    connect(m_fadeAnimation, &QPropertyAnimation::finished, this, [this]() {
+        if (m_sidebarOpacity->opacity() == 0.0) {
+            wordHoverOverlay->hide();
+            currentHoveredWord.clear();
+        }
+    });
+
     connect(wordHoverOverlay, &HoverAwareTextBrowser::mouseEntered, this, [this]() {
         m_hideTimer->stop();
+        // If fading, stop and restore opacity
+        if (m_fadeAnimation->state() == QAbstractAnimation::Running) {
+            m_fadeAnimation->stop();
+            m_sidebarOpacity->setOpacity(1.0);
+        }
     });
     connect(wordHoverOverlay, &HoverAwareTextBrowser::mouseLeft, this, &LetterboxWindow::hideWordHoverOverlay);
 
@@ -1895,6 +1917,10 @@ void LetterboxWindow::showWordHoverOverlay(const QString& word, bool alignLeft, 
 
             wordHoverOverlay->move(x, 0);
 
+            // Stop any fade animation and reset opacity before showing
+            m_fadeAnimation->stop();
+            m_sidebarOpacity->setOpacity(1.0);
+
             wordHoverOverlay->show();
 
             wordHoverOverlay->raise();
@@ -1929,11 +1955,13 @@ void LetterboxWindow::showWordHoverOverlay(const QString& word, bool alignLeft, 
 
     wordHoverOverlay->move(x, 0);
 
+    // Stop any fade animation and reset opacity before showing
+    m_fadeAnimation->stop();
+    m_sidebarOpacity->setOpacity(1.0);
+
     wordHoverOverlay->show();
 
     wordHoverOverlay->raise();
-
-
 
     int sidebarWordSize = scaledWordSize;
 
@@ -2735,10 +2763,10 @@ void LetterboxWindow::hideWordHoverOverlay()
 
 void LetterboxWindow::onHideTimer()
 {
-    if (wordHoverOverlay) {
-        wordHoverOverlay->hide();
+    if (wordHoverOverlay && wordHoverOverlay->isVisible()) {
+        // Start fade animation instead of immediately hiding
+        m_fadeAnimation->start();
     }
-    currentHoveredWord.clear();
 }
 
 void LetterboxWindow::refreshWordHoverOverlay()
