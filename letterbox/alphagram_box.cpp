@@ -126,10 +126,13 @@ void AlphagramBox::finalize(int wordSize, int hookSize, int extensionSize, bool 
                     .arg(wordData.computeTimeMicros);
         }
 
-        html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: %2; letter-spacing: 1px; color: %3; text-align: center; padding: 8px 4px; %4'>%5</td>")
+        // Use proportional horizontal padding to prevent J from overflowing
+        int wordPadH = std::max(6, wordSize / 4);
+        html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: %2; letter-spacing: 1px; color: %3; text-align: center; padding: 8px %4px; %5'>%6</td>")
                 .arg(wordSize)
                 .arg(fontWeight)
                 .arg(color)
+                .arg(wordPadH)
                 .arg(wordBorder)
                 .arg(wordCellContent);
 

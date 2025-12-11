@@ -1837,14 +1837,16 @@ void LetterboxWindow::showWordHoverOverlay(const QString& word, bool alignLeft, 
 
 {
 
-    // If we get a hover for the same word while the overlay is already visible, do nothing.
-
-    // This prevents scrolling from being reset.
-
+    // If we get a hover for the same word while the overlay is already visible,
+    // stop any fade animation and restore opacity, but don't regenerate content.
     if (word == currentHoveredWord && wordHoverOverlay->isVisible()) {
-
+        // Stop fade animation if running and restore full opacity
+        if (m_fadeAnimation->state() == QAbstractAnimation::Running) {
+            m_fadeAnimation->stop();
+            m_sidebarOpacity->setOpacity(1.0);
+        }
+        m_hideTimer->stop();
         return;
-
     }
 
 
@@ -2202,9 +2204,11 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
                 html += "</td>";
             }
 
-            // Word column (centered, bold, larger)
-            html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; color: #fff; text-align: center; padding: 8px 4px; white-space: nowrap; border-right: 1px solid #666;'>%2</td>")
+            // Word column (centered, bold, larger) - use proportional horizontal padding to prevent J from overflowing
+            int wordPadH = std::max(6, sidebarWordSize / 4);
+            html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; color: #fff; text-align: center; padding: 8px %2px; white-space: nowrap; border-right: 1px solid #666;'>%3</td>")
                     .arg(sidebarWordSize)
+                    .arg(wordPadH)
                     .arg(anagram);
 
             // Back hooks column (left-aligned) - only show if any word has back hooks
@@ -2442,9 +2446,11 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
                             .arg(cellContent);
                 }
 
-                // Word column
-                html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; text-align: center; padding: 8px 4px; border-right: 1px solid #666;'>%2</td>")
+                // Word column - use proportional horizontal padding to prevent J from overflowing
+                int wordPadH = std::max(6, sidebarBlankSize / 4);
+                html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; text-align: center; padding: 8px %2px; border-right: 1px solid #666;'>%3</td>")
                         .arg(sidebarBlankSize)
+                        .arg(wordPadH)
                         .arg(styledWord);
 
                 // Back hooks/extensions column (only if any word has back hooks/exts)
@@ -2707,9 +2713,11 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
                             .arg(cellContent);
                 }
 
-                // Word column
-                html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; text-align: center; padding: 8px 4px; border-right: 1px solid #666;'>%2</td>")
+                // Word column - use proportional horizontal padding to prevent J from overflowing
+                int wordPadH = std::max(6, sidebarBlankSize / 4);
+                html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; text-align: center; padding: 8px %2px; border-right: 1px solid #666;'>%3</td>")
                         .arg(sidebarBlankSize)
+                        .arg(wordPadH)
                         .arg(styledWord);
 
                 // Back hooks/extensions column (only if any word has back hooks or extensions)
