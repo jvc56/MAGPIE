@@ -2188,6 +2188,9 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
         html += "</div>";  // Close centering div
     }
 
+    // Add spacing between anagram table and single blank section
+    html += "<br>";
+
     // Add blank extensions section (word + ?)
     // Use optimized function that only finds words exactly one letter longer
     WordList* blankAlphagrams = letterbox_find_anagrams_with_blank(kwg, ld, wordStr.c_str());
