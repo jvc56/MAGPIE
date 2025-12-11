@@ -2441,7 +2441,7 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
     }
 
     // Add spacing between single and double blank sections
-    html += "<div style='height: 20px;'></div>";
+    html += "<br>";
 
     // Add double blank extensions section (word + ??)
     WordList* twoBlankAlphagrams = letterbox_find_anagrams_with_two_blanks(kwg, ld, wordStr.c_str());
