@@ -2434,8 +2434,9 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
         }
     } else {
         // No blank extensions found - show the empty set symbol
-        html += "<div style='margin-top: 12px;'></div>";
-        html += QString("<div style='font-family: \"Jost\", sans-serif; font-size: 16px; font-weight: 500; text-align: center; color: #fff; max-width: 100%%; white-space: normal; word-wrap: break-word; overflow-wrap: anywhere;'>%1 + ? = ∅ (0/0)</div>")
+        html += "<div style='height: 20px;'></div>";
+        html += QString("<p style='font-family: Jost; font-size: %1px; font-weight: 500; text-align: center; color: #fff; margin: 0px;'>%2 + ? = ∅ (0/0)</p>")
+                .arg(sidebarHeaderSize)
                 .arg(wordUpper);
     }
 
@@ -2686,7 +2687,8 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
         }
     } else {
         // No double blank extensions found - show the empty set symbol
-        html += QString("<div style='font-family: \"Jost\", sans-serif; font-size: 16px; font-weight: 500; text-align: center; color: #fff; max-width: 100%%; white-space: normal; word-wrap: break-word; overflow-wrap: anywhere;'>%1 + ?? = ∅ (0/0)</div>")
+        html += QString("<p style='font-family: Jost; font-size: %1px; font-weight: 500; text-align: center; color: #fff; margin: 0px;'>%2 + ?? = ∅ (0/0)</p>")
+                .arg(sidebarHeaderSize)
                 .arg(wordUpper);
     }
 
