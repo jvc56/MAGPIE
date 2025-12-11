@@ -2194,7 +2194,7 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
         html += "</div>";  // Close centering div
 
         // Add spacing between anagram table and single blank section
-        html += "<div style='height: 10px;'></div>";
+        html += "<span style='font-size: 8px;'><br></span>";
     }
 
     // Add blank extensions section (word + ?)
@@ -2450,7 +2450,7 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
     }
 
     // Add spacing between single and double blank sections
-    html += "<div style='height: 10px;'></div>";
+    html += "<span style='font-size: 8px;'><br></span>";
 
     // Add double blank extensions section (word + ??)
     WordList* twoBlankAlphagrams = letterbox_find_anagrams_with_two_blanks(kwg, ld, wordStr.c_str());
