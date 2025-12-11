@@ -4,6 +4,7 @@
 #include "../ent/endgame_results.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
+#include "../ent/heat_map.h"
 #include "../ent/move.h"
 #include "../ent/thread_control.h"
 #include "../util/string_util.h"
@@ -84,6 +85,12 @@ void string_builder_add_game(const Game *game, const MoveList *move_list,
                              const GameStringOptions *game_string_options,
                              const GameHistory *game_history,
                              StringBuilder *game_string);
+
+void string_builder_add_game_with_heat_map(
+    const Game *game, const MoveList *move_list,
+    const GameStringOptions *game_string_options,
+    const GameHistory *game_history, const HeatMap *heat_map, int play, int ply,
+    heat_map_t heat_map_type, StringBuilder *game_string);
 
 GameStringOptions *game_string_options_create_default(void);
 GameStringOptions *game_string_options_create_pretty(void);

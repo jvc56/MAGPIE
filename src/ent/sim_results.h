@@ -7,6 +7,7 @@
 #include "../def/sim_defs.h"
 #include "bai_result.h"
 #include "game.h"
+#include "heat_map.h"
 #include "move.h"
 #include "stats.h"
 #include "win_pct.h"
@@ -15,6 +16,7 @@
 typedef struct SimmedPlay SimmedPlay;
 
 typedef struct SimmedPlayDisplayInfo {
+  int play_id;
   Move move;
   double score_means[MAX_PLIES];
   double score_stdevs[MAX_PLIES];
@@ -48,7 +50,7 @@ typedef struct SimResults SimResults;
 
 SimResults *sim_results_create(void);
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
-                       int num_plies, uint64_t seed);
+                       int num_plies, uint64_t seed, bool use_heat_map);
 void sim_results_destroy(SimResults *sim_results);
 
 int sim_results_get_number_of_plays(const SimResults *sim_results);
@@ -62,11 +64,15 @@ SimmedPlay *sim_results_get_simmed_play(const SimResults *sim_results,
 const Rack *sim_results_get_rack(const SimResults *sim_results);
 void sim_results_set_rack(SimResults *sim_results, const Rack *rack);
 BAIResult *sim_results_get_bai_result(const SimResults *sim_results);
+HeatMap *sim_results_get_heat_map(const SimResults *sim_results);
+void simmed_play_increment_heat_map(SimResults *sim_results, int play_index,
+                                    int ply_index, const Move *best_play);
 
 void sim_results_lock_simmed_plays(SimResults *sim_results);
 void sim_results_unlock_simmed_plays(SimResults *sim_results);
 void sim_results_get_nth_best_move(const SimResults *sim_results, int n,
                                    Move *move);
+int sim_results_get_nth_best_play_id(const SimResults *sim_results, int n);
 void sim_results_set_valid_for_current_game_state(SimResults *sim_results,
                                                   bool valid);
 bool sim_results_get_valid_for_current_game_state(

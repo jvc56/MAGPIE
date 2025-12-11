@@ -7,6 +7,7 @@
 #include "../util/io_util.h"
 #include "bai_result.h"
 #include "equity.h"
+#include "heat_map.h"
 #include "move.h"
 #include "rack.h"
 #include "stats.h"
@@ -40,6 +41,7 @@ struct SimResults {
   cpthread_mutex_t display_mutex;
   SimmedPlay **simmed_plays;
   SimmedPlayDisplayInfo *simmed_play_display_infos;
+  HeatMap *heat_map;
   Rack rack;
   BAIResult *bai_result;
   bool valid_for_current_game_state;
@@ -111,6 +113,7 @@ void sim_results_destroy(SimResults *sim_results) {
   }
   sim_results_destroy_internal(sim_results);
   bai_result_destroy(sim_results->bai_result);
+  heat_map_destroy(sim_results->heat_map);
   free(sim_results);
 }
 
@@ -123,7 +126,7 @@ void sim_results_unlock_simmed_plays(SimResults *sim_results) {
 }
 
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
-                       int num_plies, uint64_t seed) {
+                       int num_plies, uint64_t seed, bool use_heat_map) {
   cpthread_mutex_lock(&sim_results->display_mutex);
   sim_results_destroy_internal(sim_results);
 
@@ -137,6 +140,17 @@ void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
 
   sim_results->num_simmed_plays = num_simmed_plays;
   sim_results->num_plies = num_plies;
+
+  if (use_heat_map) {
+    if (!sim_results->heat_map) {
+      sim_results->heat_map = heat_map_create();
+    }
+    heat_map_reset(sim_results->heat_map, num_simmed_plays, num_plies);
+  } else {
+    heat_map_destroy(sim_results->heat_map);
+    sim_results->heat_map = NULL;
+  }
+
   atomic_init(&sim_results->node_count, 0);
   atomic_init(&sim_results->iteration_count, 0);
   sim_results->valid_for_current_game_state = false;
@@ -153,6 +167,7 @@ SimResults *sim_results_create(void) {
   cpthread_mutex_init(&sim_results->display_mutex);
   sim_results->simmed_plays = NULL;
   sim_results->simmed_play_display_infos = NULL;
+  sim_results->heat_map = NULL;
   sim_results->bai_result = bai_result_create();
   sim_results->valid_for_current_game_state = false;
   rack_set_dist_size_and_reset(&sim_results->rack, 0);
@@ -235,6 +250,10 @@ BAIResult *sim_results_get_bai_result(const SimResults *sim_results) {
   return sim_results->bai_result;
 }
 
+HeatMap *sim_results_get_heat_map(const SimResults *sim_results) {
+  return sim_results->heat_map;
+}
+
 void simmed_play_add_score_stat(SimmedPlay *simmed_play, Equity score,
                                 bool is_bingo, int ply) {
   cpthread_mutex_lock(&simmed_play->mutex);
@@ -291,11 +310,26 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
   return wpct;
 }
 
+void simmed_play_increment_heat_map(SimResults *sim_results, int play_index,
+                                    int ply_index, const Move *best_play) {
+  if (!sim_results->heat_map) {
+    return;
+  }
+  SimmedPlay *simmed_play = sim_results->simmed_plays[play_index];
+  cpthread_mutex_lock(&simmed_play->mutex);
+  heat_map_add_move(sim_results->heat_map, play_index, ply_index, best_play);
+  cpthread_mutex_unlock(&simmed_play->mutex);
+}
+
 // NOT THREAD SAFE: Assumes no sim is in progress, the sim display info is
 // updated and sorted, and n is in bounds.
 void sim_results_get_nth_best_move(const SimResults *sim_results, int n,
                                    Move *move) {
   *move = sim_results->simmed_play_display_infos[n].move;
+}
+
+int sim_results_get_nth_best_play_id(const SimResults *sim_results, int n) {
+  return sim_results->simmed_play_display_infos[n].play_id;
 }
 
 void sim_results_set_valid_for_current_game_state(SimResults *sim_results,
@@ -316,6 +350,7 @@ void sim_results_write_to_display_info(SimResults *sim_results,
       &sim_results->simmed_play_display_infos[simmed_play_index];
   const int num_plies = sim_results_get_num_plies(sim_results);
   cpthread_mutex_lock(&simmed_play->mutex);
+  simmed_play_display_info->play_id = simmed_play->play_id;
   move_copy(&simmed_play_display_info->move, simmed_play->move);
   for (int i = 0; i < num_plies; i++) {
     const Stat *bingo_stat = simmed_play_get_bingo_stat(simmed_play, i);

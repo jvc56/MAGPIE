@@ -8,6 +8,7 @@
 #include "../ent/bag.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/heat_map.h"
 #include "../ent/inference_results.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
@@ -402,6 +403,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
     simmed_play_add_score_stat(simmed_play, move_get_score(best_play),
                                move_get_tiles_played(best_play) == RACK_SIZE,
                                ply);
+    simmed_play_increment_heat_map(sim_results, play_index, ply, best_play);
   }
 
   const Equity spread =
@@ -497,7 +499,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->thread_control = thread_control;
 
   sim_results_reset(sim_args->move_list, sim_results, sim_args->num_plies,
-                    sim_args->seed);
+                    sim_args->seed, sim_args->use_heat_map);
   simmer->sim_results = sim_results;
 
   rvs->data = simmer;

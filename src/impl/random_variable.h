@@ -29,6 +29,7 @@ typedef struct SimArgs {
   Rack *known_opp_rack;
   WinPct *win_pcts;
   bool use_inference;
+  bool use_heat_map;
   InferenceResults *inference_results;
   InferenceArgs inference_args;
   int num_threads;
