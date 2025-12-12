@@ -18,6 +18,48 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+void string_builder_add_simmed_play_ply_counts(StringBuilder *sb,
+                                               const SimmedPlay *simmed_play,
+                                               const int ply_index) {
+  StringGrid *sg = string_grid_create(5, 3, 1);
+
+  int curr_row = 0;
+  int curr_col = 0;
+  string_grid_set_cell(sg, curr_row, curr_col++, NULL);
+  string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Pct"));
+  string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Tot"));
+  curr_row++;
+
+  uint64_t num_pass = simmed_play_get_ply_info_count(simmed_play, ply_index,
+                                                     PLY_INFO_COUNT_PASS);
+  uint64_t num_exch = simmed_play_get_ply_info_count(simmed_play, ply_index,
+                                                     PLY_INFO_COUNT_EXCHANGE);
+  uint64_t num_tp = simmed_play_get_ply_info_count(
+      simmed_play, ply_index, PLY_INFO_COUNT_TILE_PLACEMENT);
+  uint64_t num_bingos = simmed_play_get_ply_info_count(simmed_play, ply_index,
+                                                       PLY_INFO_COUNT_BINGO);
+  uint64_t move_type_total = num_pass + num_exch + num_tp;
+
+  string_builder_add_formatted_string(sb, "Ply %d Iters %lu\n\n", ply_index + 1,
+                                      move_type_total);
+
+  const char *names[4] = {"Pass", "Exch", "Play", "Bingo"};
+  const uint64_t counts[4] = {num_pass, num_exch, num_tp, num_bingos};
+  for (int i = 0; i < 4; i++) {
+    const double pct = ((double)counts[i] / (double)move_type_total) * 100;
+    curr_col = 0;
+    string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate(names[i]));
+    string_grid_set_cell(sg, curr_row, curr_col++,
+                         get_formatted_string("%.2f", pct));
+    string_grid_set_cell(sg, curr_row, curr_col++,
+                         get_formatted_string("%lu", counts[i]));
+    curr_row++;
+  }
+
+  string_builder_add_string_grid(sb, sg, false);
+  string_grid_destroy(sg);
+}
+
 bool string_builder_add_sim_stats_with_display_lock(
     StringBuilder *sb, const Game *game, const SimResults *sim_results,
     int max_num_display_plays, bool use_ucgi_format) {

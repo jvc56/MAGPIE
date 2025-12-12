@@ -24,6 +24,7 @@
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
+#include "../ent/heat_map.h"
 #include "../ent/inference_results.h"
 #include "../ent/klv.h"
 #include "../ent/klv_csv.h"
@@ -121,6 +122,7 @@ typedef enum {
   ARG_TOKEN_USE_GAME_PAIRS,
   ARG_TOKEN_USE_SMALL_PLAYS,
   ARG_TOKEN_SIM_WITH_INFERENCE,
+  ARG_TOKEN_USE_HEAT_MAP,
   ARG_TOKEN_WRITE_BUFFER_SIZE,
   ARG_TOKEN_HUMAN_READABLE,
   ARG_TOKEN_RANDOM_SEED,
@@ -144,6 +146,7 @@ typedef enum {
   ARG_TOKEN_SHOW_MOVES,
   ARG_TOKEN_SHOW_INFERENCE,
   ARG_TOKEN_SHOW_ENDGAME,
+  ARG_TOKEN_SHOW_HEAT_MAP,
   ARG_TOKEN_NEXT,
   ARG_TOKEN_PREVIOUS,
   ARG_TOKEN_GOTO,
@@ -205,6 +208,7 @@ struct Config {
   bool human_readable;
   bool use_small_plays;
   bool sim_with_inference;
+  bool use_heat_map;
   bool print_boards;
   bool print_on_finish;
   bool show_prompt;
@@ -1060,6 +1064,20 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "";
       text = "Shows the endgame solver result.";
       break;
+    case ARG_TOKEN_SHOW_HEAT_MAP:
+      usages[0] = "<play_index> [<ply> <type>]";
+      examples[0] = "10";
+      examples[0] = "10 a";
+      examples[0] = "10 b";
+      examples[0] = "10 1";
+      examples[0] = "10 3 all";
+      examples[0] = "10 3 a";
+      examples[0] = "10 4 bingo";
+      examples[0] = "10 4 b";
+      text = "Shows the heat map for the given play, ply, and type. If no ply "
+             "is given, a default of 1 will be used. If no type is given, a "
+             "default of 'all' will be used.";
+      break;
     case ARG_TOKEN_NEXT:
       usages[0] = "";
       text = "Goes to the next move of the game if possible. Skips over "
@@ -1315,6 +1333,14 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "false";
       text = "Specifies whether or not to run and use the inference result "
              "when simulating.";
+      break;
+    case ARG_TOKEN_USE_HEAT_MAP:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether or not to save heat map data "
+             "when simulating. Heat maps may be memory intensive for many "
+             "plays or plies.";
       break;
     case ARG_TOKEN_WRITE_BUFFER_SIZE:
       usages[0] = "<write_buffer_size>";
@@ -1933,6 +1959,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->game = config_get_game(config);
   sim_args->move_list = config_get_move_list(config);
   sim_args->use_inference = config->sim_with_inference;
+  sim_args->use_heat_map = config->use_heat_map;
   sim_args->num_threads = config->num_threads;
   sim_args->print_interval = config->print_interval;
   sim_args->max_num_display_plays = config->max_num_display_plays;
@@ -2413,6 +2440,146 @@ void execute_show_endgame(Config *config, ErrorStack *error_stack) {
 
 char *str_api_show_endgame(Config *config, ErrorStack *error_stack) {
   return impl_show_endgame(config, error_stack);
+}
+
+// Show heat map
+
+char *impl_show_heat_map(Config *config, ErrorStack *error_stack) {
+  if (!config->game ||
+      !sim_results_get_valid_for_current_game_state(config->sim_results)) {
+    error_stack_push(error_stack, ERROR_STATUS_NO_HEAT_MAP_TO_SHOW,
+                     string_duplicate("no heat map to show"));
+    return empty_string();
+  }
+
+  const int num_plays = sim_results_get_number_of_plays(config->sim_results);
+  const int num_plies = sim_results_get_num_plies(config->sim_results);
+  const char *play_index_by_win_pct_str =
+      config_get_parg_value(config, ARG_TOKEN_SHOW_HEAT_MAP, 0);
+
+  int play_index_by_win_pct;
+  string_to_int_or_push_error("move index", play_index_by_win_pct_str, 1,
+                              num_plays,
+                              ERROR_STATUS_HEAT_MAP_MOVE_INDEX_OUT_OF_RANGE,
+                              &play_index_by_win_pct, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  // Convert from 1-indexed user input to 0-indexed internal
+  play_index_by_win_pct--;
+
+  const char *ply_index_str = NULL;
+  const char *type_str = NULL;
+
+  const char *pos_arg_2 =
+      config_get_parg_value(config, ARG_TOKEN_SHOW_HEAT_MAP, 1);
+  const char *pos_arg_3 =
+      config_get_parg_value(config, ARG_TOKEN_SHOW_HEAT_MAP, 2);
+
+  if (pos_arg_2) {
+    if (is_all_digits_or_empty(pos_arg_2)) {
+      ply_index_str = pos_arg_2;
+    } else {
+      type_str = pos_arg_2;
+    }
+    if (pos_arg_3) {
+      if (type_str) {
+        error_stack_push(error_stack, ERROR_STATUS_EXTRANEOUS_HEAT_MAP_ARG,
+                         string_duplicate("extraneous heat map argument"));
+        return empty_string();
+      }
+      type_str = pos_arg_3;
+    }
+  }
+
+  int ply_index = 0;
+
+  if (ply_index_str) {
+    string_to_int_or_push_error("ply index", ply_index_str, 1, num_plies,
+                                ERROR_STATUS_HEAT_MAP_PLY_INDEX_OUT_OF_RANGE,
+                                &ply_index, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return empty_string();
+    }
+    // Convert from 1-indexed user input to 0-indexed internal
+    ply_index--;
+  }
+
+  // The heat maps are only stored in the actual simmed plays and not the
+  // display simmed plays to save space. Therefore, we need to get the actual
+  // simmed play from the display simmed play by using the play index by sort
+  // type, which is the index of the play in the sim results before it was
+  // sorted by win pct.
+  const SimmedPlay *display_simmed_play = sim_results_get_display_simmed_play(
+      config->sim_results, play_index_by_win_pct);
+  const HeatMap *heat_map = simmed_play_get_heat_map(
+      sim_results_get_simmed_play(
+          config->sim_results,
+          simmed_play_get_play_index_by_sort_type(display_simmed_play)),
+      ply_index);
+
+  if (!heat_map) {
+    error_stack_push(error_stack, ERROR_STATUS_NO_HEAT_MAP_TO_SHOW,
+                     string_duplicate("no heat map to show"));
+    return empty_string();
+  }
+
+  heat_map_t heat_map_type = HEAT_MAP_TYPE_ALL;
+  if (type_str) {
+    if (has_iprefix(type_str, "all")) {
+      heat_map_type = HEAT_MAP_TYPE_ALL;
+    } else if (has_iprefix(type_str, "bingos")) {
+      heat_map_type = HEAT_MAP_TYPE_BINGO;
+    } else {
+      error_stack_push(
+          error_stack, ERROR_STATUS_HEAT_MAP_UNRECOGNIZED_TYPE,
+          get_formatted_string("unrecognized heat map type '%s'", type_str));
+      return empty_string();
+    }
+  }
+
+  char *result = NULL;
+  StringBuilder *hm_string = string_builder_create();
+
+  string_builder_add_simmed_play_ply_counts(hm_string, display_simmed_play,
+                                            ply_index);
+
+  if (config->game_string_options->board_color ==
+      GAME_STRING_BOARD_COLOR_NONE) {
+    string_builder_add_heat_map(hm_string, heat_map, heat_map_type,
+                                config->max_num_display_plays);
+  } else {
+    Game *game_dupe = game_duplicate(config->game);
+    Move move;
+    move_copy(&move, simmed_play_get_move(sim_results_get_display_simmed_play(
+                         config->sim_results, play_index_by_win_pct)));
+    const int play_on_turn_index = game_get_player_on_turn_index(game_dupe);
+    Rack leave;
+    get_leave_for_move(&move, game_dupe, &leave);
+    play_move_without_drawing_tiles(&move, game_dupe);
+    return_rack_to_bag(game_dupe, play_on_turn_index);
+    draw_rack_from_bag(game_dupe, play_on_turn_index, &leave);
+    string_builder_add_game_with_heat_map(
+        game_dupe, NULL, config->game_string_options, config->game_history,
+        heat_map, heat_map_type, hm_string);
+    game_destroy(game_dupe);
+  }
+  result = string_builder_dump(hm_string, NULL);
+  string_builder_destroy(hm_string);
+
+  return result;
+}
+
+void execute_show_heat_map(Config *config, ErrorStack *error_stack) {
+  char *result = impl_show_heat_map(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_show_heat_map(Config *config, ErrorStack *error_stack) {
+  return impl_show_heat_map(config, error_stack);
 }
 
 // Start new game
@@ -2932,7 +3099,8 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
                   "generated plays (%d) and the number of simmed plays (%d)\n",
                   num_moves, num_simmed_plays);
       }
-      sim_results_get_nth_best_move(sim_results, commit_move_index, &move);
+      move_copy(&move, simmed_play_get_move(sim_results_get_display_simmed_play(
+                           config->sim_results, commit_move_index)));
     } else {
       move_copy(&move,
                 move_list_get_move(config->move_list, commit_move_index));
@@ -4732,6 +4900,14 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  // Use heatmaps
+
+  config_load_bool(config, ARG_TOKEN_USE_HEAT_MAP, &config->use_heat_map,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // Human readable
 
   config_load_bool(config, ARG_TOKEN_HUMAN_READABLE, &config->human_readable,
@@ -5308,6 +5484,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_SHOW_INFERENCE, "shinference", 0, 1, show_inference, generic,
       false);
   cmd(ARG_TOKEN_SHOW_ENDGAME, "shendgame", 0, 0, show_endgame, generic, false);
+  cmd(ARG_TOKEN_SHOW_HEAT_MAP, "heatmap", 1, 3, show_heat_map, generic, false);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic, true);
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic, true);
   cmd(ARG_TOKEN_GEN, "generate", 0, 0, move_gen, generic, true);
@@ -5360,6 +5537,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1);
   arg(ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1);
   arg(ARG_TOKEN_SIM_WITH_INFERENCE, "sinfer", 1, 1);
+  arg(ARG_TOKEN_USE_HEAT_MAP, "useheatmap", 1, 1);
   arg(ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1);
   arg(ARG_TOKEN_WRITE_BUFFER_SIZE, "wb", 1, 1);
   arg(ARG_TOKEN_RANDOM_SEED, "seed", 1, 1);
@@ -5425,6 +5603,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->use_small_plays = false;
   config->human_readable = true;
   config->sim_with_inference = false;
+  config->use_heat_map = false;
   config->print_boards = false;
   config->print_on_finish = false;
   config->show_prompt = true;
@@ -5557,6 +5736,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_SHOW_MOVES:
     case ARG_TOKEN_SHOW_INFERENCE:
     case ARG_TOKEN_SHOW_ENDGAME:
+    case ARG_TOKEN_SHOW_HEAT_MAP:
     case ARG_TOKEN_NEXT:
     case ARG_TOKEN_PREVIOUS:
     case ARG_TOKEN_GOTO:
@@ -5717,6 +5897,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_SIM_WITH_INFERENCE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->sim_with_inference);
+      break;
+    case ARG_TOKEN_USE_HEAT_MAP:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->use_heat_map);
       break;
     case ARG_TOKEN_WRITE_BUFFER_SIZE:
       config_add_uint64_setting_to_string_builder(

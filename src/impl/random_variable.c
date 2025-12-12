@@ -494,7 +494,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->thread_control = thread_control;
 
   sim_results_reset(sim_args->move_list, sim_results, sim_args->num_plies,
-                    sim_args->seed);
+                    sim_args->seed, sim_args->use_heat_map);
   simmer->sim_results = sim_results;
 
   rvs->data = simmer;

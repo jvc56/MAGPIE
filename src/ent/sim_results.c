@@ -7,6 +7,7 @@
 #include "../util/io_util.h"
 #include "bai_result.h"
 #include "equity.h"
+#include "heat_map.h"
 #include "move.h"
 #include "rack.h"
 #include "stats.h"
@@ -21,6 +22,8 @@
 typedef struct PlyInfo {
   Stat *score_stat;
   Stat *bingo_stat;
+  HeatMap *heat_map;
+  uint64_t ply_info_counts[NUM_PLY_INFO_COUNT_TYPES];
 } PlyInfo;
 
 struct SimmedPlay {
@@ -51,7 +54,7 @@ struct SimResults {
 
 SimmedPlay **simmed_plays_create(const MoveList *move_list,
                                  int num_simmed_plays, int num_plies,
-                                 uint64_t seed) {
+                                 uint64_t seed, bool use_heat_map) {
   SimmedPlay **simmed_plays =
       malloc_or_die((sizeof(SimmedPlay *)) * num_simmed_plays);
 
@@ -66,6 +69,13 @@ SimmedPlay **simmed_plays_create(const MoveList *move_list,
     for (int j = 0; j < num_plies; j++) {
       simmed_play->ply_infos[j].score_stat = stat_create(true);
       simmed_play->ply_infos[j].bingo_stat = stat_create(true);
+      if (use_heat_map) {
+        simmed_play->ply_infos[j].heat_map = heat_map_create();
+      } else {
+        simmed_play->ply_infos[j].heat_map = NULL;
+      }
+      memset(simmed_play->ply_infos[j].ply_info_counts, 0,
+             sizeof(simmed_play->ply_infos[j].ply_info_counts));
     }
     simmed_play->similarity_key = 0;
     simmed_play->play_index_by_sort_type = i;
@@ -76,7 +86,10 @@ SimmedPlay **simmed_plays_create(const MoveList *move_list,
   return simmed_plays;
 }
 
-// Does not copy the PRNG or the mutex
+// Does not copy the following fields:
+// - PRNG
+// - mutex
+// - heat_map
 void simmed_play_copy(SimmedPlay *dst, const SimmedPlay *src,
                       const int num_plies) {
   move_copy(&dst->move, &src->move);
@@ -88,6 +101,8 @@ void simmed_play_copy(SimmedPlay *dst, const SimmedPlay *src,
   for (int i = 0; i < num_plies; i++) {
     stat_copy(dst->ply_infos[i].score_stat, src->ply_infos[i].score_stat);
     stat_copy(dst->ply_infos[i].bingo_stat, src->ply_infos[i].bingo_stat);
+    memcpy(dst->ply_infos[i].ply_info_counts, src->ply_infos[i].ply_info_counts,
+           sizeof(dst->ply_infos[i].ply_info_counts));
   }
 }
 
@@ -100,6 +115,7 @@ void simmed_plays_destroy(SimmedPlay **simmed_plays, int num_simmed_plays,
     for (int j = 0; j < num_plies; j++) {
       stat_destroy(simmed_plays[i]->ply_infos[j].bingo_stat);
       stat_destroy(simmed_plays[i]->ply_infos[j].score_stat);
+      heat_map_destroy(simmed_plays[i]->ply_infos[j].heat_map);
     }
     free(simmed_plays[i]->ply_infos);
     stat_destroy(simmed_plays[i]->equity_stat);
@@ -141,17 +157,17 @@ void sim_results_unlock_simmed_plays(SimResults *sim_results) {
 }
 
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
-                       int num_plies, uint64_t seed) {
+                       int num_plies, uint64_t seed, bool use_heat_map) {
   cpthread_mutex_lock(&sim_results->display_mutex);
   sim_results_destroy_internal(sim_results);
 
   const int num_simmed_plays = move_list_get_count(move_list);
 
-  sim_results->simmed_plays =
-      simmed_plays_create(move_list, num_simmed_plays, num_plies, seed);
+  sim_results->simmed_plays = simmed_plays_create(
+      move_list, num_simmed_plays, num_plies, seed, use_heat_map);
 
   sim_results->display_simmed_plays =
-      simmed_plays_create(move_list, num_simmed_plays, num_plies, 0);
+      simmed_plays_create(move_list, num_simmed_plays, num_plies, 0, false);
 
   sim_results->num_simmed_plays = num_simmed_plays;
   sim_results->num_plies = num_plies;
@@ -189,6 +205,16 @@ const Stat *simmed_play_get_score_stat(const SimmedPlay *simmed_play,
 const Stat *simmed_play_get_bingo_stat(const SimmedPlay *simmed_play,
                                        int ply_index) {
   return simmed_play->ply_infos[ply_index].bingo_stat;
+}
+
+HeatMap *simmed_play_get_heat_map(SimmedPlay *simmed_play, int ply_index) {
+  return simmed_play->ply_infos[ply_index].heat_map;
+}
+
+uint64_t simmed_play_get_ply_info_count(const SimmedPlay *simmed_play,
+                                        int ply_index,
+                                        ply_info_count_t count_type) {
+  return simmed_play->ply_infos[ply_index].ply_info_counts[count_type];
 }
 
 const Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play) {
@@ -255,11 +281,35 @@ BAIResult *sim_results_get_bai_result(const SimResults *sim_results) {
 
 void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
                                    const Move *move) {
+  const double move_score = equity_to_double(move_get_score(move));
+  const bool is_bingo = move_get_tiles_played(move) == RACK_SIZE;
+  ply_info_count_t count_type;
+  switch (move_get_type(move)) {
+  case GAME_EVENT_PASS:
+    count_type = PLY_INFO_COUNT_PASS;
+    break;
+  case GAME_EVENT_EXCHANGE:
+    count_type = PLY_INFO_COUNT_EXCHANGE;
+    break;
+  case GAME_EVENT_TILE_PLACEMENT_MOVE:
+    count_type = PLY_INFO_COUNT_TILE_PLACEMENT;
+    break;
+  default:
+    log_fatal(
+        "encountered unexpected move type %d when addings stats for ply %d",
+        move_get_type(move), ply_index);
+  }
+  HeatMap *heat_map = simmed_play_get_heat_map(simmed_play, ply_index);
   cpthread_mutex_lock(&simmed_play->mutex);
-  stat_push(simmed_play->ply_infos[ply_index].score_stat,
-            equity_to_double(move_get_score(move)), 1);
-  stat_push(simmed_play->ply_infos[ply_index].bingo_stat,
-            (double)(move_get_tiles_played(move) == RACK_SIZE), 1);
+  stat_push(simmed_play->ply_infos[ply_index].score_stat, move_score, 1);
+  stat_push(simmed_play->ply_infos[ply_index].bingo_stat, (double)(is_bingo),
+            1);
+  if (heat_map) {
+    heat_map_add_move(heat_map, move);
+  }
+  simmed_play->ply_infos[ply_index].ply_info_counts[count_type]++;
+  simmed_play->ply_infos[ply_index].ply_info_counts[PLY_INFO_COUNT_BINGO] +=
+      (uint64_t)is_bingo;
   cpthread_mutex_unlock(&simmed_play->mutex);
 }
 
@@ -309,13 +359,6 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
   stat_push(simmed_play->win_pct_stat, wpct, 1);
   cpthread_mutex_unlock(&simmed_play->mutex);
   return wpct;
-}
-
-// NOT THREAD SAFE: Assumes no sim is in progress, the sim display info is
-// updated and sorted, and n is in bounds.
-void sim_results_get_nth_best_move(const SimResults *sim_results, int n,
-                                   Move *move) {
-  move_copy(move, &sim_results->display_simmed_plays[n]->move);
 }
 
 void sim_results_set_valid_for_current_game_state(SimResults *sim_results,

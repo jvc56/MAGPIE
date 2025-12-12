@@ -11,6 +11,7 @@
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
+#include "../ent/heat_map.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
@@ -32,7 +33,6 @@
 // Display formatting constants
 enum {
   RACK_DISPLAY_WIDTH = RACK_SIZE + 2,
-  ASCII_UPPERCASE_A = 65,
   UNSEEN_LETTER_ROWS = 5,
   MIN_UNSEEN_LETTERS_PER_ROW = 20,
   MAX_MOVES = 20,
@@ -126,13 +126,35 @@ void string_builder_add_player_row(const LetterDistribution *ld,
 }
 
 void string_builder_add_board_square_color(StringBuilder *game_string,
-                                           const Board *board, int row,
-                                           int col) {
+                                           const Board *board, int row, int col,
+                                           const HeatMap *heat_map,
+                                           heat_map_t heat_map_type) {
   const uint8_t current_letter = board_get_letter(board, row, col);
   if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
     string_builder_add_string(
         game_string,
         bonus_square_to_color_code(board_get_bonus_square(board, row, col)));
+    if (heat_map) {
+      // Add background color
+      const uint64_t square_count =
+          heat_map_get_count(heat_map, row, col, heat_map_type);
+      const uint64_t total =
+          heat_map_get_board_count_max(heat_map, heat_map_type);
+      double frac = 0;
+      if (total > 0) {
+        frac = (double)square_count / (double)total;
+      }
+      double threshold = HEAT_MAP_FRAC_DELIMITER;
+      int color_index = 0;
+      while (frac > threshold &&
+             color_index < HEAT_MAP_NUM_BACKGROUND_COLORS - 1) {
+        threshold += HEAT_MAP_FRAC_DELIMITER;
+        color_index++;
+      }
+      string_builder_add_formatted_string(
+          game_string, ";%d", heat_map_ascending_color_codes[color_index]);
+    }
+    string_builder_add_char(game_string, 'm');
   } else {
     string_builder_add_color_reset(game_string);
     string_builder_add_color_bold(game_string);
@@ -212,13 +234,16 @@ static const char *full_width_column_label_strings[] = {
 void string_builder_add_board_row(const LetterDistribution *ld,
                                   const Board *board,
                                   const GameStringOptions *game_string_options,
-                                  StringBuilder *game_string, int row) {
+                                  StringBuilder *game_string, int row,
+                                  const HeatMap *heat_map,
+                                  heat_map_t heat_map_type) {
   string_builder_add_formatted_string(game_string, "%2d", row + 1);
   string_builder_add_board_side_border(game_string_options, game_string);
   for (int i = 0; i < BOARD_DIM; i++) {
     if (should_print_escape_codes(game_string_options) &&
         use_board_color(game_string_options)) {
-      string_builder_add_board_square_color(game_string, board, row, i);
+      string_builder_add_board_square_color(game_string, board, row, i,
+                                            heat_map, heat_map_type);
     }
     const uint8_t current_letter = board_get_letter(board, row, i);
     if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
@@ -279,10 +304,11 @@ void string_builder_add_board_column_header(
   }
 }
 
-void string_builder_add_game(const Game *game, const MoveList *move_list,
-                             const GameStringOptions *game_string_options,
-                             const GameHistory *game_history,
-                             StringBuilder *game_string) {
+void string_builder_add_game_internal(
+    const Game *game, const MoveList *move_list,
+    const GameStringOptions *game_string_options,
+    const GameHistory *game_history, const HeatMap *heat_map,
+    heat_map_t heat_map_type, StringBuilder *game_string) {
   const Board *board = game_get_board(game);
   const Bag *bag = game_get_bag(game);
   const Player *player0 = game_get_player(game, 0);
@@ -350,8 +376,8 @@ void string_builder_add_game(const Game *game, const MoveList *move_list,
   int game_event_index = -1;
   const GameEvent *game_event = NULL;
   for (int i = 0; i < BOARD_DIM; i++) {
-    string_builder_add_board_row(ld, board, game_string_options, game_string,
-                                 i);
+    string_builder_add_board_row(ld, board, game_string_options, game_string, i,
+                                 heat_map, heat_map_type);
     string_builder_add_spaces(game_string, 3);
     if (i == UNSEEN_START_ROW) {
       string_builder_add_formatted_string(game_string, "Unseen: (%d)",
@@ -481,6 +507,24 @@ void string_builder_add_game(const Game *game, const MoveList *move_list,
                                                  i);
   }
   string_builder_add_string(game_string, "\n");
+}
+
+void string_builder_add_game(const Game *game, const MoveList *move_list,
+                             const GameStringOptions *game_string_options,
+                             const GameHistory *game_history,
+                             StringBuilder *game_string) {
+  string_builder_add_game_internal(game, move_list, game_string_options,
+                                   game_history, NULL, 0, game_string);
+}
+
+void string_builder_add_game_with_heat_map(
+    const Game *game, const MoveList *move_list,
+    const GameStringOptions *game_string_options,
+    const GameHistory *game_history, const HeatMap *heat_map,
+    heat_map_t heat_map_type, StringBuilder *game_string) {
+  string_builder_add_game_internal(game, move_list, game_string_options,
+                                   game_history, heat_map, heat_map_type,
+                                   game_string);
 }
 
 GameStringOptions *game_string_options_create_default(void) {
