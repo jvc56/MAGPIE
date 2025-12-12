@@ -1837,14 +1837,16 @@ void LetterboxWindow::showWordHoverOverlay(const QString& word, bool alignLeft, 
 
 {
 
-    // If we get a hover for the same word while the overlay is already visible, do nothing.
-
-    // This prevents scrolling from being reset.
-
+    // If we get a hover for the same word while the overlay is already visible,
+    // stop any fade animation and restore opacity, but don't regenerate content.
     if (word == currentHoveredWord && wordHoverOverlay->isVisible()) {
-
+        // Stop fade animation if running and restore full opacity
+        if (m_fadeAnimation->state() == QAbstractAnimation::Running) {
+            m_fadeAnimation->stop();
+            m_sidebarOpacity->setOpacity(1.0);
+        }
+        m_hideTimer->stop();
         return;
-
     }
 
 
@@ -2202,9 +2204,11 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
                 html += "</td>";
             }
 
-            // Word column (centered, bold, larger)
-            html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; color: #fff; text-align: center; padding: 8px 4px; white-space: nowrap; border-right: 1px solid #666;'>%2</td>")
+            // Word column (centered, bold, larger) - use proportional horizontal padding to prevent J from overflowing
+            int wordPadH = std::max(6, sidebarWordSize / 4);
+            html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; color: #fff; text-align: center; padding: 8px %2px; white-space: nowrap; border-right: 1px solid #666;'>%3</td>")
                     .arg(sidebarWordSize)
+                    .arg(wordPadH)
                     .arg(anagram);
 
             // Back hooks column (left-aligned) - only show if any word has back hooks
@@ -2284,14 +2288,25 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
         QList<QChar> sortedBlankLetters = blankLetters.values();
         std::sort(sortedBlankLetters.begin(), sortedBlankLetters.end());
 
+        // Count how many anagrams each blank letter produces
+        QMap<QChar, int> blankLetterAnagramCounts;
+        for (const auto& wordPair : blankWords) {
+            QChar blankLetter = std::get<1>(wordPair);
+            blankLetterAnagramCounts[blankLetter]++;
+        }
+
         // Add spacing and section header
         html += "<div style='height: 20px;'></div>";
 
-        // Show the summary line: WORD + ? = A B C D ...
+        // Show the summary line: WORD + ? = A B C D ... (bold letters with multiple anagrams)
         QString blankLetterList;
         for (QChar letter : sortedBlankLetters) {
             if (!blankLetterList.isEmpty()) blankLetterList += " ";
-            blankLetterList += letter;
+            if (blankLetterAnagramCounts[letter] > 1) {
+                blankLetterList += QString("<b>%1</b>").arg(letter);
+            } else {
+                blankLetterList += letter;
+            }
         }
 
         if (blankLetterList.isEmpty()) {
@@ -2381,9 +2396,9 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
             html += "<table style='border-collapse: collapse; background-color: rgb(50, 50, 50); border: 1px solid rgb(90, 90, 90); display: inline-block;'>";
 
             // Calculate hook/extension sizes to match alphagram_box ratios (24/36 and 14/36)
-            // Use same minimums as main answer tables (baseHookSize=24, baseExtensionSize=14)
-            int hookSize = std::max(24, static_cast<int>(sidebarBlankSize * 24.0 / 36.0));
-            int extensionSize = std::max(14, static_cast<int>(sidebarBlankSize * 14.0 / 36.0));
+            // Use proportionally smaller minimums for blank tables (16 and 10 instead of 24 and 14)
+            int hookSize = std::max(16, static_cast<int>(sidebarBlankSize * 24.0 / 36.0));
+            int extensionSize = std::max(10, static_cast<int>(sidebarBlankSize * 14.0 / 36.0));
 
             const int max_rows = 100;
             int rows_rendered = 0;
@@ -2431,9 +2446,11 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
                             .arg(cellContent);
                 }
 
-                // Word column
-                html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; text-align: center; padding: 8px 4px; border-right: 1px solid #666;'>%2</td>")
+                // Word column - use proportional horizontal padding to prevent J from overflowing
+                int wordPadH = std::max(6, sidebarBlankSize / 4);
+                html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; text-align: center; padding: 8px %2px; border-right: 1px solid #666;'>%3</td>")
                         .arg(sidebarBlankSize)
+                        .arg(wordPadH)
                         .arg(styledWord);
 
                 // Back hooks/extensions column (only if any word has back hooks/exts)
@@ -2545,11 +2562,22 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
         QList<QString> sortedTwoBlankPairs = twoBlankPairs.values();
         std::sort(sortedTwoBlankPairs.begin(), sortedTwoBlankPairs.end());
 
-        // Show the summary line: WORD + ?? = AB CD EF ...
+        // Count how many anagrams each blank pair produces
+        QMap<QString, int> blankPairAnagramCounts;
+        for (const auto& wordPair : twoBlankWords) {
+            QString blankPair = std::get<1>(wordPair);
+            blankPairAnagramCounts[blankPair]++;
+        }
+
+        // Show the summary line: WORD + ?? = AB CD EF ... (bold pairs with multiple anagrams)
         QString twoBlankPairList;
         for (const QString& pair : sortedTwoBlankPairs) {
             if (!twoBlankPairList.isEmpty()) twoBlankPairList += " ";
-            twoBlankPairList += pair;
+            if (blankPairAnagramCounts[pair] > 1) {
+                twoBlankPairList += QString("<b>%1</b>").arg(pair);
+            } else {
+                twoBlankPairList += pair;
+            }
         }
 
         if (twoBlankPairList.isEmpty()) {
@@ -2622,9 +2650,9 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
             });
 
             // Calculate hook/extension sizes to match alphagram_box ratios (24/36 and 14/36)
-            // Use same minimums as main answer tables (baseHookSize=24, baseExtensionSize=14)
-            int hookSize = std::max(24, static_cast<int>(sidebarBlankSize * 24.0 / 36.0));
-            int extensionSize = std::max(14, static_cast<int>(sidebarBlankSize * 14.0 / 36.0));
+            // Use proportionally smaller minimums for blank tables (16 and 10 instead of 24 and 14)
+            int hookSize = std::max(16, static_cast<int>(sidebarBlankSize * 24.0 / 36.0));
+            int extensionSize = std::max(10, static_cast<int>(sidebarBlankSize * 14.0 / 36.0));
 
             html += "<div style='text-align: center;'>";
             html += "<table style='border-collapse: collapse; background-color: rgb(50, 50, 50); border: 1px solid rgb(90, 90, 90); display: inline-block;'>";
@@ -2685,9 +2713,11 @@ QString LetterboxWindow::generateSidebarTable(const QString& word, bool isHookOr
                             .arg(cellContent);
                 }
 
-                // Word column
-                html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; text-align: center; padding: 8px 4px; border-right: 1px solid #666;'>%2</td>")
+                // Word column - use proportional horizontal padding to prevent J from overflowing
+                int wordPadH = std::max(6, sidebarBlankSize / 4);
+                html += QString("<td style='font-family: \"Jost\", sans-serif; font-size: %1px; font-weight: 600; letter-spacing: 1px; text-align: center; padding: 8px %2px; border-right: 1px solid #666;'>%3</td>")
                         .arg(sidebarBlankSize)
+                        .arg(wordPadH)
                         .arg(styledWord);
 
                 // Back hooks/extensions column (only if any word has back hooks or extensions)
