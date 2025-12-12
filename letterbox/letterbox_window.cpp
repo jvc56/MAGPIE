@@ -1559,6 +1559,10 @@ void LetterboxWindow::createCustomWordList()
             delete item;
         }
 
+        // Re-enable input field (may have been disabled when previous list completed)
+        inputField->setEnabled(true);
+        inputField->setFocus();
+
         // Update UI
         updateWindowTitle();
         updateProgress();
@@ -1738,6 +1742,10 @@ void LetterboxWindow::loadSavedListFromFile(const QString& filepath)
         delete item->widget();
         delete item;
     }
+
+    // Re-enable input field (may have been disabled when previous list completed)
+    inputField->setEnabled(true);
+    inputField->setFocus();
 
     // Update UI
     updateWindowTitle();
@@ -2936,6 +2944,10 @@ void LetterboxWindow::createMissedWordsList()
         delete item->widget();
         delete item;
     }
+
+    // Re-enable input field (may have been disabled when previous list completed)
+    inputField->setEnabled(true);
+    inputField->setFocus();
 
     // Update UI
     updateWindowTitle();
