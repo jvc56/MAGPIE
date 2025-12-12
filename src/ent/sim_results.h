@@ -24,7 +24,6 @@ typedef struct SimmedPlayDisplayInfo {
   double equity_stdev;
   double win_pct_mean;
   double win_pct_stdev;
-  uint64_t similarity_class_id;
   uint64_t niters;
 } SimmedPlayDisplayInfo;
 

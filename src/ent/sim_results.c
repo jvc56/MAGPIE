@@ -18,16 +18,20 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef struct PlyInfo {
+  Stat *score_stat;
+  Stat *bingo_stat;
+} PlyInfo;
+
 struct SimmedPlay {
   Move *move;
-  Stat *score_stat[MAX_PLIES];
-  Stat *bingo_stat[MAX_PLIES];
   Stat *equity_stat;
   Stat *leftover_stat;
   Stat *win_pct_stat;
   uint64_t similarity_key;
-  int play_id;
+  int unsorted_play_index;
   XoshiroPRNG *prng;
+  PlyInfo *ply_infos;
   cpthread_mutex_t mutex;
 };
 
@@ -59,14 +63,13 @@ SimmedPlay **simmed_plays_create(const MoveList *move_list,
     simmed_play->equity_stat = stat_create(true);
     simmed_play->leftover_stat = stat_create(true);
     simmed_play->win_pct_stat = stat_create(true);
-    memset(simmed_play->bingo_stat, 0, sizeof(Stat *) * MAX_PLIES);
-    memset(simmed_play->score_stat, 0, sizeof(Stat *) * MAX_PLIES);
+    simmed_play->ply_infos = malloc_or_die(sizeof(PlyInfo) * num_plies);
     for (int j = 0; j < num_plies; j++) {
-      simmed_play->score_stat[j] = stat_create(true);
-      simmed_play->bingo_stat[j] = stat_create(true);
+      simmed_play->ply_infos[j].score_stat = stat_create(true);
+      simmed_play->ply_infos[j].bingo_stat = stat_create(true);
     }
     simmed_play->similarity_key = 0;
-    simmed_play->play_id = i;
+    simmed_play->unsorted_play_index = i;
     simmed_play->prng = prng_create(seed);
     cpthread_mutex_init(&simmed_play->mutex);
     simmed_plays[i] = simmed_play;
@@ -81,9 +84,10 @@ void simmed_plays_destroy(SimmedPlay **simmed_plays, int num_simmed_plays,
   }
   for (int i = 0; i < num_simmed_plays; i++) {
     for (int j = 0; j < num_plies; j++) {
-      stat_destroy(simmed_plays[i]->bingo_stat[j]);
-      stat_destroy(simmed_plays[i]->score_stat[j]);
+      stat_destroy(simmed_plays[i]->ply_infos[j].bingo_stat);
+      stat_destroy(simmed_plays[i]->ply_infos[j].score_stat);
     }
+    free(simmed_plays[i]->ply_infos);
     stat_destroy(simmed_plays[i]->equity_stat);
     stat_destroy(simmed_plays[i]->leftover_stat);
     stat_destroy(simmed_plays[i]->win_pct_stat);
@@ -163,14 +167,12 @@ Move *simmed_play_get_move(const SimmedPlay *simmed_play) {
   return simmed_play->move;
 }
 
-Stat *simmed_play_get_score_stat(const SimmedPlay *simmed_play,
-                                 int stat_index) {
-  return simmed_play->score_stat[stat_index];
+Stat *simmed_play_get_score_stat(const SimmedPlay *simmed_play, int ply_index) {
+  return simmed_play->ply_infos[ply_index].score_stat;
 }
 
-Stat *simmed_play_get_bingo_stat(const SimmedPlay *simmed_play,
-                                 int stat_index) {
-  return simmed_play->bingo_stat[stat_index];
+Stat *simmed_play_get_bingo_stat(const SimmedPlay *simmed_play, int ply_index) {
+  return simmed_play->ply_infos[ply_index].bingo_stat;
 }
 
 Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play) {
@@ -182,7 +184,7 @@ Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play) {
 }
 
 int simmed_play_get_id(const SimmedPlay *simmed_play) {
-  return simmed_play->play_id;
+  return simmed_play->unsorted_play_index;
 }
 
 // Returns the current seed and updates the seed using prng_next
@@ -236,10 +238,11 @@ BAIResult *sim_results_get_bai_result(const SimResults *sim_results) {
 }
 
 void simmed_play_add_score_stat(SimmedPlay *simmed_play, Equity score,
-                                bool is_bingo, int ply) {
+                                bool is_bingo, int ply_index) {
   cpthread_mutex_lock(&simmed_play->mutex);
-  stat_push(simmed_play->score_stat[ply], equity_to_double(score), 1);
-  stat_push(simmed_play->bingo_stat[ply], (double)is_bingo, 1);
+  stat_push(simmed_play->ply_infos[ply_index].score_stat,
+            equity_to_double(score), 1);
+  stat_push(simmed_play->ply_infos[ply_index].bingo_stat, (double)is_bingo, 1);
   cpthread_mutex_unlock(&simmed_play->mutex);
 }
 
