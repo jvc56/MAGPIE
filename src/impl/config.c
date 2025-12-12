@@ -4952,10 +4952,14 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
 
   // Seed
 
-  config_load_uint64(config, ARG_TOKEN_RANDOM_SEED, 0, &config->seed,
-                     error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
+  if (config_get_parg_value(config, ARG_TOKEN_RANDOM_SEED, 0)) {
+    config_load_uint64(config, ARG_TOKEN_RANDOM_SEED, 0, &config->seed,
+                       error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  } else {
+    config->seed++;
   }
 
   // Board layout
