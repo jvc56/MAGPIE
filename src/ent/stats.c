@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 struct Stat {
   uint64_t num_unique_samples;
@@ -27,6 +28,8 @@ Stat *stat_create(bool mean_is_estimated) {
   stat->mean_is_estimated = mean_is_estimated;
   return stat;
 }
+
+void stat_copy(Stat *dst, const Stat *src) { memcpy(dst, src, sizeof(Stat)); }
 
 void stat_destroy(Stat *stat) {
   if (!stat) {

@@ -7,6 +7,7 @@
 typedef struct Stat Stat;
 
 Stat *stat_create(bool mean_is_estimated);
+void stat_copy(Stat *dst, const Stat *src);
 void stat_destroy(Stat *stat);
 void stat_reset(Stat *stat);
 

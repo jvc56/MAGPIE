@@ -65,9 +65,8 @@ bool string_builder_add_sim_stats_with_display_lock(
       bai_result_get_status(bai_result);
   for (int i = 0; i < num_display_plays; i++) {
     curr_col = 0;
-    const SimmedPlayDisplayInfo *sp_dinfo =
-        sim_results_get_display_info(sim_results, i);
-    const Move *move = &sp_dinfo->move;
+    const SimmedPlay *sp = sim_results_get_display_simmed_play(sim_results, i);
+    const Move *move = simmed_play_get_move(sp);
     string_builder_add_move(move_sb, board, move, ld, false);
 
     string_grid_set_cell(sg, curr_row, curr_col++,
@@ -98,12 +97,15 @@ bool string_builder_add_sim_stats_with_display_lock(
     }
     curr_col++;
 
+    const Stat *win_pct_stat = simmed_play_get_win_pct_stat(sp);
     string_grid_set_cell(
         sg, curr_row, curr_col++,
-        get_formatted_string("%.2f", sp_dinfo->win_pct_mean * 100));
+        get_formatted_string("%.2f", stat_get_mean(win_pct_stat) * 100));
 
-    string_grid_set_cell(sg, curr_row, curr_col++,
-                         get_formatted_string("%.2f", sp_dinfo->equity_mean));
+    string_grid_set_cell(
+        sg, curr_row, curr_col++,
+        get_formatted_string("%.2f",
+                             stat_get_mean(simmed_play_get_equity_stat(sp))));
 
     double move_equity;
     if (move_get_type(move) == GAME_EVENT_PASS) {
@@ -114,16 +116,19 @@ bool string_builder_add_sim_stats_with_display_lock(
     string_grid_set_cell(sg, curr_row, curr_col++,
                          get_formatted_string("%.2f", move_equity));
 
-    string_grid_set_cell(sg, curr_row, curr_col++,
-                         get_formatted_string("%lu", sp_dinfo->niters));
+    string_grid_set_cell(
+        sg, curr_row, curr_col++,
+        get_formatted_string("%lu", stat_get_num_samples(win_pct_stat)));
 
     for (int j = 0; j < num_plies; j++) {
+      const PlyInfo *sp_ply_info = simmed_play_get_ply_info(sp, j);
       string_grid_set_cell(
           sg, curr_row, curr_col++,
-          get_formatted_string("%.2f", sp_dinfo->score_means[j]));
+          get_formatted_string("%.2f", stat_get_mean(sp_ply_info->score_stat)));
       string_grid_set_cell(
           sg, curr_row, curr_col++,
-          get_formatted_string("%.2f", sp_dinfo->bingo_means[j] * 100.0));
+          get_formatted_string("%.2f",
+                               stat_get_mean(sp_ply_info->bingo_stat) * 100.0));
     }
     curr_row++;
   }
@@ -186,7 +191,8 @@ void string_builder_add_sim_stats(StringBuilder *sb, const Game *game,
                                   int max_num_display_plays,
                                   bool use_ucgi_format) {
   // Only locks on success
-  bool sim_stats_ready = sim_results_lock_and_sort_display_infos(sim_results);
+  bool sim_stats_ready =
+      sim_results_lock_and_sort_display_simmed_plays(sim_results);
   if (!sim_stats_ready) {
     string_builder_add_string(sb, "sim results not yet available\n");
     return;
