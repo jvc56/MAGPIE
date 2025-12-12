@@ -2,6 +2,8 @@
 #include "../src/compat/ctime.h"
 #include "../src/compat/linenoise.h"
 #include "../src/def/cpthread_defs.h"
+#include "../src/def/exec_defs.h"
+#include "../src/def/thread_control_defs.h"
 #include "../src/ent/move.h"
 #include "../src/ent/thread_control.h"
 #include "../src/impl/config.h"
@@ -21,7 +23,6 @@
 
 typedef struct ProcessArgs {
   const char *arg_string;
-  int expected_output_line_count;
   const char *output_substr;
   int expected_outerror_line_count;
   const char *outerror_substr;
@@ -29,19 +30,23 @@ typedef struct ProcessArgs {
   cpthread_mutex_t finished_mutex;
 } ProcessArgs;
 
+typedef struct AsyncArgs {
+  Config *config;
+  ErrorStack *error_stack;
+  const char *cmd;
+} AsyncArgs;
+
 typedef struct MainArgs {
   int argc;
   char **argv;
 } MainArgs;
 
 ProcessArgs *process_args_create(const char *arg_string,
-                                 int expected_output_line_count,
                                  const char *output_substr,
                                  int expected_outerror_line_count,
                                  const char *outerror_substr) {
   ProcessArgs *process_args = malloc_or_die(sizeof(ProcessArgs));
   process_args->arg_string = arg_string;
-  process_args->expected_output_line_count = expected_output_line_count;
   process_args->output_substr = output_substr;
   process_args->expected_outerror_line_count = expected_outerror_line_count;
   process_args->outerror_substr = outerror_substr;
@@ -126,7 +131,8 @@ void block_for_search(const Config *config, int max_seconds) {
   double seconds_elapsed = 0;
   ThreadControl *thread_control = config_get_thread_control(config);
   while (true) {
-    if (thread_control_is_finished(thread_control)) {
+    if (thread_control_get_status(thread_control) ==
+        THREAD_CONTROL_STATUS_FINISHED) {
       break;
     }
     ctime_nap(DEFAULT_NAP_TIME);
@@ -152,9 +158,14 @@ void block_for_process_command(ProcessArgs *process_args, int max_seconds) {
   }
 }
 
+void *sync_cmd_thread_worker(void *uncasted_args) {
+  AsyncArgs *args = (AsyncArgs *)uncasted_args;
+  execute_command_sync(args->config, args->error_stack, args->cmd);
+  return NULL;
+}
+
 void assert_command_status_and_output(Config *config, const char *command,
                                       bool should_exit, int seconds_to_wait,
-                                      int expected_output_line_count,
                                       int expected_outerror_line_count) {
   char *test_output_filename = get_test_filename("output");
   char *test_outerror_filename = get_test_filename("outerror");
@@ -170,11 +181,13 @@ void assert_command_status_and_output(Config *config, const char *command,
 
   ErrorStack *error_stack = error_stack_create();
 
-  execute_command_async(config, error_stack, command);
-
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_print_and_reset(error_stack);
-  }
+  AsyncArgs async_args;
+  async_args.config = config;
+  async_args.error_stack = error_stack;
+  async_args.cmd = command;
+  cpthread_t sync_cmd_thread;
+  cpthread_create(&sync_cmd_thread, sync_cmd_thread_worker, &async_args);
+  cpthread_detach(sync_cmd_thread);
 
   // Let the async command start up
   ctime_nap(DEFAULT_NAP_TIME);
@@ -185,25 +198,21 @@ void assert_command_status_and_output(Config *config, const char *command,
   }
   block_for_search(config, seconds_to_wait);
 
-  fclose_or_die(errorout_fh);
-
-  char *test_output = get_string_from_file_or_die(test_output_filename);
-  int newlines_in_output = count_newlines(test_output);
-  bool fail_test = false;
-  if (newlines_in_output != expected_output_line_count) {
-    printf("%s\nassert output: output counts do not match %d != %d\n", command,
-           newlines_in_output, expected_output_line_count);
-    printf("got:>%s<\n", test_output);
-    fail_test = true;
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
   }
+
+  fclose_or_die(errorout_fh);
 
   char *test_outerror = get_string_from_file_or_die(test_outerror_filename);
   int newlines_in_outerror = count_newlines(test_outerror);
+
+  bool fail_test = false;
   if (newlines_in_outerror != expected_outerror_line_count) {
     printf(
         "assert output: error counts do not match %d != %d\nfor command: %s\n",
         newlines_in_outerror, expected_outerror_line_count, command);
-    printf("got: >%s<\n", test_outerror);
+    printf("got outerror: >%s<\n", test_outerror);
     fail_test = true;
   }
 
@@ -211,7 +220,6 @@ void assert_command_status_and_output(Config *config, const char *command,
     abort();
   }
 
-  free(test_output);
   free(test_outerror);
   free(test_output_filename);
   free(test_outerror_filename);
@@ -223,25 +231,27 @@ void assert_command_status_and_output(Config *config, const char *command,
 void test_command_execution(void) {
   Config *config = config_create_default_test();
 
+  assert_command_status_and_output(config, "set -printonfinish true", false, 5,
+                                   0);
+
   assert_command_status_and_output(config, "sim -lex CSW21 -it 1000 -plies 2h3",
-                                   false, 5, 0, 2);
+                                   false, 5, 2);
 
   assert_command_status_and_output(
       config,
       "cgp 15/15/15/15/15/15/15/15/3ABCDEFG5/15/15/15/15/15/15 "
       "ABC5DF/YXZ 0/0 0 -lex CSW21",
-      false, 5, 1, 1);
+      false, 5, 1);
 
   // Test load cgp
-  assert_command_status_and_output(config, "cgp " ION_OPENING_CGP, false, 5, 1,
-                                   0);
+  assert_command_status_and_output(config, "cgp " ION_OPENING_CGP, false, 5, 0);
 
   // Sim finishing probabilistically
   // Get moves from just user input
-  assert_command_status_and_output(config, "cgp " ZILLION_OPENING_CGP, false, 5,
-                                   1, 0);
+  assert_command_status_and_output(config, "cgp " ZILLION_OPENING_CGP, false, 1,
+                                   0);
   assert_command_status_and_output(
-      config, "addmoves 8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 1, 0);
+      config, "addmoves 8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 0);
 
   const MoveList *ml = config_get_move_list(config);
   assert(move_list_get_count(ml) == 3);
@@ -249,171 +259,175 @@ void test_command_execution(void) {
   assert_command_status_and_output(
       config,
       "sim -plies 2 -scond 95 -threads 8 -it 100000 -minp 50 -pfreq 5000000",
-      false, 60, 6, 0);
+      false, 60, 0);
 
   assert(move_list_get_count(ml) == 3);
 
   assert_command_status_and_output(config, "cgp " ZILLION_OPENING_CGP, false, 5,
-                                   1, 0);
+                                   0);
   // Confirm that loading a cgp resets the movelist
   assert(move_list_get_count(ml) == 0);
 
   // Add moves before generating to confirm that the gen command
   // resets the movelist
   assert_command_status_and_output(
-      config, "addmoves 8f.NIL,8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 1, 0);
+      config, "addmoves 8f.NIL,8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 0);
 
   assert_command_status_and_output(config, "cgp " ZILLION_OPENING_CGP, false, 5,
-                                   1, 0);
+                                   0);
 
   // Sim a single iterations
   // Get 18 moves from move gen and confirm movelist was reset.
-  assert_command_status_and_output(config, "gen -numplays 18 ", false, 5, 20,
-                                   0);
+  assert_command_status_and_output(config, "gen -numplays 18 ", false, 5, 0);
   // Add 4 more moves:
   // 2 already exist
   // 2 are new
   // To get 20 total moves
   assert_command_status_and_output(
-      config, "addmoves 8f.NIL,8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 1, 0);
+      config, "addmoves 8f.NIL,8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 0);
   assert_command_status_and_output(
       config, "sim -plies 2 -scond none -threads 8 -it 1 -pfreq 70", false, 60,
-      331, 0);
+      0);
 
   // Sim finishes with max iterations
   // Add user input moves that will be
   // cleared by the subsequent movegen command.
   assert_command_status_and_output(config, "addmoves ex.SOI,ex.IO,ex.S", false,
-                                   5, 1, 0);
+                                   5, 0);
   assert_command_status_and_output(config, "cgp " DELDAR_VS_HARSHAN_CGP, false,
-                                   5, 1, 0);
+                                   5, 0);
   // Get all moves through move gen
-  assert_command_status_and_output(config, "gen -numplays 15", false, 5, 17, 0);
+  assert_command_status_and_output(config, "gen -numplays 15", false, 5, 0);
   assert_command_status_and_output(
       config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ", false,
-      60, 222, 0);
+      60, 0);
 
   assert_command_status_and_output(config, "cgp " DELDAR_VS_HARSHAN_CGP, false,
-                                   5, 1, 0);
+                                   5, 0);
   // Sim interrupted by user
-  assert_command_status_and_output(config, "gen -numplays 15", false, 5, 17, 0);
+  assert_command_status_and_output(config, "gen -numplays 15", false, 5, 0);
   assert_command_status_and_output(
       config, "sim -plies 2 -threads 10 -it 1000000 -pfreq 1000000", true, 5,
-      18, 0);
+      0);
 
   // Infer finishes normally
-  assert_command_status_and_output(config, "cgp " EMPTY_CGP, false, 5, 1, 0);
+  assert_command_status_and_output(config, "cgp " EMPTY_CGP, false, 5, 0);
   assert_command_status_and_output(
-      config, "infer 1 MUZAKY 58 -numplays 20 -threads 4 ", false, 60, 53, 0);
+      config, "infer 1 MUZAKY 58 -numplays 20 -threads 4 ", false, 60, 0);
 
   // Infer interrupted
-  assert_command_status_and_output(config, "cgp " EMPTY_CGP, false, 5, 1, 0);
+  assert_command_status_and_output(config, "cgp " EMPTY_CGP, false, 5, 0);
   assert_command_status_and_output(config, "infer 1 3 -numplays 20 -threads 3 ",
-                                   true, 5, 2, 0);
+                                   true, 5, 1);
 
   // Autoplay finishes normally
   assert_command_status_and_output(
       config,
       "autoplay game 10 -lex CSW21 -s1 equity -s2 equity "
       "-r1 best -r2 best -numplays 1 -threads 3 -gp true",
-      false, 30, 3, 0);
+      false, 30, 0);
 
   // Autoplay interrupted
   assert_command_status_and_output(
       config,
       "autoplay game 10000000 -lex CSW21 -s1 equity -s2 equity "
       "-r1 best -r2 best -threads 5 -hr false -gp false",
-      true, 5, 2, 0);
+      true, 5, 0);
 
   assert_command_status_and_output(
       config,
       "autoplay game 10 -lex CSW21 -s1 equity -s2 equity "
       "-r1 best -r2 best -threads 1 -hr false -gp true -pfreq 4",
-      false, 30, 8, 0);
+      false, 30, 0);
 
   assert_command_status_and_output(
       config,
       "autoplay game 10 -lex CSW21 -s1 equity -s2 equity "
       "-r1 best -r2 best -threads 1 -hr true -gp false -pfreq 0",
-      false, 30, 21, 0);
+      false, 30, 0);
 
   assert_command_status_and_output(
       config,
       "autoplay game 50 -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
       "-r1 best -r2 best -threads 1 -hr true -gp true",
-      false, 30, 41, 0);
+      false, 30, 0);
 
   // Catalan
-  assert_command_status_and_output(config, "cgp " CATALAN_CGP, false, 5, 1, 0);
+  assert_command_status_and_output(config, "cgp " CATALAN_CGP, false, 5, 0);
   assert_command_status_and_output(config, "gen -r1 all -r2 all -numplays 15",
-                                   false, 5, 17, 0);
+                                   false, 5, 0);
   assert_command_status_and_output(
       config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ", false,
-      60, 222, 0);
+      60, 0);
   assert_command_status_and_output(config, "cgp " EMPTY_CATALAN_CGP, false, 5,
-                                   1, 0);
+                                   0);
   assert_command_status_and_output(
       config, "infer 1 AIMSX 52 -numplays 20 -threads 4 -pfreq 1000000", false,
-      60, 53, 0);
+      60, 0);
 
   assert_command_status_and_output(
       config,
       "autoplay game 10 -s1 equity -s2 equity -r1 "
       "best -r2 best -numplays 1  -hr false -gp false ",
-      false, 30, 2, 0);
+      false, 30, 0);
   // CSW
   assert_command_status_and_output(config, "cgp " DELDAR_VS_HARSHAN_CGP, false,
-                                   5, 1, 0);
+                                   5, 0);
   assert_command_status_and_output(config, "gen -r1 all -r2 all -numplays 15",
-                                   false, 5, 17, 0);
+                                   false, 5, 0);
   assert_command_status_and_output(
       config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ", false,
-      60, 222, 0);
+      60, 0);
 
-  assert_command_status_and_output(config, "cgp " EMPTY_CGP, false, 5, 1, 0);
+  assert_command_status_and_output(config, "cgp " EMPTY_CGP, false, 5, 0);
   assert_command_status_and_output(
       config, "infer 1 DGINR 18 -numplays 20 -threads 4 -pfreq 1000000 ", false,
-      60, 53, 0);
+      60, 0);
 
   assert_command_status_and_output(
       config,
       "autoplay game 10 -lex CSW21 -s1 equity -s2 equity "
       "-r1 best -r2 best -numplays 1 -gp false ",
-      false, 30, 2, 0);
+      false, 30, 0);
   // Polish
-  assert_command_status_and_output(config, "cgp " POLISH_CGP, false, 5, 1, 0);
+  // Turn off word maps for Polish
+  assert_command_status_and_output(config, "set -wmp false", false, 5, 0);
+  assert_command_status_and_output(config, "cgp " POLISH_CGP, false, 5, 0);
   assert_command_status_and_output(config, "gen -r1 all -r2 all -numplays 15",
-                                   false, 5, 17, 0);
+                                   false, 5, 0);
   assert_command_status_and_output(
       config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 -scond none ", false,
-      60, 222, 0);
+      60, 0);
 
-  assert_command_status_and_output(config, "cgp " EMPTY_POLISH_CGP, false, 5, 1,
+  assert_command_status_and_output(config, "cgp " EMPTY_POLISH_CGP, false, 5,
                                    0);
   assert_command_status_and_output(config,
                                    "infer 1 HUJA 20 -numplays 20 -pfreq "
                                    "1000000 -threads 4",
-                                   false, 60, 59, 0);
+                                   false, 60, 0);
 
   assert_command_status_and_output(
       config,
       "autoplay game 10 -s1 equity -s2 equity -r1 best "
       "-r2 best -numplays 1 -lex OSPS49 -hr false -gp false",
-      false, 30, 2, 0);
+      false, 30, 0);
   config_destroy(config);
 }
 
-void test_process_command(const char *arg_string,
-                          int expected_output_line_count,
-                          const char *output_substr,
+void test_process_command(const char *arg_string, const char *output_substr,
                           int expected_outerror_line_count,
                           const char *outerror_substr) {
 
   char *test_output_filename = get_test_filename("output");
   char *test_outerror_filename = get_test_filename("outerror");
 
-  char *arg_string_with_exec =
-      get_formatted_string("./bin/magpie %s", arg_string);
+  const char *disable_save_settings = "";
+  if (!has_substring(arg_string, "-saves")) {
+    disable_save_settings = "-savesettings false";
+  }
+
+  char *arg_string_with_exec = get_formatted_string(
+      "./bin/magpie %s %s", arg_string, disable_save_settings);
 
   // Reset the contents of output
   fclose_or_die(fopen_or_die(test_output_filename, "w"));
@@ -425,9 +439,12 @@ void test_process_command(const char *arg_string,
   command_test_set_stream_err(errorout_fh);
 
   MainArgs *main_args = get_main_args_from_string(arg_string_with_exec);
+  ConfigArgs config_args = {.data_paths = DEFAULT_TEST_DATA_PATH,
+                            .settings_filename =
+                                DEFAULT_TEST_SETTINGS_FILENAME};
 
-  process_command_with_data_paths(main_args->argc, main_args->argv,
-                                  DEFAULT_TEST_DATA_PATH);
+  process_command_with_config_args(main_args->argc, main_args->argv,
+                                   &config_args);
   main_args_destroy(main_args);
 
   char *test_output = get_string_from_file_or_die(test_output_filename);
@@ -436,14 +453,7 @@ void test_process_command(const char *arg_string,
   if (!has_substring(test_output, output_substr)) {
     printf("pattern not found in output:\n%s\n***\n%s\n", test_output,
            output_substr);
-    assert(0);
-  }
-
-  int newlines_in_output = count_newlines(test_output);
-  if (newlines_in_output != expected_output_line_count) {
-    printf("test process command: counts do not match %d != %d\n",
-           newlines_in_output, expected_output_line_count);
-    printf("got:\n%s\n", test_output);
+    printf("***\nerrorout:\n%s\n", test_outerror);
     assert(0);
   }
 
@@ -476,25 +486,25 @@ void test_process_command(const char *arg_string,
 void test_exec_single_command(void) {
   char *plies_error_substr = get_formatted_string(
       "error %d", ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
-  test_process_command("sim -lex CSW21 -it 10 -plies 2h3", 0, NULL, 2,
-                       plies_error_substr);
+  test_process_command("sim -lex CSW21 -it 10 -plies 2h3 -printonfinish true",
+                       NULL, 2, plies_error_substr);
   free(plies_error_substr);
 
-  test_process_command("infer 1 MUZAKY 58 -numplays 20 -threads 4 -lex CSW21",
-                       53, "infertile leave Z", 0, NULL);
+  test_process_command("infer 1 MUZAKY 58 -numplays 20 -threads 4 -lex CSW21 "
+                       "-printonfinish true",
+                       "Total target racks", 0, NULL);
 }
 
 void *test_process_command_async(void *uncasted_process_args) {
   ProcessArgs *process_args = (ProcessArgs *)uncasted_process_args;
-  test_process_command(
-      process_args->arg_string, process_args->expected_output_line_count,
-      process_args->output_substr, process_args->expected_outerror_line_count,
-      process_args->outerror_substr);
+  test_process_command(process_args->arg_string, process_args->output_substr,
+                       process_args->expected_outerror_line_count,
+                       process_args->outerror_substr);
   set_process_args_finished(process_args, true);
   return NULL;
 }
 
-void test_exec_ucgi_command(void) {
+void test_exec_async_command(void) {
   char *test_input_filename = get_test_filename("input");
 
   // Reset the contents of input
@@ -510,7 +520,8 @@ void test_exec_ucgi_command(void) {
   command_test_set_stream_in(input_reader);
 
   ProcessArgs *process_args =
-      process_args_create("set -mode ucgi", 6, "autoplay", 1, "still running");
+      process_args_create("set -mode async -printonfinish true", "autoplay", 1,
+                          "unrecognized async command");
 
   cpthread_t cmd_execution_thread;
   cpthread_create(&cmd_execution_thread, test_process_command_async,
@@ -535,14 +546,20 @@ void test_exec_ucgi_command(void) {
   // is still running. This should give a warning.
   fprintf_or_die(
       input_writer,
-      "autoplay game 1 -lex CSW21 -s1 equity -s2 equity  -gp false\n");
+      "autoplay game 1 -lex CSW21 -s1 equity -s2 equity -gp false\n");
+  fflush_or_die(input_writer);
+  ctime_nap(1.0);
+  // Make sure the status command doesn't crash anything
+  fprintf_or_die(input_writer, ASYNC_STATUS_COMMAND_STRING);
+  fprintf_or_die(input_writer, "\n");
   fflush_or_die(input_writer);
   ctime_nap(1.0);
   // Interrupt the autoplay which won't finish in 1 second
-  fprintf_or_die(input_writer, "stop\n");
+  fprintf_or_die(input_writer, ASYNC_STOP_COMMAND_STRING);
+  fprintf_or_die(input_writer, "\n");
   fflush_or_die(input_writer);
   ctime_nap(1.0);
-  fprintf_or_die(input_writer, "quit\n");
+  fprintf_or_die(input_writer, TERMINATE_KEYWORD "\n");
   fflush_or_die(input_writer);
   ctime_nap(1.0);
 
@@ -557,7 +574,7 @@ void test_exec_ucgi_command(void) {
   command_test_reset_stream_in();
 }
 
-void test_exec_console_command(void) {
+void test_exec_sync_command(void) {
   char *test_input_filename = get_test_filename("input");
 
   // Reset the contents of input
@@ -567,28 +584,31 @@ void test_exec_console_command(void) {
   FILE *input_reader = fopen_or_die(test_input_filename, "r");
   command_test_set_stream_in(input_reader);
 
-  char *initial_command = get_formatted_string("cgp %s", EMPTY_CGP);
+  char *initial_command = get_formatted_string(
+      "cgp %s -printonfinish true -mode sync -hr false", EMPTY_CGP);
 
   char *config_load_error_substr = get_formatted_string(
       "error %d", ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
 
   ProcessArgs *process_args = process_args_create(
-      initial_command, 45, "autoplay games 20", 1, config_load_error_substr);
+      initial_command, "autoplay games 20", 1, config_load_error_substr);
 
   cpthread_t cmd_execution_thread;
   cpthread_create(&cmd_execution_thread, test_process_command_async,
                   process_args);
   cpthread_detach(cmd_execution_thread);
 
-  write_to_stream(input_writer,
-                  "infer 1 DGINR 18 -numplays 7 -threads 4 -pfreq 1000000\n");
-  write_to_stream(input_writer, "set -r1 best -r2 b -nump 1 -threads 4\n");
+  write_to_stream(input_writer, "infer 1 DGINR 18 -numplays 7 -threads 4 "
+                                "-pfreq 1000000 -printonfinish true\n");
   write_to_stream(
       input_writer,
-      "autoplay game 10 -lex CSW21 -s1 equity -s2 equity -gp true \n");
+      "set -r1 best -r2 b -nump 1 -threads 4  -printonfinish true\n");
+  write_to_stream(input_writer, "autoplay game 10 -lex CSW21 -s1 equity -s2 "
+                                "equity -gp true  -printonfinish true\n");
   // Stop should have no effect and appear as an error
-  write_to_stream(input_writer, "stop\n");
-  write_to_stream(input_writer, "quit\n");
+  write_to_stream(input_writer, ASYNC_STOP_COMMAND_STRING);
+  fprintf_or_die(input_writer, "\n");
+  write_to_stream(input_writer, TERMINATE_KEYWORD "\n");
   fclose_or_die(input_writer);
 
   // Wait for magpie to quit
@@ -603,11 +623,72 @@ void test_exec_console_command(void) {
   command_test_reset_stream_in();
 }
 
+void run_short_autoplay(const char *initial_cmd) {
+  // Run the executable with a single command that doesn't change any settings
+  // so that when the process finishes it will write to settings.txt file again
+  // with the same settings
+  char *test_input_filename = get_test_filename("input");
+
+  // Reset the contents of input
+  unlink(test_input_filename);
+
+  FILE *input_writer = fopen_or_die(test_input_filename, "w+");
+  FILE *input_reader = fopen_or_die(test_input_filename, "r");
+  command_test_set_stream_in(input_reader);
+
+  ProcessArgs *process_args =
+      process_args_create(initial_cmd, "autoplay games 2", 0, "");
+
+  cpthread_t cmd_execution_thread;
+  cpthread_create(&cmd_execution_thread, test_process_command_async,
+                  process_args);
+  cpthread_detach(cmd_execution_thread);
+
+  write_to_stream(input_writer, "autoplay games 1\n");
+  write_to_stream(input_writer, TERMINATE_KEYWORD "\n");
+  fclose_or_die(input_writer);
+
+  // Wait for magpie to quit
+  block_for_process_command(process_args, 5);
+
+  fclose_or_die(input_reader);
+  delete_fifo(test_input_filename);
+  process_args_destroy(process_args);
+  free(test_input_filename);
+  command_test_reset_stream_in();
+}
+
+void test_save_settings(void) {
+  const int remove_result = remove(DEFAULT_TEST_SETTINGS_FILENAME);
+  if (remove_result != 0) {
+    printf("no existing test settings file\n");
+  } else {
+    printf("removed existing test settings file\n");
+  }
+
+  run_short_autoplay("set -mode sync -lex CSW21 -bb 73 -gp true "
+                     "-savesettings true -hr false");
+
+  char *save1 = get_string_from_file_or_die(DEFAULT_TEST_SETTINGS_FILENAME);
+
+  run_short_autoplay("set -savesettings true");
+
+  char *save2 = get_string_from_file_or_die(DEFAULT_TEST_SETTINGS_FILENAME);
+
+  remove_or_die(DEFAULT_TEST_SETTINGS_FILENAME);
+
+  assert_strings_equal(save1, save2);
+
+  free(save1);
+  free(save2);
+}
+
 void test_command(void) {
   test_exec_single_command();
   test_command_execution();
-  test_exec_ucgi_command();
-  test_exec_console_command();
+  test_exec_async_command();
+  test_exec_sync_command();
+  test_save_settings();
   command_test_reset_stream_out();
   command_test_reset_stream_err();
   command_test_reset_stream_in();

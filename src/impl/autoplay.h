@@ -19,6 +19,9 @@ typedef struct AutoplayArgs {
   autoplay_t type;
   const char *data_paths;
   GameArgs *game_args;
+  int num_threads;
+  int print_interval;
+  uint64_t seed;
   ThreadControl *thread_control;
   const GameStringOptions *game_string_options;
 } AutoplayArgs;

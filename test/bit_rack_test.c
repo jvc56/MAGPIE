@@ -11,7 +11,7 @@
 void test_compatibility(void) {
   assert(bit_rack_type_has_expected_size());
 
-  Config *english_config = config_create_or_die("set -lex NWL20");
+  Config *english_config = config_create_or_die("set -lex NWL20 -wmp false");
   const LetterDistribution *english_ld = config_get_ld(english_config);
   if (BOARD_DIM <= 15) {
     // Could have at most 14 E's in a row (designating 2 blanks)
@@ -37,7 +37,7 @@ void test_compatibility(void) {
   config_destroy(french_config);
 
   // Alphabet size is 33, 33*4 > 128
-  Config *polish_config = config_create_or_die("set -lex OSPS49");
+  Config *polish_config = config_create_or_die("set -lex OSPS49 -wmp false");
   const LetterDistribution *polish_ld = config_get_ld(polish_config);
   assert(!bit_rack_is_compatible_with_ld(polish_ld));
   config_destroy(polish_config);

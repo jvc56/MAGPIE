@@ -446,6 +446,15 @@ bool has_iprefix(const char *pre, const char *str) {
   return strncasecmp(pre, str, string_length(pre)) == 0;
 }
 
+bool has_suffix(const char *suf, const char *str) {
+  size_t suf_len = string_length(suf);
+  size_t str_len = string_length(str);
+  if (suf_len > str_len) {
+    return false;
+  }
+  return strncmp(suf, str + str_len - suf_len, suf_len) == 0;
+}
+
 // Raises a fatal error if str is null
 bool is_string_empty_or_whitespace(const char *str) {
   if (!str) {
@@ -501,6 +510,16 @@ bool is_all_digits_or_empty(const char *str) {
   return true;
 }
 
+bool contains_digit(const char *str) {
+  while (*str != '\0') {
+    if (isdigit((unsigned char)*str)) {
+      return true;
+    }
+    str++;
+  }
+  return false;
+}
+
 bool has_substring(const char *str, const char *pattern) {
   // If the pattern is empty or both strings are equal, return true
   if (is_string_empty_or_null(pattern) || strings_equal(str, pattern)) {
@@ -525,16 +544,27 @@ size_t string_length(const char *str) {
   return strlen(str);
 }
 
+char *string_duplicate_internal(const char *str) {
+  char *duplicate = malloc_or_die(sizeof(char) * (string_length(str) + 1));
+  strncpy(duplicate, str, string_length(str));
+  duplicate[string_length(str)] = '\0';
+  return duplicate;
+}
+
+char *string_duplicate_allow_null(const char *str) {
+  if (!str) {
+    return NULL;
+  }
+  return string_duplicate_internal(str);
+}
+
 char *string_duplicate(const char *str) {
   if (!str) {
     log_fatal("cannot duplicate null string");
     // unreachable return, but silences static analyzer warnings
     return NULL;
   }
-  char *duplicate = malloc_or_die(sizeof(char) * (string_length(str) + 1));
-  strncpy(duplicate, str, string_length(str));
-  duplicate[string_length(str)] = '\0';
-  return duplicate;
+  return string_duplicate_internal(str);
 }
 
 char *empty_string(void) { return string_duplicate(""); }
@@ -704,6 +734,23 @@ char *to_lower_case(const char *content) {
   }
   lower_content[len] = '\0';
   return lower_content;
+}
+
+char *replace_whitespace_with_underscore(const char *str) {
+  if (str == NULL) {
+    return NULL;
+  }
+  size_t len = strlen(str);
+  char *new_str = (char *)malloc_or_die(len + 1);
+  for (size_t i = 0; i < len; i++) {
+    if (isspace((unsigned char)str[i])) {
+      new_str[i] = '_';
+    } else {
+      new_str[i] = str[i];
+    }
+  }
+  new_str[len] = '\0';
+  return new_str;
 }
 
 const char *get_base_filename(const char *filepath) {
@@ -895,4 +942,121 @@ char *get_process_output(const char *cmd) {
 
   string_builder_destroy(content_builder);
   return output; // Returns NULL if command failed
+}
+
+// ****************************************************************************
+// ***************************** String Grid **********************************
+// ****************************************************************************
+
+struct StringGrid {
+  int rows;
+  int cols;
+  int col_padding;
+  int *max_col_widths;
+  char **cells;
+};
+
+StringGrid *string_grid_create(int rows, int cols, int col_padding) {
+  StringGrid *string_grid = malloc_or_die(sizeof(StringGrid));
+  string_grid->rows = rows;
+  string_grid->cols = cols;
+  string_grid->col_padding = col_padding;
+  string_grid->max_col_widths = calloc_or_die(cols, sizeof(int));
+  string_grid->cells =
+      calloc_or_die((size_t)rows * (size_t)cols, sizeof(char *));
+  return string_grid;
+}
+
+void string_grid_destroy(StringGrid *string_grid) {
+  if (!string_grid) {
+    return;
+  }
+  for (int i = 0; i < string_grid->rows * string_grid->cols; i++) {
+    free(string_grid->cells[i]);
+  }
+  free(string_grid->max_col_widths);
+  free(string_grid->cells);
+  free(string_grid);
+}
+
+int string_grid_get_cell_index(const StringGrid *string_grid, int row,
+                               int col) {
+  if (row < 0 || row >= string_grid->rows || col < 0 ||
+      col >= string_grid->cols) {
+    log_fatal("string grid cell index out of range: (%d, %d)", row, col);
+  }
+  return row * string_grid->cols + col;
+}
+
+// Takes ownership of the value
+void string_grid_set_cell(StringGrid *string_grid, int row, int col,
+                          char *value) {
+  const int index = string_grid_get_cell_index(string_grid, row, col);
+  free(string_grid->cells[index]);
+  string_grid->cells[index] = value;
+}
+
+static void
+string_builder_draw_horizontal_border(StringBuilder *string_builder,
+                                      const StringGrid *string_grid) {
+  string_builder_add_string(string_builder, "+");
+  for (int c = 0; c < string_grid->cols; c++) {
+    for (int i = 0; i < string_grid->max_col_widths[c]; i++) {
+      string_builder_add_string(string_builder, "-");
+    }
+    string_builder_add_string(string_builder, "+");
+  }
+  string_builder_add_string(string_builder, "\n");
+}
+
+void string_builder_add_string_grid(StringBuilder *sb, const StringGrid *sg,
+                                    const bool add_border) {
+  for (int c = 0; c < sg->cols; c++) {
+    sg->max_col_widths[c] = 0; // Initialize to 0 or 1
+    for (int r = 0; r < sg->rows; r++) {
+      const int index = string_grid_get_cell_index(sg, r, c);
+      const char *cell_value = sg->cells[index];
+      if (cell_value) {
+        const size_t cell_value_length =
+            string_length(cell_value) + sg->col_padding;
+        if (cell_value_length > (size_t)sg->max_col_widths[c]) {
+          sg->max_col_widths[c] = (int)cell_value_length;
+        }
+      }
+    }
+    if (sg->max_col_widths[c] < 1) {
+      sg->max_col_widths[c] = 1;
+    }
+  }
+
+  if (add_border) {
+    string_builder_draw_horizontal_border(sb, sg);
+  }
+
+  for (int r = 0; r < sg->rows; r++) {
+    if (add_border) {
+      string_builder_add_string(sb, "|");
+    }
+
+    for (int c = 0; c < sg->cols; c++) {
+      const int index = string_grid_get_cell_index(sg, r, c);
+      const char *cell_value = sg->cells[index];
+      if (!cell_value) {
+        cell_value = "";
+      }
+
+      string_builder_add_formatted_string(sb, "%-*s", sg->max_col_widths[c],
+                                          cell_value);
+
+      if (add_border) {
+        string_builder_add_string(sb, "|");
+      }
+    }
+
+    string_builder_add_string(sb, "\n");
+
+    if (add_border) {
+      string_builder_draw_horizontal_border(sb, sg);
+    }
+  }
 }

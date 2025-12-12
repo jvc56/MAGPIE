@@ -674,3 +674,7 @@ void game_destroy(Game *game) {
 int game_get_max_scoreless_turns(const Game *game) {
   return game->max_scoreless_turns;
 }
+
+bool game_reached_max_scoreless_turns(const Game *game) {
+  return game->consecutive_scoreless_turns >= game->max_scoreless_turns;
+}

@@ -173,6 +173,23 @@ static inline int rack_set_to_string(const LetterDistribution *ld, Rack *rack,
   return num_mls;
 }
 
+static inline int rack_set_to_string_unblanked(const LetterDistribution *ld,
+                                               Rack *rack,
+                                               const char *rack_string) {
+  rack->dist_size = ld_get_size(ld);
+  rack_reset(rack);
+  MachineLetter mls[MAX_RACK_SIZE];
+  int num_mls = ld_str_to_mls(ld, rack_string, false, mls, MAX_RACK_SIZE);
+  for (int i = 0; i < num_mls; i++) {
+    MachineLetter ml = mls[i];
+    if (ml != BLANK_MACHINE_LETTER) {
+      ml = get_unblanked_machine_letter(ml);
+    }
+    rack_add_letter(rack, ml);
+  }
+  return num_mls;
+}
+
 // Get the sum of the tile values on the rack
 static inline Equity rack_get_score(const LetterDistribution *ld,
                                     const Rack *rack) {

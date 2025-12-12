@@ -15,7 +15,8 @@ struct Magpie {
 Magpie *magpie_create(const char *data_paths) {
   Magpie *ret = malloc_or_die(sizeof(Magpie));
   ret->error = error_stack_create();
-  ret->config = config_create_default_with_data_paths(ret->error, data_paths);
+  ConfigArgs args = {.data_paths = data_paths, .settings_filename = NULL};
+  ret->config = config_create(&args, ret->error);
   ret->output = empty_string();
   return ret;
 }

@@ -88,8 +88,9 @@ void test_convert_error(void) {
 
 void test_convert_success(void) {
   ErrorStack *error_stack = error_stack_create();
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Config *config =
+      config_create_or_die("set -lex CSW21 -wmp false -s1 equity -s2 equity "
+                           "-r1 all -r2 all -numplays 1");
   ValidatedMoves *vms;
   const Game *game;
 

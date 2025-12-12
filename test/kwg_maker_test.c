@@ -288,7 +288,7 @@ void test_two_letter_merged_dawg(void) {
 }
 
 void test_polish_gaddag(void) {
-  Config *config = config_create_or_die("set -lex OSPS49");
+  Config *config = config_create_or_die("set -lex OSPS49 -wmp false");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = config_get_ld(config);
   const Player *player = game_get_player(game, 0);

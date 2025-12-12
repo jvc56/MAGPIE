@@ -31,6 +31,10 @@ typedef struct SimArgs {
   bool use_inference;
   InferenceResults *inference_results;
   InferenceArgs inference_args;
+  int num_threads;
+  int print_interval;
+  int max_num_display_plays;
+  uint64_t seed;
   ThreadControl *thread_control;
   BAIOptions bai_options;
 } SimArgs;
@@ -51,8 +55,7 @@ void rvs_destroy(RandomVariables *rvs);
 double rvs_sample(RandomVariables *rvs, uint64_t k, int thread_index,
                   BAILogger *bai_logger);
 void rvs_reset(RandomVariables *rvs);
-bool rvs_mark_as_epigon_if_similar(RandomVariables *rvs, int leader, int i);
-bool rvs_is_epigon(const RandomVariables *rvs, int i);
+bool rvs_are_similar(RandomVariables *rvs, int i, int j);
 uint64_t rvs_get_num_rvs(const RandomVariables *rvs);
 uint64_t rvs_get_total_samples(const RandomVariables *rvs);
 

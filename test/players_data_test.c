@@ -76,33 +76,23 @@ void test_for_data_type(const char **data_names, const char *data_paths,
 void test_unshared_data(void) {
   PlayersData *players_data = players_data_create();
 
-  const char *p1_name = "Alice";
   move_sort_t p1_move_sort_type = MOVE_SORT_SCORE;
   move_record_t p1_move_record_type = MOVE_RECORD_ALL;
-  players_data_set_name(players_data, 0, p1_name);
   players_data_set_move_sort_type(players_data, 0, p1_move_sort_type);
   players_data_set_move_record_type(players_data, 0, p1_move_record_type);
 
-  assert_strings_equal(players_data_get_name(players_data, 0), p1_name);
   assert(players_data_get_move_sort_type(players_data, 0) == p1_move_sort_type);
   assert(players_data_get_move_record_type(players_data, 0) ==
          p1_move_record_type);
 
-  const char *p2_name = "Bob";
   move_sort_t p2_move_sort_type = MOVE_SORT_SCORE;
   move_record_t p2_move_record_type = MOVE_RECORD_ALL;
-  players_data_set_name(players_data, 1, p2_name);
   players_data_set_move_sort_type(players_data, 1, p2_move_sort_type);
   players_data_set_move_record_type(players_data, 1, p2_move_record_type);
 
-  assert_strings_equal(players_data_get_name(players_data, 1), p2_name);
   assert(players_data_get_move_sort_type(players_data, 1) == p2_move_sort_type);
   assert(players_data_get_move_record_type(players_data, 1) ==
          p2_move_record_type);
-
-  p2_name = "Charlie";
-  players_data_set_name(players_data, 1, p2_name);
-  assert_strings_equal(players_data_get_name(players_data, 1), p2_name);
 
   players_data_destroy(players_data);
 }
@@ -111,11 +101,9 @@ void test_reloaded_data(void) {
   PlayersData *players_data = players_data_create();
   ErrorStack *error_stack = error_stack_create();
 
-  players_data_set_name(players_data, 0, "Alice");
   players_data_set_move_sort_type(players_data, 0, MOVE_SORT_SCORE);
   players_data_set_move_record_type(players_data, 0, MOVE_RECORD_ALL);
 
-  players_data_set_name(players_data, 1, "Bob");
   players_data_set_move_sort_type(players_data, 1, MOVE_SORT_SCORE);
   players_data_set_move_record_type(players_data, 1, MOVE_RECORD_ALL);
 

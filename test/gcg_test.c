@@ -32,6 +32,25 @@ char *parse_and_write_gcg(const char *gcg_filepath_read,
     log_fatal("failed to parse gcg: %s\n", gcg_filepath_read);
   }
 
+  // Remove the newline from a comment to test that the write function adds it
+  // back
+  const int num_events = game_history_get_num_events(game_history);
+  for (int i = 0; i < num_events; i++) {
+    GameEvent *event = game_history_get_event(game_history, i);
+    const char *note = game_event_get_note(event);
+    if (note != NULL) {
+      // Remove the trailing newline
+      char *trimmed_note = string_duplicate(note);
+      size_t note_length = string_length(trimmed_note);
+      if (note_length > 0 && trimmed_note[note_length - 1] == '\n') {
+        trimmed_note[note_length - 1] = '\0';
+      }
+      game_event_set_note(event, trimmed_note);
+      free(trimmed_note);
+      break;
+    }
+  }
+
   write_gcg(gcg_filepath_write, config_get_ld(config), game_history,
             error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -70,9 +89,7 @@ void assert_gcg_write_cycle(const char *gcg_filename_readonly, Config *config,
       parse_and_write_gcg(gcg_filepath_write1, gcg_filepath_write2, config,
                           game_history, error_stack);
 
-  if (!strings_equal(iter_1_gcg_string, iter_2_gcg_string)) {
-    log_fatal("gcg strings are not equal for file '%s'\n", gcg_filepath_read);
-  }
+  assert_strings_equal(iter_1_gcg_string, iter_2_gcg_string);
   free(iter_1_gcg_string);
   free(iter_2_gcg_string);
   free(gcg_filepath_read);
@@ -95,6 +112,34 @@ void test_single_error_case(const char *gcg_filename, Config *config,
   }
 }
 
+void test_game_history(GameHistory *game_history) {
+  // Check that whitespace is trimmed from the name
+  game_history_player_reset_names(game_history, 0,
+                                  " \n  \r  first  last\n  \n\r\n", NULL);
+  assert_strings_equal(game_history_player_get_name(game_history, 0),
+                       "first  last");
+  assert_strings_equal(game_history_player_get_nickname(game_history, 0),
+                       "first__last");
+
+  // Check that the GCG extension is properly added
+  game_history_set_gcg_filename(game_history,
+                                "player_one_vs_player_two" GCG_EXTENSION);
+  assert_strings_equal(game_history_get_gcg_filename(game_history),
+                       "player_one_vs_player_two" GCG_EXTENSION);
+
+  game_history_set_gcg_filename(game_history, "a" GCG_EXTENSION);
+  assert_strings_equal(game_history_get_gcg_filename(game_history),
+                       "a" GCG_EXTENSION);
+
+  game_history_set_gcg_filename(game_history, "b");
+  assert_strings_equal(game_history_get_gcg_filename(game_history),
+                       "b" GCG_EXTENSION);
+
+  game_history_set_gcg_filename(game_history, "some_game");
+  assert_strings_equal(game_history_get_gcg_filename(game_history),
+                       "some_game" GCG_EXTENSION);
+}
+
 void test_error_cases(GameHistory *game_history) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
@@ -109,7 +154,7 @@ void test_error_cases(GameHistory *game_history) {
   test_single_error_case("description_after_events", config, game_history,
                          ERROR_STATUS_GCG_PARSE_PRAGMA_SUCCEEDED_EVENT);
   test_single_error_case("move_before_player", config, game_history,
-                         ERROR_STATUS_GCG_PARSE_MOVE_BEFORE_PLAYER);
+                         ERROR_STATUS_GCG_PARSE_GAME_EVENT_BEFORE_PLAYER);
   test_single_error_case("player_number_redundant", config, game_history,
                          ERROR_STATUS_GCG_PARSE_PLAYER_NUMBER_REDUNDANT);
   test_single_error_case("encoding_wrong_place", config, game_history,
@@ -187,6 +232,21 @@ void test_error_cases(GameHistory *game_history) {
                          ERROR_STATUS_GCG_PARSE_RACK_NOT_IN_BAG);
   test_single_error_case("last_rack2_not_in_bag", config, game_history,
                          ERROR_STATUS_GCG_PARSE_RACK_NOT_IN_BAG);
+  test_single_error_case("time_penalty_first_event", config, game_history,
+                         ERROR_STATUS_GCG_PARSE_END_GAME_EVENT_BEFORE_GAME_END);
+  test_single_error_case("time_penalty_midgame", config, game_history,
+                         ERROR_STATUS_GCG_PARSE_END_GAME_EVENT_BEFORE_GAME_END);
+  test_single_error_case("time_penalty_before_rack_points", config,
+                         game_history,
+                         ERROR_STATUS_GCG_PARSE_PREMATURE_TIME_PENALTY);
+  test_single_error_case("time_penalty_between_rack_penalties", config,
+                         game_history,
+                         ERROR_STATUS_GCG_PARSE_PREMATURE_TIME_PENALTY);
+  test_single_error_case("time_penalty_before_rack_penalties", config,
+                         game_history,
+                         ERROR_STATUS_GCG_PARSE_PREMATURE_TIME_PENALTY);
+  test_single_error_case("time_penalty_duplicate", config, game_history,
+                         ERROR_STATUS_GCG_PARSE_GAME_REDUNDANT_TIME_PENALTY);
   config_destroy(config);
 
   Config *no_lexicon_config = config_create_or_die(
@@ -330,6 +390,9 @@ void assert_game_play_n_events(GameHistory *game_history, Game *game1,
   while (cgp) {
     game_play_n_events_or_die(game_history, game1, event_index);
     load_cgp_or_die(game2, cgp);
+    printf("cgp: %s\n", cgp);
+    print_game(game1, NULL);
+    print_game(game2, NULL);
     assert_games_are_equal(game1, game2, true);
     event_index++;
     cgp = cgps[event_index];
@@ -846,6 +909,72 @@ void test_success_phony_empty_bag(GameHistory *game_history) {
   config_destroy(config);
 }
 
+void test_success_out_in_many(GameHistory *game_history) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game1 = config_game_create(config);
+  Game *game2 = config_game_create(config);
+
+  assert(test_parse_gcg("out_in_many", config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+
+  // Ensure that the racks are set correctly
+  game_play_n_events_or_die(game_history, game1, 22);
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 0)), "");
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 1)),
+                            "DEOX");
+
+  game_play_n_events_or_die(game_history, game1, 23);
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 0)),
+                            "BIJSSUV");
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 1)),
+                            "ABLN");
+
+  game_play_n_events_or_die(game_history, game1, 24);
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 0)),
+                            "JSU");
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 1)),
+                            "ABLN");
+
+  game_play_n_events_or_die(game_history, game1, 25);
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 0)),
+                            "JSU");
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 1)),
+                            "N");
+
+  game_play_n_events_or_die(game_history, game1, 26);
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 0)),
+                            "S");
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 1)),
+                            "N");
+
+  game_play_n_events_or_die(game_history, game1, 27);
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 0)),
+                            "S");
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 1)), "");
+
+  game_play_n_events_or_die(game_history, game1, 28);
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 0)),
+                            "S");
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 1)), "");
+
+  game_play_n_events_or_die(game_history, game1, 29);
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 0)),
+                            "S");
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 1)), "");
+
+  game_play_n_events_or_die(game_history, game1, 30);
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 0)),
+                            "S");
+  assert_rack_equals_string(ld, player_get_rack(game_get_player(game1, 1)), "");
+
+  game_destroy(game1);
+  game_destroy(game2);
+  config_destroy(config);
+}
+
 void test_success_long_game(GameHistory *game_history) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
@@ -978,6 +1107,7 @@ void test_gcg(void) {
   // Use the same game_history for all tests to thoroughly test the
   // game_history_reset function
   GameHistory *game_history = game_history_create();
+  test_game_history(game_history);
   test_error_cases(game_history);
   test_parse_special_char(game_history);
   test_parse_special_utf8_no_header(game_history);
@@ -988,6 +1118,7 @@ void test_gcg(void) {
   test_success_six_pass(game_history);
   test_success_incomplete(game_history);
   test_success_phony_empty_bag(game_history);
+  test_success_out_in_many(game_history);
   test_vs_jeremy_gcg(game_history);
   test_write_gcg(game_history);
   test_partially_known_rack_from_phonies(game_history);

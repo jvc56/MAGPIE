@@ -28,8 +28,8 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
   Game *actual_game = config_game_create(config);
   Game *expected_game = config_game_create(config);
 
-  int player0_last_score_on_rack = -1;
-  int player1_last_score_on_rack = -1;
+  int player0_end_rack_penalty = -1;
+  int player1_end_rack_penalty = -1;
   int player0_final_score = -1;
   int player1_final_score = -1;
   int player0_score_before_last_move = -1;
@@ -67,8 +67,8 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
     play_top_n_equity_move(actual_game, 0);
 
     if (i == array_length - 1) {
-      player0_last_score_on_rack = rack_get_score(ld, player0_rack);
-      player1_last_score_on_rack = rack_get_score(ld, player1_rack);
+      player0_end_rack_penalty = calculate_end_rack_penalty(player0_rack, ld);
+      player1_end_rack_penalty = calculate_end_rack_penalty(player1_rack, ld);
       player0_final_score = player_get_score(player0);
       player1_final_score = player_get_score(player1);
     }
@@ -94,9 +94,9 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
 
   if (game_get_game_end_reason(actual_game) ==
       GAME_END_REASON_CONSECUTIVE_ZEROS) {
-    assert(player0_score_before_last_move - player0_last_score_on_rack ==
+    assert(player0_score_before_last_move + player0_end_rack_penalty ==
            player0_final_score);
-    assert(player1_score_before_last_move - player1_last_score_on_rack ==
+    assert(player1_score_before_last_move + player1_end_rack_penalty ==
            player1_final_score);
   }
 
@@ -557,9 +557,9 @@ void test_playmove(void) {
   assert(game_get_consecutive_scoreless_turns(game) == 6);
   assert(game_get_game_end_reason(game) == GAME_END_REASON_CONSECUTIVE_ZEROS);
   assert(player_get_score(player0) ==
-         player0_score - rack_get_score(ld, player0_rack));
+         player0_score + calculate_end_rack_penalty(player0_rack, ld));
   assert(player_get_score(player1) ==
-         player1_score - rack_get_score(ld, player1_rack));
+         player1_score + calculate_end_rack_penalty(player1_rack, ld));
   assert(!rack_is_empty(player0_rack));
   assert(rack_get_total_letters(player0_rack) == 1);
   assert(rack_get_total_letters(player1_rack) == 1);
@@ -718,6 +718,10 @@ void test_leave_record(void) {
   config_destroy(config);
 }
 
+bool moves_are_similar(const Move *m1, const Move *m2, const Rack *rack) {
+  return move_get_similarity_key(m1, rack) == move_get_similarity_key(m2, rack);
+}
+
 void test_moves_are_similar(void) {
   Config *config = config_create_or_die(
       "set -lex NWL23 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
@@ -731,12 +735,47 @@ void test_moves_are_similar(void) {
   rack_set_to_string(ld, player0_rack, "EEEIILZ");
   vms = validated_moves_create_and_assert_status(
       game, 0, "14f.ZINE,14f.LINE", false, false, false, ERROR_STATUS_SUCCESS);
-  const Move *m1 = validated_moves_get_move(vms, 0);
-  const Move *m2 = validated_moves_get_move(vms, 1);
-  assert(!moves_are_similar(m2, m1, ld_get_size(ld)));
-  assert(!moves_are_similar(m1, m2, ld_get_size(ld)));
+
+  assert(!moves_are_similar(validated_moves_get_move(vms, 0),
+                            validated_moves_get_move(vms, 1), player0_rack));
   validated_moves_destroy(vms);
   vms = NULL;
+
+  rack_set_to_string(ld, player0_rack, "EEEIILZ");
+  vms = validated_moves_create_and_assert_status(
+      game, 0, "14f.LENI,14f.LINE", true, false, false, ERROR_STATUS_SUCCESS);
+  assert(moves_are_similar(validated_moves_get_move(vms, 0),
+                           validated_moves_get_move(vms, 1), player0_rack));
+  validated_moves_destroy(vms);
+  vms = NULL;
+
+  load_cgp_or_die(game, EMPTY_CGP);
+  // Moves with different scores are not similar
+  rack_set_to_string(ld, player0_rack, "ACEIRST");
+  vms = validated_moves_create_and_assert_status(
+      game, 0, "8d.CRISTAE,8d.RACIEST", false, false, false,
+      ERROR_STATUS_SUCCESS);
+  assert(!moves_are_similar(validated_moves_get_move(vms, 0),
+                            validated_moves_get_move(vms, 1), player0_rack));
+  validated_moves_destroy(vms);
+  vms = NULL;
+
+  // Test that exchanges are similar
+  rack_set_to_string(ld, player0_rack, "EEEIILZ");
+  vms = validated_moves_create_and_assert_status(
+      game, 0, "ex.EEIZ,ex.ZEIE", false, false, false, ERROR_STATUS_SUCCESS);
+  assert(moves_are_similar(validated_moves_get_move(vms, 0),
+                           validated_moves_get_move(vms, 1), player0_rack));
+  validated_moves_destroy(vms);
+  vms = NULL;
+
+  // Test that passes are similar
+  rack_set_to_string(ld, player0_rack, "A");
+  Move pass1;
+  move_set_as_pass(&pass1);
+  Move pass2;
+  move_set_as_pass(&pass2);
+  assert(moves_are_similar(&pass1, &pass2, player0_rack));
 
   game_destroy(game);
   config_destroy(config);

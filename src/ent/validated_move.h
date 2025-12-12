@@ -9,6 +9,8 @@
 #include "move.h"
 #include "words.h"
 
+enum { UCGI_DELIMITER = '.' };
+
 typedef struct ValidatedMoves ValidatedMoves;
 
 ValidatedMoves *validated_moves_create(const Game *game, int player_index,
@@ -17,6 +19,7 @@ ValidatedMoves *validated_moves_create(const Game *game, int player_index,
                                        bool allow_unknown_exchanges,
                                        bool allow_playthrough,
                                        ErrorStack *error_stack);
+ValidatedMoves *validated_moves_duplicate(const ValidatedMoves *vms_orig);
 void validated_moves_destroy(ValidatedMoves *vms);
 
 int validated_moves_get_number_of_moves(const ValidatedMoves *vms);
@@ -26,14 +29,13 @@ const FormedWords *validated_moves_get_formed_words(const ValidatedMoves *vms,
 const Rack *validated_moves_get_rack(const ValidatedMoves *vms, int i);
 bool validated_moves_get_unknown_exchange(const ValidatedMoves *vms, int i);
 
-char *validated_moves_get_phonies_string(const LetterDistribution *ld,
-                                         const ValidatedMoves *vms,
-                                         int vm_index);
+bool validated_moves_is_phony(const ValidatedMoves *vms, int vm_index);
 
 int validated_moves_get_challenge_points(const ValidatedMoves *vms, int i);
 bool validated_moves_get_challenge_turn_loss(const ValidatedMoves *vms, int i);
 
-void validated_moves_add_to_move_list(const ValidatedMoves *vms, MoveList *ml);
+void validated_moves_add_to_sorted_move_list(const ValidatedMoves *vms,
+                                             MoveList *ml);
 void validated_moves_set_rack_to_played_letters(const ValidatedMoves *vms,
                                                 int i, Rack *rack_to_set);
 #endif

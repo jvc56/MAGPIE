@@ -23,9 +23,13 @@
 
 typedef struct Config Config;
 
+typedef struct ConfigArgs {
+  const char *data_paths;
+  const char *settings_filename;
+} ConfigArgs;
+
 // Constructors and Destructors
-Config *config_create_default_with_data_paths(ErrorStack *error_stack,
-                                              const char *data_paths);
+Config *config_create(const ConfigArgs *args, ErrorStack *error_stack);
 void config_destroy(Config *config);
 
 // Loading commands and execution
@@ -47,11 +51,16 @@ int config_get_num_plays(const Config *config);
 int config_get_num_small_plays(const Config *config);
 int config_get_plies(const Config *config);
 int config_get_endgame_plies(const Config *config);
-int config_get_max_iterations(const Config *config);
+uint64_t config_get_max_iterations(const Config *config);
+uint64_t config_get_seed(const Config *config);
 double config_get_stop_cond_pct(const Config *config);
 bool config_get_use_game_pairs(const Config *config);
 bool config_get_use_small_plays(const Config *config);
 bool config_get_human_readable(const Config *config);
+bool config_get_show_prompt(const Config *config);
+bool config_get_save_settings(const Config *config);
+bool config_get_loaded_settings(const Config *config);
+void config_set_loaded_settings(Config *config, const bool value);
 double config_get_tt_fraction_of_mem(const Config *config);
 PlayersData *config_get_players_data(const Config *config);
 LetterDistribution *config_get_ld(const Config *config);
@@ -63,6 +72,7 @@ MoveList *config_get_move_list(const Config *config);
 SimResults *config_get_sim_results(const Config *config);
 EndgameResults *config_get_endgame_results(const Config *config);
 AutoplayResults *config_get_autoplay_results(const Config *config);
+const char *config_get_settings_filename(const Config *config);
 const char *config_get_current_exec_name(const Config *config);
 
 // Entity creators
@@ -90,4 +100,8 @@ void config_parse_gcg(Config *config, const char *gcg_filename,
 void config_parse_gcg_string(Config *config, const char *gcg_string,
                              GameHistory *game_history,
                              ErrorStack *error_stack);
+// Settings
+void config_add_settings_to_string_builder(const Config *config,
+                                           StringBuilder *sb);
+
 #endif

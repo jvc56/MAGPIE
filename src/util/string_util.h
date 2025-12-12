@@ -24,6 +24,7 @@ void string_builder_add_spaces(StringBuilder *string_builder,
                                int number_of_spaces);
 void string_builder_add_int(StringBuilder *string_builder, int64_t n);
 void string_builder_add_char(StringBuilder *string_builder, char c);
+void string_builder_truncate(StringBuilder *string_builder, size_t len);
 void string_builder_clear(StringBuilder *string_builder);
 size_t string_builder_length(const StringBuilder *string_builder);
 const char *string_builder_peek(const StringBuilder *string_builder);
@@ -61,17 +62,20 @@ void string_list_destroy(StringList *string_list);
 // Boolean string functions
 bool has_prefix(const char *pre, const char *str);
 bool has_iprefix(const char *pre, const char *str);
+bool has_suffix(const char *suf, const char *str);
 bool is_string_empty_or_whitespace(const char *str);
 bool is_string_empty_or_null(const char *str);
 bool strings_equal(const char *str1, const char *str2);
 bool strings_iequal(const char *str1, const char *str2);
 bool is_all_digits_or_empty(const char *str);
+bool contains_digit(const char *str);
 bool has_substring(const char *str, const char *pattern);
 bool is_url(const char *content);
 size_t string_length(const char *str);
 
 // Malloc'ing string functions
 char *string_duplicate(const char *str);
+char *string_duplicate_allow_null(const char *str);
 char *empty_string(void);
 char *get_substring(const char *input_string, int start_index, int end_index);
 char *iso_8859_1_to_utf8(const char *iso_8859_1_string);
@@ -80,6 +84,7 @@ char *cut_off_after_last_char(const char *str, char ch);
 char *cut_off_after_first_char(const char *str, char ch);
 char *insert_before_dot(const char *str, const char *insert);
 char *to_lower_case(const char *content);
+char *replace_whitespace_with_underscore(const char *str);
 
 // Non-malloc'ing string functions
 const char *get_base_filename(const char *filepath);
@@ -96,4 +101,16 @@ double string_to_double(const char *str, ErrorStack *error_stack);
 // JSON utilities
 char *json_unescape_string(const char *json_string);
 char *get_process_output(const char *cmd);
+
+// String Grid functions
+
+typedef struct StringGrid StringGrid;
+
+StringGrid *string_grid_create(int rows, int cols, int col_padding);
+void string_grid_destroy(StringGrid *string_grid);
+int string_grid_get_cell_index(const StringGrid *string_grid, int row, int col);
+void string_grid_set_cell(StringGrid *string_grid, int row, int col,
+                          char *value);
+void string_builder_add_string_grid(StringBuilder *sb, const StringGrid *sg,
+                                    bool add_border);
 #endif

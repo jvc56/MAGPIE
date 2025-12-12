@@ -4,6 +4,14 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 
+#define KWG_EXTENSION ".kwg"
+#define WORDMAP_EXTENSION ".wmp"
+#define KLV_EXTENSION ".klv2"
+#define TXT_EXTENSION ".txt"
+#define CSV_EXTENSION ".csv"
+#define GCG_EXTENSION ".gcg"
+#define LEXICON_EXTENSION ".txt"
+
 typedef enum {
   DATA_FILEPATH_TYPE_KWG,
   DATA_FILEPATH_TYPE_KLV,

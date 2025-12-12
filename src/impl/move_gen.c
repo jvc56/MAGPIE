@@ -49,13 +49,6 @@
 static MoveGen *cached_gens[MAX_THREADS];
 static cpthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER; // NOLINT
 
-MoveGen *generator_create(void) {
-  MoveGen *generator = malloc_or_die(sizeof(MoveGen));
-  generator->tiles_played = 0;
-  generator->dir = BOARD_HORIZONTAL_DIRECTION;
-  return generator;
-}
-
 void generator_destroy(MoveGen *gen) {
   if (!gen) {
     return;
@@ -65,14 +58,11 @@ void generator_destroy(MoveGen *gen) {
 
 MoveGen *get_movegen(int thread_index) {
   if (!cached_gens[thread_index]) {
-    cached_gens[thread_index] = generator_create();
+    cached_gens[thread_index] = malloc_or_die(sizeof(MoveGen));
   }
   return cached_gens[thread_index];
 }
 
-// FIXME: is this necessary? the MoveGen struct may not have anymore
-// dist-dependent heap alloc'd fields, so maybe we can now destroy only at
-// program exit.
 void gen_destroy_cache(void) {
   cpthread_mutex_lock(&cache_mutex);
   for (int i = 0; i < (MAX_THREADS); i++) {
@@ -423,7 +413,7 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
 }
 
 static inline void set_play_for_record_wmp(MoveGen *gen, Move *move,
-                                           int start_col, int score) {
+                                           int start_col, Equity score) {
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
   move_set_all_except_equity(
       move, gen->playthrough_marked, 0, wgen->word_length - 1, score,
@@ -459,7 +449,7 @@ static inline Equity get_move_equity_for_sort_type_wmp(MoveGen *gen,
 
 static inline void
 update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
-                                             int score, Equity leave_value) {
+                                             Equity score, Equity leave_value) {
   bool need_to_update_best_move_equity_or_score = false;
   switch (gen->move_record_type) {
   case MOVE_RECORD_ALL:
@@ -504,25 +494,25 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
 
 void record_wmp_play(MoveGen *gen, int start_col, Equity leave_value) {
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
-  const int bingo_bonus =
+  const Equity bingo_bonus =
       gen->max_tiles_to_play == RACK_SIZE ? gen->bingo_bonus : 0;
-  int played_score_total = 0;
-  int playthrough_score_total = 0;
+  Equity played_score_total = 0;
+  Equity playthrough_score_total = 0;
   // from already played letters hooked
-  int hooked_cross_total = 0;
+  Equity hooked_cross_total = 0;
   // from newly played tiles counting both ways due to crossing
-  int played_cross_total = 0;
+  Equity played_cross_total = 0;
   int word_multiplier = 1;
   for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
     const int board_col = letter_idx + start_col;
     MachineLetter ml = gen->playthrough_marked[letter_idx];
     if (ml != PLAYED_THROUGH_MARKER) {
-      const int tile_score = get_is_blanked(ml) ? 0 : gen->tile_scores[ml];
+      const Equity tile_score = gen->tile_scores[ml];
       const BonusSquare bonus_square =
           gen_cache_get_bonus_square(gen, board_col);
       const int this_word_multiplier =
           bonus_square_get_word_multiplier(bonus_square);
-      const int hooked_cross_score =
+      const Equity hooked_cross_score =
           gen_cache_get_cross_score(gen, board_col) * this_word_multiplier;
       hooked_cross_total += hooked_cross_score;
       const int is_cross_word =
@@ -535,11 +525,10 @@ void record_wmp_play(MoveGen *gen, int start_col, Equity leave_value) {
       word_multiplier *= this_word_multiplier;
     } else {
       ml = gen_cache_get_letter(gen, board_col);
-      const int tile_score = get_is_blanked(ml) ? 0 : gen->tile_scores[ml];
-      playthrough_score_total += tile_score;
+      playthrough_score_total += gen->tile_scores[ml];
     }
   }
-  const int score =
+  const Equity score =
       (played_score_total + playthrough_score_total) * word_multiplier +
       hooked_cross_total + played_cross_total + bingo_bonus;
   update_best_move_or_insert_into_movelist_wmp(gen, start_col, score,
@@ -706,11 +695,11 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
 void go_on(MoveGen *gen, int current_col, MachineLetter L,
            uint32_t new_node_index, bool accepts, int leftstrip, int rightstrip,
            bool unique_play, int main_word_score, int word_multiplier,
-           int cross_score);
+           Equity cross_score);
 
 void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
                    int rightstrip, bool unique_play, int main_word_score,
-                   int word_multiplier, int cross_score) {
+                   int word_multiplier, Equity cross_score) {
   const MachineLetter current_letter = gen_cache_get_letter(gen, col);
   // If current_letter is nonempty, leftx is the set of letters that could go
   // immediately left of the current block of played tiles.
@@ -796,8 +785,8 @@ static inline bool play_is_nonempty_and_nonduplicate(int tiles_played,
 
 void go_on(MoveGen *gen, int current_col, MachineLetter L,
            uint32_t new_node_index, bool accepts, int leftstrip, int rightstrip,
-           bool unique_play, int main_word_score, int word_multiplier,
-           int cross_score) {
+           bool unique_play, Equity main_word_score, int word_multiplier,
+           Equity cross_score) {
   // Handle incremental scoring
   const BonusSquare bonus_square = gen_cache_get_bonus_square(gen, current_col);
   uint8_t letter_multiplier = 1;
@@ -817,13 +806,13 @@ void go_on(MoveGen *gen, int current_col, MachineLetter L,
     letter_multiplier = bonus_square_get_letter_multiplier(bonus_square);
   }
 
-  int inc_word_multiplier = this_word_multiplier * word_multiplier;
+  const int inc_word_multiplier = this_word_multiplier * word_multiplier;
 
-  const int lsm = gen->tile_scores[ml] * letter_multiplier;
+  const Equity lsm = gen->tile_scores[ml] * letter_multiplier;
 
-  int inc_main_word_score = lsm + main_word_score;
+  const Equity inc_main_word_score = lsm + main_word_score;
 
-  int inc_cross_scores = cross_score;
+  Equity inc_cross_scores = cross_score;
 
   if (fresh_tile && gen_cache_get_is_cross_word(gen, current_col)) {
     inc_cross_scores += (lsm + gen_cache_get_cross_score(gen, current_col)) *
@@ -897,11 +886,11 @@ void go_on(MoveGen *gen, int current_col, MachineLetter L,
 
 void go_on_alpha(MoveGen *gen, int current_col, MachineLetter L, int leftstrip,
                  int rightstrip, bool unique_play, int main_word_score,
-                 int word_multiplier, int cross_score);
+                 int word_multiplier, Equity cross_score);
 
 void recursive_gen_alpha(MoveGen *gen, int col, int leftstrip, int rightstrip,
-                         bool unique_play, int main_word_score,
-                         int word_multiplier, int cross_score) {
+                         bool unique_play, Equity main_word_score,
+                         int word_multiplier, Equity cross_score) {
   const MachineLetter current_letter = gen_cache_get_letter(gen, col);
   uint64_t possible_letters_here = gen_cache_get_cross_set(gen, col);
   if (possible_letters_here == 1) {
@@ -953,8 +942,8 @@ void recursive_gen_alpha(MoveGen *gen, int col, int leftstrip, int rightstrip,
 }
 
 void go_on_alpha(MoveGen *gen, int current_col, MachineLetter L, int leftstrip,
-                 int rightstrip, bool unique_play, int main_word_score,
-                 int word_multiplier, int cross_score) {
+                 int rightstrip, bool unique_play, Equity main_word_score,
+                 int word_multiplier, Equity cross_score) {
   // Handle incremental scoring
   const BonusSquare bonus_square = gen_cache_get_bonus_square(gen, current_col);
   int letter_multiplier = 1;
@@ -974,13 +963,13 @@ void go_on_alpha(MoveGen *gen, int current_col, MachineLetter L, int leftstrip,
     letter_multiplier = bonus_square_get_letter_multiplier(bonus_square);
   }
 
-  int inc_word_multiplier = this_word_multiplier * word_multiplier;
+  const int inc_word_multiplier = this_word_multiplier * word_multiplier;
 
-  const int lsm = gen->tile_scores[ml] * letter_multiplier;
+  const Equity lsm = gen->tile_scores[ml] * letter_multiplier;
 
-  int inc_main_word_score = lsm + main_word_score;
+  const Equity inc_main_word_score = lsm + main_word_score;
 
-  int inc_cross_scores = cross_score;
+  Equity inc_cross_scores = cross_score;
 
   if (fresh_tile && gen_cache_get_is_cross_word(gen, current_col)) {
     inc_cross_scores += (lsm + gen_cache_get_cross_score(gen, current_col)) *
@@ -1065,9 +1054,9 @@ static inline void shadow_record(MoveGen *gen) {
       if (gen->number_of_tiles_in_bag > 0) {
         best_leaves = wmp_move_gen_get_nonplaythrough_best_leave_values(
             &gen->wmp_move_gen);
-        for (int i = 0; i < RACK_SIZE - gen->tiles_played; i++) {
-          assert(best_leaves[i] <= gen->best_leaves[i]);
-        }
+        const int leave_size =
+            gen->number_of_letters_on_rack - gen->tiles_played;
+        assert(best_leaves[leave_size] <= gen->best_leaves[leave_size]);
       }
     }
   }
@@ -1749,8 +1738,8 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
 
 void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   const Game *game = args->game;
-  move_record_t move_record_type = args->move_record_type;
-  move_sort_t move_sort_type = args->move_sort_type;
+  gen->move_record_type = args->move_record_type;
+  gen->move_sort_type = args->move_sort_type;
   MoveList *move_list = args->move_list;
   const KWG *override_kwg = args->override_kwg;
   gen->eq_margin_movegen = args->eq_margin_movegen;
@@ -1767,21 +1756,24 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->board_number_of_tiles_played = board_get_tiles_played(gen->board);
   rack_copy(&gen->opponent_rack, player_get_rack(opponent));
   rack_copy(&gen->player_rack, player_get_rack(player));
+  move_list_set_rack(move_list, &gen->player_rack);
   rack_set_dist_size(&gen->leave, ld_get_size(&gen->ld));
   wmp_move_gen_init(&gen->wmp_move_gen, &gen->ld, &gen->player_rack,
                     player_get_wmp(player));
 
+  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
+    gen->wmp_move_gen.wmp = NULL;
+  }
+
   gen->bingo_bonus = game_get_bingo_bonus(game);
   gen->number_of_tiles_in_bag = bag_get_letters(game_get_bag(game));
   gen->kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
-  gen->move_sort_type = move_sort_type;
-  gen->move_record_type = move_record_type;
   gen->move_list = move_list;
   gen->cross_index =
       board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index);
 
   // Reset the move list
-  if (move_record_type == MOVE_RECORD_ALL_SMALL) {
+  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
     small_move_list_reset(gen->move_list);
   } else {
     move_list_reset(gen->move_list);
@@ -1829,21 +1821,31 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
     gen->best_leaves[i] = EQUITY_INITIAL_VALUE;
   }
 
-  if (gen->number_of_tiles_in_bag > 0) {
-    // Set the best leaves and maybe add exchanges.
-    // gen->leave_map.current_index moves differently when filling
-    // leave_values than when reading from it to generate plays. Start at 0,
-    // which represents using (exchanging) gen->player_rack->number_of_letters
-    // tiles and keeping 0 tiles.
-    leave_map_set_current_index(&gen->leave_map, 0);
-    uint32_t node_index = kwg_get_dawg_root_node_index(gen->klv->kwg);
-    rack_reset(&gen->leave);
-    // Assumes the player has drawn a full rack but not the opponent.
-    generate_exchange_moves(
-        gen, &gen->leave, node_index, 0, 0,
-        gen->number_of_tiles_in_bag +
-                rack_get_total_letters(&gen->opponent_rack) >=
-            (RACK_SIZE * 2));
+  const bool check_leaves = (gen->number_of_tiles_in_bag > 0) &&
+                            (gen->move_sort_type != MOVE_SORT_SCORE);
+  // TODO(olaugh): This is looking up leaves even when the sort is by score.
+  // We should pass check_leaves to generate_exchange_moves because if we sort
+  // by score we should still generate all exchanges. However this is an actual
+  // waste performance-wise for endgame, unless we want to somehow incorporate
+  // something like heuristic "endgame leaves" to use in estimates for negamax.
+  //
+  // Set the best leaves and maybe add exchanges.
+  // gen->leave_map.current_index moves differently when filling
+  // leave_values than when reading from it to generate plays. Start at 0,
+  // which represents using (exchanging) gen->player_rack->number_of_letters
+  // tiles and keeping 0 tiles.
+  leave_map_set_current_index(&gen->leave_map, 0);
+  uint32_t node_index = kwg_get_dawg_root_node_index(gen->klv->kwg);
+  rack_reset(&gen->leave);
+  // Assumes the player has drawn a full rack but not the opponent.
+  generate_exchange_moves(gen, &gen->leave, node_index, 0, 0,
+                          gen->number_of_tiles_in_bag +
+                                  rack_get_total_letters(&gen->opponent_rack) >=
+                              (RACK_SIZE * 2));
+  if (!check_leaves) {
+    for (int i = 0; i < RACK_SIZE; i++) {
+      gen->best_leaves[i] = 0;
+    }
   }
 }
 
@@ -1948,8 +1950,10 @@ void generate_moves(const MoveGenArgs *args) {
   gen_look_up_leaves_and_record_exchanges(gen);
 
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
-    wmp_move_gen_check_nonplaythrough_existence(
-        &gen->wmp_move_gen, gen->number_of_tiles_in_bag > 0, &gen->leave_map);
+    const bool check_leaves = (gen->number_of_tiles_in_bag > 0) &&
+                              (gen->move_sort_type != MOVE_SORT_SCORE);
+    wmp_move_gen_check_nonplaythrough_existence(&gen->wmp_move_gen,
+                                                check_leaves, &gen->leave_map);
   }
 
   gen_shadow(gen);

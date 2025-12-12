@@ -34,6 +34,8 @@ struct InferenceResults {
   Rack target_played_tiles;
   Rack target_known_unplayed_tiles;
   Rack bag_as_rack;
+  bool valid_for_current_game_state;
+  bool interrupted;
 };
 
 InferenceResults *inference_results_create(AliasMethod *alias_method) {
@@ -51,6 +53,8 @@ InferenceResults *inference_results_create(AliasMethod *alias_method) {
     results->alias_method_created_internally = true;
     results->alias_method = alias_method_create();
   }
+  results->valid_for_current_game_state = false;
+  results->interrupted = false;
   return results;
 }
 
@@ -81,6 +85,8 @@ void inference_results_reset(InferenceResults *results, int move_capacity,
   if (results->alias_method_created_internally) {
     alias_method_reset(results->alias_method);
   }
+  results->valid_for_current_game_state = false;
+  results->interrupted = false;
 }
 
 void inference_results_finalize(const Rack *target_played_tiles,
@@ -88,7 +94,7 @@ void inference_results_finalize(const Rack *target_played_tiles,
                                 const Rack *bag_as_rack,
                                 InferenceResults *results, Equity target_score,
                                 int target_number_of_tiles_exchanged,
-                                Equity equity_margin) {
+                                Equity equity_margin, bool interrupted) {
   results->target_score = target_score;
   results->target_number_of_tiles_exchanged = target_number_of_tiles_exchanged;
   results->equity_margin = equity_margin;
@@ -97,6 +103,10 @@ void inference_results_finalize(const Rack *target_played_tiles,
   rack_copy(&results->bag_as_rack, bag_as_rack);
   leave_rack_list_sort(results->leave_rack_list);
   alias_method_generate_tables(results->alias_method);
+  results->interrupted = interrupted;
+  if (interrupted) {
+    results->valid_for_current_game_state = false;
+  }
 }
 
 int inference_results_get_target_number_of_tiles_exchanged(
@@ -110,6 +120,17 @@ Equity inference_results_get_target_score(const InferenceResults *results) {
 
 Equity inference_results_get_equity_margin(const InferenceResults *results) {
   return results->equity_margin;
+}
+
+// Always sets to false if interrupted
+void inference_results_set_valid_for_current_game_state(
+    InferenceResults *results, bool valid) {
+  results->valid_for_current_game_state = !results->interrupted && valid;
+}
+
+bool inference_results_get_valid_for_current_game_state(
+    const InferenceResults *results) {
+  return results->valid_for_current_game_state;
 }
 
 const Rack *

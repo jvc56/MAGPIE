@@ -117,9 +117,10 @@ void test_autoplay_default(void) {
 }
 
 void test_autoplay_leavegen(void) {
-  Config *ab_config = config_create_or_die(
-      "set -lex CSW21_ab -ld english_ab -s1 equity -s2 equity -r1 best -r2 "
-      "best -numplays 1 -threads 1");
+  Config *ab_config =
+      config_create_or_die("set -lex CSW21_ab -ld english_ab -wmp false -s1 "
+                           "equity -s2 equity -r1 best -r2 "
+                           "best -numplays 1 -threads 1");
 
   // The minimum leave count should be achieved quickly, so if this takes too
   // long, we know it failed.

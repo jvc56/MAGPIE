@@ -64,3 +64,6 @@ cppcheck_*
 
 # External dependencies
 quackle
+
+# Settings
+settings.txt

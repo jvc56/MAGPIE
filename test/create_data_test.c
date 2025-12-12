@@ -9,14 +9,20 @@
 #include <stdlib.h>
 
 void test_create_data(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Config *config = config_create_or_die("set -numplays 1");
+
+  assert_config_exec_status(
+      config, "createdata klv some_klv",
+      ERROR_STATUS_CREATE_DATA_MISSING_LETTER_DISTRIBUTION);
+
   const char *klv_filename = "CSW21_small_create_test";
   char *create_data_command =
       get_formatted_string("createdata klv %s english_small", klv_filename);
+  load_and_exec_config_or_die(
+      config,
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   char *set_klv_command = get_formatted_string(
       "set -k1 %s -k2 %s -ld english_small", klv_filename, klv_filename);
-
   load_and_exec_config_or_die(config, "set -path testdata");
   load_and_exec_config_or_die(config, create_data_command);
   load_and_exec_config_or_die(config, set_klv_command);

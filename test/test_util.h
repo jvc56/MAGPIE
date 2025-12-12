@@ -19,6 +19,7 @@
 
 #define TRIVIAL_CROSS_SET_STRING "*"
 #define DEFAULT_TEST_DATA_PATH "./testdata:./data"
+#define DEFAULT_TEST_SETTINGS_FILENAME "test_settings_12345678901.txt"
 
 typedef struct SortedMoveList {
   int count;
@@ -54,10 +55,6 @@ void print_game(const Game *game, const MoveList *move_list);
 void print_cgp(const Game *game);
 void print_english_rack(const Rack *rack);
 void print_rack(const Rack *rack, const LetterDistribution *ld);
-void print_inference(const LetterDistribution *ld,
-                     const Rack *target_played_tiles,
-                     InferenceResults *inference_results);
-void set_thread_control_status_to_start(ThreadControl *thread_control);
 void load_cgp_or_die(Game *game, const char *cgp);
 void load_and_exec_config_or_die(Config *config, const char *cmd);
 bool load_and_exec_config_or_die_timed(Config *config, const char *cmd,
@@ -76,6 +73,7 @@ KLV *klv_read_from_csv_or_die(const LetterDistribution *ld,
 void klv_write_to_csv_or_die(KLV *klv, const LetterDistribution *ld,
                              const char *data_paths, const char *csv_name);
 char *get_string_from_file_or_die(const char *filename);
+void remove_or_die(const char *filename);
 void set_row(const Game *game, int row, const char *row_content);
 void assert_board_layout_error(const char *data_paths,
                                const char *board_layout_name,
@@ -144,4 +142,6 @@ void load_game_history_with_gcg_string(Config *config, const char *gcg_header,
 void load_game_history_with_gcg(Config *config, const char *gcg_file);
 void assert_config_exec_status(Config *config, const char *cmd,
                                error_code_t expected_error_code);
+error_code_t get_config_exec_status(Config *config, const char *cmd);
+
 #endif

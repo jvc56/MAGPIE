@@ -13,8 +13,6 @@ typedef struct PlayersData PlayersData;
 PlayersData *players_data_create(void);
 void players_data_destroy(PlayersData *players_data);
 
-const char *players_data_get_name(const PlayersData *players_data,
-                                  int player_index);
 move_sort_t players_data_get_move_sort_type(const PlayersData *players_data,
                                             int player_index);
 move_record_t players_data_get_move_record_type(const PlayersData *players_data,
@@ -26,8 +24,6 @@ KWG *players_data_get_kwg(const PlayersData *players_data, int player_index);
 KLV *players_data_get_klv(const PlayersData *players_data, int player_index);
 WMP *players_data_get_wmp(const PlayersData *players_data, int player_index);
 
-void players_data_set_name(PlayersData *players_data, int player_index,
-                           const char *player_name);
 void players_data_set_move_sort_type(PlayersData *players_data,
                                      int player_index,
                                      move_sort_t move_sort_type);
@@ -38,7 +34,13 @@ void *players_data_get_data(const PlayersData *players_data,
                             players_data_t players_data_type, int player_index);
 bool players_data_get_is_shared(const PlayersData *players_data,
                                 players_data_t players_data_type);
-
+bool players_data_get_use_when_available(const PlayersData *players_data,
+                                         players_data_t players_data_type,
+                                         int player_index);
+void players_data_set_use_when_available(PlayersData *players_data,
+                                         players_data_t players_data_type,
+                                         int player_index,
+                                         bool use_when_available);
 void players_data_set(PlayersData *players_data,
                       players_data_t players_data_type, const char *data_paths,
                       const char *p1_data_name, const char *p2_data_name,

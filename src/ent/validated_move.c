@@ -74,7 +74,7 @@ void validate_coordinates(const Board *board, Move *move,
           error_stack_push(
               error_stack,
               ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION,
-              get_formatted_string("failed to parse move coordinates: %s",
+              get_formatted_string("failed to parse move coordinates '%s'",
                                    coords_string));
           return;
         }
@@ -91,7 +91,7 @@ void validate_coordinates(const Board *board, Move *move,
           error_stack_push(
               error_stack,
               ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION,
-              get_formatted_string("failed to parse move coordinates: %s",
+              get_formatted_string("failed to parse move coordinates: '%s'",
                                    coords_string));
           return;
         }
@@ -102,7 +102,7 @@ void validate_coordinates(const Board *board, Move *move,
       error_stack_push(
           error_stack,
           ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION,
-          get_formatted_string("failed to parse move coordinates: %s",
+          get_formatted_string("failed to parse move coordinates: '%s'",
                                coords_string));
       return;
     }
@@ -115,7 +115,7 @@ void validate_coordinates(const Board *board, Move *move,
     error_stack_push(
         error_stack,
         ERROR_STATUS_MOVE_VALIDATION_INVALID_TILE_PLACEMENT_POSITION,
-        get_formatted_string("failed to parse move coordinates: %s",
+        get_formatted_string("failed to parse move coordinates: '%s'",
                              coords_string));
     return;
   }
@@ -196,7 +196,8 @@ void validate_tiles_played_with_mls(const Board *board,
         if (!connected && play_connects(board, current_row, current_col)) {
           connected = true;
         }
-      } else if (board_letter == ml || allow_playthrough) {
+      } else if (board_letter == ml ||
+                 (allow_playthrough && ml == PLAYED_THROUGH_MARKER)) {
         move_set_tile(move, PLAYED_THROUGH_MARKER, i);
         if (ml != PLAYED_THROUGH_MARKER) {
           if (get_is_blanked(board_letter)) {
@@ -321,9 +322,9 @@ void validate_split_move(const StringSplitter *split_move, const Game *game,
     return;
   }
 
-  if (strings_equal(move_type_or_coords, UCGI_PASS_MOVE)) {
+  if (strings_iequal(move_type_or_coords, UCGI_PASS_MOVE)) {
     move_set_as_pass(vm->move);
-  } else if (strings_equal(move_type_or_coords, UCGI_EXCHANGE_MOVE)) {
+  } else if (strings_iequal(move_type_or_coords, UCGI_EXCHANGE_MOVE)) {
     if (!is_exchange_allowed(bag)) {
       error_stack_push(
           error_stack, ERROR_STATUS_MOVE_VALIDATION_EXCHANGE_INSUFFICIENT_TILES,
@@ -458,7 +459,8 @@ void validate_split_move(const StringSplitter *split_move, const Game *game,
         bag_get_letter(bag, i) + rack_get_letter(game_player_rack, i)) {
       error_stack_push(
           error_stack, ERROR_STATUS_MOVE_VALIDATION_RACK_NOT_IN_BAG,
-          get_formatted_string("rack not available in bag: %s", rack_string));
+          get_formatted_string("rack '%s' is not available in the bag",
+                               rack_string));
       return;
     }
   }
@@ -468,10 +470,10 @@ void validate_split_move(const StringSplitter *split_move, const Game *game,
   // Check if the play is in the rack and
   // set the leave value if it is.
   if (!rack_subtract(vm->leave, tiles_played_rack)) {
-    error_stack_push(error_stack,
-                     ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_NOT_IN_RACK,
-                     get_formatted_string("tiles played not in bag: %s",
-                                          tiles_or_exchange_or_pass_rack));
+    error_stack_push(
+        error_stack, ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_NOT_IN_RACK,
+        get_formatted_string("tiles played '%s' are not on the rack '%s'",
+                             tiles_or_exchange_or_pass_rack, rack_string));
   } else {
     vm->leave_value = klv_get_leave_value(
         player_get_klv(game_get_player(game, player_index)), vm->leave);
@@ -545,7 +547,8 @@ void validate_split_move(const StringSplitter *split_move, const Game *game,
 void validate_move(ValidatedMove *vm, const Game *game, int player_index,
                    const char *ucgi_move_string, bool allow_unknown_exchanges,
                    bool allow_playthrough, ErrorStack *error_stack) {
-  StringSplitter *split_move = split_string(ucgi_move_string, '.', false);
+  StringSplitter *split_move =
+      split_string(ucgi_move_string, UCGI_DELIMITER, false);
   Rack *tiles_played_rack = rack_create(ld_get_size(game_get_ld(game)));
   validate_split_move(split_move, game, vm, player_index, tiles_played_rack,
                       allow_unknown_exchanges, allow_playthrough, error_stack);
@@ -658,6 +661,36 @@ ValidatedMove *validated_move_create(const Game *game, int player_index,
   return vm;
 }
 
+ValidatedMove *validated_move_duplicate(const ValidatedMove *vm_orig) {
+  ValidatedMove *vm_dupe = malloc_or_die(sizeof(ValidatedMove));
+  if (vm_orig->formed_words) {
+    vm_dupe->formed_words = formed_words_duplicate(vm_orig->formed_words);
+  } else {
+    vm_dupe->formed_words = NULL;
+  }
+  if (vm_orig->rack) {
+    vm_dupe->rack = rack_duplicate(vm_orig->rack);
+  } else {
+    vm_dupe->rack = NULL;
+  }
+  if (vm_orig->leave) {
+    vm_dupe->leave = rack_duplicate(vm_orig->leave);
+  } else {
+    vm_dupe->leave = NULL;
+  }
+  if (vm_orig->move) {
+    vm_dupe->move = move_create();
+    move_copy(vm_dupe->move, vm_orig->move);
+  } else {
+    vm_dupe->move = NULL;
+  }
+  vm_dupe->challenge_points = vm_orig->challenge_points;
+  vm_dupe->challenge_turn_loss = vm_orig->challenge_turn_loss;
+  vm_dupe->leave_value = vm_orig->leave_value;
+  vm_dupe->unknown_exchange = vm_orig->unknown_exchange;
+  return vm_dupe;
+}
+
 void validated_move_destroy(ValidatedMove *vm) {
   if (!vm) {
     return;
@@ -702,6 +735,20 @@ ValidatedMoves *validated_moves_create(const Game *game, int player_index,
   return vms;
 }
 
+ValidatedMoves *validated_moves_duplicate(const ValidatedMoves *vms_orig) {
+  if (!vms_orig) {
+    return NULL;
+  }
+  ValidatedMoves *vms_dupe = malloc_or_die(sizeof(ValidatedMoves));
+  vms_dupe->moves = (ValidatedMove **)malloc_or_die(sizeof(ValidatedMove *) *
+                                                    vms_orig->number_of_moves);
+  vms_dupe->number_of_moves = vms_orig->number_of_moves;
+  for (int i = 0; i < vms_orig->number_of_moves; i++) {
+    vms_dupe->moves[i] = validated_move_duplicate(vms_orig->moves[i]);
+  }
+  return vms_dupe;
+}
+
 void validated_moves_destroy(ValidatedMoves *vms) {
   if (!vms) {
     return;
@@ -743,29 +790,30 @@ bool validated_moves_get_challenge_turn_loss(const ValidatedMoves *vms, int i) {
 }
 
 // Adds moves in vms to ml that do not already exist in ml
-void validated_moves_add_to_move_list(const ValidatedMoves *vms, MoveList *ml) {
-  Move **moves = (Move **)malloc_or_die(sizeof(Move *) * vms->number_of_moves);
-  int number_of_new_moves = 0;
+// Assumes the movelist is sorted
+void validated_moves_add_to_sorted_move_list(const ValidatedMoves *vms,
+                                             MoveList *ml) {
+  Move **moves_to_add =
+      (Move **)malloc_or_die(sizeof(Move *) * vms->number_of_moves);
+  int number_of_moves_to_add = 0;
   for (int i = 0; i < vms->number_of_moves; i++) {
     if (!move_list_move_exists(ml, vms->moves[i]->move)) {
-      moves[number_of_new_moves++] = vms->moves[i]->move;
+      moves_to_add[number_of_moves_to_add++] = vms->moves[i]->move;
     }
   }
 
   int current_capacity = move_list_get_capacity(ml);
   int current_number_of_moves = move_list_get_count(ml);
-  int new_capacity = current_number_of_moves + number_of_new_moves;
+  int new_capacity = current_number_of_moves + number_of_moves_to_add;
   if (new_capacity > current_capacity) {
     move_list_resize(ml, new_capacity);
   }
 
-  for (int i = 0; i < number_of_new_moves; i++) {
-    Move *spare_move = move_list_get_spare_move(ml);
-    move_copy(spare_move, moves[i]);
-    move_list_insert_spare_move(ml, move_get_equity(spare_move));
+  for (int j = 0; j < number_of_moves_to_add; j++) {
+    move_list_add_move_to_sorted_list(ml, moves_to_add[j]);
   }
 
-  free(moves);
+  free(moves_to_add);
 }
 
 void validated_moves_set_rack_to_played_letters(const ValidatedMoves *vms,
@@ -792,4 +840,22 @@ void validated_moves_set_rack_to_played_letters(const ValidatedMoves *vms,
       }
     }
   }
+}
+
+// Returns true if the specified validated move contains
+// a phony for the main word and any of the formed words.
+bool validated_moves_is_phony(const ValidatedMoves *vms, int vm_index) {
+  const Move *move = validated_moves_get_move(vms, vm_index);
+  game_event_t move_type = move_get_type(move);
+  if (move_type != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return false;
+  }
+  const FormedWords *fw = validated_moves_get_formed_words(vms, vm_index);
+  int number_of_words = formed_words_get_num_words(fw);
+  for (int i = 0; i < number_of_words; i++) {
+    if (!formed_words_get_word_valid(fw, i)) {
+      return true;
+    }
+  }
+  return false;
 }

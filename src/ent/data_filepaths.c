@@ -6,14 +6,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#define KWG_EXTENSION ".kwg"
-#define WORDMAP_EXTENSION ".wmp"
-#define KLV_EXTENSION ".klv2"
-#define TXT_EXTENSION ".txt"
-#define CSV_EXTENSION ".csv"
-#define GCG_EXTENSION ".gcg"
-#define LEXICON_EXTENSION ".txt"
-
 static const char *const filepath_type_names[] = {
     "kwg", "klv",    "board layout", "win percentage", "letter distribution",
     "gcg", "leaves", "lexicon",      "wordmap"};
@@ -181,7 +173,7 @@ char *data_filepaths_get_writable_filename(const char *data_paths,
     return NULL;
   }
   char *dir_path = get_dirpath_from_filepath(writable_filepath);
-  if (access(dir_path, F_OK) != 0 || access(dir_path, W_OK) != 0) {
+  if (access(dir_path, F_OK | W_OK) != 0) {
     error_stack_push(
         error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_WRITABLE,
         get_formatted_string("directory %s does not exist or is not writable",

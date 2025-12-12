@@ -1263,7 +1263,6 @@ char *linenoise(const char *prompt) {
   char buf[LINENOISE_MAX_LINE];
 
   if (!isatty(linenoise_get_in_fileno())) {
-    printf("not a tty\n");
     /* Not a tty: read from file / pipe. In this mode we don't want any
      * limit to the line size, so we call a function to handle that. */
     return linenoiseNoTTY();
@@ -1282,7 +1281,6 @@ char *linenoise(const char *prompt) {
     }
     return strdup(buf);
   } else {
-    printf("tty\n");
     char *retval = linenoiseBlockingEdit(linenoise_get_in_fileno(),
                                          linenoise_get_out_fileno(), buf,
                                          LINENOISE_MAX_LINE, prompt);

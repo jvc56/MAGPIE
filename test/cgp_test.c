@@ -222,8 +222,9 @@ void test_cgp_catalan(void) {
 }
 
 void test_cgp_polish(void) {
-  Config *config = config_create_or_die(
-      "set -lex OSPS49 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Config *config =
+      config_create_or_die("set -lex OSPS49 -wmp false -s1 equity -s2 equity "
+                           "-r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
   assert_load_cgp_and_write_are_equal(game, POLISH_CGP);

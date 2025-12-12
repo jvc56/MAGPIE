@@ -4,6 +4,7 @@
 #include "../compat/cpthread.h"
 #include "../def/bai_defs.h"
 #include "../def/game_defs.h"
+#include "../def/sim_defs.h"
 #include "bai_result.h"
 #include "game.h"
 #include "move.h"
@@ -13,14 +14,26 @@
 
 typedef struct SimmedPlay SimmedPlay;
 
+typedef struct SimmedPlayDisplayInfo {
+  Move move;
+  double score_means[MAX_PLIES];
+  double score_stdevs[MAX_PLIES];
+  double bingo_means[MAX_PLIES];
+  double bingo_stdevs[MAX_PLIES];
+  double equity_mean;
+  double equity_stdev;
+  double win_pct_mean;
+  double win_pct_stdev;
+  uint64_t similarity_class_id;
+  uint64_t niters;
+} SimmedPlayDisplayInfo;
+
 Move *simmed_play_get_move(const SimmedPlay *simmed_play);
 Stat *simmed_play_get_score_stat(const SimmedPlay *simmed_play, int stat_index);
 Stat *simmed_play_get_bingo_stat(const SimmedPlay *simmed_play, int stat_index);
 Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play);
 Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play);
 int simmed_play_get_id(const SimmedPlay *simmed_play);
-bool simmed_play_get_is_epigon(const SimmedPlay *simmed_play);
-void simmed_play_set_is_epigon(SimmedPlay *simmed_play);
 uint64_t simmed_play_get_seed(SimmedPlay *simmed_play);
 void simmed_play_add_score_stat(SimmedPlay *simmed_play, Equity score,
                                 bool is_bingo, int ply);
@@ -40,16 +53,28 @@ void sim_results_destroy(SimResults *sim_results);
 
 int sim_results_get_number_of_plays(const SimResults *sim_results);
 int sim_results_get_num_plies(const SimResults *sim_results);
-int sim_results_get_node_count(const SimResults *sim_results);
+uint64_t sim_results_get_node_count(const SimResults *sim_results);
+void sim_results_increment_node_count(SimResults *sim_results);
 uint64_t sim_results_get_iteration_count(const SimResults *sim_results);
+void sim_results_increment_iteration_count(SimResults *sim_results);
 SimmedPlay *sim_results_get_simmed_play(const SimResults *sim_results,
                                         int index);
+const Rack *sim_results_get_rack(const SimResults *sim_results);
+void sim_results_set_rack(SimResults *sim_results, const Rack *rack);
 BAIResult *sim_results_get_bai_result(const SimResults *sim_results);
 
-void sim_results_set_iteration_count(SimResults *sim_results, uint64_t count);
 void sim_results_lock_simmed_plays(SimResults *sim_results);
 void sim_results_unlock_simmed_plays(SimResults *sim_results);
-void sim_results_increment_node_count(SimResults *sim_results);
-char *ucgi_sim_stats(const Game *game, SimResults *sim_results, double nps,
-                     bool best_known_play);
+void sim_results_get_nth_best_move(const SimResults *sim_results, int n,
+                                   Move *move);
+void sim_results_set_valid_for_current_game_state(SimResults *sim_results,
+                                                  bool valid);
+bool sim_results_get_valid_for_current_game_state(
+    const SimResults *sim_results);
+bool sim_results_lock_and_sort_display_infos(SimResults *sim_results);
+void sim_results_unlock_display_infos(SimResults *sim_results);
+SimmedPlayDisplayInfo *
+sim_results_get_display_info(const SimResults *sim_results, int index);
+bool sim_results_plays_are_similar(const SimResults *sim_results, int i, int j);
+
 #endif

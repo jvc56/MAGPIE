@@ -1,10 +1,12 @@
 #ifndef CONFIG_DEFS_H
 #define CONFIG_DEFS_H
 
+#define DEFAULT_SETTINGS_FILENAME "settings.txt"
+#define MAGPIE_PROMPT "magpie>"
+
 enum {
   DEFAULT_BINGO_BONUS = 50,
   DEFAULT_CHALLENGE_BONUS = 5,
-  DEFAULT_MOVE_LIST_CAPACITY = 15,
   DEFAULT_SMALL_MOVE_LIST_CAPACITY = 250000,
 };
 
@@ -17,8 +19,11 @@ enum {
 
 typedef enum {
   EXEC_MODE_UNKNOWN,
-  EXEC_MODE_CONSOLE,
-  EXEC_MODE_UCGI,
+  EXEC_MODE_SYNC,
+  EXEC_MODE_ASYNC,
 } exec_mode_t;
+
+#define EXEC_MODE_SYNC_STRING "sync"
+#define EXEC_MODE_ASYNC_STRING "async"
 
 #endif

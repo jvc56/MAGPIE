@@ -16,7 +16,6 @@
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/game_history.h"
-#include "../src/ent/inference_results.h"
 #include "../src/ent/klv.h"
 #include "../src/ent/klv_csv.h"
 #include "../src/ent/kwg.h"
@@ -35,7 +34,6 @@
 #include "../src/impl/move_gen.h"
 #include "../src/impl/wmp_move_gen.h"
 #include "../src/str/game_string.h"
-#include "../src/str/inference_string.h"
 #include "../src/str/move_string.h"
 #include "../src/str/rack_string.h"
 #include "../src/util/io_util.h"
@@ -102,18 +100,10 @@ uint64_t string_to_cross_set(const LetterDistribution *ld,
   return c;
 }
 
-void set_thread_control_status_to_start(ThreadControl *thread_control) {
-  if (!thread_control_is_ready_for_new_command(thread_control)) {
-    thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_FINISHED);
-  }
-  if (!thread_control_is_started(thread_control)) {
-    thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
-  }
-}
-
 void load_and_exec_config_or_die(Config *config, const char *cmd) {
   ErrorStack *error_stack = error_stack_create();
-  set_thread_control_status_to_start(config_get_thread_control(config));
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
   config_load_command(config, cmd, error_stack);
   error_code_t status = error_stack_top(error_stack);
   if (status != ERROR_STATUS_SUCCESS) {
@@ -126,9 +116,10 @@ void load_and_exec_config_or_die(Config *config, const char *cmd) {
     abort();
   }
   error_stack_destroy(error_stack);
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_FINISHED);
   printf("loaded config with command: %s\n", cmd);
-  printf("seed: %" PRIu64 "\n",
-         thread_control_get_seed(config_get_thread_control(config)));
+  printf("seed: %" PRIu64 "\n", config_get_seed(config));
 }
 
 void timeout_handler(int __attribute__((unused)) signum) {
@@ -175,19 +166,27 @@ char *cross_set_to_string(const LetterDistribution *ld, uint64_t input) {
   return result;
 }
 
+Config *config_create_default_test(void) {
+  ErrorStack *error_stack = error_stack_create();
+  ConfigArgs args = {.data_paths = DEFAULT_TEST_DATA_PATH,
+                     .settings_filename = DEFAULT_TEST_SETTINGS_FILENAME};
+  Config *config = config_create(&args, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_reset(error_stack);
+    abort();
+  }
+  error_stack_destroy(error_stack);
+  load_and_exec_config_or_die(config, "set -threads 1 -savesettings false -hr "
+                                      "false -numplays 15 -im 0 -minp 100");
+  return config;
+}
+
 // Loads path with a default test data path value.
 // To specify a different path, use load_and_exec_config_or_die
 // after calling this function.
 Config *config_create_or_die(const char *cmd) {
-  ErrorStack *error_stack = error_stack_create();
-  Config *config = config_create_default_with_data_paths(
-      error_stack, DEFAULT_TEST_DATA_PATH);
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_print_and_reset(error_stack);
-    abort();
-  }
+  Config *config = config_create_default_test();
   load_and_exec_config_or_die(config, cmd);
-  error_stack_destroy(error_stack);
   return config;
 }
 
@@ -258,16 +257,14 @@ char *get_string_from_file_or_die(const char *filename) {
   return result;
 }
 
-Config *config_create_default_test(void) {
-  ErrorStack *error_stack = error_stack_create();
-  Config *config = config_create_default_with_data_paths(
-      error_stack, DEFAULT_TEST_DATA_PATH);
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_reset(error_stack);
-    abort();
+void remove_or_die(const char *filename) {
+  const int remove_result = remove(filename);
+  if (remove_result != 0) {
+    int error_number = errno;
+    const char *system_error_message = strerror(error_number);
+    log_fatal("failed to remove file '%s': %s (%d)", filename,
+              system_error_message, error_number);
   }
-  error_stack_destroy(error_stack);
-  return config;
 }
 
 // Comparison function for qsort
@@ -309,7 +306,7 @@ void print_move_list(const Board *board, const LetterDistribution *ld,
                      const SortedMoveList *sml, int move_list_length) {
   StringBuilder *move_list_string = string_builder_create();
   for (int i = 0; i < move_list_length; i++) {
-    string_builder_add_move(move_list_string, board, sml->moves[i], ld);
+    string_builder_add_move(move_list_string, board, sml->moves[i], ld, true);
     string_builder_add_string(move_list_string, "\n");
   }
   printf("%s\n", string_builder_peek(move_list_string));
@@ -319,7 +316,7 @@ void print_move_list(const Board *board, const LetterDistribution *ld,
 void print_game(const Game *game, const MoveList *move_list) {
   StringBuilder *game_string = string_builder_create();
   GameStringOptions *gso = game_string_options_create_default();
-  string_builder_add_game(game, move_list, gso, game_string);
+  string_builder_add_game(game, move_list, gso, NULL, game_string);
   game_string_options_destroy(gso);
   printf("%s\n", string_builder_peek(game_string));
   string_builder_destroy(game_string);
@@ -353,16 +350,6 @@ void print_rack(const Rack *rack, const LetterDistribution *ld) {
   string_builder_add_rack(rack_sb, rack, ld, false);
   printf("%s", string_builder_peek(rack_sb));
   string_builder_destroy(rack_sb);
-}
-
-void print_inference(const LetterDistribution *ld,
-                     const Rack *target_played_tiles,
-                     InferenceResults *inference_results) {
-  StringBuilder *inference_string = string_builder_create();
-  string_builder_add_inference(inference_string, ld, inference_results,
-                               target_played_tiles);
-  printf("%s\n", string_builder_peek(inference_string));
-  string_builder_destroy(inference_string);
 }
 
 void sort_and_print_move_list(const Board *board, const LetterDistribution *ld,
@@ -417,7 +404,15 @@ void game_play_n_events_or_die(GameHistory *game_history, Game *game,
 
 void game_play_to_end_or_die(GameHistory *game_history, Game *game) {
   ErrorStack *error_stack = error_stack_create();
-  game_play_to_end(game_history, game, error_stack);
+  game_history_goto(game_history, game_history_get_num_events(game_history),
+                    error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("failed to play to end\n");
+  }
+  game_play_n_events(game_history, game,
+                     game_history_get_num_events(game_history), false,
+                     error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
     log_fatal("failed to play to end\n");
@@ -583,7 +578,7 @@ void assert_move(const Game *game, const MoveList *move_list,
   } else {
     move = move_list_get_move(move_list, move_index);
   }
-  string_builder_add_move(move_string, board, move, ld);
+  string_builder_add_move(move_string, board, move, ld, true);
   if (!strings_equal(string_builder_peek(move_string), expected_move_string)) {
     fprintf_or_die(stderr, "moves are not equal\ngot: >%s<\nexp: >%s<\n",
                    string_builder_peek(move_string), expected_move_string);
@@ -782,7 +777,8 @@ error_code_t config_simulate_and_return_status(const Config *config,
                                                Rack *known_opp_rack,
                                                SimResults *sim_results) {
   ErrorStack *error_stack = error_stack_create();
-  set_thread_control_status_to_start(config_get_thread_control(config));
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
   config_simulate(config, known_opp_rack, sim_results, error_stack);
   error_code_t status = error_stack_top(error_stack);
   if (status != ERROR_STATUS_SUCCESS) {
@@ -861,7 +857,6 @@ void assert_simmed_plays_stats_are_equal(const SimmedPlay *sp1,
 void assert_simmed_plays_are_equal(const SimmedPlay *sp1, const SimmedPlay *sp2,
                                    int max_plies) {
   assert(simmed_play_get_id(sp1) == simmed_play_get_id(sp2));
-  assert(simmed_play_get_is_epigon(sp1) == simmed_play_get_is_epigon(sp2));
   assert_moves_are_equal(simmed_play_get_move(sp1), simmed_play_get_move(sp2));
   assert_simmed_plays_stats_are_equal(sp1, sp2, max_plies);
 }
@@ -933,9 +928,9 @@ BitRack string_to_bit_rack(const LetterDistribution *ld,
 }
 
 // This only works on ASCII languages, e.g. English, French. Polish would need
-// to support multibyte user-visible characters, but Polish isn't even supported
-// for BitRack (and therefore for WMP) because the lexicon is >32 letters
-// (including the blank).
+// to support multibyte user-visible characters, but Polish isn't even
+// supported for BitRack (and therefore for WMP) because the lexicon is >32
+// letters (including the blank).
 void assert_word_in_buffer(const MachineLetter *buffer,
                            const char *expected_word,
                            const LetterDistribution *ld, const int word_idx,
@@ -1006,8 +1001,10 @@ void generate_anchors_for_test(Game *game) {
   gen_load_position(gen, &args);
   gen_look_up_leaves_and_record_exchanges(gen);
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
-    wmp_move_gen_check_nonplaythrough_existence(
-        &gen->wmp_move_gen, gen->number_of_tiles_in_bag > 0, &gen->leave_map);
+    const bool check_leaves = (gen->number_of_tiles_in_bag > 0) &&
+                              (gen->move_sort_type != MOVE_SORT_SCORE);
+    wmp_move_gen_check_nonplaythrough_existence(&gen->wmp_move_gen,
+                                                check_leaves, &gen->leave_map);
   }
   gen_shadow(gen);
   move_list_destroy(move_list);
@@ -1101,7 +1098,8 @@ void load_game_history_with_gcg(Config *config, const char *gcg_file) {
 void assert_config_exec_status(Config *config, const char *cmd,
                                error_code_t expected_error_code) {
   ErrorStack *error_stack = error_stack_create();
-  set_thread_control_status_to_start(config_get_thread_control(config));
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
   config_load_command(config, cmd, error_stack);
   error_code_t load_status = error_stack_top(error_stack);
 
@@ -1128,4 +1126,23 @@ void assert_config_exec_status(Config *config, const char *cmd,
     abort();
   }
   error_stack_destroy(error_stack);
+}
+
+error_code_t get_config_exec_status(Config *config, const char *cmd) {
+  ErrorStack *error_stack = error_stack_create();
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  config_load_command(config, cmd, error_stack);
+  error_code_t error_code = error_stack_top(error_stack);
+
+  // If we expect an error and got it during load, that's the expected result
+  if (error_code != ERROR_STATUS_SUCCESS) {
+    error_stack_destroy(error_stack);
+    return error_code;
+  }
+
+  config_execute_command(config, error_stack);
+  error_code = error_stack_top(error_stack);
+  error_stack_destroy(error_stack);
+  return error_code;
 }

@@ -30,18 +30,17 @@ long get_file_size(const char *filename) {
   error_stack_destroy(error_stack);
   fseek_or_die(stream, 0L, SEEK_END);
   const long file_size = ftell(stream);
-  fseek_or_die(stream, 0L, SEEK_SET);
+  fclose_or_die(stream);
   return file_size;
 }
 
 void write_words_to_testdata_wmp(const DictionaryWordList *words,
                                  const LetterDistribution *ld,
                                  const char *wmp_filename) {
-  Timer *timer = ctimer_create_monotonic();
-  ctimer_start(timer);
+  Timer timer;
+  ctimer_start(&timer);
   WMP *wmp = make_wmp_from_words(words, ld);
-  double seconds_elapsed = ctimer_elapsed_seconds(timer);
-  ctimer_destroy(timer);
+  double seconds_elapsed = ctimer_elapsed_seconds(&timer);
   ErrorStack *error_stack = error_stack_create();
   wmp_write_to_file(wmp, wmp_filename, error_stack);
   assert(error_stack_is_empty(error_stack));

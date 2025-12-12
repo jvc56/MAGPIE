@@ -1,9 +1,11 @@
 #include "exec.h"
 
+#include "../compat/async_command_control.h"
 #include "../compat/cpthread.h"
 #include "../compat/linenoise.h"
 #include "../def/config_defs.h"
 #include "../def/cpthread_defs.h"
+#include "../def/exec_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/thread_control.h"
 #include "../util/fileproxy.h"
@@ -13,12 +15,15 @@
 #include "move_gen.h"
 #include <assert.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
-#define UCGI_COMMAND_STRING "ucgi"
-#define QUIT_COMMAND_STRING "quit"
-#define STOP_COMMAND_STRING "stop"
-#define FILE_COMMAND_STRING "file"
+typedef struct AsyncCommandInputArgs {
+  AsyncCommandControl *acc;
+  Config *config;
+} AsyncCommandInputArgs;
 
 char *command_search_status(Config *config, bool should_exit) {
   if (!config) {
@@ -42,15 +47,15 @@ void execute_command_and_set_status_finished(Config *config,
   config_execute_command(config, error_stack);
   thread_control_set_status(config_get_thread_control(config),
                             THREAD_CONTROL_STATUS_FINISHED);
+  error_stack_print_and_reset(error_stack);
 }
 
-void *execute_command_thread_worker(void *uncasted_args) {
+void *execute_async_command_worker(void *uncasted_args) {
   Config *config = (Config *)uncasted_args;
   // Create another error stack so this asynchronous command doesn't
   // interfere with the synchronous error stack on the main thread.
   ErrorStack *error_stack_async = error_stack_create();
   execute_command_and_set_status_finished(config, error_stack_async);
-  error_stack_print_and_reset(error_stack_async);
   error_stack_destroy(error_stack_async);
   return NULL;
 }
@@ -58,14 +63,6 @@ void *execute_command_thread_worker(void *uncasted_args) {
 bool load_command_sync(Config *config, ErrorStack *error_stack,
                        const char *command) {
   ThreadControl *thread_control = config_get_thread_control(config);
-  if (!thread_control_is_ready_for_new_command(thread_control)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_COMMAND_STILL_RUNNING,
-        string_duplicate(
-            "cannot execute a new command while the previous command "
-            "is still running"));
-    return false;
-  }
   const bool reset_result =
       thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
   assert(reset_result);
@@ -97,39 +94,176 @@ bool run_str_api_command(Config *config, ErrorStack *error_stack,
   return false;
 }
 
+// Returns the async token of the command, or NUMBER_OF_ASYNC_COMMAND_TOKENS
+// if the command was not recognized.
+// Clears the string builder at the beginning of the function
+async_token_t parse_async_command(const char *command, StringBuilder *sb) {
+  async_token_t token = NUMBER_OF_ASYNC_COMMAND_TOKENS;
+  string_builder_clear(sb);
+  for (async_token_t i = 0; i < NUMBER_OF_ASYNC_COMMAND_TOKENS; i++) {
+    const char *token_to_eval_string;
+    switch (i) {
+    case ASYNC_STOP_COMMAND_TOKEN:
+      token_to_eval_string = ASYNC_STOP_COMMAND_STRING;
+      break;
+    case ASYNC_STATUS_COMMAND_TOKEN:;
+      token_to_eval_string = ASYNC_STATUS_COMMAND_STRING;
+      break;
+    case NUMBER_OF_ASYNC_COMMAND_TOKENS:
+      log_fatal(
+          "encountered unexpected async command token when processing command");
+      break;
+    }
+    if (has_iprefix(command, token_to_eval_string)) {
+      if (token == NUMBER_OF_ASYNC_COMMAND_TOKENS) {
+        token = i;
+      } else if (string_builder_length(sb) == 0) {
+        // This only works because there are two valid async commands, if we add
+        // more, this whole scheme will need to be refactored
+        string_builder_add_formatted_string(
+            sb, "ambiguous async command '%s' could be: %s, %s", command,
+            ASYNC_STOP_COMMAND_STRING, ASYNC_STATUS_COMMAND_STRING);
+      } else {
+        string_builder_add_formatted_string(sb, ", %s", token_to_eval_string);
+      }
+    }
+  }
+  return token;
+}
+
+void *execute_async_input_worker(void *uncasted_args) {
+  AsyncCommandInputArgs *args = (AsyncCommandInputArgs *)uncasted_args;
+  Config *config = args->config;
+  ThreadControl *thread_control = config_get_thread_control(config);
+  ErrorStack *error_stack = error_stack_create();
+  StringBuilder *err_msg_sb = string_builder_create();
+  char *input = NULL;
+  while (thread_control_get_status(thread_control) ==
+         THREAD_CONTROL_STATUS_STARTED) {
+    free(input);
+    input = async_command_control_wait_for_input_or_finished_signal(args->acc);
+    if (input == NULL) {
+      break;
+    }
+    if (is_string_empty_or_whitespace(input)) {
+      continue;
+    }
+
+    async_token_t input_token = parse_async_command(input, err_msg_sb);
+    if (string_builder_length(err_msg_sb) > 0) {
+      error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_AMBIGUOUS_COMMAND,
+                       string_builder_dump(err_msg_sb, NULL));
+      error_stack_print_and_reset(error_stack);
+    } else if (input_token == NUMBER_OF_ASYNC_COMMAND_TOKENS) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
+          get_formatted_string("unrecognized async command '%s'", input));
+      error_stack_print_and_reset(error_stack);
+    } else {
+      switch (input_token) {
+      case ASYNC_STOP_COMMAND_TOKEN:
+        thread_control_set_status(thread_control,
+                                  THREAD_CONTROL_STATUS_USER_INTERRUPT);
+        break;
+      case ASYNC_STATUS_COMMAND_TOKEN:;
+        char *status_str = config_get_execute_status(config);
+        thread_control_print(config_get_thread_control(config), status_str);
+        free(status_str);
+        break;
+      case NUMBER_OF_ASYNC_COMMAND_TOKENS:
+        log_fatal("found unexpected async command token");
+        break;
+      }
+    }
+  }
+  free(input);
+  string_builder_destroy(err_msg_sb);
+  error_stack_destroy(error_stack);
+  return NULL;
+}
+
+// Blocks until the async command is finished
 void execute_command_async(Config *config, ErrorStack *error_stack,
                            const char *command) {
-  if (load_command_sync(config, error_stack, command)) {
-    cpthread_t cmd_execution_thread;
-    cpthread_create(&cmd_execution_thread, execute_command_thread_worker,
-                    config);
-    cpthread_detach(cmd_execution_thread);
+  if (!load_command_sync(config, error_stack, command)) {
+    return;
   }
-}
 
-void process_ucgi_command(Config *config, ErrorStack *error_stack,
-                          const char *command) {
-  // Assume cmd is already trimmed of whitespace
+  cpthread_t cmd_execution_thread;
+  cpthread_create(&cmd_execution_thread, execute_async_command_worker, config);
+
+  AsyncCommandControl *acc = async_command_control_create();
+
+  AsyncCommandInputArgs async_args;
+  async_args.acc = acc;
+  async_args.config = config;
+
+  cpthread_t cmd_input_thread;
+  cpthread_create(&cmd_input_thread, execute_async_input_worker, &async_args);
+
   ThreadControl *thread_control = config_get_thread_control(config);
-  if (strings_equal(command, UCGI_COMMAND_STRING)) {
-    // More of a formality to align with UCI
-    thread_control_print(thread_control, "id name MAGPIE 0.1\nucgiok\n");
-  } else if (strings_equal(command, STOP_COMMAND_STRING)) {
-    if (thread_control_is_started(thread_control)) {
-      thread_control_set_status(thread_control,
-                                THREAD_CONTROL_STATUS_USER_INTERRUPT);
-    } else {
-      error_stack_push(
-          error_stack, ERROR_STATUS_COMMAND_NOTHING_TO_STOP,
-          string_duplicate("no currently running command to stop"));
+  while (thread_control_get_status(thread_control) ==
+         THREAD_CONTROL_STATUS_STARTED) {
+    thread_control_wait_for_status_change(thread_control);
+    if (thread_control_get_status(thread_control) ==
+        THREAD_CONTROL_STATUS_FINISHED) {
+      async_command_control_send_finished_signal(acc);
     }
-  } else {
-    execute_command_async(config, error_stack, command);
   }
+
+  cpthread_join(cmd_execution_thread);
+
+  // Do to race conditions, the async input thread might still
+  // be blocked on polling, so send a signal here to wake it up
+  async_command_control_send_finished_signal(acc);
+
+  cpthread_join(cmd_input_thread);
+  async_command_control_destroy(acc);
 }
 
-void command_scan_loop(Config *config, ErrorStack *error_stack,
-                       const char *initial_command_string) {
+void save_config_settings(const Config *config, ErrorStack *error_stack) {
+  if (!config_get_save_settings(config)) {
+    return;
+  }
+  StringBuilder *sb = string_builder_create();
+  config_add_settings_to_string_builder(config, sb);
+  write_string_to_file(config_get_settings_filename(config), "w",
+                       string_builder_peek(sb), error_stack);
+  string_builder_destroy(sb);
+}
+
+void load_config_settings(Config *config, ErrorStack *error_stack) {
+  // if file does not exist, just return
+  if (access(config_get_settings_filename(config), F_OK) != 0) {
+    return;
+  }
+  char *settings_string =
+      get_string_from_file(config_get_settings_filename(config), error_stack);
+  StringSplitter *settings_split_by_newline =
+      split_string_by_newline(settings_string, true);
+  const int num_lines =
+      string_splitter_get_number_of_items(settings_split_by_newline);
+  for (int i = 0; i < num_lines; i++) {
+    const char *line = string_splitter_get_item(settings_split_by_newline, i);
+    execute_command_sync(config, error_stack, line);
+    if (!error_stack_is_empty(error_stack)) {
+      break;
+    }
+  }
+  string_splitter_destroy(settings_split_by_newline);
+  free(settings_string);
+}
+
+void sync_command_scan_loop(Config *config, ErrorStack *error_stack,
+                            const char *initial_command_string) {
+  // To suppress 'finished' for internal load settings commands
+  config_set_loaded_settings(config, false);
+  load_config_settings(config, error_stack);
+  config_set_loaded_settings(config, true);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    return;
+  }
   execute_command_sync(config, error_stack, initial_command_string);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
@@ -141,16 +275,12 @@ void command_scan_loop(Config *config, ErrorStack *error_stack,
   char *input = NULL;
   linenoiseHistorySetMaxLen(1000);
   while (1) {
-    exec_mode_t exec_mode = config_get_exec_mode(config);
-
-    const char *prompt = "";
-    if (exec_mode == EXEC_MODE_CONSOLE) {
-      prompt = "magpie> ";
+    const char *prompt_text = "";
+    if (config_get_show_prompt(config)) {
+      prompt_text = MAGPIE_PROMPT " ";
     }
-
     free(input);
-
-    input = linenoise(prompt);
+    input = linenoise(prompt_text);
     if (!input) {
       // NULL input indicates an EOF
       break;
@@ -158,28 +288,36 @@ void command_scan_loop(Config *config, ErrorStack *error_stack,
 
     trim_whitespace(input);
 
-    if (strings_iequal(input, QUIT_COMMAND_STRING)) {
-      break;
-    }
-
     if (is_string_empty_or_null(input)) {
       continue;
     }
-    linenoiseHistoryAdd(input);
-    switch (exec_mode) {
-    case EXEC_MODE_CONSOLE:
-      execute_command_sync(config, error_stack, input);
-      break;
-    case EXEC_MODE_UCGI:
-      process_ucgi_command(config, error_stack, input);
-      break;
-    case EXEC_MODE_UNKNOWN:
-      log_fatal("attempted to execute command in unknown mode");
+
+    if (strings_iequal(TERMINATE_KEYWORD, input)) {
       break;
     }
-    if (!error_stack_is_empty(error_stack)) {
-      error_stack_print_and_reset(error_stack);
+
+    if (strings_iequal(input, ASYNC_STOP_COMMAND_STRING)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_COMMAND_NOTHING_TO_STOP,
+          string_duplicate("no currently running command to stop"));
+    } else {
+      linenoiseHistoryAdd(input);
+      switch (config_get_exec_mode(config)) {
+      case EXEC_MODE_SYNC:
+        execute_command_sync(config, error_stack, input);
+        break;
+      case EXEC_MODE_ASYNC:
+        execute_command_async(config, error_stack, input);
+        break;
+      case EXEC_MODE_UNKNOWN:
+        log_fatal("attempted to execute command in unknown mode");
+        break;
+      }
     }
+    if (error_stack_is_empty(error_stack)) {
+      save_config_settings(config, error_stack);
+    }
+    error_stack_print_and_reset(error_stack);
   }
   free(input);
 }
@@ -199,14 +337,14 @@ void caches_destroy(void) {
   fileproxy_destroy_cache();
 }
 
-void process_command_internal(int argc, char *argv[], const char *data_paths) {
+void process_command_internal(int argc, char *argv[],
+                              const ConfigArgs *config_args) {
   log_set_level(LOG_FATAL);
   ErrorStack *error_stack = error_stack_create();
-  Config *config =
-      config_create_default_with_data_paths(error_stack, data_paths);
+  Config *config = config_create(config_args, error_stack);
   if (error_stack_is_empty(error_stack)) {
     char *initial_command_string = create_command_from_args(argc, argv);
-    command_scan_loop(config, error_stack, initial_command_string);
+    sync_command_scan_loop(config, error_stack, initial_command_string);
     free(initial_command_string);
     caches_destroy();
   } else {
@@ -216,11 +354,11 @@ void process_command_internal(int argc, char *argv[], const char *data_paths) {
   error_stack_destroy(error_stack);
 }
 
-void process_command(int argc, char *argv[]) {
-  process_command_internal(argc, argv, DEFAULT_DATA_PATHS);
+void process_command_default(int argc, char *argv[]) {
+  process_command_internal(argc, argv, NULL);
 }
 
-void process_command_with_data_paths(int argc, char *argv[],
-                                     const char *data_paths) {
-  process_command_internal(argc, argv, data_paths);
+void process_command_with_config_args(int argc, char *argv[],
+                                      const ConfigArgs *config_args) {
+  process_command_internal(argc, argv, config_args);
 }
