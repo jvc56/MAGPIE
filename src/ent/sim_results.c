@@ -29,7 +29,7 @@ struct SimmedPlay {
   Stat *leftover_stat;
   Stat *win_pct_stat;
   uint64_t similarity_key;
-  int unsorted_play_index;
+  int play_index_by_sort_type;
   XoshiroPRNG *prng;
   PlyInfo *ply_infos;
   cpthread_mutex_t mutex;
@@ -68,7 +68,7 @@ SimmedPlay **simmed_plays_create(const MoveList *move_list,
       simmed_play->ply_infos[j].bingo_stat = stat_create(true);
     }
     simmed_play->similarity_key = 0;
-    simmed_play->unsorted_play_index = i;
+    simmed_play->play_index_by_sort_type = i;
     simmed_play->prng = prng_create(seed);
     cpthread_mutex_init(&simmed_play->mutex);
     simmed_plays[i] = simmed_play;
@@ -84,7 +84,7 @@ void simmed_play_copy(SimmedPlay *dst, const SimmedPlay *src,
   stat_copy(dst->leftover_stat, src->leftover_stat);
   stat_copy(dst->win_pct_stat, src->win_pct_stat);
   dst->similarity_key = src->similarity_key;
-  dst->unsorted_play_index = src->unsorted_play_index;
+  dst->play_index_by_sort_type = src->play_index_by_sort_type;
   for (int i = 0; i < num_plies; i++) {
     stat_copy(dst->ply_infos[i].score_stat, src->ply_infos[i].score_stat);
     stat_copy(dst->ply_infos[i].bingo_stat, src->ply_infos[i].bingo_stat);
@@ -199,8 +199,8 @@ const Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play) {
   return simmed_play->win_pct_stat;
 }
 
-int simmed_play_get_unsorted_play_index(const SimmedPlay *simmed_play) {
-  return simmed_play->unsorted_play_index;
+int simmed_play_get_play_index_by_sort_type(const SimmedPlay *simmed_play) {
+  return simmed_play->play_index_by_sort_type;
 }
 
 // Returns the current seed and updates the seed using prng_next
@@ -311,11 +311,6 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
   return wpct;
 }
 
-const PlyInfo *simmed_play_get_ply_info(const SimmedPlay *simmed_play,
-                                        int index) {
-  return &(simmed_play->ply_infos[index]);
-}
-
 // NOT THREAD SAFE: Assumes no sim is in progress, the sim display info is
 // updated and sorted, and n is in bounds.
 void sim_results_get_nth_best_move(const SimResults *sim_results, int n,
@@ -333,8 +328,8 @@ bool sim_results_get_valid_for_current_game_state(
   return sim_results->valid_for_current_game_state;
 }
 
-void sim_results_update_display_simmed_plays(const SimResults *sim_results,
-                                             const int simmed_play_index) {
+void sim_results_update_display_simmed_play(const SimResults *sim_results,
+                                            const int simmed_play_index) {
   SimmedPlay *simmed_play =
       sim_results_get_simmed_play(sim_results, simmed_play_index);
   SimmedPlay *display_simmed_play =
@@ -383,7 +378,7 @@ bool sim_results_lock_and_sort_display_simmed_plays(SimResults *sim_results) {
 
   int number_of_simmed_plays = sim_results_get_number_of_plays(sim_results);
   for (int i = 0; i < number_of_simmed_plays; i++) {
-    sim_results_update_display_simmed_plays(sim_results, i);
+    sim_results_update_display_simmed_play(sim_results, i);
   }
 
   qsort(sim_results->display_simmed_plays, number_of_simmed_plays,
@@ -396,8 +391,8 @@ void sim_results_unlock_display_infos(SimResults *sim_results) {
 }
 
 SimmedPlay *sim_results_get_display_simmed_play(const SimResults *sim_results,
-                                                int index) {
-  return sim_results->display_simmed_plays[index];
+                                                int play_index) {
+  return sim_results->display_simmed_plays[play_index];
 }
 
 bool sim_results_plays_are_similar(const SimResults *sim_results,

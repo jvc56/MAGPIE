@@ -21,7 +21,7 @@ const Stat *simmed_play_get_bingo_stat(const SimmedPlay *simmed_play,
                                        int ply_index);
 const Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play);
 const Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play);
-int simmed_play_get_unsorted_play_index(const SimmedPlay *simmed_play);
+int simmed_play_get_play_index_by_sort_type(const SimmedPlay *simmed_play);
 uint64_t simmed_play_get_seed(SimmedPlay *simmed_play);
 void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
                                    const Move *move);
@@ -62,7 +62,7 @@ bool sim_results_get_valid_for_current_game_state(
 bool sim_results_lock_and_sort_display_simmed_plays(SimResults *sim_results);
 void sim_results_unlock_display_infos(SimResults *sim_results);
 SimmedPlay *sim_results_get_display_simmed_play(const SimResults *sim_results,
-                                                int index);
+                                                int play_index);
 bool sim_results_plays_are_similar(const SimResults *sim_results, int i, int j);
 
 #endif
