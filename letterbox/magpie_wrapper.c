@@ -20,8 +20,12 @@
 Config* letterbox_create_config(const char *data_path, const char *lexicon) {
     ErrorStack *error_stack = error_stack_create();
 
-    // Create config with data path
-    Config *config = config_create_default_with_data_paths(error_stack, data_path);
+    // Create config with data path using new ConfigArgs API
+    ConfigArgs args = {
+        .data_paths = data_path,
+        .settings_filename = NULL
+    };
+    Config *config = config_create(&args, error_stack);
 
     if (!error_stack_is_empty(error_stack)) {
         fprintf(stderr, "Error creating config:\n");
