@@ -236,12 +236,13 @@ BAIResult *sim_results_get_bai_result(const SimResults *sim_results) {
   return sim_results->bai_result;
 }
 
-void simmed_play_add_score_stat(SimmedPlay *simmed_play, Equity score,
-                                bool is_bingo, int ply_index) {
+void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
+                                   const Move *move) {
   cpthread_mutex_lock(&simmed_play->mutex);
   stat_push(simmed_play->ply_infos[ply_index].score_stat,
-            equity_to_double(score), 1);
-  stat_push(simmed_play->ply_infos[ply_index].bingo_stat, (double)is_bingo, 1);
+            equity_to_double(move_get_score(move)), 1);
+  stat_push(simmed_play->ply_infos[ply_index].bingo_stat,
+            (double)(move_get_tiles_played(move) == RACK_SIZE), 1);
   cpthread_mutex_unlock(&simmed_play->mutex);
 }
 

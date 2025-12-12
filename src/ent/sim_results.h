@@ -36,8 +36,8 @@ Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play);
 Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play);
 int simmed_play_get_unsorted_play_index(const SimmedPlay *simmed_play);
 uint64_t simmed_play_get_seed(SimmedPlay *simmed_play);
-void simmed_play_add_score_stat(SimmedPlay *simmed_play, Equity score,
-                                bool is_bingo, int ply);
+void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
+                                   const Move *move);
 void simmed_play_add_equity_stat(SimmedPlay *simmed_play, Equity initial_spread,
                                  Equity spread, Equity leftover);
 double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
