@@ -18,6 +18,23 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef struct PlyInfo {
+  Stat *score_stat;
+  Stat *bingo_stat;
+} PlyInfo;
+
+struct SimmedPlay {
+  Move move;
+  Stat *equity_stat;
+  Stat *leftover_stat;
+  Stat *win_pct_stat;
+  uint64_t similarity_key;
+  int unsorted_play_index;
+  XoshiroPRNG *prng;
+  PlyInfo *ply_infos;
+  cpthread_mutex_t mutex;
+};
+
 struct SimResults {
   int num_plies;
   int num_simmed_plays;
@@ -40,8 +57,7 @@ SimmedPlay **simmed_plays_create(const MoveList *move_list,
 
   for (int i = 0; i < num_simmed_plays; i++) {
     SimmedPlay *simmed_play = malloc_or_die(sizeof(SimmedPlay));
-    simmed_play->move = move_create();
-    move_copy(simmed_play->move, move_list_get_move(move_list, i));
+    move_copy(&simmed_play->move, move_list_get_move(move_list, i));
 
     simmed_play->equity_stat = stat_create(true);
     simmed_play->leftover_stat = stat_create(true);
@@ -63,7 +79,7 @@ SimmedPlay **simmed_plays_create(const MoveList *move_list,
 // Does not copy the PRNG or the mutex
 void simmed_play_copy(SimmedPlay *dst, const SimmedPlay *src,
                       const int num_plies) {
-  move_copy(dst->move, src->move);
+  move_copy(&dst->move, &src->move);
   stat_copy(dst->equity_stat, src->equity_stat);
   stat_copy(dst->leftover_stat, src->leftover_stat);
   stat_copy(dst->win_pct_stat, src->win_pct_stat);
@@ -89,7 +105,6 @@ void simmed_plays_destroy(SimmedPlay **simmed_plays, int num_simmed_plays,
     stat_destroy(simmed_plays[i]->equity_stat);
     stat_destroy(simmed_plays[i]->leftover_stat);
     stat_destroy(simmed_plays[i]->win_pct_stat);
-    move_destroy(simmed_plays[i]->move);
     prng_destroy(simmed_plays[i]->prng);
     free(simmed_plays[i]);
   }
@@ -162,23 +177,25 @@ SimResults *sim_results_create(void) {
   return sim_results;
 }
 
-Move *simmed_play_get_move(const SimmedPlay *simmed_play) {
-  return simmed_play->move;
+const Move *simmed_play_get_move(const SimmedPlay *simmed_play) {
+  return &simmed_play->move;
 }
 
-Stat *simmed_play_get_score_stat(const SimmedPlay *simmed_play, int ply_index) {
+const Stat *simmed_play_get_score_stat(const SimmedPlay *simmed_play,
+                                       int ply_index) {
   return simmed_play->ply_infos[ply_index].score_stat;
 }
 
-Stat *simmed_play_get_bingo_stat(const SimmedPlay *simmed_play, int ply_index) {
+const Stat *simmed_play_get_bingo_stat(const SimmedPlay *simmed_play,
+                                       int ply_index) {
   return simmed_play->ply_infos[ply_index].bingo_stat;
 }
 
-Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play) {
+const Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play) {
   return simmed_play->equity_stat;
 }
 
-Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play) {
+const Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play) {
   return simmed_play->win_pct_stat;
 }
 
@@ -303,7 +320,7 @@ const PlyInfo *simmed_play_get_ply_info(const SimmedPlay *simmed_play,
 // updated and sorted, and n is in bounds.
 void sim_results_get_nth_best_move(const SimResults *sim_results, int n,
                                    Move *move) {
-  move_copy(move, sim_results->display_simmed_plays[n]->move);
+  move_copy(move, &sim_results->display_simmed_plays[n]->move);
 }
 
 void sim_results_set_valid_for_current_game_state(SimResults *sim_results,

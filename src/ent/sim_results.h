@@ -12,28 +12,15 @@
 #include "win_pct.h"
 #include <stdbool.h>
 
-typedef struct PlyInfo {
-  Stat *score_stat;
-  Stat *bingo_stat;
-} PlyInfo;
+typedef struct SimmedPlay SimmedPlay;
 
-typedef struct SimmedPlay {
-  Move *move;
-  Stat *equity_stat;
-  Stat *leftover_stat;
-  Stat *win_pct_stat;
-  uint64_t similarity_key;
-  int unsorted_play_index;
-  XoshiroPRNG *prng;
-  PlyInfo *ply_infos;
-  cpthread_mutex_t mutex;
-} SimmedPlay;
-
-Move *simmed_play_get_move(const SimmedPlay *simmed_play);
-Stat *simmed_play_get_score_stat(const SimmedPlay *simmed_play, int ply_index);
-Stat *simmed_play_get_bingo_stat(const SimmedPlay *simmed_play, int ply_index);
-Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play);
-Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play);
+const Move *simmed_play_get_move(const SimmedPlay *simmed_play);
+const Stat *simmed_play_get_score_stat(const SimmedPlay *simmed_play,
+                                       int ply_index);
+const Stat *simmed_play_get_bingo_stat(const SimmedPlay *simmed_play,
+                                       int ply_index);
+const Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play);
+const Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play);
 int simmed_play_get_unsorted_play_index(const SimmedPlay *simmed_play);
 uint64_t simmed_play_get_seed(SimmedPlay *simmed_play);
 void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
@@ -44,8 +31,7 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
                                     Equity spread, Equity leftover,
                                     game_end_reason_t game_end_reason,
                                     int game_unseen_tiles, bool plies_are_odd);
-const PlyInfo *simmed_play_get_ply_info(const SimmedPlay *simmed_play,
-                                        int index);
+
 typedef struct SimResults SimResults;
 
 SimResults *sim_results_create(void);

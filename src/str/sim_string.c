@@ -122,14 +122,14 @@ bool string_builder_add_sim_stats_with_display_lock(
         get_formatted_string("%lu", stat_get_num_samples(win_pct_stat)));
 
     for (int j = 0; j < num_plies; j++) {
-      const PlyInfo *sp_ply_info = simmed_play_get_ply_info(sp, j);
+      const Stat *score_stat = simmed_play_get_score_stat(sp, j);
+      const Stat *bingo_stat = simmed_play_get_bingo_stat(sp, j);
       string_grid_set_cell(
           sg, curr_row, curr_col++,
-          get_formatted_string("%.2f", stat_get_mean(sp_ply_info->score_stat)));
+          get_formatted_string("%.2f", stat_get_mean(score_stat)));
       string_grid_set_cell(
           sg, curr_row, curr_col++,
-          get_formatted_string("%.2f",
-                               stat_get_mean(sp_ply_info->bingo_stat) * 100.0));
+          get_formatted_string("%.2f", stat_get_mean(bingo_stat) * 100.0));
     }
     curr_row++;
   }
