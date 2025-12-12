@@ -233,14 +233,11 @@ static inline void read_wmp_for_length(WMP *wmp, uint32_t len, FILE *stream) {
   read_wfl_double_blanks(wfl, stream);
 }
 
-static inline void wmp_load_from_filename(WMP *wmp, const char *wmp_name,
-                                          const char *wmp_filename,
-                                          ErrorStack *error_stack) {
-  FILE *stream = stream_from_filename(wmp_filename, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
+static inline void wmp_load_from_filename_with_stream(WMP *wmp,
+                                                      const char *wmp_name,
+                                                      const char *wmp_filename,
+                                                      FILE *stream,
+                                                      ErrorStack *error_stack) {
   read_header_from_stream(wmp, stream);
   if (wmp->version < WMP_EARLIEST_SUPPORTED_VERSION) {
     error_stack_push(
@@ -258,15 +255,24 @@ static inline void wmp_load_from_filename(WMP *wmp, const char *wmp_name,
                          wmp->board_dim, BOARD_DIM, wmp_filename));
     return;
   }
-
   // IMPORTANT: the name must only be set once there are no more possible
   // errors that could be encountered, otherwise, it will introduce a memory
   // leak.
   wmp->name = string_duplicate(wmp_name);
-
   for (uint32_t len = 2; len <= BOARD_DIM; len++) {
     read_wmp_for_length(wmp, len, stream);
   }
+}
+
+static inline void wmp_load_from_filename(WMP *wmp, const char *wmp_name,
+                                          const char *wmp_filename,
+                                          ErrorStack *error_stack) {
+  FILE *stream = stream_from_filename(wmp_filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  wmp_load_from_filename_with_stream(wmp, wmp_name, wmp_filename, stream,
+                                     error_stack);
   fclose_or_die(stream);
 }
 

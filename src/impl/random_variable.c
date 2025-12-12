@@ -3,7 +3,6 @@
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"
 #include "../def/game_defs.h"
-#include "../def/rack_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
 #include "../ent/equity.h"
@@ -399,9 +398,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
         leftover -= this_leftover;
       }
     }
-    simmed_play_add_score_stat(simmed_play, move_get_score(best_play),
-                               move_get_tiles_played(best_play) == RACK_SIZE,
-                               ply);
+    simmed_play_add_stats_for_ply(simmed_play, ply, best_play);
   }
 
   const Equity spread =
