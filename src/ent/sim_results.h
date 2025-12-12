@@ -30,8 +30,8 @@ typedef struct SimmedPlay {
 } SimmedPlay;
 
 Move *simmed_play_get_move(const SimmedPlay *simmed_play);
-Stat *simmed_play_get_score_stat(const SimmedPlay *simmed_play, int stat_index);
-Stat *simmed_play_get_bingo_stat(const SimmedPlay *simmed_play, int stat_index);
+Stat *simmed_play_get_score_stat(const SimmedPlay *simmed_play, int ply_index);
+Stat *simmed_play_get_bingo_stat(const SimmedPlay *simmed_play, int ply_index);
 Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play);
 Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play);
 int simmed_play_get_unsorted_play_index(const SimmedPlay *simmed_play);

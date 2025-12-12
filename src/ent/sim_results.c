@@ -3,7 +3,7 @@
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"
 #include "../def/game_defs.h"
-#include "../def/sim_defs.h"
+#include "../def/rack_defs.h"
 #include "../util/io_util.h"
 #include "bai_result.h"
 #include "equity.h"
@@ -316,7 +316,7 @@ bool sim_results_get_valid_for_current_game_state(
   return sim_results->valid_for_current_game_state;
 }
 
-void sim_results_update_display_simmed_plays(SimResults *sim_results,
+void sim_results_update_display_simmed_plays(const SimResults *sim_results,
                                              const int simmed_play_index) {
   SimmedPlay *simmed_play =
       sim_results_get_simmed_play(sim_results, simmed_play_index);

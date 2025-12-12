@@ -3,7 +3,6 @@
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"
 #include "../def/game_defs.h"
-#include "../def/rack_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
 #include "../ent/equity.h"
