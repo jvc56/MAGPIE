@@ -234,7 +234,7 @@ static inline void string_builder_add_heat_map(StringBuilder *sb,
   StringGrid *sg = string_grid_create(squares_to_display + 1, 3, 1);
   string_grid_set_cell(sg, 0, 0, string_duplicate(""));
   string_grid_set_cell(sg, 0, 1, string_duplicate("Count"));
-  string_grid_set_cell(sg, 0, 2, string_duplicate("Iters"));
+  string_grid_set_cell(sg, 0, 2, string_duplicate("Total"));
   for (int i = 0; i < BOARD_DIM * BOARD_DIM && i < max_squares_to_display;
        i++) {
     int curr_col = 0;

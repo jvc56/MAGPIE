@@ -15,13 +15,25 @@
 
 typedef struct SimmedPlay SimmedPlay;
 
+typedef enum {
+  SIMMED_PASS,
+  SIMMED_EXCHANGE,
+  SIMMED_TILE_PLACEMENT,
+  NUM_SIMMED_PLAY_TYPES,
+} simmed_play_t;
+
+enum {
+  NUM_PLAY_TYPE_COUNTS = NUM_SIMMED_PLAY_TYPES * MAX_PLIES,
+};
+
 typedef struct SimmedPlayDisplayInfo {
-  int play_id;
+  int play_index;
   Move move;
   double score_means[MAX_PLIES];
   double score_stdevs[MAX_PLIES];
   double bingo_means[MAX_PLIES];
   double bingo_stdevs[MAX_PLIES];
+  uint64_t play_type_counts[NUM_PLAY_TYPE_COUNTS];
   double equity_mean;
   double equity_stdev;
   double win_pct_mean;
@@ -35,10 +47,10 @@ Stat *simmed_play_get_score_stat(const SimmedPlay *simmed_play, int stat_index);
 Stat *simmed_play_get_bingo_stat(const SimmedPlay *simmed_play, int stat_index);
 Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play);
 Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play);
-int simmed_play_get_id(const SimmedPlay *simmed_play);
+int simmed_play_get_index(const SimmedPlay *simmed_play);
 uint64_t simmed_play_get_seed(SimmedPlay *simmed_play);
-void simmed_play_add_score_stat(SimmedPlay *simmed_play, Equity score,
-                                bool is_bingo, int ply);
+void simmed_play_add_score_stat(SimmedPlay *simmed_play, const Move *move,
+                                int ply);
 void simmed_play_add_equity_stat(SimmedPlay *simmed_play, Equity initial_spread,
                                  Equity spread, Equity leftover);
 double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
@@ -67,12 +79,14 @@ BAIResult *sim_results_get_bai_result(const SimResults *sim_results);
 HeatMap *sim_results_get_heat_map(const SimResults *sim_results);
 void simmed_play_increment_heat_map(SimResults *sim_results, int play_index,
                                     int ply_index, const Move *best_play);
+int sim_results_get_move_type_count_index(const int ply,
+                                          const simmed_play_t simmed_play_type);
 
 void sim_results_lock_simmed_plays(SimResults *sim_results);
 void sim_results_unlock_simmed_plays(SimResults *sim_results);
 void sim_results_get_nth_best_move(const SimResults *sim_results, int n,
                                    Move *move);
-int sim_results_get_nth_best_play_id(const SimResults *sim_results, int n);
+int sim_results_get_nth_best_play_index(const SimResults *sim_results, int n);
 void sim_results_set_valid_for_current_game_state(SimResults *sim_results,
                                                   bool valid);
 bool sim_results_get_valid_for_current_game_state(

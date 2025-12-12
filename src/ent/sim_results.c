@@ -26,8 +26,9 @@ struct SimmedPlay {
   Stat *equity_stat;
   Stat *leftover_stat;
   Stat *win_pct_stat;
+  uint64_t play_type_counts[NUM_PLAY_TYPE_COUNTS];
   uint64_t similarity_key;
-  int play_id;
+  int play_index;
   XoshiroPRNG *prng;
   cpthread_mutex_t mutex;
 };
@@ -63,12 +64,14 @@ SimmedPlay **simmed_plays_create(const MoveList *move_list,
     simmed_play->win_pct_stat = stat_create(true);
     memset(simmed_play->bingo_stat, 0, sizeof(Stat *) * MAX_PLIES);
     memset(simmed_play->score_stat, 0, sizeof(Stat *) * MAX_PLIES);
+    memset(simmed_play->play_type_counts, 0,
+           sizeof(simmed_play->play_type_counts));
     for (int j = 0; j < num_plies; j++) {
       simmed_play->score_stat[j] = stat_create(true);
       simmed_play->bingo_stat[j] = stat_create(true);
     }
     simmed_play->similarity_key = 0;
-    simmed_play->play_id = i;
+    simmed_play->play_index = i;
     simmed_play->prng = prng_create(seed);
     cpthread_mutex_init(&simmed_play->mutex);
     simmed_plays[i] = simmed_play;
@@ -196,8 +199,8 @@ Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play) {
   return simmed_play->win_pct_stat;
 }
 
-int simmed_play_get_id(const SimmedPlay *simmed_play) {
-  return simmed_play->play_id;
+int simmed_play_get_index(const SimmedPlay *simmed_play) {
+  return simmed_play->play_index;
 }
 
 // Returns the current seed and updates the seed using prng_next
@@ -254,11 +257,37 @@ HeatMap *sim_results_get_heat_map(const SimResults *sim_results) {
   return sim_results->heat_map;
 }
 
-void simmed_play_add_score_stat(SimmedPlay *simmed_play, Equity score,
-                                bool is_bingo, int ply) {
+int sim_results_get_move_type_count_index(
+    const int ply, const simmed_play_t simmed_play_type) {
+  return (ply * NUM_SIMMED_PLAY_TYPES) + simmed_play_type;
+}
+
+void simmed_play_add_score_stat(SimmedPlay *simmed_play, const Move *move,
+                                int ply) {
+  simmed_play_t simmed_play_type;
+  switch (move_get_type(move)) {
+  case GAME_EVENT_PASS:
+    simmed_play_type = SIMMED_PASS;
+    break;
+  case GAME_EVENT_EXCHANGE:
+    simmed_play_type = SIMMED_EXCHANGE;
+    break;
+  case GAME_EVENT_TILE_PLACEMENT_MOVE:
+    simmed_play_type = SIMMED_TILE_PLACEMENT;
+    break;
+  default:
+    log_fatal(
+        "encountered invalid game event type when adding to score stat: %d",
+        move_get_type(move));
+    break;
+  }
   cpthread_mutex_lock(&simmed_play->mutex);
-  stat_push(simmed_play->score_stat[ply], equity_to_double(score), 1);
-  stat_push(simmed_play->bingo_stat[ply], (double)is_bingo, 1);
+  stat_push(simmed_play->score_stat[ply],
+            equity_to_double(move_get_score(move)), 1);
+  stat_push(simmed_play->bingo_stat[ply],
+            (double)(move_get_tiles_played(move) == RACK_SIZE), 1);
+  simmed_play->play_type_counts[sim_results_get_move_type_count_index(
+      ply, simmed_play_type)]++;
   cpthread_mutex_unlock(&simmed_play->mutex);
 }
 
@@ -328,8 +357,8 @@ void sim_results_get_nth_best_move(const SimResults *sim_results, int n,
   *move = sim_results->simmed_play_display_infos[n].move;
 }
 
-int sim_results_get_nth_best_play_id(const SimResults *sim_results, int n) {
-  return sim_results->simmed_play_display_infos[n].play_id;
+int sim_results_get_nth_best_play_index(const SimResults *sim_results, int n) {
+  return sim_results->simmed_play_display_infos[n].play_index;
 }
 
 void sim_results_set_valid_for_current_game_state(SimResults *sim_results,
@@ -350,7 +379,7 @@ void sim_results_write_to_display_info(SimResults *sim_results,
       &sim_results->simmed_play_display_infos[simmed_play_index];
   const int num_plies = sim_results_get_num_plies(sim_results);
   cpthread_mutex_lock(&simmed_play->mutex);
-  simmed_play_display_info->play_id = simmed_play->play_id;
+  simmed_play_display_info->play_index = simmed_play->play_index;
   move_copy(&simmed_play_display_info->move, simmed_play->move);
   for (int i = 0; i < num_plies; i++) {
     const Stat *bingo_stat = simmed_play_get_bingo_stat(simmed_play, i);
@@ -360,6 +389,8 @@ void sim_results_write_to_display_info(SimResults *sim_results,
     simmed_play_display_info->score_means[i] = stat_get_mean(score_stat);
     simmed_play_display_info->score_stdevs[i] = stat_get_stdev(score_stat);
   }
+  memcpy(simmed_play_display_info->play_type_counts,
+         simmed_play->play_type_counts, sizeof(simmed_play->play_type_counts));
   simmed_play_display_info->equity_mean =
       stat_get_mean(simmed_play->equity_stat);
   simmed_play_display_info->equity_stdev =

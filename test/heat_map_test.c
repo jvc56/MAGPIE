@@ -112,9 +112,42 @@ void assert_heat_map_single_move(const Game *game, const char *ucgi_move_str,
   error_stack_destroy(error_stack);
 }
 
+void show_heat_maps_for_cgp(Config *config, const char *cgp, const char *rack) {
+  StringBuilder *cmd_sb = string_builder_create();
+  string_builder_add_formatted_string(cmd_sb, "cgp %s", cgp);
+
+  load_and_exec_config_or_die(config, string_builder_peek(cmd_sb));
+  string_builder_clear(cmd_sb);
+
+  string_builder_add_formatted_string(cmd_sb, "r %s", rack);
+  load_and_exec_config_or_die(config, string_builder_peek(cmd_sb));
+
+  string_builder_destroy(cmd_sb);
+
+  load_and_exec_config_or_die(
+      config,
+      "gsim -iter 1000 -minp 10 -numplays 10 "
+      "-useh true -plies 5 -boardcolor ansi -threads 12 -sr rr -thres none");
+
+  for (int i = 0; i < 2; i++) {
+    load_and_exec_config_or_die(config, "heat 1");
+    load_and_exec_config_or_die(config, "heat 2");
+    load_and_exec_config_or_die(config, "heat 3");
+    load_and_exec_config_or_die(config, "heat 2 a");
+    load_and_exec_config_or_die(config, "heat 3 b");
+    load_and_exec_config_or_die(config, "heat 5 1");
+    load_and_exec_config_or_die(config, "heat 3 1 a");
+    load_and_exec_config_or_die(config, "heat 3 2 b");
+    load_and_exec_config_or_die(config, "heat 3 3 a");
+    load_and_exec_config_or_die(config, "heat 3 4 b");
+    load_and_exec_config_or_die(config, "heat 3 5 b");
+    load_and_exec_config_or_die(config, "set -boardcolor none");
+  }
+}
+
 void test_heat_map(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -s1 score -s2 score -r1 all -r2 all -numplays 1");
+  Config *config =
+      config_create_or_die("set -lex CSW21 -r1 all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "newgame");
 
   HeatMap *hm = heat_map_create();
@@ -208,7 +241,7 @@ void test_heat_map(void) {
 
   load_and_exec_config_or_die(
       config,
-      "gsim -iter 1000 -minp 10 -numplays 10 "
+      "gsim -iter 10 -minp 1 -numplays 10 "
       "-useh true -plies 5 -boardcolor ansi -threads 12 -sr rr -thres none");
 
   assert_config_exec_status(config, "heat 0",
@@ -226,24 +259,8 @@ void test_heat_map(void) {
   assert_config_exec_status(config, "heat 2 alls",
                             ERROR_STATUS_HEAT_MAP_UNRECOGNIZED_TYPE);
 
-  printf("starting heat map loop\n");
-  for (int i = 0; i < 2; i++) {
-    printf("testing heat 1\n");
-    load_and_exec_config_or_die(config, "heat 1");
-    printf("testing heat 2\n");
-    load_and_exec_config_or_die(config, "heat 2");
-    printf("testing heat 3\n");
-    load_and_exec_config_or_die(config, "heat 3");
-    load_and_exec_config_or_die(config, "heat 2 a");
-    load_and_exec_config_or_die(config, "heat 3 b");
-    load_and_exec_config_or_die(config, "heat 5 1");
-    load_and_exec_config_or_die(config, "heat 3 1 a");
-    load_and_exec_config_or_die(config, "heat 3 2 b");
-    load_and_exec_config_or_die(config, "heat 3 3 a");
-    load_and_exec_config_or_die(config, "heat 3 4 b");
-    load_and_exec_config_or_die(config, "heat 3 5 b");
-    load_and_exec_config_or_die(config, "set -boardcolor none");
-  }
+  show_heat_maps_for_cgp(config, EMPTY_CGP, "ABCDEFG");
+  show_heat_maps_for_cgp(config, XU_UH_CGP, "BBCCFFG");
 
   load_and_exec_config_or_die(config, "gsim -iter 1000 -minp 10 -numplays 10 "
                                       "-useh false -plies 5 -boardcolor ansi");

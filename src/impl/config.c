@@ -2454,18 +2454,18 @@ char *impl_show_heat_map(Config *config, ErrorStack *error_stack) {
 
   const int num_plays = sim_results_get_number_of_plays(config->sim_results);
   const int num_plies = sim_results_get_num_plies(config->sim_results);
-  const char *play_index_str =
+  const char *play_sorted_index_str =
       config_get_parg_value(config, ARG_TOKEN_SHOW_HEAT_MAP, 0);
 
-  int move_index;
-  string_to_int_or_push_error("move index", play_index_str, 1, num_plays,
+  int play_sorted_index;
+  string_to_int_or_push_error("move index", play_sorted_index_str, 1, num_plays,
                               ERROR_STATUS_HEAT_MAP_MOVE_INDEX_OUT_OF_RANGE,
-                              &move_index, error_stack);
+                              &play_sorted_index, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
   // Convert from 1-indexed user input to 0-indexed internal
-  move_index--;
+  play_sorted_index--;
 
   const char *ply_index_str = NULL;
   const char *type_str = NULL;
@@ -2520,20 +2520,77 @@ char *impl_show_heat_map(Config *config, ErrorStack *error_stack) {
 
   char *result = NULL;
   StringBuilder *hm_string = string_builder_create();
-  const int play_id =
-      sim_results_get_nth_best_play_id(config->sim_results, move_index);
+
+  StringGrid *sg = string_grid_create(NUM_SIMMED_PLAY_TYPES + 2, 3, 1);
+  int curr_col = 0;
+
+  string_grid_set_cell(sg, 0, curr_col++, string_duplicate("Type"));
+  string_grid_set_cell(sg, 0, curr_col++, string_duplicate("Pct"));
+  string_grid_set_cell(sg, 0, curr_col++, string_duplicate("Count"));
+  uint64_t total_count = 0;
+  uint64_t play_type_counts[NUM_SIMMED_PLAY_TYPES];
+  for (int i = 0; i < NUM_SIMMED_PLAY_TYPES; i++) {
+    SimmedPlayDisplayInfo *spdi =
+        sim_results_get_display_info(config->sim_results, play_sorted_index);
+    int move_type_count_index =
+        sim_results_get_move_type_count_index(ply_index, i);
+    play_type_counts[i] = spdi->play_type_counts[move_type_count_index];
+    total_count += play_type_counts[i];
+  }
+  for (int i = 0; i < NUM_SIMMED_PLAY_TYPES + 1; i++) {
+    char *name = NULL;
+    uint64_t count = 0;
+    switch (i) {
+    case SIMMED_PASS:
+      name = string_duplicate("Pass:");
+      count = play_type_counts[i];
+      break;
+    case SIMMED_EXCHANGE:
+      name = string_duplicate("Exch:");
+      count = play_type_counts[i];
+      break;
+    case SIMMED_TILE_PLACEMENT:
+      name = string_duplicate("Play:");
+      count = play_type_counts[i];
+      break;
+    case NUM_SIMMED_PLAY_TYPES:
+      name = string_duplicate("All:");
+      count = total_count;
+      break;
+    }
+    curr_col = 0;
+    string_grid_set_cell(sg, i + 1, curr_col++, name);
+    string_grid_set_cell(
+        sg, i + 1, curr_col++,
+        get_formatted_string("%.2f",
+                             ((double)count / (double)total_count) * 100.0));
+    string_grid_set_cell(sg, i + 1, curr_col++,
+                         get_formatted_string("%" PRIu64, count));
+  }
+
+  string_builder_add_string_grid(hm_string, sg, false);
+  string_grid_destroy(sg);
+
+  const int play_index = sim_results_get_nth_best_play_index(
+      config->sim_results, play_sorted_index);
   if (config->game_string_options->board_color ==
       GAME_STRING_BOARD_COLOR_NONE) {
-    string_builder_add_heat_map(hm_string, heat_map, play_id, ply_index,
+    string_builder_add_heat_map(hm_string, heat_map, play_index, ply_index,
                                 heat_map_type, config->max_num_display_plays);
   } else {
     Game *game_dupe = game_duplicate(config->game);
     Move move;
-    sim_results_get_nth_best_move(config->sim_results, move_index, &move);
+    sim_results_get_nth_best_move(config->sim_results, play_sorted_index,
+                                  &move);
+    const int play_on_turn_index = game_get_player_on_turn_index(game_dupe);
+    Rack leave;
+    get_leave_for_move(&move, game_dupe, &leave);
     play_move_without_drawing_tiles(&move, game_dupe);
+    return_rack_to_bag(game_dupe, play_on_turn_index);
+    draw_rack_from_bag(game_dupe, play_on_turn_index, &leave);
     string_builder_add_game_with_heat_map(
         game_dupe, NULL, config->game_string_options, config->game_history,
-        heat_map, play_id, ply_index, heat_map_type, hm_string);
+        heat_map, play_index, ply_index, heat_map_type, hm_string);
     game_destroy(game_dupe);
   }
   result = string_builder_dump(hm_string, NULL);

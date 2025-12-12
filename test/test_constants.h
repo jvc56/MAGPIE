@@ -190,6 +190,8 @@
   "336/298 0"
 #define RATPACK_CGP                                                            \
   "15/15/15/15/15/15/15/1RATPACK7/15/15/15/15/15/15/15 / 0/82 0"
+#define XU_UH_CGP "15/15/15/15/15/15/15/6XU7/6UH7/15/15/15/15/15/15 / 18/21 0"
+
 // 21 x 21 boards
 
 #define ANTHROPOMORPHISATIONS_CGP                                              \

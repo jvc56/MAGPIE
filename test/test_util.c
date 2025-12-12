@@ -856,7 +856,7 @@ void assert_simmed_plays_stats_are_equal(const SimmedPlay *sp1,
 
 void assert_simmed_plays_are_equal(const SimmedPlay *sp1, const SimmedPlay *sp2,
                                    int max_plies) {
-  assert(simmed_play_get_id(sp1) == simmed_play_get_id(sp2));
+  assert(simmed_play_get_index(sp1) == simmed_play_get_index(sp2));
   assert_moves_are_equal(simmed_play_get_move(sp1), simmed_play_get_move(sp2));
   assert_simmed_plays_stats_are_equal(sp1, sp2, max_plies);
 }

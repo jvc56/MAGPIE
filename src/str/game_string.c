@@ -140,7 +140,10 @@ void string_builder_add_board_square_color(StringBuilder *game_string,
           heat_map_get_count(heat_map, play, ply, row, col, heat_map_type);
       const uint64_t total =
           heat_map_get_board_count_max(heat_map, play, ply, heat_map_type);
-      const double frac = (double)square_count / (double)total;
+      double frac = 0;
+      if (total > 0) {
+        frac = (double)square_count / (double)total;
+      }
       double threshold = HEAT_MAP_FRAC_DELIMITER;
       int color_index = 0;
       while (frac > threshold &&

@@ -400,9 +400,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
         leftover -= this_leftover;
       }
     }
-    simmed_play_add_score_stat(simmed_play, move_get_score(best_play),
-                               move_get_tiles_played(best_play) == RACK_SIZE,
-                               ply);
+    simmed_play_add_score_stat(simmed_play, best_play, ply);
     simmed_play_increment_heat_map(sim_results, play_index, ply, best_play);
   }
 
