@@ -1067,13 +1067,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_SHOW_HEAT_MAP:
       usages[0] = "<play_index> [<ply> <type>]";
       examples[0] = "10";
-      examples[0] = "10 a";
-      examples[0] = "10 b";
-      examples[0] = "10 1";
-      examples[0] = "10 3 all";
-      examples[0] = "10 3 a";
-      examples[0] = "10 4 bingo";
-      examples[0] = "10 4 b";
+      examples[1] = "10 a";
+      examples[2] = "10 b";
+      examples[3] = "10 1";
+      examples[4] = "10 3 all";
+      examples[5] = "10 3 a";
+      examples[6] = "10 4 bingo";
+      examples[7] = "10 4 b";
       text = "Shows the heat map for the given play, ply, and type. If no ply "
              "is given, a default of 1 will be used. If no type is given, a "
              "default of 'all' will be used.";

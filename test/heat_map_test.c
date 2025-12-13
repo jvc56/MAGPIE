@@ -10,8 +10,10 @@
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 void assert_heat_map_add_move(const Game *game, const char *ucgi_move_str,
                               HeatMap *hm) {
@@ -40,8 +42,8 @@ void assert_heat_map_count(const char *name, int row, int col, heat_map_t type,
   }
 }
 
-void assert_heat_map_values(HeatMap *hm, int row, int col, heat_map_t type,
-                            const uint64_t expected_count,
+void assert_heat_map_values(const HeatMap *hm, int row, int col,
+                            heat_map_t type, const uint64_t expected_count,
                             const uint64_t expected_max_count,
                             const uint64_t expected_total) {
   const uint64_t actual_count = heat_map_get_count(hm, row, col, type);
@@ -152,7 +154,7 @@ void test_heat_map(void) {
   HeatMap *hm = heat_map_create();
   heat_map_reset(hm);
 
-  Game *game = config_get_game(config);
+  const Game *game = config_get_game(config);
 
   assert_heat_map_add_move(game, "pass", hm);
   assert_heat_map_values(hm, 0, 0, HEAT_MAP_TYPE_ALL, 0, 0, 0);

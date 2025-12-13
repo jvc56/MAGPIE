@@ -121,8 +121,8 @@ typedef struct HeatMapSquare {
 } HeatMapSquare;
 
 static inline int compare_heat_map_squares(const void *a, const void *b) {
-  HeatMapSquare *sa = (HeatMapSquare *)a;
-  HeatMapSquare *sb = (HeatMapSquare *)b;
+  const HeatMapSquare *sa = (HeatMapSquare *)a;
+  const HeatMapSquare *sb = (HeatMapSquare *)b;
   return sb->count > sa->count;
 }
 
