@@ -25,23 +25,6 @@ typedef struct HeatMap {
   uint64_t counts[NUM_HEAT_MAP_COUNTS];
 } HeatMap;
 
-enum {
-  HEAT_MAP_NUM_BACKGROUND_COLORS = 7,
-};
-
-// static const char
-//     *heat_map_ascending_color_codes[HEAT_MAP_NUM_BACKGROUND_COLORS] = {
-//         "\x1b[49m", // Default background color
-//         "\x1b[46m", // Cyan
-//         "\x1b[44m", // Blue
-//         "\x1b[42m", // Green
-//         "\x1b[45m", // Magenta
-//         "\x1b[43m", // Yellow
-//         "\x1b[41m", // Red
-// };
-
-#define HEAT_MAP_FRAC_DELIMITER (1.0 / (double)HEAT_MAP_NUM_BACKGROUND_COLORS)
-
 static inline HeatMap *heat_map_create(void) {
   return (HeatMap *)calloc_or_die(1, sizeof(HeatMap));
 }

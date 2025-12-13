@@ -283,7 +283,7 @@ BAIResult *sim_results_get_bai_result(const SimResults *sim_results) {
 void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
                                    const Move *move) {
   const double move_score = equity_to_double(move_get_score(move));
-  const bool is_bingo = move_get_tiles_played(move) == RACK_SIZE;
+  bool is_bingo = false;
   ply_info_count_t count_type;
   switch (move_get_type(move)) {
   case GAME_EVENT_PASS:
@@ -294,6 +294,7 @@ void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
     break;
   case GAME_EVENT_TILE_PLACEMENT_MOVE:
     count_type = PLY_INFO_COUNT_TILE_PLACEMENT;
+    is_bingo = move_get_tiles_played(move) == RACK_SIZE;
     break;
   default:
     log_fatal(
