@@ -2444,7 +2444,7 @@ char *str_api_show_endgame(Config *config, ErrorStack *error_stack) {
 
 // Show heat map
 
-char *impl_show_heat_map(Config *config, ErrorStack *error_stack) {
+char *impl_show_heat_map(const Config *config, ErrorStack *error_stack) {
   if (!config->game ||
       !sim_results_get_valid_for_current_game_state(config->sim_results)) {
     error_stack_push(error_stack, ERROR_STATUS_NO_HEAT_MAP_TO_SHOW,
