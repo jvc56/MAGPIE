@@ -40,14 +40,14 @@ static const char bonus_square_raw_to_chars_map[BONUS_SQUARE_MAP_SIZE] = {
 };
 
 static const char *bonus_square_raw_to_color_codes[BONUS_SQUARE_MAP_SIZE] = {
-    [0x11] = "\x1b[0",           // none, reset
-    [0x12] = "\x1b[1;36",        // DLS, cyan
-    [0x21] = "\x1b[1;35",        // DWS, magenta
-    [0x13] = "\x1b[1;34",        // TLS, blue
-    [0x31] = "\x1b[1;31",        // TWS, red
-    [0x14] = "\x1b[1;95",        // QLS, bright magenta
-    [0x41] = "\x1b[1;33",        // QWS, yellow
-    [BRICK_VALUE] = "\x1b[1;90", // brick, gray
+    [0x11] = "\x1b[0m",           // none, reset
+    [0x12] = "\x1b[1;36m",        // DLS, cyan
+    [0x21] = "\x1b[1;35m",        // DWS, magenta
+    [0x13] = "\x1b[1;34m",        // TLS, blue
+    [0x31] = "\x1b[1;31m",        // TWS, red
+    [0x14] = "\x1b[1;95m",        // QLS, bright magenta
+    [0x41] = "\x1b[1;33m",        // QWS, yellow
+    [BRICK_VALUE] = "\x1b[1;90m", // brick, gray
 };
 
 static const char *bonus_square_raw_to_alt_strings[BONUS_SQUARE_MAP_SIZE] = {

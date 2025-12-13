@@ -8,6 +8,8 @@
 #include "../util/string_util.h"
 
 void string_builder_add_simmed_play_ply_counts(StringBuilder *sb,
+                                               const Board *board,
+                                               const LetterDistribution *ld,
                                                const SimmedPlay *simmed_play,
                                                const int ply_index);
 char *string_builder_add_sim_stats(StringBuilder *sb, const Game *game,

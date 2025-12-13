@@ -135,29 +135,15 @@ void string_builder_add_board_square_color(StringBuilder *game_string,
         game_string,
         bonus_square_to_color_code(board_get_bonus_square(board, row, col)));
     if (heat_map) {
-      // Add background color
-      const uint64_t square_count =
-          heat_map_get_count(heat_map, row, col, heat_map_type);
-      const uint64_t total =
-          heat_map_get_board_count_max(heat_map, heat_map_type);
-      double frac = 0;
-      if (total > 0) {
-        frac = (double)square_count / (double)total;
-      }
-      double threshold = HEAT_MAP_FRAC_DELIMITER;
-      int color_index = 0;
-      while (frac > threshold &&
-             color_index < HEAT_MAP_NUM_BACKGROUND_COLORS - 1) {
-        threshold += HEAT_MAP_FRAC_DELIMITER;
-        color_index++;
-      }
-      string_builder_add_formatted_string(
-          game_string, ";%d", heat_map_ascending_color_codes[color_index]);
+      char *heat_map_color_code =
+          heat_map_get_color_escape_code(heat_map, row, col, heat_map_type);
+      string_builder_add_string(game_string, heat_map_color_code);
+      free(heat_map_color_code);
     }
-    string_builder_add_char(game_string, 'm');
   } else {
     string_builder_add_color_reset(game_string);
     string_builder_add_color_bold(game_string);
+    // FIXME: if heatmap, make black background here
   }
 }
 

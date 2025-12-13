@@ -2541,8 +2541,9 @@ char *impl_show_heat_map(Config *config, ErrorStack *error_stack) {
   char *result = NULL;
   StringBuilder *hm_string = string_builder_create();
 
-  string_builder_add_simmed_play_ply_counts(hm_string, display_simmed_play,
-                                            ply_index);
+  string_builder_add_simmed_play_ply_counts(
+      hm_string, game_get_board(config->game), config->ld, display_simmed_play,
+      ply_index);
 
   if (config->game_string_options->board_color ==
       GAME_STRING_BOARD_COLOR_NONE) {

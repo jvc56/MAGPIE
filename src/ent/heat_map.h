@@ -21,6 +21,7 @@ enum {
 };
 
 typedef struct HeatMap {
+  uint64_t board_count_total;
   uint64_t board_count_maxes[NUM_HEAT_MAP_TYPES];
   uint64_t counts[NUM_HEAT_MAP_COUNTS];
 } HeatMap;
@@ -29,18 +30,16 @@ enum {
   HEAT_MAP_NUM_BACKGROUND_COLORS = 7,
 };
 
-static const int
-    heat_map_ascending_color_codes[HEAT_MAP_NUM_BACKGROUND_COLORS] = {
-        49, // Default background color
-        // 100, // Dark gray
-        46, // Cyan
-        44, // Blue
-        42, // Green
-        45, // Magenta
-        43, // Yellow
-        41, // Red
-            // 107, // White
-};
+// static const char
+//     *heat_map_ascending_color_codes[HEAT_MAP_NUM_BACKGROUND_COLORS] = {
+//         "\x1b[49m", // Default background color
+//         "\x1b[46m", // Cyan
+//         "\x1b[44m", // Blue
+//         "\x1b[42m", // Green
+//         "\x1b[45m", // Magenta
+//         "\x1b[43m", // Yellow
+//         "\x1b[41m", // Red
+// };
 
 #define HEAT_MAP_FRAC_DELIMITER (1.0 / (double)HEAT_MAP_NUM_BACKGROUND_COLORS)
 
@@ -56,6 +55,7 @@ static inline void heat_map_destroy(HeatMap *hm) {
 }
 
 static inline void heat_map_reset(HeatMap *hm) {
+  hm->board_count_total = 0;
   memset(hm->board_count_maxes, 0, sizeof(hm->board_count_maxes));
   memset(hm->counts, 0, sizeof(hm->counts));
 }
@@ -70,6 +70,7 @@ static inline uint64_t heat_map_get_count(const HeatMap *hm, int row, int col,
 }
 
 static inline void heat_map_add_move(HeatMap *hm, const Move *move) {
+  hm->board_count_total++;
   if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
     return;
   }
@@ -114,6 +115,11 @@ static inline uint64_t heat_map_get_total_count(const HeatMap *hm) {
 static inline uint64_t heat_map_get_board_count_max(const HeatMap *hm,
                                                     heat_map_t heat_map_type) {
   return hm->board_count_maxes[heat_map_type];
+}
+
+// FIXME: test
+static inline uint64_t heat_map_get_board_count_total(const HeatMap *hm) {
+  return hm->board_count_total;
 }
 
 typedef struct HeatMapSquare {
@@ -168,6 +174,88 @@ static inline void string_builder_add_heat_map(StringBuilder *sb,
   }
   string_builder_add_string_grid(sb, sg, false);
   string_grid_destroy(sg);
+}
+
+typedef struct ColorSegment {
+  int r_start;
+  int g_start;
+  int b_start;
+  int r_end;
+  int g_end;
+  int b_end;
+} ColorSegment;
+
+static const ColorSegment heat_map_segments[] = {
+    // Blank -> Green
+    {0, 0, 0, 0, 255, 0},
+    // Green -> Yellow
+    {0, 255, 0, 255, 255, 0},
+    // Yellow -> Red
+    {255, 255, 0, 255, 0, 0}};
+
+static const size_t NUM_SEGMENTS =
+    sizeof(heat_map_segments) / sizeof(heat_map_segments[0]);
+
+static inline int lerp_color(int start, int end, double fraction) {
+  double interp_double =
+      (double)start + fraction * ((double)end - (double)start);
+  return (int)round(interp_double);
+}
+
+static inline char *
+heat_map_format_color_escape_string(const int r, const int g, const int b) {
+  return get_formatted_string("\x1b[48;2;%d;%d;%dm", r, g, b);
+}
+
+static inline char *interpolate_rgb(double fraction) {
+  if (fraction < 0.0) {
+    fraction = 0.0;
+  } else if (fraction > 1.0) {
+    fraction = 1.0;
+  }
+
+  if (fraction == 1.0) {
+    const ColorSegment *last_segment = &heat_map_segments[NUM_SEGMENTS - 1];
+    return heat_map_format_color_escape_string(
+        last_segment->r_end, last_segment->g_end, last_segment->b_end);
+  }
+
+  const double segment_size = 1.0 / (double)NUM_SEGMENTS;
+
+  size_t segment_index = (size_t)floor(fraction / segment_size);
+
+  if (segment_index >= NUM_SEGMENTS) {
+    segment_index = NUM_SEGMENTS - 1;
+  }
+
+  const ColorSegment *segment = &heat_map_segments[segment_index];
+
+  double start_fraction = (double)segment_index * segment_size;
+  double f = (fraction - start_fraction) / segment_size;
+
+  int r = lerp_color(segment->r_start, segment->r_end, f);
+  int g = lerp_color(segment->g_start, segment->g_end, f);
+  int b = lerp_color(segment->b_start, segment->b_end, f);
+
+  r = (r > 255) ? 255 : ((r < 0) ? 0 : r);
+  g = (g > 255) ? 255 : ((g < 0) ? 0 : g);
+  b = (b > 255) ? 255 : ((b < 0) ? 0 : b);
+
+  return heat_map_format_color_escape_string(r, g, b);
+}
+
+static inline char *heat_map_get_color_escape_code(const HeatMap *hm,
+                                                   const int row, const int col,
+                                                   const heat_map_t type) {
+  // Add background color
+  const uint64_t square_count = heat_map_get_count(hm, row, col, type);
+  // FIXME: make this optional between max and total
+  const uint64_t total = heat_map_get_board_count_max(hm, type);
+  double frac = 0;
+  if (total > 0) {
+    frac = (double)square_count / (double)total;
+  }
+  return interpolate_rgb(frac);
 }
 
 #endif
