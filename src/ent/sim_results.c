@@ -3,6 +3,7 @@
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"
 #include "../def/game_defs.h"
+#include "../def/game_history_defs.h"
 #include "../def/rack_defs.h"
 #include "../util/io_util.h"
 #include "bai_result.h"
@@ -298,6 +299,7 @@ void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
     log_fatal(
         "encountered unexpected move type %d when addings stats for ply %d",
         move_get_type(move), ply_index);
+    return;
   }
   HeatMap *heat_map = simmed_play_get_heat_map(simmed_play, ply_index);
   cpthread_mutex_lock(&simmed_play->mutex);

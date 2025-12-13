@@ -1,11 +1,17 @@
+#include "../src/def/board_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/ent/game.h"
 #include "../src/ent/heat_map.h"
 #include "../src/ent/move.h"
 #include "../src/ent/validated_move.h"
 #include "../src/impl/config.h"
+#include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
 
 void assert_heat_map_add_move(const Game *game, const char *ucgi_move_str,
                               HeatMap *hm) {
@@ -74,8 +80,8 @@ void assert_heat_map_single_move(const Game *game, const char *ucgi_move_str,
   int curr_row = move_get_row_start(move);
   int curr_col = move_get_col_start(move);
   for (int i = 0; i < move_len; i++) {
-    move_coords[i * 2] = curr_row;
-    move_coords[i * 2 + 1] = curr_col;
+    move_coords[(ptrdiff_t)i * 2] = curr_row;
+    move_coords[(ptrdiff_t)i * 2 + 1] = curr_col;
     curr_row += row_inc;
     curr_col += col_inc;
   }
@@ -87,8 +93,8 @@ void assert_heat_map_single_move(const Game *game, const char *ucgi_move_str,
       const uint64_t bingo_count =
           heat_map_get_count(hm, row, col, HEAT_MAP_TYPE_BINGO);
       if (move_coords_index < move_len &&
-          row == move_coords[move_coords_index * 2] &&
-          col == move_coords[move_coords_index * 2 + 1]) {
+          row == move_coords[(ptrdiff_t)move_coords_index * 2] &&
+          col == move_coords[(ptrdiff_t)move_coords_index * 2 + 1]) {
         assert(all_count == 1);
         assert(bingo_count == is_bingo);
         move_coords_index++;
