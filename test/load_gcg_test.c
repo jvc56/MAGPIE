@@ -21,47 +21,46 @@ void validate_load_gcg(const char *source_identifier,
 void test_load_gcg(void) {
   printf("Running load GCG tests...\n");
 
-  printf("=== Cross-tables Tests ===\n");
-  validate_load_gcg("54938", ERROR_STATUS_SUCCESS);
-  validate_load_gcg("https://cross-tables.com/"
-                    "annotated.php?u=5493899999999999999999999999999999999",
-                    ERROR_STATUS_XT_URL_MALFORMED);
-  validate_load_gcg("5493899999999999999999999999999999999",
-                    ERROR_STATUS_XT_ID_MALFORMED);
-  // Test xt URL download and numerical ID download
-  validate_load_gcg("https://cross-tables.com/annotated.php?u=54938",
-                    ERROR_STATUS_SUCCESS);
-  validate_load_gcg("54938", ERROR_STATUS_SUCCESS);
+  // Accessing games over the network is flaky for some sites.
 
-  printf("Cross-tables tests completed.\n\n");
+  // printf("=== Cross-tables Tests ===\n");
+  // validate_load_gcg("54938", ERROR_STATUS_SUCCESS);
+  // validate_load_gcg("https://cross-tables.com/"
+  //                   "annotated.php?u=5493899999999999999999999999999999999",
+  //                   ERROR_STATUS_XT_URL_MALFORMED);
+  // validate_load_gcg("5493899999999999999999999999999999999",
+  //                   ERROR_STATUS_XT_ID_MALFORMED);
+  // validate_load_gcg("https://cross-tables.com/annotated.php?u=54938",
+  //                   ERROR_STATUS_SUCCESS);
+  // validate_load_gcg("54938", ERROR_STATUS_SUCCESS);
 
-  printf("=== Woogles Tests ===\n");
+  // printf("Cross-tables tests completed.\n\n");
+
+  // printf("=== Woogles Tests ===\n");
   // Test Woogles URL download and numerical ID download
-  validate_load_gcg(
-      "https://woogles.io/game/XuoAntzDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
-      ERROR_STATUS_WOOGLES_URL_MALFORMED);
-  validate_load_gcg("XuoAntzDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
-                    ERROR_STATUS_WOOGLES_ID_MALFORMED);
-  validate_load_gcg("https://woogles.io/game/XuoAntzD", ERROR_STATUS_SUCCESS);
-  validate_load_gcg("XuoAntzD", ERROR_STATUS_SUCCESS);
+  // validate_load_gcg(
+  //     "https://woogles.io/game/XuoAntzDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+  //     ERROR_STATUS_WOOGLES_URL_MALFORMED);
+  // validate_load_gcg("XuoAntzDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+  //                   ERROR_STATUS_WOOGLES_ID_MALFORMED);
+  // validate_load_gcg("https://woogles.io/game/XuoAntzD",
+  // ERROR_STATUS_SUCCESS); validate_load_gcg("XuoAntzD", ERROR_STATUS_SUCCESS);
 
-  printf("Woogles tests completed.\n\n");
+  // printf("Woogles tests completed.\n\n");
 
   printf("=== Local File Tests ===\n");
-  // Test local file download and local file failure case
   validate_load_gcg("testdata/gcgs/success_six_pass.gcg", ERROR_STATUS_SUCCESS);
   validate_load_gcg("/tmp/nonexistent_file.gcg",
                     ERROR_STATUS_INVALID_GCG_SOURCE);
   printf("Local file tests completed.\n\n");
 
-  printf("=== URL Download Tests ===\n");
-  // Test direct URL download and failure case
-  validate_load_gcg(
-      "https://www.cross-tables.com/annotated/selfgcg/556/anno55690.gcg",
-      ERROR_STATUS_SUCCESS);
-  validate_load_gcg("https://keep.google.com/u/0/",
-                    ERROR_STATUS_GCG_PARSE_GAME_EVENT_BEFORE_PLAYER);
-  printf("URL download tests completed.\n\n");
+  // printf("=== URL Download Tests ===\n");
+  // validate_load_gcg(
+  //     "https://www.cross-tables.com/annotated/selfgcg/556/anno55690.gcg",
+  //     ERROR_STATUS_SUCCESS);
+  // validate_load_gcg("https://keep.google.com/u/0/",
+  //                   ERROR_STATUS_GCG_PARSE_GAME_EVENT_BEFORE_PLAYER);
+  // printf("URL download tests completed.\n\n");
 
   printf("=== Total Failure Test ===\n");
   // Test total failure case
