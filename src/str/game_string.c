@@ -83,6 +83,10 @@ void string_builder_add_color_bold(StringBuilder *game_string) {
   string_builder_add_string(game_string, "\x1b[1m");
 }
 
+void string_builder_add_color_black(StringBuilder *game_string) {
+  string_builder_add_string(game_string, "\x1b[48;2;0;0;0m");
+}
+
 bool use_bold_for_score(const GameStringOptions *game_string_options) {
   if (game_string_options == NULL) {
     return false;
@@ -125,16 +129,18 @@ void string_builder_add_player_row(const LetterDistribution *ld,
       equity_to_int(player_get_score(player)));
 }
 
-void string_builder_add_board_square_color(StringBuilder *game_string,
-                                           const Board *board, int row, int col,
-                                           const HeatMap *heat_map,
-                                           heat_map_t heat_map_type) {
+void string_builder_add_board_square_color(
+    StringBuilder *game_string, const Board *board, int row, int col,
+    const HeatMap *heat_map, heat_map_t heat_map_type,
+    game_string_board_color_t board_color) {
   const uint8_t current_letter = board_get_letter(board, row, col);
+  const bool use_heat_map =
+      heat_map && board_color == GAME_STRING_BOARD_COLOR_TRUECOLOR;
   if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
     string_builder_add_string(
         game_string,
         bonus_square_to_color_code(board_get_bonus_square(board, row, col)));
-    if (heat_map) {
+    if (use_heat_map) {
       char *heat_map_color_code =
           heat_map_get_color_escape_code(heat_map, row, col, heat_map_type);
       string_builder_add_string(game_string, heat_map_color_code);
@@ -142,8 +148,10 @@ void string_builder_add_board_square_color(StringBuilder *game_string,
     }
   } else {
     string_builder_add_color_reset(game_string);
+    if (use_heat_map) {
+      string_builder_add_color_black(game_string);
+    }
     string_builder_add_color_bold(game_string);
-    // FIXME: if heatmap, make black background here
   }
 }
 
@@ -229,7 +237,8 @@ void string_builder_add_board_row(const LetterDistribution *ld,
     if (should_print_escape_codes(game_string_options) &&
         use_board_color(game_string_options)) {
       string_builder_add_board_square_color(game_string, board, row, i,
-                                            heat_map, heat_map_type);
+                                            heat_map, heat_map_type,
+                                            game_string_options->board_color);
     }
     const uint8_t current_letter = board_get_letter(board, row, i);
     if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {

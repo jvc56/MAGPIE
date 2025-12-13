@@ -4954,17 +4954,17 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   const char *board_color_str =
       config_get_parg_value(config, ARG_TOKEN_BOARD_COLOR, 0);
   if (board_color_str) {
-    if (strings_iequal(board_color_str, GAME_STRING_BOARD_COLOR_NONE_STRING)) {
+    if (has_iprefix(board_color_str, GAME_STRING_BOARD_COLOR_NONE_STRING)) {
       config->game_string_options->board_color = GAME_STRING_BOARD_COLOR_NONE;
-    } else if (strings_iequal(board_color_str,
-                              GAME_STRING_BOARD_COLOR_ANSI_STRING)) {
+    } else if (has_iprefix(board_color_str,
+                           GAME_STRING_BOARD_COLOR_ANSI_STRING)) {
       config->game_string_options->board_color = GAME_STRING_BOARD_COLOR_ANSI;
-    } else if (strings_iequal(board_color_str,
-                              GAME_STRING_BOARD_COLOR_XTERM_256_STRING)) {
+    } else if (has_iprefix(board_color_str,
+                           GAME_STRING_BOARD_COLOR_XTERM_256_STRING)) {
       config->game_string_options->board_color =
           GAME_STRING_BOARD_COLOR_XTERM_256;
-    } else if (strings_iequal(board_color_str,
-                              GAME_STRING_BOARD_COLOR_TRUECOLOR_STRING)) {
+    } else if (has_iprefix(board_color_str,
+                           GAME_STRING_BOARD_COLOR_TRUECOLOR_STRING)) {
       config->game_string_options->board_color =
           GAME_STRING_BOARD_COLOR_TRUECOLOR;
     } else {

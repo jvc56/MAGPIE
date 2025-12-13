@@ -21,7 +21,6 @@ enum {
 };
 
 typedef struct HeatMap {
-  uint64_t board_count_total;
   uint64_t board_count_maxes[NUM_HEAT_MAP_TYPES];
   uint64_t counts[NUM_HEAT_MAP_COUNTS];
 } HeatMap;
@@ -55,7 +54,6 @@ static inline void heat_map_destroy(HeatMap *hm) {
 }
 
 static inline void heat_map_reset(HeatMap *hm) {
-  hm->board_count_total = 0;
   memset(hm->board_count_maxes, 0, sizeof(hm->board_count_maxes));
   memset(hm->counts, 0, sizeof(hm->counts));
 }
@@ -70,7 +68,6 @@ static inline uint64_t heat_map_get_count(const HeatMap *hm, int row, int col,
 }
 
 static inline void heat_map_add_move(HeatMap *hm, const Move *move) {
-  hm->board_count_total++;
   if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
     return;
   }
@@ -115,11 +112,6 @@ static inline uint64_t heat_map_get_total_count(const HeatMap *hm) {
 static inline uint64_t heat_map_get_board_count_max(const HeatMap *hm,
                                                     heat_map_t heat_map_type) {
   return hm->board_count_maxes[heat_map_type];
-}
-
-// FIXME: test
-static inline uint64_t heat_map_get_board_count_total(const HeatMap *hm) {
-  return hm->board_count_total;
 }
 
 typedef struct HeatMapSquare {
@@ -249,7 +241,6 @@ static inline char *heat_map_get_color_escape_code(const HeatMap *hm,
                                                    const heat_map_t type) {
   // Add background color
   const uint64_t square_count = heat_map_get_count(hm, row, col, type);
-  // FIXME: make this optional between max and total
   const uint64_t total = heat_map_get_board_count_max(hm, type);
   double frac = 0;
   if (total > 0) {

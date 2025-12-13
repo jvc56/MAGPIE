@@ -120,7 +120,7 @@ void show_heat_maps_for_cgp(Config *config, const char *cgp, const char *rack) {
   load_and_exec_config_or_die(
       config,
       "gsim -iter 1000 -minp 10 -numplays 10 "
-      "-useh true -plies 5 -boardcolor ansi -threads 12 -sr rr -thres none");
+      "-useh true -plies 5 -boardcolor true -threads 12 -sr rr -thres none");
 
   for (int i = 0; i < 2; i++) {
     load_and_exec_config_or_die(config, "heat 1");
@@ -246,7 +246,7 @@ void test_heat_map(void) {
   load_and_exec_config_or_die(
       config,
       "gsim -iter 10 -minp 1 -numplays 10 "
-      "-useh true -plies 5 -boardcolor ansi -threads 12 -sr rr -thres none");
+      "-useh true -plies 5 -boardcolor true -threads 12 -sr rr -thres none");
 
   assert_config_exec_status(config, "heat 0",
                             ERROR_STATUS_HEAT_MAP_MOVE_INDEX_OUT_OF_RANGE);
@@ -267,7 +267,7 @@ void test_heat_map(void) {
   show_heat_maps_for_cgp(config, XU_UH_CGP, "BBCCFFG");
 
   load_and_exec_config_or_die(config, "gsim -iter 1000 -minp 10 -numplays 10 "
-                                      "-useh false -plies 5 -boardcolor ansi");
+                                      "-useh false -plies 5 -boardcolor true");
   assert_config_exec_status(config, "heat 1", ERROR_STATUS_NO_HEAT_MAP_TO_SHOW);
 
   heat_map_destroy(hm);
