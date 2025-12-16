@@ -42,7 +42,7 @@ static inline void heat_map_reset(HeatMap *hm) {
 }
 
 static inline size_t heat_map_get_index(int row, int col, heat_map_t type) {
-  return ((((size_t)row * BOARD_DIM + col) * NUM_HEAT_MAP_TYPES) + type);
+  return (((size_t)row * BOARD_DIM + col) * NUM_HEAT_MAP_TYPES) + type;
 }
 
 static inline uint64_t heat_map_get_count(const HeatMap *hm, int row, int col,
