@@ -106,7 +106,13 @@ typedef struct HeatMapSquare {
 static inline int compare_heat_map_squares(const void *a, const void *b) {
   const HeatMapSquare *sa = (HeatMapSquare *)a;
   const HeatMapSquare *sb = (HeatMapSquare *)b;
-  return sb->count > sa->count;
+  if (sb->count > sa->count) {
+    return 1;
+  }
+  if (sb->count < sa->count) {
+    return -1;
+  }
+  return 0;
 }
 
 static inline void string_builder_add_heat_map(StringBuilder *sb,

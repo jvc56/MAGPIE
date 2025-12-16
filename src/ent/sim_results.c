@@ -298,7 +298,7 @@ void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
     break;
   default:
     log_fatal(
-        "encountered unexpected move type %d when addings stats for ply %d",
+        "encountered unexpected move type %d when adding stats for ply %d",
         move_get_type(move), ply_index);
     return;
   }
