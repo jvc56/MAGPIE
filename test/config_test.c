@@ -623,7 +623,8 @@ void test_config_exec_parse_args(void) {
                             ERROR_STATUS_GCG_PARSE_GAME_EVENT_BEFORE_PLAYER);
   assert_config_exec_status(config2, "load testdata/gcgs/lexicon_missing.gcg",
                             ERROR_STATUS_GCG_PARSE_LEXICON_NOT_SPECIFIED);
-  assert_config_exec_status(config2, "load 54938", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config2, "load testdata/gcgs/success_standard.gcg",
+                            ERROR_STATUS_SUCCESS);
   config_destroy(config2);
 
   // Show
@@ -634,7 +635,8 @@ void test_config_exec_parse_args(void) {
   config_destroy(config3);
 
   Config *config4 = config_create_default_test();
-  assert_config_exec_status(config4, "load 54938", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config4, "load testdata/gcgs/success_standard.gcg",
+                            ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config4, "shgame", ERROR_STATUS_SUCCESS);
   config_destroy(config4);
 
@@ -650,13 +652,14 @@ void test_config_exec_parse_args(void) {
                             ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING);
 
   // Out-of-range failures and expected success behavior
-  assert_config_exec_status(config6, "load 54938", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config6, "load testdata/gcgs/success_standard.gcg",
+                            ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config6, "previous",
                             ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE);
   assert_config_exec_status(config6, "next", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config6, "goto 28",
+  assert_config_exec_status(config6, "goto 28000",
                             ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE);
-  assert_config_exec_status(config6, "goto 27", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config6, "goto end", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config6, "next",
                             ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE);
   assert_config_exec_status(config6, "previous", ERROR_STATUS_SUCCESS);

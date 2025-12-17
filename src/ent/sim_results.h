@@ -7,10 +7,19 @@
 #include "../def/sim_defs.h"
 #include "bai_result.h"
 #include "game.h"
+#include "heat_map.h"
 #include "move.h"
 #include "stats.h"
 #include "win_pct.h"
 #include <stdbool.h>
+
+typedef enum {
+  PLY_INFO_COUNT_PASS,
+  PLY_INFO_COUNT_EXCHANGE,
+  PLY_INFO_COUNT_TILE_PLACEMENT,
+  PLY_INFO_COUNT_BINGO,
+  NUM_PLY_INFO_COUNT_TYPES,
+} ply_info_count_t;
 
 typedef struct SimmedPlay SimmedPlay;
 
@@ -19,6 +28,10 @@ const Stat *simmed_play_get_score_stat(const SimmedPlay *simmed_play,
                                        int ply_index);
 const Stat *simmed_play_get_bingo_stat(const SimmedPlay *simmed_play,
                                        int ply_index);
+HeatMap *simmed_play_get_heat_map(SimmedPlay *simmed_play, int ply_index);
+uint64_t simmed_play_get_ply_info_count(const SimmedPlay *simmed_play,
+                                        int ply_index,
+                                        ply_info_count_t count_type);
 const Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play);
 const Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play);
 int simmed_play_get_play_index_by_sort_type(const SimmedPlay *simmed_play);
@@ -36,7 +49,7 @@ typedef struct SimResults SimResults;
 
 SimResults *sim_results_create(void);
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
-                       int num_plies, uint64_t seed);
+                       int num_plies, uint64_t seed, bool use_heat_map);
 void sim_results_destroy(SimResults *sim_results);
 
 int sim_results_get_number_of_plays(const SimResults *sim_results);
@@ -53,8 +66,6 @@ BAIResult *sim_results_get_bai_result(const SimResults *sim_results);
 
 void sim_results_lock_simmed_plays(SimResults *sim_results);
 void sim_results_unlock_simmed_plays(SimResults *sim_results);
-void sim_results_get_nth_best_move(const SimResults *sim_results, int n,
-                                   Move *move);
 void sim_results_set_valid_for_current_game_state(SimResults *sim_results,
                                                   bool valid);
 bool sim_results_get_valid_for_current_game_state(

@@ -23,6 +23,7 @@
 #include "game_test.h"
 #include "gameplay_test.h"
 #include "gcg_test.h"
+#include "heat_map_test.h"
 #include "infer_test.h"
 #include "klv_test.h"
 #include "kwg_alpha_test.h"
@@ -90,6 +91,7 @@ static TestEntry test_table[] = {
     {"infer", test_infer},
     {"rv", test_random_variable},
     {"am", test_alias_method},
+    {"hm", test_heat_map},
     {"sim", test_sim},
     {"math", test_math_util},
     {"bai", test_bai},
