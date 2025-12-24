@@ -284,6 +284,10 @@ const Rack *sim_results_get_known_opp_rack(const SimResults *sim_results) {
 
 void sim_results_set_known_opp_rack(SimResults *sim_results,
                                     const Rack *known_opp_rack) {
+  if (!known_opp_rack) {
+    rack_set_dist_size_and_reset(&sim_results->known_opp_rack, 0);
+    return;
+  }
   sim_results->known_opp_rack = *known_opp_rack;
 }
 
