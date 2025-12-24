@@ -516,6 +516,29 @@ void test_config_exec_parse_args(void) {
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   assert_config_exec_status(config, "sim -it 1", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "sim AEINR -it 1", ERROR_STATUS_SUCCESS);
+  // Check the opp known rack is set correctly
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "t ABCDEFG", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r RETINAS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gsim -it 1", ERROR_STATUS_SUCCESS);
+  assert_rack_equals_string(
+      config_get_ld(config),
+      sim_results_get_known_opp_rack(config_get_sim_results(config)), "");
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com h8 CABFD", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "chal", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r RETINAS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gsim -it 1", ERROR_STATUS_SUCCESS);
+  assert_rack_equals_string(
+      config_get_ld(config),
+      sim_results_get_known_opp_rack(config_get_sim_results(config)), "ABCDF");
+  assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com h8 CABFD", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r RETINAS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gsim -it 1", ERROR_STATUS_SUCCESS);
+  assert_rack_equals_string(
+      config_get_ld(config),
+      sim_results_get_known_opp_rack(config_get_sim_results(config)), "");
 
   // Inference
   assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_SUCCESS);

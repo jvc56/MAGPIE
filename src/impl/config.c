@@ -2029,6 +2029,13 @@ void impl_sim(Config *config, ErrorStack *error_stack) {
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
+  } else if (!known_opp_rack_str) {
+    // If no input rack is specified, default to simming with the opponent's
+    // currently known rack
+    rack_copy(
+        &known_opp_rack,
+        player_get_rack(game_get_player(
+            config->game, 1 - game_get_player_on_turn_index(config->game))));
   }
   config_simulate(config, &known_opp_rack, config->sim_results, error_stack);
   if (!error_stack_is_empty(error_stack)) {

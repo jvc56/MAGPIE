@@ -62,6 +62,9 @@ SimmedPlay *sim_results_get_simmed_play(const SimResults *sim_results,
                                         int index);
 const Rack *sim_results_get_rack(const SimResults *sim_results);
 void sim_results_set_rack(SimResults *sim_results, const Rack *rack);
+const Rack *sim_results_get_known_opp_rack(const SimResults *sim_results);
+void sim_results_set_known_opp_rack(SimResults *sim_results,
+                                    const Rack *known_opp_rack);
 BAIResult *sim_results_get_bai_result(const SimResults *sim_results);
 
 void sim_results_lock_simmed_plays(SimResults *sim_results);
