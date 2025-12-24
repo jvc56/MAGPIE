@@ -3192,7 +3192,7 @@ char *impl_commit_with_pos_args(Config *config, ErrorStack *error_stack,
 
   config_init_game(config);
 
-  StringBuilder *move_string_builder = string_builder_create();
+  StringBuilder *sb = string_builder_create();
   ValidatedMoves *vms = NULL;
 
   config_backup_game_and_history(config);
@@ -3204,15 +3204,28 @@ char *impl_commit_with_pos_args(Config *config, ErrorStack *error_stack,
   rack_copy(&noncommit_player_rack, player_get_rack(game_get_player(
                                         config->game, noncommit_player_index)));
 
-  parse_commit(config, move_string_builder, &vms, error_stack, commit_pos_arg_1,
+  Board *precommit_board_copy = board_duplicate(game_get_board(config->game));
+
+  parse_commit(config, sb, &vms, error_stack, commit_pos_arg_1,
                commit_pos_arg_2, commit_pos_arg_3);
 
-  string_builder_destroy(move_string_builder);
+  char *return_str = NULL;
+  if (error_stack_is_empty(error_stack)) {
+    string_builder_clear(sb);
+    string_builder_add_validated_moves_phonies(sb, vms, config->ld,
+                                               precommit_board_copy);
+    return_str = string_builder_dump(sb, NULL);
+  } else {
+    return_str = empty_string();
+  }
+
+  board_destroy(precommit_board_copy);
+  string_builder_destroy(sb);
   validated_moves_destroy(vms);
 
   if (!error_stack_is_empty(error_stack)) {
     config_restore_game_and_history(config);
-    return empty_string();
+    return return_str;
   }
 
   if (bag_empty_before_commit) {
@@ -3223,7 +3236,7 @@ char *impl_commit_with_pos_args(Config *config, ErrorStack *error_stack,
     draw_to_full_rack(config->game, 1 - noncommit_player_index);
   }
 
-  return empty_string();
+  return return_str;
 }
 
 char *impl_commit(Config *config, ErrorStack *error_stack) {
@@ -3240,8 +3253,8 @@ char *impl_commit(Config *config, ErrorStack *error_stack) {
 void execute_commit(Config *config, ErrorStack *error_stack) {
   char *result = impl_commit(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
-    thread_control_print(config->thread_control, result);
     execute_show_game(config, error_stack);
+    thread_control_print(config->thread_control, result);
   }
   free(result);
 }
