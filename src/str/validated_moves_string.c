@@ -1,4 +1,5 @@
 #include "../def/game_history_defs.h"
+#include "../ent/board.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/validated_move.h"
