@@ -81,6 +81,7 @@ typedef enum {
   ARG_TOKEN_GEN,
   ARG_TOKEN_SIM,
   ARG_TOKEN_GEN_AND_SIM,
+  ARG_TOKEN_RACK_AND_GEN_AND_SIM,
   ARG_TOKEN_INFER,
   ARG_TOKEN_ENDGAME,
   ARG_TOKEN_AUTOPLAY,
@@ -887,6 +888,14 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "ABCD";
       examples[2] = "-";
       text = "Generates moves for the current position and runs a simulation.";
+      break;
+    case ARG_TOKEN_RACK_AND_GEN_AND_SIM:
+      usages[0] = "<player_rack> [<opponent_known_rack>]";
+      examples[0] = "ABCD";
+      examples[1] = "ABCD EFG";
+      examples[2] = "ABCD -";
+      text = "Sets the current player rack, generates moves for the current "
+             "position, and runs a simulation.";
       break;
     case ARG_TOKEN_INFER:
       usages[0] = "";
@@ -1721,8 +1730,9 @@ void impl_set_rack_internal(Config *config, const char *rack_str,
   config_reset_move_list_and_invalidate_sim_results(config);
 }
 
-void impl_set_rack(Config *config, ErrorStack *error_stack) {
-  const char *rack_str = config_get_parg_value(config, ARG_TOKEN_RACK, 0);
+void impl_set_rack(Config *config, const arg_token_t arg_token,
+                   ErrorStack *error_stack) {
+  const char *rack_str = config_get_parg_value(config, arg_token, 0);
   impl_set_rack_internal(config, rack_str, error_stack);
 }
 
@@ -2005,7 +2015,8 @@ void config_simulate(const Config *config, Rack *known_opp_rack,
   return simulate(&args, sim_results, error_stack);
 }
 
-void impl_sim(Config *config, ErrorStack *error_stack) {
+void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
+              const int known_opp_rack_str_index, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
                      string_duplicate("cannot simulate without lexicon"));
@@ -2015,8 +2026,8 @@ void impl_sim(Config *config, ErrorStack *error_stack) {
   config_init_game(config);
 
   const int ld_size = ld_get_size(game_get_ld(config->game));
-  const char *known_opp_rack_str =
-      config_get_parg_value(config, ARG_TOKEN_SIM, 0);
+  const char *known_opp_rack_str = config_get_parg_value(
+      config, known_opp_rack_arg_token, known_opp_rack_str_index);
   Rack known_opp_rack;
   rack_set_dist_size_and_reset(&known_opp_rack, ld_size);
 
@@ -2071,13 +2082,32 @@ void impl_gen_and_sim(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  impl_sim(config, error_stack);
+  impl_sim(config, ARG_TOKEN_SIM, 0, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
 }
 
 char *status_gen_and_sim(Config *config) { return status_sim(config); }
+
+// Rack and gen and sim
+
+void impl_rack_and_gen_and_sim(Config *config, ErrorStack *error_stack) {
+  impl_set_rack(config, ARG_TOKEN_RACK_AND_GEN_AND_SIM, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  impl_move_gen(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  impl_sim(config, ARG_TOKEN_RACK_AND_GEN_AND_SIM, 1, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+}
+
+char *status_rack_and_gen_and_sim(Config *config) { return status_sim(config); }
 
 // Endgame
 
@@ -5324,11 +5354,11 @@ char *str_api_add_moves(Config *config, ErrorStack *error_stack) {
 }
 
 void execute_set_rack(Config *config, ErrorStack *error_stack) {
-  impl_set_rack(config, error_stack);
+  impl_set_rack(config, ARG_TOKEN_RACK, error_stack);
 }
 
 char *str_api_set_rack(Config *config, ErrorStack *error_stack) {
-  impl_set_rack(config, error_stack);
+  impl_set_rack(config, ARG_TOKEN_RACK, error_stack);
   return empty_string();
 }
 
@@ -5349,7 +5379,7 @@ char *str_api_move_gen(Config *config, ErrorStack *error_stack) {
 }
 
 void execute_sim(Config *config, ErrorStack *error_stack) {
-  impl_sim(config, error_stack);
+  impl_sim(config, ARG_TOKEN_SIM, 0, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -5357,7 +5387,7 @@ void execute_sim(Config *config, ErrorStack *error_stack) {
 }
 
 char *str_api_sim(Config *config, ErrorStack *error_stack) {
-  impl_sim(config, error_stack);
+  impl_sim(config, ARG_TOKEN_SIM, 0, error_stack);
   return empty_string();
 }
 
@@ -5371,6 +5401,19 @@ void execute_gen_and_sim(Config *config, ErrorStack *error_stack) {
 
 char *str_api_gen_and_sim(Config *config, ErrorStack *error_stack) {
   impl_gen_and_sim(config, error_stack);
+  return empty_string();
+}
+
+void execute_rack_and_gen_and_sim(Config *config, ErrorStack *error_stack) {
+  impl_rack_and_gen_and_sim(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  execute_show_moves_or_sim_results(config, error_stack);
+}
+
+char *str_api_rack_and_gen_and_sim(Config *config, ErrorStack *error_stack) {
+  impl_rack_and_gen_and_sim(config, error_stack);
   return empty_string();
 }
 
@@ -5507,6 +5550,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_SIM, "simulate", 0, 1, sim, sim, false);
   cmd(ARG_TOKEN_GEN_AND_SIM, "gsimulate", 0, 1, gen_and_sim, gen_and_sim,
       false);
+  cmd(ARG_TOKEN_RACK_AND_GEN_AND_SIM, "rgsimulate", 1, 2, rack_and_gen_and_sim,
+      rack_and_gen_and_sim, false);
   cmd(ARG_TOKEN_INFER, "infer", 0, 5, infer, generic, false);
   cmd(ARG_TOKEN_ENDGAME, "endgame", 0, 0, endgame, generic, false);
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, generic, false);
@@ -5733,6 +5778,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_GEN:
     case ARG_TOKEN_SIM:
     case ARG_TOKEN_GEN_AND_SIM:
+    case ARG_TOKEN_RACK_AND_GEN_AND_SIM:
     case ARG_TOKEN_INFER:
     case ARG_TOKEN_ENDGAME:
     case ARG_TOKEN_AUTOPLAY:
