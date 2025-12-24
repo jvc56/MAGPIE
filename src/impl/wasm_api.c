@@ -100,7 +100,7 @@ char *wasm_score_move(const char *cgpstr, const char *ucgi_move_str) {
   }
 
   const Move *move = validated_moves_get_move(vms, 0);
-  char *phonies_string = validated_moves_get_phonies_string(ld, vms, 0);
+  char *phonies_string = validated_move_get_phonies_formed(ld, vms, 0);
 
   StringBuilder *return_string_builder = string_builder_create();
   StringBuilder *move_string_builder = string_builder_create();

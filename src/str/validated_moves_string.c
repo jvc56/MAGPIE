@@ -3,13 +3,14 @@
 #include "../ent/move.h"
 #include "../ent/validated_move.h"
 #include "../ent/words.h"
+#include "../str/move_string.h"
 #include "../util/string_util.h"
 #include "letter_distribution_string.h"
 #include <stdlib.h>
 
-char *validated_moves_get_phonies_string(const LetterDistribution *ld,
-                                         const ValidatedMoves *vms,
-                                         int vm_index) {
+char *validated_move_get_phonies_formed(const LetterDistribution *ld,
+                                        const ValidatedMoves *vms,
+                                        int vm_index) {
   const Move *move = validated_moves_get_move(vms, vm_index);
   const FormedWords *fw = validated_moves_get_formed_words(vms, vm_index);
   game_event_t move_type = move_get_type(move);
@@ -37,4 +38,26 @@ char *validated_moves_get_phonies_string(const LetterDistribution *ld,
   }
   string_builder_destroy(phonies_string_builder);
   return phonies_string;
+}
+
+void string_builder_add_validated_moves_phonies(StringBuilder *sb,
+                                                const ValidatedMoves *vms,
+                                                const LetterDistribution *ld,
+                                                const Board *board) {
+  if (!vms) {
+    return;
+  }
+  const int number_of_moves = validated_moves_get_number_of_moves(vms);
+  for (int i = 0; i < number_of_moves; i++) {
+    char *phonies_formed = validated_move_get_phonies_formed(ld, vms, i);
+    if (phonies_formed) {
+      string_builder_add_string(sb, "Invalid words formed by ");
+      string_builder_add_move(sb, board, validated_moves_get_move(vms, i), ld,
+                              false);
+      string_builder_add_string(sb, ": ");
+      string_builder_add_string(sb, phonies_formed);
+      string_builder_add_char(sb, '\n');
+    }
+    free(phonies_formed);
+  }
 }

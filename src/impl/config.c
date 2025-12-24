@@ -1639,11 +1639,11 @@ void impl_load_cgp(Config *config, ErrorStack *error_stack) {
 
 // Adding moves
 
-void impl_add_moves(Config *config, ErrorStack *error_stack) {
+char *impl_add_moves(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
                      string_duplicate("cannot add moves without lexicon"));
-    return;
+    return empty_string();
   }
 
   config_init_game(config);
@@ -1655,35 +1655,27 @@ void impl_add_moves(Config *config, ErrorStack *error_stack) {
   ValidatedMoves *new_validated_moves =
       validated_moves_create(config->game, player_on_turn_index, moves, true,
                              false, true, error_stack);
-
+  char *phonies_str = NULL;
   if (error_stack_is_empty(error_stack)) {
     const LetterDistribution *ld = game_get_ld(config->game);
     const Board *board = game_get_board(config->game);
-    StringBuilder *phonies_sb = string_builder_create();
     int number_of_new_moves =
         validated_moves_get_number_of_moves(new_validated_moves);
-    for (int i = 0; i < number_of_new_moves; i++) {
-      char *phonies_formed = validated_moves_get_phonies_string(
-          game_get_ld(config->game), new_validated_moves, i);
-      if (phonies_formed) {
-        string_builder_clear(phonies_sb);
-        string_builder_add_string(phonies_sb, "invalid words formed from ");
-        string_builder_add_move(
-            phonies_sb, board, validated_moves_get_move(new_validated_moves, i),
-            ld, false);
-        string_builder_add_string(phonies_sb, ": ");
-        string_builder_add_string(phonies_sb, phonies_formed);
-        write_to_stream_out(string_builder_peek(phonies_sb));
-      }
-      free(phonies_formed);
-    }
+    StringBuilder *phonies_sb = string_builder_create();
+    string_builder_add_validated_moves_phonies(phonies_sb, new_validated_moves,
+                                               ld, board);
+    phonies_str = string_builder_dump(phonies_sb, NULL);
     string_builder_destroy(phonies_sb);
     config_init_move_list(config, number_of_new_moves);
     validated_moves_add_to_sorted_move_list(new_validated_moves,
                                             config->move_list);
+  } else {
+    phonies_str = empty_string();
   }
 
   validated_moves_destroy(new_validated_moves);
+
+  return phonies_str;
 }
 
 // Setting player rack
@@ -5300,12 +5292,15 @@ char *str_api_load_cgp(Config *config, ErrorStack *error_stack) {
 }
 
 void execute_add_moves(Config *config, ErrorStack *error_stack) {
-  impl_add_moves(config, error_stack);
+  char *result = impl_add_moves(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
 }
 
 char *str_api_add_moves(Config *config, ErrorStack *error_stack) {
-  impl_add_moves(config, error_stack);
-  return empty_string();
+  return impl_add_moves(config, error_stack);
 }
 
 void execute_set_rack(Config *config, ErrorStack *error_stack) {
