@@ -11,6 +11,7 @@
 #include "../ent/sim_results.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
+#include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "move_string.h"
@@ -194,7 +195,7 @@ bool string_builder_add_sim_stats_with_display_lock(
   string_builder_add_formatted_string(sb, "\nShowing %d of %d simmed plays\n",
                                       num_display_plays, num_simmed_plays);
 
-  StringGrid *summary_sg = string_grid_create(3, 2, 1);
+  StringGrid *summary_sg = string_grid_create(4, 2, 1);
 
   curr_row = 0;
 
@@ -210,6 +211,16 @@ bool string_builder_add_sim_stats_with_display_lock(
       summary_sg, curr_row, 1,
       get_formatted_string("%.2f seconds",
                            bai_result_get_elapsed_seconds(bai_result)));
+  curr_row++;
+
+  string_grid_set_cell(summary_sg, curr_row, 0, string_duplicate("Opp Rack:"));
+  StringBuilder *known_opp_rack_sb = string_builder_create();
+  string_builder_add_rack(known_opp_rack_sb,
+                          sim_results_get_known_opp_rack(sim_results), ld,
+                          false);
+  string_grid_set_cell(summary_sg, curr_row, 1,
+                       string_builder_dump(known_opp_rack_sb, NULL));
+  string_builder_destroy(known_opp_rack_sb);
   curr_row++;
 
   string_grid_set_cell(summary_sg, curr_row, 0, string_duplicate("Status:"));

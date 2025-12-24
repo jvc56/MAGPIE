@@ -49,6 +49,7 @@ struct SimResults {
   SimmedPlay **simmed_plays;
   SimmedPlay **display_simmed_plays;
   Rack rack;
+  Rack known_opp_rack;
   BAIResult *bai_result;
   bool valid_for_current_game_state;
 };
@@ -191,6 +192,7 @@ SimResults *sim_results_create(void) {
   sim_results->bai_result = bai_result_create();
   sim_results->valid_for_current_game_state = false;
   rack_set_dist_size_and_reset(&sim_results->rack, 0);
+  rack_set_dist_size_and_reset(&sim_results->known_opp_rack, 0);
   return sim_results;
 }
 
@@ -274,6 +276,19 @@ const Rack *sim_results_get_rack(const SimResults *sim_results) {
 
 void sim_results_set_rack(SimResults *sim_results, const Rack *rack) {
   sim_results->rack = *rack;
+}
+
+const Rack *sim_results_get_known_opp_rack(const SimResults *sim_results) {
+  return &(sim_results->known_opp_rack);
+}
+
+void sim_results_set_known_opp_rack(SimResults *sim_results,
+                                    const Rack *known_opp_rack) {
+  if (!known_opp_rack) {
+    rack_set_dist_size_and_reset(&sim_results->known_opp_rack, 0);
+    return;
+  }
+  sim_results->known_opp_rack = *known_opp_rack;
 }
 
 BAIResult *sim_results_get_bai_result(const SimResults *sim_results) {

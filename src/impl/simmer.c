@@ -45,6 +45,7 @@ void simulate(SimArgs *sim_args, SimResults *sim_results,
   RandomVariables *rng = rvs_create(&rng_args);
 
   sim_results_set_rack(sim_results, move_list_get_rack(sim_args->move_list));
+  sim_results_set_known_opp_rack(sim_results, sim_args->known_opp_rack);
 
   bai(&sim_args->bai_options, rvs, rng, sim_args->thread_control, NULL,
       sim_results_get_bai_result(sim_results));

@@ -260,11 +260,6 @@ void string_builder_add_inference(StringBuilder *inference_string,
                                   bool use_ucgi_format) {
   StringBuilder *tmp_sb = string_builder_create();
 
-  if (!use_ucgi_format) {
-    string_builder_add_inference_description(inference_string, ld,
-                                             inference_results, tmp_sb);
-  }
-
   int target_number_of_tiles_exchanged =
       inference_results_get_target_number_of_tiles_exchanged(inference_results);
   const Rack *target_played_tiles =
@@ -406,6 +401,12 @@ void string_builder_add_inference(StringBuilder *inference_string,
   }
   string_builder_add_string_grid(inference_string, sg_common_leaves, false);
   string_builder_add_string(inference_string, "\n");
+  if (!use_ucgi_format) {
+    string_builder_clear(tmp_sb);
+    string_builder_add_inference_description(inference_string, ld,
+                                             inference_results, tmp_sb);
+    string_builder_add_string(inference_string, "\n");
+  }
   string_builder_destroy(tmp_sb);
   string_grid_destroy(sg_common_leaves);
 }
