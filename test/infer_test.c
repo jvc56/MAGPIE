@@ -17,6 +17,7 @@
 #include "../src/ent/xoshiro.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/inference.h"
 #include "../src/util/io_util.h"
 #include "../src/util/math_util.h"
 #include "../src/util/string_util.h"
@@ -41,8 +42,9 @@ int leave_rack_get_leave_letter(const LeaveRack *leave_rack, MachineLetter ml,
   return rack_get_letter(&rack, ml);
 }
 
-error_code_t infer_for_test(const Config *config, int target_index,
-                            int target_score, int target_num_exch,
+error_code_t infer_for_test(InferenceCtx **ctx, const Config *config,
+                            int target_index, int target_score,
+                            int target_num_exch,
                             const char *target_played_tiles_str,
                             const char *target_known_rack_str,
                             const char *nontarget_known_rack_str,
@@ -72,9 +74,20 @@ error_code_t infer_for_test(const Config *config, int target_index,
   ErrorStack *error_stack = error_stack_create();
   thread_control_set_status(config_get_thread_control(config),
                             THREAD_CONTROL_STATUS_STARTED);
-  config_infer(config, false, target_index, int_to_equity(target_score),
-               target_num_exch, &target_played_tiles, &target_known_rack,
-               &nontarget_known_rack, inference_results, error_stack);
+
+  InferenceArgs args;
+  infer_args_fill(
+      &args, config_get_num_plays(config),
+      config_get_eq_margin_inference(config), NULL, game,
+      config_get_num_threads(config), config_get_print_interval(config),
+      config_get_thread_control(config), false, target_index,
+      int_to_equity(target_score), target_num_exch, &target_played_tiles,
+      &target_known_rack, &nontarget_known_rack);
+  if (!ctx) {
+    infer_without_ctx(&args, inference_results, error_stack);
+  } else {
+    infer(&args, ctx, inference_results, error_stack);
+  }
   error_code_t status = error_stack_top(error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
@@ -205,13 +218,13 @@ void test_infer_rack_overflow(void) {
   Game *game = config_get_game(config);
   InferenceResults *inference_results = inference_results_create(NULL);
 
-  error_code_t status =
-      infer_for_test(config, 0, 0, 0, "ABCDEFGH", "", "", inference_results);
+  error_code_t status = infer_for_test(NULL, config, 0, 0, 0, "ABCDEFGH", "",
+                                       "", inference_results);
   assert(status == ERROR_STATUS_INFERENCE_RACK_OVERFLOW);
   game_reset(game);
 
-  status =
-      infer_for_test(config, 0, 0, 0, "DEFGH", "ABC", "", inference_results);
+  status = infer_for_test(NULL, config, 0, 0, 0, "DEFGH", "ABC", "",
+                          inference_results);
   assert(status == ERROR_STATUS_INFERENCE_RACK_OVERFLOW);
 
   inference_results_destroy(inference_results);
@@ -227,7 +240,7 @@ void test_infer_no_tiles_played_rack_empty(void) {
   ErrorStack *error_stack = error_stack_create();
   InferenceResults *inference_results = inference_results_create(NULL);
   error_code_t status =
-      infer_for_test(config, 0, 0, 0, "", "", "", inference_results);
+      infer_for_test(NULL, config, 0, 0, 0, "", "", "", inference_results);
   assert(status == ERROR_STATUS_INFERENCE_NO_TILES_PLAYED);
 
   error_stack_destroy(error_stack);
@@ -243,7 +256,7 @@ void test_infer_both_play_and_exchange(void) {
 
   InferenceResults *inference_results = inference_results_create(NULL);
   error_code_t status =
-      infer_for_test(config, 0, 0, 1, "DEFGH", "", "", inference_results);
+      infer_for_test(NULL, config, 0, 0, 1, "DEFGH", "", "", inference_results);
   assert(status == ERROR_STATUS_INFERENCE_BOTH_PLAY_AND_EXCHANGE);
 
   inference_results_destroy(inference_results);
@@ -258,7 +271,7 @@ void test_infer_exchange_score_not_zero(void) {
 
   InferenceResults *inference_results = inference_results_create(NULL);
   error_code_t status =
-      infer_for_test(config, 0, 3, 1, "", "", "", inference_results);
+      infer_for_test(NULL, config, 0, 3, 1, "", "", "", inference_results);
   assert(status == ERROR_STATUS_INFERENCE_EXCHANGE_SCORE_NOT_ZERO);
 
   inference_results_destroy(inference_results);
@@ -277,12 +290,12 @@ void test_infer_exchange_not_board_is_letter_allowed_in_cross_set(void) {
   load_cgp_or_die(game, VS_JEREMY);
   InferenceResults *inference_results = inference_results_create(NULL);
   error_code_t status =
-      infer_for_test(config, 0, 3, 1, "", "", "", inference_results);
+      infer_for_test(NULL, config, 0, 3, 1, "", "", "", inference_results);
   assert(status == ERROR_STATUS_INFERENCE_EXCHANGE_NOT_ALLOWED);
 
   bag_add_letter(bag, BLANK_MACHINE_LETTER, 0);
   // There should now be 14 tiles in the bag
-  status = infer_for_test(config, 0, 3, 1, "", "", "", inference_results);
+  status = infer_for_test(NULL, config, 0, 3, 1, "", "", "", inference_results);
   assert(status == ERROR_STATUS_INFERENCE_EXCHANGE_SCORE_NOT_ZERO);
 
   inference_results_destroy(inference_results);
@@ -297,8 +310,8 @@ void test_infer_tiles_played_not_in_bag(void) {
 
   InferenceResults *inference_results = inference_results_create(NULL);
   load_and_exec_config_or_die(config, "set -im 0 -threads 1");
-  error_code_t status =
-      infer_for_test(config, 0, 0, 1, "ACBYEYY", "", "", inference_results);
+  error_code_t status = infer_for_test(NULL, config, 0, 0, 1, "ACBYEYY", "", "",
+                                       inference_results);
   assert(status == ERROR_STATUS_INFERENCE_TARGET_LETTERS_NOT_IN_BAG);
 
   inference_results_destroy(inference_results);
@@ -350,14 +363,16 @@ void test_infer_nonerror_cases(const int number_of_threads,
   const char *gcg_string_header = "#character-encoding UTF-8\n#player1 Tim Tim "
                                   "Weiss\n#player2 Josh Josh Castellano\n";
 
+  InferenceCtx *ctx = NULL;
+
   load_and_exec_config_or_die(config, "set -numplays 20");
   if (use_game_history) {
     load_game_history_with_gcg_string(config, gcg_string_header,
                                       ">Tim: MUZAKS 8H MUZAKS +52 52");
     status = infer_for_test_with_history(config, inference_results, 1);
   } else {
-    status =
-        infer_for_test(config, 0, 52, 0, "MUZAKS", "", "", inference_results);
+    status = infer_for_test(&ctx, config, 0, 52, 0, "MUZAKS", "", "",
+                            inference_results);
   }
   assert(status == ERROR_STATUS_SUCCESS);
   // With this rack, only keeping an S is possible, and
@@ -395,13 +410,6 @@ void test_infer_nonerror_cases(const int number_of_threads,
                                         letter_stat, ld_hl_to_ml(ld, "S"));
   assert(within_epsilon(stat_get_mean(letter_stat), 1));
   assert(within_epsilon(stat_get_stdev(letter_stat), 0));
-  printf("size of bag as rack: %d\n",
-         rack_get_total_letters(
-             inference_results_get_bag_as_rack(inference_results)));
-  printf(
-      "size of target known unplayed tiles: %d\n",
-      rack_get_total_letters(inference_results_get_target_known_unplayed_tiles(
-          inference_results)));
   assert(within_epsilon(
       get_probability_for_random_minimum_draw(
           inference_results_get_bag_as_rack(inference_results),
@@ -427,8 +435,8 @@ void test_infer_nonerror_cases(const int number_of_threads,
                                       ">Tim: MUZAKY 8H MUZAKY +58 58");
     status = infer_for_test_with_history(config, inference_results, 1);
   } else {
-    status =
-        infer_for_test(config, 0, 58, 0, "MUZAKY", "", "", inference_results);
+    status = infer_for_test(&ctx, config, 0, 58, 0, "MUZAKY", "", "",
+                            inference_results);
   }
 
   assert(status == ERROR_STATUS_SUCCESS);
@@ -500,8 +508,8 @@ void test_infer_nonerror_cases(const int number_of_threads,
                                       ">Tim: MUZAK 8H MUZAK +50 50");
     status = infer_for_test_with_history(config, inference_results, 1);
   } else {
-    status =
-        infer_for_test(config, 0, 50, 0, "MUZAK", "", "", inference_results);
+    status = infer_for_test(&ctx, config, 0, 50, 0, "MUZAK", "", "",
+                            inference_results);
   }
 
   assert(status == ERROR_STATUS_SUCCESS);
@@ -547,7 +555,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
         config, inference_results,
         game_history_get_num_events(config_get_game_history(config)));
   } else {
-    status = infer_for_test(config, 0, 32, 0, "DEW??", "", "AHIILR",
+    status = infer_for_test(&ctx, config, 0, 32, 0, "DEW??", "", "AHIILR",
                             inference_results);
   }
   assert(status == ERROR_STATUS_SUCCESS);
@@ -616,7 +624,8 @@ void test_infer_nonerror_cases(const int number_of_threads,
                                       ">Tim: ERNT 8G RENT +8 8");
     status = infer_for_test_with_history(config, inference_results, 1);
   } else {
-    status = infer_for_test(config, 0, 8, 0, "ENRT", "", "", inference_results);
+    status = infer_for_test(&ctx, config, 0, 8, 0, "ENRT", "", "",
+                            inference_results);
   }
 
   assert(status == ERROR_STATUS_SUCCESS);
@@ -748,7 +757,8 @@ void test_infer_nonerror_cases(const int number_of_threads,
   // inferred
   // for plays scoring 50.
   load_and_exec_config_or_die(config, "set -im 0");
-  status = infer_for_test(config, 0, 50, 0, "IIII", "", "", inference_results);
+  status =
+      infer_for_test(&ctx, config, 0, 50, 0, "IIII", "", "", inference_results);
   assert(status == ERROR_STATUS_SUCCESS);
   // There are only 4 racks for which not playing Z(OOPSYCHOLOGY) is
   // correct:
@@ -874,8 +884,8 @@ void test_infer_nonerror_cases(const int number_of_threads,
                                       ">Tim: MUZAKY 8H MUZAKY +58 58");
     status = infer_for_test_with_history(config, inference_results, 1);
   } else {
-    status =
-        infer_for_test(config, 0, 58, 0, "MUZAKY", "", "", inference_results);
+    status = infer_for_test(&ctx, config, 0, 58, 0, "MUZAKY", "", "",
+                            inference_results);
   }
 
   assert(status == ERROR_STATUS_SUCCESS);
@@ -927,8 +937,8 @@ void test_infer_nonerror_cases(const int number_of_threads,
     string_builder_destroy(gcg_builder);
     status = infer_for_test_with_history(config, inference_results, 4);
   } else {
-    status =
-        infer_for_test(config, 0, 18, 0, "GRIND", "?", "", inference_results);
+    status = infer_for_test(&ctx, config, 0, 18, 0, "GRIND", "?", "",
+                            inference_results);
   }
 
   assert(status == ERROR_STATUS_SUCCESS);
@@ -973,7 +983,8 @@ void test_infer_nonerror_cases(const int number_of_threads,
     string_builder_destroy(gcg_builder);
     status = infer_for_test_with_history(config, inference_results, 4);
   } else {
-    status = infer_for_test(config, 0, 6, 0, "RIN", "H", "", inference_results);
+    status = infer_for_test(&ctx, config, 0, 6, 0, "RIN", "H", "",
+                            inference_results);
   }
 
   // If the player opens with RIN for 6 keeping an H, there are only 3
@@ -1041,7 +1052,8 @@ void test_infer_nonerror_cases(const int number_of_threads,
     bag_add_letter(bag, ld_hl_to_ml(ld, "V"), 0);
     bag_add_letter(bag, ld_hl_to_ml(ld, "V"), 0);
 
-    status = infer_for_test(config, 0, 0, 6, "", "", "", inference_results);
+    status =
+        infer_for_test(&ctx, config, 0, 0, 6, "", "", "", inference_results);
 
     assert(status == ERROR_STATUS_SUCCESS);
     // Keeping any one of D, H, R, or S is valid
@@ -1085,7 +1097,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
                ld_hl_to_ml(ld, "I"), 1, INFERENCE_SUBTOTAL_DRAW) == 0);
   }
 
-  game_reset(game);
+  inference_ctx_destroy(ctx);
 
   stat_destroy(letter_stat);
   rack_destroy(rack);

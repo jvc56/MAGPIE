@@ -74,6 +74,9 @@ EndgameResults *config_get_endgame_results(const Config *config);
 AutoplayResults *config_get_autoplay_results(const Config *config);
 const char *config_get_settings_filename(const Config *config);
 const char *config_get_current_exec_name(const Config *config);
+int config_get_num_threads(const Config *config);
+int config_get_print_interval(const Config *config);
+Equity config_get_eq_margin_inference(const Config *config);
 
 // Entity creators
 Game *config_game_create(const Config *config);

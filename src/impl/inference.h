@@ -2,6 +2,7 @@
 #define INFERENCE_H
 
 #include "../def/inference_defs.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/inference_results.h"
@@ -27,6 +28,14 @@ typedef struct InferenceArgs {
   int print_interval;
   ThreadControl *thread_control;
 } InferenceArgs;
+
+void infer_args_fill(InferenceArgs *args, int num_plays, Equity eq_margin,
+                     GameHistory *game_history, const Game *game,
+                     int num_threads, int print_interval,
+                     ThreadControl *thread_control, bool use_game_history,
+                     int target_index, Equity target_score, int target_num_exch,
+                     Rack *target_played_tiles, Rack *target_known_rack,
+                     Rack *nontarget_known_rack);
 
 void inference_ctx_destroy(InferenceCtx *ctx);
 

@@ -451,6 +451,16 @@ const char *config_get_settings_filename(const Config *config) {
   return config->settings_filename;
 }
 
+int config_get_num_threads(const Config *config) { return config->num_threads; }
+
+int config_get_print_interval(const Config *config) {
+  return config->print_interval;
+}
+
+Equity config_get_eq_margin_inference(const Config *config) {
+  return config->eq_margin_inference;
+}
+
 bool config_exec_parg_is_set(const Config *config) {
   return config->exec_parg_token != NUMBER_OF_ARG_TOKENS;
 }
@@ -1779,20 +1789,11 @@ void config_fill_infer_args(const Config *config, bool use_game_history,
                             int target_num_exch, Rack *target_played_tiles,
                             Rack *target_known_rack, Rack *nontarget_known_rack,
                             InferenceArgs *args) {
-  args->target_index = target_index;
-  args->target_score = target_score;
-  args->target_num_exch = target_num_exch;
-  args->move_capacity = config_get_num_plays(config);
-  args->equity_margin = config->eq_margin_inference;
-  args->target_played_tiles = target_played_tiles;
-  args->target_known_rack = target_known_rack;
-  args->nontarget_known_rack = nontarget_known_rack;
-  args->use_game_history = use_game_history;
-  args->game_history = config->game_history;
-  args->game = config_get_game(config);
-  args->num_threads = config->num_threads;
-  args->print_interval = config->print_interval;
-  args->thread_control = config->thread_control;
+  infer_args_fill(args, config->num_plays, config->eq_margin_inference,
+                  config->game_history, config->game, config->num_threads,
+                  config->print_interval, config->thread_control,
+                  use_game_history, target_index, target_score, target_num_exch,
+                  target_played_tiles, target_known_rack, nontarget_known_rack);
 }
 
 // Use target_index < 0 to infer using the game history
