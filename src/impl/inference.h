@@ -9,6 +9,8 @@
 #include "../ent/thread_control.h"
 #include "../util/io_util.h"
 
+typedef struct InferenceCtx InferenceCtx;
+
 typedef struct InferenceArgs {
   bool use_game_history;
   GameHistory *game_history;
@@ -26,7 +28,10 @@ typedef struct InferenceArgs {
   ThreadControl *thread_control;
 } InferenceArgs;
 
-void infer(InferenceArgs *args, InferenceResults *results,
-           ErrorStack *error_stack);
+void inference_ctx_destroy(InferenceCtx *ctx);
 
+void infer(InferenceArgs *args, InferenceCtx **ctx, InferenceResults *results,
+           ErrorStack *error_stack);
+void infer_without_ctx(InferenceArgs *args, InferenceResults *results,
+                       ErrorStack *error_stack);
 #endif

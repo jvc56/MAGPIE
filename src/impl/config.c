@@ -1805,7 +1805,7 @@ void config_infer(const Config *config, bool use_game_history, int target_index,
   config_fill_infer_args(config, use_game_history, target_index, target_score,
                          target_num_exch, target_played_tiles,
                          target_known_rack, nontarget_known_rack, &args);
-  infer(&args, results, error_stack);
+  infer_without_ctx(&args, results, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }

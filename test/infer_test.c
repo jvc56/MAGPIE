@@ -395,6 +395,13 @@ void test_infer_nonerror_cases(const int number_of_threads,
                                         letter_stat, ld_hl_to_ml(ld, "S"));
   assert(within_epsilon(stat_get_mean(letter_stat), 1));
   assert(within_epsilon(stat_get_stdev(letter_stat), 0));
+  printf("size of bag as rack: %d\n",
+         rack_get_total_letters(
+             inference_results_get_bag_as_rack(inference_results)));
+  printf(
+      "size of target known unplayed tiles: %d\n",
+      rack_get_total_letters(inference_results_get_target_known_unplayed_tiles(
+          inference_results)));
   assert(within_epsilon(
       get_probability_for_random_minimum_draw(
           inference_results_get_bag_as_rack(inference_results),

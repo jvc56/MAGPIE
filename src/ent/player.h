@@ -31,6 +31,7 @@ void player_add_to_score(Player *player, Equity score);
 
 void player_update(const PlayersData *players_data, Player *player);
 Player *player_duplicate(const Player *player);
+void player_copy(Player *dst, const Player *src);
 void player_reset(Player *player);
 
 #endif

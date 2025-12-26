@@ -24,6 +24,7 @@ Game *game_create(const GameArgs *game_args);
 void game_destroy(Game *game);
 void game_update(Game *game, const GameArgs *game_args);
 Game *game_duplicate(const Game *game);
+void game_copy(Game *dst, const Game *src);
 void game_reset(Game *game);
 void game_seed(Game *game, uint64_t seed);
 
