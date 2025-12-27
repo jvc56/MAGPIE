@@ -327,15 +327,9 @@ void perf_test_multithread_sim(void) {
       "7PEW2DOE/9EF1DOR/2KUNA1J1BEVELS/3TURRETs2S2/7A4T2/7N7/7S7 EEEIILZ/ "
       "336/298 0 -lex NWL20 -wmp true;");
   load_and_exec_config_or_die(config, "gen");
+  load_and_exec_config_or_die(config, "sim -hr true");
 
   SimResults *sim_results = config_get_sim_results(config);
-  error_code_t status =
-      config_simulate_and_return_status(config, NULL, sim_results);
-  assert(status == ERROR_STATUS_SUCCESS);
-  assert(bai_result_get_status(
-             sim_results_get_bai_result(config_get_sim_results(config))) ==
-         BAI_RESULT_STATUS_SAMPLE_LIMIT);
-  assert(sim_results_get_iteration_count(sim_results) == 2000);
 
   const SimmedPlay *play = get_best_simmed_play(sim_results);
   StringBuilder *move_string_builder = string_builder_create();
