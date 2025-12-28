@@ -11,7 +11,21 @@
 #include "random_variable.h"
 #include <stdlib.h>
 
-void simulate(SimArgs *sim_args, SimResults *sim_results,
+struct SimCtx {
+  RandomVariables *rvs;
+  RandomVariables *rng;
+};
+
+void sim_ctx_destroy(SimCtx *sim_ctx) {
+  if (!sim_ctx) {
+    return;
+  }
+  rvs_destroy(sim_ctx->rvs);
+  rvs_destroy(sim_ctx->rng);
+  free(sim_ctx);
+}
+
+void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
               ErrorStack *error_stack) {
   if (!sim_args->move_list || move_list_get_count(sim_args->move_list) == 0) {
     error_stack_push(error_stack, ERROR_STATUS_SIM_NO_MOVES,
@@ -36,23 +50,30 @@ void simulate(SimArgs *sim_args, SimResults *sim_results,
       .sim_results = sim_results,
   };
 
-  RandomVariables *rvs = rvs_create(&rv_sim_args);
-
   RandomVariablesArgs rng_args = {
       .type = RANDOM_VARIABLES_UNIFORM,
       .seed = sim_args->seed,
   };
 
-  RandomVariables *rng = rvs_create(&rng_args);
+  if (*sim_ctx) {
+    rvs_reset((*sim_ctx)->rvs, &rv_sim_args);
+    rvs_reset((*sim_ctx)->rng, &rng_args);
+  } else {
+    *sim_ctx = malloc_or_die(sizeof(SimCtx));
+    (*sim_ctx)->rvs = rvs_create(&rv_sim_args);
+    (*sim_ctx)->rng = rvs_create(&rng_args);
+  }
 
   sim_results_set_rack(sim_results, move_list_get_rack(sim_args->move_list));
   sim_results_set_known_opp_rack(sim_results, sim_args->known_opp_rack);
 
-  bai(&sim_args->bai_options, rvs, rng, sim_args->thread_control, NULL,
-      sim_results_get_bai_result(sim_results));
+  bai(&sim_args->bai_options, (*sim_ctx)->rvs, (*sim_ctx)->rng,
+      sim_args->thread_control, NULL, sim_results_get_bai_result(sim_results));
+}
 
-  // FIXME: once simming is part of autoplay, we will want to prevent these
-  // repeated alloc and deallocs if possible
-  rvs_destroy(rvs);
-  rvs_destroy(rng);
+void simulate_without_ctx(SimArgs *sim_args, SimResults *sim_results,
+                          ErrorStack *error_stack) {
+  SimCtx *ctx = NULL;
+  simulate(sim_args, &ctx, sim_results, error_stack);
+  sim_ctx_destroy(ctx);
 }

@@ -2013,7 +2013,7 @@ void config_simulate(const Config *config, Rack *known_opp_rack,
             "cannot sim with inference with an empty game history"));
     return;
   }
-  return simulate(&args, sim_results, error_stack);
+  return simulate_without_ctx(&args, sim_results, error_stack);
 }
 
 void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,

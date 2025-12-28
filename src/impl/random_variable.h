@@ -52,10 +52,10 @@ typedef struct RandomVariablesArgs {
 } RandomVariablesArgs;
 
 RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args);
+void rvs_reset(RandomVariables *rvs, const RandomVariablesArgs *rvs_args);
 void rvs_destroy(RandomVariables *rvs);
 double rvs_sample(RandomVariables *rvs, uint64_t k, int thread_index,
                   BAILogger *bai_logger);
-void rvs_reset(RandomVariables *rvs);
 bool rvs_are_similar(RandomVariables *rvs, int i, int j);
 uint64_t rvs_get_num_rvs(const RandomVariables *rvs);
 uint64_t rvs_get_total_samples(const RandomVariables *rvs);

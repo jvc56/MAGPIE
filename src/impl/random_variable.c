@@ -86,6 +86,11 @@ void rv_uniform_create(RandomVariables *rvs, const uint64_t seed) {
   rvs->data = rv_uniform;
 }
 
+void rv_uniform_reset(RandomVariables *rvs, const uint64_t seed) {
+  RVUniform *rv_uniform = (RVUniform *)rvs->data;
+  prng_seed(rv_uniform->xoshiro_prng, seed);
+}
+
 typedef struct RVUniformPredetermined {
   uint64_t num_samples;
   uint64_t index;
@@ -141,6 +146,12 @@ void rv_uniform_predetermined_create(RandomVariables *rvs,
          rv_uniform_predetermined->num_samples * sizeof(double));
   cpthread_mutex_init(&rv_uniform_predetermined->mutex);
   rvs->data = rv_uniform_predetermined;
+}
+
+void rv_uniform_predetermined_reset(RandomVariables *rvs) {
+  RVUniformPredetermined *rv_uniform_predetermined =
+      (RVUniformPredetermined *)rvs->data;
+  rv_uniform_predetermined->index = 0;
 }
 
 typedef struct RVNormal {
@@ -200,6 +211,11 @@ void rv_normal_create(RandomVariables *rvs, const uint64_t seed,
          rvs->num_rvs * 2 * sizeof(double));
   cpthread_mutex_init(&rv_normal->mutex);
   rvs->data = rv_normal;
+}
+
+void rv_normal_reset(RandomVariables *rvs, const uint64_t seed) {
+  RVNormal *rv_normal = (RVNormal *)rvs->data;
+  prng_seed(rv_normal->xoshiro_prng, seed);
 }
 
 typedef struct RVNormalPredetermined {
@@ -284,6 +300,12 @@ void rv_normal_predetermined_create(RandomVariables *rvs, const double *samples,
   rvs->data = rv_normal_predetermined;
 }
 
+void rv_normal_predetermined_reset(RandomVariables *rvs) {
+  RVNormalPredetermined *rv_normal_predetermined =
+      (RVNormalPredetermined *)rvs->data;
+  rv_normal_predetermined->index = 0;
+}
+
 typedef struct SimmerWorker {
   Game *game;
   MoveList *move_list;
@@ -315,6 +337,10 @@ SimmerWorker *simmer_create_worker(const Game *game) {
   simmer_worker->move_list = move_list_create(1);
   simmer_worker->prng = prng_create(0);
   return simmer_worker;
+}
+
+void simmer_reset_worker(SimmerWorker *simmer_worker, const Game *game) {
+  game_copy(simmer_worker->game, game);
 }
 
 void simmer_worker_destroy(SimmerWorker *simmer_worker) {
@@ -501,6 +527,49 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   return rvs;
 }
 
+void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
+  Simmer *simmer = (Simmer *)rvs->data;
+  rvs->num_rvs = move_list_get_count(sim_args->move_list);
+
+  simmer->initial_player = game_get_player_on_turn_index(sim_args->game);
+  const Player *player =
+      game_get_player(sim_args->game, simmer->initial_player);
+  const Player *opponent =
+      game_get_player(sim_args->game, 1 - simmer->initial_player);
+
+  simmer->initial_spread =
+      player_get_score(player) - player_get_score(opponent);
+
+  const Rack *known_opp_rack = sim_args->known_opp_rack;
+  if (known_opp_rack && !rack_is_empty(known_opp_rack)) {
+    if (!simmer->known_opp_rack) {
+      simmer->known_opp_rack = rack_duplicate(known_opp_rack);
+    } else {
+      rack_copy(simmer->known_opp_rack, known_opp_rack);
+    }
+  } else {
+    if (simmer->known_opp_rack) {
+      // FIXME: avoid repeated alloc/free if resetting multiple times
+      rack_destroy(simmer->known_opp_rack);
+    }
+    simmer->known_opp_rack = NULL;
+  }
+
+  for (int thread_index = 0; thread_index < simmer->num_threads;
+       thread_index++) {
+    simmer_reset_worker(simmer->workers[thread_index], sim_args->game);
+  }
+
+  simmer->use_inference = sim_args->use_inference;
+  simmer->use_alias_method =
+      simmer->use_inference &&
+      (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));
+
+  sim_results_reset(sim_args->move_list, simmer->sim_results,
+                    sim_args->num_plies, sim_args->seed,
+                    sim_args->use_heat_map);
+}
+
 RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {
   RandomVariables *rvs = malloc_or_die(sizeof(RandomVariables));
   // The num_rvs field will be overwritten in the rv_sim_create function
@@ -531,6 +600,28 @@ RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {
   return rvs;
 }
 
+void rvs_reset(RandomVariables *rvs, const RandomVariablesArgs *rvs_args) {
+  rvs->num_rvs = rvs_args->num_rvs;
+  atomic_store(&rvs->total_samples, 0);
+  switch (rvs_args->type) {
+  case RANDOM_VARIABLES_UNIFORM:
+    rv_uniform_reset(rvs, rvs_args->seed);
+    break;
+  case RANDOM_VARIABLES_UNIFORM_PREDETERMINED:
+    rv_uniform_predetermined_reset(rvs);
+    break;
+  case RANDOM_VARIABLES_NORMAL:
+    rv_normal_reset(rvs, rvs_args->seed);
+    break;
+  case RANDOM_VARIABLES_NORMAL_PREDETERMINED:
+    rv_normal_predetermined_reset(rvs);
+    break;
+  case RANDOM_VARIABLES_SIMMED_PLAYS:
+    rv_sim_reset(rvs, rvs_args->sim_args);
+    break;
+  }
+}
+
 void rvs_destroy(RandomVariables *rvs) {
   rvs->destroy_data_func(rvs);
   free(rvs);
@@ -542,8 +633,6 @@ double rvs_sample(RandomVariables *rvs, const uint64_t k,
   return rvs->sample_func(rvs, k, thread_index, prev_total_samples + 1,
                           bai_logger);
 }
-
-void rvs_reset(RandomVariables *rvs) { rvs->total_samples = 0; }
 
 bool rvs_are_similar(RandomVariables *rvs, const int i, const int j) {
   return rvs->similar_func(rvs, i, j);

@@ -700,6 +700,15 @@ void test_sim_one_ply(void) {
   string_builder_destroy(move_string_builder);
 }
 
+void test_sim_ctx(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "-plies 1 -threads 1 -iter 1000 -scond none");
+  // FIXME: test sim ctx by changing everything that is 'allow' to change
+  // between sim calls
+  config_destroy(config);
+}
+
 void test_sim(void) {
   const char *sim_perf_iters = getenv("SIM_PERF_ITERS");
   if (sim_perf_iters) {
@@ -719,5 +728,6 @@ void test_sim(void) {
     test_sim_round_robin_consistency();
     test_sim_top_two_consistency();
     test_sim_one_ply();
+    test_sim_ctx();
   }
 }

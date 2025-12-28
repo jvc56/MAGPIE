@@ -5,7 +5,11 @@
 #include "../util/io_util.h"
 #include "random_variable.h"
 
-void simulate(SimArgs *sim_args, SimResults *sim_results,
+typedef struct SimCtx SimCtx;
+
+void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
               ErrorStack *error_stack);
+void simulate_without_ctx(SimArgs *sim_args, SimResults *sim_results,
+                          ErrorStack *error_stack);
 
 #endif
