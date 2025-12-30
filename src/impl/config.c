@@ -25,6 +25,7 @@
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/heat_map.h"
+#include "../ent/inference_args.h"
 #include "../ent/inference_results.h"
 #include "../ent/klv.h"
 #include "../ent/klv_csv.h"
@@ -33,6 +34,7 @@
 #include "../ent/player.h"
 #include "../ent/players_data.h"
 #include "../ent/rack.h"
+#include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "../ent/trie.h"
@@ -1953,42 +1955,25 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
                           Rack *nontarget_known_tiles,
                           Rack *target_known_inference_tiles,
                           SimArgs *sim_args) {
-  sim_args->num_plies = config_get_plies(config);
-  sim_args->move_list = config_get_move_list(config);
-  sim_args->known_opp_rack = known_opp_rack;
-  sim_args->win_pcts = config_get_win_pcts(config);
-  sim_args->inference_results = config->inference_results;
-  sim_args->thread_control = config->thread_control;
-  sim_args->game = config_get_game(config);
-  sim_args->move_list = config_get_move_list(config);
-  sim_args->use_inference = config->sim_with_inference;
-  sim_args->use_heat_map = config->use_heat_map;
-  sim_args->num_threads = config->num_threads;
-  sim_args->print_interval = config->print_interval;
-  sim_args->max_num_display_plays = config->max_num_display_plays;
-  sim_args->seed = config->seed;
-  if (sim_args->use_inference) {
+  InferenceArgs inference_args;
+  if (config->sim_with_inference) {
     // FIXME: enable sim inferences using data from the last play instead of
     // the whole history so that autoplay does not have to keep a whole
     // history and play to turn for each inference which will probably incur
     // more overhead than we would like.
     config_fill_infer_args(config, true, 0, 0, 0, target_played_tiles,
                            target_known_inference_tiles, nontarget_known_tiles,
-                           &sim_args->inference_args);
+                           &inference_args);
   }
-  sim_args->bai_options.sample_limit = config->max_iterations;
-  sim_args->bai_options.sample_minimum = config->min_play_iterations;
-  const double percentile = config_get_stop_cond_pct(config);
-  if (percentile > 100 || config->threshold == BAI_THRESHOLD_NONE) {
-    sim_args->bai_options.threshold = BAI_THRESHOLD_NONE;
-  } else {
-    sim_args->bai_options.delta =
-        1.0 - (config_get_stop_cond_pct(config) / 100.0);
-    sim_args->bai_options.threshold = config->threshold;
-  }
-  sim_args->bai_options.time_limit_seconds = config->time_limit_seconds;
-  sim_args->bai_options.sampling_rule = config->sampling_rule;
-  sim_args->bai_options.num_threads = config->num_threads;
+  sim_args_fill(
+      config->num_plays, config->plies, config->move_list, known_opp_rack,
+      config->win_pcts, config->inference_results, config->thread_control,
+      config->game, config->sim_with_inference, config->use_heat_map,
+      config->num_threads, config->print_interval,
+      config->max_num_display_plays, config->seed, config->max_iterations,
+      config->min_play_iterations, config->stop_cond_pct, config->threshold,
+      config->time_limit_seconds, config->sampling_rule, &inference_args,
+      sim_args);
 }
 
 void config_simulate(const Config *config, Rack *known_opp_rack,

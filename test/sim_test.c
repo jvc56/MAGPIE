@@ -702,10 +702,17 @@ void test_sim_one_ply(void) {
 
 void test_sim_ctx(void) {
   Config *config = config_create_or_die(
-      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "set -lex CSW21 -wmp true -s1 score -s2 score -r1 all -r2 all "
       "-plies 1 -threads 1 -iter 1000 -scond none");
   // FIXME: test sim ctx by changing everything that is 'allow' to change
   // between sim calls
+  // Change between calls:
+  // - move list count
+  // - player on turn
+  // - spread
+  // - known opp rack
+  // - use inference
+  // - num plies
   config_destroy(config);
 }
 
