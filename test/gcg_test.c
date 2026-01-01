@@ -1042,6 +1042,21 @@ void test_write_gcg(GameHistory *game_history) {
   assert_gcg_write_cycle("no_challenge_rack_mid", config, game_history);
   assert_gcg_write_cycle("outplay_challenge_bonus", config, game_history);
 
+  Game *game = config_game_create(config);
+
+  // The GCG write should have set the challenge bonus rack to the next future
+  // rack for the player instead of writing the empty rack.
+  error_code_t gcg_parse_status =
+      test_parse_gcg("no_challenge_rack_mid_write2", config, game_history);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  const GameEvent *challenge_bonus_event =
+      game_history_get_event(game_history, 16);
+  assert(game_event_get_type(challenge_bonus_event) ==
+         GAME_EVENT_CHALLENGE_BONUS);
+  assert_rack_equals_string(game_get_ld(game),
+                            game_event_get_const_rack(challenge_bonus_event),
+                            "DEIINRR");
+  game_destroy(game);
   config_destroy(config);
 }
 

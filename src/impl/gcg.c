@@ -1314,8 +1314,27 @@ void string_builder_add_gcg(StringBuilder *gcg_sb, const LetterDistribution *ld,
       string_builder_add_formatted_string(gcg_sb, " -- -%d",
                                           equity_to_int(previous_move_score));
       break;
-    case GAME_EVENT_CHALLENGE_BONUS:
-      string_builder_add_rack(gcg_sb, rack, ld, true);
+    case GAME_EVENT_CHALLENGE_BONUS:;
+      const Rack *challenge_bonus_rack = rack;
+      // To be compatible with other programs that read GCG files,
+      // the challenge bonus rack should be nonempty if possible.
+      if (rack_is_empty(challenge_bonus_rack)) {
+        const int game_event_player_index = game_event_get_player_index(event);
+        for (int i = event_index + 1; i < number_of_events; i++) {
+          const GameEvent *future_event =
+              game_history_get_event(game_history, i);
+          if (game_event_get_player_index(future_event) ==
+              game_event_player_index) {
+            const Rack *future_rack = game_event_get_const_rack(future_event);
+            if (rack_get_dist_size(future_rack) > 0 &&
+                !rack_is_empty(future_rack)) {
+              challenge_bonus_rack = game_event_get_const_rack(future_event);
+            }
+            break;
+          }
+        }
+      }
+      string_builder_add_rack(gcg_sb, challenge_bonus_rack, ld, true);
       string_builder_add_formatted_string(
           gcg_sb, " (challenge) +%d",
           equity_to_int(game_event_get_score_adjustment(event)));
