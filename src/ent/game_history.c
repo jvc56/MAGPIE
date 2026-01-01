@@ -181,7 +181,7 @@ struct GameHistory {
   char *ld_name;
   char *board_layout_name;
   char *gcg_filename;
-  bool user_provided_gcg_filename;
+  bool user_has_specified_gcg_filename;
   int num_played_events;
   game_variant_t game_variant;
   GameHistoryPlayer *players[2];
@@ -395,7 +395,7 @@ void game_history_set_gcg_filename(GameHistory *game_history,
                                    const char *new_gcg_filename) {
   if (new_gcg_filename) {
     // The user has explicitly passed in a GCG filename
-    game_history->user_provided_gcg_filename = true;
+    game_history->user_has_specified_gcg_filename = true;
     free(game_history->gcg_filename);
 
     if (!has_suffix(GCG_EXTENSION, new_gcg_filename)) {
@@ -409,7 +409,7 @@ void game_history_set_gcg_filename(GameHistory *game_history,
     }
     return;
   }
-  if (game_history->user_provided_gcg_filename) {
+  if (game_history->user_has_specified_gcg_filename) {
     // The user has not passed in a GCG filename, but they have already done so
     // before, so do not overwrite the current user provided GCG filename
     // with the default GCG filename.
@@ -449,7 +449,7 @@ void game_history_reset(GameHistory *game_history) {
   game_history->board_layout_name = board_layout_get_default_name();
   free(game_history->gcg_filename);
   game_history->gcg_filename = NULL;
-  game_history->user_provided_gcg_filename = false;
+  game_history->user_has_specified_gcg_filename = false;
   for (int i = 0; i < 2; i++) {
     game_history_player_reset(game_history, i, NULL, NULL);
   }
@@ -480,7 +480,8 @@ GameHistory *game_history_duplicate(const GameHistory *gh_orig) {
   gh_copy->board_layout_name =
       string_duplicate_allow_null(gh_orig->board_layout_name);
   gh_copy->gcg_filename = string_duplicate_allow_null(gh_orig->gcg_filename);
-  gh_copy->user_provided_gcg_filename = gh_orig->user_provided_gcg_filename;
+  gh_copy->user_has_specified_gcg_filename =
+      gh_orig->user_has_specified_gcg_filename;
   gh_copy->game_variant = gh_orig->game_variant;
   gh_copy->num_events = gh_orig->num_events;
   gh_copy->num_played_events = gh_orig->num_played_events;

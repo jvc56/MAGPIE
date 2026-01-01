@@ -1801,14 +1801,50 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "rack ABCDEFG", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
+  const Game *old_game = config_get_game(config);
   assert_config_exec_status(config, "set -lex FRA20 -ld french",
                             ERROR_STATUS_SUCCESS);
+  // Changing the letter distribution should have triggered a game recreation
+  assert(old_game != config_get_game(config));
   // Changing the letter distribution to invalidate all of the results
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
   assert_config_exec_status(config, "shinfer",
                             ERROR_STATUS_NO_INFERENCE_TO_SHOW);
   assert_config_exec_status(config, "shendgame",
                             ERROR_STATUS_NO_ENDGAME_TO_SHOW);
+
+  // Test autosave
+  assert_config_exec_status(config, "newgame au1.gcg", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "t RETINAS", ERROR_STATUS_SUCCESS);
+  assert(access("au1.gcg", F_OK) != 0);
+  assert_config_exec_status(config, "e", ERROR_STATUS_SUCCESS);
+  assert(access("au1.gcg", F_OK) == 0);
+  char *au1_contents_1 = get_string_from_file_or_die("au1.gcg");
+  assert_config_exec_status(config, "t CAZIQUE", ERROR_STATUS_SUCCESS);
+  char *au1_contents_2 = get_string_from_file_or_die("au1.gcg");
+  assert_strings_equal(au1_contents_1, au1_contents_2);
+  assert_config_exec_status(config, "e", ERROR_STATUS_SUCCESS);
+  char *au1_contents_3 = get_string_from_file_or_die("au1.gcg");
+  assert_strings_ne(au1_contents_1, au1_contents_3);
+  remove_or_die("au1.gcg");
+  free(au1_contents_1);
+  free(au1_contents_2);
+  free(au1_contents_3);
+
+  assert_config_exec_status(config, "set -autosave true", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "newgame au2.gcg", ERROR_STATUS_SUCCESS);
+  assert(access("au2.gcg", F_OK) == 0);
+  char *au2_contents_1 = get_string_from_file_or_die("au2.gcg");
+  assert_config_exec_status(config, "t CAZIQUE", ERROR_STATUS_SUCCESS);
+  char *au2_contents_2 = get_string_from_file_or_die("au2.gcg");
+  assert_strings_ne(au2_contents_1, au2_contents_2);
+  assert_config_exec_status(config, "chal", ERROR_STATUS_SUCCESS);
+  char *au2_contents_3 = get_string_from_file_or_die("au2.gcg");
+  assert_strings_ne(au2_contents_2, au2_contents_3);
+  remove_or_die("au2.gcg");
+  free(au2_contents_1);
+  free(au2_contents_2);
+  free(au2_contents_3);
 
   string_builder_destroy(name_sb);
   config_destroy(config);
