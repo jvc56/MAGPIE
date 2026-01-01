@@ -872,12 +872,8 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     game_event_set_player_index(game_event, player_index);
     game_event_set_type(game_event, GAME_EVENT_TIME_PENALTY);
     // Rack is allowed to be empty for time penalty
-    if (get_matching_group_string_length(gcg_parser, 2) == 0) {
-      Rack *time_penalty_rack = game_event_get_rack(game_event);
-      rack_set_dist_size_and_reset(time_penalty_rack,
-                                   ld_get_size(gcg_parser->ld));
-    } else if (!set_rack_from_matching(gcg_parser, gcg_line, 2,
-                                       game_event_get_rack(game_event))) {
+    if (!set_rack_from_matching_allow_empty(gcg_parser, gcg_line, 2,
+                                            game_event_get_rack(game_event))) {
       error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_RACK_MALFORMED,
                        get_formatted_string(
                            "could not parse time penalty rack: %s", gcg_line));

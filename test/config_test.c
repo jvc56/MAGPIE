@@ -1854,7 +1854,7 @@ void test_config_anno_challenge(void) {
   // Commit and challenge
   Config *config = config_create_default_test();
   assert_config_exec_status(config, "newgame -lex CSW24", ERROR_STATUS_SUCCESS);
-  Game *game = config_get_game(config);
+  const Game *game = config_get_game(config);
   assert_config_exec_status(config, "t OAKMOSS", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "t ATALAYA", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "t NGLEDUG", ERROR_STATUS_SUCCESS);

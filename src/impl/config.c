@@ -979,12 +979,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "to the GCG file, or a local GCG file.";
       break;
     case ARG_TOKEN_NEW_GAME:
-      usages[0] = "[<player_one_name>] [<player_two_name>]";
+      usages[0] = "[<gcg_filename>]";
       examples[0] = "";
-      examples[1] = "Alice";
-      examples[2] = "Alice Bob";
+      examples[1] = "alice_vs_bob";
+      examples[2] = "alice_vs_bob.gcg";
       text = "Starts a new game, resetting the previous game and game history. "
-             "Player names without whitespace can be optionally specified.";
+             "The GCG filename can be optionally specified.";
       break;
     case ARG_TOKEN_EXPORT:
       usages[0] = "[<output_gcg_filename>]";
@@ -3629,7 +3629,7 @@ char *impl_overtime(Config *config, ErrorStack *error_stack) {
         error_stack, ERROR_STATUS_TIME_PENALTY_NO_PREVIOUS_CUMULATIVE_SCORE,
         get_formatted_string("no prior game event has a cumulative score "
                              "for player '%s' when "
-                             "applying time panelty",
+                             "applying time penalty",
                              player_nickname));
     config_restore_game_and_history(config);
     return empty_string();

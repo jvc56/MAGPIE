@@ -701,6 +701,7 @@ void game_history_remove_challenge_bonus_game_event(GameHistory *game_history) {
   }
 
   game_history->num_events--;
+  game_event_reset(&game_history->events[game_history->num_events]);
 }
 
 bool game_history_contains_end_rack_penalty_event(

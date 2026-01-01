@@ -477,7 +477,11 @@ void assert_strings_equal(const char *str1, const char *str2) {
 
 void assert_strings_ne(const char *str1, const char *str2) {
   if (strings_equal(str1, str2)) {
-    fprintf_or_die(stderr, "strings are equal:\n>%s<\n>%s<\n", str1, str2);
+    if (!str1) {
+      fprintf_or_die(stderr, "strings are equal:\n>(NULL)<\n>(NULL)<\n");
+    } else {
+      fprintf_or_die(stderr, "strings are equal:\n>%s<\n>%s<\n", str1, str2);
+    }
     assert(0);
   }
 }
