@@ -1813,6 +1813,15 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "shendgame",
                             ERROR_STATUS_NO_ENDGAME_TO_SHOW);
 
+  assert_config_exec_status(config, "set -lex CSW21", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(
+      config, "load testdata/gcgs/success_five_point_challenge.gcg",
+      ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "goto end", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "sim", ERROR_STATUS_SIM_GAME_OVER);
+  assert_config_exec_status(config, "t", ERROR_STATUS_COMMIT_GAME_OVER);
+
   // Test autosave
   assert_config_exec_status(config, "newgame au1.gcg", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "t RETINAS", ERROR_STATUS_SUCCESS);

@@ -19,6 +19,12 @@ void simulate(SimArgs *sim_args, SimResults *sim_results,
                                       "'generate' command to generate moves"));
     return;
   }
+  if (game_get_game_end_reason(sim_args->game) != GAME_END_REASON_NONE) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_SIM_GAME_OVER,
+        string_duplicate("cannot simulate when the game is already over"));
+    return;
+  }
 
   if (sim_args->use_inference) {
     infer(&sim_args->inference_args, sim_args->inference_results, error_stack);

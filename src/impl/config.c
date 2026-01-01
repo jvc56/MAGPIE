@@ -3239,6 +3239,15 @@ char *impl_commit_with_pos_args(Config *config, ErrorStack *error_stack,
 
   config_init_game(config);
 
+  if (!game_history_get_waiting_for_final_pass_or_challenge(
+          config->game_history) &&
+      game_get_game_end_reason(config->game) != GAME_END_REASON_NONE) {
+    error_stack_push(error_stack, ERROR_STATUS_COMMIT_GAME_OVER,
+                     string_duplicate("cannot commit a move in a game that has "
+                                      "already ended"));
+    return empty_string();
+  }
+
   StringBuilder *sb = string_builder_create();
   ValidatedMoves *vms = NULL;
 
