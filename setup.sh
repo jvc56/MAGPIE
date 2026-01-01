@@ -5,6 +5,8 @@
 # Note: The commands should be enclosed in quotes if they contain spaces.
 # The pairs must be separated by spaces.
 COMMAND_PAIRS=(
+    "git checkout main" "Switching to main branch..."
+    "git pull" "Pulling latest changes from remote..."
     "./download_data.sh" "Downloading lexical data..."
     "./convert_lexica.sh"        "Building lexical data..."
     "make clean && make magpie BUILD=release" "Building the magpie executable..."
