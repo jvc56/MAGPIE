@@ -53,6 +53,12 @@ void game_event_reset(GameEvent *game_event) {
   game_event->note = NULL;
 }
 
+void game_event_swap(GameEvent *ge1, GameEvent *ge2) {
+  GameEvent temp = *ge1;
+  *ge1 = *ge2;
+  *ge2 = temp;
+}
+
 void game_event_set_type(GameEvent *event, game_event_t event_type) {
   event->event_type = event_type;
 }
@@ -631,7 +637,7 @@ GameEvent *game_history_add_game_event(GameHistory *game_history,
 void game_history_insert_challenge_bonus_game_event(
     GameHistory *game_history, const int game_event_player_index,
     const Equity score_adjustment, ErrorStack *error_stack) {
-  if (game_history->num_events == MAX_GAME_EVENTS) {
+  if (game_history->num_events >= MAX_GAME_EVENTS) {
     error_stack_push(
         error_stack, ERROR_STATUS_GCG_PARSE_GAME_EVENT_OVERFLOW,
         get_formatted_string("exceeded the maximum number of game events (%d)",
@@ -641,10 +647,9 @@ void game_history_insert_challenge_bonus_game_event(
 
   game_history->num_events++;
   // Shift the game events over by one to make room for the new game event
-  for (int i = game_history->num_played_events; i < game_history->num_events;
-       i++) {
-    memcpy(&game_history->events[i + 1], &game_history->events[i],
-           sizeof(GameEvent));
+  for (int i = game_history->num_events - 1;
+       i > game_history->num_played_events; i--) {
+    game_event_swap(&game_history->events[i], &game_history->events[i - 1]);
   }
   const GameEvent *prev_tile_placement_event =
       game_history_get_event(game_history, game_history->num_played_events - 1);
@@ -656,7 +661,7 @@ void game_history_insert_challenge_bonus_game_event(
   game_event_set_score_adjustment(game_event, score_adjustment);
   game_event_set_cumulative_score(
       game_event, game_event_get_cumulative_score(prev_tile_placement_event) +
-                      game_event_get_score_adjustment(game_event));
+                      score_adjustment);
 
   // Update the cumulative score for every event after the inserted challenge
   // bonus
@@ -665,8 +670,8 @@ void game_history_insert_challenge_bonus_game_event(
     GameEvent *game_event_i = &game_history->events[i];
     if (game_event_get_player_index(game_event_i) == game_event_player_index) {
       game_event_set_cumulative_score(
-          game_event_i, game_event_get_cumulative_score(game_event_i) +
-                            game_event_get_score_adjustment(game_event_i));
+          game_event_i,
+          game_event_get_cumulative_score(game_event_i) + score_adjustment);
     }
   }
 }
@@ -682,8 +687,6 @@ void game_history_remove_challenge_bonus_game_event(GameHistory *game_history) {
   const Equity score_adjustment =
       game_event_get_score_adjustment(challenge_bonus_event);
 
-  GameEvent tmp_game_event;
-  memcpy(&tmp_game_event, challenge_bonus_event, sizeof(GameEvent));
   // Shift the game events over by one to subtract the challenge bonus event
   for (int i = challenge_bonus_event_index; i < game_history->num_events - 1;
        i++) {
@@ -693,11 +696,8 @@ void game_history_remove_challenge_bonus_game_event(GameHistory *game_history) {
           next_game_event,
           game_event_get_cumulative_score(next_game_event) - score_adjustment);
     }
-    memcpy(&game_history->events[i], next_game_event, sizeof(GameEvent));
+    game_event_swap(&game_history->events[i], next_game_event);
   }
-
-  memcpy(&game_history->events[game_history->num_events - 1], &tmp_game_event,
-         sizeof(GameEvent));
 
   game_history->num_events--;
 }
