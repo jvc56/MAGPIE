@@ -2017,11 +2017,25 @@ void test_config_export(void) {
   config_destroy(config);
 }
 
+void test_config_challenge_rack(void) {
+  Config *config = config_create_default_test();
+  // This triggered a segfault in prod at one point
+  assert_config_exec_status(config,
+                            "load testdata/gcgs/malformed_challenge_rack.gcg",
+                            ERROR_STATUS_GCG_PARSE_RACK_MALFORMED);
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "t RETINAS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "chal", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "t ABC", ERROR_STATUS_SUCCESS);
+  config_destroy(config);
+}
+
 void test_config(void) {
   test_game_display();
   test_trie();
   test_config_anno();
   test_config_anno_challenge();
+  test_config_challenge_rack();
   test_config_export();
   test_config_load_error_cases();
   test_config_load_success();

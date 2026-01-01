@@ -909,6 +909,39 @@ void test_success_phony_empty_bag(GameHistory *game_history) {
   config_destroy(config);
 }
 
+void test_success_challenge_rack(GameHistory *game_history) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
+
+  assert(test_parse_gcg("no_challenge_rack", config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(100));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(14));
+
+  assert(test_parse_gcg("no_challenge_rack_start", config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(23));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
+
+  assert(test_parse_gcg("no_challenge_rack_mid", config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(339));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(532));
+
+  assert(test_parse_gcg("outplay_challenge_bonus", config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(516));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(363));
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_success_out_in_many(GameHistory *game_history) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
@@ -1004,6 +1037,10 @@ void test_write_gcg(GameHistory *game_history) {
   assert_gcg_write_cycle("success_five_point_challenge", config, game_history);
   assert_gcg_write_cycle("success_just_last_rack", config, game_history);
   assert_gcg_write_cycle("success_six_pass", config, game_history);
+  assert_gcg_write_cycle("no_challenge_rack", config, game_history);
+  assert_gcg_write_cycle("no_challenge_rack_start", config, game_history);
+  assert_gcg_write_cycle("no_challenge_rack_mid", config, game_history);
+  assert_gcg_write_cycle("outplay_challenge_bonus", config, game_history);
 
   config_destroy(config);
 }
@@ -1119,6 +1156,7 @@ void test_gcg(void) {
   test_success_incomplete(game_history);
   test_success_phony_empty_bag(game_history);
   test_success_out_in_many(game_history);
+  test_success_challenge_rack(game_history);
   test_vs_jeremy_gcg(game_history);
   test_write_gcg(game_history);
   test_partially_known_rack_from_phonies(game_history);
