@@ -212,7 +212,6 @@ char *get_local_gcg_string(const char *identifier, ErrorStack *error_stack) {
   if (!identifier_with_possible_ext) {
     return NULL;
   }
-  printf("reading local GCG file: %s\n", identifier_with_possible_ext);
 
   // Read file content directly
   char *gcg_content =
