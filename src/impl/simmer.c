@@ -1,6 +1,8 @@
 #include "simmer.h"
 
+#include "../def/game_defs.h"
 #include "../def/thread_control_defs.h"
+#include "../ent/game.h"
 #include "../ent/move.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"

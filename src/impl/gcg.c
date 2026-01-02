@@ -584,23 +584,21 @@ bool token_is_pragma(const gcg_token_t token) {
 char *get_internal_board_layout_name(const char *board_layout_name) {
   if (strings_equal(board_layout_name, EXTERNAL_DEFAULT_BOARD_LAYOUT_NAME)) {
     return string_duplicate(INTERNAL_DEFAULT_BOARD_LAYOUT_NAME);
-  } else if (strings_equal(board_layout_name,
-                           EXTERNAL_SUPER_BOARD_LAYOUT_NAME)) {
-    return string_duplicate(INTERNAL_SUPER_BOARD_LAYOUT_NAME);
-  } else {
-    return string_duplicate(board_layout_name);
   }
+  if (strings_equal(board_layout_name, EXTERNAL_SUPER_BOARD_LAYOUT_NAME)) {
+    return string_duplicate(INTERNAL_SUPER_BOARD_LAYOUT_NAME);
+  }
+  return string_duplicate(board_layout_name);
 }
 
 char *get_external_board_layout_name(const char *board_layout_name) {
   if (strings_equal(board_layout_name, INTERNAL_DEFAULT_BOARD_LAYOUT_NAME)) {
     return string_duplicate(EXTERNAL_DEFAULT_BOARD_LAYOUT_NAME);
-  } else if (strings_equal(board_layout_name,
-                           INTERNAL_SUPER_BOARD_LAYOUT_NAME)) {
-    return string_duplicate(EXTERNAL_SUPER_BOARD_LAYOUT_NAME);
-  } else {
-    return string_duplicate(board_layout_name);
   }
+  if (strings_equal(board_layout_name, INTERNAL_SUPER_BOARD_LAYOUT_NAME)) {
+    return string_duplicate(EXTERNAL_SUPER_BOARD_LAYOUT_NAME);
+  }
+  return string_duplicate(board_layout_name);
 }
 
 // Returns true if processing should continue

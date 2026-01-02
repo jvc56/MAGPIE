@@ -1,5 +1,6 @@
 #include "get_gcg.h"
 
+#include "../ent/data_filepaths.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include <ctype.h>
