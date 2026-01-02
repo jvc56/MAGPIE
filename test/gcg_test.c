@@ -942,6 +942,56 @@ void test_success_challenge_rack(GameHistory *game_history) {
   config_destroy(config);
 }
 
+void test_success_board_layout_pragma(GameHistory *game_history) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+
+  char *std_gcg =
+      get_string_from_file_or_die("testdata/gcgs/success_standard.gcg");
+
+  StringSplitter *split_standard = split_string_by_newline(std_gcg, true);
+
+  StringBuilder *ext_bdn_sb = string_builder_create();
+
+  const int num_lines = string_splitter_get_number_of_items(split_standard);
+
+  for (int i = 0; i < num_lines; i++) {
+    const char *line = string_splitter_get_item(split_standard, i);
+    if (strings_equal(line, "#board-layout standard15")) {
+      string_builder_add_formatted_string(ext_bdn_sb, "#board-layout %s\n",
+                                          "CrosswordGame");
+
+    } else {
+      string_builder_add_formatted_string(ext_bdn_sb, "%s\n", line);
+    }
+  }
+
+  char *ext_gcg = string_builder_dump(ext_bdn_sb, NULL);
+
+  string_builder_destroy(ext_bdn_sb);
+  string_splitter_destroy(split_standard);
+  free(std_gcg);
+
+  assert(has_substring(ext_gcg, "#board-layout CrosswordGame"));
+
+  assert(test_parse_gcg_string(ext_gcg, config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+
+  free(ext_gcg);
+
+  assert_strings_equal(game_history_get_board_layout_name(game_history),
+                       "standard15");
+
+  StringBuilder *gcg_sb = string_builder_create();
+  string_builder_add_gcg(gcg_sb, config_get_ld(config), game_history, false);
+
+  assert(has_substring(string_builder_peek(gcg_sb),
+                       "#board-layout CrosswordGame"));
+
+  string_builder_destroy(gcg_sb);
+  config_destroy(config);
+}
+
 void test_success_out_in_many(GameHistory *game_history) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
@@ -1175,5 +1225,6 @@ void test_gcg(void) {
   test_vs_jeremy_gcg(game_history);
   test_write_gcg(game_history);
   test_partially_known_rack_from_phonies(game_history);
+  test_success_board_layout_pragma(game_history);
   game_history_destroy(game_history);
 }

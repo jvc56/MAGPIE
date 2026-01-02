@@ -26,6 +26,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define INTERNAL_DEFAULT_BOARD_LAYOUT_NAME "standard15"
+#define INTERNAL_SUPER_BOARD_LAYOUT_NAME "standard21"
+#define EXTERNAL_DEFAULT_BOARD_LAYOUT_NAME "CrosswordGame"
+#define EXTERNAL_SUPER_BOARD_LAYOUT_NAME "SuperCrosswordGame"
+
 enum { MAX_GROUPS = 7 };
 
 typedef enum {
@@ -576,6 +581,28 @@ bool token_is_pragma(const gcg_token_t token) {
   }
 }
 
+char *get_internal_board_layout_name(const char *board_layout_name) {
+  if (strings_equal(board_layout_name, EXTERNAL_DEFAULT_BOARD_LAYOUT_NAME)) {
+    return string_duplicate(INTERNAL_DEFAULT_BOARD_LAYOUT_NAME);
+  } else if (strings_equal(board_layout_name,
+                           EXTERNAL_SUPER_BOARD_LAYOUT_NAME)) {
+    return string_duplicate(INTERNAL_SUPER_BOARD_LAYOUT_NAME);
+  } else {
+    return string_duplicate(board_layout_name);
+  }
+}
+
+char *get_external_board_layout_name(const char *board_layout_name) {
+  if (strings_equal(board_layout_name, INTERNAL_DEFAULT_BOARD_LAYOUT_NAME)) {
+    return string_duplicate(EXTERNAL_DEFAULT_BOARD_LAYOUT_NAME);
+  } else if (strings_equal(board_layout_name,
+                           INTERNAL_SUPER_BOARD_LAYOUT_NAME)) {
+    return string_duplicate(EXTERNAL_SUPER_BOARD_LAYOUT_NAME);
+  } else {
+    return string_duplicate(board_layout_name);
+  }
+}
+
 // Returns true if processing should continue
 bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
                     parse_gcg_mode_t parse_gcg_mode, ErrorStack *error_stack) {
@@ -814,8 +841,12 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
   case GCG_BOARD_LAYOUT_TOKEN: {
     char *board_layout_name =
         get_matching_group_as_string(gcg_parser, gcg_line, 1);
-    game_history_set_board_layout_name(game_history, board_layout_name);
+    char *internal_board_layout_name =
+        get_internal_board_layout_name(board_layout_name);
     free(board_layout_name);
+    game_history_set_board_layout_name(game_history,
+                                       internal_board_layout_name);
+    free(internal_board_layout_name);
     break;
   }
   case GCG_TILE_DISTRIBUTION_NAME_TOKEN: {
@@ -1252,8 +1283,12 @@ void string_builder_add_gcg(StringBuilder *gcg_sb, const LetterDistribution *ld,
   const char *board_layout_name =
       game_history_get_board_layout_name(game_history);
   if (board_layout_name) {
-    string_builder_add_formatted_string(
-        gcg_sb, "#%s %s\n", GCG_BOARD_LAYOUT_STRING, board_layout_name);
+    char *external_board_layout_name =
+        get_external_board_layout_name(board_layout_name);
+    string_builder_add_formatted_string(gcg_sb, "#%s %s\n",
+                                        GCG_BOARD_LAYOUT_STRING,
+                                        external_board_layout_name);
+    free(external_board_layout_name);
   }
   const char *ld_name = game_history_get_ld_name(game_history);
   if (ld_name) {
