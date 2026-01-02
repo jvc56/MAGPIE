@@ -50,6 +50,7 @@ void test_load_gcg(void) {
 
   printf("=== Local File Tests ===\n");
   validate_load_gcg("testdata/gcgs/success_six_pass.gcg", ERROR_STATUS_SUCCESS);
+  validate_load_gcg("testdata/gcgs/success_six_pass", ERROR_STATUS_SUCCESS);
   validate_load_gcg("/tmp/nonexistent_file.gcg",
                     ERROR_STATUS_INVALID_GCG_SOURCE);
   printf("Local file tests completed.\n\n");
