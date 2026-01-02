@@ -53,6 +53,12 @@ void game_event_reset(GameEvent *game_event) {
   game_event->note = NULL;
 }
 
+void game_event_swap(GameEvent *ge1, GameEvent *ge2) {
+  GameEvent temp = *ge1;
+  *ge1 = *ge2;
+  *ge2 = temp;
+}
+
 void game_event_set_type(GameEvent *event, game_event_t event_type) {
   event->event_type = event_type;
 }
@@ -175,7 +181,7 @@ struct GameHistory {
   char *ld_name;
   char *board_layout_name;
   char *gcg_filename;
-  bool user_provided_gcg_filename;
+  bool user_has_specified_gcg_filename;
   int num_played_events;
   game_variant_t game_variant;
   GameHistoryPlayer *players[2];
@@ -389,7 +395,7 @@ void game_history_set_gcg_filename(GameHistory *game_history,
                                    const char *new_gcg_filename) {
   if (new_gcg_filename) {
     // The user has explicitly passed in a GCG filename
-    game_history->user_provided_gcg_filename = true;
+    game_history->user_has_specified_gcg_filename = true;
     free(game_history->gcg_filename);
 
     if (!has_suffix(GCG_EXTENSION, new_gcg_filename)) {
@@ -403,7 +409,7 @@ void game_history_set_gcg_filename(GameHistory *game_history,
     }
     return;
   }
-  if (game_history->user_provided_gcg_filename) {
+  if (game_history->user_has_specified_gcg_filename) {
     // The user has not passed in a GCG filename, but they have already done so
     // before, so do not overwrite the current user provided GCG filename
     // with the default GCG filename.
@@ -443,7 +449,7 @@ void game_history_reset(GameHistory *game_history) {
   game_history->board_layout_name = board_layout_get_default_name();
   free(game_history->gcg_filename);
   game_history->gcg_filename = NULL;
-  game_history->user_provided_gcg_filename = false;
+  game_history->user_has_specified_gcg_filename = false;
   for (int i = 0; i < 2; i++) {
     game_history_player_reset(game_history, i, NULL, NULL);
   }
@@ -474,7 +480,8 @@ GameHistory *game_history_duplicate(const GameHistory *gh_orig) {
   gh_copy->board_layout_name =
       string_duplicate_allow_null(gh_orig->board_layout_name);
   gh_copy->gcg_filename = string_duplicate_allow_null(gh_orig->gcg_filename);
-  gh_copy->user_provided_gcg_filename = gh_orig->user_provided_gcg_filename;
+  gh_copy->user_has_specified_gcg_filename =
+      gh_orig->user_has_specified_gcg_filename;
   gh_copy->game_variant = gh_orig->game_variant;
   gh_copy->num_events = gh_orig->num_events;
   gh_copy->num_played_events = gh_orig->num_played_events;
@@ -631,7 +638,7 @@ GameEvent *game_history_add_game_event(GameHistory *game_history,
 void game_history_insert_challenge_bonus_game_event(
     GameHistory *game_history, const int game_event_player_index,
     const Equity score_adjustment, ErrorStack *error_stack) {
-  if (game_history->num_events == MAX_GAME_EVENTS) {
+  if (game_history->num_events >= MAX_GAME_EVENTS) {
     error_stack_push(
         error_stack, ERROR_STATUS_GCG_PARSE_GAME_EVENT_OVERFLOW,
         get_formatted_string("exceeded the maximum number of game events (%d)",
@@ -641,10 +648,9 @@ void game_history_insert_challenge_bonus_game_event(
 
   game_history->num_events++;
   // Shift the game events over by one to make room for the new game event
-  for (int i = game_history->num_played_events; i < game_history->num_events;
-       i++) {
-    memcpy(&game_history->events[i + 1], &game_history->events[i],
-           sizeof(GameEvent));
+  for (int i = game_history->num_events - 1;
+       i > game_history->num_played_events; i--) {
+    game_event_swap(&game_history->events[i], &game_history->events[i - 1]);
   }
   const GameEvent *prev_tile_placement_event =
       game_history_get_event(game_history, game_history->num_played_events - 1);
@@ -656,7 +662,7 @@ void game_history_insert_challenge_bonus_game_event(
   game_event_set_score_adjustment(game_event, score_adjustment);
   game_event_set_cumulative_score(
       game_event, game_event_get_cumulative_score(prev_tile_placement_event) +
-                      game_event_get_score_adjustment(game_event));
+                      score_adjustment);
 
   // Update the cumulative score for every event after the inserted challenge
   // bonus
@@ -665,8 +671,8 @@ void game_history_insert_challenge_bonus_game_event(
     GameEvent *game_event_i = &game_history->events[i];
     if (game_event_get_player_index(game_event_i) == game_event_player_index) {
       game_event_set_cumulative_score(
-          game_event_i, game_event_get_cumulative_score(game_event_i) +
-                            game_event_get_score_adjustment(game_event_i));
+          game_event_i,
+          game_event_get_cumulative_score(game_event_i) + score_adjustment);
     }
   }
 }
@@ -682,8 +688,6 @@ void game_history_remove_challenge_bonus_game_event(GameHistory *game_history) {
   const Equity score_adjustment =
       game_event_get_score_adjustment(challenge_bonus_event);
 
-  GameEvent tmp_game_event;
-  memcpy(&tmp_game_event, challenge_bonus_event, sizeof(GameEvent));
   // Shift the game events over by one to subtract the challenge bonus event
   for (int i = challenge_bonus_event_index; i < game_history->num_events - 1;
        i++) {
@@ -693,13 +697,11 @@ void game_history_remove_challenge_bonus_game_event(GameHistory *game_history) {
           next_game_event,
           game_event_get_cumulative_score(next_game_event) - score_adjustment);
     }
-    memcpy(&game_history->events[i], next_game_event, sizeof(GameEvent));
+    game_event_swap(&game_history->events[i], next_game_event);
   }
 
-  memcpy(&game_history->events[game_history->num_events - 1], &tmp_game_event,
-         sizeof(GameEvent));
-
   game_history->num_events--;
+  game_event_reset(&game_history->events[game_history->num_events]);
 }
 
 bool game_history_contains_end_rack_penalty_event(

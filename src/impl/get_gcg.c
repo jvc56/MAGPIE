@@ -1,5 +1,6 @@
 #include "get_gcg.h"
 
+#include "../ent/data_filepaths.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include <ctype.h>
@@ -193,12 +194,31 @@ char *get_url_gcg_string(const char *identifier, ErrorStack *error_stack) {
 
 char *get_local_gcg_string(const char *identifier, ErrorStack *error_stack) {
   // Check if file exists and is readable
+  char *identifier_with_possible_ext = NULL;
   if (access(identifier, R_OK) != 0) {
-    return NULL; // Not a valid local file - not our job
+    if (!has_suffix(GCG_EXTENSION, identifier)) {
+      // Try adding .gcg extension
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_string(sb, identifier);
+      string_builder_add_string(sb, GCG_EXTENSION);
+      if (access(string_builder_peek(sb), R_OK) == 0) {
+        identifier_with_possible_ext = string_builder_dump(sb, NULL);
+      }
+      string_builder_destroy(sb);
+    }
+  } else {
+    identifier_with_possible_ext = string_duplicate(identifier);
+  }
+
+  if (!identifier_with_possible_ext) {
+    return NULL;
   }
 
   // Read file content directly
-  char *gcg_content = get_string_from_file(identifier, error_stack);
+  char *gcg_content =
+      get_string_from_file(identifier_with_possible_ext, error_stack);
+
+  free(identifier_with_possible_ext);
 
   if (!error_stack_is_empty(error_stack)) {
     return NULL;

@@ -3,7 +3,7 @@ set -e
 
 # Versioned data configuration
 DATA_VERSION="20251004"
-TESTDATA_VERSION="20251127"
+TESTDATA_VERSION="20260101"
 
 # GitHub repository details
 REPO_OWNER="jvc56"

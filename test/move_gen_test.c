@@ -794,6 +794,7 @@ void wordsmog_test(void) {
   load_and_exec_config_or_die(config, "set -ld english_blank_is_5");
   load_and_exec_config_or_die(
       config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  game = config_get_game(config);
 
   assert_validated_and_generated_moves(game, "AEIINO?", "8B", "AEpIINO", 82,
                                        true);

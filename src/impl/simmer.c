@@ -1,6 +1,8 @@
 #include "simmer.h"
 
+#include "../def/game_defs.h"
 #include "../def/thread_control_defs.h"
+#include "../ent/game.h"
 #include "../ent/move.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
@@ -17,6 +19,12 @@ void simulate(SimArgs *sim_args, SimResults *sim_results,
     error_stack_push(error_stack, ERROR_STATUS_SIM_NO_MOVES,
                      string_duplicate("cannot simulate without moves, use the "
                                       "'generate' command to generate moves"));
+    return;
+  }
+  if (game_get_game_end_reason(sim_args->game) != GAME_END_REASON_NONE) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_SIM_GAME_OVER,
+        string_duplicate("cannot simulate when the game is already over"));
     return;
   }
 

@@ -909,6 +909,89 @@ void test_success_phony_empty_bag(GameHistory *game_history) {
   config_destroy(config);
 }
 
+void test_success_challenge_rack(GameHistory *game_history) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
+
+  assert(test_parse_gcg("no_challenge_rack", config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(100));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(14));
+
+  assert(test_parse_gcg("no_challenge_rack_start", config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(23));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
+
+  assert(test_parse_gcg("no_challenge_rack_mid", config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(339));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(532));
+
+  assert(test_parse_gcg("outplay_challenge_bonus", config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(game_history, game);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(516));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(363));
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void test_success_board_layout_pragma(GameHistory *game_history) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+
+  char *std_gcg =
+      get_string_from_file_or_die("testdata/gcgs/success_standard.gcg");
+
+  StringSplitter *split_standard = split_string_by_newline(std_gcg, true);
+
+  StringBuilder *ext_bdn_sb = string_builder_create();
+
+  const int num_lines = string_splitter_get_number_of_items(split_standard);
+
+  for (int i = 0; i < num_lines; i++) {
+    const char *line = string_splitter_get_item(split_standard, i);
+    if (strings_equal(line, "#board-layout standard15")) {
+      string_builder_add_formatted_string(ext_bdn_sb, "#board-layout %s\n",
+                                          "CrosswordGame");
+
+    } else {
+      string_builder_add_formatted_string(ext_bdn_sb, "%s\n", line);
+    }
+  }
+
+  char *ext_gcg = string_builder_dump(ext_bdn_sb, NULL);
+
+  string_builder_destroy(ext_bdn_sb);
+  string_splitter_destroy(split_standard);
+  free(std_gcg);
+
+  assert(has_substring(ext_gcg, "#board-layout CrosswordGame"));
+
+  assert(test_parse_gcg_string(ext_gcg, config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+
+  free(ext_gcg);
+
+  assert_strings_equal(game_history_get_board_layout_name(game_history),
+                       "standard15");
+
+  StringBuilder *gcg_sb = string_builder_create();
+  string_builder_add_gcg(gcg_sb, config_get_ld(config), game_history, false);
+
+  assert(has_substring(string_builder_peek(gcg_sb),
+                       "#board-layout CrosswordGame"));
+
+  string_builder_destroy(gcg_sb);
+  config_destroy(config);
+}
+
 void test_success_out_in_many(GameHistory *game_history) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
@@ -1004,7 +1087,26 @@ void test_write_gcg(GameHistory *game_history) {
   assert_gcg_write_cycle("success_five_point_challenge", config, game_history);
   assert_gcg_write_cycle("success_just_last_rack", config, game_history);
   assert_gcg_write_cycle("success_six_pass", config, game_history);
+  assert_gcg_write_cycle("no_challenge_rack", config, game_history);
+  assert_gcg_write_cycle("no_challenge_rack_start", config, game_history);
+  assert_gcg_write_cycle("no_challenge_rack_mid", config, game_history);
+  assert_gcg_write_cycle("outplay_challenge_bonus", config, game_history);
 
+  Game *game = config_game_create(config);
+
+  // The GCG write should have set the challenge bonus rack to the next future
+  // rack for the player instead of writing the empty rack.
+  error_code_t gcg_parse_status =
+      test_parse_gcg("no_challenge_rack_mid_write2", config, game_history);
+  assert(gcg_parse_status == ERROR_STATUS_SUCCESS);
+  const GameEvent *challenge_bonus_event =
+      game_history_get_event(game_history, 16);
+  assert(game_event_get_type(challenge_bonus_event) ==
+         GAME_EVENT_CHALLENGE_BONUS);
+  assert_rack_equals_string(game_get_ld(game),
+                            game_event_get_const_rack(challenge_bonus_event),
+                            "DEIINRR");
+  game_destroy(game);
   config_destroy(config);
 }
 
@@ -1119,8 +1221,10 @@ void test_gcg(void) {
   test_success_incomplete(game_history);
   test_success_phony_empty_bag(game_history);
   test_success_out_in_many(game_history);
+  test_success_challenge_rack(game_history);
   test_vs_jeremy_gcg(game_history);
   test_write_gcg(game_history);
   test_partially_known_rack_from_phonies(game_history);
+  test_success_board_layout_pragma(game_history);
   game_history_destroy(game_history);
 }

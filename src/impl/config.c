@@ -164,6 +164,7 @@ typedef enum {
   ARG_TOKEN_PRINT_ON_FINISH,
   ARG_TOKEN_SHOW_PROMPT,
   ARG_TOKEN_SAVE_SETTINGS,
+  ARG_TOKEN_AUTOSAVE_GCG,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -214,6 +215,7 @@ struct Config {
   bool print_on_finish;
   bool show_prompt;
   bool save_settings;
+  bool autosave_gcg;
   bool loaded_settings;
   char *record_filepath;
   char *settings_filename;
@@ -466,13 +468,6 @@ bool config_continue_on_coldstart(const Config *config) {
 
 // Config command execution helper functions
 
-bool is_game_recreation_required(const Config *config) {
-  // If the ld changes (bag and rack size)
-  // a recreation is required to resize the
-  // dynamically allocated fields.
-  return config->ld_changed;
-}
-
 void config_fill_game_args(const Config *config, GameArgs *game_args) {
   game_args->players_data = config->players_data;
   game_args->board_layout = config->board_layout;
@@ -501,11 +496,6 @@ void config_game_update(const Config *config, Game *game) {
 // Preconditions:
 //  - The config is loaded
 void config_init_game(Config *config) {
-  if (config->game && is_game_recreation_required(config)) {
-    game_destroy(config->game);
-    config->game = NULL;
-  }
-
   if (!config->game) {
     config->game = config_game_create(config);
   } else {
@@ -989,12 +979,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "to the GCG file, or a local GCG file.";
       break;
     case ARG_TOKEN_NEW_GAME:
-      usages[0] = "[<player_one_name>] [<player_two_name>]";
+      usages[0] = "[<gcg_filename>]";
       examples[0] = "";
-      examples[1] = "Alice";
-      examples[2] = "Alice Bob";
+      examples[1] = "alice_vs_bob";
+      examples[2] = "alice_vs_bob.gcg";
       text = "Starts a new game, resetting the previous game and game history. "
-             "Player names without whitespace can be optionally specified.";
+             "The GCG filename can be optionally specified.";
       break;
     case ARG_TOKEN_EXPORT:
       usages[0] = "[<output_gcg_filename>]";
@@ -1508,6 +1498,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies whether or not to save the current settings to file "
              "after every command. If settings are saved, they will be "
              "automatically loaded on the next startup.";
+      break;
+    case ARG_TOKEN_AUTOSAVE_GCG:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether or not to automatically save the game history "
+             "as a GCG after every change.";
       break;
     case NUMBER_OF_ARG_TOKENS:
       log_fatal("encountered invalid arg token in help command");
@@ -2612,6 +2609,65 @@ char *str_api_show_heat_map(Config *config, ErrorStack *error_stack) {
   return impl_show_heat_map(config, error_stack);
 }
 
+// Export GCG
+
+void impl_export_internal(Config *config, ErrorStack *error_stack,
+                          const char *filename) {
+  // Set a default filename if none exists
+  if (filename || !game_history_get_gcg_filename(config->game_history)) {
+    game_history_set_gcg_filename(config->game_history, filename);
+  }
+
+  write_gcg(game_history_get_gcg_filename(config->game_history), config->ld,
+            config->game_history, error_stack);
+}
+
+// Writes the current game history to a GCG file if autosave is enabled
+// and the game history has a filename.
+void impl_export_if_autosave(Config *config, ErrorStack *error_stack) {
+  if (config->autosave_gcg &&
+      game_history_get_gcg_filename(config->game_history)) {
+    impl_export_internal(config, error_stack, NULL);
+  }
+}
+
+char *impl_export(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot export game without lexicon"));
+    return empty_string();
+  }
+  if (game_history_get_num_events(config->game_history) == 0) {
+    error_stack_push(error_stack, ERROR_STATUS_EXPORT_NO_GAME_EVENTS,
+                     string_duplicate("cannot export an empty game history"));
+    return empty_string();
+  }
+  config_init_game(config);
+
+  impl_export_internal(config, error_stack,
+                       config_get_parg_value(config, ARG_TOKEN_EXPORT, 0));
+
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+
+  return get_formatted_string(
+      "Saved GCG file to %s\n",
+      game_history_get_gcg_filename(config->game_history));
+}
+
+void execute_export(Config *config, ErrorStack *error_stack) {
+  char *result = impl_export(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_export(Config *config, ErrorStack *error_stack) {
+  return impl_export(config, error_stack);
+}
+
 // Start new game
 
 void update_game_history_with_config(Config *config) {
@@ -2648,72 +2704,26 @@ char *impl_new_game(Config *config, ErrorStack *error_stack) {
   game_reset(config->game);
   game_history_reset(config->game_history);
   update_game_history_with_config(config);
-  for (int player_index = 0; player_index < 2; player_index++) {
-    game_history_player_reset(
-        config->game_history, player_index,
-        config_get_parg_value(config, ARG_TOKEN_NEW_GAME, player_index), NULL);
+  const char *user_provided_filename =
+      config_get_parg_value(config, ARG_TOKEN_NEW_GAME, 0);
+  if (user_provided_filename) {
+    game_history_set_gcg_filename(config->game_history, user_provided_filename);
   }
+  impl_export_if_autosave(config, error_stack);
   return empty_string();
 }
 
 void execute_new_game(Config *config, ErrorStack *error_stack) {
   char *result = impl_new_game(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
-    thread_control_print(config->thread_control, result);
     execute_show_game(config, error_stack);
+    thread_control_print(config->thread_control, result);
   }
   free(result);
 }
 
 char *str_api_new_game(Config *config, ErrorStack *error_stack) {
   return impl_new_game(config, error_stack);
-}
-
-// Export GCG
-
-char *impl_export(Config *config, ErrorStack *error_stack) {
-  if (!config_has_game_data(config)) {
-    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-                     string_duplicate("cannot export game without lexicon"));
-    return empty_string();
-  }
-  if (game_history_get_num_events(config->game_history) == 0) {
-    error_stack_push(error_stack, ERROR_STATUS_EXPORT_NO_GAME_EVENTS,
-                     string_duplicate("cannot export an empty game history"));
-    return empty_string();
-  }
-  config_init_game(config);
-
-  const char *user_provided_filename =
-      config_get_parg_value(config, ARG_TOKEN_EXPORT, 0);
-
-  if (user_provided_filename ||
-      !game_history_get_gcg_filename(config->game_history)) {
-    game_history_set_gcg_filename(config->game_history, user_provided_filename);
-  }
-
-  write_gcg(game_history_get_gcg_filename(config->game_history), config->ld,
-            config->game_history, error_stack);
-
-  if (!error_stack_is_empty(error_stack)) {
-    return empty_string();
-  }
-
-  return get_formatted_string(
-      "Saved GCG file to %s\n",
-      game_history_get_gcg_filename(config->game_history));
-}
-
-void execute_export(Config *config, ErrorStack *error_stack) {
-  char *result = impl_export(config, error_stack);
-  if (error_stack_is_empty(error_stack)) {
-    thread_control_print(config->thread_control, result);
-  }
-  free(result);
-}
-
-char *str_api_export(Config *config, ErrorStack *error_stack) {
-  return impl_export(config, error_stack);
 }
 
 // Commit move
@@ -3229,6 +3239,15 @@ char *impl_commit_with_pos_args(Config *config, ErrorStack *error_stack,
 
   config_init_game(config);
 
+  if (!game_history_get_waiting_for_final_pass_or_challenge(
+          config->game_history) &&
+      game_get_game_end_reason(config->game) != GAME_END_REASON_NONE) {
+    error_stack_push(error_stack, ERROR_STATUS_COMMIT_GAME_OVER,
+                     string_duplicate("cannot commit a move in a game that has "
+                                      "already ended"));
+    return empty_string();
+  }
+
   StringBuilder *sb = string_builder_create();
   ValidatedMoves *vms = NULL;
 
@@ -3271,6 +3290,13 @@ char *impl_commit_with_pos_args(Config *config, ErrorStack *error_stack,
     draw_rack_from_bag(config->game, noncommit_player_index,
                        &noncommit_player_rack);
     draw_to_full_rack(config->game, 1 - noncommit_player_index);
+  }
+
+  impl_export_if_autosave(config, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    config_restore_game_and_history(config);
+    return return_str;
   }
 
   return return_str;
@@ -3432,14 +3458,21 @@ char *impl_challenge(Config *config, ErrorStack *error_stack) {
     }
   }
 
+  impl_export_if_autosave(config, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    config_restore_game_and_history(config);
+    return empty_string();
+  }
+
   return empty_string();
 }
 
 void execute_challenge(Config *config, ErrorStack *error_stack) {
   char *result = impl_challenge(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
-    thread_control_print(config->thread_control, result);
     execute_show_game(config, error_stack);
+    thread_control_print(config->thread_control, result);
   }
   free(result);
 }
@@ -3502,14 +3535,21 @@ char *impl_unchallenge(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
 
+  impl_export_if_autosave(config, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    config_restore_game_and_history(config);
+    return empty_string();
+  }
+
   return empty_string();
 }
 
 void execute_unchallenge(Config *config, ErrorStack *error_stack) {
   char *result = impl_unchallenge(config, error_stack);
   if (error_stack_is_empty(error_stack)) {
-    thread_control_print(config->thread_control, result);
     execute_show_game(config, error_stack);
+    thread_control_print(config->thread_control, result);
   }
   free(result);
 }
@@ -3576,52 +3616,69 @@ char *impl_overtime(Config *config, ErrorStack *error_stack) {
   GameEvent *time_penalty_event =
       game_history_add_game_event(config->game_history, error_stack);
 
-  if (error_stack_is_empty(error_stack)) {
-    // Find the previous cumulative score for this player.
-    const int last_event_index =
-        game_history_get_num_events(config->game_history) - 1;
-    Equity cumulative_score = EQUITY_INITIAL_VALUE;
-    for (int i = last_event_index; i >= 0; i--) {
-      const GameEvent *gei = game_history_get_event(config->game_history, i);
-      if (game_event_get_player_index(gei) == player_index) {
-        cumulative_score = game_event_get_cumulative_score(gei);
-        break;
-      }
-    }
-
-    if (cumulative_score == EQUITY_INITIAL_VALUE) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_TIME_PENALTY_NO_PREVIOUS_CUMULATIVE_SCORE,
-          get_formatted_string("no prior game event has a cumulative score "
-                               "for player '%s' when "
-                               "applying time panelty",
-                               player_nickname));
-    } else {
-      const Equity overtime_penalty = int_to_equity(overtime_penalty_int);
-      game_event_set_player_index(time_penalty_event, player_index);
-      game_event_set_type(time_penalty_event, GAME_EVENT_TIME_PENALTY);
-      game_event_set_cgp_move_string(time_penalty_event, NULL);
-      game_event_set_score_adjustment(time_penalty_event, overtime_penalty);
-      // Add the overtime penalty since the value is already negative
-      game_event_set_cumulative_score(time_penalty_event,
-                                      cumulative_score + overtime_penalty);
-      game_event_set_move_score(time_penalty_event, 0);
-
-      // When adding an overtime event, always advance to the end of the
-      // history so that the game play module can play through the entire
-      // game and catch any duplicate time penalty errors.
-      game_history_goto(config->game_history,
-                        game_history_get_num_events(config->game_history),
-                        error_stack);
-      if (error_stack_is_empty(error_stack)) {
-        config_game_play_events(config, error_stack);
-      }
-    }
-  }
   if (!error_stack_is_empty(error_stack)) {
     config_restore_game_and_history(config);
     return empty_string();
   }
+
+  // Find the previous cumulative score for this player.
+  const int last_event_index =
+      game_history_get_num_events(config->game_history) - 1;
+  Equity cumulative_score = EQUITY_INITIAL_VALUE;
+  for (int i = last_event_index; i >= 0; i--) {
+    const GameEvent *gei = game_history_get_event(config->game_history, i);
+    if (game_event_get_player_index(gei) == player_index) {
+      cumulative_score = game_event_get_cumulative_score(gei);
+      break;
+    }
+  }
+
+  if (cumulative_score == EQUITY_INITIAL_VALUE) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_TIME_PENALTY_NO_PREVIOUS_CUMULATIVE_SCORE,
+        get_formatted_string("no prior game event has a cumulative score "
+                             "for player '%s' when "
+                             "applying time penalty",
+                             player_nickname));
+    config_restore_game_and_history(config);
+    return empty_string();
+  }
+  const Equity overtime_penalty = int_to_equity(overtime_penalty_int);
+  game_event_set_player_index(time_penalty_event, player_index);
+  game_event_set_type(time_penalty_event, GAME_EVENT_TIME_PENALTY);
+  game_event_set_cgp_move_string(time_penalty_event, NULL);
+  game_event_set_score_adjustment(time_penalty_event, overtime_penalty);
+  // Add the overtime penalty since the value is already negative
+  game_event_set_cumulative_score(time_penalty_event,
+                                  cumulative_score + overtime_penalty);
+  game_event_set_move_score(time_penalty_event, 0);
+
+  // When adding an overtime event, always advance to the end of the
+  // history so that the game play module can play through the entire
+  // game and catch any duplicate time penalty errors.
+  game_history_goto(config->game_history,
+                    game_history_get_num_events(config->game_history),
+                    error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    config_restore_game_and_history(config);
+    return empty_string();
+  }
+
+  config_game_play_events(config, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    config_restore_game_and_history(config);
+    return empty_string();
+  }
+
+  impl_export_if_autosave(config, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    config_restore_game_and_history(config);
+    return empty_string();
+  }
+
   return empty_string();
 }
 
@@ -3647,6 +3704,7 @@ char *impl_switch_names(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
   game_history_switch_names(config->game_history);
+  impl_export_if_autosave(config, error_stack);
   return empty_string();
 }
 
@@ -3815,6 +3873,7 @@ char *impl_note(Config *config, ErrorStack *error_stack) {
 
   game_history_set_note_for_most_recent_event(
       config->game_history, config_get_parg_value(config, ARG_TOKEN_NOTE, 0));
+  impl_export_if_autosave(config, error_stack);
   return empty_string();
 }
 
@@ -3833,7 +3892,8 @@ char *str_api_note(Config *config, ErrorStack *error_stack) {
 
 // Set player names
 
-char *impl_set_player_name(Config *config, arg_token_t arg_token) {
+char *impl_set_player_name(Config *config, ErrorStack *error_stack,
+                           arg_token_t arg_token) {
   const char *new_player_name = config_get_parg_value(config, arg_token, 0);
   int player_index = -1;
   switch (arg_token) {
@@ -3849,41 +3909,36 @@ char *impl_set_player_name(Config *config, arg_token_t arg_token) {
   }
   game_history_player_reset_names(config->game_history, player_index,
                                   new_player_name, NULL);
+  impl_export_if_autosave(config, error_stack);
   return empty_string();
 }
 
-void execute_set_player_name(Config *config, arg_token_t arg_token) {
-  char *result = impl_set_player_name(config, arg_token);
+void execute_set_player_name(Config *config, ErrorStack *error_stack,
+                             arg_token_t arg_token) {
+  char *result = impl_set_player_name(config, error_stack, arg_token);
   thread_control_print(config->thread_control, result);
   free(result);
 }
 
-void execute_set_player_one_name(Config *config, ErrorStack
-                                                     __attribute__((unused)) *
-                                                     error_stack) {
-  execute_set_player_name(config, ARG_TOKEN_P1_NAME);
+void execute_set_player_one_name(Config *config, ErrorStack *error_stack) {
+  execute_set_player_name(config, error_stack, ARG_TOKEN_P1_NAME);
 }
 
-void execute_set_player_two_name(Config *config, ErrorStack
-                                                     __attribute__((unused)) *
-                                                     error_stack) {
-  execute_set_player_name(config, ARG_TOKEN_P2_NAME);
+void execute_set_player_two_name(Config *config, ErrorStack *error_stack) {
+  execute_set_player_name(config, error_stack, ARG_TOKEN_P2_NAME);
 }
 
-char *str_api_set_player_name(Config *config, arg_token_t arg_token) {
-  return impl_set_player_name(config, arg_token);
+char *str_api_set_player_name(Config *config, ErrorStack *error_stack,
+                              arg_token_t arg_token) {
+  return impl_set_player_name(config, error_stack, arg_token);
 }
 
-char *str_api_set_player_one_name(Config *config, ErrorStack
-                                                      __attribute__((unused)) *
-                                                      error_stack) {
-  return impl_set_player_name(config, ARG_TOKEN_P1_NAME);
+char *str_api_set_player_one_name(Config *config, ErrorStack *error_stack) {
+  return impl_set_player_name(config, error_stack, ARG_TOKEN_P1_NAME);
 }
 
-char *str_api_set_player_two_name(Config *config, ErrorStack
-                                                      __attribute__((unused)) *
-                                                      error_stack) {
-  return impl_set_player_name(config, ARG_TOKEN_P2_NAME);
+char *str_api_set_player_two_name(Config *config, ErrorStack *error_stack) {
+  return impl_set_player_name(config, error_stack, ARG_TOKEN_P2_NAME);
 }
 
 // Load GCG
@@ -4991,6 +5046,13 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  // Autosave GCG
+  config_load_bool(config, ARG_TOKEN_AUTOSAVE_GCG, &config->autosave_gcg,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // Board color
 
   const char *board_color_str =
@@ -5246,6 +5308,13 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   config_load_lexicon_dependent_data(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
+  }
+  // If the letter distribution changed, destroy the existing game
+  // and recreate it so that it will be lazily recreated with the new
+  // letter distribution when initialized.
+  if (config->ld_changed && config->game) {
+    game_destroy(config->game);
+    config->game = NULL;
   }
 
   // Update the game history
@@ -5528,7 +5597,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_SET, "setoptions", 0, 0, noop, generic, false);
   cmd(ARG_TOKEN_CGP, "cgp", 4, 4, load_cgp, generic, false);
   cmd(ARG_TOKEN_LOAD, "load", 1, 1, load_gcg, generic, false);
-  cmd(ARG_TOKEN_NEW_GAME, "newgame", 0, 2, new_game, generic, false);
+  cmd(ARG_TOKEN_NEW_GAME, "newgame", 0, 1, new_game, generic, false);
   cmd(ARG_TOKEN_EXPORT, "export", 0, 1, export, generic, true);
   cmd(ARG_TOKEN_COMMIT, "commit", 1, 3, commit, generic, true);
   cmd(ARG_TOKEN_TOP_COMMIT, "tcommit", 0, 1, top_commit, generic, true);
@@ -5621,6 +5690,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PRINT_ON_FINISH, "printonfinish", 1, 1);
   arg(ARG_TOKEN_SHOW_PROMPT, "shprompt", 1, 1);
   arg(ARG_TOKEN_SAVE_SETTINGS, "savesettings", 1, 1);
+  arg(ARG_TOKEN_AUTOSAVE_GCG, "autosavegcg", 1, 1);
 
 #undef cmd
 #undef arg
@@ -5669,6 +5739,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->print_on_finish = false;
   config->show_prompt = true;
   config->save_settings = true;
+  config->autosave_gcg = true;
   config->loaded_settings = true;
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->ld = NULL;
@@ -6069,6 +6140,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_SAVE_SETTINGS:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->save_settings);
+      break;
+    case ARG_TOKEN_AUTOSAVE_GCG:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->autosave_gcg);
       break;
     case NUMBER_OF_ARG_TOKENS:
       log_fatal("encountered invalid arg token when saving settings");
