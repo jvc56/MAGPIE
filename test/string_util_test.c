@@ -3,6 +3,44 @@
 #include <assert.h>
 #include <stdbool.h>
 
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+
+static void test_gicr_single_line(const char *data, const char *expected) {
+  FILE *f = fmemopen((void *)data, strlen(data), "r");
+  assert(f);
+
+  char *line = NULL;
+  size_t cap = 0;
+
+  getline_ignore_carriage_return(&line, &cap, f);
+
+  assert_strings_equal(line, expected);
+
+  free(line);
+  fclose(f);
+}
+
+static void test_gicr_multiple_lines(const char *data, const char **expected,
+                                     size_t count) {
+  FILE *f = fmemopen((void *)data, strlen(data), "r");
+  assert(f);
+
+  char *line = NULL;
+  size_t cap = 0;
+
+  for (size_t i = 0; i < count; i++) {
+    getline_ignore_carriage_return(&line, &cap, f);
+    assert_strings_equal(line, expected[i]);
+  }
+
+  free(line);
+  fclose(f);
+}
+
 void test_string_splitter(const char *input, const char delimiter,
                           bool ignore_empty, int expected_number_of_items,
                           const char **expected_items) {
@@ -168,4 +206,23 @@ void test_string_util(void) {
   char str10[] = ";;;In;;between;;semicolons;;;";
   trim_char(str10, ';');
   assert_strings_equal(str10, "In;;between;;semicolons");
+
+  // Test removal of carriage returns
+
+  test_string_splitter("a\r\nb", '\n', false, 2, (const char *[]){"a", "b"});
+  test_string_splitter("a\r\nb\r\n", '\n', false, 3,
+                       (const char *[]){"a", "b", ""});
+  test_string_splitter("\r\na\r\nb\r\n", '\n', false, 4,
+                       (const char *[]){"", "a", "b", ""});
+  test_string_splitter("\na\r\nb\r", '\n', false, 3,
+                       (const char *[]){"", "a", "b\r"});
+
+  test_gicr_single_line("hello\n", "hello\n");
+  test_gicr_single_line("hello\r\n", "hello\n");
+  test_gicr_single_line("hello\r", "hello");
+  test_gicr_single_line("\r\n", "\n");
+  test_gicr_single_line("\r", "");
+  test_gicr_single_line("hello", "hello");
+  test_gicr_multiple_lines("a\r\nb\nc\rd",
+                           (const char *[]){"a\n", "b\n", "c\rd"}, 3);
 }

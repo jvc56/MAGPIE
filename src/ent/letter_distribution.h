@@ -219,6 +219,7 @@ static inline void ld_destroy(LetterDistribution *ld) {
   free(ld);
 }
 
+// FIXME: handle carriage returns
 static inline LetterDistribution *ld_create(const char *data_paths,
                                             const char *ld_name,
                                             ErrorStack *error_stack) {
