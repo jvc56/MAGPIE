@@ -278,7 +278,6 @@ StringSplitter *decode_gcg(GCGParser *gcg_parser, const char *gcg_string,
   return utf8_gcg_lines;
 }
 
-// FIXME: handle carriage returns
 GCGParser *gcg_parser_create(const char *gcg_string, GameHistory *game_history,
                              const char *existing_p0_lexicon,
                              ErrorStack *error_stack) {

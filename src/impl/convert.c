@@ -19,7 +19,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// FIXME: handle carriage returns
 void convert_from_text_with_dwl(const LetterDistribution *ld,
                                 conversion_type_t conversion_type,
                                 const char *data_paths, const char *input_name,
