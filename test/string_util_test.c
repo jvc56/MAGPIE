@@ -1,5 +1,7 @@
+#include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
+#include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,7 +20,7 @@ static void test_gicr_single_line(const char *data, const char *expected) {
   assert_strings_equal(line, expected);
 
   free(line);
-  fclose(f);
+  fclose_or_die(f);
 }
 
 static void test_gicr_multiple_lines(const char *data, const char **expected,
@@ -35,7 +37,7 @@ static void test_gicr_multiple_lines(const char *data, const char **expected,
   }
 
   free(line);
-  fclose(f);
+  fclose_or_die(f);
 }
 
 void test_string_splitter(const char *input, const char delimiter,
