@@ -6,7 +6,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
 
 static void test_gicr_single_line(const char *data, const char *expected) {
   FILE *f = fmemopen((void *)data, strlen(data), "r");
