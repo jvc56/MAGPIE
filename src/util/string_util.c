@@ -311,8 +311,12 @@ int split_string_scan(const StringDelimiter *string_delimiter,
       (str_length != 0 &&
        !char_matches_string_delimiter(string_delimiter, previous_char))) {
     if (set_items) {
+      int end = item_end_index;
+      if (end > item_start_index && input_string[end - 1] == '\r') {
+        end--;
+      }
       string_splitter->items[current_number_of_items] =
-          get_substring(input_string, item_start_index, item_end_index);
+          get_substring(input_string, item_start_index, end);
     }
     current_number_of_items++;
   }

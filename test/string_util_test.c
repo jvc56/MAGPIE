@@ -1,9 +1,6 @@
 #include "../src/util/string_util.h"
 #include "test_util.h"
-#include <assert.h>
 #include <stdbool.h>
-
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -215,7 +212,7 @@ void test_string_util(void) {
   test_string_splitter("\r\na\r\nb\r\n", '\n', false, 4,
                        (const char *[]){"", "a", "b", ""});
   test_string_splitter("\na\r\nb\r", '\n', false, 3,
-                       (const char *[]){"", "a", "b\r"});
+                       (const char *[]){"", "a", "b"});
 
   test_gicr_single_line("hello\n", "hello\n");
   test_gicr_single_line("hello\r\n", "hello\n");
