@@ -47,7 +47,7 @@ This will start MAGPIE in async interactive mode by default. For more details on
 
 MAGPIE accepts two different kinds of arguments: commands and settings.
 
-Commands perform a specific action and settings affect how the actions are performed. Some commands can take positional arguments that could be required or optional. Command arguments only apply to the given command. Settings persist between commands and only change when overwritten by a new specified value. Settings are always denoted by a '-' character. Any number of settings can be specified for any command.
+Commands perform a specific action and settings affect how the actions are performed. Some commands can take positional arguments that could be required or optional. Command arguments only apply to the given command. Settings persist between commands and only change when overwritten by a new specified value. Settings are always denoted by a `-` character. Any number of settings can be specified for any command.
 
 For example, in the following command:
 
@@ -55,7 +55,7 @@ For example, in the following command:
 magpie> autoplay games 100 -lex CSW21 -threads 4 -hr true
 ```
 
-The 'autoplay' text is the command and the 'games' and '100' text are the positional arguments. Everything else is a setting which will apply to the next command, so running the subsequent command:
+The `autoplay` text is the command and the `games` and `100` text are the positional arguments. Everything else is a setting which will apply to the next command, so running the subsequent command:
 
 ```
 magpie> autoplay games 50 -lex CSW21 -threads 4 -hr true
@@ -78,7 +78,7 @@ magpie> g
 magpie> s
 ```
 
-To print more details about commands and settings, run the 'help' command:
+To print more details about commands and settings, run the `help` command:
 
 ```
 magpie> help
@@ -93,7 +93,7 @@ magpie> help lex
 
 ### Load and Save Settings
 
-On startup, MAGPIE will check for a 'settings.txt' file in the current directory and will load the settings saved in that file if it exists. By default, after every successful command that is not invoked in script mode, MAGPIE will save the current settings to 'settings.txt' so they do not have to be reentered on the next startup. To disable this feature, set the "savesettings" setting to false.
+On startup, MAGPIE will check for a `settings.txt` file in the current directory and will load the settings saved in that file if it exists. By default, after every successful command that is not invoked in script mode, MAGPIE will save the current settings to `settings.txt` so they do not have to be reentered on the next startup. To disable this feature, set the "savesettings" setting to false.
 
 ### Execution Modes
 
@@ -103,8 +103,8 @@ MAGPIE can operate in multiple modes, which are described below:
 
 Script mode executes a single command and then exits immediately. To run in script mode, the following conditions must be met:
 
-- A command which is not 'set' or 'cgp' is given
-- No execution mode is specified with the '-mode' setting.
+- A command which is not `set` or `cgp` is given
+- No execution mode is specified with the `mode` setting.
 
 If the conditions above are not met, MAGPIE will run in interative mode and wait for user input.
 
@@ -114,7 +114,7 @@ The interactive modes of MAGPIE implement a Read-Evaluate-Print-Loop which conti
 
 ##### Asynchronous Interactive Mode
 
-Asynchronous mode allows the user to either stop or query the status of the currently running command, with the 'stop' and 'status' asynchronous commands respectively. This mode is enabled by default and can be set with the '-mode async' setting.
+Asynchronous mode allows the user to either stop or query the status of the currently running command, with the `stop` and `status` asynchronous commands respectively. This mode is enabled by default and can be set with the `-mode async` setting.
 
 In async mode a long running sim and be checked for progress and stopped at anytime during execution:
 
@@ -136,7 +136,7 @@ The asynchronous commands can also be specified by their shortest unambiguous st
 
 ##### Synchronous Interactive Mode
 
-Synchronous mode blocks while a command is running and does will not accept new commands until the previous command has completed. This mode can be set with the '-mode sync' setting. It is not recommended for human users to run in sync mode.
+Synchronous mode blocks while a command is running and does will not accept new commands until the previous command has completed. This mode can be set with the `-mode sync` setting. It is not recommended for human users to run in sync mode.
 
 For running many commands programatically from another process, it is recommended to use sync mode instead of script mode to avoid the overhead startup costs.
 
@@ -252,10 +252,16 @@ sim the generated moves:
 magpie> sim
 ```
 
-to generate moves and then sim them in a single command, use the `gsim` command:
+to generate moves and sim in a single command, use the `gsim` command:
 
 ```
 magpie> gsim
+```
+
+to set the rack, generate moves, and then sim in a single command, use the `rgsimulate` command:
+
+```
+magpie> rgs RETINAS
 ```
 
 to commit a play, use the commit command:
@@ -330,9 +336,9 @@ magpie> set -ld english
 then convert the text files to the KWG and WMP. The following example assumes a text file called `CSW50.txt` is saved to `./data/lexica`:
 
 ```
-magpie> convert txt2kwg CSW50
+magpie> convert text2kwg CSW50
 magpie> convert text2wordmap CSW50
-magpie> convert txt2kwg CSW60
+magpie> convert text2kwg CSW60
 magpie> convert text2wordmap CSW60
 ```
 

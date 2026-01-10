@@ -41,7 +41,8 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
   char *line = NULL;
   size_t len = 0;
   ssize_t read;
-  while ((read = getline(&line, &len, input_file)) != -1) {
+  while ((read = getline_ignore_carriage_return(&line, &len, input_file)) !=
+         -1) {
     if (read > 0 && line[read - 1] == '\n') {
       line[read - 1] = '\0';
     }
