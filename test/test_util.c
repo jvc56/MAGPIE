@@ -372,7 +372,8 @@ void play_top_n_equity_move(Game *game, int n) {
       .override_kwg = NULL,
       .thread_index = 0,
       .eq_margin_movegen = 0,
-  };
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,  };
 
   generate_moves(&args);
   SortedMoveList *sorted_move_list = sorted_move_list_create(move_list);
@@ -727,7 +728,8 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
       .move_list = move_list,
       .thread_index = 0,
       .eq_margin_movegen = 0,
-  };
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,  };
 
   rack_set_to_string(game_get_ld(game), player_rack, rack_string);
 
@@ -1012,7 +1014,8 @@ void generate_anchors_for_test(Game *game) {
       .override_kwg = NULL,
       .thread_index = 0,
       .eq_margin_movegen = 0,
-  };
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,  };
   gen_load_position(gen, &args);
   gen_look_up_leaves_and_record_exchanges(gen);
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {

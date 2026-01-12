@@ -452,7 +452,7 @@ void generate_moves_for_game_override_record_type(
       .override_kwg = NULL,
       .thread_index = args->thread_index,
       .eq_margin_movegen = args->eq_margin_movegen,
-      .initial_best_equity = EQUITY_INITIAL_VALUE,
+      .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
@@ -477,7 +477,7 @@ Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
                             .override_kwg = NULL,
                             .thread_index = thread_index,
                             .eq_margin_movegen = 0,
-                            .initial_best_equity = EQUITY_INITIAL_VALUE,
+                            .target_equity = EQUITY_MAX_VALUE,
                             .target_leave_size_for_exchange_cutoff =
                                 UNSET_LEAVE_SIZE};
   generate_moves(&args);
@@ -485,16 +485,16 @@ Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
 }
 
 Move *get_top_equity_move_for_inferences(
-    Game *game, int thread_index, MoveList *move_list,
-    Equity initial_best_equity, int target_leave_size_for_exchange_cutoff) {
+    Game *game, int thread_index, MoveList *move_list, Equity target_equity,
+    int target_leave_size_for_exchange_cutoff, Equity equity_margin) {
   const MoveGenArgs args = {.game = game,
                             .move_list = move_list,
                             .move_record_type = MOVE_RECORD_BEST,
                             .move_sort_type = MOVE_SORT_EQUITY,
                             .override_kwg = NULL,
                             .thread_index = thread_index,
-                            .eq_margin_movegen = 0,
-                            .initial_best_equity = initial_best_equity,
+                            .eq_margin_movegen = equity_margin,
+                            .target_equity = target_equity,
                             .target_leave_size_for_exchange_cutoff =
                                 target_leave_size_for_exchange_cutoff};
   generate_moves(&args);

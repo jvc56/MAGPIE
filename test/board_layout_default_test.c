@@ -124,7 +124,8 @@ void assert_opening_penalties(Game *game, const char *data_paths,
       .move_list = move_list,
       .thread_index = 0,
       .eq_margin_movegen = 0,
-  };
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,  };
   generate_moves_for_game(&move_gen_args);
   const Move *move = move_list_get_move(move_list, 0);
   assert_move_score(move, score);

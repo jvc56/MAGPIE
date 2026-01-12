@@ -371,19 +371,31 @@ static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen,
   return true;
 }
 
+void gen_record_wmp_subanchor(int tiles, int blocks, bool skippable);
+
 static inline void wmp_move_gen_add_anchors(WMPMoveGen *wmp_move_gen, int row,
                                             int col, int last_anchor_col,
-                                            int dir, Equity inference_cutoff_equity,
+                                            int dir,
+                                            Equity inference_cutoff_equity,
                                             AnchorHeap *anchor_heap) {
   for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
     const Anchor *anchor = &wmp_move_gen->anchors[i];
     if (anchor->tiles_to_play == 0) {
       continue;
     }
-    // When finding plays for inferences, do not heap anchors that cannot
-    // sufficiently beat the actually played move. Those anchors won't be
-    // searched anyway, but we can save even more time by not heaping them.
-    if (inference_cutoff_equity > anchor->highest_possible_equity) {
+
+    // Check if this subanchor can be skipped because its highest possible
+    // equity is below the cutoff threshold. This is safe when cutoff_equity
+    // is fixed (as in inference with stop_on_threshold).
+    const bool can_skip =
+        inference_cutoff_equity != EQUITY_MAX_VALUE &&
+        anchor->highest_possible_equity < inference_cutoff_equity;
+
+    // Instrumentation: count subanchors and how many were skipped
+    gen_record_wmp_subanchor(anchor->tiles_to_play, anchor->playthrough_blocks,
+                             can_skip);
+
+    if (can_skip) {
       continue;
     }
 

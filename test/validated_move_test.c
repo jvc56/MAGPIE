@@ -645,7 +645,8 @@ void test_validated_move_distinct_kwg(void) {
       .move_list = move_list,
       .thread_index = 0,
       .eq_margin_movegen = 0,
-  };
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,  };
 
   const Player *player0 = game_get_player(game, 0);
   const Player *player1 = game_get_player(game, 1);
