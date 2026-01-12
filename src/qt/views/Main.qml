@@ -104,11 +104,11 @@ ApplicationWindow {
         Item {
             id: leftColumn
             Layout.fillHeight: true
-            Layout.preferredWidth: parent.width * 0.4
+            Layout.preferredWidth: parent.width * 0.32
 
             // Cell size based on width only (board is square)
             property double availableW: width - 20
-            property int computedCellSize: Math.max(10, Math.floor(availableW / 15))
+            property int computedCellSize: Math.max(10, Math.min(Math.floor((width - 20) / 15), Math.floor((height - 240) / 18)))
 
             // Board Area (anchored to top)
             Item {
@@ -272,11 +272,11 @@ ApplicationWindow {
                 }
             }
 
-            // Rack (above controls)
+            // Rack (below board)
             RackView {
                 id: rackView
-                anchors.bottom: controlsRow.top
-                anchors.bottomMargin: 10
+                anchors.top: boardArea.bottom
+                anchors.topMargin: 15
                 anchors.horizontalCenter: parent.horizontalCenter
                 rack: gameModel.currentRack
                 tileSize: leftColumn.computedCellSize
@@ -459,12 +459,12 @@ ApplicationWindow {
                 }
             }
 
-            // Tile Tracking (fills space between board and rack)
+            // Tile Tracking (fills space between rack and controls)
             Rectangle {
                 id: tileTrackingArea
-                anchors.top: boardArea.bottom
+                anchors.top: rackView.bottom
                 anchors.topMargin: 10
-                anchors.bottom: rackView.top
+                anchors.bottom: controlsRow.top
                 anchors.bottomMargin: 10
                 anchors.left: parent.left
                 anchors.right: parent.right
@@ -523,14 +523,13 @@ ApplicationWindow {
                         text: gameModel.unseenTiles
                         color: "#FFFFFF"
                         font.family: "Consolas"
-                        font.pixelSize: 48
+                        // Dynamic size based on cell size, with sane limits
+                        font.pixelSize: Math.max(14, Math.min(36, leftColumn.computedCellSize * 0.8))
                         font.bold: false
                         wrapMode: Text.Wrap
                         anchors.fill: parent
                         horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        fontSizeMode: Text.Fit
-                        minimumPixelSize: 8
+                        verticalAlignment: Text.AlignTop
                     }
                 }
 
@@ -570,7 +569,7 @@ ApplicationWindow {
         // Middle Column: Status & History
         ColumnLayout {
             Layout.fillHeight: true
-            Layout.preferredWidth: parent.width * 0.3
+            Layout.preferredWidth: parent.width * 0.34
             spacing: 20
             
             // Scoreboard
@@ -809,7 +808,7 @@ ApplicationWindow {
         // Right Column: Analysis
         ColumnLayout {
             Layout.fillHeight: true
-            Layout.preferredWidth: parent.width * 0.3
+            Layout.preferredWidth: parent.width * 0.34
             spacing: 20
             
             AnalysisPanel {
