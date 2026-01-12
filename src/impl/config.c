@@ -1884,7 +1884,7 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
   if (config_get_parg_num_set_values(config, ARG_TOKEN_INFER) == 0) {
     config_infer(config, true, 0, 0, 0, &target_played_tiles,
                  &target_known_rack, &nontarget_known_rack,
-                 false,
+                 true,
                  config->inference_results, error_stack);
     return;
   }
@@ -1999,7 +1999,7 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
 
   config_infer(config, false, target_index, target_score, target_num_exch,
                &target_played_tiles, &target_known_rack, &nontarget_known_rack,
-               false,
+               true,
                config->inference_results, error_stack);
 }
 

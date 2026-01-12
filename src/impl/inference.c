@@ -624,7 +624,7 @@ void verify_inference_args(const InferenceArgs *args, const Game *game_dup,
         error_stack, ERROR_STATUS_INFERENCE_EXCHANGE_NOT_ALLOWED,
         get_formatted_string("cannot infer an exchange where there are fewer "
                              "than %d tiles in the bag",
-                             (RACK_SIZE)));
+                             (RACK_SIZE) * 2));
     return;
   }
 
