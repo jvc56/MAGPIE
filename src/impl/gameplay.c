@@ -1,3 +1,4 @@
+#include "gameplay.h"
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/equity_defs.h"
@@ -379,7 +380,7 @@ void update_cross_set_for_move(const Move *move, const Game *game) {
 }
 
 // Draws the required number of tiles to fill the rack to RACK_SIZE.
-void draw_to_full_rack(const Game *game, const int player_index) {
+void draw_to_full_rack(Game *game, const int player_index) {
   Bag *bag = game_get_bag(game);
   Rack *player_rack = player_get_rack(game_get_player(game, player_index));
   const int player_draw_index = game_get_player_draw_index(game, player_index);
@@ -412,7 +413,7 @@ bool rack_is_drawable(const Game *game, const int player_index,
 // bag to the rack. Assumes the rack is empty.
 // Returns true on success.
 // Return false when the rack letters are not in the bag.
-bool draw_rack_from_bag(const Game *game, const int player_index,
+bool draw_rack_from_bag(Game *game, const int player_index,
                         const Rack *rack_to_draw) {
   if (rack_get_dist_size(rack_to_draw) == 0) {
     // Rack is effectively NULL
@@ -456,7 +457,7 @@ void draw_leave_from_bag(Bag *bag, int player_draw_index, Rack *rack_to_update,
 // Returns number of letters drawn on success
 // Returns -1 if the string was malformed.
 // Returns -2 if the tiles were not in the bag.
-int draw_rack_string_from_bag(const Game *game, const int player_index,
+int draw_rack_string_from_bag(Game *game, const int player_index,
                               const char *rack_string) {
   const LetterDistribution *ld = game_get_ld(game);
   Rack player_rack_copy;
@@ -475,7 +476,7 @@ int draw_rack_string_from_bag(const Game *game, const int player_index,
   return number_of_letters_set;
 }
 
-void return_rack_to_bag(const Game *game, const int player_index) {
+void return_rack_to_bag(Game *game, const int player_index) {
   Bag *bag = game_get_bag(game);
   Rack *player_rack = player_get_rack(game_get_player(game, player_index));
   int player_draw_index = game_get_player_draw_index(game, player_index);
@@ -489,7 +490,7 @@ void return_rack_to_bag(const Game *game, const int player_index) {
   rack_reset(player_rack);
 }
 
-void set_random_rack(const Game *game, const int player_index,
+void set_random_rack(Game *game, const int player_index,
                      const Rack *known_rack) {
   return_rack_to_bag(game, player_index);
   if (known_rack) {
@@ -559,7 +560,7 @@ void standard_end_of_game_calculations(Game *game) {
   game_set_game_end_reason(game, GAME_END_REASON_STANDARD);
 }
 
-void draw_starting_racks(const Game *game) {
+void draw_starting_racks(Game *game) {
   draw_to_full_rack(game, 0);
   draw_to_full_rack(game, 1);
 }
@@ -1522,13 +1523,14 @@ void game_play_n_events(GameHistory *game_history, Game *game,
     const GameEvent *first_game_event = game_history_get_event(game_history, 0);
     const int p1_index = game_event_get_player_index(first_game_event);
     set_rack_from_bag_or_push_to_error_stack(
-        game, p1_index,
-        game_event_get_const_rack(first_game_event), error_stack);
+        game, p1_index, game_event_get_const_rack(first_game_event),
+        error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
 
-    // Also set the opponent's rack to ensure correct bag counts at start of game
+    // Also set the opponent's rack to ensure correct bag counts at start of
+    // game
     const int p2_index = 1 - p1_index;
     const int total_events = game_history_get_num_events(game_history);
     const Rack *p2_rack = NULL;
@@ -1542,12 +1544,14 @@ void game_play_n_events(GameHistory *game_history, Game *game,
     }
 
     if (p2_rack) {
-      set_rack_from_bag_or_push_to_error_stack(game, p2_index, p2_rack, error_stack);
+      set_rack_from_bag_or_push_to_error_stack(game, p2_index, p2_rack,
+                                               error_stack);
       if (!error_stack_is_empty(error_stack)) {
         return;
       }
     } else {
-      // If opponent never moves, draw a random rack to ensure bag count is correct
+      // If opponent never moves, draw a random rack to ensure bag count is
+      // correct
       draw_to_full_rack(game, p2_index);
     }
   }

@@ -66,6 +66,7 @@ void config_set_loaded_settings(Config *config, const bool value);
 double config_get_tt_fraction_of_mem(const Config *config);
 PlayersData *config_get_players_data(const Config *config);
 LetterDistribution *config_get_ld(const Config *config);
+void config_set_ld(Config *config, LetterDistribution *ld);
 ThreadControl *config_get_thread_control(const Config *config);
 exec_mode_t config_get_exec_mode(const Config *config);
 Game *config_get_game(const Config *config);
