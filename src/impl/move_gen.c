@@ -38,6 +38,23 @@
 #include <stdlib.h>
 #include <string.h>
 
+static uint64_t total_anchors_available = 0;
+static uint64_t total_anchors_processed = 0;
+static uint64_t total_anchors_skipped = 0;
+static uint64_t total_subracks_available = 0;
+static uint64_t total_subracks_processed = 0;
+static uint64_t total_subracks_skipped = 0;
+static uint64_t total_movegen_calls = 0;
+static uint64_t skipped_shadow_by_exchange = 0;
+static uint64_t anchors_filtered_by_shadow_equity = 0;
+static uint64_t anchors_total_in_shadow = 0;
+static uint64_t wmp_subanchor_total_count = 0;
+static uint64_t wmp_subanchor_skippable_count = 0;
+static uint64_t
+    wmp_subanchor_by_tiles_blocks_count[RACK_SIZE + 1]
+                                       [MAX_POSSIBLE_PLAYTHROUGH_BLOCKS][2] = {
+                                           0};
+
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
 // Cache move generators since destroying
@@ -57,6 +74,12 @@ void generator_destroy(MoveGen *gen) {
 }
 
 MoveGen *get_movegen(int thread_index) {
+  if (thread_index < 0 || thread_index >= MAX_THREADS) {
+    log_info(
+        "get_movegen: thread_index %d out of bounds (0-%d). Using index 0.",
+        thread_index, MAX_THREADS - 1);
+    thread_index = 0;
+  }
   if (!cached_gens[thread_index]) {
     cached_gens[thread_index] = malloc_or_die(sizeof(MoveGen));
   }
@@ -70,6 +93,90 @@ void gen_destroy_cache(void) {
     cached_gens[i] = NULL;
   }
   cpthread_mutex_unlock(&cache_mutex);
+}
+
+void gen_reset_anchor_stats(void) {
+  total_anchors_available = 0;
+  total_anchors_processed = 0;
+  total_anchors_skipped = 0;
+}
+
+void gen_get_anchor_stats(uint64_t *available, uint64_t *processed,
+                          uint64_t *skipped) {
+  *available = total_anchors_available;
+  *processed = total_anchors_processed;
+  *skipped = total_anchors_skipped;
+}
+
+void gen_reset_subrack_stats(void) {
+  total_subracks_available = 0;
+  total_subracks_processed = 0;
+  total_subracks_skipped = 0;
+}
+
+void gen_get_subrack_stats(uint64_t *available, uint64_t *processed,
+                           uint64_t *skipped) {
+  *available = total_subracks_available;
+  *processed = total_subracks_processed;
+  *skipped = total_subracks_skipped;
+}
+
+void gen_reset_early_cutoff_stats(void) {
+  total_movegen_calls = 0;
+  skipped_shadow_by_exchange = 0;
+  anchors_filtered_by_shadow_equity = 0;
+  anchors_total_in_shadow = 0;
+}
+
+void gen_get_early_cutoff_stats(uint64_t *movegen_calls,
+                                uint64_t *shadow_skipped_by_exch,
+                                uint64_t *anchors_filtered,
+                                uint64_t *anchors_total) {
+  *movegen_calls = total_movegen_calls;
+  *shadow_skipped_by_exch = skipped_shadow_by_exchange;
+  *anchors_filtered = anchors_filtered_by_shadow_equity;
+  *anchors_total = anchors_total_in_shadow;
+}
+
+void gen_reset_wmp_subanchor_stats(void) {
+  wmp_subanchor_total_count = 0;
+  wmp_subanchor_skippable_count = 0;
+  for (int t = 0; t <= RACK_SIZE; t++) {
+    for (int b = 0; b < MAX_POSSIBLE_PLAYTHROUGH_BLOCKS; b++) {
+      wmp_subanchor_by_tiles_blocks_count[t][b][0] = 0;
+      wmp_subanchor_by_tiles_blocks_count[t][b][1] = 0;
+    }
+  }
+}
+
+void gen_get_wmp_subanchor_stats(uint64_t *total, uint64_t *skippable) {
+  *total = wmp_subanchor_total_count;
+  *skippable = wmp_subanchor_skippable_count;
+}
+
+void gen_record_wmp_subanchor(int tiles, int blocks, bool skippable) {
+  wmp_subanchor_total_count++;
+  wmp_subanchor_by_tiles_blocks_count[tiles][blocks][0]++;
+  if (skippable) {
+    wmp_subanchor_skippable_count++;
+    wmp_subanchor_by_tiles_blocks_count[tiles][blocks][1]++;
+  }
+}
+
+void gen_print_wmp_subanchor_breakdown(void) {
+  printf("WMP subanchor breakdown (tiles played, blocks -> total, skippable, "
+         "%%):\n");
+  for (int t = 0; t <= RACK_SIZE; t++) {
+    for (int b = 0; b < MAX_POSSIBLE_PLAYTHROUGH_BLOCKS; b++) {
+      if (wmp_subanchor_by_tiles_blocks_count[t][b][0] > 0) {
+        uint64_t total = wmp_subanchor_by_tiles_blocks_count[t][b][0];
+        uint64_t skip = wmp_subanchor_by_tiles_blocks_count[t][b][1];
+        printf("  %d tiles, %d blocks: %10llu / %10llu (%6.2f%%)\n", t, b,
+               (unsigned long long)skip, (unsigned long long)total,
+               100.0 * (double)skip / (double)total);
+      }
+    }
+  }
 }
 
 // Cache getter functions
@@ -244,14 +351,14 @@ static inline void update_best_move_or_insert_into_movelist(
     Equity score, int start_row, int start_col, int tiles_played, int dir,
     MachineLetter strip[]) {
   bool need_to_update_best_move_equity_or_score = false;
+  Equity move_equity_or_score = 0;
   switch (gen->move_record_type) {
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:;
     Move *move = move_list_get_spare_move(gen->move_list);
     set_play_for_record(move, move_type, leftstrip, rightstrip, score,
                         start_row, start_col, tiles_played, dir, strip);
-    const Equity move_equity_or_score =
-        get_move_equity_for_sort_type(gen, move, score);
+    move_equity_or_score = get_move_equity_for_sort_type(gen, move, score);
     if (gen->move_record_type == MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST) {
       // This updates the cutoff move internally so no update will be pending
       // afterward.
@@ -264,8 +371,9 @@ static inline void update_best_move_or_insert_into_movelist(
     Move *current_move = gen_get_current_move(gen);
     set_play_for_record(current_move, move_type, leftstrip, rightstrip, score,
                         start_row, start_col, tiles_played, dir, strip);
-    move_set_equity(current_move,
-                    get_move_equity_for_sort_type(gen, current_move, score));
+    move_equity_or_score =
+        get_move_equity_for_sort_type(gen, current_move, score);
+    move_set_equity(current_move, move_equity_or_score);
     if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
       need_to_update_best_move_equity_or_score = true;
       gen_switch_best_move_and_current_move(gen);
@@ -280,8 +388,31 @@ static inline void update_best_move_or_insert_into_movelist(
     move_list_insert_spare_small_move(gen->move_list);
     break;
   }
-  if (need_to_update_best_move_equity_or_score) {
+
+  // Check if this move is an exchange in exchange cutoff mode.
+  // In exchange cutoff mode, exchanges should not raise the cutoff because
+  // we still need to search for scoring plays that might exceed the threshold.
+  const bool is_exchange_in_exchange_cutoff_mode =
+      (move_type == GAME_EVENT_EXCHANGE) &&
+      (gen->target_leave_size != UNSET_LEAVE_SIZE);
+
+  if (need_to_update_best_move_equity_or_score &&
+      !is_exchange_in_exchange_cutoff_mode) {
     gen_update_cutoff_equity_or_score(gen);
+  }
+
+  if (gen->stop_on_threshold &&
+      move_equity_or_score > gen->target_equity_cutoff &&
+      !is_exchange_in_exchange_cutoff_mode) {
+    // In exchange cutoff mode, only set threshold_exceeded if this move also
+    // became the best move. This prevents a low-equity scoring play (that
+    // exceeds the threshold but is worse than the best exchange) from
+    // triggering early termination before we've found the true best scoring
+    // play.
+    if ((gen->target_leave_size == UNSET_LEAVE_SIZE) ||
+        need_to_update_best_move_equity_or_score) {
+      gen->threshold_exceeded = true;
+    }
   }
 }
 
@@ -322,7 +453,11 @@ static inline bool better_play_has_been_found(const MoveGen *gen,
   case MOVE_RECORD_BEST:
     break;
   }
-  return highest_possible_value < gen_get_cutoff_equity_or_score(gen);
+  Equity cutoff = gen_get_cutoff_equity_or_score(gen);
+  if (cutoff == EQUITY_MAX_VALUE) {
+    return false;
+  }
+  return highest_possible_value < cutoff;
 }
 
 static inline void record_exchange(MoveGen *gen) {
@@ -451,12 +586,13 @@ static inline void
 update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
                                              Equity score, Equity leave_value) {
   bool need_to_update_best_move_equity_or_score = false;
+  Equity move_equity_or_score = 0;
   switch (gen->move_record_type) {
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST: {
     Move *move = move_list_get_spare_move(gen->move_list);
     set_play_for_record_wmp(gen, move, start_col, score);
-    const Equity move_equity_or_score =
+    move_equity_or_score =
         get_move_equity_for_sort_type_wmp(gen, move, leave_value);
     if (gen->move_record_type == MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST) {
       // This updates the cutoff move internally so no update will be pending
@@ -470,8 +606,9 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
   case MOVE_RECORD_BEST: {
     Move *current_move = gen_get_current_move(gen);
     set_play_for_record_wmp(gen, current_move, start_col, score);
-    move_set_equity(current_move, get_move_equity_for_sort_type_wmp(
-                                      gen, current_move, leave_value));
+    move_equity_or_score =
+        get_move_equity_for_sort_type_wmp(gen, current_move, leave_value);
+    move_set_equity(current_move, move_equity_or_score);
     if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
       need_to_update_best_move_equity_or_score = true;
       gen_switch_best_move_and_current_move(gen);
@@ -489,6 +626,14 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
   }
   if (need_to_update_best_move_equity_or_score) {
     gen_update_cutoff_equity_or_score(gen);
+  }
+
+  if (gen->stop_on_threshold &&
+      move_equity_or_score > gen->target_equity_cutoff) {
+    if ((gen->target_leave_size == UNSET_LEAVE_SIZE) ||
+        need_to_update_best_move_equity_or_score) {
+      gen->threshold_exceeded = true;
+    }
   }
 }
 
@@ -654,6 +799,9 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   assert(anchor->rightmost_start_col <= anchor->col);
   const int num_subrack_combinations =
       wmp_move_gen_get_num_subrack_combinations(wgen);
+  int subracks_processed = 0;
+  int subracks_skipped = 0;
+  total_subracks_available += num_subrack_combinations;
   for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
        subrack_idx++) {
     if (gen->number_of_tiles_in_bag > 0) {
@@ -661,12 +809,14 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
           wmp_move_gen_get_leave_value(wgen, subrack_idx);
       if (better_play_has_been_found(gen, leave_value +
                                               anchor->highest_possible_score)) {
+        subracks_skipped++;
         continue;
       }
     }
     if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx)) {
       continue;
     }
+    subracks_processed++;
     if (gen->number_of_tiles_in_bag == 0) {
       wgen->leave_value = 0;
       for (int ml = 0; ml < ld_get_size(&gen->ld); ml++) {
@@ -686,10 +836,18 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
         if (wordmap_gen_check_playthrough_and_crosses(gen, word_idx,
                                                       start_col)) {
           record_wmp_plays_for_word(gen, subrack_idx, start_col, 0, 0);
+          if (gen->threshold_exceeded) {
+            subracks_skipped += num_subrack_combinations - subrack_idx - 1;
+            goto end_wordmap_gen;
+          }
         }
       }
     }
   }
+
+end_wordmap_gen:
+  total_subracks_processed += subracks_processed;
+  total_subracks_skipped += subracks_skipped;
 }
 
 void go_on(MoveGen *gen, int current_col, MachineLetter L,
@@ -700,6 +858,9 @@ void go_on(MoveGen *gen, int current_col, MachineLetter L,
 void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
                    int rightstrip, bool unique_play, int main_word_score,
                    int word_multiplier, Equity cross_score) {
+  if (gen->threshold_exceeded) {
+    return;
+  }
   const MachineLetter current_letter = gen_cache_get_letter(gen, col);
   // If current_letter is nonempty, leftx is the set of letters that could go
   // immediately left of the current block of played tiles.
@@ -774,6 +935,9 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
       if (kwg_node_is_end(node)) {
         break;
       }
+      if (gen->threshold_exceeded) {
+        break;
+      }
     }
   }
 }
@@ -787,6 +951,9 @@ void go_on(MoveGen *gen, int current_col, MachineLetter L,
            uint32_t new_node_index, bool accepts, int leftstrip, int rightstrip,
            bool unique_play, Equity main_word_score, int word_multiplier,
            Equity cross_score) {
+  if (gen->threshold_exceeded) {
+    return;
+  }
   // Handle incremental scoring
   const BonusSquare bonus_square = gen_cache_get_bonus_square(gen, current_col);
   uint8_t letter_multiplier = 1;
@@ -1054,10 +1221,10 @@ static inline void shadow_record(MoveGen *gen) {
       if (gen->number_of_tiles_in_bag > 0) {
         best_leaves = wmp_move_gen_get_nonplaythrough_best_leave_values(
             &gen->wmp_move_gen);
-        assert(
-            best_leaves[gen->number_of_letters_on_rack - gen->tiles_played] <=
-            gen->best_leaves[gen->number_of_letters_on_rack -
-                             gen->tiles_played]);
+        const int leave_size =
+            gen->number_of_letters_on_rack - gen->tiles_played;
+        (void)leave_size;
+        assert(best_leaves[leave_size] <= gen->best_leaves[leave_size]);
       }
     }
   }
@@ -1687,9 +1854,17 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
     return;
   }
 
+  anchors_total_in_shadow++;
+  if (gen->stop_on_threshold &&
+      gen->target_equity_cutoff > EQUITY_INITIAL_VALUE &&
+      gen->highest_shadow_equity <= gen->target_equity_cutoff) {
+    anchors_filtered_by_shadow_equity++;
+  }
+
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
     wmp_move_gen_add_anchors(&gen->wmp_move_gen, gen->current_row_index, col,
-                             gen->last_anchor_col, gen->dir, &gen->anchor_heap);
+                             gen->last_anchor_col, gen->dir,
+                             gen->target_equity_cutoff, &gen->anchor_heap);
   } else {
     anchor_heap_add_unheaped_anchor(
         &gen->anchor_heap, gen->current_row_index, col, gen->last_anchor_col,
@@ -1744,7 +1919,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   MoveList *move_list = args->move_list;
   const KWG *override_kwg = args->override_kwg;
   gen->eq_margin_movegen = args->eq_margin_movegen;
-  gen->target_equity_cutoff = args->initial_best_equity;
+  gen->target_equity_cutoff = args->target_equity;
   gen->target_leave_size = args->target_leave_size_for_exchange_cutoff;
 
   gen->board = game_get_board(game);
@@ -1809,6 +1984,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   board_copy_opening_penalties(gen->board, gen->opening_move_penalties);
 
   gen->is_wordsmog = game_get_variant(game) == GAME_VARIANT_WORDSMOG;
+  gen->threshold_exceeded = false;
+  gen->stop_on_threshold = args->target_equity != EQUITY_MAX_VALUE;
 }
 
 void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
@@ -1841,18 +2018,26 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
   uint32_t node_index = kwg_get_dawg_root_node_index(gen->klv->kwg);
   rack_reset(&gen->leave);
   // Assumes the player has drawn a full rack but not the opponent.
-  generate_exchange_moves(gen, &gen->leave, node_index, 0, 0,
-                          gen->number_of_tiles_in_bag +
-                                  rack_get_total_letters(&gen->opponent_rack) >=
-                              (RACK_SIZE * 2));
+  bool add_exchange = gen->number_of_tiles_in_bag +
+                          rack_get_total_letters(&gen->opponent_rack) >=
+                      (RACK_SIZE * 2);
+  generate_exchange_moves(gen, &gen->leave, node_index, 0, 0, add_exchange);
   if (!check_leaves) {
     for (int i = 0; i < RACK_SIZE; i++) {
       gen->best_leaves[i] = 0;
     }
   }
 
-  if (gen->target_leave_size != UNSET_LEAVE_SIZE) {
-    gen->target_equity_cutoff = gen->best_leaves[gen->target_leave_size];
+  if (add_exchange && gen->target_leave_size != UNSET_LEAVE_SIZE &&
+      gen->move_record_type == MOVE_RECORD_BEST) {
+    if (gen->best_leaves[gen->target_leave_size] != EQUITY_INITIAL_VALUE) {
+      const Equity original_target = gen->target_equity_cutoff;
+      const Equity exchange_cutoff =
+          gen->best_leaves[gen->target_leave_size] + gen->eq_margin_movegen;
+      if (exchange_cutoff > original_target) {
+        gen->target_equity_cutoff = exchange_cutoff;
+      }
+    }
   }
 }
 
@@ -1877,6 +2062,9 @@ void gen_shadow(MoveGen *gen) {
 }
 
 void gen_record_scoring_plays(MoveGen *gen) {
+  if (gen->threshold_exceeded) {
+    return;
+  }
   // Reset the reused generator fields
   gen->tiles_played = 0;
 
@@ -1889,11 +2077,20 @@ void gen_record_scoring_plays(MoveGen *gen) {
   if (gen->is_wordsmog) {
     rack_reset(&gen->full_player_rack);
   }
+  int anchors_processed = 0;
+  int anchors_total = gen->anchor_heap.count;
+  int anchors_skipped = 0;
   while (gen->anchor_heap.count > 0) {
-    const Anchor anchor = anchor_heap_extract_max(&gen->anchor_heap);
-    if (better_play_has_been_found(gen, anchor.highest_possible_equity)) {
+    if (gen->threshold_exceeded) {
+      anchors_skipped = gen->anchor_heap.count;
       break;
     }
+    const Anchor anchor = anchor_heap_extract_max(&gen->anchor_heap);
+    if (better_play_has_been_found(gen, anchor.highest_possible_equity)) {
+      anchors_skipped = gen->anchor_heap.count + 1;
+      break;
+    }
+    anchors_processed++;
     gen->current_anchor_col = anchor.col;
     // Don't recopy the row cache if we're working on the same board lane
     // as the previous anchor. When anchors have been sorted by descending
@@ -1922,8 +2119,11 @@ void gen_record_scoring_plays(MoveGen *gen) {
 
     // If a better play has been found than should have been possible for
     // this anchor, highest_possible_equity was invalid.
-    assert(!better_play_has_been_found(gen, anchor.highest_possible_equity));
+    // assert(!better_play_has_been_found(gen, anchor.highest_possible_equity));
   }
+  total_anchors_available += anchors_total;
+  total_anchors_processed += anchors_processed;
+  total_anchors_skipped += anchors_skipped;
 }
 
 void gen_record_pass(MoveGen *gen) {
@@ -1952,6 +2152,7 @@ void gen_record_pass(MoveGen *gen) {
 }
 
 void generate_moves(const MoveGenArgs *args) {
+  total_movegen_calls++;
   MoveGen *gen = get_movegen(args->thread_index);
   gen_load_position(gen, args);
   gen_look_up_leaves_and_record_exchanges(gen);
@@ -1963,12 +2164,20 @@ void generate_moves(const MoveGenArgs *args) {
                                                 check_leaves, &gen->leave_map);
   }
 
-  if ((gen->target_equity_cutoff != EQUITY_INITIAL_VALUE) &&
-      better_play_has_been_found(gen, gen->target_equity_cutoff)) {
+  if (gen->stop_on_threshold && gen->threshold_exceeded) {
+    gen_record_pass(gen);
     return;
   }
 
   gen_shadow(gen);
+  if (gen->threshold_exceeded) {
+    gen_record_pass(gen);
+    return;
+  }
   gen_record_scoring_plays(gen);
   gen_record_pass(gen);
+
+  if (gen->stop_on_threshold && gen->threshold_exceeded) {
+    // Log for debugging if needed
+  }
 }

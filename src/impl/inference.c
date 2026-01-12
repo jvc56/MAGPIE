@@ -28,6 +28,7 @@
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
+#include "move_gen.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -54,6 +55,7 @@ typedef struct Inference {
   // lose while still being considered
   // the top move.
   Equity equity_margin;
+  bool use_infer_cutoff_optimization;
   uint64_t current_rack_index;
   uint64_t total_racks_evaluated;
   int num_threads;
@@ -81,6 +83,10 @@ typedef struct Inference {
   Game *game;
   InferenceResults *results;
 } Inference;
+
+static uint64_t cutoff_total_calls = 0;
+static uint64_t cutoff_triggered_count = 0;
+static cpthread_mutex_t cutoff_stats_lock = PTHREAD_MUTEX_INITIALIZER; // NOLINT
 
 void inference_destroy(Inference *inference) {
   if (!inference) {
@@ -139,24 +145,54 @@ void record_valid_leave(const Rack *rack, InferenceResults *results,
 }
 
 void evaluate_possible_leave(Inference *inference) {
-  Equity current_leave_value = 0;
-  if (inference->target_number_of_tiles_exchanged == 0) {
-    current_leave_value =
-        klv_get_leave_value(inference->klv, inference->current_target_leave);
+  Equity current_leave_value =
+      klv_get_leave_value(inference->klv, inference->current_target_leave);
+
+  const Equity target_equity_cutoff =
+      inference->target_score + current_leave_value + inference->equity_margin;
+  int target_leave_size = UNSET_LEAVE_SIZE;
+  Equity eq_margin_movegen = 0;
+  if (inference->use_infer_cutoff_optimization &&
+      (inference->target_number_of_tiles_exchanged > 0)) {
+    target_leave_size = RACK_SIZE - inference->target_number_of_tiles_exchanged;
+    // For exchanges, pass the margin to move generation for best_leaves
+    // calculation
+    eq_margin_movegen = inference->equity_margin;
+  }
+  if (inference->use_infer_cutoff_optimization) {
+    cpthread_mutex_lock(&cutoff_stats_lock);
+    cutoff_total_calls++;
+    cpthread_mutex_unlock(&cutoff_stats_lock);
   }
 
-  const Move *top_move = get_top_equity_move(
-      inference->game, inference->thread_index, inference->move_list);
-  const bool is_within_equity_margin = inference->target_score +
-                                           current_leave_value +
-                                           inference->equity_margin >=
-                                       move_get_equity(top_move);
+  int thread_index = inference->thread_index;
+  if (thread_index < 0) {
+    thread_index = 0;
+  }
+
+  // For tile placements, margin is already in target_equity_cutoff, so pass 0
+  const Move *top_move = get_top_equity_move_for_inferences(
+      inference->game, thread_index, inference->move_list,
+      inference->use_infer_cutoff_optimization ? target_equity_cutoff
+                                               : EQUITY_MAX_VALUE,
+      target_leave_size, eq_margin_movegen);
+
+  if (inference->use_infer_cutoff_optimization &&
+      get_movegen(thread_index)->threshold_exceeded) {
+    cpthread_mutex_lock(&cutoff_stats_lock);
+    cutoff_triggered_count++;
+    cpthread_mutex_unlock(&cutoff_stats_lock);
+  }
+
+  const bool is_within_equity_margin =
+      target_equity_cutoff >= move_get_equity(top_move);
   const int tiles_played = move_get_tiles_played(top_move);
   const bool number_exchanged_matches =
       move_get_type(top_move) == GAME_EVENT_EXCHANGE &&
       tiles_played == inference->target_number_of_tiles_exchanged;
   const bool recordable = is_within_equity_margin || number_exchanged_matches ||
                           rack_is_empty(inference->bag_as_rack);
+
   if (recordable) {
     uint64_t number_of_draws_for_leave = get_number_of_draws_for_rack(
         inference->bag_as_rack, inference->current_target_leave);
@@ -165,39 +201,44 @@ void evaluate_possible_leave(Inference *inference) {
                          INFERENCE_TYPE_RACK,
                          equity_to_double(current_leave_value),
                          number_of_draws_for_leave);
-      // The full rack for the exchange was recorded above,
-      // but now we have to record the leave and the exchanged tiles
-      for (int exchanged_tile_index = 0; exchanged_tile_index < tiles_played;
-           exchanged_tile_index++) {
-        MachineLetter tile_exchanged =
-            move_get_tile(top_move, exchanged_tile_index);
-        rack_add_letter(inference->current_target_exchanged, tile_exchanged);
-        rack_take_letter(inference->current_target_leave, tile_exchanged);
-      }
-      record_valid_leave(inference->current_target_leave, inference->results,
-                         INFERENCE_TYPE_LEAVE,
-                         equity_to_double(klv_get_leave_value(
-                             inference->klv, inference->current_target_leave)),
-                         number_of_draws_for_leave);
-      record_valid_leave(
-          inference->current_target_exchanged, inference->results,
-          INFERENCE_TYPE_EXCHANGED,
-          equity_to_double(klv_get_leave_value(
-              inference->klv, inference->current_target_exchanged)),
-          number_of_draws_for_leave);
-      leave_rack_list_insert_rack(
-          inference->current_target_leave, inference->current_target_exchanged,
-          (int)number_of_draws_for_leave, current_leave_value,
-          inference_results_get_leave_rack_list(inference->results));
-      alias_method_add_rack(
-          inference_results_get_alias_method(inference->results),
-          inference->current_target_leave, (int)number_of_draws_for_leave);
-      rack_reset(inference->current_target_exchanged);
-      for (int exchanged_tile_index = 0; exchanged_tile_index < tiles_played;
-           exchanged_tile_index++) {
-        MachineLetter tile_exchanged =
-            move_get_tile(top_move, exchanged_tile_index);
-        rack_add_letter(inference->current_target_leave, tile_exchanged);
+
+      if (number_exchanged_matches) {
+        // The full rack for the exchange was recorded above,
+        // but now we have to record the leave and the exchanged tiles
+        for (int exchanged_tile_index = 0; exchanged_tile_index < tiles_played;
+             exchanged_tile_index++) {
+          MachineLetter tile_exchanged =
+              move_get_tile(top_move, exchanged_tile_index);
+          rack_add_letter(inference->current_target_exchanged, tile_exchanged);
+          rack_take_letter(inference->current_target_leave, tile_exchanged);
+        }
+        record_valid_leave(
+            inference->current_target_leave, inference->results,
+            INFERENCE_TYPE_LEAVE,
+            equity_to_double(klv_get_leave_value(
+                inference->klv, inference->current_target_leave)),
+            number_of_draws_for_leave);
+        record_valid_leave(
+            inference->current_target_exchanged, inference->results,
+            INFERENCE_TYPE_EXCHANGED,
+            equity_to_double(klv_get_leave_value(
+                inference->klv, inference->current_target_exchanged)),
+            number_of_draws_for_leave);
+        leave_rack_list_insert_rack(
+            inference->current_target_leave,
+            inference->current_target_exchanged, (int)number_of_draws_for_leave,
+            current_leave_value,
+            inference_results_get_leave_rack_list(inference->results));
+        alias_method_add_rack(
+            inference_results_get_alias_method(inference->results),
+            inference->current_target_leave, (int)number_of_draws_for_leave);
+        rack_reset(inference->current_target_exchanged);
+        for (int exchanged_tile_index = 0; exchanged_tile_index < tiles_played;
+             exchanged_tile_index++) {
+          MachineLetter tile_exchanged =
+              move_get_tile(top_move, exchanged_tile_index);
+          rack_add_letter(inference->current_target_leave, tile_exchanged);
+        }
       }
     } else {
       record_valid_leave(inference->current_target_leave, inference->results,
@@ -240,6 +281,8 @@ Inference *inference_create(Game *game, const InferenceArgs *args,
   inference->target_score = args->target_score;
   inference->target_number_of_tiles_exchanged = args->target_num_exch;
   inference->equity_margin = args->equity_margin;
+  inference->use_infer_cutoff_optimization =
+      args->use_inference_cutoff_optimization;
   inference->current_rack_index = 0;
   inference->total_racks_evaluated = 0;
   inference->num_threads = args->num_threads;
@@ -341,6 +384,8 @@ Inference *inference_duplicate(const Inference *inference, int thread_index,
   new_inference->target_number_of_tiles_exchanged =
       inference->target_number_of_tiles_exchanged;
   new_inference->equity_margin = inference->equity_margin;
+  new_inference->use_infer_cutoff_optimization =
+      inference->use_infer_cutoff_optimization;
   new_inference->current_rack_index = inference->current_rack_index;
   new_inference->total_racks_evaluated = inference->total_racks_evaluated;
 
@@ -747,4 +792,30 @@ void infer(InferenceArgs *args, InferenceResults *results,
   Game *game = game_duplicate(args->game);
   infer_with_game_duplicate(args, game, results, error_stack);
   game_destroy(game);
+}
+
+void inference_reset_cutoff_stats(void) {
+  cpthread_mutex_lock(&cutoff_stats_lock);
+  cutoff_total_calls = 0;
+  cutoff_triggered_count = 0;
+  cpthread_mutex_unlock(&cutoff_stats_lock);
+}
+
+void inference_get_cutoff_stats(uint64_t *total_calls, uint64_t *triggered) {
+  cpthread_mutex_lock(&cutoff_stats_lock);
+  *total_calls = cutoff_total_calls;
+  *triggered = cutoff_triggered_count;
+  cpthread_mutex_unlock(&cutoff_stats_lock);
+}
+
+void inference_print_cutoff_stats(void) {
+  if (cutoff_total_calls > 0) {
+    double pct =
+        100.0 * (double)cutoff_triggered_count / (double)cutoff_total_calls;
+    printf("Cutoff stats: %llu triggered / %llu total (%.2f%%)\n",
+           (unsigned long long)cutoff_triggered_count,
+           (unsigned long long)cutoff_total_calls, pct);
+  } else {
+    printf("Cutoff stats: no calls\n");
+  }
 }

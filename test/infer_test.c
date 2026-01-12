@@ -1,3 +1,4 @@
+#include "../src/compat/ctime.h"
 #include "../src/def/inference_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/thread_control_defs.h"
@@ -15,14 +16,19 @@
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
 #include "../src/ent/xoshiro.h"
+#include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/inference.h"
+#include "../src/str/rack_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/math_util.h"
 #include "../src/util/string_util.h"
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
+#include <math.h>
+#include <stdbool.h>
 #include <stdlib.h>
 
 int leave_rack_get_leave_total_letters(const LeaveRack *leave_rack,
@@ -41,12 +47,58 @@ int leave_rack_get_leave_letter(const LeaveRack *leave_rack, MachineLetter ml,
   return rack_get_letter(&rack, ml);
 }
 
+typedef struct InferDiagnostics {
+  char *cgp;
+  char *played_tiles_str;
+  int game_num;
+  int player_on_turn;
+  int score;
+  int target_num_exch;
+  uint64_t seed;
+} InferDiagnostics;
+
+void print_infer_diagnostics(const InferDiagnostics *diag) {
+  printf("\n--- Inference Mismatch Diagnostics ---\n");
+  printf("Game Num: %d, Seed: %llu\n", diag->game_num,
+         (unsigned long long)diag->seed);
+  printf("Player: %d, Score: %d, Exch: %d\n", diag->player_on_turn, diag->score,
+         diag->target_num_exch);
+  printf("Played Tiles Rack: %s\n", diag->played_tiles_str);
+  printf("CGP: %s\n", diag->cgp);
+  printf("--------------------------------------\n\n");
+}
+
+void assert_inference_results_equal(const InferenceResults *r1,
+                                    const InferenceResults *r2,
+                                    const InferDiagnostics *diag) {
+  Stat *e1 = inference_results_get_equity_values((InferenceResults *)r1,
+                                                 INFERENCE_TYPE_LEAVE);
+  Stat *e2 = inference_results_get_equity_values((InferenceResults *)r2,
+                                                 INFERENCE_TYPE_LEAVE);
+
+  if (stat_get_num_samples(e1) != stat_get_num_samples(e2)) {
+    print_infer_diagnostics(diag);
+    printf("Sample count mismatch: %llu (with) vs %llu (without)\n",
+           (unsigned long long)stat_get_num_samples(e1),
+           (unsigned long long)stat_get_num_samples(e2));
+    assert(stat_get_num_samples(e1) == stat_get_num_samples(e2));
+  }
+
+  if (fabs(stat_get_mean(e1) - stat_get_mean(e2)) > 1e-9) {
+    print_infer_diagnostics(diag);
+    printf("Mean equity mismatch: %.10f (with) vs %.10f (without)\n",
+           stat_get_mean(e1), stat_get_mean(e2));
+    assert(fabs(stat_get_mean(e1) - stat_get_mean(e2)) < 1e-9);
+  }
+}
+
 error_code_t infer_for_test(const Config *config, int target_index,
                             int target_score, int target_num_exch,
                             const char *target_played_tiles_str,
                             const char *target_known_rack_str,
                             const char *nontarget_known_rack_str,
-                            InferenceResults *inference_results) {
+                            InferenceResults *inference_results,
+                            bool use_cutoff) {
   const Game *game = config_get_game(config);
   const LetterDistribution *ld = game_get_ld(game);
   const int ld_size = ld_get_size(ld);
@@ -74,7 +126,8 @@ error_code_t infer_for_test(const Config *config, int target_index,
                             THREAD_CONTROL_STATUS_STARTED);
   config_infer(config, false, target_index, int_to_equity(target_score),
                target_num_exch, &target_played_tiles, &target_known_rack,
-               &nontarget_known_rack, inference_results, error_stack);
+               &nontarget_known_rack, use_cutoff, inference_results,
+               error_stack);
   error_code_t status = error_stack_top(error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
@@ -113,7 +166,7 @@ error_code_t infer_for_test_with_history(const Config *config,
     }
   }
   config_infer(config, true, 0, 0, 0, &target_played_tiles, &target_known_rack,
-               &nontarget_known_rack, inference_results, error_stack);
+               &nontarget_known_rack, false, inference_results, error_stack);
   error_code_t status = error_stack_top(error_stack);
   error_stack_destroy(error_stack);
   return status;
@@ -205,13 +258,13 @@ void test_infer_rack_overflow(void) {
   Game *game = config_get_game(config);
   InferenceResults *inference_results = inference_results_create(NULL);
 
-  error_code_t status =
-      infer_for_test(config, 0, 0, 0, "ABCDEFGH", "", "", inference_results);
+  error_code_t status = infer_for_test(config, 0, 0, 0, "ABCDEFGH", "", "",
+                                       inference_results, false);
   assert(status == ERROR_STATUS_INFERENCE_RACK_OVERFLOW);
   game_reset(game);
 
-  status =
-      infer_for_test(config, 0, 0, 0, "DEFGH", "ABC", "", inference_results);
+  status = infer_for_test(config, 0, 0, 0, "DEFGH", "ABC", "",
+                          inference_results, false);
   assert(status == ERROR_STATUS_INFERENCE_RACK_OVERFLOW);
 
   inference_results_destroy(inference_results);
@@ -227,7 +280,7 @@ void test_infer_no_tiles_played_rack_empty(void) {
   ErrorStack *error_stack = error_stack_create();
   InferenceResults *inference_results = inference_results_create(NULL);
   error_code_t status =
-      infer_for_test(config, 0, 0, 0, "", "", "", inference_results);
+      infer_for_test(config, 0, 0, 0, "", "", "", inference_results, false);
   assert(status == ERROR_STATUS_INFERENCE_NO_TILES_PLAYED);
 
   error_stack_destroy(error_stack);
@@ -242,8 +295,8 @@ void test_infer_both_play_and_exchange(void) {
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
   InferenceResults *inference_results = inference_results_create(NULL);
-  error_code_t status =
-      infer_for_test(config, 0, 0, 1, "DEFGH", "", "", inference_results);
+  error_code_t status = infer_for_test(config, 0, 0, 1, "DEFGH", "", "",
+                                       inference_results, false);
   assert(status == ERROR_STATUS_INFERENCE_BOTH_PLAY_AND_EXCHANGE);
 
   inference_results_destroy(inference_results);
@@ -258,7 +311,7 @@ void test_infer_exchange_score_not_zero(void) {
 
   InferenceResults *inference_results = inference_results_create(NULL);
   error_code_t status =
-      infer_for_test(config, 0, 3, 1, "", "", "", inference_results);
+      infer_for_test(config, 0, 3, 1, "", "", "", inference_results, false);
   assert(status == ERROR_STATUS_INFERENCE_EXCHANGE_SCORE_NOT_ZERO);
 
   inference_results_destroy(inference_results);
@@ -277,12 +330,13 @@ void test_infer_exchange_not_board_is_letter_allowed_in_cross_set(void) {
   load_cgp_or_die(game, VS_JEREMY);
   InferenceResults *inference_results = inference_results_create(NULL);
   error_code_t status =
-      infer_for_test(config, 0, 3, 1, "", "", "", inference_results);
+      infer_for_test(config, 0, 3, 1, "", "", "", inference_results, false);
   assert(status == ERROR_STATUS_INFERENCE_EXCHANGE_NOT_ALLOWED);
 
   bag_add_letter(bag, BLANK_MACHINE_LETTER, 0);
   // There should now be 14 tiles in the bag
-  status = infer_for_test(config, 0, 3, 1, "", "", "", inference_results);
+  status =
+      infer_for_test(config, 0, 3, 1, "", "", "", inference_results, false);
   assert(status == ERROR_STATUS_INFERENCE_EXCHANGE_SCORE_NOT_ZERO);
 
   inference_results_destroy(inference_results);
@@ -296,9 +350,9 @@ void test_infer_tiles_played_not_in_bag(void) {
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
   InferenceResults *inference_results = inference_results_create(NULL);
-  load_and_exec_config_or_die(config, "set -im 0 -threads 1");
-  error_code_t status =
-      infer_for_test(config, 0, 0, 1, "ACBYEYY", "", "", inference_results);
+  load_and_exec_config_or_die(config, "set -eq 0 -threads 1");
+  error_code_t status = infer_for_test(config, 0, 0, 1, "ACBYEYY", "", "",
+                                       inference_results, false);
   assert(status == ERROR_STATUS_INFERENCE_TARGET_LETTERS_NOT_IN_BAG);
 
   inference_results_destroy(inference_results);
@@ -356,8 +410,8 @@ void test_infer_nonerror_cases(const int number_of_threads,
                                       ">Tim: MUZAKS 8H MUZAKS +52 52");
     status = infer_for_test_with_history(config, inference_results, 1);
   } else {
-    status =
-        infer_for_test(config, 0, 52, 0, "MUZAKS", "", "", inference_results);
+    status = infer_for_test(config, 0, 52, 0, "MUZAKS", "", "",
+                            inference_results, false);
   }
   assert(status == ERROR_STATUS_SUCCESS);
   // With this rack, only keeping an S is possible, and
@@ -365,6 +419,10 @@ void test_infer_nonerror_cases(const int number_of_threads,
 
   const Stat *equity_values = inference_results_get_equity_values(
       inference_results, INFERENCE_TYPE_LEAVE);
+  if (stat_get_num_samples(equity_values) != 3) {
+    log_info("Expected 3 samples, found %lu",
+             stat_get_num_samples(equity_values));
+  }
   assert(stat_get_num_samples(equity_values) == 3);
   assert(stat_get_num_unique_samples(equity_values) == 1);
   rack_set_to_string(ld, rack, "S");
@@ -420,8 +478,8 @@ void test_infer_nonerror_cases(const int number_of_threads,
                                       ">Tim: MUZAKY 8H MUZAKY +58 58");
     status = infer_for_test_with_history(config, inference_results, 1);
   } else {
-    status =
-        infer_for_test(config, 0, 58, 0, "MUZAKY", "", "", inference_results);
+    status = infer_for_test(config, 0, 58, 0, "MUZAKY", "", "",
+                            inference_results, false);
   }
 
   assert(status == ERROR_STATUS_SUCCESS);
@@ -493,8 +551,8 @@ void test_infer_nonerror_cases(const int number_of_threads,
                                       ">Tim: MUZAK 8H MUZAK +50 50");
     status = infer_for_test_with_history(config, inference_results, 1);
   } else {
-    status =
-        infer_for_test(config, 0, 50, 0, "MUZAK", "", "", inference_results);
+    status = infer_for_test(config, 0, 50, 0, "MUZAK", "", "",
+                            inference_results, false);
   }
 
   assert(status == ERROR_STATUS_SUCCESS);
@@ -541,7 +599,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
         game_history_get_num_events(config_get_game_history(config)));
   } else {
     status = infer_for_test(config, 0, 32, 0, "DEW??", "", "AHIILR",
-                            inference_results);
+                            inference_results, false);
   }
   assert(status == ERROR_STATUS_SUCCESS);
   // Refetch equity values because the underlying
@@ -609,7 +667,8 @@ void test_infer_nonerror_cases(const int number_of_threads,
                                       ">Tim: ERNT 8G RENT +8 8");
     status = infer_for_test_with_history(config, inference_results, 1);
   } else {
-    status = infer_for_test(config, 0, 8, 0, "ENRT", "", "", inference_results);
+    status = infer_for_test(config, 0, 8, 0, "ENRT", "", "", inference_results,
+                            false);
   }
 
   assert(status == ERROR_STATUS_SUCCESS);
@@ -740,20 +799,18 @@ void test_infer_nonerror_cases(const int number_of_threads,
   // Z(OOPSYCHOLOGY) is over 100 points so keeping the Z will never be
   // inferred
   // for plays scoring 50.
-  load_and_exec_config_or_die(config, "set -im 0");
-  status = infer_for_test(config, 0, 50, 0, "IIII", "", "", inference_results);
+  load_and_exec_config_or_die(config, "set -eq 0");
+  status = infer_for_test(config, 0, 50, 0, "IIII", "", "", inference_results,
+                          false);
   assert(status == ERROR_STATUS_SUCCESS);
   // There are only 4 racks for which not playing Z(OOPSYCHOLOGY) is
   // correct:
   // EEEIIII = 4 possible draws for E = 4 total
-  // EEIIIII = 6 possible draws for the Es * 3 possible draws for the Is =
-  // 18
-  // total EIIIIII = 4 possible draws for E = 4  * 3 possible draws for the
-  // Is =
-  // 12 IIIIIII = 1 possible draw for the Is = 1 For a total of 35
-  // possible draws
-  // Refetch equity values because the underlying
-  // inference_results results were recreated
+  // EEIIIII = 6 possible draws for the Es * 3 possible draws for the Is = 18
+  // total EIIIIII = 4 possible draws for E = 4 * 3 possible draws for the Is =
+  // 12 IIIIIII = 1 possible draw for the Is = 1 For a total of 35 possible
+  // draws Refetch equity values because the underlying inference_results
+  // results were recreated
   equity_values = inference_results_get_equity_values(inference_results,
                                                       INFERENCE_TYPE_LEAVE);
   assert(stat_get_num_samples(equity_values) == 35);
@@ -867,8 +924,8 @@ void test_infer_nonerror_cases(const int number_of_threads,
                                       ">Tim: MUZAKY 8H MUZAKY +58 58");
     status = infer_for_test_with_history(config, inference_results, 1);
   } else {
-    status =
-        infer_for_test(config, 0, 58, 0, "MUZAKY", "", "", inference_results);
+    status = infer_for_test(config, 0, 58, 0, "MUZAKY", "", "",
+                            inference_results, false);
   }
 
   assert(status == ERROR_STATUS_SUCCESS);
@@ -877,15 +934,16 @@ void test_infer_nonerror_cases(const int number_of_threads,
   // K - none in bag
   // Q - QUAKY
   // Z - none in bag
-  // Letters now possible because of the additional 5 equity buffer:
-  // A - YAKUZA
-  // 2 Bs and 1 Q with 6 played tiles is 100 - (2 + 1 + 6) = 91
-  // Refetch equity values because the underlying
+  // Letters now possible because of the additional 5
+  // equity buffer: A - YAKUZA 2 Bs and 1 Q with 6
+  // played tiles is 100 - (2 + 1 + 6) = 91 Refetch
+  // equity values because the underlying
   // inference_results results were recreated
   equity_values = inference_results_get_equity_values(inference_results,
                                                       INFERENCE_TYPE_LEAVE);
   assert(stat_get_num_samples(equity_values) == 91);
-  // All letters except the 4 described above are possible, so 27 - 4 = 23
+  // All letters except the 4 described above are
+  // possible, so 27 - 4 = 23
   assert(stat_get_num_unique_samples(equity_values) == 23);
   for (int i = 0; i < ld_size; i++) {
     if (i == ld_hl_to_ml(ld, "B") || i == ld_hl_to_ml(ld, "K") ||
@@ -902,15 +960,15 @@ void test_infer_nonerror_cases(const int number_of_threads,
 
   // Test partial leaves
   // play GRIND with partial leave of ?
-  // Partially known leaves that are on the player's rack
-  // before the inference_results are not removed from the bag, so
-  // we have to remove it here.
+  // Partially known leaves that are on the player's
+  // rack before the inference_results are not removed
+  // from the bag, so we have to remove it here.
 
   load_and_exec_config_or_die(config, "set -im 0");
   if (use_game_history) {
     StringBuilder *gcg_builder = string_builder_create();
-    // The phony of IX* should make the X a known tile for the inference of
-    // GRIND
+    // The phony of IX* should make the X a known tile
+    // for the inference of GRIND
     string_builder_add_string(gcg_builder, ">Tim: I? 8H Iz +2 2\n");
     string_builder_add_string(gcg_builder, ">Tim: I? -- -2 0\n");
     string_builder_add_string(gcg_builder, ">Josh: AAAAAAA -AAAAAAA +0 0\n");
@@ -920,8 +978,8 @@ void test_infer_nonerror_cases(const int number_of_threads,
     string_builder_destroy(gcg_builder);
     status = infer_for_test_with_history(config, inference_results, 4);
   } else {
-    status =
-        infer_for_test(config, 0, 18, 0, "GRIND", "?", "", inference_results);
+    status = infer_for_test(config, 0, 18, 0, "GRIND", "?", "",
+                            inference_results, false);
   }
 
   assert(status == ERROR_STATUS_SUCCESS);
@@ -955,8 +1013,8 @@ void test_infer_nonerror_cases(const int number_of_threads,
   load_and_exec_config_or_die(config, "set -im 0");
   if (use_game_history) {
     StringBuilder *gcg_builder = string_builder_create();
-    // The phony of IH* should make the H a known tile for the inference of
-    // RIN
+    // The phony of IH* should make the H a known tile
+    // for the inference of RIN
     string_builder_add_string(gcg_builder, ">Tim: IH 8H IH +10 10\n");
     string_builder_add_string(gcg_builder, ">Tim: IH -- -10 0\n");
     string_builder_add_string(gcg_builder, ">Josh: AAAAAAA -AAAAAAA +0 0\n");
@@ -966,13 +1024,14 @@ void test_infer_nonerror_cases(const int number_of_threads,
     string_builder_destroy(gcg_builder);
     status = infer_for_test_with_history(config, inference_results, 4);
   } else {
-    status = infer_for_test(config, 0, 6, 0, "RIN", "H", "", inference_results);
+    status = infer_for_test(config, 0, 6, 0, "RIN", "H", "", inference_results,
+                            false);
   }
 
-  // If the player opens with RIN for 6 keeping an H, there are only 3
-  // possible racks where this would be correct:
-  // 1) ?HIINRR keeping ?HIR = 2 * 2 * 8 * 5 = 160
-  // 2) ?HINNRR keeping ?HNR = 2 * 2 * 5 * 5 = 100
+  // If the player opens with RIN for 6 keeping an H,
+  // there are only 3 possible racks where this would be
+  // correct: 1) ?HIINRR keeping ?HIR = 2 * 2 * 8 * 5 =
+  // 160 2) ?HINNRR keeping ?HNR = 2 * 2 * 5 * 5 = 100
   // 3) HIINNRR keeping HINR = 2 * 8 * 5 * 5 = 400
   // For a total of 660 possible draws
   assert(status == ERROR_STATUS_SUCCESS);
@@ -1021,8 +1080,9 @@ void test_infer_nonerror_cases(const int number_of_threads,
                INFERENCE_SUBTOTAL_DRAW) != 0);
   } else {
     load_cgp_or_die(game, VS_JEREMY);
-    // Take out good letters and throw in bad ones to force certain
-    // racks to have exchange as the best play
+    // Take out good letters and throw in bad ones to
+    // force certain racks to have exchange as the best
+    // play
     bag_draw_letter(bag, ld_hl_to_ml(ld, "?"), 0);
     bag_draw_letter(bag, ld_hl_to_ml(ld, "?"), 0);
     bag_draw_letter(bag, ld_hl_to_ml(ld, "E"), 0);
@@ -1034,7 +1094,8 @@ void test_infer_nonerror_cases(const int number_of_threads,
     bag_add_letter(bag, ld_hl_to_ml(ld, "V"), 0);
     bag_add_letter(bag, ld_hl_to_ml(ld, "V"), 0);
 
-    status = infer_for_test(config, 0, 0, 6, "", "", "", inference_results);
+    status =
+        infer_for_test(config, 0, 0, 6, "", "", "", inference_results, false);
 
     assert(status == ERROR_STATUS_SUCCESS);
     // Keeping any one of D, H, R, or S is valid
@@ -1051,8 +1112,8 @@ void test_infer_nonerror_cases(const int number_of_threads,
                inference_results, INFERENCE_TYPE_LEAVE, ld_hl_to_ml(ld, "S"), 1,
                INFERENCE_SUBTOTAL_DRAW) != 0);
 
-    // There are exchanges where throwing back at least one
-    // of these is correct
+    // There are exchanges where throwing back at least
+    // one of these is correct
     assert(inference_results_get_subtotal(
                inference_results, INFERENCE_TYPE_EXCHANGED,
                ld_hl_to_ml(ld, "D"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
@@ -1087,20 +1148,737 @@ void test_infer_nonerror_cases(const int number_of_threads,
   config_destroy(config);
 }
 
-void test_infer(void) {
-  test_leave_rack_reset();
-  test_trivial_random_probability();
-  test_infer_rack_overflow();
-  test_infer_no_tiles_played_rack_empty();
-  test_infer_both_play_and_exchange();
-  test_infer_exchange_score_not_zero();
-  test_infer_exchange_not_board_is_letter_allowed_in_cross_set();
-  test_infer_tiles_played_not_in_bag();
-  test_infer_empty_game_history();
-  for (int i = 0; i < 2; i++) {
-    const bool use_game_history = i == 1;
-    test_infer_nonerror_cases(1, use_game_history);
-    test_infer_nonerror_cases(2, use_game_history);
-    test_infer_nonerror_cases(7, use_game_history);
+// Helper to extract played tiles from a move
+static void get_played_tiles_from_move(const Move *move, Rack *played_tiles,
+                                       int ld_size) {
+  rack_set_dist_size_and_reset(played_tiles, ld_size);
+  const game_event_t move_type = move_get_type(move);
+
+  if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    const int tiles_length = move_get_tiles_length(move);
+    for (int i = 0; i < tiles_length; i++) {
+      uint8_t ml = move_get_tile(move, i);
+      if (ml == PLAYED_THROUGH_MARKER) {
+        continue;
+      }
+      if (get_is_blanked(ml)) {
+        rack_add_letter(played_tiles, BLANK_MACHINE_LETTER);
+      } else {
+        rack_add_letter(played_tiles, ml);
+      }
+    }
+  } else if (move_type == GAME_EVENT_EXCHANGE) {
+    const int tiles_played = move_get_tiles_played(move);
+    for (int i = 0; i < tiles_played; i++) {
+      rack_add_letter(played_tiles, move_get_tile(move, i));
+    }
   }
+}
+
+void test_infer_cutoff_optimization(void) {
+  const int NUM_GAMES = 5;
+  const int NUM_THREADS = 4;
+
+  char config_str[256];
+  snprintf(config_str, sizeof(config_str),
+           "set -lex CSW21 -wmp true -s1 equity -s2 equity "
+           "-r1 all -r2 all -numplays 1 -threads %d -equitymargin 2",
+           NUM_THREADS);
+  Config *config = config_create_or_die(config_str);
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const int ld_size = ld_get_size(ld);
+  Bag *bag = game_get_bag(game);
+
+  MoveList *move_list = move_list_create(1);
+  InferenceResults *results_with_cutoff = inference_results_create(NULL);
+  InferenceResults *results_without_cutoff = inference_results_create(NULL);
+
+  int mismatches = 0;
+
+  Rack played_tiles;
+  rack_set_dist_size(&played_tiles, ld_size);
+
+  for (int game_num = 0; game_num < NUM_GAMES; game_num++) {
+    game_reset(game);
+    bag_seed(bag, 13345 + (uint64_t)game_num * 1000);
+    draw_starting_racks(game);
+
+    int turn_number = 0;
+    while (!game_over(game)) {
+      const int player_on_turn = game_get_player_on_turn_index(game);
+      const int tiles_in_bag = bag_get_letters(bag);
+
+      // Generate best move
+      const Move *move = get_top_equity_move(game, 0, move_list);
+      const game_event_t move_type = move_get_type(move);
+      const int tiles_played = move_get_tiles_played(move);
+      const int score = equity_to_int(move_get_score(move));
+
+      // Skip first turn of game (no previous move to infer from)
+      if (turn_number == 0) {
+        play_move(move, game, NULL);
+        turn_number++;
+        continue;
+      }
+
+      // Skip passes
+      if (move_type == GAME_EVENT_PASS) {
+        play_move(move, game, NULL);
+        turn_number++;
+        continue;
+      }
+
+      // Get played tiles
+      get_played_tiles_from_move(move, &played_tiles, ld_size);
+
+      // Only infer if enough tiles in bag
+      if (tiles_in_bag < RACK_SIZE) {
+        play_move(move, game, NULL);
+        turn_number++;
+        continue;
+      }
+
+      // Build played tiles string
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_rack(sb, &played_tiles, ld, false);
+      char *played_tiles_str = string_builder_dump(sb, NULL);
+      string_builder_destroy(sb);
+
+      const int target_num_exch =
+          (move_type == GAME_EVENT_EXCHANGE) ? tiles_played : 0;
+      const char *tiles_for_infer =
+          (move_type == GAME_EVENT_EXCHANGE) ? "" : played_tiles_str;
+
+      // Reset results
+      inference_results_reset(results_with_cutoff, 1, ld_size);
+      inference_results_reset(results_without_cutoff, 1, ld_size);
+
+      // Convert tiles_for_infer string to Rack
+      Rack infer_played_tiles;
+      rack_set_dist_size_and_reset(&infer_played_tiles, ld_size);
+      if (move_type != GAME_EVENT_EXCHANGE && strlen(tiles_for_infer) > 0) {
+        rack_set_to_string(ld, &infer_played_tiles, tiles_for_infer);
+      }
+
+      Rack empty_rack;
+      rack_set_dist_size_and_reset(&empty_rack, ld_size);
+
+      ErrorStack *error_stack = error_stack_create();
+
+      // Run with cutoff
+      thread_control_set_status(config_get_thread_control(config),
+                                THREAD_CONTROL_STATUS_STARTED);
+      config_infer(config, false, player_on_turn, int_to_equity(score),
+                   target_num_exch, &infer_played_tiles, &empty_rack,
+                   &empty_rack, true, results_with_cutoff, error_stack);
+      error_code_t status1 = error_stack_top(error_stack);
+
+      // Run without cutoff
+      error_stack_reset(error_stack);
+      thread_control_set_status(config_get_thread_control(config),
+                                THREAD_CONTROL_STATUS_STARTED);
+      config_infer(config, false, player_on_turn, int_to_equity(score),
+                   target_num_exch, &infer_played_tiles, &empty_rack,
+                   &empty_rack, false, results_without_cutoff, error_stack);
+      error_code_t status2 = error_stack_top(error_stack);
+
+      error_stack_destroy(error_stack);
+
+      // Play the move to continue game
+      play_move(move, game, NULL);
+      turn_number++;
+
+      // Check status
+      assert(status1 == status2);
+
+      if (status1 == ERROR_STATUS_SUCCESS) {
+        // Compare sample counts
+        const Stat *equity1 = inference_results_get_equity_values(
+            results_with_cutoff, INFERENCE_TYPE_LEAVE);
+        const Stat *equity2 = inference_results_get_equity_values(
+            results_without_cutoff, INFERENCE_TYPE_LEAVE);
+
+        if (stat_get_num_samples(equity1) != stat_get_num_samples(equity2)) {
+          log_info(
+              "Mismatch in sample counts for move: %s, score: %d, exch: %d",
+              played_tiles_str, score, target_num_exch);
+          log_info("With cutoff: %lu, Without cutoff: %lu",
+                   stat_get_num_samples(equity1),
+                   stat_get_num_samples(equity2));
+          mismatches++;
+        }
+      }
+
+      free(played_tiles_str);
+    }
+  }
+
+  inference_results_destroy(results_with_cutoff);
+  inference_results_destroy(results_without_cutoff);
+  move_list_destroy(move_list);
+  config_destroy(config);
+
+  assert(mismatches == 0);
+}
+
+void test_infer_cutoff_repro(void) {
+  Config *config =
+      config_create_or_die("set -lex CSW21 -wmp true -s1 equity -s2 "
+                           "equity -r1 all -r2 all -numplays 50");
+  const LetterDistribution *ld = config_get_ld(config);
+  int ld_size = ld_get_size(ld);
+
+  // Problematic CGP identified in slop branch
+  const char *cgp = "10ALPHA/9MM4/8QUIST2/11P3/10XI3/10UG3/11O3/6FOB2T3/"
+                    "7HENDS3/15/15/15/15/15/15 CDNVVZ?/EEILRRR 93/174 0";
+  load_and_exec_config_or_die(config, get_formatted_string("cgp %s", cgp));
+
+  InferenceResults *results_with = inference_results_create(NULL);
+  InferenceResults *results_without = inference_results_create(NULL);
+  inference_results_reset(results_with, 1, ld_size);
+  inference_results_reset(results_without, 1, ld_size);
+
+  Rack exch_rack;
+  rack_set_dist_size_and_reset(&exch_rack, ld_size);
+  rack_set_to_string(ld, &exch_rack, "CDNVV");
+
+  Rack empty_rack;
+  rack_set_dist_size_and_reset(&empty_rack, ld_size);
+
+  ErrorStack *error_stack = error_stack_create();
+
+  // Run with cutoff
+  config_infer(config, false, 0, 0, 5, &empty_rack, &empty_rack, &empty_rack,
+               true, results_with, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    assert(false);
+  }
+
+  // Run without cutoff
+  config_infer(config, false, 0, 0, 5, &empty_rack, &empty_rack, &empty_rack,
+               false, results_without, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    assert(false);
+  }
+
+  const Stat *equity_with =
+      inference_results_get_equity_values(results_with, INFERENCE_TYPE_LEAVE);
+  const Stat *equity_without = inference_results_get_equity_values(
+      results_without, INFERENCE_TYPE_LEAVE);
+
+  uint64_t samples_with = stat_get_num_samples(equity_with);
+  uint64_t samples_without = stat_get_num_samples(equity_without);
+
+  printf("Repro Case - With Cutoff: %llu samples (mean: %.4f), Without Cutoff: "
+         "%llu samples (mean: %.4f)\n",
+         (unsigned long long)samples_with, stat_get_mean(equity_with),
+         (unsigned long long)samples_without, stat_get_mean(equity_without));
+
+  assert(samples_with == samples_without);
+
+  inference_results_destroy(results_with);
+  inference_results_destroy(results_without);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+void test_infer_cutoff_optimization_comparison(void) {
+  const int NUM_GAMES = 50;   // 500 games, plays 1-6 and exchanges 1-7
+  const int NUM_THREADS = 10; // Full cores available
+
+  // Use equity margin of 0 to test correctness (strictest test)
+  // Use CSW21 with WMP for full WMP instrumentation
+  char config_str[256];
+  snprintf(config_str, sizeof(config_str),
+           "set -lex CSW21 -wmp true -s1 equity -s2 equity "
+           "-r1 all -r2 all -numplays 1 -threads %d",
+           NUM_THREADS);
+  Config *config = config_create_or_die(config_str);
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const int ld_size = ld_get_size(ld);
+  Bag *bag = game_get_bag(game);
+
+  MoveList *move_list = move_list_create(1);
+
+  InferenceResults *results_with_cutoff = inference_results_create(NULL);
+  InferenceResults *results_without_cutoff = inference_results_create(NULL);
+
+  // Track timing by tiles played (1-7) for scoring plays and exchanges
+  double time_with_cutoff_play[RACK_SIZE + 1] = {0};
+  double time_without_cutoff_play[RACK_SIZE + 1] = {0};
+  int count_play[RACK_SIZE + 1] = {0};
+
+  double time_with_cutoff_exch[RACK_SIZE + 1] = {0};
+  double time_without_cutoff_exch[RACK_SIZE + 1] = {0};
+  int count_exch[RACK_SIZE + 1] = {0};
+
+  Timer timer;
+  Rack played_tiles;
+  rack_set_dist_size(&played_tiles, ld_size);
+
+  // Counter for 7-tile exchanges found
+  int num_seven_tile_exchanges_found = 0;
+
+  printf("\nPlaying %d random games, inference for plays 1-6 and exchanges "
+         "1-7...\n",
+         NUM_GAMES);
+  fflush(stdout);
+
+  // Reset stats before the test
+  inference_reset_cutoff_stats();
+  gen_reset_anchor_stats();
+  gen_reset_subrack_stats();
+  gen_reset_early_cutoff_stats();
+  gen_reset_wmp_subanchor_stats();
+
+  // Track anchor stats separately for with/without optimization
+  uint64_t anchors_available_with = 0, anchors_processed_with = 0;
+  uint64_t anchors_skipped_with = 0;
+  uint64_t anchors_available_without = 0, anchors_processed_without = 0;
+  uint64_t anchors_skipped_without = 0;
+
+  // Track subrack stats separately for with/without optimization
+  uint64_t subracks_available_with = 0, subracks_processed_with = 0;
+  uint64_t subracks_skipped_with = 0;
+  uint64_t subracks_available_without = 0, subracks_processed_without = 0;
+  uint64_t subracks_skipped_without = 0;
+
+  // Track per-size stats for anchors (index 0-7 for play sizes 1-7 and exch
+  // 1-7) play_anchors_with[i] = anchors processed for i-tile plays WITH cutoff
+  uint64_t play_anchors_with[RACK_SIZE + 1] = {0};
+  uint64_t play_anchors_without[RACK_SIZE + 1] = {0};
+  uint64_t exch_anchors_with[RACK_SIZE + 1] = {0};
+  uint64_t exch_anchors_without[RACK_SIZE + 1] = {0};
+  // Track early cutoff potential per size
+  uint64_t play_movegen_calls[RACK_SIZE + 1] = {0};
+  uint64_t play_shadow_skippable[RACK_SIZE + 1] = {0};
+  uint64_t play_anchor_filterable[RACK_SIZE + 1] = {0};
+  uint64_t play_anchor_total[RACK_SIZE + 1] = {0};
+  uint64_t exch_movegen_calls[RACK_SIZE + 1] = {0};
+  uint64_t exch_shadow_skippable[RACK_SIZE + 1] = {0};
+  uint64_t exch_anchor_filterable[RACK_SIZE + 1] = {0};
+  uint64_t exch_anchor_total[RACK_SIZE + 1] = {0};
+
+  for (int game_num = 0; game_num < NUM_GAMES; game_num++) {
+    // Reset game with unique seed for each game
+    game_reset(game);
+    // Start from game #1 (seed 13345) to debug the failing case
+    bag_seed(bag, 13345 + (uint64_t)game_num * 1000);
+    draw_starting_racks(game);
+
+    // Play until game over
+    while (!game_over(game)) {
+      const int player_on_turn = game_get_player_on_turn_index(game);
+      const int tiles_in_bag = bag_get_letters(bag);
+
+      // Generate best move
+      const Move *move = get_top_equity_move(game, 0, move_list);
+      const game_event_t move_type = move_get_type(move);
+      const int tiles_played = move_get_tiles_played(move);
+      const int score = equity_to_int(move_get_score(move));
+
+      // Skip passes
+      if (move_type == GAME_EVENT_PASS) {
+        play_move(move, game, NULL);
+        continue;
+      }
+
+      // Get the played tiles for inference
+      get_played_tiles_from_move(move, &played_tiles, ld_size);
+      const int num_tiles_in_rack = rack_get_total_letters(&played_tiles);
+
+      // Only infer if there are enough tiles in bag (before playing move)
+      if (tiles_in_bag < RACK_SIZE) {
+        play_move(move, game, NULL);
+        continue;
+      }
+
+      // FILTER: Run inference for plays 1-6 and exchanges 1-7
+      const bool is_scoring_play_1_to_6 =
+          (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) &&
+          (tiles_played >= 1 && tiles_played <= 6);
+      const bool is_exchange_1_to_7 = (move_type == GAME_EVENT_EXCHANGE) &&
+                                      (tiles_played >= 1 && tiles_played <= 7);
+      if (!is_scoring_play_1_to_6 && !is_exchange_1_to_7) {
+        play_move(move, game, NULL);
+        continue;
+      }
+      if (is_exchange_1_to_7 && tiles_played == 7) {
+        num_seven_tile_exchanges_found++;
+      }
+
+      // Build played tiles string for inference using StringBuilder
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_rack(sb, &played_tiles, ld, false);
+      char *played_tiles_str = string_builder_dump(sb, NULL);
+      string_builder_destroy(sb);
+
+      const int target_num_exch =
+          (move_type == GAME_EVENT_EXCHANGE) ? tiles_played : 0;
+
+      // Capture the CGP before running inference (for diagnostics)
+      char *cgp = game_get_cgp(game, true);
+      const uint64_t seed = 13345 + (uint64_t)game_num * 1000;
+
+      // For exchanges, played_tiles should be empty
+      const char *tiles_for_infer =
+          (move_type == GAME_EVENT_EXCHANGE) ? "" : played_tiles_str;
+
+      // Reset results before each inference to get per-move comparison
+      inference_results_reset(results_with_cutoff, 1, ld_size);
+      inference_results_reset(results_without_cutoff, 1, ld_size);
+
+      // Run inference with cutoff optimization
+      gen_reset_anchor_stats();
+      gen_reset_subrack_stats();
+      gen_reset_early_cutoff_stats();
+      ctimer_start(&timer);
+      error_code_t status1 =
+          infer_for_test(config, player_on_turn, score, target_num_exch,
+                         tiles_for_infer, "", "", results_with_cutoff, true);
+      double time_with = ctimer_elapsed_seconds(&timer);
+      {
+        uint64_t avail, proc, skip;
+        gen_get_anchor_stats(&avail, &proc, &skip);
+        anchors_available_with += avail;
+        anchors_processed_with += proc;
+        anchors_skipped_with += skip;
+        gen_get_subrack_stats(&avail, &proc, &skip);
+        subracks_available_with += avail;
+        subracks_processed_with += proc;
+        subracks_skipped_with += skip;
+        // Per-size anchor tracking
+        if (move_type == GAME_EVENT_EXCHANGE) {
+          exch_anchors_with[tiles_played] += proc;
+        } else {
+          play_anchors_with[tiles_played] += proc;
+        }
+        // Per-size early cutoff potential
+        uint64_t mg_calls, shadow_skip, anch_filt, anch_tot;
+        gen_get_early_cutoff_stats(&mg_calls, &shadow_skip, &anch_filt,
+                                   &anch_tot);
+        if (move_type == GAME_EVENT_EXCHANGE) {
+          exch_movegen_calls[tiles_played] += mg_calls;
+          exch_shadow_skippable[tiles_played] += shadow_skip;
+          exch_anchor_filterable[tiles_played] += anch_filt;
+          exch_anchor_total[tiles_played] += anch_tot;
+        } else {
+          play_movegen_calls[tiles_played] += mg_calls;
+          play_shadow_skippable[tiles_played] += shadow_skip;
+          play_anchor_filterable[tiles_played] += anch_filt;
+          play_anchor_total[tiles_played] += anch_tot;
+        }
+      }
+
+      // Run inference without cutoff optimization
+      gen_reset_anchor_stats();
+      gen_reset_subrack_stats();
+      ctimer_start(&timer);
+      error_code_t status2 = infer_for_test(
+          config, player_on_turn, score, target_num_exch, tiles_for_infer, "",
+          "", results_without_cutoff, false);
+      double time_without = ctimer_elapsed_seconds(&timer);
+      {
+        uint64_t avail, proc, skip;
+        gen_get_anchor_stats(&avail, &proc, &skip);
+        anchors_available_without += avail;
+        anchors_processed_without += proc;
+        anchors_skipped_without += skip;
+        gen_get_subrack_stats(&avail, &proc, &skip);
+        subracks_available_without += avail;
+        subracks_processed_without += proc;
+        subracks_skipped_without += skip;
+        // Per-size anchor tracking
+        if (move_type == GAME_EVENT_EXCHANGE) {
+          exch_anchors_without[tiles_played] += proc;
+        } else {
+          play_anchors_without[tiles_played] += proc;
+        }
+      }
+
+      // Now play the move on the main game to continue
+      play_move(move, game, NULL);
+
+      // Both should succeed or both should fail
+      assert(status1 == status2);
+
+      if (status1 == ERROR_STATUS_SUCCESS) {
+        // Prepare diagnostics for potential failure
+        InferDiagnostics diag = {
+            .cgp = cgp,
+            .played_tiles_str = played_tiles_str,
+            .game_num = game_num,
+            .player_on_turn = player_on_turn,
+            .score = score,
+            .target_num_exch = target_num_exch,
+            .seed = seed,
+        };
+
+        // Verify results are identical
+        assert_inference_results_equal(results_with_cutoff,
+                                       results_without_cutoff, &diag);
+
+        // Track timing by play type
+        if (move_type == GAME_EVENT_EXCHANGE) {
+          time_with_cutoff_exch[num_tiles_in_rack] += time_with;
+          time_without_cutoff_exch[num_tiles_in_rack] += time_without;
+          count_exch[num_tiles_in_rack]++;
+        } else {
+          time_with_cutoff_play[num_tiles_in_rack] += time_with;
+          time_without_cutoff_play[num_tiles_in_rack] += time_without;
+          count_play[num_tiles_in_rack]++;
+        }
+      }
+
+      free(cgp);
+      free(played_tiles_str);
+    }
+
+    if ((game_num + 1) % 100 == 0) {
+      printf("  Completed %d games, found %d 7-tile exchanges so far...\n",
+             game_num + 1, num_seven_tile_exchanges_found);
+      fflush(stdout);
+    }
+  }
+
+  // Print results
+  printf("\n=== 7-Tile Exchange Search Results ===\n");
+  printf("Found %d 7-tile exchanges in %d games\n\n",
+         num_seven_tile_exchanges_found, NUM_GAMES);
+  printf("=== Inference Cutoff Optimization Results ===\n");
+  printf("\nScoring plays (tiles played -> count, with cutoff, without cutoff, "
+         "speedup):\n");
+  double total_with_play = 0, total_without_play = 0;
+  int total_count_play = 0;
+  for (int i = 1; i <= RACK_SIZE; i++) {
+    if (count_play[i] > 0) {
+      double speedup = time_without_cutoff_play[i] / time_with_cutoff_play[i];
+      printf("  %d tiles: %5d plays, %.4fs with (%.4fs/inf), %.4fs without "
+             "(%.4fs/inf), %.2fx speedup\n",
+             i, count_play[i], time_with_cutoff_play[i],
+             time_with_cutoff_play[i] / count_play[i],
+             time_without_cutoff_play[i],
+             time_without_cutoff_play[i] / count_play[i], speedup);
+      total_with_play += time_with_cutoff_play[i];
+      total_without_play += time_without_cutoff_play[i];
+      total_count_play += count_play[i];
+    }
+  }
+  if (total_count_play > 0) {
+    printf("  TOTAL:   %5d plays, %.4fs with (%.4fs/inf), %.4fs without "
+           "(%.4fs/inf), %.2fx speedup\n",
+           total_count_play, total_with_play,
+           total_with_play / total_count_play, total_without_play,
+           total_without_play / total_count_play,
+           total_without_play / total_with_play);
+  }
+
+  printf("\nExchanges (tiles exchanged -> count, with cutoff, without cutoff, "
+         "speedup):\n");
+  double total_with_exch = 0, total_without_exch = 0;
+  int total_count_exch = 0;
+  for (int i = 1; i <= RACK_SIZE; i++) {
+    if (count_exch[i] > 0) {
+      double speedup = time_without_cutoff_exch[i] / time_with_cutoff_exch[i];
+      printf("  %d tiles: %5d exchs, %.4fs with (%.4fs/inf), %.4fs without "
+             "(%.4fs/inf), %.2fx speedup\n",
+             i, count_exch[i], time_with_cutoff_exch[i],
+             time_with_cutoff_exch[i] / count_exch[i],
+             time_without_cutoff_exch[i],
+             time_without_cutoff_exch[i] / count_exch[i], speedup);
+      total_with_exch += time_with_cutoff_exch[i];
+      total_without_exch += time_without_cutoff_exch[i];
+      total_count_exch += count_exch[i];
+    }
+  }
+  if (total_count_exch > 0) {
+    printf("  TOTAL:   %5d exchs, %.4fs with (%.4fs/inf), %.4fs without "
+           "(%.4fs/inf), %.2fx speedup\n",
+           total_count_exch, total_with_exch,
+           total_with_exch / total_count_exch, total_without_exch,
+           total_without_exch / total_count_exch,
+           total_without_exch / total_with_exch);
+  }
+
+  printf("\nOverall: %.4fs with cutoff, %.4fs without, %.2fx speedup\n",
+         total_with_play + total_with_exch,
+         total_without_play + total_without_exch,
+         (total_without_play + total_without_exch) /
+             (total_with_play + total_with_exch));
+
+  // Print cutoff statistics
+  printf("\n");
+  inference_print_cutoff_stats();
+
+  // Print anchor stats
+  printf("\nAnchor stats WITH cutoff optimization:\n");
+  {
+    double skip_pct = anchors_available_with > 0
+                          ? 100.0 * (double)anchors_skipped_with /
+                                (double)anchors_available_with
+                          : 0;
+    printf("  %llu processed / %llu available (%llu skipped, %.2f%%)\n",
+           (unsigned long long)anchors_processed_with,
+           (unsigned long long)anchors_available_with,
+           (unsigned long long)anchors_skipped_with, skip_pct);
+  }
+  printf("Anchor stats WITHOUT cutoff optimization:\n");
+  {
+    double skip_pct = anchors_available_without > 0
+                          ? 100.0 * (double)anchors_skipped_without /
+                                (double)anchors_available_without
+                          : 0;
+    printf("  %llu processed / %llu available (%llu skipped, %.2f%%)\n",
+           (unsigned long long)anchors_processed_without,
+           (unsigned long long)anchors_available_without,
+           (unsigned long long)anchors_skipped_without, skip_pct);
+  }
+
+  // Print subrack stats
+  printf("\nSubrack stats WITH cutoff optimization:\n");
+  {
+    double skip_pct = subracks_available_with > 0
+                          ? 100.0 * (double)subracks_skipped_with /
+                                (double)subracks_available_with
+                          : 0;
+    printf("  %llu processed / %llu available (%llu skipped, %.2f%%)\n",
+           (unsigned long long)subracks_processed_with,
+           (unsigned long long)subracks_available_with,
+           (unsigned long long)subracks_skipped_with, skip_pct);
+  }
+  printf("Subrack stats WITHOUT cutoff optimization:\n");
+  {
+    double skip_pct = subracks_available_without > 0
+                          ? 100.0 * (double)subracks_skipped_without /
+                                (double)subracks_available_without
+                          : 0;
+    printf("  %llu processed / %llu available (%llu skipped, %.2f%%)\n",
+           (unsigned long long)subracks_processed_without,
+           (unsigned long long)subracks_available_without,
+           (unsigned long long)subracks_skipped_without, skip_pct);
+  }
+
+  // Print early cutoff optimization potential (aggregate)
+  {
+    uint64_t tot_mg = 0, tot_shadow = 0, tot_filt = 0, tot_anch = 0;
+    for (int i = 1; i <= RACK_SIZE; i++) {
+      tot_mg += play_movegen_calls[i] + exch_movegen_calls[i];
+      tot_shadow += play_shadow_skippable[i] + exch_shadow_skippable[i];
+      tot_filt += play_anchor_filterable[i] + exch_anchor_filterable[i];
+      tot_anch += play_anchor_total[i] + exch_anchor_total[i];
+    }
+    printf("\nEarly cutoff optimization potential (aggregate):\n");
+    if (tot_mg > 0) {
+      double shadow_skip_pct = 100.0 * (double)tot_shadow / (double)tot_mg;
+      printf("  Shadow skippable by exchange: %llu / %llu (%.2f%%)\n",
+             (unsigned long long)tot_shadow, (unsigned long long)tot_mg,
+             shadow_skip_pct);
+    }
+    if (tot_anch > 0) {
+      double anchor_filter_pct = 100.0 * (double)tot_filt / (double)tot_anch;
+      printf("  Anchors filterable by shadow equity: %llu / %llu (%.2f%%)\n",
+             (unsigned long long)tot_filt, (unsigned long long)tot_anch,
+             anchor_filter_pct);
+    }
+  }
+
+  // Print per-size anchor breakdown
+  printf(
+      "\nPer-size anchor breakdown (tiles -> anchors with cutoff / without / "
+      "ratio):\n");
+  printf("Scoring plays:\n");
+  for (int i = 1; i <= RACK_SIZE; i++) {
+    if (play_anchors_with[i] > 0 || play_anchors_without[i] > 0) {
+      double ratio =
+          play_anchors_without[i] > 0
+              ? (double)play_anchors_with[i] / (double)play_anchors_without[i]
+              : 0;
+      // Compute hypothetical anchors if we skip shadow + filter by shadow
+      // equity
+      uint64_t hypo_anchors = play_anchors_with[i];
+      if (play_movegen_calls[i] > 0 && play_shadow_skippable[i] > 0) {
+        // Shadow skip would eliminate all anchors for those calls
+        double frac_skippable =
+            (double)play_shadow_skippable[i] / (double)play_movegen_calls[i];
+        hypo_anchors =
+            (uint64_t)((1.0 - frac_skippable) * (double)play_anchors_with[i]);
+      }
+      // Further reduce by filterable anchors
+      if (play_anchor_total[i] > 0 && play_anchor_filterable[i] > 0) {
+        double frac_filt =
+            (double)play_anchor_filterable[i] / (double)play_anchor_total[i];
+        hypo_anchors = (uint64_t)((1.0 - frac_filt) * (double)hypo_anchors);
+      }
+      double hypo_ratio =
+          play_anchors_without[i] > 0
+              ? (double)hypo_anchors / (double)play_anchors_without[i]
+              : 0;
+      printf("  %d tiles: %12llu / %12llu (%.2fx) -> hypo: %12llu (%.2fx)\n", i,
+             (unsigned long long)play_anchors_with[i],
+             (unsigned long long)play_anchors_without[i], ratio,
+             (unsigned long long)hypo_anchors, hypo_ratio);
+    }
+  }
+  printf("Exchanges:\n");
+  for (int i = 1; i <= RACK_SIZE; i++) {
+    if (exch_anchors_with[i] > 0 || exch_anchors_without[i] > 0) {
+      double ratio =
+          exch_anchors_without[i] > 0
+              ? (double)exch_anchors_with[i] / (double)exch_anchors_without[i]
+              : 0;
+      uint64_t hypo_anchors = exch_anchors_with[i];
+      if (exch_movegen_calls[i] > 0 && exch_shadow_skippable[i] > 0) {
+        double frac_skippable =
+            (double)exch_shadow_skippable[i] / (double)exch_movegen_calls[i];
+        hypo_anchors =
+            (uint64_t)((1.0 - frac_skippable) * (double)exch_anchors_with[i]);
+      }
+      if (exch_anchor_total[i] > 0 && exch_anchor_filterable[i] > 0) {
+        double frac_filt =
+            (double)exch_anchor_filterable[i] / (double)exch_anchor_total[i];
+        hypo_anchors = (uint64_t)((1.0 - frac_filt) * (double)hypo_anchors);
+      }
+      double hypo_ratio =
+          exch_anchors_without[i] > 0
+              ? (double)hypo_anchors / (double)exch_anchors_without[i]
+              : 0;
+      printf("  %d tiles: %12llu / %12llu (%.2fx) -> hypo: %12llu (%.2fx)\n", i,
+             (unsigned long long)exch_anchors_with[i],
+             (unsigned long long)exch_anchors_without[i], ratio,
+             (unsigned long long)hypo_anchors, hypo_ratio);
+    }
+  }
+
+  // Print WMP subanchor statistics
+  {
+    uint64_t wmp_total, wmp_skippable;
+    gen_get_wmp_subanchor_stats(&wmp_total, &wmp_skippable);
+    if (wmp_total > 0) {
+      printf("\nWMP subanchor skip analysis (instrumentation only, no actual "
+             "filtering):\n");
+      printf("  Total subanchors: %llu\n", (unsigned long long)wmp_total);
+      printf("  Skippable (equity < cutoff): %llu (%.2f%%)\n",
+             (unsigned long long)wmp_skippable,
+             100.0 * (double)wmp_skippable / (double)wmp_total);
+      gen_print_wmp_subanchor_breakdown();
+    }
+  }
+
+  inference_results_destroy(results_with_cutoff);
+  inference_results_destroy(results_without_cutoff);
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
+void test_infer(void) {
+  // test_infer_cutoff_repro();
+  test_infer_cutoff_optimization_comparison();
 }

@@ -1,17 +1,29 @@
 #ifndef MOVE_GEN_H
 #define MOVE_GEN_H
 
+#include "../def/board_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
+#include "../ent/anchor.h"
+#include "../ent/bit_rack.h"
+#include "../ent/board.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/klv.h"
+#include "../ent/kwg.h"
+#include "../ent/leave_map.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/move.h"
-#include "../impl/wmp_move_gen.h"
+#include "../ent/rack.h"
+#include "wmp_move_gen.h"
+#include <stdbool.h>
+#include <stdint.h>
 
 typedef struct UnrestrictedMultiplier {
   uint8_t multiplier;
   uint8_t column;
 } UnrestrictedMultiplier;
 
-// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 typedef struct MoveGen {
   // Owned by this MoveGen struct
   int current_row_index;
@@ -53,15 +65,16 @@ typedef struct MoveGen {
   Equity current_anchor_highest_possible_score;
   // Updated every time a play is recorded
   Equity cutoff_equity_or_score;
-  // Equity of target play + eq_margin_movegen
-  // Inference movegen can ignore anchors which can't beat this
-  Equity target_equity_cutoff;
-  // Using UNSET (-1) value for non-exchanges
-  int target_leave_size;
   // This field is only used for the MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST
   // record type
   Equity best_move_equity_or_score;
   Equity eq_margin_movegen;
+
+  // Inference cutoff fields
+  Equity target_equity_cutoff;
+  int target_leave_size;
+  bool stop_on_threshold;
+  bool threshold_exceeded;
 
   MachineLetter strip[(MOVE_MAX_TILES)];
   MachineLetter exchange_strip[(MOVE_MAX_TILES)];
@@ -87,67 +100,43 @@ typedef struct MoveGen {
   UnrestrictedMultiplier desc_xw_muls_copy[WORD_ALIGNING_RACK_SIZE];
   uint16_t desc_eff_letter_muls_copy[WORD_ALIGNING_RACK_SIZE];
 
-  // Since shadow does not have backtracking besides when switching from going
-  // right back to going left, it is convenient to store these parameters here
-  // rather than using function arguments for them.
-
-  // This is a sum of already-played crosswords and tiles restricted to a known
-  // empty square (times a letter or word multiplier). It's a part of the score
-  // not affected by the overall mainword multiplier.
+  // Rest of the fields from slop branch
   Equity shadow_perpendicular_additional_score;
-
-  // This is a sum of both the playthrough tiles and tiles restricted to a known
-  // empty square (times their letter multiplier). It will be multiplied by
-  // shadow_word_multiplier as part of computing score shadow_record.
   Equity shadow_mainword_restricted_score;
-
-  // Product of word multipliers used by newly played tiles.
   int shadow_word_multiplier;
-
   Equity highest_shadow_equity;
   Equity highest_shadow_score;
-  uint64_t rack_cross_set;
   int number_of_letters_on_rack;
-  Equity full_rack_descending_tile_scores[WORD_ALIGNING_RACK_SIZE];
-  Equity descending_tile_scores[WORD_ALIGNING_RACK_SIZE];
-  Equity descending_tile_scores_copy[WORD_ALIGNING_RACK_SIZE];
-  Equity best_leaves[(RACK_SIZE)];
-
-  AnchorHeap anchor_heap;
-  LetterDistribution ld;
-
-  // Include space for blank letters so their scores can be added without
-  // checking whether tiles are blanked.
-  Equity tile_scores[MAX_ALPHABET_SIZE + BLANK_MASK];
-
-  // Owned by the caller
-  const Board *board;
-  const KLV *klv;
   const KWG *kwg;
+  const KLV *klv;
+  const Board *board;
+  LetterDistribution ld;
   MoveList *move_list;
-
+  AnchorHeap anchor_heap;
+  Equity tile_scores[MACHINE_LETTER_MAX_VALUE];
+  Equity full_rack_descending_tile_scores[RACK_SIZE];
+  Equity descending_tile_scores[RACK_SIZE];
+  Equity descending_tile_scores_copy[RACK_SIZE];
   WMPMoveGen wmp_move_gen;
-  // Number of playthrough blocks used by the by current move of recursive_gen
-  // given the rightmost column of the move. Set per anchor because it depends
-  // on the anchor column.
-  uint8_t num_playthrough_blocks[BOARD_DIM];
-  uint8_t max_playthrough_blocks;
-  // Used by wordmap_gen to prepare WMP-generated plays for recording.
+  uint64_t rack_cross_set;
+  bool target_word_full_rack_existence[RACK_SIZE + 1];
+
+  Equity best_leaves[RACK_SIZE + 1];
+
   MachineLetter playthrough_marked[BOARD_DIM];
 } MoveGen;
 
 typedef struct MoveGenArgs {
-  Game *game;
+  const Game *game;
   move_record_t move_record_type;
   move_sort_t move_sort_type;
+  const KWG *override_kwg;
   Equity eq_margin_movegen;
 
-  // In movegen for inferences after scoring plays this is the equity of the
-  // actual played moved with the leave value for its complement in the rack.
-  // We know this will move will be found by movegen, so we can use it to skip
+  // Movegen for inferences after plays will need a target equity value to skip
   // anchors that can't surpass it (surpassing means exceeding the target move
-  // by eq_margin_movegen).
-  Equity initial_best_equity;
+  // by eq_margin_movegen). Defaults to EQUITY_MAX_VALUE for non-inference mode.
+  Equity target_equity;
 
   // Movegen for inferences after exchanges will need to know the number of
   // tiles exchanged so that it can determine the target equity value after
@@ -156,10 +145,8 @@ typedef struct MoveGenArgs {
   // different exchange size exceeds the target exchange value by
   // eq_margin_movegen. Value is UNSET_LEAVE_SIZE for non-exchange scenarios.
   int target_leave_size_for_exchange_cutoff;
-
   int thread_index;
   MoveList *move_list;
-  const KWG *override_kwg;
 } MoveGenArgs;
 
 void gen_destroy_cache(void);
@@ -177,5 +164,22 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args);
 void gen_look_up_leaves_and_record_exchanges(MoveGen *gen);
 
 void gen_shadow(MoveGen *gen);
+
+void gen_reset_anchor_stats(void);
+void gen_reset_subrack_stats(void);
+void gen_reset_early_cutoff_stats(void);
+void gen_get_anchor_stats(uint64_t *available, uint64_t *processed,
+                          uint64_t *skipped);
+void gen_get_subrack_stats(uint64_t *available, uint64_t *processed,
+                           uint64_t *skipped);
+void gen_get_early_cutoff_stats(uint64_t *movegen_calls,
+                                uint64_t *shadow_skippable,
+                                uint64_t *anchor_filterable,
+                                uint64_t *anchor_total);
+
+void gen_reset_wmp_subanchor_stats(void);
+void gen_get_wmp_subanchor_stats(uint64_t *total, uint64_t *skippable);
+void gen_record_wmp_subanchor(int tiles, int blocks, bool skippable);
+void gen_print_wmp_subanchor_breakdown(void);
 
 #endif
