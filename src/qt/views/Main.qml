@@ -108,27 +108,33 @@ ApplicationWindow {
 
         RowLayout {
             anchors.fill: parent
-            anchors.margins: 20
-            spacing: 20
+            anchors.margins: 10
+            spacing: 15
 
-            // Left Column: Board, Tracking, Rack, Controls
+            // Left Column: Board, Rack, Controls
             Item {
                 id: leftColumn
             Layout.fillHeight: true
-            Layout.preferredWidth: parent.width * 0.32
+            Layout.preferredWidth: gameModel.gameMode === GameHistoryModel.PlayMode ? parent.width * 0.4 : parent.width * 0.32
 
-            // Cell size based on width only (board is square)
-            property double availableW: width - 20
-            property int computedCellSize: Math.max(10, Math.min(Math.floor((width - 20) / 15), Math.floor((height - 240) / 18)))
+            // Cell size: fit the largest square board in available space
+            // In Play mode: header(80) + margin(8) + board + margin(10) + rack(~50) + controls(50) + padding
+            // In Review mode: board + margin(10) + rack(~50) + tracking + controls(50) + padding
+            property int playModeVerticalSpace: height - 220
+            property int reviewModeVerticalSpace: height - 200
+            property int availableVertical: gameModel.gameMode === GameHistoryModel.PlayMode ? playModeVerticalSpace : reviewModeVerticalSpace
+            // Also account for board background padding (12px)
+            property int computedCellSize: Math.max(10, Math.min(Math.floor((width - 12) / 15), Math.floor((availableVertical - 12) / 15)))
 
             Item {
                 id: keyboardEntryController
+                objectName: "keyboardEntryController"
                 anchors.fill: parent
                 focus: gameModel.gameMode === GameHistoryModel.PlayMode
                 
                 Keys.onPressed: (event) => {
                     if (gameModel.gameMode !== GameHistoryModel.PlayMode) return;
-                    
+
                     if (event.key === Qt.Key_Right) {
                         keyboardCursor.col = (keyboardCursor.col + 1) % 15;
                         event.accepted = true;
@@ -145,13 +151,13 @@ ApplicationWindow {
                         keyboardCursor.dir = 1 - keyboardCursor.dir;
                         event.accepted = true;
                     } else if (event.key >= Qt.Key_A && event.key <= Qt.Key_Z) {
-                        addTile(String.fromCharCode(event.key));
+                        leftColumn.addTile(String.fromCharCode(event.key));
                         event.accepted = true;
                     } else if (event.key === Qt.Key_Backspace) {
-                        removeLastTile();
+                        leftColumn.removeLastTile();
                         event.accepted = true;
                     } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                        commitMove();
+                        leftColumn.commitMove();
                         event.accepted = true;
                     } else if (event.key === Qt.Key_Escape) {
                         uncommittedTiles.clear();
@@ -165,14 +171,99 @@ ApplicationWindow {
             }
 
             function addTile(letter) {
-                // Simple letter add logic
+                // Verify letter is in rack
+                let rackStr = gameModel.currentRack.toUpperCase();
+                let upperLetter = letter.toUpperCase();
+
+                // Track how many of this letter are already in uncommittedTiles
+                let usedCount = 0;
+                for (let i = 0; i < uncommittedTiles.count; i++) {
+                    if (uncommittedTiles.get(i).letter.toUpperCase() === upperLetter) {
+                        usedCount++;
+                    }
+                }
+
+                // Count available in rack
+                let availableCount = 0;
+                for (let i = 0; i < rackStr.length; i++) {
+                    if (rackStr[i] === upperLetter) {
+                        availableCount++;
+                    }
+                }
+
+                // For now, if not in rack, check for blank?
+                // Let's just do a strict check for now.
+                if (usedCount >= availableCount) {
+                    console.log("Letter " + upperLetter + " not available in rack (available: " + availableCount + ", used: " + usedCount + ")");
+                    return;
+                }
+
                 uncommittedTiles.append({
                     row: keyboardCursor.row,
                     col: keyboardCursor.col,
-                    letter: letter,
+                    letter: upperLetter,
                     isBlank: false
                 });
                 advanceCursor();
+            }
+
+            // Add a tile at a specific board position (for drag-drop)
+            function addTileAtPosition(letter, row, col) {
+                let rackStr = gameModel.currentRack.toUpperCase();
+                let upperLetter = letter.toUpperCase();
+
+                // Check if position already has an uncommitted tile
+                for (let i = 0; i < uncommittedTiles.count; i++) {
+                    let tile = uncommittedTiles.get(i);
+                    if (tile.row === row && tile.col === col) {
+                        console.log("Position already has an uncommitted tile");
+                        return false;
+                    }
+                }
+
+                // Check if position has a permanent tile on board
+                let boardIndex = row * 15 + col;
+                if (boardIndex >= 0 && boardIndex < gameModel.board.length) {
+                    let square = gameModel.board[boardIndex];
+                    if (square && square.letter !== "") {
+                        console.log("Position already has a tile on board");
+                        return false;
+                    }
+                }
+
+                // Track how many of this letter are already in uncommittedTiles
+                let usedCount = 0;
+                for (let i = 0; i < uncommittedTiles.count; i++) {
+                    if (uncommittedTiles.get(i).letter.toUpperCase() === upperLetter) {
+                        usedCount++;
+                    }
+                }
+
+                // Count available in rack
+                let availableCount = 0;
+                for (let i = 0; i < rackStr.length; i++) {
+                    if (rackStr[i] === upperLetter) {
+                        availableCount++;
+                    }
+                }
+
+                if (usedCount >= availableCount) {
+                    console.log("Letter " + upperLetter + " not available in rack");
+                    return false;
+                }
+
+                uncommittedTiles.append({
+                    row: row,
+                    col: col,
+                    letter: upperLetter,
+                    isBlank: letter >= 'a' && letter <= 'z'
+                });
+
+                // Move cursor to dropped position
+                keyboardCursor.row = row;
+                keyboardCursor.col = col;
+
+                return true;
             }
 
             function removeLastTile() {
@@ -208,64 +299,148 @@ ApplicationWindow {
                 uncommittedTiles.clear();
             }
 
-            // Player Headers (Clocks)
-            RowLayout {
+            // Player Info Header (Play Mode)
+            Rectangle {
                 id: gameHeader
                 anchors.top: parent.top
                 anchors.left: parent.left
                 anchors.right: parent.right
-                height: 40
+                height: 80
                 visible: gameModel.gameMode === GameHistoryModel.PlayMode
-                spacing: 12
+                color: "#313244"
+                radius: 10
 
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 40
-                    color: gameModel.playerOnTurnIndex === 0 ? "#45475A" : "#313244"
-                    radius: 8
-                    border.color: gameModel.playerOnTurnIndex === 0 ? "#89B4FA" : "transparent"
-                    border.width: 2
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 6
+                    spacing: 8
 
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: 10
-                        Text {
-                            text: gameModel.player1Name
-                            color: "#CDD6F4"
-                            font.bold: true
-                        }
-                        Item { Layout.fillWidth: true }
-                        Text {
-                            text: formatTime(gameModel.player1Clock)
-                            color: gameModel.player1Clock < 30 ? "#F38BA8" : "#A6E3A1"
-                            font.family: "Consolas"
-                            font.pixelSize: 18
+                    // Player 1 Info
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        radius: 8
+                        color: gameModel.playerOnTurnIndex === 0 ? "#45475A" : "transparent"
+                        border.color: gameModel.playerOnTurnIndex === 0 ? "#89B4FA" : "transparent"
+                        border.width: 2
+
+                        Column {
+                            anchors.fill: parent
+                            anchors.margins: 5
+                            spacing: 0
+
+                            // Name and Time row
+                            Row {
+                                width: parent.width
+                                height: 16
+                                Text {
+                                    text: gameModel.player1Name
+                                    color: gameModel.playerOnTurnIndex === 0 ? "#CDD6F4" : "#7F849C"
+                                    font.bold: true
+                                    font.pixelSize: 12
+                                }
+                                Item { width: parent.width - parent.children[0].width - parent.children[2].width; height: 1 }
+                                Text {
+                                    text: formatTime(gameModel.player1Clock)
+                                    color: gameModel.player1Clock < 30 ? "#F38BA8" : "#A6E3A1"
+                                    font.family: "Consolas"
+                                    font.pixelSize: 12
+                                }
+                            }
+
+                            // Score
+                            Text {
+                                width: parent.width
+                                height: 28
+                                text: gameModel.player1Score
+                                color: gameModel.playerOnTurnIndex === 0 ? "#89B4FA" : "#7F849C"
+                                font.pixelSize: 24
+                                font.bold: true
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+
+                            // Rack (only show for player on turn)
+                            Text {
+                                visible: gameModel.playerOnTurnIndex === 0
+                                width: parent.width
+                                height: 18
+                                text: gameModel.currentRack
+                                color: "#F9E2AF"
+                                font.family: "Consolas"
+                                font.pixelSize: 13
+                                font.bold: true
+                                horizontalAlignment: Text.AlignHCenter
+                            }
                         }
                     }
-                }
 
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 40
-                    color: gameModel.playerOnTurnIndex === 1 ? "#45475A" : "#313244"
-                    radius: 8
-                    border.color: gameModel.playerOnTurnIndex === 1 ? "#F38BA8" : "transparent"
-                    border.width: 2
+                    // Separator
+                    Rectangle {
+                        width: 1
+                        Layout.fillHeight: true
+                        Layout.topMargin: 8
+                        Layout.bottomMargin: 8
+                        color: "#585B70"
+                    }
 
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: 10
-                        Text {
-                            text: gameModel.player2Name
-                            color: "#CDD6F4"
-                            font.bold: true
-                        }
-                        Item { Layout.fillWidth: true }
-                        Text {
-                            text: formatTime(gameModel.player2Clock)
-                            color: gameModel.player2Clock < 30 ? "#F38BA8" : "#A6E3A1"
-                            font.family: "Consolas"
-                            font.pixelSize: 18
+                    // Player 2 Info
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        radius: 8
+                        color: gameModel.playerOnTurnIndex === 1 ? "#45475A" : "transparent"
+                        border.color: gameModel.playerOnTurnIndex === 1 ? "#F38BA8" : "transparent"
+                        border.width: 2
+
+                        Column {
+                            anchors.fill: parent
+                            anchors.margins: 5
+                            spacing: 0
+
+                            // Name and Time row
+                            Row {
+                                width: parent.width
+                                height: 16
+                                Text {
+                                    text: gameModel.player2Name
+                                    color: gameModel.playerOnTurnIndex === 1 ? "#CDD6F4" : "#7F849C"
+                                    font.bold: true
+                                    font.pixelSize: 12
+                                }
+                                Item { width: parent.width - parent.children[0].width - parent.children[2].width; height: 1 }
+                                Text {
+                                    text: formatTime(gameModel.player2Clock)
+                                    color: gameModel.player2Clock < 30 ? "#F38BA8" : "#A6E3A1"
+                                    font.family: "Consolas"
+                                    font.pixelSize: 12
+                                }
+                            }
+
+                            // Score
+                            Text {
+                                width: parent.width
+                                height: 28
+                                text: gameModel.player2Score
+                                color: gameModel.playerOnTurnIndex === 1 ? "#89B4FA" : "#7F849C"
+                                font.pixelSize: 24
+                                font.bold: true
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+
+                            // Rack (only show for player on turn)
+                            Text {
+                                visible: gameModel.playerOnTurnIndex === 1
+                                width: parent.width
+                                height: 18
+                                text: gameModel.currentRack
+                                color: "#F9E2AF"
+                                font.family: "Consolas"
+                                font.pixelSize: 13
+                                font.bold: true
+                                horizontalAlignment: Text.AlignHCenter
+                            }
                         }
                     }
                 }
@@ -275,22 +450,23 @@ ApplicationWindow {
             Item {
                 id: boardArea
                 anchors.top: gameHeader.visible ? gameHeader.bottom : parent.top
-                anchors.topMargin: gameHeader.visible ? 10 : 0
+                anchors.topMargin: gameHeader.visible ? 8 : 0
                 anchors.left: parent.left
                 anchors.right: parent.right
                 height: boardBackground.height
-                
+
                 // Background for Board (tight fit)
                 Rectangle {
                     id: boardBackground
                     color: "#313244"
-                    radius: 10
+                    radius: 8
                     anchors.centerIn: parent
-                    width: gridContainer.width + 20
-                    height: gridContainer.height + 20
+                    width: gridContainer.width + 12
+                    height: gridContainer.height + 12
                     
                     Item {
                         id: gridContainer
+                        objectName: "gridContainer"
                         width: leftColumn.computedCellSize * 15
                         height: width
                         anchors.centerIn: parent
@@ -308,9 +484,55 @@ ApplicationWindow {
                             };
                         }
 
-                        // Keyboard Cursor
+                        // DropArea for tiles dragged from rack
+                        DropArea {
+                            id: boardDropArea
+                            objectName: "boardDropArea"
+                            anchors.fill: parent
+                            keys: ["rackTile"]
+                            enabled: gameModel.gameMode === GameHistoryModel.PlayMode
+
+                            onEntered: (drag) => {
+                                drag.accept();
+                            }
+
+                            onDropped: (drop) => {
+                                let row = Math.floor(drop.y / gridContainer.cellSize);
+                                let col = Math.floor(drop.x / gridContainer.cellSize);
+                                if (row >= 0 && row < 15 && col >= 0 && col < 15) {
+                                    // Get letter from the dragged tile
+                                    let letter = drop.source ? drop.source.charStr : "";
+                                    if (letter && letter !== " ") {
+                                        leftColumn.addTileAtPosition(letter, row, col);
+                                        keyboardEntryController.forceActiveFocus();
+                                    }
+                                    drop.accept();
+                                }
+                            }
+                        }
+
+                        // Keyboard Cursor click handler
+                        MouseArea {
+                            anchors.fill: parent
+                            enabled: gameModel.gameMode === GameHistoryModel.PlayMode
+                            onPressed: (mouse) => {
+                                let r = Math.floor(mouse.y / gridContainer.cellSize);
+                                let c = Math.floor(mouse.x / gridContainer.cellSize);
+                                if (r >= 0 && r < 15 && c >= 0 && c < 15) {
+                                    if (keyboardCursor.row === r && keyboardCursor.col === c) {
+                                        keyboardCursor.dir = 1 - keyboardCursor.dir;
+                                    } else {
+                                        keyboardCursor.row = r;
+                                        keyboardCursor.col = c;
+                                    }
+                                    keyboardEntryController.forceActiveFocus();
+                                }
+                            }
+                        }
+
                         Item {
                             id: keyboardCursor
+                            objectName: "keyboardCursor"
                             visible: gameModel.gameMode === GameHistoryModel.PlayMode
                             property int row: 7
                             property int col: 7
@@ -340,20 +562,61 @@ ApplicationWindow {
                         Repeater {
                             model: uncommittedTiles
                             delegate: Rectangle {
-                                width: gridContainer.cellSize - 4
-                                height: gridContainer.cellSize - 4
-                                x: model.col * gridContainer.cellSize + 2
-                                y: model.row * gridContainer.cellSize + 2
+                                id: uncommittedTile
+                                width: gridContainer.cellSize - 2
+                                height: gridContainer.cellSize - 2
+                                x: model.col * gridContainer.cellSize + 1
+                                y: model.row * gridContainer.cellSize + 1
                                 color: "#F9E2AF"
-                                radius: 4
+                                radius: gridContainer.cellSize * 0.1
                                 z: 5
-                                
+
+                                property string letter: model.letter
+                                property bool isBlank: model.isBlank
+
+                                // Letter
                                 Text {
-                                    anchors.centerIn: parent
-                                    text: model.letter
-                                    color: "#1E1E2E"
+                                    anchors.fill: parent
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    bottomPadding: gridContainer.cellSize * 0.1
+                                    text: uncommittedTile.letter
+                                    font.family: "Clear Sans"
+                                    font.pixelSize: uncommittedTile.isBlank ? gridContainer.cellSize * 0.4 : gridContainer.cellSize * 0.5
                                     font.bold: true
-                                    font.pixelSize: parent.height * 0.7
+                                    color: "#1E1E2E"
+                                }
+
+                                // Blank designation box
+                                Rectangle {
+                                    width: parent.width * 0.5
+                                    height: parent.height * 0.5
+                                    anchors.centerIn: parent
+                                    anchors.verticalCenterOffset: -gridContainer.cellSize * 0.05
+                                    color: "transparent"
+                                    border.color: "black"
+                                    border.width: 1
+                                    visible: uncommittedTile.isBlank
+                                }
+
+                                // Score subscript
+                                Text {
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    anchors.rightMargin: text.length > 1 ? gridContainer.cellSize * 0.05 : gridContainer.cellSize * 0.12
+                                    anchors.bottomMargin: gridContainer.cellSize * 0.05
+                                    font.family: "Clear Sans"
+                                    font.pixelSize: text.length > 1 ? gridContainer.cellSize * 0.22 : gridContainer.cellSize * 0.25
+                                    color: "#1E1E2E"
+                                    text: {
+                                        if (uncommittedTile.isBlank) return "0";
+                                        var l = uncommittedTile.letter.toUpperCase();
+                                        var scores = {
+                                            'A':1, 'B':3, 'C':3, 'D':2, 'E':1, 'F':4, 'G':2, 'H':4, 'I':1, 'J':8, 'K':5, 'L':1, 'M':3,
+                                            'N':1, 'O':1, 'P':3, 'Q':10, 'R':1, 'S':1, 'T':1, 'U':1, 'V':4, 'W':4, 'X':8, 'Y':4, 'Z':10
+                                        };
+                                        return scores[l] || "0";
+                                    }
                                 }
                             }
                         }
@@ -488,7 +751,7 @@ ApplicationWindow {
             RackView {
                 id: rackView
                 anchors.top: boardArea.bottom
-                anchors.topMargin: 15
+                anchors.topMargin: 10
                 anchors.horizontalCenter: parent.horizontalCenter
                 rack: gameModel.currentRack
                 tileSize: leftColumn.computedCellSize
@@ -615,9 +878,10 @@ ApplicationWindow {
                 }
             }
 
-            // Tile Tracking (fills space between rack and controls)
+            // Tile Tracking (fills space between rack and controls) - Review Mode only
             Rectangle {
                 id: tileTrackingArea
+                visible: gameModel.gameMode === GameHistoryModel.ReviewMode
                 anchors.top: rackView.bottom
                 anchors.topMargin: 10
                 anchors.bottom: controlsArea.top
@@ -723,57 +987,58 @@ ApplicationWindow {
             }
 
 
-        // Middle Column: Status & History
+        // Middle Column: Status & History (Review Mode only)
         ColumnLayout {
             Layout.fillHeight: true
             Layout.preferredWidth: parent.width * 0.34
             spacing: 20
-            
+            visible: gameModel.gameMode === GameHistoryModel.ReviewMode
+
             // Scoreboard
             Rectangle {
                 Layout.fillWidth: true
                 height: 120
                 color: "#313244"
                 radius: 10
-                
+
                 RowLayout {
                     anchors.fill: parent
                     anchors.margins: 10
                     spacing: 10
-                    
+
                     // Player 1
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         radius: 8
                         color: gameModel.playerOnTurnIndex === 0 ? "#45475A" : "transparent"
-                        
+
                         ColumnLayout {
                             anchors.fill: parent
                             spacing: 0
-                            
+
                             Text {
                                 text: gameModel.player1Name
                                 color: gameModel.playerOnTurnIndex === 0 ? "#CDD6F4" : "#7F849C"
-                                font.pixelSize: 20 // Reduced max font size
+                                font.pixelSize: 20
                                 fontSizeMode: Text.Fit
                                 minimumPixelSize: 10
                                 Layout.fillWidth: true
                                 horizontalAlignment: Text.AlignHCenter
                                 font.bold: gameModel.playerOnTurnIndex === 0
-                                leftPadding: 5 // Added padding
-                                rightPadding: 5 // Added padding
+                                leftPadding: 5
+                                rightPadding: 5
                             }
                             Text {
                                 text: gameModel.player1Score
                                 color: gameModel.playerOnTurnIndex === 0 ? "#89B4FA" : "#7F849C"
                                 font.pixelSize: 36
-                                font.bold: true 
+                                font.bold: true
                                 Layout.alignment: Qt.AlignHCenter
                             }
                         }
                     }
-                    
+
                     // Separator
                     Rectangle {
                         width: 1
@@ -781,7 +1046,7 @@ ApplicationWindow {
                         color: "#585B70"
                         Layout.alignment: Qt.AlignVCenter
                     }
-                    
+
                     // Player 2
                     Rectangle {
                         Layout.fillWidth: true
@@ -796,14 +1061,14 @@ ApplicationWindow {
                             Text {
                                 text: gameModel.player2Name
                                 color: gameModel.playerOnTurnIndex === 1 ? "#CDD6F4" : "#7F849C"
-                                font.pixelSize: 20 // Reduced max font size
+                                font.pixelSize: 20
                                 fontSizeMode: Text.Fit
                                 minimumPixelSize: 10
                                 Layout.fillWidth: true
                                 horizontalAlignment: Text.AlignHCenter
                                 font.bold: gameModel.playerOnTurnIndex === 1
-                                leftPadding: 5 // Added padding
-                                rightPadding: 5 // Added padding
+                                leftPadding: 5
+                                rightPadding: 5
                             }
                             Text {
                                 text: gameModel.player2Score
@@ -816,53 +1081,50 @@ ApplicationWindow {
                     }
                 }
             }
-            
-            // History
+
+            // History (Review Mode)
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 color: "#313244"
                 radius: 10
                 clip: true
-                
+
                 ColumnLayout {
                     anchors.fill: parent
                     spacing: 0
-                    
-                    // List
+
                     GridView {
                         id: historyList
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         model: gameModel.history
                         clip: true
-                        
-                        // Adjust layout for scrollbar
+
                         cellWidth: (width - 14) / 2
-                        cellHeight: 80 // Increased height for more clearance
+                        cellHeight: 80
                         flow: GridView.FlowLeftToRight
-                        
+
                         ScrollBar.vertical: ScrollBar {
                             id: vbar
                             active: true
                             width: 12
                             anchors.right: parent.right
-                            
+
                             contentItem: Rectangle {
                                 implicitWidth: 8
                                 implicitHeight: 100
                                 radius: 4
                                 color: vbar.pressed ? "#89B4FA" : (vbar.hovered ? "#6C7086" : "#585B70")
                             }
-                            
+
                             background: Rectangle {
                                 color: "#1E1E2E"
                                 opacity: 0.2
                                 radius: 4
                             }
                         }
-                        
-                        // Auto-scroll to selection
+
                         onCountChanged: if (gameModel.currentHistoryIndex >= 0) positionViewAtIndex(gameModel.currentHistoryIndex, GridView.Visible)
 
                         Connections {
@@ -880,7 +1142,7 @@ ApplicationWindow {
                             width: historyList.cellWidth
                             height: historyList.cellHeight
                             color: (index === gameModel.currentHistoryIndex) ? "#585B70" : (historyMouseArea.containsMouse ? "#45475A" : "transparent")
-                            
+
                             MouseArea {
                                 id: historyMouseArea
                                 anchors.fill: parent
@@ -888,21 +1150,20 @@ ApplicationWindow {
                                 onClicked: gameModel.jumpToHistoryIndex(index)
                             }
 
-                            // Content Container
                             Item {
                                 anchors.fill: parent
                                 anchors.margins: 8
-                                
+
                                 ColumnLayout {
                                     anchors.left: parent.left
                                     anchors.verticalCenter: parent.verticalCenter
-                                    spacing: 2 // Spacing between move lines
-                                    
+                                    spacing: 2
+
                                     Repeater {
-                                        model: modelData.scoreLines // Iterate over scoreLines
+                                        model: modelData.scoreLines
                                         delegate: RowLayout {
-                                            spacing: 4 // Space between move part and score part
-                                            
+                                            spacing: 4
+
                                             Text {
                                                 text: modelData.text
                                                 color: "#CDD6F4"
@@ -918,7 +1179,7 @@ ApplicationWindow {
                                                     if (modelData.type === 2 || modelData.type === 7 || modelData.type === 8) return "#F38BA8"
                                                     return "#89B4FA"
                                                 }
-                                                font.pixelSize: 10 // Smaller font size
+                                                font.pixelSize: 10
                                                 font.bold: false
                                                 Layout.alignment: Qt.AlignVCenter
                                             }
@@ -933,19 +1194,18 @@ ApplicationWindow {
                                         textFormat: Text.StyledText
                                     }
                                 }
-                                
+
                                 Text {
                                     text: modelData.cumulativeScore
                                     color: "#89B4FA"
                                     anchors.right: parent.right
-                                    anchors.bottom: parent.bottom // Move to bottom
-                                    anchors.bottomMargin: 5 // Add margin
+                                    anchors.bottom: parent.bottom
+                                    anchors.bottomMargin: 5
                                     font.bold: true
                                     font.pixelSize: 16
                                 }
                             }
-                            
-                            // Vertical Separator (only for left column / even index)
+
                             Rectangle {
                                 visible: index % 2 === 0
                                 width: 1
@@ -954,8 +1214,7 @@ ApplicationWindow {
                                 opacity: 0.3
                                 anchors.right: parent.right
                             }
-                            
-                            // Horizontal Separator line
+
                             Rectangle {
                                 anchors.bottom: parent.bottom
                                 width: parent.width
@@ -969,19 +1228,168 @@ ApplicationWindow {
             }
         }
 
-        // Right Column: Analysis
+        // Right Column: Analysis (Review Mode only)
         ColumnLayout {
             Layout.fillHeight: true
             Layout.preferredWidth: parent.width * 0.34
             spacing: 20
-            
+            visible: gameModel.gameMode === GameHistoryModel.ReviewMode
+
             AnalysisPanel {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 analysisModel: gameModel.analysisModel
                 lexiconName: gameModel.lexiconName
             }
-        }        }
+        }
+
+        // Right Column: Play Mode (Tracking + Scores + History)
+        ColumnLayout {
+            Layout.fillHeight: true
+            Layout.fillWidth: true
+            spacing: 15
+            visible: gameModel.gameMode === GameHistoryModel.PlayMode
+
+            // Tile Tracking (Play Mode - in right column)
+            Rectangle {
+                id: playModeTracking
+                Layout.fillWidth: true
+                // Dynamic height: header(28) + tiles text + footer(20) + padding(10)
+                Layout.preferredHeight: Math.min(200, 58 + playModeTilesText.implicitHeight)
+                color: "#313244"
+                radius: 10
+                clip: true
+
+                Column {
+                    anchors.fill: parent
+                    anchors.margins: 5
+                    spacing: 0
+
+                    // Header
+                    Row {
+                        width: parent.width
+                        height: 22
+
+                        Text {
+                            text: gameModel.bagCount + " IN BAG"
+                            color: "#CDD6F4"
+                            font.pixelSize: 10
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            width: parent.width / 2
+                        }
+
+                        Text {
+                            text: (gameModel.vowelCount + gameModel.consonantCount + gameModel.blankCount) + " UNSEEN"
+                            color: "#CDD6F4"
+                            font.pixelSize: 10
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            width: parent.width / 2
+                        }
+                    }
+
+                    // Tiles
+                    Text {
+                        id: playModeTilesText
+                        width: parent.width
+                        text: gameModel.unseenTiles
+                        color: "#FFFFFF"
+                        font.family: "Consolas"
+                        font.pixelSize: 18
+                        wrapMode: Text.Wrap
+                        horizontalAlignment: Text.AlignHCenter
+                        padding: 4
+                    }
+
+                    // Footer
+                    Row {
+                        width: parent.width
+                        height: 22
+
+                        Text {
+                            text: gameModel.vowelCount + " VOWELS"
+                            color: "#CDD6F4"
+                            font.pixelSize: 10
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            width: parent.width / 2
+                        }
+
+                        Text {
+                            text: gameModel.consonantCount + " CONSONANTS"
+                            color: "#CDD6F4"
+                            font.pixelSize: 10
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            width: parent.width / 2
+                        }
+                    }
+                }
+            }
+
+            // History (Play Mode)
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                color: "#313244"
+                radius: 10
+                clip: true
+
+                ListView {
+                    id: playModeHistoryList
+                    anchors.fill: parent
+                    anchors.margins: 5
+                    model: gameModel.history
+                    clip: true
+                    spacing: 2
+
+                    ScrollBar.vertical: ScrollBar {
+                        id: playModeVbar
+                        active: true
+                        width: 10
+                    }
+
+                    onCountChanged: if (count > 0) positionViewAtEnd()
+
+                    delegate: Rectangle {
+                        width: playModeHistoryList.width - 12
+                        height: 50
+                        color: (index === gameModel.currentHistoryIndex) ? "#585B70" : "transparent"
+                        radius: 5
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            spacing: 10
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+
+                                Repeater {
+                                    model: modelData.scoreLines
+                                    delegate: Text {
+                                        text: modelData.text + " " + modelData.scoreText
+                                        color: "#CDD6F4"
+                                        font.pixelSize: 12
+                                        font.bold: modelData.type === 1
+                                    }
+                                }
+                            }
+
+                            Text {
+                                text: modelData.cumulativeScore
+                                color: "#89B4FA"
+                                font.bold: true
+                                font.pixelSize: 16
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        }
     }
 
     StartupView {
