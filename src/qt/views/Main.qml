@@ -19,6 +19,12 @@ ApplicationWindow {
     property real saturationLevel: 0.7 // Set to 70%
     property string recentFilesJson: "[]"
 
+    function formatTime(seconds) {
+        let m = Math.floor(seconds / 60);
+        let s = seconds % 60;
+        return m + ":" + (s < 10 ? "0" : "") + s;
+    }
+
     Settings {
         id: appSettings
         property alias recentFilesJson: mainWindow.recentFilesJson
@@ -95,14 +101,19 @@ ApplicationWindow {
         }
     }
 
-    RowLayout {
+    Item {
+        id: mainContent
         anchors.fill: parent
-        anchors.margins: 20
-        spacing: 20
-        
-        // Left Column: Board, Tracking, Rack, Controls
-        Item {
-            id: leftColumn
+        visible: gameModel.gameMode !== GameHistoryModel.SetupMode
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.margins: 20
+            spacing: 20
+
+            // Left Column: Board, Tracking, Rack, Controls
+            Item {
+                id: leftColumn
             Layout.fillHeight: true
             Layout.preferredWidth: parent.width * 0.32
 
@@ -110,10 +121,161 @@ ApplicationWindow {
             property double availableW: width - 20
             property int computedCellSize: Math.max(10, Math.min(Math.floor((width - 20) / 15), Math.floor((height - 240) / 18)))
 
-            // Board Area (anchored to top)
+            Item {
+                id: keyboardEntryController
+                anchors.fill: parent
+                focus: gameModel.gameMode === GameHistoryModel.PlayMode
+                
+                Keys.onPressed: (event) => {
+                    if (gameModel.gameMode !== GameHistoryModel.PlayMode) return;
+                    
+                    if (event.key === Qt.Key_Right) {
+                        keyboardCursor.col = (keyboardCursor.col + 1) % 15;
+                        event.accepted = true;
+                    } else if (event.key === Qt.Key_Left) {
+                        keyboardCursor.col = (keyboardCursor.col + 14) % 15;
+                        event.accepted = true;
+                    } else if (event.key === Qt.Key_Down) {
+                        keyboardCursor.row = (keyboardCursor.row + 1) % 15;
+                        event.accepted = true;
+                    } else if (event.key === Qt.Key_Up) {
+                        keyboardCursor.row = (keyboardCursor.row + 14) % 15;
+                        event.accepted = true;
+                    } else if (event.key === Qt.Key_Space) {
+                        keyboardCursor.dir = 1 - keyboardCursor.dir;
+                        event.accepted = true;
+                    } else if (event.key >= Qt.Key_A && event.key <= Qt.Key_Z) {
+                        addTile(String.fromCharCode(event.key));
+                        event.accepted = true;
+                    } else if (event.key === Qt.Key_Backspace) {
+                        removeLastTile();
+                        event.accepted = true;
+                    } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                        commitMove();
+                        event.accepted = true;
+                    } else if (event.key === Qt.Key_Escape) {
+                        uncommittedTiles.clear();
+                        event.accepted = true;
+                    }
+                }
+            }
+
+            ListModel {
+                id: uncommittedTiles
+            }
+
+            function addTile(letter) {
+                // Simple letter add logic
+                uncommittedTiles.append({
+                    row: keyboardCursor.row,
+                    col: keyboardCursor.col,
+                    letter: letter,
+                    isBlank: false
+                });
+                advanceCursor();
+            }
+
+            function removeLastTile() {
+                if (uncommittedTiles.count > 0) {
+                    uncommittedTiles.remove(uncommittedTiles.count - 1);
+                    // Reverse cursor? (Optional, maybe just stay)
+                }
+            }
+
+            function advanceCursor() {
+                if (keyboardCursor.dir === 0) {
+                    keyboardCursor.col = (keyboardCursor.col + 1) % 15;
+                } else {
+                    keyboardCursor.row = (keyboardCursor.row + 1) % 15;
+                }
+            }
+
+            function commitMove() {
+                if (uncommittedTiles.count === 0) return;
+                
+                let first = uncommittedTiles.get(0);
+                let colChar = String.fromCharCode(65 + first.col);
+                let rowStr = (first.row + 1).toString();
+                let word = "";
+                for (let i = 0; i < uncommittedTiles.count; i++) {
+                    word += uncommittedTiles.get(i).letter;
+                }
+                
+                let pos = (keyboardCursor.dir === 0) ? (rowStr + colChar) : (colChar + rowStr);
+                let notation = pos + " " + word;
+                
+                gameModel.submitMove(notation);
+                uncommittedTiles.clear();
+            }
+
+            // Player Headers (Clocks)
+            RowLayout {
+                id: gameHeader
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: 40
+                visible: gameModel.gameMode === GameHistoryModel.PlayMode
+                spacing: 12
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 40
+                    color: gameModel.playerOnTurnIndex === 0 ? "#45475A" : "#313244"
+                    radius: 8
+                    border.color: gameModel.playerOnTurnIndex === 0 ? "#89B4FA" : "transparent"
+                    border.width: 2
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        Text {
+                            text: gameModel.player1Name
+                            color: "#CDD6F4"
+                            font.bold: true
+                        }
+                        Item { Layout.fillWidth: true }
+                        Text {
+                            text: formatTime(gameModel.player1Clock)
+                            color: gameModel.player1Clock < 30 ? "#F38BA8" : "#A6E3A1"
+                            font.family: "Consolas"
+                            font.pixelSize: 18
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 40
+                    color: gameModel.playerOnTurnIndex === 1 ? "#45475A" : "#313244"
+                    radius: 8
+                    border.color: gameModel.playerOnTurnIndex === 1 ? "#F38BA8" : "transparent"
+                    border.width: 2
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        Text {
+                            text: gameModel.player2Name
+                            color: "#CDD6F4"
+                            font.bold: true
+                        }
+                        Item { Layout.fillWidth: true }
+                        Text {
+                            text: formatTime(gameModel.player2Clock)
+                            color: gameModel.player2Clock < 30 ? "#F38BA8" : "#A6E3A1"
+                            font.family: "Consolas"
+                            font.pixelSize: 18
+                        }
+                    }
+                }
+            }
+
+            // Board Area (anchored to header or top)
             Item {
                 id: boardArea
-                anchors.top: parent.top
+                anchors.top: gameHeader.visible ? gameHeader.bottom : parent.top
+                anchors.topMargin: gameHeader.visible ? 10 : 0
                 anchors.left: parent.left
                 anchors.right: parent.right
                 height: boardBackground.height
@@ -138,11 +300,61 @@ ApplicationWindow {
                             // Force dependency on saturationLevel so this re-evaluates
                             var s = saturationLevel;
                             return {
-                                "1,2": { color: Qt.hsla(0.017, 0.9 * s, 0.71, 1.0), text: "2W", textColor: "#1E1E2E" }, // DWS - Salmon (#FA8072)
-                                "1,3": { color: Qt.hsla(0.0, 1.0 * s, 0.5, 1.0), text: "3W", textColor: "#FFFFFF" }, // TWS - Red (#FF0000)
-                                "2,1": { color: Qt.hsla(0.54, 0.53 * s, 0.79, 1.0), text: "2L", textColor: "#1E1E2E" }, // DLS - Light Blue (#ADD8E6)
-                                "3,1": { color: Qt.hsla(0.66, 1.0 * s, 0.27, 1.0), text: "3L", textColor: "#FFFFFF" }, // TLS - Dark Blue (#00008B)
-                                "1,1": { color: "#45475A", text: "", textColor: "#CDD6F4" }     // Normal
+                                "1,3": { color: "#D20F39", text: "3W" }, // Strong Red
+                                "1,2": { color: "#EA76CB", text: "2W" }, // Distinct Pink
+                                "3,1": { color: "#1E66F5", text: "3L" }, // Strong Blue
+                                "2,1": { color: "#04A5E5", text: "2L" }, // Light Blue
+                                "1,1": { color: "#313244", text: "" }
+                            };
+                        }
+
+                        // Keyboard Cursor
+                        Item {
+                            id: keyboardCursor
+                            visible: gameModel.gameMode === GameHistoryModel.PlayMode
+                            property int row: 7
+                            property int col: 7
+                            property int dir: 0 // 0=H, 1=V
+                            z: 10
+
+                            Rectangle {
+                                width: gridContainer.cellSize
+                                height: gridContainer.cellSize
+                                x: keyboardCursor.col * gridContainer.cellSize
+                                y: keyboardCursor.row * gridContainer.cellSize
+                                color: "#89B4FA"
+                                opacity: 0.4
+                                radius: 4
+                                
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: keyboardCursor.dir === 0 ? "▶" : "▼"
+                                    color: "white"
+                                    font.bold: true
+                                    font.pixelSize: parent.height * 0.5
+                                }
+                            }
+                        }
+
+                        // Uncommitted Tiles Layer
+                        Repeater {
+                            model: uncommittedTiles
+                            delegate: Rectangle {
+                                width: gridContainer.cellSize - 4
+                                height: gridContainer.cellSize - 4
+                                x: model.col * gridContainer.cellSize + 2
+                                y: model.row * gridContainer.cellSize + 2
+                                color: "#F9E2AF"
+                                radius: 4
+                                z: 5
+                                
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: model.letter
+                                    color: "#1E1E2E"
+                                    font.bold: true
+                                    font.pixelSize: parent.height * 0.7
+                                }
                             }
                         }
 
@@ -214,7 +426,7 @@ ApplicationWindow {
                                             ctx.strokeRect(blankX, blankY, blankSize, blankSize);
                                         }                                    } else {
                                         // Draw bonus square (rounded rectangle)
-                                        var style = gridContainer.bonusStyles[modelData.letterMultiplier + "," + modelData.wordMultiplier];
+                                        var style = gridContainer.bonusStyles[modelData.letterMultiplier + "," + modelData.wordMultiplier] || gridContainer.bonusStyles["1,1"];
                                         ctx.fillStyle = style.color;
                                         
                                         var tileX = x + 1;
@@ -283,178 +495,122 @@ ApplicationWindow {
             }
 
             // Controls (anchored to bottom)
-            RowLayout {
-                id: controlsRow
+            Item {
+                id: controlsArea
                 anchors.bottom: parent.bottom
-                anchors.horizontalCenter: parent.horizontalCenter
-                spacing: 15
-                
-                // Go to First Button
-                Button {
-                    id: goToFirstButton
-                    Layout.preferredWidth: leftColumn.computedCellSize
-                    Layout.preferredHeight: leftColumn.computedCellSize
-                    enabled: gameModel.currentHistoryIndex > 0
-                    onClicked: gameModel.jumpToHistoryIndex(0)
-                    background: Rectangle {
-                        width: parent.width
-                        height: parent.height
-                        color: parent.down ? "#4070A0" : (parent.hovered ? "#5080B0" : "#6496C8")
-                        radius: width / 2
-                        opacity: goToFirstButton.enabled ? 1.0 : 0.5
-                    }
-                    contentItem: Item {
-                        anchors.fill: parent
-                        Canvas {
-                            anchors.centerIn: parent
-                            width: parent.width * 0.5
-                            height: parent.height * 0.5
-                            onPaint: {
-                                var ctx = getContext("2d");
-                                ctx.clearRect(0, 0, width, height);
-                                ctx.fillStyle = "white";
-                                
-                                var s = Math.min(width, height);
-                                // Vertical bar
-                                ctx.fillRect(0, s * 0.2, s * 0.15, s * 0.6);
-                                // Left arrow
-                                ctx.beginPath();
-                                ctx.moveTo(s * 0.9, s * 0.2);
-                                ctx.lineTo(s * 0.3, s * 0.5);
-                                ctx.lineTo(s * 0.9, s * 0.8);
-                                ctx.closePath();
-                                ctx.fill();
-                            }
-                            onWidthChanged: requestPaint()
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: 50
+
+                // Review Mode Controls (Existing)
+                RowLayout {
+                    id: reviewControls
+                    anchors.centerIn: parent
+                    visible: gameModel.gameMode === GameHistoryModel.ReviewMode
+                    spacing: 15
+                    
+                    // Go to First Button
+                    Button {
+                        id: goToFirstButton
+                        Layout.preferredWidth: leftColumn.computedCellSize
+                        Layout.preferredHeight: leftColumn.computedCellSize
+                        enabled: gameModel.currentHistoryIndex > 0
+                        onClicked: gameModel.jumpToHistoryIndex(0)
+                        background: Rectangle {
+                            color: parent.down ? "#45475A" : (parent.hovered ? "#585B70" : "#313244")
+                            radius: width / 2
+                            opacity: enabled ? 1.0 : 0.5
                         }
+                        contentItem: Text { text: "«"; color: "white"; font.pixelSize: 20; horizontalAlignment: Text.AlignHCenter }
+                    }
+
+                    Button {
+                        id: previousButton
+                        Layout.preferredWidth: leftColumn.computedCellSize
+                        Layout.preferredHeight: leftColumn.computedCellSize
+                        enabled: gameModel.currentHistoryIndex > 0
+                        onClicked: gameModel.previous()
+                        background: Rectangle {
+                            color: parent.down ? "#45475A" : (parent.hovered ? "#585B70" : "#313244")
+                            radius: width / 2
+                            opacity: enabled ? 1.0 : 0.5
+                        }
+                        contentItem: Text { text: "‹"; color: "white"; font.pixelSize: 20; horizontalAlignment: Text.AlignHCenter }
+                    }
+
+                    Text {
+                        text: "Turn " + (gameModel.currentHistoryIndex + 1) + " / " + gameModel.totalHistoryItems
+                        color: "#CDD6F4"
+                        font.bold: true
+                    }
+
+                    Button {
+                        id: nextButton
+                        Layout.preferredWidth: leftColumn.computedCellSize
+                        Layout.preferredHeight: leftColumn.computedCellSize
+                        enabled: gameModel.currentHistoryIndex < gameModel.totalHistoryItems - 1
+                        onClicked: gameModel.next()
+                        background: Rectangle {
+                            color: parent.down ? "#45475A" : (parent.hovered ? "#585B70" : "#313244")
+                            radius: width / 2
+                            opacity: enabled ? 1.0 : 0.5
+                        }
+                        contentItem: Text { text: "›"; color: "white"; font.pixelSize: 20; horizontalAlignment: Text.AlignHCenter }
+                    }
+
+                    Button {
+                        id: goToLastButton
+                        Layout.preferredWidth: leftColumn.computedCellSize
+                        Layout.preferredHeight: leftColumn.computedCellSize
+                        enabled: gameModel.currentHistoryIndex < gameModel.totalHistoryItems - 1
+                        onClicked: gameModel.jumpToHistoryIndex(gameModel.totalHistoryItems - 1)
+                        background: Rectangle {
+                            color: parent.down ? "#45475A" : (parent.hovered ? "#585B70" : "#313244")
+                            radius: width / 2
+                            opacity: enabled ? 1.0 : 0.5
+                        }
+                        contentItem: Text { text: "»"; color: "white"; font.pixelSize: 20; horizontalAlignment: Text.AlignHCenter }
                     }
                 }
 
-                // Previous Button
-                Button {
-                    id: previousButton
-                    Layout.preferredWidth: leftColumn.computedCellSize
-                    Layout.preferredHeight: leftColumn.computedCellSize
-                    enabled: gameModel.currentHistoryIndex > 0
-                    onClicked: gameModel.previous()
-                    background: Rectangle {
-                        width: parent.width
-                        height: parent.height
-                        color: parent.down ? "#4070A0" : (parent.hovered ? "#5080B0" : "#6496C8")
-                        radius: width / 2
-                        opacity: previousButton.enabled ? 1.0 : 0.5
-                    }
-                    contentItem: Item {
-                        anchors.fill: parent
-                        Canvas {
-                            anchors.centerIn: parent
-                            width: parent.width * 0.5
-                            height: parent.height * 0.5
-                            onPaint: {
-                                var ctx = getContext("2d");
-                                ctx.clearRect(0, 0, width, height);
-                                ctx.fillStyle = "white";
-                                
-                                var s = Math.min(width, height);
-                                // Left arrow
-                                ctx.beginPath();
-                                ctx.moveTo(s * 0.8, s * 0.2);
-                                ctx.lineTo(s * 0.2, s * 0.5);
-                                ctx.lineTo(s * 0.8, s * 0.8);
-                                ctx.closePath();
-                                ctx.fill();
-                            }
-                            onWidthChanged: requestPaint()
-                        }
-                    }
-                }
+                // Play Mode Controls
+                RowLayout {
+                    id: playControls
+                    anchors.centerIn: parent
+                    visible: gameModel.gameMode === GameHistoryModel.PlayMode
+                    spacing: 15
 
-                Text {
-                    text: "Turn " + (gameModel.currentHistoryIndex + 1) + " of " + gameModel.totalHistoryItems
-                    color: "#CDD6F4"
-                    font.pixelSize: 18
-                    font.bold: true
-                    Layout.alignment: Qt.AlignVCenter
-                    Layout.margins: 10
-                }
+                    Button {
+                        text: "PASS"
+                        onClicked: gameModel.pass()
+                        contentItem: Text { text: parent.text; color: "white"; font.bold: true; horizontalAlignment: Text.AlignHCenter }
+                        background: Rectangle { implicitWidth: 80; implicitHeight: 40; color: "#F38BA8"; radius: 8 }
+                    }
 
-                // Next Button
-                Button {
-                    id: nextButton
-                    Layout.preferredWidth: leftColumn.computedCellSize
-                    Layout.preferredHeight: leftColumn.computedCellSize
-                    enabled: gameModel.currentHistoryIndex < gameModel.totalHistoryItems - 1
-                    onClicked: gameModel.next()
-                    background: Rectangle {
-                        width: parent.width
-                        height: parent.height
-                        color: parent.down ? "#4070A0" : (parent.hovered ? "#5080B0" : "#6496C8")
-                        radius: width / 2
-                        opacity: nextButton.enabled ? 1.0 : 0.5
+                    Button {
+                        text: "EXCHANGE"
+                        onClicked: { /* TODO: exchangeDialog */ }
+                        contentItem: Text { text: parent.text; color: "white"; font.bold: true; horizontalAlignment: Text.AlignHCenter }
+                        background: Rectangle { implicitWidth: 100; implicitHeight: 40; color: "#FAB387"; radius: 8 }
                     }
-                    contentItem: Item {
-                        anchors.fill: parent
-                        Canvas {
-                            anchors.centerIn: parent
-                            width: parent.width * 0.5
-                            height: parent.height * 0.5
-                            onPaint: {
-                                var ctx = getContext("2d");
-                                ctx.clearRect(0, 0, width, height);
-                                ctx.fillStyle = "white";
-                                
-                                var s = Math.min(width, height);
-                                // Right arrow
-                                ctx.beginPath();
-                                ctx.moveTo(s * 0.2, s * 0.2);
-                                ctx.lineTo(s * 0.8, s * 0.5);
-                                ctx.lineTo(s * 0.2, s * 0.8);
-                                ctx.closePath();
-                                ctx.fill();
-                            }
-                            onWidthChanged: requestPaint()
-                        }
-                    }
-                }
 
-                // Go to Last Button
-                Button {
-                    id: goToLastButton
-                    Layout.preferredWidth: leftColumn.computedCellSize
-                    Layout.preferredHeight: leftColumn.computedCellSize
-                    enabled: gameModel.currentHistoryIndex < gameModel.totalHistoryItems - 1
-                    onClicked: gameModel.jumpToHistoryIndex(gameModel.totalHistoryItems - 1)
-                    background: Rectangle {
-                        width: parent.width
-                        height: parent.height
-                        color: parent.down ? "#4070A0" : (parent.hovered ? "#5080B0" : "#6496C8")
-                        radius: width / 2
-                        opacity: goToLastButton.enabled ? 1.0 : 0.5
-                    }
-                    contentItem: Item {
-                        anchors.fill: parent
-                        Canvas {
-                            anchors.centerIn: parent
-                            width: parent.width * 0.5
-                            height: parent.height * 0.5
-                            onPaint: {
-                                var ctx = getContext("2d");
-                                ctx.clearRect(0, 0, width, height);
-                                ctx.fillStyle = "white";
-                                
-                                var s = Math.min(width, height);
-                                // Vertical bar
-                                ctx.fillRect(s * 0.85, s * 0.2, s * 0.15, s * 0.6);
-                                // Right arrow
-                                ctx.beginPath();
-                                ctx.moveTo(s * 0.1, s * 0.2);
-                                ctx.lineTo(s * 0.7, s * 0.5);
-                                ctx.lineTo(s * 0.1, s * 0.8);
-                                ctx.closePath();
-                                ctx.fill();
+                    Button {
+                        text: "AI MOVE"
+                        onClicked: {
+                            let notation = gameModel.getComputerMove();
+                            if (notation) {
+                                gameModel.submitMove(notation);
                             }
-                            onWidthChanged: requestPaint()
                         }
+                        contentItem: Text { text: parent.text; color: "white"; font.bold: true; horizontalAlignment: Text.AlignHCenter }
+                        background: Rectangle { implicitWidth: 100; implicitHeight: 40; color: "#89B4FA"; radius: 8 }
+                    }
+
+                    Button {
+                        text: "PLAY"
+                        onClicked: commitMove()
+                        contentItem: Text { text: parent.text; color: "#1E1E2E"; font.bold: true; horizontalAlignment: Text.AlignHCenter }
+                        background: Rectangle { implicitWidth: 80; implicitHeight: 40; color: "#A6E3A1"; radius: 8 }
                     }
                 }
             }
@@ -464,7 +620,7 @@ ApplicationWindow {
                 id: tileTrackingArea
                 anchors.top: rackView.bottom
                 anchors.topMargin: 10
-                anchors.bottom: controlsRow.top
+                anchors.bottom: controlsArea.top
                 anchors.bottomMargin: 10
                 anchors.left: parent.left
                 anchors.right: parent.right
@@ -561,10 +717,11 @@ ApplicationWindow {
                         horizontalAlignment: Text.AlignHCenter
                         width: parent.width / 2
                         verticalAlignment: Text.AlignVCenter
-                    }
-                }
             }
-        }
+            }
+            }
+            }
+
 
         // Middle Column: Status & History
         ColumnLayout {
@@ -824,6 +981,14 @@ ApplicationWindow {
                 analysisModel: gameModel.analysisModel
                 lexiconName: gameModel.lexiconName
             }
+        }        }
+    }
+
+    StartupView {
+        anchors.fill: parent
+        visible: gameModel.gameMode === GameHistoryModel.SetupMode
+        onStartRequested: (lexicon, minutes) => {
+            gameModel.startNewGame(lexicon, minutes)
         }
     }
 }

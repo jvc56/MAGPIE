@@ -83,9 +83,11 @@ qt_add_qml_module(qtpie
     URI QtPie
     VERSION 1.0
     RESOURCE_PREFIX "/"
-    QML_FILES src/qt/views/Main.qml
+    QML_FILES 
+    src/qt/views/Main.qml
     src/qt/views/RackView.qml
     src/qt/views/AnalysisPanel.qml
+    src/qt/views/StartupView.qml
 )
 
 target_link_libraries(qtpie

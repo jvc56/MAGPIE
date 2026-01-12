@@ -19,14 +19,14 @@ void play_move_without_drawing_tiles(const Move *move, Game *game);
 void set_random_rack(Game *game, int player_index, const Rack *known_rack);
 Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list);
 void generate_moves_for_game(const MoveGenArgs *args);
-void draw_to_full_rack(const Game *game, int player_index);
-int draw_rack_string_from_bag(const Game *game, int player_index,
+void draw_to_full_rack(Game *game, int player_index);
+int draw_rack_string_from_bag(Game *game, int player_index,
                               const char *rack_string);
 bool draw_rack_from_bag(Game *game, int player_index, const Rack *rack_to_draw);
 void draw_leave_from_bag(Bag *bag, int player_draw_index, Rack *rack_to_update,
                          const Rack *rack_to_draw);
 void get_leave_for_move(const Move *move, const Game *game, Rack *leave);
-void return_rack_to_bag(const Game *game, int player_index);
+void return_rack_to_bag(Game *game, int player_index);
 bool rack_is_drawable(const Game *game, int player_index,
                       const Rack *rack_to_draw);
 Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack);
