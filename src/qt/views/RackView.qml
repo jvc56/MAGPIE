@@ -3,16 +3,19 @@ import QtQuick.Controls
 
 Item {
     id: root
-    
+
     property string rack: ""
-    
+
     // Internal state for drag-and-drop
     property string internalRack: ""
     property int tileSize: 40
     property int dropIndex: -1
     property int caretDisplayIndex: 0 // Tracks position for visual continuity during fade-out
     property int draggingIndex: -1
-    
+
+    // Signal emitted when a tile is dropped externally (e.g., on board)
+    signal tileDroppedOnBoard(string letter, int rackIndex)
+
     // Constants
     readonly property int tileSpacing: Math.max(2, tileSize * 0.1)
 
@@ -108,20 +111,27 @@ Item {
             id: tileDelegate
             width: root.tileSize
             height: root.tileSize
-            
+
             property int tileIndex: index
             property string charStr: root.internalRack.charAt(index)
             property bool isHeld: false
-            
+
             // A tile is a blank if it is '?' or a lowercase letter (designated blank)
             property bool isBlank: charStr === "?" || (charStr >= "a" && charStr <= "z")
-            
+
+            // Drag properties for external drop targets (e.g., board)
+            Drag.active: isHeld && charStr !== " "
+            Drag.keys: ["rackTile"]
+            Drag.source: tileDelegate
+            Drag.hotSpot.x: width / 2
+            Drag.hotSpot.y: height / 2
+
             // Centered vertically
             y: (root.height - height) / 2
-            
+
             // X position
             x: getSlotX(index)
-            
+
             onIsHeldChanged: {
                 if (!isHeld) {
                     x = Qt.binding(function() { return root.getSlotX(index) });
@@ -275,22 +285,32 @@ Item {
                 }
                 
                 onReleased: {
+                    // Check if dropped on external target (e.g., board DropArea)
+                    if (tileDelegate.Drag.target) {
+                        tileDelegate.Drag.drop();
+                        // Don't process internal rack reorder
+                        tileDelegate.isHeld = false;
+                        root.dropIndex = -1;
+                        root.draggingIndex = -1;
+                        return;
+                    }
+
                     tileDelegate.isHeld = false;
-                    
+
                     if (root.dropIndex !== -1) {
                         var arr = root.internalRack.split('');
                         var charToMove = arr[root.draggingIndex];
-                        
+
                         arr.splice(root.draggingIndex, 1);
-                        
+
                         var insertAt = root.dropIndex;
                         if (root.draggingIndex < insertAt) insertAt--;
-                        
+
                         arr.splice(insertAt, 0, charToMove);
-                        
+
                         root.internalRack = arr.join('');
                     }
-                    
+
                     root.dropIndex = -1;
                     root.draggingIndex = -1;
                 }

@@ -6,7 +6,12 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Qt6 Setup
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 QuickDialogs2 Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 QuickDialogs2 Widgets QuickTest)
+find_package(Qt6QuickTest REQUIRED)
+
+message(STATUS "Qt6QuickTest found: ${Qt6QuickTest_FOUND}")
+
+enable_testing()
 
 # Suppress Qt CMake warnings
 if(COMMAND qt_policy)
@@ -49,8 +54,7 @@ set_source_files_properties(${CMAKE_BINARY_DIR}/AppIcon.icns PROPERTIES MACOSX_P
 # --- QtPie (Frontend) ---
 qt_standard_project_setup()
 
-set(QT_SOURCES
-    src/qt/main.cpp
+set(QT_MODEL_SOURCES
     src/qt/models/GameHistoryModel.cpp
     src/qt/models/GameHistoryModel.h
     src/qt/models/AnalysisModel.cpp
@@ -63,6 +67,11 @@ set(QT_SOURCES
     src/qt/models/ScoreLineItem.h
     src/qt/bridge/qt_bridge.c
     src/qt/bridge/qt_bridge.h
+)
+
+set(QT_SOURCES
+    src/qt/main.cpp
+    ${QT_MODEL_SOURCES}
     ${CMAKE_BINARY_DIR}/AppIcon.icns
 )
 
@@ -124,5 +133,27 @@ add_custom_command(
     $<TARGET_FILE_DIR:qtpie>/../Resources/fonts/Roboto-Bold.ttf
 )
 
-# Copy assets if needed (placeholder)
-# file(COPY src/qt/assets DESTINATION ${CMAKE_BINARY_DIR}/assets)
+# --- Tests ---
+file(GLOB TEST_SOURCES "tests/*.cpp")
+add_executable(tst_ui ${TEST_SOURCES} ${QT_MODEL_SOURCES})
+set_target_properties(tst_ui PROPERTIES AUTOMOC ON AUTORCC ON AUTOUIC ON)
+
+target_link_libraries(tst_ui
+    PRIVATE
+    magpie_core
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Qml
+    Qt6::Quick
+    Qt6::QuickControls2
+    Qt6::QuickDialogs2
+    Qt6::Widgets
+    Qt6::QuickTest
+)
+
+# Set common definitions and include paths
+target_compile_definitions(tst_ui PRIVATE BOARD_DIM=15 RACK_SIZE=7)
+target_include_directories(tst_ui PRIVATE src)
+
+# Register test with path to QML test files
+add_test(NAME tst_ui COMMAND tst_ui -input ${CMAKE_SOURCE_DIR}/tests)
