@@ -722,8 +722,15 @@ ApplicationWindow {
                         delegate: Rectangle {
                             width: historyList.cellWidth
                             height: historyList.cellHeight
-                            color: (index === gameModel.currentHistoryIndex) ? "#585B70" : "transparent"
+                            color: (index === gameModel.currentHistoryIndex) ? "#585B70" : (historyMouseArea.containsMouse ? "#45475A" : "transparent")
                             
+                            MouseArea {
+                                id: historyMouseArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: gameModel.jumpToHistoryIndex(index)
+                            }
+
                             // Content Container
                             Item {
                                 anchors.fill: parent
