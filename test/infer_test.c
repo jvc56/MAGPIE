@@ -1387,17 +1387,16 @@ void test_infer_cutoff_repro(void) {
   config_destroy(config);
 }
 
-void test_infer_cutoff_optimization_comparison(void) {
-  const int NUM_GAMES = 50;   // 500 games, plays 1-6 and exchanges 1-7
+void test_infer_cutoff_optimization_comparison_mode(bool use_wmp) {
+  const int NUM_GAMES = 50;   // 50 games, plays 1-6 and exchanges 1-7
   const int NUM_THREADS = 10; // Full cores available
 
   // Use equity margin of 0 to test correctness (strictest test)
-  // Use CSW21 with WMP for full WMP instrumentation
   char config_str[256];
   snprintf(config_str, sizeof(config_str),
-           "set -lex CSW21 -wmp true -s1 equity -s2 equity "
+           "set -lex CSW21 -wmp %s -s1 equity -s2 equity "
            "-r1 all -r2 all -numplays 1 -threads %d",
-           NUM_THREADS);
+           use_wmp ? "true" : "false", NUM_THREADS);
   Config *config = config_create_or_die(config_str);
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
@@ -1427,7 +1426,8 @@ void test_infer_cutoff_optimization_comparison(void) {
   // Counter for 7-tile exchanges found
   int num_seven_tile_exchanges_found = 0;
 
-  printf("\nPlaying %d random games, inference for plays 1-6 and exchanges "
+  printf("\n=== %s Mode ===\n", use_wmp ? "WMP" : "KWG (Recursive)");
+  printf("Playing %d random games, inference for plays 1-6 and exchanges "
          "1-7...\n",
          NUM_GAMES);
   fflush(stdout);
@@ -1508,6 +1508,11 @@ void test_infer_cutoff_optimization_comparison(void) {
       const bool is_exchange_1_to_7 = (move_type == GAME_EVENT_EXCHANGE) &&
                                       (tiles_played >= 1 && tiles_played <= 7);
       if (!is_scoring_play_1_to_6 && !is_exchange_1_to_7) {
+        play_move(move, game, NULL);
+        continue;
+      }
+      // Skip exchanges that can't be inferred due to bag size requirement
+      if (is_exchange_1_to_7 && tiles_in_bag < (RACK_SIZE * 2)) {
         play_move(move, game, NULL);
         continue;
       }
@@ -1880,5 +1885,6 @@ void test_infer_cutoff_optimization_comparison(void) {
 
 void test_infer(void) {
   // test_infer_cutoff_repro();
-  test_infer_cutoff_optimization_comparison();
+  test_infer_cutoff_optimization_comparison_mode(true);  // WMP mode
+  test_infer_cutoff_optimization_comparison_mode(false); // KWG (recursive) mode
 }
