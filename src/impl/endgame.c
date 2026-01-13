@@ -154,6 +154,12 @@ EndgameSolver *endgame_solver_create(void) {
   return calloc_or_die(1, sizeof(EndgameSolver));
 }
 
+void endgame_solver_clear_tt(EndgameSolver *solver) {
+  if (solver && solver->transposition_table) {
+    transposition_table_reset(solver->transposition_table);
+  }
+}
+
 void endgame_solver_destroy(EndgameSolver *es) {
   if (!es) {
     return;
