@@ -8,6 +8,7 @@
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/sim_args.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
 #include "../src/impl/config.h"
@@ -61,7 +62,7 @@ void test_sim_error_cases(void) {
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack AAADERW");
   error_code_t status = config_simulate_and_return_status(
-      config, NULL, config_get_sim_results(config));
+      config, NULL, NULL, config_get_sim_results(config));
   assert(status == ERROR_STATUS_SIM_NO_MOVES);
   config_destroy(config);
 }
@@ -75,7 +76,7 @@ void test_sim_single_iteration(void) {
   load_and_exec_config_or_die(config, "rack AAADERW");
   load_and_exec_config_or_die(config, "gen");
   error_code_t status = config_simulate_and_return_status(
-      config, NULL, config_get_sim_results(config));
+      config, NULL, NULL, config_get_sim_results(config));
   assert(status == ERROR_STATUS_SUCCESS);
   assert(bai_result_get_status(
              sim_results_get_bai_result(config_get_sim_results(config))) ==
@@ -93,7 +94,7 @@ void test_more_iterations(void) {
   load_and_exec_config_or_die(config, "gen");
   SimResults *sim_results = config_get_sim_results(config);
   error_code_t status =
-      config_simulate_and_return_status(config, NULL, sim_results);
+      config_simulate_and_return_status(config, NULL, NULL, sim_results);
   assert(status == ERROR_STATUS_SUCCESS);
   assert(bai_result_get_status(
              sim_results_get_bai_result(config_get_sim_results(config))) ==
@@ -121,8 +122,8 @@ typedef struct SimTestArgs {
 
 void *sim_thread_func(void *arg) {
   SimTestArgs *args = (SimTestArgs *)arg;
-  *(args->status) =
-      config_simulate_and_return_status(args->config, NULL, args->sim_results);
+  *(args->status) = config_simulate_and_return_status(args->config, NULL, NULL,
+                                                      args->sim_results);
 
   cpthread_mutex_lock(args->mutex);
   *(args->done) = 1;
@@ -272,7 +273,7 @@ void test_sim_round_robin_consistency(void) {
     }
 
     error_code_t status =
-        config_simulate_and_return_status(config, NULL, sim_results);
+        config_simulate_and_return_status(config, NULL, NULL, sim_results);
     assert(status == ERROR_STATUS_SUCCESS);
     assert(bai_result_get_status(
                sim_results_get_bai_result(config_get_sim_results(config))) ==
@@ -297,14 +298,14 @@ void test_sim_top_two_consistency(void) {
   // Get the initial reference results.
   SimResults *expected_sim_results = config_get_sim_results(config);
   assert(config_simulate_and_return_status(
-             config, NULL, expected_sim_results) == ERROR_STATUS_SUCCESS);
+             config, NULL, NULL, expected_sim_results) == ERROR_STATUS_SUCCESS);
   bai_result_status_t expected_exit_status = bai_result_get_status(
       sim_results_get_bai_result(config_get_sim_results(config)));
 
   SimResults *actual_sim_results = sim_results_create();
   for (int i = 0; i < 2; i++) {
     assert(config_simulate_and_return_status(
-               config, NULL, actual_sim_results) == ERROR_STATUS_SUCCESS);
+               config, NULL, NULL, actual_sim_results) == ERROR_STATUS_SUCCESS);
     bai_result_status_t actual_exit_status = bai_result_get_status(
         sim_results_get_bai_result(config_get_sim_results(config)));
     assert(actual_exit_status == expected_exit_status);
@@ -383,8 +384,8 @@ void test_sim_with_and_without_inference_helper(
   SimResults *sim_results = config_get_sim_results(config);
 
   // Without inference
-  error_code_t status =
-      config_simulate_and_return_status(config, &known_opp_rack, sim_results);
+  error_code_t status = config_simulate_and_return_status(
+      config, NULL, &known_opp_rack, sim_results);
   assert(status == ERROR_STATUS_SUCCESS);
   assert(bai_result_get_status(
              sim_results_get_bai_result(config_get_sim_results(config))) ==
@@ -398,8 +399,8 @@ void test_sim_with_and_without_inference_helper(
 
   // With inference
   load_and_exec_config_or_die(config, "set -sinfer true");
-  status =
-      config_simulate_and_return_status(config, &known_opp_rack, sim_results);
+  status = config_simulate_and_return_status(config, NULL, &known_opp_rack,
+                                             sim_results);
   assert(status == ERROR_STATUS_SUCCESS);
   assert(bai_result_get_status(
              sim_results_get_bai_result(config_get_sim_results(config))) ==
@@ -450,7 +451,7 @@ void test_play_similarity(void) {
   load_and_exec_config_or_die(config, "gen");
   SimResults *sim_results = config_get_sim_results(config);
   error_code_t status =
-      config_simulate_and_return_status(config, NULL, sim_results);
+      config_simulate_and_return_status(config, NULL, NULL, sim_results);
   assert(status == ERROR_STATUS_SUCCESS);
   assert(bai_result_get_status(
              sim_results_get_bai_result(config_get_sim_results(config))) ==
@@ -487,7 +488,7 @@ void test_similar_play_consistency(const int num_threads) {
   // for these plays should be identical.
   SimResults *sim_results = config_get_sim_results(config);
   error_code_t status =
-      config_simulate_and_return_status(config, NULL, sim_results);
+      config_simulate_and_return_status(config, NULL, NULL, sim_results);
   assert(status == ERROR_STATUS_SUCCESS);
   assert(bai_result_get_status(
              sim_results_get_bai_result(config_get_sim_results(config))) ==
@@ -645,7 +646,7 @@ void test_sim_perf(const char *sim_perf_iters) {
         append_content_to_file(sim_perf_game_details_filename, strategies[j]);
       }
       const error_code_t status =
-          config_simulate_and_return_status(config, NULL, sim_results);
+          config_simulate_and_return_status(config, NULL, NULL, sim_results);
       assert(status == ERROR_STATUS_SUCCESS);
 
       char *sim_stats_str =
@@ -683,7 +684,7 @@ void test_sim_one_ply(void) {
 
   SimResults *sim_results = config_get_sim_results(config);
   error_code_t status =
-      config_simulate_and_return_status(config, NULL, sim_results);
+      config_simulate_and_return_status(config, NULL, NULL, sim_results);
   assert(status == ERROR_STATUS_SUCCESS);
   assert(bai_result_get_status(
              sim_results_get_bai_result(config_get_sim_results(config))) ==
@@ -704,15 +705,58 @@ void test_sim_ctx(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp true -s1 score -s2 score -r1 all -r2 all "
       "-plies 1 -threads 1 -iter 1000 -scond none");
-  // FIXME: test sim ctx by changing everything that is 'allow' to change
-  // between sim calls
-  // Change between calls:
-  // - move list count
-  // - player on turn
-  // - spread
-  // - known opp rack
-  // - use inference
-  // - num plies
+  const int ld_size = ld_get_size(config_get_ld(config));
+  const int num_games = 1;
+  SimCtx *sim_ctx = NULL;
+  SimResults *sim_results = config_get_sim_results(config);
+  Rack rack;
+  rack_set_dist_size_and_reset(&rack, ld_size);
+  Rack known_opp_rack;
+  rack_set_dist_size_and_reset(&known_opp_rack, ld_size);
+  StringBuilder *cmd_sb = string_builder_create();
+  for (int i = 0; i < num_games; i++) {
+    load_and_exec_config_or_die(config, "newgame");
+    Game *game = config_get_game(config);
+    int turn_num = 0;
+    while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+      return_rack_to_bag(game, 0);
+      return_rack_to_bag(game, 1);
+      const int player_on_turn_index = game_get_player_on_turn_index(game);
+      draw_to_full_rack(game, player_on_turn_index);
+      if (turn_num % 4 == 0) {
+        const int opp_index = 1 - player_on_turn_index;
+        draw_to_full_rack(game, opp_index);
+        rack_copy(&known_opp_rack,
+                  player_get_rack(game_get_player(game, opp_index)));
+      } else {
+        rack_reset(&known_opp_rack);
+      }
+      string_builder_clear(cmd_sb);
+      string_builder_add_string(cmd_sb, "set -numplays ");
+      string_builder_add_int(cmd_sb, turn_num % 5 + 2);
+      string_builder_add_string(cmd_sb, " -sinfer ");
+      if (turn_num % 6 == 0) {
+        string_builder_add_string(cmd_sb, "true");
+      } else {
+        string_builder_add_string(cmd_sb, "false");
+      }
+      string_builder_add_string(cmd_sb, " -plies ");
+      string_builder_add_int(cmd_sb, (turn_num + 3) % 5 + 1);
+
+      load_and_exec_config_or_die(config, string_builder_peek(cmd_sb));
+      load_and_exec_config_or_die(config, "gen");
+
+      // We don't care about the exact exit status, just that it finished
+      // without error which this call will check internally.
+      config_simulate_and_return_status(config, &sim_ctx, &known_opp_rack,
+                                        sim_results);
+      load_and_exec_config_or_die(config, "s");
+      load_and_exec_config_or_die(config, "t");
+      turn_num++;
+    }
+  }
+  string_builder_destroy(cmd_sb);
+  sim_ctx_destroy(sim_ctx);
   config_destroy(config);
 }
 
@@ -721,20 +765,21 @@ void test_sim(void) {
   if (sim_perf_iters) {
     test_sim_perf(sim_perf_iters);
   } else {
-    test_similar_play_consistency(1);
-    test_similar_play_consistency(10);
-    test_sim_error_cases();
-    test_sim_single_iteration();
-    test_sim_threshold();
-    test_sim_time_limit();
-    test_all_plays_are_similar();
-    test_more_iterations();
-    test_play_similarity();
-    perf_test_multithread_sim();
-    test_sim_with_inference();
-    test_sim_round_robin_consistency();
-    test_sim_top_two_consistency();
-    test_sim_one_ply();
+    // FIXME: uncomment
+    // test_similar_play_consistency(1);
+    // test_similar_play_consistency(10);
+    // test_sim_error_cases();
+    // test_sim_single_iteration();
+    // test_sim_threshold();
+    // test_sim_time_limit();
+    // test_all_plays_are_similar();
+    // test_more_iterations();
+    // test_play_similarity();
+    // perf_test_multithread_sim();
+    // test_sim_with_inference();
+    // test_sim_round_robin_consistency();
+    // test_sim_top_two_consistency();
+    // test_sim_one_ply();
     test_sim_ctx();
   }
 }

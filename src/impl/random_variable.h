@@ -6,6 +6,7 @@
 #include "../ent/game_history.h"
 #include "../ent/inference_results.h"
 #include "../ent/rack.h"
+#include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "bai_logger.h"
@@ -21,24 +22,6 @@ typedef enum {
   RANDOM_VARIABLES_NORMAL_PREDETERMINED,
   RANDOM_VARIABLES_SIMMED_PLAYS,
 } random_variables_t;
-
-typedef struct SimArgs {
-  int num_plies;
-  const Game *game;
-  const MoveList *move_list;
-  Rack *known_opp_rack;
-  WinPct *win_pcts;
-  bool use_inference;
-  bool use_heat_map;
-  InferenceResults *inference_results;
-  InferenceArgs inference_args;
-  int num_threads;
-  int print_interval;
-  int max_num_display_plays;
-  uint64_t seed;
-  ThreadControl *thread_control;
-  BAIOptions bai_options;
-} SimArgs;
 
 typedef struct RandomVariablesArgs {
   random_variables_t type;

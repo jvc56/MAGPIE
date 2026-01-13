@@ -32,6 +32,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/simmer.h"
 #include "../src/impl/wmp_move_gen.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
@@ -774,12 +775,13 @@ ValidatedMoves *validated_moves_create_and_assert_status(
 }
 
 error_code_t config_simulate_and_return_status(const Config *config,
+                                               SimCtx **sim_ctx,
                                                Rack *known_opp_rack,
                                                SimResults *sim_results) {
   ErrorStack *error_stack = error_stack_create();
   thread_control_set_status(config_get_thread_control(config),
                             THREAD_CONTROL_STATUS_STARTED);
-  config_simulate(config, known_opp_rack, sim_results, error_stack);
+  config_simulate(config, sim_ctx, known_opp_rack, sim_results, error_stack);
   error_code_t status = error_stack_top(error_stack);
   if (status != ERROR_STATUS_SUCCESS) {
     printf("config simulate finished with error: %d\n", status);

@@ -1966,18 +1966,18 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
                            &inference_args);
   }
   sim_args_fill(
-      config->num_plays, config->plies, config->move_list, known_opp_rack,
-      config->win_pcts, config->inference_results, config->thread_control,
-      config->game, config->sim_with_inference, config->use_heat_map,
-      config->num_threads, config->print_interval,
-      config->max_num_display_plays, config->seed, config->max_iterations,
-      config->min_play_iterations, config->stop_cond_pct, config->threshold,
-      config->time_limit_seconds, config->sampling_rule, &inference_args,
-      sim_args);
+      config->plies, config->move_list, known_opp_rack, config->win_pcts,
+      config->inference_results, config->thread_control, config->game,
+      config->sim_with_inference, config->use_heat_map, config->num_threads,
+      config->print_interval, config->max_num_display_plays, config->seed,
+      config->max_iterations, config->min_play_iterations,
+      config->stop_cond_pct, config->threshold, config->time_limit_seconds,
+      config->sampling_rule, &inference_args, sim_args);
 }
 
-void config_simulate(const Config *config, Rack *known_opp_rack,
-                     SimResults *sim_results, ErrorStack *error_stack) {
+void config_simulate(const Config *config, SimCtx **sim_ctx,
+                     Rack *known_opp_rack, SimResults *sim_results,
+                     ErrorStack *error_stack) {
   SimArgs args;
   const int ld_size = ld_get_size(game_get_ld(config->game));
   Rack target_played_tiles;
@@ -1998,7 +1998,11 @@ void config_simulate(const Config *config, Rack *known_opp_rack,
             "cannot sim with inference with an empty game history"));
     return;
   }
-  return simulate_without_ctx(&args, sim_results, error_stack);
+  if (sim_ctx) {
+    simulate(&args, sim_ctx, sim_results, error_stack);
+  } else {
+    simulate_without_ctx(&args, sim_results, error_stack);
+  }
 }
 
 void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
@@ -2034,7 +2038,8 @@ void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
         player_get_rack(game_get_player(
             config->game, 1 - game_get_player_on_turn_index(config->game))));
   }
-  config_simulate(config, &known_opp_rack, config->sim_results, error_stack);
+  config_simulate(config, NULL, &known_opp_rack, config->sim_results,
+                  error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }

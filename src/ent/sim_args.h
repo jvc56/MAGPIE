@@ -4,12 +4,11 @@
 #include "../def/bai_defs.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
+#include "../ent/inference_args.h"
 #include "../ent/inference_results.h"
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
-#include "bai_logger.h"
-#include "inference.h"
 #include <stdint.h>
 
 typedef struct SimArgs {
@@ -31,8 +30,8 @@ typedef struct SimArgs {
 } SimArgs;
 
 static inline void sim_args_fill(
-    const int num_plays, const int num_plies, const MoveList *move_list,
-    Rack *known_opp_rack, WinPct *win_pcts, InferenceResults *inference_results,
+    const int num_plies, const MoveList *move_list, Rack *known_opp_rack,
+    WinPct *win_pcts, InferenceResults *inference_results,
     ThreadControl *thread_control, const Game *game,
     const bool sim_with_inference, const bool use_heat_map,
     const int num_threads, const int print_interval,
