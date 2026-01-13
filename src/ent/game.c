@@ -574,14 +574,8 @@ void game_copy(Game *dst, const Game *src) {
   dst->max_scoreless_turns = src->max_scoreless_turns;
   dst->game_end_reason = src->game_end_reason;
   dst->variant = src->variant;
-  // note: game backups must be explicitly handled by the caller if they want
-  // game copies to have backups.
-  for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
-    dst->sim_game_backups[i] = NULL;
-  }
   dst->backup_cursor = 0;
   dst->backup_mode = BACKUP_MODE_OFF;
-  dst->gcg_game_backup = NULL;
 }
 
 // Backups do not restore the move list or

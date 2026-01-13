@@ -3585,7 +3585,7 @@ char *impl_overtime(Config *config, ErrorStack *error_stack) {
           error_stack, ERROR_STATUS_TIME_PENALTY_NO_PREVIOUS_CUMULATIVE_SCORE,
           get_formatted_string("no prior game event has a cumulative score "
                                "for player '%s' when "
-                               "applying time panelty",
+                               "applying time penalty",
                                player_nickname));
     } else {
       const Equity overtime_penalty = int_to_equity(overtime_penalty_int);
@@ -4102,17 +4102,17 @@ void config_load_parsed_args(Config *config,
       if (current_parg->num_set_values > 0) {
         error_stack_push(
             error_stack, ERROR_STATUS_CONFIG_LOAD_DUPLICATE_ARG,
-            get_formatted_string("command was provided more than once: %s",
+            get_formatted_string("command '%s' was provided more than once",
                                  arg_name));
         return;
       }
 
       if (current_parg->is_command) {
         if (i > 0) {
-          error_stack_push(error_stack,
-                           ERROR_STATUS_CONFIG_LOAD_MISPLACED_COMMAND,
-                           get_formatted_string(
-                               "encountered unexpected command: %s", arg_name));
+          error_stack_push(
+              error_stack, ERROR_STATUS_CONFIG_LOAD_MISPLACED_COMMAND,
+              get_formatted_string("encountered unexpected command '%s'",
+                                   arg_name));
           return;
         }
         config->exec_parg_token = current_arg_token;

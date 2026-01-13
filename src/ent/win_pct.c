@@ -32,6 +32,11 @@ float win_pct_get(const WinPct *wp, int spread_plus_leftover,
               "maximum unseen tiles is %d",
               game_unseen_tiles, wp->max_tiles_unseen);
   }
+  if (game_unseen_tiles < 1) {
+    log_fatal("cannot get win percentage value for %d unseen tiles when the "
+              "minimum unseen tiles is 1",
+              game_unseen_tiles);
+  }
   return wp
       ->win_pcts[game_unseen_tiles - 1][wp->max_spread + spread_plus_leftover];
 };
