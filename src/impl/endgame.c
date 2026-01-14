@@ -19,6 +19,7 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/small_move_arena.h"
+#include "../ent/static_eval.h"
 #include "../ent/thread_control.h"
 #include "../ent/transposition_table.h"
 #include "../ent/xoshiro.h"
@@ -175,17 +176,22 @@ static void pvline_reconstruct_from_tt(PVLine *pv_line, Game *game_copy,
     sm.tiny_move = tiny_move;
     sm.metadata = 0;
 
-    // Get the player on turn's score before the move
-    const Player *player_on_turn = game_get_player(game_copy, on_turn);
-    int score_before = equity_to_int(player_get_score(player_on_turn));
-
-    // Play the move to advance the position and calculate score
+    // Convert to Move for scoring and playing
     small_move_to_move(move_list->spare_move, &sm, game_get_board(game_copy));
-    play_move(move_list->spare_move, game_copy, NULL);
 
-    // Get score after move (player indices may have swapped, but score stays with player)
-    int score_after = equity_to_int(player_get_score(player_on_turn));
-    int move_score = score_after - score_before;
+    // Calculate the score of the move on the board BEFORE playing it
+    int move_score = 0;
+    if (tiny_move != 0) {  // Not a pass
+      const LetterDistribution *ld = game_get_ld(game_copy);
+      Equity bingo_bonus = game_get_bingo_bonus(game_copy);
+      move_score = equity_to_int(static_eval_get_move_score(
+          ld, move_list->spare_move, game_get_board(game_copy), bingo_bonus, 0));
+      // Set the move's score so play_move updates the player's score correctly
+      move_set_score(move_list->spare_move, int_to_equity(move_score));
+    }
+
+    // Play the move to advance the position
+    play_move(move_list->spare_move, game_copy, NULL);
 
     // Store move with calculated score in metadata (lower 16 bits)
     pv_line->moves[num_moves].tiny_move = tiny_move;
