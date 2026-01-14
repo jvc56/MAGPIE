@@ -115,19 +115,25 @@ static inline TTEntry transposition_table_lookup(TranspositionTable *tt,
                                                  uint64_t zval) {
   uint64_t idx = zval & tt->size_mask;
   TTEntry entry = tt->table[idx];
+#ifdef TT_STATS
   atomic_fetch_add(&tt->lookups, 1);
+#endif
   uint64_t full_hash = ttentry_full_hash(entry, idx);
   if (full_hash != zval) {
+#ifdef TT_STATS
     if (ttentry_valid(entry)) {
       // There is another unrelated node at this position. This is a
       // type 2 collision.
       atomic_fetch_add(&tt->t2_collisions, 1);
     }
+#endif
     TTEntry e;
     ttentry_reset(&e);
     return e;
   }
+#ifdef TT_STATS
   atomic_fetch_add(&tt->hits, 1);
+#endif
   // Assume the same zobrist hash is the same position. If it's not, that's
   // a type 1 collision, which we can't do anything about. It should happen
   // extremely rarely.
@@ -139,7 +145,9 @@ static inline void transposition_table_store(TranspositionTable *tt,
   uint64_t idx = zval & tt->size_mask;
   tentry.top_4_bytes = (uint32_t)(zval >> 32);
   tentry.fifth_byte = (uint8_t)(zval >> 24);
+#ifdef TT_STATS
   atomic_fetch_add(&tt->created, 1);
+#endif
   tt->table[idx] = tentry;
 }
 

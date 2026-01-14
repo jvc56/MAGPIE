@@ -14,46 +14,36 @@
 #define ZOBRIST_MAX_LETTERS 35 // For the purposes of Zobrist hashing.
 
 // A Zobrist hash implementation for our fun game.
+// Struct layout: hot fields (accessed every move) first for cache locality.
 typedef struct Zobrist {
+  // Hot: accessed on every move
   uint64_t their_turn;
-  uint64_t **pos_table;
-  uint64_t **our_rack_table;
-  uint64_t **their_rack_table;
   uint64_t scoreless_turns[3];
-
+  uint64_t our_rack_table[ZOBRIST_MAX_LETTERS][RACK_SIZE];
+  uint64_t their_rack_table[ZOBRIST_MAX_LETTERS][RACK_SIZE];
+  // Cold: only accessed during initial hash calculation
+  uint64_t pos_table[BOARD_DIM * BOARD_DIM][ZOBRIST_MAX_LETTERS * 2];
+  // Very cold: only used during creation
   XoshiroPRNG *prng;
-  int board_dim;
 } Zobrist;
 
 static Zobrist *zobrist_create(uint64_t seed) {
   Zobrist *z = malloc_or_die(sizeof(Zobrist));
   z->prng = prng_create(seed);
-  const unsigned long total_squares = (size_t)(BOARD_DIM * BOARD_DIM);
-  // pos_table is a BOARD_DIM x BOARD_DIM 2d array of random integers
-  z->pos_table = malloc_or_die(total_squares * sizeof(uint64_t *));
-  for (size_t i = 0; i < total_squares; i++) {
-    // * 2 for the blank
-    z->pos_table[i] =
-        malloc_or_die((size_t)(ZOBRIST_MAX_LETTERS * 2) * sizeof(uint64_t));
+
+  for (int i = 0; i < BOARD_DIM * BOARD_DIM; i++) {
     for (int j = 0; j < ZOBRIST_MAX_LETTERS * 2; j++) {
       z->pos_table[i][j] = prng_get_random_number(z->prng, UINT64_MAX);
     }
   }
-  // rack tables are ZOBRIST_MAX_LETTERS * RACK_SIZE 2D arrays of random
-  // integers
-  z->our_rack_table =
-      malloc_or_die((size_t)ZOBRIST_MAX_LETTERS * sizeof(uint64_t *));
+
   for (int i = 0; i < ZOBRIST_MAX_LETTERS; i++) {
-    z->our_rack_table[i] = malloc_or_die(RACK_SIZE * sizeof(uint64_t));
     for (int j = 0; j < RACK_SIZE; j++) {
       z->our_rack_table[i][j] = prng_get_random_number(z->prng, UINT64_MAX);
     }
   }
 
-  z->their_rack_table =
-      malloc_or_die((size_t)ZOBRIST_MAX_LETTERS * sizeof(uint64_t *));
   for (int i = 0; i < ZOBRIST_MAX_LETTERS; i++) {
-    z->their_rack_table[i] = malloc_or_die(RACK_SIZE * sizeof(uint64_t));
     for (int j = 0; j < RACK_SIZE; j++) {
       z->their_rack_table[i][j] = prng_get_random_number(z->prng, UINT64_MAX);
     }
@@ -69,16 +59,6 @@ static Zobrist *zobrist_create(uint64_t seed) {
 }
 
 static void zobrist_destroy(Zobrist *z) {
-  for (int i = 0; i < BOARD_DIM * BOARD_DIM; i++) {
-    free(z->pos_table[i]);
-  }
-  free(z->pos_table);
-  for (int i = 0; i < ZOBRIST_MAX_LETTERS; i++) {
-    free(z->our_rack_table[i]);
-    free(z->their_rack_table[i]);
-  }
-  free(z->our_rack_table);
-  free(z->their_rack_table);
   prng_destroy(z->prng);
   free(z);
 }
@@ -124,59 +104,49 @@ inline static uint64_t zobrist_add_move(const Zobrist *z, uint64_t key,
                                         bool was_our_move, int scoreless_turns,
                                         int last_scoreless_turns) {
   // Add a move to the Zobrist hash.
+  // For tile placements: XOR board positions and rack hash changes.
+  // Then XOR turn indicator since we always alternate.
 
-  // For every letter in the move (assume it's only a tile placement or
-  // a pass for now):
-  // - XOR with its position on the board
-  // - XOR with the "position" on the rack hash.
-  // Then XOR with p2ToMove since we always alternate.
-  uint64_t **rack_table = z->our_rack_table;
-  if (!was_our_move) {
-    rack_table = z->their_rack_table;
-  }
+  const uint64_t (*rack_table)[RACK_SIZE] =
+      was_our_move ? z->our_rack_table : z->their_rack_table;
+
   if (move->move_type != GAME_EVENT_PASS) {
-    // create placeholder rack to keep track of what our rack would be
-    // before we made the play.
-    MachineLetter placeholder_rack[ZOBRIST_MAX_LETTERS];
-    memset(placeholder_rack, 0, ZOBRIST_MAX_LETTERS);
+    // Count tiles played of each type (for rack hash update)
+    int8_t tiles_played[ZOBRIST_MAX_LETTERS] = {0};
 
-    int row = move_get_row_start(move);
-    int col = move_get_col_start(move);
-    bool vertical = move_get_dir(move) == BOARD_VERTICAL_DIRECTION;
+    const int row = move_get_row_start(move);
+    const int col = move_get_col_start(move);
+    const int row_inc = (move_get_dir(move) == BOARD_VERTICAL_DIRECTION) ? 1 : 0;
+    const int col_inc = 1 - row_inc;
 
-    // XOR with the new board positions
+    // Single pass: XOR board positions and count tiles played
+    int cur_row = row, cur_col = col;
     for (int idx = 0; idx < move->tiles_length; idx++) {
-      int tile = move->tiles[idx];
-      int new_row = row + (vertical ? idx : 0);
-      int new_col = col + (vertical ? 0 : idx);
-      if (tile == PLAYED_THROUGH_MARKER) {
-        continue;
+      const MachineLetter tile = move->tiles[idx];
+      if (tile != PLAYED_THROUGH_MARKER) {
+        // Board hash: XOR in the new tile position
+        int board_tile = tile;
+        if (get_is_blanked(tile)) {
+          board_tile = get_unblanked_machine_letter(tile) + ZOBRIST_MAX_LETTERS;
+        }
+        key ^= z->pos_table[cur_row * BOARD_DIM + cur_col][board_tile];
+        // Count this tile for rack hash update
+        const int tile_idx = get_is_blanked(tile) ? 0 : tile;
+        tiles_played[tile_idx]++;
       }
-      int board_tile = tile;
-      if (get_is_blanked(tile)) {
-        board_tile = get_unblanked_machine_letter(tile) + ZOBRIST_MAX_LETTERS;
-      }
-      key ^= z->pos_table[new_row * BOARD_DIM + new_col][board_tile];
-      // Build up placeholder rack.
-      int tile_idx = get_is_blanked(tile) ? 0 : tile;
-      placeholder_rack[tile_idx]++;
+      cur_row += row_inc;
+      cur_col += col_inc;
     }
-    // move_rack contains the left-over tiles
-    for (int idx = 0; idx < move_rack->dist_size; idx++) {
-      for (int j = 0; j < move_rack->array[idx]; j++) {
-        placeholder_rack[idx]++;
+
+    // Rack hash: for each tile type played, XOR transition from pre to post
+    for (int tile_idx = 0; tile_idx < ZOBRIST_MAX_LETTERS; tile_idx++) {
+      const int num_played = tiles_played[tile_idx];
+      if (num_played > 0) {
+        const int post_count =
+            (tile_idx < move_rack->dist_size) ? move_rack->array[tile_idx] : 0;
+        const int pre_count = post_count + num_played;
+        key ^= rack_table[tile_idx][pre_count] ^ rack_table[tile_idx][post_count];
       }
-    }
-    // now "play" all the tiles in the placeholder rack
-    for (int idx = 0; idx < move->tiles_length; idx++) {
-      MachineLetter tile = move->tiles[idx];
-      if (tile == PLAYED_THROUGH_MARKER) {
-        continue;
-      }
-      int tile_idx = get_is_blanked(tile) ? 0 : tile;
-      key ^= rack_table[tile_idx][placeholder_rack[tile_idx]];
-      placeholder_rack[tile_idx]--;
-      key ^= rack_table[tile_idx][placeholder_rack[tile_idx]];
     }
   }
 

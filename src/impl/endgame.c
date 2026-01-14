@@ -550,10 +550,27 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     qsort(initial_moves, initial_move_count, sizeof(SmallMove),
           compare_small_moves_by_estimated_value);
 
-    // log_warn("val returned was %d, initial spread %d", val,
-    //          worker->solver->initial_spread);
     worker->solver->best_pv_value = val - worker->solver->initial_spread;
     worker->solver->principal_variation = pv;
+
+    // Log iterative deepening progress
+    StringBuilder *pv_sb = string_builder_create();
+    const LetterDistribution *ld = game_get_ld(worker->game_copy);
+    Game *temp_game = game_duplicate(worker->game_copy);
+    for (int i = 0; i < pv.num_moves; i++) {
+      Move move;
+      small_move_to_move(&move, &(pv.moves[i]), game_get_board(temp_game));
+      if (i > 0) {
+        string_builder_add_string(pv_sb, " ");
+      }
+      string_builder_add_move(pv_sb, game_get_board(temp_game), &move, ld,
+                              true);
+      play_move(&move, temp_game, NULL);
+    }
+    game_destroy(temp_game);
+    printf("  depth %d: value=%d, pv=%s\n", p, worker->solver->best_pv_value,
+           string_builder_peek(pv_sb));
+    string_builder_destroy(pv_sb);
   }
 }
 
