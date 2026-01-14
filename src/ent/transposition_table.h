@@ -22,39 +22,77 @@ enum {
   NPROC_MASK = (NPROC_SIZE - 1),
 };
 
+// TTEntry is stored as two atomic 64-bit values for lock-free concurrent access
+// with torn read detection.
+// atomic1: [top_4_bytes:32][score:16][fifth_byte:8][flag_and_depth:8]
+// atomic2: [tiny_move:64]
 typedef struct TTEntry {
-  // Don't store the full hash, but the top 5 bytes. The bottom 3 bytes
-  // can be determined from the bucket in the array.
+  _Atomic uint64_t atomic1;
+  _Atomic uint64_t atomic2;  // tiny_move
+} TTEntry;
+
+// Pack fields into atomic1 format
+static inline uint64_t ttentry_pack_atomic1(uint32_t top_4_bytes, int16_t score,
+                                             uint8_t fifth_byte,
+                                             uint8_t flag_and_depth) {
+  return ((uint64_t)top_4_bytes) | ((uint64_t)(uint16_t)score << 32) |
+         ((uint64_t)fifth_byte << 48) | ((uint64_t)flag_and_depth << 56);
+}
+
+// Unpack fields from atomic1 format
+static inline void ttentry_unpack_atomic1(uint64_t atomic1,
+                                           uint32_t *top_4_bytes, int16_t *score,
+                                           uint8_t *fifth_byte,
+                                           uint8_t *flag_and_depth) {
+  *top_4_bytes = (uint32_t)(atomic1 & 0xFFFFFFFF);
+  *score = (int16_t)((atomic1 >> 32) & 0xFFFF);
+  *fifth_byte = (uint8_t)((atomic1 >> 48) & 0xFF);
+  *flag_and_depth = (uint8_t)((atomic1 >> 56) & 0xFF);
+}
+
+// Legacy TTEntry accessors that work with unpacked values
+typedef struct TTEntryData {
   uint32_t top_4_bytes;
   int16_t score;
   uint8_t fifth_byte;
   uint8_t flag_and_depth;
   uint64_t tiny_move;
-} TTEntry;
+} TTEntryData;
 
-inline static uint64_t ttentry_full_hash(TTEntry t, uint64_t index) {
+// Full hash reconstruction from TTEntryData
+inline static uint64_t ttentry_data_full_hash(TTEntryData t, uint64_t index) {
   return ((uint64_t)(t.top_4_bytes) << 32) + ((uint64_t)(t.fifth_byte) << 24) +
          (index & BOTTOM3_BYTE_MASK);
 }
 
-inline static uint8_t ttentry_flag(TTEntry t) { return t.flag_and_depth >> 6; }
+inline static uint8_t ttentry_data_flag(TTEntryData t) {
+  return t.flag_and_depth >> 6;
+}
 
-inline static uint8_t ttentry_depth(TTEntry t) {
+inline static uint8_t ttentry_data_depth(TTEntryData t) {
   return t.flag_and_depth & DEPTH_MASK;
 }
 
-inline static int16_t ttentry_score(TTEntry t) { return t.score; }
+inline static int16_t ttentry_data_score(TTEntryData t) { return t.score; }
 
-inline static bool ttentry_valid(TTEntry t) { return ttentry_flag(t) != 0; }
+inline static bool ttentry_data_valid(TTEntryData t) {
+  return ttentry_data_flag(t) != 0;
+}
 
-inline static uint64_t ttentry_move(TTEntry t) { return t.tiny_move; }
+inline static uint64_t ttentry_data_move(TTEntryData t) { return t.tiny_move; }
 
-inline static void ttentry_reset(TTEntry *t) {
+inline static void ttentry_data_reset(TTEntryData *t) {
   t->top_4_bytes = 0;
   t->score = 0;
   t->fifth_byte = 0;
   t->flag_and_depth = 0;
   t->tiny_move = 0;
+}
+
+// Initialize atomic TTEntry to zero
+inline static void ttentry_reset(TTEntry *t) {
+  atomic_store_explicit(&t->atomic1, 0, memory_order_relaxed);
+  atomic_store_explicit(&t->atomic2, 0, memory_order_relaxed);
 }
 
 typedef struct TranspositionTable {
@@ -67,6 +105,8 @@ typedef struct TranspositionTable {
   atomic_int hits;
   atomic_int lookups;
   atomic_int t2_collisions;
+  atomic_int torn_reads;  // Detected concurrent writes during read
+  atomic_int depth_rejects;  // Entries not replaced due to depth preference
 } TranspositionTable;
 
 static inline TranspositionTable *
@@ -110,6 +150,8 @@ transposition_table_create(double fraction_of_memory) {
   atomic_init(&tt->hits, 0);
   atomic_init(&tt->lookups, 0);
   atomic_init(&tt->t2_collisions, 0);
+  atomic_init(&tt->torn_reads, 0);
+  atomic_init(&tt->depth_rejects, 0);
   return tt;
 }
 
@@ -126,24 +168,52 @@ static inline void transposition_table_reset(TranspositionTable *tt) {
   atomic_store(&tt->hits, 0);
   atomic_store(&tt->lookups, 0);
   atomic_store(&tt->t2_collisions, 0);
+  atomic_store(&tt->torn_reads, 0);
+  atomic_store(&tt->depth_rejects, 0);
 }
 
-static inline TTEntry transposition_table_lookup(TranspositionTable *tt,
-                                                 uint64_t zval) {
+// Lookup with torn read detection: read atomic1, atomic2, atomic1 again
+// If atomic1 changed, a concurrent write occurred - return invalid entry
+static inline TTEntryData transposition_table_lookup(TranspositionTable *tt,
+                                                     uint64_t zval) {
   uint64_t idx = zval & tt->size_mask;
-  TTEntry entry = tt->table[idx];
   atomic_fetch_add(&tt->lookups, 1);
-  uint64_t full_hash = ttentry_full_hash(entry, idx);
+
+  // Validated atomic read: detect torn reads from concurrent writes
+  uint64_t atomic1_before =
+      atomic_load_explicit(&tt->table[idx].atomic1, memory_order_acquire);
+  uint64_t atomic2 =
+      atomic_load_explicit(&tt->table[idx].atomic2, memory_order_acquire);
+  uint64_t atomic1_after =
+      atomic_load_explicit(&tt->table[idx].atomic1, memory_order_acquire);
+
+  if (atomic1_before != atomic1_after) {
+    // Torn read detected - concurrent write happened between our reads
+    atomic_fetch_add(&tt->torn_reads, 1);
+    TTEntryData e;
+    ttentry_data_reset(&e);
+    return e;
+  }
+
+  // Unpack the entry
+  TTEntryData entry;
+  ttentry_unpack_atomic1(atomic1_before, &entry.top_4_bytes, &entry.score,
+                         &entry.fifth_byte, &entry.flag_and_depth);
+  entry.tiny_move = atomic2;
+
+  // Validate hash
+  uint64_t full_hash = ttentry_data_full_hash(entry, idx);
   if (full_hash != zval) {
-    if (ttentry_valid(entry)) {
+    if (ttentry_data_valid(entry)) {
       // There is another unrelated node at this position. This is a
       // type 2 collision.
       atomic_fetch_add(&tt->t2_collisions, 1);
     }
-    TTEntry e;
-    ttentry_reset(&e);
+    TTEntryData e;
+    ttentry_data_reset(&e);
     return e;
   }
+
   atomic_fetch_add(&tt->hits, 1);
   // Assume the same zobrist hash is the same position. If it's not, that's
   // a type 1 collision, which we can't do anything about. It should happen
@@ -151,13 +221,40 @@ static inline TTEntry transposition_table_lookup(TranspositionTable *tt,
   return entry;
 }
 
+// Store with atomic writes: write atomic2 first, then atomic1
+// This ensures the validation check in lookup() works correctly
+// Uses depth-preferred replacement: only replace if new depth >= existing depth
 static inline void transposition_table_store(TranspositionTable *tt,
-                                             uint64_t zval, TTEntry tentry) {
+                                             uint64_t zval, TTEntryData tentry) {
   uint64_t idx = zval & tt->size_mask;
-  tentry.top_4_bytes = (uint32_t)(zval >> 32);
-  tentry.fifth_byte = (uint8_t)(zval >> 24);
+  uint32_t top_4_bytes = (uint32_t)(zval >> 32);
+  uint8_t fifth_byte = (uint8_t)(zval >> 24);
+
+  // Depth-preferred replacement: check if existing entry has greater depth
+  uint64_t existing_atomic1 =
+      atomic_load_explicit(&tt->table[idx].atomic1, memory_order_relaxed);
+  if (existing_atomic1 != 0) {
+    // Extract existing depth (bottom 6 bits of flag_and_depth, which is top byte)
+    uint8_t existing_flag_and_depth = (uint8_t)((existing_atomic1 >> 56) & 0xFF);
+    uint8_t existing_depth = existing_flag_and_depth & DEPTH_MASK;
+    uint8_t new_depth = tentry.flag_and_depth & DEPTH_MASK;
+    if (existing_depth > new_depth) {
+      // Don't replace deeper entry with shallower one
+      atomic_fetch_add(&tt->depth_rejects, 1);
+      return;
+    }
+  }
+
   atomic_fetch_add(&tt->created, 1);
-  tt->table[idx] = tentry;
+
+  // Pack into atomic format
+  uint64_t atomic1 = ttentry_pack_atomic1(top_4_bytes, tentry.score,
+                                          fifth_byte, tentry.flag_and_depth);
+
+  // Write atomic2 first, then atomic1 (so validation check works)
+  atomic_store_explicit(&tt->table[idx].atomic2, tentry.tiny_move,
+                        memory_order_release);
+  atomic_store_explicit(&tt->table[idx].atomic1, atomic1, memory_order_release);
 }
 
 static inline void transposition_table_destroy(TranspositionTable *tt) {

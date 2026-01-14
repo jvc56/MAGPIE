@@ -71,9 +71,9 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   endgame_args.thread_control = config_get_thread_control(config);
   endgame_args.game = game;
   endgame_args.plies = config_get_endgame_plies(config);
-  endgame_args.tt_fraction_of_mem = 0.25;  // 25% of memory for TT
+  endgame_args.tt_fraction_of_mem = 0.5;  // 50% of memory for TT
   endgame_args.initial_small_move_arena_size = initial_small_move_arena_size;
-  endgame_args.num_threads = 8;  // ABDADA with 8 threads
+  endgame_args.num_threads = 10;  // ABDADA with 8 threads
   endgame_args.per_ply_callback = print_pv_callback;
   endgame_args.per_ply_callback_data = &start_time;
 
@@ -222,7 +222,7 @@ void test_single_endgame_multithreaded(const char *config_settings,
   endgame_args.thread_control = config_get_thread_control(config);
   endgame_args.game = game;
   endgame_args.plies = config_get_endgame_plies(config);
-  endgame_args.tt_fraction_of_mem = 0.25;  // 25% of memory for TT
+  endgame_args.tt_fraction_of_mem = 0.5;  // 50% of memory for TT
   endgame_args.initial_small_move_arena_size =
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args.num_threads = num_threads;

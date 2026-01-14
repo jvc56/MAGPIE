@@ -147,7 +147,7 @@ static void run_endgames_with_pv(Config *config, EndgameSolver *solver,
     EndgameArgs args = {.game = game,
                         .thread_control = config_get_thread_control(config),
                         .plies = ply,
-                        .tt_fraction_of_mem = 0.25,  // 25% of memory
+                        .tt_fraction_of_mem = 0.5,  // 50% of memory
                         .initial_small_move_arena_size =
                             DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
                         .num_threads = num_threads,
@@ -172,7 +172,7 @@ void test_benchmark_endgame(void) {
 
   const int num_games = 25;  // Full benchmark
   const int ply = 12;        // Full 12-ply search
-  const int num_threads = 8;
+  const int num_threads = 10;
   const uint64_t base_seed = 0;
 
   Config *config = config_create_or_die(
@@ -214,7 +214,7 @@ static double run_endgames_baseline(Config *config, EndgameSolver *solver,
     EndgameArgs args = {.game = game,
                         .thread_control = config_get_thread_control(config),
                         .plies = ply,
-                        .tt_fraction_of_mem = 0.05,
+                        .tt_fraction_of_mem = 0.5,
                         .initial_small_move_arena_size =
                             DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE};
     EndgameResults *results = config_get_endgame_results(config);
@@ -257,7 +257,7 @@ static double run_endgames_optimized(Config *config, EndgameSolver *solver,
     EndgameArgs args = {.game = game,
                         .thread_control = config_get_thread_control(config),
                         .plies = ply,
-                        .tt_fraction_of_mem = 0.05,
+                        .tt_fraction_of_mem = 0.5,
                         .initial_small_move_arena_size =
                             DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE};
     EndgameResults *results = config_get_endgame_results(config);
