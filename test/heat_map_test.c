@@ -36,8 +36,8 @@ void assert_heat_map_count(const char *name, int row, int col, heat_map_t type,
   if (actual_count != expected_count) {
     printf("heat map counts mismatch for %s:\n", name);
     printf("row: %d, col: %d, type: %d\n", row, col, type);
-    printf("actual:   %lu\n", actual_count);
-    printf("expected: %lu\n", expected_count);
+    printf("actual:   %llu\n", (unsigned long long)actual_count);
+    printf("expected: %llu\n", (unsigned long long)expected_count);
     assert(0);
   }
 }
