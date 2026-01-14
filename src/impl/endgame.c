@@ -134,6 +134,69 @@ void pvline_update(PVLine *pv_line, const PVLine *new_pv_line,
   pv_line->score = score;
 }
 
+// Reconstruct the PV by probing the transposition table
+// This fills in moves that may have been truncated due to TT cutoffs
+static void pvline_reconstruct_from_tt(PVLine *pv_line, Game *game_copy,
+                                       TranspositionTable *tt,
+                                       int solving_player, int max_depth) {
+  if (!tt) {
+    return;
+  }
+
+  // Start from the current position and probe TT for best moves
+  int num_moves = 0;
+  MoveList *move_list = move_list_create(1);
+
+  while (num_moves < max_depth &&
+         game_get_game_end_reason(game_copy) == GAME_END_REASON_NONE) {
+    int on_turn = game_get_player_on_turn_index(game_copy);
+    const Player *solving = game_get_player(game_copy, solving_player);
+    const Player *other = game_get_player(game_copy, 1 - solving_player);
+
+    // Calculate hash for current position
+    uint64_t hash = zobrist_calculate_hash(
+        tt->zobrist, game_get_board(game_copy), player_get_rack(solving),
+        player_get_rack(other), on_turn != solving_player,
+        game_get_consecutive_scoreless_turns(game_copy));
+
+    // Probe TT
+    TTEntry entry = transposition_table_lookup(tt, hash);
+    if (!ttentry_valid(entry)) {
+      break;  // No TT entry, can't continue
+    }
+
+    uint64_t tiny_move = ttentry_move(entry);
+    if (tiny_move == INVALID_TINY_MOVE) {
+      break;  // No move stored
+    }
+
+    // Convert tiny_move to SmallMove
+    SmallMove sm;
+    sm.tiny_move = tiny_move;
+    sm.metadata = 0;
+
+    // Get the player on turn's score before the move
+    const Player *player_on_turn = game_get_player(game_copy, on_turn);
+    int score_before = equity_to_int(player_get_score(player_on_turn));
+
+    // Play the move to advance the position and calculate score
+    small_move_to_move(move_list->spare_move, &sm, game_get_board(game_copy));
+    play_move(move_list->spare_move, game_copy, NULL);
+
+    // Get score after move (player indices may have swapped, but score stays with player)
+    int score_after = equity_to_int(player_get_score(player_on_turn));
+    int move_score = score_after - score_before;
+
+    // Store move with calculated score in metadata (lower 16 bits)
+    pv_line->moves[num_moves].tiny_move = tiny_move;
+    pv_line->moves[num_moves].metadata = (uint32_t)(move_score & 0xFFFF);
+    num_moves++;
+  }
+
+  pv_line->num_moves = num_moves;
+  move_list_destroy(move_list);
+}
+
 void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->first_win_optim = false;
   es->transposition_table_optim = true;
@@ -784,7 +847,17 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
 
     // Call per-ply callback (only thread 0 to avoid race conditions)
     if (worker->thread_index == 0 && worker->solver->per_ply_callback) {
-      worker->solver->per_ply_callback(p, pv_value, &pv, worker->game_copy,
+      // If PV seems truncated, try to reconstruct it from TT
+      PVLine reconstructed_pv = pv;
+      if (pv.num_moves < p && worker->solver->transposition_table_optim) {
+        Game *temp_game = game_duplicate(worker->game_copy);
+        pvline_reconstruct_from_tt(&reconstructed_pv, temp_game,
+                                   worker->solver->transposition_table,
+                                   worker->solver->solving_player, p);
+        game_destroy(temp_game);
+      }
+      worker->solver->per_ply_callback(p, pv_value, &reconstructed_pv,
+                                       worker->game_copy,
                                        worker->solver->per_ply_callback_data);
     }
 

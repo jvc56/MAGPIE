@@ -14,46 +14,36 @@
 #define ZOBRIST_MAX_LETTERS 35 // For the purposes of Zobrist hashing.
 
 // A Zobrist hash implementation for our fun game.
+// Struct layout: hot fields (accessed every move) first for cache locality.
 typedef struct Zobrist {
+  // Hot: accessed on every move
   uint64_t their_turn;
-  uint64_t **pos_table;
-  uint64_t **our_rack_table;
-  uint64_t **their_rack_table;
   uint64_t scoreless_turns[3];
-
+  uint64_t our_rack_table[ZOBRIST_MAX_LETTERS][RACK_SIZE];
+  uint64_t their_rack_table[ZOBRIST_MAX_LETTERS][RACK_SIZE];
+  // Cold: only accessed during initial hash calculation
+  uint64_t pos_table[BOARD_DIM * BOARD_DIM][ZOBRIST_MAX_LETTERS * 2];
+  // Very cold: only used during creation
   XoshiroPRNG *prng;
-  int board_dim;
 } Zobrist;
 
 static Zobrist *zobrist_create(uint64_t seed) {
   Zobrist *z = malloc_or_die(sizeof(Zobrist));
   z->prng = prng_create(seed);
-  const unsigned long total_squares = (size_t)(BOARD_DIM * BOARD_DIM);
-  // pos_table is a BOARD_DIM x BOARD_DIM 2d array of random integers
-  z->pos_table = malloc_or_die(total_squares * sizeof(uint64_t *));
-  for (size_t i = 0; i < total_squares; i++) {
-    // * 2 for the blank
-    z->pos_table[i] =
-        malloc_or_die((size_t)(ZOBRIST_MAX_LETTERS * 2) * sizeof(uint64_t));
+
+  for (int i = 0; i < BOARD_DIM * BOARD_DIM; i++) {
     for (int j = 0; j < ZOBRIST_MAX_LETTERS * 2; j++) {
       z->pos_table[i][j] = prng_get_random_number(z->prng, UINT64_MAX);
     }
   }
-  // rack tables are ZOBRIST_MAX_LETTERS * RACK_SIZE 2D arrays of random
-  // integers
-  z->our_rack_table =
-      malloc_or_die((size_t)ZOBRIST_MAX_LETTERS * sizeof(uint64_t *));
+
   for (int i = 0; i < ZOBRIST_MAX_LETTERS; i++) {
-    z->our_rack_table[i] = malloc_or_die(RACK_SIZE * sizeof(uint64_t));
     for (int j = 0; j < RACK_SIZE; j++) {
       z->our_rack_table[i][j] = prng_get_random_number(z->prng, UINT64_MAX);
     }
   }
 
-  z->their_rack_table =
-      malloc_or_die((size_t)ZOBRIST_MAX_LETTERS * sizeof(uint64_t *));
   for (int i = 0; i < ZOBRIST_MAX_LETTERS; i++) {
-    z->their_rack_table[i] = malloc_or_die(RACK_SIZE * sizeof(uint64_t));
     for (int j = 0; j < RACK_SIZE; j++) {
       z->their_rack_table[i][j] = prng_get_random_number(z->prng, UINT64_MAX);
     }
@@ -69,16 +59,6 @@ static Zobrist *zobrist_create(uint64_t seed) {
 }
 
 static void zobrist_destroy(Zobrist *z) {
-  for (int i = 0; i < BOARD_DIM * BOARD_DIM; i++) {
-    free(z->pos_table[i]);
-  }
-  free(z->pos_table);
-  for (int i = 0; i < ZOBRIST_MAX_LETTERS; i++) {
-    free(z->our_rack_table[i]);
-    free(z->their_rack_table[i]);
-  }
-  free(z->our_rack_table);
-  free(z->their_rack_table);
   prng_destroy(z->prng);
   free(z);
 }
@@ -130,10 +110,9 @@ inline static uint64_t zobrist_add_move(const Zobrist *z, uint64_t key,
   // - XOR with its position on the board
   // - XOR with the "position" on the rack hash.
   // Then XOR with p2ToMove since we always alternate.
-  uint64_t **rack_table = z->our_rack_table;
-  if (!was_our_move) {
-    rack_table = z->their_rack_table;
-  }
+  const uint64_t (*rack_table)[RACK_SIZE] =
+      was_our_move ? z->our_rack_table : z->their_rack_table;
+
   if (move->move_type != GAME_EVENT_PASS) {
     // create placeholder rack to keep track of what our rack would be
     // before we made the play.
