@@ -115,6 +115,7 @@ static TestEntry test_table[] = {
     {"winpct", test_win_pct},
     {"endgame", test_endgame},
     {"benchend", test_benchmark_endgame},
+    {"benchendmg", test_benchmark_endgame_multi_ply},
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},
     {"load", test_load_gcg},

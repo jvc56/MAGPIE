@@ -37,6 +37,7 @@ EndgameSolver *endgame_solver_create(void);
 void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack);
 void endgame_solver_reset_tt(EndgameSolver *es);
+void endgame_solver_clear_tt(EndgameSolver *solver);
 void endgame_solver_destroy(EndgameSolver *es);
 
 void string_builder_endgame_results(StringBuilder *pv_description,

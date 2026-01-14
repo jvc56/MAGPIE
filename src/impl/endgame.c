@@ -203,6 +203,12 @@ void endgame_solver_reset_tt(EndgameSolver *es) {
   es->transposition_table = transposition_table_create(fraction);
 }
 
+void endgame_solver_clear_tt(EndgameSolver *solver) {
+  if (solver && solver->transposition_table) {
+    transposition_table_reset(solver->transposition_table);
+  }
+}
+
 void endgame_solver_destroy(EndgameSolver *es) {
   if (!es) {
     return;
