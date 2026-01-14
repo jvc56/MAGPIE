@@ -34,6 +34,7 @@ typedef struct EndgameArgs {
   double tt_fraction_of_mem;
   int plies;
   int initial_small_move_arena_size;
+  int num_threads;
   EndgamePerPlyCallback per_ply_callback;
   void *per_ply_callback_data;
 } EndgameArgs;
