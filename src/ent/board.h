@@ -41,6 +41,8 @@ typedef struct Board {
   int tiles_played;
   // Start coordinates used to reset the board
   int start_coords[2];
+  // Flag for lazy cross-set computation - when false, cross-sets need regeneration
+  bool cross_sets_valid;
 } Board;
 
 // Square: Letter
@@ -453,9 +455,21 @@ static inline int board_get_tiles_played(const Board *board) {
   return board->tiles_played;
 }
 
+static inline void board_set_tiles_played(Board *board, int tiles_played) {
+  board->tiles_played = tiles_played;
+}
+
 static inline void board_increment_tiles_played(Board *board,
                                                 int tiles_played) {
   board->tiles_played += tiles_played;
+}
+
+static inline bool board_get_cross_sets_valid(const Board *board) {
+  return board->cross_sets_valid;
+}
+
+static inline void board_set_cross_sets_valid(Board *board, bool valid) {
+  board->cross_sets_valid = valid;
 }
 
 // Board auxilllary functions
@@ -674,6 +688,7 @@ static inline void board_reset(Board *board) {
   // it is used to calculate the index for board_set_letter.
   board->tiles_played = 0;
   board->transposed = 0;
+  board->cross_sets_valid = true; // Trivial cross sets are valid for empty board
 
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {

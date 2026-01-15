@@ -217,3 +217,13 @@ void bag_increment_unseen_count(const Bag *bag, int *unseen_count) {
     unseen_count[bag->letters[i]]++;
   }
 }
+
+int bag_get_start_tile_index(const Bag *bag) { return bag->start_tile_index; }
+
+int bag_get_end_tile_index(const Bag *bag) { return bag->end_tile_index; }
+
+void bag_set_start_tile_index(Bag *bag, int index) {
+  bag->start_tile_index = index;
+}
+
+void bag_set_end_tile_index(Bag *bag, int index) { bag->end_tile_index = index; }

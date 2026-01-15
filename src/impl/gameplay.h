@@ -6,6 +6,7 @@
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/move.h"
+#include "../ent/move_undo.h"
 #include "../ent/rack.h"
 #include "move_gen.h"
 
@@ -38,5 +39,20 @@ void game_play_n_events(GameHistory *game_history, Game *game, int event_index,
                         bool validate, ErrorStack *error_stack);
 bool game_history_contains_end_rack_penalty_event(
     const GameHistory *game_history);
+
+// Incremental play/unplay for endgame search
+void play_move_incremental(const Move *move, Game *game, MoveUndo *undo);
+void unplay_move_incremental(Game *game, const MoveUndo *undo);
+
+// Optimized play for endgame outplays (skips board/cross-set updates)
+void play_move_endgame_outplay(const Move *move, Game *game, MoveUndo *undo);
+
+// Update cross-sets for squares affected by a move (for lazy cross-set evaluation)
+void update_cross_set_for_move(const Move *move, Game *game);
+
+// Update cross-sets for squares affected by a move after unplaying it.
+// Unlike update_cross_set_for_move, this doesn't rely on board_get_word_edge
+// (which assumes tiles are on board).
+void update_cross_sets_after_unplay(const Move *move, Game *game);
 
 #endif

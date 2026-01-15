@@ -93,6 +93,10 @@ int game_get_player_on_turn_index(const Game *game) {
   return game->player_on_turn_index;
 }
 
+void game_set_player_on_turn_index(Game *game, int index) {
+  game->player_on_turn_index = index;
+}
+
 game_end_reason_t game_get_game_end_reason(const Game *game) {
   return game->game_end_reason;
 }
@@ -422,6 +426,7 @@ void game_gen_all_cross_sets(Game *game) {
     }
   }
   board_transpose(board);
+  board_set_cross_sets_valid(board, true);
 }
 
 void game_reset(Game *game) {

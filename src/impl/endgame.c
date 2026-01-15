@@ -16,6 +16,7 @@
 #include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/move_undo.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/small_move_arena.h"
@@ -127,6 +128,7 @@ typedef struct EndgameSolverWorker {
   PVLine best_pv;              // Thread-local best PV
   int32_t best_pv_value;       // Thread-local best value
   int completed_depth;         // Depth this thread completed
+  MoveUndo move_undos[MAX_SEARCH_DEPTH]; // For incremental play/unplay
 } EndgameSolverWorker;
 
 #ifndef MAX
@@ -402,7 +404,7 @@ bool check_opponent_stuck(EndgameSolverWorker *worker) {
   move_set_as_pass(&pass_move);
   play_move(&pass_move, worker->game_copy, NULL);
 
-  // Generate opponent's moves
+  // Generate opponent's moves (cross-sets already valid from play_move)
   const MoveGenArgs args = {
       .game = worker->game_copy,
       .move_list = worker->move_list,
@@ -447,7 +449,7 @@ bool move_unsticks_opponent(EndgameSolverWorker *worker, const SmallMove *sm) {
   // Play the move temporarily
   play_move(&move, worker->game_copy, NULL);
 
-  // Generate opponent's moves to check if they can play now
+  // Generate opponent's moves to check if they can play now (cross-sets valid from play_move)
   const MoveGenArgs args = {
       .game = worker->game_copy,
       .move_list = worker->move_list,
@@ -804,10 +806,29 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
                          game_get_board(worker->game_copy));
 
       const Rack *stm_rack = player_get_rack(player_on_turn);
+      const int stm_rack_tiles = rack_get_total_letters(stm_rack);
+      const bool is_outplay =
+          small_move_get_tiles_played(small_move) == stm_rack_tiles;
 
       int last_consecutive_scoreless_turns =
           game_get_consecutive_scoreless_turns(worker->game_copy);
-      play_move(worker->move_list->spare_move, worker->game_copy, NULL);
+
+      // Calculate undo index for incremental backup
+      int undo_index = worker->solver->requested_plies - depth;
+
+      // Use optimized function for outplays - skips board/cross-set updates
+      if (is_outplay) {
+        play_move_endgame_outplay(worker->move_list->spare_move,
+                                  worker->game_copy,
+                                  &worker->move_undos[undo_index]);
+      } else {
+        play_move_incremental(worker->move_list->spare_move, worker->game_copy,
+                              &worker->move_undos[undo_index]);
+        // Update cross-sets for the affected squares (lazy but immediate)
+        update_cross_set_for_move(worker->move_list->spare_move,
+                                  worker->game_copy);
+        board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
+      }
 
       // Atomic increment for thread-safe node counting
       atomic_fetch_add(&worker->solver->nodes_searched, 1);
@@ -856,7 +877,20 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
                                  &child_pv, pv_node, false);
         }
       }
-      game_unplay_last_move(worker->game_copy);
+      unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_index]);
+
+      // After unplay, regenerate cross-sets for affected squares (if not an outplay)
+      // This restores the parent cross-sets. We use update_cross_sets_after_unplay
+      // which doesn't rely on board_get_word_edge (which needs tiles to be on board).
+      if (!is_outplay) {
+        // Reconstruct the move from small_move (spare_move was overwritten by recursive calls)
+        SmallMove *unplay_small_move =
+            (SmallMove *)(worker->small_move_arena->memory + element_offset);
+        small_move_to_move(worker->move_list->spare_move, unplay_small_move,
+                           game_get_board(worker->game_copy));
+        update_cross_sets_after_unplay(worker->move_list->spare_move,
+                                       worker->game_copy);
+      }
 
       // ABDADA: check if move was deferred
       if (value == ON_EVALUATION) {
@@ -1249,6 +1283,10 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   if (solver->threads > 1) {
     MoveList *temp_move_list =
         move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
+    // Ensure cross-sets are valid for the initial position
+    if (!board_get_cross_sets_valid(game_get_board((Game *)endgame_args->game))) {
+      game_gen_all_cross_sets((Game *)endgame_args->game);
+    }
     const MoveGenArgs count_args = {
         .game = (Game *)endgame_args->game,
         .move_list = temp_move_list,
