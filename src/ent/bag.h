@@ -28,4 +28,10 @@ void bag_reset(const LetterDistribution *ld, Bag *bag);
 void bag_shuffle(Bag *bag);
 void bag_increment_unseen_count(const Bag *bag, int *unseen_count);
 
+// Index accessors for incremental undo
+int bag_get_start_tile_index(const Bag *bag);
+int bag_get_end_tile_index(const Bag *bag);
+void bag_set_start_tile_index(Bag *bag, int index);
+void bag_set_end_tile_index(Bag *bag, int index);
+
 #endif

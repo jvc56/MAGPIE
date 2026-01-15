@@ -10,6 +10,7 @@
 #include <stdbool.h>
 
 typedef struct Game Game;
+typedef struct MoveUndo MoveUndo;
 
 typedef struct GameArgs {
   PlayersData *players_data;
@@ -35,6 +36,7 @@ Bag *game_get_bag(const Game *game);
 const LetterDistribution *game_get_ld(const Game *game);
 Player *game_get_player(const Game *game, int player_index);
 int game_get_player_on_turn_index(const Game *game);
+void game_set_player_on_turn_index(Game *game, int index);
 game_end_reason_t game_get_game_end_reason(const Game *game);
 bool game_over(const Game *game);
 backup_mode_t game_get_backup_mode(const Game *game);
@@ -60,5 +62,7 @@ void game_set_starting_player_index(Game *game, int starting_player_index);
 void game_gen_all_cross_sets(Game *game);
 void game_gen_cross_set(Game *game, int row, int col, int dir,
                         int cross_set_index);
+void game_gen_cross_set_tracked(Game *game, int row, int col, int dir,
+                                int cross_set_index, MoveUndo *undo);
 
 #endif

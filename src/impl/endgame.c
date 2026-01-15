@@ -15,6 +15,7 @@
 #include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/move_undo.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/small_move_arena.h"
@@ -79,6 +80,7 @@ typedef struct EndgameSolverWorker {
   MoveList *move_list;
   EndgameSolver *solver;
   int current_iterative_deepening_depth;
+  MoveUndo move_undos[MAX_SEARCH_DEPTH]; // For incremental play/unplay
 } EndgameSolverWorker;
 
 #ifndef MAX
@@ -396,7 +398,11 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
 
     int last_consecutive_scoreless_turns =
         game_get_consecutive_scoreless_turns(worker->game_copy);
-    play_move(worker->move_list->spare_move, worker->game_copy, NULL);
+
+    int undo_index = worker->solver->requested_plies - depth;
+
+    play_move_incremental(worker->move_list->spare_move, worker->game_copy,
+                          &worker->move_undos[undo_index]);
 
     // Implementation is currently single-threaded. Keep counts per worker if we
     // want to keep doing this when we have multiple threads.
@@ -425,13 +431,7 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
                         pv_node);
       }
     }
-    game_unplay_last_move(worker->game_copy);
-
-    // log_warn("%sNow unplayed %d, %s (tm:%x meta:%x)", spaces, idx,
-    //          string_builder_peek(move_description), small_move->tiny_move,
-    //          small_move->metadata);
-
-    // string_builder_destroy(move_description);
+    unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_index]);
 
     // Re-assign small_move. Its pointer location may have changed after all
     // the calls to negamax and possible reallocations in the small_move_arena.

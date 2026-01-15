@@ -13,6 +13,7 @@
 #include "kwg.h"
 #include "kwg_alpha.h"
 #include "letter_distribution.h"
+#include "move_undo.h"
 #include "player.h"
 #include "players_data.h"
 #include "rack.h"
@@ -91,6 +92,10 @@ Player *game_get_player(const Game *game, int player_index) {
 
 int game_get_player_on_turn_index(const Game *game) {
   return game->player_on_turn_index;
+}
+
+void game_set_player_on_turn_index(Game *game, int index) {
+  game->player_on_turn_index = index;
 }
 
 game_end_reason_t game_get_game_end_reason(const Game *game) {
@@ -392,6 +397,153 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
   if (game_get_variant(game) == GAME_VARIANT_CLASSIC) {
     game_gen_classic_cross_set(game, row, col, dir, cross_set_index);
   } else {
+    game_gen_alpha_cross_set(game, row, col, dir, cross_set_index);
+  }
+}
+
+// Tracked version of game_gen_classic_cross_set for incremental undo
+static inline void game_gen_classic_cross_set_tracked(const Game *game, int row,
+                                                      int col, int dir,
+                                                      int cross_set_index,
+                                                      MoveUndo *undo) {
+  if (!board_is_position_in_bounds(row, col)) {
+    return;
+  }
+
+  Board *board = game_get_board(game);
+
+  if (board_is_nonempty_or_bricked(board, row, col)) {
+    board_set_cross_set_tracked(board, row, col, dir, cross_set_index, 0, undo);
+    board_set_cross_score_tracked(board, row, col, dir, cross_set_index, 0,
+                                  undo);
+    return;
+  }
+  if (board_are_left_and_right_empty(board, row, col)) {
+    board_set_cross_set_tracked(board, row, col, dir, cross_set_index,
+                                TRIVIAL_CROSS_SET, undo);
+    board_set_cross_score_tracked(board, row, col, dir, cross_set_index, 0,
+                                  undo);
+    return;
+  }
+
+  const KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
+  const uint32_t kwg_root = kwg_get_root_node_index(kwg);
+  const LetterDistribution *ld = game_get_ld(game);
+
+  const int through_dir = board_toggle_dir(dir);
+
+  const int left_col =
+      board_get_word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
+  const int right_col =
+      board_get_word_edge(board, row, col + 1, WORD_DIRECTION_RIGHT);
+  Equity score = 0;
+  uint64_t front_hook_set = 0;
+  uint64_t back_hook_set = 0;
+  uint32_t right_lnode_index = 0;
+  bool left_lpath_is_valid = false;
+  bool right_lpath_is_valid = false;
+  uint64_t leftside_rightx_set = 0;
+
+  const bool nonempty_to_left = left_col < col;
+  if (nonempty_to_left) {
+    uint64_t leftside_leftx_set = 0;
+    const uint32_t lnode_index =
+        traverse_backwards(kwg, board, row, col - 1, kwg_root, false, 0);
+    left_lpath_is_valid = lnode_index != 0;
+    score += traverse_backwards_for_score(board, ld, row, col - 1);
+    if (left_lpath_is_valid) {
+      kwg_get_letter_sets(kwg, lnode_index, &leftside_leftx_set);
+      const uint32_t s_index =
+          kwg_get_next_node_index(kwg, lnode_index, SEPARATION_MACHINE_LETTER);
+      if (s_index != 0) {
+        back_hook_set = kwg_get_letter_sets(kwg, s_index, &leftside_rightx_set);
+      }
+    }
+    board_set_left_extension_set_with_blank_tracked(
+        board, row, col - 1, through_dir, cross_set_index, leftside_leftx_set,
+        undo);
+    board_set_right_extension_set_with_blank_tracked(
+        board, row, col - 1, through_dir, cross_set_index, leftside_rightx_set,
+        undo);
+    if (left_col > 0) {
+      board_set_left_extension_set_with_blank_tracked(
+          board, row, left_col - 1, through_dir, cross_set_index,
+          leftside_leftx_set, undo);
+    }
+  }
+
+  const bool nonempty_to_right = right_col > col;
+  if (nonempty_to_right) {
+    uint64_t rightside_leftx_set = 0;
+    uint64_t rightside_rightx_set = 0;
+    right_lnode_index =
+        traverse_backwards(kwg, board, row, right_col, kwg_root, false, 0);
+    right_lpath_is_valid = right_lnode_index != 0;
+    score += traverse_backwards_for_score(board, ld, row, right_col);
+    if (right_lpath_is_valid) {
+      front_hook_set =
+          kwg_get_letter_sets(kwg, right_lnode_index, &rightside_leftx_set);
+      const uint32_t s_index = kwg_get_next_node_index(
+          kwg, right_lnode_index, SEPARATION_MACHINE_LETTER);
+      if (s_index != 0) {
+        kwg_get_letter_sets(kwg, s_index, &rightside_rightx_set);
+      }
+    }
+    board_set_left_extension_set_with_blank_tracked(
+        board, row, right_col, through_dir, cross_set_index,
+        rightside_leftx_set, undo);
+    board_set_right_extension_set_with_blank_tracked(
+        board, row, right_col, through_dir, cross_set_index,
+        rightside_rightx_set, undo);
+    board_set_left_extension_set_with_blank_tracked(
+        board, row, col, through_dir, cross_set_index, rightside_leftx_set,
+        undo);
+  }
+
+  if (nonempty_to_left && nonempty_to_right) {
+    uint64_t letter_set = 0;
+    if (left_lpath_is_valid && right_lpath_is_valid) {
+      for (uint32_t i = right_lnode_index;; i++) {
+        const uint32_t node = kwg_node(kwg, i);
+        const uint32_t ml = kwg_node_tile(node);
+        if (board_is_letter_allowed_in_cross_set(leftside_rightx_set, ml)) {
+          const uint32_t next_node_index =
+              kwg_node_arc_index_prefetch(node, kwg);
+          if (traverse_backwards(kwg, board, row, col - 1, next_node_index,
+                                 true, left_col) != 0) {
+            letter_set |= get_cross_set_bit(ml);
+          }
+        }
+        if (kwg_node_is_end(node)) {
+          break;
+        }
+      }
+    }
+    board_set_cross_set_with_blank_tracked(board, row, col, dir,
+                                           cross_set_index, letter_set, undo);
+  } else if (nonempty_to_left) {
+    board_set_cross_set_with_blank_tracked(board, row, col, dir,
+                                           cross_set_index, back_hook_set,
+                                           undo);
+  } else if (nonempty_to_right) {
+    board_set_cross_set_with_blank_tracked(board, row, col, dir,
+                                           cross_set_index, front_hook_set,
+                                           undo);
+  }
+  board_set_cross_score_tracked(board, row, col, dir, cross_set_index, score,
+                                undo);
+}
+
+void game_gen_cross_set_tracked(Game *game, int row, int col, int dir,
+                                int cross_set_index, MoveUndo *undo) {
+  // For now, only support classic variant in tracked mode
+  // Alpha variant is less common and can be added if needed
+  if (game_get_variant(game) == GAME_VARIANT_CLASSIC) {
+    game_gen_classic_cross_set_tracked(game, row, col, dir, cross_set_index,
+                                       undo);
+  } else {
+    // Fall back to non-tracked version for alpha variant
+    // This is not ideal but alpha is rare
     game_gen_alpha_cross_set(game, row, col, dir, cross_set_index);
   }
 }

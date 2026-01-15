@@ -49,6 +49,9 @@ void test_single_endgame(const char *config_settings, const char *cgp,
 
   if (actual_error_code == ERROR_STATUS_SUCCESS) {
     const PVLine *pv_line = endgame_results_get_pvline(endgame_results);
+    if (pv_line->score != expected_score) {
+      printf("SCORE MISMATCH: expected %d, got %d\n", expected_score, pv_line->score);
+    }
     assert(pv_line->score == expected_score);
     assert(small_move_is_pass(&pv_line->moves[0]) == is_pass);
   }
@@ -132,7 +135,7 @@ void test_eldar_v_stick(void) {
       "cgp "
       "4EXODE6/1DOFF1KERATIN1U/1OHO8YEN/1POOJA1B3MEWS/5SQUINTY2A/4RHINO1e3V/"
       "2B4C2R3E/GOAT1D1E2ZIN1d/1URACILS2E4/1PIG1S4T4/2L2R4T4/2L2A1GENII3/"
-      "2A2T1L7/5E1A7/5D1M7 AEEIRUW/V 410/409 0 -lex CSW19;",
+      "2A2T1L7/5E1A7/5D1M7 AEEIRUW/V 410/409 0 -lex CSW21;",
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, 72, false);
 }
 
@@ -150,9 +153,7 @@ void test_endgame(void) {
   test_solve_standard();
   test_very_deep();
   test_small_arena_realloc();
-  //  Uncomment out more of these tests once we add more optimizations,
-  //  and/or if we can run the endgame tests in release mode.
-  //  test_pass_first();
-  // test_vs_joey();
-  // test_eldar_v_stick();
+  test_pass_first();
+  test_vs_joey();
+  test_eldar_v_stick();
 }

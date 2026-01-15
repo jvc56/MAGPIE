@@ -453,6 +453,10 @@ static inline int board_get_tiles_played(const Board *board) {
   return board->tiles_played;
 }
 
+static inline void board_set_tiles_played(Board *board, int tiles_played) {
+  board->tiles_played = tiles_played;
+}
+
 static inline void board_increment_tiles_played(Board *board,
                                                 int tiles_played) {
   board->tiles_played += tiles_played;
