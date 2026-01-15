@@ -831,10 +831,13 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
                               &worker->move_undos[undo_index]);
         // Update cross-sets with tracking - old values saved in MoveUndo for
         // automatic restoration during unplay_move_incremental
-        update_cross_set_for_move_tracked(worker->move_list->spare_move,
-                                          worker->game_copy,
-                                          &worker->move_undos[undo_index]);
-        board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
+        // Skip at depth 1 (leaf level) since we won't generate more moves
+        if (depth > 1) {
+          update_cross_set_for_move_tracked(worker->move_list->spare_move,
+                                            worker->game_copy,
+                                            &worker->move_undos[undo_index]);
+          board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
+        }
       }
 
       // Atomic increment for thread-safe node counting
