@@ -880,16 +880,10 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_index]);
 
       // After unplay, regenerate cross-sets for affected squares (if not an outplay)
-      // This restores the parent cross-sets. We use update_cross_sets_after_unplay
-      // which doesn't rely on board_get_word_edge (which needs tiles to be on board).
+      // Uses stored move info from MoveUndo to avoid reconstructing the move.
       if (!is_outplay) {
-        // Reconstruct the move from small_move (spare_move was overwritten by recursive calls)
-        SmallMove *unplay_small_move =
-            (SmallMove *)(worker->small_move_arena->memory + element_offset);
-        small_move_to_move(worker->move_list->spare_move, unplay_small_move,
-                           game_get_board(worker->game_copy));
-        update_cross_sets_after_unplay(worker->move_list->spare_move,
-                                       worker->game_copy);
+        restore_cross_sets_from_undo(&worker->move_undos[undo_index],
+                                     worker->game_copy);
       }
 
       // ABDADA: check if move was deferred

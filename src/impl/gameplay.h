@@ -55,4 +55,9 @@ void update_cross_set_for_move(const Move *move, Game *game);
 // (which assumes tiles are on board).
 void update_cross_sets_after_unplay(const Move *move, Game *game);
 
+// Restore cross-sets using stored move info from MoveUndo.
+// Faster than update_cross_sets_after_unplay because it doesn't require
+// reconstructing the move from small_move.
+void restore_cross_sets_from_undo(const MoveUndo *undo, Game *game);
+
 #endif

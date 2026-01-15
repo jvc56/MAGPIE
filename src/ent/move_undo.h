@@ -52,6 +52,14 @@ typedef struct MoveUndo {
   // Game state
   int old_consecutive_scoreless_turns;
   game_end_reason_t old_game_end_reason;
+
+  // Move info for cross-set restoration after unplay
+  // Stored during play to avoid reconstructing from small_move after unplay
+  uint8_t move_row_start;
+  uint8_t move_col_start;
+  uint8_t move_tiles_length;
+  uint8_t move_dir;
+  uint16_t move_played_tiles_mask; // bit i set if tiles[i] was played (not play-through)
 } MoveUndo;
 
 static inline void move_undo_reset(MoveUndo *undo) {
