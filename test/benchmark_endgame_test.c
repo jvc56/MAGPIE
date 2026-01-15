@@ -112,9 +112,16 @@ static bool play_until_bag_empty(Game *game, MoveList *move_list) {
   return !rack_is_empty(rack0) && !rack_is_empty(rack1);
 }
 
+typedef struct BenchmarkStats {
+  double total_time;
+  double min_time;
+  double max_time;
+  int games_solved;
+} BenchmarkStats;
+
 static void run_endgames_with_pv(Config *config, EndgameSolver *solver,
                                   int num_games, int ply, int num_threads,
-                                  uint64_t base_seed) {
+                                  uint64_t base_seed, BenchmarkStats *stats) {
   MoveList *move_list = move_list_create(1);
 
   // Create the initial game (required before game_reset works)
@@ -122,6 +129,10 @@ static void run_endgames_with_pv(Config *config, EndgameSolver *solver,
   Game *game = config_get_game(config);
 
   int valid_endgames = 0;
+  stats->total_time = 0;
+  stats->min_time = 1e9;
+  stats->max_time = 0;
+  stats->games_solved = 0;
 
   for (int i = 0; valid_endgames < num_games; i++) {
     // Reset game directly (avoids spurious output from "new" command)
@@ -156,11 +167,17 @@ static void run_endgames_with_pv(Config *config, EndgameSolver *solver,
     EndgameResults *results = config_get_endgame_results(config);
     ErrorStack *err = error_stack_create();
 
-    printf("Solving %d-ply endgame...\n", ply);
+    printf("Solving %d-ply endgame with %d threads...\n", ply, num_threads);
     endgame_solve(solver, &args, results, err);
     assert(error_stack_is_empty(err));
 
+    double elapsed = get_time_sec() - start_time;
+    stats->total_time += elapsed;
+    if (elapsed < stats->min_time) stats->min_time = elapsed;
+    if (elapsed > stats->max_time) stats->max_time = elapsed;
+
     valid_endgames++;
+    stats->games_solved = valid_endgames;
     error_stack_destroy(err);
   }
 
@@ -170,8 +187,8 @@ static void run_endgames_with_pv(Config *config, EndgameSolver *solver,
 void test_benchmark_endgame(void) {
   log_set_level(LOG_WARN);  // Allow warnings to show diagnostics
 
-  const int num_games = 25;  // Full benchmark
-  const int ply = 12;        // Full 12-ply search
+  const int num_games = 100;  // Full benchmark
+  const int ply = 8;          // 8-ply search
   const int num_threads = 10;
   const uint64_t base_seed = 0;
 
@@ -186,7 +203,23 @@ void test_benchmark_endgame(void) {
          num_threads);
   printf("==============================================\n");
 
-  run_endgames_with_pv(config, solver, num_games, ply, num_threads, base_seed);
+  BenchmarkStats stats;
+  run_endgames_with_pv(config, solver, num_games, ply, num_threads, base_seed,
+                       &stats);
+
+  printf("\n");
+  printf("==============================================\n");
+  printf("  BENCHMARK RESULTS\n");
+  printf("==============================================\n");
+  printf("  Games solved:      %d\n", stats.games_solved);
+  printf("  Ply depth:         %d\n", ply);
+  printf("  Threads:           %d\n", num_threads);
+  printf("  Total time:        %.3f s\n", stats.total_time);
+  printf("  Average time:      %.3f s/game\n",
+         stats.total_time / stats.games_solved);
+  printf("  Min time:          %.3f s\n", stats.min_time);
+  printf("  Max time:          %.3f s\n", stats.max_time);
+  printf("==============================================\n\n");
 
   endgame_solver_destroy(solver);
   config_destroy(config);

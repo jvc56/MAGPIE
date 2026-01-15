@@ -101,12 +101,12 @@ typedef struct TranspositionTable {
   int size_power_of_2;
   uint64_t size_mask;
   Zobrist *zobrist;
-  atomic_int created;
-  atomic_int hits;
-  atomic_int lookups;
-  atomic_int t2_collisions;
-  atomic_int torn_reads;  // Detected concurrent writes during read
-  atomic_int depth_rejects;  // Entries not replaced due to depth preference
+  atomic_llong created;
+  atomic_llong hits;
+  atomic_llong lookups;
+  atomic_llong t2_collisions;
+  atomic_llong torn_reads;  // Detected concurrent writes during read
+  atomic_llong depth_rejects;  // Entries not replaced due to depth preference
 } TranspositionTable;
 
 static inline TranspositionTable *

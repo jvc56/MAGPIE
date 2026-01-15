@@ -1411,13 +1411,13 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   log_warn("IID stats: searches=%d", iid_searches);
 
   if (solver->transposition_table) {
-    int tt_lookups = atomic_load(&solver->transposition_table->lookups);
-    int tt_hits = atomic_load(&solver->transposition_table->hits);
-    int tt_created = atomic_load(&solver->transposition_table->created);
-    int tt_collisions = atomic_load(&solver->transposition_table->t2_collisions);
-    int tt_torn_reads = atomic_load(&solver->transposition_table->torn_reads);
-    int tt_depth_rejects = atomic_load(&solver->transposition_table->depth_rejects);
-    log_warn("TT stats: lookups=%d, hits=%d (%.2f%%), created=%d, t2_collisions=%d, torn_reads=%d, depth_rejects=%d",
+    long long tt_lookups = atomic_load(&solver->transposition_table->lookups);
+    long long tt_hits = atomic_load(&solver->transposition_table->hits);
+    long long tt_created = atomic_load(&solver->transposition_table->created);
+    long long tt_collisions = atomic_load(&solver->transposition_table->t2_collisions);
+    long long tt_torn_reads = atomic_load(&solver->transposition_table->torn_reads);
+    long long tt_depth_rejects = atomic_load(&solver->transposition_table->depth_rejects);
+    log_warn("TT stats: lookups=%lld, hits=%lld (%.2f%%), created=%lld, t2_collisions=%lld, torn_reads=%lld, depth_rejects=%lld",
              tt_lookups, tt_hits, 100.0 * tt_hits / (tt_lookups > 0 ? tt_lookups : 1),
              tt_created, tt_collisions, tt_torn_reads, tt_depth_rejects);
   }
