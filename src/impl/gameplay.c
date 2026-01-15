@@ -765,6 +765,14 @@ void set_after_game_event_racks(const GameHistory *game_history,
         after_event_player_off_turn_rack,
         &play_events_data
              ->known_letters_from_phonies_racks[1 - player_on_turn_index]);
+    if (num_letters_in_bag -
+            rack_get_total_letters(after_event_player_off_turn_rack) <=
+        (RACK_SIZE)) {
+      // The known rack from phonies is all of the remaining letters in the bag
+      // so we now the current player on turn rack
+      copy_bag_to_rack(bag, after_event_player_off_turn_rack,
+                       after_event_player_on_turn_rack);
+    }
   }
 }
 
