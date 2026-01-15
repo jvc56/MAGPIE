@@ -2955,11 +2955,12 @@ void config_add_game_event(Config *config, const int player_index,
           config->game_history);
   if (waiting_for_final_pass_or_challenge &&
       (game_event_type != GAME_EVENT_PASS &&
-       game_event_type != GAME_EVENT_CHALLENGE_BONUS)) {
+       game_event_type != GAME_EVENT_CHALLENGE_BONUS &&
+       game_event_type != GAME_EVENT_PHONY_TILES_RETURNED)) {
     error_stack_push(error_stack,
                      ERROR_STATUS_COMMIT_WAITING_FOR_PASS_OR_CHALLENGE_BONUS,
-                     string_duplicate("waiting for final pass or challenge "
-                                      "bonus but got a different game event"));
+                     string_duplicate("waiting for final pass or challenge but "
+                                      "got a different game event"));
     return;
   }
 

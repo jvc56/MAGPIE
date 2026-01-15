@@ -1600,6 +1600,40 @@ void test_config_anno(void) {
   assert(!game_history_get_waiting_for_final_pass_or_challenge(
       config_get_game_history(config)));
 
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "s", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 2G TOOFROPE", ERROR_STATUS_SUCCESS);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(607));
+  assert(game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
+
+  assert_config_exec_status(config, "chal", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "s", ERROR_STATUS_SUCCESS);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_NONE);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(515));
+  assert(!game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 0)), "HIRT");
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 1)),
+                            "EFOOORT");
+
+  assert_config_exec_status(config, "com pass", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack FOOTROE", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com pass", ERROR_STATUS_SUCCESS);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(609));
+  assert(!game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
+
   // Test overtime cases
   assert_config_exec_status(
       config, "ov c -10",
