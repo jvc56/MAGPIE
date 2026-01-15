@@ -69,6 +69,8 @@ struct EndgameSolver {
   int initial_small_move_arena_size;
   bool iterative_deepening_optim;
   bool first_win_optim;
+  bool first_win_then_spread;  // Two-phase: find win first, then maximize
+  bool found_first_win;        // Track if we found a win in phase 1
   bool transposition_table_optim;
   bool negascout_optim;
   bool lmr_optim;  // Late Move Reductions
@@ -83,6 +85,7 @@ struct EndgameSolver {
   int solve_multiple_variations;
   int32_t best_pv_value;
   int requested_plies;
+  int spread_plies;  // Depth for spread phase (first_win_then_spread)
   int threads;
   double tt_fraction_of_mem;
   TranspositionTable *transposition_table;
@@ -236,7 +239,9 @@ static void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
 }
 
 void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
-  es->first_win_optim = false;
+  es->first_win_optim = endgame_args->first_win_optim;
+  es->first_win_then_spread = endgame_args->first_win_then_spread;
+  es->found_first_win = false;
   es->transposition_table_optim = true;
   es->iterative_deepening_optim = true;
   es->negascout_optim = true;
@@ -252,6 +257,7 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
     es->threads = 1;
   }
   es->requested_plies = endgame_args->plies;
+  es->spread_plies = endgame_args->spread_plies;
   es->solving_player = game_get_player_on_turn_index(endgame_args->game);
   es->initial_small_move_arena_size =
       endgame_args->initial_small_move_arena_size;
@@ -990,12 +996,21 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   int32_t alpha = -LARGE_VALUE;
   int32_t beta = LARGE_VALUE;
 
-  if (worker->solver->first_win_optim) {
+  // Target depth can change if we switch phases (first_win_then_spread)
+  int target_plies = plies;
+
+  // For first_win_then_spread: start with narrow window to find any win
+  bool in_win_finding_phase = worker->solver->first_win_then_spread;
+
+  if (worker->solver->first_win_optim || in_win_finding_phase) {
     // search a very small window centered around 0; we're just trying to find
     // something that surpasses it. This is useful to find "any win", and for
     // a pre-endgame solver.
     alpha = -1;
     beta = 1;
+    if (worker->thread_index == 0 && in_win_finding_phase) {
+      log_warn("Starting win-finding phase with narrow window (%d, %d)", alpha, beta);
+    }
   }
   assert(worker->small_move_arena->size == 0); // make sure arena is empty.
 
@@ -1064,7 +1079,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
       rack_get_total_letters(player_get_rack(game_get_player(
           worker->game_copy, game_get_player_on_turn_index(worker->game_copy))));
 
-  for (int p = start; p <= plies; p++) {
+  for (int p = start; p <= target_plies; p++) {
     // Check if another thread has completed the full search
     if (atomic_load(&worker->solver->search_complete) != 0) {
       break;
@@ -1078,7 +1093,8 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     int32_t val;
 
     // Use aspiration windows after depth 1
-    if (use_aspiration && p > 1 && !worker->solver->first_win_optim) {
+    if (use_aspiration && p > 1 && !worker->solver->first_win_optim &&
+        !in_win_finding_phase) {
       int32_t window = ASPIRATION_WINDOW;
       alpha = prev_value - window;
       beta = prev_value + window;
@@ -1115,6 +1131,12 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
 
     prev_value = val;
 
+    // Debug: log search result in win-finding phase
+    if (in_win_finding_phase && worker->thread_index == 0) {
+      log_warn("Depth %d: val=%d, alpha=%d, beta=%d, initial_spread=%d",
+               p, val, alpha, beta, worker->solver->initial_spread);
+    }
+
     // sort initial moves by valuation for next time.
     SmallMove *initial_moves = (SmallMove *)(worker->small_move_arena->memory);
     qsort(initial_moves, initial_move_count, sizeof(SmallMove),
@@ -1125,6 +1147,24 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     worker->best_pv_value = pv_value;
     worker->best_pv = pv;
     worker->completed_depth = p;
+
+    // first_win_then_spread: transition from win-finding to spread-maximizing
+    // Once we have any result from narrow window, switch to full window
+    // Use val (final spread) to determine win/loss, not pv_value (spread change)
+    if (in_win_finding_phase && worker->thread_index == 0) {
+      const char *result = val > 0 ? "Win" : (val < 0 ? "Loss" : "Tie");
+      log_warn("%s found at depth %d (final_spread=%d, spread_change=%d). "
+               "Switching to spread optimization (depth %d).",
+               result, p, val, pv_value, worker->solver->spread_plies);
+      in_win_finding_phase = false;
+      worker->solver->found_first_win = (val > 0);
+      // Reset to full window for spread optimization
+      alpha = -LARGE_VALUE;
+      beta = LARGE_VALUE;
+      // Switch to spread_plies depth for remaining search
+      target_plies = worker->solver->spread_plies;
+      // Note: TT entries are preserved, so we benefit from previous search
+    }
 
     // Slowroll prevention: exit early if same move wins consecutive iterations
     // Only thread 0 should trigger this, as it's the one whose result we use
@@ -1168,7 +1208,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     }
 
     // Signal other threads to stop when we complete the full search
-    if (p == plies) {
+    if (p == target_plies) {
       atomic_store(&worker->solver->search_complete, 1);
     }
   }
@@ -1389,6 +1429,13 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   log_warn("%s", string_builder_peek(final_sb));
   string_builder_destroy(final_sb);
   game_destroy(final_game_copy);
+
+  // In first_win_optim mode, show WIN/LOSS/TIE with margin
+  if (solver->first_win_optim) {
+    int32_t final_spread = solver->initial_spread + solver->best_pv_value;
+    const char *result = final_spread > 0 ? "WIN" : (final_spread < 0 ? "LOSS" : "TIE");
+    log_warn("Result: %s by %d", result, final_spread > 0 ? final_spread : -final_spread);
+  }
 
   // Print ABDADA diagnostics
   int nodes = atomic_load(&solver->nodes_searched);

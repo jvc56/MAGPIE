@@ -27,10 +27,13 @@ typedef struct EndgameArgs {
   const Game *game;
   double tt_fraction_of_mem;
   int plies;
+  int spread_plies;  // Depth for spread phase (only if first_win_then_spread)
   int initial_small_move_arena_size;
   int num_threads;
   EndgamePerPlyCallback per_ply_callback;
   void *per_ply_callback_data;
+  bool first_win_optim;        // Use narrow window to find win/loss only
+  bool first_win_then_spread;  // First find any win, then optimize spread
 } EndgameArgs;
 
 EndgameSolver *endgame_solver_create(void);

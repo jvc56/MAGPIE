@@ -120,8 +120,9 @@ typedef struct BenchmarkStats {
 } BenchmarkStats;
 
 static void run_endgames_with_pv(Config *config, EndgameSolver *solver,
-                                  int num_games, int ply, int num_threads,
-                                  uint64_t base_seed, BenchmarkStats *stats) {
+                                  int num_games, int ply, int spread_ply,
+                                  int num_threads, uint64_t base_seed,
+                                  BenchmarkStats *stats) {
   MoveList *move_list = move_list_create(1);
 
   // Create the initial game (required before game_reset works)
@@ -158,12 +159,15 @@ static void run_endgames_with_pv(Config *config, EndgameSolver *solver,
     EndgameArgs args = {.game = game,
                         .thread_control = config_get_thread_control(config),
                         .plies = ply,
+                        .spread_plies = spread_ply,
                         .tt_fraction_of_mem = 0.5,  // 50% of memory
                         .initial_small_move_arena_size =
                             DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
                         .num_threads = num_threads,
                         .per_ply_callback = print_pv_callback,
-                        .per_ply_callback_data = &start_time};
+                        .per_ply_callback_data = &start_time,
+                        .first_win_optim = false,
+                        .first_win_then_spread = true};
     EndgameResults *results = config_get_endgame_results(config);
     ErrorStack *err = error_stack_create();
 
@@ -188,7 +192,8 @@ void test_benchmark_endgame(void) {
   log_set_level(LOG_WARN);  // Allow warnings to show diagnostics
 
   const int num_games = 100;  // Full benchmark
-  const int ply = 8;          // 8-ply search
+  const int ply = 12;         // 12-ply win-finding
+  const int spread_ply = 6;   // 6-ply spread optimization
   const int num_threads = 10;
   const uint64_t base_seed = 0;
 
@@ -199,13 +204,13 @@ void test_benchmark_endgame(void) {
 
   printf("\n");
   printf("==============================================\n");
-  printf("  Endgame Benchmark: %d games, %d-ply, %d threads\n", num_games, ply,
-         num_threads);
+  printf("  Endgame Benchmark: %d games, %d/%d-ply, %d threads\n", num_games,
+         ply, spread_ply, num_threads);
   printf("==============================================\n");
 
   BenchmarkStats stats;
-  run_endgames_with_pv(config, solver, num_games, ply, num_threads, base_seed,
-                       &stats);
+  run_endgames_with_pv(config, solver, num_games, ply, spread_ply, num_threads,
+                       base_seed, &stats);
 
   printf("\n");
   printf("==============================================\n");

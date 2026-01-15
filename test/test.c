@@ -19,6 +19,7 @@
 #include "create_data_test.h"
 #include "cross_set_test.h"
 #include "endgame_test.h"
+#include "eval_endgame_test.h"
 #include "equity_adjustment_test.h"
 #include "equity_test.h"
 #include "game_test.h"
@@ -116,6 +117,7 @@ static TestEntry test_table[] = {
     {"endgame", test_endgame},
     {"benchend", test_benchmark_endgame},
     {"benchendmg", test_benchmark_endgame_multi_ply},
+    {"evalend", test_eval_endgame},
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},
     {"load", test_load_gcg},
