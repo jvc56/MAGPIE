@@ -258,6 +258,112 @@ void update_cross_set_for_move(const Move *move, Game *game) {
   }
 }
 
+// Helper: save a square before game_gen_cross_set modifies it
+static inline void save_cross_set_square(MoveUndo *undo, Board *board, int row,
+                                         int col, int dir, int ci) {
+  if (!board_is_position_in_bounds(row, col)) {
+    return;
+  }
+  move_undo_save_square_at(undo, board, row, col, dir, ci);
+}
+
+// Tracked version of calc_for_across - saves squares before modification
+static void calc_for_across_tracked(const Move *move, Game *game, int row_start,
+                                    int col_start, int csd, MoveUndo *undo) {
+  Board *board = game_get_board(game);
+  const bool kwgs_are_shared =
+      game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
+
+  for (int row = row_start; row < move_get_tiles_length(move) + row_start;
+       row++) {
+    if (move_get_tile(move, row - row_start) == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+
+    const int right_col =
+        board_get_word_edge(board, row, col_start, WORD_DIRECTION_RIGHT);
+    const int left_col =
+        board_get_word_edge(board, row, col_start, WORD_DIRECTION_LEFT);
+
+    // Save squares before game_gen_cross_set modifies them
+    save_cross_set_square(undo, board, row, right_col + 1, csd, 0);
+    save_cross_set_square(undo, board, row, left_col - 1, csd, 0);
+    save_cross_set_square(undo, board, row, col_start, csd, 0);
+    if (!kwgs_are_shared) {
+      save_cross_set_square(undo, board, row, right_col + 1, csd, 1);
+      save_cross_set_square(undo, board, row, left_col - 1, csd, 1);
+      save_cross_set_square(undo, board, row, col_start, csd, 1);
+    }
+
+    // Now update cross-sets
+    game_gen_cross_set(game, row, right_col + 1, csd, 0);
+    game_gen_cross_set(game, row, left_col - 1, csd, 0);
+    game_gen_cross_set(game, row, col_start, csd, 0);
+    if (!kwgs_are_shared) {
+      game_gen_cross_set(game, row, right_col + 1, csd, 1);
+      game_gen_cross_set(game, row, left_col - 1, csd, 1);
+      game_gen_cross_set(game, row, col_start, csd, 1);
+    }
+  }
+}
+
+// Tracked version of calc_for_self - saves squares before modification
+static void calc_for_self_tracked(const Move *move, Game *game, int row_start,
+                                  int col_start, int csd, MoveUndo *undo) {
+  Board *board = game_get_board(game);
+  const bool kwgs_are_shared =
+      game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
+
+  // Save all squares first
+  for (int col = col_start - 1; col <= col_start + move_get_tiles_length(move);
+       col++) {
+    save_cross_set_square(undo, board, row_start, col, csd, 0);
+  }
+  if (!kwgs_are_shared) {
+    for (int col = col_start - 1;
+         col <= col_start + move_get_tiles_length(move); col++) {
+      save_cross_set_square(undo, board, row_start, col, csd, 1);
+    }
+  }
+
+  // Now update cross-sets
+  for (int col = col_start - 1; col <= col_start + move_get_tiles_length(move);
+       col++) {
+    game_gen_cross_set(game, row_start, col, csd, 0);
+  }
+  if (!kwgs_are_shared) {
+    for (int col = col_start - 1;
+         col <= col_start + move_get_tiles_length(move); col++) {
+      game_gen_cross_set(game, row_start, col, csd, 1);
+    }
+  }
+}
+
+// Tracked version of update_cross_set_for_move - saves old cross-sets in MoveUndo
+void update_cross_set_for_move_tracked(const Move *move, Game *game,
+                                       MoveUndo *undo) {
+  Board *board = game_get_board(game);
+  if (board_is_dir_vertical(move_get_dir(move))) {
+    calc_for_across_tracked(move, game, move_get_row_start(move),
+                            move_get_col_start(move), BOARD_VERTICAL_DIRECTION,
+                            undo);
+    board_transpose(board);
+    calc_for_self_tracked(move, game, move_get_col_start(move),
+                          move_get_row_start(move), BOARD_VERTICAL_DIRECTION,
+                          undo);
+    board_transpose(board);
+  } else {
+    calc_for_self_tracked(move, game, move_get_row_start(move),
+                          move_get_col_start(move), BOARD_VERTICAL_DIRECTION,
+                          undo);
+    board_transpose(board);
+    calc_for_across_tracked(move, game, move_get_col_start(move),
+                            move_get_row_start(move), BOARD_VERTICAL_DIRECTION,
+                            undo);
+    board_transpose(board);
+  }
+}
+
 // Draws the required number of tiles to fill the rack to RACK_SIZE.
 void draw_to_full_rack(const Game *game, const int player_index) {
   Bag *bag = game_get_bag(game);

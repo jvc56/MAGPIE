@@ -50,6 +50,10 @@ void play_move_endgame_outplay(const Move *move, Game *game, MoveUndo *undo);
 // Update cross-sets for squares affected by a move (for lazy cross-set evaluation)
 void update_cross_set_for_move(const Move *move, Game *game);
 
+// Tracked version that saves old cross-sets in MoveUndo for automatic restoration
+void update_cross_set_for_move_tracked(const Move *move, Game *game,
+                                       MoveUndo *undo);
+
 // Update cross-sets for squares affected by a move after unplaying it.
 // Unlike update_cross_set_for_move, this doesn't rely on board_get_word_edge
 // (which assumes tiles are on board).

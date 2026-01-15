@@ -824,9 +824,11 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       } else {
         play_move_incremental(worker->move_list->spare_move, worker->game_copy,
                               &worker->move_undos[undo_index]);
-        // Update cross-sets for the affected squares (lazy but immediate)
-        update_cross_set_for_move(worker->move_list->spare_move,
-                                  worker->game_copy);
+        // Update cross-sets with tracking - old values saved in MoveUndo for
+        // automatic restoration during unplay_move_incremental
+        update_cross_set_for_move_tracked(worker->move_list->spare_move,
+                                          worker->game_copy,
+                                          &worker->move_undos[undo_index]);
         board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
       }
 
@@ -878,13 +880,8 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
         }
       }
       unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_index]);
-
-      // After unplay, regenerate cross-sets for affected squares (if not an outplay)
-      // Uses stored move info from MoveUndo to avoid reconstructing the move.
-      if (!is_outplay) {
-        restore_cross_sets_from_undo(&worker->move_undos[undo_index],
-                                     worker->game_copy);
-      }
+      // Cross-sets are automatically restored by move_undo_restore_squares
+      // since we used the tracked version during play
 
       // ABDADA: check if move was deferred
       if (value == ON_EVALUATION) {
