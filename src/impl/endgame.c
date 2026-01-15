@@ -631,6 +631,11 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
 
   assert(pv_node || alpha == beta - 1);
 
+  // Prefetch TT entry early to hide memory latency during setup
+  if (worker->solver->transposition_table_optim) {
+    transposition_table_prefetch(worker->solver->transposition_table, node_key);
+  }
+
   // ABDADA: if exclusive search and another processor is on this node, defer
   // Only defer at depth >= ABDADA_DEFER_DEPTH to reduce overhead at shallow depths
   const int num_threads = worker->solver->threads;

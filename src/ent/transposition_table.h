@@ -301,4 +301,11 @@ static inline void transposition_table_leave_node(TranspositionTable *tt,
   atomic_fetch_sub_explicit(&tt->nproc[idx], 1, memory_order_relaxed);
 }
 
+// Prefetch TT entry into cache - call early to hide memory latency
+static inline void transposition_table_prefetch(TranspositionTable *tt,
+                                                uint64_t zval) {
+  uint64_t idx = zval & tt->size_mask;
+  __builtin_prefetch(&tt->table[idx], 0, 1); // read, low temporal locality
+}
+
 #endif
