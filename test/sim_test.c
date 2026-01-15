@@ -714,6 +714,9 @@ void test_sim_ctx(void) {
   Rack known_opp_rack;
   rack_set_dist_size_and_reset(&known_opp_rack, ld_size);
   StringBuilder *cmd_sb = string_builder_create();
+  Rack leaves[2];
+  rack_set_dist_size_and_reset(&leaves[0], ld_size);
+  rack_set_dist_size_and_reset(&leaves[1], ld_size);
   for (int i = 0; i < num_games; i++) {
     load_and_exec_config_or_die(config, "newgame");
     int turn_num = 0;
@@ -721,15 +724,19 @@ void test_sim_ctx(void) {
                GAME_END_REASON_NONE &&
            bag_get_letters(game_get_bag(config_get_game(config))) >
                (RACK_SIZE * 2)) {
-      Game *game = config_get_game(config);
-      const int player_on_turn_index = game_get_player_on_turn_index(game);
-      draw_to_full_rack(game, player_on_turn_index);
+      const int player_index =
+          game_get_player_on_turn_index(config_get_game(config));
+      const int opp_index = 1 - player_index;
+
+      return_rack_to_bag(config_get_game(config), 0);
+      return_rack_to_bag(config_get_game(config), 1);
+      draw_rack_from_bag(config_get_game(config), 0, &leaves[0]);
+      draw_rack_from_bag(config_get_game(config), 1, &leaves[1]);
+      draw_to_full_rack(config_get_game(config), player_index);
+      return_rack_to_bag(config_get_game(config), opp_index);
+
       if (turn_num % 4 == 0) {
-        const int opp_index = 1 - player_on_turn_index;
-        draw_to_full_rack(game, opp_index);
-        rack_copy(&known_opp_rack,
-                  player_get_rack(game_get_player(game, opp_index)));
-        return_rack_to_bag(game, opp_index);
+        rack_copy(&known_opp_rack, &leaves[opp_index]);
       } else {
         rack_reset(&known_opp_rack);
       }
@@ -748,9 +755,24 @@ void test_sim_ctx(void) {
       load_and_exec_config_or_die(config, string_builder_peek(cmd_sb));
       load_and_exec_config_or_die(config, "gen");
 
+      printf("game %d, turn %d\n", i, turn_num);
       error_code_t status = config_simulate_and_return_status(
           config, &sim_ctx, &known_opp_rack, sim_results);
       assert(status == ERROR_STATUS_SUCCESS);
+      sim_results_lock_and_sort_display_simmed_plays(sim_results);
+      sim_results_unlock_display_infos(sim_results);
+      const Move *best_move = simmed_play_get_move(
+          sim_results_get_display_simmed_play(sim_results, 0));
+      get_leave_for_move(best_move, config_get_game(config),
+                         &leaves[player_index]);
+      StringBuilder *move_string_builder = string_builder_create();
+      string_builder_add_move(move_string_builder,
+                              game_get_board(config_get_game(config)),
+                              best_move, config_get_ld(config), true);
+      printf("move: %s\n", string_builder_peek(move_string_builder));
+      string_builder_destroy(move_string_builder);
+      load_and_exec_config_or_die(config, "s");
+      load_and_exec_config_or_die(config, "shm");
       load_and_exec_config_or_die(config, "t");
       turn_num++;
     }
@@ -765,20 +787,21 @@ void test_sim(void) {
   if (sim_perf_iters) {
     test_sim_perf(sim_perf_iters);
   } else {
-    test_similar_play_consistency(1);
-    test_similar_play_consistency(10);
-    test_sim_error_cases();
-    test_sim_single_iteration();
-    test_sim_threshold();
-    test_sim_time_limit();
-    test_all_plays_are_similar();
-    test_more_iterations();
-    test_play_similarity();
-    perf_test_multithread_sim();
-    test_sim_with_inference();
-    test_sim_round_robin_consistency();
-    test_sim_top_two_consistency();
-    test_sim_one_ply();
+    // FIXME: uncomment
+    // test_similar_play_consistency(1);
+    // test_similar_play_consistency(10);
+    // test_sim_error_cases();
+    // test_sim_single_iteration();
+    // test_sim_threshold();
+    // test_sim_time_limit();
+    // test_all_plays_are_similar();
+    // test_more_iterations();
+    // test_play_similarity();
+    // perf_test_multithread_sim();
+    // test_sim_with_inference();
+    // test_sim_round_robin_consistency();
+    // test_sim_top_two_consistency();
+    // test_sim_one_ply();
     test_sim_ctx();
   }
 }

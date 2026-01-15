@@ -688,6 +688,9 @@ void inference_ctx_set_inferences(InferenceCtx *ctx, InferenceArgs *args,
 }
 
 void inference_ctx_destroy(InferenceCtx *ctx) {
+  if (!ctx) {
+    return;
+  }
   game_destroy(ctx->game);
   for (int i = 0; i < ctx->num_workers; i++) {
     inference_destroy(ctx->worker_inferences[i]);

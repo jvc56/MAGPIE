@@ -15,6 +15,7 @@
 struct SimCtx {
   RandomVariables *rvs;
   RandomVariables *rng;
+  InferenceCtx *inference_ctx;
 };
 
 void sim_ctx_destroy(SimCtx *sim_ctx) {
@@ -23,6 +24,7 @@ void sim_ctx_destroy(SimCtx *sim_ctx) {
   }
   rvs_destroy(sim_ctx->rvs);
   rvs_destroy(sim_ctx->rng);
+  inference_ctx_destroy(sim_ctx->inference_ctx);
   free(sim_ctx);
 }
 
@@ -35,9 +37,16 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
     return;
   }
 
+  if (*sim_ctx == NULL) {
+    *sim_ctx = malloc_or_die(sizeof(SimCtx));
+    (*sim_ctx)->rvs = NULL;
+    (*sim_ctx)->rng = NULL;
+    (*sim_ctx)->inference_ctx = NULL;
+  }
+
   if (sim_args->use_inference) {
-    infer_without_ctx(&sim_args->inference_args, sim_args->inference_results,
-                      error_stack);
+    infer(&sim_args->inference_args, &((*sim_ctx)->inference_ctx),
+          sim_args->inference_results, error_stack);
     if (!error_stack_is_empty(error_stack) ||
         thread_control_get_status(sim_args->thread_control) !=
             THREAD_CONTROL_STATUS_STARTED) {
@@ -56,11 +65,10 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
       .seed = sim_args->seed,
   };
 
-  if (*sim_ctx) {
+  if ((*sim_ctx)->rvs) {
     rvs_reset((*sim_ctx)->rvs, &rv_sim_args);
     rvs_reset((*sim_ctx)->rng, &rng_args);
   } else {
-    *sim_ctx = malloc_or_die(sizeof(SimCtx));
     (*sim_ctx)->rvs = rvs_create(&rv_sim_args);
     (*sim_ctx)->rng = rvs_create(&rng_args);
   }

@@ -783,6 +783,7 @@ void set_rack_from_bag_or_push_to_error_stack(const Game *game,
     string_builder_destroy(sb);
     error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_RACK_NOT_IN_BAG,
                      err_msg);
+    abort();
   }
 }
 

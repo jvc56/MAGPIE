@@ -109,7 +109,10 @@ SimmedPlay *simmed_play_reset(SimmedPlay *simmed_play,
   stat_reset(simmed_play->equity_stat);
   stat_reset(simmed_play->leftover_stat);
   stat_reset(simmed_play->win_pct_stat);
+  printf("num alloc plies %d\n", simmed_play->num_alloc_plies);
+  printf("num new plies %d\n", new_num_plies);
   for (int j = 0; j < simmed_play->num_alloc_plies && j < new_num_plies; j++) {
+    printf("resetting %d\n", j);
     ply_info_reset(&simmed_play->ply_infos[j], use_heat_map);
   }
   if (new_num_plies > simmed_play->num_alloc_plies) {
@@ -172,10 +175,14 @@ void sim_results_simmed_plays_reset(SimResults *sim_results,
                                     const MoveList *move_list, int num_plies,
                                     uint64_t seed, bool use_heat_map) {
   const int new_num_sps = move_list_get_count(move_list);
+  printf("resetting simmed plays: %d, %d\n",
+         sim_results->num_alloc_simmed_plays, new_num_sps);
   for (int i = 0; i < sim_results->num_alloc_simmed_plays && i < new_num_sps;
        i++) {
+    printf("--- resetting actual play %d ---\n", i);
     simmed_play_reset(sim_results->simmed_plays[i], move_list, num_plies, seed,
                       use_heat_map, i);
+    printf("--- resetting displa play %d ---\n", i);
     simmed_play_reset(sim_results->display_simmed_plays[i], move_list,
                       num_plies, 0, false, i);
   }
@@ -197,6 +204,7 @@ void sim_results_simmed_plays_reset(SimResults *sim_results,
 // - PRNG
 // - mutex
 // - heat_map
+// - num_alloc_plies
 void simmed_play_copy(SimmedPlay *dst, const SimmedPlay *src,
                       const int num_plies) {
   move_copy(&dst->move, &src->move);
@@ -204,7 +212,6 @@ void simmed_play_copy(SimmedPlay *dst, const SimmedPlay *src,
   stat_copy(dst->leftover_stat, src->leftover_stat);
   stat_copy(dst->win_pct_stat, src->win_pct_stat);
   dst->similarity_key = src->similarity_key;
-  dst->num_alloc_plies = src->num_alloc_plies;
   dst->play_index_by_sort_type = src->play_index_by_sort_type;
   for (int i = 0; i < num_plies; i++) {
     stat_copy(dst->ply_infos[i].score_stat, src->ply_infos[i].score_stat);

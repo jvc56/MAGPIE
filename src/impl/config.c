@@ -80,6 +80,7 @@ typedef enum {
   ARG_TOKEN_CGP,
   ARG_TOKEN_MOVES,
   ARG_TOKEN_RACK,
+  ARG_TOKEN_RANDOM_RACK,
   ARG_TOKEN_GEN,
   ARG_TOKEN_SIM,
   ARG_TOKEN_GEN_AND_SIM,
@@ -878,6 +879,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_RACK:
       usages[0] = "<rack>";
       text = "Sets the rack for the player on turn.";
+      break;
+    case ARG_TOKEN_RANDOM_RACK:
+      usages[0] = "";
+      text = "Sets a random rack for the player on turn.";
       break;
     case ARG_TOKEN_GEN:
       usages[0] = "";
@@ -1746,6 +1751,23 @@ void impl_set_rack(Config *config, const arg_token_t arg_token,
                    ErrorStack *error_stack) {
   const char *rack_str = config_get_parg_value(config, arg_token, 0);
   impl_set_rack_internal(config, rack_str, error_stack);
+}
+
+void impl_set_random_rack(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate("cannot set player rack without lexicon"));
+    return;
+  }
+  config_init_game(config);
+  const int player_index = game_get_player_on_turn_index(config->game);
+  return_rack_to_bag(config->game, player_index);
+  draw_to_full_rack(config->game, player_index);
+  if (bag_get_letters(game_get_bag(config->game)) <= (RACK_SIZE)) {
+    draw_to_full_rack(config->game, 1 - player_index);
+  }
+  config_reset_move_list_and_invalidate_sim_results(config);
 }
 
 // Move generation
@@ -5353,6 +5375,15 @@ char *str_api_set_rack(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
+void execute_set_random_rack(Config *config, ErrorStack *error_stack) {
+  impl_set_random_rack(config, error_stack);
+}
+
+char *str_api_set_random_rack(Config *config, ErrorStack *error_stack) {
+  impl_set_random_rack(config, error_stack);
+  return empty_string();
+}
+
 void execute_move_gen(Config *config, ErrorStack *error_stack) {
   impl_move_gen(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -5537,6 +5568,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_SHOW_HEAT_MAP, "heatmap", 1, 3, show_heat_map, generic, false);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic, true);
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic, true);
+  cmd(ARG_TOKEN_RANDOM_RACK, "rrack", 0, 0, set_random_rack, generic, true);
   cmd(ARG_TOKEN_GEN, "generate", 0, 0, move_gen, generic, true);
   cmd(ARG_TOKEN_SIM, "simulate", 0, 1, sim, sim, false);
   cmd(ARG_TOKEN_GEN_AND_SIM, "gsimulate", 0, 1, gen_and_sim, gen_and_sim,
@@ -5766,6 +5798,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_CGP:
     case ARG_TOKEN_MOVES:
     case ARG_TOKEN_RACK:
+    case ARG_TOKEN_RANDOM_RACK:
     case ARG_TOKEN_GEN:
     case ARG_TOKEN_SIM:
     case ARG_TOKEN_GEN_AND_SIM:
