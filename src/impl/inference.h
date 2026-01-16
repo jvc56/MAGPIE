@@ -20,6 +20,7 @@ typedef struct InferenceArgs {
   Rack *target_played_tiles;
   Rack *target_known_rack;
   Rack *nontarget_known_rack;
+  bool use_inference_cutoff_optimization;
   const Game *game;
   int num_threads;
   int print_interval;
@@ -28,5 +29,9 @@ typedef struct InferenceArgs {
 
 void infer(InferenceArgs *args, InferenceResults *results,
            ErrorStack *error_stack);
+
+void inference_reset_cutoff_stats(void);
+void inference_get_cutoff_stats(uint64_t *total_calls, uint64_t *triggered);
+void inference_print_cutoff_stats(void);
 
 #endif

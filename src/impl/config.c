@@ -1749,6 +1749,8 @@ void impl_move_gen_override_record_type(Config *config,
       .move_list = config->move_list,
       .thread_index = 0,
       .eq_margin_movegen = config->eq_margin_movegen,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves_for_game_override_record_type(&args, move_record_type);
   move_list_sort_moves(config->move_list);
@@ -1774,6 +1776,7 @@ void impl_move_gen(Config *config, ErrorStack *error_stack) {
 void config_fill_infer_args(const Config *config, bool use_game_history,
                             int target_index, Equity target_score,
                             int target_num_exch, Rack *target_played_tiles,
+                            bool use_infer_cutoff_optimization,
                             Rack *target_known_rack, Rack *nontarget_known_rack,
                             InferenceArgs *args) {
   args->target_index = target_index;
@@ -1784,6 +1787,7 @@ void config_fill_infer_args(const Config *config, bool use_game_history,
   args->target_played_tiles = target_played_tiles;
   args->target_known_rack = target_known_rack;
   args->nontarget_known_rack = nontarget_known_rack;
+  args->use_inference_cutoff_optimization = use_infer_cutoff_optimization;
   args->use_game_history = use_game_history;
   args->game_history = config->game_history;
   args->game = config_get_game(config);
@@ -1796,11 +1800,12 @@ void config_fill_infer_args(const Config *config, bool use_game_history,
 void config_infer(const Config *config, bool use_game_history, int target_index,
                   Equity target_score, int target_num_exch,
                   Rack *target_played_tiles, Rack *target_known_rack,
-                  Rack *nontarget_known_rack, InferenceResults *results,
+                  Rack *nontarget_known_rack, bool use_inference_cutoff_optimization, InferenceResults *results,
                   ErrorStack *error_stack) {
   InferenceArgs args;
   config_fill_infer_args(config, use_game_history, target_index, target_score,
                          target_num_exch, target_played_tiles,
+                         use_inference_cutoff_optimization,
                          target_known_rack, nontarget_known_rack, &args);
   infer(&args, results, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -1830,6 +1835,7 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
   if (config_get_parg_num_set_values(config, ARG_TOKEN_INFER) == 0) {
     config_infer(config, true, 0, 0, 0, &target_played_tiles,
                  &target_known_rack, &nontarget_known_rack,
+                 true,
                  config->inference_results, error_stack);
     return;
   }
@@ -1939,6 +1945,7 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
 
   config_infer(config, false, target_index, target_score, target_num_exch,
                &target_played_tiles, &target_known_rack, &nontarget_known_rack,
+               true,
                config->inference_results, error_stack);
 }
 
@@ -1969,6 +1976,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
     // history and play to turn for each inference which will probably incur
     // more overhead than we would like.
     config_fill_infer_args(config, true, 0, 0, 0, target_played_tiles,
+                           false,
                            target_known_inference_tiles, nontarget_known_tiles,
                            &sim_args->inference_args);
   }
