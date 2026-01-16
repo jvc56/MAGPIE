@@ -138,6 +138,7 @@ typedef enum {
   // Simmer errors
   ERROR_STATUS_SIM_NO_MOVES,
   ERROR_STATUS_SIM_GAME_HISTORY_MISSING,
+  ERROR_STATUS_SIM_GAME_OVER,
   // Move validation errors
   ERROR_STATUS_MOVE_VALIDATION_GAME_NOT_LOADED,
   ERROR_STATUS_MOVE_VALIDATION_EMPTY_MOVE,
@@ -227,6 +228,7 @@ typedef enum {
   ERROR_STATUS_COMMIT_MISSING_EXCHANGE_OR_PLAY,
   ERROR_STATUS_COMMIT_PREVIOUS_PASS_NOT_FOUND,
   ERROR_STATUS_COMMIT_EMPTY_RACK,
+  ERROR_STATUS_COMMIT_GAME_OVER,
   // Challenge errors
   ERROR_STATUS_CHALLENGE_NO_PREVIOUS_MOVE,
   ERROR_STATUS_CHALLENGE_ALREADY_CHALLENGED,
@@ -275,6 +277,7 @@ FILE *get_stream_err(void);
 FILE *get_stream_in(void);
 void write_to_stream_out(const char *fmt, ...);
 void write_to_stream(FILE *stream, const char *fmt, ...);
+ssize_t getline_ignore_carriage_return(char **lineptr, size_t *n, FILE *stream);
 char *read_line_from_stream_in(void);
 
 // WARNING: This function should only be called once at startup or for testing

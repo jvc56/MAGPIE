@@ -19,6 +19,12 @@ char *validated_move_get_phonies_formed(const LetterDistribution *ld,
   bool phonies_formed = false;
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     int number_of_words = formed_words_get_num_words(fw);
+    int last_invalid_word_index = -1;
+    for (int i = 0; i < number_of_words; i++) {
+      if (!formed_words_get_word_valid(fw, i)) {
+        last_invalid_word_index = i;
+      }
+    }
     for (int i = 0; i < number_of_words; i++) {
       if (!formed_words_get_word_valid(fw, i)) {
         for (int mli = 0; mli < formed_words_get_word_length(fw, i); mli++) {
@@ -26,7 +32,7 @@ char *validated_move_get_phonies_formed(const LetterDistribution *ld,
               phonies_string_builder, ld,
               formed_words_get_word_letter(fw, i, mli));
         }
-        if (i < number_of_words - 1) {
+        if (i != last_invalid_word_index) {
           string_builder_add_string(phonies_string_builder, ",");
         }
         phonies_formed = true;

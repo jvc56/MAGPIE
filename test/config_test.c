@@ -1600,6 +1600,40 @@ void test_config_anno(void) {
   assert(!game_history_get_waiting_for_final_pass_or_challenge(
       config_get_game_history(config)));
 
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "s", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 2G TOOFROPE", ERROR_STATUS_SUCCESS);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(607));
+  assert(game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
+
+  assert_config_exec_status(config, "chal", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "s", ERROR_STATUS_SUCCESS);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_NONE);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(515));
+  assert(!game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 0)), "HIRT");
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 1)),
+                            "EFOOORT");
+
+  assert_config_exec_status(config, "com pass", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack FOOTROE", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com pass", ERROR_STATUS_SUCCESS);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_STANDARD);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(731));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(609));
+  assert(!game_history_get_waiting_for_final_pass_or_challenge(
+      config_get_game_history(config)));
+
   // Test overtime cases
   assert_config_exec_status(
       config, "ov c -10",
@@ -1801,8 +1835,11 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "rack ABCDEFG", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
+  const Game *old_game = config_get_game(config);
   assert_config_exec_status(config, "set -lex FRA20 -ld french",
                             ERROR_STATUS_SUCCESS);
+  // Changing the letter distribution should have triggered a game recreation
+  assert(old_game != config_get_game(config));
   // Changing the letter distribution to invalidate all of the results
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
   assert_config_exec_status(config, "shinfer",
@@ -1810,7 +1847,100 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "shendgame",
                             ERROR_STATUS_NO_ENDGAME_TO_SHOW);
 
+  assert_config_exec_status(config, "set -lex CSW21", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(
+      config, "load testdata/gcgs/success_five_point_challenge.gcg",
+      ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "goto end", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "sim", ERROR_STATUS_SIM_GAME_OVER);
+  assert_config_exec_status(config, "t", ERROR_STATUS_COMMIT_GAME_OVER);
+
+  // Test autosave
+  assert_config_exec_status(config, "newgame au1.gcg", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "t RETINAS", ERROR_STATUS_SUCCESS);
+  assert(access("au1.gcg", F_OK) != 0);
+  assert_config_exec_status(config, "e", ERROR_STATUS_SUCCESS);
+  assert(access("au1.gcg", F_OK) == 0);
+  char *au1_contents_1 = get_string_from_file_or_die("au1.gcg");
+  assert_config_exec_status(config, "t CAZIQUE", ERROR_STATUS_SUCCESS);
+  char *au1_contents_2 = get_string_from_file_or_die("au1.gcg");
+  assert_strings_equal(au1_contents_1, au1_contents_2);
+  assert_config_exec_status(config, "e", ERROR_STATUS_SUCCESS);
+  char *au1_contents_3 = get_string_from_file_or_die("au1.gcg");
+  assert_strings_ne(au1_contents_1, au1_contents_3);
+  remove_or_die("au1.gcg");
+  free(au1_contents_1);
+  free(au1_contents_2);
+  free(au1_contents_3);
+
+  assert_config_exec_status(config, "set -autosave true", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "newgame au2.gcg", ERROR_STATUS_SUCCESS);
+  assert(access("au2.gcg", F_OK) == 0);
+  char *au2_contents_1 = get_string_from_file_or_die("au2.gcg");
+  assert_config_exec_status(config, "t CAZIQUE", ERROR_STATUS_SUCCESS);
+  char *au2_contents_2 = get_string_from_file_or_die("au2.gcg");
+  assert_strings_ne(au2_contents_1, au2_contents_2);
+  assert_config_exec_status(config, "chal", ERROR_STATUS_SUCCESS);
+  char *au2_contents_3 = get_string_from_file_or_die("au2.gcg");
+  assert_strings_ne(au2_contents_2, au2_contents_3);
+  remove_or_die("au2.gcg");
+  free(au2_contents_1);
+  free(au2_contents_2);
+  free(au2_contents_3);
+
   string_builder_destroy(name_sb);
+  config_destroy(config);
+}
+
+void test_config_anno_challenge(void) {
+  // Commit and challenge
+  Config *config = config_create_default_test();
+  assert_config_exec_status(config, "newgame -lex CSW24", ERROR_STATUS_SUCCESS);
+  const Game *game = config_get_game(config);
+  assert_config_exec_status(config, "t OAKMOSS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "t ATALAYA", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "t NGLEDUG", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(172));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(86));
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(86));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
+  assert_config_exec_status(config, "chal", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(91));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
+  assert_config_exec_status(config, "goto end", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(177));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(86));
+  assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "n", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(91));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
+  assert_config_exec_status(config, "n", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(91));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(86));
+  assert_config_exec_status(config, "n", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(177));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(86));
+
+  assert_config_exec_status(config, "newgame -lex CSW24", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "t RETINAS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "t OULDGYF", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(66));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
+  assert_config_exec_status(config, "chal", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(71));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
+  assert_config_exec_status(config, "n", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(0));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
+  assert_config_exec_status(config, "goto end", ERROR_STATUS_SUCCESS);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(71));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(30));
+
   config_destroy(config);
 }
 
@@ -1966,10 +2096,25 @@ void test_config_export(void) {
   config_destroy(config);
 }
 
+void test_config_challenge_rack(void) {
+  Config *config = config_create_default_test();
+  // This triggered a segfault in prod at one point
+  assert_config_exec_status(config,
+                            "load testdata/gcgs/malformed_challenge_rack.gcg",
+                            ERROR_STATUS_GCG_PARSE_RACK_MALFORMED);
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "t RETINAS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "chal", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "t ABC", ERROR_STATUS_SUCCESS);
+  config_destroy(config);
+}
+
 void test_config(void) {
   test_game_display();
   test_trie();
   test_config_anno();
+  test_config_anno_challenge();
+  test_config_challenge_rack();
   test_config_export();
   test_config_load_error_cases();
   test_config_load_success();

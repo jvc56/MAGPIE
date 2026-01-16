@@ -280,7 +280,7 @@ int split_string_scan(const StringDelimiter *string_delimiter,
                       StringSplitter *string_splitter, const char *input_string,
                       bool ignore_empty, bool set_items) {
   int current_number_of_items = 0;
-  char previous_char;
+  char previous_char = '\0';
   int item_start_index = 0;
   int item_end_index = 0;
   size_t str_length = string_length(input_string);
@@ -293,8 +293,12 @@ int split_string_scan(const StringDelimiter *string_delimiter,
       if (!ignore_empty || (i != 0 && !char_matches_string_delimiter(
                                           string_delimiter, previous_char))) {
         if (set_items) {
+          int end = item_end_index - 1;
+          if (end > item_start_index && input_string[end - 1] == '\r') {
+            end--;
+          }
           string_splitter->items[current_number_of_items] =
-              get_substring(input_string, item_start_index, item_end_index - 1);
+              get_substring(input_string, item_start_index, end);
         }
         current_number_of_items++;
       }
@@ -307,8 +311,12 @@ int split_string_scan(const StringDelimiter *string_delimiter,
       (str_length != 0 &&
        !char_matches_string_delimiter(string_delimiter, previous_char))) {
     if (set_items) {
+      int end = item_end_index;
+      if (end > item_start_index && input_string[end - 1] == '\r') {
+        end--;
+      }
       string_splitter->items[current_number_of_items] =
-          get_substring(input_string, item_start_index, item_end_index);
+          get_substring(input_string, item_start_index, end);
     }
     current_number_of_items++;
   }
@@ -377,7 +385,7 @@ StringSplitter *split_file_by_newline(const char *filename,
     return NULL;
   }
   StringSplitter *file_content_split_by_newline =
-      split_string(file_content, '\n', true);
+      split_string_by_newline(file_content, true);
   free(file_content);
   return file_content_split_by_newline;
 }
@@ -928,7 +936,7 @@ char *get_process_output(const char *cmd) {
   char *buffer = NULL;
   size_t buffer_size = 0;
 
-  while (getline(&buffer, &buffer_size, pipe) != -1) {
+  while (getline_ignore_carriage_return(&buffer, &buffer_size, pipe) != -1) {
     string_builder_add_string(content_builder, buffer);
   }
 

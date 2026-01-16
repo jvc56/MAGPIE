@@ -454,10 +454,12 @@ void string_builder_add_game_internal(
               validated_moves_get_move(game_event_get_vms(previous_game_event),
                                        0),
               ld, true);
+          const int score_adjustment =
+              equity_to_int(game_event_get_score_adjustment(game_event));
           string_builder_add_formatted_string(
-              game_string, " + %d = %d ",
-              equity_to_int(game_event_get_score_adjustment(game_event)),
-              equity_to_int(game_event_get_move_score(previous_game_event)));
+              game_string, " + %d = %d ", score_adjustment,
+              equity_to_int(game_event_get_move_score(previous_game_event)) +
+                  score_adjustment);
           string_builder_add_rack(
               game_string, game_event_get_const_rack(previous_game_event), ld,
               false);

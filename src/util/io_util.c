@@ -198,12 +198,29 @@ void write_to_stream(FILE *stream, const char *fmt, ...) {
   va_end(args);
 }
 
+ssize_t getline_ignore_carriage_return(char **lineptr, size_t *n,
+                                       FILE *stream) {
+  ssize_t nread = getline(lineptr, n, stream);
+  if (nread <= 0) {
+    return nread;
+  }
+  if (nread >= 2 && (*lineptr)[nread - 2] == '\r' &&
+      (*lineptr)[nread - 1] == '\n') {
+    memmove(&(*lineptr)[nread - 2], &(*lineptr)[nread - 1], 2);
+    nread--;
+  } else if ((*lineptr)[nread - 1] == '\r') {
+    (*lineptr)[nread - 1] = '\0';
+    nread--;
+  }
+  return nread;
+}
+
 char *read_line_from_stream(FILE *stream) {
   char *line = NULL;
   size_t len = 0;
   ssize_t read;
   errno = 0;
-  read = getline(&line, &len, stream);
+  read = getline_ignore_carriage_return(&line, &len, stream);
   if (read == -1) {
     int error_number = errno;
     if (error_number) {

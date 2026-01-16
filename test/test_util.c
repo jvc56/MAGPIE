@@ -177,8 +177,9 @@ Config *config_create_default_test(void) {
     abort();
   }
   error_stack_destroy(error_stack);
-  load_and_exec_config_or_die(config, "set -threads 1 -savesettings false -hr "
-                                      "false -numplays 15 -im 0 -minp 100");
+  load_and_exec_config_or_die(
+      config, "set -threads 1 -savesettings false -hr "
+              "false -numplays 15 -im 0 -minp 100 -autosave false");
   return config;
 }
 
@@ -470,6 +471,17 @@ void assert_strings_equal(const char *str1, const char *str2) {
     } else {
       fprintf_or_die(stderr, "strings are not equal:\n>%s<\n>%s<\n", str1,
                      str2);
+    }
+    assert(0);
+  }
+}
+
+void assert_strings_ne(const char *str1, const char *str2) {
+  if (strings_equal(str1, str2)) {
+    if (!str1) {
+      fprintf_or_die(stderr, "strings are equal:\n>(NULL)<\n>(NULL)<\n");
+    } else {
+      fprintf_or_die(stderr, "strings are equal:\n>%s<\n>%s<\n", str1, str2);
     }
     assert(0);
   }

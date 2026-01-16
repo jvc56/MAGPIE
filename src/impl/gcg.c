@@ -26,6 +26,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define INTERNAL_DEFAULT_BOARD_LAYOUT_NAME "standard15"
+#define INTERNAL_SUPER_BOARD_LAYOUT_NAME "standard21"
+#define EXTERNAL_DEFAULT_BOARD_LAYOUT_NAME "CrosswordGame"
+#define EXTERNAL_SUPER_BOARD_LAYOUT_NAME "SuperCrosswordGame"
+
 enum { MAX_GROUPS = 7 };
 
 typedef enum {
@@ -380,19 +385,32 @@ void copy_score_adjustment_to_game_event(const GCGParser *gcg_parser,
 }
 
 // Returns true if successful
-bool set_rack_from_matching(const GCGParser *gcg_parser, const char *gcg_line,
-                            int group_index, Rack *rack_to_set) {
+bool set_rack_from_matching_impl(const GCGParser *gcg_parser,
+                                 const char *gcg_line, int group_index,
+                                 Rack *rack_to_set, bool allow_empty) {
+  rack_set_dist_size_and_reset(rack_to_set, ld_get_size(gcg_parser->ld));
   if (get_matching_group_string_length(gcg_parser, group_index) == 0) {
-    return NULL;
+    return allow_empty;
   }
   char *player_rack_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
-  const int ld_size = ld_get_size(gcg_parser->ld);
-  rack_set_dist_size(rack_to_set, ld_size);
-  int number_of_letters_set =
-      rack_set_to_string(gcg_parser->ld, rack_to_set, player_rack_string);
+  const bool success =
+      rack_set_to_string(gcg_parser->ld, rack_to_set, player_rack_string) > 0;
   free(player_rack_string);
-  return number_of_letters_set > 0;
+  return success;
+}
+
+bool set_rack_from_matching(const GCGParser *gcg_parser, const char *gcg_line,
+                            int group_index, Rack *rack_to_set) {
+  return set_rack_from_matching_impl(gcg_parser, gcg_line, group_index,
+                                     rack_to_set, false);
+}
+
+bool set_rack_from_matching_allow_empty(const GCGParser *gcg_parser,
+                                        const char *gcg_line, int group_index,
+                                        Rack *rack_to_set) {
+  return set_rack_from_matching_impl(gcg_parser, gcg_line, group_index,
+                                     rack_to_set, true);
 }
 
 void add_matching_group_to_string_builder(StringBuilder *sb,
@@ -563,6 +581,26 @@ bool token_is_pragma(const gcg_token_t token) {
   }
 }
 
+char *get_internal_board_layout_name(const char *board_layout_name) {
+  if (strings_equal(board_layout_name, EXTERNAL_DEFAULT_BOARD_LAYOUT_NAME)) {
+    return string_duplicate(INTERNAL_DEFAULT_BOARD_LAYOUT_NAME);
+  }
+  if (strings_equal(board_layout_name, EXTERNAL_SUPER_BOARD_LAYOUT_NAME)) {
+    return string_duplicate(INTERNAL_SUPER_BOARD_LAYOUT_NAME);
+  }
+  return string_duplicate(board_layout_name);
+}
+
+char *get_external_board_layout_name(const char *board_layout_name) {
+  if (strings_equal(board_layout_name, INTERNAL_DEFAULT_BOARD_LAYOUT_NAME)) {
+    return string_duplicate(EXTERNAL_DEFAULT_BOARD_LAYOUT_NAME);
+  }
+  if (strings_equal(board_layout_name, INTERNAL_SUPER_BOARD_LAYOUT_NAME)) {
+    return string_duplicate(EXTERNAL_SUPER_BOARD_LAYOUT_NAME);
+  }
+  return string_duplicate(board_layout_name);
+}
+
 // Returns true if processing should continue
 bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
                     parse_gcg_mode_t parse_gcg_mode, ErrorStack *error_stack) {
@@ -704,7 +742,7 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
             game_history_player_get_last_rack(game_history, 0))) {
       error_stack_push(
           error_stack, ERROR_STATUS_GCG_PARSE_RACK_MALFORMED,
-          get_formatted_string("could not parse rack: %s", gcg_line));
+          get_formatted_string("could not parse rack1 event: %s", gcg_line));
       return false;
     }
     break;
@@ -714,7 +752,7 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
             game_history_player_get_last_rack(game_history, 1))) {
       error_stack_push(
           error_stack, ERROR_STATUS_GCG_PARSE_RACK_MALFORMED,
-          get_formatted_string("could not parse rack: %s", gcg_line));
+          get_formatted_string("could not parse rack2 event: %s", gcg_line));
       return false;
     }
     break;
@@ -754,7 +792,7 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
       string_builder_destroy(move_string_builder);
       error_stack_push(
           error_stack, ERROR_STATUS_GCG_PARSE_RACK_MALFORMED,
-          get_formatted_string("could not parse rack: %s", gcg_line));
+          get_formatted_string("could not parse move rack: %s", gcg_line));
       return false;
     }
 
@@ -801,8 +839,12 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
   case GCG_BOARD_LAYOUT_TOKEN: {
     char *board_layout_name =
         get_matching_group_as_string(gcg_parser, gcg_line, 1);
-    game_history_set_board_layout_name(game_history, board_layout_name);
+    char *internal_board_layout_name =
+        get_internal_board_layout_name(board_layout_name);
     free(board_layout_name);
+    game_history_set_board_layout_name(game_history,
+                                       internal_board_layout_name);
+    free(internal_board_layout_name);
     break;
   }
   case GCG_TILE_DISTRIBUTION_NAME_TOKEN: {
@@ -836,7 +878,8 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
                                 game_event_get_rack(game_event))) {
       error_stack_push(
           error_stack, ERROR_STATUS_GCG_PARSE_RACK_MALFORMED,
-          get_formatted_string("could not parse rack: %s", gcg_line));
+          get_formatted_string("could not parse phony tiles returned rack: %s",
+                               gcg_line));
       return false;
     }
     game_event_set_player_index(game_event, player_index);
@@ -858,15 +901,11 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     game_event_set_player_index(game_event, player_index);
     game_event_set_type(game_event, GAME_EVENT_TIME_PENALTY);
     // Rack is allowed to be empty for time penalty
-    if (get_matching_group_string_length(gcg_parser, 2) == 0) {
-      Rack *time_penalty_rack = game_event_get_rack(game_event);
-      rack_set_dist_size_and_reset(time_penalty_rack,
-                                   ld_get_size(gcg_parser->ld));
-    } else if (!set_rack_from_matching(gcg_parser, gcg_line, 2,
-                                       game_event_get_rack(game_event))) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_GCG_PARSE_RACK_MALFORMED,
-          get_formatted_string("could not parse rack: %s", gcg_line));
+    if (!set_rack_from_matching_allow_empty(gcg_parser, gcg_line, 2,
+                                            game_event_get_rack(game_event))) {
+      error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_RACK_MALFORMED,
+                       get_formatted_string(
+                           "could not parse time penalty rack: %s", gcg_line));
       return false;
     }
 
@@ -897,9 +936,9 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     game_event_set_type(game_event, GAME_EVENT_END_RACK_PENALTY);
     if (!set_rack_from_matching(gcg_parser, gcg_line, 2,
                                 game_event_get_rack(game_event))) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_GCG_PARSE_RACK_MALFORMED,
-          get_formatted_string("could not parse rack: %s", gcg_line));
+      error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_RACK_MALFORMED,
+                       get_formatted_string(
+                           "could not parse rack penalty rack: %s", gcg_line));
       return false;
     }
 
@@ -907,7 +946,8 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     if (!set_rack_from_matching(gcg_parser, gcg_line, 3, &penalty_letters)) {
       error_stack_push(
           error_stack, ERROR_STATUS_GCG_PARSE_RACK_MALFORMED,
-          get_formatted_string("could not parse rack: %s", gcg_line));
+          get_formatted_string("could not parse rack penalty letters: %s",
+                               gcg_line));
       return false;
     }
     bool penalty_letters_equals_rack =
@@ -976,7 +1016,7 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
       string_builder_destroy(move_string_builder);
       error_stack_push(
           error_stack, ERROR_STATUS_GCG_PARSE_RACK_MALFORMED,
-          get_formatted_string("could not parse rack: %s", gcg_line));
+          get_formatted_string("could not parse pass rack: %s", gcg_line));
       return false;
     }
 
@@ -999,11 +1039,12 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     }
     game_event_set_player_index(game_event, player_index);
     game_event_set_type(game_event, GAME_EVENT_CHALLENGE_BONUS);
-    if (!set_rack_from_matching(gcg_parser, gcg_line, 2,
-                                game_event_get_rack(game_event))) {
+    if (!set_rack_from_matching_allow_empty(gcg_parser, gcg_line, 2,
+                                            game_event_get_rack(game_event))) {
       error_stack_push(
           error_stack, ERROR_STATUS_GCG_PARSE_RACK_MALFORMED,
-          get_formatted_string("could not parse rack: %s", gcg_line));
+          get_formatted_string("could not parse challenge bonus rack: %s",
+                               gcg_line));
       return false;
     }
     copy_score_adjustment_to_game_event(gcg_parser, game_event, gcg_line, 3,
@@ -1032,9 +1073,9 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     game_event_set_player_index(game_event, player_index);
     if (!set_rack_from_matching(gcg_parser, gcg_line, 2,
                                 game_event_get_rack(game_event))) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_GCG_PARSE_RACK_MALFORMED,
-          get_formatted_string("could not parse rack: %s", gcg_line));
+      error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_RACK_MALFORMED,
+                       get_formatted_string(
+                           "could not parse end points rack: %s", gcg_line));
       return false;
     }
 
@@ -1096,7 +1137,7 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
       string_builder_destroy(move_string_builder);
       error_stack_push(
           error_stack, ERROR_STATUS_GCG_PARSE_RACK_MALFORMED,
-          get_formatted_string("could not parse rack: %s", gcg_line));
+          get_formatted_string("could not parse exchange rack: %s", gcg_line));
       return false;
     }
 
@@ -1240,8 +1281,12 @@ void string_builder_add_gcg(StringBuilder *gcg_sb, const LetterDistribution *ld,
   const char *board_layout_name =
       game_history_get_board_layout_name(game_history);
   if (board_layout_name) {
-    string_builder_add_formatted_string(
-        gcg_sb, "#%s %s\n", GCG_BOARD_LAYOUT_STRING, board_layout_name);
+    char *external_board_layout_name =
+        get_external_board_layout_name(board_layout_name);
+    string_builder_add_formatted_string(gcg_sb, "#%s %s\n",
+                                        GCG_BOARD_LAYOUT_STRING,
+                                        external_board_layout_name);
+    free(external_board_layout_name);
   }
   const char *ld_name = game_history_get_ld_name(game_history);
   if (ld_name) {
@@ -1298,8 +1343,27 @@ void string_builder_add_gcg(StringBuilder *gcg_sb, const LetterDistribution *ld,
       string_builder_add_formatted_string(gcg_sb, " -- -%d",
                                           equity_to_int(previous_move_score));
       break;
-    case GAME_EVENT_CHALLENGE_BONUS:
-      string_builder_add_rack(gcg_sb, rack, ld, true);
+    case GAME_EVENT_CHALLENGE_BONUS:;
+      const Rack *challenge_bonus_rack = rack;
+      // To be compatible with other programs that read GCG files,
+      // the challenge bonus rack should be nonempty if possible.
+      if (rack_is_empty(challenge_bonus_rack)) {
+        const int game_event_player_index = game_event_get_player_index(event);
+        for (int i = event_index + 1; i < number_of_events; i++) {
+          const GameEvent *future_event =
+              game_history_get_event(game_history, i);
+          if (game_event_get_player_index(future_event) ==
+              game_event_player_index) {
+            const Rack *future_rack = game_event_get_const_rack(future_event);
+            if (rack_get_dist_size(future_rack) > 0 &&
+                !rack_is_empty(future_rack)) {
+              challenge_bonus_rack = game_event_get_const_rack(future_event);
+            }
+            break;
+          }
+        }
+      }
+      string_builder_add_rack(gcg_sb, challenge_bonus_rack, ld, true);
       string_builder_add_formatted_string(
           gcg_sb, " (challenge) +%d",
           equity_to_int(game_event_get_score_adjustment(event)));
