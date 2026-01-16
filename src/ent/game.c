@@ -395,7 +395,7 @@ void game_gen_cross_set(const Game *game, int row, int col, int dir,
   }
 }
 
-void game_gen_all_cross_sets(Game *game) {
+void game_gen_all_cross_sets(const Game *game) {
   Board *board = game_get_board(game);
   bool kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
 

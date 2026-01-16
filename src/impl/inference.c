@@ -12,6 +12,7 @@
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
+#include "../ent/inference_args.h"
 #include "../ent/inference_results.h"
 #include "../ent/klv.h"
 #include "../ent/leave_rack.h"
@@ -666,7 +667,7 @@ void inference_ctx_set_game(InferenceCtx *ctx, const Game *game) {
 }
 
 // Assumes that ctx->game is set
-void inference_ctx_set_inferences(InferenceCtx *ctx, InferenceArgs *args,
+void inference_ctx_set_inferences(InferenceCtx *ctx, const InferenceArgs *args,
                                   InferenceResults *results) {
   ctx->shared_rack_index = 0;
   inference_results_reset(results, args->move_capacity,
