@@ -12,6 +12,15 @@
 #include "random_variable.h"
 #include <stdlib.h>
 
+// The sim context allows zero-alloc autoplay sims by maintaining the
+// dynamically allocated sim structs in between sim calls. The following
+// options are allowed to change in between sim calls:
+// - move list count
+// - player on turn
+// - spread
+// - known opp rack
+// - use inference
+// - num plies
 struct SimCtx {
   RandomVariables *rvs;
   RandomVariables *rng;

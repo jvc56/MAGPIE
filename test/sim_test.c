@@ -703,7 +703,7 @@ void test_sim_one_ply(void) {
 
 void test_sim_ctx(void) {
   Config *config = config_create_or_die(
-      "set -lex CSW21 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-plies 1 -threads 10 -iter 100 -scond none -seed 1768329572");
   const int ld_size = ld_get_size(config_get_ld(config));
   const int num_games = 3;
@@ -755,7 +755,6 @@ void test_sim_ctx(void) {
       load_and_exec_config_or_die(config, string_builder_peek(cmd_sb));
       load_and_exec_config_or_die(config, "gen");
 
-      printf("game %d, turn %d\n", i, turn_num);
       error_code_t status = config_simulate_and_return_status(
           config, &sim_ctx, &known_opp_rack, sim_results);
       assert(status == ERROR_STATUS_SUCCESS);
@@ -769,10 +768,10 @@ void test_sim_ctx(void) {
       string_builder_add_move(move_string_builder,
                               game_get_board(config_get_game(config)),
                               best_move, config_get_ld(config), true);
-      printf("move: %s\n", string_builder_peek(move_string_builder));
       string_builder_destroy(move_string_builder);
       load_and_exec_config_or_die(config, "s");
       load_and_exec_config_or_die(config, "shm");
+      sim_results_set_valid_for_current_game_state(sim_results, true);
       load_and_exec_config_or_die(config, "t");
       turn_num++;
     }
@@ -787,21 +786,20 @@ void test_sim(void) {
   if (sim_perf_iters) {
     test_sim_perf(sim_perf_iters);
   } else {
-    // FIXME: uncomment
-    // test_similar_play_consistency(1);
-    // test_similar_play_consistency(10);
-    // test_sim_error_cases();
-    // test_sim_single_iteration();
-    // test_sim_threshold();
-    // test_sim_time_limit();
-    // test_all_plays_are_similar();
-    // test_more_iterations();
-    // test_play_similarity();
-    // perf_test_multithread_sim();
-    // test_sim_with_inference();
-    // test_sim_round_robin_consistency();
-    // test_sim_top_two_consistency();
-    // test_sim_one_ply();
+    test_similar_play_consistency(1);
+    test_similar_play_consistency(10);
+    test_sim_error_cases();
+    test_sim_single_iteration();
+    test_sim_threshold();
+    test_sim_time_limit();
+    test_all_plays_are_similar();
+    test_more_iterations();
+    test_play_similarity();
+    perf_test_multithread_sim();
+    test_sim_with_inference();
+    test_sim_round_robin_consistency();
+    test_sim_top_two_consistency();
+    test_sim_one_ply();
     test_sim_ctx();
   }
 }
