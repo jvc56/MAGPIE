@@ -119,8 +119,8 @@ void play_move_on_board(const Move *move, const Game *game) {
   }
 }
 
-void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
-                     int csd) {
+void calc_for_across(const Move *move, const Game *game, int row_start,
+                     int col_start, int csd) {
   for (int row = row_start; row < move_get_tiles_length(move) + row_start;
        row++) {
     if (move_get_tile(move, row - row_start) == PLAYED_THROUGH_MARKER) {
@@ -145,8 +145,8 @@ void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
   }
 }
 
-void calc_for_self(const Move *move, Game *game, int row_start, int col_start,
-                   int csd) {
+void calc_for_self(const Move *move, const Game *game, int row_start,
+                   int col_start, int csd) {
   for (int col = col_start - 1; col <= col_start + move_get_tiles_length(move);
        col++) {
     game_gen_cross_set(game, row_start, col, csd, 0);
@@ -159,7 +159,7 @@ void calc_for_self(const Move *move, Game *game, int row_start, int col_start,
   }
 }
 
-void update_cross_set_for_move(const Move *move, Game *game) {
+void update_cross_set_for_move(const Move *move, const Game *game) {
   Board *board = game_get_board(game);
   if (board_is_dir_vertical(move_get_dir(move))) {
     calc_for_across(move, game, move_get_row_start(move),

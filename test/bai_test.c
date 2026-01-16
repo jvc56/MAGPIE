@@ -109,6 +109,7 @@ void test_bai_sample_limit(int num_threads) {
   BAIResult *bai_result = bai_result_create();
   for (int i = 0; i < num_sampling_rules; i++) {
     bai_options.sampling_rule = sampling_rules[i];
+    rvs_reset(rvs, &rv_args);
     bai_wrapper(&bai_options, rvs, rng, thread_control, NULL, bai_result);
     assert(bai_result_get_status(bai_result) == BAI_RESULT_STATUS_SAMPLE_LIMIT);
     assert(bai_result_get_best_arm(bai_result) == 1);

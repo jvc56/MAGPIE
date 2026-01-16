@@ -42,7 +42,7 @@ void test_gen_cross_set(const Game *game, int row, int col,
   }
 }
 
-void test_gen_cross_set_row(Game *game, int row, int col,
+void test_gen_cross_set_row(const Game *game, int row, int col,
                             const char *row_content, const char *letters,
                             int expected_cross_score) {
   set_row(game, row, row_content);
