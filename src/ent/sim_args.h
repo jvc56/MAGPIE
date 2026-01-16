@@ -39,7 +39,7 @@ static inline void sim_args_fill(
     const uint64_t max_iterations, const uint64_t min_play_iterations,
     const double scond, const bai_threshold_t threshold,
     const int time_limit_seconds, const bai_sampling_rule_t sampling_rule,
-    InferenceArgs *inference_args, SimArgs *sim_args) {
+    const InferenceArgs *inference_args, SimArgs *sim_args) {
   sim_args->num_plies = num_plies;
   sim_args->move_list = move_list;
   sim_args->known_opp_rack = known_opp_rack;

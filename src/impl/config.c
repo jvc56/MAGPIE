@@ -57,7 +57,6 @@
 #include "get_gcg.h"
 #include "inference.h"
 #include "move_gen.h"
-#include "random_variable.h"
 #include "simmer.h"
 #include <assert.h>
 #include <ctype.h>
@@ -1993,7 +1992,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->sim_with_inference, config->use_heat_map, config->num_threads,
       config->print_interval, config->max_num_display_plays, config->seed,
       config->max_iterations, config->min_play_iterations,
-      config->stop_cond_pct, config->threshold, config->time_limit_seconds,
+      config->stop_cond_pct, config->threshold, (int)config->time_limit_seconds,
       config->sampling_rule, &inference_args, sim_args);
 }
 

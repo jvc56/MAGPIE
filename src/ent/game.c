@@ -209,7 +209,7 @@ static inline void traverse_backwards_add_to_rack(const Board *board, int row,
   }
 }
 
-static inline void game_gen_alpha_cross_set(Game *game, int row, int col,
+static inline void game_gen_alpha_cross_set(const Game *game, int row, int col,
                                             int dir, int cross_set_index) {
   if (!board_is_position_in_bounds(row, col)) {
     return;
@@ -386,7 +386,7 @@ static inline void game_gen_classic_cross_set(const Game *game, int row,
   board_set_cross_score(board, row, col, dir, cross_set_index, score);
 }
 
-void game_gen_cross_set(Game *game, int row, int col, int dir,
+void game_gen_cross_set(const Game *game, int row, int col, int dir,
                         int cross_set_index) {
   if (game_get_variant(game) == GAME_VARIANT_CLASSIC) {
     game_gen_classic_cross_set(game, row, col, dir, cross_set_index);

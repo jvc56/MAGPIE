@@ -6,6 +6,7 @@
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/game_history.h"
+#include "../src/ent/inference_args.h"
 #include "../src/ent/inference_results.h"
 #include "../src/ent/klv.h"
 #include "../src/ent/leave_rack.h"

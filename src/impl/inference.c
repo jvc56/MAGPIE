@@ -12,6 +12,7 @@
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
+#include "../ent/inference_results.h"
 #include "../ent/klv.h"
 #include "../ent/leave_rack.h"
 #include "../ent/letter_distribution.h"
@@ -27,6 +28,7 @@
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -295,9 +297,9 @@ void complete_inference_setup(Inference *inference, const InferenceArgs *args) {
   }
 }
 
-Inference *inference_create(Game *game, int thread_index,
+Inference *inference_create(const Game *game, int thread_index,
                             const InferenceArgs *args,
-                            InferenceResults *results) {
+                            const InferenceResults *results) {
   Inference *inference = malloc_or_die(sizeof(Inference));
   inference->game = game_duplicate(game);
   inference->move_list = move_list_create(1);
@@ -335,7 +337,7 @@ Inference *inference_create(Game *game, int thread_index,
 }
 
 void inference_reset(Inference *inference, const Game *game,
-                     InferenceArgs *args) {
+                     const InferenceArgs *args) {
   // Only update fields that will change between
   // inferences that happen in autoplay simming.
   game_copy(inference->game, game);

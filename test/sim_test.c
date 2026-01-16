@@ -1,6 +1,7 @@
 #include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
 #include "../src/def/cpthread_defs.h"
+#include "../src/def/game_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/bai_result.h"
@@ -8,11 +9,11 @@
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/rack.h"
-#include "../src/ent/sim_args.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/simmer.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
 #include "../src/str/sim_string.h"
@@ -330,7 +331,7 @@ void perf_test_multithread_sim(void) {
   load_and_exec_config_or_die(config, "gen");
   load_and_exec_config_or_die(config, "sim -hr true");
 
-  SimResults *sim_results = config_get_sim_results(config);
+  const SimResults *sim_results = config_get_sim_results(config);
 
   const SimmedPlay *play = get_best_simmed_play(sim_results);
   StringBuilder *move_string_builder = string_builder_create();
