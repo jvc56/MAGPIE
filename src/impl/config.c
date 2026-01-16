@@ -3629,49 +3629,6 @@ char *impl_overtime(Config *config, ErrorStack *error_stack) {
   GameEvent *time_penalty_event =
       game_history_add_game_event(config->game_history, error_stack);
 
-  if (error_stack_is_empty(error_stack)) {
-    // Find the previous cumulative score for this player.
-    const int last_event_index =
-        game_history_get_num_events(config->game_history) - 1;
-    Equity cumulative_score = EQUITY_INITIAL_VALUE;
-    for (int i = last_event_index; i >= 0; i--) {
-      const GameEvent *gei = game_history_get_event(config->game_history, i);
-      if (game_event_get_player_index(gei) == player_index) {
-        cumulative_score = game_event_get_cumulative_score(gei);
-        break;
-      }
-    }
-
-    if (cumulative_score == EQUITY_INITIAL_VALUE) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_TIME_PENALTY_NO_PREVIOUS_CUMULATIVE_SCORE,
-          get_formatted_string("no prior game event has a cumulative score "
-                               "for player '%s' when "
-                               "applying time penalty",
-                               player_nickname));
-    } else {
-      const Equity overtime_penalty = int_to_equity(overtime_penalty_int);
-      game_event_set_player_index(time_penalty_event, player_index);
-      game_event_set_type(time_penalty_event, GAME_EVENT_TIME_PENALTY);
-      game_event_set_cgp_move_string(time_penalty_event, NULL);
-      game_event_set_score_adjustment(time_penalty_event, overtime_penalty);
-      // Add the overtime penalty since the value is already negative
-      game_event_set_cumulative_score(time_penalty_event,
-                                      cumulative_score + overtime_penalty);
-      game_event_set_move_score(time_penalty_event, 0);
-
-      // When adding an overtime event, always advance to the end of the
-      // history so that the game play module can play through the entire
-      // game and catch any duplicate time penalty errors.
-      game_history_goto(config->game_history,
-                        game_history_get_num_events(config->game_history),
-                        error_stack);
-      if (error_stack_is_empty(error_stack)) {
-        config_game_play_events(config, error_stack);
-      }
-    }
-  }
-
   if (!error_stack_is_empty(error_stack)) {
     config_restore_game_and_history(config);
     return empty_string();
