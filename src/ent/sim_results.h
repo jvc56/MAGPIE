@@ -77,6 +77,10 @@ bool sim_results_lock_and_sort_display_simmed_plays(SimResults *sim_results);
 void sim_results_unlock_display_infos(SimResults *sim_results);
 SimmedPlay *sim_results_get_display_simmed_play(const SimResults *sim_results,
                                                 int play_index);
-bool sim_results_plays_are_similar(const SimResults *sim_results, int i, int j);
+bool sim_results_plays_are_similar(const SimResults *sim_results, int sp1_index,
+                                   int sp2_index);
+bool sim_results_display_plays_are_similar(const SimResults *sim_results,
+                                           const int sp1_index,
+                                           const int sp2_index);
 
 #endif
