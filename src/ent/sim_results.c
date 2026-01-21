@@ -456,17 +456,30 @@ SimmedPlay *sim_results_get_display_simmed_play(const SimResults *sim_results,
   return sim_results->display_simmed_plays[play_index];
 }
 
-bool sim_results_plays_are_similar(const SimResults *sim_results,
-                                   const int sp1_index, const int sp2_index) {
-  SimmedPlay *sp1 = sim_results_get_simmed_play(sim_results, sp1_index);
+bool sim_results_simmed_plays_are_similar_internal(
+    const SimResults *sim_results, SimmedPlay *sp1, SimmedPlay *sp2) {
   if (sp1->similarity_key == 0) {
     sp1->similarity_key = move_get_similarity_key(
         simmed_play_get_move(sp1), sim_results_get_rack(sim_results));
   }
-  SimmedPlay *sp2 = sim_results_get_simmed_play(sim_results, sp2_index);
   if (sp2->similarity_key == 0) {
     sp2->similarity_key = move_get_similarity_key(
         simmed_play_get_move(sp2), sim_results_get_rack(sim_results));
   }
   return sp1->similarity_key == sp2->similarity_key;
+}
+
+bool sim_results_display_plays_are_similar(const SimResults *sim_results,
+                                           const int sp1_index,
+                                           const int sp2_index) {
+  SimmedPlay *sp1 = sim_results_get_display_simmed_play(sim_results, sp1_index);
+  SimmedPlay *sp2 = sim_results_get_display_simmed_play(sim_results, sp2_index);
+  return sim_results_simmed_plays_are_similar_internal(sim_results, sp1, sp2);
+}
+
+bool sim_results_plays_are_similar(const SimResults *sim_results,
+                                   const int sp1_index, const int sp2_index) {
+  SimmedPlay *sp1 = sim_results_get_simmed_play(sim_results, sp1_index);
+  SimmedPlay *sp2 = sim_results_get_simmed_play(sim_results, sp2_index);
+  return sim_results_simmed_plays_are_similar_internal(sim_results, sp1, sp2);
 }

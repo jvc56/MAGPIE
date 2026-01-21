@@ -148,7 +148,7 @@ bool string_builder_add_sim_stats_with_display_lock(
         get_formatted_string("%d", equity_to_int(move_get_score(move))));
 
     if (bai_result_status == BAI_RESULT_STATUS_THRESHOLD && i > 0 &&
-        sim_results_plays_are_similar(sim_results, 0, i)) {
+        sim_results_display_plays_are_similar(sim_results, 0, i)) {
       string_grid_set_cell(sg, curr_row, curr_col, string_duplicate("X"));
     }
     curr_col++;
