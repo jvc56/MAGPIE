@@ -765,11 +765,6 @@ void test_sim_ctx(void) {
           sim_results_get_display_simmed_play(sim_results, 0));
       get_leave_for_move(best_move, config_get_game(config),
                          &leaves[player_index]);
-      StringBuilder *move_string_builder = string_builder_create();
-      string_builder_add_move(move_string_builder,
-                              game_get_board(config_get_game(config)),
-                              best_move, config_get_ld(config), true);
-      string_builder_destroy(move_string_builder);
       load_and_exec_config_or_die(config, "s");
       load_and_exec_config_or_die(config, "shm");
       sim_results_set_valid_for_current_game_state(sim_results, true);
