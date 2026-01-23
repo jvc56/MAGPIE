@@ -913,8 +913,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "josh ABCDE 13";
       examples[2] = "josh ABCDE 13 ABCD";
       examples[3] = "josh ABCDE 13 ABCD EFG";
-      examples[4] = "josh 3 ABCDE";
-      examples[5] = "josh 3 ABCDE EFG";
+      examples[4] = "josh ABCDE 13 - EFG";
+      examples[5] = "josh 3 ABCDE";
+      examples[6] = "josh 3 ABCDE EFG";
+      examples[7] = "josh 3 - EFG";
       text =
           "Runs an exhaustive inference for what the opponent could have kept "
           "based on their previous play. If no arguments are specified, the "
@@ -1941,23 +1943,28 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
   const char *target_known_rack_str =
       config_get_parg_value(config, ARG_TOKEN_INFER, next_arg_index);
   if (target_known_rack_str) {
-    load_rack_or_push_to_error_stack(
-        target_known_rack_str, ld, ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
-        &target_known_rack, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-    next_arg_index++;
-    const char *nontarget_known_rack_str =
-        config_get_parg_value(config, ARG_TOKEN_INFER, next_arg_index);
-    if (nontarget_known_rack_str) {
+    if (!strings_equal(target_known_rack_str, "-")) {
       load_rack_or_push_to_error_stack(
-          nontarget_known_rack_str, ld,
-          ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &nontarget_known_rack,
+          target_known_rack_str, ld,
+          ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &target_known_rack,
           error_stack);
       if (!error_stack_is_empty(error_stack)) {
         return;
       }
+    }
+    next_arg_index++;
+  }
+
+  const char *nontarget_known_rack_str =
+      config_get_parg_value(config, ARG_TOKEN_INFER, next_arg_index);
+  if (nontarget_known_rack_str &&
+      !strings_equal(nontarget_known_rack_str, "-")) {
+    load_rack_or_push_to_error_stack(
+        nontarget_known_rack_str, ld,
+        ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &nontarget_known_rack,
+        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
     }
   }
 

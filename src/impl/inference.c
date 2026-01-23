@@ -625,8 +625,7 @@ void populate_inference_args_with_game_history(InferenceArgs *args,
     rack_reset(args->target_played_tiles);
   }
   rack_copy(args->nontarget_known_rack,
-            game_event_get_after_event_player_on_turn_rack(target_move_event));
-
+            player_get_rack(game_get_player(game_dup, 1 - args->target_index)));
   if (rack_is_empty(args->target_known_rack)) {
     for (int i = most_recent_move_event_index - 1; i >= 0; i--) {
       GameEvent *event = game_history_get_event(game_history, i);
