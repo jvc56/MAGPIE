@@ -624,6 +624,9 @@ void rvs_reset(RandomVariables *rvs, const RandomVariablesArgs *rvs_args) {
 }
 
 void rvs_destroy(RandomVariables *rvs) {
+  if (!rvs) {
+    return;
+  }
   if (rvs->destroy_data_func == NULL) {
     return;
   }

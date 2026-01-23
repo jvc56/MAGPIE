@@ -745,7 +745,7 @@ void test_sim_ctx(void) {
       string_builder_add_string(cmd_sb, "set -numplays ");
       string_builder_add_int(cmd_sb, turn_num % 5 + 2);
       string_builder_add_string(cmd_sb, " -sinfer ");
-      if (turn_num % 6 + 1 == 0) {
+      if (turn_num % 6 == 5) {
         string_builder_add_string(cmd_sb, "true");
       } else {
         string_builder_add_string(cmd_sb, "false");
