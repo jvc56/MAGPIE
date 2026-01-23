@@ -602,7 +602,7 @@ void populate_inference_args_with_game_history(InferenceArgs *args,
             "cannot infer the previous play for an empty game history"));
     return;
   }
-  GameEvent *target_move_event =
+  const GameEvent *target_move_event =
       game_history_get_event(game_history, most_recent_move_event_index);
   const ValidatedMoves *last_move = game_event_get_vms(target_move_event);
   const Move *move = validated_moves_get_move(last_move, 0);

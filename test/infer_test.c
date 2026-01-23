@@ -553,12 +553,10 @@ void test_infer_nonerror_cases(const int number_of_threads,
 
   // Check that inference works with nontarget known rack
   if (use_game_history) {
-    printf("using game history\n");
     load_game_history_with_gcg_string(config, gcg_string_header,
                                       ">Tim: MUZAK 8H MUZAK +50 50");
     status = infer_for_test_with_history(config, inference_results, 1, "SSSS");
   } else {
-    printf("not using game history\n");
     load_and_exec_config_or_die(config, "r SSSS");
     status = infer_for_test(&ctx, config, 0, 50, 0, "MUZAK", "", "SSSS",
                             inference_results);
