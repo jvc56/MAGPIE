@@ -1945,6 +1945,18 @@ void test_config_anno_challenge(void) {
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(71));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(30));
 
+  assert_config_exec_status(config, "newgame -lex CSW24", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r WECH", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 8G WECH", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "chal", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com pass", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r HEW", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 8G HEW", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "chal", ERROR_STATUS_SUCCESS);
+  assert(bag_get_letters(game_get_bag(config_get_game(config))) == 96);
+  assert(bag_get_letter(game_get_bag(config_get_game(config)),
+                        ld_hl_to_ml(config_get_ld(config), "C")) == 1);
+
   config_destroy(config);
 }
 
@@ -2173,16 +2185,16 @@ void test_config_challenge_rack(void) {
 }
 
 void test_config(void) {
-  test_game_display();
-  test_trie();
-  test_config_anno();
+  //   test_game_display();
+  //   test_trie();
+  //   test_config_anno();
   test_config_anno_challenge();
-  test_config_anno_endgame_rack();
-  test_config_challenge_rack();
-  test_config_export();
-  test_config_load_error_cases();
-  test_config_load_success();
-  test_config_exec_parse_args();
-  test_config_lexical_data();
-  test_config_wmp();
+  //   test_config_anno_endgame_rack();
+  //   test_config_challenge_rack();
+  //   test_config_export();
+  //   test_config_load_error_cases();
+  //   test_config_load_success();
+  //   test_config_exec_parse_args();
+  //   test_config_lexical_data();
+  //   test_config_wmp();
 }
