@@ -17,6 +17,7 @@ struct Player {
   // treated as read-only
   int index;
   Rack *rack;
+  Rack *known_rack_from_phonies;
   Equity score;
   move_sort_t move_sort_type;
   move_record_t move_record_type;
@@ -27,6 +28,7 @@ struct Player {
 
 void player_reset(Player *player) {
   rack_reset(player->rack);
+  rack_reset(player->known_rack_from_phonies);
   player->score = 0;
 }
 
@@ -46,6 +48,7 @@ Player *player_create(const PlayersData *players_data,
   player->index = player_index;
   player->score = 0;
   player->rack = rack_create(ld_get_size(ld));
+  player->known_rack_from_phonies = rack_create(ld_get_size(ld));
 
   player_update(players_data, player);
 
@@ -56,6 +59,8 @@ Player *player_duplicate(const Player *player) {
   Player *new_player = malloc_or_die(sizeof(Player));
   new_player->index = player->index;
   new_player->rack = rack_duplicate(player->rack);
+  new_player->known_rack_from_phonies =
+      rack_duplicate(player->known_rack_from_phonies);
   new_player->score = player->score;
   new_player->move_sort_type = player->move_sort_type;
   new_player->move_record_type = player->move_record_type;
@@ -68,6 +73,7 @@ Player *player_duplicate(const Player *player) {
 void player_copy(Player *dst, const Player *src) {
   dst->index = src->index;
   rack_copy(dst->rack, src->rack);
+  rack_copy(dst->known_rack_from_phonies, src->known_rack_from_phonies);
   dst->score = src->score;
   dst->move_sort_type = src->move_sort_type;
   dst->move_record_type = src->move_record_type;
@@ -81,12 +87,17 @@ void player_destroy(Player *player) {
     return;
   }
   rack_destroy(player->rack);
+  rack_destroy(player->known_rack_from_phonies);
   free(player);
 }
 
 int player_get_index(const Player *player) { return player->index; }
 
 Rack *player_get_rack(const Player *player) { return player->rack; }
+
+Rack *player_get_known_rack_from_phonies(const Player *player) {
+  return player->known_rack_from_phonies;
+}
 
 Equity player_get_score(const Player *player) { return player->score; }
 

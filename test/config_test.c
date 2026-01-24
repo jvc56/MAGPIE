@@ -1945,6 +1945,77 @@ void test_config_anno_challenge(void) {
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(71));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(30));
 
+  assert_config_exec_status(config, "newgame -lex CSW24", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r WECH", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 8G WECH", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "chal", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com pass", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r HEW", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 8G HEW", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "chal", ERROR_STATUS_SUCCESS);
+  assert(bag_get_letters(game_get_bag(config_get_game(config))) == 96);
+  assert(bag_get_letter(game_get_bag(config_get_game(config)),
+                        ld_hl_to_ml(config_get_ld(config), "C")) == 1);
+
+  config_destroy(config);
+}
+
+void test_config_anno_endgame_rack(void) {
+  Config *config = config_create_default_test();
+
+  assert_config_exec_status(config, "set -lex CSW21", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r GILLIE", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 8D GILLIE", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r WOF", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 9I WOF", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r VIBED", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 10F VIBED", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r RETINA?", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 11H ARENITe", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r EXDRA", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com N9 EXeDRA", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r AMEIOSS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com E2 AMEIOSIS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r VAMP", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com D1 VAMP", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r RHUS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com O8 RHUS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r DDGGQT?", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com ex DGGQT", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r ZRCON", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com L10 ZIRCON", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r YED", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 15L NYED", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r ADUNC", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 12D ADUNC", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r QI", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 9C QIS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r FUGUE", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 7I FUGUE", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r ?AYGONE", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 13A wAYGONE", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r WOK", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com F4 WOK", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r JEIE", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com A11 JEwIE", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r TTT", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com B12 TATT", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r TOPHES", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com N2 TOPHES", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r AALORRT", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 14D AALROT", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "chal", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com pass", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r AALORRT", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com M13 ARY", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r ABEILNO", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "s", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r BEIINNR", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "s", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r ALOLOTA",
+                            ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG);
+
   config_destroy(config);
 }
 
@@ -2118,6 +2189,7 @@ void test_config(void) {
   test_trie();
   test_config_anno();
   test_config_anno_challenge();
+  test_config_anno_endgame_rack();
   test_config_challenge_rack();
   test_config_export();
   test_config_load_error_cases();
