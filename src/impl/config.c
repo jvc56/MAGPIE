@@ -1715,11 +1715,11 @@ void impl_set_rack_internal(Config *config, const char *rack_str,
 
   config_init_game(config);
 
-  const int player_index = game_get_player_on_turn_index(config->game);
+  const int player_on_turn_index = game_get_player_on_turn_index(config->game);
 
   Rack new_rack;
-  rack_copy(&new_rack,
-            player_get_rack(game_get_player(config->game, player_index)));
+  rack_copy(&new_rack, player_get_rack(game_get_player(config->game,
+                                                       player_on_turn_index)));
 
   load_rack_or_push_to_error_stack(rack_str, config->ld,
                                    ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
@@ -1728,14 +1728,25 @@ void impl_set_rack_internal(Config *config, const char *rack_str,
     return;
   }
 
-  if (rack_is_drawable(config->game, player_index, &new_rack)) {
-    return_rack_to_bag(config->game, player_index);
-    if (!draw_rack_from_bag(config->game, player_index, &new_rack)) {
+  // Return letters on opponent rack that may have been inferred
+  // due to an empty bag but are not known from previous phonies.
+  const int player_off_turn_index = 1 - player_on_turn_index;
+  return_rack_to_bag(config->game, player_off_turn_index);
+  if (!draw_rack_from_bag(config->game, player_off_turn_index,
+                          player_get_known_rack_from_phonies(game_get_player(
+                              config->game, player_off_turn_index)))) {
+    log_fatal("unexpectedly failed to draw known letters from phonies for "
+              "opponent from the bag in set rack command");
+  }
+
+  if (rack_is_drawable(config->game, player_on_turn_index, &new_rack)) {
+    return_rack_to_bag(config->game, player_on_turn_index);
+    if (!draw_rack_from_bag(config->game, player_on_turn_index, &new_rack)) {
       log_fatal(
-          "unexpectedly failed to draw rack from bag in set rack command");
+          "unexpectedly failed to draw rack from the bag in set rack command");
     }
     if (bag_get_letters(game_get_bag(config->game)) <= (RACK_SIZE)) {
-      draw_to_full_rack(config->game, 1 - player_index);
+      draw_to_full_rack(config->game, 1 - player_on_turn_index);
     }
   } else {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG,

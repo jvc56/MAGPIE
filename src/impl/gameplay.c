@@ -1129,4 +1129,8 @@ void game_play_n_events(GameHistory *game_history, Game *game,
       return;
     }
   }
+  for (int i = 0; i < 2; i++) {
+    rack_copy(player_get_known_rack_from_phonies(game_get_player(game, i)),
+              &play_events_data.known_letters_from_phonies_racks[i]);
+  }
 }
