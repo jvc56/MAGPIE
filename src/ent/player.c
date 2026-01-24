@@ -65,6 +65,17 @@ Player *player_duplicate(const Player *player) {
   return new_player;
 }
 
+void player_copy(Player *dst, const Player *src) {
+  dst->index = src->index;
+  rack_copy(dst->rack, src->rack);
+  dst->score = src->score;
+  dst->move_sort_type = src->move_sort_type;
+  dst->move_record_type = src->move_record_type;
+  dst->kwg = src->kwg;
+  dst->klv = src->klv;
+  dst->wmp = src->wmp;
+}
+
 void player_destroy(Player *player) {
   if (!player) {
     return;

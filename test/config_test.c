@@ -569,9 +569,13 @@ void test_config_exec_parse_args(void) {
                             ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "infer josh ABCDE 13 ABCD EFG",
                             ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "infer josh ABCDE 13 - EFG",
+                            ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "infer josh 3 ABCDE", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "infer josh 3 ABCDE", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "infer josh 3 ABCDE EFG",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "infer josh 3 ABCDE -",
                             ERROR_STATUS_SUCCESS);
   // Autoplay
   assert_config_exec_status(config,

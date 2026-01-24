@@ -411,7 +411,6 @@ static inline void *bai_worker(void *args) {
 static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
                        RandomVariables *rng, ThreadControl *thread_control,
                        BAILogger *bai_logger, BAIResult *bai_result) {
-  rvs_reset(rvs);
   bai_result_reset(bai_result, bai_options->time_limit_seconds);
 
   Checkpoint *checkpoint =

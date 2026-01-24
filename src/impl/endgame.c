@@ -578,9 +578,9 @@ void string_builder_endgame_results(StringBuilder *pv_description,
       pv_description, "Principal Variation (value: %d, length: %d)%c",
       pv_line->score, pv_line->num_moves, add_line_breaks ? '\n' : ' ');
 
-  Game *game_copy = game_duplicate(game);
-  const Board *board = game_get_board(game_copy);
-  const LetterDistribution *ld = game_get_ld(game_copy);
+  Game *gc = game_duplicate(game);
+  const Board *board = game_get_board(gc);
+  const LetterDistribution *ld = game_get_ld(gc);
 
   if (add_line_breaks) {
     StringGrid *sg = string_grid_create(pv_line->num_moves, 3, 1);
@@ -591,9 +591,8 @@ void string_builder_endgame_results(StringBuilder *pv_description,
       string_grid_set_cell(
           sg, i, curr_col++,
           get_formatted_string(
-              "(%s)",
-              game_history_player_get_name(
-                  game_history, game_get_player_on_turn_index(game_copy))));
+              "(%s)", game_history_player_get_name(
+                          game_history, game_get_player_on_turn_index(gc))));
 
       // Set the play sequence index and player name
       string_grid_set_cell(sg, i, curr_col++,
@@ -607,7 +606,7 @@ void string_builder_endgame_results(StringBuilder *pv_description,
       string_builder_clear(tmp_sb);
       // Play the move on the board to make the next small_move_to_move make
       // sense.
-      play_move(&move, game_copy, NULL);
+      play_move(&move, gc, NULL);
     }
     string_builder_add_string_grid(pv_description, sg, false);
     string_grid_destroy(sg);
@@ -621,11 +620,11 @@ void string_builder_endgame_results(StringBuilder *pv_description,
       }
       // Play the move on the board to make the next small_move_to_move make
       // sense.
-      play_move(&move, game_copy, NULL);
+      play_move(&move, gc, NULL);
     }
   }
   string_builder_add_string(pv_description, "\n");
-  game_destroy(game_copy);
+  game_destroy(gc);
 }
 
 char *endgame_results_get_string(const EndgameResults *results,
