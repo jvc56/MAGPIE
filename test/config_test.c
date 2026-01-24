@@ -2185,16 +2185,16 @@ void test_config_challenge_rack(void) {
 }
 
 void test_config(void) {
-  //   test_game_display();
-  //   test_trie();
-  //   test_config_anno();
+  test_game_display();
+  test_trie();
+  test_config_anno();
   test_config_anno_challenge();
-  //   test_config_anno_endgame_rack();
-  //   test_config_challenge_rack();
-  //   test_config_export();
-  //   test_config_load_error_cases();
-  //   test_config_load_success();
-  //   test_config_exec_parse_args();
-  //   test_config_lexical_data();
-  //   test_config_wmp();
+  test_config_anno_endgame_rack();
+  test_config_challenge_rack();
+  test_config_export();
+  test_config_load_error_cases();
+  test_config_load_success();
+  test_config_exec_parse_args();
+  test_config_lexical_data();
+  test_config_wmp();
 }
