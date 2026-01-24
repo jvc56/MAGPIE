@@ -214,11 +214,15 @@ bool rack_is_drawable(const Game *game, const int player_index,
 // Return false when the rack letters are not in the bag.
 bool draw_rack_from_bag(const Game *game, const int player_index,
                         const Rack *rack_to_draw) {
+  if (rack_get_dist_size(rack_to_draw) == 0) {
+    // Rack is effectively NULL
+    return true;
+  }
   Bag *bag = game_get_bag(game);
   Rack *player_rack = player_get_rack(game_get_player(game, player_index));
   int player_draw_index = game_get_player_draw_index(game, player_index);
-  const uint16_t dist_size = rack_get_dist_size(player_rack);
   rack_copy(player_rack, rack_to_draw);
+  const uint16_t dist_size = rack_get_dist_size(player_rack);
   for (int i = 0; i < dist_size; i++) {
     const uint16_t rack_number_of_letter = rack_get_letter(player_rack, i);
     for (uint16_t j = 0; j < rack_number_of_letter; j++) {
