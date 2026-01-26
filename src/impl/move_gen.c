@@ -57,12 +57,6 @@ void generator_destroy(MoveGen *gen) {
 }
 
 MoveGen *get_movegen(int thread_index) {
-  if (thread_index < 0 || thread_index >= MAX_THREADS) {
-    log_info(
-        "get_movegen: thread_index %d out of bounds (0-%d). Using index 0.",
-        thread_index, MAX_THREADS - 1);
-    thread_index = 0;
-  }
   if (!cached_gens[thread_index]) {
     cached_gens[thread_index] = malloc_or_die(sizeof(MoveGen));
   }
