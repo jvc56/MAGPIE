@@ -1,3 +1,4 @@
+#include "../def/equity_defs.h"
 #include "../def/move_defs.h"
 #include "../ent/board.h"
 #include "../ent/equity.h"

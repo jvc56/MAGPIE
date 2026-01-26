@@ -1,3 +1,5 @@
+#include "../src/def/equity_defs.h"
+#include "../src/def/move_defs.h"
 #include "../src/def/static_eval_defs.h"
 #include "../src/ent/game.h"
 #include "../src/ent/klv.h"

@@ -1,6 +1,7 @@
 #include "../src/def/board_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
+#include "../src/def/move_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/game.h"
 #include "../src/ent/klv.h"

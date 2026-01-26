@@ -2,9 +2,11 @@
 
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"
+#include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/inference_defs.h"
 #include "../def/letter_distribution_defs.h"
+#include "../def/move_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/alias_method.h"
@@ -29,7 +31,6 @@
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
-#include "move_gen.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>

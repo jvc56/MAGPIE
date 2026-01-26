@@ -1,4 +1,6 @@
 #include "../src/def/board_defs.h"
+#include "../src/def/equity_defs.h"
+#include "../src/def/move_defs.h"
 #include "../src/def/static_eval_defs.h"
 #include "../src/ent/board.h"
 #include "../src/ent/bonus_square.h"

@@ -2,6 +2,7 @@
 
 #include "../src/def/board_defs.h"
 #include "../src/def/cross_set_defs.h"
+#include "../src/def/equity_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/thread_control_defs.h"

@@ -2,6 +2,7 @@
 
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"
+#include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/move_defs.h"
