@@ -147,8 +147,10 @@ typedef struct MoveGenArgs {
   Equity eq_margin_movegen;
 
   // Movegen for inferences after plays will need a target equity value to skip
-  // anchors that can't surpass it (surpassing means exceeding the target move
-  // by eq_margin_movegen). Defaults to EQUITY_MAX_VALUE for non-inference mode.
+  // anchors that can't surpass it. Callers may either pass a baseline equity
+  // with a separate margin in eq_margin_movegen, or combine them into
+  // target_equity and pass eq_margin_movegen=0 (the inference code does this
+  // for tile placements). Defaults to EQUITY_MAX_VALUE for non-inference mode.
   Equity target_equity;
 
   // Movegen for inferences after exchanges will need to know the number of
