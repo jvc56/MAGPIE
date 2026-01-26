@@ -136,6 +136,7 @@ typedef enum {
   ARG_TOKEN_TIME_LIMIT,
   ARG_TOKEN_SAMPLING_RULE,
   ARG_TOKEN_THRESHOLD,
+  ARG_TOKEN_CUTOFF,
   ARG_TOKEN_LOAD,
   ARG_TOKEN_NEW_GAME,
   ARG_TOKEN_EXPORT,
@@ -206,6 +207,7 @@ struct Config {
   uint64_t max_iterations;
   uint64_t min_play_iterations;
   double stop_cond_pct;
+  double cutoff;
   Equity eq_margin_inference;
   Equity eq_margin_movegen;
   bool use_game_pairs;
@@ -1438,6 +1440,16 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "option will make the simulation run until it hits the max total "
           "iterations or time limit.";
       break;
+    case ARG_TOKEN_CUTOFF:
+      usages[0] = "<cutoff>";
+      examples[0] = "0.005";
+      examples[1] = "0.01";
+      text =
+          "Specifies the cutoff threshold for determining when simmed plays "
+          "are equivalent. If both win percentages are within cutoff of 100.0 "
+          "or both are within cutoff of 0.0, they are considered equivalent "
+          "and tiebroken by equity. The default is 0.005.";
+      break;
     case ARG_TOKEN_PRINT_BOARDS:
       usages[0] = "<true_or_false>";
       examples[0] = "true";
@@ -2008,7 +2020,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->print_interval, config->max_num_display_plays, config->seed,
       config->max_iterations, config->min_play_iterations,
       config->stop_cond_pct, config->threshold, (int)config->time_limit_seconds,
-      config->sampling_rule, &inference_args, sim_args);
+      config->sampling_rule, config->cutoff, &inference_args, sim_args);
 }
 
 void config_simulate(const Config *config, SimCtx **sim_ctx,
@@ -5307,6 +5319,17 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     }
   }
 
+  const char *cutoff = config_get_parg_value(config, ARG_TOKEN_CUTOFF, 0);
+  if (cutoff) {
+    double user_cutoff;
+    config_load_double(config, ARG_TOKEN_CUTOFF, 0, 100, &user_cutoff,
+                       error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    config->cutoff = convert_user_cutoff_to_cutoff(user_cutoff);
+  }
+
   // Non-lexical player data
 
   const arg_token_t sort_type_args[2] = {ARG_TOKEN_P1_MOVE_SORT_TYPE,
@@ -5719,6 +5742,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_TIME_LIMIT, "tlim", 1, 1);
   arg(ARG_TOKEN_SAMPLING_RULE, "sr", 1, 1);
   arg(ARG_TOKEN_THRESHOLD, "threshold", 1, 1);
+  arg(ARG_TOKEN_CUTOFF, "cutoff", 1, 1);
   arg(ARG_TOKEN_PRINT_BOARDS, "printboards", 1, 1);
   arg(ARG_TOKEN_BOARD_COLOR, "boardcolor", 1, 1);
   arg(ARG_TOKEN_BOARD_TILE_GLYPHS, "boardtiles", 1, 1);
@@ -5765,6 +5789,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->min_play_iterations = 500;
   config->max_iterations = 1000000000000;
   config->stop_cond_pct = 99;
+  config->cutoff = convert_user_cutoff_to_cutoff(0.005);
   config->time_limit_seconds = 0;
   config->num_threads = get_num_cores();
   config->print_interval = 0;
@@ -5792,7 +5817,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->game_history = game_history_create();
   config->game_history_backup = NULL;
   config->endgame_solver = endgame_solver_create();
-  config->sim_results = sim_results_create();
+  config->sim_results = sim_results_create(config->cutoff);
   config->inference_results = inference_results_create(NULL);
   config->endgame_results = endgame_results_create();
   config->autoplay_results = autoplay_results_create();
@@ -6122,6 +6147,10 @@ void config_add_settings_to_string_builder(const Config *config,
       string_builder_add_formatted_string(sb, " -%s ",
                                           config->pargs[arg_token]->name);
       string_builder_add_threshold(sb, config->threshold);
+      break;
+    case ARG_TOKEN_CUTOFF:
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token, convert_cutoff_to_user_cutoff(config->cutoff));
       break;
     case ARG_TOKEN_PRINT_BOARDS:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,

@@ -258,7 +258,8 @@ void test_sim_round_robin_consistency(void) {
 
   uint64_t seed = ctime_get_current_time();
   SimResults *sim_results_single_threaded = config_get_sim_results(config);
-  SimResults *sim_results_multithreaded = sim_results_create();
+  SimResults *sim_results_multithreaded =
+      sim_results_create(convert_user_cutoff_to_cutoff(0.005));
   for (int i = 0; i < 11; i++) {
     char *set_threads_cmd =
         get_formatted_string("set -threads %d -seed %lu", i + 1, seed);
@@ -303,7 +304,8 @@ void test_sim_top_two_consistency(void) {
   bai_result_status_t expected_exit_status = bai_result_get_status(
       sim_results_get_bai_result(config_get_sim_results(config)));
 
-  SimResults *actual_sim_results = sim_results_create();
+  SimResults *actual_sim_results =
+      sim_results_create(convert_user_cutoff_to_cutoff(0.005));
   for (int i = 0; i < 2; i++) {
     assert(config_simulate_and_return_status(
                config, NULL, NULL, actual_sim_results) == ERROR_STATUS_SUCCESS);

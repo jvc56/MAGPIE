@@ -41,7 +41,7 @@ void bai_wrapper(const BAIOptions *bai_options, RandomVariables *rvs,
 }
 
 void test_bai_top_two(int num_threads) {
-  const double means_and_vars[] = {-10, 1, 0, 1};
+  const double means_and_vars[] = {0.1, 1, 0.9, 1};
   const int num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
   RandomVariablesArgs rv_args = {
       .type = RANDOM_VARIABLES_NORMAL,
@@ -66,6 +66,7 @@ void test_bai_top_two(int num_threads) {
       .sample_limit = 200,
       .time_limit_seconds = 0,
       .num_threads = num_threads,
+      .cutoff = 0,
   };
 
   ThreadControl *thread_control = thread_control_create();
@@ -80,7 +81,7 @@ void test_bai_top_two(int num_threads) {
 }
 
 void test_bai_sample_limit(int num_threads) {
-  const double means_and_vars[] = {-10, 1, 100, 10, -20, 5};
+  const double means_and_vars[] = {0.1, 1, 0.5, 1, 0.2, 1};
   const uint64_t num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
   RandomVariablesArgs rv_args = {
       .type = RANDOM_VARIABLES_NORMAL,
@@ -104,6 +105,7 @@ void test_bai_sample_limit(int num_threads) {
       .sample_limit = 200,
       .time_limit_seconds = 0,
       .num_threads = num_threads,
+      .cutoff = 0,
   };
   ThreadControl *thread_control = thread_control_create();
   BAIResult *bai_result = bai_result_create();
@@ -127,6 +129,67 @@ void test_bai_sample_limit(int num_threads) {
   bai_result_destroy(bai_result);
   rvs_destroy(rng);
   rvs_destroy(rvs);
+}
+
+void test_bai_win_pct_cutoff_helper(int num_threads,
+                                    const double *means_and_vars,
+                                    const uint64_t num_rvs) {
+  RandomVariablesArgs rv_args = {
+      .type = RANDOM_VARIABLES_NORMAL,
+      .num_rvs = num_rvs,
+      .means_and_vars = means_and_vars,
+      .seed = 10,
+  };
+  RandomVariables *rvs = rvs_create(&rv_args);
+
+  RandomVariablesArgs rng_args = {
+      .type = RANDOM_VARIABLES_UNIFORM,
+      .num_rvs = num_rvs,
+      .seed = 10,
+  };
+  RandomVariables *rng = rvs_create(&rng_args);
+
+  BAIOptions bai_options = {
+      .threshold = BAI_THRESHOLD_NONE,
+      .delta = 0.05,
+      .sample_minimum = 37,
+      .sample_limit = 2000,
+      .time_limit_seconds = 0,
+      .num_threads = num_threads,
+      .cutoff = 0.0005,
+  };
+  ThreadControl *thread_control = thread_control_create();
+  BAIResult *bai_result = bai_result_create();
+  for (int i = 0; i < num_sampling_rules; i++) {
+    bai_options.sampling_rule = sampling_rules[i];
+    rvs_reset(rvs, &rv_args);
+    bai_wrapper(&bai_options, rvs, rng, thread_control, NULL, bai_result);
+    assert(bai_result_get_status(bai_result) ==
+           BAI_RESULT_STATUS_WIN_PCT_CUTOFF);
+    assert(bai_result_get_best_arm(bai_result) == 1);
+    uint64_t expected_num_samples = num_rvs * bai_options.sample_minimum;
+    assert(rvs_get_total_samples(rvs) == expected_num_samples);
+  }
+  thread_control_destroy(thread_control);
+  // The timer should stop once the BAI has finished.
+  const double bai_time_elapsed = bai_result_get_elapsed_seconds(bai_result);
+  ctime_nap(0.2);
+  assert(bai_time_elapsed == bai_result_get_elapsed_seconds(bai_result));
+  bai_result_destroy(bai_result);
+  rvs_destroy(rng);
+  rvs_destroy(rvs);
+}
+
+void test_bai_win_pct_cutoff(int num_threads) {
+  const double means_and_vars1[] = {0.2, 1, 1, 0.001, 0.3, 1};
+  const uint64_t num_rvs1 = (sizeof(means_and_vars1)) / (sizeof(double) * 2);
+  test_bai_win_pct_cutoff_helper(num_threads, means_and_vars1, num_rvs1);
+
+  const double means_and_vars2[] = {
+      0, 0.0000001, 0.00001, 0.000001, 0, 0.0000001,
+  };
+  const uint64_t num_rvs2 = (sizeof(means_and_vars2)) / (sizeof(double) * 2);
+  test_bai_win_pct_cutoff_helper(num_threads, means_and_vars2, num_rvs2);
 }
 
 typedef struct BAITestArgs {
@@ -154,7 +217,7 @@ void *bai_thread_func(void *arg) {
 }
 
 void test_bai_time_limit(int num_threads) {
-  const double means_and_vars[] = {-10, 1, 0, 1, 100, 10, -20, 5};
+  const double means_and_vars[] = {0.1, 1, 0.5, 1, 0.2, 1};
   const int num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
   RandomVariablesArgs rv_args = {
       .type = RANDOM_VARIABLES_NORMAL,
@@ -179,6 +242,7 @@ void test_bai_time_limit(int num_threads) {
       .sample_limit = 100000000,
       .time_limit_seconds = 2,
       .num_threads = num_threads,
+      .cutoff = 0,
   };
 
   ThreadControl *thread_control = thread_control_create();
@@ -213,7 +277,7 @@ void test_bai_time_limit(int num_threads) {
 }
 
 void test_bai_interrupt(int num_threads) {
-  const double means_and_vars[] = {-10, 1, 0, 1, 100, 10, -20, 5};
+  const double means_and_vars[] = {0.1, 1, 0.5, 1, 0.2, 1, 0.25, 1};
   const int num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
   RandomVariablesArgs rv_args = {
       .type = RANDOM_VARIABLES_NORMAL,
@@ -238,6 +302,7 @@ void test_bai_interrupt(int num_threads) {
       .sample_limit = 100000000,
       .time_limit_seconds = 20,
       .num_threads = num_threads,
+      .cutoff = 0,
   };
 
   ThreadControl *thread_control = thread_control_create();
@@ -318,6 +383,7 @@ void test_bai_similarity(int num_threads) {
       .sample_limit = num_samples,
       .time_limit_seconds = 0,
       .num_threads = num_threads,
+      .cutoff = 0,
   };
 
   ThreadControl *thread_control = thread_control_create();
@@ -329,9 +395,9 @@ void test_bai_similarity(int num_threads) {
           (double *)malloc_or_die((size_t)num_rvs * 2 * sizeof(double));
       for (int i = 0; i < num_rvs; i++) {
         means_and_vars[(ptrdiff_t)(i * 2)] =
-            3 * (max_classes - (i % max_classes));
+            0.03 * (max_classes - (i % max_classes));
         means_and_vars[(ptrdiff_t)(i * 2 + 1)] =
-            5 * (max_classes - (i % max_classes));
+            0.05 * (max_classes - (i % max_classes));
       }
       rv_args.num_rvs = num_rvs;
       rv_args.means_and_vars = means_and_vars;
@@ -422,6 +488,7 @@ void test_bai_from_seed(const char *bai_seed) {
       .sample_limit = 100000,
       .time_limit_seconds = 0,
       .num_threads = 1,
+      .cutoff = 0,
   };
   ThreadControl *thread_control = thread_control_create();
   BAIResult *bai_result = bai_result_create();
@@ -451,6 +518,7 @@ void test_bai(void) {
     for (int i = 0; i < num_thread_tests; i++) {
       const int num_threads_i = num_threads[i];
       test_bai_sample_limit(num_threads_i);
+      test_bai_win_pct_cutoff(num_threads_i);
       test_bai_time_limit(num_threads_i);
       test_bai_interrupt(num_threads_i);
       test_bai_top_two(num_threads_i);
