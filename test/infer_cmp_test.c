@@ -24,9 +24,10 @@
 
 // Helper function to compare inference results between optimized and
 // non-optimized runs
-static void assert_inference_results_match(InferenceResults *results_with_cutoff,
-                                           InferenceResults *results_without_cutoff,
-                                           int ld_size) {
+static void
+assert_inference_results_match(InferenceResults *results_with_cutoff,
+                               InferenceResults *results_without_cutoff,
+                               int ld_size) {
   // Compare equity values stats for LEAVE type
   const Stat *eq_with = inference_results_get_equity_values(
       results_with_cutoff, INFERENCE_TYPE_LEAVE);
@@ -63,13 +64,12 @@ static void assert_inference_results_match(InferenceResults *results_with_cutoff
 }
 
 // Run inference with and without cutoff optimization and verify results match
-static void
-run_inference_comparison(const Config *config, int target_index,
-                         Equity target_score,
-                         int target_num_exch, Rack *target_played_tiles,
-                         InferenceResults *results_with_cutoff,
-                         InferenceResults *results_without_cutoff, int ld_size,
-                         ErrorStack *error_stack) {
+static void run_inference_comparison(const Config *config, int target_index,
+                                     Equity target_score, int target_num_exch,
+                                     Rack *target_played_tiles,
+                                     InferenceResults *results_with_cutoff,
+                                     InferenceResults *results_without_cutoff,
+                                     int ld_size, ErrorStack *error_stack) {
   Rack target_known_rack;
   rack_set_dist_size_and_reset(&target_known_rack, ld_size);
   Rack nontarget_known_rack;
@@ -133,8 +133,8 @@ static void test_infer_cutoff_optimization(bool use_wmp) {
   MoveList *move_list = move_list_create(1);
 
   int games_completed = 0;
-  int exchanges_above_threshold = 0;  // optimization enabled (5+ tiles)
-  int exchanges_below_threshold = 0;  // optimization disabled (1-4 tiles)
+  int exchanges_above_threshold = 0; // optimization enabled (5+ tiles)
+  int exchanges_below_threshold = 0; // optimization disabled (1-4 tiles)
   int scoring_plays_tested = 0;
   const uint64_t base_seed = 42;
 
@@ -228,6 +228,6 @@ static void test_infer_cutoff_optimization(bool use_wmp) {
 
 void test_infer_cmp(void) {
   // Test cutoff optimization for both WMP and KWG modes
-  test_infer_cutoff_optimization(true);   // WMP
-  test_infer_cutoff_optimization(false);  // KWG
+  test_infer_cutoff_optimization(true);  // WMP
+  test_infer_cutoff_optimization(false); // KWG
 }

@@ -114,7 +114,8 @@ void assert_move_gen_row(Game *game, MoveList *move_list,
       .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,  };
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
 
   generate_moves_for_game(&move_gen_args);
   SortedMoveList *sml = sorted_move_list_create(move_list);
@@ -168,7 +169,8 @@ void macondo_tests(void) {
       .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,  };
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
 
   // TestSimpleRowGen
   assert_move_gen_row(game, move_list, "P", "5REGNANT3", 2, 8, 1, NULL, NULL);
@@ -423,7 +425,8 @@ void unfound_leave_lookup_test(void) {
       .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,  };
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
 
   const char cgp[300] = "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 "
                         "UNFOUND/UNFOUND 0/0 0 lex CSW21;";
@@ -468,7 +471,8 @@ void exchange_tests(void) {
       .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,  };
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
 
   generate_moves(&move_gen_args);
   SortedMoveList *test_not_an_exchange_sorted_move_list =
@@ -508,7 +512,8 @@ void movegen_many_moves(void) {
       .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,  };
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
 
   load_cgp_or_die(game, MANY_MOVES);
   generate_moves_for_game(&move_gen_args);
@@ -535,7 +540,8 @@ void equity_test(void) {
       .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,  };
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
 
   player_set_move_sort_type(player, MOVE_SORT_EQUITY);
 
@@ -587,7 +593,8 @@ void top_equity_play_recorder_test(void) {
       .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,  };
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
 
   player_set_move_record_type(player, MOVE_RECORD_BEST);
 
@@ -626,7 +633,8 @@ void small_play_recorder_test(void) {
       .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,  };
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
 
   player_set_move_record_type(player, MOVE_RECORD_ALL_SMALL);
 
@@ -690,7 +698,8 @@ void distinct_lexica_test(bool w1) {
       .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,  };
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
 
   const Player *player0 = game_get_player(game, 0);
   const Player *player1 = game_get_player(game, 1);
@@ -823,7 +832,8 @@ void consistent_tiebreaking_test(void) {
       .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,  };
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
 
   const Player *player0 = game_get_player(game, 0);
   const Player *player1 = game_get_player(game, 1);
@@ -1000,7 +1010,8 @@ void movegen_within_x_of_best_test(bool use_wmp) {
       .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,  };
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
   int all_move_list_count = 0;
   int move_list_count = 0;
   SortedMoveList *sml = NULL;
@@ -1193,7 +1204,8 @@ void movegen_does_not_return_early_from_anchor(void) {
       .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,  };
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
 
   // A8 BRRR 72 should be 1 equity better than A8 BRR 69
   set_klv_leave_value(klv, ld, "NNN", 0);
@@ -1244,7 +1256,8 @@ void movegen_one_tile_nonwmp(void) {
       .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,  };
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
 
   SortedMoveList *sml = NULL;
 
@@ -1288,7 +1301,8 @@ void movegen_one_tile_wmp(void) {
       .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,  };
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
 
   SortedMoveList *sml = NULL;
 

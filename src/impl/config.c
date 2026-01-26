@@ -1884,8 +1884,7 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
 
   if (config_get_parg_num_set_values(config, ARG_TOKEN_INFER) == 0) {
     config_infer(config, true, 0, 0, 0, &target_played_tiles,
-                 &target_known_rack, &nontarget_known_rack,
-                 true,
+                 &target_known_rack, &nontarget_known_rack, true,
                  config->inference_results, error_stack);
     return;
   }
@@ -2000,8 +1999,7 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
 
   config_infer(config, false, target_index, target_score, target_num_exch,
                &target_played_tiles, &target_known_rack, &nontarget_known_rack,
-               true,
-               config->inference_results, error_stack);
+               true, config->inference_results, error_stack);
 }
 
 // Sim
@@ -2017,8 +2015,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
     // the whole history so that autoplay does not have to keep a whole
     // history and play to turn for each inference which will probably incur
     // more overhead than we would like.
-    config_fill_infer_args(config, true, 0, 0, 0, target_played_tiles,
-                           false,
+    config_fill_infer_args(config, true, 0, 0, 0, target_played_tiles, false,
                            target_known_inference_tiles, nontarget_known_tiles,
                            &inference_args);
   }
