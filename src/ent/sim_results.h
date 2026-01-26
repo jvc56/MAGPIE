@@ -47,7 +47,7 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
 
 typedef struct SimResults SimResults;
 
-SimResults *sim_results_create(void);
+SimResults *sim_results_create(const double cutoff);
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
                        int num_plies, uint64_t seed, bool use_heat_map);
 void sim_results_destroy(SimResults *sim_results);
@@ -66,6 +66,9 @@ const Rack *sim_results_get_known_opp_rack(const SimResults *sim_results);
 void sim_results_set_known_opp_rack(SimResults *sim_results,
                                     const Rack *known_opp_rack);
 BAIResult *sim_results_get_bai_result(const SimResults *sim_results);
+
+double sim_results_get_cutoff(const SimResults *sim_results);
+void sim_results_set_cutoff(SimResults *sim_results, double cutoff);
 
 void sim_results_lock_simmed_plays(SimResults *sim_results);
 void sim_results_unlock_simmed_plays(SimResults *sim_results);

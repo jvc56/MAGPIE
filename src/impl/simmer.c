@@ -17,7 +17,7 @@
 // The sim context allows zero-alloc autoplay sims by maintaining the
 // dynamically allocated sim structs in between sim calls. The following
 // options are allowed to change in between sim calls:
-// - move list count
+// - move list
 // - player on turn
 // - spread
 // - known opp rack
@@ -92,6 +92,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
 
   sim_results_set_rack(sim_results, move_list_get_rack(sim_args->move_list));
   sim_results_set_known_opp_rack(sim_results, sim_args->known_opp_rack);
+  sim_results_set_cutoff(sim_results, sim_args->bai_options.cutoff);
 
   bai(&sim_args->bai_options, (*sim_ctx)->rvs, (*sim_ctx)->rng,
       sim_args->thread_control, NULL, sim_results_get_bai_result(sim_results));

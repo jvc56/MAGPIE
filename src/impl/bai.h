@@ -21,6 +21,7 @@
 #include "../ent/bai_result.h"
 #include "../ent/checkpoint.h"
 #include "../ent/thread_control.h"
+#include "../ent/win_pct.h"
 #include "../util/io_util.h"
 #include "bai_logger.h"
 #include "random_variable.h"
@@ -97,6 +98,7 @@ typedef struct BAISampleArgs {
   uint64_t sample_minimum;
   bai_sampling_rule_t sampling_rule;
   bai_threshold_t threshold;
+  double cutoff;
 } BAISampleArgs;
 
 static inline double bai_alt_lambda(const double mu1, const double sigma21,
@@ -315,13 +317,20 @@ bai_sync_data_add_sample_while_locked(BAISampleArgs *args, const int arm_index,
       astar_mean = arm_datum->mean;
     }
   }
-  const bool update_all = old_astar_index == -1 ||
-                          old_astar_index != bai_sync_data->astar_index ||
-                          bai_sync_data->astar_index == arm_index;
 
-  bai_update_threshold_and_challenger(bai_sync_data, args->rvs, args->threshold,
-                                      args->sampling_rule, args->delta,
-                                      arm_index, update_all);
+  if (!bai_sync_data->initial_phase &&
+      is_win_pct_within_cutoff(astar_mean, args->cutoff)) {
+    bai_result_set_status(bai_sync_data->bai_result,
+                          BAI_RESULT_STATUS_WIN_PCT_CUTOFF);
+  } else {
+    const bool update_all = old_astar_index == -1 ||
+                            old_astar_index != bai_sync_data->astar_index ||
+                            bai_sync_data->astar_index == arm_index;
+
+    bai_update_threshold_and_challenger(bai_sync_data, args->rvs,
+                                        args->threshold, args->sampling_rule,
+                                        args->delta, arm_index, update_all);
+  }
 }
 
 static inline void bai_sync_data_add_sample(BAISampleArgs *args,
@@ -364,6 +373,13 @@ static inline void bai_finish_initial_phase(void *uncasted_bai_worker_args) {
                           BAI_RESULT_STATUS_SAMPLE_LIMIT);
     return;
   }
+  if (is_win_pct_within_cutoff(
+          bai_sync_data->arm_data[bai_sync_data->astar_index].mean,
+          bai_worker_args->bai_options->cutoff)) {
+    bai_result_set_status(bai_sync_data->bai_result,
+                          BAI_RESULT_STATUS_WIN_PCT_CUTOFF);
+    return;
+  }
   bai_update_threshold_and_challenger(
       bai_sync_data, bai_worker_args->rvs,
       bai_worker_args->bai_options->threshold,
@@ -386,6 +402,7 @@ static inline void bai_worker_sample_loop(BAIWorkerArgs *bai_worker_args) {
       .sample_minimum = bai_options->sample_minimum,
       .sampling_rule = bai_options->sampling_rule,
       .threshold = bai_options->threshold,
+      .cutoff = bai_options->cutoff,
   };
 
   while (!bai_should_stop(sync_data->bai_result, thread_control)) {
