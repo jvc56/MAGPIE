@@ -214,6 +214,10 @@ void test_validated_move_errors(void) {
       game, ION_OPENING_CGP, "H9.OW", 0, true, false, true,
       ERROR_STATUS_MOVE_VALIDATION_INVALID_START_COORDS);
 
+  assert_validated_move_error(
+      game, ION_OPENING_CGP, "H6.AI", 0, true, false, true,
+      ERROR_STATUS_MOVE_VALIDATION_INCOMPLETE_TILE_PLACEMENT);
+
   game_destroy(game);
   config_destroy(config);
 }
