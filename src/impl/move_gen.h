@@ -100,10 +100,20 @@ typedef struct MoveGen {
   UnrestrictedMultiplier desc_xw_muls_copy[WORD_ALIGNING_RACK_SIZE];
   uint16_t desc_eff_letter_muls_copy[WORD_ALIGNING_RACK_SIZE];
 
-  // Rest of the fields from slop branch
+  // Since shadow does not have backtracking besides when switching from going
+  // right back to going left, it is convenient to store these parameters here
+  // rather than using function arguments for them.
+
+  // This is a sum of already-played crosswords and tiles restricted to a known
+  // empty square (times a letter or word multiplier). It's a part of the score
+  // not affected by the overall mainword multiplier.
   Equity shadow_perpendicular_additional_score;
+
+  // This is a sum of both the playthrough tiles and tiles restricted to a known
+  // empty square (times their letter multiplier). It will be multiplied by
+  // shadow_word_multiplier as part of computing score shadow_record.
   Equity shadow_mainword_restricted_score;
-  int shadow_word_multiplier;
+
   Equity highest_shadow_equity;
   Equity highest_shadow_score;
   int number_of_letters_on_rack;
