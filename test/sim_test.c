@@ -11,6 +11,7 @@
 #include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
+#include "../src/ent/win_pct.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/simmer.h"

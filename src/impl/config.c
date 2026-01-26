@@ -5321,7 +5321,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
 
   const char *cutoff = config_get_parg_value(config, ARG_TOKEN_CUTOFF, 0);
   if (cutoff) {
-    double user_cutoff;
+    double user_cutoff = 0;
     config_load_double(config, ARG_TOKEN_CUTOFF, 0, 100, &user_cutoff,
                        error_stack);
     if (!error_stack_is_empty(error_stack)) {
