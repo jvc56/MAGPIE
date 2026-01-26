@@ -97,10 +97,6 @@ struct InferenceCtx {
   Stat **rack_stats;
 };
 
-static uint64_t cutoff_total_calls = 0;
-static uint64_t cutoff_triggered_count = 0;
-static cpthread_mutex_t cutoff_stats_lock = PTHREAD_MUTEX_INITIALIZER; // NOLINT
-
 void inference_destroy(Inference *inference) {
   if (!inference) {
     return;
@@ -168,12 +164,6 @@ void evaluate_possible_leave(Inference *inference) {
     // calculation
     eq_margin_movegen = inference->equity_margin;
   }
-  if (inference->use_infer_cutoff_optimization) {
-    cpthread_mutex_lock(&cutoff_stats_lock);
-    cutoff_total_calls++;
-    cpthread_mutex_unlock(&cutoff_stats_lock);
-  }
-
   int thread_index = inference->thread_index;
   if (thread_index < 0) {
     thread_index = 0;
@@ -185,13 +175,6 @@ void evaluate_possible_leave(Inference *inference) {
       inference->use_infer_cutoff_optimization ? target_equity_cutoff
                                                : EQUITY_MAX_VALUE,
       target_leave_size, eq_margin_movegen);
-
-  if (inference->use_infer_cutoff_optimization &&
-      get_movegen(thread_index)->threshold_exceeded) {
-    cpthread_mutex_lock(&cutoff_stats_lock);
-    cutoff_triggered_count++;
-    cpthread_mutex_unlock(&cutoff_stats_lock);
-  }
 
   const bool is_within_equity_margin =
       target_equity_cutoff >= move_get_equity(top_move);
@@ -807,36 +790,4 @@ void infer_without_ctx(InferenceArgs *args, InferenceResults *results,
   InferenceCtx *ctx = NULL;
   infer(args, &ctx, results, error_stack);
   inference_ctx_destroy(ctx);
-}
-
-void inference_reset_cutoff_stats(void) {
-  cpthread_mutex_lock(&cutoff_stats_lock);
-  cutoff_total_calls = 0;
-  cutoff_triggered_count = 0;
-  cpthread_mutex_unlock(&cutoff_stats_lock);
-}
-
-void inference_get_cutoff_stats(uint64_t *total_calls, uint64_t *triggered) {
-  cpthread_mutex_lock(&cutoff_stats_lock);
-  *total_calls = cutoff_total_calls;
-  *triggered = cutoff_triggered_count;
-  cpthread_mutex_unlock(&cutoff_stats_lock);
-}
-
-void inference_print_cutoff_stats(void) {
-  uint64_t total_calls;
-  uint64_t triggered;
-
-  cpthread_mutex_lock(&cutoff_stats_lock);
-  total_calls = cutoff_total_calls;
-  triggered = cutoff_triggered_count;
-  cpthread_mutex_unlock(&cutoff_stats_lock);
-
-  if (total_calls > 0) {
-    double pct = 100.0 * (double)triggered / (double)total_calls;
-    printf("Cutoff stats: %llu triggered / %llu total (%.2f%%)\n",
-           (unsigned long long)triggered, (unsigned long long)total_calls, pct);
-  } else {
-    printf("Cutoff stats: no calls\n");
-  }
 }

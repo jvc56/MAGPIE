@@ -165,20 +165,4 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen);
 
 void gen_shadow(MoveGen *gen);
 
-void gen_reset_anchor_stats(void);
-void gen_reset_subrack_stats(void);
-void gen_reset_early_cutoff_stats(void);
-void gen_get_anchor_stats(uint64_t *available, uint64_t *processed,
-                          uint64_t *skipped);
-void gen_get_subrack_stats(uint64_t *available, uint64_t *processed,
-                           uint64_t *skipped);
-void gen_get_early_cutoff_stats(uint64_t *movegen_calls,
-                                uint64_t *anchors_filtered,
-                                uint64_t *anchors_total);
-
-void gen_reset_wmp_subanchor_stats(void);
-void gen_get_wmp_subanchor_stats(uint64_t *total, uint64_t *skippable);
-void gen_record_wmp_subanchor(int tiles, int blocks, bool skippable);
-void gen_print_wmp_subanchor_breakdown(void);
-
 #endif

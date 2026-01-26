@@ -38,25 +38,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Note: These stats are approximate and not thread-safe. They are intended
-// for debugging/profiling only and may have data races when used with
-// multithreaded inference.
-static uint64_t total_anchors_available = 0;
-static uint64_t total_anchors_processed = 0;
-static uint64_t total_anchors_skipped = 0;
-static uint64_t total_subracks_available = 0;
-static uint64_t total_subracks_processed = 0;
-static uint64_t total_subracks_skipped = 0;
-static uint64_t total_movegen_calls = 0;
-static uint64_t anchors_filtered_by_shadow_equity = 0;
-static uint64_t anchors_total_in_shadow = 0;
-static uint64_t wmp_subanchor_total_count = 0;
-static uint64_t wmp_subanchor_skippable_count = 0;
-static uint64_t
-    wmp_subanchor_by_tiles_blocks_count[RACK_SIZE + 1]
-                                       [MAX_POSSIBLE_PLAYTHROUGH_BLOCKS][2] = {
-                                           0};
-
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
 // Cache move generators since destroying
@@ -95,87 +76,6 @@ void gen_destroy_cache(void) {
     cached_gens[i] = NULL;
   }
   cpthread_mutex_unlock(&cache_mutex);
-}
-
-void gen_reset_anchor_stats(void) {
-  total_anchors_available = 0;
-  total_anchors_processed = 0;
-  total_anchors_skipped = 0;
-}
-
-void gen_get_anchor_stats(uint64_t *available, uint64_t *processed,
-                          uint64_t *skipped) {
-  *available = total_anchors_available;
-  *processed = total_anchors_processed;
-  *skipped = total_anchors_skipped;
-}
-
-void gen_reset_subrack_stats(void) {
-  total_subracks_available = 0;
-  total_subracks_processed = 0;
-  total_subracks_skipped = 0;
-}
-
-void gen_get_subrack_stats(uint64_t *available, uint64_t *processed,
-                           uint64_t *skipped) {
-  *available = total_subracks_available;
-  *processed = total_subracks_processed;
-  *skipped = total_subracks_skipped;
-}
-
-void gen_reset_early_cutoff_stats(void) {
-  total_movegen_calls = 0;
-  anchors_filtered_by_shadow_equity = 0;
-  anchors_total_in_shadow = 0;
-}
-
-void gen_get_early_cutoff_stats(uint64_t *movegen_calls,
-                                uint64_t *anchors_filtered,
-                                uint64_t *anchors_total) {
-  *movegen_calls = total_movegen_calls;
-  *anchors_filtered = anchors_filtered_by_shadow_equity;
-  *anchors_total = anchors_total_in_shadow;
-}
-
-void gen_reset_wmp_subanchor_stats(void) {
-  wmp_subanchor_total_count = 0;
-  wmp_subanchor_skippable_count = 0;
-  for (int t = 0; t <= RACK_SIZE; t++) {
-    for (int b = 0; b < MAX_POSSIBLE_PLAYTHROUGH_BLOCKS; b++) {
-      wmp_subanchor_by_tiles_blocks_count[t][b][0] = 0;
-      wmp_subanchor_by_tiles_blocks_count[t][b][1] = 0;
-    }
-  }
-}
-
-void gen_get_wmp_subanchor_stats(uint64_t *total, uint64_t *skippable) {
-  *total = wmp_subanchor_total_count;
-  *skippable = wmp_subanchor_skippable_count;
-}
-
-void gen_record_wmp_subanchor(int tiles, int blocks, bool skippable) {
-  wmp_subanchor_total_count++;
-  wmp_subanchor_by_tiles_blocks_count[tiles][blocks][0]++;
-  if (skippable) {
-    wmp_subanchor_skippable_count++;
-    wmp_subanchor_by_tiles_blocks_count[tiles][blocks][1]++;
-  }
-}
-
-void gen_print_wmp_subanchor_breakdown(void) {
-  printf("WMP subanchor breakdown (tiles played, blocks -> total, skippable, "
-         "%%):\n");
-  for (int t = 0; t <= RACK_SIZE; t++) {
-    for (int b = 0; b < MAX_POSSIBLE_PLAYTHROUGH_BLOCKS; b++) {
-      if (wmp_subanchor_by_tiles_blocks_count[t][b][0] > 0) {
-        uint64_t total = wmp_subanchor_by_tiles_blocks_count[t][b][0];
-        uint64_t skip = wmp_subanchor_by_tiles_blocks_count[t][b][1];
-        printf("  %d tiles, %d blocks: %10llu / %10llu (%6.2f%%)\n", t, b,
-               (unsigned long long)skip, (unsigned long long)total,
-               100.0 * (double)skip / (double)total);
-      }
-    }
-  }
 }
 
 // Cache getter functions
@@ -798,9 +698,6 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   assert(anchor->rightmost_start_col <= anchor->col);
   const int num_subrack_combinations =
       wmp_move_gen_get_num_subrack_combinations(wgen);
-  int subracks_processed = 0;
-  int subracks_skipped = 0;
-  total_subracks_available += num_subrack_combinations;
   for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
        subrack_idx++) {
     if (gen->number_of_tiles_in_bag > 0) {
@@ -808,14 +705,12 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
           wmp_move_gen_get_leave_value(wgen, subrack_idx);
       if (better_play_has_been_found(gen, leave_value +
                                               anchor->highest_possible_score)) {
-        subracks_skipped++;
         continue;
       }
     }
     if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx)) {
       continue;
     }
-    subracks_processed++;
     if (gen->number_of_tiles_in_bag == 0) {
       wgen->leave_value = 0;
       for (int ml = 0; ml < ld_get_size(&gen->ld); ml++) {
@@ -836,17 +731,12 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
                                                       start_col)) {
           record_wmp_plays_for_word(gen, subrack_idx, start_col, 0, 0);
           if (gen->threshold_exceeded) {
-            subracks_skipped += num_subrack_combinations - subrack_idx - 1;
-            goto end_wordmap_gen;
+            return;
           }
         }
       }
     }
   }
-
-end_wordmap_gen:
-  total_subracks_processed += subracks_processed;
-  total_subracks_skipped += subracks_skipped;
 }
 
 void go_on(MoveGen *gen, int current_col, MachineLetter L,
@@ -1853,13 +1743,6 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
     return;
   }
 
-  anchors_total_in_shadow++;
-  if (gen->stop_on_threshold &&
-      gen->target_equity_cutoff > EQUITY_INITIAL_VALUE &&
-      gen->highest_shadow_equity <= gen->target_equity_cutoff) {
-    anchors_filtered_by_shadow_equity++;
-  }
-
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
     wmp_move_gen_add_anchors(&gen->wmp_move_gen, gen->current_row_index, col,
                              gen->last_anchor_col, gen->dir,
@@ -2076,20 +1959,14 @@ void gen_record_scoring_plays(MoveGen *gen) {
   if (gen->is_wordsmog) {
     rack_reset(&gen->full_player_rack);
   }
-  int anchors_processed = 0;
-  int anchors_total = gen->anchor_heap.count;
-  int anchors_skipped = 0;
   while (gen->anchor_heap.count > 0) {
     if (gen->threshold_exceeded) {
-      anchors_skipped = gen->anchor_heap.count;
       break;
     }
     const Anchor anchor = anchor_heap_extract_max(&gen->anchor_heap);
     if (better_play_has_been_found(gen, anchor.highest_possible_equity)) {
-      anchors_skipped = gen->anchor_heap.count + 1;
       break;
     }
-    anchors_processed++;
     gen->current_anchor_col = anchor.col;
     // Don't recopy the row cache if we're working on the same board lane
     // as the previous anchor. When anchors have been sorted by descending
@@ -2117,9 +1994,6 @@ void gen_record_scoring_plays(MoveGen *gen) {
     }
 
   }
-  total_anchors_available += anchors_total;
-  total_anchors_processed += anchors_processed;
-  total_anchors_skipped += anchors_skipped;
 }
 
 void gen_record_pass(MoveGen *gen) {
@@ -2148,7 +2022,6 @@ void gen_record_pass(MoveGen *gen) {
 }
 
 void generate_moves(const MoveGenArgs *args) {
-  total_movegen_calls++;
   MoveGen *gen = get_movegen(args->thread_index);
   gen_load_position(gen, args);
   gen_look_up_leaves_and_record_exchanges(gen);

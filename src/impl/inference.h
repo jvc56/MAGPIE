@@ -20,8 +20,4 @@ void infer(InferenceArgs *args, InferenceCtx **ctx, InferenceResults *results,
 void infer_without_ctx(InferenceArgs *args, InferenceResults *results,
                        ErrorStack *error_stack);
 
-void inference_reset_cutoff_stats(void);
-void inference_get_cutoff_stats(uint64_t *total_calls, uint64_t *triggered);
-void inference_print_cutoff_stats(void);
-
 #endif
