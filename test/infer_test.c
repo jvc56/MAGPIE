@@ -1233,14 +1233,16 @@ void run_inference_comparison(Config *config, int target_index,
 }
 
 // Test that cutoff optimization produces identical results to non-optimized
-// inference. Runs 5 full games plus additional games until we have at least
-// 2 exchanges above threshold (optimization enabled) and 2 below threshold
-// (optimization disabled).
+// inference. Runs games until we have at least MIN_FULL_GAMES complete and
+// have tested at least MIN_EXCHANGES_ABOVE_THRESHOLD exchanges where the
+// optimization is enabled (5+ tiles) and MIN_EXCHANGES_BELOW_THRESHOLD where
+// it's disabled (1-4 tiles). Has a hard cap of MAX_GAMES to prevent CI timeouts.
 void test_infer_cutoff_optimization(bool use_wmp) {
   const int NUM_THREADS = 10;
   const int MIN_FULL_GAMES = 5;
   const int MIN_EXCHANGES_ABOVE_THRESHOLD = 2;
   const int MIN_EXCHANGES_BELOW_THRESHOLD = 2;
+  const int MAX_GAMES = 100;
 
   char *config_str = get_formatted_string(
       "set -lex CSW21 -wmp %s -s1 equity -s2 equity -r1 all -r2 all "
@@ -1265,14 +1267,15 @@ void test_infer_cutoff_optimization(bool use_wmp) {
   int exchanges_above_threshold = 0;  // optimization enabled (5+ tiles)
   int exchanges_below_threshold = 0;  // optimization disabled (1-4 tiles)
   int scoring_plays_tested = 0;
-  uint64_t seed = 42;
-  XoshiroPRNG *prng = prng_create(seed);
+  const uint64_t base_seed = 42;
 
-  while (games_completed < MIN_FULL_GAMES ||
-         exchanges_above_threshold < MIN_EXCHANGES_ABOVE_THRESHOLD ||
-         exchanges_below_threshold < MIN_EXCHANGES_BELOW_THRESHOLD) {
-    // Reset game for new game
+  while ((games_completed < MIN_FULL_GAMES ||
+          exchanges_above_threshold < MIN_EXCHANGES_ABOVE_THRESHOLD ||
+          exchanges_below_threshold < MIN_EXCHANGES_BELOW_THRESHOLD) &&
+         games_completed < MAX_GAMES) {
+    // Reset game and seed for deterministic behavior
     game_reset(game);
+    game_seed(game, base_seed + games_completed);
     draw_starting_racks(game);
 
     // Play the game move by move
@@ -1340,8 +1343,6 @@ void test_infer_cutoff_optimization(bool use_wmp) {
     }
 
     games_completed++;
-    // Reseed PRNG for next game
-    prng_seed(prng, seed + games_completed);
   }
 
   printf("Cutoff optimization test (%s): %d games, %d scoring plays, "
@@ -1349,7 +1350,6 @@ void test_infer_cutoff_optimization(bool use_wmp) {
          use_wmp ? "WMP" : "KWG", games_completed, scoring_plays_tested,
          exchanges_above_threshold, exchanges_below_threshold);
 
-  prng_destroy(prng);
   move_list_destroy(move_list);
   error_stack_destroy(error_stack);
   inference_results_destroy(results_with_cutoff);

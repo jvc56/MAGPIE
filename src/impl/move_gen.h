@@ -140,10 +140,10 @@ typedef struct MoveGenArgs {
 
   // Movegen for inferences after exchanges will need to know the number of
   // tiles exchanged so that it can determine the target equity value after
-  // generating exchanges to skip anchors that can't surpass it, or potentially
-  // return early without calling shadow_gen or generating scoring plays, if a
-  // different exchange size exceeds the target exchange value by
-  // eq_margin_movegen. Value is UNSET_LEAVE_SIZE for non-exchange scenarios.
+  // generating exchanges, and then skip anchors that can't surpass that value
+  // by eq_margin_movegen. This field does not itself trigger an early return
+  // from move generation based on alternate exchange sizes. Value is
+  // UNSET_LEAVE_SIZE for non-exchange scenarios.
   int target_leave_size_for_exchange_cutoff;
   int thread_index;
   MoveList *move_list;
@@ -173,9 +173,8 @@ void gen_get_anchor_stats(uint64_t *available, uint64_t *processed,
 void gen_get_subrack_stats(uint64_t *available, uint64_t *processed,
                            uint64_t *skipped);
 void gen_get_early_cutoff_stats(uint64_t *movegen_calls,
-                                uint64_t *shadow_skippable,
-                                uint64_t *anchor_filterable,
-                                uint64_t *anchor_total);
+                                uint64_t *anchors_filtered,
+                                uint64_t *anchors_total);
 
 void gen_reset_wmp_subanchor_stats(void);
 void gen_get_wmp_subanchor_stats(uint64_t *total, uint64_t *skippable);

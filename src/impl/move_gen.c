@@ -38,6 +38,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Note: These stats are approximate and not thread-safe. They are intended
+// for debugging/profiling only and may have data races when used with
+// multithreaded inference.
 static uint64_t total_anchors_available = 0;
 static uint64_t total_anchors_processed = 0;
 static uint64_t total_anchors_skipped = 0;
@@ -45,7 +48,6 @@ static uint64_t total_subracks_available = 0;
 static uint64_t total_subracks_processed = 0;
 static uint64_t total_subracks_skipped = 0;
 static uint64_t total_movegen_calls = 0;
-static uint64_t skipped_shadow_by_exchange = 0;
 static uint64_t anchors_filtered_by_shadow_equity = 0;
 static uint64_t anchors_total_in_shadow = 0;
 static uint64_t wmp_subanchor_total_count = 0;
@@ -123,17 +125,14 @@ void gen_get_subrack_stats(uint64_t *available, uint64_t *processed,
 
 void gen_reset_early_cutoff_stats(void) {
   total_movegen_calls = 0;
-  skipped_shadow_by_exchange = 0;
   anchors_filtered_by_shadow_equity = 0;
   anchors_total_in_shadow = 0;
 }
 
 void gen_get_early_cutoff_stats(uint64_t *movegen_calls,
-                                uint64_t *shadow_skipped_by_exch,
                                 uint64_t *anchors_filtered,
                                 uint64_t *anchors_total) {
   *movegen_calls = total_movegen_calls;
-  *shadow_skipped_by_exch = skipped_shadow_by_exchange;
   *anchors_filtered = anchors_filtered_by_shadow_equity;
   *anchors_total = anchors_total_in_shadow;
 }
@@ -2117,9 +2116,6 @@ void gen_record_scoring_plays(MoveGen *gen) {
                     0);
     }
 
-    // If a better play has been found than should have been possible for
-    // this anchor, highest_possible_equity was invalid.
-    // assert(!better_play_has_been_found(gen, anchor.highest_possible_equity));
   }
   total_anchors_available += anchors_total;
   total_anchors_processed += anchors_processed;

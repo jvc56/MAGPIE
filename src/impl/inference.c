@@ -824,12 +824,18 @@ void inference_get_cutoff_stats(uint64_t *total_calls, uint64_t *triggered) {
 }
 
 void inference_print_cutoff_stats(void) {
-  if (cutoff_total_calls > 0) {
-    double pct =
-        100.0 * (double)cutoff_triggered_count / (double)cutoff_total_calls;
+  uint64_t total_calls;
+  uint64_t triggered;
+
+  cpthread_mutex_lock(&cutoff_stats_lock);
+  total_calls = cutoff_total_calls;
+  triggered = cutoff_triggered_count;
+  cpthread_mutex_unlock(&cutoff_stats_lock);
+
+  if (total_calls > 0) {
+    double pct = 100.0 * (double)triggered / (double)total_calls;
     printf("Cutoff stats: %llu triggered / %llu total (%.2f%%)\n",
-           (unsigned long long)cutoff_triggered_count,
-           (unsigned long long)cutoff_total_calls, pct);
+           (unsigned long long)triggered, (unsigned long long)total_calls, pct);
   } else {
     printf("Cutoff stats: no calls\n");
   }

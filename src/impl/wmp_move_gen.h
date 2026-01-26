@@ -387,16 +387,17 @@ static inline void wmp_move_gen_add_anchors(WMPMoveGen *wmp_move_gen, int row,
     // Check if this subanchor can be skipped because its highest possible
     // equity is below the cutoff threshold. This is safe when cutoff_equity
     // is fixed (as in inference with stop_on_threshold).
-    const bool can_skip =
-        inference_cutoff_equity != EQUITY_MAX_VALUE &&
-        anchor->highest_possible_equity < inference_cutoff_equity;
+    if (inference_cutoff_equity != EQUITY_MAX_VALUE) {
+      const bool can_skip =
+          anchor->highest_possible_equity < inference_cutoff_equity;
 
-    // Instrumentation: count subanchors and how many were skipped
-    gen_record_wmp_subanchor(anchor->tiles_to_play, anchor->playthrough_blocks,
-                             can_skip);
+      // Instrumentation: count subanchors and how many could be skipped
+      gen_record_wmp_subanchor(anchor->tiles_to_play, anchor->playthrough_blocks,
+                               can_skip);
 
-    if (can_skip) {
-      continue;
+      if (can_skip) {
+        continue;
+      }
     }
 
     assert(anchor->word_length >= MINIMUM_WORD_LENGTH);
