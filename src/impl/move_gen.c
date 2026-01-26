@@ -1980,6 +1980,9 @@ void gen_record_scoring_plays(MoveGen *gen) {
                     0);
     }
 
+    // If a better play has been found than should have been possible for
+    // this anchor, highest_possible_equity was invalid.
+    assert(!better_play_has_been_found(gen, anchor.highest_possible_equity));
   }
 }
 

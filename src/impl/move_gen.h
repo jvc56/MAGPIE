@@ -114,6 +114,9 @@ typedef struct MoveGen {
   // shadow_word_multiplier as part of computing score shadow_record.
   Equity shadow_mainword_restricted_score;
 
+  // Product of word multipliers used by newly played tiles.
+  int shadow_word_multiplier;
+
   Equity highest_shadow_equity;
   Equity highest_shadow_score;
   int number_of_letters_on_rack;
