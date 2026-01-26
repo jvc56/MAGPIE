@@ -1,3 +1,5 @@
+#include "../src/def/board_defs.h"
+#include "../src/def/game_defs.h"
 #include "../src/def/inference_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/thread_control_defs.h"
@@ -13,11 +15,10 @@
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/util/io_util.h"
-#include "../src/util/math_util.h"
-#include "../src/util/string_util.h"
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -63,7 +64,8 @@ static void assert_inference_results_match(InferenceResults *results_with_cutoff
 
 // Run inference with and without cutoff optimization and verify results match
 static void
-run_inference_comparison(Config *config, int target_index, Equity target_score,
+run_inference_comparison(const Config *config, int target_index,
+                         Equity target_score,
                          int target_num_exch, Rack *target_played_tiles,
                          InferenceResults *results_with_cutoff,
                          InferenceResults *results_without_cutoff, int ld_size,
@@ -151,7 +153,7 @@ static void test_infer_cutoff_optimization(bool use_wmp) {
       const Bag *bag = game_get_bag(game);
 
       // Generate the top equity move
-      Move *top_move = get_top_equity_move(game, 0, move_list);
+      const Move *top_move = get_top_equity_move(game, 0, move_list);
       const game_event_t move_type = move_get_type(top_move);
 
       // Only test inference for tile placement moves and exchanges

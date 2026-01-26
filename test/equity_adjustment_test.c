@@ -26,7 +26,8 @@ void test_macondo_opening_equity_adjustments(void) {
       .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,  };
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
 
   rack_set_to_string(ld, rack, "EORSTVX");
   generate_moves_for_game(&move_gen_args);
@@ -108,7 +109,8 @@ void test_macondo_endgame_equity_adjustments(void) {
       .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,  };
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
 
   load_cgp_or_die(
       game,

@@ -1849,13 +1849,14 @@ void config_fill_infer_args(const Config *config, bool use_game_history,
 void config_infer(const Config *config, bool use_game_history, int target_index,
                   Equity target_score, int target_num_exch,
                   Rack *target_played_tiles, Rack *target_known_rack,
-                  Rack *nontarget_known_rack, bool use_inference_cutoff_optimization, InferenceResults *results,
-                  ErrorStack *error_stack) {
+                  Rack *nontarget_known_rack,
+                  bool use_inference_cutoff_optimization,
+                  InferenceResults *results, ErrorStack *error_stack) {
   InferenceArgs args;
   config_fill_infer_args(config, use_game_history, target_index, target_score,
                          target_num_exch, target_played_tiles,
-                         use_inference_cutoff_optimization,
-                         target_known_rack, nontarget_known_rack, &args);
+                         use_inference_cutoff_optimization, target_known_rack,
+                         nontarget_known_rack, &args);
   infer_without_ctx(&args, results, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
