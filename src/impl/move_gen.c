@@ -2032,8 +2032,4 @@ void generate_moves(const MoveGenArgs *args) {
   }
   gen_record_scoring_plays(gen);
   gen_record_pass(gen);
-
-  if (gen->stop_on_threshold && gen->threshold_exceeded) {
-    // Log for debugging if needed
-  }
 }
