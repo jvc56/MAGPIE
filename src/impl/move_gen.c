@@ -282,9 +282,10 @@ static inline void update_best_move_or_insert_into_movelist(
     break;
   }
 
-  // Check if this move is an exchange in exchange cutoff mode.
-  // In exchange cutoff mode, exchanges should not raise the cutoff because
-  // we still need to search for scoring plays that might exceed the threshold.
+  // In exchange cutoff mode, exchanges are recorded first and then
+  // target_equity_cutoff is set to the best exchange + margin. Exchanges
+  // should not update the cutoff or trigger threshold_exceeded since we
+  // need to continue to find scoring plays.
   const bool is_exchange_in_exchange_cutoff_mode =
       (move_type == GAME_EVENT_EXCHANGE) &&
       (gen->target_leave_size != UNSET_LEAVE_SIZE);
@@ -297,15 +298,7 @@ static inline void update_best_move_or_insert_into_movelist(
   if (gen->stop_on_threshold &&
       move_equity_or_score > gen->target_equity_cutoff &&
       !is_exchange_in_exchange_cutoff_mode) {
-    // In exchange cutoff mode, only set threshold_exceeded if this move also
-    // became the best move. This prevents a low-equity scoring play (that
-    // exceeds the threshold but is worse than the best exchange) from
-    // triggering early termination before we've found the true best scoring
-    // play.
-    if ((gen->target_leave_size == UNSET_LEAVE_SIZE) ||
-        need_to_update_best_move_equity_or_score) {
-      gen->threshold_exceeded = true;
-    }
+    gen->threshold_exceeded = true;
   }
 }
 
