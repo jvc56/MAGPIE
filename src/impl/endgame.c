@@ -673,11 +673,13 @@ void string_builder_endgame_results(StringBuilder *pv_description,
     for (int i = 0; i < pv_line->num_moves; i++) {
       int curr_col = 0;
       // Set the player name
-      string_grid_set_cell(
-          sg, i, curr_col++,
-          get_formatted_string(
-              "(%s)", game_history_player_get_name(
-                          game_history, game_get_player_on_turn_index(gc))));
+      const int player_on_turn = game_get_player_on_turn_index(gc);
+      const char *player_name =
+          game_history ? game_history_player_get_name(game_history,
+                                                      player_on_turn)
+                       : (player_on_turn == 0 ? "Player 1" : "Player 2");
+      string_grid_set_cell(sg, i, curr_col++,
+                           get_formatted_string("(%s)", player_name));
 
       // Set the play sequence index and player name
       string_grid_set_cell(sg, i, curr_col++,
