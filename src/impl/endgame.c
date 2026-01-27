@@ -2,6 +2,7 @@
 
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"
+#include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/move_defs.h"
@@ -205,6 +206,8 @@ int generate_stm_plays(EndgameSolverWorker *worker) {
       .override_kwg = worker->solver->pruned_kwg,
       .thread_index = worker->thread_index,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves(&args);
   SmallMove *arena_small_moves = (SmallMove *)arena_alloc(

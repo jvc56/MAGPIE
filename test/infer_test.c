@@ -81,7 +81,7 @@ error_code_t infer_for_test(InferenceCtx **ctx, const Config *config,
       &args, config_get_num_plays(config),
       config_get_eq_margin_inference(config), NULL, game,
       config_get_num_threads(config), config_get_print_interval(config),
-      config_get_thread_control(config), false, target_index,
+      config_get_thread_control(config), false, true, target_index,
       int_to_equity(target_score), target_num_exch, &target_played_tiles,
       &target_known_rack, &nontarget_known_rack);
   if (!ctx) {
@@ -135,7 +135,7 @@ infer_for_test_with_history(Config *config, InferenceResults *inference_results,
     string_builder_destroy(set_rack_cmd_sb);
   }
   config_infer(config, true, 0, 0, 0, &target_played_tiles, &target_known_rack,
-               &nontarget_known_rack, inference_results, error_stack);
+               &nontarget_known_rack, true, inference_results, error_stack);
   error_code_t status = error_stack_top(error_stack);
   error_stack_destroy(error_stack);
   return status;

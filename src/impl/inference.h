@@ -19,4 +19,5 @@ void infer(InferenceArgs *args, InferenceCtx **ctx, InferenceResults *results,
            ErrorStack *error_stack);
 void infer_without_ctx(InferenceArgs *args, InferenceResults *results,
                        ErrorStack *error_stack);
+
 #endif

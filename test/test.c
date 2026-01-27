@@ -24,6 +24,7 @@
 #include "gameplay_test.h"
 #include "gcg_test.h"
 #include "heat_map_test.h"
+#include "infer_cmp_test.h"
 #include "infer_test.h"
 #include "klv_test.h"
 #include "kwg_alpha_test.h"
@@ -119,6 +120,12 @@ static TestEntry test_table[] = {
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
+// Tests that only run when explicitly requested (not included in run_all)
+static TestEntry on_demand_test_table[] = {
+    {"infercmp", test_infer_cmp},
+    {NULL, NULL} // Sentinel value to mark end of array
+};
+
 void run_all(void) {
   for (int i = 0; test_table[i].name != NULL; ++i) {
     printf("Running test %s\n", test_table[i].name);
@@ -130,6 +137,13 @@ void run_test(const char *subtest) {
   for (int i = 0; test_table[i].name != NULL; ++i) {
     if (strcmp(subtest, test_table[i].name) == 0) {
       test_table[i].func();
+      return;
+    }
+  }
+  // Check on-demand tests (not run by run_all)
+  for (int i = 0; on_demand_test_table[i].name != NULL; ++i) {
+    if (strcmp(subtest, on_demand_test_table[i].name) == 0) {
+      on_demand_test_table[i].func();
       return;
     }
   }

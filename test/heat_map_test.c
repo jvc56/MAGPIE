@@ -10,6 +10,7 @@
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
+#include <inttypes.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -36,8 +37,8 @@ void assert_heat_map_count(const char *name, int row, int col, heat_map_t type,
   if (actual_count != expected_count) {
     printf("heat map counts mismatch for %s:\n", name);
     printf("row: %d, col: %d, type: %d\n", row, col, type);
-    printf("actual:   %lu\n", actual_count);
-    printf("expected: %lu\n", expected_count);
+    printf("actual:   %" PRIu64 "\n", actual_count);
+    printf("expected: %" PRIu64 "\n", expected_count);
     assert(0);
   }
 }

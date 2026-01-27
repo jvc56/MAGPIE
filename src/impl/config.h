@@ -86,8 +86,9 @@ Game *config_game_create(const Config *config);
 void config_infer(const Config *config, bool use_game_history, int target_index,
                   Equity target_score, int target_num_exch,
                   Rack *target_played_tiles, Rack *target_known_rack,
-                  Rack *nontarget_known_rack, InferenceResults *results,
-                  ErrorStack *error_stack);
+                  Rack *nontarget_known_rack,
+                  bool use_inference_cutoff_optimization,
+                  InferenceResults *results, ErrorStack *error_stack);
 void config_endgame(Config *config, EndgameResults *endgame_results,
                     ErrorStack *error_stack);
 void config_autoplay(const Config *config, AutoplayResults *autoplay_results,

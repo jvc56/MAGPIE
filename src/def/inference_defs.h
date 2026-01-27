@@ -1,6 +1,11 @@
 #ifndef INFERENCE_DEFS_H
 #define INFERENCE_DEFS_H
 
+// Minimum leave size for enabling cutoff optimization on exchanges.
+// Benchmarks show cutoff optimization hurts performance for exchanges
+// with leave size >= this threshold (i.e., small exchanges).
+#define INFERENCE_CUTOFF_MIN_EXCHANGE_LEAVE_SIZE 3
+
 typedef enum {
   INFERENCE_TYPE_LEAVE,
   INFERENCE_TYPE_EXCHANGED,
