@@ -263,6 +263,15 @@ void endgame_solver_destroy(EndgameSolver *es) {
   free(es);
 }
 
+// Setter functions for optimization flags (used for benchmarking)
+void endgame_solver_set_lmr(EndgameSolver *es, bool enabled) {
+  es->lmr_optim = enabled;
+}
+
+void endgame_solver_set_aspiration(EndgameSolver *es, bool enabled) {
+  es->aspiration_optim = enabled;
+}
+
 EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
                                                   int worker_index) {
 
