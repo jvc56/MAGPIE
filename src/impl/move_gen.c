@@ -927,6 +927,183 @@ void go_on(MoveGen *gen, int current_col, MachineLetter L,
   }
 }
 
+// Forward declaration for small move generation (no leave tracking)
+static inline void go_on_small(MoveGen *gen, int current_col, MachineLetter L,
+                               uint32_t new_node_index, bool accepts,
+                               int leftstrip, int rightstrip, bool unique_play,
+                               Equity main_word_score, int word_multiplier,
+                               Equity cross_score);
+
+// Specialized recursive_gen for MOVE_RECORD_ALL_SMALL that skips leave_map
+// operations. Only tracks rack state directly.
+static inline void recursive_gen_small(MoveGen *gen, int col,
+                                       uint32_t node_index, int leftstrip,
+                                       int rightstrip, bool unique_play,
+                                       int main_word_score, int word_multiplier,
+                                       Equity cross_score) {
+  const MachineLetter current_letter = gen_cache_get_letter(gen, col);
+  uint64_t possible_letters_here = gen_cache_get_cross_set(gen, col) &
+                                   gen_cache_get_left_extension_set(gen, col);
+  if ((gen->tiles_played == 0) && (col == gen->current_anchor_col + 1)) {
+    possible_letters_here &= gen->anchor_right_extension_set;
+  }
+  if (possible_letters_here == 1) {
+    possible_letters_here = 0;
+  }
+  if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
+    const MachineLetter raw = get_unblanked_machine_letter(current_letter);
+    uint32_t next_node_index = 0;
+    bool accepts = false;
+    for (uint32_t i = node_index;; i++) {
+      const uint32_t node = kwg_node(gen->kwg, i);
+      if (kwg_node_tile(node) == raw) {
+        next_node_index = kwg_node_arc_index_prefetch(node, gen->kwg);
+        accepts = kwg_node_accepts(node);
+        break;
+      }
+      if (kwg_node_is_end(node)) {
+        break;
+      }
+    }
+    go_on_small(gen, col, current_letter, next_node_index, accepts, leftstrip,
+                rightstrip, unique_play, main_word_score, word_multiplier,
+                cross_score);
+  } else if (!rack_is_empty(&gen->player_rack) &&
+             ((possible_letters_here & gen->rack_cross_set) != 0)) {
+    for (uint32_t i = node_index;; i++) {
+      const uint32_t node = kwg_node(gen->kwg, i);
+      const MachineLetter ml = kwg_node_tile(node);
+      const uint16_t number_of_ml = rack_get_letter(&gen->player_rack, ml);
+      if (ml != 0 &&
+          (number_of_ml != 0 ||
+           rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&
+          board_is_letter_allowed_in_cross_set(possible_letters_here, ml)) {
+        const uint32_t next_node_index =
+            kwg_node_arc_index_prefetch(node, gen->kwg);
+        bool accepts = kwg_node_accepts(node);
+        if (number_of_ml > 0) {
+          rack_take_letter(&gen->player_rack, ml);
+          gen->tiles_played++;
+          go_on_small(gen, col, ml, next_node_index, accepts, leftstrip,
+                      rightstrip, unique_play, main_word_score, word_multiplier,
+                      cross_score);
+          gen->tiles_played--;
+          rack_add_letter(&gen->player_rack, ml);
+        }
+        // check blank
+        if (rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) > 0) {
+          rack_take_letter(&gen->player_rack, BLANK_MACHINE_LETTER);
+          gen->tiles_played++;
+          go_on_small(gen, col, get_blanked_machine_letter(ml), next_node_index,
+                      accepts, leftstrip, rightstrip, unique_play,
+                      main_word_score, word_multiplier, cross_score);
+          gen->tiles_played--;
+          rack_add_letter(&gen->player_rack, BLANK_MACHINE_LETTER);
+        }
+      }
+      if (kwg_node_is_end(node)) {
+        break;
+      }
+    }
+  }
+}
+
+// Specialized go_on for MOVE_RECORD_ALL_SMALL
+static inline void go_on_small(MoveGen *gen, int current_col, MachineLetter L,
+                               uint32_t new_node_index, bool accepts,
+                               int leftstrip, int rightstrip, bool unique_play,
+                               Equity main_word_score, int word_multiplier,
+                               Equity cross_score) {
+  const BonusSquare bonus_square = gen_cache_get_bonus_square(gen, current_col);
+  uint8_t letter_multiplier = 1;
+  uint8_t this_word_multiplier = 1;
+  bool fresh_tile = false;
+
+  const bool square_is_empty = gen_cache_is_empty(gen, current_col);
+  MachineLetter ml;
+  if (!square_is_empty) {
+    gen->strip[current_col] = PLAYED_THROUGH_MARKER;
+    ml = gen_cache_get_letter(gen, current_col);
+  } else {
+    gen->strip[current_col] = L;
+    ml = L;
+    fresh_tile = true;
+    this_word_multiplier = bonus_square_get_word_multiplier(bonus_square);
+    letter_multiplier = bonus_square_get_letter_multiplier(bonus_square);
+  }
+
+  const int inc_word_multiplier = this_word_multiplier * word_multiplier;
+  const Equity lsm = gen->tile_scores[ml] * letter_multiplier;
+  const Equity inc_main_word_score = lsm + main_word_score;
+  Equity inc_cross_scores = cross_score;
+
+  if (fresh_tile && gen_cache_get_is_cross_word(gen, current_col)) {
+    inc_cross_scores += (lsm + gen_cache_get_cross_score(gen, current_col)) *
+                        this_word_multiplier;
+  }
+
+  if (current_col <= gen->current_anchor_col) {
+    if (square_is_empty && gen->dir &&
+        gen_cache_get_cross_set(gen, current_col) == TRIVIAL_CROSS_SET) {
+      unique_play = true;
+    }
+    leftstrip = current_col;
+    bool no_letter_directly_left =
+        (current_col == 0) || gen_cache_is_empty(gen, current_col - 1);
+
+    if (accepts && no_letter_directly_left &&
+        play_is_nonempty_and_nonduplicate(gen->tiles_played, unique_play)) {
+      record_tile_placement_move(gen, leftstrip, rightstrip,
+                                 inc_main_word_score, inc_word_multiplier,
+                                 inc_cross_scores);
+    }
+
+    if (new_node_index == 0) {
+      return;
+    }
+
+    if (current_col > 0 && current_col - 1 != gen->last_anchor_col) {
+      recursive_gen_small(gen, current_col - 1, new_node_index, leftstrip,
+                          rightstrip, unique_play, inc_main_word_score,
+                          inc_word_multiplier, inc_cross_scores);
+    }
+
+    if ((gen->tiles_played != 0) ||
+        (gen->anchor_right_extension_set & gen->rack_cross_set) != 0) {
+      uint32_t separation_node_index = kwg_get_next_node_index(
+          gen->kwg, new_node_index, SEPARATION_MACHINE_LETTER);
+      if (separation_node_index != 0 && no_letter_directly_left &&
+          gen->current_anchor_col < BOARD_DIM - 1) {
+        recursive_gen_small(gen, gen->current_anchor_col + 1,
+                            separation_node_index, leftstrip, rightstrip,
+                            unique_play, inc_main_word_score,
+                            inc_word_multiplier, inc_cross_scores);
+      }
+    }
+  } else {
+    if (square_is_empty && !unique_play && gen->dir &&
+        gen_cache_get_cross_set(gen, current_col) == TRIVIAL_CROSS_SET) {
+      unique_play = true;
+    }
+    rightstrip = current_col;
+    bool no_letter_directly_right = (current_col == BOARD_DIM - 1) ||
+                                    gen_cache_is_empty(gen, current_col + 1);
+
+    if (accepts && no_letter_directly_right &&
+        play_is_nonempty_and_nonduplicate(gen->tiles_played, unique_play)) {
+      record_tile_placement_move(gen, leftstrip, rightstrip,
+                                 inc_main_word_score, inc_word_multiplier,
+                                 inc_cross_scores);
+    }
+
+    if (new_node_index != 0 && current_col < BOARD_DIM - 1) {
+      recursive_gen_small(gen, current_col + 1, new_node_index, leftstrip,
+                          rightstrip, unique_play, inc_main_word_score,
+                          inc_word_multiplier, inc_cross_scores);
+    }
+  }
+}
+
 void go_on_alpha(MoveGen *gen, int current_col, MachineLetter L, int leftstrip,
                  int rightstrip, bool unique_play, int main_word_score,
                  int word_multiplier, Equity cross_score);
@@ -1930,6 +2107,40 @@ void gen_shadow(MoveGen *gen) {
   }
 }
 
+void gen_record_scoring_plays_small(MoveGen *gen) {
+  gen->tiles_played = 0;
+  const uint32_t kwg_root_node_index = kwg_get_root_node_index(gen->kwg);
+
+  for (int dir = 0; dir < 2; dir++) {
+    gen->dir = dir;
+    for (int row = 0; row < BOARD_DIM; row++) {
+      if (gen->row_number_of_anchors_cache[BOARD_DIM * dir + row] == 0) {
+        continue;
+      }
+      gen->current_row_index = row;
+      board_copy_row_cache(gen->lanes_cache, gen->row_cache, row, dir);
+
+      int last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+      for (int col = 0; col < BOARD_DIM; col++) {
+        if (gen_cache_get_is_anchor(gen, col)) {
+          gen->current_anchor_col = col;
+          gen->last_anchor_col = last_anchor_col;
+          gen->anchor_right_extension_set =
+              gen_cache_get_right_extension_set(gen, col);
+          gen->current_anchor_highest_possible_score = EQUITY_MAX_VALUE;
+
+          recursive_gen_small(gen, col, kwg_root_node_index, col, col,
+                              gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+          last_anchor_col = col;
+          if (!gen_cache_is_empty(gen, col)) {
+            last_anchor_col++;
+          }
+        }
+      }
+    }
+  }
+}
+
 void gen_record_scoring_plays(MoveGen *gen) {
   if (gen->threshold_exceeded) {
     return;
@@ -2014,25 +2225,29 @@ void gen_record_pass(MoveGen *gen) {
 void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen(args->thread_index);
   gen_load_position(gen, args);
-  gen_look_up_leaves_and_record_exchanges(gen);
+  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
+    gen_record_scoring_plays_small(gen);
+  } else {
+    gen_look_up_leaves_and_record_exchanges(gen);
 
-  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
-    const bool check_leaves = (gen->number_of_tiles_in_bag > 0) &&
-                              (gen->move_sort_type != MOVE_SORT_SCORE);
-    wmp_move_gen_check_nonplaythrough_existence(&gen->wmp_move_gen,
-                                                check_leaves, &gen->leave_map);
-  }
+    if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+      const bool check_leaves = (gen->number_of_tiles_in_bag > 0) &&
+                                (gen->move_sort_type != MOVE_SORT_SCORE);
+      wmp_move_gen_check_nonplaythrough_existence(
+          &gen->wmp_move_gen, check_leaves, &gen->leave_map);
+    }
 
-  if (gen->stop_on_threshold && gen->threshold_exceeded) {
-    gen_record_pass(gen);
-    return;
-  }
+    if (gen->stop_on_threshold && gen->threshold_exceeded) {
+      gen_record_pass(gen);
+      return;
+    }
 
-  gen_shadow(gen);
-  if (gen->threshold_exceeded) {
-    gen_record_pass(gen);
-    return;
+    gen_shadow(gen);
+    if (gen->threshold_exceeded) {
+      gen_record_pass(gen);
+      return;
+    }
+    gen_record_scoring_plays(gen);
   }
-  gen_record_scoring_plays(gen);
   gen_record_pass(gen);
 }
