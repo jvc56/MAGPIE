@@ -115,7 +115,7 @@ static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
     EndgameArgs args = {.game = game,
                         .thread_control = config_get_thread_control(config),
                         .plies = ply,
-                        .tt_fraction_of_mem = 0.25,
+                        .tt_fraction_of_mem = 0.05,
                         .initial_small_move_arena_size =
                             DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE};
     EndgameResults *results = config_get_endgame_results(config);
