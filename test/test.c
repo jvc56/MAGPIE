@@ -6,6 +6,7 @@
 #include "autoplay_test.h"
 #include "bag_test.h"
 #include "bai_test.h"
+#include "benchmark_endgame_test.h"
 #include "bit_rack_test.h"
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
@@ -123,6 +124,7 @@ static TestEntry test_table[] = {
 // Tests that only run when explicitly requested (not included in run_all)
 static TestEntry on_demand_test_table[] = {
     {"infercmp", test_infer_cmp},
+    {"benchend", test_benchmark_endgame},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

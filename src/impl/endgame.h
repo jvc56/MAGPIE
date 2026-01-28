@@ -16,12 +16,20 @@ enum {
 
 typedef struct EndgameSolver EndgameSolver;
 
+// Callback for per-ply PV reporting during iterative deepening
+// Parameters: depth, value (spread delta), pv_line, game, user_data
+typedef void (*EndgamePerPlyCallback)(int depth, int32_t value,
+                                      const struct PVLine *pv_line,
+                                      const struct Game *game, void *user_data);
+
 typedef struct EndgameArgs {
   ThreadControl *thread_control;
   const Game *game;
   double tt_fraction_of_mem;
   int plies;
   int initial_small_move_arena_size;
+  EndgamePerPlyCallback per_ply_callback;
+  void *per_ply_callback_data;
 } EndgameArgs;
 
 EndgameSolver *endgame_solver_create(void);
