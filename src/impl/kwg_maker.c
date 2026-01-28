@@ -1,4 +1,3 @@
-#include "../compat/ctime.h"
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/kwg_defs.h"
@@ -9,81 +8,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-
-// Timing accumulators for debugging (will be removed before PR review)
-// For small (optimized) version
-static double total_gaddag_gen_time_small = 0.0;
-static double total_gaddag_sort_time_small = 0.0;
-static double total_trie_build_time_small = 0.0;
-static double total_hash_calc_time_small = 0.0;
-static double total_merge_time_small = 0.0;
-static double total_final_index_time_small = 0.0;
-static double total_copy_nodes_time_small = 0.0;
-static int kwg_maker_call_count_small = 0;
-
-// For original version
-static double total_gaddag_gen_time_orig = 0.0;
-static double total_gaddag_sort_time_orig = 0.0;
-static double total_trie_build_time_orig = 0.0;
-static double total_hash_calc_time_orig = 0.0;
-static double total_merge_time_orig = 0.0;
-static double total_final_index_time_orig = 0.0;
-static double total_copy_nodes_time_orig = 0.0;
-static int kwg_maker_call_count_orig = 0;
-
-void kwg_maker_print_timing_stats(void) {
-  if (kwg_maker_call_count_small > 0) {
-    log_warn("KWG Maker SMALL Timing Stats (%d calls):",
-             kwg_maker_call_count_small);
-    log_warn("  GADDAG string generation: %.6fs", total_gaddag_gen_time_small);
-    log_warn("  GADDAG string sorting:    %.6fs", total_gaddag_sort_time_small);
-    log_warn("  Trie building:            %.6fs", total_trie_build_time_small);
-    log_warn("  Hash calculation:         %.6fs", total_hash_calc_time_small);
-    log_warn("  Node merging:             %.6fs", total_merge_time_small);
-    log_warn("  Final index assignment:   %.6fs", total_final_index_time_small);
-    log_warn("  Node copying:             %.6fs", total_copy_nodes_time_small);
-    log_warn("  Total KWG time:           %.6fs",
-             total_gaddag_gen_time_small + total_gaddag_sort_time_small +
-                 total_trie_build_time_small + total_hash_calc_time_small +
-                 total_merge_time_small + total_final_index_time_small +
-                 total_copy_nodes_time_small);
-  }
-  if (kwg_maker_call_count_orig > 0) {
-    log_warn("KWG Maker ORIGINAL Timing Stats (%d calls):",
-             kwg_maker_call_count_orig);
-    log_warn("  GADDAG string generation: %.6fs", total_gaddag_gen_time_orig);
-    log_warn("  GADDAG string sorting:    %.6fs", total_gaddag_sort_time_orig);
-    log_warn("  Trie building:            %.6fs", total_trie_build_time_orig);
-    log_warn("  Hash calculation:         %.6fs", total_hash_calc_time_orig);
-    log_warn("  Node merging:             %.6fs", total_merge_time_orig);
-    log_warn("  Final index assignment:   %.6fs", total_final_index_time_orig);
-    log_warn("  Node copying:             %.6fs", total_copy_nodes_time_orig);
-    log_warn("  Total KWG time:           %.6fs",
-             total_gaddag_gen_time_orig + total_gaddag_sort_time_orig +
-                 total_trie_build_time_orig + total_hash_calc_time_orig +
-                 total_merge_time_orig + total_final_index_time_orig +
-                 total_copy_nodes_time_orig);
-  }
-}
-
-void kwg_maker_reset_timing_stats(void) {
-  total_gaddag_gen_time_small = 0.0;
-  total_gaddag_sort_time_small = 0.0;
-  total_trie_build_time_small = 0.0;
-  total_hash_calc_time_small = 0.0;
-  total_merge_time_small = 0.0;
-  total_final_index_time_small = 0.0;
-  total_copy_nodes_time_small = 0.0;
-  kwg_maker_call_count_small = 0;
-  total_gaddag_gen_time_orig = 0.0;
-  total_gaddag_sort_time_orig = 0.0;
-  total_trie_build_time_orig = 0.0;
-  total_hash_calc_time_orig = 0.0;
-  total_merge_time_orig = 0.0;
-  total_final_index_time_orig = 0.0;
-  total_copy_nodes_time_orig = 0.0;
-  kwg_maker_call_count_orig = 0;
-}
 
 // The KWG data structure was originally
 // developed in wolges. For more details
@@ -558,19 +482,12 @@ add_gaddag_strings_for_word(const DictionaryWord *word,
   }
 }
 
-// Generate GADDAG strings without sorting (sort is called separately for
-// timing)
-static inline void add_gaddag_strings_no_sort(const DictionaryWordList *words,
-                                              DictionaryWordList *gaddag_strings) {
+void add_gaddag_strings(const DictionaryWordList *words,
+                        DictionaryWordList *gaddag_strings) {
   for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
     const DictionaryWord *word = dictionary_word_list_get_word(words, i);
     add_gaddag_strings_for_word(word, gaddag_strings);
   }
-}
-
-void add_gaddag_strings(const DictionaryWordList *words,
-                        DictionaryWordList *gaddag_strings) {
-  add_gaddag_strings_no_sort(words, gaddag_strings);
   dictionary_word_list_sort(gaddag_strings);
 }
 
@@ -641,15 +558,11 @@ static inline int get_letters_in_common(const DictionaryWord *word,
 // The dictionary word list must be in alphabetical order.
 KWG *make_kwg_from_words(const DictionaryWordList *words,
                          kwg_maker_output_t output, kwg_maker_merge_t merging) {
-  Timer timer;
-  kwg_maker_call_count_orig++;
-
   const bool output_dawg = (output == KWG_MAKER_OUTPUT_DAWG) ||
                            (output == KWG_MAKER_OUTPUT_DAWG_AND_GADDAG);
   const bool output_gaddag = (output == KWG_MAKER_OUTPUT_GADDAG) ||
                              (output == KWG_MAKER_OUTPUT_DAWG_AND_GADDAG);
 
-  ctimer_start(&timer);
   MutableNodeList *nodes = mutable_node_list_create();
   const int dawg_root_node_index = mutable_node_list_add_root(nodes);
   // Size is one beyond the longest string because nodes are created for
@@ -674,25 +587,12 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   }
 
   const int gaddag_root_node_index = mutable_node_list_add_root(nodes);
-  ctimer_stop(&timer);
-  total_trie_build_time_orig += ctimer_elapsed_seconds(&timer);
 
   if (output_gaddag) {
     last_word_length = 0;
     cached_node_indices[0] = gaddag_root_node_index;
     DictionaryWordList *gaddag_strings = dictionary_word_list_create();
-
-    ctimer_start(&timer);
-    add_gaddag_strings_no_sort(words, gaddag_strings);
-    ctimer_stop(&timer);
-    total_gaddag_gen_time_orig += ctimer_elapsed_seconds(&timer);
-
-    ctimer_start(&timer);
-    dictionary_word_list_sort(gaddag_strings);
-    ctimer_stop(&timer);
-    total_gaddag_sort_time_orig += ctimer_elapsed_seconds(&timer);
-
-    ctimer_start(&timer);
+    add_gaddag_strings(words, gaddag_strings);
     for (int i = 0; i < dictionary_word_list_get_count(gaddag_strings); i++) {
       const DictionaryWord *gaddag_string =
           dictionary_word_list_get_word(gaddag_strings, i);
@@ -703,17 +603,10 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
                     cached_node_indices);
     }
     dictionary_word_list_destroy(gaddag_strings);
-    ctimer_stop(&timer);
-    total_trie_build_time_orig += ctimer_elapsed_seconds(&timer);
   }
 
   if (merging == KWG_MAKER_MERGE_EXACT) {
-    ctimer_start(&timer);
     calculate_node_hash_values(nodes);
-    ctimer_stop(&timer);
-    total_hash_calc_time_orig += ctimer_elapsed_seconds(&timer);
-
-    ctimer_start(&timer);
     NodeHashTable table;
     node_hash_table_create(&table, nodes->count);
     const size_t count = nodes->count;
@@ -734,11 +627,8 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
       node->merged_into = match;
     }
     node_hash_table_destroy_buckets(&table);
-    ctimer_stop(&timer);
-    total_merge_time_orig += ctimer_elapsed_seconds(&timer);
   }
 
-  ctimer_start(&timer);
   MutableNode *dawg_root = &nodes->nodes[dawg_root_node_index];
   dawg_root->is_end = true;
   MutableNode *gaddag_root = &nodes->nodes[gaddag_root_node_index];
@@ -753,19 +643,13 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   if (output_gaddag) {
     set_final_indices(gaddag_root, nodes, ordered_pointers);
   }
-  ctimer_stop(&timer);
-  total_final_index_time_orig += ctimer_elapsed_seconds(&timer);
 
-  ctimer_start(&timer);
   const size_t final_node_count = ordered_pointers->count;
   KWG *kwg = kwg_create_empty();
   kwg_allocate_nodes(kwg, final_node_count);
   copy_nodes(ordered_pointers, nodes, kwg);
   mutable_node_list_destroy(nodes);
   node_pointer_list_destroy(ordered_pointers);
-  ctimer_stop(&timer);
-  total_copy_nodes_time_orig += ctimer_elapsed_seconds(&timer);
-
   return kwg;
 }
 
@@ -797,9 +681,6 @@ static size_t next_prime(size_t n) {
 KWG *make_kwg_from_words_small(const DictionaryWordList *words,
                                kwg_maker_output_t output,
                                kwg_maker_merge_t merging) {
-  Timer timer;
-  kwg_maker_call_count_small++;
-
   const bool output_dawg = (output == KWG_MAKER_OUTPUT_DAWG) ||
                            (output == KWG_MAKER_OUTPUT_DAWG_AND_GADDAG);
   const bool output_gaddag = (output == KWG_MAKER_OUTPUT_GADDAG) ||
@@ -823,8 +704,8 @@ KWG *make_kwg_from_words_small(const DictionaryWordList *words,
   const size_t hash_buckets = next_prime(estimated_nodes);
 
   // Create appropriately sized node list
-  ctimer_start(&timer);
-  MutableNodeList *nodes = mutable_node_list_create_with_capacity(estimated_nodes);
+  MutableNodeList *nodes =
+      mutable_node_list_create_with_capacity(estimated_nodes);
   const int dawg_root_node_index = mutable_node_list_add_root(nodes);
 
   int cached_node_indices[MAX_KWG_STRING_LENGTH + 1];
@@ -847,25 +728,12 @@ KWG *make_kwg_from_words_small(const DictionaryWordList *words,
   }
 
   const int gaddag_root_node_index = mutable_node_list_add_root(nodes);
-  ctimer_stop(&timer);
-  total_trie_build_time_small += ctimer_elapsed_seconds(&timer);
 
   if (output_gaddag) {
     // Pre-allocate gaddag_strings with estimated capacity
     DictionaryWordList *gaddag_strings =
         dictionary_word_list_create_with_capacity((int)estimated_gaddag_strings);
-
-    ctimer_start(&timer);
-    add_gaddag_strings_no_sort(words, gaddag_strings);
-    ctimer_stop(&timer);
-    total_gaddag_gen_time_small += ctimer_elapsed_seconds(&timer);
-
-    ctimer_start(&timer);
-    dictionary_word_list_sort(gaddag_strings);
-    ctimer_stop(&timer);
-    total_gaddag_sort_time_small += ctimer_elapsed_seconds(&timer);
-
-    ctimer_start(&timer);
+    add_gaddag_strings(words, gaddag_strings);
     last_word_length = 0;
     cached_node_indices[0] = gaddag_root_node_index;
     const int gaddag_count = dictionary_word_list_get_count(gaddag_strings);
@@ -879,17 +747,10 @@ KWG *make_kwg_from_words_small(const DictionaryWordList *words,
                     cached_node_indices);
     }
     dictionary_word_list_destroy(gaddag_strings);
-    ctimer_stop(&timer);
-    total_trie_build_time_small += ctimer_elapsed_seconds(&timer);
   }
 
   if (merging == KWG_MAKER_MERGE_EXACT) {
-    ctimer_start(&timer);
     calculate_node_hash_values(nodes);
-    ctimer_stop(&timer);
-    total_hash_calc_time_small += ctimer_elapsed_seconds(&timer);
-
-    ctimer_start(&timer);
     NodeHashTable table;
     node_hash_table_create_small(&table, nodes->count, hash_buckets);
     const size_t count = nodes->count;
@@ -910,11 +771,8 @@ KWG *make_kwg_from_words_small(const DictionaryWordList *words,
       node->merged_into = match;
     }
     node_hash_table_destroy_buckets(&table);
-    ctimer_stop(&timer);
-    total_merge_time_small += ctimer_elapsed_seconds(&timer);
   }
 
-  ctimer_start(&timer);
   MutableNode *dawg_root = &nodes->nodes[dawg_root_node_index];
   dawg_root->is_end = true;
   MutableNode *gaddag_root = &nodes->nodes[gaddag_root_node_index];
@@ -934,18 +792,12 @@ KWG *make_kwg_from_words_small(const DictionaryWordList *words,
   if (output_gaddag) {
     set_final_indices(gaddag_root, nodes, ordered_pointers);
   }
-  ctimer_stop(&timer);
-  total_final_index_time_small += ctimer_elapsed_seconds(&timer);
 
-  ctimer_start(&timer);
   const size_t final_node_count = ordered_pointers->count;
   KWG *kwg = kwg_create_empty();
   kwg_allocate_nodes(kwg, final_node_count);
   copy_nodes(ordered_pointers, nodes, kwg);
   mutable_node_list_destroy(nodes);
   node_pointer_list_destroy(ordered_pointers);
-  ctimer_stop(&timer);
-  total_copy_nodes_time_small += ctimer_elapsed_seconds(&timer);
-
   return kwg;
 }

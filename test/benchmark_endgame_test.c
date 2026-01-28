@@ -13,8 +13,6 @@
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
-#include "../src/impl/kwg_maker.h"
-#include "../src/impl/word_prune.h"
 #include "../src/str/game_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
@@ -149,16 +147,12 @@ static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
 void test_benchmark_endgame(void) {
   log_set_level(LOG_WARN); // Allow warnings to show diagnostics
 
-  const int num_games = 1000;
-  const int ply = 1;
+  const int num_games = 100;
+  const int ply = 3;
   const uint64_t base_seed = 0;
 
-  // Reset timing stats before benchmark
-  kwg_maker_reset_timing_stats();
-  word_prune_reset_timing_stats();
-
   Config *config = config_create_or_die(
-      "set -lex CSW21 -wmp false -threads 8 -s1 score -s2 score -r1 small -r2 small");
+      "set -lex CSW21 -threads 8 -s1 score -s2 score -r1 small -r2 small");
 
   EndgameSolver *solver = endgame_solver_create();
 
@@ -168,11 +162,6 @@ void test_benchmark_endgame(void) {
   printf("==============================================\n");
 
   run_endgames_with_timing(config, solver, num_games, ply, base_seed);
-
-  // Print timing stats after benchmark
-  printf("\n");
-  word_prune_print_timing_stats();
-  kwg_maker_print_timing_stats();
 
   endgame_solver_destroy(solver);
   config_destroy(config);

@@ -24,8 +24,4 @@ void kwg_write_gaddag_strings(const KWG *kwg, uint32_t node_index,
 void add_gaddag_strings(const DictionaryWordList *words,
                         DictionaryWordList *gaddag_strings);
 
-// Timing functions (for debugging, will be removed before PR review)
-void kwg_maker_print_timing_stats(void);
-void kwg_maker_reset_timing_stats(void);
-
 #endif

@@ -17,8 +17,4 @@ typedef struct BoardRows {
 void generate_possible_words(const Game *game, const KWG *override_kwg,
                              DictionaryWordList *possible_word_list);
 
-// Timing functions (for debugging, will be removed before PR review)
-void word_prune_print_timing_stats(void);
-void word_prune_reset_timing_stats(void);
-
 #endif // WORD_PRUNE_H
