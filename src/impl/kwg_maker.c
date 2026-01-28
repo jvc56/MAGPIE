@@ -653,7 +653,7 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
 }
 
 // Helper to get the next prime >= n for hash table sizing
-static size_t next_prime(size_t n) {
+static uint64_t next_prime(uint64_t n) {
   if (n <= 2) {
     return 2;
   }
@@ -664,9 +664,9 @@ static size_t next_prime(size_t n) {
   if (n % 2 == 0) {
     n++;
   }
-  while (1) {
+  for (;;) {
     bool is_prime = true;
-    for (size_t i = 3; i * i <= n; i += 2) {
+    for (uint64_t i = 3; i * i <= n; i += 2) {
       if (n % i == 0) {
         is_prime = false;
         break;
