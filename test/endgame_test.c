@@ -71,6 +71,7 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   endgame_args.initial_small_move_arena_size = initial_small_move_arena_size;
   endgame_args.per_ply_callback = print_pv_callback;
   endgame_args.per_ply_callback_data = &timer;
+  endgame_args.use_wordprune = true;
 
   // Create results
   EndgameResults *endgame_results = config_get_endgame_results(config);

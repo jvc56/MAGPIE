@@ -1,6 +1,8 @@
 #ifndef ENDGAME_H
 #define ENDGAME_H
 
+#include <stdbool.h>
+
 #include "../ent/endgame_results.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
@@ -30,6 +32,7 @@ typedef struct EndgameArgs {
   int initial_small_move_arena_size;
   EndgamePerPlyCallback per_ply_callback;
   void *per_ply_callback_data;
+  bool use_wordprune;
 } EndgameArgs;
 
 EndgameSolver *endgame_solver_create(void);

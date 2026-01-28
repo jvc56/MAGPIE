@@ -56,6 +56,7 @@ struct EndgameSolver {
   bool negascout_optim;
   bool lazysmp_optim;
   bool prevent_slowroll;
+  bool use_wordprune;
   PVLine principal_variation;
   PVLine *variations;
 
@@ -194,12 +195,16 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->initial_spread =
       equity_to_int(player_get_score(player) - player_get_score(opponent));
 
+  es->use_wordprune = endgame_args->use_wordprune;
   kwg_destroy(es->pruned_kwg);
-  DictionaryWordList *possible_word_list = dictionary_word_list_create();
-  generate_possible_words(endgame_args->game, NULL, possible_word_list);
-  es->pruned_kwg = make_kwg_from_words(
-      possible_word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
-  dictionary_word_list_destroy(possible_word_list);
+  es->pruned_kwg = NULL;
+  if (es->use_wordprune) {
+    DictionaryWordList *possible_word_list = dictionary_word_list_create();
+    generate_possible_words(endgame_args->game, NULL, possible_word_list);
+    es->pruned_kwg = make_kwg_from_words(
+        possible_word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
+    dictionary_word_list_destroy(possible_word_list);
+  }
 
   // later, when we have multi-threaded endgame:
   // es->threads = endgame_args->num_threads;

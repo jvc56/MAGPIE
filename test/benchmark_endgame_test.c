@@ -20,9 +20,11 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 // Execute config command quietly (suppress stdout during execution)
@@ -72,7 +74,8 @@ static bool play_until_bag_empty(Game *game, MoveList *move_list) {
 
 static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
                                      int num_games, int ply,
-                                     uint64_t base_seed) {
+                                     uint64_t base_seed, bool use_wordprune,
+                                     bool quiet) {
   MoveList *move_list = move_list_create(1);
 
   // Create the initial game (required before game_reset works)
@@ -95,14 +98,16 @@ static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
     }
 
     // Print the endgame position
-    printf("\n--- Game %d (seed %" PRIu64 ") ---\n", valid_endgames + 1,
-           base_seed + (uint64_t)i);
-    StringBuilder *game_sb = string_builder_create();
-    GameStringOptions *gso = game_string_options_create_default();
-    string_builder_add_game(game, NULL, gso, NULL, game_sb);
-    printf("%s", string_builder_peek(game_sb));
-    string_builder_destroy(game_sb);
-    game_string_options_destroy(gso);
+    if (!quiet) {
+      printf("\n--- Game %d (seed %" PRIu64 ") ---\n", valid_endgames + 1,
+             base_seed + (uint64_t)i);
+      StringBuilder *game_sb = string_builder_create();
+      GameStringOptions *gso = game_string_options_create_default();
+      string_builder_add_game(game, NULL, gso, NULL, game_sb);
+      printf("%s", string_builder_peek(game_sb));
+      string_builder_destroy(game_sb);
+      game_string_options_destroy(gso);
+    }
 
     Timer timer;
     ctimer_start(&timer);
@@ -113,21 +118,26 @@ static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
                         .initial_small_move_arena_size =
                             DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
                         .per_ply_callback = NULL,
-                        .per_ply_callback_data = NULL};
+                        .per_ply_callback_data = NULL,
+                        .use_wordprune = use_wordprune};
     EndgameResults *results = config_get_endgame_results(config);
     ErrorStack *err = error_stack_create();
 
-    printf("Solving %d-ply endgame...\n", ply);
+    if (!quiet) {
+      printf("Solving %d-ply endgame...\n", ply);
+    }
     endgame_solve(solver, &args, results, err);
     double elapsed = ctimer_elapsed_seconds(&timer);
     total_time += elapsed;
     assert(error_stack_is_empty(err));
 
     // Print the result
-    char *result_str = endgame_results_get_string(results, game, NULL, true);
-    printf("%s", result_str);
-    free(result_str);
-    printf("Time: %.3fs\n", elapsed);
+    if (!quiet) {
+      char *result_str = endgame_results_get_string(results, game, NULL, true);
+      printf("%s", result_str);
+      free(result_str);
+      printf("Time: %.3fs\n", elapsed);
+    }
 
     valid_endgames++;
     error_stack_destroy(err);
@@ -147,9 +157,23 @@ static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
 void test_benchmark_endgame(void) {
   log_set_level(LOG_WARN); // Allow warnings to show diagnostics
 
-  const int num_games = 100;
-  const int ply = 3;
-  const uint64_t base_seed = 0;
+  // Read configuration from environment variables
+  const char *num_games_str = getenv("BENCH_NUM_GAMES");
+  const char *ply_str = getenv("BENCH_PLY");
+  const char *wordprune_str = getenv("BENCH_WORDPRUNE");
+  const char *quiet_str = getenv("BENCH_QUIET");
+  const char *seed_str = getenv("BENCH_SEED");
+
+  int num_games = num_games_str ? atoi(num_games_str) : 100;
+  int ply = ply_str ? atoi(ply_str) : 3;
+  bool use_wordprune =
+      wordprune_str ? (strcmp(wordprune_str, "1") == 0 ||
+                       strcmp(wordprune_str, "true") == 0)
+                    : true;
+  bool quiet = quiet_str ? (strcmp(quiet_str, "1") == 0 ||
+                            strcmp(quiet_str, "true") == 0)
+                         : false;
+  uint64_t base_seed = seed_str ? (uint64_t)atoll(seed_str) : 0;
 
   Config *config = config_create_or_die(
       "set -lex CSW21 -threads 8 -s1 score -s2 score -r1 small -r2 small");
@@ -158,10 +182,12 @@ void test_benchmark_endgame(void) {
 
   printf("\n");
   printf("==============================================\n");
-  printf("  Endgame Benchmark: %d games, %d-ply\n", num_games, ply);
+  printf("  Endgame Benchmark: %d games, %d-ply, wordprune=%s\n", num_games,
+         ply, use_wordprune ? "on" : "off");
   printf("==============================================\n");
 
-  run_endgames_with_timing(config, solver, num_games, ply, base_seed);
+  run_endgames_with_timing(config, solver, num_games, ply, base_seed,
+                           use_wordprune, quiet);
 
   endgame_solver_destroy(solver);
   config_destroy(config);

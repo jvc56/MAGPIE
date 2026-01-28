@@ -2165,6 +2165,7 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args->per_ply_callback = NULL;
   endgame_args->per_ply_callback_data = NULL;
+  endgame_args->use_wordprune = true;
 }
 
 void config_endgame(Config *config, EndgameResults *endgame_results,
