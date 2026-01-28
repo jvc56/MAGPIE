@@ -1654,6 +1654,28 @@ void wmp_small_movegen_compare_test(void) {
         missing_count++;
       }
     }
+
+    // Find moves in WMP but not in KWG (extra moves / duplicates)
+    printf("\n  Moves in WMP but not in KWG (first 15):\n");
+    int extra_count = 0;
+    for (int i = 0; i < wmp_count && extra_count < 15; i++) {
+      bool found = false;
+      for (int j = 0; j < kwg_count; j++) {
+        if (memcmp(&wmp_sorted[i], &kwg_sorted[j], sizeof(SmallMove)) == 0) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        small_move_to_move(wmp_move_list->spare_move, &wmp_sorted[i],
+                           game_get_board(game));
+        string_builder_clear(sb);
+        string_builder_add_move(sb, game_get_board(game),
+                                wmp_move_list->spare_move, ld, true);
+        printf("    %s\n", string_builder_peek(sb));
+        extra_count++;
+      }
+    }
   }
 
   string_builder_destroy(sb);
@@ -1664,8 +1686,8 @@ void wmp_small_movegen_compare_test(void) {
   game_destroy(game);
   config_destroy(config);
 
-  // Don't assert for now - we're debugging
-  // assert(kwg_count == wmp_count);
+  // Assert that counts match
+  assert(kwg_count == wmp_count);
 }
 
 void test_move_gen(void) {

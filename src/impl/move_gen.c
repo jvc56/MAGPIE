@@ -729,8 +729,44 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
 // WMP-based small move generation for endgame
 // Records all valid moves using Word Map lookups instead of KWG traversal.
 
+// Check if a single-tile play should be recorded to avoid duplicates.
+// When a single tile forms words in both directions, we only record it
+// in horizontal direction (dir=0), unless it's "unique" to vertical
+// (i.e., there's a position with TRIVIAL_CROSS_SET meaning no horizontal hooks).
+static inline bool wmp_should_record_single_tile_play(MoveGen *gen,
+                                                      int start_col) {
+  // Always record if horizontal (dir=0)
+  if (gen->dir == 0) {
+    return true;
+  }
+  // For vertical (dir=1), check if any played position has TRIVIAL_CROSS_SET
+  const WMPMoveGen *wgen = &gen->wmp_move_gen;
+  for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
+    const int board_col = letter_idx + start_col;
+    const MachineLetter ml = gen->playthrough_marked[letter_idx];
+    if (ml != PLAYED_THROUGH_MARKER) {
+      // This is a played tile position
+      if (gen_cache_get_cross_set(gen, board_col) == TRIVIAL_CROSS_SET) {
+        // No horizontal constraints at this position, so this is unique
+        return true;
+      }
+    }
+  }
+  // All played positions have horizontal hooks, so this would duplicate
+  // a horizontal play - skip it
+  return false;
+}
+
 static inline void record_wmp_small_play(MoveGen *gen, int start_col) {
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
+
+  // Skip single-tile plays in vertical direction that would duplicate
+  // horizontal plays
+  if (wgen->tiles_to_play == 1 &&
+      !wmp_should_record_single_tile_play(gen, start_col)) {
+    return;
+  }
+
   const Equity bingo_bonus =
       wgen->tiles_to_play == RACK_SIZE ? gen->bingo_bonus : 0;
   Equity played_score_total = 0;
@@ -896,7 +932,10 @@ static void gen_record_wmp_small_for_anchor(MoveGen *gen, int anchor_col,
   // tile blocks until we hit the last anchor or find a gap after a tile block.
   int leftmost_start = anchor_col;
   bool in_tile_block = !gen_cache_is_empty(gen, anchor_col);
-  for (int col = anchor_col - 1; col > last_anchor_col && col >= 0; col--) {
+  // Note: when last_anchor_col == INITIAL_LAST_ANCHOR_COL (BOARD_DIM), there is
+  // no previous anchor on this row, so we can go all the way to column 0.
+  const int stop_col = (last_anchor_col < BOARD_DIM) ? last_anchor_col : -1;
+  for (int col = anchor_col - 1; col > stop_col; col--) {
     if (gen_cache_get_letter(gen, col) != ALPHABET_EMPTY_SQUARE_MARKER) {
       // Found a tile - this could be part of a playthrough block
       in_tile_block = true;
@@ -917,6 +956,13 @@ static void gen_record_wmp_small_for_anchor(MoveGen *gen, int anchor_col,
 
   // For each possible word start position from leftmost to anchor
   for (int start_col = leftmost_start; start_col <= anchor_col; start_col++) {
+    // Can't start at a position with a tile immediately before it, as that
+    // tile would need to be part of the word
+    if (start_col > 0 &&
+        gen_cache_get_letter(gen, start_col - 1) != ALPHABET_EMPTY_SQUARE_MARKER) {
+      continue;
+    }
+
     // For each word length
     for (int word_length = MINIMUM_WORD_LENGTH;
          word_length <= BOARD_DIM && start_col + word_length <= BOARD_DIM;
@@ -925,6 +971,14 @@ static void gen_record_wmp_small_for_anchor(MoveGen *gen, int anchor_col,
       // Word must include the anchor column
       const int end_col = start_col + word_length - 1;
       if (end_col < anchor_col) {
+        continue;
+      }
+
+      // Word must not extend beyond a gap with more tiles after it
+      // Also, word must not have a tile immediately after end_col (that tile
+      // would need to be part of the word)
+      if (end_col < BOARD_DIM - 1 &&
+          gen_cache_get_letter(gen, end_col + 1) != ALPHABET_EMPTY_SQUARE_MARKER) {
         continue;
       }
 
