@@ -27,7 +27,7 @@ static double get_time_sec(void) {
 // Per-ply callback to print PV during iterative deepening
 static void print_pv_callback(int depth, int32_t value, const PVLine *pv_line,
                               const Game *game, void *user_data) {
-  double *start_time = (double *)user_data;
+  const double *start_time = (const double *)user_data;
   double elapsed = get_time_sec() - *start_time;
 
   StringBuilder *sb = string_builder_create();

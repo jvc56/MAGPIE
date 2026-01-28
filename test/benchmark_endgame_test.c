@@ -62,7 +62,7 @@ static double get_time_sec(void) {
 // position (bag empty, both players have tiles)
 static bool play_until_bag_empty(Game *game, MoveList *move_list) {
   while (bag_get_letters(game_get_bag(game)) > 0) {
-    Move *move = get_top_equity_move(game, 0, move_list);
+    const Move *move = get_top_equity_move(game, 0, move_list);
     play_move(move, game, NULL);
 
     // Check if game ended before bag emptied
