@@ -22,7 +22,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
 #include <unistd.h>
 
 // Execute config command quietly (suppress stdout during execution)
@@ -49,13 +48,6 @@ static void exec_config_quiet(Config *config, const char *cmd) {
   (void)fflush(stdout);
   (void)dup2(saved_stdout, STDOUT_FILENO);
   close(saved_stdout);
-}
-
-static double get_time_sec(void) {
-  struct timespec ts;
-  // NOLINTNEXTLINE(misc-include-cleaner)
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
 
 // Play moves until the bag is empty, returning true if we get a valid endgame
@@ -88,8 +80,10 @@ static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
 
   int valid_endgames = 0;
   double total_time = 0;
+  const int max_attempts =
+      num_games * 10; // Safety limit to prevent infinite loop
 
-  for (int i = 0; valid_endgames < num_games; i++) {
+  for (int i = 0; valid_endgames < num_games && i < max_attempts; i++) {
     // Reset game directly (avoids spurious output from "new" command)
     game_reset(game);
     game_seed(game, base_seed + (uint64_t)i);
@@ -136,6 +130,9 @@ static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
     valid_endgames++;
     error_stack_destroy(err);
   }
+
+  // Ensure we found enough valid endgames
+  assert(valid_endgames == num_games);
 
   printf("\n==============================================\n");
   printf("  TOTAL TIME: %.3fs for %d games\n", total_time, num_games);

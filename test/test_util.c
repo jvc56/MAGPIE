@@ -52,6 +52,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #define TEST_EPSILON 1e-6
@@ -1167,4 +1168,11 @@ error_code_t get_config_exec_status(Config *config, const char *cmd) {
   error_code = error_stack_top(error_stack);
   error_stack_destroy(error_stack);
   return error_code;
+}
+
+double get_time_sec(void) {
+  struct timespec ts;
+  // NOLINTNEXTLINE(misc-include-cleaner)
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }

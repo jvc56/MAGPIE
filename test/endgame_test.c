@@ -15,14 +15,6 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <time.h>
-
-static double get_time_sec(void) {
-  struct timespec ts;
-  // NOLINTNEXTLINE(misc-include-cleaner)
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
-}
 
 // Per-ply callback to print PV during iterative deepening
 static void print_pv_callback(int depth, int32_t value, const PVLine *pv_line,
