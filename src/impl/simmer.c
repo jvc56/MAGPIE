@@ -2,6 +2,7 @@
 
 #include "../def/game_defs.h"
 #include "../def/thread_control_defs.h"
+#include "../ent/bag.h"
 #include "../ent/game.h"
 #include "../ent/move.h"
 #include "../ent/sim_args.h"
@@ -52,6 +53,15 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
         error_stack, ERROR_STATUS_SIM_GAME_OVER,
         string_duplicate("cannot simulate when the game is already over"));
     return;
+  }
+
+  // If the bag is empty, set sample_limit to the number of moves and
+  // sample_minimum to 1 for endgame simulations
+  if (bag_is_empty(game_get_bag(sim_args->game))) {
+    sim_args->bai_options.sample_limit =
+        move_list_get_count(sim_args->move_list);
+    sim_args->bai_options.sample_minimum = 1;
+    sim_args->num_plies = MAX_PLIES;
   }
 
   if (*sim_ctx == NULL) {
