@@ -1,3 +1,4 @@
+#include "../src/compat/ctime.h"
 #include "../src/def/board_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
@@ -1690,6 +1691,77 @@ void wmp_small_movegen_compare_test(void) {
   assert(kwg_count == wmp_count);
 }
 
+void wmp_small_movegen_benchmark(void) {
+  // Use CSW21 with WMP enabled
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 score -s2 score -r1 small -r2 small "
+      "-numsmallplays 100000");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  Player *player = game_get_player(game, 0);
+
+  MoveList *move_list = move_list_create_small(100000);
+
+  MoveGenArgs move_gen_args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_ALL_SMALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .thread_index = 0,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+
+  // Load a test position
+  load_cgp_or_die(game, VS_JEREMY);
+  rack_set_to_string(ld, player_get_rack(player), "BGIV");
+
+  // Have opponent draw to prevent exchange generation
+  draw_to_full_rack(game, 1);
+
+  MoveGen *gen = get_movegen(0);
+
+  const int NUM_ITERATIONS = 100;
+  Timer timer;
+
+  // Benchmark KWG
+  ctimer_start(&timer);
+  for (int i = 0; i < NUM_ITERATIONS; i++) {
+    gen_load_position(gen, &move_gen_args);
+    small_move_list_reset(move_list);
+    gen_record_scoring_plays_small(gen);
+  }
+  ctimer_stop(&timer);
+  double kwg_time = ctimer_elapsed_seconds(&timer);
+  int kwg_count = move_list_get_count(move_list);
+
+  // Benchmark WMP
+  ctimer_start(&timer);
+  for (int i = 0; i < NUM_ITERATIONS; i++) {
+    gen_load_position(gen, &move_gen_args);
+    small_move_list_reset(move_list);
+    gen_record_wmp_small(gen);
+  }
+  ctimer_stop(&timer);
+  double wmp_time = ctimer_elapsed_seconds(&timer);
+  int wmp_count = move_list_get_count(move_list);
+
+  printf("\nWMP vs KWG Small Movegen Benchmark (%d iterations):\n",
+         NUM_ITERATIONS);
+  printf("  KWG: %.4f sec (%.2f ms/iter), %d moves\n", kwg_time,
+         kwg_time * 1000 / NUM_ITERATIONS, kwg_count);
+  printf("  WMP: %.4f sec (%.2f ms/iter), %d moves\n", wmp_time,
+         wmp_time * 1000 / NUM_ITERATIONS, wmp_count);
+  printf("  Speedup: %.2fx\n", kwg_time / wmp_time);
+
+  assert(kwg_count == wmp_count);
+
+  small_move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_move_gen(void) {
   wmp_small_movegen_compare_test();
   leave_lookup_test();
@@ -1720,4 +1792,5 @@ void test_move_gen(void) {
   wmp_blank_possibilities_bananas_3();
   wmp_blank_possibilities_bananas_4();
   wmp_blank_possibilities_bananas_5();
+  wmp_small_movegen_benchmark();
 }

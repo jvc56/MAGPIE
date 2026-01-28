@@ -2591,10 +2591,16 @@ void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen(args->thread_index);
   gen_load_position(gen, args);
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
-    // WMP-based small move generation (gen_record_wmp_small) is experimental
-    // and not yet complete. Use KWG-based approach for correctness.
-    // TODO: Complete gen_record_wmp_small to match KWG behavior for all cases.
-    gen_record_scoring_plays_small(gen);
+    // For endgame small move generation, use WMP if available for faster
+    // hash-based word lookup. However, when override_kwg is provided (e.g.,
+    // pruned KWG in endgame), use KWG-based approach for consistency since
+    // WMP doesn't have a pruned equivalent.
+    if (wmp_move_gen_is_active(&gen->wmp_move_gen) &&
+        args->override_kwg == NULL) {
+      gen_record_wmp_small(gen);
+    } else {
+      gen_record_scoring_plays_small(gen);
+    }
   } else {
     gen_look_up_leaves_and_record_exchanges(gen);
 
