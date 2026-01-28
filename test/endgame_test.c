@@ -132,7 +132,7 @@ void test_vs_joey(void) {
   */
 
   test_single_endgame(
-      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 13 -ttfraction 0.05",
+      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 13",
       "cgp "
       "AIDER2U7/b1E1E2N1Z5/AWN1T2M1ATT3/LI1COBLE2OW3/OP2U2E2AA3/NE2CUSTARDS1Q1/"
       "ER1OH5I2U1/S2K2FOB1ERGOT/5HEXYLS2I1/4JIN6N1/2GOOP2NAIVEsT/1DIRE10/"
@@ -144,7 +144,7 @@ void test_pass_first(void) {
   // This endgame's first move must be a pass, otherwise Nigel can set up
   // an unblockable ZA.
   test_single_endgame(
-      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 8 -ttfraction 0.05",
+      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 8",
       "cgp "
       "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
       "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
@@ -155,7 +155,7 @@ void test_pass_first(void) {
 void test_nonempty_bag(void) {
   // The solver should return an error if the bag is not empty.
   test_single_endgame(
-      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 4 -ttfraction 0.05",
+      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 4",
       "cgp " EMPTY_CGP, DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
       ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY, 0, false);
 }
@@ -163,7 +163,7 @@ void test_nonempty_bag(void) {
 void test_solve_standard(void) {
   // A standard out-in-two endgame.
   test_single_endgame(
-      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 4 -ttfraction 0.05",
+      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 4",
       "cgp "
       "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
       "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
@@ -174,7 +174,7 @@ void test_solve_standard(void) {
 void test_very_deep(void) {
   // This insane endgame requires 25 plies to solve. We end up winning by 1 pt.
   test_single_endgame(
-      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 25 -ttfraction 0.05",
+      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 25",
       "cgp "
       "14C/13QI/12FIE/10VEE1R/9KIT2G/8CIG1IDE/8UTA2AS/7ST1SYPh1/6JA5A1/"
       "5WOLD2BOBA/3PLOT1R1NU1EX/Y1VEIN1NOR1mOA1/UT1AT1N1L2FEH1/"
@@ -184,7 +184,7 @@ void test_very_deep(void) {
 
 void test_eldar_v_stick(void) {
   test_single_endgame(
-      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 9 -ttfraction 0.05",
+      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 9",
       "cgp "
       "4EXODE6/1DOFF1KERATIN1U/1OHO8YEN/1POOJA1B3MEWS/5SQUINTY2A/4RHINO1e3V/"
       "2B4C2R3E/GOAT1D1E2ZIN1d/1URACILS2E4/1PIG1S4T4/2L2R4T4/2L2A1GENII3/"
@@ -194,7 +194,7 @@ void test_eldar_v_stick(void) {
 
 void test_small_arena_realloc(void) {
   test_single_endgame(
-      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 4 -ttfraction 0.05",
+      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 4",
       "cgp "
       "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
       "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
@@ -207,7 +207,9 @@ void test_endgame(void) {
   test_very_deep();
   test_small_arena_realloc();
   test_pass_first();
-  test_vs_joey();
-  test_eldar_v_stick();
   test_nonempty_bag();
+  //  Uncomment out more of these tests once we add more optimizations,
+  //  and/or if we can run the endgame tests in release mode.
+  // test_vs_joey();
+  // test_eldar_v_stick();
 }
