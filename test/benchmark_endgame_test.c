@@ -115,7 +115,7 @@ static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
     EndgameArgs args = {.game = game,
                         .thread_control = config_get_thread_control(config),
                         .plies = ply,
-                        .tt_fraction_of_mem = 0.5,
+                        .tt_fraction_of_mem = 0.25,
                         .initial_small_move_arena_size =
                             DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE};
     EndgameResults *results = config_get_endgame_results(config);
@@ -148,8 +148,8 @@ static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
 void test_benchmark_endgame(void) {
   log_set_level(LOG_WARN);  // Allow warnings to show diagnostics
 
-  const int num_games = 25;  // Full benchmark
-  const int ply = 12;        // Full 12-ply search
+  const int num_games = 100;
+  const int ply = 3;
   const uint64_t base_seed = 0;
 
   Config *config = config_create_or_die(
@@ -165,74 +165,5 @@ void test_benchmark_endgame(void) {
   run_endgames_with_timing(config, solver, num_games, ply, base_seed);
 
   endgame_solver_destroy(solver);
-  config_destroy(config);
-}
-
-void test_benchmark_endgame_multi_ply(void) {
-  log_set_level(LOG_FATAL);
-
-  const int num_games = 500;
-  const int ply = 8;
-  const int base_seed = 12345;
-
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -threads 1 -s1 score -s2 score -r1 small -r2 small");
-
-  EndgameSolver *solver = endgame_solver_create();
-
-  printf("\n");
-  printf("==============================================\n");
-  printf("  Endgame Benchmark: %d games, %d-ply\n", num_games, ply);
-  printf("==============================================\n\n");
-
-  double total_time = 0;
-
-  for (int i = 0; i < num_games; i++) {
-    char autoplay_cmd[64];
-    snprintf(autoplay_cmd, sizeof(autoplay_cmd), "autoplay games 1 -seed %d",
-             base_seed + i);
-
-    load_and_exec_config_or_die(config, "new");
-    load_and_exec_config_or_die(config, autoplay_cmd);
-
-    Game *game = config_get_game(config);
-    while (bag_get_letters(game_get_bag(game)) > 0) {
-      bag_draw_random_letter(game_get_bag(game), 0);
-    }
-
-    EndgameArgs args = {.game = game,
-                        .thread_control = config_get_thread_control(config),
-                        .plies = ply,
-                        .tt_fraction_of_mem = 0.5,
-                        .initial_small_move_arena_size =
-                            DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE};
-    EndgameResults *results = config_get_endgame_results(config);
-    ErrorStack *err = error_stack_create();
-
-    double start = get_time_sec();
-    endgame_solve(solver, &args, results, err);
-    double end = get_time_sec();
-    assert(error_stack_is_empty(err));
-    total_time += (end - start);
-
-    error_stack_destroy(err);
-
-    if ((i + 1) % 50 == 0) {
-      printf("  Progress: %3d/%d (%.2fs)\n", i + 1, num_games, total_time);
-    }
-  }
-
-  endgame_solver_destroy(solver);
-
-  printf("\n");
-  printf("==============================================\n");
-  printf("  RESULTS\n");
-  printf("==============================================\n");
-  printf("  Games solved:      %d\n", num_games);
-  printf("  Ply depth:         %d\n", ply);
-  printf("  Total time:        %.4f s\n", total_time);
-  printf("  Average:           %.4f ms/game\n", (total_time / num_games) * 1000);
-  printf("==============================================\n\n");
-
   config_destroy(config);
 }

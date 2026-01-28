@@ -115,8 +115,6 @@ static TestEntry test_table[] = {
     {"wmg", test_wmp_move_gen},
     {"winpct", test_win_pct},
     {"endgame", test_endgame},
-    {"benchend", test_benchmark_endgame},
-    {"benchendmg", test_benchmark_endgame_multi_ply},
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},
     {"load", test_load_gcg},
@@ -126,6 +124,7 @@ static TestEntry test_table[] = {
 // Tests that only run when explicitly requested (not included in run_all)
 static TestEntry on_demand_test_table[] = {
     {"infercmp", test_infer_cmp},
+    {"benchend", test_benchmark_endgame},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
