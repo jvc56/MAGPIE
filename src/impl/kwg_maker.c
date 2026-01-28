@@ -110,6 +110,16 @@ static inline MutableNodeList *mutable_node_list_create(void) {
   return mutable_node_list;
 }
 
+static inline MutableNodeList *
+mutable_node_list_create_with_capacity(size_t capacity) {
+  MutableNodeList *mutable_node_list = malloc_or_die(sizeof(MutableNodeList));
+  mutable_node_list->capacity = capacity;
+  mutable_node_list->nodes =
+      malloc_or_die(sizeof(MutableNode) * mutable_node_list->capacity);
+  mutable_node_list->count = 0;
+  return mutable_node_list;
+}
+
 static inline MutableNode *mutable_node_list_add(MutableNodeList *nodes) {
   if (nodes->count == nodes->capacity) {
     nodes->nodes =
@@ -272,6 +282,15 @@ static inline NodePointerList *node_pointer_list_create(void) {
   return node_pointer_list;
 }
 
+static inline NodePointerList *
+node_pointer_list_create_with_capacity(size_t capacity) {
+  NodePointerList *node_pointer_list = malloc_or_die(sizeof(NodePointerList));
+  node_pointer_list->capacity = capacity;
+  node_pointer_list->nodes = malloc_or_die(sizeof(MutableNode *) * capacity);
+  node_pointer_list->count = 0;
+  return node_pointer_list;
+}
+
 static inline void node_pointer_list_add(NodePointerList *list,
                                          MutableNode *node) {
   if (list->count == list->capacity) {
@@ -292,15 +311,32 @@ typedef struct NodeHashTable {
   uint32_t *bucket_heads;
   uint32_t *next_indices;
   size_t node_capacity;
+  size_t num_buckets;
 } NodeHashTable;
 
 static inline void node_hash_table_create(NodeHashTable *table,
                                           size_t node_capacity) {
   table->node_capacity = node_capacity;
+  table->num_buckets = KWG_HASH_NUMBER_OF_BUCKETS;
   table->bucket_heads =
       malloc_or_die(sizeof(uint32_t) * KWG_HASH_NUMBER_OF_BUCKETS);
   table->next_indices = malloc_or_die(sizeof(uint32_t) * table->node_capacity);
   for (size_t i = 0; i < KWG_HASH_NUMBER_OF_BUCKETS; i++) {
+    table->bucket_heads[i] = HASH_BUCKET_ITEM_LIST_NULL_INDEX;
+  }
+  for (size_t i = 0; i < table->node_capacity; i++) {
+    table->next_indices[i] = HASH_BUCKET_ITEM_LIST_NULL_INDEX;
+  }
+}
+
+static inline void node_hash_table_create_small(NodeHashTable *table,
+                                                size_t node_capacity,
+                                                size_t num_buckets) {
+  table->node_capacity = node_capacity;
+  table->num_buckets = num_buckets;
+  table->bucket_heads = malloc_or_die(sizeof(uint32_t) * num_buckets);
+  table->next_indices = malloc_or_die(sizeof(uint32_t) * table->node_capacity);
+  for (size_t i = 0; i < num_buckets; i++) {
     table->bucket_heads[i] = HASH_BUCKET_ITEM_LIST_NULL_INDEX;
   }
   for (size_t i = 0; i < table->node_capacity; i++) {
@@ -318,7 +354,7 @@ static inline MutableNode *node_hash_table_find_or_insert(NodeHashTable *table,
                                                           MutableNode *nodes) {
   const uint32_t node_index = node - nodes;
   const uint64_t hash_value = node->hash_with_just_children;
-  const size_t bucket_index = hash_value % KWG_HASH_NUMBER_OF_BUCKETS;
+  const size_t bucket_index = hash_value % table->num_buckets;
 
   uint32_t current_index = table->bucket_heads[bucket_index];
   uint32_t previous_index = HASH_BUCKET_ITEM_LIST_NULL_INDEX;
@@ -525,6 +561,7 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
                            (output == KWG_MAKER_OUTPUT_DAWG_AND_GADDAG);
   const bool output_gaddag = (output == KWG_MAKER_OUTPUT_GADDAG) ||
                              (output == KWG_MAKER_OUTPUT_DAWG_AND_GADDAG);
+
   MutableNodeList *nodes = mutable_node_list_create();
   const int dawg_root_node_index = mutable_node_list_add_root(nodes);
   // Size is one beyond the longest string because nodes are created for
@@ -549,6 +586,7 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   }
 
   const int gaddag_root_node_index = mutable_node_list_add_root(nodes);
+
   if (output_gaddag) {
     last_word_length = 0;
     cached_node_indices[0] = gaddag_root_node_index;
@@ -604,6 +642,161 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   if (output_gaddag) {
     set_final_indices(gaddag_root, nodes, ordered_pointers);
   }
+
+  const size_t final_node_count = ordered_pointers->count;
+  KWG *kwg = kwg_create_empty();
+  kwg_allocate_nodes(kwg, final_node_count);
+  copy_nodes(ordered_pointers, nodes, kwg);
+  mutable_node_list_destroy(nodes);
+  node_pointer_list_destroy(ordered_pointers);
+  return kwg;
+}
+
+// Helper to get the next prime >= n for hash table sizing
+static uint64_t next_prime(uint64_t n) {
+  if (n <= 2) {
+    return 2;
+  }
+  if (n <= 3) {
+    return 3;
+  }
+  // Simple primality check for small numbers
+  if (n % 2 == 0) {
+    n++;
+  }
+  for (;;) {
+    bool is_prime = true;
+    for (uint64_t i = 3; i * i <= n; i += 2) {
+      if (n % i == 0) {
+        is_prime = false;
+        break;
+      }
+    }
+    if (is_prime) {
+      return n;
+    }
+    n += 2;
+  }
+}
+
+// Optimized version for small dictionaries (endgame wordprune case).
+// Uses appropriately sized data structures based on word count.
+KWG *make_kwg_from_words_small(const DictionaryWordList *words,
+                               kwg_maker_output_t output,
+                               kwg_maker_merge_t merging) {
+  const bool output_dawg = (output == KWG_MAKER_OUTPUT_DAWG) ||
+                           (output == KWG_MAKER_OUTPUT_DAWG_AND_GADDAG);
+  const bool output_gaddag = (output == KWG_MAKER_OUTPUT_GADDAG) ||
+                             (output == KWG_MAKER_OUTPUT_DAWG_AND_GADDAG);
+
+  // Estimate sizes based on word count
+  const int words_count = dictionary_word_list_get_count(words);
+
+  // For GADDAG, each word of length L generates L gaddag strings.
+  // Average word length is ~6, so estimate ~6 * words_count gaddag strings.
+  // Node count is roughly proportional to total string length.
+  // With an average of 6 letters per word and 6 gaddag strings per word,
+  // that's ~36 * words_count character insertions, but with significant
+  // sharing. A good estimate is ~10 * words_count nodes.
+  const size_t estimated_gaddag_strings =
+      output_gaddag ? (size_t)words_count * 7 : 0;
+  const size_t estimated_nodes =
+      (size_t)words_count * 12 + 100; // +100 for safety margin
+
+  // Use a smaller hash table - prime number close to estimated node count
+  const size_t hash_buckets = next_prime(estimated_nodes);
+
+  // Create appropriately sized node list
+  MutableNodeList *nodes =
+      mutable_node_list_create_with_capacity(estimated_nodes);
+  const int dawg_root_node_index = mutable_node_list_add_root(nodes);
+
+  int cached_node_indices[MAX_KWG_STRING_LENGTH + 1];
+  MachineLetter last_word[MAX_KWG_STRING_LENGTH];
+  int last_word_length = 0;
+  for (size_t i = 0; i < MAX_KWG_STRING_LENGTH; i++) {
+    last_word[i] = 0;
+  }
+
+  if (output_dawg) {
+    cached_node_indices[0] = dawg_root_node_index;
+    for (int i = 0; i < words_count; i++) {
+      const DictionaryWord *word = dictionary_word_list_get_word(words, i);
+      const int letters_in_common =
+          get_letters_in_common(word, last_word, &last_word_length);
+      const int start_index = cached_node_indices[letters_in_common];
+      insert_suffix(start_index, nodes, word, letters_in_common,
+                    cached_node_indices);
+    }
+  }
+
+  const int gaddag_root_node_index = mutable_node_list_add_root(nodes);
+
+  if (output_gaddag) {
+    // Pre-allocate gaddag_strings with estimated capacity
+    DictionaryWordList *gaddag_strings =
+        dictionary_word_list_create_with_capacity(
+            (int)estimated_gaddag_strings);
+    add_gaddag_strings(words, gaddag_strings);
+    last_word_length = 0;
+    cached_node_indices[0] = gaddag_root_node_index;
+    const int gaddag_count = dictionary_word_list_get_count(gaddag_strings);
+    for (int i = 0; i < gaddag_count; i++) {
+      const DictionaryWord *gaddag_string =
+          dictionary_word_list_get_word(gaddag_strings, i);
+      const int letters_in_common =
+          get_letters_in_common(gaddag_string, last_word, &last_word_length);
+      const int start_index = cached_node_indices[letters_in_common];
+      insert_suffix(start_index, nodes, gaddag_string, letters_in_common,
+                    cached_node_indices);
+    }
+    dictionary_word_list_destroy(gaddag_strings);
+  }
+
+  if (merging == KWG_MAKER_MERGE_EXACT) {
+    calculate_node_hash_values(nodes);
+    NodeHashTable table;
+    node_hash_table_create_small(&table, nodes->count, hash_buckets);
+    const size_t count = nodes->count;
+    MutableNode *nodes_array = nodes->nodes;
+    for (size_t i = 0; i < count; i++) {
+      if (!output_dawg && (i == 0)) {
+        continue;
+      }
+      if (!output_gaddag && (i == 1)) {
+        continue;
+      }
+      MutableNode *node = &nodes_array[i];
+      MutableNode *match =
+          node_hash_table_find_or_insert(&table, node, nodes_array);
+      if (match == node) {
+        continue;
+      }
+      node->merged_into = match;
+    }
+    node_hash_table_destroy_buckets(&table);
+  }
+
+  MutableNode *dawg_root = &nodes->nodes[dawg_root_node_index];
+  dawg_root->is_end = true;
+  MutableNode *gaddag_root = &nodes->nodes[gaddag_root_node_index];
+  gaddag_root->is_end = true;
+
+  // Estimate final pointer list size (after merging, typically ~60-80% of node
+  // count)
+  const size_t estimated_final_nodes = nodes->count;
+  NodePointerList *ordered_pointers =
+      node_pointer_list_create_with_capacity(estimated_final_nodes);
+  node_pointer_list_add(ordered_pointers, dawg_root);
+  node_pointer_list_add(ordered_pointers, gaddag_root);
+
+  if (output_dawg) {
+    set_final_indices(dawg_root, nodes, ordered_pointers);
+  }
+  if (output_gaddag) {
+    set_final_indices(gaddag_root, nodes, ordered_pointers);
+  }
+
   const size_t final_node_count = ordered_pointers->count;
   KWG *kwg = kwg_create_empty();
   kwg_allocate_nodes(kwg, final_node_count);
