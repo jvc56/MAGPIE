@@ -726,6 +726,243 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   }
 }
 
+// WMP-based small move generation for endgame
+// Records all valid moves using Word Map lookups instead of KWG traversal.
+
+static inline void record_wmp_small_play(MoveGen *gen, int start_col) {
+  const WMPMoveGen *wgen = &gen->wmp_move_gen;
+  const Equity bingo_bonus =
+      wgen->tiles_to_play == RACK_SIZE ? gen->bingo_bonus : 0;
+  Equity played_score_total = 0;
+  Equity playthrough_score_total = 0;
+  Equity hooked_cross_total = 0;
+  Equity played_cross_total = 0;
+  int word_multiplier = 1;
+
+  for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
+    const int board_col = letter_idx + start_col;
+    MachineLetter ml = gen->playthrough_marked[letter_idx];
+    if (ml != PLAYED_THROUGH_MARKER) {
+      const Equity tile_score = gen->tile_scores[ml];
+      const BonusSquare bonus_square =
+          gen_cache_get_bonus_square(gen, board_col);
+      const int this_word_multiplier =
+          bonus_square_get_word_multiplier(bonus_square);
+      const Equity hooked_cross_score =
+          gen_cache_get_cross_score(gen, board_col) * this_word_multiplier;
+      hooked_cross_total += hooked_cross_score;
+      const int is_cross_word =
+          gen_cache_get_is_cross_word(gen, board_col) ? 1 : 0;
+      const int letter_multiplier =
+          bonus_square_get_letter_multiplier(bonus_square);
+      played_cross_total +=
+          is_cross_word * tile_score * this_word_multiplier * letter_multiplier;
+      played_score_total += tile_score * letter_multiplier;
+      word_multiplier *= this_word_multiplier;
+    } else {
+      ml = gen_cache_get_letter(gen, board_col);
+      playthrough_score_total += gen->tile_scores[ml];
+    }
+  }
+  const Equity score =
+      (played_score_total + playthrough_score_total) * word_multiplier +
+      hooked_cross_total + played_cross_total + bingo_bonus;
+
+  SmallMove *small_move = small_move_list_get_spare_move(gen->move_list);
+  set_small_play_for_record(small_move, GAME_EVENT_TILE_PLACEMENT_MOVE, 0,
+                            wgen->word_length - 1, score, gen->current_row_index,
+                            start_col, wgen->tiles_to_play, gen->dir,
+                            gen->playthrough_marked);
+  move_list_insert_spare_small_move(gen->move_list);
+}
+
+static void record_wmp_small_plays_for_word(MoveGen *gen, int subrack_idx,
+                                            int start_col, int blanks_so_far,
+                                            int pos) {
+  const WMPMoveGen *wgen = &gen->wmp_move_gen;
+  const BitRack *nonplaythrough_tiles =
+      wmp_move_gen_get_nonplaythrough_subrack(wgen, subrack_idx);
+  const int num_blanks =
+      bit_rack_get_letter(nonplaythrough_tiles, BLANK_MACHINE_LETTER);
+  if (num_blanks == blanks_so_far) {
+    record_wmp_small_play(gen, start_col);
+    return;
+  }
+  assert(pos < wgen->word_length);
+  const MachineLetter ml = gen->playthrough_marked[pos];
+  if (ml == PLAYED_THROUGH_MARKER) {
+    record_wmp_small_plays_for_word(gen, subrack_idx, start_col, blanks_so_far,
+                                    pos + 1);
+    return;
+  }
+  bool can_be_unblanked;
+  bool can_be_blanked;
+  get_blank_possibilities(gen, nonplaythrough_tiles, pos, &can_be_unblanked,
+                          &can_be_blanked);
+  if (can_be_unblanked) {
+    record_wmp_small_plays_for_word(gen, subrack_idx, start_col, blanks_so_far,
+                                    pos + 1);
+  }
+  if (can_be_blanked) {
+    gen->playthrough_marked[pos] = get_blanked_machine_letter(ml);
+    record_wmp_small_plays_for_word(gen, subrack_idx, start_col,
+                                    blanks_so_far + 1, pos + 1);
+    gen->playthrough_marked[pos] = ml;
+  }
+}
+
+// Generate small moves using WMP for a specific word length and start column.
+static void wmp_gen_small_for_position(MoveGen *gen, int start_col,
+                                       int word_length, int tiles_to_play,
+                                       int last_anchor_col) {
+  WMPMoveGen *wgen = &gen->wmp_move_gen;
+
+  // Check valid bounds
+  if (start_col < 0 || start_col + word_length > BOARD_DIM) {
+    return;
+  }
+  // Can't start before or at the previous anchor
+  if (start_col <= last_anchor_col) {
+    return;
+  }
+
+  Anchor anchor = {
+      .word_length = word_length,
+      .tiles_to_play = tiles_to_play,
+  };
+  wmp_move_gen_playthrough_subracks_init(wgen, &anchor);
+
+  const int num_subrack_combinations =
+      wmp_move_gen_get_num_subrack_combinations(wgen);
+
+  for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
+       subrack_idx++) {
+    if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx)) {
+      continue;
+    }
+
+    for (int word_idx = 0; word_idx < wgen->num_words; word_idx++) {
+      if (wordmap_gen_check_playthrough_and_crosses(gen, word_idx, start_col)) {
+        record_wmp_small_plays_for_word(gen, subrack_idx, start_col, 0, 0);
+      }
+    }
+  }
+}
+
+// Generate moves for a specific anchor column using WMP
+static void gen_record_wmp_small_for_anchor(MoveGen *gen, int anchor_col,
+                                            int last_anchor_col) {
+  WMPMoveGen *wgen = &gen->wmp_move_gen;
+  const int full_rack = wgen->full_rack_size;
+
+  // Determine leftmost valid start column
+  int leftmost_start = anchor_col;
+  for (int col = anchor_col - 1; col > last_anchor_col && col >= 0; col--) {
+    if (gen_cache_get_letter(gen, col) != ALPHABET_EMPTY_SQUARE_MARKER) {
+      break; // Hit a tile to the left
+    }
+    leftmost_start = col;
+  }
+
+  // For each possible word start position from leftmost to anchor
+  for (int start_col = leftmost_start; start_col <= anchor_col; start_col++) {
+    // For each word length that includes the anchor
+    for (int word_length = MINIMUM_WORD_LENGTH;
+         word_length <= BOARD_DIM && start_col + word_length <= BOARD_DIM;
+         word_length++) {
+
+      // Word must include the anchor column
+      const int end_col = start_col + word_length - 1;
+      if (end_col < anchor_col) {
+        continue;
+      }
+
+      // Word must not include empty squares beyond the rightmost tile block
+      bool valid_extent = true;
+      for (int col = anchor_col + 1; col <= end_col; col++) {
+        const MachineLetter ml = gen_cache_get_letter(gen, col);
+        if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
+          // Check if there's a tile after this gap
+          for (int c2 = col + 1; c2 <= end_col; c2++) {
+            if (gen_cache_get_letter(gen, c2) != ALPHABET_EMPTY_SQUARE_MARKER) {
+              // Found tile after gap - this creates a disconnected word
+              valid_extent = false;
+              break;
+            }
+          }
+          break;
+        }
+      }
+      if (!valid_extent) {
+        continue;
+      }
+
+      // Count playthrough tiles and build playthrough bitrack
+      int playthrough_count = 0;
+      wmp_move_gen_reset_playthrough(wgen);
+
+      for (int col = start_col; col < start_col + word_length; col++) {
+        const MachineLetter ml = gen_cache_get_letter(gen, col);
+        if (ml != ALPHABET_EMPTY_SQUARE_MARKER) {
+          wmp_move_gen_add_playthrough_letter(
+              wgen, get_unblanked_machine_letter(ml));
+          playthrough_count++;
+        }
+      }
+
+      const int tiles_to_play = word_length - playthrough_count;
+
+      // Skip if we need more tiles than we have
+      if (tiles_to_play > full_rack || tiles_to_play < 1) {
+        continue;
+      }
+
+      // For nonplaythrough moves, check if any valid words exist
+      if (playthrough_count == 0 &&
+          !wmp_move_gen_nonplaythrough_word_of_length_exists(wgen,
+                                                             word_length)) {
+        continue;
+      }
+
+      wmp_gen_small_for_position(gen, start_col, word_length, tiles_to_play,
+                                 last_anchor_col);
+    }
+  }
+}
+
+// Main entry point for WMP-based small move generation
+void gen_record_wmp_small(MoveGen *gen) {
+  WMPMoveGen *wgen = &gen->wmp_move_gen;
+
+  // Initialize leave map and enumerate subracks
+  leave_map_init(&gen->player_rack, &gen->leave_map);
+  leave_map_set_current_value(&gen->leave_map, 0);
+  wmp_move_gen_check_nonplaythrough_existence(wgen, false, &gen->leave_map);
+
+  for (int dir = 0; dir < 2; dir++) {
+    gen->dir = dir;
+    for (int row = 0; row < BOARD_DIM; row++) {
+      if (gen->row_number_of_anchors_cache[BOARD_DIM * dir + row] == 0) {
+        continue;
+      }
+      gen->current_row_index = row;
+      board_copy_row_cache(gen->lanes_cache, gen->row_cache, row, dir);
+
+      int last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+      for (int col = 0; col < BOARD_DIM; col++) {
+        if (gen_cache_get_is_anchor(gen, col)) {
+          gen_record_wmp_small_for_anchor(gen, col, last_anchor_col);
+
+          last_anchor_col = col;
+          if (!gen_cache_is_empty(gen, col)) {
+            last_anchor_col++;
+          }
+        }
+      }
+    }
+  }
+}
+
 void go_on(MoveGen *gen, int current_col, MachineLetter L,
            uint32_t new_node_index, bool accepts, int leftstrip, int rightstrip,
            bool unique_play, int main_word_score, int word_multiplier,
@@ -1985,10 +2222,6 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   wmp_move_gen_init(&gen->wmp_move_gen, &gen->ld, &gen->player_rack,
                     player_get_wmp(player));
 
-  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
-    gen->wmp_move_gen.wmp = NULL;
-  }
-
   gen->bingo_bonus = game_get_bingo_bonus(game);
   gen->number_of_tiles_in_bag = bag_get_letters(game_get_bag(game));
   gen->kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
@@ -2226,6 +2459,9 @@ void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen(args->thread_index);
   gen_load_position(gen, args);
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
+    // WMP-based small move generation (gen_record_wmp_small) is experimental
+    // and not yet complete. Use KWG-based approach for correctness.
+    // TODO: Complete gen_record_wmp_small to match KWG behavior for all cases.
     gen_record_scoring_plays_small(gen);
   } else {
     gen_look_up_leaves_and_record_exchanges(gen);
