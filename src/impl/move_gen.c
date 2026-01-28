@@ -811,6 +811,9 @@ static void record_wmp_small_plays_for_word(MoveGen *gen, int subrack_idx,
   }
 }
 
+// Debug: enable WMP small movegen logging
+#define WMP_SMALL_DEBUG 0
+
 // Generate small moves using WMP for a specific word length and start column.
 static void wmp_gen_small_for_position(MoveGen *gen, int start_col,
                                        int word_length, int tiles_to_play,
@@ -821,8 +824,10 @@ static void wmp_gen_small_for_position(MoveGen *gen, int start_col,
   if (start_col < 0 || start_col + word_length > BOARD_DIM) {
     return;
   }
-  // Can't start before or at the previous anchor
-  if (start_col <= last_anchor_col) {
+  // Can't start before or at the previous anchor (if there is one).
+  // INITIAL_LAST_ANCHOR_COL is BOARD_DIM, meaning no previous anchor on this
+  // row.
+  if (last_anchor_col < BOARD_DIM && start_col <= last_anchor_col) {
     return;
   }
 
@@ -835,16 +840,46 @@ static void wmp_gen_small_for_position(MoveGen *gen, int start_col,
   const int num_subrack_combinations =
       wmp_move_gen_get_num_subrack_combinations(wgen);
 
+#if WMP_SMALL_DEBUG
+  printf("  wmp_gen_small_for_position: dir=%d row=%d start_col=%d wordlen=%d "
+         "tiles_to_play=%d num_subracks=%d\n",
+         gen->dir, gen->current_row_index, start_col, word_length,
+         tiles_to_play, num_subrack_combinations);
+#endif
+
   for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
        subrack_idx++) {
     if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx)) {
+#if WMP_SMALL_DEBUG
+      printf("    subrack %d: no words found\n", subrack_idx);
+#endif
       continue;
     }
 
+#if WMP_SMALL_DEBUG
+    printf("    subrack %d: %d words found\n", subrack_idx, wgen->num_words);
+#endif
+
     for (int word_idx = 0; word_idx < wgen->num_words; word_idx++) {
+#if WMP_SMALL_DEBUG
+      const MachineLetter *word = wmp_move_gen_get_word(wgen, word_idx);
+      printf("      word %d: ", word_idx);
+      for (int i = 0; i < wgen->word_length; i++) {
+        printf("%c", word[i] + 'A' - 1);
+      }
+      printf("\n");
+#endif
       if (wordmap_gen_check_playthrough_and_crosses(gen, word_idx, start_col)) {
+#if WMP_SMALL_DEBUG
+        printf("        -> PASSED cross check\n");
+#endif
         record_wmp_small_plays_for_word(gen, subrack_idx, start_col, 0, 0);
       }
+#if WMP_SMALL_DEBUG
+      else {
+        printf("        -> FAILED cross check\n");
+      }
+#endif
     }
   }
 }
@@ -855,18 +890,34 @@ static void gen_record_wmp_small_for_anchor(MoveGen *gen, int anchor_col,
   WMPMoveGen *wgen = &gen->wmp_move_gen;
   const int full_rack = wgen->full_rack_size;
 
-  // Determine leftmost valid start column
+  // Determine leftmost valid start column. We need to consider both empty
+  // squares where we can play tiles AND playthrough tiles that are part of
+  // the word. Continue going left through both empty squares and continuous
+  // tile blocks until we hit the last anchor or find a gap after a tile block.
   int leftmost_start = anchor_col;
+  bool in_tile_block = !gen_cache_is_empty(gen, anchor_col);
   for (int col = anchor_col - 1; col > last_anchor_col && col >= 0; col--) {
     if (gen_cache_get_letter(gen, col) != ALPHABET_EMPTY_SQUARE_MARKER) {
-      break; // Hit a tile to the left
+      // Found a tile - this could be part of a playthrough block
+      in_tile_block = true;
+      leftmost_start = col;
+    } else {
+      // Empty square
+      if (in_tile_block) {
+        // We just exited a tile block - we can start here (before the block)
+        leftmost_start = col;
+        in_tile_block = false;
+        // Continue to find more empty squares
+      } else {
+        // Just extending through empty squares
+        leftmost_start = col;
+      }
     }
-    leftmost_start = col;
   }
 
   // For each possible word start position from leftmost to anchor
   for (int start_col = leftmost_start; start_col <= anchor_col; start_col++) {
-    // For each word length that includes the anchor
+    // For each word length
     for (int word_length = MINIMUM_WORD_LENGTH;
          word_length <= BOARD_DIM && start_col + word_length <= BOARD_DIM;
          word_length++) {
@@ -901,14 +952,24 @@ static void gen_record_wmp_small_for_anchor(MoveGen *gen, int anchor_col,
       int playthrough_count = 0;
       wmp_move_gen_reset_playthrough(wgen);
 
+#if WMP_SMALL_DEBUG
+      printf("  Checking playthrough for start_col=%d wordlen=%d: ", start_col,
+             word_length);
+#endif
       for (int col = start_col; col < start_col + word_length; col++) {
         const MachineLetter ml = gen_cache_get_letter(gen, col);
         if (ml != ALPHABET_EMPTY_SQUARE_MARKER) {
           wmp_move_gen_add_playthrough_letter(
               wgen, get_unblanked_machine_letter(ml));
           playthrough_count++;
+#if WMP_SMALL_DEBUG
+          printf("[col=%d: %c] ", col, get_unblanked_machine_letter(ml) + 'A' - 1);
+#endif
         }
       }
+#if WMP_SMALL_DEBUG
+      printf("(total=%d)\n", playthrough_count);
+#endif
 
       const int tiles_to_play = word_length - playthrough_count;
 
@@ -923,6 +984,13 @@ static void gen_record_wmp_small_for_anchor(MoveGen *gen, int anchor_col,
                                                              word_length)) {
         continue;
       }
+
+#if WMP_SMALL_DEBUG
+      printf("anchor_col=%d start_col=%d wordlen=%d playthrough=%d "
+             "tiles_to_play=%d last_anchor=%d\n",
+             anchor_col, start_col, word_length, playthrough_count,
+             tiles_to_play, last_anchor_col);
+#endif
 
       wmp_gen_small_for_position(gen, start_col, word_length, tiles_to_play,
                                  last_anchor_col);
@@ -949,6 +1017,16 @@ void gen_record_wmp_small(MoveGen *gen) {
       board_copy_row_cache(gen->lanes_cache, gen->row_cache, row, dir);
 
       int last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+#if WMP_SMALL_DEBUG
+      printf("\n=== dir=%d row=%d ===\n", dir, row);
+      printf("  Anchors: ");
+      for (int col = 0; col < BOARD_DIM; col++) {
+        if (gen_cache_get_is_anchor(gen, col)) {
+          printf("%d ", col);
+        }
+      }
+      printf("\n");
+#endif
       for (int col = 0; col < BOARD_DIM; col++) {
         if (gen_cache_get_is_anchor(gen, col)) {
           gen_record_wmp_small_for_anchor(gen, col, last_anchor_col);

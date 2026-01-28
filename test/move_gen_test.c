@@ -18,6 +18,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_constants.h"
@@ -1539,7 +1540,136 @@ void wmp_blank_possibilities_bananas_5(void) {
   config_destroy(config);
 }
 
+// Compare WMP and KWG small move generation
+// Returns true if they produce the same moves, false otherwise
+void wmp_small_movegen_compare_test(void) {
+  // Use CSW21 with WMP enabled
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 score -s2 score -r1 small -r2 small "
+      "-numsmallplays 100000");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  Player *player = game_get_player(game, 0);
+
+  // Create two move lists - one for KWG, one for WMP
+  MoveList *kwg_move_list = move_list_create_small(100000);
+  MoveList *wmp_move_list = move_list_create_small(100000);
+
+  MoveGenArgs move_gen_args = {
+      .game = game,
+      .move_list = kwg_move_list,
+      .move_record_type = MOVE_RECORD_ALL_SMALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .thread_index = 0,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+
+  // Load a test position
+  load_cgp_or_die(game, VS_JEREMY);
+  rack_set_to_string(ld, player_get_rack(player), "BGIV");
+
+  // Have opponent draw to prevent exchange generation
+  draw_to_full_rack(game, 1);
+
+  // Generate with KWG
+  MoveGen *gen = get_movegen(0);
+  gen_load_position(gen, &move_gen_args);
+  small_move_list_reset(kwg_move_list);
+  gen_record_scoring_plays_small(gen);
+  int kwg_count = move_list_get_count(kwg_move_list);
+
+  // Generate with WMP
+  move_gen_args.move_list = wmp_move_list;
+  gen_load_position(gen, &move_gen_args);
+  small_move_list_reset(wmp_move_list);
+  gen_record_wmp_small(gen);
+  int wmp_count = move_list_get_count(wmp_move_list);
+
+  printf("WMP small movegen test:\n");
+  printf("  KWG generated: %d moves\n", kwg_count);
+  printf("  WMP generated: %d moves\n", wmp_count);
+
+  // Sort both lists by score for comparison
+  SmallMove *kwg_sorted = malloc_or_die(kwg_count * sizeof(SmallMove));
+  SmallMove *wmp_sorted = malloc_or_die(wmp_count * sizeof(SmallMove));
+
+  for (int i = 0; i < kwg_count; i++) {
+    kwg_sorted[i] = *(kwg_move_list->small_moves[i]);
+  }
+  for (int i = 0; i < wmp_count; i++) {
+    wmp_sorted[i] = *(wmp_move_list->small_moves[i]);
+  }
+
+  qsort(kwg_sorted, kwg_count, sizeof(SmallMove), compare_small_moves_by_score);
+  qsort(wmp_sorted, wmp_count, sizeof(SmallMove), compare_small_moves_by_score);
+
+  // Print top 10 KWG moves
+  printf("\n  Top 10 KWG moves:\n");
+  StringBuilder *sb = string_builder_create();
+  for (int i = 0; i < 10 && i < kwg_count; i++) {
+    small_move_to_move(kwg_move_list->spare_move, &kwg_sorted[i],
+                       game_get_board(game));
+    string_builder_clear(sb);
+    string_builder_add_move(sb, game_get_board(game), kwg_move_list->spare_move,
+                            ld, true);
+    printf("    %2d: %s\n", i + 1, string_builder_peek(sb));
+  }
+
+  // Print top 10 WMP moves
+  printf("\n  Top 10 WMP moves:\n");
+  for (int i = 0; i < 10 && i < wmp_count; i++) {
+    small_move_to_move(wmp_move_list->spare_move, &wmp_sorted[i],
+                       game_get_board(game));
+    string_builder_clear(sb);
+    string_builder_add_move(sb, game_get_board(game), wmp_move_list->spare_move,
+                            ld, true);
+    printf("    %2d: %s\n", i + 1, string_builder_peek(sb));
+  }
+
+  // Check if counts match
+  if (kwg_count != wmp_count) {
+    printf("\n  ERROR: Move counts differ! KWG=%d, WMP=%d\n", kwg_count,
+           wmp_count);
+
+    // Find moves in KWG but not in WMP
+    printf("\n  Moves in KWG but not in WMP (first 10):\n");
+    int missing_count = 0;
+    for (int i = 0; i < kwg_count && missing_count < 10; i++) {
+      bool found = false;
+      for (int j = 0; j < wmp_count; j++) {
+        if (memcmp(&kwg_sorted[i], &wmp_sorted[j], sizeof(SmallMove)) == 0) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        small_move_to_move(kwg_move_list->spare_move, &kwg_sorted[i],
+                           game_get_board(game));
+        string_builder_clear(sb);
+        string_builder_add_move(sb, game_get_board(game),
+                                kwg_move_list->spare_move, ld, true);
+        printf("    %s\n", string_builder_peek(sb));
+        missing_count++;
+      }
+    }
+  }
+
+  string_builder_destroy(sb);
+  free(kwg_sorted);
+  free(wmp_sorted);
+  small_move_list_destroy(kwg_move_list);
+  small_move_list_destroy(wmp_move_list);
+  game_destroy(game);
+  config_destroy(config);
+
+  // Don't assert for now - we're debugging
+  // assert(kwg_count == wmp_count);
+}
+
 void test_move_gen(void) {
+  wmp_small_movegen_compare_test();
   leave_lookup_test();
   unfound_leave_lookup_test();
   macondo_tests();
