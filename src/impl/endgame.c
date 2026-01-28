@@ -197,7 +197,7 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   kwg_destroy(es->pruned_kwg);
   DictionaryWordList *possible_word_list = dictionary_word_list_create();
   generate_possible_words(endgame_args->game, NULL, possible_word_list);
-  es->pruned_kwg = make_kwg_from_words(
+  es->pruned_kwg = make_kwg_from_words_small(
       possible_word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
   dictionary_word_list_destroy(possible_word_list);
 

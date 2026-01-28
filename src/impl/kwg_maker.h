@@ -9,6 +9,12 @@
 KWG *make_kwg_from_words(const DictionaryWordList *words,
                          kwg_maker_output_t output, kwg_maker_merge_t merge);
 
+// Optimized version for small dictionaries (endgame wordprune case).
+// Uses appropriately sized data structures based on word count.
+KWG *make_kwg_from_words_small(const DictionaryWordList *words,
+                               kwg_maker_output_t output,
+                               kwg_maker_merge_t merge);
+
 void kwg_write_words(const KWG *kwg, uint32_t node_index,
                      DictionaryWordList *words, bool *nodes_reached);
 
@@ -17,5 +23,9 @@ void kwg_write_gaddag_strings(const KWG *kwg, uint32_t node_index,
 
 void add_gaddag_strings(const DictionaryWordList *words,
                         DictionaryWordList *gaddag_strings);
+
+// Timing functions (for debugging, will be removed before PR review)
+void kwg_maker_print_timing_stats(void);
+void kwg_maker_reset_timing_stats(void);
 
 #endif

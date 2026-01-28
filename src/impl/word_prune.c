@@ -1,5 +1,6 @@
 #include "word_prune.h"
 
+#include "../compat/ctime.h"
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/letter_distribution_defs.h"
@@ -15,6 +16,25 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+// Timing accumulators for debugging (will be removed before PR review)
+static double total_word_prune_time = 0.0;
+static int word_prune_call_count = 0;
+
+void word_prune_print_timing_stats(void) {
+  if (word_prune_call_count == 0) {
+    return;
+  }
+  log_warn("Word Prune Timing Stats (%d calls):", word_prune_call_count);
+  log_warn("  Total word prune time: %.6fs", total_word_prune_time);
+  log_warn("  Average per call:      %.6fs",
+           total_word_prune_time / word_prune_call_count);
+}
+
+void word_prune_reset_timing_stats(void) {
+  total_word_prune_time = 0.0;
+  word_prune_call_count = 0;
+}
 
 int compare_board_rows(const void *a, const void *b) {
   const BoardRow *row_a = (const BoardRow *)a;
@@ -328,6 +348,10 @@ void add_playthrough_words_from_row(const BoardRow *board_row, const KWG *kwg,
 
 void generate_possible_words(const Game *game, const KWG *override_kwg,
                              DictionaryWordList *possible_word_list) {
+  Timer timer;
+  ctimer_start(&timer);
+  word_prune_call_count++;
+
   const KWG *kwg = override_kwg;
   if (kwg == NULL) {
     const Player *player =
@@ -382,4 +406,7 @@ void generate_possible_words(const Game *game, const KWG *override_kwg,
   dictionary_word_list_sort(temp_list);
   dictionary_word_list_unique(temp_list, possible_word_list);
   dictionary_word_list_destroy(temp_list);
+
+  ctimer_stop(&timer);
+  total_word_prune_time += ctimer_elapsed_seconds(&timer);
 }
