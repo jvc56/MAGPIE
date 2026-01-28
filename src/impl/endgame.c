@@ -1,6 +1,7 @@
 #include "endgame.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
@@ -32,7 +33,6 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <time.h>
 
 enum {
   DEFAULT_ENDGAME_MOVELIST_CAPACITY = 250000,
@@ -732,11 +732,8 @@ char *endgame_results_get_string(const EndgameResults *results,
 void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack) {
   // Track solve start time
-  struct timespec solve_start_ts;
-  // NOLINTNEXTLINE(misc-include-cleaner)
-  clock_gettime(CLOCK_MONOTONIC, &solve_start_ts);
-  double solve_start_time =
-      (double)solve_start_ts.tv_sec + (double)solve_start_ts.tv_nsec / 1e9;
+  Timer solve_timer;
+  ctimer_start(&solve_timer);
 
   const int bag_size = bag_get_letters(game_get_bag(endgame_args->game));
   if (bag_size != 0) {
@@ -773,12 +770,7 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   free(worker_ids);
 
   // Calculate elapsed time
-  struct timespec solve_end_ts;
-  // NOLINTNEXTLINE(misc-include-cleaner)
-  clock_gettime(CLOCK_MONOTONIC, &solve_end_ts);
-  double solve_end_time =
-      (double)solve_end_ts.tv_sec + (double)solve_end_ts.tv_nsec / 1e9;
-  double elapsed = solve_end_time - solve_start_time;
+  double elapsed = ctimer_elapsed_seconds(&solve_timer);
 
   // Print final result with PV
   StringBuilder *final_sb = string_builder_create();

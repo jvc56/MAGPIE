@@ -1,5 +1,6 @@
 #include "benchmark_endgame_test.h"
 
+#include "../src/compat/ctime.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
@@ -103,7 +104,8 @@ static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
     string_builder_destroy(game_sb);
     game_string_options_destroy(gso);
 
-    double start_time = get_time_sec();
+    Timer timer;
+    ctimer_start(&timer);
     EndgameArgs args = {.game = game,
                         .thread_control = config_get_thread_control(config),
                         .plies = ply,
@@ -117,7 +119,7 @@ static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
 
     printf("Solving %d-ply endgame...\n", ply);
     endgame_solve(solver, &args, results, err);
-    double elapsed = get_time_sec() - start_time;
+    double elapsed = ctimer_elapsed_seconds(&timer);
     total_time += elapsed;
     assert(error_stack_is_empty(err));
 

@@ -1,3 +1,4 @@
+#include "../src/compat/ctime.h"
 #include "../src/ent/board.h"
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/game.h"
@@ -19,8 +20,8 @@
 // Per-ply callback to print PV during iterative deepening
 static void print_pv_callback(int depth, int32_t value, const PVLine *pv_line,
                               const Game *game, void *user_data) {
-  const double *start_time = (const double *)user_data;
-  double elapsed = get_time_sec() - *start_time;
+  const Timer *timer = (const Timer *)user_data;
+  double elapsed = ctimer_elapsed_seconds(timer);
 
   StringBuilder *sb = string_builder_create();
   string_builder_add_formatted_string(
@@ -60,7 +61,8 @@ void test_single_endgame(const char *config_settings, const char *cgp,
 
   // Create args
   Game *game = config_get_game(config);
-  double start_time = get_time_sec();
+  Timer timer;
+  ctimer_start(&timer);
   EndgameArgs endgame_args;
   endgame_args.thread_control = config_get_thread_control(config);
   endgame_args.game = game;
@@ -68,7 +70,7 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
   endgame_args.initial_small_move_arena_size = initial_small_move_arena_size;
   endgame_args.per_ply_callback = print_pv_callback;
-  endgame_args.per_ply_callback_data = &start_time;
+  endgame_args.per_ply_callback_data = &timer;
 
   // Create results
   EndgameResults *endgame_results = config_get_endgame_results(config);

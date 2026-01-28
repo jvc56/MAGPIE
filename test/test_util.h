@@ -146,6 +146,5 @@ void load_game_history_with_gcg(Config *config, const char *gcg_file);
 void assert_config_exec_status(Config *config, const char *cmd,
                                error_code_t expected_error_code);
 error_code_t get_config_exec_status(Config *config, const char *cmd);
-double get_time_sec(void);
 
 #endif
