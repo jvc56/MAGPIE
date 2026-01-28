@@ -51,25 +51,39 @@ dictionary_word_list_get_word(const DictionaryWordList *dictionary_word_list,
 
 static inline int dictionary_word_compare(const DictionaryWord *word_a,
                                           const DictionaryWord *word_b) {
+  // Most comparisons differ in the first few bytes, so check those first
+  // before calculating min_length and calling memcmp
+  const MachineLetter *a = word_a->word;
+  const MachineLetter *b = word_b->word;
   const int length_a = word_a->length;
   const int length_b = word_b->length;
-  const int min_length = length_a < length_b ? length_a : length_b;
 
-  int cmp_result =
-      memcmp(word_a->word, word_b->word, min_length * sizeof(MachineLetter));
-  if (cmp_result != 0) {
-    return cmp_result;
+  // Quick check first byte (handles empty strings too)
+  if (length_a > 0 && length_b > 0) {
+    if (a[0] != b[0])
+      return (int)a[0] - (int)b[0];
+    // Check second byte
+    if (length_a > 1 && length_b > 1) {
+      if (a[1] != b[1])
+        return (int)a[1] - (int)b[1];
+      // Check third byte
+      if (length_a > 2 && length_b > 2) {
+        if (a[2] != b[2])
+          return (int)a[2] - (int)b[2];
+        // Fall back to memcmp for rest
+        const int min_length = length_a < length_b ? length_a : length_b;
+        if (min_length > 3) {
+          int cmp = memcmp(a + 3, b + 3, (min_length - 3) * sizeof(MachineLetter));
+          if (cmp != 0)
+            return cmp;
+        }
+      }
+    }
   }
 
   // If the words are the same up to the length of the shorter word,
   // the shorter word is considered "less" than the longer one
-  if (length_a < length_b) {
-    return -1;
-  }
-  if (length_a > length_b) {
-    return 1;
-  }
-  return 0;
+  return length_a - length_b;
 }
 
 static inline void insertion_sort(DictionaryWord *arr, int left, int right) {
@@ -84,41 +98,34 @@ static inline void insertion_sort(DictionaryWord *arr, int left, int right) {
   }
 }
 
-// Merge two sorted subarrays into a single sorted array using a buffer
+// Merge two sorted subarrays - only copies left half to temp buffer
 static inline void merge(DictionaryWord *arr, int left, int mid, int right,
                          DictionaryWord *temp) {
   int n1 = mid - left + 1;
-  int n2 = right - mid;
 
-  // Copy data to temporary arrays in temp[]
+  // Only copy the left subarray to temp (right stays in place)
   for (int i = 0; i < n1; i++) {
     temp[i] = arr[left + i];
   }
-  for (int j = 0; j < n2; j++) {
-    temp[n1 + j] = arr[mid + 1 + j];
-  }
 
-  // Merge the temp arrays back into arr[left..right]
-  int i = 0;
-  int j = n1;
-  int k = left;
-  while (i < n1 && j < n1 + n2) {
-    if (dictionary_word_compare(&temp[i], &temp[j]) <= 0) {
+  // Merge from temp (left) and arr[mid+1..right] (right) back into arr
+  int i = 0;          // index into temp (left half)
+  int j = mid + 1;    // index into arr (right half)
+  int k = left;       // index into arr (output)
+
+  while (i < n1 && j <= right) {
+    if (dictionary_word_compare(&temp[i], &arr[j]) <= 0) {
       arr[k++] = temp[i++];
     } else {
-      arr[k++] = temp[j++];
+      arr[k++] = arr[j++];
     }
   }
 
-  // Copy any remaining elements from the left part of temp (if any)
+  // Copy remaining elements from temp (left half) if any
   while (i < n1) {
     arr[k++] = temp[i++];
   }
-
-  // Copy any remaining elements of the right subarray in temp (if any)
-  while (j < n1 + n2) {
-    arr[k++] = temp[j++];
-  }
+  // Right half elements are already in place, no need to copy
 }
 
 static inline void merge_sort(DictionaryWord *arr, int n) {

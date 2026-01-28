@@ -12,7 +12,8 @@
 
 // Timing accumulators for debugging (will be removed before PR review)
 // For small (optimized) version
-static double total_gaddag_string_time_small = 0.0;
+static double total_gaddag_gen_time_small = 0.0;
+static double total_gaddag_sort_time_small = 0.0;
 static double total_trie_build_time_small = 0.0;
 static double total_hash_calc_time_small = 0.0;
 static double total_merge_time_small = 0.0;
@@ -21,7 +22,8 @@ static double total_copy_nodes_time_small = 0.0;
 static int kwg_maker_call_count_small = 0;
 
 // For original version
-static double total_gaddag_string_time_orig = 0.0;
+static double total_gaddag_gen_time_orig = 0.0;
+static double total_gaddag_sort_time_orig = 0.0;
 static double total_trie_build_time_orig = 0.0;
 static double total_hash_calc_time_orig = 0.0;
 static double total_merge_time_orig = 0.0;
@@ -33,42 +35,48 @@ void kwg_maker_print_timing_stats(void) {
   if (kwg_maker_call_count_small > 0) {
     log_warn("KWG Maker SMALL Timing Stats (%d calls):",
              kwg_maker_call_count_small);
-    log_warn("  GADDAG string generation: %.6fs", total_gaddag_string_time_small);
+    log_warn("  GADDAG string generation: %.6fs", total_gaddag_gen_time_small);
+    log_warn("  GADDAG string sorting:    %.6fs", total_gaddag_sort_time_small);
     log_warn("  Trie building:            %.6fs", total_trie_build_time_small);
     log_warn("  Hash calculation:         %.6fs", total_hash_calc_time_small);
     log_warn("  Node merging:             %.6fs", total_merge_time_small);
     log_warn("  Final index assignment:   %.6fs", total_final_index_time_small);
     log_warn("  Node copying:             %.6fs", total_copy_nodes_time_small);
     log_warn("  Total KWG time:           %.6fs",
-             total_gaddag_string_time_small + total_trie_build_time_small +
-                 total_hash_calc_time_small + total_merge_time_small +
-                 total_final_index_time_small + total_copy_nodes_time_small);
+             total_gaddag_gen_time_small + total_gaddag_sort_time_small +
+                 total_trie_build_time_small + total_hash_calc_time_small +
+                 total_merge_time_small + total_final_index_time_small +
+                 total_copy_nodes_time_small);
   }
   if (kwg_maker_call_count_orig > 0) {
     log_warn("KWG Maker ORIGINAL Timing Stats (%d calls):",
              kwg_maker_call_count_orig);
-    log_warn("  GADDAG string generation: %.6fs", total_gaddag_string_time_orig);
+    log_warn("  GADDAG string generation: %.6fs", total_gaddag_gen_time_orig);
+    log_warn("  GADDAG string sorting:    %.6fs", total_gaddag_sort_time_orig);
     log_warn("  Trie building:            %.6fs", total_trie_build_time_orig);
     log_warn("  Hash calculation:         %.6fs", total_hash_calc_time_orig);
     log_warn("  Node merging:             %.6fs", total_merge_time_orig);
     log_warn("  Final index assignment:   %.6fs", total_final_index_time_orig);
     log_warn("  Node copying:             %.6fs", total_copy_nodes_time_orig);
     log_warn("  Total KWG time:           %.6fs",
-             total_gaddag_string_time_orig + total_trie_build_time_orig +
-                 total_hash_calc_time_orig + total_merge_time_orig +
-                 total_final_index_time_orig + total_copy_nodes_time_orig);
+             total_gaddag_gen_time_orig + total_gaddag_sort_time_orig +
+                 total_trie_build_time_orig + total_hash_calc_time_orig +
+                 total_merge_time_orig + total_final_index_time_orig +
+                 total_copy_nodes_time_orig);
   }
 }
 
 void kwg_maker_reset_timing_stats(void) {
-  total_gaddag_string_time_small = 0.0;
+  total_gaddag_gen_time_small = 0.0;
+  total_gaddag_sort_time_small = 0.0;
   total_trie_build_time_small = 0.0;
   total_hash_calc_time_small = 0.0;
   total_merge_time_small = 0.0;
   total_final_index_time_small = 0.0;
   total_copy_nodes_time_small = 0.0;
   kwg_maker_call_count_small = 0;
-  total_gaddag_string_time_orig = 0.0;
+  total_gaddag_gen_time_orig = 0.0;
+  total_gaddag_sort_time_orig = 0.0;
   total_trie_build_time_orig = 0.0;
   total_hash_calc_time_orig = 0.0;
   total_merge_time_orig = 0.0;
@@ -550,12 +558,19 @@ add_gaddag_strings_for_word(const DictionaryWord *word,
   }
 }
 
-void add_gaddag_strings(const DictionaryWordList *words,
-                        DictionaryWordList *gaddag_strings) {
+// Generate GADDAG strings without sorting (sort is called separately for
+// timing)
+static inline void add_gaddag_strings_no_sort(const DictionaryWordList *words,
+                                              DictionaryWordList *gaddag_strings) {
   for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
     const DictionaryWord *word = dictionary_word_list_get_word(words, i);
     add_gaddag_strings_for_word(word, gaddag_strings);
   }
+}
+
+void add_gaddag_strings(const DictionaryWordList *words,
+                        DictionaryWordList *gaddag_strings) {
+  add_gaddag_strings_no_sort(words, gaddag_strings);
   dictionary_word_list_sort(gaddag_strings);
 }
 
@@ -663,13 +678,19 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   total_trie_build_time_orig += ctimer_elapsed_seconds(&timer);
 
   if (output_gaddag) {
-    ctimer_start(&timer);
     last_word_length = 0;
     cached_node_indices[0] = gaddag_root_node_index;
     DictionaryWordList *gaddag_strings = dictionary_word_list_create();
-    add_gaddag_strings(words, gaddag_strings);
+
+    ctimer_start(&timer);
+    add_gaddag_strings_no_sort(words, gaddag_strings);
     ctimer_stop(&timer);
-    total_gaddag_string_time_orig += ctimer_elapsed_seconds(&timer);
+    total_gaddag_gen_time_orig += ctimer_elapsed_seconds(&timer);
+
+    ctimer_start(&timer);
+    dictionary_word_list_sort(gaddag_strings);
+    ctimer_stop(&timer);
+    total_gaddag_sort_time_orig += ctimer_elapsed_seconds(&timer);
 
     ctimer_start(&timer);
     for (int i = 0; i < dictionary_word_list_get_count(gaddag_strings); i++) {
@@ -831,12 +852,18 @@ KWG *make_kwg_from_words_small(const DictionaryWordList *words,
 
   if (output_gaddag) {
     // Pre-allocate gaddag_strings with estimated capacity
-    ctimer_start(&timer);
     DictionaryWordList *gaddag_strings =
         dictionary_word_list_create_with_capacity((int)estimated_gaddag_strings);
-    add_gaddag_strings(words, gaddag_strings);
+
+    ctimer_start(&timer);
+    add_gaddag_strings_no_sort(words, gaddag_strings);
     ctimer_stop(&timer);
-    total_gaddag_string_time_small += ctimer_elapsed_seconds(&timer);
+    total_gaddag_gen_time_small += ctimer_elapsed_seconds(&timer);
+
+    ctimer_start(&timer);
+    dictionary_word_list_sort(gaddag_strings);
+    ctimer_stop(&timer);
+    total_gaddag_sort_time_small += ctimer_elapsed_seconds(&timer);
 
     ctimer_start(&timer);
     last_word_length = 0;
