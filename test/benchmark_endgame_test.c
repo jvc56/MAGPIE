@@ -3,38 +3,35 @@
 #include "../src/def/game_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
-#include "../src/ent/board.h"
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/game.h"
-#include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/thread_control.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
-#include "../src/impl/exec.h"
 #include "../src/impl/gameplay.h"
 #include "../src/str/game_string.h"
-#include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
 #include <fcntl.h>
+#include <inttypes.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <time.h>
 #include <unistd.h>
 
 // Execute config command quietly (suppress stdout during execution)
 static void exec_config_quiet(Config *config, const char *cmd) {
   // Suppress stdout
-  fflush(stdout);
-  int saved_stdout = dup(STDOUT_FILENO);
-  int devnull = open("/dev/null", O_WRONLY);
-  dup2(devnull, STDOUT_FILENO);
+  (void)fflush(stdout);
+  int saved_stdout = fcntl(STDOUT_FILENO, F_DUPFD_CLOEXEC, 0);
+  int devnull = open("/dev/null", O_WRONLY | O_CLOEXEC);
+  (void)dup2(devnull, STDOUT_FILENO);
   close(devnull);
 
   ErrorStack *error_stack = error_stack_create();
@@ -49,13 +46,14 @@ static void exec_config_quiet(Config *config, const char *cmd) {
                             THREAD_CONTROL_STATUS_FINISHED);
 
   // Restore stdout
-  fflush(stdout);
-  dup2(saved_stdout, STDOUT_FILENO);
+  (void)fflush(stdout);
+  (void)dup2(saved_stdout, STDOUT_FILENO);
   close(saved_stdout);
 }
 
 static double get_time_sec(void) {
   struct timespec ts;
+  // NOLINTNEXTLINE(misc-include-cleaner)
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
@@ -102,8 +100,8 @@ static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
     }
 
     // Print the endgame position
-    printf("\n--- Game %d (seed %llu) ---\n", valid_endgames + 1,
-           (unsigned long long)(base_seed + (uint64_t)i));
+    printf("\n--- Game %d (seed %" PRIu64 ") ---\n", valid_endgames + 1,
+           base_seed + (uint64_t)i);
     StringBuilder *game_sb = string_builder_create();
     GameStringOptions *gso = game_string_options_create_default();
     string_builder_add_game(game, NULL, gso, NULL, game_sb);
@@ -117,7 +115,9 @@ static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
                         .plies = ply,
                         .tt_fraction_of_mem = 0.05,
                         .initial_small_move_arena_size =
-                            DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE};
+                            DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                        .per_ply_callback = NULL,
+                        .per_ply_callback_data = NULL};
     EndgameResults *results = config_get_endgame_results(config);
     ErrorStack *err = error_stack_create();
 
@@ -146,7 +146,7 @@ static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
 }
 
 void test_benchmark_endgame(void) {
-  log_set_level(LOG_WARN);  // Allow warnings to show diagnostics
+  log_set_level(LOG_WARN); // Allow warnings to show diagnostics
 
   const int num_games = 100;
   const int ply = 3;

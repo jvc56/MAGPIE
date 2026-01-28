@@ -13,11 +13,13 @@
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <time.h>
 
 static double get_time_sec(void) {
   struct timespec ts;
+  // NOLINTNEXTLINE(misc-include-cleaner)
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
@@ -29,8 +31,8 @@ static void print_pv_callback(int depth, int32_t value, const PVLine *pv_line,
   double elapsed = get_time_sec() - *start_time;
 
   StringBuilder *sb = string_builder_create();
-  string_builder_add_formatted_string(sb, "  depth %d: value=%d, time=%.3fs, pv=",
-                                      depth, value, elapsed);
+  string_builder_add_formatted_string(
+      sb, "  depth %d: value=%d, time=%.3fs, pv=", depth, value, elapsed);
 
   // Format each move in the PV
   Game *game_copy = game_duplicate(game);

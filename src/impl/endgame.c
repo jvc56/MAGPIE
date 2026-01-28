@@ -674,10 +674,13 @@ void string_builder_endgame_results(StringBuilder *pv_description,
       int curr_col = 0;
       // Set the player name
       const int player_on_turn = game_get_player_on_turn_index(gc);
-      const char *player_name =
-          game_history ? game_history_player_get_name(game_history,
-                                                      player_on_turn)
-                       : (player_on_turn == 0 ? "Player 1" : "Player 2");
+      const char *player_name;
+      if (game_history) {
+        player_name =
+            game_history_player_get_name(game_history, player_on_turn);
+      } else {
+        player_name = player_on_turn == 0 ? "Player 1" : "Player 2";
+      }
       string_grid_set_cell(sg, i, curr_col++,
                            get_formatted_string("(%s)", player_name));
 
@@ -730,6 +733,7 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack) {
   // Track solve start time
   struct timespec solve_start_ts;
+  // NOLINTNEXTLINE(misc-include-cleaner)
   clock_gettime(CLOCK_MONOTONIC, &solve_start_ts);
   double solve_start_time =
       (double)solve_start_ts.tv_sec + (double)solve_start_ts.tv_nsec / 1e9;
@@ -770,6 +774,7 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
 
   // Calculate elapsed time
   struct timespec solve_end_ts;
+  // NOLINTNEXTLINE(misc-include-cleaner)
   clock_gettime(CLOCK_MONOTONIC, &solve_end_ts);
   double solve_end_time =
       (double)solve_end_ts.tv_sec + (double)solve_end_ts.tv_nsec / 1e9;
@@ -782,8 +787,9 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   Move move;
 
   string_builder_add_formatted_string(
-      final_sb, "FINAL: depth=%d, value=%d, time=%.3fs, pv=",
-      solver->requested_plies, solver->best_pv_value, elapsed);
+      final_sb,
+      "FINAL: depth=%d, value=%d, time=%.3fs, pv=", solver->requested_plies,
+      solver->best_pv_value, elapsed);
   for (int i = 0; i < solver->principal_variation.num_moves; i++) {
     small_move_to_move(&move, &solver->principal_variation.moves[i],
                        game_get_board(final_game_copy));
@@ -805,7 +811,8 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
     int tt_lookups = atomic_load(&solver->transposition_table->lookups);
     int tt_hits = atomic_load(&solver->transposition_table->hits);
     int tt_created = atomic_load(&solver->transposition_table->created);
-    int tt_collisions = atomic_load(&solver->transposition_table->t2_collisions);
+    int tt_collisions =
+        atomic_load(&solver->transposition_table->t2_collisions);
     log_warn("TT stats: lookups=%d, hits=%d (%.2f%%), created=%d, "
              "t2_collisions=%d",
              tt_lookups, tt_hits,
