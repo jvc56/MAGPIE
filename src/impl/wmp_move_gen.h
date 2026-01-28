@@ -207,6 +207,54 @@ static inline void wmp_move_gen_check_nonplaythrough_existence(
   }
 }
 
+// Optimized subrack enumeration that skips leave_map tracking entirely.
+// Use this for record-all mode where leave values aren't needed.
+static inline void
+wmp_move_gen_enumerate_subracks_no_leaves(WMPMoveGen *wmp_move_gen,
+                                          BitRack *current, int next_ml,
+                                          int count) {
+  int max_num_this = 0;
+  for (; next_ml < BIT_RACK_MAX_ALPHABET_SIZE; next_ml++) {
+    max_num_this = bit_rack_get_letter(&wmp_move_gen->player_bit_rack, next_ml);
+    if (max_num_this > 0) {
+      break;
+    }
+  }
+  if (next_ml >= BIT_RACK_MAX_ALPHABET_SIZE) {
+    const int insert_index = subracks_get_combination_offset(count) +
+                             wmp_move_gen->count_by_size[count];
+    SubrackInfo *subrack_info =
+        wmp_move_gen->nonplaythrough_infos + insert_index;
+    subrack_info->subrack = *current;
+    subrack_info->leave_value = 0;
+    wmp_move_gen->count_by_size[count]++;
+    return;
+  }
+  for (int i = 0; i < max_num_this; i++) {
+    wmp_move_gen_enumerate_subracks_no_leaves(wmp_move_gen, current,
+                                              next_ml + 1, count + i);
+    bit_rack_add_letter(current, next_ml);
+  }
+  wmp_move_gen_enumerate_subracks_no_leaves(wmp_move_gen, current, next_ml + 1,
+                                            count + max_num_this);
+  for (int i = max_num_this - 1; i >= 0; i--) {
+    bit_rack_take_letter(current, next_ml);
+  }
+}
+
+// Optimized check for record-all mode - no leave_map needed
+static inline void wmp_move_gen_check_nonplaythrough_existence_no_leaves(
+    WMPMoveGen *wmp_move_gen) {
+  memset(wmp_move_gen->count_by_size, 0, sizeof(wmp_move_gen->count_by_size));
+  BitRack empty = bit_rack_create_empty();
+  wmp_move_gen_enumerate_subracks_no_leaves(wmp_move_gen, &empty,
+                                            BLANK_MACHINE_LETTER, 0);
+  for (int size = MINIMUM_WORD_LENGTH; size <= wmp_move_gen->full_rack_size;
+       size++) {
+    wmp_move_gen_check_nonplaythroughs_of_size(wmp_move_gen, size, false);
+  }
+}
+
 static inline bool wmp_move_gen_nonplaythrough_word_of_length_exists(
     const WMPMoveGen *wmp_move_gen, int word_length) {
   return wmp_move_gen->nonplaythrough_has_word_of_length[word_length];

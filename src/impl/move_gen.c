@@ -1056,10 +1056,8 @@ static void gen_record_wmp_small_for_anchor(MoveGen *gen, int anchor_col,
 void gen_record_wmp_small(MoveGen *gen) {
   WMPMoveGen *wgen = &gen->wmp_move_gen;
 
-  // Initialize leave map and enumerate subracks
-  leave_map_init(&gen->player_rack, &gen->leave_map);
-  leave_map_set_current_value(&gen->leave_map, 0);
-  wmp_move_gen_check_nonplaythrough_existence(wgen, false, &gen->leave_map);
+  // Enumerate subracks without leave tracking (optimized for record-all mode)
+  wmp_move_gen_check_nonplaythrough_existence_no_leaves(wgen);
 
   for (int dir = 0; dir < 2; dir++) {
     gen->dir = dir;
