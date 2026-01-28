@@ -40,8 +40,6 @@
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
-bool move_gen_use_optimized_record_all_small = true;
-
 // Cache move generators since destroying
 // and recreating a movegen for
 // every request to generate moves would
@@ -2227,8 +2225,7 @@ void gen_record_pass(MoveGen *gen) {
 void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen(args->thread_index);
   gen_load_position(gen, args);
-  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL &&
-      move_gen_use_optimized_record_all_small) {
+  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
     gen_record_scoring_plays_small(gen);
   } else {
     gen_look_up_leaves_and_record_exchanges(gen);
