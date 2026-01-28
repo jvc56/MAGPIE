@@ -149,8 +149,8 @@ static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
 void test_benchmark_endgame(void) {
   log_set_level(LOG_WARN); // Allow warnings to show diagnostics
 
-  const int num_games = 20;
-  const int ply = 3;
+  const int num_games = 1000;
+  const int ply = 1;
   const uint64_t base_seed = 0;
 
   // Reset timing stats before benchmark
