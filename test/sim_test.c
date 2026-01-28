@@ -780,6 +780,26 @@ void test_sim_ctx(void) {
   config_destroy(config);
 }
 
+void test_sim_endgame(void) {
+  // Test that when the bag is empty, the simulator performs
+  // only 1 iteration per move (sample_limit = num_moves, sample_minimum = 1)
+  Config *config =
+      config_create_or_die("set -lex NWL20 -wmp true -plies 1 -numplays 37 "
+                           "-threads 1 -minp 100 -iter 1000000 -scond none");
+
+  load_and_exec_config_or_die(config, "cgp " VS_JEREMY_WITH_P2_RACK);
+  load_and_exec_config_or_die(config, "r ??DDESW");
+  load_and_exec_config_or_die(config, "gs");
+
+  const int num_moves = move_list_get_count(config_get_move_list(config));
+  const uint64_t iteration_count =
+      sim_results_get_iteration_count(config_get_sim_results(config));
+
+  assert(iteration_count == (uint64_t)num_moves);
+
+  config_destroy(config);
+}
+
 void test_sim(void) {
   const char *sim_perf_iters = getenv("SIM_PERF_ITERS");
   if (sim_perf_iters) {
@@ -800,5 +820,6 @@ void test_sim(void) {
     test_sim_top_two_consistency();
     test_sim_one_ply();
     test_sim_ctx();
+    test_sim_endgame();
   }
 }
