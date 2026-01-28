@@ -53,13 +53,13 @@ static inline int dictionary_word_compare(const DictionaryWord *word_a,
                                           const DictionaryWord *word_b) {
   // Most comparisons differ in the first few bytes, so check those first
   // before calculating min_length and calling memcmp
-  const MachineLetter *a = word_a->word;
-  const MachineLetter *b = word_b->word;
   const int length_a = word_a->length;
   const int length_b = word_b->length;
 
   // Quick check first byte (handles empty strings too)
   if (length_a > 0 && length_b > 0) {
+    const MachineLetter *a = word_a->word;
+    const MachineLetter *b = word_b->word;
     if (a[0] != b[0]) {
       return (int)a[0] - (int)b[0];
     }
