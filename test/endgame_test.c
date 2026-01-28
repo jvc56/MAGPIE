@@ -35,9 +35,9 @@ static void print_pv_callback(int depth, int32_t value, const PVLine *pv_line,
       sb, "  depth %d: value=%d, time=%.3fs, pv=", depth, value, elapsed);
 
   // Format each move in the PV
-  Game *game_copy = game_duplicate(game);
-  const Board *board = game_get_board(game_copy);
-  const LetterDistribution *ld = game_get_ld(game_copy);
+  Game *gc = game_duplicate(game);
+  const Board *board = game_get_board(gc);
+  const LetterDistribution *ld = game_get_ld(gc);
   Move move;
 
   for (int i = 0; i < pv_line->num_moves; i++) {
@@ -47,12 +47,12 @@ static void print_pv_callback(int depth, int32_t value, const PVLine *pv_line,
       string_builder_add_string(sb, " ");
     }
     // Play the move to update the board for the next move
-    play_move(&move, game_copy, NULL);
+    play_move(&move, gc, NULL);
   }
 
   printf("%s\n", string_builder_peek(sb));
   string_builder_destroy(sb);
-  game_destroy(game_copy);
+  game_destroy(gc);
 }
 
 void test_single_endgame(const char *config_settings, const char *cgp,
