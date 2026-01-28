@@ -1,13 +1,52 @@
+#include "../src/compat/ctime.h"
+#include "../src/ent/board.h"
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/game.h"
+#include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
+#include "../src/impl/gameplay.h"
+#include "../src/str/game_string.h"
+#include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
+
+// Per-ply callback to print PV during iterative deepening
+static void print_pv_callback(int depth, int32_t value, const PVLine *pv_line,
+                              const Game *game, void *user_data) {
+  const Timer *timer = (const Timer *)user_data;
+  double elapsed = ctimer_elapsed_seconds(timer);
+
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_formatted_string(
+      sb, "  depth %d: value=%d, time=%.3fs, pv=", depth, value, elapsed);
+
+  // Format each move in the PV
+  Game *gc = game_duplicate(game);
+  const Board *board = game_get_board(gc);
+  const LetterDistribution *ld = game_get_ld(gc);
+  Move move;
+
+  for (int i = 0; i < pv_line->num_moves; i++) {
+    small_move_to_move(&move, &(pv_line->moves[i]), board);
+    string_builder_add_move(sb, board, &move, ld, true);
+    if (i < pv_line->num_moves - 1) {
+      string_builder_add_string(sb, " ");
+    }
+    // Play the move to update the board for the next move
+    play_move(&move, gc, NULL);
+  }
+
+  printf("%s\n", string_builder_peek(sb));
+  string_builder_destroy(sb);
+  game_destroy(gc);
+}
 
 void test_single_endgame(const char *config_settings, const char *cgp,
                          int initial_small_move_arena_size,
@@ -22,12 +61,16 @@ void test_single_endgame(const char *config_settings, const char *cgp,
 
   // Create args
   Game *game = config_get_game(config);
+  Timer timer;
+  ctimer_start(&timer);
   EndgameArgs endgame_args;
   endgame_args.thread_control = config_get_thread_control(config);
   endgame_args.game = game;
   endgame_args.plies = config_get_endgame_plies(config);
   endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
   endgame_args.initial_small_move_arena_size = initial_small_move_arena_size;
+  endgame_args.per_ply_callback = print_pv_callback;
+  endgame_args.per_ply_callback_data = &timer;
 
   // Create results
   EndgameResults *endgame_results = config_get_endgame_results(config);
@@ -35,6 +78,15 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   // Create error stack
   ErrorStack *error_stack = error_stack_create();
 
+  // Print the game position and ply count
+  StringBuilder *game_sb = string_builder_create();
+  GameStringOptions *gso = game_string_options_create_default();
+  string_builder_add_game(game, NULL, gso, NULL, game_sb);
+  printf("\n%s\n", string_builder_peek(game_sb));
+  string_builder_destroy(game_sb);
+  game_string_options_destroy(gso);
+
+  printf("Solving %d-ply endgame...\n", endgame_args.plies);
   endgame_solve(endgame_solver, &endgame_args, endgame_results, error_stack);
 
   const error_code_t actual_error_code = error_stack_top(error_stack);
@@ -132,7 +184,7 @@ void test_eldar_v_stick(void) {
       "cgp "
       "4EXODE6/1DOFF1KERATIN1U/1OHO8YEN/1POOJA1B3MEWS/5SQUINTY2A/4RHINO1e3V/"
       "2B4C2R3E/GOAT1D1E2ZIN1d/1URACILS2E4/1PIG1S4T4/2L2R4T4/2L2A1GENII3/"
-      "2A2T1L7/5E1A7/5D1M7 AEEIRUW/V 410/409 0 -lex CSW19;",
+      "2A2T1L7/5E1A7/5D1M7 AEEIRUW/V 410/409 0 -lex CSW21;",
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, 72, false);
 }
 
@@ -150,9 +202,10 @@ void test_endgame(void) {
   test_solve_standard();
   test_very_deep();
   test_small_arena_realloc();
+  test_pass_first();
+  test_nonempty_bag();
   //  Uncomment out more of these tests once we add more optimizations,
   //  and/or if we can run the endgame tests in release mode.
-  //  test_pass_first();
   // test_vs_joey();
   // test_eldar_v_stick();
 }

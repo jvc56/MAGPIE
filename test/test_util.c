@@ -2,6 +2,7 @@
 
 #include "../src/def/board_defs.h"
 #include "../src/def/cross_set_defs.h"
+#include "../src/def/equity_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/thread_control_defs.h"
@@ -32,6 +33,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/simmer.h"
 #include "../src/impl/wmp_move_gen.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
@@ -371,6 +373,8 @@ void play_top_n_equity_move(Game *game, int n) {
       .override_kwg = NULL,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   generate_moves(&args);
@@ -726,6 +730,8 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
       .move_list = move_list,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   rack_set_to_string(game_get_ld(game), player_rack, rack_string);
@@ -786,12 +792,13 @@ ValidatedMoves *validated_moves_create_and_assert_status(
 }
 
 error_code_t config_simulate_and_return_status(const Config *config,
+                                               SimCtx **sim_ctx,
                                                Rack *known_opp_rack,
                                                SimResults *sim_results) {
   ErrorStack *error_stack = error_stack_create();
   thread_control_set_status(config_get_thread_control(config),
                             THREAD_CONTROL_STATUS_STARTED);
-  config_simulate(config, known_opp_rack, sim_results, error_stack);
+  config_simulate(config, sim_ctx, known_opp_rack, sim_results, error_stack);
   error_code_t status = error_stack_top(error_stack);
   if (status != ERROR_STATUS_SUCCESS) {
     printf("config simulate finished with error: %d\n", status);
@@ -1010,6 +1017,8 @@ void generate_anchors_for_test(Game *game) {
       .override_kwg = NULL,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   gen_load_position(gen, &args);
   gen_look_up_leaves_and_record_exchanges(gen);

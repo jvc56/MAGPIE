@@ -11,6 +11,7 @@
 #include "../ent/sim_results.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
+#include "../ent/win_pct.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
@@ -98,7 +99,7 @@ bool string_builder_add_sim_stats_with_display_lock(
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Leave"));
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Score"));
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Ig"));
-    string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Win%"));
+    string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Wp"));
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Eq"));
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("StEq"));
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Iters"));
@@ -148,7 +149,7 @@ bool string_builder_add_sim_stats_with_display_lock(
         get_formatted_string("%d", equity_to_int(move_get_score(move))));
 
     if (bai_result_status == BAI_RESULT_STATUS_THRESHOLD && i > 0 &&
-        sim_results_plays_are_similar(sim_results, 0, i)) {
+        sim_results_display_plays_are_similar(sim_results, 0, i)) {
       string_grid_set_cell(sg, curr_row, curr_col, string_duplicate("X"));
     }
     curr_col++;
@@ -195,7 +196,7 @@ bool string_builder_add_sim_stats_with_display_lock(
   string_builder_add_formatted_string(sb, "\nShowing %d of %d simmed plays\n",
                                       num_display_plays, num_simmed_plays);
 
-  StringGrid *summary_sg = string_grid_create(4, 2, 1);
+  StringGrid *summary_sg = string_grid_create(5, 2, 1);
 
   curr_row = 0;
 
@@ -223,6 +224,13 @@ bool string_builder_add_sim_stats_with_display_lock(
   string_builder_destroy(known_opp_rack_sb);
   curr_row++;
 
+  string_grid_set_cell(summary_sg, curr_row, 0, string_duplicate("Wp Cutoff:"));
+  string_grid_set_cell(
+      summary_sg, curr_row, 1,
+      get_formatted_string("%g", convert_cutoff_to_user_cutoff(
+                                     sim_results_get_cutoff(sim_results))));
+  curr_row++;
+
   string_grid_set_cell(summary_sg, curr_row, 0, string_duplicate("Status:"));
 
   char *status_str = NULL;
@@ -230,6 +238,9 @@ bool string_builder_add_sim_stats_with_display_lock(
   case BAI_RESULT_STATUS_THRESHOLD:
     status_str =
         get_formatted_string("Finished (statistical threshold achieved)\n");
+    break;
+  case BAI_RESULT_STATUS_WIN_PCT_CUTOFF:
+    status_str = get_formatted_string("Finished (win percentage cutoff)\n");
     break;
   case BAI_RESULT_STATUS_SAMPLE_LIMIT:
     status_str = get_formatted_string("Finished (max iterations reached)\n");

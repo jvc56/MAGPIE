@@ -192,3 +192,33 @@ WinPct *win_pct_create(const char *data_paths, const char *win_pct_name,
   }
   return wp;
 }
+
+bool is_win_pct_at_upper_extreme(const double wp, const double cutoff) {
+  return wp >= (1.0 - cutoff);
+}
+
+bool is_win_pct_at_lower_extreme(const double wp, const double cutoff) {
+  return wp <= cutoff;
+}
+
+bool is_win_pct_within_cutoff(const double win_pct, const double cutoff) {
+  return is_win_pct_at_lower_extreme(win_pct, cutoff) ||
+         is_win_pct_at_upper_extreme(win_pct, cutoff);
+}
+
+bool are_win_pcts_within_cutoff_or_equal(const double wp1, const double wp2,
+                                         const double cutoff) {
+  return (is_win_pct_at_lower_extreme(wp1, cutoff) &&
+          is_win_pct_at_lower_extreme(wp2, cutoff)) ||
+         (is_win_pct_at_upper_extreme(wp1, cutoff) &&
+          is_win_pct_at_upper_extreme(wp2, cutoff)) ||
+         wp1 == wp2;
+}
+
+double convert_cutoff_to_user_cutoff(const double cutoff) {
+  return cutoff * 100.0;
+}
+
+double convert_user_cutoff_to_cutoff(const double user_cutoff) {
+  return user_cutoff / 100.0;
+}

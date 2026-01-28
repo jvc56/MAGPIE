@@ -1,3 +1,5 @@
+#include "../src/def/equity_defs.h"
+#include "../src/def/move_defs.h"
 #include "../src/def/static_eval_defs.h"
 #include "../src/ent/game.h"
 #include "../src/ent/klv.h"
@@ -25,6 +27,8 @@ void test_macondo_opening_equity_adjustments(void) {
       .move_list = move_list,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   rack_set_to_string(ld, rack, "EORSTVX");
@@ -106,6 +110,8 @@ void test_macondo_endgame_equity_adjustments(void) {
       .move_list = move_list,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   load_cgp_or_die(

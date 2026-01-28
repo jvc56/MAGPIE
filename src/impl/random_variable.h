@@ -6,6 +6,7 @@
 #include "../ent/game_history.h"
 #include "../ent/inference_results.h"
 #include "../ent/rack.h"
+#include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "bai_logger.h"
@@ -22,24 +23,6 @@ typedef enum {
   RANDOM_VARIABLES_SIMMED_PLAYS,
 } random_variables_t;
 
-typedef struct SimArgs {
-  int num_plies;
-  const Game *game;
-  const MoveList *move_list;
-  Rack *known_opp_rack;
-  WinPct *win_pcts;
-  bool use_inference;
-  bool use_heat_map;
-  InferenceResults *inference_results;
-  InferenceArgs inference_args;
-  int num_threads;
-  int print_interval;
-  int max_num_display_plays;
-  uint64_t seed;
-  ThreadControl *thread_control;
-  BAIOptions bai_options;
-} SimArgs;
-
 typedef struct RandomVariablesArgs {
   random_variables_t type;
   uint64_t num_rvs;
@@ -52,10 +35,10 @@ typedef struct RandomVariablesArgs {
 } RandomVariablesArgs;
 
 RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args);
+void rvs_reset(RandomVariables *rvs, const RandomVariablesArgs *rvs_args);
 void rvs_destroy(RandomVariables *rvs);
 double rvs_sample(RandomVariables *rvs, uint64_t k, int thread_index,
                   BAILogger *bai_logger);
-void rvs_reset(RandomVariables *rvs);
 bool rvs_are_similar(RandomVariables *rvs, int i, int j);
 uint64_t rvs_get_num_rvs(const RandomVariables *rvs);
 uint64_t rvs_get_total_samples(const RandomVariables *rvs);

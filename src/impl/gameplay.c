@@ -1,5 +1,6 @@
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
+#include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
@@ -119,8 +120,8 @@ void play_move_on_board(const Move *move, const Game *game) {
   }
 }
 
-void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
-                     int csd) {
+void calc_for_across(const Move *move, const Game *game, int row_start,
+                     int col_start, int csd) {
   for (int row = row_start; row < move_get_tiles_length(move) + row_start;
        row++) {
     if (move_get_tile(move, row - row_start) == PLAYED_THROUGH_MARKER) {
@@ -145,8 +146,8 @@ void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
   }
 }
 
-void calc_for_self(const Move *move, Game *game, int row_start, int col_start,
-                   int csd) {
+void calc_for_self(const Move *move, const Game *game, int row_start,
+                   int col_start, int csd) {
   for (int col = col_start - 1; col <= col_start + move_get_tiles_length(move);
        col++) {
     game_gen_cross_set(game, row_start, col, csd, 0);
@@ -159,7 +160,7 @@ void calc_for_self(const Move *move, Game *game, int row_start, int col_start,
   }
 }
 
-void update_cross_set_for_move(const Move *move, Game *game) {
+void update_cross_set_for_move(const Move *move, const Game *game) {
   Board *board = game_get_board(game);
   if (board_is_dir_vertical(move_get_dir(move))) {
     calc_for_across(move, game, move_get_row_start(move),
@@ -214,11 +215,15 @@ bool rack_is_drawable(const Game *game, const int player_index,
 // Return false when the rack letters are not in the bag.
 bool draw_rack_from_bag(const Game *game, const int player_index,
                         const Rack *rack_to_draw) {
+  if (rack_get_dist_size(rack_to_draw) == 0) {
+    // Rack is effectively NULL
+    return true;
+  }
   Bag *bag = game_get_bag(game);
   Rack *player_rack = player_get_rack(game_get_player(game, player_index));
   int player_draw_index = game_get_player_draw_index(game, player_index);
-  const uint16_t dist_size = rack_get_dist_size(player_rack);
   rack_copy(player_rack, rack_to_draw);
+  const uint16_t dist_size = rack_get_dist_size(player_rack);
   for (int i = 0; i < dist_size; i++) {
     const uint16_t rack_number_of_letter = rack_get_letter(player_rack, i);
     for (uint16_t j = 0; j < rack_number_of_letter; j++) {
@@ -448,6 +453,8 @@ void generate_moves_for_game_override_record_type(
       .override_kwg = NULL,
       .thread_index = args->thread_index,
       .eq_margin_movegen = args->eq_margin_movegen,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   generate_moves(&args_with_overwritten_record_and_sort);
@@ -464,15 +471,33 @@ void generate_moves_for_game(const MoveGenArgs *args) {
 }
 
 Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
-  const MoveGenArgs args = {
-      .game = game,
-      .move_list = move_list,
-      .move_record_type = MOVE_RECORD_BEST,
-      .move_sort_type = MOVE_SORT_EQUITY,
-      .override_kwg = NULL,
-      .thread_index = thread_index,
-      .eq_margin_movegen = 0,
-  };
+  const MoveGenArgs args = {.game = game,
+                            .move_list = move_list,
+                            .move_record_type = MOVE_RECORD_BEST,
+                            .move_sort_type = MOVE_SORT_EQUITY,
+                            .override_kwg = NULL,
+                            .thread_index = thread_index,
+                            .eq_margin_movegen = 0,
+                            .target_equity = EQUITY_MAX_VALUE,
+                            .target_leave_size_for_exchange_cutoff =
+                                UNSET_LEAVE_SIZE};
+  generate_moves(&args);
+  return move_list_get_move(move_list, 0);
+}
+
+Move *get_top_equity_move_for_inferences(
+    Game *game, int thread_index, MoveList *move_list, Equity target_equity,
+    int target_leave_size_for_exchange_cutoff, Equity equity_margin) {
+  const MoveGenArgs args = {.game = game,
+                            .move_list = move_list,
+                            .move_record_type = MOVE_RECORD_BEST,
+                            .move_sort_type = MOVE_SORT_EQUITY,
+                            .override_kwg = NULL,
+                            .thread_index = thread_index,
+                            .eq_margin_movegen = equity_margin,
+                            .target_equity = target_equity,
+                            .target_leave_size_for_exchange_cutoff =
+                                target_leave_size_for_exchange_cutoff};
   generate_moves(&args);
   return move_list_get_move(move_list, 0);
 }
@@ -765,6 +790,14 @@ void set_after_game_event_racks(const GameHistory *game_history,
         after_event_player_off_turn_rack,
         &play_events_data
              ->known_letters_from_phonies_racks[1 - player_on_turn_index]);
+    if (num_letters_in_bag -
+            rack_get_total_letters(after_event_player_off_turn_rack) <=
+        (RACK_SIZE)) {
+      // The known rack from phonies is all of the remaining letters in the bag
+      // so we now the current player on turn rack
+      copy_bag_to_rack(bag, after_event_player_off_turn_rack,
+                       after_event_player_on_turn_rack);
+    }
   }
 }
 
@@ -1116,5 +1149,9 @@ void game_play_n_events(GameHistory *game_history, Game *game,
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
+  }
+  for (int i = 0; i < 2; i++) {
+    rack_copy(player_get_known_rack_from_phonies(game_get_player(game, i)),
+              &play_events_data.known_letters_from_phonies_racks[i]);
   }
 }

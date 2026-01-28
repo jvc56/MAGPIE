@@ -43,13 +43,13 @@ cflags.dll_release = -O3 -fpic -flto -march=native -Wall -Wno-trigraphs
 
 lflags.cov := --coverage
 
-ldflags.dev := -Llib -pthread $(FSAN_ARG)
-ldflags.thread := -Llib -pthread -fsanitize=thread
-ldflags.vlg := -Llib -pthread
-ldflags.release := -Llib -pthread
-ldflags.cov := -Llib -pthread
-ldflags.dll_dev := -Llib -pthread
-ldflags.dll_release := -Llib -pthread
+ldflags.dev := -pthread $(FSAN_ARG)
+ldflags.thread := -pthread -fsanitize=thread
+ldflags.vlg := -pthread
+ldflags.release := -pthread
+ldflags.cov := -pthread
+ldflags.dll_dev := -pthread
+ldflags.dll_release := -pthread
 
 CFLAGS := ${cflags.${BUILD}}
 

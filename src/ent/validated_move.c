@@ -216,6 +216,14 @@ void validate_tiles_played_with_mls(const Board *board,
       current_row += move_dir;
       current_col += 1 - move_dir;
     }
+    if (board_is_position_in_bounds(current_row, current_col) &&
+        !board_is_empty_or_bricked(board, current_row, current_col)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_MOVE_VALIDATION_INCOMPLETE_TILE_PLACEMENT,
+          get_formatted_string("tile placement move is missing connected tiles "
+                               "at the end of the play"));
+      return;
+    }
     if (!connected) {
       error_stack_push(
           error_stack, ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_DISCONNECTED,

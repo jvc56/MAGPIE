@@ -1,17 +1,29 @@
 #ifndef MOVE_GEN_H
 #define MOVE_GEN_H
 
+#include "../def/board_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
+#include "../ent/anchor.h"
+#include "../ent/bit_rack.h"
+#include "../ent/board.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/klv.h"
+#include "../ent/kwg.h"
+#include "../ent/leave_map.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/move.h"
-#include "../impl/wmp_move_gen.h"
+#include "../ent/rack.h"
+#include "wmp_move_gen.h"
+#include <stdbool.h>
+#include <stdint.h>
 
 typedef struct UnrestrictedMultiplier {
   uint8_t multiplier;
   uint8_t column;
 } UnrestrictedMultiplier;
 
-// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 typedef struct MoveGen {
   // Owned by this MoveGen struct
   int current_row_index;
@@ -58,6 +70,12 @@ typedef struct MoveGen {
   Equity best_move_equity_or_score;
   Equity eq_margin_movegen;
 
+  // Inference cutoff fields
+  Equity target_equity_cutoff;
+  int target_leave_size;
+  bool stop_on_threshold;
+  bool threshold_exceeded;
+
   MachineLetter strip[(MOVE_MAX_TILES)];
   MachineLetter exchange_strip[(MOVE_MAX_TILES)];
   LeaveMap leave_map;
@@ -101,44 +119,49 @@ typedef struct MoveGen {
 
   Equity highest_shadow_equity;
   Equity highest_shadow_score;
-  uint64_t rack_cross_set;
   int number_of_letters_on_rack;
-  Equity full_rack_descending_tile_scores[WORD_ALIGNING_RACK_SIZE];
-  Equity descending_tile_scores[WORD_ALIGNING_RACK_SIZE];
-  Equity descending_tile_scores_copy[WORD_ALIGNING_RACK_SIZE];
-  Equity best_leaves[(RACK_SIZE)];
-
-  AnchorHeap anchor_heap;
-  LetterDistribution ld;
-
-  // Include space for blank letters so their scores can be added without
-  // checking whether tiles are blanked.
-  Equity tile_scores[MAX_ALPHABET_SIZE + BLANK_MASK];
-
-  // Owned by the caller
-  const Board *board;
-  const KLV *klv;
   const KWG *kwg;
+  const KLV *klv;
+  const Board *board;
+  LetterDistribution ld;
   MoveList *move_list;
-
+  AnchorHeap anchor_heap;
+  Equity tile_scores[MACHINE_LETTER_MAX_VALUE];
+  Equity full_rack_descending_tile_scores[RACK_SIZE];
+  Equity descending_tile_scores[RACK_SIZE];
+  Equity descending_tile_scores_copy[RACK_SIZE];
   WMPMoveGen wmp_move_gen;
-  // Number of playthrough blocks used by the by current move of recursive_gen
-  // given the rightmost column of the move. Set per anchor because it depends
-  // on the anchor column.
-  uint8_t num_playthrough_blocks[BOARD_DIM];
-  uint8_t max_playthrough_blocks;
-  // Used by wordmap_gen to prepare WMP-generated plays for recording.
+  uint64_t rack_cross_set;
+  bool target_word_full_rack_existence[RACK_SIZE + 1];
+
+  Equity best_leaves[RACK_SIZE + 1];
+
   MachineLetter playthrough_marked[BOARD_DIM];
 } MoveGen;
 
 typedef struct MoveGenArgs {
-  Game *game;
+  const Game *game;
   move_record_t move_record_type;
   move_sort_t move_sort_type;
+  const KWG *override_kwg;
   Equity eq_margin_movegen;
+
+  // Movegen for inferences after plays will need a target equity value to skip
+  // anchors that can't surpass it. Callers may either pass a baseline equity
+  // with a separate margin in eq_margin_movegen, or combine them into
+  // target_equity and pass eq_margin_movegen=0 (the inference code does this
+  // for tile placements). Defaults to EQUITY_MAX_VALUE for non-inference mode.
+  Equity target_equity;
+
+  // Movegen for inferences after exchanges will need to know the number of
+  // tiles exchanged so that it can determine the target equity value after
+  // generating exchanges, and then skip anchors that can't surpass that value
+  // by eq_margin_movegen. This field does not itself trigger an early return
+  // from move generation based on alternate exchange sizes. Value is
+  // UNSET_LEAVE_SIZE for non-exchange scenarios.
+  int target_leave_size_for_exchange_cutoff;
   int thread_index;
   MoveList *move_list;
-  const KWG *override_kwg;
 } MoveGenArgs;
 
 void gen_destroy_cache(void);

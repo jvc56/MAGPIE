@@ -1,7 +1,9 @@
 #include "endgame.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
+#include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/move_defs.h"
@@ -67,6 +69,10 @@ struct EndgameSolver {
   double tt_fraction_of_mem;
   TranspositionTable *transposition_table;
 
+  // Per-ply callback for iterative deepening progress
+  EndgamePerPlyCallback per_ply_callback;
+  void *per_ply_callback_data;
+
   // Owned by the caller:
   ThreadControl *thread_control;
   const Game *game;
@@ -108,6 +114,66 @@ void pvline_update(PVLine *pv_line, const PVLine *new_pv_line,
   pv_line->score = score;
 }
 
+// Reconstruct the PV by probing the transposition table
+// This fills in moves that may have been truncated due to TT cutoffs
+static void pvline_reconstruct_from_tt(PVLine *pv_line, Game *game_copy,
+                                       TranspositionTable *tt,
+                                       int solving_player, int max_depth) {
+  if (!tt) {
+    return;
+  }
+
+  // Start from the current position and probe TT for best moves
+  int num_moves = 0;
+  MoveList *move_list = move_list_create(1);
+
+  while (num_moves < max_depth &&
+         game_get_game_end_reason(game_copy) == GAME_END_REASON_NONE) {
+    int on_turn = game_get_player_on_turn_index(game_copy);
+    const Player *solving = game_get_player(game_copy, solving_player);
+    const Player *other = game_get_player(game_copy, 1 - solving_player);
+
+    // Calculate hash for current position
+    uint64_t hash = zobrist_calculate_hash(
+        tt->zobrist, game_get_board(game_copy), player_get_rack(solving),
+        player_get_rack(other), on_turn != solving_player,
+        game_get_consecutive_scoreless_turns(game_copy));
+
+    // Probe TT
+    TTEntry tt_entry = transposition_table_lookup(tt, hash);
+    if (!ttentry_valid(tt_entry)) {
+      break; // No TT entry, can't continue
+    }
+
+    uint64_t tiny_move = ttentry_move(tt_entry);
+    if (tiny_move == INVALID_TINY_MOVE) {
+      break; // No move stored
+    }
+
+    // Convert tiny_move to SmallMove
+    SmallMove sm;
+    sm.tiny_move = tiny_move;
+    sm.metadata = 0;
+
+    // Convert to Move for playing
+    small_move_to_move(move_list->spare_move, &sm, game_get_board(game_copy));
+
+    // Calculate the score of the move
+    int move_score = equity_to_int(move_list->spare_move->score);
+
+    // Play the move to advance the position
+    play_move(move_list->spare_move, game_copy, NULL);
+
+    // Store move with score in metadata (lower 16 bits)
+    pv_line->moves[num_moves].tiny_move = tiny_move;
+    pv_line->moves[num_moves].metadata = (uint32_t)(move_score & 0xFFFF);
+    num_moves++;
+  }
+
+  pv_line->num_moves = num_moves;
+  move_list_destroy(move_list);
+}
+
 void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->first_win_optim = false;
   es->transposition_table_optim = true;
@@ -139,6 +205,8 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   // es->threads = endgame_args->num_threads;
   es->thread_control = endgame_args->thread_control;
   es->game = endgame_args->game;
+  es->per_ply_callback = endgame_args->per_ply_callback;
+  es->per_ply_callback_data = endgame_args->per_ply_callback_data;
   if (endgame_args->tt_fraction_of_mem == 0) {
     transposition_table_destroy(es->transposition_table);
     es->transposition_table = NULL;
@@ -205,6 +273,8 @@ int generate_stm_plays(EndgameSolverWorker *worker) {
       .override_kwg = worker->solver->pruned_kwg,
       .thread_index = worker->thread_index,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves(&args);
   SmallMove *arena_small_moves = (SmallMove *)arena_alloc(
@@ -550,27 +620,25 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     qsort(initial_moves, initial_move_count, sizeof(SmallMove),
           compare_small_moves_by_estimated_value);
 
-    worker->solver->best_pv_value = val - worker->solver->initial_spread;
+    int32_t pv_value = val - worker->solver->initial_spread;
+    worker->solver->best_pv_value = pv_value;
     worker->solver->principal_variation = pv;
 
-    // Log iterative deepening progress
-    StringBuilder *pv_sb = string_builder_create();
-    const LetterDistribution *ld = game_get_ld(worker->game_copy);
-    Game *temp_game = game_duplicate(worker->game_copy);
-    for (int i = 0; i < pv.num_moves; i++) {
-      Move move;
-      small_move_to_move(&move, &(pv.moves[i]), game_get_board(temp_game));
-      if (i > 0) {
-        string_builder_add_string(pv_sb, " ");
+    // Call per-ply callback if set
+    if (worker->solver->per_ply_callback) {
+      // If PV seems truncated, try to reconstruct it from TT
+      PVLine reconstructed_pv = pv;
+      if (pv.num_moves < p && worker->solver->transposition_table_optim) {
+        Game *temp_game = game_duplicate(worker->game_copy);
+        pvline_reconstruct_from_tt(&reconstructed_pv, temp_game,
+                                   worker->solver->transposition_table,
+                                   worker->solver->solving_player, p);
+        game_destroy(temp_game);
       }
-      string_builder_add_move(pv_sb, game_get_board(temp_game), &move, ld,
-                              true);
-      play_move(&move, temp_game, NULL);
+      worker->solver->per_ply_callback(p, pv_value, &reconstructed_pv,
+                                       worker->game_copy,
+                                       worker->solver->per_ply_callback_data);
     }
-    game_destroy(temp_game);
-    printf("  depth %d: value=%d, pv=%s\n", p, worker->solver->best_pv_value,
-           string_builder_peek(pv_sb));
-    string_builder_destroy(pv_sb);
   }
 }
 
@@ -595,9 +663,9 @@ void string_builder_endgame_results(StringBuilder *pv_description,
       pv_description, "Principal Variation (value: %d, length: %d)%c",
       pv_line->score, pv_line->num_moves, add_line_breaks ? '\n' : ' ');
 
-  Game *game_copy = game_duplicate(game);
-  const Board *board = game_get_board(game_copy);
-  const LetterDistribution *ld = game_get_ld(game_copy);
+  Game *gc = game_duplicate(game);
+  const Board *board = game_get_board(gc);
+  const LetterDistribution *ld = game_get_ld(gc);
 
   if (add_line_breaks) {
     StringGrid *sg = string_grid_create(pv_line->num_moves, 3, 1);
@@ -605,12 +673,16 @@ void string_builder_endgame_results(StringBuilder *pv_description,
     for (int i = 0; i < pv_line->num_moves; i++) {
       int curr_col = 0;
       // Set the player name
-      string_grid_set_cell(
-          sg, i, curr_col++,
-          get_formatted_string(
-              "(%s)",
-              game_history_player_get_name(
-                  game_history, game_get_player_on_turn_index(game_copy))));
+      const int player_on_turn = game_get_player_on_turn_index(gc);
+      const char *player_name;
+      if (game_history) {
+        player_name =
+            game_history_player_get_name(game_history, player_on_turn);
+      } else {
+        player_name = player_on_turn == 0 ? "Player 1" : "Player 2";
+      }
+      string_grid_set_cell(sg, i, curr_col++,
+                           get_formatted_string("(%s)", player_name));
 
       // Set the play sequence index and player name
       string_grid_set_cell(sg, i, curr_col++,
@@ -624,7 +696,7 @@ void string_builder_endgame_results(StringBuilder *pv_description,
       string_builder_clear(tmp_sb);
       // Play the move on the board to make the next small_move_to_move make
       // sense.
-      play_move(&move, game_copy, NULL);
+      play_move(&move, gc, NULL);
     }
     string_builder_add_string_grid(pv_description, sg, false);
     string_grid_destroy(sg);
@@ -638,11 +710,11 @@ void string_builder_endgame_results(StringBuilder *pv_description,
       }
       // Play the move on the board to make the next small_move_to_move make
       // sense.
-      play_move(&move, game_copy, NULL);
+      play_move(&move, gc, NULL);
     }
   }
   string_builder_add_string(pv_description, "\n");
-  game_destroy(game_copy);
+  game_destroy(gc);
 }
 
 char *endgame_results_get_string(const EndgameResults *results,
@@ -659,6 +731,10 @@ char *endgame_results_get_string(const EndgameResults *results,
 
 void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack) {
+  // Track solve start time
+  Timer solve_timer;
+  ctimer_start(&solve_timer);
+
   const int bag_size = bag_get_letters(game_get_bag(endgame_args->game));
   if (bag_size != 0) {
     error_stack_push(error_stack, ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY,
@@ -692,6 +768,49 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
 
   free(solver_workers);
   free(worker_ids);
+
+  // Calculate elapsed time
+  double elapsed = ctimer_elapsed_seconds(&solve_timer);
+
+  // Print final result with PV
+  StringBuilder *final_sb = string_builder_create();
+  const LetterDistribution *ld = game_get_ld(endgame_args->game);
+  Game *final_game_copy = game_duplicate(endgame_args->game);
+  Move move;
+
+  string_builder_add_formatted_string(
+      final_sb,
+      "FINAL: depth=%d, value=%d, time=%.3fs, pv=", solver->requested_plies,
+      solver->best_pv_value, elapsed);
+  for (int i = 0; i < solver->principal_variation.num_moves; i++) {
+    small_move_to_move(&move, &solver->principal_variation.moves[i],
+                       game_get_board(final_game_copy));
+    string_builder_add_move(final_sb, game_get_board(final_game_copy), &move,
+                            ld, true);
+    if (i < solver->principal_variation.num_moves - 1) {
+      string_builder_add_string(final_sb, " ");
+    }
+    play_move(&move, final_game_copy, NULL);
+  }
+  log_warn("%s", string_builder_peek(final_sb));
+  string_builder_destroy(final_sb);
+  game_destroy(final_game_copy);
+
+  // Print stats
+  log_warn("nodes=%d", solver->nodes_searched);
+
+  if (solver->transposition_table) {
+    int tt_lookups = atomic_load(&solver->transposition_table->lookups);
+    int tt_hits = atomic_load(&solver->transposition_table->hits);
+    int tt_created = atomic_load(&solver->transposition_table->created);
+    int tt_collisions =
+        atomic_load(&solver->transposition_table->t2_collisions);
+    log_warn("TT stats: lookups=%d, hits=%d (%.2f%%), created=%d, "
+             "t2_collisions=%d",
+             tt_lookups, tt_hits,
+             100.0 * tt_hits / (tt_lookups > 0 ? tt_lookups : 1), tt_created,
+             tt_collisions);
+  }
 
   endgame_results_set_pvline(results, &solver->principal_variation);
 }

@@ -16,6 +16,7 @@ void player_destroy(Player *player);
 
 int player_get_index(const Player *player);
 Rack *player_get_rack(const Player *player);
+Rack *player_get_known_rack_from_phonies(const Player *player);
 Equity player_get_score(const Player *player);
 move_sort_t player_get_move_sort_type(const Player *player);
 move_record_t player_get_move_record_type(const Player *player);
@@ -31,6 +32,7 @@ void player_add_to_score(Player *player, Equity score);
 
 void player_update(const PlayersData *players_data, Player *player);
 Player *player_duplicate(const Player *player);
+void player_copy(Player *dst, const Player *src);
 void player_reset(Player *player);
 
 #endif
