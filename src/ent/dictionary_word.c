@@ -60,22 +60,27 @@ static inline int dictionary_word_compare(const DictionaryWord *word_a,
 
   // Quick check first byte (handles empty strings too)
   if (length_a > 0 && length_b > 0) {
-    if (a[0] != b[0])
+    if (a[0] != b[0]) {
       return (int)a[0] - (int)b[0];
+    }
     // Check second byte
     if (length_a > 1 && length_b > 1) {
-      if (a[1] != b[1])
+      if (a[1] != b[1]) {
         return (int)a[1] - (int)b[1];
+      }
       // Check third byte
       if (length_a > 2 && length_b > 2) {
-        if (a[2] != b[2])
+        if (a[2] != b[2]) {
           return (int)a[2] - (int)b[2];
+        }
         // Fall back to memcmp for rest
         const int min_length = length_a < length_b ? length_a : length_b;
         if (min_length > 3) {
-          int cmp = memcmp(a + 3, b + 3, (min_length - 3) * sizeof(MachineLetter));
-          if (cmp != 0)
+          int cmp =
+              memcmp(a + 3, b + 3, (min_length - 3) * sizeof(MachineLetter));
+          if (cmp != 0) {
             return cmp;
+          }
         }
       }
     }
@@ -109,9 +114,9 @@ static inline void merge(DictionaryWord *arr, int left, int mid, int right,
   }
 
   // Merge from temp (left) and arr[mid+1..right] (right) back into arr
-  int i = 0;          // index into temp (left half)
-  int j = mid + 1;    // index into arr (right half)
-  int k = left;       // index into arr (output)
+  int i = 0;       // index into temp (left half)
+  int j = mid + 1; // index into arr (right half)
+  int k = left;    // index into arr (output)
 
   while (i < n1 && j <= right) {
     if (dictionary_word_compare(&temp[i], &arr[j]) <= 0) {

@@ -286,8 +286,7 @@ static inline NodePointerList *
 node_pointer_list_create_with_capacity(size_t capacity) {
   NodePointerList *node_pointer_list = malloc_or_die(sizeof(NodePointerList));
   node_pointer_list->capacity = capacity;
-  node_pointer_list->nodes =
-      malloc_or_die(sizeof(MutableNode *) * capacity);
+  node_pointer_list->nodes = malloc_or_die(sizeof(MutableNode *) * capacity);
   node_pointer_list->count = 0;
   return node_pointer_list;
 }
@@ -655,13 +654,16 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
 
 // Helper to get the next prime >= n for hash table sizing
 static size_t next_prime(size_t n) {
-  if (n <= 2)
+  if (n <= 2) {
     return 2;
-  if (n <= 3)
+  }
+  if (n <= 3) {
     return 3;
+  }
   // Simple primality check for small numbers
-  if (n % 2 == 0)
+  if (n % 2 == 0) {
     n++;
+  }
   while (1) {
     bool is_prime = true;
     for (size_t i = 3; i * i <= n; i += 2) {
@@ -670,8 +672,9 @@ static size_t next_prime(size_t n) {
         break;
       }
     }
-    if (is_prime)
+    if (is_prime) {
       return n;
+    }
     n += 2;
   }
 }
@@ -693,8 +696,8 @@ KWG *make_kwg_from_words_small(const DictionaryWordList *words,
   // Average word length is ~6, so estimate ~6 * words_count gaddag strings.
   // Node count is roughly proportional to total string length.
   // With an average of 6 letters per word and 6 gaddag strings per word,
-  // that's ~36 * words_count character insertions, but with significant sharing.
-  // A good estimate is ~10 * words_count nodes.
+  // that's ~36 * words_count character insertions, but with significant
+  // sharing. A good estimate is ~10 * words_count nodes.
   const size_t estimated_gaddag_strings =
       output_gaddag ? (size_t)words_count * 7 : 0;
   const size_t estimated_nodes =
@@ -732,7 +735,8 @@ KWG *make_kwg_from_words_small(const DictionaryWordList *words,
   if (output_gaddag) {
     // Pre-allocate gaddag_strings with estimated capacity
     DictionaryWordList *gaddag_strings =
-        dictionary_word_list_create_with_capacity((int)estimated_gaddag_strings);
+        dictionary_word_list_create_with_capacity(
+            (int)estimated_gaddag_strings);
     add_gaddag_strings(words, gaddag_strings);
     last_word_length = 0;
     cached_node_indices[0] = gaddag_root_node_index;
