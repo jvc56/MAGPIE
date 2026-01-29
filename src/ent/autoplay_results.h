@@ -32,10 +32,11 @@ void autoplay_results_add_move(AutoplayResults *autoplay_results,
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
                                const Game *game, int turns, bool divergent,
                                uint64_t seed);
-void autoplay_results_finalize(AutoplayResults **autoplay_results_list,
-                               int list_size, AutoplayResults *primary);
+void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,
+                                  int list_size, AutoplayResults *primary);
 char *autoplay_results_to_string(AutoplayResults *autoplay_results,
                                  bool human_readable, bool show_divergent);
+char *autoplay_results_get_status(AutoplayResults *autoplay_results);
 void string_builder_add_winning_player_confidence(StringBuilder *sb,
                                                   double p0_total,
                                                   double p1_total,
@@ -53,4 +54,8 @@ uint64_t autoplay_results_build_option(autoplay_recorder_t recorder_type);
 uint64_t autoplay_results_get_options(const AutoplayResults *autoplay_results);
 void autoplay_results_set_players_data(AutoplayResults *autoplay_results,
                                        const PlayersData *players_data);
+void autoplay_results_set_status_data(AutoplayResults *autoplay_results,
+                                      AutoplayResults **results_list,
+                                      int results_list_size, bool finished,
+                                      bool human_readable, bool show_divergent);
 #endif

@@ -2248,6 +2248,11 @@ void impl_autoplay(Config *config, ErrorStack *error_stack) {
                   num_games_str, 0, error_stack);
 }
 
+char *status_autoplay(Config *config) {
+  AutoplayResults *autoplay_results = config->autoplay_results;
+  return autoplay_results_get_status(autoplay_results);
+}
+
 // Conversion
 
 void config_fill_conversion_args(const Config *config, ConversionArgs *args) {
@@ -5695,7 +5700,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
       rack_and_gen_and_sim, false);
   cmd(ARG_TOKEN_INFER, "infer", 0, 5, infer, generic, false);
   cmd(ARG_TOKEN_ENDGAME, "endgame", 0, 0, endgame, generic, false);
-  cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, generic, false);
+  cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, autoplay, false);
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic, false);
   cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic, false);
   cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic, false);
