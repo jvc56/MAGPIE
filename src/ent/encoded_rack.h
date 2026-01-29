@@ -12,13 +12,13 @@
 
 // Use -1 for bits per ml since the ml bits just represent the tiles and aren't
 // specifying a count of anything.
-#define BITS_PER_ML (uint8_t) BITS_TO_REPRESENT(MAX_ALPHABET_SIZE - 1)
+#define BITS_PER_ML (uint8_t)BITS_TO_REPRESENT(MAX_ALPHABET_SIZE - 1)
 // Do not use any adjustments for RACK_SIZE since this represents the actual
 // count. For example, a rack size of 8 has 9 distinct counts (0, 1, 2, ..., 8).
 // We could possibly do an increment on the read to convert the actual bit
 // values from [0, 7] to [1, 8] since there will never be zero of a tile in the
 // encoded rack, but we'll leave that for later.
-#define BITS_PER_COUNT (uint8_t) BITS_TO_REPRESENT(RACK_SIZE)
+#define BITS_PER_COUNT (uint8_t)BITS_TO_REPRESENT(RACK_SIZE)
 #define BITS_PER_ML_AND_COUNT (BITS_PER_ML + BITS_PER_COUNT)
 #define BITS_PER_UNIT (uint8_t)(sizeof(ENCODED_RACK_UNIT_TYPE) * CHAR_BIT)
 #define BITS_PER_RACK (uint8_t)(BITS_PER_ML_AND_COUNT * RACK_SIZE)
