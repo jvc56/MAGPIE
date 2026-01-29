@@ -106,6 +106,10 @@ _Static_assert(sizeof(WordPair) >= sizeof(DoubleBlankPair), "WordPair must be >=
 
 // ============================================================================
 // Radix sort implementations with prefetching
+//
+// Uses LSD (Least-Significant-Digit) radix sort for 128-bit BitRack keys.
+// The number of passes is alphabet-aware: English (27 letters × 4 bits = 108
+// bits) needs 14 passes instead of 16, reducing work by ~12%.
 // ============================================================================
 
 static void radix_pass_word_pairs(WordPair *src, WordPair *dst, uint32_t count,
@@ -281,6 +285,11 @@ static void radix_sort_double_blank_pairs(DoubleBlankPair *pairs, DoubleBlankPai
 
 // ============================================================================
 // Shared scratch buffer for each word length
+//
+// Each word length gets its own scratch buffers, allowing all lengths to be
+// processed in parallel. The buffers are reused across phases 1-3 to avoid
+// repeated allocations. WordPair, BlankPair, and DoubleBlankPair are all the
+// same size (verified by static_assert), enabling buffer reuse.
 // ============================================================================
 
 typedef struct {
@@ -303,6 +312,11 @@ typedef struct {
 
 // ============================================================================
 // Thread limiting semaphore
+//
+// Counting semaphore that limits concurrent threads to the user's -threads N
+// setting. Threads acquire before starting work and release when done. This
+// allows the main thread to launch new work as soon as any thread finishes,
+// providing better load balancing than a fixed thread pool.
 // ============================================================================
 
 typedef struct {
@@ -830,9 +844,22 @@ static uint32_t calculate_max_word_lookup_bytes(WMP *wmp) {
 
 // ============================================================================
 // Main entry point
+//
+// WMP construction uses a three-phase parallel approach:
+//   Phase 1: Build word entries and extract unique racks (from words list)
+//   Phase 2: Build single-blank entries (from unique racks)
+//   Phase 3: Build double-blank entries (from unique racks)
+//
+// Each phase processes word lengths 2-15 in parallel. Lengths are sorted by
+// workload (descending) before thread launch so heavy workloads start first,
+// improving CPU utilization when there are more lengths than threads.
+//
+// A counting semaphore limits concurrent threads to respect the user's
+// -threads N setting, ensuring politeness on shared machines.
 // ============================================================================
 
-// Helper to sort lengths by work (descending order)
+// Sort lengths by work descending so heavy workloads (7-8 letter words) start
+// first, and light workloads (2-3, 14-15 letter words) fill in gaps later.
 static void sort_lengths_by_work(int *lengths, const uint32_t *work, int count) {
   // Simple insertion sort (count is at most 14)
   for (int i = 1; i < count; i++) {

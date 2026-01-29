@@ -104,6 +104,7 @@ The original single-threaded implementation on main takes ~1.7s.
 - `src/impl/config.c` - Fill num_threads in conversion args
 - `test/wmp_test.c` - Update for new signature
 - `test/wmp_maker_test.c` - Update for new signature
+- `convert_lexica.sh` - Use 4 threads for WMP conversion
 
 ## Testing
 
