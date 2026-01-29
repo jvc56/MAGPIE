@@ -1,6 +1,10 @@
 #ifndef ENDGAME_H
 #define ENDGAME_H
 
+// Note: The endgame solver currently only supports RACK_SIZE <= 7.
+// This limitation comes from SmallMove, which encodes up to 7 tiles
+// in a 64-bit integer for memory efficiency during search.
+
 #include "../ent/endgame_results.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
