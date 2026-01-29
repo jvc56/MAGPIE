@@ -205,7 +205,7 @@ static void calc_for_across_after_unplay(const Move *move, const Game *game,
 // Update cross-sets for squares affected by a move after unplaying it.
 // This version doesn't rely on board_get_word_edge (which assumes tiles are on
 // board).
-void update_cross_sets_after_unplay(const Move *move, Game *game) {
+void update_cross_sets_after_unplay(const Move *move, const Game *game) {
   Board *board = game_get_board(game);
   if (board_is_dir_vertical(move_get_dir(move))) {
     calc_for_across_after_unplay(move, game, move_get_row_start(move),
@@ -338,7 +338,7 @@ void update_cross_set_for_move_from_undo(const MoveUndo *undo,
 
 // Update cross-sets after unplaying using MoveUndo
 void update_cross_sets_after_unplay_from_undo(const MoveUndo *undo,
-                                              Game *game) {
+                                              const Game *game) {
   Board *board = game_get_board(game);
   if (board_is_dir_vertical(undo->move_dir)) {
     calc_for_across_after_unplay_from_undo(undo, game, undo->move_row_start,
@@ -788,7 +788,8 @@ void unplay_move_incremental(Game *game, const MoveUndo *undo) {
   game_set_game_end_reason(game, undo->old_game_end_reason);
 
   // Restore player rack and both players' scores
-  Player *player_on_turn = game_get_player(game, undo->player_on_turn_index);
+  const Player *player_on_turn =
+      game_get_player(game, undo->player_on_turn_index);
   rack_copy(player_get_rack(player_on_turn), &undo->old_rack);
   player_set_score(game_get_player(game, 0), undo->old_scores[0]);
   player_set_score(game_get_player(game, 1), undo->old_scores[1]);
