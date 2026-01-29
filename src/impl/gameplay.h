@@ -6,6 +6,7 @@
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/move.h"
+#include "../ent/move_undo.h"
 #include "../ent/rack.h"
 #include "move_gen.h"
 
@@ -36,6 +37,11 @@ bool rack_is_drawable(const Game *game, int player_index,
                       const Rack *rack_to_draw);
 Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack);
 void return_phony_letters(Game *game);
+
+// Incremental play/unplay functions for endgame solver optimization
+void play_move_incremental(const Move *move, Game *game, MoveUndo *undo);
+void unplay_move_incremental(const MoveUndo *undo, Game *game);
+void restore_cross_sets_from_undo(const MoveUndo *undo, Game *game);
 
 void game_play_n_events(GameHistory *game_history, Game *game, int event_index,
                         bool validate, ErrorStack *error_stack);
