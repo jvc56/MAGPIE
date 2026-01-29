@@ -284,6 +284,49 @@ void test_eldar_v_stick_16_threads(void) {
       16, 72, false);
 }
 
+// Compare 1-thread vs 16-thread on pass_first (8-ply) and very_deep (25-ply)
+void test_abdada_comparison(void) {
+  printf("\n=== ABDADA Comparison: 1 thread vs 16 threads ===\n");
+
+  // pass_first: 8-ply CSW21
+  printf("\n--- pass_first (8-ply) with 1 thread ---\n");
+  test_single_endgame_multithreaded(
+      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 8",
+      "cgp "
+      "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
+      "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
+      "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW21",
+      1, -60, true);
+
+  printf("\n--- pass_first (8-ply) with 16 threads ---\n");
+  test_single_endgame_multithreaded(
+      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 8",
+      "cgp "
+      "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
+      "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
+      "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW21",
+      16, -60, true);
+
+  // very_deep: 25-ply CSW21
+  printf("\n--- very_deep (25-ply) with 1 thread ---\n");
+  test_single_endgame_multithreaded(
+      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 25",
+      "cgp "
+      "14C/13QI/12FIE/10VEE1R/9KIT2G/8CIG1IDE/8UTA2AS/7ST1SYPh1/6JA5A1/"
+      "5WOLD2BOBA/3PLOT1R1NU1EX/Y1VEIN1NOR1mOA1/UT1AT1N1L2FEH1/"
+      "GUR2WIRER5/SNEEZED8 ADENOOO/AHIILMM 353/236 0 -lex CSW21;",
+      1, -116, true);
+
+  printf("\n--- very_deep (25-ply) with 16 threads ---\n");
+  test_single_endgame_multithreaded(
+      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 25",
+      "cgp "
+      "14C/13QI/12FIE/10VEE1R/9KIT2G/8CIG1IDE/8UTA2AS/7ST1SYPh1/6JA5A1/"
+      "5WOLD2BOBA/3PLOT1R1NU1EX/Y1VEIN1NOR1mOA1/UT1AT1N1L2FEH1/"
+      "GUR2WIRER5/SNEEZED8 ADENOOO/AHIILMM 353/236 0 -lex CSW21;",
+      16, -116, true);
+}
+
 void test_endgame(void) {
   test_solve_standard();
   test_very_deep();
