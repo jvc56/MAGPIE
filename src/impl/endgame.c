@@ -34,6 +34,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 enum {
   DEFAULT_ENDGAME_MOVELIST_CAPACITY = 250000,
