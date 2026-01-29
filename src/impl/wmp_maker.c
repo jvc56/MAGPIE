@@ -1,6 +1,7 @@
 #include "wmp_maker.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/memory_info.h"
 #include "../def/bit_rack_defs.h"
 #include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
@@ -301,6 +302,40 @@ typedef struct {
 } LengthScratchBuffers;
 
 // ============================================================================
+// Thread limiting semaphore
+// ============================================================================
+
+typedef struct {
+  cpthread_mutex_t mutex;
+  cpthread_cond_t cond;
+  int count;
+  int max_count;
+} ThreadSemaphore;
+
+static void thread_sem_init(ThreadSemaphore *sem, int max_count) {
+  cpthread_mutex_init(&sem->mutex);
+  cpthread_cond_init(&sem->cond);
+  sem->count = max_count;
+  sem->max_count = max_count;
+}
+
+static void thread_sem_acquire(ThreadSemaphore *sem) {
+  cpthread_mutex_lock(&sem->mutex);
+  while (sem->count == 0) {
+    cpthread_cond_wait(&sem->cond, &sem->mutex);
+  }
+  sem->count--;
+  cpthread_mutex_unlock(&sem->mutex);
+}
+
+static void thread_sem_release(ThreadSemaphore *sem) {
+  cpthread_mutex_lock(&sem->mutex);
+  sem->count++;
+  cpthread_cond_signal(&sem->cond);
+  cpthread_mutex_unlock(&sem->mutex);
+}
+
+// ============================================================================
 // Phase 1: Build word entries and extract unique racks
 // ============================================================================
 
@@ -312,6 +347,7 @@ typedef struct {
   WordPair *temp;
   uint32_t pair_count;
   LengthScratchBuffers *scratch;
+  ThreadSemaphore *sem;  // NULL if running single-threaded
 } WordBuildArg;
 
 static void *build_words_and_extract_racks(void *arg) {
@@ -434,6 +470,7 @@ static void *build_words_and_extract_racks(void *arg) {
     }
   }
 
+  if (a->sem) thread_sem_release(a->sem);
   return NULL;
 }
 
@@ -445,6 +482,7 @@ typedef struct {
   LengthScratchBuffers *scratch;
   WMPForLength *wfl;
   int length;
+  ThreadSemaphore *sem;
 } BlankBuildArg;
 
 static void *build_blank_entries_direct(void *arg) {
@@ -568,6 +606,7 @@ static void *build_blank_entries_direct(void *arg) {
     }
   }
 
+  if (a->sem) thread_sem_release(a->sem);
   return NULL;
 }
 
@@ -579,6 +618,7 @@ typedef struct {
   LengthScratchBuffers *scratch;
   WMPForLength *wfl;
   int length;
+  ThreadSemaphore *sem;
 } DoubleBlankBuildArg;
 
 static void *build_double_blank_entries_direct(void *arg) {
@@ -719,6 +759,7 @@ static void *build_double_blank_entries_direct(void *arg) {
     }
   }
 
+  if (a->sem) thread_sem_release(a->sem);
   return NULL;
 }
 
@@ -791,11 +832,35 @@ static uint32_t calculate_max_word_lookup_bytes(WMP *wmp) {
 // Main entry point
 // ============================================================================
 
+// Helper to sort lengths by work (descending order)
+static void sort_lengths_by_work(int *lengths, const uint32_t *work, int count) {
+  // Simple insertion sort (count is at most 14)
+  for (int i = 1; i < count; i++) {
+    int key_len = lengths[i];
+    uint32_t key_work = work[key_len];
+    int j = i - 1;
+    while (j >= 0 && work[lengths[j]] < key_work) {
+      lengths[j + 1] = lengths[j];
+      j--;
+    }
+    lengths[j + 1] = key_len;
+  }
+}
+
 WMP *make_wmp_from_words(const DictionaryWordList *words,
-                         const LetterDistribution *ld) {
+                         const LetterDistribution *ld, int num_threads) {
   if (ld->distribution[BLANK_MACHINE_LETTER] > 2) {
     log_fatal("cannot create WMP with more than 2 blanks");
     return NULL;
+  }
+
+  // Use all cores if num_threads is 0
+  if (num_threads <= 0) {
+    num_threads = get_num_cores();
+  }
+  // Cap at BOARD_DIM - 1 (max number of word lengths: 2-15)
+  if (num_threads > BOARD_DIM - 1) {
+    num_threads = BOARD_DIM - 1;
   }
 
   const int total_words = dictionary_word_list_get_count(words);
@@ -807,13 +872,23 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
     num_words_by_length[dictionary_word_get_length(word)]++;
   }
 
+  // Build sorted list of lengths with words (by work descending)
+  int sorted_lengths[BOARD_DIM + 1];
+  int num_active_lengths = 0;
+  for (int len = 2; len <= BOARD_DIM; len++) {
+    if (num_words_by_length[len] > 0) {
+      sorted_lengths[num_active_lengths++] = len;
+    }
+  }
+  // Sort by pair count descending (heaviest work first)
+  uint32_t pair_counts[BOARD_DIM + 1] = {0};
+
   // Initialize scratch buffers for each length
   LengthScratchBuffers scratch[BOARD_DIM + 1] = {{0}};
 
   // Pre-allocate word pair buffers (these will be reused for blank/double-blank)
   WordPair *pairs_by_length[BOARD_DIM + 1] = {NULL};
   WordPair *temp_by_length[BOARD_DIM + 1] = {NULL};
-  uint32_t pair_counts[BOARD_DIM + 1] = {0};
 
   for (int len = 2; len <= BOARD_DIM; len++) {
     if (num_words_by_length[len] > 0) {
@@ -831,7 +906,7 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
     }
   }
 
-  // Generate pairs
+  // Generate pairs and count
   for (int i = 0; i < total_words; i++) {
     const DictionaryWord *word = dictionary_word_list_get_word(words, i);
     uint8_t len = dictionary_word_get_length(word);
@@ -840,29 +915,19 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
     pairs_by_length[len][idx].word_index = (uint32_t)i;
   }
 
+  // Now sort lengths by work (pair_counts)
+  sort_lengths_by_work(sorted_lengths, pair_counts, num_active_lengths);
+
   WMP *wmp = malloc_or_die(sizeof(WMP));
   wmp->name = NULL;
   wmp->version = WMP_VERSION;
   wmp->board_dim = BOARD_DIM;
 
-  // Phase 1: Build word entries in parallel and extract unique racks
-  WordBuildArg word_args[BOARD_DIM + 1];
-  pthread_t word_threads[BOARD_DIM + 1];
-
+  // Initialize empty wfls for lengths with no words
   for (int len = 2; len <= BOARD_DIM; len++) {
-    word_args[len].words = words;
-    word_args[len].wfl = &wmp->wfls[len];
-    word_args[len].length = len;
-    word_args[len].pairs = pairs_by_length[len];
-    word_args[len].temp = temp_by_length[len];
-    word_args[len].pair_count = pair_counts[len];
-    word_args[len].scratch = &scratch[len];
-
-    if (pair_counts[len] > 0) {
-      cpthread_create(&word_threads[len], build_words_and_extract_racks, &word_args[len]);
-    } else {
-      // Initialize empty wfl
+    if (num_words_by_length[len] == 0) {
       WMPForLength *wfl = &wmp->wfls[len];
+      // Word entries
       wfl->num_word_buckets = 16;
       wfl->num_word_entries = 0;
       wfl->num_uninlined_words = 0;
@@ -870,6 +935,19 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
       memset(wfl->word_bucket_starts, 0, 17 * sizeof(uint32_t));
       wfl->word_map_entries = malloc_or_die(sizeof(WMPEntry));
       wfl->word_letters = malloc_or_die(1);
+      // Blank entries
+      wfl->num_blank_buckets = 16;
+      wfl->num_blank_entries = 0;
+      wfl->blank_bucket_starts = malloc_or_die(17 * sizeof(uint32_t));
+      memset(wfl->blank_bucket_starts, 0, 17 * sizeof(uint32_t));
+      wfl->blank_map_entries = malloc_or_die(sizeof(WMPEntry));
+      // Double-blank entries
+      wfl->num_double_blank_buckets = 16;
+      wfl->num_double_blank_entries = 0;
+      wfl->double_blank_bucket_starts = malloc_or_die(17 * sizeof(uint32_t));
+      memset(wfl->double_blank_bucket_starts, 0, 17 * sizeof(uint32_t));
+      wfl->double_blank_map_entries = malloc_or_die(sizeof(WMPEntry));
+      // Scratch buffers
       scratch[len].unique_racks = malloc_or_die(sizeof(BitRack));
       scratch[len].num_unique_racks = 0;
       scratch[len].scratch1 = malloc_or_die(sizeof(WordPair));
@@ -881,9 +959,46 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
     }
   }
 
-  for (int len = 2; len <= BOARD_DIM; len++) {
-    if (pair_counts[len] > 0) {
-      cpthread_join(word_threads[len]);
+  // Initialize thread semaphore for limiting concurrency
+  ThreadSemaphore sem;
+  thread_sem_init(&sem, num_threads);
+
+  // Phase 1: Build word entries in parallel and extract unique racks
+  // Launch threads in work-descending order for better scheduling
+  WordBuildArg word_args[BOARD_DIM + 1];
+  pthread_t word_threads[BOARD_DIM + 1];
+
+  if (num_threads == 1) {
+    // Single-threaded: run sequentially in work order
+    for (int i = 0; i < num_active_lengths; i++) {
+      int len = sorted_lengths[i];
+      word_args[len].words = words;
+      word_args[len].wfl = &wmp->wfls[len];
+      word_args[len].length = len;
+      word_args[len].pairs = pairs_by_length[len];
+      word_args[len].temp = temp_by_length[len];
+      word_args[len].pair_count = pair_counts[len];
+      word_args[len].scratch = &scratch[len];
+      word_args[len].sem = NULL;
+      build_words_and_extract_racks(&word_args[len]);
+    }
+  } else {
+    // Multi-threaded: use semaphore to limit concurrent threads
+    for (int i = 0; i < num_active_lengths; i++) {
+      int len = sorted_lengths[i];
+      word_args[len].words = words;
+      word_args[len].wfl = &wmp->wfls[len];
+      word_args[len].length = len;
+      word_args[len].pairs = pairs_by_length[len];
+      word_args[len].temp = temp_by_length[len];
+      word_args[len].pair_count = pair_counts[len];
+      word_args[len].scratch = &scratch[len];
+      word_args[len].sem = &sem;
+      thread_sem_acquire(&sem);
+      cpthread_create(&word_threads[len], build_words_and_extract_racks, &word_args[len]);
+    }
+    for (int i = 0; i < num_active_lengths; i++) {
+      cpthread_join(word_threads[sorted_lengths[i]]);
     }
   }
 
@@ -891,30 +1006,56 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
   BlankBuildArg blank_args[BOARD_DIM + 1];
   pthread_t blank_threads[BOARD_DIM + 1];
 
-  for (int len = 2; len <= BOARD_DIM; len++) {
-    blank_args[len].scratch = &scratch[len];
-    blank_args[len].wfl = &wmp->wfls[len];
-    blank_args[len].length = len;
-    cpthread_create(&blank_threads[len], build_blank_entries_direct, &blank_args[len]);
-  }
-
-  for (int len = 2; len <= BOARD_DIM; len++) {
-    cpthread_join(blank_threads[len]);
+  if (num_threads == 1) {
+    for (int i = 0; i < num_active_lengths; i++) {
+      int len = sorted_lengths[i];
+      blank_args[len].scratch = &scratch[len];
+      blank_args[len].wfl = &wmp->wfls[len];
+      blank_args[len].length = len;
+      blank_args[len].sem = NULL;
+      build_blank_entries_direct(&blank_args[len]);
+    }
+  } else {
+    for (int i = 0; i < num_active_lengths; i++) {
+      int len = sorted_lengths[i];
+      blank_args[len].scratch = &scratch[len];
+      blank_args[len].wfl = &wmp->wfls[len];
+      blank_args[len].length = len;
+      blank_args[len].sem = &sem;
+      thread_sem_acquire(&sem);
+      cpthread_create(&blank_threads[len], build_blank_entries_direct, &blank_args[len]);
+    }
+    for (int i = 0; i < num_active_lengths; i++) {
+      cpthread_join(blank_threads[sorted_lengths[i]]);
+    }
   }
 
   // Phase 3: Build double-blank entries in parallel (reusing scratch buffers)
   DoubleBlankBuildArg dbl_args[BOARD_DIM + 1];
   pthread_t dbl_threads[BOARD_DIM + 1];
 
-  for (int len = 2; len <= BOARD_DIM; len++) {
-    dbl_args[len].scratch = &scratch[len];
-    dbl_args[len].wfl = &wmp->wfls[len];
-    dbl_args[len].length = len;
-    cpthread_create(&dbl_threads[len], build_double_blank_entries_direct, &dbl_args[len]);
-  }
-
-  for (int len = 2; len <= BOARD_DIM; len++) {
-    cpthread_join(dbl_threads[len]);
+  if (num_threads == 1) {
+    for (int i = 0; i < num_active_lengths; i++) {
+      int len = sorted_lengths[i];
+      dbl_args[len].scratch = &scratch[len];
+      dbl_args[len].wfl = &wmp->wfls[len];
+      dbl_args[len].length = len;
+      dbl_args[len].sem = NULL;
+      build_double_blank_entries_direct(&dbl_args[len]);
+    }
+  } else {
+    for (int i = 0; i < num_active_lengths; i++) {
+      int len = sorted_lengths[i];
+      dbl_args[len].scratch = &scratch[len];
+      dbl_args[len].wfl = &wmp->wfls[len];
+      dbl_args[len].length = len;
+      dbl_args[len].sem = &sem;
+      thread_sem_acquire(&sem);
+      cpthread_create(&dbl_threads[len], build_double_blank_entries_direct, &dbl_args[len]);
+    }
+    for (int i = 0; i < num_active_lengths; i++) {
+      cpthread_join(dbl_threads[sorted_lengths[i]]);
+    }
   }
 
   // Free scratch buffers
