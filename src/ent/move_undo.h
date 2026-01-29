@@ -44,15 +44,6 @@ typedef struct MoveUndo {
   Rack old_rack;
   Equity old_scores[2]; // Both players' scores (needed for end game penalty)
 
-  // Tiles drawn from bag (to put back on undo)
-  MachineLetter tiles_drawn[RACK_SIZE];
-  int num_tiles_drawn;
-
-  // Bag state - we save start/end indices and PRNG state
-  // The letters array doesn't change, just the indices
-  int old_bag_start_tile_index;
-  int old_bag_end_tile_index;
-
   // Game state
   int old_consecutive_scoreless_turns;
   game_end_reason_t old_game_end_reason;
@@ -71,7 +62,6 @@ typedef struct MoveUndo {
 
 static inline void move_undo_reset(MoveUndo *undo) {
   undo->num_square_changes = 0;
-  undo->num_tiles_drawn = 0;
   undo->move_tiles_length = 0;
   memset(undo->saved_squares_bitmap, 0, sizeof(undo->saved_squares_bitmap));
 }

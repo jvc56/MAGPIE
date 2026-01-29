@@ -714,12 +714,6 @@ void play_move_incremental(const Move *move, Game *game, MoveUndo *undo) {
   undo->old_scores[0] = player_get_score(game_get_player(game, 0));
   undo->old_scores[1] = player_get_score(game_get_player(game, 1));
 
-  // Save bag state
-  Bag *bag = game_get_bag(game);
-  undo->old_bag_start_tile_index = bag_get_start_tile_index(bag);
-  undo->old_bag_end_tile_index = bag_get_end_tile_index(bag);
-  undo->num_tiles_drawn = 0;
-
   // Save board state
   Board *board = game_get_board(game);
   undo->old_tiles_played = board_get_tiles_played(board);
@@ -753,16 +747,8 @@ void play_move_incremental(const Move *move, Game *game, MoveUndo *undo) {
 
     player_add_to_score(player_on_turn, move_get_score(move));
 
-    // Draw tiles (tracking what was drawn)
-    const int player_draw_index =
-        game_get_player_draw_index(game, undo->player_on_turn_index);
-    int num_to_draw = RACK_SIZE - rack_get_total_letters(player_on_turn_rack);
-    while (num_to_draw > 0 && !bag_is_empty(bag)) {
-      MachineLetter drawn = bag_draw_random_letter(bag, player_draw_index);
-      rack_add_letter(player_get_rack(player_on_turn), drawn);
-      undo->tiles_drawn[undo->num_tiles_drawn++] = drawn;
-      num_to_draw--;
-    }
+    // Note: No tile drawing needed - incremental play/unplay is only used
+    // during endgame when the bag is empty.
 
     if (rack_is_empty(player_on_turn_rack)) {
       const LetterDistribution *ld = game_get_ld(game);
@@ -807,10 +793,8 @@ void unplay_move_incremental(Game *game, const MoveUndo *undo) {
   player_set_score(game_get_player(game, 0), undo->old_scores[0]);
   player_set_score(game_get_player(game, 1), undo->old_scores[1]);
 
-  // Restore bag state
-  Bag *bag = game_get_bag(game);
-  bag_set_start_tile_index(bag, undo->old_bag_start_tile_index);
-  bag_set_end_tile_index(bag, undo->old_bag_end_tile_index);
+  // Note: No bag state restoration needed - incremental play/unplay is only
+  // used during endgame when the bag is empty.
 
   // Restore board
   Board *board = game_get_board(game);
@@ -844,11 +828,6 @@ void play_move_endgame_outplay(const Move *move, Game *game, MoveUndo *undo) {
   // Save scores for undo
   undo->old_scores[0] = player_get_score(game_get_player(game, 0));
   undo->old_scores[1] = player_get_score(game_get_player(game, 1));
-
-  // Save bag state (even though we don't modify it, unplay expects it)
-  const Bag *bag = game_get_bag(game);
-  undo->old_bag_start_tile_index = bag_get_start_tile_index(bag);
-  undo->old_bag_end_tile_index = bag_get_end_tile_index(bag);
 
   // Save board state (even though we don't modify it, unplay expects it)
   const Board *board = game_get_board(game);
