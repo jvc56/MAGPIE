@@ -278,7 +278,7 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
     // this state
     int undo_index = worker->solver->requested_plies - depth - 1;
     if (undo_index >= 0) {
-      MoveUndo *parent_undo = &worker->move_undos[undo_index];
+      const MoveUndo *parent_undo = &worker->move_undos[undo_index];
       if (parent_undo->move_tiles_length > 0) {
         // Update cross-sets using the undo-based function
         update_cross_set_for_move_from_undo(parent_undo, worker->game_copy);
@@ -539,7 +539,7 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
     // After unplay, if tiles were placed, cross-sets need to be recomputed
     // for the restored state. Use undo-based function for correct cross-set
     // update. If it was a pass, cross-sets are unchanged and still valid.
-    MoveUndo *current_undo = &worker->move_undos[undo_index];
+    const MoveUndo *current_undo = &worker->move_undos[undo_index];
     if (current_undo->move_tiles_length > 0) {
       update_cross_sets_after_unplay_from_undo(current_undo, worker->game_copy);
       board_set_cross_sets_valid(game_get_board(worker->game_copy), true);

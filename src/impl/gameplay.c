@@ -164,7 +164,7 @@ void calc_for_self(const Move *move, const Game *game, int row_start,
 // Update cross-sets for move region after unplay. Unlike calc_for_across,
 // this doesn't use board_get_word_edge (which requires tiles to be on board).
 // Instead, it directly iterates over the move's tile positions.
-static void calc_for_across_after_unplay(const Move *move, Game *game,
+static void calc_for_across_after_unplay(const Move *move, const Game *game,
                                          int row_start, int col_start,
                                          int csd) {
   const Board *board = game_get_board(game);
@@ -275,7 +275,8 @@ static void calc_for_self_from_undo(const MoveUndo *undo, const Game *game,
 
 // calc_for_across after unplay using MoveUndo
 static void calc_for_across_after_unplay_from_undo(const MoveUndo *undo,
-                                                   Game *game, int row_start,
+                                                   const Game *game,
+                                                   int row_start,
                                                    int col_start, int csd) {
   const Board *board = game_get_board(game);
   const bool kwgs_are_shared =
@@ -638,7 +639,7 @@ void return_phony_letters(Game *game) {
   game_increment_consecutive_scoreless_turns(game);
 }
 
-static void play_move_on_board_tracked(const Move *move, Game *game,
+static void play_move_on_board_tracked(const Move *move, const Game *game,
                                        MoveUndo *undo) {
   Board *board = game_get_board(game);
   int row_start = move_get_row_start(move);
@@ -765,7 +766,8 @@ void play_move_incremental(const Move *move, Game *game, MoveUndo *undo) {
 
     if (rack_is_empty(player_on_turn_rack)) {
       const LetterDistribution *ld = game_get_ld(game);
-      Player *opponent = game_get_player(game, 1 - undo->player_on_turn_index);
+      const Player *opponent =
+          game_get_player(game, 1 - undo->player_on_turn_index);
       // Standard end game: player who went out gets 2x opponent's rack value
       Equity end_rack_points =
           calculate_end_rack_points(player_get_rack(opponent), ld);
@@ -844,12 +846,12 @@ void play_move_endgame_outplay(const Move *move, Game *game, MoveUndo *undo) {
   undo->old_scores[1] = player_get_score(game_get_player(game, 1));
 
   // Save bag state (even though we don't modify it, unplay expects it)
-  Bag *bag = game_get_bag(game);
+  const Bag *bag = game_get_bag(game);
   undo->old_bag_start_tile_index = bag_get_start_tile_index(bag);
   undo->old_bag_end_tile_index = bag_get_end_tile_index(bag);
 
   // Save board state (even though we don't modify it, unplay expects it)
-  Board *board = game_get_board(game);
+  const Board *board = game_get_board(game);
   undo->old_tiles_played = board_get_tiles_played(board);
   undo->old_cross_sets_valid = board_get_cross_sets_valid(board);
   memcpy(undo->old_number_of_row_anchors, board->number_of_row_anchors,
