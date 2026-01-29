@@ -311,8 +311,8 @@ static void radix_sort_double_blank_pairs(DoubleBlankPair *pairs,
 
 typedef struct {
   // Pre-allocated buffers that can be reused across phases
-  void *scratch1;        // Used as pairs array
-  void *scratch2;        // Used as temp array for sorting
+  void *scratch1;      // Used as pairs array
+  void *scratch2;      // Used as temp array for sorting
   size_t scratch_size; // Size in bytes of each scratch buffer
 
   // Bucket counts buffer (reused across phases)
@@ -688,8 +688,7 @@ static void *build_double_blank_entries_direct(void *arg) {
   int length = a->length;
 
   // Estimate max pairs
-  size_t max_pairs =
-      (size_t)num_racks * (size_t)length * (size_t)length / 2;
+  size_t max_pairs = (size_t)num_racks * (size_t)length * (size_t)length / 2;
   size_t needed_size = sizeof(DoubleBlankPair) * max_pairs;
 
   // Reuse scratch buffers if large enough
