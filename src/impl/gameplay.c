@@ -226,6 +226,138 @@ void update_cross_sets_after_unplay(const Move *move, Game *game) {
   }
 }
 
+// --- MoveUndo-based cross-set update functions ---
+// These use the tiles_placed_mask instead of the Move's tiles array
+
+// calc_for_across using MoveUndo (for forward update when tiles are on board)
+static void calc_for_across_from_undo(const MoveUndo *undo, const Game *game,
+                                      int row_start, int col_start, int csd) {
+  const Board *board = game_get_board(game);
+  const bool kwgs_are_shared =
+      game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
+
+  for (int i = 0; i < undo->move_tiles_length; i++) {
+    // Check tiles_placed_mask: bit i is set if position i had an actual tile
+    if ((undo->tiles_placed_mask & (1 << i)) == 0) {
+      continue; // This was a played-through position, skip it
+    }
+
+    int row = row_start + i;
+    const int right_col =
+        board_get_word_edge(board, row, col_start, WORD_DIRECTION_RIGHT);
+    const int left_col =
+        board_get_word_edge(board, row, col_start, WORD_DIRECTION_LEFT);
+    game_gen_cross_set(game, row, right_col + 1, csd, 0);
+    game_gen_cross_set(game, row, left_col - 1, csd, 0);
+    game_gen_cross_set(game, row, col_start, csd, 0);
+    if (!kwgs_are_shared) {
+      game_gen_cross_set(game, row, right_col + 1, csd, 1);
+      game_gen_cross_set(game, row, left_col - 1, csd, 1);
+      game_gen_cross_set(game, row, col_start, csd, 1);
+    }
+  }
+}
+
+// calc_for_self using MoveUndo (doesn't need tiles info, just length)
+static void calc_for_self_from_undo(const MoveUndo *undo, const Game *game,
+                                    int row_start, int col_start, int csd) {
+  for (int col = col_start - 1; col <= col_start + undo->move_tiles_length;
+       col++) {
+    game_gen_cross_set(game, row_start, col, csd, 0);
+  }
+  if (!game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG)) {
+    for (int col = col_start - 1; col <= col_start + undo->move_tiles_length;
+         col++) {
+      game_gen_cross_set(game, row_start, col, csd, 1);
+    }
+  }
+}
+
+// calc_for_across after unplay using MoveUndo
+static void calc_for_across_after_unplay_from_undo(const MoveUndo *undo,
+                                                   Game *game, int row_start,
+                                                   int col_start, int csd) {
+  const Board *board = game_get_board(game);
+  const bool kwgs_are_shared =
+      game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
+
+  for (int i = 0; i < undo->move_tiles_length; i++) {
+    // Check tiles_placed_mask: bit i is set if position i had an actual tile
+    if ((undo->tiles_placed_mask & (1 << i)) == 0) {
+      continue; // This was a played-through position, skip it
+    }
+
+    int row = row_start + i;
+
+    // For each tile position, find the word edges by looking at adjacent tiles
+    // that are still on the board (pre-existing tiles, not the ones we just
+    // unplayed)
+    int left_col = col_start - 1;
+    while (left_col >= 0 && !board_is_empty_or_bricked(board, row, left_col)) {
+      left_col--;
+    }
+    int right_col = col_start + 1;
+    while (right_col < BOARD_DIM &&
+           !board_is_empty_or_bricked(board, row, right_col)) {
+      right_col++;
+    }
+
+    // Update cross-sets at left edge, right edge, and the move position itself
+    game_gen_cross_set(game, row, left_col, csd, 0);
+    game_gen_cross_set(game, row, right_col, csd, 0);
+    game_gen_cross_set(game, row, col_start, csd, 0);
+    if (!kwgs_are_shared) {
+      game_gen_cross_set(game, row, left_col, csd, 1);
+      game_gen_cross_set(game, row, right_col, csd, 1);
+      game_gen_cross_set(game, row, col_start, csd, 1);
+    }
+  }
+}
+
+// Update cross-sets for move region using MoveUndo (forward update)
+void update_cross_set_for_move_from_undo(const MoveUndo *undo,
+                                         const Game *game) {
+  Board *board = game_get_board(game);
+  if (board_is_dir_vertical(undo->move_dir)) {
+    calc_for_across_from_undo(undo, game, undo->move_row_start,
+                              undo->move_col_start, BOARD_VERTICAL_DIRECTION);
+    board_transpose(board);
+    calc_for_self_from_undo(undo, game, undo->move_col_start,
+                            undo->move_row_start, BOARD_VERTICAL_DIRECTION);
+    board_transpose(board);
+  } else {
+    calc_for_self_from_undo(undo, game, undo->move_row_start,
+                            undo->move_col_start, BOARD_VERTICAL_DIRECTION);
+    board_transpose(board);
+    calc_for_across_from_undo(undo, game, undo->move_col_start,
+                              undo->move_row_start, BOARD_VERTICAL_DIRECTION);
+    board_transpose(board);
+  }
+}
+
+// Update cross-sets after unplaying using MoveUndo
+void update_cross_sets_after_unplay_from_undo(const MoveUndo *undo,
+                                              Game *game) {
+  Board *board = game_get_board(game);
+  if (board_is_dir_vertical(undo->move_dir)) {
+    calc_for_across_after_unplay_from_undo(undo, game, undo->move_row_start,
+                                           undo->move_col_start,
+                                           BOARD_VERTICAL_DIRECTION);
+    board_transpose(board);
+    calc_for_self_from_undo(undo, game, undo->move_col_start,
+                            undo->move_row_start, BOARD_VERTICAL_DIRECTION);
+    board_transpose(board);
+  } else {
+    calc_for_self_from_undo(undo, game, undo->move_row_start,
+                            undo->move_col_start, BOARD_VERTICAL_DIRECTION);
+    board_transpose(board);
+    calc_for_across_after_unplay_from_undo(undo, game, undo->move_col_start,
+                                           undo->move_row_start,
+                                           BOARD_VERTICAL_DIRECTION);
+    board_transpose(board);
+  }
+}
+
 void update_cross_set_for_move(const Move *move, const Game *game) {
   Board *board = game_get_board(game);
   if (board_is_dir_vertical(move_get_dir(move))) {
@@ -594,9 +726,25 @@ void play_move_incremental(const Move *move, Game *game, MoveUndo *undo) {
          sizeof(undo->old_number_of_row_anchors));
 
   if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    // Save move info for lazy cross-set updates
+    undo->move_row_start = (uint8_t)move_get_row_start(move);
+    undo->move_col_start = (uint8_t)move_get_col_start(move);
+    undo->move_tiles_length = (uint8_t)move_get_tiles_length(move);
+    undo->move_dir = (uint8_t)move_get_dir(move);
+
+    // Build tiles_placed_mask: bit i set if position i had an actual tile placed
+    uint16_t tiles_placed_mask = 0;
+    for (int i = 0; i < move_get_tiles_length(move); i++) {
+      if (move_get_tile(move, i) != PLAYED_THROUGH_MARKER) {
+        tiles_placed_mask |= (uint16_t)(1 << i);
+      }
+    }
+    undo->tiles_placed_mask = tiles_placed_mask;
+
     play_move_on_board_tracked(move, game, undo);
-    // Note: cross-sets are NOT updated here. The caller is responsible for
-    // calling update_cross_set_for_move after this function if needed.
+    // Cross-sets are NOT updated here - they are computed lazily before move
+    // generation. The caller can call update_cross_set_for_move if eager update
+    // is needed, or leave them invalid for lazy evaluation.
     board_set_cross_sets_valid(board, false);
     game_set_consecutive_scoreless_turns(game, 0);
 
