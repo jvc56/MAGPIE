@@ -1,6 +1,8 @@
 #ifndef ENDGAME_H
 #define ENDGAME_H
 
+#include <stdbool.h>
+
 #include "../ent/endgame_results.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
@@ -36,6 +38,9 @@ EndgameSolver *endgame_solver_create(void);
 void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack);
 void endgame_solver_destroy(EndgameSolver *es);
+
+// Setter function for aspiration windows (used for benchmarking)
+void endgame_solver_set_aspiration(EndgameSolver *es, bool enabled);
 
 void string_builder_endgame_results(StringBuilder *pv_description,
                                     const EndgameResults *results,
