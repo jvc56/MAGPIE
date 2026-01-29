@@ -273,7 +273,8 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
   Board *board = game_get_board(worker->game_copy);
   if (!board_get_cross_sets_valid(board)) {
     // Get the parent's MoveUndo (the one that made cross-sets invalid)
-    // The parent undo contains info about the move that was played to reach this state
+    // The parent undo contains info about the move that was played to reach
+    // this state
     int undo_index = worker->solver->requested_plies - depth - 1;
     if (undo_index >= 0) {
       MoveUndo *parent_undo = &worker->move_undos[undo_index];
@@ -535,8 +536,8 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
     }
     unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_index]);
     // After unplay, if tiles were placed, cross-sets need to be recomputed
-    // for the restored state. Use undo-based function for correct cross-set update.
-    // If it was a pass, cross-sets are unchanged and still valid.
+    // for the restored state. Use undo-based function for correct cross-set
+    // update. If it was a pass, cross-sets are unchanged and still valid.
     MoveUndo *current_undo = &worker->move_undos[undo_index];
     if (current_undo->move_tiles_length > 0) {
       update_cross_sets_after_unplay_from_undo(current_undo, worker->game_copy);
@@ -638,7 +639,8 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
         game_get_consecutive_scoreless_turns(worker->game_copy));
   }
 
-  int initial_move_count = generate_stm_plays(worker, worker->solver->requested_plies);
+  int initial_move_count =
+      generate_stm_plays(worker, worker->solver->requested_plies);
   // Arena pointer better have started at 0, since it was empty.
   assign_estimates_and_sort(worker, 0, initial_move_count, INVALID_TINY_MOVE);
   worker->solver->n_initial_moves = initial_move_count;

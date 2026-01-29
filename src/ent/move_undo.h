@@ -59,8 +59,9 @@ typedef struct MoveUndo {
   uint8_t move_col_start;
   uint8_t move_tiles_length;
   uint8_t move_dir;
-  // Bitmask: bit i is set if position i had an actual tile placed (not played-through)
-  // Max tiles_length is BOARD_DIM (15), so 16 bits is sufficient
+  // Bitmask: bit i is set if position i had an actual tile placed (not
+  // played-through) Max tiles_length is BOARD_DIM (15), so 16 bits is
+  // sufficient
   uint16_t tiles_placed_mask;
 } MoveUndo;
 
@@ -88,7 +89,8 @@ static inline void move_undo_save_square(MoveUndo *undo, Board *board,
     log_fatal("move_undo: exceeded MAX_UNDO_SQUARE_CHANGES");
   }
   undo->square_changes[undo->num_square_changes].index = (int16_t)index;
-  undo->square_changes[undo->num_square_changes].old_value = board->squares[index];
+  undo->square_changes[undo->num_square_changes].old_value =
+      board->squares[index];
   undo->num_square_changes++;
   move_undo_mark_square_saved(undo, index);
 }
@@ -145,7 +147,8 @@ static inline void board_set_letter_tracked(Board *b, int row, int col,
               true);
         }
         if (inc_right) {
-          move_undo_save_square_at(undo, b, right_cw_row, right_cw_col, dir, ci);
+          move_undo_save_square_at(undo, b, right_cw_row, right_cw_col, dir,
+                                   ci);
           square_set_is_cross_word(
               board_get_writable_square(b, right_cw_row, right_cw_col, dir, ci),
               true);
@@ -188,8 +191,8 @@ static inline void board_set_cross_score_tracked(Board *b, int row, int col,
 }
 
 // Tracked version of board_set_anchor
-// Must set anchor on BOTH cross indices (ci=0 and ci=1), same as board_set_anchor
-// Also updates number_of_row_anchors like the original
+// Must set anchor on BOTH cross indices (ci=0 and ci=1), same as
+// board_set_anchor Also updates number_of_row_anchors like the original
 static inline bool board_set_anchor_tracked(Board *board, int row, int col,
                                             int dir, bool anchor,
                                             MoveUndo *undo) {
@@ -201,8 +204,10 @@ static inline bool board_set_anchor_tracked(Board *board, int row, int col,
     s->anchor = anchor;
     if (ci == 0) {
       old_anchor = prev_anchor;
-      // Update number_of_row_anchors - this is needed for correct move generation
-      const int index = board_get_number_of_row_anchors_index(board, row, col, dir);
+      // Update number_of_row_anchors - this is needed for correct move
+      // generation
+      const int index =
+          board_get_number_of_row_anchors_index(board, row, col, dir);
       if (prev_anchor && !anchor) {
         board->number_of_row_anchors[index]--;
       } else if (!prev_anchor && anchor) {
@@ -214,24 +219,21 @@ static inline bool board_set_anchor_tracked(Board *board, int row, int col,
 }
 
 // Tracked version of board_set_left_extension_set_with_blank
-static inline void
-board_set_left_extension_set_with_blank_tracked(Board *b, int row, int col,
-                                                int dir, int csi,
-                                                uint64_t left_extension_set,
-                                                MoveUndo *undo) {
+static inline void board_set_left_extension_set_with_blank_tracked(
+    Board *b, int row, int col, int dir, int csi, uint64_t left_extension_set,
+    MoveUndo *undo) {
   move_undo_save_square_at(undo, b, row, col, dir, csi);
   const uint64_t left_extension_set_with_blank =
       left_extension_set + !!left_extension_set;
-  square_set_left_extension_set(board_get_writable_square(b, row, col, dir, csi),
-                                left_extension_set_with_blank);
+  square_set_left_extension_set(
+      board_get_writable_square(b, row, col, dir, csi),
+      left_extension_set_with_blank);
 }
 
 // Tracked version of board_set_right_extension_set_with_blank
-static inline void
-board_set_right_extension_set_with_blank_tracked(Board *b, int row, int col,
-                                                 int dir, int csi,
-                                                 uint64_t right_extension_set,
-                                                 MoveUndo *undo) {
+static inline void board_set_right_extension_set_with_blank_tracked(
+    Board *b, int row, int col, int dir, int csi, uint64_t right_extension_set,
+    MoveUndo *undo) {
   move_undo_save_square_at(undo, b, row, col, dir, csi);
   const uint64_t right_extension_set_with_blank =
       right_extension_set + !!right_extension_set;
@@ -245,8 +247,10 @@ static inline void board_update_anchors_tracked(Board *board, int row, int col,
                                                 MoveUndo *undo) {
   // Save both direction squares, both cross indices, before modifying
   for (int ci = 0; ci < 2; ci++) {
-    move_undo_save_square_at(undo, board, row, col, BOARD_HORIZONTAL_DIRECTION, ci);
-    move_undo_save_square_at(undo, board, row, col, BOARD_VERTICAL_DIRECTION, ci);
+    move_undo_save_square_at(undo, board, row, col, BOARD_HORIZONTAL_DIRECTION,
+                             ci);
+    move_undo_save_square_at(undo, board, row, col, BOARD_VERTICAL_DIRECTION,
+                             ci);
   }
 
   board_set_anchor_tracked(board, row, col, BOARD_HORIZONTAL_DIRECTION, false,
@@ -280,18 +284,19 @@ static inline void board_update_anchors_tracked(Board *board, int row, int col,
   if (tile_here) {
     // When there's a tile here, set anchors based on adjacent empty squares
     if (!tile_right) {
-      board_set_anchor_tracked(board, row, col, BOARD_HORIZONTAL_DIRECTION, true,
-                               undo);
+      board_set_anchor_tracked(board, row, col, BOARD_HORIZONTAL_DIRECTION,
+                               true, undo);
     }
     if (!tile_below) {
       board_set_anchor_tracked(board, row, col, BOARD_VERTICAL_DIRECTION, true,
                                undo);
     }
   } else {
-    // Empty square: set anchors only if adjacent tiles exist in specific pattern
+    // Empty square: set anchors only if adjacent tiles exist in specific
+    // pattern
     if (!tile_left && !tile_right && (tile_above || tile_below)) {
-      board_set_anchor_tracked(board, row, col, BOARD_HORIZONTAL_DIRECTION, true,
-                               undo);
+      board_set_anchor_tracked(board, row, col, BOARD_HORIZONTAL_DIRECTION,
+                               true, undo);
     }
     if (!tile_above && !tile_below && (tile_left || tile_right)) {
       board_set_anchor_tracked(board, row, col, BOARD_VERTICAL_DIRECTION, true,
