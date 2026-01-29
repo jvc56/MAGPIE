@@ -2,9 +2,9 @@
 
 #include "../compat/cpthread.h"
 #include "../compat/memory_info.h"
-#include "../def/cpthread_defs.h"
 #include "../def/bit_rack_defs.h"
 #include "../def/board_defs.h"
+#include "../def/cpthread_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/wmp_defs.h"
 #include "../ent/bit_rack.h"
