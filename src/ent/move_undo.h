@@ -8,6 +8,8 @@
 #include "rack.h"
 
 // Maximum squares that can be modified by a single move.
+// This calculation assumes RACK_SIZE=7. Other factors (SmallMove encoding)
+// block endgame support for 8+ tile racks, so larger support is not needed.
 // A 7-tile move can affect:
 // - 7 tiles × 4 sub-boards for letters + is_cross_word = ~84
 // - Cross sets: ~30 squares × specific dir/ci = ~60
