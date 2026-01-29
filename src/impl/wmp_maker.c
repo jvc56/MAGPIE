@@ -206,7 +206,104 @@ static void radix_sort_word_pairs(WordPair *pairs, uint32_t count) {
   free(temp);
 }
 
-// Build word map using sort-and-merge approach
+// Thread argument for building word map for a single length
+typedef struct {
+  const DictionaryWordList *words;
+  WordPair *pairs;
+  uint32_t pair_count;
+  MutableWordsOfSameLengthMap *mwfl;
+  int length;
+} WordMapThreadArg;
+
+// Build word map for a single length (thread function)
+static void *build_word_map_for_length(void *arg) {
+  WordMapThreadArg *targ = (WordMapThreadArg *)arg;
+  WordPair *pairs = targ->pairs;
+  uint32_t count = targ->pair_count;
+  MutableWordsOfSameLengthMap *mwfl = targ->mwfl;
+  const DictionaryWordList *words = targ->words;
+
+  // Sort pairs by bit_rack
+  radix_sort_word_pairs(pairs, count);
+
+  // Count unique bit_racks
+  uint32_t num_unique = 0;
+  if (count > 0) {
+    num_unique = 1;
+    for (uint32_t i = 1; i < count; i++) {
+      if (!bit_rack_equals(&pairs[i].bit_rack, &pairs[i-1].bit_rack)) {
+        num_unique++;
+      }
+    }
+  }
+
+  // Allocate buckets
+  mwfl->num_word_buckets = next_power_of_2(num_unique);
+  if (mwfl->num_word_buckets < 16) {
+    mwfl->num_word_buckets = 16;
+  }
+  mwfl->word_buckets = malloc_or_die(sizeof(MutableWordMapBucket) * mwfl->num_word_buckets);
+
+  // First pass: count entries per bucket
+  uint32_t *bucket_counts = calloc(mwfl->num_word_buckets, sizeof(uint32_t));
+  if (bucket_counts == NULL) {
+    log_fatal("calloc failed");
+  }
+
+  if (count > 0) {
+    BitRack *prev = &pairs[0].bit_rack;
+    bucket_counts[bit_rack_get_bucket_index(prev, mwfl->num_word_buckets)]++;
+    for (uint32_t i = 1; i < count; i++) {
+      if (!bit_rack_equals(&pairs[i].bit_rack, prev)) {
+        prev = &pairs[i].bit_rack;
+        bucket_counts[bit_rack_get_bucket_index(prev, mwfl->num_word_buckets)]++;
+      }
+    }
+  }
+
+  // Allocate bucket entries
+  for (uint32_t bucket_idx = 0; bucket_idx < mwfl->num_word_buckets; bucket_idx++) {
+    uint32_t c = bucket_counts[bucket_idx];
+    mwfl->word_buckets[bucket_idx].num_entries = 0;
+    mwfl->word_buckets[bucket_idx].capacity = c > 0 ? c : 1;
+    mwfl->word_buckets[bucket_idx].entries =
+        malloc_or_die(sizeof(MutableWordMapEntry) * mwfl->word_buckets[bucket_idx].capacity);
+  }
+
+  // Second pass: build entries
+  if (count > 0) {
+    uint32_t run_start = 0;
+    for (uint32_t i = 1; i <= count; i++) {
+      bool different = (i == count) ||
+                       !bit_rack_equals(&pairs[i].bit_rack, &pairs[i-1].bit_rack);
+      if (different) {
+        uint32_t words_in_run = i - run_start;
+        BitRack current_rack = pairs[run_start].bit_rack;
+        uint32_t bucket_idx = bit_rack_get_bucket_index(&current_rack, mwfl->num_word_buckets);
+        MutableWordMapBucket *bucket = &mwfl->word_buckets[bucket_idx];
+        MutableWordMapEntry *entry = &bucket->entries[bucket->num_entries];
+        entry->bit_rack = current_rack;
+        entry->letters = dictionary_word_list_create_with_capacity((int)words_in_run);
+
+        for (uint32_t j = run_start; j < i; j++) {
+          const DictionaryWord *word = dictionary_word_list_get_word(words, (int)pairs[j].word_index);
+          dictionary_word_list_add_word(entry->letters,
+                                        dictionary_word_get_word(word),
+                                        dictionary_word_get_length(word));
+        }
+
+        bucket->num_entries++;
+        run_start = i;
+      }
+    }
+  }
+
+  free(bucket_counts);
+  free(pairs);
+  return NULL;
+}
+
+// Build word map using sort-and-merge approach with parallel processing
 static MutableWordMap *make_mwmp_from_words_sorted(const DictionaryWordList *words) {
   const int total_words = dictionary_word_list_get_count(words);
 
@@ -227,7 +324,7 @@ static MutableWordMap *make_mwmp_from_words_sorted(const DictionaryWordList *wor
     }
   }
 
-  // Generate pairs
+  // Generate pairs (sequential - fast)
   for (int word_idx = 0; word_idx < total_words; word_idx++) {
     const DictionaryWord *word = dictionary_word_list_get_word(words, word_idx);
     const uint8_t length = dictionary_word_get_length(word);
@@ -237,96 +334,37 @@ static MutableWordMap *make_mwmp_from_words_sorted(const DictionaryWordList *wor
     pairs[idx].word_index = (uint32_t)word_idx;
   }
 
-  // Sort each length's pairs
+  MutableWordMap *mwmp = malloc_or_die(sizeof(MutableWordMap));
+
+  // Prepare thread arguments
+  WordMapThreadArg thread_args[BOARD_DIM + 1];
+  pthread_t threads[BOARD_DIM + 1];
+
   for (int len = 2; len <= BOARD_DIM; len++) {
     if (pair_counts[len] > 0) {
-      radix_sort_word_pairs(pairs_by_length[len], pair_counts[len]);
+      thread_args[len].words = words;
+      thread_args[len].pairs = pairs_by_length[len];
+      thread_args[len].pair_count = pair_counts[len];
+      thread_args[len].mwfl = &mwmp->maps[len];
+      thread_args[len].length = len;
+      cpthread_create(&threads[len], build_word_map_for_length, &thread_args[len]);
+    } else {
+      // Initialize empty map for this length
+      mwmp->maps[len].num_word_buckets = 16;
+      mwmp->maps[len].word_buckets = malloc_or_die(sizeof(MutableWordMapBucket) * 16);
+      for (int i = 0; i < 16; i++) {
+        mwmp->maps[len].word_buckets[i].entries = malloc_or_die(sizeof(MutableWordMapEntry));
+        mwmp->maps[len].word_buckets[i].num_entries = 0;
+        mwmp->maps[len].word_buckets[i].capacity = 1;
+      }
     }
   }
 
-  // Build word map from sorted pairs
-  MutableWordMap *mwmp = malloc_or_die(sizeof(MutableWordMap));
-
+  // Wait for all threads
   for (int len = 2; len <= BOARD_DIM; len++) {
-    MutableWordsOfSameLengthMap *mwfl = &mwmp->maps[len];
-    WordPair *pairs = pairs_by_length[len];
-    uint32_t count = pair_counts[len];
-
-    // Count unique bit_racks
-    uint32_t num_unique = 0;
-    if (count > 0) {
-      num_unique = 1;
-      for (uint32_t i = 1; i < count; i++) {
-        if (!bit_rack_equals(&pairs[i].bit_rack, &pairs[i-1].bit_rack)) {
-          num_unique++;
-        }
-      }
+    if (pair_counts[len] > 0) {
+      cpthread_join(threads[len]);
     }
-
-    // Allocate buckets
-    mwfl->num_word_buckets = next_power_of_2(num_unique);
-    if (mwfl->num_word_buckets < 16) {
-      mwfl->num_word_buckets = 16;
-    }
-    mwfl->word_buckets = malloc_or_die(sizeof(MutableWordMapBucket) * mwfl->num_word_buckets);
-
-    // First pass: count entries per bucket
-    uint32_t *bucket_counts = calloc(mwfl->num_word_buckets, sizeof(uint32_t));
-    if (bucket_counts == NULL) {
-      log_fatal("calloc failed");
-    }
-
-    if (count > 0) {
-      BitRack *prev = &pairs[0].bit_rack;
-      bucket_counts[bit_rack_get_bucket_index(prev, mwfl->num_word_buckets)]++;
-      for (uint32_t i = 1; i < count; i++) {
-        if (!bit_rack_equals(&pairs[i].bit_rack, prev)) {
-          prev = &pairs[i].bit_rack;
-          bucket_counts[bit_rack_get_bucket_index(prev, mwfl->num_word_buckets)]++;
-        }
-      }
-    }
-
-    // Allocate bucket entries
-    for (uint32_t bucket_idx = 0; bucket_idx < mwfl->num_word_buckets; bucket_idx++) {
-      uint32_t c = bucket_counts[bucket_idx];
-      mwfl->word_buckets[bucket_idx].num_entries = 0;
-      mwfl->word_buckets[bucket_idx].capacity = c > 0 ? c : 1;
-      mwfl->word_buckets[bucket_idx].entries =
-          malloc_or_die(sizeof(MutableWordMapEntry) * mwfl->word_buckets[bucket_idx].capacity);
-    }
-
-    // Second pass: count words per unique bit_rack for DictionaryWordList capacity
-    if (count > 0) {
-      uint32_t run_start = 0;
-      for (uint32_t i = 1; i <= count; i++) {
-        bool different = (i == count) ||
-                         !bit_rack_equals(&pairs[i].bit_rack, &pairs[i-1].bit_rack);
-        if (different) {
-          uint32_t words_in_run = i - run_start;
-          BitRack current_rack = pairs[run_start].bit_rack;
-          uint32_t bucket_idx = bit_rack_get_bucket_index(&current_rack, mwfl->num_word_buckets);
-          MutableWordMapBucket *bucket = &mwfl->word_buckets[bucket_idx];
-          MutableWordMapEntry *entry = &bucket->entries[bucket->num_entries];
-          entry->bit_rack = current_rack;
-          entry->letters = dictionary_word_list_create_with_capacity((int)words_in_run);
-
-          // Add all words in this run
-          for (uint32_t j = run_start; j < i; j++) {
-            const DictionaryWord *word = dictionary_word_list_get_word(words, (int)pairs[j].word_index);
-            dictionary_word_list_add_word(entry->letters,
-                                          dictionary_word_get_word(word),
-                                          dictionary_word_get_length(word));
-          }
-
-          bucket->num_entries++;
-          run_start = i;
-        }
-      }
-    }
-
-    free(bucket_counts);
-    free(pairs_by_length[len]);
   }
 
   return mwmp;
@@ -460,12 +498,35 @@ static void build_blank_map_sorted(const MutableWordsOfSameLengthMap *mwfl,
   free(pairs);
 }
 
-// Build entire blank map using sort-and-merge
+// Thread argument for building blank map for a single length
+typedef struct {
+  const MutableWordsOfSameLengthMap *mwfl;
+  MutableBlanksForSameLengthMap *mbfl;
+  int length;
+} BlankMapThreadArg;
+
+static void *build_blank_map_thread(void *arg) {
+  BlankMapThreadArg *targ = (BlankMapThreadArg *)arg;
+  build_blank_map_sorted(targ->mwfl, targ->mbfl, targ->length);
+  return NULL;
+}
+
+// Build entire blank map using sort-and-merge with parallel processing
 static MutableBlankMap *make_mutable_blank_map_sorted(const MutableWordMap *mwmp) {
   MutableBlankMap *mbmp = malloc_or_die(sizeof(MutableBlankMap));
 
+  BlankMapThreadArg thread_args[BOARD_DIM + 1];
+  pthread_t threads[BOARD_DIM + 1];
+
   for (int len = 2; len <= BOARD_DIM; len++) {
-    build_blank_map_sorted(&mwmp->maps[len], &mbmp->maps[len], len);
+    thread_args[len].mwfl = &mwmp->maps[len];
+    thread_args[len].mbfl = &mbmp->maps[len];
+    thread_args[len].length = len;
+    cpthread_create(&threads[len], build_blank_map_thread, &thread_args[len]);
+  }
+
+  for (int len = 2; len <= BOARD_DIM; len++) {
+    cpthread_join(threads[len]);
   }
 
   return mbmp;
@@ -663,12 +724,37 @@ static void build_double_blank_map_sorted(const MutableWordsOfSameLengthMap *mwf
   free(pairs);
 }
 
-// Build entire double-blank map using sort-and-merge
+// Thread argument for building double-blank map for a single length
+typedef struct {
+  const MutableWordsOfSameLengthMap *mwfl;
+  MutableDoubleBlanksForSameLengthMap *mdbfl;
+  int length;
+} DoubleBlankMapThreadArg;
+
+static void *build_double_blank_map_thread(void *arg) {
+  DoubleBlankMapThreadArg *targ = (DoubleBlankMapThreadArg *)arg;
+  build_double_blank_map_sorted(targ->mwfl, targ->mdbfl, targ->length);
+  return NULL;
+}
+
+// Build entire double-blank map using sort-and-merge with parallel processing
 static MutableDoubleBlankMap *make_mutable_double_blank_map_sorted(const MutableWordMap *mwmp) {
   MutableDoubleBlankMap *mdbmp = malloc_or_die(sizeof(MutableDoubleBlankMap));
+
+  DoubleBlankMapThreadArg thread_args[BOARD_DIM + 1];
+  pthread_t threads[BOARD_DIM + 1];
+
   for (int len = 2; len <= BOARD_DIM; len++) {
-    build_double_blank_map_sorted(&mwmp->maps[len], &mdbmp->maps[len], len);
+    thread_args[len].mwfl = &mwmp->maps[len];
+    thread_args[len].mdbfl = &mdbmp->maps[len];
+    thread_args[len].length = len;
+    cpthread_create(&threads[len], build_double_blank_map_thread, &thread_args[len]);
   }
+
+  for (int len = 2; len <= BOARD_DIM; len++) {
+    cpthread_join(threads[len]);
+  }
+
   return mdbmp;
 }
 
