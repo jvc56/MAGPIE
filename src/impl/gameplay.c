@@ -541,8 +541,8 @@ void play_move_incremental(const Move *move, Game *game, MoveUndo *undo) {
       board_transpose(board);
     }
 
-    // Mark cross-sets as invalid (lazy evaluation)
-    board_set_cross_sets_valid(board, false);
+    // Update cross-sets after placing tiles (required for move generation)
+    update_cross_set_for_move(move, game);
 
     game_set_consecutive_scoreless_turns(game, 0);
     player_add_to_score(player_on_turn, move_get_score(move));
@@ -571,6 +571,9 @@ void play_move_incremental(const Move *move, Game *game, MoveUndo *undo) {
 
   game_start_next_player_turn(game);
 }
+
+// Forward declaration for restore_cross_sets_from_undo (defined below)
+void restore_cross_sets_from_undo(const MoveUndo *undo, Game *game);
 
 // Unplay a move using the recorded undo information.
 // This efficiently restores the game state without full board copies.
@@ -606,124 +609,27 @@ void unplay_move_incremental(const MoveUndo *undo, Game *game) {
   game_set_player_on_turn_index(game, player_index);
   game_set_consecutive_scoreless_turns(game, undo->old_consecutive_scoreless_turns);
   game_set_game_end_reason(game, undo->old_game_end_reason);
+
+  // Restore cross-sets and anchors for the restored board position
+  restore_cross_sets_from_undo(undo, game);
 }
 
-// Helper for calculating cross-sets after unplay using stored move info.
-static void calc_for_across_after_unplay_from_undo(const MoveUndo *undo,
-                                                   const Game *game,
-                                                   int row_start, int col_start,
-                                                   int csd) {
-  for (int row = row_start; row < undo->move_tiles_length + row_start; row++) {
-    int index = row - row_start;
-    // Skip play-through positions (bit not set in played_tiles_mask)
-    if (!(undo->move_played_tiles_mask & (1 << index))) {
-      continue;
-    }
-
-    const Board *board = game_get_board(game);
-    const bool kwgs_are_shared =
-        game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
-    const int right_col =
-        board_get_word_edge(board, row, col_start, WORD_DIRECTION_RIGHT);
-    const int left_col =
-        board_get_word_edge(board, row, col_start, WORD_DIRECTION_LEFT);
-    game_gen_cross_set(game, row, right_col + 1, csd, 0);
-    game_gen_cross_set(game, row, left_col - 1, csd, 0);
-    game_gen_cross_set(game, row, col_start, csd, 0);
-    if (!kwgs_are_shared) {
-      game_gen_cross_set(game, row, right_col + 1, csd, 1);
-      game_gen_cross_set(game, row, left_col - 1, csd, 1);
-      game_gen_cross_set(game, row, col_start, csd, 1);
-    }
-  }
-}
-
-static void calc_for_self_after_unplay_from_undo(const MoveUndo *undo,
-                                                 const Game *game, int row_start,
-                                                 int col_start, int csd) {
-  for (int col = col_start - 1; col <= col_start + undo->move_tiles_length;
-       col++) {
-    game_gen_cross_set(game, row_start, col, csd, 0);
-  }
-  if (!game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG)) {
-    for (int col = col_start - 1; col <= col_start + undo->move_tiles_length;
-         col++) {
-      game_gen_cross_set(game, row_start, col, csd, 1);
-    }
-  }
-}
-
-// Restore cross-sets after unplay using stored move info from MoveUndo.
-// This avoids the need to reconstruct the move from arena memory.
+// Restore cross-sets and anchors after unplay using stored move info.
+// For correctness, we regenerate all cross-sets and anchors.
+// This could be optimized later to only update affected squares.
 void restore_cross_sets_from_undo(const MoveUndo *undo, Game *game) {
-  Board *board = game_get_board(game);
-
   if (undo->move_tiles_length == 0) {
-    // Pass move, no cross-sets to restore
-    board_set_cross_sets_valid(board, true);
+    // Pass move, no cross-sets or anchors to restore
     return;
   }
 
-  int row_start = undo->move_row_start;
-  int col_start = undo->move_col_start;
-  int move_dir = undo->move_dir;
+  Board *board = game_get_board(game);
 
-  if (board_is_dir_vertical(move_dir)) {
-    calc_for_across_after_unplay_from_undo(undo, game, row_start, col_start,
-                                           BOARD_VERTICAL_DIRECTION);
-    board_transpose(board);
-    calc_for_self_after_unplay_from_undo(undo, game, col_start, row_start,
-                                         BOARD_VERTICAL_DIRECTION);
-    board_transpose(board);
-  } else {
-    calc_for_self_after_unplay_from_undo(undo, game, row_start, col_start,
-                                         BOARD_VERTICAL_DIRECTION);
-    board_transpose(board);
-    calc_for_across_after_unplay_from_undo(undo, game, col_start, row_start,
-                                           BOARD_VERTICAL_DIRECTION);
-    board_transpose(board);
-  }
+  // Regenerate all cross-sets for correctness
+  game_gen_all_cross_sets(game);
 
-  // Update anchors
-  int actual_row = row_start;
-  int actual_col = col_start;
-  int tiles_length = undo->move_tiles_length;
-
-  if (board_is_dir_vertical(move_dir)) {
-    for (int row = actual_row; row < tiles_length + actual_row; row++) {
-      board_update_anchors(board, row, actual_col);
-      if (actual_col > 0) {
-        board_update_anchors(board, row, actual_col - 1);
-      }
-      if (actual_col < BOARD_DIM - 1) {
-        board_update_anchors(board, row, actual_col + 1);
-      }
-    }
-    if (actual_row - 1 >= 0) {
-      board_update_anchors(board, actual_row - 1, actual_col);
-    }
-    if (tiles_length + actual_row < BOARD_DIM) {
-      board_update_anchors(board, tiles_length + actual_row, actual_col);
-    }
-  } else {
-    for (int col = actual_col; col < tiles_length + actual_col; col++) {
-      board_update_anchors(board, actual_row, col);
-      if (actual_row > 0) {
-        board_update_anchors(board, actual_row - 1, col);
-      }
-      if (actual_row < BOARD_DIM - 1) {
-        board_update_anchors(board, actual_row + 1, col);
-      }
-    }
-    if (actual_col - 1 >= 0) {
-      board_update_anchors(board, actual_row, actual_col - 1);
-    }
-    if (tiles_length + actual_col < BOARD_DIM) {
-      board_update_anchors(board, actual_row, tiles_length + actual_col);
-    }
-  }
-
-  board_set_cross_sets_valid(board, true);
+  // Regenerate all anchors for correctness
+  board_update_all_anchors(board);
 }
 
 void generate_moves_for_game_override_record_type(
