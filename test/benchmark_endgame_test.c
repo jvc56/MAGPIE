@@ -173,7 +173,7 @@ void test_benchmark_endgame(void) {
   const uint64_t base_seed = 42;  // Fixed seed for reproducibility
 
   // Thread counts to benchmark
-  int thread_counts[] = {1, 12};
+  int thread_counts[] = {1, 12, 16};
   int num_configs = sizeof(thread_counts) / sizeof(thread_counts[0]);
 
   Config *config = config_create_or_die(
