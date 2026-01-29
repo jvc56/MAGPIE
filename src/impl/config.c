@@ -25,6 +25,7 @@
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/heat_map.h"
+#include "../ent/inference_args.h"
 #include "../ent/inference_results.h"
 #include "../ent/klv.h"
 #include "../ent/klv_csv.h"
@@ -33,6 +34,7 @@
 #include "../ent/player.h"
 #include "../ent/players_data.h"
 #include "../ent/rack.h"
+#include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "../ent/trie.h"
@@ -55,7 +57,6 @@
 #include "get_gcg.h"
 #include "inference.h"
 #include "move_gen.h"
-#include "random_variable.h"
 #include "simmer.h"
 #include <assert.h>
 #include <ctype.h>
@@ -78,6 +79,7 @@ typedef enum {
   ARG_TOKEN_CGP,
   ARG_TOKEN_MOVES,
   ARG_TOKEN_RACK,
+  ARG_TOKEN_RANDOM_RACK,
   ARG_TOKEN_GEN,
   ARG_TOKEN_SIM,
   ARG_TOKEN_GEN_AND_SIM,
@@ -134,6 +136,7 @@ typedef enum {
   ARG_TOKEN_TIME_LIMIT,
   ARG_TOKEN_SAMPLING_RULE,
   ARG_TOKEN_THRESHOLD,
+  ARG_TOKEN_CUTOFF,
   ARG_TOKEN_LOAD,
   ARG_TOKEN_NEW_GAME,
   ARG_TOKEN_EXPORT,
@@ -204,6 +207,7 @@ struct Config {
   uint64_t max_iterations;
   uint64_t min_play_iterations;
   double stop_cond_pct;
+  double cutoff;
   Equity eq_margin_inference;
   Equity eq_margin_movegen;
   bool use_game_pairs;
@@ -451,6 +455,16 @@ AutoplayResults *config_get_autoplay_results(const Config *config) {
 
 const char *config_get_settings_filename(const Config *config) {
   return config->settings_filename;
+}
+
+int config_get_num_threads(const Config *config) { return config->num_threads; }
+
+int config_get_print_interval(const Config *config) {
+  return config->print_interval;
+}
+
+Equity config_get_eq_margin_inference(const Config *config) {
+  return config->eq_margin_inference;
 }
 
 bool config_exec_parg_is_set(const Config *config) {
@@ -857,6 +871,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<rack>";
       text = "Sets the rack for the player on turn.";
       break;
+    case ARG_TOKEN_RANDOM_RACK:
+      usages[0] = "";
+      text = "Sets a random rack for the player on turn.";
+      break;
     case ARG_TOKEN_GEN:
       usages[0] = "";
       text = "Generates moves for the current position.";
@@ -897,8 +915,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "josh ABCDE 13";
       examples[2] = "josh ABCDE 13 ABCD";
       examples[3] = "josh ABCDE 13 ABCD EFG";
-      examples[4] = "josh 3 ABCDE";
-      examples[5] = "josh 3 ABCDE EFG";
+      examples[4] = "josh ABCDE 13 - EFG";
+      examples[5] = "josh 3 ABCDE";
+      examples[6] = "josh 3 ABCDE EFG";
+      examples[7] = "josh 3 - EFG";
       text =
           "Runs an exhaustive inference for what the opponent could have kept "
           "based on their previous play. If no arguments are specified, the "
@@ -1420,6 +1440,16 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "option will make the simulation run until it hits the max total "
           "iterations or time limit.";
       break;
+    case ARG_TOKEN_CUTOFF:
+      usages[0] = "<cutoff>";
+      examples[0] = "0.005";
+      examples[1] = "0.01";
+      text =
+          "Specifies the cutoff threshold for determining when simmed plays "
+          "are equivalent. If both win percentages are within cutoff of 100.0 "
+          "or both are within cutoff of 0.0, they are considered equivalent "
+          "and tiebroken by equity. The default is 0.005.";
+      break;
     case ARG_TOKEN_PRINT_BOARDS:
       usages[0] = "<true_or_false>";
       examples[0] = "true";
@@ -1697,11 +1727,11 @@ void impl_set_rack_internal(Config *config, const char *rack_str,
 
   config_init_game(config);
 
-  const int player_index = game_get_player_on_turn_index(config->game);
+  const int player_on_turn_index = game_get_player_on_turn_index(config->game);
 
   Rack new_rack;
-  rack_copy(&new_rack,
-            player_get_rack(game_get_player(config->game, player_index)));
+  rack_copy(&new_rack, player_get_rack(game_get_player(config->game,
+                                                       player_on_turn_index)));
 
   load_rack_or_push_to_error_stack(rack_str, config->ld,
                                    ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
@@ -1710,14 +1740,25 @@ void impl_set_rack_internal(Config *config, const char *rack_str,
     return;
   }
 
-  if (rack_is_drawable(config->game, player_index, &new_rack)) {
-    return_rack_to_bag(config->game, player_index);
-    if (!draw_rack_from_bag(config->game, player_index, &new_rack)) {
+  // Return letters on opponent rack that may have been inferred
+  // due to an empty bag but are not known from previous phonies.
+  const int player_off_turn_index = 1 - player_on_turn_index;
+  return_rack_to_bag(config->game, player_off_turn_index);
+  if (!draw_rack_from_bag(config->game, player_off_turn_index,
+                          player_get_known_rack_from_phonies(game_get_player(
+                              config->game, player_off_turn_index)))) {
+    log_fatal("unexpectedly failed to draw known letters from phonies for "
+              "opponent from the bag in set rack command");
+  }
+
+  if (rack_is_drawable(config->game, player_on_turn_index, &new_rack)) {
+    return_rack_to_bag(config->game, player_on_turn_index);
+    if (!draw_rack_from_bag(config->game, player_on_turn_index, &new_rack)) {
       log_fatal(
-          "unexpectedly failed to draw rack from bag in set rack command");
+          "unexpectedly failed to draw rack from the bag in set rack command");
     }
     if (bag_get_letters(game_get_bag(config->game)) <= (RACK_SIZE)) {
-      draw_to_full_rack(config->game, 1 - player_index);
+      draw_to_full_rack(config->game, 1 - player_on_turn_index);
     }
   } else {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG,
@@ -1731,6 +1772,23 @@ void impl_set_rack(Config *config, const arg_token_t arg_token,
                    ErrorStack *error_stack) {
   const char *rack_str = config_get_parg_value(config, arg_token, 0);
   impl_set_rack_internal(config, rack_str, error_stack);
+}
+
+void impl_set_random_rack(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate("cannot set player rack without lexicon"));
+    return;
+  }
+  config_init_game(config);
+  const int player_index = game_get_player_on_turn_index(config->game);
+  return_rack_to_bag(config->game, player_index);
+  draw_to_full_rack(config->game, player_index);
+  if (bag_get_letters(game_get_bag(config->game)) <= (RACK_SIZE)) {
+    draw_to_full_rack(config->game, 1 - player_index);
+  }
+  config_reset_move_list_and_invalidate_sim_results(config);
 }
 
 // Move generation
@@ -1749,6 +1807,8 @@ void impl_move_gen_override_record_type(Config *config,
       .move_list = config->move_list,
       .thread_index = 0,
       .eq_margin_movegen = config->eq_margin_movegen,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves_for_game_override_record_type(&args, move_record_type);
   move_list_sort_moves(config->move_list);
@@ -1774,35 +1834,30 @@ void impl_move_gen(Config *config, ErrorStack *error_stack) {
 void config_fill_infer_args(const Config *config, bool use_game_history,
                             int target_index, Equity target_score,
                             int target_num_exch, Rack *target_played_tiles,
+                            bool use_infer_cutoff_optimization,
                             Rack *target_known_rack, Rack *nontarget_known_rack,
                             InferenceArgs *args) {
-  args->target_index = target_index;
-  args->target_score = target_score;
-  args->target_num_exch = target_num_exch;
-  args->move_capacity = config_get_num_plays(config);
-  args->equity_margin = config->eq_margin_inference;
-  args->target_played_tiles = target_played_tiles;
-  args->target_known_rack = target_known_rack;
-  args->nontarget_known_rack = nontarget_known_rack;
-  args->use_game_history = use_game_history;
-  args->game_history = config->game_history;
-  args->game = config_get_game(config);
-  args->num_threads = config->num_threads;
-  args->print_interval = config->print_interval;
-  args->thread_control = config->thread_control;
+  infer_args_fill(args, config->num_plays, config->eq_margin_inference,
+                  config->game_history, config->game, config->num_threads,
+                  config->print_interval, config->thread_control,
+                  use_game_history, use_infer_cutoff_optimization, target_index,
+                  target_score, target_num_exch, target_played_tiles,
+                  target_known_rack, nontarget_known_rack);
 }
 
 // Use target_index < 0 to infer using the game history
 void config_infer(const Config *config, bool use_game_history, int target_index,
                   Equity target_score, int target_num_exch,
                   Rack *target_played_tiles, Rack *target_known_rack,
-                  Rack *nontarget_known_rack, InferenceResults *results,
-                  ErrorStack *error_stack) {
+                  Rack *nontarget_known_rack,
+                  bool use_inference_cutoff_optimization,
+                  InferenceResults *results, ErrorStack *error_stack) {
   InferenceArgs args;
   config_fill_infer_args(config, use_game_history, target_index, target_score,
                          target_num_exch, target_played_tiles,
-                         target_known_rack, nontarget_known_rack, &args);
-  infer(&args, results, error_stack);
+                         use_inference_cutoff_optimization, target_known_rack,
+                         nontarget_known_rack, &args);
+  infer_without_ctx(&args, results, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -1829,7 +1884,7 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
 
   if (config_get_parg_num_set_values(config, ARG_TOKEN_INFER) == 0) {
     config_infer(config, true, 0, 0, 0, &target_played_tiles,
-                 &target_known_rack, &nontarget_known_rack,
+                 &target_known_rack, &nontarget_known_rack, true,
                  config->inference_results, error_stack);
     return;
   }
@@ -1917,29 +1972,34 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
   const char *target_known_rack_str =
       config_get_parg_value(config, ARG_TOKEN_INFER, next_arg_index);
   if (target_known_rack_str) {
-    load_rack_or_push_to_error_stack(
-        target_known_rack_str, ld, ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
-        &target_known_rack, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-    next_arg_index++;
-    const char *nontarget_known_rack_str =
-        config_get_parg_value(config, ARG_TOKEN_INFER, next_arg_index);
-    if (nontarget_known_rack_str) {
+    if (!strings_equal(target_known_rack_str, "-")) {
       load_rack_or_push_to_error_stack(
-          nontarget_known_rack_str, ld,
-          ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &nontarget_known_rack,
+          target_known_rack_str, ld,
+          ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &target_known_rack,
           error_stack);
       if (!error_stack_is_empty(error_stack)) {
         return;
       }
     }
+    next_arg_index++;
+  }
+
+  const char *nontarget_known_rack_str =
+      config_get_parg_value(config, ARG_TOKEN_INFER, next_arg_index);
+  if (nontarget_known_rack_str &&
+      !strings_equal(nontarget_known_rack_str, "-")) {
+    load_rack_or_push_to_error_stack(
+        nontarget_known_rack_str, ld,
+        ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &nontarget_known_rack,
+        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
   }
 
   config_infer(config, false, target_index, target_score, target_num_exch,
                &target_played_tiles, &target_known_rack, &nontarget_known_rack,
-               config->inference_results, error_stack);
+               true, config->inference_results, error_stack);
 }
 
 // Sim
@@ -1949,46 +2009,29 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
                           Rack *nontarget_known_tiles,
                           Rack *target_known_inference_tiles,
                           SimArgs *sim_args) {
-  sim_args->num_plies = config_get_plies(config);
-  sim_args->move_list = config_get_move_list(config);
-  sim_args->known_opp_rack = known_opp_rack;
-  sim_args->win_pcts = config_get_win_pcts(config);
-  sim_args->inference_results = config->inference_results;
-  sim_args->thread_control = config->thread_control;
-  sim_args->game = config_get_game(config);
-  sim_args->move_list = config_get_move_list(config);
-  sim_args->use_inference = config->sim_with_inference;
-  sim_args->use_heat_map = config->use_heat_map;
-  sim_args->num_threads = config->num_threads;
-  sim_args->print_interval = config->print_interval;
-  sim_args->max_num_display_plays = config->max_num_display_plays;
-  sim_args->seed = config->seed;
-  if (sim_args->use_inference) {
+  InferenceArgs inference_args;
+  if (config->sim_with_inference) {
     // FIXME: enable sim inferences using data from the last play instead of
     // the whole history so that autoplay does not have to keep a whole
     // history and play to turn for each inference which will probably incur
     // more overhead than we would like.
-    config_fill_infer_args(config, true, 0, 0, 0, target_played_tiles,
+    config_fill_infer_args(config, true, 0, 0, 0, target_played_tiles, false,
                            target_known_inference_tiles, nontarget_known_tiles,
-                           &sim_args->inference_args);
+                           &inference_args);
   }
-  sim_args->bai_options.sample_limit = config->max_iterations;
-  sim_args->bai_options.sample_minimum = config->min_play_iterations;
-  const double percentile = config_get_stop_cond_pct(config);
-  if (percentile > 100 || config->threshold == BAI_THRESHOLD_NONE) {
-    sim_args->bai_options.threshold = BAI_THRESHOLD_NONE;
-  } else {
-    sim_args->bai_options.delta =
-        1.0 - (config_get_stop_cond_pct(config) / 100.0);
-    sim_args->bai_options.threshold = config->threshold;
-  }
-  sim_args->bai_options.time_limit_seconds = config->time_limit_seconds;
-  sim_args->bai_options.sampling_rule = config->sampling_rule;
-  sim_args->bai_options.num_threads = config->num_threads;
+  sim_args_fill(
+      config->plies, config->move_list, known_opp_rack, config->win_pcts,
+      config->inference_results, config->thread_control, config->game,
+      config->sim_with_inference, config->use_heat_map, config->num_threads,
+      config->print_interval, config->max_num_display_plays, config->seed,
+      config->max_iterations, config->min_play_iterations,
+      config->stop_cond_pct, config->threshold, (int)config->time_limit_seconds,
+      config->sampling_rule, config->cutoff, &inference_args, sim_args);
 }
 
-void config_simulate(const Config *config, Rack *known_opp_rack,
-                     SimResults *sim_results, ErrorStack *error_stack) {
+void config_simulate(const Config *config, SimCtx **sim_ctx,
+                     Rack *known_opp_rack, SimResults *sim_results,
+                     ErrorStack *error_stack) {
   SimArgs args;
   const int ld_size = ld_get_size(game_get_ld(config->game));
   Rack target_played_tiles;
@@ -2009,7 +2052,11 @@ void config_simulate(const Config *config, Rack *known_opp_rack,
             "cannot sim with inference with an empty game history"));
     return;
   }
-  return simulate(&args, sim_results, error_stack);
+  if (sim_ctx) {
+    simulate(&args, sim_ctx, sim_results, error_stack);
+  } else {
+    simulate_without_ctx(&args, sim_results, error_stack);
+  }
 }
 
 void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
@@ -2045,7 +2092,8 @@ void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
         player_get_rack(game_get_player(
             config->game, 1 - game_get_player_on_turn_index(config->game))));
   }
-  config_simulate(config, &known_opp_rack, config->sim_results, error_stack);
+  config_simulate(config, NULL, &known_opp_rack, config->sim_results,
+                  error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -2115,7 +2163,7 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
   endgame_args->tt_fraction_of_mem = config->tt_fraction_of_mem;
   endgame_args->initial_small_move_arena_size =
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-  endgame_args->num_threads = 1;
+  endgame_args->num_threads = config->num_threads;
   endgame_args->per_ply_callback = NULL;
   endgame_args->per_ply_callback_data = NULL;
 }
@@ -2958,11 +3006,12 @@ void config_add_game_event(Config *config, const int player_index,
           config->game_history);
   if (waiting_for_final_pass_or_challenge &&
       (game_event_type != GAME_EVENT_PASS &&
-       game_event_type != GAME_EVENT_CHALLENGE_BONUS)) {
+       game_event_type != GAME_EVENT_CHALLENGE_BONUS &&
+       game_event_type != GAME_EVENT_PHONY_TILES_RETURNED)) {
     error_stack_push(error_stack,
                      ERROR_STATUS_COMMIT_WAITING_FOR_PASS_OR_CHALLENGE_BONUS,
-                     string_duplicate("waiting for final pass or challenge "
-                                      "bonus but got a different game event"));
+                     string_duplicate("waiting for final pass or challenge but "
+                                      "got a different game event"));
     return;
   }
 
@@ -4169,17 +4218,17 @@ void config_load_parsed_args(Config *config,
       if (current_parg->num_set_values > 0) {
         error_stack_push(
             error_stack, ERROR_STATUS_CONFIG_LOAD_DUPLICATE_ARG,
-            get_formatted_string("command was provided more than once: %s",
+            get_formatted_string("command '%s' was provided more than once",
                                  arg_name));
         return;
       }
 
       if (current_parg->is_command) {
         if (i > 0) {
-          error_stack_push(error_stack,
-                           ERROR_STATUS_CONFIG_LOAD_MISPLACED_COMMAND,
-                           get_formatted_string(
-                               "encountered unexpected command: %s", arg_name));
+          error_stack_push(
+              error_stack, ERROR_STATUS_CONFIG_LOAD_MISPLACED_COMMAND,
+              get_formatted_string("encountered unexpected command '%s'",
+                                   arg_name));
           return;
         }
         config->exec_parg_token = current_arg_token;
@@ -5279,6 +5328,17 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     }
   }
 
+  const char *cutoff = config_get_parg_value(config, ARG_TOKEN_CUTOFF, 0);
+  if (cutoff) {
+    double user_cutoff = 0;
+    config_load_double(config, ARG_TOKEN_CUTOFF, 0, 100, &user_cutoff,
+                       error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    config->cutoff = convert_user_cutoff_to_cutoff(user_cutoff);
+  }
+
   // Non-lexical player data
 
   const arg_token_t sort_type_args[2] = {ARG_TOKEN_P1_MOVE_SORT_TYPE,
@@ -5431,6 +5491,15 @@ void execute_set_rack(Config *config, ErrorStack *error_stack) {
 
 char *str_api_set_rack(Config *config, ErrorStack *error_stack) {
   impl_set_rack(config, ARG_TOKEN_RACK, error_stack);
+  return empty_string();
+}
+
+void execute_set_random_rack(Config *config, ErrorStack *error_stack) {
+  impl_set_random_rack(config, error_stack);
+}
+
+char *str_api_set_random_rack(Config *config, ErrorStack *error_stack) {
+  impl_set_random_rack(config, error_stack);
   return empty_string();
 }
 
@@ -5618,6 +5687,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_SHOW_HEAT_MAP, "heatmap", 1, 3, show_heat_map, generic, false);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic, true);
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic, true);
+  cmd(ARG_TOKEN_RANDOM_RACK, "rrack", 0, 0, set_random_rack, generic, true);
   cmd(ARG_TOKEN_GEN, "generate", 0, 0, move_gen, generic, true);
   cmd(ARG_TOKEN_SIM, "simulate", 0, 1, sim, sim, false);
   cmd(ARG_TOKEN_GEN_AND_SIM, "gsimulate", 0, 1, gen_and_sim, gen_and_sim,
@@ -5681,6 +5751,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_TIME_LIMIT, "tlim", 1, 1);
   arg(ARG_TOKEN_SAMPLING_RULE, "sr", 1, 1);
   arg(ARG_TOKEN_THRESHOLD, "threshold", 1, 1);
+  arg(ARG_TOKEN_CUTOFF, "cutoff", 1, 1);
   arg(ARG_TOKEN_PRINT_BOARDS, "printboards", 1, 1);
   arg(ARG_TOKEN_BOARD_COLOR, "boardcolor", 1, 1);
   arg(ARG_TOKEN_BOARD_TILE_GLYPHS, "boardtiles", 1, 1);
@@ -5727,6 +5798,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->min_play_iterations = 500;
   config->max_iterations = 1000000000000;
   config->stop_cond_pct = 99;
+  config->cutoff = convert_user_cutoff_to_cutoff(0.005);
   config->time_limit_seconds = 0;
   config->num_threads = get_num_cores();
   config->print_interval = 0;
@@ -5754,7 +5826,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->game_history = game_history_create();
   config->game_history_backup = NULL;
   config->endgame_solver = endgame_solver_create();
-  config->sim_results = sim_results_create();
+  config->sim_results = sim_results_create(config->cutoff);
   config->inference_results = inference_results_create(NULL);
   config->endgame_results = endgame_results_create();
   config->autoplay_results = autoplay_results_create();
@@ -5849,6 +5921,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_CGP:
     case ARG_TOKEN_MOVES:
     case ARG_TOKEN_RACK:
+    case ARG_TOKEN_RANDOM_RACK:
     case ARG_TOKEN_GEN:
     case ARG_TOKEN_SIM:
     case ARG_TOKEN_GEN_AND_SIM:
@@ -6083,6 +6156,10 @@ void config_add_settings_to_string_builder(const Config *config,
       string_builder_add_formatted_string(sb, " -%s ",
                                           config->pargs[arg_token]->name);
       string_builder_add_threshold(sb, config->threshold);
+      break;
+    case ARG_TOKEN_CUTOFF:
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token, convert_cutoff_to_user_cutoff(config->cutoff));
       break;
     case ARG_TOKEN_PRINT_BOARDS:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,

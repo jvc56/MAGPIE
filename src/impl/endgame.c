@@ -49,6 +49,11 @@ enum {
   // ABDADA: sentinel value returned when node is being searched by another
   // processor
   ON_EVALUATION = -(1 << 29),
+  // ABDADA: minimum remaining depth to use parallel search with deferral.
+  // Below this depth, use serial search to avoid nproc tracking overhead.
+  // A value of 4-5 is optimal: shallow nodes are fast enough serially,
+  // while deeper nodes benefit from parallelization.
+  MIN_SPLIT_DEPTH = 4,
 };
 
 struct EndgameSolver {
@@ -279,7 +284,8 @@ int generate_stm_plays(EndgameSolverWorker *worker) {
 }
 
 void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
-                               int move_count, uint64_t tt_move) {
+                               int move_count, uint64_t tt_move,
+                               bool is_root_position) {
   // assign estimates to arena plays.
   // log_warn("assigning estimates; depth %d, arena_begin %d, move_count %d",
   //          depth, worker->small_move_arena->size, move_count);
@@ -348,6 +354,16 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
     if (last_move_was_pass && small_move_is_pass(current_move)) {
       small_move_add_estimated_value(current_move, EARLY_PASS_BF);
     }
+
+    // Thread-based move rotation for root position: add a small bias based on
+    // move index and thread index to ensure different threads search different
+    // moves first. This reduces contention on the PV move.
+    if (is_root_position && num_threads > 1 && thread_idx > 0) {
+      // Rotate effective priority: thread 1 prefers move 1, thread 2 prefers move 2, etc.
+      // Add a bonus to moves where (i % num_threads) == thread_idx
+      int rotation_bonus = ((int)i % num_threads == thread_idx) ? 10 : 0;
+      small_move_add_estimated_value(current_move, rotation_bonus);
+    }
   }
   // sort moves by estimated value, from biggest to smallest value. A good move
   // sorting is instrumental to the performance of ab pruning.
@@ -382,9 +398,14 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
 
   assert(pv_node || alpha == beta - 1);
 
-  // ABDADA: if exclusive search and another processor is on this node, defer
+  // ABDADA optimization: only use parallel search features for deeper nodes.
+  // Shallow nodes (depth < MIN_SPLIT_DEPTH) are fast to search serially,
+  // and the overhead of nproc tracking and deferral hurts more than it helps.
   const int num_threads = worker->solver->threads;
-  if (exclusive_p && num_threads > 1 &&
+  const bool use_abdada_at_depth = (num_threads > 1) && (depth >= MIN_SPLIT_DEPTH);
+
+  // ABDADA: if exclusive search and another processor is on this node, defer
+  if (exclusive_p && use_abdada_at_depth &&
       worker->solver->transposition_table_optim) {
     if (transposition_table_is_busy(worker->solver->transposition_table,
                                     node_key)) {
@@ -392,8 +413,8 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
     }
   }
 
-  // ABDADA: mark that we're searching this node
-  if (num_threads > 1 && worker->solver->transposition_table_optim) {
+  // ABDADA: mark that we're searching this node (only for deeper nodes)
+  if (use_abdada_at_depth && worker->solver->transposition_table_optim) {
     transposition_table_enter_node(worker->solver->transposition_table,
                                    node_key);
   }
@@ -420,7 +441,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       if (flag == TT_EXACT) {
         if (!pv_node) {
           // ABDADA: leave node before returning
-          if (num_threads > 1) {
+          if (use_abdada_at_depth) {
             transposition_table_leave_node(worker->solver->transposition_table,
                                            node_key);
           }
@@ -434,7 +455,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       if (alpha >= beta) {
         if (!pv_node) {
           // ABDADA: leave node before returning
-          if (num_threads > 1) {
+          if (use_abdada_at_depth) {
             transposition_table_leave_node(worker->solver->transposition_table,
                                            node_key);
           }
@@ -450,7 +471,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   if (depth == 0 ||
       game_get_game_end_reason(worker->game_copy) != GAME_END_REASON_NONE) {
     // ABDADA: leave node before returning
-    if (num_threads > 1 && worker->solver->transposition_table_optim) {
+    if (use_abdada_at_depth && worker->solver->transposition_table_optim) {
       transposition_table_leave_node(worker->solver->transposition_table,
                                      node_key);
     }
@@ -468,7 +489,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   bool arena_alloced = false;
   if (worker->current_iterative_deepening_depth != depth) {
     nplays = generate_stm_plays(worker);
-    assign_estimates_and_sort(worker, depth, nplays, tt_move);
+    assign_estimates_and_sort(worker, depth, nplays, tt_move, false);
     // log_warn("generated and allocated; nplays %d, cur_size %ld", nplays,
     //          worker->small_move_arena->size);
     arena_alloced = true;
@@ -488,7 +509,8 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   bool deferred_stack[MAX_DEFERRED_STACK];
   bool *deferred = NULL;
   bool deferred_heap_allocated = false;
-  bool use_abdada = (num_threads > 1);
+  // Only use ABDADA deferral logic for deeper nodes
+  const bool use_abdada = use_abdada_at_depth;
   if (use_abdada) {
     if (nplays <= MAX_DEFERRED_STACK) {
       deferred = deferred_stack;
@@ -642,7 +664,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   }
 
   // ABDADA: leave node before returning
-  if (num_threads > 1 && worker->solver->transposition_table_optim) {
+  if (use_abdada_at_depth && worker->solver->transposition_table_optim) {
     transposition_table_leave_node(worker->solver->transposition_table,
                                    node_key);
   }
@@ -680,7 +702,8 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
 
   int initial_move_count = generate_stm_plays(worker);
   // Arena pointer better have started at 0, since it was empty.
-  assign_estimates_and_sort(worker, 0, initial_move_count, INVALID_TINY_MOVE);
+  // This is the root position, so enable thread-based move rotation
+  assign_estimates_and_sort(worker, 0, initial_move_count, INVALID_TINY_MOVE, true);
   worker->solver->n_initial_moves = initial_move_count;
   assert((size_t)worker->small_move_arena->size ==
          initial_move_count * sizeof(SmallMove));

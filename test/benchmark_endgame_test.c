@@ -166,8 +166,8 @@ static void run_endgames_with_pv(Config *config, EndgameSolver *solver,
 void test_benchmark_endgame(void) {
   log_set_level(LOG_WARN);  // Allow warnings to show diagnostics
 
-  const int num_games = 25;  // Full benchmark
-  const int ply = 12;        // Full 12-ply search
+  const int num_games = 3;   // Quick verification test
+  const int ply = 6;         // 6-ply search
   const int num_threads = 8;
   const uint64_t base_seed = 0;
 

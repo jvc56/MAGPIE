@@ -17,9 +17,12 @@ enum {
   DEPTH_MASK = ((1 << 6) - 1),
   // ABDADA nproc table: use a smaller table than TT to reduce memory and
   // improve cache locality. Collisions just cause extra deferrals.
-  NPROC_SIZE_POWER = 18,  // 2^18 = 256K entries
+  // With cache line padding, we use fewer entries but eliminate false sharing.
+  NPROC_SIZE_POWER = 14,  // 2^14 = 16K entries (reduced due to 64-byte padding)
   NPROC_SIZE = (1 << NPROC_SIZE_POWER),
   NPROC_MASK = (NPROC_SIZE - 1),
+  // Cache line size for padding to prevent false sharing
+  CACHE_LINE_SIZE = 64,
 };
 
 typedef struct TTEntry {
@@ -57,9 +60,17 @@ inline static void ttentry_reset(TTEntry *t) {
   t->tiny_move = 0;
 }
 
+// ABDADA: cache-line aligned nproc entry to prevent false sharing.
+// Each entry is padded to CACHE_LINE_SIZE bytes so that different threads
+// accessing different entries don't share cache lines.
+typedef struct NprocEntry {
+  atomic_uchar count;
+  char padding[CACHE_LINE_SIZE - sizeof(atomic_uchar)];
+} NprocEntry;
+
 typedef struct TranspositionTable {
   TTEntry *table;
-  atomic_uchar *nproc;  // ABDADA: small table for tracking concurrent searches
+  NprocEntry *nproc;  // ABDADA: cache-aligned table for tracking concurrent searches
   int size_power_of_2;
   uint64_t size_mask;
   Zobrist *zobrist;
@@ -98,11 +109,12 @@ transposition_table_create(double fraction_of_memory) {
            (sizeof(TTEntry) * num_elems) / (size_t)(1024 * 1024));
   tt->table = malloc_or_die(sizeof(TTEntry) * num_elems);
   memset(tt->table, 0, sizeof(TTEntry) * num_elems);
-  // ABDADA: allocate smaller nproc table for tracking concurrent searches
-  // Using a smaller table (256K vs millions) improves cache locality
-  tt->nproc = (atomic_uchar *)malloc_or_die(sizeof(atomic_uchar) * NPROC_SIZE);
+  // ABDADA: allocate cache-aligned nproc table for tracking concurrent searches.
+  // Each entry is padded to a full cache line to prevent false sharing between
+  // threads accessing different entries.
+  tt->nproc = (NprocEntry *)malloc_or_die(sizeof(NprocEntry) * NPROC_SIZE);
   for (int i = 0; i < NPROC_SIZE; i++) {
-    atomic_init(&tt->nproc[i], 0);
+    atomic_init(&tt->nproc[i].count, 0);
   }
   tt->size_mask = num_elems - 1;
   tt->zobrist = zobrist_create(ctime_get_current_time());
@@ -118,9 +130,9 @@ static inline void transposition_table_reset(TranspositionTable *tt) {
   // space for it, destroy and recreate it with the new space.
   uint64_t num_elems = tt->size_mask + 1;
   memset(tt->table, 0, sizeof(TTEntry) * num_elems);
-  // ABDADA: reset nproc counters (smaller table)
+  // ABDADA: reset nproc counters
   for (int i = 0; i < NPROC_SIZE; i++) {
-    atomic_store_explicit(&tt->nproc[i], 0, memory_order_relaxed);
+    atomic_store_explicit(&tt->nproc[i].count, 0, memory_order_relaxed);
   }
   atomic_store(&tt->created, 0);
   atomic_store(&tt->hits, 0);
@@ -185,7 +197,7 @@ static inline TTEntry *transposition_table_get_entry(TranspositionTable *tt,
 static inline bool transposition_table_is_busy(TranspositionTable *tt,
                                                uint64_t zval) {
   uint64_t idx = zval & NPROC_MASK;
-  return atomic_load_explicit(&tt->nproc[idx], memory_order_relaxed) > 0;
+  return atomic_load_explicit(&tt->nproc[idx].count, memory_order_relaxed) > 0;
 }
 
 // Enter node: increment nproc counter
@@ -193,7 +205,7 @@ static inline bool transposition_table_is_busy(TranspositionTable *tt,
 static inline void transposition_table_enter_node(TranspositionTable *tt,
                                                   uint64_t zval) {
   uint64_t idx = zval & NPROC_MASK;
-  atomic_fetch_add_explicit(&tt->nproc[idx], 1, memory_order_relaxed);
+  atomic_fetch_add_explicit(&tt->nproc[idx].count, 1, memory_order_relaxed);
 }
 
 // Leave node: decrement nproc counter
@@ -201,7 +213,7 @@ static inline void transposition_table_enter_node(TranspositionTable *tt,
 static inline void transposition_table_leave_node(TranspositionTable *tt,
                                                   uint64_t zval) {
   uint64_t idx = zval & NPROC_MASK;
-  atomic_fetch_sub_explicit(&tt->nproc[idx], 1, memory_order_relaxed);
+  atomic_fetch_sub_explicit(&tt->nproc[idx].count, 1, memory_order_relaxed);
 }
 
 #endif
