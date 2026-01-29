@@ -1,5 +1,6 @@
 #include "wmp_maker.h"
 
+#include "../compat/cpthread.h"
 #include "../def/bit_rack_defs.h"
 #include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
@@ -644,6 +645,397 @@ make_mutable_double_blank_map_from_mwmp(const MutableWordMap *mwmp) {
   return mutable_double_blank_map;
 }
 
+// ============================================================================
+// Parallel construction with preallocation
+// ============================================================================
+// The functions below support parallel construction of blank and double-blank
+// maps by preallocating all memory on the main thread, then having worker
+// threads only write data without calling malloc. This avoids crashes that
+// occur when pthreads call malloc under optimized builds (-O1 or higher).
+
+// For counting unique bit_racks per bucket, we need temporary tracking
+typedef struct BitRackSet {
+  BitRack *racks;
+  uint32_t count;
+  uint32_t capacity;
+} BitRackSet;
+
+static void bit_rack_set_init(BitRackSet *set) {
+  set->count = 0;
+  set->capacity = 8;
+  set->racks = malloc_or_die(sizeof(BitRack) * set->capacity);
+}
+
+static void bit_rack_set_destroy(BitRackSet *set) {
+  free(set->racks);
+}
+
+static bool bit_rack_set_contains(const BitRackSet *set, const BitRack *rack) {
+  for (uint32_t i = 0; i < set->count; i++) {
+    if (bit_rack_equals(&set->racks[i], rack)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static void bit_rack_set_add(BitRackSet *set, const BitRack *rack) {
+  if (!bit_rack_set_contains(set, rack)) {
+    if (set->count == set->capacity) {
+      set->capacity *= 2;
+      set->racks = realloc_or_die(set->racks, sizeof(BitRack) * set->capacity);
+    }
+    set->racks[set->count++] = *rack;
+  }
+}
+
+// Count unique blank entries per bucket from word map
+static void count_blank_entries_from_word_entry(
+    const MutableWordMapEntry *word_entry, uint32_t num_buckets,
+    BitRackSet *bucket_sets) {
+  BitRack bit_rack = entry_get_full_bit_rack(word_entry);
+  for (MachineLetter ml = 1; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+    if (bit_rack_get_letter(&bit_rack, ml) > 0) {
+      bit_rack_take_letter(&bit_rack, ml);
+      bit_rack_add_letter(&bit_rack, BLANK_MACHINE_LETTER);
+      uint32_t bucket_idx = bit_rack_get_bucket_index(&bit_rack, num_buckets);
+      bit_rack_set_add(&bucket_sets[bucket_idx], &bit_rack);
+      bit_rack_take_letter(&bit_rack, BLANK_MACHINE_LETTER);
+      bit_rack_add_letter(&bit_rack, ml);
+    }
+  }
+}
+
+// Preallocate blank map with exact bucket capacities
+static void preallocate_mbfl(MutableBlanksForSameLengthMap *mbfl,
+                             const MutableWordsOfSameLengthMap *mwfl,
+                             int length) {
+  mbfl->num_blank_buckets = next_power_of_2(mwfl->num_word_buckets * length);
+  mbfl->blank_buckets =
+      malloc_or_die(sizeof(MutableBlankMapBucket) * mbfl->num_blank_buckets);
+
+  // Create temporary sets to count unique entries per bucket
+  BitRackSet *bucket_sets =
+      malloc_or_die(sizeof(BitRackSet) * mbfl->num_blank_buckets);
+  for (uint32_t i = 0; i < mbfl->num_blank_buckets; i++) {
+    bit_rack_set_init(&bucket_sets[i]);
+  }
+
+  // Count unique bit_racks per bucket
+  for (uint32_t bucket_idx = 0; bucket_idx < mwfl->num_word_buckets;
+       bucket_idx++) {
+    const MutableWordMapBucket *mwfl_bucket = &mwfl->word_buckets[bucket_idx];
+    for (uint32_t entry_idx = 0; entry_idx < mwfl_bucket->num_entries;
+         entry_idx++) {
+      count_blank_entries_from_word_entry(&mwfl_bucket->entries[entry_idx],
+                                          mbfl->num_blank_buckets, bucket_sets);
+    }
+  }
+
+  // Allocate buckets with exact sizes
+  for (uint32_t i = 0; i < mbfl->num_blank_buckets; i++) {
+    uint32_t capacity = bucket_sets[i].count;
+    if (capacity == 0) {
+      capacity = 1;  // Minimum capacity
+    }
+    mbfl->blank_buckets[i].num_entries = 0;
+    mbfl->blank_buckets[i].capacity = capacity;
+    mbfl->blank_buckets[i].entries =
+        malloc_or_die(sizeof(MutableBlankMapEntry) * capacity);
+    bit_rack_set_destroy(&bucket_sets[i]);
+  }
+  free(bucket_sets);
+}
+
+// No-alloc version of set_blank_map_bit - assumes capacity is sufficient
+static void set_blank_map_bit_no_alloc(MutableBlanksForSameLengthMap *mbfl,
+                                       const BitRack *bit_rack,
+                                       MachineLetter ml) {
+  const uint32_t bucket_index =
+      bit_rack_get_bucket_index(bit_rack, mbfl->num_blank_buckets);
+  MutableBlankMapBucket *bucket = &mbfl->blank_buckets[bucket_index];
+  for (uint32_t entry_idx = 0; entry_idx < bucket->num_entries; entry_idx++) {
+    MutableBlankMapEntry *entry = &bucket->entries[entry_idx];
+    if (bit_rack_equals(&entry->bit_rack, bit_rack)) {
+      entry->blank_letters |= 1U << ml;
+      return;
+    }
+  }
+  // Assert we have capacity (preallocation should ensure this)
+  assert(bucket->num_entries < bucket->capacity);
+  MutableBlankMapEntry *entry = &bucket->entries[bucket->num_entries];
+  entry->bit_rack = *bit_rack;
+  entry->blank_letters = 1U << ml;
+  bucket->num_entries++;
+}
+
+// No-alloc version of insert_blanks_from_word_entry
+static void insert_blanks_from_word_entry_no_alloc(
+    const MutableWordMapEntry *word_entry, MutableBlanksForSameLengthMap *mbfl) {
+  BitRack bit_rack = entry_get_full_bit_rack(word_entry);
+  for (MachineLetter ml = 1; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+    if (bit_rack_get_letter(&bit_rack, ml) > 0) {
+      bit_rack_take_letter(&bit_rack, ml);
+      bit_rack_add_letter(&bit_rack, BLANK_MACHINE_LETTER);
+      set_blank_map_bit_no_alloc(mbfl, &bit_rack, ml);
+      bit_rack_take_letter(&bit_rack, BLANK_MACHINE_LETTER);
+      bit_rack_add_letter(&bit_rack, ml);
+    }
+  }
+}
+
+// Fill preallocated mbfl without any malloc calls
+static void fill_mbfl_from_mwfl_no_alloc(MutableBlanksForSameLengthMap *mbfl,
+                                         const MutableWordsOfSameLengthMap *mwfl) {
+  for (uint32_t bucket_idx = 0; bucket_idx < mwfl->num_word_buckets;
+       bucket_idx++) {
+    const MutableWordMapBucket *mwfl_bucket = &mwfl->word_buckets[bucket_idx];
+    for (uint32_t entry_idx = 0; entry_idx < mwfl_bucket->num_entries;
+         entry_idx++) {
+      insert_blanks_from_word_entry_no_alloc(&mwfl_bucket->entries[entry_idx],
+                                             mbfl);
+    }
+  }
+}
+
+// Preallocate entire blank map
+static void preallocate_blank_map(MutableBlankMap *mbmp,
+                                  const MutableWordMap *mwmp) {
+  for (int len = 2; len <= BOARD_DIM; len++) {
+    preallocate_mbfl(&mbmp->maps[len], &mwmp->maps[len], len);
+  }
+}
+
+// Fill preallocated blank map without malloc
+static void fill_blank_map_no_alloc(MutableBlankMap *mbmp,
+                                    const MutableWordMap *mwmp) {
+  for (int len = 2; len <= BOARD_DIM; len++) {
+    fill_mbfl_from_mwfl_no_alloc(&mbmp->maps[len], &mwmp->maps[len]);
+  }
+}
+
+// Similar structures for double-blank map with letter pair counting
+typedef struct DoubleBlankBucketInfo {
+  BitRackSet bit_rack_set;
+  uint32_t *pair_counts;  // Count of pairs for each unique bit_rack
+} DoubleBlankBucketInfo;
+
+// Count unique double-blank entries and their pair counts per bucket
+static void count_double_blank_entries_from_word_entry(
+    const MutableWordMapEntry *word_entry, uint32_t num_buckets,
+    DoubleBlankBucketInfo *bucket_infos) {
+  BitRack bit_rack = entry_get_full_bit_rack(word_entry);
+  for (MachineLetter ml1 = 1; ml1 < BIT_RACK_MAX_ALPHABET_SIZE; ml1++) {
+    if (bit_rack_get_letter(&bit_rack, ml1) > 0) {
+      bit_rack_take_letter(&bit_rack, ml1);
+      bit_rack_add_letter(&bit_rack, BLANK_MACHINE_LETTER);
+      for (MachineLetter ml2 = ml1; ml2 < BIT_RACK_MAX_ALPHABET_SIZE; ml2++) {
+        if (bit_rack_get_letter(&bit_rack, ml2) > 0) {
+          bit_rack_take_letter(&bit_rack, ml2);
+          bit_rack_add_letter(&bit_rack, BLANK_MACHINE_LETTER);
+          uint32_t bucket_idx =
+              bit_rack_get_bucket_index(&bit_rack, num_buckets);
+          DoubleBlankBucketInfo *info = &bucket_infos[bucket_idx];
+
+          // Check if this bit_rack already exists in this bucket
+          bool found = false;
+          for (uint32_t i = 0; i < info->bit_rack_set.count; i++) {
+            if (bit_rack_equals(&info->bit_rack_set.racks[i], &bit_rack)) {
+              info->pair_counts[i]++;
+              found = true;
+              break;
+            }
+          }
+          if (!found) {
+            // New entry - add to set
+            if (info->bit_rack_set.count == info->bit_rack_set.capacity) {
+              uint32_t new_capacity = info->bit_rack_set.capacity * 2;
+              info->bit_rack_set.racks = realloc_or_die(
+                  info->bit_rack_set.racks, sizeof(BitRack) * new_capacity);
+              info->pair_counts = realloc_or_die(
+                  info->pair_counts, sizeof(uint32_t) * new_capacity);
+              info->bit_rack_set.capacity = new_capacity;
+            }
+            info->bit_rack_set.racks[info->bit_rack_set.count] = bit_rack;
+            info->pair_counts[info->bit_rack_set.count] = 1;
+            info->bit_rack_set.count++;
+          }
+
+          bit_rack_take_letter(&bit_rack, BLANK_MACHINE_LETTER);
+          bit_rack_add_letter(&bit_rack, ml2);
+        }
+      }
+      bit_rack_take_letter(&bit_rack, BLANK_MACHINE_LETTER);
+      bit_rack_add_letter(&bit_rack, ml1);
+    }
+  }
+}
+
+// Preallocate double-blank map with exact sizes
+static void preallocate_mdbfl(MutableDoubleBlanksForSameLengthMap *mdbfl,
+                              const MutableWordsOfSameLengthMap *mwfl,
+                              int length) {
+  mdbfl->num_double_blank_buckets =
+      next_power_of_2(mwfl->num_word_buckets * length);
+  mdbfl->double_blank_buckets = malloc_or_die(
+      sizeof(MutableDoubleBlankMapBucket) * mdbfl->num_double_blank_buckets);
+
+  // Create tracking structures for each bucket
+  DoubleBlankBucketInfo *bucket_infos =
+      malloc_or_die(sizeof(DoubleBlankBucketInfo) * mdbfl->num_double_blank_buckets);
+  for (uint32_t i = 0; i < mdbfl->num_double_blank_buckets; i++) {
+    bucket_infos[i].bit_rack_set.count = 0;
+    bucket_infos[i].bit_rack_set.capacity = 8;
+    bucket_infos[i].bit_rack_set.racks =
+        malloc_or_die(sizeof(BitRack) * 8);
+    bucket_infos[i].pair_counts = malloc_or_die(sizeof(uint32_t) * 8);
+  }
+
+  // Count entries and pairs
+  for (uint32_t bucket_idx = 0; bucket_idx < mwfl->num_word_buckets;
+       bucket_idx++) {
+    const MutableWordMapBucket *mwfl_bucket = &mwfl->word_buckets[bucket_idx];
+    for (uint32_t entry_idx = 0; entry_idx < mwfl_bucket->num_entries;
+         entry_idx++) {
+      count_double_blank_entries_from_word_entry(
+          &mwfl_bucket->entries[entry_idx], mdbfl->num_double_blank_buckets,
+          bucket_infos);
+    }
+  }
+
+  // Allocate buckets and entries with exact sizes
+  for (uint32_t i = 0; i < mdbfl->num_double_blank_buckets; i++) {
+    uint32_t num_entries = bucket_infos[i].bit_rack_set.count;
+    if (num_entries == 0) {
+      num_entries = 1;  // Minimum
+    }
+    MutableDoubleBlankMapBucket *bucket = &mdbfl->double_blank_buckets[i];
+    bucket->num_entries = 0;
+    bucket->capacity = num_entries;
+    bucket->entries =
+        malloc_or_die(sizeof(MutableDoubleBlankMapEntry) * num_entries);
+
+    // Preallocate each entry's letter_pairs list with exact capacity
+    for (uint32_t j = 0; j < bucket_infos[i].bit_rack_set.count; j++) {
+      uint32_t pair_count = bucket_infos[i].pair_counts[j];
+      bucket->entries[j].letter_pairs =
+          dictionary_word_list_create_with_capacity(pair_count);
+    }
+
+    // Clean up tracking
+    free(bucket_infos[i].bit_rack_set.racks);
+    free(bucket_infos[i].pair_counts);
+  }
+  free(bucket_infos);
+}
+
+// No-alloc version of mutable_double_blank_map_bucket_insert_pair
+// Note: We still need the DictionaryWordList add, but it's preallocated
+static void double_blank_bucket_insert_pair_no_alloc(
+    MutableDoubleBlankMapBucket *bucket, const BitRack *bit_rack,
+    const MachineLetter *blanks_as_word) {
+  for (uint32_t i = 0; i < bucket->num_entries; i++) {
+    MutableDoubleBlankMapEntry *entry = &bucket->entries[i];
+    if (bit_rack_equals(&entry->bit_rack, bit_rack)) {
+      dictionary_word_list_add_word(entry->letter_pairs, blanks_as_word, 2);
+      return;
+    }
+  }
+  // New entry - use preallocated slot
+  assert(bucket->num_entries < bucket->capacity);
+  MutableDoubleBlankMapEntry *entry = &bucket->entries[bucket->num_entries];
+  entry->bit_rack = *bit_rack;
+  // letter_pairs was preallocated in preallocate_mdbfl
+  dictionary_word_list_add_word(entry->letter_pairs, blanks_as_word, 2);
+  bucket->num_entries++;
+}
+
+// No-alloc version of insert_double_blanks_from_word_entry
+static void insert_double_blanks_from_word_entry_no_alloc(
+    const MutableWordMapEntry *word_entry,
+    MutableDoubleBlanksForSameLengthMap *mdbfl) {
+  BitRack bit_rack = entry_get_full_bit_rack(word_entry);
+  MachineLetter blanks_as_word[2];
+  for (MachineLetter ml1 = 1; ml1 < BIT_RACK_MAX_ALPHABET_SIZE; ml1++) {
+    if (bit_rack_get_letter(&bit_rack, ml1) > 0) {
+      bit_rack_take_letter(&bit_rack, ml1);
+      bit_rack_add_letter(&bit_rack, BLANK_MACHINE_LETTER);
+      blanks_as_word[0] = ml1;
+      for (MachineLetter ml2 = ml1; ml2 < BIT_RACK_MAX_ALPHABET_SIZE; ml2++) {
+        if (bit_rack_get_letter(&bit_rack, ml2) > 0) {
+          bit_rack_take_letter(&bit_rack, ml2);
+          bit_rack_add_letter(&bit_rack, BLANK_MACHINE_LETTER);
+          blanks_as_word[1] = ml2;
+          uint32_t bucket_index = bit_rack_get_bucket_index(
+              &bit_rack, mdbfl->num_double_blank_buckets);
+          MutableDoubleBlankMapBucket *bucket =
+              &mdbfl->double_blank_buckets[bucket_index];
+          double_blank_bucket_insert_pair_no_alloc(bucket, &bit_rack,
+                                                   blanks_as_word);
+          bit_rack_take_letter(&bit_rack, BLANK_MACHINE_LETTER);
+          bit_rack_add_letter(&bit_rack, ml2);
+        }
+      }
+      bit_rack_take_letter(&bit_rack, BLANK_MACHINE_LETTER);
+      bit_rack_add_letter(&bit_rack, ml1);
+    }
+  }
+}
+
+// Fill preallocated mdbfl without malloc
+static void fill_mdbfl_from_mwfl_no_alloc(
+    MutableDoubleBlanksForSameLengthMap *mdbfl,
+    const MutableWordsOfSameLengthMap *mwfl) {
+  for (uint32_t bucket_idx = 0; bucket_idx < mwfl->num_word_buckets;
+       bucket_idx++) {
+    const MutableWordMapBucket *mwfl_bucket = &mwfl->word_buckets[bucket_idx];
+    for (uint32_t entry_idx = 0; entry_idx < mwfl_bucket->num_entries;
+         entry_idx++) {
+      insert_double_blanks_from_word_entry_no_alloc(
+          &mwfl_bucket->entries[entry_idx], mdbfl);
+    }
+  }
+}
+
+// Preallocate entire double-blank map
+static void preallocate_double_blank_map(MutableDoubleBlankMap *mdbmp,
+                                         const MutableWordMap *mwmp) {
+  for (int len = 2; len <= BOARD_DIM; len++) {
+    preallocate_mdbfl(&mdbmp->maps[len], &mwmp->maps[len], len);
+  }
+}
+
+// Fill preallocated double-blank map without malloc
+static void fill_double_blank_map_no_alloc(MutableDoubleBlankMap *mdbmp,
+                                           const MutableWordMap *mwmp) {
+  for (int len = 2; len <= BOARD_DIM; len++) {
+    fill_mdbfl_from_mwfl_no_alloc(&mdbmp->maps[len], &mwmp->maps[len]);
+  }
+}
+
+// Thread worker functions for parallel filling
+typedef struct BlankMapFillArgs {
+  MutableBlankMap *mbmp;
+  const MutableWordMap *mwmp;
+} BlankMapFillArgs;
+
+typedef struct DoubleBlankMapFillArgs {
+  MutableDoubleBlankMap *mdbmp;
+  const MutableWordMap *mwmp;
+} DoubleBlankMapFillArgs;
+
+static void *fill_blank_map_thread(void *arg) {
+  BlankMapFillArgs *args = (BlankMapFillArgs *)arg;
+  fill_blank_map_no_alloc(args->mbmp, args->mwmp);
+  return NULL;
+}
+
+static void *fill_double_blank_map_thread(void *arg) {
+  DoubleBlankMapFillArgs *args = (DoubleBlankMapFillArgs *)arg;
+  fill_double_blank_map_no_alloc(args->mdbmp, args->mwmp);
+  return NULL;
+}
+
 void mutable_word_map_destroy(MutableWordMap *mwmp) {
   for (int len = 2; len <= BOARD_DIM; len++) {
     MutableWordsOfSameLengthMap *mwfl = &mwmp->maps[len];
@@ -898,8 +1290,26 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
     return NULL;
   }
   MutableWordMap *mwmp = make_mwmp_from_words(words);
-  MutableBlankMap *mbmp = make_mutable_blank_map_from_mwmp(mwmp);
-  MutableDoubleBlankMap *mdbmp = make_mutable_double_blank_map_from_mwmp(mwmp);
+
+  // Preallocate blank map and double-blank map on main thread
+  // This counts exact sizes needed and allocates all memory upfront
+  MutableBlankMap *mbmp = malloc_or_die(sizeof(MutableBlankMap));
+  MutableDoubleBlankMap *mdbmp = malloc_or_die(sizeof(MutableDoubleBlankMap));
+
+  preallocate_blank_map(mbmp, mwmp);
+  preallocate_double_blank_map(mdbmp, mwmp);
+
+  // Fill the preallocated maps in parallel - threads only write, no malloc
+  cpthread_t blank_thread, double_blank_thread;
+  BlankMapFillArgs blank_args = {.mbmp = mbmp, .mwmp = mwmp};
+  DoubleBlankMapFillArgs double_blank_args = {.mdbmp = mdbmp, .mwmp = mwmp};
+
+  cpthread_create(&blank_thread, fill_blank_map_thread, &blank_args);
+  cpthread_create(&double_blank_thread, fill_double_blank_map_thread,
+                  &double_blank_args);
+
+  cpthread_join(blank_thread);
+  cpthread_join(double_blank_thread);
 
   MutableWordMap *resized_mwmp = resize_mutable_word_map(mwmp);
   mutable_word_map_destroy(mwmp);
