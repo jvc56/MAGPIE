@@ -38,10 +38,14 @@ bool rack_is_drawable(const Game *game, int player_index,
 Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack);
 void return_phony_letters(Game *game);
 
+// Cross-set update for move affected squares
+void update_cross_set_for_move(const Move *move, const Game *game);
+
 // Incremental play/unplay functions for endgame solver optimization
 void play_move_incremental(const Move *move, Game *game, MoveUndo *undo);
-void unplay_move_incremental(const MoveUndo *undo, Game *game);
-void restore_cross_sets_from_undo(const MoveUndo *undo, Game *game);
+void unplay_move_incremental(Game *game, const MoveUndo *undo);
+void play_move_endgame_outplay(const Move *move, Game *game, MoveUndo *undo);
+void update_cross_sets_after_unplay(const Move *move, Game *game);
 
 void game_play_n_events(GameHistory *game_history, Game *game, int event_index,
                         bool validate, ErrorStack *error_stack);

@@ -468,14 +468,29 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
     //          small_move->metadata);
 
     const Rack *stm_rack = player_get_rack(player_on_turn);
+    const int stm_rack_tiles = rack_get_total_letters(stm_rack);
+    const bool is_outplay =
+        small_move_get_tiles_played(small_move) == stm_rack_tiles;
 
     int last_consecutive_scoreless_turns =
         game_get_consecutive_scoreless_turns(worker->game_copy);
-    // TODO: Use incremental play/unplay once bugs are fixed
-    // MoveUndo *undo = &worker->move_undos[worker->undo_depth++];
-    // play_move_incremental(worker->move_list->spare_move, worker->game_copy,
-    //                       undo);
-    play_move(worker->move_list->spare_move, worker->game_copy, NULL);
+
+    // Calculate undo index for incremental backup
+    int undo_index = worker->solver->requested_plies - depth;
+
+    // Use optimized function for outplays - skips board/cross-set updates
+    if (is_outplay) {
+      play_move_endgame_outplay(worker->move_list->spare_move,
+                                worker->game_copy,
+                                &worker->move_undos[undo_index]);
+    } else {
+      play_move_incremental(worker->move_list->spare_move, worker->game_copy,
+                            &worker->move_undos[undo_index]);
+      // Update cross-sets for the affected squares
+      update_cross_set_for_move(worker->move_list->spare_move,
+                                worker->game_copy);
+      board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
+    }
 
     // Implementation is currently single-threaded. Keep counts per worker if we
     // want to keep doing this when we have multiple threads.
@@ -504,11 +519,20 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
                         pv_node);
       }
     }
-    // TODO: Use incremental play/unplay once bugs are fixed
-    // worker->undo_depth--;
-    // unplay_move_incremental(&worker->move_undos[worker->undo_depth],
-    //                         worker->game_copy);
-    game_unplay_last_move(worker->game_copy);
+    unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_index]);
+
+    // After unplay, regenerate cross-sets for affected squares (if not an outplay)
+    // This restores the parent cross-sets. We use update_cross_sets_after_unplay
+    // which doesn't rely on board_get_word_edge (which needs tiles to be on board).
+    if (!is_outplay) {
+      // Reconstruct the move from small_move (spare_move was overwritten by recursive calls)
+      SmallMove *unplay_small_move =
+          (SmallMove *)(worker->small_move_arena->memory + element_offset);
+      small_move_to_move(worker->move_list->spare_move, unplay_small_move,
+                         game_get_board(worker->game_copy));
+      update_cross_sets_after_unplay(worker->move_list->spare_move,
+                                     worker->game_copy);
+    }
 
     // log_warn("%sNow unplayed %d, %s (tm:%x meta:%x)", spaces, idx,
     //          string_builder_peek(move_description), small_move->tiny_move,
