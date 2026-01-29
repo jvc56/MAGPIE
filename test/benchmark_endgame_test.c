@@ -144,25 +144,103 @@ static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
   move_list_destroy(move_list);
 }
 
-void test_benchmark_endgame(void) {
-  log_set_level(LOG_WARN); // Allow warnings to show diagnostics
+static void run_single_endgame_timed(Config *config, EndgameSolver *solver,
+                                     Game *game, int ply, double *elapsed_out) {
+  Timer timer;
+  ctimer_start(&timer);
+  EndgameArgs args = {.game = game,
+                      .thread_control = config_get_thread_control(config),
+                      .plies = ply,
+                      .tt_fraction_of_mem = 0.05,
+                      .initial_small_move_arena_size =
+                          DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                      .per_ply_callback = NULL,
+                      .per_ply_callback_data = NULL};
+  EndgameResults *results = config_get_endgame_results(config);
+  ErrorStack *err = error_stack_create();
+  endgame_solve(solver, &args, results, err);
+  *elapsed_out = ctimer_elapsed_seconds(&timer);
+  assert(error_stack_is_empty(err));
+  error_stack_destroy(err);
+}
 
-  const int num_games = 100;
-  const int ply = 3;
+void test_benchmark_endgame(void) {
+  log_set_level(LOG_FATAL); // Suppress warnings for cleaner output
+
+  const int num_games = 3;
   const uint64_t base_seed = 0;
 
   Config *config = config_create_or_die(
       "set -lex CSW21 -threads 8 -s1 score -s2 score -r1 small -r2 small");
 
   EndgameSolver *solver = endgame_solver_create();
+  MoveList *move_list = move_list_create(1);
 
-  printf("\n");
-  printf("==============================================\n");
-  printf("  Endgame Benchmark: %d games, %d-ply\n", num_games, ply);
-  printf("==============================================\n");
+  // Create the initial game
+  ErrorStack *error_stack = error_stack_create();
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  config_load_command(config, "new", error_stack);
+  config_execute_command(config, error_stack);
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_FINISHED);
+  error_stack_destroy(error_stack);
 
-  run_endgames_with_timing(config, solver, num_games, ply, base_seed);
+  Game *game = config_get_game(config);
 
+  // Find 3 valid endgame seeds
+  uint64_t valid_seeds[3];
+  int found = 0;
+  for (uint64_t seed = base_seed; found < num_games; seed++) {
+    game_reset(game);
+    game_seed(game, seed);
+    draw_starting_racks(game);
+
+    // Play until bag empty
+    bool valid = true;
+    while (bag_get_letters(game_get_bag(game)) > 0) {
+      const Move *move = get_top_equity_move(game, 0, move_list);
+      play_move(move, game, NULL);
+      if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
+        valid = false;
+        break;
+      }
+    }
+    if (!valid) continue;
+
+    const Rack *rack0 = player_get_rack(game_get_player(game, 0));
+    const Rack *rack1 = player_get_rack(game_get_player(game, 1));
+    if (rack_is_empty(rack0) || rack_is_empty(rack1)) continue;
+
+    valid_seeds[found++] = seed;
+  }
+
+  printf("\nPly depth benchmark (3 games, seeds: %lu, %lu, %lu)\n",
+         valid_seeds[0], valid_seeds[1], valid_seeds[2]);
+  printf("Ply,Total(s)\n");
+
+  // Run each ply depth
+  for (int ply = 1; ply <= 10; ply++) {
+    double total_time = 0;
+    for (int g = 0; g < num_games; g++) {
+      // Recreate the endgame position
+      game_reset(game);
+      game_seed(game, valid_seeds[g]);
+      draw_starting_racks(game);
+      while (bag_get_letters(game_get_bag(game)) > 0) {
+        const Move *move = get_top_equity_move(game, 0, move_list);
+        play_move(move, game, NULL);
+      }
+
+      double elapsed;
+      run_single_endgame_timed(config, solver, game, ply, &elapsed);
+      total_time += elapsed;
+    }
+    printf("%d,%.3f\n", ply, total_time);
+    fflush(stdout);
+  }
+
+  move_list_destroy(move_list);
   endgame_solver_destroy(solver);
   config_destroy(config);
 }
