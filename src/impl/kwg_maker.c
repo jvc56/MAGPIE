@@ -652,33 +652,6 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   return kwg;
 }
 
-// Helper to get the next prime >= n for hash table sizing
-static uint64_t next_prime(uint64_t n) {
-  if (n <= 2) {
-    return 2;
-  }
-  if (n <= 3) {
-    return 3;
-  }
-  // Simple primality check for small numbers
-  if (n % 2 == 0) {
-    n++;
-  }
-  for (;;) {
-    bool is_prime = true;
-    for (uint64_t i = 3; i * i <= n; i += 2) {
-      if (n % i == 0) {
-        is_prime = false;
-        break;
-      }
-    }
-    if (is_prime) {
-      return n;
-    }
-    n += 2;
-  }
-}
-
 // Optimized version for small dictionaries (endgame wordprune case).
 // Uses appropriately sized data structures based on word count.
 //
@@ -715,9 +688,6 @@ KWG *make_kwg_from_words_small(const DictionaryWordList *words,
       output_gaddag ? (size_t)words_count * 7 : 0;
   const size_t estimated_nodes =
       (size_t)words_count * 12 + 100; // +100 for safety margin
-
-  // Use a smaller hash table - prime number close to estimated node count
-  const size_t hash_buckets = next_prime(estimated_nodes);
 
   // Create appropriately sized node list
   MutableNodeList *nodes =
@@ -770,6 +740,8 @@ KWG *make_kwg_from_words_small(const DictionaryWordList *words,
   if (merging == KWG_MAKER_MERGE_EXACT) {
     calculate_node_hash_values(nodes);
 
+    // Chained hash table with appropriately sized buckets
+    const size_t hash_buckets = estimated_nodes * 2 + 1;
     NodeHashTable table;
     node_hash_table_create_small(&table, nodes->count, hash_buckets);
     const size_t count = nodes->count;
