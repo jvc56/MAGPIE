@@ -25,7 +25,7 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
                                 const char *output_name,
                                 DictionaryWordList *strings,
                                 ConversionResults *conversion_results,
-                                ErrorStack *error_stack) {
+                                int num_threads, ErrorStack *error_stack) {
 
   char *input_filename = data_filepaths_get_readable_filename(
       data_paths, input_name, DATA_FILEPATH_TYPE_LEXICON, error_stack);
@@ -99,7 +99,7 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
-    WMP *wmp = make_wmp_from_words(strings, ld);
+    WMP *wmp = make_wmp_from_words(strings, ld, num_threads);
     wmp_write_to_file(wmp, wmp_output_filename, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       error_stack_push(
@@ -141,7 +141,7 @@ void convert_with_names(const LetterDistribution *ld,
                         conversion_type_t conversion_type,
                         const char *data_paths, const char *input_name,
                         const char *output_name,
-                        ConversionResults *conversion_results,
+                        ConversionResults *conversion_results, int num_threads,
                         ErrorStack *error_stack) {
   if ((conversion_type == CONVERT_TEXT2DAWG) ||
       (conversion_type == CONVERT_TEXT2GADDAG) ||
@@ -150,7 +150,7 @@ void convert_with_names(const LetterDistribution *ld,
     DictionaryWordList *strings = dictionary_word_list_create();
     convert_from_text_with_dwl(ld, conversion_type, data_paths, input_name,
                                output_name, strings, conversion_results,
-                               error_stack);
+                               num_threads, error_stack);
     dictionary_word_list_destroy(strings);
   } else if (conversion_type == CONVERT_DAWG2TEXT) {
     KWG *kwg = kwg_create(data_paths, input_name, error_stack);
@@ -243,6 +243,6 @@ void convert(const ConversionArgs *args, ConversionResults *conversion_results,
 
   convert_with_names(ld, conversion_type, args->data_paths,
                      args->input_and_output_name, args->input_and_output_name,
-                     conversion_results, error_stack);
+                     conversion_results, args->num_threads, error_stack);
   ld_destroy(ld);
 }

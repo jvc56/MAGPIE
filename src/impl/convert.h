@@ -11,6 +11,7 @@ typedef struct ConversionArgs {
   const char *data_paths;
   const char *input_and_output_name;
   const char *ld_name;
+  int num_threads;
 } ConversionArgs;
 
 void convert(const ConversionArgs *args, ConversionResults *conversion_results,

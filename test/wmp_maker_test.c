@@ -45,7 +45,7 @@ void test_make_wmp_from_words(void) {
   }
   dictionary_word_list_destroy(words);
 
-  WMP *wmp = make_wmp_from_words(q_words_2to8, ld);
+  WMP *wmp = make_wmp_from_words(q_words_2to8, ld, 0);
   assert(wmp != NULL);
   assert(wmp->version == WMP_VERSION);
   assert(wmp->board_dim == BOARD_DIM);

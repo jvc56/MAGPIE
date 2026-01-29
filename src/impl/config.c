@@ -2257,6 +2257,7 @@ void config_fill_conversion_args(const Config *config, ConversionArgs *args) {
   args->input_and_output_name =
       config_get_parg_value(config, ARG_TOKEN_CONVERT, 1);
   args->ld_name = config_get_parg_value(config, ARG_TOKEN_CONVERT, 2);
+  args->num_threads = config_get_num_threads(config);
 }
 
 void config_convert(const Config *config, ConversionResults *results,
