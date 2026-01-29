@@ -911,6 +911,10 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
     return NULL;
   }
   MutableWordMap *mwmp = make_mwmp_from_words(words);
+
+  // Build blank map and double-blank map sequentially
+  // (Parallel execution crashes with optimized builds due to malloc/thread
+  // interaction issues)
   MutableBlankMap *mbmp = make_mutable_blank_map_from_mwmp(mwmp);
   MutableDoubleBlankMap *mdbmp = make_mutable_double_blank_map_from_mwmp(mwmp);
 
