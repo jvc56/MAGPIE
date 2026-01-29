@@ -41,6 +41,9 @@ typedef struct Board {
   int tiles_played;
   // Start coordinates used to reset the board
   int start_coords[2];
+  // Flag for lazy cross-set evaluation in endgame solver.
+  // When false, cross-sets need to be recalculated before move generation.
+  bool cross_sets_valid;
 } Board;
 
 // Square: Letter
@@ -458,6 +461,21 @@ static inline void board_increment_tiles_played(Board *board,
   board->tiles_played += tiles_played;
 }
 
+static inline void board_set_tiles_played(Board *board, int tiles_played) {
+  board->tiles_played = tiles_played;
+}
+
+// Board: cross_sets_valid
+
+static inline bool board_get_cross_sets_valid(const Board *board) {
+  return board->cross_sets_valid;
+}
+
+static inline void board_set_cross_sets_valid(Board *board,
+                                              bool cross_sets_valid) {
+  board->cross_sets_valid = cross_sets_valid;
+}
+
 // Board auxilllary functions
 
 static inline int board_get_cross_set_index(bool kwgs_are_shared,
@@ -674,6 +692,7 @@ static inline void board_reset(Board *board) {
   // it is used to calculate the index for board_set_letter.
   board->tiles_played = 0;
   board->transposed = 0;
+  board->cross_sets_valid = true;
 
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {

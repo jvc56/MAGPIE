@@ -47,6 +47,7 @@ bool game_get_data_is_shared(const Game *game,
                              players_data_t players_data_type);
 
 void game_set_consecutive_scoreless_turns(Game *game, int value);
+void game_set_player_on_turn_index(Game *game, int player_index);
 int game_get_max_scoreless_turns(const Game *game);
 bool game_reached_max_scoreless_turns(const Game *game);
 void game_increment_consecutive_scoreless_turns(Game *game);

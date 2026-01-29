@@ -127,6 +127,16 @@ void bag_destroy(Bag *bag) {
 
 bool bag_is_empty(const Bag *bag) { return bag_get_letters(bag) == 0; }
 
+int bag_get_start_tile_index(const Bag *bag) { return bag->start_tile_index; }
+
+void bag_set_start_tile_index(Bag *bag, int index) {
+  bag->start_tile_index = index;
+}
+
+int bag_get_end_tile_index(const Bag *bag) { return bag->end_tile_index; }
+
+void bag_set_end_tile_index(Bag *bag, int index) { bag->end_tile_index = index; }
+
 // This assumes the bag is shuffled and nonempty.
 // The player index is used to determine which side
 // of the bag the player draws from.
