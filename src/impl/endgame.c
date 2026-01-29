@@ -88,7 +88,6 @@ typedef struct EndgameSolverWorker {
   int current_iterative_deepening_depth;
   // Array of MoveUndo structures for incremental play/unplay
   MoveUndo move_undos[MAX_SEARCH_DEPTH];
-  int undo_depth;
 } EndgameSolverWorker;
 
 #ifndef MAX
@@ -252,7 +251,8 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
       create_arena(solver->initial_small_move_arena_size, 16);
 
   solver_worker->solver = solver;
-  solver_worker->undo_depth = 0;
+  // Zero-initialize move_undos to prevent undefined behavior from stale values
+  memset(solver_worker->move_undos, 0, sizeof(solver_worker->move_undos));
 
   return solver_worker;
 }

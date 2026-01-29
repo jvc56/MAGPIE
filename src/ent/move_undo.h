@@ -26,8 +26,9 @@ typedef struct MoveUndo {
   SquareChange square_changes[MAX_UNDO_SQUARE_CHANGES];
 
   // Bitmap to track which square indices have been saved (avoid duplicates)
-  // Board has 2*2*BOARD_DIM*BOARD_DIM squares = 900 for 15x15
-  // We use a bitmap: 900/64 = ~15 uint64_t words (round up to 16)
+  // Board has 2*2*BOARD_DIM*BOARD_DIM squares (e.g. 900 for BOARD_DIM=15)
+  // We use a bitmap: ceil(num_squares / 64) uint64_t words (e.g. 15 for 900).
+  // The +63 in the expression ensures proper rounding up to the next 64-bit word.
   uint64_t saved_squares_bitmap[(2 * 2 * BOARD_DIM * BOARD_DIM + 63) / 64];
 
   // Board scalar state
@@ -68,6 +69,7 @@ typedef struct MoveUndo {
 static inline void move_undo_reset(MoveUndo *undo) {
   undo->num_square_changes = 0;
   undo->num_tiles_drawn = 0;
+  undo->move_tiles_length = 0;
   memset(undo->saved_squares_bitmap, 0, sizeof(undo->saved_squares_bitmap));
 }
 
