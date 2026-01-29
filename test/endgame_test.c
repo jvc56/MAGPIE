@@ -284,12 +284,31 @@ void test_eldar_v_stick_16_threads(void) {
       16, 72, false);
 }
 
-// Compare 1-thread vs 16-thread on pass_first (8-ply) and very_deep (25-ply)
+// Compare 1-thread vs 16-thread on all fast endgames from main branch
 void test_abdada_comparison(void) {
   printf("\n=== ABDADA Comparison: 1 thread vs 16 threads ===\n");
 
+  // solve_standard: 4-ply NWL20
+  printf("\n--- solve_standard (4-ply NWL20) with 1 thread ---\n");
+  test_single_endgame_multithreaded(
+      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 4",
+      "cgp "
+      "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20",
+      1, 11, false);
+
+  printf("\n--- solve_standard (4-ply NWL20) with 16 threads ---\n");
+  test_single_endgame_multithreaded(
+      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 4",
+      "cgp "
+      "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20",
+      16, 11, false);
+
   // pass_first: 8-ply CSW21
-  printf("\n--- pass_first (8-ply) with 1 thread ---\n");
+  printf("\n--- pass_first (8-ply CSW21) with 1 thread ---\n");
   test_single_endgame_multithreaded(
       "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 8",
       "cgp "
@@ -298,7 +317,7 @@ void test_abdada_comparison(void) {
       "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW21",
       1, -60, true);
 
-  printf("\n--- pass_first (8-ply) with 16 threads ---\n");
+  printf("\n--- pass_first (8-ply CSW21) with 16 threads ---\n");
   test_single_endgame_multithreaded(
       "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 8",
       "cgp "
@@ -308,7 +327,7 @@ void test_abdada_comparison(void) {
       16, -60, true);
 
   // very_deep: 25-ply CSW21
-  printf("\n--- very_deep (25-ply) with 1 thread ---\n");
+  printf("\n--- very_deep (25-ply CSW21) with 1 thread ---\n");
   test_single_endgame_multithreaded(
       "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 25",
       "cgp "
@@ -317,7 +336,7 @@ void test_abdada_comparison(void) {
       "GUR2WIRER5/SNEEZED8 ADENOOO/AHIILMM 353/236 0 -lex CSW21;",
       1, -116, true);
 
-  printf("\n--- very_deep (25-ply) with 16 threads ---\n");
+  printf("\n--- very_deep (25-ply CSW21) with 16 threads ---\n");
   test_single_endgame_multithreaded(
       "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 25",
       "cgp "
