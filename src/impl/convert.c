@@ -141,8 +141,8 @@ void convert_with_names(const LetterDistribution *ld,
                         conversion_type_t conversion_type,
                         const char *data_paths, const char *input_name,
                         const char *output_name,
-                        ConversionResults *conversion_results,
-                        int num_threads, ErrorStack *error_stack) {
+                        ConversionResults *conversion_results, int num_threads,
+                        ErrorStack *error_stack) {
   if ((conversion_type == CONVERT_TEXT2DAWG) ||
       (conversion_type == CONVERT_TEXT2GADDAG) ||
       (conversion_type == CONVERT_TEXT2KWG) ||

@@ -23,7 +23,8 @@
 
 // Round up to next power of 2
 static inline uint32_t next_power_of_2(uint32_t n) {
-  if (n == 0) return 1;
+  if (n == 0)
+    return 1;
   n--;
   n |= n >> 1;
   n |= n >> 2;
@@ -53,11 +54,13 @@ static inline uint32_t bit_rack_get_letter_mask(const BitRack *bit_rack) {
   uint64_t high = bit_rack_get_high_64(bit_rack);
   uint32_t mask = 0;
   for (int i = 0; i < 16; i++) {
-    if (low & 0xF) mask |= 1U << i;
+    if (low & 0xF)
+      mask |= 1U << i;
     low >>= 4;
   }
   for (int i = 0; i < 16; i++) {
-    if (high & 0xF) mask |= 1U << (i + 16);
+    if (high & 0xF)
+      mask |= 1U << (i + 16);
     high >>= 4;
   }
   return mask;
@@ -96,13 +99,14 @@ typedef struct BlankPair {
 
 typedef struct DoubleBlankPair {
   BitRack bit_rack;
-  uint16_t packed_pair;  // ml1 | (ml2 << 8)
+  uint16_t packed_pair; // ml1 | (ml2 << 8)
 } DoubleBlankPair;
 
 // All pair types have the same size (24 bytes with alignment)
 // This allows buffer reuse across phases
 _Static_assert(sizeof(WordPair) == sizeof(BlankPair), "Pair sizes must match");
-_Static_assert(sizeof(WordPair) >= sizeof(DoubleBlankPair), "WordPair must be >= DoubleBlankPair");
+_Static_assert(sizeof(WordPair) >= sizeof(DoubleBlankPair),
+               "WordPair must be >= DoubleBlankPair");
 
 // ============================================================================
 // Radix sort implementations with prefetching
@@ -113,7 +117,7 @@ _Static_assert(sizeof(WordPair) >= sizeof(DoubleBlankPair), "WordPair must be >=
 // ============================================================================
 
 static void radix_pass_word_pairs(WordPair *src, WordPair *dst, uint32_t count,
-                                   int byte_idx) {
+                                  int byte_idx) {
   uint32_t counts[256] = {0};
 
   // Count phase with prefetching
@@ -125,7 +129,8 @@ static void radix_pass_word_pairs(WordPair *src, WordPair *dst, uint32_t count,
     if (byte_idx < 8) {
       byte = (bit_rack_get_low_64(&src[i].bit_rack) >> (byte_idx * 8)) & 0xFF;
     } else {
-      byte = (bit_rack_get_high_64(&src[i].bit_rack) >> ((byte_idx - 8) * 8)) & 0xFF;
+      byte = (bit_rack_get_high_64(&src[i].bit_rack) >> ((byte_idx - 8) * 8)) &
+             0xFF;
     }
     counts[byte]++;
   }
@@ -147,15 +152,17 @@ static void radix_pass_word_pairs(WordPair *src, WordPair *dst, uint32_t count,
     if (byte_idx < 8) {
       byte = (bit_rack_get_low_64(&src[i].bit_rack) >> (byte_idx * 8)) & 0xFF;
     } else {
-      byte = (bit_rack_get_high_64(&src[i].bit_rack) >> ((byte_idx - 8) * 8)) & 0xFF;
+      byte = (bit_rack_get_high_64(&src[i].bit_rack) >> ((byte_idx - 8) * 8)) &
+             0xFF;
     }
     dst[counts[byte]++] = src[i];
   }
 }
 
-static void radix_sort_word_pairs(WordPair *pairs, WordPair *temp, uint32_t count,
-                                   int num_passes) {
-  if (count <= 1) return;
+static void radix_sort_word_pairs(WordPair *pairs, WordPair *temp,
+                                  uint32_t count, int num_passes) {
+  if (count <= 1)
+    return;
   for (int pass = 0; pass < num_passes; pass++) {
     if (pass % 2 == 0) {
       radix_pass_word_pairs(pairs, temp, count, pass);
@@ -169,8 +176,8 @@ static void radix_sort_word_pairs(WordPair *pairs, WordPair *temp, uint32_t coun
   }
 }
 
-static void radix_pass_blank_pairs(BlankPair *src, BlankPair *dst, uint32_t count,
-                                    int byte_idx) {
+static void radix_pass_blank_pairs(BlankPair *src, BlankPair *dst,
+                                   uint32_t count, int byte_idx) {
   uint32_t counts[256] = {0};
 
   for (uint32_t i = 0; i < count; i++) {
@@ -181,7 +188,8 @@ static void radix_pass_blank_pairs(BlankPair *src, BlankPair *dst, uint32_t coun
     if (byte_idx < 8) {
       byte = (bit_rack_get_low_64(&src[i].bit_rack) >> (byte_idx * 8)) & 0xFF;
     } else {
-      byte = (bit_rack_get_high_64(&src[i].bit_rack) >> ((byte_idx - 8) * 8)) & 0xFF;
+      byte = (bit_rack_get_high_64(&src[i].bit_rack) >> ((byte_idx - 8) * 8)) &
+             0xFF;
     }
     counts[byte]++;
   }
@@ -201,15 +209,17 @@ static void radix_pass_blank_pairs(BlankPair *src, BlankPair *dst, uint32_t coun
     if (byte_idx < 8) {
       byte = (bit_rack_get_low_64(&src[i].bit_rack) >> (byte_idx * 8)) & 0xFF;
     } else {
-      byte = (bit_rack_get_high_64(&src[i].bit_rack) >> ((byte_idx - 8) * 8)) & 0xFF;
+      byte = (bit_rack_get_high_64(&src[i].bit_rack) >> ((byte_idx - 8) * 8)) &
+             0xFF;
     }
     dst[counts[byte]++] = src[i];
   }
 }
 
-static void radix_sort_blank_pairs(BlankPair *pairs, BlankPair *temp, uint32_t count,
-                                    int num_passes) {
-  if (count <= 1) return;
+static void radix_sort_blank_pairs(BlankPair *pairs, BlankPair *temp,
+                                   uint32_t count, int num_passes) {
+  if (count <= 1)
+    return;
   for (int pass = 0; pass < num_passes; pass++) {
     if (pass % 2 == 0) {
       radix_pass_blank_pairs(pairs, temp, count, pass);
@@ -223,8 +233,9 @@ static void radix_sort_blank_pairs(BlankPair *pairs, BlankPair *temp, uint32_t c
   }
 }
 
-static void radix_pass_double_blank_pairs(DoubleBlankPair *src, DoubleBlankPair *dst,
-                                           uint32_t count, int byte_idx) {
+static void radix_pass_double_blank_pairs(DoubleBlankPair *src,
+                                          DoubleBlankPair *dst, uint32_t count,
+                                          int byte_idx) {
   uint32_t counts[256] = {0};
 
   for (uint32_t i = 0; i < count; i++) {
@@ -235,9 +246,11 @@ static void radix_pass_double_blank_pairs(DoubleBlankPair *src, DoubleBlankPair 
     if (byte_idx < 2) {
       byte = (src[i].packed_pair >> (byte_idx * 8)) & 0xFF;
     } else if (byte_idx < 10) {
-      byte = (bit_rack_get_low_64(&src[i].bit_rack) >> ((byte_idx - 2) * 8)) & 0xFF;
+      byte = (bit_rack_get_low_64(&src[i].bit_rack) >> ((byte_idx - 2) * 8)) &
+             0xFF;
     } else {
-      byte = (bit_rack_get_high_64(&src[i].bit_rack) >> ((byte_idx - 10) * 8)) & 0xFF;
+      byte = (bit_rack_get_high_64(&src[i].bit_rack) >> ((byte_idx - 10) * 8)) &
+             0xFF;
     }
     counts[byte]++;
   }
@@ -257,17 +270,21 @@ static void radix_pass_double_blank_pairs(DoubleBlankPair *src, DoubleBlankPair 
     if (byte_idx < 2) {
       byte = (src[i].packed_pair >> (byte_idx * 8)) & 0xFF;
     } else if (byte_idx < 10) {
-      byte = (bit_rack_get_low_64(&src[i].bit_rack) >> ((byte_idx - 2) * 8)) & 0xFF;
+      byte = (bit_rack_get_low_64(&src[i].bit_rack) >> ((byte_idx - 2) * 8)) &
+             0xFF;
     } else {
-      byte = (bit_rack_get_high_64(&src[i].bit_rack) >> ((byte_idx - 10) * 8)) & 0xFF;
+      byte = (bit_rack_get_high_64(&src[i].bit_rack) >> ((byte_idx - 10) * 8)) &
+             0xFF;
     }
     dst[counts[byte]++] = src[i];
   }
 }
 
-static void radix_sort_double_blank_pairs(DoubleBlankPair *pairs, DoubleBlankPair *temp,
-                                           uint32_t count, int num_bitrack_passes) {
-  if (count <= 1) return;
+static void radix_sort_double_blank_pairs(DoubleBlankPair *pairs,
+                                          DoubleBlankPair *temp, uint32_t count,
+                                          int num_bitrack_passes) {
+  if (count <= 1)
+    return;
   // 2 passes for packed_pair + num_bitrack_passes for BitRack
   int total_passes = 2 + num_bitrack_passes;
   for (int pass = 0; pass < total_passes; pass++) {
@@ -302,7 +319,8 @@ typedef struct {
   uint32_t *bucket_counts;
   uint32_t bucket_counts_size;
 
-  // Unique racks extracted from word phase (shared between blank and double-blank)
+  // Unique racks extracted from word phase (shared between blank and
+  // double-blank)
   BitRack *unique_racks;
   uint32_t num_unique_racks;
 
@@ -361,7 +379,7 @@ typedef struct {
   WordPair *temp;
   uint32_t pair_count;
   LengthScratchBuffers *scratch;
-  ThreadSemaphore *sem;  // NULL if running single-threaded
+  ThreadSemaphore *sem; // NULL if running single-threaded
 } WordBuildArg;
 
 static void *build_words_and_extract_racks(void *arg) {
@@ -390,7 +408,8 @@ static void *build_words_and_extract_racks(void *arg) {
 
   // Extract unique racks for blank/double-blank phases (stored in scratch)
   scratch->num_unique_racks = num_unique;
-  scratch->unique_racks = malloc_or_die(sizeof(BitRack) * (num_unique > 0 ? num_unique : 1));
+  scratch->unique_racks =
+      malloc_or_die(sizeof(BitRack) * (num_unique > 0 ? num_unique : 1));
   if (count > 0) {
     uint32_t rack_idx = 0;
     scratch->unique_racks[rack_idx++] = pairs[0].bit_rack;
@@ -403,7 +422,8 @@ static void *build_words_and_extract_racks(void *arg) {
 
   // Build word entries
   wfl->num_word_buckets = next_power_of_2(num_unique);
-  if (wfl->num_word_buckets < 16) wfl->num_word_buckets = 16;
+  if (wfl->num_word_buckets < 16)
+    wfl->num_word_buckets = 16;
 
   // Resize bucket_counts if needed
   if (wfl->num_word_buckets > scratch->bucket_counts_size) {
@@ -421,10 +441,12 @@ static void *build_words_and_extract_racks(void *arg) {
   if (count > 0) {
     uint32_t run_start = 0;
     for (uint32_t i = 1; i <= count; i++) {
-      bool is_end = (i == count) || !bit_rack_equals(&pairs[i].bit_rack, &pairs[i - 1].bit_rack);
+      bool is_end = (i == count) || !bit_rack_equals(&pairs[i].bit_rack,
+                                                     &pairs[i - 1].bit_rack);
       if (is_end) {
         uint32_t words_in_run = i - run_start;
-        bucket_counts[bit_rack_get_bucket_index(&pairs[run_start].bit_rack, wfl->num_word_buckets)]++;
+        bucket_counts[bit_rack_get_bucket_index(&pairs[run_start].bit_rack,
+                                                wfl->num_word_buckets)]++;
         if (words_in_run > max_inline) {
           num_uninlined_letters += words_in_run * word_length;
         }
@@ -436,8 +458,10 @@ static void *build_words_and_extract_racks(void *arg) {
   wfl->num_word_entries = num_unique;
   wfl->word_map_entries = malloc_or_die(num_unique * sizeof(WMPEntry));
   wfl->num_uninlined_words = num_uninlined_letters / word_length;
-  wfl->word_letters = malloc_or_die(num_uninlined_letters > 0 ? num_uninlined_letters : 1);
-  wfl->word_bucket_starts = malloc_or_die((wfl->num_word_buckets + 1) * sizeof(uint32_t));
+  wfl->word_letters =
+      malloc_or_die(num_uninlined_letters > 0 ? num_uninlined_letters : 1);
+  wfl->word_bucket_starts =
+      malloc_or_die((wfl->num_word_buckets + 1) * sizeof(uint32_t));
 
   uint32_t offset = 0;
   for (uint32_t b = 0; b < wfl->num_word_buckets; b++) {
@@ -452,12 +476,15 @@ static void *build_words_and_extract_racks(void *arg) {
   if (count > 0) {
     uint32_t run_start = 0;
     for (uint32_t i = 1; i <= count; i++) {
-      bool is_end = (i == count) || !bit_rack_equals(&pairs[i].bit_rack, &pairs[i - 1].bit_rack);
+      bool is_end = (i == count) || !bit_rack_equals(&pairs[i].bit_rack,
+                                                     &pairs[i - 1].bit_rack);
       if (is_end) {
         uint32_t words_in_run = i - run_start;
         BitRack rack = pairs[run_start].bit_rack;
-        uint32_t bucket_idx = bit_rack_get_bucket_index(&rack, wfl->num_word_buckets);
-        uint32_t entry_idx = wfl->word_bucket_starts[bucket_idx] + bucket_counts[bucket_idx]++;
+        uint32_t bucket_idx =
+            bit_rack_get_bucket_index(&rack, wfl->num_word_buckets);
+        uint32_t entry_idx =
+            wfl->word_bucket_starts[bucket_idx] + bucket_counts[bucket_idx]++;
 
         WMPEntry *entry = &wfl->word_map_entries[entry_idx];
         wmp_entry_write_bit_rack(entry, &rack);
@@ -465,7 +492,8 @@ static void *build_words_and_extract_racks(void *arg) {
         if (words_in_run <= max_inline) {
           memset(entry->bucket_or_inline, 0, WMP_INLINE_VALUE_BYTES);
           for (uint32_t j = 0; j < words_in_run; j++) {
-            const DictionaryWord *word = dictionary_word_list_get_word(words, (int)pairs[run_start + j].word_index);
+            const DictionaryWord *word = dictionary_word_list_get_word(
+                words, (int)pairs[run_start + j].word_index);
             memcpy(entry->bucket_or_inline + j * word_length,
                    dictionary_word_get_word(word), word_length);
           }
@@ -474,8 +502,10 @@ static void *build_words_and_extract_racks(void *arg) {
           entry->word_start = letter_offset;
           entry->num_words = words_in_run;
           for (uint32_t j = 0; j < words_in_run; j++) {
-            const DictionaryWord *word = dictionary_word_list_get_word(words, (int)pairs[run_start + j].word_index);
-            memcpy(wfl->word_letters + letter_offset, dictionary_word_get_word(word), word_length);
+            const DictionaryWord *word = dictionary_word_list_get_word(
+                words, (int)pairs[run_start + j].word_index);
+            memcpy(wfl->word_letters + letter_offset,
+                   dictionary_word_get_word(word), word_length);
             letter_offset += word_length;
           }
         }
@@ -484,7 +514,8 @@ static void *build_words_and_extract_racks(void *arg) {
     }
   }
 
-  if (a->sem) thread_sem_release(a->sem);
+  if (a->sem)
+    thread_sem_release(a->sem);
   return NULL;
 }
 
@@ -556,7 +587,8 @@ static void *build_blank_entries_direct(void *arg) {
 
   // Determine bucket count
   wfl->num_blank_buckets = next_power_of_2(num_unique);
-  if (wfl->num_blank_buckets < 16) wfl->num_blank_buckets = 16;
+  if (wfl->num_blank_buckets < 16)
+    wfl->num_blank_buckets = 16;
 
   // Resize bucket_counts if needed
   if (wfl->num_blank_buckets > scratch->bucket_counts_size) {
@@ -564,7 +596,8 @@ static void *build_blank_entries_direct(void *arg) {
     scratch->bucket_counts = calloc(wfl->num_blank_buckets, sizeof(uint32_t));
     scratch->bucket_counts_size = wfl->num_blank_buckets;
   } else {
-    memset(scratch->bucket_counts, 0, wfl->num_blank_buckets * sizeof(uint32_t));
+    memset(scratch->bucket_counts, 0,
+           wfl->num_blank_buckets * sizeof(uint32_t));
   }
   uint32_t *bucket_counts = scratch->bucket_counts;
 
@@ -574,7 +607,8 @@ static void *build_blank_entries_direct(void *arg) {
     for (uint32_t i = 1; i < num_pairs; i++) {
       if (!bit_rack_equals(&pairs[i].bit_rack, prev)) {
         prev = &pairs[i].bit_rack;
-        bucket_counts[bit_rack_get_bucket_index(prev, wfl->num_blank_buckets)]++;
+        bucket_counts[bit_rack_get_bucket_index(prev,
+                                                wfl->num_blank_buckets)]++;
       }
     }
   }
@@ -582,7 +616,8 @@ static void *build_blank_entries_direct(void *arg) {
   // Allocate final arrays
   wfl->num_blank_entries = num_unique;
   wfl->blank_map_entries = malloc_or_die(num_unique * sizeof(WMPEntry));
-  wfl->blank_bucket_starts = malloc_or_die((wfl->num_blank_buckets + 1) * sizeof(uint32_t));
+  wfl->blank_bucket_starts =
+      malloc_or_die((wfl->num_blank_buckets + 1) * sizeof(uint32_t));
 
   // Compute bucket starts
   uint32_t offset = 0;
@@ -601,12 +636,15 @@ static void *build_blank_entries_direct(void *arg) {
     uint32_t current_bits = pairs[0].blank_letter_bit;
 
     for (uint32_t i = 1; i <= num_pairs; i++) {
-      bool is_end = (i == num_pairs) || !bit_rack_equals(&pairs[i].bit_rack, &current_rack);
+      bool is_end = (i == num_pairs) ||
+                    !bit_rack_equals(&pairs[i].bit_rack, &current_rack);
       if (!is_end) {
         current_bits |= pairs[i].blank_letter_bit;
       } else {
-        uint32_t bucket_idx = bit_rack_get_bucket_index(&current_rack, wfl->num_blank_buckets);
-        uint32_t entry_idx = wfl->blank_bucket_starts[bucket_idx] + bucket_counts[bucket_idx]++;
+        uint32_t bucket_idx =
+            bit_rack_get_bucket_index(&current_rack, wfl->num_blank_buckets);
+        uint32_t entry_idx =
+            wfl->blank_bucket_starts[bucket_idx] + bucket_counts[bucket_idx]++;
         WMPEntry *entry = &wfl->blank_map_entries[entry_idx];
         memset(entry->bucket_or_inline, 0, WMP_INLINE_VALUE_BYTES);
         entry->blank_letters = current_bits;
@@ -620,7 +658,8 @@ static void *build_blank_entries_direct(void *arg) {
     }
   }
 
-  if (a->sem) thread_sem_release(a->sem);
+  if (a->sem)
+    thread_sem_release(a->sem);
   return NULL;
 }
 
@@ -670,7 +709,8 @@ static void *build_double_blank_entries_direct(void *arg) {
       bit_rack_take_letter(&rack, ml1);
       bit_rack_add_letter(&rack, BLANK_MACHINE_LETTER);
 
-      uint32_t present2 = bit_rack_get_letter_mask(&rack) & ~((1U << ml1) - 1) & ~1U;
+      uint32_t present2 =
+          bit_rack_get_letter_mask(&rack) & ~((1U << ml1) - 1) & ~1U;
       while (present2) {
         MachineLetter ml2 = (MachineLetter)bit_ctz32(present2);
         present2 &= present2 - 1;
@@ -706,25 +746,30 @@ static void *build_double_blank_entries_direct(void *arg) {
 
   // Determine bucket count
   wfl->num_double_blank_buckets = next_power_of_2(num_unique);
-  if (wfl->num_double_blank_buckets < 16) wfl->num_double_blank_buckets = 16;
+  if (wfl->num_double_blank_buckets < 16)
+    wfl->num_double_blank_buckets = 16;
 
   // Resize bucket_counts if needed
   if (wfl->num_double_blank_buckets > scratch->bucket_counts_size) {
     free(scratch->bucket_counts);
-    scratch->bucket_counts = calloc(wfl->num_double_blank_buckets, sizeof(uint32_t));
+    scratch->bucket_counts =
+        calloc(wfl->num_double_blank_buckets, sizeof(uint32_t));
     scratch->bucket_counts_size = wfl->num_double_blank_buckets;
   } else {
-    memset(scratch->bucket_counts, 0, wfl->num_double_blank_buckets * sizeof(uint32_t));
+    memset(scratch->bucket_counts, 0,
+           wfl->num_double_blank_buckets * sizeof(uint32_t));
   }
   uint32_t *bucket_counts = scratch->bucket_counts;
 
   if (num_pairs > 0) {
     BitRack *prev = &pairs[0].bit_rack;
-    bucket_counts[bit_rack_get_bucket_index(prev, wfl->num_double_blank_buckets)]++;
+    bucket_counts[bit_rack_get_bucket_index(prev,
+                                            wfl->num_double_blank_buckets)]++;
     for (uint32_t i = 1; i < num_pairs; i++) {
       if (!bit_rack_equals(&pairs[i].bit_rack, prev)) {
         prev = &pairs[i].bit_rack;
-        bucket_counts[bit_rack_get_bucket_index(prev, wfl->num_double_blank_buckets)]++;
+        bucket_counts[bit_rack_get_bucket_index(
+            prev, wfl->num_double_blank_buckets)]++;
       }
     }
   }
@@ -732,7 +777,8 @@ static void *build_double_blank_entries_direct(void *arg) {
   // Allocate final arrays
   wfl->num_double_blank_entries = num_unique;
   wfl->double_blank_map_entries = malloc_or_die(num_unique * sizeof(WMPEntry));
-  wfl->double_blank_bucket_starts = malloc_or_die((wfl->num_double_blank_buckets + 1) * sizeof(uint32_t));
+  wfl->double_blank_bucket_starts =
+      malloc_or_die((wfl->num_double_blank_buckets + 1) * sizeof(uint32_t));
 
   // Compute bucket starts
   uint32_t offset = 0;
@@ -749,7 +795,9 @@ static void *build_double_blank_entries_direct(void *arg) {
   if (num_pairs > 0) {
     uint32_t run_start = 0;
     for (uint32_t i = 1; i <= num_pairs; i++) {
-      bool is_end = (i == num_pairs) || !bit_rack_equals(&pairs[i].bit_rack, &pairs[i - 1].bit_rack);
+      bool is_end =
+          (i == num_pairs) ||
+          !bit_rack_equals(&pairs[i].bit_rack, &pairs[i - 1].bit_rack);
       if (is_end) {
         BitRack rack = pairs[run_start].bit_rack;
         uint32_t first_blank_letters = 0;
@@ -761,8 +809,10 @@ static void *build_double_blank_entries_direct(void *arg) {
           }
         }
 
-        uint32_t bucket_idx = bit_rack_get_bucket_index(&rack, wfl->num_double_blank_buckets);
-        uint32_t entry_idx = wfl->double_blank_bucket_starts[bucket_idx] + bucket_counts[bucket_idx]++;
+        uint32_t bucket_idx =
+            bit_rack_get_bucket_index(&rack, wfl->num_double_blank_buckets);
+        uint32_t entry_idx = wfl->double_blank_bucket_starts[bucket_idx] +
+                             bucket_counts[bucket_idx]++;
         WMPEntry *entry = &wfl->double_blank_map_entries[entry_idx];
         memset(entry->bucket_or_inline, 0, WMP_INLINE_VALUE_BYTES);
         entry->first_blank_letters = first_blank_letters;
@@ -773,7 +823,8 @@ static void *build_double_blank_entries_direct(void *arg) {
     }
   }
 
-  if (a->sem) thread_sem_release(a->sem);
+  if (a->sem)
+    thread_sem_release(a->sem);
   return NULL;
 }
 
@@ -781,9 +832,10 @@ static void *build_double_blank_entries_direct(void *arg) {
 // max_word_lookup_bytes calculation
 // ============================================================================
 
-static uint32_t wfl_get_word_count(const WMPForLength *wfl, const BitRack *bit_rack,
-                                    int word_length) {
-  uint32_t bucket_idx = bit_rack_get_bucket_index(bit_rack, wfl->num_word_buckets);
+static uint32_t wfl_get_word_count(const WMPForLength *wfl,
+                                   const BitRack *bit_rack, int word_length) {
+  uint32_t bucket_idx =
+      bit_rack_get_bucket_index(bit_rack, wfl->num_word_buckets);
   uint32_t start = wfl->word_bucket_starts[bucket_idx];
   uint32_t end = wfl->word_bucket_starts[bucket_idx + 1];
   for (uint32_t i = start; i < end; i++) {
@@ -811,18 +863,23 @@ static uint32_t calculate_max_word_lookup_bytes(WMP *wmp) {
 
       bit_rack_set_letter_count(&rack, BLANK_MACHINE_LETTER, 1);
       for (MachineLetter ml1 = 1; ml1 < BIT_RACK_MAX_ALPHABET_SIZE; ml1++) {
-        if (!(first_blanks & (1U << ml1))) continue;
+        if (!(first_blanks & (1U << ml1)))
+          continue;
         bit_rack_add_letter(&rack, ml1);
 
-        uint32_t blank_bucket = bit_rack_get_bucket_index(&rack, wfl->num_blank_buckets);
+        uint32_t blank_bucket =
+            bit_rack_get_bucket_index(&rack, wfl->num_blank_buckets);
         uint32_t bstart = wfl->blank_bucket_starts[blank_bucket];
         uint32_t bend = wfl->blank_bucket_starts[blank_bucket + 1];
         for (uint32_t bi = bstart; bi < bend; bi++) {
-          BitRack blank_rack = wmp_entry_read_bit_rack(&wfl->blank_map_entries[bi]);
+          BitRack blank_rack =
+              wmp_entry_read_bit_rack(&wfl->blank_map_entries[bi]);
           if (bit_rack_equals(&blank_rack, &rack)) {
             uint32_t second_blanks = wfl->blank_map_entries[bi].blank_letters;
-            for (MachineLetter ml2 = ml1; ml2 < BIT_RACK_MAX_ALPHABET_SIZE; ml2++) {
-              if (!(second_blanks & (1U << ml2))) continue;
+            for (MachineLetter ml2 = ml1; ml2 < BIT_RACK_MAX_ALPHABET_SIZE;
+                 ml2++) {
+              if (!(second_blanks & (1U << ml2)))
+                continue;
               bit_rack_add_letter(&rack, ml2);
               bit_rack_set_letter_count(&rack, BLANK_MACHINE_LETTER, 0);
               total_words += wfl_get_word_count(wfl, &rack, len);
@@ -836,7 +893,8 @@ static uint32_t calculate_max_word_lookup_bytes(WMP *wmp) {
       }
 
       uint32_t bytes = total_words * len;
-      if (bytes > max_bytes) max_bytes = bytes;
+      if (bytes > max_bytes)
+        max_bytes = bytes;
     }
   }
   return max_bytes;
@@ -860,7 +918,8 @@ static uint32_t calculate_max_word_lookup_bytes(WMP *wmp) {
 
 // Sort lengths by work descending so heavy workloads (7-8 letter words) start
 // first, and light workloads (2-3, 14-15 letter words) fill in gaps later.
-static void sort_lengths_by_work(int *lengths, const uint32_t *work, int count) {
+static void sort_lengths_by_work(int *lengths, const uint32_t *work,
+                                 int count) {
   // Simple insertion sort (count is at most 14)
   for (int i = 1; i < count; i++) {
     int key_len = lengths[i];
@@ -913,7 +972,8 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
   // Initialize scratch buffers for each length
   LengthScratchBuffers scratch[BOARD_DIM + 1] = {{0}};
 
-  // Pre-allocate word pair buffers (these will be reused for blank/double-blank)
+  // Pre-allocate word pair buffers (these will be reused for
+  // blank/double-blank)
   WordPair *pairs_by_length[BOARD_DIM + 1] = {NULL};
   WordPair *temp_by_length[BOARD_DIM + 1] = {NULL};
 
@@ -938,7 +998,8 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
     const DictionaryWord *word = dictionary_word_list_get_word(words, i);
     uint8_t len = dictionary_word_get_length(word);
     uint32_t idx = pair_counts[len]++;
-    pairs_by_length[len][idx].bit_rack = bit_rack_create_from_dictionary_word(word);
+    pairs_by_length[len][idx].bit_rack =
+        bit_rack_create_from_dictionary_word(word);
     pairs_by_length[len][idx].word_index = (uint32_t)i;
   }
 
@@ -1022,7 +1083,8 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
       word_args[len].scratch = &scratch[len];
       word_args[len].sem = &sem;
       thread_sem_acquire(&sem);
-      cpthread_create(&word_threads[len], build_words_and_extract_racks, &word_args[len]);
+      cpthread_create(&word_threads[len], build_words_and_extract_racks,
+                      &word_args[len]);
     }
     for (int i = 0; i < num_active_lengths; i++) {
       cpthread_join(word_threads[sorted_lengths[i]]);
@@ -1050,7 +1112,8 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
       blank_args[len].length = len;
       blank_args[len].sem = &sem;
       thread_sem_acquire(&sem);
-      cpthread_create(&blank_threads[len], build_blank_entries_direct, &blank_args[len]);
+      cpthread_create(&blank_threads[len], build_blank_entries_direct,
+                      &blank_args[len]);
     }
     for (int i = 0; i < num_active_lengths; i++) {
       cpthread_join(blank_threads[sorted_lengths[i]]);
@@ -1078,7 +1141,8 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
       dbl_args[len].length = len;
       dbl_args[len].sem = &sem;
       thread_sem_acquire(&sem);
-      cpthread_create(&dbl_threads[len], build_double_blank_entries_direct, &dbl_args[len]);
+      cpthread_create(&dbl_threads[len], build_double_blank_entries_direct,
+                      &dbl_args[len]);
     }
     for (int i = 0; i < num_active_lengths; i++) {
       cpthread_join(dbl_threads[sorted_lengths[i]]);
