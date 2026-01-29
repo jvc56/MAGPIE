@@ -169,11 +169,11 @@ void test_benchmark_endgame(void) {
   log_set_level(LOG_WARN);  // Allow warnings to show diagnostics
 
   const int num_games = 3;
-  const int ply = 6;  // Need deeper search to see ABDADA benefits
+  const int ply = 10;  // Deep search for better scaling
   const uint64_t base_seed = 42;  // Fixed seed for reproducibility
 
   // Thread counts to benchmark
-  int thread_counts[] = {1, 2, 4, 8};
+  int thread_counts[] = {1, 2, 4, 8, 12, 16};
   int num_configs = sizeof(thread_counts) / sizeof(thread_counts[0]);
 
   Config *config = config_create_or_die(
