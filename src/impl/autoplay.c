@@ -163,15 +163,15 @@ void postgen_prebroadcast_func(void *data) {
   }
 
   // Get total game data.
-  autoplay_results_finalize(lg_shared_data->autoplay_results_list,
-                            shared_data->num_threads,
-                            lg_shared_data->primary_autoplay_results);
+  autoplay_results_consolidate(lg_shared_data->autoplay_results_list,
+                               shared_data->num_threads,
+                               lg_shared_data->primary_autoplay_results);
 
   // Get generational game data
   autoplay_results_reset(lg_shared_data->gen_autoplay_results);
-  autoplay_results_finalize(lg_shared_data->autoplay_results_list,
-                            shared_data->num_threads,
-                            lg_shared_data->gen_autoplay_results);
+  autoplay_results_consolidate(lg_shared_data->autoplay_results_list,
+                               shared_data->num_threads,
+                               lg_shared_data->gen_autoplay_results);
 
   for (int i = 0; i < shared_data->num_threads; i++) {
     autoplay_results_reset(lg_shared_data->autoplay_results_list[i]);
@@ -750,15 +750,23 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
                     autoplay_workers[thread_index]);
   }
 
+  autoplay_results_set_status_data(
+      autoplay_results, autoplay_results_list, args->num_threads, false,
+      args->human_readable, show_divergent_results);
+
   for (int thread_index = 0; thread_index < args->num_threads; thread_index++) {
     cpthread_join(worker_ids[thread_index]);
   }
 
   // The stats have already been combined in leavegen mode
   if (!is_leavegen_mode) {
-    autoplay_results_finalize(autoplay_results_list, args->num_threads,
-                              autoplay_results);
+    autoplay_results_consolidate(autoplay_results_list, args->num_threads,
+                                 autoplay_results);
   }
+
+  autoplay_results_set_status_data(autoplay_results, NULL, 0, true,
+                                   args->human_readable,
+                                   show_divergent_results);
 
   free(autoplay_results_list);
 
