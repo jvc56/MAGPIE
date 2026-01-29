@@ -1,6 +1,7 @@
 #include "endgame.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
 #include "../def/game_defs.h"
 #include "../def/kwg_defs.h"
@@ -20,6 +21,7 @@
 #include "../ent/small_move_arena.h"
 #include "../ent/thread_control.h"
 #include "../ent/transposition_table.h"
+#include "../ent/xoshiro.h"
 #include "../ent/zobrist.h"
 #include "../str/move_string.h"
 #include "../util/io_util.h"
@@ -29,7 +31,9 @@
 #include "move_gen.h"
 #include "word_prune.h"
 #include <assert.h>
+#include <stdatomic.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 enum {
@@ -40,6 +44,74 @@ enum {
   EARLY_PASS_BF = 1 << 29,
   HASH_MOVE_BF = 1 << 28,
   GOING_OUT_BF = 1 << 27,
+  // YBWC constants
+  MIN_SPLIT_DEPTH = 99,        // Don't split at shallow depths (TEMP: disabled for debugging)
+  MAX_SPLIT_DEPTH = 8,        // Maximum nested split depth per thread
+  MAX_MOVES_PER_SPLIT = 64,   // Maximum moves to store in a split-point
+};
+
+// Forward declarations for YBWC
+typedef struct SplitPoint SplitPoint;
+typedef struct YBWCThreadPool YBWCThreadPool;
+typedef struct EndgameSolverWorker EndgameSolverWorker;
+
+// Forward declaration of negamax for helper functions
+static int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
+                       int32_t alpha, int32_t beta, PVLine *pv, bool pv_node);
+
+// SplitPoint: represents a node where work can be distributed to helper threads
+struct SplitPoint {
+  // Tree position
+  uint64_t node_key;               // Zobrist hash for this position
+  int depth;                       // Remaining depth to search
+
+  // Alpha-beta bounds (alpha is atomic for concurrent updates)
+  _Atomic int32_t alpha;           // Current best bound (updated atomically)
+  int32_t beta;                    // Upper bound (constant for this split)
+  int32_t best_value;              // Best value found so far
+  uint64_t best_tiny_move;         // Best move found
+  int32_t alpha_orig;              // Original alpha for TT flag determination
+
+  // Move distribution
+  SmallMove moves[MAX_MOVES_PER_SPLIT]; // Moves at this node
+  int num_moves;                   // Total moves
+  _Atomic int next_move_index;     // Next move to be claimed (atomic)
+
+  // Game state for helpers to sync to
+  Game *game_state;                // Game state at this split-point
+
+  // Thread coordination
+  _Atomic int active_helpers;      // Number of threads working here
+  cpthread_mutex_t mutex;          // Protects non-atomic result updates
+  cpthread_cond_t complete_cond;   // Signal when all helpers done
+
+  // Context
+  EndgameSolverWorker *owner;      // Thread that created this split-point
+  bool pv_node;                    // Whether this is a PV node
+  int on_turn_spread;              // Spread at this position
+
+  // Result
+  PVLine pv;                       // Best PV found at this split-point
+};
+
+// YBWCThreadPool: manages worker threads and work distribution
+struct YBWCThreadPool {
+  int num_threads;
+  EndgameSolverWorker **workers;
+  cpthread_t *thread_ids;
+
+  // Split-point pool
+  SplitPoint **split_points;       // Array of pointers to active split-points
+  _Atomic int num_split_points;    // Number of active split-points
+  int max_split_points;            // Capacity
+
+  // Thread synchronization
+  cpthread_mutex_t pool_mutex;     // Protects split-point array
+  cpthread_cond_t work_available;  // Signal when split-point created
+
+  // Global state
+  _Atomic bool stop_search;        // Early termination flag
+  _Atomic int idle_threads;        // Number of threads waiting for work
 };
 
 struct EndgameSolver {
@@ -52,13 +124,12 @@ struct EndgameSolver {
   bool first_win_optim;
   bool transposition_table_optim;
   bool negascout_optim;
-  bool lazysmp_optim;
   bool prevent_slowroll;
   PVLine principal_variation;
   PVLine *variations;
 
   KWG *pruned_kwg;
-  int nodes_searched;
+  atomic_int nodes_searched;       // Atomic for thread-safe counting
 
   int solve_multiple_variations;
   int32_t best_pv_value;
@@ -67,19 +138,35 @@ struct EndgameSolver {
   double tt_fraction_of_mem;
   TranspositionTable *transposition_table;
 
+  // YBWC thread pool
+  YBWCThreadPool *thread_pool;
+
   // Owned by the caller:
   ThreadControl *thread_control;
   const Game *game;
 };
 
-typedef struct EndgameSolverWorker {
+struct EndgameSolverWorker {
   int thread_index;
   Game *game_copy;
   Arena *small_move_arena;
   MoveList *move_list;
   EndgameSolver *solver;
   int current_iterative_deepening_depth;
-} EndgameSolverWorker;
+
+  // YBWC additions
+  YBWCThreadPool *thread_pool;           // Reference to thread pool
+  SplitPoint *current_split_point;       // Split-point we're helping (NULL if owner)
+  XoshiroPRNG *prng;                     // Per-thread PRNG for move ordering jitter
+
+  // Per-thread results
+  PVLine best_pv;                        // Thread-local best PV
+  int32_t best_pv_value;                 // Thread-local best value
+  int completed_depth;                   // Depth this thread completed
+
+  // Split-point ownership tracking
+  int num_owned_splits;                  // Number of splits this thread owns
+};
 
 #ifndef MAX
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -110,12 +197,16 @@ void pvline_update(PVLine *pv_line, const PVLine *new_pv_line,
 
 void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->first_win_optim = false;
-  es->transposition_table_optim = true;
+  // Disable TT with multiple threads until we make it thread-safe
+  es->transposition_table_optim = (endgame_args->num_threads <= 1);
   es->iterative_deepening_optim = true;
   es->negascout_optim = true;
   es->solve_multiple_variations = 0;
-  es->nodes_searched = 0;
-  es->threads = 1; // for now
+  atomic_store(&es->nodes_searched, 0);
+  es->threads = endgame_args->num_threads;
+  if (es->threads < 1) {
+    es->threads = 1;
+  }
   es->requested_plies = endgame_args->plies;
   es->solving_player = game_get_player_on_turn_index(endgame_args->game);
   es->initial_small_move_arena_size =
@@ -135,8 +226,6 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
       possible_word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
   dictionary_word_list_destroy(possible_word_list);
 
-  // later, when we have multi-threaded endgame:
-  // es->threads = endgame_args->num_threads;
   es->thread_control = endgame_args->thread_control;
   es->game = endgame_args->game;
   if (endgame_args->tt_fraction_of_mem == 0) {
@@ -164,7 +253,8 @@ void endgame_solver_destroy(EndgameSolver *es) {
 }
 
 EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
-                                                  int worker_index) {
+                                                  int worker_index,
+                                                  uint64_t base_seed) {
 
   EndgameSolverWorker *solver_worker =
       malloc_or_die(sizeof(EndgameSolverWorker));
@@ -181,6 +271,19 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
 
   solver_worker->solver = solver;
 
+  // YBWC additions
+  solver_worker->thread_pool = solver->thread_pool;
+  solver_worker->current_split_point = NULL;
+
+  // Initialize per-thread PRNG with unique seed for jitter
+  solver_worker->prng = prng_create(base_seed + (uint64_t)worker_index * 12345);
+
+  // Initialize per-thread result tracking
+  solver_worker->best_pv.num_moves = 0;
+  solver_worker->best_pv_value = -LARGE_VALUE;
+  solver_worker->completed_depth = 0;
+  solver_worker->num_owned_splits = 0;
+
   return solver_worker;
 }
 
@@ -191,7 +294,347 @@ void solver_worker_destroy(EndgameSolverWorker *solver_worker) {
   game_destroy(solver_worker->game_copy);
   small_move_list_destroy(solver_worker->move_list);
   arena_destroy(solver_worker->small_move_arena);
+  prng_destroy(solver_worker->prng);
   free(solver_worker);
+}
+
+// ============================================================================
+// YBWC Thread Pool and Split-Point Management
+// ============================================================================
+
+YBWCThreadPool *ybwc_pool_create(int num_threads) {
+  YBWCThreadPool *pool = malloc_or_die(sizeof(YBWCThreadPool));
+  pool->num_threads = num_threads;
+  pool->workers = malloc_or_die(sizeof(EndgameSolverWorker *) * num_threads);
+  pool->thread_ids = malloc_or_die(sizeof(cpthread_t) * num_threads);
+
+  // Split-point pool: capacity = num_threads * 4
+  pool->max_split_points = num_threads * 4;
+  pool->split_points =
+      malloc_or_die(sizeof(SplitPoint *) * pool->max_split_points);
+  atomic_store(&pool->num_split_points, 0);
+
+  // Synchronization
+  cpthread_mutex_init(&pool->pool_mutex);
+  cpthread_cond_init(&pool->work_available);
+
+  atomic_store(&pool->stop_search, false);
+  atomic_store(&pool->idle_threads, 0);
+
+  return pool;
+}
+
+void ybwc_pool_destroy(YBWCThreadPool *pool) {
+  if (!pool) {
+    return;
+  }
+  free(pool->split_points);
+  free(pool->workers);
+  free(pool->thread_ids);
+  free(pool);
+}
+
+SplitPoint *split_point_create(EndgameSolverWorker *owner, uint64_t node_key,
+                               int depth, int32_t alpha, int32_t beta,
+                               int32_t best_value, uint64_t best_tiny_move,
+                               bool pv_node, int on_turn_spread,
+                               int32_t alpha_orig) {
+  SplitPoint *sp = malloc_or_die(sizeof(SplitPoint));
+
+  sp->node_key = node_key;
+  sp->depth = depth;
+  // Alpha should reflect improvement from first move (if any)
+  atomic_store(&sp->alpha, best_value > alpha ? best_value : alpha);
+  sp->beta = beta;
+  sp->best_value = best_value;
+  sp->best_tiny_move = best_tiny_move;
+  sp->alpha_orig = alpha_orig;
+
+  sp->num_moves = 0;
+  atomic_store(&sp->next_move_index, 0);
+
+  // Duplicate game state for helpers to sync to
+  sp->game_state = game_duplicate(owner->game_copy);
+
+  atomic_store(&sp->active_helpers, 1); // Owner is always active
+  cpthread_mutex_init(&sp->mutex);
+  cpthread_cond_init(&sp->complete_cond);
+
+  sp->owner = owner;
+  sp->pv_node = pv_node;
+  sp->on_turn_spread = on_turn_spread;
+
+  sp->pv.num_moves = 0;
+  sp->pv.score = 0;
+
+  return sp;
+}
+
+void split_point_destroy(SplitPoint *sp) {
+  if (!sp) {
+    return;
+  }
+  game_destroy(sp->game_state);
+  free(sp);
+}
+
+void split_point_add_move(SplitPoint *sp, const SmallMove *move) {
+  if (sp->num_moves < MAX_MOVES_PER_SPLIT) {
+    sp->moves[sp->num_moves++] = *move;
+  }
+}
+
+// Add split-point to pool and wake up waiting threads
+void add_split_point_to_pool(YBWCThreadPool *pool, SplitPoint *sp) {
+  cpthread_mutex_lock(&pool->pool_mutex);
+  int idx = atomic_load(&pool->num_split_points);
+  if (idx < pool->max_split_points) {
+    pool->split_points[idx] = sp;
+    atomic_store(&pool->num_split_points, idx + 1);
+    // Wake up all idle threads
+    cpthread_cond_broadcast(&pool->work_available);
+  }
+  cpthread_mutex_unlock(&pool->pool_mutex);
+}
+
+// Remove split-point from pool
+void remove_split_point_from_pool(YBWCThreadPool *pool, SplitPoint *sp) {
+  cpthread_mutex_lock(&pool->pool_mutex);
+  int n = atomic_load(&pool->num_split_points);
+  for (int i = 0; i < n; i++) {
+    if (pool->split_points[i] == sp) {
+      // Shift remaining elements
+      for (int j = i; j < n - 1; j++) {
+        pool->split_points[j] = pool->split_points[j + 1];
+      }
+      atomic_store(&pool->num_split_points, n - 1);
+      break;
+    }
+  }
+  cpthread_mutex_unlock(&pool->pool_mutex);
+}
+
+// Find a split-point to help with (prefer deeper splits for more cutoffs)
+SplitPoint *find_split_point_to_help(YBWCThreadPool *pool,
+                                     EndgameSolverWorker *worker) {
+  cpthread_mutex_lock(&pool->pool_mutex);
+
+  SplitPoint *best_sp = NULL;
+  int best_depth = -1;
+
+  int n = atomic_load(&pool->num_split_points);
+  for (int i = 0; i < n; i++) {
+    SplitPoint *sp = pool->split_points[i];
+    // Don't help your own split-point (you're already the owner)
+    if (sp->owner == worker) {
+      continue;
+    }
+    // Check if there's work remaining
+    int next_idx = atomic_load(&sp->next_move_index);
+    if (next_idx >= sp->num_moves) {
+      continue;
+    }
+    // Check for cutoff
+    if (atomic_load(&sp->alpha) >= sp->beta) {
+      continue;
+    }
+    // Prefer deeper splits
+    if (sp->depth > best_depth) {
+      best_depth = sp->depth;
+      best_sp = sp;
+    }
+  }
+
+  // Must increment active_helpers while holding lock to prevent race with owner
+  if (best_sp) {
+    atomic_fetch_add(&best_sp->active_helpers, 1);
+  }
+
+  cpthread_mutex_unlock(&pool->pool_mutex);
+  return best_sp;
+}
+
+// Update split-point results atomically
+void update_split_point_results(SplitPoint *sp, const SmallMove *move,
+                                int32_t value, const PVLine *child_pv) {
+  cpthread_mutex_lock(&sp->mutex);
+
+  if (value > sp->best_value) {
+    sp->best_value = value;
+    sp->best_tiny_move = move->tiny_move;
+    pvline_update(&sp->pv, child_pv, move, value);
+
+    // Update alpha if improved (using compare-exchange for atomicity)
+    int32_t old_alpha = atomic_load(&sp->alpha);
+    while (value > old_alpha) {
+      if (atomic_compare_exchange_weak(&sp->alpha, &old_alpha, value)) {
+        break;
+      }
+    }
+  }
+
+  cpthread_mutex_unlock(&sp->mutex);
+}
+
+// Check if we should split at this node
+bool should_split(EndgameSolverWorker *worker, int depth, int num_moves) {
+  YBWCThreadPool *pool = worker->thread_pool;
+  if (!pool || pool->num_threads <= 1) {
+    return false;
+  }
+
+  // Don't split too close to leaves (overhead > benefit)
+  if (depth < MIN_SPLIT_DEPTH) {
+    return false;
+  }
+
+  // Need at least 2 moves remaining (first is searched sequentially)
+  if (num_moves < 2) {
+    return false;
+  }
+
+  // Only split if there are idle threads waiting
+  if (atomic_load(&pool->idle_threads) == 0) {
+    return false;
+  }
+
+  // Limit nesting depth
+  if (worker->num_owned_splits >= MAX_SPLIT_DEPTH) {
+    return false;
+  }
+
+  return true;
+}
+
+// Help process moves at a split-point
+void help_at_split_point(EndgameSolverWorker *worker, SplitPoint *sp) {
+  // Create a temporary game copy from the split-point's game state
+  // We need a fresh copy since we'll be playing/unplaying moves
+  Game *saved_game = worker->game_copy;
+  worker->game_copy = game_duplicate(sp->game_state);
+  game_set_endgame_solving_mode(worker->game_copy);
+  game_set_backup_mode(worker->game_copy, BACKUP_MODE_SIMULATION);
+
+  while (true) {
+    // Check for cutoff
+    int32_t current_alpha = atomic_load(&sp->alpha);
+    if (current_alpha >= sp->beta) {
+      break;
+    }
+
+    // Claim next move atomically
+    int idx = atomic_fetch_add(&sp->next_move_index, 1);
+    if (idx >= sp->num_moves) {
+      break;
+    }
+
+    SmallMove *move = &sp->moves[idx];
+
+    // Convert small move to full move for play
+    small_move_to_move(worker->move_list->spare_move, move,
+                       game_get_board(worker->game_copy));
+
+    const int on_turn_idx = game_get_player_on_turn_index(worker->game_copy);
+    const Player *player_on_turn =
+        game_get_player(worker->game_copy, on_turn_idx);
+    const Rack *stm_rack = player_get_rack(player_on_turn);
+    int last_consecutive_scoreless_turns =
+        game_get_consecutive_scoreless_turns(worker->game_copy);
+
+    play_move(worker->move_list->spare_move, worker->game_copy, NULL);
+
+    // Atomic increment for thread-safe node counting
+    atomic_fetch_add(&worker->solver->nodes_searched, 1);
+
+    // Calculate child key for TT
+    uint64_t child_key = 0;
+    if (worker->solver->transposition_table_optim) {
+      child_key = zobrist_add_move(
+          worker->solver->transposition_table->zobrist, sp->node_key,
+          worker->move_list->spare_move, stm_rack,
+          on_turn_idx == worker->solver->solving_player,
+          game_get_consecutive_scoreless_turns(worker->game_copy),
+          last_consecutive_scoreless_turns);
+    }
+
+    PVLine child_pv;
+    child_pv.game = worker->game_copy;
+    child_pv.num_moves = 0;
+
+    // Re-read alpha for the search
+    current_alpha = atomic_load(&sp->alpha);
+
+    // Full-window search (temporary - for debugging)
+    int32_t value =
+        negamax(worker, child_key, sp->depth - 1, -sp->beta,
+                -current_alpha, &child_pv, sp->pv_node);
+
+    game_unplay_last_move(worker->game_copy);
+
+    // Update split-point results
+    update_split_point_results(sp, move, -value, &child_pv);
+  }
+
+  // Restore the worker's original game copy
+  game_destroy(worker->game_copy);
+  worker->game_copy = saved_game;
+}
+
+// Wait for all helpers at a split-point to complete
+void wait_for_split_complete(SplitPoint *sp) {
+  cpthread_mutex_lock(&sp->mutex);
+  while (atomic_load(&sp->active_helpers) > 1) {
+    // Only wait if other helpers are still working
+    cpthread_cond_wait(&sp->complete_cond, &sp->mutex);
+  }
+  cpthread_mutex_unlock(&sp->mutex);
+}
+
+// Helper thread main loop - waits for work and processes split-points
+void *helper_thread_main(void *arg) {
+  EndgameSolverWorker *worker = (EndgameSolverWorker *)arg;
+  YBWCThreadPool *pool = worker->thread_pool;
+
+  while (!atomic_load(&pool->stop_search)) {
+    // Try to find a split-point to help with
+    SplitPoint *sp = find_split_point_to_help(pool, worker);
+
+    if (sp == NULL) {
+      // No work available, wait for notification
+      cpthread_mutex_lock(&pool->pool_mutex);
+      atomic_fetch_add(&pool->idle_threads, 1);
+
+      // Wait until work is available or search stops
+      while (!atomic_load(&pool->stop_search) &&
+             atomic_load(&pool->num_split_points) == 0) {
+        cpthread_cond_wait(&pool->work_available, &pool->pool_mutex);
+      }
+
+      atomic_fetch_sub(&pool->idle_threads, 1);
+      cpthread_mutex_unlock(&pool->pool_mutex);
+      continue;
+    }
+
+    // Join the split-point (active_helpers already incremented in find_split_point_to_help)
+    worker->current_split_point = sp;
+
+    // Help process moves
+    help_at_split_point(worker, sp);
+
+    // Leave the split-point
+    worker->current_split_point = NULL;
+
+    // Must hold mutex while decrementing to prevent race with owner's wait
+    cpthread_mutex_lock(&sp->mutex);
+    int remaining = atomic_fetch_sub(&sp->active_helpers, 1) - 1;
+    if (remaining == 1) {
+      // Only owner remains - signal completion
+      cpthread_cond_signal(&sp->complete_cond);
+    }
+    cpthread_mutex_unlock(&sp->mutex);
+  }
+
+  return NULL;
 }
 
 int generate_stm_plays(EndgameSolverWorker *worker) {
@@ -301,8 +744,8 @@ char *create_spaces(int depth) {
 // void print_small_plays(EndgameSolverWorker *worker, int nplays,
 //                        int cur_move_loc) {}
 
-int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
-                int32_t alpha, int32_t beta, PVLine *pv, bool pv_node) {
+static int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
+                       int32_t alpha, int32_t beta, PVLine *pv, bool pv_node) {
 
   assert(pv_node || alpha == beta - 1);
   int32_t alpha_orig = alpha;
@@ -375,22 +818,13 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
   size_t arena_offset =
       worker->small_move_arena->size - (sizeof(SmallMove) * nplays);
 
-  // log_warn("Iterating through %d plays", nplays);
-  for (int idx = 0; idx < nplays; idx++) {
-    size_t element_offset = arena_offset + idx * sizeof(SmallMove);
+  // YBWC: Search first move sequentially (eldest brother)
+  if (nplays > 0) {
+    size_t element_offset = arena_offset;
     SmallMove *small_move =
         (SmallMove *)(worker->small_move_arena->memory + element_offset);
     small_move_to_move(worker->move_list->spare_move, small_move,
                        game_get_board(worker->game_copy));
-
-    // delete me
-    // StringBuilder *move_description = string_builder_create();
-    // string_builder_add_move_description(move_description,
-    //                                     worker->move_list->spare_move,
-    //                                     game_get_ld(worker->game_copy));
-    // log_warn("%sTrying moveidx %d, %s (tm:%x meta:%x)", spaces, idx,
-    //          string_builder_peek(move_description), small_move->tiny_move,
-    //          small_move->metadata);
 
     const Rack *stm_rack = player_get_rack(player_on_turn);
 
@@ -398,9 +832,8 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
         game_get_consecutive_scoreless_turns(worker->game_copy);
     play_move(worker->move_list->spare_move, worker->game_copy, NULL);
 
-    // Implementation is currently single-threaded. Keep counts per worker if we
-    // want to keep doing this when we have multiple threads.
-    worker->solver->nodes_searched++;
+    // Atomic increment for thread-safe node counting
+    atomic_fetch_add(&worker->solver->nodes_searched, 1);
 
     uint64_t child_key = 0;
     if (worker->solver->transposition_table_optim) {
@@ -412,60 +845,130 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
           last_consecutive_scoreless_turns);
     }
 
-    int32_t value = 0;
-    if (idx == 0 || !worker->solver->negascout_optim) {
-      value = negamax(worker, child_key, depth - 1, -beta, -alpha, &child_pv,
-                      pv_node);
-    } else {
-      value = negamax(worker, child_key, depth - 1, -alpha - 1, -alpha,
-                      &child_pv, false);
-      if (alpha < -value && -value < beta) {
-        // re-search with wider window
-        value = negamax(worker, child_key, depth - 1, -beta, -alpha, &child_pv,
-                        pv_node);
-      }
-    }
+    int32_t value = negamax(worker, child_key, depth - 1, -beta, -alpha,
+                            &child_pv, pv_node);
     game_unplay_last_move(worker->game_copy);
 
-    // log_warn("%sNow unplayed %d, %s (tm:%x meta:%x)", spaces, idx,
-    //          string_builder_peek(move_description), small_move->tiny_move,
-    //          small_move->metadata);
-
-    // string_builder_destroy(move_description);
-
-    // Re-assign small_move. Its pointer location may have changed after all
-    // the calls to negamax and possible reallocations in the small_move_arena.
+    // Re-assign small_move after potential reallocation
     small_move =
         (SmallMove *)(worker->small_move_arena->memory + element_offset);
     if (-value > best_value) {
       best_value = -value;
       best_tiny_move = small_move->tiny_move;
-      // log_warn("%sUpdatePV, bestval %d", spaces, best_value);
-      // StringBuilder *child_pvsb =
-      //     pvline_string(&child_pv, worker->game_copy, false);
-      // StringBuilder *old_pvsb = pvline_string(pv, worker->game_copy, false);
       pvline_update(pv, &child_pv, small_move,
                     best_value - worker->solver->initial_spread);
-
-      // StringBuilder *new_pvsb = pvline_string(pv, worker->game_copy, false);
-      // log_warn("%schild_pv: %s", spaces, string_builder_peek(child_pvsb));
-      // log_warn("%snew_pv: %s", spaces, string_builder_peek(new_pvsb));
-      // string_builder_destroy(child_pvsb);
-      // string_builder_destroy(old_pvsb);
-      // string_builder_destroy(new_pvsb);
     }
     if (worker->current_iterative_deepening_depth == depth) {
-      // At the very top depth, set the estimated value of the small move,
-      // for the next iterative deepening iteration.
       small_move_set_estimated_value(small_move, -value);
     }
     alpha = MAX(alpha, best_value);
-    if (best_value >= beta) {
-      // beta cut-off
-      break;
-    }
-    // clear the child node's pv for the next child node
     pvline_clear(&child_pv);
+  }
+
+  // YBWC: After first move, check if we should split for remaining moves
+  if (nplays > 1 && best_value < beta &&
+      should_split(worker, depth, nplays - 1)) {
+    // Create split-point for remaining moves
+    SplitPoint *sp =
+        split_point_create(worker, node_key, depth, alpha, beta, best_value,
+                           best_tiny_move, pv_node, on_turn_spread, alpha_orig);
+
+    // Copy remaining moves to split-point
+    for (int idx = 1; idx < nplays && idx <= MAX_MOVES_PER_SPLIT; idx++) {
+      size_t element_offset = arena_offset + idx * sizeof(SmallMove);
+      SmallMove *small_move =
+          (SmallMove *)(worker->small_move_arena->memory + element_offset);
+      split_point_add_move(sp, small_move);
+    }
+    sp->pv = *pv; // Copy current best PV
+
+    // Start claiming from first remaining move
+    atomic_store(&sp->next_move_index, 0);
+
+    // Add to pool and wake helpers
+    worker->num_owned_splits++;
+    add_split_point_to_pool(worker->thread_pool, sp);
+
+    // Owner also helps process the split-point
+    help_at_split_point(worker, sp);
+
+    // Wait for all helpers to complete
+    wait_for_split_complete(sp);
+
+    // Remove from pool
+    remove_split_point_from_pool(worker->thread_pool, sp);
+    worker->num_owned_splits--;
+
+    // Collect results
+    best_value = sp->best_value;
+    best_tiny_move = sp->best_tiny_move;
+    *pv = sp->pv;
+
+    // Update estimated values for iterative deepening (can't easily do this
+    // for parallel search results, so skip)
+
+    split_point_destroy(sp);
+  } else if (nplays > 1 && best_value < beta) {
+    // Sequential search of remaining moves (no split possible)
+    for (int idx = 1; idx < nplays; idx++) {
+      size_t element_offset = arena_offset + idx * sizeof(SmallMove);
+      SmallMove *small_move =
+          (SmallMove *)(worker->small_move_arena->memory + element_offset);
+      small_move_to_move(worker->move_list->spare_move, small_move,
+                         game_get_board(worker->game_copy));
+
+      const Rack *stm_rack = player_get_rack(player_on_turn);
+
+      int last_consecutive_scoreless_turns =
+          game_get_consecutive_scoreless_turns(worker->game_copy);
+      play_move(worker->move_list->spare_move, worker->game_copy, NULL);
+
+      // Atomic increment for thread-safe node counting
+      atomic_fetch_add(&worker->solver->nodes_searched, 1);
+
+      uint64_t child_key = 0;
+      if (worker->solver->transposition_table_optim) {
+        child_key = zobrist_add_move(
+            worker->solver->transposition_table->zobrist, node_key,
+            worker->move_list->spare_move, stm_rack,
+            on_turn_idx == worker->solver->solving_player,
+            game_get_consecutive_scoreless_turns(worker->game_copy),
+            last_consecutive_scoreless_turns);
+      }
+
+      int32_t value = 0;
+      if (!worker->solver->negascout_optim) {
+        value = negamax(worker, child_key, depth - 1, -beta, -alpha, &child_pv,
+                        pv_node);
+      } else {
+        value = negamax(worker, child_key, depth - 1, -alpha - 1, -alpha,
+                        &child_pv, false);
+        if (alpha < -value && -value < beta) {
+          // re-search with wider window
+          value = negamax(worker, child_key, depth - 1, -beta, -alpha,
+                          &child_pv, pv_node);
+        }
+      }
+      game_unplay_last_move(worker->game_copy);
+
+      // Re-assign small_move after potential reallocation
+      small_move =
+          (SmallMove *)(worker->small_move_arena->memory + element_offset);
+      if (-value > best_value) {
+        best_value = -value;
+        best_tiny_move = small_move->tiny_move;
+        pvline_update(pv, &child_pv, small_move,
+                      best_value - worker->solver->initial_spread);
+      }
+      if (worker->current_iterative_deepening_depth == depth) {
+        small_move_set_estimated_value(small_move, -value);
+      }
+      alpha = MAX(alpha, best_value);
+      if (best_value >= beta) {
+        break;
+      }
+      pvline_clear(&child_pv);
+    }
   }
 
   if (worker->solver->transposition_table_optim) {
@@ -545,6 +1048,24 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     pv.game = worker->game_copy;
     pv.num_moves = 0;
     int32_t val = negamax(worker, initial_hash_key, p, alpha, beta, &pv, true);
+    printf("  depth %d: value=%d, pv=", p, val - worker->solver->initial_spread);
+    // Print the full PV with scores
+    Game *pv_game = game_duplicate(worker->game_copy);
+    const LetterDistribution *ld = game_get_ld(pv_game);
+    StringBuilder *pv_sb = string_builder_create();
+    Move pv_move;
+    for (int i = 0; i < pv.num_moves; i++) {
+      if (i > 0) {
+        string_builder_add_string(pv_sb, " ");
+      }
+      small_move_to_move(&pv_move, &pv.moves[i], game_get_board(pv_game));
+      string_builder_add_move(pv_sb, game_get_board(pv_game), &pv_move, ld,
+                              true);
+      play_move(&pv_move, pv_game, NULL);
+    }
+    printf("%s\n", string_builder_peek(pv_sb));
+    string_builder_destroy(pv_sb);
+    game_destroy(pv_game);
     // sort initial moves by valuation for next time.
     SmallMove *initial_moves = (SmallMove *)(worker->small_move_arena->memory);
     qsort(initial_moves, initial_move_count, sizeof(SmallMove),
@@ -654,27 +1175,71 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
 
   endgame_solver_reset(solver, endgame_args);
 
-  // kick-off iterative deepening thread.
+  // Generate base seed for YBWC using current time
+  uint64_t base_seed = (uint64_t)ctime_get_current_time();
 
+  // Create YBWC thread pool if multi-threaded
+  YBWCThreadPool *thread_pool = NULL;
+  if (solver->threads > 1) {
+    thread_pool = ybwc_pool_create(solver->threads);
+    solver->thread_pool = thread_pool;
+  } else {
+    solver->thread_pool = NULL;
+  }
+
+  // Create workers
   EndgameSolverWorker **solver_workers =
       malloc_or_die((sizeof(EndgameSolverWorker *)) * solver->threads);
-  cpthread_t *worker_ids =
-      malloc_or_die((sizeof(cpthread_t)) * (solver->threads));
 
   for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
     solver_workers[thread_index] =
-        endgame_solver_create_worker(solver, thread_index);
-    cpthread_create(&worker_ids[thread_index], solver_worker_start,
-                    solver_workers[thread_index]);
+        endgame_solver_create_worker(solver, thread_index, base_seed);
+    if (thread_pool) {
+      thread_pool->workers[thread_index] = solver_workers[thread_index];
+    }
   }
 
+  if (solver->threads > 1) {
+    // YBWC mode: master thread runs iterative deepening, helpers wait for work
+    // Start helper threads first
+    for (int thread_index = 1; thread_index < solver->threads; thread_index++) {
+      cpthread_create(&thread_pool->thread_ids[thread_index],
+                      helper_thread_main, solver_workers[thread_index]);
+    }
+
+    // Master thread (index 0) runs iterative deepening
+    iterative_deepening(solver_workers[0], solver->requested_plies);
+
+    // Store master's result
+    solver_workers[0]->best_pv = solver->principal_variation;
+    solver_workers[0]->best_pv_value = solver->best_pv_value;
+    solver_workers[0]->completed_depth = solver->requested_plies;
+
+    // Signal helpers to stop and wait for them
+    atomic_store(&thread_pool->stop_search, true);
+    cpthread_mutex_lock(&thread_pool->pool_mutex);
+    cpthread_cond_broadcast(&thread_pool->work_available);
+    cpthread_mutex_unlock(&thread_pool->pool_mutex);
+
+    for (int thread_index = 1; thread_index < solver->threads; thread_index++) {
+      cpthread_join(thread_pool->thread_ids[thread_index]);
+    }
+  } else {
+    // Single-threaded mode: just run iterative deepening
+    iterative_deepening(solver_workers[0], solver->requested_plies);
+  }
+
+  // Clean up workers
   for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
-    cpthread_join(worker_ids[thread_index]);
     solver_worker_destroy(solver_workers[thread_index]);
   }
-
   free(solver_workers);
-  free(worker_ids);
+
+  // Clean up thread pool
+  if (thread_pool) {
+    ybwc_pool_destroy(thread_pool);
+    solver->thread_pool = NULL;
+  }
 
   endgame_results_set_pvline(results, &solver->principal_variation);
 }
