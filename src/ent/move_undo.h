@@ -30,7 +30,8 @@ typedef struct MoveUndo {
   // Bitmap to track which square indices have been saved (avoid duplicates)
   // Board has 2*2*BOARD_DIM*BOARD_DIM squares (e.g. 900 for BOARD_DIM=15)
   // We use a bitmap: ceil(num_squares / 64) uint64_t words (e.g. 15 for 900).
-  // The +63 in the expression ensures proper rounding up to the next 64-bit word.
+  // The +63 in the expression ensures proper rounding up to the next 64-bit
+  // word.
   uint64_t saved_squares_bitmap[(2 * 2 * BOARD_DIM * BOARD_DIM + 63) / 64];
 
   // Board scalar state
