@@ -21,6 +21,9 @@
 // Utility functions
 // ============================================================================
 
+// Minimum number of hash buckets for WMP tables
+#define MIN_BUCKETS 16
+
 // Round up to next power of 2
 static inline uint32_t next_power_of_2(uint32_t n) {
   if (n == 0)
@@ -427,8 +430,8 @@ static void *build_words_and_extract_racks(void *arg) {
 
   // Build word entries
   wfl->num_word_buckets = next_power_of_2(num_unique);
-  if (wfl->num_word_buckets < 16)
-    wfl->num_word_buckets = 16;
+  if (wfl->num_word_buckets < MIN_BUCKETS)
+    wfl->num_word_buckets = MIN_BUCKETS;
 
   // Resize bucket_counts if needed
   if (wfl->num_word_buckets > scratch->bucket_counts_size) {
@@ -592,8 +595,8 @@ static void *build_blank_entries_direct(void *arg) {
 
   // Determine bucket count
   wfl->num_blank_buckets = next_power_of_2(num_unique);
-  if (wfl->num_blank_buckets < 16)
-    wfl->num_blank_buckets = 16;
+  if (wfl->num_blank_buckets < MIN_BUCKETS)
+    wfl->num_blank_buckets = MIN_BUCKETS;
 
   // Resize bucket_counts if needed
   if (wfl->num_blank_buckets > scratch->bucket_counts_size) {
@@ -751,8 +754,8 @@ static void *build_double_blank_entries_direct(void *arg) {
 
   // Determine bucket count
   wfl->num_double_blank_buckets = next_power_of_2(num_unique);
-  if (wfl->num_double_blank_buckets < 16)
-    wfl->num_double_blank_buckets = 16;
+  if (wfl->num_double_blank_buckets < MIN_BUCKETS)
+    wfl->num_double_blank_buckets = MIN_BUCKETS;
 
   // Resize bucket_counts if needed
   if (wfl->num_double_blank_buckets > scratch->bucket_counts_size) {
@@ -992,8 +995,8 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
       scratch[len].scratch2 = temp_by_length[len];
       scratch[len].scratch_size = size;
       // Initial bucket_counts allocation
-      scratch[len].bucket_counts = calloc(16, sizeof(uint32_t));
-      scratch[len].bucket_counts_size = 16;
+      scratch[len].bucket_counts = calloc(MIN_BUCKETS, sizeof(uint32_t));
+      scratch[len].bucket_counts_size = MIN_BUCKETS;
       scratch[len].radix_passes = radix_passes_for_alphabet(ld_get_size(ld));
     }
   }
@@ -1021,24 +1024,30 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
     if (num_words_by_length[len] == 0) {
       WMPForLength *wfl = &wmp->wfls[len];
       // Word entries
-      wfl->num_word_buckets = 16;
+      wfl->num_word_buckets = MIN_BUCKETS;
       wfl->num_word_entries = 0;
       wfl->num_uninlined_words = 0;
-      wfl->word_bucket_starts = malloc_or_die(17 * sizeof(uint32_t));
-      memset(wfl->word_bucket_starts, 0, 17 * sizeof(uint32_t));
+      wfl->word_bucket_starts =
+          malloc_or_die((wfl->num_word_buckets + 1) * sizeof(uint32_t));
+      memset(wfl->word_bucket_starts, 0,
+             (wfl->num_word_buckets + 1) * sizeof(uint32_t));
       wfl->word_map_entries = malloc_or_die(sizeof(WMPEntry));
       wfl->word_letters = malloc_or_die(1);
       // Blank entries
-      wfl->num_blank_buckets = 16;
+      wfl->num_blank_buckets = MIN_BUCKETS;
       wfl->num_blank_entries = 0;
-      wfl->blank_bucket_starts = malloc_or_die(17 * sizeof(uint32_t));
-      memset(wfl->blank_bucket_starts, 0, 17 * sizeof(uint32_t));
+      wfl->blank_bucket_starts =
+          malloc_or_die((wfl->num_blank_buckets + 1) * sizeof(uint32_t));
+      memset(wfl->blank_bucket_starts, 0,
+             (wfl->num_blank_buckets + 1) * sizeof(uint32_t));
       wfl->blank_map_entries = malloc_or_die(sizeof(WMPEntry));
       // Double-blank entries
-      wfl->num_double_blank_buckets = 16;
+      wfl->num_double_blank_buckets = MIN_BUCKETS;
       wfl->num_double_blank_entries = 0;
-      wfl->double_blank_bucket_starts = malloc_or_die(17 * sizeof(uint32_t));
-      memset(wfl->double_blank_bucket_starts, 0, 17 * sizeof(uint32_t));
+      wfl->double_blank_bucket_starts =
+          malloc_or_die((wfl->num_double_blank_buckets + 1) * sizeof(uint32_t));
+      memset(wfl->double_blank_bucket_starts, 0,
+             (wfl->num_double_blank_buckets + 1) * sizeof(uint32_t));
       wfl->double_blank_map_entries = malloc_or_die(sizeof(WMPEntry));
       // Scratch buffers
       scratch[len].unique_racks = malloc_or_die(sizeof(BitRack));
@@ -1046,8 +1055,8 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
       scratch[len].scratch1 = malloc_or_die(sizeof(WordPair));
       scratch[len].scratch2 = malloc_or_die(sizeof(WordPair));
       scratch[len].scratch_size = sizeof(WordPair);
-      scratch[len].bucket_counts = calloc(16, sizeof(uint32_t));
-      scratch[len].bucket_counts_size = 16;
+      scratch[len].bucket_counts = calloc(MIN_BUCKETS, sizeof(uint32_t));
+      scratch[len].bucket_counts_size = MIN_BUCKETS;
       scratch[len].radix_passes = radix_passes_for_alphabet(ld_get_size(ld));
     }
   }
