@@ -2250,6 +2250,9 @@ void impl_autoplay(Config *config, ErrorStack *error_stack) {
 
 char *status_autoplay(Config *config) {
   AutoplayResults *autoplay_results = config->autoplay_results;
+  if (!autoplay_results) {
+    return string_duplicate("autoplay has not been initialized");
+  }
   return autoplay_results_get_status(autoplay_results);
 }
 
