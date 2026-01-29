@@ -66,56 +66,20 @@ typedef struct {
   bool lmr;
   bool aspiration;
   double total_time;
-  int agreements;  // agreements with baseline
   int total_games;
+  int32_t *values;  // Store values per game for comparison
 } ModeStats;
-
-// Solve endgame with specific optimization settings
-static int32_t solve_with_settings(Config *config, EndgameSolver *solver,
-                                   Game *game, int ply, bool lmr,
-                                   bool aspiration, double *elapsed_out) {
-  // Configure optimizations via the solver's internal state
-  // We need to access the solver's fields - for now we'll use the external API
-  // The solver gets reset in endgame_solve, so we need a different approach
-
-  Timer timer;
-  ctimer_start(&timer);
-
-  EndgameArgs args = {.game = game,
-                      .thread_control = config_get_thread_control(config),
-                      .plies = ply,
-                      .tt_fraction_of_mem = 0.05,
-                      .initial_small_move_arena_size =
-                          DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-                      .per_ply_callback = NULL,
-                      .per_ply_callback_data = NULL};
-  EndgameResults *results = config_get_endgame_results(config);
-  ErrorStack *err = error_stack_create();
-
-  endgame_solver_set_lmr(solver, lmr);
-  endgame_solver_set_aspiration(solver, aspiration);
-
-  endgame_solve(solver, &args, results, err);
-
-  *elapsed_out = ctimer_elapsed_seconds(&timer);
-  assert(error_stack_is_empty(err));
-  error_stack_destroy(err);
-
-  const PVLine *pv = endgame_results_get_pvline(results);
-  return pv->score;
-}
 
 void test_benchmark_optimizations(void) {
   log_set_level(LOG_FATAL);  // Suppress warnings for cleaner output
 
-  const int num_games = 100;
-  const int ply = 4;
+  const int num_games = 20;
+  const int ply = 6;
   const uint64_t base_seed = 12345;
 
   Config *config = config_create_or_die(
       "set -lex CSW21 -threads 1 -s1 score -s2 score -r1 small -r2 small");
 
-  EndgameSolver *solver = endgame_solver_create();
   MoveList *move_list = move_list_create(1);
 
   // Create initial game
@@ -123,77 +87,110 @@ void test_benchmark_optimizations(void) {
   Game *game = config_get_game(config);
 
   ModeStats modes[4] = {
-      {"baseline (no opts)", false, false, 0, 0, 0},
-      {"LMR only", true, false, 0, 0, 0},
-      {"aspiration only", false, true, 0, 0, 0},
-      {"LMR + aspiration", true, true, 0, 0, 0},
+      {"baseline (no opts)", false, false, 0, 0, NULL},
+      {"LMR only", true, false, 0, 0, NULL},
+      {"aspiration only", false, true, 0, 0, NULL},
+      {"LMR + aspiration", true, true, 0, 0, NULL},
   };
+
+  // Allocate value arrays
+  for (int m = 0; m < 4; m++) {
+    modes[m].values = malloc(num_games * sizeof(int32_t));
+  }
 
   printf("\n");
   printf("==============================================\n");
   printf("  Optimization Comparison: %d games, %d-ply\n", num_games, ply);
+  printf("  (One fresh TT per mode, reused across positions)\n");
   printf("==============================================\n\n");
 
-  int valid_endgames = 0;
+  // First, find all valid endgame seeds
+  uint64_t *valid_seeds = malloc(num_games * sizeof(uint64_t));
+  int valid_count = 0;
   const int max_attempts = num_games * 10;
 
-  for (int i = 0; valid_endgames < num_games && i < max_attempts; i++) {
+  printf("Finding %d valid endgame positions...\n", num_games);
+  for (int i = 0; valid_count < num_games && i < max_attempts; i++) {
     game_reset(game);
     game_seed(game, base_seed + (uint64_t)i);
     draw_starting_racks(game);
 
-    if (!play_until_bag_empty(game, move_list)) {
-      continue;
+    if (play_until_bag_empty(game, move_list)) {
+      valid_seeds[valid_count++] = base_seed + (uint64_t)i;
     }
+  }
+  printf("Found %d valid endgames.\n\n", valid_count);
 
-    printf("Game %d: ", valid_endgames + 1);
+  // Run each mode on ALL positions before moving to next mode
+  for (int m = 0; m < 4; m++) {
+    printf("Running %s on %d positions...\n", modes[m].name, valid_count);
     fflush(stdout);
 
-    int32_t baseline_value = 0;
+    // Create fresh solver for this mode (fresh TT)
+    EndgameSolver *solver = endgame_solver_create();
+    endgame_solver_set_lmr(solver, modes[m].lmr);
+    endgame_solver_set_aspiration(solver, modes[m].aspiration);
 
-    // Run all 4 modes on this position
-    for (int m = 0; m < 4; m++) {
-      // Reset game to same position before each solve
+    Timer mode_timer;
+    ctimer_start(&mode_timer);
+
+    for (int g = 0; g < valid_count; g++) {
+      // Setup position
       game_reset(game);
-      game_seed(game, base_seed + (uint64_t)i);
+      game_seed(game, valid_seeds[g]);
       draw_starting_racks(game);
       play_until_bag_empty(game, move_list);
 
-      double elapsed;
-      int32_t value = solve_with_settings(config, solver, game, ply,
-                                          modes[m].lmr, modes[m].aspiration,
-                                          &elapsed);
+      EndgameArgs args = {.game = game,
+                          .thread_control = config_get_thread_control(config),
+                          .plies = ply,
+                          .tt_fraction_of_mem = 0.05,
+                          .initial_small_move_arena_size =
+                              DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                          .per_ply_callback = NULL,
+                          .per_ply_callback_data = NULL};
+      EndgameResults *results = config_get_endgame_results(config);
+      ErrorStack *err = error_stack_create();
 
-      modes[m].total_time += elapsed;
+      endgame_solve(solver, &args, results, err);
+
+      assert(error_stack_is_empty(err));
+      error_stack_destroy(err);
+
+      const PVLine *pv = endgame_results_get_pvline(results);
+      modes[m].values[g] = pv->score;
       modes[m].total_games++;
-
-      if (m == 0) {
-        baseline_value = value;
-        modes[m].agreements++;  // baseline always agrees with itself
-      } else {
-        if (value == baseline_value) {
-          modes[m].agreements++;
-        }
-      }
     }
 
-    printf("baseline=%d\n", baseline_value);
-    valid_endgames++;
+    modes[m].total_time = ctimer_elapsed_seconds(&mode_timer);
+    endgame_solver_destroy(solver);
+
+    printf("  Completed in %.1fs (%.3fs/game)\n", modes[m].total_time,
+           modes[m].total_time / modes[m].total_games);
   }
 
+  // Compare results
   printf("\n==============================================\n");
   printf("  RESULTS\n");
   printf("==============================================\n\n");
+
+  // Count agreements with baseline
+  int agreements[4] = {valid_count, 0, 0, 0};  // baseline agrees with itself
+  for (int m = 1; m < 4; m++) {
+    for (int g = 0; g < valid_count; g++) {
+      if (modes[m].values[g] == modes[0].values[g]) {
+        agreements[m]++;
+      }
+    }
+  }
 
   printf("%-25s %10s %10s %12s\n", "Mode", "Agree", "Time/game", "Total time");
   printf("%-25s %10s %10s %12s\n", "----", "-----", "---------", "----------");
 
   for (int m = 0; m < 4; m++) {
     double avg_time = modes[m].total_time / modes[m].total_games;
-    printf("%-25s %7d/%d %9.3fs %11.1fs\n",
-           modes[m].name,
-           modes[m].agreements, modes[m].total_games,
-           avg_time, modes[m].total_time);
+    printf("%-25s %7d/%d %9.3fs %11.1fs\n", modes[m].name, agreements[m],
+           modes[m].total_games, avg_time, modes[m].total_time);
   }
 
   printf("\n");
@@ -202,11 +199,15 @@ void test_benchmark_optimizations(void) {
   for (int m = 1; m < 4; m++) {
     double avg_time = modes[m].total_time / modes[m].total_games;
     double speedup = baseline_avg / avg_time;
-    printf("  %s: %.2fx faster, %d/%d agreement\n",
-           modes[m].name, speedup, modes[m].agreements, modes[m].total_games);
+    printf("  %s: %.2fx faster, %d/%d agreement\n", modes[m].name, speedup,
+           agreements[m], modes[m].total_games);
   }
 
+  // Cleanup
+  for (int m = 0; m < 4; m++) {
+    free(modes[m].values);
+  }
+  free(valid_seeds);
   move_list_destroy(move_list);
-  endgame_solver_destroy(solver);
   config_destroy(config);
 }
