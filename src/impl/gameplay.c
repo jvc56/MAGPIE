@@ -276,8 +276,8 @@ static void calc_for_self_from_undo(const MoveUndo *undo, const Game *game,
 // calc_for_across after unplay using MoveUndo
 static void calc_for_across_after_unplay_from_undo(const MoveUndo *undo,
                                                    const Game *game,
-                                                   int row_start,
-                                                   int col_start, int csd) {
+                                                   int row_start, int col_start,
+                                                   int csd) {
   const Board *board = game_get_board(game);
   const bool kwgs_are_shared =
       game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
