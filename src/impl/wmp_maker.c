@@ -377,11 +377,6 @@ static void thread_sem_release(ThreadSemaphore *sem) {
   cpthread_mutex_unlock(&sem->mutex);
 }
 
-static void thread_sem_destroy(ThreadSemaphore *sem) {
-  cpthread_mutex_destroy(&sem->mutex);
-  cpthread_cond_destroy(&sem->cond);
-}
-
 // ============================================================================
 // Phase 1: Build word entries and extract unique racks
 // ============================================================================
@@ -1177,9 +1172,6 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
       cpthread_join(dbl_threads[sorted_lengths[i]]);
     }
   }
-
-  // Destroy thread semaphore
-  thread_sem_destroy(&sem);
 
   // Free scratch buffers
   for (int len = 2; len <= BOARD_DIM; len++) {
