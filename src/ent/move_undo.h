@@ -52,6 +52,16 @@ typedef struct MoveUndo {
   // Game state
   int old_consecutive_scoreless_turns;
   game_end_reason_t old_game_end_reason;
+
+  // Minimal move info for lazy cross-set updates
+  // Only valid if tiles were placed (not pass/exchange)
+  uint8_t move_row_start;
+  uint8_t move_col_start;
+  uint8_t move_tiles_length;
+  uint8_t move_dir;
+  // Bitmask: bit i is set if position i had an actual tile placed (not played-through)
+  // Max tiles_length is BOARD_DIM (15), so 16 bits is sufficient
+  uint16_t tiles_placed_mask;
 } MoveUndo;
 
 static inline void move_undo_reset(MoveUndo *undo) {

@@ -267,8 +267,23 @@ void solver_worker_destroy(EndgameSolverWorker *solver_worker) {
   free(solver_worker);
 }
 
-int generate_stm_plays(EndgameSolverWorker *worker) {
+int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
   // stm means side to move
+  // Lazy cross-set generation: only compute if not already valid
+  Board *board = game_get_board(worker->game_copy);
+  if (!board_get_cross_sets_valid(board)) {
+    // Get the parent's MoveUndo (the one that made cross-sets invalid)
+    // The parent undo contains info about the move that was played to reach this state
+    int undo_index = worker->solver->requested_plies - depth - 1;
+    if (undo_index >= 0) {
+      MoveUndo *parent_undo = &worker->move_undos[undo_index];
+      if (parent_undo->move_tiles_length > 0) {
+        // Update cross-sets using the undo-based function
+        update_cross_set_for_move_from_undo(parent_undo, worker->game_copy);
+      }
+    }
+    board_set_cross_sets_valid(board, true);
+  }
   // This won't actually sort by score. We'll do this later.
   const MoveGenArgs args = {
       .game = worker->game_copy,
@@ -434,7 +449,7 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
   // char *spaces = create_spaces(worker->solver->requested_plies - depth);
   bool arena_alloced = false;
   if (worker->current_iterative_deepening_depth != depth) {
-    nplays = generate_stm_plays(worker);
+    nplays = generate_stm_plays(worker, depth);
     assign_estimates_and_sort(worker, depth, nplays, tt_move);
     // log_warn("generated and allocated; nplays %d, cur_size %ld", nplays,
     //          worker->small_move_arena->size);
@@ -486,9 +501,9 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
     } else {
       play_move_incremental(worker->move_list->spare_move, worker->game_copy,
                             &worker->move_undos[undo_index]);
-      // Update cross-sets for the affected squares
-      update_cross_set_for_move(worker->move_list->spare_move,
-                                worker->game_copy);
+      // Cross-sets are left invalid - they will be computed lazily before move
+      // generation if we reach that point. The cross-set squares will be saved
+      // to MoveUndo before updating, so they're restored on unplay.
     }
 
     // Implementation is currently single-threaded. Keep counts per worker if we
@@ -519,17 +534,13 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
       }
     }
     unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_index]);
-
-    // After unplay, regenerate cross-sets for affected squares (if not an outplay)
-    // We use update_cross_sets_after_unplay which doesn't rely on board_get_word_edge
-    if (!is_outplay) {
-      // Reconstruct the move from small_move (spare_move was overwritten by recursive calls)
-      SmallMove *unplay_small_move =
-          (SmallMove *)(worker->small_move_arena->memory + element_offset);
-      small_move_to_move(worker->move_list->spare_move, unplay_small_move,
-                         game_get_board(worker->game_copy));
-      update_cross_sets_after_unplay(worker->move_list->spare_move,
-                                     worker->game_copy);
+    // After unplay, if tiles were placed, cross-sets need to be recomputed
+    // for the restored state. Use undo-based function for correct cross-set update.
+    // If it was a pass, cross-sets are unchanged and still valid.
+    MoveUndo *current_undo = &worker->move_undos[undo_index];
+    if (current_undo->move_tiles_length > 0) {
+      update_cross_sets_after_unplay_from_undo(current_undo, worker->game_copy);
+      board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
     }
 
     // log_warn("%sNow unplayed %d, %s (tm:%x meta:%x)", spaces, idx,
@@ -627,7 +638,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
         game_get_consecutive_scoreless_turns(worker->game_copy));
   }
 
-  int initial_move_count = generate_stm_plays(worker);
+  int initial_move_count = generate_stm_plays(worker, worker->solver->requested_plies);
   // Arena pointer better have started at 0, since it was empty.
   assign_estimates_and_sort(worker, 0, initial_move_count, INVALID_TINY_MOVE);
   worker->solver->n_initial_moves = initial_move_count;
