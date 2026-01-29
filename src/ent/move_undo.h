@@ -1,6 +1,8 @@
 #ifndef MOVE_UNDO_H
 #define MOVE_UNDO_H
 
+#include <assert.h>
+
 #include "../def/board_defs.h"
 #include "../def/game_defs.h"
 #include "../def/rack_defs.h"
@@ -80,9 +82,7 @@ static inline void move_undo_save_square(MoveUndo *undo, Board *board,
   if (move_undo_square_is_saved(undo, index)) {
     return;
   }
-  if (undo->num_square_changes >= MAX_UNDO_SQUARE_CHANGES) {
-    log_fatal("move_undo: exceeded MAX_UNDO_SQUARE_CHANGES");
-  }
+  assert(undo->num_square_changes < MAX_UNDO_SQUARE_CHANGES);
   undo->square_changes[undo->num_square_changes].index = (int16_t)index;
   undo->square_changes[undo->num_square_changes].old_value =
       board->squares[index];
