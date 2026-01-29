@@ -488,8 +488,8 @@ static void *build_words_and_extract_racks(void *arg) {
 
   memset(bucket_counts, 0, wfl->num_word_buckets * sizeof(uint32_t));
 
-  uint32_t letter_offset = 0;
   if (count > 0) {
+    uint32_t letter_offset = 0;
     uint32_t run_start = 0;
     for (uint32_t i = 1; i <= count; i++) {
       bool is_end = (i == count) || !bit_rack_equals(&pairs[i].bit_rack,
@@ -550,7 +550,7 @@ typedef struct {
 static void *build_blank_entries_direct(void *arg) {
   BlankBuildArg *a = (BlankBuildArg *)arg;
   LengthScratchBuffers *scratch = a->scratch;
-  BitRack *unique_racks = scratch->unique_racks;
+  const BitRack *unique_racks = scratch->unique_racks;
   uint32_t num_racks = scratch->num_unique_racks;
   WMPForLength *wfl = a->wfl;
 
@@ -620,7 +620,7 @@ static void *build_blank_entries_direct(void *arg) {
   uint32_t *bucket_counts = scratch->bucket_counts;
 
   if (num_pairs > 0) {
-    BitRack *prev = &pairs[0].bit_rack;
+    const BitRack *prev = &pairs[0].bit_rack;
     bucket_counts[bit_rack_get_bucket_index(prev, wfl->num_blank_buckets)]++;
     for (uint32_t i = 1; i < num_pairs; i++) {
       if (!bit_rack_equals(&pairs[i].bit_rack, prev)) {
@@ -696,7 +696,7 @@ typedef struct {
 static void *build_double_blank_entries_direct(void *arg) {
   DoubleBlankBuildArg *a = (DoubleBlankBuildArg *)arg;
   LengthScratchBuffers *scratch = a->scratch;
-  BitRack *unique_racks = scratch->unique_racks;
+  const BitRack *unique_racks = scratch->unique_racks;
   uint32_t num_racks = scratch->num_unique_racks;
   WMPForLength *wfl = a->wfl;
   int length = a->length;
@@ -782,7 +782,7 @@ static void *build_double_blank_entries_direct(void *arg) {
   uint32_t *bucket_counts = scratch->bucket_counts;
 
   if (num_pairs > 0) {
-    BitRack *prev = &pairs[0].bit_rack;
+    const BitRack *prev = &pairs[0].bit_rack;
     bucket_counts[bit_rack_get_bucket_index(prev,
                                             wfl->num_double_blank_buckets)]++;
     for (uint32_t i = 1; i < num_pairs; i++) {
@@ -877,7 +877,7 @@ static uint32_t calculate_max_word_lookup_bytes(WMP *wmp) {
   for (int len = 2; len <= BOARD_DIM; len++) {
     WMPForLength *wfl = &wmp->wfls[len];
     for (uint32_t i = 0; i < wfl->num_double_blank_entries; i++) {
-      WMPEntry *entry = &wfl->double_blank_map_entries[i];
+      const WMPEntry *entry = &wfl->double_blank_map_entries[i];
       BitRack rack = wmp_entry_read_bit_rack(entry);
       uint32_t first_blanks = entry->first_blank_letters;
       uint32_t total_words = 0;
