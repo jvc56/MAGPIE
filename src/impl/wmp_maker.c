@@ -2,6 +2,7 @@
 
 #include "../compat/cpthread.h"
 #include "../compat/memory_info.h"
+#include "../def/cpthread_defs.h"
 #include "../def/bit_rack_defs.h"
 #include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
@@ -22,12 +23,13 @@
 // ============================================================================
 
 // Minimum number of hash buckets for WMP tables
-#define MIN_BUCKETS 16
+enum { MIN_BUCKETS = 16 };
 
 // Round up to next power of 2
 static inline uint32_t next_power_of_2(uint32_t n) {
-  if (n == 0)
+  if (n == 0) {
     return 1;
+  }
   n--;
   n |= n >> 1;
   n |= n >> 2;
@@ -57,13 +59,15 @@ static inline uint32_t bit_rack_get_letter_mask(const BitRack *bit_rack) {
   uint64_t high = bit_rack_get_high_64(bit_rack);
   uint32_t mask = 0;
   for (int i = 0; i < 16; i++) {
-    if (low & 0xF)
+    if (low & 0xF) {
       mask |= 1U << i;
+    }
     low >>= 4;
   }
   for (int i = 0; i < 16; i++) {
-    if (high & 0xF)
+    if (high & 0xF) {
       mask |= 1U << (i + 16);
+    }
     high >>= 4;
   }
   return mask;
@@ -77,7 +81,7 @@ static inline uint32_t bit_rack_get_letter_mask(const BitRack *bit_rack) {
 #endif
 
 // Prefetch distance (number of elements ahead to prefetch)
-#define PREFETCH_DISTANCE 16
+enum { PREFETCH_DISTANCE = 16 };
 
 // Number of radix passes needed based on alphabet size
 // Each letter uses 4 bits, so bytes_needed = ceil(alphabet_size * 4 / 8)
@@ -107,9 +111,9 @@ typedef struct DoubleBlankPair {
 
 // All pair types have the same size (24 bytes with alignment)
 // This allows buffer reuse across phases
-_Static_assert(sizeof(WordPair) == sizeof(BlankPair), "Pair sizes must match");
-_Static_assert(sizeof(WordPair) >= sizeof(DoubleBlankPair),
-               "WordPair must be >= DoubleBlankPair");
+static_assert(sizeof(WordPair) == sizeof(BlankPair), "Pair sizes must match");
+static_assert(sizeof(WordPair) >= sizeof(DoubleBlankPair),
+              "WordPair must be >= DoubleBlankPair");
 
 // ============================================================================
 // Radix sort implementations with prefetching
@@ -164,8 +168,9 @@ static void radix_pass_word_pairs(WordPair *src, WordPair *dst, uint32_t count,
 
 static void radix_sort_word_pairs(WordPair *pairs, WordPair *temp,
                                   uint32_t count, int num_passes) {
-  if (count <= 1)
+  if (count <= 1) {
     return;
+  }
   for (int pass = 0; pass < num_passes; pass++) {
     if (pass % 2 == 0) {
       radix_pass_word_pairs(pairs, temp, count, pass);
@@ -221,8 +226,9 @@ static void radix_pass_blank_pairs(BlankPair *src, BlankPair *dst,
 
 static void radix_sort_blank_pairs(BlankPair *pairs, BlankPair *temp,
                                    uint32_t count, int num_passes) {
-  if (count <= 1)
+  if (count <= 1) {
     return;
+  }
   for (int pass = 0; pass < num_passes; pass++) {
     if (pass % 2 == 0) {
       radix_pass_blank_pairs(pairs, temp, count, pass);
@@ -286,8 +292,9 @@ static void radix_pass_double_blank_pairs(DoubleBlankPair *src,
 static void radix_sort_double_blank_pairs(DoubleBlankPair *pairs,
                                           DoubleBlankPair *temp, uint32_t count,
                                           int num_bitrack_passes) {
-  if (count <= 1)
+  if (count <= 1) {
     return;
+  }
   // 2 passes for packed_pair + num_bitrack_passes for BitRack
   int total_passes = 2 + num_bitrack_passes;
   for (int pass = 0; pass < total_passes; pass++) {
@@ -382,12 +389,12 @@ static void thread_sem_destroy(ThreadSemaphore *sem) {
 typedef struct {
   const DictionaryWordList *words;
   WMPForLength *wfl;
-  int length;
   WordPair *pairs;
   WordPair *temp;
-  uint32_t pair_count;
   LengthScratchBuffers *scratch;
   ThreadSemaphore *sem; // NULL if running single-threaded
+  int length;
+  uint32_t pair_count;
 } WordBuildArg;
 
 static void *build_words_and_extract_racks(void *arg) {
@@ -430,8 +437,9 @@ static void *build_words_and_extract_racks(void *arg) {
 
   // Build word entries
   wfl->num_word_buckets = next_power_of_2(num_unique);
-  if (wfl->num_word_buckets < MIN_BUCKETS)
+  if (wfl->num_word_buckets < MIN_BUCKETS) {
     wfl->num_word_buckets = MIN_BUCKETS;
+  }
 
   // Resize bucket_counts if needed
   if (wfl->num_word_buckets > scratch->bucket_counts_size) {
@@ -502,7 +510,7 @@ static void *build_words_and_extract_racks(void *arg) {
           for (uint32_t j = 0; j < words_in_run; j++) {
             const DictionaryWord *word = dictionary_word_list_get_word(
                 words, (int)pairs[run_start + j].word_index);
-            memcpy(entry->bucket_or_inline + j * word_length,
+            memcpy(entry->bucket_or_inline + (size_t)j * word_length,
                    dictionary_word_get_word(word), word_length);
           }
         } else {
@@ -522,8 +530,9 @@ static void *build_words_and_extract_racks(void *arg) {
     }
   }
 
-  if (a->sem)
+  if (a->sem) {
     thread_sem_release(a->sem);
+  }
   return NULL;
 }
 
@@ -595,8 +604,9 @@ static void *build_blank_entries_direct(void *arg) {
 
   // Determine bucket count
   wfl->num_blank_buckets = next_power_of_2(num_unique);
-  if (wfl->num_blank_buckets < MIN_BUCKETS)
+  if (wfl->num_blank_buckets < MIN_BUCKETS) {
     wfl->num_blank_buckets = MIN_BUCKETS;
+  }
 
   // Resize bucket_counts if needed
   if (wfl->num_blank_buckets > scratch->bucket_counts_size) {
@@ -666,8 +676,9 @@ static void *build_blank_entries_direct(void *arg) {
     }
   }
 
-  if (a->sem)
+  if (a->sem) {
     thread_sem_release(a->sem);
+  }
   return NULL;
 }
 
@@ -754,8 +765,9 @@ static void *build_double_blank_entries_direct(void *arg) {
 
   // Determine bucket count
   wfl->num_double_blank_buckets = next_power_of_2(num_unique);
-  if (wfl->num_double_blank_buckets < MIN_BUCKETS)
+  if (wfl->num_double_blank_buckets < MIN_BUCKETS) {
     wfl->num_double_blank_buckets = MIN_BUCKETS;
+  }
 
   // Resize bucket_counts if needed
   if (wfl->num_double_blank_buckets > scratch->bucket_counts_size) {
@@ -831,8 +843,9 @@ static void *build_double_blank_entries_direct(void *arg) {
     }
   }
 
-  if (a->sem)
+  if (a->sem) {
     thread_sem_release(a->sem);
+  }
   return NULL;
 }
 
@@ -870,10 +883,11 @@ static uint32_t calculate_max_word_lookup_bytes(WMP *wmp) {
       uint32_t total_words = 0;
 
       bit_rack_set_letter_count(&rack, BLANK_MACHINE_LETTER, 1);
-      for (MachineLetter ml1 = 1; ml1 < BIT_RACK_MAX_ALPHABET_SIZE; ml1++) {
-        if (!(first_blanks & (1U << ml1)))
+      for (int ml1 = 1; ml1 < BIT_RACK_MAX_ALPHABET_SIZE; ml1++) {
+        if (!(first_blanks & (1U << ml1))) {
           continue;
-        bit_rack_add_letter(&rack, ml1);
+        }
+        bit_rack_add_letter(&rack, (MachineLetter)ml1);
 
         uint32_t blank_bucket =
             bit_rack_get_bucket_index(&rack, wfl->num_blank_buckets);
@@ -884,25 +898,26 @@ static uint32_t calculate_max_word_lookup_bytes(WMP *wmp) {
               wmp_entry_read_bit_rack(&wfl->blank_map_entries[bi]);
           if (bit_rack_equals(&blank_rack, &rack)) {
             uint32_t second_blanks = wfl->blank_map_entries[bi].blank_letters;
-            for (MachineLetter ml2 = ml1; ml2 < BIT_RACK_MAX_ALPHABET_SIZE;
-                 ml2++) {
-              if (!(second_blanks & (1U << ml2)))
+            for (int ml2 = ml1; ml2 < BIT_RACK_MAX_ALPHABET_SIZE; ml2++) {
+              if (!(second_blanks & (1U << ml2))) {
                 continue;
-              bit_rack_add_letter(&rack, ml2);
+              }
+              bit_rack_add_letter(&rack, (MachineLetter)ml2);
               bit_rack_set_letter_count(&rack, BLANK_MACHINE_LETTER, 0);
               total_words += wfl_get_word_count(wfl, &rack, len);
               bit_rack_set_letter_count(&rack, BLANK_MACHINE_LETTER, 1);
-              bit_rack_take_letter(&rack, ml2);
+              bit_rack_take_letter(&rack, (MachineLetter)ml2);
             }
             break;
           }
         }
-        bit_rack_take_letter(&rack, ml1);
+        bit_rack_take_letter(&rack, (MachineLetter)ml1);
       }
 
       uint32_t bytes = total_words * len;
-      if (bytes > max_bytes)
+      if (bytes > max_bytes) {
         max_bytes = bytes;
+      }
     }
   }
   return max_bytes;
