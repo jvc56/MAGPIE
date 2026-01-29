@@ -58,37 +58,6 @@ static double get_time_sec(void) {
   return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
 
-// Per-ply callback to print PV during iterative deepening
-static void print_pv_callback(int depth, int32_t value, const PVLine *pv_line,
-                              const Game *game, void *user_data) {
-  double *start_time = (double *)user_data;
-  double elapsed = get_time_sec() - *start_time;
-
-  StringBuilder *sb = string_builder_create();
-  string_builder_add_formatted_string(sb, "  depth %d: value=%d, time=%.3fs, pv=",
-                                      depth, value, elapsed);
-
-  // Format each move in the PV
-  Game *game_copy = game_duplicate(game);
-  const Board *board = game_get_board(game_copy);
-  const LetterDistribution *ld = game_get_ld(game_copy);
-  Move move;
-
-  for (int i = 0; i < pv_line->num_moves; i++) {
-    small_move_to_move(&move, &(pv_line->moves[i]), board);
-    string_builder_add_move(sb, board, &move, ld, true);
-    if (i < pv_line->num_moves - 1) {
-      string_builder_add_string(sb, " ");
-    }
-    // Play the move to update the board for the next move
-    play_move(&move, game_copy, NULL);
-  }
-
-  printf("%s\n", string_builder_peek(sb));
-  string_builder_destroy(sb);
-  game_destroy(game_copy);
-}
-
 // Play moves until the bag is empty, returning true if we get a valid endgame
 // position (bag empty, both players have tiles)
 static bool play_until_bag_empty(Game *game, MoveList *move_list) {
