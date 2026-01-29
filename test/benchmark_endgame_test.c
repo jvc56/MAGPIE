@@ -139,21 +139,23 @@ static void run_endgames_with_pv(Config *config, EndgameSolver *solver,
     string_builder_destroy(game_sb);
     game_string_options_destroy(gso);
 
-    double start_time = get_time_sec();
+    double game_start = get_time_sec();
     EndgameArgs args = {.game = game,
                         .thread_control = config_get_thread_control(config),
                         .plies = ply,
-                        .tt_fraction_of_mem = 0.25,  // 25% of memory
+                        .tt_fraction_of_mem = 0.1,  // 10% to reduce TT alloc time
                         .initial_small_move_arena_size =
                             DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
                         .num_threads = num_threads,
-                        .per_ply_callback = print_pv_callback,
-                        .per_ply_callback_data = &start_time};
+                        .per_ply_callback = NULL,  // Disable callback
+                        .per_ply_callback_data = NULL};
     EndgameResults *results = config_get_endgame_results(config);
     ErrorStack *err = error_stack_create();
 
-    printf("Solving %d-ply endgame...\n", ply);
+    printf("Solving %d-ply endgame with %d threads...\n", ply, num_threads);
     endgame_solve(solver, &args, results, err);
+    double game_elapsed = get_time_sec() - game_start;
+    printf("  Game solved in %.3fs\n", game_elapsed);
     assert(error_stack_is_empty(err));
 
     valid_endgames++;
@@ -166,24 +168,35 @@ static void run_endgames_with_pv(Config *config, EndgameSolver *solver,
 void test_benchmark_endgame(void) {
   log_set_level(LOG_WARN);  // Allow warnings to show diagnostics
 
-  const int num_games = 3;   // Quick verification test
-  const int ply = 6;         // 6-ply search
-  const int num_threads = 8;
-  const uint64_t base_seed = 0;
+  const int num_games = 3;
+  const int ply = 6;  // Need deeper search to see ABDADA benefits
+  const uint64_t base_seed = 42;  // Fixed seed for reproducibility
+
+  // Thread counts to benchmark
+  int thread_counts[] = {1, 2, 4, 8};
+  int num_configs = sizeof(thread_counts) / sizeof(thread_counts[0]);
 
   Config *config = config_create_or_die(
       "set -lex CSW21 -threads 1 -s1 score -s2 score -r1 small -r2 small");
 
-  EndgameSolver *solver = endgame_solver_create();
-
   printf("\n");
   printf("==============================================\n");
-  printf("  Endgame Benchmark: %d games, %d-ply, %d threads\n", num_games, ply,
-         num_threads);
+  printf("  ABDADA Endgame Benchmark: %d games, %d-ply\n", num_games, ply);
   printf("==============================================\n");
 
-  run_endgames_with_pv(config, solver, num_games, ply, num_threads, base_seed);
+  for (int c = 0; c < num_configs; c++) {
+    int num_threads = thread_counts[c];
+    EndgameSolver *solver = endgame_solver_create();
 
-  endgame_solver_destroy(solver);
+    printf("\n--- Testing with %d thread(s) ---\n", num_threads);
+    double start_time = get_time_sec();
+    run_endgames_with_pv(config, solver, num_games, ply, num_threads, base_seed);
+    double elapsed = get_time_sec() - start_time;
+    printf("Total time for %d threads: %.3fs (%.3fs/game)\n",
+           num_threads, elapsed, elapsed / num_games);
+
+    endgame_solver_destroy(solver);
+  }
+
   config_destroy(config);
 }
