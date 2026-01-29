@@ -108,21 +108,8 @@ typedef struct BlankPair {
   uint32_t blank_letter_bit;
 } BlankPair;
 
-static int compare_blank_pairs(const void *a, const void *b) {
-  const BlankPair *pa = (const BlankPair *)a;
-  const BlankPair *pb = (const BlankPair *)b;
-  uint64_t ah = bit_rack_get_high_64(&pa->bit_rack);
-  uint64_t bh = bit_rack_get_high_64(&pb->bit_rack);
-  if (ah != bh) return (ah < bh) ? -1 : 1;
-  uint64_t al = bit_rack_get_low_64(&pa->bit_rack);
-  uint64_t bl = bit_rack_get_low_64(&pb->bit_rack);
-  if (al != bl) return (al < bl) ? -1 : 1;
-  return 0;
-}
 
-// Radix sort pass for BlankPair - extracts byte from BitRack
-// (Currently unused - radix sort disabled due to ordering issues)
-__attribute__((unused))
+// Radix sort pass for BlankPair - extracts byte from BitRack (16 bytes total)
 static void radix_pass_blank_pairs(BlankPair *src, BlankPair *dst, uint32_t count,
                                     int byte_idx) {
   uint32_t counts[256] = {0};
@@ -155,14 +142,13 @@ static void radix_pass_blank_pairs(BlankPair *src, BlankPair *dst, uint32_t coun
   }
 }
 
-// Radix sort BlankPairs by BitRack (12 bytes = 96 bits)
-// (Currently unused - radix sort disabled due to ordering issues)
-__attribute__((unused))
+// Radix sort BlankPairs by BitRack (16 bytes = 128 bits)
 static void radix_sort_blank_pairs_with_temp(BlankPair *pairs, BlankPair *temp,
                                               uint32_t count) {
   if (count <= 1) return;
 
-  for (int pass = 0; pass < 12; pass++) {
+  // 16 passes for 16 bytes. After even number of passes, data ends up in pairs.
+  for (int pass = 0; pass < 16; pass++) {
     if (pass % 2 == 0) {
       radix_pass_blank_pairs(pairs, temp, count, pass);
     } else {
@@ -177,25 +163,11 @@ typedef struct DoubleBlankPair {
   uint16_t packed_pair;
 } DoubleBlankPair;
 
-static int compare_double_blank_pairs(const void *a, const void *b) {
-  const DoubleBlankPair *pa = (const DoubleBlankPair *)a;
-  const DoubleBlankPair *pb = (const DoubleBlankPair *)b;
-  uint64_t ah = bit_rack_get_high_64(&pa->bit_rack);
-  uint64_t bh = bit_rack_get_high_64(&pb->bit_rack);
-  if (ah != bh) return (ah < bh) ? -1 : 1;
-  uint64_t al = bit_rack_get_low_64(&pa->bit_rack);
-  uint64_t bl = bit_rack_get_low_64(&pb->bit_rack);
-  if (al != bl) return (al < bl) ? -1 : 1;
-  if (pa->packed_pair != pb->packed_pair) {
-    return (pa->packed_pair < pb->packed_pair) ? -1 : 1;
-  }
-  return 0;
-}
 
 // Radix sort pass for DoubleBlankPair
 // byte_idx 0-1: packed_pair (least significant)
-// byte_idx 2-13: BitRack bytes 0-11 (most significant)
-__attribute__((unused))
+// byte_idx 2-9: BitRack low bytes (8 bytes)
+// byte_idx 10-17: BitRack high bytes (8 bytes)
 static void radix_pass_double_blank_pairs(DoubleBlankPair *src, DoubleBlankPair *dst,
                                            uint32_t count, int byte_idx) {
   uint32_t counts[256] = {0};
@@ -206,10 +178,10 @@ static void radix_pass_double_blank_pairs(DoubleBlankPair *src, DoubleBlankPair 
       // packed_pair bytes (little-endian)
       byte = (src[i].packed_pair >> (byte_idx * 8)) & 0xFF;
     } else if (byte_idx < 10) {
-      // BitRack low bytes
+      // BitRack low bytes (indices 2-9 map to low byte 0-7)
       byte = (bit_rack_get_low_64(&src[i].bit_rack) >> ((byte_idx - 2) * 8)) & 0xFF;
     } else {
-      // BitRack high bytes
+      // BitRack high bytes (indices 10-17 map to high byte 0-7)
       byte = (bit_rack_get_high_64(&src[i].bit_rack) >> ((byte_idx - 10) * 8)) & 0xFF;
     }
     counts[byte]++;
@@ -236,24 +208,20 @@ static void radix_pass_double_blank_pairs(DoubleBlankPair *src, DoubleBlankPair 
 }
 
 // Radix sort DoubleBlankPairs by (BitRack, packed_pair)
-// 14 passes: 2 for packed_pair + 12 for BitRack
-// Currently disabled due to sorting issues - using qsort instead
-__attribute__((unused))
+// 18 passes: 2 for packed_pair + 16 for BitRack
 static void radix_sort_double_blank_pairs_with_temp(DoubleBlankPair *pairs,
                                                      DoubleBlankPair *temp,
                                                      uint32_t count) {
   if (count <= 1) return;
 
-  // 14 passes: pass 0 pairs->temp, pass 1 temp->pairs, ..., pass 13 temp->pairs
-  // After 14 passes (even count, but last pass is odd), data is in pairs
-  for (int pass = 0; pass < 14; pass++) {
+  // 18 passes: After even number of passes, data ends up in pairs.
+  for (int pass = 0; pass < 18; pass++) {
     if (pass % 2 == 0) {
       radix_pass_double_blank_pairs(pairs, temp, count, pass);
     } else {
       radix_pass_double_blank_pairs(temp, pairs, count, pass);
     }
   }
-  // Data is already in pairs - no copy needed
 }
 
 // ============================================================================
@@ -300,10 +268,12 @@ static void radix_pass_word_pairs(WordPair *src, WordPair *dst, uint32_t count,
 }
 
 // Radix sort with pre-allocated temp buffer (caller provides temp of same size as pairs)
+// 16 passes for full 128-bit BitRack (16 bytes)
 static void radix_sort_word_pairs_with_temp(WordPair *pairs, WordPair *temp, uint32_t count) {
   if (count <= 1) return;
 
-  for (int pass = 0; pass < 12; pass++) {
+  // 16 passes for 16 bytes. After even number of passes, data ends up in pairs.
+  for (int pass = 0; pass < 16; pass++) {
     if (pass % 2 == 0) {
       radix_pass_word_pairs(pairs, temp, count, pass);
     } else {
@@ -538,10 +508,8 @@ static void build_blank_map_sorted(const MutableWordsOfSameLengthMap *mwfl,
     }
   }
 
-  // Sort by bit_rack using qsort
-  // (radix sort has subtle ordering issues that cause incorrect merging)
-  (void)temp;  // allocated but unused - radix sort disabled
-  qsort(pairs, num_pairs, sizeof(BlankPair), compare_blank_pairs);
+  // Sort by bit_rack using radix sort (16 bytes for full 128-bit BitRack)
+  radix_sort_blank_pairs_with_temp(pairs, temp, num_pairs);
 
   // Count unique bit_racks (for sizing)
   uint32_t num_unique = 0;
@@ -750,9 +718,8 @@ static void build_double_blank_map_sorted(const MutableWordsOfSameLengthMap *mwf
     }
   }
 
-  // Sort by bit_rack then by packed_pair using qsort (radix sort has issues)
-  (void)temp;  // unused for now
-  qsort(pairs, num_pairs, sizeof(DoubleBlankPair), compare_double_blank_pairs);
+  // Sort by bit_rack then by packed_pair using radix sort (18 passes)
+  radix_sort_double_blank_pairs_with_temp(pairs, temp, num_pairs);
 
   // Count unique bit_racks and pairs per bit_rack
   uint32_t num_unique = 0;
