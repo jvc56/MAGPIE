@@ -1,0 +1,40 @@
+YBWC vs ABDADA Endgame Solver Benchmark Results
+================================================
+
+Test Configuration:
+- 10 games, 6-ply depth
+- Same random seeds for fair comparison
+- Release builds with -O3 -flto -march=native
+- 16-core VM
+
+ABDADA (combined-optimizations branch) - WORKING
+-------------------------------------------------
+  Threads   Time (s)   ms/game   Speedup
+  -------   --------   -------   -------
+        1      69.36   6936.02     1.00x
+        2      27.60   2760.40     2.51x
+        4      18.03   1802.60     3.85x
+        6      14.12   1411.57     4.91x
+        8      12.59   1258.99     5.51x
+       12      11.93   1193.32     5.81x
+       16      13.43   1342.76     5.17x
+
+YBWC (ybwc branch) - BROKEN
+---------------------------
+  Threads   Time (s)   ms/game   Speedup
+  -------   --------   -------   -------
+        1     167.96   16795.85     1.00x
+        2     339.73   33972.50     0.49x
+        4     333.59   33359.10     0.50x
+        6     332.69   33269.24     0.50x
+        8     332.03   33203.01     0.51x
+       12     332.30   33229.54     0.51x
+       16     332.01   33201.04     0.51x
+
+Key Findings:
+1. YBWC parallelization is broken - multi-threading makes it 2x SLOWER
+2. ABDADA scales well up to 12 threads (5.81x speedup)
+3. ABDADA single-threaded is also 2.4x faster than YBWC single-threaded
+   (likely due to other optimizations in combined-optimizations branch)
+
+Conclusion: The YBWC implementation has a serious bug. ABDADA is recommended.
