@@ -39,8 +39,7 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack);
 void endgame_solver_destroy(EndgameSolver *es);
 
-// Setter functions for optimization flags (used for benchmarking)
-void endgame_solver_set_lmr(EndgameSolver *es, bool enabled);
+// Setter function for aspiration windows (used for benchmarking)
 void endgame_solver_set_aspiration(EndgameSolver *es, bool enabled);
 
 void string_builder_endgame_results(StringBuilder *pv_description,

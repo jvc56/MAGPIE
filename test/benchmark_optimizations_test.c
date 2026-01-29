@@ -63,7 +63,6 @@ static bool play_until_bag_empty(Game *game, MoveList *move_list) {
 
 typedef struct {
   const char *name;
-  bool lmr;
   bool aspiration;
   double total_time;
   int total_games;
@@ -86,21 +85,19 @@ void test_benchmark_optimizations(void) {
   exec_config_quiet(config, "new");
   Game *game = config_get_game(config);
 
-  ModeStats modes[4] = {
-      {"baseline (no opts)", false, false, 0, 0, NULL},
-      {"LMR only", true, false, 0, 0, NULL},
-      {"aspiration only", false, true, 0, 0, NULL},
-      {"LMR + aspiration", true, true, 0, 0, NULL},
+  ModeStats modes[2] = {
+      {"baseline (no aspiration)", false, 0, 0, NULL},
+      {"aspiration windows", true, 0, 0, NULL},
   };
 
   // Allocate value arrays
-  for (int m = 0; m < 4; m++) {
+  for (int m = 0; m < 2; m++) {
     modes[m].values = malloc(num_games * sizeof(int32_t));
   }
 
   printf("\n");
   printf("==============================================\n");
-  printf("  Optimization Comparison: %d games, %d-ply\n", num_games, ply);
+  printf("  Aspiration Window Benchmark: %d games, %d-ply\n", num_games, ply);
   printf("  (One fresh TT per mode, reused across positions)\n");
   printf("==============================================\n\n");
 
@@ -122,13 +119,12 @@ void test_benchmark_optimizations(void) {
   printf("Found %d valid endgames.\n\n", valid_count);
 
   // Run each mode on ALL positions before moving to next mode
-  for (int m = 0; m < 4; m++) {
+  for (int m = 0; m < 2; m++) {
     printf("Running %s on %d positions...\n", modes[m].name, valid_count);
     fflush(stdout);
 
     // Create fresh solver for this mode (fresh TT)
     EndgameSolver *solver = endgame_solver_create();
-    endgame_solver_set_lmr(solver, modes[m].lmr);
     endgame_solver_set_aspiration(solver, modes[m].aspiration);
 
     Timer mode_timer;
@@ -175,36 +171,33 @@ void test_benchmark_optimizations(void) {
   printf("==============================================\n\n");
 
   // Count agreements with baseline
-  int agreements[4] = {valid_count, 0, 0, 0};  // baseline agrees with itself
-  for (int m = 1; m < 4; m++) {
-    for (int g = 0; g < valid_count; g++) {
-      if (modes[m].values[g] == modes[0].values[g]) {
-        agreements[m]++;
-      }
+  int agreements = 0;
+  for (int g = 0; g < valid_count; g++) {
+    if (modes[1].values[g] == modes[0].values[g]) {
+      agreements++;
     }
   }
 
-  printf("%-25s %10s %10s %12s\n", "Mode", "Agree", "Time/game", "Total time");
-  printf("%-25s %10s %10s %12s\n", "----", "-----", "---------", "----------");
+  printf("%-30s %10s %10s %12s\n", "Mode", "Agree", "Time/game", "Total time");
+  printf("%-30s %10s %10s %12s\n", "----", "-----", "---------", "----------");
 
-  for (int m = 0; m < 4; m++) {
+  for (int m = 0; m < 2; m++) {
     double avg_time = modes[m].total_time / modes[m].total_games;
-    printf("%-25s %7d/%d %9.3fs %11.1fs\n", modes[m].name, agreements[m],
+    int agree = (m == 0) ? valid_count : agreements;
+    printf("%-30s %7d/%d %9.3fs %11.1fs\n", modes[m].name, agree,
            modes[m].total_games, avg_time, modes[m].total_time);
   }
 
   printf("\n");
-  printf("Speedups vs baseline:\n");
   double baseline_avg = modes[0].total_time / modes[0].total_games;
-  for (int m = 1; m < 4; m++) {
-    double avg_time = modes[m].total_time / modes[m].total_games;
-    double speedup = baseline_avg / avg_time;
-    printf("  %s: %.2fx faster, %d/%d agreement\n", modes[m].name, speedup,
-           agreements[m], modes[m].total_games);
-  }
+  double asp_avg = modes[1].total_time / modes[1].total_games;
+  double speedup = baseline_avg / asp_avg;
+  printf("Aspiration windows: %.2fx %s, %d/%d agreement\n",
+         speedup >= 1.0 ? speedup : 1.0 / speedup,
+         speedup >= 1.0 ? "faster" : "slower", agreements, valid_count);
 
   // Cleanup
-  for (int m = 0; m < 4; m++) {
+  for (int m = 0; m < 2; m++) {
     free(modes[m].values);
   }
   free(valid_seeds);

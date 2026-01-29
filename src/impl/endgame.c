@@ -56,7 +56,6 @@ struct EndgameSolver {
   bool first_win_optim;
   bool transposition_table_optim;
   bool negascout_optim;
-  bool lmr_optim;         // Late Move Reductions
   bool aspiration_optim;  // Aspiration windows
   bool lazysmp_optim;
   bool prevent_slowroll;
@@ -73,9 +72,10 @@ struct EndgameSolver {
   int moves_generated;
   int first_move_cutoffs;      // cutoffs on first move (best move ordering)
   int negascout_researches;    // times we had to re-search with wider window
-  int lmr_reductions;          // times LMR reduced depth
-  int lmr_researches;          // times LMR required re-search
   int aspiration_failures;     // times aspiration window failed
+  // Per-window aspiration stats: [0]=25, [1]=50, [2]=100, [3]=200, [4]=full
+  int aspiration_success[5];   // successes at each window size
+  int aspiration_fail[5];      // failures at each window size
   int nodes_at_depth[30];      // nodes visited at each depth
 
   int solve_multiple_variations;
@@ -195,9 +195,6 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->transposition_table_optim = true;
   es->iterative_deepening_optim = true;
   es->negascout_optim = true;
-  // LMR provides ~40-90% speedup but may find suboptimal lines (within ~1 point)
-  // in complex endgames. Disable for exact solving.
-  es->lmr_optim = true;
   es->aspiration_optim = true;
   es->solve_multiple_variations = 0;
   es->nodes_searched = 0;
@@ -207,9 +204,11 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->moves_generated = 0;
   es->first_move_cutoffs = 0;
   es->negascout_researches = 0;
-  es->lmr_reductions = 0;
-  es->lmr_researches = 0;
   es->aspiration_failures = 0;
+  for (int i = 0; i < 5; i++) {
+    es->aspiration_success[i] = 0;
+    es->aspiration_fail[i] = 0;
+  }
   for (int i = 0; i < 30; i++) {
     es->nodes_at_depth[i] = 0;
   }
@@ -263,11 +262,7 @@ void endgame_solver_destroy(EndgameSolver *es) {
   free(es);
 }
 
-// Setter functions for optimization flags (used for benchmarking)
-void endgame_solver_set_lmr(EndgameSolver *es, bool enabled) {
-  es->lmr_optim = enabled;
-}
-
+// Setter function for aspiration windows (used for benchmarking)
 void endgame_solver_set_aspiration(EndgameSolver *es, bool enabled) {
   es->aspiration_optim = enabled;
 }
@@ -533,29 +528,9 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
       value = negamax(worker, child_key, depth - 1, -beta, -alpha, &child_pv,
                       pv_node);
     } else {
-      // Late Move Reductions: for later moves at sufficient depth, try reduced
-      // depth search first. If move looks good, re-search at full depth.
-      // Be conservative: only apply at depth >= 4 and for moves after the
-      // first 4, to avoid missing critical variations.
-      int reduction = 0;
-      if (worker->solver->lmr_optim && !pv_node && depth >= 4 && idx >= 4 &&
-          !small_move_is_pass(small_move) &&
-          small_move_get_tiles_played(small_move) !=
-              player_get_rack(player_on_turn)->number_of_letters) {
-        // Reduce depth by 1 for late moves that aren't passes or going-out
-        reduction = 1;
-        worker->solver->lmr_reductions++;
-      }
-
-      value = negamax(worker, child_key, depth - 1 - reduction, -alpha - 1,
-                      -alpha, &child_pv, false);
-
-      // Re-search at full depth if reduced search found a promising move
-      if (reduction > 0 && -value > alpha) {
-        worker->solver->lmr_researches++;
-        value = negamax(worker, child_key, depth - 1, -alpha - 1, -alpha,
-                        &child_pv, false);
-      }
+      // Negascout/PVS: search with null window first
+      value = negamax(worker, child_key, depth - 1, -alpha - 1, -alpha,
+                      &child_pv, false);
 
       if (alpha < -value && -value < beta) {
         // re-search with wider window (negascout)
@@ -690,23 +665,44 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     pv.game = worker->game_copy;
     pv.num_moves = 0;
 
-    // Aspiration windows: use narrow window based on previous value
-    int32_t asp_alpha = alpha;
-    int32_t asp_beta = beta;
+    // Aspiration windows with progressive widening
+    int32_t val;
     if (worker->solver->aspiration_optim && p > 1 &&
         !worker->solver->first_win_optim) {
-      asp_alpha = prev_value - ASPIRATION_WINDOW;
-      asp_beta = prev_value + ASPIRATION_WINDOW;
-    }
+      // Start with narrow window, progressively widen on failure
+      // Window sizes: 25[0], 50[1], 100[2], 200[3], full[4]
+      int32_t window = ASPIRATION_WINDOW;
+      int window_idx = 0;  // 0=25, 1=50, 2=100, 3=200, 4=full
+      int32_t asp_alpha = prev_value - window;
+      int32_t asp_beta = prev_value + window;
 
-    int32_t val = negamax(worker, initial_hash_key, p, asp_alpha, asp_beta, &pv,
-                          true);
+      val = negamax(worker, initial_hash_key, p, asp_alpha, asp_beta, &pv, true);
 
-    // If aspiration window failed, re-search with full window
-    if (worker->solver->aspiration_optim && p > 1 &&
-        !worker->solver->first_win_optim &&
-        (val <= asp_alpha || val >= asp_beta)) {
-      worker->solver->aspiration_failures++;
+      // Progressive widening: double window size on each failure
+      while (val <= asp_alpha || val >= asp_beta) {
+        worker->solver->aspiration_failures++;
+        worker->solver->aspiration_fail[window_idx]++;
+        window *= 2;
+        window_idx++;
+        if (window > 200) {
+          // Fall back to full window
+          val = negamax(worker, initial_hash_key, p, alpha, beta, &pv, true);
+          worker->solver->aspiration_success[4]++;  // full window always succeeds
+          break;
+        }
+        // Widen in the direction of failure
+        if (val <= asp_alpha) {
+          asp_alpha = prev_value - window;
+        } else {
+          asp_beta = prev_value + window;
+        }
+        val = negamax(worker, initial_hash_key, p, asp_alpha, asp_beta, &pv, true);
+      }
+      // Record success if we didn't fall back to full window
+      if (window <= 200) {
+        worker->solver->aspiration_success[window_idx]++;
+      }
+    } else {
       val = negamax(worker, initial_hash_key, p, alpha, beta, &pv, true);
     }
 
@@ -923,13 +919,31 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
            "avg_cutoff_idx=%.2f, negascout_researches=%d",
            solver->beta_cutoffs, solver->first_move_cutoffs, first_move_pct,
            avg_cutoff_idx, solver->negascout_researches);
-  double lmr_research_rate =
-      solver->lmr_reductions > 0
-          ? 100.0 * solver->lmr_researches / solver->lmr_reductions
-          : 0.0;
-  log_warn("lmr stats: reductions=%d, researches=%d (%.1f%%)",
-           solver->lmr_reductions, solver->lmr_researches, lmr_research_rate);
   log_warn("aspiration stats: failures=%d", solver->aspiration_failures);
+  // Per-window breakdown: window sizes are 25, 50, 100, 200, full
+  int total_asp = 0;
+  for (int i = 0; i < 5; i++) {
+    total_asp += solver->aspiration_success[i] + solver->aspiration_fail[i];
+  }
+  if (total_asp > 0) {
+    const int windows[] = {25, 50, 100, 200, 0};  // 0 = full
+    StringBuilder *asp_sb = string_builder_create();
+    string_builder_add_string(asp_sb, "aspiration per-window: ");
+    for (int i = 0; i < 5; i++) {
+      int s = solver->aspiration_success[i];
+      int f = solver->aspiration_fail[i];
+      if (s + f > 0) {
+        if (i < 4) {
+          string_builder_add_formatted_string(asp_sb, "w%d=%d/%d ", windows[i],
+                                              s, s + f);
+        } else {
+          string_builder_add_formatted_string(asp_sb, "full=%d ", s);
+        }
+      }
+    }
+    log_warn("%s", string_builder_peek(asp_sb));
+    string_builder_destroy(asp_sb);
+  }
 
   // Print nodes per depth
   StringBuilder *depth_sb = string_builder_create();
