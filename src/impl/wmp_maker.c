@@ -653,7 +653,10 @@ void mutable_word_map_destroy(MutableWordMap *mwmp) {
       for (uint32_t entry_idx = 0; entry_idx < bucket->num_entries;
            entry_idx++) {
         MutableWordMapEntry *entry = &bucket->entries[entry_idx];
-        dictionary_word_list_destroy(entry->letters);
+        // Handle NULL letters (ownership may have been transferred)
+        if (entry->letters != NULL) {
+          dictionary_word_list_destroy(entry->letters);
+        }
       }
       free(bucket->entries);
     }
@@ -685,7 +688,10 @@ void mutable_double_blank_map_destroy(MutableDoubleBlankMap *mdbmp) {
       for (uint32_t entry_idx = 0; entry_idx < bucket->num_entries;
            entry_idx++) {
         MutableDoubleBlankMapEntry *entry = &bucket->entries[entry_idx];
-        dictionary_word_list_destroy(entry->letter_pairs);
+        // Handle NULL letter_pairs (ownership may have been transferred)
+        if (entry->letter_pairs != NULL) {
+          dictionary_word_list_destroy(entry->letter_pairs);
+        }
       }
       free(bucket->entries);
     }
@@ -703,29 +709,34 @@ uint32_t mwfl_get_num_entries(const MutableWordsOfSameLengthMap *mwfl) {
   return num_sets;
 }
 
-void reinsert_word_entry(const MutableWordMapEntry *entry,
+// Transfer entry directly using stored bit_rack instead of recomputing
+void transfer_word_entry(MutableWordMapEntry *entry,
                          MutableWordsOfSameLengthMap *new_mwfl) {
-  const int num_words = dictionary_word_list_get_count(entry->letters);
-  for (int word_idx = 0; word_idx < num_words; word_idx++) {
-    const DictionaryWord *word =
-        dictionary_word_list_get_word(entry->letters, word_idx);
-    const BitRack bit_rack = bit_rack_create_from_dictionary_word(word);
-    const uint32_t bucket_index =
-        bit_rack_get_bucket_index(&bit_rack, new_mwfl->num_word_buckets);
-    MutableWordMapBucket *bucket = &new_mwfl->word_buckets[bucket_index];
-    mutable_word_map_bucket_insert_word(bucket, &bit_rack, word);
+  const uint32_t bucket_index =
+      bit_rack_get_bucket_index(&entry->bit_rack, new_mwfl->num_word_buckets);
+  MutableWordMapBucket *bucket = &new_mwfl->word_buckets[bucket_index];
+
+  if (bucket->num_entries == bucket->capacity) {
+    bucket->capacity *= 2;
+    bucket->entries = realloc_or_die(
+        bucket->entries, sizeof(MutableWordMapEntry) * bucket->capacity);
   }
+  // Transfer ownership of the entry (including letters pointer)
+  bucket->entries[bucket->num_entries] = *entry;
+  bucket->num_entries++;
+  // Null out source to prevent double-free during destroy
+  entry->letters = NULL;
 }
 
-void reinsert_entries_from_word_bucket(const MutableWordMapBucket *bucket,
+void transfer_entries_from_word_bucket(MutableWordMapBucket *bucket,
                                        MutableWordsOfSameLengthMap *new_mwfl) {
   for (uint32_t entry_idx = 0; entry_idx < bucket->num_entries; entry_idx++) {
-    const MutableWordMapEntry *entry = &bucket->entries[entry_idx];
-    reinsert_word_entry(entry, new_mwfl);
+    MutableWordMapEntry *entry = &bucket->entries[entry_idx];
+    transfer_word_entry(entry, new_mwfl);
   }
 }
 
-void fill_resized_mwfl(const MutableWordsOfSameLengthMap *mwfl,
+void fill_resized_mwfl(MutableWordsOfSameLengthMap *mwfl,
                        MutableWordsOfSameLengthMap *new_mwfl) {
   const uint32_t num_entries = mwfl_get_num_entries(mwfl);
   new_mwfl->num_word_buckets = next_power_of_2(num_entries);
@@ -737,15 +748,15 @@ void fill_resized_mwfl(const MutableWordsOfSameLengthMap *mwfl,
   }
   for (uint32_t bucket_idx = 0; bucket_idx < mwfl->num_word_buckets;
        bucket_idx++) {
-    const MutableWordMapBucket *bucket = &mwfl->word_buckets[bucket_idx];
-    reinsert_entries_from_word_bucket(bucket, new_mwfl);
+    MutableWordMapBucket *bucket = &mwfl->word_buckets[bucket_idx];
+    transfer_entries_from_word_bucket(bucket, new_mwfl);
   }
 }
 
-MutableWordMap *resize_mutable_word_map(const MutableWordMap *mwmp) {
+MutableWordMap *resize_mutable_word_map(MutableWordMap *mwmp) {
   MutableWordMap *resized_mwmp = malloc_or_die(sizeof(MutableWordMap));
   for (int len = 2; len <= BOARD_DIM; len++) {
-    const MutableWordsOfSameLengthMap *mwfl = &mwmp->maps[len];
+    MutableWordsOfSameLengthMap *mwfl = &mwmp->maps[len];
     MutableWordsOfSameLengthMap *new_mwfl = &resized_mwmp->maps[len];
     fill_resized_mwfl(mwfl, new_mwfl);
   }
@@ -832,34 +843,36 @@ mdbfl_get_num_entries(const MutableDoubleBlanksForSameLengthMap *mdbfl) {
   return num_entries;
 }
 
-void reinsert_double_blank_entry(
-    const MutableDoubleBlankMapEntry *entry,
-    MutableDoubleBlanksForSameLengthMap *new_mdbfl) {
-  for (int pair_idx = 0;
-       pair_idx < dictionary_word_list_get_count(entry->letter_pairs);
-       pair_idx++) {
-    const DictionaryWord *pair =
-        dictionary_word_list_get_word(entry->letter_pairs, pair_idx);
-    const uint8_t *pair_letters = dictionary_word_get_word(pair);
-    const uint32_t new_bucket_idx = bit_rack_get_bucket_index(
-        &entry->bit_rack, new_mdbfl->num_double_blank_buckets);
-    MutableDoubleBlankMapBucket *bucket =
-        &new_mdbfl->double_blank_buckets[new_bucket_idx];
-    mutable_double_blank_map_bucket_insert_pair(bucket, &entry->bit_rack,
-                                                pair_letters);
+// Transfer entry directly using stored bit_rack instead of reinserting pairs
+void transfer_double_blank_entry(MutableDoubleBlankMapEntry *entry,
+                                 MutableDoubleBlanksForSameLengthMap *new_mdbfl) {
+  const uint32_t new_bucket_idx = bit_rack_get_bucket_index(
+      &entry->bit_rack, new_mdbfl->num_double_blank_buckets);
+  MutableDoubleBlankMapBucket *bucket =
+      &new_mdbfl->double_blank_buckets[new_bucket_idx];
+
+  if (bucket->num_entries == bucket->capacity) {
+    bucket->capacity *= 2;
+    bucket->entries = realloc_or_die(
+        bucket->entries, sizeof(MutableDoubleBlankMapEntry) * bucket->capacity);
   }
+  // Transfer ownership of the entry (including letter_pairs pointer)
+  bucket->entries[bucket->num_entries] = *entry;
+  bucket->num_entries++;
+  // Null out source to prevent double-free during destroy
+  entry->letter_pairs = NULL;
 }
 
-void reinsert_entries_from_double_blank_bucket(
-    const MutableDoubleBlankMapBucket *bucket,
+void transfer_entries_from_double_blank_bucket(
+    MutableDoubleBlankMapBucket *bucket,
     MutableDoubleBlanksForSameLengthMap *new_mdbfl) {
   for (uint32_t entry_idx = 0; entry_idx < bucket->num_entries; entry_idx++) {
-    const MutableDoubleBlankMapEntry *entry = &bucket->entries[entry_idx];
-    reinsert_double_blank_entry(entry, new_mdbfl);
+    MutableDoubleBlankMapEntry *entry = &bucket->entries[entry_idx];
+    transfer_double_blank_entry(entry, new_mdbfl);
   }
 }
 
-void fill_resized_mdbfl(const MutableDoubleBlanksForSameLengthMap *mdbfl,
+void fill_resized_mdbfl(MutableDoubleBlanksForSameLengthMap *mdbfl,
                         MutableDoubleBlanksForSameLengthMap *new_mdbfl) {
   const uint32_t num_entries = mdbfl_get_num_entries(mdbfl);
   new_mdbfl->num_double_blank_buckets = next_power_of_2(num_entries);
@@ -873,18 +886,18 @@ void fill_resized_mdbfl(const MutableDoubleBlanksForSameLengthMap *mdbfl,
   }
   for (uint32_t bucket_idx = 0; bucket_idx < mdbfl->num_double_blank_buckets;
        bucket_idx++) {
-    const MutableDoubleBlankMapBucket *bucket =
+    MutableDoubleBlankMapBucket *bucket =
         &mdbfl->double_blank_buckets[bucket_idx];
-    reinsert_entries_from_double_blank_bucket(bucket, new_mdbfl);
+    transfer_entries_from_double_blank_bucket(bucket, new_mdbfl);
   }
 }
 
 MutableDoubleBlankMap *
-resize_mutable_double_blank_map(const MutableDoubleBlankMap *mdbmp) {
+resize_mutable_double_blank_map(MutableDoubleBlankMap *mdbmp) {
   MutableDoubleBlankMap *resized_mdbmp =
       malloc_or_die(sizeof(MutableDoubleBlankMap));
   for (int len = 2; len <= BOARD_DIM; len++) {
-    const MutableDoubleBlanksForSameLengthMap *mdbfl = &mdbmp->maps[len];
+    MutableDoubleBlanksForSameLengthMap *mdbfl = &mdbmp->maps[len];
     MutableDoubleBlanksForSameLengthMap *new_mdbfl = &resized_mdbmp->maps[len];
     fill_resized_mdbfl(mdbfl, new_mdbfl);
   }
