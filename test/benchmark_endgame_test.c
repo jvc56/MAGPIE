@@ -167,7 +167,7 @@ static void run_single_endgame_timed(Config *config, EndgameSolver *solver,
 void test_benchmark_endgame(void) {
   log_set_level(LOG_FATAL); // Suppress warnings for cleaner output
 
-  const int num_games = 3;
+  const int num_games = 10;
   const uint64_t base_seed = 0;
 
   Config *config = config_create_or_die(
@@ -188,8 +188,8 @@ void test_benchmark_endgame(void) {
 
   Game *game = config_get_game(config);
 
-  // Find 3 valid endgame seeds
-  uint64_t valid_seeds[3];
+  // Find 10 valid endgame seeds
+  uint64_t valid_seeds[10];
   int found = 0;
   for (uint64_t seed = base_seed; found < num_games; seed++) {
     game_reset(game);
@@ -215,8 +215,7 @@ void test_benchmark_endgame(void) {
     valid_seeds[found++] = seed;
   }
 
-  printf("\nPly depth benchmark (3 games, seeds: %lu, %lu, %lu)\n",
-         valid_seeds[0], valid_seeds[1], valid_seeds[2]);
+  printf("\nPly depth benchmark (%d games)\n", num_games);
   printf("Ply,Total(s)\n");
 
   // Run each ply depth
