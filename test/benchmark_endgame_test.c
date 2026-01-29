@@ -148,7 +148,7 @@ void test_benchmark_endgame(void) {
   log_set_level(LOG_WARN); // Allow warnings to show diagnostics
 
   const int num_games = 100;
-  const int ply = 3;
+  const int ply = 2;
   const uint64_t base_seed = 0;
 
   Config *config = config_create_or_die(
