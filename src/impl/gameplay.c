@@ -15,6 +15,7 @@
 #include "../ent/klv.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/move_undo.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/validated_move.h"
@@ -438,6 +439,291 @@ void return_phony_letters(Game *game) {
   game_unplay_last_move(game);
   game_start_next_player_turn(game);
   game_increment_consecutive_scoreless_turns(game);
+}
+
+// Incremental play for endgame solver optimization.
+// This plays a move and records all changes needed to undo it efficiently.
+void play_move_incremental(const Move *move, Game *game, MoveUndo *undo) {
+  move_undo_init(undo);
+
+  Board *board = game_get_board(game);
+  const int player_on_turn_index = game_get_player_on_turn_index(game);
+  Player *player_on_turn = game_get_player(game, player_on_turn_index);
+  Rack *player_on_turn_rack = player_get_rack(player_on_turn);
+  const LetterDistribution *ld = game_get_ld(game);
+
+  // Save old state
+  undo->old_player_on_turn_index = player_on_turn_index;
+  undo->old_score = player_get_score(player_on_turn);
+  Player *opponent = game_get_player(game, 1 - player_on_turn_index);
+  undo->old_opponent_score = player_get_score(opponent);
+  undo->old_tiles_played = board_get_tiles_played(board);
+  undo->old_cross_sets_valid = board_get_cross_sets_valid(board);
+  undo->old_consecutive_scoreless_turns =
+      game_get_consecutive_scoreless_turns(game);
+  undo->old_game_end_reason = game_get_game_end_reason(game);
+
+  // Save rack state
+  const int dist_size = rack_get_dist_size(player_on_turn_rack);
+  undo->old_rack_count = rack_get_total_letters(player_on_turn_rack);
+  for (int i = 0; i < dist_size && i < MAX_ALPHABET_SIZE; i++) {
+    undo->old_rack_array[i] = rack_get_letter(player_on_turn_rack, i);
+  }
+
+  if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    // Store move info for cross-set restoration
+    int row_start = move_get_row_start(move);
+    int col_start = move_get_col_start(move);
+    int move_dir = move_get_dir(move);
+    int tiles_length = move_get_tiles_length(move);
+
+    undo->move_row_start = (uint8_t)row_start;
+    undo->move_col_start = (uint8_t)col_start;
+    undo->move_tiles_length = (uint8_t)tiles_length;
+    undo->move_dir = (uint8_t)move_dir;
+
+    // Build played_tiles_mask
+    uint16_t played_tiles_mask = 0;
+    for (int idx = 0; idx < tiles_length; idx++) {
+      if (move_get_tile(move, idx) != PLAYED_THROUGH_MARKER) {
+        played_tiles_mask |= (uint16_t)(1 << idx);
+      }
+    }
+    undo->move_played_tiles_mask = played_tiles_mask;
+
+    // Handle board transposition
+    bool board_was_transposed = false;
+    if (!board_matches_dir(board, move_dir)) {
+      board_transpose(board);
+      board_was_transposed = true;
+      row_start = move_get_col_start(move);
+      col_start = move_get_row_start(move);
+    }
+
+    // Place tiles on board and track changes
+    for (int idx = 0; idx < tiles_length; idx++) {
+      MachineLetter letter = move_get_tile(move, idx);
+      if (letter == PLAYED_THROUGH_MARKER) {
+        continue;
+      }
+      // Track the square change before modifying (store in original coordinates)
+      int track_row = board_was_transposed ? col_start + idx : row_start;
+      int track_col = board_was_transposed ? row_start : col_start + idx;
+      move_undo_track_square(undo, track_row, track_col,
+          board_get_letter(board, row_start, col_start + idx));
+
+      board_set_letter(board, row_start, col_start + idx, letter);
+      MachineLetter rack_letter =
+          get_is_blanked(letter) ? BLANK_MACHINE_LETTER : letter;
+      rack_take_letter(player_on_turn_rack, rack_letter);
+    }
+
+    board_increment_tiles_played(board, move_get_tiles_played(move));
+
+    // Update anchors
+    for (int col = col_start; col < tiles_length + col_start; col++) {
+      board_update_anchors(board, row_start, col);
+      if (row_start > 0) {
+        board_update_anchors(board, row_start - 1, col);
+      }
+      if (row_start < BOARD_DIM - 1) {
+        board_update_anchors(board, row_start + 1, col);
+      }
+    }
+    if (col_start - 1 >= 0) {
+      board_update_anchors(board, row_start, col_start - 1);
+    }
+    if (tiles_length + col_start < BOARD_DIM) {
+      board_update_anchors(board, row_start, tiles_length + col_start);
+    }
+
+    if (board_was_transposed) {
+      board_transpose(board);
+    }
+
+    // Mark cross-sets as invalid (lazy evaluation)
+    board_set_cross_sets_valid(board, false);
+
+    game_set_consecutive_scoreless_turns(game, 0);
+    player_add_to_score(player_on_turn, move_get_score(move));
+
+    // Check for game end (empty rack in endgame = outplay)
+    if (rack_is_empty(player_on_turn_rack)) {
+      player_add_to_score(
+          player_on_turn,
+          calculate_end_rack_points(player_get_rack(opponent), ld));
+      game_set_game_end_reason(game, GAME_END_REASON_STANDARD);
+    }
+  } else if (move_get_type(move) == GAME_EVENT_PASS) {
+    game_increment_consecutive_scoreless_turns(game);
+  }
+
+  // Check for consecutive zeros game end
+  if (game_reached_max_scoreless_turns(game)) {
+    Player *player0 = game_get_player(game, 0);
+    Player *player1 = game_get_player(game, 1);
+    player_add_to_score(
+        player0, calculate_end_rack_penalty(player_get_rack(player0), ld));
+    player_add_to_score(
+        player1, calculate_end_rack_penalty(player_get_rack(player1), ld));
+    game_set_game_end_reason(game, GAME_END_REASON_CONSECUTIVE_ZEROS);
+  }
+
+  game_start_next_player_turn(game);
+}
+
+// Unplay a move using the recorded undo information.
+// This efficiently restores the game state without full board copies.
+void unplay_move_incremental(const MoveUndo *undo, Game *game) {
+  Board *board = game_get_board(game);
+  const int player_index = undo->old_player_on_turn_index;
+  Player *player = game_get_player(game, player_index);
+  Rack *player_rack = player_get_rack(player);
+
+  // Restore board squares
+  for (int i = 0; i < undo->num_square_changes; i++) {
+    const SquareChange *change = &undo->square_changes[i];
+    board_set_letter(board, change->row, change->col, change->old_letter);
+  }
+
+  // Restore board scalars
+  board_set_tiles_played(board, undo->old_tiles_played);
+  board_set_cross_sets_valid(board, undo->old_cross_sets_valid);
+
+  // Restore rack
+  const int dist_size = rack_get_dist_size(player_rack);
+  rack_reset(player_rack);
+  for (int i = 0; i < dist_size && i < MAX_ALPHABET_SIZE; i++) {
+    rack_add_letters(player_rack, i, undo->old_rack_array[i]);
+  }
+
+  // Restore player scores (both - important for game end scenarios)
+  player_set_score(player, undo->old_score);
+  Player *opponent = game_get_player(game, 1 - player_index);
+  player_set_score(opponent, undo->old_opponent_score);
+
+  // Restore game state
+  game_set_player_on_turn_index(game, player_index);
+  game_set_consecutive_scoreless_turns(game, undo->old_consecutive_scoreless_turns);
+  game_set_game_end_reason(game, undo->old_game_end_reason);
+}
+
+// Helper for calculating cross-sets after unplay using stored move info.
+static void calc_for_across_after_unplay_from_undo(const MoveUndo *undo,
+                                                   const Game *game,
+                                                   int row_start, int col_start,
+                                                   int csd) {
+  for (int row = row_start; row < undo->move_tiles_length + row_start; row++) {
+    int index = row - row_start;
+    // Skip play-through positions (bit not set in played_tiles_mask)
+    if (!(undo->move_played_tiles_mask & (1 << index))) {
+      continue;
+    }
+
+    const Board *board = game_get_board(game);
+    const bool kwgs_are_shared =
+        game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
+    const int right_col =
+        board_get_word_edge(board, row, col_start, WORD_DIRECTION_RIGHT);
+    const int left_col =
+        board_get_word_edge(board, row, col_start, WORD_DIRECTION_LEFT);
+    game_gen_cross_set(game, row, right_col + 1, csd, 0);
+    game_gen_cross_set(game, row, left_col - 1, csd, 0);
+    game_gen_cross_set(game, row, col_start, csd, 0);
+    if (!kwgs_are_shared) {
+      game_gen_cross_set(game, row, right_col + 1, csd, 1);
+      game_gen_cross_set(game, row, left_col - 1, csd, 1);
+      game_gen_cross_set(game, row, col_start, csd, 1);
+    }
+  }
+}
+
+static void calc_for_self_after_unplay_from_undo(const MoveUndo *undo,
+                                                 const Game *game, int row_start,
+                                                 int col_start, int csd) {
+  for (int col = col_start - 1; col <= col_start + undo->move_tiles_length;
+       col++) {
+    game_gen_cross_set(game, row_start, col, csd, 0);
+  }
+  if (!game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG)) {
+    for (int col = col_start - 1; col <= col_start + undo->move_tiles_length;
+         col++) {
+      game_gen_cross_set(game, row_start, col, csd, 1);
+    }
+  }
+}
+
+// Restore cross-sets after unplay using stored move info from MoveUndo.
+// This avoids the need to reconstruct the move from arena memory.
+void restore_cross_sets_from_undo(const MoveUndo *undo, Game *game) {
+  Board *board = game_get_board(game);
+
+  if (undo->move_tiles_length == 0) {
+    // Pass move, no cross-sets to restore
+    board_set_cross_sets_valid(board, true);
+    return;
+  }
+
+  int row_start = undo->move_row_start;
+  int col_start = undo->move_col_start;
+  int move_dir = undo->move_dir;
+
+  if (board_is_dir_vertical(move_dir)) {
+    calc_for_across_after_unplay_from_undo(undo, game, row_start, col_start,
+                                           BOARD_VERTICAL_DIRECTION);
+    board_transpose(board);
+    calc_for_self_after_unplay_from_undo(undo, game, col_start, row_start,
+                                         BOARD_VERTICAL_DIRECTION);
+    board_transpose(board);
+  } else {
+    calc_for_self_after_unplay_from_undo(undo, game, row_start, col_start,
+                                         BOARD_VERTICAL_DIRECTION);
+    board_transpose(board);
+    calc_for_across_after_unplay_from_undo(undo, game, col_start, row_start,
+                                           BOARD_VERTICAL_DIRECTION);
+    board_transpose(board);
+  }
+
+  // Update anchors
+  int actual_row = row_start;
+  int actual_col = col_start;
+  int tiles_length = undo->move_tiles_length;
+
+  if (board_is_dir_vertical(move_dir)) {
+    for (int row = actual_row; row < tiles_length + actual_row; row++) {
+      board_update_anchors(board, row, actual_col);
+      if (actual_col > 0) {
+        board_update_anchors(board, row, actual_col - 1);
+      }
+      if (actual_col < BOARD_DIM - 1) {
+        board_update_anchors(board, row, actual_col + 1);
+      }
+    }
+    if (actual_row - 1 >= 0) {
+      board_update_anchors(board, actual_row - 1, actual_col);
+    }
+    if (tiles_length + actual_row < BOARD_DIM) {
+      board_update_anchors(board, tiles_length + actual_row, actual_col);
+    }
+  } else {
+    for (int col = actual_col; col < tiles_length + actual_col; col++) {
+      board_update_anchors(board, actual_row, col);
+      if (actual_row > 0) {
+        board_update_anchors(board, actual_row - 1, col);
+      }
+      if (actual_row < BOARD_DIM - 1) {
+        board_update_anchors(board, actual_row + 1, col);
+      }
+    }
+    if (actual_col - 1 >= 0) {
+      board_update_anchors(board, actual_row, actual_col - 1);
+    }
+    if (tiles_length + actual_col < BOARD_DIM) {
+      board_update_anchors(board, actual_row, tiles_length + actual_col);
+    }
+  }
+
+  board_set_cross_sets_valid(board, true);
 }
 
 void generate_moves_for_game_override_record_type(

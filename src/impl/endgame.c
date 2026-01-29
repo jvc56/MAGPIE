@@ -17,6 +17,7 @@
 #include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/move_undo.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/small_move_arena.h"
@@ -85,6 +86,9 @@ typedef struct EndgameSolverWorker {
   MoveList *move_list;
   EndgameSolver *solver;
   int current_iterative_deepening_depth;
+  // Array of MoveUndo structures for incremental play/unplay
+  MoveUndo move_undos[MAX_SEARCH_DEPTH];
+  int undo_depth;
 } EndgameSolverWorker;
 
 #ifndef MAX
@@ -248,6 +252,7 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
       create_arena(solver->initial_small_move_arena_size, 16);
 
   solver_worker->solver = solver;
+  solver_worker->undo_depth = 0;
 
   return solver_worker;
 }

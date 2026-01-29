@@ -19,6 +19,12 @@ int bag_get_letters(const Bag *bag);
 int bag_get_letter(const Bag *bag, MachineLetter ml);
 bool bag_is_empty(const Bag *bag);
 
+// Accessor functions for bag tile indices (used for incremental play/unplay)
+int bag_get_start_tile_index(const Bag *bag);
+void bag_set_start_tile_index(Bag *bag, int index);
+int bag_get_end_tile_index(const Bag *bag);
+void bag_set_end_tile_index(Bag *bag, int index);
+
 void bag_add_letter(Bag *bag, MachineLetter letter, int player_draw_index);
 bool bag_draw_letter(Bag *bag, MachineLetter letter, int player_draw_index);
 

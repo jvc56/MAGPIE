@@ -132,6 +132,10 @@ void game_set_consecutive_scoreless_turns(Game *game, int value) {
   game->consecutive_scoreless_turns = value;
 }
 
+void game_set_player_on_turn_index(Game *game, int player_index) {
+  game->player_on_turn_index = player_index;
+}
+
 void game_increment_consecutive_scoreless_turns(Game *game) {
   game->consecutive_scoreless_turns++;
 }
