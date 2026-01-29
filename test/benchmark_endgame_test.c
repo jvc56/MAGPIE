@@ -137,20 +137,20 @@ static void run_endgames_with_pv(Config *config, EndgameSolver *solver,
 void test_benchmark_endgame(void) {
   log_set_level(LOG_WARN);  // Allow warnings to show diagnostics
 
-  const int num_games = 5;
-  const int ply = 8;  // Balance depth vs time
+  const int num_games = 10;
+  const int ply = 6;
   const uint64_t base_seed = 42;  // Fixed seed for reproducibility
 
-  // Thread counts to benchmark
-  int thread_counts[] = {1, 12, 16};
+  // Thread counts to benchmark: 1 (like main) vs 16 (ABDADA)
+  int thread_counts[] = {1, 16};
   int num_configs = sizeof(thread_counts) / sizeof(thread_counts[0]);
 
   Config *config = config_create_or_die(
-      "set -lex CSW21 -threads 1 -s1 score -s2 score -r1 small -r2 small");
+      "set -lex TWL98 -threads 1 -s1 score -s2 score -r1 small -r2 small");
 
   printf("\n");
   printf("==============================================\n");
-  printf("  ABDADA Endgame Benchmark: %d games, %d-ply\n", num_games, ply);
+  printf("  ABDADA Endgame Benchmark: %d games, %d-ply TWL98\n", num_games, ply);
   printf("==============================================\n");
 
   for (int c = 0; c < num_configs; c++) {
