@@ -78,6 +78,13 @@ struct EndgameSolver {
   int aspiration_fail[5];      // failures at each window size
   int nodes_at_depth[30];      // nodes visited at each depth
 
+  // Aspiration health metrics (Gemini diagnostic)
+  int aspiration_fail_high;    // fail-high (value >= beta) - bingo volatility
+  int aspiration_fail_low;     // fail-low (value <= alpha) - PV refuted
+  int aspiration_iterations;   // total iterative deepening iterations with aspiration
+  int nodes_wasted_on_fails;   // nodes visited during failed aspiration searches
+  int pv_first_move_correct;   // times the TT/previous-iter best move was actually best
+
   int solve_multiple_variations;
   int32_t best_pv_value;
   int requested_plies;
@@ -205,6 +212,11 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->first_move_cutoffs = 0;
   es->negascout_researches = 0;
   es->aspiration_failures = 0;
+  es->aspiration_fail_high = 0;
+  es->aspiration_fail_low = 0;
+  es->aspiration_iterations = 0;
+  es->nodes_wasted_on_fails = 0;
+  es->pv_first_move_correct = 0;
   for (int i = 0; i < 5; i++) {
     es->aspiration_success[i] = 0;
     es->aspiration_fail[i] = 0;
@@ -669,6 +681,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     int32_t val;
     if (worker->solver->aspiration_optim && p > 1 &&
         !worker->solver->first_win_optim) {
+      worker->solver->aspiration_iterations++;
       // Start with narrow window, progressively widen on failure
       // Window sizes: 25[0], 50[1], 100[2], 200[3], full[4]
       int32_t window = ASPIRATION_WINDOW;
@@ -676,16 +689,27 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
       int32_t asp_alpha = prev_value - window;
       int32_t asp_beta = prev_value + window;
 
+      int nodes_before = worker->solver->nodes_searched;
       val = negamax(worker, initial_hash_key, p, asp_alpha, asp_beta, &pv, true);
 
       // Progressive widening: double window size on each failure
       while (val <= asp_alpha || val >= asp_beta) {
+        // Track wasted nodes from this failed search
+        worker->solver->nodes_wasted_on_fails +=
+            (worker->solver->nodes_searched - nodes_before);
         worker->solver->aspiration_failures++;
         worker->solver->aspiration_fail[window_idx]++;
+        // Track fail direction
+        if (val <= asp_alpha) {
+          worker->solver->aspiration_fail_low++;
+        } else {
+          worker->solver->aspiration_fail_high++;
+        }
         window *= 2;
         window_idx++;
         if (window > 200) {
           // Fall back to full window
+          nodes_before = worker->solver->nodes_searched;
           val = negamax(worker, initial_hash_key, p, alpha, beta, &pv, true);
           worker->solver->aspiration_success[4]++;  // full window always succeeds
           break;
@@ -696,6 +720,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
         } else {
           asp_beta = prev_value + window;
         }
+        nodes_before = worker->solver->nodes_searched;
         val = negamax(worker, initial_hash_key, p, asp_alpha, asp_beta, &pv, true);
       }
       // Record success if we didn't fall back to full window
@@ -919,7 +944,21 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
            "avg_cutoff_idx=%.2f, negascout_researches=%d",
            solver->beta_cutoffs, solver->first_move_cutoffs, first_move_pct,
            avg_cutoff_idx, solver->negascout_researches);
-  log_warn("aspiration stats: failures=%d", solver->aspiration_failures);
+  log_warn("aspiration stats: failures=%d (fail_high=%d, fail_low=%d)",
+           solver->aspiration_failures, solver->aspiration_fail_high,
+           solver->aspiration_fail_low);
+  // Aspiration health metrics
+  if (solver->aspiration_iterations > 0) {
+    double research_cost =
+        solver->nodes_searched > 0
+            ? (double)(solver->nodes_searched + solver->nodes_wasted_on_fails) /
+                  solver->nodes_searched
+            : 1.0;
+    log_warn("aspiration health: iterations=%d, nodes_wasted=%d, "
+             "re-search_cost=%.2fx",
+             solver->aspiration_iterations, solver->nodes_wasted_on_fails,
+             research_cost);
+  }
   // Per-window breakdown: window sizes are 25, 50, 100, 200, full
   int total_asp = 0;
   for (int i = 0; i < 5; i++) {
