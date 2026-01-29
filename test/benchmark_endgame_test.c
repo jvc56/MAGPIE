@@ -137,9 +137,10 @@ static void run_endgames_with_pv(Config *config, EndgameSolver *solver,
 void test_benchmark_endgame(void) {
   log_set_level(LOG_WARN);  // Allow warnings to show diagnostics
 
-  const int num_games = 10;
-  const int ply = 6;
-  const uint64_t base_seed = 42;  // Fixed seed for reproducibility
+  // Test specific hard seeds (45 and 49) at 9-ply
+  const int ply = 9;
+  uint64_t seeds[] = {45, 49};  // Game 4 and Game 8 from previous benchmark
+  int num_seeds = sizeof(seeds) / sizeof(seeds[0]);
 
   // Thread counts to benchmark: 1 (like main) vs 16 (ABDADA)
   int thread_counts[] = {1, 16};
@@ -150,22 +151,66 @@ void test_benchmark_endgame(void) {
 
   printf("\n");
   printf("==============================================\n");
-  printf("  ABDADA Endgame Benchmark: %d games, %d-ply TWL98\n", num_games, ply);
+  printf("  ABDADA Hard Games Benchmark: %d-ply TWL98\n", ply);
   printf("==============================================\n");
+
+  MoveList *move_list = move_list_create(1);
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
 
   for (int c = 0; c < num_configs; c++) {
     int num_threads = thread_counts[c];
     EndgameSolver *solver = endgame_solver_create();
 
     printf("\n--- Testing with %d thread(s) ---\n", num_threads);
-    double start_time = get_time_sec();
-    run_endgames_with_pv(config, solver, num_games, ply, num_threads, base_seed);
-    double elapsed = get_time_sec() - start_time;
-    printf("Total time for %d threads: %.3fs (%.3fs/game)\n",
-           num_threads, elapsed, elapsed / num_games);
+    double total_time = 0;
 
+    for (int s = 0; s < num_seeds; s++) {
+      uint64_t seed = seeds[s];
+      game_reset(game);
+      game_seed(game, seed);
+      draw_starting_racks(game);
+
+      while (bag_get_letters(game_get_bag(game)) > 0) {
+        Move *move = get_top_equity_move(game, 0, move_list);
+        play_move(move, game, NULL);
+      }
+
+      printf("\n--- Seed %llu ---\n", (unsigned long long)seed);
+      StringBuilder *game_sb = string_builder_create();
+      GameStringOptions *gso = game_string_options_create_default();
+      string_builder_add_game(game, NULL, gso, NULL, game_sb);
+      printf("%s", string_builder_peek(game_sb));
+      string_builder_destroy(game_sb);
+      game_string_options_destroy(gso);
+
+      double game_start = get_time_sec();
+      EndgameArgs args = {.game = game,
+                          .thread_control = config_get_thread_control(config),
+                          .plies = ply,
+                          .tt_fraction_of_mem = 0.1,
+                          .initial_small_move_arena_size =
+                              DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                          .num_threads = num_threads,
+                          .per_ply_callback = NULL,
+                          .per_ply_callback_data = NULL};
+      EndgameResults *results = config_get_endgame_results(config);
+      ErrorStack *err = error_stack_create();
+
+      printf("Solving %d-ply endgame with %d threads...\n", ply, num_threads);
+      endgame_solve(solver, &args, results, err);
+      double game_elapsed = get_time_sec() - game_start;
+      printf("  Solved in %.3fs\n", game_elapsed);
+      total_time += game_elapsed;
+
+      assert(error_stack_is_empty(err));
+      error_stack_destroy(err);
+    }
+
+    printf("\nTotal time for %d threads: %.3fs\n", num_threads, total_time);
     endgame_solver_destroy(solver);
   }
 
+  move_list_destroy(move_list);
   config_destroy(config);
 }
