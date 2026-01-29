@@ -128,7 +128,8 @@ void test_vs_joey(void) {
   */
 
   test_single_endgame(
-      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 13",
+      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 13 "
+      "-ttfraction 0.4",
       "cgp "
       "AIDER2U7/b1E1E2N1Z5/AWN1T2M1ATT3/LI1COBLE2OW3/OP2U2E2AA3/NE2CUSTARDS1Q1/"
       "ER1OH5I2U1/S2K2FOB1ERGOT/5HEXYLS2I1/4JIN6N1/2GOOP2NAIVEsT/1DIRE10/"
@@ -180,7 +181,8 @@ void test_very_deep(void) {
 
 void test_eldar_v_stick(void) {
   test_single_endgame(
-      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 9",
+      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 9 "
+      "-ttfraction 0.4",
       "cgp "
       "4EXODE6/1DOFF1KERATIN1U/1OHO8YEN/1POOJA1B3MEWS/5SQUINTY2A/4RHINO1e3V/"
       "2B4C2R3E/GOAT1D1E2ZIN1d/1URACILS2E4/1PIG1S4T4/2L2R4T4/2L2A1GENII3/"
@@ -204,8 +206,7 @@ void test_endgame(void) {
   test_small_arena_realloc();
   test_pass_first();
   test_nonempty_bag();
-  //  Uncomment out more of these tests once we add more optimizations,
-  //  and/or if we can run the endgame tests in release mode.
-  // test_vs_joey();
-  // test_eldar_v_stick();
+  // Harder tests (slow in debug mode, need release builds):
+  test_vs_joey();       // 13-ply, value 55
+  test_eldar_v_stick(); // 9-ply
 }

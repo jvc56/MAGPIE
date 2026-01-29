@@ -42,6 +42,8 @@ enum {
   EARLY_PASS_BF = 1 << 29,
   HASH_MOVE_BF = 1 << 28,
   GOING_OUT_BF = 1 << 27,
+  // Aspiration window size for iterative deepening
+  ASPIRATION_WINDOW = 25,
 };
 
 struct EndgameSolver {
@@ -54,6 +56,7 @@ struct EndgameSolver {
   bool first_win_optim;
   bool transposition_table_optim;
   bool negascout_optim;
+  bool aspiration_optim;  // Aspiration windows
   bool lazysmp_optim;
   bool prevent_slowroll;
   PVLine principal_variation;
@@ -61,6 +64,26 @@ struct EndgameSolver {
 
   KWG *pruned_kwg;
   int nodes_searched;
+
+  // Search statistics for analysis
+  int beta_cutoffs;
+  int beta_cutoff_move_sum;    // sum of move indices at cutoff
+  int tt_cutoffs;
+  int moves_generated;
+  int first_move_cutoffs;      // cutoffs on first move (best move ordering)
+  int negascout_researches;    // times we had to re-search with wider window
+  int aspiration_failures;     // times aspiration window failed
+  // Per-window aspiration stats: [0]=25, [1]=50, [2]=100, [3]=200, [4]=full
+  int aspiration_success[5];   // successes at each window size
+  int aspiration_fail[5];      // failures at each window size
+  int nodes_at_depth[30];      // nodes visited at each depth
+
+  // Aspiration health metrics (Gemini diagnostic)
+  int aspiration_fail_high;    // fail-high (value >= beta) - bingo volatility
+  int aspiration_fail_low;     // fail-low (value <= alpha) - PV refuted
+  int aspiration_iterations;   // total iterative deepening iterations with aspiration
+  int nodes_wasted_on_fails;   // nodes visited during failed aspiration searches
+  int pv_first_move_correct;   // times the TT/previous-iter best move was actually best
 
   int solve_multiple_variations;
   int32_t best_pv_value;
@@ -179,8 +202,28 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->transposition_table_optim = true;
   es->iterative_deepening_optim = true;
   es->negascout_optim = true;
+  es->aspiration_optim = true;
   es->solve_multiple_variations = 0;
   es->nodes_searched = 0;
+  es->beta_cutoffs = 0;
+  es->beta_cutoff_move_sum = 0;
+  es->tt_cutoffs = 0;
+  es->moves_generated = 0;
+  es->first_move_cutoffs = 0;
+  es->negascout_researches = 0;
+  es->aspiration_failures = 0;
+  es->aspiration_fail_high = 0;
+  es->aspiration_fail_low = 0;
+  es->aspiration_iterations = 0;
+  es->nodes_wasted_on_fails = 0;
+  es->pv_first_move_correct = 0;
+  for (int i = 0; i < 5; i++) {
+    es->aspiration_success[i] = 0;
+    es->aspiration_fail[i] = 0;
+  }
+  for (int i = 0; i < 30; i++) {
+    es->nodes_at_depth[i] = 0;
+  }
   es->threads = 1; // for now
   es->requested_plies = endgame_args->plies;
   es->solving_player = game_get_player_on_turn_index(endgame_args->game);
@@ -229,6 +272,11 @@ void endgame_solver_destroy(EndgameSolver *es) {
   transposition_table_destroy(es->transposition_table);
   kwg_destroy(es->pruned_kwg);
   free(es);
+}
+
+// Setter function for aspiration windows (used for benchmarking)
+void endgame_solver_set_aspiration(EndgameSolver *es, bool enabled) {
+  es->aspiration_optim = enabled;
 }
 
 EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
@@ -406,6 +454,7 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
       if (alpha >= beta) {
         if (!pv_node) {
           // don't cut-off PV node
+          worker->solver->tt_cutoffs++;
           return score;
         }
       }
@@ -430,6 +479,7 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
   bool arena_alloced = false;
   if (worker->current_iterative_deepening_depth != depth) {
     nplays = generate_stm_plays(worker);
+    worker->solver->moves_generated += nplays;
     assign_estimates_and_sort(worker, depth, nplays, tt_move);
     // log_warn("generated and allocated; nplays %d, cur_size %ld", nplays,
     //          worker->small_move_arena->size);
@@ -471,6 +521,9 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
     // Implementation is currently single-threaded. Keep counts per worker if we
     // want to keep doing this when we have multiple threads.
     worker->solver->nodes_searched++;
+    if (depth < 30) {
+      worker->solver->nodes_at_depth[depth]++;
+    }
 
     uint64_t child_key = 0;
     if (worker->solver->transposition_table_optim) {
@@ -487,10 +540,13 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
       value = negamax(worker, child_key, depth - 1, -beta, -alpha, &child_pv,
                       pv_node);
     } else {
+      // Negascout/PVS: search with null window first
       value = negamax(worker, child_key, depth - 1, -alpha - 1, -alpha,
                       &child_pv, false);
+
       if (alpha < -value && -value < beta) {
-        // re-search with wider window
+        // re-search with wider window (negascout)
+        worker->solver->negascout_researches++;
         value = negamax(worker, child_key, depth - 1, -beta, -alpha, &child_pv,
                         pv_node);
       }
@@ -532,6 +588,11 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
     alpha = MAX(alpha, best_value);
     if (best_value >= beta) {
       // beta cut-off
+      worker->solver->beta_cutoffs++;
+      worker->solver->beta_cutoff_move_sum += idx;
+      if (idx == 0) {
+        worker->solver->first_move_cutoffs++;
+      }
       break;
     }
     // clear the child node's pv for the next child node
@@ -609,12 +670,69 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     start = plies;
   }
 
+  int32_t prev_value = 0; // for aspiration windows
   for (int p = start; p <= plies; p++) {
     worker->current_iterative_deepening_depth = p;
     PVLine pv;
     pv.game = worker->game_copy;
     pv.num_moves = 0;
-    int32_t val = negamax(worker, initial_hash_key, p, alpha, beta, &pv, true);
+
+    // Aspiration windows with progressive widening
+    int32_t val;
+    if (worker->solver->aspiration_optim && p > 1 &&
+        !worker->solver->first_win_optim) {
+      worker->solver->aspiration_iterations++;
+      // Start with narrow window, progressively widen on failure
+      // Window sizes: 25[0], 50[1], 100[2], 200[3], full[4]
+      int32_t window = ASPIRATION_WINDOW;
+      int window_idx = 0;  // 0=25, 1=50, 2=100, 3=200, 4=full
+      int32_t asp_alpha = prev_value - window;
+      int32_t asp_beta = prev_value + window;
+
+      int nodes_before = worker->solver->nodes_searched;
+      val = negamax(worker, initial_hash_key, p, asp_alpha, asp_beta, &pv, true);
+
+      // Progressive widening: double window size on each failure
+      while (val <= asp_alpha || val >= asp_beta) {
+        // Track wasted nodes from this failed search
+        worker->solver->nodes_wasted_on_fails +=
+            (worker->solver->nodes_searched - nodes_before);
+        worker->solver->aspiration_failures++;
+        worker->solver->aspiration_fail[window_idx]++;
+        // Track fail direction
+        if (val <= asp_alpha) {
+          worker->solver->aspiration_fail_low++;
+        } else {
+          worker->solver->aspiration_fail_high++;
+        }
+        window *= 2;
+        window_idx++;
+        if (window > 200) {
+          // Fall back to full window
+          nodes_before = worker->solver->nodes_searched;
+          val = negamax(worker, initial_hash_key, p, alpha, beta, &pv, true);
+          worker->solver->aspiration_success[4]++;  // full window always succeeds
+          break;
+        }
+        // Widen in the direction of failure
+        if (val <= asp_alpha) {
+          asp_alpha = prev_value - window;
+        } else {
+          asp_beta = prev_value + window;
+        }
+        nodes_before = worker->solver->nodes_searched;
+        val = negamax(worker, initial_hash_key, p, asp_alpha, asp_beta, &pv, true);
+      }
+      // Record success if we didn't fall back to full window
+      if (window <= 200) {
+        worker->solver->aspiration_success[window_idx]++;
+      }
+    } else {
+      val = negamax(worker, initial_hash_key, p, alpha, beta, &pv, true);
+    }
+
+    prev_value = val;
+
     // sort initial moves by valuation for next time.
     SmallMove *initial_moves = (SmallMove *)(worker->small_move_arena->memory);
     qsort(initial_moves, initial_move_count, sizeof(SmallMove),
@@ -797,7 +915,8 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   game_destroy(final_game_copy);
 
   // Print stats
-  log_warn("nodes=%d", solver->nodes_searched);
+  log_warn("nodes=%d, moves_generated=%d", solver->nodes_searched,
+           solver->moves_generated);
 
   if (solver->transposition_table) {
     int tt_lookups = atomic_load(&solver->transposition_table->lookups);
@@ -806,11 +925,76 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
     int tt_collisions =
         atomic_load(&solver->transposition_table->t2_collisions);
     log_warn("TT stats: lookups=%d, hits=%d (%.2f%%), created=%d, "
-             "t2_collisions=%d",
+             "t2_collisions=%d, tt_cutoffs=%d",
              tt_lookups, tt_hits,
              100.0 * tt_hits / (tt_lookups > 0 ? tt_lookups : 1), tt_created,
-             tt_collisions);
+             tt_collisions, solver->tt_cutoffs);
   }
+
+  // Print search efficiency stats
+  double avg_cutoff_idx =
+      solver->beta_cutoffs > 0
+          ? (double)solver->beta_cutoff_move_sum / solver->beta_cutoffs
+          : 0.0;
+  double first_move_pct =
+      solver->beta_cutoffs > 0
+          ? 100.0 * solver->first_move_cutoffs / solver->beta_cutoffs
+          : 0.0;
+  log_warn("cutoff stats: beta_cutoffs=%d, first_move_cutoffs=%d (%.1f%%), "
+           "avg_cutoff_idx=%.2f, negascout_researches=%d",
+           solver->beta_cutoffs, solver->first_move_cutoffs, first_move_pct,
+           avg_cutoff_idx, solver->negascout_researches);
+  log_warn("aspiration stats: failures=%d (fail_high=%d, fail_low=%d)",
+           solver->aspiration_failures, solver->aspiration_fail_high,
+           solver->aspiration_fail_low);
+  // Aspiration health metrics
+  if (solver->aspiration_iterations > 0) {
+    double research_cost =
+        solver->nodes_searched > 0
+            ? (double)(solver->nodes_searched + solver->nodes_wasted_on_fails) /
+                  solver->nodes_searched
+            : 1.0;
+    log_warn("aspiration health: iterations=%d, nodes_wasted=%d, "
+             "re-search_cost=%.2fx",
+             solver->aspiration_iterations, solver->nodes_wasted_on_fails,
+             research_cost);
+  }
+  // Per-window breakdown: window sizes are 25, 50, 100, 200, full
+  int total_asp = 0;
+  for (int i = 0; i < 5; i++) {
+    total_asp += solver->aspiration_success[i] + solver->aspiration_fail[i];
+  }
+  if (total_asp > 0) {
+    const int windows[] = {25, 50, 100, 200, 0};  // 0 = full
+    StringBuilder *asp_sb = string_builder_create();
+    string_builder_add_string(asp_sb, "aspiration per-window: ");
+    for (int i = 0; i < 5; i++) {
+      int s = solver->aspiration_success[i];
+      int f = solver->aspiration_fail[i];
+      if (s + f > 0) {
+        if (i < 4) {
+          string_builder_add_formatted_string(asp_sb, "w%d=%d/%d ", windows[i],
+                                              s, s + f);
+        } else {
+          string_builder_add_formatted_string(asp_sb, "full=%d ", s);
+        }
+      }
+    }
+    log_warn("%s", string_builder_peek(asp_sb));
+    string_builder_destroy(asp_sb);
+  }
+
+  // Print nodes per depth
+  StringBuilder *depth_sb = string_builder_create();
+  string_builder_add_string(depth_sb, "nodes_at_depth: ");
+  for (int i = solver->requested_plies; i >= 1; i--) {
+    if (solver->nodes_at_depth[i] > 0) {
+      string_builder_add_formatted_string(depth_sb, "d%d=%d ", i,
+                                          solver->nodes_at_depth[i]);
+    }
+  }
+  log_warn("%s", string_builder_peek(depth_sb));
+  string_builder_destroy(depth_sb);
 
   endgame_results_set_pvline(results, &solver->principal_variation);
 }
