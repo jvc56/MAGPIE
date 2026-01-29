@@ -93,7 +93,7 @@ transposition_table_create(double fraction_of_memory) {
   tt->table = malloc_or_die(sizeof(TTEntry) * num_elems);
   memset(tt->table, 0, sizeof(TTEntry) * num_elems);
   tt->size_mask = num_elems - 1;
-  tt->zobrist = zobrist_create(12345);  // Fixed seed for determinism
+  tt->zobrist = zobrist_create(12345); // Fixed seed for determinism
   atomic_init(&tt->created, 0);
   atomic_init(&tt->hits, 0);
   atomic_init(&tt->lookups, 0);

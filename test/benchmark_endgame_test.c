@@ -206,11 +206,13 @@ void test_benchmark_endgame(void) {
         break;
       }
     }
-    if (!valid) continue;
+    if (!valid)
+      continue;
 
     const Rack *rack0 = player_get_rack(game_get_player(game, 0));
     const Rack *rack1 = player_get_rack(game_get_player(game, 1));
-    if (rack_is_empty(rack0) || rack_is_empty(rack1)) continue;
+    if (rack_is_empty(rack0) || rack_is_empty(rack1))
+      continue;
 
     valid_seeds[found++] = seed;
   }

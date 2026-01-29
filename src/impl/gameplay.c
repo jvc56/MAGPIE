@@ -212,12 +212,12 @@ void update_cross_sets_after_unplay(const Move *move, Game *game) {
                                  move_get_col_start(move),
                                  BOARD_VERTICAL_DIRECTION);
     board_transpose(board);
-    calc_for_self(move, game, move_get_col_start(move), move_get_row_start(move),
-                  BOARD_VERTICAL_DIRECTION);
+    calc_for_self(move, game, move_get_col_start(move),
+                  move_get_row_start(move), BOARD_VERTICAL_DIRECTION);
     board_transpose(board);
   } else {
-    calc_for_self(move, game, move_get_row_start(move), move_get_col_start(move),
-                  BOARD_VERTICAL_DIRECTION);
+    calc_for_self(move, game, move_get_row_start(move),
+                  move_get_col_start(move), BOARD_VERTICAL_DIRECTION);
     board_transpose(board);
     calc_for_across_after_unplay(move, game, move_get_col_start(move),
                                  move_get_row_start(move),
@@ -672,7 +672,8 @@ static void play_move_on_board_tracked(const Move *move, Game *game,
   // Update tiles_played (old value already saved by play_move_incremental)
   board_increment_tiles_played(board, move_get_tiles_played(move));
 
-  // Update anchors (old number_of_row_anchors already saved by play_move_incremental)
+  // Update anchors (old number_of_row_anchors already saved by
+  // play_move_incremental)
   for (int col = col_start; col < tiles_length + col_start; col++) {
     board_update_anchors_tracked(board, row_start, col, undo);
     if (row_start > 0) {
@@ -732,7 +733,8 @@ void play_move_incremental(const Move *move, Game *game, MoveUndo *undo) {
     undo->move_tiles_length = (uint8_t)move_get_tiles_length(move);
     undo->move_dir = (uint8_t)move_get_dir(move);
 
-    // Build tiles_placed_mask: bit i set if position i had an actual tile placed
+    // Build tiles_placed_mask: bit i set if position i had an actual tile
+    // placed
     uint16_t tiles_placed_mask = 0;
     for (int i = 0; i < move_get_tiles_length(move); i++) {
       if (move_get_tile(move, i) != PLAYED_THROUGH_MARKER) {
@@ -763,8 +765,7 @@ void play_move_incremental(const Move *move, Game *game, MoveUndo *undo) {
 
     if (rack_is_empty(player_on_turn_rack)) {
       const LetterDistribution *ld = game_get_ld(game);
-      Player *opponent =
-          game_get_player(game, 1 - undo->player_on_turn_index);
+      Player *opponent = game_get_player(game, 1 - undo->player_on_turn_index);
       // Standard end game: player who went out gets 2x opponent's rack value
       Equity end_rack_points =
           calculate_end_rack_points(player_get_rack(opponent), ld);
@@ -780,10 +781,10 @@ void play_move_incremental(const Move *move, Game *game, MoveUndo *undo) {
     const LetterDistribution *ld = game_get_ld(game);
     Player *player0 = game_get_player(game, 0);
     Player *player1 = game_get_player(game, 1);
-    player_add_to_score(player0,
-                        calculate_end_rack_penalty(player_get_rack(player0), ld));
-    player_add_to_score(player1,
-                        calculate_end_rack_penalty(player_get_rack(player1), ld));
+    player_add_to_score(
+        player0, calculate_end_rack_penalty(player_get_rack(player0), ld));
+    player_add_to_score(
+        player1, calculate_end_rack_penalty(player_get_rack(player1), ld));
     game_set_game_end_reason(game, GAME_END_REASON_CONSECUTIVE_ZEROS);
   }
   game_start_next_player_turn(game);
@@ -794,7 +795,8 @@ void unplay_move_incremental(Game *game, const MoveUndo *undo) {
   game_set_player_on_turn_index(game, undo->player_on_turn_index);
 
   // Restore game state
-  game_set_consecutive_scoreless_turns(game, undo->old_consecutive_scoreless_turns);
+  game_set_consecutive_scoreless_turns(game,
+                                       undo->old_consecutive_scoreless_turns);
   game_set_game_end_reason(game, undo->old_game_end_reason);
 
   // Restore player rack and both players' scores
@@ -830,7 +832,8 @@ void play_move_endgame_outplay(const Move *move, Game *game, MoveUndo *undo) {
   undo->old_game_end_reason = game_get_game_end_reason(game);
 
   Player *player_on_turn = game_get_player(game, undo->player_on_turn_index);
-  const Player *opponent = game_get_player(game, 1 - undo->player_on_turn_index);
+  const Player *opponent =
+      game_get_player(game, 1 - undo->player_on_turn_index);
   const LetterDistribution *ld = game_get_ld(game);
 
   // Save rack (even though we don't modify it, unplay expects it)
