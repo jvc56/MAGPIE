@@ -313,7 +313,7 @@ typedef struct {
   // Pre-allocated buffers that can be reused across phases
   void *scratch1;        // Used as pairs array
   void *scratch2;        // Used as temp array for sorting
-  uint32_t scratch_size; // Size in bytes of each scratch buffer
+  size_t scratch_size; // Size in bytes of each scratch buffer
 
   // Bucket counts buffer (reused across phases)
   uint32_t *bucket_counts;
@@ -365,6 +365,11 @@ static void thread_sem_release(ThreadSemaphore *sem) {
   sem->count++;
   cpthread_cond_signal(&sem->cond);
   cpthread_mutex_unlock(&sem->mutex);
+}
+
+static void thread_sem_destroy(ThreadSemaphore *sem) {
+  cpthread_mutex_destroy(&sem->mutex);
+  cpthread_cond_destroy(&sem->cond);
 }
 
 // ============================================================================
@@ -538,8 +543,8 @@ static void *build_blank_entries_direct(void *arg) {
   WMPForLength *wfl = a->wfl;
 
   // Estimate max pairs and check scratch buffer size
-  uint32_t max_pairs = num_racks * a->length;
-  uint32_t needed_size = sizeof(BlankPair) * max_pairs;
+  size_t max_pairs = (size_t)num_racks * (size_t)a->length;
+  size_t needed_size = sizeof(BlankPair) * max_pairs;
 
   // Reuse scratch buffers if large enough, otherwise reallocate
   if (needed_size > scratch->scratch_size) {
@@ -683,8 +688,9 @@ static void *build_double_blank_entries_direct(void *arg) {
   int length = a->length;
 
   // Estimate max pairs
-  uint32_t max_pairs = num_racks * (uint32_t)length * (uint32_t)length / 2;
-  uint32_t needed_size = sizeof(DoubleBlankPair) * max_pairs;
+  size_t max_pairs =
+      (size_t)num_racks * (size_t)length * (size_t)length / 2;
+  size_t needed_size = sizeof(DoubleBlankPair) * max_pairs;
 
   // Reuse scratch buffers if large enough
   if (needed_size > scratch->scratch_size) {
@@ -979,7 +985,7 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
 
   for (int len = 2; len <= BOARD_DIM; len++) {
     if (num_words_by_length[len] > 0) {
-      uint32_t size = sizeof(WordPair) * num_words_by_length[len];
+      size_t size = sizeof(WordPair) * (size_t)num_words_by_length[len];
       pairs_by_length[len] = malloc_or_die(size);
       temp_by_length[len] = malloc_or_die(size);
       // Initialize scratch with these buffers
@@ -1054,7 +1060,7 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
   // Phase 1: Build word entries in parallel and extract unique racks
   // Launch threads in work-descending order for better scheduling
   WordBuildArg word_args[BOARD_DIM + 1];
-  pthread_t word_threads[BOARD_DIM + 1];
+  cpthread_t word_threads[BOARD_DIM + 1];
 
   if (num_threads == 1) {
     // Single-threaded: run sequentially in work order
@@ -1093,7 +1099,7 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
 
   // Phase 2: Build blank entries in parallel (reusing scratch buffers)
   BlankBuildArg blank_args[BOARD_DIM + 1];
-  pthread_t blank_threads[BOARD_DIM + 1];
+  cpthread_t blank_threads[BOARD_DIM + 1];
 
   if (num_threads == 1) {
     for (int i = 0; i < num_active_lengths; i++) {
@@ -1122,7 +1128,7 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
 
   // Phase 3: Build double-blank entries in parallel (reusing scratch buffers)
   DoubleBlankBuildArg dbl_args[BOARD_DIM + 1];
-  pthread_t dbl_threads[BOARD_DIM + 1];
+  cpthread_t dbl_threads[BOARD_DIM + 1];
 
   if (num_threads == 1) {
     for (int i = 0; i < num_active_lengths; i++) {
@@ -1148,6 +1154,9 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
       cpthread_join(dbl_threads[sorted_lengths[i]]);
     }
   }
+
+  // Destroy thread semaphore
+  thread_sem_destroy(&sem);
 
   // Free scratch buffers
   for (int len = 2; len <= BOARD_DIM; len++) {

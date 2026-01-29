@@ -27,6 +27,12 @@ static inline void cpthread_mutex_unlock(cpthread_mutex_t *mutex) {
   }
 }
 
+static inline void cpthread_mutex_destroy(cpthread_mutex_t *mutex) {
+  if (pthread_mutex_destroy(mutex)) {
+    log_fatal("mutex destroy failed");
+  }
+}
+
 static inline void cpthread_cond_init(cpthread_cond_t *cond) {
   if (pthread_cond_init(cond, NULL)) {
     log_fatal("cond init failed");
@@ -76,6 +82,12 @@ static inline void cpthread_cond_signal(cpthread_cond_t *cond) {
 static inline void cpthread_cond_broadcast(cpthread_cond_t *cond) {
   if (pthread_cond_broadcast(cond)) {
     log_fatal("cond broadcast failed");
+  }
+}
+
+static inline void cpthread_cond_destroy(cpthread_cond_t *cond) {
+  if (pthread_cond_destroy(cond)) {
+    log_fatal("cond destroy failed");
   }
 }
 
