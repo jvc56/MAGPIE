@@ -489,7 +489,6 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
       // Update cross-sets for the affected squares
       update_cross_set_for_move(worker->move_list->spare_move,
                                 worker->game_copy);
-      board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
     }
 
     // Implementation is currently single-threaded. Keep counts per worker if we
@@ -522,8 +521,7 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
     unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_index]);
 
     // After unplay, regenerate cross-sets for affected squares (if not an outplay)
-    // This restores the parent cross-sets. We use update_cross_sets_after_unplay
-    // which doesn't rely on board_get_word_edge (which needs tiles to be on board).
+    // We use update_cross_sets_after_unplay which doesn't rely on board_get_word_edge
     if (!is_outplay) {
       // Reconstruct the move from small_move (spare_move was overwritten by recursive calls)
       SmallMove *unplay_small_move =

@@ -595,7 +595,8 @@ void play_move_incremental(const Move *move, Game *game, MoveUndo *undo) {
 
   if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     play_move_on_board_tracked(move, game, undo);
-    // Cross-sets are computed lazily before move generation
+    // Note: cross-sets are NOT updated here. The caller is responsible for
+    // calling update_cross_set_for_move after this function if needed.
     board_set_cross_sets_valid(board, false);
     game_set_consecutive_scoreless_turns(game, 0);
 
