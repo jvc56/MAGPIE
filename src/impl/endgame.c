@@ -471,6 +471,10 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
 
     int last_consecutive_scoreless_turns =
         game_get_consecutive_scoreless_turns(worker->game_copy);
+    // TODO: Use incremental play/unplay once bugs are fixed
+    // MoveUndo *undo = &worker->move_undos[worker->undo_depth++];
+    // play_move_incremental(worker->move_list->spare_move, worker->game_copy,
+    //                       undo);
     play_move(worker->move_list->spare_move, worker->game_copy, NULL);
 
     // Implementation is currently single-threaded. Keep counts per worker if we
@@ -500,6 +504,10 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
                         pv_node);
       }
     }
+    // TODO: Use incremental play/unplay once bugs are fixed
+    // worker->undo_depth--;
+    // unplay_move_incremental(&worker->move_undos[worker->undo_depth],
+    //                         worker->game_copy);
     game_unplay_last_move(worker->game_copy);
 
     // log_warn("%sNow unplayed %d, %s (tm:%x meta:%x)", spaces, idx,
