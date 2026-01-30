@@ -121,7 +121,7 @@ Further optimization would require algorithmic changes to the DAWG/GADDAG constr
 
 **Optimization Status:** After extensive experimentation, several successful optimizations have been identified:
 1. LSD radix sort provides 47% faster GADDAG string sorting
-2. Arena allocator provides 3x faster full dictionary builds and 8% faster endgame KWG creation
+2. Arena allocator provides 3x faster full dictionary builds (no significant improvement for small endgame dictionaries due to inline storage optimization)
 
 Multiple other micro-optimization attempts (struct size reduction, hash table variations, iterative transforms) either made performance worse or showed no improvement. The remaining performance is bound by the fundamental O(n * L) complexity of GADDAG construction where n is word count and L is average word length.
 
@@ -137,7 +137,7 @@ Multiple other micro-optimization attempts (struct size reduction, hash table va
 | Incremental hashing | ❌ Reverted | Slower |
 | Inline capacity changes | ❌ Reverted | No improvement |
 | MutableNode size reduction | ❌ Reverted | Slower |
-| Arena allocator for child indices | ✅ Committed | 3x faster full dict, 8% faster endgame |
+| Arena allocator for child indices | ✅ Committed | 3x faster full dict |
 
 ## Unsuccessful Optimization: MutableNode Size Reduction
 
@@ -178,26 +178,19 @@ Multiple other micro-optimization attempts (struct size reduction, hash table va
 Full dictionary build (kwgmaker tests including CSW21):
 | Approach | Time |
 |----------|------|
-| Arena allocator | 3.5s |
+| Arena allocator | 3.8s |
 | Individual malloc | 10.3s |
 
-**Result: ~66% faster (3x speedup) for full dictionary builds**
+**Result: ~63% faster (~3x speedup) for full dictionary builds**
 
-Endgame benchmark (100 games, ~8K words each):
-| Approach | Time |
-|----------|------|
-| Arena allocator | 22.5s |
-| Individual malloc | 24.5s |
+Note: For small endgame dictionaries (~8K words), the arena allocator provides no significant improvement because most nodes have ≤2 children which use inline storage (no heap allocation).
 
-**Result: ~8% faster for endgame word pruning**
-
-**Why it helps:**
+**Why it helps for full dictionaries:**
 - Full dictionaries have many more nodes with >2 children, so arena allocation avoids thousands of malloc calls
-- Even for small dictionaries, avoiding the malloc/free overhead for nodes that exceed inline capacity improves performance
 - Arena deallocation is O(1) instead of O(n) for individual frees
-- Better memory locality for child index arrays
+- Uses linked-list of blocks to avoid realloc invalidating existing pointers
 
-**Conclusion:** Arena allocation provides significant benefits for full dictionary builds and measurable improvement for endgames.
+**Conclusion:** Arena allocation provides significant benefits for full dictionary builds.
 
 ## Remaining Ideas (Not Tried)
 
