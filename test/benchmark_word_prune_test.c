@@ -45,6 +45,7 @@
 #define NUM_GAMES 10
 #define BASE_SEED 42
 #define MOVEGEN_TIMING_ITERATIONS 50
+#define FIXED_SIM_ITERATIONS 10000  // Fixed iteration count for fair comparison
 
 typedef struct TurnTimingData {
   int turn_number;
@@ -122,22 +123,25 @@ static void build_pruned_structures(const Game *game, int num_threads,
 }
 
 // Run simulation and return timing info
+// Uses fixed iteration count (no stopping condition) for fair comparison
 static double run_sim_internal(Config *config, int num_threads, int num_plies,
                                uint64_t seed, uint64_t *out_iterations) {
   Timer timer;
-  ctimer_start(&timer);
 
   SimResults *sim_results = config_get_sim_results(config);
   SimCtx *sim_ctx = NULL;
 
+  // Use -scond 99.99 (effectively never triggers) with fixed iteration count
   char *set_cmd = get_formatted_string("set -threads %d -plies %d -seed %lu "
-                                       "-iter 10000000 -scond 95 -sr tt -minp 50",
-                                       num_threads, num_plies, seed);
+                                       "-iter %d -scond 99.99 -sr tt -minp 50",
+                                       num_threads, num_plies, seed,
+                                       FIXED_SIM_ITERATIONS);
   load_and_exec_config_or_die(config, set_cmd);
   free(set_cmd);
 
   load_and_exec_config_or_die(config, "gen");
 
+  ctimer_start(&timer);
   error_code_t status = config_simulate_and_return_status(config, &sim_ctx, NULL, sim_results);
   assert(status == ERROR_STATUS_SUCCESS);
 
@@ -361,7 +365,7 @@ static void analyze_results(GameTimingData *games, int num_games) {
     }
   }
 
-  printf("Results by board fill level:\n");
+  printf("Results by board fill level (fixed %d iterations per sim):\n", FIXED_SIM_ITERATIONS);
   printf("%-8s | %-5s | %-8s | %-8s | %-8s | %-8s | %-7s | %-7s\n",
          "Tiles", "N", "Full(s)", "Pruned(s)", "Overhead", "SimSpdup", "MG Full", "MG Prun");
   printf("---------+-------+----------+----------+----------+----------+---------+---------\n");
@@ -406,10 +410,11 @@ static void analyze_results(GameTimingData *games, int num_games) {
     printf("\nNo break-even point found - pruning not beneficial in tested range.\n");
   }
 
-  printf("\nFor ~2 minute per turn time control (%d plies, %d threads):\n",
-         NUM_PLIES, NUM_THREADS);
+  printf("\nSimulation config: %d plies, %d threads, %d fixed iterations\n",
+         NUM_PLIES, NUM_THREADS, FIXED_SIM_ITERATIONS);
   printf("  Pruning includes: word_prune + KWG build + WMP build\n");
   printf("  Pruned KWG is used for both movegen AND cross-set computation\n");
+  printf("  SimSpdup = ratio of sim time (full/pruned) for same iteration count\n");
   printf("\n");
 }
 
@@ -419,7 +424,8 @@ void test_benchmark_word_prune(void) {
   printf("\n");
   printf("=======================================================\n");
   printf("  Word Pruning Benchmark for BAI Targeting\n");
-  printf("  Config: %d threads, %d plies, CSW24\n", NUM_THREADS, NUM_PLIES);
+  printf("  Config: %d threads, %d plies, %d iters, CSW24\n",
+         NUM_THREADS, NUM_PLIES, FIXED_SIM_ITERATIONS);
   printf("  Pruned KWG used for cross-sets AND movegen\n");
   printf("=======================================================\n");
 
