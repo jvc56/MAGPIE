@@ -130,6 +130,30 @@ Further optimization would require algorithmic changes to the DAWG/GADDAG constr
 | Iterative tree build | ❌ Reverted | Slower |
 | Incremental hashing | ❌ Reverted | Slower |
 | Inline capacity changes | ❌ Reverted | No improvement |
+| MutableNode size reduction | ❌ Reverted | Slower |
+
+## Unsuccessful Optimization: MutableNode Size Reduction
+
+**Attempted:** Reduce MutableNode struct from 64 bytes to smaller sizes for better cache utilization.
+
+**Approaches tried:**
+
+1. **48 bytes with flags** - Combined accepts/is_end into uint8_t flags, used uint32_t merged_into_index instead of pointer
+   - Result: ~2-3% SLOWER
+
+2. **48 bytes with bools** - Same as above but kept bool accepts/is_end
+   - Result: ~2-3% SLOWER
+
+3. **56 bytes** - Only changed NodeIndexList count/capacity from size_t to uint32_t
+   - Result: ~5-7% SLOWER
+
+**Why it didn't help:**
+- The 64-byte struct is a power of 2, which may have optimal alignment properties on x86-64
+- Using uint32_t instead of size_t may cause extra zero-extension operations on 64-bit CPUs
+- The original struct layout was already well-optimized for the specific access patterns
+- Field reordering disrupted cache-friendly access patterns
+
+**Conclusion:** The MutableNode struct is already well-optimized at 64 bytes. Do not attempt to reduce its size.
 
 ## Remaining Ideas (Not Tried)
 
@@ -147,9 +171,7 @@ These ideas were considered but not implemented. They target the main bottleneck
 
 1. **Memory pool allocator**: Replace individual `malloc` calls with a pre-allocated memory pool for nodes. Could reduce allocation overhead.
 
-2. **Better node memory layout**: Reorder `MutableNode` fields for better cache alignment. Current struct is 64 bytes; could profile cache miss rates.
-
-3. **Batch child insertion**: Instead of adding children one at a time, batch insertions when multiple children are known. Risk: requires algorithm changes.
+2. **Batch child insertion**: Instead of adding children one at a time, batch insertions when multiple children are known. Risk: requires algorithm changes.
 
 ### Merge Phase (18%)
 
@@ -164,11 +186,6 @@ These ideas were considered but not implemented. They target the main bottleneck
 1. **Profile-guided optimization (PGO)**: Build with profiling, run benchmarks, rebuild with profile data. Could help compiler optimize hot paths.
 
 2. **SIMD string comparison**: Use SIMD instructions for string matching in `insert_suffix`. Risk: strings are short (~6 chars), SIMD setup overhead may dominate.
-
-3. **Reduce MutableNode size**: Current node is 64 bytes. Compacting could improve cache utilization. Fields that could shrink:
-   - `ml` (MachineLetter): currently int, could be uint8_t
-   - `accepts`, `is_end`: currently bool (1 byte each), could be bit flags
-   - `merge_offset`: uint8_t (already small)
 
 ## Test Commands
 
