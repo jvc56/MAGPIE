@@ -36,8 +36,8 @@ typedef struct Move {
 
 // SmallMove is a compact 128-bit move representation used by the endgame
 // solver. It encodes up to 7 tiles in 64 bits, so it only supports
-// RACK_SIZE <= 7. For larger rack sizes, the endgame solver would need
-// a different move encoding.
+// RACK_SIZE <= 7 and BOARD_DIM <= 16. For larger rack sizes or board
+// dimensions, the endgame solver would need a different move encoding.
 typedef struct SmallMove {
   // tiny_move 64-bit schema:
   // From left to right, (63 to 0):
