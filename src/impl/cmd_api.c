@@ -1,9 +1,12 @@
 #include "cmd_api.h"
 
+#include "../compat/linenoise.h"
+#include "../ent/thread_control.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "config.h"
 #include "exec.h"
+#include <stdio.h>
 #include <stdlib.h>
 
 struct Magpie {
@@ -30,14 +33,41 @@ void magpie_destroy(Magpie *mp) {
 
 cmd_exit_code magpie_run_sync(Magpie *mp, const char *command) {
   free(mp->output);
-  bool ret = run_str_api_command(mp->config, mp->error, command, &mp->output);
+  mp->output = NULL;
+
+  // Capture stdout to memory stream (same approach as test/command_test.c)
+  char *buffer = NULL;
+  size_t size = 0;
+  FILE *mem_stream = open_memstream(&buffer, &size);
+  if (!mem_stream) {
+    mp->output = empty_string();
+    return MAGPIE_ERROR;
+  }
+
+  // Redirect stdout and linenoise output
+  io_set_stream_out(mem_stream);
+  linenoise_set_stream_out(mem_stream);
+
+  // Execute command synchronously (same as shell does)
+  execute_command_sync(mp->config, mp->error, command);
+
+  // Restore stdout
+  fflush(mem_stream);
+  fclose(mem_stream);
+  io_reset_stream_out();
+  linenoise_set_stream_out(NULL);
+
+  // Store captured output
+  if (buffer) {
+    mp->output = buffer;
+  } else {
+    mp->output = empty_string();
+  }
+
   if (error_stack_is_empty(mp->error)) {
     return MAGPIE_SUCCESS;
   }
-  if (ret) {
-    return MAGPIE_ERROR;
-  }
-  return MAGPIE_DID_NOT_RUN;
+  return MAGPIE_ERROR;
 }
 
 char *magpie_get_and_clear_error(Magpie *mp) {
@@ -51,3 +81,10 @@ char *magpie_get_last_command_status_message(Magpie *mp) {
 char *magpie_get_last_command_output(const Magpie *mp) {
   return string_duplicate(mp->output);
 }
+
+void magpie_stop_current_command(Magpie *mp) {
+  ThreadControl *tc = config_get_thread_control(mp->config);
+  thread_control_set_status(tc, THREAD_CONTROL_STATUS_USER_INTERRUPT);
+}
+
+Config *magpie_get_config(Magpie *mp) { return mp->config; }

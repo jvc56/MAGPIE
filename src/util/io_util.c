@@ -1,6 +1,7 @@
 #include "io_util.h"
 
 #include "../def/cpthread_defs.h"
+#include "fileproxy.h"
 #include <assert.h>
 #include <errno.h>
 #include <pthread.h>
@@ -436,7 +437,7 @@ void fseek_or_die(FILE *stream, long offset, int whence) {
 }
 
 char *get_string_from_file(const char *filename, ErrorStack *error_stack) {
-  FILE *file_handle = fopen_safe(filename, "r", error_stack);
+  FILE *file_handle = stream_from_filename(filename, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }

@@ -1,5 +1,6 @@
 #include "data_filepaths.h"
 
+#include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include <glob.h>
@@ -94,7 +95,8 @@ char *data_filepaths_get_first_valid_filename(const char *data_paths,
   for (int i = 0; i < number_of_data_paths; i++) {
     const char *data_path_i = string_splitter_get_item(split_data_paths, i);
     char *full_filename_i = get_filepath(data_path_i, data_name, type);
-    if (access(full_filename_i, F_OK | R_OK) == 0) {
+    bool file_exists = fileproxy_file_exists(full_filename_i);
+    if (file_exists) {
       if (data_path_only) {
         ret_val = string_duplicate(data_path_i);
         free(full_filename_i);
