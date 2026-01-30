@@ -105,7 +105,7 @@ static void exec_config_quiet(Config *config, const char *cmd) {
   close(saved_stdout);
 }
 
-#define MOVEGEN_TIMING_ITERATIONS 100
+#define MOVEGEN_TIMING_ITERATIONS 25
 
 // Measure actual movegen time with full and pruned KWG
 static void measure_movegen_time(const Game *game, int num_threads,
