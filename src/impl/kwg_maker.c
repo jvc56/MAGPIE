@@ -45,7 +45,7 @@ typedef struct ArenaBlock {
 typedef struct IndexArena {
   ArenaBlock *head;
   ArenaBlock *current;
-  size_t block_size;  // Size for new blocks
+  size_t block_size; // Size for new blocks
 } IndexArena;
 
 static inline ArenaBlock *arena_block_create(size_t capacity) {
@@ -57,7 +57,8 @@ static inline ArenaBlock *arena_block_create(size_t capacity) {
   return block;
 }
 
-static inline void index_arena_create(IndexArena *arena, size_t initial_capacity) {
+static inline void index_arena_create(IndexArena *arena,
+                                      size_t initial_capacity) {
   arena->head = arena_block_create(initial_capacity);
   arena->current = arena->head;
   arena->block_size = initial_capacity;
@@ -78,7 +79,8 @@ static inline uint32_t *index_arena_alloc(IndexArena *arena, size_t count) {
   if (arena->current->used + count > arena->current->capacity) {
     size_t new_capacity = arena->block_size;
     if (count > new_capacity) {
-      new_capacity = count * 2;  // Ensure block is big enough for this allocation
+      new_capacity =
+          count * 2; // Ensure block is big enough for this allocation
     }
     ArenaBlock *new_block = arena_block_create(new_capacity);
     arena->current->next = new_block;
@@ -134,8 +136,9 @@ static inline void node_index_list_add(NodeIndexList *list, uint32_t index) {
 }
 
 // Arena-aware version - allocates from arena instead of malloc
-static inline void node_index_list_add_arena(NodeIndexList *list, uint32_t index,
-                                              IndexArena *arena) {
+static inline void node_index_list_add_arena(NodeIndexList *list,
+                                             uint32_t index,
+                                             IndexArena *arena) {
   if (list->count == list->capacity) {
     size_t new_capacity = (list->capacity == 0) ? 4 : list->capacity * 2;
     uint32_t *new_indices = index_arena_alloc(arena, new_capacity);
@@ -173,7 +176,7 @@ typedef struct MutableNodeList {
   MutableNode *nodes;
   size_t count;
   size_t capacity;
-  IndexArena *arena;  // Optional arena for child index allocation
+  IndexArena *arena; // Optional arena for child index allocation
 } MutableNodeList;
 
 static inline MutableNodeList *mutable_node_list_create(void) {
@@ -199,7 +202,8 @@ mutable_node_list_create_with_capacity(size_t capacity) {
 
 // Create with arena for child index allocation
 static inline MutableNodeList *
-mutable_node_list_create_with_arena(size_t node_capacity, size_t arena_capacity) {
+mutable_node_list_create_with_arena(size_t node_capacity,
+                                    size_t arena_capacity) {
   MutableNodeList *mutable_node_list = malloc_or_die(sizeof(MutableNodeList));
   mutable_node_list->capacity = node_capacity;
   mutable_node_list->nodes =
@@ -246,7 +250,7 @@ static inline int add_child(uint32_t node_index, MutableNodeList *nodes,
 
 // Arena-aware version - allocates child indices from arena
 static inline int add_child_arena(uint32_t node_index, MutableNodeList *nodes,
-                                   MachineLetter ml) {
+                                  MachineLetter ml) {
   const size_t child_node_index = nodes->count;
   MutableNode *node = &nodes->nodes[node_index];
   node_index_list_add_arena(&node->children, child_node_index, nodes->arena);
@@ -257,7 +261,8 @@ static inline int add_child_arena(uint32_t node_index, MutableNodeList *nodes,
 }
 
 static inline void mutable_node_list_destroy(MutableNodeList *nodes) {
-  // If arena is used, all child indices are in the arena - no individual frees needed
+  // If arena is used, all child indices are in the arena - no individual frees
+  // needed
   if (nodes->arena == NULL) {
     for (size_t i = 0; i < nodes->count; i++) {
       node_index_list_destroy(&nodes->nodes[i].children);
