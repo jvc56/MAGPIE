@@ -45,7 +45,7 @@
 #define NUM_GAMES 1
 #define BASE_SEED 42
 #define MOVEGEN_TIMING_ITERATIONS 50
-#define FIXED_SIM_ITERATIONS 2000  // Fixed iteration count for fair comparison
+#define FIXED_SIM_ITERATIONS 2000
 
 typedef struct TurnTimingData {
   int turn_number;
@@ -237,10 +237,16 @@ static void build_pruned_structures(const Game *game, int num_threads,
   *wmp_build_time = ctimer_elapsed_seconds(&timer);
 }
 
+typedef struct PerPlayStats {
+  int num_plays;
+  uint64_t iterations[15];  // Max 15 plays
+} PerPlayStats;
+
 // Run simulation and return timing info
 // Uses fixed iteration count with very high minp to force exact iterations
 static double run_sim_internal(Config *config, int num_threads, int num_plies,
-                               uint64_t seed, uint64_t *out_iterations) {
+                               uint64_t seed, uint64_t *out_iterations,
+                               PerPlayStats *out_per_play) {
   Timer timer;
 
   SimResults *sim_results = config_get_sim_results(config);
@@ -264,6 +270,16 @@ static double run_sim_internal(Config *config, int num_threads, int num_plies,
 
   double sim_time = ctimer_elapsed_seconds(&timer);
   *out_iterations = sim_results_get_iteration_count(sim_results);
+
+  // Collect per-play stats
+  if (out_per_play) {
+    out_per_play->num_plays = sim_results_get_number_of_plays(sim_results);
+    for (int i = 0; i < out_per_play->num_plays && i < 15; i++) {
+      const SimmedPlay *sp = sim_results_get_simmed_play(sim_results, i);
+      const Stat *eq_stat = simmed_play_get_equity_stat(sp);
+      out_per_play->iterations[i] = stat_get_num_samples(eq_stat);
+    }
+  }
 
   sim_ctx_destroy(sim_ctx);
   return sim_time;
@@ -382,15 +398,26 @@ static void run_single_game(Config *config, GameTimingData *game_data,
         printf("    WARNING: Movegen mismatch at turn %d!\n", turn + 1);
       }
 
+      // Print KWG sizes
+      const KWG *full_kwg = player_get_kwg(game_get_player(game, 0));
+      int full_kwg_nodes = kwg_get_number_of_nodes(full_kwg);
+      int pruned_kwg_nodes = kwg_get_number_of_nodes(pruned_kwg);
+      printf("    KWG nodes: full=%d (%.1fMB), pruned=%d (%.1fMB) = %.1f%% of full\n",
+             full_kwg_nodes, full_kwg_nodes * 4.0 / 1e6,
+             pruned_kwg_nodes, pruned_kwg_nodes * 4.0 / 1e6,
+             100.0 * pruned_kwg_nodes / full_kwg_nodes);
+
       // Measure movegen timing
       measure_movegen_time(game, pruned_kwg,
                           &td->movegen_full_time_us, &td->movegen_pruned_time_us);
       td->movegen_speedup = td->movegen_full_time_us / td->movegen_pruned_time_us;
 
       // Run simulation with FULL KWG/WMP
+      PerPlayStats full_play_stats = {0};
       td->sim_full_time_sec = run_sim_internal(config, NUM_THREADS, NUM_PLIES,
                                                seed + (uint64_t)turn,
-                                               &td->sim_full_iterations);
+                                               &td->sim_full_iterations,
+                                               &full_play_stats);
 
       // Save original KWG/WMP for both players
       Player *p0 = game_get_player(game, 0);
@@ -410,9 +437,30 @@ static void run_single_game(Config *config, GameTimingData *game_data,
       game_gen_all_cross_sets(game);
 
       // Run simulation with PRUNED KWG/WMP
+      PerPlayStats pruned_play_stats = {0};
       td->sim_pruned_time_sec = run_sim_internal(config, NUM_THREADS, NUM_PLIES,
                                                   seed + (uint64_t)turn,
-                                                  &td->sim_pruned_iterations);
+                                                  &td->sim_pruned_iterations,
+                                                  &pruned_play_stats);
+
+      // Print detailed per-play stats comparison
+      printf("    FULL per-play iters (%d plays): [", full_play_stats.num_plays);
+      uint64_t full_total = 0;
+      for (int i = 0; i < full_play_stats.num_plays && i < 15; i++) {
+        if (i > 0) printf(", ");
+        printf("%" PRIu64, full_play_stats.iterations[i]);
+        full_total += full_play_stats.iterations[i];
+      }
+      printf("] total=%" PRIu64 "\n", full_total);
+
+      printf("    PRUNED per-play iters (%d plays): [", pruned_play_stats.num_plays);
+      uint64_t pruned_total = 0;
+      for (int i = 0; i < pruned_play_stats.num_plays && i < 15; i++) {
+        if (i > 0) printf(", ");
+        printf("%" PRIu64, pruned_play_stats.iterations[i]);
+        pruned_total += pruned_play_stats.iterations[i];
+      }
+      printf("] total=%" PRIu64 "\n", pruned_total);
 
       // Restore original KWG/WMP
       player_set_kwg(p0, orig_kwg0);
