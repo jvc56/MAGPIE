@@ -788,6 +788,7 @@ void unplay_move_incremental(Game *game, const MoveUndo *undo) {
   game_set_game_end_reason(game, undo->old_game_end_reason);
 
   // Restore player rack and both players' scores
+  // cppcheck-suppress constVariablePointer ; rack is modified via player_get_rack
   Player *player_on_turn = game_get_player(game, undo->player_on_turn_index);
   rack_copy(player_get_rack(player_on_turn), &undo->old_rack);
   player_set_score(game_get_player(game, 0), undo->old_scores[0]);
