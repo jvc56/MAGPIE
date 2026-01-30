@@ -1,13 +1,12 @@
 #ifndef MOVE_UNDO_H
 #define MOVE_UNDO_H
 
-#include <assert.h>
-
 #include "../def/board_defs.h"
 #include "../def/game_defs.h"
 #include "../def/rack_defs.h"
 #include "board.h"
 #include "rack.h"
+#include <assert.h>
 
 // Maximum squares that can be modified by a single move.
 // This calculation assumes RACK_SIZE=7. Other factors (SmallMove encoding)
