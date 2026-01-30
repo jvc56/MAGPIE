@@ -14,8 +14,74 @@
 #include "../src/util/io_util.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+
+void test_make_wmp_from_kwg(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game = config_game_create(config);
+  const Player *player = game_get_player(game, 0);
+  const KWG *csw_kwg = player_get_kwg(player);
+
+  // Create WMP directly from KWG (uses DAWG only)
+  WMP *wmp = make_wmp_from_kwg(csw_kwg, ld, 0);
+  assert(wmp != NULL);
+  assert(wmp->version == WMP_VERSION);
+  assert(wmp->board_dim == BOARD_DIM);
+
+  // Verify it can look up words
+  MachineLetter *buffer = malloc_or_die(wmp->max_word_lookup_bytes);
+
+  // Test basic word lookup
+  BitRack aa = string_to_bit_rack(ld, "AA");
+  int bytes_written = wmp_write_words_to_buffer(wmp, &aa, 2, buffer);
+  assert(bytes_written == 2);
+  assert_word_in_buffer(buffer, "AA", ld, 0, 2);
+
+  // Test with blanks
+  BitRack a_blank = string_to_bit_rack(ld, "A?");
+  bytes_written = wmp_write_words_to_buffer(wmp, &a_blank, 2, buffer);
+  // Should find AA, AB, AD, AE, AG, AH, AI, AL, AM, AN, AR, AS, AT, AW, AX, AY,
+  // BA, DA, EA, FA, HA, JA, KA, LA, MA, NA, PA, TA, YA, ZA
+  assert(bytes_written > 0);
+  // AA is one of the possibilities
+  bool found_aa = false;
+  for (int i = 0; i < bytes_written / 2; i++) {
+    const MachineLetter *word = buffer + i * 2;
+    if (word[0] == ld_hl_to_ml(ld, "A") && word[1] == ld_hl_to_ml(ld, "A")) {
+      found_aa = true;
+      break;
+    }
+  }
+  assert(found_aa);
+
+  // Compare with WMP created from words to ensure they produce identical results
+  DictionaryWordList *words = dictionary_word_list_create();
+  kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
+  WMP *wmp_from_words = make_wmp_from_words(words, ld, 0);
+
+  // Both WMPs should have the same structure
+  assert(wmp->version == wmp_from_words->version);
+  assert(wmp->board_dim == wmp_from_words->board_dim);
+  assert(wmp->max_word_lookup_bytes == wmp_from_words->max_word_lookup_bytes);
+
+  // Verify same lookup results for a few test cases
+  BitRack test_rack = string_to_bit_rack(ld, "RETINAS");
+  int bytes1 = wmp_write_words_to_buffer(wmp, &test_rack, 7, buffer);
+  MachineLetter *buffer2 = malloc_or_die(wmp_from_words->max_word_lookup_bytes);
+  int bytes2 = wmp_write_words_to_buffer(wmp_from_words, &test_rack, 7, buffer2);
+  assert(bytes1 == bytes2);
+
+  free(buffer2);
+  wmp_destroy(wmp_from_words);
+  dictionary_word_list_destroy(words);
+  free(buffer);
+  wmp_destroy(wmp);
+  game_destroy(game);
+  config_destroy(config);
+}
 
 void test_make_wmp_from_words(void) {
   Config *config = config_create_or_die("set -lex CSW21");
@@ -99,4 +165,7 @@ void test_make_wmp_from_words(void) {
   config_destroy(config);
 }
 
-void test_wmp_maker(void) { test_make_wmp_from_words(); }
+void test_wmp_maker(void) {
+  test_make_wmp_from_kwg();
+  test_make_wmp_from_words();
+}
