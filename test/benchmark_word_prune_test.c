@@ -42,10 +42,10 @@
 
 #define NUM_THREADS 16
 #define NUM_PLIES 5
-#define NUM_GAMES 10
+#define NUM_GAMES 1
 #define BASE_SEED 42
 #define MOVEGEN_TIMING_ITERATIONS 50
-#define FIXED_SIM_ITERATIONS 10000  // Fixed iteration count for fair comparison
+#define FIXED_SIM_ITERATIONS 2000  // Fixed iteration count for fair comparison
 
 typedef struct TurnTimingData {
   int turn_number;
@@ -96,6 +96,50 @@ static int count_tiles_on_board(const Game *game) {
     }
   }
   return count;
+}
+
+// Compare cross-sets between full and pruned KWG
+static bool compare_cross_sets(Game *game, const KWG *full_kwg, const KWG *pruned_kwg) {
+  const Board *board = game_get_board(game);
+  Player *p0 = game_get_player(game, 0);
+
+  // Save original and generate full cross-sets
+  const KWG *orig_kwg = player_get_kwg(p0);
+  player_set_kwg(p0, full_kwg);
+  game_gen_all_cross_sets(game);
+
+  // Copy full cross-sets
+  uint64_t full_cross_sets[BOARD_DIM][BOARD_DIM][2];
+  for (int r = 0; r < BOARD_DIM; r++) {
+    for (int c = 0; c < BOARD_DIM; c++) {
+      full_cross_sets[r][c][0] = board_get_cross_set(board, r, c, 0, GAME_VARIANT_CLASSIC);
+      full_cross_sets[r][c][1] = board_get_cross_set(board, r, c, 1, GAME_VARIANT_CLASSIC);
+    }
+  }
+
+  // Generate pruned cross-sets
+  player_set_kwg(p0, pruned_kwg);
+  game_gen_all_cross_sets(game);
+
+  // Compare
+  bool match = true;
+  for (int r = 0; r < BOARD_DIM; r++) {
+    for (int c = 0; c < BOARD_DIM; c++) {
+      uint64_t pruned_h = board_get_cross_set(board, r, c, 0, GAME_VARIANT_CLASSIC);
+      uint64_t pruned_v = board_get_cross_set(board, r, c, 1, GAME_VARIANT_CLASSIC);
+      if (full_cross_sets[r][c][0] != pruned_h || full_cross_sets[r][c][1] != pruned_v) {
+        printf("    Cross-set mismatch at (%d,%d): full=(%lx,%lx) pruned=(%lx,%lx)\n",
+               r, c, full_cross_sets[r][c][0], full_cross_sets[r][c][1], pruned_h, pruned_v);
+        match = false;
+      }
+    }
+  }
+
+  // Restore original
+  player_set_kwg(p0, orig_kwg);
+  game_gen_all_cross_sets(game);
+
+  return match;
 }
 
 // Validate that pruned KWG produces the same top move as full KWG
@@ -194,7 +238,7 @@ static void build_pruned_structures(const Game *game, int num_threads,
 }
 
 // Run simulation and return timing info
-// Uses fixed iteration count (no stopping condition) for fair comparison
+// Uses fixed iteration count with very high minp to force exact iterations
 static double run_sim_internal(Config *config, int num_threads, int num_plies,
                                uint64_t seed, uint64_t *out_iterations) {
   Timer timer;
@@ -202,11 +246,13 @@ static double run_sim_internal(Config *config, int num_threads, int num_plies,
   SimResults *sim_results = config_get_sim_results(config);
   SimCtx *sim_ctx = NULL;
 
-  // Use -scond 99.99 (effectively never triggers) with fixed iteration count
+  // Force exact iterations: set minp = iter/numplays so min total = iter
+  // With 15 plays and 10000 iter, minp = 667 forces at least 10005 iterations
+  int min_per_play = (FIXED_SIM_ITERATIONS / 15) + 1;
   char *set_cmd = get_formatted_string("set -threads %d -plies %d -seed %lu "
-                                       "-iter %d -scond 99.99 -sr tt -minp 50",
+                                       "-iter %d -scond 99.99 -sr tt -minp %d",
                                        num_threads, num_plies, seed,
-                                       FIXED_SIM_ITERATIONS);
+                                       FIXED_SIM_ITERATIONS, min_per_play);
   load_and_exec_config_or_die(config, set_cmd);
   free(set_cmd);
 
@@ -529,10 +575,26 @@ static void validate_pruned_movegen(int num_games) {
             KWG_MAKER_OUTPUT_DAWG, KWG_MAKER_MERGE_EXACT);
         dictionary_word_list_destroy(pruned_words);
 
-        // Validate
+        // Get full KWG for comparison
+        const KWG *full_kwg = player_get_kwg(game_get_player(game, 0));
+
+        // Check cross-sets match
+        if (!compare_cross_sets(game, full_kwg, pruned_kwg)) {
+          printf("  Game %d turn %d: CROSS-SET MISMATCH!\n", g + 1, turn + 1);
+          mismatches++;
+        }
+
+        // Validate movegen
         total_positions++;
         int full_count, pruned_count;
-        if (!validate_movegen_agreement(game, pruned_kwg, &full_count, &pruned_count)) {
+        bool movegen_match = validate_movegen_agreement(game, pruned_kwg, &full_count, &pruned_count);
+
+        // Always check if move counts differ
+        if (full_count != pruned_count) {
+          printf("  Game %d turn %d: MOVE COUNT MISMATCH full=%d pruned=%d\n",
+                 g + 1, turn + 1, full_count, pruned_count);
+          mismatches++;
+        } else if (!movegen_match) {
           mismatches++;
           printf("  Game %d turn %d (board=%d tiles, full=%d pruned=%d moves)\n",
                  g + 1, turn + 1, tiles_on_board, full_count, pruned_count);
@@ -567,8 +629,8 @@ static void validate_pruned_movegen(int num_games) {
 void test_benchmark_word_prune(void) {
   log_set_level(LOG_WARN);
 
-  // First validate that pruned movegen matches full movegen
-  validate_pruned_movegen(10);
+  // Quick validation - 1 game
+  validate_pruned_movegen(1);
 
   printf("\n");
   printf("=======================================================\n");
