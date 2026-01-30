@@ -88,7 +88,7 @@ static inline int get_radix_key(const DictionaryWord *word, int pos) {
 static inline void radix_sort_pass(const DictionaryWord *src, DictionaryWord *dst,
                                    int n, int pos, int *count) {
   // Count phase - count occurrences of each key
-  memset(count, 0, (RADIX_SIZE + 1) * sizeof(int));
+  memset(count, 0, (RADIX_SIZE + 2) * sizeof(int));
   for (int i = 0; i < n; i++) {
     int key = get_radix_key(&src[i], pos);
     count[key + 1]++;
@@ -127,7 +127,8 @@ static inline void radix_sort(DictionaryWord *arr, int n) {
 
   // Allocate temp array for double buffering
   DictionaryWord *temp = malloc_or_die(sizeof(DictionaryWord) * (size_t)n);
-  int count[RADIX_SIZE + 1];
+  // Need RADIX_SIZE + 2 because count phase uses count[key + 1] and max key is RADIX_SIZE
+  int count[RADIX_SIZE + 2];
 
   // LSD: process from rightmost position to leftmost
   // Double buffering: alternate between arr and temp to avoid copying
