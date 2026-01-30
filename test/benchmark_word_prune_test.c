@@ -2,8 +2,10 @@
 
 #include "../src/compat/ctime.h"
 #include "../src/def/bai_defs.h"
+#include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/kwg_defs.h"
+#include "../src/def/move_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/bai_result.h"
@@ -62,6 +64,12 @@ typedef struct TurnTimingData {
   uint64_t num_sim_iterations;
   int full_word_count;
 
+  // Actual movegen timing
+  double movegen_full_time_us;    // avg movegen time with full KWG (microseconds)
+  double movegen_pruned_time_us;  // avg movegen time with pruned KWG (microseconds)
+  double movegen_speedup;         // actual speedup factor
+  int movegen_iterations;         // number of iterations for timing
+
   // Derived metrics
   double word_reduction_pct;      // % reduction in words
   double estimated_movegen_speedup;  // estimated speedup factor for movegen
@@ -95,6 +103,79 @@ static void exec_config_quiet(Config *config, const char *cmd) {
   (void)fflush(stdout);
   (void)dup2(saved_stdout, STDOUT_FILENO);
   close(saved_stdout);
+}
+
+#define MOVEGEN_TIMING_ITERATIONS 100
+
+// Measure actual movegen time with full and pruned KWG
+static void measure_movegen_time(const Game *game, int num_threads,
+                                 double *full_time_us, double *pruned_time_us,
+                                 int *num_iterations, int *pruned_word_count) {
+  Timer timer;
+  MoveList *move_list = move_list_create(500);
+
+  // First, generate the pruned word list and KWG
+  DictionaryWordList *possible_words = dictionary_word_list_create();
+  generate_possible_words(game, NULL, possible_words);
+  *pruned_word_count = dictionary_word_list_get_count(possible_words);
+
+  KWG *pruned_kwg = make_kwg_from_words_small(possible_words, KWG_MAKER_OUTPUT_DAWG,
+                                               KWG_MAKER_MERGE_EXACT);
+  dictionary_word_list_destroy(possible_words);
+
+  // Time movegen with full KWG (using NULL for override_kwg)
+  MoveGenArgs full_args = {
+      .game = game,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .thread_index = 0,
+      .move_list = move_list,
+  };
+
+  // Warmup
+  generate_moves(&full_args);
+
+  ctimer_start(&timer);
+  for (int i = 0; i < MOVEGEN_TIMING_ITERATIONS; i++) {
+    move_list_reset(move_list);
+    generate_moves(&full_args);
+  }
+  double full_total_time = ctimer_elapsed_seconds(&timer);
+  *full_time_us = (full_total_time * 1000000.0) / MOVEGEN_TIMING_ITERATIONS;
+
+  // Time movegen with pruned KWG
+  MoveGenArgs pruned_args = {
+      .game = game,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = pruned_kwg,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .thread_index = 0,
+      .move_list = move_list,
+  };
+
+  // Warmup
+  move_list_reset(move_list);
+  generate_moves(&pruned_args);
+
+  ctimer_start(&timer);
+  for (int i = 0; i < MOVEGEN_TIMING_ITERATIONS; i++) {
+    move_list_reset(move_list);
+    generate_moves(&pruned_args);
+  }
+  double pruned_total_time = ctimer_elapsed_seconds(&timer);
+  *pruned_time_us = (pruned_total_time * 1000000.0) / MOVEGEN_TIMING_ITERATIONS;
+
+  *num_iterations = MOVEGEN_TIMING_ITERATIONS;
+
+  kwg_destroy(pruned_kwg);
+  move_list_destroy(move_list);
 }
 
 static int count_tiles_on_board(const Game *game) {
@@ -176,6 +257,9 @@ static void print_turn_data(const TurnTimingData *td) {
   printf("  Turn %2d: board=%3d tiles, bag=%2d tiles, moves=%4d\n",
          td->turn_number, td->tiles_on_board, td->tiles_in_bag,
          td->num_moves_generated);
+  printf("    Movegen: full=%.0fus, pruned=%.0fus, speedup=%.2fx\n",
+         td->movegen_full_time_us, td->movegen_pruned_time_us,
+         td->movegen_speedup);
   printf("    Prune overhead: word_prune=%.3fs, kwg_build=%.3fs, "
          "wmp_build=%.3fs, total=%.3fs\n",
          td->word_prune_time_sec, td->kwg_build_time_sec,
@@ -216,6 +300,17 @@ static void run_single_game(Config *config, GameTimingData *game_data,
     bool should_time = (td->tiles_on_board >= 10 && td->tiles_in_bag > 0);
 
     if (should_time) {
+      // Measure actual movegen time with full and pruned KWG
+      double full_time_us, pruned_time_us;
+      int movegen_iters, pruned_word_count_mg;
+      measure_movegen_time(game, NUM_THREADS, &full_time_us, &pruned_time_us,
+                          &movegen_iters, &pruned_word_count_mg);
+
+      td->movegen_full_time_us = full_time_us;
+      td->movegen_pruned_time_us = pruned_time_us;
+      td->movegen_speedup = full_time_us / pruned_time_us;
+      td->movegen_iterations = movegen_iters;
+
       // Measure pruning overhead
       double word_prune_time, kwg_build_time, wmp_build_time;
       int pruned_word_count;
@@ -336,8 +431,58 @@ static void analyze_wmp_build_time(GameTimingData *games, int num_games) {
   }
 }
 
+static void analyze_movegen_timing(GameTimingData *games, int num_games) {
+  printf("\n");
+  printf("=======================================================\n");
+  printf("          ACTUAL MOVEGEN TIMING BY TILES ON BOARD\n");
+  printf("=======================================================\n");
+  printf("\n");
+
+  typedef struct {
+    double total_full_time;
+    double total_pruned_time;
+    double total_speedup;
+    int count;
+  } MovegenBucket;
+
+  MovegenBucket buckets[15] = {0};  // 0-10, 10-20, ..., 130-140+ tiles
+
+  for (int g = 0; g < num_games; g++) {
+    for (int t = 0; t < games[g].num_turns; t++) {
+      TurnTimingData *td = &games[g].turns[t];
+      int bucket_idx = td->tiles_on_board / 10;
+      if (bucket_idx >= 15) bucket_idx = 14;
+
+      buckets[bucket_idx].total_full_time += td->movegen_full_time_us;
+      buckets[bucket_idx].total_pruned_time += td->movegen_pruned_time_us;
+      buckets[bucket_idx].total_speedup += td->movegen_speedup;
+      buckets[bucket_idx].count++;
+    }
+  }
+
+  printf("Movegen time by board fill level:\n");
+  printf("%-12s | %-8s | %-12s | %-12s | %-10s\n",
+         "Tiles", "Count", "Full (us)", "Pruned (us)", "Speedup");
+  printf("-------------+----------+--------------+--------------+------------\n");
+
+  for (int i = 0; i < 15; i++) {
+    if (buckets[i].count == 0) continue;
+
+    double avg_full = buckets[i].total_full_time / buckets[i].count;
+    double avg_pruned = buckets[i].total_pruned_time / buckets[i].count;
+    double avg_speedup = buckets[i].total_speedup / buckets[i].count;
+
+    printf("%3d-%3d      | %8d | %12.0f | %12.0f | %10.2fx\n",
+           i * 10, (i + 1) * 10 - 1, buckets[i].count,
+           avg_full, avg_pruned, avg_speedup);
+  }
+}
+
 static void analyze_results(GameTimingData *games, int num_games) {
-  // First, analyze WMP build time vs word count
+  // First, analyze actual movegen timing
+  analyze_movegen_timing(games, num_games);
+
+  // Then analyze WMP build time vs word count
   analyze_wmp_build_time(games, num_games);
 
   printf("\n");
