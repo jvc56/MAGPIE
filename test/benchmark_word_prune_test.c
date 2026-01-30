@@ -98,6 +98,77 @@ static int count_tiles_on_board(const Game *game) {
   return count;
 }
 
+// Validate that pruned KWG produces the same top move as full KWG
+// Returns true if they match, false if they differ
+static bool validate_movegen_agreement(const Game *game, const KWG *pruned_kwg,
+                                       int *out_full_count, int *out_pruned_count) {
+  MoveList *full_moves = move_list_create(500);
+  MoveList *pruned_moves = move_list_create(500);
+
+  MoveGenArgs full_args = {
+      .game = game,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .thread_index = 0,
+      .move_list = full_moves,
+  };
+
+  MoveGenArgs pruned_args = full_args;
+  pruned_args.override_kwg = pruned_kwg;
+  pruned_args.move_list = pruned_moves;
+
+  generate_moves(&full_args);
+  generate_moves(&pruned_args);
+
+  int full_count = move_list_get_count(full_moves);
+  int pruned_count = move_list_get_count(pruned_moves);
+
+  *out_full_count = full_count;
+  *out_pruned_count = pruned_count;
+
+  bool match = true;
+
+  if (full_count == 0 && pruned_count == 0) {
+    // Both found no moves - OK
+  } else if (full_count == 0 || pruned_count == 0) {
+    printf("    MISMATCH: full found %d moves, pruned found %d moves\n",
+           full_count, pruned_count);
+    match = false;
+  } else {
+    const Move *full_top = move_list_get_move(full_moves, 0);
+    const Move *pruned_top = move_list_get_move(pruned_moves, 0);
+
+    // Compare top moves by position, type, and score
+    bool same_type = move_get_type(full_top) == move_get_type(pruned_top);
+    bool same_pos = move_get_row_start(full_top) == move_get_row_start(pruned_top) &&
+                    move_get_col_start(full_top) == move_get_col_start(pruned_top);
+    bool same_tiles = move_get_tiles_played(full_top) == move_get_tiles_played(pruned_top);
+    bool same_score = move_get_score(full_top) == move_get_score(pruned_top);
+
+    if (!same_type || !same_pos || !same_tiles || !same_score) {
+      printf("    MISMATCH: full top: type=%d pos=(%d,%d) tiles=%d score=%d equity=%d\n",
+             move_get_type(full_top), move_get_row_start(full_top),
+             move_get_col_start(full_top), move_get_tiles_played(full_top),
+             move_get_score(full_top), move_get_equity(full_top));
+      printf("              pruned:   type=%d pos=(%d,%d) tiles=%d score=%d equity=%d\n",
+             move_get_type(pruned_top), move_get_row_start(pruned_top),
+             move_get_col_start(pruned_top), move_get_tiles_played(pruned_top),
+             move_get_score(pruned_top), move_get_equity(pruned_top));
+      printf("    Full found %d moves, pruned found %d moves\n",
+             full_count, pruned_count);
+      match = false;
+    }
+  }
+
+  move_list_destroy(full_moves);
+  move_list_destroy(pruned_moves);
+  return match;
+}
+
 // Build pruned structures and return them
 static void build_pruned_structures(const Game *game, int num_threads,
                                     DictionaryWordList **out_words,
@@ -259,6 +330,12 @@ static void run_single_game(Config *config, GameTimingData *game_data,
       td->pruned_word_count = dictionary_word_list_get_count(pruned_words);
       dictionary_word_list_destroy(pruned_words);
 
+      // Validate that pruned KWG finds the same top move as full KWG
+      int full_move_count, pruned_move_count;
+      if (!validate_movegen_agreement(game, pruned_kwg, &full_move_count, &pruned_move_count)) {
+        printf("    WARNING: Movegen mismatch at turn %d!\n", turn + 1);
+      }
+
       // Measure movegen timing
       measure_movegen_time(game, pruned_kwg,
                           &td->movegen_full_time_us, &td->movegen_pruned_time_us);
@@ -418,8 +495,80 @@ static void analyze_results(GameTimingData *games, int num_games) {
   printf("\n");
 }
 
+// Fast validation: just check that pruned KWG finds same top move as full KWG
+// across many game positions without running any simulations
+static void validate_pruned_movegen(int num_games) {
+  printf("\n=== Validating pruned movegen agreement ===\n");
+
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 15 -threads 1");
+
+  int total_positions = 0;
+  int mismatches = 0;
+
+  for (int g = 0; g < num_games; g++) {
+    uint64_t seed = BASE_SEED + (uint64_t)g;
+    load_and_exec_config_or_die(config, "new");
+    Game *game = config_get_game(config);
+    game_reset(game);
+    game_seed(game, seed);
+    draw_starting_racks(game);
+
+    MoveList *move_list = move_list_create(100);
+    int turn = 0;
+
+    while (game_get_game_end_reason(game) == GAME_END_REASON_NONE && turn < 50) {
+      int tiles_on_board = count_tiles_on_board(game);
+
+      if (tiles_on_board >= 2) {  // After first move
+        // Build pruned KWG
+        DictionaryWordList *pruned_words = dictionary_word_list_create();
+        generate_possible_words(game, NULL, pruned_words);
+        KWG *pruned_kwg = make_kwg_from_words_small(pruned_words,
+            KWG_MAKER_OUTPUT_DAWG, KWG_MAKER_MERGE_EXACT);
+        dictionary_word_list_destroy(pruned_words);
+
+        // Validate
+        total_positions++;
+        int full_count, pruned_count;
+        if (!validate_movegen_agreement(game, pruned_kwg, &full_count, &pruned_count)) {
+          mismatches++;
+          printf("  Game %d turn %d (board=%d tiles, full=%d pruned=%d moves)\n",
+                 g + 1, turn + 1, tiles_on_board, full_count, pruned_count);
+        }
+
+        kwg_destroy(pruned_kwg);
+      }
+
+      // Play top equity move to advance
+      const Move *best = get_top_equity_move(game, 0, move_list);
+      play_move(best, game, NULL);
+      turn++;
+    }
+
+    move_list_destroy(move_list);
+    printf("Game %d: %d turns checked\n", g + 1, turn);
+  }
+
+  printf("\n=== Validation Results ===\n");
+  printf("Total positions checked: %d\n", total_positions);
+  printf("Mismatches found: %d\n", mismatches);
+  if (mismatches == 0) {
+    printf("SUCCESS: Pruned KWG produces identical top moves!\n");
+  } else {
+    printf("FAILURE: %d positions had different top moves!\n", mismatches);
+  }
+  printf("\n");
+
+  config_destroy(config);
+}
+
 void test_benchmark_word_prune(void) {
   log_set_level(LOG_WARN);
+
+  // First validate that pruned movegen matches full movegen
+  validate_pruned_movegen(10);
 
   printf("\n");
   printf("=======================================================\n");
