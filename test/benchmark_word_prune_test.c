@@ -228,7 +228,7 @@ static void build_pruned_structures(const Game *game, int num_threads,
   *word_prune_time = ctimer_elapsed_seconds(&timer);
 
   ctimer_start(&timer);
-  *out_kwg = make_kwg_from_words_small(*out_words, KWG_MAKER_OUTPUT_DAWG,
+  *out_kwg = make_kwg_from_words_small(*out_words, KWG_MAKER_OUTPUT_DAWG_AND_GADDAG,
                                         KWG_MAKER_MERGE_EXACT);
   *kwg_build_time = ctimer_elapsed_seconds(&timer);
 
