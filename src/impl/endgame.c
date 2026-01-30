@@ -105,6 +105,7 @@ typedef struct EndgameSolverWorker {
   PVLine best_pv;              // Thread-local best PV
   int32_t best_pv_value;       // Thread-local best value
   int completed_depth;         // Depth this thread completed
+  bool stuck_tile_mode;        // Use stuck-tile estimation (rewards keeping tiles)
 } EndgameSolverWorker;
 
 #ifndef MAX
@@ -214,7 +215,8 @@ void endgame_solver_destroy(EndgameSolver *es) {
 
 EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
                                                   int worker_index,
-                                                  uint64_t base_seed) {
+                                                  uint64_t base_seed,
+                                                  bool stuck_tile_mode) {
 
   EndgameSolverWorker *solver_worker =
       malloc_or_die(sizeof(EndgameSolverWorker));
@@ -239,6 +241,9 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
   solver_worker->best_pv.num_moves = 0;
   solver_worker->best_pv_value = -LARGE_VALUE;
   solver_worker->completed_depth = 0;
+
+  // Stuck-tile mode: use estimation that rewards keeping tiles on rack
+  solver_worker->stuck_tile_mode = stuck_tile_mode;
 
   return solver_worker;
 }
@@ -299,6 +304,7 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
   // to explore different parts of the search tree first
   const int thread_idx = worker->thread_index;
   const int num_threads = worker->solver->threads;
+  const bool stuck_tile_mode = worker->stuck_tile_mode;
 
   for (size_t i = 0; i < (size_t)move_count; i++) {
     size_t element_offset = arena_offset + i * sizeof(SmallMove);
@@ -306,18 +312,45 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
         (SmallMove *)(worker->small_move_arena->memory + element_offset);
     // log_warn("assign estimate to move idx %d, tm %x, meta %x", i,
     //          current_move->tiny_move, current_move->metadata);
-    if (small_move_get_tiles_played(current_move) == ntiles_on_rack) {
-      small_move_set_estimated_value(
-          current_move,
-          equity_to_int(int_to_equity(small_move_get_score(current_move)) +
-                        (calculate_end_rack_points(
-                            other_rack, game_get_ld(worker->game_copy)))) |
-              GOING_OUT_BF);
+    int tiles_played = small_move_get_tiles_played(current_move);
+    int tiles_kept = ntiles_on_rack - tiles_played;
+
+    if (tiles_played == ntiles_on_rack) {
+      // Going out move
+      if (stuck_tile_mode) {
+        // In stuck-tile mode, going out is NOT prioritized.
+        // Just use score + opponent rack value, no GOING_OUT_BF bonus.
+        // This allows the search to explore slow-play alternatives equally.
+        small_move_set_estimated_value(
+            current_move,
+            equity_to_int(int_to_equity(small_move_get_score(current_move)) +
+                          (calculate_end_rack_points(
+                              other_rack, game_get_ld(worker->game_copy)))));
+      } else {
+        // Normal mode: heavily prioritize going out
+        small_move_set_estimated_value(
+            current_move,
+            equity_to_int(int_to_equity(small_move_get_score(current_move)) +
+                          (calculate_end_rack_points(
+                              other_rack, game_get_ld(worker->game_copy)))) |
+                GOING_OUT_BF);
+      }
+    } else if (stuck_tile_mode) {
+      // Stuck-tile mode: reward keeping tiles on rack (slow play strategy)
+      // The idea is that when opponent has an unplayable tile, we want to
+      // explore moves that keep tiles on our rack, forcing opponent to pass.
+      int base_estimate = small_move_get_score(current_move);
+      // Add bonus for each tile kept on rack (encourages slow play)
+      base_estimate += 5 * tiles_kept;
+      // Add small random jitter for variety
+      if (num_threads > 1) {
+        base_estimate += (int)(prng_get_random_number(worker->prng, 8));
+      }
+      small_move_set_estimated_value(current_move, base_estimate);
     } else if (depth > 2 && num_threads > 1) {
-      // Lazy SMP jitter for move ordering
+      // Normal Lazy SMP jitter for move ordering
       // Different threads prioritize different move characteristics
       int base_estimate = small_move_get_score(current_move);
-      int tiles_played = small_move_get_tiles_played(current_move);
 
       // Add thread-specific jitter to move estimates
       // Thread 0: pure score (no jitter - the "main" thread)
@@ -895,11 +928,31 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   cpthread_t *worker_ids =
       malloc_or_die((sizeof(cpthread_t)) * (solver->threads));
 
+  // Stuck-tile mode allocation: when we have 4+ threads, use half for
+  // stuck-tile estimation (rewards keeping tiles on rack for slow-play).
+  // This provides useful jitter - some threads explore normal outplay lines
+  // while others explore slow-play lines that may be better when opponent
+  // has an unplayable tile (like Q or V).
+  // Thread 0 always uses normal mode (the "main" thread).
+  const int stuck_tile_start = (solver->threads >= 4) ? (solver->threads / 2) : solver->threads;
+  int stuck_tile_count = 0;
+  int normal_count = 0;
+
   for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
+    bool use_stuck_tile_mode = (thread_index >= stuck_tile_start);
+    if (use_stuck_tile_mode) {
+      stuck_tile_count++;
+    } else {
+      normal_count++;
+    }
     solver_workers[thread_index] =
-        endgame_solver_create_worker(solver, thread_index, base_seed);
+        endgame_solver_create_worker(solver, thread_index, base_seed, use_stuck_tile_mode);
     cpthread_create(&worker_ids[thread_index], solver_worker_start,
                     solver_workers[thread_index]);
+  }
+
+  if (stuck_tile_count > 0) {
+    log_warn("Thread allocation: %d normal, %d stuck-tile mode", normal_count, stuck_tile_count);
   }
 
   // Wait for all threads to complete
@@ -924,6 +977,13 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   // Copy the best result to the solver's principal variation
   solver->principal_variation = solver_workers[best_thread]->best_pv;
   solver->best_pv_value = solver_workers[best_thread]->best_pv_value;
+
+  // Log which thread type found the best result
+  if (stuck_tile_count > 0) {
+    const char *mode_str = solver_workers[best_thread]->stuck_tile_mode ? "stuck-tile" : "normal";
+    log_warn("Best result from thread %d (%s mode), depth %d, value %d",
+             best_thread, mode_str, best_depth, solver->best_pv_value);
+  }
 
   // Print ABDADA diagnostics
   int nodes = atomic_load(&solver->nodes_searched);
