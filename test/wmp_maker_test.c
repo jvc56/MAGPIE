@@ -50,7 +50,7 @@ void test_make_wmp_from_kwg(void) {
   // AA is one of the possibilities
   bool found_aa = false;
   for (int i = 0; i < bytes_written / 2; i++) {
-    const MachineLetter *word = buffer + i * 2;
+    const MachineLetter *word = buffer + (size_t)i * 2;
     if (word[0] == ld_hl_to_ml(ld, "A") && word[1] == ld_hl_to_ml(ld, "A")) {
       found_aa = true;
       break;
@@ -58,7 +58,8 @@ void test_make_wmp_from_kwg(void) {
   }
   assert(found_aa);
 
-  // Compare with WMP created from words to ensure they produce identical results
+  // Compare with WMP created from words to ensure they produce identical
+  // results
   DictionaryWordList *words = dictionary_word_list_create();
   kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
   WMP *wmp_from_words = make_wmp_from_words(words, ld, 0);
@@ -72,7 +73,8 @@ void test_make_wmp_from_kwg(void) {
   BitRack test_rack = string_to_bit_rack(ld, "RETINAS");
   int bytes1 = wmp_write_words_to_buffer(wmp, &test_rack, 7, buffer);
   MachineLetter *buffer2 = malloc_or_die(wmp_from_words->max_word_lookup_bytes);
-  int bytes2 = wmp_write_words_to_buffer(wmp_from_words, &test_rack, 7, buffer2);
+  int bytes2 =
+      wmp_write_words_to_buffer(wmp_from_words, &test_rack, 7, buffer2);
   assert(bytes1 == bytes2);
 
   free(buffer2);
@@ -129,7 +131,7 @@ void test_make_wmp_from_dawg_only_kwg(void) {
   bool found_ab = false;
   bool found_ba = false;
   for (int i = 0; i < 2; i++) {
-    const MachineLetter *word = buffer + i * 2;
+    const MachineLetter *word = buffer + (size_t)i * 2;
     if (word[0] == ld_hl_to_ml(ld, "A") && word[1] == ld_hl_to_ml(ld, "B")) {
       found_ab = true;
     }
@@ -147,7 +149,7 @@ void test_make_wmp_from_dawg_only_kwg(void) {
   bool found_cat = false;
   bool found_act = false;
   for (int i = 0; i < 2; i++) {
-    const MachineLetter *word = buffer + i * 3;
+    const MachineLetter *word = buffer + (size_t)i * 3;
     if (word[0] == ld_hl_to_ml(ld, "C") && word[1] == ld_hl_to_ml(ld, "A") &&
         word[2] == ld_hl_to_ml(ld, "T")) {
       found_cat = true;

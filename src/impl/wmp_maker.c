@@ -9,6 +9,7 @@
 #include "../def/wmp_defs.h"
 #include "../ent/bit_rack.h"
 #include "../ent/dictionary_word.h"
+#include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/wmp.h"
 #include "../util/io_util.h"
