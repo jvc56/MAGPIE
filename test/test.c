@@ -7,6 +7,7 @@
 #include "bag_test.h"
 #include "bai_test.h"
 #include "benchmark_endgame_test.h"
+#include "benchmark_word_prune_test.h"
 #include "bit_rack_test.h"
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
@@ -125,6 +126,7 @@ static TestEntry test_table[] = {
 static TestEntry on_demand_test_table[] = {
     {"infercmp", test_infer_cmp},
     {"benchend", test_benchmark_endgame},
+    {"benchwp", test_benchmark_word_prune},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
