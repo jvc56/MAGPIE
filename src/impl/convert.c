@@ -162,6 +162,25 @@ void convert_with_names(const LetterDistribution *ld,
       dictionary_word_list_destroy(words);
     }
     kwg_destroy(kwg);
+  } else if (conversion_type == CONVERT_DAWG2WORDMAP) {
+    KWG *kwg = kwg_create(data_paths, input_name, error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      char *wmp_output_filename = data_filepaths_get_writable_filename(
+          data_paths, output_name, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
+      if (error_stack_is_empty(error_stack)) {
+        WMP *wmp = make_wmp_from_kwg(kwg, ld, num_threads);
+        wmp_write_to_file(wmp, wmp_output_filename, error_stack);
+        if (!error_stack_is_empty(error_stack)) {
+          error_stack_push(
+              error_stack, ERROR_STATUS_CONVERT_OUTPUT_FILE_NOT_WRITABLE,
+              get_formatted_string("could not write wordmap to output file: %s",
+                                   wmp_output_filename));
+        }
+        wmp_destroy(wmp);
+        free(wmp_output_filename);
+      }
+    }
+    kwg_destroy(kwg);
   } else if (conversion_type == CONVERT_CSV2KLV) {
     KLV *klv = klv_read_from_csv(ld, data_paths, input_name, error_stack);
     if (error_stack_is_empty(error_stack)) {
@@ -200,6 +219,8 @@ get_conversion_type_from_string(const char *conversion_type_string) {
     conversion_type = CONVERT_KLV2CSV;
   } else if (strings_equal(conversion_type_string, "text2wordmap")) {
     conversion_type = CONVERT_TEXT2WORDMAP;
+  } else if (strings_equal(conversion_type_string, "dawg2wordmap")) {
+    conversion_type = CONVERT_DAWG2WORDMAP;
   }
   return conversion_type;
 }
