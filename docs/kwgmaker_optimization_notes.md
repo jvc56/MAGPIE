@@ -119,7 +119,11 @@ The remaining performance is bounded by fundamental algorithmic constraints:
 
 Further optimization would require algorithmic changes to the DAWG/GADDAG construction approach itself.
 
-**Optimization Status:** After extensive experimentation, the current implementation appears to be near-optimal for the given algorithm. Multiple micro-optimization attempts (struct size reduction, arena allocators, hash table variations, iterative transforms) have either made performance worse or shown no improvement. The remaining performance is bound by the fundamental O(n * L) complexity of GADDAG construction where n is word count and L is average word length.
+**Optimization Status:** After extensive experimentation, several successful optimizations have been identified:
+1. LSD radix sort provides 47% faster GADDAG string sorting
+2. Arena allocator provides 3x faster full dictionary builds and 8% faster endgame KWG creation
+
+Multiple other micro-optimization attempts (struct size reduction, hash table variations, iterative transforms) either made performance worse or showed no improvement. The remaining performance is bound by the fundamental O(n * L) complexity of GADDAG construction where n is word count and L is average word length.
 
 ## Summary of Changes
 
@@ -133,7 +137,7 @@ Further optimization would require algorithmic changes to the DAWG/GADDAG constr
 | Incremental hashing | ❌ Reverted | Slower |
 | Inline capacity changes | ❌ Reverted | No improvement |
 | MutableNode size reduction | ❌ Reverted | Slower |
-| Arena allocator for child indices | ❌ Reverted | No improvement |
+| Arena allocator for child indices | ✅ Committed | 3x faster full dict, 8% faster endgame |
 
 ## Unsuccessful Optimization: MutableNode Size Reduction
 
@@ -158,7 +162,7 @@ Further optimization would require algorithmic changes to the DAWG/GADDAG constr
 
 **Conclusion:** The MutableNode struct is already well-optimized at 64 bytes. Do not attempt to reduce its size.
 
-## Unsuccessful Optimization: Arena Allocator for Child Indices
+## Successful Optimization: Arena Allocator for Child Indices
 
 **Attempted:** Replace individual `malloc` calls for child index arrays with a bump allocator (arena) to reduce allocation overhead.
 
@@ -167,23 +171,33 @@ Further optimization would require algorithmic changes to the DAWG/GADDAG constr
 - Created `index_arena_alloc()` for bump allocation with auto-growth
 - Modified `MutableNodeList` to optionally use arena
 - Created `insert_suffix_arena()` and `add_child_arena()` variants
+- Applied to both `make_kwg_from_words` (full dictionaries) and `make_kwg_from_words_small` (endgame)
 
-**Benchmark Results (100 endgames):**
+**Benchmark Results:**
+
+Full dictionary build (kwgmaker tests including CSW21):
 | Approach | Time |
 |----------|------|
-| Arena allocator | 24.2-24.3s |
-| Individual malloc | 24.5-24.6s |
+| Arena allocator | 3.5s |
+| Individual malloc | 10.3s |
 
-**Results:** ~1-2% faster, but within measurement noise.
+**Result: ~66% faster (3x speedup) for full dictionary builds**
 
-**Why it didn't help significantly:**
-- Most nodes have ≤2 children, which fit in inline storage (no heap allocation)
-- The `NodeIndexList` already uses inline storage for 2 indices before falling back to heap
-- Only nodes with >2 children benefit from arena allocation
-- The arena's growth/realloc overhead when capacity is exceeded offsets any savings
-- Very few malloc calls actually happen due to the inline optimization
+Endgame benchmark (100 games, ~8K words each):
+| Approach | Time |
+|----------|------|
+| Arena allocator | 22.5s |
+| Individual malloc | 24.5s |
 
-**Conclusion:** The inline capacity optimization already minimizes allocations. An arena allocator provides no measurable benefit.
+**Result: ~8% faster for endgame word pruning**
+
+**Why it helps:**
+- Full dictionaries have many more nodes with >2 children, so arena allocation avoids thousands of malloc calls
+- Even for small dictionaries, avoiding the malloc/free overhead for nodes that exceed inline capacity improves performance
+- Arena deallocation is O(1) instead of O(n) for individual frees
+- Better memory locality for child index arrays
+
+**Conclusion:** Arena allocation provides significant benefits for full dictionary builds and measurable improvement for endgames.
 
 ## Remaining Ideas (Not Tried)
 
