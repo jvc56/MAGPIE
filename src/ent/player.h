@@ -28,6 +28,8 @@ void player_set_score(Player *player, Equity score);
 void player_set_move_sort_type(Player *player, move_sort_t move_sort_type);
 void player_set_move_record_type(Player *player,
                                  move_record_t move_record_type);
+void player_set_kwg(Player *player, const KWG *kwg);
+void player_set_wmp(Player *player, const WMP *wmp);
 void player_add_to_score(Player *player, Equity score);
 
 void player_update(const PlayersData *players_data, Player *player);
