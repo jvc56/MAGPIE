@@ -62,6 +62,12 @@ struct EndgameSolver {
   KWG *pruned_kwg;
   int nodes_searched;
 
+  // NegaScout diagnostic counters
+  int scout_searches;   // Total scout (null-window) searches performed
+  int scout_researches; // Re-searches needed when scout failed
+  int beta_cutoffs;     // Fail-high: move was too good (beta cutoff)
+  int exact_scores;     // Exact scores found (not a cutoff)
+
   int solve_multiple_variations;
   int32_t best_pv_value;
   int requested_plies;
@@ -181,6 +187,10 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->negascout_optim = true;
   es->solve_multiple_variations = 0;
   es->nodes_searched = 0;
+  es->scout_searches = 0;
+  es->scout_researches = 0;
+  es->beta_cutoffs = 0;
+  es->exact_scores = 0;
   es->threads = 1; // for now
   es->requested_plies = endgame_args->plies;
   es->solving_player = game_get_player_on_turn_index(endgame_args->game);
@@ -487,10 +497,13 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
       value = negamax(worker, child_key, depth - 1, -beta, -alpha, &child_pv,
                       pv_node);
     } else {
+      // Scout search with null window
+      worker->solver->scout_searches++;
       value = negamax(worker, child_key, depth - 1, -alpha - 1, -alpha,
                       &child_pv, false);
       if (alpha < -value && -value < beta) {
-        // re-search with wider window
+        // Scout failed - re-search with wider window
+        worker->solver->scout_researches++;
         value = negamax(worker, child_key, depth - 1, -beta, -alpha, &child_pv,
                         pv_node);
       }
@@ -531,7 +544,8 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
     }
     alpha = MAX(alpha, best_value);
     if (best_value >= beta) {
-      // beta cut-off
+      // beta cut-off (fail-high)
+      worker->solver->beta_cutoffs++;
       break;
     }
     // clear the child node's pv for the next child node
@@ -543,11 +557,12 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
     uint8_t flag;
     TTEntry entry_to_store = {.score = score};
     if (best_value <= alpha_orig) {
-      flag = TT_UPPER;
+      flag = TT_UPPER;  // fail-low: no move improved alpha
     } else if (best_value >= beta) {
-      flag = TT_LOWER;
+      flag = TT_LOWER;  // fail-high: beta cutoff
     } else {
-      flag = TT_EXACT;
+      flag = TT_EXACT;  // exact score found
+      worker->solver->exact_scores++;
     }
     entry_to_store.flag_and_depth = (flag << 6) + (uint8_t)depth;
     entry_to_store.tiny_move = best_tiny_move;
@@ -798,6 +813,14 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
 
   // Print stats
   log_warn("nodes=%d", solver->nodes_searched);
+
+  // Print NegaScout stats
+  log_warn("NegaScout stats: scout_searches=%d, scout_researches=%d (%.2f%%), "
+           "beta_cutoffs=%d, exact_scores=%d",
+           solver->scout_searches, solver->scout_researches,
+           100.0 * solver->scout_researches /
+               (solver->scout_searches > 0 ? solver->scout_searches : 1),
+           solver->beta_cutoffs, solver->exact_scores);
 
   if (solver->transposition_table) {
     int tt_lookups = atomic_load(&solver->transposition_table->lookups);
