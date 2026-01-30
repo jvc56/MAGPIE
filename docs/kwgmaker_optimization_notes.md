@@ -119,6 +119,8 @@ The remaining performance is bounded by fundamental algorithmic constraints:
 
 Further optimization would require algorithmic changes to the DAWG/GADDAG construction approach itself.
 
+**Optimization Status:** After extensive experimentation, the current implementation appears to be near-optimal for the given algorithm. Multiple micro-optimization attempts (struct size reduction, arena allocators, hash table variations, iterative transforms) have either made performance worse or shown no improvement. The remaining performance is bound by the fundamental O(n * L) complexity of GADDAG construction where n is word count and L is average word length.
+
 ## Summary of Changes
 
 | Change | Status | Impact |
@@ -131,6 +133,7 @@ Further optimization would require algorithmic changes to the DAWG/GADDAG constr
 | Incremental hashing | ❌ Reverted | Slower |
 | Inline capacity changes | ❌ Reverted | No improvement |
 | MutableNode size reduction | ❌ Reverted | Slower |
+| Arena allocator for child indices | ❌ Reverted | No improvement |
 
 ## Unsuccessful Optimization: MutableNode Size Reduction
 
@@ -155,6 +158,33 @@ Further optimization would require algorithmic changes to the DAWG/GADDAG constr
 
 **Conclusion:** The MutableNode struct is already well-optimized at 64 bytes. Do not attempt to reduce its size.
 
+## Unsuccessful Optimization: Arena Allocator for Child Indices
+
+**Attempted:** Replace individual `malloc` calls for child index arrays with a bump allocator (arena) to reduce allocation overhead.
+
+**Implementation:**
+- Added `IndexArena` struct with buffer, capacity, and used fields
+- Created `index_arena_alloc()` for bump allocation with auto-growth
+- Modified `MutableNodeList` to optionally use arena
+- Created `insert_suffix_arena()` and `add_child_arena()` variants
+
+**Benchmark Results (100 endgames):**
+| Approach | Time |
+|----------|------|
+| Arena allocator | 24.2-24.3s |
+| Individual malloc | 24.5-24.6s |
+
+**Results:** ~1-2% faster, but within measurement noise.
+
+**Why it didn't help significantly:**
+- Most nodes have ≤2 children, which fit in inline storage (no heap allocation)
+- The `NodeIndexList` already uses inline storage for 2 indices before falling back to heap
+- Only nodes with >2 children benefit from arena allocation
+- The arena's growth/realloc overhead when capacity is exceeded offsets any savings
+- Very few malloc calls actually happen due to the inline optimization
+
+**Conclusion:** The inline capacity optimization already minimizes allocations. An arena allocator provides no measurable benefit.
+
 ## Remaining Ideas (Not Tried)
 
 These ideas were considered but not implemented. They target the main bottlenecks.
@@ -169,9 +199,9 @@ These ideas were considered but not implemented. They target the main bottleneck
 
 ### Tree Building (28%)
 
-1. **Memory pool allocator**: Replace individual `malloc` calls with a pre-allocated memory pool for nodes. Could reduce allocation overhead.
+1. **Batch child insertion**: Instead of adding children one at a time, batch insertions when multiple children are known. Risk: requires algorithm changes.
 
-2. **Batch child insertion**: Instead of adding children one at a time, batch insertions when multiple children are known. Risk: requires algorithm changes.
+2. **Trie structure optimization**: The current approach builds a trie then converts to DAWG. An alternative could use a more compact intermediate representation.
 
 ### Merge Phase (18%)
 
