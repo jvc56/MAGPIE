@@ -5,7 +5,6 @@
 #include "../ent/bag.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
-#include "../ent/kwg.h"
 #include "../ent/move.h"
 #include "../ent/rack.h"
 #include "move_gen.h"
@@ -42,10 +41,5 @@ void game_play_n_events(GameHistory *game_history, Game *game, int event_index,
                         bool validate, ErrorStack *error_stack);
 bool game_history_contains_end_rack_penalty_event(
     const GameHistory *game_history);
-
-// Update cross sets for squares affected by a move using an explicit KWG.
-// Used for endgame solving with pruned KWGs.
-void update_cross_set_for_move_with_kwg(const Move *move, const Game *game,
-                                        const KWG *kwg);
 
 #endif

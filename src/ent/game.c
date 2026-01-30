@@ -61,6 +61,11 @@ struct Game {
   int backup_cursor;
   MinimalGameBackup *gcg_game_backup;
   backup_mode_t backup_mode;
+
+  // Optional override KWG for cross set generation.
+  // If set, this KWG is used instead of the player's KWG when computing
+  // cross sets. Used for endgame solving with pruned KWGs.
+  const KWG *cross_set_override_kwg;
 };
 
 game_variant_t game_get_variant(const Game *game) { return game->variant; }
@@ -143,6 +148,10 @@ void game_set_endgame_solving_mode(Game *game) {
     game->consecutive_scoreless_turns = 0;
   }
   game->max_scoreless_turns = 2;
+}
+
+void game_set_cross_set_override_kwg(Game *game, const KWG *kwg) {
+  game->cross_set_override_kwg = kwg;
 }
 
 void game_start_next_player_turn(Game *game) {
@@ -249,7 +258,10 @@ static inline void game_gen_alpha_cross_set(const Game *game, int row, int col,
     score += traverse_backwards_for_score(board, ld, row, right_col);
   }
 
-  const KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
+  // Use override KWG if set, otherwise use player's KWG
+  const KWG *kwg = game->cross_set_override_kwg
+                       ? game->cross_set_override_kwg
+                       : player_get_kwg(game_get_player(game, cross_set_index));
 
   board_set_cross_set_with_blank(
       board, row, col, dir, cross_set_index,
@@ -278,7 +290,10 @@ static inline void game_gen_classic_cross_set(const Game *game, int row,
     return;
   }
 
-  const KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
+  // Use override KWG if set, otherwise use player's KWG
+  const KWG *kwg = game->cross_set_override_kwg
+                       ? game->cross_set_override_kwg
+                       : player_get_kwg(game_get_player(game, cross_set_index));
   const uint32_t kwg_root = kwg_get_root_node_index(kwg);
   const LetterDistribution *ld = game_get_ld(game);
 
@@ -395,193 +410,6 @@ void game_gen_cross_set(const Game *game, int row, int col, int dir,
   }
 }
 
-// Version of game_gen_alpha_cross_set that uses an explicit KWG instead of
-// looking it up from the player. Used for endgame solving with pruned KWGs.
-static inline void game_gen_alpha_cross_set_with_kwg(const Game *game, int row,
-                                                     int col, int dir,
-                                                     int cross_set_index,
-                                                     const KWG *kwg) {
-  if (!board_is_position_in_bounds(row, col)) {
-    return;
-  }
-
-  Board *board = game_get_board(game);
-
-  if (board_is_nonempty_or_bricked(board, row, col)) {
-    board_set_cross_set(board, row, col, dir, cross_set_index, 0);
-    board_set_cross_score(board, row, col, dir, cross_set_index, 0);
-    return;
-  }
-  if (board_are_left_and_right_empty(board, row, col)) {
-    board_set_cross_set(board, row, col, dir, cross_set_index,
-                        TRIVIAL_CROSS_SET);
-    board_set_cross_score(board, row, col, dir, cross_set_index, 0);
-    return;
-  }
-
-  const LetterDistribution *ld = game_get_ld(game);
-
-  const int left_col =
-      board_get_word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
-  const int right_col =
-      board_get_word_edge(board, row, col + 1, WORD_DIRECTION_RIGHT);
-  Equity score = 0;
-
-  Rack cross_set_rack;
-  rack_set_dist_size_and_reset(&cross_set_rack, ld_get_size(ld));
-  if (left_col < col) {
-    traverse_backwards_add_to_rack(board, row, col - 1, &cross_set_rack);
-    score += traverse_backwards_for_score(board, ld, row, col - 1);
-  }
-
-  if (right_col > col) {
-    traverse_backwards_add_to_rack(board, row, right_col, &cross_set_rack);
-    score += traverse_backwards_for_score(board, ld, row, right_col);
-  }
-
-  board_set_cross_set_with_blank(
-      board, row, col, dir, cross_set_index,
-      kwg_compute_alpha_cross_set(kwg, &cross_set_rack));
-  board_set_cross_score(board, row, col, dir, cross_set_index, score);
-}
-
-// Version of game_gen_classic_cross_set that uses an explicit KWG instead of
-// looking it up from the player. Used for endgame solving with pruned KWGs.
-static inline void game_gen_classic_cross_set_with_kwg(const Game *game,
-                                                       int row, int col,
-                                                       int dir,
-                                                       int cross_set_index,
-                                                       const KWG *kwg) {
-  if (!board_is_position_in_bounds(row, col)) {
-    return;
-  }
-
-  Board *board = game_get_board(game);
-
-  if (board_is_nonempty_or_bricked(board, row, col)) {
-    board_set_cross_set(board, row, col, dir, cross_set_index, 0);
-    board_set_cross_score(board, row, col, dir, cross_set_index, 0);
-    return;
-  }
-  if (board_are_left_and_right_empty(board, row, col)) {
-    board_set_cross_set(board, row, col, dir, cross_set_index,
-                        TRIVIAL_CROSS_SET);
-    board_set_cross_score(board, row, col, dir, cross_set_index, 0);
-    return;
-  }
-
-  const uint32_t kwg_root = kwg_get_root_node_index(kwg);
-  const LetterDistribution *ld = game_get_ld(game);
-
-  const int through_dir = board_toggle_dir(dir);
-
-  const int left_col =
-      board_get_word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
-  const int right_col =
-      board_get_word_edge(board, row, col + 1, WORD_DIRECTION_RIGHT);
-  Equity score = 0;
-  uint64_t front_hook_set = 0;
-  uint64_t back_hook_set = 0;
-  uint32_t right_lnode_index = 0;
-  bool left_lpath_is_valid = false;
-  bool right_lpath_is_valid = false;
-  uint64_t leftside_rightx_set = 0;
-
-  const bool nonempty_to_left = left_col < col;
-  if (nonempty_to_left) {
-    uint64_t leftside_leftx_set = 0;
-    const uint32_t lnode_index =
-        traverse_backwards(kwg, board, row, col - 1, kwg_root, false, 0);
-    left_lpath_is_valid = lnode_index != 0;
-    score += traverse_backwards_for_score(board, ld, row, col - 1);
-    if (left_lpath_is_valid) {
-      kwg_get_letter_sets(kwg, lnode_index, &leftside_leftx_set);
-      const uint32_t s_index =
-          kwg_get_next_node_index(kwg, lnode_index, SEPARATION_MACHINE_LETTER);
-      if (s_index != 0) {
-        back_hook_set = kwg_get_letter_sets(kwg, s_index, &leftside_rightx_set);
-      }
-    }
-    board_set_left_extension_set_with_blank(
-        board, row, col - 1, through_dir, cross_set_index, leftside_leftx_set);
-    board_set_right_extension_set_with_blank(
-        board, row, col - 1, through_dir, cross_set_index, leftside_rightx_set);
-    if (left_col > 0) {
-      board_set_left_extension_set_with_blank(board, row, left_col - 1,
-                                              through_dir, cross_set_index,
-                                              leftside_leftx_set);
-    }
-  }
-
-  const bool nonempty_to_right = right_col > col;
-  if (nonempty_to_right) {
-    uint64_t rightside_leftx_set = 0;
-    uint64_t rightside_rightx_set = 0;
-    right_lnode_index =
-        traverse_backwards(kwg, board, row, right_col, kwg_root, false, 0);
-    right_lpath_is_valid = right_lnode_index != 0;
-    score += traverse_backwards_for_score(board, ld, row, right_col);
-    if (right_lpath_is_valid) {
-      front_hook_set =
-          kwg_get_letter_sets(kwg, right_lnode_index, &rightside_leftx_set);
-      const uint32_t s_index = kwg_get_next_node_index(
-          kwg, right_lnode_index, SEPARATION_MACHINE_LETTER);
-      if (s_index != 0) {
-        kwg_get_letter_sets(kwg, s_index, &rightside_rightx_set);
-      }
-    }
-    board_set_left_extension_set_with_blank(board, row, right_col, through_dir,
-                                            cross_set_index,
-                                            rightside_leftx_set);
-    board_set_right_extension_set_with_blank(board, row, right_col, through_dir,
-                                             cross_set_index,
-                                             rightside_rightx_set);
-    board_set_left_extension_set_with_blank(
-        board, row, col, through_dir, cross_set_index, rightside_leftx_set);
-  }
-
-  if (nonempty_to_left && nonempty_to_right) {
-    uint64_t letter_set = 0;
-    if (left_lpath_is_valid && right_lpath_is_valid) {
-      for (uint32_t i = right_lnode_index;; i++) {
-        const uint32_t node = kwg_node(kwg, i);
-        const uint32_t ml = kwg_node_tile(node);
-        if (board_is_letter_allowed_in_cross_set(leftside_rightx_set, ml)) {
-          const uint32_t next_node_index =
-              kwg_node_arc_index_prefetch(node, kwg);
-          if (traverse_backwards(kwg, board, row, col - 1, next_node_index,
-                                 true, left_col) != 0) {
-            letter_set |= get_cross_set_bit(ml);
-          }
-        }
-        if (kwg_node_is_end(node)) {
-          break;
-        }
-      }
-    }
-    board_set_cross_set_with_blank(board, row, col, dir, cross_set_index,
-                                   letter_set);
-  } else if (nonempty_to_left) {
-    board_set_cross_set_with_blank(board, row, col, dir, cross_set_index,
-                                   back_hook_set);
-  } else if (nonempty_to_right) {
-    board_set_cross_set_with_blank(board, row, col, dir, cross_set_index,
-                                   front_hook_set);
-  }
-  board_set_cross_score(board, row, col, dir, cross_set_index, score);
-}
-
-void game_gen_cross_set_with_kwg(const Game *game, int row, int col, int dir,
-                                 int cross_set_index, const KWG *kwg) {
-  if (game_get_variant(game) == GAME_VARIANT_CLASSIC) {
-    game_gen_classic_cross_set_with_kwg(game, row, col, dir, cross_set_index,
-                                        kwg);
-  } else {
-    game_gen_alpha_cross_set_with_kwg(game, row, col, dir, cross_set_index,
-                                      kwg);
-  }
-}
-
 void game_gen_all_cross_sets(const Game *game) {
   Board *board = game_get_board(game);
   bool kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
@@ -604,34 +432,6 @@ void game_gen_all_cross_sets(const Game *game) {
       game_gen_cross_set(game, i, j, BOARD_VERTICAL_DIRECTION, 0);
       if (!kwgs_are_shared) {
         game_gen_cross_set(game, i, j, BOARD_VERTICAL_DIRECTION, 1);
-      }
-    }
-  }
-  board_transpose(board);
-}
-
-// Version that uses an explicit KWG for all cross sets.
-// Used for endgame solving with pruned KWGs.
-void game_gen_all_cross_sets_with_kwg(const Game *game, const KWG *kwg) {
-  Board *board = game_get_board(game);
-  bool kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
-
-  for (int i = 0; i < BOARD_DIM; i++) {
-    for (int j = 0; j < BOARD_DIM; j++) {
-      game_gen_cross_set_with_kwg(game, i, j, BOARD_VERTICAL_DIRECTION, 0, kwg);
-      if (!kwgs_are_shared) {
-        game_gen_cross_set_with_kwg(game, i, j, BOARD_VERTICAL_DIRECTION, 1,
-                                    kwg);
-      }
-    }
-  }
-  board_transpose(board);
-  for (int i = 0; i < BOARD_DIM; i++) {
-    for (int j = 0; j < BOARD_DIM; j++) {
-      game_gen_cross_set_with_kwg(game, i, j, BOARD_VERTICAL_DIRECTION, 0, kwg);
-      if (!kwgs_are_shared) {
-        game_gen_cross_set_with_kwg(game, i, j, BOARD_VERTICAL_DIRECTION, 1,
-                                    kwg);
       }
     }
   }
@@ -735,6 +535,7 @@ Game *game_create(const GameArgs *game_args) {
   game->backup_cursor = 0;
   game->backup_mode = BACKUP_MODE_OFF;
   game->gcg_game_backup = NULL;
+  game->cross_set_override_kwg = NULL;
   return game;
 }
 
@@ -768,6 +569,8 @@ Game *game_duplicate(const Game *game) {
   new_game->backup_cursor = 0;
   new_game->backup_mode = BACKUP_MODE_OFF;
   new_game->gcg_game_backup = NULL;
+  // Override KWG must be explicitly set by the caller if needed
+  new_game->cross_set_override_kwg = NULL;
   return new_game;
 }
 

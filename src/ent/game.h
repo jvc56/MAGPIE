@@ -52,6 +52,7 @@ int game_get_max_scoreless_turns(const Game *game);
 bool game_reached_max_scoreless_turns(const Game *game);
 void game_increment_consecutive_scoreless_turns(Game *game);
 void game_set_endgame_solving_mode(Game *game);
+void game_set_cross_set_override_kwg(Game *game, const KWG *kwg);
 void game_set_game_end_reason(Game *game, game_end_reason_t game_end_reason);
 void game_start_next_player_turn(Game *game);
 
@@ -60,10 +61,7 @@ void game_backup(Game *game);
 void game_unplay_last_move(Game *game);
 void game_set_starting_player_index(Game *game, int starting_player_index);
 void game_gen_all_cross_sets(const Game *game);
-void game_gen_all_cross_sets_with_kwg(const Game *game, const KWG *kwg);
 void game_gen_cross_set(const Game *game, int row, int col, int dir,
                         int cross_set_index);
-void game_gen_cross_set_with_kwg(const Game *game, int row, int col, int dir,
-                                 int cross_set_index, const KWG *kwg);
 
 #endif

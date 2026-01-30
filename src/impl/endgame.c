@@ -242,9 +242,13 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
   game_set_endgame_solving_mode(solver_worker->game_copy);
   game_set_backup_mode(solver_worker->game_copy, BACKUP_MODE_SIMULATION);
 
-  // Regenerate all cross sets using the pruned KWG for more restrictive
-  // cross set constraints during endgame solving.
-  game_gen_all_cross_sets_with_kwg(solver_worker->game_copy, solver->pruned_kwg);
+  // Set the override KWG so all cross set generation uses the pruned KWG.
+  // This integrates with the normal gameplay flow - when play_move updates
+  // cross sets, it will automatically use the pruned KWG.
+  game_set_cross_set_override_kwg(solver_worker->game_copy, solver->pruned_kwg);
+
+  // Regenerate all cross sets using the pruned KWG for the initial position.
+  game_gen_all_cross_sets(solver_worker->game_copy);
 
   solver_worker->move_list =
       move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
@@ -473,15 +477,8 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
         game_get_consecutive_scoreless_turns(worker->game_copy);
     play_move(worker->move_list->spare_move, worker->game_copy, NULL);
 
-    // Update cross sets with the pruned KWG for tile placement moves.
-    // play_move updates cross sets with the full KWG, so we need to
-    // regenerate them with the pruned KWG for more restrictive constraints.
-    if (move_get_type(worker->move_list->spare_move) ==
-        GAME_EVENT_TILE_PLACEMENT_MOVE) {
-      update_cross_set_for_move_with_kwg(worker->move_list->spare_move,
-                                         worker->game_copy,
-                                         worker->solver->pruned_kwg);
-    }
+    // Cross sets are now automatically updated with the pruned KWG via
+    // the cross_set_override_kwg set on the game copy.
 
     // Implementation is currently single-threaded. Keep counts per worker if we
     // want to keep doing this when we have multiple threads.
