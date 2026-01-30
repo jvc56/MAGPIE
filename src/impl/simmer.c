@@ -13,6 +13,7 @@
 #include "../util/string_util.h"
 #include "bai.h"
 #include "inference.h"
+#include "move_gen.h"
 #include "random_variable.h"
 #include <stdlib.h>
 
@@ -43,6 +44,9 @@ void sim_ctx_destroy(SimCtx *sim_ctx) {
 
 void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
               ErrorStack *error_stack) {
+  // Reset movegen timing stats for this simulation
+  movegen_reset_timing();
+
   if (!sim_args->move_list || move_list_get_count(sim_args->move_list) == 0) {
     error_stack_push(error_stack, ERROR_STATUS_SIM_NO_MOVES,
                      string_duplicate("cannot simulate without moves, use the "

@@ -110,7 +110,6 @@
           },
           onRuntimeInitialized: () => {
             console.log('[WASM] Runtime fully initialized');
-            console.log('[WASM] PThread pool size:', mod.PThread ? 'PThread available' : 'PThread NOT available');
           }
         });
 
@@ -170,6 +169,7 @@
           "data/letterdistributions/english.csv",
           `data/lexica/${lexicon}.klv2`,
           "data/strategy/winpct.csv",
+          "data/layouts/standard15.txt",
         ];
 
         for (const filename of files) {
@@ -207,9 +207,21 @@
 
         // Run commands
         const nthreads = Math.min(Math.max(navigator.hardwareConcurrency || 4, 1), 20);
+        // Strip lex from CGP string - it's set separately
+        let cleanCgp = cgpstring;
+        const lexIndex = cleanCgp.indexOf(' lex ');
+        if (lexIndex !== -1) {
+          cleanCgp = cleanCgp.substring(0, lexIndex);
+        }
+        // Also handle -lex format
+        const dashLexIndex = cleanCgp.indexOf(' -lex ');
+        if (dashLexIndex !== -1) {
+          cleanCgp = cleanCgp.substring(0, dashLexIndex);
+        }
         const commands = [
           `set -lex ${lexicon}`,
-          `cgp ${cgpstring}`,
+          `cgp ${cleanCgp}`,
+          `generate`,
           `sim -numplays 15 -threads ${nthreads}`,
         ];
 

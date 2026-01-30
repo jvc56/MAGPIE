@@ -61,6 +61,41 @@
         border-radius: 4px;
         margin: 10px 0;
       }
+      .settings-grid {
+        background: #f5f5f5;
+        padding: 15px;
+        border-radius: 4px;
+        margin: 10px 0;
+      }
+      .setting-row {
+        margin: 8px 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .setting-row label {
+        min-width: 150px;
+      }
+      .setting-row input[type="checkbox"] {
+        margin-right: 5px;
+      }
+      .wmp-status {
+        font-size: 12px;
+        padding: 2px 8px;
+        border-radius: 3px;
+      }
+      .wmp-status.enabled {
+        background: #c8e6c9;
+        color: #2e7d32;
+      }
+      .wmp-status.disabled {
+        background: #ffcdd2;
+        color: #c62828;
+      }
+      .wmp-status.not-loaded {
+        background: #e0e0e0;
+        color: #616161;
+      }
     </style>
   </head>
   <body>
@@ -88,6 +123,36 @@ C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/7PEW2DOE/9EF1
     ></textarea>
     <button type="button" id="loadSampleButton">Load Sample CGP</button>
 
+    <h3>Simulation Settings:</h3>
+    <div class="settings-grid">
+      <div class="setting-row">
+        <label>
+          <input type="checkbox" id="useWmp" checked />
+          Use WMP (fast movegen)
+        </label>
+        <span id="wmpStatus" class="wmp-status"></span>
+      </div>
+      <div class="setting-row">
+        <label for="numPlays">Plays to simulate:</label>
+        <input type="number" id="numPlays" value="15" min="1" max="100" style="width: 60px" />
+      </div>
+      <div class="setting-row">
+        <label for="stopCondition">Stop condition:</label>
+        <select id="stopCondition">
+          <option value="auto">Auto (statistical threshold)</option>
+          <option value="iterations">Fixed iterations</option>
+        </select>
+      </div>
+      <div class="setting-row" id="iterationsRow" style="display: none">
+        <label for="maxIterations">Max iterations:</label>
+        <input type="number" id="maxIterations" value="10000" min="100" max="1000000" step="1000" style="width: 80px" />
+      </div>
+      <div class="setting-row" id="thresholdRow">
+        <label for="stopThreshold">Win% threshold:</label>
+        <input type="number" id="stopThreshold" value="0.5" min="0.1" max="5" step="0.1" style="width: 60px" /> %
+      </div>
+    </div>
+
     <button type="button" id="submitButton" disabled>Run Simulation</button>
     <button type="button" id="stopButton" disabled>Stop</button>
 
@@ -103,6 +168,55 @@ C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/7PEW2DOE/9EF1
 
       let magpieWorker = null;
       let workerReady = false;
+      let wmpBuilt = false;
+      let wmpLexicon = null;  // Track which lexicon the WMP was built for
+      let magpieInitialized = false;  // Track if MAGPIE is initialized
+      let magpieLexicon = null;  // Track which lexicon MAGPIE is using
+
+      // DOM elements for settings
+      const useWmpCheckbox = document.getElementById("useWmp");
+      const wmpStatusSpan = document.getElementById("wmpStatus");
+      const numPlaysInput = document.getElementById("numPlays");
+      const stopConditionSelect = document.getElementById("stopCondition");
+      const maxIterationsInput = document.getElementById("maxIterations");
+      const stopThresholdInput = document.getElementById("stopThreshold");
+      const iterationsRow = document.getElementById("iterationsRow");
+      const thresholdRow = document.getElementById("thresholdRow");
+
+      // Toggle iterations/threshold visibility based on stop condition
+      stopConditionSelect.addEventListener("change", () => {
+        if (stopConditionSelect.value === "iterations") {
+          iterationsRow.style.display = "flex";
+          thresholdRow.style.display = "none";
+        } else {
+          iterationsRow.style.display = "none";
+          thresholdRow.style.display = "flex";
+        }
+      });
+
+      function updateWmpStatus() {
+        if (!wmpBuilt) {
+          wmpStatusSpan.textContent = "Not built";
+          wmpStatusSpan.className = "wmp-status not-loaded";
+        } else if (useWmpCheckbox.checked) {
+          wmpStatusSpan.textContent = "Enabled";
+          wmpStatusSpan.className = "wmp-status enabled";
+        } else {
+          wmpStatusSpan.textContent = "Disabled";
+          wmpStatusSpan.className = "wmp-status disabled";
+        }
+      }
+      updateWmpStatus();
+
+      useWmpCheckbox.addEventListener("change", () => {
+        if (workerReady && wmpBuilt) {
+          magpieWorker.postMessage({
+            type: "set_wmp_enabled",
+            data: { enabled: useWmpCheckbox.checked },
+          });
+        }
+        updateWmpStatus();
+      });
 
       function setStatus(text, type = "") {
         statusElement.textContent = text;
@@ -141,6 +255,14 @@ C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/7PEW2DOE/9EF1
               setStatus("✓ MAGPIE initialized", "success");
               break;
 
+            case "wmp_complete":
+              if (e.data.success) {
+                console.log("✓ WMP built successfully");
+              } else {
+                console.error("WMP build failed:", e.data.error);
+              }
+              break;
+
             case "status":
               appendOutput(text);
               break;
@@ -150,7 +272,13 @@ C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/7PEW2DOE/9EF1
               break;
 
             case "complete":
-              setStatus("✓ Simulation complete", "success");
+              if (window.simStartTime) {
+                const simTime = ((performance.now() - window.simStartTime) / 1000).toFixed(2);
+                appendOutput(`\n✓ Simulation completed in ${simTime}s`);
+                setStatus(`✓ Simulation complete (${simTime}s)`, "success");
+              } else {
+                setStatus("✓ Simulation complete", "success");
+              }
               submitButton.disabled = false;
               stopButton.disabled = true;
               break;
@@ -277,27 +405,66 @@ C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/7PEW2DOE/9EF1
         setStatus("Precaching files...");
         await precachePromise;
 
-        // Initialize MAGPIE
-        setStatus("Initializing MAGPIE...");
+        // Only initialize MAGPIE if not already initialized or lexicon changed
+        if (!magpieInitialized || magpieLexicon !== lexicon) {
+          // Initialize MAGPIE
+          setStatus("Initializing MAGPIE...");
 
-        // Wait for init_complete message
-        const initPromise = new Promise((resolve) => {
-          const originalOnMessage = magpieWorker.onmessage;
-          magpieWorker.onmessage = (e) => {
-            if (e.data.type === "init_complete") {
-              magpieWorker.onmessage = originalOnMessage;
-              resolve();
-            }
-            originalOnMessage(e);
-          };
-        });
+          // Wait for init_complete message
+          const initPromise = new Promise((resolve) => {
+            const originalOnMessage = magpieWorker.onmessage;
+            magpieWorker.onmessage = (e) => {
+              if (e.data.type === "init_complete") {
+                magpieWorker.onmessage = originalOnMessage;
+                resolve();
+              }
+              originalOnMessage(e);
+            };
+          });
 
-        magpieWorker.postMessage({
-          type: "init",
-          data: { dataPath: "data" },
-        });
+          magpieWorker.postMessage({
+            type: "init",
+            data: { dataPath: "data" },
+          });
 
-        await initPromise;
+          await initPromise;
+
+          // First run set -lex to load the KWG (needed before WMP can be built)
+          setStatus("Loading lexicon...");
+          appendOutput(`▶ Loading lexicon ${lexicon}...\n`);
+
+          // Wait for command to complete
+          const setLexPromise = new Promise((resolve) => {
+            const originalOnMessage = magpieWorker.onmessage;
+            magpieWorker.onmessage = (e) => {
+              if (e.data.type === "complete") {
+                magpieWorker.onmessage = originalOnMessage;
+                resolve();
+              }
+              originalOnMessage(e);
+            };
+          });
+
+          magpieWorker.postMessage({
+            type: "run",
+            data: {
+              commands: [`set -lex ${lexicon} -numplays 40 -hr false`],
+            },
+          });
+
+          await setLexPromise;
+          appendOutput(`✓ Lexicon loaded\n`);
+
+          magpieInitialized = true;
+          magpieLexicon = lexicon;
+
+          // Reset WMP state since MAGPIE was reinitialized
+          wmpBuilt = false;
+          wmpLexicon = null;
+          updateWmpStatus();
+        } else {
+          appendOutput(`✓ Using existing MAGPIE instance\n`);
+        }
 
         // Calculate threads
         const nthreads = Math.min(
@@ -306,18 +473,102 @@ C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/7PEW2DOE/9EF1
         );
         console.log("Using threads:", nthreads);
 
-        setStatus("Running simulation...");
-        appendOutput(`▶ Starting simulation with ${nthreads} threads...\n`);
+        // Strip lex from CGP string - it's set separately
+        let cleanCgp = cgpstring;
+        const lexIndex = cleanCgp.indexOf(' lex ');
+        if (lexIndex !== -1) {
+          cleanCgp = cleanCgp.substring(0, lexIndex);
+        }
+        const dashLexIndex = cleanCgp.indexOf(' -lex ');
+        if (dashLexIndex !== -1) {
+          cleanCgp = cleanCgp.substring(0, dashLexIndex);
+        }
 
-        // Run simulation
+        // Only build WMP if lexicon changed or not built yet
+        if (wmpLexicon !== lexicon) {
+          setStatus("Building WMP (word map)...");
+          appendOutput(`▶ Building WMP with ${nthreads} threads...\n`);
+
+          const wmpStartTime = performance.now();
+
+          // Wait for wmp_complete message
+          const wmpPromise = new Promise((resolve) => {
+            const originalOnMessage = magpieWorker.onmessage;
+            magpieWorker.onmessage = (e) => {
+              if (e.data.type === "wmp_complete") {
+                magpieWorker.onmessage = originalOnMessage;
+                resolve(e.data.success);
+              }
+              originalOnMessage(e);
+            };
+          });
+
+          magpieWorker.postMessage({
+            type: "build_wmp",
+            data: { numThreads: nthreads },
+          });
+
+          const wmpSuccess = await wmpPromise;
+          const wmpTime = ((performance.now() - wmpStartTime) / 1000).toFixed(2);
+
+          if (wmpSuccess) {
+            appendOutput(`✓ WMP built in ${wmpTime}s\n`);
+            wmpBuilt = true;
+            wmpLexicon = lexicon;
+            updateWmpStatus();
+          } else {
+            appendOutput(`⚠ WMP build failed, continuing with KWG movegen\n`);
+            wmpBuilt = false;
+            wmpLexicon = null;
+            updateWmpStatus();
+          }
+        } else {
+          appendOutput(`✓ Using cached WMP for ${lexicon}\n`);
+        }
+
+        // Set WMP enabled/disabled based on checkbox
+        if (wmpBuilt) {
+          const wmpEnabled = useWmpCheckbox.checked;
+          console.log("Setting WMP enabled:", wmpEnabled);
+          magpieWorker.postMessage({
+            type: "set_wmp_enabled",
+            data: { enabled: wmpEnabled },
+          });
+          appendOutput(`ℹ WMP movegen: ${wmpEnabled ? "enabled" : "disabled"}\n`);
+        }
+
+        // Build simulation command with settings
+        const numPlays = parseInt(numPlaysInput.value) || 15;
+        let simCmd = `sim -threads ${nthreads} -numplays ${numPlays}`;
+
+        if (stopConditionSelect.value === "iterations") {
+          const maxIter = parseInt(maxIterationsInput.value) || 10000;
+          simCmd += ` -iterations ${maxIter} -scondition none`;
+        } else {
+          const threshold = parseFloat(stopThresholdInput.value) || 0.5;
+          simCmd += ` -scondition ${threshold / 100}`;  // Convert % to decimal
+        }
+
+        console.log("Sim command:", simCmd);
+
+        const movegenType = (wmpBuilt && useWmpCheckbox.checked) ? "WMP" : "KWG";
+
+        // Run simulation with timing
+        setStatus("Running simulation...");
+        appendOutput(`▶ Starting simulation with ${nthreads} threads (${movegenType} movegen)...\n`);
+        const simStartTime = performance.now();
+
+        // Store start time for completion handler
+        window.simStartTime = simStartTime;
+
+        // Run simulation (lex already set, so just run cgp, generate, sim)
         magpieWorker.postMessage({
           type: "run",
           data: {
             commands: [
-              `set -lex ${lexicon} -numplays 40 -hr false`,
-              `cgp ${cgpstring}`,
+              `cgp ${cleanCgp}`,
               `generate`,
-              `sim -threads ${nthreads}`,
+              simCmd,
             ],
           },
         });

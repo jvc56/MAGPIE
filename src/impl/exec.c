@@ -62,28 +62,38 @@ void *execute_async_command_worker(void *uncasted_args) {
 
 bool load_command_sync(Config *config, ErrorStack *error_stack,
                        const char *command) {
+  printf("[EXEC] load_command_sync entered\n"); fflush(stdout);
   ThreadControl *thread_control = config_get_thread_control(config);
+  printf("[EXEC] got thread_control: %p\n", (void*)thread_control); fflush(stdout);
   const bool reset_result =
       thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+  printf("[EXEC] thread_control_set_status returned: %d\n", reset_result); fflush(stdout);
   assert(reset_result);
   (void)reset_result; // Suppress unused warning when NDEBUG is defined
   // Loading the config should always be done synchronously and then start the
   // execution asynchronously (if enabled)
+  printf("[EXEC] calling config_load_command\n"); fflush(stdout);
   config_load_command(config, command, error_stack);
+  printf("[EXEC] config_load_command returned\n"); fflush(stdout);
   if (!error_stack_is_empty(error_stack)) {
+    printf("[EXEC] error stack not empty, returning false\n"); fflush(stdout);
     thread_control_set_status(config_get_thread_control(config),
                               THREAD_CONTROL_STATUS_FINISHED);
     return false;
   }
-
+  printf("[EXEC] load_command_sync returning true\n"); fflush(stdout);
   return true;
 }
 
 void execute_command_sync(Config *config, ErrorStack *error_stack,
                           const char *command) {
+  printf("[EXEC] execute_command_sync entered\n"); fflush(stdout);
   if (load_command_sync(config, error_stack, command)) {
+    printf("[EXEC] calling execute_command_and_set_status_finished\n"); fflush(stdout);
     execute_command_and_set_status_finished(config, error_stack);
+    printf("[EXEC] execute_command_and_set_status_finished returned\n"); fflush(stdout);
   }
+  printf("[EXEC] execute_command_sync exiting\n"); fflush(stdout);
 }
 
 bool run_str_api_command(Config *config, ErrorStack *error_stack,

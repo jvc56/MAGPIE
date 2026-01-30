@@ -49,4 +49,15 @@ void players_data_reload(PlayersData *players_data,
                          players_data_t players_data_type,
                          const char *data_paths, ErrorStack *error_stack);
 
+// Sets WMP data directly for both players (shared) without loading from file.
+// The WMP will be marked as externally managed and won't be destroyed by
+// players_data_set or config loading.
+void players_data_set_wmp_direct(PlayersData *players_data, WMP *wmp);
+
+// Check if WMP is externally managed (won't be destroyed by config loading)
+bool players_data_wmp_is_external(const PlayersData *players_data);
+
+// Destroy externally-managed WMP when done
+void players_data_destroy_external_wmp(PlayersData *players_data);
+
 #endif

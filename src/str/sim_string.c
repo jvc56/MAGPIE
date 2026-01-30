@@ -12,6 +12,7 @@
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
 #include "../ent/win_pct.h"
+#include "../impl/move_gen.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
@@ -282,6 +283,25 @@ void string_builder_add_sim_stats(StringBuilder *sb, const Game *game,
         (double)sim_results_get_node_count(sim_results) /
             bai_result_get_elapsed_seconds(
                 sim_results_get_bai_result(sim_results)));
+
+    // Add movegen timing breakdown
+    uint64_t wordmap_ns, recursive_ns, shadow_ns, total_ns;
+    uint64_t wordmap_calls, recursive_calls, shadow_calls, total_calls;
+    movegen_get_timing(&wordmap_ns, &recursive_ns, &shadow_ns, &total_ns,
+                       &wordmap_calls, &recursive_calls, &shadow_calls, &total_calls);
+
+    string_builder_add_formatted_string(sb, "info movegen_timing total=%.3fs (%llu calls)",
+        (double)total_ns / 1e9, (unsigned long long)total_calls);
+    if (wordmap_calls > 0) {
+      string_builder_add_formatted_string(sb, " wmp=%.3fs (%llu calls)",
+          (double)wordmap_ns / 1e9, (unsigned long long)wordmap_calls);
+    }
+    if (recursive_calls > 0) {
+      string_builder_add_formatted_string(sb, " kwg=%.3fs (%llu calls)",
+          (double)recursive_ns / 1e9, (unsigned long long)recursive_calls);
+    }
+    string_builder_add_formatted_string(sb, " shadow=%.3fs (%llu calls)\n",
+        (double)shadow_ns / 1e9, (unsigned long long)shadow_calls);
   }
   sim_results_unlock_display_infos(sim_results);
 }

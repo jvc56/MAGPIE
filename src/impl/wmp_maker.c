@@ -1077,6 +1077,10 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
   ThreadSemaphore sem;
   thread_sem_init(&sem, num_threads);
 
+  printf("[WMP] Phase 1/4: Building word entries (%d words, %d threads)...\n",
+         total_words, num_threads);
+  fflush(stdout);
+
   // Phase 1: Build word entries in parallel and extract unique racks
   // Launch threads in work-descending order for better scheduling
   WordBuildArg word_args[BOARD_DIM + 1];
@@ -1117,6 +1121,9 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
     }
   }
 
+  printf("[WMP] Phase 2/4: Building single-blank entries...\n");
+  fflush(stdout);
+
   // Phase 2: Build blank entries in parallel (reusing scratch buffers)
   BlankBuildArg blank_args[BOARD_DIM + 1];
   cpthread_t blank_threads[BOARD_DIM + 1];
@@ -1145,6 +1152,9 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
       cpthread_join(blank_threads[sorted_lengths[i]]);
     }
   }
+
+  printf("[WMP] Phase 3/4: Building double-blank entries...\n");
+  fflush(stdout);
 
   // Phase 3: Build double-blank entries in parallel (reusing scratch buffers)
   DoubleBlankBuildArg dbl_args[BOARD_DIM + 1];
@@ -1183,8 +1193,14 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
     free(scratch[len].unique_racks);
   }
 
+  printf("[WMP] Phase 4/4: Calculating lookup table sizes...\n");
+  fflush(stdout);
+
   // Calculate max_word_lookup_bytes
   wmp->max_word_lookup_bytes = calculate_max_word_lookup_bytes(wmp);
+
+  printf("[WMP] Build complete.\n");
+  fflush(stdout);
 
   return wmp;
 }

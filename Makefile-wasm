@@ -2,53 +2,85 @@ SRC_DIR := src
 TEST_DIR := test
 CMD_DIR := wasmentry
 OBJ_DIR := obj
+OBJ_DIR_64 := obj64
 BIN_DIR := bin
 
 SRC := $(wildcard $(SRC_DIR)/**/*.c)
 SRC_SUBDIRS := $(shell find $(SRC_DIR) -type d)
 SRC_OBJ_SUBDIRS := $(patsubst $(SRC_DIR)/%,$(OBJ_DIR)/$(SRC_DIR)/%,$(SRC_SUBDIRS))
+SRC_OBJ_SUBDIRS_64 := $(patsubst $(SRC_DIR)/%,$(OBJ_DIR_64)/$(SRC_DIR)/%,$(SRC_SUBDIRS))
 CMD := $(wildcard $(CMD_DIR)/*.c)
 OBJ_SRC := $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/$(SRC_DIR)/%.o)
 OBJ_CMD := $(CMD:$(CMD_DIR)/%.c=$(OBJ_DIR)/$(CMD_DIR)/%.o)
+OBJ_SRC_64 := $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR_64)/$(SRC_DIR)/%.o)
+OBJ_CMD_64 := $(CMD:$(CMD_DIR)/%.c=$(OBJ_DIR_64)/$(CMD_DIR)/%.o)
 
-cflags.release := -O3 -Wall -Wextra -Wno-trigraphs -pthread
-ldflags.release := -Llib -pthread
+# WASM optimization flags:
+# -msimd128: Enable SIMD for 128-bit operations (BitRack)
+# -flto: Link-time optimization for cross-file inlining
+# -ffast-math: Faster floating point (okay for game equity calculations)
+# -DNDEBUG: Disable assertions in release builds
+cflags.release := -O3 -Wall -Wextra -Wno-trigraphs -pthread -msimd128 -flto -ffast-math -DNDEBUG
+# LTO must be enabled in both compile and link stages
+ldflags.release := -Llib -pthread -flto
 
 # $\ trick to turn backslash-newline-whitespace into an empty string
 
-lflags.shell := -s EXPORTED_RUNTIME_METHODS=["cwrap","stringToNewUTF8","UTF8ToString","PThread"] \
+lflags.shell := -s EXPORTED_RUNTIME_METHODS=["cwrap","stringToNewUTF8","UTF8ToString","PThread","HEAPU8"] \
 	-s EXPORTED_FUNCTIONS=_free,_main,_malloc,_precache_file_data,$\
 	_wasm_magpie_init,_wasm_magpie_destroy,_wasm_run_command,_wasm_run_command_async,$\
-	_wasm_get_output,_wasm_get_error,_wasm_get_status,_wasm_get_thread_status,_wasm_stop_command\
+	_wasm_get_output,_wasm_get_error,_wasm_get_status,_wasm_get_thread_status,_wasm_stop_command,$\
+	_wasm_build_wmp,_wasm_set_wmp_enabled,_wasm_get_wmp_status\
 	-sPTHREAD_POOL_SIZE="navigator.hardwareConcurrency + 3" \
 	-sPTHREAD_POOL_SIZE_STRICT=0 \
 	-s ALLOW_BLOCKING_ON_MAIN_THREAD=1 \
 	-sEXIT_RUNTIME=0 \
 	-sSTACK_SIZE=2MB \
 	-sDEFAULT_PTHREAD_STACK_SIZE=2MB 
-lflags.release := ${lflags.shell} -s MODULARIZE=1 --closure 1 -sEXPORT_NAME="MAGPIE" -s ENVIRONMENT='web,worker'
+lflags.release := ${lflags.shell} -s MODULARIZE=1 -sEXPORT_NAME="MAGPIE" -s ENVIRONMENT='web,worker' -sASSERTIONS=1
+# WASM64 adds 64-bit memory addressing (pointer size becomes 8 bytes)
+lflags.release64 := ${lflags.release} -sMEMORY64
 
 LDLIBS := -lm
 
-.PHONY: all clean
+.PHONY: all clean wasm32 wasm64
 
 all: magpie_wasm
 
+wasm32: magpie_wasm
+
+wasm64: magpie_wasm64
+
 magpie_wasm: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
 	emcc $(ldflags.release) $(lflags.release) $^ $(LDLIBS) -o $(BIN_DIR)/$@.mjs \
-	-s INITIAL_MEMORY=128MB
+	-s INITIAL_MEMORY=256MB -sALLOW_MEMORY_GROWTH=1 -sMAXIMUM_MEMORY=1GB
 
+magpie_wasm64: $(OBJ_SRC_64) $(OBJ_CMD_64) | $(BIN_DIR)
+	emcc $(ldflags.release) $(lflags.release64) $^ $(LDLIBS) -o $(BIN_DIR)/$@.mjs \
+	-s INITIAL_MEMORY=256MB -sALLOW_MEMORY_GROWTH=1 -sMAXIMUM_MEMORY=16GB
+
+# wasm32 compilation rules
 $(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(SRC_OBJ_SUBDIRS)
 	emcc $(cflags.release) -c $< -o $@
 
 $(OBJ_DIR)/$(CMD_DIR)/%.o: $(CMD_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(CMD_DIR)
 	emcc $(cflags.release) -c $< -o $@
 
+# wasm64 compilation rules (need -sMEMORY64 at compile time too)
+$(OBJ_DIR_64)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR_64) $(OBJ_DIR_64)/$(SRC_DIR) $(SRC_OBJ_SUBDIRS_64)
+	emcc $(cflags.release) -sMEMORY64 -c $< -o $@
+
+$(OBJ_DIR_64)/$(CMD_DIR)/%.o: $(CMD_DIR)/%.c | $(OBJ_DIR_64) $(OBJ_DIR_64)/$(CMD_DIR)
+	emcc $(cflags.release) -sMEMORY64 -c $< -o $@
+
 $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(SRC_OBJ_SUBDIRS):
 	mkdir -p $@
 
+$(OBJ_DIR_64) $(OBJ_DIR_64)/$(SRC_DIR) $(OBJ_DIR_64)/$(CMD_DIR) $(SRC_OBJ_SUBDIRS_64):
+	mkdir -p $@
+
 clean:
-	@$(RM) -rv $(OBJ_DIR)
+	@$(RM) -rv $(OBJ_DIR) $(OBJ_DIR_64)
 
 -include $(OBJ_SRC:.o=.d)
 -include $(OBJ_CMD:.o=.d)

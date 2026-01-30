@@ -26,6 +26,7 @@ typedef struct UnrestrictedMultiplier {
 
 typedef struct MoveGen {
   // Owned by this MoveGen struct
+  int thread_index;
   int current_row_index;
   int current_anchor_col;
   uint64_t anchor_left_extension_set;
@@ -179,5 +180,12 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args);
 void gen_look_up_leaves_and_record_exchanges(MoveGen *gen);
 
 void gen_shadow(MoveGen *gen);
+
+// Timing instrumentation for movegen profiling
+void movegen_reset_timing(void);
+void movegen_get_timing(uint64_t *wordmap_ns, uint64_t *recursive_ns,
+                        uint64_t *shadow_ns, uint64_t *total_ns,
+                        uint64_t *wordmap_calls, uint64_t *recursive_calls,
+                        uint64_t *shadow_calls, uint64_t *total_calls);
 
 #endif

@@ -21,6 +21,7 @@ struct PlayersData {
   bool use_when_available[(NUMBER_OF_DATA * 2)];
   move_sort_t move_sort_types[2];
   move_record_t move_record_types[2];
+  bool wmp_is_external;  // WMP was set externally and shouldn't be destroyed by config
 };
 
 #define DEFAULT_MOVE_SORT_TYPE MOVE_SORT_EQUITY
@@ -99,14 +100,18 @@ KLV *players_data_get_klv(const PlayersData *players_data, int player_index) {
 }
 
 WMP *players_data_get_wmp(const PlayersData *players_data, int player_index) {
+  bool use_available = players_data_get_use_when_available(
+      players_data, PLAYERS_DATA_TYPE_WMP, player_index);
+  if (!use_available) {
+    return NULL;
+  }
   return (WMP *)players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP,
-                                      player_index);
+                                       player_index);
 }
 
 void players_data_set_data(PlayersData *players_data,
                            players_data_t players_data_type, int player_index,
                            void *data) {
-  // Data must be allocated by the caller
   int data_index =
       players_data_get_player_data_index(players_data_type, player_index);
   players_data->data[data_index] = data;
@@ -152,6 +157,10 @@ void players_data_destroy_data(PlayersData *players_data,
   int data_index =
       players_data_get_player_data_index(players_data_type, player_index);
   if (players_data->data[data_index]) {
+    // Don't destroy externally-managed WMP
+    if (players_data_type == PLAYERS_DATA_TYPE_WMP && players_data->wmp_is_external) {
+      return;
+    }
     switch (players_data_type) {
     case PLAYERS_DATA_TYPE_KWG:
       kwg_destroy(players_data->data[data_index]);
@@ -213,6 +222,7 @@ const char *players_data_get_data_name(const PlayersData *players_data,
 
 PlayersData *players_data_create(void) {
   PlayersData *players_data = malloc_or_die(sizeof(PlayersData));
+  players_data->wmp_is_external = false;
   for (int player_index = 0; player_index < 2; player_index++) {
     for (int data_index = 0; data_index < NUMBER_OF_DATA; data_index++) {
       int player_data_index = players_data_get_player_data_index(
@@ -234,6 +244,9 @@ void players_data_destroy(PlayersData *players_data) {
   if (!players_data) {
     return;
   }
+  // Destroy external WMP if present (since destroy_data skips it)
+  players_data_destroy_external_wmp(players_data);
+
   for (int data_index = 0; data_index < NUMBER_OF_DATA; data_index++) {
     bool is_shared =
         players_data_get_is_shared(players_data, (players_data_t)data_index);
@@ -255,6 +268,11 @@ void players_data_set(PlayersData *players_data,
                       players_data_t players_data_type, const char *data_paths,
                       const char *p1_data_name, const char *p2_data_name,
                       ErrorStack *error_stack) {
+  // Skip WMP loading if an external WMP is set (e.g., built from KWG in WASM)
+  if (players_data_type == PLAYERS_DATA_TYPE_WMP && players_data->wmp_is_external) {
+    return;
+  }
+
   // WMP is optional, KWG and KLV are required for every player.
   if (!players_data_type_is_nullable(players_data_type)) {
     if (is_string_empty_or_null(p1_data_name)) {
@@ -356,4 +374,44 @@ void players_data_reload(PlayersData *players_data,
                             recreated_data[player_index]);
     }
   }
+}
+
+void players_data_set_wmp_direct(PlayersData *players_data, WMP *wmp) {
+  // Clear external flag first so existing WMP can be destroyed if needed
+  players_data->wmp_is_external = false;
+
+  // Destroy existing WMP data for both players
+  bool old_is_shared =
+      players_data_get_is_shared(players_data, PLAYERS_DATA_TYPE_WMP);
+  if (!old_is_shared) {
+    players_data_destroy_data(players_data, PLAYERS_DATA_TYPE_WMP, 1);
+  }
+  players_data_destroy_data(players_data, PLAYERS_DATA_TYPE_WMP, 0);
+
+  // Set new WMP for both players (shared)
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_WMP, 0, wmp);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_WMP, 1, wmp);
+  players_data_set_is_shared(players_data, PLAYERS_DATA_TYPE_WMP, true);
+
+  // Mark as externally managed so config loading won't destroy it
+  players_data->wmp_is_external = (wmp != NULL);
+}
+
+bool players_data_wmp_is_external(const PlayersData *players_data) {
+  return players_data->wmp_is_external;
+}
+
+void players_data_destroy_external_wmp(PlayersData *players_data) {
+  if (!players_data->wmp_is_external) {
+    return;
+  }
+  int data_index = players_data_get_player_data_index(PLAYERS_DATA_TYPE_WMP, 0);
+  if (players_data->data[data_index]) {
+    wmp_destroy(players_data->data[data_index]);
+    players_data->data[data_index] = NULL;
+    // Also clear player 1's pointer (they share)
+    int data_index_1 = players_data_get_player_data_index(PLAYERS_DATA_TYPE_WMP, 1);
+    players_data->data[data_index_1] = NULL;
+  }
+  players_data->wmp_is_external = false;
 }

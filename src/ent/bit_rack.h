@@ -26,6 +26,14 @@
 #define USE_INT128_INTRINSIC 0
 // #endif
 
+// Enable WASM SIMD for 128-bit operations when compiling with -msimd128
+#if defined(__wasm_simd128__)
+#define USE_WASM_SIMD 1
+#include <wasm_simd128.h>
+#else
+#define USE_WASM_SIMD 0
+#endif
+
 #if USE_INT128_INTRINSIC
 typedef unsigned __int128 BitRack;
 #else
@@ -142,6 +150,12 @@ static inline void bit_rack_add_bit_rack(BitRack *bit_rack,
                                          const BitRack *other) {
 #if USE_INT128_INTRINSIC
   *bit_rack += *other;
+#elif USE_WASM_SIMD
+  // Use WASM SIMD for fast 128-bit addition (as two 64-bit lanes)
+  v128_t va = wasm_v128_load(bit_rack);
+  v128_t vb = wasm_v128_load(other);
+  v128_t result = wasm_i64x2_add(va, vb);
+  wasm_v128_store(bit_rack, result);
 #else
   // No carry is needed: high and low are split at a boundary between letter
   // counts. Letter counts should never overflow, so neither will the internal
@@ -170,6 +184,12 @@ static inline uint64_t bit_rack_get_low_64(const BitRack *bit_rack) {
 static inline bool bit_rack_equals(const BitRack *a, const BitRack *b) {
 #if USE_INT128_INTRINSIC
   return *a == *b;
+#elif USE_WASM_SIMD
+  // Use WASM SIMD for fast 128-bit comparison
+  v128_t va = wasm_v128_load(a);
+  v128_t vb = wasm_v128_load(b);
+  v128_t eq = wasm_i64x2_eq(va, vb);
+  return wasm_i8x16_all_true(eq);
 #else
   return (a->high == b->high) && (a->low == b->low);
 #endif
