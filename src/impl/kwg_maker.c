@@ -34,31 +34,58 @@ typedef struct NodeIndexList {
 } NodeIndexList;
 
 // Arena allocator for child index arrays (avoids individual malloc calls)
-typedef struct IndexArena {
+// Uses a linked list of blocks to avoid realloc invalidating existing pointers
+typedef struct ArenaBlock {
   uint32_t *buffer;
   size_t capacity;
   size_t used;
+  struct ArenaBlock *next;
+} ArenaBlock;
+
+typedef struct IndexArena {
+  ArenaBlock *head;
+  ArenaBlock *current;
+  size_t block_size;  // Size for new blocks
 } IndexArena;
 
-static inline void index_arena_create(IndexArena *arena, size_t capacity) {
-  arena->buffer = malloc_or_die(sizeof(uint32_t) * capacity);
-  arena->capacity = capacity;
-  arena->used = 0;
+static inline ArenaBlock *arena_block_create(size_t capacity) {
+  ArenaBlock *block = malloc_or_die(sizeof(ArenaBlock));
+  block->buffer = malloc_or_die(sizeof(uint32_t) * capacity);
+  block->capacity = capacity;
+  block->used = 0;
+  block->next = NULL;
+  return block;
+}
+
+static inline void index_arena_create(IndexArena *arena, size_t initial_capacity) {
+  arena->head = arena_block_create(initial_capacity);
+  arena->current = arena->head;
+  arena->block_size = initial_capacity;
 }
 
 static inline void index_arena_destroy(IndexArena *arena) {
-  free(arena->buffer);
+  ArenaBlock *block = arena->head;
+  while (block != NULL) {
+    ArenaBlock *next = block->next;
+    free(block->buffer);
+    free(block);
+    block = next;
+  }
 }
 
 static inline uint32_t *index_arena_alloc(IndexArena *arena, size_t count) {
-  if (arena->used + count > arena->capacity) {
-    // Grow arena if needed
-    arena->capacity = (arena->capacity + count) * 2;
-    arena->buffer = realloc_or_die(arena->buffer,
-                                    sizeof(uint32_t) * arena->capacity);
+  // If current block doesn't have enough space, allocate a new block
+  if (arena->current->used + count > arena->current->capacity) {
+    size_t new_capacity = arena->block_size;
+    if (count > new_capacity) {
+      new_capacity = count * 2;  // Ensure block is big enough for this allocation
+    }
+    ArenaBlock *new_block = arena_block_create(new_capacity);
+    arena->current->next = new_block;
+    arena->current = new_block;
   }
-  uint32_t *result = arena->buffer + arena->used;
-  arena->used += count;
+  uint32_t *result = arena->current->buffer + arena->current->used;
+  arena->current->used += count;
   return result;
 }
 
