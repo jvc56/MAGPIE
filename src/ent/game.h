@@ -5,6 +5,7 @@
 #include "../def/players_data_defs.h"
 #include "bag.h"
 #include "board.h"
+#include "kwg.h"
 #include "letter_distribution.h"
 #include "player.h"
 #include <stdbool.h>
@@ -59,7 +60,10 @@ void game_backup(Game *game);
 void game_unplay_last_move(Game *game);
 void game_set_starting_player_index(Game *game, int starting_player_index);
 void game_gen_all_cross_sets(const Game *game);
+void game_gen_all_cross_sets_with_kwg(const Game *game, const KWG *kwg);
 void game_gen_cross_set(const Game *game, int row, int col, int dir,
                         int cross_set_index);
+void game_gen_cross_set_with_kwg(const Game *game, int row, int col, int dir,
+                                 int cross_set_index, const KWG *kwg);
 
 #endif

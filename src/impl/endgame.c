@@ -241,6 +241,11 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
   solver_worker->game_copy = game_duplicate(solver->game);
   game_set_endgame_solving_mode(solver_worker->game_copy);
   game_set_backup_mode(solver_worker->game_copy, BACKUP_MODE_SIMULATION);
+
+  // Regenerate all cross sets using the pruned KWG for more restrictive
+  // cross set constraints during endgame solving.
+  game_gen_all_cross_sets_with_kwg(solver_worker->game_copy, solver->pruned_kwg);
+
   solver_worker->move_list =
       move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
 
@@ -467,6 +472,16 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
     int last_consecutive_scoreless_turns =
         game_get_consecutive_scoreless_turns(worker->game_copy);
     play_move(worker->move_list->spare_move, worker->game_copy, NULL);
+
+    // Update cross sets with the pruned KWG for tile placement moves.
+    // play_move updates cross sets with the full KWG, so we need to
+    // regenerate them with the pruned KWG for more restrictive constraints.
+    if (move_get_type(worker->move_list->spare_move) ==
+        GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      update_cross_set_for_move_with_kwg(worker->move_list->spare_move,
+                                         worker->game_copy,
+                                         worker->solver->pruned_kwg);
+    }
 
     // Implementation is currently single-threaded. Keep counts per worker if we
     // want to keep doing this when we have multiple threads.
