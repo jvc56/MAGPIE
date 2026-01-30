@@ -44,15 +44,14 @@ cp wasmentry/test-worker.html bin/
 The server must send special headers for SharedArrayBuffer (required for pthreads):
 
 ```bash
-cd wasmentry
-python cors_server.py
+python wasmentry/cors_server.py
 ```
 
 Server runs at: http://localhost:8080
 
 ### 4. Test in Browser
 
-Open: http://localhost:8080/test-worker.html
+Open: http://localhost:8080/wasmentry/test-worker.html
 
 ## Required Server Headers
 
