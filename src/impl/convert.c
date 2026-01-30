@@ -168,15 +168,21 @@ void convert_with_names(const LetterDistribution *ld,
       char *wmp_output_filename = data_filepaths_get_writable_filename(
           data_paths, output_name, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
       if (error_stack_is_empty(error_stack)) {
-        WMP *wmp = make_wmp_from_kwg(kwg, ld, num_threads);
+        DictionaryWordList *words = dictionary_word_list_create();
+        kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), words, NULL);
+        WMP *wmp = make_wmp_from_words(words, ld, num_threads);
         wmp_write_to_file(wmp, wmp_output_filename, error_stack);
         if (!error_stack_is_empty(error_stack)) {
           error_stack_push(
               error_stack, ERROR_STATUS_CONVERT_OUTPUT_FILE_NOT_WRITABLE,
               get_formatted_string("could not write wordmap to output file: %s",
                                    wmp_output_filename));
+        } else {
+          conversion_results_set_number_of_strings(
+              conversion_results, dictionary_word_list_get_count(words));
         }
         wmp_destroy(wmp);
+        dictionary_word_list_destroy(words);
         free(wmp_output_filename);
       }
     }
