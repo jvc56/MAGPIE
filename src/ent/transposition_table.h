@@ -117,7 +117,7 @@ transposition_table_create(double fraction_of_memory) {
     atomic_init(&tt->nproc[i].count, 0);
   }
   tt->size_mask = num_elems - 1;
-  tt->zobrist = zobrist_create(ctime_get_current_time());
+  tt->zobrist = zobrist_create(12345); // Fixed seed for determinism
   atomic_init(&tt->created, 0);
   atomic_init(&tt->hits, 0);
   atomic_init(&tt->lookups, 0);
