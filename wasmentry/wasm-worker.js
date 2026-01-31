@@ -33,7 +33,7 @@ let statusCheckInterval = null;
     postMessage({ type: 'log', text: 'Starting WASM import...' });
 
     // Import the WASM module factory
-    const module = await import('/bin/magpie_wasm.mjs');
+    const module = await import('./magpie_wasm.mjs');
     const MAGPIE = module.default;
 
     postMessage({ type: 'log', text: 'WASM module imported, initializing...' });
@@ -52,9 +52,9 @@ let statusCheckInterval = null;
         postMessage({ type: 'error', text: text });
       },
       locateFile: (path, prefix) => {
-        // Help worker find .wasm and .worker.js files in /bin/
+        // Files are in the same directory as the worker
         if (path.endsWith('.wasm') || path.endsWith('.worker.js')) {
-          return '/bin/' + path;
+          return './' + path;
         }
         return prefix + path;
       },

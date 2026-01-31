@@ -10,7 +10,7 @@ The Web Worker implementation runs MAGPIE's computation-intensive operations in 
 
 ```
 Main Thread (UI)                Web Worker (Background)
-├─ test-worker.html            ├─ magpie-worker.js
+├─ test-worker.html            ├─ wasm-worker.js
 │  ├─ User interface           │  ├─ Loads WASM module
 │  ├─ Status display           │  ├─ Handles file precaching
 │  └─ Message passing          │  ├─ Runs MAGPIE commands
@@ -27,29 +27,24 @@ make -f Makefile-wasm clean
 make -f Makefile-wasm magpie_wasm
 ```
 
-This creates:
-- `bin/magpie_wasm.mjs` - JavaScript module
-- `bin/magpie_wasm.wasm` - WebAssembly binary
-- `bin/magpie_wasm.worker.js` - pthread worker support
+This creates in `wasmentry/`:
+- `magpie_wasm.mjs` - JavaScript module
+- `magpie_wasm.wasm` - WebAssembly binary
 
-### 2. Copy Web Worker Files
+**Note**: As of Emscripten 3.1.58+, the separate `.worker.js` file for pthread support is no longer generated. The pthread workers now bootstrap directly from the main `.mjs` file.
 
-```bash
-cp wasmentry/magpie-worker.js bin/
-cp wasmentry/test-worker.html bin/
-```
-
-### 3. Start CORS Server
+### 2. Start CORS Server
 
 The server must send special headers for SharedArrayBuffer (required for pthreads):
 
 ```bash
-python wasmentry/cors_server.py
+cd wasmentry
+python cors_server.py
 ```
 
-Server runs at: http://localhost:8080
+Server runs at: http://localhost:8080 (serves from project root for data/ access)
 
-### 4. Test in Browser
+### 3. Test in Browser
 
 Open: http://localhost:8080/wasmentry/test-worker.html
 
@@ -155,16 +150,12 @@ worker.postMessage({ type: 'destroy' });
 magpie/
 ├── wasmentry/
 │   ├── api.c                    # WASM entry point (cmd_api wrapper)
-│   ├── magpie-worker.js         # Web Worker script
+│   ├── wasm-worker.js           # Web Worker script
 │   ├── test-worker.html         # Test page
 │   ├── cors_server.py           # Dev server with COOP/COEP headers
+│   ├── magpie_wasm.mjs          # Generated JS module (from build)
+│   ├── magpie_wasm.wasm         # Generated WASM binary (from build)
 │   └── WEBWORKER.md            # This file
-├── bin/
-│   ├── magpie_wasm.mjs          # Generated JS module
-│   ├── magpie_wasm.wasm         # Generated WASM binary
-│   ├── magpie_wasm.worker.js    # Generated pthread worker
-│   ├── magpie-worker.js         # Copied from wasmentry/
-│   └── test-worker.html         # Copied from wasmentry/
 └── Makefile-wasm                # Build configuration
 ```
 
@@ -173,7 +164,7 @@ magpie/
 ### Basic Simulation
 
 ```javascript
-const worker = new Worker('magpie-worker.js');
+const worker = new Worker('wasm-worker.js');
 
 worker.onmessage = (e) => {
   switch (e.data.type) {
@@ -237,7 +228,7 @@ worker.onmessage = (e) => {
 ### "Worker failed to load"
 
 **Cause**: Incorrect worker path
-**Fix**: Check that `magpie-worker.js` is in the same directory as the HTML or adjust the path
+**Fix**: Check that `wasm-worker.js` is in the same directory as the HTML or adjust the path
 
 ### "Module is not defined"
 
@@ -262,13 +253,12 @@ worker.onmessage = (e) => {
    Header set Cross-Origin-Embedder-Policy "require-corp"
    ```
 
-3. **Deploy files:**
-   - `magpie_wasm.mjs`
-   - `magpie_wasm.wasm`
-   - `magpie_wasm.worker.js`
-   - `magpie-worker.js`
-   - Your HTML file
-   - Data files (kwg, klv2, csv)
+3. **Deploy files from wasmentry/:**
+   - `magpie_wasm.mjs` (generated)
+   - `magpie_wasm.wasm` (generated)
+   - `wasm-worker.js`
+   - `test-worker.html` (or your own HTML)
+   - Data files from `../data/` (kwg, klv2, csv) - must be accessible at `/data/...`
 
 4. **Serve with HTTPS** (required for SharedArrayBuffer in production)
 

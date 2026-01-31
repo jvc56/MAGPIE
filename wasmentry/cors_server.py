@@ -60,7 +60,7 @@ def main():
         print("  ✓ Cross-Origin-Embedder-Policy: require-corp")
         print("  ✓ Access-Control-Allow-Origin: *")
         print()
-        print("Open http://localhost:{port}/bin/test-worker.html to test")
+        print(f"Open http://localhost:{port}/wasmentry/test-worker.html to test")
         print("Press Ctrl+C to stop")
         print()
 
