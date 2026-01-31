@@ -33,6 +33,64 @@ typedef struct NodeIndexList {
   size_t capacity;
 } NodeIndexList;
 
+// Arena allocator for child index arrays (avoids individual malloc calls)
+// Uses a linked list of blocks to avoid realloc invalidating existing pointers
+typedef struct ArenaBlock {
+  uint32_t *buffer;
+  size_t capacity;
+  size_t used;
+  struct ArenaBlock *next;
+} ArenaBlock;
+
+typedef struct IndexArena {
+  ArenaBlock *head;
+  ArenaBlock *current;
+  size_t block_size; // Size for new blocks
+} IndexArena;
+
+static inline ArenaBlock *arena_block_create(size_t capacity) {
+  ArenaBlock *block = malloc_or_die(sizeof(ArenaBlock));
+  block->buffer = malloc_or_die(sizeof(uint32_t) * capacity);
+  block->capacity = capacity;
+  block->used = 0;
+  block->next = NULL;
+  return block;
+}
+
+static inline void index_arena_create(IndexArena *arena,
+                                      size_t initial_capacity) {
+  arena->head = arena_block_create(initial_capacity);
+  arena->current = arena->head;
+  arena->block_size = initial_capacity;
+}
+
+static inline void index_arena_destroy(IndexArena *arena) {
+  ArenaBlock *block = arena->head;
+  while (block != NULL) {
+    ArenaBlock *next = block->next;
+    free(block->buffer);
+    free(block);
+    block = next;
+  }
+}
+
+static inline uint32_t *index_arena_alloc(IndexArena *arena, size_t count) {
+  // If current block doesn't have enough space, allocate a new block
+  if (arena->current->used + count > arena->current->capacity) {
+    size_t new_capacity = arena->block_size;
+    if (count > new_capacity) {
+      new_capacity =
+          count * 2; // Ensure block is big enough for this allocation
+    }
+    ArenaBlock *new_block = arena_block_create(new_capacity);
+    arena->current->next = new_block;
+    arena->current = new_block;
+  }
+  uint32_t *result = arena->current->buffer + arena->current->used;
+  arena->current->used += count;
+  return result;
+}
+
 static inline bool node_index_list_is_inline(const NodeIndexList *list) {
   return list->capacity <= KWG_NODE_INDEX_LIST_INLINE_CAPACITY;
 }
@@ -77,6 +135,25 @@ static inline void node_index_list_add(NodeIndexList *list, uint32_t index) {
   list->count++;
 }
 
+// Arena-aware version - allocates from arena instead of malloc
+static inline void node_index_list_add_arena(NodeIndexList *list,
+                                             uint32_t index,
+                                             IndexArena *arena) {
+  if (list->count == list->capacity) {
+    size_t new_capacity = (list->capacity == 0) ? 4 : list->capacity * 2;
+    uint32_t *new_indices = index_arena_alloc(arena, new_capacity);
+    if (list->count > 0) {
+      const uint32_t *old_indices = node_index_list_get_const_indices(list);
+      memcpy(new_indices, old_indices, sizeof(uint32_t) * list->count);
+    }
+    list->indices = new_indices;
+    list->capacity = new_capacity;
+  }
+  uint32_t *indices = node_index_list_get_indices(list);
+  indices[list->count] = index;
+  list->count++;
+}
+
 static inline void node_index_list_destroy(NodeIndexList *list) {
   if (!node_index_list_is_inline(list)) {
     free(list->indices);
@@ -99,6 +176,7 @@ typedef struct MutableNodeList {
   MutableNode *nodes;
   size_t count;
   size_t capacity;
+  IndexArena *arena; // Optional arena for child index allocation
 } MutableNodeList;
 
 static inline MutableNodeList *mutable_node_list_create(void) {
@@ -107,6 +185,7 @@ static inline MutableNodeList *mutable_node_list_create(void) {
   mutable_node_list->nodes =
       malloc_or_die(sizeof(MutableNode) * mutable_node_list->capacity);
   mutable_node_list->count = 0;
+  mutable_node_list->arena = NULL;
   return mutable_node_list;
 }
 
@@ -117,6 +196,21 @@ mutable_node_list_create_with_capacity(size_t capacity) {
   mutable_node_list->nodes =
       malloc_or_die(sizeof(MutableNode) * mutable_node_list->capacity);
   mutable_node_list->count = 0;
+  mutable_node_list->arena = NULL;
+  return mutable_node_list;
+}
+
+// Create with arena for child index allocation
+static inline MutableNodeList *
+mutable_node_list_create_with_arena(size_t node_capacity,
+                                    size_t arena_capacity) {
+  MutableNodeList *mutable_node_list = malloc_or_die(sizeof(MutableNodeList));
+  mutable_node_list->capacity = node_capacity;
+  mutable_node_list->nodes =
+      malloc_or_die(sizeof(MutableNode) * mutable_node_list->capacity);
+  mutable_node_list->count = 0;
+  mutable_node_list->arena = malloc_or_die(sizeof(IndexArena));
+  index_arena_create(mutable_node_list->arena, arena_capacity);
   return mutable_node_list;
 }
 
@@ -154,9 +248,28 @@ static inline int add_child(uint32_t node_index, MutableNodeList *nodes,
   return (int)child_node_index;
 }
 
+// Arena-aware version - allocates child indices from arena
+static inline int add_child_arena(uint32_t node_index, MutableNodeList *nodes,
+                                  MachineLetter ml) {
+  const size_t child_node_index = nodes->count;
+  MutableNode *node = &nodes->nodes[node_index];
+  node_index_list_add_arena(&node->children, child_node_index, nodes->arena);
+  MutableNode *child = mutable_node_list_add(nodes);
+  child->ml = ml;
+  node_index_list_initialize(&child->children);
+  return (int)child_node_index;
+}
+
 static inline void mutable_node_list_destroy(MutableNodeList *nodes) {
-  for (size_t i = 0; i < nodes->count; i++) {
-    node_index_list_destroy(&nodes->nodes[i].children);
+  // If arena is used, all child indices are in the arena - no individual frees
+  // needed
+  if (nodes->arena == NULL) {
+    for (size_t i = 0; i < nodes->count; i++) {
+      node_index_list_destroy(&nodes->nodes[i].children);
+    }
+  } else {
+    index_arena_destroy(nodes->arena);
+    free(nodes->arena);
   }
   free(nodes->nodes);
   free(nodes);
@@ -429,6 +542,33 @@ void insert_suffix(uint32_t node_index, MutableNodeList *nodes,
   insert_suffix(child_index, nodes, word, pos + 1, cached_node_indices);
 }
 
+// Arena-aware version
+void insert_suffix_arena(uint32_t node_index, MutableNodeList *nodes,
+                         const DictionaryWord *word, int pos,
+                         int *cached_node_indices) {
+  MutableNode *node = &nodes->nodes[node_index];
+  const int length = dictionary_word_get_length(word);
+  if (pos == length) {
+    node->accepts = true;
+    return;
+  }
+  const int ml = dictionary_word_get_word(word)[pos];
+  const uint8_t node_num_children = node->children.count;
+  for (MachineLetter i = 0; i < node_num_children; i++) {
+    node = &nodes->nodes[node_index];
+    const uint32_t child_index = get_child_index(node, i);
+    const MutableNode *child = &nodes->nodes[child_index];
+    if (child->ml == ml) {
+      insert_suffix_arena(child_index, nodes, word, pos + 1,
+                          cached_node_indices);
+      return;
+    }
+  }
+  const int child_index = add_child_arena(node_index, nodes, ml);
+  cached_node_indices[pos + 1] = child_index;
+  insert_suffix_arena(child_index, nodes, word, pos + 1, cached_node_indices);
+}
+
 void copy_nodes(NodePointerList *ordered_pointers, MutableNodeList *nodes,
                 const KWG *kwg) {
   uint32_t *kwg_nodes = kwg_get_mutable_nodes(kwg);
@@ -562,7 +702,13 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   const bool output_gaddag = (output == KWG_MAKER_OUTPUT_GADDAG) ||
                              (output == KWG_MAKER_OUTPUT_DAWG_AND_GADDAG);
 
-  MutableNodeList *nodes = mutable_node_list_create();
+  // Estimate sizes for arena allocation
+  const int words_count = dictionary_word_list_get_count(words);
+  const size_t estimated_nodes = (size_t)words_count * 12 + 100;
+  const size_t arena_capacity = estimated_nodes;
+
+  MutableNodeList *nodes =
+      mutable_node_list_create_with_arena(estimated_nodes, arena_capacity);
   const int dawg_root_node_index = mutable_node_list_add_root(nodes);
   // Size is one beyond the longest string because nodes are created for
   // potential children at the max+1'th, though there are none.
@@ -574,14 +720,13 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   }
   if (output_dawg) {
     cached_node_indices[0] = dawg_root_node_index;
-    const int words_count = dictionary_word_list_get_count(words);
     for (int i = 0; i < words_count; i++) {
       const DictionaryWord *word = dictionary_word_list_get_word(words, i);
       const int letters_in_common =
           get_letters_in_common(word, last_word, &last_word_length);
       const int start_index = cached_node_indices[letters_in_common];
-      insert_suffix(start_index, nodes, word, letters_in_common,
-                    cached_node_indices);
+      insert_suffix_arena(start_index, nodes, word, letters_in_common,
+                          cached_node_indices);
     }
   }
 
@@ -598,8 +743,8 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
       const int letters_in_common =
           get_letters_in_common(gaddag_string, last_word, &last_word_length);
       const int start_index = cached_node_indices[letters_in_common];
-      insert_suffix(start_index, nodes, gaddag_string, letters_in_common,
-                    cached_node_indices);
+      insert_suffix_arena(start_index, nodes, gaddag_string, letters_in_common,
+                          cached_node_indices);
     }
     dictionary_word_list_destroy(gaddag_strings);
   }
@@ -652,35 +797,21 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   return kwg;
 }
 
-// Helper to get the next prime >= n for hash table sizing
-static uint64_t next_prime(uint64_t n) {
-  if (n <= 2) {
-    return 2;
-  }
-  if (n <= 3) {
-    return 3;
-  }
-  // Simple primality check for small numbers
-  if (n % 2 == 0) {
-    n++;
-  }
-  for (;;) {
-    bool is_prime = true;
-    for (uint64_t i = 3; i * i <= n; i += 2) {
-      if (n % i == 0) {
-        is_prime = false;
-        break;
-      }
-    }
-    if (is_prime) {
-      return n;
-    }
-    n += 2;
-  }
-}
-
 // Optimized version for small dictionaries (endgame wordprune case).
 // Uses appropriately sized data structures based on word count.
+//
+// Timing analysis (avg over 75 endgames, ~8K words each):
+//   gaddag_gen: 4.4ms (36%) - generating and sorting GADDAG strings
+//   tree:       3.4ms (28%) - building the tree
+//   hash:       1.0ms (8%)  - computing hash values
+//   merge:      2.2ms (18%) - hash-based node merging
+//   finalize:   0.3ms (2%)  - setting final indices
+//   copy:       0.2ms (2%)  - copying to serialized format
+//
+// The copy step (which wmpmaker optimized by writing directly to final format)
+// is already essentially instant. The bottlenecks are gaddag_gen and tree
+// building, which fundamentally require intermediate structures for the
+// DAWG/GADDAG algorithm (child tracking, hash-based merging).
 KWG *make_kwg_from_words_small(const DictionaryWordList *words,
                                kwg_maker_output_t output,
                                kwg_maker_merge_t merging) {
@@ -702,13 +833,11 @@ KWG *make_kwg_from_words_small(const DictionaryWordList *words,
       output_gaddag ? (size_t)words_count * 7 : 0;
   const size_t estimated_nodes =
       (size_t)words_count * 12 + 100; // +100 for safety margin
+  const size_t arena_capacity = estimated_nodes;
 
-  // Use a smaller hash table - prime number close to estimated node count
-  const size_t hash_buckets = next_prime(estimated_nodes);
-
-  // Create appropriately sized node list
+  // Create node list with arena allocator for child indices
   MutableNodeList *nodes =
-      mutable_node_list_create_with_capacity(estimated_nodes);
+      mutable_node_list_create_with_arena(estimated_nodes, arena_capacity);
   const int dawg_root_node_index = mutable_node_list_add_root(nodes);
 
   int cached_node_indices[MAX_KWG_STRING_LENGTH + 1];
@@ -725,8 +854,8 @@ KWG *make_kwg_from_words_small(const DictionaryWordList *words,
       const int letters_in_common =
           get_letters_in_common(word, last_word, &last_word_length);
       const int start_index = cached_node_indices[letters_in_common];
-      insert_suffix(start_index, nodes, word, letters_in_common,
-                    cached_node_indices);
+      insert_suffix_arena(start_index, nodes, word, letters_in_common,
+                          cached_node_indices);
     }
   }
 
@@ -738,6 +867,7 @@ KWG *make_kwg_from_words_small(const DictionaryWordList *words,
         dictionary_word_list_create_with_capacity(
             (int)estimated_gaddag_strings);
     add_gaddag_strings(words, gaddag_strings);
+
     last_word_length = 0;
     cached_node_indices[0] = gaddag_root_node_index;
     const int gaddag_count = dictionary_word_list_get_count(gaddag_strings);
@@ -747,14 +877,17 @@ KWG *make_kwg_from_words_small(const DictionaryWordList *words,
       const int letters_in_common =
           get_letters_in_common(gaddag_string, last_word, &last_word_length);
       const int start_index = cached_node_indices[letters_in_common];
-      insert_suffix(start_index, nodes, gaddag_string, letters_in_common,
-                    cached_node_indices);
+      insert_suffix_arena(start_index, nodes, gaddag_string, letters_in_common,
+                          cached_node_indices);
     }
     dictionary_word_list_destroy(gaddag_strings);
   }
 
   if (merging == KWG_MAKER_MERGE_EXACT) {
     calculate_node_hash_values(nodes);
+
+    // Chained hash table with appropriately sized buckets
+    const size_t hash_buckets = estimated_nodes * 2 + 1;
     NodeHashTable table;
     node_hash_table_create_small(&table, nodes->count, hash_buckets);
     const size_t count = nodes->count;
@@ -801,6 +934,7 @@ KWG *make_kwg_from_words_small(const DictionaryWordList *words,
   KWG *kwg = kwg_create_empty();
   kwg_allocate_nodes(kwg, final_node_count);
   copy_nodes(ordered_pointers, nodes, kwg);
+
   mutable_node_list_destroy(nodes);
   node_pointer_list_destroy(ordered_pointers);
   return kwg;
