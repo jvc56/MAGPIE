@@ -10,6 +10,7 @@
 #include <stdbool.h>
 
 typedef struct Game Game;
+typedef struct KWG KWG;
 
 typedef struct GameArgs {
   PlayersData *players_data;
@@ -52,6 +53,7 @@ int game_get_max_scoreless_turns(const Game *game);
 bool game_reached_max_scoreless_turns(const Game *game);
 void game_increment_consecutive_scoreless_turns(Game *game);
 void game_set_endgame_solving_mode(Game *game);
+void game_set_override_kwg(Game *game, const KWG *kwg);
 void game_set_game_end_reason(Game *game, game_end_reason_t game_end_reason);
 void game_start_next_player_turn(Game *game);
 

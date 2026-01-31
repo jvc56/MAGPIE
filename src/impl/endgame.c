@@ -245,6 +245,8 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
   solver_worker->game_copy = game_duplicate(solver->game);
   game_set_endgame_solving_mode(solver_worker->game_copy);
   game_set_backup_mode(solver_worker->game_copy, BACKUP_MODE_SIMULATION);
+  // Use the pruned KWG for cross set computation in addition to move generation
+  game_set_override_kwg(solver_worker->game_copy, solver->pruned_kwg);
   solver_worker->move_list =
       move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
 

@@ -61,6 +61,11 @@ struct Game {
   int backup_cursor;
   MinimalGameBackup *gcg_game_backup;
   backup_mode_t backup_mode;
+
+  // Optional override KWG for cross set generation (used in endgame).
+  // When non-NULL, cross set generation uses this KWG instead of player KWGs.
+  // Owned by the caller.
+  const KWG *override_kwg;
 };
 
 game_variant_t game_get_variant(const Game *game) { return game->variant; }
@@ -149,6 +154,10 @@ void game_set_endgame_solving_mode(Game *game) {
   game->max_scoreless_turns = 2;
 }
 
+void game_set_override_kwg(Game *game, const KWG *kwg) {
+  game->override_kwg = kwg;
+}
+
 void game_start_next_player_turn(Game *game) {
   game->player_on_turn_index = 1 - game->player_on_turn_index;
 }
@@ -199,6 +208,16 @@ static inline uint32_t traverse_backwards(const KWG *kwg, const Board *board,
   }
 
   return node_index;
+}
+
+// Returns the KWG to use for cross set generation.
+// Uses override_kwg if set, otherwise uses player KWG.
+static inline const KWG *get_kwg_for_cross_set(const Game *game,
+                                               int cross_set_index) {
+  if (game->override_kwg != NULL) {
+    return game->override_kwg;
+  }
+  return player_get_kwg(game_get_player(game, cross_set_index));
 }
 
 static inline void traverse_backwards_add_to_rack(const Board *board, int row,
@@ -253,7 +272,7 @@ static inline void game_gen_alpha_cross_set(const Game *game, int row, int col,
     score += traverse_backwards_for_score(board, ld, row, right_col);
   }
 
-  const KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
+  const KWG *kwg = get_kwg_for_cross_set(game, cross_set_index);
 
   board_set_cross_set_with_blank(
       board, row, col, dir, cross_set_index,
@@ -282,7 +301,7 @@ static inline void game_gen_classic_cross_set(const Game *game, int row,
     return;
   }
 
-  const KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
+  const KWG *kwg = get_kwg_for_cross_set(game, cross_set_index);
   const uint32_t kwg_root = kwg_get_root_node_index(kwg);
   const LetterDistribution *ld = game_get_ld(game);
 
@@ -524,6 +543,7 @@ Game *game_create(const GameArgs *game_args) {
   game->backup_cursor = 0;
   game->backup_mode = BACKUP_MODE_OFF;
   game->gcg_game_backup = NULL;
+  game->override_kwg = NULL;
   return game;
 }
 
@@ -557,6 +577,9 @@ Game *game_duplicate(const Game *game) {
   new_game->backup_cursor = 0;
   new_game->backup_mode = BACKUP_MODE_OFF;
   new_game->gcg_game_backup = NULL;
+  // Copy override_kwg so that duplicated games used in endgame inherit the
+  // pruned KWG.
+  new_game->override_kwg = game->override_kwg;
   return new_game;
 }
 
@@ -580,6 +603,7 @@ void game_copy(Game *dst, const Game *src) {
   dst->variant = src->variant;
   dst->backup_cursor = 0;
   dst->backup_mode = BACKUP_MODE_OFF;
+  dst->override_kwg = src->override_kwg;
 }
 
 // Backups do not restore the move list or
