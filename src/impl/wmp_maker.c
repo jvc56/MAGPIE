@@ -9,9 +9,11 @@
 #include "../def/wmp_defs.h"
 #include "../ent/bit_rack.h"
 #include "../ent/dictionary_word.h"
+#include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/wmp.h"
 #include "../util/io_util.h"
+#include "kwg_maker.h"
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -1184,5 +1186,14 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
   // Calculate max_word_lookup_bytes
   wmp->max_word_lookup_bytes = calculate_max_word_lookup_bytes(wmp);
 
+  return wmp;
+}
+
+WMP *make_wmp_from_kwg(const KWG *kwg, const LetterDistribution *ld,
+                       int num_threads) {
+  DictionaryWordList *words = dictionary_word_list_create();
+  kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), words, NULL);
+  WMP *wmp = make_wmp_from_words(words, ld, num_threads);
+  dictionary_word_list_destroy(words);
   return wmp;
 }
