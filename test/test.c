@@ -115,6 +115,7 @@ static TestEntry test_table[] = {
     {"wmg", test_wmp_move_gen},
     {"winpct", test_win_pct},
     {"endgame", test_endgame},
+    {"benchend", test_benchmark_endgame},
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},
     {"load", test_load_gcg},
@@ -125,6 +126,8 @@ static TestEntry test_table[] = {
 static TestEntry on_demand_test_table[] = {
     {"infercmp", test_infer_cmp},
     {"benchend", test_benchmark_endgame},
+    {"eldar16", test_eldar_v_stick_16_threads},
+    {"abdadacmp", test_abdada_comparison},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
