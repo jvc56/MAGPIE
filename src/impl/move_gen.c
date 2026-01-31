@@ -42,6 +42,12 @@
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
 // Timing instrumentation for movegen profiling
+// Define MOVEGEN_TIMING=1 to enable (adds overhead, especially in WASM)
+#ifndef MOVEGEN_TIMING
+#define MOVEGEN_TIMING 0
+#endif
+
+#if MOVEGEN_TIMING
 typedef struct {
   uint64_t wordmap_gen_ns;
   uint64_t recursive_gen_ns;
@@ -96,6 +102,17 @@ void movegen_get_timing(uint64_t *wordmap_ns, uint64_t *recursive_ns,
   }
   cpthread_mutex_unlock(&timing_mutex);
 }
+#else
+// Stubs when timing is disabled
+void movegen_reset_timing(void) {}
+void movegen_get_timing(uint64_t *wordmap_ns, uint64_t *recursive_ns,
+                        uint64_t *shadow_ns, uint64_t *total_ns,
+                        uint64_t *wordmap_calls, uint64_t *recursive_calls,
+                        uint64_t *shadow_calls, uint64_t *total_calls) {
+  *wordmap_ns = *recursive_ns = *shadow_ns = *total_ns = 0;
+  *wordmap_calls = *recursive_calls = *shadow_calls = *total_calls = 0;
+}
+#endif
 
 // Cache move generators since destroying
 // and recreating a movegen for
@@ -2252,17 +2269,25 @@ void gen_record_scoring_plays(MoveGen *gen) {
       recursive_gen_alpha(gen, anchor.col, anchor.col, anchor.col,
                           gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
     } else if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+#if MOVEGEN_TIMING
       uint64_t start = get_time_ns();
+#endif
       wordmap_gen(gen, &anchor);
+#if MOVEGEN_TIMING
       thread_timings[gen->thread_index].wordmap_gen_ns += get_time_ns() - start;
       thread_timings[gen->thread_index].wordmap_gen_calls++;
+#endif
     } else {
+#if MOVEGEN_TIMING
       uint64_t start = get_time_ns();
+#endif
       recursive_gen(gen, anchor.col, kwg_root_node_index, anchor.col,
                     anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,
                     0);
+#if MOVEGEN_TIMING
       thread_timings[gen->thread_index].recursive_gen_ns += get_time_ns() - start;
       thread_timings[gen->thread_index].recursive_gen_calls++;
+#endif
     }
 
     // If a better play has been found than should have been possible for
@@ -2297,7 +2322,9 @@ void gen_record_pass(MoveGen *gen) {
 }
 
 void generate_moves(const MoveGenArgs *args) {
+#if MOVEGEN_TIMING
   uint64_t total_start = get_time_ns();
+#endif
   MoveGen *gen = get_movegen(args->thread_index);
   gen_load_position(gen, args);
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
@@ -2314,25 +2341,35 @@ void generate_moves(const MoveGenArgs *args) {
 
     if (gen->stop_on_threshold && gen->threshold_exceeded) {
       gen_record_pass(gen);
+#if MOVEGEN_TIMING
       thread_timings[gen->thread_index].total_gen_ns += get_time_ns() - total_start;
       thread_timings[gen->thread_index].total_gen_calls++;
+#endif
       return;
     }
 
+#if MOVEGEN_TIMING
     uint64_t shadow_start = get_time_ns();
+#endif
     gen_shadow(gen);
+#if MOVEGEN_TIMING
     thread_timings[gen->thread_index].gen_shadow_ns += get_time_ns() - shadow_start;
     thread_timings[gen->thread_index].gen_shadow_calls++;
+#endif
 
     if (gen->threshold_exceeded) {
       gen_record_pass(gen);
+#if MOVEGEN_TIMING
       thread_timings[gen->thread_index].total_gen_ns += get_time_ns() - total_start;
       thread_timings[gen->thread_index].total_gen_calls++;
+#endif
       return;
     }
     gen_record_scoring_plays(gen);
   }
   gen_record_pass(gen);
+#if MOVEGEN_TIMING
   thread_timings[gen->thread_index].total_gen_ns += get_time_ns() - total_start;
   thread_timings[gen->thread_index].total_gen_calls++;
+#endif
 }

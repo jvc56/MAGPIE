@@ -21,6 +21,8 @@ OBJ_CMD_64 := $(CMD:$(CMD_DIR)/%.c=$(OBJ_DIR_64)/$(CMD_DIR)/%.o)
 # -ffast-math: Faster floating point (okay for game equity calculations)
 # -DNDEBUG: Disable assertions in release builds
 cflags.release := -O3 -Wall -Wextra -Wno-trigraphs -pthread -msimd128 -flto -ffast-math -DNDEBUG
+# Debug build with profiling symbols (use 'make -f Makefile-wasm profile')
+cflags.profile := -O2 -g -Wall -Wextra -Wno-trigraphs -pthread -msimd128 -fno-inline-functions
 # LTO must be enabled in both compile and link stages
 ldflags.release := -Llib -pthread -flto
 
@@ -39,17 +41,20 @@ lflags.shell := -s EXPORTED_RUNTIME_METHODS=["cwrap","stringToNewUTF8","UTF8ToSt
 	-sDEFAULT_PTHREAD_STACK_SIZE=2MB 
 lflags.release := ${lflags.shell} -s MODULARIZE=1 -sEXPORT_NAME="MAGPIE" -s ENVIRONMENT='web,worker' -sASSERTIONS=1
 # WASM64 adds 64-bit memory addressing (pointer size becomes 8 bytes)
-lflags.release64 := ${lflags.release} -sMEMORY64
+# MIN_SAFARI_VERSION=180301 enables Safari 17.4+ support for Memory64
+lflags.release64 := ${lflags.release} -sMEMORY64 -sMIN_SAFARI_VERSION=180301
 
 LDLIBS := -lm
 
-.PHONY: all clean wasm32 wasm64
+.PHONY: all clean wasm32 wasm64 profile
 
 all: magpie_wasm
 
 wasm32: magpie_wasm
 
 wasm64: magpie_wasm64
+
+profile: magpie_wasm_profile
 
 magpie_wasm: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
 	emcc $(ldflags.release) $(lflags.release) $^ $(LDLIBS) -o $(BIN_DIR)/$@.mjs \
@@ -58,6 +63,26 @@ magpie_wasm: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
 magpie_wasm64: $(OBJ_SRC_64) $(OBJ_CMD_64) | $(BIN_DIR)
 	emcc $(ldflags.release) $(lflags.release64) $^ $(LDLIBS) -o $(BIN_DIR)/$@.mjs \
 	-s INITIAL_MEMORY=256MB -sALLOW_MEMORY_GROWTH=1 -sMAXIMUM_MEMORY=16GB
+
+# Profile build - readable function names, no LTO
+OBJ_DIR_PROF := obj_profile
+SRC_OBJ_SUBDIRS_PROF := $(patsubst $(SRC_DIR)/%,$(OBJ_DIR_PROF)/$(SRC_DIR)/%,$(SRC_SUBDIRS))
+OBJ_SRC_PROF := $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR_PROF)/$(SRC_DIR)/%.o)
+OBJ_CMD_PROF := $(CMD:$(CMD_DIR)/%.c=$(OBJ_DIR_PROF)/$(CMD_DIR)/%.o)
+
+magpie_wasm_profile: $(OBJ_SRC_PROF) $(OBJ_CMD_PROF) | $(BIN_DIR)
+	emcc -Llib -pthread -g $(lflags.release) $^ $(LDLIBS) -o $(BIN_DIR)/$@.mjs \
+	-s INITIAL_MEMORY=256MB -sALLOW_MEMORY_GROWTH=1 -sMAXIMUM_MEMORY=1GB \
+	--profiling-funcs
+
+$(OBJ_DIR_PROF)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR_PROF) $(OBJ_DIR_PROF)/$(SRC_DIR) $(SRC_OBJ_SUBDIRS_PROF)
+	emcc $(cflags.profile) -c $< -o $@
+
+$(OBJ_DIR_PROF)/$(CMD_DIR)/%.o: $(CMD_DIR)/%.c | $(OBJ_DIR_PROF) $(OBJ_DIR_PROF)/$(CMD_DIR)
+	emcc $(cflags.profile) -c $< -o $@
+
+$(OBJ_DIR_PROF) $(OBJ_DIR_PROF)/$(SRC_DIR) $(OBJ_DIR_PROF)/$(CMD_DIR) $(SRC_OBJ_SUBDIRS_PROF):
+	mkdir -p $@
 
 # wasm32 compilation rules
 $(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(SRC_OBJ_SUBDIRS)
@@ -80,7 +105,7 @@ $(OBJ_DIR_64) $(OBJ_DIR_64)/$(SRC_DIR) $(OBJ_DIR_64)/$(CMD_DIR) $(SRC_OBJ_SUBDIR
 	mkdir -p $@
 
 clean:
-	@$(RM) -rv $(OBJ_DIR) $(OBJ_DIR_64)
+	@$(RM) -rv $(OBJ_DIR) $(OBJ_DIR_64) $(OBJ_DIR_PROF)
 
 -include $(OBJ_SRC:.o=.d)
 -include $(OBJ_CMD:.o=.d)
