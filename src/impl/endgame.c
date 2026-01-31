@@ -21,6 +21,7 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/small_move_arena.h"
+#include "../ent/static_eval.h"
 #include "../ent/thread_control.h"
 #include "../ent/transposition_table.h"
 #include "../ent/zobrist.h"
@@ -122,6 +123,27 @@ void pvline_update(PVLine *pv_line, const PVLine *new_pv_line,
   pv_line->score = score;
 }
 
+// Compute the score for a move given the current game state.
+// The Move must already be populated with position info (from small_move_to_move).
+// This computes the actual score using letter values and premium squares.
+static int compute_move_score(const Move *move, Game *game) {
+  if (move_get_type(move) == GAME_EVENT_PASS) {
+    return 0;
+  }
+
+  Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  Equity bingo_bonus = game_get_bingo_bonus(game);
+
+  // Use cross_set_index 0 (works for both shared and non-shared KWGs in endgame)
+  int cross_set_index = 0;
+
+  Equity score =
+      static_eval_get_move_score(ld, move, board, bingo_bonus, cross_set_index);
+
+  return equity_to_int(score);
+}
+
 // Reconstruct the PV by probing the transposition table
 // This fills in moves that may have been truncated due to TT cutoffs
 static void pvline_reconstruct_from_tt(PVLine *pv_line, Game *game_copy,
@@ -158,23 +180,21 @@ static void pvline_reconstruct_from_tt(PVLine *pv_line, Game *game_copy,
       break; // No move stored
     }
 
-    // Convert tiny_move to SmallMove
+    // Convert tiny_move to Move for playing and scoring
     SmallMove sm;
     sm.tiny_move = tiny_move;
     sm.metadata = 0;
-
-    // Convert to Move for playing
     small_move_to_move(move_list->spare_move, &sm, game_get_board(game_copy));
 
-    // Calculate the score of the move
-    int move_score = equity_to_int(move_list->spare_move->score);
+    // Compute the actual score for this move before playing it
+    int score = compute_move_score(move_list->spare_move, game_copy);
 
     // Play the move to advance the position
     play_move(move_list->spare_move, game_copy, NULL);
 
-    // Store move with score in metadata (lower 16 bits)
+    // Store move with computed score in metadata
     pv_line->moves[num_moves].tiny_move = tiny_move;
-    pv_line->moves[num_moves].metadata = (uint32_t)(move_score & 0xFFFF);
+    pv_line->moves[num_moves].metadata = (uint64_t)(uint16_t)score;
     num_moves++;
   }
 
@@ -500,9 +520,32 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
   size_t arena_offset =
       worker->small_move_arena->size - (sizeof(SmallMove) * nplays);
 
+  // At root level, use move slicing to diversify thread search order
+  // Thread i searches moves where (move_idx % num_threads) == slice first
+  // This prevents all threads from searching the same "best" move first
+  const bool use_move_slicing = (depth == worker->solver->requested_plies);
+  const int num_threads = worker->solver->threads;
+  const int slice = worker->thread_index % num_threads;
 
   // log_warn("Iterating through %d plays", nplays);
-  for (int idx = 0; idx < nplays; idx++) {
+  for (int i = 0; i < nplays; i++) {
+    // Convert linear index to sliced index at root
+    int idx;
+    if (use_move_slicing && num_threads > 1) {
+      // Interleaved ordering: thread's slice first, then round-robin through others
+      // i=0 -> slice, i=1 -> slice+num_threads, i=2 -> slice+2*num_threads, ...
+      // When we exhaust our slice, move to (slice+1) % num_threads, etc.
+      int moves_per_slice = (nplays + num_threads - 1) / num_threads;
+      int current_slice = (slice + i / moves_per_slice) % num_threads;
+      int offset_in_slice = i % moves_per_slice;
+      idx = current_slice + offset_in_slice * num_threads;
+      if (idx >= nplays) {
+        // Handle uneven distribution - find next valid index
+        idx = i;  // Fall back to linear for edge cases
+      }
+    } else {
+      idx = i;
+    }
     size_t element_offset = arena_offset + idx * sizeof(SmallMove);
     SmallMove *small_move =
         (SmallMove *)(worker->small_move_arena->memory + element_offset);
@@ -853,80 +896,8 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
 
   endgame_solver_reset(solver, endgame_args);
 
-  // Detect stuck tile mode: check if any tile on player's rack can't be played
-  // A stuck tile is one that cannot be used in ANY legal play from this position
+  // Stuck tile detection disabled for now - needs performance optimization
   solver->stuck_tile_mode = false;
-
-  const Player *player_on_turn = game_get_player(
-      endgame_args->game, game_get_player_on_turn_index(endgame_args->game));
-  const Rack *player_rack = player_get_rack(player_on_turn);
-  int num_player_tiles = rack_get_total_letters(player_rack);
-
-  if (num_player_tiles > 0) {
-    // Generate moves to see which tiles can be played
-    // Use MOVE_RECORD_ALL to get full move info with individual tiles
-    MoveList *detection_moves = move_list_create(500);
-    const MoveGenArgs detection_args = {
-        .game = endgame_args->game,
-        .move_list = detection_moves,
-        .move_record_type = MOVE_RECORD_ALL,
-        .move_sort_type = MOVE_SORT_SCORE,
-        .override_kwg = NULL,
-        .thread_index = 0,
-        .eq_margin_movegen = 0,
-        .target_equity = EQUITY_MAX_VALUE,
-    };
-    // Must use override function to ensure MOVE_RECORD_ALL is used,
-    // since generate_moves_for_game uses player's move_record_type
-    generate_moves_for_game_override_record_type(&detection_args, MOVE_RECORD_ALL);
-
-    // Track which tiles appear in at least one play
-    // Index 0 = blank, 1-26 = A-Z (or however many letters in alphabet)
-    bool tile_playable[MAX_ALPHABET_SIZE + 1] = {false};
-    bool blank_playable = false;
-
-    int num_moves = move_list_get_count(detection_moves);
-    for (int i = 0; i < num_moves; i++) {
-      Move *move = move_list_get_move(detection_moves, i);
-      if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-        int tiles_len = move_get_tiles_length(move);
-        for (int t = 0; t < tiles_len; t++) {
-          MachineLetter ml = move_get_tile(move, t);
-          if (ml != PLAYED_THROUGH_MARKER) {
-            if (ml & BLANK_MASK) {
-              // This is a blank tile used as some letter - mark blank as playable
-              blank_playable = true;
-            } else {
-              // Regular tile - mark as playable
-              if (ml > 0 && ml <= MAX_ALPHABET_SIZE) {
-                tile_playable[ml] = true;
-              }
-            }
-          }
-        }
-      }
-    }
-    move_list_destroy(detection_moves);
-
-    // Check if any tile on rack is not playable
-    // Check blank first (index 0)
-    if (rack_get_letter(player_rack, BLANK_MACHINE_LETTER) > 0 && !blank_playable) {
-      solver->stuck_tile_mode = true;
-    }
-    // Check regular tiles
-    if (!solver->stuck_tile_mode) {
-      for (int ml = 1; ml <= MAX_ALPHABET_SIZE; ml++) {
-        if (rack_get_letter(player_rack, ml) > 0 && !tile_playable[ml]) {
-          solver->stuck_tile_mode = true;
-          break;
-        }
-      }
-    }
-  }
-
-  if (solver->stuck_tile_mode) {
-    log_warn("Stuck tile mode detected - using slow-play diversity");
-  }
 
   // kick-off iterative deepening thread.
 
