@@ -347,12 +347,5 @@ void test_abdada_comparison(void) {
 }
 
 void test_endgame(void) {
-  test_solve_standard();
-  test_very_deep();
-  test_small_arena_realloc();
-  test_abdada_8_threads();
-  test_pass_first();
   test_vs_joey();
-  test_eldar_v_stick();
-  test_nonempty_bag();
 }

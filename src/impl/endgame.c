@@ -58,6 +58,7 @@ struct EndgameSolver {
   bool negascout_optim;
   bool lazysmp_optim;
   bool prevent_slowroll;
+  bool stuck_tile_mode;  // True if either player has unplayable tiles
   PVLine principal_variation;
   PVLine *variations;
 
@@ -89,6 +90,9 @@ typedef struct EndgameSolverWorker {
   int current_iterative_deepening_depth;
   // Array of MoveUndo structures for incremental play/unplay
   MoveUndo move_undos[MAX_SEARCH_DEPTH];
+  // Slow-play mode: rewards keeping tiles on rack instead of going out fast
+  // Used by half of threads to provide move ordering diversity
+  bool slow_play_mode;
 } EndgameSolverWorker;
 
 #ifndef MAX
@@ -185,7 +189,10 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->negascout_optim = true;
   es->solve_multiple_variations = 0;
   es->nodes_searched = 0;
-  es->threads = 1; // for now
+  es->threads = endgame_args->num_threads;
+  if (es->threads < 1) {
+    es->threads = 1;
+  }
   es->requested_plies = endgame_args->plies;
   es->solving_player = game_get_player_on_turn_index(endgame_args->game);
   es->initial_small_move_arena_size =
@@ -205,8 +212,6 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
       possible_word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
   dictionary_word_list_destroy(possible_word_list);
 
-  // later, when we have multi-threaded endgame:
-  // es->threads = endgame_args->num_threads;
   es->thread_control = endgame_args->thread_control;
   es->game = endgame_args->game;
   es->per_ply_callback = endgame_args->per_ply_callback;
@@ -236,7 +241,8 @@ void endgame_solver_destroy(EndgameSolver *es) {
 }
 
 EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
-                                                  int worker_index) {
+                                                  int worker_index,
+                                                  bool slow_play_mode) {
 
   EndgameSolverWorker *solver_worker =
       malloc_or_die(sizeof(EndgameSolverWorker));
@@ -254,6 +260,9 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
   solver_worker->solver = solver;
   // Zero-initialize move_undos to prevent undefined behavior from stale values
   memset(solver_worker->move_undos, 0, sizeof(solver_worker->move_undos));
+
+  // Slow-play mode provides move ordering diversity
+  solver_worker->slow_play_mode = slow_play_mode;
 
   return solver_worker;
 }
@@ -323,6 +332,7 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
   int ntiles_on_rack = stm_rack->number_of_letters;
   bool last_move_was_pass = game_get_consecutive_scoreless_turns(
                                 worker->game_copy) == 1; // check if this is ok.
+  const bool slow_play_mode = worker->slow_play_mode;
 
   size_t arena_offset =
       worker->small_move_arena->size - (sizeof(SmallMove) * move_count);
@@ -333,23 +343,44 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
         (SmallMove *)(worker->small_move_arena->memory + element_offset);
     // log_warn("assign estimate to move idx %d, tm %x, meta %x", i,
     //          current_move->tiny_move, current_move->metadata);
-    if (small_move_get_tiles_played(current_move) == ntiles_on_rack) {
-      small_move_set_estimated_value(
-          current_move,
+
+    int tiles_played = small_move_get_tiles_played(current_move);
+
+    const LetterDistribution *ld = game_get_ld(worker->game_copy);
+    int opp_tile_score = equity_to_int(calculate_end_rack_points(other_rack, ld));
+    int our_tile_score = equity_to_int(calculate_end_rack_points(stm_rack, ld));
+
+    if (tiles_played == ntiles_on_rack) {
+      // Going out move
+      int32_t base_value =
           equity_to_int(int_to_equity(small_move_get_score(current_move)) +
-                        (calculate_end_rack_points(
-                            other_rack, game_get_ld(worker->game_copy)))) |
-              GOING_OUT_BF);
+                        (calculate_end_rack_points(other_rack, ld)));
+      if (slow_play_mode) {
+        // Slow-play mode: outplays valued at score + 2*opp_tile_score
+        int32_t slow_value = small_move_get_score(current_move) + 2 * opp_tile_score;
+        small_move_set_estimated_value(current_move, slow_value);
+      } else {
+        // Normal mode: heavily prioritize going out
+        small_move_set_estimated_value(current_move, base_value | GOING_OUT_BF);
+      }
+    } else if (slow_play_mode) {
+      // Slow-play mode: non-outplays valued at score + 2*our_tile_score + 2*opp_tile_score
+      // This rewards keeping tiles on rack when opponent has stuck tiles
+      int32_t slow_value = small_move_get_score(current_move) +
+                           2 * our_tile_score + 2 * opp_tile_score;
+      small_move_set_estimated_value(current_move, slow_value);
     } else if (depth > 2) {
-      // some more jitter for lazysmp (to be implemented)
-      if (worker->thread_index >= 6) {
+      // Normal mode with some diversity based on thread index
+      if (worker->thread_index % 2 == 1) {
+        // Odd threads: favor more tiles played
         small_move_set_estimated_value(
             current_move, small_move_get_score(current_move) +
-                              3 * small_move_get_tiles_played(current_move));
+                              3 * tiles_played);
       } else {
+        // Even threads: favor fewer tiles played
         small_move_set_estimated_value(
             current_move, small_move_get_score(current_move) -
-                              5 * small_move_get_tiles_played(current_move));
+                              3 * tiles_played);
       }
     } else {
       small_move_set_estimated_value(current_move,
@@ -443,6 +474,8 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
     return on_turn_spread;
   }
 
+  // Using pure Lazy SMP (staggered depths + shared TT)
+
   PVLine child_pv;
   child_pv.game = worker->game_copy;
   child_pv.num_moves = 0;
@@ -466,6 +499,7 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
   uint64_t best_tiny_move = INVALID_TINY_MOVE;
   size_t arena_offset =
       worker->small_move_arena->size - (sizeof(SmallMove) * nplays);
+
 
   // log_warn("Iterating through %d plays", nplays);
   for (int idx = 0; idx < nplays; idx++) {
@@ -520,6 +554,7 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
           on_turn_idx == worker->solver->solving_player,
           game_get_consecutive_scoreless_turns(worker->game_copy),
           last_consecutive_scoreless_turns);
+
     }
 
     int32_t value = 0;
@@ -656,6 +691,28 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   int start = 1;
   if (!worker->solver->iterative_deepening_optim) {
     start = plies;
+  } else if (worker->solver->stuck_tile_mode) {
+    // Stuck tile mode: pair threads at same depth with different move ordering
+    // Threads 0,1 start at depth 1; threads 2,3 at depth 1+stagger; etc.
+    // Odd threads use slow-play ordering for diversity
+    int stagger = 2;
+    int pair_index = worker->thread_index / 2;
+    start = 1 + (pair_index * stagger);
+    if (start > plies) {
+      // Wrap around instead of capping to avoid redundant work
+      start = 1 + ((pair_index * stagger) % plies);
+    }
+  } else {
+    // Normal mode: stagger +3 with smart wraparound for good distribution
+    // Add +1 offset for each wrap cycle to avoid clustering when gcd(stagger, plies) > 1
+    // E.g., 8 threads, 9 plies, stagger 3: 1,4,7,2,5,8,3,6 (all unique)
+    int stagger = 3;
+    int offset = worker->thread_index * stagger;
+    int wrap_count = offset / plies;
+    start = 1 + (offset % plies) + wrap_count;
+    if (start > plies) {
+      start = plies;  // Safety cap
+    }
   }
 
   for (int p = start; p <= plies; p++) {
@@ -796,6 +853,81 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
 
   endgame_solver_reset(solver, endgame_args);
 
+  // Detect stuck tile mode: check if any tile on player's rack can't be played
+  // A stuck tile is one that cannot be used in ANY legal play from this position
+  solver->stuck_tile_mode = false;
+
+  const Player *player_on_turn = game_get_player(
+      endgame_args->game, game_get_player_on_turn_index(endgame_args->game));
+  const Rack *player_rack = player_get_rack(player_on_turn);
+  int num_player_tiles = rack_get_total_letters(player_rack);
+
+  if (num_player_tiles > 0) {
+    // Generate moves to see which tiles can be played
+    // Use MOVE_RECORD_ALL to get full move info with individual tiles
+    MoveList *detection_moves = move_list_create(500);
+    const MoveGenArgs detection_args = {
+        .game = endgame_args->game,
+        .move_list = detection_moves,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_SCORE,
+        .override_kwg = NULL,
+        .thread_index = 0,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+    };
+    // Must use override function to ensure MOVE_RECORD_ALL is used,
+    // since generate_moves_for_game uses player's move_record_type
+    generate_moves_for_game_override_record_type(&detection_args, MOVE_RECORD_ALL);
+
+    // Track which tiles appear in at least one play
+    // Index 0 = blank, 1-26 = A-Z (or however many letters in alphabet)
+    bool tile_playable[MAX_ALPHABET_SIZE + 1] = {false};
+    bool blank_playable = false;
+
+    int num_moves = move_list_get_count(detection_moves);
+    for (int i = 0; i < num_moves; i++) {
+      Move *move = move_list_get_move(detection_moves, i);
+      if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+        int tiles_len = move_get_tiles_length(move);
+        for (int t = 0; t < tiles_len; t++) {
+          MachineLetter ml = move_get_tile(move, t);
+          if (ml != PLAYED_THROUGH_MARKER) {
+            if (ml & BLANK_MASK) {
+              // This is a blank tile used as some letter - mark blank as playable
+              blank_playable = true;
+            } else {
+              // Regular tile - mark as playable
+              if (ml > 0 && ml <= MAX_ALPHABET_SIZE) {
+                tile_playable[ml] = true;
+              }
+            }
+          }
+        }
+      }
+    }
+    move_list_destroy(detection_moves);
+
+    // Check if any tile on rack is not playable
+    // Check blank first (index 0)
+    if (rack_get_letter(player_rack, BLANK_MACHINE_LETTER) > 0 && !blank_playable) {
+      solver->stuck_tile_mode = true;
+    }
+    // Check regular tiles
+    if (!solver->stuck_tile_mode) {
+      for (int ml = 1; ml <= MAX_ALPHABET_SIZE; ml++) {
+        if (rack_get_letter(player_rack, ml) > 0 && !tile_playable[ml]) {
+          solver->stuck_tile_mode = true;
+          break;
+        }
+      }
+    }
+  }
+
+  if (solver->stuck_tile_mode) {
+    log_warn("Stuck tile mode detected - using slow-play diversity");
+  }
+
   // kick-off iterative deepening thread.
 
   EndgameSolverWorker **solver_workers =
@@ -803,9 +935,12 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   cpthread_t *worker_ids =
       malloc_or_die((sizeof(cpthread_t)) * (solver->threads));
 
+  // In stuck tile mode: odd threads use slow-play (reward keeping tiles)
+  // Otherwise: all threads use normal mode
   for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
+    bool use_slow_play = solver->stuck_tile_mode && (thread_index % 2 == 1);
     solver_workers[thread_index] =
-        endgame_solver_create_worker(solver, thread_index);
+        endgame_solver_create_worker(solver, thread_index, use_slow_play);
     cpthread_create(&worker_ids[thread_index], solver_worker_start,
                     solver_workers[thread_index]);
   }

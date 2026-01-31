@@ -77,6 +77,7 @@ static bool play_until_bag_empty(Game *game, MoveList *move_list) {
   return !rack_is_empty(rack0) && !rack_is_empty(rack1);
 }
 
+__attribute__((unused))
 static void run_endgames_with_pv(Config *config, EndgameSolver *solver,
                                   int num_games, int ply, int num_threads,
                                   uint64_t base_seed) {
