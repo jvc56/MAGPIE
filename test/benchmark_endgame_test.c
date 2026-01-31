@@ -58,6 +58,36 @@ static double get_time_sec(void) {
   return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
 
+// Per-ply callback to print PV during iterative deepening
+static void print_pv_callback(int depth, int32_t value, const PVLine *pv_line,
+                              const Game *game, void *user_data) {
+  double *start_time = (double *)user_data;
+  double elapsed = get_time_sec() - *start_time;
+
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_formatted_string(sb, "  depth %d: value=%d, time=%.3fs, pv=",
+                                      depth, value, elapsed);
+
+  // Format each move in the PV
+  Game *game_copy = game_duplicate(game);
+  const Board *board = game_get_board(game_copy);
+  const LetterDistribution *ld = game_get_ld(game_copy);
+  Move move;
+
+  for (int i = 0; i < pv_line->num_moves; i++) {
+    small_move_to_move(&move, &(pv_line->moves[i]), board);
+    string_builder_add_move(sb, board, &move, ld, true);
+    if (i < pv_line->num_moves - 1) {
+      string_builder_add_string(sb, " ");
+    }
+    play_move(&move, game_copy, NULL);
+  }
+
+  printf("%s\n", string_builder_peek(sb));
+  string_builder_destroy(sb);
+  game_destroy(game_copy);
+}
+
 // Play moves until the bag is empty, returning true if we get a valid endgame
 // position (bag empty, both players have tiles)
 static bool play_until_bag_empty(Game *game, MoveList *move_list) {
@@ -77,7 +107,6 @@ static bool play_until_bag_empty(Game *game, MoveList *move_list) {
   return !rack_is_empty(rack0) && !rack_is_empty(rack1);
 }
 
-__attribute__((unused))
 static void run_endgames_with_pv(Config *config, EndgameSolver *solver,
                                   int num_games, int ply, int num_threads,
                                   uint64_t base_seed) {
@@ -117,8 +146,8 @@ static void run_endgames_with_pv(Config *config, EndgameSolver *solver,
                         .initial_small_move_arena_size =
                             DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
                         .num_threads = num_threads,
-                        .per_ply_callback = NULL,  // Disable callback
-                        .per_ply_callback_data = NULL};
+                        .per_ply_callback = print_pv_callback,
+                        .per_ply_callback_data = &game_start};
     EndgameResults *results = config_get_endgame_results(config);
     ErrorStack *err = error_stack_create();
 
@@ -138,80 +167,23 @@ static void run_endgames_with_pv(Config *config, EndgameSolver *solver,
 void test_benchmark_endgame(void) {
   log_set_level(LOG_WARN);  // Allow warnings to show diagnostics
 
-  // Test specific hard seeds (45 and 49) at 9-ply
-  const int ply = 9;
-  uint64_t seeds[] = {45, 49};  // Game 4 and Game 8 from previous benchmark
-  int num_seeds = sizeof(seeds) / sizeof(seeds[0]);
-
-  // Thread counts to benchmark: 1 (like main) vs 16 (ABDADA)
-  int thread_counts[] = {1, 16};
-  int num_configs = sizeof(thread_counts) / sizeof(thread_counts[0]);
+  const int num_games = 10;
+  const int ply = 6;
+  const int num_threads = 8;
+  const uint64_t base_seed = 100;
 
   Config *config = config_create_or_die(
       "set -lex TWL98 -threads 1 -s1 score -s2 score -r1 small -r2 small");
 
   printf("\n");
   printf("==============================================\n");
-  printf("  ABDADA Hard Games Benchmark: %d-ply TWL98\n", ply);
+  printf("  Benchmark: %d games at %d-ply with %d threads\n", num_games, ply,
+         num_threads);
   printf("==============================================\n");
 
-  MoveList *move_list = move_list_create(1);
-  exec_config_quiet(config, "new");
-  Game *game = config_get_game(config);
+  EndgameSolver *solver = endgame_solver_create();
+  run_endgames_with_pv(config, solver, num_games, ply, num_threads, base_seed);
+  endgame_solver_destroy(solver);
 
-  for (int c = 0; c < num_configs; c++) {
-    int num_threads = thread_counts[c];
-    EndgameSolver *solver = endgame_solver_create();
-
-    printf("\n--- Testing with %d thread(s) ---\n", num_threads);
-    double total_time = 0;
-
-    for (int s = 0; s < num_seeds; s++) {
-      uint64_t seed = seeds[s];
-      game_reset(game);
-      game_seed(game, seed);
-      draw_starting_racks(game);
-
-      while (bag_get_letters(game_get_bag(game)) > 0) {
-        Move *move = get_top_equity_move(game, 0, move_list);
-        play_move(move, game, NULL);
-      }
-
-      printf("\n--- Seed %llu ---\n", (unsigned long long)seed);
-      StringBuilder *game_sb = string_builder_create();
-      GameStringOptions *gso = game_string_options_create_default();
-      string_builder_add_game(game, NULL, gso, NULL, game_sb);
-      printf("%s", string_builder_peek(game_sb));
-      string_builder_destroy(game_sb);
-      game_string_options_destroy(gso);
-
-      double game_start = get_time_sec();
-      EndgameArgs args = {.game = game,
-                          .thread_control = config_get_thread_control(config),
-                          .plies = ply,
-                          .tt_fraction_of_mem = 0.1,
-                          .initial_small_move_arena_size =
-                              DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-                          .num_threads = num_threads,
-                          .per_ply_callback = NULL,
-                          .per_ply_callback_data = NULL};
-      EndgameResults *results = config_get_endgame_results(config);
-      ErrorStack *err = error_stack_create();
-
-      printf("Solving %d-ply endgame with %d threads...\n", ply, num_threads);
-      endgame_solve(solver, &args, results, err);
-      double game_elapsed = get_time_sec() - game_start;
-      printf("  Solved in %.3fs\n", game_elapsed);
-      total_time += game_elapsed;
-
-      assert(error_stack_is_empty(err));
-      error_stack_destroy(err);
-    }
-
-    printf("\nTotal time for %d threads: %.3fs\n", num_threads, total_time);
-    endgame_solver_destroy(solver);
-  }
-
-  move_list_destroy(move_list);
   config_destroy(config);
 }
