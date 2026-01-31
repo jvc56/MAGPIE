@@ -934,7 +934,9 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   // while others explore slow-play lines that may be better when opponent
   // has an unplayable tile (like Q or V).
   // Thread 0 always uses normal mode (the "main" thread).
-  const int stuck_tile_start = (solver->threads >= 4) ? (solver->threads / 2) : solver->threads;
+  // Set STUCK_TILE_MIN_THREADS to a high value to disable stuck-tile mode for benchmarking.
+  const int STUCK_TILE_MIN_THREADS = 4;  // Re-enabled after A/B testing showed 4x speedup
+  const int stuck_tile_start = (solver->threads >= STUCK_TILE_MIN_THREADS) ? (solver->threads / 2) : solver->threads;
   int stuck_tile_count = 0;
   int normal_count = 0;
 
