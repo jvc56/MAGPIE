@@ -62,10 +62,10 @@ struct EndgameSolver {
   PVLine *variations;
 
   // Per-player pruned KWGs for 2-lexicon endgames.
-  // In SHARED mode, both indices point to the same KWG.
-  // In PER_PLAYER mode, each player has their own pruned KWG.
+  // In IGNORANT mode, both indices point to the same KWG.
+  // In INFORMED mode, each player has their own pruned KWG.
   KWG *pruned_kwgs[2];
-  endgame_lexicon_mode_t lexicon_mode;
+  dual_lexicon_mode_t dual_lexicon_mode;
   int nodes_searched;
 
   int solve_multiple_variations;
@@ -211,11 +211,11 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->pruned_kwgs[0] = NULL;
   es->pruned_kwgs[1] = NULL;
 
-  es->lexicon_mode = endgame_args->lexicon_mode;
+  es->dual_lexicon_mode = endgame_args->dual_lexicon_mode;
 
-  // Create pruned KWG(s) based on lexicon mode
-  if (es->lexicon_mode == ENDGAME_LEXICON_SHARED) {
-    // SHARED mode: create one pruned KWG used by both players
+  // Create pruned KWG(s) based on dual-lexicon mode
+  if (es->dual_lexicon_mode == DUAL_LEXICON_MODE_IGNORANT) {
+    // IGNORANT mode: create one pruned KWG used by both players
     DictionaryWordList *possible_word_list = dictionary_word_list_create();
     generate_possible_words(endgame_args->game, NULL, possible_word_list);
     es->pruned_kwgs[0] = make_kwg_from_words_small(
@@ -223,7 +223,7 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
     es->pruned_kwgs[1] = es->pruned_kwgs[0]; // Same KWG for both
     dictionary_word_list_destroy(possible_word_list);
   } else {
-    // PER_PLAYER mode: create separate pruned KWGs for each player's lexicon
+    // INFORMED mode: create separate pruned KWGs for each player's lexicon
     for (int player_idx = 0; player_idx < 2; player_idx++) {
       const KWG *player_kwg =
           player_get_kwg(game_get_player(endgame_args->game, player_idx));
@@ -280,7 +280,7 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
   game_set_backup_mode(solver_worker->game_copy, BACKUP_MODE_SIMULATION);
   // Use the pruned KWG(s) for cross set computation in addition to move generation.
   game_set_override_kwgs(solver_worker->game_copy, solver->pruned_kwgs[0],
-                         solver->pruned_kwgs[1], solver->lexicon_mode);
+                         solver->pruned_kwgs[1], solver->dual_lexicon_mode);
   solver_worker->move_list =
       move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
 

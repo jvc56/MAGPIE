@@ -71,10 +71,10 @@ static bool play_until_bag_empty(Game *game, MoveList *move_list) {
   return !rack_is_empty(rack0) && !rack_is_empty(rack1);
 }
 
-// Solve endgame with given lexicon mode and return the score
+// Solve endgame with given dual-lexicon mode and return the score
 static int solve_endgame_with_mode(Config *config, EndgameSolver *solver,
                                    Game *game, int ply,
-                                   endgame_lexicon_mode_t mode) {
+                                   dual_lexicon_mode_t mode) {
   EndgameArgs args = {.game = game,
                       .thread_control = config_get_thread_control(config),
                       .plies = ply,
@@ -83,7 +83,7 @@ static int solve_endgame_with_mode(Config *config, EndgameSolver *solver,
                           DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
                       .per_ply_callback = NULL,
                       .per_ply_callback_data = NULL,
-                      .lexicon_mode = mode};
+                      .dual_lexicon_mode = mode};
 
   EndgameResults *results = config_get_endgame_results(config);
   ErrorStack *err = error_stack_create();
@@ -124,20 +124,20 @@ static void search_for_2lex_differences(Config *config, EndgameSolver *solver,
     valid_endgames++;
 
     // Solve with both modes
-    int shared_score =
-        solve_endgame_with_mode(config, solver, game, ply, ENDGAME_LEXICON_SHARED);
-    int per_player_score =
-        solve_endgame_with_mode(config, solver, game, ply, ENDGAME_LEXICON_PER_PLAYER);
+    int ignorant_score =
+        solve_endgame_with_mode(config, solver, game, ply, DUAL_LEXICON_MODE_IGNORANT);
+    int informed_score =
+        solve_endgame_with_mode(config, solver, game, ply, DUAL_LEXICON_MODE_INFORMED);
 
-    if (shared_score != per_player_score) {
+    if (ignorant_score != informed_score) {
       differences_found++;
       printf("\n");
       printf("========================================\n");
       printf("DIFFERENCE FOUND! Game %d (seed %" PRIu64 ")\n", valid_endgames,
              base_seed + (uint64_t)i);
       printf("========================================\n");
-      printf("SHARED mode score:     %d\n", shared_score);
-      printf("PER_PLAYER mode score: %d\n", per_player_score);
+      printf("IGNORANT mode score: %d\n", ignorant_score);
+      printf("INFORMED mode score: %d\n", informed_score);
 
       // Print the game position
       StringBuilder *game_sb = string_builder_create();

@@ -37,10 +37,10 @@ typedef struct EndgameArgs {
   int initial_small_move_arena_size;
   EndgamePerPlyCallback per_ply_callback;
   void *per_ply_callback_data;
-  // Lexicon mode for 2-lexicon endgames.
-  // SHARED: Both players use the same pruned KWG (default, faster).
-  // PER_PLAYER: Each player uses their own pruned KWG (for different lexicons).
-  endgame_lexicon_mode_t lexicon_mode;
+  // Dual-lexicon mode for 2-lexicon endgames.
+  // IGNORANT: Both players use the same pruned KWG (default, faster).
+  // INFORMED: Each player uses their own pruned KWG (for different lexicons).
+  dual_lexicon_mode_t dual_lexicon_mode;
 } EndgameArgs;
 
 EndgameSolver *endgame_solver_create(void);

@@ -71,7 +71,7 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   endgame_args.initial_small_move_arena_size = initial_small_move_arena_size;
   endgame_args.per_ply_callback = print_pv_callback;
   endgame_args.per_ply_callback_data = &timer;
-  endgame_args.lexicon_mode = ENDGAME_LEXICON_SHARED;
+  endgame_args.dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT;
 
   // Create results
   EndgameResults *endgame_results = config_get_endgame_results(config);
@@ -210,7 +210,7 @@ void test_small_arena_realloc(void) {
   "7PIgWEEDS/5DUI3N2H/5ETUI4TI/3GUP7AL/13NY/4TItHONIA1G1/"                     \
   "7E5L1/4RECRATE2E1/7D1ANGORA BELSTUZ/IQV 373/426 0"
 
-void test_2lex_endgame(endgame_lexicon_mode_t mode, int expected_score) {
+void test_2lex_endgame(dual_lexicon_mode_t mode, int expected_score) {
   Config *config = config_create_or_die(
       "set -l1 TWL98 -l2 CSW24 -wmp false -s1 score -s2 score -r1 small -r2 "
       "small -threads 1 -eplies 4");
@@ -229,7 +229,7 @@ void test_2lex_endgame(endgame_lexicon_mode_t mode, int expected_score) {
       .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
       .per_ply_callback = NULL,
       .per_ply_callback_data = NULL,
-      .lexicon_mode = mode,
+      .dual_lexicon_mode = mode,
   };
 
   endgame_solve(solver, &args, results, error_stack);
@@ -242,12 +242,12 @@ void test_2lex_endgame(endgame_lexicon_mode_t mode, int expected_score) {
   config_destroy(config);
 }
 
-void test_2lex_shared(void) {
-  test_2lex_endgame(ENDGAME_LEXICON_SHARED, 96);
+void test_2lex_ignorant(void) {
+  test_2lex_endgame(DUAL_LEXICON_MODE_IGNORANT, 96);
 }
 
-void test_2lex_per_player(void) {
-  test_2lex_endgame(ENDGAME_LEXICON_PER_PLAYER, 81);
+void test_2lex_informed(void) {
+  test_2lex_endgame(DUAL_LEXICON_MODE_INFORMED, 81);
 }
 
 void test_endgame(void) {
@@ -257,8 +257,8 @@ void test_endgame(void) {
   test_pass_first();
   test_nonempty_bag();
   // 2-lexicon endgame tests (TWL98 vs CSW24, QI-relevant)
-  test_2lex_shared();
-  test_2lex_per_player();
+  test_2lex_ignorant();
+  test_2lex_informed();
   //  Uncomment out more of these tests once we add more optimizations,
   //  and/or if we can run the endgame tests in release mode.
   // test_vs_joey();
