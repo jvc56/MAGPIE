@@ -199,22 +199,28 @@ void test_small_arena_realloc(void) {
       512, ERROR_STATUS_SUCCESS, 11, false);
 }
 
-// Test 2-lexicon endgame with specified lexicon mode.
+// QI-relevant 2-lexicon endgame test.
 // TWL98 vs CSW24 - TWL98 doesn't have QI, CSW24 does.
-// Verifies that SHARED and PER_PLAYER modes give different results.
-void test_2lex_endgame_differs(const char *cgp) {
-  // Load config with 2 lexicons
+// Position from TWL98 vs CSW24 game (seed 1023).
+// Player 1 (TWL98) has IQV - has Q and I but can't play QI in TWL98.
+// CSW24 player on turn.
+#define TWO_LEXICON_CGP                                                        \
+  "cgp "                                                                       \
+  "DOBIE2ARCSINES/1FANWORT4OX1/7O3FROM/7K3L3/6VEEJAY3/11MOA1/"                 \
+  "7PIgWEEDS/5DUI3N2H/5ETUI4TI/3GUP7AL/13NY/4TItHONIA1G1/"                     \
+  "7E5L1/4RECRATE2E1/7D1ANGORA BELSTUZ/IQV 373/426 0"
+
+void test_2lex_endgame(endgame_lexicon_mode_t mode, int expected_score) {
   Config *config = config_create_or_die(
       "set -l1 TWL98 -l2 CSW24 -wmp false -s1 score -s2 score -r1 small -r2 "
       "small -threads 1 -eplies 4");
-  load_and_exec_config_or_die(config, cgp);
+  load_and_exec_config_or_die(config, TWO_LEXICON_CGP);
 
   EndgameSolver *solver = endgame_solver_create();
   Game *game = config_get_game(config);
   ErrorStack *error_stack = error_stack_create();
   EndgameResults *results = config_get_endgame_results(config);
 
-  // Test SHARED mode
   EndgameArgs args = {
       .thread_control = config_get_thread_control(config),
       .game = game,
@@ -223,63 +229,25 @@ void test_2lex_endgame_differs(const char *cgp) {
       .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
       .per_ply_callback = NULL,
       .per_ply_callback_data = NULL,
-      .lexicon_mode = ENDGAME_LEXICON_SHARED,
+      .lexicon_mode = mode,
   };
 
-  printf("\nTesting 2-lexicon endgame (SHARED mode)...\n");
   endgame_solve(solver, &args, results, error_stack);
   assert(error_stack_is_empty(error_stack));
-  int shared_score = endgame_results_get_pvline(results)->score;
-  printf("SHARED mode score: %d\n", shared_score);
-
-  // Test PER_PLAYER mode
-  args.lexicon_mode = ENDGAME_LEXICON_PER_PLAYER;
-  printf("Testing 2-lexicon endgame (PER_PLAYER mode)...\n");
-  endgame_solve(solver, &args, results, error_stack);
-  assert(error_stack_is_empty(error_stack));
-  int per_player_score = endgame_results_get_pvline(results)->score;
-  printf("PER_PLAYER mode score: %d\n", per_player_score);
-
-  // Verify the modes give different results for this test case
-  printf("SHARED=%d, PER_PLAYER=%d (should differ)\n", shared_score,
-         per_player_score);
-  assert(shared_score != per_player_score);
+  int actual_score = endgame_results_get_pvline(results)->score;
+  assert(actual_score == expected_score);
 
   error_stack_destroy(error_stack);
   endgame_solver_destroy(solver);
   config_destroy(config);
 }
 
-// Test case where SHARED and PER_PLAYER modes give different results.
-// Position from TWL98 vs CSW24 game (seed 15).
-void test_2lex_case_1(void) {
-  test_2lex_endgame_differs(
-      "cgp "
-      "1SHUTTLED6/1NO4TEArGAS1/1OW1B1Q1M2OWO1/JURAL1I1Y2BANG/1TE1EAN8/"
-      "1Y2AX2I6/2I1R3O6/1UNMITrED6/2C1E3I6/2L1R3N6/2UR4E6/2DI11/2EF11/"
-      "3FIZ1HOVE4/CONS1AGEE1APEAK IILPRST/DORV 368/398 0");
+void test_2lex_shared(void) {
+  test_2lex_endgame(ENDGAME_LEXICON_SHARED, 96);
 }
 
-// Test case where SHARED and PER_PLAYER modes give different results.
-// Position from TWL98 vs CSW24 game (seed 16).
-void test_2lex_case_2(void) {
-  test_2lex_endgame_differs(
-      "cgp "
-      "3J3MIsALLOT/1SrADDHA6H/3B5EVOE1R/5OUABAIN2E/3FAURD2V1MOW/10A1OX1/"
-      "5F4C1P2/NOYADE1TWEENY2/5E1O7/5Z1T1K5/GURLIEST1E5/E6R1G5/N1QUINTICS5/"
-      "O6N7/A6G7 EIILPRS/EIIRT 280/458 0");
-}
-
-// QI-relevant test: TWL98 player has Q+I but can't play QI.
-// Position from TWL98 vs CSW24 game (seed 1023).
-// Player 1 (TWL98) has IQV - has Q and I but can't play QI in TWL98.
-// CSW24 player on turn. SHARED=81, PER_PLAYER=96.
-void test_2lex_case_3(void) {
-  test_2lex_endgame_differs(
-      "cgp "
-      "DOBIE2ARCSINES/1FANWORT4OX1/7O3FROM/7K3L3/6VEEJAY3/11MOA1/"
-      "7PIgWEEDS/5DUI3N2H/5ETUI4TI/3GUP7AL/13NY/4TItHONIA1G1/"
-      "7E5L1/4RECRATE2E1/7D1ANGORA BELSTUZ/IQV 373/426 0");
+void test_2lex_per_player(void) {
+  test_2lex_endgame(ENDGAME_LEXICON_PER_PLAYER, 81);
 }
 
 void test_endgame(void) {
@@ -288,10 +256,9 @@ void test_endgame(void) {
   test_small_arena_realloc();
   test_pass_first();
   test_nonempty_bag();
-  // 2-lexicon endgame tests (TWL98 vs CSW24)
-  test_2lex_case_1();
-  test_2lex_case_2();
-  test_2lex_case_3(); // QI-relevant: TWL98 player has Q+I
+  // 2-lexicon endgame tests (TWL98 vs CSW24, QI-relevant)
+  test_2lex_shared();
+  test_2lex_per_player();
   //  Uncomment out more of these tests once we add more optimizations,
   //  and/or if we can run the endgame tests in release mode.
   // test_vs_joey();
