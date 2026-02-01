@@ -245,8 +245,12 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
   solver_worker->game_copy = game_duplicate(solver->game);
   game_set_endgame_solving_mode(solver_worker->game_copy);
   game_set_backup_mode(solver_worker->game_copy, BACKUP_MODE_SIMULATION);
-  // Use the pruned KWG for cross set computation in addition to move generation
-  game_set_override_kwg(solver_worker->game_copy, solver->pruned_kwg);
+  // Use the pruned KWG for cross set computation in addition to move generation.
+  // SHARED mode: both players use the same pruned KWG.
+  // For 2-lexicon endgames, PER_PLAYER mode with separate pruned KWGs would be
+  // needed.
+  game_set_override_kwgs(solver_worker->game_copy, solver->pruned_kwg,
+                         solver->pruned_kwg, ENDGAME_LEXICON_SHARED);
   solver_worker->move_list =
       move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
 

@@ -53,7 +53,8 @@ int game_get_max_scoreless_turns(const Game *game);
 bool game_reached_max_scoreless_turns(const Game *game);
 void game_increment_consecutive_scoreless_turns(Game *game);
 void game_set_endgame_solving_mode(Game *game);
-void game_set_override_kwg(Game *game, const KWG *kwg);
+void game_set_override_kwgs(Game *game, const KWG *kwg0, const KWG *kwg1,
+                            endgame_lexicon_mode_t mode);
 void game_set_game_end_reason(Game *game, game_end_reason_t game_end_reason);
 void game_start_next_player_turn(Game *game);
 
