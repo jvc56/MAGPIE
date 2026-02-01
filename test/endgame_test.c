@@ -270,6 +270,18 @@ void test_2lex_case_2(void) {
       "O6N7/A6G7 EIILPRS/EIIRT 280/458 0");
 }
 
+// QI-relevant test: TWL98 player has Q+I but can't play QI.
+// Position from TWL98 vs CSW24 game (seed 1023).
+// Player 1 (TWL98) has IQV - has Q and I but can't play QI in TWL98.
+// CSW24 player on turn. SHARED=81, PER_PLAYER=96.
+void test_2lex_case_3(void) {
+  test_2lex_endgame_differs(
+      "cgp "
+      "DOBIE2ARCSINES/1FANWORT4OX1/7O3FROM/7K3L3/6VEEJAY3/11MOA1/"
+      "7PIgWEEDS/5DUI3N2H/5ETUI4TI/3GUP7AL/13NY/4TItHONIA1G1/"
+      "7E5L1/4RECRATE2E1/7D1ANGORA BELSTUZ/IQV 373/426 0");
+}
+
 void test_endgame(void) {
   test_solve_standard();
   test_very_deep();
@@ -279,6 +291,7 @@ void test_endgame(void) {
   // 2-lexicon endgame tests (TWL98 vs CSW24)
   test_2lex_case_1();
   test_2lex_case_2();
+  test_2lex_case_3(); // QI-relevant: TWL98 player has Q+I
   //  Uncomment out more of these tests once we add more optimizations,
   //  and/or if we can run the endgame tests in release mode.
   // test_vs_joey();
