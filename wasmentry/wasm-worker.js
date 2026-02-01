@@ -44,9 +44,14 @@ let statusCheckInterval = null;
         postMessage({ type: 'log', text: text });
       },
       printErr: (text) => {
-        // Filter out harmless Emscripten exit warning with PROXY_TO_PTHREAD
+        // Filter out harmless Emscripten warnings
         if (text.includes('program exited') && text.includes('keepRuntimeAlive')) {
           postMessage({ type: 'log', text: 'Runtime initialized (ignoring harmless exit warning)' });
+          return;
+        }
+        // Filter out harmless "still waiting on run dependencies" on slower devices
+        if (text.includes('still waiting on run dependencies') || text.includes('wasm-instantiate')) {
+          postMessage({ type: 'log', text: 'WASM instantiating... (this is normal on mobile)' });
           return;
         }
         postMessage({ type: 'error', text: text });
@@ -85,8 +90,9 @@ let statusCheckInterval = null;
     postMessage({ type: 'ready' });
     postMessage({ type: 'log', text: 'Worker ready!' });
   } catch (error) {
-    const errorMsg = `Failed to initialize WASM: ${error.message}\nStack: ${error.stack}`;
+    const errorMsg = `❌ WASM INITIALIZATION FAILED\n\nError: ${error.message}\n\nThis is likely a memory issue. On mobile devices, try reducing INITIAL_MEMORY in Makefile-wasm.\n\nFull error:\n${error.stack}`;
     postMessage({ type: 'error', text: errorMsg });
+    postMessage({ type: 'init_failed', text: errorMsg });
     console.error('Worker initialization error:', error);
   }
 })();
@@ -131,27 +137,33 @@ async function handlePrecache({ filename, url }) {
     return;
   }
 
+  postMessage({ type: 'log', text: `Precaching ${filename} from ${url}...` });
+
   const filenamePtr = Module.stringToNewUTF8(filename);
 
   try {
+    postMessage({ type: 'log', text: `Fetching ${url}...` });
     const resp = await fetch(url);
+
     if (!resp.ok) {
-      throw new Error(`File not found`);
+      throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
     }
 
+    postMessage({ type: 'log', text: `Fetched ${filename}, loading into memory...` });
     const arrBuffer = new Uint8Array(await resp.arrayBuffer());
     const buf = Module._malloc(arrBuffer.length * arrBuffer.BYTES_PER_ELEMENT);
     Module.HEAPU8.set(arrBuffer, buf);
 
+    postMessage({ type: 'log', text: `Calling precache_file_data for ${filename}...` });
     precacheFileData(filenamePtr, buf, arrBuffer.length);
 
     Module._free(buf);
+    postMessage({ type: 'log', text: `✓ Precached ${filename}` });
     postMessage({ type: 'precache_complete', filename: filename });
   } catch (error) {
-    postMessage({
-      type: 'error',
-      text: `Failed to precache ${filename}: ${error.message}`,
-    });
+    const errorMsg = `Failed to precache ${filename} from ${url}: ${error.message}`;
+    postMessage({ type: 'error', text: errorMsg });
+    postMessage({ type: 'log', text: `❌ ${errorMsg}` });
   } finally {
     Module._free(filenamePtr);
   }

@@ -44,6 +44,7 @@ class CORSRequestHandler(http.server.SimpleHTTPRequestHandler):
 
 
 def main():
+    import socket
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
 
     handler = partial(CORSRequestHandler, directory="..")
@@ -51,8 +52,18 @@ def main():
     # Enable socket reuse to avoid "Address already in use" errors
     socketserver.TCPServer.allow_reuse_address = True
 
-    with socketserver.TCPServer(("", port), handler) as httpd:
+    # Get local IP for mobile access
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+    except:
+        local_ip = "unknown"
+
+    with socketserver.TCPServer(("0.0.0.0", port), handler) as httpd:
         print(f"Server running at http://localhost:{port}/")
+        print(f"Mobile access: http://{local_ip}:{port}/")
         print(f"Serving files from: .. (project root)")
         print()
         print("Headers enabled:")
@@ -60,7 +71,9 @@ def main():
         print("  ✓ Cross-Origin-Embedder-Policy: require-corp")
         print("  ✓ Access-Control-Allow-Origin: *")
         print()
-        print(f"Open http://localhost:{port}/wasmentry/test-worker.html to test")
+        print(f"Desktop: http://localhost:{port}/wasmentry/test-worker.html")
+        print(f"iPhone:  http://{local_ip}:{port}/wasmentry/test-worker.html")
+        print()
         print("Press Ctrl+C to stop")
         print()
 

@@ -133,7 +133,8 @@ void *players_data_create_data(players_data_t players_data_type,
     if (!error_stack_is_empty(error_stack)) {
       error_code_t error_code = error_stack_top(error_stack);
       if (error_code == ERROR_STATUS_FILEPATH_FILE_NOT_FOUND) {
-        log_debug("Wordmap file '%s' not found, continuing without wordmap", data_name);
+        log_debug("Wordmap file '%s' not found, continuing without wordmap",
+                  data_name);
         error_stack_reset(error_stack);
         data = NULL;
       }

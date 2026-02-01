@@ -146,6 +146,11 @@ C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/7PEW2DOE/9EF1
         outputElement.scrollTop = outputElement.scrollHeight;
       }
 
+      function appendOutput(text) {
+        outputElement.value += text + "\n";
+        outputElement.scrollTop = outputElement.scrollHeight;
+      }
+
       function clearOutput() {
         outputElement.value = "";
       }
@@ -206,6 +211,14 @@ C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/7PEW2DOE/9EF1
 
             case "log":
               console.log("[Worker]", text);
+              appendOutput(text);
+              break;
+
+            case "init_failed":
+              setStatus("WASM failed to load - see output", "error");
+              appendOutput(text);
+              submitButton.disabled = true;
+              endgameButton.disabled = true;
               break;
 
             default:
@@ -226,8 +239,10 @@ C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/7PEW2DOE/9EF1
       const sampleSelect = document.getElementById("sampleSelect");
 
       const samples = {
-        midgame: "C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/7PEW2DOE/9EF1DOR/2KUNA1J1BEVELS/3TURRETs2S2/7A4T2/7N7/7S7 EEEIILZ/ 336/298 0 -lex NWL23",
-        endgame: "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW24"
+        midgame:
+          "C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/7PEW2DOE/9EF1DOR/2KUNA1J1BEVELS/3TURRETs2S2/7A4T2/7N7/7S7 EEEIILZ/ 336/298 0 -lex NWL23",
+        endgame:
+          "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW24",
       };
 
       loadSampleButton.addEventListener("click", () => {
@@ -357,7 +372,7 @@ C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/7PEW2DOE/9EF1
           type: "run",
           data: {
             commands: [
-              `set -lex ${lexicon} -numplays 40 -hr false`,
+              `set -lex ${lexicon} -hr false -tlim 12`,
               `cgp ${cgpstring}`,
               `generate`,
               `sim -threads ${nthreads}`,
@@ -474,20 +489,22 @@ C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/7PEW2DOE/9EF1
         appendOutput(`▶ Solving endgame...\n`);
 
         // Calculate TT fraction: use max of 25% or the minimum TT size
-        // Minimum TT = 256 MB (2^24 elements × 16 bytes/element)
-        // With 512 MB WASM heap: min_fraction = 256/512 = 0.5
-        const heapSize = 512 * 1024 * 1024; // 512 MB (INITIAL_MEMORY)
-        const minTTSize = 256 * 1024 * 1024; // 256 MB minimum
+        // WASM uses 17-byte entries with 2^21 minimum (34.5 MB)
+        // With 256 MB WASM heap: min_fraction = 34.5/256 ≈ 0.135
+        const heapSize = 256 * 1024 * 1024; // 256 MB (INITIAL_MEMORY)
+        const minTTSize = 34.5 * 1024 * 1024; // 34.5 MB minimum (2^21 × 17 bytes)
         const minFraction = minTTSize / heapSize;
         const ttMemFraction = Math.max(0.25, minFraction);
 
-        appendOutput(`Using TT fraction: ${ttMemFraction.toFixed(2)} (${(ttMemFraction * 100).toFixed(0)}%)\n`);
+        appendOutput(
+          `Using TT fraction: ${ttMemFraction.toFixed(2)} (${(ttMemFraction * 100).toFixed(0)}%)\n`,
+        );
 
         magpieWorker.postMessage({
           type: "run",
           data: {
             commands: [
-              `set -lex ${lexicon} -ttfraction ${ttMemFraction}`,
+              `set -lex ${lexicon} -ttfraction ${ttMemFraction} -eplies 7`,
               `cgp ${cgpstring}`,
               `endgame`,
             ],
