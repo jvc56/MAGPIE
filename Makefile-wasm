@@ -2,9 +2,11 @@ SRC_DIR := src
 TEST_DIR := test
 CMD_DIR := wasmentry
 OBJ_DIR := obj
-BIN_DIR := bin
+BIN_DIR := wasmentry
 
-SRC := $(wildcard $(SRC_DIR)/*.c)
+SRC := $(wildcard $(SRC_DIR)/**/*.c)
+SRC_SUBDIRS := $(shell find $(SRC_DIR) -type d)
+SRC_OBJ_SUBDIRS := $(patsubst $(SRC_DIR)/%,$(OBJ_DIR)/$(SRC_DIR)/%,$(SRC_SUBDIRS))
 CMD := $(wildcard $(CMD_DIR)/*.c)
 OBJ_SRC := $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/$(SRC_DIR)/%.o)
 OBJ_CMD := $(CMD:$(CMD_DIR)/%.c=$(OBJ_DIR)/$(CMD_DIR)/%.o)
@@ -14,12 +16,16 @@ ldflags.release := -Llib -pthread
 
 # $\ trick to turn backslash-newline-whitespace into an empty string
 
-lflags.shell := -s EXPORTED_RUNTIME_METHODS=["cwrap","stringToNewUTF8","UTF8ToString"] \
+lflags.shell := -s EXPORTED_RUNTIME_METHODS=["cwrap","stringToNewUTF8","UTF8ToString","PThread","HEAPU8"] \
 	-s EXPORTED_FUNCTIONS=_free,_main,_malloc,_precache_file_data,$\
-	_process_ucgi_command_wasm,_score_play,_destroy_cache,_ucgi_search_status_wasm,$\
-	_ucgi_stop_search_wasm,_static_evaluation\
-	-sPTHREAD_POOL_SIZE="navigator.hardwareConcurrency + 3"\
-	-s ALLOW_BLOCKING_ON_MAIN_THREAD=0 
+	_wasm_magpie_init,_wasm_magpie_destroy,_wasm_run_command,_wasm_run_command_async,$\
+	_wasm_get_output,_wasm_get_error,_wasm_get_status,_wasm_get_thread_status,_wasm_stop_command\
+	-sPTHREAD_POOL_SIZE="navigator.hardwareConcurrency + 3" \
+	-sPTHREAD_POOL_SIZE_STRICT=0 \
+	-s ALLOW_BLOCKING_ON_MAIN_THREAD=1 \
+	-sEXIT_RUNTIME=0 \
+	-sSTACK_SIZE=2MB \
+	-sDEFAULT_PTHREAD_STACK_SIZE=2MB 
 lflags.release := ${lflags.shell} -s MODULARIZE=1 --closure 1 -sEXPORT_NAME="MAGPIE" -s ENVIRONMENT='web,worker'
 
 LDLIBS := -lm
@@ -30,20 +36,15 @@ all: magpie_wasm
 
 magpie_wasm: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
 	emcc $(ldflags.release) $(lflags.release) $^ $(LDLIBS) -o $(BIN_DIR)/$@.mjs \
-	-s INITIAL_MEMORY=128MB
+	-s INITIAL_MEMORY=256MB
 
-magpie_shell: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
-	emcc $(ldflags.release) $(lflags.shell) $^ $(LDLIBS) -o $(BIN_DIR)/$@.html \
-	-s INITIAL_MEMORY=128MB \
-	--shell-file wasm_shell.html
-
-$(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR)
+$(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(SRC_OBJ_SUBDIRS)
 	emcc $(cflags.release) -c $< -o $@
 
 $(OBJ_DIR)/$(CMD_DIR)/%.o: $(CMD_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(CMD_DIR)
 	emcc $(cflags.release) -c $< -o $@
 
-$(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR):
+$(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(SRC_OBJ_SUBDIRS):
 	mkdir -p $@
 
 clean:

@@ -8,7 +8,9 @@
 #include "../util/io_util.h"
 
 // Platform-specific includes
-#if defined(_WIN32) || defined(_WIN64)
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#elif defined(_WIN32) || defined(_WIN64)
 #include <windows.h>
 #elif defined(__APPLE__) || defined(__MACH__)
 #include <sys/param.h>
@@ -23,7 +25,14 @@
 static inline uint64_t get_total_memory(void) {
   uint64_t total_memory = 0;
 
-#if defined(_WIN32) || defined(_WIN64)
+#if defined(__EMSCRIPTEN__)
+  // WASM/Emscripten implementation
+  // Return the heap size via EM_ASM
+  total_memory = EM_ASM_INT({
+    return HEAP8.length;
+  });
+
+#elif defined(_WIN32) || defined(_WIN64)
   // Windows implementation
   MEMORYSTATUSEX statex;
   statex.dwLength = sizeof(statex);
@@ -88,7 +97,16 @@ static inline uint64_t get_total_memory(void) {
 static inline int get_num_cores(void) {
   int core_count = 1; // Default fallback value
 
-#if defined(_WIN32) || defined(_WIN64)
+#if defined(__EMSCRIPTEN__)
+  // WASM/Emscripten: Use navigator.hardwareConcurrency via JS
+  // For now, return a reasonable default
+  core_count = EM_ASM_INT({
+    return (typeof navigator !== 'undefined' && navigator.hardwareConcurrency)
+           ? navigator.hardwareConcurrency
+           : 4;
+  });
+
+#elif defined(_WIN32) || defined(_WIN64)
                       // === Implementation for Windows ===
   SYSTEM_INFO sys_info;
   GetSystemInfo(&sys_info);

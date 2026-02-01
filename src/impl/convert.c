@@ -12,6 +12,7 @@
 #include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/wmp.h"
+#include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "kwg_maker.h"
@@ -33,7 +34,7 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
     return;
   }
 
-  FILE *input_file = fopen_safe(input_filename, "r", error_stack);
+  FILE *input_file = stream_from_filename(input_filename, error_stack);
   free(input_filename);
   if (!error_stack_is_empty(error_stack)) {
     return;

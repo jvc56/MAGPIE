@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 enum {
   MAX_CACHE_SIZE = 32,
@@ -57,4 +58,15 @@ void fileproxy_destroy_cache(void) {
     free(file_cache.entries[i].raw_data);
   }
   file_cache.num_items = 0;
+}
+
+bool fileproxy_file_exists(const char *filename) {
+  // Check cache first
+  for (int i = 0; i < file_cache.num_items; i++) {
+    if (strings_equal(file_cache.entries[i].filename, filename)) {
+      return true;
+    }
+  }
+  // Fall back to filesystem check
+  return access(filename, F_OK | R_OK) == 0;
 }
