@@ -30,4 +30,14 @@ typedef enum {
   NUMBER_OF_GAME_END_REASONS,
 } game_end_reason_t;
 
+// Mode for cross set computation with overridden KWGs.
+// SHARED: Both players use the same KWG (e.g., single pruned KWG in endgame).
+//         Each player assumes the opponent knows their lexicon.
+// PER_PLAYER: Each player uses their own KWG (potentially different pruned KWGs).
+//             Each player knows what words the opponent can actually play.
+typedef enum {
+  ENDGAME_LEXICON_SHARED,
+  ENDGAME_LEXICON_PER_PLAYER,
+} endgame_lexicon_mode_t;
+
 #endif

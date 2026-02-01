@@ -61,6 +61,14 @@ struct Game {
   int backup_cursor;
   MinimalGameBackup *gcg_game_backup;
   backup_mode_t backup_mode;
+
+  // Optional override KWGs for cross set generation (used in endgame).
+  // When non-NULL, cross set generation uses these KWGs instead of player KWGs.
+  // In SHARED mode, both indices use override_kwgs[0].
+  // In PER_PLAYER mode, each player uses their own override_kwgs[player_index].
+  // Owned by the caller.
+  const KWG *override_kwgs[2];
+  endgame_lexicon_mode_t endgame_lexicon_mode;
 };
 
 game_variant_t game_get_variant(const Game *game) { return game->variant; }
@@ -149,6 +157,13 @@ void game_set_endgame_solving_mode(Game *game) {
   game->max_scoreless_turns = 2;
 }
 
+void game_set_override_kwgs(Game *game, const KWG *kwg0, const KWG *kwg1,
+                            endgame_lexicon_mode_t mode) {
+  game->override_kwgs[0] = kwg0;
+  game->override_kwgs[1] = kwg1;
+  game->endgame_lexicon_mode = mode;
+}
+
 void game_start_next_player_turn(Game *game) {
   game->player_on_turn_index = 1 - game->player_on_turn_index;
 }
@@ -199,6 +214,22 @@ static inline uint32_t traverse_backwards(const KWG *kwg, const Board *board,
   }
 
   return node_index;
+}
+
+// Returns the KWG to use for cross set generation.
+// Uses override_kwgs if set, otherwise uses player KWG.
+// In SHARED mode, both players use override_kwgs[0].
+// In PER_PLAYER mode, each player uses their own override_kwgs[cross_set_index].
+static inline const KWG *get_kwg_for_cross_set(const Game *game,
+                                               int cross_set_index) {
+  if (game->override_kwgs[0] != NULL) {
+    if (game->endgame_lexicon_mode == ENDGAME_LEXICON_SHARED) {
+      return game->override_kwgs[0];
+    }
+    // PER_PLAYER mode: use each player's own override KWG
+    return game->override_kwgs[cross_set_index];
+  }
+  return player_get_kwg(game_get_player(game, cross_set_index));
 }
 
 static inline void traverse_backwards_add_to_rack(const Board *board, int row,
@@ -253,7 +284,7 @@ static inline void game_gen_alpha_cross_set(const Game *game, int row, int col,
     score += traverse_backwards_for_score(board, ld, row, right_col);
   }
 
-  const KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
+  const KWG *kwg = get_kwg_for_cross_set(game, cross_set_index);
 
   board_set_cross_set_with_blank(
       board, row, col, dir, cross_set_index,
@@ -282,7 +313,7 @@ static inline void game_gen_classic_cross_set(const Game *game, int row,
     return;
   }
 
-  const KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
+  const KWG *kwg = get_kwg_for_cross_set(game, cross_set_index);
   const uint32_t kwg_root = kwg_get_root_node_index(kwg);
   const LetterDistribution *ld = game_get_ld(game);
 
@@ -524,6 +555,9 @@ Game *game_create(const GameArgs *game_args) {
   game->backup_cursor = 0;
   game->backup_mode = BACKUP_MODE_OFF;
   game->gcg_game_backup = NULL;
+  game->override_kwgs[0] = NULL;
+  game->override_kwgs[1] = NULL;
+  game->endgame_lexicon_mode = ENDGAME_LEXICON_SHARED;
   return game;
 }
 
@@ -557,6 +591,11 @@ Game *game_duplicate(const Game *game) {
   new_game->backup_cursor = 0;
   new_game->backup_mode = BACKUP_MODE_OFF;
   new_game->gcg_game_backup = NULL;
+  // Copy override_kwgs so that duplicated games used in endgame inherit the
+  // pruned KWGs.
+  new_game->override_kwgs[0] = game->override_kwgs[0];
+  new_game->override_kwgs[1] = game->override_kwgs[1];
+  new_game->endgame_lexicon_mode = game->endgame_lexicon_mode;
   return new_game;
 }
 
@@ -580,6 +619,9 @@ void game_copy(Game *dst, const Game *src) {
   dst->variant = src->variant;
   dst->backup_cursor = 0;
   dst->backup_mode = BACKUP_MODE_OFF;
+  dst->override_kwgs[0] = src->override_kwgs[0];
+  dst->override_kwgs[1] = src->override_kwgs[1];
+  dst->endgame_lexicon_mode = src->endgame_lexicon_mode;
 }
 
 // Backups do not restore the move list or
