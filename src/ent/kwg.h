@@ -180,7 +180,7 @@ static inline void kwg_write_to_file(const KWG *kwg, const char *filename,
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#if IS_LITTLE_ENDIAN
   // On little-endian systems, write the entire array at once
   fwrite_or_die(kwg->nodes, sizeof(uint32_t), kwg->number_of_nodes, stream,
                 "kwg nodes");
