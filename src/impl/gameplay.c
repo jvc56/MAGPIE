@@ -897,6 +897,23 @@ Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
   return move_list_get_move(move_list, 0);
 }
 
+Move *get_top_equity_move_with_kwg_override(Game *game, int thread_index,
+                                            MoveList *move_list,
+                                            const KWG *override_kwg) {
+  const MoveGenArgs args = {.game = game,
+                            .move_list = move_list,
+                            .move_record_type = MOVE_RECORD_BEST,
+                            .move_sort_type = MOVE_SORT_EQUITY,
+                            .override_kwg = override_kwg,
+                            .thread_index = thread_index,
+                            .eq_margin_movegen = 0,
+                            .target_equity = EQUITY_MAX_VALUE,
+                            .target_leave_size_for_exchange_cutoff =
+                                UNSET_LEAVE_SIZE};
+  generate_moves(&args);
+  return move_list_get_move(move_list, 0);
+}
+
 Move *get_top_equity_move_for_inferences(
     Game *game, int thread_index, MoveList *move_list, Equity target_equity,
     int target_leave_size_for_exchange_cutoff, Equity equity_margin) {

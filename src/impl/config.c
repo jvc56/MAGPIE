@@ -231,6 +231,7 @@ struct Config {
   bai_sampling_rule_t sampling_rule;
   bai_threshold_t threshold;
   game_variant_t game_variant;
+  dual_lexicon_mode_t dual_lexicon_mode;
   WinPct *win_pcts;
   BoardLayout *board_layout;
   LetterDistribution *ld;
@@ -2026,7 +2027,8 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->print_interval, config->max_num_display_plays, config->seed,
       config->max_iterations, config->min_play_iterations,
       config->stop_cond_pct, config->threshold, (int)config->time_limit_seconds,
-      config->sampling_rule, config->cutoff, &inference_args, sim_args);
+      config->sampling_rule, config->cutoff, &inference_args,
+      config->dual_lexicon_mode, sim_args);
 }
 
 void config_simulate(const Config *config, SimCtx **sim_ctx,
@@ -5825,6 +5827,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->autosave_gcg = true;
   config->loaded_settings = true;
   config->game_variant = DEFAULT_GAME_VARIANT;
+  config->dual_lexicon_mode = DUAL_LEXICON_MODE_INFORMED;
   config->ld = NULL;
   config->players_data = players_data_create();
   config->thread_control = thread_control_create();

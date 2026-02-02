@@ -329,6 +329,9 @@ typedef struct Simmer {
   int max_num_display_plays;
   ThreadControl *thread_control;
   SimResults *sim_results;
+  dual_lexicon_mode_t dual_lexicon_mode;
+  // KWG of the initial player (used in IGNORANT mode to override opponent moves)
+  const KWG *initial_player_kwg;
 } Simmer;
 
 SimmerWorker *simmer_create_worker(const Game *game) {
@@ -411,7 +414,17 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       break;
     }
 
-    const Move *best_play = get_top_equity_move(game, thread_index, move_list);
+    // In IGNORANT mode, when opponent is on turn, use the initial player's KWG
+    // so opponent "plays dumb" - doesn't exploit lexicon-specific words.
+    // In INFORMED mode, opponent uses their actual KWG.
+    const Move *best_play;
+    if (simmer->dual_lexicon_mode == DUAL_LEXICON_MODE_IGNORANT &&
+        player_on_turn_index != simmer->initial_player) {
+      best_play = get_top_equity_move_with_kwg_override(
+          game, thread_index, move_list, simmer->initial_player_kwg);
+    } else {
+      best_play = get_top_equity_move(game, thread_index, move_list);
+    }
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
     play_move(best_play, game, NULL);
@@ -520,6 +533,10 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
 
   simmer->thread_control = thread_control;
 
+  // Store dual-lexicon mode and initial player's KWG for IGNORANT mode
+  simmer->dual_lexicon_mode = sim_args->dual_lexicon_mode;
+  simmer->initial_player_kwg = player_get_kwg(player);
+
   sim_results_reset(sim_args->move_list, sim_results, sim_args->num_plies,
                     sim_args->seed, sim_args->use_heat_map);
   simmer->sim_results = sim_results;
@@ -565,6 +582,10 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->use_alias_method =
       simmer->use_inference &&
       (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));
+
+  // Update dual-lexicon mode and initial player's KWG
+  simmer->dual_lexicon_mode = sim_args->dual_lexicon_mode;
+  simmer->initial_player_kwg = player_get_kwg(player);
 
   sim_results_reset(sim_args->move_list, simmer->sim_results,
                     sim_args->num_plies, sim_args->seed,

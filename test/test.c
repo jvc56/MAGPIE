@@ -18,6 +18,7 @@
 #include "convert_test.h"
 #include "create_data_test.h"
 #include "cross_set_test.h"
+#include "dual_lexicon_test.h"
 #include "endgame_test.h"
 #include "equity_adjustment_test.h"
 #include "equity_test.h"
@@ -125,6 +126,7 @@ static TestEntry test_table[] = {
 static TestEntry on_demand_test_table[] = {
     {"infercmp", test_infer_cmp},
     {"benchend", test_benchmark_endgame},
+    {"duallex", test_dual_lexicon},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
