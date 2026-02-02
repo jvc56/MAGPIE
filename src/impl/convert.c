@@ -38,24 +38,29 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+
+  // Initialize fast converter once for O(1) ASCII lookups
+  FastStringConverter fc;
+  fast_converter_init(&fc, ld);
+
   char *line = NULL;
   size_t len = 0;
   ssize_t read;
+  // Stack buffer avoids malloc/free per word (words are at most BOARD_DIM)
+  MachineLetter mls[BOARD_DIM + 1];
   while ((read = getline_ignore_carriage_return(&line, &len, input_file)) !=
          -1) {
     if (read > 0 && line[read - 1] == '\n') {
       line[read - 1] = '\0';
     }
-    const size_t line_length = string_length(line);
-    MachineLetter *mls = malloc_or_die(line_length);
-    const int mls_length = ld_str_to_mls(ld, line, false, mls, line_length);
+    const int mls_length =
+        fast_str_to_mls(&fc, line, false, mls, BOARD_DIM + 1);
     if (mls_length > BOARD_DIM) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONVERT_TEXT_CONTAINS_WORD_TOO_LONG,
           get_formatted_string(
               "could not convert word '%s' with a length greater than %d", line,
               mls_length));
-      free(mls);
       break;
     }
     if (mls_length < 0) {
@@ -63,7 +68,6 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
           error_stack, ERROR_STATUS_CONVERT_TEXT_CONTAINS_INVALID_LETTER,
           get_formatted_string(
               "could not convert word '%s' with invalid letter", line));
-      free(mls);
       break;
     }
     if (!unblank_machine_letters(mls, mls_length)) {
@@ -71,7 +75,6 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
           error_stack, ERROR_STATUS_CONVERT_TEXT_CONTAINS_INVALID_LETTER,
           get_formatted_string(
               "could not convert word '%s' with invalid letter", line));
-      free(mls);
       break;
     }
     if (mls_length < 2) {
@@ -79,11 +82,9 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
           error_stack, ERROR_STATUS_CONVERT_TEXT_CONTAINS_WORD_TOO_SHORT,
           get_formatted_string("could not convert word less than length 2: %s",
                                line));
-      free(mls);
       break;
     }
     dictionary_word_list_add_word(strings, mls, mls_length);
-    free(mls);
   }
   if (line != NULL) {
     free(line);

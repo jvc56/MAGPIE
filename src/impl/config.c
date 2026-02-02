@@ -2067,6 +2067,24 @@ void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
     return;
   }
 
+  // Lazy load win_pcts if not already loaded
+  if (config->win_pcts == NULL) {
+    const char *win_pct_name =
+        config_get_parg_value(config, ARG_TOKEN_WIN_PCT, 0);
+    if (win_pct_name == NULL) {
+      win_pct_name = DEFAULT_WIN_PCT;
+    }
+    config->win_pcts =
+        win_pct_create(config->data_paths, win_pct_name, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_WIN_PCT_ERROR,
+          string_duplicate(
+              "encountered an error loading the win percentage file"));
+      return;
+    }
+  }
+
   config_init_game(config);
 
   const int ld_size = ld_get_size(game_get_ld(config->game));
@@ -5391,11 +5409,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   // Update the game history
   update_game_history_with_config(config);
 
-  // Set win pct
+  // Set win pct - only reload if already loaded and name changed
+  // (lazy loading happens in impl_sim when actually needed)
 
   const char *new_win_pct_name =
       config_get_parg_value(config, ARG_TOKEN_WIN_PCT, 0);
-  if (new_win_pct_name &&
+  if (new_win_pct_name && config->win_pcts != NULL &&
       !strings_equal(win_pct_get_name(config->win_pcts), new_win_pct_name)) {
     win_pct_destroy(config->win_pcts);
     config->win_pcts =
@@ -5653,15 +5672,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
     return NULL;
   }
 
-  config->win_pcts =
-      win_pct_create(config->data_paths, DEFAULT_WIN_PCT, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_WIN_PCT_ERROR,
-        string_duplicate(
-            "encountered an error loading the default win percentage file"));
-    return NULL;
-  }
+  // win_pcts is loaded lazily on first use (simulation, etc.)
+  config->win_pcts = NULL;
 
   // Command parsed from string input
 #define cmd(token, name, n_req, n_val, func, stat, hotkey)                     \
@@ -6056,7 +6068,9 @@ void config_add_settings_to_string_builder(const Config *config,
       break;
     case ARG_TOKEN_WIN_PCT:
       config_add_string_setting_to_string_builder(
-          config, sb, arg_token, win_pct_get_name(config->win_pcts));
+          config, sb, arg_token,
+          config->win_pcts ? win_pct_get_name(config->win_pcts)
+                           : DEFAULT_WIN_PCT);
       break;
     case ARG_TOKEN_PLIES:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
