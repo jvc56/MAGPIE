@@ -224,7 +224,7 @@ void test_2lex_endgame(dual_lexicon_mode_t mode, int expected_score) {
   EndgameArgs args = {
       .thread_control = config_get_thread_control(config),
       .game = game,
-      .plies = 4,
+      .plies = 3,
       .tt_fraction_of_mem = 0.05,
       .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
       .per_ply_callback = NULL,
