@@ -160,7 +160,9 @@ char *cross_set_to_string(const LetterDistribution *ld, uint64_t input) {
   StringBuilder *css_builder = string_builder_create();
   for (int i = 0; i < MAX_ALPHABET_SIZE; ++i) {
     if (input & ((uint64_t)1 << i)) {
-      string_builder_add_string(css_builder, ld_ml_to_hl(ld, i));
+      char *letter = ld_ml_to_hl(ld, i);
+      string_builder_add_string(css_builder, letter);
+      free(letter);
     }
   }
   char *result = string_builder_dump(css_builder, NULL);

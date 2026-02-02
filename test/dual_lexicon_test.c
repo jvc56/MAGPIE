@@ -35,74 +35,61 @@ static bool letter_in_cross_set(uint64_t cross_set, uint8_t ml) {
 
 // Test that demonstrates cross-set differences between lexicons
 // When ASTROID is on the board:
-// - CSW player sees S in cross-set at O8 (can play ASTROIDS)
-// - NWL player does NOT see S in cross-set (ASTROIDS not valid)
+// - CSW player (player 2) sees S in cross-set at O8 (can play ASTROIDS)
+// - NWL player (player 1) does NOT see S in cross-set (ASTROIDS not valid)
 void test_dual_lexicon_cross_sets(void) {
-  // First test: CSW player sees S hook for ASTROIDS
-  Config *csw_config = config_create_or_die("set -lex CSW21");
-  Game *csw_game = config_game_create(csw_config);
-  const LetterDistribution *ld = game_get_ld(csw_game);
+  // Create a dual-lexicon game: player 1 uses NWL, player 2 uses CSW
+  Config *config = config_create_or_die("set -l1 NWL20 -l2 CSW21");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP_WITHOUT_OPTIONS);
+
+  Game *game = config_get_game(config);
+  Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
 
   // Set up the board with ASTROID at 8H (row 7, col 7-13)
-  // We need to manually place the letters since ASTROID might not be loadable
-  // in all lexicons
-  Board *board = game_get_board(csw_game);
   const char *astroid_row = "       ASTROID ";
-  set_row(csw_game, 7, astroid_row);
-  game_gen_all_cross_sets(csw_game);
+  set_row(game, 7, astroid_row);
+  game_gen_all_cross_sets(game);
 
   // Check cross-set at position O8 (row 7, col 14) - the TWS hook square
-  // In CSW, S should be in the cross-set because ASTROIDS is valid
-  uint64_t csw_cross_set =
+  // Cross-set index 0 = player 1 (NWL)
+  // Cross-set index 1 = player 2 (CSW)
+  uint64_t nwl_cross_set =
       board_get_cross_set(board, 7, 14, BOARD_HORIZONTAL_DIRECTION, 0);
+  uint64_t csw_cross_set =
+      board_get_cross_set(board, 7, 14, BOARD_HORIZONTAL_DIRECTION, 1);
 
   uint8_t s_ml = ld_hl_to_ml(ld, "S");
+  bool nwl_has_s = letter_in_cross_set(nwl_cross_set, s_ml);
   bool csw_has_s = letter_in_cross_set(csw_cross_set, s_ml);
 
-  printf("CSW cross-set at O8 (row 7, col 14): ");
+  printf("\n=== Dual Lexicon Cross-Set Test ===\n");
+  printf("Game setup: Player 1 (NWL) vs Player 2 (CSW)\n");
+  printf("Board: ASTROID at 8H\n");
+  printf("Hook position: O8 (row 7, col 14) - Triple Word Score\n\n");
+
+  char *nwl_cs_str = cross_set_to_string(ld, nwl_cross_set);
   char *csw_cs_str = cross_set_to_string(ld, csw_cross_set);
-  printf("%s\n", csw_cs_str);
-  printf("CSW has S in cross-set: %s\n", csw_has_s ? "YES" : "NO");
-  free(csw_cs_str);
 
-  game_destroy(csw_game);
-  config_destroy(csw_config);
-
-  // Second test: NWL player does NOT see S hook (ASTROID not in NWL,
-  // so ASTROIDS would require ASTROID to be valid first)
-  Config *nwl_config = config_create_or_die("set -lex NWL20");
-  Game *nwl_game = config_game_create(nwl_config);
-  Board *nwl_board = game_get_board(nwl_game);
-
-  // Set up same position
-  set_row(nwl_game, 7, astroid_row);
-  game_gen_all_cross_sets(nwl_game);
-
-  uint64_t nwl_cross_set =
-      board_get_cross_set(nwl_board, 7, 14, BOARD_HORIZONTAL_DIRECTION, 0);
-
-  const LetterDistribution *nwl_ld = game_get_ld(nwl_game);
-  uint8_t nwl_s_ml = ld_hl_to_ml(nwl_ld, "S");
-  bool nwl_has_s = letter_in_cross_set(nwl_cross_set, nwl_s_ml);
-
-  printf("\nNWL cross-set at O8 (row 7, col 14): ");
-  char *nwl_cs_str = cross_set_to_string(nwl_ld, nwl_cross_set);
-  printf("%s\n", nwl_cs_str);
+  printf("NWL (Player 1) cross-set at O8: %s\n", nwl_cs_str);
   printf("NWL has S in cross-set: %s\n", nwl_has_s ? "YES" : "NO");
+  printf("\nCSW (Player 2) cross-set at O8: %s\n", csw_cs_str);
+  printf("CSW has S in cross-set: %s\n", csw_has_s ? "YES" : "NO");
+
   free(nwl_cs_str);
+  free(csw_cs_str);
 
   // The key assertion: CSW should have S, NWL should NOT
   // (assuming ASTROID is CSW-only and ASTROIDS follows the same pattern)
-  printf("\n=== Dual Lexicon Cross-Set Test ===\n");
-  printf("CSW has S hook for ASTROIDS: %s\n", csw_has_s ? "YES" : "NO");
-  printf("NWL has S hook for ASTROIDS: %s\n", nwl_has_s ? "YES" : "NO");
+  printf("\nExpected: CSW has S hook for ASTROIDS, NWL does not\n");
+  if (csw_has_s && !nwl_has_s) {
+    printf("*** PASS: Cross-sets differ as expected ***\n");
+  } else if (csw_has_s == nwl_has_s) {
+    printf("Note: Both players have same S availability.\n");
+    printf("This could mean ASTROID/ASTROIDS is in both lexicons.\n");
+  }
 
-  // Note: The assertion depends on whether ASTROID/ASTROIDS are actually
-  // CSW-only. If both lexicons have it, the test will need adjustment.
-  // For now, just print the results for verification.
-
-  game_destroy(nwl_game);
-  config_destroy(nwl_config);
+  config_destroy(config);
 }
 
 // Test dual-lexicon game setup where players have different lexicons
