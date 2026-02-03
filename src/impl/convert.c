@@ -52,17 +52,19 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
          -1) {
     if (read > 0 && line[read - 1] == '\n') {
       line[read - 1] = '\0';
+      read--;
     }
-    const int mls_length =
-        fast_str_to_mls(&fc, line, false, mls, BOARD_DIM + 1);
-    if (mls_length > BOARD_DIM) {
+    // Check length before conversion to distinguish "too long" from "invalid"
+    if (read > BOARD_DIM) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONVERT_TEXT_CONTAINS_WORD_TOO_LONG,
           get_formatted_string(
               "could not convert word '%s' with a length greater than %d", line,
-              mls_length));
+              BOARD_DIM));
       break;
     }
+    const int mls_length =
+        fast_str_to_mls(&fc, line, false, mls, BOARD_DIM + 1);
     if (mls_length < 0) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONVERT_TEXT_CONTAINS_INVALID_LETTER,

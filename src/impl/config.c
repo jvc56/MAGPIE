@@ -5408,18 +5408,20 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   // Update the game history
   update_game_history_with_config(config);
 
-  // Set win pct - only reload if already loaded and name changed
-  // (lazy loading happens in impl_sim when actually needed)
-
+  // Set win pct - load if explicitly specified and either not loaded yet
+  // or if name changed. Lazy loading happens in impl_sim when needed for
+  // simulations that don't specify a win_pct explicitly.
   const char *new_win_pct_name =
       config_get_parg_value(config, ARG_TOKEN_WIN_PCT, 0);
-  if (new_win_pct_name && config->win_pcts != NULL &&
-      !strings_equal(win_pct_get_name(config->win_pcts), new_win_pct_name)) {
-    win_pct_destroy(config->win_pcts);
-    config->win_pcts =
-        win_pct_create(config->data_paths, new_win_pct_name, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
+  if (new_win_pct_name != NULL) {
+    if (config->win_pcts == NULL ||
+        !strings_equal(win_pct_get_name(config->win_pcts), new_win_pct_name)) {
+      win_pct_destroy(config->win_pcts);
+      config->win_pcts =
+          win_pct_create(config->data_paths, new_win_pct_name, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
     }
   }
 }
