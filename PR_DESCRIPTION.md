@@ -6,13 +6,12 @@ This PR significantly improves KWG (DAWG/GADDAG) building performance, achieving
 
 ## Benchmark Results
 
-### KWG Conversion (text2kwg CSW24 - 280,887 words)
+### KWG Maker Tests (kwgmaker test suite)
 
 | Version | Time | Speedup |
 |---------|------|---------|
-| Before optimization | ~0.54-0.56s | baseline |
-| After optimization | ~0.40-0.44s | **1.3x faster** |
-| wolges (Rust reference) | ~0.39-0.40s | target |
+| main branch | 1.70s | baseline |
+| optimized | 0.85s | **2.0x faster** |
 
 ### Endgame Solver Impact (1000 games, 1-ply)
 
