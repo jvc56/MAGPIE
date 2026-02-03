@@ -2029,9 +2029,26 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->sampling_rule, config->cutoff, &inference_args, sim_args);
 }
 
-void config_simulate(const Config *config, SimCtx **sim_ctx,
-                     Rack *known_opp_rack, SimResults *sim_results,
-                     ErrorStack *error_stack) {
+void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
+                     SimResults *sim_results, ErrorStack *error_stack) {
+  // Lazy load win_pcts if not already loaded
+  if (config->win_pcts == NULL) {
+    const char *win_pct_name =
+        config_get_parg_value(config, ARG_TOKEN_WIN_PCT, 0);
+    if (win_pct_name == NULL) {
+      win_pct_name = DEFAULT_WIN_PCT;
+    }
+    config->win_pcts =
+        win_pct_create(config->data_paths, win_pct_name, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_WIN_PCT_ERROR,
+          string_duplicate(
+              "encountered an error loading the win percentage file"));
+      return;
+    }
+  }
+
   SimArgs args;
   const int ld_size = ld_get_size(game_get_ld(config->game));
   Rack target_played_tiles;
@@ -2065,24 +2082,6 @@ void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
                      string_duplicate("cannot simulate without lexicon"));
     return;
-  }
-
-  // Lazy load win_pcts if not already loaded
-  if (config->win_pcts == NULL) {
-    const char *win_pct_name =
-        config_get_parg_value(config, ARG_TOKEN_WIN_PCT, 0);
-    if (win_pct_name == NULL) {
-      win_pct_name = DEFAULT_WIN_PCT;
-    }
-    config->win_pcts =
-        win_pct_create(config->data_paths, win_pct_name, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_CONFIG_LOAD_WIN_PCT_ERROR,
-          string_duplicate(
-              "encountered an error loading the win percentage file"));
-      return;
-    }
   }
 
   config_init_game(config);

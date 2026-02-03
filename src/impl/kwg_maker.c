@@ -28,9 +28,9 @@
 // Uses sibling chains instead of child arrays
 typedef struct State {
   uint8_t tile;
-  uint8_t accepts;       // bool stored as uint8_t for packing
-  uint32_t arc_index;    // Index of first child state (0 = no children)
-  uint32_t next_index;   // Index of next sibling state (0 = last sibling)
+  uint8_t accepts;     // bool stored as uint8_t for packing
+  uint32_t arc_index;  // Index of first child state (0 = no children)
+  uint32_t next_index; // Index of next sibling state (0 = last sibling)
 } State;
 
 // Transition: temporary structure used during tree construction
@@ -38,7 +38,7 @@ typedef struct State {
 typedef struct Transition {
   uint8_t tile;
   uint8_t accepts;
-  uint32_t arc_index;  // Filled when children are finalized
+  uint32_t arc_index; // Filled when children are finalized
 } Transition;
 
 // Growable list of states
@@ -60,8 +60,9 @@ typedef struct StateHashTable {
 // Transition stack for building the trie
 typedef struct TransitionStack {
   Transition *transitions;
-  size_t *depth_markers;    // Stack of indices marking where each depth starts
-  uint32_t *sibling_heads;  // Head of sibling chain at each depth (from previous pops)
+  size_t *depth_markers; // Stack of indices marking where each depth starts
+  uint32_t *
+      sibling_heads; // Head of sibling chain at each depth (from previous pops)
   size_t trans_count;
   size_t trans_capacity;
   size_t depth;
@@ -158,12 +159,10 @@ static inline bool state_equals(const State *a, const State *b) {
 // Find or insert a state, returning its index
 // If an equivalent state exists, returns its index
 // Otherwise adds the state and returns its new index
-static inline uint32_t state_hash_table_find_or_insert(StateHashTable *table,
-                                                       StateList *list,
-                                                       uint8_t tile,
-                                                       uint8_t accepts,
-                                                       uint32_t arc_index,
-                                                       uint32_t next_index) {
+static inline uint32_t
+state_hash_table_find_or_insert(StateHashTable *table, StateList *list,
+                                uint8_t tile, uint8_t accepts,
+                                uint32_t arc_index, uint32_t next_index) {
   State candidate = {tile, accepts, arc_index, next_index};
   uint64_t h = state_hash(&candidate);
   size_t bucket = h % table->num_buckets;
@@ -241,7 +240,8 @@ static inline void transition_stack_push(TransitionStack *stack, uint8_t tile) {
 static inline uint32_t transition_stack_pop(TransitionStack *stack,
                                             StateList *states,
                                             StateHashTable *table) {
-  // Get the existing sibling chain at this level (from previous pops under same parent)
+  // Get the existing sibling chain at this level (from previous pops under same
+  // parent)
   size_t popping_depth = stack->depth;
   uint32_t next_index = stack->sibling_heads[popping_depth];
 
@@ -251,9 +251,8 @@ static inline uint32_t transition_stack_pop(TransitionStack *stack,
   // Create states in reverse order, linking to existing siblings
   for (size_t i = stack->trans_count; i > start; i--) {
     Transition *t = &stack->transitions[i - 1];
-    next_index = state_hash_table_find_or_insert(table, states, t->tile,
-                                                 t->accepts, t->arc_index,
-                                                 next_index);
+    next_index = state_hash_table_find_or_insert(
+        table, states, t->tile, t->accepts, t->arc_index, next_index);
   }
 
   // Store the new chain head for future siblings at this level
@@ -336,20 +335,84 @@ static uint32_t build_dawg_from_sorted_words(const DictionaryWordList *words,
 
 // Entry in the output queue: a state and where it's placed in the output
 typedef struct {
-  uint32_t state_idx;    // Index in states array
-  uint32_t output_idx;   // Index in output KWG
-  uint32_t chain_base;   // Base index of this sibling chain in output
-  bool is_end;           // True if this is the last sibling in output order
+  uint32_t state_idx;  // Index in states array
+  uint32_t output_idx; // Index in output KWG
+  uint32_t chain_base; // Base index of this sibling chain in output
+  bool is_end;         // True if this is the last sibling in output order
 } OutputEntry;
+
+// BFS entry for serialization
+typedef struct {
+  uint32_t arc_index;
+  uint32_t output_base;
+} SerializeBFSEntry;
+
+// Context for BFS serialization (passed to helper function)
+typedef struct {
+  const StateList *states;
+  OutputEntry **entries;
+  size_t *entries_count;
+  size_t *entries_capacity;
+  SerializeBFSEntry **bfs_queue;
+  size_t *bfs_tail;
+  bool *visited;
+} SerializeContext;
+
+// Helper: process a sibling chain starting at head, placing at output_base.
+// Adds ALL states to entries (including previously-serialized ones, as
+// duplicates). Note: sibling chains are built in reverse order (Z->Y->...->A),
+// but we need to serialize in alphabetical order (A, B, ..., Z) for KWG
+// traversal. So we assign output positions in reverse: first in chain gets
+// highest index. The chain HEAD is placed last in output, so it has
+// is_end=true. IMPORTANT: Each sibling group MUST be consecutive in output (KWG
+// format requirement), so we duplicate states that appear in multiple sibling
+// chains.
+static inline void process_chain_and_queue(SerializeContext *ctx,
+                                           uint32_t head_state,
+                                           uint32_t out_base,
+                                           uint32_t chain_length) {
+  if (head_state == 0) {
+    return;
+  }
+  uint32_t pos = chain_length;
+  bool first = true;
+  for (uint32_t p = head_state; p != 0;
+       p = ctx->states->states[p].next_index) {
+    pos--;
+    if (*ctx->entries_count >= *ctx->entries_capacity) {
+      *ctx->entries_capacity *= 2;
+      *ctx->entries =
+          realloc_or_die(*ctx->entries,
+                         sizeof(OutputEntry) * (*ctx->entries_capacity));
+      *ctx->bfs_queue =
+          realloc_or_die(*ctx->bfs_queue,
+                         sizeof(SerializeBFSEntry) * (*ctx->entries_capacity));
+    }
+    (*ctx->entries)[*ctx->entries_count].state_idx = p;
+    (*ctx->entries)[*ctx->entries_count].output_idx = out_base + pos;
+    (*ctx->entries)[*ctx->entries_count].chain_base = out_base;
+    (*ctx->entries)[*ctx->entries_count].is_end =
+        first; // first in iteration = last in output
+    (*ctx->entries_count)++;
+    first = false;
+    // Queue children for BFS if not already visited
+    uint32_t children = ctx->states->states[p].arc_index;
+    if (children != 0 && !ctx->visited[children]) {
+      ctx->visited[children] = true;
+      (*ctx->bfs_queue)[*ctx->bfs_tail].arc_index = children;
+      (*ctx->bfs_queue)[*ctx->bfs_tail].output_base = UINT32_MAX; // placeholder
+      (*ctx->bfs_tail)++;
+    }
+  }
+}
 
 // Serialize states to KWG format.
 // Key insight: siblings must be consecutive in output. Due to deduplication,
 // a single state may be part of multiple sibling chains. We handle this by
 // serializing each sibling chain independently, potentially duplicating states
 // in the output.
-static void serialize_states_to_kwg(const StateList *states,
-                                    uint32_t dawg_root, uint32_t gaddag_root,
-                                    KWG *kwg) {
+static void serialize_states_to_kwg(const StateList *states, uint32_t dawg_root,
+                                    uint32_t gaddag_root, KWG *kwg) {
   // First pass: count output nodes needed by traversing all reachable chains.
   // Use visited array to track which chain heads have been queued for BFS.
   size_t max_states = states->count;
@@ -359,58 +422,25 @@ static void serialize_states_to_kwg(const StateList *states,
   }
 
   // Count total output nodes and collect output entries
-  size_t output_count = 2; // Reserve 0 and 1 for root pointers
+  size_t output_count = 2;                  // Reserve 0 and 1 for root pointers
   size_t entries_capacity = max_states * 2; // May need duplicates
   OutputEntry *entries = malloc_or_die(sizeof(OutputEntry) * entries_capacity);
   size_t entries_count = 0;
 
   // Queue for BFS: stores (arc_index to process, output_base for its children)
-  typedef struct {
-    uint32_t arc_index;
-    uint32_t output_base;
-  } BFSEntry;
-  BFSEntry *bfs_queue = malloc_or_die(sizeof(BFSEntry) * entries_capacity);
-  size_t bfs_head = 0, bfs_tail = 0;
+  SerializeBFSEntry *bfs_queue =
+      malloc_or_die(sizeof(SerializeBFSEntry) * entries_capacity);
+  size_t bfs_head = 0;
+  size_t bfs_tail = 0;
 
-  // Helper: process a sibling chain starting at head, placing at output_base.
-  // Adds ALL states to entries (including previously-serialized ones, as duplicates).
-  // Note: sibling chains are built in reverse order (Z->Y->...->A), but we need
-  // to serialize in alphabetical order (A, B, ..., Z) for KWG traversal.
-  // So we assign output positions in reverse: first in chain gets highest index.
-  // The chain HEAD is placed last in output, so it has is_end=true.
-  // IMPORTANT: Each sibling group MUST be consecutive in output (KWG format requirement),
-  // so we duplicate states that appear in multiple sibling chains.
-  #define PROCESS_CHAIN_AND_QUEUE(head_state, out_base, chain_length) do { \
-    uint32_t _head = (head_state); \
-    uint32_t _base = (out_base); \
-    uint32_t _len = (chain_length); \
-    if (_head != 0) { \
-      uint32_t _pos = _len; \
-      bool _first = true; \
-      for (uint32_t p = _head; p != 0; p = states->states[p].next_index) { \
-        _pos--; \
-        if (entries_count >= entries_capacity) { \
-          entries_capacity *= 2; \
-          entries = realloc_or_die(entries, sizeof(OutputEntry) * entries_capacity); \
-          bfs_queue = realloc_or_die(bfs_queue, sizeof(BFSEntry) * entries_capacity); \
-        } \
-        entries[entries_count].state_idx = p; \
-        entries[entries_count].output_idx = _base + _pos; \
-        entries[entries_count].chain_base = _base; \
-        entries[entries_count].is_end = _first; /* first in iteration = last in output */ \
-        entries_count++; \
-        _first = false; \
-        /* Queue children for BFS if not already visited */ \
-        uint32_t children = states->states[p].arc_index; \
-        if (children != 0 && !visited[children]) { \
-          visited[children] = true; \
-          bfs_queue[bfs_tail].arc_index = children; \
-          bfs_queue[bfs_tail].output_base = UINT32_MAX; /* placeholder */ \
-          bfs_tail++; \
-        } \
-      } \
-    } \
-  } while(0)
+  // Set up serialization context for helper function
+  SerializeContext ctx = {.states = states,
+                          .entries = &entries,
+                          .entries_count = &entries_count,
+                          .entries_capacity = &entries_capacity,
+                          .bfs_queue = &bfs_queue,
+                          .bfs_tail = &bfs_tail,
+                          .visited = visited};
 
   // Track base indices for root chains (used for root pointers)
   uint32_t dawg_base = 0;
@@ -423,7 +453,7 @@ static void serialize_states_to_kwg(const StateList *states,
       chain_len++;
     }
     dawg_base = output_count; // Store base for root pointer
-    PROCESS_CHAIN_AND_QUEUE(dawg_root, output_count, chain_len);
+    process_chain_and_queue(&ctx, dawg_root, output_count, chain_len);
     output_count += chain_len;
     visited[dawg_root] = true;
   }
@@ -435,14 +465,14 @@ static void serialize_states_to_kwg(const StateList *states,
       chain_len++;
     }
     gaddag_base = output_count; // Store base for root pointer
-    PROCESS_CHAIN_AND_QUEUE(gaddag_root, output_count, chain_len);
+    process_chain_and_queue(&ctx, gaddag_root, output_count, chain_len);
     output_count += chain_len;
     visited[gaddag_root] = true;
   }
 
   // BFS: process queued children
   while (bfs_head < bfs_tail) {
-    BFSEntry entry = bfs_queue[bfs_head++];
+    SerializeBFSEntry entry = bfs_queue[bfs_head++];
     uint32_t chain_head = entry.arc_index;
 
     // Count all siblings in this chain
@@ -456,21 +486,25 @@ static void serialize_states_to_kwg(const StateList *states,
     output_count += chain_len;
 
     // Re-iterate to create entries and queue children
-    // Note: assign in reverse order (chain is Z->Y->...->A, want A at lowest index)
-    // The chain HEAD is placed last in output, so it has is_end=true.
+    // Note: assign in reverse order (chain is Z->Y->...->A, want A at lowest
+    // index) The chain HEAD is placed last in output, so it has is_end=true.
     uint32_t pos = chain_len;
     bool first = true;
     for (uint32_t p = chain_head; p != 0; p = states->states[p].next_index) {
       pos--;
       if (entries_count >= entries_capacity) {
         entries_capacity *= 2;
-        entries = realloc_or_die(entries, sizeof(OutputEntry) * entries_capacity);
-        bfs_queue = realloc_or_die(bfs_queue, sizeof(BFSEntry) * entries_capacity);
+        entries =
+            realloc_or_die(entries, sizeof(OutputEntry) * entries_capacity);
+        bfs_queue =
+            realloc_or_die(bfs_queue,
+                           sizeof(SerializeBFSEntry) * entries_capacity);
       }
       entries[entries_count].state_idx = p;
       entries[entries_count].output_idx = base + pos;
       entries[entries_count].chain_base = base;
-      entries[entries_count].is_end = first; // first in iteration = last in output
+      entries[entries_count].is_end =
+          first; // first in iteration = last in output
       entries_count++;
       first = false;
 
@@ -485,18 +519,18 @@ static void serialize_states_to_kwg(const StateList *states,
     }
   }
 
-  #undef PROCESS_CHAIN_AND_QUEUE
-
   // Build a map from chain_head to chain_base.
   // The chain_head is the state that was queued (its arc_index from a parent).
-  // Each entry stores its chain_base, so we just need to record the base for each head.
+  // Each entry stores its chain_base, so we just need to record the base for
+  // each head.
   uint32_t *chain_base_map = malloc_or_die(sizeof(uint32_t) * max_states);
   for (size_t i = 0; i < max_states; i++) {
     chain_base_map[i] = UINT32_MAX;
   }
   // Record chain_base ONLY for entries where the state is the chain head.
-  // The chain head is the first state in iteration order (which gets is_end=true).
-  // This is critical because a state can be part of multiple chains:
+  // The chain head is the first state in iteration order (which gets
+  // is_end=true). This is critical because a state can be part of multiple
+  // chains:
   // - As the chain head (e.g., I as Q's only child)
   // - As a non-head sibling (e.g., I in X's children U→I)
   // We must record the base for when the state IS the chain head.
@@ -567,8 +601,8 @@ KWG *make_kwg_from_words_fast(const DictionaryWordList *words,
   state_hash_table_create(&table, num_buckets, estimated_states);
 
   TransitionStack stack;
-  transition_stack_create(&stack, MAX_KWG_STRING_LENGTH * 2,
-                          MAX_KWG_STRING_LENGTH + 1);
+  transition_stack_create(&stack, (size_t)MAX_KWG_STRING_LENGTH * 2,
+                          (size_t)MAX_KWG_STRING_LENGTH + 1);
 
   uint32_t dawg_root = 0;
   uint32_t gaddag_root = 0;
@@ -594,7 +628,7 @@ KWG *make_kwg_from_words_fast(const DictionaryWordList *words,
       const DictionaryWord *word = dictionary_word_list_get_word(words, i);
       const MachineLetter *raw_word = dictionary_word_get_word(word);
       const int length = dictionary_word_get_length(word);
-      MachineLetter gaddag_string[MAX_KWG_STRING_LENGTH];
+      MachineLetter gaddag_string[MAX_KWG_STRING_LENGTH] = {0};
 
       // Add reversed word (no separator)
       for (int j = 0; j < length; j++) {
@@ -611,7 +645,8 @@ KWG *make_kwg_from_words_fast(const DictionaryWordList *words,
         for (int j = sep_pos; j < length; j++) {
           gaddag_string[sep_pos + 1 + (j - sep_pos)] = raw_word[j];
         }
-        dictionary_word_list_add_word(gaddag_strings, gaddag_string, length + 1);
+        dictionary_word_list_add_word(gaddag_strings, gaddag_string,
+                                      length + 1);
       }
     }
     dictionary_word_list_sort(gaddag_strings);

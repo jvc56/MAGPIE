@@ -219,8 +219,8 @@ void test_fast_str_to_mls(void) {
 
   // Test consecutive multichar letters
   MachineLetter cmls2[20], cmls2_slow[20];
-  num_mls =
-      fast_str_to_mls(&fc_catalan, "[L·L]ES[QU][qu]A[QU][qu]", false, cmls2, 20);
+  num_mls = fast_str_to_mls(&fc_catalan, "[L·L]ES[QU][qu]A[QU][qu]", false,
+                            cmls2, 20);
   num_mls_slow = ld_str_to_mls(catalan_ld, "[L·L]ES[QU][qu]A[QU][qu]", false,
                                cmls2_slow, 20);
   assert(num_mls == num_mls_slow);
