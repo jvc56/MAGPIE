@@ -33,16 +33,11 @@ void thread_control_destroy(ThreadControl *thread_control) {
 
 thread_control_status_t
 thread_control_get_status(ThreadControl *thread_control) {
-#ifdef __EMSCRIPTEN__
-  // WASM: Skip mutex due to Emscripten pthread issues
-  return thread_control->status;
-#else
   thread_control_status_t status;
   cpthread_mutex_lock(&thread_control->status_mutex);
   status = thread_control->status;
   cpthread_mutex_unlock(&thread_control->status_mutex);
   return status;
-#endif
 }
 
 // Lock-free read - no mutex, just read the status directly
@@ -56,16 +51,6 @@ thread_control_get_status_unsafe(ThreadControl *thread_control) {
 // Returns false if the exit status remains unchanged.
 bool thread_control_set_status(ThreadControl *thread_control,
                                thread_control_status_t new_status) {
-#ifdef __EMSCRIPTEN__
-  // WASM: Skip mutex due to Emscripten pthread issues
-  // This is unsafe but works for our use case
-  const thread_control_status_t old_status = thread_control->status;
-  if (new_status != old_status) {
-    thread_control->status = new_status;
-    return true;
-  }
-  return false;
-#else
   bool success = false;
   cpthread_mutex_lock(&thread_control->status_mutex);
   const thread_control_status_t old_status = thread_control->status;
@@ -78,7 +63,6 @@ bool thread_control_set_status(ThreadControl *thread_control,
   }
   cpthread_mutex_unlock(&thread_control->status_mutex);
   return success;
-#endif
 }
 
 void thread_control_wait_for_status_change(ThreadControl *thread_control) {
