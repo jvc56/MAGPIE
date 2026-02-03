@@ -376,14 +376,12 @@ static inline void process_chain_and_queue(SerializeContext *ctx,
   }
   uint32_t pos = chain_length;
   bool first = true;
-  for (uint32_t p = head_state; p != 0;
-       p = ctx->states->states[p].next_index) {
+  for (uint32_t p = head_state; p != 0; p = ctx->states->states[p].next_index) {
     pos--;
     if (*ctx->entries_count >= *ctx->entries_capacity) {
       *ctx->entries_capacity *= 2;
-      *ctx->entries =
-          realloc_or_die(*ctx->entries,
-                         sizeof(OutputEntry) * (*ctx->entries_capacity));
+      *ctx->entries = realloc_or_die(
+          *ctx->entries, sizeof(OutputEntry) * (*ctx->entries_capacity));
       *ctx->bfs_queue =
           realloc_or_die(*ctx->bfs_queue,
                          sizeof(SerializeBFSEntry) * (*ctx->entries_capacity));
@@ -496,9 +494,8 @@ static void serialize_states_to_kwg(const StateList *states, uint32_t dawg_root,
         entries_capacity *= 2;
         entries =
             realloc_or_die(entries, sizeof(OutputEntry) * entries_capacity);
-        bfs_queue =
-            realloc_or_die(bfs_queue,
-                           sizeof(SerializeBFSEntry) * entries_capacity);
+        bfs_queue = realloc_or_die(bfs_queue, sizeof(SerializeBFSEntry) *
+                                                  entries_capacity);
       }
       entries[entries_count].state_idx = p;
       entries[entries_count].output_idx = base + pos;
