@@ -296,8 +296,8 @@ static uint32_t build_dawg_from_sorted_words(const DictionaryWordList *words,
   int prev_len = 0;
   uint32_t root_arc = 0; // Will hold the final root arc_index
 
-  for (int w = 0; w < word_count; w++) {
-    const DictionaryWord *word = dictionary_word_list_get_word(words, w);
+  for (int word_idx = 0; word_idx < word_count; word_idx++) {
+    const DictionaryWord *word = dictionary_word_list_get_word(words, word_idx);
     const MachineLetter *letters = dictionary_word_get_word(word);
     const int len = dictionary_word_get_length(word);
 
