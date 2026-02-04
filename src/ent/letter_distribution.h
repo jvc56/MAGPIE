@@ -57,8 +57,8 @@ static inline void fast_converter_init(FastStringConverter *fc,
                                        const LetterDistribution *ld) {
   fc->ld = ld;
   // Initialize all ASCII entries to INVALID_LETTER
-  for (int i = 0; i < 128; i++) {
-    fc->ascii_to_ml[i] = INVALID_LETTER;
+  for (int ascii_code = 0; ascii_code < 128; ascii_code++) {
+    fc->ascii_to_ml[ascii_code] = INVALID_LETTER;
   }
   // Populate from ld_ml_to_hl for single-byte ASCII letters
   for (int ml = 0; ml < MACHINE_LETTER_MAX_VALUE; ml++) {
@@ -71,17 +71,19 @@ static inline void fast_converter_init(FastStringConverter *fc,
 }
 
 // Fast human-readable letter to machine letter conversion.
-// For single ASCII chars, uses O(1) lookup. Falls back to linear search otherwise.
-static inline MachineLetter fast_converter_hl_to_ml(const FastStringConverter *fc,
-                                                     const char *letter) {
+// For single ASCII chars, uses O(1) lookup. Falls back to linear search
+// otherwise.
+static inline MachineLetter
+fast_converter_hl_to_ml(const FastStringConverter *fc, const char *letter) {
   // Fast path: single ASCII character
-  if (letter[0] != '\0' && letter[1] == '\0' && (unsigned char)letter[0] < 128) {
+  if (letter[0] != '\0' && letter[1] == '\0' &&
+      (unsigned char)letter[0] < 128) {
     return fc->ascii_to_ml[(unsigned char)letter[0]];
   }
   // Slow path: multi-byte or non-ASCII, linear search
-  for (int i = 0; i < MACHINE_LETTER_MAX_VALUE; i++) {
-    if (strings_equal(fc->ld->ld_ml_to_hl[i], letter)) {
-      return i;
+  for (int ml = 0; ml < MACHINE_LETTER_MAX_VALUE; ml++) {
+    if (strings_equal(fc->ld->ld_ml_to_hl[ml], letter)) {
+      return ml;
     }
   }
   return INVALID_LETTER;
@@ -536,7 +538,8 @@ static inline int fast_str_to_mls_ascii(const FastStringConverter *fc,
 
 // Fast version of ld_str_to_mls using a pre-built FastStringConverter.
 // Same interface as ld_str_to_mls but uses O(1) ASCII lookup.
-static inline int fast_str_to_mls(const FastStringConverter *fc, const char *str,
+static inline int fast_str_to_mls(const FastStringConverter *fc,
+                                  const char *str,
                                   bool allow_played_through_marker,
                                   MachineLetter *mls, size_t mls_size) {
   assert(str != NULL);
@@ -558,8 +561,8 @@ static inline int fast_str_to_mls(const FastStringConverter *fc, const char *str
   int current_code_point_bytes_remaining = 0;
   int number_of_letters_in_builder = 0;
 
-  for (size_t i = 0; i < num_bytes; i++) {
-    char current_char = str[i];
+  for (size_t byte_idx = 0; byte_idx < num_bytes; byte_idx++) {
+    char current_char = str[byte_idx];
     switch (current_char) {
     case MULTICHAR_START_DELIMITER:
       if (building_multichar_letter || current_code_point_bytes_remaining > 0) {

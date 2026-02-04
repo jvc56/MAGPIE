@@ -116,8 +116,8 @@ static inline void state_hash_table_create(StateHashTable *table,
   table->node_capacity = node_capacity;
   table->bucket_heads = malloc_or_die(sizeof(uint32_t) * num_buckets);
   table->next_in_chain = malloc_or_die(sizeof(uint32_t) * node_capacity);
-  for (size_t i = 0; i < num_buckets; i++) {
-    table->bucket_heads[i] = 0; // 0 = empty (state 0 is null state)
+  for (size_t bucket_idx = 0; bucket_idx < num_buckets; bucket_idx++) {
+    table->bucket_heads[bucket_idx] = 0; // 0 = empty (state 0 is null state)
   }
 }
 
@@ -193,8 +193,8 @@ static inline void transition_stack_create(TransitionStack *stack,
   stack->trans_capacity = trans_cap;
   stack->depth = 0;
   stack->depth_capacity = depth_cap;
-  for (size_t i = 0; i < depth_cap; i++) {
-    stack->sibling_heads[i] = 0;
+  for (size_t depth_idx = 0; depth_idx < depth_cap; depth_idx++) {
+    stack->sibling_heads[depth_idx] = 0;
   }
 }
 
@@ -218,8 +218,9 @@ static inline void transition_stack_ensure_capacity(TransitionStack *stack) {
     stack->sibling_heads = realloc_or_die(
         stack->sibling_heads, sizeof(uint32_t) * stack->depth_capacity);
     // Initialize new sibling_heads entries
-    for (size_t i = old_cap; i < stack->depth_capacity; i++) {
-      stack->sibling_heads[i] = 0;
+    for (size_t depth_idx = old_cap; depth_idx < stack->depth_capacity;
+         depth_idx++) {
+      stack->sibling_heads[depth_idx] = 0;
     }
   }
 }
@@ -249,8 +250,8 @@ static inline uint32_t transition_stack_pop(TransitionStack *stack,
   size_t start = stack->depth_markers[stack->depth];
 
   // Create states in reverse order, linking to existing siblings
-  for (size_t i = stack->trans_count; i > start; i--) {
-    const Transition *t = &stack->transitions[i - 1];
+  for (size_t trans_idx = stack->trans_count; trans_idx > start; trans_idx--) {
+    const Transition *t = &stack->transitions[trans_idx - 1];
     next_index = state_hash_table_find_or_insert(
         table, states, t->tile, t->accepts, t->arc_index, next_index);
   }
@@ -313,8 +314,8 @@ static uint32_t build_dawg_from_sorted_words(const DictionaryWordList *words,
     }
 
     // Push transitions for the new suffix
-    for (int i = common; i < len; i++) {
-      transition_stack_push(stack, letters[i]);
+    for (int letter_idx = common; letter_idx < len; letter_idx++) {
+      transition_stack_push(stack, letters[letter_idx]);
     }
 
     // Mark the last letter as accepting
@@ -415,8 +416,8 @@ static void serialize_states_to_kwg(const StateList *states, uint32_t dawg_root,
   // Use visited array to track which chain heads have been queued for BFS.
   size_t max_states = states->count;
   bool *visited = malloc_or_die(sizeof(bool) * max_states);
-  for (size_t i = 0; i < max_states; i++) {
-    visited[i] = false;
+  for (size_t state_idx = 0; state_idx < max_states; state_idx++) {
+    visited[state_idx] = false;
   }
 
   // Count total output nodes and collect output entries
@@ -521,8 +522,8 @@ static void serialize_states_to_kwg(const StateList *states, uint32_t dawg_root,
   // Each entry stores its chain_base, so we just need to record the base for
   // each head.
   uint32_t *chain_base_map = malloc_or_die(sizeof(uint32_t) * max_states);
-  for (size_t i = 0; i < max_states; i++) {
-    chain_base_map[i] = UINT32_MAX;
+  for (size_t state_idx = 0; state_idx < max_states; state_idx++) {
+    chain_base_map[state_idx] = UINT32_MAX;
   }
   // Record chain_base ONLY for entries where the state is the chain head.
   // The chain head is the first state in iteration order (which gets
@@ -531,11 +532,11 @@ static void serialize_states_to_kwg(const StateList *states, uint32_t dawg_root,
   // - As the chain head (e.g., I as Q's only child)
   // - As a non-head sibling (e.g., I in X's children U→I)
   // We must record the base for when the state IS the chain head.
-  for (size_t i = 0; i < entries_count; i++) {
+  for (size_t entry_idx = 0; entry_idx < entries_count; entry_idx++) {
     // Only record for entries where this state is the chain head (is_end=true)
-    uint32_t sidx = entries[i].state_idx;
-    if (entries[i].is_end && chain_base_map[sidx] == UINT32_MAX) {
-      chain_base_map[sidx] = entries[i].chain_base;
+    uint32_t sidx = entries[entry_idx].state_idx;
+    if (entries[entry_idx].is_end && chain_base_map[sidx] == UINT32_MAX) {
+      chain_base_map[sidx] = entries[entry_idx].chain_base;
     }
   }
 
@@ -549,9 +550,9 @@ static void serialize_states_to_kwg(const StateList *states, uint32_t dawg_root,
   kwg_nodes[1] = gaddag_base | KWG_NODE_IS_END_FLAG;
 
   // Serialize each entry
-  for (size_t i = 0; i < entries_count; i++) {
-    uint32_t sidx = entries[i].state_idx;
-    uint32_t oidx = entries[i].output_idx;
+  for (size_t entry_idx = 0; entry_idx < entries_count; entry_idx++) {
+    uint32_t sidx = entries[entry_idx].state_idx;
+    uint32_t oidx = entries[entry_idx].output_idx;
     const State *s = &states->states[sidx];
 
     uint32_t node = ((uint32_t)s->tile) << KWG_TILE_BIT_OFFSET;
@@ -559,7 +560,7 @@ static void serialize_states_to_kwg(const StateList *states, uint32_t dawg_root,
       node |= KWG_NODE_ACCEPTS_FLAG;
     }
     // is_end: true if this is the last sibling in output order
-    if (entries[i].is_end) {
+    if (entries[entry_idx].is_end) {
       node |= KWG_NODE_IS_END_FLAG;
     }
     // arc: point to chain base (alphabetically-first child in output order)
@@ -612,34 +613,37 @@ KWG *make_kwg_from_words_fast(const DictionaryWordList *words,
   if (output_gaddag) {
     // Count total GADDAG strings: each word of length L produces L strings
     int total_gaddag_strings = 0;
-    for (int i = 0; i < words_count; i++) {
-      const DictionaryWord *word = dictionary_word_list_get_word(words, i);
+    for (int word_idx = 0; word_idx < words_count; word_idx++) {
+      const DictionaryWord *word =
+          dictionary_word_list_get_word(words, word_idx);
       total_gaddag_strings += dictionary_word_get_length(word);
     }
 
     // Pre-allocate exact capacity to avoid reallocs
     DictionaryWordList *gaddag_strings =
         dictionary_word_list_create_with_capacity(total_gaddag_strings);
-    for (int i = 0; i < words_count; i++) {
-      const DictionaryWord *word = dictionary_word_list_get_word(words, i);
+    for (int word_idx = 0; word_idx < words_count; word_idx++) {
+      const DictionaryWord *word =
+          dictionary_word_list_get_word(words, word_idx);
       const MachineLetter *raw_word = dictionary_word_get_word(word);
       const int length = dictionary_word_get_length(word);
       MachineLetter gaddag_string[MAX_KWG_STRING_LENGTH] = {0};
 
       // Add reversed word (no separator)
-      for (int j = 0; j < length; j++) {
-        gaddag_string[j] = raw_word[length - j - 1];
+      for (int letter_idx = 0; letter_idx < length; letter_idx++) {
+        gaddag_string[letter_idx] = raw_word[length - letter_idx - 1];
       }
       dictionary_word_list_add_word(gaddag_strings, gaddag_string, length);
 
       // Add pivot forms: for "CARE" -> "RAC@E", "AC@RE", "C@ARE"
       for (int sep_pos = length - 1; sep_pos >= 1; sep_pos--) {
-        for (int j = 0; j < sep_pos; j++) {
-          gaddag_string[j] = raw_word[sep_pos - j - 1];
+        for (int letter_idx = 0; letter_idx < sep_pos; letter_idx++) {
+          gaddag_string[letter_idx] = raw_word[sep_pos - letter_idx - 1];
         }
         gaddag_string[sep_pos] = SEPARATION_MACHINE_LETTER;
-        for (int j = sep_pos; j < length; j++) {
-          gaddag_string[sep_pos + 1 + (j - sep_pos)] = raw_word[j];
+        for (int letter_idx = sep_pos; letter_idx < length; letter_idx++) {
+          gaddag_string[sep_pos + 1 + (letter_idx - sep_pos)] =
+              raw_word[letter_idx];
         }
         dictionary_word_list_add_word(gaddag_strings, gaddag_string,
                                       length + 1);
@@ -650,8 +654,8 @@ KWG *make_kwg_from_words_fast(const DictionaryWordList *words,
     // Reset stack for GADDAG building
     stack.trans_count = 0;
     stack.depth = 0;
-    for (size_t i = 0; i < stack.depth_capacity; i++) {
-      stack.sibling_heads[i] = 0;
+    for (size_t depth_idx = 0; depth_idx < stack.depth_capacity; depth_idx++) {
+      stack.sibling_heads[depth_idx] = 0;
     }
 
     gaddag_root =
@@ -900,8 +904,8 @@ static inline void mutable_node_list_destroy(MutableNodeList *nodes) {
   // If arena is used, all child indices are in the arena - no individual frees
   // needed
   if (nodes->arena == NULL) {
-    for (size_t i = 0; i < nodes->count; i++) {
-      node_index_list_destroy(&nodes->nodes[i].children);
+    for (size_t node_idx = 0; node_idx < nodes->count; node_idx++) {
+      node_index_list_destroy(&nodes->nodes[node_idx].children);
     }
   } else {
     index_arena_destroy(nodes->arena);
@@ -1040,9 +1044,10 @@ void insert_suffix(uint32_t node_index, MutableNodeList *nodes,
   }
   const int ml = dictionary_word_get_word(word)[pos];
   const uint8_t node_num_children = node->children.count;
-  for (MachineLetter i = 0; i < node_num_children; i++) {
+  for (MachineLetter child_pos = 0; child_pos < node_num_children;
+       child_pos++) {
     node = &nodes->nodes[node_index];
-    const uint32_t child_index = get_child_index(node, i);
+    const uint32_t child_index = get_child_index(node, child_pos);
     const MutableNode *child = &nodes->nodes[child_index];
     if (child->ml == ml) {
       insert_suffix(child_index, nodes, word, pos + 1, cached_node_indices);
@@ -1066,9 +1071,10 @@ void insert_suffix_arena(uint32_t node_index, MutableNodeList *nodes,
   }
   const int ml = dictionary_word_get_word(word)[pos];
   const uint8_t node_num_children = node->children.count;
-  for (MachineLetter i = 0; i < node_num_children; i++) {
+  for (MachineLetter child_pos = 0; child_pos < node_num_children;
+       child_pos++) {
     node = &nodes->nodes[node_index];
-    const uint32_t child_index = get_child_index(node, i);
+    const uint32_t child_index = get_child_index(node, child_pos);
     const MutableNode *child = &nodes->nodes[child_index];
     if (child->ml == ml) {
       insert_suffix_arena(child_index, nodes, word, pos + 1,
@@ -1257,9 +1263,9 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
     DictionaryWordList *gaddag_strings = dictionary_word_list_create();
     add_gaddag_strings(words, gaddag_strings);
     const int gaddag_count = dictionary_word_list_get_count(gaddag_strings);
-    for (int i = 0; i < gaddag_count; i++) {
+    for (int gaddag_idx = 0; gaddag_idx < gaddag_count; gaddag_idx++) {
       const DictionaryWord *gaddag_string =
-          dictionary_word_list_get_word(gaddag_strings, i);
+          dictionary_word_list_get_word(gaddag_strings, gaddag_idx);
       const int letters_in_common =
           get_letters_in_common(gaddag_string, last_word, &last_word_length);
       const int start_index = cached_node_indices[letters_in_common];
@@ -1352,9 +1358,9 @@ KWG *make_kwg_from_words_small(const DictionaryWordList *words,
     last_word_length = 0;
     cached_node_indices[0] = gaddag_root_node_index;
     const int gaddag_count = dictionary_word_list_get_count(gaddag_strings);
-    for (int i = 0; i < gaddag_count; i++) {
+    for (int gaddag_idx = 0; gaddag_idx < gaddag_count; gaddag_idx++) {
       const DictionaryWord *gaddag_string =
-          dictionary_word_list_get_word(gaddag_strings, i);
+          dictionary_word_list_get_word(gaddag_strings, gaddag_idx);
       const int letters_in_common =
           get_letters_in_common(gaddag_string, last_word, &last_word_length);
       const int start_index = cached_node_indices[letters_in_common];

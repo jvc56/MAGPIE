@@ -90,20 +90,20 @@ static inline void radix_sort_pass(const DictionaryWord *src,
                                    int *count) {
   // Count phase - count occurrences of each key
   memset(count, 0, (RADIX_SIZE + 2) * sizeof(int));
-  for (int i = 0; i < n; i++) {
-    int key = get_radix_key(&src[i], pos);
+  for (int word_idx = 0; word_idx < n; word_idx++) {
+    int key = get_radix_key(&src[word_idx], pos);
     count[key + 1]++;
   }
 
   // Prefix sum - convert counts to starting positions
-  for (int r = 0; r < RADIX_SIZE; r++) {
-    count[r + 1] += count[r];
+  for (int radix = 0; radix < RADIX_SIZE; radix++) {
+    count[radix + 1] += count[radix];
   }
 
   // Distribute phase - place elements in sorted order
-  for (int i = 0; i < n; i++) {
-    int key = get_radix_key(&src[i], pos);
-    dst[count[key]++] = src[i];
+  for (int word_idx = 0; word_idx < n; word_idx++) {
+    int key = get_radix_key(&src[word_idx], pos);
+    dst[count[key]++] = src[word_idx];
   }
 }
 
@@ -117,9 +117,9 @@ static inline void radix_sort(DictionaryWord *arr, int n) {
 
   // Find maximum string length
   int max_len = 0;
-  for (int i = 0; i < n; i++) {
-    if (arr[i].length > max_len) {
-      max_len = arr[i].length;
+  for (int word_idx = 0; word_idx < n; word_idx++) {
+    if (arr[word_idx].length > max_len) {
+      max_len = arr[word_idx].length;
     }
   }
 

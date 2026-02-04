@@ -192,8 +192,8 @@ void test_fast_str_to_mls(void) {
   num_mls_slow = ld_str_to_mls(english_ld, "ABZ", false, emls_slow, 20);
   assert(num_mls == num_mls_slow);
   assert(num_mls == 3);
-  for (int i = 0; i < num_mls; i++) {
-    assert(emls[i] == emls_slow[i]);
+  for (int ml_idx = 0; ml_idx < num_mls; ml_idx++) {
+    assert(emls[ml_idx] == emls_slow[ml_idx]);
   }
 
   // Test blanked letters (lowercase)
@@ -201,8 +201,8 @@ void test_fast_str_to_mls(void) {
   num_mls_slow = ld_str_to_mls(english_ld, "AbZ", false, emls_slow, 20);
   assert(num_mls == num_mls_slow);
   assert(num_mls == 3);
-  for (int i = 0; i < num_mls; i++) {
-    assert(emls[i] == emls_slow[i]);
+  for (int ml_idx = 0; ml_idx < num_mls; ml_idx++) {
+    assert(emls[ml_idx] == emls_slow[ml_idx]);
   }
 
   // Catalan with multichar letters - fast path falls back to slow for non-ASCII
@@ -213,8 +213,8 @@ void test_fast_str_to_mls(void) {
       ld_str_to_mls(catalan_ld, "A[l·l]O[QU]IMI[qu]ES", false, cmls_slow, 20);
   assert(num_mls == num_mls_slow);
   assert(num_mls == 10);
-  for (int i = 0; i < num_mls; i++) {
-    assert(cmls[i] == cmls_slow[i]);
+  for (int ml_idx = 0; ml_idx < num_mls; ml_idx++) {
+    assert(cmls[ml_idx] == cmls_slow[ml_idx]);
   }
 
   // Test consecutive multichar letters
@@ -225,8 +225,8 @@ void test_fast_str_to_mls(void) {
                                cmls2_slow, 20);
   assert(num_mls == num_mls_slow);
   assert(num_mls == 8);
-  for (int i = 0; i < num_mls; i++) {
-    assert(cmls2[i] == cmls2_slow[i]);
+  for (int ml_idx = 0; ml_idx < num_mls; ml_idx++) {
+    assert(cmls2[ml_idx] == cmls2_slow[ml_idx]);
   }
 
   // Polish with UTF-8 characters
@@ -235,16 +235,16 @@ void test_fast_str_to_mls(void) {
   num_mls_slow = ld_str_to_mls(polish_ld, "FGÓIŁHAŃ", false, pmls_slow, 20);
   assert(num_mls == num_mls_slow);
   assert(num_mls == 8);
-  for (int i = 0; i < num_mls; i++) {
-    assert(pmls[i] == pmls_slow[i]);
+  for (int ml_idx = 0; ml_idx < num_mls; ml_idx++) {
+    assert(pmls[ml_idx] == pmls_slow[ml_idx]);
   }
 
   num_mls = fast_str_to_mls(&fc_polish, "ŻŚŻGÓI", false, pmls, 20);
   num_mls_slow = ld_str_to_mls(polish_ld, "ŻŚŻGÓI", false, pmls_slow, 20);
   assert(num_mls == num_mls_slow);
   assert(num_mls == 6);
-  for (int i = 0; i < num_mls; i++) {
-    assert(pmls[i] == pmls_slow[i]);
+  for (int ml_idx = 0; ml_idx < num_mls; ml_idx++) {
+    assert(pmls[ml_idx] == pmls_slow[ml_idx]);
   }
 
   MachineLetter imls[40], imls_slow[40];
