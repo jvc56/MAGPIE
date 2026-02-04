@@ -5,6 +5,7 @@
 #include "../ent/dictionary_word.h"
 #include "../ent/kwg.h"
 #include "../util/io_util.h"
+#include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -112,6 +113,7 @@ static inline uint32_t state_list_add(StateList *list, uint8_t tile,
 static inline void state_hash_table_create(StateHashTable *table,
                                            size_t num_buckets,
                                            size_t node_capacity) {
+  assert(num_buckets > 0);
   table->num_buckets = num_buckets;
   table->node_capacity = node_capacity;
   table->bucket_heads = malloc_or_die(sizeof(uint32_t) * num_buckets);
