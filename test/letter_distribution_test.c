@@ -159,7 +159,9 @@ void test_fast_str_to_mls(void) {
   const LetterDistribution *polish_ld = config_get_ld(osps_config);
 
   // Initialize fast converters
-  FastStringConverter fc_english, fc_catalan, fc_polish;
+  FastStringConverter fc_english;
+  FastStringConverter fc_catalan;
+  FastStringConverter fc_polish;
   fast_converter_init(&fc_english, english_ld);
   fast_converter_init(&fc_catalan, catalan_ld);
   fast_converter_init(&fc_polish, polish_ld);
@@ -187,7 +189,8 @@ void test_fast_str_to_mls(void) {
   assert(mls[1] == mls_slow[1]);
 
   // English words - compare fast vs slow
-  MachineLetter emls[20], emls_slow[20];
+  MachineLetter emls[20];
+  MachineLetter emls_slow[20];
   num_mls = fast_str_to_mls(&fc_english, "ABZ", false, emls, 20);
   num_mls_slow = ld_str_to_mls(english_ld, "ABZ", false, emls_slow, 20);
   assert(num_mls == num_mls_slow);
@@ -206,7 +209,8 @@ void test_fast_str_to_mls(void) {
   }
 
   // Catalan with multichar letters - fast path falls back to slow for non-ASCII
-  MachineLetter cmls[20], cmls_slow[20];
+  MachineLetter cmls[20];
+  MachineLetter cmls_slow[20];
   num_mls =
       fast_str_to_mls(&fc_catalan, "A[l·l]O[QU]IMI[qu]ES", false, cmls, 20);
   num_mls_slow =
@@ -218,7 +222,8 @@ void test_fast_str_to_mls(void) {
   }
 
   // Test consecutive multichar letters
-  MachineLetter cmls2[20], cmls2_slow[20];
+  MachineLetter cmls2[20];
+  MachineLetter cmls2_slow[20];
   num_mls = fast_str_to_mls(&fc_catalan, "[L·L]ES[QU][qu]A[QU][qu]", false,
                             cmls2, 20);
   num_mls_slow = ld_str_to_mls(catalan_ld, "[L·L]ES[QU][qu]A[QU][qu]", false,
@@ -230,7 +235,8 @@ void test_fast_str_to_mls(void) {
   }
 
   // Polish with UTF-8 characters
-  MachineLetter pmls[20], pmls_slow[20];
+  MachineLetter pmls[20];
+  MachineLetter pmls_slow[20];
   num_mls = fast_str_to_mls(&fc_polish, "FGÓIŁHAŃ", false, pmls, 20);
   num_mls_slow = ld_str_to_mls(polish_ld, "FGÓIŁHAŃ", false, pmls_slow, 20);
   assert(num_mls == num_mls_slow);
@@ -247,7 +253,8 @@ void test_fast_str_to_mls(void) {
     assert(pmls[ml_idx] == pmls_slow[ml_idx]);
   }
 
-  MachineLetter imls[40], imls_slow[40];
+  MachineLetter imls[40];
+  MachineLetter imls_slow[40];
 
   // Playthrough tiles
   num_mls = fast_str_to_mls(&fc_english, ".BDEF", true, imls, 40);
