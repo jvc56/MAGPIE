@@ -250,7 +250,7 @@ static inline uint32_t transition_stack_pop(TransitionStack *stack,
 
   // Create states in reverse order, linking to existing siblings
   for (size_t i = stack->trans_count; i > start; i--) {
-    Transition *t = &stack->transitions[i - 1];
+    const Transition *t = &stack->transitions[i - 1];
     next_index = state_hash_table_find_or_insert(
         table, states, t->tile, t->accepts, t->arc_index, next_index);
   }
@@ -532,11 +532,10 @@ static void serialize_states_to_kwg(const StateList *states, uint32_t dawg_root,
   // - As a non-head sibling (e.g., I in X's children U→I)
   // We must record the base for when the state IS the chain head.
   for (size_t i = 0; i < entries_count; i++) {
-    uint32_t sidx = entries[i].state_idx;
-    uint32_t base = entries[i].chain_base;
     // Only record for entries where this state is the chain head (is_end=true)
+    uint32_t sidx = entries[i].state_idx;
     if (entries[i].is_end && chain_base_map[sidx] == UINT32_MAX) {
-      chain_base_map[sidx] = base;
+      chain_base_map[sidx] = entries[i].chain_base;
     }
   }
 
@@ -963,85 +962,6 @@ void calculate_node_hash_values(MutableNodeList *node_list) {
   }
 }
 
-// Compute hash for a single node, assuming all children are already finalized.
-// This is used for incremental deduplication during tree construction.
-static inline void finalize_node_hash(MutableNode *node, MutableNode *nodes) {
-  uint64_t hash_with_just_children = 0;
-
-  const size_t children_count = node->children.count;
-  const uint32_t *indices = node_index_list_get_const_indices(&node->children);
-  for (size_t i = 0; i < children_count; i++) {
-    const uint32_t child_index = indices[i];
-    MutableNode *child = &nodes[child_index];
-    // Children are already finalized, so hash_with_node is valid
-    hash_with_just_children ^= child->hash_with_node * KWG_HASH_COMBINING_PRIME;
-  }
-  hash_with_just_children =
-      (hash_with_just_children << 1) | (hash_with_just_children >> 63);
-  node->hash_with_just_children = hash_with_just_children;
-
-  uint64_t hash_with_node = hash_with_just_children;
-  hash_with_node ^= 1 + node->ml;
-  if (node->accepts) {
-    hash_with_node ^= 1 << (ENGLISH_ALPHABET_BITS_USED + 1);
-  }
-  node->hash_with_node = hash_with_node;
-}
-
-bool subtree_equals(const MutableNode *node_a, const MutableNode *node_b,
-                    const MutableNode *nodes) {
-  // Hashes were already compared, don't check them again.
-  if (node_a->ml != node_b->ml || node_a->accepts != node_b->accepts) {
-    return false;
-  }
-  if (node_a->children.count != node_b->children.count) {
-    return false;
-  }
-  const size_t count = node_a->children.count;
-  const uint32_t *indices_a =
-      node_index_list_get_const_indices(&node_a->children);
-  const uint32_t *indices_b =
-      node_index_list_get_const_indices(&node_b->children);
-  for (size_t idx = 0; idx < count; idx++) {
-    const MutableNode *child_a = &nodes[indices_a[idx]];
-    const MutableNode *child_b = &nodes[indices_b[idx]];
-    if (child_a->hash_with_node != child_b->hash_with_node) {
-      return false;
-    }
-    if (!subtree_equals(child_a, child_b, nodes)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-bool mutable_node_equals(const MutableNode *node_a, const MutableNode *node_b,
-                         const MutableNode *nodes) {
-  // Ignores node_x->ml and node_x->accepts
-  if (node_a->hash_with_just_children != node_b->hash_with_just_children) {
-    return false;
-  }
-  if (node_a->children.count != node_b->children.count) {
-    return false;
-  }
-  const size_t count = node_a->children.count;
-  const uint32_t *indices_a =
-      node_index_list_get_const_indices(&node_a->children);
-  const uint32_t *indices_b =
-      node_index_list_get_const_indices(&node_b->children);
-  for (size_t idx = 0; idx < count; idx++) {
-    const MutableNode *child_a = &nodes[indices_a[idx]];
-    const MutableNode *child_b = &nodes[indices_b[idx]];
-    if (child_a->hash_with_node != child_b->hash_with_node) {
-      return false;
-    }
-    if (!subtree_equals(child_a, child_b, nodes)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 typedef struct NodePointerList {
   MutableNode **nodes;
   size_t count;
@@ -1080,108 +1000,6 @@ static inline void node_pointer_list_add(NodePointerList *list,
 static inline void node_pointer_list_destroy(NodePointerList *list) {
   free(list->nodes);
   free(list);
-}
-
-typedef struct NodeHashTable {
-  uint32_t *bucket_heads;
-  uint32_t *next_indices;
-  size_t node_capacity;
-  size_t num_buckets;
-} NodeHashTable;
-
-static inline void node_hash_table_create(NodeHashTable *table,
-                                          size_t node_capacity) {
-  table->node_capacity = node_capacity;
-  table->num_buckets = KWG_HASH_NUMBER_OF_BUCKETS;
-  table->bucket_heads =
-      malloc_or_die(sizeof(uint32_t) * KWG_HASH_NUMBER_OF_BUCKETS);
-  table->next_indices = malloc_or_die(sizeof(uint32_t) * table->node_capacity);
-  for (size_t i = 0; i < KWG_HASH_NUMBER_OF_BUCKETS; i++) {
-    table->bucket_heads[i] = HASH_BUCKET_ITEM_LIST_NULL_INDEX;
-  }
-  for (size_t i = 0; i < table->node_capacity; i++) {
-    table->next_indices[i] = HASH_BUCKET_ITEM_LIST_NULL_INDEX;
-  }
-}
-
-static inline void node_hash_table_create_small(NodeHashTable *table,
-                                                size_t node_capacity,
-                                                size_t num_buckets) {
-  table->node_capacity = node_capacity;
-  table->num_buckets = num_buckets;
-  table->bucket_heads = malloc_or_die(sizeof(uint32_t) * num_buckets);
-  table->next_indices = malloc_or_die(sizeof(uint32_t) * table->node_capacity);
-  for (size_t i = 0; i < num_buckets; i++) {
-    table->bucket_heads[i] = HASH_BUCKET_ITEM_LIST_NULL_INDEX;
-  }
-  for (size_t i = 0; i < table->node_capacity; i++) {
-    table->next_indices[i] = HASH_BUCKET_ITEM_LIST_NULL_INDEX;
-  }
-}
-
-static inline void node_hash_table_destroy_buckets(NodeHashTable *table) {
-  free(table->bucket_heads);
-  free(table->next_indices);
-}
-
-// Ensure the hash table can handle node indices up to required_capacity
-static inline void node_hash_table_ensure_capacity(NodeHashTable *table,
-                                                   size_t required_capacity) {
-  if (required_capacity <= table->node_capacity) {
-    return;
-  }
-  size_t new_capacity = table->node_capacity;
-  while (new_capacity < required_capacity) {
-    new_capacity *= 2;
-  }
-  table->next_indices =
-      realloc_or_die(table->next_indices, sizeof(uint32_t) * new_capacity);
-  for (size_t i = table->node_capacity; i < new_capacity; i++) {
-    table->next_indices[i] = HASH_BUCKET_ITEM_LIST_NULL_INDEX;
-  }
-  table->node_capacity = new_capacity;
-}
-
-static inline MutableNode *node_hash_table_find_or_insert(NodeHashTable *table,
-                                                          MutableNode *node,
-                                                          MutableNode *nodes) {
-  const uint32_t node_index = node - nodes;
-  const uint64_t hash_value = node->hash_with_just_children;
-  const size_t bucket_index = hash_value % table->num_buckets;
-
-  uint32_t current_index = table->bucket_heads[bucket_index];
-  uint32_t previous_index = HASH_BUCKET_ITEM_LIST_NULL_INDEX;
-
-  while (current_index != HASH_BUCKET_ITEM_LIST_NULL_INDEX) {
-    MutableNode *candidate = &nodes[current_index];
-    if (mutable_node_equals(node, candidate, nodes)) {
-      return candidate;
-    }
-    previous_index = current_index;
-    current_index = table->next_indices[current_index];
-  }
-
-  // Ensure capacity before inserting
-  node_hash_table_ensure_capacity(table, node_index + 1);
-
-  if (previous_index == HASH_BUCKET_ITEM_LIST_NULL_INDEX) {
-    table->bucket_heads[bucket_index] = node_index;
-  } else {
-    table->next_indices[previous_index] = node_index;
-  }
-  table->next_indices[node_index] = HASH_BUCKET_ITEM_LIST_NULL_INDEX;
-  return node;
-}
-
-// Finalize a node: compute its hash and deduplicate against hash table.
-static inline void finalize_and_deduplicate(MutableNode *node,
-                                            MutableNode *nodes_array,
-                                            NodeHashTable *table) {
-  finalize_node_hash(node, nodes_array);
-  MutableNode *match = node_hash_table_find_or_insert(table, node, nodes_array);
-  if (match != node) {
-    node->merged_into_index = match - nodes_array;
-  }
 }
 
 uint32_t get_child_index(const MutableNode *node, size_t idx) {
@@ -1419,40 +1237,15 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
     last_word[i] = 0;
   }
 
-  // Create hash table upfront for incremental deduplication
-  NodeHashTable table;
-  const bool do_merge = (merging == KWG_MAKER_MERGE_EXACT);
-  if (do_merge) {
-    node_hash_table_create(&table, estimated_nodes);
-  }
-
   if (output_dawg) {
     cached_node_indices[0] = dawg_root_node_index;
-    int previous_depth = 0;
     for (int i = 0; i < words_count; i++) {
       const DictionaryWord *word = dictionary_word_list_get_word(words, i);
       const int letters_in_common =
           get_letters_in_common(word, last_word, &last_word_length);
-
-      // Finalize nodes that are complete (backtracking in the trie)
-      if (do_merge) {
-        for (int depth = previous_depth; depth > letters_in_common; depth--) {
-          MutableNode *node = &nodes->nodes[cached_node_indices[depth]];
-          finalize_and_deduplicate(node, nodes->nodes, &table);
-        }
-      }
-
       const int start_index = cached_node_indices[letters_in_common];
       insert_suffix_arena(start_index, nodes, word, letters_in_common,
                           cached_node_indices);
-      previous_depth = dictionary_word_get_length(word);
-    }
-    // Finalize remaining DAWG nodes (except root which we handle specially)
-    if (do_merge) {
-      for (int depth = previous_depth; depth >= 1; depth--) {
-        MutableNode *node = &nodes->nodes[cached_node_indices[depth]];
-        finalize_and_deduplicate(node, nodes->nodes, &table);
-      }
     }
   }
 
@@ -1463,46 +1256,17 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
     cached_node_indices[0] = gaddag_root_node_index;
     DictionaryWordList *gaddag_strings = dictionary_word_list_create();
     add_gaddag_strings(words, gaddag_strings);
-    int previous_depth = 0;
     const int gaddag_count = dictionary_word_list_get_count(gaddag_strings);
     for (int i = 0; i < gaddag_count; i++) {
       const DictionaryWord *gaddag_string =
           dictionary_word_list_get_word(gaddag_strings, i);
       const int letters_in_common =
           get_letters_in_common(gaddag_string, last_word, &last_word_length);
-
-      // Finalize nodes that are complete (backtracking in the trie)
-      if (do_merge) {
-        for (int depth = previous_depth; depth > letters_in_common; depth--) {
-          MutableNode *node = &nodes->nodes[cached_node_indices[depth]];
-          finalize_and_deduplicate(node, nodes->nodes, &table);
-        }
-      }
-
       const int start_index = cached_node_indices[letters_in_common];
       insert_suffix_arena(start_index, nodes, gaddag_string, letters_in_common,
                           cached_node_indices);
-      previous_depth = dictionary_word_get_length(gaddag_string);
-    }
-    // Finalize remaining GADDAG nodes (except root)
-    if (do_merge) {
-      for (int depth = previous_depth; depth >= 1; depth--) {
-        MutableNode *node = &nodes->nodes[cached_node_indices[depth]];
-        finalize_and_deduplicate(node, nodes->nodes, &table);
-      }
     }
     dictionary_word_list_destroy(gaddag_strings);
-  }
-
-  // Finalize root nodes (they won't merge with anything but need hashes)
-  if (do_merge) {
-    if (output_dawg) {
-      finalize_node_hash(&nodes->nodes[dawg_root_node_index], nodes->nodes);
-    }
-    if (output_gaddag) {
-      finalize_node_hash(&nodes->nodes[gaddag_root_node_index], nodes->nodes);
-    }
-    node_hash_table_destroy_buckets(&table);
   }
 
   MutableNode *dawg_root = &nodes->nodes[dawg_root_node_index];
@@ -1564,41 +1328,15 @@ KWG *make_kwg_from_words_small(const DictionaryWordList *words,
     last_word[i] = 0;
   }
 
-  // Create hash table upfront for incremental deduplication
-  NodeHashTable table;
-  const bool do_merge = (merging == KWG_MAKER_MERGE_EXACT);
-  if (do_merge) {
-    const size_t hash_buckets = estimated_nodes * 2 + 1;
-    node_hash_table_create_small(&table, estimated_nodes, hash_buckets);
-  }
-
   if (output_dawg) {
     cached_node_indices[0] = dawg_root_node_index;
-    int previous_depth = 0;
     for (int i = 0; i < words_count; i++) {
       const DictionaryWord *word = dictionary_word_list_get_word(words, i);
       const int letters_in_common =
           get_letters_in_common(word, last_word, &last_word_length);
-
-      // Finalize nodes that are complete (backtracking in the trie)
-      if (do_merge) {
-        for (int depth = previous_depth; depth > letters_in_common; depth--) {
-          MutableNode *node = &nodes->nodes[cached_node_indices[depth]];
-          finalize_and_deduplicate(node, nodes->nodes, &table);
-        }
-      }
-
       const int start_index = cached_node_indices[letters_in_common];
       insert_suffix_arena(start_index, nodes, word, letters_in_common,
                           cached_node_indices);
-      previous_depth = dictionary_word_get_length(word);
-    }
-    // Finalize remaining DAWG nodes (except root)
-    if (do_merge) {
-      for (int depth = previous_depth; depth >= 1; depth--) {
-        MutableNode *node = &nodes->nodes[cached_node_indices[depth]];
-        finalize_and_deduplicate(node, nodes->nodes, &table);
-      }
     }
   }
 
@@ -1613,46 +1351,17 @@ KWG *make_kwg_from_words_small(const DictionaryWordList *words,
 
     last_word_length = 0;
     cached_node_indices[0] = gaddag_root_node_index;
-    int previous_depth = 0;
     const int gaddag_count = dictionary_word_list_get_count(gaddag_strings);
     for (int i = 0; i < gaddag_count; i++) {
       const DictionaryWord *gaddag_string =
           dictionary_word_list_get_word(gaddag_strings, i);
       const int letters_in_common =
           get_letters_in_common(gaddag_string, last_word, &last_word_length);
-
-      // Finalize nodes that are complete (backtracking in the trie)
-      if (do_merge) {
-        for (int depth = previous_depth; depth > letters_in_common; depth--) {
-          MutableNode *node = &nodes->nodes[cached_node_indices[depth]];
-          finalize_and_deduplicate(node, nodes->nodes, &table);
-        }
-      }
-
       const int start_index = cached_node_indices[letters_in_common];
       insert_suffix_arena(start_index, nodes, gaddag_string, letters_in_common,
                           cached_node_indices);
-      previous_depth = dictionary_word_get_length(gaddag_string);
-    }
-    // Finalize remaining GADDAG nodes (except root)
-    if (do_merge) {
-      for (int depth = previous_depth; depth >= 1; depth--) {
-        MutableNode *node = &nodes->nodes[cached_node_indices[depth]];
-        finalize_and_deduplicate(node, nodes->nodes, &table);
-      }
     }
     dictionary_word_list_destroy(gaddag_strings);
-  }
-
-  // Finalize root nodes (they won't merge with anything but need hashes)
-  if (do_merge) {
-    if (output_dawg) {
-      finalize_node_hash(&nodes->nodes[dawg_root_node_index], nodes->nodes);
-    }
-    if (output_gaddag) {
-      finalize_node_hash(&nodes->nodes[gaddag_root_node_index], nodes->nodes);
-    }
-    node_hash_table_destroy_buckets(&table);
   }
 
   MutableNode *dawg_root = &nodes->nodes[dawg_root_node_index];
