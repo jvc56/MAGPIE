@@ -377,7 +377,8 @@ static inline void process_chain_and_queue(SerializeContext *ctx,
   }
   uint32_t pos = chain_length;
   bool first = true;
-  for (uint32_t p = head_state; p != 0; p = ctx->states->states[p].next_index) {
+  for (uint32_t curr_state = head_state; curr_state != 0;
+       curr_state = ctx->states->states[curr_state].next_index) {
     pos--;
     if (*ctx->entries_count >= *ctx->entries_capacity) {
       *ctx->entries_capacity *= 2;
@@ -387,7 +388,7 @@ static inline void process_chain_and_queue(SerializeContext *ctx,
           realloc_or_die(*ctx->bfs_queue,
                          sizeof(SerializeBFSEntry) * (*ctx->entries_capacity));
     }
-    (*ctx->entries)[*ctx->entries_count].state_idx = p;
+    (*ctx->entries)[*ctx->entries_count].state_idx = curr_state;
     (*ctx->entries)[*ctx->entries_count].output_idx = out_base + pos;
     (*ctx->entries)[*ctx->entries_count].chain_base = out_base;
     (*ctx->entries)[*ctx->entries_count].is_end =
@@ -395,7 +396,7 @@ static inline void process_chain_and_queue(SerializeContext *ctx,
     (*ctx->entries_count)++;
     first = false;
     // Queue children for BFS if not already visited
-    uint32_t children = ctx->states->states[p].arc_index;
+    uint32_t children = ctx->states->states[curr_state].arc_index;
     if (children != 0 && !ctx->visited[children]) {
       ctx->visited[children] = true;
       (*ctx->bfs_queue)[*ctx->bfs_tail].arc_index = children;
@@ -448,7 +449,8 @@ static void serialize_states_to_kwg(const StateList *states, uint32_t dawg_root,
   // First: count and queue DAWG root chain
   if (dawg_root != 0) {
     uint32_t chain_len = 0;
-    for (uint32_t p = dawg_root; p != 0; p = states->states[p].next_index) {
+    for (uint32_t curr_state = dawg_root; curr_state != 0;
+         curr_state = states->states[curr_state].next_index) {
       chain_len++;
     }
     dawg_base = output_count; // Store base for root pointer
@@ -460,7 +462,8 @@ static void serialize_states_to_kwg(const StateList *states, uint32_t dawg_root,
   // Then: count and queue GADDAG root chain
   if (gaddag_root != 0 && !visited[gaddag_root]) {
     uint32_t chain_len = 0;
-    for (uint32_t p = gaddag_root; p != 0; p = states->states[p].next_index) {
+    for (uint32_t curr_state = gaddag_root; curr_state != 0;
+         curr_state = states->states[curr_state].next_index) {
       chain_len++;
     }
     gaddag_base = output_count; // Store base for root pointer
@@ -476,7 +479,8 @@ static void serialize_states_to_kwg(const StateList *states, uint32_t dawg_root,
 
     // Count all siblings in this chain
     uint32_t chain_len = 0;
-    for (uint32_t p = chain_head; p != 0; p = states->states[p].next_index) {
+    for (uint32_t curr_state = chain_head; curr_state != 0;
+         curr_state = states->states[curr_state].next_index) {
       chain_len++;
     }
 
@@ -489,7 +493,8 @@ static void serialize_states_to_kwg(const StateList *states, uint32_t dawg_root,
     // index) The chain HEAD is placed last in output, so it has is_end=true.
     uint32_t pos = chain_len;
     bool first = true;
-    for (uint32_t p = chain_head; p != 0; p = states->states[p].next_index) {
+    for (uint32_t curr_state = chain_head; curr_state != 0;
+         curr_state = states->states[curr_state].next_index) {
       pos--;
       if (entries_count >= entries_capacity) {
         entries_capacity *= 2;
@@ -498,7 +503,7 @@ static void serialize_states_to_kwg(const StateList *states, uint32_t dawg_root,
         bfs_queue = realloc_or_die(bfs_queue, sizeof(SerializeBFSEntry) *
                                                   entries_capacity);
       }
-      entries[entries_count].state_idx = p;
+      entries[entries_count].state_idx = curr_state;
       entries[entries_count].output_idx = base + pos;
       entries[entries_count].chain_base = base;
       entries[entries_count].is_end =
@@ -507,7 +512,7 @@ static void serialize_states_to_kwg(const StateList *states, uint32_t dawg_root,
       first = false;
 
       // Queue children for BFS if not already visited
-      uint32_t children = states->states[p].arc_index;
+      uint32_t children = states->states[curr_state].arc_index;
       if (children != 0 && !visited[children]) {
         visited[children] = true;
         bfs_queue[bfs_tail].arc_index = children;
