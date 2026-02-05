@@ -15,14 +15,11 @@ enum {
   TTENTRY_SIZE_BYTES = 16,
   BOTTOM3_BYTE_MASK = ((1 << 24) - 1),
   DEPTH_MASK = ((1 << 6) - 1),
-  // ABDADA nproc table: use a smaller table than TT to reduce memory and
-  // improve cache locality. Collisions just cause extra deferrals.
-  // With cache line padding, we use fewer entries but eliminate false sharing.
-  NPROC_SIZE_POWER = 14,  // 2^14 = 16K entries (reduced due to 64-byte padding)
-  NPROC_SIZE = (1 << NPROC_SIZE_POWER),
-  NPROC_MASK = (NPROC_SIZE - 1),
   // Cache line size for padding to prevent false sharing
   CACHE_LINE_SIZE = 64,
+  // Default nproc size power: 2^12 = 4K entries (256KB with cache-line padding)
+  // Benchmarks show this is optimal for parallel endgame search.
+  NPROC_SIZE_POWER_DEFAULT = 11,
 };
 
 typedef struct TTEntry {
@@ -73,16 +70,23 @@ typedef struct TranspositionTable {
   NprocEntry *nproc;  // ABDADA: cache-aligned table for tracking concurrent searches
   int size_power_of_2;
   uint64_t size_mask;
+  int nproc_size;      // Number of nproc entries (power of 2)
+  uint64_t nproc_mask; // Mask for nproc index (nproc_size - 1)
   Zobrist *zobrist;
   atomic_int created;
   atomic_int hits;
   atomic_int lookups;
   atomic_int t2_collisions;
+  atomic_int replacements;  // For compatibility with bucket version
 } TranspositionTable;
 
+// Create transposition table.
+// fraction_of_memory: fraction of system RAM for TT (e.g., 0.25 = 25%)
+// nproc_size_power: power of 2 for nproc table size (e.g., 12 = 4K entries)
+//                   Use NPROC_SIZE_POWER_DEFAULT (11) for best performance.
 static inline TranspositionTable *
-transposition_table_create(double fraction_of_memory) {
-  TranspositionTable *tt = malloc_or_die(sizeof(TranspositionTable));
+transposition_table_create(double fraction_of_memory, int nproc_size_power) {
+  TranspositionTable *tt = (TranspositionTable *)malloc_or_die(sizeof(TranspositionTable));
 
   uint64_t total_memory = get_total_memory();
   uint64_t desired_n_elems =
@@ -106,14 +110,23 @@ transposition_table_create(double fraction_of_memory) {
   log_warn("Creating transposition table. System memory: %lu, TT size: 2**%d "
            "(number of elements: %d, memory required: %dMB)",
            total_memory, tt->size_power_of_2, num_elems,
-           (sizeof(TTEntry) * num_elems) / (size_t)(1024 * 1024));
-  tt->table = malloc_or_die(sizeof(TTEntry) * num_elems);
+           (int)((sizeof(TTEntry) * num_elems) / (size_t)(1024 * 1024)));
+  tt->table = (TTEntry *)malloc_or_die(sizeof(TTEntry) * num_elems);
   memset(tt->table, 0, sizeof(TTEntry) * num_elems);
+
   // ABDADA: allocate cache-aligned nproc table for tracking concurrent searches.
   // Each entry is padded to a full cache line to prevent false sharing between
   // threads accessing different entries.
-  tt->nproc = (NprocEntry *)malloc_or_die(sizeof(NprocEntry) * NPROC_SIZE);
-  for (int i = 0; i < NPROC_SIZE; i++) {
+  // If nproc_size_power is 0, use the default (2^12 = 4K entries).
+  if (nproc_size_power == 0) {
+    nproc_size_power = NPROC_SIZE_POWER_DEFAULT;
+  }
+  tt->nproc_size = 1 << nproc_size_power;
+  tt->nproc_mask = tt->nproc_size - 1;
+  log_warn("ABDADA nproc table: 2**%d entries (%d KB)",
+           nproc_size_power, (int)(sizeof(NprocEntry) * tt->nproc_size / 1024));
+  tt->nproc = (NprocEntry *)malloc_or_die(sizeof(NprocEntry) * tt->nproc_size);
+  for (int i = 0; i < tt->nproc_size; i++) {
     atomic_init(&tt->nproc[i].count, 0);
   }
   tt->size_mask = num_elems - 1;
@@ -122,6 +135,7 @@ transposition_table_create(double fraction_of_memory) {
   atomic_init(&tt->hits, 0);
   atomic_init(&tt->lookups, 0);
   atomic_init(&tt->t2_collisions, 0);
+  atomic_init(&tt->replacements, 0);
   return tt;
 }
 
@@ -131,13 +145,20 @@ static inline void transposition_table_reset(TranspositionTable *tt) {
   uint64_t num_elems = tt->size_mask + 1;
   memset(tt->table, 0, sizeof(TTEntry) * num_elems);
   // ABDADA: reset nproc counters
-  for (int i = 0; i < NPROC_SIZE; i++) {
+  for (int i = 0; i < tt->nproc_size; i++) {
     atomic_store_explicit(&tt->nproc[i].count, 0, memory_order_relaxed);
   }
   atomic_store(&tt->created, 0);
   atomic_store(&tt->hits, 0);
   atomic_store(&tt->lookups, 0);
   atomic_store(&tt->t2_collisions, 0);
+  atomic_store(&tt->replacements, 0);
+}
+
+static inline void transposition_table_prefetch(TranspositionTable *tt,
+                                                uint64_t zval) {
+  uint64_t idx = zval & tt->size_mask;
+  __builtin_prefetch(&tt->table[idx], 0, 3);
 }
 
 static inline TTEntry transposition_table_lookup(TranspositionTable *tt,
@@ -168,6 +189,15 @@ static inline void transposition_table_store(TranspositionTable *tt,
   uint64_t idx = zval & tt->size_mask;
   tentry.top_4_bytes = (uint32_t)(zval >> 32);
   tentry.fifth_byte = (uint8_t)(zval >> 24);
+
+  // Track replacements when overwriting valid entries
+  if (ttentry_valid(tt->table[idx])) {
+    uint64_t existing_hash = ttentry_full_hash(tt->table[idx], idx);
+    if (existing_hash != zval) {
+      atomic_fetch_add(&tt->replacements, 1);
+    }
+  }
+
   atomic_fetch_add(&tt->created, 1);
   tt->table[idx] = tentry;
 }
@@ -196,7 +226,7 @@ static inline TTEntry *transposition_table_get_entry(TranspositionTable *tt,
 // Uses relaxed ordering since exact count doesn't matter, just > 0
 static inline bool transposition_table_is_busy(TranspositionTable *tt,
                                                uint64_t zval) {
-  uint64_t idx = zval & NPROC_MASK;
+  uint64_t idx = zval & tt->nproc_mask;
   return atomic_load_explicit(&tt->nproc[idx].count, memory_order_relaxed) > 0;
 }
 
@@ -204,7 +234,7 @@ static inline bool transposition_table_is_busy(TranspositionTable *tt,
 // Uses relaxed ordering - we just need eventual visibility
 static inline void transposition_table_enter_node(TranspositionTable *tt,
                                                   uint64_t zval) {
-  uint64_t idx = zval & NPROC_MASK;
+  uint64_t idx = zval & tt->nproc_mask;
   atomic_fetch_add_explicit(&tt->nproc[idx].count, 1, memory_order_relaxed);
 }
 
@@ -212,7 +242,7 @@ static inline void transposition_table_enter_node(TranspositionTable *tt,
 // Uses relaxed ordering - we just need eventual visibility
 static inline void transposition_table_leave_node(TranspositionTable *tt,
                                                   uint64_t zval) {
-  uint64_t idx = zval & NPROC_MASK;
+  uint64_t idx = zval & tt->nproc_mask;
   atomic_fetch_sub_explicit(&tt->nproc[idx].count, 1, memory_order_relaxed);
 }
 

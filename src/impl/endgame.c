@@ -242,7 +242,8 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   } else if (es->tt_fraction_of_mem != endgame_args->tt_fraction_of_mem) {
     transposition_table_destroy(es->transposition_table);
     es->transposition_table =
-        transposition_table_create(endgame_args->tt_fraction_of_mem);
+        transposition_table_create(endgame_args->tt_fraction_of_mem,
+                                   NPROC_SIZE_POWER_DEFAULT);
   }
   es->tt_fraction_of_mem = endgame_args->tt_fraction_of_mem;
 }
@@ -444,6 +445,9 @@ char *create_spaces(int depth) {
 // void print_small_plays(EndgameSolverWorker *worker, int nplays,
 //                        int cur_move_loc) {}
 
+// Maximum number of moves that can be deferred per node for ABDADA
+enum { MAX_DEFERRED_MOVES = 64 };
+
 int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
                 int32_t alpha, int32_t beta, PVLine *pv, bool pv_node) {
 
@@ -527,6 +531,11 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
   const int num_threads = worker->solver->threads;
   const int slice = worker->thread_index % num_threads;
 
+  // ABDADA: track deferred moves (moves where another thread is already searching)
+  int deferred_indices[MAX_DEFERRED_MOVES];
+  int num_deferred = 0;
+  const bool use_abdada = (num_threads > 1) && worker->solver->transposition_table_optim;
+
   // log_warn("Iterating through %d plays", nplays);
   for (int i = 0; i < nplays; i++) {
     // Convert linear index to sliced index at root
@@ -597,7 +606,27 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
           on_turn_idx == worker->solver->solving_player,
           game_get_consecutive_scoreless_turns(worker->game_copy),
           last_consecutive_scoreless_turns);
+    }
 
+    // ABDADA: for non-first moves, check if another thread is searching this node
+    // If so, defer it - we'll search it later when hopefully there's a TT entry
+    if (use_abdada && i > 0 && num_deferred < MAX_DEFERRED_MOVES) {
+      if (transposition_table_is_busy(worker->solver->transposition_table, child_key)) {
+        // Defer this move - unplay and continue to next
+        unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_index]);
+        const MoveUndo *current_undo = &worker->move_undos[undo_index];
+        if (current_undo->move_tiles_length > 0) {
+          update_cross_sets_after_unplay_from_undo(current_undo, worker->game_copy);
+          board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
+        }
+        deferred_indices[num_deferred++] = idx;
+        continue;
+      }
+    }
+
+    // ABDADA: mark this node as being searched
+    if (use_abdada) {
+      transposition_table_enter_node(worker->solver->transposition_table, child_key);
     }
 
     int32_t value = 0;
@@ -613,6 +642,12 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
                         pv_node);
       }
     }
+
+    // ABDADA: mark this node as no longer being searched
+    if (use_abdada) {
+      transposition_table_leave_node(worker->solver->transposition_table, child_key);
+    }
+
     unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_index]);
     // After unplay, if tiles were placed, cross-sets need to be recomputed
     // for the restored state. Use undo-based function for correct cross-set
@@ -661,6 +696,77 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
       break;
     }
     // clear the child node's pv for the next child node
+    pvline_clear(&child_pv);
+  }
+
+  // ABDADA: search deferred moves (nodes that were busy during first pass)
+  // These should now have TT entries from the other thread's search
+  for (int d = 0; d < num_deferred && best_value < beta; d++) {
+    int idx = deferred_indices[d];
+    size_t element_offset = arena_offset + idx * sizeof(SmallMove);
+    SmallMove *small_move =
+        (SmallMove *)(worker->small_move_arena->memory + element_offset);
+    small_move_to_move(worker->move_list->spare_move, small_move,
+                       game_get_board(worker->game_copy));
+
+    const Rack *stm_rack = player_get_rack(player_on_turn);
+    const int stm_rack_tiles = rack_get_total_letters(stm_rack);
+    const bool is_outplay =
+        small_move_get_tiles_played(small_move) == stm_rack_tiles;
+
+    int last_consecutive_scoreless_turns =
+        game_get_consecutive_scoreless_turns(worker->game_copy);
+    int undo_index = worker->solver->requested_plies - depth;
+
+    if (is_outplay) {
+      play_move_endgame_outplay(worker->move_list->spare_move,
+                                worker->game_copy,
+                                &worker->move_undos[undo_index]);
+    } else {
+      play_move_incremental(worker->move_list->spare_move, worker->game_copy,
+                            &worker->move_undos[undo_index]);
+    }
+
+    worker->solver->nodes_searched++;
+
+    uint64_t child_key = zobrist_add_move(
+        worker->solver->transposition_table->zobrist, node_key,
+        worker->move_list->spare_move, stm_rack,
+        on_turn_idx == worker->solver->solving_player,
+        game_get_consecutive_scoreless_turns(worker->game_copy),
+        last_consecutive_scoreless_turns);
+
+    // Don't defer again - search immediately
+    transposition_table_enter_node(worker->solver->transposition_table, child_key);
+
+    int32_t value = negamax(worker, child_key, depth - 1, -alpha - 1, -alpha,
+                            &child_pv, false);
+    if (alpha < -value && -value < beta) {
+      value = negamax(worker, child_key, depth - 1, -beta, -alpha, &child_pv,
+                      pv_node);
+    }
+
+    transposition_table_leave_node(worker->solver->transposition_table, child_key);
+
+    unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_index]);
+    const MoveUndo *current_undo = &worker->move_undos[undo_index];
+    if (current_undo->move_tiles_length > 0) {
+      update_cross_sets_after_unplay_from_undo(current_undo, worker->game_copy);
+      board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
+    }
+
+    small_move =
+        (SmallMove *)(worker->small_move_arena->memory + element_offset);
+    if (-value > best_value) {
+      best_value = -value;
+      best_tiny_move = small_move->tiny_move;
+      pvline_update(pv, &child_pv, small_move,
+                    best_value - worker->solver->initial_spread);
+    }
+    if (worker->current_iterative_deepening_depth == depth) {
+      small_move_set_estimated_value(small_move, -value);
+    }
+    alpha = MAX(alpha, best_value);
     pvline_clear(&child_pv);
   }
 
@@ -960,11 +1066,13 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
     int tt_created = atomic_load(&solver->transposition_table->created);
     int tt_collisions =
         atomic_load(&solver->transposition_table->t2_collisions);
+    int tt_replacements =
+        atomic_load(&solver->transposition_table->replacements);
     log_warn("TT stats: lookups=%d, hits=%d (%.2f%%), created=%d, "
-             "t2_collisions=%d",
+             "collisions=%d, replacements=%d",
              tt_lookups, tt_hits,
-             100.0 * tt_hits / (tt_lookups > 0 ? tt_lookups : 1), tt_created,
-             tt_collisions);
+             100.0 * tt_hits / (tt_lookups > 0 ? tt_lookups : 1),
+             tt_created, tt_collisions, tt_replacements);
   }
 
   endgame_results_set_pvline(results, &solver->principal_variation);

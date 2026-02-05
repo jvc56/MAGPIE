@@ -164,6 +164,71 @@ static void run_endgames_with_pv(Config *config, EndgameSolver *solver,
   move_list_destroy(move_list);
 }
 
+// Quick benchmark: 10 random 7-ply endgames, returns total time
+static double run_quick_benchmark(int num_threads) {
+  const int num_games = 10;
+  const int ply = 7;
+  const uint64_t base_seed = 42;  // Fixed seed for reproducibility
+
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -threads 1 -s1 score -s2 score -r1 small -r2 small");
+
+  MoveList *move_list = move_list_create(1);
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+
+  EndgameSolver *solver = endgame_solver_create();
+  double total_time = 0.0;
+  int valid_endgames = 0;
+
+  for (int i = 0; valid_endgames < num_games; i++) {
+    game_reset(game);
+    game_seed(game, base_seed + (uint64_t)i);
+    draw_starting_racks(game);
+
+    if (!play_until_bag_empty(game, move_list)) {
+      continue;
+    }
+
+    printf("\n--- Game %d (seed %llu) ---\n", valid_endgames + 1,
+           (unsigned long long)(base_seed + (uint64_t)i));
+    StringBuilder *game_sb = string_builder_create();
+    GameStringOptions *gso = game_string_options_create_default();
+    string_builder_add_game(game, NULL, gso, NULL, game_sb);
+    printf("%s", string_builder_peek(game_sb));
+    string_builder_destroy(game_sb);
+    game_string_options_destroy(gso);
+
+    double game_start = get_time_sec();
+    EndgameArgs args = {.game = game,
+                        .thread_control = config_get_thread_control(config),
+                        .plies = ply,
+                        .tt_fraction_of_mem = 0.25,
+                        .initial_small_move_arena_size =
+                            DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                        .num_threads = num_threads,
+                        .per_ply_callback = print_pv_callback,
+                        .per_ply_callback_data = &game_start};
+    EndgameResults *results = config_get_endgame_results(config);
+    ErrorStack *err = error_stack_create();
+
+    endgame_solve(solver, &args, results, err);
+    double elapsed = get_time_sec() - game_start;
+    total_time += elapsed;
+
+    printf("  Game %d: %.2fs\n", valid_endgames + 1, elapsed);
+    assert(error_stack_is_empty(err));
+    error_stack_destroy(err);
+    valid_endgames++;
+  }
+
+  move_list_destroy(move_list);
+  endgame_solver_destroy(solver);
+  config_destroy(config);
+
+  return total_time;
+}
+
 void test_benchmark_endgame(void) {
   log_set_level(LOG_WARN);  // Allow warnings to show diagnostics
 
@@ -186,4 +251,21 @@ void test_benchmark_endgame(void) {
   endgame_solver_destroy(solver);
 
   config_destroy(config);
+}
+
+void test_quick_benchmark(void) {
+  log_set_level(LOG_WARN);
+
+  // Get thread count from environment variable, default to 1
+  const char *threads_env = getenv("BENCH_THREADS");
+  int num_threads = threads_env ? atoi(threads_env) : 1;
+  if (num_threads < 1) num_threads = 1;
+
+  printf("\n=== Quick Benchmark: 10 random 7-ply endgames, %d thread(s) ===\n",
+         num_threads);
+
+  double total = run_quick_benchmark(num_threads);
+  double avg = total / 10.0;
+
+  printf("\nTotal: %.2fs, Average: %.2fs per position\n", total, avg);
 }

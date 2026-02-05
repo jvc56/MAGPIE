@@ -4,7 +4,8 @@
 
 void test_transposition_table(void) {
   // Ensure that tt size is 2**24 in size by passing in 0.
-  TranspositionTable *tt = transposition_table_create(0);
+  // Use NPROC_SIZE_POWER_DEFAULT for nproc table (4K entries)
+  TranspositionTable *tt = transposition_table_create(0, NPROC_SIZE_POWER_DEFAULT);
   assert(tt->size_power_of_2 == 24);
 
   TTEntry entry;
