@@ -40,13 +40,6 @@ thread_control_get_status(ThreadControl *thread_control) {
   return status;
 }
 
-// Lock-free read - no mutex, just read the status directly
-// This is unsafe in general but works for WASM where we're just polling
-thread_control_status_t
-thread_control_get_status_unsafe(ThreadControl *thread_control) {
-  return thread_control->status;
-}
-
 // Returns true if the status was set successfully.
 // Returns false if the exit status remains unchanged.
 bool thread_control_set_status(ThreadControl *thread_control,

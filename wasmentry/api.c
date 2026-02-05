@@ -1,10 +1,10 @@
-#include "../src/impl/cmd_api.h"
-#include "../src/impl/exec.h"
-#include "../src/impl/config.h"
-#include "../src/ent/thread_control.h"
-#include "../src/util/io_util.h"
-#include "../src/util/fileproxy.h"
 #include "../src/compat/cpthread.h"
+#include "../src/ent/thread_control.h"
+#include "../src/impl/cmd_api.h"
+#include "../src/impl/config.h"
+#include "../src/impl/exec.h"
+#include "../src/util/fileproxy.h"
+#include "../src/util/io_util.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -88,7 +88,7 @@ void wasm_run_command_async(const char *command) {
 
   cpthread_t thread;
   cpthread_create(&thread, wasm_command_thread_worker, args);
-  cpthread_detach(thread);  // Don't need to join - let it run independently
+  cpthread_detach(thread); // Don't need to join - let it run independently
 }
 
 char *wasm_get_output(void) {
@@ -126,7 +126,7 @@ int wasm_get_thread_status(void) {
   if (!tc) {
     return 0;
   }
-  return (int)thread_control_get_status_unsafe(tc);
+  return (int)thread_control_get_status(tc);
 }
 
 void wasm_stop_command(void) {

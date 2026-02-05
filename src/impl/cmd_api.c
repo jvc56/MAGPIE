@@ -54,9 +54,9 @@ char *magpie_get_last_command_output(const Magpie *mp) {
   return string_duplicate(mp->output);
 }
 
-void magpie_stop_current_command(Magpie *mp) {
+void magpie_stop_current_command(const Magpie *mp) {
   ThreadControl *tc = config_get_thread_control(mp->config);
   thread_control_set_status(tc, THREAD_CONTROL_STATUS_USER_INTERRUPT);
 }
 
-Config *magpie_get_config(Magpie *mp) { return mp->config; }
+Config *magpie_get_config(const Magpie *mp) { return mp->config; }
