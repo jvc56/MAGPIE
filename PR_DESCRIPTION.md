@@ -2,7 +2,9 @@
 
 ## Summary
 
-This PR implements ABDADA (Alpha-Beta Distributed Distributed Algorithm) for multi-threaded endgame solving, achieving significant speedups on deep endgame searches.
+This PR implements ABDADA (Alpha-Bêta Distribué avec Droit d'Aînesse = Distributed Alpha-Beta Search with Eldest Son Right) for multi-threaded endgame solving, achieving significant speedups on deep endgame searches.
+
+ABDADA was developed by Jean-Christophe Weill and combines concepts from Young Brothers Wait Concept (YBWC) with a shared transposition table approach. The key insight is that the eldest (first) son at each node is always searched, while younger siblings are searched "exclusively" - meaning they're deferred if another processor is already searching them.
 
 ## Performance Results
 
@@ -23,11 +25,12 @@ The single-threaded speedup comes primarily from aspiration windows, which narro
 ## Key Algorithmic Improvements
 
 ### 1. ABDADA Parallel Search
-ABDADA is a parallel alpha-beta algorithm that uses a shared transposition table with "nproc" tracking to coordinate work between threads:
+ABDADA coordinates parallel search using the "eldest son right" principle:
 
-- **Exclusive node searching**: Non-first moves are searched "exclusively" - if another thread is already searching the same node, the move is deferred
-- **Two-phase iteration**: First phase searches moves exclusively; second phase revisits deferred moves
-- **Reduced search overlap**: Threads explore different parts of the search tree rather than duplicating work
+- **Eldest son always searched**: The first move at each node is always searched immediately (like YBWC)
+- **Younger siblings searched exclusively**: Non-first moves check if another processor is already searching that node; if so, the move is deferred
+- **Two-phase iteration**: First phase searches moves exclusively; second phase revisits any deferred moves
+- **nproc tracking**: A counter in the transposition table tracks how many processors are currently searching each node
 
 Key implementation details:
 - Separate 256KB nproc table (vs multi-GB TT) for better cache locality
