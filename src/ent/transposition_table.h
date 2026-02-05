@@ -47,6 +47,7 @@ inline static uint64_t ttentry_full_hash(TTEntry t, uint64_t index,
   return (stored_hash << size_power) | index;
 #else
   // Native: Store 40 bits, take bottom 24 bits from index
+  (void)size_power; // Unused in native build
   return ((uint64_t)(t.top_4_bytes) << 32) + ((uint64_t)(t.fifth_byte) << 24) +
          (index & BOTTOM3_BYTE_MASK);
 #endif
@@ -114,7 +115,8 @@ transposition_table_create(double fraction_of_memory) {
   size_t memory_mb = (sizeof(TTEntry) * num_elems) / (1024 * 1024);
   log_info("Creating transposition table. System memory: %llu, TT size: 2^%d "
            "(elements: %d, memory: %zu MB)",
-           (unsigned long long)total_memory, tt->size_power_of_2, num_elems, memory_mb);
+           (unsigned long long)total_memory, tt->size_power_of_2, num_elems,
+           memory_mb);
   tt->table = malloc_or_die(sizeof(TTEntry) * num_elems);
   memset(tt->table, 0, sizeof(TTEntry) * num_elems);
   tt->size_mask = num_elems - 1;

@@ -1,6 +1,7 @@
 #include "cmd_api.h"
 
 #include "../ent/thread_control.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "config.h"
 #include "exec.h"
