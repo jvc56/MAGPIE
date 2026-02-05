@@ -28,10 +28,11 @@ static inline uint64_t get_total_memory(void) {
 #if defined(__EMSCRIPTEN__)
   // WASM/Emscripten implementation
   // Return the heap size via EM_ASM
-  // cppcheck-suppress syntaxError
+  // cppcheck-suppress-begin syntaxError
   total_memory = EM_ASM_INT({
     return HEAP8.length;
   });
+  // cppcheck-suppress-end
 
 #elif defined(_WIN32) || defined(_WIN64)
   // Windows implementation
@@ -101,12 +102,13 @@ static inline int get_num_cores(void) {
 #if defined(__EMSCRIPTEN__)
   // WASM/Emscripten: Use navigator.hardwareConcurrency via JS
   // For now, return a reasonable default
-  // cppcheck-suppress syntaxError
+  // cppcheck-suppress-begin syntaxError
   core_count = EM_ASM_INT({
     return (typeof navigator !== 'undefined' && navigator.hardwareConcurrency)
            ? navigator.hardwareConcurrency
            : 4;
   });
+  // cppcheck-suppress-end
 
 #elif defined(_WIN32) || defined(_WIN64)
                       // === Implementation for Windows ===
