@@ -794,6 +794,9 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
 
     int32_t val;
 
+    // Track whether this depth's search completed validly
+    bool search_valid = true;
+
     // Use aspiration windows after depth 1
     if (use_aspiration && p > 1 && !worker->solver->first_win_optim) {
       int32_t window = ASPIRATION_WINDOW;
@@ -804,6 +807,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
       while (true) {
         // Check if another thread completed
         if (atomic_load(&worker->solver->search_complete) != 0) {
+          search_valid = false;
           break;
         }
 
@@ -828,6 +832,11 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     } else {
       // Full window search for depth 1 or when aspiration disabled
       val = abdada_negamax(worker, initial_hash_key, p, alpha, beta, &pv, true, false);
+    }
+
+    // If search was interrupted, don't store results for this depth
+    if (!search_valid) {
+      break;
     }
 
     prev_value = val;

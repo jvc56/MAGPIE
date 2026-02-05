@@ -15,10 +15,11 @@ Benchmarked on 10 games with 7-ply depth (CSW24, seed 42):
 | Main branch (1 thread) | 431.7s | baseline |
 | ABDADA (1 thread) | 117.0s | 3.7x |
 | ABDADA (6 threads) | 62.6s | 6.9x |
+| ABDADA (8 threads) | 51.8s | 8.3x |
 
 - **Algorithm improvements alone**: 3.7x speedup (even single-threaded) - primarily from aspiration windows
-- **Parallel efficiency**: 53% with 6 threads (1.87x additional speedup)
-- **Total speedup**: 6.9x with 6 threads over the baseline
+- **Parallel scaling**: 2.26x with 8 threads over single-threaded ABDADA
+- **Total speedup**: 8.3x with 8 threads over the baseline
 
 The single-threaded speedup comes primarily from aspiration windows, which narrow the alpha-beta search window based on the previous iteration's result, allowing more aggressive pruning.
 
