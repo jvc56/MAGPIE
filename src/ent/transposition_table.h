@@ -173,13 +173,6 @@ static inline void transposition_table_destroy(TranspositionTable *tt) {
 // ABDADA functions for tracking concurrent node searches
 // Uses a smaller table (256K entries) with relaxed memory ordering for speed
 
-// Get pointer to TT entry (for checking nproc without copying)
-static inline TTEntry *transposition_table_get_entry(TranspositionTable *tt,
-                                                     uint64_t zval) {
-  uint64_t idx = zval & tt->size_mask;
-  return &tt->table[idx];
-}
-
 // Check if node is being searched by another processor
 // Uses relaxed ordering since exact count doesn't matter, just > 0
 static inline bool transposition_table_is_busy(TranspositionTable *tt,

@@ -259,15 +259,6 @@ EndgameSolver *endgame_solver_create(void) {
   return es;
 }
 
-void endgame_solver_reset_tt(EndgameSolver *es) {
-  if (!es || !es->transposition_table) {
-    return;
-  }
-  double fraction = es->tt_fraction_of_mem;
-  transposition_table_destroy(es->transposition_table);
-  es->transposition_table = transposition_table_create(fraction);
-}
-
 void endgame_solver_destroy(EndgameSolver *es) {
   if (!es) {
     return;
@@ -365,9 +356,6 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
 
 void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
                                int move_count, uint64_t tt_move) {
-  // assign estimates to arena plays.
-  // log_warn("assigning estimates; depth %d, arena_begin %d, move_count %d",
-  //          depth, worker->small_move_arena->size, move_count);
   const int player_index = game_get_player_on_turn_index(worker->game_copy);
   const Player *player = game_get_player(worker->game_copy, player_index);
   const Player *opponent = game_get_player(worker->game_copy, 1 - player_index);
@@ -389,8 +377,6 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
     size_t element_offset = arena_offset + i * sizeof(SmallMove);
     SmallMove *current_move =
         (SmallMove *)(worker->small_move_arena->memory + element_offset);
-    // log_warn("assign estimate to move idx %d, tm %x, meta %x", i,
-    //          current_move->tiny_move, current_move->metadata);
     if (small_move_get_tiles_played(current_move) == ntiles_on_rack) {
       small_move_set_estimated_value(
           current_move,
@@ -441,25 +427,6 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
   qsort(small_moves, move_count, sizeof(SmallMove),
         compare_small_moves_by_estimated_value);
 }
-
-// XXX: Move this debug helper to a utility function or something.
-char *create_spaces(int depth) {
-  // Allocate memory for the string of spaces (+1 for the null terminator)
-  char *spaces = (char *)malloc_or_die(depth + 1);
-
-  // Fill the string with spaces
-  for (int i = 0; i < depth; i++) {
-    spaces[i] = ' ';
-  }
-
-  // Null-terminate the string
-  spaces[depth] = '\0';
-
-  return spaces;
-}
-
-// void print_small_plays(EndgameSolverWorker *worker, int nplays,
-//                        int cur_move_loc) {}
 
 int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
                        int depth, int32_t alpha, int32_t beta, PVLine *pv,
@@ -549,19 +516,15 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   child_pv.num_moves = 0;
 
   int nplays;
-  // char *spaces = create_spaces(worker->solver->requested_plies - depth);
   bool arena_alloced = false;
   if (worker->current_iterative_deepening_depth != depth) {
     nplays = generate_stm_plays(worker, depth);
     assign_estimates_and_sort(worker, depth, nplays, tt_move);
-    // log_warn("generated and allocated; nplays %d, cur_size %ld", nplays,
-    //          worker->small_move_arena->size);
     arena_alloced = true;
   } else {
     // Use initial moves. They already have been sorted by estimated value.
     nplays = worker->solver->n_initial_moves;
   }
-  // print_small_plays(worker, nplays, cur_move_loc);
 
   int32_t best_value = -LARGE_VALUE;
   uint64_t best_tiny_move = INVALID_TINY_MOVE;
@@ -747,9 +710,6 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
 
   if (arena_alloced) {
     arena_dealloc(worker->small_move_arena, nplays * sizeof(SmallMove));
-    // log_warn("arena_dealloced; new size: %ld",
-    // worker->small_move_arena->size); printf("%sReset back to %ld\n", spaces,
-    // worker->small_move_arena->size);
   }
 
   // ABDADA: leave node before returning
@@ -758,7 +718,6 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
                                    node_key);
   }
 
-  // free(spaces);
   return best_value;
 }
 
@@ -796,10 +755,6 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   worker->solver->n_initial_moves = initial_move_count;
   assert((size_t)worker->small_move_arena->size ==
          initial_move_count * sizeof(SmallMove));
-  // log_warn("Generated %d initial moves; pointer is at %d",
-  // initial_move_count,
-  //          worker->small_move_arena->size);
-  // SmallMove last_winner;
 
   worker->current_iterative_deepening_depth = 1;
   int start = 1;
