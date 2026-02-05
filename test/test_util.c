@@ -791,8 +791,7 @@ ValidatedMoves *validated_moves_create_and_assert_status(
   return vms;
 }
 
-error_code_t config_simulate_and_return_status(const Config *config,
-                                               SimCtx **sim_ctx,
+error_code_t config_simulate_and_return_status(Config *config, SimCtx **sim_ctx,
                                                Rack *known_opp_rack,
                                                SimResults *sim_results) {
   ErrorStack *error_stack = error_stack_create();

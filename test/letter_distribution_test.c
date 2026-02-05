@@ -143,7 +143,169 @@ void test_ld_str_to_mls(void) {
   config_destroy(disc_config);
 }
 
+void test_fast_str_to_mls(void) {
+  Config *nwl_config = config_create_or_die(
+      "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
+  load_and_exec_config_or_die(nwl_config, "set -ld EnGlIsH");
+  const LetterDistribution *english_ld = config_get_ld(nwl_config);
+
+  Config *disc_config = config_create_or_die(
+      "set -lex DISC2 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  const LetterDistribution *catalan_ld = config_get_ld(disc_config);
+
+  Config *osps_config =
+      config_create_or_die("set -lex OSPS49 -wmp false -s1 equity -s2 equity "
+                           "-r1 all -r2 all -numplays 1");
+  const LetterDistribution *polish_ld = config_get_ld(osps_config);
+
+  // Initialize fast converters
+  FastStringConverter fc_english;
+  FastStringConverter fc_catalan;
+  FastStringConverter fc_polish;
+  fast_converter_init(&fc_english, english_ld);
+  fast_converter_init(&fc_catalan, catalan_ld);
+  fast_converter_init(&fc_polish, polish_ld);
+
+  // Verify ASCII lookup table is populated correctly for English
+  // A=1, B=2, ..., Z=26, ?=0
+  assert(fc_english.ascii_to_ml['A'] == 1);
+  assert(fc_english.ascii_to_ml['B'] == 2);
+  assert(fc_english.ascii_to_ml['Z'] == 26);
+  assert(fc_english.ascii_to_ml['?'] == 0);
+  // Lowercase should map to blanked letters
+  assert(fc_english.ascii_to_ml['a'] == get_blanked_machine_letter(1));
+  assert(fc_english.ascii_to_ml['z'] == get_blanked_machine_letter(26));
+  // Invalid characters should be INVALID_LETTER
+  assert(fc_english.ascii_to_ml['1'] == INVALID_LETTER);
+  assert(fc_english.ascii_to_ml['@'] == INVALID_LETTER);
+
+  MachineLetter mls[4];
+  MachineLetter mls_slow[4];
+  int num_mls = fast_str_to_mls(&fc_english, "??", false, mls, 4);
+  int num_mls_slow = ld_str_to_mls(english_ld, "??", false, mls_slow, 4);
+  assert(num_mls == num_mls_slow);
+  assert(num_mls == 2);
+  assert(mls[0] == mls_slow[0]);
+  assert(mls[1] == mls_slow[1]);
+
+  // English words - compare fast vs slow
+  MachineLetter emls[20];
+  MachineLetter emls_slow[20];
+  num_mls = fast_str_to_mls(&fc_english, "ABZ", false, emls, 20);
+  num_mls_slow = ld_str_to_mls(english_ld, "ABZ", false, emls_slow, 20);
+  assert(num_mls == num_mls_slow);
+  assert(num_mls == 3);
+  for (int ml_idx = 0; ml_idx < num_mls; ml_idx++) {
+    assert(emls[ml_idx] == emls_slow[ml_idx]);
+  }
+
+  // Test blanked letters (lowercase)
+  num_mls = fast_str_to_mls(&fc_english, "AbZ", false, emls, 20);
+  num_mls_slow = ld_str_to_mls(english_ld, "AbZ", false, emls_slow, 20);
+  assert(num_mls == num_mls_slow);
+  assert(num_mls == 3);
+  for (int ml_idx = 0; ml_idx < num_mls; ml_idx++) {
+    assert(emls[ml_idx] == emls_slow[ml_idx]);
+  }
+
+  // Catalan with multichar letters - fast path falls back to slow for non-ASCII
+  MachineLetter cmls[20];
+  MachineLetter cmls_slow[20];
+  num_mls =
+      fast_str_to_mls(&fc_catalan, "A[l·l]O[QU]IMI[qu]ES", false, cmls, 20);
+  num_mls_slow =
+      ld_str_to_mls(catalan_ld, "A[l·l]O[QU]IMI[qu]ES", false, cmls_slow, 20);
+  assert(num_mls == num_mls_slow);
+  assert(num_mls == 10);
+  for (int ml_idx = 0; ml_idx < num_mls; ml_idx++) {
+    assert(cmls[ml_idx] == cmls_slow[ml_idx]);
+  }
+
+  // Test consecutive multichar letters
+  MachineLetter cmls2[20];
+  MachineLetter cmls2_slow[20];
+  num_mls = fast_str_to_mls(&fc_catalan, "[L·L]ES[QU][qu]A[QU][qu]", false,
+                            cmls2, 20);
+  num_mls_slow = ld_str_to_mls(catalan_ld, "[L·L]ES[QU][qu]A[QU][qu]", false,
+                               cmls2_slow, 20);
+  assert(num_mls == num_mls_slow);
+  assert(num_mls == 8);
+  for (int ml_idx = 0; ml_idx < num_mls; ml_idx++) {
+    assert(cmls2[ml_idx] == cmls2_slow[ml_idx]);
+  }
+
+  // Polish with UTF-8 characters
+  MachineLetter pmls[20];
+  MachineLetter pmls_slow[20];
+  num_mls = fast_str_to_mls(&fc_polish, "FGÓIŁHAŃ", false, pmls, 20);
+  num_mls_slow = ld_str_to_mls(polish_ld, "FGÓIŁHAŃ", false, pmls_slow, 20);
+  assert(num_mls == num_mls_slow);
+  assert(num_mls == 8);
+  for (int ml_idx = 0; ml_idx < num_mls; ml_idx++) {
+    assert(pmls[ml_idx] == pmls_slow[ml_idx]);
+  }
+
+  num_mls = fast_str_to_mls(&fc_polish, "ŻŚŻGÓI", false, pmls, 20);
+  num_mls_slow = ld_str_to_mls(polish_ld, "ŻŚŻGÓI", false, pmls_slow, 20);
+  assert(num_mls == num_mls_slow);
+  assert(num_mls == 6);
+  for (int ml_idx = 0; ml_idx < num_mls; ml_idx++) {
+    assert(pmls[ml_idx] == pmls_slow[ml_idx]);
+  }
+
+  MachineLetter imls[40];
+  MachineLetter imls_slow[40];
+
+  // Playthrough tiles
+  num_mls = fast_str_to_mls(&fc_english, ".BDEF", true, imls, 40);
+  num_mls_slow = ld_str_to_mls(english_ld, ".BDEF", true, imls_slow, 40);
+  assert(num_mls == num_mls_slow);
+  assert(num_mls == 5);
+
+  num_mls = fast_str_to_mls(&fc_english, ".B.D.E.F..", true, imls, 40);
+  num_mls_slow = ld_str_to_mls(english_ld, ".B.D.E.F..", true, imls_slow, 40);
+  assert(num_mls == num_mls_slow);
+  assert(num_mls == 10);
+
+  num_mls = fast_str_to_mls(&fc_english, "$BDEF", true, imls, 40);
+  num_mls_slow = ld_str_to_mls(english_ld, "$BDEF", true, imls_slow, 40);
+  assert(num_mls == num_mls_slow);
+  assert(num_mls == 5);
+
+  // Invalid multichar strings - should return -1
+  assert(fast_str_to_mls(&fc_polish, "ŻŚ[Ż]GÓI", true, imls, 40) == -1);
+  assert(fast_str_to_mls(&fc_polish, "Ż[ŚŻ]GÓI", true, imls, 40) == -1);
+  assert(fast_str_to_mls(&fc_catalan, "A[ES]A", true, imls, 40) == -1);
+  assert(fast_str_to_mls(&fc_catalan, "ABCD[ABCEFGH]EGD", true, imls, 40) ==
+         -1);
+  assert(fast_str_to_mls(&fc_catalan, "[", true, imls, 40) == -1);
+  assert(fast_str_to_mls(&fc_catalan, "]", true, imls, 40) == -1);
+  assert(fast_str_to_mls(&fc_catalan, "[]", true, imls, 40) == -1);
+  assert(fast_str_to_mls(&fc_catalan, "ABC[DE", true, imls, 40) == -1);
+  assert(fast_str_to_mls(&fc_catalan, "ABCD]E", true, imls, 40) == -1);
+  assert(fast_str_to_mls(&fc_catalan, "ABC[D]E", true, imls, 40) == -1);
+  assert(fast_str_to_mls(&fc_catalan, "[L·L[QU]]ES", true, imls, 40) == -1);
+  assert(fast_str_to_mls(&fc_catalan, "[L·L]ES[QU][qu][]A[QU][qu]", true, imls,
+                         40) == -1);
+  assert(fast_str_to_mls(&fc_catalan, "[L·L]ES[QU][qu]A[QU][qu", true, imls,
+                         40) == -1);
+
+  // Invalid letters
+  assert(fast_str_to_mls(&fc_english, "2", true, imls, 40) == -1);
+  assert(fast_str_to_mls(&fc_english, "ABC9EFG", true, imls, 40) == -1);
+
+  // Play through not allowed
+  assert(fast_str_to_mls(&fc_english, "AB.F", false, imls, 40) == -1);
+  assert(fast_str_to_mls(&fc_english, "BEHF.", false, imls, 40) == -1);
+  assert(fast_str_to_mls(&fc_english, ".BDEF", false, imls, 40) == -1);
+
+  config_destroy(nwl_config);
+  config_destroy(osps_config);
+  config_destroy(disc_config);
+}
+
 void test_ld(void) {
   test_ld_score_order();
   test_ld_str_to_mls();
+  test_fast_str_to_mls();
 }

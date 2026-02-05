@@ -193,12 +193,15 @@ void test_careen_career_exact_merged_gaddag(void) {
          kwg_gaddag_prefix_arc(kwg, ld, "R"));
 
   // But all of these merge to the same node.
-  uint32_t c_aree = kwg_gaddag_prefix_arc(kwg, ld, "C@AREE");
-  assert(c_aree != 0);
-  assert(kwg_gaddag_prefix_arc(kwg, ld, "AC@REE") == c_aree);
-  assert(kwg_gaddag_prefix_arc(kwg, ld, "RAC@EE") == c_aree);
-  assert(kwg_gaddag_prefix_arc(kwg, ld, "ERAC@E") == c_aree);
-  assert(kwg_gaddag_prefix_arc(kwg, ld, "EERAC@") == c_aree);
+  assert(kwg_gaddag_prefix_arc(kwg, ld, "C@AREE") != 0);
+  assert(kwg_gaddag_prefix_arc(kwg, ld, "AC@REE") ==
+         kwg_gaddag_prefix_arc(kwg, ld, "C@AREE"));
+  assert(kwg_gaddag_prefix_arc(kwg, ld, "RAC@EE") ==
+         kwg_gaddag_prefix_arc(kwg, ld, "C@AREE"));
+  assert(kwg_gaddag_prefix_arc(kwg, ld, "ERAC@E") ==
+         kwg_gaddag_prefix_arc(kwg, ld, "C@AREE"));
+  assert(kwg_gaddag_prefix_arc(kwg, ld, "EERAC@") ==
+         kwg_gaddag_prefix_arc(kwg, ld, "C@AREE"));
 
   dictionary_word_list_destroy(words);
   kwg_destroy(kwg);

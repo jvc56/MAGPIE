@@ -96,9 +96,8 @@ void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
                      const char *num_games_or_min_rack_targets,
                      int games_before_force_draw_start,
                      ErrorStack *error_stack);
-void config_simulate(const Config *config, SimCtx **sim_ctx,
-                     Rack *known_opp_rack, SimResults *sim_results,
-                     ErrorStack *error_stack);
+void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
+                     SimResults *sim_results, ErrorStack *error_stack);
 void config_convert(const Config *config, ConversionResults *results,
                     ErrorStack *error_stack);
 void config_parse_gcg(Config *config, const char *gcg_filename,

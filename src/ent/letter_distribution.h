@@ -44,6 +44,51 @@ typedef struct LetterDistribution {
   char ld_ml_to_alt_hl[MACHINE_LETTER_MAX_VALUE][MAX_LETTER_BYTE_LENGTH];
 } LetterDistribution;
 
+// Fast string-to-machine-letter converter using ASCII lookup table.
+// Create once from a LetterDistribution, then use for bulk conversions.
+typedef struct FastStringConverter {
+  MachineLetter ascii_to_ml[128]; // Direct lookup for ASCII 0-127
+  const LetterDistribution *ld;   // Fallback for non-ASCII
+} FastStringConverter;
+
+// Initialize a FastStringConverter from a LetterDistribution.
+// Call this once, then use fast_converter_hl_to_ml for fast lookups.
+static inline void fast_converter_init(FastStringConverter *fc,
+                                       const LetterDistribution *ld) {
+  fc->ld = ld;
+  // Initialize all ASCII entries to INVALID_LETTER
+  for (int ascii_code = 0; ascii_code < 128; ascii_code++) {
+    fc->ascii_to_ml[ascii_code] = INVALID_LETTER;
+  }
+  // Populate from ld_ml_to_hl for single-byte ASCII letters
+  for (int ml = 0; ml < MACHINE_LETTER_MAX_VALUE; ml++) {
+    const char *hl = ld->ld_ml_to_hl[ml];
+    // Check if it's a single ASCII character (byte 0 is 0-127, byte 1 is '\0')
+    if (hl[0] != '\0' && hl[1] == '\0' && (unsigned char)hl[0] < 128) {
+      fc->ascii_to_ml[(unsigned char)hl[0]] = ml;
+    }
+  }
+}
+
+// Fast human-readable letter to machine letter conversion.
+// For single ASCII chars, uses O(1) lookup. Falls back to linear search
+// otherwise.
+static inline MachineLetter
+fast_converter_hl_to_ml(const FastStringConverter *fc, const char *letter) {
+  // Fast path: single ASCII character
+  if (letter[0] != '\0' && letter[1] == '\0' &&
+      (unsigned char)letter[0] < 128) {
+    return fc->ascii_to_ml[(unsigned char)letter[0]];
+  }
+  // Slow path: multi-byte or non-ASCII, linear search
+  for (int ml = 0; ml < MACHINE_LETTER_MAX_VALUE; ml++) {
+    if (strings_equal(fc->ld->ld_ml_to_hl[ml], letter)) {
+      return ml;
+    }
+  }
+  return INVALID_LETTER;
+}
+
 static inline MachineLetter get_blanked_machine_letter(MachineLetter ml) {
   return ml | BLANK_MASK;
 }
@@ -451,6 +496,131 @@ static inline int ld_str_to_mls(const LetterDistribution *ld, const char *str,
           ml = PLAYED_THROUGH_MARKER;
         } else {
           // letter is invalid
+          return -1;
+        }
+      }
+      mls[num_mls] = ml;
+      num_mls++;
+      current_letter_byte_index = 0;
+      number_of_letters_in_builder = 0;
+    }
+  }
+  if (building_multichar_letter || current_code_point_bytes_remaining != 0) {
+    return -1;
+  }
+  return num_mls;
+}
+
+// Super fast ASCII-only path for pure ASCII strings (no UTF-8, no multichar).
+// Returns -1 if string contains non-ASCII or multichar delimiters.
+static inline int fast_str_to_mls_ascii(const FastStringConverter *fc,
+                                        const char *str, MachineLetter *mls,
+                                        size_t mls_size) {
+  int num_mls = 0;
+  for (const char *p = str; *p != '\0'; p++) {
+    unsigned char c = (unsigned char)*p;
+    // Bail to slow path if non-ASCII or multichar delimiter
+    if (c >= 128 || c == MULTICHAR_START_DELIMITER ||
+        c == MULTICHAR_END_DELIMITER) {
+      return -1;
+    }
+    if (num_mls >= (int)mls_size) {
+      return -1;
+    }
+    MachineLetter ml = fc->ascii_to_ml[c];
+    if (ml == INVALID_LETTER) {
+      return -1;
+    }
+    mls[num_mls++] = ml;
+  }
+  return num_mls;
+}
+
+// Fast version of ld_str_to_mls using a pre-built FastStringConverter.
+// Same interface as ld_str_to_mls but uses O(1) ASCII lookup.
+static inline int fast_str_to_mls(const FastStringConverter *fc,
+                                  const char *str,
+                                  bool allow_played_through_marker,
+                                  MachineLetter *mls, size_t mls_size) {
+  assert(str != NULL);
+
+  // Try super fast ASCII path first (no UTF-8 handling, no multichar)
+  if (!allow_played_through_marker) {
+    int result = fast_str_to_mls_ascii(fc, str, mls, mls_size);
+    if (result >= 0) {
+      return result;
+    }
+    // Fall through to slow path if ASCII path failed
+  }
+
+  int num_mls = 0;
+  size_t num_bytes = string_length(str);
+  char current_letter[MAX_LETTER_BYTE_LENGTH + 1];
+  int current_letter_byte_index = 0;
+  bool building_multichar_letter = false;
+  int current_code_point_bytes_remaining = 0;
+  int number_of_letters_in_builder = 0;
+
+  for (size_t byte_idx = 0; byte_idx < num_bytes; byte_idx++) {
+    char current_char = str[byte_idx];
+    switch (current_char) {
+    case MULTICHAR_START_DELIMITER:
+      if (building_multichar_letter || current_code_point_bytes_remaining > 0) {
+        return -1;
+      }
+      building_multichar_letter = true;
+      break;
+    case MULTICHAR_END_DELIMITER:
+      if (!building_multichar_letter || number_of_letters_in_builder < 2 ||
+          current_code_point_bytes_remaining > 0) {
+        return -1;
+      }
+      building_multichar_letter = false;
+      break;
+    default:
+      if (current_letter_byte_index == MAX_LETTER_BYTE_LENGTH) {
+        return -1;
+      }
+
+      int number_of_bytes_for_code_point =
+          get_number_of_utf8_bytes_for_code_point(current_char);
+
+      if (number_of_bytes_for_code_point < 0) {
+        return -1;
+      }
+
+      if (number_of_bytes_for_code_point > 0 &&
+          current_code_point_bytes_remaining > 0) {
+        return -1;
+      }
+
+      if (!building_multichar_letter && number_of_bytes_for_code_point > 0) {
+        current_code_point_bytes_remaining = number_of_bytes_for_code_point;
+      } else if (number_of_bytes_for_code_point != 0) {
+        number_of_letters_in_builder++;
+      }
+
+      current_letter[current_letter_byte_index] = current_char;
+      current_letter_byte_index++;
+      current_letter[current_letter_byte_index] = '\0';
+
+      if (current_code_point_bytes_remaining > 0) {
+        current_code_point_bytes_remaining--;
+      }
+      break;
+    }
+
+    if (!building_multichar_letter && current_code_point_bytes_remaining == 0) {
+      if (num_mls >= (int)mls_size) {
+        return -1;
+      }
+      // Use fast converter instead of slow ld_hl_to_ml
+      MachineLetter ml = fast_converter_hl_to_ml(fc, current_letter);
+      if (ml == INVALID_LETTER) {
+        if (current_letter_byte_index == 1 && allow_played_through_marker &&
+            char_is_playthrough(current_char)) {
+          ml = PLAYED_THROUGH_MARKER;
+        } else {
           return -1;
         }
       }

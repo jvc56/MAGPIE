@@ -86,8 +86,7 @@ ValidatedMoves *validated_moves_create_and_assert_status(
     const Game *game, int player_index, const char *ucgi_moves_string,
     bool allow_phonies, bool allow_unknown_exchanges, bool allow_playthrough,
     error_code_t expected_status);
-error_code_t config_simulate_and_return_status(const Config *config,
-                                               SimCtx **sim_ctx,
+error_code_t config_simulate_and_return_status(Config *config, SimCtx **sim_ctx,
                                                Rack *known_opp_rack,
                                                SimResults *sim_results);
 void game_play_n_events_or_die(GameHistory *game_history, Game *game,
