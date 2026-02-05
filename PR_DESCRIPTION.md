@@ -16,13 +16,11 @@ Benchmarked on 10 games with 7-ply depth (CSW24, seed 42):
 | ABDADA (1 thread) | 117.0s | 3.7x |
 | ABDADA (6 threads) | 62.6s | 6.9x |
 
-- **Algorithm improvements alone**: 3.7x speedup (even single-threaded) - from aspiration windows + incremental play/unplay
+- **Algorithm improvements alone**: 3.7x speedup (even single-threaded) - primarily from aspiration windows
 - **Parallel efficiency**: 53% with 6 threads (1.87x additional speedup)
 - **Total speedup**: 6.9x with 6 threads over the baseline
 
-The single-threaded speedups come from:
-1. **Aspiration windows**: Narrow the alpha-beta search window based on the previous iteration's result, allowing more aggressive pruning
-2. **Incremental play/unplay**: Use MoveUndo to efficiently backup and restore game state instead of full copy/restore
+The single-threaded speedup comes primarily from aspiration windows, which narrow the alpha-beta search window based on the previous iteration's result, allowing more aggressive pruning.
 
 ## Key Algorithmic Improvements
 
@@ -46,16 +44,7 @@ After depth 1, searches use a narrow window (±25) centered on the previous iter
 - Automatic re-search with wider windows on fail-high/fail-low
 - Disabled for first-win optimization mode
 
-### 3. Incremental Play/Unplay
-Instead of copying and restoring the full game state at each node, the search uses:
-- `play_move_incremental()` / `play_move_endgame_outplay()` to make moves with minimal state backup
-- `unplay_move_incremental()` to restore state from a `MoveUndo` structure
-- Lazy cross-set computation (only recompute when needed for move generation)
-- Optimized outplay path that skips board updates when the player is going out
-
-This reduces the per-node overhead significantly, especially in deep searches.
-
-### 4. Lazy SMP Move Ordering Jitter
+### 3. Lazy SMP Move Ordering Jitter
 Different threads use different move ordering heuristics to explore different branches first:
 - Thread 0: Pure score-based ordering (the "main" thread)
 - Odd threads: Favor moves that play more tiles
@@ -64,16 +53,16 @@ Different threads use different move ordering heuristics to explore different br
 
 This ensures threads don't all search the same moves in the same order.
 
-### 5. Per-Thread PRNG
+### 4. Per-Thread PRNG
 Each worker thread has its own Xoshiro PRNG seeded uniquely, enabling deterministic jitter without synchronization overhead.
 
-### 6. Atomic Node Counting
+### 5. Atomic Node Counting
 Thread-safe node counting using `atomic_fetch_add` for accurate statistics across all threads.
 
-### 7. Early Termination
+### 6. Early Termination
 Threads check `atomic search_complete` flag and can stop early when another thread has completed the full search.
 
-### 8. Per-Ply Callback
+### 7. Per-Ply Callback
 New callback mechanism for iterative deepening progress:
 ```c
 typedef void (*EndgamePerPlyCallback)(int depth, int32_t value,
