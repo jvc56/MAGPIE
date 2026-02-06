@@ -3,5 +3,6 @@
 
 void test_endgame(void);
 void test_endgame_wasm(void);
+void test_14domino(void);
 
 #endif
