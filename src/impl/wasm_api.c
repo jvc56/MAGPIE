@@ -38,7 +38,8 @@ void wasm_load_command(const char *cmd) {
 
 void wasm_init_configs(const char *paths) {
   iso_error_stack = error_stack_create();
-  ConfigArgs args = {.data_paths = paths, .settings_filename = NULL, .use_wmp = false};
+  ConfigArgs args = {
+      .data_paths = paths, .settings_filename = NULL, .use_wmp = false};
   iso_config = config_create(&args, iso_error_stack);
   if (!error_stack_is_empty(iso_error_stack)) {
     error_stack_print_and_reset(iso_error_stack);

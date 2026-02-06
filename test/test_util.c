@@ -171,7 +171,8 @@ char *cross_set_to_string(const LetterDistribution *ld, uint64_t input) {
 Config *config_create_default_test(void) {
   ErrorStack *error_stack = error_stack_create();
   ConfigArgs args = {.data_paths = DEFAULT_TEST_DATA_PATH,
-                     .settings_filename = DEFAULT_TEST_SETTINGS_FILENAME, .use_wmp = true};
+                     .settings_filename = DEFAULT_TEST_SETTINGS_FILENAME,
+                     .use_wmp = true};
   Config *config = config_create(&args, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_reset(error_stack);
