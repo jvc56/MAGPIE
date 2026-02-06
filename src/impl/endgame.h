@@ -7,6 +7,7 @@
 // search. The board-size limitation comes from MoveUndo's 16-bit
 // tiles_placed_mask.
 
+#include "../def/game_defs.h"
 #include "../ent/endgame_results.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
@@ -36,6 +37,10 @@ typedef struct EndgameArgs {
   int initial_small_move_arena_size;
   EndgamePerPlyCallback per_ply_callback;
   void *per_ply_callback_data;
+  // Dual-lexicon mode for 2-lexicon endgames.
+  // IGNORANT: Both players use the same pruned KWG (default, faster).
+  // INFORMED: Each player uses their own pruned KWG (for different lexicons).
+  dual_lexicon_mode_t dual_lexicon_mode;
 } EndgameArgs;
 
 EndgameSolver *endgame_solver_create(void);

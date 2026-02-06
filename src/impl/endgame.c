@@ -61,7 +61,11 @@ struct EndgameSolver {
   PVLine principal_variation;
   PVLine *variations;
 
-  KWG *pruned_kwg;
+  // Per-player pruned KWGs for 2-lexicon endgames.
+  // In IGNORANT mode, both indices point to the same KWG.
+  // In INFORMED mode, each player has their own pruned KWG.
+  KWG *pruned_kwgs[2];
+  dual_lexicon_mode_t dual_lexicon_mode;
   int nodes_searched;
 
   int solve_multiple_variations;
@@ -198,12 +202,38 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->initial_spread =
       equity_to_int(player_get_score(player) - player_get_score(opponent));
 
-  kwg_destroy(es->pruned_kwg);
-  DictionaryWordList *possible_word_list = dictionary_word_list_create();
-  generate_possible_words(endgame_args->game, NULL, possible_word_list);
-  es->pruned_kwg = make_kwg_from_words_small(
-      possible_word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
-  dictionary_word_list_destroy(possible_word_list);
+  // Destroy previous pruned KWGs
+  // In SHARED mode both point to same KWG, so only destroy once
+  if (es->pruned_kwgs[1] != NULL && es->pruned_kwgs[1] != es->pruned_kwgs[0]) {
+    kwg_destroy(es->pruned_kwgs[1]);
+  }
+  kwg_destroy(es->pruned_kwgs[0]);
+  es->pruned_kwgs[0] = NULL;
+  es->pruned_kwgs[1] = NULL;
+
+  es->dual_lexicon_mode = endgame_args->dual_lexicon_mode;
+
+  // Create pruned KWG(s) based on dual-lexicon mode
+  if (es->dual_lexicon_mode == DUAL_LEXICON_MODE_IGNORANT) {
+    // IGNORANT mode: create one pruned KWG used by both players
+    DictionaryWordList *possible_word_list = dictionary_word_list_create();
+    generate_possible_words(endgame_args->game, NULL, possible_word_list);
+    es->pruned_kwgs[0] = make_kwg_from_words_small(
+        possible_word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
+    es->pruned_kwgs[1] = es->pruned_kwgs[0]; // Same KWG for both
+    dictionary_word_list_destroy(possible_word_list);
+  } else {
+    // INFORMED mode: create separate pruned KWGs for each player's lexicon
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      const KWG *player_kwg =
+          player_get_kwg(game_get_player(endgame_args->game, player_idx));
+      DictionaryWordList *possible_word_list = dictionary_word_list_create();
+      generate_possible_words(endgame_args->game, player_kwg, possible_word_list);
+      es->pruned_kwgs[player_idx] = make_kwg_from_words_small(
+          possible_word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
+      dictionary_word_list_destroy(possible_word_list);
+    }
+  }
 
   // later, when we have multi-threaded endgame:
   // es->threads = endgame_args->num_threads;
@@ -231,7 +261,10 @@ void endgame_solver_destroy(EndgameSolver *es) {
     return;
   }
   transposition_table_destroy(es->transposition_table);
-  kwg_destroy(es->pruned_kwg);
+  kwg_destroy(es->pruned_kwgs[0]);
+  if (es->pruned_kwgs[1] != es->pruned_kwgs[0]) {
+    kwg_destroy(es->pruned_kwgs[1]);
+  }
   free(es);
 }
 
@@ -245,6 +278,9 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
   solver_worker->game_copy = game_duplicate(solver->game);
   game_set_endgame_solving_mode(solver_worker->game_copy);
   game_set_backup_mode(solver_worker->game_copy, BACKUP_MODE_SIMULATION);
+  // Use the pruned KWG(s) for cross set computation in addition to move generation.
+  game_set_override_kwgs(solver_worker->game_copy, solver->pruned_kwgs[0],
+                         solver->pruned_kwgs[1], solver->dual_lexicon_mode);
   solver_worker->move_list =
       move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
 
@@ -287,12 +323,14 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
     board_set_cross_sets_valid(board, true);
   }
   // This won't actually sort by score. We'll do this later.
+  // Use the current player's pruned KWG for move generation.
+  const int player_on_turn = game_get_player_on_turn_index(worker->game_copy);
   const MoveGenArgs args = {
       .game = worker->game_copy,
       .move_list = worker->move_list,
       .move_record_type = MOVE_RECORD_ALL_SMALL,
       .move_sort_type = MOVE_SORT_SCORE,
-      .override_kwg = worker->solver->pruned_kwg,
+      .override_kwg = worker->solver->pruned_kwgs[player_on_turn],
       .thread_index = worker->thread_index,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,

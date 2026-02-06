@@ -3,6 +3,7 @@
 
 #include "../def/game_defs.h"
 #include "../def/players_data_defs.h"
+#include "../def/sim_defs.h"
 #include "bag.h"
 #include "board.h"
 #include "letter_distribution.h"
@@ -10,6 +11,7 @@
 #include <stdbool.h>
 
 typedef struct Game Game;
+typedef struct KWG KWG;
 
 typedef struct GameArgs {
   PlayersData *players_data;
@@ -52,6 +54,8 @@ int game_get_max_scoreless_turns(const Game *game);
 bool game_reached_max_scoreless_turns(const Game *game);
 void game_increment_consecutive_scoreless_turns(Game *game);
 void game_set_endgame_solving_mode(Game *game);
+void game_set_override_kwgs(Game *game, const KWG *kwg0, const KWG *kwg1,
+                            dual_lexicon_mode_t mode);
 void game_set_game_end_reason(Game *game, game_end_reason_t game_end_reason);
 void game_start_next_player_turn(Game *game);
 
