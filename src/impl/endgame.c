@@ -80,8 +80,6 @@ struct EndgameSolver {
   double tt_fraction_of_mem;
   TranspositionTable *transposition_table;
 
-  // Lazy SMP result synchronization
-  cpthread_mutex_t result_mutex;
   atomic_int completed_depth; // Highest depth completed by any thread
   atomic_int
       search_complete; // Signal for threads to stop early (0=running, 1=done)
@@ -258,7 +256,6 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
 
 EndgameSolver *endgame_solver_create(void) {
   EndgameSolver *es = calloc_or_die(1, sizeof(EndgameSolver));
-  cpthread_mutex_init(&es->result_mutex);
   return es;
 }
 
@@ -297,6 +294,7 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
   solver_worker->prng = prng_create(base_seed + (uint64_t)worker_index * 12345);
 
   // Initialize per-thread result tracking
+  solver_worker->best_pv.game = solver_worker->game_copy;
   solver_worker->best_pv.num_moves = 0;
   solver_worker->best_pv_value = -LARGE_VALUE;
   solver_worker->completed_depth = 0;
@@ -565,8 +563,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       // First move (idx == 0) is never exclusive
       // In first phase, other moves are exclusive
       // In second phase (deferred[idx] == true), moves are not exclusive
-      bool child_exclusive =
-          use_abdada && (idx > 0) && (deferred == NULL || !deferred[idx]);
+      bool child_exclusive = use_abdada && (idx > 0) && !deferred[idx];
 
       // ABDADA: skip if deferred and we're in first phase (will process later)
       // This check is not needed in the current structure since we mark
