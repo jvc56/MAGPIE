@@ -27,6 +27,7 @@ typedef struct Config Config;
 typedef struct ConfigArgs {
   const char *data_paths;
   const char *settings_filename;
+  bool use_wmp;
 } ConfigArgs;
 
 // Constructors and Destructors

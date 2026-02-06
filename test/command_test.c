@@ -441,7 +441,7 @@ void test_process_command(const char *arg_string, const char *output_substr,
   MainArgs *main_args = get_main_args_from_string(arg_string_with_exec);
   ConfigArgs config_args = {.data_paths = DEFAULT_TEST_DATA_PATH,
                             .settings_filename =
-                                DEFAULT_TEST_SETTINGS_FILENAME};
+                                DEFAULT_TEST_SETTINGS_FILENAME, .use_wmp = true};
 
   process_command_with_config_args(main_args->argc, main_args->argv,
                                    &config_args);

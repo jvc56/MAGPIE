@@ -10,7 +10,7 @@
 
 typedef struct PlayersData PlayersData;
 
-PlayersData *players_data_create(void);
+PlayersData *players_data_create(bool use_wmp);
 void players_data_destroy(PlayersData *players_data);
 
 move_sort_t players_data_get_move_sort_type(const PlayersData *players_data,
