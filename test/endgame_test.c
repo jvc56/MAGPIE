@@ -199,78 +199,6 @@ void test_small_arena_realloc(void) {
       512, ERROR_STATUS_SUCCESS, 11, false);
 }
 
-// Compare single-threaded vs multi-threaded results on the very_deep position
-void test_thread_comparison(void) {
-  const char *cgp_cmd = "cgp "
-      "14C/13QI/12FIE/10VEE1R/9KIT2G/8CIG1IDE/8UTA2AS/7ST1SYPh1/6JA5A1/"
-      "5WOLD2BOBA/3PLOT1R1NU1EX/Y1VEIN1NOR1mOA1/UT1AT1N1L2FEH1/"
-      "GUR2WIRER5/SNEEZED8 ADENOOO/AHIILMM 353/236 0 -lex CSW21;";
-
-  int thread_counts[] = {1, 6};
-  int32_t results[2];
-
-  for (int t = 0; t < 2; t++) {
-    int num_threads = thread_counts[t];
-    Config *config = config_create_or_die(
-        "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 25");
-    load_and_exec_config_or_die(config, cgp_cmd);
-
-    EndgameSolver *endgame_solver = endgame_solver_create();
-    Game *game = config_get_game(config);
-
-    EndgameArgs endgame_args;
-    endgame_args.thread_control = config_get_thread_control(config);
-    endgame_args.game = game;
-    endgame_args.plies = 25;
-    endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
-    endgame_args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-    endgame_args.num_threads = num_threads;
-    endgame_args.per_ply_callback = NULL;
-    endgame_args.per_ply_callback_data = NULL;
-
-    EndgameResults *endgame_results = config_get_endgame_results(config);
-    ErrorStack *error_stack = error_stack_create();
-
-    printf("\n=== Testing with %d thread(s), 27 plies ===\n", num_threads);
-    endgame_solve(endgame_solver, &endgame_args, endgame_results, error_stack);
-    assert(error_stack_is_empty(error_stack));
-
-    const PVLine *pv_line = endgame_results_get_pvline(endgame_results);
-    results[t] = pv_line->score;
-    printf("Result with %d thread(s): %d, PV: ", num_threads, pv_line->score);
-
-    // Print the PV
-    Game *gc = game_duplicate(game);
-    const Board *board = game_get_board(gc);
-    const LetterDistribution *ld = game_get_ld(gc);
-    Move move;
-    for (int i = 0; i < pv_line->num_moves && i < 5; i++) {
-      small_move_to_move(&move, &(pv_line->moves[i]), board);
-      StringBuilder *sb = string_builder_create();
-      string_builder_add_move(sb, board, &move, ld, true);
-      printf("%s ", string_builder_peek(sb));
-      string_builder_destroy(sb);
-      play_move(&move, gc, NULL);
-    }
-    if (pv_line->num_moves > 5) printf("...");
-    printf("\n");
-    game_destroy(gc);
-
-    endgame_solver_destroy(endgame_solver);
-    error_stack_destroy(error_stack);
-    config_destroy(config);
-  }
-
-  printf("\n=== COMPARISON ===\n");
-  printf("1 thread:  %d\n", results[0]);
-  printf("6 threads: %d\n", results[1]);
-  if (results[0] == results[1]) {
-    printf("PASS: Results match!\n");
-  } else {
-    printf("MISMATCH: Difference = %d\n", results[0] - results[1]);
-  }
-}
-
 void test_endgame(void) {
   test_solve_standard();
   test_very_deep();
@@ -281,5 +209,4 @@ void test_endgame(void) {
   //  and/or if we can run the endgame tests in release mode.
   // test_vs_joey();
   // test_eldar_v_stick();
-  // test_thread_comparison();  // Uncomment to compare 1 vs 6 threads
 }
