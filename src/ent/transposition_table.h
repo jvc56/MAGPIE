@@ -15,6 +15,11 @@ enum {
   TTENTRY_SIZE_BYTES = 16,
   BOTTOM3_BYTE_MASK = ((1 << 24) - 1),
   DEPTH_MASK = ((1 << 6) - 1),
+  // ABDADA nproc table: use a smaller table than TT to reduce memory and
+  // improve cache locality. Collisions just cause extra deferrals.
+  NPROC_SIZE_POWER = 18, // 2^18 = 256K entries
+  NPROC_SIZE = (1 << NPROC_SIZE_POWER),
+  NPROC_MASK = (NPROC_SIZE - 1),
 };
 
 typedef struct TTEntry {
@@ -54,6 +59,7 @@ inline static void ttentry_reset(TTEntry *t) {
 
 typedef struct TranspositionTable {
   TTEntry *table;
+  atomic_uchar *nproc; // ABDADA: small table for tracking concurrent searches
   int size_power_of_2;
   uint64_t size_mask;
   Zobrist *zobrist;
@@ -92,6 +98,12 @@ transposition_table_create(double fraction_of_memory) {
            (sizeof(TTEntry) * num_elems) / (size_t)(1024 * 1024));
   tt->table = malloc_or_die(sizeof(TTEntry) * num_elems);
   memset(tt->table, 0, sizeof(TTEntry) * num_elems);
+  // ABDADA: allocate smaller nproc table for tracking concurrent searches
+  // Using a smaller table (256K vs millions) improves cache locality
+  tt->nproc = (atomic_uchar *)malloc_or_die(sizeof(atomic_uchar) * NPROC_SIZE);
+  for (int i = 0; i < NPROC_SIZE; i++) {
+    atomic_init(&tt->nproc[i], 0);
+  }
   tt->size_mask = num_elems - 1;
   tt->zobrist = zobrist_create(12345); // Fixed seed for determinism
   atomic_init(&tt->created, 0);
@@ -104,7 +116,12 @@ transposition_table_create(double fraction_of_memory) {
 static inline void transposition_table_reset(TranspositionTable *tt) {
   // This function resets the transposition table. If you want to reallocate
   // space for it, destroy and recreate it with the new space.
-  memset(tt->table, 0, sizeof(TTEntry) * (tt->size_mask + 1));
+  uint64_t num_elems = tt->size_mask + 1;
+  memset(tt->table, 0, sizeof(TTEntry) * num_elems);
+  // ABDADA: reset nproc counters (smaller table)
+  for (int i = 0; i < NPROC_SIZE; i++) {
+    atomic_store_explicit(&tt->nproc[i], 0, memory_order_relaxed);
+  }
   atomic_store(&tt->created, 0);
   atomic_store(&tt->hits, 0);
   atomic_store(&tt->lookups, 0);
@@ -149,7 +166,35 @@ static inline void transposition_table_destroy(TranspositionTable *tt) {
   }
   zobrist_destroy(tt->zobrist);
   free(tt->table);
+  free(tt->nproc);
   free(tt);
+}
+
+// ABDADA functions for tracking concurrent node searches
+// Uses a smaller table (256K entries) with relaxed memory ordering for speed
+
+// Check if node is being searched by another processor
+// Uses relaxed ordering since exact count doesn't matter, just > 0
+static inline bool transposition_table_is_busy(TranspositionTable *tt,
+                                               uint64_t zval) {
+  uint64_t idx = zval & NPROC_MASK;
+  return atomic_load_explicit(&tt->nproc[idx], memory_order_relaxed) > 0;
+}
+
+// Enter node: increment nproc counter
+// Uses relaxed ordering - we just need eventual visibility
+static inline void transposition_table_enter_node(TranspositionTable *tt,
+                                                  uint64_t zval) {
+  uint64_t idx = zval & NPROC_MASK;
+  atomic_fetch_add_explicit(&tt->nproc[idx], 1, memory_order_relaxed);
+}
+
+// Leave node: decrement nproc counter
+// Uses relaxed ordering - we just need eventual visibility
+static inline void transposition_table_leave_node(TranspositionTable *tt,
+                                                  uint64_t zval) {
+  uint64_t idx = zval & NPROC_MASK;
+  atomic_fetch_sub_explicit(&tt->nproc[idx], 1, memory_order_relaxed);
 }
 
 #endif

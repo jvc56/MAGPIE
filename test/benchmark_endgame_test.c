@@ -112,6 +112,7 @@ static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
                         .tt_fraction_of_mem = 0.05,
                         .initial_small_move_arena_size =
                             DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                        .num_threads = 6,
                         .per_ply_callback = NULL,
                         .per_ply_callback_data = NULL};
     EndgameResults *results = config_get_endgame_results(config);
@@ -152,7 +153,7 @@ void test_benchmark_endgame(void) {
   const uint64_t base_seed = 0;
 
   Config *config = config_create_or_die(
-      "set -lex CSW21 -threads 8 -s1 score -s2 score -r1 small -r2 small");
+      "set -lex CSW21 -threads 6 -s1 score -s2 score -r1 small -r2 small");
 
   EndgameSolver *solver = endgame_solver_create();
 
