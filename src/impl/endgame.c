@@ -87,11 +87,6 @@ struct EndgameSolver {
   EndgamePerPlyCallback per_ply_callback;
   void *per_ply_callback_data;
 
-  // Diagnostic counters for ABDADA
-  atomic_int deferred_count;   // How many times a move was deferred
-  atomic_int abdada_loops;     // How many ABDADA loop iterations
-  atomic_int deferred_mallocs; // How many deferred arrays allocated
-
   // Owned by the caller:
   ThreadControl *thread_control;
   const Game *game;
@@ -231,11 +226,6 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
 
   // Initialize Lazy SMP synchronization
   atomic_store(&es->search_complete, 0);
-
-  // Initialize diagnostic counters
-  atomic_store(&es->deferred_count, 0);
-  atomic_store(&es->abdada_loops, 0);
-  atomic_store(&es->deferred_mallocs, 0);
 
   es->thread_control = endgame_args->thread_control;
   es->game = endgame_args->game;
@@ -542,7 +532,6 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
     } else {
       deferred = malloc_or_die(sizeof(bool) * nplays);
       deferred_heap_allocated = true;
-      atomic_fetch_add(&worker->solver->deferred_mallocs, 1);
     }
     for (int i = 0; i < nplays; i++) {
       deferred[i] = false;
@@ -551,10 +540,8 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
 
   // ABDADA two-phase iteration
   bool all_done = false;
-  int loop_count = 0;
   while (!all_done) {
     all_done = true;
-    loop_count++;
 
     for (int idx = 0; idx < nplays; idx++) {
       // ABDADA: determine if this move should be searched exclusively
@@ -639,7 +626,6 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       if (value == ON_EVALUATION) {
         if (deferred != NULL) {
           deferred[idx] = true;
-          atomic_fetch_add(&worker->solver->deferred_count, 1);
         }
         all_done = false;
         continue; // Skip to next move
@@ -680,11 +666,6 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
     if (!use_abdada) {
       all_done = true;
     }
-  }
-
-  // Track ABDADA loop iterations (only if more than 1 loop was needed)
-  if (loop_count > 1) {
-    atomic_fetch_add(&worker->solver->abdada_loops, loop_count - 1);
   }
 
   // Clean up deferred array (only if heap-allocated)

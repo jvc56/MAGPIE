@@ -7,6 +7,7 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 // Platform-specific TT configuration
 #ifdef __EMSCRIPTEN__
@@ -43,6 +44,11 @@ typedef struct TTEntry {
   uint8_t flag_and_depth;
   uint64_t tiny_move;
 } TTEntry;
+
+#ifndef __EMSCRIPTEN__
+static_assert(sizeof(TTEntry) == TTENTRY_SIZE_BYTES,
+              "TTEntry must be exactly 16 bytes for lockless hashing");
+#endif
 
 inline static uint64_t ttentry_full_hash(TTEntry t, uint64_t index,
                                          int size_power) {
@@ -158,8 +164,28 @@ static inline void transposition_table_reset(TranspositionTable *tt) {
 static inline TTEntry transposition_table_lookup(TranspositionTable *tt,
                                                  uint64_t zval) {
   uint64_t idx = zval & tt->size_mask;
-  TTEntry entry = tt->table[idx];
   atomic_fetch_add(&tt->lookups, 1);
+
+#ifdef __EMSCRIPTEN__
+  // WASM: single-threaded, direct struct copy is safe
+  TTEntry entry = tt->table[idx];
+#else
+  // Lockless hashing (Hyatt 1999): each TTEntry is stored as two 8-byte
+  // halves with the key half XOR'd against the data half. Aligned 8-byte
+  // loads are atomic on x86-64 and ARM64, so each half is read consistently.
+  // If a concurrent write causes a torn read (halves from different writes),
+  // the XOR produces invalid hash bits and the check below rejects the entry,
+  // preventing incorrect alpha-beta pruning from corrupted TT data.
+  volatile uint64_t *slot = (volatile uint64_t *)&tt->table[idx];
+  uint64_t xored_key = slot[0];
+  uint64_t data = slot[1];
+  uint64_t key_half = xored_key ^ data;
+
+  TTEntry entry;
+  memcpy(&entry, &key_half, 8);
+  entry.tiny_move = data;
+#endif
+
   uint64_t full_hash = ttentry_full_hash(entry, idx, tt->size_power_of_2);
   if (full_hash != zval) {
     if (ttentry_valid(entry)) {
@@ -192,7 +218,15 @@ static inline void transposition_table_store(TranspositionTable *tt,
   tentry.fifth_byte = (uint8_t)(zval >> 24);
 #endif
   atomic_fetch_add(&tt->created, 1);
-  tt->table[idx] = tentry;
+
+  // Lockless hashing: XOR key half with data half so torn reads
+  // (one half from one write, the other from a different write)
+  // are detected by hash mismatch on lookup.
+  uint64_t key_half;
+  memcpy(&key_half, &tentry, 8);
+  volatile uint64_t *slot = (volatile uint64_t *)&tt->table[idx];
+  slot[0] = key_half ^ tentry.tiny_move;
+  slot[1] = tentry.tiny_move;
 }
 
 static inline void transposition_table_destroy(TranspositionTable *tt) {
