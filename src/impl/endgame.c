@@ -931,6 +931,7 @@ void string_builder_endgame_results(StringBuilder *pv_description,
       // sense.
       play_move(&move, gc, NULL);
     }
+    string_builder_destroy(tmp_sb);
     string_builder_add_string_grid(pv_description, sg, false);
     string_grid_destroy(sg);
   } else {
