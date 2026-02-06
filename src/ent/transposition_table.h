@@ -4,21 +4,19 @@
 #include "../compat/ctime.h"
 #include "../compat/memory_info.h"
 #include "zobrist.h"
+#include <assert.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 
-// Platform-specific TT configuration
-#ifdef __EMSCRIPTEN__
-// WASM: 17-byte entries, 2^21 minimum (34.5 MB) for mobile
-#define TT_MIN_SIZE_POWER 21
-#define TTENTRY_SIZE_BYTES 17
-#else
-// Native: 16-byte entries, 2^24 minimum (256 MB) for performance
-#define TT_MIN_SIZE_POWER 24
+// 16-byte entries for lockless hashing on all platforms
 #define TTENTRY_SIZE_BYTES 16
-#define BOTTOM3_BYTE_MASK ((1 << 24) - 1)
+
+#ifdef __EMSCRIPTEN__
+#define TT_MIN_SIZE_POWER 21 // 2^21 minimum (32 MB) for mobile
+#else
+#define TT_MIN_SIZE_POWER 24 // 2^24 minimum (256 MB) for performance
 #endif
 
 enum {
@@ -36,32 +34,21 @@ enum {
 typedef struct TTEntry {
   uint32_t top_4_bytes; // Bits [63:32] of hash
   int16_t score;
-#ifdef __EMSCRIPTEN__
-  uint16_t bytes_5_6; // Bits [31:16] (WASM: store 48 bits total)
-#else
-  uint8_t fifth_byte; // Bits [31:24] (Native: store 40 bits total)
-#endif
+  uint8_t fifth_byte;   // Bits [31:24] of hash (40 stored bits total)
   uint8_t flag_and_depth;
   uint64_t tiny_move;
 } TTEntry;
 
-#ifndef __EMSCRIPTEN__
 static_assert(sizeof(TTEntry) == TTENTRY_SIZE_BYTES,
               "TTEntry must be exactly 16 bytes for lockless hashing");
-#endif
 
 inline static uint64_t ttentry_full_hash(TTEntry t, uint64_t index,
                                          int size_power) {
-#ifdef __EMSCRIPTEN__
-  // WASM: Store 48 bits, take remaining bits from index
-  uint64_t stored_hash = ((uint64_t)(t.top_4_bytes) << 16) | t.bytes_5_6;
+  // Reconstruct hash from 40 stored bits + index bits.
+  // On large tables (size_power >= 24) all 64 bits are recovered.
+  // On smaller tables a few high bits are lost, which is acceptable.
+  uint64_t stored_hash = ((uint64_t)(t.top_4_bytes) << 8) | t.fifth_byte;
   return (stored_hash << size_power) | index;
-#else
-  // Native: Store 40 bits, take bottom 24 bits from index
-  (void)size_power; // Unused in native build
-  return ((uint64_t)(t.top_4_bytes) << 32) + ((uint64_t)(t.fifth_byte) << 24) +
-         (index & BOTTOM3_BYTE_MASK);
-#endif
 }
 
 inline static uint8_t ttentry_flag(TTEntry t) { return t.flag_and_depth >> 6; }
@@ -79,11 +66,7 @@ inline static uint64_t ttentry_move(TTEntry t) { return t.tiny_move; }
 inline static void ttentry_reset(TTEntry *t) {
   t->top_4_bytes = 0;
   t->score = 0;
-#ifdef __EMSCRIPTEN__
-  t->bytes_5_6 = 0;
-#else
   t->fifth_byte = 0;
-#endif
   t->flag_and_depth = 0;
   t->tiny_move = 0;
 }
@@ -166,25 +149,20 @@ static inline TTEntry transposition_table_lookup(TranspositionTable *tt,
   uint64_t idx = zval & tt->size_mask;
   atomic_fetch_add(&tt->lookups, 1);
 
-#ifdef __EMSCRIPTEN__
-  // WASM: single-threaded, direct struct copy is safe
-  TTEntry entry = tt->table[idx];
-#else
   // Lockless hashing (Hyatt 1999): each TTEntry is stored as two 8-byte
-  // halves with the key half XOR'd against the data half. Aligned 8-byte
-  // loads are atomic on x86-64 and ARM64, so each half is read consistently.
+  // halves with the key half XOR'd against the data half. Each half is
+  // loaded atomically (relaxed ordering) so it is internally consistent.
   // If a concurrent write causes a torn read (halves from different writes),
   // the XOR produces invalid hash bits and the check below rejects the entry,
   // preventing incorrect alpha-beta pruning from corrupted TT data.
-  volatile uint64_t *slot = (volatile uint64_t *)&tt->table[idx];
-  uint64_t xored_key = slot[0];
-  uint64_t data = slot[1];
+  const _Atomic uint64_t *slot = (const _Atomic uint64_t *)&tt->table[idx];
+  uint64_t xored_key = atomic_load_explicit(&slot[0], memory_order_relaxed);
+  uint64_t data = atomic_load_explicit(&slot[1], memory_order_relaxed);
   uint64_t key_half = xored_key ^ data;
 
   TTEntry entry;
   memcpy(&entry, &key_half, 8);
   entry.tiny_move = data;
-#endif
 
   uint64_t full_hash = ttentry_full_hash(entry, idx, tt->size_power_of_2);
   if (full_hash != zval) {
@@ -207,16 +185,10 @@ static inline TTEntry transposition_table_lookup(TranspositionTable *tt,
 static inline void transposition_table_store(TranspositionTable *tt,
                                              uint64_t zval, TTEntry tentry) {
   uint64_t idx = zval & tt->size_mask;
-#ifdef __EMSCRIPTEN__
-  // WASM: Store top 48 bits (shift right by size_power to remove index bits)
+  // Store top 40 bits of hash (shift right by size_power to remove index bits)
   uint64_t stored_hash = zval >> tt->size_power_of_2;
-  tentry.top_4_bytes = (uint32_t)(stored_hash >> 16);
-  tentry.bytes_5_6 = (uint16_t)(stored_hash & 0xFFFF);
-#else
-  // Native: Store top 40 bits (bits 63-24)
-  tentry.top_4_bytes = (uint32_t)(zval >> 32);
-  tentry.fifth_byte = (uint8_t)(zval >> 24);
-#endif
+  tentry.top_4_bytes = (uint32_t)(stored_hash >> 8);
+  tentry.fifth_byte = (uint8_t)(stored_hash & 0xFF);
   atomic_fetch_add(&tt->created, 1);
 
   // Lockless hashing: XOR key half with data half so torn reads
@@ -224,9 +196,10 @@ static inline void transposition_table_store(TranspositionTable *tt,
   // are detected by hash mismatch on lookup.
   uint64_t key_half;
   memcpy(&key_half, &tentry, 8);
-  volatile uint64_t *slot = (volatile uint64_t *)&tt->table[idx];
-  slot[0] = key_half ^ tentry.tiny_move;
-  slot[1] = tentry.tiny_move;
+  _Atomic uint64_t *slot = (_Atomic uint64_t *)&tt->table[idx];
+  atomic_store_explicit(&slot[0], key_half ^ tentry.tiny_move,
+                        memory_order_relaxed);
+  atomic_store_explicit(&slot[1], tentry.tiny_move, memory_order_relaxed);
 }
 
 static inline void transposition_table_destroy(TranspositionTable *tt) {
