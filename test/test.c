@@ -125,6 +125,7 @@ static TestEntry test_table[] = {
 static TestEntry on_demand_test_table[] = {
     {"infercmp", test_infer_cmp},
     {"benchend", test_benchmark_endgame},
+    {"14domino", test_14domino},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
