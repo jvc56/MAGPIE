@@ -69,7 +69,7 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   endgame_args.plies = config_get_endgame_plies(config);
   endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
   endgame_args.initial_small_move_arena_size = initial_small_move_arena_size;
-  endgame_args.num_threads = 6;
+  endgame_args.num_threads = 1;
   endgame_args.per_ply_callback = print_pv_callback;
   endgame_args.per_ply_callback_data = &timer;
 
