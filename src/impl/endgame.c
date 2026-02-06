@@ -80,8 +80,8 @@ struct EndgameSolver {
   double tt_fraction_of_mem;
   TranspositionTable *transposition_table;
 
-  atomic_int
-      search_complete; // Signal for threads to stop early (0=running, 1=done)
+  // Signal for threads to stop early (0=running, 1=done)
+  atomic_int search_complete;
 
   // Per-ply callback for iterative deepening progress
   EndgamePerPlyCallback per_ply_callback;
@@ -1023,30 +1023,6 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   solver->principal_variation = solver_workers[best_thread]->best_pv;
   solver->best_pv_value = solver_workers[best_thread]->best_pv_value;
 
-  // Print ABDADA diagnostics
-  int nodes = atomic_load(&solver->nodes_searched);
-  int deferred = atomic_load(&solver->deferred_count);
-  int loops = atomic_load(&solver->abdada_loops);
-  int mallocs = atomic_load(&solver->deferred_mallocs);
-  log_warn("ABDADA stats: nodes=%d, deferred=%d (%.2f%%), extra_loops=%d, "
-           "deferred_mallocs=%d",
-           nodes, deferred, 100.0 * deferred / (nodes > 0 ? nodes : 1), loops,
-           mallocs);
-
-  if (solver->transposition_table) {
-    int tt_lookups = atomic_load(&solver->transposition_table->lookups);
-    int tt_hits = atomic_load(&solver->transposition_table->hits);
-    int tt_created = atomic_load(&solver->transposition_table->created);
-    int tt_collisions =
-        atomic_load(&solver->transposition_table->t2_collisions);
-    log_warn("TT stats: lookups=%d, hits=%d (%.2f%%), created=%d, "
-             "t2_collisions=%d (%.2f%%)",
-             tt_lookups, tt_hits,
-             100.0 * tt_hits / (tt_lookups > 0 ? tt_lookups : 1), tt_created,
-             tt_collisions,
-             100.0 * tt_collisions / (tt_lookups > 0 ? tt_lookups : 1));
-  }
-
   // Clean up workers
   for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
     solver_worker_destroy(solver_workers[thread_index]);
@@ -1081,22 +1057,6 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   log_warn("%s", string_builder_peek(final_sb));
   string_builder_destroy(final_sb);
   game_destroy(final_game_copy);
-
-  // Print stats
-  log_warn("nodes=%d", solver->nodes_searched);
-
-  if (solver->transposition_table) {
-    int tt_lookups = atomic_load(&solver->transposition_table->lookups);
-    int tt_hits = atomic_load(&solver->transposition_table->hits);
-    int tt_created = atomic_load(&solver->transposition_table->created);
-    int tt_collisions =
-        atomic_load(&solver->transposition_table->t2_collisions);
-    log_warn("TT stats: lookups=%d, hits=%d (%.2f%%), created=%d, "
-             "t2_collisions=%d",
-             tt_lookups, tt_hits,
-             100.0 * tt_hits / (tt_lookups > 0 ? tt_lookups : 1), tt_created,
-             tt_collisions);
-  }
 
   endgame_results_set_pvline(results, &solver->principal_variation);
 }
