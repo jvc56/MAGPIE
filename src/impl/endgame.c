@@ -52,6 +52,8 @@ enum {
   // ABDADA: sentinel value returned when node is being searched by another
   // processor
   ON_EVALUATION = -(1 << 29),
+  // Aspiration window initial size
+  ASPIRATION_WINDOW = 25,
 };
 
 struct EndgameSolver {
@@ -780,8 +782,6 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     }
   }
 
-  // Aspiration window parameters
-  const int32_t ASPIRATION_WINDOW = 25; // Initial window size
   int32_t prev_value = 0;
   bool use_aspiration = worker->solver->iterative_deepening_optim;
 
