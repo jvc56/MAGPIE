@@ -80,7 +80,6 @@ struct EndgameSolver {
   double tt_fraction_of_mem;
   TranspositionTable *transposition_table;
 
-  atomic_int completed_depth; // Highest depth completed by any thread
   atomic_int
       search_complete; // Signal for threads to stop early (0=running, 1=done)
 
@@ -231,7 +230,6 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   dictionary_word_list_destroy(possible_word_list);
 
   // Initialize Lazy SMP synchronization
-  atomic_store(&es->completed_depth, 0);
   atomic_store(&es->search_complete, 0);
 
   // Initialize diagnostic counters
