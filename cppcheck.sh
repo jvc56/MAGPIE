@@ -82,6 +82,7 @@ echo "Running cppcheck analysis on src/, test/, and cmd/ directories..."
     --error-exitcode=1 \
     -U_WIN32 \
     -U__APPLE__ \
+    -U__EMSCRIPTEN__ \
     -j "${MAX_CORES}" \
     src/ test/ cmd/
 

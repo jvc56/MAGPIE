@@ -57,6 +57,48 @@
 #define IS_LITTLE_ENDIAN 0
 #endif
 
+#elif defined(__EMSCRIPTEN__)
+
+#include <stdint.h>
+// Emscripten/WebAssembly is always little-endian
+#define IS_LITTLE_ENDIAN 1
+
+// Byte swap functions for big-endian conversions
+static inline uint16_t __bswap16(uint16_t x) {
+  return (x >> 8) | (x << 8);
+}
+
+static inline uint32_t __bswap32(uint32_t x) {
+  return ((x & 0xff000000) >> 24) | ((x & 0x00ff0000) >> 8) |
+         ((x & 0x0000ff00) << 8) | ((x & 0x000000ff) << 24);
+}
+
+static inline uint64_t __bswap64(uint64_t x) {
+  return ((x & 0xff00000000000000ULL) >> 56) |
+         ((x & 0x00ff000000000000ULL) >> 40) |
+         ((x & 0x0000ff0000000000ULL) >> 24) |
+         ((x & 0x000000ff00000000ULL) >> 8) |
+         ((x & 0x00000000ff000000ULL) << 8) |
+         ((x & 0x0000000000ff0000ULL) << 24) |
+         ((x & 0x000000000000ff00ULL) << 40) |
+         ((x & 0x00000000000000ffULL) << 56);
+}
+
+#define htobe16(x) __bswap16(x)
+#define htole16(x) (x)
+#define be16toh(x) __bswap16(x)
+#define le16toh(x) (x)
+
+#define htobe32(x) __bswap32(x)
+#define htole32(x) (x)
+#define be32toh(x) __bswap32(x)
+#define le32toh(x) (x)
+
+#define htobe64(x) __bswap64(x)
+#define htole64(x) (x)
+#define be64toh(x) __bswap64(x)
+#define le64toh(x) (x)
+
 #else
 #error "Unsupported platform"
 #endif

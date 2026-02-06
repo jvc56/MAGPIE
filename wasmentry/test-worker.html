@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>MAGPIE WASM - Web Worker Test</title>
+    <style>
+      body {
+        font-family: monospace;
+        max-width: 1200px;
+        margin: 20px auto;
+        padding: 0 20px;
+        background: #1e1e1e;
+        color: #e0e0e0;
+      }
+      h1 {
+        color: #e0e0e0;
+      }
+      h3 {
+        color: #b0b0b0;
+      }
+      .status {
+        padding: 10px;
+        margin: 10px 0;
+        background: #2d2d2d;
+        border-radius: 4px;
+        font-weight: bold;
+        color: #e0e0e0;
+      }
+      .status.error {
+        background: #3d1f1f;
+        color: #ff6b6b;
+      }
+      .status.success {
+        background: #1f3d1f;
+        color: #69db7c;
+      }
+      textarea {
+        width: 100%;
+        font-family: monospace;
+        font-size: 14px;
+        border: 1px solid #444;
+        border-radius: 4px;
+        padding: 10px;
+        box-sizing: border-box;
+        background: #2d2d2d;
+        color: #e0e0e0;
+      }
+      button {
+        padding: 10px 20px;
+        font-size: 16px;
+        background: #2196f3;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        margin: 10px 5px 10px 0;
+      }
+      button:hover:not(:disabled) {
+        background: #1976d2;
+      }
+      button:disabled {
+        background: #3a3a3a;
+        color: #666;
+        cursor: not-allowed;
+      }
+      select {
+        padding: 10px;
+        font-size: 14px;
+        font-family: monospace;
+        background: #2d2d2d;
+        color: #e0e0e0;
+        border: 1px solid #444;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-right: 5px;
+      }
+      select:focus {
+        outline: none;
+        border-color: #2196f3;
+      }
+      .info {
+        background: #1f2d3d;
+        padding: 15px;
+        border-radius: 4px;
+        margin: 10px 0;
+        color: #b0c4de;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>MAGPIE WASM - Web Worker Test</h1>
+
+    <div class="info">
+      <strong>Note:</strong> This uses a Web Worker to run MAGPIE in the
+      background, keeping the UI responsive during long-running simulations.
+      <br /><br />
+      <strong>Important:</strong> Your server must send these headers for
+      threading to work:
+      <br />
+      <code>Cross-Origin-Opener-Policy: same-origin</code><br />
+      <code>Cross-Origin-Embedder-Policy: require-corp</code>
+    </div>
+
+    <div class="status" id="status">Loading WASM...</div>
+
+    <h3>CGP Input:</h3>
+    <textarea
+      id="inputParams"
+      rows="4"
+      placeholder="Enter CGP string, e.g.:
+C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/7PEW2DOE/9EF1DOR/2KUNA1J1BEVELS/3TURRETs2S2/7A4T2/7N7/7S7 EEEIILZ/ 336/298 0 -lex NWL23"
+    ></textarea>
+    <select id="sampleSelect">
+      <option value="midgame">Sample Midgame</option>
+      <option value="endgame">Sample Endgame</option>
+    </select>
+    <button type="button" id="loadSampleButton">Load Sample</button>
+
+    <button type="button" id="submitButton" disabled>Run Simulation</button>
+    <button type="button" id="endgameButton" disabled>Solve Endgame</button>
+    <button type="button" id="stopButton" disabled>Stop</button>
+
+    <h3>Output:</h3>
+    <textarea id="output" rows="20" readonly></textarea>
+
+    <script type="text/javascript">
+      const statusElement = document.getElementById("status");
+      const submitButton = document.getElementById("submitButton");
+      const endgameButton = document.getElementById("endgameButton");
+      const stopButton = document.getElementById("stopButton");
+      const inputElement = document.getElementById("inputParams");
+      const outputElement = document.getElementById("output");
+
+      let magpieWorker = null;
+      let workerReady = false;
+
+      function setStatus(text, type = "") {
+        statusElement.textContent = text;
+        statusElement.className = "status " + type;
+        console.log("[Status]", text);
+      }
+
+      function appendOutput(text) {
+        outputElement.value += text + "\n";
+        outputElement.scrollTop = outputElement.scrollHeight;
+      }
+
+      function appendOutput(text) {
+        outputElement.value += text + "\n";
+        outputElement.scrollTop = outputElement.scrollHeight;
+      }
+
+      function clearOutput() {
+        outputElement.value = "";
+      }
+
+      // Initialize worker
+      function initWorker() {
+        magpieWorker = new Worker("wasm-worker.js", { type: "module" });
+
+        magpieWorker.onmessage = (e) => {
+          const { type, text, filename } = e.data;
+
+          switch (type) {
+            case "ready":
+              workerReady = true;
+              setStatus("✓ WASM loaded and ready", "success");
+              submitButton.disabled = false;
+              endgameButton.disabled = false;
+              break;
+
+            case "precache_complete":
+              console.log("✓ Precached:", filename);
+              break;
+
+            case "init_complete":
+              setStatus("✓ MAGPIE initialized", "success");
+              break;
+
+            case "status":
+              appendOutput(text);
+              break;
+
+            case "output":
+              appendOutput(text);
+              break;
+
+            case "complete":
+              setStatus("✓ Complete", "success");
+              submitButton.disabled = false;
+              endgameButton.disabled = false;
+              stopButton.disabled = true;
+              break;
+
+            case "stopped":
+              setStatus("⏸ Stopped", "");
+              submitButton.disabled = false;
+              endgameButton.disabled = false;
+              stopButton.disabled = true;
+              break;
+
+            case "error":
+              console.error("Error:", text);
+              appendOutput("❌ ERROR: " + text);
+              setStatus("Error: " + text, "error");
+              submitButton.disabled = false;
+              endgameButton.disabled = false;
+              stopButton.disabled = true;
+              break;
+
+            case "log":
+              console.log("[Worker]", text);
+              appendOutput(text);
+              break;
+
+            case "init_failed":
+              setStatus("WASM failed to load - see output", "error");
+              appendOutput(text);
+              submitButton.disabled = true;
+              endgameButton.disabled = true;
+              break;
+
+            default:
+              console.log("Unknown message:", type, e.data);
+          }
+        };
+
+        magpieWorker.onerror = (error) => {
+          console.error("Worker error:", error);
+          setStatus("Worker error - see console", "error");
+        };
+
+        setStatus("Loading WASM...");
+      }
+
+      // Button handlers
+      const loadSampleButton = document.getElementById("loadSampleButton");
+      const sampleSelect = document.getElementById("sampleSelect");
+
+      const samples = {
+        midgame:
+          "C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/7PEW2DOE/9EF1DOR/2KUNA1J1BEVELS/3TURRETs2S2/7A4T2/7N7/7S7 EEEIILZ/ 336/298 0 -lex NWL23",
+        endgame:
+          "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW24",
+      };
+
+      loadSampleButton.addEventListener("click", () => {
+        const selectedSample = sampleSelect.value;
+        inputElement.value = samples[selectedSample];
+      });
+
+      submitButton.addEventListener("click", async () => {
+        if (!workerReady) {
+          setStatus("Please wait for WASM to load", "error");
+          return;
+        }
+
+        submitButton.disabled = true;
+        stopButton.disabled = false;
+
+        const cgpstring = inputElement.value.trim();
+        const vals = cgpstring.split(" ");
+
+        if (vals.length < 6) {
+          setStatus("Error: need valid CGP string", "error");
+          submitButton.disabled = false;
+          stopButton.disabled = true;
+          return;
+        }
+
+        let lexicon = "";
+        for (let i = 4; i < vals.length; i += 2) {
+          const opcode = vals[i];
+          const value = vals[i + 1];
+          // Handle both old format (lex NWL23;) and new format (-lex NWL23)
+          if (opcode === "-lex" || opcode === "lex") {
+            // Strip trailing semicolon if present (for backwards compatibility)
+            lexicon = value.endsWith(";") ? value.slice(0, -1) : value;
+            break;
+          }
+        }
+
+        if (lexicon === "") {
+          setStatus("Error: need lexicon in CGP", "error");
+          submitButton.disabled = false;
+          stopButton.disabled = true;
+          return;
+        }
+
+        clearOutput();
+        setStatus("Precaching files...");
+
+        // Precache required files
+        const distFile = "data/letterdistributions/english.csv";
+        const leavesFile = `data/lexica/${lexicon}.klv2`;
+        const winPctFile = "data/strategy/winpct.csv";
+        const boardLayoutFile = "data/layouts/standard15.txt";
+
+        const filenames = [
+          `data/lexica/${lexicon}.kwg`,
+          distFile,
+          leavesFile,
+          winPctFile,
+          boardLayoutFile,
+        ];
+
+        // Track precaching completion
+        let precachedCount = 0;
+        const precachePromise = new Promise((resolve) => {
+          const originalOnMessage = magpieWorker.onmessage;
+          magpieWorker.onmessage = (e) => {
+            if (e.data.type === "precache_complete") {
+              precachedCount++;
+              if (precachedCount === filenames.length) {
+                magpieWorker.onmessage = originalOnMessage;
+                resolve();
+              }
+            }
+            originalOnMessage(e);
+          };
+        });
+
+        // Precache all files
+        for (const filename of filenames) {
+          // Use absolute path from server root
+          const url = "/" + filename;
+          magpieWorker.postMessage({
+            type: "precache",
+            data: { filename, url },
+          });
+        }
+
+        // Wait for all files to be precached
+        setStatus("Precaching files...");
+        await precachePromise;
+
+        // Initialize MAGPIE
+        setStatus("Initializing MAGPIE...");
+
+        // Wait for init_complete message
+        const initPromise = new Promise((resolve) => {
+          const originalOnMessage = magpieWorker.onmessage;
+          magpieWorker.onmessage = (e) => {
+            if (e.data.type === "init_complete") {
+              magpieWorker.onmessage = originalOnMessage;
+              resolve();
+            }
+            originalOnMessage(e);
+          };
+        });
+
+        magpieWorker.postMessage({
+          type: "init",
+          data: { dataPath: "data" },
+        });
+
+        await initPromise;
+
+        // Calculate threads
+        const nthreads = Math.min(
+          Math.max(navigator.hardwareConcurrency || 4, 1),
+          20,
+        );
+        console.log("Using threads:", nthreads);
+
+        setStatus("Running simulation...");
+        appendOutput(`▶ Starting simulation with ${nthreads} threads...\n`);
+
+        // Run simulation
+        magpieWorker.postMessage({
+          type: "run",
+          data: {
+            commands: [
+              `set -lex ${lexicon} -hr false -tlim 12`,
+              `cgp ${cgpstring}`,
+              `generate`,
+              `sim -threads ${nthreads}`,
+              `shm`,
+            ],
+          },
+        });
+      });
+
+      endgameButton.addEventListener("click", async () => {
+        if (!workerReady) {
+          setStatus("Please wait for WASM to load", "error");
+          return;
+        }
+
+        endgameButton.disabled = true;
+        submitButton.disabled = true;
+        stopButton.disabled = false;
+
+        const cgpstring = inputElement.value.trim();
+        const vals = cgpstring.split(" ");
+
+        if (vals.length < 6) {
+          setStatus("Error: need valid CGP string", "error");
+          endgameButton.disabled = false;
+          submitButton.disabled = false;
+          stopButton.disabled = true;
+          return;
+        }
+
+        let lexicon = "";
+        for (let i = 4; i < vals.length; i += 2) {
+          const opcode = vals[i];
+          const value = vals[i + 1];
+          if (opcode === "-lex" || opcode === "lex") {
+            lexicon = value.endsWith(";") ? value.slice(0, -1) : value;
+            break;
+          }
+        }
+
+        if (lexicon === "") {
+          setStatus("Error: need lexicon in CGP", "error");
+          endgameButton.disabled = false;
+          submitButton.disabled = false;
+          stopButton.disabled = true;
+          return;
+        }
+
+        clearOutput();
+        setStatus("Precaching files...");
+
+        // Precache required files
+        const distFile = "data/letterdistributions/english.csv";
+        const leavesFile = `data/lexica/${lexicon}.klv2`;
+        const winPctFile = "data/strategy/winpct.csv";
+        const boardLayoutFile = "data/layouts/standard15.txt";
+
+        const filenames = [
+          `data/lexica/${lexicon}.kwg`,
+          distFile,
+          leavesFile,
+          winPctFile,
+          boardLayoutFile,
+        ];
+
+        // Track precaching completion
+        let precachedCount = 0;
+        const precachePromise = new Promise((resolve) => {
+          const originalOnMessage = magpieWorker.onmessage;
+          magpieWorker.onmessage = (e) => {
+            if (e.data.type === "precache_complete") {
+              precachedCount++;
+              if (precachedCount === filenames.length) {
+                magpieWorker.onmessage = originalOnMessage;
+                resolve();
+              }
+            }
+            originalOnMessage(e);
+          };
+        });
+
+        // Precache all files
+        for (const filename of filenames) {
+          const url = "/" + filename;
+          magpieWorker.postMessage({
+            type: "precache",
+            data: { filename, url },
+          });
+        }
+
+        await precachePromise;
+
+        // Initialize MAGPIE
+        setStatus("Initializing MAGPIE...");
+
+        const initPromise = new Promise((resolve) => {
+          const originalOnMessage = magpieWorker.onmessage;
+          magpieWorker.onmessage = (e) => {
+            if (e.data.type === "init_complete") {
+              magpieWorker.onmessage = originalOnMessage;
+              resolve();
+            }
+            originalOnMessage(e);
+          };
+        });
+
+        magpieWorker.postMessage({
+          type: "init",
+          data: { dataPath: "data" },
+        });
+
+        await initPromise;
+
+        setStatus("Solving endgame...");
+        appendOutput(`▶ Solving endgame...\n`);
+
+        // Calculate TT fraction: use max of 25% or the minimum TT size
+        // WASM uses 17-byte entries with 2^21 minimum (34.5 MB)
+        // With 256 MB WASM heap: min_fraction = 34.5/256 ≈ 0.135
+        const heapSize = 256 * 1024 * 1024; // 256 MB (INITIAL_MEMORY)
+        const minTTSize = 34.5 * 1024 * 1024; // 34.5 MB minimum (2^21 × 17 bytes)
+        const minFraction = minTTSize / heapSize;
+        const ttMemFraction = Math.max(0.25, minFraction);
+
+        appendOutput(
+          `Using TT fraction: ${ttMemFraction.toFixed(2)} (${(ttMemFraction * 100).toFixed(0)}%)\n`,
+        );
+
+        magpieWorker.postMessage({
+          type: "run",
+          data: {
+            commands: [
+              `set -lex ${lexicon} -ttfraction ${ttMemFraction} -eplies 7`,
+              `cgp ${cgpstring}`,
+              `endgame`,
+            ],
+          },
+        });
+      });
+
+      stopButton.addEventListener("click", () => {
+        if (workerReady) {
+          magpieWorker.postMessage({ type: "stop" });
+          setStatus("Stopping...");
+        }
+      });
+
+      // Initialize on load
+      initWorker();
+    </script>
+  </body>
+</html>

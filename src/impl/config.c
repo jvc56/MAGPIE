@@ -5839,7 +5839,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->loaded_settings = true;
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->ld = NULL;
-  config->players_data = players_data_create();
+  config->players_data = players_data_create(config_args->use_wmp);
   config->thread_control = thread_control_create();
   config->game = NULL;
   config->game_backup = NULL;
