@@ -80,8 +80,9 @@ struct EndgameSolver {
 
   // Lazy SMP result synchronization
   cpthread_mutex_t result_mutex;
-  atomic_int completed_depth;  // Highest depth completed by any thread
-  atomic_int search_complete;  // Signal for threads to stop early (0=running, 1=done)
+  atomic_int completed_depth; // Highest depth completed by any thread
+  atomic_int
+      search_complete; // Signal for threads to stop early (0=running, 1=done)
 
   // Per-ply callback for iterative deepening progress
   EndgamePerPlyCallback per_ply_callback;
@@ -106,10 +107,10 @@ typedef struct EndgameSolverWorker {
   int current_iterative_deepening_depth;
   // Array of MoveUndo structures for incremental play/unplay
   MoveUndo move_undos[MAX_SEARCH_DEPTH];
-  XoshiroPRNG *prng;       // Per-thread PRNG for jitter
-  PVLine best_pv;          // Thread-local best PV
-  int32_t best_pv_value;   // Thread-local best value
-  int completed_depth;     // Depth this thread completed
+  XoshiroPRNG *prng;     // Per-thread PRNG for jitter
+  PVLine best_pv;        // Thread-local best PV
+  int32_t best_pv_value; // Thread-local best value
+  int completed_depth;   // Depth this thread completed
 } EndgameSolverWorker;
 
 #ifndef MAX
@@ -562,8 +563,8 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       // First move (idx == 0) is never exclusive
       // In first phase, other moves are exclusive
       // In second phase (deferred[idx] == true), moves are not exclusive
-      bool child_exclusive = use_abdada && (idx > 0) &&
-                             (deferred == NULL || !deferred[idx]);
+      bool child_exclusive =
+          use_abdada && (idx > 0) && (deferred == NULL || !deferred[idx]);
 
       // ABDADA: skip if deferred and we're in first phase (will process later)
       // This check is not needed in the current structure since we mark
@@ -594,9 +595,9 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       } else {
         play_move_incremental(worker->move_list->spare_move, worker->game_copy,
                               &worker->move_undos[undo_index]);
-        // Cross-sets are left invalid - they will be computed lazily before move
-        // generation if we reach that point. The cross-set squares will be saved
-        // to MoveUndo before updating, so they're restored on unplay.
+        // Cross-sets are left invalid - they will be computed lazily before
+        // move generation if we reach that point. The cross-set squares will be
+        // saved to MoveUndo before updating, so they're restored on unplay.
       }
 
       // Atomic increment for thread-safe node counting
@@ -625,13 +626,15 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
                                  &child_pv, pv_node, false);
         }
       }
-      unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_index]);
+      unplay_move_incremental(worker->game_copy,
+                              &worker->move_undos[undo_index]);
       // After unplay, if tiles were placed, cross-sets need to be recomputed
       // for the restored state. Use undo-based function for correct cross-set
       // update. If it was a pass, cross-sets are unchanged and still valid.
       const MoveUndo *current_undo = &worker->move_undos[undo_index];
       if (current_undo->move_tiles_length > 0) {
-        update_cross_sets_after_unplay_from_undo(current_undo, worker->game_copy);
+        update_cross_sets_after_unplay_from_undo(current_undo,
+                                                 worker->game_copy);
         board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
       }
 
@@ -651,7 +654,8 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       }
 
       // Re-assign small_move. Its pointer location may have changed after all
-      // the calls to negamax and possible reallocations in the small_move_arena.
+      // the calls to negamax and possible reallocations in the
+      // small_move_arena.
       small_move =
           (SmallMove *)(worker->small_move_arena->memory + element_offset);
       if (-value > best_value) {
@@ -777,7 +781,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   }
 
   // Aspiration window parameters
-  const int32_t ASPIRATION_WINDOW = 25;  // Initial window size
+  const int32_t ASPIRATION_WINDOW = 25; // Initial window size
   int32_t prev_value = 0;
   bool use_aspiration = worker->solver->iterative_deepening_optim;
 
@@ -811,15 +815,18 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
           break;
         }
 
-        val = abdada_negamax(worker, initial_hash_key, p, alpha, beta, &pv, true, false);
+        val = abdada_negamax(worker, initial_hash_key, p, alpha, beta, &pv,
+                             true, false);
 
         if (val <= alpha) {
           // Fail-low: widen alpha
-          alpha = (window >= LARGE_VALUE / 2) ? -LARGE_VALUE : prev_value - window * 2;
+          alpha = (window >= LARGE_VALUE / 2) ? -LARGE_VALUE
+                                              : prev_value - window * 2;
           window *= 2;
         } else if (val >= beta) {
           // Fail-high: widen beta
-          beta = (window >= LARGE_VALUE / 2) ? LARGE_VALUE : prev_value + window * 2;
+          beta = (window >= LARGE_VALUE / 2) ? LARGE_VALUE
+                                             : prev_value + window * 2;
           window *= 2;
         } else {
           // Value is within window, we're done
@@ -831,7 +838,8 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
       }
     } else {
       // Full window search for depth 1 or when aspiration disabled
-      val = abdada_negamax(worker, initial_hash_key, p, alpha, beta, &pv, true, false);
+      val = abdada_negamax(worker, initial_hash_key, p, alpha, beta, &pv, true,
+                           false);
     }
 
     // If search was interrupted, don't store results for this depth
@@ -1025,18 +1033,23 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   int deferred = atomic_load(&solver->deferred_count);
   int loops = atomic_load(&solver->abdada_loops);
   int mallocs = atomic_load(&solver->deferred_mallocs);
-  log_warn("ABDADA stats: nodes=%d, deferred=%d (%.2f%%), extra_loops=%d, deferred_mallocs=%d",
-           nodes, deferred, 100.0 * deferred / (nodes > 0 ? nodes : 1),
-           loops, mallocs);
+  log_warn("ABDADA stats: nodes=%d, deferred=%d (%.2f%%), extra_loops=%d, "
+           "deferred_mallocs=%d",
+           nodes, deferred, 100.0 * deferred / (nodes > 0 ? nodes : 1), loops,
+           mallocs);
 
   if (solver->transposition_table) {
     int tt_lookups = atomic_load(&solver->transposition_table->lookups);
     int tt_hits = atomic_load(&solver->transposition_table->hits);
     int tt_created = atomic_load(&solver->transposition_table->created);
-    int tt_collisions = atomic_load(&solver->transposition_table->t2_collisions);
-    log_warn("TT stats: lookups=%d, hits=%d (%.2f%%), created=%d, t2_collisions=%d (%.2f%%)",
-             tt_lookups, tt_hits, 100.0 * tt_hits / (tt_lookups > 0 ? tt_lookups : 1),
-             tt_created, tt_collisions, 100.0 * tt_collisions / (tt_lookups > 0 ? tt_lookups : 1));
+    int tt_collisions =
+        atomic_load(&solver->transposition_table->t2_collisions);
+    log_warn("TT stats: lookups=%d, hits=%d (%.2f%%), created=%d, "
+             "t2_collisions=%d (%.2f%%)",
+             tt_lookups, tt_hits,
+             100.0 * tt_hits / (tt_lookups > 0 ? tt_lookups : 1), tt_created,
+             tt_collisions,
+             100.0 * tt_collisions / (tt_lookups > 0 ? tt_lookups : 1));
   }
 
   // Clean up workers

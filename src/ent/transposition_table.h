@@ -17,7 +17,7 @@ enum {
   DEPTH_MASK = ((1 << 6) - 1),
   // ABDADA nproc table: use a smaller table than TT to reduce memory and
   // improve cache locality. Collisions just cause extra deferrals.
-  NPROC_SIZE_POWER = 18,  // 2^18 = 256K entries
+  NPROC_SIZE_POWER = 18, // 2^18 = 256K entries
   NPROC_SIZE = (1 << NPROC_SIZE_POWER),
   NPROC_MASK = (NPROC_SIZE - 1),
 };
@@ -59,7 +59,7 @@ inline static void ttentry_reset(TTEntry *t) {
 
 typedef struct TranspositionTable {
   TTEntry *table;
-  atomic_uchar *nproc;  // ABDADA: small table for tracking concurrent searches
+  atomic_uchar *nproc; // ABDADA: small table for tracking concurrent searches
   int size_power_of_2;
   uint64_t size_mask;
   Zobrist *zobrist;
