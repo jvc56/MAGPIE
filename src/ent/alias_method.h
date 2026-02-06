@@ -148,7 +148,7 @@ static inline bool alias_method_sample(AliasMethod *am, XoshiroPRNG *prng,
 
   const uint32_t bin = (uint32_t)prng_get_random_number(prng, am->num_items);
   const double rand_between_0_and_1 =
-      (double)prng_get_random_number(prng, XOSHIRO_MAX) / XOSHIRO_MAX;
+      (double)prng_get_random_number(prng, XOSHIRO_MAX) / (double)XOSHIRO_MAX;
 
   uint32_t chosen_idx;
   if (rand_between_0_and_1 < am->items[bin].probability) {
