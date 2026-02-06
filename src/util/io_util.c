@@ -1,7 +1,6 @@
 #include "io_util.h"
 
 #include "../def/cpthread_defs.h"
-#include "fileproxy.h"
 #include <assert.h>
 #include <errno.h>
 #include <pthread.h>
@@ -436,12 +435,8 @@ void fseek_or_die(FILE *stream, long offset, int whence) {
   }
 }
 
-char *get_string_from_file(const char *filename, ErrorStack *error_stack) {
-  FILE *file_handle = stream_from_filename(filename, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return NULL;
-  }
-
+char *get_string_from_file_handle(FILE *file_handle, const char *filename,
+                                  ErrorStack *error_stack) {
   // Get the file size by seeking to the end and then back to the beginning
   fseek_or_die(file_handle, 0, SEEK_END);
   long file_size = ftell(file_handle);
