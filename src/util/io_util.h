@@ -325,8 +325,7 @@ bool error_stack_is_empty(const ErrorStack *error_stack);
 void error_stack_reset(ErrorStack *error_stack);
 
 void fseek_or_die(FILE *stream, long offset, int whence);
-char *get_string_from_file_handle(FILE *file_handle, const char *filename,
-                                  ErrorStack *error_stack);
+char *get_string_from_file(const char *filename, ErrorStack *error_stack);
 void write_string_to_file(const char *filename, const char *mode,
                           const char *string, ErrorStack *error_stack);
 FILE *fopen_or_die(const char *filename, const char *mode);

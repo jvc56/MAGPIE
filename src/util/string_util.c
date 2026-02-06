@@ -1,6 +1,5 @@
 #include "string_util.h"
 
-#include "fileproxy.h"
 #include "io_util.h"
 #include <assert.h>
 #include <ctype.h>

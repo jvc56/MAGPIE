@@ -2,13 +2,11 @@
 #ifndef STRING_BUILDER_H
 #define STRING_BUILDER_H
 
+#include "io_util.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-
-// Forward declaration to avoid circular dependency
-typedef struct ErrorStack ErrorStack;
 
 typedef struct StringBuilder StringBuilder;
 

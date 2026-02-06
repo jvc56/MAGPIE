@@ -1,5 +1,3 @@
-#include "fileproxy.h"
-
 #include "io_util.h"
 #include "string_util.h"
 #include <stdio.h>
@@ -39,14 +37,6 @@ FILE *stream_from_filename(const char *filename, ErrorStack *error_stack) {
   FILE *stream;
   stream = fopen_safe(filename, "r", error_stack);
   return stream;
-}
-
-char *get_string_from_file(const char *filename, ErrorStack *error_stack) {
-  FILE *file_handle = stream_from_filename(filename, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return NULL;
-  }
-  return get_string_from_file_handle(file_handle, filename, error_stack);
 }
 
 void precache_file_data(const char *filename, const char *raw_data,
