@@ -129,16 +129,6 @@ void *players_data_create_data(players_data_t players_data_type,
     break;
   case PLAYERS_DATA_TYPE_WMP:
     data = wmp_create(data_paths, data_name, error_stack);
-    // Wordmaps are optional - if the file doesn't exist, just return NULL
-    if (!error_stack_is_empty(error_stack)) {
-      error_code_t error_code = error_stack_top(error_stack);
-      if (error_code == ERROR_STATUS_FILEPATH_FILE_NOT_FOUND) {
-        log_debug("Wordmap file '%s' not found, continuing without wordmap",
-                  data_name);
-        error_stack_reset(error_stack);
-        data = NULL;
-      }
-    }
     break;
   case NUMBER_OF_DATA:
     log_fatal("cannot create invalid players data type");
