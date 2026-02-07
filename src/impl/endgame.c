@@ -722,6 +722,12 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   return best_value;
 }
 
+bool iterative_deepening_should_stop(EndgameSolver *solver) {
+  return atomic_load(&solver->search_complete) != 0 ||
+         thread_control_get_status(solver->thread_control) ==
+             THREAD_CONTROL_STATUS_USER_INTERRUPT;
+}
+
 void iterative_deepening(EndgameSolverWorker *worker, int plies) {
 
   int32_t alpha = -LARGE_VALUE;
@@ -782,7 +788,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
 
   for (int p = start; p <= plies; p++) {
     // Check if another thread has completed the full search
-    if (atomic_load(&worker->solver->search_complete) != 0) {
+    if (iterative_deepening_should_stop(worker->solver)) {
       break;
     }
 
@@ -805,7 +811,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
       // Search with narrow window, widen on fail-high/fail-low
       while (true) {
         // Check if another thread completed
-        if (atomic_load(&worker->solver->search_complete) != 0) {
+        if (iterative_deepening_should_stop(worker->solver)) {
           search_valid = false;
           break;
         }
