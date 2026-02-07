@@ -58,6 +58,19 @@ static void print_pv_callback(int depth, int32_t value, const PVLine *pv_line,
     }
   }
 
+  // Compute final spread: value is from root player's perspective
+  int on_turn = game_get_player_on_turn_index(game);
+  int p1 = equity_to_int(player_get_score(game_get_player(game, 0)));
+  int p2 = equity_to_int(player_get_score(game_get_player(game, 1)));
+  int final_spread = (p1 - p2) + (on_turn == 0 ? value : -value);
+  if (final_spread > 0) {
+    string_builder_add_formatted_string(sb, " [P1 wins by %d]", final_spread);
+  } else if (final_spread < 0) {
+    string_builder_add_formatted_string(sb, " [P2 wins by %d]", -final_spread);
+  } else {
+    string_builder_add_string(sb, " [Tie]");
+  }
+
   printf("%s\n", string_builder_peek(sb));
   string_builder_destroy(sb);
   game_destroy(gc);
@@ -238,7 +251,7 @@ void test_14domino(void) {
   endgame_args.tt_fraction_of_mem = 0.5;
   endgame_args.initial_small_move_arena_size =
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-  endgame_args.num_threads = 10;
+  endgame_args.num_threads = 6;
   endgame_args.per_ply_callback = print_pv_callback;
   endgame_args.per_ply_callback_data = &timer;
 
@@ -260,6 +273,108 @@ void test_14domino(void) {
 
   const PVLine *pv_line = endgame_results_get_pvline(endgame_results);
   assert(pv_line->score == 52);
+
+  endgame_solver_destroy(endgame_solver);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+void test_kue14domino(void) {
+  // Position after 11K K(U)E (26 pts) then 13D QI (15 pts) from 14domino.
+  // P1 to move with ?AESU. Compare to optimal reply VIEW to confirm QI is
+  // suboptimal for Player 2.
+  Config *config = config_create_or_die(
+      "set -s1 score -s2 score -r1 small -r2 small -eplies 12 "
+      "-ttfraction 0.5");
+  load_and_exec_config_or_die(
+      config,
+      "cgp "
+      "6MOO1VIRLS/1EJECTA6A1/2I2AEON4R1/2BAH6X1N1/2SLID4GIFTS/"
+      "4DONG1OR1R1i/7HOURLY1Z/FE4DINT1A2Y/RECLINE2I1N3/"
+      "EW1ATAP2E1G3/M9KUE2/D3PATOOTIE3/3QI10/15/15 "
+      "?AESU/BEUVW 302/336 0 -lex NWL23;");
+
+  EndgameSolver *endgame_solver = endgame_solver_create();
+  Game *game = config_get_game(config);
+  Timer timer;
+  ctimer_start(&timer);
+
+  EndgameArgs endgame_args;
+  endgame_args.thread_control = config_get_thread_control(config);
+  endgame_args.game = game;
+  endgame_args.plies = 12;
+  endgame_args.tt_fraction_of_mem = 0.5;
+  endgame_args.initial_small_move_arena_size =
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  endgame_args.num_threads = 6;
+  endgame_args.per_ply_callback = print_pv_callback;
+  endgame_args.per_ply_callback_data = &timer;
+
+  EndgameResults *endgame_results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+
+  StringBuilder *game_sb = string_builder_create();
+  GameStringOptions *gso = game_string_options_create_default();
+  string_builder_add_game(game, NULL, gso, NULL, game_sb);
+  printf("\n%s\n", string_builder_peek(game_sb));
+  string_builder_destroy(game_sb);
+  game_string_options_destroy(gso);
+
+  printf("After K(U)E + QI 13D:\n");
+  printf("Solving %d-ply endgame with %d threads, ttfraction=%.1f...\n",
+         endgame_args.plies, endgame_args.num_threads,
+         endgame_args.tt_fraction_of_mem);
+  endgame_solve(endgame_solver, &endgame_args, endgame_results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  endgame_solver_destroy(endgame_solver);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+
+  // Now solve the same position but with VIEW 7C as the reply instead.
+  // VIEW scores 29 (V*2 DL + I + E + W = 14, cross HIDE = 8, cross DOW = 7).
+  // P2: 321+29=350, rack BQU.
+  config = config_create_or_die(
+      "set -s1 score -s2 score -r1 small -r2 small -eplies 12 "
+      "-ttfraction 0.5");
+  load_and_exec_config_or_die(
+      config,
+      "cgp "
+      "6MOO1VIRLS/1EJECTA6A1/2I2AEON4R1/2BAH6X1N1/2SLID4GIFTS/"
+      "4DONG1OR1R1i/2VIEW1HOURLY1Z/FE4DINT1A2Y/RECLINE2I1N3/"
+      "EW1ATAP2E1G3/M9KUE2/D3PATOOTIE3/15/15/15 "
+      "?AESU/BQU 302/350 0 -lex NWL23;");
+
+  endgame_solver = endgame_solver_create();
+  game = config_get_game(config);
+  ctimer_start(&timer);
+
+  endgame_args.thread_control = config_get_thread_control(config);
+  endgame_args.game = game;
+  endgame_args.plies = 12;
+  endgame_args.tt_fraction_of_mem = 0.5;
+  endgame_args.initial_small_move_arena_size =
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  endgame_args.num_threads = 6;
+  endgame_args.per_ply_callback = print_pv_callback;
+  endgame_args.per_ply_callback_data = &timer;
+
+  endgame_results = config_get_endgame_results(config);
+  error_stack = error_stack_create();
+
+  game_sb = string_builder_create();
+  gso = game_string_options_create_default();
+  string_builder_add_game(game, NULL, gso, NULL, game_sb);
+  printf("\n%s\n", string_builder_peek(game_sb));
+  string_builder_destroy(game_sb);
+  game_string_options_destroy(gso);
+
+  printf("After K(U)E + VIEW 7C:\n");
+  printf("Solving %d-ply endgame with %d threads, ttfraction=%.1f...\n",
+         endgame_args.plies, endgame_args.num_threads,
+         endgame_args.tt_fraction_of_mem);
+  endgame_solve(endgame_solver, &endgame_args, endgame_results, error_stack);
+  assert(error_stack_is_empty(error_stack));
 
   endgame_solver_destroy(endgame_solver);
   error_stack_destroy(error_stack);

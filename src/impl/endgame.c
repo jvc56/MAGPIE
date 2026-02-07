@@ -1100,6 +1100,26 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
       string_builder_add_string(final_sb, " ");
     }
   }
+  // Append [PX wins by Y] to final line
+  {
+    int on_turn = game_get_player_on_turn_index(endgame_args->game);
+    int p1 = equity_to_int(
+        player_get_score(game_get_player(endgame_args->game, 0)));
+    int p2 = equity_to_int(
+        player_get_score(game_get_player(endgame_args->game, 1)));
+    int final_spread =
+        (p1 - p2) + (on_turn == 0 ? solver->best_pv_value
+                                   : -solver->best_pv_value);
+    if (final_spread > 0) {
+      string_builder_add_formatted_string(final_sb, " [P1 wins by %d]",
+                                          final_spread);
+    } else if (final_spread < 0) {
+      string_builder_add_formatted_string(final_sb, " [P2 wins by %d]",
+                                          -final_spread);
+    } else {
+      string_builder_add_string(final_sb, " [Tie]");
+    }
+  }
   log_warn("%s", string_builder_peek(final_sb));
   string_builder_destroy(final_sb);
   game_destroy(final_game_copy);
