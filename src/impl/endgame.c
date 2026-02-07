@@ -26,7 +26,6 @@
 #include "../ent/xoshiro.h"
 #include "../ent/zobrist.h"
 #include "../str/move_string.h"
-#include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
@@ -34,10 +33,71 @@
 #include "move_gen.h"
 #include "word_prune.h"
 #include <assert.h>
+#include <math.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+// ---------------------------------------------------------------------------
+// ValueMap implementation (open-addressing hash table for ground truth values)
+// ---------------------------------------------------------------------------
+
+ValueMap *value_map_create(uint32_t capacity) {
+  ValueMap *vm = malloc_or_die(sizeof(ValueMap));
+  // Round up to power of 2 for fast modulo
+  uint32_t cap = 1;
+  while (cap < capacity) {
+    cap <<= 1;
+  }
+  vm->capacity = cap;
+  vm->count = 0;
+  vm->entries = calloc_or_die(cap, sizeof(ValueMapEntry));
+  return vm;
+}
+
+void value_map_destroy(ValueMap *vm) {
+  if (!vm) {
+    return;
+  }
+  free(vm->entries);
+  free(vm);
+}
+
+void value_map_store(ValueMap *vm, uint64_t key, int32_t value) {
+  // Use direct-mapped (1-way) replacement: each key maps to exactly one slot.
+  // Collisions simply replace the old entry. This avoids probe chains and
+  // guarantees O(1) store/lookup at the cost of some evictions.
+  uint32_t mask = vm->capacity - 1;
+  uint32_t i = (uint32_t)(key & mask);
+  if (!vm->entries[i].occupied) {
+    vm->count++;
+  }
+  vm->entries[i].key = key;
+  vm->entries[i].value = value;
+  vm->entries[i].occupied = true;
+}
+
+bool value_map_lookup(const ValueMap *vm, uint64_t key, int32_t *out_value) {
+  if (!vm) {
+    return false;
+  }
+  uint32_t mask = vm->capacity - 1;
+  uint32_t i = (uint32_t)(key & mask);
+  if (vm->entries[i].occupied && vm->entries[i].key == key) {
+    *out_value = vm->entries[i].value;
+    return true;
+  }
+  return false;
+}
+
+// Box-Muller transform: generate a standard normal random variable
+// from a uniform random source.
+static double gaussian_noise(XoshiroPRNG *prng) {
+  double u1 = (double)(prng_get_random_number(prng, 1000000) + 1) / 1000001.0;
+  double u2 = (double)(prng_get_random_number(prng, 1000000) + 1) / 1000001.0;
+  return sqrt(-2.0 * log(u1)) * cos(2.0 * M_PI * u2);
+}
 
 enum {
   DEFAULT_ENDGAME_MOVELIST_CAPACITY = 250000,
@@ -88,6 +148,16 @@ struct EndgameSolver {
   EndgamePerPlyCallback per_ply_callback;
   void *per_ply_callback_data;
 
+  // Diagnostic counters for ABDADA
+  atomic_int deferred_count;   // How many times a move was deferred
+  atomic_int abdada_loops;     // How many ABDADA loop iterations
+  atomic_int deferred_mallocs; // How many deferred arrays allocated
+
+  // Ground truth value map for move ordering experiments
+  ValueMap *value_map;        // NOT owned - caller manages lifetime
+  double estimate_noise;      // Gaussian noise stddev for value map estimates
+  bool recording_ground_truth; // true during ground truth recording phase
+
   // Owned by the caller:
   ThreadControl *thread_control;
   const Game *game;
@@ -135,33 +205,18 @@ void pvline_update(PVLine *pv_line, const PVLine *new_pv_line,
   pv_line->score = score;
 }
 
-// Extend the PV by probing the transposition table for moves beyond
-// what the search PV already contains. Existing PV moves (which have
-// correct scores) are preserved; only new moves are appended.
-static void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
-                                  TranspositionTable *tt, int solving_player,
-                                  int max_depth) {
+// Reconstruct the PV by probing the transposition table
+// This fills in moves that may have been truncated due to TT cutoffs
+static void pvline_reconstruct_from_tt(PVLine *pv_line, Game *game_copy,
+                                       TranspositionTable *tt,
+                                       int solving_player, int max_depth) {
   if (!tt) {
     return;
   }
 
-  MoveList *move_list =
-      move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
-
-  // Play existing PV moves to advance game state to where extension begins.
-  // These moves already have correct scores in their metadata.
-  for (int i = 0; i < pv_line->num_moves; i++) {
-    if (game_get_game_end_reason(game_copy) != GAME_END_REASON_NONE) {
-      small_move_list_destroy(move_list);
-      return;
-    }
-    small_move_to_move(move_list->spare_move, &pv_line->moves[i],
-                       game_get_board(game_copy));
-    play_move(move_list->spare_move, game_copy, NULL);
-  }
-
-  // Extend PV from TT
-  int num_moves = pv_line->num_moves;
+  // Start from the current position and probe TT for best moves
+  int num_moves = 0;
+  MoveList *move_list = move_list_create(1);
 
   while (num_moves < max_depth &&
          game_get_game_end_reason(game_copy) == GAME_END_REASON_NONE) {
@@ -169,57 +224,45 @@ static void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
     const Player *solving = game_get_player(game_copy, solving_player);
     const Player *other = game_get_player(game_copy, 1 - solving_player);
 
+    // Calculate hash for current position
     uint64_t hash = zobrist_calculate_hash(
         tt->zobrist, game_get_board(game_copy), player_get_rack(solving),
         player_get_rack(other), on_turn != solving_player,
         game_get_consecutive_scoreless_turns(game_copy));
 
+    // Probe TT
     TTEntry tt_entry = transposition_table_lookup(tt, hash);
     if (!ttentry_valid(tt_entry)) {
-      break;
+      break; // No TT entry, can't continue
     }
 
     uint64_t tiny_move = ttentry_move(tt_entry);
     if (tiny_move == INVALID_TINY_MOVE) {
-      break;
+      break; // No move stored
     }
 
-    // Generate legal moves to find the correct score for this tiny_move.
-    // This is only called for display, so the cost doesn't matter.
-    const MoveGenArgs args = {
-        .game = game_copy,
-        .move_list = move_list,
-        .move_record_type = MOVE_RECORD_ALL_SMALL,
-        .move_sort_type = MOVE_SORT_SCORE,
-        .override_kwg = NULL,
-        .thread_index = 0,
-        .eq_margin_movegen = 0,
-        .target_equity = EQUITY_MAX_VALUE,
-        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-    };
-    generate_moves(&args);
-
-    uint16_t move_score = 0;
-    for (int i = 0; i < move_list->count; i++) {
-      if (move_list->small_moves[i]->tiny_move == tiny_move) {
-        move_score = small_move_get_score(move_list->small_moves[i]);
-        break;
-      }
-    }
-
+    // Convert tiny_move to SmallMove
     SmallMove sm;
     sm.tiny_move = tiny_move;
-    sm.metadata = (uint64_t)move_score;
+    sm.metadata = 0;
+
+    // Convert to Move for playing
     small_move_to_move(move_list->spare_move, &sm, game_get_board(game_copy));
+
+    // Calculate the score of the move
+    int move_score = equity_to_int(move_list->spare_move->score);
+
+    // Play the move to advance the position
     play_move(move_list->spare_move, game_copy, NULL);
 
+    // Store move with score in metadata (lower 16 bits)
     pv_line->moves[num_moves].tiny_move = tiny_move;
-    pv_line->moves[num_moves].metadata = (uint64_t)move_score;
+    pv_line->moves[num_moves].metadata = (uint32_t)(move_score & 0xFFFF);
     num_moves++;
   }
 
   pv_line->num_moves = num_moves;
-  small_move_list_destroy(move_list);
+  move_list_destroy(move_list);
 }
 
 void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
@@ -254,6 +297,11 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
 
   // Initialize Lazy SMP synchronization
   atomic_store(&es->search_complete, 0);
+
+  // Initialize diagnostic counters
+  atomic_store(&es->deferred_count, 0);
+  atomic_store(&es->abdada_loops, 0);
+  atomic_store(&es->deferred_mallocs, 0);
 
   es->thread_control = endgame_args->thread_control;
   es->game = endgame_args->game;
@@ -372,7 +420,8 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
 }
 
 void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
-                               int move_count, uint64_t tt_move) {
+                               int move_count, uint64_t tt_move,
+                               uint64_t node_key) {
   const int player_index = game_get_player_on_turn_index(worker->game_copy);
   const Player *player = game_get_player(worker->game_copy, player_index);
   const Player *opponent = game_get_player(worker->game_copy, 1 - player_index);
@@ -390,6 +439,12 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
   const int thread_idx = worker->thread_index;
   const int num_threads = worker->solver->threads;
 
+  // Check if we have a value map for ground truth estimates
+  const ValueMap *vm = worker->solver->value_map;
+  const double noise_stddev = worker->solver->estimate_noise;
+  const bool use_value_map = (vm != NULL);
+  int vm_hits = 0;
+
   for (size_t i = 0; i < (size_t)move_count; i++) {
     size_t element_offset = arena_offset + i * sizeof(SmallMove);
     SmallMove *current_move =
@@ -401,6 +456,27 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
                         (calculate_end_rack_points(
                             other_rack, game_get_ld(worker->game_copy)))) |
               GOING_OUT_BF);
+    } else if (use_value_map) {
+      // Use ground truth value map for move ordering.
+      // Key is (parent_hash ^ tiny_move), matching how values were recorded.
+      uint64_t vm_key = node_key ^ current_move->tiny_move;
+      int32_t gt_value;
+      if (value_map_lookup(vm, vm_key, &gt_value)) {
+        // The value map stores values from the child's negamax return,
+        // which is already negated from the parent perspective during recording.
+        // So we negate again to get the parent's view (higher = better for
+        // parent).
+        int32_t estimate = -gt_value;
+        if (noise_stddev > 0.0) {
+          estimate += (int32_t)(gaussian_noise(worker->prng) * noise_stddev);
+        }
+        small_move_set_estimated_value(current_move, estimate);
+        vm_hits++;
+      } else {
+        // Fallback to raw score
+        small_move_set_estimated_value(current_move,
+                                       small_move_get_score(current_move));
+      }
     } else if (depth > 2 && num_threads > 1) {
       // Lazy SMP jitter for move ordering
       // Different threads prioritize different move characteristics
@@ -437,6 +513,9 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
       small_move_add_estimated_value(current_move, EARLY_PASS_BF);
     }
   }
+
+  (void)vm_hits; // used for debugging if needed
+
   // sort moves by estimated value, from biggest to smallest value. A good move
   // sorting is instrumental to the performance of ab pruning.
   SmallMove *small_moves =
@@ -536,7 +615,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   bool arena_alloced = false;
   if (worker->current_iterative_deepening_depth != depth) {
     nplays = generate_stm_plays(worker, depth);
-    assign_estimates_and_sort(worker, depth, nplays, tt_move);
+    assign_estimates_and_sort(worker, depth, nplays, tt_move, node_key);
     arena_alloced = true;
   } else {
     // Use initial moves. They already have been sorted by estimated value.
@@ -560,6 +639,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
     } else {
       deferred = malloc_or_die(sizeof(bool) * nplays);
       deferred_heap_allocated = true;
+      atomic_fetch_add(&worker->solver->deferred_mallocs, 1);
     }
     for (int i = 0; i < nplays; i++) {
       deferred[i] = false;
@@ -568,8 +648,10 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
 
   // ABDADA two-phase iteration
   bool all_done = false;
+  int loop_count = 0;
   while (!all_done) {
     all_done = true;
+    loop_count++;
 
     for (int idx = 0; idx < nplays; idx++) {
       // ABDADA: determine if this move should be searched exclusively
@@ -654,6 +736,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       if (value == ON_EVALUATION) {
         if (deferred != NULL) {
           deferred[idx] = true;
+          atomic_fetch_add(&worker->solver->deferred_count, 1);
         }
         all_done = false;
         continue; // Skip to next move
@@ -669,6 +752,16 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       // small_move_arena.
       small_move =
           (SmallMove *)(worker->small_move_arena->memory + element_offset);
+
+      // Record ground truth: store (parent_key ^ tiny_move) -> child_value
+      // so the parent's assign_estimates_and_sort can look it up.
+      // Value is from child's perspective (negated by parent for ordering).
+      if (worker->solver->recording_ground_truth && worker->solver->value_map &&
+          worker->thread_index == 0) {
+        uint64_t vm_key = node_key ^ small_move->tiny_move;
+        value_map_store(worker->solver->value_map, vm_key, value);
+      }
+
       if (-value > best_value) {
         best_value = -value;
         best_tiny_move = small_move->tiny_move;
@@ -694,6 +787,11 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
     if (!use_abdada) {
       all_done = true;
     }
+  }
+
+  // Track ABDADA loop iterations (only if more than 1 loop was needed)
+  if (loop_count > 1) {
+    atomic_fetch_add(&worker->solver->abdada_loops, loop_count - 1);
   }
 
   // Clean up deferred array (only if heap-allocated)
@@ -761,7 +859,8 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   int initial_move_count =
       generate_stm_plays(worker, worker->solver->requested_plies);
   // Arena pointer better have started at 0, since it was empty.
-  assign_estimates_and_sort(worker, 0, initial_move_count, INVALID_TINY_MOVE);
+  assign_estimates_and_sort(worker, 0, initial_move_count, INVALID_TINY_MOVE,
+                            initial_hash_key);
   worker->solver->n_initial_moves = initial_move_count;
   assert((size_t)worker->small_move_arena->size ==
          initial_move_count * sizeof(SmallMove));
@@ -866,16 +965,16 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
 
     // Call per-ply callback (only thread 0 to avoid race conditions)
     if (worker->thread_index == 0 && worker->solver->per_ply_callback) {
-      // If PV is shorter than depth, extend it from TT
-      PVLine extended_pv = pv;
+      // If PV seems truncated, try to reconstruct it from TT
+      PVLine reconstructed_pv = pv;
       if (pv.num_moves < p && worker->solver->transposition_table_optim) {
         Game *temp_game = game_duplicate(worker->game_copy);
-        pvline_extend_from_tt(&extended_pv, temp_game,
-                              worker->solver->transposition_table,
-                              worker->solver->solving_player, p);
+        pvline_reconstruct_from_tt(&reconstructed_pv, temp_game,
+                                   worker->solver->transposition_table,
+                                   worker->solver->solving_player, p);
         game_destroy(temp_game);
       }
-      worker->solver->per_ply_callback(p, pv_value, &extended_pv,
+      worker->solver->per_ply_callback(p, pv_value, &reconstructed_pv,
                                        worker->game_copy,
                                        worker->solver->per_ply_callback_data);
     }
@@ -936,24 +1035,12 @@ void string_builder_endgame_results(StringBuilder *pv_description,
       // Set the move string
       small_move_to_move(&move, &(pv_line->moves[i]), board);
       string_builder_add_move(tmp_sb, board, &move, ld, true);
-      // Play the move on the board to make the next small_move_to_move make
-      // sense.
-      play_move(&move, gc, NULL);
-      if (game_get_game_end_reason(gc) == GAME_END_REASON_STANDARD) {
-        int opp_idx = game_get_player_on_turn_index(gc);
-        const Rack *opp_rack =
-            player_get_rack(game_get_player(gc, opp_idx));
-        int adj = equity_to_int(calculate_end_rack_points(opp_rack, ld));
-        string_builder_add_string(tmp_sb, " (");
-        string_builder_add_rack(tmp_sb, opp_rack, ld, false);
-        string_builder_add_formatted_string(tmp_sb, " +%d)", adj);
-      } else if (game_get_game_end_reason(gc) ==
-                 GAME_END_REASON_CONSECUTIVE_ZEROS) {
-        string_builder_add_string(tmp_sb, " (6 zeros)");
-      }
       string_grid_set_cell(sg, i, curr_col++,
                            string_builder_dump(tmp_sb, NULL));
       string_builder_clear(tmp_sb);
+      // Play the move on the board to make the next small_move_to_move make
+      // sense.
+      play_move(&move, gc, NULL);
     }
     string_builder_destroy(tmp_sb);
     string_builder_add_string_grid(pv_description, sg, false);
@@ -963,24 +1050,12 @@ void string_builder_endgame_results(StringBuilder *pv_description,
       string_builder_add_formatted_string(pv_description, "%d: ", i + 1);
       small_move_to_move(&move, &(pv_line->moves[i]), board);
       string_builder_add_move(pv_description, board, &move, ld, true);
-      // Play the move on the board to make the next small_move_to_move make
-      // sense.
-      play_move(&move, gc, NULL);
-      if (game_get_game_end_reason(gc) == GAME_END_REASON_STANDARD) {
-        int opp_idx = game_get_player_on_turn_index(gc);
-        const Rack *opp_rack =
-            player_get_rack(game_get_player(gc, opp_idx));
-        int adj = equity_to_int(calculate_end_rack_points(opp_rack, ld));
-        string_builder_add_string(pv_description, " (");
-        string_builder_add_rack(pv_description, opp_rack, ld, false);
-        string_builder_add_formatted_string(pv_description, " +%d)", adj);
-      } else if (game_get_game_end_reason(gc) ==
-                 GAME_END_REASON_CONSECUTIVE_ZEROS) {
-        string_builder_add_string(pv_description, " (6 zeros)");
-      }
       if (i != pv_line->num_moves - 1) {
         string_builder_add_string(pv_description, " -> ");
       }
+      // Play the move on the board to make the next small_move_to_move make
+      // sense.
+      play_move(&move, gc, NULL);
     }
   }
   string_builder_add_string(pv_description, "\n");
@@ -1082,47 +1157,57 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
                        game_get_board(final_game_copy));
     string_builder_add_move(final_sb, game_get_board(final_game_copy), &move,
                             ld, true);
-    play_move(&move, final_game_copy, NULL);
-    if (game_get_game_end_reason(final_game_copy) ==
-        GAME_END_REASON_STANDARD) {
-      int opp_idx = game_get_player_on_turn_index(final_game_copy);
-      const Rack *opp_rack =
-          player_get_rack(game_get_player(final_game_copy, opp_idx));
-      int adj = equity_to_int(calculate_end_rack_points(opp_rack, ld));
-      string_builder_add_string(final_sb, " (");
-      string_builder_add_rack(final_sb, opp_rack, ld, false);
-      string_builder_add_formatted_string(final_sb, " +%d)", adj);
-    } else if (game_get_game_end_reason(final_game_copy) ==
-               GAME_END_REASON_CONSECUTIVE_ZEROS) {
-      string_builder_add_string(final_sb, " (6 zeros)");
-    }
     if (i < solver->principal_variation.num_moves - 1) {
       string_builder_add_string(final_sb, " ");
     }
-  }
-  // Append [PX wins by Y] to final line
-  {
-    int on_turn = game_get_player_on_turn_index(endgame_args->game);
-    int p1 = equity_to_int(
-        player_get_score(game_get_player(endgame_args->game, 0)));
-    int p2 = equity_to_int(
-        player_get_score(game_get_player(endgame_args->game, 1)));
-    int final_spread =
-        (p1 - p2) + (on_turn == 0 ? solver->best_pv_value
-                                   : -solver->best_pv_value);
-    if (final_spread > 0) {
-      string_builder_add_formatted_string(final_sb, " [P1 wins by %d]",
-                                          final_spread);
-    } else if (final_spread < 0) {
-      string_builder_add_formatted_string(final_sb, " [P2 wins by %d]",
-                                          -final_spread);
-    } else {
-      string_builder_add_string(final_sb, " [Tie]");
-    }
+    play_move(&move, final_game_copy, NULL);
   }
   log_warn("%s", string_builder_peek(final_sb));
   string_builder_destroy(final_sb);
   game_destroy(final_game_copy);
 
   endgame_results_set_pvline(results, &solver->principal_variation);
+}
+
+void endgame_solver_set_value_map(EndgameSolver *solver, ValueMap *vm) {
+  solver->value_map = vm;
+}
+
+void endgame_solver_set_estimate_noise(EndgameSolver *solver, double stddev) {
+  solver->estimate_noise = stddev;
+}
+
+ValueMap *endgame_record_ground_truth(EndgameSolver *solver,
+                                      const EndgameArgs *endgame_args) {
+  // Create a large value map to hold position values.
+  // For a 7-ply search, we might see millions of unique positions.
+  ValueMap *vm = value_map_create(1 << 24); // 16M entries (~256MB)
+
+  solver->value_map = vm;
+  solver->recording_ground_truth = true;
+
+  // Run the search - this will populate the value map
+  EndgameResults *results = endgame_results_create();
+  ErrorStack *error_stack = error_stack_create();
+  endgame_solve(solver, endgame_args, results, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+  }
+  error_stack_destroy(error_stack);
+
+  printf("Ground truth recording complete: %u positions stored in value map "
+         "(capacity %u)\n",
+         vm->count, vm->capacity);
+
+  const PVLine *pv = endgame_results_get_pvline(results);
+  printf("Recording search result: score=%d, pv_moves=%d\n", pv->score,
+         pv->num_moves);
+  endgame_results_destroy(results);
+
+  // Stop recording but keep the value map for use
+  solver->recording_ground_truth = false;
+  solver->value_map = NULL;
+
+  return vm;
 }

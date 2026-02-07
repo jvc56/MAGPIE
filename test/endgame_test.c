@@ -80,8 +80,11 @@ void test_single_endgame(const char *config_settings, const char *cgp,
                          int initial_small_move_arena_size,
                          error_code_t expected_error_code,
                          const int expected_score, const bool is_pass) {
-  // Load config
-  Config *config = config_create_or_die(config_settings);
+  // Load config (endgame tests don't need WMP)
+  char settings_buf[512];
+  snprintf(settings_buf, sizeof(settings_buf), "%s -wmp false",
+           config_settings);
+  Config *config = config_create_or_die(settings_buf);
   load_and_exec_config_or_die(config, cgp);
 
   // Create solver
@@ -229,7 +232,7 @@ void test_small_arena_realloc(void) {
 
 void test_14domino(void) {
   Config *config = config_create_or_die(
-      "set -s1 score -s2 score -r1 small -r2 small -eplies 14 "
+      "set -s1 score -s2 score -r1 small -r2 small -wmp false -eplies 14 "
       "-ttfraction 0.5");
   load_and_exec_config_or_die(
       config,
@@ -284,7 +287,7 @@ void test_kue14domino(void) {
   // P1 to move with ?AESU. Compare to optimal reply VIEW to confirm QI is
   // suboptimal for Player 2.
   Config *config = config_create_or_die(
-      "set -s1 score -s2 score -r1 small -r2 small -eplies 12 "
+      "set -s1 score -s2 score -r1 small -r2 small -wmp false -eplies 12 "
       "-ttfraction 0.5");
   load_and_exec_config_or_die(
       config,
@@ -335,7 +338,7 @@ void test_kue14domino(void) {
   // VIEW scores 29 (V*2 DL + I + E + W = 14, cross HIDE = 8, cross DOW = 7).
   // P2: 321+29=350, rack BQU.
   config = config_create_or_die(
-      "set -s1 score -s2 score -r1 small -r2 small -eplies 12 "
+      "set -s1 score -s2 score -r1 small -r2 small -wmp false -eplies 12 "
       "-ttfraction 0.5");
   load_and_exec_config_or_die(
       config,
@@ -398,4 +401,107 @@ void test_endgame_wasm(void) {
   test_small_arena_realloc();
   test_pass_first();
   test_nonempty_bag();
+}
+
+// Test ground truth value map estimation with Gaussian noise.
+// 1. Run a 7-ply search on the 14domino position to record ground truth values
+// 2. Re-run the 14-ply search using those values (with noise) as move estimates
+// 3. Report nodes searched and time for various noise levels
+void test_estimate_quality(void) {
+  const char *cgp_str =
+      "cgp "
+      "6MOO1VIRLS/1EJECTA6A1/2I2AEON4R1/2BAH6X1N1/2SLID4GIFTS/"
+      "4DONG1OR1R1i/7HOURLY1Z/FE4DINT1A2Y/RECLINE2I1N3/"
+      "EW1ATAP2E1G3/M10U3/D3PATOOTIE3/15/15/15 "
+      "?AEEKSU/BEIQUVW 276/321 0 -lex NWL23;";
+  const double tt_frac = 0.25;
+
+  // ------- Phase 1: Record ground truth from 7-ply search -------
+  fprintf(stderr, "\n=== Phase 1: Recording ground truth (7-ply search) ===\n");
+
+  Config *config = config_create_or_die(
+      "set -s1 score -s2 score -r1 small -r2 small -wmp false -eplies 7 "
+      "-ttfraction 0.25");
+  load_and_exec_config_or_die(config, cgp_str);
+
+  EndgameSolver *solver = endgame_solver_create();
+  Game *game = config_get_game(config);
+
+  EndgameArgs record_args;
+  record_args.thread_control = config_get_thread_control(config);
+  record_args.game = game;
+  record_args.plies = 7;
+  record_args.tt_fraction_of_mem = tt_frac;
+  record_args.initial_small_move_arena_size =
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  record_args.num_threads = 1; // Single thread for deterministic recording
+  record_args.per_ply_callback = print_pv_callback;
+  Timer timer;
+  ctimer_start(&timer);
+  record_args.per_ply_callback_data = &timer;
+
+  ValueMap *vm = endgame_record_ground_truth(solver, &record_args);
+
+  endgame_solver_destroy(solver);
+  config_destroy(config);
+
+  fprintf(stderr, "Value map: %u entries stored\n\n", vm->count);
+
+  // ------- Phase 2: Run 14-ply search with various noise levels -------
+  double noise_levels[] = {0.0, 10.0, 50.0, 200.0};
+  int num_noise_levels = (int)(sizeof(noise_levels) / sizeof(noise_levels[0]));
+
+  // Also run a baseline with no value map (pure score estimates)
+  fprintf(stderr,
+          "=== Phase 2: 14-ply solves with estimate noise levels ===\n\n");
+
+  for (int trial = -1; trial < num_noise_levels; trial++) {
+    config = config_create_or_die(
+        "set -s1 score -s2 score -r1 small -r2 small -wmp false -eplies 14 "
+        "-ttfraction 0.25");
+    load_and_exec_config_or_die(config, cgp_str);
+
+    solver = endgame_solver_create();
+    game = config_get_game(config);
+
+    EndgameArgs solve_args;
+    solve_args.thread_control = config_get_thread_control(config);
+    solve_args.game = game;
+    solve_args.plies = 14;
+    solve_args.tt_fraction_of_mem = tt_frac;
+    solve_args.initial_small_move_arena_size =
+        DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    solve_args.num_threads = 1; // Single thread for fair comparison
+    solve_args.per_ply_callback = print_pv_callback;
+    ctimer_start(&timer);
+    solve_args.per_ply_callback_data = &timer;
+
+    if (trial >= 0) {
+      endgame_solver_set_value_map(solver, vm);
+      endgame_solver_set_estimate_noise(solver, noise_levels[trial]);
+      fprintf(stderr, "--- Trial: noise_stddev=%.1f ---\n",
+              noise_levels[trial]);
+    } else {
+      fprintf(
+          stderr,
+          "--- Trial: BASELINE (no value map, raw score estimates) ---\n");
+    }
+
+    EndgameResults *results = config_get_endgame_results(config);
+    ErrorStack *error_stack = error_stack_create();
+
+    endgame_solve(solver, &solve_args, results, error_stack);
+    double elapsed = ctimer_elapsed_seconds(&timer);
+    assert(error_stack_is_empty(error_stack));
+
+    const PVLine *pv = endgame_results_get_pvline(results);
+    fprintf(stderr, "  Result: score=%d, time=%.3fs\n\n", pv->score, elapsed);
+
+    error_stack_destroy(error_stack);
+    endgame_solver_destroy(solver);
+    config_destroy(config);
+  }
+
+  value_map_destroy(vm);
+  fprintf(stderr, "=== Estimate quality test complete ===\n");
 }
