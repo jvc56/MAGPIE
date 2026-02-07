@@ -435,8 +435,11 @@ void fseek_or_die(FILE *stream, long offset, int whence) {
   }
 }
 
+// Forward declaration to avoid circular dependency with fileproxy.h
+FILE *stream_from_filename(const char *filename, ErrorStack *error_stack);
+
 char *get_string_from_file(const char *filename, ErrorStack *error_stack) {
-  FILE *file_handle = fopen_safe(filename, "r", error_stack);
+  FILE *file_handle = stream_from_filename(filename, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
