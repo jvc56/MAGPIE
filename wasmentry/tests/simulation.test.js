@@ -6,7 +6,7 @@ test.describe('WASM Worker Simulation Tests', () => {
     test.setTimeout(120000); // 2 minutes
 
     // Navigate to the test page
-    await page.goto('/test-worker.html');
+    await page.goto('/wasmentry/test-worker.html');
 
     // Wait for WASM to load - look for success status
     await expect(page.locator('#status')).toContainText('WASM loaded and ready', {
@@ -40,9 +40,8 @@ test.describe('WASM Worker Simulation Tests', () => {
       timeout: 30000,
     });
 
-    // Check that output shows thread status changing (indicates workers are running)
-    // The output should show "thread status: 1" when threads are active
-    await expect(page.locator('#output')).toContainText('thread status: 1', {
+    // Check that output is being populated (indicates simulation is running)
+    await expect(page.locator('#output')).not.toHaveValue('', {
       timeout: 20000,
     });
 
@@ -54,9 +53,13 @@ test.describe('WASM Worker Simulation Tests', () => {
     // Verify output contains simulation results
     const output = await page.inputValue('#output');
 
-    // Should contain move suggestions and equity values
-    expect(output).toMatch(/\d+\.\s+\w+/); // Pattern like "1. WORD"
-    expect(output).toMatch(/[\d.]+/); // Some numeric values (equity/scores)
+    // Should contain move suggestions with rankings (e.g., "1:  14F ZI(N)E")
+    expect(output).toMatch(/\d+:/); // Pattern like "1:", "2:", etc.
+    expect(output).toContain('Showing'); // Should show "Showing X of Y simmed plays"
+    expect(output).toContain('simmed plays');
+
+    // Verify the top move is 14F ZI(N)E
+    expect(output).toMatch(/^1:\s+14F ZI\(N\)E/m);
 
     // Should NOT contain errors
     expect(output).not.toContain('ERROR');
@@ -68,7 +71,7 @@ test.describe('WASM Worker Simulation Tests', () => {
   test('should handle stop button correctly', async ({ page }) => {
     test.setTimeout(60000);
 
-    await page.goto('/test-worker.html');
+    await page.goto('/wasmentry/test-worker.html');
 
     // Wait for WASM to load
     await expect(page.locator('#status')).toContainText('WASM loaded and ready', {

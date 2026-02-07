@@ -1,7 +1,10 @@
 import { defineConfig, devices } from '@playwright/test';
 
+/**
+ * See https://playwright.dev/docs/test-configuration.
+ */
 export default defineConfig({
-  testDir: './tests/wasm',
+  testDir: './tests',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
@@ -27,8 +30,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'python3 -u cors_server.py',
-    cwd: './wasmentry',
+    command: 'python3 -u cors_server.py 8000',
     url: 'http://localhost:8000',
     reuseExistingServer: !process.env.CI,
     timeout: 120000,

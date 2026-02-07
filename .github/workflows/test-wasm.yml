@@ -28,12 +28,6 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install Playwright
-        run: |
-          npm init -y
-          npm install -D @playwright/test
-          npx playwright install chromium
-
       - name: Build WASM
         run: make -f Makefile-wasm magpie_wasm
 
@@ -49,8 +43,15 @@ jobs:
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
         run: ./download_data.sh
 
+      - name: Install Playwright dependencies
+        working-directory: ./wasmentry
+        run: |
+          npm install
+          npx playwright install chromium
+
       - name: Run Playwright tests
-        run: npx playwright test
+        working-directory: ./wasmentry
+        run: npm test
 
       - name: Upload test results
         if: failure()
