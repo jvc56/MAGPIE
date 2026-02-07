@@ -123,6 +123,7 @@ static TestEntry test_table[] = {
 
 // Tests that only run when explicitly requested (not included in run_all)
 static TestEntry on_demand_test_table[] = {
+    {"endgame_wasm", test_endgame_wasm},
     {"infercmp", test_infer_cmp},
     {"benchend", test_benchmark_endgame},
     {NULL, NULL} // Sentinel value to mark end of array

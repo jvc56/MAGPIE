@@ -210,3 +210,10 @@ void test_endgame(void) {
   // test_vs_joey();
   // test_eldar_v_stick();
 }
+
+void test_endgame_wasm(void) {
+  test_solve_standard();
+  test_small_arena_realloc();
+  test_pass_first();
+  test_nonempty_bag();
+}

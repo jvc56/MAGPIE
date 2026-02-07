@@ -2,5 +2,6 @@
 #define ENDGAME_TEST_H
 
 void test_endgame(void);
+void test_endgame_wasm(void);
 
 #endif
