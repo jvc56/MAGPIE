@@ -27,9 +27,16 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'cd wasmentry && python3 cors_server.py',
+    command: 'python3 -u cors_server.py',
+    cwd: './wasmentry',
     url: 'http://localhost:8000',
     reuseExistingServer: !process.env.CI,
     timeout: 120000,
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: {
+      PYTHONUNBUFFERED: '1',
+      EMSDK_QUIET: '1',
+    },
   },
 });
