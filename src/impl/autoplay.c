@@ -21,6 +21,7 @@
 #include "../ent/player.h"
 #include "../ent/players_data.h"
 #include "../ent/rack.h"
+#include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "../ent/xoshiro.h"
 #include "../str/game_string.h"
@@ -248,6 +249,7 @@ typedef struct AutoplayWorker {
   AutoplaySharedData *shared_data;
   XoshiroPRNG *prng;
   int *min_rack_targets;
+  SimResults *sim_results;
 } AutoplayWorker;
 
 AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
@@ -266,6 +268,7 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
                                               autoplay_worker->prng);
   }
   autoplay_worker->shared_data = shared_data;
+  autoplay_worker->sim_results = sim_results_create(args->cutoff);
   return autoplay_worker;
 }
 
@@ -275,6 +278,7 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   }
   autoplay_results_destroy(autoplay_worker->autoplay_results);
   prng_destroy(autoplay_worker->prng);
+  sim_results_destroy(autoplay_worker->sim_results);
   free(autoplay_worker);
 }
 
@@ -441,13 +445,18 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     rack_copy(player_rack, &rare_rack_or_move_leave);
 
     const Move *forced_move =
-        get_top_equity_move(game, thread_index, game_runner->move_list);
+        get_top_computer_move(game, thread_index, game_runner->move_list,
+                              autoplay_worker->sim_results,
+                              autoplay_worker->args, player_on_turn_index);
     rack_list_add_rack(lg_shared_data->rack_list, &rare_rack_or_move_leave,
                        equity_to_double(move_get_equity(forced_move)));
 
     rack_copy(player_rack, &original_rack);
   }
-  *move = get_top_equity_move(game, thread_index, game_runner->move_list);
+
+  *move = get_top_computer_move(game, thread_index, game_runner->move_list,
+                                autoplay_worker->sim_results,
+                                autoplay_worker->args, player_on_turn_index);
 
   if (lg_shared_data) {
     rack_list_add_rack(lg_shared_data->rack_list, player_rack,
