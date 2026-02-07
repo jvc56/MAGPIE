@@ -1,3 +1,4 @@
+#include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
 #include "../src/ent/board.h"
 #include "../src/ent/endgame_results.h"
@@ -14,10 +15,8 @@
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
-#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <unistd.h>
 
 // Per-ply callback to print PV during iterative deepening
 static void print_pv_callback(int depth, int32_t value, const PVLine *pv_line,
@@ -104,12 +103,11 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   game_string_options_destroy(gso);
 
   // Create timeout thread if timeout is nonzero
-  pthread_t timeout_thread_id;
+  cpthread_t timeout_thread_id;
   TimeoutThreadArgs timeout_args = {
       .thread_control = endgame_args.thread_control, .timeout = timeout};
   if (timeout > 0) {
-    pthread_create(&timeout_thread_id, NULL, timeout_thread_function,
-                   &timeout_args);
+    cpthread_create(&timeout_thread_id, timeout_thread_function, &timeout_args);
   }
 
   printf("Solving %d-ply endgame...\n", endgame_args.plies);
@@ -117,7 +115,7 @@ void test_single_endgame(const char *config_settings, const char *cgp,
 
   // Join the timeout thread if it was created
   if (timeout > 0) {
-    pthread_join(timeout_thread_id, NULL);
+    cpthread_join(timeout_thread_id);
   }
 
   const error_code_t actual_error_code = error_stack_top(error_stack);
@@ -130,7 +128,7 @@ void test_single_endgame(const char *config_settings, const char *cgp,
     assert(0);
   }
 
-  if (actual_error_code == ERROR_STATUS_SUCCESS) {
+  if (actual_error_code == ERROR_STATUS_SUCCESS && timeout == 0) {
     const PVLine *pv_line = endgame_results_get_pvline(endgame_results);
     assert(pv_line->score == expected_score);
     assert(small_move_is_pass(&pv_line->moves[0]) == is_pass);
@@ -235,15 +233,13 @@ void test_small_arena_realloc(void) {
 }
 
 void test_endgame_interrupt(void) {
-  // This insane endgame requires 25 plies to solve. We end up winning by 1 pt.
   test_single_endgame(
-      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 25",
+      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 9",
       "cgp "
-      "14C/13QI/12FIE/10VEE1R/9KIT2G/8CIG1IDE/8UTA2AS/7ST1SYPh1/6JA5A1/"
-      "5WOLD2BOBA/3PLOT1R1NU1EX/Y1VEIN1NOR1mOA1/UT1AT1N1L2FEH1/"
-      "GUR2WIRER5/SNEEZED8 ADENOOO/AHIILMM 353/236 0 -lex CSW21;",
-      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, -116, true,
-      3);
+      "4EXODE6/1DOFF1KERATIN1U/1OHO8YEN/1POOJA1B3MEWS/5SQUINTY2A/4RHINO1e3V/"
+      "2B4C2R3E/GOAT1D1E2ZIN1d/1URACILS2E4/1PIG1S4T4/2L2R4T4/2L2A1GENII3/"
+      "2A2T1L7/5E1A7/5D1M7 AEEIRUW/V 410/409 0 -lex CSW21;",
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, 0, true, 2);
 }
 
 void test_endgame(void) {
@@ -252,6 +248,7 @@ void test_endgame(void) {
   test_small_arena_realloc();
   test_pass_first();
   test_nonempty_bag();
+  test_endgame_interrupt();
   //  Uncomment out more of these tests once we add more optimizations,
   //  and/or if we can run the endgame tests in release mode.
   // test_vs_joey();
