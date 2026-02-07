@@ -39,6 +39,15 @@ FILE *stream_from_filename(const char *filename, ErrorStack *error_stack) {
   return stream;
 }
 
+char *fileproxy_get_string_from_filename(const char *filename,
+                                         ErrorStack *error_stack) {
+  FILE *file = stream_from_filename(filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  return get_string_from_file_handle(file, filename, error_stack);
+}
+
 void precache_file_data(const char *filename, const char *raw_data,
                         const int num_bytes) {
   char *data_copy = malloc_or_die(sizeof(char) * num_bytes);
