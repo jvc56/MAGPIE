@@ -26,6 +26,7 @@
 #include "../ent/xoshiro.h"
 #include "../ent/zobrist.h"
 #include "../str/move_string.h"
+#include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
@@ -87,11 +88,6 @@ struct EndgameSolver {
   EndgamePerPlyCallback per_ply_callback;
   void *per_ply_callback_data;
 
-  // Diagnostic counters for ABDADA
-  atomic_int deferred_count;   // How many times a move was deferred
-  atomic_int abdada_loops;     // How many ABDADA loop iterations
-  atomic_int deferred_mallocs; // How many deferred arrays allocated
-
   // Owned by the caller:
   ThreadControl *thread_control;
   const Game *game;
@@ -139,18 +135,33 @@ void pvline_update(PVLine *pv_line, const PVLine *new_pv_line,
   pv_line->score = score;
 }
 
-// Reconstruct the PV by probing the transposition table
-// This fills in moves that may have been truncated due to TT cutoffs
-static void pvline_reconstruct_from_tt(PVLine *pv_line, Game *game_copy,
-                                       TranspositionTable *tt,
-                                       int solving_player, int max_depth) {
+// Extend the PV by probing the transposition table for moves beyond
+// what the search PV already contains. Existing PV moves (which have
+// correct scores) are preserved; only new moves are appended.
+static void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
+                                  TranspositionTable *tt, int solving_player,
+                                  int max_depth) {
   if (!tt) {
     return;
   }
 
-  // Start from the current position and probe TT for best moves
-  int num_moves = 0;
-  MoveList *move_list = move_list_create(1);
+  MoveList *move_list =
+      move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
+
+  // Play existing PV moves to advance game state to where extension begins.
+  // These moves already have correct scores in their metadata.
+  for (int i = 0; i < pv_line->num_moves; i++) {
+    if (game_get_game_end_reason(game_copy) != GAME_END_REASON_NONE) {
+      small_move_list_destroy(move_list);
+      return;
+    }
+    small_move_to_move(move_list->spare_move, &pv_line->moves[i],
+                       game_get_board(game_copy));
+    play_move(move_list->spare_move, game_copy, NULL);
+  }
+
+  // Extend PV from TT
+  int num_moves = pv_line->num_moves;
 
   while (num_moves < max_depth &&
          game_get_game_end_reason(game_copy) == GAME_END_REASON_NONE) {
@@ -158,45 +169,57 @@ static void pvline_reconstruct_from_tt(PVLine *pv_line, Game *game_copy,
     const Player *solving = game_get_player(game_copy, solving_player);
     const Player *other = game_get_player(game_copy, 1 - solving_player);
 
-    // Calculate hash for current position
     uint64_t hash = zobrist_calculate_hash(
         tt->zobrist, game_get_board(game_copy), player_get_rack(solving),
         player_get_rack(other), on_turn != solving_player,
         game_get_consecutive_scoreless_turns(game_copy));
 
-    // Probe TT
     TTEntry tt_entry = transposition_table_lookup(tt, hash);
     if (!ttentry_valid(tt_entry)) {
-      break; // No TT entry, can't continue
+      break;
     }
 
     uint64_t tiny_move = ttentry_move(tt_entry);
     if (tiny_move == INVALID_TINY_MOVE) {
-      break; // No move stored
+      break;
     }
 
-    // Convert tiny_move to SmallMove
+    // Generate legal moves to find the correct score for this tiny_move.
+    // This is only called for display, so the cost doesn't matter.
+    const MoveGenArgs args = {
+        .game = game_copy,
+        .move_list = move_list,
+        .move_record_type = MOVE_RECORD_ALL_SMALL,
+        .move_sort_type = MOVE_SORT_SCORE,
+        .override_kwg = NULL,
+        .thread_index = 0,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    generate_moves(&args);
+
+    uint16_t move_score = 0;
+    for (int i = 0; i < move_list->count; i++) {
+      if (move_list->small_moves[i]->tiny_move == tiny_move) {
+        move_score = small_move_get_score(move_list->small_moves[i]);
+        break;
+      }
+    }
+
     SmallMove sm;
     sm.tiny_move = tiny_move;
-    sm.metadata = 0;
-
-    // Convert to Move for playing
+    sm.metadata = (uint64_t)move_score;
     small_move_to_move(move_list->spare_move, &sm, game_get_board(game_copy));
-
-    // Calculate the score of the move
-    int move_score = equity_to_int(move_list->spare_move->score);
-
-    // Play the move to advance the position
     play_move(move_list->spare_move, game_copy, NULL);
 
-    // Store move with score in metadata (lower 16 bits)
     pv_line->moves[num_moves].tiny_move = tiny_move;
-    pv_line->moves[num_moves].metadata = (uint32_t)(move_score & 0xFFFF);
+    pv_line->moves[num_moves].metadata = (uint64_t)move_score;
     num_moves++;
   }
 
   pv_line->num_moves = num_moves;
-  move_list_destroy(move_list);
+  small_move_list_destroy(move_list);
 }
 
 void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
@@ -231,11 +254,6 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
 
   // Initialize Lazy SMP synchronization
   atomic_store(&es->search_complete, 0);
-
-  // Initialize diagnostic counters
-  atomic_store(&es->deferred_count, 0);
-  atomic_store(&es->abdada_loops, 0);
-  atomic_store(&es->deferred_mallocs, 0);
 
   es->thread_control = endgame_args->thread_control;
   es->game = endgame_args->game;
@@ -542,7 +560,6 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
     } else {
       deferred = malloc_or_die(sizeof(bool) * nplays);
       deferred_heap_allocated = true;
-      atomic_fetch_add(&worker->solver->deferred_mallocs, 1);
     }
     for (int i = 0; i < nplays; i++) {
       deferred[i] = false;
@@ -551,10 +568,8 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
 
   // ABDADA two-phase iteration
   bool all_done = false;
-  int loop_count = 0;
   while (!all_done) {
     all_done = true;
-    loop_count++;
 
     for (int idx = 0; idx < nplays; idx++) {
       // ABDADA: determine if this move should be searched exclusively
@@ -639,7 +654,6 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       if (value == ON_EVALUATION) {
         if (deferred != NULL) {
           deferred[idx] = true;
-          atomic_fetch_add(&worker->solver->deferred_count, 1);
         }
         all_done = false;
         continue; // Skip to next move
@@ -680,11 +694,6 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
     if (!use_abdada) {
       all_done = true;
     }
-  }
-
-  // Track ABDADA loop iterations (only if more than 1 loop was needed)
-  if (loop_count > 1) {
-    atomic_fetch_add(&worker->solver->abdada_loops, loop_count - 1);
   }
 
   // Clean up deferred array (only if heap-allocated)
@@ -857,16 +866,16 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
 
     // Call per-ply callback (only thread 0 to avoid race conditions)
     if (worker->thread_index == 0 && worker->solver->per_ply_callback) {
-      // If PV seems truncated, try to reconstruct it from TT
-      PVLine reconstructed_pv = pv;
+      // If PV is shorter than depth, extend it from TT
+      PVLine extended_pv = pv;
       if (pv.num_moves < p && worker->solver->transposition_table_optim) {
         Game *temp_game = game_duplicate(worker->game_copy);
-        pvline_reconstruct_from_tt(&reconstructed_pv, temp_game,
-                                   worker->solver->transposition_table,
-                                   worker->solver->solving_player, p);
+        pvline_extend_from_tt(&extended_pv, temp_game,
+                              worker->solver->transposition_table,
+                              worker->solver->solving_player, p);
         game_destroy(temp_game);
       }
-      worker->solver->per_ply_callback(p, pv_value, &reconstructed_pv,
+      worker->solver->per_ply_callback(p, pv_value, &extended_pv,
                                        worker->game_copy,
                                        worker->solver->per_ply_callback_data);
     }
@@ -927,12 +936,24 @@ void string_builder_endgame_results(StringBuilder *pv_description,
       // Set the move string
       small_move_to_move(&move, &(pv_line->moves[i]), board);
       string_builder_add_move(tmp_sb, board, &move, ld, true);
-      string_grid_set_cell(sg, i, curr_col++,
-                           string_builder_dump(tmp_sb, NULL));
-      string_builder_clear(tmp_sb);
       // Play the move on the board to make the next small_move_to_move make
       // sense.
       play_move(&move, gc, NULL);
+      if (game_get_game_end_reason(gc) == GAME_END_REASON_STANDARD) {
+        int opp_idx = game_get_player_on_turn_index(gc);
+        const Rack *opp_rack =
+            player_get_rack(game_get_player(gc, opp_idx));
+        int adj = equity_to_int(calculate_end_rack_points(opp_rack, ld));
+        string_builder_add_string(tmp_sb, " (");
+        string_builder_add_rack(tmp_sb, opp_rack, ld, false);
+        string_builder_add_formatted_string(tmp_sb, " +%d)", adj);
+      } else if (game_get_game_end_reason(gc) ==
+                 GAME_END_REASON_CONSECUTIVE_ZEROS) {
+        string_builder_add_string(tmp_sb, " (6 zeros)");
+      }
+      string_grid_set_cell(sg, i, curr_col++,
+                           string_builder_dump(tmp_sb, NULL));
+      string_builder_clear(tmp_sb);
     }
     string_builder_destroy(tmp_sb);
     string_builder_add_string_grid(pv_description, sg, false);
@@ -942,12 +963,24 @@ void string_builder_endgame_results(StringBuilder *pv_description,
       string_builder_add_formatted_string(pv_description, "%d: ", i + 1);
       small_move_to_move(&move, &(pv_line->moves[i]), board);
       string_builder_add_move(pv_description, board, &move, ld, true);
-      if (i != pv_line->num_moves - 1) {
-        string_builder_add_string(pv_description, " -> ");
-      }
       // Play the move on the board to make the next small_move_to_move make
       // sense.
       play_move(&move, gc, NULL);
+      if (game_get_game_end_reason(gc) == GAME_END_REASON_STANDARD) {
+        int opp_idx = game_get_player_on_turn_index(gc);
+        const Rack *opp_rack =
+            player_get_rack(game_get_player(gc, opp_idx));
+        int adj = equity_to_int(calculate_end_rack_points(opp_rack, ld));
+        string_builder_add_string(pv_description, " (");
+        string_builder_add_rack(pv_description, opp_rack, ld, false);
+        string_builder_add_formatted_string(pv_description, " +%d)", adj);
+      } else if (game_get_game_end_reason(gc) ==
+                 GAME_END_REASON_CONSECUTIVE_ZEROS) {
+        string_builder_add_string(pv_description, " (6 zeros)");
+      }
+      if (i != pv_line->num_moves - 1) {
+        string_builder_add_string(pv_description, " -> ");
+      }
     }
   }
   string_builder_add_string(pv_description, "\n");
@@ -1049,10 +1082,43 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
                        game_get_board(final_game_copy));
     string_builder_add_move(final_sb, game_get_board(final_game_copy), &move,
                             ld, true);
+    play_move(&move, final_game_copy, NULL);
+    if (game_get_game_end_reason(final_game_copy) ==
+        GAME_END_REASON_STANDARD) {
+      int opp_idx = game_get_player_on_turn_index(final_game_copy);
+      const Rack *opp_rack =
+          player_get_rack(game_get_player(final_game_copy, opp_idx));
+      int adj = equity_to_int(calculate_end_rack_points(opp_rack, ld));
+      string_builder_add_string(final_sb, " (");
+      string_builder_add_rack(final_sb, opp_rack, ld, false);
+      string_builder_add_formatted_string(final_sb, " +%d)", adj);
+    } else if (game_get_game_end_reason(final_game_copy) ==
+               GAME_END_REASON_CONSECUTIVE_ZEROS) {
+      string_builder_add_string(final_sb, " (6 zeros)");
+    }
     if (i < solver->principal_variation.num_moves - 1) {
       string_builder_add_string(final_sb, " ");
     }
-    play_move(&move, final_game_copy, NULL);
+  }
+  // Append [PX wins by Y] to final line
+  {
+    int on_turn = game_get_player_on_turn_index(endgame_args->game);
+    int p1 = equity_to_int(
+        player_get_score(game_get_player(endgame_args->game, 0)));
+    int p2 = equity_to_int(
+        player_get_score(game_get_player(endgame_args->game, 1)));
+    int final_spread =
+        (p1 - p2) + (on_turn == 0 ? solver->best_pv_value
+                                   : -solver->best_pv_value);
+    if (final_spread > 0) {
+      string_builder_add_formatted_string(final_sb, " [P1 wins by %d]",
+                                          final_spread);
+    } else if (final_spread < 0) {
+      string_builder_add_formatted_string(final_sb, " [P2 wins by %d]",
+                                          -final_spread);
+    } else {
+      string_builder_add_string(final_sb, " [Tie]");
+    }
   }
   log_warn("%s", string_builder_peek(final_sb));
   string_builder_destroy(final_sb);
