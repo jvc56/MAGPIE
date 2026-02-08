@@ -248,6 +248,7 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->tt_fraction_of_mem = endgame_args->tt_fraction_of_mem;
   if (es->results) {
     endgame_results_reset(es->results);
+    endgame_results_set_valid_for_current_game_state(es->results, true);
   }
 }
 

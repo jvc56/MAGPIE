@@ -2201,8 +2201,6 @@ void impl_endgame(Config *config, ErrorStack *error_stack) {
     return;
   }
   config_init_game(config);
-  endgame_results_set_valid_for_current_game_state(config->endgame_results,
-                                                   true);
   config_endgame(config, config->endgame_results, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
