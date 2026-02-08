@@ -5664,7 +5664,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   }
   bool default_use_wmp = true;
   if (config_args) {
-   default_use_wmp = config_args->use_wmp;
+    default_use_wmp = config_args->use_wmp;
   }
   // Attempt to load fields that might fail first
   config->board_layout =
