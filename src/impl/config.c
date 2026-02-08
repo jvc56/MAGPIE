@@ -40,6 +40,7 @@
 #include "../ent/trie.h"
 #include "../ent/validated_move.h"
 #include "../ent/win_pct.h"
+#include "../str/endgame_string.h"
 #include "../str/game_string.h"
 #include "../str/inference_string.h"
 #include "../str/move_string.h"
@@ -2206,6 +2207,16 @@ void impl_endgame(Config *config, ErrorStack *error_stack) {
   }
   endgame_results_set_valid_for_current_game_state(config->endgame_results,
                                                    true);
+}
+
+char *status_endgame(Config *config) {
+  if (!endgame_results_get_valid_for_current_game_state(
+          config->endgame_results)) {
+    return get_formatted_string(
+        "Endgame endgame_results are not yet initialized.\n");
+  }
+  return endgame_results_get_string(config->endgame_results, config->game,
+                                    config->game_history, true);
 }
 
 // Autoplay

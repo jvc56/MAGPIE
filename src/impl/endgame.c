@@ -67,14 +67,12 @@ struct EndgameSolver {
   bool transposition_table_optim;
   bool negascout_optim;
   bool prevent_slowroll;
-  PVLine principal_variation;
   PVLine *variations;
 
   KWG *pruned_kwg;
   atomic_int nodes_searched;
 
   int solve_multiple_variations;
-  int32_t best_pv_value;
   int requested_plies;
   int threads;
   double tt_fraction_of_mem;
@@ -93,6 +91,7 @@ struct EndgameSolver {
   atomic_int deferred_mallocs; // How many deferred arrays allocated
 
   // Owned by the caller:
+  EndgameResults *results;
   ThreadControl *thread_control;
   const Game *game;
 };
@@ -250,6 +249,7 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
         transposition_table_create(endgame_args->tt_fraction_of_mem);
   }
   es->tt_fraction_of_mem = endgame_args->tt_fraction_of_mem;
+  endgame_results_reset(es->results);
 }
 
 EndgameSolver *endgame_solver_create(void) {
@@ -861,6 +861,8 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     worker->best_pv = pv;
     worker->completed_depth = p;
 
+    endgame_results_set_best_pvline(worker->solver->results, &pv, pv_value, p);
+
     // Call per-ply callback (only thread 0 to avoid race conditions)
     if (worker->thread_index == 0 && worker->solver->per_ply_callback) {
       // If PV seems truncated, try to reconstruct it from TT
@@ -894,90 +896,8 @@ void *solver_worker_start(void *uncasted_solver_worker) {
   return NULL;
 }
 
-void string_builder_endgame_results(StringBuilder *pv_description,
-                                    const EndgameResults *results,
-                                    const Game *game,
-                                    const GameHistory *game_history,
-                                    bool add_line_breaks) {
-  const PVLine *pv_line = endgame_results_get_pvline(results);
-  Move move;
-  string_builder_add_formatted_string(
-      pv_description, "Principal Variation (value: %d, length: %d)%c",
-      pv_line->score, pv_line->num_moves, add_line_breaks ? '\n' : ' ');
-
-  Game *gc = game_duplicate(game);
-  const Board *board = game_get_board(gc);
-  const LetterDistribution *ld = game_get_ld(gc);
-
-  if (add_line_breaks) {
-    StringGrid *sg = string_grid_create(pv_line->num_moves, 3, 1);
-    StringBuilder *tmp_sb = string_builder_create();
-    for (int i = 0; i < pv_line->num_moves; i++) {
-      int curr_col = 0;
-      // Set the player name
-      const int player_on_turn = game_get_player_on_turn_index(gc);
-      const char *player_name;
-      if (game_history) {
-        player_name =
-            game_history_player_get_name(game_history, player_on_turn);
-      } else {
-        player_name = player_on_turn == 0 ? "Player 1" : "Player 2";
-      }
-      string_grid_set_cell(sg, i, curr_col++,
-                           get_formatted_string("(%s)", player_name));
-
-      // Set the play sequence index and player name
-      string_grid_set_cell(sg, i, curr_col++,
-                           get_formatted_string("%d:", i + 1));
-
-      // Set the move string
-      small_move_to_move(&move, &(pv_line->moves[i]), board);
-      string_builder_add_move(tmp_sb, board, &move, ld, true);
-      string_grid_set_cell(sg, i, curr_col++,
-                           string_builder_dump(tmp_sb, NULL));
-      string_builder_clear(tmp_sb);
-      // Play the move on the board to make the next small_move_to_move make
-      // sense.
-      play_move(&move, gc, NULL);
-    }
-    string_builder_destroy(tmp_sb);
-    string_builder_add_string_grid(pv_description, sg, false);
-    string_grid_destroy(sg);
-  } else {
-    for (int i = 0; i < pv_line->num_moves; i++) {
-      string_builder_add_formatted_string(pv_description, "%d: ", i + 1);
-      small_move_to_move(&move, &(pv_line->moves[i]), board);
-      string_builder_add_move(pv_description, board, &move, ld, true);
-      if (i != pv_line->num_moves - 1) {
-        string_builder_add_string(pv_description, " -> ");
-      }
-      // Play the move on the board to make the next small_move_to_move make
-      // sense.
-      play_move(&move, gc, NULL);
-    }
-  }
-  string_builder_add_string(pv_description, "\n");
-  game_destroy(gc);
-}
-
-char *endgame_results_get_string(const EndgameResults *results,
-                                 const Game *game,
-                                 const GameHistory *game_history,
-                                 bool add_line_breaks) {
-  StringBuilder *pv_description = string_builder_create();
-  string_builder_endgame_results(pv_description, results, game, game_history,
-                                 add_line_breaks);
-  char *pvline_string = string_builder_dump(pv_description, NULL);
-  string_builder_destroy(pv_description);
-  return pvline_string;
-}
-
 void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack) {
-  // Track solve start time
-  Timer solve_timer;
-  ctimer_start(&solve_timer);
-
   const int bag_size = bag_get_letters(game_get_bag(endgame_args->game));
   if (bag_size != 0) {
     error_stack_push(error_stack, ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY,
@@ -988,6 +908,7 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
     return;
   }
 
+  solver->results = results;
   endgame_solver_reset(solver, endgame_args);
 
   // Generate base seed for Lazy SMP jitter using current time
@@ -1011,24 +932,6 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
     cpthread_join(worker_ids[thread_index]);
   }
 
-  // Lazy SMP result aggregation: find the best result among all threads
-  // The thread that completed the deepest search with a valid result wins
-  int best_thread = 0;
-  int best_depth = solver_workers[0]->completed_depth;
-
-  for (int thread_index = 1; thread_index < solver->threads; thread_index++) {
-    int thread_depth = solver_workers[thread_index]->completed_depth;
-    // Prefer deeper completed depth, or same depth from lower-indexed thread
-    if (thread_depth > best_depth) {
-      best_depth = thread_depth;
-      best_thread = thread_index;
-    }
-  }
-
-  // Copy the best result to the solver's principal variation
-  solver->principal_variation = solver_workers[best_thread]->best_pv;
-  solver->best_pv_value = solver_workers[best_thread]->best_pv_value;
-
   // Clean up workers
   for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
     solver_worker_destroy(solver_workers[thread_index]);
@@ -1036,33 +939,4 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
 
   free(solver_workers);
   free(worker_ids);
-
-  // Calculate elapsed time
-  double elapsed = ctimer_elapsed_seconds(&solve_timer);
-
-  // Print final result with PV
-  StringBuilder *final_sb = string_builder_create();
-  const LetterDistribution *ld = game_get_ld(endgame_args->game);
-  Game *final_game_copy = game_duplicate(endgame_args->game);
-  Move move;
-
-  string_builder_add_formatted_string(
-      final_sb,
-      "FINAL: depth=%d, value=%d, time=%.3fs, pv=", solver->requested_plies,
-      solver->best_pv_value, elapsed);
-  for (int i = 0; i < solver->principal_variation.num_moves; i++) {
-    small_move_to_move(&move, &solver->principal_variation.moves[i],
-                       game_get_board(final_game_copy));
-    string_builder_add_move(final_sb, game_get_board(final_game_copy), &move,
-                            ld, true);
-    if (i < solver->principal_variation.num_moves - 1) {
-      string_builder_add_string(final_sb, " ");
-    }
-    play_move(&move, final_game_copy, NULL);
-  }
-  log_warn("%s", string_builder_peek(final_sb));
-  string_builder_destroy(final_sb);
-  game_destroy(final_game_copy);
-
-  endgame_results_set_pvline(results, &solver->principal_variation);
 }

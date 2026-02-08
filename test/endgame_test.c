@@ -1,5 +1,6 @@
 #include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
+#include "../src/def/exec_defs.h"
 #include "../src/ent/board.h"
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/game.h"
@@ -8,6 +9,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
+#include "../src/str/endgame_string.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
@@ -50,14 +52,26 @@ static void print_pv_callback(int depth, int32_t value, const PVLine *pv_line,
 }
 
 typedef struct {
-  ThreadControl *thread_control;
+  Config *config;
   int timeout;
 } TimeoutThreadArgs;
 
 static void *timeout_thread_function(void *arg) {
   TimeoutThreadArgs *args = (TimeoutThreadArgs *)arg;
-  sleep(args->timeout);
-  thread_control_set_status(args->thread_control,
+  char *endgame_string =
+      endgame_results_get_string(config_get_endgame_results(args->config),
+                                 config_get_game(args->config), NULL, true);
+  printf("ttf (initial): %s\n", endgame_string);
+  free(endgame_string);
+  for (int i = 0; i < args->timeout; i++) {
+    ctime_nap(1);
+    endgame_string =
+        endgame_results_get_string(config_get_endgame_results(args->config),
+                                   config_get_game(args->config), NULL, true);
+    printf("ttf (%d): %s\n", i, endgame_string);
+    free(endgame_string);
+  }
+  thread_control_set_status(config_get_thread_control(args->config),
                             THREAD_CONTROL_STATUS_USER_INTERRUPT);
   return NULL;
 }
@@ -104,8 +118,7 @@ void test_single_endgame(const char *config_settings, const char *cgp,
 
   // Create timeout thread if timeout is nonzero
   cpthread_t timeout_thread_id;
-  TimeoutThreadArgs timeout_args = {
-      .thread_control = endgame_args.thread_control, .timeout = timeout};
+  TimeoutThreadArgs timeout_args = {.config = config, .timeout = timeout};
   if (timeout > 0) {
     cpthread_create(&timeout_thread_id, timeout_thread_function, &timeout_args);
   }
@@ -129,7 +142,8 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   }
 
   if (actual_error_code == ERROR_STATUS_SUCCESS && timeout == 0) {
-    const PVLine *pv_line = endgame_results_get_pvline(endgame_results);
+    const PVLine *pv_line =
+        endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
     assert(pv_line->score == expected_score);
     assert(small_move_is_pass(&pv_line->moves[0]) == is_pass);
   }
@@ -239,7 +253,7 @@ void test_endgame_interrupt(void) {
       "4EXODE6/1DOFF1KERATIN1U/1OHO8YEN/1POOJA1B3MEWS/5SQUINTY2A/4RHINO1e3V/"
       "2B4C2R3E/GOAT1D1E2ZIN1d/1URACILS2E4/1PIG1S4T4/2L2R4T4/2L2A1GENII3/"
       "2A2T1L7/5E1A7/5D1M7 AEEIRUW/V 410/409 0 -lex CSW21;",
-      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, 0, true, 2);
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, 0, true, 3);
 }
 
 void test_endgame(void) {
