@@ -12,11 +12,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-void string_builder_endgame_results(StringBuilder *pv_description,
-                                    const EndgameResults *endgame_results,
-                                    const Game *game,
-                                    const GameHistory *game_history,
-                                    bool add_line_breaks) {
+static void string_builder_endgame_results(
+    StringBuilder *pv_description, const EndgameResults *endgame_results,
+    const Game *game, const GameHistory *game_history, bool add_line_breaks) {
   const int depth =
       endgame_results_get_depth(endgame_results, ENDGAME_RESULT_DISPLAY);
   if (depth < 0) {

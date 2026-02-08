@@ -2201,22 +2201,22 @@ void impl_endgame(Config *config, ErrorStack *error_stack) {
     return;
   }
   config_init_game(config);
+  endgame_results_set_valid_for_current_game_state(config->endgame_results,
+                                                   true);
   config_endgame(config, config->endgame_results, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  endgame_results_set_valid_for_current_game_state(config->endgame_results,
-                                                   true);
 }
 
 char *status_endgame(Config *config) {
   if (!config->endgame_results) {
-    return string_duplicate("endgame results have not been initialized.\n");
+    return string_duplicate("endgame results are not yet initialized.\n");
   }
   if (!endgame_results_get_valid_for_current_game_state(
           config->endgame_results)) {
-    return get_formatted_string(
-        "Endgame endgame_results are not yet initialized.\n");
+    return get_formatted_string("endgame results are not yet initialized for "
+                                "the current game state.\n");
   }
   return endgame_results_get_string(config->endgame_results, config->game,
                                     config->game_history, true);

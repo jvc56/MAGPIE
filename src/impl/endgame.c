@@ -721,7 +721,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   return best_value;
 }
 
-bool iterative_deepening_should_stop(EndgameSolver *solver) {
+static bool iterative_deepening_should_stop(EndgameSolver *solver) {
   return atomic_load(&solver->search_complete) != 0 ||
          thread_control_get_status(solver->thread_control) ==
              THREAD_CONTROL_STATUS_USER_INTERRUPT;
