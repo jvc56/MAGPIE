@@ -6,6 +6,7 @@
 #include "../ent/move.h"
 #include "../impl/gameplay.h"
 #include "../str/move_string.h"
+#include "../util/io_util.h"
 #include "../util/string_util.h"
 #include <stddef.h>
 #include <stdio.h>
