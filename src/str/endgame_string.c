@@ -1,8 +1,15 @@
+#include "../ent/board.h"
 #include "../ent/endgame_results.h"
+#include "../ent/game.h"
 #include "../ent/game_history.h"
+#include "../ent/letter_distribution.h"
+#include "../ent/move.h"
 #include "../impl/gameplay.h"
 #include "../str/move_string.h"
 #include "../util/string_util.h"
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 void string_builder_endgame_results(StringBuilder *pv_description,
                                     const EndgameResults *endgame_results,

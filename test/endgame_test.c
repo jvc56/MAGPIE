@@ -1,11 +1,12 @@
 #include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
-#include "../src/def/exec_defs.h"
+#include "../src/def/cpthread_defs.h"
 #include "../src/ent/board.h"
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
+#include "../src/ent/thread_control.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
@@ -19,6 +20,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 // Per-ply callback to print PV during iterative deepening
 static void print_pv_callback(int depth, int32_t value, const PVLine *pv_line,
@@ -57,7 +59,7 @@ typedef struct {
 } TimeoutThreadArgs;
 
 static void *timeout_thread_function(void *arg) {
-  TimeoutThreadArgs *args = (TimeoutThreadArgs *)arg;
+  const TimeoutThreadArgs *args = (TimeoutThreadArgs *)arg;
   char *endgame_string =
       endgame_results_get_string(config_get_endgame_results(args->config),
                                  config_get_game(args->config), NULL, true);

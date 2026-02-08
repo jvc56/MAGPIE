@@ -1,7 +1,6 @@
 #ifndef ENDGAME_STRING_H
 #define ENDGAME_STRING_H
 
-#include "../def/thread_control_defs.h"
 #include "../ent/endgame_results.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"

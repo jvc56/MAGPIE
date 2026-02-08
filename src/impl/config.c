@@ -2210,6 +2210,9 @@ void impl_endgame(Config *config, ErrorStack *error_stack) {
 }
 
 char *status_endgame(Config *config) {
+  if (!config->endgame_results) {
+    return string_duplicate("endgame results have not been initialized.\n");
+  }
   if (!endgame_results_get_valid_for_current_game_state(
           config->endgame_results)) {
     return get_formatted_string(

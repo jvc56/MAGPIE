@@ -7,15 +7,14 @@
 #include "../def/game_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/move_defs.h"
+#include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/endgame_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
-#include "../ent/game_history.h"
 #include "../ent/kwg.h"
-#include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/move_undo.h"
 #include "../ent/player.h"
@@ -25,9 +24,7 @@
 #include "../ent/transposition_table.h"
 #include "../ent/xoshiro.h"
 #include "../ent/zobrist.h"
-#include "../str/move_string.h"
 #include "../util/io_util.h"
-#include "../util/string_util.h"
 #include "gameplay.h"
 #include "kwg_maker.h"
 #include "move_gen.h"
@@ -249,7 +246,9 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
         transposition_table_create(endgame_args->tt_fraction_of_mem);
   }
   es->tt_fraction_of_mem = endgame_args->tt_fraction_of_mem;
-  endgame_results_reset(es->results);
+  if (es->results) {
+    endgame_results_reset(es->results);
+  }
 }
 
 EndgameSolver *endgame_solver_create(void) {

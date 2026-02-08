@@ -2,8 +2,8 @@
 
 #include "../compat/cpthread.h"
 #include "../compat/ctime.h"
+#include "../def/cpthread_defs.h"
 #include "../util/io_util.h"
-#include "game_history.h"
 #include <stdlib.h>
 
 typedef struct PVData {
@@ -126,9 +126,11 @@ void endgame_results_unlock(EndgameResults *endgame_results,
   }
 }
 
-// NOT THREAD SAFE: Caller must ensure synchronization
 void endgame_results_update_display_data(EndgameResults *endgame_results) {
-  endgame_results->display_pv_data = endgame_results->best_pv_data;
+  endgame_results->display_pv_data.pv_line =
+      endgame_results->best_pv_data.pv_line;
+  endgame_results->display_pv_data.value = endgame_results->best_pv_data.value;
+  endgame_results->display_pv_data.depth = endgame_results->best_pv_data.depth;
   endgame_results->display_seconds_elapsed =
       ctimer_elapsed_seconds(&endgame_results->timer);
 }
