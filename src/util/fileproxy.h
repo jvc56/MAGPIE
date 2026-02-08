@@ -5,6 +5,8 @@
 #include <stdio.h>
 
 FILE *stream_from_filename(const char *filename, ErrorStack *error_stack);
+char *fileproxy_get_string_from_filename(const char *filename,
+                                         ErrorStack *error_stack);
 void fileproxy_destroy_cache(void);
 bool fileproxy_file_exists(const char *filename);
 

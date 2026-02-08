@@ -4,6 +4,7 @@
 #include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../ent/equity.h"
+#include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "data_filepaths.h"
@@ -273,12 +274,18 @@ static inline LetterDistribution *ld_create(const char *data_paths,
   free(ld_name_lowercase);
   LetterDistribution *ld = NULL;
   if (error_stack_is_empty(error_stack)) {
-    StringSplitter *ld_lines = split_file_by_newline(ld_filename, error_stack);
+    char *file_contents =
+        fileproxy_get_string_from_filename(ld_filename, error_stack);
     if (error_stack_is_empty(error_stack)) {
-      ld = calloc_or_die(1, sizeof(LetterDistribution));
-      ld_create_internal(ld_name, ld_lines, ld, error_stack);
+      StringSplitter *ld_lines =
+          split_string_by_newline(file_contents, error_stack);
+      if (error_stack_is_empty(error_stack)) {
+        ld = calloc_or_die(1, sizeof(LetterDistribution));
+        ld_create_internal(ld_name, ld_lines, ld, error_stack);
+      }
+      string_splitter_destroy(ld_lines);
     }
-    string_splitter_destroy(ld_lines);
+    free(file_contents);
   }
   free(ld_filename);
   if (!error_stack_is_empty(error_stack)) {

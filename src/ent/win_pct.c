@@ -1,5 +1,6 @@
 #include "win_pct.h"
 
+#include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "data_filepaths.h"
@@ -176,14 +177,19 @@ WinPct *win_pct_create(const char *data_paths, const char *win_pct_name,
       data_paths, win_pct_name, DATA_FILEPATH_TYPE_WIN_PCT, error_stack);
   WinPct *wp = NULL;
   if (error_stack_is_empty(error_stack)) {
-    StringSplitter *split_win_pct_contents =
-        split_file_by_newline(win_pct_filename, error_stack);
+    char *file_contents =
+        fileproxy_get_string_from_filename(win_pct_filename, error_stack);
     if (error_stack_is_empty(error_stack)) {
-      wp = calloc_or_die(1, sizeof(WinPct));
-      win_pct_create_internal(win_pct_name, win_pct_filename, wp,
-                              split_win_pct_contents, error_stack);
+      StringSplitter *split_win_pct_contents =
+          split_string_by_newline(file_contents, error_stack);
+      if (error_stack_is_empty(error_stack)) {
+        wp = calloc_or_die(1, sizeof(WinPct));
+        win_pct_create_internal(win_pct_name, win_pct_filename, wp,
+                                split_win_pct_contents, error_stack);
+      }
+      string_splitter_destroy(split_win_pct_contents);
     }
-    string_splitter_destroy(split_win_pct_contents);
+    free(file_contents);
   }
   free(win_pct_filename);
   if (!error_stack_is_empty(error_stack)) {

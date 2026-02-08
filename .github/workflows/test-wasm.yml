@@ -1,0 +1,63 @@
+name: Test WASM Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-wasm:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: "latest"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build WASM
+        run: make -f Makefile-wasm magpie_wasm
+
+      - name: Get datafile cache
+        id: cache-datafiles
+        uses: actions/cache@v3
+        with:
+          path: |
+            data/*
+          key: downloaded-data-files-wasm-29
+
+      - name: Download data files
+        if: steps.cache-datafiles.outputs.cache-hit != 'true'
+        run: ./download_data.sh
+
+      - name: Install Playwright dependencies
+        working-directory: ./wasmentry
+        run: |
+          npm install
+          npx playwright install chromium
+
+      - name: Run Playwright tests
+        working-directory: ./wasmentry
+        run: npm test
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: playwright-results
+          path: |
+            test-results/
+            playwright-report/

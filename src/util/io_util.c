@@ -435,8 +435,8 @@ void fseek_or_die(FILE *stream, long offset, int whence) {
   }
 }
 
-char *get_string_from_file(const char *filename, ErrorStack *error_stack) {
-  FILE *file_handle = fopen_safe(filename, "r", error_stack);
+char *get_string_from_file_handle(FILE *file_handle, const char *filename,
+                                  ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
@@ -471,6 +471,14 @@ char *get_string_from_file(const char *filename, ErrorStack *error_stack) {
   fclose_or_die(file_handle);
 
   return result_string;
+}
+
+char *get_string_from_file(const char *filename, ErrorStack *error_stack) {
+  FILE *file_handle = fopen_safe(filename, "r", error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  return get_string_from_file_handle(file_handle, filename, error_stack);
 }
 
 FILE *fopen_or_die(const char *filename, const char *mode) {
