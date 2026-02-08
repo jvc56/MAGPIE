@@ -34,6 +34,9 @@
 #include "word_prune.h"
 #include <assert.h>
 #include <math.h>
+#ifndef __wasm__
+#include <sched.h>
+#endif
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -422,6 +425,7 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
 void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
                                int move_count, uint64_t tt_move,
                                uint64_t node_key) {
+  (void)depth; // depth parameter retained for API compatibility
   const int player_index = game_get_player_on_turn_index(worker->game_copy);
   const Player *player = game_get_player(worker->game_copy, player_index);
   const Player *opponent = game_get_player(worker->game_copy, 1 - player_index);
@@ -477,8 +481,8 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
         small_move_set_estimated_value(current_move,
                                        small_move_get_score(current_move));
       }
-    } else if (depth > 2 && num_threads > 1) {
-      // Lazy SMP jitter for move ordering
+    } else if (num_threads > 1) {
+      // Lazy SMP jitter for move ordering at all depths
       // Different threads prioritize different move characteristics
       int base_estimate = small_move_get_score(current_move);
       int tiles_played = small_move_get_tiles_played(current_move);
@@ -530,10 +534,14 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
 
   assert(pv_node || alpha == beta - 1);
 
-  // ABDADA: if exclusive search and another processor is on this node, defer
+  // ABDADA: if exclusive search and another processor is on this node, defer.
+  // Only use ABDADA exclusion at sufficient depth (>= 3) where the cost of
+  // redundant search justifies the protocol overhead. At shallow depths the
+  // deferral/retry loop causes more contention than it saves.
   const int num_threads = worker->solver->threads;
-  if (exclusive_p && num_threads > 1 &&
-      worker->solver->transposition_table_optim) {
+  const bool abdada_active = (num_threads > 1 && depth >= 3 &&
+                              worker->solver->transposition_table_optim);
+  if (exclusive_p && abdada_active) {
     if (transposition_table_is_busy(worker->solver->transposition_table,
                                     node_key)) {
       return ON_EVALUATION;
@@ -541,7 +549,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   }
 
   // ABDADA: mark that we're searching this node
-  if (num_threads > 1 && worker->solver->transposition_table_optim) {
+  if (abdada_active) {
     transposition_table_enter_node(worker->solver->transposition_table,
                                    node_key);
   }
@@ -568,7 +576,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       if (flag == TT_EXACT) {
         if (!pv_node) {
           // ABDADA: leave node before returning
-          if (num_threads > 1) {
+          if (abdada_active) {
             transposition_table_leave_node(worker->solver->transposition_table,
                                            node_key);
           }
@@ -582,7 +590,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       if (alpha >= beta) {
         if (!pv_node) {
           // ABDADA: leave node before returning
-          if (num_threads > 1) {
+          if (abdada_active) {
             transposition_table_leave_node(worker->solver->transposition_table,
                                            node_key);
           }
@@ -598,7 +606,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   if (depth == 0 ||
       game_get_game_end_reason(worker->game_copy) != GAME_END_REASON_NONE) {
     // ABDADA: leave node before returning
-    if (num_threads > 1 && worker->solver->transposition_table_optim) {
+    if (abdada_active) {
       transposition_table_leave_node(worker->solver->transposition_table,
                                      node_key);
     }
@@ -632,7 +640,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   bool deferred_stack[MAX_DEFERRED_STACK];
   bool *deferred = NULL;
   bool deferred_heap_allocated = false;
-  bool use_abdada = (num_threads > 1);
+  bool use_abdada = abdada_active;
   if (use_abdada) {
     if (nplays <= MAX_DEFERRED_STACK) {
       deferred = deferred_stack;
@@ -787,6 +795,13 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
     if (!use_abdada) {
       all_done = true;
     }
+
+    // ABDADA: yield when we still have deferred moves so other threads
+    // can make progress. Without this, threads tight-spin on deferred
+    // moves causing massive CPU waste at shallow depths.
+    if (!all_done) {
+      sched_yield();
+    }
   }
 
   // Track ABDADA loop iterations (only if more than 1 loop was needed)
@@ -821,7 +836,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   }
 
   // ABDADA: leave node before returning
-  if (num_threads > 1 && worker->solver->transposition_table_optim) {
+  if (abdada_active) {
     transposition_table_leave_node(worker->solver->transposition_table,
                                    node_key);
   }
@@ -871,18 +886,16 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     start = plies;
   }
 
-  // Lazy SMP depth jitter: different threads can start at different depths
-  // This helps threads explore different parts of the search space
-  // Thread 0 always starts at depth 1 (the main thread)
-  // Other threads can start at depth 1 or 2 based on their index
+  // Lazy SMP depth jitter: spread threads across different starting depths
+  // so they don't all compete on the same shallow levels simultaneously.
+  // Thread 0 always starts at depth 1 (main thread, provides per-ply callback).
+  // Other threads start at depth 1 + (index % depth_spread), clamped to plies.
   const int num_threads = worker->solver->threads;
   if (num_threads > 1 && worker->thread_index > 0) {
-    // Even-indexed helper threads (2, 4, 6...) start at depth 2
-    // Odd-indexed helper threads (1, 3, 5...) start at depth 1
-    // This ensures some threads get to deeper depths faster
-    if (worker->thread_index % 2 == 0 && plies >= 2) {
-      start = 2;
-    }
+    // Spread across up to 4 different starting depths to reduce contention.
+    // With 16 threads: 1 at d1 (thread 0), ~4 at d2, ~4 at d3, ~4 at d4, ~3 at d5
+    int depth_offset = 1 + (worker->thread_index % MIN(4, plies - 1));
+    start = MIN(depth_offset, plies);
   }
 
   int32_t prev_value = 0;

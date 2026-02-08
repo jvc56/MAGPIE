@@ -415,46 +415,65 @@ void test_estimate_quality(void) {
       "EW1ATAP2E1G3/M10U3/D3PATOOTIE3/15/15/15 "
       "?AEEKSU/BEIQUVW 276/321 0 -lex NWL23;";
 
-  // One run: 1 thread, tt_frac=0.25, 7-ply
   double tt_frac = 0.25;
-  int nthreads = 16;
+  int thread_counts[] = {1, 2, 3, 4, 6, 8, 10, 12};
+  int num_trials = (int)(sizeof(thread_counts) / sizeof(thread_counts[0]));
+  double elapsed_results[8];
 
   fprintf(stderr,
-          "\n=== 7-ply endgame: threads=%d, tt_frac=%.2f ===\n",
-          nthreads, tt_frac);
+          "\n=== 7-ply thread sweep: tt_frac=%.2f ===\n"
+          "Position: 14domino (?AEEKSU/BEIQUVW, 276/321)\n\n",
+          tt_frac);
 
-  Config *config = config_create_or_die(
-      "set -s1 score -s2 score -r1 small -r2 small -wmp false "
-      "-eplies 7 -ttfraction 0.25");
-  load_and_exec_config_or_die(config, cgp_str);
+  for (int t = 0; t < num_trials; t++) {
+    int nthreads = thread_counts[t];
 
-  EndgameSolver *solver = endgame_solver_create();
-  Game *game = config_get_game(config);
+    Config *config = config_create_or_die(
+        "set -s1 score -s2 score -r1 small -r2 small -wmp false "
+        "-eplies 7 -ttfraction 0.25");
+    load_and_exec_config_or_die(config, cgp_str);
 
-  EndgameArgs solve_args;
-  solve_args.thread_control = config_get_thread_control(config);
-  solve_args.game = game;
-  solve_args.plies = 7;
-  solve_args.tt_fraction_of_mem = tt_frac;
-  solve_args.initial_small_move_arena_size =
-      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-  solve_args.num_threads = nthreads;
-  solve_args.per_ply_callback = print_pv_callback;
-  Timer timer;
-  ctimer_start(&timer);
-  solve_args.per_ply_callback_data = &timer;
+    EndgameSolver *solver = endgame_solver_create();
+    Game *game = config_get_game(config);
 
-  EndgameResults *results = config_get_endgame_results(config);
-  ErrorStack *error_stack = error_stack_create();
+    EndgameArgs solve_args;
+    solve_args.thread_control = config_get_thread_control(config);
+    solve_args.game = game;
+    solve_args.plies = 7;
+    solve_args.tt_fraction_of_mem = tt_frac;
+    solve_args.initial_small_move_arena_size =
+        DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    solve_args.num_threads = nthreads;
+    solve_args.per_ply_callback = print_pv_callback;
+    Timer timer;
+    ctimer_start(&timer);
+    solve_args.per_ply_callback_data = &timer;
 
-  endgame_solve(solver, &solve_args, results, error_stack);
-  double elapsed = ctimer_elapsed_seconds(&timer);
-  assert(error_stack_is_empty(error_stack));
+    fprintf(stderr, "--- %d thread(s) ---\n", nthreads);
 
-  const PVLine *pv = endgame_results_get_pvline(results);
-  fprintf(stderr, "  DONE: score=%d, time=%.3fs\n", pv->score, elapsed);
+    EndgameResults *results = config_get_endgame_results(config);
+    ErrorStack *error_stack = error_stack_create();
 
-  error_stack_destroy(error_stack);
-  endgame_solver_destroy(solver);
-  config_destroy(config);
+    endgame_solve(solver, &solve_args, results, error_stack);
+    double elapsed = ctimer_elapsed_seconds(&timer);
+    assert(error_stack_is_empty(error_stack));
+
+    const PVLine *pv = endgame_results_get_pvline(results);
+    fprintf(stderr, "  TOTAL: score=%d, time=%.1fs\n\n", pv->score, elapsed);
+    elapsed_results[t] = elapsed;
+
+    error_stack_destroy(error_stack);
+    endgame_solver_destroy(solver);
+    config_destroy(config);
+  }
+
+  // Print summary table
+  fprintf(stderr, "=== SUMMARY ===\n");
+  fprintf(stderr, "Threads  Time(s)  Speedup\n");
+  for (int t = 0; t < num_trials; t++) {
+    double speedup = elapsed_results[0] / elapsed_results[t];
+    fprintf(stderr, "%7d  %7.1f  %5.2fx\n", thread_counts[t],
+            elapsed_results[t], speedup);
+  }
+  fprintf(stderr, "\n");
 }
