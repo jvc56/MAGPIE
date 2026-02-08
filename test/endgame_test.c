@@ -415,22 +415,30 @@ void test_estimate_quality(void) {
       "EW1ATAP2E1G3/M10U3/D3PATOOTIE3/15/15/15 "
       "?AEEKSU/BEIQUVW 276/321 0 -lex NWL23;";
 
-  double tt_frac = 0.25;
-  int thread_counts[] = {9, 11};
-  int num_trials = (int)(sizeof(thread_counts) / sizeof(thread_counts[0]));
-  double elapsed_results[2];
+  // TT size sweep: 9 threads, varying tt_fraction
+  // System has ~21GB RAM. tt_fraction maps to approximate TT size:
+  //   0.095 => ~2GB, 0.19 => ~4GB, 0.38 => ~8GB, 0.76 => ~16GB
+  int nthreads = 9;
+  double tt_fracs[] = {0.095, 0.19, 0.38, 0.76};
+  const char *tt_labels[] = {"~2GB", "~4GB", "~8GB", "~16GB"};
+  int num_trials = (int)(sizeof(tt_fracs) / sizeof(tt_fracs[0]));
+  double elapsed_results[4];
 
   fprintf(stderr,
-          "\n=== 7-ply thread sweep: tt_frac=%.2f ===\n"
+          "\n=== 7-ply TT size sweep: %d threads ===\n"
           "Position: 14domino (?AEEKSU/BEIQUVW, 276/321)\n\n",
-          tt_frac);
+          nthreads);
 
   for (int t = 0; t < num_trials; t++) {
-    int nthreads = thread_counts[t];
+    double tt_frac = tt_fracs[t];
 
-    Config *config = config_create_or_die(
-        "set -s1 score -s2 score -r1 small -r2 small -wmp false "
-        "-eplies 7 -ttfraction 0.25");
+    char settings[256];
+    snprintf(settings, sizeof(settings),
+             "set -s1 score -s2 score -r1 small -r2 small -wmp false "
+             "-eplies 7 -ttfraction %.3f",
+             tt_frac);
+
+    Config *config = config_create_or_die(settings);
     load_and_exec_config_or_die(config, cgp_str);
 
     EndgameSolver *solver = endgame_solver_create();
@@ -449,7 +457,7 @@ void test_estimate_quality(void) {
     ctimer_start(&timer);
     solve_args.per_ply_callback_data = &timer;
 
-    fprintf(stderr, "--- %d thread(s) ---\n", nthreads);
+    fprintf(stderr, "--- %s (tt_frac=%.3f) ---\n", tt_labels[t], tt_frac);
 
     EndgameResults *results = config_get_endgame_results(config);
     ErrorStack *error_stack = error_stack_create();
@@ -468,12 +476,12 @@ void test_estimate_quality(void) {
   }
 
   // Print summary table
-  fprintf(stderr, "=== SUMMARY ===\n");
-  fprintf(stderr, "Threads  Time(s)  Speedup\n");
+  fprintf(stderr, "=== SUMMARY (%d threads) ===\n", nthreads);
+  fprintf(stderr, "TT Size  Time(s)  vs smallest\n");
   for (int t = 0; t < num_trials; t++) {
-    double speedup = elapsed_results[0] / elapsed_results[t];
-    fprintf(stderr, "%7d  %7.1f  %5.2fx\n", thread_counts[t],
-            elapsed_results[t], speedup);
+    double ratio = elapsed_results[0] / elapsed_results[t];
+    fprintf(stderr, "%7s  %7.1f  %5.2fx\n", tt_labels[t],
+            elapsed_results[t], ratio);
   }
   fprintf(stderr, "\n");
 }
