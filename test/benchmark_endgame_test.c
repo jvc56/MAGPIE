@@ -167,3 +167,79 @@ void test_benchmark_endgame(void) {
   endgame_solver_destroy(solver);
   config_destroy(config);
 }
+
+// Benchmark the 14domino endgame at 7 plies with different thread counts.
+// Uses TT fraction 0.20 (~4GB on a 22GB system, capped at 2^28 entries).
+void test_benchmark_threads(void) {
+  log_set_level(LOG_WARN);
+
+  // 14domino endgame position: ?AEEKSU vs BEIQUVW (14 tiles total)
+  const char *cgp =
+      "cgp "
+      "6MOO1VIRLS/1EJECTA6A1/2I2AEON4R1/2BAH6X1N1/2SLID4GIFTS/"
+      "4DONG1OR1R1i/7HOURLY1Z/FE4DINT1A2Y/RECLINE2I1N3/"
+      "EW1ATAP2E1G3/M10U3/D3PATOOTIE3/15/15/15 "
+      "?AEEKSU/BEIQUVW 276/321 0 -lex NWL23;";
+
+  const int ply = 7;
+  const double tt_fraction = 0.20;
+  const int thread_counts[] = {4, 6, 8, 10, 12, 16};
+  const int num_configs = 6;
+
+  printf("\n");
+  printf("==============================================================\n");
+  printf("  Thread Benchmark: 14domino endgame at %d plies\n", ply);
+  printf("  TT fraction: %.2f (targeting <=4GB)\n", tt_fraction);
+  printf("==============================================================\n");
+
+  for (int c = 0; c < num_configs; c++) {
+    int num_threads = thread_counts[c];
+
+    char config_str[256];
+    snprintf(config_str, sizeof(config_str),
+             "set -s1 score -s2 score -r1 small -r2 small -wmp false "
+             "-threads %d",
+             num_threads);
+    Config *config = config_create_or_die(config_str);
+    load_and_exec_config_or_die(config, (char *)cgp);
+
+    Game *game = config_get_game(config);
+    EndgameSolver *solver = endgame_solver_create();
+    EndgameResults *results = config_get_endgame_results(config);
+    ErrorStack *err = error_stack_create();
+
+    printf("\n--- %d thread(s) ---\n", num_threads);
+    fflush(stdout);
+
+    Timer timer;
+    ctimer_start(&timer);
+
+    EndgameArgs args = {.game = game,
+                        .thread_control = config_get_thread_control(config),
+                        .plies = ply,
+                        .tt_fraction_of_mem = tt_fraction,
+                        .initial_small_move_arena_size =
+                            DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                        .num_threads = num_threads,
+                        .per_ply_callback = NULL,
+                        .per_ply_callback_data = NULL};
+
+    endgame_solve(solver, &args, results, err);
+    double elapsed = ctimer_elapsed_seconds(&timer);
+    assert(error_stack_is_empty(err));
+
+    char *result_str = endgame_results_get_string(results, game, NULL, true);
+    printf("%s", result_str);
+    free(result_str);
+    printf("Threads: %2d, Time: %.3fs\n", num_threads, elapsed);
+    fflush(stdout);
+
+    error_stack_destroy(err);
+    endgame_solver_destroy(solver);
+    config_destroy(config);
+  }
+
+  printf("\n==============================================================\n");
+  printf("  Benchmark complete\n");
+  printf("==============================================================\n");
+}

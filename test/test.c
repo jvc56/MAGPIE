@@ -128,6 +128,7 @@ static TestEntry on_demand_test_table[] = {
     {"benchend", test_benchmark_endgame},
     {"14domino", test_14domino},
     {"kue14domino", test_kue14domino},
+    {"benchthreads", test_benchmark_threads},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
