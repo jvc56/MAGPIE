@@ -5662,6 +5662,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
     config->settings_filename =
         string_duplicate(config_args->settings_filename);
   }
+  bool default_use_wmp = true;
+  if (config_args) {
+   default_use_wmp = config_args->use_wmp;
+  }
   // Attempt to load fields that might fail first
   config->board_layout =
       board_layout_create_default(config->data_paths, error_stack);
@@ -5839,7 +5843,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->loaded_settings = true;
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->ld = NULL;
-  config->players_data = players_data_create(config_args->use_wmp);
+  config->players_data = players_data_create(default_use_wmp);
   config->thread_control = thread_control_create();
   config->game = NULL;
   config->game_backup = NULL;
