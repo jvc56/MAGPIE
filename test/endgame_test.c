@@ -416,9 +416,9 @@ void test_estimate_quality(void) {
       "?AEEKSU/BEIQUVW 276/321 0 -lex NWL23;";
 
   double tt_frac = 0.25;
-  int thread_counts[] = {1, 2, 3, 4, 6, 8, 10, 12};
+  int thread_counts[] = {9, 11};
   int num_trials = (int)(sizeof(thread_counts) / sizeof(thread_counts[0]));
-  double elapsed_results[8];
+  double elapsed_results[2];
 
   fprintf(stderr,
           "\n=== 7-ply thread sweep: tt_frac=%.2f ===\n"
