@@ -20,6 +20,27 @@ enum {
   DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE = 1024 * 1024,
 };
 
+// ValueMap: open-addressing hash table for storing ground truth position values.
+// Used to record values from a shallow search and inject them as move estimates
+// in a deeper search, with optional Gaussian noise.
+typedef struct ValueMapEntry {
+  uint64_t key;   // parent_hash ^ tiny_move
+  int32_t value;  // negamax value (from the child's side-to-move perspective)
+  bool occupied;
+} ValueMapEntry;
+
+typedef struct ValueMap {
+  ValueMapEntry *entries;
+  uint32_t capacity;
+  uint32_t count;
+} ValueMap;
+
+ValueMap *value_map_create(uint32_t capacity);
+void value_map_destroy(ValueMap *vm);
+void value_map_store(ValueMap *vm, uint64_t key, int32_t value);
+// Returns true if found, false otherwise. Writes value to *out_value.
+bool value_map_lookup(const ValueMap *vm, uint64_t key, int32_t *out_value);
+
 typedef struct EndgameSolver EndgameSolver;
 
 // Callback for per-ply PV reporting during iterative deepening
@@ -43,6 +64,19 @@ EndgameSolver *endgame_solver_create(void);
 void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack);
 void endgame_solver_destroy(EndgameSolver *es);
+
+// Run a shallow search and record ground truth position values into a ValueMap.
+// The caller owns the returned ValueMap and must destroy it.
+ValueMap *endgame_record_ground_truth(EndgameSolver *solver,
+                                      const EndgameArgs *endgame_args);
+
+// Set a ValueMap to be used for move ordering estimates.
+// The solver does NOT take ownership; caller must keep it alive.
+void endgame_solver_set_value_map(EndgameSolver *solver, ValueMap *vm);
+
+// Set Gaussian noise standard deviation for value map estimates.
+// 0.0 = perfect estimates, larger = noisier.
+void endgame_solver_set_estimate_noise(EndgameSolver *solver, double stddev);
 
 void string_builder_endgame_results(StringBuilder *pv_description,
                                     const EndgameResults *results,

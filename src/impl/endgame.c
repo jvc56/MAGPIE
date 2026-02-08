@@ -33,10 +33,74 @@
 #include "move_gen.h"
 #include "word_prune.h"
 #include <assert.h>
+#include <math.h>
+#ifndef __wasm__
+#include <sched.h>
+#endif
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+// ---------------------------------------------------------------------------
+// ValueMap implementation (open-addressing hash table for ground truth values)
+// ---------------------------------------------------------------------------
+
+ValueMap *value_map_create(uint32_t capacity) {
+  ValueMap *vm = malloc_or_die(sizeof(ValueMap));
+  // Round up to power of 2 for fast modulo
+  uint32_t cap = 1;
+  while (cap < capacity) {
+    cap <<= 1;
+  }
+  vm->capacity = cap;
+  vm->count = 0;
+  vm->entries = calloc_or_die(cap, sizeof(ValueMapEntry));
+  return vm;
+}
+
+void value_map_destroy(ValueMap *vm) {
+  if (!vm) {
+    return;
+  }
+  free(vm->entries);
+  free(vm);
+}
+
+void value_map_store(ValueMap *vm, uint64_t key, int32_t value) {
+  // Use direct-mapped (1-way) replacement: each key maps to exactly one slot.
+  // Collisions simply replace the old entry. This avoids probe chains and
+  // guarantees O(1) store/lookup at the cost of some evictions.
+  uint32_t mask = vm->capacity - 1;
+  uint32_t i = (uint32_t)(key & mask);
+  if (!vm->entries[i].occupied) {
+    vm->count++;
+  }
+  vm->entries[i].key = key;
+  vm->entries[i].value = value;
+  vm->entries[i].occupied = true;
+}
+
+bool value_map_lookup(const ValueMap *vm, uint64_t key, int32_t *out_value) {
+  if (!vm) {
+    return false;
+  }
+  uint32_t mask = vm->capacity - 1;
+  uint32_t i = (uint32_t)(key & mask);
+  if (vm->entries[i].occupied && vm->entries[i].key == key) {
+    *out_value = vm->entries[i].value;
+    return true;
+  }
+  return false;
+}
+
+// Box-Muller transform: generate a standard normal random variable
+// from a uniform random source.
+static double gaussian_noise(XoshiroPRNG *prng) {
+  double u1 = (double)(prng_get_random_number(prng, 1000000) + 1) / 1000001.0;
+  double u2 = (double)(prng_get_random_number(prng, 1000000) + 1) / 1000001.0;
+  return sqrt(-2.0 * log(u1)) * cos(2.0 * M_PI * u2);
+}
 
 enum {
   DEFAULT_ENDGAME_MOVELIST_CAPACITY = 250000,
@@ -91,6 +155,11 @@ struct EndgameSolver {
   atomic_int deferred_count;   // How many times a move was deferred
   atomic_int abdada_loops;     // How many ABDADA loop iterations
   atomic_int deferred_mallocs; // How many deferred arrays allocated
+
+  // Ground truth value map for move ordering experiments
+  ValueMap *value_map;        // NOT owned - caller manages lifetime
+  double estimate_noise;      // Gaussian noise stddev for value map estimates
+  bool recording_ground_truth; // true during ground truth recording phase
 
   // Owned by the caller:
   ThreadControl *thread_control;
@@ -354,7 +423,9 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
 }
 
 void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
-                               int move_count, uint64_t tt_move) {
+                               int move_count, uint64_t tt_move,
+                               uint64_t node_key) {
+  (void)depth; // depth parameter retained for API compatibility
   const int player_index = game_get_player_on_turn_index(worker->game_copy);
   const Player *player = game_get_player(worker->game_copy, player_index);
   const Player *opponent = game_get_player(worker->game_copy, 1 - player_index);
@@ -372,6 +443,12 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
   const int thread_idx = worker->thread_index;
   const int num_threads = worker->solver->threads;
 
+  // Check if we have a value map for ground truth estimates
+  const ValueMap *vm = worker->solver->value_map;
+  const double noise_stddev = worker->solver->estimate_noise;
+  const bool use_value_map = (vm != NULL);
+  int vm_hits = 0;
+
   for (size_t i = 0; i < (size_t)move_count; i++) {
     size_t element_offset = arena_offset + i * sizeof(SmallMove);
     SmallMove *current_move =
@@ -383,8 +460,29 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
                         (calculate_end_rack_points(
                             other_rack, game_get_ld(worker->game_copy)))) |
               GOING_OUT_BF);
-    } else if (depth > 2 && num_threads > 1) {
-      // Lazy SMP jitter for move ordering
+    } else if (use_value_map) {
+      // Use ground truth value map for move ordering.
+      // Key is (parent_hash ^ tiny_move), matching how values were recorded.
+      uint64_t vm_key = node_key ^ current_move->tiny_move;
+      int32_t gt_value;
+      if (value_map_lookup(vm, vm_key, &gt_value)) {
+        // The value map stores values from the child's negamax return,
+        // which is already negated from the parent perspective during recording.
+        // So we negate again to get the parent's view (higher = better for
+        // parent).
+        int32_t estimate = -gt_value;
+        if (noise_stddev > 0.0) {
+          estimate += (int32_t)(gaussian_noise(worker->prng) * noise_stddev);
+        }
+        small_move_set_estimated_value(current_move, estimate);
+        vm_hits++;
+      } else {
+        // Fallback to raw score
+        small_move_set_estimated_value(current_move,
+                                       small_move_get_score(current_move));
+      }
+    } else if (num_threads > 1) {
+      // Lazy SMP jitter for move ordering at all depths
       // Different threads prioritize different move characteristics
       int base_estimate = small_move_get_score(current_move);
       int tiles_played = small_move_get_tiles_played(current_move);
@@ -419,6 +517,9 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
       small_move_add_estimated_value(current_move, EARLY_PASS_BF);
     }
   }
+
+  (void)vm_hits; // used for debugging if needed
+
   // sort moves by estimated value, from biggest to smallest value. A good move
   // sorting is instrumental to the performance of ab pruning.
   SmallMove *small_moves =
@@ -433,10 +534,14 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
 
   assert(pv_node || alpha == beta - 1);
 
-  // ABDADA: if exclusive search and another processor is on this node, defer
+  // ABDADA: if exclusive search and another processor is on this node, defer.
+  // Only use ABDADA exclusion at sufficient depth (>= 3) where the cost of
+  // redundant search justifies the protocol overhead. At shallow depths the
+  // deferral/retry loop causes more contention than it saves.
   const int num_threads = worker->solver->threads;
-  if (exclusive_p && num_threads > 1 &&
-      worker->solver->transposition_table_optim) {
+  const bool abdada_active = (num_threads > 1 && depth >= 3 &&
+                              worker->solver->transposition_table_optim);
+  if (exclusive_p && abdada_active) {
     if (transposition_table_is_busy(worker->solver->transposition_table,
                                     node_key)) {
       return ON_EVALUATION;
@@ -444,7 +549,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   }
 
   // ABDADA: mark that we're searching this node
-  if (num_threads > 1 && worker->solver->transposition_table_optim) {
+  if (abdada_active) {
     transposition_table_enter_node(worker->solver->transposition_table,
                                    node_key);
   }
@@ -471,7 +576,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       if (flag == TT_EXACT) {
         if (!pv_node) {
           // ABDADA: leave node before returning
-          if (num_threads > 1) {
+          if (abdada_active) {
             transposition_table_leave_node(worker->solver->transposition_table,
                                            node_key);
           }
@@ -485,7 +590,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       if (alpha >= beta) {
         if (!pv_node) {
           // ABDADA: leave node before returning
-          if (num_threads > 1) {
+          if (abdada_active) {
             transposition_table_leave_node(worker->solver->transposition_table,
                                            node_key);
           }
@@ -501,7 +606,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   if (depth == 0 ||
       game_get_game_end_reason(worker->game_copy) != GAME_END_REASON_NONE) {
     // ABDADA: leave node before returning
-    if (num_threads > 1 && worker->solver->transposition_table_optim) {
+    if (abdada_active) {
       transposition_table_leave_node(worker->solver->transposition_table,
                                      node_key);
     }
@@ -518,7 +623,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   bool arena_alloced = false;
   if (worker->current_iterative_deepening_depth != depth) {
     nplays = generate_stm_plays(worker, depth);
-    assign_estimates_and_sort(worker, depth, nplays, tt_move);
+    assign_estimates_and_sort(worker, depth, nplays, tt_move, node_key);
     arena_alloced = true;
   } else {
     // Use initial moves. They already have been sorted by estimated value.
@@ -535,7 +640,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   bool deferred_stack[MAX_DEFERRED_STACK];
   bool *deferred = NULL;
   bool deferred_heap_allocated = false;
-  bool use_abdada = (num_threads > 1);
+  bool use_abdada = abdada_active;
   if (use_abdada) {
     if (nplays <= MAX_DEFERRED_STACK) {
       deferred = deferred_stack;
@@ -655,6 +760,16 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       // small_move_arena.
       small_move =
           (SmallMove *)(worker->small_move_arena->memory + element_offset);
+
+      // Record ground truth: store (parent_key ^ tiny_move) -> child_value
+      // so the parent's assign_estimates_and_sort can look it up.
+      // Value is from child's perspective (negated by parent for ordering).
+      if (worker->solver->recording_ground_truth && worker->solver->value_map &&
+          worker->thread_index == 0) {
+        uint64_t vm_key = node_key ^ small_move->tiny_move;
+        value_map_store(worker->solver->value_map, vm_key, value);
+      }
+
       if (-value > best_value) {
         best_value = -value;
         best_tiny_move = small_move->tiny_move;
@@ -679,6 +794,13 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
     // Single-threaded mode: only one pass needed
     if (!use_abdada) {
       all_done = true;
+    }
+
+    // ABDADA: yield when we still have deferred moves so other threads
+    // can make progress. Without this, threads tight-spin on deferred
+    // moves causing massive CPU waste at shallow depths.
+    if (!all_done) {
+      sched_yield();
     }
   }
 
@@ -714,7 +836,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   }
 
   // ABDADA: leave node before returning
-  if (num_threads > 1 && worker->solver->transposition_table_optim) {
+  if (abdada_active) {
     transposition_table_leave_node(worker->solver->transposition_table,
                                    node_key);
   }
@@ -752,7 +874,8 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   int initial_move_count =
       generate_stm_plays(worker, worker->solver->requested_plies);
   // Arena pointer better have started at 0, since it was empty.
-  assign_estimates_and_sort(worker, 0, initial_move_count, INVALID_TINY_MOVE);
+  assign_estimates_and_sort(worker, 0, initial_move_count, INVALID_TINY_MOVE,
+                            initial_hash_key);
   worker->solver->n_initial_moves = initial_move_count;
   assert((size_t)worker->small_move_arena->size ==
          initial_move_count * sizeof(SmallMove));
@@ -763,18 +886,16 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     start = plies;
   }
 
-  // Lazy SMP depth jitter: different threads can start at different depths
-  // This helps threads explore different parts of the search space
-  // Thread 0 always starts at depth 1 (the main thread)
-  // Other threads can start at depth 1 or 2 based on their index
+  // Lazy SMP depth jitter: spread threads across different starting depths
+  // so they don't all compete on the same shallow levels simultaneously.
+  // Thread 0 always starts at depth 1 (main thread, provides per-ply callback).
+  // Other threads start at depth 1 + (index % depth_spread), clamped to plies.
   const int num_threads = worker->solver->threads;
   if (num_threads > 1 && worker->thread_index > 0) {
-    // Even-indexed helper threads (2, 4, 6...) start at depth 2
-    // Odd-indexed helper threads (1, 3, 5...) start at depth 1
-    // This ensures some threads get to deeper depths faster
-    if (worker->thread_index % 2 == 0 && plies >= 2) {
-      start = 2;
-    }
+    // Spread across up to 4 different starting depths to reduce contention.
+    // With 16 threads: 1 at d1 (thread 0), ~4 at d2, ~4 at d3, ~4 at d4, ~3 at d5
+    int depth_offset = 1 + (worker->thread_index % MIN(4, plies - 1));
+    start = MIN(depth_offset, plies);
   }
 
   int32_t prev_value = 0;
@@ -1059,4 +1180,47 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   game_destroy(final_game_copy);
 
   endgame_results_set_pvline(results, &solver->principal_variation);
+}
+
+void endgame_solver_set_value_map(EndgameSolver *solver, ValueMap *vm) {
+  solver->value_map = vm;
+}
+
+void endgame_solver_set_estimate_noise(EndgameSolver *solver, double stddev) {
+  solver->estimate_noise = stddev;
+}
+
+ValueMap *endgame_record_ground_truth(EndgameSolver *solver,
+                                      const EndgameArgs *endgame_args) {
+  // Create a large value map to hold position values.
+  // For a 7-ply search, we might see millions of unique positions.
+  ValueMap *vm = value_map_create(1 << 24); // 16M entries (~256MB)
+
+  solver->value_map = vm;
+  solver->recording_ground_truth = true;
+
+  // Run the search - this will populate the value map
+  EndgameResults *results = endgame_results_create();
+  ErrorStack *error_stack = error_stack_create();
+  endgame_solve(solver, endgame_args, results, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+  }
+  error_stack_destroy(error_stack);
+
+  printf("Ground truth recording complete: %u positions stored in value map "
+         "(capacity %u)\n",
+         vm->count, vm->capacity);
+
+  const PVLine *pv = endgame_results_get_pvline(results);
+  printf("Recording search result: score=%d, pv_moves=%d\n", pv->score,
+         pv->num_moves);
+  endgame_results_destroy(results);
+
+  // Stop recording but keep the value map for use
+  solver->recording_ground_truth = false;
+  solver->value_map = NULL;
+
+  return vm;
 }
