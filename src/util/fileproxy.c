@@ -25,6 +25,9 @@ static FileCache file_cache = {0};
 
 FILE *stream_from_filename(const char *filename, ErrorStack *error_stack) {
   // Look in cache.
+  if (!filename) {
+    log_fatal("attempted to get stream for null filename");
+  }
   for (int i = 0; i < file_cache.num_items; i++) {
     if (strings_equal(file_cache.entries[i].filename, filename)) {
       log_debug("Found %s in cache...", filename);
@@ -37,6 +40,15 @@ FILE *stream_from_filename(const char *filename, ErrorStack *error_stack) {
   FILE *stream;
   stream = fopen_safe(filename, "r", error_stack);
   return stream;
+}
+
+char *fileproxy_get_string_from_filename(const char *filename,
+                                         ErrorStack *error_stack) {
+  FILE *file = stream_from_filename(filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  return get_string_from_file_handle(file, filename, error_stack);
 }
 
 void precache_file_data(const char *filename, const char *raw_data,

@@ -378,18 +378,6 @@ StringSplitter *split_string(const char *input_string, const char delimiter,
                                ignore_empty);
 }
 
-StringSplitter *split_file_by_newline(const char *filename,
-                                      ErrorStack *error_stack) {
-  char *file_content = get_string_from_file(filename, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return NULL;
-  }
-  StringSplitter *file_content_split_by_newline =
-      split_string_by_newline(file_content, true);
-  free(file_content);
-  return file_content_split_by_newline;
-}
-
 // ****************************************************************************
 // ****************************** String List *********************************
 // ****************************************************************************
