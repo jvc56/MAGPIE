@@ -54,6 +54,10 @@ static void print_pv_callback(int depth, int32_t value, const PVLine *pv_line,
       string_builder_add_string(sb, " (6 zeros)");
     }
     if (i < pv_line->num_moves - 1) {
+      // Insert | between exact (negamax) and greedy moves
+      if (i + 1 == pv_line->negamax_depth && pv_line->negamax_depth > 0) {
+        string_builder_add_string(sb, " |");
+      }
       string_builder_add_string(sb, " ");
     }
   }
@@ -174,7 +178,7 @@ void test_pass_first(void) {
       "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
       "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
       "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW21",
-      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, -60, true);
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, -63, true);
 }
 
 void test_nonempty_bag(void) {
@@ -280,9 +284,8 @@ void test_14domino(void) {
 }
 
 void test_kue14domino(void) {
-  // Position after 11K K(U)E (26 pts) then 13D QI (15 pts) from 14domino.
-  // P1 to move with ?AESU. Compare to optimal reply VIEW to confirm QI is
-  // suboptimal for Player 2.
+  // Position after 11K K(U)E (26 pts) then 7C VIEW (29 pts) from 14domino.
+  // P1 to move with ?AESU, P2 has BQU. VIEW is the optimal reply.
   Config *config = config_create_or_die(
       "set -s1 score -s2 score -r1 small -r2 small -eplies 12 "
       "-ttfraction 0.5");
@@ -290,9 +293,9 @@ void test_kue14domino(void) {
       config,
       "cgp "
       "6MOO1VIRLS/1EJECTA6A1/2I2AEON4R1/2BAH6X1N1/2SLID4GIFTS/"
-      "4DONG1OR1R1i/7HOURLY1Z/FE4DINT1A2Y/RECLINE2I1N3/"
-      "EW1ATAP2E1G3/M9KUE2/D3PATOOTIE3/3QI10/15/15 "
-      "?AESU/BEUVW 302/336 0 -lex NWL23;");
+      "4DONG1OR1R1i/2VIEW1HOURLY1Z/FE4DINT1A2Y/RECLINE2I1N3/"
+      "EW1ATAP2E1G3/M9KUE2/D3PATOOTIE3/15/15/15 "
+      "?AESU/BQU 302/350 0 -lex NWL23;");
 
   EndgameSolver *endgame_solver = endgame_solver_create();
   Game *game = config_get_game(config);
@@ -320,7 +323,7 @@ void test_kue14domino(void) {
   string_builder_destroy(game_sb);
   game_string_options_destroy(gso);
 
-  printf("After K(U)E + QI 13D:\n");
+  printf("After K(U)E + VIEW 7C:\n");
   printf("Solving %d-ply endgame with %d threads, ttfraction=%.1f...\n",
          endgame_args.plies, endgame_args.num_threads,
          endgame_args.tt_fraction_of_mem);
@@ -331,9 +334,8 @@ void test_kue14domino(void) {
   error_stack_destroy(error_stack);
   config_destroy(config);
 
-  // Now solve the same position but with VIEW 7C as the reply instead.
-  // VIEW scores 29 (V*2 DL + I + E + W = 14, cross HIDE = 8, cross DOW = 7).
-  // P2: 321+29=350, rack BQU.
+  // Now solve the same position but with 13D QI (15 pts) as the reply instead.
+  // P2: 321+15=336, rack BEUVW. QI is suboptimal for Player 2.
   config = config_create_or_die(
       "set -s1 score -s2 score -r1 small -r2 small -eplies 12 "
       "-ttfraction 0.5");
@@ -341,9 +343,9 @@ void test_kue14domino(void) {
       config,
       "cgp "
       "6MOO1VIRLS/1EJECTA6A1/2I2AEON4R1/2BAH6X1N1/2SLID4GIFTS/"
-      "4DONG1OR1R1i/2VIEW1HOURLY1Z/FE4DINT1A2Y/RECLINE2I1N3/"
-      "EW1ATAP2E1G3/M9KUE2/D3PATOOTIE3/15/15/15 "
-      "?AESU/BQU 302/350 0 -lex NWL23;");
+      "4DONG1OR1R1i/7HOURLY1Z/FE4DINT1A2Y/RECLINE2I1N3/"
+      "EW1ATAP2E1G3/M9KUE2/D3PATOOTIE3/3QI10/15/15 "
+      "?AESU/BEUVW 302/336 0 -lex NWL23;");
 
   endgame_solver = endgame_solver_create();
   game = config_get_game(config);
@@ -369,7 +371,7 @@ void test_kue14domino(void) {
   string_builder_destroy(game_sb);
   game_string_options_destroy(gso);
 
-  printf("After K(U)E + VIEW 7C:\n");
+  printf("After K(U)E + QI 13D:\n");
   printf("Solving %d-ply endgame with %d threads, ttfraction=%.1f...\n",
          endgame_args.plies, endgame_args.num_threads,
          endgame_args.tt_fraction_of_mem);

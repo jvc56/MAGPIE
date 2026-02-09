@@ -13,6 +13,7 @@ typedef struct PVLine {
   Game *game;
   int32_t score;
   int num_moves;
+  int negamax_depth; // number of moves from exact search (rest are greedy)
 } PVLine;
 
 typedef struct EndgameResults EndgameResults;
