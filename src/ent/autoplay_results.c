@@ -109,6 +109,13 @@ typedef struct GameData {
   uint64_t p0_losses;
   uint64_t p0_ties;
   uint64_t p0_firsts;
+  uint64_t first_player_wins;
+  uint64_t first_player_losses;
+  uint64_t first_player_ties;
+  uint64_t equal_turn_games;
+  uint64_t first_player_wins_equal_turns;
+  uint64_t first_player_losses_equal_turns;
+  uint64_t first_player_ties_equal_turns;
   Stat *p0_score;
   Stat *p1_score;
   Stat *turns;
@@ -123,6 +130,13 @@ void game_data_reset(GameData *gd) {
   gd->p0_losses = 0;
   gd->p0_ties = 0;
   gd->p0_firsts = 0;
+  gd->first_player_wins = 0;
+  gd->first_player_losses = 0;
+  gd->first_player_ties = 0;
+  gd->equal_turn_games = 0;
+  gd->first_player_wins_equal_turns = 0;
+  gd->first_player_losses_equal_turns = 0;
+  gd->first_player_ties_equal_turns = 0;
   stat_reset(gd->p0_score);
   stat_reset(gd->p1_score);
   stat_reset(gd->turns);
@@ -158,6 +172,12 @@ void game_data_add_game(GameData *gd, const RecorderArgs *args) {
       equity_to_int(player_get_score(game_get_player(game, 0)));
   const int p1_game_score =
       equity_to_int(player_get_score(game_get_player(game, 1)));
+  const int starting_player_index = game_get_starting_player_index(game);
+  const int first_player_score =
+      equity_to_int(player_get_score(game_get_player(game, starting_player_index)));
+  const int second_player_score =
+      equity_to_int(player_get_score(game_get_player(game, 1 - starting_player_index)));
+  const bool equal_turns = (turns % 2) == 0;
   cpthread_mutex_lock(&gd->mutex);
   gd->total_games++;
   if (p0_game_score > p1_game_score) {
@@ -167,8 +187,27 @@ void game_data_add_game(GameData *gd, const RecorderArgs *args) {
   } else {
     gd->p0_ties++;
   }
-  if (game_get_starting_player_index(game) == 0) {
+  if (starting_player_index == 0) {
     gd->p0_firsts++;
+  }
+  if (first_player_score > second_player_score) {
+    gd->first_player_wins++;
+    if (equal_turns) {
+      gd->first_player_wins_equal_turns++;
+    }
+  } else if (second_player_score > first_player_score) {
+    gd->first_player_losses++;
+    if (equal_turns) {
+      gd->first_player_losses_equal_turns++;
+    }
+  } else {
+    gd->first_player_ties++;
+    if (equal_turns) {
+      gd->first_player_ties_equal_turns++;
+    }
+  }
+  if (equal_turns) {
+    gd->equal_turn_games++;
   }
   stat_push(gd->p0_score, (double)p0_game_score, 1);
   stat_push(gd->p1_score, (double)p1_game_score, 1);
@@ -193,6 +232,11 @@ char *game_data_ucgi_str(const GameData *gd) {
       stat_get_mean(gd->p0_score), stat_get_stdev(gd->p0_score),
       stat_get_mean(gd->p1_score), stat_get_stdev(gd->p1_score));
   string_builder_add_game_end_reasons(sb, gd);
+  string_builder_add_formatted_string(
+      sb, "%lu %lu %lu %lu %lu %lu %lu ",
+      gd->first_player_wins, gd->first_player_losses, gd->first_player_ties,
+      gd->equal_turn_games, gd->first_player_wins_equal_turns,
+      gd->first_player_losses_equal_turns, gd->first_player_ties_equal_turns);
   string_builder_add_string(sb, "\n");
   char *res = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
@@ -335,6 +379,37 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
                                                gd->total_games);
   string_builder_add_string(sb, "\n");
 
+  // Going first stats
+  double first_total =
+      (double)gd->first_player_wins + (double)gd->first_player_ties / 2.0;
+  double first_win_pct = first_total / (double)gd->total_games;
+  string_builder_add_formatted_string(
+      sb, "Going First Win%%: %2.2f%%\n", first_win_pct * 100.0);
+
+  uint64_t unequal_turn_games = gd->total_games - gd->equal_turn_games;
+  if (gd->equal_turn_games > 0) {
+    double et_first_total =
+        (double)gd->first_player_wins_equal_turns +
+        (double)gd->first_player_ties_equal_turns / 2.0;
+    double et_first_win_pct = et_first_total / (double)gd->equal_turn_games;
+    string_builder_add_formatted_string(
+        sb, "  Equal Turns (%lu games): %2.2f%%\n",
+        gd->equal_turn_games, et_first_win_pct * 100.0);
+  }
+  if (unequal_turn_games > 0) {
+    uint64_t uneq_first_wins =
+        gd->first_player_wins - gd->first_player_wins_equal_turns;
+    uint64_t uneq_first_ties =
+        gd->first_player_ties - gd->first_player_ties_equal_turns;
+    double uneq_first_total =
+        (double)uneq_first_wins + (double)uneq_first_ties / 2.0;
+    double uneq_first_win_pct = uneq_first_total / (double)unequal_turn_games;
+    string_builder_add_formatted_string(
+        sb, "  Unequal Turns (%lu games): %2.2f%%\n",
+        unequal_turn_games, uneq_first_win_pct * 100.0);
+  }
+  string_builder_add_string(sb, "\n");
+
   char *ret_str = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
   return ret_str;
@@ -409,6 +484,16 @@ void game_data_sets_consolidate_subset(Recorder **recorder_list,
     gd_primary->p0_losses += gd_i->p0_losses;
     gd_primary->p0_ties += gd_i->p0_ties;
     gd_primary->p0_firsts += gd_i->p0_firsts;
+    gd_primary->first_player_wins += gd_i->first_player_wins;
+    gd_primary->first_player_losses += gd_i->first_player_losses;
+    gd_primary->first_player_ties += gd_i->first_player_ties;
+    gd_primary->equal_turn_games += gd_i->equal_turn_games;
+    gd_primary->first_player_wins_equal_turns +=
+        gd_i->first_player_wins_equal_turns;
+    gd_primary->first_player_losses_equal_turns +=
+        gd_i->first_player_losses_equal_turns;
+    gd_primary->first_player_ties_equal_turns +=
+        gd_i->first_player_ties_equal_turns;
     p0_score_stats[i] = gd_i->p0_score;
     p1_score_stats[i] = gd_i->p1_score;
     turns_stats[i] = gd_i->turns;
