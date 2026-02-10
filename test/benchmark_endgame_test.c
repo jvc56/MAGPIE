@@ -13,6 +13,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
+#include "../src/str/endgame_string.h"
 #include "../src/str/game_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"

@@ -1,12 +1,17 @@
+#include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
+#include "../src/def/cpthread_defs.h"
+#include "../src/def/thread_control_defs.h"
 #include "../src/ent/board.h"
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
+#include "../src/ent/thread_control.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
+#include "../src/str/endgame_string.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
@@ -16,6 +21,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 // Per-ply callback to print PV during iterative deepening
 static void print_pv_callback(int depth, int32_t value, const PVLine *pv_line,
@@ -48,10 +54,36 @@ static void print_pv_callback(int depth, int32_t value, const PVLine *pv_line,
   game_destroy(gc);
 }
 
+typedef struct {
+  Config *config;
+  int timeout;
+} TimeoutThreadArgs;
+
+static void *timeout_thread_function(void *arg) {
+  const TimeoutThreadArgs *args = (TimeoutThreadArgs *)arg;
+  char *endgame_string =
+      endgame_results_get_string(config_get_endgame_results(args->config),
+                                 config_get_game(args->config), NULL, true);
+  printf("ttf (initial): %s\n", endgame_string);
+  free(endgame_string);
+  for (int i = 0; i < args->timeout; i++) {
+    ctime_nap(1);
+    endgame_string =
+        endgame_results_get_string(config_get_endgame_results(args->config),
+                                   config_get_game(args->config), NULL, true);
+    printf("ttf (%d): %s\n", i, endgame_string);
+    free(endgame_string);
+  }
+  thread_control_set_status(config_get_thread_control(args->config),
+                            THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  return NULL;
+}
+
 void test_single_endgame(const char *config_settings, const char *cgp,
                          int initial_small_move_arena_size,
                          error_code_t expected_error_code,
-                         const int expected_score, const bool is_pass) {
+                         const int expected_score, const bool is_pass,
+                         int timeout) {
   // Load config
   Config *config = config_create_or_die(config_settings);
   load_and_exec_config_or_die(config, cgp);
@@ -87,8 +119,20 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   string_builder_destroy(game_sb);
   game_string_options_destroy(gso);
 
+  // Create timeout thread if timeout is nonzero
+  cpthread_t timeout_thread_id;
+  TimeoutThreadArgs timeout_args = {.config = config, .timeout = timeout};
+  if (timeout > 0) {
+    cpthread_create(&timeout_thread_id, timeout_thread_function, &timeout_args);
+  }
+
   printf("Solving %d-ply endgame...\n", endgame_args.plies);
   endgame_solve(endgame_solver, &endgame_args, endgame_results, error_stack);
+
+  // Join the timeout thread if it was created
+  if (timeout > 0) {
+    cpthread_join(timeout_thread_id);
+  }
 
   const error_code_t actual_error_code = error_stack_top(error_stack);
   const bool has_expected_error = actual_error_code == expected_error_code;
@@ -100,8 +144,9 @@ void test_single_endgame(const char *config_settings, const char *cgp,
     assert(0);
   }
 
-  if (actual_error_code == ERROR_STATUS_SUCCESS) {
-    const PVLine *pv_line = endgame_results_get_pvline(endgame_results);
+  if (actual_error_code == ERROR_STATUS_SUCCESS && timeout == 0) {
+    const PVLine *pv_line =
+        endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
     assert(pv_line->score == expected_score);
     assert(small_move_is_pass(&pv_line->moves[0]) == is_pass);
   }
@@ -134,7 +179,8 @@ void test_vs_joey(void) {
       "AIDER2U7/b1E1E2N1Z5/AWN1T2M1ATT3/LI1COBLE2OW3/OP2U2E2AA3/NE2CUSTARDS1Q1/"
       "ER1OH5I2U1/S2K2FOB1ERGOT/5HEXYLS2I1/4JIN6N1/2GOOP2NAIVEsT/1DIRE10/"
       "2GAY10/15/15 AEFILMR/DIV 371/412 0 -lex NWL20;",
-      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, 55, false);
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, 55, false,
+      0);
 }
 
 void test_pass_first(void) {
@@ -146,7 +192,8 @@ void test_pass_first(void) {
       "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
       "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
       "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW21",
-      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, -60, true);
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, -60, true,
+      0);
 }
 
 void test_nonempty_bag(void) {
@@ -154,7 +201,7 @@ void test_nonempty_bag(void) {
   test_single_endgame(
       "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 4",
       "cgp " EMPTY_CGP, DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-      ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY, 0, false);
+      ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY, 0, false, 0);
 }
 
 void test_solve_standard(void) {
@@ -165,7 +212,8 @@ void test_solve_standard(void) {
       "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
       "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
       "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20",
-      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, 11, false);
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, 11, false,
+      0);
 }
 
 void test_very_deep(void) {
@@ -176,7 +224,8 @@ void test_very_deep(void) {
       "14C/13QI/12FIE/10VEE1R/9KIT2G/8CIG1IDE/8UTA2AS/7ST1SYPh1/6JA5A1/"
       "5WOLD2BOBA/3PLOT1R1NU1EX/Y1VEIN1NOR1mOA1/UT1AT1N1L2FEH1/"
       "GUR2WIRER5/SNEEZED8 ADENOOO/AHIILMM 353/236 0 -lex CSW21;",
-      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, -116, true);
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, -116, true,
+      0);
 }
 
 void test_eldar_v_stick(void) {
@@ -186,7 +235,8 @@ void test_eldar_v_stick(void) {
       "4EXODE6/1DOFF1KERATIN1U/1OHO8YEN/1POOJA1B3MEWS/5SQUINTY2A/4RHINO1e3V/"
       "2B4C2R3E/GOAT1D1E2ZIN1d/1URACILS2E4/1PIG1S4T4/2L2R4T4/2L2A1GENII3/"
       "2A2T1L7/5E1A7/5D1M7 AEEIRUW/V 410/409 0 -lex CSW21;",
-      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, 72, false);
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, 72, false,
+      0);
 }
 
 void test_small_arena_realloc(void) {
@@ -196,7 +246,17 @@ void test_small_arena_realloc(void) {
       "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
       "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
       "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20",
-      512, ERROR_STATUS_SUCCESS, 11, false);
+      512, ERROR_STATUS_SUCCESS, 11, false, 0);
+}
+
+void test_endgame_interrupt(void) {
+  test_single_endgame(
+      "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 9",
+      "cgp "
+      "4EXODE6/1DOFF1KERATIN1U/1OHO8YEN/1POOJA1B3MEWS/5SQUINTY2A/4RHINO1e3V/"
+      "2B4C2R3E/GOAT1D1E2ZIN1d/1URACILS2E4/1PIG1S4T4/2L2R4T4/2L2A1GENII3/"
+      "2A2T1L7/5E1A7/5D1M7 AEEIRUW/V 410/409 0 -lex CSW21;",
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, 0, true, 3);
 }
 
 void test_endgame(void) {
@@ -205,6 +265,7 @@ void test_endgame(void) {
   test_small_arena_realloc();
   test_pass_first();
   test_nonempty_bag();
+  test_endgame_interrupt();
   //  Uncomment out more of these tests once we add more optimizations,
   //  and/or if we can run the endgame tests in release mode.
   // test_vs_joey();
