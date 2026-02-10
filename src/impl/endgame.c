@@ -368,6 +368,58 @@ static void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
     num_moves++;
   }
 
+  // All moves up to here are from exact search (original PV + TT extension)
+  pv_line->negamax_depth = num_moves;
+
+  // Greedy playout: if game isn't over, extend PV with highest-scoring moves.
+  // This handles cases where the search PV was truncated (e.g., parallel search
+  // effects) and TT entries were overwritten.
+  while (num_moves < MAX_VARIANT_LENGTH &&
+         game_get_game_end_reason(game_copy) == GAME_END_REASON_NONE) {
+    const MoveGenArgs greedy_args = {
+        .game = game_copy,
+        .move_list = move_list,
+        .move_record_type = MOVE_RECORD_ALL_SMALL,
+        .move_sort_type = MOVE_SORT_SCORE,
+        .override_kwg = NULL,
+        .thread_index = 0,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    generate_moves(&greedy_args);
+    int nplays = move_list->count;
+    if (nplays == 0) {
+      break;
+    }
+
+    // Check for consecutive passes ending the game
+    if (nplays == 1 && small_move_is_pass(move_list->small_moves[0])) {
+      if (game_get_consecutive_scoreless_turns(game_copy) >= 1) {
+        break;
+      }
+    }
+
+    // Pick highest-scoring move
+    int best_idx = 0;
+    int best_score = INT32_MIN;
+    for (int j = 0; j < nplays; j++) {
+      int sc = small_move_get_score(move_list->small_moves[j]);
+      if (sc > best_score) {
+        best_score = sc;
+        best_idx = j;
+      }
+    }
+
+    SmallMove best_sm = *move_list->small_moves[best_idx];
+    small_move_to_move(move_list->spare_move, &best_sm,
+                       game_get_board(game_copy));
+    play_move(move_list->spare_move, game_copy, NULL);
+
+    pv_line->moves[num_moves] = best_sm;
+    num_moves++;
+  }
+
   pv_line->num_moves = num_moves;
   small_move_list_destroy(move_list);
 }
@@ -1619,15 +1671,16 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       while (game_get_game_end_reason(worker->game_copy) ==
                  GAME_END_REASON_NONE &&
              playout_depth < max_playout) {
-        // Lazy cross-set update
+        // Lazy cross-set update from the previous move's undo.
+        // When playout_depth==0, the previous move is the last negamax move
+        // at undo slot plies-1. For subsequent playout moves, the previous
+        // undo is at plies + playout_depth - 1.
         Board *pb = game_get_board(worker->game_copy);
         if (!board_get_cross_sets_valid(pb)) {
           int undo_idx = plies + playout_depth - 1;
-          if (undo_idx >= plies) {
-            const MoveUndo *prev = &worker->move_undos[undo_idx];
-            if (prev->move_tiles_length > 0) {
-              update_cross_set_for_move_from_undo(prev, worker->game_copy);
-            }
+          const MoveUndo *prev = &worker->move_undos[undo_idx];
+          if (prev->move_tiles_length > 0) {
+            update_cross_set_for_move_from_undo(prev, worker->game_copy);
           }
           board_set_cross_sets_valid(pb, true);
         }
@@ -2436,6 +2489,16 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
 
   // Calculate elapsed time
   double elapsed = ctimer_elapsed_seconds(&solve_timer);
+
+  // Extend final PV with TT + greedy playout if incomplete
+  if (solver->principal_variation.num_moves < solver->requested_plies &&
+      solver->transposition_table) {
+    Game *ext_game = game_duplicate(endgame_args->game);
+    pvline_extend_from_tt(&solver->principal_variation, ext_game,
+                          solver->transposition_table, solver->solving_player,
+                          solver->requested_plies);
+    game_destroy(ext_game);
+  }
 
   // Print final result with PV
   StringBuilder *final_sb = string_builder_create();
