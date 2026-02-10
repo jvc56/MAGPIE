@@ -207,6 +207,7 @@ struct EndgameSolver {
   bool transposition_table_optim;
   bool negascout_optim;
   bool prevent_slowroll;
+  bool use_heuristics;
   PVLine principal_variation;
   PVLine *variations;
 
@@ -429,6 +430,7 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->transposition_table_optim = true;
   es->iterative_deepening_optim = true;
   es->negascout_optim = true;
+  es->use_heuristics = endgame_args->use_heuristics;
   es->solve_multiple_variations = 0;
   atomic_store(&es->nodes_searched, 0);
   es->threads = endgame_args->num_threads;
@@ -1661,7 +1663,8 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       transposition_table_leave_node(worker->solver->transposition_table,
                                      node_key);
     }
-    if (game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE) {
+    if (worker->solver->use_heuristics &&
+        game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE) {
       // Greedy playout: iteratively play best-scoring moves to completion.
       int solving_player = worker->solver->solving_player;
       int plies = worker->solver->requested_plies;
@@ -1774,6 +1777,24 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
         }
       }
 
+      // Store greedy playout result in TT at depth 0.
+      // Only store if no deeper entry exists (prefer deeper negamax results).
+      if (worker->solver->transposition_table_optim) {
+        TTEntry existing = transposition_table_lookup(
+            worker->solver->transposition_table, node_key);
+        if (!ttentry_valid(existing) || ttentry_depth(existing) == 0) {
+          int32_t greedy_result = (on_turn_idx == solving_player)
+                                      ? greedy_spread
+                                      : -greedy_spread;
+          int16_t tt_score = (int16_t)(greedy_result - on_turn_spread);
+          TTEntry entry_to_store = {.score = tt_score,
+                                    .flag_and_depth = (TT_EXACT << 6),
+                                    .tiny_move = INVALID_TINY_MOVE};
+          transposition_table_store(worker->solver->transposition_table,
+                                    node_key, entry_to_store);
+        }
+      }
+
       // Convert from solving_player's perspective to on_turn perspective
       if (on_turn_idx == solving_player) {
         return greedy_spread;
@@ -1791,10 +1812,11 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   int nplays;
   bool arena_alloced = false;
   if (worker->current_iterative_deepening_depth != depth) {
-    // Recompute opp_stuck at every node by generating the opponent's moves.
     int opp_idx = 1 - worker->solver->solving_player;
     const Rack *opp_rack =
         player_get_rack(game_get_player(worker->game_copy, opp_idx));
+    if (worker->solver->use_heuristics) {
+    // Recompute opp_stuck at every node by generating the opponent's moves.
     const Board *check_board = game_get_board(worker->game_copy);
     const LetterDistribution *check_ld = game_get_ld(worker->game_copy);
 
@@ -1831,6 +1853,11 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       game_set_player_on_turn_index(worker->game_copy, on_turn_idx);
       // Now generate the solving player's moves
       nplays = generate_stm_plays(worker, depth);
+    }
+    } else {
+      // Heuristics disabled: just generate moves, no stuck-tile detection
+      nplays = generate_stm_plays(worker, depth);
+      opp_stuck_frac = 0.0f;
     }
 
     // Log stuck-tile activation once per solve

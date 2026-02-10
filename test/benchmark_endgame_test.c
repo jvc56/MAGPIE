@@ -5,6 +5,7 @@
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/endgame_results.h"
+#include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
@@ -113,6 +114,7 @@ static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
                         .initial_small_move_arena_size =
                             DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
                         .num_threads = 6,
+                        .use_heuristics = true,
                         .per_ply_callback = NULL,
                         .per_ply_callback_data = NULL};
     EndgameResults *results = config_get_endgame_results(config);
@@ -144,6 +146,191 @@ static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
 
   move_list_destroy(move_list);
 }
+
+// Play out an endgame position move-by-move with A/B solver settings.
+// solver_a is used when player_a_idx is on turn, solver_b otherwise.
+// Returns final spread from player_a_idx's perspective.
+static int play_endgame_ab(Game *game, EndgameSolver *solver_a,
+                           EndgameArgs *args_a, int max_plies_a,
+                           EndgameSolver *solver_b, EndgameArgs *args_b,
+                           int max_plies_b, EndgameResults *results,
+                           MoveList *move_list, double *time_a, double *time_b,
+                           int player_a_idx) {
+  while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+    int on_turn = game_get_player_on_turn_index(game);
+    EndgameSolver *solver = (on_turn == player_a_idx) ? solver_a : solver_b;
+    EndgameArgs *args = (on_turn == player_a_idx) ? args_a : args_b;
+    int max_plies = (on_turn == player_a_idx) ? max_plies_a : max_plies_b;
+    double *elapsed = (on_turn == player_a_idx) ? time_a : time_b;
+
+    args->game = game;
+    args->plies = max_plies;
+
+    Timer t;
+    ctimer_start(&t);
+    ErrorStack *err = error_stack_create();
+    endgame_solve(solver, args, results, err);
+    *elapsed += ctimer_elapsed_seconds(&t);
+    assert(error_stack_is_empty(err));
+    error_stack_destroy(err);
+
+    const PVLine *pv = endgame_results_get_pvline(results);
+    if (pv->num_moves == 0)
+      break;
+
+    SmallMove best = pv->moves[0];
+    small_move_to_move(move_list->spare_move, &best,
+                       game_get_board(game));
+    play_move(move_list->spare_move, game, NULL);
+  }
+  int score_a =
+      equity_to_int(player_get_score(game_get_player(game, player_a_idx)));
+  int score_b = equity_to_int(
+      player_get_score(game_get_player(game, 1 - player_a_idx)));
+  return score_a - score_b;
+}
+
+static void run_benchmark_ab(int new_ply_setting, int old_ply_setting,
+                             int num_positions, uint64_t base_seed) {
+  log_set_level(LOG_WARN);
+
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -threads 6 -s1 score -s2 score -r1 small -r2 small");
+
+  EndgameSolver *solver_new = endgame_solver_create();
+  EndgameSolver *solver_old = endgame_solver_create();
+
+  EndgameArgs args_new = {.thread_control = config_get_thread_control(config),
+                          .plies = new_ply_setting,
+                          .tt_fraction_of_mem = 0.25,
+                          .initial_small_move_arena_size =
+                              DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                          .num_threads = 1,
+                          .use_heuristics = true,
+                          .per_ply_callback = NULL,
+                          .per_ply_callback_data = NULL};
+
+  EndgameArgs args_old = {.thread_control = config_get_thread_control(config),
+                          .plies = old_ply_setting,
+                          .tt_fraction_of_mem = 0.25,
+                          .initial_small_move_arena_size =
+                              DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                          .num_threads = 1,
+                          .use_heuristics = false,
+                          .per_ply_callback = NULL,
+                          .per_ply_callback_data = NULL};
+
+  EndgameResults *results = endgame_results_create();
+  MoveList *move_list = move_list_create(1);
+
+  // Create the initial game
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+
+  int total_new_spread = 0;
+  int total_old_spread = 0;
+  double total_time_new = 0;
+  double total_time_old = 0;
+  int valid_positions = 0;
+  int new_wins = 0;
+  int old_wins = 0;
+  int ties = 0;
+  const int max_attempts = num_positions * 10;
+
+  printf("\n");
+  printf("==============================================================\n");
+  int new_ply = args_new.plies;
+  int old_ply = args_old.plies;
+  printf("  A/B Endgame Benchmark: %d positions, game pairs\n",
+         num_positions);
+  printf("  Method A (new): %d-ply, heuristics=true  (stuck-tile + greedy leaf)\n",
+         new_ply);
+  printf("  Method B (old): %d-ply, heuristics=false (classic evaluation)\n",
+         old_ply);
+  printf("==============================================================\n\n");
+
+  for (int i = 0; valid_positions < num_positions && i < max_attempts; i++) {
+    game_reset(game);
+    game_seed(game, base_seed + (uint64_t)i);
+    draw_starting_racks(game);
+
+    if (!play_until_bag_empty(game, move_list)) {
+      continue;
+    }
+
+    int on_turn = game_get_player_on_turn_index(game);
+    valid_positions++;
+
+    // Save position for replay
+    Game *saved_game = game_duplicate(game);
+
+    // Game 1: new method plays as on-turn player, old plays as opponent
+    double time_new_1 = 0, time_old_1 = 0;
+    int spread_1 = play_endgame_ab(game, solver_new, &args_new, new_ply,
+                                   solver_old, &args_old, old_ply, results,
+                                   move_list, &time_new_1, &time_old_1,
+                                   on_turn);
+
+    // Game 2: old method plays as on-turn player, new plays as opponent
+    game_copy(game, saved_game); // restore position
+    double time_new_2 = 0, time_old_2 = 0;
+    int spread_2 = play_endgame_ab(game, solver_old, &args_old, old_ply,
+                                   solver_new, &args_new, new_ply, results,
+                                   move_list, &time_old_2, &time_new_2,
+                                   on_turn);
+
+    // spread_1 is from new's perspective, spread_2 is from old's perspective
+    int pair_advantage = spread_1 - spread_2;
+    total_new_spread += spread_1;
+    total_old_spread += spread_2;
+    total_time_new += time_new_1 + time_new_2;
+    total_time_old += time_old_1 + time_old_2;
+
+    if (pair_advantage > 0)
+      new_wins++;
+    else if (pair_advantage < 0)
+      old_wins++;
+    else
+      ties++;
+
+    printf("  Pair %3d: new_spread=%+4d, old_spread=%+4d, "
+           "pair_adv=%+4d  (new: %.2fs, old: %.2fs)\n",
+           valid_positions, spread_1, spread_2, pair_advantage,
+           time_new_1 + time_new_2, time_old_1 + time_old_2);
+
+    game_destroy(saved_game);
+  }
+
+  assert(valid_positions == num_positions);
+
+  int net_advantage = total_new_spread - total_old_spread;
+  printf("\n==============================================================\n");
+  printf("  RESULTS: %d game pairs (%d games total)\n", num_positions,
+         num_positions * 2);
+  printf("  New method total spread: %+d (avg %+.1f)\n", total_new_spread,
+         (double)total_new_spread / num_positions);
+  printf("  Old method total spread: %+d (avg %+.1f)\n", total_old_spread,
+         (double)total_old_spread / num_positions);
+  printf("  Net advantage (new): %+d (avg %+.1f per pair)\n", net_advantage,
+         (double)net_advantage / num_positions);
+  printf("  Pair wins: new=%d, old=%d, ties=%d\n", new_wins, old_wins, ties);
+  printf("  Time: new=%.2fs, old=%.2fs\n", total_time_new, total_time_old);
+  printf("==============================================================\n");
+
+  endgame_results_destroy(results);
+  move_list_destroy(move_list);
+  endgame_solver_destroy(solver_new);
+  endgame_solver_destroy(solver_old);
+  config_destroy(config);
+}
+
+void test_benchmark_endgame_ab(void) { run_benchmark_ab(3, 3, 50, 42); }
+
+void test_benchmark_endgame_ab_2v3(void) { run_benchmark_ab(2, 3, 50, 42); }
+
+void test_benchmark_endgame_ab_3v4(void) { run_benchmark_ab(3, 4, 50, 42); }
+
+void test_benchmark_endgame_ab_4v5(void) { run_benchmark_ab(4, 6, 25, 2000); }
 
 void test_benchmark_endgame(void) {
   log_set_level(LOG_WARN); // Allow warnings to show diagnostics

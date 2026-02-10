@@ -35,6 +35,8 @@ typedef struct EndgameArgs {
   int plies;
   int initial_small_move_arena_size;
   int num_threads;
+  // Enable stuck-tile heuristics and greedy leaf playout (default: true)
+  bool use_heuristics;
   EndgamePerPlyCallback per_ply_callback;
   void *per_ply_callback_data;
 } EndgameArgs;

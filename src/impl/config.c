@@ -2181,6 +2181,7 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
   endgame_args->initial_small_move_arena_size =
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args->num_threads = config->num_threads;
+  endgame_args->use_heuristics = true;
   endgame_args->per_ply_callback = NULL;
   endgame_args->per_ply_callback_data = NULL;
 }
