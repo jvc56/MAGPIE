@@ -49,6 +49,7 @@ enum {
   // ABDADA: sentinel value returned when node is being searched by another
   // processor
   ON_EVALUATION = -(1 << 29),
+  ABDADA_INTERRUPTED = -(1 << 28),
   // Aspiration window initial size
   ASPIRATION_WINDOW = 25,
 };
@@ -435,7 +436,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
 
   if (thread_control_get_status(worker->solver->thread_control) ==
       THREAD_CONTROL_STATUS_USER_INTERRUPT) {
-    return -LARGE_VALUE;
+    return ABDADA_INTERRUPTED;
   }
 
   // ABDADA: if exclusive search and another processor is on this node, defer
@@ -638,6 +639,11 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
         update_cross_sets_after_unplay_from_undo(current_undo,
                                                  worker->game_copy);
         board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
+      }
+
+      if (value == ABDADA_INTERRUPTED) {
+        all_done = true;
+        break;
       }
 
       // ABDADA: check if move was deferred
