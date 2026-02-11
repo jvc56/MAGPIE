@@ -144,41 +144,13 @@ static inline uint64_t shadow_zobrist_add_move(const Zobrist *z,
   return shadow_key;
 }
 
-// Check if any tile on the rack has no move that uses it.
-// Returns true if at least one tile is completely unplayable.
-// moves_array: array of SmallMove* pointers (from move_list), or NULL if
-//   moves are contiguous in arena_base.
-// arena_base: base pointer for arena-allocated SmallMove array (used when
-//   moves_array is NULL).
 // Returns fraction of opponent's rack tiles that are stuck (0.0 = none, 1.0 = all).
 // A tile is "stuck" if no legal move plays that tile type.
-static float stuck_tile_fraction(const Board *board,
-                                 const LetterDistribution *ld, Move *spare_move,
-                                 const Rack *rack, SmallMove **moves_array,
-                                 const uint8_t *arena_base, int nplays) {
-  bool tile_playable[MACHINE_LETTER_MAX_VALUE];
-  memset(tile_playable, false, sizeof(tile_playable));
-
-  for (int i = 0; i < nplays; i++) {
-    SmallMove *sm;
-    if (moves_array) {
-      sm = moves_array[i];
-    } else {
-      sm = (SmallMove *)(arena_base + i * sizeof(SmallMove));
-    }
-    if (small_move_is_pass(sm))
-      continue;
-    small_move_to_move(spare_move, sm, board);
-    int tlen = move_get_tiles_length(spare_move);
-    for (int pos = 0; pos < tlen; pos++) {
-      uint8_t tile = move_get_tile(spare_move, pos);
-      if (tile == PLAYED_THROUGH_MARKER)
-        continue;
-      uint8_t ml_val = get_is_blanked(tile) ? 0 : tile;
-      tile_playable[ml_val] = true;
-    }
-  }
-
+// tiles_played_bv: bitvector where bit i is set if machine letter i appears in
+//   any valid move (from MOVE_RECORD_TILES_PLAYED).
+static float stuck_tile_fraction_from_bv(const LetterDistribution *ld,
+                                         const Rack *rack,
+                                         uint64_t tiles_played_bv) {
   int total_tiles = 0;
   int stuck_tiles = 0;
   int ld_size = ld_get_size(ld);
@@ -186,7 +158,7 @@ static float stuck_tile_fraction(const Board *board,
     int count = rack_get_letter(rack, ml);
     if (count > 0) {
       total_tiles += count;
-      if (!tile_playable[ml]) {
+      if (!(tiles_played_bv & ((uint64_t)1 << ml))) {
         stuck_tiles += count;
       }
     }
@@ -212,7 +184,6 @@ struct EndgameSolver {
   PVLine *variations;
 
   KWG *pruned_kwg;
-  atomic_int nodes_searched;
 
   int solve_multiple_variations;
   int32_t best_pv_value;
@@ -226,8 +197,6 @@ struct EndgameSolver {
   atomic_int search_complete;
   // Flag: stuck-tile mode has been logged (0=not yet, 1=logged)
   atomic_int stuck_tile_logged;
-  // Last iterative deepening depth for which build boost was logged (-1=none)
-  atomic_int build_boost_logged_depth;
   // Fraction of opponent's tiles that are stuck at the root (0.0 = none)
   float initial_opp_stuck_frac;
 
@@ -432,7 +401,6 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->negascout_optim = true;
   es->use_heuristics = endgame_args->use_heuristics;
   es->solve_multiple_variations = 0;
-  atomic_store(&es->nodes_searched, 0);
   es->threads = endgame_args->num_threads;
   if (es->threads < 1) {
     es->threads = 1;
@@ -459,7 +427,6 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   // Initialize Lazy SMP synchronization
   atomic_store(&es->search_complete, 0);
   atomic_store(&es->stuck_tile_logged, 0);
-  atomic_store(&es->build_boost_logged_depth, -1);
 
   es->thread_control = endgame_args->thread_control;
   es->game = endgame_args->game;
@@ -854,36 +821,38 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
                         (calculate_end_rack_points(
                             other_rack, game_get_ld(worker->game_copy)))) |
               GOING_OUT_BF);
-    } else if (build_values && build_values[i] > small_move_get_score(current_move)) {
-      // Prorate build boost by the fraction of opponent tiles that are stuck.
-      // Full boost when all tiles stuck (opponent can't interfere),
-      // partial when only some are stuck (opponent has some agency).
+    } else if (build_values) {
+      // Use build-chain estimate as center: when opponent has stuck tiles,
+      // prorate the chain boost by stuck fraction. build_values[i] includes
+      // the move's own score plus any extension chain value.
       int score = small_move_get_score(current_move);
-      int boosted = score + (int)(opp_stuck_frac * (float)(build_values[i] - score));
-      small_move_set_estimated_value(current_move, boosted - conservation_bonus);
-    } else if (num_threads > 1) {
-      // Lazy SMP jitter for move ordering at all depths
-      int base_estimate = small_move_get_score(current_move) - conservation_bonus;
-      int tiles_played = small_move_get_tiles_played(current_move);
-
-      // Thread 0: conservation bias only (no jitter - the "main" thread)
-      // Odd threads: favor more tiles played (reduced by conservation)
-      // Even threads (except 0): favor fewer tiles played (amplified)
-      // All non-zero threads also get small random jitter
-      if (thread_idx > 0) {
-        if (thread_idx % 2 == 1) {
-          base_estimate += 3 * tiles_played;
-        } else {
-          base_estimate -= 3 * tiles_played;
-        }
-        // Add small random jitter (0-7) to break ties differently
-        base_estimate += (int)(prng_get_random_number(worker->prng, 8));
+      int estimate;
+      if (build_values[i] > score) {
+        estimate = score + (int)(opp_stuck_frac * (float)(build_values[i] - score));
+      } else {
+        estimate = score;
       }
-      small_move_set_estimated_value(current_move, base_estimate);
+      estimate -= conservation_bonus;
+      // Tiles-played jitter for search diversity: each thread gets a
+      // unique bias magnitude. Odd threads favor aggressive play (more
+      // tiles), even threads favor conservative play (fewer tiles).
+      if (num_threads > 1 && thread_idx > 0) {
+        int tiles_played = small_move_get_tiles_played(current_move);
+        int bias = thread_idx * tiles_played;
+        estimate += (thread_idx % 2 == 1) ? bias : -bias;
+        estimate += (int)(prng_get_random_number(worker->prng, 8));
+      }
+      small_move_set_estimated_value(current_move, estimate);
     } else {
-      small_move_set_estimated_value(
-          current_move,
-          small_move_get_score(current_move) - conservation_bonus);
+      int estimate = small_move_get_score(current_move) - conservation_bonus;
+      // Tiles-played jitter for search diversity
+      if (num_threads > 1 && thread_idx > 0) {
+        int tiles_played = small_move_get_tiles_played(current_move);
+        int bias = thread_idx * tiles_played;
+        estimate += (thread_idx % 2 == 1) ? bias : -bias;
+        estimate += (int)(prng_get_random_number(worker->prng, 8));
+      }
+      small_move_set_estimated_value(current_move, estimate);
     }
 
     if (current_move->tiny_move == tt_move) {
@@ -1588,9 +1557,9 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   assert(pv_node || alpha == beta - 1);
 
   // ABDADA: if exclusive search and another processor is on this node, defer.
-  // Only use ABDADA exclusion at sufficient depth (>= 3) where the cost of
-  // redundant search justifies the protocol overhead. At shallow depths the
-  // deferral/retry loop causes more contention than it saves.
+  // Active at depth >= 3 where the cost of redundant search justifies the
+  // protocol overhead. At shallower depths, nproc table collisions cause
+  // excessive false deferrals.
   const int num_threads = worker->solver->threads;
   const bool abdada_active = (num_threads > 1 && depth >= 3 &&
                               worker->solver->transposition_table_optim);
@@ -1815,43 +1784,50 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
     int opp_idx = 1 - worker->solver->solving_player;
     const Rack *opp_rack =
         player_get_rack(game_get_player(worker->game_copy, opp_idx));
+    uint64_t opp_tiles_bv = 0;
     if (worker->solver->use_heuristics) {
-    // Recompute opp_stuck at every node by generating the opponent's moves.
-    const Board *check_board = game_get_board(worker->game_copy);
+    // Fast stuck-tile check: use TILES_PLAYED mode which exits early
+    // once all rack tile types have been seen in valid moves.
     const LetterDistribution *check_ld = game_get_ld(worker->game_copy);
 
     if (on_turn_idx == opp_idx) {
-      // Opponent is on turn: generate their moves (which we need anyway)
-      // and check for stuck tiles in the same pass.
-      nplays = generate_stm_plays(worker, depth);
-      size_t check_offset =
-          worker->small_move_arena->size - (sizeof(SmallMove) * nplays);
-      opp_stuck_frac = stuck_tile_fraction(
-          check_board, check_ld, worker->move_list->spare_move, opp_rack,
-          NULL, worker->small_move_arena->memory + check_offset, nplays);
-    } else {
-      // Solving player is on turn: generate opponent's moves separately
-      // to check for stuck tiles, then generate solving player's moves.
-      // Swap to opponent, generate, check, swap back.
-      game_set_player_on_turn_index(worker->game_copy, opp_idx);
-      const MoveGenArgs opp_args = {
+      // Opponent is on turn: fast tile check, then generate ALL_SMALL for search.
+      const MoveGenArgs tp_args = {
           .game = worker->game_copy,
           .move_list = worker->move_list,
-          .move_record_type = MOVE_RECORD_ALL_SMALL,
+          .move_record_type = MOVE_RECORD_TILES_PLAYED,
           .move_sort_type = MOVE_SORT_SCORE,
           .override_kwg = worker->solver->pruned_kwg,
           .thread_index = worker->thread_index,
           .eq_margin_movegen = 0,
           .target_equity = EQUITY_MAX_VALUE,
           .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+          .tiles_played_bv = &opp_tiles_bv,
       };
-      generate_moves(&opp_args);
-      int opp_nplays = worker->move_list->count;
-      opp_stuck_frac = stuck_tile_fraction(
-          check_board, check_ld, worker->move_list->spare_move, opp_rack,
-          worker->move_list->small_moves, NULL, opp_nplays);
+      generate_moves(&tp_args);
+      opp_stuck_frac =
+          stuck_tile_fraction_from_bv(check_ld, opp_rack, opp_tiles_bv);
+      nplays = generate_stm_plays(worker, depth);
+    } else {
+      // Solving player is on turn: fast tile check for opponent, then
+      // generate solving player's moves for search.
+      game_set_player_on_turn_index(worker->game_copy, opp_idx);
+      const MoveGenArgs tp_args = {
+          .game = worker->game_copy,
+          .move_list = worker->move_list,
+          .move_record_type = MOVE_RECORD_TILES_PLAYED,
+          .move_sort_type = MOVE_SORT_SCORE,
+          .override_kwg = worker->solver->pruned_kwg,
+          .thread_index = worker->thread_index,
+          .eq_margin_movegen = 0,
+          .target_equity = EQUITY_MAX_VALUE,
+          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+          .tiles_played_bv = &opp_tiles_bv,
+      };
+      generate_moves(&tp_args);
+      opp_stuck_frac =
+          stuck_tile_fraction_from_bv(check_ld, opp_rack, opp_tiles_bv);
       game_set_player_on_turn_index(worker->game_copy, on_turn_idx);
-      // Now generate the solving player's moves
       nplays = generate_stm_plays(worker, depth);
     }
     } else {
@@ -1865,59 +1841,8 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       int expected = 0;
       if (atomic_compare_exchange_strong(&worker->solver->stuck_tile_logged,
                                          &expected, 1)) {
-        const Board *log_board = game_get_board(worker->game_copy);
         const LetterDistribution *log_ld = game_get_ld(worker->game_copy);
         int ld_size = ld_get_size(log_ld);
-        // Find unplayable tiles by generating opponent's moves
-        // (reuse move_list if opponent was on turn, else re-generate)
-        int check_nplays;
-        SmallMove **check_moves;
-        if (on_turn_idx == opp_idx) {
-          // Moves are in the arena from generate_stm_plays above
-          check_nplays = nplays;
-          check_moves = NULL; // use arena
-        } else {
-          // Generate opponent's moves again for logging
-          game_set_player_on_turn_index(worker->game_copy, opp_idx);
-          generate_moves(&(MoveGenArgs){
-              .game = worker->game_copy,
-              .move_list = worker->move_list,
-              .move_record_type = MOVE_RECORD_ALL_SMALL,
-              .move_sort_type = MOVE_SORT_SCORE,
-              .override_kwg = worker->solver->pruned_kwg,
-              .thread_index = worker->thread_index,
-              .eq_margin_movegen = 0,
-              .target_equity = EQUITY_MAX_VALUE,
-              .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-          });
-          check_nplays = worker->move_list->count;
-          check_moves = worker->move_list->small_moves;
-          game_set_player_on_turn_index(worker->game_copy, on_turn_idx);
-        }
-        bool tile_playable[MACHINE_LETTER_MAX_VALUE];
-        memset(tile_playable, false, sizeof(tile_playable));
-        size_t arena_check_offset =
-            worker->small_move_arena->size - (sizeof(SmallMove) * nplays);
-        for (int mi = 0; mi < check_nplays; mi++) {
-          SmallMove *log_sm;
-          if (check_moves) {
-            log_sm = check_moves[mi];
-          } else {
-            log_sm = (SmallMove *)(worker->small_move_arena->memory +
-                                   arena_check_offset + mi * sizeof(SmallMove));
-          }
-          if (small_move_is_pass(log_sm))
-            continue;
-          small_move_to_move(worker->move_list->spare_move, log_sm, log_board);
-          int tlen = move_get_tiles_length(worker->move_list->spare_move);
-          for (int pos = 0; pos < tlen; pos++) {
-            uint8_t tile = move_get_tile(worker->move_list->spare_move, pos);
-            if (tile == PLAYED_THROUGH_MARKER)
-              continue;
-            uint8_t ml_val = get_is_blanked(tile) ? 0 : tile;
-            tile_playable[ml_val] = true;
-          }
-        }
         StringBuilder *stuck_sb = string_builder_create();
         string_builder_add_formatted_string(stuck_sb, "Player %d (",
                                             opp_idx + 1);
@@ -1925,7 +1850,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
         string_builder_add_string(stuck_sb, ") stuck tiles: ");
         for (int ml = 0; ml < ld_size; ml++) {
           int count = rack_get_letter(opp_rack, ml);
-          if (count > 0 && !tile_playable[ml]) {
+          if (count > 0 && !(opp_tiles_bv & ((uint64_t)1 << ml))) {
             for (int k = 0; k < count; k++) {
               string_builder_add_user_visible_letter(stuck_sb, log_ld, ml);
             }
@@ -1971,21 +1896,26 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
     }
   }
 
-  // ABDADA two-phase iteration
+  // ABDADA two-phase iteration:
+  // Pass 0: search all moves with exclusion (defer busy nodes).
+  // Pass 1+: retry only deferred moves without exclusion.
+  int pass = 0;
   bool all_done = false;
   while (!all_done) {
     all_done = true;
 
     for (int idx = 0; idx < nplays; idx++) {
+      // After the first pass, skip moves that aren't deferred
+      // (they were already successfully searched)
+      if (pass > 0 && deferred != NULL && !deferred[idx]) {
+        continue;
+      }
+
       // ABDADA: determine if this move should be searched exclusively
       // First move (idx == 0) is never exclusive
       // In first phase, other moves are exclusive
-      // In second phase (deferred[idx] == true), moves are not exclusive
+      // In retry phase (deferred[idx] == true), moves are not exclusive
       bool child_exclusive = use_abdada && (idx > 0) && !deferred[idx];
-
-      // ABDADA: skip if deferred and we're in first phase (will process later)
-      // This check is not needed in the current structure since we mark
-      // deferred only after ON_EVALUATION
 
       size_t element_offset = arena_offset + idx * sizeof(SmallMove);
       SmallMove *small_move =
@@ -2016,9 +1946,6 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
         // move generation if we reach that point. The cross-set squares will be
         // saved to MoveUndo before updating, so they're restored on unplay.
       }
-
-      // Atomic increment for thread-safe node counting
-      atomic_fetch_add(&worker->solver->nodes_searched, 1);
 
       uint64_t child_key = 0;
       if (worker->solver->transposition_table_optim) {
@@ -2120,11 +2047,14 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       all_done = true;
     }
 
+    pass++;
+
     // ABDADA: yield when we still have deferred moves so other threads
-    // can make progress. Without this, threads tight-spin on deferred
-    // moves causing massive CPU waste at shallow depths.
+    // can make progress.
     if (!all_done) {
+#ifndef __wasm__
       sched_yield();
+#endif
     }
   }
 

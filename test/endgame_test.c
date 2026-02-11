@@ -399,6 +399,57 @@ void test_endgame(void) {
   // test_eldar_v_stick();
 }
 
+void test_monster_q(void) {
+  Config *config = config_create_or_die(
+      "set -s1 score -s2 score -r1 small -r2 small -eplies 5 "
+      "-ttfraction 0.5");
+  load_and_exec_config_or_die(
+      config,
+      "cgp "
+      "5LEX1AFFORD/3SNOWIER1Y3/2V8T3/1DO6J1T3/1AG6OKE3/"
+      "1U7YE3N/1B8T3E/ERICA2GARTH2V/1I2MIAOW1L3U/"
+      "PE6AZIONES/OS8n4/L6DINGBATS/I14/COULEE9/"
+      "E3HARN7 "
+      "ADEIIU?/MNPQRT 369/399 0 -lex CSW21;");
+
+  EndgameSolver *endgame_solver = endgame_solver_create();
+  Game *game = config_get_game(config);
+  Timer timer;
+  ctimer_start(&timer);
+
+  EndgameArgs endgame_args;
+  endgame_args.thread_control = config_get_thread_control(config);
+  endgame_args.game = game;
+  endgame_args.plies = 5;
+  endgame_args.tt_fraction_of_mem = 0.5;
+  endgame_args.initial_small_move_arena_size =
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  endgame_args.num_threads = 6;
+  endgame_args.use_heuristics = true;
+  endgame_args.per_ply_callback = print_pv_callback;
+  endgame_args.per_ply_callback_data = &timer;
+
+  EndgameResults *endgame_results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+
+  StringBuilder *game_sb = string_builder_create();
+  GameStringOptions *gso = game_string_options_create_default();
+  string_builder_add_game(game, NULL, gso, NULL, game_sb);
+  printf("\n%s\n", string_builder_peek(game_sb));
+  string_builder_destroy(game_sb);
+  game_string_options_destroy(gso);
+
+  printf("Solving %d-ply endgame with %d threads, ttfraction=%.1f...\n",
+         endgame_args.plies, endgame_args.num_threads,
+         endgame_args.tt_fraction_of_mem);
+  endgame_solve(endgame_solver, &endgame_args, endgame_results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  endgame_solver_destroy(endgame_solver);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_endgame_wasm(void) {
   test_solve_standard();
   test_small_arena_realloc();

@@ -78,6 +78,13 @@ typedef struct MoveGen {
 
   MachineLetter strip[(MOVE_MAX_TILES)];
   MachineLetter exchange_strip[(MOVE_MAX_TILES)];
+  // MOVE_RECORD_TILES_PLAYED mode fields:
+  // Bitvector of machine letters that appear in any valid move.
+  // Bit i is set if machine letter i is playable.
+  uint64_t tiles_played_bv;
+  // Bitvector of machine letters on the rack (target for early exit).
+  // Generation stops when (tiles_played_bv & target_tiles_bv) == target_tiles_bv.
+  uint64_t target_tiles_bv;
   LeaveMap leave_map;
   BitRack player_bit_rack;
   // Shadow plays
@@ -162,6 +169,10 @@ typedef struct MoveGenArgs {
   int target_leave_size_for_exchange_cutoff;
   int thread_index;
   MoveList *move_list;
+  // Output: bitvector of machine letters that appear in any valid move.
+  // Only used with MOVE_RECORD_TILES_PLAYED. Caller provides pointer; callee
+  // writes result. Bit i set means machine letter i is playable.
+  uint64_t *tiles_played_bv;
 } MoveGenArgs;
 
 void gen_destroy_cache(void);
