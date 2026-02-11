@@ -433,6 +433,11 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
 
   assert(pv_node || alpha == beta - 1);
 
+  if (thread_control_get_status(worker->solver->thread_control) ==
+      THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+    return -LARGE_VALUE;
+  }
+
   // ABDADA: if exclusive search and another processor is on this node, defer
   const int num_threads = worker->solver->threads;
   if (exclusive_p && num_threads > 1 &&
