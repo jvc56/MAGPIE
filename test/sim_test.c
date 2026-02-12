@@ -833,9 +833,6 @@ void test_sim(void) {
   if (sim_perf_iters) {
     test_sim_perf(sim_perf_iters);
   } else {
-    // FIXME: uncomment
-    test_sim_with_inference();
-    return;
     test_similar_play_consistency(1);
     test_similar_play_consistency(10);
     test_sim_error_cases();
@@ -846,6 +843,7 @@ void test_sim(void) {
     test_more_iterations();
     test_play_similarity();
     perf_test_multithread_sim();
+    test_sim_with_inference();
     test_sim_round_robin_consistency();
     test_sim_top_two_consistency();
     test_sim_one_ply();
