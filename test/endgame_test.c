@@ -428,7 +428,7 @@ void test_endgame(void) {
 
 void test_monster_q(void) {
   Config *config = config_create_or_die(
-      "set -s1 score -s2 score -r1 small -r2 small -eplies 5 "
+      "set -s1 score -s2 score -r1 small -r2 small -eplies 6 "
       "-ttfraction 0.5");
   load_and_exec_config_or_die(
       config,
@@ -447,7 +447,7 @@ void test_monster_q(void) {
   EndgameArgs endgame_args;
   endgame_args.thread_control = config_get_thread_control(config);
   endgame_args.game = game;
-  endgame_args.plies = 5;
+  endgame_args.plies = 6;
   endgame_args.tt_fraction_of_mem = 0.5;
   endgame_args.initial_small_move_arena_size =
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;

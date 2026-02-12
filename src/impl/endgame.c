@@ -1715,13 +1715,45 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
           }
         }
 
-        // Pick highest-scoring move
+        // Pick best move by adjusted score.
+        // When opponent has stuck tiles and solving player is on turn,
+        // prefer conservation: penalize playing many tiles / high-value tiles.
+        int playout_on_turn =
+            game_get_player_on_turn_index(worker->game_copy);
+        bool conserve = opp_stuck_frac > 0.0f &&
+                        playout_on_turn == solving_player;
+        const LetterDistribution *playout_ld =
+            conserve ? game_get_ld(worker->game_copy) : NULL;
+        int playout_rack_size = conserve
+            ? player_get_rack(game_get_player(worker->game_copy,
+                                              playout_on_turn))->number_of_letters
+            : 0;
+
         int best_idx = 0;
-        int best_score = INT32_MIN;
+        int best_adj = INT32_MIN;
         for (int j = 0; j < nplays; j++) {
-          int sc = small_move_get_score(worker->move_list->small_moves[j]);
-          if (sc > best_score) {
-            best_score = sc;
+          SmallMove *sm = worker->move_list->small_moves[j];
+          int adj = small_move_get_score(sm);
+          if (conserve && !small_move_is_pass(sm) &&
+              small_move_get_tiles_played(sm) < playout_rack_size) {
+            small_move_to_move(worker->move_list->spare_move, sm,
+                               game_get_board(worker->game_copy));
+            int tlen = move_get_tiles_length(worker->move_list->spare_move);
+            int face_value = 0;
+            int tile_count = 0;
+            for (int pos = 0; pos < tlen; pos++) {
+              uint8_t tile =
+                  move_get_tile(worker->move_list->spare_move, pos);
+              if (tile == PLAYED_THROUGH_MARKER)
+                continue;
+              uint8_t ml = get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile;
+              face_value += equity_to_int(ld_get_score(playout_ld, ml));
+              tile_count++;
+            }
+            adj -= (int)((7 * tile_count + 2 * face_value) * opp_stuck_frac);
+          }
+          if (adj > best_adj) {
+            best_adj = adj;
             best_idx = j;
           }
         }
