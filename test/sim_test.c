@@ -459,7 +459,7 @@ void test_sim_with_inference(void) {
   // will return 0 possible racks.
   load_and_exec_config_or_die(config, "com 8E ZAIRE");
   load_and_exec_config_or_die(config, "rgs ABCDEFG");
-  SimResults *sim_results = config_get_sim_results(config);
+  const SimResults *sim_results = config_get_sim_results(config);
   assert(sim_results_get_num_infer_leaves(sim_results) == 0);
   const int num_moves = sim_results_get_number_of_plays(sim_results);
   const int num_plies = sim_results_get_num_plies(sim_results);
