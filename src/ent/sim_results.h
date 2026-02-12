@@ -69,6 +69,9 @@ BAIResult *sim_results_get_bai_result(const SimResults *sim_results);
 
 double sim_results_get_cutoff(const SimResults *sim_results);
 void sim_results_set_cutoff(SimResults *sim_results, double cutoff);
+uint64_t sim_results_get_num_infer_leaves(const SimResults *sim_results);
+void sim_results_set_num_infer_leaves(SimResults *sim_results,
+                                      uint64_t num_infer_leaves);
 
 void sim_results_lock_simmed_plays(SimResults *sim_results);
 void sim_results_unlock_simmed_plays(SimResults *sim_results);

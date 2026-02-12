@@ -1,6 +1,7 @@
 #include "simmer.h"
 
 #include "../def/game_defs.h"
+#include "../def/inference_defs.h"
 #include "../def/sim_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
@@ -72,6 +73,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
     (*sim_ctx)->inference_ctx = NULL;
   }
 
+  uint64_t num_infer_leaves = 0;
   if (sim_args->use_inference) {
     infer(&sim_args->inference_args, &((*sim_ctx)->inference_ctx),
           sim_args->inference_results, error_stack);
@@ -80,6 +82,9 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
             THREAD_CONTROL_STATUS_STARTED) {
       return;
     }
+    num_infer_leaves =
+        stat_get_num_unique_samples(inference_results_get_equity_values(
+            sim_args->inference_results, INFERENCE_TYPE_LEAVE));
   }
 
   RandomVariablesArgs rv_sim_args = {
@@ -104,6 +109,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
   sim_results_set_rack(sim_results, move_list_get_rack(sim_args->move_list));
   sim_results_set_known_opp_rack(sim_results, sim_args->known_opp_rack);
   sim_results_set_cutoff(sim_results, sim_args->bai_options.cutoff);
+  sim_results_set_num_infer_leaves(sim_results, num_infer_leaves);
 
   bai(&sim_args->bai_options, (*sim_ctx)->rvs, (*sim_ctx)->rng,
       sim_args->thread_control, NULL, sim_results_get_bai_result(sim_results));

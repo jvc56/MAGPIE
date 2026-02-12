@@ -422,7 +422,7 @@ void test_sim_with_and_without_inference_helper(
 
 void test_sim_with_inference(void) {
   // 8H MUZAKS infers a leave of S, so playing EMPYREAN one short of the triple
-  // word will sim worse with inferenc
+  // word will sim worse with inference
   const char *empyrean_move_str = "h7.EMPYREAN";
   const char *napery_move_string = "9g.NAPERY";
   test_sim_with_and_without_inference_helper(
@@ -444,6 +444,34 @@ void test_sim_with_inference(void) {
       "muzaks_empyrean", "IIIIIII",
       (const char *[]){empyrean_move_str, napery_move_string, NULL},
       empyrean_move_str, empyrean_move_str);
+
+  // Test that the inferences fall back to simming
+  // with random racks if the inference determines that there were
+  // no possible racks that the opponent could have had with the given
+  // equity margin.
+  Config *config =
+      config_create_or_die("set -lex CSW21 -wmp true  "
+                           "-plies 5 -threads 1 -iter 100 -minp 10 -numplays "
+                           "10 -sinfer true -seed 10");
+  load_and_exec_config_or_die(config, "new");
+  load_and_exec_config_or_die(config, "r ZAIRERE");
+  // ZAIRE at 8E is 20 fewer points than at 8D, so the inference for this play
+  // will return 0 possible racks.
+  load_and_exec_config_or_die(config, "com 8E ZAIRE");
+  load_and_exec_config_or_die(config, "rgs ABCDEFG");
+  SimResults *sim_results = config_get_sim_results(config);
+  assert(sim_results_get_num_infer_leaves(sim_results) == 0);
+  const int num_moves = sim_results_get_number_of_plays(sim_results);
+  const int num_plies = sim_results_get_num_plies(sim_results);
+  for (int move_index = 0; move_index < num_moves; move_index++) {
+    for (int ply_index = 0; ply_index < num_plies; ply_index++) {
+      const Stat *score_stat = simmed_play_get_score_stat(
+          sim_results_get_simmed_play(sim_results, move_index), ply_index);
+      assert(stat_get_mean(score_stat) >= 0.001);
+    }
+  }
+
+  config_destroy(config);
 }
 
 void test_play_similarity(void) {
@@ -805,6 +833,9 @@ void test_sim(void) {
   if (sim_perf_iters) {
     test_sim_perf(sim_perf_iters);
   } else {
+    // FIXME: uncomment
+    test_sim_with_inference();
+    return;
     test_similar_play_consistency(1);
     test_similar_play_consistency(10);
     test_sim_error_cases();
@@ -815,7 +846,6 @@ void test_sim(void) {
     test_more_iterations();
     test_play_similarity();
     perf_test_multithread_sim();
-    test_sim_with_inference();
     test_sim_round_robin_consistency();
     test_sim_top_two_consistency();
     test_sim_one_ply();

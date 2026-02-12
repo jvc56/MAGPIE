@@ -56,6 +56,7 @@ struct SimResults {
   BAIResult *bai_result;
   bool valid_for_current_game_state;
   double cutoff;
+  uint64_t num_infer_leaves;
 };
 
 void ply_info_init(PlyInfo *ply_info, bool use_heat_map) {
@@ -295,6 +296,7 @@ SimResults *sim_results_create(const double cutoff) {
   sim_results->bai_result = bai_result_create();
   sim_results->valid_for_current_game_state = false;
   sim_results->cutoff = cutoff;
+  sim_results->num_infer_leaves = 0;
   rack_set_dist_size_and_reset(&sim_results->rack, 0);
   rack_set_dist_size_and_reset(&sim_results->known_opp_rack, 0);
   return sim_results;
@@ -405,6 +407,15 @@ double sim_results_get_cutoff(const SimResults *sim_results) {
 
 void sim_results_set_cutoff(SimResults *sim_results, double cutoff) {
   sim_results->cutoff = cutoff;
+}
+
+uint64_t sim_results_get_num_infer_leaves(const SimResults *sim_results) {
+  return sim_results->num_infer_leaves;
+}
+
+void sim_results_set_num_infer_leaves(SimResults *sim_results,
+                                      uint64_t num_infer_leaves) {
+  sim_results->num_infer_leaves = num_infer_leaves;
 }
 
 void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
