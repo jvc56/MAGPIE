@@ -3,6 +3,7 @@
 
 void test_endgame(void);
 void test_endgame_wasm(void);
+void test_multi_pv(void);
 void test_14domino(void);
 void test_kue14domino(void);
 void test_eldar_v_stick(void);

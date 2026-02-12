@@ -720,12 +720,16 @@ static inline int small_move_get_tiles_played(const SmallMove *sm) {
   return (int)((sm->metadata >> 24) & 0xFF);
 }
 
+static inline int32_t small_move_get_estimated_value(const SmallMove *sm) {
+  return (int32_t)(sm->metadata >> 32);
+}
+
 static inline void small_move_set_estimated_value(SmallMove *sm, int32_t val) {
   // Cast val to uint32_t and then to uint64_t to ensure a non-negative value
   // for shifting
   uint64_t uval = (uint64_t)(uint32_t)val;
-  // Shift left by 32 bits using the unsigned value
-  sm->metadata |= (uval << 32);
+  // Clear upper 32 bits and set new estimated value
+  sm->metadata = (sm->metadata & 0xFFFFFFFF) | (uval << 32);
 }
 
 static inline void small_move_add_estimated_value(SmallMove *sm, int32_t val) {

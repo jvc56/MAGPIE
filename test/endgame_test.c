@@ -21,28 +21,35 @@
 #include <stdint.h>
 #include <stdio.h>
 
-// Per-ply callback to print PV during iterative deepening
-static void print_pv_callback(int depth, int32_t value, const PVLine *pv_line,
-                              const Game *game, void *user_data) {
-  const Timer *timer = (const Timer *)user_data;
-  double elapsed = ctimer_elapsed_seconds(timer);
+// Helper: append [Px wins by Y] / [Tie] based on spread delta
+static void append_outcome(StringBuilder *sb, const Game *game,
+                           int32_t spread_delta) {
+  int on_turn = game_get_player_on_turn_index(game);
+  int p1 = equity_to_int(player_get_score(game_get_player(game, 0)));
+  int p2 = equity_to_int(player_get_score(game_get_player(game, 1)));
+  int final_spread = (p1 - p2) + (on_turn == 0 ? spread_delta : -spread_delta);
+  if (final_spread > 0) {
+    string_builder_add_formatted_string(sb, " [P1 wins by %d]", final_spread);
+  } else if (final_spread < 0) {
+    string_builder_add_formatted_string(sb, " [P2 wins by %d]",
+                                        -final_spread);
+  } else {
+    string_builder_add_string(sb, " [Tie]");
+  }
+}
 
-  StringBuilder *sb = string_builder_create();
-  string_builder_add_formatted_string(
-      sb, "  depth %d: value=%d, time=%.3fs, pv=", depth, value, elapsed);
-
-  // Format each move in the PV
-  Game *gc = game_duplicate(game);
-  const Board *board = game_get_board(gc);
-  const LetterDistribution *ld = game_get_ld(gc);
+// Format a PVLine into a string builder (moves separated by spaces, with
+// end-of-game annotations and | between negamax/greedy moves)
+static void format_pvline(StringBuilder *sb, const PVLine *pv_line,
+                          const Game *game) {
+  const LetterDistribution *ld = game_get_ld(game);
   Move move;
-
+  Game *gc = game_duplicate(game);
   for (int i = 0; i < pv_line->num_moves; i++) {
-    small_move_to_move(&move, &(pv_line->moves[i]), board);
-    string_builder_add_move(sb, board, &move, ld, true);
+    small_move_to_move(&move, &(pv_line->moves[i]), game_get_board(gc));
+    string_builder_add_move(sb, game_get_board(gc), &move, ld, true);
     play_move(&move, gc, NULL);
     if (game_get_game_end_reason(gc) == GAME_END_REASON_STANDARD) {
-      // Player went out: show opponent rack tiles and +2x rack points
       int opp_idx = game_get_player_on_turn_index(gc);
       const Rack *opp_rack = player_get_rack(game_get_player(gc, opp_idx));
       int adj = equity_to_int(calculate_end_rack_points(opp_rack, ld));
@@ -54,30 +61,44 @@ static void print_pv_callback(int depth, int32_t value, const PVLine *pv_line,
       string_builder_add_string(sb, " (6 zeros)");
     }
     if (i < pv_line->num_moves - 1) {
-      // Insert | between exact (negamax) and greedy moves
       if (i + 1 == pv_line->negamax_depth && pv_line->negamax_depth > 0) {
         string_builder_add_string(sb, " |");
       }
       string_builder_add_string(sb, " ");
     }
   }
+  game_destroy(gc);
+}
 
-  // Compute final spread: value is from root player's perspective
-  int on_turn = game_get_player_on_turn_index(game);
-  int p1 = equity_to_int(player_get_score(game_get_player(game, 0)));
-  int p2 = equity_to_int(player_get_score(game_get_player(game, 1)));
-  int final_spread = (p1 - p2) + (on_turn == 0 ? value : -value);
-  if (final_spread > 0) {
-    string_builder_add_formatted_string(sb, " [P1 wins by %d]", final_spread);
-  } else if (final_spread < 0) {
-    string_builder_add_formatted_string(sb, " [P2 wins by %d]", -final_spread);
-  } else {
-    string_builder_add_string(sb, " [Tie]");
-  }
+// Per-ply callback to print PV and ranked root moves during iterative
+// deepening
+static void print_pv_callback(int depth, int32_t value, const PVLine *pv_line,
+                              const Game *game, const PVLine *ranked_pvs,
+                              int num_ranked_pvs, void *user_data) {
+  const Timer *timer = (const Timer *)user_data;
+  double elapsed = ctimer_elapsed_seconds(timer);
 
+  // Print best PV line
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_formatted_string(
+      sb, "  depth %d: value=%d, time=%.3fs, pv=", depth, value, elapsed);
+  format_pvline(sb, pv_line, game);
+  append_outcome(sb, game, value);
   printf("%s\n", string_builder_peek(sb));
   string_builder_destroy(sb);
-  game_destroy(gc);
+
+  // Print ranked root moves with full PV lines
+  printf("    ranked moves (%d):\n", num_ranked_pvs);
+  for (int r = 0; r < num_ranked_pvs; r++) {
+    const PVLine *rpv = &ranked_pvs[r];
+    StringBuilder *msb = string_builder_create();
+    string_builder_add_formatted_string(msb, "      %2d. ", r + 1);
+    format_pvline(msb, rpv, game);
+    string_builder_add_formatted_string(msb, " value=%d", rpv->score);
+    append_outcome(msb, game, rpv->score);
+    printf("%s\n", string_builder_peek(msb));
+    string_builder_destroy(msb);
+  }
 }
 
 void test_single_endgame(const char *config_settings, const char *cgp,
@@ -103,6 +124,7 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   endgame_args.initial_small_move_arena_size = initial_small_move_arena_size;
   endgame_args.num_threads = 6;
   endgame_args.use_heuristics = true;
+  endgame_args.num_top_moves = 1;
   endgame_args.per_ply_callback = print_pv_callback;
   endgame_args.per_ply_callback_data = &timer;
 
@@ -120,7 +142,8 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   string_builder_destroy(game_sb);
   game_string_options_destroy(gso);
 
-  printf("Solving %d-ply endgame...\n", endgame_args.plies);
+  printf("Solving %d-ply endgame with %d threads...\n", endgame_args.plies,
+         endgame_args.num_threads);
   endgame_solve(endgame_solver, &endgame_args, endgame_results, error_stack);
 
   const error_code_t actual_error_code = error_stack_top(error_stack);
@@ -256,8 +279,9 @@ void test_14domino(void) {
   endgame_args.tt_fraction_of_mem = 0.5;
   endgame_args.initial_small_move_arena_size =
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-  endgame_args.num_threads = 6;
+  endgame_args.num_threads = 8;
   endgame_args.use_heuristics = true;
+  endgame_args.num_top_moves = 5;
   endgame_args.per_ply_callback = print_pv_callback;
   endgame_args.per_ply_callback_data = &timer;
 
@@ -271,9 +295,10 @@ void test_14domino(void) {
   string_builder_destroy(game_sb);
   game_string_options_destroy(gso);
 
-  printf("Solving %d-ply endgame with %d threads, ttfraction=%.1f...\n",
+  printf("Solving %d-ply endgame with %d threads, top %d moves, "
+         "ttfraction=%.1f...\n",
          endgame_args.plies, endgame_args.num_threads,
-         endgame_args.tt_fraction_of_mem);
+         endgame_args.num_top_moves, endgame_args.tt_fraction_of_mem);
   endgame_solve(endgame_solver, &endgame_args, endgame_results, error_stack);
   assert(error_stack_is_empty(error_stack));
 
@@ -313,6 +338,7 @@ void test_kue14domino(void) {
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args.num_threads = 6;
   endgame_args.use_heuristics = true;
+  endgame_args.num_top_moves = 1;
   endgame_args.per_ply_callback = print_pv_callback;
   endgame_args.per_ply_callback_data = &timer;
 
@@ -362,6 +388,7 @@ void test_kue14domino(void) {
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args.num_threads = 6;
   endgame_args.use_heuristics = true;
+  endgame_args.num_top_moves = 1;
   endgame_args.per_ply_callback = print_pv_callback;
   endgame_args.per_ply_callback_data = &timer;
 
@@ -426,6 +453,7 @@ void test_monster_q(void) {
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args.num_threads = 6;
   endgame_args.use_heuristics = true;
+  endgame_args.num_top_moves = 1;
   endgame_args.per_ply_callback = print_pv_callback;
   endgame_args.per_ply_callback_data = &timer;
 
@@ -446,6 +474,107 @@ void test_monster_q(void) {
   assert(error_stack_is_empty(error_stack));
 
   endgame_solver_destroy(endgame_solver);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+void test_multi_pv(void) {
+  // Test multi-PV mode: solve a 4-ply endgame requesting top 5 moves.
+  // Verify we get multiple PVs back with values in descending order,
+  // and the best PV matches the single-PV result.
+  Config *config = config_create_or_die(
+      "set -s1 score -s2 score -r1 small -r2 small -eplies 4");
+  load_and_exec_config_or_die(
+      config,
+      "cgp "
+      "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
+
+  // First: solve single-PV to get the reference best value
+  EndgameSolver *endgame_solver = endgame_solver_create();
+  Game *game = config_get_game(config);
+
+  EndgameArgs endgame_args;
+  endgame_args.thread_control = config_get_thread_control(config);
+  endgame_args.game = game;
+  endgame_args.plies = 4;
+  endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  endgame_args.initial_small_move_arena_size =
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  endgame_args.num_threads = 6;
+  endgame_args.num_top_moves = 1;
+  endgame_args.use_heuristics = true;
+  endgame_args.per_ply_callback = NULL;
+  endgame_args.per_ply_callback_data = NULL;
+
+  EndgameResults *endgame_results = endgame_results_create();
+  ErrorStack *error_stack = error_stack_create();
+
+  endgame_solve(endgame_solver, &endgame_args, endgame_results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const PVLine *single_pv = endgame_results_get_pvline(endgame_results);
+  int32_t single_best_score = single_pv->score;
+
+  endgame_solver_destroy(endgame_solver);
+
+  // Now: solve multi-PV with top 5
+  endgame_solver = endgame_solver_create();
+  endgame_args.num_top_moves = 5;
+  Timer timer;
+  ctimer_start(&timer);
+  endgame_args.per_ply_callback = print_pv_callback;
+  endgame_args.per_ply_callback_data = &timer;
+
+  StringBuilder *game_sb = string_builder_create();
+  GameStringOptions *gso = game_string_options_create_default();
+  string_builder_add_game(game, NULL, gso, NULL, game_sb);
+  printf("\n%s\n", string_builder_peek(game_sb));
+  string_builder_destroy(game_sb);
+  game_string_options_destroy(gso);
+
+  printf("Solving %d-ply endgame with %d threads, top %d moves...\n",
+         endgame_args.plies, endgame_args.num_threads,
+         endgame_args.num_top_moves);
+
+  EndgameResults *multi_results = endgame_results_create();
+  endgame_solve(endgame_solver, &endgame_args, multi_results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  int num_pvs = endgame_results_get_num_pvlines(multi_results);
+  printf("Multi-PV returned %d PVs\n", num_pvs);
+  assert(num_pvs >= 2); // Should have at least 2 legal moves
+  assert(num_pvs <= 5); // Should not exceed requested K
+
+  // Best PV should match single-PV result
+  const PVLine *best_pv = endgame_results_get_pvline_at(multi_results, 0);
+  printf("Single-PV best: %d, Multi-PV best: %d\n", single_best_score,
+         best_pv->score);
+  assert(best_pv->score == single_best_score);
+
+  // Values should be in descending order
+  for (int i = 1; i < num_pvs; i++) {
+    const PVLine *pv = endgame_results_get_pvline_at(multi_results, i);
+    const PVLine *prev_pv = endgame_results_get_pvline_at(multi_results, i - 1);
+    printf("  PV %d: value=%d\n", i + 1, pv->score);
+    assert(pv->score <= prev_pv->score);
+  }
+
+  // Each PV should have at least 1 move
+  for (int i = 0; i < num_pvs; i++) {
+    const PVLine *pv = endgame_results_get_pvline_at(multi_results, i);
+    assert(pv->num_moves >= 1);
+  }
+
+  // Test string output for multi-PV
+  char *result_str =
+      endgame_results_get_string(multi_results, game, NULL, false);
+  printf("Multi-PV output:\n%s\n", result_str);
+  free(result_str);
+
+  endgame_solver_destroy(endgame_solver);
+  endgame_results_destroy(multi_results);
+  endgame_results_destroy(endgame_results);
   error_stack_destroy(error_stack);
   config_destroy(config);
 }

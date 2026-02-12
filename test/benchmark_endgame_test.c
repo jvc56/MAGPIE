@@ -1506,30 +1506,21 @@ void test_benchmark_stuck_tournament(void) {
 
 // 4-ply and 5-ply round robin on stuck positions, then 5-ply on clean
 void test_benchmark_deep_tournament(void) {
-  const char *stuck = "/tmp/stuck_tile_positions.cgp";
+  // Use no-monster file (line 161 removed — that position takes 3+ hours at
+  // 5-ply). 4-ply stuck results already captured from prior run with full file.
+  const char *stuck = "/tmp/stuck_tile_positions_no_monster.cgp";
   const char *clean = "/tmp/clean_positions.cgp";
 
-  // --- 4-ply vs everything on stuck positions ---
-  run_benchmark_solver_vs_movegen_from_cgp(
-      stuck, "/tmp/ab_stuck_equity_vs_4plyh.csv",
-      4, true, MOVE_SORT_EQUITY, 6, 0);
-  run_benchmark_ab_from_cgp(stuck, "/tmp/ab_stuck_2v4h.csv",
-                             4, true, 2, true, 6, 0);
-  run_benchmark_ab_from_cgp(stuck, "/tmp/ab_stuck_3v4h.csv",
-                             4, true, 3, true, 6, 0);
-
-  // --- 5-ply vs everything on stuck positions ---
-  run_benchmark_solver_vs_movegen_from_cgp(
-      stuck, "/tmp/ab_stuck_equity_vs_5plyh.csv",
-      5, true, MOVE_SORT_EQUITY, 6, 0);
-  run_benchmark_ab_from_cgp(stuck, "/tmp/ab_stuck_2v5h.csv",
-                             5, true, 2, true, 6, 0);
+  // --- 5-ply vs remaining opponents on stuck positions ---
+  // (5-ply vs equity and 5-ply vs 2-ply already done from prior run)
+  // Use 2 threads to avoid OOM on 8GB machine
   run_benchmark_ab_from_cgp(stuck, "/tmp/ab_stuck_3v5h.csv",
-                             5, true, 3, true, 6, 0);
+                             5, true, 3, true, 2, 0);
   run_benchmark_ab_from_cgp(stuck, "/tmp/ab_stuck_4v5h.csv",
-                             5, true, 4, true, 6, 0);
+                             5, true, 4, true, 2, 0);
 
   // --- 5-ply vs everything on clean positions ---
+  // Clean positions are easier, can use more threads
   run_benchmark_solver_vs_movegen_from_cgp(
       clean, "/tmp/ab_clean_equity_vs_5plyh.csv",
       5, true, MOVE_SORT_EQUITY, 6, 1000);

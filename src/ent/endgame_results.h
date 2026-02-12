@@ -20,9 +20,16 @@ typedef struct EndgameResults EndgameResults;
 
 EndgameResults *endgame_results_create(void);
 void endgame_results_destroy(EndgameResults *endgame_result);
+// Returns the best PV (index 0). Backward compatible.
 const PVLine *endgame_results_get_pvline(const EndgameResults *endgame_result);
 void endgame_results_set_pvline(EndgameResults *endgame_result,
                                 const PVLine *pv_line);
+// Multi-PV accessors
+int endgame_results_get_num_pvlines(const EndgameResults *endgame_result);
+const PVLine *endgame_results_get_pvline_at(const EndgameResults *endgame_result,
+                                            int index);
+void endgame_results_set_pvlines(EndgameResults *endgame_result,
+                                 const PVLine *pv_lines, int count);
 bool endgame_results_get_valid_for_current_game_state(
     const EndgameResults *endgame_result);
 void endgame_results_set_valid_for_current_game_state(
