@@ -16,6 +16,7 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "move_string.h"
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -196,7 +197,7 @@ bool string_builder_add_sim_stats_with_display_lock(
   string_builder_add_formatted_string(sb, "\nShowing %d of %d simmed plays\n",
                                       num_display_plays, num_simmed_plays);
 
-  StringGrid *summary_sg = string_grid_create(5, 2, 1);
+  StringGrid *summary_sg = string_grid_create(6, 2, 1);
 
   curr_row = 0;
 
@@ -222,6 +223,13 @@ bool string_builder_add_sim_stats_with_display_lock(
   string_grid_set_cell(summary_sg, curr_row, 1,
                        string_builder_dump(known_opp_rack_sb, NULL));
   string_builder_destroy(known_opp_rack_sb);
+  curr_row++;
+
+  string_grid_set_cell(summary_sg, curr_row, 0, string_duplicate("Infer:"));
+  string_grid_set_cell(
+      summary_sg, curr_row, 1,
+      get_formatted_string("%" PRIu64,
+                           sim_results_get_num_infer_leaves(sim_results)));
   curr_row++;
 
   string_grid_set_cell(summary_sg, curr_row, 0, string_duplicate("Wp Cutoff:"));

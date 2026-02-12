@@ -373,6 +373,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   game_seed(game, seed);
 
   int player_off_turn_index = 1 - game_get_player_on_turn_index(game);
+  bool set_player_off_turn_rack_with_known_opp_rack = false;
   if (simmer->use_alias_method) {
     Rack inferred_rack;
     rack_set_dist_size(&inferred_rack, simmer->dist_size);
@@ -380,8 +381,14 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
             inference_results_get_alias_method(simmer->inference_results),
             simmer_worker->prng, &inferred_rack)) {
       set_random_rack(game, player_off_turn_index, &inferred_rack);
+    } else {
+      set_player_off_turn_rack_with_known_opp_rack = true;
     }
   } else {
+    set_player_off_turn_rack_with_known_opp_rack = true;
+  }
+
+  if (set_player_off_turn_rack_with_known_opp_rack) {
     set_random_rack(game, player_off_turn_index, simmer->known_opp_rack);
   }
 
