@@ -16,6 +16,7 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "move_string.h"
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
