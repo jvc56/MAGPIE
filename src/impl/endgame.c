@@ -623,7 +623,8 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       } else {
         value = abdada_negamax(worker, child_key, depth - 1, -alpha - 1, -alpha,
                                &child_pv, false, child_exclusive);
-        if (value != ON_EVALUATION && alpha < -value && -value < beta) {
+        if (value != ABDADA_INTERRUPTED && value != ON_EVALUATION &&
+            alpha < -value && -value < beta) {
           // re-search with wider window (not exclusive since we need the value)
           value = abdada_negamax(worker, child_key, depth - 1, -beta, -alpha,
                                  &child_pv, pv_node, false);
@@ -643,6 +644,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
 
       if (value == ABDADA_INTERRUPTED) {
         all_done = true;
+        best_value = ABDADA_INTERRUPTED;
         break;
       }
 
