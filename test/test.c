@@ -115,6 +115,7 @@ static TestEntry test_table[] = {
     {"wmg", test_wmp_move_gen},
     {"winpct", test_win_pct},
     {"endgame", test_endgame},
+    {"eldar_v", test_eldar_v_stick},
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},
     {"load", test_load_gcg},
@@ -149,7 +150,6 @@ static TestEntry on_demand_test_table[] = {
     {"multipv", test_multi_pv},
     {"14domino", test_14domino},
     {"kue14domino", test_kue14domino},
-    {"eldar", test_eldar_v_stick},
     {"monsterq", test_monster_q},
     {NULL, NULL} // Sentinel value to mark end of array
 };
