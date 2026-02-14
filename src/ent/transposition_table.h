@@ -72,8 +72,8 @@ inline static void ttentry_reset(TTEntry *t) {
 }
 
 typedef struct TranspositionTable {
-  TTEntry *table;
-  atomic_uchar *nproc; // ABDADA: small table for tracking concurrent searches
+  _Atomic uint64_t *table; // Pairs of uint64_t for lockless hashing
+  atomic_uchar *nproc;     // ABDADA: small table for tracking concurrent searches
   int size_power_of_2;
   uint64_t size_mask;
   Zobrist *zobrist;
@@ -107,13 +107,13 @@ transposition_table_create(double fraction_of_memory) {
              (1 << TT_MIN_SIZE_POWER) * TTENTRY_SIZE_BYTES / (1024 * 1024));
   }
   int num_elems = 1 << tt->size_power_of_2;
-  size_t memory_mb = (sizeof(TTEntry) * num_elems) / (1024 * 1024);
+  size_t memory_mb = ((size_t)TTENTRY_SIZE_BYTES * num_elems) / (1024 * 1024);
   log_info("Creating transposition table. System memory: %llu, TT size: 2^%d "
            "(elements: %d, memory: %zu MB)",
            (unsigned long long)total_memory, tt->size_power_of_2, num_elems,
            memory_mb);
-  tt->table = malloc_or_die(sizeof(TTEntry) * num_elems);
-  memset(tt->table, 0, sizeof(TTEntry) * num_elems);
+  tt->table = (_Atomic uint64_t *)malloc_or_die(sizeof(uint64_t) * 2 * num_elems);
+  memset(tt->table, 0, sizeof(uint64_t) * 2 * num_elems);
   // ABDADA: allocate smaller nproc table for tracking concurrent searches
   // Using a smaller table (256K vs millions) improves cache locality
   tt->nproc = (atomic_uchar *)malloc_or_die(sizeof(atomic_uchar) * NPROC_SIZE);
@@ -133,7 +133,7 @@ static inline void transposition_table_reset(TranspositionTable *tt) {
   // This function resets the transposition table. If you want to reallocate
   // space for it, destroy and recreate it with the new space.
   uint64_t num_elems = tt->size_mask + 1;
-  memset(tt->table, 0, sizeof(TTEntry) * num_elems);
+  memset(tt->table, 0, sizeof(uint64_t) * 2 * num_elems);
   // ABDADA: reset nproc counters (smaller table)
   for (int i = 0; i < NPROC_SIZE; i++) {
     atomic_store_explicit(&tt->nproc[i], 0, memory_order_relaxed);
@@ -155,7 +155,7 @@ static inline TTEntry transposition_table_lookup(TranspositionTable *tt,
   // If a concurrent write causes a torn read (halves from different writes),
   // the XOR produces invalid hash bits and the check below rejects the entry,
   // preventing incorrect alpha-beta pruning from corrupted TT data.
-  const _Atomic uint64_t *slot = (const _Atomic uint64_t *)&tt->table[idx];
+  const _Atomic uint64_t *slot = &tt->table[idx * 2];
   uint64_t xored_key = atomic_load_explicit(&slot[0], memory_order_relaxed);
   uint64_t data = atomic_load_explicit(&slot[1], memory_order_relaxed);
   uint64_t key_half = xored_key ^ data;
@@ -196,7 +196,7 @@ static inline void transposition_table_store(TranspositionTable *tt,
   // are detected by hash mismatch on lookup.
   uint64_t key_half;
   memcpy(&key_half, &tentry, 8);
-  _Atomic uint64_t *slot = (_Atomic uint64_t *)&tt->table[idx];
+  _Atomic uint64_t *slot = &tt->table[idx * 2];
   atomic_store_explicit(&slot[0], key_half ^ tentry.tiny_move,
                         memory_order_relaxed);
   atomic_store_explicit(&slot[1], tentry.tiny_move, memory_order_relaxed);
