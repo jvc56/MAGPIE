@@ -49,6 +49,7 @@ enum {
   // ABDADA: sentinel value returned when node is being searched by another
   // processor
   ON_EVALUATION = -(1 << 29),
+  ABDADA_INTERRUPTED = -(1 << 28),
   // Aspiration window initial size
   ASPIRATION_WINDOW = 25,
 };
@@ -433,6 +434,11 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
 
   assert(pv_node || alpha == beta - 1);
 
+  if (thread_control_get_status(worker->solver->thread_control) ==
+      THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+    return ABDADA_INTERRUPTED;
+  }
+
   // ABDADA: if exclusive search and another processor is on this node, defer
   const int num_threads = worker->solver->threads;
   if (exclusive_p && num_threads > 1 &&
@@ -617,7 +623,8 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       } else {
         value = abdada_negamax(worker, child_key, depth - 1, -alpha - 1, -alpha,
                                &child_pv, false, child_exclusive);
-        if (value != ON_EVALUATION && alpha < -value && -value < beta) {
+        if (value != ABDADA_INTERRUPTED && value != ON_EVALUATION &&
+            alpha < -value && -value < beta) {
           // re-search with wider window (not exclusive since we need the value)
           value = abdada_negamax(worker, child_key, depth - 1, -beta, -alpha,
                                  &child_pv, pv_node, false);
@@ -633,6 +640,12 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
         update_cross_sets_after_unplay_from_undo(current_undo,
                                                  worker->game_copy);
         board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
+      }
+
+      if (value == ABDADA_INTERRUPTED) {
+        all_done = true;
+        best_value = ABDADA_INTERRUPTED;
+        break;
       }
 
       // ABDADA: check if move was deferred
