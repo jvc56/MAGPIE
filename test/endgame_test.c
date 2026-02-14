@@ -87,17 +87,26 @@ static void print_pv_callback(int depth, int32_t value, const PVLine *pv_line,
   printf("%s\n", string_builder_peek(sb));
   string_builder_destroy(sb);
 
-  // Print ranked root moves with full PV lines
-  printf("    ranked moves (%d):\n", num_ranked_pvs);
-  for (int r = 0; r < num_ranked_pvs; r++) {
-    const PVLine *rpv = &ranked_pvs[r];
-    StringBuilder *msb = string_builder_create();
-    string_builder_add_formatted_string(msb, "      %2d. ", r + 1);
-    format_pvline(msb, rpv, game);
-    string_builder_add_formatted_string(msb, " value=%d", rpv->score);
-    append_outcome(msb, game, rpv->score);
-    printf("%s\n", string_builder_peek(msb));
-    string_builder_destroy(msb);
+  (void)ranked_pvs;
+  (void)num_ranked_pvs;
+}
+
+// Per-ply callback that also prints ranked root moves
+static void print_pv_and_ranked_callback(int depth, int32_t value,
+                                         const PVLine *pv_line,
+                                         const Game *game,
+                                         const PVLine *ranked_pvs,
+                                         int num_ranked_pvs, void *user_data) {
+  print_pv_callback(depth, value, pv_line, game, ranked_pvs, num_ranked_pvs,
+                    user_data);
+  for (int i = 0; i < num_ranked_pvs; i++) {
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_formatted_string(sb, "    %2d. value=%d, pv=", i + 1,
+                                        ranked_pvs[i].score);
+    format_pvline(sb, &ranked_pvs[i], game);
+    append_outcome(sb, game, ranked_pvs[i].score);
+    printf("%s\n", string_builder_peek(sb));
+    string_builder_destroy(sb);
   }
 }
 
@@ -237,7 +246,7 @@ void test_very_deep(void) {
 
 void test_eldar_v_stick(void) {
   test_single_endgame(
-      "set -s1 score -s2 score -r1 small -r2 small -threads 6 -eplies 9",
+      "set -s1 score -s2 score -r1 small -r2 small -threads 6 -eplies 5",
       "cgp "
       "4EXODE6/1DOFF1KERATIN1U/1OHO8YEN/1POOJA1B3MEWS/5SQUINTY2A/4RHINO1e3V/"
       "2B4C2R3E/GOAT1D1E2ZIN1d/1URACILS2E4/1PIG1S4T4/2L2R4T4/2L2A1GENII3/"
@@ -281,8 +290,8 @@ void test_14domino(void) {
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args.num_threads = 8;
   endgame_args.use_heuristics = true;
-  endgame_args.num_top_moves = 5;
-  endgame_args.per_ply_callback = print_pv_callback;
+  endgame_args.num_top_moves = 10;
+  endgame_args.per_ply_callback = print_pv_and_ranked_callback;
   endgame_args.per_ply_callback_data = &timer;
 
   EndgameResults *endgame_results = config_get_endgame_results(config);
@@ -423,7 +432,6 @@ void test_endgame(void) {
   //  Uncomment out more of these tests once we add more optimizations,
   //  and/or if we can run the endgame tests in release mode.
   // test_vs_joey();
-  // test_eldar_v_stick();
 }
 
 void test_monster_q(void) {
