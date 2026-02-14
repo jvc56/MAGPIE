@@ -117,6 +117,7 @@ static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
                         .initial_small_move_arena_size =
                             DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
                         .num_threads = 6,
+                        .num_top_moves = 1,
                         .use_heuristics = true,
                         .per_ply_callback = NULL,
                         .per_ply_callback_data = NULL};
@@ -210,6 +211,7 @@ static void run_benchmark_ab_full(int new_ply_setting, bool new_heuristics,
                           .initial_small_move_arena_size =
                               DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
                           .num_threads = 6,
+                          .num_top_moves = 1,
                           .use_heuristics = new_heuristics,
                           .per_ply_callback = NULL,
                           .per_ply_callback_data = NULL};
@@ -220,6 +222,7 @@ static void run_benchmark_ab_full(int new_ply_setting, bool new_heuristics,
                           .initial_small_move_arena_size =
                               DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
                           .num_threads = 6,
+                          .num_top_moves = 1,
                           .use_heuristics = old_heuristics,
                           .per_ply_callback = NULL,
                           .per_ply_callback_data = NULL};
@@ -372,6 +375,7 @@ static void run_benchmark_ab_from_cgp(const char *cgp_path,
                           .initial_small_move_arena_size =
                               DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
                           .num_threads = num_threads,
+                          .num_top_moves = 1,
                           .use_heuristics = new_heuristics,
                           .per_ply_callback = NULL,
                           .per_ply_callback_data = NULL};
@@ -382,6 +386,7 @@ static void run_benchmark_ab_from_cgp(const char *cgp_path,
                           .initial_small_move_arena_size =
                               DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
                           .num_threads = num_threads,
+                          .num_top_moves = 1,
                           .use_heuristics = old_heuristics,
                           .per_ply_callback = NULL,
                           .per_ply_callback_data = NULL};
@@ -623,6 +628,7 @@ static void run_benchmark_solver_vs_movegen_from_cgp(
       .tt_fraction_of_mem = 0.10,
       .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
       .num_threads = num_threads,
+      .num_top_moves = 1,
       .use_heuristics = solver_heuristics,
       .per_ply_callback = NULL,
       .per_ply_callback_data = NULL};
@@ -901,6 +907,7 @@ static void run_benchmark_selfplay(int ply, int num_positions,
                       .initial_small_move_arena_size =
                           DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
                       .num_threads = 1,
+                      .num_top_moves = 1,
                       .use_heuristics = true,
                       .per_ply_callback = NULL,
                       .per_ply_callback_data = NULL};
@@ -1030,6 +1037,7 @@ static void run_benchmark_thread_scaling(int ply, int num_positions,
                         .initial_small_move_arena_size =
                             DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
                         .num_threads = nthreads,
+                        .num_top_moves = 1,
                         .use_heuristics = true,
                         .per_ply_callback = NULL,
                         .per_ply_callback_data = NULL};
