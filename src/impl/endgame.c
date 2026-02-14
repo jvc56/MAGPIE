@@ -93,28 +93,29 @@ static inline uint64_t shadow_zobrist_add_move(const Zobrist *z,
   return shadow_key;
 }
 
-// Returns fraction of opponent's rack tiles that are stuck (0.0 = none, 1.0 = all).
+// Returns fraction of opponent's rack score that is stuck (0.0 = none, 1.0 = all).
 // A tile is "stuck" if no legal move plays that tile type.
 // tiles_played_bv: bitvector where bit i is set if machine letter i appears in
 //   any valid move (from MOVE_RECORD_TILES_PLAYED).
 static float stuck_tile_fraction_from_bv(const LetterDistribution *ld,
                                          const Rack *rack,
                                          uint64_t tiles_played_bv) {
-  int total_tiles = 0;
-  int stuck_tiles = 0;
+  int total_score = 0;
+  int stuck_score = 0;
   int ld_size = ld_get_size(ld);
   for (int ml = 0; ml < ld_size; ml++) {
     int count = rack_get_letter(rack, ml);
     if (count > 0) {
-      total_tiles += count;
+      int score = count * ld_get_score(ld, ml);
+      total_score += score;
       if (!(tiles_played_bv & ((uint64_t)1 << ml))) {
-        stuck_tiles += count;
+        stuck_score += score;
       }
     }
   }
-  if (total_tiles == 0)
+  if (total_score == 0)
     return 0.0f;
-  return (float)stuck_tiles / (float)total_tiles;
+  return (float)stuck_score / (float)total_score;
 }
 
 struct EndgameSolver {
@@ -739,7 +740,25 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
       }
       small_move_set_estimated_value(current_move, estimate);
     } else {
-      int estimate = small_move_get_score(current_move) - conservation_bonus;
+      int score = small_move_get_score(current_move);
+      int estimate = score - conservation_bonus;
+      // Static endgame equity: score minus face value of tiles played.
+      // Playing tiles earns points but "spends" the tiles themselves.
+      if (!small_move_is_pass(current_move) &&
+          small_move_get_tiles_played(current_move) < ntiles_on_rack) {
+        small_move_to_move(worker->move_list->spare_move, current_move,
+                           est_board);
+        int tlen = move_get_tiles_length(worker->move_list->spare_move);
+        int tiles_face_value = 0;
+        for (int pos = 0; pos < tlen; pos++) {
+          uint8_t tile = move_get_tile(worker->move_list->spare_move, pos);
+          if (tile == PLAYED_THROUGH_MARKER)
+            continue;
+          uint8_t ml = get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile;
+          tiles_face_value += equity_to_int(ld_get_score(est_ld, ml));
+        }
+        estimate -= tiles_face_value;
+      }
       // Tiles-played jitter for search diversity
       if (num_threads > 1 && thread_idx > 0) {
         int tiles_played = small_move_get_tiles_played(current_move);
@@ -1433,8 +1452,11 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
         game_get_consecutive_scoreless_turns(worker->game_copy));
   }
 
-  // Use pre-computed opp_stuck fraction from endgame_solve
-  float initial_opp_stuck_frac = worker->solver->initial_opp_stuck_frac;
+  // Half the threads use stuck-tile-aware root ordering (build chains +
+  // conservation), the other half use score-based ordering for diversity.
+  float initial_opp_stuck_frac =
+      (worker->thread_index % 2 == 0) ? worker->solver->initial_opp_stuck_frac
+                                      : 0.0f;
 
   int initial_move_count =
       generate_stm_plays(worker, worker->solver->requested_plies);
@@ -1701,8 +1723,36 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
 
   endgame_solver_reset(solver, endgame_args);
 
-  // Root opp_stuck is 0; per-node detection in abdada_negamax handles it.
+  // Compute initial stuck-tile fraction for root move ordering.
+  // Per-node detection in abdada_negamax recomputes this dynamically.
   solver->initial_opp_stuck_frac = 0.0f;
+  if (solver->use_heuristics) {
+    int opp_idx = 1 - solver->solving_player;
+    const Rack *opp_rack =
+        player_get_rack(game_get_player(endgame_args->game, opp_idx));
+    uint64_t opp_tiles_bv = 0;
+    Game *root_game = game_duplicate(endgame_args->game);
+    game_set_player_on_turn_index(root_game, opp_idx);
+    MoveList *tmp_ml = move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
+    const MoveGenArgs tp_args = {
+        .game = root_game,
+        .move_list = tmp_ml,
+        .move_record_type = MOVE_RECORD_TILES_PLAYED,
+        .move_sort_type = MOVE_SORT_SCORE,
+        .override_kwg = solver->pruned_kwg,
+        .thread_index = 0,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+        .tiles_played_bv = &opp_tiles_bv,
+    };
+    generate_moves(&tp_args);
+    solver->initial_opp_stuck_frac =
+        stuck_tile_fraction_from_bv(game_get_ld(endgame_args->game),
+                                    opp_rack, opp_tiles_bv);
+    small_move_list_destroy(tmp_ml);
+    game_destroy(root_game);
+  }
 
   // Generate base seed for ABDADA jitter using current time
   uint64_t base_seed = (uint64_t)ctime_get_current_time();
