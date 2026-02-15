@@ -31,6 +31,9 @@ jobs:
       - name: Build WASM
         run: make -f Makefile-wasm magpie_wasm
 
+      - name: Build WASM tests
+        run: make -f Makefile-wasm magpie_wasm_test
+
       - name: Get datafile cache
         id: cache-datafiles
         uses: actions/cache@v3
@@ -42,6 +45,12 @@ jobs:
       - name: Download data files
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
         run: ./download_data.sh
+
+      - name: Run WASM unit tests
+        run: |
+          node bin/magpie_wasm_test.js tt
+          node bin/magpie_wasm_test.js endgame
+          node bin/magpie_wasm_test.js eldar_v
 
       - name: Install Playwright dependencies
         working-directory: ./wasmentry
