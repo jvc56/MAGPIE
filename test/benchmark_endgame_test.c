@@ -1005,7 +1005,7 @@ static void run_benchmark_thread_scaling(int ply, int num_positions,
   Game *game = config_get_game(config);
 
   // Collect endgame positions by playing games until bag is empty.
-  Game **saved_games = malloc(sizeof(Game *) * (size_t)num_positions);
+  Game **saved_games = malloc_or_die(sizeof(Game *) * (size_t)num_positions);
   int valid_positions = 0;
   const int max_attempts = num_positions * 10;
 
