@@ -33,7 +33,6 @@
 #include "move_gen.h"
 #include "word_prune.h"
 #include <assert.h>
-#include <math.h>
 #ifndef __wasm__
 #include <sched.h>
 #endif
@@ -53,7 +52,6 @@ enum {
   EARLY_PASS_BF = 1 << 29,
   HASH_MOVE_BF = 1 << 28,
   GOING_OUT_BF = 1 << 27,
-  BUILD_MOVE_BF = 1 << 25,
   // ABDADA: sentinel value returned when node is being searched by another
   // processor
   ON_EVALUATION = -(1 << 29),
@@ -120,18 +118,15 @@ static float stuck_tile_fraction_from_bv(const LetterDistribution *ld,
 struct EndgameSolver {
   int initial_spread;
   int solving_player;
-  int n_initial_moves;
 
   int initial_small_move_arena_size;
   bool iterative_deepening_optim;
   bool first_win_optim;
   bool transposition_table_optim;
   bool negascout_optim;
-  bool prevent_slowroll;
   bool use_heuristics;
   PVLine principal_variation;
   int32_t best_pv_value;
-  PVLine *variations;
 
   KWG *pruned_kwg;
 
@@ -171,6 +166,7 @@ typedef struct EndgameSolverWorker {
   PVLine best_pv;        // Thread-local best PV
   int32_t best_pv_value; // Thread-local best value
   int completed_depth;   // Depth this thread completed
+  int n_initial_moves;   // Number of root moves (thread-local to avoid races)
 } EndgameSolverWorker;
 
 #ifndef MAX
@@ -532,13 +528,8 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
   return worker->move_list->count;
 }
 
-void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
-                               int move_count, uint64_t tt_move,
-                               uint64_t node_key, uint64_t shadow_key,
-                               float opp_stuck_frac) {
-  (void)node_key;
-  (void)shadow_key;
-  (void)depth;
+void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
+                               uint64_t tt_move, float opp_stuck_frac) {
   const int player_index = game_get_player_on_turn_index(worker->game_copy);
   const Player *player = game_get_player(worker->game_copy, player_index);
   const Player *opponent = game_get_player(worker->game_copy, 1 - player_index);
@@ -1063,50 +1054,50 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
         player_get_rack(game_get_player(worker->game_copy, opp_idx));
     uint64_t opp_tiles_bv = 0;
     if (worker->solver->use_heuristics) {
-    // Fast stuck-tile check: use TILES_PLAYED mode which exits early
-    // once all rack tile types have been seen in valid moves.
-    const LetterDistribution *check_ld = game_get_ld(worker->game_copy);
+      // Fast stuck-tile check: use TILES_PLAYED mode which exits early
+      // once all rack tile types have been seen in valid moves.
+      const LetterDistribution *check_ld = game_get_ld(worker->game_copy);
 
-    if (on_turn_idx == opp_idx) {
-      // Opponent is on turn: fast tile check, then generate ALL_SMALL for search.
-      const MoveGenArgs tp_args = {
-          .game = worker->game_copy,
-          .move_list = worker->move_list,
-          .move_record_type = MOVE_RECORD_TILES_PLAYED,
-          .move_sort_type = MOVE_SORT_SCORE,
-          .override_kwg = worker->solver->pruned_kwg,
-          .thread_index = worker->thread_index,
-          .eq_margin_movegen = 0,
-          .target_equity = EQUITY_MAX_VALUE,
-          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-          .tiles_played_bv = &opp_tiles_bv,
-      };
-      generate_moves(&tp_args);
-      opp_stuck_frac =
-          stuck_tile_fraction_from_bv(check_ld, opp_rack, opp_tiles_bv);
-      nplays = generate_stm_plays(worker, depth);
-    } else {
-      // Solving player is on turn: fast tile check for opponent, then
-      // generate solving player's moves for search.
-      game_set_player_on_turn_index(worker->game_copy, opp_idx);
-      const MoveGenArgs tp_args = {
-          .game = worker->game_copy,
-          .move_list = worker->move_list,
-          .move_record_type = MOVE_RECORD_TILES_PLAYED,
-          .move_sort_type = MOVE_SORT_SCORE,
-          .override_kwg = worker->solver->pruned_kwg,
-          .thread_index = worker->thread_index,
-          .eq_margin_movegen = 0,
-          .target_equity = EQUITY_MAX_VALUE,
-          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-          .tiles_played_bv = &opp_tiles_bv,
-      };
-      generate_moves(&tp_args);
-      opp_stuck_frac =
-          stuck_tile_fraction_from_bv(check_ld, opp_rack, opp_tiles_bv);
-      game_set_player_on_turn_index(worker->game_copy, on_turn_idx);
-      nplays = generate_stm_plays(worker, depth);
-    }
+      if (on_turn_idx == opp_idx) {
+        // Opponent is on turn: fast tile check, then generate ALL_SMALL.
+        const MoveGenArgs tp_args = {
+            .game = worker->game_copy,
+            .move_list = worker->move_list,
+            .move_record_type = MOVE_RECORD_TILES_PLAYED,
+            .move_sort_type = MOVE_SORT_SCORE,
+            .override_kwg = worker->solver->pruned_kwg,
+            .thread_index = worker->thread_index,
+            .eq_margin_movegen = 0,
+            .target_equity = EQUITY_MAX_VALUE,
+            .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+            .tiles_played_bv = &opp_tiles_bv,
+        };
+        generate_moves(&tp_args);
+        opp_stuck_frac =
+            stuck_tile_fraction_from_bv(check_ld, opp_rack, opp_tiles_bv);
+        nplays = generate_stm_plays(worker, depth);
+      } else {
+        // Solving player is on turn: fast tile check for opponent, then
+        // generate solving player's moves for search.
+        game_set_player_on_turn_index(worker->game_copy, opp_idx);
+        const MoveGenArgs tp_args = {
+            .game = worker->game_copy,
+            .move_list = worker->move_list,
+            .move_record_type = MOVE_RECORD_TILES_PLAYED,
+            .move_sort_type = MOVE_SORT_SCORE,
+            .override_kwg = worker->solver->pruned_kwg,
+            .thread_index = worker->thread_index,
+            .eq_margin_movegen = 0,
+            .target_equity = EQUITY_MAX_VALUE,
+            .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+            .tiles_played_bv = &opp_tiles_bv,
+        };
+        generate_moves(&tp_args);
+        opp_stuck_frac =
+            stuck_tile_fraction_from_bv(check_ld, opp_rack, opp_tiles_bv);
+        game_set_player_on_turn_index(worker->game_copy, on_turn_idx);
+        nplays = generate_stm_plays(worker, depth);
+      }
     } else {
       // Heuristics disabled: just generate moves, no stuck-tile detection
       nplays = generate_stm_plays(worker, depth);
@@ -1142,12 +1133,11 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
 
     uint64_t stm_shadow =
         (on_turn_idx == 0) ? shadow_key_0 : shadow_key_1;
-    assign_estimates_and_sort(worker, depth, nplays, tt_move, node_key,
-                              stm_shadow, opp_stuck_frac);
+    assign_estimates_and_sort(worker, nplays, tt_move, opp_stuck_frac);
     arena_alloced = true;
   } else {
     // Use initial moves. They already have been sorted by estimated value.
-    nplays = worker->solver->n_initial_moves;
+    nplays = worker->n_initial_moves;
   }
 
   int32_t best_value = -LARGE_VALUE;
@@ -1481,9 +1471,9 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   int initial_move_count =
       generate_stm_plays(worker, worker->solver->requested_plies);
   // Arena pointer better have started at 0, since it was empty.
-  assign_estimates_and_sort(worker, 0, initial_move_count, INVALID_TINY_MOVE,
-                            initial_hash_key, 0, initial_opp_stuck_frac);
-  worker->solver->n_initial_moves = initial_move_count;
+  assign_estimates_and_sort(worker, initial_move_count, INVALID_TINY_MOVE,
+                            initial_opp_stuck_frac);
+  worker->n_initial_moves = initial_move_count;
   assert((size_t)worker->small_move_arena->size ==
          initial_move_count * sizeof(SmallMove));
 
@@ -1743,7 +1733,7 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
 
   if (num_top > 1) {
     EndgameSolverWorker *bw = solver_workers[best_thread];
-    int n_root = solver->n_initial_moves;
+    int n_root = bw->n_initial_moves;
     int k = (num_top < n_root) ? num_top : n_root;
     SmallMove *root_moves = (SmallMove *)bw->small_move_arena->memory;
 
@@ -1786,7 +1776,6 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
       }
     }
   }
-
 
   // Clean up workers
   for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
