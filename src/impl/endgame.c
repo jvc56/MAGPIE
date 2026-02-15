@@ -223,12 +223,15 @@ static void pvline_update(PVLine *pv_line, const PVLine *new_pv_line,
   pvline_clear(pv_line);
   pv_line->moves[0].metadata = move->metadata;
   pv_line->moves[0].tiny_move = move->tiny_move;
-  for (int i = 0; i < new_pv_line->num_moves; i++) {
-    assert(i != MAX_VARIANT_LENGTH - 1);
+  int child_moves = new_pv_line->num_moves;
+  if (child_moves > MAX_VARIANT_LENGTH - 1) {
+    child_moves = MAX_VARIANT_LENGTH - 1;
+  }
+  for (int i = 0; i < child_moves; i++) {
     pv_line->moves[i + 1].metadata = new_pv_line->moves[i].metadata;
     pv_line->moves[i + 1].tiny_move = new_pv_line->moves[i].tiny_move;
   }
-  pv_line->num_moves = new_pv_line->num_moves + 1;
+  pv_line->num_moves = child_moves + 1;
   pv_line->score = score;
   // negamax_depth is not updated here; callers set it explicitly.
 }
