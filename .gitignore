@@ -22,3 +22,16 @@ TODO
 CLAUDE.md
 *.DS_Store
 settings.txt
+
+# Node.js / Playwright
+node_modules/
+package-lock.json
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Python venv
+venv/
+
+# Compiled libraries
+*.a

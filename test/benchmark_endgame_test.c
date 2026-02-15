@@ -17,6 +17,7 @@
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/str/endgame_string.h"
 #include "../src/str/game_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
@@ -178,7 +179,7 @@ static int play_endgame_ab(Game *game, EndgameSolver *solver_a,
     assert(error_stack_is_empty(err));
     error_stack_destroy(err);
 
-    const PVLine *pv = endgame_results_get_pvline(results);
+    const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
     if (pv->num_moves == 0)
       break;
 
@@ -539,7 +540,7 @@ static int play_endgame_solver_vs_movegen(
       assert(error_stack_is_empty(err));
       error_stack_destroy(err);
 
-      const PVLine *pv = endgame_results_get_pvline(results);
+      const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
       if (pv->num_moves == 0) break;
       SmallMove best = pv->moves[0];
       small_move_to_move(move_list->spare_move, &best, game_get_board(game));
@@ -952,7 +953,7 @@ static void run_benchmark_selfplay(int ply, int num_positions,
       assert(error_stack_is_empty(err));
       error_stack_destroy(err);
 
-      const PVLine *pv = endgame_results_get_pvline(results);
+      const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
       if (pv->num_moves == 0)
         break;
 
@@ -1059,7 +1060,7 @@ static void run_benchmark_thread_scaling(int ply, int num_positions,
         assert(error_stack_is_empty(err));
         error_stack_destroy(err);
 
-        const PVLine *pv = endgame_results_get_pvline(results);
+        const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
         if (pv->num_moves == 0)
           break;
 

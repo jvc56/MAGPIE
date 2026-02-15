@@ -1,69 +1,149 @@
 #include "endgame_results.h"
 
+#include "../compat/cpthread.h"
+#include "../compat/ctime.h"
+#include "../def/cpthread_defs.h"
 #include "../util/io_util.h"
 #include <stdlib.h>
 #include <string.h>
 
+typedef struct PVData {
+  PVLine pv_line;
+  int value;
+  int depth;
+  cpthread_mutex_t mutex;
+} PVData;
+
 struct EndgameResults {
-  PVLine *pv_lines;
-  int num_pv_lines;
-  int capacity;
+  PVData best_pv_data;
+  PVData display_pv_data;
   bool valid_for_current_game_state;
+  Timer timer;
+  double display_seconds_elapsed;
 };
 
 EndgameResults *endgame_results_create(void) {
   EndgameResults *endgame_results = malloc_or_die(sizeof(EndgameResults));
-  endgame_results->pv_lines = malloc_or_die(sizeof(PVLine));
-  endgame_results->num_pv_lines = 0;
-  endgame_results->capacity = 1;
+  endgame_results->best_pv_data.depth = -1;
+  cpthread_mutex_init(&endgame_results->best_pv_data.mutex);
+  cpthread_mutex_init(&endgame_results->display_pv_data.mutex);
   endgame_results->valid_for_current_game_state = false;
+  ctimer_reset(&endgame_results->timer);
   return endgame_results;
 }
 
-void endgame_results_destroy(EndgameResults *endgame_result) {
-  if (!endgame_result) {
-    return;
-  }
-  free(endgame_result->pv_lines);
-  free(endgame_result);
+void endgame_results_destroy(EndgameResults *endgame_results) {
+  free(endgame_results);
+}
+
+// NOT THREAD SAFE: Caller must ensure synchronization
+void endgame_results_reset(EndgameResults *endgame_results) {
+  endgame_results->best_pv_data.depth = -1;
+  endgame_results->valid_for_current_game_state = false;
+  ctimer_start(&endgame_results->timer);
 }
 
 bool endgame_results_get_valid_for_current_game_state(
-    const EndgameResults *endgame_result) {
-  return endgame_result->valid_for_current_game_state;
+    const EndgameResults *endgame_results) {
+  return endgame_results->valid_for_current_game_state;
 }
 
 void endgame_results_set_valid_for_current_game_state(
-    EndgameResults *endgame_result, bool valid) {
-  endgame_result->valid_for_current_game_state = valid;
+    EndgameResults *endgame_results, bool valid) {
+  endgame_results->valid_for_current_game_state = valid;
 }
 
-const PVLine *endgame_results_get_pvline(const EndgameResults *endgame_result) {
-  return &endgame_result->pv_lines[0];
-}
-
-void endgame_results_set_pvline(EndgameResults *endgame_result,
-                                const PVLine *pv_line) {
-  endgame_result->pv_lines[0] = *pv_line;
-  endgame_result->num_pv_lines = 1;
-}
-
-int endgame_results_get_num_pvlines(const EndgameResults *endgame_result) {
-  return endgame_result->num_pv_lines;
-}
-
-const PVLine *endgame_results_get_pvline_at(
-    const EndgameResults *endgame_result, int index) {
-  return &endgame_result->pv_lines[index];
-}
-
-void endgame_results_set_pvlines(EndgameResults *endgame_result,
-                                 const PVLine *pv_lines, int count) {
-  if (count > endgame_result->capacity) {
-    free(endgame_result->pv_lines);
-    endgame_result->pv_lines = malloc_or_die(count * sizeof(PVLine));
-    endgame_result->capacity = count;
+// NOT THREAD SAFE: Caller must ensure synchronization
+const PVLine *endgame_results_get_pvline(const EndgameResults *endgame_results,
+                                         endgame_result_t result_type) {
+  const PVLine *pv_line = NULL;
+  switch (result_type) {
+  case ENDGAME_RESULT_BEST:
+    pv_line = &endgame_results->best_pv_data.pv_line;
+    break;
+  case ENDGAME_RESULT_DISPLAY:
+    pv_line = &endgame_results->display_pv_data.pv_line;
+    break;
   }
-  memcpy(endgame_result->pv_lines, pv_lines, count * sizeof(PVLine));
-  endgame_result->num_pv_lines = count;
+  return pv_line;
+}
+
+// NOT THREAD SAFE: Caller must ensure synchronization
+int endgame_results_get_value(const EndgameResults *endgame_results,
+                              endgame_result_t result_type) {
+  int value;
+  switch (result_type) {
+  case ENDGAME_RESULT_BEST:
+    value = endgame_results->best_pv_data.value;
+    break;
+  case ENDGAME_RESULT_DISPLAY:
+    value = endgame_results->display_pv_data.value;
+    break;
+  }
+  return value;
+}
+
+// NOT THREAD SAFE: Caller must ensure synchronization
+int endgame_results_get_depth(const EndgameResults *endgame_results,
+                              endgame_result_t result_type) {
+  int depth;
+  switch (result_type) {
+  case ENDGAME_RESULT_BEST:
+    depth = endgame_results->best_pv_data.depth;
+    break;
+  case ENDGAME_RESULT_DISPLAY:
+    depth = endgame_results->display_pv_data.depth;
+    break;
+  }
+  return depth;
+}
+
+double endgame_results_get_display_seconds_elapsed(
+    const EndgameResults *endgame_results) {
+  return endgame_results->display_seconds_elapsed;
+}
+
+void endgame_results_lock(EndgameResults *endgame_results,
+                          endgame_result_t result_type) {
+  switch (result_type) {
+  case ENDGAME_RESULT_BEST:
+    cpthread_mutex_lock(&endgame_results->best_pv_data.mutex);
+    break;
+  case ENDGAME_RESULT_DISPLAY:
+    cpthread_mutex_lock(&endgame_results->display_pv_data.mutex);
+    break;
+  }
+}
+
+void endgame_results_unlock(EndgameResults *endgame_results,
+                            endgame_result_t result_type) {
+  switch (result_type) {
+  case ENDGAME_RESULT_BEST:
+    cpthread_mutex_unlock(&endgame_results->best_pv_data.mutex);
+    break;
+  case ENDGAME_RESULT_DISPLAY:
+    cpthread_mutex_unlock(&endgame_results->display_pv_data.mutex);
+    break;
+  }
+}
+
+void endgame_results_update_display_data(EndgameResults *endgame_results) {
+  endgame_results->display_pv_data.pv_line =
+      endgame_results->best_pv_data.pv_line;
+  endgame_results->display_pv_data.value = endgame_results->best_pv_data.value;
+  endgame_results->display_pv_data.depth = endgame_results->best_pv_data.depth;
+  endgame_results->display_seconds_elapsed =
+      ctimer_elapsed_seconds(&endgame_results->timer);
+}
+
+void endgame_results_set_best_pvline(EndgameResults *endgame_results,
+                                     const PVLine *pv_line, int value,
+                                     int depth) {
+  endgame_results_lock(endgame_results, ENDGAME_RESULT_BEST);
+  if (depth > endgame_results->best_pv_data.depth) {
+    endgame_results->best_pv_data.depth = depth;
+    endgame_results->best_pv_data.value = value;
+    endgame_results->best_pv_data.pv_line = *pv_line;
+  }
+  endgame_results_unlock(endgame_results, ENDGAME_RESULT_BEST);
 }

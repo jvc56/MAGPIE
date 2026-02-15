@@ -1,0 +1,30 @@
+{
+  "name": "magpie",
+  "version": "1.0.0",
+  "description": "**Macondo Accordant Game Program and Inference Engine**",
+  "main": "playwright.config.js",
+  "bin": {
+    "magpie": "bin/magpie-worker.js"
+  },
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jvc56/MAGPIE.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/jvc56/MAGPIE/issues"
+  },
+  "homepage": "https://github.com/jvc56/MAGPIE#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
+  }
+}

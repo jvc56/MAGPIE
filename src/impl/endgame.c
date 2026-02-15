@@ -7,15 +7,14 @@
 #include "../def/game_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/move_defs.h"
+#include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/endgame_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
-#include "../ent/game_history.h"
 #include "../ent/kwg.h"
-#include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/move_undo.h"
 #include "../ent/player.h"
@@ -29,7 +28,6 @@
 #include "../str/move_string.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
-#include "../util/string_util.h"
 #include "gameplay.h"
 #include "kwg_maker.h"
 #include "move_gen.h"
@@ -59,6 +57,7 @@ enum {
   // ABDADA: sentinel value returned when node is being searched by another
   // processor
   ON_EVALUATION = -(1 << 29),
+  ABDADA_INTERRUPTED = -(1 << 28),
   // Aspiration window initial size
   ASPIRATION_WINDOW = 25,
 };
@@ -131,12 +130,12 @@ struct EndgameSolver {
   bool prevent_slowroll;
   bool use_heuristics;
   PVLine principal_variation;
+  int32_t best_pv_value;
   PVLine *variations;
 
   KWG *pruned_kwg;
 
   int solve_multiple_variations;
-  int32_t best_pv_value;
   int requested_plies;
   int threads;
   double tt_fraction_of_mem;
@@ -154,6 +153,7 @@ struct EndgameSolver {
   void *per_ply_callback_data;
 
   // Owned by the caller:
+  EndgameResults *results;
   ThreadControl *thread_control;
   const Game *game;
 };
@@ -421,6 +421,10 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
         transposition_table_create(endgame_args->tt_fraction_of_mem);
   }
   es->tt_fraction_of_mem = endgame_args->tt_fraction_of_mem;
+  if (es->results) {
+    endgame_results_reset(es->results);
+    endgame_results_set_valid_for_current_game_state(es->results, true);
+  }
 }
 
 EndgameSolver *endgame_solver_create(void) {
@@ -795,6 +799,11 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
                        float opp_stuck_frac) {
 
   assert(pv_node || alpha == beta - 1);
+
+  if (thread_control_get_status(worker->solver->thread_control) ==
+      THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+    return ABDADA_INTERRUPTED;
+  }
 
   // ABDADA: if exclusive search and another processor is on this node, defer.
   // Active at depth >= 3 where the cost of redundant search justifies the
@@ -1307,7 +1316,8 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
         value = abdada_negamax(worker, child_key, child_shadow_0,
                                child_shadow_1, depth - 1, -alpha - 1, -alpha,
                                &child_pv, false, child_exclusive, opp_stuck_frac);
-        if (value != ON_EVALUATION && alpha < -value && -value < beta) {
+        if (value != ABDADA_INTERRUPTED && value != ON_EVALUATION &&
+            alpha < -value && -value < beta) {
           // re-search with wider window (not exclusive since we need the value)
           value = abdada_negamax(worker, child_key, child_shadow_0,
                                  child_shadow_1, depth - 1, -beta, -alpha,
@@ -1324,6 +1334,12 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
         update_cross_sets_after_unplay_from_undo(current_undo,
                                                  worker->game_copy);
         board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
+      }
+
+      if (value == ABDADA_INTERRUPTED) {
+        all_done = true;
+        best_value = ABDADA_INTERRUPTED;
+        break;
       }
 
       // ABDADA: check if move was deferred
@@ -1425,10 +1441,18 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   return best_value;
 }
 
+static bool iterative_deepening_should_stop(EndgameSolver *solver) {
+  return atomic_load(&solver->search_complete) != 0 ||
+         thread_control_get_status(solver->thread_control) ==
+             THREAD_CONTROL_STATUS_USER_INTERRUPT;
+}
+
 void iterative_deepening(EndgameSolverWorker *worker, int plies) {
 
   int32_t alpha = -LARGE_VALUE;
   int32_t beta = LARGE_VALUE;
+  int32_t prev_value = 0;
+  bool use_aspiration = (worker->solver->threads > 1);
 
   if (worker->solver->first_win_optim) {
     // search a very small window centered around 0; we're just trying to find
@@ -1487,7 +1511,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
 
   for (int p = start; p <= plies; p++) {
     // Check if another thread has completed the full search
-    if (atomic_load(&worker->solver->search_complete) != 0) {
+    if (iterative_deepening_should_stop(worker->solver)) {
       break;
     }
 
@@ -1496,9 +1520,58 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     pv.game = worker->game_copy;
     pv.num_moves = 0;
 
-    int32_t val =
-        abdada_negamax(worker, initial_hash_key, 0, 0, p, alpha, beta, &pv,
-                       true, false, initial_opp_stuck_frac);
+    int32_t val;
+
+    // Track whether this depth's search completed validly
+    bool search_valid = true;
+
+    // Use aspiration windows after depth 1
+    if (use_aspiration && p > 1 && !worker->solver->first_win_optim) {
+      int32_t window = ASPIRATION_WINDOW;
+      alpha = prev_value - window;
+      beta = prev_value + window;
+
+      // Search with narrow window, widen on fail-high/fail-low
+      while (true) {
+        // Check if another thread completed
+        if (iterative_deepening_should_stop(worker->solver)) {
+          search_valid = false;
+          break;
+        }
+
+        val = abdada_negamax(worker, initial_hash_key, 0, 0, p, alpha, beta,
+                             &pv, true, false, initial_opp_stuck_frac);
+
+        if (val <= alpha) {
+          // Fail-low: widen alpha
+          alpha = (window >= LARGE_VALUE / 2) ? -LARGE_VALUE
+                                              : prev_value - window * 2;
+          window *= 2;
+        } else if (val >= beta) {
+          // Fail-high: widen beta
+          beta = (window >= LARGE_VALUE / 2) ? LARGE_VALUE
+                                             : prev_value + window * 2;
+          window *= 2;
+        } else {
+          // Value is within window, we're done
+          break;
+        }
+
+        // Reset PV for re-search
+        pv.num_moves = 0;
+      }
+    } else {
+      // Full window search for depth 1 or when aspiration disabled
+      val = abdada_negamax(worker, initial_hash_key, 0, 0, p, alpha, beta,
+                           &pv, true, false, initial_opp_stuck_frac);
+    }
+
+    // If search was interrupted, don't store results for this depth
+    if (!search_valid) {
+      break;
+    }
+
+    prev_value = val;
 
     // sort initial moves by valuation for next time.
     SmallMove *initial_moves = (SmallMove *)(worker->small_move_arena->memory);
@@ -1508,8 +1581,11 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     // Store result in worker's local tracking
     int32_t pv_value = val - worker->solver->initial_spread;
     worker->best_pv_value = pv_value;
+    pv.score = pv_value;
     worker->best_pv = pv;
     worker->completed_depth = p;
+
+    endgame_results_set_best_pvline(worker->solver->results, &pv, pv_value, p);
 
     // Call per-ply callback (only thread 0 to avoid race conditions)
     if (worker->thread_index == 0 && worker->solver->per_ply_callback) {
@@ -1571,146 +1647,8 @@ void *solver_worker_start(void *uncasted_solver_worker) {
   return NULL;
 }
 
-static void string_builder_add_single_pv(StringBuilder *pv_description,
-                                         const PVLine *pv_line,
-                                         const Game *game,
-                                         const GameHistory *game_history,
-                                         bool add_line_breaks) {
-  Move move;
-  Game *gc = game_duplicate(game);
-  const Board *board = game_get_board(gc);
-  const LetterDistribution *ld = game_get_ld(gc);
-
-  if (add_line_breaks) {
-    StringGrid *sg = string_grid_create(pv_line->num_moves, 3, 1);
-    StringBuilder *tmp_sb = string_builder_create();
-    for (int i = 0; i < pv_line->num_moves; i++) {
-      int curr_col = 0;
-      const int player_on_turn = game_get_player_on_turn_index(gc);
-      const char *player_name;
-      if (game_history) {
-        player_name =
-            game_history_player_get_name(game_history, player_on_turn);
-      } else {
-        player_name = player_on_turn == 0 ? "Player 1" : "Player 2";
-      }
-      string_grid_set_cell(sg, i, curr_col++,
-                           get_formatted_string("(%s)", player_name));
-      string_grid_set_cell(sg, i, curr_col++,
-                           get_formatted_string("%d:", i + 1));
-
-      small_move_to_move(&move, &(pv_line->moves[i]), board);
-      string_builder_add_move(tmp_sb, board, &move, ld, true);
-      play_move(&move, gc, NULL);
-      if (game_get_game_end_reason(gc) == GAME_END_REASON_STANDARD) {
-        int opp_idx = game_get_player_on_turn_index(gc);
-        const Rack *opp_rack =
-            player_get_rack(game_get_player(gc, opp_idx));
-        int adj = equity_to_int(calculate_end_rack_points(opp_rack, ld));
-        string_builder_add_string(tmp_sb, " (");
-        string_builder_add_rack(tmp_sb, opp_rack, ld, false);
-        string_builder_add_formatted_string(tmp_sb, " +%d)", adj);
-      } else if (game_get_game_end_reason(gc) ==
-                 GAME_END_REASON_CONSECUTIVE_ZEROS) {
-        string_builder_add_string(tmp_sb, " (6 zeros)");
-      }
-      string_grid_set_cell(sg, i, curr_col++,
-                           string_builder_dump(tmp_sb, NULL));
-      string_builder_clear(tmp_sb);
-    }
-    string_builder_destroy(tmp_sb);
-    string_builder_add_string_grid(pv_description, sg, false);
-    string_grid_destroy(sg);
-  } else {
-    for (int i = 0; i < pv_line->num_moves; i++) {
-      string_builder_add_formatted_string(pv_description, "%d: ", i + 1);
-      small_move_to_move(&move, &(pv_line->moves[i]), board);
-      string_builder_add_move(pv_description, board, &move, ld, true);
-      play_move(&move, gc, NULL);
-      if (game_get_game_end_reason(gc) == GAME_END_REASON_STANDARD) {
-        int opp_idx = game_get_player_on_turn_index(gc);
-        const Rack *opp_rack =
-            player_get_rack(game_get_player(gc, opp_idx));
-        int adj = equity_to_int(calculate_end_rack_points(opp_rack, ld));
-        string_builder_add_string(pv_description, " (");
-        string_builder_add_rack(pv_description, opp_rack, ld, false);
-        string_builder_add_formatted_string(pv_description, " +%d)", adj);
-      } else if (game_get_game_end_reason(gc) ==
-                 GAME_END_REASON_CONSECUTIVE_ZEROS) {
-        string_builder_add_string(pv_description, " (6 zeros)");
-      }
-      if (i != pv_line->num_moves - 1) {
-        if (i + 1 == pv_line->negamax_depth && pv_line->negamax_depth > 0) {
-          string_builder_add_string(pv_description, " | ");
-        } else {
-          string_builder_add_string(pv_description, " -> ");
-        }
-      }
-    }
-  }
-  game_destroy(gc);
-}
-
-void string_builder_endgame_results(StringBuilder *pv_description,
-                                    const EndgameResults *results,
-                                    const Game *game,
-                                    const GameHistory *game_history,
-                                    bool add_line_breaks) {
-  const int on_turn = game_get_player_on_turn_index(game);
-  const int p1_score = equity_to_int(
-      player_get_score(game_get_player(game, 0)));
-  const int p2_score = equity_to_int(
-      player_get_score(game_get_player(game, 1)));
-
-  const int num_pvs = endgame_results_get_num_pvlines(results);
-  for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
-    const PVLine *pv_line = endgame_results_get_pvline_at(results, pv_idx);
-    if (num_pvs > 1) {
-      string_builder_add_formatted_string(
-          pv_description, "Variation %d (value: %d, length: %d)%c",
-          pv_idx + 1, pv_line->score, pv_line->num_moves,
-          add_line_breaks ? '\n' : ' ');
-    } else {
-      string_builder_add_formatted_string(
-          pv_description, "Principal Variation (value: %d, length: %d)%c",
-          pv_line->score, pv_line->num_moves, add_line_breaks ? '\n' : ' ');
-    }
-    string_builder_add_single_pv(pv_description, pv_line, game, game_history,
-                                 add_line_breaks);
-    // Append [Px wins by Y] outcome
-    int final_spread =
-        (p1_score - p2_score) + (on_turn == 0 ? pv_line->score : -pv_line->score);
-    if (final_spread > 0) {
-      string_builder_add_formatted_string(pv_description, " [P1 wins by %d]",
-                                          final_spread);
-    } else if (final_spread < 0) {
-      string_builder_add_formatted_string(pv_description, " [P2 wins by %d]",
-                                          -final_spread);
-    } else {
-      string_builder_add_string(pv_description, " [Tie]");
-    }
-    string_builder_add_string(pv_description, "\n");
-  }
-}
-
-char *endgame_results_get_string(const EndgameResults *results,
-                                 const Game *game,
-                                 const GameHistory *game_history,
-                                 bool add_line_breaks) {
-  StringBuilder *pv_description = string_builder_create();
-  string_builder_endgame_results(pv_description, results, game, game_history,
-                                 add_line_breaks);
-  char *pvline_string = string_builder_dump(pv_description, NULL);
-  string_builder_destroy(pv_description);
-  return pvline_string;
-}
-
 void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack) {
-  // Track solve start time
-  Timer solve_timer;
-  ctimer_start(&solve_timer);
-
   const int bag_size = bag_get_letters(game_get_bag(endgame_args->game));
   if (bag_size != 0) {
     error_stack_push(error_stack, ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY,
@@ -1721,7 +1659,11 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
     return;
   }
 
+  solver->results = results;
   endgame_solver_reset(solver, endgame_args);
+
+  Timer solve_timer;
+  ctimer_start(&solve_timer);
 
   // Compute initial stuck-tile fraction for root move ordering.
   // Per-node detection in abdada_negamax recomputes this dynamically.
@@ -1851,6 +1793,7 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
     multi_pvs[0] = solver->principal_variation;
   }
 
+
   // Clean up workers
   for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
     solver_worker_destroy(solver_workers[thread_index]);
@@ -1944,10 +1887,9 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
     game_destroy(final_game_copy);
   }
 
-  // Store results
-  if (num_pvs > 1) {
-    endgame_results_set_pvlines(results, multi_pvs, num_pvs);
-  } else {
-    endgame_results_set_pvline(results, &solver->principal_variation);
-  }
+  // Store results using main's thread-safe API
+  solver->principal_variation.score = solver->best_pv_value;
+  endgame_results_set_best_pvline(results, &solver->principal_variation,
+                                  solver->best_pv_value,
+                                  solver->requested_plies);
 }

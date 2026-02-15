@@ -40,6 +40,7 @@
 #include "../ent/trie.h"
 #include "../ent/validated_move.h"
 #include "../ent/win_pct.h"
+#include "../str/endgame_string.h"
 #include "../str/game_string.h"
 #include "../str/inference_string.h"
 #include "../str/move_string.h"
@@ -2214,8 +2215,19 @@ void impl_endgame(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  endgame_results_set_valid_for_current_game_state(config->endgame_results,
-                                                   true);
+}
+
+char *status_endgame(Config *config) {
+  if (!config->endgame_results) {
+    return string_duplicate("endgame results are not yet initialized.\n");
+  }
+  if (!endgame_results_get_valid_for_current_game_state(
+          config->endgame_results)) {
+    return get_formatted_string("endgame results are not yet initialized for "
+                                "the current game state.\n");
+  }
+  return endgame_results_get_string(config->endgame_results, config->game,
+                                    config->game_history, true);
 }
 
 // Autoplay
@@ -5680,6 +5692,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
     config->settings_filename =
         string_duplicate(config_args->settings_filename);
   }
+  bool default_use_wmp = true;
+  if (config_args) {
+    default_use_wmp = config_args->use_wmp;
+  }
   // Attempt to load fields that might fail first
   config->board_layout =
       board_layout_create_default(config->data_paths, error_stack);
@@ -5734,7 +5750,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_RACK_AND_GEN_AND_SIM, "rgsimulate", 1, 2, rack_and_gen_and_sim,
       rack_and_gen_and_sim, false);
   cmd(ARG_TOKEN_INFER, "infer", 0, 5, infer, generic, false);
-  cmd(ARG_TOKEN_ENDGAME, "endgame", 0, 0, endgame, generic, false);
+  cmd(ARG_TOKEN_ENDGAME, "endgame", 0, 0, endgame, endgame, false);
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, autoplay, false);
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic, false);
   cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic, false);
@@ -5859,7 +5875,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->loaded_settings = true;
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->ld = NULL;
-  config->players_data = players_data_create(config_args->use_wmp);
+  config->players_data = players_data_create(default_use_wmp);
   config->thread_control = thread_control_create();
   config->game = NULL;
   config->game_backup = NULL;
