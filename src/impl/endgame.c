@@ -1746,6 +1746,8 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   const int num_top = solver->solve_multiple_variations;
   int num_pvs = 1;
   PVLine multi_pvs[MAX_VARIANT_LENGTH];
+  // PV[0] uses the search-tracked principal variation which has the most
+  // accurate move sequence from the actual search.
   multi_pvs[0] = solver->principal_variation;
 
   if (num_top > 1) {
@@ -1773,9 +1775,10 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
       }
     }
 
-    // Build PVLines for top-K root moves
+    // Build PVLines for non-best root moves (r=1..k-1).
+    // PV[0] is already set from the search-tracked principal variation above.
     num_pvs = k;
-    for (int r = 0; r < k; r++) {
+    for (int r = 1; r < k; r++) {
       PVLine *pv = &multi_pvs[r];
       pv->moves[0] = root_moves[r];
       pv->num_moves = 1;
@@ -1784,18 +1787,13 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
       pv->negamax_depth = 1;
       pv->game = NULL;
 
-      // Extend PV from TT for non-best moves
-      if (r > 0 && solver->transposition_table) {
+      if (solver->transposition_table) {
         Game *ext_game = game_duplicate(endgame_args->game);
         pvline_extend_from_tt(pv, ext_game, solver->transposition_table,
                               solver->solving_player, solver->requested_plies);
         game_destroy(ext_game);
       }
     }
-
-    // PV[0] uses the search-tracked principal variation which has the most
-    // accurate move sequence from the actual search.
-    multi_pvs[0] = solver->principal_variation;
   }
 
 
