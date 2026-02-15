@@ -565,8 +565,6 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
   int *build_values = NULL;
   if (opp_stuck_frac > 0.0f && move_count > 1) {
     build_values = malloc_or_die(move_count * sizeof(int));
-    // Track the best extension parent for each move (-1 = no extension)
-    int *build_parent = malloc_or_die(move_count * sizeof(int));
 
     // Sort indices by tiles_played descending for bottom-up computation
     int *order = malloc_or_die(move_count * sizeof(int));
@@ -599,7 +597,6 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
       SmallMove *sm_a = (SmallMove *)(worker->small_move_arena->memory +
                                       arena_offset + i * sizeof(SmallMove));
       build_values[i] = small_move_get_score(sm_a);
-      build_parent[i] = -1;
       if (small_move_is_pass(sm_a))
         continue;
 
@@ -612,7 +609,6 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
       // Find the best extension (containing move with more tiles, already
       // processed so build_values[j] is final)
       int best_extension = 0;
-      int best_parent_idx = -1;
       for (int oj = 0; oj < oi; oj++) {
         int j = order[oj];
         SmallMove *sm_b =
@@ -672,18 +668,13 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
 
         if (build_values[j] > best_extension) {
           best_extension = build_values[j];
-          best_parent_idx = j;
         }
       }
-      if (best_parent_idx >= 0) {
+      if (best_extension > 0) {
         build_values[i] += best_extension;
-        build_parent[i] = best_parent_idx;
       }
     }
     free(order);
-
-    (void)build_parent; // logging disabled
-    free(build_parent);
   }
 
   const Board *est_board = game_get_board(worker->game_copy);
