@@ -378,9 +378,11 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->iterative_deepening_optim = true;
   es->negascout_optim = true;
   es->use_heuristics = endgame_args->use_heuristics;
-  es->solve_multiple_variations = endgame_args->num_top_moves > 1
-                                      ? endgame_args->num_top_moves
-                                      : 0;
+  int num_top_moves = endgame_args->num_top_moves;
+  if (num_top_moves <= 0) {
+    num_top_moves = 1;
+  }
+  es->solve_multiple_variations = num_top_moves > 1 ? num_top_moves : 0;
   es->threads = endgame_args->num_threads;
   if (es->threads < 1) {
     es->threads = 1;
