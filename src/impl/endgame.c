@@ -499,6 +499,182 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
   return worker->move_list->count;
 }
 
+// Sum face values of placed tiles in a move, skipping played-through markers.
+static int compute_played_tiles_face_value(const Move *move,
+                                           const LetterDistribution *ld) {
+  int face_value = 0;
+  int tlen = move_get_tiles_length(move);
+  for (int pos = 0; pos < tlen; pos++) {
+    uint8_t tile = move_get_tile(move, pos);
+    if (tile == PLAYED_THROUGH_MARKER)
+      continue;
+    uint8_t ml = get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile;
+    face_value += equity_to_int(ld_get_score(ld, ml));
+  }
+  return face_value;
+}
+
+// Conservation bonus: penalize playing tiles when opponent has stuck tiles.
+// Returns (7 * tile_count + 2 * face_value) * opp_stuck_frac.
+// The move must already be expanded into spare_move.
+static int compute_conservation_bonus(const Move *move,
+                                      const LetterDistribution *ld,
+                                      float opp_stuck_frac) {
+  int tlen = move_get_tiles_length(move);
+  int face_value = 0;
+  int tile_count = 0;
+  for (int pos = 0; pos < tlen; pos++) {
+    uint8_t tile = move_get_tile(move, pos);
+    if (tile == PLAYED_THROUGH_MARKER)
+      continue;
+    uint8_t ml = get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile;
+    face_value += equity_to_int(ld_get_score(ld, ml));
+    tile_count++;
+  }
+  return (int)((7 * tile_count + 2 * face_value) * opp_stuck_frac);
+}
+
+// Thread jitter for ABDADA search diversity: each thread gets a unique bias
+// based on tiles played. Odd threads favor aggressive play, even threads favor
+// conservative play. Returns 0 for single-threaded or thread 0.
+static int compute_thread_jitter(EndgameSolverWorker *worker,
+                                 int tiles_played) {
+  int thread_idx = worker->thread_index;
+  if (worker->solver->threads <= 1 || thread_idx == 0)
+    return 0;
+  int bias = thread_idx * tiles_played;
+  int jitter = (thread_idx % 2 == 1) ? bias : -bias;
+  jitter += (int)(prng_get_random_number(worker->prng, 8));
+  return jitter;
+}
+
+// Compute build chain values for recursive build detection. When opponent is
+// stuck, cumulative build chain values reward moves that build toward longer
+// scoring sequences (e.g., ED->RED->IRED->AIRED->WAIRED).
+// Returns malloc'd int[] (caller frees), or NULL when move_count <= 1 or
+// opp_stuck_frac == 0.
+static int *compute_build_chain_values(EndgameSolverWorker *worker,
+                                       int move_count, size_t arena_offset,
+                                       float opp_stuck_frac) {
+  if (opp_stuck_frac <= 0.0f || move_count <= 1)
+    return NULL;
+
+  int *build_values = malloc_or_die(move_count * sizeof(int));
+
+  // Sort indices by tiles_played descending for bottom-up computation
+  int *order = malloc_or_die(move_count * sizeof(int));
+  for (int i = 0; i < move_count; i++) {
+    order[i] = i;
+  }
+  // Simple insertion sort by tiles_played descending
+  for (int i = 1; i < move_count; i++) {
+    int key = order[i];
+    const SmallMove *sm_key =
+        (const SmallMove *)(worker->small_move_arena->memory + arena_offset +
+                            key * sizeof(SmallMove));
+    int tp_key = small_move_get_tiles_played(sm_key);
+    int j = i - 1;
+    while (j >= 0) {
+      const SmallMove *sm_j =
+          (const SmallMove *)(worker->small_move_arena->memory + arena_offset +
+                              order[j] * sizeof(SmallMove));
+      int tp_j = small_move_get_tiles_played(sm_j);
+      if (tp_j >= tp_key)
+        break;
+      order[j + 1] = order[j];
+      j--;
+    }
+    order[j + 1] = key;
+  }
+
+  // Bottom-up: process moves from most tiles to fewest
+  for (int oi = 0; oi < move_count; oi++) {
+    int i = order[oi];
+    const SmallMove *sm_a =
+        (const SmallMove *)(worker->small_move_arena->memory + arena_offset +
+                            i * sizeof(SmallMove));
+    build_values[i] = small_move_get_score(sm_a);
+    if (small_move_is_pass(sm_a))
+      continue;
+
+    int dir_a = (int)(sm_a->tiny_move & 1);
+    int row_a = (int)((sm_a->tiny_move & SMALL_MOVE_ROW_BITMASK) >> 6);
+    int col_a = (int)((sm_a->tiny_move & SMALL_MOVE_COL_BITMASK) >> 1);
+    int len_a = (int)((sm_a->metadata >> 16) & 0xFF);
+    int tp_a = small_move_get_tiles_played(sm_a);
+
+    // Find the best extension (containing move with more tiles, already
+    // processed so build_values[j] is final)
+    int best_extension = 0;
+    for (int oj = 0; oj < oi; oj++) {
+      int j = order[oj];
+      const SmallMove *sm_b =
+          (const SmallMove *)(worker->small_move_arena->memory + arena_offset +
+                              j * sizeof(SmallMove));
+      if (small_move_is_pass(sm_b))
+        continue;
+      int tp_b = small_move_get_tiles_played(sm_b);
+      if (tp_b <= tp_a)
+        continue;
+      if ((int)(sm_b->tiny_move & 1) != dir_a)
+        continue;
+
+      int row_b = (int)((sm_b->tiny_move & SMALL_MOVE_ROW_BITMASK) >> 6);
+      int col_b = (int)((sm_b->tiny_move & SMALL_MOVE_COL_BITMASK) >> 1);
+      int len_b = (int)((sm_b->metadata >> 16) & 0xFF);
+
+      bool contained;
+      if (dir_a == 0) {
+        contained = (row_a == row_b) && (col_a >= col_b) &&
+                    (col_a + len_a <= col_b + len_b);
+      } else {
+        contained = (col_a == col_b) && (row_a >= row_b) &&
+                    (row_a + len_a <= row_b + len_b);
+      }
+      if (!contained)
+        continue;
+
+      // Verify actual tiles match at each position.
+      // Convert both to full Moves and compare tile-by-tile.
+      Move mv_a, mv_b;
+      const Board *brd = game_get_board(worker->game_copy);
+      small_move_to_move(&mv_a, sm_a, brd);
+      small_move_to_move(&mv_b, sm_b, brd);
+
+      // Offset of A's start within B's tile span
+      int offset_in_b;
+      if (dir_a == 0) {
+        offset_in_b = col_a - col_b;
+      } else {
+        offset_in_b = row_a - row_b;
+      }
+
+      bool tiles_match = true;
+      for (int ti = 0; ti < len_a; ti++) {
+        uint8_t tile_a = move_get_tile(&mv_a, ti);
+        if (tile_a == PLAYED_THROUGH_MARKER)
+          continue; // board tile, not placed by A
+        uint8_t tile_b = move_get_tile(&mv_b, ti + offset_in_b);
+        if (tile_a != tile_b) {
+          tiles_match = false;
+          break;
+        }
+      }
+      if (!tiles_match)
+        continue;
+
+      if (build_values[j] > best_extension) {
+        best_extension = build_values[j];
+      }
+    }
+    if (best_extension > 0) {
+      build_values[i] += best_extension;
+    }
+  }
+  free(order);
+  return build_values;
+}
+
 void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
                                uint64_t tt_move, float opp_stuck_frac) {
   const int player_index = game_get_player_on_turn_index(worker->game_copy);
@@ -513,131 +689,8 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
   size_t arena_offset =
       worker->small_move_arena->size - (sizeof(SmallMove) * move_count);
 
-  // ABDADA jitter: different threads use different move ordering heuristics
-  // to explore different parts of the search tree first
-  const int thread_idx = worker->thread_index;
-  const int num_threads = worker->solver->threads;
-
-  // Recursive build detection: when opponent is stuck, compute cumulative
-  // build chain values for both players. A build chain like
-  // ED→RED→IRED→AIRED→WAIRED gives ED a value of
-  // score(ED)+score(RED)+score(IRED)+score(AIRED)+score(WAIRED).
-  // This helps both the solving player (build up scoring moves) and the
-  // opponent (build toward going-out moves like TUB→TUBA).
-  int *build_values = NULL;
-  if (opp_stuck_frac > 0.0f && move_count > 1) {
-    build_values = malloc_or_die(move_count * sizeof(int));
-
-    // Sort indices by tiles_played descending for bottom-up computation
-    int *order = malloc_or_die(move_count * sizeof(int));
-    for (int i = 0; i < move_count; i++) {
-      order[i] = i;
-    }
-    // Simple insertion sort by tiles_played descending
-    for (int i = 1; i < move_count; i++) {
-      int key = order[i];
-      const SmallMove *sm_key = (const SmallMove *)(worker->small_move_arena->memory +
-                                        arena_offset + key * sizeof(SmallMove));
-      int tp_key = small_move_get_tiles_played(sm_key);
-      int j = i - 1;
-      while (j >= 0) {
-        const SmallMove *sm_j =
-            (const SmallMove *)(worker->small_move_arena->memory +
-                          arena_offset + order[j] * sizeof(SmallMove));
-        int tp_j = small_move_get_tiles_played(sm_j);
-        if (tp_j >= tp_key)
-          break;
-        order[j + 1] = order[j];
-        j--;
-      }
-      order[j + 1] = key;
-    }
-
-    // Bottom-up: process moves from most tiles to fewest
-    for (int oi = 0; oi < move_count; oi++) {
-      int i = order[oi];
-      const SmallMove *sm_a = (const SmallMove *)(worker->small_move_arena->memory +
-                                      arena_offset + i * sizeof(SmallMove));
-      build_values[i] = small_move_get_score(sm_a);
-      if (small_move_is_pass(sm_a))
-        continue;
-
-      int dir_a = (int)(sm_a->tiny_move & 1);
-      int row_a = (int)((sm_a->tiny_move & SMALL_MOVE_ROW_BITMASK) >> 6);
-      int col_a = (int)((sm_a->tiny_move & SMALL_MOVE_COL_BITMASK) >> 1);
-      int len_a = (int)((sm_a->metadata >> 16) & 0xFF);
-      int tp_a = small_move_get_tiles_played(sm_a);
-
-      // Find the best extension (containing move with more tiles, already
-      // processed so build_values[j] is final)
-      int best_extension = 0;
-      for (int oj = 0; oj < oi; oj++) {
-        int j = order[oj];
-        const SmallMove *sm_b =
-            (const SmallMove *)(worker->small_move_arena->memory +
-                          arena_offset + j * sizeof(SmallMove));
-        if (small_move_is_pass(sm_b))
-          continue;
-        int tp_b = small_move_get_tiles_played(sm_b);
-        if (tp_b <= tp_a)
-          continue;
-        if ((int)(sm_b->tiny_move & 1) != dir_a)
-          continue;
-
-        int row_b = (int)((sm_b->tiny_move & SMALL_MOVE_ROW_BITMASK) >> 6);
-        int col_b = (int)((sm_b->tiny_move & SMALL_MOVE_COL_BITMASK) >> 1);
-        int len_b = (int)((sm_b->metadata >> 16) & 0xFF);
-
-        bool contained;
-        if (dir_a == 0) {
-          contained = (row_a == row_b) && (col_a >= col_b) &&
-                      (col_a + len_a <= col_b + len_b);
-        } else {
-          contained = (col_a == col_b) && (row_a >= row_b) &&
-                      (row_a + len_a <= row_b + len_b);
-        }
-        if (!contained)
-          continue;
-
-        // Verify actual tiles match at each position.
-        // Convert both to full Moves and compare tile-by-tile.
-        Move mv_a, mv_b;
-        const Board *brd = game_get_board(worker->game_copy);
-        small_move_to_move(&mv_a, sm_a, brd);
-        small_move_to_move(&mv_b, sm_b, brd);
-
-        // Offset of A's start within B's tile span
-        int offset_in_b;
-        if (dir_a == 0) {
-          offset_in_b = col_a - col_b;
-        } else {
-          offset_in_b = row_a - row_b;
-        }
-
-        bool tiles_match = true;
-        for (int ti = 0; ti < len_a; ti++) {
-          uint8_t tile_a = move_get_tile(&mv_a, ti);
-          if (tile_a == PLAYED_THROUGH_MARKER)
-            continue; // board tile, not placed by A
-          uint8_t tile_b = move_get_tile(&mv_b, ti + offset_in_b);
-          if (tile_a != tile_b) {
-            tiles_match = false;
-            break;
-          }
-        }
-        if (!tiles_match)
-          continue;
-
-        if (build_values[j] > best_extension) {
-          best_extension = build_values[j];
-        }
-      }
-      if (best_extension > 0) {
-        build_values[i] += best_extension;
-      }
-    }
-    free(order);
-  }
+  int *build_values =
+      compute_build_chain_values(worker, move_count, arena_offset, opp_stuck_frac);
 
   const Board *est_board = game_get_board(worker->game_copy);
   const LetterDistribution *est_ld = game_get_ld(worker->game_copy);
@@ -647,29 +700,16 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
     SmallMove *current_move =
         (SmallMove *)(worker->small_move_arena->memory + element_offset);
 
-    // Compute tile conservation penalty: base per tile + 2x face value.
-    // Even 1-point tiles score well via played-through crosswords,
-    // and high-value tiles are worth holding onto.
-    // Only computed when opponent has stuck tiles.
+    bool is_non_pass_partial = !small_move_is_pass(current_move) &&
+        small_move_get_tiles_played(current_move) < ntiles_on_rack;
+
+    // Conservation bonus: penalize playing tiles when opponent has stuck tiles.
     int conservation_bonus = 0;
-    if (opp_stuck_frac > 0.0f && !small_move_is_pass(current_move) &&
-        small_move_get_tiles_played(current_move) < ntiles_on_rack) {
+    if (opp_stuck_frac > 0.0f && is_non_pass_partial) {
       small_move_to_move(worker->move_list->spare_move, current_move,
                          est_board);
-      int tlen = move_get_tiles_length(worker->move_list->spare_move);
-      int face_value = 0;
-      int tile_count = 0;
-      for (int pos = 0; pos < tlen; pos++) {
-        uint8_t tile = move_get_tile(worker->move_list->spare_move, pos);
-        if (tile == PLAYED_THROUGH_MARKER)
-          continue;
-        uint8_t ml = get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile;
-        face_value += equity_to_int(ld_get_score(est_ld, ml));
-        tile_count++;
-      }
-      // 7 pts base per tile + 2x tile face value, scaled by stuck fraction
-      conservation_bonus =
-          (int)((7 * tile_count + 2 * face_value) * opp_stuck_frac);
+      conservation_bonus = compute_conservation_bonus(
+          worker->move_list->spare_move, est_ld, opp_stuck_frac);
     }
 
     if (small_move_get_tiles_played(current_move) == ntiles_on_rack) {
@@ -691,43 +731,25 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
         estimate = score;
       }
       estimate -= conservation_bonus;
-      // Tiles-played jitter for search diversity: each thread gets a
-      // unique bias magnitude. Odd threads favor aggressive play (more
-      // tiles), even threads favor conservative play (fewer tiles).
-      if (num_threads > 1 && thread_idx > 0) {
-        int tiles_played = small_move_get_tiles_played(current_move);
-        int bias = thread_idx * tiles_played;
-        estimate += (thread_idx % 2 == 1) ? bias : -bias;
-        estimate += (int)(prng_get_random_number(worker->prng, 8));
-      }
+      estimate += compute_thread_jitter(
+          worker, small_move_get_tiles_played(current_move));
       small_move_set_estimated_value(current_move, estimate);
     } else {
       int score = small_move_get_score(current_move);
       int estimate = score - conservation_bonus;
       // Static endgame equity: score minus face value of tiles played.
-      // Playing tiles earns points but "spends" the tiles themselves.
-      if (!small_move_is_pass(current_move) &&
-          small_move_get_tiles_played(current_move) < ntiles_on_rack) {
-        small_move_to_move(worker->move_list->spare_move, current_move,
-                           est_board);
-        int tlen = move_get_tiles_length(worker->move_list->spare_move);
-        int tiles_face_value = 0;
-        for (int pos = 0; pos < tlen; pos++) {
-          uint8_t tile = move_get_tile(worker->move_list->spare_move, pos);
-          if (tile == PLAYED_THROUGH_MARKER)
-            continue;
-          uint8_t ml = get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile;
-          tiles_face_value += equity_to_int(ld_get_score(est_ld, ml));
+      if (is_non_pass_partial) {
+        // spare_move may already be populated from conservation bonus above;
+        // if not (opp_stuck_frac == 0), expand it now.
+        if (opp_stuck_frac <= 0.0f) {
+          small_move_to_move(worker->move_list->spare_move, current_move,
+                             est_board);
         }
-        estimate -= tiles_face_value;
+        estimate -= compute_played_tiles_face_value(
+            worker->move_list->spare_move, est_ld);
       }
-      // Tiles-played jitter for search diversity
-      if (num_threads > 1 && thread_idx > 0) {
-        int tiles_played = small_move_get_tiles_played(current_move);
-        int bias = thread_idx * tiles_played;
-        estimate += (thread_idx % 2 == 1) ? bias : -bias;
-        estimate += (int)(prng_get_random_number(worker->prng, 8));
-      }
+      estimate += compute_thread_jitter(
+          worker, small_move_get_tiles_played(current_move));
       small_move_set_estimated_value(current_move, estimate);
     }
 
@@ -895,8 +917,6 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
             game_get_player_on_turn_index(worker->game_copy);
         bool conserve = opp_stuck_frac > 0.0f &&
                         playout_on_turn == solving_player;
-        const LetterDistribution *playout_ld =
-            conserve ? game_get_ld(worker->game_copy) : NULL;
         int playout_rack_size = conserve
             ? player_get_rack(game_get_player(worker->game_copy,
                                               playout_on_turn))->number_of_letters
@@ -911,19 +931,9 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
               small_move_get_tiles_played(sm) < playout_rack_size) {
             small_move_to_move(worker->move_list->spare_move, sm,
                                game_get_board(worker->game_copy));
-            int tlen = move_get_tiles_length(worker->move_list->spare_move);
-            int face_value = 0;
-            int tile_count = 0;
-            for (int pos = 0; pos < tlen; pos++) {
-              uint8_t tile =
-                  move_get_tile(worker->move_list->spare_move, pos);
-              if (tile == PLAYED_THROUGH_MARKER)
-                continue;
-              uint8_t ml = get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile;
-              face_value += equity_to_int(ld_get_score(playout_ld, ml));
-              tile_count++;
-            }
-            adj -= (int)((7 * tile_count + 2 * face_value) * opp_stuck_frac);
+            adj -= compute_conservation_bonus(
+                worker->move_list->spare_move,
+                game_get_ld(worker->game_copy), opp_stuck_frac);
           }
           if (adj > best_adj) {
             best_adj = adj;
