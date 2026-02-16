@@ -1131,8 +1131,6 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       }
     }
 
-    uint64_t stm_shadow =
-        (on_turn_idx == 0) ? shadow_key_0 : shadow_key_1;
     assign_estimates_and_sort(worker, nplays, tt_move, opp_stuck_frac);
     arena_alloced = true;
   } else {
