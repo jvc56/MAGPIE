@@ -60,35 +60,6 @@ enum {
   ASPIRATION_WINDOW = 25,
 };
 
-// Shadow zobrist: XOR only board tile positions from a move.
-// No rack, turn, or scoreless turn hashing. This creates a hash that is
-// consistent between solitaire search (one player) and the real two-sided
-// search, because it only tracks one side's tile placements.
-static inline uint64_t shadow_zobrist_add_move(const Zobrist *z,
-                                                uint64_t shadow_key,
-                                                const Move *move) {
-  if (move->move_type == GAME_EVENT_PASS) {
-    return shadow_key;
-  }
-  int row = move_get_row_start(move);
-  int col = move_get_col_start(move);
-  bool vertical = move_get_dir(move) == BOARD_VERTICAL_DIRECTION;
-
-  for (int idx = 0; idx < move->tiles_length; idx++) {
-    int tile = move->tiles[idx];
-    int new_row = row + (vertical ? idx : 0);
-    int new_col = col + (vertical ? 0 : idx);
-    if (tile == PLAYED_THROUGH_MARKER) {
-      continue;
-    }
-    int board_tile = tile;
-    if (get_is_blanked(tile)) {
-      board_tile = get_unblanked_machine_letter(tile) + ZOBRIST_MAX_LETTERS;
-    }
-    shadow_key ^= z->pos_table[new_row * BOARD_DIM + new_col][board_tile];
-  }
-  return shadow_key;
-}
 
 // Returns fraction of opponent's rack score that is stuck (0.0 = none, 1.0 = all).
 // A tile is "stuck" if no legal move plays that tile type.
@@ -780,7 +751,6 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
 }
 
 int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
-                       uint64_t shadow_key_0, uint64_t shadow_key_1,
                        int depth, int32_t alpha, int32_t beta, PVLine *pv,
                        bool pv_node, bool exclusive_p,
                        float opp_stuck_frac) {
@@ -1229,22 +1199,6 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
             last_consecutive_scoreless_turns);
       }
 
-      // Update shadow keys: only the moving player's shadow changes
-      uint64_t child_shadow_0 = shadow_key_0;
-      uint64_t child_shadow_1 = shadow_key_1;
-      if (worker->solver->transposition_table_optim) {
-        const Zobrist *z = worker->solver->transposition_table->zobrist;
-        if (on_turn_idx == 0) {
-          child_shadow_0 =
-              shadow_zobrist_add_move(z, shadow_key_0,
-                                     worker->move_list->spare_move);
-        } else {
-          child_shadow_1 =
-              shadow_zobrist_add_move(z, shadow_key_1,
-                                     worker->move_list->spare_move);
-        }
-      }
-
       // Per-root-move aspiration: at root after depth 1, each move gets its
       // own aspiration window centered on its estimated_value from the previous
       // ID iteration. This gives accurate values for all root moves (needed for
@@ -1267,8 +1221,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
         }
 
         while (true) {
-          value = abdada_negamax(worker, child_key, child_shadow_0,
-                                 child_shadow_1, depth - 1, -move_beta,
+          value = abdada_negamax(worker, child_key, depth - 1, -move_beta,
                                  -move_alpha, &child_pv, pv_node,
                                  child_exclusive, opp_stuck_frac);
           if (value == ON_EVALUATION) {
@@ -1293,18 +1246,15 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
           }
         }
       } else if (idx == 0 || !worker->solver->negascout_optim || is_root) {
-        value = abdada_negamax(worker, child_key, child_shadow_0,
-                               child_shadow_1, depth - 1, -beta, -alpha,
+        value = abdada_negamax(worker, child_key, depth - 1, -beta, -alpha,
                                &child_pv, pv_node, child_exclusive, opp_stuck_frac);
       } else {
-        value = abdada_negamax(worker, child_key, child_shadow_0,
-                               child_shadow_1, depth - 1, -alpha - 1, -alpha,
+        value = abdada_negamax(worker, child_key, depth - 1, -alpha - 1, -alpha,
                                &child_pv, false, child_exclusive, opp_stuck_frac);
         if (value != ABDADA_INTERRUPTED && value != ON_EVALUATION &&
             alpha < -value && -value < beta) {
           // re-search with wider window (not exclusive since we need the value)
-          value = abdada_negamax(worker, child_key, child_shadow_0,
-                                 child_shadow_1, depth - 1, -beta, -alpha,
+          value = abdada_negamax(worker, child_key, depth - 1, -beta, -alpha,
                                  &child_pv, pv_node, false, opp_stuck_frac);
         }
       }
@@ -1523,7 +1473,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
           break;
         }
 
-        val = abdada_negamax(worker, initial_hash_key, 0, 0, p, alpha, beta,
+        val = abdada_negamax(worker, initial_hash_key, p, alpha, beta,
                              &pv, true, false, initial_opp_stuck_frac);
 
         if (val <= alpha) {
@@ -1546,7 +1496,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
       }
     } else {
       // Full window search for depth 1 or when aspiration disabled
-      val = abdada_negamax(worker, initial_hash_key, 0, 0, p, alpha, beta,
+      val = abdada_negamax(worker, initial_hash_key, p, alpha, beta,
                            &pv, true, false, initial_opp_stuck_frac);
     }
 
