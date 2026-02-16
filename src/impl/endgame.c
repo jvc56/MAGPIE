@@ -565,13 +565,13 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
     // Simple insertion sort by tiles_played descending
     for (int i = 1; i < move_count; i++) {
       int key = order[i];
-      SmallMove *sm_key = (SmallMove *)(worker->small_move_arena->memory +
+      const SmallMove *sm_key = (const SmallMove *)(worker->small_move_arena->memory +
                                         arena_offset + key * sizeof(SmallMove));
       int tp_key = small_move_get_tiles_played(sm_key);
       int j = i - 1;
       while (j >= 0) {
-        SmallMove *sm_j =
-            (SmallMove *)(worker->small_move_arena->memory +
+        const SmallMove *sm_j =
+            (const SmallMove *)(worker->small_move_arena->memory +
                           arena_offset + order[j] * sizeof(SmallMove));
         int tp_j = small_move_get_tiles_played(sm_j);
         if (tp_j >= tp_key)
@@ -585,7 +585,7 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
     // Bottom-up: process moves from most tiles to fewest
     for (int oi = 0; oi < move_count; oi++) {
       int i = order[oi];
-      SmallMove *sm_a = (SmallMove *)(worker->small_move_arena->memory +
+      const SmallMove *sm_a = (const SmallMove *)(worker->small_move_arena->memory +
                                       arena_offset + i * sizeof(SmallMove));
       build_values[i] = small_move_get_score(sm_a);
       if (small_move_is_pass(sm_a))
@@ -602,8 +602,8 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
       int best_extension = 0;
       for (int oj = 0; oj < oi; oj++) {
         int j = order[oj];
-        SmallMove *sm_b =
-            (SmallMove *)(worker->small_move_arena->memory +
+        const SmallMove *sm_b =
+            (const SmallMove *)(worker->small_move_arena->memory +
                           arena_offset + j * sizeof(SmallMove));
         if (small_move_is_pass(sm_b))
           continue;
@@ -935,7 +935,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
         int best_idx = 0;
         int best_adj = INT32_MIN;
         for (int j = 0; j < nplays; j++) {
-          SmallMove *sm = worker->move_list->small_moves[j];
+          const SmallMove *sm = worker->move_list->small_moves[j];
           int adj = small_move_get_score(sm);
           if (conserve && !small_move_is_pass(sm) &&
               small_move_get_tiles_played(sm) < playout_rack_size) {

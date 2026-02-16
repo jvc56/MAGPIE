@@ -766,7 +766,7 @@ void test_benchmark_equity_vs_3ply(void) {
 // Score movegen vs equity movegen on clean positions
 void test_benchmark_score_vs_equity(void) {
   log_set_level(LOG_WARN);
-  char set_cmd[] =
+  const char set_cmd[] =
       "set -lex CSW21 -threads 1 -s1 equity -s2 equity -r1 all -r2 all";
   Config *config = config_create_or_die(set_cmd);
   exec_config_quiet(config, "new");

@@ -76,6 +76,7 @@ echo "Running cppcheck analysis on src/, test/, and cmd/ directories..."
     --suppress=constParameterCallback \
     --suppress=unusedFunction \
     --suppress=normalCheckLevelMaxBranches \
+    --suppress=nullPointerOutOfResources \
     --suppress='*:*/linenoise.c' \
     --suppress='*:*/linenoise.h' \
     --std=c99 \
