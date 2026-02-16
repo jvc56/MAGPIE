@@ -148,8 +148,7 @@ static TestEntry on_demand_test_table[] = {
     {"selfplay5", test_benchmark_selfplay_5ply},
     {"threadscale", test_benchmark_thread_scaling},
     {"multipv", test_multi_pv},
-    {"14domino", test_14domino},
-    {"kue14domino", test_kue14domino},
+    {"kue", test_kue},
     {"monsterq", test_monster_q},
     {NULL, NULL} // Sentinel value to mark end of array
 };
