@@ -250,7 +250,9 @@ void test_vs_joey(void) {
 
 void test_pass_first(void) {
   // This endgame's first move must be a pass, otherwise Nigel can set up
-  // an unblockable ZA.
+  // an unblockable ZA. Exact value is -63 (verified at 25-ply with and
+  // without heuristics). The optimal PV is 10 moves with 4 passes, so
+  // 8-ply relies on greedy playout for the tail.
   test_single_endgame(
       "set -s1 score -s2 score -r1 small -r2 small -threads 6 -eplies 8",
       "cgp "
