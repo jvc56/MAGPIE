@@ -43,6 +43,7 @@ class GameHistoryModel : public QObject {
   Q_PROPERTY(int player1Clock READ player1Clock NOTIFY clocksChanged)
   Q_PROPERTY(int player2Clock READ player2Clock NOTIFY clocksChanged)
   Q_PROPERTY(bool aiThinking READ aiThinking NOTIFY aiThinkingChanged)
+  Q_PROPERTY(bool timerRunning READ timerRunning NOTIFY clocksChanged)
 
 public:
   enum GameMode { SetupMode = 0, PlayMode = 1, ReviewMode = 2 };
@@ -65,6 +66,7 @@ public:
   Q_INVOKABLE void pass();
   Q_INVOKABLE void exchange(const QString &tiles);
   Q_INVOKABLE QString getComputerMove();
+  Q_INVOKABLE void toggleTimer();
 
   QString player1Name() const;
   QString player2Name() const;
@@ -90,6 +92,7 @@ public:
   int player1Clock() const { return m_clocks[0]; }
   int player2Clock() const { return m_clocks[1]; }
   bool aiThinking() const { return m_aiThinking; }
+  bool timerRunning() const;
 
 signals:
   void gameChanged();

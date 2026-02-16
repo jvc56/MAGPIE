@@ -394,6 +394,19 @@ game_variant_t config_get_game_variant(const Config *config) {
 
 WinPct *config_get_win_pcts(const Config *config) { return config->win_pcts; }
 
+WinPct *config_load_win_pcts(Config *config, ErrorStack *error_stack) {
+  if (config->win_pcts == NULL) {
+    const char *win_pct_name =
+        config_get_parg_value(config, ARG_TOKEN_WIN_PCT, 0);
+    if (win_pct_name == NULL) {
+      win_pct_name = DEFAULT_WIN_PCT;
+    }
+    config->win_pcts =
+        win_pct_create(config->data_paths, win_pct_name, error_stack);
+  }
+  return config->win_pcts;
+}
+
 bool config_get_use_game_pairs(const Config *config) {
   return config->use_game_pairs;
 }

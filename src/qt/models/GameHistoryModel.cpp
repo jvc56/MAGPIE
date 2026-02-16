@@ -172,9 +172,11 @@ void GameHistoryModel::updateHistory() {
   if (!m_gameHistory || !m_game)
     return;
 
-  // Reset game to start (index 0) to capture initial state.
-  // bridge_game_play_to_index(0) ensures full racks (via game re-creation).
-  bridge_game_play_to_index(m_gameHistory, m_game, 0);
+  // Use a scratch game for replay so we don't destroy m_game's state.
+  // In play mode, m_game holds the live game with correctly drawn racks;
+  // replaying from history would lose racks that aren't recorded as events.
+  BridgeGame *scratch = bridge_game_create_from_history(m_gameHistory);
+  bridge_game_play_to_index(m_gameHistory, scratch, 0);
   int total = bridge_get_num_events(m_gameHistory);
 
   int lastScores[2] = {0, 0};
@@ -219,7 +221,7 @@ void GameHistoryModel::updateHistory() {
     char *moveStrC = nullptr;
     char *rackStrC = nullptr;
 
-    bridge_get_event_details(m_gameHistory, m_game, i, &playerIndex, &type,
+    bridge_get_event_details(m_gameHistory, scratch, i, &playerIndex, &type,
                              &moveStrC, &rackStrC, &score, &cumulativeScore);
 
     QString moveText = QString::fromUtf8(moveStrC);
@@ -262,11 +264,11 @@ void GameHistoryModel::updateHistory() {
       // i)
       char *tilesC = nullptr;
       int vowels = 0, consonants = 0, blanks = 0;
-      bridge_get_unseen_tiles(m_game, &tilesC, &vowels, &consonants, &blanks);
+      bridge_get_unseen_tiles(scratch, &tilesC, &vowels, &consonants, &blanks);
       current.unseenTiles = tilesC ? QString::fromUtf8(tilesC) : "";
       if (tilesC)
         free(tilesC);
-      current.bagCount = bridge_get_bag_count(m_game);
+      current.bagCount = bridge_get_bag_count(scratch);
       current.vowelCount = vowels;
       current.consonantCount = consonants;
       current.blankCount = blanks;
@@ -283,9 +285,11 @@ void GameHistoryModel::updateHistory() {
     }
 
     // Advance game state after processing this event
-    bridge_game_play_to_index(m_gameHistory, m_game, i + 1);
+    bridge_game_play_to_index(m_gameHistory, scratch, i + 1);
   }
   flush(true);
+
+  bridge_game_destroy(scratch);
 
   emit historyChanged();
 }
@@ -294,27 +298,37 @@ void GameHistoryModel::updateGameState() {
   if (!m_game)
     return;
 
-  // Calculate start index of the current history item for analysis
-  int hIndex = currentHistoryIndex();
-  int analysisIndex = 0;
-  if (hIndex > 0) {
-    analysisIndex = m_historyItemEndIndices[hIndex - 1];
+  BridgeGame *analysisGame = nullptr;
+
+  if (m_gameMode == PlayMode) {
+    // In play mode, only analyze when it's the human's turn (player 0).
+    // When it's the computer's turn, it will play immediately, so
+    // analyzing its position is wasted work and causes rapid start/stop
+    // cycles that can crash.
+    int onTurn = bridge_get_player_on_turn_index(m_game);
+    if (onTurn == 0) {
+      analysisGame = bridge_game_clone(m_game);
+    } else {
+      // Stop any running analysis without starting a new one
+      if (m_analysisModel) {
+        m_analysisModel->stopAnalysis();
+      }
+    }
+  } else {
+    // In review mode, replay from history to the start of the current turn
+    int hIndex = currentHistoryIndex();
+    int analysisIndex = 0;
+    if (hIndex > 0) {
+      analysisIndex = m_historyItemEndIndices[hIndex - 1];
+    }
+    analysisGame = bridge_game_create_from_history(m_gameHistory);
+    bridge_game_play_to_index(m_gameHistory, analysisGame, analysisIndex);
   }
 
-  // Create a game state for analysis corresponding to the *start* of the turn
-  // We need a way to get that state efficiently.
-  // Replaying from scratch to analysisIndex is safest but potentially slow.
-  // Since we don't have arbitrary state cache, let's try it.
-  // Ideally, we would clone m_game if it was at the right state, but m_game is
-  // at m_currentIndex (end of turn).
-
-  BridgeGame *analysisGame = bridge_game_create_from_history(m_gameHistory);
-  bridge_game_play_to_index(m_gameHistory, analysisGame, analysisIndex);
-
   // Trigger analysis
-  if (m_analysisModel) {
+  if (analysisGame && m_analysisModel) {
     m_analysisModel->startAnalysis(analysisGame);
-  } else {
+  } else if (analysisGame) {
     bridge_game_destroy(analysisGame);
   }
 
@@ -426,8 +440,6 @@ QString GameHistoryModel::currentRack() const {
     return "";
 
   if (m_gameMode == PlayMode) {
-    if (!m_game)
-      return "";
     char *rack = bridge_get_current_rack(m_game);
     QString qs = QString::fromUtf8(rack);
     free(rack);
@@ -577,10 +589,11 @@ void GameHistoryModel::startNewGame(const QString &lexicon,
 
   m_currentIndex = 0;
   updateHistory();
-  updateGameState();
 
-  // Draw racks AFTER updateHistory() which resets game to index 0
+  // Draw racks BEFORE updateGameState() so the analysis clone has tiles
   bridge_game_draw_racks(m_game);
+
+  updateGameState();
 
   emit gameModeChanged();
   emit historyChanged();
@@ -623,6 +636,20 @@ void GameHistoryModel::onTimerTick() {
     emit clocksChanged();
   }
 }
+bool GameHistoryModel::timerRunning() const {
+  return m_timer && m_timer->isActive();
+}
+
+void GameHistoryModel::toggleTimer() {
+  if (!m_timer)
+    return;
+  if (m_timer->isActive())
+    m_timer->stop();
+  else
+    m_timer->start(1000);
+  emit clocksChanged();
+}
+
 QString GameHistoryModel::getComputerMove() {
   if (!m_game)
     return QString();

@@ -78,7 +78,9 @@ int bridge_load_gcg(BridgeGameHistory *gh, const char *gcg_content,
   }
 
   ErrorStack *err = error_stack_create();
-  gh->config = config_create_default_with_data_paths(err, data_path);
+  ConfigArgs config_args = {
+      .data_paths = data_path, .settings_filename = NULL, .use_wmp = false};
+  gh->config = config_create(&config_args, err);
   if (!error_stack_is_empty(err)) {
     char *msg = error_stack_get_string_and_reset(err);
     snprintf(error_msg, error_msg_len, "Config create failed: %s", msg);
@@ -294,8 +296,7 @@ static char *internal_format_rack(const Rack *r, const LetterDistribution *ld) {
 char *bridge_get_current_rack(BridgeGame *game) {
   Game *g = TO_GAME(game);
   if (!g) {
-    printf("bridge_get_current_rack: game is NULL\n");
-    fflush(stdout);
+    fprintf(stderr, "bridge_get_current_rack: game is NULL\n");
     return string_duplicate("");
   }
 
@@ -309,19 +310,10 @@ char *bridge_get_current_rack(BridgeGame *game) {
   int bagTiles = bag ? bag_get_letters(bag) : -1;
   int ldSize = ld ? ld_get_size(ld) : -1;
 
-  printf("bridge_get_current_rack: player=%d, rack_tiles=%d, bag_tiles=%d, "
-         "ld_size=%d\n",
-         playerIdx, totalTiles, bagTiles, ldSize);
-  fflush(stdout);
-
-  if (!ld) {
-    printf("bridge_get_current_rack: ld is NULL\n");
-    fflush(stdout);
-  }
-  if (!r) {
-    printf("bridge_get_current_rack: rack is NULL\n");
-    fflush(stdout);
-  }
+  fprintf(stderr,
+          "bridge_get_current_rack: player=%d, rack_tiles=%d, bag_tiles=%d, "
+          "ld_size=%d\n",
+          playerIdx, totalTiles, bagTiles, ldSize);
 
   return internal_format_rack(r, ld);
 }
@@ -331,10 +323,8 @@ int bridge_get_bag_count(BridgeGame *game) {
   Game *g = TO_GAME(game);
   if (!g)
     return 0;
-  Bag *bag = game_get_bag(g);
-  return bag ? bag_get_letters(bag) : 0;
+  return bag_get_letters(game_get_bag(g));
 }
-
 
 // Get unseen tiles (bag + opponent rack)
 // Returns string in *tiles (caller must free), and counts
@@ -672,7 +662,7 @@ void bridge_move_list_destroy(BridgeMoveList *ml) {
 }
 
 BridgeSimResults *bridge_sim_results_create(void) {
-  return (BridgeSimResults *)sim_results_create();
+  return (BridgeSimResults *)sim_results_create(0.99);
 }
 
 void bridge_sim_results_destroy(BridgeSimResults *sr) {
@@ -716,7 +706,18 @@ void bridge_simulate(BridgeGame *game, BridgeMoveList *moves,
   // Inherit settings from config
   Config *cfg = game->config;
   args.seed = config_get_seed(cfg);
-  args.win_pcts = config_get_win_pcts(cfg);
+
+  ErrorStack *err = error_stack_create();
+
+  // Lazy-load win_pcts if not already loaded
+  args.win_pcts = config_load_win_pcts(cfg, err);
+  if (!error_stack_is_empty(err)) {
+    char *msg = error_stack_get_string_and_reset(err);
+    printf("Failed to load win percentages: %s\n", msg);
+    free(msg);
+    error_stack_destroy(err);
+    return;
+  }
 
   // BAI Options
   args.bai_options.threshold = BAI_THRESHOLD_GK16;
@@ -728,15 +729,15 @@ void bridge_simulate(BridgeGame *game, BridgeMoveList *moves,
   args.bai_options.sample_minimum = 100; // Default
   args.bai_options.num_threads = 10;
 
-  ErrorStack *err = error_stack_create();
-
   // Initialize results
-  sim_results_reset((MoveList *)moves, (SimResults *)results, plies, 0);
+  sim_results_reset((MoveList *)moves, (SimResults *)results, plies, 0, false);
 
   // Start the thread control
   thread_control_set_status((ThreadControl *)tc, THREAD_CONTROL_STATUS_STARTED);
 
-  simulate(&args, (SimResults *)results, err);
+  SimCtx *sim_ctx = NULL;
+  simulate(&args, &sim_ctx, (SimResults *)results, err);
+  // sim_ctx is cleaned up by simulate
 
   if (!error_stack_is_empty(err)) {
     char *msg = error_stack_get_string_and_reset(err);
@@ -825,7 +826,9 @@ BridgeGameHistory *bridge_game_create_fresh(const char *data_path,
   BridgeGameHistory *gh = bridge_game_history_create();
   ErrorStack *err = error_stack_create();
 
-  gh->config = config_create_default_with_data_paths(err, data_path);
+  ConfigArgs config_args2 = {
+      .data_paths = data_path, .settings_filename = NULL, .use_wmp = false};
+  gh->config = config_create(&config_args2, err);
   if (!error_stack_is_empty(err)) {
     char *msg = error_stack_get_string_and_reset(err);
     snprintf(error_msg, error_msg_len, "Config create failed: %s", msg);
@@ -999,27 +1002,23 @@ char *bridge_get_computer_move(BridgeGame *game) {
 
 void bridge_game_draw_racks(BridgeGame *game) {
   if (!game || !game->game) {
-    printf("bridge_game_draw_racks: game is NULL\n");
-    fflush(stdout);
+    fprintf(stderr, "bridge_game_draw_racks: game or game->game is NULL\n");
     return;
   }
 
   Game *g = game->game;
   Bag *bag = game_get_bag(g);
-  int bag_count_before = bag ? bag_get_letters(bag) : -1;
-  printf("bridge_game_draw_racks: bag_count_before=%d\n", bag_count_before);
-  fflush(stdout);
+  int bag_before = bag ? bag_get_letters(bag) : -1;
 
+  fprintf(stderr, "bridge_game_draw_racks: bag_count_before=%d\n", bag_before);
   draw_starting_racks(g);
 
-  int bag_count_after = bag ? bag_get_letters(bag) : -1;
+  int bag_after = bag ? bag_get_letters(bag) : -1;
   Player *p0 = game_get_player(g, 0);
   Player *p1 = game_get_player(g, 1);
-  Rack *r0 = p0 ? player_get_rack(p0) : NULL;
-  Rack *r1 = p1 ? player_get_rack(p1) : NULL;
-  int rack0_count = r0 ? rack_get_total_letters(r0) : -1;
-  int rack1_count = r1 ? rack_get_total_letters(r1) : -1;
-  printf("bridge_game_draw_racks: bag_count_after=%d, rack0=%d, rack1=%d\n",
-         bag_count_after, rack0_count, rack1_count);
-  fflush(stdout);
+  int r0 = p0 ? rack_get_total_letters(player_get_rack(p0)) : -1;
+  int r1 = p1 ? rack_get_total_letters(player_get_rack(p1)) : -1;
+
+  fprintf(stderr, "bridge_game_draw_racks: bag_after=%d, rack0=%d, rack1=%d\n",
+          bag_after, r0, r1);
 }

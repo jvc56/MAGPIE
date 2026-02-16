@@ -12,6 +12,8 @@ Item {
     property int dropIndex: -1
     property int caretDisplayIndex: 0 // Tracks position for visual continuity during fade-out
     property int draggingIndex: -1
+    property bool exchangeMode: false
+    property var selectedIndices: []
 
     // Signal emitted when a tile is dropped externally (e.g., on board)
     signal tileDroppedOnBoard(string letter, int rackIndex)
@@ -25,6 +27,7 @@ Item {
         if (r === undefined || r === null) r = "";
         while (r.length < 7) r += " ";
         internalRack = r;
+        selectedIndices = [];
     }
     
     Component.onCompleted: {
@@ -47,6 +50,18 @@ Item {
         var totalWidth = 7 * tileSize + 6 * tileSpacing;
         var startX = (root.width - totalWidth) / 2;
         return startX + index * (tileSize + tileSpacing);
+    }
+
+    function getSelectedTiles() {
+        var result = "";
+        for (var i = 0; i < selectedIndices.length; i++) {
+            result += internalRack.charAt(selectedIndices[i]);
+        }
+        return result;
+    }
+
+    function clearSelection() {
+        selectedIndices = [];
     }
 
     // Drop Indicator (Caret)
@@ -118,6 +133,7 @@ Item {
 
             // A tile is a blank if it is '?' or a lowercase letter (designated blank)
             property bool isBlank: charStr === "?" || (charStr >= "a" && charStr <= "z")
+            property bool isSelected: root.exchangeMode && root.selectedIndices.indexOf(index) >= 0
 
             // Drag properties for external drop targets (e.g., board)
             Drag.active: isHeld && charStr !== " "
@@ -126,8 +142,9 @@ Item {
             Drag.hotSpot.x: width / 2
             Drag.hotSpot.y: height / 2
 
-            // Centered vertically
-            y: (root.height - height) / 2
+            // Centered vertically, shifted up when selected in exchange mode
+            y: (root.height - height) / 2 - (isSelected ? root.tileSize * 0.3 : 0)
+            Behavior on y { NumberAnimation { duration: 150; easing.type: Easing.OutQuad } }
 
             // X position
             x: getSlotX(index)
@@ -135,7 +152,9 @@ Item {
             onIsHeldChanged: {
                 if (!isHeld) {
                     x = Qt.binding(function() { return root.getSlotX(index) });
-                    y = (root.height - height) / 2;
+                    y = Qt.binding(function() {
+                        return (root.height - height) / 2 - (isSelected ? root.tileSize * 0.3 : 0);
+                    });
                 }
             }
 
@@ -160,8 +179,11 @@ Item {
 
                 color: {
                     if (charStr === " ") return "#313244"; // Empty
+                    if (tileDelegate.isSelected) return "#89CFF0"; // Selected for exchange
                     return "#F9E2AF"; // Tile color
                 }
+                border.color: tileDelegate.isSelected ? "#4A90E2" : "transparent"
+                border.width: tileDelegate.isSelected ? 2 : 0
                 
                 // Style changes during drag
                 opacity: tileDelegate.isHeld ? 0.9 : 1.0
@@ -239,18 +261,30 @@ Item {
 
             MouseArea {
                 anchors.fill: parent
-                drag.target: tileDelegate
+                drag.target: root.exchangeMode ? null : tileDelegate
                 drag.smoothed: false
                 drag.threshold: 5
-                
+
                 enabled: charStr !== " "
-                
+
                 onPressed: {
+                    if (root.exchangeMode) {
+                        var newIndices = root.selectedIndices.slice();
+                        var idx = newIndices.indexOf(index);
+                        if (idx >= 0) {
+                            newIndices.splice(idx, 1);
+                        } else {
+                            newIndices.push(index);
+                        }
+                        root.selectedIndices = newIndices;
+                        return;
+                    }
                     tileDelegate.isHeld = true;
                     root.draggingIndex = index;
                 }
-                
+
                 onPositionChanged: {
+                    if (root.exchangeMode) return;
                     if (!tileDelegate.isHeld) return;
                     
                     var centerX = tileDelegate.x + tileDelegate.width / 2;
@@ -285,6 +319,7 @@ Item {
                 }
                 
                 onReleased: {
+                    if (root.exchangeMode) return;
                     // Check if dropped on external target (e.g., board DropArea)
                     if (tileDelegate.Drag.target) {
                         tileDelegate.Drag.drop();

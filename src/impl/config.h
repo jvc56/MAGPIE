@@ -49,6 +49,7 @@ int config_get_bingo_bonus(const Config *config);
 BoardLayout *config_get_board_layout(const Config *config);
 game_variant_t config_get_game_variant(const Config *config);
 WinPct *config_get_win_pcts(const Config *config);
+WinPct *config_load_win_pcts(Config *config, ErrorStack *error_stack);
 int config_get_num_plays(const Config *config);
 int config_get_num_small_plays(const Config *config);
 int config_get_plies(const Config *config);
