@@ -5,6 +5,7 @@
 #include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/move_defs.h"
 #include "../def/thread_control_defs.h"
@@ -15,6 +16,7 @@
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/kwg.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/move_undo.h"
 #include "../ent/player.h"
@@ -28,6 +30,7 @@
 #include "../str/move_string.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "gameplay.h"
 #include "kwg_maker.h"
 #include "move_gen.h"
@@ -81,8 +84,9 @@ static float stuck_tile_fraction_from_bv(const LetterDistribution *ld,
       }
     }
   }
-  if (total_score == 0)
-    return 0.0f;
+  if (total_score == 0) {
+    return 0.0F;
+  }
   return (float)stuck_score / (float)total_score;
 }
 
@@ -203,6 +207,59 @@ static void pvline_update(PVLine *pv_line, const PVLine *new_pv_line,
   // negamax_depth is not updated here; callers set it explicitly.
 }
 
+// Greedy playout for display: extend PV with highest-scoring moves after
+// TT extension. Returns number of moves appended.
+static int greedy_playout_for_display(PVLine *pv_line, int start_idx,
+                                      Game *game_copy, MoveList *move_list) {
+  int num_moves = start_idx;
+  while (num_moves < MAX_VARIANT_LENGTH &&
+         game_get_game_end_reason(game_copy) == GAME_END_REASON_NONE) {
+    const MoveGenArgs greedy_args = {
+        .game = game_copy,
+        .move_list = move_list,
+        .move_record_type = MOVE_RECORD_ALL_SMALL,
+        .move_sort_type = MOVE_SORT_SCORE,
+        .override_kwg = NULL,
+        .thread_index = 0,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    generate_moves(&greedy_args);
+    int nplays = move_list->count;
+    if (nplays == 0) {
+      break;
+    }
+
+    // Check for consecutive passes ending the game
+    if (nplays == 1 && small_move_is_pass(move_list->small_moves[0])) {
+      if (game_get_consecutive_scoreless_turns(game_copy) >= 1) {
+        break;
+      }
+    }
+
+    // Pick highest-scoring move
+    int best_idx = 0;
+    int best_score = INT32_MIN;
+    for (int j = 0; j < nplays; j++) {
+      int sc = small_move_get_score(move_list->small_moves[j]);
+      if (sc > best_score) {
+        best_score = sc;
+        best_idx = j;
+      }
+    }
+
+    SmallMove best_sm = *move_list->small_moves[best_idx];
+    small_move_to_move(move_list->spare_move, &best_sm,
+                       game_get_board(game_copy));
+    play_move(move_list->spare_move, game_copy, NULL);
+
+    pv_line->moves[num_moves] = best_sm;
+    num_moves++;
+  }
+  return num_moves - start_idx;
+}
+
 // Extend the PV by probing the transposition table for moves beyond
 // what the search PV already contains. Existing PV moves (which have
 // correct scores) are preserved; only new moves are appended.
@@ -292,51 +349,8 @@ static void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
   // Greedy playout: if game isn't over, extend PV with highest-scoring moves.
   // This handles cases where the search PV was truncated (e.g., parallel search
   // effects) and TT entries were overwritten.
-  while (num_moves < MAX_VARIANT_LENGTH &&
-         game_get_game_end_reason(game_copy) == GAME_END_REASON_NONE) {
-    const MoveGenArgs greedy_args = {
-        .game = game_copy,
-        .move_list = move_list,
-        .move_record_type = MOVE_RECORD_ALL_SMALL,
-        .move_sort_type = MOVE_SORT_SCORE,
-        .override_kwg = NULL,
-        .thread_index = 0,
-        .eq_margin_movegen = 0,
-        .target_equity = EQUITY_MAX_VALUE,
-        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-    };
-    generate_moves(&greedy_args);
-    int nplays = move_list->count;
-    if (nplays == 0) {
-      break;
-    }
-
-    // Check for consecutive passes ending the game
-    if (nplays == 1 && small_move_is_pass(move_list->small_moves[0])) {
-      if (game_get_consecutive_scoreless_turns(game_copy) >= 1) {
-        break;
-      }
-    }
-
-    // Pick highest-scoring move
-    int best_idx = 0;
-    int best_score = INT32_MIN;
-    for (int j = 0; j < nplays; j++) {
-      int sc = small_move_get_score(move_list->small_moves[j]);
-      if (sc > best_score) {
-        best_score = sc;
-        best_idx = j;
-      }
-    }
-
-    SmallMove best_sm = *move_list->small_moves[best_idx];
-    small_move_to_move(move_list->spare_move, &best_sm,
-                       game_get_board(game_copy));
-    play_move(move_list->spare_move, game_copy, NULL);
-
-    pv_line->moves[num_moves] = best_sm;
-    num_moves++;
-  }
+  num_moves += greedy_playout_for_display(pv_line, num_moves, game_copy,
+                                          move_list);
 
   pv_line->num_moves = num_moves;
   small_move_list_destroy(move_list);
@@ -506,8 +520,9 @@ static int compute_played_tiles_face_value(const Move *move,
   int tlen = move_get_tiles_length(move);
   for (int pos = 0; pos < tlen; pos++) {
     uint8_t tile = move_get_tile(move, pos);
-    if (tile == PLAYED_THROUGH_MARKER)
+    if (tile == PLAYED_THROUGH_MARKER) {
       continue;
+    }
     uint8_t ml = get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile;
     face_value += equity_to_int(ld_get_score(ld, ml));
   }
@@ -525,13 +540,14 @@ static int compute_conservation_bonus(const Move *move,
   int tile_count = 0;
   for (int pos = 0; pos < tlen; pos++) {
     uint8_t tile = move_get_tile(move, pos);
-    if (tile == PLAYED_THROUGH_MARKER)
+    if (tile == PLAYED_THROUGH_MARKER) {
       continue;
+    }
     uint8_t ml = get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile;
     face_value += equity_to_int(ld_get_score(ld, ml));
     tile_count++;
   }
-  return (int)((7 * tile_count + 2 * face_value) * opp_stuck_frac);
+  return (int)((float)(7 * tile_count + 2 * face_value) * opp_stuck_frac);
 }
 
 // Thread jitter for ABDADA search diversity: each thread gets a unique bias
@@ -540,8 +556,9 @@ static int compute_conservation_bonus(const Move *move,
 static int compute_thread_jitter(EndgameSolverWorker *worker,
                                  int tiles_played) {
   int thread_idx = worker->thread_index;
-  if (worker->solver->threads <= 1 || thread_idx == 0)
+  if (worker->solver->threads <= 1 || thread_idx == 0) {
     return 0;
+  }
   int bias = thread_idx * tiles_played;
   int jitter = (thread_idx % 2 == 1) ? bias : -bias;
   jitter += (int)(prng_get_random_number(worker->prng, 8));
@@ -556,8 +573,9 @@ static int compute_thread_jitter(EndgameSolverWorker *worker,
 static int *compute_build_chain_values(EndgameSolverWorker *worker,
                                        int move_count, size_t arena_offset,
                                        float opp_stuck_frac) {
-  if (opp_stuck_frac <= 0.0f || move_count <= 1)
+  if (opp_stuck_frac <= 0.0F || move_count <= 1) {
     return NULL;
+  }
 
   int *build_values = malloc_or_die(move_count * sizeof(int));
 
@@ -579,8 +597,9 @@ static int *compute_build_chain_values(EndgameSolverWorker *worker,
           (const SmallMove *)(worker->small_move_arena->memory + arena_offset +
                               order[j] * sizeof(SmallMove));
       int tp_j = small_move_get_tiles_played(sm_j);
-      if (tp_j >= tp_key)
+      if (tp_j >= tp_key) {
         break;
+      }
       order[j + 1] = order[j];
       j--;
     }
@@ -594,8 +613,9 @@ static int *compute_build_chain_values(EndgameSolverWorker *worker,
         (const SmallMove *)(worker->small_move_arena->memory + arena_offset +
                             i * sizeof(SmallMove));
     build_values[i] = small_move_get_score(sm_a);
-    if (small_move_is_pass(sm_a))
+    if (small_move_is_pass(sm_a)) {
       continue;
+    }
 
     int dir_a = (int)(sm_a->tiny_move & 1);
     int row_a = (int)((sm_a->tiny_move & SMALL_MOVE_ROW_BITMASK) >> 6);
@@ -611,13 +631,16 @@ static int *compute_build_chain_values(EndgameSolverWorker *worker,
       const SmallMove *sm_b =
           (const SmallMove *)(worker->small_move_arena->memory + arena_offset +
                               j * sizeof(SmallMove));
-      if (small_move_is_pass(sm_b))
+      if (small_move_is_pass(sm_b)) {
         continue;
+      }
       int tp_b = small_move_get_tiles_played(sm_b);
-      if (tp_b <= tp_a)
+      if (tp_b <= tp_a) {
         continue;
-      if ((int)(sm_b->tiny_move & 1) != dir_a)
+      }
+      if ((int)(sm_b->tiny_move & 1) != dir_a) {
         continue;
+      }
 
       int row_b = (int)((sm_b->tiny_move & SMALL_MOVE_ROW_BITMASK) >> 6);
       int col_b = (int)((sm_b->tiny_move & SMALL_MOVE_COL_BITMASK) >> 1);
@@ -631,12 +654,14 @@ static int *compute_build_chain_values(EndgameSolverWorker *worker,
         contained = (col_a == col_b) && (row_a >= row_b) &&
                     (row_a + len_a <= row_b + len_b);
       }
-      if (!contained)
+      if (!contained) {
         continue;
+      }
 
       // Verify actual tiles match at each position.
       // Convert both to full Moves and compare tile-by-tile.
-      Move mv_a, mv_b;
+      Move mv_a;
+      Move mv_b;
       const Board *brd = game_get_board(worker->game_copy);
       small_move_to_move(&mv_a, sm_a, brd);
       small_move_to_move(&mv_b, sm_b, brd);
@@ -652,16 +677,18 @@ static int *compute_build_chain_values(EndgameSolverWorker *worker,
       bool tiles_match = true;
       for (int ti = 0; ti < len_a; ti++) {
         uint8_t tile_a = move_get_tile(&mv_a, ti);
-        if (tile_a == PLAYED_THROUGH_MARKER)
+        if (tile_a == PLAYED_THROUGH_MARKER) {
           continue; // board tile, not placed by A
+        }
         uint8_t tile_b = move_get_tile(&mv_b, ti + offset_in_b);
         if (tile_a != tile_b) {
           tiles_match = false;
           break;
         }
       }
-      if (!tiles_match)
+      if (!tiles_match) {
         continue;
+      }
 
       if (build_values[j] > best_extension) {
         best_extension = build_values[j];
@@ -705,7 +732,7 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
 
     // Conservation bonus: penalize playing tiles when opponent has stuck tiles.
     int conservation_bonus = 0;
-    if (opp_stuck_frac > 0.0f && is_non_pass_partial) {
+    if (opp_stuck_frac > 0.0F && is_non_pass_partial) {
       small_move_to_move(worker->move_list->spare_move, current_move,
                          est_board);
       conservation_bonus = compute_conservation_bonus(
@@ -741,7 +768,7 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
       if (is_non_pass_partial) {
         // spare_move may already be populated from conservation bonus above;
         // if not (opp_stuck_frac == 0), expand it now.
-        if (opp_stuck_frac <= 0.0f) {
+        if (opp_stuck_frac <= 0.0F) {
           small_move_to_move(worker->move_list->spare_move, current_move,
                              est_board);
         }
@@ -770,6 +797,282 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
       (SmallMove *)(worker->small_move_arena->memory + arena_offset);
   qsort(small_moves, move_count, sizeof(SmallMove),
         compare_small_moves_by_estimated_value);
+}
+
+// Greedy playout at depth==0 leaf nodes: generate moves iteratively,
+// pick best (with conservation bonus), compute final spread with rack
+// adjustments, unplay moves, store in TT. Returns evaluation from
+// on_turn's perspective.
+static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
+                                           uint64_t node_key,
+                                           int on_turn_idx,
+                                           int32_t on_turn_spread,
+                                           PVLine *pv,
+                                           float opp_stuck_frac) {
+  int solving_player = worker->solver->solving_player;
+  int plies = worker->solver->requested_plies;
+  int playout_depth = 0;
+  int max_playout = MAX_SEARCH_DEPTH - plies;
+
+  while (game_get_game_end_reason(worker->game_copy) ==
+             GAME_END_REASON_NONE &&
+         playout_depth < max_playout) {
+    // Lazy cross-set update from the previous move's undo.
+    // When playout_depth==0, the previous move is the last negamax move
+    // at undo slot plies-1. For subsequent playout moves, the previous
+    // undo is at plies + playout_depth - 1.
+    Board *pb = game_get_board(worker->game_copy);
+    if (!board_get_cross_sets_valid(pb)) {
+      int undo_idx = plies + playout_depth - 1;
+      const MoveUndo *prev = &worker->move_undos[undo_idx];
+      if (prev->move_tiles_length > 0) {
+        update_cross_set_for_move_from_undo(prev, worker->game_copy);
+      }
+      board_set_cross_sets_valid(pb, true);
+    }
+
+    const MoveGenArgs pargs = {
+        .game = worker->game_copy,
+        .move_list = worker->move_list,
+        .move_record_type = MOVE_RECORD_ALL_SMALL,
+        .move_sort_type = MOVE_SORT_SCORE,
+        .override_kwg = worker->solver->pruned_kwg,
+        .thread_index = worker->thread_index,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    generate_moves(&pargs);
+    int nplays = worker->move_list->count;
+
+    if (nplays == 0) {
+      break;
+    }
+
+    // Check for consecutive passes ending the game
+    if (nplays == 1 &&
+        small_move_is_pass(worker->move_list->small_moves[0])) {
+      if (game_get_consecutive_scoreless_turns(worker->game_copy) >= 1) {
+        break; // would be 6 consecutive zeros
+      }
+    }
+
+    // Pick best move by adjusted score.
+    // When opponent has stuck tiles and solving player is on turn,
+    // prefer conservation: penalize playing many tiles / high-value tiles.
+    int playout_on_turn =
+        game_get_player_on_turn_index(worker->game_copy);
+    bool conserve = opp_stuck_frac > 0.0F &&
+                    playout_on_turn == solving_player;
+    int playout_rack_size = conserve
+        ? player_get_rack(game_get_player(worker->game_copy,
+                                          playout_on_turn))->number_of_letters
+        : 0;
+
+    int best_idx = 0;
+    int best_adj = INT32_MIN;
+    for (int j = 0; j < nplays; j++) {
+      const SmallMove *sm = worker->move_list->small_moves[j];
+      int adj = small_move_get_score(sm);
+      if (conserve && !small_move_is_pass(sm) &&
+          small_move_get_tiles_played(sm) < playout_rack_size) {
+        small_move_to_move(worker->move_list->spare_move, sm,
+                           game_get_board(worker->game_copy));
+        adj -= compute_conservation_bonus(
+            worker->move_list->spare_move,
+            game_get_ld(worker->game_copy), opp_stuck_frac);
+      }
+      if (adj > best_adj) {
+        best_adj = adj;
+        best_idx = j;
+      }
+    }
+
+    SmallMove best_sm = *(worker->move_list->small_moves[best_idx]);
+    small_move_to_move(worker->move_list->spare_move, &best_sm,
+                       game_get_board(worker->game_copy));
+
+    int undo_slot = plies + playout_depth;
+    play_move_incremental(worker->move_list->spare_move,
+                          worker->game_copy,
+                          &worker->move_undos[undo_slot]);
+
+    // Store move in PV
+    if (playout_depth < MAX_VARIANT_LENGTH) {
+      pv->moves[playout_depth] = best_sm;
+    }
+    playout_depth++;
+  }
+
+  // Compute final spread from solving_player's perspective
+  const Player *sp =
+      game_get_player(worker->game_copy, solving_player);
+  const Player *op =
+      game_get_player(worker->game_copy, 1 - solving_player);
+  int32_t greedy_spread =
+      equity_to_int(player_get_score(sp) - player_get_score(op));
+
+  // End-of-game rack adjustments if game didn't end naturally
+  if (game_get_game_end_reason(worker->game_copy) ==
+      GAME_END_REASON_NONE) {
+    const LetterDistribution *ld = game_get_ld(worker->game_copy);
+    int32_t sp_rack = equity_to_int(
+        calculate_end_rack_points(player_get_rack(sp), ld));
+    int32_t op_rack = equity_to_int(
+        calculate_end_rack_points(player_get_rack(op), ld));
+    greedy_spread -= sp_rack;
+    greedy_spread += op_rack;
+  }
+
+  pv->num_moves = playout_depth < MAX_VARIANT_LENGTH
+                       ? playout_depth
+                       : MAX_VARIANT_LENGTH;
+  pv->negamax_depth = 0;
+
+  // Unplay all playout moves in reverse
+  for (int d = playout_depth - 1; d >= 0; d--) {
+    int undo_slot = plies + d;
+    unplay_move_incremental(worker->game_copy,
+                            &worker->move_undos[undo_slot]);
+    const MoveUndo *undo = &worker->move_undos[undo_slot];
+    if (undo->move_tiles_length > 0) {
+      update_cross_sets_after_unplay_from_undo(undo, worker->game_copy);
+      board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
+    }
+  }
+
+  // Store greedy playout result in TT at depth 0.
+  // Only store if no deeper entry exists (prefer deeper negamax results).
+  if (worker->solver->transposition_table_optim) {
+    TTEntry existing = transposition_table_lookup(
+        worker->solver->transposition_table, node_key);
+    if (!ttentry_valid(existing) || ttentry_depth(existing) == 0) {
+      int32_t greedy_result = (on_turn_idx == solving_player)
+                                  ? greedy_spread
+                                  : -greedy_spread;
+      int16_t tt_score = (int16_t)(greedy_result - on_turn_spread);
+      TTEntry entry_to_store = {.score = tt_score,
+                                .flag_and_depth = (TT_EXACT << 6),
+                                .tiny_move = INVALID_TINY_MOVE};
+      transposition_table_store(worker->solver->transposition_table,
+                                node_key, entry_to_store);
+    }
+  }
+
+  // Convert from solving_player's perspective to on_turn perspective
+  if (on_turn_idx == solving_player) {
+    return greedy_spread;
+  }
+  return -greedy_spread;
+}
+
+// Generate opponent's moves in TILES_PLAYED mode and return stuck-tile
+// fraction. Saves and restores player-on-turn if it differs from opp_idx.
+// If tiles_played_bv_out is non-NULL, writes the bitvector of tile types
+// that appear in at least one valid move.
+static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
+                                        const KWG *pruned_kwg, int opp_idx,
+                                        int thread_index,
+                                        uint64_t *tiles_played_bv_out) {
+  int saved_on_turn = game_get_player_on_turn_index(game);
+  if (saved_on_turn != opp_idx) {
+    game_set_player_on_turn_index(game, opp_idx);
+  }
+  const Rack *opp_rack = player_get_rack(game_get_player(game, opp_idx));
+  uint64_t opp_tiles_bv = 0;
+  const MoveGenArgs tp_args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_TILES_PLAYED,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .override_kwg = pruned_kwg,
+      .thread_index = thread_index,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .tiles_played_bv = &opp_tiles_bv,
+  };
+  generate_moves(&tp_args);
+  if (saved_on_turn != opp_idx) {
+    game_set_player_on_turn_index(game, saved_on_turn);
+  }
+  if (tiles_played_bv_out) {
+    *tiles_played_bv_out = opp_tiles_bv;
+  }
+  return stuck_tile_fraction_from_bv(game_get_ld(game), opp_rack, opp_tiles_bv);
+}
+
+// Compute TT flag (UPPER/LOWER/EXACT) and store entry at end of search.
+static void negamax_tt_store(const EndgameSolverWorker *worker,
+                             uint64_t node_key, int depth,
+                             int32_t best_value, int32_t alpha_orig,
+                             int32_t beta, int32_t on_turn_spread,
+                             uint64_t best_tiny_move) {
+  int16_t score = (int16_t)(best_value - on_turn_spread);
+  uint8_t flag;
+  TTEntry entry_to_store = {.score = score};
+  if (best_value <= alpha_orig) {
+    flag = TT_UPPER;
+  } else if (best_value >= beta) {
+    flag = TT_LOWER;
+  } else {
+    flag = TT_EXACT;
+  }
+  entry_to_store.flag_and_depth = (flag << 6) + (uint8_t)depth;
+  entry_to_store.tiny_move = best_tiny_move;
+  transposition_table_store(worker->solver->transposition_table, node_key,
+                            entry_to_store);
+}
+
+// Stuck-tile detection, move generation, logging, and sorting for non-root
+// nodes. Updates *opp_stuck_frac. Returns move count.
+static int negamax_generate_and_sort_moves(EndgameSolverWorker *worker,
+                                           int depth, uint64_t tt_move,
+                                           float *opp_stuck_frac) {
+  int opp_idx = 1 - worker->solver->solving_player;
+  uint64_t opp_tiles_bv = 0;
+  int nplays;
+  if (worker->solver->use_heuristics) {
+    *opp_stuck_frac = compute_opp_stuck_fraction(
+        worker->game_copy, worker->move_list, worker->solver->pruned_kwg,
+        opp_idx, worker->thread_index, &opp_tiles_bv);
+    nplays = generate_stm_plays(worker, depth);
+  } else {
+    nplays = generate_stm_plays(worker, depth);
+    *opp_stuck_frac = 0.0F;
+  }
+
+  // Log stuck-tile activation once per solve
+  if (*opp_stuck_frac > 0.0F) {
+    int expected = 0;
+    if (atomic_compare_exchange_strong(&worker->solver->stuck_tile_logged,
+                                       &expected, 1)) {
+      const Rack *opp_rack =
+          player_get_rack(game_get_player(worker->game_copy, opp_idx));
+      const LetterDistribution *log_ld = game_get_ld(worker->game_copy);
+      int ld_size = ld_get_size(log_ld);
+      StringBuilder *stuck_sb = string_builder_create();
+      string_builder_add_formatted_string(stuck_sb, "Player %d (",
+                                          opp_idx + 1);
+      string_builder_add_rack(stuck_sb, opp_rack, log_ld, false);
+      string_builder_add_string(stuck_sb, ") stuck tiles: ");
+      for (int ml = 0; ml < ld_size; ml++) {
+        int count = rack_get_letter(opp_rack, ml);
+        if (count > 0 && !(opp_tiles_bv & ((uint64_t)1 << ml))) {
+          for (int k = 0; k < count; k++) {
+            string_builder_add_user_visible_letter(stuck_sb, log_ld, ml);
+          }
+        }
+      }
+      log_warn("Stuck-tile mode (%.0f%%): %s",
+               (double)(*opp_stuck_frac * 100.0F),
+               string_builder_peek(stuck_sb));
+      string_builder_destroy(stuck_sb);
+    }
+  }
+
+  assign_estimates_and_sort(worker, nplays, tt_move, *opp_stuck_frac);
+  return nplays;
 }
 
 int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
@@ -862,162 +1165,8 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
     }
     if (worker->solver->use_heuristics &&
         game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE) {
-      // Greedy playout: iteratively play best-scoring moves to completion.
-      int solving_player = worker->solver->solving_player;
-      int plies = worker->solver->requested_plies;
-      int playout_depth = 0;
-      int max_playout = MAX_SEARCH_DEPTH - plies;
-
-      while (game_get_game_end_reason(worker->game_copy) ==
-                 GAME_END_REASON_NONE &&
-             playout_depth < max_playout) {
-        // Lazy cross-set update from the previous move's undo.
-        // When playout_depth==0, the previous move is the last negamax move
-        // at undo slot plies-1. For subsequent playout moves, the previous
-        // undo is at plies + playout_depth - 1.
-        Board *pb = game_get_board(worker->game_copy);
-        if (!board_get_cross_sets_valid(pb)) {
-          int undo_idx = plies + playout_depth - 1;
-          const MoveUndo *prev = &worker->move_undos[undo_idx];
-          if (prev->move_tiles_length > 0) {
-            update_cross_set_for_move_from_undo(prev, worker->game_copy);
-          }
-          board_set_cross_sets_valid(pb, true);
-        }
-
-        const MoveGenArgs pargs = {
-            .game = worker->game_copy,
-            .move_list = worker->move_list,
-            .move_record_type = MOVE_RECORD_ALL_SMALL,
-            .move_sort_type = MOVE_SORT_SCORE,
-            .override_kwg = worker->solver->pruned_kwg,
-            .thread_index = worker->thread_index,
-            .eq_margin_movegen = 0,
-            .target_equity = EQUITY_MAX_VALUE,
-            .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-        };
-        generate_moves(&pargs);
-        int nplays = worker->move_list->count;
-
-        if (nplays == 0)
-          break;
-
-        // Check for consecutive passes ending the game
-        if (nplays == 1 &&
-            small_move_is_pass(worker->move_list->small_moves[0])) {
-          if (game_get_consecutive_scoreless_turns(worker->game_copy) >= 1) {
-            break; // would be 6 consecutive zeros
-          }
-        }
-
-        // Pick best move by adjusted score.
-        // When opponent has stuck tiles and solving player is on turn,
-        // prefer conservation: penalize playing many tiles / high-value tiles.
-        int playout_on_turn =
-            game_get_player_on_turn_index(worker->game_copy);
-        bool conserve = opp_stuck_frac > 0.0f &&
-                        playout_on_turn == solving_player;
-        int playout_rack_size = conserve
-            ? player_get_rack(game_get_player(worker->game_copy,
-                                              playout_on_turn))->number_of_letters
-            : 0;
-
-        int best_idx = 0;
-        int best_adj = INT32_MIN;
-        for (int j = 0; j < nplays; j++) {
-          const SmallMove *sm = worker->move_list->small_moves[j];
-          int adj = small_move_get_score(sm);
-          if (conserve && !small_move_is_pass(sm) &&
-              small_move_get_tiles_played(sm) < playout_rack_size) {
-            small_move_to_move(worker->move_list->spare_move, sm,
-                               game_get_board(worker->game_copy));
-            adj -= compute_conservation_bonus(
-                worker->move_list->spare_move,
-                game_get_ld(worker->game_copy), opp_stuck_frac);
-          }
-          if (adj > best_adj) {
-            best_adj = adj;
-            best_idx = j;
-          }
-        }
-
-        SmallMove best_sm = *(worker->move_list->small_moves[best_idx]);
-        small_move_to_move(worker->move_list->spare_move, &best_sm,
-                           game_get_board(worker->game_copy));
-
-        int undo_slot = plies + playout_depth;
-        play_move_incremental(worker->move_list->spare_move,
-                              worker->game_copy,
-                              &worker->move_undos[undo_slot]);
-
-        // Store move in PV
-        if (playout_depth < MAX_VARIANT_LENGTH) {
-          pv->moves[playout_depth] = best_sm;
-        }
-        playout_depth++;
-      }
-
-      // Compute final spread from solving_player's perspective
-      const Player *sp =
-          game_get_player(worker->game_copy, solving_player);
-      const Player *op =
-          game_get_player(worker->game_copy, 1 - solving_player);
-      int32_t greedy_spread =
-          equity_to_int(player_get_score(sp) - player_get_score(op));
-
-      // End-of-game rack adjustments if game didn't end naturally
-      if (game_get_game_end_reason(worker->game_copy) ==
-          GAME_END_REASON_NONE) {
-        const LetterDistribution *ld = game_get_ld(worker->game_copy);
-        int32_t sp_rack = equity_to_int(
-            calculate_end_rack_points(player_get_rack(sp), ld));
-        int32_t op_rack = equity_to_int(
-            calculate_end_rack_points(player_get_rack(op), ld));
-        greedy_spread -= sp_rack;
-        greedy_spread += op_rack;
-      }
-
-      pv->num_moves = playout_depth < MAX_VARIANT_LENGTH
-                           ? playout_depth
-                           : MAX_VARIANT_LENGTH;
-      pv->negamax_depth = 0;
-
-      // Unplay all playout moves in reverse
-      for (int d = playout_depth - 1; d >= 0; d--) {
-        int undo_slot = plies + d;
-        unplay_move_incremental(worker->game_copy,
-                                &worker->move_undos[undo_slot]);
-        const MoveUndo *undo = &worker->move_undos[undo_slot];
-        if (undo->move_tiles_length > 0) {
-          update_cross_sets_after_unplay_from_undo(undo, worker->game_copy);
-          board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
-        }
-      }
-
-      // Store greedy playout result in TT at depth 0.
-      // Only store if no deeper entry exists (prefer deeper negamax results).
-      if (worker->solver->transposition_table_optim) {
-        TTEntry existing = transposition_table_lookup(
-            worker->solver->transposition_table, node_key);
-        if (!ttentry_valid(existing) || ttentry_depth(existing) == 0) {
-          int32_t greedy_result = (on_turn_idx == solving_player)
-                                      ? greedy_spread
-                                      : -greedy_spread;
-          int16_t tt_score = (int16_t)(greedy_result - on_turn_spread);
-          TTEntry entry_to_store = {.score = tt_score,
-                                    .flag_and_depth = (TT_EXACT << 6),
-                                    .tiny_move = INVALID_TINY_MOVE};
-          transposition_table_store(worker->solver->transposition_table,
-                                    node_key, entry_to_store);
-        }
-      }
-
-      // Convert from solving_player's perspective to on_turn perspective
-      if (on_turn_idx == solving_player) {
-        return greedy_spread;
-      } else {
-        return -greedy_spread;
-      }
+      return negamax_greedy_leaf_playout(worker, node_key, on_turn_idx,
+                                         on_turn_spread, pv, opp_stuck_frac);
     }
     return on_turn_spread;
   }
@@ -1029,89 +1178,8 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   int nplays;
   bool arena_alloced = false;
   if (worker->current_iterative_deepening_depth != depth) {
-    int opp_idx = 1 - worker->solver->solving_player;
-    const Rack *opp_rack =
-        player_get_rack(game_get_player(worker->game_copy, opp_idx));
-    uint64_t opp_tiles_bv = 0;
-    if (worker->solver->use_heuristics) {
-      // Fast stuck-tile check: use TILES_PLAYED mode which exits early
-      // once all rack tile types have been seen in valid moves.
-      const LetterDistribution *check_ld = game_get_ld(worker->game_copy);
-
-      if (on_turn_idx == opp_idx) {
-        // Opponent is on turn: fast tile check, then generate ALL_SMALL.
-        const MoveGenArgs tp_args = {
-            .game = worker->game_copy,
-            .move_list = worker->move_list,
-            .move_record_type = MOVE_RECORD_TILES_PLAYED,
-            .move_sort_type = MOVE_SORT_SCORE,
-            .override_kwg = worker->solver->pruned_kwg,
-            .thread_index = worker->thread_index,
-            .eq_margin_movegen = 0,
-            .target_equity = EQUITY_MAX_VALUE,
-            .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-            .tiles_played_bv = &opp_tiles_bv,
-        };
-        generate_moves(&tp_args);
-        opp_stuck_frac =
-            stuck_tile_fraction_from_bv(check_ld, opp_rack, opp_tiles_bv);
-        nplays = generate_stm_plays(worker, depth);
-      } else {
-        // Solving player is on turn: fast tile check for opponent, then
-        // generate solving player's moves for search.
-        game_set_player_on_turn_index(worker->game_copy, opp_idx);
-        const MoveGenArgs tp_args = {
-            .game = worker->game_copy,
-            .move_list = worker->move_list,
-            .move_record_type = MOVE_RECORD_TILES_PLAYED,
-            .move_sort_type = MOVE_SORT_SCORE,
-            .override_kwg = worker->solver->pruned_kwg,
-            .thread_index = worker->thread_index,
-            .eq_margin_movegen = 0,
-            .target_equity = EQUITY_MAX_VALUE,
-            .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-            .tiles_played_bv = &opp_tiles_bv,
-        };
-        generate_moves(&tp_args);
-        opp_stuck_frac =
-            stuck_tile_fraction_from_bv(check_ld, opp_rack, opp_tiles_bv);
-        game_set_player_on_turn_index(worker->game_copy, on_turn_idx);
-        nplays = generate_stm_plays(worker, depth);
-      }
-    } else {
-      // Heuristics disabled: just generate moves, no stuck-tile detection
-      nplays = generate_stm_plays(worker, depth);
-      opp_stuck_frac = 0.0f;
-    }
-
-    // Log stuck-tile activation once per solve
-    if (opp_stuck_frac > 0.0f) {
-      int expected = 0;
-      if (atomic_compare_exchange_strong(&worker->solver->stuck_tile_logged,
-                                         &expected, 1)) {
-        const LetterDistribution *log_ld = game_get_ld(worker->game_copy);
-        int ld_size = ld_get_size(log_ld);
-        StringBuilder *stuck_sb = string_builder_create();
-        string_builder_add_formatted_string(stuck_sb, "Player %d (",
-                                            opp_idx + 1);
-        string_builder_add_rack(stuck_sb, opp_rack, log_ld, false);
-        string_builder_add_string(stuck_sb, ") stuck tiles: ");
-        for (int ml = 0; ml < ld_size; ml++) {
-          int count = rack_get_letter(opp_rack, ml);
-          if (count > 0 && !(opp_tiles_bv & ((uint64_t)1 << ml))) {
-            for (int k = 0; k < count; k++) {
-              string_builder_add_user_visible_letter(stuck_sb, log_ld, ml);
-            }
-          }
-        }
-        log_warn("Stuck-tile mode (%.0f%%): %s",
-                 (double)(opp_stuck_frac * 100.0f),
-                 string_builder_peek(stuck_sb));
-        string_builder_destroy(stuck_sb);
-      }
-    }
-
-    assign_estimates_and_sort(worker, nplays, tt_move, opp_stuck_frac);
+    nplays = negamax_generate_and_sort_moves(worker, depth, tt_move,
+                                              &opp_stuck_frac);
     arena_alloced = true;
   } else {
     // Use initial moves. They already have been sorted by estimated value.
@@ -1220,7 +1288,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
 
       int32_t value = 0;
       if (use_root_aspiration) {
-        int32_t est = (int32_t)small_move_get_estimated_value(small_move);
+        int32_t est = small_move_get_estimated_value(small_move);
         int32_t window = ASPIRATION_WINDOW;
         int32_t move_alpha = MAX(alpha, est - window);
         int32_t move_beta = MIN(beta, est + window);
@@ -1356,20 +1424,8 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   }
 
   if (worker->solver->transposition_table_optim) {
-    int16_t score = (int16_t)(best_value - on_turn_spread);
-    uint8_t flag;
-    TTEntry entry_to_store = {.score = score};
-    if (best_value <= alpha_orig) {
-      flag = TT_UPPER;
-    } else if (best_value >= beta) {
-      flag = TT_LOWER;
-    } else {
-      flag = TT_EXACT;
-    }
-    entry_to_store.flag_and_depth = (flag << 6) + (uint8_t)depth;
-    entry_to_store.tiny_move = best_tiny_move;
-    transposition_table_store(worker->solver->transposition_table, node_key,
-                              entry_to_store);
+    negamax_tt_store(worker, node_key, depth, best_value, alpha_orig, beta,
+                     on_turn_spread, best_tiny_move);
   }
 
   if (arena_alloced) {
@@ -1389,6 +1445,43 @@ static bool iterative_deepening_should_stop(EndgameSolver *solver) {
   return atomic_load(&solver->search_complete) != 0 ||
          thread_control_get_status(solver->thread_control) ==
              THREAD_CONTROL_STATUS_USER_INTERRUPT;
+}
+
+// Build top-K ranked PVLines from root SmallMoves (with TT extension) and
+// invoke per_ply_callback. Display/callback plumbing only.
+static void build_ranked_pvs_and_notify(EndgameSolverWorker *worker,
+                                        int depth, int32_t pv_value,
+                                        const PVLine *extended_pv,
+                                        const SmallMove *initial_moves,
+                                        int initial_move_count) {
+  enum { MAX_RANKED_CALLBACK_PVS = 10 };
+  int n_ranked =
+      initial_move_count < MAX_RANKED_CALLBACK_PVS
+          ? initial_move_count
+          : MAX_RANKED_CALLBACK_PVS;
+  PVLine ranked_pvs[MAX_RANKED_CALLBACK_PVS];
+  for (int r = 0; r < n_ranked; r++) {
+    PVLine *rpv = &ranked_pvs[r];
+    rpv->moves[0] = initial_moves[r];
+    rpv->num_moves = 1;
+    rpv->score =
+        small_move_get_estimated_value(&initial_moves[r]) -
+        worker->solver->initial_spread;
+    rpv->negamax_depth = 1;
+    rpv->game = NULL;
+    // Extend from TT
+    if (worker->solver->transposition_table_optim) {
+      Game *ext_game = game_duplicate(worker->game_copy);
+      pvline_extend_from_tt(rpv, ext_game,
+                            worker->solver->transposition_table,
+                            worker->solver->solving_player, depth);
+      game_destroy(ext_game);
+    }
+  }
+
+  worker->solver->per_ply_callback(
+      depth, pv_value, extended_pv, worker->game_copy, ranked_pvs, n_ranked,
+      worker->solver->per_ply_callback_data);
 }
 
 void iterative_deepening(EndgameSolverWorker *worker, int plies) {
@@ -1424,7 +1517,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   // conservation), the other half use score-based ordering for diversity.
   float initial_opp_stuck_frac =
       (worker->thread_index % 2 == 0) ? worker->solver->initial_opp_stuck_frac
-                                      : 0.0f;
+                                      : 0.0F;
 
   int initial_move_count =
       generate_stm_plays(worker, worker->solver->requested_plies);
@@ -1543,35 +1636,8 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
         game_destroy(temp_game);
       }
 
-      // Build top-K ranked PVLines with TT extension
-      enum { MAX_RANKED_CALLBACK_PVS = 10 };
-      int n_ranked =
-          initial_move_count < MAX_RANKED_CALLBACK_PVS
-              ? initial_move_count
-              : MAX_RANKED_CALLBACK_PVS;
-      PVLine ranked_pvs[MAX_RANKED_CALLBACK_PVS];
-      for (int r = 0; r < n_ranked; r++) {
-        PVLine *rpv = &ranked_pvs[r];
-        rpv->moves[0] = initial_moves[r];
-        rpv->num_moves = 1;
-        rpv->score =
-            (int32_t)small_move_get_estimated_value(&initial_moves[r]) -
-            worker->solver->initial_spread;
-        rpv->negamax_depth = 1;
-        rpv->game = NULL;
-        // Extend from TT
-        if (worker->solver->transposition_table_optim) {
-          Game *ext_game = game_duplicate(worker->game_copy);
-          pvline_extend_from_tt(rpv, ext_game,
-                                worker->solver->transposition_table,
-                                worker->solver->solving_player, p);
-          game_destroy(ext_game);
-        }
-      }
-
-      worker->solver->per_ply_callback(
-          p, pv_value, &extended_pv, worker->game_copy, ranked_pvs, n_ranked,
-          worker->solver->per_ply_callback_data);
+      build_ranked_pvs_and_notify(worker, p, pv_value, &extended_pv,
+                                   initial_moves, initial_move_count);
     }
 
     // Signal other threads to stop when we complete the full search
@@ -1591,186 +1657,38 @@ void *solver_worker_start(void *uncasted_solver_worker) {
   return NULL;
 }
 
-void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
-                   EndgameResults *results, ErrorStack *error_stack) {
-  const int bag_size = bag_get_letters(game_get_bag(endgame_args->game));
-  if (bag_size != 0) {
-    error_stack_push(error_stack, ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY,
-                     get_formatted_string(
-                         "bag must be empty to solve an endgame, but have %d "
-                         "letters in the bag",
-                         bag_size));
-    return;
-  }
+// Compute the initial stuck-tile fraction for the opponent at the root.
+// Duplicates the game to avoid modifying the original.
+static float compute_initial_stuck_fraction(const EndgameSolver *solver,
+                                            const Game *game) {
+  int opp_idx = 1 - solver->solving_player;
+  Game *root_game = game_duplicate(game);
+  MoveList *tmp_ml = move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
+  float frac = compute_opp_stuck_fraction(root_game, tmp_ml,
+                                          solver->pruned_kwg, opp_idx, 0,
+                                          NULL);
+  small_move_list_destroy(tmp_ml);
+  game_destroy(root_game);
+  return frac;
+}
 
-  solver->results = results;
-  endgame_solver_reset(solver, endgame_args);
-
-  Timer solve_timer;
-  ctimer_start(&solve_timer);
-
-  // Compute initial stuck-tile fraction for root move ordering.
-  // Per-node detection in abdada_negamax recomputes this dynamically.
-  solver->initial_opp_stuck_frac = 0.0f;
-  if (solver->use_heuristics) {
-    int opp_idx = 1 - solver->solving_player;
-    const Rack *opp_rack =
-        player_get_rack(game_get_player(endgame_args->game, opp_idx));
-    uint64_t opp_tiles_bv = 0;
-    Game *root_game = game_duplicate(endgame_args->game);
-    game_set_player_on_turn_index(root_game, opp_idx);
-    MoveList *tmp_ml = move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
-    const MoveGenArgs tp_args = {
-        .game = root_game,
-        .move_list = tmp_ml,
-        .move_record_type = MOVE_RECORD_TILES_PLAYED,
-        .move_sort_type = MOVE_SORT_SCORE,
-        .override_kwg = solver->pruned_kwg,
-        .thread_index = 0,
-        .eq_margin_movegen = 0,
-        .target_equity = EQUITY_MAX_VALUE,
-        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-        .tiles_played_bv = &opp_tiles_bv,
-    };
-    generate_moves(&tp_args);
-    solver->initial_opp_stuck_frac =
-        stuck_tile_fraction_from_bv(game_get_ld(endgame_args->game),
-                                    opp_rack, opp_tiles_bv);
-    small_move_list_destroy(tmp_ml);
-    game_destroy(root_game);
-  }
-
-  // Generate base seed for ABDADA jitter using current time
-  uint64_t base_seed = (uint64_t)ctime_get_current_time();
-
-  // Kick-off iterative deepening threads (ABDADA)
-  EndgameSolverWorker **solver_workers =
-      malloc_or_die((sizeof(EndgameSolverWorker *)) * solver->threads);
-  cpthread_t *worker_ids =
-      malloc_or_die((sizeof(cpthread_t)) * (solver->threads));
-
-  for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
-    solver_workers[thread_index] =
-        endgame_solver_create_worker(solver, thread_index, base_seed);
-    cpthread_create(&worker_ids[thread_index], solver_worker_start,
-                    solver_workers[thread_index]);
-  }
-
-  // Wait for all threads to complete
-  for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
-    cpthread_join(worker_ids[thread_index]);
-  }
-
-  // ABDADA result aggregation: find the best result among all threads
-  // The thread that completed the deepest search with a valid result wins
-  int best_thread = 0;
-  int best_depth = solver_workers[0]->completed_depth;
-
-  for (int thread_index = 1; thread_index < solver->threads; thread_index++) {
-    int thread_depth = solver_workers[thread_index]->completed_depth;
-    // Prefer deeper completed depth, or same depth from lower-indexed thread
-    if (thread_depth > best_depth) {
-      best_depth = thread_depth;
-      best_thread = thread_index;
-    }
-  }
-
-  // Copy the best result to the solver's principal variation
-  solver->principal_variation = solver_workers[best_thread]->best_pv;
-  solver->best_pv_value = solver_workers[best_thread]->best_pv_value;
-
-  // Multi-PV: extract top-K root moves from best thread's arena before
-  // destroying workers. The arena contains root SmallMoves sorted by
-  // estimated value (descending) from the final ID iteration's qsort.
-  const int num_top = solver->solve_multiple_variations;
-  int num_pvs = 1;
-  PVLine multi_pvs[MAX_VARIANT_LENGTH];
-  // PV[0] uses the search-tracked principal variation which has the most
-  // accurate move sequence from the actual search.
-  multi_pvs[0] = solver->principal_variation;
-
-  if (num_top > 1) {
-    EndgameSolverWorker *bw = solver_workers[best_thread];
-    int n_root = bw->n_initial_moves;
-    int k = (num_top < n_root) ? num_top : n_root;
-    SmallMove *root_moves = (SmallMove *)bw->small_move_arena->memory;
-
-    // Root moves are already sorted by estimated_value descending from the
-    // final qsort in iterative_deepening. The estimated_value for each root
-    // move is the actual negamax return value set during the search
-    // (line small_move_set_estimated_value(small_move, -value) at root).
-
-    // Ensure the PV's first move is at root_moves[0] to avoid duplicates.
-    // qsort is not stable, so tied values may place the PV move elsewhere.
-    uint64_t pv_tiny = solver->principal_variation.moves[0].tiny_move;
-    if (root_moves[0].tiny_move != pv_tiny) {
-      for (int r = 1; r < n_root; r++) {
-        if (root_moves[r].tiny_move == pv_tiny) {
-          SmallMove tmp = root_moves[0];
-          root_moves[0] = root_moves[r];
-          root_moves[r] = tmp;
-          break;
-        }
-      }
-    }
-
-    // Build PVLines for non-best root moves (r=1..k-1).
-    // PV[0] is already set from the search-tracked principal variation above.
-    num_pvs = k;
-    for (int r = 1; r < k; r++) {
-      PVLine *pv = &multi_pvs[r];
-      pv->moves[0] = root_moves[r];
-      pv->num_moves = 1;
-      pv->score = (int32_t)small_move_get_estimated_value(&root_moves[r]) -
-                  solver->initial_spread;
-      pv->negamax_depth = 1;
-      pv->game = NULL;
-
-      if (solver->transposition_table) {
-        Game *ext_game = game_duplicate(endgame_args->game);
-        pvline_extend_from_tt(pv, ext_game, solver->transposition_table,
-                              solver->solving_player, solver->requested_plies);
-        game_destroy(ext_game);
-      }
-    }
-  }
-
-  // Clean up workers
-  for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
-    solver_worker_destroy(solver_workers[thread_index]);
-  }
-
-  free(solver_workers);
-  free(worker_ids);
-
-  // Calculate elapsed time
-  double elapsed = ctimer_elapsed_seconds(&solve_timer);
-
-  // Extend best PV with TT + greedy playout if incomplete (single-PV case)
-  if (num_top <= 1 &&
-      solver->principal_variation.num_moves < solver->requested_plies &&
-      solver->transposition_table) {
-    Game *ext_game = game_duplicate(endgame_args->game);
-    pvline_extend_from_tt(&solver->principal_variation, ext_game,
-                          solver->transposition_table, solver->solving_player,
-                          solver->requested_plies);
-    game_destroy(ext_game);
-    multi_pvs[0] = solver->principal_variation;
-  }
-
-  // Print final result(s)
-  const LetterDistribution *ld = game_get_ld(endgame_args->game);
-  const int on_turn = game_get_player_on_turn_index(endgame_args->game);
+// Format and log all final PV lines: move-by-move replay, game-end
+// annotations (rack points, 6 zeros), win/loss/tie summary.
+static void log_final_pvs(const PVLine *multi_pvs, int num_pvs,
+                           const EndgameSolver *solver,
+                           const Game *game, double elapsed) {
+  const LetterDistribution *ld = game_get_ld(game);
+  const int on_turn = game_get_player_on_turn_index(game);
   const int p1_score = equity_to_int(
-      player_get_score(game_get_player(endgame_args->game, 0)));
+      player_get_score(game_get_player(game, 0)));
   const int p2_score = equity_to_int(
-      player_get_score(game_get_player(endgame_args->game, 1)));
+      player_get_score(game_get_player(game, 1)));
 
   for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
     const PVLine *pv = &multi_pvs[pv_idx];
     StringBuilder *final_sb = string_builder_create();
     Move move;
-    Game *final_game_copy = game_duplicate(endgame_args->game);
+    Game *final_game_copy = game_duplicate(game);
 
     if (num_pvs > 1) {
       string_builder_add_formatted_string(
@@ -1827,6 +1745,162 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
     string_builder_destroy(final_sb);
     game_destroy(final_game_copy);
   }
+}
+
+// Read root SmallMoves from best thread's arena, swap PV move to front,
+// build PVLines with TT extension for non-best root moves. Returns number
+// of PVs filled. multi_pvs[0] must already be set by caller.
+static int extract_multi_pvs(const EndgameSolver *solver,
+                             EndgameSolverWorker *best_worker,
+                             const Game *game,
+                             PVLine *multi_pvs, int num_top) {
+  int n_root = best_worker->n_initial_moves;
+  int k = (num_top < n_root) ? num_top : n_root;
+  SmallMove *root_moves = (SmallMove *)best_worker->small_move_arena->memory;
+
+  // Root moves are already sorted by estimated_value descending from the
+  // final qsort in iterative_deepening. The estimated_value for each root
+  // move is the actual negamax return value set during the search
+  // (line small_move_set_estimated_value(small_move, -value) at root).
+
+  // Ensure the PV's first move is at root_moves[0] to avoid duplicates.
+  // qsort is not stable, so tied values may place the PV move elsewhere.
+  uint64_t pv_tiny = solver->principal_variation.moves[0].tiny_move;
+  if (root_moves[0].tiny_move != pv_tiny) {
+    for (int r = 1; r < n_root; r++) {
+      if (root_moves[r].tiny_move == pv_tiny) {
+        SmallMove tmp = root_moves[0];
+        root_moves[0] = root_moves[r];
+        root_moves[r] = tmp;
+        break;
+      }
+    }
+  }
+
+  // Build PVLines for non-best root moves (r=1..k-1).
+  // PV[0] is already set from the search-tracked principal variation above.
+  for (int r = 1; r < k; r++) {
+    PVLine *pv = &multi_pvs[r];
+    pv->moves[0] = root_moves[r];
+    pv->num_moves = 1;
+    pv->score = small_move_get_estimated_value(&root_moves[r]) -
+                solver->initial_spread;
+    pv->negamax_depth = 1;
+    pv->game = NULL;
+
+    if (solver->transposition_table) {
+      Game *ext_game = game_duplicate(game);
+      pvline_extend_from_tt(pv, ext_game, solver->transposition_table,
+                            solver->solving_player, solver->requested_plies);
+      game_destroy(ext_game);
+    }
+  }
+  return k;
+}
+
+void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
+                   EndgameResults *results, ErrorStack *error_stack) {
+  const int bag_size = bag_get_letters(game_get_bag(endgame_args->game));
+  if (bag_size != 0) {
+    error_stack_push(error_stack, ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY,
+                     get_formatted_string(
+                         "bag must be empty to solve an endgame, but have %d "
+                         "letters in the bag",
+                         bag_size));
+    return;
+  }
+
+  solver->results = results;
+  endgame_solver_reset(solver, endgame_args);
+
+  Timer solve_timer;
+  ctimer_start(&solve_timer);
+
+  // Compute initial stuck-tile fraction for root move ordering.
+  // Per-node detection in abdada_negamax recomputes this dynamically.
+  solver->initial_opp_stuck_frac = 0.0F;
+  if (solver->use_heuristics) {
+    solver->initial_opp_stuck_frac =
+        compute_initial_stuck_fraction(solver, endgame_args->game);
+  }
+
+  // Generate base seed for ABDADA jitter using current time
+  uint64_t base_seed = (uint64_t)ctime_get_current_time();
+
+  // Kick-off iterative deepening threads (ABDADA)
+  EndgameSolverWorker **solver_workers =
+      malloc_or_die((sizeof(EndgameSolverWorker *)) * solver->threads);
+  cpthread_t *worker_ids =
+      malloc_or_die((sizeof(cpthread_t)) * (solver->threads));
+
+  for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
+    solver_workers[thread_index] =
+        endgame_solver_create_worker(solver, thread_index, base_seed);
+    cpthread_create(&worker_ids[thread_index], solver_worker_start,
+                    solver_workers[thread_index]);
+  }
+
+  // Wait for all threads to complete
+  for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
+    cpthread_join(worker_ids[thread_index]);
+  }
+
+  // ABDADA result aggregation: find the best result among all threads
+  // The thread that completed the deepest search with a valid result wins
+  int best_thread = 0;
+  int best_depth = solver_workers[0]->completed_depth;
+
+  for (int thread_index = 1; thread_index < solver->threads; thread_index++) {
+    int thread_depth = solver_workers[thread_index]->completed_depth;
+    // Prefer deeper completed depth, or same depth from lower-indexed thread
+    if (thread_depth > best_depth) {
+      best_depth = thread_depth;
+      best_thread = thread_index;
+    }
+  }
+
+  // Copy the best result to the solver's principal variation
+  solver->principal_variation = solver_workers[best_thread]->best_pv;
+  solver->best_pv_value = solver_workers[best_thread]->best_pv_value;
+
+  // Multi-PV: extract top-K root moves from best thread's arena before
+  // destroying workers.
+  const int num_top = solver->solve_multiple_variations;
+  int num_pvs = 1;
+  PVLine multi_pvs[MAX_VARIANT_LENGTH];
+  // PV[0] uses the search-tracked principal variation which has the most
+  // accurate move sequence from the actual search.
+  multi_pvs[0] = solver->principal_variation;
+
+  if (num_top > 1) {
+    num_pvs = extract_multi_pvs(solver, solver_workers[best_thread],
+                                endgame_args->game, multi_pvs, num_top);
+  }
+
+  // Clean up workers
+  for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
+    solver_worker_destroy(solver_workers[thread_index]);
+  }
+
+  free(solver_workers);
+  free(worker_ids);
+
+  // Calculate elapsed time
+  double elapsed = ctimer_elapsed_seconds(&solve_timer);
+
+  // Extend best PV with TT + greedy playout if incomplete (single-PV case)
+  if (num_top <= 1 &&
+      solver->principal_variation.num_moves < solver->requested_plies &&
+      solver->transposition_table) {
+    Game *ext_game = game_duplicate(endgame_args->game);
+    pvline_extend_from_tt(&solver->principal_variation, ext_game,
+                          solver->transposition_table, solver->solving_player,
+                          solver->requested_plies);
+    game_destroy(ext_game);
+    multi_pvs[0] = solver->principal_variation;
+  }
+
+  log_final_pvs(multi_pvs, num_pvs, solver, endgame_args->game, elapsed);
 
   // Store results using main's thread-safe API
   solver->principal_variation.score = solver->best_pv_value;

@@ -285,9 +285,11 @@ static inline void update_best_move_or_insert_into_movelist(
     // Only record which tile types from the rack appear in valid moves.
     for (int i = leftstrip; i <= rightstrip; i++) {
       MachineLetter tile = strip[i];
-      if (tile == PLAYED_THROUGH_MARKER)
+      if (tile == PLAYED_THROUGH_MARKER) {
         continue;
+      }
       uint8_t ml_val = get_is_blanked(tile) ? 0 : tile;
+      // NOLINTNEXTLINE(clang-analyzer-core.BitwiseShift)
       gen->tiles_played_bv |= ((uint64_t)1 << ml_val);
     }
     // Early exit when all rack tile types have been seen

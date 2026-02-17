@@ -1,6 +1,7 @@
 #include "../src/ent/transposition_table.h"
 #include <assert.h>
 #include <stdatomic.h>
+#include <stdint.h>
 
 void test_transposition_table(void) {
   // Passing 0 clamps to the platform minimum: 2^24 native, 2^21 WASM.

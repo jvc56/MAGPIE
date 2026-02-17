@@ -1,17 +1,20 @@
 #include "benchmark_endgame_test.h"
 
 #include "../src/compat/ctime.h"
+#include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
+#include "../src/def/letter_distribution_defs.h"
+#include "../src/def/move_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
+#include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/thread_control.h"
-#include "../src/ent/letter_distribution.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
@@ -28,6 +31,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 // Execute config command quietly (suppress stdout during execution)
@@ -180,8 +184,9 @@ static int play_endgame_ab(Game *game, EndgameSolver *solver_a,
     error_stack_destroy(err);
 
     const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
-    if (pv->num_moves == 0)
+    if (pv->num_moves == 0) {
       break;
+    }
 
     SmallMove best = pv->moves[0];
     small_move_to_move(move_list->spare_move, &best,
@@ -273,7 +278,8 @@ static void run_benchmark_ab_full(int new_ply_setting, bool new_heuristics,
     Game *saved_game = game_duplicate(game);
 
     // Game 1: new method plays as on-turn player, old plays as opponent
-    double time_new_1 = 0, time_old_1 = 0;
+    double time_new_1 = 0;
+    double time_old_1 = 0;
     int spread_1 = play_endgame_ab(game, solver_new, &args_new, new_ply,
                                    solver_old, &args_old, old_ply, results,
                                    move_list, &time_new_1, &time_old_1,
@@ -281,7 +287,8 @@ static void run_benchmark_ab_full(int new_ply_setting, bool new_heuristics,
 
     // Game 2: old method plays as on-turn player, new plays as opponent
     game_copy(game, saved_game); // restore position
-    double time_new_2 = 0, time_old_2 = 0;
+    double time_new_2 = 0;
+    double time_old_2 = 0;
     int spread_2 = play_endgame_ab(game, solver_old, &args_old, old_ply,
                                    solver_new, &args_new, new_ply, results,
                                    move_list, &time_old_2, &time_new_2,
@@ -294,12 +301,13 @@ static void run_benchmark_ab_full(int new_ply_setting, bool new_heuristics,
     total_time_new += time_new_1 + time_new_2;
     total_time_old += time_old_1 + time_old_2;
 
-    if (pair_advantage > 0)
+    if (pair_advantage > 0) {
       new_wins++;
-    else if (pair_advantage < 0)
+    } else if (pair_advantage < 0) {
       old_wins++;
-    else
+    } else {
       ties++;
+    }
 
     printf("  Pair %3d: new_spread=%+4d, old_spread=%+4d, "
            "pair_adv=%+4d  (new: %.2fs, old: %.2fs)\n",
@@ -362,9 +370,9 @@ static void run_benchmark_ab_from_cgp(const char *cgp_path,
   log_set_level(LOG_WARN);
 
   char set_cmd[256];
-  snprintf(set_cmd, sizeof(set_cmd),
-           "set -lex CSW21 -threads %d -s1 score -s2 score -r1 small -r2 small",
-           num_threads);
+  (void)snprintf(set_cmd, sizeof(set_cmd),
+                 "set -lex CSW21 -threads %d -s1 score -s2 score -r1 small -r2 small",
+                 num_threads);
   Config *config = config_create_or_die(set_cmd);
 
   EndgameSolver *solver_new = endgame_solver_create();
@@ -398,18 +406,23 @@ static void run_benchmark_ab_from_cgp(const char *cgp_path,
   exec_config_quiet(config, "new");
   Game *game = config_get_game(config);
 
-  FILE *cgp_file = fopen(cgp_path, "r");
+  FILE *cgp_file = fopen(cgp_path, "re");
   if (!cgp_file) {
     log_fatal("Cannot open %s\n", cgp_path);
   }
-  FILE *out = fopen(output_path, "w");
+  FILE *out = fopen(output_path, "we");
   if (!out) {
     log_fatal("Cannot open %s for writing\n", output_path);
   }
 
-  int total_new_spread = 0, total_old_spread = 0;
-  double total_time_new = 0, total_time_old = 0;
-  int num_positions = 0, new_wins = 0, old_wins = 0, ties = 0;
+  int total_new_spread = 0;
+  int total_old_spread = 0;
+  double total_time_new = 0;
+  double total_time_old = 0;
+  int num_positions = 0;
+  int new_wins = 0;
+  int old_wins = 0;
+  int ties = 0;
 
   printf("\n");
   printf("==============================================================\n");
@@ -423,17 +436,21 @@ static void run_benchmark_ab_from_cgp(const char *cgp_path,
   printf("  Threads: %d\n", num_threads);
   printf("==============================================================\n\n");
 
-  fprintf(out, "# A/B: new=%d-ply(h=%s) vs old=%d-ply(h=%s), threads=%d\n",
-          new_ply, new_heuristics ? "true" : "false",
-          old_ply, old_heuristics ? "true" : "false", num_threads);
-  fprintf(out, "# pair,new_spread,old_spread,pair_adv,time_new,time_old,cgp\n");
+  (void)fprintf(out, "# A/B: new=%d-ply(h=%s) vs old=%d-ply(h=%s), threads=%d\n",
+                new_ply, new_heuristics ? "true" : "false",
+                old_ply, old_heuristics ? "true" : "false", num_threads);
+  (void)fprintf(out, "# pair,new_spread,old_spread,pair_adv,time_new,time_old,cgp\n");
 
   char line[4096];
   while (fgets(line, sizeof(line), cgp_file) &&
          (max_pairs <= 0 || num_positions < max_pairs)) {
     size_t len = strlen(line);
-    if (len > 0 && line[len - 1] == '\n') line[len - 1] = '\0';
-    if (line[0] == '\0') continue;
+    if (len > 0 && line[len - 1] == '\n') {
+      line[len - 1] = '\0';
+    }
+    if (line[0] == '\0') {
+      continue;
+    }
 
     load_cgp_or_die(game, line);
     int on_turn = game_get_player_on_turn_index(game);
@@ -442,7 +459,8 @@ static void run_benchmark_ab_from_cgp(const char *cgp_path,
     Game *saved_game = game_duplicate(game);
 
     // Game 1: new plays as on-turn, old plays as opponent
-    double time_new_1 = 0, time_old_1 = 0;
+    double time_new_1 = 0;
+    double time_old_1 = 0;
     int spread_1 = play_endgame_ab(game, solver_new, &args_new, new_ply,
                                    solver_old, &args_old, old_ply, results,
                                    move_list, &time_new_1, &time_old_1,
@@ -450,7 +468,8 @@ static void run_benchmark_ab_from_cgp(const char *cgp_path,
 
     // Game 2: old plays as on-turn, new plays as opponent
     game_copy(game, saved_game);
-    double time_new_2 = 0, time_old_2 = 0;
+    double time_new_2 = 0;
+    double time_old_2 = 0;
     int spread_2 = play_endgame_ab(game, solver_old, &args_old, old_ply,
                                    solver_new, &args_new, new_ply, results,
                                    move_list, &time_old_2, &time_new_2,
@@ -462,14 +481,18 @@ static void run_benchmark_ab_from_cgp(const char *cgp_path,
     total_time_new += time_new_1 + time_new_2;
     total_time_old += time_old_1 + time_old_2;
 
-    if (pair_advantage > 0) new_wins++;
-    else if (pair_advantage < 0) old_wins++;
-    else ties++;
+    if (pair_advantage > 0) {
+      new_wins++;
+    } else if (pair_advantage < 0) {
+      old_wins++;
+    } else {
+      ties++;
+    }
 
-    fprintf(out, "%d,%+d,%+d,%+d,%.2f,%.2f,%s\n",
-            num_positions, spread_1, spread_2, pair_advantage,
-            time_new_1 + time_new_2, time_old_1 + time_old_2, line);
-    fflush(out);
+    (void)fprintf(out, "%d,%+d,%+d,%+d,%.2f,%.2f,%s\n",
+                  num_positions, spread_1, spread_2, pair_advantage,
+                  time_new_1 + time_new_2, time_old_1 + time_old_2, line);
+    (void)fflush(out);
 
     printf("  Pair %3d: new_spread=%+4d, old_spread=%+4d, "
            "pair_adv=%+4d  (new: %.2fs, old: %.2fs)\n",
@@ -480,7 +503,7 @@ static void run_benchmark_ab_from_cgp(const char *cgp_path,
     game_destroy(saved_game);
   }
 
-  fclose(cgp_file);
+  (void)fclose(cgp_file);
 
   int net_advantage = total_new_spread - total_old_spread;
   printf("\n==============================================================\n");
@@ -496,11 +519,11 @@ static void run_benchmark_ab_from_cgp(const char *cgp_path,
   printf("  Time: new=%.2fs, old=%.2fs\n", total_time_new, total_time_old);
   printf("==============================================================\n");
 
-  fprintf(out, "# RESULTS: %d pairs, net=%+d, W/L/T=%d/%d/%d, "
-               "time_new=%.2f, time_old=%.2f\n",
-          num_positions, net_advantage, new_wins, old_wins, ties,
-          total_time_new, total_time_old);
-  fclose(out);
+  (void)fprintf(out, "# RESULTS: %d pairs, net=%+d, W/L/T=%d/%d/%d, "
+                     "time_new=%.2f, time_old=%.2f\n",
+                num_positions, net_advantage, new_wins, old_wins, ties,
+                total_time_new, total_time_old);
+  (void)fclose(out);
 
   endgame_results_destroy(results);
   move_list_destroy(move_list);
@@ -541,7 +564,9 @@ static int play_endgame_solver_vs_movegen(
       error_stack_destroy(err);
 
       const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
-      if (pv->num_moves == 0) break;
+      if (pv->num_moves == 0) {
+        break;
+      }
       SmallMove best = pv->moves[0];
       small_move_to_move(move_list->spare_move, &best, game_get_board(game));
       play_move(move_list->spare_move, game, NULL);
@@ -560,7 +585,9 @@ static int play_endgame_solver_vs_movegen(
       };
       generate_moves(&mg_args);
       *time_mg += ctimer_elapsed_seconds(&t);
-      if (move_list->count == 0) break;
+      if (move_list->count == 0) {
+        break;
+      }
       play_move(move_list->moves[0], game, NULL);
     }
   }
@@ -598,7 +625,9 @@ static int play_endgame_movegen_vs_movegen(
     };
     generate_moves(&mg_args);
     *elapsed += ctimer_elapsed_seconds(&t);
-    if (move_list->count == 0) break;
+    if (move_list->count == 0) {
+      break;
+    }
     play_move(move_list->moves[0], game, NULL);
   }
   int sa = equity_to_int(
@@ -616,10 +645,10 @@ static void run_benchmark_solver_vs_movegen_from_cgp(
   log_set_level(LOG_WARN);
 
   char set_cmd[256];
-  snprintf(set_cmd, sizeof(set_cmd),
-           "set -lex CSW21 -threads %d -s1 equity -s2 equity "
-           "-r1 all -r2 all",
-           num_threads);
+  (void)snprintf(set_cmd, sizeof(set_cmd),
+                 "set -lex CSW21 -threads %d -s1 equity -s2 equity "
+                 "-r1 all -r2 all",
+                 num_threads);
   Config *config = config_create_or_die(set_cmd);
 
   EndgameSolver *solver = endgame_solver_create();
@@ -640,14 +669,23 @@ static void run_benchmark_solver_vs_movegen_from_cgp(
   exec_config_quiet(config, "new");
   Game *game = config_get_game(config);
 
-  FILE *cgp_file = fopen(cgp_path, "r");
-  if (!cgp_file) log_fatal("Cannot open %s\n", cgp_path);
-  FILE *out = fopen(output_path, "w");
-  if (!out) log_fatal("Cannot open %s for writing\n", output_path);
+  FILE *cgp_file = fopen(cgp_path, "re");
+  if (!cgp_file) {
+    log_fatal("Cannot open %s\n", cgp_path);
+  }
+  FILE *out = fopen(output_path, "we");
+  if (!out) {
+    log_fatal("Cannot open %s for writing\n", output_path);
+  }
 
-  int total_solver_spread = 0, total_equity_spread = 0;
-  double total_time_solver = 0, total_time_equity = 0;
-  int num_positions = 0, solver_wins = 0, equity_wins = 0, ties = 0;
+  int total_solver_spread = 0;
+  int total_equity_spread = 0;
+  double total_time_solver = 0;
+  double total_time_equity = 0;
+  int num_positions = 0;
+  int solver_wins = 0;
+  int equity_wins = 0;
+  int ties = 0;
 
   printf("\n");
   printf("==============================================================\n");
@@ -661,18 +699,22 @@ static void run_benchmark_solver_vs_movegen_from_cgp(
   printf("  Max pairs: %d\n", max_pairs);
   printf("==============================================================\n\n");
 
-  fprintf(out, "# solver=%d-ply(h=%s) vs %s_movegen, threads=%d\n",
-          solver_ply, solver_heuristics ? "true" : "false", mg_name,
-          num_threads);
-  fprintf(out, "# pair,solver_spread,equity_spread,pair_adv,"
-               "time_solver,time_equity,cgp\n");
+  (void)fprintf(out, "# solver=%d-ply(h=%s) vs %s_movegen, threads=%d\n",
+                solver_ply, solver_heuristics ? "true" : "false", mg_name,
+                num_threads);
+  (void)fprintf(out, "# pair,solver_spread,equity_spread,pair_adv,"
+                     "time_solver,time_equity,cgp\n");
 
   char line[4096];
   while (fgets(line, sizeof(line), cgp_file) &&
          (max_pairs <= 0 || num_positions < max_pairs)) {
     size_t len = strlen(line);
-    if (len > 0 && line[len - 1] == '\n') line[len - 1] = '\0';
-    if (line[0] == '\0') continue;
+    if (len > 0 && line[len - 1] == '\n') {
+      line[len - 1] = '\0';
+    }
+    if (line[0] == '\0') {
+      continue;
+    }
 
     load_cgp_or_die(game, line);
     int on_turn = game_get_player_on_turn_index(game);
@@ -681,14 +723,16 @@ static void run_benchmark_solver_vs_movegen_from_cgp(
     Game *saved_game = game_duplicate(game);
 
     // Game 1: solver plays as on-turn
-    double ts1 = 0, te1 = 0;
+    double ts1 = 0;
+    double te1 = 0;
     int spread_1 = play_endgame_solver_vs_movegen(
         game, solver, &solver_args, solver_ply, mg_sort_type, results,
         move_list, &ts1, &te1, on_turn);
 
     // Game 2: movegen plays as on-turn (solver as opponent)
     game_copy(game, saved_game);
-    double ts2 = 0, te2 = 0;
+    double ts2 = 0;
+    double te2 = 0;
     int spread_2 = play_endgame_solver_vs_movegen(
         game, solver, &solver_args, solver_ply, mg_sort_type, results,
         move_list, &te2, &ts2, 1 - on_turn);
@@ -701,14 +745,18 @@ static void run_benchmark_solver_vs_movegen_from_cgp(
     total_time_solver += ts1 + ts2;
     total_time_equity += te1 + te2;
 
-    if (pair_advantage > 0) solver_wins++;
-    else if (pair_advantage < 0) equity_wins++;
-    else ties++;
+    if (pair_advantage > 0) {
+      solver_wins++;
+    } else if (pair_advantage < 0) {
+      equity_wins++;
+    } else {
+      ties++;
+    }
 
-    fprintf(out, "%d,%+d,%+d,%+d,%.2f,%.2f,%s\n",
-            num_positions, spread_1, spread_2, pair_advantage,
-            ts1 + ts2, te1 + te2, line);
-    fflush(out);
+    (void)fprintf(out, "%d,%+d,%+d,%+d,%.2f,%.2f,%s\n",
+                  num_positions, spread_1, spread_2, pair_advantage,
+                  ts1 + ts2, te1 + te2, line);
+    (void)fflush(out);
 
     printf("  Pair %3d: solver=%+4d, equity=%+4d, "
            "adv=%+4d  (solver: %.2fs, equity: %.2fs)\n",
@@ -719,7 +767,7 @@ static void run_benchmark_solver_vs_movegen_from_cgp(
     game_destroy(saved_game);
   }
 
-  fclose(cgp_file);
+  (void)fclose(cgp_file);
 
   int net = total_solver_spread - total_equity_spread;
   printf("\n==============================================================\n");
@@ -737,11 +785,11 @@ static void run_benchmark_solver_vs_movegen_from_cgp(
          total_time_solver, total_time_equity);
   printf("==============================================================\n");
 
-  fprintf(out, "# RESULTS: %d pairs, net=%+d, W/L/T=%d/%d/%d, "
-               "time_solver=%.2f, time_equity=%.2f\n",
-          num_positions, net, solver_wins, equity_wins, ties,
-          total_time_solver, total_time_equity);
-  fclose(out);
+  (void)fprintf(out, "# RESULTS: %d pairs, net=%+d, W/L/T=%d/%d/%d, "
+                     "time_solver=%.2f, time_equity=%.2f\n",
+                num_positions, net, solver_wins, equity_wins, ties,
+                total_time_solver, total_time_equity);
+  (void)fclose(out);
 
   endgame_results_destroy(results);
   move_list_destroy(move_list);
@@ -773,40 +821,55 @@ void test_benchmark_score_vs_equity(void) {
   Game *game = config_get_game(config);
   MoveList *move_list = move_list_create(1);
 
-  FILE *cgp_file = fopen("/tmp/clean_positions.cgp", "r");
-  if (!cgp_file) log_fatal("Cannot open /tmp/clean_positions.cgp\n");
-  FILE *out = fopen("/tmp/ab_score_vs_equity.csv", "w");
-  if (!out) log_fatal("Cannot open output\n");
+  FILE *cgp_file = fopen("/tmp/clean_positions.cgp", "re");
+  if (!cgp_file) {
+    log_fatal("Cannot open /tmp/clean_positions.cgp\n");
+  }
+  FILE *out = fopen("/tmp/ab_score_vs_equity.csv", "we");
+  if (!out) {
+    log_fatal("Cannot open output\n");
+  }
 
-  int total_score_spread = 0, total_eq_spread = 0;
-  double total_time_score = 0, total_time_eq = 0;
-  int n = 0, score_wins = 0, eq_wins = 0, ties = 0;
+  int total_score_spread = 0;
+  int total_eq_spread = 0;
+  double total_time_score = 0;
+  double total_time_eq = 0;
+  int n = 0;
+  int score_wins = 0;
+  int eq_wins = 0;
+  int ties = 0;
   const int max_pairs = 1000;
 
   printf("\n==============================================================\n");
   printf("  Score vs Equity Movegen, max %d pairs\n", max_pairs);
   printf("==============================================================\n\n");
-  fprintf(out, "# score_movegen vs equity_movegen\n");
-  fprintf(out, "# pair,score_spread,equity_spread,pair_adv,time_score,time_eq,cgp\n");
+  (void)fprintf(out, "# score_movegen vs equity_movegen\n");
+  (void)fprintf(out, "# pair,score_spread,equity_spread,pair_adv,time_score,time_eq,cgp\n");
 
   char line[4096];
   while (fgets(line, sizeof(line), cgp_file) && n < max_pairs) {
     size_t len = strlen(line);
-    if (len > 0 && line[len - 1] == '\n') line[len - 1] = '\0';
-    if (line[0] == '\0') continue;
+    if (len > 0 && line[len - 1] == '\n') {
+      line[len - 1] = '\0';
+    }
+    if (line[0] == '\0') {
+      continue;
+    }
 
     load_cgp_or_die(game, line);
     int on_turn = game_get_player_on_turn_index(game);
     n++;
     Game *saved = game_duplicate(game);
 
-    double ts1 = 0, te1 = 0;
+    double ts1 = 0;
+    double te1 = 0;
     int spread_1 = play_endgame_movegen_vs_movegen(
         game, MOVE_SORT_SCORE, MOVE_SORT_EQUITY, move_list,
         &ts1, &te1, on_turn);
 
     game_copy(game, saved);
-    double ts2 = 0, te2 = 0;
+    double ts2 = 0;
+    double te2 = 0;
     int spread_2 = play_endgame_movegen_vs_movegen(
         game, MOVE_SORT_EQUITY, MOVE_SORT_SCORE, move_list,
         &te2, &ts2, on_turn);
@@ -817,19 +880,23 @@ void test_benchmark_score_vs_equity(void) {
     total_eq_spread += spread_2;
     total_time_score += ts1 + ts2;
     total_time_eq += te1 + te2;
-    if (adv > 0) score_wins++;
-    else if (adv < 0) eq_wins++;
-    else ties++;
+    if (adv > 0) {
+      score_wins++;
+    } else if (adv < 0) {
+      eq_wins++;
+    } else {
+      ties++;
+    }
 
-    fprintf(out, "%d,%+d,%+d,%+d,%.2f,%.2f,%s\n",
-            n, spread_1, spread_2, adv, ts1 + ts2, te1 + te2, line);
-    fflush(out);
+    (void)fprintf(out, "%d,%+d,%+d,%+d,%.2f,%.2f,%s\n",
+                  n, spread_1, spread_2, adv, ts1 + ts2, te1 + te2, line);
+    (void)fflush(out);
     printf("  Pair %3d: score=%+4d, equity=%+4d, adv=%+4d\n",
            n, spread_1, spread_2, adv);
     fflush(stdout);
     game_destroy(saved);
   }
-  fclose(cgp_file);
+  (void)fclose(cgp_file);
 
   int net = total_score_spread - total_eq_spread;
   printf("\n==============================================================\n");
@@ -841,9 +908,9 @@ void test_benchmark_score_vs_equity(void) {
   printf("  Time: score=%.2fs, equity=%.2fs\n",
          total_time_score, total_time_eq);
   printf("==============================================================\n");
-  fprintf(out, "# RESULTS: %d pairs, net=%+d, W/L/T=%d/%d/%d\n",
-          n, net, score_wins, eq_wins, ties);
-  fclose(out);
+  (void)fprintf(out, "# RESULTS: %d pairs, net=%+d, W/L/T=%d/%d/%d\n",
+                n, net, score_wins, eq_wins, ties);
+  (void)fclose(out);
   move_list_destroy(move_list);
   config_destroy(config);
 }
@@ -954,8 +1021,9 @@ static void run_benchmark_selfplay(int ply, int num_positions,
       error_stack_destroy(err);
 
       const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
-      if (pv->num_moves == 0)
+      if (pv->num_moves == 0) {
         break;
+      }
 
       SmallMove best = pv->moves[0];
       small_move_to_move(move_list->spare_move, &best,
@@ -1061,8 +1129,9 @@ static void run_benchmark_thread_scaling(int ply, int num_positions,
         error_stack_destroy(err);
 
         const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
-        if (pv->num_moves == 0)
+        if (pv->num_moves == 0) {
           break;
+        }
 
         SmallMove best = pv->moves[0];
         small_move_to_move(move_list->spare_move, &best,
@@ -1148,7 +1217,8 @@ static float compute_stuck_fraction(Game *game, MoveList *move_list,
 
   const Rack *rack = player_get_rack(game_get_player(game, player_idx));
   const LetterDistribution *ld = game_get_ld(game);
-  int total = 0, stuck = 0;
+  int total = 0;
+  int stuck = 0;
   int ld_size = ld_get_size(ld);
   for (int ml = 0; ml < ld_size; ml++) {
     int count = rack_get_letter(rack, ml);
@@ -1159,7 +1229,9 @@ static float compute_stuck_fraction(Game *game, MoveList *move_list,
       }
     }
   }
-  if (total == 0) return 0.0f;
+  if (total == 0) {
+    return 0.0F;
+  }
   return (float)stuck / (float)total;
 }
 
@@ -1188,8 +1260,8 @@ void test_stuck_tile_survey(void) {
   int valid_positions = 0;
 
   // Write CGPs to files
-  FILE *cgp_stuck = fopen("/tmp/stuck_tile_positions.cgp", "w");
-  FILE *cgp_clean = fopen("/tmp/clean_positions.cgp", "w");
+  FILE *cgp_stuck = fopen("/tmp/stuck_tile_positions.cgp", "we");
+  FILE *cgp_clean = fopen("/tmp/clean_positions.cgp", "we");
   assert(cgp_stuck);
   assert(cgp_clean);
   int stuck_count = 0;
@@ -1219,19 +1291,27 @@ void test_stuck_tile_survey(void) {
       float frac_p1 = compute_stuck_fraction(game, move_list, 1);
       float max_frac = frac_p0 > frac_p1 ? frac_p0 : frac_p1;
 
-      if (max_frac > 0.0f) {
+      if (max_frac > 0.0F) {
         any_stuck_at_depth[d]++;
         found_stuck = true;
       }
 
       int bucket;
-      if (max_frac == 0.0f) bucket = 0;
-      else if (max_frac < 0.20f) bucket = 1;
-      else if (max_frac < 0.40f) bucket = 2;
-      else if (max_frac < 0.60f) bucket = 3;
-      else if (max_frac < 0.80f) bucket = 4;
-      else if (max_frac < 1.00f) bucket = 5;
-      else bucket = 6;
+      if (max_frac == 0.0F) {
+        bucket = 0;
+      } else if (max_frac < 0.20F) {
+        bucket = 1;
+      } else if (max_frac < 0.40F) {
+        bucket = 2;
+      } else if (max_frac < 0.60F) {
+        bucket = 3;
+      } else if (max_frac < 0.80F) {
+        bucket = 4;
+      } else if (max_frac < 1.00F) {
+        bucket = 5;
+      } else {
+        bucket = 6;
+      }
       buckets[d][bucket]++;
 
       // Play greedy best move to advance to depth 1
@@ -1249,7 +1329,9 @@ void test_stuck_tile_survey(void) {
             .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
         };
         generate_moves(&mg_args);
-        if (move_list->count == 0) break;
+        if (move_list->count == 0) {
+          break;
+        }
         play_move(move_list->moves[0], game, NULL);
       }
     }
@@ -1257,10 +1339,10 @@ void test_stuck_tile_survey(void) {
     char *cgp = game_get_cgp(saved, true);
     if (found_stuck) {
       ever_stuck++;
-      fprintf(cgp_stuck, "%s\n", cgp);
+      (void)fprintf(cgp_stuck, "%s\n", cgp);
       stuck_count++;
     } else {
-      fprintf(cgp_clean, "%s\n", cgp);
+      (void)fprintf(cgp_clean, "%s\n", cgp);
       clean_count++;
     }
     free(cgp);
@@ -1269,8 +1351,8 @@ void test_stuck_tile_survey(void) {
     game_destroy(saved);
   }
 
-  fclose(cgp_stuck);
-  fclose(cgp_clean);
+  (void)fclose(cgp_stuck);
+  (void)fclose(cgp_clean);
   assert(valid_positions == num_positions);
 
   printf("\n");
@@ -1291,8 +1373,12 @@ void test_stuck_tile_survey(void) {
 
   for (int d = 0; d <= 1; d++) {
     int reached = 0;
-    for (int b = 0; b < NUM_BUCKETS; b++) reached += buckets[d][b];
-    if (reached == 0) break;
+    for (int b = 0; b < NUM_BUCKETS; b++) {
+      reached += buckets[d][b];
+    }
+    if (reached == 0) {
+      break;
+    }
 
     printf("  Depth %d: %d/%d have stuck tiles (%.1f%%)\n",
            d, any_stuck_at_depth[d], reached,
@@ -1331,28 +1417,28 @@ void test_stuck_letter_frequency(void) {
     // Copy TWL06.klv2 as CEL22.klv2 if needed
     const char *src = "data/lexica/TWL06.klv2";
     const char *dst = "data/lexica/CEL22.klv2";
-    FILE *check = fopen(dst, "r");
+    FILE *check = fopen(dst, "re");
     if (!check) {
-      FILE *in = fopen(src, "rb");
+      FILE *in = fopen(src, "rbe");
       assert(in);
-      FILE *out = fopen(dst, "wb");
+      FILE *out = fopen(dst, "wbe");
       assert(out);
       char buf[8192];
       size_t n;
       while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
-        fwrite(buf, 1, n, out);
+        (void)fwrite(buf, 1, n, out);
       }
-      fclose(in);
-      fclose(out);
+      (void)fclose(in);
+      (void)fclose(out);
     } else {
-      fclose(check);
+      (void)fclose(check);
     }
   }
 
   char lex_cmd[256];
-  snprintf(lex_cmd, sizeof(lex_cmd),
-           "set -lex %s -threads 1 -s1 score -s2 score -r1 small -r2 small",
-           lex);
+  (void)snprintf(lex_cmd, sizeof(lex_cmd),
+                 "set -lex %s -threads 1 -s1 score -s2 score -r1 small -r2 small",
+                 lex);
   Config *config = config_create_or_die(lex_cmd);
   MoveList *move_list = move_list_create(1);
   exec_config_quiet(config, "new");
@@ -1384,11 +1470,15 @@ void test_stuck_letter_frequency(void) {
     bool found_stuck = false;
 
     for (int d = 0; d <= 1; d++) {
-      if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) break;
+      if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
+        break;
+      }
 
       for (int p = 0; p < 2; p++) {
         const Rack *rack = player_get_rack(game_get_player(game, p));
-        if (rack_get_total_letters(rack) == 0) continue;
+        if (rack_get_total_letters(rack) == 0) {
+          continue;
+        }
 
         int current_on_turn = game_get_player_on_turn_index(game);
         if (current_on_turn != p) {
@@ -1442,19 +1532,25 @@ void test_stuck_letter_frequency(void) {
             .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
         };
         generate_moves(&mg_args);
-        if (move_list->count == 0) break;
+        if (move_list->count == 0) {
+          break;
+        }
         play_move(move_list->moves[0], game, NULL);
       }
     }
 
-    if (found_stuck) stuck_found++;
+    if (found_stuck) {
+      stuck_found++;
+    }
     game_copy(game, saved);
     game_destroy(saved);
   }
 
   // Sort by stuck count descending
   int order[MAX_ALPHABET_SIZE];
-  for (int i = 0; i < ld_size; i++) order[i] = i;
+  for (int i = 0; i < ld_size; i++) {
+    order[i] = i;
+  }
   for (int i = 0; i < ld_size - 1; i++) {
     for (int j = i + 1; j < ld_size; j++) {
       if (stuck_counts[order[j]] > stuck_counts[order[i]]) {
@@ -1477,11 +1573,13 @@ void test_stuck_letter_frequency(void) {
 
   for (int i = 0; i < ld_size; i++) {
     int ml = order[i];
-    if (stuck_counts[ml] == 0) break;
+    if (stuck_counts[ml] == 0) {
+      break;
+    }
     char *letter = ld_ml_to_hl(ld, ml);
     float rate = rack_counts[ml] > 0
-                     ? 100.0f * stuck_counts[ml] / rack_counts[ml]
-                     : 0.0f;
+                     ? 100.0F * (float)stuck_counts[ml] / (float)rack_counts[ml]
+                     : 0.0F;
     printf("  %-8s %6d  %6d  %7.1f%%\n", letter, stuck_counts[ml],
            rack_counts[ml], (double)rate);
     free(letter);
