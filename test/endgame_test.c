@@ -37,8 +37,7 @@ static void append_outcome(StringBuilder *sb, const Game *game,
   if (final_spread > 0) {
     string_builder_add_formatted_string(sb, " [P1 wins by %d]", final_spread);
   } else if (final_spread < 0) {
-    string_builder_add_formatted_string(sb, " [P2 wins by %d]",
-                                        -final_spread);
+    string_builder_add_formatted_string(sb, " [P2 wins by %d]", -final_spread);
   } else {
     string_builder_add_string(sb, " [Tie]");
   }
@@ -331,12 +330,11 @@ void test_kue(void) {
       "set -s1 score -s2 score -r1 small -r2 small -eplies 14 "
       "-ttfraction 0.5");
   load_and_exec_config_or_die(
-      config,
-      "cgp "
-      "6MOO1VIRLS/1EJECTA6A1/2I2AEON4R1/2BAH6X1N1/2SLID4GIFTS/"
-      "4DONG1OR1R1i/7HOURLY1Z/FE4DINT1A2Y/RECLINE2I1N3/"
-      "EW1ATAP2E1G3/M10U3/D3PATOOTIE3/15/15/15 "
-      "?AEEKSU/BEIQUVW 276/321 0 -lex NWL23;");
+      config, "cgp "
+              "6MOO1VIRLS/1EJECTA6A1/2I2AEON4R1/2BAH6X1N1/2SLID4GIFTS/"
+              "4DONG1OR1R1i/7HOURLY1Z/FE4DINT1A2Y/RECLINE2I1N3/"
+              "EW1ATAP2E1G3/M10U3/D3PATOOTIE3/15/15/15 "
+              "?AEEKSU/BEIQUVW 276/321 0 -lex NWL23;");
 
   EndgameSolver *endgame_solver = endgame_solver_create();
   Game *game = config_get_game(config);
@@ -398,14 +396,13 @@ void test_monster_q(void) {
   Config *config = config_create_or_die(
       "set -s1 score -s2 score -r1 small -r2 small -eplies 6 "
       "-ttfraction 0.5");
-  load_and_exec_config_or_die(
-      config,
-      "cgp "
-      "5LEX1AFFORD/3SNOWIER1Y3/2V8T3/1DO6J1T3/1AG6OKE3/"
-      "1U7YE3N/1B8T3E/ERICA2GARTH2V/1I2MIAOW1L3U/"
-      "PE6AZIONES/OS8n4/L6DINGBATS/I14/COULEE9/"
-      "E3HARN7 "
-      "ADEIIU?/MNPQRT 369/399 0 -lex CSW21;");
+  load_and_exec_config_or_die(config,
+                              "cgp "
+                              "5LEX1AFFORD/3SNOWIER1Y3/2V8T3/1DO6J1T3/1AG6OKE3/"
+                              "1U7YE3N/1B8T3E/ERICA2GARTH2V/1I2MIAOW1L3U/"
+                              "PE6AZIONES/OS8n4/L6DINGBATS/I14/COULEE9/"
+                              "E3HARN7 "
+                              "ADEIIU?/MNPQRT 369/399 0 -lex CSW21;");
 
   EndgameSolver *endgame_solver = endgame_solver_create();
   Game *game = config_get_game(config);
@@ -453,11 +450,10 @@ void test_multi_pv(void) {
   Config *config = config_create_or_die(
       "set -s1 score -s2 score -r1 small -r2 small -eplies 4");
   load_and_exec_config_or_die(
-      config,
-      "cgp "
-      "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
-      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
-      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
+      config, "cgp "
+              "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+              "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+              "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
 
   // First: solve single-PV to get the reference best value
   EndgameSolver *endgame_solver = endgame_solver_create();

@@ -189,14 +189,13 @@ static int play_endgame_ab(Game *game, EndgameSolver *solver_a,
     }
 
     SmallMove best = pv->moves[0];
-    small_move_to_move(move_list->spare_move, &best,
-                       game_get_board(game));
+    small_move_to_move(move_list->spare_move, &best, game_get_board(game));
     play_move(move_list->spare_move, game, NULL);
   }
   int score_a =
       equity_to_int(player_get_score(game_get_player(game, player_a_idx)));
-  int score_b = equity_to_int(
-      player_get_score(game_get_player(game, 1 - player_a_idx)));
+  int score_b =
+      equity_to_int(player_get_score(game_get_player(game, 1 - player_a_idx)));
   return score_a - score_b;
 }
 
@@ -254,12 +253,11 @@ static void run_benchmark_ab_full(int new_ply_setting, bool new_heuristics,
   printf("==============================================================\n");
   int new_ply = args_new.plies;
   int old_ply = args_old.plies;
-  printf("  A/B Endgame Benchmark: %d positions, game pairs\n",
-         num_positions);
-  printf("  Method A (new): %d-ply, heuristics=%s\n",
-         new_ply, new_heuristics ? "true" : "false");
-  printf("  Method B (old): %d-ply, heuristics=%s\n",
-         old_ply, old_heuristics ? "true" : "false");
+  printf("  A/B Endgame Benchmark: %d positions, game pairs\n", num_positions);
+  printf("  Method A (new): %d-ply, heuristics=%s\n", new_ply,
+         new_heuristics ? "true" : "false");
+  printf("  Method B (old): %d-ply, heuristics=%s\n", old_ply,
+         old_heuristics ? "true" : "false");
   printf("==============================================================\n\n");
 
   for (int i = 0; valid_positions < num_positions && i < max_attempts; i++) {
@@ -280,19 +278,17 @@ static void run_benchmark_ab_full(int new_ply_setting, bool new_heuristics,
     // Game 1: new method plays as on-turn player, old plays as opponent
     double time_new_1 = 0;
     double time_old_1 = 0;
-    int spread_1 = play_endgame_ab(game, solver_new, &args_new, new_ply,
-                                   solver_old, &args_old, old_ply, results,
-                                   move_list, &time_new_1, &time_old_1,
-                                   on_turn);
+    int spread_1 = play_endgame_ab(
+        game, solver_new, &args_new, new_ply, solver_old, &args_old, old_ply,
+        results, move_list, &time_new_1, &time_old_1, on_turn);
 
     // Game 2: old method plays as on-turn player, new plays as opponent
     game_copy(game, saved_game); // restore position
     double time_new_2 = 0;
     double time_old_2 = 0;
-    int spread_2 = play_endgame_ab(game, solver_old, &args_old, old_ply,
-                                   solver_new, &args_new, new_ply, results,
-                                   move_list, &time_old_2, &time_new_2,
-                                   on_turn);
+    int spread_2 = play_endgame_ab(
+        game, solver_old, &args_old, old_ply, solver_new, &args_new, new_ply,
+        results, move_list, &time_old_2, &time_new_2, on_turn);
 
     // spread_1 is from new's perspective, spread_2 is from old's perspective
     int pair_advantage = spread_1 - spread_2;
@@ -343,7 +339,7 @@ static void run_benchmark_ab_full(int new_ply_setting, bool new_heuristics,
 
 // Convenience wrapper: new=heuristics, old=classic
 static void run_benchmark_ab(int new_ply, int old_ply, int num_positions,
-                              uint64_t base_seed) {
+                             uint64_t base_seed) {
   run_benchmark_ab_full(new_ply, true, old_ply, false, num_positions,
                         base_seed);
 }
@@ -354,7 +350,9 @@ void test_benchmark_endgame_ab_2v3(void) { run_benchmark_ab(2, 3, 50, 42); }
 
 void test_benchmark_endgame_ab_3v4(void) { run_benchmark_ab(3, 4, 50, 42); }
 
-void test_benchmark_endgame_ab_4v5(void) { run_benchmark_ab(4, 5, 10000, 1337); }
+void test_benchmark_endgame_ab_4v5(void) {
+  run_benchmark_ab(4, 5, 10000, 1337);
+}
 
 void test_benchmark_endgame_ab_4v5h(void) {
   run_benchmark_ab_full(4, true, 5, true, 50, 42);
@@ -363,16 +361,17 @@ void test_benchmark_endgame_ab_4v5h(void) {
 // A/B benchmark loading positions from a CGP file.
 // Writes per-game results (CGP, moves, scores) to output_path.
 static void run_benchmark_ab_from_cgp(const char *cgp_path,
-                                       const char *output_path,
-                                       int new_ply, bool new_heuristics,
-                                       int old_ply, bool old_heuristics,
-                                       int num_threads, int max_pairs) {
+                                      const char *output_path, int new_ply,
+                                      bool new_heuristics, int old_ply,
+                                      bool old_heuristics, int num_threads,
+                                      int max_pairs) {
   log_set_level(LOG_WARN);
 
   char set_cmd[256];
-  (void)snprintf(set_cmd, sizeof(set_cmd),
-                 "set -lex CSW21 -threads %d -s1 score -s2 score -r1 small -r2 small",
-                 num_threads);
+  (void)snprintf(
+      set_cmd, sizeof(set_cmd),
+      "set -lex CSW21 -threads %d -s1 score -s2 score -r1 small -r2 small",
+      num_threads);
   Config *config = config_create_or_die(set_cmd);
 
   EndgameSolver *solver_new = endgame_solver_create();
@@ -431,17 +430,19 @@ static void run_benchmark_ab_from_cgp(const char *cgp_path,
   printf("  A/B Endgame Benchmark from CGP file\n");
   printf("  Source: %s\n", cgp_path);
   printf("  Output: %s\n", output_path);
-  printf("  Method A (new): %d-ply, heuristics=%s\n",
-         new_ply, new_heuristics ? "true" : "false");
-  printf("  Method B (old): %d-ply, heuristics=%s\n",
-         old_ply, old_heuristics ? "true" : "false");
+  printf("  Method A (new): %d-ply, heuristics=%s\n", new_ply,
+         new_heuristics ? "true" : "false");
+  printf("  Method B (old): %d-ply, heuristics=%s\n", old_ply,
+         old_heuristics ? "true" : "false");
   printf("  Threads: %d\n", num_threads);
   printf("==============================================================\n\n");
 
-  (void)fprintf(out, "# A/B: new=%d-ply(h=%s) vs old=%d-ply(h=%s), threads=%d\n",
-                new_ply, new_heuristics ? "true" : "false",
-                old_ply, old_heuristics ? "true" : "false", num_threads);
-  (void)fprintf(out, "# pair,new_spread,old_spread,pair_adv,time_new,time_old,cgp\n");
+  (void)fprintf(out,
+                "# A/B: new=%d-ply(h=%s) vs old=%d-ply(h=%s), threads=%d\n",
+                new_ply, new_heuristics ? "true" : "false", old_ply,
+                old_heuristics ? "true" : "false", num_threads);
+  (void)fprintf(
+      out, "# pair,new_spread,old_spread,pair_adv,time_new,time_old,cgp\n");
 
   char line[4096];
   while (fgets(line, sizeof(line), cgp_file) &&
@@ -463,19 +464,17 @@ static void run_benchmark_ab_from_cgp(const char *cgp_path,
     // Game 1: new plays as on-turn, old plays as opponent
     double time_new_1 = 0;
     double time_old_1 = 0;
-    int spread_1 = play_endgame_ab(game, solver_new, &args_new, new_ply,
-                                   solver_old, &args_old, old_ply, results,
-                                   move_list, &time_new_1, &time_old_1,
-                                   on_turn);
+    int spread_1 = play_endgame_ab(
+        game, solver_new, &args_new, new_ply, solver_old, &args_old, old_ply,
+        results, move_list, &time_new_1, &time_old_1, on_turn);
 
     // Game 2: old plays as on-turn, new plays as opponent
     game_copy(game, saved_game);
     double time_new_2 = 0;
     double time_old_2 = 0;
-    int spread_2 = play_endgame_ab(game, solver_old, &args_old, old_ply,
-                                   solver_new, &args_new, new_ply, results,
-                                   move_list, &time_old_2, &time_new_2,
-                                   on_turn);
+    int spread_2 = play_endgame_ab(
+        game, solver_old, &args_old, old_ply, solver_new, &args_new, new_ply,
+        results, move_list, &time_old_2, &time_new_2, on_turn);
 
     int pair_advantage = spread_1 - spread_2;
     total_new_spread += spread_1;
@@ -491,9 +490,9 @@ static void run_benchmark_ab_from_cgp(const char *cgp_path,
       ties++;
     }
 
-    (void)fprintf(out, "%d,%+d,%+d,%+d,%.2f,%.2f,%s\n",
-                  num_positions, spread_1, spread_2, pair_advantage,
-                  time_new_1 + time_new_2, time_old_1 + time_old_2, line);
+    (void)fprintf(out, "%d,%+d,%+d,%+d,%.2f,%.2f,%s\n", num_positions, spread_1,
+                  spread_2, pair_advantage, time_new_1 + time_new_2,
+                  time_old_1 + time_old_2, line);
     (void)fflush(out);
 
     printf("  Pair %3d: new_spread=%+4d, old_spread=%+4d, "
@@ -521,8 +520,9 @@ static void run_benchmark_ab_from_cgp(const char *cgp_path,
   printf("  Time: new=%.2fs, old=%.2fs\n", total_time_new, total_time_old);
   printf("==============================================================\n");
 
-  (void)fprintf(out, "# RESULTS: %d pairs, net=%+d, W/L/T=%d/%d/%d, "
-                     "time_new=%.2f, time_old=%.2f\n",
+  (void)fprintf(out,
+                "# RESULTS: %d pairs, net=%+d, W/L/T=%d/%d/%d, "
+                "time_new=%.2f, time_old=%.2f\n",
                 num_positions, net_advantage, new_wins, old_wins, ties,
                 total_time_new, total_time_old);
   (void)fclose(out);
@@ -537,10 +537,10 @@ static void run_benchmark_ab_from_cgp(const char *cgp_path,
 // Static eval (1-ply) vs 2-ply heuristic on clean (nonstuck) positions
 void test_benchmark_ab_clean_1v2h(void) {
   run_benchmark_ab_from_cgp("/tmp/clean_positions.cgp",
-                             "/tmp/ab_clean_1v2h.csv",
-                             2, true,   // new: 2-ply heuristic
-                             1, false,  // old: 1-ply static
-                             6, 1000);
+                            "/tmp/ab_clean_1v2h.csv", 2,
+                            true,     // new: 2-ply heuristic
+                            1, false, // old: 1-ply static
+                            6, 1000);
 }
 
 // Play an endgame where one side uses endgame solver and the other uses
@@ -565,7 +565,8 @@ static int play_endgame_solver_vs_movegen(
       assert(error_stack_is_empty(err));
       error_stack_destroy(err);
 
-      const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+      const PVLine *pv =
+          endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
       if (pv->num_moves == 0) {
         break;
       }
@@ -593,8 +594,8 @@ static int play_endgame_solver_vs_movegen(
       play_move(move_list->moves[0], game, NULL);
     }
   }
-  int score_s = equity_to_int(
-      player_get_score(game_get_player(game, solver_player_idx)));
+  int score_s =
+      equity_to_int(player_get_score(game_get_player(game, solver_player_idx)));
   int score_e = equity_to_int(
       player_get_score(game_get_player(game, 1 - solver_player_idx)));
   return score_s - score_e;
@@ -602,10 +603,10 @@ static int play_endgame_solver_vs_movegen(
 
 // Play an endgame where both sides use movegen with different sort types.
 // Returns final spread from player_a's perspective.
-static int play_endgame_movegen_vs_movegen(
-    Game *game, move_sort_t sort_a, move_sort_t sort_b,
-    MoveList *move_list, double *time_a, double *time_b,
-    int player_a_idx) {
+static int play_endgame_movegen_vs_movegen(Game *game, move_sort_t sort_a,
+                                           move_sort_t sort_b,
+                                           MoveList *move_list, double *time_a,
+                                           double *time_b, int player_a_idx) {
   while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
     int on_turn = game_get_player_on_turn_index(game);
     move_sort_t sort = (on_turn == player_a_idx) ? sort_a : sort_b;
@@ -632,10 +633,9 @@ static int play_endgame_movegen_vs_movegen(
     }
     play_move(move_list->moves[0], game, NULL);
   }
-  int sa = equity_to_int(
-      player_get_score(game_get_player(game, player_a_idx)));
-  int sb = equity_to_int(
-      player_get_score(game_get_player(game, 1 - player_a_idx)));
+  int sa = equity_to_int(player_get_score(game_get_player(game, player_a_idx)));
+  int sb =
+      equity_to_int(player_get_score(game_get_player(game, 1 - player_a_idx)));
   return sa - sb;
 }
 
@@ -697,8 +697,8 @@ static void run_benchmark_solver_vs_movegen_from_cgp(
   printf("  Solver vs %s Movegen Benchmark\n", mg_name);
   printf("  Source: %s\n", cgp_path);
   printf("  Output: %s\n", output_path);
-  printf("  Solver: %d-ply, heuristics=%s, threads=%d\n",
-         solver_ply, solver_heuristics ? "true" : "false", num_threads);
+  printf("  Solver: %d-ply, heuristics=%s, threads=%d\n", solver_ply,
+         solver_heuristics ? "true" : "false", num_threads);
   printf("  Movegen: greedy best-%s move\n", mg_name);
   printf("  Max pairs: %d\n", max_pairs);
   printf("==============================================================\n\n");
@@ -757,15 +757,14 @@ static void run_benchmark_solver_vs_movegen_from_cgp(
       ties++;
     }
 
-    (void)fprintf(out, "%d,%+d,%+d,%+d,%.2f,%.2f,%s\n",
-                  num_positions, spread_1, spread_2, pair_advantage,
-                  ts1 + ts2, te1 + te2, line);
+    (void)fprintf(out, "%d,%+d,%+d,%+d,%.2f,%.2f,%s\n", num_positions, spread_1,
+                  spread_2, pair_advantage, ts1 + ts2, te1 + te2, line);
     (void)fflush(out);
 
     printf("  Pair %3d: solver=%+4d, equity=%+4d, "
            "adv=%+4d  (solver: %.2fs, equity: %.2fs)\n",
-           num_positions, spread_1, spread_2, pair_advantage,
-           ts1 + ts2, te1 + te2);
+           num_positions, spread_1, spread_2, pair_advantage, ts1 + ts2,
+           te1 + te2);
     (void)fflush(stdout);
 
     game_destroy(saved_game);
@@ -783,14 +782,15 @@ static void run_benchmark_solver_vs_movegen_from_cgp(
          num_positions > 0 ? (double)total_equity_spread / num_positions : 0.0);
   printf("  Net advantage (solver): %+d (avg %+.1f per pair)\n", net,
          num_positions > 0 ? (double)net / num_positions : 0.0);
-  printf("  Pair wins: solver=%d, equity=%d, ties=%d\n",
-         solver_wins, equity_wins, ties);
-  printf("  Time: solver=%.2fs, equity=%.2fs\n",
-         total_time_solver, total_time_equity);
+  printf("  Pair wins: solver=%d, equity=%d, ties=%d\n", solver_wins,
+         equity_wins, ties);
+  printf("  Time: solver=%.2fs, equity=%.2fs\n", total_time_solver,
+         total_time_equity);
   printf("==============================================================\n");
 
-  (void)fprintf(out, "# RESULTS: %d pairs, net=%+d, W/L/T=%d/%d/%d, "
-                     "time_solver=%.2f, time_equity=%.2f\n",
+  (void)fprintf(out,
+                "# RESULTS: %d pairs, net=%+d, W/L/T=%d/%d/%d, "
+                "time_solver=%.2f, time_equity=%.2f\n",
                 num_positions, net, solver_wins, equity_wins, ties,
                 total_time_solver, total_time_equity);
   (void)fclose(out);
@@ -803,16 +803,16 @@ static void run_benchmark_solver_vs_movegen_from_cgp(
 
 // Equity movegen vs 2-ply heuristic solver on clean positions
 void test_benchmark_equity_vs_2ply(void) {
-  run_benchmark_solver_vs_movegen_from_cgp(
-      "/tmp/clean_positions.cgp", "/tmp/ab_equity_vs_2plyh.csv",
-      2, true, MOVE_SORT_EQUITY, 6, 1000);
+  run_benchmark_solver_vs_movegen_from_cgp("/tmp/clean_positions.cgp",
+                                           "/tmp/ab_equity_vs_2plyh.csv", 2,
+                                           true, MOVE_SORT_EQUITY, 6, 1000);
 }
 
 // Equity movegen vs 3-ply heuristic solver on clean positions
 void test_benchmark_equity_vs_3ply(void) {
-  run_benchmark_solver_vs_movegen_from_cgp(
-      "/tmp/clean_positions.cgp", "/tmp/ab_equity_vs_3plyh.csv",
-      3, true, MOVE_SORT_EQUITY, 6, 1000);
+  run_benchmark_solver_vs_movegen_from_cgp("/tmp/clean_positions.cgp",
+                                           "/tmp/ab_equity_vs_3plyh.csv", 3,
+                                           true, MOVE_SORT_EQUITY, 6, 1000);
 }
 
 // Score movegen vs equity movegen on clean positions
@@ -850,7 +850,9 @@ void test_benchmark_score_vs_equity(void) {
   printf("  Score vs Equity Movegen, max %d pairs\n", max_pairs);
   printf("==============================================================\n\n");
   (void)fprintf(out, "# score_movegen vs equity_movegen\n");
-  (void)fprintf(out, "# pair,score_spread,equity_spread,pair_adv,time_score,time_eq,cgp\n");
+  (void)fprintf(
+      out,
+      "# pair,score_spread,equity_spread,pair_adv,time_score,time_eq,cgp\n");
 
   char line[4096];
   while (fgets(line, sizeof(line), cgp_file) && n < max_pairs) {
@@ -869,16 +871,16 @@ void test_benchmark_score_vs_equity(void) {
 
     double ts1 = 0;
     double te1 = 0;
-    int spread_1 = play_endgame_movegen_vs_movegen(
-        game, MOVE_SORT_SCORE, MOVE_SORT_EQUITY, move_list,
-        &ts1, &te1, on_turn);
+    int spread_1 =
+        play_endgame_movegen_vs_movegen(game, MOVE_SORT_SCORE, MOVE_SORT_EQUITY,
+                                        move_list, &ts1, &te1, on_turn);
 
     game_copy(game, saved);
     double ts2 = 0;
     double te2 = 0;
-    int spread_2 = play_endgame_movegen_vs_movegen(
-        game, MOVE_SORT_EQUITY, MOVE_SORT_SCORE, move_list,
-        &te2, &ts2, on_turn);
+    int spread_2 =
+        play_endgame_movegen_vs_movegen(game, MOVE_SORT_EQUITY, MOVE_SORT_SCORE,
+                                        move_list, &te2, &ts2, on_turn);
     spread_2 = -spread_2;
 
     int adv = spread_1 - spread_2;
@@ -894,11 +896,11 @@ void test_benchmark_score_vs_equity(void) {
       ties++;
     }
 
-    (void)fprintf(out, "%d,%+d,%+d,%+d,%.2f,%.2f,%s\n",
-                  n, spread_1, spread_2, adv, ts1 + ts2, te1 + te2, line);
+    (void)fprintf(out, "%d,%+d,%+d,%+d,%.2f,%.2f,%s\n", n, spread_1, spread_2,
+                  adv, ts1 + ts2, te1 + te2, line);
     (void)fflush(out);
-    printf("  Pair %3d: score=%+4d, equity=%+4d, adv=%+4d\n",
-           n, spread_1, spread_2, adv);
+    printf("  Pair %3d: score=%+4d, equity=%+4d, adv=%+4d\n", n, spread_1,
+           spread_2, adv);
     (void)fflush(stdout);
     game_destroy(saved);
   }
@@ -909,13 +911,13 @@ void test_benchmark_score_vs_equity(void) {
   printf("  RESULTS: %d pairs\n", n);
   printf("  Net advantage (score): %+d (avg %+.1f per pair)\n", net,
          n > 0 ? (double)net / n : 0.0);
-  printf("  Pair wins: score=%d, equity=%d, ties=%d\n",
-         score_wins, eq_wins, ties);
-  printf("  Time: score=%.2fs, equity=%.2fs\n",
-         total_time_score, total_time_eq);
+  printf("  Pair wins: score=%d, equity=%d, ties=%d\n", score_wins, eq_wins,
+         ties);
+  printf("  Time: score=%.2fs, equity=%.2fs\n", total_time_score,
+         total_time_eq);
   printf("==============================================================\n");
-  (void)fprintf(out, "# RESULTS: %d pairs, net=%+d, W/L/T=%d/%d/%d\n",
-                n, net, score_wins, eq_wins, ties);
+  (void)fprintf(out, "# RESULTS: %d pairs, net=%+d, W/L/T=%d/%d/%d\n", n, net,
+                score_wins, eq_wins, ties);
   (void)fclose(out);
   move_list_destroy(move_list);
   config_destroy(config);
@@ -923,45 +925,45 @@ void test_benchmark_score_vs_equity(void) {
 
 // Score movegen vs 2-ply heuristic solver on clean positions
 void test_benchmark_score_vs_2ply(void) {
-  run_benchmark_solver_vs_movegen_from_cgp(
-      "/tmp/clean_positions.cgp", "/tmp/ab_score_vs_2plyh.csv",
-      2, true, MOVE_SORT_SCORE, 6, 1000);
+  run_benchmark_solver_vs_movegen_from_cgp("/tmp/clean_positions.cgp",
+                                           "/tmp/ab_score_vs_2plyh.csv", 2,
+                                           true, MOVE_SORT_SCORE, 6, 1000);
 }
 
 // Score movegen vs 3-ply heuristic solver on clean positions
 void test_benchmark_score_vs_3ply(void) {
-  run_benchmark_solver_vs_movegen_from_cgp(
-      "/tmp/clean_positions.cgp", "/tmp/ab_score_vs_3plyh.csv",
-      3, true, MOVE_SORT_SCORE, 6, 1000);
+  run_benchmark_solver_vs_movegen_from_cgp("/tmp/clean_positions.cgp",
+                                           "/tmp/ab_score_vs_3plyh.csv", 3,
+                                           true, MOVE_SORT_SCORE, 6, 1000);
 }
 
 // 4-ply heuristic vs everything: score, equity, 2ply, 3ply
 void test_benchmark_4ply_tournament(void) {
   // 4ply vs score
-  run_benchmark_solver_vs_movegen_from_cgp(
-      "/tmp/clean_positions.cgp", "/tmp/ab_score_vs_4plyh.csv",
-      4, true, MOVE_SORT_SCORE, 6, 1000);
+  run_benchmark_solver_vs_movegen_from_cgp("/tmp/clean_positions.cgp",
+                                           "/tmp/ab_score_vs_4plyh.csv", 4,
+                                           true, MOVE_SORT_SCORE, 6, 1000);
   // 4ply vs equity
-  run_benchmark_solver_vs_movegen_from_cgp(
-      "/tmp/clean_positions.cgp", "/tmp/ab_equity_vs_4plyh.csv",
-      4, true, MOVE_SORT_EQUITY, 6, 1000);
+  run_benchmark_solver_vs_movegen_from_cgp("/tmp/clean_positions.cgp",
+                                           "/tmp/ab_equity_vs_4plyh.csv", 4,
+                                           true, MOVE_SORT_EQUITY, 6, 1000);
   // 4ply vs 2ply
   run_benchmark_ab_from_cgp("/tmp/clean_positions.cgp",
-                             "/tmp/ab_clean_2v4h.csv",
-                             4, true, 2, true, 6, 1000);
+                            "/tmp/ab_clean_2v4h.csv", 4, true, 2, true, 6,
+                            1000);
   // 4ply vs 3ply
   run_benchmark_ab_from_cgp("/tmp/clean_positions.cgp",
-                             "/tmp/ab_clean_3v4h.csv",
-                             4, true, 3, true, 6, 1000);
+                            "/tmp/ab_clean_3v4h.csv", 4, true, 3, true, 6,
+                            1000);
 }
 
 // 2-ply vs 3-ply heuristic solver on clean positions
 void test_benchmark_ab_clean_2v3h(void) {
   run_benchmark_ab_from_cgp("/tmp/clean_positions.cgp",
-                             "/tmp/ab_clean_2v3h.csv",
-                             3, true,   // new: 3-ply heuristic
-                             2, true,   // old: 2-ply heuristic
-                             6, 1000);
+                            "/tmp/ab_clean_2v3h.csv", 3,
+                            true,    // new: 3-ply heuristic
+                            2, true, // old: 2-ply heuristic
+                            6, 1000);
 }
 
 // Self-play benchmark: one solver plays both sides of endgame positions.
@@ -1026,31 +1028,29 @@ static void run_benchmark_selfplay(int ply, int num_positions,
       assert(error_stack_is_empty(err));
       error_stack_destroy(err);
 
-      const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+      const PVLine *pv =
+          endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
       if (pv->num_moves == 0) {
         break;
       }
 
       SmallMove best = pv->moves[0];
-      small_move_to_move(move_list->spare_move, &best,
-                         game_get_board(game));
+      small_move_to_move(move_list->spare_move, &best, game_get_board(game));
       play_move(move_list->spare_move, game, NULL);
     }
 
     total_time += game_time;
-    int score0 =
-        equity_to_int(player_get_score(game_get_player(game, 0)));
-    int score1 =
-        equity_to_int(player_get_score(game_get_player(game, 1)));
-    printf("  Game %3d: %d-%d (spread %+d)  %.2fs\n", valid_positions,
-           score0, score1, score0 - score1, game_time);
+    int score0 = equity_to_int(player_get_score(game_get_player(game, 0)));
+    int score1 = equity_to_int(player_get_score(game_get_player(game, 1)));
+    printf("  Game %3d: %d-%d (spread %+d)  %.2fs\n", valid_positions, score0,
+           score1, score0 - score1, game_time);
   }
 
   assert(valid_positions == num_positions);
 
   printf("\n==============================================================\n");
-  printf("  TOTAL: %.2fs for %d games (avg %.2fs)\n", total_time,
-         num_positions, total_time / num_positions);
+  printf("  TOTAL: %.2fs for %d games (avg %.2fs)\n", total_time, num_positions,
+         total_time / num_positions);
   printf("==============================================================\n");
 
   endgame_results_destroy(results);
@@ -1067,8 +1067,7 @@ void test_benchmark_selfplay_5ply(void) { run_benchmark_selfplay(5, 100, 42); }
 // in the provided array to find optimal thread count for endgame solving.
 static void run_benchmark_thread_scaling(int ply, int num_positions,
                                          const int *thread_counts,
-                                         int num_counts,
-                                         uint64_t base_seed) {
+                                         int num_counts, uint64_t base_seed) {
   log_set_level(LOG_WARN);
 
   Config *config = config_create_or_die(
@@ -1134,21 +1133,20 @@ static void run_benchmark_thread_scaling(int ply, int num_positions,
         assert(error_stack_is_empty(err));
         error_stack_destroy(err);
 
-        const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+        const PVLine *pv =
+            endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
         if (pv->num_moves == 0) {
           break;
         }
 
         SmallMove best = pv->moves[0];
-        small_move_to_move(move_list->spare_move, &best,
-                           game_get_board(game));
+        small_move_to_move(move_list->spare_move, &best, game_get_board(game));
         play_move(move_list->spare_move, game, NULL);
       }
     }
 
     printf("  %d thread%s: %.2fs (avg %.3fs/game)\n", nthreads,
-           nthreads == 1 ? " " : "s", total_time,
-           total_time / num_positions);
+           nthreads == 1 ? " " : "s", total_time, total_time / num_positions);
     (void)fflush(stdout);
 
     endgame_results_destroy(results);
@@ -1367,15 +1365,13 @@ void test_stuck_tile_survey(void) {
          num_positions, (unsigned long long)base_seed);
   printf("==============================================================\n\n");
   printf("  Positions with stuck tiles at depth 0 or 1: %d/%d (%.1f%%)\n",
-         ever_stuck, num_positions,
-         100.0 * ever_stuck / num_positions);
+         ever_stuck, num_positions, 100.0 * ever_stuck / num_positions);
   printf("  Stuck:  /tmp/stuck_tile_positions.cgp (%d positions)\n",
          stuck_count);
-  printf("  Clean:  /tmp/clean_positions.cgp (%d positions)\n\n",
-         clean_count);
+  printf("  Clean:  /tmp/clean_positions.cgp (%d positions)\n\n", clean_count);
 
   const char *labels[] = {"    0%", " 1-19%", "20-39%", "40-59%",
-                           "60-79%", "80-99%", "  100%"};
+                          "60-79%", "80-99%", "  100%"};
 
   for (int d = 0; d <= 1; d++) {
     int reached = 0;
@@ -1386,8 +1382,8 @@ void test_stuck_tile_survey(void) {
       break;
     }
 
-    printf("  Depth %d: %d/%d have stuck tiles (%.1f%%)\n",
-           d, any_stuck_at_depth[d], reached,
+    printf("  Depth %d: %d/%d have stuck tiles (%.1f%%)\n", d,
+           any_stuck_at_depth[d], reached,
            100.0 * any_stuck_at_depth[d] / reached);
     for (int b = 0; b < NUM_BUCKETS; b++) {
       if (buckets[d][b] > 0) {
@@ -1442,9 +1438,9 @@ void test_stuck_letter_frequency(void) {
   }
 
   char lex_cmd[256];
-  (void)snprintf(lex_cmd, sizeof(lex_cmd),
-                 "set -lex %s -threads 1 -s1 score -s2 score -r1 small -r2 small",
-                 lex);
+  (void)snprintf(
+      lex_cmd, sizeof(lex_cmd),
+      "set -lex %s -threads 1 -s1 score -s2 score -r1 small -r2 small", lex);
   Config *config = config_create_or_die(lex_cmd);
   MoveList *move_list = move_list_create(1);
   exec_config_quiet(config, "new");
@@ -1605,16 +1601,16 @@ void test_stuck_letter_frequency(void) {
 void test_benchmark_stuck_tournament(void) {
   const char *cgp = "/tmp/stuck_tile_positions.cgp";
   // equity vs 2-ply
-  run_benchmark_solver_vs_movegen_from_cgp(
-      cgp, "/tmp/ab_stuck_equity_vs_2plyh.csv",
-      2, true, MOVE_SORT_EQUITY, 6, 0);
+  run_benchmark_solver_vs_movegen_from_cgp(cgp,
+                                           "/tmp/ab_stuck_equity_vs_2plyh.csv",
+                                           2, true, MOVE_SORT_EQUITY, 6, 0);
   // equity vs 3-ply
-  run_benchmark_solver_vs_movegen_from_cgp(
-      cgp, "/tmp/ab_stuck_equity_vs_3plyh.csv",
-      3, true, MOVE_SORT_EQUITY, 6, 0);
+  run_benchmark_solver_vs_movegen_from_cgp(cgp,
+                                           "/tmp/ab_stuck_equity_vs_3plyh.csv",
+                                           3, true, MOVE_SORT_EQUITY, 6, 0);
   // 2-ply vs 3-ply
-  run_benchmark_ab_from_cgp(cgp, "/tmp/ab_stuck_2v3h.csv",
-                             3, true, 2, true, 6, 0);
+  run_benchmark_ab_from_cgp(cgp, "/tmp/ab_stuck_2v3h.csv", 3, true, 2, true, 6,
+                            0);
 }
 
 // 4-ply and 5-ply round robin on stuck positions, then 5-ply on clean
@@ -1627,20 +1623,20 @@ void test_benchmark_deep_tournament(void) {
   // --- 5-ply vs remaining opponents on stuck positions ---
   // (5-ply vs equity and 5-ply vs 2-ply already done from prior run)
   // Use 2 threads to avoid OOM on 8GB machine
-  run_benchmark_ab_from_cgp(stuck, "/tmp/ab_stuck_3v5h.csv",
-                             5, true, 3, true, 2, 0);
-  run_benchmark_ab_from_cgp(stuck, "/tmp/ab_stuck_4v5h.csv",
-                             5, true, 4, true, 2, 0);
+  run_benchmark_ab_from_cgp(stuck, "/tmp/ab_stuck_3v5h.csv", 5, true, 3, true,
+                            2, 0);
+  run_benchmark_ab_from_cgp(stuck, "/tmp/ab_stuck_4v5h.csv", 5, true, 4, true,
+                            2, 0);
 
   // --- 5-ply vs everything on clean positions ---
   // Clean positions are easier, can use more threads
-  run_benchmark_solver_vs_movegen_from_cgp(
-      clean, "/tmp/ab_clean_equity_vs_5plyh.csv",
-      5, true, MOVE_SORT_EQUITY, 6, 1000);
-  run_benchmark_ab_from_cgp(clean, "/tmp/ab_clean_2v5h.csv",
-                             5, true, 2, true, 6, 1000);
-  run_benchmark_ab_from_cgp(clean, "/tmp/ab_clean_3v5h.csv",
-                             5, true, 3, true, 6, 1000);
-  run_benchmark_ab_from_cgp(clean, "/tmp/ab_clean_4v5h.csv",
-                             5, true, 4, true, 6, 1000);
+  run_benchmark_solver_vs_movegen_from_cgp(clean,
+                                           "/tmp/ab_clean_equity_vs_5plyh.csv",
+                                           5, true, MOVE_SORT_EQUITY, 6, 1000);
+  run_benchmark_ab_from_cgp(clean, "/tmp/ab_clean_2v5h.csv", 5, true, 2, true,
+                            6, 1000);
+  run_benchmark_ab_from_cgp(clean, "/tmp/ab_clean_3v5h.csv", 5, true, 3, true,
+                            6, 1000);
+  run_benchmark_ab_from_cgp(clean, "/tmp/ab_clean_4v5h.csv", 5, true, 4, true,
+                            6, 1000);
 }

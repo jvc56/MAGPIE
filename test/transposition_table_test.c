@@ -26,8 +26,7 @@ void test_transposition_table(void) {
   assert(atomic_load(&tt->t2_collisions) == 0);
   // Create a type-2 collision: same index bits, different stored hash.
   // Offset by 2^size_power so the index wraps to the same slot.
-  const uint64_t collision_hash =
-      base_hash + (1ULL << tt->size_power_of_2);
+  const uint64_t collision_hash = base_hash + (1ULL << tt->size_power_of_2);
   TTEntry te = transposition_table_lookup(tt, collision_hash);
   assert(te.fifth_byte == 0);
   assert(te.top_4_bytes == 0);

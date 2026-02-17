@@ -83,7 +83,8 @@ typedef struct MoveGen {
   // Bit i is set if machine letter i is playable.
   uint64_t tiles_played_bv;
   // Bitvector of machine letters on the rack (target for early exit).
-  // Generation stops when (tiles_played_bv & target_tiles_bv) == target_tiles_bv.
+  // Generation stops when (tiles_played_bv & target_tiles_bv) ==
+  // target_tiles_bv.
   uint64_t target_tiles_bv;
   LeaveMap leave_map;
   BitRack player_bit_rack;

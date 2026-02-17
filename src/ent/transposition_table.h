@@ -34,7 +34,7 @@ enum {
 typedef struct TTEntry {
   uint32_t top_4_bytes; // Bits [63:32] of hash
   int16_t score;
-  uint8_t fifth_byte;   // Bits [31:24] of hash (40 stored bits total)
+  uint8_t fifth_byte; // Bits [31:24] of hash (40 stored bits total)
   uint8_t flag_and_depth;
   uint64_t tiny_move;
 } TTEntry;
@@ -73,7 +73,7 @@ inline static void ttentry_reset(TTEntry *t) {
 
 typedef struct TranspositionTable {
   _Atomic uint64_t *table; // Pairs of uint64_t for lockless hashing
-  atomic_uchar *nproc;     // ABDADA: small table for tracking concurrent searches
+  atomic_uchar *nproc; // ABDADA: small table for tracking concurrent searches
   int size_power_of_2;
   uint64_t size_mask;
   Zobrist *zobrist;
@@ -112,7 +112,8 @@ transposition_table_create(double fraction_of_memory) {
            "(elements: %d, memory: %zu MB)",
            (unsigned long long)total_memory, tt->size_power_of_2, num_elems,
            memory_mb);
-  tt->table = (_Atomic uint64_t *)malloc_or_die(sizeof(uint64_t) * 2 * num_elems);
+  tt->table =
+      (_Atomic uint64_t *)malloc_or_die(sizeof(uint64_t) * 2 * num_elems);
   memset(tt->table, 0, sizeof(uint64_t) * 2 * num_elems);
   // ABDADA: allocate smaller nproc table for tracking concurrent searches
   // Using a smaller table (256K vs millions) improves cache locality
