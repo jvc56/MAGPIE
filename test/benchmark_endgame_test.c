@@ -412,6 +412,7 @@ static void run_benchmark_ab_from_cgp(const char *cgp_path,
   }
   FILE *out = fopen(output_path, "we");
   if (!out) {
+    (void)fclose(cgp_file);
     log_fatal("Cannot open %s for writing\n", output_path);
     return;
   }
@@ -678,6 +679,7 @@ static void run_benchmark_solver_vs_movegen_from_cgp(
   }
   FILE *out = fopen(output_path, "we");
   if (!out) {
+    (void)fclose(cgp_file);
     log_fatal("Cannot open %s for writing\n", output_path);
     return;
   }
@@ -832,6 +834,7 @@ void test_benchmark_score_vs_equity(void) {
   }
   FILE *out = fopen("/tmp/ab_score_vs_equity.csv", "we");
   if (!out) {
+    (void)fclose(cgp_file);
     log_fatal("Cannot open output\n");
     return;
   }
