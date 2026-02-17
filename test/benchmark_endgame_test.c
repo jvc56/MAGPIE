@@ -313,7 +313,7 @@ static void run_benchmark_ab_full(int new_ply_setting, bool new_heuristics,
            "pair_adv=%+4d  (new: %.2fs, old: %.2fs)\n",
            valid_positions, spread_1, spread_2, pair_advantage,
            time_new_1 + time_new_2, time_old_1 + time_old_2);
-    fflush(stdout);
+    (void)fflush(stdout);
 
     game_destroy(saved_game);
   }
@@ -409,10 +409,12 @@ static void run_benchmark_ab_from_cgp(const char *cgp_path,
   FILE *cgp_file = fopen(cgp_path, "re");
   if (!cgp_file) {
     log_fatal("Cannot open %s\n", cgp_path);
+    return;
   }
   FILE *out = fopen(output_path, "we");
   if (!out) {
     log_fatal("Cannot open %s for writing\n", output_path);
+    return;
   }
 
   int total_new_spread = 0;
@@ -498,7 +500,7 @@ static void run_benchmark_ab_from_cgp(const char *cgp_path,
            "pair_adv=%+4d  (new: %.2fs, old: %.2fs)\n",
            num_positions, spread_1, spread_2, pair_advantage,
            time_new_1 + time_new_2, time_old_1 + time_old_2);
-    fflush(stdout);
+    (void)fflush(stdout);
 
     game_destroy(saved_game);
   }
@@ -672,10 +674,12 @@ static void run_benchmark_solver_vs_movegen_from_cgp(
   FILE *cgp_file = fopen(cgp_path, "re");
   if (!cgp_file) {
     log_fatal("Cannot open %s\n", cgp_path);
+    return;
   }
   FILE *out = fopen(output_path, "we");
   if (!out) {
     log_fatal("Cannot open %s for writing\n", output_path);
+    return;
   }
 
   int total_solver_spread = 0;
@@ -762,7 +766,7 @@ static void run_benchmark_solver_vs_movegen_from_cgp(
            "adv=%+4d  (solver: %.2fs, equity: %.2fs)\n",
            num_positions, spread_1, spread_2, pair_advantage,
            ts1 + ts2, te1 + te2);
-    fflush(stdout);
+    (void)fflush(stdout);
 
     game_destroy(saved_game);
   }
@@ -824,10 +828,12 @@ void test_benchmark_score_vs_equity(void) {
   FILE *cgp_file = fopen("/tmp/clean_positions.cgp", "re");
   if (!cgp_file) {
     log_fatal("Cannot open /tmp/clean_positions.cgp\n");
+    return;
   }
   FILE *out = fopen("/tmp/ab_score_vs_equity.csv", "we");
   if (!out) {
     log_fatal("Cannot open output\n");
+    return;
   }
 
   int total_score_spread = 0;
@@ -893,7 +899,7 @@ void test_benchmark_score_vs_equity(void) {
     (void)fflush(out);
     printf("  Pair %3d: score=%+4d, equity=%+4d, adv=%+4d\n",
            n, spread_1, spread_2, adv);
-    fflush(stdout);
+    (void)fflush(stdout);
     game_destroy(saved);
   }
   (void)fclose(cgp_file);
@@ -1143,7 +1149,7 @@ static void run_benchmark_thread_scaling(int ply, int num_positions,
     printf("  %d thread%s: %.2fs (avg %.3fs/game)\n", nthreads,
            nthreads == 1 ? " " : "s", total_time,
            total_time / num_positions);
-    fflush(stdout);
+    (void)fflush(stdout);
 
     endgame_results_destroy(results);
     endgame_solver_destroy(solver);
@@ -1392,7 +1398,7 @@ void test_stuck_tile_survey(void) {
     printf("\n");
   }
   printf("==============================================================\n");
-  fflush(stdout);
+  (void)fflush(stdout);
 
   move_list_destroy(move_list);
   config_destroy(config);
@@ -1589,7 +1595,7 @@ void test_stuck_letter_frequency(void) {
   printf("  Stuck rate: %.1f%% of endgame positions\n",
          100.0 * stuck_found / games_tried);
   printf("==============================================================\n");
-  fflush(stdout);
+  (void)fflush(stdout);
 
   move_list_destroy(move_list);
   config_destroy(config);
