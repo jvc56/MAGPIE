@@ -59,6 +59,9 @@ enum {
   ABDADA_INTERRUPTED = -(1 << 28),
   // Aspiration window initial size
   ASPIRATION_WINDOW = 25,
+  // Conservation bonus weights: penalize playing tiles when opponent is stuck
+  CONSERVATION_TILE_WEIGHT = 7,
+  CONSERVATION_VALUE_WEIGHT = 2,
 };
 
 // Returns fraction of opponent's rack score that is stuck (0.0 = none, 1.0 =
@@ -529,7 +532,8 @@ static int compute_played_tiles_face_value(const Move *move,
 }
 
 // Conservation bonus: penalize playing tiles when opponent has stuck tiles.
-// Returns (7 * tile_count + 2 * face_value) * opp_stuck_frac.
+// Returns (CONSERVATION_TILE_WEIGHT * tile_count +
+//          CONSERVATION_VALUE_WEIGHT * face_value) * opp_stuck_frac.
 // The move must already be expanded into spare_move.
 static int compute_conservation_bonus(const Move *move,
                                       const LetterDistribution *ld,
@@ -546,7 +550,9 @@ static int compute_conservation_bonus(const Move *move,
     face_value += equity_to_int(ld_get_score(ld, ml));
     tile_count++;
   }
-  return (int)((float)(7 * tile_count + 2 * face_value) * opp_stuck_frac);
+  return (int)((float)(CONSERVATION_TILE_WEIGHT * tile_count +
+                       CONSERVATION_VALUE_WEIGHT * face_value) *
+               opp_stuck_frac);
 }
 
 // Thread jitter for ABDADA search diversity: each thread gets a unique bias
