@@ -5,7 +5,6 @@
 #include "../def/cpthread_defs.h"
 #include "../util/io_util.h"
 #include <stdlib.h>
-#include <string.h>
 
 typedef struct PVData {
   PVLine pv_line;
