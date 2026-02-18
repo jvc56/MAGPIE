@@ -25,9 +25,272 @@ ApplicationWindow {
         return m + ":" + (s < 10 ? "0" : "") + s;
     }
 
+    function sortedRack(rackStr) {
+        if (!rackStr || rackStr.length === 0) return rackStr;
+        var arr = rackStr.split('');
+        if (appSettings.rackSortStyle === "vowelFirst") {
+            var vowels = "AEIOU";
+            arr.sort(function(a, b) {
+                var au = a.toUpperCase(), bu = b.toUpperCase();
+                var aIsBlank = (a === "?");
+                var bIsBlank = (b === "?");
+                if (aIsBlank !== bIsBlank) return aIsBlank ? 1 : -1;
+                var aIsVowel = vowels.indexOf(au) >= 0;
+                var bIsVowel = vowels.indexOf(bu) >= 0;
+                if (aIsVowel !== bIsVowel) return aIsVowel ? -1 : 1;
+                return au < bu ? -1 : (au > bu ? 1 : 0);
+            });
+        } else {
+            arr.sort(function(a, b) {
+                var aIsBlank = (a === "?");
+                var bIsBlank = (b === "?");
+                if (aIsBlank !== bIsBlank) return aIsBlank ? 1 : -1;
+                return a < b ? -1 : (a > b ? 1 : 0);
+            });
+        }
+        return arr.join('');
+    }
+
+    function formatHistoryRack(item) {
+        if (!item) return "";
+        if (appSettings.rackDisplayMode === "playedLeave") {
+            var played = item.playedTiles || "";
+            var leave = item.leaveString || "";
+            if (played.length === 0 && leave.length === 0)
+                return sortedRack(item.rackString);
+            if (played.length === 0) return sortedRack(leave);
+            if (leave.length === 0) return sortedRack(played);
+            return sortedRack(played) + "/" + sortedRack(leave);
+        } else {
+            // wholeRack mode
+            var full = item.fullRack || "";
+            return full.length > 0 ? sortedRack(full) : sortedRack(item.rackString);
+        }
+    }
+
     Settings {
         id: appSettings
         property alias recentFilesJson: mainWindow.recentFilesJson
+        property string phonyMode: "void"
+        property string rackSortStyle: "vowelFirst"
+        property string rackDisplayMode: "wholeRack"
+    }
+
+    Dialog {
+        id: settingsDialog
+        title: "Settings"
+        anchors.centerIn: parent
+        width: 400
+        height: 450
+        modal: true
+
+        background: Rectangle {
+            color: "#1E1E2E"
+            border.color: "#45475A"
+            border.width: 1
+            radius: 12
+        }
+
+        header: Item {
+            height: 48
+            Text {
+                text: "Settings"
+                color: "#CDD6F4"
+                font.pixelSize: 18
+                font.bold: true
+                anchors.centerIn: parent
+            }
+            Rectangle {
+                anchors.bottom: parent.bottom
+                width: parent.width
+                height: 1
+                color: "#45475A"
+            }
+        }
+
+        contentItem: Column {
+            spacing: 24
+            topPadding: 16
+            leftPadding: 24
+            rightPadding: 24
+
+            // Phony Mode
+            Column {
+                spacing: 8
+                Text {
+                    text: "Phony Mode"
+                    color: "#A6ADC8"
+                    font.pixelSize: 14
+                }
+                Row {
+                    spacing: 10
+                    Repeater {
+                        model: [
+                            { value: "void", label: "Void" },
+                            { value: "challenge", label: "Challenge" }
+                        ]
+                        delegate: Button {
+                            property bool isSelected: appSettings.phonyMode === modelData.value
+                            text: modelData.label
+                            onClicked: appSettings.phonyMode = modelData.value
+                            contentItem: Text {
+                                text: parent.text
+                                color: parent.isSelected ? "#1E1E2E" : "#CDD6F4"
+                                font.pixelSize: 14
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitWidth: 120
+                                implicitHeight: 40
+                                color: parent.isSelected ? "#89B4FA" : (parent.hovered ? "#45475A" : "#313244")
+                                radius: 8
+                                border.color: parent.hovered && !parent.isSelected ? "#89B4FA" : "transparent"
+                                border.width: 1
+                                Behavior on color { ColorAnimation { duration: 100 } }
+                            }
+                        }
+                    }
+                }
+                Text {
+                    text: appSettings.phonyMode === "void"
+                          ? "Phony words are blocked from being played."
+                          : "Phony words are played then automatically challenged off."
+                    color: "#6C7086"
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                    width: 340
+                }
+            }
+
+            // Rack Sort Style
+            Column {
+                spacing: 8
+                Text {
+                    text: "Rack Sort"
+                    color: "#A6ADC8"
+                    font.pixelSize: 14
+                }
+                Row {
+                    spacing: 10
+                    Repeater {
+                        model: [
+                            { value: "vowelFirst", label: "Vowel First" },
+                            { value: "alphabetical", label: "Alphabetical" }
+                        ]
+                        delegate: Button {
+                            property bool isSelected: appSettings.rackSortStyle === modelData.value
+                            text: modelData.label
+                            onClicked: appSettings.rackSortStyle = modelData.value
+                            contentItem: Text {
+                                text: parent.text
+                                color: parent.isSelected ? "#1E1E2E" : "#CDD6F4"
+                                font.pixelSize: 14
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitWidth: 120
+                                implicitHeight: 40
+                                color: parent.isSelected ? "#89B4FA" : (parent.hovered ? "#45475A" : "#313244")
+                                radius: 8
+                                border.color: parent.hovered && !parent.isSelected ? "#89B4FA" : "transparent"
+                                border.width: 1
+                                Behavior on color { ColorAnimation { duration: 100 } }
+                            }
+                        }
+                    }
+                }
+                Text {
+                    text: appSettings.rackSortStyle === "vowelFirst"
+                          ? "Sort vowels first, then consonants, blanks last."
+                          : "Sort tiles alphabetically, blanks last."
+                    color: "#6C7086"
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                    width: 340
+                }
+            }
+
+            // Rack Display Mode
+            Column {
+                spacing: 8
+                Text {
+                    text: "History Rack Display"
+                    color: "#A6ADC8"
+                    font.pixelSize: 14
+                }
+                Row {
+                    spacing: 10
+                    Repeater {
+                        model: [
+                            { value: "wholeRack", label: "Whole Rack" },
+                            { value: "playedLeave", label: "Played / Leave" }
+                        ]
+                        delegate: Button {
+                            property bool isSelected: appSettings.rackDisplayMode === modelData.value
+                            text: modelData.label
+                            onClicked: appSettings.rackDisplayMode = modelData.value
+                            contentItem: Text {
+                                text: parent.text
+                                color: parent.isSelected ? "#1E1E2E" : "#CDD6F4"
+                                font.pixelSize: 14
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitWidth: 140
+                                implicitHeight: 40
+                                color: parent.isSelected ? "#89B4FA" : (parent.hovered ? "#45475A" : "#313244")
+                                radius: 8
+                                border.color: parent.hovered && !parent.isSelected ? "#89B4FA" : "transparent"
+                                border.width: 1
+                                Behavior on color { ColorAnimation { duration: 100 } }
+                            }
+                        }
+                    }
+                }
+                Text {
+                    text: appSettings.rackDisplayMode === "wholeRack"
+                          ? "Show all tiles held before the move (e.g. AEGNRT?)."
+                          : "Show played tiles and leave separately (e.g. RENT/AG?)."
+                    color: "#6C7086"
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                    width: 340
+                }
+            }
+        }
+
+        footer: Item {
+            height: 48
+            Rectangle {
+                anchors.top: parent.top
+                width: parent.width
+                height: 1
+                color: "#45475A"
+            }
+            Button {
+                text: "Done"
+                anchors.centerIn: parent
+                onClicked: settingsDialog.close()
+                contentItem: Text {
+                    text: parent.text
+                    color: "#1E1E2E"
+                    font.pixelSize: 14
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    implicitWidth: 100
+                    implicitHeight: 36
+                    color: parent.down ? "#7BA4E8" : (parent.hovered ? "#9BC2FF" : "#89B4FA")
+                    radius: 8
+                    Behavior on color { ColorAnimation { duration: 100 } }
+                }
+            }
+        }
     }
 
     function addToRecentFiles(fileUrl) {
@@ -82,6 +345,11 @@ ApplicationWindow {
                     enabled: JSON.parse(mainWindow.recentFilesJson).length > 0
                     onTriggered: mainWindow.recentFilesJson = "[]"
                 }
+            }
+            MenuSeparator {}
+            MenuItem {
+                text: "Settings..."
+                onTriggered: settingsDialog.open()
             }
             MenuSeparator {}
             MenuItem {
@@ -149,6 +417,7 @@ ApplicationWindow {
                             leftColumn.cancelExchangeMode();
                         } else {
                             uncommittedTiles.clear();
+                            gameModel.clearPreview();
                         }
                         event.accepted = true;
                     } else if (event.key === Qt.Key_Minus) {
@@ -358,6 +627,7 @@ ApplicationWindow {
                     isBlank: useBlank
                 });
                 advanceCursor();
+                updatePreview();
             }
 
             // Add a tile at a specific board position (for drag-drop)
@@ -434,6 +704,7 @@ ApplicationWindow {
                 // Move cursor to dropped position
                 keyboardCursor.row = row;
                 keyboardCursor.col = col;
+                updatePreview();
 
                 return true;
             }
@@ -444,6 +715,7 @@ ApplicationWindow {
                     keyboardCursor.row = removed.row;
                     keyboardCursor.col = removed.col;
                     uncommittedTiles.remove(uncommittedTiles.count - 1);
+                    updatePreview();
                 } else {
                     // No tiles to remove — just move cursor back
                     if (keyboardCursor.dir === 0) {
@@ -472,8 +744,8 @@ ApplicationWindow {
                 }
             }
 
-            function commitMove() {
-                if (uncommittedTiles.count === 0) return;
+            function buildNotation() {
+                if (uncommittedTiles.count === 0) return "";
 
                 // Sort uncommitted tiles by position along the play direction
                 let tiles = [];
@@ -569,12 +841,32 @@ ApplicationWindow {
                 }
 
                 let pos = isHoriz ? (rowStr + colChar) : (colChar + rowStr);
-                let notation = pos + "." + word;
+                return pos + "." + word;
+            }
+
+            function updatePreview() {
+                let notation = buildNotation();
+                if (notation.length > 0) {
+                    gameModel.previewMove(notation);
+                } else {
+                    gameModel.clearPreview();
+                }
+            }
+
+            function commitMove() {
+                let notation = buildNotation();
+                if (notation.length === 0) return;
+
+                let wasPhony = (gameModel.previewStatus === 2);
+                if (appSettings.phonyMode === "void" && wasPhony) return;
 
                 let prevIndex = gameModel.currentHistoryIndex;
                 gameModel.submitMove(notation);
                 if (gameModel.currentHistoryIndex !== prevIndex) {
                     uncommittedTiles.clear();
+                    if (appSettings.phonyMode === "challenge" && wasPhony) {
+                        gameModel.challengeLastMove();
+                    }
                     humanMoveCompleted();
                 }
             }
@@ -586,6 +878,7 @@ ApplicationWindow {
                     return;
                 }
                 uncommittedTiles.clear();
+                gameModel.clearPreview();
                 exchangeMode = true;
                 rackView.clearSelection();
             }
@@ -667,10 +960,10 @@ ApplicationWindow {
                             // Force dependency on saturationLevel so this re-evaluates
                             var s = saturationLevel;
                             return {
-                                "1,3": { color: "#D20F39", text: "3W" }, // Strong Red
-                                "1,2": { color: "#EA76CB", text: "2W" }, // Distinct Pink
-                                "3,1": { color: "#1E66F5", text: "3L" }, // Strong Blue
-                                "2,1": { color: "#04A5E5", text: "2L" }, // Light Blue
+                                "1,3": { color: "#C4656A", text: "3W" }, // Muted Rose
+                                "1,2": { color: "#B48EAD", text: "2W" }, // Dusty Mauve
+                                "3,1": { color: "#6B85A3", text: "3L" }, // Steel Blue
+                                "2,1": { color: "#7BA7BC", text: "2L" }, // Pale Sky
                                 "1,1": { color: "#313244", text: "" }
                             };
                         }
@@ -969,6 +1262,7 @@ ApplicationWindow {
                 rack: gameModel.currentRack
                 tileSize: leftColumn.computedCellSize
                 exchangeMode: leftColumn.exchangeMode
+                sortStyle: appSettings.rackSortStyle
             }
 
             // Controls (anchored to bottom)
@@ -1073,6 +1367,7 @@ ApplicationWindow {
                         contentItem: Text {
                             text: parent.text; color: "white"; font.bold: true
                             horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
                         }
                         background: Rectangle {
                             implicitWidth: 100; implicitHeight: 40; radius: 8
@@ -1082,6 +1377,9 @@ ApplicationWindow {
 
                     // PLAY / CONFIRM
                     Button {
+                        property bool voidBlocked: !leftColumn.exchangeMode
+                            && appSettings.phonyMode === "void"
+                            && gameModel.previewStatus === 2
                         text: leftColumn.exchangeMode ? "CONFIRM" : "PLAY"
                         onClicked: {
                             if (leftColumn.exchangeMode) {
@@ -1092,13 +1390,15 @@ ApplicationWindow {
                         }
                         contentItem: Text {
                             text: parent.text
-                            color: leftColumn.exchangeMode ? "white" : "#1E1E2E"
+                            color: parent.voidBlocked ? "#7F849C"
+                                : (leftColumn.exchangeMode ? "white" : "#1E1E2E")
                             font.bold: true
                             horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
                         }
                         background: Rectangle {
                             implicitWidth: 100; implicitHeight: 40; radius: 8
-                            color: "#A6E3A1"
+                            color: parent.voidBlocked ? "#585B70" : "#A6E3A1"
                         }
                     }
                 }
@@ -1326,9 +1626,12 @@ ApplicationWindow {
                         Layout.fillHeight: true
                         model: gameModel.history
                         clip: true
+                        currentIndex: -1
+                        highlight: Item {}
+                        keyNavigationEnabled: false
 
                         cellWidth: (width - 14) / 2
-                        cellHeight: 80
+                        cellHeight: 95
                         flow: GridView.FlowLeftToRight
 
                         ScrollBar.vertical: ScrollBar {
@@ -1393,7 +1696,7 @@ ApplicationWindow {
                                             Text {
                                                 text: modelData.text
                                                 color: "#CDD6F4"
-                                                font.pixelSize: modelData.type === 1 ? 14 : 10
+                                                font.pixelSize: modelData.type === 1 ? 24 : 17
                                                 font.bold: modelData.type === 1
                                                 textFormat: Text.PlainText
                                                 Layout.alignment: Qt.AlignVCenter
@@ -1405,7 +1708,7 @@ ApplicationWindow {
                                                     if (modelData.type === 2 || modelData.type === 7 || modelData.type === 8) return "#F38BA8"
                                                     return "#89B4FA"
                                                 }
-                                                font.pixelSize: 10
+                                                font.pixelSize: 17
                                                 font.bold: false
                                                 Layout.alignment: Qt.AlignVCenter
                                             }
@@ -1413,11 +1716,11 @@ ApplicationWindow {
                                     }
 
                                     Text {
-                                        text: modelData.rackString
+                                        text: formatHistoryRack(modelData)
                                         color: "#A6ADC8"
                                         font.family: "Consolas"
-                                        font.pixelSize: 12
-                                        textFormat: Text.StyledText
+                                        font.pixelSize: 22
+                                        textFormat: Text.PlainText
                                     }
                                 }
 
@@ -1428,7 +1731,7 @@ ApplicationWindow {
                                     anchors.bottom: parent.bottom
                                     anchors.bottomMargin: 5
                                     font.bold: true
-                                    font.pixelSize: 16
+                                    font.pixelSize: 26
                                 }
                             }
 
@@ -1665,9 +1968,12 @@ ApplicationWindow {
                     anchors.margins: 7
                     model: gameModel.history
                     clip: true
+                    currentIndex: -1
+                    highlight: Item {}
+                    keyNavigationEnabled: false
 
                     cellWidth: (width - 14) / 2
-                    cellHeight: 70
+                    cellHeight: 85
                     flow: GridView.FlowLeftToRight
 
                     ScrollBar.vertical: ScrollBar {
@@ -1695,6 +2001,11 @@ ApplicationWindow {
                     Connections {
                         target: gameModel
                         function onGameChanged() {
+                            if (playModeHistoryGrid.count > 0) {
+                                playModeHistoryGrid.positionViewAtEnd()
+                            }
+                        }
+                        function onPreviewChanged() {
                             if (playModeHistoryGrid.count > 0) {
                                 playModeHistoryGrid.positionViewAtEnd()
                             }
@@ -1733,7 +2044,7 @@ ApplicationWindow {
                                         Text {
                                             text: modelData.text
                                             color: "#CDD6F4"
-                                            font.pixelSize: modelData.type === 1 ? 13 : 10
+                                            font.pixelSize: modelData.type === 1 ? 22 : 16
                                             font.bold: modelData.type === 1
                                             textFormat: Text.PlainText
                                             Layout.alignment: Qt.AlignVCenter
@@ -1745,7 +2056,7 @@ ApplicationWindow {
                                                 if (modelData.type === 2 || modelData.type === 7 || modelData.type === 8) return "#F38BA8"
                                                 return "#89B4FA"
                                             }
-                                            font.pixelSize: 11
+                                            font.pixelSize: 17
                                             Layout.alignment: Qt.AlignVCenter
                                         }
                                     }
@@ -1753,10 +2064,10 @@ ApplicationWindow {
 
                                 // Rack
                                 Text {
-                                    text: modelData.rackString
+                                    text: formatHistoryRack(modelData)
                                     color: "#A6ADC8"
                                     font.family: "Consolas"
-                                    font.pixelSize: 11
+                                    font.pixelSize: 20
                                     textFormat: Text.PlainText
                                 }
                             }
@@ -1770,7 +2081,7 @@ ApplicationWindow {
                                 anchors.bottom: parent.bottom
                                 anchors.bottomMargin: 2
                                 font.bold: true
-                                font.pixelSize: 14
+                                font.pixelSize: 24
                             }
                         }
 
@@ -1791,6 +2102,99 @@ ApplicationWindow {
                             height: 1
                             color: "#585B70"
                             opacity: 0.3
+                        }
+                    }
+
+                    // Live Move Preview (footer, appears after last history entry)
+                    footer: Item {
+                        width: playModeHistoryGrid.width
+                        height: gameModel.previewStatus !== 0 ? playModeHistoryGrid.cellHeight : 0
+
+                        Rectangle {
+                            visible: gameModel.previewStatus !== 0
+                            width: playModeHistoryGrid.cellWidth
+                            height: playModeHistoryGrid.cellHeight
+                            color: "#45475A"
+
+                            Item {
+                                anchors.fill: parent
+                                anchors.margins: 6
+
+                                // Dot + notation + leave
+                                ColumnLayout {
+                                    anchors.left: parent.left
+                                    anchors.right: previewCumulativeText.left
+                                    anchors.rightMargin: 4
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    spacing: 1
+
+                                    RowLayout {
+                                        spacing: 4
+
+                                        // Valid/Phony indicator dot
+                                        Rectangle {
+                                            width: 7
+                                            height: 7
+                                            radius: 3.5
+                                            color: gameModel.previewStatus === 1 ? "#A6E3A1" : "#F38BA8"
+                                            Layout.alignment: Qt.AlignVCenter
+                                        }
+
+                                        Text {
+                                            text: gameModel.previewNotation
+                                            color: "#CDD6F4"
+                                            font.pixelSize: 22
+                                            font.bold: true
+                                            Layout.alignment: Qt.AlignVCenter
+                                        }
+                                        Text {
+                                            text: "+" + gameModel.previewScore
+                                            color: gameModel.previewStatus === 1 ? "#A6E3A1" : "#F38BA8"
+                                            font.pixelSize: 17
+                                            Layout.alignment: Qt.AlignVCenter
+                                        }
+                                    }
+
+                                    // Leave
+                                    Text {
+                                        text: sortedRack(gameModel.previewLeave.length > 0 ? gameModel.previewLeave : "-")
+                                        color: "#A6ADC8"
+                                        font.family: "Consolas"
+                                        font.pixelSize: 20
+                                        textFormat: Text.PlainText
+                                    }
+                                }
+
+                                // Cumulative score (bottom-right)
+                                Text {
+                                    id: previewCumulativeText
+                                    text: gameModel.player1Score + gameModel.previewScore
+                                    color: "#89B4FA"
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    anchors.bottomMargin: 2
+                                    font.bold: true
+                                    font.pixelSize: 24
+                                }
+                            }
+
+                            // Right separator (matches even-index entries)
+                            Rectangle {
+                                width: 1
+                                height: parent.height
+                                color: "#585B70"
+                                opacity: 0.3
+                                anchors.right: parent.right
+                            }
+
+                            // Bottom separator
+                            Rectangle {
+                                anchors.bottom: parent.bottom
+                                width: parent.width
+                                height: 1
+                                color: "#585B70"
+                                opacity: 0.3
+                            }
                         }
                     }
                 }

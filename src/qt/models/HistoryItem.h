@@ -21,10 +21,14 @@ class HistoryItem : public QObject
     Q_PROPERTY(int vowelCount READ vowelCount CONSTANT)
     Q_PROPERTY(int consonantCount READ consonantCount CONSTANT)
     Q_PROPERTY(int blankCount READ blankCount CONSTANT)
+    Q_PROPERTY(QString playedTiles READ playedTiles CONSTANT)
+    Q_PROPERTY(QString leaveString READ leaveString CONSTANT)
+    Q_PROPERTY(QString fullRack READ fullRack CONSTANT)
 
 public:
     explicit HistoryItem(int playerIndex, int type, const QList<QObject*> &scoreLines, const QString &rackString, int score, int cumulativeScore, int eventIndex,
                          const QString &unseenTiles, int bagCount, int vowelCount, int consonantCount, int blankCount,
+                         const QString &playedTiles, const QString &leaveString, const QString &fullRack,
                          QObject *parent = nullptr);
 
     int playerIndex() const;
@@ -39,6 +43,9 @@ public:
     int vowelCount() const;
     int consonantCount() const;
     int blankCount() const;
+    QString playedTiles() const;
+    QString leaveString() const;
+    QString fullRack() const;
 
 private:
     int m_playerIndex;
@@ -53,6 +60,9 @@ private:
     int m_vowelCount;
     int m_consonantCount;
     int m_blankCount;
+    QString m_playedTiles;
+    QString m_leaveString;
+    QString m_fullRack;
 };
 
 #endif // HISTORYITEM_H

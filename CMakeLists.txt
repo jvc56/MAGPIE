@@ -22,6 +22,12 @@ endif()
 # Definitions from Makefile
 add_compile_definitions(BOARD_DIM=15 RACK_SIZE=7)
 
+# Build in Release mode by default for GUI (disables assert() via NDEBUG,
+# enables optimizations). The core engine tests use their own build system.
+if(NOT CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "")
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 # Compiler Flags (matching Makefile roughly, but less strict for now to ensure build)
 if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     add_compile_options(-Wall -Wextra -Wno-trigraphs)

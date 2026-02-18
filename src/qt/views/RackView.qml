@@ -5,6 +5,7 @@ Item {
     id: root
 
     property string rack: ""
+    property string sortStyle: "vowelFirst"
 
     // Internal state for drag-and-drop
     property string internalRack: ""
@@ -21,20 +22,48 @@ Item {
     // Constants
     readonly property int tileSpacing: Math.max(2, tileSize * 0.1)
 
-    // Sync external rack to internal rack (padding to 7)
+    function applySortToRack(rackStr) {
+        var arr = rackStr.trim().split('');
+        if (arr.length === 0) return rackStr;
+        if (root.sortStyle === "vowelFirst") {
+            var vowels = "AEIOU";
+            arr.sort(function(a, b) {
+                var au = a.toUpperCase(), bu = b.toUpperCase();
+                var aIsBlank = (a === "?");
+                var bIsBlank = (b === "?");
+                if (aIsBlank !== bIsBlank) return aIsBlank ? 1 : -1;
+                var aIsVowel = vowels.indexOf(au) >= 0;
+                var bIsVowel = vowels.indexOf(bu) >= 0;
+                if (aIsVowel !== bIsVowel) return aIsVowel ? -1 : 1;
+                return au < bu ? -1 : (au > bu ? 1 : 0);
+            });
+        } else {
+            arr.sort(function(a, b) {
+                var aIsBlank = (a === "?");
+                var bIsBlank = (b === "?");
+                if (aIsBlank !== bIsBlank) return aIsBlank ? 1 : -1;
+                return a < b ? -1 : (a > b ? 1 : 0);
+            });
+        }
+        var r = arr.join('');
+        while (r.length < 7) r += " ";
+        return r;
+    }
+
+    // Sync external rack to internal rack (padding to 7, auto-sort)
     onRackChanged: {
         var r = rack;
         if (r === undefined || r === null) r = "";
         while (r.length < 7) r += " ";
-        internalRack = r;
+        internalRack = applySortToRack(r);
         selectedIndices = [];
     }
-    
+
     Component.onCompleted: {
         var r = rack;
         if (r === undefined || r === null) r = "";
         while (r.length < 7) r += " ";
-        internalRack = r;
+        internalRack = applySortToRack(r);
     }
     
     implicitWidth: (7 * tileSize) + (6 * tileSpacing) + (tileSize * 0.5)
@@ -453,11 +482,7 @@ Item {
             }
         }
         onClicked: {
-            var arr = root.internalRack.trim().split('');
-            arr.sort();
-            var r = arr.join('');
-            while (r.length < 7) r += " ";
-            root.internalRack = r;
+            root.internalRack = root.applySortToRack(root.internalRack);
         }
     }
 }

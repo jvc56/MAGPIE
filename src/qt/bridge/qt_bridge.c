@@ -903,6 +903,78 @@ char *bridge_validate_move(BridgeGame *game, const char *notation) {
   return error_msg;
 }
 
+int bridge_preview_move(BridgeGame *game, const char *ucgi_notation,
+                        char **notation_out, int *score_out,
+                        bool *is_phony_out, char **leave_out,
+                        char **error_out) {
+  if (!game || !game->game || !ucgi_notation) {
+    if (error_out)
+      *error_out = string_duplicate("Invalid game or move string");
+    return 1;
+  }
+
+  ErrorStack *err = error_stack_create();
+  Game *g = game->game;
+  int playerIdx = game_get_player_on_turn_index(g);
+
+  ValidatedMoves *vms = validated_moves_create(g, playerIdx, ucgi_notation,
+                                               true,  // allow_phonies
+                                               false, // allow_unknown_exchanges
+                                               true,  // allow_playthrough
+                                               err);
+
+  if (!error_stack_is_empty(err) || !vms ||
+      validated_moves_get_number_of_moves(vms) == 0) {
+    if (error_out) {
+      *error_out = error_stack_is_empty(err)
+                       ? string_duplicate("No valid move found")
+                       : error_stack_get_string_and_reset(err);
+    }
+    validated_moves_destroy(vms);
+    error_stack_destroy(err);
+    return 1;
+  }
+
+  const Move *m = validated_moves_get_move(vms, 0);
+  const LetterDistribution *ld = game_get_ld(g);
+
+  if (score_out)
+    *score_out = equity_to_int(move_get_score(m));
+  if (is_phony_out)
+    *is_phony_out = validated_moves_is_phony(vms, 0);
+
+  if (notation_out) {
+    Board *board = game_get_board(g);
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_human_readable_move(sb, m, board, ld);
+    *notation_out = string_duplicate(string_builder_peek(sb));
+    string_builder_destroy(sb);
+  }
+
+  if (leave_out) {
+    Rack *leave_rack =
+        rack_duplicate(player_get_rack(game_get_player(g, playerIdx)));
+    if (move_get_type(m) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      for (int i = 0; i < move_get_tiles_length(m); i++) {
+        MachineLetter tile = move_get_tile(m, i);
+        if (tile == 0)
+          continue; // playthrough
+        if (get_is_blanked(tile)) {
+          rack_take_letter(leave_rack, BLANK_MACHINE_LETTER);
+        } else {
+          rack_take_letter(leave_rack, tile);
+        }
+      }
+    }
+    *leave_out = internal_format_rack(leave_rack, ld);
+    rack_destroy(leave_rack);
+  }
+
+  validated_moves_destroy(vms);
+  error_stack_destroy(err);
+  return 0;
+}
+
 char *bridge_play_move(BridgeGameHistory *gh, BridgeGame *game,
                        const char *notation) {
   if (!game || !game->game || !notation || !gh || !gh->config)
@@ -969,10 +1041,236 @@ char *bridge_play_move(BridgeGameHistory *gh, BridgeGame *game,
   game_event_set_cumulative_score(
       event, player_get_score(game_get_player(g, playerIdx)));
 
-  validated_moves_destroy(vms);
+  game_event_set_vms(event, vms);
   error_stack_destroy(err);
 
   return NULL;
+}
+
+char *bridge_challenge_last_move(BridgeGameHistory *gh, BridgeGame *game) {
+  if (!game || !game->game || !gh || !gh->config)
+    return string_duplicate("Invalid game state");
+
+  GameHistory *hist = TO_GH(gh);
+  Game *g = TO_GAME(game);
+  int num_events = game_history_get_num_events(hist);
+  if (num_events == 0)
+    return string_duplicate("No events to challenge");
+
+  GameEvent *last_event = game_history_get_event(hist, num_events - 1);
+  if (game_event_get_type(last_event) != GAME_EVENT_TILE_PLACEMENT_MOVE)
+    return string_duplicate("Last event is not a tile placement");
+
+  int phony_player = game_event_get_player_index(last_event);
+  Equity move_score = game_event_get_move_score(last_event);
+  const Rack *pre_move_rack = game_event_get_const_rack(last_event);
+
+  // Get the move tiles from the validated moves
+  ValidatedMoves *vms = game_event_get_vms(last_event);
+  if (!vms || validated_moves_get_number_of_moves(vms) == 0)
+    return string_duplicate("No validated move data");
+  const Move *move = validated_moves_get_move(vms, 0);
+
+  // 1. Return the phony player's current rack (post-draw) to the bag
+  return_rack_to_bag(g, phony_player);
+
+  // 2. Remove placed tiles from the board and return them to the bag
+  Board *board = game_get_board(g);
+  int row = move_get_row_start(move);
+  int col = move_get_col_start(move);
+  int dir = move_get_dir(move);
+  int ri = (dir == BOARD_VERTICAL_DIRECTION) ? 1 : 0;
+  int ci = (dir == BOARD_HORIZONTAL_DIRECTION) ? 1 : 0;
+  int tiles_removed = 0;
+
+  for (int i = 0; i < move_get_tiles_length(move); i++) {
+    MachineLetter tile = move_get_tile(move, i);
+    if (tile != 0) { // 0 = playthrough (existing tile)
+      board_set_letter(board, row, col, ALPHABET_EMPTY_SQUARE_MARKER);
+      // Return the tile to the bag (blanks go back as BLANK_MACHINE_LETTER)
+      MachineLetter bag_letter =
+          get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile;
+      bag_add_letter(game_get_bag(g), bag_letter, phony_player);
+      tiles_removed++;
+    }
+    row += ri;
+    col += ci;
+  }
+  board_set_tiles_played(board, board_get_tiles_played(board) - tiles_removed);
+
+  // 3. Rebuild is_cross_word flags and anchors (board_set_letter with
+  //    EMPTY_SQUARE_MARKER does not clear is_cross_word on adjacent squares,
+  //    and anchors are not updated by game_gen_all_cross_sets)
+  for (int r = 0; r < BOARD_DIM; r++) {
+    for (int c = 0; c < BOARD_DIM; c++) {
+      board_reset_is_cross_word(board, r, c, BOARD_HORIZONTAL_DIRECTION);
+      board_reset_is_cross_word(board, r, c, BOARD_VERTICAL_DIRECTION);
+    }
+  }
+  // Re-derive is_cross_word from remaining tiles on the board
+  for (int r = 0; r < BOARD_DIM; r++) {
+    for (int c = 0; c < BOARD_DIM; c++) {
+      if (!board_is_empty(board, r, c)) {
+        for (int csi = 0; csi < 2; csi++) {
+          if (r > 0)
+            square_set_is_cross_word(
+                board_get_writable_square(board, r - 1, c,
+                                          BOARD_HORIZONTAL_DIRECTION, csi),
+                true);
+          if (r < BOARD_DIM - 1)
+            square_set_is_cross_word(
+                board_get_writable_square(board, r + 1, c,
+                                          BOARD_HORIZONTAL_DIRECTION, csi),
+                true);
+          if (c > 0)
+            square_set_is_cross_word(
+                board_get_writable_square(board, r, c - 1,
+                                          BOARD_VERTICAL_DIRECTION, csi),
+                true);
+          if (c < BOARD_DIM - 1)
+            square_set_is_cross_word(
+                board_get_writable_square(board, r, c + 1,
+                                          BOARD_VERTICAL_DIRECTION, csi),
+                true);
+        }
+      }
+    }
+  }
+  board_update_all_anchors(board);
+
+  // 4. Regenerate all cross sets (board changed)
+  game_gen_all_cross_sets(g);
+
+  // 5. Draw the pre-move rack from the bag (restores original tiles)
+  draw_rack_from_bag(g, phony_player, pre_move_rack);
+
+  // 6. Restore the phony player's score
+  Player *phony_p = game_get_player(g, phony_player);
+  player_add_to_score(phony_p, -move_score);
+
+  // 7. Increment consecutive scoreless turns
+  game_increment_consecutive_scoreless_turns(g);
+
+  // 8. Add PHONY_TILES_RETURNED event to history
+  ErrorStack *err = error_stack_create();
+  GameEvent *phony_event = game_history_add_game_event(hist, err);
+  if (!error_stack_is_empty(err)) {
+    char *msg = error_stack_get_string_and_reset(err);
+    error_stack_destroy(err);
+    return msg;
+  }
+
+  game_event_set_player_index(phony_event, phony_player);
+  game_event_set_type(phony_event, GAME_EVENT_PHONY_TILES_RETURNED);
+  game_event_set_move_score(phony_event, int_to_equity(0));
+  game_event_set_cumulative_score(phony_event, player_get_score(phony_p));
+
+  Rack *phony_event_rack = game_event_get_rack(phony_event);
+  rack_copy(phony_event_rack, pre_move_rack);
+
+  error_stack_destroy(err);
+  return NULL;
+}
+
+void bridge_get_event_rack_info(BridgeGameHistory *gh, BridgeGame *game,
+                                int index, char **played_tiles_out,
+                                char **leave_out, char **full_rack_out) {
+  GameHistory *hist = TO_GH(gh);
+  Game *g = TO_GAME(game);
+  if (!hist || !g) {
+    if (played_tiles_out)
+      *played_tiles_out = string_duplicate("");
+    if (leave_out)
+      *leave_out = string_duplicate("");
+    if (full_rack_out)
+      *full_rack_out = string_duplicate("");
+    return;
+  }
+
+  GameEvent *event = game_history_get_event(hist, index);
+  if (!event) {
+    if (played_tiles_out)
+      *played_tiles_out = string_duplicate("");
+    if (leave_out)
+      *leave_out = string_duplicate("");
+    if (full_rack_out)
+      *full_rack_out = string_duplicate("");
+    return;
+  }
+
+  game_event_t type = game_event_get_type(event);
+  const LetterDistribution *ld = game_get_ld(g);
+  int ld_size = ld_get_size(ld);
+
+  if (type != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    // For non-tile-placement events, just return the event rack as full rack
+    const Rack *event_rack = game_event_get_const_rack(event);
+    if (played_tiles_out)
+      *played_tiles_out = string_duplicate("");
+    if (leave_out)
+      *leave_out = string_duplicate("");
+    if (full_rack_out)
+      *full_rack_out = event_rack ? internal_format_rack(event_rack, ld)
+                                  : string_duplicate("");
+    return;
+  }
+
+  ValidatedMoves *vms = game_event_get_vms(event);
+  if (!vms || validated_moves_get_number_of_moves(vms) == 0) {
+    const Rack *event_rack = game_event_get_const_rack(event);
+    if (played_tiles_out)
+      *played_tiles_out = string_duplicate("");
+    if (leave_out)
+      *leave_out = string_duplicate("");
+    if (full_rack_out)
+      *full_rack_out = event_rack ? internal_format_rack(event_rack, ld)
+                                  : string_duplicate("");
+    return;
+  }
+
+  const Move *move = validated_moves_get_move(vms, 0);
+
+  // Extract played tiles from the Move
+  Rack played;
+  played.dist_size = ld_size;
+  rack_reset(&played);
+  for (int i = 0; i < move_get_tiles_length(move); i++) {
+    MachineLetter tile = move_get_tile(move, i);
+    if (tile == 0)
+      continue; // playthrough
+    if (get_is_blanked(tile)) {
+      rack_add_letter(&played, BLANK_MACHINE_LETTER);
+    } else {
+      rack_add_letter(&played, tile);
+    }
+  }
+
+  // Determine if event rack is the full pre-move rack or the leave
+  const Rack *event_rack = game_event_get_const_rack(event);
+  Rack test_rack;
+  rack_copy(&test_rack, event_rack);
+
+  if (rack_subtract(&test_rack, &played)) {
+    // event_rack contained the played tiles, so it's the full rack
+    // test_rack is now the leave (full - played)
+    if (played_tiles_out)
+      *played_tiles_out = internal_format_rack(&played, ld);
+    if (leave_out)
+      *leave_out = internal_format_rack(&test_rack, ld);
+    if (full_rack_out)
+      *full_rack_out = internal_format_rack(event_rack, ld);
+  } else {
+    // event_rack doesn't contain the played tiles, so it's the leave
+    Rack full;
+    rack_copy(&full, event_rack);
+    rack_add(&full, &played);
+    if (played_tiles_out)
+      *played_tiles_out = internal_format_rack(&played, ld);
+    if (leave_out)
+      *leave_out = internal_format_rack(event_rack, ld);
+    if (full_rack_out)
+      *full_rack_out = internal_format_rack(&full, ld);
+  }
 }
 
 char *bridge_get_computer_move(BridgeGame *game) {

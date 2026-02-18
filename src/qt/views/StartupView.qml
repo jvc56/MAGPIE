@@ -89,6 +89,7 @@ Rectangle {
                             color: timeBtn.isSelected ? "#1E1E2E" : "#CDD6F4"
                             font.pixelSize: 14
                             horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
                         }
                         
                         background: Rectangle {

@@ -195,6 +195,10 @@ void GameHistoryModel::updateHistory() {
     int vowelCount;
     int consonantCount;
     int blankCount;
+    // Rack breakdown
+    QString playedTiles;
+    QString leaveStr;
+    QString fullRack;
     bool valid = false;
   } current;
 
@@ -206,7 +210,8 @@ void GameHistoryModel::updateHistory() {
         current.scoreLines, // Pass the list
         current.rackStr, current.totalTurnScore, current.cumulativeScore,
         current.eventIndex, current.unseenTiles, current.bagCount,
-        current.vowelCount, current.consonantCount, current.blankCount));
+        current.vowelCount, current.consonantCount, current.blankCount,
+        current.playedTiles, current.leaveStr, current.fullRack));
     // Store the end index (event index + 1) for this history item
     m_historyItemEndIndices.append(current.eventIndex + 1);
 
@@ -285,7 +290,21 @@ void GameHistoryModel::updateHistory() {
     }
 
     // Advance game state after processing this event
+    // (this also sets vms on event i via game_play_n_events)
     bridge_game_play_to_index(m_gameHistory, scratch, i + 1);
+
+    // Get rack breakdown (played tiles, leave, full rack) now that vms is set
+    if (!isSecondary) {
+      char *playedC = nullptr, *leaveC = nullptr, *fullRackC = nullptr;
+      bridge_get_event_rack_info(m_gameHistory, scratch, i, &playedC, &leaveC,
+                                 &fullRackC);
+      current.playedTiles = playedC ? QString::fromUtf8(playedC) : "";
+      current.leaveStr = leaveC ? QString::fromUtf8(leaveC) : "";
+      current.fullRack = fullRackC ? QString::fromUtf8(fullRackC) : "";
+      free(playedC);
+      free(leaveC);
+      free(fullRackC);
+    }
   }
   flush(true);
 
@@ -408,14 +427,6 @@ int GameHistoryModel::player2Score() const {
 }
 
 int GameHistoryModel::playerOnTurnIndex() const {
-  if (m_currentIndex > 0 && m_gameHistory) {
-    int playerIndex;
-    bridge_get_event_details(m_gameHistory, m_game, m_currentIndex - 1,
-                             &playerIndex, nullptr, nullptr, nullptr, nullptr,
-                             nullptr);
-    return playerIndex;
-  }
-
   if (!m_game)
     return 0;
   return bridge_get_player_on_turn_index(m_game);
@@ -602,14 +613,74 @@ void GameHistoryModel::startNewGame(const QString &lexicon,
   emit gameChanged();
 }
 
+void GameHistoryModel::previewMove(const QString &notation) {
+  if (!m_game) {
+    clearPreview();
+    return;
+  }
+
+  char *notationOut = nullptr;
+  int score = 0;
+  bool isPhony = false;
+  char *leaveOut = nullptr;
+  char *errorOut = nullptr;
+
+  int rc = bridge_preview_move(m_game, notation.toUtf8().constData(),
+                               &notationOut, &score, &isPhony, &leaveOut,
+                               &errorOut);
+
+  if (rc != 0) {
+    if (errorOut)
+      free(errorOut);
+    clearPreview();
+    return;
+  }
+
+  m_previewNotation = QString::fromUtf8(notationOut);
+  m_previewScore = score;
+  m_previewStatus = isPhony ? 2 : 1;
+  m_previewLeave = QString::fromUtf8(leaveOut);
+  free(notationOut);
+  free(leaveOut);
+  emit previewChanged();
+}
+
+void GameHistoryModel::clearPreview() {
+  if (m_previewStatus == 0)
+    return;
+  m_previewNotation.clear();
+  m_previewScore = 0;
+  m_previewStatus = 0;
+  m_previewLeave.clear();
+  emit previewChanged();
+}
+
 void GameHistoryModel::submitMove(const QString &notation) {
   if (m_gameMode != PlayMode || !m_game || !m_gameHistory)
     return;
+  clearPreview();
 
   char *err =
       bridge_play_move(m_gameHistory, m_game, notation.toUtf8().constData());
   if (err) {
     qWarning() << "Move failed:" << err;
+    free(err);
+    return;
+  }
+
+  m_currentIndex = bridge_get_num_events(m_gameHistory);
+  updateHistory();
+  updateGameState();
+  emit gameChanged();
+}
+
+void GameHistoryModel::challengeLastMove() {
+  if (m_gameMode != PlayMode || !m_game || !m_gameHistory)
+    return;
+
+  char *err = bridge_challenge_last_move(m_gameHistory, m_game);
+  if (err) {
+    qWarning() << "Challenge failed:" << err;
     free(err);
     return;
   }

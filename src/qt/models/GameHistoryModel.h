@@ -44,6 +44,11 @@ class GameHistoryModel : public QObject {
   Q_PROPERTY(int player2Clock READ player2Clock NOTIFY clocksChanged)
   Q_PROPERTY(bool aiThinking READ aiThinking NOTIFY aiThinkingChanged)
   Q_PROPERTY(bool timerRunning READ timerRunning NOTIFY clocksChanged)
+  Q_PROPERTY(
+      QString previewNotation READ previewNotation NOTIFY previewChanged)
+  Q_PROPERTY(int previewScore READ previewScore NOTIFY previewChanged)
+  Q_PROPERTY(int previewStatus READ previewStatus NOTIFY previewChanged)
+  Q_PROPERTY(QString previewLeave READ previewLeave NOTIFY previewChanged)
 
 public:
   enum GameMode { SetupMode = 0, PlayMode = 1, ReviewMode = 2 };
@@ -67,6 +72,9 @@ public:
   Q_INVOKABLE void exchange(const QString &tiles);
   Q_INVOKABLE QString getComputerMove();
   Q_INVOKABLE void toggleTimer();
+  Q_INVOKABLE void previewMove(const QString &notation);
+  Q_INVOKABLE void clearPreview();
+  Q_INVOKABLE void challengeLastMove();
 
   QString player1Name() const;
   QString player2Name() const;
@@ -93,6 +101,10 @@ public:
   int player2Clock() const { return m_clocks[1]; }
   bool aiThinking() const { return m_aiThinking; }
   bool timerRunning() const;
+  QString previewNotation() const { return m_previewNotation; }
+  int previewScore() const { return m_previewScore; }
+  int previewStatus() const { return m_previewStatus; }
+  QString previewLeave() const { return m_previewLeave; }
 
 signals:
   void gameChanged();
@@ -102,6 +114,7 @@ signals:
   void gameModeChanged();
   void clocksChanged();
   void aiThinkingChanged();
+  void previewChanged();
 
 private slots:
   void onTimerTick();
@@ -124,6 +137,11 @@ private:
   int m_clocks[2] = {0, 0};
   bool m_aiThinking = false;
   QTimer *m_timer = nullptr;
+
+  QString m_previewNotation;
+  int m_previewScore = 0;
+  int m_previewStatus = 0; // 0=none, 1=valid, 2=phony
+  QString m_previewLeave;
 };
 
 #endif // GAMEHISTORYMODEL_H

@@ -3,6 +3,7 @@
 
 HistoryItem::HistoryItem(int playerIndex, int type, const QList<QObject*> &scoreLines, const QString &rackString, int score, int cumulativeScore, int eventIndex,
                          const QString &unseenTiles, int bagCount, int vowelCount, int consonantCount, int blankCount,
+                         const QString &playedTiles, const QString &leaveString, const QString &fullRack,
                          QObject *parent)
     : QObject(parent),
       m_playerIndex(playerIndex),
@@ -16,7 +17,10 @@ HistoryItem::HistoryItem(int playerIndex, int type, const QList<QObject*> &score
       m_bagCount(bagCount),
       m_vowelCount(vowelCount),
       m_consonantCount(consonantCount),
-      m_blankCount(blankCount)
+      m_blankCount(blankCount),
+      m_playedTiles(playedTiles),
+      m_leaveString(leaveString),
+      m_fullRack(fullRack)
 {
     // Take ownership of score lines
     for (QObject *obj : m_scoreLines) {
@@ -82,4 +86,19 @@ int HistoryItem::consonantCount() const
 int HistoryItem::blankCount() const
 {
     return m_blankCount;
+}
+
+QString HistoryItem::playedTiles() const
+{
+    return m_playedTiles;
+}
+
+QString HistoryItem::leaveString() const
+{
+    return m_leaveString;
+}
+
+QString HistoryItem::fullRack() const
+{
+    return m_fullRack;
 }

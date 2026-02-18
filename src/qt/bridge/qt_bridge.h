@@ -122,9 +122,31 @@ BridgeGameHistory *bridge_game_create_fresh(const char *data_path,
 // Returns NULL if valid, or a newly allocated error message if invalid.
 char *bridge_validate_move(BridgeGame *game, const char *notation);
 
+// Preview a move without playing it. Returns 0 on success, 1 on error.
+// On success, populates notation_out (human-readable), score_out,
+// is_phony_out, and leave_out (remaining rack tiles after move).
+// Caller must free notation_out, leave_out, and error_out.
+int bridge_preview_move(BridgeGame *game, const char *ucgi_notation,
+                        char **notation_out, int *score_out,
+                        bool *is_phony_out, char **leave_out,
+                        char **error_out);
+
 // Returns NULL on success, or error message on failure.
 char *bridge_play_move(BridgeGameHistory *gh, BridgeGame *game,
                        const char *notation);
+
+// Challenge the last move as a phony. Removes the tiles from the board,
+// restores the player's rack and score, and adds a PHONY_TILES_RETURNED event.
+// Returns NULL on success, or error message on failure.
+char *bridge_challenge_last_move(BridgeGameHistory *gh, BridgeGame *game);
+
+// Get rack breakdown for a history event: played tiles, leave, and full rack.
+// For tile placement moves, extracts played tiles from the Move's tiles array.
+// The event must have vms set (call after game_play_n_events has replayed it).
+// All output strings are malloc'd; caller must free.
+void bridge_get_event_rack_info(BridgeGameHistory *gh, BridgeGame *game,
+                                int index, char **played_tiles_out,
+                                char **leave_out, char **full_rack_out);
 
 // Returns UCGI notation for the best move. Caller must free.
 char *bridge_get_computer_move(BridgeGame *game);
