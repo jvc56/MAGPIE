@@ -329,14 +329,16 @@ static void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
       }
     }
 
-    SmallMove sm;
+    SmallMove sm = {0};
     sm.tiny_move = tiny_move;
-    sm.metadata = (uint64_t)move_score;
+    sm.metadata.score = move_score;
     small_move_to_move(move_list->spare_move, &sm, game_get_board(game_copy));
     play_move(move_list->spare_move, game_copy, NULL);
 
     pv_line->moves[num_moves].tiny_move = tiny_move;
-    pv_line->moves[num_moves].metadata = (uint64_t)move_score;
+    memset(&pv_line->moves[num_moves].metadata, 0,
+           sizeof(pv_line->moves[num_moves].metadata));
+    pv_line->moves[num_moves].metadata.score = move_score;
     num_moves++;
   }
 
@@ -617,7 +619,7 @@ static int *compute_build_chain_values(EndgameSolverWorker *worker,
     int dir_a = (int)(sm_a->tiny_move & 1);
     int row_a = (int)((sm_a->tiny_move & SMALL_MOVE_ROW_BITMASK) >> 6);
     int col_a = (int)((sm_a->tiny_move & SMALL_MOVE_COL_BITMASK) >> 1);
-    int len_a = (int)((sm_a->metadata >> 16) & 0xFF);
+    int len_a = small_move_get_play_length(sm_a);
     int tp_a = small_move_get_tiles_played(sm_a);
 
     // Find the best extension (containing move with more tiles, already
@@ -641,7 +643,7 @@ static int *compute_build_chain_values(EndgameSolverWorker *worker,
 
       int row_b = (int)((sm_b->tiny_move & SMALL_MOVE_ROW_BITMASK) >> 6);
       int col_b = (int)((sm_b->tiny_move & SMALL_MOVE_COL_BITMASK) >> 1);
-      int len_b = (int)((sm_b->metadata >> 16) & 0xFF);
+      int len_b = small_move_get_play_length(sm_b);
 
       bool contained;
       if (dir_a == 0) {
