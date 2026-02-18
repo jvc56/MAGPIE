@@ -62,6 +62,8 @@ enum {
   // Conservation bonus weights: penalize playing tiles when opponent is stuck
   CONSERVATION_TILE_WEIGHT = 7,
   CONSERVATION_VALUE_WEIGHT = 2,
+  // Random noise range for thread jitter, centered around zero
+  THREAD_JITTER_NOISE = 8,
 };
 
 // Returns fraction of opponent's rack score that is stuck (0.0 = none, 1.0 =
@@ -566,7 +568,8 @@ static int compute_thread_jitter(EndgameSolverWorker *worker,
   }
   int bias = thread_idx * tiles_played;
   int jitter = (thread_idx % 2 == 1) ? bias : -bias;
-  jitter += (int)(prng_get_random_number(worker->prng, 8));
+  jitter += (int)(prng_get_random_number(worker->prng, THREAD_JITTER_NOISE)) -
+            THREAD_JITTER_NOISE / 2;
   return jitter;
 }
 
