@@ -64,6 +64,31 @@ void test_convert_error(void) {
   args.input_and_output_name = "CSW21_too_long_2";
   convert_and_assert_status(&args, conversion_results,
                             ERROR_STATUS_CONVERT_TEXT_CONTAINS_WORD_TOO_LONG);
+
+  // SEHENSWÜRDIGKEIT has 16 tiles (> BOARD_DIM) and 18 bytes in UTF-8
+  // (Ü is 2 bytes). Ensures too-long words are rejected by tile count.
+  args.conversion_type_string = "text2dawg";
+  args.data_paths = DEFAULT_TEST_DATA_PATH;
+  args.ld_name = "german";
+  args.input_and_output_name = "german_too_long";
+  convert_and_assert_status(&args, conversion_results,
+                            ERROR_STATUS_CONVERT_TEXT_CONTAINS_WORD_TOO_LONG);
+
+  // ABFRÜHSTÜCKEND is 14 tiles but 16 bytes (two 2-byte Ü's).
+  args.conversion_type_string = "text2dawg";
+  args.data_paths = DEFAULT_TEST_DATA_PATH;
+  args.ld_name = "german";
+  args.input_and_output_name = "german_max_length";
+  convert_and_assert_status(&args, conversion_results, ERROR_STATUS_SUCCESS);
+
+  // ABARRAN[QU]ESSEM is 13 tiles but 16 bytes ([QU] is a digraph tile).
+  args.conversion_type_string = "text2dawg";
+  args.data_paths = DEFAULT_TEST_DATA_PATH;
+  args.ld_name = "catalan";
+  args.input_and_output_name = "catalan_max_length";
+  convert_and_assert_status(&args, conversion_results, ERROR_STATUS_SUCCESS);
+  args.ld_name = NULL;
+
   args.conversion_type_string = "text2dawg";
   args.data_paths = DEFAULT_TEST_DATA_PATH;
   args.input_and_output_name = "CSW21_invalid_letter";
