@@ -234,10 +234,9 @@ static int greedy_playout_for_display(PVLine *pv_line, int start_idx,
     }
 
     // Check for consecutive passes ending the game
-    if (nplays == 1 && small_move_is_pass(move_list->small_moves[0])) {
-      if (game_get_consecutive_scoreless_turns(game_copy) >= 1) {
-        break;
-      }
+    if (nplays == 1 && small_move_is_pass(move_list->small_moves[0]) &&
+        game_get_consecutive_scoreless_turns(game_copy) >= 1) {
+      break;
     }
 
     // Pick highest-scoring move
@@ -857,10 +856,9 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
     }
 
     // Check for consecutive passes ending the game
-    if (nplays == 1 && small_move_is_pass(worker->move_list->small_moves[0])) {
-      if (game_get_consecutive_scoreless_turns(worker->game_copy) >= 1) {
-        break; // would be 6 consecutive zeros
-      }
+    if (nplays == 1 && small_move_is_pass(worker->move_list->small_moves[0]) &&
+        game_get_consecutive_scoreless_turns(worker->game_copy) >= 1) {
+      break; // would be 6 consecutive zeros
     }
 
     // Pick best move by adjusted score.
