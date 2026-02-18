@@ -156,413 +156,59 @@ static void run_endgames_with_timing(Config *config, EndgameSolver *solver,
   move_list_destroy(move_list);
 }
 
-// Play out an endgame position move-by-move with A/B solver settings.
-// solver_a is used when player_a_idx is on turn, solver_b otherwise.
+// A/B benchmark player config: either an endgame solver or greedy movegen.
+typedef struct {
+  int plies;        // 0 = static eval (greedy movegen)
+  bool heuristics;  // only meaningful when plies > 0
+  move_sort_t sort; // only meaningful when plies == 0
+} ABPlayerConfig;
+
+typedef struct {
+  ABPlayerConfig a;
+  ABPlayerConfig b;
+  int num_positions;
+  uint64_t seed;
+} ABBenchmarkConfig;
+
+static void ab_player_label(const ABPlayerConfig *cfg, char *buf, size_t len) {
+  if (cfg->plies > 0) {
+    (void)snprintf(buf, len, "%d-ply %s", cfg->plies,
+                   cfg->heuristics ? "heuristic" : "classic");
+  } else {
+    (void)snprintf(buf, len, "%s movegen",
+                   cfg->sort == MOVE_SORT_SCORE ? "score" : "equity");
+  }
+}
+
+// Play out an endgame position move-by-move with A/B player configs.
+// Each turn, the on-turn player uses either endgame solver (plies > 0) or
+// greedy movegen (plies == 0) according to its config.
 // Returns final spread from player_a_idx's perspective.
-static int play_endgame_ab(Game *game, EndgameSolver *solver_a,
-                           EndgameArgs *args_a, int max_plies_a,
-                           EndgameSolver *solver_b, EndgameArgs *args_b,
-                           int max_plies_b, EndgameResults *results,
-                           MoveList *move_list, double *time_a, double *time_b,
-                           int player_a_idx) {
+static int play_endgame_generic(Game *game, const ABPlayerConfig *cfg_a,
+                                EndgameSolver *solver_a, EndgameArgs *args_a,
+                                const ABPlayerConfig *cfg_b,
+                                EndgameSolver *solver_b, EndgameArgs *args_b,
+                                EndgameResults *results, MoveList *move_list,
+                                double *time_a, double *time_b,
+                                int player_a_idx) {
   while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
     int on_turn = game_get_player_on_turn_index(game);
-    EndgameSolver *solver = (on_turn == player_a_idx) ? solver_a : solver_b;
-    EndgameArgs *args = (on_turn == player_a_idx) ? args_a : args_b;
-    int max_plies = (on_turn == player_a_idx) ? max_plies_a : max_plies_b;
-    double *elapsed = (on_turn == player_a_idx) ? time_a : time_b;
-
-    args->game = game;
-    args->plies = max_plies;
+    bool is_a = (on_turn == player_a_idx);
+    const ABPlayerConfig *cfg = is_a ? cfg_a : cfg_b;
+    double *elapsed = is_a ? time_a : time_b;
 
     Timer t;
     ctimer_start(&t);
-    ErrorStack *err = error_stack_create();
-    endgame_solve(solver, args, results, err);
-    *elapsed += ctimer_elapsed_seconds(&t);
-    assert(error_stack_is_empty(err));
-    error_stack_destroy(err);
 
-    const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
-    if (pv->num_moves == 0) {
-      break;
-    }
+    if (cfg->plies > 0) {
+      EndgameSolver *solver = is_a ? solver_a : solver_b;
+      EndgameArgs *args = is_a ? args_a : args_b;
+      args->game = game;
+      args->plies = cfg->plies;
 
-    SmallMove best = pv->moves[0];
-    small_move_to_move(move_list->spare_move, &best, game_get_board(game));
-    play_move(move_list->spare_move, game, NULL);
-  }
-  int score_a =
-      equity_to_int(player_get_score(game_get_player(game, player_a_idx)));
-  int score_b =
-      equity_to_int(player_get_score(game_get_player(game, 1 - player_a_idx)));
-  return score_a - score_b;
-}
-
-static void run_benchmark_ab_full(int new_ply_setting, bool new_heuristics,
-                                  int old_ply_setting, bool old_heuristics,
-                                  int num_positions, uint64_t base_seed) {
-  log_set_level(LOG_WARN);
-
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -threads 6 -s1 score -s2 score -r1 small -r2 small");
-
-  EndgameSolver *solver_new = endgame_solver_create();
-  EndgameSolver *solver_old = endgame_solver_create();
-
-  EndgameArgs args_new = {.thread_control = config_get_thread_control(config),
-                          .plies = new_ply_setting,
-                          .tt_fraction_of_mem = 0.10,
-                          .initial_small_move_arena_size =
-                              DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-                          .num_threads = 6,
-                          .num_top_moves = 1,
-                          .use_heuristics = new_heuristics,
-                          .per_ply_callback = NULL,
-                          .per_ply_callback_data = NULL};
-
-  EndgameArgs args_old = {.thread_control = config_get_thread_control(config),
-                          .plies = old_ply_setting,
-                          .tt_fraction_of_mem = 0.10,
-                          .initial_small_move_arena_size =
-                              DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-                          .num_threads = 6,
-                          .num_top_moves = 1,
-                          .use_heuristics = old_heuristics,
-                          .per_ply_callback = NULL,
-                          .per_ply_callback_data = NULL};
-
-  EndgameResults *results = endgame_results_create();
-  MoveList *move_list = move_list_create(1);
-
-  // Create the initial game
-  exec_config_quiet(config, "new");
-  Game *game = config_get_game(config);
-
-  int total_new_spread = 0;
-  int total_old_spread = 0;
-  double total_time_new = 0;
-  double total_time_old = 0;
-  int valid_positions = 0;
-  int new_wins = 0;
-  int old_wins = 0;
-  int ties = 0;
-  const int max_attempts = num_positions * 10;
-
-  printf("\n");
-  printf("==============================================================\n");
-  int new_ply = args_new.plies;
-  int old_ply = args_old.plies;
-  printf("  A/B Endgame Benchmark: %d positions, game pairs\n", num_positions);
-  printf("  Method A (new): %d-ply, heuristics=%s\n", new_ply,
-         new_heuristics ? "true" : "false");
-  printf("  Method B (old): %d-ply, heuristics=%s\n", old_ply,
-         old_heuristics ? "true" : "false");
-  printf("==============================================================\n\n");
-
-  for (int i = 0; valid_positions < num_positions && i < max_attempts; i++) {
-    game_reset(game);
-    game_seed(game, base_seed + (uint64_t)i);
-    draw_starting_racks(game);
-
-    if (!play_until_bag_empty(game, move_list)) {
-      continue;
-    }
-
-    int on_turn = game_get_player_on_turn_index(game);
-    valid_positions++;
-
-    // Save position for replay
-    Game *saved_game = game_duplicate(game);
-
-    // Game 1: new method plays as on-turn player, old plays as opponent
-    double time_new_1 = 0;
-    double time_old_1 = 0;
-    int spread_1 = play_endgame_ab(
-        game, solver_new, &args_new, new_ply, solver_old, &args_old, old_ply,
-        results, move_list, &time_new_1, &time_old_1, on_turn);
-
-    // Game 2: old method plays as on-turn player, new plays as opponent
-    game_copy(game, saved_game); // restore position
-    double time_new_2 = 0;
-    double time_old_2 = 0;
-    int spread_2 = play_endgame_ab(
-        game, solver_old, &args_old, old_ply, solver_new, &args_new, new_ply,
-        results, move_list, &time_old_2, &time_new_2, on_turn);
-
-    // spread_1 is from new's perspective, spread_2 is from old's perspective
-    int pair_advantage = spread_1 - spread_2;
-    total_new_spread += spread_1;
-    total_old_spread += spread_2;
-    total_time_new += time_new_1 + time_new_2;
-    total_time_old += time_old_1 + time_old_2;
-
-    if (pair_advantage > 0) {
-      new_wins++;
-    } else if (pair_advantage < 0) {
-      old_wins++;
-    } else {
-      ties++;
-    }
-
-    printf("  Pair %3d: new_spread=%+4d, old_spread=%+4d, "
-           "pair_adv=%+4d  (new: %.2fs, old: %.2fs)\n",
-           valid_positions, spread_1, spread_2, pair_advantage,
-           time_new_1 + time_new_2, time_old_1 + time_old_2);
-    (void)fflush(stdout);
-
-    game_destroy(saved_game);
-  }
-
-  assert(valid_positions == num_positions);
-
-  int net_advantage = total_new_spread - total_old_spread;
-  printf("\n==============================================================\n");
-  printf("  RESULTS: %d game pairs (%d games total)\n", num_positions,
-         num_positions * 2);
-  printf("  New method total spread: %+d (avg %+.1f)\n", total_new_spread,
-         (double)total_new_spread / num_positions);
-  printf("  Old method total spread: %+d (avg %+.1f)\n", total_old_spread,
-         (double)total_old_spread / num_positions);
-  printf("  Net advantage (new): %+d (avg %+.1f per pair)\n", net_advantage,
-         (double)net_advantage / num_positions);
-  printf("  Pair wins: new=%d, old=%d, ties=%d\n", new_wins, old_wins, ties);
-  printf("  Time: new=%.2fs, old=%.2fs\n", total_time_new, total_time_old);
-  printf("==============================================================\n");
-
-  endgame_results_destroy(results);
-  move_list_destroy(move_list);
-  endgame_solver_destroy(solver_new);
-  endgame_solver_destroy(solver_old);
-  config_destroy(config);
-}
-
-// Convenience wrapper: new=heuristics, old=classic
-static void run_benchmark_ab(int new_ply, int old_ply, int num_positions,
-                             uint64_t base_seed) {
-  run_benchmark_ab_full(new_ply, true, old_ply, false, num_positions,
-                        base_seed);
-}
-
-void test_benchmark_endgame_ab(void) { run_benchmark_ab(3, 3, 50, 42); }
-
-void test_benchmark_endgame_ab_2v3(void) { run_benchmark_ab(2, 3, 50, 42); }
-
-void test_benchmark_endgame_ab_3v4(void) { run_benchmark_ab(3, 4, 50, 42); }
-
-void test_benchmark_endgame_ab_4v5(void) {
-  run_benchmark_ab(4, 5, 10000, 1337);
-}
-
-void test_benchmark_endgame_ab_4v5h(void) {
-  run_benchmark_ab_full(4, true, 5, true, 50, 42);
-}
-
-// A/B benchmark loading positions from a CGP file.
-// Writes per-game results (CGP, moves, scores) to output_path.
-static void run_benchmark_ab_from_cgp(const char *cgp_path,
-                                      const char *output_path, int new_ply,
-                                      bool new_heuristics, int old_ply,
-                                      bool old_heuristics, int num_threads,
-                                      int max_pairs) {
-  log_set_level(LOG_WARN);
-
-  char set_cmd[256];
-  (void)snprintf(
-      set_cmd, sizeof(set_cmd),
-      "set -lex CSW21 -threads %d -s1 score -s2 score -r1 small -r2 small",
-      num_threads);
-  Config *config = config_create_or_die(set_cmd);
-
-  EndgameSolver *solver_new = endgame_solver_create();
-  EndgameSolver *solver_old = endgame_solver_create();
-
-  EndgameArgs args_new = {.thread_control = config_get_thread_control(config),
-                          .plies = new_ply,
-                          .tt_fraction_of_mem = 0.10,
-                          .initial_small_move_arena_size =
-                              DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-                          .num_threads = num_threads,
-                          .num_top_moves = 1,
-                          .use_heuristics = new_heuristics,
-                          .per_ply_callback = NULL,
-                          .per_ply_callback_data = NULL};
-
-  EndgameArgs args_old = {.thread_control = config_get_thread_control(config),
-                          .plies = old_ply,
-                          .tt_fraction_of_mem = 0.10,
-                          .initial_small_move_arena_size =
-                              DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-                          .num_threads = num_threads,
-                          .num_top_moves = 1,
-                          .use_heuristics = old_heuristics,
-                          .per_ply_callback = NULL,
-                          .per_ply_callback_data = NULL};
-
-  EndgameResults *results = endgame_results_create();
-  MoveList *move_list = move_list_create(1);
-
-  exec_config_quiet(config, "new");
-  Game *game = config_get_game(config);
-
-  FILE *cgp_file = fopen(cgp_path, "re");
-  if (!cgp_file) {
-    log_fatal("Cannot open %s\n", cgp_path);
-    return;
-  }
-  FILE *out = fopen(output_path, "we");
-  if (!out) {
-    (void)fclose(cgp_file);
-    log_fatal("Cannot open %s for writing\n", output_path);
-    return;
-  }
-
-  int total_new_spread = 0;
-  int total_old_spread = 0;
-  double total_time_new = 0;
-  double total_time_old = 0;
-  int num_positions = 0;
-  int new_wins = 0;
-  int old_wins = 0;
-  int ties = 0;
-
-  printf("\n");
-  printf("==============================================================\n");
-  printf("  A/B Endgame Benchmark from CGP file\n");
-  printf("  Source: %s\n", cgp_path);
-  printf("  Output: %s\n", output_path);
-  printf("  Method A (new): %d-ply, heuristics=%s\n", new_ply,
-         new_heuristics ? "true" : "false");
-  printf("  Method B (old): %d-ply, heuristics=%s\n", old_ply,
-         old_heuristics ? "true" : "false");
-  printf("  Threads: %d\n", num_threads);
-  printf("==============================================================\n\n");
-
-  (void)fprintf(out,
-                "# A/B: new=%d-ply(h=%s) vs old=%d-ply(h=%s), threads=%d\n",
-                new_ply, new_heuristics ? "true" : "false", old_ply,
-                old_heuristics ? "true" : "false", num_threads);
-  (void)fprintf(
-      out, "# pair,new_spread,old_spread,pair_adv,time_new,time_old,cgp\n");
-
-  char line[4096];
-  while (fgets(line, sizeof(line), cgp_file) &&
-         (max_pairs <= 0 || num_positions < max_pairs)) {
-    size_t len = strlen(line);
-    if (len > 0 && line[len - 1] == '\n') {
-      line[len - 1] = '\0';
-    }
-    if (line[0] == '\0') {
-      continue;
-    }
-
-    load_cgp_or_die(game, line);
-    int on_turn = game_get_player_on_turn_index(game);
-    num_positions++;
-
-    Game *saved_game = game_duplicate(game);
-
-    // Game 1: new plays as on-turn, old plays as opponent
-    double time_new_1 = 0;
-    double time_old_1 = 0;
-    int spread_1 = play_endgame_ab(
-        game, solver_new, &args_new, new_ply, solver_old, &args_old, old_ply,
-        results, move_list, &time_new_1, &time_old_1, on_turn);
-
-    // Game 2: old plays as on-turn, new plays as opponent
-    game_copy(game, saved_game);
-    double time_new_2 = 0;
-    double time_old_2 = 0;
-    int spread_2 = play_endgame_ab(
-        game, solver_old, &args_old, old_ply, solver_new, &args_new, new_ply,
-        results, move_list, &time_old_2, &time_new_2, on_turn);
-
-    int pair_advantage = spread_1 - spread_2;
-    total_new_spread += spread_1;
-    total_old_spread += spread_2;
-    total_time_new += time_new_1 + time_new_2;
-    total_time_old += time_old_1 + time_old_2;
-
-    if (pair_advantage > 0) {
-      new_wins++;
-    } else if (pair_advantage < 0) {
-      old_wins++;
-    } else {
-      ties++;
-    }
-
-    (void)fprintf(out, "%d,%+d,%+d,%+d,%.2f,%.2f,%s\n", num_positions, spread_1,
-                  spread_2, pair_advantage, time_new_1 + time_new_2,
-                  time_old_1 + time_old_2, line);
-    (void)fflush(out);
-
-    printf("  Pair %3d: new_spread=%+4d, old_spread=%+4d, "
-           "pair_adv=%+4d  (new: %.2fs, old: %.2fs)\n",
-           num_positions, spread_1, spread_2, pair_advantage,
-           time_new_1 + time_new_2, time_old_1 + time_old_2);
-    (void)fflush(stdout);
-
-    game_destroy(saved_game);
-  }
-
-  (void)fclose(cgp_file);
-
-  int net_advantage = total_new_spread - total_old_spread;
-  printf("\n==============================================================\n");
-  printf("  RESULTS: %d game pairs (%d games total)\n", num_positions,
-         num_positions * 2);
-  printf("  New method total spread: %+d (avg %+.1f)\n", total_new_spread,
-         num_positions > 0 ? (double)total_new_spread / num_positions : 0.0);
-  printf("  Old method total spread: %+d (avg %+.1f)\n", total_old_spread,
-         num_positions > 0 ? (double)total_old_spread / num_positions : 0.0);
-  printf("  Net advantage (new): %+d (avg %+.1f per pair)\n", net_advantage,
-         num_positions > 0 ? (double)net_advantage / num_positions : 0.0);
-  printf("  Pair wins: new=%d, old=%d, ties=%d\n", new_wins, old_wins, ties);
-  printf("  Time: new=%.2fs, old=%.2fs\n", total_time_new, total_time_old);
-  printf("==============================================================\n");
-
-  (void)fprintf(out,
-                "# RESULTS: %d pairs, net=%+d, W/L/T=%d/%d/%d, "
-                "time_new=%.2f, time_old=%.2f\n",
-                num_positions, net_advantage, new_wins, old_wins, ties,
-                total_time_new, total_time_old);
-  (void)fclose(out);
-
-  endgame_results_destroy(results);
-  move_list_destroy(move_list);
-  endgame_solver_destroy(solver_new);
-  endgame_solver_destroy(solver_old);
-  config_destroy(config);
-}
-
-// Static eval (1-ply) vs 2-ply heuristic on clean (nonstuck) positions
-void test_benchmark_ab_clean_1v2h(void) {
-  run_benchmark_ab_from_cgp("/tmp/clean_positions.cgp",
-                            "/tmp/ab_clean_1v2h.csv", 2,
-                            true,     // new: 2-ply heuristic
-                            1, false, // old: 1-ply static
-                            6, 1000);
-}
-
-// Play an endgame where one side uses endgame solver and the other uses
-// movegen with a given sort type (greedy best move each turn).
-// Returns final spread from solver player's perspective.
-static int play_endgame_solver_vs_movegen(
-    Game *game, EndgameSolver *solver, EndgameArgs *solver_args,
-    int solver_plies, move_sort_t mg_sort_type, EndgameResults *results,
-    MoveList *move_list, double *time_solver, double *time_mg,
-    int solver_player_idx) {
-  while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
-    int on_turn = game_get_player_on_turn_index(game);
-    Timer t;
-    ctimer_start(&t);
-
-    if (on_turn == solver_player_idx) {
-      solver_args->game = game;
-      solver_args->plies = solver_plies;
       ErrorStack *err = error_stack_create();
-      endgame_solve(solver, solver_args, results, err);
-      *time_solver += ctimer_elapsed_seconds(&t);
+      endgame_solve(solver, args, results, err);
+      *elapsed += ctimer_elapsed_seconds(&t);
       assert(error_stack_is_empty(err));
       error_stack_destroy(err);
 
@@ -580,7 +226,7 @@ static int play_endgame_solver_vs_movegen(
           .game = game,
           .move_list = move_list,
           .move_record_type = MOVE_RECORD_BEST,
-          .move_sort_type = mg_sort_type,
+          .move_sort_type = cfg->sort,
           .override_kwg = NULL,
           .thread_index = 0,
           .eq_margin_movegen = 0,
@@ -588,83 +234,60 @@ static int play_endgame_solver_vs_movegen(
           .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       };
       generate_moves(&mg_args);
-      *time_mg += ctimer_elapsed_seconds(&t);
+      *elapsed += ctimer_elapsed_seconds(&t);
       if (move_list->count == 0) {
         break;
       }
       play_move(move_list->moves[0], game, NULL);
     }
   }
-  int score_s =
-      equity_to_int(player_get_score(game_get_player(game, solver_player_idx)));
-  int score_e = equity_to_int(
-      player_get_score(game_get_player(game, 1 - solver_player_idx)));
-  return score_s - score_e;
-}
-
-// Play an endgame where both sides use movegen with different sort types.
-// Returns final spread from player_a's perspective.
-static int play_endgame_movegen_vs_movegen(Game *game, move_sort_t sort_a,
-                                           move_sort_t sort_b,
-                                           MoveList *move_list, double *time_a,
-                                           double *time_b, int player_a_idx) {
-  while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
-    int on_turn = game_get_player_on_turn_index(game);
-    move_sort_t sort = (on_turn == player_a_idx) ? sort_a : sort_b;
-    double *elapsed = (on_turn == player_a_idx) ? time_a : time_b;
-
-    Timer t;
-    ctimer_start(&t);
-    move_list_reset(move_list);
-    const MoveGenArgs mg_args = {
-        .game = game,
-        .move_list = move_list,
-        .move_record_type = MOVE_RECORD_BEST,
-        .move_sort_type = sort,
-        .override_kwg = NULL,
-        .thread_index = 0,
-        .eq_margin_movegen = 0,
-        .target_equity = EQUITY_MAX_VALUE,
-        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-    };
-    generate_moves(&mg_args);
-    *elapsed += ctimer_elapsed_seconds(&t);
-    if (move_list->count == 0) {
-      break;
-    }
-    play_move(move_list->moves[0], game, NULL);
-  }
-  int sa = equity_to_int(player_get_score(game_get_player(game, player_a_idx)));
-  int sb =
+  int score_a =
+      equity_to_int(player_get_score(game_get_player(game, player_a_idx)));
+  int score_b =
       equity_to_int(player_get_score(game_get_player(game, 1 - player_a_idx)));
-  return sa - sb;
+  return score_a - score_b;
 }
 
-// A/B benchmark: endgame solver vs movegen, loading from CGP file.
-static void run_benchmark_solver_vs_movegen_from_cgp(
-    const char *cgp_path, const char *output_path, int solver_ply,
-    bool solver_heuristics, move_sort_t mg_sort_type, int num_threads,
-    int max_pairs) {
+// Run a single A/B benchmark matchup from a config entry.
+static void run_benchmark_ab_config(const ABBenchmarkConfig *bench) {
   log_set_level(LOG_WARN);
 
-  char set_cmd[256];
-  (void)snprintf(set_cmd, sizeof(set_cmd),
-                 "set -lex CSW21 -threads %d -s1 equity -s2 equity "
-                 "-r1 all -r2 all",
-                 num_threads);
-  Config *config = config_create_or_die(set_cmd);
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -threads 6 -s1 score -s2 score -r1 small -r2 small");
 
-  EndgameSolver *solver = endgame_solver_create();
-  EndgameArgs solver_args = {
-      .thread_control = config_get_thread_control(config),
-      .plies = solver_ply,
-      .tt_fraction_of_mem = 0.10,
-      .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-      .num_threads = num_threads,
-      .num_top_moves = 1,
-      .use_heuristics = solver_heuristics,
-      .per_ply_callback = NULL,
-      .per_ply_callback_data = NULL};
+  EndgameSolver *solver_a = bench->a.plies > 0 ? endgame_solver_create() : NULL;
+  EndgameSolver *solver_b = bench->b.plies > 0 ? endgame_solver_create() : NULL;
+
+  EndgameArgs args_a = {0};
+  EndgameArgs args_b = {0};
+
+  if (solver_a) {
+    args_a = (EndgameArgs){
+        .thread_control = config_get_thread_control(config),
+        .plies = bench->a.plies,
+        .tt_fraction_of_mem = 0.10,
+        .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+        .num_threads = 6,
+        .num_top_moves = 1,
+        .use_heuristics = bench->a.heuristics,
+        .per_ply_callback = NULL,
+        .per_ply_callback_data = NULL,
+    };
+  }
+
+  if (solver_b) {
+    args_b = (EndgameArgs){
+        .thread_control = config_get_thread_control(config),
+        .plies = bench->b.plies,
+        .tt_fraction_of_mem = 0.10,
+        .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+        .num_threads = 6,
+        .num_top_moves = 1,
+        .use_heuristics = bench->b.heuristics,
+        .per_ply_callback = NULL,
+        .per_ply_callback_data = NULL,
+    };
+  }
 
   EndgameResults *results = endgame_results_create();
   MoveList *move_list = move_list_create(1);
@@ -672,301 +295,152 @@ static void run_benchmark_solver_vs_movegen_from_cgp(
   exec_config_quiet(config, "new");
   Game *game = config_get_game(config);
 
-  FILE *cgp_file = fopen(cgp_path, "re");
-  if (!cgp_file) {
-    log_fatal("Cannot open %s\n", cgp_path);
-    return;
-  }
-  FILE *out = fopen(output_path, "we");
-  if (!out) {
-    (void)fclose(cgp_file);
-    log_fatal("Cannot open %s for writing\n", output_path);
-    return;
-  }
+  char label_a[64];
+  char label_b[64];
+  ab_player_label(&bench->a, label_a, sizeof(label_a));
+  ab_player_label(&bench->b, label_b, sizeof(label_b));
 
-  int total_solver_spread = 0;
-  int total_equity_spread = 0;
-  double total_time_solver = 0;
-  double total_time_equity = 0;
-  int num_positions = 0;
-  int solver_wins = 0;
-  int equity_wins = 0;
+  int total_a_spread = 0;
+  int total_b_spread = 0;
+  double total_time_a = 0;
+  double total_time_b = 0;
+  int valid_positions = 0;
+  int a_wins = 0;
+  int b_wins = 0;
   int ties = 0;
+  const int max_attempts = bench->num_positions * 10;
 
   printf("\n");
   printf("==============================================================\n");
-  const char *mg_name = (mg_sort_type == MOVE_SORT_SCORE) ? "score" : "equity";
-  printf("  Solver vs %s Movegen Benchmark\n", mg_name);
-  printf("  Source: %s\n", cgp_path);
-  printf("  Output: %s\n", output_path);
-  printf("  Solver: %d-ply, heuristics=%s, threads=%d\n", solver_ply,
-         solver_heuristics ? "true" : "false", num_threads);
-  printf("  Movegen: greedy best-%s move\n", mg_name);
-  printf("  Max pairs: %d\n", max_pairs);
+  printf("  A/B Endgame Benchmark: %d positions, game pairs\n",
+         bench->num_positions);
+  printf("  A: %s\n", label_a);
+  printf("  B: %s\n", label_b);
   printf("==============================================================\n\n");
 
-  (void)fprintf(out, "# solver=%d-ply(h=%s) vs %s_movegen, threads=%d\n",
-                solver_ply, solver_heuristics ? "true" : "false", mg_name,
-                num_threads);
-  (void)fprintf(out, "# pair,solver_spread,equity_spread,pair_adv,"
-                     "time_solver,time_equity,cgp\n");
+  for (int i = 0; valid_positions < bench->num_positions && i < max_attempts;
+       i++) {
+    game_reset(game);
+    game_seed(game, bench->seed + (uint64_t)i);
+    draw_starting_racks(game);
 
-  char line[4096];
-  while (fgets(line, sizeof(line), cgp_file) &&
-         (max_pairs <= 0 || num_positions < max_pairs)) {
-    size_t len = strlen(line);
-    if (len > 0 && line[len - 1] == '\n') {
-      line[len - 1] = '\0';
-    }
-    if (line[0] == '\0') {
+    if (!play_until_bag_empty(game, move_list)) {
       continue;
     }
 
-    load_cgp_or_die(game, line);
     int on_turn = game_get_player_on_turn_index(game);
-    num_positions++;
+    valid_positions++;
 
     Game *saved_game = game_duplicate(game);
 
-    // Game 1: solver plays as on-turn
-    double ts1 = 0;
-    double te1 = 0;
-    int spread_1 = play_endgame_solver_vs_movegen(
-        game, solver, &solver_args, solver_ply, mg_sort_type, results,
-        move_list, &ts1, &te1, on_turn);
+    // Game 1: A plays as on-turn, B plays as opponent
+    double time_a_1 = 0;
+    double time_b_1 = 0;
+    int spread_1 = play_endgame_generic(
+        game, &bench->a, solver_a, &args_a, &bench->b, solver_b, &args_b,
+        results, move_list, &time_a_1, &time_b_1, on_turn);
 
-    // Game 2: movegen plays as on-turn (solver as opponent)
+    // Game 2: B plays as on-turn, A plays as opponent
     game_copy(game, saved_game);
-    double ts2 = 0;
-    double te2 = 0;
-    int spread_2 = play_endgame_solver_vs_movegen(
-        game, solver, &solver_args, solver_ply, mg_sort_type, results,
-        move_list, &te2, &ts2, 1 - on_turn);
-    // spread_2 is from equity's perspective; negate for solver's
-    spread_2 = -spread_2;
+    double time_a_2 = 0;
+    double time_b_2 = 0;
+    // NOLINTNEXTLINE(readability-suspicious-call-argument)
+    int spread_2 = play_endgame_generic(
+        game, &bench->b, solver_b, &args_b, &bench->a, solver_a, &args_a,
+        results, move_list, &time_b_2, &time_a_2, on_turn);
 
+    // spread_1 is from A's perspective, spread_2 is from B's perspective
     int pair_advantage = spread_1 - spread_2;
-    total_solver_spread += spread_1;
-    total_equity_spread += spread_2;
-    total_time_solver += ts1 + ts2;
-    total_time_equity += te1 + te2;
+    total_a_spread += spread_1;
+    total_b_spread += spread_2;
+    total_time_a += time_a_1 + time_a_2;
+    total_time_b += time_b_1 + time_b_2;
 
     if (pair_advantage > 0) {
-      solver_wins++;
+      a_wins++;
     } else if (pair_advantage < 0) {
-      equity_wins++;
+      b_wins++;
     } else {
       ties++;
     }
 
-    (void)fprintf(out, "%d,%+d,%+d,%+d,%.2f,%.2f,%s\n", num_positions, spread_1,
-                  spread_2, pair_advantage, ts1 + ts2, te1 + te2, line);
-    (void)fflush(out);
-
-    printf("  Pair %3d: solver=%+4d, equity=%+4d, "
-           "adv=%+4d  (solver: %.2fs, equity: %.2fs)\n",
-           num_positions, spread_1, spread_2, pair_advantage, ts1 + ts2,
-           te1 + te2);
+    printf("  Pair %3d: A=%+4d, B=%+4d, "
+           "adv=%+4d  (A: %.2fs, B: %.2fs)\n",
+           valid_positions, spread_1, spread_2, pair_advantage,
+           time_a_1 + time_a_2, time_b_1 + time_b_2);
     (void)fflush(stdout);
 
     game_destroy(saved_game);
   }
 
-  (void)fclose(cgp_file);
+  assert(valid_positions == bench->num_positions);
 
-  int net = total_solver_spread - total_equity_spread;
+  int net_advantage = total_a_spread - total_b_spread;
   printf("\n==============================================================\n");
-  printf("  RESULTS: %d game pairs (%d games total)\n", num_positions,
-         num_positions * 2);
-  printf("  Solver total spread: %+d (avg %+.1f)\n", total_solver_spread,
-         num_positions > 0 ? (double)total_solver_spread / num_positions : 0.0);
-  printf("  Equity total spread: %+d (avg %+.1f)\n", total_equity_spread,
-         num_positions > 0 ? (double)total_equity_spread / num_positions : 0.0);
-  printf("  Net advantage (solver): %+d (avg %+.1f per pair)\n", net,
-         num_positions > 0 ? (double)net / num_positions : 0.0);
-  printf("  Pair wins: solver=%d, equity=%d, ties=%d\n", solver_wins,
-         equity_wins, ties);
-  printf("  Time: solver=%.2fs, equity=%.2fs\n", total_time_solver,
-         total_time_equity);
+  printf("  RESULTS: %d game pairs (%d games total)\n", bench->num_positions,
+         bench->num_positions * 2);
+  printf("  A (%s) total spread: %+d (avg %+.1f)\n", label_a, total_a_spread,
+         (double)total_a_spread / bench->num_positions);
+  printf("  B (%s) total spread: %+d (avg %+.1f)\n", label_b, total_b_spread,
+         (double)total_b_spread / bench->num_positions);
+  printf("  Net advantage (A): %+d (avg %+.1f per pair)\n", net_advantage,
+         (double)net_advantage / bench->num_positions);
+  printf("  Pair wins: A=%d, B=%d, ties=%d\n", a_wins, b_wins, ties);
+  printf("  Time: A=%.2fs, B=%.2fs\n", total_time_a, total_time_b);
   printf("==============================================================\n");
-
-  (void)fprintf(out,
-                "# RESULTS: %d pairs, net=%+d, W/L/T=%d/%d/%d, "
-                "time_solver=%.2f, time_equity=%.2f\n",
-                num_positions, net, solver_wins, equity_wins, ties,
-                total_time_solver, total_time_equity);
-  (void)fclose(out);
 
   endgame_results_destroy(results);
   move_list_destroy(move_list);
+  if (solver_a) {
+    endgame_solver_destroy(solver_a);
+  }
+  if (solver_b) {
+    endgame_solver_destroy(solver_b);
+  }
+  config_destroy(config);
+}
+
+static const ABBenchmarkConfig ab_configs[] = {
+    // score movegen vs 2-ply heuristic
+    {{0, false, MOVE_SORT_SCORE}, {2, true, 0}, 50, 42},
+    // 3-ply heuristic vs 3-ply classic
+    {{3, true, 0}, {3, false, 0}, 50, 42},
+    // 2-ply heuristic vs 3-ply classic
+    {{2, true, 0}, {3, false, 0}, 50, 42},
+    // 3-ply heuristic vs 4-ply classic
+    {{3, true, 0}, {4, false, 0}, 50, 42},
+    // 4-ply heuristic vs 5-ply heuristic
+    {{4, true, 0}, {5, true, 0}, 50, 42},
+};
+
+void test_benchmark_endgame_ab(void) {
+  int n = (int)(sizeof(ab_configs) / sizeof(ab_configs[0]));
+  for (int i = 0; i < n; i++) {
+    run_benchmark_ab_config(&ab_configs[i]);
+  }
+}
+
+void test_benchmark_endgame(void) {
+  log_set_level(LOG_WARN); // Allow warnings to show diagnostics
+
+  const int num_games = 100;
+  const int ply = 3;
+  const uint64_t base_seed = 0;
+
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -threads 6 -s1 score -s2 score -r1 small -r2 small");
+
+  EndgameSolver *solver = endgame_solver_create();
+
+  printf("\n");
+  printf("==============================================\n");
+  printf("  Endgame Benchmark: %d games, %d-ply\n", num_games, ply);
+  printf("==============================================\n");
+
+  run_endgames_with_timing(config, solver, num_games, ply, base_seed);
+
   endgame_solver_destroy(solver);
   config_destroy(config);
-}
-
-// Equity movegen vs 2-ply heuristic solver on clean positions
-void test_benchmark_equity_vs_2ply(void) {
-  run_benchmark_solver_vs_movegen_from_cgp("/tmp/clean_positions.cgp",
-                                           "/tmp/ab_equity_vs_2plyh.csv", 2,
-                                           true, MOVE_SORT_EQUITY, 6, 1000);
-}
-
-// Equity movegen vs 3-ply heuristic solver on clean positions
-void test_benchmark_equity_vs_3ply(void) {
-  run_benchmark_solver_vs_movegen_from_cgp("/tmp/clean_positions.cgp",
-                                           "/tmp/ab_equity_vs_3plyh.csv", 3,
-                                           true, MOVE_SORT_EQUITY, 6, 1000);
-}
-
-// Score movegen vs equity movegen on clean positions
-void test_benchmark_score_vs_equity(void) {
-  log_set_level(LOG_WARN);
-  const char set_cmd[] =
-      "set -lex CSW21 -threads 1 -s1 equity -s2 equity -r1 all -r2 all";
-  Config *config = config_create_or_die(set_cmd);
-  exec_config_quiet(config, "new");
-  Game *game = config_get_game(config);
-  MoveList *move_list = move_list_create(1);
-
-  FILE *cgp_file = fopen("/tmp/clean_positions.cgp", "re");
-  if (!cgp_file) {
-    log_fatal("Cannot open /tmp/clean_positions.cgp\n");
-    return;
-  }
-  FILE *out = fopen("/tmp/ab_score_vs_equity.csv", "we");
-  if (!out) {
-    (void)fclose(cgp_file);
-    log_fatal("Cannot open output\n");
-    return;
-  }
-
-  int total_score_spread = 0;
-  int total_eq_spread = 0;
-  double total_time_score = 0;
-  double total_time_eq = 0;
-  int n = 0;
-  int score_wins = 0;
-  int eq_wins = 0;
-  int ties = 0;
-  const int max_pairs = 1000;
-
-  printf("\n==============================================================\n");
-  printf("  Score vs Equity Movegen, max %d pairs\n", max_pairs);
-  printf("==============================================================\n\n");
-  (void)fprintf(out, "# score_movegen vs equity_movegen\n");
-  (void)fprintf(
-      out,
-      "# pair,score_spread,equity_spread,pair_adv,time_score,time_eq,cgp\n");
-
-  char line[4096];
-  while (fgets(line, sizeof(line), cgp_file) && n < max_pairs) {
-    size_t len = strlen(line);
-    if (len > 0 && line[len - 1] == '\n') {
-      line[len - 1] = '\0';
-    }
-    if (line[0] == '\0') {
-      continue;
-    }
-
-    load_cgp_or_die(game, line);
-    int on_turn = game_get_player_on_turn_index(game);
-    n++;
-    Game *saved = game_duplicate(game);
-
-    double ts1 = 0;
-    double te1 = 0;
-    int spread_1 =
-        play_endgame_movegen_vs_movegen(game, MOVE_SORT_SCORE, MOVE_SORT_EQUITY,
-                                        move_list, &ts1, &te1, on_turn);
-
-    game_copy(game, saved);
-    double ts2 = 0;
-    double te2 = 0;
-    int spread_2 =
-        play_endgame_movegen_vs_movegen(game, MOVE_SORT_EQUITY, MOVE_SORT_SCORE,
-                                        move_list, &te2, &ts2, on_turn);
-    spread_2 = -spread_2;
-
-    int adv = spread_1 - spread_2;
-    total_score_spread += spread_1;
-    total_eq_spread += spread_2;
-    total_time_score += ts1 + ts2;
-    total_time_eq += te1 + te2;
-    if (adv > 0) {
-      score_wins++;
-    } else if (adv < 0) {
-      eq_wins++;
-    } else {
-      ties++;
-    }
-
-    (void)fprintf(out, "%d,%+d,%+d,%+d,%.2f,%.2f,%s\n", n, spread_1, spread_2,
-                  adv, ts1 + ts2, te1 + te2, line);
-    (void)fflush(out);
-    printf("  Pair %3d: score=%+4d, equity=%+4d, adv=%+4d\n", n, spread_1,
-           spread_2, adv);
-    (void)fflush(stdout);
-    game_destroy(saved);
-  }
-  (void)fclose(cgp_file);
-
-  int net = total_score_spread - total_eq_spread;
-  printf("\n==============================================================\n");
-  printf("  RESULTS: %d pairs\n", n);
-  printf("  Net advantage (score): %+d (avg %+.1f per pair)\n", net,
-         n > 0 ? (double)net / n : 0.0);
-  printf("  Pair wins: score=%d, equity=%d, ties=%d\n", score_wins, eq_wins,
-         ties);
-  printf("  Time: score=%.2fs, equity=%.2fs\n", total_time_score,
-         total_time_eq);
-  printf("==============================================================\n");
-  (void)fprintf(out, "# RESULTS: %d pairs, net=%+d, W/L/T=%d/%d/%d\n", n, net,
-                score_wins, eq_wins, ties);
-  (void)fclose(out);
-  move_list_destroy(move_list);
-  config_destroy(config);
-}
-
-// Score movegen vs 2-ply heuristic solver on clean positions
-void test_benchmark_score_vs_2ply(void) {
-  run_benchmark_solver_vs_movegen_from_cgp("/tmp/clean_positions.cgp",
-                                           "/tmp/ab_score_vs_2plyh.csv", 2,
-                                           true, MOVE_SORT_SCORE, 6, 1000);
-}
-
-// Score movegen vs 3-ply heuristic solver on clean positions
-void test_benchmark_score_vs_3ply(void) {
-  run_benchmark_solver_vs_movegen_from_cgp("/tmp/clean_positions.cgp",
-                                           "/tmp/ab_score_vs_3plyh.csv", 3,
-                                           true, MOVE_SORT_SCORE, 6, 1000);
-}
-
-// 4-ply heuristic vs everything: score, equity, 2ply, 3ply
-void test_benchmark_4ply_tournament(void) {
-  // 4ply vs score
-  run_benchmark_solver_vs_movegen_from_cgp("/tmp/clean_positions.cgp",
-                                           "/tmp/ab_score_vs_4plyh.csv", 4,
-                                           true, MOVE_SORT_SCORE, 6, 1000);
-  // 4ply vs equity
-  run_benchmark_solver_vs_movegen_from_cgp("/tmp/clean_positions.cgp",
-                                           "/tmp/ab_equity_vs_4plyh.csv", 4,
-                                           true, MOVE_SORT_EQUITY, 6, 1000);
-  // 4ply vs 2ply
-  run_benchmark_ab_from_cgp("/tmp/clean_positions.cgp",
-                            "/tmp/ab_clean_2v4h.csv", 4, true, 2, true, 6,
-                            1000);
-  // 4ply vs 3ply
-  run_benchmark_ab_from_cgp("/tmp/clean_positions.cgp",
-                            "/tmp/ab_clean_3v4h.csv", 4, true, 3, true, 6,
-                            1000);
-}
-
-// 2-ply vs 3-ply heuristic solver on clean positions
-void test_benchmark_ab_clean_2v3h(void) {
-  run_benchmark_ab_from_cgp("/tmp/clean_positions.cgp",
-                            "/tmp/ab_clean_2v3h.csv", 3,
-                            true,    // new: 3-ply heuristic
-                            2, true, // old: 2-ply heuristic
-                            6, 1000);
 }
 
 // Self-play benchmark: one solver plays both sides of endgame positions.
@@ -1169,29 +643,6 @@ static void run_benchmark_thread_scaling(int ply, int num_positions,
 void test_benchmark_thread_scaling(void) {
   const int counts[] = {3, 6};
   run_benchmark_thread_scaling(4, 50, counts, 2, 42);
-}
-
-void test_benchmark_endgame(void) {
-  log_set_level(LOG_WARN); // Allow warnings to show diagnostics
-
-  const int num_games = 100;
-  const int ply = 3;
-  const uint64_t base_seed = 0;
-
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -threads 6 -s1 score -s2 score -r1 small -r2 small");
-
-  EndgameSolver *solver = endgame_solver_create();
-
-  printf("\n");
-  printf("==============================================\n");
-  printf("  Endgame Benchmark: %d games, %d-ply\n", num_games, ply);
-  printf("==============================================\n");
-
-  run_endgames_with_timing(config, solver, num_games, ply, base_seed);
-
-  endgame_solver_destroy(solver);
-  config_destroy(config);
 }
 
 // Compute stuck tile fraction for a player: generate moves with
@@ -1598,48 +1049,4 @@ void test_stuck_letter_frequency(void) {
 
   move_list_destroy(move_list);
   config_destroy(config);
-}
-
-// Tournament on stuck-tile positions: equity, 2-ply, 3-ply
-void test_benchmark_stuck_tournament(void) {
-  const char *cgp = "/tmp/stuck_tile_positions.cgp";
-  // equity vs 2-ply
-  run_benchmark_solver_vs_movegen_from_cgp(cgp,
-                                           "/tmp/ab_stuck_equity_vs_2plyh.csv",
-                                           2, true, MOVE_SORT_EQUITY, 6, 0);
-  // equity vs 3-ply
-  run_benchmark_solver_vs_movegen_from_cgp(cgp,
-                                           "/tmp/ab_stuck_equity_vs_3plyh.csv",
-                                           3, true, MOVE_SORT_EQUITY, 6, 0);
-  // 2-ply vs 3-ply
-  run_benchmark_ab_from_cgp(cgp, "/tmp/ab_stuck_2v3h.csv", 3, true, 2, true, 6,
-                            0);
-}
-
-// 4-ply and 5-ply round robin on stuck positions, then 5-ply on clean
-void test_benchmark_deep_tournament(void) {
-  // Use no-monster file (line 161 removed — that position takes 3+ hours at
-  // 5-ply). 4-ply stuck results already captured from prior run with full file.
-  const char *stuck = "/tmp/stuck_tile_positions_no_monster.cgp";
-  const char *clean = "/tmp/clean_positions.cgp";
-
-  // --- 5-ply vs remaining opponents on stuck positions ---
-  // (5-ply vs equity and 5-ply vs 2-ply already done from prior run)
-  // Use 2 threads to avoid OOM on 8GB machine
-  run_benchmark_ab_from_cgp(stuck, "/tmp/ab_stuck_3v5h.csv", 5, true, 3, true,
-                            2, 0);
-  run_benchmark_ab_from_cgp(stuck, "/tmp/ab_stuck_4v5h.csv", 5, true, 4, true,
-                            2, 0);
-
-  // --- 5-ply vs everything on clean positions ---
-  // Clean positions are easier, can use more threads
-  run_benchmark_solver_vs_movegen_from_cgp(clean,
-                                           "/tmp/ab_clean_equity_vs_5plyh.csv",
-                                           5, true, MOVE_SORT_EQUITY, 6, 1000);
-  run_benchmark_ab_from_cgp(clean, "/tmp/ab_clean_2v5h.csv", 5, true, 2, true,
-                            6, 1000);
-  run_benchmark_ab_from_cgp(clean, "/tmp/ab_clean_3v5h.csv", 5, true, 3, true,
-                            6, 1000);
-  run_benchmark_ab_from_cgp(clean, "/tmp/ab_clean_4v5h.csv", 5, true, 4, true,
-                            6, 1000);
 }
