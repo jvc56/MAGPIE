@@ -47,30 +47,32 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
   char *line = NULL;
   size_t len = 0;
   ssize_t read;
-  // Stack buffer avoids malloc/free per word (words are at most BOARD_DIM)
-  MachineLetter mls[BOARD_DIM + 1];
+  // Use BOARD_DIM + 2 so we can distinguish "too long" (mls_length ==
+  // BOARD_DIM + 1) from "invalid letter" (mls_length == -1). Multi-byte
+  // or multichar tiles (e.g. UTF-8, [QU]) mean raw byte length can exceed
+  // BOARD_DIM even when the word has <= BOARD_DIM tiles.
+  MachineLetter mls[BOARD_DIM + 2];
   while ((read = getline_ignore_carriage_return(&line, &len, input_file)) !=
          -1) {
     if (read > 0 && line[read - 1] == '\n') {
       line[read - 1] = '\0';
       read--;
     }
-    // Check length before conversion to distinguish "too long" from "invalid"
-    if (read > BOARD_DIM) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_CONVERT_TEXT_CONTAINS_WORD_TOO_LONG,
-          get_formatted_string(
-              "could not convert word '%s' with a length greater than %d", line,
-              BOARD_DIM));
-      break;
-    }
     const int mls_length =
-        fast_str_to_mls(&fc, line, false, mls, BOARD_DIM + 1);
+        fast_str_to_mls(&fc, line, false, mls, BOARD_DIM + 2);
     if (mls_length < 0) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONVERT_TEXT_CONTAINS_INVALID_LETTER,
           get_formatted_string(
               "could not convert word '%s' with invalid letter", line));
+      break;
+    }
+    if (mls_length > BOARD_DIM) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONVERT_TEXT_CONTAINS_WORD_TOO_LONG,
+          get_formatted_string(
+              "could not convert word '%s' with a length greater than %d", line,
+              BOARD_DIM));
       break;
     }
     if (!unblank_machine_letters(mls, mls_length)) {
