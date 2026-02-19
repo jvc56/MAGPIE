@@ -106,10 +106,10 @@ void test_ld_str_to_mls(void) {
   MachineLetter imls[40];
 
   // Ensure allowing playthrough tiles works
+  // Ensure allowing playthrough tiles works
   assert(ld_str_to_mls(english_ld, ".BDEF", true, imls, 40) == 5);
   assert(ld_str_to_mls(english_ld, ".B.D.E.F..", true, imls, 40) == 10);
-  assert(ld_str_to_mls(english_ld, ".BDEF", true, imls, 40) == 5);
-  assert(ld_str_to_mls(english_ld, ".B.D.E.F..", true, imls, 40) == 10);
+  // Ensure invalid racks return -1
   // Ensure invalid racks return -1
 
   // Invalid multichar strings

@@ -148,7 +148,7 @@ void test_board_all(void) {
   play_move(validated_moves_get_move(vms, 0), game, NULL);
   validated_moves_destroy(vms);
 
-  // Play SCHIZIER, better than best CSW word of SCHERZI
+  // Play SCAURING through the S of SPORK
   rack_set_to_string(ld, player1_rack, "CAURING");
   vms = validated_moves_create_and_assert_status(game, 1, "H8 SCAURING", false,
                                                  false, ERROR_STATUS_SUCCESS);

@@ -59,9 +59,6 @@ void test_validated_move_errors(void) {
       game, EMPTY_CGP, "h8 HA#DJI", 0, false, false,
       ERROR_STATUS_MOVE_VALIDATION_INVALID_TILES_PLAYED);
   assert_validated_move_error(
-      game, EMPTY_CGP, "h8 HA#DJI", 0, false, false,
-      ERROR_STATUS_MOVE_VALIDATION_INVALID_TILES_PLAYED);
-  assert_validated_move_error(
       game, EMPTY_CGP, "h8 HADJI", 0, false, false,
       ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_NOT_IN_RACK);
   assert_validated_move_error(
