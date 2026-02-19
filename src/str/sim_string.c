@@ -77,7 +77,8 @@ void string_builder_add_simmed_play_ply_counts(StringBuilder *sb,
 
 bool string_builder_add_sim_stats_with_display_lock(
     StringBuilder *sb, const Game *game, const SimResults *sim_results,
-    int max_num_display_plays, bool use_ucgi_format) {
+    int max_num_display_plays, int max_num_display_plies,
+    bool use_ucgi_format) {
   const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
   int num_display_plays = num_simmed_plays;
   if (num_display_plays > max_num_display_plays) {
@@ -89,7 +90,9 @@ bool string_builder_add_sim_stats_with_display_lock(
     num_rows += 1;
   }
   const int num_plies = sim_results_get_num_plies(sim_results);
-  const int num_cols = 9 + num_plies * 2;
+  const int num_display_plies =
+      max_num_display_plies < num_plies ? max_num_display_plies : num_plies;
+  const int num_cols = 9 + num_display_plies * 2;
   StringGrid *sg = string_grid_create(num_rows, num_cols, 1);
 
   int curr_row = 0;
@@ -104,7 +107,7 @@ bool string_builder_add_sim_stats_with_display_lock(
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Eq"));
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("StEq"));
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Iters"));
-    for (int j = 0; j < num_plies; j++) {
+    for (int j = 0; j < num_display_plies; j++) {
       string_grid_set_cell(sg, curr_row, curr_col++,
                            get_formatted_string("Ply%d-S", j + 1));
       string_grid_set_cell(sg, curr_row, curr_col++,
@@ -178,7 +181,7 @@ bool string_builder_add_sim_stats_with_display_lock(
         sg, curr_row, curr_col++,
         get_formatted_string("%lu", stat_get_num_samples(win_pct_stat)));
 
-    for (int j = 0; j < num_plies; j++) {
+    for (int j = 0; j < num_display_plies; j++) {
       const Stat *score_stat = simmed_play_get_score_stat(sp, j);
       const Stat *bingo_stat = simmed_play_get_bingo_stat(sp, j);
       string_grid_set_cell(
@@ -194,8 +197,9 @@ bool string_builder_add_sim_stats_with_display_lock(
   string_builder_add_string_grid(sb, sg, false);
   string_grid_destroy(sg);
 
-  string_builder_add_formatted_string(sb, "\nShowing %d of %d simmed plays\n",
-                                      num_display_plays, num_simmed_plays);
+  string_builder_add_formatted_string(
+      sb, "\nShowing %d of %d plays\nShowing %d of %d plies\n\n",
+      num_display_plays, num_simmed_plays, num_display_plies, num_plies);
 
   StringGrid *summary_sg = string_grid_create(6, 2, 1);
 
@@ -274,6 +278,7 @@ bool string_builder_add_sim_stats_with_display_lock(
 void string_builder_add_sim_stats(StringBuilder *sb, const Game *game,
                                   SimResults *sim_results,
                                   int max_num_display_plays,
+                                  int max_num_display_plies,
                                   bool use_ucgi_format) {
   // Only locks on success
   bool sim_stats_ready =
@@ -283,7 +288,8 @@ void string_builder_add_sim_stats(StringBuilder *sb, const Game *game,
     return;
   }
   string_builder_add_sim_stats_with_display_lock(
-      sb, game, sim_results, max_num_display_plays, use_ucgi_format);
+      sb, game, sim_results, max_num_display_plays, max_num_display_plies,
+      use_ucgi_format);
   if (use_ucgi_format) {
     string_builder_add_formatted_string(
         sb, "\ninfo nps %f\n",
@@ -295,10 +301,11 @@ void string_builder_add_sim_stats(StringBuilder *sb, const Game *game,
 }
 
 char *sim_results_get_string(const Game *game, SimResults *sim_results,
-                             int max_num_display_plays, bool use_ucgi_format) {
+                             int max_num_display_plays,
+                             int max_num_display_plies, bool use_ucgi_format) {
   StringBuilder *sb = string_builder_create();
   string_builder_add_sim_stats(sb, game, sim_results, max_num_display_plays,
-                               use_ucgi_format);
+                               max_num_display_plies, use_ucgi_format);
   char *str = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
   return str;
@@ -306,9 +313,10 @@ char *sim_results_get_string(const Game *game, SimResults *sim_results,
 
 void sim_results_print(ThreadControl *thread_control, const Game *game,
                        SimResults *sim_results, int max_num_display_plays,
-                       bool use_ucgi_format) {
-  char *sim_stats_string = sim_results_get_string(
-      game, sim_results, max_num_display_plays, use_ucgi_format);
+                       int max_num_display_plies, bool use_ucgi_format) {
+  char *sim_stats_string =
+      sim_results_get_string(game, sim_results, max_num_display_plays,
+                             max_num_display_plies, use_ucgi_format);
   thread_control_print(thread_control, sim_stats_string);
   free(sim_stats_string);
 }

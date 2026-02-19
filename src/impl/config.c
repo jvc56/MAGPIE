@@ -114,6 +114,7 @@ typedef enum {
   ARG_TOKEN_P2_MOVE_RECORD_TYPE,
   ARG_TOKEN_WIN_PCT,
   ARG_TOKEN_PLIES,
+  ARG_TOKEN_SHPLIES,
   ARG_TOKEN_ENDGAME_PLIES,
   ARG_TOKEN_ENDGAME_TOP_K,
   ARG_TOKEN_NUMBER_OF_PLAYS,
@@ -205,6 +206,7 @@ struct Config {
   int max_num_display_plays;
   int num_small_plays;
   int plies;
+  int shplies;
   int endgame_plies;
   int endgame_top_k;
   uint64_t max_iterations;
@@ -367,6 +369,8 @@ int config_get_num_small_plays(const Config *config) {
   return config->num_small_plays;
 }
 int config_get_plies(const Config *config) { return config->plies; }
+
+int config_get_shplies(const Config *config) { return config->shplies; }
 
 int config_get_endgame_plies(const Config *config) {
   return config->endgame_plies;
@@ -1259,6 +1263,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "4";
       text = "Specifies the number of plies to use for simulations.";
       break;
+    case ARG_TOKEN_SHPLIES:
+      usages[0] = "<shplies>";
+      examples[0] = "2";
+      examples[1] = "4";
+      text = "Specifies the number of plies to display when printing sim "
+             "results.";
+      break;
     case ARG_TOKEN_ENDGAME_PLIES:
       usages[0] = "<endgame_plies>";
       examples[0] = "4";
@@ -2031,7 +2042,8 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->plies, config->move_list, known_opp_rack, config->win_pcts,
       config->inference_results, config->thread_control, config->game,
       config->sim_with_inference, config->use_heat_map, config->num_threads,
-      config->print_interval, config->max_num_display_plays, config->seed,
+      config->print_interval, config->max_num_display_plays, config->shplies,
+      config->seed,
       config->max_iterations, config->min_play_iterations,
       config->stop_cond_pct, config->threshold, (int)config->time_limit_seconds,
       config->sampling_rule, config->cutoff, &inference_args, sim_args);
@@ -2141,7 +2153,7 @@ char *status_sim(Config *config) {
     return string_duplicate("simmer has not been initialized");
   }
   return sim_results_get_string(config->game, sim_results,
-                                config->max_num_display_plays,
+                                config->max_num_display_plays, config->shplies,
                                 !config->human_readable);
 }
 
@@ -2476,7 +2488,8 @@ char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
   if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
     result =
         sim_results_get_string(config->game, config->sim_results,
-                               max_num_display_plays, !config->human_readable);
+                               max_num_display_plays, config->shplies,
+                               !config->human_readable);
   } else {
     result = move_list_get_string(
         config->move_list, game_get_board(config->game), config->ld,
@@ -4963,6 +4976,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_int(config, ARG_TOKEN_SHPLIES, 1, MAX_PLIES, &config->shplies,
+                  error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_int(config, ARG_TOKEN_ENDGAME_PLIES, 1, MAX_VARIANT_LENGTH,
                   &config->endgame_plies, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -5780,6 +5799,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
   arg(ARG_TOKEN_PLIES, "plies", 1, 1);
+  arg(ARG_TOKEN_SHPLIES, "shplies", 1, 1);
   arg(ARG_TOKEN_ENDGAME_PLIES, "eplies", 1, 1);
   arg(ARG_TOKEN_ENDGAME_TOP_K, "etopk", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1);
@@ -5845,6 +5865,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->max_num_display_plays = 15;
   config->num_small_plays = DEFAULT_SMALL_MOVE_LIST_CAPACITY;
   config->plies = 5;
+  config->shplies = 2;
   config->endgame_plies = 6;
   config->endgame_top_k = 1;
   config->eq_margin_inference = int_to_equity(5);
@@ -6109,6 +6130,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PLIES:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->plies);
+      break;
+    case ARG_TOKEN_SHPLIES:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->shplies);
       break;
     case ARG_TOKEN_ENDGAME_PLIES:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
