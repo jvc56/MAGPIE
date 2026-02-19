@@ -1852,8 +1852,7 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
     // Find the thread that completed the deepest search for its root move arena
     int best_thread = 0;
     int best_depth = solver_workers[0]->completed_depth;
-    for (int thread_index = 1; thread_index < solver->threads;
-         thread_index++) {
+    for (int thread_index = 1; thread_index < solver->threads; thread_index++) {
       int thread_depth = solver_workers[thread_index]->completed_depth;
       if (thread_depth > best_depth) {
         best_depth = thread_depth;
