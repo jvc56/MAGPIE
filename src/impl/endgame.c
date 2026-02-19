@@ -1832,34 +1832,34 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
     cpthread_join(worker_ids[thread_index]);
   }
 
-  // ABDADA result aggregation: find the best result among all threads
-  // The thread that completed the deepest search with a valid result wins
-  int best_thread = 0;
-  int best_depth = solver_workers[0]->completed_depth;
-
-  for (int thread_index = 1; thread_index < solver->threads; thread_index++) {
-    int thread_depth = solver_workers[thread_index]->completed_depth;
-    // Prefer deeper completed depth, or same depth from lower-indexed thread
-    if (thread_depth > best_depth) {
-      best_depth = thread_depth;
-      best_thread = thread_index;
-    }
-  }
-
-  // Copy the best result to the solver's principal variation
-  solver->principal_variation = solver_workers[best_thread]->best_pv;
-  solver->best_pv_value = solver_workers[best_thread]->best_pv_value;
+  // The endgame_results already tracks the best PV on the fly (updated by
+  // each worker after completing each depth). Read it back now that all
+  // threads have joined.
+  const PVLine *best_pv =
+      endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+  solver->principal_variation = *best_pv;
+  solver->best_pv_value =
+      endgame_results_get_value(results, ENDGAME_RESULT_BEST);
 
   // Multi-PV: extract top-K root moves from best thread's arena before
   // destroying workers.
   const int num_top = solver->solve_multiple_variations;
   int num_pvs = 1;
   PVLine multi_pvs[MAX_VARIANT_LENGTH];
-  // PV[0] uses the search-tracked principal variation which has the most
-  // accurate move sequence from the actual search.
   multi_pvs[0] = solver->principal_variation;
 
   if (num_top > 1) {
+    // Find the thread that completed the deepest search for its root move arena
+    int best_thread = 0;
+    int best_depth = solver_workers[0]->completed_depth;
+    for (int thread_index = 1; thread_index < solver->threads;
+         thread_index++) {
+      int thread_depth = solver_workers[thread_index]->completed_depth;
+      if (thread_depth > best_depth) {
+        best_depth = thread_depth;
+        best_thread = thread_index;
+      }
+    }
     num_pvs = extract_multi_pvs(solver, solver_workers[best_thread],
                                 endgame_args->game, multi_pvs, num_top);
   }
