@@ -7,6 +7,7 @@
 #include "../src/ent/move.h"
 #include <assert.h>
 
+// NOLINTNEXTLINE
 _Static_assert(sizeof(SmallMove) == 16, "SmallMove must be 16 bytes");
 
 void test_move_resize(void) {
