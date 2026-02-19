@@ -25,7 +25,7 @@ void test_words_played(void) {
   const FormedWords *fw = validated_moves_get_formed_words(vms_pent, 0);
 
   assert(formed_words_get_num_words(fw) == 4);
-  // Should generate 4 words: PIP, ONE, HEN, and the main word PENT
+  // Should generate 4 words: PIT, ONE, HEN, and the main word TENT
   assert(formed_words_get_word_length(fw, 0) == 3);
   assert(formed_words_get_word_valid(fw, 0));
   assert(memcmp(formed_words_get_word(fw, 0), (MachineLetter[]){16, 9, 20},
@@ -54,7 +54,7 @@ void test_words_played(void) {
 
   assert(formed_words_get_num_words(fw) == 5);
   // should generate 5 "words":
-  // OD, WIFAY*, ANE, ZGENUINE*, and the main word DIQETAZ*
+  // OD, WIFAY*, ANE, ZGENUINE*, and the main word DIPETAZ*
   assert(formed_words_get_word_length(fw, 0) == 2);
   assert(formed_words_get_word_valid(fw, 0));
   assert(memcmp(formed_words_get_word(fw, 0), (MachineLetter[]){15, 4}, 2) ==
