@@ -251,7 +251,7 @@ void test_command_execution(void) {
   assert_command_status_and_output(config, "cgp " ZILLION_OPENING_CGP, false, 1,
                                    0);
   assert_command_status_and_output(
-      config, "addmoves 8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 0);
+      config, "addmoves 8F LIN,8D ZILLION,8F ZILLION", false, 5, 0);
 
   const MoveList *ml = config_get_move_list(config);
   assert(move_list_get_count(ml) == 3);
@@ -271,7 +271,7 @@ void test_command_execution(void) {
   // Add moves before generating to confirm that the gen command
   // resets the movelist
   assert_command_status_and_output(
-      config, "addmoves 8f.NIL,8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 0);
+      config, "addmoves  8f NIL,8F LIN,8D ZILLION,8F ZILLION", false, 5, 0);
 
   assert_command_status_and_output(config, "cgp " ZILLION_OPENING_CGP, false, 5,
                                    0);
@@ -284,7 +284,7 @@ void test_command_execution(void) {
   // 2 are new
   // To get 20 total moves
   assert_command_status_and_output(
-      config, "addmoves 8f.NIL,8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 0);
+      config, "addmoves 8f NIL,8F LIN,8D ZILLION,8F ZILLION", false, 5, 0);
   assert_command_status_and_output(
       config, "sim -plies 2 -scond none -threads 8 -it 1 -pfreq 70", false, 60,
       0);
@@ -292,7 +292,8 @@ void test_command_execution(void) {
   // Sim finishes with max iterations
   // Add user input moves that will be
   // cleared by the subsequent movegen command.
-  assert_command_status_and_output(config, "addmoves ex.SOI,ex.IO,ex.S", false,
+  assert_command_status_and_output(config, "r SOI", false, 5, 0);
+  assert_command_status_and_output(config, "addmoves ex SOI,ex IO,ex S", false,
                                    5, 0);
   assert_command_status_and_output(config, "cgp " DELDAR_VS_HARSHAN_CGP, false,
                                    5, 0);

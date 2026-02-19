@@ -49,9 +49,11 @@ void play_move_and_validate_cgp(Game *game, const char *move_string,
                                 const char *rack_string,
                                 const char *expected_cgp,
                                 bool write_player_on_turn_first) {
+  printf("move string: >%s<\n", move_string);
+  printf("rack string: >%s<\n", rack_string);
   ValidatedMoves *vms = validated_moves_create_and_assert_status(
       game, game_get_player_on_turn_index(game), move_string, false, false,
-      false, ERROR_STATUS_SUCCESS);
+      ERROR_STATUS_SUCCESS);
   assert(validated_moves_get_number_of_moves(vms) == 1);
   const Move *move = validated_moves_get_move(vms, 0);
   int player_on_turn_index = game_get_player_on_turn_index(game);
@@ -132,14 +134,14 @@ void test_cgp_english(void) {
       "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AAENRSZ/DIIIILU 0/0 3",
       false);
   play_move_and_validate_cgp(
-      game, "ex.IIILU", "CDEIRW?",
+      game, "ex IIILU", "CDEIRW?",
       "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AAENRSZ/CDEIRW? 0/0 4",
       false);
   play_move_and_validate_cgp(
-      game, "8G.ZA", "AENNRST",
+      game, "8G ZA", "AENNRST",
       "15/15/15/15/15/15/15/6ZA7/15/15/15/15/15/15/15 AENNRST/CDEIRW? 22/0 0",
       false);
-  play_move_and_validate_cgp(game, "9E.CRoWDIE", "AGNOTT?",
+  play_move_and_validate_cgp(game, "9E CRoWDIE", "AGNOTT?",
                              "15/15/15/15/15/15/15/6ZA7/4CRoWDIE4/15/15/15/15/"
                              "15/15 AENNRST/AGNOTT? 22/79 0",
                              false);
@@ -158,14 +160,14 @@ void test_cgp_english(void) {
       "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 DIIIILU/AAENRSZ 0/0 3",
       true);
   play_move_and_validate_cgp(
-      game, "ex.IIILU", "CDEIRW?",
+      game, "ex IIILU", "CDEIRW?",
       "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AAENRSZ/CDEIRW? 0/0 4",
       true);
   play_move_and_validate_cgp(
-      game, "8G.ZA", "AENNRST",
+      game, "8G ZA", "AENNRST",
       "15/15/15/15/15/15/15/6ZA7/15/15/15/15/15/15/15 CDEIRW?/AENNRST 0/22 0",
       true);
-  play_move_and_validate_cgp(game, "9E.CRoWDIE", "AGNOTT?",
+  play_move_and_validate_cgp(game, "9E CRoWDIE", "AGNOTT?",
                              "15/15/15/15/15/15/15/6ZA7/4CRoWDIE4/15/15/15/15/"
                              "15/15 AENNRST/AGNOTT? 22/79 0",
                              true);

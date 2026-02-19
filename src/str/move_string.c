@@ -130,16 +130,16 @@ void string_builder_add_ucgi_move(StringBuilder *move_string_builder,
   if (move_get_type(move) != GAME_EVENT_PASS) {
     if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
       if (board_is_dir_vertical(move_get_dir(move))) {
-        string_builder_add_formatted_string(move_string_builder, "%c%d.",
+        string_builder_add_formatted_string(move_string_builder, "%c%d ",
                                             move_get_col_start(move) + 'a',
                                             move_get_row_start(move) + 1);
       } else {
-        string_builder_add_formatted_string(move_string_builder, "%d%c.",
+        string_builder_add_formatted_string(move_string_builder, "%d%c ",
                                             move_get_row_start(move) + 1,
                                             move_get_col_start(move) + 'a');
       }
     } else {
-      string_builder_add_string(move_string_builder, "ex.");
+      string_builder_add_string(move_string_builder, "ex ");
     }
 
     int number_of_tiles_to_print = move_get_tiles_length(move);

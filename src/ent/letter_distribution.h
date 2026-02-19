@@ -394,7 +394,7 @@ static inline MachineLetter ld_hl_to_ml(const LetterDistribution *ld,
 }
 
 static inline bool char_is_playthrough(const char c) {
-  return c == ASCII_PLAYED_THROUGH || c == ASCII_UCGI_PLAYED_THROUGH;
+  return c == ASCII_PLAYED_THROUGH;
 }
 
 // Convert a string of arbitrary characters into an array of machine letters,

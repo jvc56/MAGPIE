@@ -722,9 +722,6 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
                                           const char *move_tiles,
                                           const int move_score,
                                           const bool play_move_on_board) {
-  const Player *player =
-      game_get_player(game, game_get_player_on_turn_index(game));
-  Rack *player_rack = player_get_rack(player);
   MoveList *move_list = move_list_create(1);
   const MoveGenArgs move_gen_args = {
       .game = game,
@@ -735,7 +732,11 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
-  rack_set_to_string(game_get_ld(game), player_rack, rack_string);
+  const int player_index = game_get_player_on_turn_index(game);
+
+  return_rack_to_bag(game, 0);
+  return_rack_to_bag(game, 1);
+  draw_rack_string_from_bag(game, player_index, rack_string);
 
   generate_moves_for_game(&move_gen_args);
   char *gen_move_string;
@@ -751,18 +752,21 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
   char *move_tiles_no_parens = remove_parentheses(move_tiles);
   char *vm_move_string;
   if (strings_equal(move_position, "exch")) {
-    vm_move_string = get_formatted_string("ex.%s", move_tiles_no_parens);
+    vm_move_string = get_formatted_string("ex %s", move_tiles_no_parens);
   } else {
     vm_move_string =
-        get_formatted_string("%s.%s", move_position, move_tiles_no_parens);
+        get_formatted_string("%s %s", move_position, move_tiles_no_parens);
   }
   free(move_tiles_no_parens);
 
   ErrorStack *error_stack = error_stack_create();
-  ValidatedMoves *vms = validated_moves_create(game, 0, vm_move_string, false,
-                                               true, false, error_stack);
+  ValidatedMoves *vms = validated_moves_create(
+      game, player_index, vm_move_string, false, false, error_stack);
   free(vm_move_string);
-  assert(error_stack_top(error_stack) == ERROR_STATUS_SUCCESS);
+  if (error_stack_top(error_stack) != ERROR_STATUS_SUCCESS) {
+    error_stack_print_and_reset(error_stack);
+    assert(0);
+  }
 
   if (play_move_on_board) {
     play_move(move_list_get_move(move_list, 0), game, NULL);
@@ -774,17 +778,17 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
 }
 
 ValidatedMoves *validated_moves_create_and_assert_status(
-    const Game *game, int player_index, const char *ucgi_moves_string,
-    bool allow_phonies, bool allow_unknown_exchanges, bool allow_playthrough,
-    error_code_t expected_status) {
+    const Game *game, int player_index, const char *moves_string,
+    bool allow_phonies, bool allow_playthrough, error_code_t expected_status) {
   ErrorStack *error_stack = error_stack_create();
-  ValidatedMoves *vms = validated_moves_create(
-      game, player_index, ucgi_moves_string, allow_phonies,
-      allow_unknown_exchanges, allow_playthrough, error_stack);
+  ValidatedMoves *vms =
+      validated_moves_create(game, player_index, moves_string, allow_phonies,
+                             allow_playthrough, error_stack);
   const bool ok = error_stack_top(error_stack) == expected_status;
   if (!ok) {
-    printf("validated_moves_create return unexpected status for %s: %d != %d\n",
-           ucgi_moves_string, error_stack_top(error_stack), expected_status);
+    printf(
+        "validated_moves_create return unexpected status for >%s<: %d != %d\n",
+        moves_string, error_stack_top(error_stack), expected_status);
     error_stack_print_and_reset(error_stack);
     assert(0);
   }
@@ -816,9 +820,16 @@ ValidatedMoves *assert_validated_move_success(Game *game, const char *cgp_str,
   load_cgp_or_die(game, cgp_str);
   ErrorStack *error_stack = error_stack_create();
   ValidatedMoves *vms =
-      validated_moves_create(game, player_index, move_str, allow_phonies, true,
+      validated_moves_create(game, player_index, move_str, allow_phonies,
                              allow_playthrough, error_stack);
-  assert(error_stack_top(error_stack) == ERROR_STATUS_SUCCESS);
+  const bool success = error_stack_top(error_stack) == ERROR_STATUS_SUCCESS;
+  if (!success) {
+    printf(
+        "validated_moves_create failed with status %d for move string: >%s<\n",
+        error_stack_top(error_stack), move_str);
+    error_stack_print_and_reset(error_stack);
+    assert(0);
+  }
   error_stack_destroy(error_stack);
   return vms;
 }
@@ -979,14 +990,6 @@ void assert_move_equity_exact(const Move *move, Equity expected_equity) {
 void assert_rack_score(const LetterDistribution *ld, const Rack *rack,
                        int expected_score) {
   assert(rack_get_score(ld, rack) == int_to_equity(expected_score));
-}
-
-void assert_validated_moves_challenge_points(const ValidatedMoves *vms, int i,
-                                             int expected_challenge_points) {
-  const Equity expected_challenge_points_eq =
-      int_to_equity(expected_challenge_points);
-  assert(validated_moves_get_challenge_points(vms, i) ==
-         expected_challenge_points_eq);
 }
 
 void assert_anchor_equity_int(const AnchorHeap *ah, int i, int expected) {

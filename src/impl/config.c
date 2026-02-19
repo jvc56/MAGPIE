@@ -862,10 +862,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     case ARG_TOKEN_MOVES:
       usages[0] = "<move>";
-      usages[1] = "<move>,<move>,...";
-      examples[0] = " 8F.LIN";
-      examples[1] = " 8F.LIN,8D.ZILLION,8F.ZILLION";
-      text = "Adds the CGP moves to the move list. Multiple moves must be "
+      usages[1] = "<move>, <move>, ...";
+      examples[0] = " 8F LIN";
+      examples[1] = " 8F LIN, 8D  ZILLION, 8F ZILLION, pass";
+      text = "Adds the moves to the move list. Multiple moves must be "
              "delimited by commas as opposed to spaces.";
       break;
     case ARG_TOKEN_RACK:
@@ -1689,9 +1689,8 @@ char *impl_add_moves(Config *config, ErrorStack *error_stack) {
 
   int player_on_turn_index = game_get_player_on_turn_index(config->game);
 
-  ValidatedMoves *new_validated_moves =
-      validated_moves_create(config->game, player_on_turn_index, moves, true,
-                             false, true, error_stack);
+  ValidatedMoves *new_validated_moves = validated_moves_create(
+      config->game, player_on_turn_index, moves, true, true, error_stack);
   char *phonies_str = NULL;
   if (error_stack_is_empty(error_stack)) {
     const LetterDistribution *ld = game_get_ld(config->game);
@@ -3257,14 +3256,11 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
                                commit_pos_arg_1));
       return;
     }
-    string_builder_add_formatted_string(move_string_builder, "%s%c%s%c",
-                                        commit_pos_arg_1, UCGI_DELIMITER,
-                                        commit_pos_arg_2, UCGI_DELIMITER);
-    string_builder_add_rack(move_string_builder, player_rack, config->ld,
-                            false);
+    string_builder_add_formatted_string(move_string_builder, "%s %s",
+                                        commit_pos_arg_1, commit_pos_arg_2);
     *vms = validated_moves_create(config->game, player_on_turn_index,
                                   string_builder_peek(move_string_builder),
-                                  true, false, true, error_stack);
+                                  true, true, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
@@ -4274,7 +4270,8 @@ void config_load_parsed_args(Config *config,
       current_value_index = 0;
       if (current_arg_token == ARG_TOKEN_NOTE ||
           current_arg_token == ARG_TOKEN_P1_NAME ||
-          current_arg_token == ARG_TOKEN_P2_NAME) {
+          current_arg_token == ARG_TOKEN_P2_NAME ||
+          current_arg_token == ARG_TOKEN_MOVES) {
         // Add the rest of the remaining string to the next parg value,
         // which basically treats the rest of the string after the command
         // as a single argument.

@@ -108,8 +108,8 @@ void test_ld_str_to_mls(void) {
   // Ensure allowing playthrough tiles works
   assert(ld_str_to_mls(english_ld, ".BDEF", true, imls, 40) == 5);
   assert(ld_str_to_mls(english_ld, ".B.D.E.F..", true, imls, 40) == 10);
-  assert(ld_str_to_mls(english_ld, "$BDEF", true, imls, 40) == 5);
-  assert(ld_str_to_mls(english_ld, "$B$D$E$F$$", true, imls, 40) == 10);
+  assert(ld_str_to_mls(english_ld, ".BDEF", true, imls, 40) == 5);
+  assert(ld_str_to_mls(english_ld, ".B.D.E.F..", true, imls, 40) == 10);
   // Ensure invalid racks return -1
 
   // Invalid multichar strings
@@ -267,8 +267,8 @@ void test_fast_str_to_mls(void) {
   assert(num_mls == num_mls_slow);
   assert(num_mls == 10);
 
-  num_mls = fast_str_to_mls(&fc_english, "$BDEF", true, imls, 40);
-  num_mls_slow = ld_str_to_mls(english_ld, "$BDEF", true, imls_slow, 40);
+  num_mls = fast_str_to_mls(&fc_english, ".BDEF", true, imls, 40);
+  num_mls_slow = ld_str_to_mls(english_ld, ".BDEF", true, imls_slow, 40);
   assert(num_mls == num_mls_slow);
   assert(num_mls == 5);
 

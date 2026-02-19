@@ -83,9 +83,8 @@ void assert_board_layout_error(const char *data_paths,
 void load_game_with_test_board(Game *game, const char *data_paths,
                                const char *board_layout_name);
 ValidatedMoves *validated_moves_create_and_assert_status(
-    const Game *game, int player_index, const char *ucgi_moves_string,
-    bool allow_phonies, bool allow_unknown_exchanges, bool allow_playthrough,
-    error_code_t expected_status);
+    const Game *game, int player_index, const char *moves_string,
+    bool allow_phonies, bool allow_playthrough, error_code_t expected_status);
 error_code_t config_simulate_and_return_status(Config *config, SimCtx **sim_ctx,
                                                Rack *known_opp_rack,
                                                SimResults *sim_results);
@@ -126,8 +125,6 @@ void assert_move_equity_int(const Move *move, int expected_equity);
 void assert_move_equity_exact(const Move *move, Equity expected_equity);
 void assert_rack_score(const LetterDistribution *ld, const Rack *rack,
                        int expected_score);
-void assert_validated_moves_challenge_points(const ValidatedMoves *vms, int i,
-                                             int expected_challenge_points);
 void assert_anchor_equity_int(const AnchorHeap *ah, int i, int expected);
 void assert_anchor_equity_exact(const AnchorHeap *ah, int i, Equity expected);
 void assert_anchor_score(const AnchorHeap *ah, int i, int expected);

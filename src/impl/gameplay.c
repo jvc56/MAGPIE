@@ -1304,7 +1304,7 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
     if (validate) {
       vms =
           validated_moves_create(game, game_event_player_index, cgp_move_string,
-                                 true, true, true, error_stack);
+                                 true, true, error_stack);
       // Set the validated move in the game event immediately so
       // that the game event can take ownership of the vms.
       game_event_set_vms(game_event, vms);
