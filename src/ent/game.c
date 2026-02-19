@@ -235,7 +235,7 @@ void game_clear_override_kwgs(Game *game) {
 // If override KWGs are set, uses those (respecting dual-lexicon mode).
 // Otherwise falls back to the player's standard KWG.
 static inline const KWG *get_kwg_for_cross_set(const Game *game,
-                                                int cross_set_index) {
+                                               int cross_set_index) {
   if (game->override_kwgs[0] != NULL) {
     if (game->dual_lexicon_mode == DUAL_LEXICON_MODE_IGNORANT) {
       return game->override_kwgs[0];

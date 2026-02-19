@@ -7,9 +7,9 @@
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/kwg_defs.h"
-#include "../def/players_data_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
+#include "../def/players_data_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
@@ -466,8 +466,7 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
                            NULL, DUAL_LEXICON_MODE_IGNORANT);
   } else {
     game_set_override_kwgs(solver_worker->game_copy, solver->pruned_kwgs[0],
-                           solver->pruned_kwgs[1],
-                           DUAL_LEXICON_MODE_INFORMED);
+                           solver->pruned_kwgs[1], DUAL_LEXICON_MODE_INFORMED);
   }
   // Regenerate initial cross-sets using the pruned KWGs
   game_gen_all_cross_sets(solver_worker->game_copy);
@@ -528,7 +527,8 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
       .move_list = worker->move_list,
       .move_record_type = MOVE_RECORD_ALL_SMALL,
       .move_sort_type = MOVE_SORT_SCORE,
-      .override_kwg = worker->solver->pruned_kwgs[worker->solver->solving_player],
+      .override_kwg =
+          worker->solver->pruned_kwgs[worker->solver->solving_player],
       .thread_index = worker->thread_index,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
@@ -872,7 +872,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
         .move_list = worker->move_list,
         .move_record_type = MOVE_RECORD_ALL_SMALL,
         .move_sort_type = MOVE_SORT_SCORE,
-        .override_kwg = worker->solver->pruned_kwgs[worker->solver->solving_player],
+        .override_kwg =
+            worker->solver->pruned_kwgs[worker->solver->solving_player],
         .thread_index = worker->thread_index,
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
@@ -1060,8 +1061,8 @@ static int negamax_generate_and_sort_moves(EndgameSolverWorker *worker,
   if (worker->solver->use_heuristics) {
     *opp_stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
-        worker->solver->pruned_kwgs[worker->solver->solving_player],
-        opp_idx, worker->thread_index, &opp_tiles_bv);
+        worker->solver->pruned_kwgs[worker->solver->solving_player], opp_idx,
+        worker->thread_index, &opp_tiles_bv);
     nplays = generate_stm_plays(worker, depth);
   } else {
     nplays = generate_stm_plays(worker, depth);
@@ -1684,8 +1685,8 @@ static float compute_initial_stuck_fraction(const EndgameSolver *solver,
   Game *root_game = game_duplicate(game);
   MoveList *tmp_ml = move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
   float frac = compute_opp_stuck_fraction(
-      root_game, tmp_ml, solver->pruned_kwgs[solver->solving_player],
-                                          opp_idx, 0, NULL);
+      root_game, tmp_ml, solver->pruned_kwgs[solver->solving_player], opp_idx,
+      0, NULL);
   small_move_list_destroy(tmp_ml);
   game_destroy(root_game);
   return frac;
