@@ -10,7 +10,6 @@
 #include "../src/impl/config.h"
 #include "../src/impl/convert.h"
 #include "../src/util/io_util.h"
-#include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdlib.h>

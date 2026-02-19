@@ -64,14 +64,12 @@ static void *timeout_thread_function(void *arg) {
   char *endgame_string =
       endgame_results_get_string(config_get_endgame_results(args->config),
                                  config_get_game(args->config), NULL, true);
-  printf("ttf (initial): %s\n", endgame_string);
   free(endgame_string);
   for (int i = 0; i < args->timeout; i++) {
     ctime_nap(1);
     endgame_string =
         endgame_results_get_string(config_get_endgame_results(args->config),
                                    config_get_game(args->config), NULL, true);
-    printf("ttf (%d): %s\n", i, endgame_string);
     free(endgame_string);
   }
   thread_control_set_status(config_get_thread_control(args->config),

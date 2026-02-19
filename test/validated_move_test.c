@@ -7,7 +7,6 @@
 #include "../src/ent/klv.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
-#include "../src/ent/player.h"
 #include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/validated_move.h"

@@ -13,7 +13,8 @@ typedef struct ValidatedMoves ValidatedMoves;
 
 ValidatedMoves *validated_moves_create(const Game *game, int player_index,
                                        const char *moves_string,
-                                       bool allow_phonies, bool allow_playthrough,
+                                       bool allow_phonies,
+                                       bool allow_playthrough,
                                        ErrorStack *error_stack);
 ValidatedMoves *validated_moves_duplicate(const ValidatedMoves *vms_orig);
 void validated_moves_destroy(ValidatedMoves *vms);

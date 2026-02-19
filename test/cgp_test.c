@@ -49,8 +49,6 @@ void play_move_and_validate_cgp(Game *game, const char *move_string,
                                 const char *rack_string,
                                 const char *expected_cgp,
                                 bool write_player_on_turn_first) {
-  printf("move string: >%s<\n", move_string);
-  printf("rack string: >%s<\n", rack_string);
   ValidatedMoves *vms = validated_moves_create_and_assert_status(
       game, game_get_player_on_turn_index(game), move_string, false, false,
       ERROR_STATUS_SUCCESS);

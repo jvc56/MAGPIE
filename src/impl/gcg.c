@@ -3,7 +3,6 @@
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
-#include "../def/letter_distribution_defs.h"
 #include "../def/validated_move_defs.h"
 #include "../ent/board_layout.h"
 #include "../ent/equity.h"
