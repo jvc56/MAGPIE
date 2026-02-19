@@ -30,4 +30,12 @@ typedef enum {
   NUMBER_OF_GAME_END_REASONS,
 } game_end_reason_t;
 
+// Dual-lexicon mode for endgame solving:
+// IGNORANT: both players assumed to use the same lexicon (shared cross-sets)
+// INFORMED: players may have different lexicons (separate cross-sets per player)
+typedef enum {
+  DUAL_LEXICON_MODE_IGNORANT,
+  DUAL_LEXICON_MODE_INFORMED,
+} dual_lexicon_mode_t;
+
 #endif
