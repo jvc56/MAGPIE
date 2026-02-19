@@ -3,13 +3,16 @@ TEST_DIR := test
 CMD_DIR := wasmentry
 OBJ_DIR := obj
 BIN_DIR := wasmentry
+TEST_BIN_DIR := bin
 
 SRC := $(wildcard $(SRC_DIR)/**/*.c)
 SRC_SUBDIRS := $(shell find $(SRC_DIR) -type d)
 SRC_OBJ_SUBDIRS := $(patsubst $(SRC_DIR)/%,$(OBJ_DIR)/$(SRC_DIR)/%,$(SRC_SUBDIRS))
 CMD := $(wildcard $(CMD_DIR)/*.c)
+TEST := $(wildcard $(TEST_DIR)/*.c)
 OBJ_SRC := $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/$(SRC_DIR)/%.o)
 OBJ_CMD := $(CMD:$(CMD_DIR)/%.c=$(OBJ_DIR)/$(CMD_DIR)/%.o)
+OBJ_TEST := $(TEST:$(TEST_DIR)/%.c=$(OBJ_DIR)/$(TEST_DIR)/%.o)
 
 cflags.release := -O3 -Wall -Wextra -Wno-trigraphs -pthread
 ldflags.release := -Llib -pthread
@@ -25,8 +28,16 @@ lflags.shell := -s EXPORTED_RUNTIME_METHODS=["cwrap","stringToNewUTF8","UTF8ToSt
 	-s ALLOW_BLOCKING_ON_MAIN_THREAD=1 \
 	-sEXIT_RUNTIME=0 \
 	-sSTACK_SIZE=2MB \
-	-sDEFAULT_PTHREAD_STACK_SIZE=2MB 
+	-sDEFAULT_PTHREAD_STACK_SIZE=2MB
 lflags.release := ${lflags.shell} -s MODULARIZE=1 --closure 1 -sEXPORT_NAME="MAGPIE" -s ENVIRONMENT='web,worker'
+
+lflags.test := -sNODERAWFS=1 \
+	-sENVIRONMENT='node' \
+	-sEXIT_RUNTIME=1 \
+	-sPTHREAD_POOL_SIZE=8 \
+	-sALLOW_MEMORY_GROWTH=1 \
+	-sSTACK_SIZE=2MB \
+	-sDEFAULT_PTHREAD_STACK_SIZE=2MB
 
 LDLIBS := -lm
 
@@ -38,13 +49,20 @@ magpie_wasm: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
 	emcc $(ldflags.release) $(lflags.release) $^ $(LDLIBS) -o $(BIN_DIR)/$@.mjs \
 	-s INITIAL_MEMORY=256MB
 
+magpie_wasm_test: $(OBJ_SRC) $(OBJ_TEST) | $(TEST_BIN_DIR)
+	emcc $(ldflags.release) $(lflags.test) $^ $(LDLIBS) -o $(TEST_BIN_DIR)/$@.js \
+	-sINITIAL_MEMORY=512MB
+
 $(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(SRC_OBJ_SUBDIRS)
 	emcc $(cflags.release) -c $< -o $@
 
 $(OBJ_DIR)/$(CMD_DIR)/%.o: $(CMD_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(CMD_DIR)
 	emcc $(cflags.release) -c $< -o $@
 
-$(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(SRC_OBJ_SUBDIRS):
+$(OBJ_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TEST_DIR)
+	emcc $(cflags.release) -c $< -o $@
+
+$(BIN_DIR) $(TEST_BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(SRC_OBJ_SUBDIRS):
 	mkdir -p $@
 
 clean:
@@ -52,3 +70,4 @@ clean:
 
 -include $(OBJ_SRC:.o=.d)
 -include $(OBJ_CMD:.o=.d)
+-include $(OBJ_TEST:.o=.d)

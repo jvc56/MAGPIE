@@ -115,6 +115,7 @@ static TestEntry test_table[] = {
     {"wmg", test_wmp_move_gen},
     {"winpct", test_win_pct},
     {"endgame", test_endgame},
+    {"eldar_v", test_eldar_v_stick},
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},
     {"load", test_load_gcg},
@@ -123,8 +124,18 @@ static TestEntry test_table[] = {
 
 // Tests that only run when explicitly requested (not included in run_all)
 static TestEntry on_demand_test_table[] = {
+    {"endgame_wasm", test_endgame_wasm},
     {"infercmp", test_infer_cmp},
     {"benchend", test_benchmark_endgame},
+    {"benchab", test_benchmark_endgame_ab},
+    {"stucksurvey", test_stuck_tile_survey},
+    {"stuckletters", test_stuck_letter_frequency},
+    {"selfplay4", test_benchmark_selfplay_4ply},
+    {"selfplay5", test_benchmark_selfplay_5ply},
+    {"threadscale", test_benchmark_thread_scaling},
+    {"multipv", test_multi_pv},
+    {"kue", test_kue},
+    {"monsterq", test_monster_q},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

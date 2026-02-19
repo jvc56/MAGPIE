@@ -67,13 +67,12 @@ typedef struct SmallMove {
   // xxxx xxxx
   // RRCC CCCV
   uint64_t tiny_move;
-  // metadata schema:
-  // From left to right (63 to 0):
-  // - estimated_value (32 bits, representing a 2s-complement signed value).
-  // - 8 bits for num_tiles_from_rack
-  // - 8 bits for play_length (number of tiles in play, including playthrough)
-  // - 16 bits for the score of the play
-  uint64_t metadata;
+  struct {
+    uint16_t score;
+    uint8_t play_length;
+    uint8_t tiles_played;
+    int32_t estimated_value;
+  } metadata;
 } SmallMove;
 
 #define SMALL_MOVE_COL_BITMASK 0x3E   // 0b00111110
@@ -252,7 +251,7 @@ static inline SmallMove *small_move_list_get_spare_move(const MoveList *ml) {
 }
 
 static inline void small_move_set_as_pass(SmallMove *move) {
-  move->metadata = 0;
+  memset(&move->metadata, 0, sizeof(move->metadata));
   move->tiny_move = 0;
 }
 
@@ -269,8 +268,10 @@ small_move_set_all(SmallMove *move, const MachineLetter strip[], int leftstrip,
     play_length = rightstrip - leftstrip + 1;
   }
 
-  const int score_int = equity_to_int(score);
-  move->metadata = score_int | (play_length << 16) | (tiles_played << 24);
+  move->metadata.score = (uint16_t)equity_to_int(score);
+  move->metadata.play_length = (uint8_t)play_length;
+  move->metadata.tiles_played = (uint8_t)tiles_played;
+  move->metadata.estimated_value = 0;
 
   if (move_type == GAME_EVENT_PASS) {
     move->tiny_move = 0;
@@ -717,24 +718,27 @@ static inline void small_move_list_destroy(MoveList *ml) {
 static inline void small_move_list_reset(MoveList *ml) { ml->count = 0; }
 
 static inline int small_move_get_tiles_played(const SmallMove *sm) {
-  return (int)((sm->metadata >> 24) & 0xFF);
+  return sm->metadata.tiles_played;
+}
+
+static inline int small_move_get_play_length(const SmallMove *sm) {
+  return sm->metadata.play_length;
+}
+
+static inline int32_t small_move_get_estimated_value(const SmallMove *sm) {
+  return sm->metadata.estimated_value;
 }
 
 static inline void small_move_set_estimated_value(SmallMove *sm, int32_t val) {
-  // Cast val to uint32_t and then to uint64_t to ensure a non-negative value
-  // for shifting
-  uint64_t uval = (uint64_t)(uint32_t)val;
-  // Shift left by 32 bits using the unsigned value
-  sm->metadata |= (uval << 32);
+  sm->metadata.estimated_value = val;
 }
 
 static inline void small_move_add_estimated_value(SmallMove *sm, int32_t val) {
-  uint64_t uval = (uint64_t)(uint32_t)val;
-  sm->metadata += (uval << 32);
+  sm->metadata.estimated_value += val;
 }
 
 static inline uint16_t small_move_get_score(const SmallMove *sm) {
-  return sm->metadata & 0xFFFF;
+  return sm->metadata.score;
 }
 
 static inline bool small_move_is_pass(const SmallMove *sm) {
@@ -747,9 +751,8 @@ static inline int compare_small_moves_by_estimated_value(const void *a,
   const SmallMove *sm1 = (const SmallMove *)a;
   const SmallMove *sm2 = (const SmallMove *)b;
 
-  // Extract estimated values as int32_t from each metadata
-  int32_t estimated_value1 = (int32_t)(sm1->metadata >> 32);
-  int32_t estimated_value2 = (int32_t)(sm2->metadata >> 32);
+  int32_t estimated_value1 = sm1->metadata.estimated_value;
+  int32_t estimated_value2 = sm2->metadata.estimated_value;
 
   // Compare the estimated values
   if (estimated_value1 > estimated_value2) {

@@ -23,10 +23,14 @@ enum {
 typedef struct EndgameSolver EndgameSolver;
 
 // Callback for per-ply PV reporting during iterative deepening
-// Parameters: depth, value (spread delta), pv_line, game, user_data
+// Parameters: depth, value (spread delta), pv_line, game,
+//             ranked_pvs (top-K PVLines with TT-extended variations),
+//             num_ranked_pvs, user_data
 typedef void (*EndgamePerPlyCallback)(int depth, int32_t value,
                                       const struct PVLine *pv_line,
-                                      const struct Game *game, void *user_data);
+                                      const struct Game *game,
+                                      const struct PVLine *ranked_pvs,
+                                      int num_ranked_pvs, void *user_data);
 
 typedef struct EndgameArgs {
   ThreadControl *thread_control;
@@ -35,6 +39,10 @@ typedef struct EndgameArgs {
   int plies;
   int initial_small_move_arena_size;
   int num_threads;
+  // Enable stuck-tile heuristics and greedy leaf playout (default: true)
+  bool use_heuristics;
+  // Number of top moves to return with full PVs (default 1)
+  int num_top_moves;
   EndgamePerPlyCallback per_ply_callback;
   void *per_ply_callback_data;
 } EndgameArgs;

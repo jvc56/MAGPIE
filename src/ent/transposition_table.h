@@ -4,20 +4,19 @@
 #include "../compat/ctime.h"
 #include "../compat/memory_info.h"
 #include "zobrist.h"
+#include <assert.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
-// Platform-specific TT configuration
-#ifdef __EMSCRIPTEN__
-// WASM: 17-byte entries, 2^21 minimum (34.5 MB) for mobile
-#define TT_MIN_SIZE_POWER 21
-#define TTENTRY_SIZE_BYTES 17
-#else
-// Native: 16-byte entries, 2^24 minimum (256 MB) for performance
-#define TT_MIN_SIZE_POWER 24
+// 16-byte entries for lockless hashing on all platforms
 #define TTENTRY_SIZE_BYTES 16
-#define BOTTOM3_BYTE_MASK ((1 << 24) - 1)
+
+#ifdef __EMSCRIPTEN__
+#define TT_MIN_SIZE_POWER 21 // 2^21 minimum (32 MB) for mobile
+#else
+#define TT_MIN_SIZE_POWER 24 // 2^24 minimum (256 MB) for performance
 #endif
 
 enum {
@@ -35,27 +34,21 @@ enum {
 typedef struct TTEntry {
   uint32_t top_4_bytes; // Bits [63:32] of hash
   int16_t score;
-#ifdef __EMSCRIPTEN__
-  uint16_t bytes_5_6; // Bits [31:16] (WASM: store 48 bits total)
-#else
-  uint8_t fifth_byte; // Bits [31:24] (Native: store 40 bits total)
-#endif
+  uint8_t fifth_byte; // Bits [31:24] of hash (40 stored bits total)
   uint8_t flag_and_depth;
   uint64_t tiny_move;
 } TTEntry;
 
+static_assert(sizeof(TTEntry) == TTENTRY_SIZE_BYTES,
+              "TTEntry must be exactly 16 bytes for lockless hashing");
+
 inline static uint64_t ttentry_full_hash(TTEntry t, uint64_t index,
                                          int size_power) {
-#ifdef __EMSCRIPTEN__
-  // WASM: Store 48 bits, take remaining bits from index
-  uint64_t stored_hash = ((uint64_t)(t.top_4_bytes) << 16) | t.bytes_5_6;
+  // Reconstruct hash from 40 stored bits + index bits.
+  // On large tables (size_power >= 24) all 64 bits are recovered.
+  // On smaller tables a few high bits are lost, which is acceptable.
+  uint64_t stored_hash = ((uint64_t)(t.top_4_bytes) << 8) | t.fifth_byte;
   return (stored_hash << size_power) | index;
-#else
-  // Native: Store 40 bits, take bottom 24 bits from index
-  (void)size_power; // Unused in native build
-  return ((uint64_t)(t.top_4_bytes) << 32) + ((uint64_t)(t.fifth_byte) << 24) +
-         (index & BOTTOM3_BYTE_MASK);
-#endif
 }
 
 inline static uint8_t ttentry_flag(TTEntry t) { return t.flag_and_depth >> 6; }
@@ -73,17 +66,13 @@ inline static uint64_t ttentry_move(TTEntry t) { return t.tiny_move; }
 inline static void ttentry_reset(TTEntry *t) {
   t->top_4_bytes = 0;
   t->score = 0;
-#ifdef __EMSCRIPTEN__
-  t->bytes_5_6 = 0;
-#else
   t->fifth_byte = 0;
-#endif
   t->flag_and_depth = 0;
   t->tiny_move = 0;
 }
 
 typedef struct TranspositionTable {
-  TTEntry *table;
+  _Atomic uint64_t *table; // Pairs of uint64_t for lockless hashing
   atomic_uchar *nproc; // ABDADA: small table for tracking concurrent searches
   int size_power_of_2;
   uint64_t size_mask;
@@ -118,13 +107,14 @@ transposition_table_create(double fraction_of_memory) {
              (1 << TT_MIN_SIZE_POWER) * TTENTRY_SIZE_BYTES / (1024 * 1024));
   }
   int num_elems = 1 << tt->size_power_of_2;
-  size_t memory_mb = (sizeof(TTEntry) * num_elems) / (1024 * 1024);
+  size_t memory_mb = ((size_t)TTENTRY_SIZE_BYTES * num_elems) / (1024 * 1024);
   log_info("Creating transposition table. System memory: %llu, TT size: 2^%d "
            "(elements: %d, memory: %zu MB)",
            (unsigned long long)total_memory, tt->size_power_of_2, num_elems,
            memory_mb);
-  tt->table = malloc_or_die(sizeof(TTEntry) * num_elems);
-  memset(tt->table, 0, sizeof(TTEntry) * num_elems);
+  tt->table =
+      (_Atomic uint64_t *)malloc_or_die(sizeof(uint64_t) * 2 * num_elems);
+  memset(tt->table, 0, sizeof(uint64_t) * 2 * num_elems);
   // ABDADA: allocate smaller nproc table for tracking concurrent searches
   // Using a smaller table (256K vs millions) improves cache locality
   tt->nproc = (atomic_uchar *)malloc_or_die(sizeof(atomic_uchar) * NPROC_SIZE);
@@ -144,7 +134,7 @@ static inline void transposition_table_reset(TranspositionTable *tt) {
   // This function resets the transposition table. If you want to reallocate
   // space for it, destroy and recreate it with the new space.
   uint64_t num_elems = tt->size_mask + 1;
-  memset(tt->table, 0, sizeof(TTEntry) * num_elems);
+  memset(tt->table, 0, sizeof(uint64_t) * 2 * num_elems);
   // ABDADA: reset nproc counters (smaller table)
   for (int i = 0; i < NPROC_SIZE; i++) {
     atomic_store_explicit(&tt->nproc[i], 0, memory_order_relaxed);
@@ -158,8 +148,23 @@ static inline void transposition_table_reset(TranspositionTable *tt) {
 static inline TTEntry transposition_table_lookup(TranspositionTable *tt,
                                                  uint64_t zval) {
   uint64_t idx = zval & tt->size_mask;
-  TTEntry entry = tt->table[idx];
   atomic_fetch_add(&tt->lookups, 1);
+
+  // Lockless hashing (Hyatt 1999): each TTEntry is stored as two 8-byte
+  // halves with the key half XOR'd against the data half. Each half is
+  // loaded atomically (relaxed ordering) so it is internally consistent.
+  // If a concurrent write causes a torn read (halves from different writes),
+  // the XOR produces invalid hash bits and the check below rejects the entry,
+  // preventing incorrect alpha-beta pruning from corrupted TT data.
+  const _Atomic uint64_t *slot = &tt->table[idx * 2];
+  uint64_t xored_key = atomic_load_explicit(&slot[0], memory_order_relaxed);
+  uint64_t data = atomic_load_explicit(&slot[1], memory_order_relaxed);
+  uint64_t key_half = xored_key ^ data;
+
+  TTEntry entry;
+  memcpy(&entry, &key_half, 8);
+  entry.tiny_move = data;
+
   uint64_t full_hash = ttentry_full_hash(entry, idx, tt->size_power_of_2);
   if (full_hash != zval) {
     if (ttentry_valid(entry)) {
@@ -181,18 +186,21 @@ static inline TTEntry transposition_table_lookup(TranspositionTable *tt,
 static inline void transposition_table_store(TranspositionTable *tt,
                                              uint64_t zval, TTEntry tentry) {
   uint64_t idx = zval & tt->size_mask;
-#ifdef __EMSCRIPTEN__
-  // WASM: Store top 48 bits (shift right by size_power to remove index bits)
+  // Store top 40 bits of hash (shift right by size_power to remove index bits)
   uint64_t stored_hash = zval >> tt->size_power_of_2;
-  tentry.top_4_bytes = (uint32_t)(stored_hash >> 16);
-  tentry.bytes_5_6 = (uint16_t)(stored_hash & 0xFFFF);
-#else
-  // Native: Store top 40 bits (bits 63-24)
-  tentry.top_4_bytes = (uint32_t)(zval >> 32);
-  tentry.fifth_byte = (uint8_t)(zval >> 24);
-#endif
+  tentry.top_4_bytes = (uint32_t)(stored_hash >> 8);
+  tentry.fifth_byte = (uint8_t)(stored_hash & 0xFF);
   atomic_fetch_add(&tt->created, 1);
-  tt->table[idx] = tentry;
+
+  // Lockless hashing: XOR key half with data half so torn reads
+  // (one half from one write, the other from a different write)
+  // are detected by hash mismatch on lookup.
+  uint64_t key_half;
+  memcpy(&key_half, &tentry, 8);
+  _Atomic uint64_t *slot = &tt->table[idx * 2];
+  atomic_store_explicit(&slot[0], key_half ^ tentry.tiny_move,
+                        memory_order_relaxed);
+  atomic_store_explicit(&slot[1], tentry.tiny_move, memory_order_relaxed);
 }
 
 static inline void transposition_table_destroy(TranspositionTable *tt) {

@@ -28,20 +28,29 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Build WASM
-        run: make -f Makefile-wasm magpie_wasm
-
       - name: Get datafile cache
         id: cache-datafiles
         uses: actions/cache@v3
         with:
           path: |
             data/*
+            testdata/*
           key: downloaded-data-files-wasm-29
 
-      - name: Download data files
+      - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
-        run: ./download_data.sh
+        run: ./download_data.sh && ./convert_lexica.sh
+
+      - name: Build WASM
+        run: make clean && make -f Makefile-wasm magpie_wasm
+
+      - name: Build WASM tests
+        run: make -f Makefile-wasm magpie_wasm_test
+
+      - name: Run WASM unit tests
+        run: |
+          node bin/magpie_wasm_test.js tt
+          node bin/magpie_wasm_test.js endgame
 
       - name: Install Playwright dependencies
         working-directory: ./wasmentry

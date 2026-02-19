@@ -191,6 +191,7 @@ static inline void gen_update_cutoff_equity_or_score(MoveGen *gen) {
   switch (gen->move_record_type) {
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_ALL_SMALL:
+  case MOVE_RECORD_TILES_PLAYED:
     log_fatal("gen_get_cutoff_equity_or_score called with "
               "MOVE_RECORD_ALL or "
               "MOVE_RECORD_ALL_SMALL");
@@ -280,6 +281,22 @@ static inline void update_best_move_or_insert_into_movelist(
     // small_move doesn't use equity.
     move_list_insert_spare_small_move(gen->move_list);
     break;
+  case MOVE_RECORD_TILES_PLAYED:
+    // Only record which tile types from the rack appear in valid moves.
+    for (int i = leftstrip; i <= rightstrip; i++) {
+      MachineLetter tile = strip[i];
+      if (tile == PLAYED_THROUGH_MARKER) {
+        continue;
+      }
+      uint8_t ml_val = get_is_blanked(tile) ? 0 : tile;
+      // NOLINTNEXTLINE(clang-analyzer-core.BitwiseShift)
+      gen->tiles_played_bv |= ((uint64_t)1 << ml_val);
+    }
+    // Early exit when all rack tile types have been seen
+    if ((gen->tiles_played_bv & gen->target_tiles_bv) == gen->target_tiles_bv) {
+      gen->threshold_exceeded = true;
+    }
+    break;
   }
 
   // In exchange cutoff mode, exchanges are recorded first and then
@@ -329,6 +346,7 @@ static inline bool better_play_has_been_found(const MoveGen *gen,
   switch (gen->move_record_type) {
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_ALL_SMALL:
+  case MOVE_RECORD_TILES_PLAYED:
     return false;
     break;
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
@@ -350,6 +368,7 @@ static inline void record_exchange(MoveGen *gen) {
   switch (gen->move_record_type) {
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_ALL_SMALL:
+  case MOVE_RECORD_TILES_PLAYED:
     break;
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
   case MOVE_RECORD_BEST:
@@ -502,8 +521,9 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
     break;
   }
   case MOVE_RECORD_ALL_SMALL:
+  case MOVE_RECORD_TILES_PLAYED:
     log_fatal("update_best_move_or_insert_into_movelist_wmp called with "
-              "MOVE_RECORD_ALL_SMALL");
+              "MOVE_RECORD_ALL_SMALL or MOVE_RECORD_TILES_PLAYED");
 #if defined(__has_builtin) && __has_builtin(__builtin_unreachable)
     __builtin_unreachable();
 #else
@@ -1985,7 +2005,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   wmp_move_gen_init(&gen->wmp_move_gen, &gen->ld, &gen->player_rack,
                     player_get_wmp(player));
 
-  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
+  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
+      gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
     gen->wmp_move_gen.wmp = NULL;
   }
 
@@ -1997,7 +2018,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
       board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index);
 
   // Reset the move list
-  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
+  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
+      gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
     small_move_list_reset(gen->move_list);
   } else {
     move_list_reset(gen->move_list);
@@ -2114,6 +2136,9 @@ void gen_record_scoring_plays_small(MoveGen *gen) {
   for (int dir = 0; dir < 2; dir++) {
     gen->dir = dir;
     for (int row = 0; row < BOARD_DIM; row++) {
+      if (gen->threshold_exceeded) {
+        return;
+      }
       if (gen->row_number_of_anchors_cache[BOARD_DIM * dir + row] == 0) {
         continue;
       }
@@ -2219,14 +2244,38 @@ void gen_record_pass(MoveGen *gen) {
     move_list_set_spare_small_move_as_pass(gen->move_list);
     move_list_insert_spare_small_move(gen->move_list);
     break;
+  case MOVE_RECORD_TILES_PLAYED:
+    // Pass doesn't use any tiles — nothing to record.
+    break;
   }
 }
 
 void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen(args->thread_index);
   gen_load_position(gen, args);
-  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
+  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
+      gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
+    if (gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
+      gen->tiles_played_bv = 0;
+      gen->stop_on_threshold = true;
+      gen->threshold_exceeded = false;
+      // Build target bitvector from the rack
+      gen->target_tiles_bv = 0;
+      const uint16_t dist_size = rack_get_dist_size(&gen->player_rack);
+      for (uint16_t ml = 0; ml < dist_size; ml++) {
+        if (rack_get_letter(&gen->player_rack, ml) > 0) {
+          gen->target_tiles_bv |= ((uint64_t)1 << ml);
+        }
+      }
+    }
     gen_record_scoring_plays_small(gen);
+    if (gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
+      // Write the bitvector to the caller's output pointer
+      if (args->tiles_played_bv) {
+        *args->tiles_played_bv = gen->tiles_played_bv;
+      }
+      return; // No pass recording needed
+    }
   } else {
     gen_look_up_leaves_and_record_exchanges(gen);
 

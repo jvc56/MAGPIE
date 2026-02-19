@@ -115,6 +115,7 @@ typedef enum {
   ARG_TOKEN_WIN_PCT,
   ARG_TOKEN_PLIES,
   ARG_TOKEN_ENDGAME_PLIES,
+  ARG_TOKEN_ENDGAME_TOP_K,
   ARG_TOKEN_NUMBER_OF_PLAYS,
   ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS,
   ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,
@@ -205,6 +206,7 @@ struct Config {
   int num_small_plays;
   int plies;
   int endgame_plies;
+  int endgame_top_k;
   uint64_t max_iterations;
   uint64_t min_play_iterations;
   double stop_cond_pct;
@@ -1263,6 +1265,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "8";
       text = "Specifies the number of plies to use for solving endgames.";
       break;
+    case ARG_TOKEN_ENDGAME_TOP_K:
+      usages[0] = "<endgame_top_k>";
+      examples[0] = "1";
+      examples[1] = "5";
+      text = "Number of top moves to return with full PVs from endgame solver.";
+      break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
       usages[0] = "<number_of_plays>";
       examples[0] = "150";
@@ -2182,6 +2190,8 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
   endgame_args->initial_small_move_arena_size =
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args->num_threads = config->num_threads;
+  endgame_args->num_top_moves = config->endgame_top_k;
+  endgame_args->use_heuristics = true;
   endgame_args->per_ply_callback = NULL;
   endgame_args->per_ply_callback_data = NULL;
 }
@@ -4371,6 +4381,8 @@ void string_builder_add_move_record_type(StringBuilder *sb,
   case MOVE_RECORD_ALL_SMALL:
     string_builder_add_string(sb, MOVE_RECORD_ALL_SMALL_STRING);
     break;
+  case MOVE_RECORD_TILES_PLAYED:
+    break;
   }
 }
 
@@ -4956,6 +4968,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
 
   config_load_int(config, ARG_TOKEN_ENDGAME_PLIES, 1, MAX_VARIANT_LENGTH,
                   &config->endgame_plies, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_int(config, ARG_TOKEN_ENDGAME_TOP_K, 1, MAX_VARIANT_LENGTH,
+                  &config->endgame_top_k, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -5766,6 +5784,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
   arg(ARG_TOKEN_PLIES, "plies", 1, 1);
   arg(ARG_TOKEN_ENDGAME_PLIES, "eplies", 1, 1);
+  arg(ARG_TOKEN_ENDGAME_TOP_K, "etopk", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1);
   arg(ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS, "maxnumdplays", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_SMALL_PLAYS, "numsmallplays", 1, 1);
@@ -5830,6 +5849,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->num_small_plays = DEFAULT_SMALL_MOVE_LIST_CAPACITY;
   config->plies = 5;
   config->endgame_plies = 6;
+  config->endgame_top_k = 1;
   config->eq_margin_inference = int_to_equity(5);
   config->eq_margin_movegen = int_to_equity(5);
   config->min_play_iterations = 500;
@@ -6096,6 +6116,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_ENDGAME_PLIES:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->endgame_plies);
+      break;
+    case ARG_TOKEN_ENDGAME_TOP_K:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->endgame_top_k);
       break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
