@@ -414,7 +414,8 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   // In INFORMED mode with different lexicons, each player index gets its own
   // pruned KWG so that cross-set index i uses the pruned KWG derived from
   // player i's lexicon.
-  for (int player_idx = 0; player_idx < (create_separate_kwgs ? 2 : 1); player_idx++) {
+  for (int player_idx = 0; player_idx < (create_separate_kwgs ? 2 : 1);
+       player_idx++) {
     const KWG *full_kwg =
         player_get_kwg(game_get_player(endgame_args->game, player_idx));
     DictionaryWordList *word_list = dictionary_word_list_create();

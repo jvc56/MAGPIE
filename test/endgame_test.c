@@ -436,8 +436,9 @@ void test_2lex_informed(void) {
 }
 
 // Verify that pruned-KWG cross-sets produce the same moves as full-KWG
-// cross-sets. Runs a short endgame solve with debug_verify_cross_set_equivalence
-// enabled, which asserts move equivalence at every generate_stm_plays call.
+// cross-sets. Runs a short endgame solve with
+// debug_verify_cross_set_equivalence enabled, which asserts move equivalence at
+// every generate_stm_plays call.
 void test_cross_set_pruning_equivalence(void) {
   // Single-lexicon: standard out-in-two position, 2-ply, 1 thread
   {
