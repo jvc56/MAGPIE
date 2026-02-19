@@ -539,8 +539,7 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
       .move_record_type = MOVE_RECORD_ALL_SMALL,
       .move_sort_type = MOVE_SORT_SCORE,
       .override_kwg = solver_get_pruned_kwg(
-          worker->solver,
-          game_get_player_on_turn_index(worker->game_copy)),
+          worker->solver, game_get_player_on_turn_index(worker->game_copy)),
       .thread_index = worker->thread_index,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
@@ -885,8 +884,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
         .move_record_type = MOVE_RECORD_ALL_SMALL,
         .move_sort_type = MOVE_SORT_SCORE,
         .override_kwg = solver_get_pruned_kwg(
-            worker->solver,
-            game_get_player_on_turn_index(worker->game_copy)),
+            worker->solver, game_get_player_on_turn_index(worker->game_copy)),
         .thread_index = worker->thread_index,
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
@@ -1698,8 +1696,8 @@ static float compute_initial_stuck_fraction(const EndgameSolver *solver,
   Game *root_game = game_duplicate(game);
   MoveList *tmp_ml = move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
   float frac = compute_opp_stuck_fraction(
-      root_game, tmp_ml, solver_get_pruned_kwg(solver, opp_idx), opp_idx,
-      0, NULL);
+      root_game, tmp_ml, solver_get_pruned_kwg(solver, opp_idx), opp_idx, 0,
+      NULL);
   small_move_list_destroy(tmp_ml);
   game_destroy(root_game);
   return frac;
