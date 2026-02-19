@@ -683,8 +683,8 @@ void test_leave_record(void) {
   const Move *move;
 
   rack_set_to_string(ld, player0_rack, "DEKNRTY");
-  vms = validated_moves_create_and_assert_status(game, 0, "8G.KY", false, false,
-                                                 false, ERROR_STATUS_SUCCESS);
+  vms = validated_moves_create_and_assert_status(game, 0, "8G KY", false, false,
+                                                 ERROR_STATUS_SUCCESS);
   move = validated_moves_get_move(vms, 0);
   play_move(move, game, actual_leave);
   rack_set_to_string(ld, expected_leave, "DENRT");
@@ -693,8 +693,8 @@ void test_leave_record(void) {
   game_reset(game);
 
   rack_set_to_string(ld, player0_rack, "DEKNRTY");
-  vms = validated_moves_create_and_assert_status(
-      game, 0, "ex.DKY", false, false, false, ERROR_STATUS_SUCCESS);
+  vms = validated_moves_create_and_assert_status(game, 0, "ex DKY", false,
+                                                 false, ERROR_STATUS_SUCCESS);
   move = validated_moves_get_move(vms, 0);
   play_move(move, game, actual_leave);
   rack_set_to_string(ld, expected_leave, "ENRT");
@@ -704,7 +704,7 @@ void test_leave_record(void) {
 
   rack_set_to_string(ld, player0_rack, "DEKNRTY");
   vms = validated_moves_create_and_assert_status(game, 0, "pass", false, false,
-                                                 false, ERROR_STATUS_SUCCESS);
+                                                 ERROR_STATUS_SUCCESS);
   move = validated_moves_get_move(vms, 0);
   play_move(move, game, actual_leave);
   rack_set_to_string(ld, expected_leave, "DEKNRTY");
@@ -734,7 +734,7 @@ void test_moves_are_similar(void) {
 
   rack_set_to_string(ld, player0_rack, "EEEIILZ");
   vms = validated_moves_create_and_assert_status(
-      game, 0, "14f.ZINE,14f.LINE", false, false, false, ERROR_STATUS_SUCCESS);
+      game, 0, "14f ZINE,14f LINE", false, false, ERROR_STATUS_SUCCESS);
 
   assert(!moves_are_similar(validated_moves_get_move(vms, 0),
                             validated_moves_get_move(vms, 1), player0_rack));
@@ -743,7 +743,7 @@ void test_moves_are_similar(void) {
 
   rack_set_to_string(ld, player0_rack, "EEEIILZ");
   vms = validated_moves_create_and_assert_status(
-      game, 0, "14f.LENI,14f.LINE", true, false, false, ERROR_STATUS_SUCCESS);
+      game, 0, "14f LENI,14f LINE", true, false, ERROR_STATUS_SUCCESS);
   assert(moves_are_similar(validated_moves_get_move(vms, 0),
                            validated_moves_get_move(vms, 1), player0_rack));
   validated_moves_destroy(vms);
@@ -753,8 +753,7 @@ void test_moves_are_similar(void) {
   // Moves with different scores are not similar
   rack_set_to_string(ld, player0_rack, "ACEIRST");
   vms = validated_moves_create_and_assert_status(
-      game, 0, "8d.CRISTAE,8d.RACIEST", false, false, false,
-      ERROR_STATUS_SUCCESS);
+      game, 0, "8d CRISTAE,8d RACIEST", false, false, ERROR_STATUS_SUCCESS);
   assert(!moves_are_similar(validated_moves_get_move(vms, 0),
                             validated_moves_get_move(vms, 1), player0_rack));
   validated_moves_destroy(vms);
@@ -763,7 +762,7 @@ void test_moves_are_similar(void) {
   // Test that exchanges are similar
   rack_set_to_string(ld, player0_rack, "EEEIILZ");
   vms = validated_moves_create_and_assert_status(
-      game, 0, "ex.EEIZ,ex.ZEIE", false, false, false, ERROR_STATUS_SUCCESS);
+      game, 0, "ex EEIZ,ex ZEIE", false, false, ERROR_STATUS_SUCCESS);
   assert(moves_are_similar(validated_moves_get_move(vms, 0),
                            validated_moves_get_move(vms, 1), player0_rack));
   validated_moves_destroy(vms);

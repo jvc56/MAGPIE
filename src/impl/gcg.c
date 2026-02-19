@@ -3,7 +3,6 @@
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
-#include "../def/letter_distribution_defs.h"
 #include "../def/validated_move_defs.h"
 #include "../ent/board_layout.h"
 #include "../ent/equity.h"
@@ -433,12 +432,6 @@ void add_letters_played_to_string_builder(StringBuilder *sb,
                                           int group_index) {
   char *matching_group_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
-  size_t matching_group_string_length = string_length(matching_group_string);
-  for (size_t i = 0; i < matching_group_string_length; i++) {
-    if (matching_group_string[i] == ASCII_PLAYED_THROUGH) {
-      matching_group_string[i] = ASCII_UCGI_PLAYED_THROUGH;
-    }
-  }
   string_builder_add_string(sb, matching_group_string);
   free(matching_group_string);
 }
@@ -777,16 +770,12 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     // Position
     add_matching_group_to_string_builder(move_string_builder, gcg_parser,
                                          gcg_line, 3);
-    string_builder_add_char(move_string_builder, '.');
+    string_builder_add_char(move_string_builder, ' ');
 
     // Play
     add_letters_played_to_string_builder(move_string_builder, gcg_parser,
                                          gcg_line, 4);
-    string_builder_add_char(move_string_builder, '.');
 
-    // Rack
-    add_matching_group_to_string_builder(move_string_builder, gcg_parser,
-                                         gcg_line, 2);
     if (!set_rack_from_matching(gcg_parser, gcg_line, 2,
                                 game_event_get_rack(game_event))) {
       string_builder_destroy(move_string_builder);
@@ -1003,25 +992,15 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     game_event_set_player_index(game_event, player_index);
     game_event_set_type(game_event, GAME_EVENT_PASS);
 
-    move_string_builder = string_builder_create();
-
-    // Add the pass to the builder
-    string_builder_add_formatted_string(move_string_builder, "%s.",
-                                        UCGI_PASS_MOVE);
-    // Add the rack to the builder
-    add_matching_group_to_string_builder(move_string_builder, gcg_parser,
-                                         gcg_line, 2);
     if (!set_rack_from_matching(gcg_parser, gcg_line, 2,
                                 game_event_get_rack(game_event))) {
-      string_builder_destroy(move_string_builder);
       error_stack_push(
           error_stack, ERROR_STATUS_GCG_PARSE_RACK_MALFORMED,
           get_formatted_string("could not parse pass rack: %s", gcg_line));
       return false;
     }
 
-    cgp_move_string = string_builder_dump(move_string_builder, NULL);
-    string_builder_destroy(move_string_builder);
+    cgp_move_string = string_duplicate(UCGI_PASS_MOVE);
 
     copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 3,
                                         error_stack);
@@ -1121,17 +1100,12 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
 
     move_string_builder = string_builder_create();
 
-    // Exchange token
-    string_builder_add_formatted_string(move_string_builder, "%s.",
+    // Exchange token and tiles exchanged
+    string_builder_add_formatted_string(move_string_builder, "%s ",
                                         UCGI_EXCHANGE_MOVE);
-    // Tiles exchanged
     add_matching_group_to_string_builder(move_string_builder, gcg_parser,
                                          gcg_line, 3);
-    string_builder_add_char(move_string_builder, '.');
 
-    // Rack
-    add_matching_group_to_string_builder(move_string_builder, gcg_parser,
-                                         gcg_line, 2);
     if (!set_rack_from_matching(gcg_parser, gcg_line, 2,
                                 game_event_get_rack(game_event))) {
       string_builder_destroy(move_string_builder);

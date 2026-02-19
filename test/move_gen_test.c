@@ -937,7 +937,7 @@ void movegen_var_bingo_bonus_test(void) {
               "8D BUSUUTI 64");
 
   vms = assert_validated_move_success(config_get_game(config),
-                                      opening_busuuti_cgp, "8D.BUSUUTI", 0,
+                                      opening_busuuti_cgp, "8D BUSUUTI", 0,
                                       false, false);
   assert_move_score(validated_moves_get_move(vms, 0), 64);
   validated_moves_destroy(vms);
@@ -949,7 +949,7 @@ void movegen_var_bingo_bonus_test(void) {
               "8D BUSUUTI 54");
 
   vms = assert_validated_move_success(config_get_game(config),
-                                      opening_busuuti_cgp, "8D.BUSUUTI", 0,
+                                      opening_busuuti_cgp, "8D BUSUUTI", 0,
                                       false, false);
   assert_move_score(validated_moves_get_move(vms, 0), 54);
   validated_moves_destroy(vms);
@@ -961,7 +961,7 @@ void movegen_var_bingo_bonus_test(void) {
               "8D BUSUUTI 324");
 
   vms = assert_validated_move_success(config_get_game(config),
-                                      opening_busuuti_cgp, "8D.BUSUUTI", 0,
+                                      opening_busuuti_cgp, "8D BUSUUTI", 0,
                                       false, false);
   assert_move_score(validated_moves_get_move(vms, 0), 324);
   validated_moves_destroy(vms);

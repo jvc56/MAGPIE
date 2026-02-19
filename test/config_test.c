@@ -471,12 +471,14 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(config, "cgp " VS_OXY, ERROR_STATUS_SUCCESS);
 
   // Adding moves
-  assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(
-      config, "add 8A.HADJI -lex CSW21",
-      ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_DISCONNECTED);
-  assert_config_exec_status(config, "add 8D.HADJI -lex CSW21",
+  assert_config_exec_status(config,
+                            "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 "
+                            "HADJI/ 0/0 0 -lex CSW21;",
                             ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(
+      config, "add 8A HADJI",
+      ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_DISCONNECTED);
+  assert_config_exec_status(config, "add 8D HADJI", ERROR_STATUS_SUCCESS);
 
   // Setting the rack
   assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_SUCCESS);

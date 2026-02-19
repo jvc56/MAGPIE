@@ -288,7 +288,7 @@ void test_board_layout_correctness(void) {
   load_cgp_or_die(game, ENTASIS_OPENING_CGP);
 
   ValidatedMoves *vms = validated_moves_create_and_assert_status(
-      game, 0, "7J.FRAWZEY", false, false, false,
+      game, 0, "7J FRAWZEY", false, false,
       ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_OUT_OF_BOUNDS);
   validated_moves_destroy(vms);
 
@@ -296,7 +296,7 @@ void test_board_layout_correctness(void) {
   load_game_with_test_board(game, data_paths, "5_by_5_bricked_box_15");
 
   vms = validated_moves_create_and_assert_status(
-      game, 0, "8H.FRAWZEY", false, false, false,
+      game, 0, "8H FRAWZEY", false, false,
       ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_OVER_BRICK);
   validated_moves_destroy(vms);
 

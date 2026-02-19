@@ -139,7 +139,7 @@ void test_sim_threshold(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -wmp true -plies 2 -threads 8 -iter 100000000 -scond 95");
   load_and_exec_config_or_die(config, "cgp " ZILLION_OPENING_CGP);
-  load_and_exec_config_or_die(config, "addmoves 8F.LIN,8D.ZILLION,8F.ZILLION");
+  load_and_exec_config_or_die(config, "addmoves 8F LIN,8D ZILLION,8F ZILLION");
 
   SimResults *sim_results = config_get_sim_results(config);
   error_code_t status;
@@ -219,7 +219,7 @@ void test_all_plays_are_similar(void) {
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack ACEIRST");
   load_and_exec_config_or_die(config,
-                              "addmoves 8D.ATRESIC,8D.STEARIC,8D.RACIEST");
+                              "addmoves 8D ATRESIC,8D STEARIC,8D RACIEST");
 
   SimResults *sim_results = config_get_sim_results(config);
   error_code_t status;
@@ -423,8 +423,8 @@ void test_sim_with_and_without_inference_helper(
 void test_sim_with_inference(void) {
   // 8H MUZAKS infers a leave of S, so playing EMPYREAN one short of the triple
   // word will sim worse with inference
-  const char *empyrean_move_str = "h7.EMPYREAN";
-  const char *napery_move_string = "9g.NAPERY";
+  const char *empyrean_move_str = "h7 EMPYREAN";
+  const char *napery_move_string = "9g NAPERY";
   test_sim_with_and_without_inference_helper(
       "muzaks_empyrean", "",
       (const char *[]){empyrean_move_str, napery_move_string, NULL},
@@ -432,9 +432,9 @@ void test_sim_with_inference(void) {
 
   // N6 ERE infers a leave of RE, so playing SYNCHRONIZE/D will sim worse with
   // inference because of the RESYNCHRONIZE/D extension.
-  const char *synced_move_str = "1c.SYNCHRONIZED";
-  const char *sync_move_string = "1c.SYNCHRONIZE";
-  const char *ze_move_string = "b6.ZE";
+  const char *synced_move_str = "1c SYNCHRONIZED";
+  const char *sync_move_string = "1c SYNCHRONIZE";
+  const char *ze_move_string = "b6 ZE";
   test_sim_with_and_without_inference_helper(
       "resynchronized", "",
       (const char *[]){synced_move_str, sync_move_string, ze_move_string, NULL},

@@ -47,7 +47,6 @@
 #include "string_util_test.h"
 #include "transposition_table_test.h"
 #include "validated_move_test.h"
-#include "wasm_api_test.h"
 #include "win_pct_test.h"
 #include "wmp_maker_test.h"
 #include "wmp_move_gen_test.h"
@@ -100,7 +99,6 @@ static TestEntry test_table[] = {
     {"command", test_command},
     {"gcg", test_gcg},
     {"autoplay", test_autoplay},
-    {"wasm", test_wasm_api},
     {"words", test_words},
     {"wordprune", test_word_prune},
     {"kwgmaker", test_kwg_maker},

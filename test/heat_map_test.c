@@ -19,9 +19,8 @@
 void assert_heat_map_add_move(const Game *game, const char *ucgi_move_str,
                               HeatMap *hm) {
   ErrorStack *error_stack = error_stack_create();
-  ValidatedMoves *vms = validated_moves_create(game, 0, ucgi_move_str, true,
-                                               false, true, error_stack);
-  assert(error_stack_is_empty(error_stack));
+  ValidatedMoves *vms =
+      validated_moves_create(game, 0, ucgi_move_str, true, true, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
     assert(0);
@@ -60,8 +59,8 @@ void assert_heat_map_values(const HeatMap *hm, int row, int col,
 void assert_heat_map_single_move(const Game *game, const char *ucgi_move_str,
                                  HeatMap *hm) {
   ErrorStack *error_stack = error_stack_create();
-  ValidatedMoves *vms = validated_moves_create(game, 0, ucgi_move_str, true,
-                                               false, true, error_stack);
+  ValidatedMoves *vms =
+      validated_moves_create(game, 0, ucgi_move_str, true, true, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
     assert(0);
@@ -155,17 +154,19 @@ void test_heat_map(void) {
   HeatMap *hm = heat_map_create();
   heat_map_reset(hm);
 
+  load_and_exec_config_or_die(config, "r PRETZEL");
+
   const Game *game = config_get_game(config);
 
   assert_heat_map_add_move(game, "pass", hm);
   assert_heat_map_values(hm, 0, 0, HEAT_MAP_TYPE_ALL, 0, 0, 0);
   assert_heat_map_values(hm, 0, 0, HEAT_MAP_TYPE_BINGO, 0, 0, 0);
 
-  assert_heat_map_add_move(game, "ex.ABC.ABCDEFG", hm);
+  assert_heat_map_add_move(game, "ex ZEP", hm);
   assert_heat_map_values(hm, 0, 0, HEAT_MAP_TYPE_ALL, 0, 0, 0);
   assert_heat_map_values(hm, 0, 0, HEAT_MAP_TYPE_BINGO, 0, 0, 0);
 
-  assert_heat_map_add_move(game, "8h.DO", hm);
+  assert_heat_map_add_move(game, "8h ZE", hm);
   assert_heat_map_values(hm, 7, 7, HEAT_MAP_TYPE_ALL, 1, 1, 2);
   assert_heat_map_values(hm, 7, 8, HEAT_MAP_TYPE_ALL, 1, 1, 2);
   assert_heat_map_values(hm, 7, 9, HEAT_MAP_TYPE_ALL, 0, 1, 2);
@@ -173,7 +174,7 @@ void test_heat_map(void) {
   assert_heat_map_values(hm, 7, 8, HEAT_MAP_TYPE_BINGO, 0, 0, 2);
   assert_heat_map_values(hm, 7, 9, HEAT_MAP_TYPE_BINGO, 0, 0, 2);
 
-  assert_heat_map_add_move(game, "8h.PRETZEL", hm);
+  assert_heat_map_add_move(game, "8h PRETZEL", hm);
   assert_heat_map_values(hm, 7, 7, HEAT_MAP_TYPE_ALL, 2, 2, 16);
   assert_heat_map_values(hm, 7, 8, HEAT_MAP_TYPE_ALL, 2, 2, 16);
   assert_heat_map_values(hm, 7, 9, HEAT_MAP_TYPE_ALL, 1, 2, 16);
@@ -191,7 +192,7 @@ void test_heat_map(void) {
   assert_heat_map_values(hm, 7, 13, HEAT_MAP_TYPE_BINGO, 1, 1, 16);
   assert_heat_map_values(hm, 7, 6, HEAT_MAP_TYPE_BINGO, 0, 1, 16);
 
-  assert_heat_map_add_move(game, "h8.PRETZEL", hm);
+  assert_heat_map_add_move(game, "h8 PRETZEL", hm);
   assert_heat_map_values(hm, 7, 7, HEAT_MAP_TYPE_ALL, 3, 3, 30);
   assert_heat_map_values(hm, 8, 7, HEAT_MAP_TYPE_ALL, 1, 3, 30);
   assert_heat_map_values(hm, 9, 7, HEAT_MAP_TYPE_ALL, 1, 3, 30);
@@ -209,7 +210,7 @@ void test_heat_map(void) {
   assert_heat_map_values(hm, 13, 7, HEAT_MAP_TYPE_BINGO, 1, 2, 30);
   assert_heat_map_values(hm, 6, 7, HEAT_MAP_TYPE_BINGO, 0, 2, 30);
 
-  assert_heat_map_add_move(game, "h7.FAV", hm);
+  assert_heat_map_add_move(game, "h7 LEE", hm);
   assert_heat_map_values(hm, 6, 7, HEAT_MAP_TYPE_ALL, 1, 4, 33);
   assert_heat_map_values(hm, 7, 7, HEAT_MAP_TYPE_ALL, 4, 4, 33);
   assert_heat_map_values(hm, 8, 7, HEAT_MAP_TYPE_ALL, 2, 4, 33);
@@ -227,25 +228,26 @@ void test_heat_map(void) {
 
   load_and_exec_config_or_die(
       config,
-      "cgp 15/1AI9IA1/1E11E1/15/15/15/15/15/15/15/15/15/1E11E1/1AI9IA1/15 / "
+      "cgp 15/1AI9IA1/1E11E1/15/15/15/15/15/15/15/15/15/1E11E1/1AI9IA1/15 "
+      "RETINAS/ "
       "0/0 0");
 
-  assert_heat_map_single_move(game, "1A.RETINAS", hm);
-  assert_heat_map_single_move(game, "1A.RETINA", hm);
-  assert_heat_map_single_move(game, "A1.RETINAS", hm);
-  assert_heat_map_single_move(game, "A1.RETINA", hm);
-  assert_heat_map_single_move(game, "O1.FRAWZEY", hm);
-  assert_heat_map_single_move(game, "O1.FROZEN", hm);
-  assert_heat_map_single_move(game, "1H.FRAWZEY", hm);
-  assert_heat_map_single_move(game, "1H.FROZEN", hm);
-  assert_heat_map_single_move(game, "O8.BUSUUTI", hm);
-  assert_heat_map_single_move(game, "O8.BUSTIS", hm);
-  assert_heat_map_single_move(game, "15H.BUSUUTI", hm);
-  assert_heat_map_single_move(game, "15H.BUSTIS", hm);
-  assert_heat_map_single_move(game, "15A.SHORTEN", hm);
-  assert_heat_map_single_move(game, "15A.SHORTS", hm);
-  assert_heat_map_single_move(game, "A8.SHORTEN", hm);
-  assert_heat_map_single_move(game, "A8.SHORTS", hm);
+  assert_heat_map_single_move(game, "1A RETINAS", hm);
+  assert_heat_map_single_move(game, "1A RETINA", hm);
+  assert_heat_map_single_move(game, "A1 RETINAS", hm);
+  assert_heat_map_single_move(game, "A1 RETINA", hm);
+  assert_heat_map_single_move(game, "O1 RATINES", hm);
+  assert_heat_map_single_move(game, "O1 RETAIN", hm);
+  assert_heat_map_single_move(game, "1H ANESTRI", hm);
+  assert_heat_map_single_move(game, "1H TISANE", hm);
+  assert_heat_map_single_move(game, "O8 STARNIE", hm);
+  assert_heat_map_single_move(game, "O8 TRAINS", hm);
+  assert_heat_map_single_move(game, "15H ANTSIER", hm);
+  assert_heat_map_single_move(game, "15H TERAIS", hm);
+  assert_heat_map_single_move(game, "15A NASTIER", hm);
+  assert_heat_map_single_move(game, "15A TINEAS", hm);
+  assert_heat_map_single_move(game, "A8 RETINAS", hm);
+  assert_heat_map_single_move(game, "A8 ESTRIN", hm);
 
   load_and_exec_config_or_die(config, "newgame");
   load_and_exec_config_or_die(config, "r ABCDEFG");

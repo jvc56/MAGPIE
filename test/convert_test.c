@@ -10,7 +10,6 @@
 #include "../src/impl/config.h"
 #include "../src/impl/convert.h"
 #include "../src/util/io_util.h"
-#include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdlib.h>
@@ -121,27 +120,33 @@ void test_convert_success(void) {
 
   load_and_exec_config_or_die(config, "convert text2dawg CSW21_dawg_only");
   load_and_exec_config_or_die(config, "set -lex CSW21_dawg_only");
-  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 BRAVO/ 0/0 0 "
+              "-lex CSW21;");
   game = config_get_game(config);
-  vms = validated_moves_create_and_assert_status(
-      game, 0, "H8.BRAVO", false, false, false, ERROR_STATUS_SUCCESS);
+  vms = validated_moves_create_and_assert_status(game, 0, "H8 BRAVO", false,
+                                                 false, ERROR_STATUS_SUCCESS);
   validated_moves_destroy(vms);
 
   load_and_exec_config_or_die(config, "convert text2dawg CSW21_gaddag_only");
   load_and_exec_config_or_die(config, "set -lex CSW21_gaddag_only");
-  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 CHARLIE/ 0/0 0 "
+              "-lex CSW21;");
   game = config_get_game(config);
-  vms = validated_moves_create_and_assert_status(
-      game, 0, "H8.CHARLIE", false, false, false, ERROR_STATUS_SUCCESS);
+  vms = validated_moves_create_and_assert_status(game, 0, "H8 CHARLIE", false,
+                                                 false, ERROR_STATUS_SUCCESS);
   validated_moves_destroy(vms);
 
   load_and_exec_config_or_die(config,
                               "convert text2dawg CSW21_dawg_and_gaddag");
   load_and_exec_config_or_die(config, "set -lex CSW21_dawg_and_gaddag");
-  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 QUEBEC/ 0/0 0 "
+              "-lex CSW21;");
   game = config_get_game(config);
-  vms = validated_moves_create_and_assert_status(
-      game, 0, "H8.QUEBEC", false, false, false, ERROR_STATUS_SUCCESS);
+  vms = validated_moves_create_and_assert_status(game, 0, "H8 QUEBEC", false,
+                                                 false, ERROR_STATUS_SUCCESS);
   validated_moves_destroy(vms);
 
   load_and_exec_config_or_die(config, "convert text2wordmap CSW21_small");
