@@ -504,6 +504,17 @@ void solver_worker_destroy(EndgameSolverWorker *solver_worker) {
   free(solver_worker);
 }
 
+// Returns the pruned KWG for the given player index.
+// In shared-KWG mode, only pruned_kwgs[0] exists, so it is always returned.
+// In non-shared mode, each player index maps to its own pruned KWG.
+static inline const KWG *solver_get_pruned_kwg(const EndgameSolver *solver,
+                                               int player_index) {
+  if (solver->pruned_kwgs[1] == NULL) {
+    return solver->pruned_kwgs[0];
+  }
+  return solver->pruned_kwgs[player_index];
+}
+
 int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
   // stm means side to move
   // Lazy cross-set generation: only compute if not already valid
@@ -527,8 +538,9 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
       .move_list = worker->move_list,
       .move_record_type = MOVE_RECORD_ALL_SMALL,
       .move_sort_type = MOVE_SORT_SCORE,
-      .override_kwg =
-          worker->solver->pruned_kwgs[worker->solver->solving_player],
+      .override_kwg = solver_get_pruned_kwg(
+          worker->solver,
+          game_get_player_on_turn_index(worker->game_copy)),
       .thread_index = worker->thread_index,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
@@ -872,8 +884,9 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
         .move_list = worker->move_list,
         .move_record_type = MOVE_RECORD_ALL_SMALL,
         .move_sort_type = MOVE_SORT_SCORE,
-        .override_kwg =
-            worker->solver->pruned_kwgs[worker->solver->solving_player],
+        .override_kwg = solver_get_pruned_kwg(
+            worker->solver,
+            game_get_player_on_turn_index(worker->game_copy)),
         .thread_index = worker->thread_index,
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
@@ -1061,7 +1074,7 @@ static int negamax_generate_and_sort_moves(EndgameSolverWorker *worker,
   if (worker->solver->use_heuristics) {
     *opp_stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
-        worker->solver->pruned_kwgs[worker->solver->solving_player], opp_idx,
+        solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx,
         worker->thread_index, &opp_tiles_bv);
     nplays = generate_stm_plays(worker, depth);
   } else {
@@ -1685,7 +1698,7 @@ static float compute_initial_stuck_fraction(const EndgameSolver *solver,
   Game *root_game = game_duplicate(game);
   MoveList *tmp_ml = move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
   float frac = compute_opp_stuck_fraction(
-      root_game, tmp_ml, solver->pruned_kwgs[solver->solving_player], opp_idx,
+      root_game, tmp_ml, solver_get_pruned_kwg(solver, opp_idx), opp_idx,
       0, NULL);
   small_move_list_destroy(tmp_ml);
   game_destroy(root_game);
