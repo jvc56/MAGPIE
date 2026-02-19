@@ -45,6 +45,7 @@ typedef struct EndgameArgs {
   int num_top_moves;
   EndgamePerPlyCallback per_ply_callback;
   void *per_ply_callback_data;
+  dual_lexicon_mode_t dual_lexicon_mode;
 } EndgameArgs;
 
 EndgameSolver *endgame_solver_create(void);

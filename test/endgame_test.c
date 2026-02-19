@@ -380,12 +380,70 @@ void test_kue(void) {
   config_destroy(config);
 }
 
+// QI-relevant 2-lexicon endgame test.
+// TWL98 vs CSW24 - TWL98 doesn't have QI, CSW24 does.
+// Position from TWL98 vs CSW24 game (seed 1023).
+// Player 1 (TWL98) has IQV - has Q and I but can't play QI in TWL98.
+// CSW24 player on turn.
+#define TWO_LEXICON_CGP                                                        \
+  "cgp "                                                                       \
+  "DOBIE2ARCSINES/1FANWORT4OX1/7O3FROM/7K3L3/6VEEJAY3/11MOA1/"                 \
+  "7PIgWEEDS/5DUI3N2H/5ETUI4TI/3GUP7AL/13NY/4TItHONIA1G1/"                     \
+  "7E5L1/4RECRATE2E1/7D1ANGORA BELSTUZ/IQV 373/426 0"
+
+void test_2lex_endgame(dual_lexicon_mode_t mode, int expected_score) {
+  Config *config = config_create_or_die(
+      "set -l1 TWL98 -l2 CSW24 -wmp false -s1 score -s2 score -r1 small -r2 "
+      "small -threads 1 -eplies 4");
+  load_and_exec_config_or_die(config, TWO_LEXICON_CGP);
+
+  EndgameSolver *solver = endgame_solver_create();
+  Game *game = config_get_game(config);
+  ErrorStack *error_stack = error_stack_create();
+  EndgameResults *results = config_get_endgame_results(config);
+
+  EndgameArgs args = {
+      .thread_control = config_get_thread_control(config),
+      .game = game,
+      .plies = 3,
+      .tt_fraction_of_mem = 0.05,
+      .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+      .num_threads = 1,
+      .num_top_moves = 1,
+      .use_heuristics = false,
+      .per_ply_callback = NULL,
+      .per_ply_callback_data = NULL,
+      .dual_lexicon_mode = mode,
+  };
+
+  endgame_solve(solver, &args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const PVLine *pv_line =
+      endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+  assert(pv_line->score == expected_score);
+
+  error_stack_destroy(error_stack);
+  endgame_solver_destroy(solver);
+  config_destroy(config);
+}
+
+void test_2lex_ignorant(void) {
+  test_2lex_endgame(DUAL_LEXICON_MODE_IGNORANT, 96);
+}
+
+void test_2lex_informed(void) {
+  test_2lex_endgame(DUAL_LEXICON_MODE_INFORMED, 81);
+}
+
 void test_endgame(void) {
   test_solve_standard();
   test_very_deep();
   test_small_arena_realloc();
   test_pass_first();
   test_nonempty_bag();
+  // 2-lexicon endgame tests (TWL98 vs CSW24, QI-relevant)
+  test_2lex_ignorant();
+  test_2lex_informed();
   test_endgame_interrupt();
   //  Uncomment out more of these tests once we add more optimizations,
   //  and/or if we can run the endgame tests in release mode.

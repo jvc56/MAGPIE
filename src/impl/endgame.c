@@ -106,6 +106,7 @@ struct EndgameSolver {
   PVLine principal_variation;
 
   KWG *pruned_kwgs[2];
+  dual_lexicon_mode_t dual_lexicon_mode;
 
   int solve_multiple_variations;
   int requested_plies;
@@ -391,14 +392,17 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->pruned_kwgs[0] = NULL;
   es->pruned_kwgs[1] = NULL;
 
-  bool kwgs_are_shared =
-      game_get_data_is_shared(endgame_args->game, PLAYERS_DATA_TYPE_KWG);
+  es->dual_lexicon_mode = endgame_args->dual_lexicon_mode;
+  bool create_separate_kwgs =
+      (es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED) &&
+      !game_get_data_is_shared(endgame_args->game, PLAYERS_DATA_TYPE_KWG);
 
   // Generate pruned KWG(s) from the set of possible words on this board.
-  // In shared-KWG mode, one pruned KWG is used for everything.
-  // In non-shared mode, each player index gets its own pruned KWG so that
-  // cross-set index i uses the pruned KWG derived from player i's lexicon.
-  for (int pi = 0; pi < (kwgs_are_shared ? 1 : 2); pi++) {
+  // In IGNORANT mode (or shared-KWG), one pruned KWG is used for everything.
+  // In INFORMED mode with different lexicons, each player index gets its own
+  // pruned KWG so that cross-set index i uses the pruned KWG derived from
+  // player i's lexicon.
+  for (int pi = 0; pi < (create_separate_kwgs ? 2 : 1); pi++) {
     const KWG *full_kwg =
         player_get_kwg(game_get_player(endgame_args->game, pi));
     DictionaryWordList *word_list = dictionary_word_list_create();
@@ -459,15 +463,8 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
   game_set_backup_mode(solver_worker->game_copy, BACKUP_MODE_SIMULATION);
 
   // Set override KWGs so cross-set computation uses the pruned lexicon
-  bool kwgs_shared =
-      game_get_data_is_shared(solver->game, PLAYERS_DATA_TYPE_KWG);
-  if (kwgs_shared) {
-    game_set_override_kwgs(solver_worker->game_copy, solver->pruned_kwgs[0],
-                           NULL, DUAL_LEXICON_MODE_IGNORANT);
-  } else {
-    game_set_override_kwgs(solver_worker->game_copy, solver->pruned_kwgs[0],
-                           solver->pruned_kwgs[1], DUAL_LEXICON_MODE_INFORMED);
-  }
+  game_set_override_kwgs(solver_worker->game_copy, solver->pruned_kwgs[0],
+                         solver->pruned_kwgs[1], solver->dual_lexicon_mode);
   // Regenerate initial cross-sets using the pruned KWGs
   game_gen_all_cross_sets(solver_worker->game_copy);
   solver_worker->move_list =
