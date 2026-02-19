@@ -103,7 +103,6 @@ struct EndgameSolver {
   bool negascout_optim;
   bool use_heuristics;
   PVLine principal_variation;
-  int32_t best_pv_value;
 
   KWG *pruned_kwg;
 
@@ -1838,8 +1837,6 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   const PVLine *best_pv =
       endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
   solver->principal_variation = *best_pv;
-  solver->best_pv_value =
-      endgame_results_get_value(results, ENDGAME_RESULT_BEST);
 
   // Multi-PV: extract top-K root moves from best thread's arena before
   // destroying workers.
