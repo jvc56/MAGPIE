@@ -395,12 +395,19 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->pruned_kwgs[1] = NULL;
 
   es->dual_lexicon_mode = endgame_args->dual_lexicon_mode;
+  // INFORMED mode with shared KWGs is meaningless (both players have the same
+  // lexicon). Coerce to IGNORANT to avoid building only pruned_kwgs[0] while
+  // get_kwg_for_cross_set would try to dereference pruned_kwgs[1] as NULL.
+  bool shared_kwg =
+      game_get_data_is_shared(endgame_args->game, PLAYERS_DATA_TYPE_KWG);
+  if (es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED && shared_kwg) {
+    es->dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT;
+  }
   es->skip_pruned_cross_sets = endgame_args->skip_pruned_cross_sets;
   es->debug_verify_cross_set_equivalence =
       endgame_args->debug_verify_cross_set_equivalence;
   bool create_separate_kwgs =
-      (es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED) &&
-      !game_get_data_is_shared(endgame_args->game, PLAYERS_DATA_TYPE_KWG);
+      (es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED) && !shared_kwg;
 
   // Generate pruned KWG(s) from the set of possible words on this board.
   // In IGNORANT mode (or shared-KWG), one pruned KWG is used for everything.
