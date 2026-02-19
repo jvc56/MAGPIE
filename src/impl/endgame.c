@@ -1888,10 +1888,4 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   }
 
   log_final_pvs(multi_pvs, num_pvs, solver, endgame_args->game, elapsed);
-
-  // Store results using main's thread-safe API
-  solver->principal_variation.score = solver->best_pv_value;
-  endgame_results_set_best_pvline(results, &solver->principal_variation,
-                                  solver->best_pv_value,
-                                  solver->requested_plies);
 }
