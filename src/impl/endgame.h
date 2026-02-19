@@ -48,10 +48,6 @@ typedef struct EndgameArgs {
   dual_lexicon_mode_t dual_lexicon_mode;
   // If true, skip using pruned KWGs for cross-set computation (benchmark only)
   bool skip_pruned_cross_sets;
-  // If true, verify that pruned-KWG cross-sets produce the same moves as
-  // full-KWG cross-sets at every move generation in the search.
-  // Only checked in non-NDEBUG builds; the field always exists for ABI compat.
-  bool debug_verify_cross_set_equivalence;
 } EndgameArgs;
 
 EndgameSolver *endgame_solver_create(void);

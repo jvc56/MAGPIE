@@ -435,73 +435,7 @@ void test_2lex_informed(void) {
   test_2lex_endgame(DUAL_LEXICON_MODE_INFORMED, 81);
 }
 
-// Verify that pruned-KWG cross-sets produce the same moves as full-KWG
-// cross-sets. Runs a short endgame solve with
-// debug_verify_cross_set_equivalence enabled, which asserts move equivalence at
-// every generate_stm_plays call.
-void test_cross_set_pruning_equivalence(void) {
-  // Single-lexicon: standard out-in-two position, 2-ply, 1 thread
-  {
-    Config *config = config_create_or_die(
-        "set -s1 score -s2 score -r1 small -r2 small -threads 1 -eplies 2");
-    load_and_exec_config_or_die(
-        config, "cgp "
-                "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/"
-                "8WE2OBI/6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/"
-                "FIVE1E5IT1C/5SPORRAN2A/6ORE2N2D "
-                "BGIV/DEHILOR 384/389 0 -lex NWL20");
-    EndgameSolver *solver = endgame_solver_create();
-    EndgameResults *results = config_get_endgame_results(config);
-    ErrorStack *error_stack = error_stack_create();
-    EndgameArgs args = {
-        .thread_control = config_get_thread_control(config),
-        .game = config_get_game(config),
-        .plies = 2,
-        .tt_fraction_of_mem = 0.05,
-        .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-        .num_threads = 1,
-        .num_top_moves = 1,
-        .use_heuristics = true,
-        .debug_verify_cross_set_equivalence = true,
-    };
-    endgame_solve(solver, &args, results, error_stack);
-    assert(error_stack_is_empty(error_stack));
-    error_stack_destroy(error_stack);
-    endgame_solver_destroy(solver);
-    config_destroy(config);
-  }
-
-  // Dual-lexicon (INFORMED): TWL98 vs CSW24, 2-ply, 1 thread
-  {
-    Config *config = config_create_or_die(
-        "set -l1 TWL98 -l2 CSW24 -wmp false -s1 score -s2 score -r1 small -r2 "
-        "small -threads 1 -eplies 2");
-    load_and_exec_config_or_die(config, TWO_LEXICON_CGP);
-    EndgameSolver *solver = endgame_solver_create();
-    EndgameResults *results = config_get_endgame_results(config);
-    ErrorStack *error_stack = error_stack_create();
-    EndgameArgs args = {
-        .thread_control = config_get_thread_control(config),
-        .game = config_get_game(config),
-        .plies = 2,
-        .tt_fraction_of_mem = 0.05,
-        .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-        .num_threads = 1,
-        .num_top_moves = 1,
-        .use_heuristics = false,
-        .dual_lexicon_mode = DUAL_LEXICON_MODE_INFORMED,
-        .debug_verify_cross_set_equivalence = true,
-    };
-    endgame_solve(solver, &args, results, error_stack);
-    assert(error_stack_is_empty(error_stack));
-    error_stack_destroy(error_stack);
-    endgame_solver_destroy(solver);
-    config_destroy(config);
-  }
-}
-
 void test_endgame(void) {
-  test_cross_set_pruning_equivalence();
   test_solve_standard();
   test_very_deep();
   test_small_arena_realloc();

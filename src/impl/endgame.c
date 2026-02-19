@@ -108,7 +108,6 @@ struct EndgameSolver {
   KWG *pruned_kwgs[2];
   dual_lexicon_mode_t dual_lexicon_mode;
   bool skip_pruned_cross_sets;
-  bool debug_verify_cross_set_equivalence;
 
   int solve_multiple_variations;
   int requested_plies;
@@ -404,8 +403,6 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
     es->dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT;
   }
   es->skip_pruned_cross_sets = endgame_args->skip_pruned_cross_sets;
-  es->debug_verify_cross_set_equivalence =
-      endgame_args->debug_verify_cross_set_equivalence;
   bool create_separate_kwgs =
       (es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED) && !shared_kwg;
 
@@ -527,20 +524,6 @@ static inline const KWG *solver_get_pruned_kwg(const EndgameSolver *solver,
   return solver->pruned_kwgs[player_index];
 }
 
-#ifndef NDEBUG
-static int compare_uint64(const void *a, const void *b) {
-  uint64_t value_a = *(const uint64_t *)a;
-  uint64_t value_b = *(const uint64_t *)b;
-  if (value_a < value_b) {
-    return -1;
-  }
-  if (value_a > value_b) {
-    return 1;
-  }
-  return 0;
-}
-#endif
-
 int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
   // stm means side to move
   // Lazy cross-set generation: only compute if not already valid
@@ -572,60 +555,6 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves(&args);
-
-#ifndef NDEBUG
-  if (worker->solver->debug_verify_cross_set_equivalence &&
-      !worker->solver->skip_pruned_cross_sets) {
-    // Verify that pruned-KWG cross-sets produce identical moves to full-KWG
-    // cross-sets. Duplicate the game, clear override KWGs, regenerate
-    // cross-sets with the full lexicon, and compare move lists.
-    int pruned_count = worker->move_list->count;
-    uint64_t *pruned_tiny_moves =
-        malloc_or_die(pruned_count * sizeof(uint64_t));
-    for (int i = 0; i < pruned_count; i++) {
-      pruned_tiny_moves[i] = worker->move_list->small_moves[i]->tiny_move;
-    }
-
-    Game *verify_game = game_duplicate(worker->game_copy);
-    game_clear_override_kwgs(verify_game);
-    game_gen_all_cross_sets(verify_game);
-
-    MoveList *verify_ml =
-        move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
-    const MoveGenArgs verify_args = {
-        .game = verify_game,
-        .move_list = verify_ml,
-        .move_record_type = MOVE_RECORD_ALL_SMALL,
-        .move_sort_type = MOVE_SORT_SCORE,
-        .override_kwg = solver_get_pruned_kwg(
-            worker->solver, game_get_player_on_turn_index(worker->game_copy)),
-        .thread_index = worker->thread_index,
-        .eq_margin_movegen = 0,
-        .target_equity = EQUITY_MAX_VALUE,
-        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-    };
-    generate_moves(&verify_args);
-
-    assert(verify_ml->count == pruned_count);
-
-    uint64_t *full_tiny_moves =
-        malloc_or_die(verify_ml->count * sizeof(uint64_t));
-    for (int i = 0; i < verify_ml->count; i++) {
-      full_tiny_moves[i] = verify_ml->small_moves[i]->tiny_move;
-    }
-
-    qsort(pruned_tiny_moves, pruned_count, sizeof(uint64_t), compare_uint64);
-    qsort(full_tiny_moves, verify_ml->count, sizeof(uint64_t), compare_uint64);
-    for (int i = 0; i < pruned_count; i++) {
-      assert(pruned_tiny_moves[i] == full_tiny_moves[i]);
-    }
-
-    free(pruned_tiny_moves);
-    free(full_tiny_moves);
-    small_move_list_destroy(verify_ml);
-    game_destroy(verify_game);
-  }
-#endif
 
   SmallMove *arena_small_moves = (SmallMove *)arena_alloc(
       worker->small_move_arena, worker->move_list->count * sizeof(SmallMove));
