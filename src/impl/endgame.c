@@ -414,12 +414,12 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   // In INFORMED mode with different lexicons, each player index gets its own
   // pruned KWG so that cross-set index i uses the pruned KWG derived from
   // player i's lexicon.
-  for (int pi = 0; pi < (create_separate_kwgs ? 2 : 1); pi++) {
+  for (int player_idx = 0; player_idx < (create_separate_kwgs ? 2 : 1); player_idx++) {
     const KWG *full_kwg =
-        player_get_kwg(game_get_player(endgame_args->game, pi));
+        player_get_kwg(game_get_player(endgame_args->game, player_idx));
     DictionaryWordList *word_list = dictionary_word_list_create();
     generate_possible_words(endgame_args->game, full_kwg, word_list);
-    es->pruned_kwgs[pi] = make_kwg_from_words_small(
+    es->pruned_kwgs[player_idx] = make_kwg_from_words_small(
         word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
     dictionary_word_list_destroy(word_list);
   }
@@ -528,12 +528,14 @@ static inline const KWG *solver_get_pruned_kwg(const EndgameSolver *solver,
 
 #ifndef NDEBUG
 static int compare_uint64(const void *a, const void *b) {
-  uint64_t va = *(const uint64_t *)a;
-  uint64_t vb = *(const uint64_t *)b;
-  if (va < vb)
+  uint64_t value_a = *(const uint64_t *)a;
+  uint64_t value_b = *(const uint64_t *)b;
+  if (value_a < value_b) {
     return -1;
-  if (va > vb)
+  }
+  if (value_a > value_b) {
     return 1;
+  }
   return 0;
 }
 #endif
