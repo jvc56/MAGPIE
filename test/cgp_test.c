@@ -169,7 +169,7 @@ void test_cgp_english(void) {
       true);
   play_move_and_validate_cgp(game, "9E CRoWDIE", "AGNOTT?",
                              "15/15/15/15/15/15/15/6ZA7/4CRoWDIE4/15/15/15/15/"
-                             "15/15 CDEIRW?/AGNOTT? 22/79 0",
+                             "15/15 AENNRST/AGNOTT? 22/79 0",
                              true);
 
   game_destroy(game);
