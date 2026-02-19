@@ -136,6 +136,7 @@ static TestEntry on_demand_test_table[] = {
     {"multipv", test_multi_pv},
     {"kue", test_kue},
     {"monsterq", test_monster_q},
+    {"benchxset", test_benchmark_cross_set_pruning},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

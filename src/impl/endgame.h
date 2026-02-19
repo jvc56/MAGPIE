@@ -46,6 +46,8 @@ typedef struct EndgameArgs {
   EndgamePerPlyCallback per_ply_callback;
   void *per_ply_callback_data;
   dual_lexicon_mode_t dual_lexicon_mode;
+  // If true, skip using pruned KWGs for cross-set computation (benchmark only)
+  bool skip_pruned_cross_sets;
 } EndgameArgs;
 
 EndgameSolver *endgame_solver_create(void);

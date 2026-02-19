@@ -8,5 +8,6 @@ void test_benchmark_selfplay_5ply(void);
 void test_benchmark_thread_scaling(void);
 void test_stuck_tile_survey(void);
 void test_stuck_letter_frequency(void);
+void test_benchmark_cross_set_pruning(void);
 
 #endif

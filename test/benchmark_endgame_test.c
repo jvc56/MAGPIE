@@ -1050,3 +1050,101 @@ void test_stuck_letter_frequency(void) {
   move_list_destroy(move_list);
   config_destroy(config);
 }
+
+void test_benchmark_cross_set_pruning(void) {
+  log_set_level(LOG_WARN);
+
+  const int num_games = 10;
+  const int ply = 5;
+  const int num_threads = 10;
+  const uint64_t base_seed = 42;
+
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -threads 10 -s1 score -s2 score -r1 small -r2 small");
+
+  MoveList *move_list = move_list_create(1);
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+
+  // Collect endgame positions
+  Game **saved_games = malloc_or_die(sizeof(Game *) * (size_t)num_games);
+  int valid = 0;
+  const int max_attempts = num_games * 10;
+  for (int i = 0; valid < num_games && i < max_attempts; i++) {
+    game_reset(game);
+    game_seed(game, base_seed + (uint64_t)i);
+    draw_starting_racks(game);
+    if (!play_until_bag_empty(game, move_list)) {
+      continue;
+    }
+    saved_games[valid] = game_duplicate(game);
+    valid++;
+  }
+  assert(valid == num_games);
+
+  printf("\n");
+  printf("==============================================================\n");
+  printf("  Cross-Set Pruning Benchmark: %d positions, %d-ply, %d threads\n",
+         num_games, ply, num_threads);
+  printf("==============================================================\n\n");
+
+  // Run both variants
+  for (int variant = 0; variant < 2; variant++) {
+    bool skip_pruned = (variant == 1);
+    const char *label = skip_pruned ? "WITHOUT pruned cross-sets (old)"
+                                    : "WITH pruned cross-sets (new)";
+
+    EndgameSolver *solver = endgame_solver_create();
+    EndgameResults *results = endgame_results_create();
+
+    double total_time = 0;
+
+    for (int p = 0; p < num_games; p++) {
+      game_copy(game, saved_games[p]);
+
+      EndgameArgs args = {.thread_control = config_get_thread_control(config),
+                          .game = game,
+                          .plies = ply,
+                          .tt_fraction_of_mem = 0.10,
+                          .initial_small_move_arena_size =
+                              DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                          .num_threads = num_threads,
+                          .num_top_moves = 1,
+                          .use_heuristics = true,
+                          .per_ply_callback = NULL,
+                          .per_ply_callback_data = NULL,
+                          .skip_pruned_cross_sets = skip_pruned};
+
+      Timer t;
+      ctimer_start(&t);
+      ErrorStack *err = error_stack_create();
+      endgame_solve(solver, &args, results, err);
+      double elapsed = ctimer_elapsed_seconds(&t);
+      total_time += elapsed;
+      assert(error_stack_is_empty(err));
+
+      const PVLine *pv =
+          endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+      printf("  [%s] Game %2d: value=%+4d  %.2fs\n",
+             skip_pruned ? "old" : "new", p + 1, pv->score, elapsed);
+      (void)fflush(stdout);
+      error_stack_destroy(err);
+    }
+
+    printf("\n  %s\n", label);
+    printf("  TOTAL: %.2fs  AVG: %.3fs/game\n\n", total_time,
+           total_time / num_games);
+
+    endgame_results_destroy(results);
+    endgame_solver_destroy(solver);
+  }
+
+  printf("==============================================================\n");
+
+  for (int p = 0; p < num_games; p++) {
+    game_destroy(saved_games[p]);
+  }
+  free(saved_games);
+  move_list_destroy(move_list);
+  config_destroy(config);
+}

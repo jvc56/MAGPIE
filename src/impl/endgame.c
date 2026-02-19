@@ -107,6 +107,7 @@ struct EndgameSolver {
 
   KWG *pruned_kwgs[2];
   dual_lexicon_mode_t dual_lexicon_mode;
+  bool skip_pruned_cross_sets;
 
   int solve_multiple_variations;
   int requested_plies;
@@ -393,6 +394,7 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->pruned_kwgs[1] = NULL;
 
   es->dual_lexicon_mode = endgame_args->dual_lexicon_mode;
+  es->skip_pruned_cross_sets = endgame_args->skip_pruned_cross_sets;
   bool create_separate_kwgs =
       (es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED) &&
       !game_get_data_is_shared(endgame_args->game, PLAYERS_DATA_TYPE_KWG);
@@ -463,10 +465,12 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
   game_set_backup_mode(solver_worker->game_copy, BACKUP_MODE_SIMULATION);
 
   // Set override KWGs so cross-set computation uses the pruned lexicon
-  game_set_override_kwgs(solver_worker->game_copy, solver->pruned_kwgs[0],
-                         solver->pruned_kwgs[1], solver->dual_lexicon_mode);
-  // Regenerate initial cross-sets using the pruned KWGs
-  game_gen_all_cross_sets(solver_worker->game_copy);
+  if (!solver->skip_pruned_cross_sets) {
+    game_set_override_kwgs(solver_worker->game_copy, solver->pruned_kwgs[0],
+                           solver->pruned_kwgs[1], solver->dual_lexicon_mode);
+    // Regenerate initial cross-sets using the pruned KWGs
+    game_gen_all_cross_sets(solver_worker->game_copy);
+  }
   solver_worker->move_list =
       move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
 
