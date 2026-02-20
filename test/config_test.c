@@ -1767,6 +1767,9 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "shm 1 -shplies 1", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shm 2 -shplies 25", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shm 5 -shplies 3", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shm 8d", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shm BAR", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shm 8e BAR", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "t", ERROR_STATUS_SUCCESS);
   // No rack was given to the top commit command, so it should commit the best
   // simmed play 8D BARCHAN should sim best

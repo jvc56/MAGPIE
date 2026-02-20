@@ -1080,7 +1080,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     case ARG_TOKEN_SHOW_MOVES:
       usages[0] = "";
-      text = "Shows the moves or the sim results if available.";
+      usages[1] = "<number>";
+      usages[2] = "<coord>";
+      usages[3] = "<prefix>";
+      usages[4] = "<coord> <prefix>";
+      text = "Shows the moves or the sim results if available. Optionally "
+             "takes a max number of plays, a coordinate (e.g. d12) to show "
+             "only moves at that square, or a word prefix to show only moves "
+             "starting with those letters. A coordinate and prefix may be "
+             "combined.";
       break;
     case ARG_TOKEN_SHOW_INFERENCE:
       usages[0] = "";
@@ -2043,8 +2051,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->inference_results, config->thread_control, config->game,
       config->sim_with_inference, config->use_heat_map, config->num_threads,
       config->print_interval, config->max_num_display_plays, config->shplies,
-      config->seed,
-      config->max_iterations, config->min_play_iterations,
+      config->seed, config->max_iterations, config->min_play_iterations,
       config->stop_cond_pct, config->threshold, (int)config->time_limit_seconds,
       config->sampling_rule, config->cutoff, &inference_args, sim_args);
 }
@@ -2154,7 +2161,7 @@ char *status_sim(Config *config) {
   }
   return sim_results_get_string(config->game, sim_results,
                                 config->max_num_display_plays, config->shplies,
-                                !config->human_readable);
+                                -1, -1, NULL, 0, !config->human_readable);
 }
 
 // Gen and Sim
@@ -2458,6 +2465,49 @@ char *str_api_show_game(Config *config, ErrorStack *error_stack) {
 
 // Show moves
 
+// Parses a board coordinate string in vertical ("d12") or horizontal ("12d")
+// notation into 0-indexed row and col. Returns true on success.
+static bool parse_move_coord(const char *str, int *row, int *col,
+                             ErrorStack *error_stack) {
+  int len = (int)strlen(str);
+  if (len < 2) {
+    return false;
+  }
+  if (isalpha((unsigned char)str[0])) {
+    // Vertical notation: single letter then digits (e.g. "d12")
+    for (int i = 1; i < len; i++) {
+      if (!isdigit((unsigned char)str[i])) {
+        return false;
+      }
+    }
+    *col = tolower((unsigned char)str[0]) - 'a';
+    *row = string_to_int(str + 1, error_stack) - 1;
+    if (!error_stack_is_empty(error_stack)) {
+      return false;
+    }
+    return true;
+  } else if (isdigit((unsigned char)str[0])) {
+    // Horizontal notation: digits then single letter (e.g. "12d")
+    int i = 1;
+    while (i < len && isdigit((unsigned char)str[i])) {
+      i++;
+    }
+    if (i >= len || i != len - 1 || !isalpha((unsigned char)str[i])) {
+      return false;
+    }
+    char row_str[BOARD_DIM];
+    memcpy(row_str, str, (size_t)i);
+    row_str[i] = '\0';
+    *row = string_to_int(row_str, error_stack) - 1;
+    if (!error_stack_is_empty(error_stack)) {
+      return false;
+    }
+    *col = tolower((unsigned char)str[i]) - 'a';
+    return true;
+  }
+  return false;
+}
+
 char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
@@ -2470,30 +2520,83 @@ char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
                      string_duplicate("no moves to show"));
     return empty_string();
   }
-  const char *max_num_display_plays_str =
-      config_get_parg_value(config, ARG_TOKEN_SHOW_MOVES, 0);
+
+  const char *arg0 = config_get_parg_value(config, ARG_TOKEN_SHOW_MOVES, 0);
+  const char *arg1 = config_get_parg_value(config, ARG_TOKEN_SHOW_MOVES, 1);
 
   int max_num_display_plays = config->max_num_display_plays;
-  if (max_num_display_plays_str) {
-    string_to_int_or_push_error("max num display plays",
-                                max_num_display_plays_str, 1, INT_MAX,
-                                ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
-                                &max_num_display_plays, error_stack);
+  int filter_row = -1;
+  int filter_col = -1;
+  const char *prefix_str = NULL;
+
+  if (arg0) {
+    int coord_row;
+    int coord_col;
+    bool is_coord = parse_move_coord(arg0, &coord_row, &coord_col, error_stack);
     if (!error_stack_is_empty(error_stack)) {
+      return empty_string();
+    }
+    if (is_coord) {
+      if (coord_row < 0 || coord_row >= BOARD_DIM || coord_col < 0 ||
+          coord_col >= BOARD_DIM) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_CONFIG_LOAD_MOVE_COORDS_OUT_OF_BOUNDS,
+            get_formatted_string("move filter coordinate '%s' is out of bounds",
+                                 arg0));
+        return empty_string();
+      }
+      filter_row = coord_row;
+      filter_col = coord_col;
+      if (arg1) {
+        prefix_str = arg1;
+      }
+    } else {
+      // Check if arg0 is all digits (a max count)
+      bool all_digits = true;
+      for (int i = 0; arg0[i]; i++) {
+        if (!isdigit((unsigned char)arg0[i])) {
+          all_digits = false;
+          break;
+        }
+      }
+      if (all_digits) {
+        string_to_int_or_push_error(
+            "max num display plays", arg0, 1, INT_MAX,
+            ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+            &max_num_display_plays, error_stack);
+        if (!error_stack_is_empty(error_stack)) {
+          return empty_string();
+        }
+      } else {
+        prefix_str = arg0;
+      }
+    }
+  }
+
+  MachineLetter prefix_mls[BOARD_DIM];
+  int prefix_len = 0;
+  if (prefix_str) {
+    prefix_len =
+        ld_str_to_mls(config->ld, prefix_str, false, prefix_mls, BOARD_DIM);
+    if (prefix_len < 0) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
+          get_formatted_string("invalid prefix letters: %s", prefix_str));
       return empty_string();
     }
   }
 
   char *result = NULL;
   if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
-    result =
-        sim_results_get_string(config->game, config->sim_results,
-                               max_num_display_plays, config->shplies,
-                               !config->human_readable);
+    result = sim_results_get_string(
+        config->game, config->sim_results, max_num_display_plays,
+        config->shplies, filter_row, filter_col, prefix_mls, prefix_len,
+        !config->human_readable);
   } else {
     result = move_list_get_string(
         config->move_list, game_get_board(config->game), config->ld,
-        max_num_display_plays, !config->human_readable);
+        max_num_display_plays, filter_row, filter_col, prefix_mls, prefix_len,
+        !config->human_readable);
   }
   return result;
 }
@@ -5750,7 +5853,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_SWITCH_NAMES, "switchnames", 0, 0, switch_names, generic,
       false);
   cmd(ARG_TOKEN_SHOW_GAME, "shgame", 0, 0, show_game, generic, true);
-  cmd(ARG_TOKEN_SHOW_MOVES, "shmoves", 0, 1, show_moves_or_sim_results, generic,
+  cmd(ARG_TOKEN_SHOW_MOVES, "shmoves", 0, 2, show_moves_or_sim_results, generic,
       false);
   cmd(ARG_TOKEN_SHOW_INFERENCE, "shinference", 0, 1, show_inference, generic,
       false);
