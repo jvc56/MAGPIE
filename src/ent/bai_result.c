@@ -11,11 +11,11 @@ struct BAIResult {
   bai_result_status_t status;
   int best_arm;
   Timer timer;
-  uint64_t time_limit_seconds;
+  double time_limit_seconds;
   cpthread_mutex_t mutex;
 };
 
-void bai_result_reset(BAIResult *bai_result, uint64_t time_limit_seconds) {
+void bai_result_reset(BAIResult *bai_result, double time_limit_seconds) {
   bai_result->status = BAI_RESULT_STATUS_NONE;
   bai_result->best_arm = -1;
   bai_result->time_limit_seconds = time_limit_seconds;
@@ -49,7 +49,7 @@ void bai_result_stop_timer(BAIResult *bai_result) {
   ctimer_stop(&bai_result->timer);
 }
 
-uint64_t bai_result_get_time_limit_seconds(const BAIResult *bai_result) {
+double bai_result_get_time_limit_seconds(const BAIResult *bai_result) {
   return bai_result->time_limit_seconds;
 }
 
@@ -62,7 +62,7 @@ bai_result_status_t bai_result_set_and_get_status(BAIResult *bai_result,
       bai_result->status = BAI_RESULT_STATUS_USER_INTERRUPT;
     } else if (bai_result->time_limit_seconds > 0 &&
                bai_result_get_elapsed_seconds(bai_result) >=
-                   (double)bai_result->time_limit_seconds) {
+                   bai_result->time_limit_seconds) {
       bai_result->status = BAI_RESULT_STATUS_TIMEOUT;
     }
   }

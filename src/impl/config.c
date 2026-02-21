@@ -227,7 +227,7 @@ struct Config {
   char *record_filepath;
   char *settings_filename;
   double tt_fraction_of_mem;
-  uint64_t time_limit_seconds;
+  double time_limit_seconds;
   int num_threads;
   int print_interval;
   uint64_t seed;
@@ -2033,7 +2033,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->sim_with_inference, config->use_heat_map, config->num_threads,
       config->print_interval, config->max_num_display_plays, config->seed,
       config->max_iterations, config->min_play_iterations,
-      config->stop_cond_pct, config->threshold, (int)config->time_limit_seconds,
+      config->stop_cond_pct, config->threshold, config->time_limit_seconds,
       config->sampling_rule, config->cutoff, &inference_args, sim_args);
 }
 
@@ -5011,7 +5011,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_uint64(config, ARG_TOKEN_TIME_LIMIT, 0,
+  config_load_double(config, ARG_TOKEN_TIME_LIMIT, 0, 1e12,
                      &config->time_limit_seconds, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -5853,7 +5853,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->max_iterations = 1000000000000;
   config->stop_cond_pct = 99;
   config->cutoff = convert_user_cutoff_to_cutoff(0.005);
-  config->time_limit_seconds = 0;
+  config->time_limit_seconds = 0.0;
   config->num_threads = get_num_cores();
   config->print_interval = 0;
   config->seed = ctime_get_current_time();
@@ -6204,7 +6204,7 @@ void config_add_settings_to_string_builder(const Config *config,
                                                   config->tt_fraction_of_mem);
       break;
     case ARG_TOKEN_TIME_LIMIT:
-      config_add_uint64_setting_to_string_builder(config, sb, arg_token,
+      config_add_double_setting_to_string_builder(config, sb, arg_token,
                                                   config->time_limit_seconds);
       break;
     case ARG_TOKEN_SAMPLING_RULE:

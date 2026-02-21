@@ -15,7 +15,7 @@ typedef enum {
 
 typedef struct BAIResult BAIResult;
 
-void bai_result_reset(BAIResult *bai_result, uint64_t time_limit_seconds);
+void bai_result_reset(BAIResult *bai_result, double time_limit_seconds);
 BAIResult *bai_result_create(void);
 void bai_result_destroy(BAIResult *bai_result);
 void bai_result_set_best_arm(BAIResult *bai_result, int best_arm);
@@ -27,6 +27,6 @@ bai_result_status_t bai_result_set_and_get_status(BAIResult *bai_result,
                                                   bool user_interrupt);
 double bai_result_get_elapsed_seconds(const BAIResult *bai_result);
 void bai_result_stop_timer(BAIResult *bai_result);
-uint64_t bai_result_get_time_limit_seconds(const BAIResult *bai_result);
+double bai_result_get_time_limit_seconds(const BAIResult *bai_result);
 
 #endif
