@@ -3774,24 +3774,32 @@ static char *build_interpolated_note(Config *config, const char *raw_note,
         move_idx = move_idx * 10 + (*p - '0');
         p++;
       }
-      if (!config->move_list || move_list_get_count(config->move_list) == 0) {
+      const bool use_sim =
+          sim_results_get_valid_for_current_game_state(config->sim_results);
+      const int num_moves =
+          use_sim ? sim_results_get_number_of_plays(config->sim_results)
+                  : (config->move_list ? move_list_get_count(config->move_list)
+                                       : 0);
+      if (num_moves == 0) {
         error_stack_push(
             error_stack, ERROR_STATUS_NOTE_NO_MOVES,
             string_duplicate("no moves available for $N interpolation"));
         string_builder_destroy(sb);
         return NULL;
       }
-      if (move_idx < 1 || move_idx > move_list_get_count(config->move_list)) {
+      if (move_idx < 1 || move_idx > num_moves) {
         error_stack_push(
             error_stack, ERROR_STATUS_NOTE_MOVE_INDEX_OUT_OF_RANGE,
             get_formatted_string("move index %d is out of range", move_idx));
         string_builder_destroy(sb);
         return NULL;
       }
-      string_builder_add_move(
-          sb, game_get_board(config->game),
-          move_list_get_move(config->move_list, move_idx - 1), config->ld,
-          false);
+      const Move *move =
+          use_sim ? simmed_play_get_move(sim_results_get_display_simmed_play(
+                        config->sim_results, move_idx - 1))
+                  : move_list_get_move(config->move_list, move_idx - 1);
+      string_builder_add_move(sb, game_get_board(config->game), move,
+                              config->ld, false);
     } else {
       string_builder_add_char(sb, *p);
       p++;
