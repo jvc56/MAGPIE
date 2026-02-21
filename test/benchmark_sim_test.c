@@ -299,10 +299,8 @@ static void run_sim_benchmark(const SimBenchmarkConfig *bench) {
 }
 
 static const SimBenchmarkConfig sim_configs[] = {
-    // 2-ply vs 3-ply at 0.1s per turn
-    {{2, 0.1}, {3, 0.1}, 50, 42},
-    // 2-ply vs 3-ply at 1.0s per turn
-    {{2, 1.0}, {3, 1.0}, 50, 42},
+    // 2-ply vs 3-ply at 10s per turn
+    {{2, 10.0}, {3, 10.0}, 100, 42},
 };
 
 void test_benchmark_sim(void) {
