@@ -75,7 +75,7 @@ static double play_sim_turn(Config *config, const SimPlayerConfig *cfg,
   // Generate candidate moves
   char *set_cmd =
       get_formatted_string("set -plies %d -tlim %g -numplays 15 "
-                           "-scond none -it 1000000000 -threads 10",
+                           "-scond none -it 1000000000 -threads 16",
                            cfg->plies, cfg->time_limit_secs);
   load_and_exec_config_or_die(config, set_cmd);
   free(set_cmd);
