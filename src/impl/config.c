@@ -158,6 +158,7 @@ typedef enum {
   ARG_TOKEN_PREVIOUS,
   ARG_TOKEN_GOTO,
   ARG_TOKEN_NOTE,
+  ARG_TOKEN_CNOTE,
   ARG_TOKEN_PRINT_BOARDS,
   ARG_TOKEN_BOARD_COLOR,
   ARG_TOKEN_BOARD_TILE_GLYPHS,
@@ -1036,6 +1037,22 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "the rack after the exchange can be specified so that six passes "
           "can be correctly scored.";
       break;
+    case ARG_TOKEN_CNOTE:
+      usages[0] = "<move_index> <note>";
+      usages[1] = "<position> <tiles> <note>";
+      usages[2] = "ex <exchanged_tiles> <note>";
+      usages[3] = "pass <note>";
+      examples[0] = "2 should have played $1";
+      examples[1] = "11d ANTIQuES should have played $1 instead of $3";
+      examples[2] = "ex ABC should have passed";
+      examples[3] = "pass should have played $1";
+      text =
+          "Commits the move and adds a note to it in a single command. The "
+          "commit arguments are identical to the commit command (except the "
+          "optional rack-after-exchange is not supported). The note follows "
+          "the commit arguments and may use $N to interpolate the N-th move "
+          "from the current move list by its 1-indexed position.";
+      break;
     case ARG_TOKEN_TOP_COMMIT:
       usages[0] = "[<rack>]";
       examples[0] = "";
@@ -1144,8 +1161,11 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<content_with_possible_whitespace>";
       examples[0] = "#knowledgesaddest";
       examples[1] = "this is a valid note with whitespace";
+      examples[2] = "should have played $1 instead of $3";
       text = "Specifies the note for the most recently added move. If there is "
-             "an existing note it will be overwritten.";
+             "an existing note it will be overwritten. Use $N (e.g. $1, $2) to "
+             "interpolate the N-th move from the current move list by its "
+             "1-indexed position.";
       break;
     case ARG_TOKEN_P1_NAME:
       usages[0] = "<player_name_with_possible_whitespace>";
@@ -1639,6 +1659,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     };
     static const arg_token_t game_anno_cmds[] = {
         ARG_TOKEN_CHALLENGE,    /* challenge */
+        ARG_TOKEN_CNOTE,        /* cnote */
         ARG_TOKEN_COMMIT,       /* commit */
         ARG_TOKEN_EXPORT,       /* export */
         ARG_TOKEN_LOAD,         /* load */
@@ -3704,6 +3725,122 @@ char *str_api_commit(Config *config, ErrorStack *error_stack) {
   return impl_commit(config, error_stack);
 }
 
+// Commit with note
+
+// Builds a new heap-allocated string from raw_note with every $N reference
+// replaced by the string representation of the N-th move (1-indexed) in the
+// current move list. Returns NULL and pushes an error if any $N reference is
+// invalid; otherwise returns the caller-owned interpolated string.
+static char *build_interpolated_note(Config *config, const char *raw_note,
+                                     ErrorStack *error_stack) {
+  StringBuilder *sb = string_builder_create();
+  const char *p = raw_note;
+  while (*p) {
+    if (*p == '$' && isdigit((unsigned char)*(p + 1))) {
+      p++; // skip '$'
+      int move_idx = 0;
+      while (isdigit((unsigned char)*p)) {
+        move_idx = move_idx * 10 + (*p - '0');
+        p++;
+      }
+      if (!config->move_list || move_list_get_count(config->move_list) == 0) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_NOTE_NO_MOVES,
+            string_duplicate("no moves available for $N interpolation"));
+        string_builder_destroy(sb);
+        return NULL;
+      }
+      if (move_idx < 1 || move_idx > move_list_get_count(config->move_list)) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_NOTE_MOVE_INDEX_OUT_OF_RANGE,
+            get_formatted_string("move index %d is out of range", move_idx));
+        string_builder_destroy(sb);
+        return NULL;
+      }
+      string_builder_add_move(sb, game_get_board(config->game),
+                              move_list_get_move(config->move_list, move_idx - 1),
+                              config->ld, false);
+    } else {
+      string_builder_add_char(sb, *p);
+      p++;
+    }
+  }
+  char *note = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return note;
+}
+
+char *impl_cnote(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot commit a move without lexicon"));
+    return empty_string();
+  }
+
+  const char *raw = config_get_parg_value(config, ARG_TOKEN_CNOTE, 0);
+  StringSplitter *split = split_string_by_whitespace(raw, true);
+  const int num_items = string_splitter_get_number_of_items(split);
+
+  const char *commit_arg_1 = string_splitter_get_item(split, 0);
+  const char *commit_arg_2 = NULL;
+  int note_start_idx;
+  if (strings_iequal(commit_arg_1, UCGI_PASS_MOVE) ||
+      is_all_digits_or_empty(commit_arg_1)) {
+    note_start_idx = 1;
+  } else {
+    if (num_items < 2) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_COMMIT_MISSING_EXCHANGE_OR_PLAY,
+          get_formatted_string("missing exchange or play for commit '%s'",
+                               commit_arg_1));
+      string_splitter_destroy(split);
+      return empty_string();
+    }
+    commit_arg_2 = string_splitter_get_item(split, 1);
+    note_start_idx = 2;
+  }
+
+  // Join the remaining tokens into the raw note, then interpolate $N references
+  // before committing (commit clears the move list). Keep split alive until
+  // after the commit since commit_arg_1 and commit_arg_2 point into it.
+  char *raw_note = string_splitter_join(split, note_start_idx, num_items, " ");
+  char *note = build_interpolated_note(config, raw_note, error_stack);
+  free(raw_note);
+  if (!note) {
+    string_splitter_destroy(split);
+    return empty_string();
+  }
+
+  // Commit the move (this clears the move list).
+  char *result =
+      impl_commit_with_pos_args(config, error_stack, commit_arg_1,
+                                commit_arg_2, NULL);
+  string_splitter_destroy(split);
+  if (!error_stack_is_empty(error_stack)) {
+    free(note);
+    return result;
+  }
+
+  // Set the note on the event that was just committed.
+  game_history_set_note_for_most_recent_event(config->game_history, note);
+  free(note);
+  impl_export_if_autosave(config, error_stack);
+  return result;
+}
+
+void execute_cnote(Config *config, ErrorStack *error_stack) {
+  char *result = impl_cnote(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    execute_show_game(config, error_stack);
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_cnote(Config *config, ErrorStack *error_stack) {
+  return impl_cnote(config, error_stack);
+}
+
 // Top commit
 
 char *impl_top_commit(Config *config, ErrorStack *error_stack) {
@@ -4249,8 +4386,15 @@ char *impl_note(Config *config, ErrorStack *error_stack) {
 
   config_init_game(config);
 
-  game_history_set_note_for_most_recent_event(
-      config->game_history, config_get_parg_value(config, ARG_TOKEN_NOTE, 0));
+  // Build the note, interpolating $N with the string for the N-th move
+  // (1-indexed) in the current move list.
+  const char *raw_note = config_get_parg_value(config, ARG_TOKEN_NOTE, 0);
+  char *note = build_interpolated_note(config, raw_note, error_stack);
+  if (!note) {
+    return empty_string();
+  }
+  game_history_set_note_for_most_recent_event(config->game_history, note);
+  free(note);
   impl_export_if_autosave(config, error_stack);
   return empty_string();
 }
@@ -4561,6 +4705,7 @@ void config_load_parsed_args(Config *config,
       }
       current_value_index = 0;
       if (current_arg_token == ARG_TOKEN_NOTE ||
+          current_arg_token == ARG_TOKEN_CNOTE ||
           current_arg_token == ARG_TOKEN_P1_NAME ||
           current_arg_token == ARG_TOKEN_P2_NAME ||
           current_arg_token == ARG_TOKEN_MOVES) {
@@ -6011,6 +6156,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_LOAD, "load", 1, 1, load_gcg, generic, false);
   cmd(ARG_TOKEN_NEW_GAME, "newgame", 0, 1, new_game, generic, false);
   cmd(ARG_TOKEN_EXPORT, "export", 0, 1, export, generic, true);
+  cmd(ARG_TOKEN_CNOTE, "cnote", 1, 1, cnote, generic, false);
   cmd(ARG_TOKEN_COMMIT, "commit", 1, 3, commit, generic, true);
   cmd(ARG_TOKEN_TOP_COMMIT, "tcommit", 0, 1, top_commit, generic, true);
   cmd(ARG_TOKEN_CHALLENGE, "challenge", 0, 1, challenge, generic, false);
@@ -6279,6 +6425,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_LOAD:
     case ARG_TOKEN_NEW_GAME:
     case ARG_TOKEN_EXPORT:
+    case ARG_TOKEN_CNOTE:
     case ARG_TOKEN_COMMIT:
     case ARG_TOKEN_TOP_COMMIT:
     case ARG_TOKEN_CHALLENGE:
