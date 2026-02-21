@@ -111,4 +111,15 @@ void string_grid_set_cell(StringGrid *string_grid, int row, int col,
                           char *value);
 void string_builder_add_string_grid(StringBuilder *sb, const StringGrid *sg,
                                     bool add_border);
+
+// Returns the number of terminal columns a string occupies, correctly handling
+// ANSI escape sequences (0 columns) and Unicode wide characters (2 columns).
+int visual_string_length(const char *str);
+
+// Interleaves board_string (left column) with content (right column), padding
+// each board line to the maximum visual width so the content column is aligned.
+void string_builder_add_with_board_interleave(StringBuilder *sb,
+                                              const char *content,
+                                              const char *board_string);
+
 #endif

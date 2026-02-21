@@ -286,7 +286,8 @@ void string_builder_add_move_list(
     StringBuilder *string_builder, const MoveList *move_list,
     const Board *board, const LetterDistribution *ld, int max_num_display_plays,
     int filter_row, int filter_col, const MachineLetter *prefix_mls,
-    int prefix_len, bool exclude_tile_placement_moves, bool use_ucgi_format) {
+    int prefix_len, bool exclude_tile_placement_moves, bool use_ucgi_format,
+    const char *game_board_string) {
   const bool has_filter = filter_row >= 0 || filter_col >= 0 ||
                           prefix_len > 0 || exclude_tile_placement_moves;
   const int num_moves = move_list_get_count(move_list);
@@ -324,11 +325,11 @@ void string_builder_add_move_list(
     string_grid_set_cell(string_grid, curr_row, curr_col++,
                          string_duplicate("Move"));
     string_grid_set_cell(string_grid, curr_row, curr_col++,
-                         string_duplicate("Leave"));
+                         string_duplicate("Lv"));
     string_grid_set_cell(string_grid, curr_row, curr_col++,
-                         string_duplicate("Score"));
+                         string_duplicate("Sc"));
     string_grid_set_cell(string_grid, curr_row, curr_col++,
-                         string_duplicate("Static Eq"));
+                         string_duplicate("StEq"));
     curr_row++;
   }
 
@@ -384,10 +385,22 @@ void string_builder_add_move_list(
 
     curr_row++;
   }
-  string_builder_add_string_grid(string_builder, string_grid, false);
-  string_builder_add_formatted_string(string_builder,
-                                      "\nShowing %d of %d plays\n",
-                                      num_moves_to_display, num_moves);
+  if (game_board_string) {
+    StringBuilder *temp_sb = string_builder_create();
+    string_builder_add_string_grid(temp_sb, string_grid, false);
+    string_builder_add_formatted_string(temp_sb, "\nShowing %d of %d plays\n",
+                                        num_moves_to_display, num_moves);
+    char *moves_str = string_builder_dump(temp_sb, NULL);
+    string_builder_destroy(temp_sb);
+    string_builder_add_with_board_interleave(string_builder, moves_str,
+                                             game_board_string);
+    free(moves_str);
+  } else {
+    string_builder_add_string_grid(string_builder, string_grid, false);
+    string_builder_add_formatted_string(string_builder,
+                                        "\nShowing %d of %d plays\n",
+                                        num_moves_to_display, num_moves);
+  }
   string_grid_destroy(string_grid);
   string_builder_destroy(tmp_sb);
 }
@@ -397,11 +410,13 @@ char *move_list_get_string(const MoveList *move_list, const Board *board,
                            int max_num_display_plays, int filter_row,
                            int filter_col, const MachineLetter *prefix_mls,
                            int prefix_len, bool exclude_tile_placement_moves,
-                           bool use_ucgi_format) {
+                           bool use_ucgi_format,
+                           const char *game_board_string) {
   StringBuilder *sb = string_builder_create();
   string_builder_add_move_list(sb, move_list, board, ld, max_num_display_plays,
                                filter_row, filter_col, prefix_mls, prefix_len,
-                               exclude_tile_placement_moves, use_ucgi_format);
+                               exclude_tile_placement_moves, use_ucgi_format,
+                               game_board_string);
   char *move_list_string = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
   return move_list_string;

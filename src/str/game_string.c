@@ -33,13 +33,13 @@
 // Display formatting constants
 enum {
   RACK_DISPLAY_WIDTH = RACK_SIZE + 2,
-  UNSEEN_LETTER_ROWS = 5,
-  MIN_UNSEEN_LETTERS_PER_ROW = 20,
+  UNSEEN_LETTER_ROWS = 10,
+  MIN_UNSEEN_LETTERS_PER_ROW = 10,
   MAX_MOVES = 20,
   UNSEEN_START_ROW = 1,
-  GAME_EVENT_START_ROW = 10,
+  GAME_EVENT_START_ROW = 12,
   FINAL_PASS_PROMPT_ROW = BOARD_DIM - 1,
-  COMMENT_MAX_LINE_WIDTH = 72,
+  COMMENT_MAX_LINE_WIDTH = 50,
   COMMENT_INDENT_SPACES = 3,
 };
 
@@ -425,7 +425,7 @@ void string_builder_add_game_internal(
     if (i == UNSEEN_START_ROW) {
       string_builder_add_formatted_string(game_string, "Unseen: (%d)",
                                           num_bag_letters);
-    } else if (i > UNSEEN_START_ROW + 1 && letter_index < num_bag_letters) {
+    } else if (i > UNSEEN_START_ROW && letter_index < num_bag_letters) {
       for (int j = 0; j < letters_per_row && letter_index < num_bag_letters;
            j++) {
         string_builder_add_user_visible_letter(game_string, ld,
@@ -443,14 +443,11 @@ void string_builder_add_game_internal(
       if (i == GAME_EVENT_START_ROW) {
         game_event_index = game_history_get_num_played_events(game_history) - 1;
         game_event = game_history_get_event(game_history, game_event_index);
-        string_builder_add_formatted_string(game_string,
-                                            "Event %d:", game_event_index + 1);
-      } else if (i == GAME_EVENT_START_ROW + 1) {
-        string_builder_add_string(
-            game_string,
+        string_builder_add_formatted_string(
+            game_string, "Event %d (%s):", game_event_index + 1,
             game_history_player_get_name(
                 game_history, game_event_get_player_index(game_event)));
-      } else if (i == GAME_EVENT_START_ROW + 2) {
+      } else if (i == GAME_EVENT_START_ROW + 1) {
         const Rack *player_rack = game_event_get_const_rack(game_event);
         const GameEvent *previous_game_event = NULL;
         switch (game_event_get_type(game_event)) {

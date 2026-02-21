@@ -457,7 +457,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       sample_count % simmer->print_interval == 0) {
     sim_results_print(simmer->thread_control, simmer_worker->game,
                       simmer->sim_results, simmer->max_num_display_plays,
-                      simmer->max_num_display_plies, true);
+                      simmer->max_num_display_plies, true, NULL);
   }
   sim_results_increment_iteration_count(sim_results);
 

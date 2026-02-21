@@ -172,6 +172,7 @@ typedef enum {
   ARG_TOKEN_SHOW_PROMPT,
   ARG_TOKEN_SAVE_SETTINGS,
   ARG_TOKEN_AUTOSAVE_GCG,
+  ARG_TOKEN_SHOW_GAME_WITH_MOVES,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -223,6 +224,7 @@ struct Config {
   bool use_heat_map;
   bool print_boards;
   bool print_on_finish;
+  bool show_game_with_moves;
   bool show_prompt;
   bool save_settings;
   bool autosave_gcg;
@@ -1567,6 +1569,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies whether or not to print a finished message when a "
              "command completes execution.";
       break;
+    case ARG_TOKEN_SHOW_GAME_WITH_MOVES:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether or not to display the game board to the right "
+             "of moves when showing moves or simulation results.";
+      break;
     case ARG_TOKEN_SHOW_PROMPT:
       usages[0] = "<true_or_false>";
       examples[0] = "true";
@@ -1758,6 +1767,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_PRETTY,                      /* pretty */
         ARG_TOKEN_PRINT_BOARDS,                /* printboards */
         ARG_TOKEN_SHPLIES,                     /* shplies */
+        ARG_TOKEN_SHOW_GAME_WITH_MOVES,        /* shwithmoves */
     };
     // Other Options (alphabetical by name)
     static const arg_token_t other_opts[] = {
@@ -2341,7 +2351,7 @@ char *status_sim(Config *config) {
   }
   return sim_results_get_string(
       config->game, sim_results, config->max_num_display_plays, config->shplies,
-      -1, -1, NULL, 0, false, !config->human_readable);
+      -1, -1, NULL, 0, false, !config->human_readable, NULL);
 }
 
 // Gen and Sim
@@ -2772,18 +2782,38 @@ char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
     }
   }
 
+  char *game_board_string = NULL;
+  const char *board_display_start = NULL;
+  if (config->show_game_with_moves) {
+    StringBuilder *game_sb = string_builder_create();
+    string_builder_add_game(config->game, NULL, config->game_string_options,
+                            config->game_history, game_sb);
+    game_board_string = string_builder_dump(game_sb, NULL);
+    string_builder_destroy(game_sb);
+    // The board string starts with a leading '\n'; skip it so the board's
+    // column-header line aligns with the moves header row.
+    board_display_start = game_board_string;
+    if (board_display_start && *board_display_start == '\n') {
+      board_display_start++;
+    }
+  }
+
   char *result = NULL;
   if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
-    result = sim_results_get_string(
-        config->game, config->sim_results, max_num_display_plays,
-        config->shplies, filter_row, filter_col, prefix_mls, prefix_len,
-        exclude_tile_placement_moves, !config->human_readable);
+    result = sim_results_get_string(config->game, config->sim_results,
+                                    max_num_display_plays, config->shplies,
+                                    filter_row, filter_col, prefix_mls,
+                                    prefix_len, exclude_tile_placement_moves,
+                                    !config->human_readable,
+                                    board_display_start);
   } else {
     result = move_list_get_string(
         config->move_list, game_get_board(config->game), config->ld,
         max_num_display_plays, filter_row, filter_col, prefix_mls, prefix_len,
-        exclude_tile_placement_moves, !config->human_readable);
+        exclude_tile_placement_moves, !config->human_readable,
+        board_display_start);
   }
+  free(game_board_string);
   return result;
 }
 
@@ -5579,6 +5609,14 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  // Show game with moves
+
+  config_load_bool(config, ARG_TOKEN_SHOW_GAME_WITH_MOVES,
+                   &config->show_game_with_moves, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // Show prompt
 
   config_load_bool(config, ARG_TOKEN_SHOW_PROMPT, &config->show_prompt,
@@ -6264,6 +6302,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_SHOW_PROMPT, "shprompt", 1, 1);
   arg(ARG_TOKEN_SAVE_SETTINGS, "savesettings", 1, 1);
   arg(ARG_TOKEN_AUTOSAVE_GCG, "autosavegcg", 1, 1);
+  arg(ARG_TOKEN_SHOW_GAME_WITH_MOVES, "shwithmoves", 1, 1);
 
 #undef cmd
 #undef arg
@@ -6313,6 +6352,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->use_heat_map = false;
   config->print_boards = false;
   config->print_on_finish = false;
+  config->show_game_with_moves = true;
   config->show_prompt = true;
   config->save_settings = true;
   config->autosave_gcg = true;
@@ -6724,6 +6764,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PRINT_ON_FINISH:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->print_on_finish);
+      break;
+    case ARG_TOKEN_SHOW_GAME_WITH_MOVES:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->show_game_with_moves);
       break;
     case ARG_TOKEN_SHOW_PROMPT:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,

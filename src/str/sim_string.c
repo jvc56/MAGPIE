@@ -119,13 +119,13 @@ bool string_builder_add_sim_stats_with_display_lock(
   if (!use_ucgi_format) {
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate(""));
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Move"));
-    string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Leave"));
-    string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Score"));
+    string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Lv"));
+    string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Sc"));
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Ig"));
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Wp"));
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Eq"));
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("StEq"));
-    string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Iters"));
+    string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("It"));
     for (int j = 0; j < num_display_plies; j++) {
       string_grid_set_cell(sg, curr_row, curr_col++,
                            get_formatted_string("Ply%d-S", j + 1));
@@ -304,7 +304,8 @@ void string_builder_add_sim_stats(
     StringBuilder *sb, const Game *game, SimResults *sim_results,
     int max_num_display_plays, int max_num_display_plies, int filter_row,
     int filter_col, const MachineLetter *prefix_mls, int prefix_len,
-    bool exclude_tile_placement_moves, bool use_ucgi_format) {
+    bool exclude_tile_placement_moves, bool use_ucgi_format,
+    const char *game_board_string) {
   // Only locks on success
   bool sim_stats_ready =
       sim_results_lock_and_sort_display_simmed_plays(sim_results);
@@ -312,16 +313,28 @@ void string_builder_add_sim_stats(
     string_builder_add_string(sb, "sim results not yet available\n");
     return;
   }
-  string_builder_add_sim_stats_with_display_lock(
-      sb, game, sim_results, max_num_display_plays, max_num_display_plies,
-      filter_row, filter_col, prefix_mls, prefix_len,
-      exclude_tile_placement_moves, use_ucgi_format);
-  if (use_ucgi_format) {
-    string_builder_add_formatted_string(
-        sb, "\ninfo nps %f\n",
-        (double)sim_results_get_node_count(sim_results) /
-            bai_result_get_elapsed_seconds(
-                sim_results_get_bai_result(sim_results)));
+  if (game_board_string && !use_ucgi_format) {
+    StringBuilder *temp_sb = string_builder_create();
+    string_builder_add_sim_stats_with_display_lock(
+        temp_sb, game, sim_results, max_num_display_plays,
+        max_num_display_plies, filter_row, filter_col, prefix_mls, prefix_len,
+        exclude_tile_placement_moves, use_ucgi_format);
+    char *sim_str = string_builder_dump(temp_sb, NULL);
+    string_builder_destroy(temp_sb);
+    string_builder_add_with_board_interleave(sb, sim_str, game_board_string);
+    free(sim_str);
+  } else {
+    string_builder_add_sim_stats_with_display_lock(
+        sb, game, sim_results, max_num_display_plays, max_num_display_plies,
+        filter_row, filter_col, prefix_mls, prefix_len,
+        exclude_tile_placement_moves, use_ucgi_format);
+    if (use_ucgi_format) {
+      string_builder_add_formatted_string(
+          sb, "\ninfo nps %f\n",
+          (double)sim_results_get_node_count(sim_results) /
+              bai_result_get_elapsed_seconds(
+                  sim_results_get_bai_result(sim_results)));
+    }
   }
   sim_results_unlock_display_infos(sim_results);
 }
@@ -331,12 +344,13 @@ char *sim_results_get_string(const Game *game, SimResults *sim_results,
                              int max_num_display_plies, int filter_row,
                              int filter_col, const MachineLetter *prefix_mls,
                              int prefix_len, bool exclude_tile_placement_moves,
-                             bool use_ucgi_format) {
+                             bool use_ucgi_format,
+                             const char *game_board_string) {
   StringBuilder *sb = string_builder_create();
-  string_builder_add_sim_stats(sb, game, sim_results, max_num_display_plays,
-                               max_num_display_plies, filter_row, filter_col,
-                               prefix_mls, prefix_len,
-                               exclude_tile_placement_moves, use_ucgi_format);
+  string_builder_add_sim_stats(
+      sb, game, sim_results, max_num_display_plays, max_num_display_plies,
+      filter_row, filter_col, prefix_mls, prefix_len,
+      exclude_tile_placement_moves, use_ucgi_format, game_board_string);
   char *str = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
   return str;
@@ -344,10 +358,11 @@ char *sim_results_get_string(const Game *game, SimResults *sim_results,
 
 void sim_results_print(ThreadControl *thread_control, const Game *game,
                        SimResults *sim_results, int max_num_display_plays,
-                       int max_num_display_plies, bool use_ucgi_format) {
+                       int max_num_display_plies, bool use_ucgi_format,
+                       const char *game_board_string) {
   char *sim_stats_string = sim_results_get_string(
       game, sim_results, max_num_display_plays, max_num_display_plies, -1, -1,
-      NULL, 0, false, use_ucgi_format);
+      NULL, 0, false, use_ucgi_format, game_board_string);
   thread_control_print(thread_control, sim_stats_string);
   free(sim_stats_string);
 }
