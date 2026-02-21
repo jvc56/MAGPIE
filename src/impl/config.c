@@ -1046,12 +1046,11 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "11d ANTIQuES should have played $1 instead of $3";
       examples[2] = "ex ABC should have passed";
       examples[3] = "pass should have played $1";
-      text =
-          "Commits the move and adds a note to it in a single command. The "
-          "commit arguments are identical to the commit command (except the "
-          "optional rack-after-exchange is not supported). The note follows "
-          "the commit arguments and may use $N to interpolate the N-th move "
-          "from the current move list by its 1-indexed position.";
+      text = "Commits the move and adds a note to it in a single command. The "
+             "commit arguments are identical to the commit command (except the "
+             "optional rack-after-exchange is not supported). The note follows "
+             "the commit arguments and may use $N to interpolate the N-th move "
+             "from the current move list by its 1-indexed position.";
       break;
     case ARG_TOKEN_TOP_COMMIT:
       usages[0] = "[<rack>]";
@@ -3629,7 +3628,8 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
 char *impl_commit_with_pos_args(Config *config, ErrorStack *error_stack,
                                 const char *commit_pos_arg_1,
                                 const char *commit_pos_arg_2,
-                                const char *commit_pos_arg_3) {
+                                const char *commit_pos_arg_3,
+                                const bool autosave) {
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
                      string_duplicate("cannot commit a move without lexicon"));
@@ -3691,11 +3691,13 @@ char *impl_commit_with_pos_args(Config *config, ErrorStack *error_stack,
     draw_to_full_rack(config->game, 1 - noncommit_player_index);
   }
 
-  impl_export_if_autosave(config, error_stack);
+  if (autosave) {
+    impl_export_if_autosave(config, error_stack);
 
-  if (!error_stack_is_empty(error_stack)) {
-    config_restore_game_and_history(config);
-    return return_str;
+    if (!error_stack_is_empty(error_stack)) {
+      config_restore_game_and_history(config);
+      return return_str;
+    }
   }
 
   return return_str;
@@ -3709,7 +3711,7 @@ char *impl_commit(Config *config, ErrorStack *error_stack) {
   const char *commit_pos_arg_3 =
       config_get_parg_value(config, ARG_TOKEN_COMMIT, 2);
   return impl_commit_with_pos_args(config, error_stack, commit_pos_arg_1,
-                                   commit_pos_arg_2, commit_pos_arg_3);
+                                   commit_pos_arg_2, commit_pos_arg_3, true);
 }
 
 void execute_commit(Config *config, ErrorStack *error_stack) {
@@ -3757,9 +3759,10 @@ static char *build_interpolated_note(Config *config, const char *raw_note,
         string_builder_destroy(sb);
         return NULL;
       }
-      string_builder_add_move(sb, game_get_board(config->game),
-                              move_list_get_move(config->move_list, move_idx - 1),
-                              config->ld, false);
+      string_builder_add_move(
+          sb, game_get_board(config->game),
+          move_list_get_move(config->move_list, move_idx - 1), config->ld,
+          false);
     } else {
       string_builder_add_char(sb, *p);
       p++;
@@ -3776,6 +3779,8 @@ char *impl_cnote(Config *config, ErrorStack *error_stack) {
                      string_duplicate("cannot commit a move without lexicon"));
     return empty_string();
   }
+
+  config_init_game(config);
 
   const char *raw = config_get_parg_value(config, ARG_TOKEN_CNOTE, 0);
   StringSplitter *split = split_string_by_whitespace(raw, true);
@@ -3804,6 +3809,13 @@ char *impl_cnote(Config *config, ErrorStack *error_stack) {
   // before committing (commit clears the move list). Keep split alive until
   // after the commit since commit_arg_1 and commit_arg_2 point into it.
   char *raw_note = string_splitter_join(split, note_start_idx, num_items, " ");
+  if (is_string_empty_or_whitespace(raw_note)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
+                     string_duplicate("missing note for cnote"));
+    free(raw_note);
+    string_splitter_destroy(split);
+    return empty_string();
+  }
   char *note = build_interpolated_note(config, raw_note, error_stack);
   free(raw_note);
   if (!note) {
@@ -3812,9 +3824,8 @@ char *impl_cnote(Config *config, ErrorStack *error_stack) {
   }
 
   // Commit the move (this clears the move list).
-  char *result =
-      impl_commit_with_pos_args(config, error_stack, commit_arg_1,
-                                commit_arg_2, NULL);
+  char *result = impl_commit_with_pos_args(config, error_stack, commit_arg_1,
+                                           commit_arg_2, NULL, false);
   string_splitter_destroy(split);
   if (!error_stack_is_empty(error_stack)) {
     free(note);
@@ -3871,7 +3882,7 @@ char *impl_top_commit(Config *config, ErrorStack *error_stack) {
     }
     impl_move_gen_override_record_type(config, MOVE_RECORD_BEST);
   }
-  return impl_commit_with_pos_args(config, error_stack, "1", NULL, NULL);
+  return impl_commit_with_pos_args(config, error_stack, "1", NULL, NULL, true);
 }
 
 void execute_top_commit(Config *config, ErrorStack *error_stack) {
