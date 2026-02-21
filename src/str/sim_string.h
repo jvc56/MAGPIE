@@ -17,7 +17,8 @@ char *sim_results_get_string(const Game *game, SimResults *sim_results,
                              int max_num_display_plays,
                              int max_num_display_plies, int filter_row,
                              int filter_col, const MachineLetter *prefix_mls,
-                             int prefix_len, bool use_ucgi_format);
+                             int prefix_len, bool exclude_tile_placement_moves,
+                             bool use_ucgi_format);
 void sim_results_print(ThreadControl *thread_control, const Game *game,
                        SimResults *sim_results, int max_num_display_plays,
                        int max_num_display_plies, bool use_ucgi_format);

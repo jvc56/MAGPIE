@@ -79,12 +79,12 @@ bool string_builder_add_sim_stats_with_display_lock(
     StringBuilder *sb, const Game *game, const SimResults *sim_results,
     int max_num_display_plays, int max_num_display_plies, int filter_row,
     int filter_col, const MachineLetter *prefix_mls, int prefix_len,
-    bool use_ucgi_format) {
+    bool exclude_tile_placement_moves, bool use_ucgi_format) {
   const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
   const LetterDistribution *ld = game_get_ld(game);
   const Board *board = game_get_board(game);
-  const bool has_filter =
-      filter_row >= 0 || filter_col >= 0 || prefix_len > 0;
+  const bool has_filter = filter_row >= 0 || filter_col >= 0 ||
+                          prefix_len > 0 || exclude_tile_placement_moves;
   int num_display_plays;
   if (has_filter) {
     num_display_plays = 0;
@@ -92,7 +92,8 @@ bool string_builder_add_sim_stats_with_display_lock(
       const Move *move = simmed_play_get_move(
           sim_results_get_display_simmed_play(sim_results, i));
       if (move_matches_filters(move, filter_row, filter_col, prefix_mls,
-                               prefix_len, board)) {
+                               prefix_len, exclude_tile_placement_moves,
+                               board)) {
         num_display_plays++;
       }
     }
@@ -145,8 +146,9 @@ bool string_builder_add_sim_stats_with_display_lock(
        i++) {
     const SimmedPlay *sp = sim_results_get_display_simmed_play(sim_results, i);
     const Move *move = simmed_play_get_move(sp);
-    if (has_filter && !move_matches_filters(move, filter_row, filter_col,
-                                            prefix_mls, prefix_len, board)) {
+    if (has_filter && !move_matches_filters(
+                          move, filter_row, filter_col, prefix_mls, prefix_len,
+                          exclude_tile_placement_moves, board)) {
       continue;
     }
     display_count++;
@@ -298,13 +300,11 @@ bool string_builder_add_sim_stats_with_display_lock(
   return true;
 }
 
-void string_builder_add_sim_stats(StringBuilder *sb, const Game *game,
-                                  SimResults *sim_results,
-                                  int max_num_display_plays,
-                                  int max_num_display_plies, int filter_row,
-                                  int filter_col,
-                                  const MachineLetter *prefix_mls,
-                                  int prefix_len, bool use_ucgi_format) {
+void string_builder_add_sim_stats(
+    StringBuilder *sb, const Game *game, SimResults *sim_results,
+    int max_num_display_plays, int max_num_display_plies, int filter_row,
+    int filter_col, const MachineLetter *prefix_mls, int prefix_len,
+    bool exclude_tile_placement_moves, bool use_ucgi_format) {
   // Only locks on success
   bool sim_stats_ready =
       sim_results_lock_and_sort_display_simmed_plays(sim_results);
@@ -314,7 +314,8 @@ void string_builder_add_sim_stats(StringBuilder *sb, const Game *game,
   }
   string_builder_add_sim_stats_with_display_lock(
       sb, game, sim_results, max_num_display_plays, max_num_display_plies,
-      filter_row, filter_col, prefix_mls, prefix_len, use_ucgi_format);
+      filter_row, filter_col, prefix_mls, prefix_len,
+      exclude_tile_placement_moves, use_ucgi_format);
   if (use_ucgi_format) {
     string_builder_add_formatted_string(
         sb, "\ninfo nps %f\n",
@@ -329,11 +330,13 @@ char *sim_results_get_string(const Game *game, SimResults *sim_results,
                              int max_num_display_plays,
                              int max_num_display_plies, int filter_row,
                              int filter_col, const MachineLetter *prefix_mls,
-                             int prefix_len, bool use_ucgi_format) {
+                             int prefix_len, bool exclude_tile_placement_moves,
+                             bool use_ucgi_format) {
   StringBuilder *sb = string_builder_create();
   string_builder_add_sim_stats(sb, game, sim_results, max_num_display_plays,
                                max_num_display_plies, filter_row, filter_col,
-                               prefix_mls, prefix_len, use_ucgi_format);
+                               prefix_mls, prefix_len,
+                               exclude_tile_placement_moves, use_ucgi_format);
   char *str = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
   return str;
@@ -342,10 +345,9 @@ char *sim_results_get_string(const Game *game, SimResults *sim_results,
 void sim_results_print(ThreadControl *thread_control, const Game *game,
                        SimResults *sim_results, int max_num_display_plays,
                        int max_num_display_plies, bool use_ucgi_format) {
-  char *sim_stats_string =
-      sim_results_get_string(game, sim_results, max_num_display_plays,
-                             max_num_display_plies, -1, -1, NULL, 0,
-                             use_ucgi_format);
+  char *sim_stats_string = sim_results_get_string(
+      game, sim_results, max_num_display_plays, max_num_display_plies, -1, -1,
+      NULL, 0, false, use_ucgi_format);
   thread_control_print(thread_control, sim_stats_string);
   free(sim_stats_string);
 }

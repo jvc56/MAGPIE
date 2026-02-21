@@ -1770,6 +1770,8 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "shm 8d", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shm BAR", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shm 8e BAR", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shm -", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shm - AB", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "t", ERROR_STATUS_SUCCESS);
   // No rack was given to the top commit command, so it should commit the best
   // simmed play 8D BARCHAN should sim best

@@ -1084,11 +1084,22 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[2] = "<coord>";
       usages[3] = "<prefix>";
       usages[4] = "<coord> <prefix>";
+      usages[5] = "-";
+      usages[6] = "- <prefix>";
+      examples[0] = "";
+      examples[1] = "10";
+      examples[2] = "D12";
+      examples[3] = "4e";
+      examples[4] = "MUZ";
+      examples[5] = "8B MUZ";
+      examples[6] = "-";
+      examples[7] = "- TUV";
       text = "Shows the moves or the sim results if available. Optionally "
-             "takes a max number of plays, a coordinate (e.g. d12) to show "
+             "takes a max number of plays, a coordinate to show "
              "only moves at that square, or a word prefix to show only moves "
              "starting with those letters. A coordinate and prefix may be "
-             "combined.";
+             "combined. Use '-' in place of coordinates to show only "
+             "exchange and pass moves.";
       break;
     case ARG_TOKEN_SHOW_INFERENCE:
       usages[0] = "";
@@ -2159,9 +2170,9 @@ char *status_sim(Config *config) {
   if (!sim_results) {
     return string_duplicate("simmer has not been initialized");
   }
-  return sim_results_get_string(config->game, sim_results,
-                                config->max_num_display_plays, config->shplies,
-                                -1, -1, NULL, 0, !config->human_readable);
+  return sim_results_get_string(
+      config->game, sim_results, config->max_num_display_plays, config->shplies,
+      -1, -1, NULL, 0, false, !config->human_readable);
 }
 
 // Gen and Sim
@@ -2527,6 +2538,7 @@ char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
   int max_num_display_plays = config->max_num_display_plays;
   int filter_row = -1;
   int filter_col = -1;
+  bool exclude_tile_placement_moves = false;
   const char *prefix_str = NULL;
 
   if (arg0) {
@@ -2547,6 +2559,11 @@ char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
       }
       filter_row = coord_row;
       filter_col = coord_col;
+      if (arg1) {
+        prefix_str = arg1;
+      }
+    } else if (strings_equal(arg0, "-")) {
+      exclude_tile_placement_moves = true;
       if (arg1) {
         prefix_str = arg1;
       }
@@ -2591,12 +2608,12 @@ char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
     result = sim_results_get_string(
         config->game, config->sim_results, max_num_display_plays,
         config->shplies, filter_row, filter_col, prefix_mls, prefix_len,
-        !config->human_readable);
+        exclude_tile_placement_moves, !config->human_readable);
   } else {
     result = move_list_get_string(
         config->move_list, game_get_board(config->game), config->ld,
         max_num_display_plays, filter_row, filter_col, prefix_mls, prefix_len,
-        !config->human_readable);
+        exclude_tile_placement_moves, !config->human_readable);
   }
   return result;
 }

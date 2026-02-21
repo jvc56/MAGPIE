@@ -233,11 +233,16 @@ void string_builder_add_move_leave(StringBuilder *sb, const Rack *rack,
 }
 
 // Board can be null
-bool move_matches_filters(const Move *move, int filter_row,
-                                 int filter_col,
-                                 const MachineLetter *prefix_mls,
-                                 int prefix_len, const Board *board) {
-  const bool is_exchange = move_get_type(move) == GAME_EVENT_EXCHANGE;
+bool move_matches_filters(const Move *move, int filter_row, int filter_col,
+                          const MachineLetter *prefix_mls, int prefix_len,
+                          bool exclude_tile_placement_moves,
+                          const Board *board) {
+  const game_event_t move_type = move_get_type(move);
+  if (exclude_tile_placement_moves &&
+      move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return false;
+  }
+  const bool is_exchange = move_type == GAME_EVENT_EXCHANGE;
   if ((filter_row >= 0 &&
        (move_get_row_start(move) != filter_row || is_exchange)) ||
       (filter_col >= 0 &&
@@ -277,14 +282,13 @@ bool move_matches_filters(const Move *move, int filter_row,
 }
 
 // Board can be null
-void string_builder_add_move_list(StringBuilder *string_builder,
-                                  const MoveList *move_list, const Board *board,
-                                  const LetterDistribution *ld,
-                                  int max_num_display_plays, int filter_row,
-                                  int filter_col,
-                                  const MachineLetter *prefix_mls,
-                                  int prefix_len, bool use_ucgi_format) {
-  const bool has_filter = filter_row >= 0 || filter_col >= 0 || prefix_len > 0;
+void string_builder_add_move_list(
+    StringBuilder *string_builder, const MoveList *move_list,
+    const Board *board, const LetterDistribution *ld, int max_num_display_plays,
+    int filter_row, int filter_col, const MachineLetter *prefix_mls,
+    int prefix_len, bool exclude_tile_placement_moves, bool use_ucgi_format) {
+  const bool has_filter = filter_row >= 0 || filter_col >= 0 ||
+                          prefix_len > 0 || exclude_tile_placement_moves;
   const int num_moves = move_list_get_count(move_list);
 
   int num_moves_to_display;
@@ -292,7 +296,8 @@ void string_builder_add_move_list(StringBuilder *string_builder,
     num_moves_to_display = 0;
     for (int i = 0; i < num_moves; i++) {
       if (move_matches_filters(move_list_get_move(move_list, i), filter_row,
-                               filter_col, prefix_mls, prefix_len, board)) {
+                               filter_col, prefix_mls, prefix_len,
+                               exclude_tile_placement_moves, board)) {
         num_moves_to_display++;
       }
     }
@@ -333,8 +338,9 @@ void string_builder_add_move_list(StringBuilder *string_builder,
   int display_count = 0;
   for (int i = 0; i < num_moves && display_count < num_moves_to_display; i++) {
     const Move *move = move_list_get_move(move_list, i);
-    if (has_filter && !move_matches_filters(move, filter_row, filter_col,
-                                            prefix_mls, prefix_len, board)) {
+    if (has_filter && !move_matches_filters(
+                          move, filter_row, filter_col, prefix_mls, prefix_len,
+                          exclude_tile_placement_moves, board)) {
       continue;
     }
     display_count++;
@@ -390,11 +396,12 @@ char *move_list_get_string(const MoveList *move_list, const Board *board,
                            const LetterDistribution *ld,
                            int max_num_display_plays, int filter_row,
                            int filter_col, const MachineLetter *prefix_mls,
-                           int prefix_len, bool use_ucgi_format) {
+                           int prefix_len, bool exclude_tile_placement_moves,
+                           bool use_ucgi_format) {
   StringBuilder *sb = string_builder_create();
   string_builder_add_move_list(sb, move_list, board, ld, max_num_display_plays,
                                filter_row, filter_col, prefix_mls, prefix_len,
-                               use_ucgi_format);
+                               exclude_tile_placement_moves, use_ucgi_format);
   char *move_list_string = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
   return move_list_string;
