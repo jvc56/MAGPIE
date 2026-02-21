@@ -329,11 +329,13 @@ void string_builder_add_sim_stats(
         filter_row, filter_col, prefix_mls, prefix_len,
         exclude_tile_placement_moves, use_ucgi_format);
     if (use_ucgi_format) {
-      string_builder_add_formatted_string(
-          sb, "\ninfo nps %f\n",
-          (double)sim_results_get_node_count(sim_results) /
-              bai_result_get_elapsed_seconds(
-                  sim_results_get_bai_result(sim_results)));
+      double elapsed = bai_result_get_elapsed_seconds(
+          sim_results_get_bai_result(sim_results));
+      double nps =
+          elapsed > 0.0
+              ? (double)sim_results_get_node_count(sim_results) / elapsed
+              : 0.0;
+      string_builder_add_formatted_string(sb, "\ninfo nps %f\n", nps);
     }
   }
   sim_results_unlock_display_infos(sim_results);

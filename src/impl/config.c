@@ -2800,12 +2800,11 @@ char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
 
   char *result = NULL;
   if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
-    result = sim_results_get_string(config->game, config->sim_results,
-                                    max_num_display_plays, config->shplies,
-                                    filter_row, filter_col, prefix_mls,
-                                    prefix_len, exclude_tile_placement_moves,
-                                    !config->human_readable,
-                                    board_display_start);
+    result = sim_results_get_string(
+        config->game, config->sim_results, max_num_display_plays,
+        config->shplies, filter_row, filter_col, prefix_mls, prefix_len,
+        exclude_tile_placement_moves, !config->human_readable,
+        board_display_start);
   } else {
     result = move_list_get_string(
         config->move_list, game_get_board(config->game), config->ld,
@@ -3866,6 +3865,10 @@ char *impl_cnote(Config *config, ErrorStack *error_stack) {
   game_history_set_note_for_most_recent_event(config->game_history, note);
   free(note);
   impl_export_if_autosave(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    config_restore_game_and_history(config);
+    return result;
+  }
   return result;
 }
 

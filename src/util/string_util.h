@@ -114,7 +114,7 @@ void string_builder_add_string_grid(StringBuilder *sb, const StringGrid *sg,
 
 // Returns the number of terminal columns a string occupies, correctly handling
 // ANSI escape sequences (0 columns) and Unicode wide characters (2 columns).
-int visual_string_length(const char *str);
+size_t visual_string_length(const char *str);
 
 // Interleaves board_string (left column) with content (right column), padding
 // each board line to the maximum visual width so the content column is aligned.
