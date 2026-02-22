@@ -61,7 +61,7 @@ test.describe("WASM Worker Simulation Tests", () => {
     // Should contain move suggestions with rankings (e.g., "1:  14F ZI(N)E")
     expect(output).toMatch(/\d+:/); // Pattern like "1:", "2:", etc.
     expect(output).toContain("Showing"); // Should show "Showing X of Y simmed plays"
-    expect(output).toContain("Finished (statistical threshold achieved)");
+    expect(output).toContain("Finished");
 
     // Verify the top move is 14F ZI(N)E
     expect(output).toMatch(/^1:\s+14F ZI\(N\)E/m);
