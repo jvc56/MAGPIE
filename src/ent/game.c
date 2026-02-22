@@ -56,6 +56,11 @@ struct Game {
   // Owned by the caller
   const LetterDistribution *ld;
   game_variant_t variant;
+  // Optional override KWGs for cross-set generation (e.g., word-pruned KWGs
+  // in the endgame solver). When non-NULL, cross-set computation uses these
+  // instead of the player's full KWG. Not owned by Game.
+  const KWG *override_kwgs[2];
+  dual_lexicon_mode_t dual_lexicon_mode;
   // Backups
   MinimalGameBackup *sim_game_backups[MAX_SEARCH_DEPTH];
   int backup_cursor;
@@ -213,6 +218,33 @@ static inline void traverse_backwards_add_to_rack(const Board *board, int row,
   }
 }
 
+void game_set_override_kwgs(Game *game, const KWG *kwg0, const KWG *kwg1,
+                            dual_lexicon_mode_t mode) {
+  game->override_kwgs[0] = kwg0;
+  game->override_kwgs[1] = kwg1;
+  game->dual_lexicon_mode = mode;
+}
+
+void game_clear_override_kwgs(Game *game) {
+  game->override_kwgs[0] = NULL;
+  game->override_kwgs[1] = NULL;
+  game->dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT;
+}
+
+// Returns the KWG to use for cross-set generation at the given cross_set_index.
+// If override KWGs are set, uses those (respecting dual-lexicon mode).
+// Otherwise falls back to the player's standard KWG.
+static inline const KWG *get_kwg_for_cross_set(const Game *game,
+                                               int cross_set_index) {
+  if (game->override_kwgs[0] != NULL) {
+    if (game->dual_lexicon_mode == DUAL_LEXICON_MODE_IGNORANT) {
+      return game->override_kwgs[0];
+    }
+    return game->override_kwgs[cross_set_index];
+  }
+  return player_get_kwg(game_get_player(game, cross_set_index));
+}
+
 static inline void game_gen_alpha_cross_set(const Game *game, int row, int col,
                                             int dir, int cross_set_index) {
   if (!board_is_position_in_bounds(row, col)) {
@@ -253,7 +285,7 @@ static inline void game_gen_alpha_cross_set(const Game *game, int row, int col,
     score += traverse_backwards_for_score(board, ld, row, right_col);
   }
 
-  const KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
+  const KWG *kwg = get_kwg_for_cross_set(game, cross_set_index);
 
   board_set_cross_set_with_blank(
       board, row, col, dir, cross_set_index,
@@ -282,7 +314,7 @@ static inline void game_gen_classic_cross_set(const Game *game, int row,
     return;
   }
 
-  const KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
+  const KWG *kwg = get_kwg_for_cross_set(game, cross_set_index);
   const uint32_t kwg_root = kwg_get_root_node_index(kwg);
   const LetterDistribution *ld = game_get_ld(game);
 
@@ -517,6 +549,9 @@ Game *game_create(const GameArgs *game_args) {
   game->max_scoreless_turns = MAX_SCORELESS_TURNS;
   game->game_end_reason = GAME_END_REASON_NONE;
   game->variant = game_args->game_variant;
+  game->override_kwgs[0] = NULL;
+  game->override_kwgs[1] = NULL;
+  game->dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT;
 
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
     game->sim_game_backups[i] = NULL;
@@ -548,6 +583,9 @@ Game *game_duplicate(const Game *game) {
   new_game->max_scoreless_turns = game->max_scoreless_turns;
   new_game->game_end_reason = game->game_end_reason;
   new_game->variant = game->variant;
+  new_game->override_kwgs[0] = game->override_kwgs[0];
+  new_game->override_kwgs[1] = game->override_kwgs[1];
+  new_game->dual_lexicon_mode = game->dual_lexicon_mode;
 
   // note: game backups must be explicitly handled by the caller if they want
   // game copies to have backups.
@@ -578,6 +616,9 @@ void game_copy(Game *dst, const Game *src) {
   dst->max_scoreless_turns = src->max_scoreless_turns;
   dst->game_end_reason = src->game_end_reason;
   dst->variant = src->variant;
+  dst->override_kwgs[0] = src->override_kwgs[0];
+  dst->override_kwgs[1] = src->override_kwgs[1];
+  dst->dual_lexicon_mode = src->dual_lexicon_mode;
   dst->backup_cursor = 0;
   dst->backup_mode = BACKUP_MODE_OFF;
 }

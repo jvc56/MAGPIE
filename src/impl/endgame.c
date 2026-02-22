@@ -9,6 +9,7 @@
 #include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
+#include "../def/players_data_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
@@ -104,7 +105,9 @@ struct EndgameSolver {
   bool use_heuristics;
   PVLine principal_variation;
 
-  KWG *pruned_kwg;
+  KWG *pruned_kwgs[2];
+  dual_lexicon_mode_t dual_lexicon_mode;
+  bool skip_pruned_cross_sets;
 
   int solve_multiple_variations;
   int requested_plies;
@@ -385,12 +388,39 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->initial_spread =
       equity_to_int(player_get_score(player) - player_get_score(opponent));
 
-  kwg_destroy(es->pruned_kwg);
-  DictionaryWordList *possible_word_list = dictionary_word_list_create();
-  generate_possible_words(endgame_args->game, NULL, possible_word_list);
-  es->pruned_kwg = make_kwg_from_words_small(
-      possible_word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
-  dictionary_word_list_destroy(possible_word_list);
+  kwg_destroy(es->pruned_kwgs[0]);
+  kwg_destroy(es->pruned_kwgs[1]);
+  es->pruned_kwgs[0] = NULL;
+  es->pruned_kwgs[1] = NULL;
+
+  es->dual_lexicon_mode = endgame_args->dual_lexicon_mode;
+  // INFORMED mode with shared KWGs is meaningless (both players have the same
+  // lexicon). Coerce to IGNORANT to avoid building only pruned_kwgs[0] while
+  // get_kwg_for_cross_set would try to dereference pruned_kwgs[1] as NULL.
+  bool shared_kwg =
+      game_get_data_is_shared(endgame_args->game, PLAYERS_DATA_TYPE_KWG);
+  if (es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED && shared_kwg) {
+    es->dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT;
+  }
+  es->skip_pruned_cross_sets = endgame_args->skip_pruned_cross_sets;
+  bool create_separate_kwgs =
+      (es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED) && !shared_kwg;
+
+  // Generate pruned KWG(s) from the set of possible words on this board.
+  // In IGNORANT mode (or shared-KWG), one pruned KWG is used for everything.
+  // In INFORMED mode with different lexicons, each player index gets its own
+  // pruned KWG so that cross-set index i uses the pruned KWG derived from
+  // player i's lexicon.
+  for (int player_idx = 0; player_idx < (create_separate_kwgs ? 2 : 1);
+       player_idx++) {
+    const KWG *full_kwg =
+        player_get_kwg(game_get_player(endgame_args->game, player_idx));
+    DictionaryWordList *word_list = dictionary_word_list_create();
+    generate_possible_words(endgame_args->game, full_kwg, word_list);
+    es->pruned_kwgs[player_idx] = make_kwg_from_words_small(
+        word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
+    dictionary_word_list_destroy(word_list);
+  }
 
   // Initialize ABDADA synchronization
   atomic_store(&es->search_complete, 0);
@@ -425,7 +455,8 @@ void endgame_solver_destroy(EndgameSolver *es) {
     return;
   }
   transposition_table_destroy(es->transposition_table);
-  kwg_destroy(es->pruned_kwg);
+  kwg_destroy(es->pruned_kwgs[0]);
+  kwg_destroy(es->pruned_kwgs[1]);
   free(es);
 }
 
@@ -440,6 +471,14 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
   solver_worker->game_copy = game_duplicate(solver->game);
   game_set_endgame_solving_mode(solver_worker->game_copy);
   game_set_backup_mode(solver_worker->game_copy, BACKUP_MODE_SIMULATION);
+
+  // Set override KWGs so cross-set computation uses the pruned lexicon
+  if (!solver->skip_pruned_cross_sets) {
+    game_set_override_kwgs(solver_worker->game_copy, solver->pruned_kwgs[0],
+                           solver->pruned_kwgs[1], solver->dual_lexicon_mode);
+    // Regenerate initial cross-sets using the pruned KWGs
+    game_gen_all_cross_sets(solver_worker->game_copy);
+  }
   solver_worker->move_list =
       move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
 
@@ -474,6 +513,17 @@ void solver_worker_destroy(EndgameSolverWorker *solver_worker) {
   free(solver_worker);
 }
 
+// Returns the pruned KWG for the given player index.
+// In shared-KWG mode, only pruned_kwgs[0] exists, so it is always returned.
+// In non-shared mode, each player index maps to its own pruned KWG.
+static inline const KWG *solver_get_pruned_kwg(const EndgameSolver *solver,
+                                               int player_index) {
+  if (solver->pruned_kwgs[1] == NULL) {
+    return solver->pruned_kwgs[0];
+  }
+  return solver->pruned_kwgs[player_index];
+}
+
 int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
   // stm means side to move
   // Lazy cross-set generation: only compute if not already valid
@@ -497,13 +547,15 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
       .move_list = worker->move_list,
       .move_record_type = MOVE_RECORD_ALL_SMALL,
       .move_sort_type = MOVE_SORT_SCORE,
-      .override_kwg = worker->solver->pruned_kwg,
+      .override_kwg = solver_get_pruned_kwg(
+          worker->solver, game_get_player_on_turn_index(worker->game_copy)),
       .thread_index = worker->thread_index,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves(&args);
+
   SmallMove *arena_small_moves = (SmallMove *)arena_alloc(
       worker->small_move_arena, worker->move_list->count * sizeof(SmallMove));
   for (int i = 0; i < worker->move_list->count; i++) {
@@ -841,7 +893,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
         .move_list = worker->move_list,
         .move_record_type = MOVE_RECORD_ALL_SMALL,
         .move_sort_type = MOVE_SORT_SCORE,
-        .override_kwg = worker->solver->pruned_kwg,
+        .override_kwg = solver_get_pruned_kwg(
+            worker->solver, game_get_player_on_turn_index(worker->game_copy)),
         .thread_index = worker->thread_index,
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
@@ -1028,8 +1081,9 @@ static int negamax_generate_and_sort_moves(EndgameSolverWorker *worker,
   int nplays;
   if (worker->solver->use_heuristics) {
     *opp_stuck_frac = compute_opp_stuck_fraction(
-        worker->game_copy, worker->move_list, worker->solver->pruned_kwg,
-        opp_idx, worker->thread_index, &opp_tiles_bv);
+        worker->game_copy, worker->move_list,
+        solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx,
+        worker->thread_index, &opp_tiles_bv);
     nplays = generate_stm_plays(worker, depth);
   } else {
     nplays = generate_stm_plays(worker, depth);
@@ -1651,8 +1705,9 @@ static float compute_initial_stuck_fraction(const EndgameSolver *solver,
   int opp_idx = 1 - solver->solving_player;
   Game *root_game = game_duplicate(game);
   MoveList *tmp_ml = move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
-  float frac = compute_opp_stuck_fraction(root_game, tmp_ml, solver->pruned_kwg,
-                                          opp_idx, 0, NULL);
+  float frac = compute_opp_stuck_fraction(
+      root_game, tmp_ml, solver_get_pruned_kwg(solver, opp_idx), opp_idx, 0,
+      NULL);
   small_move_list_destroy(tmp_ml);
   game_destroy(root_game);
   return frac;

@@ -5,6 +5,7 @@
 #include "../def/players_data_defs.h"
 #include "bag.h"
 #include "board.h"
+#include "kwg.h"
 #include "letter_distribution.h"
 #include "player.h"
 #include <stdbool.h>
@@ -62,5 +63,12 @@ void game_set_starting_player_index(Game *game, int starting_player_index);
 void game_gen_all_cross_sets(const Game *game);
 void game_gen_cross_set(const Game *game, int row, int col, int dir,
                         int cross_set_index);
+
+// Override KWGs for cross-set generation (e.g., word-pruned KWGs in endgame).
+// kwg0/kwg1 are not owned by Game. In IGNORANT mode, kwg0 is used for both
+// cross-set indices. In INFORMED mode, kwg0/kwg1 are used for indices 0/1.
+void game_set_override_kwgs(Game *game, const KWG *kwg0, const KWG *kwg1,
+                            dual_lexicon_mode_t mode);
+void game_clear_override_kwgs(Game *game);
 
 #endif
