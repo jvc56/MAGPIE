@@ -821,7 +821,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
                                     const bool short_form) {
   const char *examples[10] = {NULL};
   const char *usages[10] = {NULL};
-  const char *text = NULL;
+  const char *text = "";
   bool is_hotkey = false;
   const char *name = NULL;
   const char *shortest_unambiguous_name = NULL;
@@ -1613,12 +1613,6 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     string_builder_add_char(sb, ',');
     string_builder_add_string(sb, name);
     string_builder_add_string(sb, " - ");
-    if (is_string_empty_or_null(text)) {
-      // To silence the tidier warning about the text variable potentially being
-      // uninitialized, even though it is guaranteed to be initialized in this
-      // branch since every case in the switch statement initializes it.
-      text = "";
-    }
     const char *dot = strchr(text, '.');
     const int text_len = dot ? (int)(dot - text + 1) : (int)strlen(text);
     string_builder_add_formatted_string(sb, "%.*s\n", text_len, text);
@@ -3781,7 +3775,7 @@ char *str_api_commit(Config *config, ErrorStack *error_stack) {
 // replaced by the string representation of the N-th move (1-indexed) in the
 // current move list. Returns NULL and pushes an error if any $N reference is
 // invalid; otherwise returns the caller-owned interpolated string.
-static char *build_interpolated_note(Config *config, const char *raw_note,
+static char *build_interpolated_note(const Config *config, const char *raw_note,
                                      ErrorStack *error_stack) {
   StringBuilder *sb = string_builder_create();
   const char *p = raw_note;
