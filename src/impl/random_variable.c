@@ -327,6 +327,7 @@ typedef struct Simmer {
   int num_threads;
   int print_interval;
   int max_num_display_plays;
+  int max_num_display_plies;
   ThreadControl *thread_control;
   SimResults *sim_results;
 } Simmer;
@@ -455,7 +456,8 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   if (simmer->print_interval > 0 &&
       sample_count % simmer->print_interval == 0) {
     sim_results_print(simmer->thread_control, simmer_worker->game,
-                      simmer->sim_results, simmer->max_num_display_plays, true);
+                      simmer->sim_results, simmer->max_num_display_plays,
+                      simmer->max_num_display_plies, true, NULL);
   }
   sim_results_increment_iteration_count(sim_results);
 
@@ -510,6 +512,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->num_threads = sim_args->num_threads;
   simmer->print_interval = sim_args->print_interval;
   simmer->max_num_display_plays = sim_args->max_num_display_plays;
+  simmer->max_num_display_plies = sim_args->max_num_display_plies;
 
   simmer->workers =
       malloc_or_die((sizeof(SimmerWorker *)) * (simmer->num_threads));

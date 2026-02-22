@@ -33,12 +33,14 @@
 // Display formatting constants
 enum {
   RACK_DISPLAY_WIDTH = RACK_SIZE + 2,
-  UNSEEN_LETTER_ROWS = 5,
-  MIN_UNSEEN_LETTERS_PER_ROW = 20,
+  UNSEEN_LETTER_ROWS = 10,
+  MIN_UNSEEN_LETTERS_PER_ROW = 10,
   MAX_MOVES = 20,
   UNSEEN_START_ROW = 1,
-  GAME_EVENT_START_ROW = 10,
+  GAME_EVENT_START_ROW = 12,
   FINAL_PASS_PROMPT_ROW = BOARD_DIM - 1,
+  COMMENT_MAX_LINE_WIDTH = 50,
+  COMMENT_INDENT_SPACES = 3,
 };
 
 bool should_print_escape_codes(const GameStringOptions *game_string_options) {
@@ -281,6 +283,52 @@ void string_builder_add_move_with_rank_and_equity(const Game *game,
   string_builder_add_equity(game_string, move_get_equity(move), "%0.2f");
 }
 
+void string_builder_add_word_wrapped_comment(StringBuilder *game_string,
+                                             const char *comment) {
+  if (!comment || comment[0] == '\0') {
+    return;
+  }
+  int line_len = 0;
+  const char *p = comment;
+  while (*p != '\0') {
+    // Find the end of the current word
+    const char *word_start = p;
+    while (*p != '\0' && *p != ' ' && *p != '\n') {
+      p++;
+    }
+    int word_len = (int)(p - word_start);
+    // Handle explicit newlines in the comment
+    if (word_len == 0 && *p == '\n') {
+      string_builder_add_char(game_string, '\n');
+      line_len = 0;
+      p++;
+      continue;
+    }
+    // Wrap if the word won't fit on the current line
+    if (line_len > 0 && line_len + 1 + word_len > COMMENT_MAX_LINE_WIDTH) {
+      string_builder_add_char(game_string, '\n');
+      line_len = 0;
+    }
+    // Indent the start of each line
+    if (line_len == 0) {
+      string_builder_add_spaces(game_string, COMMENT_INDENT_SPACES);
+      line_len += COMMENT_INDENT_SPACES;
+    } else {
+      string_builder_add_char(game_string, ' ');
+      line_len++;
+    }
+    for (int i = 0; i < word_len; i++) {
+      string_builder_add_char(game_string, word_start[i]);
+    }
+    line_len += word_len;
+    // Skip spaces between words
+    while (*p == ' ') {
+      p++;
+    }
+  }
+  string_builder_add_char(game_string, '\n');
+}
+
 void string_builder_add_board_column_header(
     const GameStringOptions *game_string_options, int col,
     StringBuilder *game_string) {
@@ -377,7 +425,7 @@ void string_builder_add_game_internal(
     if (i == UNSEEN_START_ROW) {
       string_builder_add_formatted_string(game_string, "Unseen: (%d)",
                                           num_bag_letters);
-    } else if (i > UNSEEN_START_ROW + 1 && letter_index < num_bag_letters) {
+    } else if (i > UNSEEN_START_ROW && letter_index < num_bag_letters) {
       for (int j = 0; j < letters_per_row && letter_index < num_bag_letters;
            j++) {
         string_builder_add_user_visible_letter(game_string, ld,
@@ -395,14 +443,11 @@ void string_builder_add_game_internal(
       if (i == GAME_EVENT_START_ROW) {
         game_event_index = game_history_get_num_played_events(game_history) - 1;
         game_event = game_history_get_event(game_history, game_event_index);
-        string_builder_add_formatted_string(game_string,
-                                            "Event %d:", game_event_index + 1);
-      } else if (i == GAME_EVENT_START_ROW + 1) {
-        string_builder_add_string(
-            game_string,
+        string_builder_add_formatted_string(
+            game_string, "Event %d (%s):", game_event_index + 1,
             game_history_player_get_name(
                 game_history, game_event_get_player_index(game_event)));
-      } else if (i == GAME_EVENT_START_ROW + 2) {
+      } else if (i == GAME_EVENT_START_ROW + 1) {
         const Rack *player_rack = game_event_get_const_rack(game_event);
         const GameEvent *previous_game_event = NULL;
         switch (game_event_get_type(game_event)) {
@@ -502,6 +547,10 @@ void string_builder_add_game_internal(
   for (int i = 0; i < num_moves_to_display; i++) {
     string_builder_add_move_with_rank_and_equity(game, move_list, game_string,
                                                  i);
+  }
+  if (add_game_event && game_event) {
+    const char *note = game_event_get_note(game_event);
+    string_builder_add_word_wrapped_comment(game_string, note);
   }
   string_builder_add_string(game_string, "\n");
 }

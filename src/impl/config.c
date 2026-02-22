@@ -4,11 +4,13 @@
 #include "../compat/memory_info.h"
 #include "../def/autoplay_defs.h"
 #include "../def/bai_defs.h"
+#include "../def/board_defs.h"
 #include "../def/config_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/exec_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
@@ -114,6 +116,7 @@ typedef enum {
   ARG_TOKEN_P2_MOVE_RECORD_TYPE,
   ARG_TOKEN_WIN_PCT,
   ARG_TOKEN_PLIES,
+  ARG_TOKEN_SHPLIES,
   ARG_TOKEN_ENDGAME_PLIES,
   ARG_TOKEN_ENDGAME_TOP_K,
   ARG_TOKEN_NUMBER_OF_PLAYS,
@@ -157,6 +160,7 @@ typedef enum {
   ARG_TOKEN_PREVIOUS,
   ARG_TOKEN_GOTO,
   ARG_TOKEN_NOTE,
+  ARG_TOKEN_CNOTE,
   ARG_TOKEN_PRINT_BOARDS,
   ARG_TOKEN_BOARD_COLOR,
   ARG_TOKEN_BOARD_TILE_GLYPHS,
@@ -170,6 +174,7 @@ typedef enum {
   ARG_TOKEN_SHOW_PROMPT,
   ARG_TOKEN_SAVE_SETTINGS,
   ARG_TOKEN_AUTOSAVE_GCG,
+  ARG_TOKEN_SHOW_GAME_WITH_MOVES,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -205,6 +210,7 @@ struct Config {
   int max_num_display_plays;
   int num_small_plays;
   int plies;
+  int shplies;
   int endgame_plies;
   int endgame_top_k;
   uint64_t max_iterations;
@@ -220,6 +226,7 @@ struct Config {
   bool use_heat_map;
   bool print_boards;
   bool print_on_finish;
+  bool show_game_with_moves;
   bool show_prompt;
   bool save_settings;
   bool autosave_gcg;
@@ -367,6 +374,8 @@ int config_get_num_small_plays(const Config *config) {
   return config->num_small_plays;
 }
 int config_get_plies(const Config *config) { return config->plies; }
+
+int config_get_shplies(const Config *config) { return config->shplies; }
 
 int config_get_endgame_plies(const Config *config) {
   return config->endgame_plies;
@@ -808,11 +817,11 @@ arg_token_t get_token_from_string(Config *config, const char *arg_name,
 // Help
 void add_help_arg_to_string_builder(const Config *config, int token,
                                     StringBuilder *sb,
-                                    const bool show_async_commands) {
+                                    const bool show_async_commands,
+                                    const bool short_form) {
   const char *examples[10] = {NULL};
   const char *usages[10] = {NULL};
-  const char *text = NULL;
-  bool is_command = false;
+  const char *text = "";
   bool is_hotkey = false;
   const char *name = NULL;
   const char *shortest_unambiguous_name = NULL;
@@ -838,7 +847,6 @@ void add_help_arg_to_string_builder(const Config *config, int token,
   } else {
     arg_token_t arg_token = token;
     const ParsedArg *parg = config_get_parg(config, arg_token);
-    is_command = parg->is_command;
     is_hotkey = parg->is_hotkey;
     name = parg->name;
     shortest_unambiguous_name = parg->shortest_unambiguous_name;
@@ -847,9 +855,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "[<command_or_arg>]";
       examples[0] = "";
       examples[1] = "infer";
-      text = "Prints a help message for the given command or argument. If no "
-             "argument is "
-             "given, prints help messages for all commands and arguments.";
+      text = "Prints a short description of all commands and arguments. Use "
+             "'help <command>' for full usage details.";
       break;
     case ARG_TOKEN_SET:
       usages[0] = "<option1> <value1> <option2> <value2> ...";
@@ -1034,6 +1041,21 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "the rack after the exchange can be specified so that six passes "
           "can be correctly scored.";
       break;
+    case ARG_TOKEN_CNOTE:
+      usages[0] = "<move_index> <note>";
+      usages[1] = "<position> <tiles> <note>";
+      usages[2] = "ex <exchanged_tiles> <note>";
+      usages[3] = "pass <note>";
+      examples[0] = "2 should have played $1";
+      examples[1] = "11d ANTIQuES should have played $1 instead of $3";
+      examples[2] = "ex ABC should have passed";
+      examples[3] = "pass should have played $1";
+      text = "Commits the move and adds a note to it in a single command. The "
+             "commit arguments are identical to the commit command (except the "
+             "optional rack-after-exchange is not supported). The note follows "
+             "the commit arguments and may use $N to interpolate the N-th move "
+             "from the current move list by its 1-indexed position.";
+      break;
     case ARG_TOKEN_TOP_COMMIT:
       usages[0] = "[<rack>]";
       examples[0] = "";
@@ -1076,7 +1098,26 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     case ARG_TOKEN_SHOW_MOVES:
       usages[0] = "";
-      text = "Shows the moves or the sim results if available.";
+      usages[1] = "<number>";
+      usages[2] = "<coord>";
+      usages[3] = "<prefix>";
+      usages[4] = "<coord> <prefix>";
+      usages[5] = "-";
+      usages[6] = "- <prefix>";
+      examples[0] = "";
+      examples[1] = "10";
+      examples[2] = "D12";
+      examples[3] = "4e";
+      examples[4] = "MUZ";
+      examples[5] = "8B MUZ";
+      examples[6] = "-";
+      examples[7] = "- TUV";
+      text = "Shows the moves or the sim results if available. Optionally "
+             "takes a max number of plays, a coordinate to show "
+             "only moves at that square, or a word prefix to show only moves "
+             "starting with those letters. A coordinate and prefix may be "
+             "combined. Use '-' in place of coordinates to show only "
+             "exchange and pass moves.";
       break;
     case ARG_TOKEN_SHOW_INFERENCE:
       usages[0] = "";
@@ -1123,8 +1164,11 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<content_with_possible_whitespace>";
       examples[0] = "#knowledgesaddest";
       examples[1] = "this is a valid note with whitespace";
+      examples[2] = "should have played $1 instead of $3";
       text = "Specifies the note for the most recently added move. If there is "
-             "an existing note it will be overwritten.";
+             "an existing note it will be overwritten. Use $N (e.g. $1, $2) to "
+             "interpolate the N-th move from the current move list by its "
+             "1-indexed position.";
       break;
     case ARG_TOKEN_P1_NAME:
       usages[0] = "<player_name_with_possible_whitespace>";
@@ -1259,6 +1303,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "4";
       text = "Specifies the number of plies to use for simulations.";
       break;
+    case ARG_TOKEN_SHPLIES:
+      usages[0] = "<shplies>";
+      examples[0] = "2";
+      examples[1] = "4";
+      text = "Specifies the number of plies to display when printing sim "
+             "results.";
+      break;
     case ARG_TOKEN_ENDGAME_PLIES:
       usages[0] = "<endgame_plies>";
       examples[0] = "4";
@@ -1313,10 +1364,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "1";
       examples[1] = "2.4";
       examples[2] = "10.0";
-      text =
-          "Specifies the tolerance, in terms of equity, for how much worse a "
-          "move can be than the best equity move and still be considered a "
-          "possible rack from which the opponent played.";
+      text = "Specifies the maximum equity loss for an opponent's play when "
+             "running an inference.";
       break;
     case ARG_TOKEN_MOVEGEN_MARGIN:
       usages[0] = "<movegen_equity_margin>";
@@ -1324,9 +1373,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "5.5";
       examples[2] = "10.0";
       text =
-          "Specifies the tolerance, in terms of equity, for how much worse a "
-          "move can be than the best equity move and still be generated by "
-          "the move generation command.";
+          "Specifies the maximum equity loss for a move that can be generated.";
       break;
     case ARG_TOKEN_MIN_PLAY_ITERATIONS:
       usages[0] = "<min_play_iterations>";
@@ -1524,6 +1571,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies whether or not to print a finished message when a "
              "command completes execution.";
       break;
+    case ARG_TOKEN_SHOW_GAME_WITH_MOVES:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether or not to display the game board to the right "
+             "of moves when showing moves or simulation results.";
+      break;
     case ARG_TOKEN_SHOW_PROMPT:
       usages[0] = "<true_or_false>";
       examples[0] = "true";
@@ -1550,17 +1604,25 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     }
   }
-  const char *is_arg_char = "-";
-  if (is_command) {
-    is_arg_char = "";
+  if (short_form) {
+    if (is_hotkey) {
+      string_builder_add_char(sb, name[0]);
+    } else {
+      string_builder_add_string(sb, shortest_unambiguous_name);
+    }
+    string_builder_add_char(sb, ',');
+    string_builder_add_string(sb, name);
+    string_builder_add_string(sb, " - ");
+    const char *dot = strchr(text, '.');
+    const int text_len = dot ? (int)(dot - text + 1) : (int)strlen(text);
+    string_builder_add_formatted_string(sb, "%.*s\n", text_len, text);
+    return;
   }
 
   if (is_hotkey) {
-    string_builder_add_formatted_string(sb, "%s%c, %s%s", is_arg_char, name[0],
-                                        is_arg_char, name);
+    string_builder_add_formatted_string(sb, "%c, %s", name[0], name);
   } else {
-    string_builder_add_formatted_string(sb, "%s%s, %s%s", is_arg_char,
-                                        shortest_unambiguous_name, is_arg_char,
+    string_builder_add_formatted_string(sb, "%s, %s", shortest_unambiguous_name,
                                         name);
   }
 
@@ -1599,29 +1661,188 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
 
   StringBuilder *sb = string_builder_create();
   if (help_arg_token == NUMBER_OF_ARG_TOKENS) {
-    // Show the full help command
-    // Show help for the commands first
-    string_builder_add_string(sb, "Commands\n\n");
-    for (arg_token_t k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
-      if (config->pargs[k]->is_command) {
-        add_help_arg_to_string_builder(config, k, sb, false);
-      }
+    // Game Navigation Commands (alphabetical by name)
+    static const arg_token_t game_nav_cmds[] = {
+        ARG_TOKEN_GOTO,     /* goto */
+        ARG_TOKEN_NEXT,     /* next */
+        ARG_TOKEN_PREVIOUS, /* previous */
+    };
+    static const arg_token_t game_anno_cmds[] = {
+        ARG_TOKEN_CHALLENGE,    /* challenge */
+        ARG_TOKEN_CNOTE,        /* cnote */
+        ARG_TOKEN_COMMIT,       /* commit */
+        ARG_TOKEN_EXPORT,       /* export */
+        ARG_TOKEN_LOAD,         /* load */
+        ARG_TOKEN_NEW_GAME,     /* newgame */
+        ARG_TOKEN_NOTE,         /* note */
+        ARG_TOKEN_OVERTIME,     /* overtimepenalty */
+        ARG_TOKEN_P1_NAME,      /* p1 */
+        ARG_TOKEN_P2_NAME,      /* p2 */
+        ARG_TOKEN_RACK,         /* rack */
+        ARG_TOKEN_RANDOM_RACK,  /* rrack */
+        ARG_TOKEN_SWITCH_NAMES, /* switchnames */
+        ARG_TOKEN_TOP_COMMIT,   /* tcommit */
+        ARG_TOKEN_UNCHALLENGE,  /* unchallenge */
+    };
+    // Game Analysis Commands (alphabetical by name)
+    static const arg_token_t game_analysis_cmds[] = {
+        ARG_TOKEN_MOVES,                /* addmoves */
+        ARG_TOKEN_ENDGAME,              /* endgame */
+        ARG_TOKEN_GEN,                  /* generate */
+        ARG_TOKEN_GEN_AND_SIM,          /* gsimulate */
+        ARG_TOKEN_SHOW_HEAT_MAP,        /* heatmap */
+        ARG_TOKEN_INFER,                /* infer */
+        ARG_TOKEN_LEAVE_GEN,            /* leavegen */
+        ARG_TOKEN_RACK_AND_GEN_AND_SIM, /* rgsimulate */
+        ARG_TOKEN_SHOW_ENDGAME,         /* shendgame */
+        ARG_TOKEN_SHOW_GAME,            /* shgame */
+        ARG_TOKEN_SHOW_INFERENCE,       /* shinference */
+        ARG_TOKEN_SHOW_MOVES,           /* shmoves */
+        ARG_TOKEN_SIM,                  /* simulate */
+    };
+    // Other Commands (alphabetical by name)
+    static const arg_token_t other_cmds[] = {
+        ARG_TOKEN_AUTOPLAY,    /* autoplay */
+        ARG_TOKEN_CGP,         /* cgp */
+        ARG_TOKEN_CONVERT,     /* convert */
+        ARG_TOKEN_CREATE_DATA, /* createdata */
+        ARG_TOKEN_HELP,        /* help */
+        ARG_TOKEN_SET,         /* setoptions */
+
+    };
+    // Player Options (alphabetical by name)
+    static const arg_token_t player_opts[] = {
+        ARG_TOKEN_BINGO_BONUS,         /* bb */
+        ARG_TOKEN_BOARD_LAYOUT,        /* bdn */
+        ARG_TOKEN_CHALLENGE_BONUS,     /* cb */
+        ARG_TOKEN_P1_LEAVES,           /* k1 */
+        ARG_TOKEN_P2_LEAVES,           /* k2 */
+        ARG_TOKEN_P1_LEXICON,          /* l1 */
+        ARG_TOKEN_P2_LEXICON,          /* l2 */
+        ARG_TOKEN_LETTER_DISTRIBUTION, /* ld */
+        ARG_TOKEN_LEAVES,              /* leaves */
+        ARG_TOKEN_LEXICON,             /* lex */
+        ARG_TOKEN_P1_MOVE_RECORD_TYPE, /* r1 */
+        ARG_TOKEN_P2_MOVE_RECORD_TYPE, /* r2 */
+        ARG_TOKEN_P1_MOVE_SORT_TYPE,   /* s1 */
+        ARG_TOKEN_P2_MOVE_SORT_TYPE,   /* s2 */
+        ARG_TOKEN_GAME_VARIANT,        /* var */
+        ARG_TOKEN_P1_USE_WMP,          /* w1 */
+        ARG_TOKEN_P2_USE_WMP,          /* w2 */
+        ARG_TOKEN_USE_WMP,             /* wmp */
+    };
+    // Game Analysis Options (alphabetical by name)
+    static const arg_token_t game_analysis_opts[] = {
+        ARG_TOKEN_CUTOFF,                /* cutoff */
+        ARG_TOKEN_ENDGAME_PLIES,         /* eplies */
+        ARG_TOKEN_ENDGAME_TOP_K,         /* etopk */
+        ARG_TOKEN_USE_GAME_PAIRS,        /* gp */
+        ARG_TOKEN_INFERENCE_MARGIN,      /* imargin */
+        ARG_TOKEN_MAX_ITERATIONS,        /* iterations */
+        ARG_TOKEN_MIN_PLAY_ITERATIONS,   /* minplayiterations */
+        ARG_TOKEN_MOVEGEN_MARGIN,        /* mmargin */
+        ARG_TOKEN_NUMBER_OF_PLAYS,       /* numplays */
+        ARG_TOKEN_NUMBER_OF_SMALL_PLAYS, /* numsmallplays */
+        ARG_TOKEN_PLIES,                 /* plies */
+        ARG_TOKEN_STOP_COND_PCT,         /* scondition */
+        ARG_TOKEN_SIM_WITH_INFERENCE,    /* sinfer */
+        ARG_TOKEN_USE_SMALL_PLAYS,       /* sp */
+        ARG_TOKEN_SAMPLING_RULE,         /* sr */
+        ARG_TOKEN_THRESHOLD,             /* threshold */
+        ARG_TOKEN_TIME_LIMIT,            /* tlim */
+        ARG_TOKEN_TT_FRACTION_OF_MEM,    /* ttfraction */
+        ARG_TOKEN_USE_HEAT_MAP,          /* useheatmap */
+        ARG_TOKEN_WRITE_BUFFER_SIZE,     /* wb */
+        ARG_TOKEN_WIN_PCT,               /* winpct */
+    };
+    // Display Options (alphabetical by name)
+    static const arg_token_t display_opts[] = {
+        ARG_TOKEN_BOARD_BORDER,                /* boardborder */
+        ARG_TOKEN_BOARD_COLOR,                 /* boardcolor */
+        ARG_TOKEN_BOARD_COLUMN_LABEL,          /* boardcolumns */
+        ARG_TOKEN_BOARD_TILE_GLYPHS,           /* boardtiles */
+        ARG_TOKEN_HUMAN_READABLE,              /* hr */
+        ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS, /* maxnumdplays */
+        ARG_TOKEN_ON_TURN_COLOR,               /* onturncolor */
+        ARG_TOKEN_ON_TURN_MARKER,              /* onturnmarker */
+        ARG_TOKEN_ON_TURN_SCORE_STYLE,         /* onturnscore */
+        ARG_TOKEN_PRETTY,                      /* pretty */
+        ARG_TOKEN_PRINT_BOARDS,                /* printboards */
+        ARG_TOKEN_SHPLIES,                     /* shplies */
+        ARG_TOKEN_SHOW_GAME_WITH_MOVES,        /* shwithmoves */
+    };
+    // Other Options (alphabetical by name)
+    static const arg_token_t other_opts[] = {
+        ARG_TOKEN_AUTOSAVE_GCG,      /* autosavegcg */
+        ARG_TOKEN_EXEC_MODE,         /* mode */
+        ARG_TOKEN_DATA_PATH,         /* path */
+        ARG_TOKEN_PRINT_INTERVAL,    /* pfrequency */
+        ARG_TOKEN_PRINT_ON_FINISH,   /* printonfinish */
+        ARG_TOKEN_SAVE_SETTINGS,     /* savesettings */
+        ARG_TOKEN_RANDOM_SEED,       /* seed */
+        ARG_TOKEN_SHOW_PROMPT,       /* shprompt */
+        ARG_TOKEN_NUMBER_OF_THREADS, /* threads */
+    };
+    int total_tokens = 0;
+    string_builder_add_string(sb, "Game Navigation Commands\n\n");
+    for (size_t i = 0; i < sizeof(game_nav_cmds) / sizeof(game_nav_cmds[0]);
+         i++) {
+      add_help_arg_to_string_builder(config, game_nav_cmds[i], sb, false, true);
+      total_tokens++;
     }
-    // Show help for async commands
-    string_builder_add_string(sb, "\n\nAsync commands\n\n");
-    for (async_token_t k = 0; k < NUMBER_OF_ASYNC_COMMAND_TOKENS; k++) {
-      add_help_arg_to_string_builder(config, k, sb, true);
+    string_builder_add_string(sb, "\nGame Annotation Commands\n\n");
+    for (size_t i = 0; i < sizeof(game_anno_cmds) / sizeof(game_anno_cmds[0]);
+         i++) {
+      add_help_arg_to_string_builder(config, game_anno_cmds[i], sb, false,
+                                     true);
+      total_tokens++;
     }
-    // Then show help for the settings
-    string_builder_add_string(sb, "\n\nSettings\n\n");
-    for (arg_token_t k = 0; k < NUMBER_OF_ARG_TOKENS; k++) {
-      if (!config->pargs[k]->is_command) {
-        add_help_arg_to_string_builder(config, k, sb, false);
-      }
+    string_builder_add_string(sb, "\nGame Analysis Commands\n\n");
+    for (size_t i = 0;
+         i < sizeof(game_analysis_cmds) / sizeof(game_analysis_cmds[0]); i++) {
+      add_help_arg_to_string_builder(config, game_analysis_cmds[i], sb, false,
+                                     true);
+      total_tokens++;
     }
+    string_builder_add_string(sb, "\nOther Commands\n\n");
+    for (size_t i = 0; i < sizeof(other_cmds) / sizeof(other_cmds[0]); i++) {
+      add_help_arg_to_string_builder(config, other_cmds[i], sb, false, true);
+      total_tokens++;
+    }
+    // Async Commands in alphabetical order: status, stop
+    string_builder_add_string(sb, "\nAsync Commands\n\n");
+    add_help_arg_to_string_builder(config, ASYNC_STATUS_COMMAND_TOKEN, sb, true,
+                                   true);
+    add_help_arg_to_string_builder(config, ASYNC_STOP_COMMAND_TOKEN, sb, true,
+                                   true);
+    string_builder_add_string(sb, "\nPlayer Options\n\n");
+    for (size_t i = 0; i < sizeof(player_opts) / sizeof(player_opts[0]); i++) {
+      add_help_arg_to_string_builder(config, player_opts[i], sb, false, true);
+      total_tokens++;
+    }
+    string_builder_add_string(sb, "\nGame Analysis Options\n\n");
+    for (size_t i = 0;
+         i < sizeof(game_analysis_opts) / sizeof(game_analysis_opts[0]); i++) {
+      add_help_arg_to_string_builder(config, game_analysis_opts[i], sb, false,
+                                     true);
+      total_tokens++;
+    }
+    string_builder_add_string(sb, "\nDisplay Options\n\n");
+    for (size_t i = 0; i < sizeof(display_opts) / sizeof(display_opts[0]);
+         i++) {
+      add_help_arg_to_string_builder(config, display_opts[i], sb, false, true);
+      total_tokens++;
+    }
+    string_builder_add_string(sb, "\nOther Options\n\n");
+    for (size_t i = 0; i < sizeof(other_opts) / sizeof(other_opts[0]); i++) {
+      add_help_arg_to_string_builder(config, other_opts[i], sb, false, true);
+      total_tokens++;
+    }
+    assert(total_tokens == NUMBER_OF_ARG_TOKENS);
   } else {
-    add_help_arg_to_string_builder(config, help_arg_token, sb, false);
+    add_help_arg_to_string_builder(config, help_arg_token, sb, false, false);
   }
+  string_builder_add_string(sb, "\n");
   char *result = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
   return result;
@@ -2031,8 +2252,8 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->plies, config->move_list, known_opp_rack, config->win_pcts,
       config->inference_results, config->thread_control, config->game,
       config->sim_with_inference, config->use_heat_map, config->num_threads,
-      config->print_interval, config->max_num_display_plays, config->seed,
-      config->max_iterations, config->min_play_iterations,
+      config->print_interval, config->max_num_display_plays, config->shplies,
+      config->seed, config->max_iterations, config->min_play_iterations,
       config->stop_cond_pct, config->threshold, (int)config->time_limit_seconds,
       config->sampling_rule, config->cutoff, &inference_args, sim_args);
 }
@@ -2140,9 +2361,9 @@ char *status_sim(Config *config) {
   if (!sim_results) {
     return string_duplicate("simmer has not been initialized");
   }
-  return sim_results_get_string(config->game, sim_results,
-                                config->max_num_display_plays,
-                                !config->human_readable);
+  return sim_results_get_string(
+      config->game, sim_results, config->max_num_display_plays, config->shplies,
+      -1, -1, NULL, 0, false, !config->human_readable, NULL);
 }
 
 // Gen and Sim
@@ -2446,6 +2667,50 @@ char *str_api_show_game(Config *config, ErrorStack *error_stack) {
 
 // Show moves
 
+// Parses a board coordinate string in vertical ("d12") or horizontal ("12d")
+// notation into 0-indexed row and col. Returns true on success.
+static bool parse_move_coord(const char *str, int *row, int *col,
+                             ErrorStack *error_stack) {
+  int len = (int)strlen(str);
+  if (len < 2) {
+    return false;
+  }
+  if (isalpha((unsigned char)str[0])) {
+    // Vertical notation: single letter then digits (e.g. "d12")
+    for (int i = 1; i < len; i++) {
+      if (!isdigit((unsigned char)str[i])) {
+        return false;
+      }
+    }
+    *col = tolower((unsigned char)str[0]) - 'a';
+    *row = string_to_int(str + 1, error_stack) - 1;
+    if (!error_stack_is_empty(error_stack)) {
+      return false;
+    }
+    return true;
+  }
+  if (isdigit((unsigned char)str[0])) {
+    // Horizontal notation: digits then single letter (e.g. "12d")
+    int i = 1;
+    while (i < len && isdigit((unsigned char)str[i])) {
+      i++;
+    }
+    if (i >= len || i != len - 1 || !isalpha((unsigned char)str[i])) {
+      return false;
+    }
+    char row_str[BOARD_DIM];
+    memcpy(row_str, str, (size_t)i);
+    row_str[i] = '\0';
+    *row = string_to_int(row_str, error_stack) - 1;
+    if (!error_stack_is_empty(error_stack)) {
+      return false;
+    }
+    *col = tolower((unsigned char)str[i]) - 'a';
+    return true;
+  }
+  return false;
+}
+
 char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
@@ -2458,30 +2723,109 @@ char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
                      string_duplicate("no moves to show"));
     return empty_string();
   }
-  const char *max_num_display_plays_str =
-      config_get_parg_value(config, ARG_TOKEN_SHOW_MOVES, 0);
+
+  const char *arg0 = config_get_parg_value(config, ARG_TOKEN_SHOW_MOVES, 0);
+  const char *arg1 = config_get_parg_value(config, ARG_TOKEN_SHOW_MOVES, 1);
 
   int max_num_display_plays = config->max_num_display_plays;
-  if (max_num_display_plays_str) {
-    string_to_int_or_push_error("max num display plays",
-                                max_num_display_plays_str, 1, INT_MAX,
-                                ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
-                                &max_num_display_plays, error_stack);
+  int filter_row = -1;
+  int filter_col = -1;
+  bool exclude_tile_placement_moves = false;
+  const char *prefix_str = NULL;
+
+  if (arg0) {
+    int coord_row;
+    int coord_col;
+    bool is_coord = parse_move_coord(arg0, &coord_row, &coord_col, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return empty_string();
+    }
+    if (is_coord) {
+      if (coord_row < 0 || coord_row >= BOARD_DIM || coord_col < 0 ||
+          coord_col >= BOARD_DIM) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_CONFIG_LOAD_MOVE_COORDS_OUT_OF_BOUNDS,
+            get_formatted_string("move filter coordinate '%s' is out of bounds",
+                                 arg0));
+        return empty_string();
+      }
+      filter_row = coord_row;
+      filter_col = coord_col;
+      if (arg1) {
+        prefix_str = arg1;
+      }
+    } else if (strings_equal(arg0, "-")) {
+      exclude_tile_placement_moves = true;
+      if (arg1) {
+        prefix_str = arg1;
+      }
+    } else {
+      // Check if arg0 is all digits (a max count)
+      bool all_digits = true;
+      for (int i = 0; arg0[i]; i++) {
+        if (!isdigit((unsigned char)arg0[i])) {
+          all_digits = false;
+          break;
+        }
+      }
+      if (all_digits) {
+        string_to_int_or_push_error(
+            "max num display plays", arg0, 1, INT_MAX,
+            ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+            &max_num_display_plays, error_stack);
+        if (!error_stack_is_empty(error_stack)) {
+          return empty_string();
+        }
+      } else {
+        prefix_str = arg0;
+      }
+    }
+  }
+
+  MachineLetter prefix_mls[BOARD_DIM];
+  int prefix_len = 0;
+  if (prefix_str) {
+    prefix_len =
+        ld_str_to_mls(config->ld, prefix_str, false, prefix_mls, BOARD_DIM);
+    if (prefix_len < 0) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
+          get_formatted_string("invalid prefix letters '%s'", prefix_str));
+      return empty_string();
+    }
+  }
+
+  char *game_board_string = NULL;
+  const char *board_display_start = NULL;
+  if (config->show_game_with_moves) {
+    StringBuilder *game_sb = string_builder_create();
+    string_builder_add_game(config->game, NULL, config->game_string_options,
+                            config->game_history, game_sb);
+    game_board_string = string_builder_dump(game_sb, NULL);
+    string_builder_destroy(game_sb);
+    // The board string starts with a leading '\n'; skip it so the board's
+    // column-header line aligns with the moves header row.
+    board_display_start = game_board_string;
+    if (board_display_start && *board_display_start == '\n') {
+      board_display_start++;
     }
   }
 
   char *result = NULL;
   if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
-    result =
-        sim_results_get_string(config->game, config->sim_results,
-                               max_num_display_plays, !config->human_readable);
+    result = sim_results_get_string(
+        config->game, config->sim_results, max_num_display_plays,
+        config->shplies, filter_row, filter_col, prefix_mls, prefix_len,
+        exclude_tile_placement_moves, !config->human_readable,
+        board_display_start);
   } else {
     result = move_list_get_string(
         config->move_list, game_get_board(config->game), config->ld,
-        max_num_display_plays, !config->human_readable);
+        max_num_display_plays, filter_row, filter_col, prefix_mls, prefix_len,
+        exclude_tile_placement_moves, !config->human_readable,
+        board_display_start);
   }
+  free(game_board_string);
   return result;
 }
 
@@ -3326,7 +3670,8 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
 char *impl_commit_with_pos_args(Config *config, ErrorStack *error_stack,
                                 const char *commit_pos_arg_1,
                                 const char *commit_pos_arg_2,
-                                const char *commit_pos_arg_3) {
+                                const char *commit_pos_arg_3,
+                                const bool autosave) {
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
                      string_duplicate("cannot commit a move without lexicon"));
@@ -3388,11 +3733,13 @@ char *impl_commit_with_pos_args(Config *config, ErrorStack *error_stack,
     draw_to_full_rack(config->game, 1 - noncommit_player_index);
   }
 
-  impl_export_if_autosave(config, error_stack);
+  if (autosave) {
+    impl_export_if_autosave(config, error_stack);
 
-  if (!error_stack_is_empty(error_stack)) {
-    config_restore_game_and_history(config);
-    return return_str;
+    if (!error_stack_is_empty(error_stack)) {
+      config_restore_game_and_history(config);
+      return return_str;
+    }
   }
 
   return return_str;
@@ -3406,7 +3753,7 @@ char *impl_commit(Config *config, ErrorStack *error_stack) {
   const char *commit_pos_arg_3 =
       config_get_parg_value(config, ARG_TOKEN_COMMIT, 2);
   return impl_commit_with_pos_args(config, error_stack, commit_pos_arg_1,
-                                   commit_pos_arg_2, commit_pos_arg_3);
+                                   commit_pos_arg_2, commit_pos_arg_3, true);
 }
 
 void execute_commit(Config *config, ErrorStack *error_stack) {
@@ -3420,6 +3767,145 @@ void execute_commit(Config *config, ErrorStack *error_stack) {
 
 char *str_api_commit(Config *config, ErrorStack *error_stack) {
   return impl_commit(config, error_stack);
+}
+
+// Commit with note
+
+// Builds a new heap-allocated string from raw_note with every $N reference
+// replaced by the string representation of the N-th move (1-indexed) in the
+// current move list. Returns NULL and pushes an error if any $N reference is
+// invalid; otherwise returns the caller-owned interpolated string.
+static char *build_interpolated_note(const Config *config, const char *raw_note,
+                                     ErrorStack *error_stack) {
+  StringBuilder *sb = string_builder_create();
+  const char *p = raw_note;
+  while (*p) {
+    if (*p == '$' && isdigit((unsigned char)*(p + 1))) {
+      p++; // skip '$'
+      int move_idx = 0;
+      while (isdigit((unsigned char)*p)) {
+        move_idx = move_idx * 10 + (*p - '0');
+        p++;
+      }
+      const bool use_sim =
+          sim_results_get_valid_for_current_game_state(config->sim_results);
+      int num_moves = 0;
+      if (use_sim) {
+        num_moves = sim_results_get_number_of_plays(config->sim_results);
+      } else if (config->move_list) {
+        num_moves = move_list_get_count(config->move_list);
+      }
+      if (num_moves == 0) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_NOTE_NO_MOVES,
+            string_duplicate("no moves available for $N interpolation"));
+        string_builder_destroy(sb);
+        return NULL;
+      }
+      if (move_idx < 1 || move_idx > num_moves) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_NOTE_MOVE_INDEX_OUT_OF_RANGE,
+            get_formatted_string("move index %d is out of range", move_idx));
+        string_builder_destroy(sb);
+        return NULL;
+      }
+      const Move *move =
+          use_sim ? simmed_play_get_move(sim_results_get_display_simmed_play(
+                        config->sim_results, move_idx - 1))
+                  : move_list_get_move(config->move_list, move_idx - 1);
+      string_builder_add_move(sb, game_get_board(config->game), move,
+                              config->ld, false);
+    } else {
+      string_builder_add_char(sb, *p);
+      p++;
+    }
+  }
+  char *note = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return note;
+}
+
+char *impl_cnote(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot commit a move without lexicon"));
+    return empty_string();
+  }
+
+  config_init_game(config);
+
+  const char *raw = config_get_parg_value(config, ARG_TOKEN_CNOTE, 0);
+  StringSplitter *split = split_string_by_whitespace(raw, true);
+  const int num_items = string_splitter_get_number_of_items(split);
+
+  const char *commit_arg_1 = string_splitter_get_item(split, 0);
+  const char *commit_arg_2 = NULL;
+  int note_start_idx;
+  if (strings_iequal(commit_arg_1, UCGI_PASS_MOVE) ||
+      is_all_digits_or_empty(commit_arg_1)) {
+    note_start_idx = 1;
+  } else {
+    if (num_items < 2) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_COMMIT_MISSING_EXCHANGE_OR_PLAY,
+          get_formatted_string("missing exchange or play for commit '%s'",
+                               commit_arg_1));
+      string_splitter_destroy(split);
+      return empty_string();
+    }
+    commit_arg_2 = string_splitter_get_item(split, 1);
+    note_start_idx = 2;
+  }
+
+  // Join the remaining tokens into the raw note, then interpolate $N references
+  // before committing (commit clears the move list). Keep split alive until
+  // after the commit since commit_arg_1 and commit_arg_2 point into it.
+  char *raw_note = string_splitter_join(split, note_start_idx, num_items, " ");
+  if (is_string_empty_or_whitespace(raw_note)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
+                     string_duplicate("missing note for cnote"));
+    free(raw_note);
+    string_splitter_destroy(split);
+    return empty_string();
+  }
+  char *note = build_interpolated_note(config, raw_note, error_stack);
+  free(raw_note);
+  if (!error_stack_is_empty(error_stack)) {
+    string_splitter_destroy(split);
+    return empty_string();
+  }
+
+  // Commit the move (this clears the move list).
+  char *result = impl_commit_with_pos_args(config, error_stack, commit_arg_1,
+                                           commit_arg_2, NULL, false);
+  string_splitter_destroy(split);
+  if (!error_stack_is_empty(error_stack)) {
+    free(note);
+    return result;
+  }
+
+  // Set the note on the event that was just committed.
+  game_history_set_note_for_most_recent_event(config->game_history, note);
+  free(note);
+  impl_export_if_autosave(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    config_restore_game_and_history(config);
+    return result;
+  }
+  return result;
+}
+
+void execute_cnote(Config *config, ErrorStack *error_stack) {
+  char *result = impl_cnote(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    execute_show_game(config, error_stack);
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_cnote(Config *config, ErrorStack *error_stack) {
+  return impl_cnote(config, error_stack);
 }
 
 // Top commit
@@ -3452,7 +3938,7 @@ char *impl_top_commit(Config *config, ErrorStack *error_stack) {
     }
     impl_move_gen_override_record_type(config, MOVE_RECORD_BEST);
   }
-  return impl_commit_with_pos_args(config, error_stack, "1", NULL, NULL);
+  return impl_commit_with_pos_args(config, error_stack, "1", NULL, NULL, true);
 }
 
 void execute_top_commit(Config *config, ErrorStack *error_stack) {
@@ -3967,8 +4453,15 @@ char *impl_note(Config *config, ErrorStack *error_stack) {
 
   config_init_game(config);
 
-  game_history_set_note_for_most_recent_event(
-      config->game_history, config_get_parg_value(config, ARG_TOKEN_NOTE, 0));
+  // Build the note, interpolating $N with the string for the N-th move
+  // (1-indexed) in the current move list.
+  const char *raw_note = config_get_parg_value(config, ARG_TOKEN_NOTE, 0);
+  char *note = build_interpolated_note(config, raw_note, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  game_history_set_note_for_most_recent_event(config->game_history, note);
+  free(note);
   impl_export_if_autosave(config, error_stack);
   return empty_string();
 }
@@ -4279,6 +4772,7 @@ void config_load_parsed_args(Config *config,
       }
       current_value_index = 0;
       if (current_arg_token == ARG_TOKEN_NOTE ||
+          current_arg_token == ARG_TOKEN_CNOTE ||
           current_arg_token == ARG_TOKEN_P1_NAME ||
           current_arg_token == ARG_TOKEN_P2_NAME ||
           current_arg_token == ARG_TOKEN_MOVES) {
@@ -4963,6 +5457,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_int(config, ARG_TOKEN_SHPLIES, 1, MAX_PLIES, &config->shplies,
+                  error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_int(config, ARG_TOKEN_ENDGAME_PLIES, 1, MAX_VARIANT_LENGTH,
                   &config->endgame_plies, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -5131,6 +5631,14 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
 
   config_load_bool(config, ARG_TOKEN_PRINT_ON_FINISH, &config->print_on_finish,
                    error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  // Show game with moves
+
+  config_load_bool(config, ARG_TOKEN_SHOW_GAME_WITH_MOVES,
+                   &config->show_game_with_moves, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -5723,6 +6231,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_LOAD, "load", 1, 1, load_gcg, generic, false);
   cmd(ARG_TOKEN_NEW_GAME, "newgame", 0, 1, new_game, generic, false);
   cmd(ARG_TOKEN_EXPORT, "export", 0, 1, export, generic, true);
+  cmd(ARG_TOKEN_CNOTE, "cnote", 1, 1, cnote, generic, false);
   cmd(ARG_TOKEN_COMMIT, "commit", 1, 3, commit, generic, true);
   cmd(ARG_TOKEN_TOP_COMMIT, "tcommit", 0, 1, top_commit, generic, true);
   cmd(ARG_TOKEN_CHALLENGE, "challenge", 0, 1, challenge, generic, false);
@@ -5731,7 +6240,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_SWITCH_NAMES, "switchnames", 0, 0, switch_names, generic,
       false);
   cmd(ARG_TOKEN_SHOW_GAME, "shgame", 0, 0, show_game, generic, true);
-  cmd(ARG_TOKEN_SHOW_MOVES, "shmoves", 0, 1, show_moves_or_sim_results, generic,
+  cmd(ARG_TOKEN_SHOW_MOVES, "shmoves", 0, 2, show_moves_or_sim_results, generic,
       false);
   cmd(ARG_TOKEN_SHOW_INFERENCE, "shinference", 0, 1, show_inference, generic,
       false);
@@ -5780,6 +6289,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
   arg(ARG_TOKEN_PLIES, "plies", 1, 1);
+  arg(ARG_TOKEN_SHPLIES, "shplies", 1, 1);
   arg(ARG_TOKEN_ENDGAME_PLIES, "eplies", 1, 1);
   arg(ARG_TOKEN_ENDGAME_TOP_K, "etopk", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1);
@@ -5818,6 +6328,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_SHOW_PROMPT, "shprompt", 1, 1);
   arg(ARG_TOKEN_SAVE_SETTINGS, "savesettings", 1, 1);
   arg(ARG_TOKEN_AUTOSAVE_GCG, "autosavegcg", 1, 1);
+  arg(ARG_TOKEN_SHOW_GAME_WITH_MOVES, "shwithmoves", 1, 1);
 
 #undef cmd
 #undef arg
@@ -5845,6 +6356,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->max_num_display_plays = 15;
   config->num_small_plays = DEFAULT_SMALL_MOVE_LIST_CAPACITY;
   config->plies = 5;
+  config->shplies = 2;
   config->endgame_plies = 6;
   config->endgame_top_k = 1;
   config->eq_margin_inference = int_to_equity(5);
@@ -5866,6 +6378,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->use_heat_map = false;
   config->print_boards = false;
   config->print_on_finish = false;
+  config->show_game_with_moves = true;
   config->show_prompt = true;
   config->save_settings = true;
   config->autosave_gcg = true;
@@ -5989,6 +6502,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_LOAD:
     case ARG_TOKEN_NEW_GAME:
     case ARG_TOKEN_EXPORT:
+    case ARG_TOKEN_CNOTE:
     case ARG_TOKEN_COMMIT:
     case ARG_TOKEN_TOP_COMMIT:
     case ARG_TOKEN_CHALLENGE:
@@ -6109,6 +6623,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PLIES:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->plies);
+      break;
+    case ARG_TOKEN_SHPLIES:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->shplies);
       break;
     case ARG_TOKEN_ENDGAME_PLIES:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
@@ -6272,6 +6790,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PRINT_ON_FINISH:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->print_on_finish);
+      break;
+    case ARG_TOKEN_SHOW_GAME_WITH_MOVES:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->show_game_with_moves);
       break;
     case ARG_TOKEN_SHOW_PROMPT:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,

@@ -24,6 +24,7 @@ typedef struct SimArgs {
   int num_threads;
   int print_interval;
   int max_num_display_plays;
+  int max_num_display_plies;
   uint64_t seed;
   ThreadControl *thread_control;
   BAIOptions bai_options;
@@ -36,10 +37,10 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
               ThreadControl *thread_control, const Game *game,
               const bool sim_with_inference, const bool use_heat_map,
               const int num_threads, const int print_interval,
-              const int max_num_display_plays, const uint64_t seed,
-              const uint64_t max_iterations, const uint64_t min_play_iterations,
-              const double scond, const bai_threshold_t threshold,
-              const int time_limit_seconds,
+              const int max_num_display_plays, const int max_num_display_plies,
+              const uint64_t seed, const uint64_t max_iterations,
+              const uint64_t min_play_iterations, const double scond,
+              const bai_threshold_t threshold, const int time_limit_seconds,
               const bai_sampling_rule_t sampling_rule, const double cutoff,
               const InferenceArgs *inference_args, SimArgs *sim_args) {
   sim_args->num_plies = num_plies;
@@ -54,6 +55,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->num_threads = num_threads;
   sim_args->print_interval = print_interval;
   sim_args->max_num_display_plays = max_num_display_plays;
+  sim_args->max_num_display_plies = max_num_display_plies;
   sim_args->seed = seed;
   if (sim_args->use_inference) {
     sim_args->inference_args = *inference_args;

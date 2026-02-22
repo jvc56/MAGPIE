@@ -25,14 +25,23 @@ void string_builder_add_move_leave(StringBuilder *sb, const Rack *rack,
                                    const Move *move,
                                    const LetterDistribution *ld);
 
-void string_builder_add_move_list(StringBuilder *string_builder,
-                                  const MoveList *move_list, const Board *board,
-                                  const LetterDistribution *ld,
-                                  int max_num_display_plays,
-                                  bool use_ucgi_format);
+bool move_matches_filters(const Move *move, int filter_row, int filter_col,
+                          const MachineLetter *prefix_mls, int prefix_len,
+                          bool exclude_tile_placement_moves,
+                          const Board *board);
+
+void string_builder_add_move_list(
+    StringBuilder *string_builder, const MoveList *move_list,
+    const Board *board, const LetterDistribution *ld, int max_num_display_plays,
+    int filter_row, int filter_col, const MachineLetter *prefix_mls,
+    int prefix_len, bool exclude_tile_placement_moves, bool use_ucgi_format,
+    const char *game_board_string);
 
 char *move_list_get_string(const MoveList *move_list, const Board *board,
                            const LetterDistribution *ld,
-                           int max_num_display_plays, bool use_ucgi_format);
+                           int max_num_display_plays, int filter_row,
+                           int filter_col, const MachineLetter *prefix_mls,
+                           int prefix_len, bool exclude_tile_placement_moves,
+                           bool use_ucgi_format, const char *game_board_string);
 
 #endif

@@ -1056,3 +1056,102 @@ void string_builder_add_string_grid(StringBuilder *sb, const StringGrid *sg,
     }
   }
 }
+
+size_t visual_string_length(const char *str) {
+  if (!str) {
+    log_fatal("cannot get visual length of a null string");
+    return 0;
+  }
+  size_t len = 0;
+  while (*str) {
+    if ((unsigned char)*str == 0x1B && *(str + 1) == '[') {
+      // Skip ANSI escape sequence: ESC [ ... m
+      str += 2;
+      while (*str && *str != 'm') {
+        str++;
+      }
+      if (*str) {
+        str++;
+      }
+    } else if ((unsigned char)*str < 0x80) {
+      // ASCII character: 1 column
+      len++;
+      str++;
+    } else if (((unsigned char)*str & 0xE0) == 0xC0) {
+      // 2-byte UTF-8 sequence: 1 column
+      len++;
+      str++;
+      if (*str) {
+        str++;
+      }
+    } else if (((unsigned char)*str & 0xF0) == 0xE0) {
+      // 3-byte UTF-8 sequence: decode code point to determine column width
+      unsigned int cp = ((unsigned char)*str & 0x0F) << 12;
+      str++;
+      if (*str) {
+        cp |= ((unsigned char)*str & 0x3F) << 6;
+        str++;
+      }
+      if (*str) {
+        cp |= ((unsigned char)*str & 0x3F);
+        str++;
+      }
+      // Wide and fullwidth characters occupy 2 terminal columns.
+      // Covers Hangul Jamo, CJK blocks (incl. U+3000 ideographic space),
+      // Hiragana/Katakana, CJK Unified Ideographs, Yi, Hangul Syllables,
+      // CJK Compatibility Ideographs, Vertical/Compat Forms, Fullwidth Forms.
+      len +=
+          ((cp >= 0x1100 && cp <= 0x115F) || (cp >= 0x2E80 && cp <= 0x303E) ||
+           (cp >= 0x3041 && cp <= 0x33FF) || (cp >= 0x3400 && cp <= 0x9FFF) ||
+           (cp >= 0xA000 && cp <= 0xA4CF) || (cp >= 0xAC00 && cp <= 0xD7AF) ||
+           (cp >= 0xF900 && cp <= 0xFAFF) || (cp >= 0xFE10 && cp <= 0xFE6F) ||
+           (cp >= 0xFF01 && cp <= 0xFF60) || (cp >= 0xFFE0 && cp <= 0xFFE6))
+              ? 2
+              : 1;
+    } else {
+      // 4-byte sequences or continuation bytes: skip
+      str++;
+    }
+  }
+  return len;
+}
+
+void string_builder_add_with_board_interleave(StringBuilder *sb,
+                                              const char *content,
+                                              const char *board_string) {
+  StringSplitter *content_lines = split_string_by_newline(content, false);
+  StringSplitter *board_lines = split_string_by_newline(board_string, false);
+  const int num_content_lines =
+      string_splitter_get_number_of_items(content_lines);
+  const int num_board_lines = string_splitter_get_number_of_items(board_lines);
+
+  size_t max_board_visual_width = 0;
+  for (int i = 0; i < num_board_lines; i++) {
+    size_t vlen =
+        visual_string_length(string_splitter_get_item(board_lines, i));
+    if (vlen > max_board_visual_width) {
+      max_board_visual_width = vlen;
+    }
+  }
+
+  const int total_lines =
+      num_content_lines > num_board_lines ? num_content_lines : num_board_lines;
+  for (int i = 0; i < total_lines; i++) {
+    const char *board_line =
+        i < num_board_lines ? string_splitter_get_item(board_lines, i) : NULL;
+    const char *content_line =
+        i < num_content_lines ? string_splitter_get_item(content_lines, i) : "";
+    if (board_line) {
+      size_t padding =
+          max_board_visual_width - visual_string_length(board_line);
+      string_builder_add_string(sb, board_line);
+      string_builder_add_spaces(sb, (int)padding + 2);
+    } else {
+      string_builder_add_spaces(sb, (int)max_board_visual_width + 2);
+    }
+    string_builder_add_string(sb, content_line);
+    string_builder_add_char(sb, '\n');
+  }
+  string_splitter_destroy(content_lines);
+  string_splitter_destroy(board_lines);
+}

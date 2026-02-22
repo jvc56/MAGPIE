@@ -8,12 +8,14 @@
 #include "../src/ent/game.h"
 #include "../src/ent/game_history.h"
 #include "../src/ent/letter_distribution.h"
+#include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/players_data.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/trie.h"
 #include "../src/ent/wmp.h"
 #include "../src/impl/config.h"
+#include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_constants.h"
@@ -1764,9 +1766,14 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "rack BARCHAN", ERROR_STATUS_SUCCESS);
   // Generate and sim
   assert_config_exec_status(config, "gsim -seed 1", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "shm 1", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "shm 2", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "shm 5", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shm 1 -shplies 1", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shm 2 -shplies 25", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shm 5 -shplies 3", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shm 8d", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shm BAR", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shm 8e BAR", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shm -", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shm - AB", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "t", ERROR_STATUS_SUCCESS);
   // No rack was given to the top commit command, so it should commit the best
   // simmed play 8D BARCHAN should sim best
@@ -2186,6 +2193,86 @@ void test_config_challenge_rack(void) {
   config_destroy(config);
 }
 
+static void assert_note_with_move_ref(Config *config, int move_idx) {
+  const MoveList *ml = config_get_move_list(config);
+  const Move *move = move_list_get_move(ml, move_idx - 1);
+  const Game *game = config_get_game(config);
+
+  StringBuilder *expected_sb = string_builder_create();
+  string_builder_add_move(expected_sb, game_get_board(game), move,
+                          config_get_ld(config), false);
+
+  StringBuilder *cmd_sb = string_builder_create();
+  string_builder_add_formatted_string(cmd_sb, "note $%d", move_idx);
+  assert_config_exec_status(config, string_builder_peek(cmd_sb),
+                            ERROR_STATUS_SUCCESS);
+
+  const GameHistory *gh = config_get_game_history(config);
+  assert_strings_equal(game_history_get_note_for_most_recent_event(gh),
+                       string_builder_peek(expected_sb));
+
+  string_builder_destroy(expected_sb);
+  string_builder_destroy(cmd_sb);
+}
+
+void test_config_note_move_interpolation(void) {
+  // No moves: game has events but no moves have been generated.
+  Config *config = config_create_or_die("set -lex CSW21");
+  assert_config_exec_status(config, "load testdata/gcgs/success.gcg",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "note $1", ERROR_STATUS_NOTE_NO_MOVES);
+  config_destroy(config);
+
+  // Set up a game with generated moves for the remaining tests.
+  // Use numplays 150 with RETINAS after one play to guarantee >= 100 moves.
+  config = config_create_or_die("set -lex CSW21 -numplays 150");
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p1 a", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p2 b", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "t RETINAS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r RETINAS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+
+  // Move index out of range.
+  const MoveList *ml = config_get_move_list(config);
+  const int count = move_list_get_count(ml);
+  StringBuilder *cmd_sb = string_builder_create();
+  string_builder_add_formatted_string(cmd_sb, "note $%d", count + 1);
+  assert_config_exec_status(config, string_builder_peek(cmd_sb),
+                            ERROR_STATUS_NOTE_MOVE_INDEX_OUT_OF_RANGE);
+  string_builder_destroy(cmd_sb);
+
+  // 1-digit index.
+  assert_note_with_move_ref(config, 1);
+
+  // 2-digit index.
+  assert_note_with_move_ref(config, 10);
+
+  // 3-digit index.
+  assert(count >= 100);
+  assert_note_with_move_ref(config, 100);
+
+  // Multiple move references in a single note.
+  const Game *game = config_get_game(config);
+  StringBuilder *expected_sb = string_builder_create();
+  string_builder_add_string(expected_sb, "should have played ");
+  string_builder_add_move(expected_sb, game_get_board(game),
+                          move_list_get_move(ml, 0), config_get_ld(config),
+                          false);
+  string_builder_add_string(expected_sb, " instead of ");
+  string_builder_add_move(expected_sb, game_get_board(game),
+                          move_list_get_move(ml, 2), config_get_ld(config),
+                          false);
+  assert_config_exec_status(config, "note should have played $1 instead of $3",
+                            ERROR_STATUS_SUCCESS);
+  const GameHistory *gh = config_get_game_history(config);
+  assert_strings_equal(game_history_get_note_for_most_recent_event(gh),
+                       string_builder_peek(expected_sb));
+  string_builder_destroy(expected_sb);
+
+  config_destroy(config);
+}
+
 void test_config(void) {
   test_game_display();
   test_trie();
@@ -2199,4 +2286,5 @@ void test_config(void) {
   test_config_exec_parse_args();
   test_config_lexical_data();
   test_config_wmp();
+  test_config_note_move_interpolation();
 }
