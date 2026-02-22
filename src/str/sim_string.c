@@ -22,7 +22,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-typedef enum {
+enum {
   MIN_NUM_SIM_RESULT_COLS = 9,
 };
 
