@@ -22,6 +22,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+typedef enum {
+  MIN_NUM_SIM_RESULT_COLS = 9,
+};
+
 void string_builder_add_simmed_play_ply_counts(StringBuilder *sb,
                                                const Board *board,
                                                const LetterDistribution *ld,
@@ -112,7 +116,7 @@ bool string_builder_add_sim_stats_with_display_lock(
   const int num_plies = sim_results_get_num_plies(sim_results);
   const int num_display_plies =
       max_num_display_plies < num_plies ? max_num_display_plies : num_plies;
-  const int num_cols = 9 + num_display_plies * 2;
+  const int num_cols = MIN_NUM_SIM_RESULT_COLS + num_display_plies * 2;
   StringGrid *sg = string_grid_create(num_rows, num_cols, 1);
 
   int curr_row = 0;
