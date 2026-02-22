@@ -4,11 +4,13 @@
 #include "../compat/memory_info.h"
 #include "../def/autoplay_defs.h"
 #include "../def/bai_defs.h"
+#include "../def/board_defs.h"
 #include "../def/config_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/exec_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
@@ -1611,6 +1613,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     string_builder_add_char(sb, ',');
     string_builder_add_string(sb, name);
     string_builder_add_string(sb, " - ");
+    if (is_string_empty_or_null(text)) {
+      // To silence the tidier warning about the text variable potentially being
+      // uninitialized, even though it is guaranteed to be initialized in this
+      // branch since every case in the switch statement initializes it.
+      text = "";
+    }
     const char *dot = strchr(text, '.');
     const int text_len = dot ? (int)(dot - text + 1) : (int)strlen(text);
     string_builder_add_formatted_string(sb, "%.*s\n", text_len, text);
@@ -2686,7 +2694,8 @@ static bool parse_move_coord(const char *str, int *row, int *col,
       return false;
     }
     return true;
-  } else if (isdigit((unsigned char)str[0])) {
+  }
+  if (isdigit((unsigned char)str[0])) {
     // Horizontal notation: digits then single letter (e.g. "12d")
     int i = 1;
     while (i < len && isdigit((unsigned char)str[i])) {
@@ -3786,11 +3795,12 @@ static char *build_interpolated_note(Config *config, const char *raw_note,
       }
       const bool use_sim =
           sim_results_get_valid_for_current_game_state(config->sim_results);
-      const int num_moves =
-          use_sim ? sim_results_get_number_of_plays(config->sim_results)
-                  : (config->move_list ? move_list_get_count(config->move_list)
-                                       : 0);
-      printf("num_moves: %d\n", num_moves);
+      int num_moves = 0;
+      if (use_sim) {
+        num_moves = sim_results_get_number_of_plays(config->sim_results);
+      } else if (config->move_list) {
+        num_moves = move_list_get_count(config->move_list);
+      }
       if (num_moves == 0) {
         error_stack_push(
             error_stack, ERROR_STATUS_NOTE_NO_MOVES,

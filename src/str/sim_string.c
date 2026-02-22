@@ -1,6 +1,7 @@
 
 #include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../ent/bai_result.h"
 #include "../ent/board.h"
 #include "../ent/equity.h"

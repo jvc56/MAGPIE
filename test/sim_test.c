@@ -681,9 +681,8 @@ void test_sim_perf(const char *sim_perf_iters) {
           config_simulate_and_return_status(config, NULL, NULL, sim_results);
       assert(status == ERROR_STATUS_SUCCESS);
 
-      char *sim_stats_str =
-          sim_results_get_string(game, sim_results, 100, 100, -1, -1, NULL, 0,
-                                 false, true, NULL);
+      char *sim_stats_str = sim_results_get_string(
+          game, sim_results, 100, 100, -1, -1, NULL, 0, false, true, NULL);
       if (i < details_limit) {
         append_content_to_file(sim_perf_game_details_filename, sim_stats_str);
       }

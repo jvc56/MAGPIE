@@ -1145,9 +1145,9 @@ void string_builder_add_with_board_interleave(StringBuilder *sb,
       size_t padding =
           max_board_visual_width - visual_string_length(board_line);
       string_builder_add_string(sb, board_line);
-      string_builder_add_spaces(sb, padding + 2);
+      string_builder_add_spaces(sb, (int)padding + 2);
     } else {
-      string_builder_add_spaces(sb, max_board_visual_width + 2);
+      string_builder_add_spaces(sb, (int)max_board_visual_width + 2);
     }
     string_builder_add_string(sb, content_line);
     string_builder_add_char(sb, '\n');

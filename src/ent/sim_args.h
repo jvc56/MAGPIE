@@ -38,10 +38,9 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
               const bool sim_with_inference, const bool use_heat_map,
               const int num_threads, const int print_interval,
               const int max_num_display_plays, const int max_num_display_plies,
-              const uint64_t seed,
-              const uint64_t max_iterations, const uint64_t min_play_iterations,
-              const double scond, const bai_threshold_t threshold,
-              const int time_limit_seconds,
+              const uint64_t seed, const uint64_t max_iterations,
+              const uint64_t min_play_iterations, const double scond,
+              const bai_threshold_t threshold, const int time_limit_seconds,
               const bai_sampling_rule_t sampling_rule, const double cutoff,
               const InferenceArgs *inference_args, SimArgs *sim_args) {
   sim_args->num_plies = num_plies;

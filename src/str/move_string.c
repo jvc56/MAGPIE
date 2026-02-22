@@ -13,6 +13,7 @@
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 void string_builder_add_move_description(StringBuilder *move_string_builder,
                                          const Move *move,
