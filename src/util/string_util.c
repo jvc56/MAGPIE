@@ -1062,7 +1062,7 @@ size_t visual_string_length(const char *str) {
     log_fatal("cannot get visual length of a null string");
     return 0;
   }
-  int len = 0;
+  size_t len = 0;
   while (*str) {
     if ((unsigned char)*str == 0x1B && *(str + 1) == '[') {
       // Skip ANSI escape sequence: ESC [ ... m

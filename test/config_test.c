@@ -2224,8 +2224,7 @@ void test_config_note_move_interpolation(void) {
   config_destroy(config);
 
   // Set up a game with generated moves for the remaining tests.
-  // Use numplays 150 with RETINAS on an opening board to guarantee >= 100
-  // moves.
+  // Use numplays 150 with RETINAS after one play to guarantee >= 100 moves.
   config = config_create_or_die("set -lex CSW21 -numplays 150");
   assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "p1 a", ERROR_STATUS_SUCCESS);
