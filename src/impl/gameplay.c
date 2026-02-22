@@ -12,18 +12,25 @@
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
+#include "../ent/inference_args.h"
 #include "../ent/klv.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/move_undo.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+#include "../ent/sim_args.h"
+#include "../ent/sim_results.h"
+#include "../ent/stats.h"
 #include "../ent/validated_move.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "autoplay.h"
 #include "move_gen.h"
+#include "simmer.h"
 #include <assert.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -912,6 +919,124 @@ Move *get_top_equity_move_for_inferences(
                                 target_leave_size_for_exchange_cutoff};
   generate_moves(&args);
   return move_list_get_move(move_list, 0);
+}
+
+Move *get_top_computer_move(Game *game, int thread_index, MoveList *move_list,
+                            SimResults *sim_results,
+                            const struct AutoplayArgs *autoplay_args,
+                            int player_index) {
+  // Determine which plies to use for this player
+  int sim_plies = player_index == 0 ? autoplay_args->p1_sim_plies
+                                    : autoplay_args->p2_sim_plies;
+
+  // If sim_plies is 0 or if bag is empty, use static equity
+  if (sim_plies == 0 || bag_get_letters(game_get_bag(game)) < RACK_SIZE) {
+    return get_top_equity_move(game, thread_index, move_list);
+  }
+
+  // Generate all moves
+  const MoveGenArgs gen_args = {.game = game,
+                                .move_list = move_list,
+                                .move_record_type = MOVE_RECORD_ALL,
+                                .move_sort_type = MOVE_SORT_EQUITY,
+                                .override_kwg = NULL,
+                                .thread_index = thread_index,
+                                .eq_margin_movegen = 0,
+                                .target_equity = EQUITY_MAX_VALUE,
+                                .target_leave_size_for_exchange_cutoff =
+                                    UNSET_LEAVE_SIZE};
+  generate_moves(&gen_args);
+
+  // If only one move, return it
+  if (move_list_get_count(move_list) <= 1) {
+    return move_list_get_move(move_list, 0);
+  }
+
+  // Set up simulation parameters
+  const int ld_size = ld_get_size(game_get_ld(game));
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  Rack nontarget_known_tiles;
+  rack_set_dist_size_and_reset(&nontarget_known_tiles, ld_size);
+  Rack target_known_inference_tiles;
+  rack_set_dist_size_and_reset(&target_known_inference_tiles, ld_size);
+
+  InferenceArgs inference_args;
+  // Initialize with sensible defaults (will not be used for inference)
+  inference_args.use_game_history = false;
+  inference_args.use_inference_cutoff_optimization = false;
+  inference_args.game_history = NULL;
+  inference_args.target_index = 0;
+  inference_args.target_score = int_to_equity(0);
+  inference_args.target_num_exch = 0;
+  inference_args.move_capacity = 0;
+  inference_args.equity_margin = int_to_equity(0);
+  inference_args.target_played_tiles = &target_played_tiles;
+  inference_args.target_known_rack = &nontarget_known_tiles;
+  inference_args.nontarget_known_rack = &nontarget_known_tiles;
+  inference_args.game = game;
+  inference_args.num_threads = 1;
+  inference_args.print_interval = 0;
+  inference_args.thread_control = autoplay_args->thread_control;
+
+  SimArgs sim_args;
+  double stop_cond_pct = player_index == 0 ? autoplay_args->p1_stop_cond_pct
+                                           : autoplay_args->p2_stop_cond_pct;
+  uint64_t max_iterations = player_index == 0
+                                ? autoplay_args->p1_max_iterations
+                                : autoplay_args->p2_max_iterations;
+  uint64_t min_play_iterations = player_index == 0
+                                     ? autoplay_args->p1_min_play_iterations
+                                     : autoplay_args->p2_min_play_iterations;
+
+  sim_args_fill(
+      sim_plies, move_list, NULL, autoplay_args->win_pcts, NULL,
+      autoplay_args->thread_control, game, false, false,
+      1, // Use single thread in concurrent mode
+      0, // print_interval set to 0 for autoplay
+      autoplay_args->max_num_display_plays, autoplay_args->seed, max_iterations,
+      min_play_iterations, stop_cond_pct, autoplay_args->threshold,
+      (int)autoplay_args->time_limit_seconds, autoplay_args->sampling_rule,
+      autoplay_args->cutoff, &inference_args, &sim_args);
+
+  // Reset sim results with move list
+  sim_results_reset(move_list, sim_results, sim_plies, autoplay_args->seed,
+                    false);
+
+  // Run simulation
+  if (autoplay_args->multi_threading_mode) {
+    // Multi-threaded mode: use all threads for this simulation
+    sim_args.num_threads = autoplay_args->num_threads;
+    SimCtx *sim_ctx = NULL;
+    simulate(&sim_args, &sim_ctx, sim_results, NULL);
+    if (sim_ctx) {
+      sim_ctx_destroy(sim_ctx);
+    }
+  } else {
+    // Single-threaded mode: use single thread to avoid blocking other games
+    simulate_without_ctx(&sim_args, sim_results, NULL);
+  }
+
+  // Get the move with the best simulated equity
+  const Move *best_move = NULL;
+  double best_equity = -INFINITY;
+
+  for (int i = 0; i < move_list_get_count(move_list); i++) {
+    SimmedPlay *sp = sim_results_get_simmed_play(sim_results, i);
+    if (sp) {
+      double move_equity = stat_get_mean(simmed_play_get_equity_stat(sp));
+      if (move_equity > best_equity) {
+        best_equity = move_equity;
+        best_move = simmed_play_get_move(sp);
+      }
+    }
+  }
+
+  if (best_move) {
+    return (Move *)best_move;
+  }
+  // Fallback if sim results were empty
+  return get_top_equity_move(game, thread_index, move_list);
 }
 
 void validate_challenge_bonus_order(const GameEvent *game_event,
