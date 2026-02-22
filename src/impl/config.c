@@ -1781,26 +1781,31 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_SHOW_PROMPT,       /* shprompt */
         ARG_TOKEN_NUMBER_OF_THREADS, /* threads */
     };
+    int total_tokens = 0;
     string_builder_add_string(sb, "Game Navigation Commands\n\n");
     for (size_t i = 0; i < sizeof(game_nav_cmds) / sizeof(game_nav_cmds[0]);
          i++) {
       add_help_arg_to_string_builder(config, game_nav_cmds[i], sb, false, true);
+      total_tokens++;
     }
     string_builder_add_string(sb, "\nGame Annotation Commands\n\n");
     for (size_t i = 0; i < sizeof(game_anno_cmds) / sizeof(game_anno_cmds[0]);
          i++) {
       add_help_arg_to_string_builder(config, game_anno_cmds[i], sb, false,
                                      true);
+      total_tokens++;
     }
     string_builder_add_string(sb, "\nGame Analysis Commands\n\n");
     for (size_t i = 0;
          i < sizeof(game_analysis_cmds) / sizeof(game_analysis_cmds[0]); i++) {
       add_help_arg_to_string_builder(config, game_analysis_cmds[i], sb, false,
                                      true);
+      total_tokens++;
     }
     string_builder_add_string(sb, "\nOther Commands\n\n");
     for (size_t i = 0; i < sizeof(other_cmds) / sizeof(other_cmds[0]); i++) {
       add_help_arg_to_string_builder(config, other_cmds[i], sb, false, true);
+      total_tokens++;
     }
     // Async Commands in alphabetical order: status, stop
     string_builder_add_string(sb, "\nAsync Commands\n\n");
@@ -1811,22 +1816,27 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     string_builder_add_string(sb, "\nPlayer Options\n\n");
     for (size_t i = 0; i < sizeof(player_opts) / sizeof(player_opts[0]); i++) {
       add_help_arg_to_string_builder(config, player_opts[i], sb, false, true);
+      total_tokens++;
     }
     string_builder_add_string(sb, "\nGame Analysis Options\n\n");
     for (size_t i = 0;
          i < sizeof(game_analysis_opts) / sizeof(game_analysis_opts[0]); i++) {
       add_help_arg_to_string_builder(config, game_analysis_opts[i], sb, false,
                                      true);
+      total_tokens++;
     }
     string_builder_add_string(sb, "\nDisplay Options\n\n");
     for (size_t i = 0; i < sizeof(display_opts) / sizeof(display_opts[0]);
          i++) {
       add_help_arg_to_string_builder(config, display_opts[i], sb, false, true);
+      total_tokens++;
     }
     string_builder_add_string(sb, "\nOther Options\n\n");
     for (size_t i = 0; i < sizeof(other_opts) / sizeof(other_opts[0]); i++) {
       add_help_arg_to_string_builder(config, other_opts[i], sb, false, true);
+      total_tokens++;
     }
+    assert(total_tokens == NUMBER_OF_ARG_TOKENS);
   } else {
     add_help_arg_to_string_builder(config, help_arg_token, sb, false, false);
   }
@@ -2777,7 +2787,7 @@ char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
     if (prefix_len < 0) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
-          get_formatted_string("invalid prefix letters: %s", prefix_str));
+          get_formatted_string("invalid prefix letters '%s'", prefix_str));
       return empty_string();
     }
   }
@@ -3780,6 +3790,7 @@ static char *build_interpolated_note(Config *config, const char *raw_note,
           use_sim ? sim_results_get_number_of_plays(config->sim_results)
                   : (config->move_list ? move_list_get_count(config->move_list)
                                        : 0);
+      printf("num_moves: %d\n", num_moves);
       if (num_moves == 0) {
         error_stack_push(
             error_stack, ERROR_STATUS_NOTE_NO_MOVES,
@@ -3855,7 +3866,7 @@ char *impl_cnote(Config *config, ErrorStack *error_stack) {
   }
   char *note = build_interpolated_note(config, raw_note, error_stack);
   free(raw_note);
-  if (!note) {
+  if (!error_stack_is_empty(error_stack)) {
     string_splitter_destroy(split);
     return empty_string();
   }
@@ -4442,7 +4453,7 @@ char *impl_note(Config *config, ErrorStack *error_stack) {
   // (1-indexed) in the current move list.
   const char *raw_note = config_get_parg_value(config, ARG_TOKEN_NOTE, 0);
   char *note = build_interpolated_note(config, raw_note, error_stack);
-  if (!note) {
+  if (!error_stack_is_empty(error_stack)) {
     return empty_string();
   }
   game_history_set_note_for_most_recent_event(config->game_history, note);

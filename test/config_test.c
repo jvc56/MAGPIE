@@ -8,10 +8,10 @@
 #include "../src/ent/game.h"
 #include "../src/ent/game_history.h"
 #include "../src/ent/letter_distribution.h"
+#include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/players_data.h"
 #include "../src/ent/sim_results.h"
-#include "../src/ent/move.h"
 #include "../src/ent/trie.h"
 #include "../src/ent/wmp.h"
 #include "../src/impl/config.h"
@@ -2224,14 +2224,15 @@ void test_config_note_move_interpolation(void) {
   config_destroy(config);
 
   // Set up a game with generated moves for the remaining tests.
-  // Use numplays 150 with RETINAS on an opening board to guarantee >= 100 moves.
+  // Use numplays 150 with RETINAS on an opening board to guarantee >= 100
+  // moves.
   config = config_create_or_die("set -lex CSW21 -numplays 150");
   assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "p1 a", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "p2 b", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "rack RETINAS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "t RETINAS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r RETINAS", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
 
   // Move index out of range.
   const MoveList *ml = config_get_move_list(config);
@@ -2263,8 +2264,7 @@ void test_config_note_move_interpolation(void) {
   string_builder_add_move(expected_sb, game_get_board(game),
                           move_list_get_move(ml, 2), config_get_ld(config),
                           false);
-  assert_config_exec_status(config,
-                            "note should have played $1 instead of $3",
+  assert_config_exec_status(config, "note should have played $1 instead of $3",
                             ERROR_STATUS_SUCCESS);
   const GameHistory *gh = config_get_game_history(config);
   assert_strings_equal(game_history_get_note_for_most_recent_event(gh),
