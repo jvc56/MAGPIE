@@ -176,7 +176,7 @@ static void run_timed_selfplay_from(const char *cgp_file, int num_games,
         thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
 
         TimerArgs ta = {.tc = tc, .seconds = time_limit_sec, .done = false};
-        pthread_t timer_tid;
+        pthread_t timer_tid; // NOLINT(misc-include-cleaner)
         pthread_create(&timer_tid, NULL, timer_thread_func, &ta);
 
         Timer t;
