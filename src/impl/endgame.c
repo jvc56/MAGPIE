@@ -859,6 +859,11 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
         compare_small_moves_by_estimated_value);
 }
 
+static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
+                                        const KWG *pruned_kwg, int opp_idx,
+                                        int thread_index,
+                                        uint64_t *tiles_played_bv_out);
+
 // Greedy playout at depth==0 leaf nodes: generate moves iteratively,
 // pick best (with conservation bonus), compute final spread with rack
 // adjustments, unplay moves, store in TT. Returns evaluation from
@@ -871,6 +876,18 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
   int plies = worker->solver->requested_plies;
   int playout_depth = 0;
   int max_playout = MAX_SEARCH_DEPTH - plies;
+
+  // Recompute opp_stuck_frac from the current position rather than using the
+  // parent's value. This ensures position-dependent (not path-dependent)
+  // evaluation, which is required for TT consistency across threads and
+  // transpositions.
+  if (worker->solver->use_heuristics) {
+    int opp_idx = 1 - solving_player;
+    opp_stuck_frac = compute_opp_stuck_fraction(
+        worker->game_copy, worker->move_list,
+        solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx,
+        worker->thread_index, NULL);
+  }
 
   while (game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE &&
          playout_depth < max_playout) {
