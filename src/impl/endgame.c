@@ -1262,12 +1262,12 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   if (worker->solver->forced_pass_bypass && arena_alloced && nplays == 1 &&
       game_get_consecutive_scoreless_turns(worker->game_copy) == 0) {
     size_t fp_offset = worker->small_move_arena->size - sizeof(SmallMove);
-    SmallMove *only_move =
-        (SmallMove *)(worker->small_move_arena->memory + fp_offset);
+    const SmallMove *only_move =
+        (const SmallMove *)(worker->small_move_arena->memory + fp_offset);
     if (small_move_is_pass(only_move)) {
       // Save move data before arena may be reallocated during recursion
       SmallMove pass_move = *only_move;
-      Board *board = game_get_board(worker->game_copy);
+      const Board *board = game_get_board(worker->game_copy);
       small_move_to_move(worker->move_list->spare_move, &pass_move, board);
 
       int last_consecutive_scoreless_turns =
