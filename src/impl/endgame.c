@@ -1588,8 +1588,13 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   }
 
   for (int p = start; p <= plies; p++) {
-    // Check if another thread has completed the full search
-    if (iterative_deepening_should_stop(worker->solver)) {
+    // Thread 0 is authoritative: it always runs all depths so its final result
+    // can be stored. Non-thread-0 threads stop early when search_complete is
+    // set. All threads stop on user interrupt.
+    if (iterative_deepening_should_stop(worker->solver) &&
+        (worker->thread_index > 0 ||
+         thread_control_get_status(worker->solver->thread_control) ==
+             THREAD_CONTROL_STATUS_USER_INTERRUPT)) {
       break;
     }
 
@@ -1611,8 +1616,12 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
 
       // Search with narrow window, widen on fail-high/fail-low
       while (true) {
-        // Check if another thread completed
-        if (iterative_deepening_should_stop(worker->solver)) {
+        // Same stop logic as the outer depth loop: thread 0 is authoritative
+        // and only stops on user interrupt, not on search_complete.
+        if (iterative_deepening_should_stop(worker->solver) &&
+            (worker->thread_index > 0 ||
+             thread_control_get_status(worker->solver->thread_control) ==
+                 THREAD_CONTROL_STATUS_USER_INTERRUPT)) {
           search_valid = false;
           break;
         }
@@ -1663,7 +1672,17 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     worker->best_pv = pv;
     worker->completed_depth = p;
 
-    endgame_results_set_best_pvline(worker->solver->results, &pv, pv_value, p);
+    // At the final ply depth, only thread 0 stores its result. Non-thread-0
+    // threads can produce incorrect values at depth=plies via ABDADA
+    // approximation (they start at a higher depth, so their early aspiration
+    // windows are centered on 0 rather than the true value). Thread 0 always
+    // starts at depth 1 and has accurate prev_value references for aspiration
+    // centering at every depth, making it the authoritative source. At
+    // intermediate depths, any thread may store (for interrupt correctness).
+    if (p < plies || worker->thread_index == 0) {
+      endgame_results_set_best_pvline(worker->solver->results, &pv, pv_value,
+                                      p);
+    }
 
     // Call per-ply callback (only thread 0 to avoid race conditions)
     if (worker->thread_index == 0 && worker->solver->per_ply_callback) {
