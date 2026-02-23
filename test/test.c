@@ -45,6 +45,7 @@
 #include "sim_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
+#include "timed_endgame_test.h"
 #include "transposition_table_test.h"
 #include "validated_move_test.h"
 #include "win_pct_test.h"
@@ -124,13 +125,14 @@ static TestEntry test_table[] = {
 static TestEntry on_demand_test_table[] = {
     {"endgame_wasm", test_endgame_wasm},
     {"infercmp", test_infer_cmp},
-    {"benchend", test_benchmark_endgame},
-    {"benchab", test_benchmark_endgame_ab},
-    {"stucksurvey", test_stuck_tile_survey},
-    {"stuckletters", test_stuck_letter_frequency},
-    {"selfplay4", test_benchmark_selfplay_4ply},
-    {"selfplay5", test_benchmark_selfplay_5ply},
-    {"threadscale", test_benchmark_thread_scaling},
+    {"genstuck", test_generate_stuck_cgps},
+    {"gennonstuck", test_generate_nonstuck_cgps},
+    {"benchfp", test_benchmark_forced_pass},
+    {"benchns", test_benchmark_nonstuck},
+    {"benchns3v3", test_benchmark_nonstuck_3v3},
+    {"timedab", test_benchmark_timed_selfplay},
+    {"overnight", test_benchmark_timed_overnight},
+    {"timedhard", test_benchmark_timed_hard},
     {"multipv", test_multi_pv},
     {"kue", test_kue},
     {"monsterq", test_monster_q},

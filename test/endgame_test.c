@@ -162,6 +162,7 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   endgame_args.initial_small_move_arena_size = initial_small_move_arena_size;
   endgame_args.num_threads = 6;
   endgame_args.use_heuristics = true;
+  endgame_args.forced_pass_bypass = true;
   endgame_args.num_top_moves = 1;
   endgame_args.per_ply_callback = print_pv_callback;
   endgame_args.per_ply_callback_data = &timer;
@@ -474,6 +475,7 @@ void test_monster_q(void) {
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args.num_threads = 6;
   endgame_args.use_heuristics = true;
+  endgame_args.forced_pass_bypass = true;
   endgame_args.num_top_moves = 1;
   endgame_args.per_ply_callback = print_pv_callback;
   endgame_args.per_ply_callback_data = &timer;

@@ -103,6 +103,7 @@ struct EndgameSolver {
   bool transposition_table_optim;
   bool negascout_optim;
   bool use_heuristics;
+  bool forced_pass_bypass;
   PVLine principal_variation;
 
   KWG *pruned_kwgs[2];
@@ -348,8 +349,9 @@ static void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
     num_moves++;
   }
 
-  // All moves up to here are from exact search (original PV + TT extension)
-  pv_line->negamax_depth = num_moves;
+  // Preserve original negamax_depth from the search. TT-extended moves
+  // are from cached entries, not the current depth's negamax search.
+  // The | separator in PV display marks the search depth boundary.
 
   // Greedy playout: if game isn't over, extend PV with highest-scoring moves.
   // This handles cases where the search PV was truncated (e.g., parallel search
@@ -367,6 +369,7 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->iterative_deepening_optim = true;
   es->negascout_optim = true;
   es->use_heuristics = endgame_args->use_heuristics;
+  es->forced_pass_bypass = endgame_args->forced_pass_bypass;
   int num_top_moves = endgame_args->num_top_moves;
   if (num_top_moves <= 0) {
     num_top_moves = 1;
@@ -918,24 +921,43 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
     // prefer conservation: penalize playing many tiles / high-value tiles.
     int playout_on_turn = game_get_player_on_turn_index(worker->game_copy);
     bool conserve = opp_stuck_frac > 0.0F && playout_on_turn == solving_player;
-    int playout_rack_size =
-        conserve ? player_get_rack(
-                       game_get_player(worker->game_copy, playout_on_turn))
-                       ->number_of_letters
-                 : 0;
+
+    // Pre-compute voluntary pass penalty for conservation mode.
+    // By passing instead of going out, the game heads toward a 6-zero
+    // ending where both players lose 1x their rack value, instead of
+    // gaining 2x opponent's rack. Cost: (own_rack + opp_rack) * stuck_frac.
+    int pass_penalty = 0;
+    if (conserve && worker->solver->forced_pass_bypass) {
+      const LetterDistribution *ld = game_get_ld(worker->game_copy);
+      const Rack *own_rack =
+          player_get_rack(game_get_player(worker->game_copy, playout_on_turn));
+      const Rack *opp_rack = player_get_rack(
+          game_get_player(worker->game_copy, 1 - playout_on_turn));
+      pass_penalty =
+          (int)((float)(equity_to_int(rack_get_score(ld, own_rack)) +
+                        equity_to_int(rack_get_score(ld, opp_rack))) *
+                opp_stuck_frac);
+    }
 
     int best_idx = 0;
     int best_adj = INT32_MIN;
     for (int j = 0; j < nplays; j++) {
       const SmallMove *sm = worker->move_list->small_moves[j];
-      int adj = small_move_get_score(sm);
-      if (conserve && !small_move_is_pass(sm) &&
-          small_move_get_tiles_played(sm) < playout_rack_size) {
-        small_move_to_move(worker->move_list->spare_move, sm,
-                           game_get_board(worker->game_copy));
-        adj -= compute_conservation_bonus(worker->move_list->spare_move,
-                                          game_get_ld(worker->game_copy),
-                                          opp_stuck_frac);
+      int score = small_move_get_score(sm);
+      int adj;
+      if (conserve) {
+        if (small_move_is_pass(sm)) {
+          adj = score - pass_penalty;
+        } else {
+          small_move_to_move(worker->move_list->spare_move, sm,
+                             game_get_board(worker->game_copy));
+          int conservation_bonus = compute_conservation_bonus(
+              worker->move_list->spare_move, game_get_ld(worker->game_copy),
+              opp_stuck_frac);
+          adj = score - conservation_bonus;
+        }
+      } else {
+        adj = score;
       }
       if (adj > best_adj) {
         best_adj = adj;
@@ -1232,6 +1254,72 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
     nplays = worker->n_initial_moves;
   }
 
+  // Forced-pass fast path: when the only legal move is pass,
+  // play it without consuming a depth ply. Since a forced pass is
+  // deterministic (no branching), it shouldn't cost search depth.
+  // Guard: only when previous move scored (consecutive_scoreless_turns == 0)
+  // to avoid non-termination in mutual-pass endgames.
+  if (worker->solver->forced_pass_bypass && arena_alloced && nplays == 1 &&
+      game_get_consecutive_scoreless_turns(worker->game_copy) == 0) {
+    size_t fp_offset = worker->small_move_arena->size - sizeof(SmallMove);
+    const SmallMove *only_move =
+        (const SmallMove *)(worker->small_move_arena->memory + fp_offset);
+    if (small_move_is_pass(only_move)) {
+      // Save move data before arena may be reallocated during recursion
+      SmallMove pass_move = *only_move;
+      const Board *board = game_get_board(worker->game_copy);
+      small_move_to_move(worker->move_list->spare_move, &pass_move, board);
+
+      int last_consecutive_scoreless_turns =
+          game_get_consecutive_scoreless_turns(worker->game_copy);
+
+      MoveUndo pass_undo;
+      play_move_incremental(worker->move_list->spare_move, worker->game_copy,
+                            &pass_undo);
+
+      uint64_t child_key = 0;
+      if (worker->solver->transposition_table_optim) {
+        const Rack *stm_rack = player_get_rack(player_on_turn);
+        child_key = zobrist_add_move(
+            worker->solver->transposition_table->zobrist, node_key,
+            worker->move_list->spare_move, stm_rack,
+            on_turn_idx == worker->solver->solving_player,
+            game_get_consecutive_scoreless_turns(worker->game_copy),
+            last_consecutive_scoreless_turns);
+      }
+
+      // Recurse at SAME depth (forced pass doesn't consume depth)
+      child_pv.num_moves = 0;
+      int32_t value = abdada_negamax(worker, child_key, depth, -beta, -alpha,
+                                     &child_pv, pv_node, false, opp_stuck_frac);
+
+      unplay_move_incremental(worker->game_copy, &pass_undo);
+
+      arena_dealloc(worker->small_move_arena, sizeof(SmallMove));
+
+      if (abdada_active) {
+        transposition_table_leave_node(worker->solver->transposition_table,
+                                       node_key);
+      }
+
+      if (value == ABDADA_INTERRUPTED) {
+        return ABDADA_INTERRUPTED;
+      }
+
+      int32_t pass_best = -value;
+      pvline_update(pv, &child_pv, &pass_move,
+                    pass_best - worker->solver->initial_spread);
+      pv->negamax_depth = child_pv.negamax_depth + 1;
+
+      if (worker->solver->transposition_table_optim) {
+        negamax_tt_store(worker, node_key, depth, pass_best, alpha_orig, beta,
+                         on_turn_spread, pass_move.tiny_move);
+      }
+
+      return pass_best;
+    }
+  }
+
   int32_t best_value = -LARGE_VALUE;
   uint64_t best_tiny_move = INVALID_TINY_MOVE;
   size_t arena_offset =
@@ -1514,7 +1602,8 @@ static void build_ranked_pvs_and_notify(EndgameSolverWorker *worker, int depth,
     if (worker->solver->transposition_table_optim) {
       Game *ext_game = game_duplicate(worker->game_copy);
       pvline_extend_from_tt(rpv, ext_game, worker->solver->transposition_table,
-                            worker->solver->solving_player, depth);
+                            worker->solver->solving_player,
+                            worker->solver->requested_plies);
       game_destroy(ext_game);
     }
   }
@@ -1667,13 +1756,13 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
 
     // Call per-ply callback (only thread 0 to avoid race conditions)
     if (worker->thread_index == 0 && worker->solver->per_ply_callback) {
-      // If PV is shorter than depth, extend it from TT
+      // Extend PV from TT + greedy playout for display
       PVLine extended_pv = pv;
-      if (pv.num_moves < p && worker->solver->transposition_table_optim) {
+      if (worker->solver->transposition_table_optim) {
         Game *temp_game = game_duplicate(worker->game_copy);
-        pvline_extend_from_tt(&extended_pv, temp_game,
-                              worker->solver->transposition_table,
-                              worker->solver->solving_player, p);
+        pvline_extend_from_tt(
+            &extended_pv, temp_game, worker->solver->transposition_table,
+            worker->solver->solving_player, worker->solver->requested_plies);
         game_destroy(temp_game);
       }
 
@@ -1926,10 +2015,8 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   // Calculate elapsed time
   double elapsed = ctimer_elapsed_seconds(&solve_timer);
 
-  // Extend best PV with TT + greedy playout if incomplete (single-PV case)
-  if (num_top <= 1 &&
-      solver->principal_variation.num_moves < solver->requested_plies &&
-      solver->transposition_table) {
+  // Extend best PV with TT + greedy playout for display (single-PV case)
+  if (num_top <= 1 && solver->transposition_table) {
     Game *ext_game = game_duplicate(endgame_args->game);
     pvline_extend_from_tt(&solver->principal_variation, ext_game,
                           solver->transposition_table, solver->solving_player,

@@ -48,6 +48,8 @@ typedef struct EndgameArgs {
   dual_lexicon_mode_t dual_lexicon_mode;
   // If true, skip using pruned KWGs for cross-set computation (benchmark only)
   bool skip_pruned_cross_sets;
+  // If true, play forced passes without consuming a depth ply (default: false)
+  bool forced_pass_bypass;
 } EndgameArgs;
 
 EndgameSolver *endgame_solver_create(void);
