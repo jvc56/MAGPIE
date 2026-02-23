@@ -1237,7 +1237,7 @@ static void run_ab_benchmark(const char *cgp_file, const char *label,
   EndgameResults *results = endgame_results_create();
 
   // Read CGPs into array (heap-allocated for large counts)
-  char(*cgp_lines)[4096] = malloc((size_t)max_positions * 4096);
+  char (*cgp_lines)[4096] = malloc((size_t)max_positions * 4096);
   assert(cgp_lines);
   int num_cgps = 0;
   while (num_cgps < max_positions && fgets(cgp_lines[num_cgps], 4096, fp)) {
@@ -1321,8 +1321,8 @@ static void run_ab_benchmark(const char *cgp_file, const char *label,
       same++;
     }
 
-    printf("  %4d  %+8d %+8d  %7.3fs %7.3fs  %+5d\n", ci + 1, val_old,
-           val_new, time_old, time_new, delta);
+    printf("  %4d  %+8d %+8d  %7.3fs %7.3fs  %+5d\n", ci + 1, val_old, val_new,
+           time_old, time_new, delta);
     total_time_old += time_old;
     total_time_new += time_new;
     solved++;
@@ -1410,7 +1410,7 @@ static void run_timed_selfplay_from(const char *cgp_file, int num_games,
   }
 
   // Read all CGPs from file
-  char(*cgp_lines)[4096] = malloc((size_t)max_cgp_lines * 4096);
+  char (*cgp_lines)[4096] = malloc((size_t)max_cgp_lines * 4096);
   assert(cgp_lines);
   int num_cgps = 0;
   while (num_cgps < max_cgp_lines && fgets(cgp_lines[num_cgps], 4096, fp)) {
@@ -1437,14 +1437,14 @@ static void run_timed_selfplay_from(const char *cgp_file, int num_games,
 
   printf("\n");
   printf("==============================================================\n");
-  printf("  Timed Selfplay A/B: %d games, %.1fs/turn, %d threads\n",
-         num_games, time_limit_sec, 8);
+  printf("  Timed Selfplay A/B: %d games, %.1fs/turn, %d threads\n", num_games,
+         time_limit_sec, 8);
   printf("  Old: IDS no bypass vs New: IDS with bypass\n");
   printf("  Positions: 100%% stuck from %s\n", cgp_file);
   printf("==============================================================\n");
   printf("  %4s  %10s %10s  %8s %8s  %6s  %5s %5s  %6s %6s\n", "Game",
-         "Old Spread", "New Spread", "Old Time", "New Time", "Delta",
-         "OTrns", "NTrns", "OMaxT", "NMaxT");
+         "Old Spread", "New Spread", "Old Time", "New Time", "Delta", "OTrns",
+         "NTrns", "OMaxT", "NMaxT");
   printf("  ----  ---------- ----------  -------- --------  ------"
          "  ----- -----  ------ ------\n");
   (void)fflush(stdout);
@@ -1527,8 +1527,7 @@ static void run_timed_selfplay_from(const char *cgp_file, int num_games,
         }
 
         SmallMove best = pv->moves[0];
-        small_move_to_move(move_list->spare_move, &best,
-                           game_get_board(game));
+        small_move_to_move(move_list->spare_move, &best, game_get_board(game));
         play_move(move_list->spare_move, game, NULL);
       }
 
@@ -1561,10 +1560,11 @@ static void run_timed_selfplay_from(const char *cgp_file, int num_games,
       global_max_turn_new = max_turn_time[1];
     }
 
-    printf("  %4d  %+10d %+10d  %7.2fs %7.2fs  %+5d  %5d %5d  %5.1fs %5.1fs\n",
-           gi + 1, final_spread[0], final_spread[1], game_time[0],
-           game_time[1], delta, turn_count[0], turn_count[1],
-           max_turn_time[0], max_turn_time[1]);
+    printf(
+        "  %4d  %+10d %+10d  %7.2fs %7.2fs  %+5d  %5d %5d  %5.1fs %5.1fs\n",
+        gi + 1, final_spread[0], final_spread[1], game_time[0], game_time[1],
+        delta, turn_count[0], turn_count[1], max_turn_time[0],
+        max_turn_time[1]);
     (void)fflush(stdout);
   }
 
@@ -1578,11 +1578,12 @@ static void run_timed_selfplay_from(const char *cgp_file, int num_games,
          num_games > 0 ? (double)total_delta / num_games : 0.0);
   printf("    Old total time: %.2fs  |  New total time: %.2fs\n",
          total_time_old, total_time_new);
-  printf("    Old turns: %d (avg %.1f/game)  |  New turns: %d (avg %.1f/game)\n",
-         total_turns_old,
-         num_games > 0 ? (double)total_turns_old / num_games : 0.0,
-         total_turns_new,
-         num_games > 0 ? (double)total_turns_new / num_games : 0.0);
+  printf(
+      "    Old turns: %d (avg %.1f/game)  |  New turns: %d (avg %.1f/game)\n",
+      total_turns_old,
+      num_games > 0 ? (double)total_turns_old / num_games : 0.0,
+      total_turns_new,
+      num_games > 0 ? (double)total_turns_new / num_games : 0.0);
   printf("    Max turn time: old=%.1fs  new=%.1fs  (limit=%.1fs)\n",
          global_max_turn_old, global_max_turn_new, time_limit_sec);
   printf("    Turns exceeding limit by >10%%: old=%d  new=%d\n",

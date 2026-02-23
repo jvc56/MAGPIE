@@ -929,8 +929,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
     int pass_penalty = 0;
     if (conserve && worker->solver->forced_pass_bypass) {
       const LetterDistribution *ld = game_get_ld(worker->game_copy);
-      const Rack *own_rack = player_get_rack(
-          game_get_player(worker->game_copy, playout_on_turn));
+      const Rack *own_rack =
+          player_get_rack(game_get_player(worker->game_copy, playout_on_turn));
       const Rack *opp_rack = player_get_rack(
           game_get_player(worker->game_copy, 1 - playout_on_turn));
       pass_penalty =
@@ -1760,10 +1760,9 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
       PVLine extended_pv = pv;
       if (worker->solver->transposition_table_optim) {
         Game *temp_game = game_duplicate(worker->game_copy);
-        pvline_extend_from_tt(&extended_pv, temp_game,
-                              worker->solver->transposition_table,
-                              worker->solver->solving_player,
-                              worker->solver->requested_plies);
+        pvline_extend_from_tt(
+            &extended_pv, temp_game, worker->solver->transposition_table,
+            worker->solver->solving_player, worker->solver->requested_plies);
         game_destroy(temp_game);
       }
 
