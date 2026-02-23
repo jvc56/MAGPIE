@@ -125,7 +125,7 @@ static TestEntry test_table[] = {
 static TestEntry on_demand_test_table[] = {
     {"endgame_wasm", test_endgame_wasm},
     {"infercmp", test_infer_cmp},
-{"genstuck", test_generate_stuck_cgps},
+    {"genstuck", test_generate_stuck_cgps},
     {"gennonstuck", test_generate_nonstuck_cgps},
     {"benchfp", test_benchmark_forced_pass},
     {"benchns", test_benchmark_nonstuck},

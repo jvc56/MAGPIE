@@ -14,9 +14,9 @@
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
+#include "../src/impl/exec.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
-#include "../src/impl/exec.h"
 #include "../src/util/io_util.h"
 #include "test_util.h"
 #include <assert.h>
@@ -242,11 +242,10 @@ static void run_timed_selfplay_from(const char *cgp_file, int num_games,
       global_max_turn_new = max_turn_time[1];
     }
 
-    printf(
-        "  %4d  %+10d %+10d  %7.2fs %7.2fs  %+5d  %5d %5d  %5.1fs %5.1fs\n",
-        gi + 1, final_spread[0], final_spread[1], game_time[0], game_time[1],
-        delta, turn_count[0], turn_count[1], max_turn_time[0],
-        max_turn_time[1]);
+    printf("  %4d  %+10d %+10d  %7.2fs %7.2fs  %+5d  %5d %5d  %5.1fs %5.1fs\n",
+           gi + 1, final_spread[0], final_spread[1], game_time[0], game_time[1],
+           delta, turn_count[0], turn_count[1], max_turn_time[0],
+           max_turn_time[1]);
     (void)fflush(stdout);
   }
 

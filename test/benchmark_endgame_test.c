@@ -390,8 +390,8 @@ static void run_ab_benchmark(const char *cgp_file, const char *label,
       same++;
     }
 
-    printf("  %4d  %+8d %+8d  %7.3fs %7.3fs  %+5d\n", ci + 1, val_old,
-           val_new, time_old, time_new, delta);
+    printf("  %4d  %+8d %+8d  %7.3fs %7.3fs  %+5d\n", ci + 1, val_old, val_new,
+           time_old, time_new, delta);
     total_time_old += time_old;
     total_time_new += time_new;
     solved++;
