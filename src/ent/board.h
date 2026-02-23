@@ -862,4 +862,47 @@ static inline int board_toggle_dir(int dir) {
   return dir ^ (BOARD_VERTICAL_DIRECTION | BOARD_HORIZONTAL_DIRECTION);
 }
 
+// For a single-tile rack, determines if the tile can be played anywhere on
+// the board using only cross sets. A tile is playable at a square if:
+//   1. The square is empty (not occupied, not bricked)
+//   2. The square is adjacent to at least one existing tile
+//   3. For non-blank tiles: the letter's bit is set in BOTH the horizontal
+//      and vertical cross sets
+//   4. For blanks (ml == 0): some non-blank letter bit is set in the
+//      intersection of both cross sets (the blank can represent that letter)
+//
+// This is only valid for single-tile plays. Multi-tile plays may require
+// tiles that are only playable in combination, which cross sets cannot verify.
+static inline bool board_is_letter_playable_anywhere(const Board *board,
+                                                     MachineLetter ml,
+                                                     int cross_set_index) {
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      if (board_is_nonempty_or_bricked(board, row, col)) {
+        continue;
+      }
+      if (board_are_all_adjacent_squares_empty(board, row, col)) {
+        continue;
+      }
+      uint64_t h = board_get_cross_set(
+          board, row, col, BOARD_HORIZONTAL_DIRECTION, cross_set_index);
+      uint64_t v = board_get_cross_set(
+          board, row, col, BOARD_VERTICAL_DIRECTION, cross_set_index);
+      uint64_t both = h & v;
+      if (ml == BLANK_MACHINE_LETTER) {
+        // Blank can represent any letter — check if any non-blank letter
+        // is valid in both directions (shift out bit 0).
+        if (both >> 1) {
+          return true;
+        }
+      } else {
+        if (both & ((uint64_t)1 << ml)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 #endif
