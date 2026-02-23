@@ -862,6 +862,42 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
         compare_small_moves_by_estimated_value);
 }
 
+// Generate opponent's moves in TILES_PLAYED mode and return stuck-tile
+// fraction. Saves and restores player-on-turn if it differs from opp_idx.
+// If tiles_played_bv_out is non-NULL, writes the bitvector of tile types
+// that appear in at least one valid move.
+static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
+                                        const KWG *pruned_kwg, int opp_idx,
+                                        int thread_index,
+                                        uint64_t *tiles_played_bv_out) {
+  int saved_on_turn = game_get_player_on_turn_index(game);
+  if (saved_on_turn != opp_idx) {
+    game_set_player_on_turn_index(game, opp_idx);
+  }
+  const Rack *opp_rack = player_get_rack(game_get_player(game, opp_idx));
+  uint64_t opp_tiles_bv = 0;
+  const MoveGenArgs tp_args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_TILES_PLAYED,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .override_kwg = pruned_kwg,
+      .thread_index = thread_index,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .tiles_played_bv = &opp_tiles_bv,
+  };
+  generate_moves(&tp_args);
+  if (saved_on_turn != opp_idx) {
+    game_set_player_on_turn_index(game, saved_on_turn);
+  }
+  if (tiles_played_bv_out) {
+    *tiles_played_bv_out = opp_tiles_bv;
+  }
+  return stuck_tile_fraction_from_bv(game_get_ld(game), opp_rack, opp_tiles_bv);
+}
+
 // Greedy playout at depth==0 leaf nodes: generate moves iteratively,
 // pick best (with conservation bonus), compute final spread with rack
 // adjustments, unplay moves, store in TT. Returns evaluation from
@@ -874,6 +910,18 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
   int plies = worker->solver->requested_plies;
   int playout_depth = 0;
   int max_playout = MAX_SEARCH_DEPTH - plies;
+
+  // Recompute opp_stuck_frac from the current position rather than using the
+  // parent's value. This ensures position-dependent (not path-dependent)
+  // evaluation, which is required for TT consistency across threads and
+  // transpositions.
+  if (worker->solver->use_heuristics) {
+    int opp_idx = 1 - solving_player;
+    opp_stuck_frac = compute_opp_stuck_fraction(
+        worker->game_copy, worker->move_list,
+        solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx,
+        worker->thread_index, NULL);
+  }
 
   while (game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE &&
          playout_depth < max_playout) {
@@ -1034,42 +1082,6 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
     return greedy_spread;
   }
   return -greedy_spread;
-}
-
-// Generate opponent's moves in TILES_PLAYED mode and return stuck-tile
-// fraction. Saves and restores player-on-turn if it differs from opp_idx.
-// If tiles_played_bv_out is non-NULL, writes the bitvector of tile types
-// that appear in at least one valid move.
-static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
-                                        const KWG *pruned_kwg, int opp_idx,
-                                        int thread_index,
-                                        uint64_t *tiles_played_bv_out) {
-  int saved_on_turn = game_get_player_on_turn_index(game);
-  if (saved_on_turn != opp_idx) {
-    game_set_player_on_turn_index(game, opp_idx);
-  }
-  const Rack *opp_rack = player_get_rack(game_get_player(game, opp_idx));
-  uint64_t opp_tiles_bv = 0;
-  const MoveGenArgs tp_args = {
-      .game = game,
-      .move_list = move_list,
-      .move_record_type = MOVE_RECORD_TILES_PLAYED,
-      .move_sort_type = MOVE_SORT_SCORE,
-      .override_kwg = pruned_kwg,
-      .thread_index = thread_index,
-      .eq_margin_movegen = 0,
-      .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-      .tiles_played_bv = &opp_tiles_bv,
-  };
-  generate_moves(&tp_args);
-  if (saved_on_turn != opp_idx) {
-    game_set_player_on_turn_index(game, saved_on_turn);
-  }
-  if (tiles_played_bv_out) {
-    *tiles_played_bv_out = opp_tiles_bv;
-  }
-  return stuck_tile_fraction_from_bv(game_get_ld(game), opp_rack, opp_tiles_bv);
 }
 
 // Compute TT flag (UPPER/LOWER/EXACT) and store entry at end of search.
