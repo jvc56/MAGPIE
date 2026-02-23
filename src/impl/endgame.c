@@ -875,6 +875,29 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
     game_set_player_on_turn_index(game, opp_idx);
   }
   const Rack *opp_rack = player_get_rack(game_get_player(game, opp_idx));
+  if (rack_get_total_letters(opp_rack) == 1) {
+    MachineLetter ml = 0;
+    int ld_size = ld_get_size(game_get_ld(game));
+    for (int i = 0; i < ld_size; i++) {
+      if (rack_get_letter(opp_rack, i) > 0) {
+        ml = (MachineLetter)i;
+        break;
+      }
+    }
+    bool kwgs_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
+    int ci = board_get_cross_set_index(kwgs_shared, opp_idx);
+    bool playable =
+        board_is_letter_playable_anywhere(game_get_board(game), ml, ci);
+    uint64_t opp_tiles_bv = playable ? ((uint64_t)1 << ml) : 0;
+    if (saved_on_turn != opp_idx) {
+      game_set_player_on_turn_index(game, saved_on_turn);
+    }
+    if (tiles_played_bv_out) {
+      *tiles_played_bv_out = opp_tiles_bv;
+    }
+    return stuck_tile_fraction_from_bv(game_get_ld(game), opp_rack,
+                                       opp_tiles_bv);
+  }
   uint64_t opp_tiles_bv = 0;
   const MoveGenArgs tp_args = {
       .game = game,
