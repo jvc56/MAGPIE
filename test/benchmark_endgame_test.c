@@ -185,8 +185,7 @@ void test_generate_stuck_cgps(void) {
           saved = true;
           break;
         }
-        if (frac >= 0.5F && frac < 1.0F &&
-                   found_partial < target_partial) {
+        if (frac >= 0.5F && frac < 1.0F && found_partial < target_partial) {
           char *cgp = game_get_cgp(game, true);
           (void)fprintf(fp_partial, "%s\n", cgp);
           free(cgp);
