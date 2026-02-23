@@ -28,6 +28,7 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -424,7 +425,7 @@ void test_benchmark_endgame(void) {
   log_set_level(LOG_WARN); // Allow warnings to show diagnostics
 
   const int num_games = 100;
-  const int ply = 3;
+  const int ply = 5;
   const uint64_t base_seed = 0;
 
   Config *config = config_create_or_die(
@@ -1048,5 +1049,674 @@ void test_stuck_letter_frequency(void) {
   (void)fflush(stdout);
 
   move_list_destroy(move_list);
+  config_destroy(config);
+}
+
+// Generate stuck-tile CGPs: self-play games until endgame, filter for
+// positions where the opponent is 100% stuck (all rack tiles stuck).
+// Saves CGPs to /tmp/stuck_100pct_cgps.txt and partial-stuck to
+// /tmp/stuck_partial_cgps.txt.
+void test_generate_stuck_cgps(void) {
+  log_set_level(LOG_FATAL);
+
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -threads 1 -s1 score -s2 score -r1 small -r2 small");
+
+  MoveList *move_list = move_list_create(1);
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+
+  const int target_full = 1500;
+  const int target_partial = 200;
+  const uint64_t base_seed = 7777;
+  const int max_attempts = 1500000;
+
+  FILE *fp_full = fopen("/tmp/stuck_100pct_cgps.txt", "we");
+  FILE *fp_partial = fopen("/tmp/stuck_partial_cgps.txt", "we");
+  assert(fp_full);
+  assert(fp_partial);
+
+  int found_full = 0;
+  int found_partial = 0;
+
+  for (int i = 0;
+       (found_full < target_full || found_partial < target_partial) &&
+       i < max_attempts;
+       i++) {
+    game_reset(game);
+    game_seed(game, base_seed + (uint64_t)i);
+    draw_starting_racks(game);
+
+    if (!play_until_bag_empty(game, move_list)) {
+      continue;
+    }
+
+    // Continue playing greedy moves past bag-empty to reduce rack sizes.
+    // Smaller racks are much more likely to have 100% stuck tiles.
+    for (int extra = 0; extra < 10; extra++) {
+      if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
+        break;
+      }
+      const Rack *r0 = player_get_rack(game_get_player(game, 0));
+      const Rack *r1 = player_get_rack(game_get_player(game, 1));
+      if (rack_is_empty(r0) || rack_is_empty(r1)) {
+        break;
+      }
+
+      // Check both players for stuck tiles at this position
+      bool saved = false;
+      for (int p = 0; p < 2; p++) {
+        float frac = compute_stuck_fraction(game, move_list, p);
+        if (frac >= 1.0F && found_full < target_full) {
+          char *cgp = game_get_cgp(game, true);
+          (void)fprintf(fp_full, "%s\n", cgp);
+          free(cgp);
+          found_full++;
+          saved = true;
+          break;
+        } else if (frac >= 0.5F && frac < 1.0F &&
+                   found_partial < target_partial) {
+          char *cgp = game_get_cgp(game, true);
+          (void)fprintf(fp_partial, "%s\n", cgp);
+          free(cgp);
+          found_partial++;
+          saved = true;
+          break;
+        }
+      }
+      if (saved) {
+        break;
+      }
+
+      // Play one more greedy move
+      const Move *move = get_top_equity_move(game, 0, move_list);
+      if (move_get_type(move) == GAME_EVENT_PASS) {
+        break;
+      }
+      play_move(move, game, NULL);
+    }
+  }
+
+  (void)fclose(fp_full);
+  (void)fclose(fp_partial);
+
+  printf("\n");
+  printf("==============================================================\n");
+  printf("  Generate Stuck CGPs (seed=%llu)\n", (unsigned long long)base_seed);
+  printf("==============================================================\n");
+  printf("  100%% stuck: %d positions → /tmp/stuck_100pct_cgps.txt\n",
+         found_full);
+  printf("  50-99%% stuck: %d positions → /tmp/stuck_partial_cgps.txt\n",
+         found_partial);
+  printf("==============================================================\n");
+  (void)fflush(stdout);
+
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
+// Generate non-stuck endgame positions (stuck_fraction == 0 for both players).
+void test_generate_nonstuck_cgps(void) {
+  log_set_level(LOG_FATAL);
+
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -threads 1 -s1 score -s2 score -r1 small -r2 small");
+
+  MoveList *move_list = move_list_create(1);
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+
+  const int target = 500;
+  const uint64_t base_seed = 31415;
+  const int max_attempts = 100000;
+
+  FILE *fp = fopen("/tmp/nonstuck_cgps.txt", "we");
+  assert(fp);
+
+  int found = 0;
+
+  for (int i = 0; found < target && i < max_attempts; i++) {
+    game_reset(game);
+    game_seed(game, base_seed + (uint64_t)i);
+    draw_starting_racks(game);
+
+    if (!play_until_bag_empty(game, move_list)) {
+      continue;
+    }
+
+    if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
+      continue;
+    }
+
+    // Check that neither player has stuck tiles
+    float frac0 = compute_stuck_fraction(game, move_list, 0);
+    float frac1 = compute_stuck_fraction(game, move_list, 1);
+    if (frac0 > 0.0F || frac1 > 0.0F) {
+      continue;
+    }
+
+    char *cgp = game_get_cgp(game, true);
+    (void)fprintf(fp, "%s\n", cgp);
+    free(cgp);
+    found++;
+  }
+
+  (void)fclose(fp);
+
+  printf("\n");
+  printf("==============================================================\n");
+  printf("  Generate Non-Stuck CGPs (seed=%llu)\n",
+         (unsigned long long)base_seed);
+  printf("==============================================================\n");
+  printf("  0%% stuck: %d positions -> /tmp/nonstuck_cgps.txt\n", found);
+  printf("==============================================================\n");
+  (void)fflush(stdout);
+
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
+// Core A/B benchmark: solve each CGP twice (with and without
+// forced-pass bypass), comparing value and time pairwise.
+static void run_ab_benchmark(const char *cgp_file, const char *label,
+                             int old_ply, int new_ply, int max_positions) {
+  FILE *fp = fopen(cgp_file, "re");
+  if (!fp) {
+    printf("No CGP file found at %s — run genstuck/gennonstuck first.\n",
+           cgp_file);
+    return;
+  }
+
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -threads 6 -s1 score -s2 score -r1 small -r2 small");
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+
+  EndgameSolver *solver_old = endgame_solver_create();
+  EndgameSolver *solver_new = endgame_solver_create();
+  EndgameResults *results = endgame_results_create();
+
+  // Read CGPs into array (heap-allocated for large counts)
+  char(*cgp_lines)[4096] = malloc((size_t)max_positions * 4096);
+  assert(cgp_lines);
+  int num_cgps = 0;
+  while (num_cgps < max_positions && fgets(cgp_lines[num_cgps], 4096, fp)) {
+    size_t len = strlen(cgp_lines[num_cgps]);
+    if (len > 0 && cgp_lines[num_cgps][len - 1] == '\n') {
+      cgp_lines[num_cgps][len - 1] = '\0';
+    }
+    if (strlen(cgp_lines[num_cgps]) > 0) {
+      num_cgps++;
+    }
+  }
+  (void)fclose(fp);
+
+  printf("\n");
+  printf("==============================================================\n");
+  printf("  A/B Benchmark [%s]: %d positions\n", label, num_cgps);
+  printf("  Old: %d-ply (no bypass) vs New: %d-ply (with bypass)\n", old_ply,
+         new_ply);
+  printf("==============================================================\n");
+  printf("  %4s  %8s %8s  %8s %8s  %6s\n", "Pos", "Old Val", "New Val",
+         "Old Time", "New Time", "Delta");
+  printf("  ----  -------- --------  -------- --------  ------\n");
+
+  double total_time_old = 0, total_time_new = 0;
+  int new_better = 0, old_better = 0, same = 0;
+  int total_delta = 0;
+  int solved = 0;
+
+  for (int ci = 0; ci < num_cgps; ci++) {
+    ErrorStack *err = error_stack_create();
+    game_load_cgp(game, cgp_lines[ci], err);
+    if (!error_stack_is_empty(err)) {
+      error_stack_destroy(err);
+      continue;
+    }
+    error_stack_destroy(err);
+
+    EndgameArgs args = {.game = game,
+                        .thread_control = config_get_thread_control(config),
+                        .plies = old_ply,
+                        .tt_fraction_of_mem = 0.05,
+                        .initial_small_move_arena_size =
+                            DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                        .num_threads = 8,
+                        .num_top_moves = 1,
+                        .use_heuristics = true,
+                        .per_ply_callback = NULL,
+                        .per_ply_callback_data = NULL,
+                        .forced_pass_bypass = false};
+
+    // --- OLD (no bypass) ---
+    Timer t;
+    ctimer_start(&t);
+    err = error_stack_create();
+    endgame_solve(solver_old, &args, results, err);
+    double time_old = ctimer_elapsed_seconds(&t);
+    assert(error_stack_is_empty(err));
+    error_stack_destroy(err);
+    int32_t val_old =
+        endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->score;
+
+    // --- NEW (with bypass) ---
+    args.plies = new_ply;
+    args.forced_pass_bypass = true;
+    ctimer_start(&t);
+    err = error_stack_create();
+    endgame_solve(solver_new, &args, results, err);
+    double time_new = ctimer_elapsed_seconds(&t);
+    assert(error_stack_is_empty(err));
+    error_stack_destroy(err);
+    int32_t val_new =
+        endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->score;
+
+    int delta = val_new - val_old;
+    total_delta += delta;
+    if (delta > 0) {
+      new_better++;
+    } else if (delta < 0) {
+      old_better++;
+    } else {
+      same++;
+    }
+
+    printf("  %4d  %+8d %+8d  %7.3fs %7.3fs  %+5d\n", ci + 1, val_old,
+           val_new, time_old, time_new, delta);
+    total_time_old += time_old;
+    total_time_new += time_new;
+    solved++;
+
+    if ((ci + 1) % 25 == 0) {
+      (void)fflush(stdout);
+    }
+  }
+
+  printf("  ----  -------- --------  -------- --------  ------\n");
+  printf("\n");
+  printf("  Results (%d positions, old=%d-ply new=%d-ply):\n", solved, old_ply,
+         new_ply);
+  printf("    New better: %d  |  Old better: %d  |  Same: %d\n", new_better,
+         old_better, same);
+  printf("    Total value delta: %+d (avg %+.2f per position)\n", total_delta,
+         solved > 0 ? (double)total_delta / solved : 0.0);
+  printf("    Old total time: %.3fs (avg %.3fs)\n", total_time_old,
+         solved > 0 ? total_time_old / solved : 0.0);
+  printf("    New total time: %.3fs (avg %.3fs)\n", total_time_new,
+         solved > 0 ? total_time_new / solved : 0.0);
+  printf("    Speedup: %.2fx\n",
+         total_time_new > 0 ? total_time_old / total_time_new : 0.0);
+  printf("==============================================================\n");
+  (void)fflush(stdout);
+
+  free(cgp_lines);
+  endgame_results_destroy(results);
+  endgame_solver_destroy(solver_old);
+  endgame_solver_destroy(solver_new);
+  config_destroy(config);
+}
+
+void test_benchmark_forced_pass(void) {
+  log_set_level(LOG_FATAL);
+  run_ab_benchmark("/tmp/stuck_100pct_cgps.txt", "stuck", 3, 2, 500);
+}
+
+void test_benchmark_nonstuck(void) {
+  log_set_level(LOG_FATAL);
+  run_ab_benchmark("/tmp/nonstuck_cgps.txt", "nonstuck", 3, 2, 500);
+}
+
+void test_benchmark_nonstuck_3v3(void) {
+  log_set_level(LOG_FATAL);
+  run_ab_benchmark("/tmp/nonstuck_cgps.txt", "nonstuck", 3, 3, 500);
+}
+
+// Timer thread: sleeps for the specified duration, then fires USER_INTERRUPT.
+// Uses a done flag polled in short intervals so the thread can be stopped
+// promptly when the solver finishes before the time limit.
+typedef struct {
+  ThreadControl *tc;
+  double seconds;
+  volatile bool done;
+} TimerArgs;
+
+static void *timer_thread_func(void *arg) {
+  TimerArgs *ta = (TimerArgs *)arg;
+  double remaining = ta->seconds;
+  while (remaining > 0 && !ta->done) {
+    double sleep_time = remaining > 0.05 ? 0.05 : remaining;
+    struct timespec ts;
+    ts.tv_sec = (time_t)sleep_time;
+    ts.tv_nsec = (long)((sleep_time - (double)ts.tv_sec) * 1e9);
+    nanosleep(&ts, NULL);
+    remaining -= sleep_time;
+  }
+  if (!ta->done) {
+    thread_control_set_status(ta->tc, THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  }
+  return NULL;
+}
+
+// Core timed selfplay A/B benchmark: play stuck-tile endgame positions to
+// completion using IDS with a per-turn time limit. Old vs New.
+static void run_timed_selfplay_from(const char *cgp_file, int num_games,
+                                    double time_limit_sec) {
+  const int max_ply = 25;
+  const int max_cgp_lines = 2000;
+  FILE *fp = fopen(cgp_file, "re");
+  if (!fp) {
+    printf("No CGP file found at %s — run genstuck first.\n", cgp_file);
+    return;
+  }
+
+  // Read all CGPs from file
+  char(*cgp_lines)[4096] = malloc((size_t)max_cgp_lines * 4096);
+  assert(cgp_lines);
+  int num_cgps = 0;
+  while (num_cgps < max_cgp_lines && fgets(cgp_lines[num_cgps], 4096, fp)) {
+    size_t len = strlen(cgp_lines[num_cgps]);
+    if (len > 0 && cgp_lines[num_cgps][len - 1] == '\n') {
+      cgp_lines[num_cgps][len - 1] = '\0';
+    }
+    if (strlen(cgp_lines[num_cgps]) > 0) {
+      num_cgps++;
+    }
+  }
+  (void)fclose(fp);
+
+  if (num_games > num_cgps) {
+    num_games = num_cgps;
+  }
+
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -threads 6 -s1 score -s2 score -r1 small -r2 small");
+
+  MoveList *move_list = move_list_create(1);
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+
+  printf("\n");
+  printf("==============================================================\n");
+  printf("  Timed Selfplay A/B: %d games, %.1fs/turn, %d threads\n",
+         num_games, time_limit_sec, 8);
+  printf("  Old: IDS no bypass vs New: IDS with bypass\n");
+  printf("  Positions: 100%% stuck from %s\n", cgp_file);
+  printf("==============================================================\n");
+  printf("  %4s  %10s %10s  %8s %8s  %6s  %5s %5s  %6s %6s\n", "Game",
+         "Old Spread", "New Spread", "Old Time", "New Time", "Delta",
+         "OTrns", "NTrns", "OMaxT", "NMaxT");
+  printf("  ----  ---------- ----------  -------- --------  ------"
+         "  ----- -----  ------ ------\n");
+  (void)fflush(stdout);
+
+  int total_delta = 0;
+  int new_better = 0, old_better = 0, same_count = 0;
+  double total_time_old = 0, total_time_new = 0;
+  double global_max_turn_old = 0, global_max_turn_new = 0;
+  int total_turns_old = 0, total_turns_new = 0;
+  int total_exceeded_old = 0, total_exceeded_new = 0;
+
+  for (int gi = 0; gi < num_games; gi++) {
+    int final_spread[2] = {0, 0};
+    double game_time[2] = {0, 0};
+    double max_turn_time[2] = {0, 0};
+    int turn_count[2] = {0, 0};
+
+    for (int config_idx = 0; config_idx < 2; config_idx++) {
+      bool use_bypass = (config_idx == 1);
+
+      ErrorStack *err = error_stack_create();
+      game_load_cgp(game, cgp_lines[gi], err);
+      assert(error_stack_is_empty(err));
+      error_stack_destroy(err);
+
+      EndgameSolver *solver = endgame_solver_create();
+      EndgameResults *results = endgame_results_create();
+
+      ThreadControl *tc = config_get_thread_control(config);
+
+      while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+        EndgameArgs args = {.game = game,
+                            .thread_control = tc,
+                            .plies = max_ply,
+                            .tt_fraction_of_mem = 0.05,
+                            .initial_small_move_arena_size =
+                                DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                            .num_threads = 8,
+                            .num_top_moves = 1,
+                            .use_heuristics = true,
+                            .per_ply_callback = NULL,
+                            .per_ply_callback_data = NULL,
+                            .forced_pass_bypass = use_bypass};
+
+        thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
+
+        TimerArgs ta = {.tc = tc, .seconds = time_limit_sec, .done = false};
+        pthread_t timer_tid;
+        pthread_create(&timer_tid, NULL, timer_thread_func, &ta);
+
+        Timer t;
+        ctimer_start(&t);
+        err = error_stack_create();
+        endgame_solve(solver, &args, results, err);
+        double elapsed = ctimer_elapsed_seconds(&t);
+
+        ta.done = true;
+        pthread_join(timer_tid, NULL);
+
+        assert(error_stack_is_empty(err));
+        error_stack_destroy(err);
+
+        game_time[config_idx] += elapsed;
+        turn_count[config_idx]++;
+        if (elapsed > max_turn_time[config_idx]) {
+          max_turn_time[config_idx] = elapsed;
+        }
+        if (elapsed > time_limit_sec * 1.1) {
+          if (config_idx == 0) {
+            total_exceeded_old++;
+          } else {
+            total_exceeded_new++;
+          }
+        }
+
+        const PVLine *pv =
+            endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+        if (pv->num_moves == 0) {
+          break;
+        }
+
+        SmallMove best = pv->moves[0];
+        small_move_to_move(move_list->spare_move, &best,
+                           game_get_board(game));
+        play_move(move_list->spare_move, game, NULL);
+      }
+
+      int s0 = equity_to_int(player_get_score(game_get_player(game, 0)));
+      int s1 = equity_to_int(player_get_score(game_get_player(game, 1)));
+      final_spread[config_idx] = s0 - s1;
+
+      endgame_results_destroy(results);
+      endgame_solver_destroy(solver);
+    }
+
+    int delta = final_spread[1] - final_spread[0];
+    total_delta += delta;
+    if (delta > 0) {
+      new_better++;
+    } else if (delta < 0) {
+      old_better++;
+    } else {
+      same_count++;
+    }
+
+    total_time_old += game_time[0];
+    total_time_new += game_time[1];
+    total_turns_old += turn_count[0];
+    total_turns_new += turn_count[1];
+    if (max_turn_time[0] > global_max_turn_old) {
+      global_max_turn_old = max_turn_time[0];
+    }
+    if (max_turn_time[1] > global_max_turn_new) {
+      global_max_turn_new = max_turn_time[1];
+    }
+
+    printf("  %4d  %+10d %+10d  %7.2fs %7.2fs  %+5d  %5d %5d  %5.1fs %5.1fs\n",
+           gi + 1, final_spread[0], final_spread[1], game_time[0],
+           game_time[1], delta, turn_count[0], turn_count[1],
+           max_turn_time[0], max_turn_time[1]);
+    (void)fflush(stdout);
+  }
+
+  printf("  ----  ---------- ----------  -------- --------  ------"
+         "  ----- -----  ------ ------\n");
+  printf("\n");
+  printf("  Results (%d games, %.1fs/turn):\n", num_games, time_limit_sec);
+  printf("    New better: %d  |  Old better: %d  |  Same: %d\n", new_better,
+         old_better, same_count);
+  printf("    Total spread delta: %+d (avg %+.2f per game)\n", total_delta,
+         num_games > 0 ? (double)total_delta / num_games : 0.0);
+  printf("    Old total time: %.2fs  |  New total time: %.2fs\n",
+         total_time_old, total_time_new);
+  printf("    Old turns: %d (avg %.1f/game)  |  New turns: %d (avg %.1f/game)\n",
+         total_turns_old,
+         num_games > 0 ? (double)total_turns_old / num_games : 0.0,
+         total_turns_new,
+         num_games > 0 ? (double)total_turns_new / num_games : 0.0);
+  printf("    Max turn time: old=%.1fs  new=%.1fs  (limit=%.1fs)\n",
+         global_max_turn_old, global_max_turn_new, time_limit_sec);
+  printf("    Turns exceeding limit by >10%%: old=%d  new=%d\n",
+         total_exceeded_old, total_exceeded_new);
+  printf("==============================================================\n");
+  (void)fflush(stdout);
+
+  free(cgp_lines);
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
+void test_benchmark_timed_selfplay(void) {
+  log_set_level(LOG_FATAL);
+  run_timed_selfplay_from("/tmp/stuck_100pct_cgps.txt", 20, 30.0);
+}
+
+void test_benchmark_timed_overnight(void) {
+  log_set_level(LOG_FATAL);
+  run_timed_selfplay_from("/tmp/stuck_100pct_cgps.txt", 1500, 30.0);
+}
+
+void test_benchmark_timed_hard(void) {
+  log_set_level(LOG_FATAL);
+  run_timed_selfplay_from("/tmp/stuck_hard_cgps.txt", 188, 150.0);
+}
+
+// Stuck-tile selfplay benchmark: find positions where one player has stuck
+// tiles, then play them to completion with the endgame solver.
+void test_benchmark_stuck_selfplay(void) {
+  log_set_level(LOG_WARN);
+
+  const int ply = 5;
+  const int target = 10;
+  const uint64_t base_seed = 42;
+
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -threads 6 -s1 score -s2 score -r1 small -r2 small");
+
+  EndgameSolver *solver = endgame_solver_create();
+
+  EndgameArgs args = {.thread_control = config_get_thread_control(config),
+                      .plies = ply,
+                      .tt_fraction_of_mem = 0.10,
+                      .initial_small_move_arena_size =
+                          DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                      .num_threads = 6,
+                      .num_top_moves = 1,
+                      .use_heuristics = true,
+                      .per_ply_callback = NULL,
+                      .per_ply_callback_data = NULL};
+
+  EndgameResults *results = endgame_results_create();
+  MoveList *move_list = move_list_create(1);
+
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+
+  int found = 0;
+  double total_time = 0;
+  int total_spread = 0;
+  const int max_attempts = target * 50;
+
+  printf("\n");
+  printf("==============================================================\n");
+  printf("  Stuck-tile Selfplay: %d positions, %d-ply\n", target, ply);
+  printf("==============================================================\n\n");
+
+  for (int i = 0; found < target && i < max_attempts; i++) {
+    game_reset(game);
+    game_seed(game, base_seed + (uint64_t)i);
+    draw_starting_racks(game);
+
+    if (!play_until_bag_empty(game, move_list)) {
+      continue;
+    }
+
+    // Check if either player has stuck tiles
+    float frac_p0 = compute_stuck_fraction(game, move_list, 0);
+    float frac_p1 = compute_stuck_fraction(game, move_list, 1);
+    float max_frac = frac_p0 > frac_p1 ? frac_p0 : frac_p1;
+    if (max_frac <= 0.0F) {
+      continue;
+    }
+
+    found++;
+    double game_time = 0;
+
+    printf("  Game %2d (seed %3" PRIu64 ", stuck=%.0f%%): ", found,
+           base_seed + (uint64_t)i, (double)(max_frac * 100.0F));
+    (void)fflush(stdout);
+
+    while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+      args.game = game;
+      args.plies = ply;
+
+      Timer t;
+      ctimer_start(&t);
+      ErrorStack *err = error_stack_create();
+      endgame_solve(solver, &args, results, err);
+      game_time += ctimer_elapsed_seconds(&t);
+      assert(error_stack_is_empty(err));
+      error_stack_destroy(err);
+
+      const PVLine *pv =
+          endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+      if (pv->num_moves == 0) {
+        break;
+      }
+
+      SmallMove best = pv->moves[0];
+      small_move_to_move(move_list->spare_move, &best, game_get_board(game));
+      play_move(move_list->spare_move, game, NULL);
+    }
+
+    total_time += game_time;
+    int score0 = equity_to_int(player_get_score(game_get_player(game, 0)));
+    int score1 = equity_to_int(player_get_score(game_get_player(game, 1)));
+    int spread = score0 - score1;
+    total_spread += spread;
+    printf("%d-%d (spread %+d)  %.2fs\n", score0, score1, spread, game_time);
+    (void)fflush(stdout);
+  }
+
+  assert(found == target);
+
+  printf("\n==============================================================\n");
+  printf("  TOTAL: %.2fs, total spread: %+d, avg spread: %+.1f\n", total_time,
+         total_spread, (double)total_spread / found);
+  printf("==============================================================\n");
+  (void)fflush(stdout);
+
+  endgame_results_destroy(results);
+  move_list_destroy(move_list);
+  endgame_solver_destroy(solver);
   config_destroy(config);
 }
