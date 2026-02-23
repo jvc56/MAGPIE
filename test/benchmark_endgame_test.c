@@ -3,6 +3,7 @@
 #include "../src/compat/ctime.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
+#include "../src/def/game_history_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
@@ -183,7 +184,8 @@ void test_generate_stuck_cgps(void) {
           found_full++;
           saved = true;
           break;
-        } else if (frac >= 0.5F && frac < 1.0F &&
+        }
+        if (frac >= 0.5F && frac < 1.0F &&
                    found_partial < target_partial) {
           char *cgp = game_get_cgp(game, true);
           (void)fprintf(fp_partial, "%s\n", cgp);
@@ -330,8 +332,11 @@ static void run_ab_benchmark(const char *cgp_file, const char *label,
          "Old Time", "New Time", "Delta");
   printf("  ----  -------- --------  -------- --------  ------\n");
 
-  double total_time_old = 0, total_time_new = 0;
-  int new_better = 0, old_better = 0, same = 0;
+  double total_time_old = 0;
+  double total_time_new = 0;
+  int new_better = 0;
+  int old_better = 0;
+  int same = 0;
   int total_delta = 0;
   int solved = 0;
 

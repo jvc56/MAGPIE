@@ -1,9 +1,7 @@
 #include "timed_endgame_test.h"
 
 #include "../src/compat/ctime.h"
-#include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
-#include "../src/def/move_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/equity.h"
@@ -14,9 +12,7 @@
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
-#include "../src/impl/exec.h"
 #include "../src/impl/gameplay.h"
-#include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
 #include "test_util.h"
 #include <assert.h>
@@ -132,11 +128,17 @@ static void run_timed_selfplay_from(const char *cgp_file, int num_games,
   (void)fflush(stdout);
 
   int total_delta = 0;
-  int new_better = 0, old_better = 0, same_count = 0;
-  double total_time_old = 0, total_time_new = 0;
-  double global_max_turn_old = 0, global_max_turn_new = 0;
-  int total_turns_old = 0, total_turns_new = 0;
-  int total_exceeded_old = 0, total_exceeded_new = 0;
+  int new_better = 0;
+  int old_better = 0;
+  int same_count = 0;
+  double total_time_old = 0;
+  double total_time_new = 0;
+  double global_max_turn_old = 0;
+  double global_max_turn_new = 0;
+  int total_turns_old = 0;
+  int total_turns_new = 0;
+  int total_exceeded_old = 0;
+  int total_exceeded_new = 0;
 
   for (int gi = 0; gi < num_games; gi++) {
     int final_spread[2] = {0, 0};
