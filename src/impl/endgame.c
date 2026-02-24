@@ -892,6 +892,7 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
           opp_tiles_bv |= ((uint64_t)1 << i);
         } else {
           all_playable = false;
+          break;
         }
       }
     }
