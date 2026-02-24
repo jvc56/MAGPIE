@@ -895,14 +895,18 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
         }
       }
     }
-    if (all_playable) {
+    // For a 1-tile rack, the cross-set check is authoritative: a single tile
+    // either has a 1-tile play or it has no play at all. Skip movegen.
+    if (all_playable || rack_get_total_letters(opp_rack) == 1) {
       if (saved_on_turn != opp_idx) {
         game_set_player_on_turn_index(game, saved_on_turn);
       }
       if (tiles_played_bv_out) {
         *tiles_played_bv_out = opp_tiles_bv;
       }
-      return 0.0F;
+      return all_playable ? 0.0F
+                          : stuck_tile_fraction_from_bv(
+                                game_get_ld(game), opp_rack, opp_tiles_bv);
     }
   }
   const MoveGenArgs tp_args = {
