@@ -567,31 +567,269 @@ static inline const KWG *solver_get_pruned_kwg(const EndgameSolver *solver,
   return solver->pruned_kwgs[player_index];
 }
 
+// Generate moves for a single-tile rack by scanning cross-sets, bypassing
+// the GADDAG entirely.  In a bag-empty endgame, every tile placement uses the
+// last rack tile and ends the game, so only the best-scoring position matters.
+// Returns 1 with the best placement written to the arena, or 1 with a pass
+// move if no placement is legal (player is stuck).
+static int generate_single_tile_plays(EndgameSolverWorker *worker) {
+  const Game *game = worker->game_copy;
+  const Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  int stm_idx = game_get_player_on_turn_index(game);
+  const Rack *stm_rack = player_get_rack(game_get_player(game, stm_idx));
+  bool kwgs_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
+  int ci = board_get_cross_set_index(kwgs_shared, stm_idx);
+  int ld_size = ld_get_size(ld);
+
+  // Find the single tile on the rack.
+  MachineLetter tile_ml = BLANK_MACHINE_LETTER;
+  bool is_blank = false;
+  for (int ml = 0; ml < ld_size; ml++) {
+    if (rack_get_letter(stm_rack, ml) > 0) {
+      tile_ml = ml;
+      is_blank = (ml == BLANK_MACHINE_LETTER);
+      break;
+    }
+  }
+
+  bool found = false;
+  Equity best_score = 0;
+  int best_row = 0, best_col = 0;
+  bool best_dir_vertical = false;
+  int best_start = 0;   // leftmost col (H) or topmost row (V) of the word
+  int best_play_length = 0;
+  MachineLetter best_letter = 0; // for blank: the letter the blank plays as
+
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      if (board_is_nonempty_or_bricked(board, row, col)) {
+        continue;
+      }
+      // board_get_is_cross_word(H) = has vertical neighbors (tiles above/below)
+      // board_get_is_cross_word(V) = has horizontal neighbors (tiles left/right)
+      bool has_v_nbrs =
+          board_get_is_cross_word(board, row, col, BOARD_HORIZONTAL_DIRECTION);
+      bool has_h_nbrs =
+          board_get_is_cross_word(board, row, col, BOARD_VERTICAL_DIRECTION);
+      if (!has_v_nbrs && !has_h_nbrs) {
+        continue;
+      }
+
+      // cross_set(H) validates the vertical word; cross_set(V) validates
+      // the horizontal word.  The tile must satisfy both.
+      uint64_t h_cs =
+          board_get_cross_set(board, row, col, BOARD_HORIZONTAL_DIRECTION, ci);
+      uint64_t v_cs =
+          board_get_cross_set(board, row, col, BOARD_VERTICAL_DIRECTION, ci);
+      uint64_t combined = h_cs & v_cs;
+
+      BonusSquare bsq = board_get_bonus_square(board, row, col);
+      int lm = bonus_square_get_letter_multiplier(bsq);
+      int wm = bonus_square_get_word_multiplier(bsq);
+      // cross_score(V) = sum of existing horizontal neighbor tile values
+      // cross_score(H) = sum of existing vertical neighbor tile values
+      Equity h_nbr_score =
+          board_get_cross_score(board, row, col, BOARD_VERTICAL_DIRECTION, ci);
+      Equity v_nbr_score =
+          board_get_cross_score(board, row, col, BOARD_HORIZONTAL_DIRECTION, ci);
+
+      // Use vertical direction only when there are vertical neighbors and no
+      // horizontal neighbors; otherwise label the play horizontal.
+      bool dir_vertical = has_v_nbrs && !has_h_nbrs;
+
+      // Find word extent in the primary direction for play_length and
+      // col_start/row_start encoding.
+      int word_start, word_end;
+      if (!dir_vertical) {
+        word_start = col - 1;
+        while (word_start >= 0 &&
+               !board_is_empty_or_bricked(board, row, word_start)) {
+          word_start--;
+        }
+        word_start++;
+        word_end = col + 1;
+        while (word_end < BOARD_DIM &&
+               !board_is_empty_or_bricked(board, row, word_end)) {
+          word_end++;
+        }
+        word_end--;
+      } else {
+        word_start = row - 1;
+        while (word_start >= 0 &&
+               !board_is_empty_or_bricked(board, word_start, col)) {
+          word_start--;
+        }
+        word_start++;
+        word_end = row + 1;
+        while (word_end < BOARD_DIM &&
+               !board_is_empty_or_bricked(board, word_end, col)) {
+          word_end++;
+        }
+        word_end--;
+      }
+      int play_length = word_end - word_start + 1;
+
+      if (!is_blank) {
+        if (!(combined & ((uint64_t)1 << tile_ml))) {
+          continue;
+        }
+        Equity tile_ls = ld_get_score(ld, tile_ml) * lm;
+        Equity score = 0;
+        if (has_h_nbrs) {
+          score += (tile_ls + h_nbr_score) * wm;
+        }
+        if (has_v_nbrs) {
+          score += (tile_ls + v_nbr_score) * wm;
+        }
+        if (!found || score > best_score) {
+          found = true;
+          best_score = score;
+          best_row = row;
+          best_col = col;
+          best_dir_vertical = dir_vertical;
+          best_start = word_start;
+          best_play_length = play_length;
+          best_letter = tile_ml;
+        }
+      } else {
+        // Blank has zero face value; score depends only on position.
+        // Any non-blank letter permitted by the combined cross-set is valid.
+        if (!(combined >> 1)) {
+          continue;
+        }
+        Equity score = 0;
+        if (has_h_nbrs) {
+          score += h_nbr_score * wm;
+        }
+        if (has_v_nbrs) {
+          score += v_nbr_score * wm;
+        }
+        if (!found || score > best_score) {
+          MachineLetter letter = 0;
+          for (MachineLetter L = 1; L < ld_size; L++) {
+            if ((combined >> L) & 1) {
+              letter = L;
+              break;
+            }
+          }
+          found = true;
+          best_score = score;
+          best_row = row;
+          best_col = col;
+          best_dir_vertical = dir_vertical;
+          best_start = word_start;
+          best_play_length = play_length;
+          best_letter = letter;
+        }
+      }
+    }
+  }
+
+  SmallMove *sm =
+      (SmallMove *)arena_alloc(worker->small_move_arena, sizeof(SmallMove));
+  sm->metadata.estimated_value = 0;
+
+  if (!found) {
+    // Stuck: the only legal move is pass.
+    sm->metadata.score = 0;
+    sm->metadata.play_length = 0;
+    sm->metadata.tiles_played = 0;
+    sm->tiny_move = 0;
+    return 1;
+  }
+
+  sm->metadata.score = (uint16_t)equity_to_int(best_score);
+  sm->metadata.play_length = (uint8_t)best_play_length;
+  sm->metadata.tiles_played = 1;
+
+  // Build tiny_move following the same convention as small_move_set_all:
+  // for vertical, row_start and col_start are swapped before storing.
+  uint64_t tm = (uint64_t)best_letter << 20; // tile in bits 25-20
+  if (is_blank) {
+    tm |= 1ULL << 12; // blank flag for tile index 0
+  }
+  if (best_dir_vertical) {
+    tm |= 1;                              // direction bit
+    tm |= (uint64_t)best_start << 1;     // topmost row → bits 5-1
+    tm |= (uint64_t)best_col << 6;       // column → bits 10-6
+  } else {
+    tm |= (uint64_t)best_start << 1;     // leftmost col → bits 5-1
+    tm |= (uint64_t)best_row << 6;       // row → bits 10-6
+  }
+  sm->tiny_move = tm;
+  return 1;
+}
+
 int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
   // stm means side to move
-  // Lazy cross-set generation: only compute if not already valid
+  // Lazy cross-set generation: only compute if not already valid.
   Board *board = game_get_board(worker->game_copy);
   if (!board_get_cross_sets_valid(board)) {
-    // Get the parent's MoveUndo (the one that made cross-sets invalid)
-    // The parent undo contains info about the move that was played to reach
-    // this state
     int undo_index = worker->solver->requested_plies - depth - 1;
     if (undo_index >= 0) {
       const MoveUndo *parent_undo = &worker->move_undos[undo_index];
       if (parent_undo->move_tiles_length > 0) {
-        // Update cross-sets using the undo-based function
         update_cross_set_for_move_from_undo(parent_undo, worker->game_copy);
       }
     }
     board_set_cross_sets_valid(board, true);
   }
+
+  int stm_idx = game_get_player_on_turn_index(worker->game_copy);
+  const Rack *stm_rack =
+      player_get_rack(game_get_player(worker->game_copy, stm_idx));
+
+  // Single-tile fast path: scan cross-sets directly, no GADDAG traversal.
+  // Every placement ends the game; only the best score is needed.
+  if (stm_rack->number_of_letters == 1) {
+    int fast_count = generate_single_tile_plays(worker);
+#ifdef ENDGAME_SINGLE_TILE_VERIFY
+    {
+      // Verify fast path score against full GADDAG movegen.
+      const SmallMove *fast_sm =
+          (const SmallMove *)(worker->small_move_arena->memory +
+                              worker->small_move_arena->size - sizeof(SmallMove));
+      uint16_t fast_score = fast_sm->metadata.score;
+
+      const MoveGenArgs verify_args = {
+          .game = worker->game_copy,
+          .move_list = worker->move_list,
+          .move_record_type = MOVE_RECORD_ALL_SMALL,
+          .move_sort_type = MOVE_SORT_SCORE,
+          .override_kwg = NULL, // full KWG, same as cross-set source
+          .thread_index = worker->thread_index,
+          .eq_margin_movegen = 0,
+          .target_equity = EQUITY_MAX_VALUE,
+          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      };
+      generate_moves(&verify_args);
+
+      uint16_t gaddag_best_score = 0;
+      for (int vi = 0; vi < worker->move_list->count; vi++) {
+        uint16_t s = small_move_get_score(worker->move_list->small_moves[vi]);
+        if (s > gaddag_best_score) {
+          gaddag_best_score = s;
+        }
+      }
+
+      if (fast_score != gaddag_best_score) {
+        printf("[SINGLE_TILE_VERIFY FAIL] fast_score=%u gaddag_best=%u\n",
+               (unsigned)fast_score, (unsigned)gaddag_best_score);
+        fflush(stdout);
+        assert(fast_score == gaddag_best_score);
+      }
+    }
+#endif
+    return fast_count;
+  }
+
   const MoveGenArgs args = {
       .game = worker->game_copy,
       .move_list = worker->move_list,
       .move_record_type = MOVE_RECORD_ALL_SMALL,
       .move_sort_type = MOVE_SORT_SCORE,
-      .override_kwg = solver_get_pruned_kwg(
-          worker->solver, game_get_player_on_turn_index(worker->game_copy)),
+      .override_kwg = solver_get_pruned_kwg(worker->solver, stm_idx),
       .thread_index = worker->thread_index,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
@@ -602,11 +840,8 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
   SmallMove *arena_small_moves = (SmallMove *)arena_alloc(
       worker->small_move_arena, worker->move_list->count * sizeof(SmallMove));
   for (int i = 0; i < worker->move_list->count; i++) {
-    // Copy by value
     arena_small_moves[i] = *(worker->move_list->small_moves[i]);
   }
-  // Now that the arena has these, we can deal with the move list directly
-  // in the arena.
   return worker->move_list->count;
 }
 
@@ -1418,6 +1653,85 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   uint64_t best_tiny_move = INVALID_TINY_MOVE;
   size_t arena_offset =
       worker->small_move_arena->size - (sizeof(SmallMove) * nplays);
+
+  // Analytical leaf shortcut for single-tile outplay.
+  // When stm has exactly 1 tile and the only legal move is a non-pass, it
+  // plays that tile and ends the game immediately. Skip the board mutation
+  // cycle (small_move_to_move + play_move + child recursion + unplay).
+  if (arena_alloced && nplays == 1) {
+    const SmallMove *only_sm =
+        (const SmallMove *)(worker->small_move_arena->memory + arena_offset);
+    const Rack *stm_rack_a = player_get_rack(player_on_turn);
+    if (!small_move_is_pass(only_sm) &&
+        rack_get_total_letters(stm_rack_a) == 1) {
+      const LetterDistribution *ld = game_get_ld(worker->game_copy);
+      int32_t move_score = (int32_t)small_move_get_score(only_sm);
+      int32_t opp_bonus = equity_to_int(
+          calculate_end_rack_points(player_get_rack(other_player), ld));
+      int32_t leaf_value = on_turn_spread + move_score + opp_bonus;
+
+#ifdef ENDGAME_SINGLE_TILE_VERIFY
+      {
+        SmallMove verify_sm = *only_sm;
+        small_move_to_move(worker->move_list->spare_move, &verify_sm,
+                           game_get_board(worker->game_copy));
+        int undo_index = worker->solver->requested_plies - depth;
+        int last_cslt =
+            game_get_consecutive_scoreless_turns(worker->game_copy);
+        play_move_endgame_outplay(worker->move_list->spare_move,
+                                  worker->game_copy,
+                                  &worker->move_undos[undo_index]);
+        uint64_t verify_key = 0;
+        if (worker->solver->transposition_table_optim) {
+          verify_key = zobrist_add_move(
+              worker->solver->transposition_table->zobrist, node_key,
+              worker->move_list->spare_move, stm_rack_a,
+              on_turn_idx == worker->solver->solving_player,
+              game_get_consecutive_scoreless_turns(worker->game_copy),
+              last_cslt);
+        }
+        // Reuse child_pv (num_moves==0); child returns immediately since game
+        // has ended, so child_pv is unchanged after this call.
+        int32_t verify_value =
+            abdada_negamax(worker, verify_key, depth - 1, -beta, -alpha,
+                           &child_pv, pv_node, false, opp_stuck_frac);
+        unplay_move_incremental(worker->game_copy,
+                                &worker->move_undos[undo_index]);
+        if (verify_value != ABDADA_INTERRUPTED &&
+            verify_value != ON_EVALUATION) {
+          int32_t full_value = -verify_value;
+          if (full_value != leaf_value) {
+            printf("[OUTPLAY_VERIFY FAIL] analytical=%d full=%d\n",
+                   (int)leaf_value, (int)full_value);
+            fflush(stdout);
+            assert(full_value == leaf_value);
+          }
+        }
+        // Refresh pointer in case arena was reallocated during verify.
+        only_sm =
+            (const SmallMove *)(worker->small_move_arena->memory + arena_offset);
+      }
+#endif
+
+      pvline_update(pv, &child_pv, only_sm,
+                    leaf_value - worker->solver->initial_spread);
+      pv->negamax_depth = 1;
+
+      if (worker->solver->transposition_table_optim) {
+        negamax_tt_store(worker, node_key, depth, leaf_value, alpha_orig, beta,
+                         on_turn_spread, only_sm->tiny_move);
+      }
+
+      arena_dealloc(worker->small_move_arena, sizeof(SmallMove));
+
+      if (abdada_active) {
+        transposition_table_leave_node(worker->solver->transposition_table,
+                                       node_key);
+      }
+
+      return leaf_value;
+    }
+  }
 
   // Multi-PV: track top-K values at root to widen alpha
   const bool is_root = (worker->current_iterative_deepening_depth == depth);
