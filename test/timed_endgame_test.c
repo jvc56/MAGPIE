@@ -392,8 +392,6 @@ static void run_timed_precheck_ab(int num_games, double time_limit_sec,
     int tt_collisions[2] = {0, 0};
 
     for (int config_idx = 0; config_idx < 2; config_idx++) {
-      bool skip_precheck = (config_idx == 0);
-
       ErrorStack *err = error_stack_create();
       game_load_cgp(game, cgp, err);
       assert(error_stack_is_empty(err));
@@ -416,7 +414,6 @@ static void run_timed_precheck_ab(int num_games, double time_limit_sec,
                             .use_heuristics = true,
                             .per_ply_callback = NULL,
                             .per_ply_callback_data = NULL,
-                            .skip_cross_set_precheck = skip_precheck,
                             .forced_pass_bypass = false};
 
         thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
@@ -620,18 +617,16 @@ static void run_timed_round_robin(const char *cgp_file, int start_game,
     num_games = num_cgps - start_game;
   }
 
-  // 4 configs: [time_mode, skip_precheck]
-  // time_mode: 0 = baseline (80% hard), 1 = flexible (60/90 EBF)
-  const char *cfg_names[] = {"BO", "FO", "BN", "FN"};
-  const int cfg_time_mode[] = {0, 1, 0, 1};
-  const bool cfg_skip_precheck[] = {true, true, false, false};
+  // 2 configs: B = baseline (80% hard limit), F = flexible (60/90 EBF)
+  // Precheck is always enabled (it is now the only supported mode).
+  const char *cfg_names[] = {"B", "F"};
+  const int cfg_time_mode[] = {0, 1};
 
-  // 6 pairings (all C(4,2) combinations)
-  const int num_pairings = 6;
-  const int pair_a[] = {0, 0, 0, 1, 1, 2};
-  const int pair_b[] = {1, 2, 3, 2, 3, 3};
-  const char *pair_labels[] = {"BO-FO", "BO-BN", "BO-FN",
-                               "FO-BN", "FO-FN", "BN-FN"};
+  // 1 pairing: B vs F
+  const int num_pairings = 1;
+  const int pair_a[] = {0};
+  const int pair_b[] = {1};
+  const char *pair_labels[] = {"B-F"};
 
   Config *config = config_create_or_die(
       "set -lex CSW21 -threads 6 -s1 score -s2 score -r1 small -r2 small");
@@ -643,14 +638,12 @@ static void run_timed_round_robin(const char *cgp_file, int start_game,
   printf("\n");
   printf("=================================================================="
          "======================================\n");
-  printf("  4-Way Round Robin: %d games, P1=%.0fs P2=%.0fs budget, "
+  printf("  B vs F Round Robin: %d games, P1=%.0fs P2=%.0fs budget, "
          "8 threads\n",
          num_games, p1_budget_sec, p2_budget_sec);
   printf("  Positions: %s\n", cgp_file);
-  printf("  BO=baseline/precheck-off  FO=flexible/precheck-off  "
-         "BN=baseline/precheck-on  FN=flexible/precheck-on\n");
-  printf("  Baseline: 80%% hard limit.  Flexible: 60%%/90%% soft/hard + EBF.\n");
-  printf("  Head-to-head: each pair plays both sides per game. "
+  printf("  B=baseline (80%% hard limit)  F=flexible (60%%/90%% soft/hard + EBF)\n");
+  printf("  Precheck always enabled. "
          "Net + = first config stronger.\n");
   printf("=================================================================="
          "======================================\n");
@@ -768,7 +761,6 @@ static void run_timed_round_robin(const char *cgp_file, int start_game,
               .use_heuristics = true,
               .per_ply_callback = NULL,
               .per_ply_callback_data = NULL,
-              .skip_cross_set_precheck = cfg_skip_precheck[cfg],
               .forced_pass_bypass = false,
               .soft_time_limit = soft_limit,
               .hard_time_limit = hard_limit};
@@ -1172,7 +1164,6 @@ static void run_overnight_gamepairs(int num_games, double p1_budget_sec,
             .use_heuristics = true,
             .per_ply_callback = depth_log_callback,
             .per_ply_callback_data = &depth_ctx,
-            .skip_cross_set_precheck = skip_precheck_for_player[pot],
             .forced_pass_bypass = false,
             .soft_time_limit = 0,
             .hard_time_limit = 0};

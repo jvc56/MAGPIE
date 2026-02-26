@@ -420,8 +420,7 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
     es->dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT;
   }
   es->skip_pruned_cross_sets = endgame_args->skip_pruned_cross_sets;
-  es->cross_set_precheck = !endgame_args->skip_pruned_cross_sets &&
-                            !endgame_args->skip_cross_set_precheck;
+  es->cross_set_precheck = !endgame_args->skip_pruned_cross_sets;
   es->soft_time_limit = endgame_args->soft_time_limit;
   es->hard_time_limit = endgame_args->hard_time_limit;
   bool create_separate_kwgs =
@@ -1752,6 +1751,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   ctimer_start(&ids_timer);
   double prev_depth_time = 0.0;
   double prev_prev_depth_time = 0.0;
+  double ema_ebf_per_ply = -1.0; // -1 = not yet seeded
   double depth_start_time = 0.0;
   bool use_aspiration = (worker->solver->threads > 1);
 
@@ -1921,13 +1921,12 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     // EBF-based time management: decide whether to start the next depth.
     // Only thread 0 checks (other threads follow via search_complete signal).
     // Require a minimum depth before applying any time management so the solver
-    // always produces a reasonably deep answer before the EBF/soft limit can
-    // stop it — prevents shallow-depth artifacts (e.g. spurious PASS at d4).
-    // EBF cannot activate before d3 (needs prev_prev_depth_time, set after d2),
-    // so min_depth=3 is the effective minimum regardless of this constant.
-    // Keep at 3 so short-budget later turns stop cleanly via EBF rather than
-    // getting interrupted mid-depth by the external timer.
-    const int min_depth_for_time_mgmt = 3;
+    // always produces a reasonably deep answer before EBF/soft limit can stop
+    // it — prevents shallow-depth artifacts (e.g. spurious PASS at d3).
+    // min_depth=4: the d1/d3 EBF ratio is unreliable because the cross-set
+    // precheck prunes very heavily at shallow depths, making d1 anomalously
+    // fast. Starting at d4 (which uses the d2/d4 ratio) gives a stable base.
+    const int min_depth_for_time_mgmt = 4;
     if (worker->thread_index == 0 && worker->solver->soft_time_limit > 0) {
       double elapsed = ctimer_elapsed_seconds(&ids_timer);
       double this_depth_time = elapsed - depth_start_time;
@@ -1939,11 +1938,21 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
         }
         // Estimate time for next depth using 2-ply EBF: sqrt(t[d]/t[d-2]).
         // More stable than 1-ply EBF across odd/even ply alternation.
+        // Apply EMA smoothing: the cross-set precheck produces irregular search
+        // trees at shallow depths (heavy pruning early, less so later), making
+        // instantaneous EBF estimates volatile. EMA blends the current sample
+        // with the historical estimate, smoothing out transient spikes.
         if (prev_prev_depth_time > 0.01 && this_depth_time > 0.01) {
           double ebf2 = this_depth_time / prev_prev_depth_time;
-          // estimated t[d+1] = t[d] * sqrt(t[d]/t[d-2])
           double ebf_per_ply = sqrt(ebf2);
-          double estimated_next = this_depth_time * ebf_per_ply;
+          const double ema_alpha = 0.4;
+          if (ema_ebf_per_ply < 0.0) {
+            ema_ebf_per_ply = ebf_per_ply; // seed on first valid sample
+          } else {
+            ema_ebf_per_ply =
+                ema_alpha * ebf_per_ply + (1.0 - ema_alpha) * ema_ebf_per_ply;
+          }
+          double estimated_next = this_depth_time * ema_ebf_per_ply;
           if (elapsed + estimated_next > worker->solver->hard_time_limit) {
             // Next depth would likely exceed hard limit — stop now
             atomic_store(&worker->solver->search_complete, 1);
