@@ -862,20 +862,19 @@ static inline int board_toggle_dir(int dir) {
   return dir ^ (BOARD_VERTICAL_DIRECTION | BOARD_HORIZONTAL_DIRECTION);
 }
 
-// For a single-tile rack, determines if the tile can be played anywhere on
-// the board using only cross sets. A tile is playable at a square if:
-//   1. The square is empty (not occupied, not bricked)
-//   2. The square is adjacent to at least one existing tile
-//   3. For non-blank tiles: the letter's bit is set in BOTH the horizontal
-//      and vertical cross sets
-//   4. For blanks (ml == 0): some non-blank letter bit is set in the
-//      intersection of both cross sets (the blank can represent that letter)
+// Scans the board once and returns a bitvector of all machine letters that
+// have a valid single-tile play somewhere on the board. Bit i is set if
+// machine letter i can be placed at some empty square adjacent to existing
+// tiles where both horizontal and vertical cross sets allow it.
 //
-// This is only valid for single-tile plays. Multi-tile plays may require
-// tiles that are only playable in combination, which cross sets cannot verify.
-static inline bool board_is_letter_playable_anywhere(const Board *board,
-                                                     MachineLetter ml,
-                                                     int cross_set_index) {
+// If rack_tiles_bv is nonzero, exits early once every bit in rack_tiles_bv
+// is covered (all rack tiles found playable). Blank (bit 0) should NOT be
+// included in rack_tiles_bv — handle blank playability at the call site by
+// checking if any non-blank bit is set in the returned bitvector.
+static inline uint64_t board_get_playable_tiles_bv(const Board *board,
+                                                   int cross_set_index,
+                                                   uint64_t rack_tiles_bv) {
+  uint64_t playable = 0;
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
       if (board_is_nonempty_or_bricked(board, row, col)) {
@@ -889,20 +888,15 @@ static inline bool board_is_letter_playable_anywhere(const Board *board,
       uint64_t v = board_get_cross_set(
           board, row, col, BOARD_VERTICAL_DIRECTION, cross_set_index);
       uint64_t both = h & v;
-      if (ml == BLANK_MACHINE_LETTER) {
-        // Blank can represent any letter — check if any non-blank letter
-        // is valid in both directions (shift out bit 0).
-        if (both >> 1) {
-          return true;
-        }
-      } else {
-        if (both & ((uint64_t)1 << ml)) {
-          return true;
-        }
+      if (both != TRIVIAL_CROSS_SET) {
+        playable |= both;
+      }
+      if (rack_tiles_bv && (playable & rack_tiles_bv) == rack_tiles_bv) {
+        return playable;
       }
     }
   }
-  return false;
+  return playable;
 }
 
 #endif

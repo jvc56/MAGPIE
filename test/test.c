@@ -130,12 +130,15 @@ static TestEntry on_demand_test_table[] = {
     {"benchfp", test_benchmark_forced_pass},
     {"benchns", test_benchmark_nonstuck},
     {"benchns3v3", test_benchmark_nonstuck_3v3},
+    {"abprecheck", test_benchmark_timed_precheck},
     {"timedab", test_benchmark_timed_selfplay},
     {"overnight", test_benchmark_timed_overnight},
     {"timedhard", test_benchmark_timed_hard},
     {"multipv", test_multi_pv},
     {"kue", test_kue},
     {"monsterq", test_monster_q},
+    {"roundrobin", test_benchmark_timed_round_robin},
+    {"gamepairs", test_benchmark_overnight_gamepairs},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

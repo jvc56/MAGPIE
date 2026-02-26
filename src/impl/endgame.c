@@ -38,6 +38,7 @@
 #include "move_gen.h"
 #include "word_prune.h"
 #include <assert.h>
+#include <math.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -109,6 +110,9 @@ struct EndgameSolver {
   KWG *pruned_kwgs[2];
   dual_lexicon_mode_t dual_lexicon_mode;
   bool skip_pruned_cross_sets;
+  bool cross_set_precheck;
+  double soft_time_limit;
+  double hard_time_limit;
 
   int solve_multiple_variations;
   int requested_plies;
@@ -122,6 +126,15 @@ struct EndgameSolver {
   atomic_int stuck_tile_logged;
   // Fraction of opponent's tiles that are stuck at the root (0.0 = none)
   float initial_opp_stuck_frac;
+
+  // Root move progress tracking (thread 0 only, for external polling)
+  atomic_int root_moves_completed; // How many root moves finished this depth
+  atomic_int root_moves_total;     // Total root moves at this depth
+  atomic_int current_depth;        // Depth currently being searched
+
+  // Ply-2 progress tracking (children of root move #1, thread 0 only)
+  atomic_int ply2_moves_completed;
+  atomic_int ply2_moves_total;
 
   // Per-ply callback for iterative deepening progress
   EndgamePerPlyCallback per_ply_callback;
@@ -147,6 +160,7 @@ typedef struct EndgameSolverWorker {
   int32_t best_pv_value; // Thread-local best value
   int completed_depth;   // Depth this thread completed
   int n_initial_moves;   // Number of root moves (thread-local to avoid races)
+  bool in_first_root_move; // True when thread 0 is inside root move idx==0
 } EndgameSolverWorker;
 
 #ifndef MAX
@@ -406,6 +420,10 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
     es->dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT;
   }
   es->skip_pruned_cross_sets = endgame_args->skip_pruned_cross_sets;
+  es->cross_set_precheck = !endgame_args->skip_pruned_cross_sets &&
+                            !endgame_args->skip_cross_set_precheck;
+  es->soft_time_limit = endgame_args->soft_time_limit;
+  es->hard_time_limit = endgame_args->hard_time_limit;
   bool create_separate_kwgs =
       (es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED) && !shared_kwg;
 
@@ -428,6 +446,11 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   // Initialize ABDADA synchronization
   atomic_store(&es->search_complete, 0);
   atomic_store(&es->stuck_tile_logged, 0);
+  atomic_store(&es->root_moves_completed, 0);
+  atomic_store(&es->root_moves_total, 0);
+  atomic_store(&es->current_depth, 0);
+  atomic_store(&es->ply2_moves_completed, 0);
+  atomic_store(&es->ply2_moves_total, 0);
 
   es->thread_control = endgame_args->thread_control;
   es->game = endgame_args->game;
@@ -451,6 +474,23 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
 EndgameSolver *endgame_solver_create(void) {
   EndgameSolver *es = calloc_or_die(1, sizeof(EndgameSolver));
   return es;
+}
+
+const TranspositionTable *
+endgame_solver_get_transposition_table(const EndgameSolver *es) {
+  return es->transposition_table;
+}
+
+void endgame_solver_get_progress(const EndgameSolver *es, int *current_depth,
+                                 int *root_moves_completed,
+                                 int *root_moves_total,
+                                 int *ply2_moves_completed,
+                                 int *ply2_moves_total) {
+  *current_depth = atomic_load(&es->current_depth);
+  *root_moves_completed = atomic_load(&es->root_moves_completed);
+  *root_moves_total = atomic_load(&es->root_moves_total);
+  *ply2_moves_completed = atomic_load(&es->ply2_moves_completed);
+  *ply2_moves_total = atomic_load(&es->ply2_moves_total);
 }
 
 void endgame_solver_destroy(EndgameSolver *es) {
@@ -869,35 +909,46 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
 static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
                                         const KWG *pruned_kwg, int opp_idx,
                                         int thread_index,
+                                        bool cross_set_precheck,
                                         uint64_t *tiles_played_bv_out) {
   int saved_on_turn = game_get_player_on_turn_index(game);
   if (saved_on_turn != opp_idx) {
     game_set_player_on_turn_index(game, opp_idx);
   }
   const Rack *opp_rack = player_get_rack(game_get_player(game, opp_idx));
-  // Cross-set pre-check: for each tile type on the rack, check if it has a
-  // valid single-tile play. If all do, stuck fraction is 0 — skip movegen.
-  // Otherwise, seed the tiles_played bitvector with known-playable tiles
-  // so movegen doesn't have to rediscover them.
+  // Cross-set pre-check: scan the board once to find all tiles with valid
+  // single-tile plays. If every rack tile is playable, stuck fraction is 0 —
+  // skip movegen. For 1-tile racks, the check is authoritative (no multi-tile
+  // words possible), so skip movegen regardless of result. For multi-tile
+  // racks that fall through, seed the tiles_played bitvector with known-
+  // playable tiles so movegen doesn't have to rediscover them.
+  //
+  // Only valid when the board's cross-sets are up to date and were generated
+  // from the same KWG used by movegen (the pruned KWG). When cross-sets are
+  // stale (lazy update pending) or generated from a different KWG
+  // (skip_pruned_cross_sets mode), skip the pre-check and fall through to
+  // full movegen.
   uint64_t opp_tiles_bv = 0;
-  {
+  const Board *board = game_get_board(game);
+  if (cross_set_precheck && board_get_cross_sets_valid(board)) {
     bool kwgs_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
     int ci = board_get_cross_set_index(kwgs_shared, opp_idx);
-    const Board *board = game_get_board(game);
-    int ld_size = ld_get_size(game_get_ld(game));
-    bool all_playable = true;
+    const LetterDistribution *ld = game_get_ld(game);
+    int ld_size = ld_get_size(ld);
+    uint64_t rack_tiles_bv = 0;
     for (int i = 0; i < ld_size; i++) {
       if (rack_get_letter(opp_rack, i) > 0) {
-        if (board_is_letter_playable_anywhere(board, (MachineLetter)i, ci)) {
-          opp_tiles_bv |= ((uint64_t)1 << i);
-        } else {
-          all_playable = false;
-          break;
-        }
+        rack_tiles_bv |= ((uint64_t)1 << i);
       }
     }
-    // For a 1-tile rack, the cross-set check is authoritative: a single tile
-    // either has a 1-tile play or it has no play at all. Skip movegen.
+    uint64_t rack_non_blank = rack_tiles_bv & ~(uint64_t)1;
+    uint64_t playable_bv =
+        board_get_playable_tiles_bv(board, ci, rack_non_blank);
+    opp_tiles_bv = playable_bv & rack_tiles_bv;
+    if ((rack_tiles_bv & 1) && (playable_bv >> 1)) {
+      opp_tiles_bv |= 1;
+    }
+    bool all_playable = (opp_tiles_bv == rack_tiles_bv);
     if (all_playable || rack_get_total_letters(opp_rack) == 1) {
       if (saved_on_turn != opp_idx) {
         game_set_player_on_turn_index(game, saved_on_turn);
@@ -906,8 +957,8 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
         *tiles_played_bv_out = opp_tiles_bv;
       }
       return all_playable ? 0.0F
-                          : stuck_tile_fraction_from_bv(
-                                game_get_ld(game), opp_rack, opp_tiles_bv);
+                          : stuck_tile_fraction_from_bv(ld, opp_rack,
+                                                        opp_tiles_bv);
     }
   }
   const MoveGenArgs tp_args = {
@@ -954,11 +1005,18 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
     opp_stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
         solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx,
-        worker->thread_index, NULL);
+        worker->thread_index,
+        worker->solver->cross_set_precheck, NULL);
   }
 
+  bool playout_interrupted = false;
   while (game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE &&
          playout_depth < max_playout) {
+    if (thread_control_get_status(worker->solver->thread_control) ==
+        THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+      playout_interrupted = true;
+      break;
+    }
     // Lazy cross-set update from the previous move's undo.
     // When playout_depth==0, the previous move is the last negamax move
     // at undo slot plies-1. For subsequent playout moves, the previous
@@ -1094,6 +1152,10 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
     }
   }
 
+  if (playout_interrupted) {
+    return ABDADA_INTERRUPTED;
+  }
+
   // Store greedy playout result in TT at depth 0.
   // Only store if no deeper entry exists (prefer deeper negamax results).
   if (worker->solver->transposition_table_optim) {
@@ -1151,7 +1213,8 @@ static int negamax_generate_and_sort_moves(EndgameSolverWorker *worker,
     *opp_stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
         solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx,
-        worker->thread_index, &opp_tiles_bv);
+        worker->thread_index,
+        worker->solver->cross_set_precheck, &opp_tiles_bv);
     nplays = generate_stm_plays(worker, depth);
   } else {
     nplays = generate_stm_plays(worker, depth);
@@ -1190,14 +1253,15 @@ static int negamax_generate_and_sort_moves(EndgameSolverWorker *worker,
   return nplays;
 }
 
+static bool iterative_deepening_should_stop(EndgameSolver *solver);
+
 int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
                        int depth, int32_t alpha, int32_t beta, PVLine *pv,
                        bool pv_node, bool exclusive_p, float opp_stuck_frac) {
 
   assert(pv_node || alpha == beta - 1);
 
-  if (thread_control_get_status(worker->solver->thread_control) ==
-      THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+  if (iterative_deepening_should_stop(worker->solver)) {
     return ABDADA_INTERRUPTED;
   }
 
@@ -1373,6 +1437,13 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
 
   // Multi-PV: track top-K values at root to widen alpha
   const bool is_root = (worker->current_iterative_deepening_depth == depth);
+  const bool is_ply2 =
+      (worker->current_iterative_deepening_depth - 1 == depth) &&
+      worker->thread_index == 0 && worker->in_first_root_move;
+  if (is_ply2) {
+    atomic_store(&worker->solver->ply2_moves_total, nplays);
+    atomic_store(&worker->solver->ply2_moves_completed, 0);
+  }
   const int multi_pv_k = worker->solver->solve_multiple_variations;
   const bool multi_pv = is_root && multi_pv_k > 1;
   int32_t topk_values[MAX_VARIANT_LENGTH];
@@ -1428,6 +1499,11 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       const bool is_outplay =
           small_move_get_tiles_played(small_move) == stm_rack_tiles;
 
+      // Track whether thread 0 is inside root move #1's subtree
+      if (is_root && worker->thread_index == 0 && pass == 0) {
+        worker->in_first_root_move = (idx == 0);
+      }
+
       int last_consecutive_scoreless_turns =
           game_get_consecutive_scoreless_turns(worker->game_copy);
 
@@ -1481,7 +1557,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
           value = abdada_negamax(worker, child_key, depth - 1, -move_beta,
                                  -move_alpha, &child_pv, pv_node,
                                  child_exclusive, opp_stuck_frac);
-          if (value == ON_EVALUATION) {
+          if (value == ON_EVALUATION || value == ABDADA_INTERRUPTED) {
             break;
           }
           if (-value <= move_alpha && move_alpha > alpha) {
@@ -1563,6 +1639,13 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
         // At the very top depth, set the estimated value of the small move,
         // for the next iterative deepening iteration.
         small_move_set_estimated_value(small_move, -value);
+        // Track root move progress (thread 0 only, for external polling)
+        if (worker->thread_index == 0 && pass == 0) {
+          atomic_fetch_add(&worker->solver->root_moves_completed, 1);
+        }
+      }
+      if (is_ply2 && pass == 0) {
+        atomic_fetch_add(&worker->solver->ply2_moves_completed, 1);
       }
       if (multi_pv) {
         // Multi-PV: insert value into sorted top-K array and set alpha to
@@ -1600,7 +1683,8 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
     free(deferred);
   }
 
-  if (worker->solver->transposition_table_optim) {
+  if (worker->solver->transposition_table_optim &&
+      best_value != ABDADA_INTERRUPTED) {
     negamax_tt_store(worker, node_key, depth, best_value, alpha_orig, beta,
                      on_turn_spread, best_tiny_move);
   }
@@ -1664,6 +1748,11 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   int32_t alpha = -LARGE_VALUE;
   int32_t beta = LARGE_VALUE;
   int32_t prev_value = 0;
+  Timer ids_timer;
+  ctimer_start(&ids_timer);
+  double prev_depth_time = 0.0;
+  double prev_prev_depth_time = 0.0;
+  double depth_start_time = 0.0;
   bool use_aspiration = (worker->solver->threads > 1);
 
   if (worker->solver->first_win_optim) {
@@ -1729,6 +1818,17 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     }
 
     worker->current_iterative_deepening_depth = p;
+    // Update root move progress counters (thread 0 only)
+    if (worker->thread_index == 0) {
+      atomic_store(&worker->solver->current_depth, p);
+      atomic_store(&worker->solver->root_moves_completed, 0);
+      atomic_store(&worker->solver->root_moves_total,
+                   worker->n_initial_moves);
+      atomic_store(&worker->solver->ply2_moves_completed, 0);
+      atomic_store(&worker->solver->ply2_moves_total, 0);
+      worker->in_first_root_move = false;
+    }
+    depth_start_time = ctimer_elapsed_seconds(&ids_timer);
     PVLine pv;
     pv.game = worker->game_copy;
     pv.num_moves = 0;
@@ -1779,8 +1879,9 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
                            false, initial_opp_stuck_frac);
     }
 
-    // If search was interrupted, don't store results for this depth
-    if (!search_valid) {
+    // If search was interrupted, discard this depth and use last complete depth
+    bool interrupted = !search_valid || val == ABDADA_INTERRUPTED;
+    if (interrupted) {
       break;
     }
 
@@ -1798,7 +1899,8 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     worker->best_pv = pv;
     worker->completed_depth = p;
 
-    endgame_results_set_best_pvline(worker->solver->results, &pv, pv_value, p);
+    endgame_results_set_best_pvline(worker->solver->results, &pv, pv_value, p,
+                                    false);
 
     // Call per-ply callback (only thread 0 to avoid race conditions)
     if (worker->thread_index == 0 && worker->solver->per_ply_callback) {
@@ -1814,6 +1916,43 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
 
       build_ranked_pvs_and_notify(worker, p, pv_value, &extended_pv,
                                   initial_moves, initial_move_count);
+    }
+
+    // EBF-based time management: decide whether to start the next depth.
+    // Only thread 0 checks (other threads follow via search_complete signal).
+    // Require a minimum depth before applying any time management so the solver
+    // always produces a reasonably deep answer before the EBF/soft limit can
+    // stop it — prevents shallow-depth artifacts (e.g. spurious PASS at d4).
+    // EBF cannot activate before d3 (needs prev_prev_depth_time, set after d2),
+    // so min_depth=3 is the effective minimum regardless of this constant.
+    // Keep at 3 so short-budget later turns stop cleanly via EBF rather than
+    // getting interrupted mid-depth by the external timer.
+    const int min_depth_for_time_mgmt = 3;
+    if (worker->thread_index == 0 && worker->solver->soft_time_limit > 0) {
+      double elapsed = ctimer_elapsed_seconds(&ids_timer);
+      double this_depth_time = elapsed - depth_start_time;
+      if (p >= min_depth_for_time_mgmt) {
+        if (elapsed >= worker->solver->soft_time_limit) {
+          // Past soft limit — stop immediately, bank remaining time
+          atomic_store(&worker->solver->search_complete, 1);
+          break;
+        }
+        // Estimate time for next depth using 2-ply EBF: sqrt(t[d]/t[d-2]).
+        // More stable than 1-ply EBF across odd/even ply alternation.
+        if (prev_prev_depth_time > 0.01 && this_depth_time > 0.01) {
+          double ebf2 = this_depth_time / prev_prev_depth_time;
+          // estimated t[d+1] = t[d] * sqrt(t[d]/t[d-2])
+          double ebf_per_ply = sqrt(ebf2);
+          double estimated_next = this_depth_time * ebf_per_ply;
+          if (elapsed + estimated_next > worker->solver->hard_time_limit) {
+            // Next depth would likely exceed hard limit — stop now
+            atomic_store(&worker->solver->search_complete, 1);
+            break;
+          }
+        }
+      }
+      prev_prev_depth_time = prev_depth_time;
+      prev_depth_time = this_depth_time;
     }
 
     // Signal other threads to stop when we complete the full search
@@ -1842,7 +1981,7 @@ static float compute_initial_stuck_fraction(const EndgameSolver *solver,
   MoveList *tmp_ml = move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
   float frac = compute_opp_stuck_fraction(
       root_game, tmp_ml, solver_get_pruned_kwg(solver, opp_idx), opp_idx, 0,
-      NULL);
+      solver->cross_set_precheck, NULL);
   small_move_list_destroy(tmp_ml);
   game_destroy(root_game);
   return frac;
@@ -2061,8 +2200,12 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   // Calculate elapsed time
   double elapsed = ctimer_elapsed_seconds(&solve_timer);
 
-  // Extend best PV with TT + greedy playout for display (single-PV case)
-  if (num_top <= 1 && solver->transposition_table) {
+  // Extend best PV with TT + greedy playout for display (single-PV case).
+  // Skip when interrupted by timer — extension calls generate_moves per ply
+  // and would add seconds of post-search overhead.
+  bool interrupted = thread_control_get_status(solver->thread_control) ==
+                     THREAD_CONTROL_STATUS_USER_INTERRUPT;
+  if (!interrupted && num_top <= 1 && solver->transposition_table) {
     Game *ext_game = game_duplicate(endgame_args->game);
     pvline_extend_from_tt(&solver->principal_variation, ext_game,
                           solver->transposition_table, solver->solving_player,
@@ -2071,5 +2214,7 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
     multi_pvs[0] = solver->principal_variation;
   }
 
-  log_final_pvs(multi_pvs, num_pvs, solver, endgame_args->game, elapsed);
+  if (!interrupted) {
+    log_final_pvs(multi_pvs, num_pvs, solver, endgame_args->game, elapsed);
+  }
 }

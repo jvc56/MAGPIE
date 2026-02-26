@@ -138,19 +138,24 @@ void test_generate_stuck_cgps(void) {
 
   const int target_full = 1500;
   const int target_partial = 200;
+  const int target_hard = 500;
   const uint64_t base_seed = 7777;
   const int max_attempts = 1500000;
 
   FILE *fp_full = fopen("/tmp/stuck_100pct_cgps.txt", "we");
   FILE *fp_partial = fopen("/tmp/stuck_partial_cgps.txt", "we");
+  FILE *fp_hard = fopen("/tmp/stuck_hard_endgame_cgps.txt", "we");
   assert(fp_full);
   assert(fp_partial);
+  assert(fp_hard);
 
   int found_full = 0;
   int found_partial = 0;
+  int found_hard = 0;
 
   for (int i = 0;
-       (found_full < target_full || found_partial < target_partial) &&
+       (found_full < target_full || found_partial < target_partial ||
+        found_hard < target_hard) &&
        i < max_attempts;
        i++) {
     game_reset(game);
@@ -159,6 +164,21 @@ void test_generate_stuck_cgps(void) {
 
     if (!play_until_bag_empty(game, move_list)) {
       continue;
+    }
+
+    // Check for stuck tiles right at bag-empty (full racks = hard positions).
+    // Save positions where at least one player has at least one stuck tile.
+    if (found_hard < target_hard) {
+      for (int p = 0; p < 2; p++) {
+        float frac = compute_stuck_fraction(game, move_list, p);
+        if (frac > 0.0F) {
+          char *cgp = game_get_cgp(game, true);
+          (void)fprintf(fp_hard, "%s\n", cgp);
+          free(cgp);
+          found_hard++;
+          break;
+        }
+      }
     }
 
     // Continue playing greedy moves past bag-empty to reduce rack sizes.
@@ -209,6 +229,7 @@ void test_generate_stuck_cgps(void) {
 
   (void)fclose(fp_full);
   (void)fclose(fp_partial);
+  (void)fclose(fp_hard);
 
   printf("\n");
   printf("==============================================================\n");
@@ -218,6 +239,9 @@ void test_generate_stuck_cgps(void) {
          found_full);
   printf("  50-99%% stuck: %d positions → /tmp/stuck_partial_cgps.txt\n",
          found_partial);
+  printf("  any stuck at bag-empty: %d positions → "
+         "/tmp/stuck_hard_endgame_cgps.txt\n",
+         found_hard);
   printf("==============================================================\n");
   (void)fflush(stdout);
 
