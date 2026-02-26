@@ -617,16 +617,20 @@ static void run_timed_round_robin(const char *cgp_file, int start_game,
     num_games = num_cgps - start_game;
   }
 
-  // 2 configs: B = baseline (80% hard limit), F = flexible (60/90 EBF)
-  // Precheck is always enabled (it is now the only supported mode).
-  const char *cfg_names[] = {"B", "F"};
-  const int cfg_time_mode[] = {0, 1};
+  // 3 configs:
+  //   O = Old: no cross-set precheck, baseline timing (80% hard limit)
+  //   B = Precheck + baseline timing (80% hard limit)
+  //   F = Precheck + flexible EBF timing (60%/90% soft/hard)
+  const char *cfg_names[] = {"O", "B", "F"};
+  const int cfg_time_mode[] = {0, 0, 1};
+  const bool cfg_precheck[] = {false, true, true};
 
-  // 1 pairing: B vs F
-  const int num_pairings = 1;
-  const int pair_a[] = {0};
-  const int pair_b[] = {1};
-  const char *pair_labels[] = {"B-F"};
+  // 3 pairings: O-B isolates precheck effect, O-F shows combined gain,
+  // B-F isolates EBF effect.
+  const int num_pairings = 3;
+  const int pair_a[] = {0, 0, 1};
+  const int pair_b[] = {1, 2, 2};
+  const char *pair_labels[] = {"O-B", "O-F", "B-F"};
 
   Config *config = config_create_or_die(
       "set -lex CSW21 -threads 6 -s1 score -s2 score -r1 small -r2 small");
@@ -638,12 +642,13 @@ static void run_timed_round_robin(const char *cgp_file, int start_game,
   printf("\n");
   printf("=================================================================="
          "======================================\n");
-  printf("  B vs F Round Robin: %d games, P1=%.0fs P2=%.0fs budget, "
+  printf("  3-Way Round Robin: %d games, P1=%.0fs P2=%.0fs budget, "
          "8 threads\n",
          num_games, p1_budget_sec, p2_budget_sec);
   printf("  Positions: %s\n", cgp_file);
-  printf("  B=baseline (80%% hard limit)  F=flexible (60%%/90%% soft/hard + EBF)\n");
-  printf("  Precheck always enabled. "
+  printf("  O=old (no precheck, 80%% hard)  B=precheck+baseline  "
+         "F=precheck+EBF+75%%bail\n");
+  printf("  O-B=precheck effect  O-F=combined effect  B-F=EBF effect. "
          "Net + = first config stronger.\n");
   printf("=================================================================="
          "======================================\n");
@@ -761,6 +766,7 @@ static void run_timed_round_robin(const char *cgp_file, int start_game,
               .use_heuristics = true,
               .per_ply_callback = NULL,
               .per_ply_callback_data = NULL,
+              .skip_pruned_cross_sets = !cfg_precheck[cfg],
               .forced_pass_bypass = false,
               .soft_time_limit = soft_limit,
               .hard_time_limit = hard_limit};
@@ -883,7 +889,7 @@ static void run_timed_round_robin(const char *cgp_file, int start_game,
 
 void test_benchmark_timed_round_robin(void) {
   log_set_level(LOG_FATAL);
-  run_timed_round_robin("/tmp/stuck_hard_endgame_cgps.txt", 100, 30, 20.0,
+  run_timed_round_robin("/tmp/stuck_hard_endgame_cgps.txt", 0, 500, 20.0,
                         12.0);
 }
 

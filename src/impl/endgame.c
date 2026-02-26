@@ -49,6 +49,10 @@ enum {
   // Maximum moves for stack allocation in ABDADA deferred tracking
   // Keep small to avoid stack overflow in deep recursive searches
   MAX_DEFERRED_STACK = 64,
+  // How many abdada_negamax calls between per-depth deadline checks.
+  // Checked per-worker (no cross-thread contention). At ~100K nodes/s/thread,
+  // 4096 nodes ≈ 40ms granularity — cheap but responsive enough to bail early.
+  DEPTH_DEADLINE_CHECK_INTERVAL = 4096,
   // Bit flags for move estimates. These large numbers will force these
   // estimated values to sort first.
   LARGE_VALUE = 1 << 30, // for alpha-beta pruning
@@ -122,6 +126,10 @@ struct EndgameSolver {
 
   // Signal for threads to stop early (0=running, 1=done)
   atomic_int search_complete;
+  // Per-depth deadline: absolute CLOCK_MONOTONIC nanoseconds; 0 = disabled.
+  // Thread 0 sets this after each completed depth (from EBF estimate).
+  // All worker threads check it periodically and bail if exceeded.
+  _Atomic int64_t depth_deadline_ns;
   // Flag: stuck-tile mode has been logged (0=not yet, 1=logged)
   atomic_int stuck_tile_logged;
   // Fraction of opponent's tiles that are stuck at the root (0.0 = none)
@@ -161,6 +169,8 @@ typedef struct EndgameSolverWorker {
   int completed_depth;   // Depth this thread completed
   int n_initial_moves;   // Number of root moves (thread-local to avoid races)
   bool in_first_root_move; // True when thread 0 is inside root move idx==0
+  // Counter for throttling per-depth deadline checks in abdada_negamax
+  uint64_t nodes_since_deadline_check;
 } EndgameSolverWorker;
 
 #ifndef MAX
@@ -444,6 +454,7 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
 
   // Initialize ABDADA synchronization
   atomic_store(&es->search_complete, 0);
+  atomic_store(&es->depth_deadline_ns, 0);
   atomic_store(&es->stuck_tile_logged, 0);
   atomic_store(&es->root_moves_completed, 0);
   atomic_store(&es->root_moves_total, 0);
@@ -540,6 +551,7 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
   solver_worker->best_pv.num_moves = 0;
   solver_worker->best_pv_value = -LARGE_VALUE;
   solver_worker->completed_depth = 0;
+  solver_worker->nodes_since_deadline_check = 0;
 
   return solver_worker;
 }
@@ -1254,6 +1266,28 @@ static int negamax_generate_and_sort_moves(EndgameSolverWorker *worker,
 
 static bool iterative_deepening_should_stop(EndgameSolver *solver);
 
+// Checks whether the per-depth deadline has been exceeded and signals all
+// workers to stop if so. Marked noinline to keep struct timespec off the hot
+// abdada_negamax stack frame — deep searches (25-ply) would otherwise
+// overflow the stack under ASAN's enlarged frames.
+__attribute__((noinline)) static bool
+check_depth_deadline(EndgameSolverWorker *worker) {
+  int64_t deadline_ns =
+      atomic_load_explicit(&worker->solver->depth_deadline_ns,
+                           memory_order_relaxed);
+  if (deadline_ns == 0) {
+    return false;
+  }
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  int64_t now_ns = (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+  if (now_ns > deadline_ns) {
+    atomic_store(&worker->solver->search_complete, 1);
+    return true;
+  }
+  return false;
+}
+
 int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
                        int depth, int32_t alpha, int32_t beta, PVLine *pv,
                        bool pv_node, bool exclusive_p, float opp_stuck_frac) {
@@ -1262,6 +1296,18 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
 
   if (iterative_deepening_should_stop(worker->solver)) {
     return ABDADA_INTERRUPTED;
+  }
+
+  // Per-depth deadline check: bail mid-depth if we're running over the EBF
+  // estimate. Throttled to every DEPTH_DEADLINE_CHECK_INTERVAL nodes per worker
+  // to amortize the clock_gettime call. The actual check is in a noinline
+  // helper so struct timespec does not land on every abdada_negamax frame —
+  // deep searches (e.g. 25-ply) would otherwise overflow the stack.
+  if (++worker->nodes_since_deadline_check >= DEPTH_DEADLINE_CHECK_INTERVAL) {
+    worker->nodes_since_deadline_check = 0;
+    if (check_depth_deadline(worker)) {
+      return ABDADA_INTERRUPTED;
+    }
   }
 
   // ABDADA: if exclusive search and another processor is on this node, defer.
@@ -1957,6 +2003,26 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
             // Next depth would likely exceed hard limit — stop now
             atomic_store(&worker->solver->search_complete, 1);
             break;
+          }
+          // Mid-depth bail: set a per-depth deadline so workers abort if a
+          // depth runs far beyond its EBF estimate.  Only activate in the
+          // final stretch (elapsed >= 75% of hard limit).  Below that
+          // threshold the solver still has many depths ahead of it and the
+          // EBF estimate is likely noisy at shallow depths; bailing early
+          // would drop back to a shallower result unnecessarily.  Above 75%,
+          // we are near the last depth we will attempt, so a runaway depth
+          // directly starves subsequent turns.  Clear any stale deadline when
+          // we are below the threshold so workers don't fire spuriously.
+          if (elapsed >= 0.75 * worker->solver->hard_time_limit) {
+            struct timespec ts_now;
+            clock_gettime(CLOCK_MONOTONIC, &ts_now);
+            int64_t now_ns =
+                (int64_t)ts_now.tv_sec * 1000000000LL + ts_now.tv_nsec;
+            int64_t budget_ns = (int64_t)(estimated_next * 1.5e9);
+            atomic_store(&worker->solver->depth_deadline_ns,
+                         now_ns + budget_ns);
+          } else {
+            atomic_store(&worker->solver->depth_deadline_ns, 0);
           }
         }
       }

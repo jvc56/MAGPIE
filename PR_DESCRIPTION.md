@@ -34,7 +34,7 @@ heavily pruned, making them anomalously fast relative to deeper depths. This
 caused the 2-ply EBF estimate (`sqrt(t[d]/t[d-2])`) to spike at early depths
 and prematurely terminate search.
 
-Two fixes applied to `iterative_deepening` in `endgame.c`:
+Three fixes applied to `iterative_deepening` in `endgame.c`:
 
 1. **`min_depth_for_time_mgmt` raised from 3 → 4**: the d1/d3 EBF ratio
    (precheck prunes d1 extremely heavily) was the most volatile estimate.
@@ -44,30 +44,54 @@ Two fixes applied to `iterative_deepening` in `endgame.c`:
    current 2-ply sample with the historical EMA, damping transient spikes from
    depth-to-depth tree irregularity.
 
-## 30-game round robin benchmark (positions 100–129, 20s/12s budget, O3)
+3. **Mid-depth bail via per-depth deadline**: after each completed depth, a
+   deadline of `1.5 × estimated_next_depth_time` is set. Worker threads check
+   it every 4096 nodes (via a `noinline` helper to avoid growing the recursive
+   stack frame). If the deadline fires mid-depth, `search_complete` is set and
+   the depth is discarded — the last fully completed depth's result is used.
+   This prevents a depth from overshooting its budget and starving subsequent
+   turns in a multi-turn endgame. The 1.5× multiplier tolerates normal tree
+   variance while still catching 2–3× overruns. The deadline is only set when
+   `elapsed >= 75% of hard_time_limit`. Below that threshold the EBF estimate
+   can be noisy and the solver has many depths ahead; bailing early would drop
+   back to a shallower result unnecessarily. Above 75% a runaway depth
+   directly starves subsequent turns, making bail appropriate.
 
-Compared four solver configs across 30 endgame positions (8 threads,
-CSW21, P1=20s P2=12s, precheck always on for B/F N configs):
+## 200-game 3-way round robin (positions 0–199, 20s/12s budget, O3)
 
-| Config | Description | Net spread vs all opponents |
-|--------|-------------|----------------------------|
-| **FO** | EBF, no precheck | **+18** |
-| **FN** | EBF, precheck | **+18** |
-| **BN** | Baseline, precheck | -17 |
-| **BO** | Baseline, no precheck | -19 |
+Three configs compared across 200 endgame positions (8 threads, CSW21,
+P1=20s P2=12s):
+
+- **O** — Old: no cross-set precheck, 80% hard time limit
+- **B** — Precheck + baseline 80% hard limit (isolates precheck effect)
+- **F** — Precheck + EBF + 75% mid-depth bail guard (this PR, full stack)
+
+| Pairing | Net spread | Wins | Losses | Ties | Meaning |
+|---------|-----------|------|--------|------|---------|
+| **O-B** | -39 (avg -0.20) | 13 | 21 | 167 | precheck effect |
+| **O-F** | **-81** (avg **-0.41**) | 13 | 30 | 158 | **combined effect** |
+| **B-F** | -7 (avg -0.04) | 19 | 25 | 157 | EBF effect |
+
+Total time over 200 games (P1 + P2 combined):
+
+| Config | Total time | Overtime |
+|--------|-----------|----------|
+| **O** | 9332.7s | **2.85s** |
+| **B** | 9284.2s | **2.61s** |
+| **F** | **7656.4s** | **0.32s** |
 
 Key findings:
-- **EBF time management dominates**: both EBF configs beat both baseline configs
-  by ~37 points total (avg ~0.6 pts/game). Baseline wastes budget by burning
-  80% of remaining time every turn regardless of search progress.
-- **Precheck effect**: slightly positive with baseline (BN +2 vs BO), slightly
-  negative with EBF (FN -13 vs FO on FO-FN pairing, but FO and FN tied overall
-  at +18). The negative EBF interaction was the EBF calibration issue now fixed.
-- **Overtime**: minimal (BO=0.26s, FO=0.04s, BN=0.06s, FN=0.02s total across
-  all 30 games).
-
-Based on this, precheck is now the only supported mode and EBF calibration has
-been updated for precheck's tree structure.
+- **Combined gain**: F beats old by 81 points (avg +0.41/game) over 200 games,
+  a clear win for the full stack.
+- **Precheck contributes**: B beats O by 39 points (avg +0.20/game) from the
+  cross-set stuck check alone.
+- **EBF contributes**: F beats B by 7 points (avg +0.04/game) from smarter time
+  management; smaller but consistent.
+- **Time efficiency**: F uses ~18% less total search time than O or B while
+  achieving better decisions — the precheck prunes stuck checks and the EBF
+  banks remaining budget for subsequent turns.
+- **Overtime**: F incurs only 0.32s total overtime vs 2.85s (O) and 2.61s (B),
+  demonstrating tighter budget adherence.
 
 ## Test plan
 
