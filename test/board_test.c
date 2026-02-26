@@ -541,9 +541,9 @@ void test_board_all(void) {
   config_destroy(config);
 }
 
-// Test board_is_letter_playable_anywhere against generate_moves with
+// Test board_get_playable_tiles_bv against generate_moves with
 // MOVE_RECORD_TILES_PLAYED for single-tile racks.
-void test_board_is_letter_playable_anywhere(void) {
+void test_board_get_playable_tiles_bv(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -559,7 +559,12 @@ void test_board_is_letter_playable_anywhere(void) {
   int ci = board_get_cross_set_index(kwgs_shared, player_idx);
   int ld_size = ld_get_size(ld);
 
-  // For every possible machine letter, compare the cross-set-only result
+  // Get the full playable bitvector in one board scan (non-blank tiles only).
+  uint64_t all_non_blank_bv = (((uint64_t)1 << ld_size) - 1) & ~(uint64_t)1;
+  uint64_t playable_bv =
+      board_get_playable_tiles_bv(board, ci, all_non_blank_bv);
+
+  // For every possible machine letter, compare the bitvector result
   // against the full move generator with a single-tile rack.
   const Player *player = game_get_player(game, player_idx);
   Rack *rack = player_get_rack(player);
@@ -573,9 +578,14 @@ void test_board_is_letter_playable_anywhere(void) {
     rack_reset(rack);
     rack_add_letter(rack, (MachineLetter)ml);
 
-    // Cross-set result.
-    bool cs_playable =
-        board_is_letter_playable_anywhere(board, (MachineLetter)ml, ci);
+    // Cross-set bitvector result.
+    // Blank is playable if any non-blank letter is valid anywhere.
+    bool cs_playable;
+    if (ml == BLANK_MACHINE_LETTER) {
+      cs_playable = (playable_bv >> 1) != 0;
+    } else {
+      cs_playable = (playable_bv & ((uint64_t)1 << ml)) != 0;
+    }
 
     // Move generator result.
     uint64_t tiles_bv = 0;
@@ -608,5 +618,5 @@ void test_board_is_letter_playable_anywhere(void) {
 
 void test_board(void) {
   test_board_all();
-  test_board_is_letter_playable_anywhere();
+  test_board_get_playable_tiles_bv();
 }

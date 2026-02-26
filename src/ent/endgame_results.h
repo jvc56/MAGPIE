@@ -46,5 +46,7 @@ void endgame_results_unlock(EndgameResults *endgame_results,
 void endgame_results_update_display_data(EndgameResults *endgame_results);
 void endgame_results_set_best_pvline(EndgameResults *endgame_results,
                                      const PVLine *pv_line, int value,
-                                     int depth);
+                                     int depth, bool partial);
+bool endgame_results_get_partial(const EndgameResults *endgame_results,
+                                 endgame_result_t result_type);
 #endif

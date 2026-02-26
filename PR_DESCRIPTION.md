@@ -1,48 +1,34 @@
 ## Summary
 
-When the opponent is 100% stuck (all rack tiles are stuck), their only legal move is pass. Previously, this forced pass consumed a full depth ply in the alpha-beta search, halving the effective search horizon. This PR plays forced passes without decrementing depth, effectively doubling search depth in stuck-tile positions at near-zero cost.
+Speed up `compute_opp_stuck_fraction` by using a cross-set pre-check before falling back to full move generation. A single board scan intersects horizontal and vertical cross-sets to build a bitvector of all machine letters that have a valid single-tile play. If every opponent rack tile appears in that bitvector, the stuck fraction is 0 and movegen is skipped entirely. For 1-tile racks the check is authoritative in both directions (no multi-tile words possible), so movegen is skipped regardless of the result.
 
-The search remains fully adversarial — after each real move, the opponent's stuckness is re-verified since a tile placement can un-stick them.
+### How the board scan works
 
-Also includes a voluntary pass penalty in the greedy playout conservation heuristic: `(own_rack + opp_rack) * opp_stuck_frac`.
+`board_get_playable_tiles_bv` iterates over empty squares adjacent to existing tiles. At each square it computes `h & v` (the intersection of horizontal and vertical cross-sets) and accumulates into a `playable` bitvector. It exits early once `(playable & rack_tiles_bv) == rack_tiles_bv` — all rack tiles found playable.
 
-## Changes
+Blank is excluded from the rack mask passed to the board scan. The caller checks blank playability separately: if any non-blank bit is set in the returned bitvector (`playable_bv >> 1`), the blank is playable.
 
-- **`src/impl/endgame.c`**: Forced-pass fast path in `abdada_negamax` — when movegen returns exactly one move and it's a pass, recurse at same depth. Gated by `forced_pass_bypass` flag.
-- **`src/impl/endgame.h`**: Added `forced_pass_bypass` field to `EndgameArgs`.
-- **`test/benchmark_endgame_test.c`**: A/B benchmark infrastructure for stuck and non-stuck positions, timed selfplay with per-turn tracking, CGP generators.
-- **`test/endgame_test.c`**: Enable bypass in existing endgame tests.
+### Cross-set validity guard
 
-## Benchmarks
+The endgame solver uses lazy cross-set updates — after a move is played, cross-sets may be stale until the next movegen call triggers an update. The pre-check is gated on `board_get_cross_sets_valid(board)`. When cross-sets are stale, the pre-check is skipped and the function falls through to full movegen, which handles stale cross-sets via its own lazy update path.
 
-### Fixed-ply (stuck positions, 100% opponent stuck)
+## Performance
 
-| Benchmark | Positions | Result | Spread | Speed |
-|---|---|---|---|---|
-| 3-ply old vs 3-ply new | 50 | 12-0-38 (new wins) | +46 | 0.05x (deeper search) |
-| 3-ply old vs 2-ply new | 500 | 13-3-484 | +66 | 1.81x faster |
+Profiled with `BUILD=profile` (`-O3 -g`), `sample` tool (30s, 1ms intervals). Metric: fraction of total thread samples in `compute_opp_stuck_fraction`.
 
-At same nominal depth, new never regresses. At matched effective depth (~2 real moves each), 1.8x faster with +66 spread.
+| Benchmark | Baseline (main) | With pre-check |
+|---|---|---|
+| benchfp (100% stuck positions) | 7.7% | 0.8% |
+| benchns (non-stuck positions) | 6.3% | 0.4% |
 
-### Fixed-ply (non-stuck positions)
+## Files changed
 
-| Benchmark | Positions | Result | Spread | Speed |
-|---|---|---|---|---|
-| 3-ply old vs 3-ply new | 500 | 4-0-496 | +30 | 1.00x |
-
-**Zero overhead on non-stuck positions.** Identical times, identical values in 496/500 cases.
-
-### Timed selfplay (IDS with interrupt, 100% stuck)
-
-| Benchmark | Games | Result | Spread |
-|---|---|---|---|
-| 30s/turn, all stuck | 1500 | 21-17-1462 | +57 |
-| 150s/turn, hard stuck | 188 | 22-14-152 | +50 |
-
-At 30s/turn, most stuck positions solve easily either way (wash). At 150s/turn on the hardest positions (those that couldn't solve within 30s), the deeper effective search produces measurably better play: new wins 22-14 with +50 spread.
+- **`src/ent/board.h`**: New `board_get_playable_tiles_bv` — single-pass board scan returning a bitvector of playable machine letters with early exit.
+- **`src/impl/endgame.c`**: Cross-set pre-check in `compute_opp_stuck_fraction` with validity guard. Falls through to movegen when cross-sets are stale or when multi-tile racks have tiles without single-tile plays.
+- **`test/board_test.c`**: Test for `board_get_playable_tiles_bv` — validates against movegen for every machine letter on two board positions.
 
 ## Test plan
 
-- [ ] `make clean && make BUILD=dev` — compiles with sanitizers, no warnings
-- [ ] `./bin/magpie_test endgame` — all existing endgame tests pass
-- [ ] `./bin/magpie_test eldar_v` — eldar_v expected score unchanged
+- [ ] `make clean && make BUILD=dev magpie_test && ./bin/magpie_test board` — board tests pass
+- [ ] `./bin/magpie_test endgame` — all endgame tests pass (including 25-ply deterministic solve)
+- [ ] `./bin/magpie_test eldar_v` — stuck-tile endgame expected score unchanged
