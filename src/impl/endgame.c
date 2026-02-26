@@ -611,16 +611,14 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
 }
 
 // Sum face values of placed tiles in a move, skipping played-through markers.
-static int compute_played_tiles_face_value(const Move *move,
+static int compute_played_tiles_face_value(const SmallMove *sm,
                                            const LetterDistribution *ld) {
   int face_value = 0;
-  int tlen = move_get_tiles_length(move);
-  for (int pos = 0; pos < tlen; pos++) {
-    uint8_t tile = move_get_tile(move, pos);
-    if (tile == PLAYED_THROUGH_MARKER) {
-      continue;
-    }
-    uint8_t ml = get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile;
+  int n = sm->metadata.tiles_played;
+  uint64_t tm = sm->tiny_move;
+  for (int i = 0; i < n; i++) {
+    MachineLetter tile = (tm >> (20 + 6 * i)) & 63;
+    MachineLetter ml = (tm & (1ULL << (12 + i))) ? BLANK_MACHINE_LETTER : tile;
     face_value += equity_to_int(ld_get_score(ld, ml));
   }
   return face_value;
@@ -629,23 +627,18 @@ static int compute_played_tiles_face_value(const Move *move,
 // Conservation bonus: penalize playing tiles when opponent has stuck tiles.
 // Returns (CONSERVATION_TILE_WEIGHT * tile_count +
 //          CONSERVATION_VALUE_WEIGHT * face_value) * opp_stuck_frac.
-// The move must already be expanded into spare_move.
-static int compute_conservation_bonus(const Move *move,
+static int compute_conservation_bonus(const SmallMove *sm,
                                       const LetterDistribution *ld,
                                       float opp_stuck_frac) {
-  int tlen = move_get_tiles_length(move);
+  int n = sm->metadata.tiles_played;
   int face_value = 0;
-  int tile_count = 0;
-  for (int pos = 0; pos < tlen; pos++) {
-    uint8_t tile = move_get_tile(move, pos);
-    if (tile == PLAYED_THROUGH_MARKER) {
-      continue;
-    }
-    uint8_t ml = get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile;
+  uint64_t tm = sm->tiny_move;
+  for (int i = 0; i < n; i++) {
+    MachineLetter tile = (tm >> (20 + 6 * i)) & 63;
+    MachineLetter ml = (tm & (1ULL << (12 + i))) ? BLANK_MACHINE_LETTER : tile;
     face_value += equity_to_int(ld_get_score(ld, ml));
-    tile_count++;
   }
-  return (int)((float)(CONSERVATION_TILE_WEIGHT * tile_count +
+  return (int)((float)(CONSERVATION_TILE_WEIGHT * n +
                        CONSERVATION_VALUE_WEIGHT * face_value) *
                opp_stuck_frac);
 }
@@ -726,6 +719,9 @@ static int *compute_build_chain_values(EndgameSolverWorker *worker,
 
     // Find the best extension (containing move with more tiles, already
     // processed so build_values[j] is final)
+    Move mv_a;
+    bool mv_a_initialized = false;
+    const Board *brd = game_get_board(worker->game_copy);
     int best_extension = 0;
     for (int oj = 0; oj < oi; oj++) {
       int j = order[oj];
@@ -760,11 +756,12 @@ static int *compute_build_chain_values(EndgameSolverWorker *worker,
       }
 
       // Verify actual tiles match at each position.
-      // Convert both to full Moves and compare tile-by-tile.
-      Move mv_a;
+      // Expand mv_a once (lazily) on first containment hit; expand mv_b each time.
+      if (!mv_a_initialized) {
+        small_move_to_move(&mv_a, sm_a, brd);
+        mv_a_initialized = true;
+      }
       Move mv_b;
-      const Board *brd = game_get_board(worker->game_copy);
-      small_move_to_move(&mv_a, sm_a, brd);
       small_move_to_move(&mv_b, sm_b, brd);
 
       // Offset of A's start within B's tile span
@@ -820,7 +817,6 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
   int *build_values = compute_build_chain_values(worker, move_count,
                                                  arena_offset, opp_stuck_frac);
 
-  const Board *est_board = game_get_board(worker->game_copy);
   const LetterDistribution *est_ld = game_get_ld(worker->game_copy);
 
   for (size_t i = 0; i < (size_t)move_count; i++) {
@@ -835,10 +831,8 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
     // Conservation bonus: penalize playing tiles when opponent has stuck tiles.
     int conservation_bonus = 0;
     if (opp_stuck_frac > 0.0F && is_non_pass_partial) {
-      small_move_to_move(worker->move_list->spare_move, current_move,
-                         est_board);
-      conservation_bonus = compute_conservation_bonus(
-          worker->move_list->spare_move, est_ld, opp_stuck_frac);
+      conservation_bonus =
+          compute_conservation_bonus(current_move, est_ld, opp_stuck_frac);
     }
 
     if (small_move_get_tiles_played(current_move) == ntiles_on_rack) {
@@ -869,14 +863,7 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
       int estimate = score - conservation_bonus;
       // Static endgame equity: score minus face value of tiles played.
       if (is_non_pass_partial) {
-        // spare_move may already be populated from conservation bonus above;
-        // if not (opp_stuck_frac == 0), expand it now.
-        if (opp_stuck_frac <= 0.0F) {
-          small_move_to_move(worker->move_list->spare_move, current_move,
-                             est_board);
-        }
-        estimate -= compute_played_tiles_face_value(
-            worker->move_list->spare_move, est_ld);
+        estimate -= compute_played_tiles_face_value(current_move, est_ld);
       }
       estimate += compute_thread_jitter(
           worker, small_move_get_tiles_played(current_move));
@@ -1089,11 +1076,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
         if (small_move_is_pass(sm)) {
           adj = score - pass_penalty;
         } else {
-          small_move_to_move(worker->move_list->spare_move, sm,
-                             game_get_board(worker->game_copy));
           int conservation_bonus = compute_conservation_bonus(
-              worker->move_list->spare_move, game_get_ld(worker->game_copy),
-              opp_stuck_frac);
+              sm, game_get_ld(worker->game_copy), opp_stuck_frac);
           adj = score - conservation_bonus;
         }
       } else {
