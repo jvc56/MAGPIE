@@ -153,10 +153,9 @@ void test_generate_stuck_cgps(void) {
   int found_partial = 0;
   int found_hard = 0;
 
-  for (int i = 0;
-       (found_full < target_full || found_partial < target_partial ||
-        found_hard < target_hard) &&
-       i < max_attempts;
+  for (int i = 0; (found_full < target_full || found_partial < target_partial ||
+                   found_hard < target_hard) &&
+                  i < max_attempts;
        i++) {
     game_reset(game);
     game_seed(game, base_seed + (uint64_t)i);

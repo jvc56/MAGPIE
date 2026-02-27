@@ -181,7 +181,8 @@ inline static uint64_t zobrist_add_move(const Zobrist *z, uint64_t key,
   }
 
   if (last_scoreless_turns != scoreless_turns) {
-    key ^= z->scoreless_turns[last_scoreless_turns > 2 ? 2 : last_scoreless_turns];
+    key ^=
+        z->scoreless_turns[last_scoreless_turns > 2 ? 2 : last_scoreless_turns];
     key ^= z->scoreless_turns[scoreless_turns > 2 ? 2 : scoreless_turns];
   }
   key ^= z->their_turn;

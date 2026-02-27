@@ -8,11 +8,11 @@
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/equity.h"
-#include "../src/ent/transposition_table.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/thread_control.h"
+#include "../src/ent/transposition_table.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
@@ -318,20 +318,21 @@ static void run_timed_precheck_ab(int num_games, double time_limit_sec,
   Game *game = config_get_game(config);
 
   printf("\n");
-  printf("=========================================================================="
+  printf("====================================================================="
+         "====="
          "==========\n");
   printf("  Timed Precheck A/B: up to %d games, %.1fs/turn, 8 threads, "
          "seed=%llu\n",
          num_games, time_limit_sec, (unsigned long long)base_seed);
   printf("  Old: no cross-set precheck  vs  New: with cross-set precheck\n");
   printf("  Positions: random endgames (greedy self-play to bag-empty)\n");
-  printf("=========================================================================="
+  printf("====================================================================="
+         "====="
          "==========\n");
   printf("  %4s  %6s  %7s %7s  %4s %4s  %7s %7s  %5s  %-8s %-8s"
          "  %7s %7s %5s %5s  %-24s\n",
-         "Game", "Delta", "OldT1", "NewT1", "OD1", "ND1", "OldTot",
-         "NewTot", "Trns", "P1", "P2", "OLook", "NLook", "OHit%",
-         "NHit%", "Cumulative");
+         "Game", "Delta", "OldT1", "NewT1", "OD1", "ND1", "OldTot", "NewTot",
+         "Trns", "P1", "P2", "OLook", "NLook", "OHit%", "NHit%", "Cumulative");
   printf("  ----  ------  ------- -------  ---- ----  ------- -------"
          "  -----  -------- --------"
          "  ------- ------- ----- -----  ------------------------\n");
@@ -438,8 +439,7 @@ static void run_timed_precheck_ab(int num_games, double time_limit_sec,
         error_stack_destroy(err);
 
         game_time[config_idx] += elapsed;
-        int depth =
-            endgame_results_get_depth(results, ENDGAME_RESULT_BEST);
+        int depth = endgame_results_get_depth(results, ENDGAME_RESULT_BEST);
         if (turn_count[config_idx] == 0) {
           first_turn_time[config_idx] = elapsed;
           first_turn_depth[config_idx] = depth;
@@ -508,10 +508,10 @@ static void run_timed_precheck_ab(int num_games, double time_limit_sec,
            "%-8s %-8s  %5.1fM %5.1fM %4.1f%% %4.1f%%  "
            "N+%d O+%d =%d  d=%+d\n",
            games_played, delta, first_turn_time[0], first_turn_time[1],
-           first_turn_depth[0], first_turn_depth[1], game_time[0],
-           game_time[1], turn_count[0], turn_count[1], rack_str0,
-           rack_str1, tt_lookups[0] / 1e6, tt_lookups[1] / 1e6, ohit_pct,
-           nhit_pct, new_better, old_better, same_count, total_delta);
+           first_turn_depth[0], first_turn_depth[1], game_time[0], game_time[1],
+           turn_count[0], turn_count[1], rack_str0, rack_str1,
+           tt_lookups[0] / 1e6, tt_lookups[1] / 1e6, ohit_pct, nhit_pct,
+           new_better, old_better, same_count, total_delta);
     (void)fflush(stdout);
   }
 
@@ -519,8 +519,7 @@ static void run_timed_precheck_ab(int num_games, double time_limit_sec,
          "  -----  ------------------------\n");
   printf("\n");
   printf("  Results (%d games from %d attempts, %.1fs/turn, seed=%llu):\n",
-         games_played, attempts, time_limit_sec,
-         (unsigned long long)base_seed);
+         games_played, attempts, time_limit_sec, (unsigned long long)base_seed);
   printf("    New better: %d  |  Old better: %d  |  Same: %d\n", new_better,
          old_better, same_count);
   printf("    Total spread delta: %+d (avg %+.2f per game)\n", total_delta,
@@ -529,9 +528,8 @@ static void run_timed_precheck_ab(int num_games, double time_limit_sec,
          total_time_old, total_time_new);
   printf("    Old T1 total: %.2fs (avg %.2fs)  |  New T1 total: %.2fs "
          "(avg %.2fs)\n",
-         total_t1_old,
-         games_played > 0 ? total_t1_old / games_played : 0.0, total_t1_new,
-         games_played > 0 ? total_t1_new / games_played : 0.0);
+         total_t1_old, games_played > 0 ? total_t1_old / games_played : 0.0,
+         total_t1_new, games_played > 0 ? total_t1_new / games_played : 0.0);
   printf("    Old overage: %.2fs  |  New overage: %.2fs\n", total_overage_old,
          total_overage_new);
   printf(
@@ -540,7 +538,8 @@ static void run_timed_precheck_ab(int num_games, double time_limit_sec,
       games_played > 0 ? (double)total_turns_old / games_played : 0.0,
       total_turns_new,
       games_played > 0 ? (double)total_turns_new / games_played : 0.0);
-  printf("=========================================================================="
+  printf("====================================================================="
+         "====="
          "==========\n");
   (void)fflush(stdout);
 
@@ -579,7 +578,7 @@ void test_benchmark_timed_hard(void) {
 //   grep "^CTROW:"  output.log   # latest cross-table rows
 //   grep "^RESULT:" output.log   # per-game result summary lines
 
-#define RR_MAX_CFGS     4
+#define RR_MAX_CFGS 4
 #define RR_MAX_PAIRINGS 6
 
 // Cumulative statistics for a running round-robin tournament.
@@ -587,18 +586,18 @@ void test_benchmark_timed_hard(void) {
 typedef struct {
   int num_cfgs;
   int num_pairings;
-  int pair_a[RR_MAX_PAIRINGS];       // index of first config in each pairing
-  int pair_b[RR_MAX_PAIRINGS];       // index of second config in each pairing
+  int pair_a[RR_MAX_PAIRINGS]; // index of first config in each pairing
+  int pair_b[RR_MAX_PAIRINGS]; // index of second config in each pairing
   const char *cfg_names[RR_MAX_CFGS];
   const char *pair_labels[RR_MAX_PAIRINGS];
-  int pair_net[RR_MAX_PAIRINGS];     // cumul net spread (>0 means pair_a wins)
-  int pair_wins_a[RR_MAX_PAIRINGS];  // games where pair_a had higher net
-  int pair_wins_b[RR_MAX_PAIRINGS];  // games where pair_b had higher net
+  int pair_net[RR_MAX_PAIRINGS];    // cumul net spread (>0 means pair_a wins)
+  int pair_wins_a[RR_MAX_PAIRINGS]; // games where pair_a had higher net
+  int pair_wins_b[RR_MAX_PAIRINGS]; // games where pair_b had higher net
   int pair_ties[RR_MAX_PAIRINGS];
   double cumul_time[RR_MAX_CFGS];     // total solver wall-time (seconds)
   double cumul_overtime[RR_MAX_CFGS]; // total overtime-penalty seconds
   int games_played;
-  int stuck_count;  // positions where either player had stuck tiles
+  int stuck_count; // positions where either player had stuck tiles
 } RRState;
 
 // Record one pairing's net result for a game. net>0 means pair_a won.
@@ -622,53 +621,58 @@ static void rr_print_crosstable(const RRState *rr) {
   int ties[RR_MAX_CFGS];
   int matrix[RR_MAX_CFGS][RR_MAX_CFGS];
   memset(spread, 0, sizeof(spread));
-  memset(wins,   0, sizeof(wins));
+  memset(wins, 0, sizeof(wins));
   memset(losses, 0, sizeof(losses));
-  memset(ties,   0, sizeof(ties));
+  memset(ties, 0, sizeof(ties));
   memset(matrix, 0, sizeof(matrix));
 
   for (int pi = 0; pi < rr->num_pairings; pi++) {
     int a = rr->pair_a[pi];
     int b = rr->pair_b[pi];
     int n = rr->pair_net[pi];
-    matrix[a][b] =  n;
+    matrix[a][b] = n;
     matrix[b][a] = -n;
-    spread[a]   += n;
-    spread[b]   -= n;
-    wins[a]     += rr->pair_wins_a[pi];
-    losses[a]   += rr->pair_wins_b[pi];
-    ties[a]     += rr->pair_ties[pi];
-    wins[b]     += rr->pair_wins_b[pi];
-    losses[b]   += rr->pair_wins_a[pi];
-    ties[b]     += rr->pair_ties[pi];
+    spread[a] += n;
+    spread[b] -= n;
+    wins[a] += rr->pair_wins_a[pi];
+    losses[a] += rr->pair_wins_b[pi];
+    ties[a] += rr->pair_ties[pi];
+    wins[b] += rr->pair_wins_b[pi];
+    losses[b] += rr->pair_wins_a[pi];
+    ties[b] += rr->pair_ties[pi];
   }
 
   // Sort configs by W-L descending (selection sort; small N).
   int order[RR_MAX_CFGS];
-  for (int i = 0; i < rr->num_cfgs; i++) order[i] = i;
+  for (int i = 0; i < rr->num_cfgs; i++)
+    order[i] = i;
   for (int i = 0; i < rr->num_cfgs - 1; i++) {
     for (int j = i + 1; j < rr->num_cfgs; j++) {
       if (wins[order[j]] - losses[order[j]] >
           wins[order[i]] - losses[order[i]]) {
-        int t = order[i]; order[i] = order[j]; order[j] = t;
+        int t = order[i];
+        order[i] = order[j];
+        order[j] = t;
       }
     }
   }
 
   int gp = rr->games_played;
-  printf("Cross-table (%d game(s), %d stuck, %d nonstuck):\n",
-         gp, rr->stuck_count, gp - rr->stuck_count);
+  printf("Cross-table (%d game(s), %d stuck, %d nonstuck):\n", gp,
+         rr->stuck_count, gp - rr->stuck_count);
   printf("  %-9s ", "");
-  for (int j = 0; j < rr->num_cfgs; j++) printf("  %8s", rr->cfg_names[j]);
-  printf("  | %3s %3s %3s %4s | %7s %7s  %8s %7s\n",
-         "W", "L", "T", "W-L", "Spread", "Avg", "Time", "OT");
+  for (int j = 0; j < rr->num_cfgs; j++)
+    printf("  %8s", rr->cfg_names[j]);
+  printf("  | %3s %3s %3s %4s | %7s %7s  %8s %7s\n", "W", "L", "T", "W-L",
+         "Spread", "Avg", "Time", "OT");
   printf("  %-9s ", "");
-  for (int j = 0; j < rr->num_cfgs; j++) printf("  --------");
+  for (int j = 0; j < rr->num_cfgs; j++)
+    printf("  --------");
   printf("  | --- --- --- ---- | ------- -------  -------- -------\n");
 
   for (int ri = 0; ri < rr->num_cfgs; ri++) {
     int i = order[ri];
-    int wl  = wins[i] - losses[i];
+    int wl = wins[i] - losses[i];
     double avg = gp > 0 ? (double)spread[i] / gp : 0.0;
     // CTROW: prefix makes this row greppable in incomplete logs.
     printf("CTROW: %-9s", rr->cfg_names[i]);
@@ -679,10 +683,9 @@ static void rr_print_crosstable(const RRState *rr) {
         printf("  %+8d", matrix[i][j]);
       }
     }
-    printf("  | %3d %3d %3d %+4d | %+7d %+7.2f  %7.1fs %6.2fs\n",
-           wins[i], losses[i], ties[i], wl,
-           spread[i], avg,
-           rr->cumul_time[i], rr->cumul_overtime[i]);
+    printf("  | %3d %3d %3d %+4d | %+7d %+7.2f  %7.1fs %6.2fs\n", wins[i],
+           losses[i], ties[i], wl, spread[i], avg, rr->cumul_time[i],
+           rr->cumul_overtime[i]);
   }
 }
 
@@ -777,12 +780,13 @@ static void run_timed_round_robin(const char *cgp_file, int start_game,
 
   RRState rr;
   memset(&rr, 0, sizeof(rr));
-  rr.num_cfgs     = 3;
+  rr.num_cfgs = 3;
   rr.num_pairings = num_pairings;
-  for (int i = 0; i < 3; i++) rr.cfg_names[i] = cfg_names[i];
+  for (int i = 0; i < 3; i++)
+    rr.cfg_names[i] = cfg_names[i];
   for (int pi = 0; pi < num_pairings; pi++) {
-    rr.pair_a[pi]      = pair_a[pi];
-    rr.pair_b[pi]      = pair_b[pi];
+    rr.pair_a[pi] = pair_a[pi];
+    rr.pair_b[pi] = pair_b[pi];
     rr.pair_labels[pi] = pair_labels[pi];
   }
 
@@ -848,29 +852,28 @@ static void run_timed_round_robin(const char *cgp_file, int start_game,
 
           int tiles_on_rack = rack_get_total_letters(
               player_get_rack(game_get_player(game, pot)));
-          EndgameTurnLimits limits = endgame_compute_turn_limits(
-              budget[pot], player_turn_count[pot], tiles_on_rack,
-              cfg_time_mode[cfg]);
+          EndgameTurnLimits limits =
+              endgame_compute_turn_limits(budget[pot], player_turn_count[pot],
+                                          tiles_on_rack, cfg_time_mode[cfg]);
           double turn_limit = limits.turn_limit;
           double soft_limit = limits.soft_limit;
           double hard_limit = limits.hard_limit;
 
-          EndgameArgs args = {
-              .game = game,
-              .thread_control = tc,
-              .plies = max_ply,
-              .tt_fraction_of_mem = tt_frac,
-              .initial_small_move_arena_size =
-                  DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-              .num_threads = 8,
-              .num_top_moves = 1,
-              .use_heuristics = true,
-              .per_ply_callback = NULL,
-              .per_ply_callback_data = NULL,
-              .skip_pruned_cross_sets = !cfg_precheck[cfg],
-              .forced_pass_bypass = false,
-              .soft_time_limit = soft_limit,
-              .hard_time_limit = hard_limit};
+          EndgameArgs args = {.game = game,
+                              .thread_control = tc,
+                              .plies = max_ply,
+                              .tt_fraction_of_mem = tt_frac,
+                              .initial_small_move_arena_size =
+                                  DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                              .num_threads = 8,
+                              .num_top_moves = 1,
+                              .use_heuristics = true,
+                              .per_ply_callback = NULL,
+                              .per_ply_callback_data = NULL,
+                              .skip_pruned_cross_sets = !cfg_precheck[cfg],
+                              .forced_pass_bypass = false,
+                              .soft_time_limit = soft_limit,
+                              .hard_time_limit = hard_limit};
 
           thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
 
@@ -893,8 +896,7 @@ static void run_timed_round_robin(const char *cgp_file, int start_game,
           assert(error_stack_is_empty(err));
           error_stack_destroy(err);
 
-          int depth =
-              endgame_results_get_depth(res[pot], ENDGAME_RESULT_BEST);
+          int depth = endgame_results_get_depth(res[pot], ENDGAME_RESULT_BEST);
 
           const PVLine *pv =
               endgame_results_get_pvline(res[pot], ENDGAME_RESULT_BEST);
@@ -910,8 +912,8 @@ static void run_timed_round_robin(const char *cgp_file, int start_game,
             string_builder_add_string(move_log, " | ");
           }
           char player_label[16];
-          snprintf(player_label, sizeof(player_label), "P%d(%s)",
-                   pot + 1, cfg_names[cfg]);
+          snprintf(player_label, sizeof(player_label), "P%d(%s)", pot + 1,
+                   cfg_names[cfg]);
           string_builder_add_string(move_log, player_label);
           string_builder_add_string(move_log, ": ");
           string_builder_add_move(move_log, game_get_board(game),
@@ -935,7 +937,10 @@ static void run_timed_round_robin(const char *cgp_file, int start_game,
             int penalty = (int)(ot * 10.0 + 0.999); // ceil(10 * overtime_secs)
             printf("    [P%d(%s) overtime: %.2fs, -%d pts]\n", p + 1,
                    cfg_names[cfg_for_player[p]], ot, penalty);
-            if (p == 0) s0 -= penalty; else s1 -= penalty;
+            if (p == 0)
+              s0 -= penalty;
+            else
+              s1 -= penalty;
             rr.cumul_overtime[cfg_for_player[p]] += ot;
           }
         }
@@ -970,8 +975,8 @@ static void run_timed_round_robin(const char *cgp_file, int start_game,
   printf("\n");
   printf("=================================================================="
          "======================================\n");
-  printf("  Final results (%d games, P1=%.0fs P2=%.0fs):\n",
-         games_played, p1_budget_sec, p2_budget_sec);
+  printf("  Final results (%d games, P1=%.0fs P2=%.0fs):\n", games_played,
+         p1_budget_sec, p2_budget_sec);
   rr_print_crosstable(&rr);
   printf("=================================================================="
          "======================================\n");
@@ -985,8 +990,7 @@ static void run_timed_round_robin(const char *cgp_file, int start_game,
 
 void test_benchmark_timed_round_robin(void) {
   log_set_level(LOG_FATAL);
-  run_timed_round_robin("/tmp/stuck_hard_endgame_cgps.txt", 0, 500, 20.0,
-                        12.0);
+  run_timed_round_robin("/tmp/stuck_hard_endgame_cgps.txt", 0, 500, 20.0, 12.0);
 }
 
 void test_benchmark_timed_round_robin_nonstuck(void) {
@@ -1046,11 +1050,9 @@ static bool position_any_stuck(Game *game, MoveList *move_list) {
       game_set_player_on_turn_index(game, saved_pot);
     }
 
-    const Rack *rack =
-        player_get_rack(game_get_player(game, player_idx));
+    const Rack *rack = player_get_rack(game_get_player(game, player_idx));
     for (int ml = 0; ml < ld_size; ml++) {
-      if (rack_get_letter(rack, ml) > 0 &&
-          !(tiles_bv & ((uint64_t)1 << ml))) {
+      if (rack_get_letter(rack, ml) > 0 && !(tiles_bv & ((uint64_t)1 << ml))) {
         return true;
       }
     }
@@ -1059,7 +1061,7 @@ static bool position_any_stuck(Game *game, MoveList *move_list) {
 }
 
 static void run_four_way_round_robin(int num_games, uint64_t base_seed) {
-  const int max_ply   = 25;
+  const int max_ply = 25;
   const int max_turns = 50;
   const double tt_frac =
       (2.0 * 1024.0 * 1024.0 * 1024.0) / (double)get_total_memory();
@@ -1071,27 +1073,28 @@ static void run_four_way_round_robin(int num_games, uint64_t base_seed) {
   //   is_stuck: 0=nonstuck, 1=stuck.
   //   pot: 0=P1, 1=P2.
   const double cfg_budgets[4][2][2] = {
-      {{0.0, 0.0}, {0.0, 0.0}},        // Static: unused
-      {{1.0, 0.4}, {3.0, 2.0}},        // Bullet
-      {{3.0, 1.0}, {9.0, 6.0}},        // Blitz
-      {{10.0, 4.0}, {90.0, 60.0}},     // Classical
+      {{0.0, 0.0}, {0.0, 0.0}},    // Static: unused
+      {{1.0, 0.4}, {3.0, 2.0}},    // Bullet
+      {{3.0, 1.0}, {9.0, 6.0}},    // Blitz
+      {{10.0, 4.0}, {90.0, 60.0}}, // Classical
   };
 
   // All 6 C(4,2) pairings.
   const int num_pairings = 6;
-  const int pair_a[]      = {0, 0, 0, 1, 1, 2};
-  const int pair_b[]      = {1, 2, 3, 2, 3, 3};
-  const char *pair_labels[] = {
-      "St-Bu", "St-Bl", "St-Cl", "Bu-Bl", "Bu-Cl", "Bl-Cl"};
+  const int pair_a[] = {0, 0, 0, 1, 1, 2};
+  const int pair_b[] = {1, 2, 3, 2, 3, 3};
+  const char *pair_labels[] = {"St-Bu", "St-Bl", "St-Cl",
+                               "Bu-Bl", "Bu-Cl", "Bl-Cl"};
 
   RRState rr;
   memset(&rr, 0, sizeof(rr));
-  rr.num_cfgs     = 4;
+  rr.num_cfgs = 4;
   rr.num_pairings = num_pairings;
-  for (int i = 0; i < 4; i++) rr.cfg_names[i] = cfg_names[i];
+  for (int i = 0; i < 4; i++)
+    rr.cfg_names[i] = cfg_names[i];
   for (int pi = 0; pi < num_pairings; pi++) {
-    rr.pair_a[pi]      = pair_a[pi];
-    rr.pair_b[pi]      = pair_b[pi];
+    rr.pair_a[pi] = pair_a[pi];
+    rr.pair_b[pi] = pair_b[pi];
     rr.pair_labels[pi] = pair_labels[pi];
   }
 
@@ -1136,7 +1139,8 @@ static void run_four_way_round_robin(int num_games, uint64_t base_seed) {
     bool is_stuck = position_any_stuck(game, move_list);
     char *cgp = game_get_cgp(game, true);
 
-    if (is_stuck) rr.stuck_count++;
+    if (is_stuck)
+      rr.stuck_count++;
     games_played++;
     rr.games_played++;
 
@@ -1195,22 +1199,22 @@ static void run_four_way_round_robin(int num_games, uint64_t base_seed) {
             EndgameTurnLimits limits = endgame_compute_turn_limits(
                 budget[pot], player_turn_count[pot], tiles_on_rack, 1);
 
-            EndgameArgs args = {
-                .game = game,
-                .thread_control = tc,
-                .plies = max_ply,
-                .tt_fraction_of_mem = tt_frac,
-                .initial_small_move_arena_size =
-                    DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-                .num_threads = 8,
-                .num_top_moves = 1,
-                .use_heuristics = true,
-                .per_ply_callback = NULL,
-                .per_ply_callback_data = NULL,
-                .skip_pruned_cross_sets = false,  // F: precheck enabled
-                .forced_pass_bypass = false,
-                .soft_time_limit = limits.soft_limit,
-                .hard_time_limit = limits.hard_limit};
+            EndgameArgs args = {.game = game,
+                                .thread_control = tc,
+                                .plies = max_ply,
+                                .tt_fraction_of_mem = tt_frac,
+                                .initial_small_move_arena_size =
+                                    DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                                .num_threads = 8,
+                                .num_top_moves = 1,
+                                .use_heuristics = true,
+                                .per_ply_callback = NULL,
+                                .per_ply_callback_data = NULL,
+                                .skip_pruned_cross_sets =
+                                    false, // F: precheck enabled
+                                .forced_pass_bypass = false,
+                                .soft_time_limit = limits.soft_limit,
+                                .hard_time_limit = limits.hard_limit};
 
             thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
 
@@ -1257,15 +1261,18 @@ static void run_four_way_round_robin(int num_games, uint64_t base_seed) {
             int penalty = (int)(ot * 10.0 + 0.999);
             printf("    [P%d(%s) overtime: %.2fs, -%d pts]\n", p + 1,
                    cfg_names[cfg], ot, penalty);
-            if (p == 0) { s0 -= penalty; } else { s1 -= penalty; }
+            if (p == 0) {
+              s0 -= penalty;
+            } else {
+              s1 -= penalty;
+            }
           }
         }
         spread[dir] = s0 - s1;
 
-        printf("  %s G%d P1=%-9s P2=%-9s => %+d (%d turns)\n",
-               pair_labels[pi], dir + 1,
-               cfg_names[cfg_for_player[0]], cfg_names[cfg_for_player[1]],
-               spread[dir], turn_num);
+        printf("  %s G%d P1=%-9s P2=%-9s => %+d (%d turns)\n", pair_labels[pi],
+               dir + 1, cfg_names[cfg_for_player[0]],
+               cfg_names[cfg_for_player[1]], spread[dir], turn_num);
         (void)fflush(stdout);
 
         for (int i = 0; i < 2; i++) {
@@ -1276,8 +1283,8 @@ static void run_four_way_round_robin(int num_games, uint64_t base_seed) {
 
       net[pi] = spread[0] - spread[1];
       rr_record_pairing(&rr, pi, net[pi]);
-      printf("  %s net: %+d  cumul: %+d\n",
-             pair_labels[pi], net[pi], rr.pair_net[pi]);
+      printf("  %s net: %+d  cumul: %+d\n", pair_labels[pi], net[pi],
+             rr.pair_net[pi]);
     } // pi
 
     free(cgp);
@@ -1315,22 +1322,21 @@ void test_benchmark_four_way_round_robin(void) {
 
 // Callback context for per-depth logging
 typedef struct {
-  Timer turn_timer;               // Started at beginning of each turn
-  FILE *log_fp;                   // Log file for per-depth data
-  const EndgameSolver *solver;    // For querying root_total in callback
-  double turn_limit_s;            // Time budget allocated for this turn
-  int game_id;                    // Current seed number
-  int dir;                        // Direction: 0 or 1 (side-swap)
-  int config_idx;                 // 0=no-precheck, 1=with-precheck
-  int turn_num;                   // Turn number within this game
-  int player_on_turn;             // Which player (0 or 1)
+  Timer turn_timer;            // Started at beginning of each turn
+  FILE *log_fp;                // Log file for per-depth data
+  const EndgameSolver *solver; // For querying root_total in callback
+  double turn_limit_s;         // Time budget allocated for this turn
+  int game_id;                 // Current seed number
+  int dir;                     // Direction: 0 or 1 (side-swap)
+  int config_idx;              // 0=no-precheck, 1=with-precheck
+  int turn_num;                // Turn number within this game
+  int player_on_turn;          // Which player (0 or 1)
 } DepthLogContext;
 
 // Per-depth callback: logs depth completion with value and best move
-static void depth_log_callback(int depth, int32_t value,
-                                const PVLine *pv_line, const Game *game,
-                                const PVLine *ranked_pvs, int num_ranked_pvs,
-                                void *user_data) {
+static void depth_log_callback(int depth, int32_t value, const PVLine *pv_line,
+                               const Game *game, const PVLine *ranked_pvs,
+                               int num_ranked_pvs, void *user_data) {
   DepthLogContext *ctx = (DepthLogContext *)user_data;
   double elapsed = ctimer_elapsed_seconds(&ctx->turn_timer);
 
@@ -1350,15 +1356,14 @@ static void depth_log_callback(int depth, int32_t value,
   int cur_depth_ignored = 0, root_done_ignored = 0, root_total = 0;
   int p2_done_ignored = 0, p2_total_ignored = 0;
   endgame_solver_get_progress(ctx->solver, &cur_depth_ignored,
-                              &root_done_ignored, &root_total,
-                              &p2_done_ignored, &p2_total_ignored);
+                              &root_done_ignored, &root_total, &p2_done_ignored,
+                              &p2_total_ignored);
 
   const char *cfg_name = ctx->config_idx == 0 ? "nopc" : "pc";
-  (void)fprintf(ctx->log_fp,
-                "%d,%d,%s,%d,P%d,d,%d,%.4f,%d,%d,,,,%s,,\n",
+  (void)fprintf(ctx->log_fp, "%d,%d,%s,%d,P%d,d,%d,%.4f,%d,%d,,,,%s,,\n",
                 ctx->game_id, ctx->dir, cfg_name, ctx->turn_num,
-                ctx->player_on_turn + 1, depth, elapsed, value,
-                root_total, move_str);
+                ctx->player_on_turn + 1, depth, elapsed, value, root_total,
+                move_str);
 
   (void)ranked_pvs;
   (void)num_ranked_pvs;
@@ -1414,10 +1419,8 @@ static void *poll_thread_func(void *arg) {
     (void)fprintf(ctx->log_fp,
                   "%d,%d,%s,%d,P%d,p,%d,%.4f,%d/%d,,%d,%d,%d,,%d/%d,,\n",
                   ctx->game_id, ctx->dir, cfg_name, ctx->turn_num,
-                  ctx->player_on_turn + 1, cur_depth, elapsed,
-                  root_done, root_total,
-                  lookups, hits, created,
-                  p2_done, p2_total);
+                  ctx->player_on_turn + 1, cur_depth, elapsed, root_done,
+                  root_total, lookups, hits, created, p2_done, p2_total);
     (void)fflush(ctx->log_fp);
   }
   return NULL;
@@ -1550,8 +1553,8 @@ static void run_overnight_gamepairs(int num_games, double p1_budget_sec,
       double budget[2] = {p1_budget_sec, p2_budget_sec};
       int turns = 0;
 
-      printf("  G%d: P1=%s P2=%s\n", dir + 1,
-             label_for_player[0], label_for_player[1]);
+      printf("  G%d: P1=%s P2=%s\n", dir + 1, label_for_player[0],
+             label_for_player[1]);
 
       while (game_get_game_end_reason(game) == GAME_END_REASON_NONE &&
              turns < max_turns) {
@@ -1570,27 +1573,25 @@ static void run_overnight_gamepairs(int num_games, double p1_budget_sec,
         depth_ctx.turn_limit_s = turn_limit;
         ctimer_start(&depth_ctx.turn_timer);
 
-        const char *cfg_name_start =
-            depth_ctx.config_idx == 0 ? "nopc" : "pc";
+        const char *cfg_name_start = depth_ctx.config_idx == 0 ? "nopc" : "pc";
         (void)fprintf(log_fp, "%d,%d,%s,%d,P%d,start,,,,,,,,,,%.4f,\n",
                       games_played, dir, cfg_name_start, turns, pot + 1,
                       turn_limit);
 
-        EndgameArgs args = {
-            .game = game,
-            .thread_control = tc,
-            .plies = max_ply,
-            .tt_fraction_of_mem = tt_frac,
-            .initial_small_move_arena_size =
-                DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-            .num_threads = 8,
-            .num_top_moves = 1,
-            .use_heuristics = true,
-            .per_ply_callback = depth_log_callback,
-            .per_ply_callback_data = &depth_ctx,
-            .forced_pass_bypass = false,
-            .soft_time_limit = 0,
-            .hard_time_limit = 0};
+        EndgameArgs args = {.game = game,
+                            .thread_control = tc,
+                            .plies = max_ply,
+                            .tt_fraction_of_mem = tt_frac,
+                            .initial_small_move_arena_size =
+                                DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                            .num_threads = 8,
+                            .num_top_moves = 1,
+                            .use_heuristics = true,
+                            .per_ply_callback = depth_log_callback,
+                            .per_ply_callback_data = &depth_ctx,
+                            .forced_pass_bypass = false,
+                            .soft_time_limit = 0,
+                            .hard_time_limit = 0};
 
         thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
 
@@ -1598,17 +1599,16 @@ static void run_overnight_gamepairs(int num_games, double p1_budget_sec,
         pthread_t timer_tid; // NOLINT(misc-include-cleaner)
         pthread_create(&timer_tid, NULL, timer_thread_func, &ta);
 
-        PollContext poll_ctx = {
-            .turn_timer = &depth_ctx.turn_timer,
-            .log_fp = log_fp,
-            .solver = solvers[pot],
-            .results = results[pot],
-            .game_id = games_played,
-            .dir = dir,
-            .config_idx = depth_ctx.config_idx,
-            .turn_num = turns,
-            .player_on_turn = pot,
-            .done = false};
+        PollContext poll_ctx = {.turn_timer = &depth_ctx.turn_timer,
+                                .log_fp = log_fp,
+                                .solver = solvers[pot],
+                                .results = results[pot],
+                                .game_id = games_played,
+                                .dir = dir,
+                                .config_idx = depth_ctx.config_idx,
+                                .turn_num = turns,
+                                .player_on_turn = pot,
+                                .done = false};
         pthread_t poll_tid; // NOLINT(misc-include-cleaner)
         pthread_create(&poll_tid, NULL, poll_thread_func, &poll_ctx);
 
@@ -1627,15 +1627,13 @@ static void run_overnight_gamepairs(int num_games, double p1_budget_sec,
         error_stack_destroy(err);
 
         // Log type=end: final depth, elapsed, and whether timed out
-        int timed_out =
-            (thread_control_get_status(tc) ==
-             THREAD_CONTROL_STATUS_USER_INTERRUPT)
-                ? 1
-                : 0;
+        int timed_out = (thread_control_get_status(tc) ==
+                         THREAD_CONTROL_STATUS_USER_INTERRUPT)
+                            ? 1
+                            : 0;
         int end_depth =
             endgame_results_get_depth(results[pot], ENDGAME_RESULT_BEST);
-        const char *cfg_name_end =
-            depth_ctx.config_idx == 0 ? "nopc" : "pc";
+        const char *cfg_name_end = depth_ctx.config_idx == 0 ? "nopc" : "pc";
         (void)fprintf(log_fp, "%d,%d,%s,%d,P%d,end,%d,%.4f,,,,,,,,,%d\n",
                       games_played, dir, cfg_name_end, turns, pot + 1,
                       end_depth, elapsed, timed_out);
@@ -1661,17 +1659,15 @@ static void run_overnight_gamepairs(int num_games, double p1_budget_sec,
           string_builder_destroy(sb);
         }
 
-        printf("    t%d P%d(%s) d%d %.2fs bud=%.1f %s\n",
-               turns, pot + 1, label_for_player[pot], depth, elapsed,
-               budget[pot], move_str);
+        printf("    t%d P%d(%s) d%d %.2fs bud=%.1f %s\n", turns, pot + 1,
+               label_for_player[pot], depth, elapsed, budget[pot], move_str);
 
         if (pv->num_moves == 0) {
           break;
         }
 
         SmallMove best = pv->moves[0];
-        small_move_to_move(move_list->spare_move, &best,
-                           game_get_board(game));
+        small_move_to_move(move_list->spare_move, &best, game_get_board(game));
         play_move(move_list->spare_move, game, NULL);
         turns++;
       }
@@ -1703,8 +1699,8 @@ static void run_overnight_gamepairs(int num_games, double p1_budget_sec,
       same_count++;
     }
 
-    printf("  Net: %+d  (cumul %+d, pc+%d nopc+%d =%d)\n",
-           net, total_net, pc_better, nopc_better, same_count);
+    printf("  Net: %+d  (cumul %+d, pc+%d nopc+%d =%d)\n", net, total_net,
+           pc_better, nopc_better, same_count);
     (void)fflush(stdout);
     (void)fflush(log_fp);
   }

@@ -4,8 +4,8 @@
 #include "../def/cpthread_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../util/io_util.h"
-#include <stdbool.h>
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -36,8 +36,8 @@ thread_control_status_t
 thread_control_get_status(ThreadControl *thread_control) {
   // Lock-free read: avoids mutex contention on the hot per-node search path.
   // acquire ordering ensures we see any prior store from the timer thread.
-  return (thread_control_status_t)atomic_load_explicit(
-      &thread_control->status, memory_order_acquire);
+  return (thread_control_status_t)atomic_load_explicit(&thread_control->status,
+                                                       memory_order_acquire);
 }
 
 // Returns true if the status was set successfully.
@@ -66,8 +66,8 @@ bool thread_control_set_status(ThreadControl *thread_control,
 
 void thread_control_wait_for_status_change(ThreadControl *thread_control) {
   cpthread_mutex_lock(&thread_control->status_mutex);
-  if ((thread_control_status_t)atomic_load_explicit(
-          &thread_control->status, memory_order_relaxed) !=
+  if ((thread_control_status_t)atomic_load_explicit(&thread_control->status,
+                                                    memory_order_relaxed) !=
       THREAD_CONTROL_STATUS_FINISHED) {
     cpthread_cond_wait(&thread_control->status_cond,
                        &thread_control->status_mutex);
