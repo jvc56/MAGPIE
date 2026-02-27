@@ -704,6 +704,42 @@ void game_history_remove_challenge_bonus_game_event(GameHistory *game_history) {
   game_event_reset(&game_history->events[game_history->num_events]);
 }
 
+// Removes trailing GAME_EVENT_TIME_PENALTY events that are not preceded by
+// end-game events (END_RACK_POINTS or END_RACK_PENALTY). This handles GCGs
+// that have overtime penalties appended after an incomplete game.
+void game_history_trim_trailing_overtime_penalties(GameHistory *game_history) {
+  const int num_events = game_history->num_events;
+
+  // Find the start of any trailing TIME_PENALTY sequence
+  int first_tp_index = num_events;
+  while (first_tp_index > 0 &&
+         game_history->events[first_tp_index - 1].event_type ==
+             GAME_EVENT_TIME_PENALTY) {
+    first_tp_index--;
+  }
+
+  // Nothing to do if no trailing TIME_PENALTY events
+  if (first_tp_index == num_events) {
+    return;
+  }
+
+  // If preceded by an end-game event, the time penalties are valid — keep them
+  if (first_tp_index > 0) {
+    const game_event_t prev_type =
+        game_history->events[first_tp_index - 1].event_type;
+    if (prev_type == GAME_EVENT_END_RACK_POINTS ||
+        prev_type == GAME_EVENT_END_RACK_PENALTY) {
+      return;
+    }
+  }
+
+  // Strip the trailing overtime penalties
+  for (int i = first_tp_index; i < num_events; i++) {
+    game_event_reset(&game_history->events[i]);
+  }
+  game_history->num_events = first_tp_index;
+}
+
 bool game_history_contains_end_rack_penalty_event(
     const GameHistory *game_history) {
   for (int i = 0; i < game_history_get_num_events(game_history); i++) {

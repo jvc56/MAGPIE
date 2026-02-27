@@ -1244,6 +1244,46 @@ void test_multiple_description_pragmas(GameHistory *game_history) {
   config_destroy(config);
 }
 
+void test_success_trailing_overtime_penalty(GameHistory *game_history) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+
+  // Load an existing GCG and build a partial game string (3 moves, game not
+  // over)
+  char *std_gcg =
+      get_string_from_file_or_die("testdata/gcgs/success_standard.gcg");
+  StringSplitter *split_standard = split_string_by_newline(std_gcg, true);
+  StringBuilder *partial_gcg_sb = string_builder_create();
+  const int num_lines = string_splitter_get_number_of_items(split_standard);
+  int events_seen = 0;
+  for (int i = 0; i < num_lines && events_seen < 3; i++) {
+    const char *line = string_splitter_get_item(split_standard, i);
+    string_builder_add_formatted_string(partial_gcg_sb, "%s\n", line);
+    if (line[0] == '>') {
+      events_seen++;
+    }
+  }
+
+  // Append an overtime penalty before the game is over
+  string_builder_add_string(partial_gcg_sb, ">HastyBot:  (time) -10 69\n");
+  string_builder_add_string(partial_gcg_sb,
+                            ">RightBehindYou:  (time) -10 69\n");
+
+  char *gcg_with_penalty = string_builder_dump(partial_gcg_sb, NULL);
+  string_builder_destroy(partial_gcg_sb);
+  string_splitter_destroy(split_standard);
+  free(std_gcg);
+
+  // Should parse successfully with the overtime penalty stripped
+  assert(test_parse_gcg_string(gcg_with_penalty, config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+  // Only 3 events remain (the overtime penalty was stripped)
+  assert(game_history_get_num_events(game_history) == 3);
+
+  free(gcg_with_penalty);
+  config_destroy(config);
+}
+
 void test_gcg(void) {
   // Use the same game_history for all tests to thoroughly test the
   // game_history_reset function
@@ -1266,5 +1306,6 @@ void test_gcg(void) {
   test_partially_known_rack_from_phonies(game_history);
   test_success_board_layout_pragma(game_history);
   test_multiple_description_pragmas(game_history);
+  test_success_trailing_overtime_penalty(game_history);
   game_history_destroy(game_history);
 }

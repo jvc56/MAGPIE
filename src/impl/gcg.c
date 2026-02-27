@@ -1220,6 +1220,9 @@ void parse_gcg_events(GCGParser *gcg_parser, Game *game,
 
   finalize_note(gcg_parser);
 
+  // Remove trailing overtime penalties for incomplete games
+  game_history_trim_trailing_overtime_penalties(gcg_parser->game_history);
+
   // Play through the game to detected errors
   game_play_n_events(gcg_parser->game_history, game,
                      game_history_get_num_events(gcg_parser->game_history),
