@@ -919,8 +919,7 @@ static void run_timed_round_robin(const char *cgp_file, int start_game,
           string_builder_add_move(move_log, game_get_board(game),
                                   move_list->spare_move, ld, true);
           char depth_str[32];
-          snprintf(depth_str, sizeof(depth_str), " d%d %.1fs", depth,
-                   elapsed);
+          snprintf(depth_str, sizeof(depth_str), " d%d %.1fs", depth, elapsed);
           string_builder_add_string(move_log, depth_str);
 
           play_move(move_list->spare_move, game, NULL);

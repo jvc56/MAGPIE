@@ -17,7 +17,6 @@ typedef struct {
 //                    1 = flexible (EBF with 60% soft / 90% hard + 50ms slack)
 EndgameTurnLimits endgame_compute_turn_limits(double budget_remaining,
                                               int player_turn_count,
-                                              int tiles_on_rack,
-                                              int time_mode);
+                                              int tiles_on_rack, int time_mode);
 
 #endif

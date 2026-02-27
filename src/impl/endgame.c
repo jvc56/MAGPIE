@@ -163,11 +163,11 @@ typedef struct EndgameSolverWorker {
   int current_iterative_deepening_depth;
   // Array of MoveUndo structures for incremental play/unplay
   MoveUndo move_undos[MAX_SEARCH_DEPTH];
-  XoshiroPRNG *prng;     // Per-thread PRNG for jitter
-  PVLine best_pv;        // Thread-local best PV
-  int32_t best_pv_value; // Thread-local best value
-  int completed_depth;   // Depth this thread completed
-  int n_initial_moves;   // Number of root moves (thread-local to avoid races)
+  XoshiroPRNG *prng;       // Per-thread PRNG for jitter
+  PVLine best_pv;          // Thread-local best PV
+  int32_t best_pv_value;   // Thread-local best value
+  int completed_depth;     // Depth this thread completed
+  int n_initial_moves;     // Number of root moves (thread-local to avoid races)
   bool in_first_root_move; // True when thread 0 is inside root move idx==0
   // Counter for throttling per-depth deadline checks in abdada_negamax
   uint64_t nodes_since_deadline_check;
@@ -967,9 +967,9 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
       if (tiles_played_bv_out) {
         *tiles_played_bv_out = opp_tiles_bv;
       }
-      return all_playable ? 0.0F
-                          : stuck_tile_fraction_from_bv(ld, opp_rack,
-                                                        opp_tiles_bv);
+      return all_playable
+                 ? 0.0F
+                 : stuck_tile_fraction_from_bv(ld, opp_rack, opp_tiles_bv);
     }
   }
   const MoveGenArgs tp_args = {
@@ -1016,8 +1016,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
     opp_stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
         solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx,
-        worker->thread_index,
-        worker->solver->cross_set_precheck, NULL);
+        worker->thread_index, worker->solver->cross_set_precheck, NULL);
   }
 
   bool playout_interrupted = false;
@@ -1224,8 +1223,8 @@ static int negamax_generate_and_sort_moves(EndgameSolverWorker *worker,
     *opp_stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
         solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx,
-        worker->thread_index,
-        worker->solver->cross_set_precheck, &opp_tiles_bv);
+        worker->thread_index, worker->solver->cross_set_precheck,
+        &opp_tiles_bv);
     nplays = generate_stm_plays(worker, depth);
   } else {
     nplays = generate_stm_plays(worker, depth);
@@ -1272,9 +1271,8 @@ static bool iterative_deepening_should_stop(EndgameSolver *solver);
 // overflow the stack under ASAN's enlarged frames.
 __attribute__((noinline)) static bool
 check_depth_deadline(EndgameSolverWorker *worker) {
-  int64_t deadline_ns =
-      atomic_load_explicit(&worker->solver->depth_deadline_ns,
-                           memory_order_relaxed);
+  int64_t deadline_ns = atomic_load_explicit(&worker->solver->depth_deadline_ns,
+                                             memory_order_relaxed);
   if (deadline_ns == 0) {
     return false;
   }
@@ -1868,8 +1866,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     if (worker->thread_index == 0) {
       atomic_store(&worker->solver->current_depth, p);
       atomic_store(&worker->solver->root_moves_completed, 0);
-      atomic_store(&worker->solver->root_moves_total,
-                   worker->n_initial_moves);
+      atomic_store(&worker->solver->root_moves_total, worker->n_initial_moves);
       atomic_store(&worker->solver->ply2_moves_completed, 0);
       atomic_store(&worker->solver->ply2_moves_total, 0);
       worker->in_first_root_move = false;
