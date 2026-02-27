@@ -9,6 +9,7 @@
 #include "move.h"
 #include "rack.h"
 #include "xoshiro.h"
+#include <assert.h>
 #include <stdint.h>
 
 #define ZOBRIST_MAX_LETTERS 35 // For the purposes of Zobrist hashing.
@@ -115,7 +116,8 @@ zobrist_calculate_hash(const Zobrist *z, const Board *game_board,
   if (their_turn) {
     key ^= z->their_turn;
   }
-  key ^= z->scoreless_turns[scoreless_turns > 2 ? 2 : scoreless_turns];
+  assert(scoreless_turns >= 0 && scoreless_turns <= 2);
+  key ^= z->scoreless_turns[scoreless_turns];
   return key;
 }
 
@@ -181,9 +183,10 @@ inline static uint64_t zobrist_add_move(const Zobrist *z, uint64_t key,
   }
 
   if (last_scoreless_turns != scoreless_turns) {
-    key ^=
-        z->scoreless_turns[last_scoreless_turns > 2 ? 2 : last_scoreless_turns];
-    key ^= z->scoreless_turns[scoreless_turns > 2 ? 2 : scoreless_turns];
+    assert(last_scoreless_turns >= 0 && last_scoreless_turns <= 2);
+    assert(scoreless_turns >= 0 && scoreless_turns <= 2);
+    key ^= z->scoreless_turns[last_scoreless_turns];
+    key ^= z->scoreless_turns[scoreless_turns];
   }
   key ^= z->their_turn;
 
