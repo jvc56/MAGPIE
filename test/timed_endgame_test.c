@@ -425,6 +425,9 @@ static void run_timed_precheck_ab(int num_games, double time_limit_sec,
                             .use_heuristics = true,
                             .per_ply_callback = NULL,
                             .per_ply_callback_data = NULL,
+                            /* config_idx == 0: Old (no cross-set precheck)
+                             * config_idx == 1: New (with cross-set precheck) */
+                            .skip_pruned_cross_sets = (config_idx == 0),
                             .forced_pass_bypass = false};
 
         thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);

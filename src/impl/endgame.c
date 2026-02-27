@@ -931,8 +931,8 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
   // single-tile plays. If every rack tile is playable, stuck fraction is 0 —
   // skip movegen. For 1-tile racks, the check is authoritative (no multi-tile
   // words possible), so skip movegen regardless of result. For multi-tile
-  // racks that fall through, seed the tiles_played bitvector with known-
-  // playable tiles so movegen doesn't have to rediscover them.
+  // racks that fall through, seed movegen's tiles_played bitvector with the
+  // known-playable tiles so movegen doesn't have to rediscover them.
   //
   // Only valid when the board's cross-sets are up to date and were generated
   // from the same KWG used by movegen (the pruned KWG). When cross-sets are
@@ -983,6 +983,7 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       .tiles_played_bv = &opp_tiles_bv,
+      .initial_tiles_bv = opp_tiles_bv,
   };
   generate_moves(&tp_args);
   if (saved_on_turn != opp_idx) {

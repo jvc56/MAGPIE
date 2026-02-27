@@ -887,10 +887,7 @@ static inline uint64_t board_get_playable_tiles_bv(const Board *board,
           board, row, col, BOARD_HORIZONTAL_DIRECTION, cross_set_index);
       uint64_t v = board_get_cross_set(
           board, row, col, BOARD_VERTICAL_DIRECTION, cross_set_index);
-      uint64_t both = h & v;
-      if (both != TRIVIAL_CROSS_SET) {
-        playable |= both;
-      }
+      playable |= h & v;
       if (rack_tiles_bv && (playable & rack_tiles_bv) == rack_tiles_bv) {
         return playable;
       }

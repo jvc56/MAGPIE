@@ -174,6 +174,9 @@ typedef struct MoveGenArgs {
   // Only used with MOVE_RECORD_TILES_PLAYED. Caller provides pointer; callee
   // writes result. Bit i set means machine letter i is playable.
   uint64_t *tiles_played_bv;
+  // Input: initial set of known-playable tiles for MOVE_RECORD_TILES_PLAYED.
+  // Movegen ORs further discoveries in. Default 0 (no known tiles).
+  uint64_t initial_tiles_bv;
 } MoveGenArgs;
 
 void gen_destroy_cache(void);
