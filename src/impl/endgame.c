@@ -43,7 +43,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 enum {
   DEFAULT_ENDGAME_MOVELIST_CAPACITY = 250000,
@@ -1277,9 +1276,7 @@ check_depth_deadline(EndgameSolverWorker *worker) {
   if (deadline_ns == 0) {
     return false;
   }
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  int64_t now_ns = (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+  int64_t now_ns = ctimer_monotonic_ns();
   if (now_ns > deadline_ns) {
     atomic_store(&worker->solver->search_complete, 1);
     return true;
@@ -2011,10 +2008,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
           // directly starves subsequent turns.  Clear any stale deadline when
           // we are below the threshold so workers don't fire spuriously.
           if (elapsed >= 0.75 * worker->solver->hard_time_limit) {
-            struct timespec ts_now;
-            clock_gettime(CLOCK_MONOTONIC, &ts_now);
-            int64_t now_ns =
-                (int64_t)ts_now.tv_sec * 1000000000LL + ts_now.tv_nsec;
+            int64_t now_ns = ctimer_monotonic_ns();
             int64_t budget_ns = (int64_t)(estimated_next * 1.5e9);
             atomic_store(&worker->solver->depth_deadline_ns,
                          now_ns + budget_ns);

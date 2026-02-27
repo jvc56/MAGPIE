@@ -79,4 +79,12 @@ static inline void ctimer_clock_gettime_realtime(TimeSpec *ts) {
   clock_gettime(CLOCK_REALTIME, ts);
 }
 
+// Returns the current CLOCK_MONOTONIC time as nanoseconds since an arbitrary
+// epoch. Suitable for computing absolute deadlines and durations.
+static inline int64_t ctimer_monotonic_ns(void) {
+  TimeSpec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+}
+
 #endif
