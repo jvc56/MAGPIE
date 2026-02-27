@@ -1945,8 +1945,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     worker->best_pv = pv;
     worker->completed_depth = p;
 
-    endgame_results_set_best_pvline(worker->solver->results, &pv, pv_value, p,
-                                    false);
+    endgame_results_set_best_pvline(worker->solver->results, &pv, pv_value, p);
 
     // Call per-ply callback (only thread 0 to avoid race conditions)
     if (worker->thread_index == 0 && worker->solver->per_ply_callback) {

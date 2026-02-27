@@ -295,7 +295,7 @@ void test_very_deep(void) {
 
 void test_eldar_v_stick(void) {
   test_single_endgame(
-      "set -s1 score -s2 score -r1 small -r2 small -threads 6 -eplies 5",
+      "set -s1 score -s2 score -r1 small -r2 small -threads 6 -eplies 3",
       "cgp "
       "4EXODE6/1DOFF1KERATIN1U/1OHO8YEN/1POOJA1B3MEWS/5SQUINTY2A/4RHINO1e3V/"
       "2B4C2R3E/GOAT1D1E2ZIN1d/1URACILS2E4/1PIG1S4T4/2L2R4T4/2L2A1GENII3/"

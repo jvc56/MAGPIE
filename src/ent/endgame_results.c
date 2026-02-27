@@ -10,7 +10,6 @@ typedef struct PVData {
   PVLine pv_line;
   int value;
   int depth;
-  bool partial;
   cpthread_mutex_t mutex;
 } PVData;
 
@@ -39,7 +38,6 @@ void endgame_results_destroy(EndgameResults *endgame_results) {
 // NOT THREAD SAFE: Caller must ensure synchronization
 void endgame_results_reset(EndgameResults *endgame_results) {
   endgame_results->best_pv_data.depth = -1;
-  endgame_results->best_pv_data.partial = false;
   endgame_results->valid_for_current_game_state = false;
   ctimer_start(&endgame_results->timer);
 }
@@ -99,21 +97,6 @@ int endgame_results_get_depth(const EndgameResults *endgame_results,
   return depth;
 }
 
-// NOT THREAD SAFE: Caller must ensure synchronization
-bool endgame_results_get_partial(const EndgameResults *endgame_results,
-                                 endgame_result_t result_type) {
-  bool partial;
-  switch (result_type) {
-  case ENDGAME_RESULT_BEST:
-    partial = endgame_results->best_pv_data.partial;
-    break;
-  case ENDGAME_RESULT_DISPLAY:
-    partial = endgame_results->display_pv_data.partial;
-    break;
-  }
-  return partial;
-}
-
 double endgame_results_get_display_seconds_elapsed(
     const EndgameResults *endgame_results) {
   return endgame_results->display_seconds_elapsed;
@@ -148,21 +131,18 @@ void endgame_results_update_display_data(EndgameResults *endgame_results) {
       endgame_results->best_pv_data.pv_line;
   endgame_results->display_pv_data.value = endgame_results->best_pv_data.value;
   endgame_results->display_pv_data.depth = endgame_results->best_pv_data.depth;
-  endgame_results->display_pv_data.partial =
-      endgame_results->best_pv_data.partial;
   endgame_results->display_seconds_elapsed =
       ctimer_elapsed_seconds(&endgame_results->timer);
 }
 
 void endgame_results_set_best_pvline(EndgameResults *endgame_results,
                                      const PVLine *pv_line, int value,
-                                     int depth, bool partial) {
+                                     int depth) {
   endgame_results_lock(endgame_results, ENDGAME_RESULT_BEST);
   if (depth > endgame_results->best_pv_data.depth) {
     endgame_results->best_pv_data.depth = depth;
     endgame_results->best_pv_data.value = value;
     endgame_results->best_pv_data.pv_line = *pv_line;
-    endgame_results->best_pv_data.partial = partial;
   }
   endgame_results_unlock(endgame_results, ENDGAME_RESULT_BEST);
 }

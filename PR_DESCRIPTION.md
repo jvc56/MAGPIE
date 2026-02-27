@@ -93,6 +93,37 @@ Key findings:
 - **Overtime**: F incurs only 0.32s total overtime vs 2.85s (O) and 2.61s (B),
   demonstrating tighter budget adherence.
 
+## 226-game 3-way round robin — "bullet" time control (non-stuck positions, 1s/0.4s budget, O3)
+
+Same three configs on 226 non-stuck endgame positions (8 threads, CSW21,
+P1=1.0s P2=0.4s). Tight "bullet" budgets stress time management on positions
+where neither player has stuck tiles.
+
+| Pairing | Net spread | Wins | Losses | Ties | Meaning |
+|---------|-----------|------|--------|------|---------|
+| **O-B** | -25 (avg -0.11) | 10 | 25 | 191 | precheck effect |
+| **O-F** | **-105** (avg **-0.46**) | 10 | 32 | 184 | **combined effect** |
+| **B-F** | -104 (avg -0.46) | 12 | 25 | 189 | EBF effect |
+
+Cross-table ranked by W-L vs all opponents:
+
+| Rank | Config | W | L | T | W-L | Spread | Avg/game | Overtime |
+|------|--------|---|---|---|-----|--------|----------|----------|
+| 1 | **F** | 57 | 22 | 373 | **+35** | **+209** | **+0.92** | 25.68s |
+| 2 | B | 37 | 35 | 380 | +2 | -79 | -0.35 | 25.95s |
+| 3 | O | 20 | 57 | 375 | -37 | -130 | -0.58 | 27.84s |
+
+Key findings:
+- **F dominates at bullet**: W-L of +35 vs B's +2 and O's -37, avg +0.92
+  spread/game — a clear signal even at this time control.
+- **EBF is the driver**: O-F and B-F are nearly identical (-105 vs -104),
+  confirming the precheck has minimal effect on non-stuck positions. F's
+  entire edge over B comes from EBF time management, not the precheck.
+- **Precheck neutral here**: O-B shows only -25 (avg -0.11), consistent with
+  the precheck having nothing to do when no tiles are stuck.
+- **Overtime roughly equal**: all configs incur ~26-28s total overtime across
+  226 games; F is actually the most budget-efficient (25.68s).
+
 ## Test plan
 
 - [ ] `make clean && make BUILD=dev magpie_test && ./bin/magpie_test board` — board tests pass

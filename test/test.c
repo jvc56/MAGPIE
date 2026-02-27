@@ -127,6 +127,7 @@ static TestEntry on_demand_test_table[] = {
     {"infercmp", test_infer_cmp},
     {"genstuck", test_generate_stuck_cgps},
     {"gennonstuck", test_generate_nonstuck_cgps},
+    {"gennonstuck2", test_generate_nonstuck_cgps2},
     {"benchfp", test_benchmark_forced_pass},
     {"benchns", test_benchmark_nonstuck},
     {"benchns3v3", test_benchmark_nonstuck_3v3},
@@ -138,6 +139,8 @@ static TestEntry on_demand_test_table[] = {
     {"kue", test_kue},
     {"monsterq", test_monster_q},
     {"roundrobin", test_benchmark_timed_round_robin},
+    {"roundrobin_ns", test_benchmark_timed_round_robin_nonstuck},
+    {"fourway", test_benchmark_four_way_round_robin},
     {"gamepairs", test_benchmark_overnight_gamepairs},
     {NULL, NULL} // Sentinel value to mark end of array
 };

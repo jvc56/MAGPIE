@@ -250,9 +250,7 @@ void test_generate_stuck_cgps(void) {
 }
 
 // Generate non-stuck endgame positions (stuck_fraction == 0 for both players).
-void test_generate_nonstuck_cgps(void) {
-  log_set_level(LOG_FATAL);
-
+static void generate_nonstuck_cgps(uint64_t base_seed, const char *outfile) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -threads 1 -s1 score -s2 score -r1 small -r2 small");
 
@@ -261,10 +259,9 @@ void test_generate_nonstuck_cgps(void) {
   Game *game = config_get_game(config);
 
   const int target = 500;
-  const uint64_t base_seed = 31415;
   const int max_attempts = 100000;
 
-  FILE *fp = fopen("/tmp/nonstuck_cgps.txt", "we");
+  FILE *fp = fopen(outfile, "we");
   assert(fp);
 
   int found = 0;
@@ -302,12 +299,22 @@ void test_generate_nonstuck_cgps(void) {
   printf("  Generate Non-Stuck CGPs (seed=%llu)\n",
          (unsigned long long)base_seed);
   printf("==============================================================\n");
-  printf("  0%% stuck: %d positions -> /tmp/nonstuck_cgps.txt\n", found);
+  printf("  0%% stuck: %d positions -> %s\n", found, outfile);
   printf("==============================================================\n");
   (void)fflush(stdout);
 
   move_list_destroy(move_list);
   config_destroy(config);
+}
+
+void test_generate_nonstuck_cgps(void) {
+  log_set_level(LOG_FATAL);
+  generate_nonstuck_cgps(31415, "/tmp/nonstuck_cgps.txt");
+}
+
+void test_generate_nonstuck_cgps2(void) {
+  log_set_level(LOG_FATAL);
+  generate_nonstuck_cgps(271828, "/tmp/nonstuck_cgps2.txt");
 }
 
 // Core A/B benchmark: solve each CGP twice (with and without
