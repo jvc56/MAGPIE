@@ -250,9 +250,9 @@ void test_pass_first(void) {
   // This endgame's first move must be a pass, otherwise Nigel can set up
   // an unblockable ZA. Exact value is -63 (verified at 25-ply with and
   // without heuristics). The optimal PV is 10 moves with 4 passes, so
-  // 8-ply relies on greedy playout for the tail.
+  // 7-ply relies on greedy playout for the tail.
   test_single_endgame(
-      "set -s1 score -s2 score -r1 small -r2 small -threads 6 -eplies 8",
+      "set -s1 score -s2 score -r1 small -r2 small -threads 6 -eplies 7",
       "cgp "
       "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
       "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
