@@ -21,10 +21,29 @@ Profiled with `BUILD=profile` (`-O3 -g`), `sample` tool (30s, 1ms intervals). Me
 | benchfp (100% stuck positions) | 7.7% | 0.8% |
 | benchns (non-stuck positions) | 6.3% | 0.4% |
 
+## Zobrist bounds-checking fix
+
+`zobrist_calculate_hash` and `zobrist_add_move` in `src/ent/zobrist.h` indexed
+`z->scoreless_turns[scoreless_turns]` without bounds-checking. The array has
+size 3 (indices 0–2), but `scoreless_turns` can exceed 2 in some endgame paths,
+causing an out-of-bounds read. Both call sites now clamp the index:
+`scoreless_turns > 2 ? 2 : scoreless_turns`.
+
+## GCG multiple-description pragma support
+
+`GCG_DESCRIPTION_TOKEN` in `src/impl/gcg.c` was previously treated as a
+unique, must-precede-moves pragma (same group as `GCG_TITLE_TOKEN`,
+`GCG_ID_TOKEN`). It is now moved to the `GCG_PLAYER_TOKEN` group — still
+required to precede move events, but allowed to appear multiple times. When
+multiple `#description` lines are present, the parse handler concatenates them
+with `\n` rather than overwriting.
+
 ## Files changed
 
 - **`src/ent/board.h`**: New `board_get_playable_tiles_bv` — single-pass board scan returning a bitvector of playable machine letters with early exit.
+- **`src/ent/zobrist.h`**: Bounds-check on `scoreless_turns` index in `zobrist_calculate_hash` and `zobrist_add_move`.
 - **`src/impl/endgame.c`**: Cross-set pre-check in `compute_opp_stuck_fraction` with validity guard. Falls through to movegen when cross-sets are stale or when multi-tile racks have tiles without single-tile plays.
+- **`src/impl/gcg.c`**: Allow multiple `#description` pragmas; concatenate with newline. Move `GCG_DESCRIPTION_TOKEN` to the non-unique pre-move pragma group.
 - **`test/board_test.c`**: Test for `board_get_playable_tiles_bv` — validates against movegen for every machine letter on two board positions.
 
 ## EBF time management calibration
