@@ -708,7 +708,7 @@ void game_history_remove_challenge_bonus_game_event(GameHistory *game_history) {
 // end-game events (END_RACK_POINTS or END_RACK_PENALTY). This handles GCGs
 // that have overtime penalties appended after an incomplete game.
 void game_history_trim_trailing_overtime_penalties(GameHistory *game_history) {
-  int num_events = game_history->num_events;
+  const int num_events = game_history->num_events;
 
   // Find the start of any trailing TIME_PENALTY sequence
   int first_tp_index = num_events;
