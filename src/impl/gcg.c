@@ -475,7 +475,6 @@ void common_gcg_token_validation(GCGParser *gcg_parser, gcg_token_t token,
     // The following pragmas must always be before move events
     // and must be unique
   case GCG_TITLE_TOKEN:
-  case GCG_DESCRIPTION_TOKEN:
   case GCG_ID_TOKEN:
   case GCG_LEXICON_TOKEN:
   case GCG_BOARD_LAYOUT_TOKEN:
@@ -497,6 +496,7 @@ void common_gcg_token_validation(GCGParser *gcg_parser, gcg_token_t token,
     break;
     // The following pragmas must always be before move events
   case GCG_PLAYER_TOKEN:
+  case GCG_DESCRIPTION_TOKEN:
     if (number_of_events > 0) {
       error_stack_push(
           error_stack, ERROR_STATUS_GCG_PARSE_PRAGMA_SUCCEEDED_EVENT,
@@ -715,9 +715,19 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     break;
   }
   case GCG_DESCRIPTION_TOKEN: {
-    char *description = get_matching_group_as_string(gcg_parser, gcg_line, 1);
-    game_history_set_description(game_history, description);
-    free(description);
+    char *new_description =
+        get_matching_group_as_string(gcg_parser, gcg_line, 1);
+    const char *existing_description =
+        game_history_get_description(game_history);
+    if (existing_description != NULL) {
+      char *combined =
+          get_formatted_string("%s\n%s", existing_description, new_description);
+      game_history_set_description(game_history, combined);
+      free(combined);
+    } else {
+      game_history_set_description(game_history, new_description);
+    }
+    free(new_description);
     break;
   }
   case GCG_ID_TOKEN: {
