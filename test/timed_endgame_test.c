@@ -385,8 +385,10 @@ static void run_timed_precheck_ab(int num_games, double time_limit_sec,
     string_builder_add_rack(sb1, r1, ld, false);
     char rack_str0[32] = {0};
     char rack_str1[32] = {0};
-    (void)snprintf(rack_str0, sizeof(rack_str0), "%s", string_builder_peek(sb0));
-    (void)snprintf(rack_str1, sizeof(rack_str1), "%s", string_builder_peek(sb1));
+    (void)snprintf(rack_str0, sizeof(rack_str0), "%s",
+                   string_builder_peek(sb0));
+    (void)snprintf(rack_str1, sizeof(rack_str1), "%s",
+                   string_builder_peek(sb1));
     string_builder_destroy(sb0);
     string_builder_destroy(sb1);
 
@@ -691,9 +693,9 @@ static void rr_print_crosstable(const RRState *rr) {
         printf("  %+8d", matrix[row_cfg][col_cfg]);
       }
     }
-    printf("  | %3d %3d %3d %+4d | %+7d %+7.2f  %7.1fs %6.2fs\n",
-           wins[row_cfg], losses[row_cfg], ties[row_cfg], wl, spread[row_cfg],
-           avg, rr->cumul_time[row_cfg], rr->cumul_overtime[row_cfg]);
+    printf("  | %3d %3d %3d %+4d | %+7d %+7.2f  %7.1fs %6.2fs\n", wins[row_cfg],
+           losses[row_cfg], ties[row_cfg], wl, spread[row_cfg], avg,
+           rr->cumul_time[row_cfg], rr->cumul_overtime[row_cfg]);
   }
 }
 
@@ -894,8 +896,8 @@ static void run_timed_round_robin(const char *cgp_file, int start_game,
           pthread_create(&timer_tid, NULL, timer_thread_func, &ta);
 
           err = error_stack_create();
-          endgame_solve(solvers[player_on_turn], &args,
-                        res[player_on_turn], err);
+          endgame_solve(solvers[player_on_turn], &args, res[player_on_turn],
+                        err);
 
           ta.done = true;
           pthread_join(timer_tid, NULL);
@@ -907,7 +909,7 @@ static void run_timed_round_robin(const char *cgp_file, int start_game,
           error_stack_destroy(err);
 
           int depth = endgame_results_get_depth(res[player_on_turn],
-                                                   ENDGAME_RESULT_BEST);
+                                                ENDGAME_RESULT_BEST);
 
           const PVLine *pv = endgame_results_get_pvline(res[player_on_turn],
                                                         ENDGAME_RESULT_BEST);
@@ -923,8 +925,8 @@ static void run_timed_round_robin(const char *cgp_file, int start_game,
             string_builder_add_string(move_log, " | ");
           }
           char player_label[16];
-          (void)snprintf(player_label, sizeof(player_label), "P%d(%s)", player_on_turn + 1,
-                         cfg_names[cfg]);
+          (void)snprintf(player_label, sizeof(player_label), "P%d(%s)",
+                         player_on_turn + 1, cfg_names[cfg]);
           string_builder_add_string(move_log, player_label);
           string_builder_add_string(move_log, ": ");
           string_builder_add_move(move_log, game_get_board(game),
@@ -1241,8 +1243,8 @@ static void run_four_way_round_robin(int num_games, uint64_t base_seed) {
             Timer t;
             ctimer_start(&t);
             err = error_stack_create();
-            endgame_solve(solvers[player_on_turn], &args,
-                          res[player_on_turn], err);
+            endgame_solve(solvers[player_on_turn], &args, res[player_on_turn],
+                          err);
             ta.done = true;
             pthread_join(timer_tid, NULL);
             double elapsed = ctimer_elapsed_seconds(&t);
@@ -1253,9 +1255,8 @@ static void run_four_way_round_robin(int num_games, uint64_t base_seed) {
             assert(error_stack_is_empty(err));
             error_stack_destroy(err);
 
-            const PVLine *pv =
-                endgame_results_get_pvline(res[player_on_turn],
-                                           ENDGAME_RESULT_BEST);
+            const PVLine *pv = endgame_results_get_pvline(res[player_on_turn],
+                                                          ENDGAME_RESULT_BEST);
             if (pv->num_moves == 0) {
               break;
             }
@@ -1635,8 +1636,8 @@ static void run_overnight_gamepairs(int num_games, double p1_budget_sec,
         Timer t;
         ctimer_start(&t);
         err = error_stack_create();
-        endgame_solve(solvers[player_on_turn], &args,
-                      results[player_on_turn], err);
+        endgame_solve(solvers[player_on_turn], &args, results[player_on_turn],
+                      err);
         double elapsed = ctimer_elapsed_seconds(&t);
 
         poll_ctx.done = true;
@@ -1652,9 +1653,8 @@ static void run_overnight_gamepairs(int num_games, double p1_budget_sec,
                          THREAD_CONTROL_STATUS_USER_INTERRUPT)
                             ? 1
                             : 0;
-        int end_depth =
-            endgame_results_get_depth(results[player_on_turn],
-                                      ENDGAME_RESULT_BEST);
+        int end_depth = endgame_results_get_depth(results[player_on_turn],
+                                                  ENDGAME_RESULT_BEST);
         const char *cfg_name_end = depth_ctx.config_idx == 0 ? "nopc" : "pc";
         (void)fprintf(log_fp, "%d,%d,%s,%d,P%d,end,%d,%.4f,,,,,,,,,%d\n",
                       games_played, dir, cfg_name_end, turns,
@@ -1665,9 +1665,8 @@ static void run_overnight_gamepairs(int num_games, double p1_budget_sec,
 
         int depth = end_depth;
 
-        const PVLine *pv =
-            endgame_results_get_pvline(results[player_on_turn],
-                                       ENDGAME_RESULT_BEST);
+        const PVLine *pv = endgame_results_get_pvline(results[player_on_turn],
+                                                      ENDGAME_RESULT_BEST);
 
         // Format move for display
         char move_str[64] = "none";
