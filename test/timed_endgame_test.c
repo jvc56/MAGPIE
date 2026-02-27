@@ -297,7 +297,7 @@ static void run_timed_selfplay_from(const char *cgp_file, int num_games,
 // endgame position (bag empty, both players have tiles, game not over).
 static bool play_until_bag_empty(Game *game, MoveList *move_list) {
   while (bag_get_letters(game_get_bag(game)) > 0) {
-    Move *move = get_top_equity_move(game, 0, move_list);
+    const Move *move = get_top_equity_move(game, 0, move_list);
     play_move(move, game, NULL);
     if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
       return false;
@@ -1205,7 +1205,7 @@ static void run_four_way_round_robin(int num_games, uint64_t base_seed) {
             // Static: greedy best move from movegen, no time management.
             Timer t;
             ctimer_start(&t);
-            Move *move = get_top_equity_move(game, 0, move_list);
+            const Move *move = get_top_equity_move(game, 0, move_list);
             play_move(move, game, NULL);
             rr.cumul_time[0] += ctimer_elapsed_seconds(&t);
           } else {

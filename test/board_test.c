@@ -603,6 +603,7 @@ void test_board_get_playable_tiles_bv(void) {
     };
     generate_moves(&args);
 
+    // cppcheck-suppress knownConditionTrueFalse
     bool mg_playable = (tiles_bv & ((uint64_t)1 << ml)) != 0;
     assert(cs_playable == mg_playable);
   }

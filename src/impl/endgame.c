@@ -947,9 +947,9 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
     const LetterDistribution *ld = game_get_ld(game);
     int ld_size = ld_get_size(ld);
     uint64_t rack_tiles_bv = 0;
-    for (int i = 0; i < ld_size; i++) {
-      if (rack_get_letter(opp_rack, i) > 0) {
-        rack_tiles_bv |= ((uint64_t)1 << i);
+    for (int ml = 0; ml < ld_size; ml++) {
+      if (rack_get_letter(opp_rack, ml) > 0) {
+        rack_tiles_bv |= ((uint64_t)1 << ml);
       }
     }
     uint64_t rack_non_blank = rack_tiles_bv & ~(uint64_t)1;
@@ -1794,7 +1794,6 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   double prev_depth_time = 0.0;
   double prev_prev_depth_time = 0.0;
   double ema_ebf_per_ply = -1.0; // -1 = not yet seeded
-  double depth_start_time = 0.0;
   bool use_aspiration = (worker->solver->threads > 1);
 
   if (worker->solver->first_win_optim) {
@@ -1853,23 +1852,23 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     start = MIN(depth_offset, plies);
   }
 
-  for (int p = start; p <= plies; p++) {
+  for (int ply = start; ply <= plies; ply++) {
     // Check if another thread has completed the full search
     if (iterative_deepening_should_stop(worker->solver)) {
       break;
     }
 
-    worker->current_iterative_deepening_depth = p;
+    worker->current_iterative_deepening_depth = ply;
     // Update root move progress counters (thread 0 only)
     if (worker->thread_index == 0) {
-      atomic_store(&worker->solver->current_depth, p);
+      atomic_store(&worker->solver->current_depth, ply);
       atomic_store(&worker->solver->root_moves_completed, 0);
       atomic_store(&worker->solver->root_moves_total, worker->n_initial_moves);
       atomic_store(&worker->solver->ply2_moves_completed, 0);
       atomic_store(&worker->solver->ply2_moves_total, 0);
       worker->in_first_root_move = false;
     }
-    depth_start_time = ctimer_elapsed_seconds(&ids_timer);
+    double depth_start_time = ctimer_elapsed_seconds(&ids_timer);
     PVLine pv;
     pv.game = worker->game_copy;
     pv.num_moves = 0;
@@ -1880,7 +1879,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     bool search_valid = true;
 
     // Use aspiration windows after depth 1
-    if (use_aspiration && p > 1 && !worker->solver->first_win_optim) {
+    if (use_aspiration && ply > 1 && !worker->solver->first_win_optim) {
       int32_t window = ASPIRATION_WINDOW;
       alpha = prev_value - window;
       beta = prev_value + window;
@@ -1893,7 +1892,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
           break;
         }
 
-        val = abdada_negamax(worker, initial_hash_key, p, alpha, beta, &pv,
+        val = abdada_negamax(worker, initial_hash_key, ply, alpha, beta, &pv,
                              true, false, initial_opp_stuck_frac);
 
         if (val <= alpha) {
@@ -1916,8 +1915,8 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
       }
     } else {
       // Full window search for depth 1 or when aspiration disabled
-      val = abdada_negamax(worker, initial_hash_key, p, alpha, beta, &pv, true,
-                           false, initial_opp_stuck_frac);
+      val = abdada_negamax(worker, initial_hash_key, ply, alpha, beta, &pv,
+                           true, false, initial_opp_stuck_frac);
     }
 
     // If search was interrupted, discard this depth and use last complete depth
@@ -1938,9 +1937,10 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     worker->best_pv_value = pv_value;
     pv.score = pv_value;
     worker->best_pv = pv;
-    worker->completed_depth = p;
+    worker->completed_depth = ply;
 
-    endgame_results_set_best_pvline(worker->solver->results, &pv, pv_value, p);
+    endgame_results_set_best_pvline(worker->solver->results, &pv, pv_value,
+                                    ply);
 
     // Call per-ply callback (only thread 0 to avoid race conditions)
     if (worker->thread_index == 0 && worker->solver->per_ply_callback) {
@@ -1954,7 +1954,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
         game_destroy(temp_game);
       }
 
-      build_ranked_pvs_and_notify(worker, p, pv_value, &extended_pv,
+      build_ranked_pvs_and_notify(worker, ply, pv_value, &extended_pv,
                                   initial_moves, initial_move_count);
     }
 
@@ -1970,7 +1970,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     if (worker->thread_index == 0 && worker->solver->soft_time_limit > 0) {
       double elapsed = ctimer_elapsed_seconds(&ids_timer);
       double this_depth_time = elapsed - depth_start_time;
-      if (p >= min_depth_for_time_mgmt) {
+      if (ply >= min_depth_for_time_mgmt) {
         if (elapsed >= worker->solver->soft_time_limit) {
           // Past soft limit — stop immediately, bank remaining time
           atomic_store(&worker->solver->search_complete, 1);
@@ -2022,7 +2022,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     }
 
     // Signal other threads to stop when we complete the full search
-    if (p == plies) {
+    if (ply == plies) {
       atomic_store(&worker->solver->search_complete, 1);
     }
   }
