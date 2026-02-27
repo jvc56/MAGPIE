@@ -127,6 +127,7 @@ void game_history_insert_challenge_bonus_game_event(GameHistory *game_history,
                                                     Equity score_adjustment,
                                                     ErrorStack *error_stack);
 void game_history_remove_challenge_bonus_game_event(GameHistory *game_history);
+void game_history_trim_trailing_overtime_penalties(GameHistory *game_history);
 
 void game_history_set_gcg_filename(GameHistory *game_history,
                                    const char *new_gcg_filename);
