@@ -393,7 +393,6 @@ static void run_timed_precheck_ab(int num_games, double time_limit_sec,
     int max_depth[2] = {0, 0};
     int tt_lookups[2] = {0, 0};
     int tt_hits[2] = {0, 0};
-    int tt_collisions[2] = {0, 0};
 
     for (int config_idx = 0; config_idx < 2; config_idx++) {
       ErrorStack *err = error_stack_create();
@@ -473,7 +472,6 @@ static void run_timed_precheck_ab(int num_games, double time_limit_sec,
       if (tt) {
         tt_lookups[config_idx] = atomic_load(&tt->lookups);
         tt_hits[config_idx] = atomic_load(&tt->hits);
-        tt_collisions[config_idx] = atomic_load(&tt->t2_collisions);
       }
 
       endgame_results_destroy(results);
