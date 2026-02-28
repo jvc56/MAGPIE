@@ -1020,6 +1020,305 @@ void test_benchmark_timed_round_robin_nonstuck(void) {
 }
 
 // ============================================================
+// 4-config round robin: O vs N vs B vs F
+// ============================================================
+// Isolates the precheck and EBF contributions independently:
+//
+//   O = no precheck, baseline timing (80% hard limit)
+//   N = no precheck, EBF timing     (60%/90% soft/hard)
+//   B = precheck,    baseline timing (80% hard limit)
+//   F = precheck,    EBF timing      (60%/90% soft/hard)
+//
+// 6 pairings x 2 directions = 12 sub-games per position.
+//   O-N: EBF effect, no precheck
+//   O-B: precheck effect, no EBF
+//   O-F: combined effect
+//   N-B: no-precheck+EBF vs precheck+baseline
+//   N-F: precheck effect with EBF timing
+//   B-F: EBF effect with precheck
+//
+// Net + means first config is stronger.
+static void run_timed_round_robin_4cfg(const char *cgp_file, int start_game,
+                                       int num_games, double p1_budget_sec,
+                                       double p2_budget_sec) {
+  const int max_ply = 25;
+  const int max_turns = 50;
+  const double tt_frac = 0.25;
+
+  const int max_cgp_lines = 2000;
+  FILE *fp = fopen(cgp_file, "re");
+  if (!fp) {
+    printf("No CGP file found at %s — run genstuck first.\n", cgp_file);
+    return;
+  }
+  char (*cgp_lines)[4096] = malloc((size_t)max_cgp_lines * 4096);
+  assert(cgp_lines);
+  int num_cgps = 0;
+  while (num_cgps < max_cgp_lines && fgets(cgp_lines[num_cgps], 4096, fp)) {
+    size_t len = strlen(cgp_lines[num_cgps]);
+    if (len > 0 && cgp_lines[num_cgps][len - 1] == '\n') {
+      cgp_lines[num_cgps][len - 1] = '\0';
+    }
+    if (strlen(cgp_lines[num_cgps]) > 0) {
+      num_cgps++;
+    }
+  }
+  (void)fclose(fp);
+  if (start_game >= num_cgps) {
+    printf("start_game=%d >= num_cgps=%d, nothing to run.\n", start_game,
+           num_cgps);
+    free(cgp_lines);
+    return;
+  }
+  if (start_game + num_games > num_cgps) {
+    num_games = num_cgps - start_game;
+  }
+
+  const char *cfg_names[] = {"O", "N", "B", "F"};
+  const int cfg_time_mode[] = {0, 1, 0, 1};
+  const bool cfg_precheck[] = {false, false, true, true};
+
+  const int num_pairings = 6;
+  const int pair_a[] = {0, 0, 0, 1, 1, 2};
+  const int pair_b[] = {1, 2, 3, 2, 3, 3};
+  const char *pair_labels[] = {"O-N", "O-B", "O-F", "N-B", "N-F", "B-F"};
+
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -threads 6 -s1 score -s2 score -r1 small -r2 small");
+  MoveList *move_list = move_list_create(1);
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+
+  printf("\n");
+  printf("=================================================================="
+         "======================================\n");
+  printf("  4-Config Round Robin: %d games, P1=%.1fs P2=%.1fs, 8 threads\n",
+         num_games, p1_budget_sec, p2_budget_sec);
+  printf("  Positions: %s\n", cgp_file);
+  printf("  O=no-precheck+baseline  N=no-precheck+EBF  "
+         "B=precheck+baseline  F=precheck+EBF\n");
+  printf("  O-N=EBF effect(no-pc)  O-B=precheck effect(no-EBF)  "
+         "O-F=combined\n");
+  printf("  N-B=no-pc+EBF vs pc+base  N-F=precheck effect(EBF)  "
+         "B-F=EBF effect(pc)\n");
+  printf("  Net + means first config stronger.\n");
+  printf("=================================================================="
+         "======================================\n");
+  (void)fflush(stdout);
+
+  RRState rr;
+  memset(&rr, 0, sizeof(rr));
+  rr.num_cfgs = 4;
+  rr.num_pairings = num_pairings;
+  for (int cfg_idx = 0; cfg_idx < 4; cfg_idx++) {
+    rr.cfg_names[cfg_idx] = cfg_names[cfg_idx];
+  }
+  for (int pi = 0; pi < num_pairings; pi++) {
+    rr.pair_a[pi] = pair_a[pi];
+    rr.pair_b[pi] = pair_b[pi];
+    rr.pair_labels[pi] = pair_labels[pi];
+  }
+
+  int games_played = 0;
+  GameStringOptions *gso = game_string_options_create_default();
+
+  for (int gi = 0; gi < num_games; gi++) {
+    const char *cgp = cgp_lines[start_game + gi];
+    games_played++;
+    rr.games_played++;
+
+    printf("\n=== Game %d ===\n", gi + 1);
+    {
+      ErrorStack *err = error_stack_create();
+      game_load_cgp(game, cgp, err);
+      assert(error_stack_is_empty(err));
+      error_stack_destroy(err);
+      StringBuilder *game_sb = string_builder_create();
+      string_builder_add_game(game, NULL, gso, NULL, game_sb);
+      printf("%s\n", string_builder_peek(game_sb));
+      string_builder_destroy(game_sb);
+    }
+
+    int net[6];
+    const LetterDistribution *ld = game_get_ld(game);
+
+    for (int pi = 0; pi < num_pairings; pi++) {
+      int ca = pair_a[pi];
+      int cb = pair_b[pi];
+      int spread[2];
+
+      printf("  %s:\n", pair_labels[pi]);
+
+      for (int dir = 0; dir < 2; dir++) {
+        int cfg_for_player[2];
+        cfg_for_player[0] = dir == 0 ? ca : cb;
+        cfg_for_player[1] = dir == 0 ? cb : ca;
+
+        ErrorStack *err = error_stack_create();
+        game_load_cgp(game, cgp, err);
+        assert(error_stack_is_empty(err));
+        error_stack_destroy(err);
+
+        EndgameSolver *solvers[2] = {endgame_solver_create(),
+                                     endgame_solver_create()};
+        EndgameResults *res[2] = {endgame_results_create(),
+                                  endgame_results_create()};
+        ThreadControl *tc = config_get_thread_control(config);
+
+        double budget[2] = {p1_budget_sec, p2_budget_sec};
+        int player_turn_count[2] = {0, 0};
+
+        StringBuilder *move_log = string_builder_create();
+        int turn_num = 0;
+
+        while (game_get_game_end_reason(game) == GAME_END_REASON_NONE &&
+               turn_num < max_turns) {
+          int player_on_turn = game_get_player_on_turn_index(game);
+          int cfg = cfg_for_player[player_on_turn];
+
+          int tiles_on_rack = rack_get_total_letters(
+              player_get_rack(game_get_player(game, player_on_turn)));
+          EndgameTurnLimits limits = endgame_compute_turn_limits(
+              budget[player_on_turn], player_turn_count[player_on_turn],
+              tiles_on_rack, cfg_time_mode[cfg]);
+
+          EndgameArgs args = {
+              .game = game,
+              .thread_control = tc,
+              .plies = max_ply,
+              .tt_fraction_of_mem = tt_frac,
+              .initial_small_move_arena_size =
+                  DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+              .num_threads = 8,
+              .num_top_moves = 1,
+              .use_heuristics = true,
+              .per_ply_callback = NULL,
+              .per_ply_callback_data = NULL,
+              .skip_pruned_cross_sets = !cfg_precheck[cfg],
+              .forced_pass_bypass = false,
+              .soft_time_limit = limits.soft_limit,
+              .hard_time_limit = limits.hard_limit};
+
+          thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
+
+          Timer turn_timer;
+          ctimer_start(&turn_timer);
+
+          TimerArgs ta = {
+              .tc = tc, .seconds = limits.timer_secs, .done = false};
+          pthread_t timer_tid; // NOLINT(misc-include-cleaner)
+          pthread_create(&timer_tid, NULL, timer_thread_func, &ta);
+
+          err = error_stack_create();
+          endgame_solve(solvers[player_on_turn], &args, res[player_on_turn],
+                        err);
+          ta.done = true;
+          pthread_join(timer_tid, NULL);
+          double elapsed = ctimer_elapsed_seconds(&turn_timer);
+          budget[player_on_turn] -= elapsed;
+          rr.cumul_time[cfg] += elapsed;
+
+          assert(error_stack_is_empty(err));
+          error_stack_destroy(err);
+
+          int depth = endgame_results_get_depth(res[player_on_turn],
+                                                ENDGAME_RESULT_BEST);
+          const PVLine *pv = endgame_results_get_pvline(res[player_on_turn],
+                                                        ENDGAME_RESULT_BEST);
+          if (pv->num_moves == 0) {
+            break;
+          }
+
+          SmallMove best = pv->moves[0];
+          small_move_to_move(move_list->spare_move, &best,
+                             game_get_board(game));
+
+          if (turn_num > 0) {
+            string_builder_add_string(move_log, " | ");
+          }
+          char player_label[16];
+          (void)snprintf(player_label, sizeof(player_label), "P%d(%s)",
+                         player_on_turn + 1, cfg_names[cfg]);
+          string_builder_add_string(move_log, player_label);
+          string_builder_add_string(move_log, ": ");
+          string_builder_add_move(move_log, game_get_board(game),
+                                  move_list->spare_move, ld, true);
+          char depth_str[32];
+          (void)snprintf(depth_str, sizeof(depth_str), " d%d %.1fs", depth,
+                         elapsed);
+          string_builder_add_string(move_log, depth_str);
+
+          play_move(move_list->spare_move, game, NULL);
+          player_turn_count[player_on_turn]++;
+          turn_num++;
+        }
+
+        int s0 = equity_to_int(player_get_score(game_get_player(game, 0)));
+        int s1 = equity_to_int(player_get_score(game_get_player(game, 1)));
+        for (int p = 0; p < 2; p++) {
+          if (budget[p] < 0) {
+            double ot = -budget[p];
+            int penalty = (int)(ot * 10.0 + 0.999);
+            printf("    [P%d(%s) overtime: %.2fs, -%d pts]\n", p + 1,
+                   cfg_names[cfg_for_player[p]], ot, penalty);
+            if (p == 0) {
+              s0 -= penalty;
+            } else {
+              s1 -= penalty;
+            }
+            rr.cumul_overtime[cfg_for_player[p]] += ot;
+          }
+        }
+        spread[dir] = s0 - s1;
+
+        printf("    G%d P1=%s P2=%s: %s => %+d\n", dir + 1,
+               cfg_names[cfg_for_player[0]], cfg_names[cfg_for_player[1]],
+               string_builder_peek(move_log), spread[dir]);
+
+        string_builder_destroy(move_log);
+        for (int p = 0; p < 2; p++) {
+          endgame_results_destroy(res[p]);
+          endgame_solver_destroy(solvers[p]);
+        }
+      }
+
+      net[pi] = spread[0] - spread[1];
+      rr_record_pairing(&rr, pi, net[pi]);
+      printf("    Net: %+d  (cumul %+d)\n", net[pi], rr.pair_net[pi]);
+    }
+
+    printf("RESULT: game=%d", gi + 1);
+    for (int pi = 0; pi < num_pairings; pi++) {
+      printf(" %s=%+d(cumul%+d)", pair_labels[pi], net[pi], rr.pair_net[pi]);
+    }
+    printf("\n");
+    rr_print_crosstable(&rr);
+    (void)fflush(stdout);
+  }
+
+  printf("\n");
+  printf("=================================================================="
+         "======================================\n");
+  printf("  Final results (%d games, P1=%.1fs P2=%.1fs):\n", games_played,
+         p1_budget_sec, p2_budget_sec);
+  rr_print_crosstable(&rr);
+  printf("=================================================================="
+         "======================================\n");
+  (void)fflush(stdout);
+
+  game_string_options_destroy(gso);
+  free(cgp_lines);
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
+void test_benchmark_timed_round_robin_4cfg(void) {
+  log_set_level(LOG_FATAL);
+  run_timed_round_robin_4cfg("/tmp/stuck_hard_endgame_cgps.txt", 0, 10000, 9.0,
+                             6.0);
+}
+
+// ============================================================
 // 4-way round robin: Static vs Bullet vs Blitz vs Classical
 // ============================================================
 // Generates random endgame positions via greedy self-play to bag-empty.

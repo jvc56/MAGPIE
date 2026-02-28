@@ -140,6 +140,7 @@ static TestEntry on_demand_test_table[] = {
     {"monsterq", test_monster_q},
     {"roundrobin", test_benchmark_timed_round_robin},
     {"roundrobin_ns", test_benchmark_timed_round_robin_nonstuck},
+    {"roundrobin_4cfg", test_benchmark_timed_round_robin_4cfg},
     {"fourway", test_benchmark_four_way_round_robin},
     {"threshtour", test_benchmark_threshold_tournament},
     {"gamepairs", test_benchmark_overnight_gamepairs},
