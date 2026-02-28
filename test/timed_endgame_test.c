@@ -63,6 +63,17 @@ static void exec_config_quiet(Config *config, const char *cmd) {
   close(saved_stdout);
 }
 
+// Returns a TT fraction capped at 0.5 so a 2 GB target never requests more
+// than half of total RAM on low-memory machines or containers.
+static double tt_frac_for_2gb(void) {
+  uint64_t total_mem = get_total_memory();
+  if (total_mem == 0) {
+    return 0.25;
+  }
+  double frac = (2.0 * 1024.0 * 1024.0 * 1024.0) / (double)total_mem;
+  return frac < 0.5 ? frac : 0.5;
+}
+
 // Timer thread: sleeps for the specified duration, then fires USER_INTERRUPT.
 // Uses a done flag polled in short intervals so the thread can be stopped
 // promptly when the solver finishes before the time limit.
@@ -721,8 +732,7 @@ static void run_timed_round_robin(const char *cgp_file, int start_game,
   const int max_ply = 25;
   const int max_turns = 50;
   // 2GB per TT (two TTs active simultaneously during a game)
-  const double tt_frac =
-      (2.0 * 1024.0 * 1024.0 * 1024.0) / (double)get_total_memory();
+  const double tt_frac = tt_frac_for_2gb();
 
   // Read positions from file
   const int max_cgp_lines = 2000;
@@ -1098,8 +1108,7 @@ static double fw_median_double(double *arr, int n) {
 static void run_four_way_round_robin(int num_games, uint64_t base_seed) {
   const int max_ply = 25;
   const int max_turns = 50;
-  const double tt_frac =
-      (2.0 * 1024.0 * 1024.0 * 1024.0) / (double)get_total_memory();
+  const double tt_frac = tt_frac_for_2gb();
 
   const char *cfg_names[] = {"Static", "Bullet", "Blitz", "Classical"};
 
@@ -1507,8 +1516,7 @@ void test_benchmark_four_way_round_robin(void) {
 static void run_threshold_tournament(int num_games, uint64_t base_seed) {
   const int max_ply = 25;
   const int max_turns = 50;
-  const double tt_frac =
-      (2.0 * 1024.0 * 1024.0 * 1024.0) / (double)get_total_memory();
+  const double tt_frac = tt_frac_for_2gb();
 
   // 4 configs: {Blitz, Bullet} × {100 ms threshold, 150 ms threshold}.
   const int num_cfgs = 4;
@@ -1890,8 +1898,7 @@ static void run_overnight_gamepairs(int num_games, double p1_budget_sec,
                                     double p2_budget_sec, uint64_t base_seed) {
   const int max_ply = 25;
   const int max_turns = 50;
-  const double tt_frac =
-      (2.0 * 1024.0 * 1024.0 * 1024.0) / (double)get_total_memory();
+  const double tt_frac = tt_frac_for_2gb();
 
   Config *config = config_create_or_die(
       "set -lex CSW21 -threads 6 -s1 score -s2 score -r1 small -r2 small");
