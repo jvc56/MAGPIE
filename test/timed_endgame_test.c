@@ -424,8 +424,14 @@ static void run_timed_precheck_ab(int num_games, double time_limit_sec,
                             .use_heuristics = true,
                             .per_ply_callback = NULL,
                             .per_ply_callback_data = NULL,
-                            /* config_idx == 0: Old (no cross-set precheck)
-                             * config_idx == 1: New (with cross-set precheck) */
+                            /* config_idx == 0: Old baseline — uses full KWG
+                             *   for cross-sets; precheck disabled (requires
+                             *   pruned-KWG cross-sets to be valid).
+                             * config_idx == 1: New — pruned KWG for cross-sets
+                             *   + cross-set precheck enabled. The two are
+                             *   coupled: the precheck is only valid when
+                             *   cross-sets come from the same KWG as movegen.
+                             */
                             .skip_pruned_cross_sets = (config_idx == 0),
                             .forced_pass_bypass = false};
 
