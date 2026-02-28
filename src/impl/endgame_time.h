@@ -33,10 +33,12 @@ typedef enum {
   // is generating moves for near-full-rack positions (100–200 ms); at
   // deeper depths alpha-beta pruning keeps each call fast (~20–90 ms).
   //
-  // ET_TIMER_EARLY_MS = 250 ms: turns where timer fires at ≥ 50 ms into the
-  // search are past the most expensive shallow iterations, so response stays
-  // well within the 250 ms budget.  Turns where turn_limit < 250 ms have no
-  // useful pruned search window and fall back to static evaluation.
+  // ET_TIMER_EARLY_MS = 100 ms: fires the external timer 100 ms before the
+  // nominal turn_limit.  By 100 ms into the search, the solver is past the
+  // most expensive shallow IDS iterations; subsequent generate_stm_plays()
+  // calls complete within ~20–90 ms, so elapsed ≈ turn_limit after interrupt.
+  // Turns where turn_limit < 100 ms have no useful pruned search window and
+  // fall back to static evaluation.
   //
   // Also used to estimate how many future turns will run the solver vs. fall
   // back to static eval (see endgame_compute_turn_limits).
