@@ -2,6 +2,7 @@
 #define SIM_ARGS_H
 
 #include "../def/bai_defs.h"
+#include "../def/sim_defs.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/inference_args.h"
@@ -28,6 +29,9 @@ typedef struct SimArgs {
   uint64_t seed;
   ThreadControl *thread_control;
   BAIOptions bai_options;
+  // Multi-fidelity configuration
+  int num_fidelity_levels;
+  FidelityLevel fidelity_levels[MAX_FIDELITY_LEVELS];
 } SimArgs;
 
 static inline void
@@ -72,6 +76,16 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->bai_options.sampling_rule = sampling_rule;
   sim_args->bai_options.num_threads = num_threads;
   sim_args->bai_options.cutoff = cutoff;
+  // Default: single fidelity level with static ply strategy (existing behavior)
+  sim_args->num_fidelity_levels = 1;
+  sim_args->fidelity_levels[0] = (FidelityLevel){
+      .sample_limit = max_iterations,
+      .sample_minimum = min_play_iterations,
+      .ply_strategy = PLY_STRATEGY_STATIC,
+      .nested_candidates = 0,
+      .nested_rollouts = 0,
+      .nested_plies = 0,
+  };
 }
 
 #endif

@@ -2,7 +2,10 @@
 
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"
+#include "../def/equity_defs.h"
 #include "../def/game_defs.h"
+#include "../def/move_defs.h"
+#include "../def/sim_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
 #include "../ent/equity.h"
@@ -311,6 +314,11 @@ typedef struct SimmerWorker {
   Game *game;
   MoveList *move_list;
   XoshiroPRNG *prng;
+  // Resources for nested simulation ply decisions.
+  // Only allocated when ply_strategy == PLY_STRATEGY_NESTED_SIM.
+  Game *nested_game;               // scratch game for mini-rollouts
+  MoveList *nested_move_list;      // capacity-1 list for inner movegen
+  MoveList *candidate_move_list;   // capacity-K list for outer candidate gen
 } SimmerWorker;
 
 typedef struct Simmer {
@@ -330,19 +338,37 @@ typedef struct Simmer {
   int max_num_display_plies;
   ThreadControl *thread_control;
   SimResults *sim_results;
+  // Ply strategy for the current fidelity level
+  ply_strategy_t ply_strategy;
+  int nested_candidates;
+  int nested_rollouts;
+  int nested_plies;
 } Simmer;
 
-SimmerWorker *simmer_create_worker(const Game *game) {
+SimmerWorker *simmer_create_worker(const Game *game, ply_strategy_t ply_strategy,
+                                   int nested_candidates) {
   SimmerWorker *simmer_worker = malloc_or_die(sizeof(SimmerWorker));
   simmer_worker->game = game_duplicate(game);
   game_set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
   simmer_worker->move_list = move_list_create(1);
   simmer_worker->prng = prng_create(0);
+  if (ply_strategy == PLY_STRATEGY_NESTED_SIM) {
+    simmer_worker->nested_game = game_duplicate(game);
+    simmer_worker->nested_move_list = move_list_create(1);
+    simmer_worker->candidate_move_list = move_list_create(nested_candidates);
+  } else {
+    simmer_worker->nested_game = NULL;
+    simmer_worker->nested_move_list = NULL;
+    simmer_worker->candidate_move_list = NULL;
+  }
   return simmer_worker;
 }
 
 void simmer_reset_worker(SimmerWorker *simmer_worker, const Game *game) {
   game_copy(simmer_worker->game, game);
+  if (simmer_worker->nested_game) {
+    game_copy(simmer_worker->nested_game, game);
+  }
 }
 
 void simmer_worker_destroy(SimmerWorker *simmer_worker) {
@@ -352,7 +378,88 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   game_destroy(simmer_worker->game);
   move_list_destroy(simmer_worker->move_list);
   prng_destroy(simmer_worker->prng);
+  game_destroy(simmer_worker->nested_game);
+  move_list_destroy(simmer_worker->nested_move_list);
+  move_list_destroy(simmer_worker->candidate_move_list);
   free(simmer_worker);
+}
+
+// Choose the best move by running mini-rollouts for each candidate.
+// Generates K candidates, runs N mini-rollouts per candidate using static
+// eval, and returns the candidate with the best average spread.
+// The returned Move* points into candidate_move_list and remains valid
+// until the next generate_moves call on that list.
+static Move *get_top_nested_sim_move(Game *game, int thread_index,
+                                     SimmerWorker *worker,
+                                     int num_rollouts, int num_plies) {
+  MoveList *candidate_list = worker->candidate_move_list;
+  Game *nested_game = worker->nested_game;
+  MoveList *nested_move_list = worker->nested_move_list;
+  XoshiroPRNG *prng = worker->prng;
+
+  // Generate top-K candidates by equity
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_list = candidate_list,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .thread_index = thread_index,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&gen_args);
+  move_list_sort_moves(candidate_list);
+
+  const int actual_candidates = move_list_get_count(candidate_list);
+  if (actual_candidates <= 1) {
+    // Only one move (or none) — no point running rollouts
+    return move_list_get_move(candidate_list, 0);
+  }
+
+  const int player_index = game_get_player_on_turn_index(game);
+  int best_candidate = 0;
+  double best_avg_spread = -1e18;
+
+  for (int k = 0; k < actual_candidates; k++) {
+    const Move *candidate = move_list_get_move(candidate_list, k);
+    double total_spread = 0.0;
+
+    for (int n = 0; n < num_rollouts; n++) {
+      // Copy game state and re-seed for different tile draw order
+      game_copy(nested_game, game);
+      game_seed(nested_game, prng_next(prng));
+
+      // Play candidate move (no backup needed, we discard this state)
+      game_set_backup_mode(nested_game, BACKUP_MODE_OFF);
+      play_move(candidate, nested_game, NULL);
+
+      // Rollout using static eval
+      for (int ply = 0; ply < num_plies; ply++) {
+        if (game_over(nested_game)) {
+          break;
+        }
+        const Move *best = get_top_equity_move(nested_game, thread_index,
+                                               nested_move_list);
+        play_move(best, nested_game, NULL);
+      }
+
+      // Compute spread from perspective of the player making this decision
+      const Equity spread =
+          player_get_score(game_get_player(nested_game, player_index)) -
+          player_get_score(game_get_player(nested_game, 1 - player_index));
+      total_spread += (double)equity_to_int(spread);
+    }
+
+    const double avg_spread = total_spread / num_rollouts;
+    if (avg_spread > best_avg_spread) {
+      best_avg_spread = avg_spread;
+      best_candidate = k;
+    }
+  }
+
+  return move_list_get_move(candidate_list, best_candidate);
 }
 
 double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
@@ -419,7 +526,15 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       break;
     }
 
-    const Move *best_play = get_top_equity_move(game, thread_index, move_list);
+    const Move *best_play;
+    if (simmer->ply_strategy == PLY_STRATEGY_NESTED_SIM &&
+        simmer_worker->nested_game != NULL) {
+      best_play = get_top_nested_sim_move(
+          game, thread_index, simmer_worker,
+          simmer->nested_rollouts, simmer->nested_plies);
+    } else {
+      best_play = get_top_equity_move(game, thread_index, move_list);
+    }
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
     play_move(best_play, game, NULL);
@@ -514,11 +629,39 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->max_num_display_plays = sim_args->max_num_display_plays;
   simmer->max_num_display_plies = sim_args->max_num_display_plies;
 
+  // Set ply strategy from the first fidelity level (will be updated
+  // per-level during multi-fidelity runs)
+  if (sim_args->num_fidelity_levels > 0) {
+    simmer->ply_strategy = sim_args->fidelity_levels[0].ply_strategy;
+    simmer->nested_candidates = sim_args->fidelity_levels[0].nested_candidates;
+    simmer->nested_rollouts = sim_args->fidelity_levels[0].nested_rollouts;
+    simmer->nested_plies = sim_args->fidelity_levels[0].nested_plies;
+  } else {
+    simmer->ply_strategy = PLY_STRATEGY_STATIC;
+    simmer->nested_candidates = 0;
+    simmer->nested_rollouts = 0;
+    simmer->nested_plies = 0;
+  }
+
+  // Determine if any fidelity level uses nested sim so we can pre-allocate
+  ply_strategy_t max_ply_strategy = PLY_STRATEGY_STATIC;
+  int max_nested_candidates = 0;
+  for (int fl = 0; fl < sim_args->num_fidelity_levels; fl++) {
+    if (sim_args->fidelity_levels[fl].ply_strategy == PLY_STRATEGY_NESTED_SIM) {
+      max_ply_strategy = PLY_STRATEGY_NESTED_SIM;
+      if (sim_args->fidelity_levels[fl].nested_candidates >
+          max_nested_candidates) {
+        max_nested_candidates = sim_args->fidelity_levels[fl].nested_candidates;
+      }
+    }
+  }
+
   simmer->workers =
       malloc_or_die((sizeof(SimmerWorker *)) * (simmer->num_threads));
   for (int thread_index = 0; thread_index < simmer->num_threads;
        thread_index++) {
-    simmer->workers[thread_index] = simmer_create_worker(sim_args->game);
+    simmer->workers[thread_index] = simmer_create_worker(
+        sim_args->game, max_ply_strategy, max_nested_candidates);
   }
 
   simmer->win_pcts = sim_args->win_pcts;
@@ -576,9 +719,28 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
       simmer->use_inference &&
       (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));
 
+  // Update ply strategy from current fidelity level
+  if (sim_args->num_fidelity_levels > 0) {
+    simmer->ply_strategy = sim_args->fidelity_levels[0].ply_strategy;
+    simmer->nested_candidates = sim_args->fidelity_levels[0].nested_candidates;
+    simmer->nested_rollouts = sim_args->fidelity_levels[0].nested_rollouts;
+    simmer->nested_plies = sim_args->fidelity_levels[0].nested_plies;
+  } else {
+    simmer->ply_strategy = PLY_STRATEGY_STATIC;
+  }
+
   sim_results_reset(sim_args->move_list, simmer->sim_results,
                     sim_args->num_plies, sim_args->seed,
                     sim_args->use_heat_map);
+}
+
+void rvs_set_fidelity_level(RandomVariables *rvs,
+                            const FidelityLevel *level) {
+  Simmer *simmer = (Simmer *)rvs->data;
+  simmer->ply_strategy = level->ply_strategy;
+  simmer->nested_candidates = level->nested_candidates;
+  simmer->nested_rollouts = level->nested_rollouts;
+  simmer->nested_plies = level->nested_plies;
 }
 
 RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {
