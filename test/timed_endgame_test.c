@@ -1709,8 +1709,8 @@ static void run_threshold_tournament(int num_games, uint64_t base_seed) {
         int s0 = equity_to_int(player_get_score(game_get_player(game, 0)));
         int s1 = equity_to_int(player_get_score(game_get_player(game, 1)));
         for (int p = 0; p < 2; p++) {
-          int cfg = cfg_for_player[p];
           if (budget[p] < 0) {
+            int cfg = cfg_for_player[p];
             double ot = -budget[p];
             rr.cumul_overtime[cfg] += ot;
             int penalty = (int)(ot * 10.0 + 0.999);
@@ -1847,6 +1847,7 @@ static void *poll_thread_func(void *arg) {
   while (!ctx->done) {
     struct timespec ts = {1, 0}; // 1 second
     nanosleep(&ts, NULL);
+    // cppcheck-suppress knownConditionTrueFalse
     if (ctx->done) {
       break;
     }
