@@ -913,15 +913,21 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
         compare_small_moves_by_estimated_value);
 }
 
+static bool iterative_deepening_should_stop(EndgameSolver *solver);
+
 // Generate opponent's moves in TILES_PLAYED mode and return stuck-tile
 // fraction. Saves and restores player-on-turn if it differs from opp_idx.
 // If tiles_played_bv_out is non-NULL, writes the bitvector of tile types
 // that appear in at least one valid move.
+// solver is nullable; when non-NULL an interrupt check is performed before
+// the expensive generate_moves call so a fired interrupt cuts the work short.
+// Callers detect the interrupt themselves after this returns.
 static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
                                         const KWG *pruned_kwg, int opp_idx,
                                         int thread_index,
                                         bool cross_set_precheck,
-                                        uint64_t *tiles_played_bv_out) {
+                                        uint64_t *tiles_played_bv_out,
+                                        EndgameSolver *solver) {
   int saved_on_turn = game_get_player_on_turn_index(game);
   if (saved_on_turn != opp_idx) {
     game_set_player_on_turn_index(game, opp_idx);
@@ -972,6 +978,18 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
                  : stuck_tile_fraction_from_bv(ld, opp_rack, opp_tiles_bv);
     }
   }
+  // Check for interrupt before the expensive movegen call.  If already fired,
+  // restore game state and return early — the caller will re-detect the
+  // interrupt immediately and discard this 0.0F result.
+  if (solver && iterative_deepening_should_stop(solver)) {
+    if (saved_on_turn != opp_idx) {
+      game_set_player_on_turn_index(game, saved_on_turn);
+    }
+    if (tiles_played_bv_out) {
+      *tiles_played_bv_out = opp_tiles_bv;
+    }
+    return 0.0F;
+  }
   const MoveGenArgs tp_args = {
       .game = game,
       .move_list = move_list,
@@ -1017,7 +1035,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
     opp_stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
         solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx,
-        worker->thread_index, worker->solver->cross_set_precheck, NULL);
+        worker->thread_index, worker->solver->cross_set_precheck, NULL,
+        worker->solver);
   }
 
   bool playout_interrupted = false;
@@ -1213,7 +1232,7 @@ static void negamax_tt_store(const EndgameSolverWorker *worker,
 }
 
 // Stuck-tile detection, move generation, logging, and sorting for non-root
-// nodes. Updates *opp_stuck_frac. Returns move count.
+// nodes. Updates *opp_stuck_frac. Returns move count, or -1 if interrupted.
 static int negamax_generate_and_sort_moves(EndgameSolverWorker *worker,
                                            int depth, uint64_t tt_move,
                                            float *opp_stuck_frac) {
@@ -1225,7 +1244,12 @@ static int negamax_generate_and_sort_moves(EndgameSolverWorker *worker,
         worker->game_copy, worker->move_list,
         solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx,
         worker->thread_index, worker->solver->cross_set_precheck,
-        &opp_tiles_bv);
+        &opp_tiles_bv, worker->solver);
+    // Check for interrupt between the two expensive operations so threads
+    // don't run a second full movegen after the timer has already fired.
+    if (iterative_deepening_should_stop(worker->solver)) {
+      return -1;
+    }
     nplays = generate_stm_plays(worker, depth);
   } else {
     nplays = generate_stm_plays(worker, depth);
@@ -1263,8 +1287,6 @@ static int negamax_generate_and_sort_moves(EndgameSolverWorker *worker,
   assign_estimates_and_sort(worker, nplays, tt_move, *opp_stuck_frac);
   return nplays;
 }
-
-static bool iterative_deepening_should_stop(EndgameSolver *solver);
 
 // Checks whether the per-depth deadline has been exceeded and signals all
 // workers to stop if so. Marked noinline to keep struct timespec off the hot
@@ -1398,8 +1420,27 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   int nplays;
   bool arena_alloced = false;
   if (worker->current_iterative_deepening_depth != depth) {
+    // Check interrupt before entering expensive movegen.  A thread that just
+    // passed the check at the top of this function may have had the interrupt
+    // fire during the TT-lookup / spread-calculation window above; catching it
+    // here avoids running two full movegens unnecessarily.
+    if (iterative_deepening_should_stop(worker->solver)) {
+      if (abdada_active) {
+        transposition_table_leave_node(worker->solver->transposition_table,
+                                       node_key);
+      }
+      return ABDADA_INTERRUPTED;
+    }
     nplays = negamax_generate_and_sort_moves(worker, depth, tt_move,
                                              &opp_stuck_frac);
+    if (nplays == -1) {
+      // Interrupted during compute_opp_stuck_fraction
+      if (abdada_active) {
+        transposition_table_leave_node(worker->solver->transposition_table,
+                                       node_key);
+      }
+      return ABDADA_INTERRUPTED;
+    }
     arena_alloced = true;
   } else {
     // Use initial moves. They already have been sorted by estimated value.
@@ -2048,7 +2089,7 @@ static float compute_initial_stuck_fraction(const EndgameSolver *solver,
   MoveList *tmp_ml = move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
   float frac = compute_opp_stuck_fraction(
       root_game, tmp_ml, solver_get_pruned_kwg(solver, opp_idx), opp_idx, 0,
-      solver->cross_set_precheck, NULL);
+      solver->cross_set_precheck, NULL, NULL);
   small_move_list_destroy(tmp_ml);
   game_destroy(root_game);
   return frac;
