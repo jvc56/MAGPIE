@@ -20,7 +20,7 @@ EndgameTurnLimits endgame_compute_turn_limits(double budget_remaining,
   // Cap at floor_budget_cap of remaining budget so bullet/tiny budgets
   // don't overshoot on the very first turn.
   int shift = player_turn_count < 31 ? player_turn_count : 31;
-  double floor_secs = floor_start / (double)(1 << shift);
+  double floor_secs = floor_start / (double)(1u << shift);
   if (floor_secs > budget_remaining * floor_budget_cap) {
     floor_secs = budget_remaining * floor_budget_cap;
   }
