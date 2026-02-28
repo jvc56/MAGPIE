@@ -891,7 +891,8 @@ static void run_timed_round_robin(const char *cgp_file, int start_game,
           Timer turn_timer;
           ctimer_start(&turn_timer);
 
-          TimerArgs ta = {.tc = tc, .seconds = limits.timer_secs, .done = false};
+          TimerArgs ta = {
+              .tc = tc, .seconds = limits.timer_secs, .done = false};
           pthread_t timer_tid; // NOLINT(misc-include-cleaner)
           pthread_create(&timer_tid, NULL, timer_thread_func, &ta);
 
@@ -1083,12 +1084,14 @@ static int fw_cmp_double(const void *a, const void *b) {
   return (diff > 0) - (diff < 0);
 }
 static int fw_median_int(int *arr, int n) {
-  if (n <= 0) return -1;
+  if (n <= 0)
+    return -1;
   qsort(arr, (size_t)n, sizeof(int), fw_cmp_int);
   return arr[n / 2];
 }
 static double fw_median_double(double *arr, int n) {
-  if (n <= 0) return 0.0;
+  if (n <= 0)
+    return 0.0;
   qsort(arr, (size_t)n, sizeof(double), fw_cmp_double);
   return arr[n / 2];
 }
@@ -1106,7 +1109,7 @@ static void run_four_way_round_robin(int num_games, uint64_t base_seed) {
   //   player_on_turn: 0=P1, 1=P2.
   const double cfg_budgets[4][2][2] = {
       {{0.0, 0.0}, {0.0, 0.0}},    // Static: unused
-      {{1.0, 0.667}, {3.0, 2.0}},   // Bullet
+      {{1.0, 0.667}, {3.0, 2.0}},  // Bullet
       {{3.0, 1.0}, {9.0, 6.0}},    // Blitz
       {{10.0, 4.0}, {90.0, 60.0}}, // Classical
   };
@@ -1127,23 +1130,24 @@ static void run_four_way_round_robin(int num_games, uint64_t base_seed) {
   // fw_bud_end[cfg][sample]: remaining budget at end of each sub-game.
   // Max: 500 × 6 sub-games per cfg = 3000.
   double fw_bud_end[4][3100];
-  int    fw_bud_end_n[4];
+  int fw_bud_end_n[4];
   double fw_bud_min[4];
   // fw_tiles[cfg][sample]: total tiles on both racks at end of sub-game.
   int fw_tiles[4][3100];
   int fw_tiles_n[4];
   // Totals for averaging.
-  int fw_turns[4];   // total turns played per cfg
-  int fw_games[4];   // total sub-games per cfg (denominator for avg t/game)
-  memset(fw_depth,     0, sizeof(fw_depth));
-  memset(fw_depth_n,   0, sizeof(fw_depth_n));
-  memset(fw_bud_end,   0, sizeof(fw_bud_end));
+  int fw_turns[4]; // total turns played per cfg
+  int fw_games[4]; // total sub-games per cfg (denominator for avg t/game)
+  memset(fw_depth, 0, sizeof(fw_depth));
+  memset(fw_depth_n, 0, sizeof(fw_depth_n));
+  memset(fw_bud_end, 0, sizeof(fw_bud_end));
   memset(fw_bud_end_n, 0, sizeof(fw_bud_end_n));
-  memset(fw_tiles,     0, sizeof(fw_tiles));
-  memset(fw_tiles_n,   0, sizeof(fw_tiles_n));
-  memset(fw_turns,     0, sizeof(fw_turns));
-  memset(fw_games,     0, sizeof(fw_games));
-  for (int i = 0; i < 4; i++) fw_bud_min[i] = 1e9;
+  memset(fw_tiles, 0, sizeof(fw_tiles));
+  memset(fw_tiles_n, 0, sizeof(fw_tiles_n));
+  memset(fw_turns, 0, sizeof(fw_turns));
+  memset(fw_games, 0, sizeof(fw_games));
+  for (int i = 0; i < 4; i++)
+    fw_bud_min[i] = 1e9;
 
   RRState rr;
   memset(&rr, 0, sizeof(rr));
@@ -1423,12 +1427,11 @@ static void run_four_way_round_robin(int num_games, uint64_t base_seed) {
     rr_print_crosstable(&rr);
     {
       printf("  Per-config stats (%d sub-games per config):\n", fw_games[1]);
-      printf("  %-9s | %10s | %5s %5s | %9s %9s | %8s\n",
-             "Config", "AvgT/game", "P1-d", "P2-d", "MedBudg", "MinBudg",
-             "MedTile");
-      printf("  %-9s | %10s | %5s %5s | %9s %9s | %8s\n",
-             "---------", "----------", "-----", "-----", "---------",
-             "---------", "--------");
+      printf("  %-9s | %10s | %5s %5s | %9s %9s | %8s\n", "Config", "AvgT/game",
+             "P1-d", "P2-d", "MedBudg", "MinBudg", "MedTile");
+      printf("  %-9s | %10s | %5s %5s | %9s %9s | %8s\n", "---------",
+             "----------", "-----", "-----", "---------", "---------",
+             "--------");
       for (int ci = 0; ci < 4; ci++) {
         double avg_t =
             (fw_games[ci] > 0) ? rr.cumul_time[ci] / fw_games[ci] : 0.0;
@@ -1437,9 +1440,8 @@ static void run_four_way_round_robin(int num_games, uint64_t base_seed) {
         double med_bud = fw_median_double(fw_bud_end[ci], fw_bud_end_n[ci]);
         int med_tiles = fw_median_int(fw_tiles[ci], fw_tiles_n[ci]);
         if (ci == 0) {
-          printf(
-              "  %-9s | %9.4fs |     -     - |         -         - | %8d\n",
-              cfg_names[ci], avg_t, med_tiles);
+          printf("  %-9s | %9.4fs |     -     - |         -         - | %8d\n",
+                 cfg_names[ci], avg_t, med_tiles);
         } else {
           printf("  %-9s | %9.4fs | d%-3d  d%-3d | %8.3fs %8.3fs | %8d\n",
                  cfg_names[ci], avg_t, med_d_p1, med_d_p2, med_bud,
@@ -1459,15 +1461,12 @@ static void run_four_way_round_robin(int num_games, uint64_t base_seed) {
 
   // Supplementary per-config stats table.
   printf("\n  Per-config stats (%d sub-games per config):\n", fw_games[1]);
-  printf("  %-9s | %10s | %5s %5s | %9s %9s | %8s\n",
-         "Config", "AvgT/game", "P1-d", "P2-d", "MedBudg", "MinBudg",
-         "MedTile");
-  printf("  %-9s | %10s | %5s %5s | %9s %9s | %8s\n",
-         "---------", "----------", "-----", "-----", "---------", "---------",
-         "--------");
+  printf("  %-9s | %10s | %5s %5s | %9s %9s | %8s\n", "Config", "AvgT/game",
+         "P1-d", "P2-d", "MedBudg", "MinBudg", "MedTile");
+  printf("  %-9s | %10s | %5s %5s | %9s %9s | %8s\n", "---------",
+         "----------", "-----", "-----", "---------", "---------", "--------");
   for (int ci = 0; ci < 4; ci++) {
-    double avg_t =
-        (fw_games[ci] > 0) ? rr.cumul_time[ci] / fw_games[ci] : 0.0;
+    double avg_t = (fw_games[ci] > 0) ? rr.cumul_time[ci] / fw_games[ci] : 0.0;
     int med_d_p1 = fw_median_int(fw_depth[ci][0], fw_depth_n[ci][0]);
     int med_d_p2 = fw_median_int(fw_depth[ci][1], fw_depth_n[ci][1]);
     double med_bud = fw_median_double(fw_bud_end[ci], fw_bud_end_n[ci]);
@@ -1477,8 +1476,8 @@ static void run_four_way_round_robin(int num_games, uint64_t base_seed) {
              cfg_names[ci], avg_t, med_tiles);
     } else {
       printf("  %-9s | %9.4fs | d%-3d  d%-3d | %8.3fs %8.3fs | %8d\n",
-             cfg_names[ci], avg_t, med_d_p1, med_d_p2, med_bud,
-             fw_bud_min[ci], med_tiles);
+             cfg_names[ci], avg_t, med_d_p1, med_d_p2, med_bud, fw_bud_min[ci],
+             med_tiles);
     }
   }
 
@@ -1549,8 +1548,8 @@ static void run_threshold_tournament(int num_games, uint64_t base_seed) {
   printf("\n");
   printf("========================================================"
          "========================\n");
-  printf("  Threshold Tournament: up to %d games, seed=%llu\n",
-         num_games, (unsigned long long)base_seed);
+  printf("  Threshold Tournament: up to %d games, seed=%llu\n", num_games,
+         (unsigned long long)base_seed);
   printf("  Bl100 = Blitz  (nonstuck 3s/1s   stuck 9s/6s)   1t<100ms\n");
   printf("  Bu100 = Bullet (nonstuck 1s/0.4s  stuck 3s/2s)   1t<100ms\n");
   printf("  Bl150 = Blitz  (nonstuck 3s/1s   stuck 9s/6s)   1t<150ms\n");
@@ -1616,7 +1615,7 @@ static void run_threshold_tournament(int num_games, uint64_t base_seed) {
         double budget[2];
         for (int p = 0; p < 2; p++) {
           int cfg = cfg_for_player[p];
-          const double(*bud)[2] =
+          const double (*bud)[2] =
               cfg_is_bullet[cfg] ? bullet_budgets : blitz_budgets;
           budget[p] = bud[sk][p];
         }
@@ -1672,8 +1671,8 @@ static void run_threshold_tournament(int num_games, uint64_t base_seed) {
             Timer t;
             ctimer_start(&t);
             err = error_stack_create();
-            endgame_solve(solvers[player_on_turn], &args,
-                          res[player_on_turn], err);
+            endgame_solve(solvers[player_on_turn], &args, res[player_on_turn],
+                          err);
             ta.done = true;
             pthread_join(timer_tid, NULL);
             double elapsed = ctimer_elapsed_seconds(&t);
@@ -1684,8 +1683,8 @@ static void run_threshold_tournament(int num_games, uint64_t base_seed) {
             assert(error_stack_is_empty(err));
             error_stack_destroy(err);
 
-            const PVLine *pv = endgame_results_get_pvline(
-                res[player_on_turn], ENDGAME_RESULT_BEST);
+            const PVLine *pv = endgame_results_get_pvline(res[player_on_turn],
+                                                          ENDGAME_RESULT_BEST);
             if (pv->num_moves == 0) {
               break;
             }
@@ -1717,8 +1716,8 @@ static void run_threshold_tournament(int num_games, uint64_t base_seed) {
         }
         spread[dir] = s0 - s1;
 
-        printf("  %s G%d P1=%-9s P2=%-9s => %+d (%d turns)\n",
-               pair_labels[pi], dir + 1, cfg_names[cfg_for_player[0]],
+        printf("  %s G%d P1=%-9s P2=%-9s => %+d (%d turns)\n", pair_labels[pi],
+               dir + 1, cfg_names[cfg_for_player[0]],
                cfg_names[cfg_for_player[1]], spread[dir], turn_num);
         (void)fflush(stdout);
 
@@ -2182,4 +2181,3 @@ void test_benchmark_overnight_gamepairs(void) {
   log_set_level(LOG_FATAL);
   run_overnight_gamepairs(100, 15.0, 9.0, 31415926);
 }
-

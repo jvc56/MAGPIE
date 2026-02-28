@@ -4,16 +4,16 @@ EndgameTurnLimits endgame_compute_turn_limits(double budget_remaining,
                                               int player_turn_count,
                                               int tiles_on_rack,
                                               int time_mode) {
-  const double slack            = ET_SLACK_MS / 1000.0;
-  const double floor_min        = ET_FLOOR_MIN_MS / 1000.0;
-  const double floor_start      = ET_FLOOR_START_MS / 1000.0;
-  const double response_margin  = ET_RESPONSE_MARGIN_MS / 1000.0;
-  const double min_turn_limit   = ET_MIN_TURN_LIMIT_MS / 1000.0;
-  const double timer_early      = ET_TIMER_EARLY_MS / 1000.0;
+  const double slack = ET_SLACK_MS / 1000.0;
+  const double floor_min = ET_FLOOR_MIN_MS / 1000.0;
+  const double floor_start = ET_FLOOR_START_MS / 1000.0;
+  const double response_margin = ET_RESPONSE_MARGIN_MS / 1000.0;
+  const double min_turn_limit = ET_MIN_TURN_LIMIT_MS / 1000.0;
+  const double timer_early = ET_TIMER_EARLY_MS / 1000.0;
   const double floor_budget_cap = ET_FLOOR_BUDGET_CAP_PCT / 100.0;
-  const double baseline_limit   = ET_BASELINE_LIMIT_PCT / 100.0;
-  const double soft_frac        = ET_SOFT_LIMIT_PCT / 100.0;
-  const double hard_frac        = ET_HARD_LIMIT_PCT / 100.0;
+  const double baseline_limit = ET_BASELINE_LIMIT_PCT / 100.0;
+  const double soft_frac = ET_SOFT_LIMIT_PCT / 100.0;
+  const double hard_frac = ET_HARD_LIMIT_PCT / 100.0;
 
   // Halving floor: floor_start on first turn, halves each player turn,
   // minimum floor_min.  Ensures a minimum search even when budget is low.
@@ -69,7 +69,8 @@ EndgameTurnLimits endgame_compute_turn_limits(double budget_remaining,
     if (limits.hard_limit < 0) {
       limits.hard_limit = 0;
     }
-    limits.turn_limit = spendable * hard_frac - slack; // external timer: same slack
+    limits.turn_limit =
+        spendable * hard_frac - slack; // external timer: same slack
   }
 
   // Apply floor.
@@ -105,8 +106,9 @@ EndgameTurnLimits endgame_compute_turn_limits(double budget_remaining,
 
   // Use 1 thread for non-static-eval turns where remaining budget is small.
   // 8-thread join overhead (~8 ms) dominates search quality when budget is low.
-  limits.use_single_thread = (!limits.use_static_eval &&
-                              budget_remaining < ET_SINGLE_THREAD_BUDGET_MS / 1000.0);
+  limits.use_single_thread =
+      (!limits.use_static_eval &&
+       budget_remaining < ET_SINGLE_THREAD_BUDGET_MS / 1000.0);
 
   return limits;
 }

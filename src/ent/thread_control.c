@@ -67,7 +67,7 @@ bool thread_control_set_status(ThreadControl *thread_control,
 void thread_control_wait_for_status_change(ThreadControl *thread_control) {
   cpthread_mutex_lock(&thread_control->status_mutex);
   while ((thread_control_status_t)atomic_load_explicit(&thread_control->status,
-                                                      memory_order_relaxed) !=
+                                                       memory_order_relaxed) !=
          THREAD_CONTROL_STATUS_FINISHED) {
     cpthread_cond_wait(&thread_control->status_cond,
                        &thread_control->status_mutex);

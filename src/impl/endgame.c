@@ -1243,8 +1243,8 @@ static int negamax_generate_and_sort_moves(EndgameSolverWorker *worker,
     *opp_stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
         solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx,
-        worker->thread_index, worker->solver->cross_set_precheck,
-        &opp_tiles_bv, worker->solver);
+        worker->thread_index, worker->solver->cross_set_precheck, &opp_tiles_bv,
+        worker->solver);
     // Check for interrupt between the two expensive operations so threads
     // don't run a second full movegen after the timer has already fired.
     if (iterative_deepening_should_stop(worker->solver)) {

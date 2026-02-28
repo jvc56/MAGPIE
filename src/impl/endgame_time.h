@@ -8,22 +8,22 @@
 typedef enum {
   // Subtracted from EBF soft/hard limits: headroom for timer poll (~5 ms)
   // plus average solver response latency (~15 ms) after interrupt fires.
-  ET_SLACK_MS                = 20,
+  ET_SLACK_MS = 20,
 
   // Minimum per-turn search time; the floor never drops below this value.
-  ET_FLOOR_MIN_MS            = 20,
+  ET_FLOOR_MIN_MS = 20,
 
   // First-turn floor before halving each player turn:
   // 200 ms → 100 ms → 50 ms → 25 ms → … → ET_FLOOR_MIN_MS.
-  ET_FLOOR_START_MS          = 200,
+  ET_FLOOR_START_MS = 200,
 
   // Safety-cap margin: turn_limit is clamped to (budget − this value).
   // Covers the irreducible solver response latency after USER_INTERRUPT fires:
   // generate_stm_plays completion (~10 ms) + 8× pthread_join (~8 ms).
-  ET_RESPONSE_MARGIN_MS      = 30,
+  ET_RESPONSE_MARGIN_MS = 30,
 
   // Absolute minimum turn_limit after the safety-cap clamp (avoids 0).
-  ET_MIN_TURN_LIMIT_MS       = 1,
+  ET_MIN_TURN_LIMIT_MS = 1,
 
   // External timer fires this many ms before the nominal turn_limit so that
   // the solver's response latency lands within turn_limit.
@@ -42,7 +42,7 @@ typedef enum {
   //
   // Also used to estimate how many future turns will run the solver vs. fall
   // back to static eval (see endgame_compute_turn_limits).
-  ET_TIMER_EARLY_MS          = 100,
+  ET_TIMER_EARLY_MS = 100,
 
   // Below this remaining budget, use 1 thread instead of the default count.
   // 8-thread join overhead (~8 ms) dominates when budget is small; 1 thread
@@ -52,24 +52,25 @@ typedef enum {
 
   // Cap the halving floor at this percentage of the remaining budget so
   // bullet/tiny budgets do not overshoot on the very first turn.
-  ET_FLOOR_BUDGET_CAP_PCT    = 50,
+  ET_FLOOR_BUDGET_CAP_PCT = 50,
 
   // Baseline mode: hard limit as percentage of spendable budget.
-  ET_BASELINE_LIMIT_PCT      = 80,
+  ET_BASELINE_LIMIT_PCT = 80,
 
   // Flexible mode: EBF soft limit as percentage of spendable budget.
-  ET_SOFT_LIMIT_PCT          = 60,
+  ET_SOFT_LIMIT_PCT = 60,
 
   // Flexible mode: EBF hard limit and external turn_limit as percentage
   // of spendable budget.
-  ET_HARD_LIMIT_PCT          = 90,
+  ET_HARD_LIMIT_PCT = 90,
 } EndgameTimingConst;
 
 // Per-turn time limits computed from a player's remaining budget.
 typedef struct {
   double turn_limit; // nominal per-turn budget (for display and delta tracking)
-  double timer_secs; // actual external timer value = turn_limit − ET_TIMER_EARLY_MS
-                     // (fire early so elapsed ≈ turn_limit after response latency)
+  double timer_secs; // actual external timer value = turn_limit −
+                     // ET_TIMER_EARLY_MS (fire early so elapsed ≈ turn_limit
+                     // after response latency)
   double soft_limit; // IDS soft limit (0 if time_mode == 0)
   double hard_limit; // IDS hard limit (0 if time_mode == 0)
   // When true, caller should use 1 thread instead of the default count.
