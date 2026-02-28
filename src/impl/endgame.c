@@ -1722,12 +1722,14 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
         // At the very top depth, set the estimated value of the small move,
         // for the next iterative deepening iteration.
         small_move_set_estimated_value(small_move, -value);
-        // Track root move progress (thread 0 only, for external polling)
-        if (worker->thread_index == 0 && pass == 0) {
+        // Track root move progress (thread 0 only, for external polling).
+        // Count on any pass so ABDADA deferred moves that complete on pass 1+
+        // are not missed.
+        if (worker->thread_index == 0) {
           atomic_fetch_add(&worker->solver->root_moves_completed, 1);
         }
       }
-      if (is_ply2 && pass == 0) {
+      if (is_ply2) {
         atomic_fetch_add(&worker->solver->ply2_moves_completed, 1);
       }
       if (multi_pv) {
