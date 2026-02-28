@@ -1090,14 +1090,16 @@ static int fw_cmp_double(const void *a, const void *b) {
   return (diff > 0) - (diff < 0);
 }
 static int fw_median_int(int *arr, int n) {
-  if (n <= 0)
+  if (n <= 0) {
     return -1;
+  }
   qsort(arr, (size_t)n, sizeof(int), fw_cmp_int);
   return arr[n / 2];
 }
 static double fw_median_double(double *arr, int n) {
-  if (n <= 0)
+  if (n <= 0) {
     return 0.0;
+  }
   qsort(arr, (size_t)n, sizeof(double), fw_cmp_double);
   return arr[n / 2];
 }
@@ -1152,8 +1154,9 @@ static void run_four_way_round_robin(int num_games, uint64_t base_seed) {
   memset(fw_tiles_n, 0, sizeof(fw_tiles_n));
   memset(fw_turns, 0, sizeof(fw_turns));
   memset(fw_games, 0, sizeof(fw_games));
-  for (int i = 0; i < 4; i++)
+  for (int i = 0; i < 4; i++) {
     fw_bud_min[i] = 1e9;
+  }
 
   RRState rr;
   memset(&rr, 0, sizeof(rr));
