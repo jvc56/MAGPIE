@@ -19,7 +19,8 @@ EndgameTurnLimits endgame_compute_turn_limits(double budget_remaining,
   // minimum floor_min.  Ensures a minimum search even when budget is low.
   // Cap at floor_budget_cap of remaining budget so bullet/tiny budgets
   // don't overshoot on the very first turn.
-  double floor_secs = floor_start / (double)(1 << player_turn_count);
+  int shift = player_turn_count < 31 ? player_turn_count : 31;
+  double floor_secs = floor_start / (double)(1 << shift);
   if (floor_secs > budget_remaining * floor_budget_cap) {
     floor_secs = budget_remaining * floor_budget_cap;
   }
