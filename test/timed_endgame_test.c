@@ -1463,8 +1463,8 @@ static void run_four_way_round_robin(int num_games, uint64_t base_seed) {
   printf("\n  Per-config stats (%d sub-games per config):\n", fw_games[1]);
   printf("  %-9s | %10s | %5s %5s | %9s %9s | %8s\n", "Config", "AvgT/game",
          "P1-d", "P2-d", "MedBudg", "MinBudg", "MedTile");
-  printf("  %-9s | %10s | %5s %5s | %9s %9s | %8s\n", "---------",
-         "----------", "-----", "-----", "---------", "---------", "--------");
+  printf("  %-9s | %10s | %5s %5s | %9s %9s | %8s\n", "---------", "----------",
+         "-----", "-----", "---------", "---------", "--------");
   for (int ci = 0; ci < 4; ci++) {
     double avg_t = (fw_games[ci] > 0) ? rr.cumul_time[ci] / fw_games[ci] : 0.0;
     int med_d_p1 = fw_median_int(fw_depth[ci][0], fw_depth_n[ci][0]);
