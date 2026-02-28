@@ -69,7 +69,7 @@ static void exec_config_quiet(Config *config, const char *cmd) {
 typedef struct {
   ThreadControl *tc;
   double seconds;
-  volatile bool done;
+  _Atomic bool done;
 } TimerArgs;
 
 static void *timer_thread_func(void *arg) {
@@ -1833,7 +1833,7 @@ typedef struct {
   int config_idx;
   int turn_num;
   int player_on_turn;
-  volatile bool done;
+  _Atomic bool done;
 } PollContext;
 
 static void *poll_thread_func(void *arg) {
