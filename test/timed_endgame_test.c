@@ -1516,7 +1516,7 @@ void test_benchmark_four_way_round_robin(void) {
 static void run_threshold_tournament(int num_games, uint64_t base_seed) {
   const int max_ply = 25;
   const int max_turns = 50;
-  const double tt_frac = tt_frac_for_2gb();
+  const double tt_frac = 0.25;
 
   // 4 configs: {Blitz, Bullet} × {100 ms threshold, 150 ms threshold}.
   const int num_cfgs = 4;
