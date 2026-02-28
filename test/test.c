@@ -143,7 +143,6 @@ static TestEntry on_demand_test_table[] = {
     {"fourway", test_benchmark_four_way_round_robin},
     {"threshtour", test_benchmark_threshold_tournament},
     {"gamepairs", test_benchmark_overnight_gamepairs},
-    {"bulletcal", test_benchmark_bullet_calibration},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
