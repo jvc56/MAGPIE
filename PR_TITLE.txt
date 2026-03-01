@@ -1,1 +1,0 @@
-Forced-pass bypass in endgame solver for stuck-tile positions

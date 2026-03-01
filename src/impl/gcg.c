@@ -103,6 +103,8 @@ struct GCGParser {
 #define GCG_PLAYER_STRING "player"
 #define GCG_RACK_STRING "rack"
 
+#define GCG_DESCRIPTION_CREATION_TEXT "Created with MAGPIE"
+
 typedef struct TokenStringRegexPair {
   gcg_token_t token;
   const char *regex_string;
@@ -1234,8 +1236,25 @@ void string_builder_add_gcg(StringBuilder *gcg_sb, const LetterDistribution *ld,
                             const bool star_last_played_move) {
   string_builder_add_formatted_string(gcg_sb, "#%s UTF-8\n",
                                       GCG_CHAR_ENCODING_STRING);
-  string_builder_add_formatted_string(gcg_sb, "#%s Created with MAGPIE\n",
-                                      GCG_DESCRIPTION_STRING);
+  const char *description = game_history_get_description(game_history);
+  if (!description || !has_iprefix("Created with", description)) {
+    string_builder_add_formatted_string(gcg_sb, "#%s %s\n",
+                                        GCG_DESCRIPTION_STRING,
+                                        GCG_DESCRIPTION_CREATION_TEXT);
+  }
+  if (description) {
+    StringSplitter *description_lines =
+        split_string_by_newline(description, true);
+    const int number_of_description_lines =
+        string_splitter_get_number_of_items(description_lines);
+    for (int i = 0; i < number_of_description_lines; i++) {
+      const char *description_line =
+          string_splitter_get_item(description_lines, i);
+      string_builder_add_formatted_string(
+          gcg_sb, "#%s %s\n", GCG_DESCRIPTION_STRING, description_line);
+    }
+    string_splitter_destroy(description_lines);
+  }
   const char *id_auth = game_history_get_id_auth(game_history);
   const char *uid = game_history_get_uid(game_history);
   if (id_auth && !uid) {
