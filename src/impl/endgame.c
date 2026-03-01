@@ -430,7 +430,7 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
     es->dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT;
   }
   es->skip_pruned_cross_sets = endgame_args->skip_pruned_cross_sets;
-  es->cross_set_precheck = !endgame_args->skip_pruned_cross_sets;
+  es->cross_set_precheck = endgame_args->cross_set_precheck;
   es->soft_time_limit = endgame_args->soft_time_limit;
   es->hard_time_limit = endgame_args->hard_time_limit;
   bool create_separate_kwgs =
@@ -940,11 +940,10 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
   // racks that fall through, seed movegen's tiles_played bitvector with the
   // known-playable tiles so movegen doesn't have to rediscover them.
   //
-  // Only valid when the board's cross-sets are up to date and were generated
-  // from the same KWG used by movegen (the pruned KWG). When cross-sets are
-  // stale (lazy update pending) or generated from a different KWG
-  // (skip_pruned_cross_sets mode), skip the pre-check and fall through to
-  // full movegen.
+  // Requires valid cross-sets. At the root they are freshly generated;
+  // at non-root nodes negamax_generate_and_sort_moves updates them
+  // incrementally before calling here. The guard board_get_cross_sets_valid
+  // provides a safe fallback in case the caller skipped the update.
   uint64_t opp_tiles_bv = 0;
   const Board *board = game_get_board(game);
   if (cross_set_precheck && board_get_cross_sets_valid(board)) {
@@ -1239,6 +1238,24 @@ static int negamax_generate_and_sort_moves(EndgameSolverWorker *worker,
   int opp_idx = 1 - worker->solver->solving_player;
   uint64_t opp_tiles_bv = 0;
   int nplays;
+  // Bring cross-sets up to date before the precheck so it can fire even at
+  // mid-tree nodes (not just root/after-pass). The same incremental update
+  // would otherwise happen lazily inside generate_stm_plays; doing it here
+  // first means generate_stm_plays will find cross-sets already valid and
+  // skip its own update.
+  if (worker->solver->cross_set_precheck) {
+    Board *board = game_get_board(worker->game_copy);
+    if (!board_get_cross_sets_valid(board)) {
+      int undo_index = worker->solver->requested_plies - depth - 1;
+      if (undo_index >= 0) {
+        const MoveUndo *parent_undo = &worker->move_undos[undo_index];
+        if (parent_undo->move_tiles_length > 0) {
+          update_cross_set_for_move_from_undo(parent_undo, worker->game_copy);
+        }
+      }
+      board_set_cross_sets_valid(board, true);
+    }
+  }
   if (worker->solver->use_heuristics) {
     *opp_stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
@@ -1838,6 +1855,11 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   double prev_depth_time = 0.0;
   double prev_prev_depth_time = 0.0;
   double ema_ebf_per_ply = -1.0; // -1 = not yet seeded
+  // Soft-limit stability tracking: record the pv_value the first time elapsed
+  // crosses soft_time_limit.  On each subsequent crossing, stop only if the
+  // value hasn't changed — result is stable and we can bank the remaining time.
+  // INT32_MIN is the sentinel meaning "not yet crossed the soft limit".
+  int32_t soft_limit_pv_value = INT32_MIN;
   bool use_aspiration = (worker->solver->threads > 1);
 
   if (worker->solver->first_win_optim) {
@@ -2016,9 +2038,16 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
       double this_depth_time = elapsed - depth_start_time;
       if (ply >= min_depth_for_time_mgmt) {
         if (elapsed >= worker->solver->soft_time_limit) {
-          // Past soft limit — stop immediately, bank remaining time
-          atomic_store(&worker->solver->search_complete, 1);
-          break;
+          if (pv_value == soft_limit_pv_value) {
+            // Result unchanged since last soft-limit crossing — stable.
+            // Bank the remaining time for future turns.
+            atomic_store(&worker->solver->search_complete, 1);
+            break;
+          }
+          // First crossing or result still changing: record value and fall
+          // through to the hard-limit check so the next depth can still run
+          // if the EBF estimate says it fits.
+          soft_limit_pv_value = pv_value;
         }
         // Estimate time for next depth using 2-ply EBF: sqrt(t[d]/t[d-2]).
         // More stable than 1-ply EBF across odd/even ply alternation.

@@ -141,9 +141,11 @@ static TestEntry on_demand_test_table[] = {
     {"roundrobin", test_benchmark_timed_round_robin},
     {"roundrobin_ns", test_benchmark_timed_round_robin_nonstuck},
     {"roundrobin_4cfg", test_benchmark_timed_round_robin_4cfg},
+    {"4cfgrandom", test_benchmark_timed_4cfg_random},
     {"fourway", test_benchmark_four_way_round_robin},
     {"threshtour", test_benchmark_threshold_tournament},
     {"gamepairs", test_benchmark_overnight_gamepairs},
+    {"bbprecheck", test_benchmark_bullet_blitz_precheck},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

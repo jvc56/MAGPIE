@@ -48,6 +48,9 @@ typedef struct EndgameArgs {
   dual_lexicon_mode_t dual_lexicon_mode;
   // If true, skip using pruned KWGs for cross-set computation (benchmark only)
   bool skip_pruned_cross_sets;
+  // If true, run cross-set precheck to detect stuck opponents before movegen.
+  // Safe with both pruned and full-KWG cross-sets; default false.
+  bool cross_set_precheck;
   // If true, play forced passes without consuming a depth ply (default: false)
   bool forced_pass_bypass;
   // IDS time management (0 = no limit, rely on external timer only):

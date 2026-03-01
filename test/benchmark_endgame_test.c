@@ -387,6 +387,7 @@ static void run_ab_benchmark(const char *cgp_file, const char *label,
                         .num_threads = 8,
                         .num_top_moves = 1,
                         .use_heuristics = true,
+                        .cross_set_precheck = true,
                         .per_ply_callback = NULL,
                         .per_ply_callback_data = NULL,
                         .forced_pass_bypass = false};

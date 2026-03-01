@@ -2403,6 +2403,8 @@ char *status_rack_and_gen_and_sim(Config *config) { return status_sim(config); }
 // Endgame
 
 void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
+  memset(endgame_args, 0, sizeof(*endgame_args));
+  endgame_args->cross_set_precheck = true;
   endgame_args->thread_control = config->thread_control;
   endgame_args->game = config->game;
   endgame_args->plies = config->endgame_plies;
