@@ -48,13 +48,29 @@ typedef struct EndgameArgs {
   dual_lexicon_mode_t dual_lexicon_mode;
   // If true, skip using pruned KWGs for cross-set computation (benchmark only)
   bool skip_pruned_cross_sets;
+  // If true, run cross-set precheck to detect stuck opponents before movegen.
+  // Safe with both pruned and full-KWG cross-sets; default false.
+  bool cross_set_precheck;
   // If true, play forced passes without consuming a depth ply (default: false)
   bool forced_pass_bypass;
+  // IDS time management (0 = no limit, rely on external timer only):
+  // After each completed depth, if elapsed > soft_time_limit, stop.
+  // If elapsed < soft_time_limit, estimate next depth time via EBF.
+  // If estimated completion > hard_time_limit, stop to bank remaining time.
+  double soft_time_limit;
+  double hard_time_limit;
 } EndgameArgs;
 
 EndgameSolver *endgame_solver_create(void);
 void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack);
 void endgame_solver_destroy(EndgameSolver *es);
+const TranspositionTable *
+endgame_solver_get_transposition_table(const EndgameSolver *es);
+void endgame_solver_get_progress(const EndgameSolver *es, int *current_depth,
+                                 int *root_moves_completed,
+                                 int *root_moves_total,
+                                 int *ply2_moves_completed,
+                                 int *ply2_moves_total);
 
 #endif

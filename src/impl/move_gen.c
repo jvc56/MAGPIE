@@ -2256,9 +2256,8 @@ void generate_moves(const MoveGenArgs *args) {
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
       gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
     if (gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
-      gen->tiles_played_bv = 0;
+      gen->tiles_played_bv = args->initial_tiles_bv;
       gen->stop_on_threshold = true;
-      gen->threshold_exceeded = false;
       // Build target bitvector from the rack
       gen->target_tiles_bv = 0;
       const uint16_t dist_size = rack_get_dist_size(&gen->player_rack);
@@ -2267,8 +2266,12 @@ void generate_moves(const MoveGenArgs *args) {
           gen->target_tiles_bv |= ((uint64_t)1 << ml);
         }
       }
+      gen->threshold_exceeded =
+          (gen->tiles_played_bv & gen->target_tiles_bv) == gen->target_tiles_bv;
     }
-    gen_record_scoring_plays_small(gen);
+    if (!gen->threshold_exceeded) {
+      gen_record_scoring_plays_small(gen);
+    }
     if (gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
       // Write the bitvector to the caller's output pointer
       if (args->tiles_played_bv) {

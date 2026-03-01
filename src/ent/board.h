@@ -862,4 +862,38 @@ static inline int board_toggle_dir(int dir) {
   return dir ^ (BOARD_VERTICAL_DIRECTION | BOARD_HORIZONTAL_DIRECTION);
 }
 
+// Scans the board once and returns a bitvector of all machine letters that
+// have a valid single-tile play somewhere on the board. Bit i is set if
+// machine letter i can be placed at some empty square adjacent to existing
+// tiles where both horizontal and vertical cross sets allow it.
+//
+// If rack_tiles_bv is nonzero, exits early once every bit in rack_tiles_bv
+// is covered (all rack tiles found playable). Blank (bit 0) should NOT be
+// included in rack_tiles_bv — handle blank playability at the call site by
+// checking if any non-blank bit is set in the returned bitvector.
+static inline uint64_t board_get_playable_tiles_bv(const Board *board,
+                                                   int cross_set_index,
+                                                   uint64_t rack_tiles_bv) {
+  uint64_t playable = 0;
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      if (board_is_nonempty_or_bricked(board, row, col)) {
+        continue;
+      }
+      if (board_are_all_adjacent_squares_empty(board, row, col)) {
+        continue;
+      }
+      uint64_t h = board_get_cross_set(
+          board, row, col, BOARD_HORIZONTAL_DIRECTION, cross_set_index);
+      uint64_t v = board_get_cross_set(
+          board, row, col, BOARD_VERTICAL_DIRECTION, cross_set_index);
+      playable |= h & v;
+      if (rack_tiles_bv && (playable & rack_tiles_bv) == rack_tiles_bv) {
+        return playable;
+      }
+    }
+  }
+  return playable;
+}
+
 #endif

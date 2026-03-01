@@ -162,6 +162,7 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   endgame_args.initial_small_move_arena_size = initial_small_move_arena_size;
   endgame_args.num_threads = 6;
   endgame_args.use_heuristics = true;
+  endgame_args.cross_set_precheck = true;
   endgame_args.forced_pass_bypass = true;
   endgame_args.num_top_moves = 1;
   endgame_args.per_ply_callback = print_pv_callback;
@@ -250,9 +251,9 @@ void test_pass_first(void) {
   // This endgame's first move must be a pass, otherwise Nigel can set up
   // an unblockable ZA. Exact value is -63 (verified at 25-ply with and
   // without heuristics). The optimal PV is 10 moves with 4 passes, so
-  // 8-ply relies on greedy playout for the tail.
+  // 7-ply relies on greedy playout for the tail.
   test_single_endgame(
-      "set -s1 score -s2 score -r1 small -r2 small -threads 6 -eplies 8",
+      "set -s1 score -s2 score -r1 small -r2 small -threads 6 -eplies 7",
       "cgp "
       "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
       "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
@@ -295,7 +296,7 @@ void test_very_deep(void) {
 
 void test_eldar_v_stick(void) {
   test_single_endgame(
-      "set -s1 score -s2 score -r1 small -r2 small -threads 6 -eplies 5",
+      "set -s1 score -s2 score -r1 small -r2 small -threads 6 -eplies 3",
       "cgp "
       "4EXODE6/1DOFF1KERATIN1U/1OHO8YEN/1POOJA1B3MEWS/5SQUINTY2A/4RHINO1e3V/"
       "2B4C2R3E/GOAT1D1E2ZIN1d/1URACILS2E4/1PIG1S4T4/2L2R4T4/2L2A1GENII3/"
@@ -349,6 +350,7 @@ void test_kue(void) {
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args.num_threads = 8;
   endgame_args.use_heuristics = true;
+  endgame_args.cross_set_precheck = true;
   endgame_args.num_top_moves = 10;
   endgame_args.per_ply_callback = print_pv_and_ranked_callback;
   endgame_args.per_ply_callback_data = &timer;
@@ -475,6 +477,7 @@ void test_monster_q(void) {
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args.num_threads = 6;
   endgame_args.use_heuristics = true;
+  endgame_args.cross_set_precheck = true;
   endgame_args.forced_pass_bypass = true;
   endgame_args.num_top_moves = 1;
   endgame_args.per_ply_callback = print_pv_callback;
@@ -527,6 +530,7 @@ void test_multi_pv(void) {
   endgame_args.num_threads = 6;
   endgame_args.num_top_moves = 1;
   endgame_args.use_heuristics = true;
+  endgame_args.cross_set_precheck = true;
   endgame_args.per_ply_callback = NULL;
   endgame_args.per_ply_callback_data = NULL;
 

@@ -4,20 +4,21 @@
 #include "../def/cpthread_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../util/io_util.h"
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 
 struct ThreadControl {
-  thread_control_status_t status;
-  cpthread_mutex_t status_mutex;
+  _Atomic int status; // atomic for lock-free reads on the hot search path
+  cpthread_mutex_t status_mutex; // protects cond var signaling only
   cpthread_cond_t status_cond;
   cpthread_mutex_t print_mutex;
 };
 
 ThreadControl *thread_control_create(void) {
   ThreadControl *thread_control = malloc_or_die(sizeof(ThreadControl));
-  thread_control->status = THREAD_CONTROL_STATUS_UNINITIALIZED;
+  atomic_init(&thread_control->status, THREAD_CONTROL_STATUS_UNINITIALIZED);
   cpthread_mutex_init(&thread_control->status_mutex);
   cpthread_mutex_init(&thread_control->print_mutex);
   cpthread_cond_init(&thread_control->status_cond);
@@ -33,11 +34,10 @@ void thread_control_destroy(ThreadControl *thread_control) {
 
 thread_control_status_t
 thread_control_get_status(ThreadControl *thread_control) {
-  thread_control_status_t status;
-  cpthread_mutex_lock(&thread_control->status_mutex);
-  status = thread_control->status;
-  cpthread_mutex_unlock(&thread_control->status_mutex);
-  return status;
+  // Lock-free read: avoids mutex contention on the hot per-node search path.
+  // acquire ordering ensures we see any prior store from the timer thread.
+  return (thread_control_status_t)atomic_load_explicit(&thread_control->status,
+                                                       memory_order_acquire);
 }
 
 // Returns true if the status was set successfully.
@@ -45,10 +45,16 @@ thread_control_get_status(ThreadControl *thread_control) {
 bool thread_control_set_status(ThreadControl *thread_control,
                                thread_control_status_t new_status) {
   bool success = false;
+  // Still hold the mutex here so the cond broadcast is correctly paired
+  // with cond_wait in thread_control_wait_for_status_change.
   cpthread_mutex_lock(&thread_control->status_mutex);
-  const thread_control_status_t old_status = thread_control->status;
+  const thread_control_status_t old_status =
+      (thread_control_status_t)atomic_load_explicit(&thread_control->status,
+                                                    memory_order_relaxed);
   if (new_status != old_status) {
-    thread_control->status = new_status;
+    // release ordering so search threads' acquire-load sees the update.
+    atomic_store_explicit(&thread_control->status, new_status,
+                          memory_order_release);
     success = true;
     if (new_status != THREAD_CONTROL_STATUS_STARTED) {
       cpthread_cond_broadcast(&thread_control->status_cond);
@@ -60,7 +66,9 @@ bool thread_control_set_status(ThreadControl *thread_control,
 
 void thread_control_wait_for_status_change(ThreadControl *thread_control) {
   cpthread_mutex_lock(&thread_control->status_mutex);
-  if (thread_control->status != THREAD_CONTROL_STATUS_FINISHED) {
+  while ((thread_control_status_t)atomic_load_explicit(&thread_control->status,
+                                                       memory_order_relaxed) !=
+         THREAD_CONTROL_STATUS_FINISHED) {
     cpthread_cond_wait(&thread_control->status_cond,
                        &thread_control->status_mutex);
   }

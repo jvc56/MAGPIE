@@ -2,15 +2,20 @@
 
 #include "../src/def/board_defs.h"
 #include "../src/def/cross_set_defs.h"
+#include "../src/def/equity_defs.h"
 #include "../src/def/letter_distribution_defs.h"
+#include "../src/def/move_defs.h"
+#include "../src/def/players_data_defs.h"
 #include "../src/ent/board.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
+#include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/validated_move.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
 #include "test_constants.h"
 #include "test_util.h"
@@ -536,4 +541,83 @@ void test_board_all(void) {
   config_destroy(config);
 }
 
-void test_board(void) { test_board_all(); }
+// Test board_get_playable_tiles_bv against generate_moves with
+// MOVE_RECORD_TILES_PLAYED for single-tile racks.
+void test_board_get_playable_tiles_bv(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 score -s2 score -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const Board *board = game_get_board(game);
+  MoveList *move_list = move_list_create(1);
+
+  // Use a position with tiles on the board so cross sets are meaningful.
+  load_cgp_or_die(game, VS_OXY);
+
+  bool kwgs_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
+  int player_idx = 0;
+  int ci = board_get_cross_set_index(kwgs_shared, player_idx);
+  int ld_size = ld_get_size(ld);
+
+  // Get the full playable bitvector in one board scan (non-blank tiles only).
+  uint64_t all_non_blank_bv = (((uint64_t)1 << ld_size) - 1) & ~(uint64_t)1;
+  uint64_t playable_bv =
+      board_get_playable_tiles_bv(board, ci, all_non_blank_bv);
+
+  // For every possible machine letter, compare the bitvector result
+  // against the full move generator with a single-tile rack.
+  const Player *player = game_get_player(game, player_idx);
+  Rack *rack = player_get_rack(player);
+  int saved_on_turn = game_get_player_on_turn_index(game);
+  if (saved_on_turn != player_idx) {
+    game_set_player_on_turn_index(game, player_idx);
+  }
+
+  for (int ml = 0; ml < ld_size; ml++) {
+    // Set up a single-tile rack.
+    rack_reset(rack);
+    rack_add_letter(rack, (MachineLetter)ml);
+
+    // Cross-set bitvector result.
+    // Blank is playable if any non-blank letter is valid anywhere.
+    bool cs_playable;
+    if (ml == BLANK_MACHINE_LETTER) {
+      cs_playable = (playable_bv >> 1) != 0;
+    } else {
+      cs_playable = (playable_bv & ((uint64_t)1 << ml)) != 0;
+    }
+
+    // Move generator result.
+    uint64_t tiles_bv = 0;
+    const MoveGenArgs args = {
+        .game = game,
+        .move_list = move_list,
+        .move_record_type = MOVE_RECORD_TILES_PLAYED,
+        .move_sort_type = MOVE_SORT_SCORE,
+        .override_kwg = NULL,
+        .thread_index = 0,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+        .tiles_played_bv = &tiles_bv,
+    };
+    generate_moves(&args);
+
+    // cppcheck-suppress knownConditionTrueFalse
+    bool mg_playable = (tiles_bv & ((uint64_t)1 << ml)) != 0;
+    assert(cs_playable == mg_playable);
+  }
+
+  if (saved_on_turn != player_idx) {
+    game_set_player_on_turn_index(game, saved_on_turn);
+  }
+
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void test_board(void) {
+  test_board_all();
+  test_board_get_playable_tiles_bv();
+}
