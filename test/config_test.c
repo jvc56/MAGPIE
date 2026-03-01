@@ -2299,12 +2299,10 @@ void test_config_note_move_interpolation(void) {
 }
 
 void test_config(void) {
-  // FIXME: uncomment
-  test_config_anno_challenge();
-  return;
   test_game_display();
   test_trie();
   test_config_anno();
+  test_config_anno_challenge();
   test_config_anno_endgame_rack();
   test_config_challenge_rack();
   test_config_export();
