@@ -22,6 +22,7 @@ typedef enum {
 typedef struct FidelityLevel {
   uint64_t sample_limit;
   uint64_t sample_minimum;
+  int time_limit_seconds;  // per-level time budget (0 = no limit)
   ply_strategy_t ply_strategy;
   // Fields below only used when ply_strategy == PLY_STRATEGY_NESTED_SIM
   int nested_candidates;   // K: number of candidate moves to evaluate per ply

@@ -81,6 +81,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->fidelity_levels[0] = (FidelityLevel){
       .sample_limit = max_iterations,
       .sample_minimum = min_play_iterations,
+      .time_limit_seconds = time_limit_seconds,
       .ply_strategy = PLY_STRATEGY_STATIC,
       .nested_candidates = 0,
       .nested_rollouts = 0,
