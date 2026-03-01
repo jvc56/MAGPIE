@@ -581,8 +581,8 @@ static inline const KWG *solver_get_pruned_kwg(const EndgameSolver *solver,
 // Generate moves for a single-tile rack by scanning cross-sets, bypassing
 // the GADDAG entirely.  In a bag-empty endgame, every tile placement uses the
 // last rack tile and ends the game, so only the best-scoring position matters.
-// Returns 1 with the best placement written to the arena, or 1 with a pass
-// move if no placement is legal (player is stuck).
+// Always returns 1; writes the best-scoring placement to the arena, or a pass
+// move if no legal placement exists.
 static int generate_single_tile_plays(EndgameSolverWorker *worker) {
   const Game *game = worker->game_copy;
   const Board *board = game_get_board(game);
@@ -756,17 +756,17 @@ static int generate_single_tile_plays(EndgameSolverWorker *worker) {
 
   // Build tiny_move following the same convention as small_move_set_all:
   // for vertical, row_start and col_start are swapped before storing.
-  uint64_t tm = (uint64_t)best_letter << 20; // tile in bits 25-20
+  uint64_t tm = (uint64_t)best_letter << 20;
   if (is_blank) {
     tm |= 1ULL << 12; // blank flag for tile index 0
   }
   if (best_dir_vertical) {
-    tm |= 1;                              // direction bit
-    tm |= (uint64_t)best_start << 1;     // topmost row → bits 5-1
-    tm |= (uint64_t)best_col << 6;       // column → bits 10-6
+    tm |= 1; // direction bit
+    tm |= (uint64_t)best_start << 1;
+    tm |= (uint64_t)best_col << 6;
   } else {
-    tm |= (uint64_t)best_start << 1;     // leftmost col → bits 5-1
-    tm |= (uint64_t)best_row << 6;       // row → bits 10-6
+    tm |= (uint64_t)best_start << 1;
+    tm |= (uint64_t)best_row << 6;
   }
   sm->tiny_move = tm;
   return 1;
@@ -794,45 +794,7 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
   // Single-tile fast path: scan cross-sets directly, no GADDAG traversal.
   // Every placement ends the game; only the best score is needed.
   if (stm_rack->number_of_letters == 1) {
-    int fast_count = generate_single_tile_plays(worker);
-#ifdef ENDGAME_SINGLE_TILE_VERIFY
-    {
-      // Verify fast path score against full GADDAG movegen.
-      const SmallMove *fast_sm =
-          (const SmallMove *)(worker->small_move_arena->memory +
-                              worker->small_move_arena->size - sizeof(SmallMove));
-      uint16_t fast_score = fast_sm->metadata.score;
-
-      const MoveGenArgs verify_args = {
-          .game = worker->game_copy,
-          .move_list = worker->move_list,
-          .move_record_type = MOVE_RECORD_ALL_SMALL,
-          .move_sort_type = MOVE_SORT_SCORE,
-          .override_kwg = NULL, // full KWG, same as cross-set source
-          .thread_index = worker->thread_index,
-          .eq_margin_movegen = 0,
-          .target_equity = EQUITY_MAX_VALUE,
-          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-      };
-      generate_moves(&verify_args);
-
-      uint16_t gaddag_best_score = 0;
-      for (int vi = 0; vi < worker->move_list->count; vi++) {
-        uint16_t s = small_move_get_score(worker->move_list->small_moves[vi]);
-        if (s > gaddag_best_score) {
-          gaddag_best_score = s;
-        }
-      }
-
-      if (fast_score != gaddag_best_score) {
-        printf("[SINGLE_TILE_VERIFY FAIL] fast_score=%u gaddag_best=%u\n",
-               (unsigned)fast_score, (unsigned)gaddag_best_score);
-        fflush(stdout);
-        assert(fast_score == gaddag_best_score);
-      }
-    }
-#endif
-    return fast_count;
+    return generate_single_tile_plays(worker);
   }
 
   const MoveGenArgs args = {
@@ -1769,49 +1731,6 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       int32_t opp_bonus = equity_to_int(
           calculate_end_rack_points(player_get_rack(other_player), ld));
       int32_t leaf_value = on_turn_spread + move_score + opp_bonus;
-
-#ifdef ENDGAME_SINGLE_TILE_VERIFY
-      {
-        SmallMove verify_sm = *only_sm;
-        small_move_to_move(worker->move_list->spare_move, &verify_sm,
-                           game_get_board(worker->game_copy));
-        int undo_index = worker->solver->requested_plies - depth;
-        int last_cslt =
-            game_get_consecutive_scoreless_turns(worker->game_copy);
-        play_move_endgame_outplay(worker->move_list->spare_move,
-                                  worker->game_copy,
-                                  &worker->move_undos[undo_index]);
-        uint64_t verify_key = 0;
-        if (worker->solver->transposition_table_optim) {
-          verify_key = zobrist_add_move(
-              worker->solver->transposition_table->zobrist, node_key,
-              worker->move_list->spare_move, stm_rack_a,
-              on_turn_idx == worker->solver->solving_player,
-              game_get_consecutive_scoreless_turns(worker->game_copy),
-              last_cslt);
-        }
-        // Reuse child_pv (num_moves==0); child returns immediately since game
-        // has ended, so child_pv is unchanged after this call.
-        int32_t verify_value =
-            abdada_negamax(worker, verify_key, depth - 1, -beta, -alpha,
-                           &child_pv, pv_node, false, opp_stuck_frac);
-        unplay_move_incremental(worker->game_copy,
-                                &worker->move_undos[undo_index]);
-        if (verify_value != ABDADA_INTERRUPTED &&
-            verify_value != ON_EVALUATION) {
-          int32_t full_value = -verify_value;
-          if (full_value != leaf_value) {
-            printf("[OUTPLAY_VERIFY FAIL] analytical=%d full=%d\n",
-                   (int)leaf_value, (int)full_value);
-            fflush(stdout);
-            assert(full_value == leaf_value);
-          }
-        }
-        // Refresh pointer in case arena was reallocated during verify.
-        only_sm =
-            (const SmallMove *)(worker->small_move_arena->memory + arena_offset);
-      }
-#endif
 
       pvline_update(pv, &child_pv, only_sm,
                     leaf_value - worker->solver->initial_spread);
