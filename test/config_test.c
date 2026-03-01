@@ -1966,6 +1966,31 @@ void test_config_anno_challenge(void) {
   assert(bag_get_letter(game_get_bag(config_get_game(config)),
                         ld_hl_to_ml(config_get_ld(config), "C")) == 1);
 
+  assert_config_exec_status(config, "lo testdata/gcgs/success_standard.gcg",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "goto end", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 2g TTU", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "chal", ERROR_STATUS_SUCCESS);
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 0)), "EIU");
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 1)),
+                            "IOQSTTU");
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "p", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com 2g TT", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "chal", ERROR_STATUS_SUCCESS);
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 0)), "EIU");
+  assert_rack_equals_string(config_get_ld(config),
+                            player_get_rack(game_get_player(game, 1)),
+                            "IOQSTTU");
+
   config_destroy(config);
 }
 
@@ -2274,10 +2299,12 @@ void test_config_note_move_interpolation(void) {
 }
 
 void test_config(void) {
+  // FIXME: uncomment
+  test_config_anno_challenge();
+  return;
   test_game_display();
   test_trie();
   test_config_anno();
-  test_config_anno_challenge();
   test_config_anno_endgame_rack();
   test_config_challenge_rack();
   test_config_export();

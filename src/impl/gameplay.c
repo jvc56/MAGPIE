@@ -1368,7 +1368,20 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
       Rack *known_rack_from_phonies =
           &play_events_data
                ->known_letters_from_phonies_racks[game_event_player_index];
-      rack_union(known_rack_from_phonies, previously_played_letters);
+      // If the bag is empty at the time of the phony, then the rack
+      // of the player who phonied is fully known.
+      if (rack_get_total_letters(previously_played_letters) +
+              rack_get_total_letters(
+                  player_get_rack(game_get_player(game, 0))) +
+              rack_get_total_letters(
+                  player_get_rack(game_get_player(game, 1))) +
+              bag_get_letters(game_get_bag(game)) <=
+          RACK_SIZE * 2) {
+        rack_copy(known_rack_from_phonies,
+                  game_event_get_const_rack(previous_game_event));
+      } else {
+        rack_union(known_rack_from_phonies, previously_played_letters);
+      }
     }
     // This event is guaranteed to immediately succeed
     // a tile placement move.
