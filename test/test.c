@@ -22,6 +22,7 @@
 #include "equity_adjustment_test.h"
 #include "equity_test.h"
 #include "game_test.h"
+#include "gamepair_bai_benchmark.h"
 #include "gameplay_test.h"
 #include "gcg_test.h"
 #include "heat_map_test.h"
@@ -138,6 +139,7 @@ static TestEntry on_demand_test_table[] = {
     {"kue", test_kue},
     {"monsterq", test_monster_q},
     {"nestsimbench", test_nested_sim_benchmark},
+    {"gamepairbai", test_gamepair_bai_benchmark},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
