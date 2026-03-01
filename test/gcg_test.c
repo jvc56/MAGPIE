@@ -1264,8 +1264,8 @@ void test_description_write(GameHistory *game_history) {
   assert(test_parse_gcg("success_standard", config, game_history) ==
          ERROR_STATUS_SUCCESS);
 
-  // Case 1: Description starts with "Created with" but not "Created with MAGPIE"
-  // Expect no prefix to be prepended; the existing line is left as-is.
+  // Case 1: Description starts with "Created with" but not "Created with
+  // MAGPIE" Expect no prefix to be prepended; the existing line is left as-is.
   assert_strings_equal(game_history_get_description(game_history),
                        "Created with Macondo");
   gcg_sb = string_builder_create();
