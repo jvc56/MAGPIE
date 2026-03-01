@@ -612,6 +612,10 @@ typedef struct {
   double cumul_overtime[RR_MAX_CFGS]; // total overtime-penalty seconds
   int games_played;
   int stuck_count; // positions where either player had stuck tiles
+  // Turn-1 (first move) stats per config.
+  int turn1_depth_hist[RR_MAX_CFGS][26]; // histogram: [cfg][depth 1..25]
+  int turn1_depth_count[RR_MAX_CFGS];
+  double cumul_turn1_time[RR_MAX_CFGS];
 } RRState;
 
 // Record one pairing's net result for a game. net>0 means pair_a won.
@@ -672,6 +676,14 @@ static void rr_print_crosstable(const RRState *rr) {
     }
   }
 
+  bool has_turn1 = false;
+  for (int ci = 0; ci < rr->num_cfgs; ci++) {
+    if (rr->turn1_depth_count[ci] > 0) {
+      has_turn1 = true;
+      break;
+    }
+  }
+
   int games_played = rr->games_played;
   printf("Cross-table (%d game(s), %d stuck, %d nonstuck):\n", games_played,
          rr->stuck_count, games_played - rr->stuck_count);
@@ -679,19 +691,40 @@ static void rr_print_crosstable(const RRState *rr) {
   for (int col_cfg = 0; col_cfg < rr->num_cfgs; col_cfg++) {
     printf("  %8s", rr->cfg_names[col_cfg]);
   }
-  printf("  | %3s %3s %3s %4s | %7s %7s  %8s %7s\n", "W", "L", "T", "W-L",
+  printf("  | %3s %3s %3s %4s | %7s %7s  %8s %7s", "W", "L", "T", "W-L",
          "Spread", "Avg", "Time", "OT");
+  if (has_turn1) printf(" | %5s %7s", "MedD", "T1Time");
+  printf("\n");
   printf("  %-9s ", "");
   for (int col_cfg = 0; col_cfg < rr->num_cfgs; col_cfg++) {
     printf("  --------");
   }
-  printf("  | --- --- --- ---- | ------- -------  -------- -------\n");
+  printf("  | --- --- --- ---- | ------- -------  -------- -------");
+  if (has_turn1) printf(" | ----- -------");
+  printf("\n");
 
   for (int ri = 0; ri < rr->num_cfgs; ri++) {
     int row_cfg = order[ri];
     int wl = wins[row_cfg] - losses[row_cfg];
     double avg =
         games_played > 0 ? (double)spread[row_cfg] / games_played : 0.0;
+    int med_depth = 0;
+    double avg_t1 = 0.0;
+    if (has_turn1) {
+      int cnt = rr->turn1_depth_count[row_cfg];
+      if (cnt > 0) {
+        int mid = (cnt + 1) / 2;
+        int cumul_d = 0;
+        for (int d = 1; d <= 25; d++) {
+          cumul_d += rr->turn1_depth_hist[row_cfg][d];
+          if (cumul_d >= mid) {
+            med_depth = d;
+            break;
+          }
+        }
+        avg_t1 = rr->cumul_turn1_time[row_cfg] / cnt;
+      }
+    }
     // CTROW: prefix makes this row greppable in incomplete logs.
     printf("CTROW: %-9s", rr->cfg_names[row_cfg]);
     for (int col_cfg = 0; col_cfg < rr->num_cfgs; col_cfg++) {
@@ -701,9 +734,11 @@ static void rr_print_crosstable(const RRState *rr) {
         printf("  %+8d", matrix[row_cfg][col_cfg]);
       }
     }
-    printf("  | %3d %3d %3d %+4d | %+7d %+7.2f  %7.1fs %6.2fs\n", wins[row_cfg],
+    printf("  | %3d %3d %3d %+4d | %+7d %+7.2f  %7.1fs %6.2fs", wins[row_cfg],
            losses[row_cfg], ties[row_cfg], wl, spread[row_cfg], avg,
            rr->cumul_time[row_cfg], rr->cumul_overtime[row_cfg]);
+    if (has_turn1) printf(" | %5d %6.2fs", med_depth, avg_t1);
+    printf("\n");
   }
 }
 
@@ -2314,6 +2349,24 @@ static void run_bullet_blitz_precheck_tournament(int num_games,
 
           int depth = endgame_results_get_depth(res[player_on_turn],
                                                 ENDGAME_RESULT_BEST);
+
+          // Record turn-1 (first move of this player in this sub-game).
+          if (player_turn_count[player_on_turn] == 0) {
+            int d = (depth >= 1 && depth <= 25) ? depth : 25;
+            rr_all.turn1_depth_hist[cfg][d]++;
+            rr_all.turn1_depth_count[cfg]++;
+            rr_all.cumul_turn1_time[cfg] += elapsed;
+            if (is_stuck) {
+              rr_stuck.turn1_depth_hist[cfg][d]++;
+              rr_stuck.turn1_depth_count[cfg]++;
+              rr_stuck.cumul_turn1_time[cfg] += elapsed;
+            } else {
+              rr_ns.turn1_depth_hist[cfg][d]++;
+              rr_ns.turn1_depth_count[cfg]++;
+              rr_ns.cumul_turn1_time[cfg] += elapsed;
+            }
+          }
+
           const PVLine *pv = endgame_results_get_pvline(res[player_on_turn],
                                                         ENDGAME_RESULT_BEST);
           if (pv->num_moves == 0) {
@@ -2399,6 +2452,12 @@ static void run_bullet_blitz_precheck_tournament(int num_games,
     }
     printf("\n");
     rr_print_crosstable(&rr_all);
+    if (rr_stuck.games_played > 0) {
+      rr_print_crosstable(&rr_stuck);
+    }
+    if (rr_ns.games_played > 0) {
+      rr_print_crosstable(&rr_ns);
+    }
     free(cgp);
     (void)fflush(stdout);
   }

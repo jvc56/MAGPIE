@@ -1130,6 +1130,9 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
   // provides a safe fallback in case the caller skipped the update.
   uint64_t opp_tiles_bv = 0;
   const Board *board = game_get_board(game);
+#ifdef PRECHECK_VERIFY
+  float precheck_result = -1.0F; // sentinel: precheck disabled or board invalid
+#endif
   if (cross_set_precheck && board_get_cross_sets_valid(board)) {
     bool kwgs_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
     int ci = board_get_cross_set_index(kwgs_shared, opp_idx);
@@ -1150,16 +1153,28 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
     }
     bool all_playable = (opp_tiles_bv == rack_tiles_bv);
     if (all_playable || rack_get_total_letters(opp_rack) == 1) {
+      float frac = all_playable
+                       ? 0.0F
+                       : stuck_tile_fraction_from_bv(ld, opp_rack, opp_tiles_bv);
+#ifdef PRECHECK_VERIFY
+      // Precheck claims it can skip movegen here. Verify by falling through:
+      // save the result, reset opp_tiles_bv so movegen starts from scratch.
+      precheck_result = frac;
+      opp_tiles_bv = 0;
+#else
       if (saved_on_turn != opp_idx) {
         game_set_player_on_turn_index(game, saved_on_turn);
       }
       if (tiles_played_bv_out) {
         *tiles_played_bv_out = opp_tiles_bv;
       }
-      return all_playable
-                 ? 0.0F
-                 : stuck_tile_fraction_from_bv(ld, opp_rack, opp_tiles_bv);
+      return frac;
+#endif
     }
+    // Multi-tile partial result: precheck is not authoritative (a tile absent
+    // from opp_tiles_bv may still be playable via a multi-tile word). Fall
+    // through to movegen with opp_tiles_bv pre-seeded.
+
   }
   // Check for interrupt before the expensive movegen call.  If already fired,
   // restore game state and return early — the caller will re-detect the
@@ -1187,13 +1202,25 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
       .initial_tiles_bv = opp_tiles_bv,
   };
   generate_moves(&tp_args);
+  float movegen_result =
+      stuck_tile_fraction_from_bv(game_get_ld(game), opp_rack, opp_tiles_bv);
+#ifdef PRECHECK_VERIFY
+  if (precheck_result >= 0.0F && fabsf(precheck_result - movegen_result) > 0.001F) {
+    fprintf(stderr,
+            "PRECHECK_VERIFY MISMATCH: precheck=%.6f movegen=%.6f "
+            "opp_idx=%d rack_letters=%d\n",
+            (double)precheck_result, (double)movegen_result, opp_idx,
+            rack_get_total_letters(opp_rack));
+    // Don't abort — keep running to count all mismatches.
+  }
+#endif
   if (saved_on_turn != opp_idx) {
     game_set_player_on_turn_index(game, saved_on_turn);
   }
   if (tiles_played_bv_out) {
     *tiles_played_bv_out = opp_tiles_bv;
   }
-  return stuck_tile_fraction_from_bv(game_get_ld(game), opp_rack, opp_tiles_bv);
+  return movegen_result;
 }
 
 // Greedy playout at depth==0 leaf nodes: generate moves iteratively,
@@ -1214,6 +1241,22 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
   // evaluation, which is required for TT consistency across threads and
   // transpositions.
   if (worker->solver->use_heuristics) {
+    // The move that brought us to this leaf may have invalidated cross-sets.
+    // Update them now so the precheck guard fires (same eager update that
+    // negamax_generate_and_sort_moves does at internal nodes).
+    if (worker->solver->cross_set_precheck) {
+      Board *leaf_board = game_get_board(worker->game_copy);
+      if (!board_get_cross_sets_valid(leaf_board)) {
+        int undo_idx = plies - 1; // last negamax move
+        if (undo_idx >= 0) {
+          const MoveUndo *last_undo = &worker->move_undos[undo_idx];
+          if (last_undo->move_tiles_length > 0) {
+            update_cross_set_for_move_from_undo(last_undo, worker->game_copy);
+          }
+        }
+        board_set_cross_sets_valid(leaf_board, true);
+      }
+    }
     int opp_idx = 1 - solving_player;
     opp_stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
