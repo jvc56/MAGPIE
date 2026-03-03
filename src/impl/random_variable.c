@@ -22,7 +22,9 @@
 #include "../ent/xoshiro.h"
 #include "../str/sim_string.h"
 #include "../util/io_util.h"
+#include "../ent/endgame_results.h"
 #include "bai_logger.h"
+#include "endgame.h"
 #include "gameplay.h"
 #include <math.h>
 #include <stdatomic.h>
@@ -319,6 +321,8 @@ typedef struct SimmerWorker {
   Game *nested_game;               // scratch game for mini-rollouts
   MoveList *nested_move_list;      // capacity-1 list for inner movegen
   MoveList *candidate_move_list;   // capacity-K list for outer candidate gen
+  // Lightweight endgame solver for empty-bag ply decisions (2-ply exact)
+  EndgamePlyCtx *endgame_ctx;
 } SimmerWorker;
 
 typedef struct Simmer {
@@ -346,7 +350,8 @@ typedef struct Simmer {
 } Simmer;
 
 SimmerWorker *simmer_create_worker(const Game *game, ply_strategy_t ply_strategy,
-                                   int nested_candidates) {
+                                   int nested_candidates,
+                                   int thread_index, int num_sim_threads) {
   SimmerWorker *simmer_worker = malloc_or_die(sizeof(SimmerWorker));
   simmer_worker->game = game_duplicate(game);
   game_set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
@@ -361,6 +366,10 @@ SimmerWorker *simmer_create_worker(const Game *game, ply_strategy_t ply_strategy
     simmer_worker->nested_move_list = NULL;
     simmer_worker->candidate_move_list = NULL;
   }
+  // Lightweight endgame solver for empty-bag ply decisions.
+  // Thread index offset avoids collisions with sim threads' cached MoveGen.
+  simmer_worker->endgame_ctx =
+      endgame_ply_ctx_create(game, num_sim_threads + thread_index);
   return simmer_worker;
 }
 
@@ -369,6 +378,17 @@ void simmer_reset_worker(SimmerWorker *simmer_worker, const Game *game) {
   if (simmer_worker->nested_game) {
     game_copy(simmer_worker->nested_game, game);
   }
+}
+
+// Lazily allocate nested sim resources if not already present.
+static void simmer_worker_ensure_nested(SimmerWorker *worker,
+                                        int nested_candidates) {
+  if (worker->nested_game) {
+    return;
+  }
+  worker->nested_game = game_duplicate(worker->game);
+  worker->nested_move_list = move_list_create(1);
+  worker->candidate_move_list = move_list_create(nested_candidates);
 }
 
 void simmer_worker_destroy(SimmerWorker *simmer_worker) {
@@ -381,17 +401,24 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   game_destroy(simmer_worker->nested_game);
   move_list_destroy(simmer_worker->nested_move_list);
   move_list_destroy(simmer_worker->candidate_move_list);
+  endgame_ply_ctx_destroy(simmer_worker->endgame_ctx);
   free(simmer_worker);
 }
 
+// Forward declaration for endgame ply solver (used in nested sim rollouts)
+static const Move *endgame_ply_solve(Game *game, SimmerWorker *worker);
+
 // Choose the best move by running mini-rollouts for each candidate.
 // Generates K candidates, runs N mini-rollouts per candidate using static
-// eval, and returns the candidate with the best average spread.
-// The returned Move* points into candidate_move_list and remains valid
-// until the next generate_moves call on that list.
+// eval, and returns the candidate with the best win rate (ties broken by
+// average spread). If best_wpct_out is non-NULL, writes the best candidate's
+// average win% there. The returned Move* points into candidate_move_list and
+// remains valid until the next generate_moves call on that list.
 static Move *get_top_nested_sim_move(Game *game, int thread_index,
                                      SimmerWorker *worker,
-                                     int num_rollouts, int num_plies) {
+                                     const WinPct *win_pcts,
+                                     int num_rollouts, int num_plies,
+                                     double *best_wpct_out) {
   MoveList *candidate_list = worker->candidate_move_list;
   Game *nested_game = worker->nested_game;
   MoveList *nested_move_list = worker->nested_move_list;
@@ -413,18 +440,21 @@ static Move *get_top_nested_sim_move(Game *game, int thread_index,
   move_list_sort_moves(candidate_list);
 
   const int actual_candidates = move_list_get_count(candidate_list);
-  if (actual_candidates <= 1) {
-    // Only one move (or none) — no point running rollouts
+  if (actual_candidates <= 1 && !best_wpct_out) {
+    // Only one move and no win% needed — skip rollouts
     return move_list_get_move(candidate_list, 0);
   }
 
   const int player_index = game_get_player_on_turn_index(game);
+  const bool plies_are_odd = (num_plies % 2) != 0;
   int best_candidate = 0;
+  double best_avg_wpct = -1.0;
   double best_avg_spread = -1e18;
 
   for (int k = 0; k < actual_candidates; k++) {
     const Move *candidate = move_list_get_move(candidate_list, k);
     double total_spread = 0.0;
+    double total_wpct = 0.0;
 
     for (int n = 0; n < num_rollouts; n++) {
       // Copy game state and re-seed for different tile draw order
@@ -435,31 +465,78 @@ static Move *get_top_nested_sim_move(Game *game, int thread_index,
       game_set_backup_mode(nested_game, BACKUP_MODE_OFF);
       play_move(candidate, nested_game, NULL);
 
-      // Rollout using static eval
+      // Rollout using static eval (or endgame solver when bag empty)
       for (int ply = 0; ply < num_plies; ply++) {
         if (game_over(nested_game)) {
           break;
         }
-        const Move *best = get_top_equity_move(nested_game, thread_index,
-                                               nested_move_list);
+        const Move *best;
+        if (bag_is_empty(game_get_bag(nested_game))) {
+          best = endgame_ply_solve(nested_game, worker);
+        } else {
+          best = get_top_equity_move(nested_game, thread_index,
+                                     nested_move_list);
+        }
         play_move(best, nested_game, NULL);
       }
 
       // Compute spread from perspective of the player making this decision
-      const Equity spread =
-          player_get_score(game_get_player(nested_game, player_index)) -
-          player_get_score(game_get_player(nested_game, 1 - player_index));
-      total_spread += (double)equity_to_int(spread);
+      const int spread =
+          equity_to_int(
+              player_get_score(game_get_player(nested_game, player_index))) -
+          equity_to_int(
+              player_get_score(game_get_player(nested_game, 1 - player_index)));
+      total_spread += (double)spread;
+
+      // Convert spread to win probability using win_pct table
+      double wpct;
+      if (game_over(nested_game)) {
+        wpct = (spread > 0) ? 1.0 : (spread == 0) ? 0.5 : 0.0;
+      } else {
+        int lookup_spread = spread;
+        if (!plies_are_odd) {
+          lookup_spread = -lookup_spread;
+        }
+        unsigned int unseen =
+            bag_get_letters(game_get_bag(nested_game)) +
+            rack_get_total_letters(player_get_rack(
+                game_get_player(nested_game, 1 - player_index)));
+        if (unseen == 0) {
+          wpct = (spread > 0) ? 1.0 : (spread == 0) ? 0.5 : 0.0;
+        } else {
+          wpct = (double)win_pct_get(win_pcts, lookup_spread, unseen);
+          if (!plies_are_odd) {
+            wpct = 1.0 - wpct;
+          }
+        }
+      }
+      total_wpct += wpct;
     }
 
+    const double avg_wpct = total_wpct / num_rollouts;
     const double avg_spread = total_spread / num_rollouts;
-    if (avg_spread > best_avg_spread) {
+    if (avg_wpct > best_avg_wpct ||
+        (avg_wpct == best_avg_wpct && avg_spread > best_avg_spread)) {
+      best_avg_wpct = avg_wpct;
       best_avg_spread = avg_spread;
       best_candidate = k;
     }
   }
 
+  if (best_wpct_out) {
+    *best_wpct_out = best_avg_wpct;
+  }
   return move_list_get_move(candidate_list, best_candidate);
+}
+
+// Run a lightweight 2-ply endgame solve. Returns the best move (pointer into
+// worker's move_list, valid until next call).
+static const Move *endgame_ply_solve(Game *game, SimmerWorker *worker) {
+  SmallMove sm;
+  endgame_ply_solve_quick(worker->endgame_ctx, game, 2, &sm);
+  Move *spare = move_list_get_spare_move(worker->move_list);
+  small_move_to_move(spare, &sm, game_get_board(game));
+  return spare;
 }
 
 double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
@@ -518,6 +595,9 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   game_set_backup_mode(game, BACKUP_MODE_OFF);
   // further plies will NOT be backed up.
   Rack spare_rack;
+  double inner_wpct = -1.0;
+  bool inner_wpct_valid = false;
+  int last_ply_player = -1;
   for (int ply = 0; ply < plies; ply++) {
     const int player_on_turn_index = game_get_player_on_turn_index(game);
     const Player *player_on_turn = game_get_player(game, player_on_turn_index);
@@ -527,11 +607,18 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
     }
 
     const Move *best_play;
-    if (simmer->ply_strategy == PLY_STRATEGY_NESTED_SIM &&
-        simmer_worker->nested_game != NULL) {
+    if (bag_is_empty(game_get_bag(game))) {
+      // Empty bag: use 2-ply endgame solver for both strategies
+      best_play = endgame_ply_solve(game, simmer_worker);
+    } else if (simmer->ply_strategy == PLY_STRATEGY_NESTED_SIM) {
+      simmer_worker_ensure_nested(simmer_worker, simmer->nested_candidates);
+      double this_wpct;
       best_play = get_top_nested_sim_move(
-          game, thread_index, simmer_worker,
-          simmer->nested_rollouts, simmer->nested_plies);
+          game, thread_index, simmer_worker, simmer->win_pcts,
+          simmer->nested_rollouts, simmer->nested_plies, &this_wpct);
+      inner_wpct = this_wpct;
+      inner_wpct_valid = true;
+      last_ply_player = player_on_turn_index;
     } else {
       best_play = get_top_equity_move(game, thread_index, move_list);
     }
@@ -556,14 +643,28 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       player_get_score(game_get_player(game, 1 - simmer->initial_player));
   simmed_play_add_equity_stat(simmed_play, simmer->initial_spread, spread,
                               leftover);
-  const double wpct = simmed_play_add_win_pct_stat(
-      simmer->win_pcts, simmed_play, spread, leftover,
-      game_get_game_end_reason(game),
-      // number of tiles unseen to us: bag tiles + tiles on opp rack.
-      bag_get_letters(game_get_bag(game)) +
-          rack_get_total_letters(player_get_rack(
-              game_get_player(game, 1 - simmer->initial_player))),
-      plies % 2);
+
+  double wpct;
+  if (inner_wpct_valid) {
+    // Use inner nested sim's win% as the leaf value.
+    // Flip if the last ply was evaluated from the opponent's perspective.
+    if (last_ply_player == simmer->initial_player) {
+      wpct = inner_wpct;
+    } else {
+      wpct = 1.0 - inner_wpct;
+    }
+    // Still record in the win_pct stat for display purposes
+    simmed_play_push_win_pct(simmed_play, wpct);
+  } else {
+    wpct = simmed_play_add_win_pct_stat(
+        simmer->win_pcts, simmed_play, spread, leftover,
+        game_get_game_end_reason(game),
+        // number of tiles unseen to us: bag tiles + tiles on opp rack.
+        bag_get_letters(game_get_bag(game)) +
+            rack_get_total_letters(player_get_rack(
+                game_get_player(game, 1 - simmer->initial_player))),
+        plies % 2);
+  }
   // reset to first state. we only need to restore one backup.
   game_unplay_last_move(game);
   return_rack_to_bag(game, player_off_turn_index);
@@ -661,7 +762,8 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   for (int thread_index = 0; thread_index < simmer->num_threads;
        thread_index++) {
     simmer->workers[thread_index] = simmer_create_worker(
-        sim_args->game, max_ply_strategy, max_nested_candidates);
+        sim_args->game, max_ply_strategy, max_nested_candidates,
+        thread_index, simmer->num_threads);
   }
 
   simmer->win_pcts = sim_args->win_pcts;

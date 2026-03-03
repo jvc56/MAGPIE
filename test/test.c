@@ -140,6 +140,8 @@ static TestEntry on_demand_test_table[] = {
     {"monsterq", test_monster_q},
     {"nestsimbench", test_nested_sim_benchmark},
     {"gamepairbai", test_gamepair_bai_benchmark},
+    {"lategame", test_gamepair_bai_late_game},
+    {"cutofftest", test_gamepair_bai_cutoff},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

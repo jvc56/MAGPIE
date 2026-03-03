@@ -50,11 +50,28 @@ typedef struct EndgameArgs {
   bool skip_pruned_cross_sets;
   // If true, play forced passes without consuming a depth ply (default: false)
   bool forced_pass_bypass;
+  // Base thread index offset for endgame solver workers (default: 0).
+  // Used to avoid thread_index collisions when endgame solver runs inside
+  // sim worker threads. Each endgame worker i gets thread_index_base + i.
+  int thread_index_base;
 } EndgameArgs;
 
 EndgameSolver *endgame_solver_create(void);
 void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack);
 void endgame_solver_destroy(EndgameSolver *es);
+
+// Lightweight endgame solver for use inside sim plies.
+// Pre-allocates all resources once; each solve call reuses them.
+typedef struct EndgamePlyCtx EndgamePlyCtx;
+
+EndgamePlyCtx *endgame_ply_ctx_create(const Game *game, int thread_index);
+void endgame_ply_ctx_destroy(EndgamePlyCtx *ctx);
+
+// Quick 2-ply endgame solve. Game must have an empty bag.
+// Returns the best first move as a SmallMove.
+// The result is written into *best_move_out. Returns true on success.
+bool endgame_ply_solve_quick(EndgamePlyCtx *ctx, const Game *game, int plies,
+                             SmallMove *best_move_out);
 
 #endif

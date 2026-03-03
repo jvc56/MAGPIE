@@ -127,6 +127,13 @@ struct EndgameSolver {
   EndgamePerPlyCallback per_ply_callback;
   void *per_ply_callback_data;
 
+  // Base thread index offset for workers
+  int thread_index_base;
+
+  // Max moves to consider per node (0 = unlimited). When set, only the top N
+  // moves by score are searched at each node, reducing branching factor.
+  int max_moves_per_node;
+
   // Owned by the caller:
   EndgameResults *results;
   ThreadControl *thread_control;
@@ -414,21 +421,26 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   // In INFORMED mode with different lexicons, each player index gets its own
   // pruned KWG so that cross-set index i uses the pruned KWG derived from
   // player i's lexicon.
-  for (int player_idx = 0; player_idx < (create_separate_kwgs ? 2 : 1);
-       player_idx++) {
-    const KWG *full_kwg =
-        player_get_kwg(game_get_player(endgame_args->game, player_idx));
-    DictionaryWordList *word_list = dictionary_word_list_create();
-    generate_possible_words(endgame_args->game, full_kwg, word_list);
-    es->pruned_kwgs[player_idx] = make_kwg_from_words_small(
-        word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
-    dictionary_word_list_destroy(word_list);
+  // When skip_pruned_cross_sets is true, skip the expensive word generation
+  // and KWG building (used for lightweight in-sim endgame solves).
+  if (!endgame_args->skip_pruned_cross_sets) {
+    for (int player_idx = 0; player_idx < (create_separate_kwgs ? 2 : 1);
+         player_idx++) {
+      const KWG *full_kwg =
+          player_get_kwg(game_get_player(endgame_args->game, player_idx));
+      DictionaryWordList *word_list = dictionary_word_list_create();
+      generate_possible_words(endgame_args->game, full_kwg, word_list);
+      es->pruned_kwgs[player_idx] = make_kwg_from_words_small(
+          word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
+      dictionary_word_list_destroy(word_list);
+    }
   }
 
   // Initialize ABDADA synchronization
   atomic_store(&es->search_complete, 0);
   atomic_store(&es->stuck_tile_logged, 0);
 
+  es->thread_index_base = endgame_args->thread_index_base;
   es->thread_control = endgame_args->thread_control;
   es->game = endgame_args->game;
   es->per_ply_callback = endgame_args->per_ply_callback;
@@ -463,6 +475,119 @@ void endgame_solver_destroy(EndgameSolver *es) {
   free(es);
 }
 
+// --- Lightweight endgame solver for sim plies ---
+
+// Forward declarations for lightweight solver
+void solver_worker_destroy(EndgameSolverWorker *solver_worker);
+void iterative_deepening(EndgameSolverWorker *worker, int plies);
+
+struct EndgamePlyCtx {
+  EndgameSolver solver;
+  EndgameSolverWorker *worker;
+  EndgameResults *results;      // dummy results for iterative_deepening
+  ThreadControl *thread_control;  // dummy thread_control (never interrupted)
+};
+
+EndgamePlyCtx *endgame_ply_ctx_create(const Game *game, int thread_index) {
+  EndgamePlyCtx *ctx = calloc_or_die(1, sizeof(EndgamePlyCtx));
+  EndgameSolver *s = &ctx->solver;
+
+  // Set up minimal solver state (no TT, no pruned KWGs, no callbacks)
+  s->iterative_deepening_optim = true;
+  s->negascout_optim = true;
+  s->use_heuristics = false;  // skip stuck-tile for speed
+  s->forced_pass_bypass = true;
+  s->skip_pruned_cross_sets = true;
+  s->threads = 1;
+  s->thread_index_base = thread_index;
+  s->max_moves_per_node = 10;
+  s->initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+
+  // Create a persistent worker with pre-allocated game_copy, arena, etc.
+  // We temporarily set solver->game so the worker can duplicate it.
+  s->game = game;
+  EndgameSolverWorker *w = malloc_or_die(sizeof(EndgameSolverWorker));
+  w->thread_index = thread_index;
+  w->game_copy = game_duplicate(game);
+  game_set_endgame_solving_mode(w->game_copy);
+  game_set_backup_mode(w->game_copy, BACKUP_MODE_SIMULATION);
+  w->move_list = move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
+  w->small_move_arena =
+      create_arena(DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, 16);
+  w->solver = s;
+  memset(w->move_undos, 0, sizeof(w->move_undos));
+  w->prng = prng_create(42 + (uint64_t)thread_index);
+  w->best_pv.game = w->game_copy;
+  w->best_pv.num_moves = 0;
+  w->best_pv_value = -LARGE_VALUE;
+  w->completed_depth = 0;
+
+  ctx->worker = w;
+  ctx->results = endgame_results_create();
+  ctx->thread_control = thread_control_create();
+  s->results = ctx->results;
+  s->thread_control = ctx->thread_control;
+  return ctx;
+}
+
+void endgame_ply_ctx_destroy(EndgamePlyCtx *ctx) {
+  if (!ctx) {
+    return;
+  }
+  solver_worker_destroy(ctx->worker);
+  endgame_results_destroy(ctx->results);
+  thread_control_destroy(ctx->thread_control);
+  // solver is embedded (not malloc'd), no transposition table, no pruned KWGs
+  free(ctx);
+}
+
+bool endgame_ply_solve_quick(EndgamePlyCtx *ctx, const Game *game, int plies,
+                             SmallMove *best_move_out) {
+  if (bag_get_letters(game_get_bag(game)) != 0) {
+    return false;
+  }
+
+  EndgameSolver *s = &ctx->solver;
+  EndgameSolverWorker *w = ctx->worker;
+
+  // Update solver state for this position
+  s->solving_player = game_get_player_on_turn_index(game);
+  s->game = game;
+  s->requested_plies = plies;
+  const Player *player = game_get_player(game, s->solving_player);
+  const Player *opponent = game_get_player(game, 1 - s->solving_player);
+  s->initial_spread =
+      equity_to_int(player_get_score(player) - player_get_score(opponent));
+  atomic_store(&s->search_complete, 0);
+  atomic_store(&s->stuck_tile_logged, 0);
+  s->initial_opp_stuck_frac = 0.0F;
+
+  // Reuse worker - copy game state, reset arena, reset results
+  thread_control_set_status(ctx->thread_control,
+                            THREAD_CONTROL_STATUS_STARTED);
+  endgame_results_reset(ctx->results);
+  game_copy(w->game_copy, game);
+  game_set_endgame_solving_mode(w->game_copy);
+  game_set_backup_mode(w->game_copy, BACKUP_MODE_SIMULATION);
+  arena_reset(w->small_move_arena);
+  w->best_pv.num_moves = 0;
+  w->best_pv_value = -LARGE_VALUE;
+  w->completed_depth = 0;
+
+  // Run search directly on the calling thread (no pthread)
+  iterative_deepening(w, plies);
+
+  if (w->best_pv.num_moves > 0) {
+    *best_move_out = w->best_pv.moves[0];
+    return true;
+  }
+  // No moves found - return pass
+  small_move_set_as_pass(best_move_out);
+  return true;
+}
+
+// --- End lightweight endgame solver ---
+
 EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
                                                   int worker_index,
                                                   uint64_t base_seed) {
@@ -470,7 +595,7 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
   EndgameSolverWorker *solver_worker =
       malloc_or_die(sizeof(EndgameSolverWorker));
 
-  solver_worker->thread_index = worker_index;
+  solver_worker->thread_index = solver->thread_index_base + worker_index;
   solver_worker->game_copy = game_duplicate(solver->game);
   game_set_endgame_solving_mode(solver_worker->game_copy);
   game_set_backup_mode(solver_worker->game_copy, BACKUP_MODE_SIMULATION);
@@ -1264,6 +1389,17 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
   } else {
     // Use initial moves. They already have been sorted by estimated value.
     nplays = worker->n_initial_moves;
+  }
+
+  // Cap moves per node if configured (moves are already sorted by score).
+  const int max_mpn = worker->solver->max_moves_per_node;
+  if (max_mpn > 0 && nplays > max_mpn) {
+    if (arena_alloced) {
+      // Reclaim arena space for the moves we won't search.
+      arena_dealloc(worker->small_move_arena,
+                    (nplays - max_mpn) * sizeof(SmallMove));
+    }
+    nplays = max_mpn;
   }
 
   // Forced-pass fast path: when the only legal move is pass,
