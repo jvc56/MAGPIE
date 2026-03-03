@@ -10,6 +10,7 @@
 #include "../util/string_util.h"
 #include "board_layout.h"
 #include "letter_distribution.h"
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -874,6 +875,7 @@ static inline int board_toggle_dir(int dir) {
 static inline uint64_t board_get_playable_tiles_bv(const Board *board,
                                                    int cross_set_index,
                                                    uint64_t rack_tiles_bv) {
+  assert(!(rack_tiles_bv & 1)); // blank (bit 0) must be excluded by caller
   uint64_t playable = 0;
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
