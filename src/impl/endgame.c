@@ -606,7 +606,7 @@ static int generate_single_tile_plays(EndgameSolverWorker *worker) {
   Equity best_score = 0;
   int best_row = 0, best_col = 0;
   bool best_dir_vertical = false;
-  int best_start = 0;   // leftmost col (H) or topmost row (V) of the word
+  int best_start = 0; // leftmost col (H) or topmost row (V) of the word
   int best_play_length = 0;
   MachineLetter best_letter = 0; // for blank: the letter the blank plays as
 
@@ -616,7 +616,8 @@ static int generate_single_tile_plays(EndgameSolverWorker *worker) {
         continue;
       }
       // board_get_is_cross_word(H) = has vertical neighbors (tiles above/below)
-      // board_get_is_cross_word(V) = has horizontal neighbors (tiles left/right)
+      // board_get_is_cross_word(V) = has horizontal neighbors (tiles
+      // left/right)
       bool has_v_nbrs =
           board_get_is_cross_word(board, row, col, BOARD_HORIZONTAL_DIRECTION);
       bool has_h_nbrs =
@@ -640,8 +641,8 @@ static int generate_single_tile_plays(EndgameSolverWorker *worker) {
       // cross_score(H) = sum of existing vertical neighbor tile values
       Equity h_nbr_score =
           board_get_cross_score(board, row, col, BOARD_VERTICAL_DIRECTION, ci);
-      Equity v_nbr_score =
-          board_get_cross_score(board, row, col, BOARD_HORIZONTAL_DIRECTION, ci);
+      Equity v_nbr_score = board_get_cross_score(
+          board, row, col, BOARD_HORIZONTAL_DIRECTION, ci);
 
       // Use vertical direction only when there are vertical neighbors and no
       // horizontal neighbors; otherwise label the play horizontal.
@@ -960,7 +961,8 @@ static int *compute_build_chain_values(EndgameSolverWorker *worker,
       }
 
       // Verify actual tiles match at each position.
-      // Expand mv_a once (lazily) on first containment hit; expand mv_b each time.
+      // Expand mv_a once (lazily) on first containment hit; expand mv_b each
+      // time.
       if (!mv_a_initialized) {
         small_move_to_move(&mv_a, sm_a, brd);
         mv_a_initialized = true;
@@ -1138,9 +1140,9 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
     }
     bool all_playable = (opp_tiles_bv == rack_tiles_bv);
     if (all_playable || rack_get_total_letters(opp_rack) == 1) {
-      float frac = all_playable
-                       ? 0.0F
-                       : stuck_tile_fraction_from_bv(ld, opp_rack, opp_tiles_bv);
+      float frac = all_playable ? 0.0F
+                                : stuck_tile_fraction_from_bv(ld, opp_rack,
+                                                              opp_tiles_bv);
       if (saved_on_turn != opp_idx) {
         game_set_player_on_turn_index(game, saved_on_turn);
       }
@@ -1153,7 +1155,6 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
       // with opp_tiles_bv pre-seeded so movegen skips re-discovering the
       // already-known playable tiles.
     }
-
   }
   // Check for interrupt before the expensive movegen call.  If already fired,
   // restore game state and return early — the caller will re-detect the
@@ -1232,8 +1233,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
     opp_stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
         solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx,
-        worker->thread_index, NULL,
-        worker->solver);
+        worker->thread_index, NULL, worker->solver);
   }
 
   bool playout_interrupted = false;
@@ -1282,8 +1282,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
           .move_record_type = MOVE_RECORD_ALL_SMALL,
           .move_sort_type = MOVE_SORT_SCORE,
           .override_kwg = solver_get_pruned_kwg(
-              worker->solver,
-              game_get_player_on_turn_index(worker->game_copy)),
+              worker->solver, game_get_player_on_turn_index(worker->game_copy)),
           .thread_index = worker->thread_index,
           .eq_margin_movegen = 0,
           .target_equity = EQUITY_MAX_VALUE,
@@ -1475,8 +1474,7 @@ static int negamax_generate_and_sort_moves(EndgameSolverWorker *worker,
     *opp_stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
         solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx,
-        worker->thread_index, &opp_tiles_bv,
-        worker->solver);
+        worker->thread_index, &opp_tiles_bv, worker->solver);
     // Check for interrupt between the two expensive operations so threads
     // don't run a second full movegen after the timer has already fired.
     if (iterative_deepening_should_stop(worker->solver)) {
@@ -2546,10 +2544,9 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
     // Use an 8 MB stack. abdada_negamax carries ~10 KB MoveUndo + ~420 B PVLine
     // per frame; at 25-ply depth this approaches the 512 KB macOS default,
     // and ASAN's enlarged frames push it over. 8 MB gives ample headroom.
-    cpthread_create_with_stack_size(&worker_ids[thread_index],
-                                    solver_worker_start,
-                                    solver_workers[thread_index],
-                                    8 * 1024 * 1024);
+    cpthread_create_with_stack_size(
+        &worker_ids[thread_index], solver_worker_start,
+        solver_workers[thread_index], 8 * 1024 * 1024);
   }
 
   // Wait for all threads to complete

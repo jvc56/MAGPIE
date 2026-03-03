@@ -307,7 +307,6 @@ static bool play_until_bag_empty(Game *game, MoveList *move_list) {
   return !rack_is_empty(rack0) && !rack_is_empty(rack1);
 }
 
-
 void test_benchmark_timed_selfplay(void) {
   log_set_level(LOG_FATAL);
   run_timed_selfplay_from("/tmp/stuck_100pct_cgps.txt", 20, 30.0);
@@ -434,14 +433,16 @@ static void rr_print_crosstable(const RRState *rr) {
   }
   printf("  | %3s %3s %3s %4s | %7s %7s  %8s %7s", "W", "L", "T", "W-L",
          "Spread", "Avg", "Time", "OT");
-  if (has_turn1) printf(" | %5s %7s", "MedD", "T1Time");
+  if (has_turn1)
+    printf(" | %5s %7s", "MedD", "T1Time");
   printf("\n");
   printf("  %-9s ", "");
   for (int col_cfg = 0; col_cfg < rr->num_cfgs; col_cfg++) {
     printf("  --------");
   }
   printf("  | --- --- --- ---- | ------- -------  -------- -------");
-  if (has_turn1) printf(" | ----- -------");
+  if (has_turn1)
+    printf(" | ----- -------");
   printf("\n");
 
   for (int ri = 0; ri < rr->num_cfgs; ri++) {
@@ -478,12 +479,11 @@ static void rr_print_crosstable(const RRState *rr) {
     printf("  | %3d %3d %3d %+4d | %+7d %+7.2f  %7.1fs %6.2fs", wins[row_cfg],
            losses[row_cfg], ties[row_cfg], wl, spread[row_cfg], avg,
            rr->cumul_time[row_cfg], rr->cumul_overtime[row_cfg]);
-    if (has_turn1) printf(" | %5d %6.2fs", med_depth, avg_t1);
+    if (has_turn1)
+      printf(" | %5d %6.2fs", med_depth, avg_t1);
     printf("\n");
   }
 }
-
-
 
 // ============================================================
 // 4-way round robin: Static vs Bullet vs Blitz vs Classical
@@ -975,8 +975,8 @@ static void run_four_way_round_robin(int num_games, uint64_t base_seed) {
 // 4 configs x 6 pairings x 2 directions = 12 sub-games per position.
 // Separate crosstables are kept for stuck and nonstuck positions.
 static void run_4cfg_random_tournament(int num_games, uint64_t base_seed,
-                                       double ns_p1, double ns_p2,
-                                       double sk_p1, double sk_p2) {
+                                       double ns_p1, double ns_p2, double sk_p1,
+                                       double sk_p2) {
   const int max_ply = 25;
   const int max_turns = 50;
   const double tt_frac = 0.25;
@@ -1003,8 +1003,8 @@ static void run_4cfg_random_tournament(int num_games, uint64_t base_seed,
   printf("\n");
   printf("=================================================================="
          "======================================\n");
-  printf("  4-Config Random Tournament: up to %d games, seed=%llu\n",
-         num_games, (unsigned long long)base_seed);
+  printf("  4-Config Random Tournament: up to %d games, seed=%llu\n", num_games,
+         (unsigned long long)base_seed);
   printf("  O=no-precheck+baseline  N=no-precheck+EBF  "
          "B=precheck+baseline  F=precheck+EBF\n");
   printf("  Pruned cross-sets OFF for all configs.\n");
@@ -1109,22 +1109,21 @@ static void run_4cfg_random_tournament(int num_games, uint64_t base_seed,
               budget[player_on_turn], player_turn_count[player_on_turn],
               tiles_on_rack, cfg_time_mode[cfg]);
 
-          EndgameArgs args = {
-              .game = game,
-              .thread_control = tc,
-              .plies = max_ply,
-              .tt_fraction_of_mem = tt_frac,
-              .initial_small_move_arena_size =
-                  DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-              .num_threads = 8,
-              .num_top_moves = 1,
-              .use_heuristics = true,
-              .per_ply_callback = NULL,
-              .per_ply_callback_data = NULL,
-              .skip_pruned_cross_sets = true,
-              .forced_pass_bypass = false,
-              .soft_time_limit = limits.soft_limit,
-              .hard_time_limit = limits.hard_limit};
+          EndgameArgs args = {.game = game,
+                              .thread_control = tc,
+                              .plies = max_ply,
+                              .tt_fraction_of_mem = tt_frac,
+                              .initial_small_move_arena_size =
+                                  DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                              .num_threads = 8,
+                              .num_top_moves = 1,
+                              .use_heuristics = true,
+                              .per_ply_callback = NULL,
+                              .per_ply_callback_data = NULL,
+                              .skip_pruned_cross_sets = true,
+                              .forced_pass_bypass = false,
+                              .soft_time_limit = limits.soft_limit,
+                              .hard_time_limit = limits.hard_limit};
 
           thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
 
@@ -1245,8 +1244,8 @@ static void run_4cfg_random_tournament(int num_games, uint64_t base_seed,
          "======================================\n");
   printf("  Final results: %d games (%d stuck, %d nonstuck) from %d "
          "attempts\n",
-         games_played, rr_all.stuck_count,
-         games_played - rr_all.stuck_count, attempts);
+         games_played, rr_all.stuck_count, games_played - rr_all.stuck_count,
+         attempts);
   printf("\n  Overall:\n");
   rr_print_crosstable(&rr_all);
   printf("\n  Stuck positions only (%d):\n", rr_all.stuck_count);
@@ -1267,11 +1266,10 @@ void test_benchmark_timed_4cfg_random(void) {
   run_4cfg_random_tournament(10000, 31415926, 2.0, 1.2, 2.0, 1.2);
 }
 
-
-
 // Profiling harness: run many endgame positions with a single fixed config so
 // a sampling profiler (e.g. macOS `sample`) shows clean per-function costs.
-// No comparison, just workload generation. Run ~500 positions at 2s/1.2s budgets.
+// No comparison, just workload generation. Run ~500 positions at 2s/1.2s
+// budgets.
 static void run_profiling_workload(int num_games, uint64_t base_seed) {
   const int max_ply = 25;
   const double tt_frac = 0.25;
@@ -1326,27 +1324,26 @@ static void run_profiling_workload(int num_games, uint64_t base_seed) {
     while (game_get_game_end_reason(game) == GAME_END_REASON_NONE &&
            turn_num < max_turns) {
       int pot = game_get_player_on_turn_index(game);
-      int tiles_on_rack = rack_get_total_letters(
-          player_get_rack(game_get_player(game, pot)));
+      int tiles_on_rack =
+          rack_get_total_letters(player_get_rack(game_get_player(game, pot)));
       EndgameTurnLimits limits = endgame_compute_turn_limits(
           budget[pot], player_turn_count[pot], tiles_on_rack, 1);
 
-      EndgameArgs args = {
-          .game = game,
-          .thread_control = tc,
-          .plies = max_ply,
-          .tt_fraction_of_mem = tt_frac,
-          .initial_small_move_arena_size =
-              DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-          .num_threads = 8,
-          .num_top_moves = 1,
-          .use_heuristics = true,
-          .per_ply_callback = NULL,
-          .per_ply_callback_data = NULL,
-          .skip_pruned_cross_sets = true,
-          .forced_pass_bypass = false,
-          .soft_time_limit = limits.soft_limit,
-          .hard_time_limit = limits.hard_limit};
+      EndgameArgs args = {.game = game,
+                          .thread_control = tc,
+                          .plies = max_ply,
+                          .tt_fraction_of_mem = tt_frac,
+                          .initial_small_move_arena_size =
+                              DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                          .num_threads = 8,
+                          .num_top_moves = 1,
+                          .use_heuristics = true,
+                          .per_ply_callback = NULL,
+                          .per_ply_callback_data = NULL,
+                          .skip_pruned_cross_sets = true,
+                          .forced_pass_bypass = false,
+                          .soft_time_limit = limits.soft_limit,
+                          .hard_time_limit = limits.hard_limit};
 
       thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
       Timer turn_timer;
