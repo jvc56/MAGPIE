@@ -92,9 +92,10 @@ typedef struct {
 //                        ET_HARD_LIMIT_PCT% hard − ET_SLACK_MS ms slack)
 //
 // Reservation: only floor_min is reserved per future turn that is expected to
-// run the solver (turn_limit ≥ ET_TIMER_EARLY_MS).  Since each solver turn
-// costs at least ET_TIMER_EARLY_MS seconds, the number of expected solver turns
-// is estimated as (budget − tiles×floor_min) / ET_TIMER_EARLY_MS.  Turns
+// run the solver (turn_limit ≥ ET_TIMER_EARLY_MS ms).  Since each solver turn
+// costs at least timer_early seconds (ET_TIMER_EARLY_MS ms), the number of
+// expected solver turns is estimated as (budget − tiles×floor_min) /
+// timer_early.  Turns
 // expected to fall back to static eval need no reservation.  For large budgets
 // (standard time controls) this equals the full turns_left reservation;
 // for bullet budgets it is reduced, front-loading budget to the current turn.
