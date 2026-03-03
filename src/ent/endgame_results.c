@@ -24,6 +24,8 @@ struct EndgameResults {
 EndgameResults *endgame_results_create(void) {
   EndgameResults *endgame_results = malloc_or_die(sizeof(EndgameResults));
   endgame_results->best_pv_data.depth = -1;
+  endgame_results->best_pv_data.pv_line.num_moves = 0;
+  endgame_results->display_pv_data.pv_line.num_moves = 0;
   cpthread_mutex_init(&endgame_results->best_pv_data.mutex);
   cpthread_mutex_init(&endgame_results->display_pv_data.mutex);
   endgame_results->valid_for_current_game_state = false;
@@ -38,6 +40,7 @@ void endgame_results_destroy(EndgameResults *endgame_results) {
 // NOT THREAD SAFE: Caller must ensure synchronization
 void endgame_results_reset(EndgameResults *endgame_results) {
   endgame_results->best_pv_data.depth = -1;
+  endgame_results->best_pv_data.pv_line.num_moves = 0;
   endgame_results->valid_for_current_game_state = false;
   ctimer_start(&endgame_results->timer);
 }
