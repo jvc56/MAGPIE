@@ -86,6 +86,26 @@ static inline void cpthread_create(pthread_t *newthread,
   }
 }
 
+// Like cpthread_create but sets an explicit stack size.
+// Use for threads with large per-frame locals (e.g. deep recursive search
+// with MoveUndo on the stack) where the default 512 KB macOS stack is
+// insufficient under ASAN's enlarged frames.
+static inline void cpthread_create_with_stack_size(
+    pthread_t *newthread, void *(*start_routine)(void *), void *arg,
+    size_t stack_size) {
+  pthread_attr_t attr;
+  if (pthread_attr_init(&attr)) {
+    log_fatal("thread attr init failed");
+  }
+  if (pthread_attr_setstacksize(&attr, stack_size)) {
+    log_fatal("thread attr setstacksize failed");
+  }
+  if (pthread_create(newthread, &attr, start_routine, arg)) {
+    log_fatal("thread create failed");
+  }
+  pthread_attr_destroy(&attr);
+}
+
 static inline void cpthread_join(cpthread_t th) {
   if (pthread_join(th, NULL)) {
     log_fatal("thread join failed");

@@ -1205,6 +1205,45 @@ void test_vs_jeremy_gcg(GameHistory *game_history) {
   config_destroy(config);
 }
 
+void test_multiple_description_pragmas(GameHistory *game_history) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+
+  char *std_gcg =
+      get_string_from_file_or_die("testdata/gcgs/success_standard.gcg");
+
+  StringSplitter *split_standard = split_string_by_newline(std_gcg, true);
+
+  StringBuilder *multi_desc_sb = string_builder_create();
+
+  const int num_lines = string_splitter_get_number_of_items(split_standard);
+
+  for (int i = 0; i < num_lines; i++) {
+    const char *line = string_splitter_get_item(split_standard, i);
+    string_builder_add_formatted_string(multi_desc_sb, "%s\n", line);
+    if (strings_equal(line, "#description Created with Macondo")) {
+      string_builder_add_string(multi_desc_sb, "#description Second line\n");
+      string_builder_add_string(multi_desc_sb, "#description Third line\n");
+    }
+  }
+
+  char *multi_desc_gcg = string_builder_dump(multi_desc_sb, NULL);
+
+  string_builder_destroy(multi_desc_sb);
+  string_splitter_destroy(split_standard);
+  free(std_gcg);
+
+  assert(test_parse_gcg_string(multi_desc_gcg, config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+
+  free(multi_desc_gcg);
+
+  assert_strings_equal(game_history_get_description(game_history),
+                       "Created with Macondo\nSecond line\nThird line");
+
+  config_destroy(config);
+}
+
 void test_gcg(void) {
   // Use the same game_history for all tests to thoroughly test the
   // game_history_reset function
@@ -1226,5 +1265,6 @@ void test_gcg(void) {
   test_write_gcg(game_history);
   test_partially_known_rack_from_phonies(game_history);
   test_success_board_layout_pragma(game_history);
+  test_multiple_description_pragmas(game_history);
   game_history_destroy(game_history);
 }
