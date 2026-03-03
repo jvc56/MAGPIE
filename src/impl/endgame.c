@@ -2495,6 +2495,7 @@ static int extract_multi_pvs(const EndgameSolver *solver,
 
     if (solver->transposition_table) {
       Game *ext_game = game_duplicate(game);
+      game_set_endgame_solving_mode(ext_game);
       pvline_extend_from_tt(pv, ext_game, solver->transposition_table,
                             solver->solving_player, solver->requested_plies);
       game_destroy(ext_game);
@@ -2601,6 +2602,7 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
                      THREAD_CONTROL_STATUS_USER_INTERRUPT;
   if (!interrupted && num_top <= 1 && solver->transposition_table) {
     Game *ext_game = game_duplicate(endgame_args->game);
+    game_set_endgame_solving_mode(ext_game);
     pvline_extend_from_tt(&solver->principal_variation, ext_game,
                           solver->transposition_table, solver->solving_player,
                           solver->requested_plies);
