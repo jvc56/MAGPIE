@@ -467,6 +467,12 @@ int round_to_nearest_int(double a) {
   return (int)(a + 0.5 - (a < 0)); // truncated to 55
 }
 
+void simmed_play_push_win_pct(SimmedPlay *simmed_play, double wpct) {
+  cpthread_mutex_lock(&simmed_play->mutex);
+  stat_push(simmed_play->win_pct_stat, wpct, 1);
+  cpthread_mutex_unlock(&simmed_play->mutex);
+}
+
 double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
                                     Equity spread, Equity leftover,
                                     game_end_reason_t game_end_reason,

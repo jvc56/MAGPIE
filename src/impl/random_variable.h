@@ -2,6 +2,7 @@
 #define RANDOM_VARIABLE_H
 
 #include "../def/bai_defs.h"
+#include "../def/sim_defs.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/inference_results.h"
@@ -42,5 +43,7 @@ double rvs_sample(RandomVariables *rvs, uint64_t k, int thread_index,
 bool rvs_are_similar(RandomVariables *rvs, int i, int j);
 uint64_t rvs_get_num_rvs(const RandomVariables *rvs);
 uint64_t rvs_get_total_samples(const RandomVariables *rvs);
+void rvs_set_fidelity_level(RandomVariables *rvs,
+                            const FidelityLevel *level);
 
 #endif
