@@ -763,7 +763,8 @@ static int generate_single_tile_plays(EndgameSolverWorker *worker) {
   }
   if (best_dir_vertical) {
     tm |= 1; // direction bit
-    // small_move_set_all swaps row/col for vertical: bits 1-5 = col, bits 6-10 = row.
+    // small_move_set_all swaps row/col for vertical: bits 1-5 = col, bits 6-10
+    // = row.
     tm |= (uint64_t)best_col << 1;
     tm |= (uint64_t)best_start << 6;
   } else {
