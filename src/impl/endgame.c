@@ -476,6 +476,7 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   if (es->results) {
     endgame_results_reset(es->results);
     endgame_results_set_valid_for_current_game_state(es->results, true);
+    endgame_results_set_start_game(es->results, endgame_args->game);
   }
 }
 

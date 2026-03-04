@@ -33,7 +33,14 @@ static void string_builder_endgame_results(
       endgame_results_get_display_seconds_elapsed(endgame_results),
       add_line_breaks ? '\n' : ' ');
 
-  Game *gc = game_duplicate(game);
+  // Prefer the start_game snapshot (captured when the solve began) so that
+  // the PV can be decoded correctly even if config->game has since changed
+  // (e.g. after newgame).
+  const Game *source_game = endgame_results_get_start_game(endgame_results);
+  if (!source_game) {
+    source_game = game;
+  }
+  Game *gc = game_duplicate(source_game);
   const Board *board = game_get_board(gc);
   const LetterDistribution *ld = game_get_ld(gc);
 
