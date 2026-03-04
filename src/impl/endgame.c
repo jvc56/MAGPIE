@@ -1274,8 +1274,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
       // abdada_negamax stays correct.
       size_t arena_before = worker->small_move_arena->size;
       generate_single_tile_plays(worker);
-      SmallMove *arena_sm =
-          (SmallMove *)(worker->small_move_arena->memory + arena_before);
+      const SmallMove *arena_sm =
+          (const SmallMove *)(worker->small_move_arena->memory + arena_before);
       *worker->move_list->small_moves[0] = *arena_sm;
       arena_dealloc(worker->small_move_arena, sizeof(SmallMove));
       worker->move_list->count = 1;
