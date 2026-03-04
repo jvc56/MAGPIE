@@ -4,6 +4,7 @@
 #include "../def/autoplay_defs.h"
 #include "../ent/autoplay_results.h"
 #include "../ent/game.h"
+#include "../ent/sim_args.h"
 #include "../ent/thread_control.h"
 #include "../util/io_util.h"
 #include <stdbool.h>
@@ -24,6 +25,10 @@ typedef struct AutoplayArgs {
   uint64_t seed;
   ThreadControl *thread_control;
   const GameStringOptions *game_string_options;
+  multi_threading_mode_t multi_threading_mode;
+  double cutoff;
+  SimArgs p1_sim_args;
+  SimArgs p2_sim_args;
 } AutoplayArgs;
 
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,

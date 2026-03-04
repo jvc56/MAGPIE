@@ -324,6 +324,14 @@ void test_autoplay_wmp_correctness(void) {
   error_stack_destroy(error_stack);
 }
 
+void test_autoplay_sim(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 5 -pl1 2 -minp 10 -iter 100 -threads 2");
+  load_and_exec_config_or_die(config, "autoplay games 2 -seed 1");
+  config_destroy(config);
+}
+
 void test_autoplay(void) {
   test_odds_that_player_is_better();
   test_autoplay_default();
@@ -332,4 +340,5 @@ void test_autoplay(void) {
   test_autoplay_wmp_correctness();
   test_autoplay_win_pct_record();
   test_autoplay_leaves_record();
+  test_autoplay_sim();
 }

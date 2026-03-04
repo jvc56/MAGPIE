@@ -28,6 +28,10 @@ typedef struct BAIOptions {
   uint64_t sample_minimum;
   uint64_t time_limit_seconds;
   int num_threads;
+  // Offset added to each BAI worker's thread index when accessing thread-indexed
+  // resources (e.g. the MoveGen cache). Set to non-zero when multiple parallel
+  // callers each spawn their own BAI workers to avoid index collisions.
+  int thread_index_offset;
   double cutoff;
 } BAIOptions;
 
