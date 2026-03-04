@@ -615,13 +615,15 @@ static int generate_single_tile_plays(EndgameSolverWorker *worker) {
       if (board_is_nonempty_or_bricked(board, row, col)) {
         continue;
       }
-      // board_get_is_cross_word(H) = has vertical neighbors (tiles above/below)
-      // board_get_is_cross_word(V) = has horizontal neighbors (tiles
-      // left/right)
+      // Check actual board occupancy (not the stored is_cross_word flag, which
+      // is set on tile placement but not cleared on unplay — using it would
+      // give stale results during the search tree's play/unplay cycle).
       bool has_v_nbrs =
-          board_get_is_cross_word(board, row, col, BOARD_HORIZONTAL_DIRECTION);
+          (row > 0 && !board_is_empty(board, row - 1, col)) ||
+          (row < BOARD_DIM - 1 && !board_is_empty(board, row + 1, col));
       bool has_h_nbrs =
-          board_get_is_cross_word(board, row, col, BOARD_VERTICAL_DIRECTION);
+          (col > 0 && !board_is_empty(board, row, col - 1)) ||
+          (col < BOARD_DIM - 1 && !board_is_empty(board, row, col + 1));
       if (!has_v_nbrs && !has_h_nbrs) {
         continue;
       }
@@ -761,8 +763,9 @@ static int generate_single_tile_plays(EndgameSolverWorker *worker) {
   }
   if (best_dir_vertical) {
     tm |= 1; // direction bit
-    tm |= (uint64_t)best_start << 1;
-    tm |= (uint64_t)best_col << 6;
+    // small_move_set_all swaps row/col for vertical: bits 1-5 = col, bits 6-10 = row.
+    tm |= (uint64_t)best_col << 1;
+    tm |= (uint64_t)best_start << 6;
   } else {
     tm |= (uint64_t)best_start << 1;
     tm |= (uint64_t)best_row << 6;
