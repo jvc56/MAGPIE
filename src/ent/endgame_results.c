@@ -168,7 +168,7 @@ void endgame_results_set_start_game(EndgameResults *endgame_results,
   endgame_results->start_game = game_duplicate(game);
 }
 
-const Game *endgame_results_get_start_game(
-    const EndgameResults *endgame_results) {
+const Game *
+endgame_results_get_start_game(const EndgameResults *endgame_results) {
   return endgame_results->start_game;
 }
