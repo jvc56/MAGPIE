@@ -23,7 +23,6 @@
 #include "../src/impl/move_gen.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
-#include "../src/str/rack_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
@@ -433,16 +432,18 @@ static void rr_print_crosstable(const RRState *rr) {
   }
   printf("  | %3s %3s %3s %4s | %7s %7s  %8s %7s", "W", "L", "T", "W-L",
          "Spread", "Avg", "Time", "OT");
-  if (has_turn1)
+  if (has_turn1) {
     printf(" | %5s %7s", "MedD", "T1Time");
+  }
   printf("\n");
   printf("  %-9s ", "");
   for (int col_cfg = 0; col_cfg < rr->num_cfgs; col_cfg++) {
     printf("  --------");
   }
   printf("  | --- --- --- ---- | ------- -------  -------- -------");
-  if (has_turn1)
+  if (has_turn1) {
     printf(" | ----- -------");
+  }
   printf("\n");
 
   for (int ri = 0; ri < rr->num_cfgs; ri++) {
@@ -479,8 +480,9 @@ static void rr_print_crosstable(const RRState *rr) {
     printf("  | %3d %3d %3d %+4d | %+7d %+7.2f  %7.1fs %6.2fs", wins[row_cfg],
            losses[row_cfg], ties[row_cfg], wl, spread[row_cfg], avg,
            rr->cumul_time[row_cfg], rr->cumul_overtime[row_cfg]);
-    if (has_turn1)
+    if (has_turn1) {
       printf(" | %5d %6.2fs", med_depth, avg_t1);
+    }
     printf("\n");
   }
 }
@@ -1016,12 +1018,21 @@ static void run_4cfg_random_tournament(int num_games, uint64_t base_seed,
   (void)fflush(stdout);
 
   // Three RRStates: overall, stuck-only, nonstuck-only.
-  RRState rr_all, rr_stuck, rr_ns;
+  RRState rr_all;
+  RRState rr_stuck;
+  RRState rr_ns;
   memset(&rr_all, 0, sizeof(rr_all));
   memset(&rr_stuck, 0, sizeof(rr_stuck));
   memset(&rr_ns, 0, sizeof(rr_ns));
   for (int ri = 0; ri < 3; ri++) {
-    RRState *rr = (ri == 0) ? &rr_all : (ri == 1) ? &rr_stuck : &rr_ns;
+    RRState *rr;
+    if (ri == 0) {
+      rr = &rr_all;
+    } else if (ri == 1) {
+      rr = &rr_stuck;
+    } else {
+      rr = &rr_ns;
+    }
     rr->num_cfgs = 4;
     rr->num_pairings = num_pairings;
     for (int ci = 0; ci < 4; ci++) {

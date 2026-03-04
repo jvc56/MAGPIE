@@ -3,6 +3,7 @@
 #include "../compat/cpthread.h"
 #include "../compat/csched.h"
 #include "../compat/ctime.h"
+#include "../def/board_defs.h"
 #include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
@@ -13,6 +14,7 @@
 #include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
+#include "../ent/bonus_square.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/endgame_results.h"
 #include "../ent/equity.h"
@@ -605,7 +607,8 @@ static int generate_single_tile_plays(EndgameSolverWorker *worker) {
 
   bool found = false;
   Equity best_score = 0;
-  int best_row = 0, best_col = 0;
+  int best_row = 0;
+  int best_col = 0;
   bool best_dir_vertical = false;
   int best_start = 0; // leftmost col (H) or topmost row (V) of the word
   int best_play_length = 0;
@@ -653,7 +656,8 @@ static int generate_single_tile_plays(EndgameSolverWorker *worker) {
 
       // Find word extent in the primary direction for play_length and
       // col_start/row_start encoding.
-      int word_start, word_end;
+      int word_start;
+      int word_end;
       if (!dir_vertical) {
         word_start = col - 1;
         while (word_start >= 0 &&
@@ -720,7 +724,7 @@ static int generate_single_tile_plays(EndgameSolverWorker *worker) {
         }
         if (!found || score > best_score) {
           MachineLetter letter = 0;
-          for (MachineLetter L = 1; L < ld_size; L++) {
+          for (MachineLetter L = 1; L < (MachineLetter)ld_size; L++) {
             if ((combined >> L) & 1) {
               letter = L;
               break;
@@ -1155,11 +1159,10 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
         *tiles_played_bv_out = opp_tiles_bv;
       }
       return frac;
-    } else {
-      // Multi-tile partial result: not authoritative. Fall through to movegen
-      // with opp_tiles_bv pre-seeded so movegen skips re-discovering the
-      // already-known playable tiles.
     }
+    // Multi-tile partial result: not authoritative. Fall through to movegen
+    // with opp_tiles_bv pre-seeded so movegen skips re-discovering the
+    // already-known playable tiles.
   }
   // Check for interrupt before the expensive movegen call.  If already fired,
   // restore game state and return early — the caller will re-detect the
@@ -2552,7 +2555,7 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
     // and ASAN's enlarged frames push it over. 8 MB gives ample headroom.
     cpthread_create_with_stack_size(
         &worker_ids[thread_index], solver_worker_start,
-        solver_workers[thread_index], 8 * 1024 * 1024);
+        solver_workers[thread_index], (size_t)8 * 1024 * 1024);
   }
 
   // Wait for all threads to complete
