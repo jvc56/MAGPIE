@@ -575,6 +575,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->use_alias_method =
       simmer->use_inference &&
       (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));
+  simmer->inference_results = sim_args->inference_results;
 
   sim_results_reset(sim_args->move_list, simmer->sim_results,
                     sim_args->num_plies, sim_args->seed,

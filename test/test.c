@@ -17,6 +17,7 @@
 #include "config_test.h"
 #include "convert_test.h"
 #include "create_data_test.h"
+#include "debug_infer_turn2.h"
 #include "cross_set_test.h"
 #include "endgame_test.h"
 #include "equity_adjustment_test.h"
@@ -26,6 +27,8 @@
 #include "gcg_test.h"
 #include "heat_map_test.h"
 #include "infer_cmp_test.h"
+#include "inference_gamepair_benchmark.h"
+#include "inference_timing_benchmark.h"
 #include "infer_test.h"
 #include "klv_test.h"
 #include "kwg_alpha_test.h"
@@ -40,6 +43,7 @@
 #include "players_data_test.h"
 #include "rack_list_test.h"
 #include "rack_test.h"
+#include "roundrobin_benchmark.h"
 #include "random_variable_test.h"
 #include "shadow_test.h"
 #include "sim_test.h"
@@ -125,6 +129,10 @@ static TestEntry test_table[] = {
 static TestEntry on_demand_test_table[] = {
     {"endgame_wasm", test_endgame_wasm},
     {"infercmp", test_infer_cmp},
+    {"infgp", test_inference_gamepair_benchmark},
+    {"roundrobin", test_roundrobin_benchmark},
+    {"debug_infer", test_debug_infer_turn2},
+    {"inftiming", test_inference_timing_benchmark},
     {"genstuck", test_generate_stuck_cgps},
     {"gennonstuck", test_generate_nonstuck_cgps},
     {"benchfp", test_benchmark_forced_pass},
