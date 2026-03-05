@@ -1223,18 +1223,16 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
     // the lazy update inside the greedy playout's generate_stm_plays — one
     // update either way; doing it here means the playout loop's lazy check
     // becomes a no-op on the first iteration.
-    {
-      Board *leaf_board = game_get_board(worker->game_copy);
-      if (!board_get_cross_sets_valid(leaf_board)) {
-        int undo_idx = plies - 1; // last negamax move
-        if (undo_idx >= 0) {
-          const MoveUndo *last_undo = &worker->move_undos[undo_idx];
-          if (last_undo->move_tiles_length > 0) {
-            update_cross_set_for_move_from_undo(last_undo, worker->game_copy);
-          }
+    Board *leaf_board = game_get_board(worker->game_copy);
+    if (!board_get_cross_sets_valid(leaf_board)) {
+      int undo_idx = plies - 1; // last negamax move
+      if (undo_idx >= 0) {
+        const MoveUndo *last_undo = &worker->move_undos[undo_idx];
+        if (last_undo->move_tiles_length > 0) {
+          update_cross_set_for_move_from_undo(last_undo, worker->game_copy);
         }
-        board_set_cross_sets_valid(leaf_board, true);
       }
+      board_set_cross_sets_valid(leaf_board, true);
     }
     int opp_idx = 1 - solving_player;
     opp_stuck_frac = compute_opp_stuck_fraction(
