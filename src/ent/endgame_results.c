@@ -4,6 +4,7 @@
 #include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
 #include "../util/io_util.h"
+#include "game.h"
 #include <stdlib.h>
 
 typedef struct PVData {
@@ -19,27 +20,42 @@ struct EndgameResults {
   bool valid_for_current_game_state;
   Timer timer;
   double display_seconds_elapsed;
+  // Snapshot of the game state when the endgame solve began; used by
+  // shendgame to decode the PV even if config->game has since changed (e.g.
+  // after newgame).
+  Game *start_game;
 };
 
 EndgameResults *endgame_results_create(void) {
   EndgameResults *endgame_results = malloc_or_die(sizeof(EndgameResults));
   endgame_results->best_pv_data.depth = -1;
+  endgame_results->best_pv_data.pv_line.num_moves = 0;
+  endgame_results->display_pv_data.depth = -1;
+  endgame_results->display_pv_data.value = 0;
+  endgame_results->display_pv_data.pv_line.num_moves = 0;
   cpthread_mutex_init(&endgame_results->best_pv_data.mutex);
   cpthread_mutex_init(&endgame_results->display_pv_data.mutex);
   endgame_results->valid_for_current_game_state = false;
   ctimer_reset(&endgame_results->timer);
+  endgame_results->start_game = NULL;
   return endgame_results;
 }
 
 void endgame_results_destroy(EndgameResults *endgame_results) {
+  game_destroy(endgame_results->start_game);
   free(endgame_results);
 }
 
 // NOT THREAD SAFE: Caller must ensure synchronization
 void endgame_results_reset(EndgameResults *endgame_results) {
   endgame_results->best_pv_data.depth = -1;
+  endgame_results->best_pv_data.pv_line.num_moves = 0;
+  endgame_results->display_pv_data.depth = -1;
+  endgame_results->display_pv_data.pv_line.num_moves = 0;
   endgame_results->valid_for_current_game_state = false;
   ctimer_start(&endgame_results->timer);
+  game_destroy(endgame_results->start_game);
+  endgame_results->start_game = NULL;
 }
 
 bool endgame_results_get_valid_for_current_game_state(
@@ -145,4 +161,15 @@ void endgame_results_set_best_pvline(EndgameResults *endgame_results,
     endgame_results->best_pv_data.pv_line = *pv_line;
   }
   endgame_results_unlock(endgame_results, ENDGAME_RESULT_BEST);
+}
+
+void endgame_results_set_start_game(EndgameResults *endgame_results,
+                                    const Game *game) {
+  game_destroy(endgame_results->start_game);
+  endgame_results->start_game = game_duplicate(game);
+}
+
+const Game *
+endgame_results_get_start_game(const EndgameResults *endgame_results) {
+  return endgame_results->start_game;
 }

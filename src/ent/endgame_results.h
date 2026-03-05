@@ -47,4 +47,8 @@ void endgame_results_update_display_data(EndgameResults *endgame_results);
 void endgame_results_set_best_pvline(EndgameResults *endgame_results,
                                      const PVLine *pv_line, int value,
                                      int depth);
+void endgame_results_set_start_game(EndgameResults *endgame_results,
+                                    const Game *game);
+const Game *
+endgame_results_get_start_game(const EndgameResults *endgame_results);
 #endif
