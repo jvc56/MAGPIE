@@ -164,6 +164,9 @@ typedef struct EndgameSolverWorker {
   int current_iterative_deepening_depth;
   // Array of MoveUndo structures for incremental play/unplay
   MoveUndo move_undos[MAX_SEARCH_DEPTH];
+  // Per-depth MoveUndo for forced-pass bypass. Pass recurses at the same depth
+  // so it cannot share move_undos[]; indexed by the depth parameter (0..25).
+  MoveUndo pass_undos[MAX_SEARCH_DEPTH + 1];
   XoshiroPRNG *prng;       // Per-thread PRNG for jitter
   PVLine best_pv;          // Thread-local best PV
   int32_t best_pv_value;   // Thread-local best value
@@ -799,7 +802,8 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
   const Rack *stm_rack =
       player_get_rack(game_get_player(worker->game_copy, stm_idx));
 
-  if (stm_rack->number_of_letters == 1) {
+  if (stm_rack->number_of_letters == 1 &&
+      !worker->solver->skip_pruned_cross_sets) {
     return generate_single_tile_plays(worker);
   }
 
@@ -1129,7 +1133,8 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
   // results, fall through to movegen with opp_tiles_bv pre-seeded.
   uint64_t opp_tiles_bv = 0;
   const Board *board = game_get_board(game);
-  if (board_get_cross_sets_valid(board)) {
+  if (board_get_cross_sets_valid(board) &&
+      !(solver && solver->skip_pruned_cross_sets)) {
     bool kwgs_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
     int ci = board_get_cross_set_index(kwgs_shared, opp_idx);
     const LetterDistribution *ld = game_get_ld(game);
@@ -1270,7 +1275,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
     const Rack *stm_rack_p =
         player_get_rack(game_get_player(worker->game_copy, stm_idx_p));
     int nplays;
-    if (stm_rack_p->number_of_letters == 1) {
+    if (stm_rack_p->number_of_letters == 1 &&
+        !worker->solver->skip_pruned_cross_sets) {
       // Single-tile fast path: cross-set scan instead of KWG traversal.
       // generate_single_tile_plays allocs to the arena; copy the result into
       // move_list and immediately pop the arena so the per-node dealloc in
@@ -1704,9 +1710,8 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       int last_consecutive_scoreless_turns =
           game_get_consecutive_scoreless_turns(worker->game_copy);
 
-      MoveUndo pass_undo;
       play_move_incremental(worker->move_list->spare_move, worker->game_copy,
-                            &pass_undo);
+                            &worker->pass_undos[depth]);
 
       uint64_t child_key = 0;
       if (worker->solver->transposition_table_optim) {
@@ -1724,7 +1729,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       int32_t value = abdada_negamax(worker, child_key, depth, -beta, -alpha,
                                      &child_pv, pv_node, false, opp_stuck_frac);
 
-      unplay_move_incremental(worker->game_copy, &pass_undo);
+      unplay_move_incremental(worker->game_copy, &worker->pass_undos[depth]);
 
       arena_dealloc(worker->small_move_arena, sizeof(SmallMove));
 
@@ -2550,12 +2555,8 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
     solver_workers[thread_index] =
         endgame_solver_create_worker(solver, thread_index, base_seed);
-    // Use an 8 MB stack. abdada_negamax carries ~10 KB MoveUndo + ~420 B PVLine
-    // per frame; at 25-ply depth this approaches the 512 KB macOS default,
-    // and ASAN's enlarged frames push it over. 8 MB gives ample headroom.
-    cpthread_create_with_stack_size(
-        &worker_ids[thread_index], solver_worker_start,
-        solver_workers[thread_index], (size_t)8 * 1024 * 1024);
+    cpthread_create(&worker_ids[thread_index], solver_worker_start,
+                    solver_workers[thread_index]);
   }
 
   // Wait for all threads to complete

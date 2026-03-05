@@ -1852,7 +1852,6 @@ static void run_overnight_gamepairs(int num_games, double p1_budget_sec,
     if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
       continue;
     }
-
     char *cgp = game_get_cgp(game, true);
     games_played++;
 
@@ -2096,4 +2095,80 @@ static void run_overnight_gamepairs(int num_games, double p1_budget_sec,
 void test_benchmark_overnight_gamepairs(void) {
   log_set_level(LOG_FATAL);
   run_overnight_gamepairs(100, 15.0, 9.0, 31415926);
+}
+
+static void solve_eldar_v_once(Config *config, bool skip_pc,
+                                double *elapsed_out, int *depth_out) {
+  exec_config_quiet(config,
+                    "cgp "
+                    "4EXODE6/1DOFF1KERATIN1U/1OHO8YEN/1POOJA1B3MEWS/"
+                    "5SQUINTY2A/4RHINO1e3V/2B4C2R3E/GOAT1D1E2ZIN1d/"
+                    "1URACILS2E4/1PIG1S4T4/2L2R4T4/2L2A1GENII3/"
+                    "2A2T1L7/5E1A7/5D1M7 AEEIRUW/V 410/409 0 -lex CSW21;");
+  Game *game = config_get_game(config);
+  EndgameSolver *solver = endgame_solver_create();
+  EndgameResults *results = endgame_results_create();
+  ErrorStack *err = error_stack_create();
+  ThreadControl *tc = config_get_thread_control(config);
+
+  EndgameArgs args = {
+      .game = game,
+      .thread_control = tc,
+      .plies = 3,
+      .tt_fraction_of_mem = 0.25,
+      .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+      .num_threads = 6,
+      .num_top_moves = 1,
+      .use_heuristics = true,
+      .forced_pass_bypass = true,
+      .skip_pruned_cross_sets = skip_pc,
+  };
+
+  thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
+  Timer timer;
+  ctimer_start(&timer);
+  endgame_solve(solver, &args, results, err);
+  *elapsed_out = ctimer_elapsed_seconds(&timer);
+  *depth_out = endgame_results_get_depth(results, ENDGAME_RESULT_BEST);
+
+  assert(error_stack_is_empty(err));
+  error_stack_destroy(err);
+  endgame_results_destroy(results);
+  endgame_solver_destroy(solver);
+}
+
+void test_eldar_v_timing(void) {
+  log_set_level(LOG_FATAL);
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -threads 6 -s1 score -s2 score -r1 small -r2 small");
+  exec_config_quiet(config, "new");
+
+  const int n_runs = 3;
+  printf("\nEldar V timing (%d runs each, 3-ply, 6 threads):\n", n_runs);
+  printf("  %-6s  %9s  %5s\n", "config", "elapsed_s", "depth");
+
+  double pc_total = 0.0;
+  double nopc_total = 0.0;
+  for (int r = 0; r < n_runs; r++) {
+    double elapsed;
+    int depth;
+    solve_eldar_v_once(config, false, &elapsed, &depth);
+    printf("  pc     %8.3fs  d%d\n", elapsed, depth);
+    (void)fflush(stdout);
+    pc_total += elapsed;
+  }
+  for (int r = 0; r < n_runs; r++) {
+    double elapsed;
+    int depth;
+    solve_eldar_v_once(config, true, &elapsed, &depth);
+    printf("  nopc   %8.3fs  d%d\n", elapsed, depth);
+    (void)fflush(stdout);
+    nopc_total += elapsed;
+  }
+  printf("  ---\n");
+  printf("  pc   avg: %.3fs\n", pc_total / n_runs);
+  printf("  nopc avg: %.3fs\n", nopc_total / n_runs);
+  printf("  speedup: %.2fx\n", nopc_total / pc_total);
+
+  config_destroy(config);
 }

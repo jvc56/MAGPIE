@@ -9,5 +9,6 @@ void test_benchmark_four_way_round_robin(void);
 void test_benchmark_threshold_tournament(void);
 void test_benchmark_overnight_gamepairs(void);
 void test_benchmark_profile_precheck(void);
+void test_eldar_v_timing(void);
 
 #endif

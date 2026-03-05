@@ -142,6 +142,7 @@ static TestEntry on_demand_test_table[] = {
     {"threshtour", test_benchmark_threshold_tournament},
     {"gamepairs", test_benchmark_overnight_gamepairs},
     {"profile_p", test_benchmark_profile_precheck},
+    {"eldar_timing", test_eldar_v_timing},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
