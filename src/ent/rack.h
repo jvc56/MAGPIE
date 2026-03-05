@@ -5,6 +5,7 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "letter_distribution.h"
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
