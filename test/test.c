@@ -45,7 +45,6 @@
 #include "sim_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
-#include "timed_endgame_test.h"
 #include "transposition_table_test.h"
 #include "validated_move_test.h"
 #include "win_pct_test.h"
@@ -131,18 +130,9 @@ static TestEntry on_demand_test_table[] = {
     {"benchfp", test_benchmark_forced_pass},
     {"benchns", test_benchmark_nonstuck},
     {"benchns3v3", test_benchmark_nonstuck_3v3},
-    {"timedab", test_benchmark_timed_selfplay},
-    {"overnight", test_benchmark_timed_overnight},
-    {"timedhard", test_benchmark_timed_hard},
     {"multipv", test_multi_pv},
     {"kue", test_kue},
     {"monsterq", test_monster_q},
-    {"4cfgrandom", test_benchmark_timed_4cfg_random},
-    {"fourway", test_benchmark_four_way_round_robin},
-    {"threshtour", test_benchmark_threshold_tournament},
-    {"gamepairs", test_benchmark_overnight_gamepairs},
-    {"profile_p", test_benchmark_profile_precheck},
-    {"eldar_timing", test_eldar_v_timing},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
