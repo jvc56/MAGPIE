@@ -2374,6 +2374,11 @@ static float compute_initial_stuck_fraction(const EndgameSolver *solver,
                                             const Game *game) {
   int opp_idx = 1 - solver->solving_player;
   Game *root_game = game_duplicate(game);
+  // Regenerate cross-sets with the pruned KWGs so the precheck inside
+  // compute_opp_stuck_fraction reads the same cross-sets that movegen uses.
+  game_set_override_kwgs(root_game, solver->pruned_kwgs[0],
+                         solver->pruned_kwgs[1], solver->dual_lexicon_mode);
+  game_gen_all_cross_sets(root_game);
   MoveList *tmp_ml = move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
   float frac = compute_opp_stuck_fraction(
       root_game, tmp_ml, solver_get_pruned_kwg(solver, opp_idx), opp_idx, 0,
