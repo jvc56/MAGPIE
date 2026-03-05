@@ -86,7 +86,6 @@ static inline void cpthread_create(pthread_t *newthread,
   }
 }
 
-
 static inline void cpthread_join(cpthread_t th) {
   if (pthread_join(th, NULL)) {
     log_fatal("thread join failed");
