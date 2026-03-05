@@ -473,3 +473,252 @@ void test_benchmark_nonstuck_3v3(void) {
   log_set_level(LOG_FATAL);
   run_ab_benchmark("/tmp/nonstuck_cgps.txt", "nonstuck", 3, 3, 500);
 }
+
+// Generate stuck positions that are not solvable to 25 ply in probe_seconds
+// (using a release build). Writes up to target CGPs to outfile.
+static int generate_hard_stuck_cgps(uint64_t base_seed, int target,
+                                     double probe_seconds,
+                                     const char *outfile) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -threads 6 -s1 score -s2 score -r1 small -r2 small");
+  MoveList *move_list = move_list_create(1);
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+  EndgameSolver *solver = endgame_solver_create();
+  EndgameResults *results = endgame_results_create();
+
+  FILE *fp = fopen(outfile, "we");
+  assert(fp);
+
+  int found = 0;
+  const int max_attempts = 2000000;
+
+  for (int i = 0; found < target && i < max_attempts; i++) {
+    game_reset(game);
+    game_seed(game, base_seed + (uint64_t)i);
+    draw_starting_racks(game);
+
+    if (!play_until_bag_empty(game, move_list)) {
+      continue;
+    }
+    if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
+      continue;
+    }
+
+    // Need at least one stuck tile
+    bool any_stuck = false;
+    for (int p = 0; p < 2 && !any_stuck; p++) {
+      if (compute_stuck_fraction(game, move_list, p) > 0.0f) {
+        any_stuck = true;
+      }
+    }
+    if (!any_stuck) {
+      continue;
+    }
+
+    // Probe: try to solve to 25 ply within probe_seconds.
+    // If we don't reach ply 25, it's a hard position.
+    const EndgameArgs args = {
+        .game = game,
+        .thread_control = config_get_thread_control(config),
+        .plies = 25,
+        .tt_fraction_of_mem = 0.05,
+        .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+        .num_threads = 6,
+        .num_top_moves = 1,
+        .use_heuristics = true,
+        .forced_pass_bypass = true,
+        .hard_time_limit = probe_seconds,
+        .soft_time_limit = probe_seconds * 0.7,
+    };
+    ErrorStack *err = error_stack_create();
+    endgame_solve(solver, &args, results, err);
+    assert(error_stack_is_empty(err));
+    error_stack_destroy(err);
+
+    int achieved = endgame_results_get_depth(results, ENDGAME_RESULT_BEST);
+    if (achieved < 25) {
+      char *cgp = game_get_cgp(game, true);
+      (void)fprintf(fp, "%s\n", cgp);
+      free(cgp);
+      found++;
+      if (found % 20 == 0 || found <= 3) {
+        printf("  Found %d/%d (attempt %d, depth=%d)\n", found, target, i,
+               achieved);
+        (void)fflush(stdout);
+      }
+    }
+  }
+
+  (void)fclose(fp);
+  endgame_results_destroy(results);
+  endgame_solver_destroy(solver);
+  move_list_destroy(move_list);
+  config_destroy(config);
+  return found;
+}
+
+void test_generate_hard_stuck_cgps(void) {
+  log_set_level(LOG_FATAL);
+  printf("\n");
+  printf("==============================================================\n");
+  printf("  Generate Hard Stuck CGPs\n");
+  printf("  Criterion: stuck position not solved to 25-ply in 10s\n");
+  printf("  NOTE: run with BUILD=release for meaningful timing\n");
+  printf("==============================================================\n");
+  (void)fflush(stdout);
+  int found = generate_hard_stuck_cgps(123456789ULL, 200, 10.0,
+                                        "/tmp/hard_stuck_200_cgps.txt");
+  printf("  Found %d → /tmp/hard_stuck_200_cgps.txt\n", found);
+  printf("==============================================================\n");
+  (void)fflush(stdout);
+}
+
+// Run precheck vs noprecheck on hard stuck positions.
+// Each position is solved by both configs; compare which finds better value.
+// pc_budget and nopc_budget are hard time limits in seconds.
+static void run_hard_stuck_gamepairs(const char *cgp_file, int max_positions,
+                                     double pc_budget, double nopc_budget) {
+  FILE *fp = fopen(cgp_file, "re");
+  if (!fp) {
+    printf("No CGP file at %s — run genhardstuck first.\n", cgp_file);
+    return;
+  }
+
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -threads 6 -s1 score -s2 score -r1 small -r2 small");
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+  EndgameSolver *solver_pc = endgame_solver_create();
+  EndgameSolver *solver_nopc = endgame_solver_create();
+  EndgameResults *results = endgame_results_create();
+
+  char (*cgp_lines)[4096] = malloc((size_t)max_positions * 4096);
+  assert(cgp_lines);
+  int num_cgps = 0;
+  while (num_cgps < max_positions && fgets(cgp_lines[num_cgps], 4096, fp)) {
+    size_t len = strlen(cgp_lines[num_cgps]);
+    if (len > 0 && cgp_lines[num_cgps][len - 1] == '\n') {
+      cgp_lines[num_cgps][len - 1] = '\0';
+    }
+    if (strlen(cgp_lines[num_cgps]) > 0) {
+      num_cgps++;
+    }
+  }
+  (void)fclose(fp);
+
+  printf("\n");
+  printf("==============================================================\n");
+  printf("  Hard Stuck Gamepairs: pc(%.0fs) vs nopc(%.0fs)\n", pc_budget,
+         nopc_budget);
+  printf("  %d positions | NOTE: run with BUILD=release\n", num_cgps);
+  printf("==============================================================\n");
+  (void)fflush(stdout);
+
+  int pc_wins = 0, nopc_wins = 0, same_count = 0;
+  int total_spread = 0;
+  double total_time_pc = 0, total_time_nopc = 0;
+  double total_depth_pc = 0, total_depth_nopc = 0;
+  int solved = 0;
+
+  for (int ci = 0; ci < num_cgps; ci++) {
+    ErrorStack *err = error_stack_create();
+    game_load_cgp(game, cgp_lines[ci], err);
+    if (!error_stack_is_empty(err)) {
+      error_stack_destroy(err);
+      continue;
+    }
+    error_stack_destroy(err);
+
+    EndgameArgs pc_args = {
+        .game = game,
+        .thread_control = config_get_thread_control(config),
+        .plies = 25,
+        .tt_fraction_of_mem = 0.05,
+        .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+        .num_threads = 6,
+        .num_top_moves = 1,
+        .use_heuristics = true,
+        .forced_pass_bypass = true,
+        .hard_time_limit = pc_budget,
+        .soft_time_limit = pc_budget * 0.7,
+        .skip_pruned_cross_sets = false,
+    };
+    EndgameArgs nopc_args = pc_args;
+    nopc_args.hard_time_limit = nopc_budget;
+    nopc_args.soft_time_limit = nopc_budget * 0.7;
+    nopc_args.skip_pruned_cross_sets = true;
+
+    Timer t;
+    ctimer_start(&t);
+    err = error_stack_create();
+    endgame_solve(solver_pc, &pc_args, results, err);
+    assert(error_stack_is_empty(err));
+    error_stack_destroy(err);
+    double time_pc = ctimer_elapsed_seconds(&t);
+    int val_pc = endgame_results_get_value(results, ENDGAME_RESULT_BEST);
+    int depth_pc = endgame_results_get_depth(results, ENDGAME_RESULT_BEST);
+
+    ctimer_start(&t);
+    err = error_stack_create();
+    endgame_solve(solver_nopc, &nopc_args, results, err);
+    assert(error_stack_is_empty(err));
+    error_stack_destroy(err);
+    double time_nopc = ctimer_elapsed_seconds(&t);
+    int val_nopc = endgame_results_get_value(results, ENDGAME_RESULT_BEST);
+    int depth_nopc = endgame_results_get_depth(results, ENDGAME_RESULT_BEST);
+
+    int spread = val_pc - val_nopc;
+    total_spread += spread;
+    if (spread > 0) {
+      pc_wins++;
+    } else if (spread < 0) {
+      nopc_wins++;
+    } else {
+      same_count++;
+    }
+    total_time_pc += time_pc;
+    total_time_nopc += time_nopc;
+    total_depth_pc += depth_pc;
+    total_depth_nopc += depth_nopc;
+    solved++;
+
+    if (solved % 20 == 0 || solved <= 3) {
+      printf("  [%3d] pc=%+d(d%d,%.1fs) nopc=%+d(d%d,%.1fs) Δ=%+d\n", solved,
+             val_pc, depth_pc, time_pc, val_nopc, depth_nopc, time_nopc,
+             spread);
+      (void)fflush(stdout);
+    }
+  }
+
+  printf("\n");
+  printf("  --- Summary (%d positions) ---\n", solved);
+  printf("  pc wins: %d  |  nopc wins: %d  |  same: %d\n", pc_wins, nopc_wins,
+         same_count);
+  printf("  Net spread: %+d (%+.2f/pos)\n", total_spread,
+         solved > 0 ? (double)total_spread / solved : 0.0);
+  printf("  pc:   avg %.3fs/pos  avg depth %.2f\n",
+         solved > 0 ? total_time_pc / solved : 0.0,
+         solved > 0 ? total_depth_pc / solved : 0.0);
+  printf("  nopc: avg %.3fs/pos  avg depth %.2f\n",
+         solved > 0 ? total_time_nopc / solved : 0.0,
+         solved > 0 ? total_depth_nopc / solved : 0.0);
+  printf("==============================================================\n");
+  (void)fflush(stdout);
+
+  free(cgp_lines);
+  endgame_results_destroy(results);
+  endgame_solver_destroy(solver_pc);
+  endgame_solver_destroy(solver_nopc);
+  config_destroy(config);
+}
+
+void test_benchmark_hard_stuck_gamepairs(void) {
+  log_set_level(LOG_FATAL);
+  run_hard_stuck_gamepairs("/tmp/hard_stuck_200_cgps.txt", 200, 45.0, 45.0);
+}
+
+void test_benchmark_hard_stuck_gamepairs_unequal(void) {
+  log_set_level(LOG_FATAL);
+  run_hard_stuck_gamepairs("/tmp/hard_stuck_200_cgps.txt", 200, 45.0, 20.0);
+}

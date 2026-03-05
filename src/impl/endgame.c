@@ -115,6 +115,7 @@ struct EndgameSolver {
 
   KWG *pruned_kwgs[2];
   dual_lexicon_mode_t dual_lexicon_mode;
+  bool skip_pruned_cross_sets;
   double soft_time_limit;
   double hard_time_limit;
 
@@ -432,6 +433,7 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   if (es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED && shared_kwg) {
     es->dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT;
   }
+  es->skip_pruned_cross_sets = endgame_args->skip_pruned_cross_sets;
   es->soft_time_limit = endgame_args->soft_time_limit;
   es->hard_time_limit = endgame_args->hard_time_limit;
   bool create_separate_kwgs =
@@ -528,10 +530,12 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
   game_set_backup_mode(solver_worker->game_copy, BACKUP_MODE_SIMULATION);
 
   // Set override KWGs so cross-set computation uses the pruned lexicon
-  game_set_override_kwgs(solver_worker->game_copy, solver->pruned_kwgs[0],
-                         solver->pruned_kwgs[1], solver->dual_lexicon_mode);
-  // Regenerate initial cross-sets using the pruned KWGs
-  game_gen_all_cross_sets(solver_worker->game_copy);
+  if (!solver->skip_pruned_cross_sets) {
+    game_set_override_kwgs(solver_worker->game_copy, solver->pruned_kwgs[0],
+                           solver->pruned_kwgs[1], solver->dual_lexicon_mode);
+    // Regenerate initial cross-sets using the pruned KWGs
+    game_gen_all_cross_sets(solver_worker->game_copy);
+  }
   solver_worker->move_list =
       move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
 
@@ -798,7 +802,8 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
   const Rack *stm_rack =
       player_get_rack(game_get_player(worker->game_copy, stm_idx));
 
-  if (stm_rack->number_of_letters == 1) {
+  if (stm_rack->number_of_letters == 1 &&
+      !worker->solver->skip_pruned_cross_sets) {
     return generate_single_tile_plays(worker);
   }
 
@@ -1128,7 +1133,8 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
   // results, fall through to movegen with opp_tiles_bv pre-seeded.
   uint64_t opp_tiles_bv = 0;
   const Board *board = game_get_board(game);
-  if (board_get_cross_sets_valid(board)) {
+  if (board_get_cross_sets_valid(board) &&
+      !(solver && solver->skip_pruned_cross_sets)) {
     bool kwgs_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
     int ci = board_get_cross_set_index(kwgs_shared, opp_idx);
     const LetterDistribution *ld = game_get_ld(game);
@@ -1269,7 +1275,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
     const Rack *stm_rack_p =
         player_get_rack(game_get_player(worker->game_copy, stm_idx_p));
     int nplays;
-    if (stm_rack_p->number_of_letters == 1) {
+    if (stm_rack_p->number_of_letters == 1 &&
+        !worker->solver->skip_pruned_cross_sets) {
       // Single-tile fast path: cross-set scan instead of KWG traversal.
       // generate_single_tile_plays allocs to the arena; copy the result into
       // move_list and immediately pop the arena so the per-node dealloc in

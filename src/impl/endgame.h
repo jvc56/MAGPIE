@@ -46,6 +46,8 @@ typedef struct EndgameArgs {
   EndgamePerPlyCallback per_ply_callback;
   void *per_ply_callback_data;
   dual_lexicon_mode_t dual_lexicon_mode;
+  // If true, disable precheck and single-tile fast paths (benchmark only)
+  bool skip_pruned_cross_sets;
   // If true, play forced passes without consuming a depth ply (default: false)
   bool forced_pass_bypass;
   // IDS time management (0 = no limit, rely on external timer only):
