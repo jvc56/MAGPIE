@@ -473,4 +473,3 @@ void test_benchmark_nonstuck_3v3(void) {
   log_set_level(LOG_FATAL);
   run_ab_benchmark("/tmp/nonstuck_cgps.txt", "nonstuck", 3, 3, 500);
 }
-
