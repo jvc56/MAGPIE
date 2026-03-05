@@ -78,6 +78,8 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
 
   uint64_t num_infer_leaves = 0;
   if (sim_args->use_inference) {
+    sim_args->inference_args.parent_worker_thread_index =
+        sim_args->bai_options.parent_worker_thread_index;
     infer(&sim_args->inference_args, &((*sim_ctx)->inference_ctx),
           sim_args->inference_results, error_stack);
     if (!error_stack_is_empty(error_stack) ||

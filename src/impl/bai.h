@@ -176,6 +176,8 @@ bai_sync_data_get_next_bai_sample_index_while_locked(BAISampleArgs *args) {
     const double denominator =
         numerator + psi_jt * bai_d(emp_mean_jt, emp_var_jt, theta_bar);
     const double coin = numerator / denominator;
+    // Thread index can by anything here since this sample doesn't use
+    // multithreading
     if (rvs_sample(args->bai_sync_data->rng, 0, 0, NULL) < coin) {
       arm_index = it;
     } else {
@@ -392,7 +394,17 @@ static inline void bai_worker_sample_loop(BAIWorkerArgs *bai_worker_args) {
   ThreadControl *thread_control = bai_worker_args->sync_data->thread_control;
   const BAIOptions *bai_options = bai_worker_args->bai_options;
   RandomVariables *rvs = bai_worker_args->rvs;
-  const int thread_index = bai_worker_args->thread_index;
+  const int bai_thread_index = bai_worker_args->thread_index;
+
+  if (bai_thread_index > 0 && bai_options->parent_worker_thread_index > 0) {
+    log_fatal("Both BAI worker thread index (%d) and parent worker "
+              "thread index (%d) are greater than 0.",
+              bai_thread_index, bai_options->parent_worker_thread_index);
+  }
+  int rvs_thread_index = 0;
+  if (bai_options->parent_worker_thread_index == 0) {
+    rvs_thread_index = bai_thread_index;
+  }
 
   BAISampleArgs sample_args = {
       .bai_sync_data = sync_data,
@@ -410,7 +422,7 @@ static inline void bai_worker_sample_loop(BAIWorkerArgs *bai_worker_args) {
     if (arm_index < 0) {
       break;
     }
-    double sample = rvs_sample(rvs, arm_index, thread_index, NULL);
+    double sample = rvs_sample(rvs, arm_index, rvs_thread_index, NULL);
     bai_sync_data_add_sample(&sample_args, arm_index, sample);
   }
 }

@@ -1693,12 +1693,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     case ARG_TOKEN_MULTI_THREADING_MODE:
       usages[0] = "<mode>";
-      examples[0] = "one_thread_per_game";
-      examples[1] = "one_game_all_threads";
-      text = "Specifies the multi-threading mode for autoplay with simulation. "
-             "'one_thread_per_game' runs N games in parallel (default). "
-             "'one_game_all_threads' runs one game at a time using all threads "
-             "for simulation.";
+      examples[0] = MULTI_THREADING_MODE_PER_GAME_PARALLELISM_STRING;
+      examples[1] = MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM_STRING;
+      text = "Specifies the multi-threading mode for autoplay with "
+             "simulation. " MULTI_THREADING_MODE_PER_GAME_PARALLELISM_STRING
+             " runs N games in parallel "
+             "(default). " MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM_STRING
+             " runs one game at a time using all threads for simulation.";
       break;
     case NUMBER_OF_ARG_TOKENS:
       log_fatal("encountered invalid arg token in help command");
@@ -2187,7 +2188,7 @@ void config_fill_infer_args(const Config *config, bool use_game_history,
                             Rack *target_known_rack, Rack *nontarget_known_rack,
                             InferenceArgs *args) {
   infer_args_fill(args, config->num_plays, config->eq_margin_inference,
-                  config->game_history, config->game, config->num_threads,
+                  config->game_history, config->game, config->num_threads, 0,
                   config->print_interval, config->thread_control,
                   use_game_history, use_infer_cutoff_optimization, target_index,
                   target_score, target_num_exch, target_played_tiles,
@@ -2597,8 +2598,14 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->multi_threading_mode = config->multi_threading_mode;
   autoplay_args->cutoff = config->cutoff;
 
-  InferenceArgs zero_inference_args;
-  memset(&zero_inference_args, 0, sizeof(zero_inference_args));
+  InferenceArgs inference_args = {0};
+  if (config->p1_sim_with_inference || config->p2_sim_with_inference) {
+    // For autoplay, we want to use the game history for inference since it will
+    // be more accurate and the overhead of using the history will be less of a
+    // concern since we will be simming many games.
+    config_fill_infer_args(config, false, 0, 0, 0, NULL, false, NULL, NULL,
+                           &inference_args);
+  }
 
   sim_args_fill(
       config->p1_sim_plies, /*move_list=*/NULL, config->p1_num_plays,
@@ -2610,7 +2617,7 @@ void config_fill_autoplay_args(const Config *config,
       /*seed=*/0, config->p1_max_iterations, config->p1_min_play_iterations,
       config->p1_stop_cond_pct, config->p1_threshold,
       config->p1_time_limit_seconds, config->p1_sampling_rule, config->cutoff,
-      &zero_inference_args, &autoplay_args->p1_sim_args);
+      &inference_args, &autoplay_args->p1_sim_args);
 
   sim_args_fill(
       config->p2_sim_plies, /*move_list=*/NULL, config->p2_num_plays,
@@ -2622,7 +2629,7 @@ void config_fill_autoplay_args(const Config *config,
       /*seed=*/0, config->p2_max_iterations, config->p2_min_play_iterations,
       config->p2_stop_cond_pct, config->p2_threshold,
       config->p2_time_limit_seconds, config->p2_sampling_rule, config->cutoff,
-      &zero_inference_args, &autoplay_args->p2_sim_args);
+      &inference_args, &autoplay_args->p2_sim_args);
 }
 
 void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
@@ -6255,10 +6262,14 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   const char *mtmode_str =
       config_get_parg_value(config, ARG_TOKEN_MULTI_THREADING_MODE, 0);
   if (mtmode_str) {
-    if (has_iprefix(mtmode_str, "one_thread_per_game")) {
-      config->multi_threading_mode = MULTI_THREADING_MODE_ONE_THREAD_PER_GAME;
-    } else if (has_iprefix(mtmode_str, "one_game_all_threads")) {
-      config->multi_threading_mode = MULTI_THREADING_MODE_ONE_GAME_ALL_THREADS;
+    if (has_iprefix(mtmode_str,
+                    MULTI_THREADING_MODE_PER_GAME_PARALLELISM_STRING)) {
+      config->multi_threading_mode = MULTI_THREADING_MODE_PER_GAME_PARALLELISM;
+    } else if (has_iprefix(
+                   mtmode_str,
+                   MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM_STRING)) {
+      config->multi_threading_mode =
+          MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM;
     } else {
       error_stack_push(
           error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
@@ -6780,7 +6791,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->p2_threshold = config->threshold;
   config->p1_sampling_rule = config->sampling_rule;
   config->p2_sampling_rule = config->sampling_rule;
-  config->multi_threading_mode = MULTI_THREADING_MODE_ONE_THREAD_PER_GAME;
+  config->multi_threading_mode = MULTI_THREADING_MODE_PER_GAME_PARALLELISM;
   config->use_heat_map = false;
   config->print_boards = false;
   config->print_on_finish = false;
@@ -6863,7 +6874,7 @@ void config_add_uint64_setting_to_string_builder(const Config *config,
                                                  StringBuilder *sb,
                                                  arg_token_t arg_token,
                                                  uint64_t value) {
-  string_builder_add_formatted_string(sb, " -%s %lu",
+  string_builder_add_formatted_string(sb, " -%s %" PRIu64,
                                       config->pargs[arg_token]->name, value);
 }
 
@@ -6943,28 +6954,38 @@ void config_add_settings_to_string_builder(const Config *config,
                                                config->p2_num_plays);
       break;
     case ARG_TOKEN_P1_STOP_COND_PCT:
-      config_add_double_setting_to_string_builder(config, sb, arg_token,
-                                                  config->p1_stop_cond_pct);
+      if (config->p1_stop_cond_pct >= 100.0) {
+        config_add_string_setting_to_string_builder(config, sb, arg_token,
+                                                    "none");
+      } else {
+        config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                    config->p1_stop_cond_pct);
+      }
       break;
     case ARG_TOKEN_P2_STOP_COND_PCT:
-      config_add_double_setting_to_string_builder(config, sb, arg_token,
-                                                  config->p2_stop_cond_pct);
+      if (config->p2_stop_cond_pct >= 100.0) {
+        config_add_string_setting_to_string_builder(config, sb, arg_token,
+                                                    "none");
+      } else {
+        config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                    config->p2_stop_cond_pct);
+      }
       break;
     case ARG_TOKEN_P1_MAX_ITERATIONS:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->p1_max_iterations);
+      config_add_uint64_setting_to_string_builder(config, sb, arg_token,
+                                                  config->p1_max_iterations);
       break;
     case ARG_TOKEN_P2_MAX_ITERATIONS:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->p2_max_iterations);
+      config_add_uint64_setting_to_string_builder(config, sb, arg_token,
+                                                  config->p2_max_iterations);
       break;
     case ARG_TOKEN_P1_MIN_PLAY_ITERATIONS:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->p1_min_play_iterations);
+      config_add_uint64_setting_to_string_builder(
+          config, sb, arg_token, config->p1_min_play_iterations);
       break;
     case ARG_TOKEN_P2_MIN_PLAY_ITERATIONS:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->p2_min_play_iterations);
+      config_add_uint64_setting_to_string_builder(
+          config, sb, arg_token, config->p2_min_play_iterations);
       break;
     case ARG_TOKEN_P1_SIM_WITH_INFERENCE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
@@ -7004,10 +7025,12 @@ void config_add_settings_to_string_builder(const Config *config,
       string_builder_add_formatted_string(sb, " -%s ",
                                           config->pargs[arg_token]->name);
       if (config->multi_threading_mode ==
-          MULTI_THREADING_MODE_ONE_GAME_ALL_THREADS) {
-        string_builder_add_string(sb, "one_game_all_threads");
+          MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM) {
+        string_builder_add_string(
+            sb, MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM_STRING);
       } else {
-        string_builder_add_string(sb, "one_thread_per_game");
+        string_builder_add_string(
+            sb, MULTI_THREADING_MODE_PER_GAME_PARALLELISM_STRING);
       }
       break;
     case ARG_TOKEN_DATA_PATH:

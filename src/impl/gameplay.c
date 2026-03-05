@@ -883,13 +883,13 @@ void generate_moves_for_game(const MoveGenArgs *args) {
                 args->game, game_get_player_on_turn_index(args->game))));
 }
 
-Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
+Move *get_top_equity_move(Game *game, int movegen_index, MoveList *move_list) {
   const MoveGenArgs args = {.game = game,
                             .move_list = move_list,
                             .move_record_type = MOVE_RECORD_BEST,
                             .move_sort_type = MOVE_SORT_EQUITY,
                             .override_kwg = NULL,
-                            .thread_index = thread_index,
+                            .thread_index = movegen_index,
                             .eq_margin_movegen = 0,
                             .target_equity = EQUITY_MAX_VALUE,
                             .target_leave_size_for_exchange_cutoff =
@@ -899,14 +899,14 @@ Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
 }
 
 Move *get_top_equity_move_for_inferences(
-    Game *game, int thread_index, MoveList *move_list, Equity target_equity,
+    Game *game, int movegen_index, MoveList *move_list, Equity target_equity,
     int target_leave_size_for_exchange_cutoff, Equity equity_margin) {
   const MoveGenArgs args = {.game = game,
                             .move_list = move_list,
                             .move_record_type = MOVE_RECORD_BEST,
                             .move_sort_type = MOVE_SORT_EQUITY,
                             .override_kwg = NULL,
-                            .thread_index = thread_index,
+                            .thread_index = movegen_index,
                             .eq_margin_movegen = equity_margin,
                             .target_equity = target_equity,
                             .target_leave_size_for_exchange_cutoff =
@@ -915,11 +915,11 @@ Move *get_top_equity_move_for_inferences(
   return move_list_get_move(move_list, 0);
 }
 
-Move *get_top_simming_move(Game *game, int thread_index, MoveList *move_list,
+Move *get_top_simming_move(Game *game, int movegen_index, MoveList *move_list,
                            SimArgs *sim_args, SimCtx **sim_ctx,
                            SimResults *sim_results, ErrorStack *error_stack) {
   if (sim_args->num_plies == 0) {
-    return get_top_equity_move(game, thread_index, move_list);
+    return get_top_equity_move(game, movegen_index, move_list);
   }
 
   const MoveGenArgs gen_args = {
@@ -928,19 +928,21 @@ Move *get_top_simming_move(Game *game, int thread_index, MoveList *move_list,
       .move_record_type = MOVE_RECORD_ALL,
       .move_sort_type = MOVE_SORT_EQUITY,
       .override_kwg = NULL,
-      .thread_index = thread_index,
+      .thread_index = movegen_index,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves(&gen_args);
 
-  if (move_list_get_count(move_list) == 0) {
-    return get_top_equity_move(game, thread_index, move_list);
+  if (move_list_get_count(move_list) == 1) {
+    return move_list_get_move(move_list, 0);
   }
 
   sim_args->game = game;
   sim_args->move_list = move_list;
+
+  // FIXME: fill the infer args here using the previous play
 
   simulate(sim_args, sim_ctx, sim_results, error_stack);
   if (!error_stack_is_empty(error_stack)) {

@@ -244,7 +244,7 @@ void postgen_prebroadcast_func(void *data) {
 
 typedef struct AutoplayWorker {
   int worker_index;
-  const AutoplayArgs *args;
+  AutoplayArgs args;
   AutoplayResults *autoplay_results;
   AutoplaySharedData *shared_data;
   XoshiroPRNG *prng;
@@ -259,7 +259,7 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
                                        int worker_index,
                                        AutoplaySharedData *shared_data) {
   AutoplayWorker *autoplay_worker = malloc_or_die(sizeof(AutoplayWorker));
-  autoplay_worker->args = args;
+  autoplay_worker->args = *args;
   autoplay_worker->worker_index = worker_index;
   autoplay_worker->autoplay_results =
       autoplay_results_create_empty_copy(target);
@@ -372,7 +372,7 @@ typedef struct GameRunner {
 } GameRunner;
 
 GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
-  const AutoplayArgs *args = autoplay_worker->args;
+  const AutoplayArgs *args = &autoplay_worker->args;
   GameRunner *game_runner = malloc_or_die(sizeof(GameRunner));
   game_runner->shared_data = autoplay_worker->shared_data;
   game_runner->game = game_create(args->game_args);
@@ -412,7 +412,7 @@ void game_runner_start(const AutoplayWorker *autoplay_worker,
       // generation.
       (iter_output->iter_count -
        game_runner->shared_data->leavegen_shared_data->gen_start_games) >=
-          (uint64_t)autoplay_worker->args->games_before_force_draw_start) {
+          (uint64_t)autoplay_worker->args.games_before_force_draw_start) {
     game_runner->force_draw = true;
   }
 }
@@ -424,36 +424,20 @@ bool game_runner_is_game_over(GameRunner *game_runner) {
 }
 
 Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
-                                       GameRunner *game_runner,
-                                       int thread_index) {
+                                       GameRunner *game_runner) {
   Game *game = game_runner->game;
   const int player_on_turn_index = game_get_player_on_turn_index(game);
-  SimArgs sim_args = (player_on_turn_index == 0)
-                         ? autoplay_worker->args->p1_sim_args
-                         : autoplay_worker->args->p2_sim_args;
-  sim_args.game = game;
-  sim_args.seed = game_runner->seed;
-  sim_args.num_threads = (autoplay_worker->args->multi_threading_mode ==
-                          MULTI_THREADING_MODE_ONE_GAME_ALL_THREADS)
-                             ? autoplay_worker->args->num_threads
-                             : 1;
-  sim_args.bai_options.num_threads = sim_args.num_threads;
-  // In ONE_THREAD_PER_GAME mode, each autoplay worker (thread_index 0..N-1)
-  // runs its own sim. BAI workers must not use the same cached_gens slots as
-  // the autoplay workers, so offset their thread indices past the autoplay
-  // range.
-  sim_args.bai_options.thread_index_offset =
-      (autoplay_worker->args->multi_threading_mode ==
-       MULTI_THREADING_MODE_ONE_THREAD_PER_GAME)
-          ? autoplay_worker->args->num_threads + thread_index
-          : 0;
-
+  SimArgs *sim_args = (player_on_turn_index == 0)
+                          ? &autoplay_worker->args.p1_sim_args
+                          : &autoplay_worker->args.p2_sim_args;
+  sim_args->game = game_runner->game;
+  sim_args->seed = game_runner->seed;
   ErrorStack *error_stack = autoplay_worker->error_stack;
   error_stack_reset(error_stack);
   Move *move = get_top_simming_move(
-      game, thread_index, game_runner->move_list[player_on_turn_index],
-      &sim_args, &autoplay_worker->sim_ctx, autoplay_worker->sim_results,
-      error_stack);
+      game, autoplay_worker->worker_index,
+      game_runner->move_list[player_on_turn_index], sim_args,
+      &autoplay_worker->sim_ctx, autoplay_worker->sim_results, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
     log_fatal("autoplay worker %d failed to get top simming move for player %d "
@@ -475,7 +459,6 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
   const int player_on_turn_index = game_get_player_on_turn_index(game);
   LeavegenSharedData *lg_shared_data =
       game_runner->shared_data->leavegen_shared_data;
-  const int thread_index = autoplay_worker->worker_index;
   // If we are forcing a draw, we need to draw a rare leave. The drawn
   // leave does not necessarily fit in the bag. If we've reached the
   // target minimum leave count for all leaves, no rare leave can be
@@ -496,16 +479,15 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     // Set the rack to the rare leave
     rack_copy(player_rack, &rare_rack_or_move_leave);
 
-    const Move *forced_move = game_runner_get_top_simming_move(
-        autoplay_worker, game_runner, thread_index);
+    const Move *forced_move =
+        game_runner_get_top_simming_move(autoplay_worker, game_runner);
     rack_list_add_rack(lg_shared_data->rack_list, &rare_rack_or_move_leave,
                        equity_to_double(move_get_equity(forced_move)));
 
     rack_copy(player_rack, &original_rack);
   }
 
-  *move = game_runner_get_top_simming_move(autoplay_worker, game_runner,
-                                           thread_index);
+  *move = game_runner_get_top_simming_move(autoplay_worker, game_runner);
 
   if (lg_shared_data) {
     rack_list_add_rack(lg_shared_data->rack_list, player_rack,
@@ -516,7 +498,7 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
                             game_runner->game, *move, &rare_rack_or_move_leave);
 
   // Print board with move about to be played if requested
-  if (autoplay_worker->args->print_boards) {
+  if (autoplay_worker->args.print_boards) {
     StringBuilder *output = string_builder_create();
     if (game_runner->pair_game_number == 0) {
       string_builder_add_formatted_string(
@@ -530,10 +512,10 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
           game_runner->pair_game_number, game_runner->turn_number + 1);
     }
     string_builder_add_game(game, game_runner->move_list[player_on_turn_index],
-                            autoplay_worker->args->game_string_options, NULL,
+                            autoplay_worker->args.game_string_options, NULL,
                             output);
     string_builder_add_string(output, "\n");
-    thread_control_print(autoplay_worker->args->thread_control,
+    thread_control_print(autoplay_worker->args.thread_control,
                          string_builder_peek(output));
     string_builder_destroy(output);
   }
@@ -563,7 +545,7 @@ void print_current_status(AutoplayWorker *autoplay_worker,
   } else {
     string_builder_add_string(status_sb, "\n");
   }
-  thread_control_print(autoplay_worker->args->thread_control,
+  thread_control_print(autoplay_worker->args.thread_control,
                        string_builder_peek(status_sb));
   string_builder_destroy(status_sb);
 }
@@ -639,7 +621,7 @@ bool target_min_leave_count_reached(AutoplayWorker *autoplay_worker) {
 void autoplay_single_generation(AutoplayWorker *autoplay_worker,
                                 GameRunner *game_runner1,
                                 GameRunner *game_runner2) {
-  ThreadControl *thread_control = autoplay_worker->args->thread_control;
+  ThreadControl *thread_control = autoplay_worker->args.thread_control;
   AutoplayIterOutput iter_output;
   while (
       // Check if autoplay was exited by the user.
@@ -670,10 +652,25 @@ void autoplay_leave_gen(AutoplayWorker *autoplay_worker,
   }
 }
 
+void init_sim_args_for_player(AutoplayWorker *autoplay_worker,
+                              int player_index) {
+  SimArgs *sim_args = (player_index == 0) ? &autoplay_worker->args.p1_sim_args
+                                          : &autoplay_worker->args.p2_sim_args;
+  sim_args->num_threads = (autoplay_worker->args.multi_threading_mode ==
+                           MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM)
+                              ? autoplay_worker->args.num_threads
+                              : 1;
+  sim_args->bai_options.num_threads = sim_args->num_threads;
+  sim_args->bai_options.parent_worker_thread_index =
+      autoplay_worker->worker_index;
+}
+
 void *autoplay_worker(void *uncasted_autoplay_worker) {
   AutoplayWorker *autoplay_worker = (AutoplayWorker *)uncasted_autoplay_worker;
-  const AutoplayArgs *args = autoplay_worker->args;
+  const AutoplayArgs *args = &autoplay_worker->args;
   GameRunner *game_runner1 = game_runner_create(autoplay_worker);
+  init_sim_args_for_player(autoplay_worker, 0);
+  init_sim_args_for_player(autoplay_worker, 1);
   GameRunner *game_runner2 = NULL;
   switch (args->type) {
   case AUTOPLAY_TYPE_DEFAULT:
@@ -734,6 +731,7 @@ void valid_autoplay_results_options(const AutoplayResults *autoplay_results,
   }
 }
 
+// Modifies the sim_args if simming is enabled.
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
               ErrorStack *error_stack) {
   const bool is_leavegen_mode = args->type == AUTOPLAY_TYPE_LEAVE_GEN;
@@ -790,8 +788,8 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
   const bool any_player_sims =
       args->p1_sim_args.num_plies > 0 || args->p2_sim_args.num_plies > 0;
   const int autoplay_num_threads =
-      (any_player_sims &&
-       args->multi_threading_mode == MULTI_THREADING_MODE_ONE_GAME_ALL_THREADS)
+      (any_player_sims && args->multi_threading_mode ==
+                              MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM)
           ? 1
           : args->num_threads;
 
