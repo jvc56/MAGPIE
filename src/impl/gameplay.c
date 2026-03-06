@@ -939,11 +939,6 @@ Move *get_top_simming_move(Game *game, int movegen_index, MoveList *move_list,
     return move_list_get_move(move_list, 0);
   }
 
-  sim_args->game = game;
-  sim_args->move_list = move_list;
-
-  // FIXME: fill the infer args here using the previous play
-
   simulate(sim_args, sim_ctx, sim_results, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;

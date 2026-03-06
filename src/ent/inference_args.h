@@ -17,7 +17,7 @@ typedef struct InferenceArgs {
   int target_index;
   Equity target_score;
   int target_num_exch;
-  int move_capacity;
+  int leave_list_capacity;
   Equity equity_margin;
   Rack *target_played_tiles;
   Rack *target_known_rack;
@@ -30,7 +30,7 @@ typedef struct InferenceArgs {
 } InferenceArgs;
 
 static inline void
-infer_args_fill(InferenceArgs *args, int num_plays, Equity eq_margin,
+infer_args_fill(InferenceArgs *args, int leave_list_capacity, Equity eq_margin,
                 GameHistory *game_history, const Game *game, int num_threads,
                 int parent_worker_thread_index, int print_interval,
                 ThreadControl *thread_control, bool use_game_history,
@@ -41,7 +41,7 @@ infer_args_fill(InferenceArgs *args, int num_plays, Equity eq_margin,
   args->target_index = target_index;
   args->target_score = target_score;
   args->target_num_exch = target_num_exch;
-  args->move_capacity = num_plays;
+  args->leave_list_capacity = leave_list_capacity;
   args->equity_margin = eq_margin;
   args->target_played_tiles = target_played_tiles;
   args->target_known_rack = target_known_rack;

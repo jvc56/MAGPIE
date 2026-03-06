@@ -47,7 +47,7 @@ typedef struct Inference {
   // The following fields are owned by this struct.
 
   int ld_size;
-  int move_capacity;
+  int leave_list_capacity;
   // Target player index in the game
   int target_index;
   // Target player score
@@ -213,11 +213,14 @@ void evaluate_possible_leave(Inference *inference) {
             equity_to_double(klv_get_leave_value(
                 inference->klv, inference->current_target_exchanged)),
             number_of_draws_for_leave);
-        leave_rack_list_insert_rack(
-            inference->current_target_leave,
-            inference->current_target_exchanged, (int)number_of_draws_for_leave,
-            current_leave_value,
-            inference_results_get_leave_rack_list(inference->results));
+        LeaveRackList *lrl =
+            inference_results_get_leave_rack_list(inference->results);
+        if (lrl) {
+          leave_rack_list_insert_rack(inference->current_target_leave,
+                                      inference->current_target_exchanged,
+                                      (int)number_of_draws_for_leave,
+                                      current_leave_value, lrl);
+        }
         alias_method_add_rack(
             inference_results_get_alias_method(inference->results),
             inference->current_target_leave, (int)number_of_draws_for_leave);
@@ -237,10 +240,13 @@ void evaluate_possible_leave(Inference *inference) {
       alias_method_add_rack(
           inference_results_get_alias_method(inference->results),
           inference->current_target_leave, (int)number_of_draws_for_leave);
-      leave_rack_list_insert_rack(
-          inference->current_target_leave, NULL, (int)number_of_draws_for_leave,
-          current_leave_value,
-          inference_results_get_leave_rack_list(inference->results));
+      LeaveRackList *lrl =
+          inference_results_get_leave_rack_list(inference->results);
+      if (lrl) {
+        leave_rack_list_insert_rack(inference->current_target_leave, NULL,
+                                    (int)number_of_draws_for_leave,
+                                    current_leave_value, lrl);
+      }
     }
   }
 }
@@ -329,7 +335,7 @@ Inference *inference_create(const Game *game, int thread_index,
       player_get_klv(game_get_player(inference->game, args->target_index));
 
   inference->ld_size = ld_get_size(game_get_ld(inference->game));
-  inference->move_capacity = args->move_capacity;
+  inference->leave_list_capacity = args->leave_list_capacity;
   inference->target_index = args->target_index;
   inference->target_score = args->target_score;
   inference->target_number_of_tiles_exchanged = args->target_num_exch;
@@ -352,7 +358,7 @@ Inference *inference_create(const Game *game, int thread_index,
 
   inference->results =
       inference_results_create(inference_results_get_alias_method(results));
-  inference_results_reset(inference->results, inference->move_capacity,
+  inference_results_reset(inference->results, inference->leave_list_capacity,
                           inference->ld_size);
 
   // Multithreading
@@ -400,7 +406,7 @@ void inference_reset(Inference *inference, const Game *game,
       game_get_player(inference->game, inference->target_index));
   rack_reset(inference->bag_as_rack);
 
-  inference_results_reset(inference->results, inference->move_capacity,
+  inference_results_reset(inference->results, inference->leave_list_capacity,
                           inference->ld_size);
 
   complete_inference_setup(inference, args);
@@ -412,6 +418,11 @@ void add_inference_results(InferenceResults *inference_results_to_add,
                                   inference_results_to_update);
   LeaveRackList *lrl_to_add =
       inference_results_get_leave_rack_list(inference_results_to_add);
+  if (!lrl_to_add) {
+    // This means that lrl_to_update is also necessarily NULL, so no leave racks
+    // to add.
+    return;
+  }
   LeaveRackList *lrl_to_update =
       inference_results_get_leave_rack_list(inference_results_to_update);
 
@@ -714,7 +725,7 @@ void inference_ctx_set_game(InferenceCtx *ctx, const Game *game) {
 void inference_ctx_set_inferences(InferenceCtx *ctx, const InferenceArgs *args,
                                   InferenceResults *results) {
   ctx->shared_rack_index = 0;
-  inference_results_reset(results, args->move_capacity,
+  inference_results_reset(results, args->leave_list_capacity,
                           ld_get_size(game_get_ld(args->game)));
   if (ctx->worker_inferences[0]) {
     for (int i = 0; i < ctx->num_workers; i++) {

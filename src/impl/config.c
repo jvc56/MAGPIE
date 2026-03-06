@@ -2415,13 +2415,8 @@ void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
   config_fill_sim_args(config, known_opp_rack, &target_played_tiles,
                        &nontarget_known_tiles, &target_known_inference_tiles,
                        &args);
-  if (args.use_inference &&
-      game_history_get_num_events(config->game_history) == 0) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_SIM_GAME_HISTORY_MISSING,
-        string_duplicate(
-            "cannot sim with inference with an empty game history"));
-    return;
+  if (game_history_get_num_events(config->game_history) == 0) {
+    args.use_inference = false;
   }
   if (sim_ctx) {
     simulate(&args, sim_ctx, sim_results, error_stack);
@@ -2468,8 +2463,11 @@ void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  const bool use_inference_for_this_run =
+      config->sim_with_inference &&
+      game_history_get_num_events(config->game_history) > 0;
   bool sim_results_valid = true;
-  if (config->sim_with_inference) {
+  if (use_inference_for_this_run) {
     // This will always set the state to false if it was interrupted
     inference_results_set_valid_for_current_game_state(
         config->inference_results, true);
@@ -2588,7 +2586,6 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->use_game_pairs = config_get_use_game_pairs(config);
   autoplay_args->human_readable = config_get_human_readable(config);
   autoplay_args->print_boards = config->print_boards;
-  autoplay_args->num_threads = config->num_threads;
   autoplay_args->print_interval = config->print_interval;
   autoplay_args->seed = config->seed;
   autoplay_args->thread_control = config_get_thread_control(config);
@@ -2598,22 +2595,54 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->multi_threading_mode = config->multi_threading_mode;
   autoplay_args->cutoff = config->cutoff;
 
+  autoplay_args->num_threads = config->num_threads;
+  int num_worker_threads_per_sim = 1;
+  if (autoplay_args->multi_threading_mode ==
+          MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM &&
+      (config->p1_sim_plies > 0 || config->p2_sim_plies > 0)) {
+    autoplay_args->num_threads = 1;
+    num_worker_threads_per_sim = config->num_threads;
+  }
+
   InferenceArgs inference_args = {0};
   if (config->p1_sim_with_inference || config->p2_sim_with_inference) {
-    // For autoplay, we want to use the game history for inference since it will
-    // be more accurate and the overhead of using the history will be less of a
-    // concern since we will be simming many games.
-    config_fill_infer_args(config, false, 0, 0, 0, NULL, false, NULL, NULL,
-                           &inference_args);
+    // Autoplay with inference must populate the following InferenceArgs fields
+    // that are left unset here.
+    // At startup:
+    //  - game
+    //  - parent_worker_thread_index;
+    // For each move:
+    //  - target_index
+    //  - target_score
+    //  - int target_num_exch
+    //  - target_played_tiles
+    //  - target_known_rack
+    //  - nontarget_known_rack
+    //  - previous play exists
+    infer_args_fill(&inference_args, 0, config->eq_margin_inference, NULL, NULL,
+                    num_worker_threads_per_sim, 0, config->print_interval,
+                    config->thread_control, false, true, 0, 0, 0, NULL, NULL,
+                    NULL);
   }
+
+  // Autoplay with sims must populate the following SimArgs fields that are left
+  // unset here.
+  // At startup:
+  //  - move list
+  //  - inference results
+  //  - parent_worker_thread_index;
+  // For each game:
+  //  - seed
+  // For each move:
+  //  - game
 
   sim_args_fill(
       config->p1_sim_plies, /*move_list=*/NULL, config->p1_num_plays,
       /*known_opp_rack=*/NULL, config->win_pcts, /*inference_results=*/NULL,
       config->thread_control, /*game=*/NULL, config->p1_sim_with_inference,
       /*use_heat_map=*/false,
-      /*num_threads=*/1, /*print_interval=*/0, config->p1_num_plays,
-      config->shplies,
+      /*num_threads=*/num_worker_threads_per_sim, /*print_interval=*/0,
+      config->p1_num_plays, config->shplies,
       /*seed=*/0, config->p1_max_iterations, config->p1_min_play_iterations,
       config->p1_stop_cond_pct, config->p1_threshold,
       config->p1_time_limit_seconds, config->p1_sampling_rule, config->cutoff,
@@ -2624,8 +2653,8 @@ void config_fill_autoplay_args(const Config *config,
       /*known_opp_rack=*/NULL, config->win_pcts, /*inference_results=*/NULL,
       config->thread_control,
       /*game=*/NULL, config->p2_sim_with_inference, /*use_heat_map=*/false,
-      /*num_threads=*/1, /*print_interval=*/0, config->p2_num_plays,
-      config->shplies,
+      /*num_threads=*/num_worker_threads_per_sim, /*print_interval=*/0,
+      config->p2_num_plays, config->shplies,
       /*seed=*/0, config->p2_max_iterations, config->p2_min_play_iterations,
       config->p2_stop_cond_pct, config->p2_threshold,
       config->p2_time_limit_seconds, config->p2_sampling_rule, config->cutoff,
