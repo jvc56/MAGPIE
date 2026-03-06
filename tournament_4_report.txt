@@ -1,0 +1,171 @@
+================================================================================
+           MAGPIE INFERENCE TOURNAMENT 4 — DETAILED REPORT
+================================================================================
+
+CONFIGURATION
+  Seeds completed:     108 of 350
+  Games played:        1296
+  Budget per turn:     2.0 seconds
+  Inference time limit: 1.0 seconds
+  Min play iterations: 50
+  Simulation plies:    2
+  Threads:             10
+  Seed range:          9000-9107
+  Avg turns per game:  22.9
+  Avg seconds per game: 36.1
+  Total wall time:     ~13.0 hours
+
+PLAYERS
+  STATIC   Equity-best move (no simulation, no inference)
+  SIM2     2-ply simulation, 2s budget, no inference
+  INFER1   2-ply simulation + inference, equity_margin=1 (infer on almost all moves)
+  INFR20   2-ply simulation + inference, equity_margin=20 (infer only when moves are close)
+
+================================================================================
+                           OVERALL STANDINGS
+================================================================================
+
+ELO RATINGS (anchored: STATIC = 2000)
+
+  Player         Elo  vs STA
+  ----------  ------  ------
+  INFR20        2043     +43
+  INFER1        2041     +41
+  SIM2          2031     +31
+  STATIC        2000
+
+
+================================================================================
+                        W-L CROSSTABLE (sorted by win%)
+================================================================================
+
+                  INFR20        INFER1          SIM2        STATIC  |           TOTAL
+            ------------  ------------  ------------  ------------  |  --------------
+INFR20                    112.0-104.0   112.0-104.0   117.5-98.5    |  341.5-306.5 52.7%
+INFER1      104.0-112.0                 109.0-107.0   126.5-89.5    |  339.5-308.5 52.4%
+SIM2        104.0-112.0   107.0-109.0                 115.5-100.5   |  326.5-321.5 50.4%
+STATIC       98.5-117.5    89.5-126.5   100.5-115.5                 |  288.5-359.5 44.5%
+
+
+================================================================================
+                     SPREAD CROSSTABLE (sorted by total spread)
+================================================================================
+
+                  INFER1          SIM2        INFR20        STATIC  |           TOTAL
+            ------------  ------------  ------------  ------------  |  --------------
+INFER1                            -1.1          +0.3          +5.0  |     +894  +1.4/g
+SIM2                +1.1                        +2.4          -3.3  |      +52  +0.1/g
+INFR20              -0.3          -2.4                        +1.5  |     -246  -0.4/g
+STATIC              -5.0          +3.3          -1.5                |     -700  -1.1/g
+
+
+================================================================================
+                       DETAILED MATCHUP BREAKDOWN
+================================================================================
+
+  INFR20 vs INFER1  (216 games, avg 23 turns/game)
+    INFR20    112.0-104.0  ( 51.9%)  spread    -55  ( -0.3/g)  avg scored 447
+    INFER1    104.0-112.0  ( 48.1%)  spread    +55  ( +0.3/g)  avg scored 447
+    Pairs: 54  |  INFR20 sweeps: 10  splits: 92  INFER1 sweeps: 6
+
+  INFR20 vs SIM2  (216 games, avg 23 turns/game)
+    INFR20    112.0-104.0  ( 51.9%)  spread   -512  ( -2.4/g)  avg scored 450
+    SIM2      104.0-112.0  ( 48.1%)  spread   +512  ( +2.4/g)  avg scored 452
+    Pairs: 54  |  INFR20 sweeps: 11  splits: 90  SIM2 sweeps: 7
+
+  INFR20 vs STATIC  (216 games, avg 23 turns/game)
+    INFR20    117.5-98.5   ( 54.4%)  spread   +321  ( +1.5/g)  avg scored 456
+    STATIC     98.5-117.5  ( 45.6%)  spread   -321  ( -1.5/g)  avg scored 454
+    Pairs: 54  |  INFR20 sweeps: 23  splits: 70  STATIC sweeps: 14
+
+  INFER1 vs SIM2  (216 games, avg 23 turns/game)
+    INFER1    109.0-107.0  ( 50.5%)  spread   -243  ( -1.1/g)  avg scored 447
+    SIM2      107.0-109.0  ( 49.5%)  spread   +243  ( +1.1/g)  avg scored 448
+    Pairs: 54  |  INFER1 sweeps: 10  splits: 89  SIM2 sweeps: 9
+
+  INFER1 vs STATIC  (216 games, avg 23 turns/game)
+    INFER1    126.5-89.5   ( 58.6%)  spread  +1082  ( +5.0/g)  avg scored 455
+    STATIC     89.5-126.5  ( 41.4%)  spread  -1082  ( -5.0/g)  avg scored 450
+    Pairs: 54  |  INFER1 sweeps: 29  splits: 68  STATIC sweeps: 10
+
+  SIM2 vs STATIC  (216 games, avg 23 turns/game)
+    SIM2      115.5-100.5  ( 53.5%)  spread   -703  ( -3.3/g)  avg scored 455
+    STATIC    100.5-115.5  ( 46.5%)  spread   +703  ( +3.3/g)  avg scored 458
+    Pairs: 54  |  SIM2 sweeps: 21  splits: 72  STATIC sweeps: 14
+
+
+================================================================================
+                          GAME-PAIR SWEEP TABLE
+================================================================================
+
+  Format: sweeps / splits / swept
+
+                      INFR20            INFER1              SIM2            STATIC  |          TOTAL
+INFR20                   ---    10/  92/   6     11/  90/   7     23/  70/  14   |   44/ 252/  27
+INFER1         6/  92/  10                ---    10/  89/   9     29/  68/  10   |   45/ 249/  29
+SIM2           7/  90/  11      9/  89/  10                ---    21/  72/  14   |   37/ 251/  35
+STATIC        14/  70/  23     10/  68/  29     14/  72/  21                ---  |   38/ 210/  73
+
+
+================================================================================
+                          SCORING STATISTICS
+================================================================================
+
+  Player       Avg Pts   Avg Opp  Avg Margin
+  ----------  --------  --------  ----------
+  INFR20         450.8     451.1        -0.4
+  INFER1         450.0     448.6        +1.4
+  SIM2           451.9     451.8        +0.1
+  STATIC         454.2     455.3        -1.1
+
+
+================================================================================
+                            NOTABLE GAMES
+================================================================================
+
+  Highest score:    648 by STATIC (vs SIM2, seed 9083)
+  Biggest blowout:  609-233 (+376) STATIC vs INFR20 (seed 9064)
+  Tied games:       3 out of 1296 (0.23%)
+    9041:INFER1-STATIC=420 9085:STATIC-SIM2=507 9085:STATIC-INFR20=507 
+
+
+================================================================================
+                         MODEL FIT (Bradley-Terry)
+================================================================================
+
+             vs               Actual     Model      Diff
+  ----------    ----------  --------  --------  --------
+  STATIC     vs SIM2           46.5%     45.6%     +0.9%
+  STATIC     vs INFER1         41.4%     44.1%     -2.7%
+  STATIC     vs INFR20         45.6%     43.9%     +1.7%
+  SIM2       vs INFER1         49.5%     48.5%     +1.0%
+  SIM2       vs INFR20         48.1%     48.3%     -0.1%
+  INFER1     vs INFR20         48.1%     49.8%     -1.6%
+
+
+================================================================================
+                            KEY OBSERVATIONS
+================================================================================
+
+  1. All three non-STATIC players are clustered within ~15 Elo points.
+     The differences are not yet statistically significant.
+
+  2. INFER1 (eq_margin=1) leads in both win rate and spread.
+     It is the strongest player against STATIC specifically.
+
+  3. The win-rate and spread rankings diverge:
+     By wins:   INFER1 > INFR20 > SIM2 > STATIC
+     By spread: INFER1 >> SIM2 > STATIC > INFR20
+
+  4. Non-transitivity: INFER1 beats STATIC more than the Bradley-Terry
+     model predicts, while INFR20 beats STATIC less than expected.
+     The results do not perfectly fit a single linear Elo scale.
+
+  5. Among the top three, head-to-head records are nearly circular:
+     no player dominates the other two convincingly.
+
+  6. STATIC has a losing record but comparatively modest negative spread,
+     suggesting it wins big when tile draws favor it (no strategy adaptation
+     means large variance in outcomes).
+
+================================================================================

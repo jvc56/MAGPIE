@@ -1,0 +1,19 @@
+TOURNAMENT 4 CROSSTABLE — 86 seeds (1032 games)
+Players: STATIC (equity-best), SIM2 (sim 2s), INFER1 (sim+infer eq_margin=1), INFR20 (sim+infer eq_margin=20)
+Budget: 2s per turn, inference limit 1s, min_play_iterations=50
+
+W-L RECORD — sorted by win% (ties count as 0.5-0.5)
+                  INFER1        INFR20          SIM2        STATIC  |           TOTAL
+            ------------  ------------  ------------  ------------  |  --------------
+INFER1                     84.0-88.0     88.0-84.0    100.5-71.5    |  272.5-243.5 52.8%
+INFR20       88.0-84.0                   88.0-84.0     91.5-80.5    |  267.5-248.5 51.8%
+SIM2         84.0-88.0     84.0-88.0                   93.5-78.5    |  261.5-254.5 50.7%
+STATIC       71.5-100.5    80.5-91.5     78.5-93.5                  |  230.5-285.5 44.7%
+
+SPREAD PER GAME — sorted by total spread
+                  INFER1          SIM2        STATIC        INFR20  |           TOTAL
+            ------------  ------------  ------------  ------------  |  --------------
+INFER1                            +3.0          +4.0          +3.4  |    +1792  +3.5/g
+SIM2                -3.0                        +0.5          +2.6  |      +27  +0.1/g
+STATIC              -4.0          -0.5                        -0.1  |     -806  -1.6/g
+INFR20              -3.4          -2.6          +0.1                |    -1013  -2.0/g
