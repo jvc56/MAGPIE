@@ -80,7 +80,7 @@ error_code_t infer_for_test(InferenceCtx **ctx, const Config *config,
   infer_args_fill(
       &args, config_get_num_plays(config),
       config_get_eq_margin_inference(config), NULL, game,
-      config_get_num_threads(config), config_get_print_interval(config),
+      config_get_num_threads(config), 0, config_get_print_interval(config),
       config_get_thread_control(config), false, true, target_index,
       int_to_equity(target_score), target_num_exch, &target_played_tiles,
       &target_known_rack, &nontarget_known_rack);

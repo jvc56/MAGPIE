@@ -5,6 +5,8 @@
 #include "../compat/ctime.h"
 #include "../def/autoplay_defs.h"
 #include "../def/cpthread_defs.h"
+#include "../def/game_history_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
@@ -14,6 +16,8 @@
 #include "../ent/data_filepaths.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/inference_args.h"
+#include "../ent/inference_results.h"
 #include "../ent/klv.h"
 #include "../ent/klv_csv.h"
 #include "../ent/letter_distribution.h"
@@ -21,6 +25,7 @@
 #include "../ent/player.h"
 #include "../ent/players_data.h"
 #include "../ent/rack.h"
+#include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "../ent/xoshiro.h"
 #include "../str/game_string.h"
@@ -28,6 +33,7 @@
 #include "../util/string_util.h"
 #include "gameplay.h"
 #include "rack_list.h"
+#include "simmer.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -243,11 +249,16 @@ void postgen_prebroadcast_func(void *data) {
 
 typedef struct AutoplayWorker {
   int worker_index;
-  const AutoplayArgs *args;
+  AutoplayArgs args;
   AutoplayResults *autoplay_results;
   AutoplaySharedData *shared_data;
   XoshiroPRNG *prng;
   int *min_rack_targets;
+  SimCtx *sim_ctx;
+  SimResults *sim_results;
+  InferenceResults *inference_results;
+  ErrorStack *error_stack;
+  MoveList *move_lists[2];
 } AutoplayWorker;
 
 AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
@@ -255,7 +266,7 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
                                        int worker_index,
                                        AutoplaySharedData *shared_data) {
   AutoplayWorker *autoplay_worker = malloc_or_die(sizeof(AutoplayWorker));
-  autoplay_worker->args = args;
+  autoplay_worker->args = *args;
   autoplay_worker->worker_index = worker_index;
   autoplay_worker->autoplay_results =
       autoplay_results_create_empty_copy(target);
@@ -266,6 +277,14 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
                                               autoplay_worker->prng);
   }
   autoplay_worker->shared_data = shared_data;
+  autoplay_worker->sim_ctx = NULL;
+  autoplay_worker->sim_results = sim_results_create(args->cutoff);
+  autoplay_worker->inference_results = inference_results_create(NULL);
+  autoplay_worker->error_stack = error_stack_create();
+  autoplay_worker->move_lists[0] =
+      move_list_create(args->p1_sim_args.num_plays);
+  autoplay_worker->move_lists[1] =
+      move_list_create(args->p2_sim_args.num_plays);
   return autoplay_worker;
 }
 
@@ -275,6 +294,12 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   }
   autoplay_results_destroy(autoplay_worker->autoplay_results);
   prng_destroy(autoplay_worker->prng);
+  sim_ctx_destroy(autoplay_worker->sim_ctx);
+  sim_results_destroy(autoplay_worker->sim_results);
+  inference_results_destroy(autoplay_worker->inference_results);
+  error_stack_destroy(autoplay_worker->error_stack);
+  move_list_destroy(autoplay_worker->move_lists[0]);
+  move_list_destroy(autoplay_worker->move_lists[1]);
   free(autoplay_worker);
 }
 
@@ -304,13 +329,13 @@ LeavegenSharedData *leavegen_shared_data_create(
 
 // Use NULL for the KLV when not running in leave gen mode.
 AutoplaySharedData *
-autoplay_shared_data_create(const AutoplayArgs *args,
+autoplay_shared_data_create(const AutoplayArgs *args, int num_autoplay_threads,
                             const uint64_t first_gen_num_games,
                             AutoplayResults *primary_autoplay_results,
                             AutoplayResults **autoplay_results_list, KLV *klv,
                             int num_gens, int *min_rack_targets) {
   AutoplaySharedData *shared_data = malloc_or_die(sizeof(AutoplaySharedData));
-  shared_data->num_threads = args->num_threads;
+  shared_data->num_threads = num_autoplay_threads;
   shared_data->print_interval = args->print_interval;
   ctimer_start(&shared_data->timer);
   shared_data->max_iter_count = first_gen_num_games;
@@ -325,7 +350,8 @@ autoplay_shared_data_create(const AutoplayArgs *args,
   if (klv) {
     shared_data->leavegen_shared_data = leavegen_shared_data_create(
         primary_autoplay_results, autoplay_results_list, args->game_args->ld,
-        args->data_paths, klv, args->num_threads, num_gens, min_rack_targets);
+        args->data_paths, klv, num_autoplay_threads, num_gens,
+        min_rack_targets);
   }
   return shared_data;
 }
@@ -356,16 +382,22 @@ typedef struct GameRunner {
   uint64_t game_number;
   uint64_t seed;
   Game *game;
-  MoveList *move_list;
+  // Used for inference args in autoplay with
+  // inference
+  Game *game_one_move_behind;
+  Move previous_move;
   AutoplaySharedData *shared_data;
 } GameRunner;
 
 GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
-  const AutoplayArgs *args = autoplay_worker->args;
+  const AutoplayArgs *args = &autoplay_worker->args;
   GameRunner *game_runner = malloc_or_die(sizeof(GameRunner));
   game_runner->shared_data = autoplay_worker->shared_data;
   game_runner->game = game_create(args->game_args);
-  game_runner->move_list = move_list_create(1);
+  game_runner->game_one_move_behind = NULL;
+  if (args->p1_sim_args.use_inference || args->p2_sim_args.use_inference) {
+    game_runner->game_one_move_behind = game_create(args->game_args);
+  }
   game_runner->pair_game_number =
       0; // Will be set in game_runner_start if using pairs
   return game_runner;
@@ -376,12 +408,11 @@ void game_runner_destroy(GameRunner *game_runner) {
     return;
   }
   game_destroy(game_runner->game);
-  move_list_destroy(game_runner->move_list);
+  game_destroy(game_runner->game_one_move_behind);
   free(game_runner);
 }
 
-void game_runner_start(const AutoplayWorker *autoplay_worker,
-                       GameRunner *game_runner,
+void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
                        const AutoplayIterOutput *iter_output,
                        int starting_player_index, int pair_game_number) {
   Game *game = game_runner->game;
@@ -390,8 +421,18 @@ void game_runner_start(const AutoplayWorker *autoplay_worker,
   game_runner->game_number = iter_output->iter_count;
   game_runner->pair_game_number = pair_game_number;
   game_seed(game, iter_output->seed);
+  autoplay_worker->args.p1_sim_args.seed = iter_output->seed;
+  autoplay_worker->args.p2_sim_args.seed = iter_output->seed;
   game_set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
+  if (game_runner->game_one_move_behind) {
+    Game *game_one_move_behind = game_runner->game_one_move_behind;
+    game_reset(game_one_move_behind);
+    game_seed(game_one_move_behind, iter_output->seed);
+    game_set_starting_player_index(game_one_move_behind, starting_player_index);
+    draw_starting_racks(game_one_move_behind);
+  }
+
   game_runner->turn_number = 0;
   game_runner->force_draw = false;
   if (game_runner->shared_data->leavegen_shared_data &&
@@ -399,7 +440,7 @@ void game_runner_start(const AutoplayWorker *autoplay_worker,
       // generation.
       (iter_output->iter_count -
        game_runner->shared_data->leavegen_shared_data->gen_start_games) >=
-          (uint64_t)autoplay_worker->args->games_before_force_draw_start) {
+          (uint64_t)autoplay_worker->args.games_before_force_draw_start) {
     game_runner->force_draw = true;
   }
 }
@@ -408,6 +449,84 @@ bool game_runner_is_game_over(GameRunner *game_runner) {
   return game_over(game_runner->game) ||
          (game_runner->shared_data->leavegen_shared_data &&
           bag_get_letters(game_get_bag(game_runner->game)) < (RACK_SIZE));
+}
+
+Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
+                                       GameRunner *game_runner) {
+  Game *game = game_runner->game;
+  const int player_on_turn_index = game_get_player_on_turn_index(game);
+  MoveList *move_list = autoplay_worker->move_lists[player_on_turn_index];
+  SimArgs *sim_args = (player_on_turn_index == 0)
+                          ? &autoplay_worker->args.p1_sim_args
+                          : &autoplay_worker->args.p2_sim_args;
+  sim_args->move_list = move_list;
+  sim_args->game = game_runner->game;
+
+  Rack target_played_tiles;
+  Rack nontarget_known_rack;
+  Rack target_known_rack;
+  const bool player_uses_inference = sim_args->use_inference;
+  sim_args->use_inference =
+      player_uses_inference && game_runner->turn_number > 0 &&
+      move_get_type(&game_runner->previous_move) != GAME_EVENT_PASS;
+  if (sim_args->use_inference) {
+    InferenceArgs *infer_args = &sim_args->inference_args;
+    const int ld_size = ld_get_size(game_get_ld(game));
+    // Set target played tiles
+    rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+    const int move_tiles_length =
+        move_get_tiles_length(&game_runner->previous_move);
+    if (move_get_type(&game_runner->previous_move) ==
+        GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      for (int i = 0; i < move_tiles_length; i++) {
+        if (move_get_tile(&game_runner->previous_move, i) !=
+            PLAYED_THROUGH_MARKER) {
+          if (get_is_blanked(move_get_tile(&game_runner->previous_move, i))) {
+            rack_add_letter(&target_played_tiles, BLANK_MACHINE_LETTER);
+          } else {
+            rack_add_letter(&target_played_tiles,
+                            move_get_tile(&game_runner->previous_move, i));
+          }
+        }
+      }
+    }
+    // Set nontarget known rack
+    rack_copy(&nontarget_known_rack,
+              player_get_rack(game_get_player(game, player_on_turn_index)));
+    // Set target known rack, which will always be empty because autoplay does
+    // not support challenged phonies (yet)
+    rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+    infer_args_fill(
+        infer_args, infer_args->leave_list_capacity, infer_args->equity_margin,
+        infer_args->game_history, game_runner->game_one_move_behind,
+        infer_args->num_threads, infer_args->parent_worker_thread_index,
+        infer_args->print_interval, infer_args->thread_control,
+        infer_args->use_game_history,
+        infer_args->use_inference_cutoff_optimization,
+        // We can use 1 - player_on_turn_index for the target index because
+        // autoplay does not support challenged phonies (yet).
+        1 - player_on_turn_index, move_get_score(&game_runner->previous_move),
+        move_get_type(&game_runner->previous_move) == GAME_EVENT_EXCHANGE
+            ? move_get_tiles_played(&game_runner->previous_move)
+            : 0,
+        &target_played_tiles, &target_known_rack, &nontarget_known_rack);
+  }
+
+  ErrorStack *error_stack = autoplay_worker->error_stack;
+  Move *move = get_top_simming_move(
+      game, autoplay_worker->worker_index, move_list, sim_args,
+      &autoplay_worker->sim_ctx, autoplay_worker->sim_results, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("autoplay worker %d failed to get top simming move for player %d "
+              "on turn %d of game number %llu with seed %llu",
+              autoplay_worker->worker_index, player_on_turn_index,
+              game_runner->turn_number + 1,
+              (unsigned long long)game_runner->game_number + 1,
+              (unsigned long long)game_runner->seed);
+  }
+  sim_args->use_inference = player_uses_inference;
+  return move;
 }
 
 void game_runner_play_move(AutoplayWorker *autoplay_worker,
@@ -419,7 +538,6 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
   const int player_on_turn_index = game_get_player_on_turn_index(game);
   LeavegenSharedData *lg_shared_data =
       game_runner->shared_data->leavegen_shared_data;
-  const int thread_index = autoplay_worker->worker_index;
   // If we are forcing a draw, we need to draw a rare leave. The drawn
   // leave does not necessarily fit in the bag. If we've reached the
   // target minimum leave count for all leaves, no rare leave can be
@@ -441,13 +559,14 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     rack_copy(player_rack, &rare_rack_or_move_leave);
 
     const Move *forced_move =
-        get_top_equity_move(game, thread_index, game_runner->move_list);
+        game_runner_get_top_simming_move(autoplay_worker, game_runner);
     rack_list_add_rack(lg_shared_data->rack_list, &rare_rack_or_move_leave,
                        equity_to_double(move_get_equity(forced_move)));
 
     rack_copy(player_rack, &original_rack);
   }
-  *move = get_top_equity_move(game, thread_index, game_runner->move_list);
+
+  *move = game_runner_get_top_simming_move(autoplay_worker, game_runner);
 
   if (lg_shared_data) {
     rack_list_add_rack(lg_shared_data->rack_list, player_rack,
@@ -458,7 +577,7 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
                             game_runner->game, *move, &rare_rack_or_move_leave);
 
   // Print board with move about to be played if requested
-  if (autoplay_worker->args->print_boards) {
+  if (autoplay_worker->args.print_boards) {
     StringBuilder *output = string_builder_create();
     if (game_runner->pair_game_number == 0) {
       string_builder_add_formatted_string(
@@ -471,16 +590,21 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
           (unsigned long long)game_runner->game_number + 1,
           game_runner->pair_game_number, game_runner->turn_number + 1);
     }
-    string_builder_add_game(game, game_runner->move_list,
-                            autoplay_worker->args->game_string_options, NULL,
-                            output);
+    string_builder_add_game(
+        game, autoplay_worker->move_lists[player_on_turn_index],
+        autoplay_worker->args.game_string_options, NULL, output);
     string_builder_add_string(output, "\n");
-    thread_control_print(autoplay_worker->args->thread_control,
+    thread_control_print(autoplay_worker->args.thread_control,
                          string_builder_peek(output));
     string_builder_destroy(output);
   }
 
   play_move(*move, game, NULL);
+  if (game_runner->game_one_move_behind && game_runner->turn_number > 0) {
+    play_move(&game_runner->previous_move, game_runner->game_one_move_behind,
+              NULL);
+  }
+  move_copy(&game_runner->previous_move, *move);
   game_runner->turn_number++;
 }
 
@@ -505,7 +629,7 @@ void print_current_status(AutoplayWorker *autoplay_worker,
   } else {
     string_builder_add_string(status_sb, "\n");
   }
-  thread_control_print(autoplay_worker->args->thread_control,
+  thread_control_print(autoplay_worker->args.thread_control,
                        string_builder_peek(status_sb));
   string_builder_destroy(status_sb);
 }
@@ -581,7 +705,7 @@ bool target_min_leave_count_reached(AutoplayWorker *autoplay_worker) {
 void autoplay_single_generation(AutoplayWorker *autoplay_worker,
                                 GameRunner *game_runner1,
                                 GameRunner *game_runner2) {
-  ThreadControl *thread_control = autoplay_worker->args->thread_control;
+  ThreadControl *thread_control = autoplay_worker->args.thread_control;
   AutoplayIterOutput iter_output;
   while (
       // Check if autoplay was exited by the user.
@@ -612,10 +736,28 @@ void autoplay_leave_gen(AutoplayWorker *autoplay_worker,
   }
 }
 
+// - The sim args for autoplay share the same inference results, since only one
+//   inference will be running at a time per autoplay worker.
+// - The game of the sim args needs to be set explicitly before each move, since
+//   there is only one pair of p1 and p2 sim args but potentially 2 games if
+//   using game pairs.
+void init_sim_args_for_player(AutoplayWorker *autoplay_worker,
+                              int player_index) {
+  SimArgs *sim_args = (player_index == 0) ? &autoplay_worker->args.p1_sim_args
+                                          : &autoplay_worker->args.p2_sim_args;
+  sim_args->bai_options.parent_worker_thread_index =
+      autoplay_worker->worker_index;
+  sim_args->inference_args.parent_worker_thread_index =
+      autoplay_worker->worker_index;
+  sim_args->inference_results = autoplay_worker->inference_results;
+}
+
 void *autoplay_worker(void *uncasted_autoplay_worker) {
   AutoplayWorker *autoplay_worker = (AutoplayWorker *)uncasted_autoplay_worker;
-  const AutoplayArgs *args = autoplay_worker->args;
+  const AutoplayArgs *args = &autoplay_worker->args;
   GameRunner *game_runner1 = game_runner_create(autoplay_worker);
+  init_sim_args_for_player(autoplay_worker, 0);
+  init_sim_args_for_player(autoplay_worker, 1);
   GameRunner *game_runner2 = NULL;
   switch (args->type) {
   case AUTOPLAY_TYPE_DEFAULT:
@@ -729,19 +871,22 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
     show_divergent_results = false;
   }
 
+  const int autoplay_num_threads = args->num_threads;
+
   AutoplayResults **autoplay_results_list =
-      malloc_or_die((sizeof(AutoplayResults *)) * (args->num_threads));
+      malloc_or_die((sizeof(AutoplayResults *)) * (autoplay_num_threads));
 
   AutoplaySharedData *shared_data = autoplay_shared_data_create(
-      args, first_gen_num_games, autoplay_results, autoplay_results_list, klv,
-      num_gens, min_rack_targets);
+      args, autoplay_num_threads, first_gen_num_games, autoplay_results,
+      autoplay_results_list, klv, num_gens, min_rack_targets);
 
   AutoplayWorker **autoplay_workers =
-      malloc_or_die((sizeof(AutoplayWorker *)) * (args->num_threads));
+      malloc_or_die((sizeof(AutoplayWorker *)) * (autoplay_num_threads));
   cpthread_t *worker_ids =
-      malloc_or_die((sizeof(cpthread_t)) * (args->num_threads));
+      malloc_or_die((sizeof(cpthread_t)) * (autoplay_num_threads));
 
-  for (int thread_index = 0; thread_index < args->num_threads; thread_index++) {
+  for (int thread_index = 0; thread_index < autoplay_num_threads;
+       thread_index++) {
     autoplay_workers[thread_index] = autoplay_worker_create(
         args, autoplay_results, thread_index, shared_data);
     autoplay_results_list[thread_index] =
@@ -751,16 +896,17 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
   }
 
   autoplay_results_set_status_data(
-      autoplay_results, autoplay_results_list, args->num_threads, false,
+      autoplay_results, autoplay_results_list, autoplay_num_threads, false,
       args->human_readable, show_divergent_results);
 
-  for (int thread_index = 0; thread_index < args->num_threads; thread_index++) {
+  for (int thread_index = 0; thread_index < autoplay_num_threads;
+       thread_index++) {
     cpthread_join(worker_ids[thread_index]);
   }
 
   // The stats have already been combined in leavegen mode
   if (!is_leavegen_mode) {
-    autoplay_results_consolidate(autoplay_results_list, args->num_threads,
+    autoplay_results_consolidate(autoplay_results_list, autoplay_num_threads,
                                  autoplay_results);
   }
 
@@ -770,7 +916,8 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
 
   free(autoplay_results_list);
 
-  for (int thread_index = 0; thread_index < args->num_threads; thread_index++) {
+  for (int thread_index = 0; thread_index < autoplay_num_threads;
+       thread_index++) {
     autoplay_worker_destroy(autoplay_workers[thread_index]);
   }
 

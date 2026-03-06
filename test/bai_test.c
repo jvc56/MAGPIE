@@ -33,9 +33,10 @@ static const int strategies[][3] = {
 static const int num_strategies_entries =
     sizeof(strategies) / sizeof(strategies[0]);
 
-void bai_wrapper(const BAIOptions *bai_options, RandomVariables *rvs,
+void bai_wrapper(BAIOptions *bai_options, RandomVariables *rvs,
                  RandomVariables *rng, ThreadControl *thread_control,
                  BAILogger *bai_logger, BAIResult *bai_result) {
+  bai_options->parent_worker_thread_index = 0;
   thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
   bai(bai_options, rvs, rng, thread_control, bai_logger, bai_result);
 }
@@ -193,7 +194,7 @@ void test_bai_win_pct_cutoff(int num_threads) {
 }
 
 typedef struct BAITestArgs {
-  const BAIOptions *options;
+  BAIOptions *options;
   RandomVariables *rvs;
   RandomVariables *rng;
   ThreadControl *thread_control;
