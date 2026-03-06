@@ -327,9 +327,16 @@ void test_autoplay_wmp_correctness(void) {
 void test_autoplay_sim(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all "
-      "-numplays 5 -pl1 2 -minp 5 -iter 50 -threads 2 -sinfer true");
-  load_and_exec_config_or_die(config, "autoplay games 1 -seed 1 -mtmode pgp");
-  load_and_exec_config_or_die(config, "autoplay games 1 -seed 2 -mtmode igp");
+      "-numplays 3 -pl1 2 -minp 2 -iter 10 -threads 10 -sinfer false");
+  load_and_exec_config_or_die(config,
+                              "autoplay games 1 -seed 1 -mtmode pgp -gp false");
+  load_and_exec_config_or_die(config,
+                              "autoplay games 1 -seed 1 -mtmode pgp -gp true");
+  load_and_exec_config_or_die(
+      config, "autoplay games 1 -seed 2 -mtmode igp -sinfer true -gp false");
+  load_and_exec_config_or_die(config,
+                              "autoplay games 2 -seed 3 -mtmode igp -np1 3 "
+                              "-np2 2 -plies 2 -gp true ");
   config_destroy(config);
 }
 

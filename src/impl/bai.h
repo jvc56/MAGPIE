@@ -401,10 +401,12 @@ static inline void bai_worker_sample_loop(BAIWorkerArgs *bai_worker_args) {
               "thread index (%d) are greater than 0.",
               bai_thread_index, bai_options->parent_worker_thread_index);
   }
-  int rvs_thread_index = 0;
-  if (bai_options->parent_worker_thread_index == 0) {
-    rvs_thread_index = bai_thread_index;
-  }
+  // In IGP mode, parent_worker_thread_index == 0 and bai_thread_index
+  // distinguishes concurrent BAI threads. In PGP mode, bai_thread_index == 0
+  // and parent_worker_thread_index distinguishes concurrent autoplay workers.
+  // Using the wrong index causes multiple threads to share cached_gens[0].
+  const int rvs_thread_index =
+      bai_options->parent_worker_thread_index + bai_thread_index;
 
   BAISampleArgs sample_args = {
       .bai_sync_data = sync_data,

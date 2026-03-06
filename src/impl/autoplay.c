@@ -475,14 +475,17 @@ Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
     rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
     const int move_tiles_length =
         move_get_tiles_length(&game_runner->previous_move);
-    for (int i = 0; i < move_tiles_length; i++) {
-      if (move_get_tile(&game_runner->previous_move, i) !=
-          PLAYED_THROUGH_MARKER) {
-        if (get_is_blanked(move_get_tile(&game_runner->previous_move, i))) {
-          rack_add_letter(&target_played_tiles, BLANK_MACHINE_LETTER);
-        } else {
-          rack_add_letter(&target_played_tiles,
-                          move_get_tile(&game_runner->previous_move, i));
+    if (move_get_type(&game_runner->previous_move) ==
+        GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      for (int i = 0; i < move_tiles_length; i++) {
+        if (move_get_tile(&game_runner->previous_move, i) !=
+            PLAYED_THROUGH_MARKER) {
+          if (get_is_blanked(move_get_tile(&game_runner->previous_move, i))) {
+            rack_add_letter(&target_played_tiles, BLANK_MACHINE_LETTER);
+          } else {
+            rack_add_letter(&target_played_tiles,
+                            move_get_tile(&game_runner->previous_move, i));
+          }
         }
       }
     }

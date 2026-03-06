@@ -371,10 +371,7 @@ Inference *inference_create(const Game *game, int thread_index,
               args->parent_worker_thread_index, thread_index);
   }
 
-  inference->movegen_index = 0;
-  if (args->parent_worker_thread_index == 0) {
-    inference->movegen_index = thread_index;
-  }
+  inference->movegen_index = args->parent_worker_thread_index + thread_index;
 
   complete_inference_setup(inference, args);
 
