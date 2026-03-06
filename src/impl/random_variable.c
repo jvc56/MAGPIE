@@ -368,17 +368,17 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   SimResults *sim_results = simmer->sim_results;
   SimmedPlay *simmed_play =
       sim_results_get_simmed_play(sim_results, (int)play_index);
-  // In PGP mode, rvs_thread_index = parent_worker_thread_index + bai_thread_index.
-  // The local index into the workers array is always bai_thread_index (0-based),
-  // while the global thread_index is used for movegen to avoid cache conflicts.
+  // In PGP mode, rvs_thread_index = parent_worker_thread_index +
+  // bai_thread_index. The local index into the workers array is always
+  // bai_thread_index (0-based), while the global thread_index is used for
+  // movegen to avoid cache conflicts.
   const int local_worker_index =
       thread_index - simmer->parent_worker_thread_index;
   if (local_worker_index < 0 || local_worker_index >= simmer->num_threads) {
-    log_fatal(
-        "local worker index (%d) is out of bounds for simmer with "
-        "num_threads %d (thread_index=%d, parent=%d)",
-        local_worker_index, simmer->num_threads, thread_index,
-        simmer->parent_worker_thread_index);
+    log_fatal("local worker index (%d) is out of bounds for simmer with "
+              "num_threads %d (thread_index=%d, parent=%d)",
+              local_worker_index, simmer->num_threads, thread_index,
+              simmer->parent_worker_thread_index);
   }
   SimmerWorker *simmer_worker = simmer->workers[local_worker_index];
   Game *game = simmer_worker->game;

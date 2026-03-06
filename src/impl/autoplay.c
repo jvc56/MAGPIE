@@ -467,7 +467,8 @@ Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
   Rack target_known_rack;
   const bool player_uses_inference = sim_args->use_inference;
   sim_args->use_inference =
-      player_uses_inference && game_runner->turn_number > 0;
+      player_uses_inference && game_runner->turn_number > 0 &&
+      move_get_type(&game_runner->previous_move) != GAME_EVENT_PASS;
   if (sim_args->use_inference) {
     InferenceArgs *infer_args = &sim_args->inference_args;
     const int ld_size = ld_get_size(game_get_ld(game));
