@@ -734,9 +734,6 @@ void autoplay_leave_gen(AutoplayWorker *autoplay_worker,
 
 // - The sim args for autoplay share the same inference results, since only one
 //   inference will be running at a time per autoplay worker.
-// - The move list for each sim args can be set once at startup since the
-//   autoplay worker maintains 2 move lists with a possibly different number of
-//   plays.
 // - The game of the sim args needs to be set explicitly before each move, since
 //   there is only one pair of p1 and p2 sim args but potentially 2 games if
 //   using game pairs.
@@ -817,7 +814,6 @@ void valid_autoplay_results_options(const AutoplayResults *autoplay_results,
   }
 }
 
-// Modifies the sim_args if simming is enabled.
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
               ErrorStack *error_stack) {
   const bool is_leavegen_mode = args->type == AUTOPLAY_TYPE_LEAVE_GEN;

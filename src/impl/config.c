@@ -64,6 +64,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <float.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <math.h>
 #include <stdbool.h>

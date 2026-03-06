@@ -1,5 +1,6 @@
 #include "simmer.h"
 
+#include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/inference_defs.h"
 #include "../def/move_defs.h"
