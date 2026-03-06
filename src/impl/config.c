@@ -1863,8 +1863,8 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_P2_STOP_COND_PCT,       /* sc2 */
         ARG_TOKEN_P1_SIM_WITH_INFERENCE,  /* si1 */
         ARG_TOKEN_P2_SIM_WITH_INFERENCE,  /* si2 */
-        ARG_TOKEN_P1_SAMPLING_RULE,       /* samp1 */
-        ARG_TOKEN_P2_SAMPLING_RULE,       /* samp2 */
+        ARG_TOKEN_P1_SAMPLING_RULE,       /* sa1 */
+        ARG_TOKEN_P2_SAMPLING_RULE,       /* sa2 */
         ARG_TOKEN_P1_THRESHOLD,           /* th1 */
         ARG_TOKEN_P2_THRESHOLD,           /* th2 */
         ARG_TOKEN_THRESHOLD,              /* threshold */
@@ -6739,8 +6739,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_TIME_LIMIT, "tl2", 1, 1);
   arg(ARG_TOKEN_P1_THRESHOLD, "th1", 1, 1);
   arg(ARG_TOKEN_P2_THRESHOLD, "th2", 1, 1);
-  arg(ARG_TOKEN_P1_SAMPLING_RULE, "samp1", 1, 1);
-  arg(ARG_TOKEN_P2_SAMPLING_RULE, "samp2", 1, 1);
+  arg(ARG_TOKEN_P1_SAMPLING_RULE, "sa1", 1, 1);
+  arg(ARG_TOKEN_P2_SAMPLING_RULE, "sa2", 1, 1);
   arg(ARG_TOKEN_MULTI_THREADING_MODE, "mtmode", 1, 1);
   arg(ARG_TOKEN_PRINT_BOARDS, "printboards", 1, 1);
   arg(ARG_TOKEN_BOARD_COLOR, "boardcolor", 1, 1);
