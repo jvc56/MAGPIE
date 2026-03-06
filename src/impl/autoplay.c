@@ -21,6 +21,7 @@
 #include "../ent/player.h"
 #include "../ent/players_data.h"
 #include "../ent/rack.h"
+#include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "../ent/xoshiro.h"
 #include "../str/game_string.h"
