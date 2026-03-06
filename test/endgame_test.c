@@ -160,12 +160,13 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   endgame_args.plies = config_get_endgame_plies(config);
   endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
   endgame_args.initial_small_move_arena_size = initial_small_move_arena_size;
-  endgame_args.num_threads = 6;
+  endgame_args.num_threads = config_get_num_threads(config);
   endgame_args.use_heuristics = true;
   endgame_args.forced_pass_bypass = true;
   endgame_args.num_top_moves = 1;
   endgame_args.per_ply_callback = print_pv_callback;
   endgame_args.per_ply_callback_data = &timer;
+  endgame_args.movegen_cache = config_get_movegen_cache(config);
 
   // Create results
   EndgameResults *endgame_results = config_get_endgame_results(config);
@@ -326,7 +327,7 @@ void test_endgame_interrupt(void) {
 
 void test_kue(void) {
   Config *config = config_create_or_die(
-      "set -s1 score -s2 score -r1 small -r2 small -eplies 14 "
+      "set -s1 score -s2 score -r1 small -r2 small -eplies 14 -threads 8 "
       "-ttfraction 0.5");
   load_and_exec_config_or_die(
       config, "cgp "
@@ -347,11 +348,12 @@ void test_kue(void) {
   endgame_args.tt_fraction_of_mem = 0.5;
   endgame_args.initial_small_move_arena_size =
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-  endgame_args.num_threads = 8;
+  endgame_args.num_threads = config_get_num_threads(config);
   endgame_args.use_heuristics = true;
   endgame_args.num_top_moves = 10;
   endgame_args.per_ply_callback = print_pv_and_ranked_callback;
   endgame_args.per_ply_callback_data = &timer;
+  endgame_args.movegen_cache = config_get_movegen_cache(config);
 
   EndgameResults *endgame_results = config_get_endgame_results(config);
   ErrorStack *error_stack = error_stack_create();
@@ -407,12 +409,13 @@ void test_2lex_endgame(dual_lexicon_mode_t mode, int expected_score) {
       .plies = 3,
       .tt_fraction_of_mem = 0.05,
       .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-      .num_threads = 1,
+      .num_threads = config_get_num_threads(config),
       .num_top_moves = 1,
       .use_heuristics = false,
       .per_ply_callback = NULL,
       .per_ply_callback_data = NULL,
       .dual_lexicon_mode = mode,
+      .movegen_cache = config_get_movegen_cache(config),
   };
 
   endgame_solve(solver, &args, results, error_stack);
@@ -451,7 +454,7 @@ void test_endgame(void) {
 
 void test_monster_q(void) {
   Config *config = config_create_or_die(
-      "set -s1 score -s2 score -r1 small -r2 small -eplies 6 "
+      "set -s1 score -s2 score -r1 small -r2 small -eplies 6 -threads 6"
       "-ttfraction 0.5");
   load_and_exec_config_or_die(config,
                               "cgp "
@@ -473,12 +476,13 @@ void test_monster_q(void) {
   endgame_args.tt_fraction_of_mem = 0.5;
   endgame_args.initial_small_move_arena_size =
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-  endgame_args.num_threads = 6;
+  endgame_args.num_threads = config_get_num_threads(config);
   endgame_args.use_heuristics = true;
   endgame_args.forced_pass_bypass = true;
   endgame_args.num_top_moves = 1;
   endgame_args.per_ply_callback = print_pv_callback;
   endgame_args.per_ply_callback_data = &timer;
+  endgame_args.movegen_cache = config_get_movegen_cache(config);
 
   EndgameResults *endgame_results = config_get_endgame_results(config);
   ErrorStack *error_stack = error_stack_create();
@@ -506,7 +510,7 @@ void test_multi_pv(void) {
   // Verify we get multiple PVs back with values in descending order,
   // and the best PV matches the single-PV result.
   Config *config = config_create_or_die(
-      "set -s1 score -s2 score -r1 small -r2 small -eplies 4");
+      "set -s1 score -s2 score -r1 small -r2 small -eplies 4 -threads 6");
   load_and_exec_config_or_die(
       config, "cgp "
               "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
@@ -524,11 +528,12 @@ void test_multi_pv(void) {
   endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
   endgame_args.initial_small_move_arena_size =
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-  endgame_args.num_threads = 6;
+  endgame_args.num_threads = config_get_num_threads(config);
   endgame_args.num_top_moves = 1;
   endgame_args.use_heuristics = true;
   endgame_args.per_ply_callback = NULL;
   endgame_args.per_ply_callback_data = NULL;
+  endgame_args.movegen_cache = config_get_movegen_cache(config);
 
   EndgameResults *endgame_results = endgame_results_create();
   ErrorStack *error_stack = error_stack_create();

@@ -128,8 +128,8 @@ void assert_rack_score(const LetterDistribution *ld, const Rack *rack,
 void assert_anchor_equity_int(const AnchorHeap *ah, int i, int expected);
 void assert_anchor_equity_exact(const AnchorHeap *ah, int i, Equity expected);
 void assert_anchor_score(const AnchorHeap *ah, int i, int expected);
-void generate_anchors_for_test(Game *game);
-void extract_sorted_anchors_for_test(AnchorHeap *sorted_anchors);
+void generate_anchors_for_test(Game *game, MoveGen *gen);
+void extract_sorted_anchors_for_test(AnchorHeap *sorted_anchors, MoveGen *gen);
 void set_klv_leave_value(const KLV *klv, const LetterDistribution *ld,
                          const char *rack_str, Equity equity);
 error_code_t test_parse_gcg(const char *gcg_filename, Config *config,

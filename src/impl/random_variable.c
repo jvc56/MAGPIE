@@ -21,6 +21,8 @@
 #include "../util/io_util.h"
 #include "bai_logger.h"
 #include "gameplay.h"
+#include "move_gen.h"
+#include "move_gen_cache.h"
 #include <math.h>
 #include <stdatomic.h>
 #include <stddef.h>
@@ -311,6 +313,7 @@ typedef struct SimmerWorker {
   Game *game;
   MoveList *move_list;
   XoshiroPRNG *prng;
+  MoveGen *movegen;
 } SimmerWorker;
 
 typedef struct Simmer {
@@ -325,12 +328,6 @@ typedef struct Simmer {
   bool use_alias_method;
   const InferenceResults *inference_results;
   int num_threads;
-  // In PGP mode, each autoplay worker has its own simmer with num_threads
-  // workers indexed 0..num_threads-1. However, the global rvs_thread_index
-  // passed to rv_sim_sample is parent_worker_thread_index + bai_thread_index,
-  // which can exceed num_threads-1. Storing parent_worker_thread_index lets us
-  // compute the local 0-based worker index: thread_index - parent_offset.
-  int parent_worker_thread_index;
   int print_interval;
   int max_num_display_plays;
   int max_num_display_plies;
@@ -338,12 +335,13 @@ typedef struct Simmer {
   SimResults *sim_results;
 } Simmer;
 
-SimmerWorker *simmer_create_worker(const Game *game) {
+SimmerWorker *simmer_create_worker(const Game *game, MoveGen *movegen) {
   SimmerWorker *simmer_worker = malloc_or_die(sizeof(SimmerWorker));
   simmer_worker->game = game_duplicate(game);
   game_set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
   simmer_worker->move_list = move_list_create(1);
   simmer_worker->prng = prng_create(0);
+  simmer_worker->movegen = movegen;
   return simmer_worker;
 }
 
@@ -368,19 +366,12 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   SimResults *sim_results = simmer->sim_results;
   SimmedPlay *simmed_play =
       sim_results_get_simmed_play(sim_results, (int)play_index);
-  // In PGP mode, rvs_thread_index = parent_worker_thread_index +
-  // bai_thread_index. The local index into the workers array is always
-  // bai_thread_index (0-based), while the global thread_index is used for
-  // movegen to avoid cache conflicts.
-  const int local_worker_index =
-      thread_index - simmer->parent_worker_thread_index;
-  if (local_worker_index < 0 || local_worker_index >= simmer->num_threads) {
-    log_fatal("local worker index (%d) is out of bounds for simmer with "
-              "num_threads %d (thread_index=%d, parent=%d)",
-              local_worker_index, simmer->num_threads, thread_index,
-              simmer->parent_worker_thread_index);
+  if (thread_index < 0 || thread_index >= simmer->num_threads) {
+    log_fatal("thread index (%d) is out of bounds for simmer with "
+              "num_threads %d",
+              thread_index, simmer->num_threads);
   }
-  SimmerWorker *simmer_worker = simmer->workers[local_worker_index];
+  SimmerWorker *simmer_worker = simmer->workers[thread_index];
   Game *game = simmer_worker->game;
   MoveList *move_list = simmer_worker->move_list;
   const int plies = sim_results_get_num_plies(sim_results);
@@ -437,7 +428,8 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       break;
     }
 
-    const Move *best_play = get_top_equity_move(game, thread_index, move_list);
+    const Move *best_play =
+        get_top_equity_move(game, simmer_worker->movegen, move_list);
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
     play_move(best_play, game, NULL);
@@ -528,8 +520,6 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->dist_size = ld_get_size(game_get_ld(sim_args->game));
 
   simmer->num_threads = sim_args->num_threads;
-  simmer->parent_worker_thread_index =
-      sim_args->bai_options.parent_worker_thread_index;
   simmer->print_interval = sim_args->print_interval;
   simmer->max_num_display_plays = sim_args->max_num_display_plays;
   simmer->max_num_display_plies = sim_args->max_num_display_plies;
@@ -538,7 +528,10 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
       malloc_or_die((sizeof(SimmerWorker *)) * (simmer->num_threads));
   for (int thread_index = 0; thread_index < simmer->num_threads;
        thread_index++) {
-    simmer->workers[thread_index] = simmer_create_worker(sim_args->game);
+    simmer->workers[thread_index] = simmer_create_worker(
+        sim_args->game,
+        move_gen_cache_get(sim_args->movegen_cache,
+                           sim_args->movegen_start_index + thread_index));
   }
 
   simmer->win_pcts = sim_args->win_pcts;

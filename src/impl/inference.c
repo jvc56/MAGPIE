@@ -31,6 +31,8 @@
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
+#include "move_gen.h"
+#include "move_gen_cache.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -62,7 +64,7 @@ typedef struct Inference {
   uint64_t current_rack_index;
   int num_threads;
   int print_interval;
-  int movegen_index;
+  MoveGen *movegen;
   uint64_t *shared_rack_index;
   cpthread_mutex_t *shared_rack_index_lock;
   cpthread_t cpthread_id;
@@ -168,7 +170,7 @@ void evaluate_possible_leave(Inference *inference) {
 
   // For tile placements, margin is already in target_equity_cutoff, so pass 0
   const Move *top_move = get_top_equity_move_for_inferences(
-      inference->game, inference->movegen_index, inference->move_list,
+      inference->game, inference->movegen, inference->move_list,
       inference->use_infer_cutoff_optimization ? target_equity_cutoff
                                                : EQUITY_MAX_VALUE,
       target_leave_size, eq_margin_movegen);
@@ -365,13 +367,8 @@ Inference *inference_create(const Game *game, int thread_index,
   inference->num_threads = args->num_threads;
   inference->print_interval = args->print_interval;
   inference->thread_control = args->thread_control;
-  if (args->parent_worker_thread_index > 0 && thread_index > 0) {
-    log_fatal("Both parent worker thread index (%d) and inference thread "
-              "index (%d) are greater than 0.",
-              args->parent_worker_thread_index, thread_index);
-  }
-
-  inference->movegen_index = args->parent_worker_thread_index + thread_index;
+  inference->movegen = move_gen_cache_get(
+      args->movegen_cache, args->movegen_start_index + thread_index);
 
   complete_inference_setup(inference, args);
 

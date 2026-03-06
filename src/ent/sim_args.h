@@ -9,6 +9,7 @@
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
+#include "../impl/move_gen_cache.h"
 #include <stdint.h>
 
 typedef struct SimArgs {
@@ -28,6 +29,8 @@ typedef struct SimArgs {
   int max_num_display_plies;
   uint64_t seed;
   ThreadControl *thread_control;
+  MoveGenCache *movegen_cache;
+  int movegen_start_index;
   BAIOptions bai_options;
 } SimArgs;
 
@@ -43,7 +46,8 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
               const uint64_t min_play_iterations, const double scond,
               const bai_threshold_t threshold, const int time_limit_seconds,
               const bai_sampling_rule_t sampling_rule, const double cutoff,
-              const InferenceArgs *inference_args, SimArgs *sim_args) {
+              const InferenceArgs *inference_args, MoveGenCache *movegen_cache,
+              SimArgs *sim_args) {
   sim_args->num_plies = num_plies;
   sim_args->move_list = move_list;
   sim_args->num_plays = num_plays;
@@ -62,6 +66,9 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   if (sim_args->use_inference) {
     sim_args->inference_args = *inference_args;
   }
+  sim_args->movegen_cache = movegen_cache;
+  // movegen_start_index will be overwritten in autoplay
+  sim_args->movegen_start_index = 0;
   sim_args->bai_options.sample_limit = max_iterations;
   sim_args->bai_options.sample_minimum = min_play_iterations;
   if (scond > 100 || threshold == BAI_THRESHOLD_NONE) {
@@ -74,8 +81,6 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->bai_options.sampling_rule = sampling_rule;
   sim_args->bai_options.num_threads = num_threads;
   sim_args->bai_options.cutoff = cutoff;
-  // This will be overwritten in autoplay
-  sim_args->bai_options.parent_worker_thread_index = 0;
 }
 
 #endif

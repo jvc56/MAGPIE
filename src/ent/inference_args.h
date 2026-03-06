@@ -8,6 +8,7 @@
 #include "../ent/inference_results.h"
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
+#include "../impl/move_gen_cache.h"
 #include "../util/io_util.h"
 
 typedef struct InferenceArgs {
@@ -24,7 +25,8 @@ typedef struct InferenceArgs {
   Rack *nontarget_known_rack;
   const Game *game;
   int num_threads;
-  int parent_worker_thread_index;
+  MoveGenCache *movegen_cache;
+  int movegen_start_index;
   int print_interval;
   ThreadControl *thread_control;
 } InferenceArgs;
@@ -32,10 +34,10 @@ typedef struct InferenceArgs {
 static inline void
 infer_args_fill(InferenceArgs *args, int leave_list_capacity, Equity eq_margin,
                 GameHistory *game_history, const Game *game, int num_threads,
-                int parent_worker_thread_index, int print_interval,
-                ThreadControl *thread_control, bool use_game_history,
-                bool use_inference_cutoff_optimization, int target_index,
-                Equity target_score, int target_num_exch,
+                MoveGenCache *movegen_cache, int movegen_start_index,
+                int print_interval, ThreadControl *thread_control,
+                bool use_game_history, bool use_inference_cutoff_optimization,
+                int target_index, Equity target_score, int target_num_exch,
                 Rack *target_played_tiles, Rack *target_known_rack,
                 Rack *nontarget_known_rack) {
   args->target_index = target_index;
@@ -51,7 +53,8 @@ infer_args_fill(InferenceArgs *args, int leave_list_capacity, Equity eq_margin,
   args->game_history = game_history;
   args->game = game;
   args->num_threads = num_threads;
-  args->parent_worker_thread_index = parent_worker_thread_index;
+  args->movegen_cache = movegen_cache;
+  args->movegen_start_index = movegen_start_index;
   args->print_interval = print_interval;
   args->thread_control = thread_control;
 }

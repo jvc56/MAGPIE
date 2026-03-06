@@ -396,18 +396,6 @@ static inline void bai_worker_sample_loop(BAIWorkerArgs *bai_worker_args) {
   RandomVariables *rvs = bai_worker_args->rvs;
   const int bai_thread_index = bai_worker_args->thread_index;
 
-  if (bai_thread_index > 0 && bai_options->parent_worker_thread_index > 0) {
-    log_fatal("Both BAI worker thread index (%d) and parent worker "
-              "thread index (%d) are greater than 0.",
-              bai_thread_index, bai_options->parent_worker_thread_index);
-  }
-  // In IGP mode, parent_worker_thread_index == 0 and bai_thread_index
-  // distinguishes concurrent BAI threads. In PGP mode, bai_thread_index == 0
-  // and parent_worker_thread_index distinguishes concurrent autoplay workers.
-  // Using the wrong index causes multiple threads to share cached_gens[0].
-  const int rvs_thread_index =
-      bai_options->parent_worker_thread_index + bai_thread_index;
-
   BAISampleArgs sample_args = {
       .bai_sync_data = sync_data,
       .rvs = rvs,
@@ -424,7 +412,7 @@ static inline void bai_worker_sample_loop(BAIWorkerArgs *bai_worker_args) {
     if (arm_index < 0) {
       break;
     }
-    double sample = rvs_sample(rvs, arm_index, rvs_thread_index, NULL);
+    double sample = rvs_sample(rvs, arm_index, bai_thread_index, NULL);
     bai_sync_data_add_sample(&sample_args, arm_index, sample);
   }
 }

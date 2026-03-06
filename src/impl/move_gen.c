@@ -1,6 +1,5 @@
 #include "move_gen.h"
 
-#include "../compat/cpthread.h"
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/equity_defs.h"
@@ -12,7 +11,6 @@
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
-#include "../def/thread_control_defs.h"
 #include "../ent/anchor.h"
 #include "../ent/bag.h"
 #include "../ent/bit_rack.h"
@@ -39,38 +37,6 @@
 #include <string.h>
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
-
-// Cache move generators since destroying
-// and recreating a movegen for
-// every request to generate moves would
-// be expensive. The infer and sim functions
-// don't have this problem since they are
-// only called once per command.
-static MoveGen *cached_gens[MAX_THREADS];
-static cpthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER; // NOLINT
-
-void generator_destroy(MoveGen *gen) {
-  if (!gen) {
-    return;
-  }
-  free(gen);
-}
-
-MoveGen *get_movegen(int thread_index) {
-  if (!cached_gens[thread_index]) {
-    cached_gens[thread_index] = malloc_or_die(sizeof(MoveGen));
-  }
-  return cached_gens[thread_index];
-}
-
-void gen_destroy_cache(void) {
-  cpthread_mutex_lock(&cache_mutex);
-  for (int i = 0; i < (MAX_THREADS); i++) {
-    generator_destroy(cached_gens[i]);
-    cached_gens[i] = NULL;
-  }
-  cpthread_mutex_unlock(&cache_mutex);
-}
 
 // Cache getter functions
 
@@ -2251,7 +2217,7 @@ void gen_record_pass(MoveGen *gen) {
 }
 
 void generate_moves(const MoveGenArgs *args) {
-  MoveGen *gen = get_movegen(args->thread_index);
+  MoveGen *gen = args->gen;
   gen_load_position(gen, args);
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
       gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {

@@ -32,6 +32,7 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
+#include "move_gen_cache.h"
 #include "rack_list.h"
 #include "simmer.h"
 #include <stdbool.h>
@@ -259,6 +260,7 @@ typedef struct AutoplayWorker {
   InferenceResults *inference_results;
   ErrorStack *error_stack;
   MoveList *move_lists[2];
+  MoveGenCache *movegen_cache;
 } AutoplayWorker;
 
 AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
@@ -268,6 +270,7 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   AutoplayWorker *autoplay_worker = malloc_or_die(sizeof(AutoplayWorker));
   autoplay_worker->args = *args;
   autoplay_worker->worker_index = worker_index;
+  autoplay_worker->movegen_cache = args->movegen_cache;
   autoplay_worker->autoplay_results =
       autoplay_results_create_empty_copy(target);
   autoplay_worker->prng = NULL;
@@ -499,9 +502,9 @@ Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
     infer_args_fill(
         infer_args, infer_args->leave_list_capacity, infer_args->equity_margin,
         infer_args->game_history, game_runner->game_one_move_behind,
-        infer_args->num_threads, infer_args->parent_worker_thread_index,
-        infer_args->print_interval, infer_args->thread_control,
-        infer_args->use_game_history,
+        infer_args->num_threads, infer_args->movegen_cache,
+        infer_args->movegen_start_index, infer_args->print_interval,
+        infer_args->thread_control, infer_args->use_game_history,
         infer_args->use_inference_cutoff_optimization,
         // We can use 1 - player_on_turn_index for the target index because
         // autoplay does not support challenged phonies (yet).
@@ -513,9 +516,12 @@ Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
   }
 
   ErrorStack *error_stack = autoplay_worker->error_stack;
-  Move *move = get_top_simming_move(
-      game, autoplay_worker->worker_index, move_list, sim_args,
-      &autoplay_worker->sim_ctx, autoplay_worker->sim_results, error_stack);
+  Move *move =
+      get_top_simming_move(game,
+                           move_gen_cache_get(autoplay_worker->movegen_cache,
+                                              autoplay_worker->worker_index),
+                           move_list, sim_args, &autoplay_worker->sim_ctx,
+                           autoplay_worker->sim_results, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
     log_fatal("autoplay worker %d failed to get top simming move for player %d "
@@ -745,10 +751,10 @@ void init_sim_args_for_player(AutoplayWorker *autoplay_worker,
                               int player_index) {
   SimArgs *sim_args = (player_index == 0) ? &autoplay_worker->args.p1_sim_args
                                           : &autoplay_worker->args.p2_sim_args;
-  sim_args->bai_options.parent_worker_thread_index =
-      autoplay_worker->worker_index;
-  sim_args->inference_args.parent_worker_thread_index =
-      autoplay_worker->worker_index;
+  sim_args->movegen_cache = autoplay_worker->movegen_cache;
+  sim_args->movegen_start_index = autoplay_worker->worker_index;
+  sim_args->inference_args.movegen_cache = autoplay_worker->movegen_cache;
+  sim_args->inference_args.movegen_start_index = autoplay_worker->worker_index;
   sim_args->inference_results = autoplay_worker->inference_results;
 }
 

@@ -130,11 +130,11 @@ void simulate_without_ctx(SimArgs *sim_args, SimResults *sim_results,
   sim_ctx_destroy(ctx);
 }
 
-Move *get_top_simming_move(Game *game, int movegen_index, MoveList *move_list,
+Move *get_top_simming_move(Game *game, MoveGen *movegen, MoveList *move_list,
                            SimArgs *sim_args, SimCtx **sim_ctx,
                            SimResults *sim_results, ErrorStack *error_stack) {
   if (sim_args->num_plies == 0) {
-    return get_top_equity_move(game, movegen_index, move_list);
+    return get_top_equity_move(game, movegen, move_list);
   }
 
   const MoveGenArgs gen_args = {
@@ -143,7 +143,7 @@ Move *get_top_simming_move(Game *game, int movegen_index, MoveList *move_list,
       .move_record_type = MOVE_RECORD_ALL,
       .move_sort_type = MOVE_SORT_EQUITY,
       .override_kwg = NULL,
-      .thread_index = movegen_index,
+      .gen = movegen,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,

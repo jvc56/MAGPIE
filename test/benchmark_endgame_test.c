@@ -19,6 +19,7 @@
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/move_gen_cache.h"
 #include "../src/util/io_util.h"
 #include "test_util.h"
 #include <assert.h>
@@ -58,8 +59,9 @@ static void exec_config_quiet(Config *config, const char *cmd) {
 // Play moves until the bag is empty, returning true if we get a valid endgame
 // position (bag empty, both players have tiles)
 static bool play_until_bag_empty(Game *game, MoveList *move_list) {
+  MoveGen gen;
   while (bag_get_letters(game_get_bag(game)) > 0) {
-    const Move *move = get_top_equity_move(game, 0, move_list);
+    const Move *move = get_top_equity_move(game, &gen, move_list);
     play_move(move, game, NULL);
 
     // Check if game ended before bag emptied
@@ -84,13 +86,14 @@ static float compute_stuck_fraction(Game *game, MoveList *move_list,
   }
 
   uint64_t tiles_bv = 0;
+  MoveGen gen;
   const MoveGenArgs args = {
       .game = game,
       .move_list = move_list,
       .move_record_type = MOVE_RECORD_TILES_PLAYED,
       .move_sort_type = MOVE_SORT_SCORE,
       .override_kwg = NULL,
-      .thread_index = 0,
+      .gen = &gen,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -218,7 +221,9 @@ void test_generate_stuck_cgps(void) {
       }
 
       // Play one more greedy move
-      const Move *move = get_top_equity_move(game, 0, move_list);
+      const Move *move = get_top_equity_move(
+          game, move_gen_cache_get(config_get_movegen_cache(config), 0),
+          move_list);
       if (move_get_type(move) == GAME_EVENT_PASS) {
         break;
       }
@@ -389,7 +394,8 @@ static void run_ab_benchmark(const char *cgp_file, const char *label,
                         .use_heuristics = true,
                         .per_ply_callback = NULL,
                         .per_ply_callback_data = NULL,
-                        .forced_pass_bypass = false};
+                        .forced_pass_bypass = false,
+                        .movegen_cache = config_get_movegen_cache(config)};
 
     // --- OLD (no bypass) ---
     Timer t;

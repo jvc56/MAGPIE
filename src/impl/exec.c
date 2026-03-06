@@ -12,7 +12,6 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "config.h"
-#include "move_gen.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -333,10 +332,7 @@ char *create_command_from_args(int argc, char *argv[]) {
   return command_string;
 }
 
-void caches_destroy(void) {
-  gen_destroy_cache();
-  fileproxy_destroy_cache();
-}
+void caches_destroy(void) { fileproxy_destroy_cache(); }
 
 void process_command_internal(int argc, char *argv[],
                               const ConfigArgs *config_args) {

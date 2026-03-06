@@ -60,6 +60,7 @@
 #include "get_gcg.h"
 #include "inference.h"
 #include "move_gen.h"
+#include "move_gen_cache.h"
 #include "simmer.h"
 #include <assert.h>
 #include <ctype.h>
@@ -297,6 +298,7 @@ struct Config {
   AutoplayResults *autoplay_results;
   ConversionResults *conversion_results;
   GameStringOptions *game_string_options;
+  MoveGenCache movegen_cache;
 };
 
 void parsed_arg_create(Config *config, arg_token_t arg_token, const char *name,
@@ -490,6 +492,10 @@ GameHistory *config_get_game_history(const Config *config) {
 
 MoveList *config_get_move_list(const Config *config) {
   return config->move_list;
+}
+
+MoveGenCache *config_get_movegen_cache(const Config *config) {
+  return (MoveGenCache *)&config->movegen_cache;
 }
 
 SimResults *config_get_sim_results(const Config *config) {
@@ -2156,7 +2162,7 @@ void impl_move_gen_override_record_type(Config *config,
   const MoveGenArgs args = {
       .game = config->game,
       .move_list = config->move_list,
-      .thread_index = 0,
+      .gen = move_gen_cache_get(&config->movegen_cache, 0),
       .eq_margin_movegen = config->eq_margin_movegen,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -2189,7 +2195,8 @@ void config_fill_infer_args(const Config *config, bool use_game_history,
                             Rack *target_known_rack, Rack *nontarget_known_rack,
                             InferenceArgs *args) {
   infer_args_fill(args, config->num_plays, config->eq_margin_inference,
-                  config->game_history, config->game, config->num_threads, 0,
+                  config->game_history, config->game, config->num_threads,
+                  (MoveGenCache *)&config->movegen_cache, 0,
                   config->print_interval, config->thread_control,
                   use_game_history, use_infer_cutoff_optimization, target_index,
                   target_score, target_num_exch, target_played_tiles,
@@ -2378,7 +2385,8 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->max_num_display_plays, config->shplies, config->seed,
       config->max_iterations, config->min_play_iterations,
       config->stop_cond_pct, config->threshold, config->time_limit_seconds,
-      config->sampling_rule, config->cutoff, &inference_args, sim_args);
+      config->sampling_rule, config->cutoff, &inference_args,
+      (MoveGenCache *)&config->movegen_cache, sim_args);
 }
 
 void config_load_win_pcts(Config *config, ErrorStack *error_stack) {
@@ -2541,6 +2549,7 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
   endgame_args->per_ply_callback_data = NULL;
   endgame_args->soft_time_limit = 0;
   endgame_args->hard_time_limit = 0;
+  endgame_args->movegen_cache = &config->movegen_cache;
 }
 
 void config_endgame(Config *config, EndgameResults *endgame_results,
@@ -2608,13 +2617,15 @@ void config_fill_autoplay_args(const Config *config,
     num_worker_threads_per_sim = config->num_threads;
   }
 
+  autoplay_args->movegen_cache = (MoveGenCache *)&config->movegen_cache;
+
   InferenceArgs inference_args = {0};
   if (config->p1_sim_with_inference || config->p2_sim_with_inference) {
     // Autoplay with inference must populate the following InferenceArgs fields
     // that are left unset here.
     // At startup:
     //  - game
-    //  - parent_worker_thread_index;
+    //  - movegen_start_index
     // For each move:
     //  - target_index
     //  - target_score
@@ -2624,9 +2635,10 @@ void config_fill_autoplay_args(const Config *config,
     //  - nontarget_known_rack
     //  - previous play exists
     infer_args_fill(&inference_args, 0, config->eq_margin_inference, NULL, NULL,
-                    num_worker_threads_per_sim, 0, config->print_interval,
-                    config->thread_control, false, true, 0, 0, 0, NULL, NULL,
-                    NULL);
+                    num_worker_threads_per_sim,
+                    (MoveGenCache *)&config->movegen_cache, 0,
+                    config->print_interval, config->thread_control, false, true,
+                    0, 0, 0, NULL, NULL, NULL);
   }
 
   // Autoplay with sims must populate the following SimArgs fields that are left
@@ -2634,7 +2646,7 @@ void config_fill_autoplay_args(const Config *config,
   // At startup:
   //  - move list
   //  - inference results
-  //  - parent_worker_thread_index;
+  //  - movegen_start_index
   // For each game:
   //  - seed
   // For each move:
@@ -2650,7 +2662,8 @@ void config_fill_autoplay_args(const Config *config,
       /*seed=*/0, config->p1_max_iterations, config->p1_min_play_iterations,
       config->p1_stop_cond_pct, config->p1_threshold,
       config->p1_time_limit_seconds, config->p1_sampling_rule, config->cutoff,
-      &inference_args, &autoplay_args->p1_sim_args);
+      &inference_args, (MoveGenCache *)&config->movegen_cache,
+      &autoplay_args->p1_sim_args);
 
   sim_args_fill(
       config->p2_sim_plies, /*move_list=*/NULL, config->p2_num_plays,
@@ -2662,7 +2675,8 @@ void config_fill_autoplay_args(const Config *config,
       /*seed=*/0, config->p2_max_iterations, config->p2_min_play_iterations,
       config->p2_stop_cond_pct, config->p2_threshold,
       config->p2_time_limit_seconds, config->p2_sampling_rule, config->cutoff,
-      &inference_args, &autoplay_args->p2_sim_args);
+      &inference_args, (MoveGenCache *)&config->movegen_cache,
+      &autoplay_args->p2_sim_args);
 }
 
 void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
@@ -5698,7 +5712,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_int(config, ARG_TOKEN_NUMBER_OF_THREADS, 1, MAX_THREADS,
+  config_load_int(config, ARG_TOKEN_NUMBER_OF_THREADS, 1, INT_MAX,
                   &config->num_threads, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -6370,6 +6384,8 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       return;
     }
   }
+
+  move_gen_cache_alloc(&config->movegen_cache, config->num_threads);
 }
 
 // Parses the arguments given by the cmd string and updates the state of
@@ -6852,6 +6868,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
 
   autoplay_results_set_players_data(config->autoplay_results,
                                     config->players_data);
+  move_gen_cache_init(&config->movegen_cache);
+
   return config;
 }
 
@@ -6879,6 +6897,7 @@ void config_destroy(Config *config) {
   autoplay_results_destroy(config->autoplay_results);
   conversion_results_destroy(config->conversion_results);
   game_string_options_destroy(config->game_string_options);
+  move_gen_cache_destroy(&config->movegen_cache);
   free(config->settings_filename);
   free(config->data_paths);
   free(config);
