@@ -33,7 +33,7 @@ static const int strategies[][3] = {
 static const int num_strategies_entries =
     sizeof(strategies) / sizeof(strategies[0]);
 
-void bai_wrapper(BAIOptions *bai_options, RandomVariables *rvs,
+void bai_wrapper(const BAIOptions *bai_options, RandomVariables *rvs,
                  RandomVariables *rng, ThreadControl *thread_control,
                  BAILogger *bai_logger, BAIResult *bai_result) {
   thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);

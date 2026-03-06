@@ -30,6 +30,7 @@
 #include "../ent/transposition_table.h"
 #include "../ent/xoshiro.h"
 #include "../ent/zobrist.h"
+#include "../src/impl/move_gen_cache.h"
 #include "../str/letter_distribution_string.h"
 #include "../str/move_string.h"
 #include "../str/rack_string.h"

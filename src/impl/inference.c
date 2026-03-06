@@ -31,6 +31,8 @@
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
+#include "move_gen.h"
+#include "move_gen_cache.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -365,8 +367,8 @@ Inference *inference_create(const Game *game, int thread_index,
   inference->num_threads = args->num_threads;
   inference->print_interval = args->print_interval;
   inference->thread_control = args->thread_control;
-  inference->movegen =
-      move_gen_cache_get(args->movegen_cache, args->movegen_start_index + thread_index);
+  inference->movegen = move_gen_cache_get(
+      args->movegen_cache, args->movegen_start_index + thread_index);
 
   complete_inference_setup(inference, args);
 

@@ -14,6 +14,7 @@
 #include "../src/ent/win_pct.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/move_gen_cache.h"
 #include "../src/impl/simmer.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
@@ -695,8 +696,9 @@ void test_sim_perf(const char *sim_perf_iters) {
       sim_strategy_stats_commit(stats, j);
     }
     write_stats_to_file(sim_perf_filename, strategies, stats, num_strategies);
-    const Move *best_play =
-        get_top_equity_move(game, move_gen_cache_get(config_get_movegen_cache(config), 0), config_get_move_list(config));
+    const Move *best_play = get_top_equity_move(
+        game, move_gen_cache_get(config_get_movegen_cache(config), 0),
+        config_get_move_list(config));
     play_move(best_play, game, NULL);
   }
   for (int i = 0; i < num_strategies; i++) {

@@ -504,8 +504,7 @@ Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
         infer_args->game_history, game_runner->game_one_move_behind,
         infer_args->num_threads, infer_args->movegen_cache,
         infer_args->movegen_start_index, infer_args->print_interval,
-        infer_args->thread_control,
-        infer_args->use_game_history,
+        infer_args->thread_control, infer_args->use_game_history,
         infer_args->use_inference_cutoff_optimization,
         // We can use 1 - player_on_turn_index for the target index because
         // autoplay does not support challenged phonies (yet).
@@ -517,12 +516,12 @@ Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
   }
 
   ErrorStack *error_stack = autoplay_worker->error_stack;
-  Move *move = get_top_simming_move(
-      game,
-      move_gen_cache_get(autoplay_worker->movegen_cache,
-                         autoplay_worker->worker_index),
-      move_list, sim_args,
-      &autoplay_worker->sim_ctx, autoplay_worker->sim_results, error_stack);
+  Move *move =
+      get_top_simming_move(game,
+                           move_gen_cache_get(autoplay_worker->movegen_cache,
+                                              autoplay_worker->worker_index),
+                           move_list, sim_args, &autoplay_worker->sim_ctx,
+                           autoplay_worker->sim_results, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
     log_fatal("autoplay worker %d failed to get top simming move for player %d "
@@ -891,8 +890,6 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
       malloc_or_die((sizeof(AutoplayWorker *)) * (autoplay_num_threads));
   cpthread_t *worker_ids =
       malloc_or_die((sizeof(cpthread_t)) * (autoplay_num_threads));
-
-  move_gen_cache_alloc(args->movegen_cache, autoplay_num_threads);
 
   for (int thread_index = 0; thread_index < autoplay_num_threads;
        thread_index++) {

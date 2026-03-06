@@ -332,9 +332,7 @@ char *create_command_from_args(int argc, char *argv[]) {
   return command_string;
 }
 
-void caches_destroy(void) {
-  fileproxy_destroy_cache();
-}
+void caches_destroy(void) { fileproxy_destroy_cache(); }
 
 void process_command_internal(int argc, char *argv[],
                               const ConfigArgs *config_args) {

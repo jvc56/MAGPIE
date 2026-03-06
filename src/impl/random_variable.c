@@ -21,6 +21,7 @@
 #include "../util/io_util.h"
 #include "bai_logger.h"
 #include "gameplay.h"
+#include "move_gen.h"
 #include "move_gen_cache.h"
 #include <math.h>
 #include <stdatomic.h>
@@ -427,7 +428,8 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       break;
     }
 
-    const Move *best_play = get_top_equity_move(game, simmer_worker->movegen, move_list);
+    const Move *best_play =
+        get_top_equity_move(game, simmer_worker->movegen, move_list);
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
     play_move(best_play, game, NULL);

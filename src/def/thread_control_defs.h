@@ -8,5 +8,4 @@ typedef enum {
   THREAD_CONTROL_STATUS_FINISHED,
 } thread_control_status_t;
 
-
 #endif

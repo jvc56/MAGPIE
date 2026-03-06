@@ -19,6 +19,7 @@
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/move_gen_cache.h"
 #include "../src/util/io_util.h"
 #include "test_util.h"
 #include <assert.h>
