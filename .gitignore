@@ -35,3 +35,6 @@ venv/
 
 # Compiled libraries
 *.a
+PR_DESCRIPTION.md
+PR_TITLE.txt
+SPEEDUP_NOTES.md
