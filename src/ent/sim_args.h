@@ -74,6 +74,8 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->bai_options.sampling_rule = sampling_rule;
   sim_args->bai_options.num_threads = num_threads;
   sim_args->bai_options.cutoff = cutoff;
+  // This will be overwritten in autoplay
+  sim_args->bai_options.parent_worker_thread_index = 0;
 }
 
 #endif

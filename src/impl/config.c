@@ -1841,8 +1841,8 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_USE_GAME_PAIRS,         /* gp */
         ARG_TOKEN_INFERENCE_MARGIN,       /* imargin */
         ARG_TOKEN_MAX_ITERATIONS,         /* iterations */
-        ARG_TOKEN_P1_MAX_ITERATIONS,      /* it1 */
-        ARG_TOKEN_P2_MAX_ITERATIONS,      /* it2 */
+        ARG_TOKEN_P1_MAX_ITERATIONS,      /* i1 */
+        ARG_TOKEN_P2_MAX_ITERATIONS,      /* i2 */
         ARG_TOKEN_P1_MIN_PLAY_ITERATIONS, /* mi1 */
         ARG_TOKEN_P2_MIN_PLAY_ITERATIONS, /* mi2 */
         ARG_TOKEN_MIN_PLAY_ITERATIONS,    /* minplayiterations */
@@ -4911,7 +4911,6 @@ void config_load_parsed_args(Config *config,
 
   for (int i = 0; i < number_of_input_strs; i++) {
     const char *input_str = string_splitter_get_item(cmd_split_string, i);
-
     bool is_cmd = i == 0;
     bool is_arg = string_length(input_str) > 1 && input_str[0] == '-' &&
                   !isdigit(input_str[1]);
@@ -6729,8 +6728,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_NUM_PLAYS, "np2", 1, 1);
   arg(ARG_TOKEN_P1_STOP_COND_PCT, "sc1", 1, 1);
   arg(ARG_TOKEN_P2_STOP_COND_PCT, "sc2", 1, 1);
-  arg(ARG_TOKEN_P1_MAX_ITERATIONS, "it1", 1, 1);
-  arg(ARG_TOKEN_P2_MAX_ITERATIONS, "it2", 1, 1);
+  arg(ARG_TOKEN_P1_MAX_ITERATIONS, "i1", 1, 1);
+  arg(ARG_TOKEN_P2_MAX_ITERATIONS, "i2", 1, 1);
   arg(ARG_TOKEN_P1_MIN_PLAY_ITERATIONS, "mi1", 1, 1);
   arg(ARG_TOKEN_P2_MIN_PLAY_ITERATIONS, "mi2", 1, 1);
   arg(ARG_TOKEN_P1_SIM_WITH_INFERENCE, "si1", 1, 1);
@@ -6966,89 +6965,6 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_NOTE:
     case ARG_TOKEN_P1_NAME:
     case ARG_TOKEN_P2_NAME:
-    case ARG_TOKEN_P1_SIM_PLIES:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->p1_sim_plies);
-      break;
-    case ARG_TOKEN_P2_SIM_PLIES:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->p2_sim_plies);
-      break;
-    case ARG_TOKEN_P1_NUM_PLAYS:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->p1_num_plays);
-      break;
-    case ARG_TOKEN_P2_NUM_PLAYS:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->p2_num_plays);
-      break;
-    case ARG_TOKEN_P1_STOP_COND_PCT:
-      if (config->p1_stop_cond_pct >= 100.0) {
-        config_add_string_setting_to_string_builder(config, sb, arg_token,
-                                                    "none");
-      } else {
-        config_add_double_setting_to_string_builder(config, sb, arg_token,
-                                                    config->p1_stop_cond_pct);
-      }
-      break;
-    case ARG_TOKEN_P2_STOP_COND_PCT:
-      if (config->p2_stop_cond_pct >= 100.0) {
-        config_add_string_setting_to_string_builder(config, sb, arg_token,
-                                                    "none");
-      } else {
-        config_add_double_setting_to_string_builder(config, sb, arg_token,
-                                                    config->p2_stop_cond_pct);
-      }
-      break;
-    case ARG_TOKEN_P1_MAX_ITERATIONS:
-      config_add_uint64_setting_to_string_builder(config, sb, arg_token,
-                                                  config->p1_max_iterations);
-      break;
-    case ARG_TOKEN_P2_MAX_ITERATIONS:
-      config_add_uint64_setting_to_string_builder(config, sb, arg_token,
-                                                  config->p2_max_iterations);
-      break;
-    case ARG_TOKEN_P1_MIN_PLAY_ITERATIONS:
-      config_add_uint64_setting_to_string_builder(
-          config, sb, arg_token, config->p1_min_play_iterations);
-      break;
-    case ARG_TOKEN_P2_MIN_PLAY_ITERATIONS:
-      config_add_uint64_setting_to_string_builder(
-          config, sb, arg_token, config->p2_min_play_iterations);
-      break;
-    case ARG_TOKEN_P1_SIM_WITH_INFERENCE:
-      config_add_bool_setting_to_string_builder(config, sb, arg_token,
-                                                config->p1_sim_with_inference);
-      break;
-    case ARG_TOKEN_P2_SIM_WITH_INFERENCE:
-      config_add_bool_setting_to_string_builder(config, sb, arg_token,
-                                                config->p2_sim_with_inference);
-      break;
-    case ARG_TOKEN_P1_TIME_LIMIT:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->p1_time_limit_seconds);
-      break;
-    case ARG_TOKEN_P2_TIME_LIMIT:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->p2_time_limit_seconds);
-      break;
-    case ARG_TOKEN_P1_THRESHOLD:
-      config_add_double_setting_to_string_builder(config, sb, arg_token,
-                                                  config->p1_threshold);
-      break;
-    case ARG_TOKEN_P2_THRESHOLD:
-      config_add_double_setting_to_string_builder(config, sb, arg_token,
-                                                  config->p2_threshold);
-      break;
-    case ARG_TOKEN_P1_SAMPLING_RULE:
-      string_builder_add_formatted_string(sb, " -%s ",
-                                          config->pargs[arg_token]->name);
-      string_builder_add_sampling_rule(sb, config->p1_sampling_rule);
-      break;
-    case ARG_TOKEN_P2_SAMPLING_RULE:
-      string_builder_add_formatted_string(sb, " -%s ",
-                                          config->pargs[arg_token]->name);
-      string_builder_add_sampling_rule(sb, config->p2_sampling_rule);
       break;
     case ARG_TOKEN_MULTI_THREADING_MODE:
       string_builder_add_formatted_string(sb, " -%s ",
@@ -7165,6 +7081,14 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->plies);
       break;
+    case ARG_TOKEN_P1_SIM_PLIES:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->p1_sim_plies);
+      break;
+    case ARG_TOKEN_P2_SIM_PLIES:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->p2_sim_plies);
+      break;
     case ARG_TOKEN_SHPLIES:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->shplies);
@@ -7181,6 +7105,14 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->num_plays);
       break;
+    case ARG_TOKEN_P1_NUM_PLAYS:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->p1_num_plays);
+      break;
+    case ARG_TOKEN_P2_NUM_PLAYS:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->p2_num_plays);
+      break;
     case ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->max_num_display_plays);
@@ -7193,9 +7125,35 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_uint64_setting_to_string_builder(config, sb, arg_token,
                                                   config->max_iterations);
       break;
+    case ARG_TOKEN_P1_MAX_ITERATIONS:
+      config_add_uint64_setting_to_string_builder(config, sb, arg_token,
+                                                  config->p1_max_iterations);
+      break;
+    case ARG_TOKEN_P2_MAX_ITERATIONS:
+      config_add_uint64_setting_to_string_builder(config, sb, arg_token,
+                                                  config->p2_max_iterations);
+      break;
     case ARG_TOKEN_STOP_COND_PCT:
       config_add_double_setting_to_string_builder(config, sb, arg_token,
                                                   config->stop_cond_pct);
+      break;
+    case ARG_TOKEN_P1_STOP_COND_PCT:
+      if (config->p1_stop_cond_pct >= 100.0) {
+        config_add_string_setting_to_string_builder(config, sb, arg_token,
+                                                    "none");
+      } else {
+        config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                    config->p1_stop_cond_pct);
+      }
+      break;
+    case ARG_TOKEN_P2_STOP_COND_PCT:
+      if (config->p2_stop_cond_pct >= 100.0) {
+        config_add_string_setting_to_string_builder(config, sb, arg_token,
+                                                    "none");
+      } else {
+        config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                    config->p2_stop_cond_pct);
+      }
       break;
     case ARG_TOKEN_INFERENCE_MARGIN:
       if (config->eq_margin_inference != 0) {
@@ -7214,6 +7172,14 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_uint64_setting_to_string_builder(config, sb, arg_token,
                                                   config->min_play_iterations);
       break;
+    case ARG_TOKEN_P1_MIN_PLAY_ITERATIONS:
+      config_add_uint64_setting_to_string_builder(
+          config, sb, arg_token, config->p1_min_play_iterations);
+      break;
+    case ARG_TOKEN_P2_MIN_PLAY_ITERATIONS:
+      config_add_uint64_setting_to_string_builder(
+          config, sb, arg_token, config->p2_min_play_iterations);
+      break;
     case ARG_TOKEN_USE_GAME_PAIRS:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->use_game_pairs);
@@ -7225,6 +7191,14 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_SIM_WITH_INFERENCE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->sim_with_inference);
+      break;
+    case ARG_TOKEN_P1_SIM_WITH_INFERENCE:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->p1_sim_with_inference);
+      break;
+    case ARG_TOKEN_P2_SIM_WITH_INFERENCE:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->p2_sim_with_inference);
       break;
     case ARG_TOKEN_USE_HEAT_MAP:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
@@ -7266,15 +7240,43 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->time_limit_seconds);
       break;
+    case ARG_TOKEN_P1_TIME_LIMIT:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->p1_time_limit_seconds);
+      break;
+    case ARG_TOKEN_P2_TIME_LIMIT:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->p2_time_limit_seconds);
+      break;
     case ARG_TOKEN_SAMPLING_RULE:
       string_builder_add_formatted_string(sb, " -%s ",
                                           config->pargs[arg_token]->name);
       string_builder_add_sampling_rule(sb, config->sampling_rule);
       break;
+    case ARG_TOKEN_P1_SAMPLING_RULE:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_sampling_rule(sb, config->p1_sampling_rule);
+      break;
+    case ARG_TOKEN_P2_SAMPLING_RULE:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_sampling_rule(sb, config->p2_sampling_rule);
+      break;
     case ARG_TOKEN_THRESHOLD:
       string_builder_add_formatted_string(sb, " -%s ",
                                           config->pargs[arg_token]->name);
       string_builder_add_threshold(sb, config->threshold);
+      break;
+    case ARG_TOKEN_P1_THRESHOLD:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_threshold(sb, config->p1_threshold);
+      break;
+    case ARG_TOKEN_P2_THRESHOLD:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_threshold(sb, config->p2_threshold);
       break;
     case ARG_TOKEN_CUTOFF:
       config_add_double_setting_to_string_builder(
