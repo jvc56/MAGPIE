@@ -166,6 +166,7 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   endgame_args.num_top_moves = 1;
   endgame_args.per_ply_callback = print_pv_callback;
   endgame_args.per_ply_callback_data = &timer;
+  endgame_args.movegen_cache = config_get_movegen_cache(config);
 
   // Create results
   EndgameResults *endgame_results = config_get_endgame_results(config);
@@ -352,6 +353,7 @@ void test_kue(void) {
   endgame_args.num_top_moves = 10;
   endgame_args.per_ply_callback = print_pv_and_ranked_callback;
   endgame_args.per_ply_callback_data = &timer;
+  endgame_args.movegen_cache = config_get_movegen_cache(config);
 
   EndgameResults *endgame_results = config_get_endgame_results(config);
   ErrorStack *error_stack = error_stack_create();
@@ -413,6 +415,7 @@ void test_2lex_endgame(dual_lexicon_mode_t mode, int expected_score) {
       .per_ply_callback = NULL,
       .per_ply_callback_data = NULL,
       .dual_lexicon_mode = mode,
+      .movegen_cache = config_get_movegen_cache(config),
   };
 
   endgame_solve(solver, &args, results, error_stack);
@@ -479,6 +482,7 @@ void test_monster_q(void) {
   endgame_args.num_top_moves = 1;
   endgame_args.per_ply_callback = print_pv_callback;
   endgame_args.per_ply_callback_data = &timer;
+  endgame_args.movegen_cache = config_get_movegen_cache(config);
 
   EndgameResults *endgame_results = config_get_endgame_results(config);
   ErrorStack *error_stack = error_stack_create();
@@ -529,6 +533,7 @@ void test_multi_pv(void) {
   endgame_args.use_heuristics = true;
   endgame_args.per_ply_callback = NULL;
   endgame_args.per_ply_callback_data = NULL;
+  endgame_args.movegen_cache = config_get_movegen_cache(config);
 
   EndgameResults *endgame_results = endgame_results_create();
   ErrorStack *error_stack = error_stack_create();

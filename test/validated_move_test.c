@@ -609,10 +609,11 @@ void test_validated_move_distinct_kwg(void) {
                            "-r1 best -r2 best -numplays 1");
   Game *game = config_game_create(config);
   MoveList *move_list = move_list_create(1);
+  MoveGen gen = {0};
   const MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
+      .gen = &gen,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,

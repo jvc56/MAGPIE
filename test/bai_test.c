@@ -36,7 +36,6 @@ static const int num_strategies_entries =
 void bai_wrapper(BAIOptions *bai_options, RandomVariables *rvs,
                  RandomVariables *rng, ThreadControl *thread_control,
                  BAILogger *bai_logger, BAIResult *bai_result) {
-  bai_options->parent_worker_thread_index = 0;
   thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
   bai(bai_options, rvs, rng, thread_control, bai_logger, bai_result);
 }

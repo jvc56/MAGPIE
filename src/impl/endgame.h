@@ -15,6 +15,7 @@
 #include "../ent/small_move_arena.h"
 #include "../ent/thread_control.h"
 #include "../ent/transposition_table.h"
+#include "../impl/move_gen_cache.h"
 
 enum {
   DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE = 1024 * 1024,
@@ -54,6 +55,7 @@ typedef struct EndgameArgs {
   // If estimated completion > hard_time_limit, stop to bank remaining time.
   double soft_time_limit;
   double hard_time_limit;
+  MoveGenCache *movegen_cache;
 } EndgameArgs;
 
 EndgameSolver *endgame_solver_create(void);

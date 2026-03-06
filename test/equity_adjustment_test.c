@@ -25,7 +25,7 @@ void test_macondo_opening_equity_adjustments(void) {
   const MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
+      .gen = &(MoveGen){0},
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -108,7 +108,7 @@ void test_macondo_endgame_equity_adjustments(void) {
   const MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
+      .gen = &(MoveGen){0},
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,

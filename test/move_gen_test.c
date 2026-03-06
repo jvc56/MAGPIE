@@ -108,10 +108,11 @@ void assert_move_gen_row(Game *game, MoveList *move_list,
                        rack_string);
   }
 
+  MoveGen gen;
   const MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
+      .gen = &gen,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -163,10 +164,11 @@ void macondo_tests(void) {
   const LetterDistribution *ld = game_get_ld(game);
   const Player *player = game_get_player(game, 0);
   MoveList *move_list = move_list_create(10000);
+  MoveGen gen;
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
+      .gen = &gen,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -419,10 +421,11 @@ void unfound_leave_lookup_test(void) {
   Game *game = config_game_create(config);
   MoveList *move_list = move_list_create(1);
   Rack *rack = player_get_rack(game_get_player(game, 0));
+  MoveGen gen;
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
+      .gen = &gen,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -462,13 +465,14 @@ void exchange_tests(void) {
   // so exchanges should not be possible.
   play_top_n_equity_move(game, 0);
 
+  MoveGen gen;
   const MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
       .move_record_type = MOVE_RECORD_BEST,
       .move_sort_type = MOVE_SORT_EQUITY,
       .override_kwg = NULL,
-      .thread_index = 0,
+      .gen = &gen,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -506,10 +510,11 @@ void movegen_many_moves(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   MoveList *move_list = move_list_create(239000);
+  MoveGen gen;
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
+      .gen = &gen,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -534,10 +539,11 @@ void equity_test(void) {
 
   Player *player = game_get_player(game, 0);
   MoveList *move_list = move_list_create(300);
+  MoveGen gen;
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
+      .gen = &gen,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -587,10 +593,11 @@ void top_equity_play_recorder_test(void) {
   const LetterDistribution *ld = game_get_ld(game);
   Player *player = game_get_player(game, 0);
   MoveList *move_list = move_list_create(1);
+  MoveGen gen;
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
+      .gen = &gen,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -627,10 +634,11 @@ void small_play_recorder_test(void) {
   const LetterDistribution *ld = game_get_ld(game);
   Player *player = game_get_player(game, 0);
   MoveList *move_list = move_list_create_small(100000);
+  MoveGen gen;
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
+      .gen = &gen,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -692,10 +700,11 @@ void distinct_lexica_test(bool w1) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   MoveList *move_list = move_list_create(1);
+  MoveGen gen;
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
+      .gen = &gen,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -826,10 +835,11 @@ void consistent_tiebreaking_test(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   MoveList *move_list = move_list_create(1);
+  MoveGen gen;
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
+      .gen = &gen,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1004,10 +1014,11 @@ void movegen_within_x_of_best_test(bool use_wmp) {
   const LetterDistribution *ld = game_get_ld(game);
   Player *player = game_get_player(game, 0);
   MoveList *move_list = move_list_create(10000);
+  MoveGen gen;
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
+      .gen = &gen,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1196,12 +1207,13 @@ void movegen_does_not_return_early_from_anchor(void) {
   Rack *player_rack = player_get_rack(player);
   MoveList *move_list = move_list_create(10);
   const KLV *klv = players_data_get_klv(config_get_players_data(config), 0);
+  MoveGen gen;
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
       .move_record_type = MOVE_RECORD_BEST,
       .move_sort_type = MOVE_SORT_EQUITY,
-      .thread_index = 0,
+      .gen = &gen,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1248,12 +1260,13 @@ void movegen_one_tile_nonwmp(void) {
   const Player *player = game_get_player(game, 0);
   Rack *player_rack = player_get_rack(player);
   MoveList *move_list = move_list_create(10);
+  MoveGen gen;
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
       .move_record_type = MOVE_RECORD_ALL,
       .move_sort_type = MOVE_SORT_SCORE,
-      .thread_index = 0,
+      .gen = &gen,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1293,12 +1306,13 @@ void movegen_one_tile_wmp(void) {
   const Player *player = game_get_player(game, 0);
   Rack *player_rack = player_get_rack(player);
   MoveList *move_list = move_list_create(10);
+  MoveGen gen;
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
       .move_record_type = MOVE_RECORD_ALL,
       .move_sort_type = MOVE_SORT_SCORE,
-      .thread_index = 0,
+      .gen = &gen,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1336,7 +1350,8 @@ void wmp_blank_possibilities_natural(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
 
-  MoveGen *gen = get_movegen(0);
+  MoveGen gen_storage;
+  MoveGen *gen = &gen_storage;
   memset(gen, 0, sizeof(*gen));
   gen->wmp_move_gen.word_length = 7;
 
@@ -1368,7 +1383,8 @@ void wmp_blank_possibilities_blanked(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
 
-  MoveGen *gen = get_movegen(0);
+  MoveGen gen_storage;
+  MoveGen *gen = &gen_storage;
   memset(gen, 0, sizeof(*gen));
 
   // No playthrough tiles. All of these tiles are newly placed.
@@ -1403,7 +1419,8 @@ void wmp_blank_possibilities_bananas_1(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
 
-  MoveGen *gen = get_movegen(0);
+  MoveGen gen_storage;
+  MoveGen *gen = &gen_storage;
   memset(gen, 0, sizeof(*gen));
 
   set_playthrough_marked_from_string(gen, ld, "BANANAS");
@@ -1431,7 +1448,8 @@ void wmp_blank_possibilities_bananas_2(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
 
-  MoveGen *gen = get_movegen(0);
+  MoveGen gen_storage;
+  MoveGen *gen = &gen_storage;
   memset(gen, 0, sizeof(*gen));
 
   set_playthrough_marked_from_string(gen, ld, "BaNANAS");
@@ -1460,7 +1478,8 @@ void wmp_blank_possibilities_bananas_3(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
 
-  MoveGen *gen = get_movegen(0);
+  MoveGen gen_storage;
+  MoveGen *gen = &gen_storage;
   memset(gen, 0, sizeof(*gen));
 
   set_playthrough_marked_from_string(gen, ld, "BaNaNAS");
@@ -1488,7 +1507,8 @@ void wmp_blank_possibilities_bananas_4(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
 
-  MoveGen *gen = get_movegen(0);
+  MoveGen gen_storage;
+  MoveGen *gen = &gen_storage;
   memset(gen, 0, sizeof(*gen));
 
   set_playthrough_marked_from_string(gen, ld, "B.NaNAS");
@@ -1516,7 +1536,8 @@ void wmp_blank_possibilities_bananas_5(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
 
-  MoveGen *gen = get_movegen(0);
+  MoveGen gen_storage;
+  MoveGen *gen = &gen_storage;
   memset(gen, 0, sizeof(*gen));
 
   set_playthrough_marked_from_string(gen, ld, "BA.ANAS");

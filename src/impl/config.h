@@ -18,6 +18,7 @@
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "../ent/win_pct.h"
+#include "../impl/move_gen_cache.h"
 #include "../impl/simmer.h"
 #include "../util/io_util.h"
 #include <stdbool.h>
@@ -72,6 +73,7 @@ exec_mode_t config_get_exec_mode(const Config *config);
 Game *config_get_game(const Config *config);
 GameHistory *config_get_game_history(const Config *config);
 MoveList *config_get_move_list(const Config *config);
+MoveGenCache *config_get_movegen_cache(const Config *config);
 SimResults *config_get_sim_results(const Config *config);
 EndgameResults *config_get_endgame_results(const Config *config);
 AutoplayResults *config_get_autoplay_results(const Config *config);

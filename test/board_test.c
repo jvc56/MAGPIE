@@ -595,7 +595,7 @@ void test_board_get_playable_tiles_bv(void) {
         .move_record_type = MOVE_RECORD_TILES_PLAYED,
         .move_sort_type = MOVE_SORT_SCORE,
         .override_kwg = NULL,
-        .thread_index = 0,
+        .gen = &(MoveGen){0},
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
         .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,

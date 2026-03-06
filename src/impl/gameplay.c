@@ -863,7 +863,7 @@ void generate_moves_for_game_override_record_type(
       .move_record_type = move_record_type,
       .move_sort_type = player_get_move_sort_type(player_on_turn),
       .override_kwg = NULL,
-      .thread_index = args->thread_index,
+      .gen = args->gen,
       .eq_margin_movegen = args->eq_margin_movegen,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -882,13 +882,13 @@ void generate_moves_for_game(const MoveGenArgs *args) {
                 args->game, game_get_player_on_turn_index(args->game))));
 }
 
-Move *get_top_equity_move(Game *game, int movegen_index, MoveList *move_list) {
+Move *get_top_equity_move(Game *game, MoveGen *movegen, MoveList *move_list) {
   const MoveGenArgs args = {.game = game,
                             .move_list = move_list,
                             .move_record_type = MOVE_RECORD_BEST,
                             .move_sort_type = MOVE_SORT_EQUITY,
                             .override_kwg = NULL,
-                            .thread_index = movegen_index,
+                            .gen = movegen,
                             .eq_margin_movegen = 0,
                             .target_equity = EQUITY_MAX_VALUE,
                             .target_leave_size_for_exchange_cutoff =
@@ -898,14 +898,14 @@ Move *get_top_equity_move(Game *game, int movegen_index, MoveList *move_list) {
 }
 
 Move *get_top_equity_move_for_inferences(
-    Game *game, int movegen_index, MoveList *move_list, Equity target_equity,
+    Game *game, MoveGen *movegen, MoveList *move_list, Equity target_equity,
     int target_leave_size_for_exchange_cutoff, Equity equity_margin) {
   const MoveGenArgs args = {.game = game,
                             .move_list = move_list,
                             .move_record_type = MOVE_RECORD_BEST,
                             .move_sort_type = MOVE_SORT_EQUITY,
                             .override_kwg = NULL,
-                            .thread_index = movegen_index,
+                            .gen = movegen,
                             .eq_margin_movegen = equity_margin,
                             .target_equity = target_equity,
                             .target_leave_size_for_exchange_cutoff =

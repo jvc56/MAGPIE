@@ -153,7 +153,7 @@ static void test_infer_cutoff_optimization(bool use_wmp) {
       const Bag *bag = game_get_bag(game);
 
       // Generate the top equity move
-      const Move *top_move = get_top_equity_move(game, 0, move_list);
+      const Move *top_move = get_top_equity_move(game, move_gen_cache_get(config_get_movegen_cache(config), 0), move_list);
       const game_event_t move_type = move_get_type(top_move);
 
       // Only test inference for tile placement moves and exchanges

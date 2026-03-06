@@ -6,6 +6,7 @@
 #include "../ent/game.h"
 #include "../ent/sim_args.h"
 #include "../ent/thread_control.h"
+#include "../impl/move_gen_cache.h"
 #include "../util/io_util.h"
 #include <stdbool.h>
 
@@ -29,6 +30,7 @@ typedef struct AutoplayArgs {
   double cutoff;
   SimArgs p1_sim_args;
   SimArgs p2_sim_args;
+  MoveGenCache *movegen_cache;
 } AutoplayArgs;
 
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
