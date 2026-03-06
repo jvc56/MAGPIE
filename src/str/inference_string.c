@@ -254,10 +254,9 @@ void string_builder_add_inference_description(
 }
 
 StringGrid *get_common_leaves_string_grid(
-    const InferenceResults *inference_results,
-    const int max_num_leaves_to_display, const bool use_ucgi_format,
-    StringBuilder *tmp_sb, const bool is_exchange, const LetterDistribution *ld,
-    const inference_stat_t common_leaves_type) {
+    InferenceResults *inference_results, const int max_num_leaves_to_display,
+    const bool use_ucgi_format, StringBuilder *tmp_sb, const bool is_exchange,
+    const LetterDistribution *ld, const inference_stat_t common_leaves_type) {
   const LeaveRackList *leave_rack_list =
       inference_results_get_leave_rack_list(inference_results);
   if (!leave_rack_list || leave_rack_list_get_count(leave_rack_list) == 0) {
@@ -357,6 +356,7 @@ StringGrid *get_common_leaves_string_grid(
     }
     curr_row++;
   }
+  return sg_common_leaves;
 }
 
 void string_builder_add_inference(StringBuilder *inference_string,

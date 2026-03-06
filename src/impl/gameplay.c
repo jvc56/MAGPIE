@@ -23,7 +23,6 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "move_gen.h"
-#include "simmer.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -913,40 +912,6 @@ Move *get_top_equity_move_for_inferences(
                                 target_leave_size_for_exchange_cutoff};
   generate_moves(&args);
   return move_list_get_move(move_list, 0);
-}
-
-Move *get_top_simming_move(Game *game, int movegen_index, MoveList *move_list,
-                           SimArgs *sim_args, SimCtx **sim_ctx,
-                           SimResults *sim_results, ErrorStack *error_stack) {
-  if (sim_args->num_plies == 0) {
-    return get_top_equity_move(game, movegen_index, move_list);
-  }
-
-  const MoveGenArgs gen_args = {
-      .game = game,
-      .move_list = move_list,
-      .move_record_type = MOVE_RECORD_ALL,
-      .move_sort_type = MOVE_SORT_EQUITY,
-      .override_kwg = NULL,
-      .thread_index = movegen_index,
-      .eq_margin_movegen = 0,
-      .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-  };
-  generate_moves(&gen_args);
-
-  if (move_list_get_count(move_list) == 1) {
-    return move_list_get_move(move_list, 0);
-  }
-
-  simulate(sim_args, sim_ctx, sim_results, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return NULL;
-  }
-
-  return move_list_get_move(
-      sim_args->move_list,
-      bai_result_get_best_arm(sim_results_get_bai_result(sim_results)));
 }
 
 void validate_challenge_bonus_order(const GameEvent *game_event,
