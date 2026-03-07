@@ -42,10 +42,71 @@ struct PegSolver {
 typedef struct PegCandidate {
   SmallMove move;
   // Win fraction in [0,1]: win=1, tie=0.5, loss=0 averaged over bag scenarios.
+  // When pruned is true, this is the upper bound (best possible win_pct).
   double win_pct;
   // Expected spread from mover's perspective, averaged over bag scenarios.
   double expected_value;
+  // True if evaluation was cut short because this candidate cannot possibly
+  // reach the cutoff_k-th best win_pct.
+  bool pruned;
 } PegCandidate;
+
+// ---------------------------------------------------------------------------
+// Cutoff tracker for early pruning
+// ---------------------------------------------------------------------------
+
+// Tracks the K-th best win_pct among completed candidates. Threads update
+// this after each candidate finishes evaluation; the current cutoff is read
+// (without locking) during per-scenario evaluation to prune hopeless
+// candidates.
+typedef struct PegCutoff {
+  cpthread_mutex_t mutex;
+  double *completed; // win_pcts of completed (non-pruned) candidates
+  int num_completed;
+  int capacity;
+  int cutoff_k;              // position threshold (K-th best matters)
+  int total_weight;          // total bag-tile weight (sum of unseen counts)
+  _Atomic double cutoff;     // current K-th best win_pct, -1 initially
+} PegCutoff;
+
+static void peg_cutoff_init(PegCutoff *pc, int cutoff_k, int total_weight,
+                            int capacity) {
+  cpthread_mutex_init(&pc->mutex);
+  pc->completed = malloc_or_die(capacity * sizeof(double));
+  pc->num_completed = 0;
+  pc->capacity = capacity;
+  pc->cutoff_k = cutoff_k;
+  pc->total_weight = total_weight;
+  atomic_init(&pc->cutoff, -1.0);
+}
+
+static void peg_cutoff_destroy(PegCutoff *pc) {
+  free(pc->completed);
+}
+
+static int compare_doubles_desc(const void *a, const void *b) {
+  double da = *(const double *)a, db = *(const double *)b;
+  return (db > da) ? 1 : (db < da) ? -1 : 0;
+}
+
+// Called after a non-pruned candidate completes evaluation.
+static void peg_cutoff_update(PegCutoff *pc, double win_pct) {
+  cpthread_mutex_lock(&pc->mutex);
+  pc->completed[pc->num_completed++] = win_pct;
+  if (pc->num_completed >= pc->cutoff_k) {
+    // Find the K-th best (sort descending, take [k-1]).
+    qsort(pc->completed, pc->num_completed, sizeof(double),
+          compare_doubles_desc);
+    atomic_store_explicit(&pc->cutoff, pc->completed[pc->cutoff_k - 1],
+                          memory_order_relaxed);
+  }
+  cpthread_mutex_unlock(&pc->mutex);
+}
+
+// Read the current cutoff. Returns -1 if not yet established.
+static double peg_cutoff_get(const PegCutoff *pc) {
+  return atomic_load_explicit(&pc->cutoff, memory_order_relaxed);
+}
 
 static int compare_peg_candidates_desc(const void *a, const void *b) {
   const PegCandidate *ca = (const PegCandidate *)a;
@@ -298,15 +359,34 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
                                          ThreadControl *tc,
                                          TranspositionTable *shared_tt,
                                          dual_lexicon_mode_t dual_lexicon_mode,
-                                         double *win_pct_out) {
+                                         PegCutoff *cutoff,
+                                         double *win_pct_out,
+                                         bool *pruned_out) {
   double total = 0.0;
   double wins = 0.0;
   int weight = 0;
+  *pruned_out = false;
 
   for (int t = 0; t < ld_size; t++) {
     int cnt = (int)unseen[t];
     if (cnt == 0)
       continue;
+
+    // Early cutoff: if even winning all remaining scenarios can't reach the
+    // K-th best, stop evaluating and report the upper bound.
+    if (cutoff) {
+      double threshold = peg_cutoff_get(cutoff);
+      if (threshold >= 0) {
+        int remaining = cutoff->total_weight - weight;
+        double best_possible = (wins + remaining) / (double)cutoff->total_weight;
+        if (best_possible < threshold - 1e-9) {
+          *win_pct_out = best_possible;
+          *pruned_out = true;
+          return total / (weight > 0 ? weight : 1);
+        }
+      }
+    }
+
     Game *scenario =
         setup_endgame_scenario(base_game, move, mover_idx, opp_idx,
                                (MachineLetter)t, unseen, ld_size);
@@ -382,18 +462,39 @@ static void peg_eval_pass_recursive(const PegArgs *outer_args,
                                     const uint8_t unseen[MAX_ALPHABET_SIZE],
                                     int ld_size, int plies,
                                     TranspositionTable *shared_tt,
+                                    PegCutoff *cutoff,
                                     double *win_pct_out,
-                                    double *expected_value_out) {
+                                    double *expected_value_out,
+                                    bool *pruned_out) {
   int mover_idx = 1 - opp_idx;
   const LetterDistribution *ld = game_get_ld(outer_args->game);
   double total = 0.0;
   double wins = 0.0;
   int weight = 0;
+  if (pruned_out)
+    *pruned_out = false;
 
   for (int t = 0; t < ld_size; t++) {
     int cnt = (int)unseen[t];
     if (cnt == 0)
       continue;
+
+    // Early cutoff check.
+    if (cutoff) {
+      double threshold = peg_cutoff_get(cutoff);
+      if (threshold >= 0) {
+        int remaining = cutoff->total_weight - weight;
+        double best_possible = (wins + remaining) / (double)cutoff->total_weight;
+        if (best_possible < threshold - 1e-9) {
+          *win_pct_out = best_possible;
+          *expected_value_out = (weight > 0) ? total / weight : 0.0;
+          if (pruned_out)
+            *pruned_out = true;
+          return;
+        }
+      }
+    }
+
     // Create inner game: opp on turn, rack = unseen-{T}.
     Game *inner_game = game_duplicate(outer_args->game);
     Rack *opp_rack = player_get_rack(game_get_player(inner_game, opp_idx));
@@ -577,10 +678,11 @@ static void *peg_greedy_thread(void *arg) {
   PegGreedyThreadArgs *a = (PegGreedyThreadArgs *)arg;
   for (int i = a->start; i < a->end; i++) {
     PegCandidate *c = &a->candidates[i];
+    c->pruned = false;
     if (small_move_is_pass(&c->move)) {
       peg_eval_pass_recursive(a->outer_args, a->opp_idx,
-                              a->unseen, a->ld_size, 0, NULL,
-                              &c->win_pct, &c->expected_value);
+                              a->unseen, a->ld_size, 0, NULL, NULL,
+                              &c->win_pct, &c->expected_value, NULL);
     } else {
       c->expected_value =
           peg_greedy_eval_play(a->worker, &c->move, a->mover_idx, a->opp_idx,
@@ -613,6 +715,8 @@ typedef struct PegEndgameThreadArgs {
   // For recursive pass evaluation.
   PegSolver *solver;
   const PegArgs *outer_args;
+  // Early cutoff tracker (NULL if disabled).
+  PegCutoff *cutoff;
 } PegEndgameThreadArgs;
 
 static void *peg_endgame_thread(void *arg) {
@@ -622,17 +726,22 @@ static void *peg_endgame_thread(void *arg) {
     if (idx >= a->num_candidates)
       break;
     PegCandidate *c = &a->candidates[idx];
+    bool pruned = false;
     if (small_move_is_pass(&c->move)) {
       peg_eval_pass_recursive(a->outer_args, a->opp_idx,
                               a->unseen, a->ld_size, a->plies,
-                              a->shared_tt,
-                              &c->win_pct, &c->expected_value);
+                              a->shared_tt, a->cutoff,
+                              &c->win_pct, &c->expected_value, &pruned);
     } else {
       c->expected_value = peg_endgame_eval_candidate(
           a->endgame_solver, a->endgame_results, a->base_game, &c->move,
           a->mover_idx, a->opp_idx, a->plies, a->unseen, a->ld_size,
           a->thread_control, a->shared_tt, a->dual_lexicon_mode,
-          &c->win_pct);
+          a->cutoff, &c->win_pct, &pruned);
+    }
+    c->pruned = pruned;
+    if (!pruned && a->cutoff) {
+      peg_cutoff_update(a->cutoff, c->win_pct);
     }
   }
   return NULL;
@@ -663,13 +772,15 @@ static void invoke_per_pass_callback(const PegArgs *args, int pass,
   SmallMove moves[PEG_CALLBACK_MAX_TOP];
   double values[PEG_CALLBACK_MAX_TOP];
   double win_pcts[PEG_CALLBACK_MAX_TOP];
+  bool pruned[PEG_CALLBACK_MAX_TOP];
   for (int i = 0; i < top; i++) {
     moves[i] = sorted[i].move;
     values[i] = sorted[i].expected_value;
     win_pcts[i] = sorted[i].win_pct;
+    pruned[i] = sorted[i].pruned;
   }
-  args->per_pass_callback(pass, num_evaluated, moves, values, win_pcts, top,
-                          args->game, elapsed, stage_seconds,
+  args->per_pass_callback(pass, num_evaluated, moves, values, win_pcts, pruned,
+                          top, args->game, elapsed, stage_seconds,
                           args->per_pass_callback_data);
 }
 
@@ -915,6 +1026,33 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
       eg_results[ti] = endgame_results_create();
     }
 
+    // Early cutoff: determine K (how many candidates must survive).
+    // Final pass: only the best matters (K=1).
+    // Non-final: K = next pass's limit.
+    PegCutoff cutoff_state;
+    PegCutoff *cutoff_ptr = NULL;
+    if (args->early_cutoff) {
+      int cutoff_k;
+      if (pass == args->num_passes - 1) {
+        cutoff_k = 1;
+      } else {
+        int next_limit = args->pass_candidate_limits[pass + 1];
+        if (next_limit <= 0) {
+          static const int kDefaults[] = {
+              PEG_DEFAULT_PASS0_LIMIT, PEG_DEFAULT_PASS1_LIMIT,
+              PEG_DEFAULT_PASS2_LIMIT, PEG_DEFAULT_PASS3_LIMIT,
+              PEG_DEFAULT_PASS4_LIMIT,
+          };
+          int nd = (int)(sizeof(kDefaults) / sizeof(kDefaults[0]));
+          next_limit = (pass + 1 < nd) ? kDefaults[pass + 1]
+                                       : PEG_DEFAULT_PASS4_LIMIT;
+        }
+        cutoff_k = next_limit < limit ? next_limit : limit;
+      }
+      peg_cutoff_init(&cutoff_state, cutoff_k, total_unseen, limit);
+      cutoff_ptr = &cutoff_state;
+    }
+
     // Work-stealing: threads pull candidates from a shared atomic index.
     atomic_int next_candidate;
     atomic_init(&next_candidate, 0);
@@ -941,11 +1079,16 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
           .dual_lexicon_mode = args->dual_lexicon_mode,
           .solver = solver,
           .outer_args = args,
+          .cutoff = cutoff_ptr,
       };
       cpthread_create(&eg_threads[ti], peg_endgame_thread, &eg_targs[ti]);
     }
     for (int ti = 0; ti < num_threads; ti++) {
       cpthread_join(eg_threads[ti]);
+    }
+
+    if (cutoff_ptr) {
+      peg_cutoff_destroy(cutoff_ptr);
     }
 
     for (int ti = 0; ti < num_threads; ti++) {

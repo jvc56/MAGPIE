@@ -28,7 +28,8 @@ static void print_game_position(const Game *game) {
 static void peg_progress_callback(int pass, int num_evaluated,
                                    const SmallMove *top_moves,
                                    const double *top_values,
-                                   const double *top_win_pcts, int num_top,
+                                   const double *top_win_pcts,
+                                   const bool *top_pruned, int num_top,
                                    const Game *game, double elapsed,
                                    double stage_seconds, void *user_data) {
   (void)user_data;
@@ -59,8 +60,9 @@ static void peg_progress_callback(int pass, int num_evaluated,
     }
     string_builder_add_formatted_string(sb, " %d  leave=", score);
     string_builder_add_rack(sb, &leave, ld, false);
-    printf("  %d. %s  win%%=%.1f%%  spread=%+.2f\n", i + 1,
-           string_builder_peek(sb), top_win_pcts[i] * 100.0, top_values[i]);
+    printf("  %d. %s  win%%%s%.1f%%  spread=%+.2f\n", i + 1,
+           string_builder_peek(sb), top_pruned[i] ? "<=" : "=",
+           top_win_pcts[i] * 100.0, top_values[i]);
     string_builder_destroy(sb);
   }
 }
@@ -111,6 +113,7 @@ static void test_peg_straightforward(void) {
       .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
       .num_passes = 2,
       .pass_candidate_limits = {8},
+      .early_cutoff = true,
       .per_pass_callback = peg_progress_callback,
   };
 
@@ -181,6 +184,7 @@ static void test_peg_endgame_pass(void) {
       .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
       .num_passes = 1,
       .pass_candidate_limits = {8},
+      .early_cutoff = true,
       .per_pass_callback = peg_progress_callback,
   };
 

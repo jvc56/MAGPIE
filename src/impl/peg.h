@@ -31,11 +31,13 @@ enum {
 //   game          - the original input game (for move formatting)
 //   elapsed       - seconds elapsed since peg_solve started (cumulative)
 //   stage_seconds - seconds spent on this pass only
+//   top_pruned    - true if candidate was pruned (win_pct is upper bound)
 //   user_data     - caller-supplied pointer
 typedef void (*PegPerPassCallback)(int pass, int num_evaluated,
                                    const SmallMove *top_moves,
                                    const double *top_values,
-                                   const double *top_win_pcts, int num_top,
+                                   const double *top_win_pcts,
+                                   const bool *top_pruned, int num_top,
                                    const Game *game, double elapsed,
                                    double stage_seconds, void *user_data);
 
@@ -64,6 +66,11 @@ typedef struct PegArgs {
   void *per_pass_callback_data;
   // How many top candidates to pass to the callback (0 = default 5).
   int per_pass_num_top;
+
+  // When true, skip remaining bag-tile scenarios for a candidate once it
+  // cannot possibly reach the K-th best win_pct among completed candidates.
+  // Pruned candidates are reported with an upper-bound win_pct.
+  bool early_cutoff;
 
   // Internal flag: set by peg_eval_pass_recursive to skip the pass candidate
   // in the inner recursive call, preventing infinite mutual recursion.
