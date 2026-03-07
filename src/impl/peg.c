@@ -1179,7 +1179,25 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
       cutoff_ptr = &cutoff_state;
     }
 
-    // Work-stealing: threads pull candidates from a shared atomic index.
+    // Separate pass from non-pass candidates: move pass to end of the
+    // top-K range so non-pass candidates can be work-stolen in parallel,
+    // then pass gets all threads for its parallel scenario evaluation.
+    int eg_pass_idx = -1;
+    for (int i = 0; i < limit; i++) {
+      if (small_move_is_pass(&candidates[i].move)) {
+        eg_pass_idx = i;
+        break;
+      }
+    }
+    int eg_non_pass_count = limit;
+    if (eg_pass_idx >= 0) {
+      PegCandidate tmp = candidates[eg_pass_idx];
+      candidates[eg_pass_idx] = candidates[limit - 1];
+      candidates[limit - 1] = tmp;
+      eg_non_pass_count = limit - 1;
+    }
+
+    // Work-stealing: threads pull non-pass candidates from a shared index.
     atomic_int next_candidate;
     atomic_init(&next_candidate, 0);
 
@@ -1191,7 +1209,7 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
       eg_targs[ti] = (PegEndgameThreadArgs){
           .candidates = candidates,
           .next_candidate = &next_candidate,
-          .num_candidates = limit,
+          .num_candidates = eg_non_pass_count,
           .endgame_solver = eg_solvers[ti],
           .endgame_results = eg_results[ti],
           .base_game = base_game,
@@ -1212,6 +1230,18 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
     }
     for (int ti = 0; ti < num_threads; ti++) {
       cpthread_join(eg_threads[ti]);
+    }
+
+    // Evaluate pass with all threads (parallel bag-tile scenarios).
+    if (eg_pass_idx >= 0) {
+      PegCandidate *pass_c = &candidates[limit - 1];
+      bool pruned = false;
+      peg_eval_pass_recursive(args, opp_idx, unseen, ld_size, plies,
+                              shared_tt, cutoff_ptr, num_threads,
+                              args->thread_index_base,
+                              &pass_c->win_pct, &pass_c->expected_value,
+                              &pruned);
+      pass_c->pruned = pruned;
     }
 
     if (cutoff_ptr) {
