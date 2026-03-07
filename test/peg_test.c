@@ -112,7 +112,7 @@ static void test_peg_straightforward(void) {
       .game = game,
       .thread_control = config_get_thread_control(config),
       .time_budget_seconds = 0.0,
-      .num_threads = 1,
+      .num_threads = 8,
       .tt_fraction_of_mem = 0.5, // ~4 GB TT, shared within each pass
       .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
       .num_passes = 2,
@@ -183,7 +183,7 @@ static void test_peg_endgame_pass(void) {
       .game = game,
       .thread_control = config_get_thread_control(config),
       .time_budget_seconds = 0.0,
-      .num_threads = 1,
+      .num_threads = 8,
       .tt_fraction_of_mem = 0.5,
       .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
       .num_passes = 1,

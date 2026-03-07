@@ -69,6 +69,10 @@ typedef struct EndgameArgs {
   // own.  The caller is responsible for the lifetime of the shared TT.
   // tt_fraction_of_mem is ignored when shared_tt is set.
   TranspositionTable *shared_tt;
+  // Offset added to worker thread indices. When multiple endgame_solve calls
+  // run concurrently (e.g. from PEG), each must use a distinct range to avoid
+  // collisions on the global per-thread MoveGen cache.
+  int thread_index_offset;
 } EndgameArgs;
 
 EndgameSolver *endgame_solver_create(void);

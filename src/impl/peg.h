@@ -77,6 +77,12 @@ typedef struct PegArgs {
   // Callers should leave this at 0.
   int skip_pass;
 
+  // Base offset for worker thread indices. Ensures that concurrent PEG
+  // evaluations (e.g. inner recursive calls from different greedy threads)
+  // use non-overlapping thread indices for the global MoveGen cache.
+  // Callers should leave this at 0.
+  int thread_index_base;
+
   // If non-NULL, all endgame solves share this TT instead of creating their
   // own.  The caller owns the lifetime.  Internal recursive calls propagate
   // this pointer automatically.

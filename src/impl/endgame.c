@@ -118,6 +118,7 @@ struct EndgameSolver {
   int solve_multiple_variations;
   int requested_plies;
   int threads;
+  int thread_index_offset;
   double tt_fraction_of_mem;
   TranspositionTable *transposition_table;
   bool tt_is_external; // true when using a caller-provided shared TT
@@ -404,6 +405,7 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   if (es->threads < 1) {
     es->threads = 1;
   }
+  es->thread_index_offset = endgame_args->thread_index_offset;
   es->requested_plies = endgame_args->plies;
   es->solving_player = game_get_player_on_turn_index(endgame_args->game);
   es->initial_small_move_arena_size =
@@ -2389,8 +2391,8 @@ static float compute_initial_stuck_fraction(const EndgameSolver *solver,
   Game *root_game = game_duplicate(game);
   MoveList *tmp_ml = move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
   float frac = compute_opp_stuck_fraction(
-      root_game, tmp_ml, solver_get_pruned_kwg(solver, opp_idx), opp_idx, 0,
-      NULL, NULL);
+      root_game, tmp_ml, solver_get_pruned_kwg(solver, opp_idx), opp_idx,
+      solver->thread_index_offset, NULL, NULL);
   small_move_list_destroy(tmp_ml);
   game_destroy(root_game);
   return frac;
@@ -2484,8 +2486,8 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
       malloc_or_die((sizeof(cpthread_t)) * (solver->threads));
 
   for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
-    solver_workers[thread_index] =
-        endgame_solver_create_worker(solver, thread_index, base_seed);
+    solver_workers[thread_index] = endgame_solver_create_worker(
+        solver, solver->thread_index_offset + thread_index, base_seed);
     cpthread_create(&worker_ids[thread_index], solver_worker_start,
                     solver_workers[thread_index]);
   }
