@@ -60,9 +60,13 @@ static void peg_progress_callback(int pass, int num_evaluated,
     }
     string_builder_add_formatted_string(sb, " %d  leave=", score);
     string_builder_add_rack(sb, &leave, ld, false);
-    printf("  %d. %s  win%%%s%.1f%%  spread=%+.2f\n", i + 1,
-           string_builder_peek(sb), top_pruned[i] ? "<=" : "=",
-           top_win_pcts[i] * 100.0, top_values[i]);
+    if (top_pruned[i]) {
+      printf("  %d. %s  win%%≤%.1f%%\n", i + 1,
+             string_builder_peek(sb), top_win_pcts[i] * 100.0);
+    } else {
+      printf("  %d. %s  win%%=%.1f%%  spread=%+.2f\n", i + 1,
+             string_builder_peek(sb), top_win_pcts[i] * 100.0, top_values[i]);
+    }
     string_builder_destroy(sb);
   }
 }
@@ -180,7 +184,7 @@ static void test_peg_endgame_pass(void) {
       .thread_control = config_get_thread_control(config),
       .time_budget_seconds = 0.0,
       .num_threads = 1,
-      .tt_fraction_of_mem = 0.05,
+      .tt_fraction_of_mem = 0.5,
       .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
       .num_passes = 1,
       .pass_candidate_limits = {8},
