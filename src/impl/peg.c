@@ -593,156 +593,15 @@ static void peg_eval_pass_one_scenario(
   game_destroy(inner_game);
 }
 
-// Thread args and worker for parallel pass scenario evaluation.
-typedef struct PegPassScenarioThreadArgs {
-  const PegArgs *outer_args;
-  int opp_idx;
-  const uint8_t *unseen;
-  int ld_size;
-  int plies;
-  TranspositionTable *shared_tt;
-  int thread_index;
-  MachineLetter bag_tile;
-  // Output
-  double spread;
-  double win;
-} PegPassScenarioThreadArgs;
-
-static void *peg_pass_scenario_thread(void *arg) {
-  PegPassScenarioThreadArgs *a = (PegPassScenarioThreadArgs *)arg;
-  peg_eval_pass_one_scenario(a->outer_args, a->opp_idx, a->unseen,
-                             a->ld_size, a->plies, a->shared_tt,
-                             a->thread_index, a->bag_tile,
-                             &a->spread, &a->win);
-  return NULL;
-}
-
-// Evaluates a pass by calling peg_solve from the opponent's perspective.
-// After the mover passes, the opponent faces their own 1-PEG position:
-// the bag still has 1 tile, and the opponent (now on turn) must decide
-// their best play without knowing which tile is in the bag.
-//
-// The inner peg_solve uses skip_pass=1 (prevents infinite recursion) and
-// num_passes = plies-1 (lags the outer pipeline by one stage), so the
-// opp's move selection mirrors the main PEG pipeline at one stage less
-// depth.  Opp's choice is based on expected value (imperfect info).
-//
-// For each possible bag tile T (weighted by unseen[T]):
-//   - Call inner peg_solve to find opp's best tile play.
-//   - Compute the "opp also passes" outcome: both players lose their rack
-//     tile values (2-consecutive-passes game-ending rule).
-//   - Opp picks whichever option gives better expected value.
-//   - Score the ACTUAL outcome with draw=T (deterministic endgame).
-//
-// When num_pass_threads > 1, bag-tile scenarios are evaluated in parallel.
-// When num_pass_threads == 1, scenarios are evaluated serially with cutoff.
-static void peg_eval_pass_recursive(const PegArgs *outer_args,
-                                    int opp_idx,
-                                    const uint8_t unseen[MAX_ALPHABET_SIZE],
-                                    int ld_size, int plies,
-                                    TranspositionTable *shared_tt,
-                                    PegCutoff *cutoff,
-                                    int num_pass_threads,
-                                    int thread_index_base,
-                                    double *win_pct_out,
-                                    double *expected_value_out,
-                                    bool *pruned_out) {
-  if (pruned_out)
-    *pruned_out = false;
-
-  // Collect distinct bag tiles.
-  int num_scenarios = 0;
-  MachineLetter scenario_tiles[MAX_ALPHABET_SIZE];
-  int scenario_counts[MAX_ALPHABET_SIZE];
-  int total_weight = 0;
-  for (int t = 0; t < ld_size; t++) {
-    if (unseen[t] > 0) {
-      scenario_tiles[num_scenarios] = (MachineLetter)t;
-      scenario_counts[num_scenarios] = (int)unseen[t];
-      total_weight += (int)unseen[t];
-      num_scenarios++;
-    }
-  }
-
-  if (num_scenarios == 0) {
-    *win_pct_out = 0.0;
-    *expected_value_out = 0.0;
-    return;
-  }
-
-  double total = 0.0;
-  double wins = 0.0;
-  int weight = 0;
-
-  if (num_pass_threads > 1 && num_scenarios > 1) {
-    // Parallel: dispatch each bag-tile scenario to its own thread.
-    int nthreads = num_scenarios;
-    PegPassScenarioThreadArgs *sargs =
-        malloc_or_die(nthreads * sizeof(PegPassScenarioThreadArgs));
-    cpthread_t *sthreads = malloc_or_die(nthreads * sizeof(cpthread_t));
-
-    for (int si = 0; si < nthreads; si++) {
-      sargs[si] = (PegPassScenarioThreadArgs){
-          .outer_args = outer_args,
-          .opp_idx = opp_idx,
-          .unseen = unseen,
-          .ld_size = ld_size,
-          .plies = plies,
-          .shared_tt = shared_tt,
-          .thread_index = thread_index_base + si,
-          .bag_tile = scenario_tiles[si],
-      };
-      cpthread_create(&sthreads[si], peg_pass_scenario_thread, &sargs[si]);
-    }
-    for (int si = 0; si < nthreads; si++) {
-      cpthread_join(sthreads[si]);
-      total += sargs[si].spread * scenario_counts[si];
-      wins += sargs[si].win * scenario_counts[si];
-      weight += scenario_counts[si];
-    }
-    free(sargs);
-    free(sthreads);
-  } else {
-    // Serial: evaluate scenarios one at a time with early cutoff.
-    for (int si = 0; si < num_scenarios; si++) {
-      // Early cutoff check.
-      if (cutoff) {
-        double threshold = peg_cutoff_get(cutoff);
-        if (threshold >= 0) {
-          int remaining = total_weight - weight;
-          double best_possible =
-              (wins + remaining) / (double)total_weight;
-          if (best_possible < threshold - 1e-9) {
-            *win_pct_out = best_possible;
-            *expected_value_out = (weight > 0) ? total / weight : 0.0;
-            if (pruned_out)
-              *pruned_out = true;
-            return;
-          }
-        }
-      }
-      double spread, win;
-      peg_eval_pass_one_scenario(outer_args, opp_idx, unseen, ld_size,
-                                 plies, shared_tt, thread_index_base,
-                                 scenario_tiles[si], &spread, &win);
-      total += spread * scenario_counts[si];
-      wins += win * scenario_counts[si];
-      weight += scenario_counts[si];
-    }
-  }
-
-  *win_pct_out = wins / weight;
-  *expected_value_out = total / weight;
-}
-
 // ---------------------------------------------------------------------------
 // Thread arguments and worker functions — greedy pass
 // ---------------------------------------------------------------------------
 
 typedef struct PegGreedyThreadArgs {
   PegCandidate *candidates;
-  atomic_int *next_candidate; // work-stealing index
-  int num_candidates;         // non-pass candidates only
+  atomic_int *next_work_item; // work-stealing index
+  int num_non_pass;           // non-pass candidates (items 0..num_non_pass-1)
+  int num_work_items;         // total: non_pass + pass scenarios
   EndgameSolverWorker *worker;
   int mover_idx;
   int opp_idx;
@@ -750,20 +609,34 @@ typedef struct PegGreedyThreadArgs {
   int ld_size;
   int total_unseen;
   int thread_index; // unique thread index for this worker
+  // Pass scenario data (items num_non_pass..num_work_items-1).
+  MachineLetter *scenario_tiles;
+  int *scenario_counts;
+  double *pass_spreads; // output per scenario
+  double *pass_wins;    // output per scenario
+  const PegArgs *outer_args;
 } PegGreedyThreadArgs;
 
 static void *peg_greedy_thread(void *arg) {
   PegGreedyThreadArgs *a = (PegGreedyThreadArgs *)arg;
   while (true) {
-    int i = atomic_fetch_add(a->next_candidate, 1);
-    if (i >= a->num_candidates)
+    int i = atomic_fetch_add(a->next_work_item, 1);
+    if (i >= a->num_work_items)
       break;
-    PegCandidate *c = &a->candidates[i];
-    c->pruned = false;
-    c->expected_value =
-        peg_greedy_eval_play(a->worker, &c->move, a->mover_idx, a->opp_idx,
-                             a->unseen, a->ld_size, a->total_unseen,
-                             &c->win_pct);
+    if (i < a->num_non_pass) {
+      PegCandidate *c = &a->candidates[i];
+      c->pruned = false;
+      c->expected_value =
+          peg_greedy_eval_play(a->worker, &c->move, a->mover_idx, a->opp_idx,
+                               a->unseen, a->ld_size, a->total_unseen,
+                               &c->win_pct);
+    } else {
+      int si = i - a->num_non_pass;
+      peg_eval_pass_one_scenario(a->outer_args, a->opp_idx, a->unseen,
+                                 a->ld_size, 0, NULL, a->thread_index,
+                                 a->scenario_tiles[si], &a->pass_spreads[si],
+                                 &a->pass_wins[si]);
+    }
   }
   return NULL;
 }
@@ -774,8 +647,9 @@ static void *peg_greedy_thread(void *arg) {
 
 typedef struct PegEndgameThreadArgs {
   PegCandidate *candidates;
-  atomic_int *next_candidate; // work-stealing index
-  int num_candidates;
+  atomic_int *next_work_item; // work-stealing index
+  int num_non_pass;           // non-pass candidates (items 0..num_non_pass-1)
+  int num_work_items;         // total: non_pass + pass scenarios
   EndgameSolver *endgame_solver; // one per thread
   EndgameResults *endgame_results;
   const Game *base_game;
@@ -793,32 +667,37 @@ typedef struct PegEndgameThreadArgs {
   const PegArgs *outer_args;
   // Early cutoff tracker (NULL if disabled).
   PegCutoff *cutoff;
+  // Pass scenario data (items num_non_pass..num_work_items-1).
+  MachineLetter *scenario_tiles;
+  int *scenario_counts;
+  double *pass_spreads;
+  double *pass_wins;
 } PegEndgameThreadArgs;
 
 static void *peg_endgame_thread(void *arg) {
   PegEndgameThreadArgs *a = (PegEndgameThreadArgs *)arg;
   while (true) {
-    int idx = atomic_fetch_add(a->next_candidate, 1);
-    if (idx >= a->num_candidates)
+    int idx = atomic_fetch_add(a->next_work_item, 1);
+    if (idx >= a->num_work_items)
       break;
-    PegCandidate *c = &a->candidates[idx];
-    bool pruned = false;
-    if (small_move_is_pass(&c->move)) {
-      peg_eval_pass_recursive(a->outer_args, a->opp_idx,
-                              a->unseen, a->ld_size, a->plies,
-                              a->shared_tt, a->cutoff,
-                              1, a->thread_index,
-                              &c->win_pct, &c->expected_value, &pruned);
-    } else {
+    if (idx < a->num_non_pass) {
+      PegCandidate *c = &a->candidates[idx];
+      bool pruned = false;
       c->expected_value = peg_endgame_eval_candidate(
           a->endgame_solver, a->endgame_results, a->base_game, &c->move,
           a->mover_idx, a->opp_idx, a->plies, a->unseen, a->ld_size,
           a->thread_control, a->shared_tt, a->dual_lexicon_mode,
           a->thread_index, a->cutoff, &c->win_pct, &pruned);
-    }
-    c->pruned = pruned;
-    if (!pruned && a->cutoff) {
-      peg_cutoff_update(a->cutoff, c->win_pct);
+      c->pruned = pruned;
+      if (!pruned && a->cutoff) {
+        peg_cutoff_update(a->cutoff, c->win_pct);
+      }
+    } else {
+      int si = idx - a->num_non_pass;
+      peg_eval_pass_one_scenario(a->outer_args, a->opp_idx, a->unseen,
+                                 a->ld_size, a->plies, a->shared_tt,
+                                 a->thread_index, a->scenario_tiles[si],
+                                 &a->pass_spreads[si], &a->pass_wins[si]);
     }
   }
   return NULL;
@@ -1009,8 +888,7 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
         greedy_solvers[ti], tidx, (uint64_t)tidx * 54321 + 1);
   }
 
-  // Separate pass from non-pass candidates: move pass to end so it can be
-  // evaluated last with early-cutoff knowledge from the non-pass results.
+  // Separate pass from non-pass candidates: move pass to end.
   int pass_candidate_idx = -1;
   for (int i = 0; i < num_candidates; i++) {
     if (small_move_is_pass(&candidates[i].move)) {
@@ -1026,7 +904,24 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
     non_pass_count = num_candidates - 1;
   }
 
-  // Work-stealing: threads pull non-pass candidates from a shared index.
+  // Build pass scenario arrays for the unified work queue.
+  int greedy_num_scenarios = 0;
+  MachineLetter greedy_scenario_tiles[MAX_ALPHABET_SIZE];
+  int greedy_scenario_counts[MAX_ALPHABET_SIZE];
+  double greedy_pass_spreads[MAX_ALPHABET_SIZE];
+  double greedy_pass_wins[MAX_ALPHABET_SIZE];
+  if (pass_candidate_idx >= 0) {
+    for (int t = 0; t < ld_size; t++) {
+      if (unseen[t] > 0) {
+        greedy_scenario_tiles[greedy_num_scenarios] = (MachineLetter)t;
+        greedy_scenario_counts[greedy_num_scenarios] = (int)unseen[t];
+        greedy_num_scenarios++;
+      }
+    }
+  }
+  int greedy_num_work_items = non_pass_count + greedy_num_scenarios;
+
+  // Unified work-stealing: non-pass candidates and pass scenarios in one queue.
   atomic_int greedy_next;
   atomic_init(&greedy_next, 0);
   PegGreedyThreadArgs *greedy_targs =
@@ -1036,8 +931,9 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
   for (int ti = 0; ti < num_threads; ti++) {
     greedy_targs[ti] = (PegGreedyThreadArgs){
         .candidates = candidates,
-        .next_candidate = &greedy_next,
-        .num_candidates = non_pass_count,
+        .next_work_item = &greedy_next,
+        .num_non_pass = non_pass_count,
+        .num_work_items = greedy_num_work_items,
         .worker = greedy_workers[ti],
         .mover_idx = mover_idx,
         .opp_idx = opp_idx,
@@ -1045,6 +941,11 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
         .ld_size = ld_size,
         .total_unseen = total_unseen,
         .thread_index = args->thread_index_base + ti,
+        .scenario_tiles = greedy_scenario_tiles,
+        .scenario_counts = greedy_scenario_counts,
+        .pass_spreads = greedy_pass_spreads,
+        .pass_wins = greedy_pass_wins,
+        .outer_args = args,
     };
     cpthread_create(&greedy_threads[ti], peg_greedy_thread, &greedy_targs[ti]);
   }
@@ -1052,36 +953,19 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
     cpthread_join(greedy_threads[ti]);
   }
 
-  // Evaluate pass candidate last, with early cutoff from non-pass results.
+  // Aggregate pass scenario results into the pass candidate.
   if (pass_candidate_idx >= 0) {
     PegCandidate *pass_c = &candidates[num_candidates - 1];
-    PegCutoff greedy_cutoff;
-    PegCutoff *greedy_cutoff_ptr = NULL;
-    if (args->early_cutoff) {
-      int cutoff_k = args->pass_candidate_limits[0];
-      if (cutoff_k <= 0)
-        cutoff_k = PEG_DEFAULT_PASS0_LIMIT;
-      if (cutoff_k > non_pass_count)
-        cutoff_k = non_pass_count;
-      if (cutoff_k > 0) {
-        peg_cutoff_init(&greedy_cutoff, cutoff_k, total_unseen,
-                        non_pass_count);
-        for (int i = 0; i < non_pass_count; i++) {
-          peg_cutoff_update(&greedy_cutoff, candidates[i].win_pct);
-        }
-        greedy_cutoff_ptr = &greedy_cutoff;
-      }
+    double total = 0.0, wins = 0.0;
+    int weight = 0;
+    for (int si = 0; si < greedy_num_scenarios; si++) {
+      total += greedy_pass_spreads[si] * greedy_scenario_counts[si];
+      wins += greedy_pass_wins[si] * greedy_scenario_counts[si];
+      weight += greedy_scenario_counts[si];
     }
-    bool pruned = false;
-    peg_eval_pass_recursive(args, opp_idx, unseen, ld_size, 0, NULL,
-                            greedy_cutoff_ptr, num_threads,
-                            args->thread_index_base,
-                            &pass_c->win_pct, &pass_c->expected_value,
-                            &pruned);
-    pass_c->pruned = pruned;
-    if (greedy_cutoff_ptr) {
-      peg_cutoff_destroy(greedy_cutoff_ptr);
-    }
+    pass_c->win_pct = (weight > 0) ? wins / weight : 0.0;
+    pass_c->expected_value = (weight > 0) ? total / weight : 0.0;
+    pass_c->pruned = false;
   }
 
   // Clean up greedy infrastructure.
@@ -1179,9 +1063,7 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
       cutoff_ptr = &cutoff_state;
     }
 
-    // Separate pass from non-pass candidates: move pass to end of the
-    // top-K range so non-pass candidates can be work-stolen in parallel,
-    // then pass gets all threads for its parallel scenario evaluation.
+    // Separate pass from non-pass candidates in the top-K range.
     int eg_pass_idx = -1;
     for (int i = 0; i < limit; i++) {
       if (small_move_is_pass(&candidates[i].move)) {
@@ -1197,9 +1079,26 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
       eg_non_pass_count = limit - 1;
     }
 
-    // Work-stealing: threads pull non-pass candidates from a shared index.
-    atomic_int next_candidate;
-    atomic_init(&next_candidate, 0);
+    // Build pass scenario arrays for the unified work queue.
+    int eg_num_scenarios = 0;
+    MachineLetter eg_scenario_tiles[MAX_ALPHABET_SIZE];
+    int eg_scenario_counts[MAX_ALPHABET_SIZE];
+    double eg_pass_spreads[MAX_ALPHABET_SIZE];
+    double eg_pass_wins[MAX_ALPHABET_SIZE];
+    if (eg_pass_idx >= 0) {
+      for (int t = 0; t < ld_size; t++) {
+        if (unseen[t] > 0) {
+          eg_scenario_tiles[eg_num_scenarios] = (MachineLetter)t;
+          eg_scenario_counts[eg_num_scenarios] = (int)unseen[t];
+          eg_num_scenarios++;
+        }
+      }
+    }
+    int eg_num_work_items = eg_non_pass_count + eg_num_scenarios;
+
+    // Unified work-stealing: non-pass candidates and pass scenarios in one queue.
+    atomic_int next_work_item;
+    atomic_init(&next_work_item, 0);
 
     PegEndgameThreadArgs *eg_targs =
         malloc_or_die(num_threads * sizeof(PegEndgameThreadArgs));
@@ -1208,8 +1107,9 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
     for (int ti = 0; ti < num_threads; ti++) {
       eg_targs[ti] = (PegEndgameThreadArgs){
           .candidates = candidates,
-          .next_candidate = &next_candidate,
-          .num_candidates = eg_non_pass_count,
+          .next_work_item = &next_work_item,
+          .num_non_pass = eg_non_pass_count,
+          .num_work_items = eg_num_work_items,
           .endgame_solver = eg_solvers[ti],
           .endgame_results = eg_results[ti],
           .base_game = base_game,
@@ -1225,6 +1125,10 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
           .solver = solver,
           .outer_args = args,
           .cutoff = cutoff_ptr,
+          .scenario_tiles = eg_scenario_tiles,
+          .scenario_counts = eg_scenario_counts,
+          .pass_spreads = eg_pass_spreads,
+          .pass_wins = eg_pass_wins,
       };
       cpthread_create(&eg_threads[ti], peg_endgame_thread, &eg_targs[ti]);
     }
@@ -1232,16 +1136,19 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
       cpthread_join(eg_threads[ti]);
     }
 
-    // Evaluate pass with all threads (parallel bag-tile scenarios).
+    // Aggregate pass scenario results into the pass candidate.
     if (eg_pass_idx >= 0) {
       PegCandidate *pass_c = &candidates[limit - 1];
-      bool pruned = false;
-      peg_eval_pass_recursive(args, opp_idx, unseen, ld_size, plies,
-                              shared_tt, cutoff_ptr, num_threads,
-                              args->thread_index_base,
-                              &pass_c->win_pct, &pass_c->expected_value,
-                              &pruned);
-      pass_c->pruned = pruned;
+      double total = 0.0, wins = 0.0;
+      int weight = 0;
+      for (int si = 0; si < eg_num_scenarios; si++) {
+        total += eg_pass_spreads[si] * eg_scenario_counts[si];
+        wins += eg_pass_wins[si] * eg_scenario_counts[si];
+        weight += eg_scenario_counts[si];
+      }
+      pass_c->win_pct = (weight > 0) ? wins / weight : 0.0;
+      pass_c->expected_value = (weight > 0) ? total / weight : 0.0;
+      pass_c->pruned = false;
     }
 
     if (cutoff_ptr) {
