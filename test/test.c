@@ -19,6 +19,7 @@
 #include "create_data_test.h"
 #include "cross_set_test.h"
 #include "endgame_test.h"
+#include "peg_test.h"
 #include "equity_adjustment_test.h"
 #include "equity_test.h"
 #include "game_test.h"
@@ -113,6 +114,7 @@ static TestEntry test_table[] = {
     {"wmg", test_wmp_move_gen},
     {"winpct", test_win_pct},
     {"endgame", test_endgame},
+    {"peg", test_peg},
     {"eldar_v", test_eldar_v_stick},
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},
