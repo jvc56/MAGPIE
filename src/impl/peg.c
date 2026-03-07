@@ -366,6 +366,7 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
   double wins = 0.0;
   int weight = 0;
   *pruned_out = false;
+  ErrorStack *local_es = error_stack_create();
 
   for (int t = 0; t < ld_size; t++) {
     int cnt = (int)unseen[t];
@@ -382,6 +383,7 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
         if (best_possible < threshold - 1e-9) {
           *win_pct_out = best_possible;
           *pruned_out = true;
+          error_stack_destroy(local_es);
           return total / (weight > 0 ? weight : 1);
         }
       }
@@ -412,9 +414,8 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
         .skip_word_pruning = true,
     };
 
-    ErrorStack *local_es = error_stack_create();
+    error_stack_reset(local_es);
     endgame_solve(endgame_solver, &ea, results, local_es);
-    error_stack_destroy(local_es);
 
     // endgame_val = opp's incremental endgame advantage (from opp's perspective).
     // mover_total = mover_lead + (-endgame_val) = absolute final spread for mover.
@@ -429,6 +430,7 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
     game_destroy(scenario);
   }
 
+  error_stack_destroy(local_es);
   if (weight == 0) {
     *win_pct_out = 0.0;
     return 0.0;
@@ -474,6 +476,10 @@ static void peg_eval_pass_recursive(const PegArgs *outer_args,
   if (pruned_out)
     *pruned_out = false;
 
+  ErrorStack *inner_es = error_stack_create();
+  EndgameSolver *eg_solver = endgame_solver_create();
+  EndgameResults *eg_results = endgame_results_create();
+
   for (int t = 0; t < ld_size; t++) {
     int cnt = (int)unseen[t];
     if (cnt == 0)
@@ -490,7 +496,7 @@ static void peg_eval_pass_recursive(const PegArgs *outer_args,
           *expected_value_out = (weight > 0) ? total / weight : 0.0;
           if (pruned_out)
             *pruned_out = true;
-          return;
+          goto cleanup;
         }
       }
     }
@@ -522,7 +528,7 @@ static void peg_eval_pass_recursive(const PegArgs *outer_args,
     // The inner solve lags the outer pipeline by one stage, and uses
     // skip_pass=1 to prevent infinite recursion.
     int inner_passes = plies > 0 ? plies - 1 : 0;
-    PegSolver *inner_solver = peg_solver_create();
+    PegSolver inner_solver = {0};
     PegArgs inner_args = {
         .game = inner_game,
         .thread_control = outer_args->thread_control,
@@ -540,17 +546,14 @@ static void peg_eval_pass_recursive(const PegArgs *outer_args,
           outer_args->pass_candidate_limits[i];
 
     PegResult inner_result;
-    ErrorStack *inner_es = error_stack_create();
-    peg_solve(inner_solver, &inner_args, &inner_result, inner_es);
+    error_stack_reset(inner_es);
+    peg_solve(&inner_solver, &inner_args, &inner_result, inner_es);
 
     bool found_tile_play =
         error_stack_is_empty(inner_es) &&
         !small_move_is_pass(&inner_result.best_move);
     double opp_play_expected_win = inner_result.best_win_pct;
     double opp_play_expected_spread = inner_result.best_expected_spread;
-
-    error_stack_destroy(inner_es);
-    peg_solver_destroy(inner_solver);
 
     // Drain the bag from inner_game so setup_endgame_scenario works correctly.
     // inner_game was duplicated from outer_args->game which has 1 tile in the
@@ -583,16 +586,17 @@ static void peg_eval_pass_recursive(const PegArgs *outer_args,
       // Set up the specific scenario: opp plays their chosen move,
       // draws the known bag tile T, endgame solved deterministically.
       // Need unseen from opp's perspective for setup_endgame_scenario.
+      // Unseen from opp's perspective = mover's rack + bag tile t.
+      // No need to duplicate the game: compute_unseen doesn't use the bag,
+      // and the algebra simplifies to mover_rack[ml] + (ml == t ? 1 : 0).
       uint8_t inner_unseen[MAX_ALPHABET_SIZE];
       {
-        Game *tmp = game_duplicate(inner_game);
-        Bag *tbag = game_get_bag(tmp);
+        const Rack *mr =
+            player_get_rack(game_get_player(inner_game, mover_idx));
         for (int ml = 0; ml < ld_size; ml++) {
-          while (bag_get_letter(tbag, ml) > 0)
-            bag_draw_letter(tbag, (MachineLetter)ml, opp_idx);
+          inner_unseen[ml] = (uint8_t)rack_get_letter(mr, ml);
         }
-        compute_unseen(tmp, opp_idx, inner_unseen);
-        game_destroy(tmp);
+        inner_unseen[t]++;
       }
 
       Game *scenario = setup_endgame_scenario(
@@ -606,8 +610,6 @@ static void peg_eval_pass_recursive(const PegArgs *outer_args,
               player_get_score(game_get_player(scenario, mover_idx)));
 
       int solve_plies = plies > 0 ? plies : 1;
-      EndgameSolver *eg_solver = endgame_solver_create();
-      EndgameResults *eg_results = endgame_results_create();
       EndgameArgs ea = {
           .thread_control = outer_args->thread_control,
           .game = scenario,
@@ -621,9 +623,8 @@ static void peg_eval_pass_recursive(const PegArgs *outer_args,
           .dual_lexicon_mode = outer_args->dual_lexicon_mode,
           .skip_word_pruning = true,
       };
-      ErrorStack *local_es = error_stack_create();
-      endgame_solve(eg_solver, &ea, eg_results, local_es);
-      error_stack_destroy(local_es);
+      error_stack_reset(inner_es);
+      endgame_solve(eg_solver, &ea, eg_results, inner_es);
 
       // endgame_val from solving_player's (mover's) perspective.
       int endgame_val =
@@ -631,8 +632,6 @@ static void peg_eval_pass_recursive(const PegArgs *outer_args,
       int32_t opp_total = opp_lead - endgame_val;
       opp_spread = (double)opp_total;
 
-      endgame_results_destroy(eg_results);
-      endgame_solver_destroy(eg_solver);
       game_destroy(scenario);
     }
 
@@ -649,10 +648,15 @@ static void peg_eval_pass_recursive(const PegArgs *outer_args,
   if (weight == 0) {
     *win_pct_out = 0.0;
     *expected_value_out = 0.0;
-    return;
+  } else {
+    *win_pct_out = wins / weight;
+    *expected_value_out = total / weight;
   }
-  *win_pct_out = wins / weight;
-  *expected_value_out = total / weight;
+
+cleanup:
+  endgame_results_destroy(eg_results);
+  endgame_solver_destroy(eg_solver);
+  error_stack_destroy(inner_es);
 }
 
 // ---------------------------------------------------------------------------
