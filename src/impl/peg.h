@@ -104,6 +104,13 @@ typedef struct PegArgs {
   // own.  The caller owns the lifetime.  Internal recursive calls propagate
   // this pointer automatically.
   TranspositionTable *shared_tt;
+
+  // Optional allowlist of candidate move strings (e.g. {"10I X(I)", "7L
+  // S(NO)T"}).  When non-NULL, only candidates whose formatted move string
+  // matches an entry are kept; all others are discarded before evaluation.
+  // Useful for fast, targeted tests of specific plays.
+  const char **candidate_allowlist;
+  int candidate_allowlist_count;
 } PegArgs;
 
 typedef struct PegResult {

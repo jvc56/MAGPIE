@@ -20,6 +20,7 @@
 #include "cross_set_test.h"
 #include "endgame_test.h"
 #include "peg_test.h"
+#include "peg2_test.h"
 #include "equity_adjustment_test.h"
 #include "equity_test.h"
 #include "game_test.h"
@@ -135,6 +136,8 @@ static TestEntry on_demand_test_table[] = {
     {"multipv", test_multi_pv},
     {"kue", test_kue},
     {"monsterq", test_monster_q},
+    {"peg2", test_peg2},
+    {"2peg_xi_extras_snot", test_peg2_xi_extras_snot},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

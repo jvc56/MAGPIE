@@ -1,102 +1,16 @@
 #include "peg_test.h"
 
-#include "../src/def/game_defs.h"
-#include "../src/ent/equity.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
 #include "../src/impl/config.h"
 #include "../src/impl/peg.h"
-#include "../src/str/game_string.h"
-#include "../src/str/move_string.h"
-#include "../src/str/rack_string.h"
-#include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
+#include "peg_test_util.h"
 #include "test_util.h"
 
 #include <assert.h>
-#include <stdio.h>
-
-static void print_game_position(const Game *game) {
-  StringBuilder *sb = string_builder_create();
-  GameStringOptions *gso = game_string_options_create_default();
-  string_builder_add_game(game, NULL, gso, NULL, sb);
-  printf("\n%s\n", string_builder_peek(sb));
-  string_builder_destroy(sb);
-  game_string_options_destroy(gso);
-}
-
-static void peg_progress_callback(int pass, int num_evaluated,
-                                   const Move *top_moves,
-                                   const double *top_values,
-                                   const double *top_win_pcts,
-                                   const bool *top_pruned, int num_top,
-                                   const Game *game, double elapsed,
-                                   double stage_seconds, void *user_data) {
-  (void)user_data;
-  if (pass == 0) {
-    printf("[PEG greedy] %d candidates evaluated in %.3fs\n", num_evaluated,
-           stage_seconds);
-  } else {
-    printf("[PEG %d-ply endgame] %d candidates evaluated in %.3fs (%.3fs "
-           "cumulative)\n",
-           pass, num_evaluated, stage_seconds, elapsed);
-  }
-  const LetterDistribution *ld = game_get_ld(game);
-  int mover_idx = game_get_player_on_turn_index(game);
-  const Rack *mover_rack = player_get_rack(game_get_player(game, mover_idx));
-  for (int i = 0; i < num_top; i++) {
-    Move m = top_moves[i];
-    StringBuilder *sb = string_builder_create();
-    string_builder_add_move(sb, game_get_board(game), &m, ld, false);
-    if (move_get_type(&m) == GAME_EVENT_PASS) {
-      // Pass has no score/equity/leave to display.
-      if (top_pruned[i]) {
-        printf("  %d. %s  win%%≤%.1f%%\n", i + 1,
-               string_builder_peek(sb), top_win_pcts[i] * 100.0);
-      } else {
-        printf("  %d. %s  win%%=%.1f%%  spread=%+.2f\n", i + 1,
-               string_builder_peek(sb), top_win_pcts[i] * 100.0, top_values[i]);
-      }
-      string_builder_destroy(sb);
-      continue;
-    }
-    int score = equity_to_int(move_get_score(&top_moves[i]));
-    double equity = equity_to_double(move_get_equity(&top_moves[i]));
-    // Compute leave: mover's rack minus the tiles played.
-    Rack leave;
-    rack_copy(&leave, mover_rack);
-    for (int j = 0; j < m.tiles_length; j++) {
-      MachineLetter ml = m.tiles[j];
-      if (ml != PLAYED_THROUGH_MARKER)
-        rack_take_letter(&leave, get_is_blanked(ml) ? BLANK_MACHINE_LETTER : ml);
-    }
-    string_builder_add_formatted_string(sb, " %d  eq=%.1f  leave=", score,
-                                        equity);
-    string_builder_add_rack(sb, &leave, ld, false);
-    if (top_pruned[i]) {
-      printf("  %d. %s  win%%≤%.1f%%\n", i + 1,
-             string_builder_peek(sb), top_win_pcts[i] * 100.0);
-    } else {
-      printf("  %d. %s  win%%=%.1f%%  spread=%+.2f\n", i + 1,
-             string_builder_peek(sb), top_win_pcts[i] * 100.0, top_values[i]);
-    }
-    string_builder_destroy(sb);
-  }
-}
-
-static void print_peg_result(const PegResult *result, const Game *game) {
-  Move m = result->best_move;
-  StringBuilder *sb = string_builder_create();
-  string_builder_add_move(sb, game_get_board(game), &m, game_get_ld(game),
-                          false);
-  const char *depth_label =
-      result->stages_completed <= 1 ? "greedy" : "endgame";
-  printf("  Best move: %s  win%%=%.1f%%  spread=%.2f  depth=%d (%s)\n",
-         string_builder_peek(sb), result->best_win_pct * 100.0,
-         result->best_expected_spread, result->stages_completed, depth_label);
-  string_builder_destroy(sb);
-}
+#include <string.h>
 
 // From macondo TestStraightforward1PEG (NWL20).
 // Mover has ENOSTXY, 1 tile in bag (8 unseen total: 1 bag + 7 opponent tiles).
@@ -118,7 +32,7 @@ static void test_peg_straightforward(void) {
 
   Game *game = config_get_game(config);
   assert(bag_get_letters(game_get_bag(game)) == 1);
-  print_game_position(game);
+  peg_test_print_game_position(game);
 
   PegSolver *solver = peg_solver_create();
   PegArgs args = {
@@ -131,7 +45,7 @@ static void test_peg_straightforward(void) {
       .num_stages = 3,
       .stage_candidate_limits = {24, 10},
       .early_cutoff = true,
-      .per_pass_callback = peg_progress_callback,
+      .per_pass_callback = peg_test_progress_callback,
   };
 
   PegResult result;
@@ -152,7 +66,7 @@ static void test_peg_straightforward(void) {
   }
   assert(result.best_win_pct > 0.93 && result.best_win_pct < 0.94);
   assert(result.best_expected_spread > 0.0);
-  print_peg_result(&result, game);
+  peg_test_print_result(&result, game);
 
   peg_solver_destroy(solver);
   error_stack_destroy(error_stack);
@@ -186,11 +100,9 @@ static void test_peg_endgame_pass(void) {
       "IF1N3AS1RYAL1/ETUDIAIS7 AEINRST/ 301/300 0 -lex FRA20 -ld french");
 
   Game *game = config_get_game(config);
-  print_game_position(game);
+  peg_test_print_game_position(game);
 
   PegSolver *solver = peg_solver_create();
-  // pass_candidate_limits={2}: only refine top 2 greedy candidates with the
-  // 1-ply endgame, keeping the test fast (~2 candidates x 8 scenarios x 0.2s).
   PegArgs args = {
       .game = game,
       .thread_control = config_get_thread_control(config),
@@ -201,7 +113,7 @@ static void test_peg_endgame_pass(void) {
       .num_stages = 2,
       .stage_candidate_limits = {7},
       .early_cutoff = true,
-      .per_pass_callback = peg_progress_callback,
+      .per_pass_callback = peg_test_progress_callback,
   };
 
   PegResult result;
@@ -211,7 +123,7 @@ static void test_peg_endgame_pass(void) {
   assert(error_stack_is_empty(error_stack));
   assert(result.stages_completed == 2);
   assert(result.candidates_remaining >= 1);
-  print_peg_result(&result, game);
+  peg_test_print_result(&result, game);
 
   peg_solver_destroy(solver);
   error_stack_destroy(error_stack);
@@ -231,7 +143,7 @@ static void test_peg_no_unseen_error(void) {
       "FIVE1E5IT1C/5SPORRAN2A/6ORE2N2D / 384/389 0 -lex NWL20");
 
   Game *game = config_get_game(config);
-  print_game_position(game);
+  peg_test_print_game_position(game);
 
   PegSolver *solver = peg_solver_create();
   PegArgs args = {
@@ -251,61 +163,8 @@ static void test_peg_no_unseen_error(void) {
   config_destroy(config);
 }
 
-// From macondo TestTwoInBagSingleMove (CSW21, originally CSW19).
-// Mover has AEFGSTX, 2 tiles in bag (9 unseen total: 2 bag + 7 opponent tiles).
-// The winning move is 6F .X. (play X through the existing A on 6F), which wins
-// 70 out of 72 ordered-pair scenarios.  It only loses when the bag contains
-// (E,I) and mover draws I: opponent bingoes with TOREROS/ROOSTER.
-static void test_peg_two_in_bag(void) {
-  Config *config =
-      config_create_or_die("set -s1 score -s2 score -r1 small -r2 small");
-  load_and_exec_config_or_die(
-      config,
-      "cgp 1T13/1W3Q9/VERB1U9/1E1OPIUM5C1/1LAWIN1I5O1/1Y3A1E5R1/"
-      "7V4NO1/NOTArIZE1C2UN1/6ODAH2LA1/3TAHA2I2LED/2JUT4R2A1O/"
-      "3G5P4D/3R3BrIEFING/3I5L4E/3K2DESYNES1M AEFGSTX/EEIOOST "
-      "370/341 0 -lex CSW21");
-
-  Game *game = config_get_game(config);
-  assert(bag_get_letters(game_get_bag(game)) == 2);
-  print_game_position(game);
-
-  PegSolver *solver = peg_solver_create();
-  PegArgs args = {
-      .game = game,
-      .thread_control = config_get_thread_control(config),
-      .time_budget_seconds = 0.0,
-      .num_threads = 8,
-      .tt_fraction_of_mem = 0.5,
-      .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
-      .num_stages = 1,
-      .stage_candidate_limits = {},
-      .early_cutoff = true,
-      .inner_opp_multi_tile_limit = 8,
-      .inner_opp_one_tile_limit = 8,
-      .max_non_emptying = 3,
-      .skip_phase_1b = false,
-      .skip_root_pass = true,
-      .per_pass_callback = peg_progress_callback,
-      .per_pass_num_top = 128,
-  };
-
-  PegResult result;
-  ErrorStack *error_stack = error_stack_create();
-  peg_solve(solver, &args, &result, error_stack);
-
-  assert(error_stack_is_empty(error_stack));
-  assert(move_get_type(&result.best_move) != GAME_EVENT_PASS);
-  print_peg_result(&result, game);
-
-  peg_solver_destroy(solver);
-  error_stack_destroy(error_stack);
-  config_destroy(config);
-}
-
 void test_peg(void) {
   test_peg_straightforward();
   test_peg_endgame_pass();
   test_peg_no_unseen_error();
-  (void)test_peg_two_in_bag;
 }

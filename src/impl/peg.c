@@ -2013,6 +2013,32 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
   }
   move_list_destroy(initial_ml);
 
+  // Apply candidate allowlist if provided.
+  if (args->candidate_allowlist && args->candidate_allowlist_count > 0) {
+    const Board *board = game_get_board(base_game);
+    const LetterDistribution *fld = game_get_ld(args->game);
+    int j = 0;
+    for (int i = 0; i < num_candidates; i++) {
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_move(sb, board, &candidates[i].move, fld, false);
+      const char *move_str = string_builder_peek(sb);
+      bool keep = false;
+      for (int k = 0; k < args->candidate_allowlist_count; k++) {
+        if (strcmp(move_str, args->candidate_allowlist[k]) == 0) {
+          keep = true;
+          break;
+        }
+      }
+      string_builder_destroy(sb);
+      if (keep) {
+        if (j != i)
+          candidates[j] = candidates[i];
+        j++;
+      }
+    }
+    num_candidates = j;
+  }
+
   if (num_candidates == 0) {
     free(candidates);
     game_destroy(base_game);
