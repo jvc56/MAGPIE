@@ -325,7 +325,7 @@ void test_infer_exchange_not_board_is_letter_allowed_in_cross_set(void) {
       "ILOOPQR/EEINTTX 289/456 0";
   load_cgp_or_die(game, cgp_14_unseen);
   load_and_exec_config_or_die(config, "s");
-  // The bag has 14, exchanges should not be allowed
+  // The bag has 14, exchanges should be allowed
   status = infer_for_test(NULL, config, 1, 0, 5, "", "", "ILOOPQR",
                           inference_results);
   assert(status == ERROR_STATUS_SUCCESS);
@@ -1189,9 +1189,6 @@ void test_infer_nonerror_cases(const int number_of_threads,
 }
 
 void test_infer(void) {
-  // FIXME: remove
-  test_infer_exchange_not_board_is_letter_allowed_in_cross_set();
-  return;
   test_leave_rack_reset();
   test_trivial_random_probability();
   test_infer_rack_overflow();

@@ -130,13 +130,13 @@ void simulate_without_ctx(SimArgs *sim_args, SimResults *sim_results,
   sim_ctx_destroy(ctx);
 }
 
+// The move_list and sim_args->move_list are expected to be the same pointer,
+// but they are passed in separately because this function needs to generate
+// moves on a nonconst MoveList pointer but the SimArgs MoveList pointer is
+// const.
 Move *get_top_simming_move(Game *game, int movegen_index, MoveList *move_list,
                            SimArgs *sim_args, SimCtx **sim_ctx,
                            SimResults *sim_results, ErrorStack *error_stack) {
-  if (sim_args->num_plies == 0) {
-    return get_top_equity_move(game, movegen_index, move_list);
-  }
-
   const MoveGenArgs gen_args = {
       .game = game,
       .move_list = move_list,

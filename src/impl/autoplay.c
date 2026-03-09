@@ -258,6 +258,9 @@ typedef struct AutoplayWorker {
   SimResults *sim_results;
   InferenceResults *inference_results;
   ErrorStack *error_stack;
+  Rack target_played_tiles;
+  Rack nontarget_known_rack;
+  Rack target_known_rack;
   MoveList *move_lists[2];
 } AutoplayWorker;
 
@@ -281,6 +284,12 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   autoplay_worker->sim_results = sim_results_create(args->cutoff);
   autoplay_worker->inference_results = inference_results_create(NULL);
   autoplay_worker->error_stack = error_stack_create();
+  rack_set_dist_size_and_reset(&autoplay_worker->target_played_tiles,
+                               ld_get_size(args->game_args->ld));
+  rack_set_dist_size_and_reset(&autoplay_worker->nontarget_known_rack,
+                               ld_get_size(args->game_args->ld));
+  rack_set_dist_size_and_reset(&autoplay_worker->target_known_rack,
+                               ld_get_size(args->game_args->ld));
   autoplay_worker->move_lists[0] =
       move_list_create(args->p1_sim_args.num_plays);
   autoplay_worker->move_lists[1] =
@@ -462,18 +471,14 @@ Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
   sim_args->move_list = move_list;
   sim_args->game = game_runner->game;
 
-  Rack target_played_tiles;
-  Rack nontarget_known_rack;
-  Rack target_known_rack;
   const bool player_uses_inference = sim_args->use_inference;
   sim_args->use_inference =
       player_uses_inference && game_runner->turn_number > 0 &&
       move_get_type(&game_runner->previous_move) != GAME_EVENT_PASS;
   if (sim_args->use_inference) {
     InferenceArgs *infer_args = &sim_args->inference_args;
-    const int ld_size = ld_get_size(game_get_ld(game));
     // Set target played tiles
-    rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+    rack_reset(&autoplay_worker->target_played_tiles);
     const int move_tiles_length =
         move_get_tiles_length(&game_runner->previous_move);
     if (move_get_type(&game_runner->previous_move) ==
@@ -482,20 +487,22 @@ Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
         if (move_get_tile(&game_runner->previous_move, i) !=
             PLAYED_THROUGH_MARKER) {
           if (get_is_blanked(move_get_tile(&game_runner->previous_move, i))) {
-            rack_add_letter(&target_played_tiles, BLANK_MACHINE_LETTER);
+            rack_add_letter(&autoplay_worker->target_played_tiles,
+                            BLANK_MACHINE_LETTER);
           } else {
-            rack_add_letter(&target_played_tiles,
+            rack_add_letter(&autoplay_worker->target_played_tiles,
                             move_get_tile(&game_runner->previous_move, i));
           }
         }
       }
     }
     // Set nontarget known rack
-    rack_copy(&nontarget_known_rack,
+    rack_copy(&autoplay_worker->nontarget_known_rack,
               player_get_rack(game_get_player(game, player_on_turn_index)));
-    // Set target known rack, which will always be empty because autoplay does
-    // not support challenged phonies (yet)
-    rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+    // The target known rack was set to empty when the autoplay worker was
+    // created. It does not need to be modified after initial creation as it
+    // will always be empty because autoplay does not support challenged phonies
+    // (yet).
     infer_args_fill(
         infer_args, infer_args->leave_list_capacity, infer_args->equity_margin,
         infer_args->game_history, game_runner->game_one_move_behind,
@@ -509,7 +516,9 @@ Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
         move_get_type(&game_runner->previous_move) == GAME_EVENT_EXCHANGE
             ? move_get_tiles_played(&game_runner->previous_move)
             : 0,
-        &target_played_tiles, &target_known_rack, &nontarget_known_rack);
+        &autoplay_worker->target_played_tiles,
+        &autoplay_worker->target_known_rack,
+        &autoplay_worker->nontarget_known_rack);
   }
 
   ErrorStack *error_stack = autoplay_worker->error_stack;
@@ -527,6 +536,22 @@ Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
   }
   sim_args->use_inference = player_uses_inference;
   return move;
+}
+
+Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
+                                GameRunner *game_runner) {
+  const int player_on_turn_index =
+      game_get_player_on_turn_index(game_runner->game);
+  SimArgs *sim_args = (player_on_turn_index == 0)
+                          ? &autoplay_worker->args.p1_sim_args
+                          : &autoplay_worker->args.p2_sim_args;
+  if (sim_args->num_plies == 0) {
+    return get_top_equity_move(
+        game_runner->game, autoplay_worker->worker_index,
+        autoplay_worker->move_lists[player_on_turn_index]);
+  } else {
+    return game_runner_get_top_simming_move(autoplay_worker, game_runner);
+  }
 }
 
 void game_runner_play_move(AutoplayWorker *autoplay_worker,
@@ -559,14 +584,14 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     rack_copy(player_rack, &rare_rack_or_move_leave);
 
     const Move *forced_move =
-        game_runner_get_top_simming_move(autoplay_worker, game_runner);
+        game_runner_get_best_move(autoplay_worker, game_runner);
     rack_list_add_rack(lg_shared_data->rack_list, &rare_rack_or_move_leave,
                        equity_to_double(move_get_equity(forced_move)));
 
     rack_copy(player_rack, &original_rack);
   }
 
-  *move = game_runner_get_top_simming_move(autoplay_worker, game_runner);
+  *move = game_runner_get_best_move(autoplay_worker, game_runner);
 
   if (lg_shared_data) {
     rack_list_add_rack(lg_shared_data->rack_list, player_rack,
