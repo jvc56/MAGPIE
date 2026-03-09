@@ -147,6 +147,9 @@ struct EndgameSolver {
   EndgamePerPlyCallback per_ply_callback;
   void *per_ply_callback_data;
 
+  // Deepest depth reported via per_ply_callback (any thread may fire callback)
+  atomic_int last_callback_depth;
+
   // Owned by the caller:
   EndgameResults *results;
   ThreadControl *thread_control;
@@ -241,7 +244,8 @@ static void pvline_update(PVLine *pv_line, const PVLine *new_pv_line,
 // Greedy playout for display: extend PV with highest-scoring moves after
 // TT extension. Returns number of moves appended.
 static int greedy_playout_for_display(PVLine *pv_line, int start_idx,
-                                      Game *game_copy, MoveList *move_list) {
+                                      Game *game_copy, MoveList *move_list,
+                                      int thread_index) {
   int num_moves = start_idx;
   while (num_moves < MAX_VARIANT_LENGTH &&
          game_get_game_end_reason(game_copy) == GAME_END_REASON_NONE) {
@@ -251,7 +255,7 @@ static int greedy_playout_for_display(PVLine *pv_line, int start_idx,
         .move_record_type = MOVE_RECORD_ALL_SMALL,
         .move_sort_type = MOVE_SORT_SCORE,
         .override_kwg = NULL,
-        .thread_index = 0,
+        .thread_index = thread_index,
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
         .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -295,7 +299,7 @@ static int greedy_playout_for_display(PVLine *pv_line, int start_idx,
 // correct scores) are preserved; only new moves are appended.
 static void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
                                   TranspositionTable *tt, int solving_player,
-                                  int max_depth) {
+                                  int max_depth, int thread_index) {
   if (!tt) {
     return;
   }
@@ -347,7 +351,7 @@ static void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
         .move_record_type = MOVE_RECORD_ALL_SMALL,
         .move_sort_type = MOVE_SORT_SCORE,
         .override_kwg = NULL,
-        .thread_index = 0,
+        .thread_index = thread_index,
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
         .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -383,14 +387,15 @@ static void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
   // This handles cases where the search PV was truncated (e.g., parallel search
   // effects) and TT entries were overwritten.
   num_moves +=
-      greedy_playout_for_display(pv_line, num_moves, game_copy, move_list);
+      greedy_playout_for_display(pv_line, num_moves, game_copy, move_list,
+                                thread_index);
 
   pv_line->num_moves = num_moves;
   small_move_list_destroy(move_list);
 }
 
 void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
-  es->first_win_optim = false;
+  es->first_win_optim = endgame_args->first_win_optim;
   es->transposition_table_optim = true;
   es->iterative_deepening_optim = true;
   es->negascout_optim = true;
@@ -466,6 +471,7 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   atomic_store(&es->current_depth, 0);
   atomic_store(&es->ply2_moves_completed, 0);
   atomic_store(&es->ply2_moves_total, 0);
+  atomic_store(&es->last_callback_depth, 0);
 
   es->thread_control = endgame_args->thread_control;
   es->game = endgame_args->game;
@@ -2105,7 +2111,8 @@ static void build_ranked_pvs_and_notify(EndgameSolverWorker *worker, int depth,
       Game *ext_game = game_duplicate(worker->game_copy);
       pvline_extend_from_tt(rpv, ext_game, worker->solver->transposition_table,
                             worker->solver->solving_player,
-                            worker->solver->requested_plies);
+                            worker->solver->requested_plies,
+                            worker->thread_index);
       game_destroy(ext_game);
     }
   }
@@ -2278,20 +2285,28 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     endgame_results_set_best_pvline(worker->solver->results, &pv, pv_value,
                                     ply);
 
-    // Call per-ply callback (only thread 0 to avoid race conditions)
-    if (worker->thread_index == 0 && worker->solver->per_ply_callback) {
-      // Extend PV from TT + greedy playout for display
-      PVLine extended_pv = pv;
-      if (worker->solver->transposition_table_optim) {
-        Game *temp_game = game_duplicate(worker->game_copy);
-        pvline_extend_from_tt(
-            &extended_pv, temp_game, worker->solver->transposition_table,
-            worker->solver->solving_player, worker->solver->requested_plies);
-        game_destroy(temp_game);
-      }
+    // Call per-ply callback when this thread completes a new deepest depth.
+    // Uses CAS so exactly one thread fires the callback per depth.
+    if (worker->solver->per_ply_callback) {
+      int last_cb = atomic_load(&worker->solver->last_callback_depth);
+      bool claimed = (ply > last_cb) &&
+                     atomic_compare_exchange_strong(
+                         &worker->solver->last_callback_depth, &last_cb, ply);
+      if (claimed) {
+        // Extend PV from TT + greedy playout for display
+        PVLine extended_pv = pv;
+        if (worker->solver->transposition_table_optim) {
+          Game *temp_game = game_duplicate(worker->game_copy);
+          pvline_extend_from_tt(
+              &extended_pv, temp_game, worker->solver->transposition_table,
+              worker->solver->solving_player, worker->solver->requested_plies,
+              worker->thread_index);
+          game_destroy(temp_game);
+        }
 
-      build_ranked_pvs_and_notify(worker, ply, pv_value, &extended_pv,
-                                  initial_moves, initial_move_count);
+        build_ranked_pvs_and_notify(worker, ply, pv_value, &extended_pv,
+                                    initial_moves, initial_move_count);
+      }
     }
 
     // EBF-based time management: decide whether to start the next depth.
@@ -2443,7 +2458,8 @@ static int extract_multi_pvs(const EndgameSolver *solver,
       Game *ext_game = game_duplicate(game);
       game_set_endgame_solving_mode(ext_game);
       pvline_extend_from_tt(pv, ext_game, solver->transposition_table,
-                            solver->solving_player, solver->requested_plies);
+                            solver->solving_player, solver->requested_plies,
+                            solver->thread_index_offset);
       game_destroy(ext_game);
     }
   }
@@ -2546,9 +2562,15 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
     game_set_endgame_solving_mode(ext_game);
     pvline_extend_from_tt(&solver->principal_variation, ext_game,
                           solver->transposition_table, solver->solving_player,
-                          solver->requested_plies);
+                          solver->requested_plies, solver->thread_index_offset);
     game_destroy(ext_game);
     multi_pvs[0] = solver->principal_variation;
+    // Write TT-extended PV back to results so callers see the full line.
+    // Use requested_plies as depth to ensure it overwrites the search PV
+    // (which was stored with the IDS depth, not negamax_depth).
+    endgame_results_set_best_pvline(
+        results, &solver->principal_variation,
+        solver->principal_variation.score, solver->requested_plies);
   }
 
   (void)elapsed; // log_final_pvs removed; elapsed unused.

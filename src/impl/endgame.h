@@ -73,6 +73,9 @@ typedef struct EndgameArgs {
   // run concurrently (e.g. from PEG), each must use a distinct range to avoid
   // collisions on the global per-thread MoveGen cache.
   int thread_index_offset;
+  // When true, search with α=-1, β=1 to determine win/loss without finding
+  // the exact best spread. Much faster due to narrow-window cutoffs.
+  bool first_win_optim;
 } EndgameArgs;
 
 EndgameSolver *endgame_solver_create(void);

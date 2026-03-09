@@ -155,7 +155,7 @@ void endgame_results_set_best_pvline(EndgameResults *endgame_results,
                                      const PVLine *pv_line, int value,
                                      int depth) {
   endgame_results_lock(endgame_results, ENDGAME_RESULT_BEST);
-  if (depth > endgame_results->best_pv_data.depth) {
+  if (depth >= endgame_results->best_pv_data.depth) {
     endgame_results->best_pv_data.depth = depth;
     endgame_results->best_pv_data.value = value;
     endgame_results->best_pv_data.pv_line = *pv_line;

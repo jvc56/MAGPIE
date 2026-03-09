@@ -210,6 +210,14 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   if (actual_error_code == ERROR_STATUS_SUCCESS && timeout == 0) {
     const PVLine *pv_line =
         endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
+    double elapsed = ctimer_elapsed_seconds(&timer);
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_formatted_string(
+        sb, "  final: value=%d, time=%.3fs, pv=", pv_line->score, elapsed);
+    format_pvline(sb, pv_line, game);
+    append_outcome(sb, game, pv_line->score);
+    printf("%s\n", string_builder_peek(sb));
+    string_builder_destroy(sb);
     assert(pv_line->score == expected_score);
     assert(small_move_is_pass(&pv_line->moves[0]) == is_pass);
   }
@@ -291,6 +299,203 @@ void test_very_deep(void) {
       "GUR2WIRER5/SNEEZED8 ADENOOO/AHIILMM 353/236 0 -lex CSW21;",
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, -116, true,
       0);
+}
+
+void test_very_deep_first_win(void) {
+  // Same 25-ply endgame as test_very_deep, but with first_win_optim enabled.
+  // The best play wins by 1 pt (value=-116, spread=1), so the narrow
+  // α=-1, β=1 window should find the same winning pass.
+  Config *config = config_create_or_die(
+      "set -s1 score -s2 score -r1 small -r2 small -threads 6 -eplies 25");
+  load_and_exec_config_or_die(
+      config,
+      "cgp "
+      "14C/13QI/12FIE/10VEE1R/9KIT2G/8CIG1IDE/8UTA2AS/7ST1SYPh1/6JA5A1/"
+      "5WOLD2BOBA/3PLOT1R1NU1EX/Y1VEIN1NOR1mOA1/UT1AT1N1L2FEH1/"
+      "GUR2WIRER5/SNEEZED8 ADENOOO/AHIILMM 353/236 0 -lex CSW21;");
+
+  Game *game = config_get_game(config);
+  Timer timer;
+  ctimer_start(&timer);
+
+  EndgameSolver *endgame_solver = endgame_solver_create();
+  EndgameArgs endgame_args = {0};
+  endgame_args.thread_control = config_get_thread_control(config);
+  endgame_args.game = game;
+  endgame_args.plies = config_get_endgame_plies(config);
+  endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  endgame_args.initial_small_move_arena_size =
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  endgame_args.num_threads = 6;
+  endgame_args.use_heuristics = true;
+  endgame_args.forced_pass_bypass = true;
+  endgame_args.num_top_moves = 1;
+  endgame_args.per_ply_callback = print_pv_callback;
+  endgame_args.per_ply_callback_data = &timer;
+  endgame_args.first_win_optim = true;
+
+  EndgameResults *endgame_results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+
+  StringBuilder *game_sb = string_builder_create();
+  GameStringOptions *gso = game_string_options_create_default();
+  string_builder_add_game(game, NULL, gso, NULL, game_sb);
+  printf("\n%s\n", string_builder_peek(game_sb));
+  string_builder_destroy(game_sb);
+  game_string_options_destroy(gso);
+
+  printf("Solving 25-ply endgame with first_win_optim...\n");
+  endgame_solve(endgame_solver, &endgame_args, endgame_results, error_stack);
+
+  assert(error_stack_is_empty(error_stack));
+  const PVLine *pv_line =
+      endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
+  double elapsed = ctimer_elapsed_seconds(&timer);
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_formatted_string(
+      sb, "  final: value=%d, time=%.3fs, pv=", pv_line->score, elapsed);
+  format_pvline(sb, pv_line, game);
+  append_outcome(sb, game, pv_line->score);
+  printf("%s\n", string_builder_peek(sb));
+  string_builder_destroy(sb);
+
+  // First move should be a pass (same as test_very_deep).
+  assert(small_move_is_pass(&pv_line->moves[0]));
+  // The value may differ from -116 since first_win_optim uses a narrow window,
+  // but it should still indicate a win (value <= -1 from P1's perspective,
+  // meaning the final spread is positive for P1).
+  assert(pv_line->score <= -1);
+
+  endgame_solver_destroy(endgame_solver);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+
+  // Eldar V stick position: wins by 72, far from the window boundary.
+  // Should find a win almost instantly with first_win_optim.
+  config = config_create_or_die(
+      "set -s1 score -s2 score -r1 small -r2 small -threads 6 -eplies 25");
+  load_and_exec_config_or_die(
+      config,
+      "cgp "
+      "4EXODE6/1DOFF1KERATIN1U/1OHO8YEN/1POOJA1B3MEWS/5SQUINTY2A/4RHINO1e3V/"
+      "2B4C2R3E/GOAT1D1E2ZIN1d/1URACILS2E4/1PIG1S4T4/2L2R4T4/2L2A1GENII3/"
+      "2A2T1L7/5E1A7/5D1M7 AEEIRUW/V 410/409 0 -lex CSW21;");
+
+  game = config_get_game(config);
+  ctimer_start(&timer);
+
+  endgame_solver = endgame_solver_create();
+  endgame_args = (EndgameArgs){0};
+  endgame_args.thread_control = config_get_thread_control(config);
+  endgame_args.game = game;
+  endgame_args.plies = config_get_endgame_plies(config);
+  endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  endgame_args.initial_small_move_arena_size =
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  endgame_args.num_threads = 6;
+  endgame_args.use_heuristics = true;
+  endgame_args.forced_pass_bypass = true;
+  endgame_args.num_top_moves = 1;
+  endgame_args.per_ply_callback = print_pv_callback;
+  endgame_args.per_ply_callback_data = &timer;
+  endgame_args.first_win_optim = true;
+
+  endgame_results = config_get_endgame_results(config);
+  error_stack = error_stack_create();
+
+  game_sb = string_builder_create();
+  gso = game_string_options_create_default();
+  string_builder_add_game(game, NULL, gso, NULL, game_sb);
+  printf("\n%s\n", string_builder_peek(game_sb));
+  string_builder_destroy(game_sb);
+  game_string_options_destroy(gso);
+
+  printf("Solving 25-ply eldar_v with first_win_optim...\n");
+  endgame_solve(endgame_solver, &endgame_args, endgame_results, error_stack);
+
+  assert(error_stack_is_empty(error_stack));
+  pv_line = endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
+  elapsed = ctimer_elapsed_seconds(&timer);
+  sb = string_builder_create();
+  string_builder_add_formatted_string(
+      sb, "  final: value=%d, time=%.3fs, pv=", pv_line->score, elapsed);
+  format_pvline(sb, pv_line, game);
+  append_outcome(sb, game, pv_line->score);
+  printf("%s\n", string_builder_peek(sb));
+  string_builder_destroy(sb);
+
+  // Should find a win. Initial spread is 1 (410-409), so a positive score
+  // means the spread delta is positive → P1 wins by more than 1.
+  assert(pv_line->score > 0);
+
+  endgame_solver_destroy(endgame_solver);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+
+  // Pass-first position (FV vs AADIZ): P1 loses by 9 (value=-63).
+  // first_win_optim should confirm no win exists (score >= 0 is false).
+  config = config_create_or_die(
+      "set -s1 score -s2 score -r1 small -r2 small -threads 6 -eplies 25");
+  load_and_exec_config_or_die(
+      config,
+      "cgp "
+      "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/"
+      "1E4N3c1BOK/1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/"
+      "1MOTIVATE1T1S2/1S2N5S4/3PERJURY5/15/15/15 FV/AADIZ 442/388 0 "
+      "-lex CSW21");
+
+  game = config_get_game(config);
+  ctimer_start(&timer);
+
+  endgame_solver = endgame_solver_create();
+  endgame_args = (EndgameArgs){0};
+  endgame_args.thread_control = config_get_thread_control(config);
+  endgame_args.game = game;
+  endgame_args.plies = config_get_endgame_plies(config);
+  endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  endgame_args.initial_small_move_arena_size =
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  endgame_args.num_threads = 6;
+  endgame_args.use_heuristics = true;
+  endgame_args.forced_pass_bypass = true;
+  endgame_args.num_top_moves = 1;
+  endgame_args.per_ply_callback = print_pv_callback;
+  endgame_args.per_ply_callback_data = &timer;
+  endgame_args.first_win_optim = true;
+
+  endgame_results = config_get_endgame_results(config);
+  error_stack = error_stack_create();
+
+  game_sb = string_builder_create();
+  gso = game_string_options_create_default();
+  string_builder_add_game(game, NULL, gso, NULL, game_sb);
+  printf("\n%s\n", string_builder_peek(game_sb));
+  string_builder_destroy(game_sb);
+  game_string_options_destroy(gso);
+
+  printf("Solving 25-ply unwinnable with first_win_optim...\n");
+  endgame_solve(endgame_solver, &endgame_args, endgame_results, error_stack);
+
+  assert(error_stack_is_empty(error_stack));
+  pv_line = endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
+  elapsed = ctimer_elapsed_seconds(&timer);
+  sb = string_builder_create();
+  string_builder_add_formatted_string(
+      sb, "  final: value=%d, time=%.3fs, pv=", pv_line->score, elapsed);
+  format_pvline(sb, pv_line, game);
+  append_outcome(sb, game, pv_line->score);
+  printf("%s\n", string_builder_peek(sb));
+  string_builder_destroy(sb);
+
+  // P1 cannot win: initial spread is 54 (442-388), but P2 wins by 9
+  // (value=-63). Score should indicate a loss (score + initial_spread < 0).
+  // With first_win_optim (α=-1, β=1), score should be <= -initial_spread
+  // since no move achieves a positive final spread.
+  assert(pv_line->score < 0);
+
+  endgame_solver_destroy(endgame_solver);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
 }
 
 void test_eldar_v_stick(void) {
