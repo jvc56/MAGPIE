@@ -5,9 +5,12 @@
 #include "move_gen.h"
 #include <string.h>
 
+enum {
+  MOVE_GEN_CACHE_SIZE = 512,
+};
+
 typedef struct MoveGenCache {
-  MoveGen *movegens;
-  int size;
+  MoveGen *movegens[MOVE_GEN_CACHE_SIZE];
 } MoveGenCache;
 
 static inline void move_gen_cache_init(MoveGenCache *cache) {
@@ -15,25 +18,26 @@ static inline void move_gen_cache_init(MoveGenCache *cache) {
 }
 
 static inline void move_gen_cache_alloc(MoveGenCache *cache, int size) {
-  if (size <= cache->size) {
-    return;
+  if (size > MOVE_GEN_CACHE_SIZE) {
+    log_fatal("Requested move gen cache size %d exceeds maximum of %d", size,
+              MOVE_GEN_CACHE_SIZE);
   }
-  if (!cache->movegens) {
-    cache->movegens = malloc_or_die(size * sizeof(MoveGen));
-  } else {
-    cache->movegens = realloc_or_die(cache->movegens, size * sizeof(MoveGen));
+  for (int i = 0; i < size; i++) {
+    if (!cache->movegens[i]) {
+      cache->movegens[i] = malloc_or_die(sizeof(MoveGen));
+    }
   }
-  cache->size = size;
 }
 
 static inline void move_gen_cache_destroy(MoveGenCache *cache) {
-  free(cache->movegens);
-  cache->movegens = NULL;
-  cache->size = 0;
+  for (int i = 0; i < MOVE_GEN_CACHE_SIZE; i++) {
+    free(cache->movegens[i]);
+    cache->movegens[i] = NULL;
+  }
 }
 
 static inline MoveGen *move_gen_cache_get(MoveGenCache *cache, int index) {
-  return &cache->movegens[index];
+  return cache->movegens[index];
 }
 
 #endif
