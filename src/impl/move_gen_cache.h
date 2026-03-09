@@ -6,7 +6,7 @@
 #include <string.h>
 
 typedef struct MoveGenCache {
-  MoveGen *movegens;
+  MoveGen **movegens;
   int size;
 } MoveGenCache;
 
@@ -19,21 +19,27 @@ static inline void move_gen_cache_alloc(MoveGenCache *cache, int size) {
     return;
   }
   if (!cache->movegens) {
-    cache->movegens = malloc_or_die(size * sizeof(MoveGen));
+    cache->movegens = malloc_or_die(size * sizeof(MoveGen *));
   } else {
-    cache->movegens = realloc_or_die(cache->movegens, size * sizeof(MoveGen));
+    cache->movegens = realloc_or_die(cache->movegens, size * sizeof(MoveGen *));
+  }
+  for (int i = cache->size; i < size; i++) {
+    cache->movegens[i] = malloc_or_die(sizeof(MoveGen));
   }
   cache->size = size;
 }
 
 static inline void move_gen_cache_destroy(MoveGenCache *cache) {
+  for (int i = 0; i < cache->size; i++) {
+    free(cache->movegens[i]);
+  }
   free(cache->movegens);
   cache->movegens = NULL;
   cache->size = 0;
 }
 
 static inline MoveGen *move_gen_cache_get(MoveGenCache *cache, int index) {
-  return &cache->movegens[index];
+  return cache->movegens[index];
 }
 
 #endif
