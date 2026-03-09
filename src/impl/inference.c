@@ -583,8 +583,16 @@ void verify_inference_args(const InferenceArgs *args, const Game *game_dup,
     }
   }
 
+  // This is the total number of letters that are unseen from the nontarget's
+  // perspective. It is the number of tiles on the opponents rack + the number
+  // of tiles in the bag.
+  int total_unseen_count = bag_get_letters(bag) +
+                           rack_get_total_letters(player0_rack) +
+                           rack_get_total_letters(player1_rack);
   for (int i = 0; i < ld_size; i++) {
-    bag_letter_counts[i] -= rack_get_letter(args->nontarget_known_rack, i);
+    const int num_letter_i_on_nontarget_rack =
+        rack_get_letter(args->nontarget_known_rack, i);
+    bag_letter_counts[i] -= num_letter_i_on_nontarget_rack;
     if (bag_letter_counts[i] < 0) {
       StringBuilder *sb = string_builder_create();
       string_builder_add_string(sb, "noninferred player rack letters (");
@@ -597,6 +605,7 @@ void verify_inference_args(const InferenceArgs *args, const Game *game_dup,
       free(err_msg);
       return;
     }
+    total_unseen_count -= num_letter_i_on_nontarget_rack;
   }
 
   const int num_played_letters =
@@ -616,12 +625,12 @@ void verify_inference_args(const InferenceArgs *args, const Game *game_dup,
     return;
   }
 
-  if (args->target_num_exch != 0 && bag_get_letters(bag) < (RACK_SIZE) * 2) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_INFERENCE_EXCHANGE_NOT_ALLOWED,
-        get_formatted_string("cannot infer an exchange where there are fewer "
-                             "than %d tiles in the bag",
-                             (RACK_SIZE) * 2));
+  if (args->target_num_exch != 0 && total_unseen_count < (RACK_SIZE) * 2) {
+    error_stack_push(error_stack, ERROR_STATUS_INFERENCE_EXCHANGE_NOT_ALLOWED,
+                     get_formatted_string(
+                         "cannot infer an exchange where there are fewer "
+                         "than %d unseen tiles from the player's perspective",
+                         (RACK_SIZE) * 2));
     return;
   }
 
