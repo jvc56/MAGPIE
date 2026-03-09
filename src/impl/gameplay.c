@@ -883,17 +883,7 @@ void generate_moves_for_game(const MoveGenArgs *args) {
 }
 
 Move *get_top_equity_move(Game *game, MoveGen *movegen, MoveList *move_list) {
-  const MoveGenArgs args = {.game = game,
-                            .move_list = move_list,
-                            .move_record_type = MOVE_RECORD_BEST,
-                            .move_sort_type = MOVE_SORT_EQUITY,
-                            .override_kwg = NULL,
-                            .gen = movegen,
-                            .eq_margin_movegen = 0,
-                            .target_equity = EQUITY_MAX_VALUE,
-                            .target_leave_size_for_exchange_cutoff =
-                                UNSET_LEAVE_SIZE};
-  generate_moves(&args);
+  generate_moves_best_equity_only(game, move_list, movegen);
   return move_list_get_move(move_list, 0);
 }
 

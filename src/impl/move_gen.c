@@ -2022,6 +2022,83 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->stop_on_threshold = args->target_equity != EQUITY_MAX_VALUE;
 }
 
+void gen_load_position_best_equity_only(const Game *game, MoveList *move_list,
+                                        MoveGen *gen) {
+  gen->move_record_type = MOVE_RECORD_BEST;
+  gen->move_sort_type = MOVE_SORT_EQUITY;
+  const KWG *override_kwg = NULL;
+  gen->eq_margin_movegen = 0;
+  gen->target_equity_cutoff = EQUITY_MAX_VALUE;
+  gen->target_leave_size = UNSET_LEAVE_SIZE;
+
+  gen->board = game_get_board(game);
+  gen->player_index = game_get_player_on_turn_index(game);
+  const Player *player = game_get_player(game, gen->player_index);
+  const Player *opponent = game_get_player(game, 1 - gen->player_index);
+
+  memcpy(&gen->ld, game_get_ld(game), sizeof(LetterDistribution));
+  gen->kwg = player_get_kwg(player);
+  gen->kwg = (override_kwg == NULL) ? player_get_kwg(player) : override_kwg;
+  gen->klv = player_get_klv(player);
+  gen->board_number_of_tiles_played = board_get_tiles_played(gen->board);
+  rack_copy(&gen->opponent_rack, player_get_rack(opponent));
+  rack_copy(&gen->player_rack, player_get_rack(player));
+  move_list_set_rack(move_list, &gen->player_rack);
+  rack_set_dist_size(&gen->leave, ld_get_size(&gen->ld));
+  wmp_move_gen_init(&gen->wmp_move_gen, &gen->ld, &gen->player_rack,
+                    player_get_wmp(player));
+
+  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
+      gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
+    gen->wmp_move_gen.wmp = NULL;
+  }
+
+  gen->bingo_bonus = game_get_bingo_bonus(game);
+  gen->number_of_tiles_in_bag = bag_get_letters(game_get_bag(game));
+  gen->kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
+  gen->move_list = move_list;
+  gen->cross_index =
+      board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index);
+
+  // Reset the move list
+  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
+      gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
+    small_move_list_reset(gen->move_list);
+  } else {
+    move_list_reset(gen->move_list);
+  }
+
+  // Reset the best and current moves
+  gen->best_move_index = 0;
+  move_set_equity(gen_get_best_move(gen), EQUITY_INITIAL_VALUE);
+  gen->best_move_equity_or_score = EQUITY_INITIAL_VALUE;
+  gen->cutoff_equity_or_score = EQUITY_INITIAL_VALUE;
+
+  // Set rack cross set and cache ld's tile scores
+  gen->rack_cross_set = 0;
+  memset(gen->tile_scores, 0, sizeof(gen->tile_scores));
+  for (int i = 0; i < ld_get_size(&gen->ld); i++) {
+    if (rack_get_letter(&gen->player_rack, i) > 0) {
+      gen->rack_cross_set = gen->rack_cross_set | ((uint64_t)1 << i);
+    }
+    gen->tile_scores[i] = ld_get_score(&gen->ld, i);
+    gen->tile_scores[get_blanked_machine_letter(i)] =
+        ld_get_score(&gen->ld, BLANK_MACHINE_LETTER);
+  }
+
+  set_descending_tile_scores(gen);
+
+  board_load_number_of_row_anchors_cache(gen->board,
+                                         gen->row_number_of_anchors_cache);
+  board_load_lanes_cache(gen->board, gen->cross_index, gen->lanes_cache);
+
+  board_copy_opening_penalties(gen->board, gen->opening_move_penalties);
+
+  gen->is_wordsmog = game_get_variant(game) == GAME_VARIANT_WORDSMOG;
+  gen->threshold_exceeded = false;
+  gen->stop_on_threshold = false;
+}
+
 void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
   leave_map_init(&gen->player_rack, &gen->leave_map);
   if (rack_get_total_letters(&gen->player_rack) < RACK_SIZE) {
@@ -2267,5 +2344,30 @@ void generate_moves(const MoveGenArgs *args) {
     }
     gen_record_scoring_plays(gen);
   }
+  gen_record_pass(gen);
+}
+
+void generate_moves_best_equity_only(const Game *game, MoveList *move_list,
+                                     MoveGen *gen) {
+  gen_load_position_best_equity_only(game, move_list, gen);
+  gen_look_up_leaves_and_record_exchanges(gen);
+
+  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    const bool check_leaves = (gen->number_of_tiles_in_bag > 0);
+    wmp_move_gen_check_nonplaythrough_existence(&gen->wmp_move_gen,
+                                                check_leaves, &gen->leave_map);
+  }
+
+  if (gen->stop_on_threshold && gen->threshold_exceeded) {
+    gen_record_pass(gen);
+    return;
+  }
+
+  gen_shadow(gen);
+  if (gen->threshold_exceeded) {
+    gen_record_pass(gen);
+    return;
+  }
+  gen_record_scoring_plays(gen);
   gen_record_pass(gen);
 }

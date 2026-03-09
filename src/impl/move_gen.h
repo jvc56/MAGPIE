@@ -184,6 +184,8 @@ typedef struct MoveGenArgs {
 // so far is using a reduced wordlist kwg (done with wordprune) for endgame
 // solving.
 void generate_moves(const MoveGenArgs *args);
+void generate_moves_best_equity_only(const Game *game, MoveList *move_list,
+                                     MoveGen *gen);
 
 void gen_load_position(MoveGen *gen, const MoveGenArgs *args);
 
