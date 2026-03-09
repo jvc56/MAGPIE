@@ -1919,24 +1919,28 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
   int total_unseen = compute_unseen(args->game, mover_idx, unseen);
 
   // --- Validate input ---
-  int tiles_in_bag = bag_get_letters(game_get_bag(args->game));
-  if (tiles_in_bag < 1 || total_unseen < 1) {
+  if (total_unseen < 1) {
     error_stack_push(error_stack, ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY,
                      get_formatted_string(
-                         "peg_solve requires at least 1 tile in bag and 1 "
-                         "unseen tile, but found bag=%d unseen=%d",
-                         tiles_in_bag, total_unseen));
+                         "peg_solve requires at least 1 unseen tile, "
+                         "but found unseen=%d",
+                         total_unseen));
     return;
   }
+  // Derive the effective bag size from total_unseen.  The CGP may have an
+  // empty opponent rack (all unseen tiles in the game bag), so we cannot
+  // rely on bag_get_letters.  The opponent gets min(total_unseen-1, RACK_SIZE)
+  // tiles; the rest are bag tiles.
+  int tiles_in_bag = total_unseen > RACK_SIZE ? total_unseen - RACK_SIZE : 1;
   if (tiles_in_bag > 2) {
     error_stack_push(error_stack, ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY,
                      get_formatted_string(
-                         "peg_solve: %d tiles in bag, max supported is 2",
-                         tiles_in_bag));
+                         "peg_solve: %d unseen tiles implies %d in bag, "
+                         "max supported is 2",
+                         total_unseen, tiles_in_bag));
     return;
   }
   // The opponent receives (total_unseen - tiles_in_bag) tiles per scenario.
-  // If this exceeds RACK_SIZE the move generator would index out of bounds.
   int opp_tiles = total_unseen - tiles_in_bag;
   if (opp_tiles > RACK_SIZE) {
     error_stack_push(error_stack, ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY,

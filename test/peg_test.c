@@ -49,6 +49,18 @@ static void peg_progress_callback(int pass, int num_evaluated,
     Move m = top_moves[i];
     StringBuilder *sb = string_builder_create();
     string_builder_add_move(sb, game_get_board(game), &m, ld, false);
+    if (move_get_type(&m) == GAME_EVENT_PASS) {
+      // Pass has no score/equity/leave to display.
+      if (top_pruned[i]) {
+        printf("  %d. %s  win%%≤%.1f%%\n", i + 1,
+               string_builder_peek(sb), top_win_pcts[i] * 100.0);
+      } else {
+        printf("  %d. %s  win%%=%.1f%%  spread=%+.2f\n", i + 1,
+               string_builder_peek(sb), top_win_pcts[i] * 100.0, top_values[i]);
+      }
+      string_builder_destroy(sb);
+      continue;
+    }
     int score = equity_to_int(move_get_score(&top_moves[i]));
     double equity = equity_to_double(move_get_equity(&top_moves[i]));
     // Compute leave: mover's rack minus the tiles played.
@@ -117,7 +129,7 @@ static void test_peg_straightforward(void) {
       .tt_fraction_of_mem = 0.5, // ~4 GB TT, shared within each pass
       .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
       .num_stages = 3,
-      .stage_candidate_limits = {8, 8},
+      .stage_candidate_limits = {24, 10},
       .early_cutoff = true,
       .per_pass_callback = peg_progress_callback,
   };
@@ -187,7 +199,7 @@ static void test_peg_endgame_pass(void) {
       .tt_fraction_of_mem = 0.5,
       .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
       .num_stages = 2,
-      .stage_candidate_limits = {8},
+      .stage_candidate_limits = {7},
       .early_cutoff = true,
       .per_pass_callback = peg_progress_callback,
   };
@@ -292,8 +304,8 @@ static void test_peg_two_in_bag(void) {
 }
 
 void test_peg(void) {
-  (void)test_peg_straightforward;
-  (void)test_peg_endgame_pass;
-  (void)test_peg_no_unseen_error;
-  test_peg_two_in_bag();
+  test_peg_straightforward();
+  test_peg_endgame_pass();
+  test_peg_no_unseen_error();
+  (void)test_peg_two_in_bag;
 }
