@@ -300,6 +300,8 @@ void fflush_or_die(FILE *stream);
 void *malloc_or_die(size_t size);
 void *calloc_or_die(size_t num, size_t size);
 void *realloc_or_die(void *realloc_target, size_t size);
+void *portable_aligned_alloc_or_die(size_t alignment, size_t size);
+void portable_aligned_free_or_die(void *ptr);
 
 typedef struct ErrorStack ErrorStack;
 

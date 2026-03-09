@@ -1,5 +1,6 @@
 #include "io_util.h"
 
+#include "../compat/malloc.h"
 #include "../def/cpthread_defs.h"
 #include <assert.h>
 #include <errno.h>
@@ -312,6 +313,19 @@ void *realloc_or_die(void *realloc_target, size_t size) {
     log_fatal("failed to realloc %p with size of %lu", realloc_target, size);
   }
   return realloc_result;
+}
+
+void *portable_aligned_alloc_or_die(size_t alignment, size_t size) {
+  void *ptr;
+  if (portable_aligned_alloc(&ptr, alignment, size) != 0) {
+    log_fatal("failed to aligned alloc size %lu with alignment %lu", size,
+              alignment);
+  }
+  return ptr;
+}
+
+void portable_aligned_free_or_die(void *ptr) {
+  portable_aligned_free(ptr);
 }
 
 struct ErrorStack {
