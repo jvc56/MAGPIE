@@ -133,10 +133,6 @@ void simulate_without_ctx(SimArgs *sim_args, SimResults *sim_results,
 Move *get_top_simming_move(Game *game, MoveGen *movegen, MoveList *move_list,
                            SimArgs *sim_args, SimCtx **sim_ctx,
                            SimResults *sim_results, ErrorStack *error_stack) {
-  if (sim_args->num_plies == 0) {
-    return get_top_equity_move(game, movegen, move_list);
-  }
-
   const MoveGenArgs gen_args = {
       .game = game,
       .move_list = move_list,

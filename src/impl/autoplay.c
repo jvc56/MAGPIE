@@ -465,14 +465,14 @@ Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
   sim_args->move_list = move_list;
   sim_args->game = game_runner->game;
 
-  Rack target_played_tiles;
-  Rack nontarget_known_rack;
-  Rack target_known_rack;
   const bool player_uses_inference = sim_args->use_inference;
   sim_args->use_inference =
       player_uses_inference && game_runner->turn_number > 0 &&
       move_get_type(&game_runner->previous_move) != GAME_EVENT_PASS;
   if (sim_args->use_inference) {
+    Rack target_played_tiles;
+    Rack nontarget_known_rack;
+    Rack target_known_rack;
     InferenceArgs *infer_args = &sim_args->inference_args;
     const int ld_size = ld_get_size(game_get_ld(game));
     // Set target played tiles
@@ -535,6 +535,24 @@ Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
   return move;
 }
 
+Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
+                                GameRunner *game_runner) {
+  const int player_on_turn_index =
+      game_get_player_on_turn_index(game_runner->game);
+  const SimArgs *sim_args = (player_on_turn_index == 0)
+                                ? &autoplay_worker->args.p1_sim_args
+                                : &autoplay_worker->args.p2_sim_args;
+  if (sim_args->num_plies == 0) {
+    return get_top_equity_move(
+        game_runner->game,
+        move_gen_cache_get(autoplay_worker->movegen_cache,
+                           autoplay_worker->worker_index),
+        autoplay_worker->move_lists[player_on_turn_index]);
+  } else {
+    return game_runner_get_top_simming_move(autoplay_worker, game_runner);
+  }
+}
+
 void game_runner_play_move(AutoplayWorker *autoplay_worker,
                            GameRunner *game_runner, Move **move) {
   if (game_runner_is_game_over(game_runner)) {
@@ -565,14 +583,14 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     rack_copy(player_rack, &rare_rack_or_move_leave);
 
     const Move *forced_move =
-        game_runner_get_top_simming_move(autoplay_worker, game_runner);
+        game_runner_get_best_move(autoplay_worker, game_runner);
     rack_list_add_rack(lg_shared_data->rack_list, &rare_rack_or_move_leave,
                        equity_to_double(move_get_equity(forced_move)));
 
     rack_copy(player_rack, &original_rack);
   }
 
-  *move = game_runner_get_top_simming_move(autoplay_worker, game_runner);
+  *move = game_runner_get_best_move(autoplay_worker, game_runner);
 
   if (lg_shared_data) {
     rack_list_add_rack(lg_shared_data->rack_list, player_rack,
