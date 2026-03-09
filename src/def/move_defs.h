@@ -22,6 +22,11 @@ typedef enum {
   MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST,
   MOVE_RECORD_ALL_SMALL,
   MOVE_RECORD_TILES_PLAYED,
+  // Check whether any RACK_SIZE-tile play (bingo) exists. Does not record
+  // moves.  Uses WMP anchors filtered to tiles_to_play == RACK_SIZE for
+  // speed.  After generate_moves returns, check gen->threshold_exceeded or
+  // use the has_playable_bingo() wrapper.
+  MOVE_RECORD_BINGO_EXISTS,
 } move_record_t;
 
 #define MOVE_SORT_EQUITY_STRING "equity"

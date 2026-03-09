@@ -7,18 +7,18 @@
 #include "../ent/thread_control.h"
 #include "endgame.h"
 
-// Maximum number of refinement passes (greedy + up to 15 endgame depths).
-enum { PEG_MAX_PASSES = 16 };
+// Maximum number of stages (stage 0 = greedy, stages 1+ = endgame).
+enum { PEG_MAX_STAGES = 16 };
 
-// Default pass candidate limits: progressively fewer candidates per deeper pass.
-// pass_candidate_limits[0]: top-K to enter 1-ply endgame from greedy
-// pass_candidate_limits[k]: top-K to enter (k+1)-ply endgame from k-ply
+// Default stage candidate limits: progressively fewer candidates per deeper
+// stage. stage_candidate_limits[i] is the top-K to promote from stage i to
+// stage i+1.
 enum {
-  PEG_DEFAULT_PASS0_LIMIT = 64,
-  PEG_DEFAULT_PASS1_LIMIT = 32,
-  PEG_DEFAULT_PASS2_LIMIT = 16,
-  PEG_DEFAULT_PASS3_LIMIT = 8,
-  PEG_DEFAULT_PASS4_LIMIT = 4,
+  PEG_DEFAULT_STAGE_LIMIT_0 = 64,
+  PEG_DEFAULT_STAGE_LIMIT_1 = 32,
+  PEG_DEFAULT_STAGE_LIMIT_2 = 16,
+  PEG_DEFAULT_STAGE_LIMIT_3 = 8,
+  PEG_DEFAULT_STAGE_LIMIT_4 = 4,
 };
 
 // Called after each PEG evaluation pass completes and candidates are sorted.
@@ -34,7 +34,7 @@ enum {
 //   top_pruned    - true if candidate was pruned (win_pct is upper bound)
 //   user_data     - caller-supplied pointer
 typedef void (*PegPerPassCallback)(int pass, int num_evaluated,
-                                   const SmallMove *top_moves,
+                                   const Move *top_moves,
                                    const double *top_values,
                                    const double *top_win_pcts,
                                    const bool *top_pruned, int num_top,
@@ -53,13 +53,13 @@ typedef struct PegArgs {
   double tt_fraction_of_mem;
   dual_lexicon_mode_t dual_lexicon_mode;
 
-  // Candidate limits after each pass:
-  //   pass_candidate_limits[0]: top-K to promote from greedy -> 1-ply endgame
-  //   pass_candidate_limits[1]: top-K to promote from 1-ply  -> 2-ply endgame
+  // Number of stages (1 = greedy only, 2 = greedy + 1-ply endgame, etc.).
+  // stage_candidate_limits has num_stages-1 entries:
+  //   stage_candidate_limits[0]: top-K to promote from greedy -> 1-ply endgame
+  //   stage_candidate_limits[1]: top-K to promote from 1-ply  -> 2-ply endgame
   //   ...
-  // num_passes: number of endgame passes (0 = greedy only).
-  int pass_candidate_limits[PEG_MAX_PASSES];
-  int num_passes;
+  int num_stages;
+  int stage_candidate_limits[PEG_MAX_STAGES];
 
   // Optional progress callback (NULL to disable).
   PegPerPassCallback per_pass_callback;
@@ -71,6 +71,23 @@ typedef struct PegArgs {
   // cannot possibly reach the K-th best win_pct among completed candidates.
   // Pruned candidates are reported with an upper-bound win_pct.
   bool early_cutoff;
+
+  // For 2-bag non-emptying candidates: number of opp responses to evaluate.
+  // multi_tile: plays with >=2 tiles (empty the 1-tile bag). 0 = default 8.
+  // one_tile: plays with 1 tile (opp keeps full rack for bingo fishing). 0 = default 8.
+  int inner_opp_multi_tile_limit;
+  int inner_opp_one_tile_limit;
+
+  // Maximum number of non-emptying (1-tile) candidates to evaluate in Phase 2.
+  // Negative or 0 = no limit (evaluate all). Sorted by equity descending.
+  int max_non_emptying;
+
+  // When true, skip Phase 1b (full-rack bag-emptying candidates).
+  bool skip_phase_1b;
+
+  // When true, do not evaluate the pass candidate at the root level.
+  // Useful for 2-in-bag positions where pass is never competitive.
+  bool skip_root_pass;
 
   // Internal flag: set by peg_eval_pass_recursive to skip the pass candidate
   // in the inner recursive call, preventing infinite mutual recursion.
@@ -90,13 +107,13 @@ typedef struct PegArgs {
 } PegArgs;
 
 typedef struct PegResult {
-  SmallMove best_move;
+  Move best_move;
   // Win fraction in [0,1] averaged over all bag-tile scenarios (primary sort).
   double best_win_pct;
   // Expected spread from mover's perspective, averaged over bag-tile scenarios.
   double best_expected_spread;
-  // How many endgame passes completed (0 = greedy only).
-  int passes_completed;
+  // How many stages completed (1 = greedy only, 2 = greedy + 1-ply, etc.).
+  int stages_completed;
   // Candidates remaining after the last completed pass.
   int candidates_remaining;
 } PegResult;

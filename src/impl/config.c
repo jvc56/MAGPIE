@@ -4876,6 +4876,7 @@ void string_builder_add_move_record_type(StringBuilder *sb,
     string_builder_add_string(sb, MOVE_RECORD_ALL_SMALL_STRING);
     break;
   case MOVE_RECORD_TILES_PLAYED:
+  case MOVE_RECORD_BINGO_EXISTS:
     break;
   }
 }

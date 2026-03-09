@@ -192,6 +192,7 @@ static inline void gen_update_cutoff_equity_or_score(MoveGen *gen) {
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_ALL_SMALL:
   case MOVE_RECORD_TILES_PLAYED:
+  case MOVE_RECORD_BINGO_EXISTS:
     log_fatal("gen_get_cutoff_equity_or_score called with "
               "MOVE_RECORD_ALL or "
               "MOVE_RECORD_ALL_SMALL");
@@ -297,6 +298,13 @@ static inline void update_best_move_or_insert_into_movelist(
       gen->threshold_exceeded = true;
     }
     break;
+  case MOVE_RECORD_BINGO_EXISTS:
+    // We only care about RACK_SIZE-tile plays.  The anchor filter should
+    // prevent non-bingo plays from reaching here, but guard anyway.
+    if (tiles_played == RACK_SIZE) {
+      gen->threshold_exceeded = true;
+    }
+    break;
   }
 
   // In exchange cutoff mode, exchanges are recorded first and then
@@ -347,6 +355,7 @@ static inline bool better_play_has_been_found(const MoveGen *gen,
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_ALL_SMALL:
   case MOVE_RECORD_TILES_PLAYED:
+  case MOVE_RECORD_BINGO_EXISTS:
     return false;
     break;
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
@@ -369,6 +378,7 @@ static inline void record_exchange(MoveGen *gen) {
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_ALL_SMALL:
   case MOVE_RECORD_TILES_PLAYED:
+  case MOVE_RECORD_BINGO_EXISTS:
     break;
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
   case MOVE_RECORD_BEST:
@@ -529,6 +539,11 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
 #else
     return;
 #endif
+  case MOVE_RECORD_BINGO_EXISTS:
+    if (gen->max_tiles_to_play == RACK_SIZE) {
+      gen->threshold_exceeded = true;
+    }
+    return;
   }
   if (need_to_update_best_move_equity_or_score) {
     gen_update_cutoff_equity_or_score(gen);
@@ -2000,7 +2015,9 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->board_number_of_tiles_played = board_get_tiles_played(gen->board);
   rack_copy(&gen->opponent_rack, player_get_rack(opponent));
   rack_copy(&gen->player_rack, player_get_rack(player));
-  move_list_set_rack(move_list, &gen->player_rack);
+  if (move_list != NULL) {
+    move_list_set_rack(move_list, &gen->player_rack);
+  }
   rack_set_dist_size(&gen->leave, ld_get_size(&gen->ld));
   wmp_move_gen_init(&gen->wmp_move_gen, &gen->ld, &gen->player_rack,
                     player_get_wmp(player));
@@ -2018,11 +2035,13 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
       board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index);
 
   // Reset the move list
-  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
-      gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
-    small_move_list_reset(gen->move_list);
-  } else {
-    move_list_reset(gen->move_list);
+  if (gen->move_list != NULL) {
+    if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
+        gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
+      small_move_list_reset(gen->move_list);
+    } else {
+      move_list_reset(gen->move_list);
+    }
   }
 
   // Reset the best and current moves
@@ -2245,6 +2264,7 @@ void gen_record_pass(MoveGen *gen) {
     move_list_insert_spare_small_move(gen->move_list);
     break;
   case MOVE_RECORD_TILES_PLAYED:
+  case MOVE_RECORD_BINGO_EXISTS:
     // Pass doesn't use any tiles — nothing to record.
     break;
   }
@@ -2279,6 +2299,30 @@ void generate_moves(const MoveGenArgs *args) {
       }
       return; // No pass recording needed
     }
+  } else if (gen->move_record_type == MOVE_RECORD_BINGO_EXISTS) {
+    // Bingo existence check: run shadow to create WMP anchors, then
+    // filter to RACK_SIZE-tile anchors only and check for valid plays.
+    gen->stop_on_threshold = true;
+    gen_shadow(gen);
+    if (!gen->threshold_exceeded) {
+      // Remove non-bingo anchors from the heap.
+      AnchorHeap *ah = &gen->anchor_heap;
+      int write = 0;
+      for (int i = 0; i < ah->count; i++) {
+        if (ah->anchors[i].tiles_to_play == RACK_SIZE) {
+          if (i != write)
+            ah->anchors[write] = ah->anchors[i];
+          write++;
+        }
+      }
+      ah->count = write;
+      if (write > 0) {
+        anchor_heapify_all(ah);
+        gen_record_scoring_plays(gen);
+      }
+    }
+    // No pass recording needed.
+    return;
   } else {
     gen_look_up_leaves_and_record_exchanges(gen);
 
@@ -2302,4 +2346,48 @@ void generate_moves(const MoveGenArgs *args) {
     gen_record_scoring_plays(gen);
   }
   gen_record_pass(gen);
+}
+
+bool has_playable_bingo(const Game *game, int thread_index) {
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_list = NULL,
+      .move_record_type = MOVE_RECORD_BINGO_EXISTS,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .thread_index = thread_index,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&gen_args);
+  MoveGen *gen = get_movegen(thread_index);
+  return gen->threshold_exceeded;
+}
+
+bool has_playable_or_possible_bingo(const Game *game, int thread_index) {
+  int on_turn = game_get_player_on_turn_index(game);
+  const Player *player = game_get_player(game, on_turn);
+  const Rack *rack = player_get_rack(player);
+
+  // 1. Two blanks: always possible.
+  if (rack_get_letter(rack, BLANK_MACHINE_LETTER) >= 2)
+    return true;
+
+  const LetterDistribution *ld = game_get_ld(game);
+  const WMP *wmp = player_get_wmp(player);
+  if (wmp) {
+    BitRack br = bit_rack_create_from_rack(ld, rack);
+
+    // 2. Rack forms a valid RACK_SIZE-letter word (a "seven").
+    if (wmp_get_word_entry(wmp, &br, RACK_SIZE) != NULL)
+      return true;
+
+    // 3. Rack + 1 blank forms a valid (RACK_SIZE+1)-letter word.
+    bit_rack_add_letter(&br, BLANK_MACHINE_LETTER);
+    if (wmp_get_word_entry(wmp, &br, RACK_SIZE + 1) != NULL)
+      return true;
+  }
+
+  // 4. Board-based check: a bingo is playable right now.
+  return has_playable_bingo(game, thread_index);
 }

@@ -1539,6 +1539,42 @@ void wmp_blank_possibilities_bananas_5(void) {
   config_destroy(config);
 }
 
+void bingo_exists_test(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -s1 score -s2 score -r1 small -r2 small");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  Player *player = game_get_player(game, 0);
+
+  // Test 1: Opening position with AEINRST — bingo exists (NASTIER, RETINAS,
+  // etc.)
+  load_cgp_or_die(game, EMPTY_CGP);
+  rack_set_to_string(ld, player_get_rack(player), "AEINRST");
+  assert(has_playable_bingo(game, 0));
+
+  // Test 2: Opening position with VVWWXYZ — no 7-letter word possible.
+  rack_set_to_string(ld, player_get_rack(player), "VVWWXYZ");
+  assert(!has_playable_bingo(game, 0));
+
+  // Test 3: Mid-game position (VS_JEREMY) with AEINRST.
+  load_cgp_or_die(game, VS_JEREMY);
+  rack_set_to_string(ld, player_get_rack(player), "AEINRST");
+  bool result_midgame = has_playable_bingo(game, 0);
+  (void)result_midgame; // Board-dependent; just ensure no crash.
+
+  // Test 4: Only 6 tiles on rack — cannot bingo.
+  rack_set_to_string(ld, player_get_rack(player), "AEINRS");
+  assert(!has_playable_bingo(game, 0));
+
+  // Test 5: Opening position with AEINRS? — blank enables bingo.
+  load_cgp_or_die(game, EMPTY_CGP);
+  rack_set_to_string(ld, player_get_rack(player), "AEINRS?");
+  assert(has_playable_bingo(game, 0));
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_move_gen(void) {
   leave_lookup_test();
   unfound_leave_lookup_test();
@@ -1568,4 +1604,5 @@ void test_move_gen(void) {
   wmp_blank_possibilities_bananas_3();
   wmp_blank_possibilities_bananas_4();
   wmp_blank_possibilities_bananas_5();
+  bingo_exists_test();
 }

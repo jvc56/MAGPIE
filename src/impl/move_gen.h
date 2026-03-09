@@ -195,4 +195,18 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen);
 
 void gen_shadow(MoveGen *gen);
 
+// Returns true if the on-turn player can play all RACK_SIZE tiles (bingo)
+// on the current board.  Uses MOVE_RECORD_BINGO_EXISTS with WMP anchor
+// filtering for speed.
+bool has_playable_bingo(const Game *game, int thread_index);
+
+// Returns true if a bingo is playable on the board OR possible from the rack
+// alone (i.e., the rack could form a bingo given the right board hooks).
+// Checks, in order (returning early on any hit):
+//   1. Rack has 2 blanks.
+//   2. Rack tiles form a valid RACK_SIZE-letter word (a "seven").
+//   3. Rack + 1 blank forms a valid (RACK_SIZE+1)-letter word.
+//   4. A bingo is playable on the current board (has_playable_bingo).
+bool has_playable_or_possible_bingo(const Game *game, int thread_index);
+
 #endif
