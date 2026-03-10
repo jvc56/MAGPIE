@@ -2851,36 +2851,34 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
       qsort(candidates, limit, sizeof(PegCandidate),
             compare_peg_candidates_desc);
 
-      // Determine which candidates need spread computation.
-      int reeval_count = 0;
-      if (args->first_win_mode == PEG_FIRST_WIN_PRUNE_ONLY) {
-        // Re-eval all non-pruned candidates.
-        for (int ci = 0; ci < limit; ci++) {
-          if (!candidates[ci].pruned)
-            reeval_count++;
+      // Identify the best win% among non-pruned candidates.
+      double best_wp = -1.0;
+      int tied_count = 0;
+      for (int ci = 0; ci < limit; ci++) {
+        if (!candidates[ci].pruned) {
+          if (best_wp < 0.0)
+            best_wp = candidates[ci].win_pct;
+          if (candidates[ci].win_pct > best_wp - 1e-9)
+            tied_count++;
         }
-      } else {
-        // WIN_PCT_THEN_SPREAD: re-eval tied candidates (3a) or all (3b).
-        if (args->first_win_spread_all_final) {
-          // Mode 3b: all non-pruned survivors.
-          for (int ci = 0; ci < limit; ci++) {
-            if (!candidates[ci].pruned)
-              reeval_count++;
-          }
-        } else {
-          // Mode 3a: only candidates tied with the best win%.
-          double best_wp = -1.0;
-          for (int ci = 0; ci < limit; ci++) {
-            if (!candidates[ci].pruned) {
-              best_wp = candidates[ci].win_pct;
-              break;
-            }
-          }
-          for (int ci = 0; ci < limit; ci++) {
-            if (!candidates[ci].pruned &&
-                candidates[ci].win_pct > best_wp - 1e-9)
-              reeval_count++;
-          }
+      }
+
+      // Determine which candidates need spread re-evaluation.
+      // PRUNE_ONLY: re-eval candidates tied at the best win%.
+      // WIN_PCT_THEN_SPREAD 3a: re-eval only if 2+ candidates are tied.
+      // WIN_PCT_THEN_SPREAD 3b: re-eval candidates at best win% (even if 1).
+      int reeval_count = 0;
+      bool skip_reeval = false;
+      if (args->first_win_mode == PEG_FIRST_WIN_WIN_PCT_THEN_SPREAD &&
+          !args->first_win_spread_all_final && tied_count < 2) {
+        // Mode 3a: no tie at top, skip re-eval entirely.
+        skip_reeval = true;
+      }
+      if (!skip_reeval) {
+        for (int ci = 0; ci < limit; ci++) {
+          if (!candidates[ci].pruned &&
+              candidates[ci].win_pct > best_wp - 1e-9)
+            reeval_count++;
         }
       }
 
@@ -2888,31 +2886,16 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
         printf("[PEG] Stage %d spread re-eval: %d candidates\n", stage,
                reeval_count);
 
-      // Re-evaluate selected candidates sequentially with full spread.
-      double best_wp = -1.0;
-      for (int ci = 0; ci < limit; ci++) {
-        if (!candidates[ci].pruned) {
-          best_wp = candidates[ci].win_pct;
-          break;
-        }
-      }
-      // First pass: re-eval non-pass candidates sequentially with full
-      // spread. Track whether there is a pass candidate that needs re-eval.
+      // Re-evaluate selected candidates with full spread.
+      // First pass: re-eval non-pass candidates sequentially.
+      // Track whether there is a pass candidate that needs re-eval.
       bool pass_needs_reeval = false;
       int pass_reeval_idx = -1;
       for (int ci = 0; ci < limit; ci++) {
         PegCandidate *c = &candidates[ci];
         if (c->pruned)
           continue;
-        bool should_reeval;
-        if (args->first_win_mode == PEG_FIRST_WIN_PRUNE_ONLY ||
-            args->first_win_spread_all_final) {
-          should_reeval = true;
-        } else {
-          // Mode 3a: only tied with best.
-          should_reeval = (c->win_pct > best_wp - 1e-9);
-        }
-        if (!should_reeval)
+        if (c->win_pct < best_wp - 1e-9 || skip_reeval)
           continue;
 
         if (move_get_type(&c->move) == GAME_EVENT_PASS) {

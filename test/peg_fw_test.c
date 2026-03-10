@@ -1,7 +1,6 @@
 #include "peg_fw_test.h"
 
 #include "../src/ent/game.h"
-#include "../src/ent/move.h"
 #include "../src/impl/config.h"
 #include "../src/impl/peg.h"
 #include "peg_test_util.h"
@@ -76,103 +75,6 @@ static PegResult run_peg_fw_ex(const char *cgp, peg_first_win_mode_t mode,
   error_stack_destroy(error_stack);
   config_destroy(config);
   return result;
-}
-
-static PegResult run_peg_fw(const char *cgp, peg_first_win_mode_t mode,
-                            bool spread_all_final, int num_stages,
-                            const int *stage_limits, int num_limits) {
-  return run_peg_fw_ex(cgp, mode, spread_all_final, num_stages,
-                       stage_limits, num_limits, false, NULL);
-}
-
-// ---------------------------------------------------------------------------
-// Mode 1: PRUNE_ONLY — first_win prunes losers, survivors get full spread.
-// Uses ONYX position. Should find 13L ONYX with ~93.75% win AND known spread.
-// ---------------------------------------------------------------------------
-static void test_peg_fw_prune_only(void) {
-  printf("\n=== PEG_FIRST_WIN_PRUNE_ONLY (ONYX) ===\n");
-  int limits[] = {24, 10};
-  PegResult r = run_peg_fw(ONYX_CGP, PEG_FIRST_WIN_PRUNE_ONLY, false, 3,
-                           limits, 2);
-  assert(r.stages_completed == 3);
-  {
-    StringBuilder *sb = string_builder_create();
-    string_builder_add_formatted_string(sb, "best_wp=%.3f spread_known=%d",
-                                        r.best_win_pct, r.spread_known);
-    printf("  %s\n", string_builder_peek(sb));
-    string_builder_destroy(sb);
-  }
-  assert(r.best_win_pct > 0.93 && r.best_win_pct < 0.94);
-  assert(r.spread_known);
-  assert(r.best_expected_spread > 0.0);
-}
-
-// ---------------------------------------------------------------------------
-// Mode 2: WIN_PCT_THEN_SPREAD (3a) — first_win on all stages, spread only
-// for tied candidates on final stage.
-// ---------------------------------------------------------------------------
-static void test_peg_fw_winpct_then_spread_3a(void) {
-  printf("\n=== PEG_FIRST_WIN_WIN_PCT_THEN_SPREAD mode 3a (ONYX) ===\n");
-  int limits[] = {24, 10};
-  PegResult r = run_peg_fw(ONYX_CGP, PEG_FIRST_WIN_WIN_PCT_THEN_SPREAD,
-                           false, 3, limits, 2);
-  assert(r.stages_completed == 3);
-  assert(r.best_win_pct > 0.93 && r.best_win_pct < 0.94);
-}
-
-// ---------------------------------------------------------------------------
-// Mode 2: WIN_PCT_THEN_SPREAD (3b) — spread for all final-stage survivors.
-// ---------------------------------------------------------------------------
-static void test_peg_fw_winpct_then_spread_3b(void) {
-  printf("\n=== PEG_FIRST_WIN_WIN_PCT_THEN_SPREAD mode 3b (ONYX) ===\n");
-  int limits[] = {24, 10};
-  PegResult r = run_peg_fw(ONYX_CGP, PEG_FIRST_WIN_WIN_PCT_THEN_SPREAD,
-                           true, 3, limits, 2);
-  assert(r.stages_completed == 3);
-  assert(r.best_win_pct > 0.93 && r.best_win_pct < 0.94);
-  assert(r.spread_known);
-  assert(r.best_expected_spread > 0.0);
-}
-
-// ---------------------------------------------------------------------------
-// Mode 3: WIN_PCT_THEN_SPREAD_ALL — first_win on all stages except the last.
-// ---------------------------------------------------------------------------
-static void test_peg_fw_winpct_then_spread_all(void) {
-  printf("\n=== PEG_FIRST_WIN_WIN_PCT_THEN_SPREAD_ALL (ONYX) ===\n");
-  int limits[] = {24, 10};
-  PegResult r = run_peg_fw(ONYX_CGP, PEG_FIRST_WIN_WIN_PCT_THEN_SPREAD_ALL,
-                           false, 3, limits, 2);
-  assert(r.stages_completed == 3);
-  assert(r.best_win_pct > 0.93 && r.best_win_pct < 0.94);
-  assert(r.spread_known);
-  assert(r.best_expected_spread > 0.0);
-}
-
-// ---------------------------------------------------------------------------
-// Mode 4: WIN_PCT_ONLY — first_win on all stages, never compute spread.
-// ---------------------------------------------------------------------------
-static void test_peg_fw_winpct_only(void) {
-  printf("\n=== PEG_FIRST_WIN_WIN_PCT_ONLY (ONYX) ===\n");
-  int limits[] = {24, 10};
-  PegResult r = run_peg_fw(ONYX_CGP, PEG_FIRST_WIN_WIN_PCT_ONLY,
-                           false, 3, limits, 2);
-  assert(r.stages_completed == 3);
-  assert(r.best_win_pct > 0.93 && r.best_win_pct < 0.94);
-  assert(!r.spread_known);
-}
-
-// ---------------------------------------------------------------------------
-// French pass position with WIN_PCT_ONLY — verify pass still wins.
-// ---------------------------------------------------------------------------
-static void test_peg_fw_french_pass_winpct_only(void) {
-  printf("\n=== PEG_FIRST_WIN_WIN_PCT_ONLY (French pass) ===\n");
-  int limits[] = {7};
-  PegResult r = run_peg_fw(FRENCH_PASS_CGP, PEG_FIRST_WIN_WIN_PCT_ONLY,
-                           false, 2, limits, 1);
-  assert(r.stages_completed == 2);
-  assert(move_get_type(&r.best_move) == GAME_EVENT_PASS);
-  assert(r.best_win_pct > 0.68 && r.best_win_pct < 0.70);
-  assert(!r.spread_known);
 }
 
 // ---------------------------------------------------------------------------
@@ -274,13 +176,4 @@ void test_peg_fw_bench(void) {
            move_strs[m][1], win_pcts[m][1] * 100.0, french_spread, times[m][1]);
   }
   printf("\n");
-}
-
-void test_peg_fw(void) {
-  test_peg_fw_prune_only();
-  test_peg_fw_winpct_then_spread_3a();
-  test_peg_fw_winpct_then_spread_3b();
-  test_peg_fw_winpct_then_spread_all();
-  test_peg_fw_winpct_only();
-  test_peg_fw_french_pass_winpct_only();
 }

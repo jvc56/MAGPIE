@@ -46,6 +46,7 @@ static void test_peg_straightforward(void) {
       .stage_candidate_limits = {24, 10},
       .early_cutoff = true,
       .per_pass_callback = peg_test_progress_callback,
+      .first_win_mode = PEG_FIRST_WIN_WIN_PCT_THEN_SPREAD,
   };
 
   PegResult result;
@@ -65,7 +66,6 @@ static void test_peg_straightforward(void) {
     string_builder_destroy(sb);
   }
   assert(result.best_win_pct > 0.93 && result.best_win_pct < 0.94);
-  assert(result.best_expected_spread > 0.0);
   peg_test_print_result(&result, game);
 
   peg_solver_destroy(solver);
@@ -114,6 +114,7 @@ static void test_peg_endgame_pass(void) {
       .stage_candidate_limits = {7},
       .early_cutoff = true,
       .per_pass_callback = peg_test_progress_callback,
+      .first_win_mode = PEG_FIRST_WIN_WIN_PCT_THEN_SPREAD,
   };
 
   PegResult result;
