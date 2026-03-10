@@ -2896,6 +2896,10 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
           break;
         }
       }
+      // First pass: re-eval non-pass candidates sequentially with full
+      // spread. Track whether there is a pass candidate that needs re-eval.
+      bool pass_needs_reeval = false;
+      int pass_reeval_idx = -1;
       for (int ci = 0; ci < limit; ci++) {
         PegCandidate *c = &candidates[ci];
         if (c->pruned)
@@ -2912,42 +2916,71 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
           continue;
 
         if (move_get_type(&c->move) == GAME_EVENT_PASS) {
-          // Re-evaluate pass through the correct scenario-based path.
-          for (int si = 0; si < eg_num_scenarios; si++) {
-            if (tiles_in_bag == 1) {
-              peg_eval_pass_one_scenario(
-                  args, opp_idx, unseen, ld_size, plies, shared_tt,
-                  args->thread_index_base, eg_scenario_t1[si],
-                  &eg_pass_spreads[si], &eg_pass_wins[si], false);
-            } else {
-              peg_eval_pass_one_scenario_pair(
-                  args, opp_idx, unseen, ld_size, plies, shared_tt,
-                  args->thread_index_base, eg_scenario_t1[si],
-                  eg_scenario_t2[si], &eg_pass_spreads[si],
-                  &eg_pass_wins[si], false);
-            }
-          }
-          double total = 0.0, wins = 0.0;
-          int weight = 0;
-          for (int si = 0; si < eg_num_scenarios; si++) {
-            total += eg_pass_spreads[si] * eg_scenario_counts[si];
-            wins += eg_pass_wins[si] * eg_scenario_counts[si];
-            weight += eg_scenario_counts[si];
-          }
-          c->win_pct = (weight > 0) ? wins / weight : 0.0;
-          c->expected_value = (weight > 0) ? total / weight : 0.0;
-          c->spread_known = true;
-        } else {
-          bool pruned = false;
-          c->expected_value = peg_endgame_eval_candidate(
-              eg_solvers[0], eg_results[0], base_game, &c->move,
-              mover_idx, opp_idx, plies, unseen, ld_size,
-              tiles_in_bag, args->thread_control, shared_tt,
-              args->dual_lexicon_mode, args->thread_index_base,
-              args, NULL, &c->win_pct, &pruned, false);
-          c->pruned = pruned;
-          c->spread_known = true;
+          pass_needs_reeval = true;
+          pass_reeval_idx = ci;
+          continue;
         }
+        bool pruned = false;
+        c->expected_value = peg_endgame_eval_candidate(
+            eg_solvers[0], eg_results[0], base_game, &c->move,
+            mover_idx, opp_idx, plies, unseen, ld_size,
+            tiles_in_bag, args->thread_control, shared_tt,
+            args->dual_lexicon_mode, args->thread_index_base,
+            args, NULL, &c->win_pct, &pruned, false);
+        c->pruned = pruned;
+        c->spread_known = true;
+      }
+
+      // Re-eval pass candidate via multi-threaded scenario dispatch.
+      if (pass_needs_reeval && eg_num_scenarios > 0) {
+        atomic_int reeval_next;
+        atomic_init(&reeval_next, 0);
+        for (int ti = 0; ti < num_threads; ti++) {
+          eg_targs[ti] = (PegEndgameThreadArgs){
+              .candidates = candidates,
+              .next_work_item = &reeval_next,
+              .num_non_pass = 0,
+              .num_work_items = eg_num_scenarios,
+              .endgame_solver = eg_solvers[ti],
+              .endgame_results = eg_results[ti],
+              .base_game = base_game,
+              .mover_idx = mover_idx,
+              .opp_idx = opp_idx,
+              .plies = plies,
+              .unseen = unseen,
+              .ld_size = ld_size,
+              .tiles_in_bag = tiles_in_bag,
+              .thread_index = args->thread_index_base + ti,
+              .thread_control = args->thread_control,
+              .shared_tt = shared_tt,
+              .dual_lexicon_mode = args->dual_lexicon_mode,
+              .solver = solver,
+              .outer_args = args,
+              .cutoff = NULL,
+              .scenario_t1 = eg_scenario_t1,
+              .scenario_t2 = eg_scenario_t2,
+              .scenario_counts = eg_scenario_counts,
+              .pass_spreads = eg_pass_spreads,
+              .pass_wins = eg_pass_wins,
+              .first_win_optim = false,
+          };
+          cpthread_create(&eg_threads[ti], peg_endgame_thread, &eg_targs[ti]);
+        }
+        for (int ti = 0; ti < num_threads; ti++) {
+          cpthread_join(eg_threads[ti]);
+        }
+        // Aggregate pass scenario results.
+        PegCandidate *pass_c = &candidates[pass_reeval_idx];
+        double total = 0.0, wins = 0.0;
+        int weight = 0;
+        for (int si = 0; si < eg_num_scenarios; si++) {
+          total += eg_pass_spreads[si] * eg_scenario_counts[si];
+          wins += eg_pass_wins[si] * eg_scenario_counts[si];
+          weight += eg_scenario_counts[si];
+        }
+        pass_c->win_pct = (weight > 0) ? wins / weight : 0.0;
+        pass_c->expected_value = (weight > 0) ? total / weight : 0.0;
+        pass_c->spread_known = true;
       }
     }
 
