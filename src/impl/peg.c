@@ -53,6 +53,9 @@ typedef struct PegCandidate {
   // True if evaluation was cut short because this candidate cannot possibly
   // reach the cutoff_k-th best win_pct.
   bool pruned;
+  // True when expected_value holds a real spread (full search or greedy).
+  // False when only win/loss was determined (first_win_optim stages).
+  bool spread_known;
 } PegCandidate;
 
 // ---------------------------------------------------------------------------
@@ -596,7 +599,8 @@ static int32_t peg_eval_endgame_scenario(EndgameSolver *endgame_solver,
                                          ThreadControl *tc,
                                          TranspositionTable *shared_tt,
                                          dual_lexicon_mode_t dual_lexicon_mode,
-                                         int thread_index) {
+                                         int thread_index,
+                                         bool first_win_optim) {
   int32_t mover_lead =
       equity_to_int(player_get_score(game_get_player(scenario, mover_idx))) -
       equity_to_int(player_get_score(game_get_player(scenario, opp_idx)));
@@ -613,6 +617,7 @@ static int32_t peg_eval_endgame_scenario(EndgameSolver *endgame_solver,
       .dual_lexicon_mode = dual_lexicon_mode,
       .skip_word_pruning = true,
       .thread_index_offset = thread_index,
+      .first_win_optim = first_win_optim,
   };
 
   ErrorStack *local_es = error_stack_create();
@@ -1348,7 +1353,8 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
                                          const PegArgs *outer_args,
                                          PegCutoff *cutoff,
                                          double *win_pct_out,
-                                         bool *pruned_out) {
+                                         bool *pruned_out,
+                                         bool first_win_optim) {
   int tiles_played = move->tiles_played;
 
   // Non-bag-emptying candidate in 2-bag: recursive sub-PEG.
@@ -1400,7 +1406,7 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
                                               opp_idx, t, unseen, ld_size);
       int32_t mover_total = peg_eval_endgame_scenario(
           endgame_solver, results, scenario, mover_idx, opp_idx, plies, tc,
-          shared_tt, dual_lexicon_mode, thread_index);
+          shared_tt, dual_lexicon_mode, thread_index, first_win_optim);
       total += (double)mover_total * cnt;
       wins +=
           ((mover_total > 0) ? 1.0 : (mover_total == 0 ? 0.5 : 0.0)) * cnt;
@@ -1449,7 +1455,7 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
           ld_size);
       int32_t mover_total = peg_eval_endgame_scenario(
           endgame_solver, results, scenario, mover_idx, opp_idx, plies, tc,
-          shared_tt, dual_lexicon_mode, thread_index);
+          shared_tt, dual_lexicon_mode, thread_index, first_win_optim);
       total += (double)mover_total * cnt;
       wins +=
           ((mover_total > 0) ? 1.0 : (mover_total == 0 ? 0.5 : 0.0)) * cnt;
@@ -1476,7 +1482,8 @@ static void peg_eval_pass_one_scenario(
     const PegArgs *outer_args, int opp_idx,
     const uint8_t *unseen, int ld_size, int plies,
     TranspositionTable *shared_tt, int thread_index,
-    MachineLetter bag_tile, double *spread_out, double *win_out) {
+    MachineLetter bag_tile, double *spread_out, double *win_out,
+    bool first_win_optim) {
   int mover_idx = 1 - opp_idx;
   const LetterDistribution *ld = game_get_ld(outer_args->game);
 
@@ -1518,6 +1525,8 @@ static void peg_eval_pass_one_scenario(
       .skip_pass = 1,
       .shared_tt = shared_tt,
       .thread_index_base = thread_index,
+      .first_win_mode = outer_args->first_win_mode,
+      .first_win_spread_all_final = outer_args->first_win_spread_all_final,
   };
   for (int i = 0; i < PEG_MAX_STAGES; i++)
     inner_args.stage_candidate_limits[i] =
@@ -1598,6 +1607,7 @@ static void peg_eval_pass_one_scenario(
         .dual_lexicon_mode = outer_args->dual_lexicon_mode,
         .skip_word_pruning = true,
         .thread_index_offset = thread_index,
+        .first_win_optim = first_win_optim,
     };
     ErrorStack *local_es = error_stack_create();
     endgame_solve(eg_solver, &ea, eg_results, local_es);
@@ -1628,7 +1638,8 @@ static void peg_eval_pass_one_scenario_pair(
     const uint8_t *unseen, int ld_size, int plies,
     TranspositionTable *shared_tt, int thread_index,
     MachineLetter bag_t1, MachineLetter bag_t2,
-    double *spread_out, double *win_out) {
+    double *spread_out, double *win_out,
+    bool first_win_optim) {
   int mover_idx = 1 - opp_idx;
   const LetterDistribution *ld = game_get_ld(outer_args->game);
 
@@ -1667,6 +1678,8 @@ static void peg_eval_pass_one_scenario_pair(
       .shared_tt = shared_tt,
       .thread_index_base = thread_index,
       .early_cutoff = outer_args->early_cutoff,
+      .first_win_mode = outer_args->first_win_mode,
+      .first_win_spread_all_final = outer_args->first_win_spread_all_final,
   };
   for (int i = 0; i < PEG_MAX_STAGES; i++)
     inner_args.stage_candidate_limits[i] =
@@ -1681,6 +1694,7 @@ static void peg_eval_pass_one_scenario_pair(
       move_get_type(&inner_result.best_move) != GAME_EVENT_PASS;
   double opp_play_expected_win = inner_result.best_win_pct;
   double opp_play_expected_spread = inner_result.best_expected_spread;
+  (void)first_win_optim; // Pass-pair scenarios don't directly endgame_solve
 
   error_stack_destroy(inner_es);
   peg_solver_destroy(inner_solver);
@@ -1770,12 +1784,12 @@ static void *peg_greedy_thread(void *arg) {
         peg_eval_pass_one_scenario(a->outer_args, a->opp_idx, a->unseen,
                                    a->ld_size, 0, NULL, a->thread_index,
                                    a->scenario_t1[si], &a->pass_spreads[si],
-                                   &a->pass_wins[si]);
+                                   &a->pass_wins[si], false);
       } else {
         peg_eval_pass_one_scenario_pair(
             a->outer_args, a->opp_idx, a->unseen, a->ld_size, 0, NULL,
             a->thread_index, a->scenario_t1[si], a->scenario_t2[si],
-            &a->pass_spreads[si], &a->pass_wins[si]);
+            &a->pass_spreads[si], &a->pass_wins[si], false);
       }
     }
     (void)0; // progress display removed
@@ -1816,6 +1830,8 @@ typedef struct PegEndgameThreadArgs {
   int *scenario_counts;
   double *pass_spreads;
   double *pass_wins;
+  // When true, endgame solves use narrow-window (α=-1,β=1) for win/loss only.
+  bool first_win_optim;
 } PegEndgameThreadArgs;
 
 static void *peg_endgame_thread(void *arg) {
@@ -1832,8 +1848,9 @@ static void *peg_endgame_thread(void *arg) {
           a->mover_idx, a->opp_idx, a->plies, a->unseen, a->ld_size,
           a->tiles_in_bag, a->thread_control, a->shared_tt,
           a->dual_lexicon_mode, a->thread_index, a->outer_args, a->cutoff,
-          &c->win_pct, &pruned);
+          &c->win_pct, &pruned, a->first_win_optim);
       c->pruned = pruned;
+      c->spread_known = !a->first_win_optim;
       if (!pruned && a->cutoff) {
         peg_cutoff_update(a->cutoff, c->win_pct);
       }
@@ -1843,12 +1860,14 @@ static void *peg_endgame_thread(void *arg) {
         peg_eval_pass_one_scenario(a->outer_args, a->opp_idx, a->unseen,
                                    a->ld_size, a->plies, a->shared_tt,
                                    a->thread_index, a->scenario_t1[si],
-                                   &a->pass_spreads[si], &a->pass_wins[si]);
+                                   &a->pass_spreads[si], &a->pass_wins[si],
+                                   a->first_win_optim);
       } else {
         peg_eval_pass_one_scenario_pair(
             a->outer_args, a->opp_idx, a->unseen, a->ld_size, a->plies,
             a->shared_tt, a->thread_index, a->scenario_t1[si],
-            a->scenario_t2[si], &a->pass_spreads[si], &a->pass_wins[si]);
+            a->scenario_t2[si], &a->pass_spreads[si], &a->pass_wins[si],
+            a->first_win_optim);
       }
     }
   }
@@ -1881,15 +1900,17 @@ static void invoke_per_pass_callback(const PegArgs *args, int pass,
   double values[PEG_CALLBACK_MAX_TOP];
   double win_pcts[PEG_CALLBACK_MAX_TOP];
   bool pruned[PEG_CALLBACK_MAX_TOP];
+  bool spread_known[PEG_CALLBACK_MAX_TOP];
   for (int i = 0; i < top; i++) {
     moves[i] = sorted[i].move;
     values[i] = sorted[i].expected_value;
     win_pcts[i] = sorted[i].win_pct;
     pruned[i] = sorted[i].pruned;
+    spread_known[i] = sorted[i].spread_known;
   }
   args->per_pass_callback(pass, num_evaluated, moves, values, win_pcts, pruned,
-                          top, args->game, elapsed, stage_seconds,
-                          args->per_pass_callback_data);
+                          spread_known, top, args->game, elapsed,
+                          stage_seconds, args->per_pass_callback_data);
 }
 
 PegSolver *peg_solver_create(void) {
@@ -2007,6 +2028,7 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
         continue;
       move_copy(&candidates[j].move, im);
       candidates[j].expected_value = 0.0;
+      candidates[j].spread_known = true;
       j++;
     }
     num_candidates = j;
@@ -2706,6 +2728,30 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
         malloc_or_die(num_threads * sizeof(PegEndgameThreadArgs));
     cpthread_t *eg_threads = malloc_or_die(num_threads * sizeof(cpthread_t));
 
+    // Determine whether this stage uses first_win_optim.
+    bool is_last_stage = (stage == args->num_stages - 1);
+    bool stage_first_win = false;
+    switch (args->first_win_mode) {
+    case PEG_FIRST_WIN_NEVER:
+      stage_first_win = false;
+      break;
+    case PEG_FIRST_WIN_PRUNE_ONLY:
+      // First pass of each stage uses first_win; survivors get re-evaluated.
+      stage_first_win = true;
+      break;
+    case PEG_FIRST_WIN_WIN_PCT_THEN_SPREAD:
+      // All stages use first_win; spread only on final stage for ties/all.
+      stage_first_win = true;
+      break;
+    case PEG_FIRST_WIN_WIN_PCT_THEN_SPREAD_ALL:
+      // All stages except the last use first_win.
+      stage_first_win = !is_last_stage;
+      break;
+    case PEG_FIRST_WIN_WIN_PCT_ONLY:
+      stage_first_win = true;
+      break;
+    }
+
     // Process non-pass candidates one at a time (sequential) so verbose
     // output for each candidate is not interleaved with other candidates.
     for (int ci = 0; ci < eg_non_pass_count; ci++) {
@@ -2716,8 +2762,9 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
           mover_idx, opp_idx, plies, unseen, ld_size,
           tiles_in_bag, args->thread_control, shared_tt,
           args->dual_lexicon_mode, args->thread_index_base,
-          args, cutoff_ptr, &c->win_pct, &pruned);
+          args, cutoff_ptr, &c->win_pct, &pruned, stage_first_win);
       c->pruned = pruned;
+      c->spread_known = !stage_first_win;
       if (!pruned && cutoff_ptr) {
         peg_cutoff_update(cutoff_ptr, c->win_pct);
       }
@@ -2754,6 +2801,7 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
             .scenario_counts = eg_scenario_counts,
             .pass_spreads = eg_pass_spreads,
             .pass_wins = eg_pass_wins,
+            .first_win_optim = stage_first_win,
         };
         cpthread_create(&eg_threads[ti], peg_endgame_thread, &eg_targs[ti]);
       }
@@ -2775,10 +2823,132 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
       pass_c->win_pct = (weight > 0) ? wins / weight : 0.0;
       pass_c->expected_value = (weight > 0) ? total / weight : 0.0;
       pass_c->pruned = false;
+      pass_c->spread_known = !stage_first_win;
     }
 
     if (cutoff_ptr) {
       peg_cutoff_destroy(cutoff_ptr);
+    }
+
+    // -----------------------------------------------------------------------
+    // Mode-specific post-processing: re-evaluate with full spread search
+    // for modes that used first_win_optim on this stage.
+    // -----------------------------------------------------------------------
+    bool need_spread_reeval = false;
+    if (stage_first_win) {
+      if (args->first_win_mode == PEG_FIRST_WIN_PRUNE_ONLY) {
+        // Re-evaluate all non-pruned candidates with full spread search.
+        need_spread_reeval = true;
+      } else if (args->first_win_mode == PEG_FIRST_WIN_WIN_PCT_THEN_SPREAD &&
+                 is_last_stage) {
+        // On final stage: re-evaluate for spread.
+        need_spread_reeval = true;
+      }
+    }
+
+    if (need_spread_reeval) {
+      // Sort first to identify which candidates to re-evaluate.
+      qsort(candidates, limit, sizeof(PegCandidate),
+            compare_peg_candidates_desc);
+
+      // Determine which candidates need spread computation.
+      int reeval_count = 0;
+      if (args->first_win_mode == PEG_FIRST_WIN_PRUNE_ONLY) {
+        // Re-eval all non-pruned candidates.
+        for (int ci = 0; ci < limit; ci++) {
+          if (!candidates[ci].pruned)
+            reeval_count++;
+        }
+      } else {
+        // WIN_PCT_THEN_SPREAD: re-eval tied candidates (3a) or all (3b).
+        if (args->first_win_spread_all_final) {
+          // Mode 3b: all non-pruned survivors.
+          for (int ci = 0; ci < limit; ci++) {
+            if (!candidates[ci].pruned)
+              reeval_count++;
+          }
+        } else {
+          // Mode 3a: only candidates tied with the best win%.
+          double best_wp = -1.0;
+          for (int ci = 0; ci < limit; ci++) {
+            if (!candidates[ci].pruned) {
+              best_wp = candidates[ci].win_pct;
+              break;
+            }
+          }
+          for (int ci = 0; ci < limit; ci++) {
+            if (!candidates[ci].pruned &&
+                candidates[ci].win_pct > best_wp - 1e-9)
+              reeval_count++;
+          }
+        }
+      }
+
+      if (top_level && reeval_count > 0)
+        printf("[PEG] Stage %d spread re-eval: %d candidates\n", stage,
+               reeval_count);
+
+      // Re-evaluate selected candidates sequentially with full spread.
+      double best_wp = -1.0;
+      for (int ci = 0; ci < limit; ci++) {
+        if (!candidates[ci].pruned) {
+          best_wp = candidates[ci].win_pct;
+          break;
+        }
+      }
+      for (int ci = 0; ci < limit; ci++) {
+        PegCandidate *c = &candidates[ci];
+        if (c->pruned)
+          continue;
+        bool should_reeval;
+        if (args->first_win_mode == PEG_FIRST_WIN_PRUNE_ONLY ||
+            args->first_win_spread_all_final) {
+          should_reeval = true;
+        } else {
+          // Mode 3a: only tied with best.
+          should_reeval = (c->win_pct > best_wp - 1e-9);
+        }
+        if (!should_reeval)
+          continue;
+
+        if (move_get_type(&c->move) == GAME_EVENT_PASS) {
+          // Re-evaluate pass through the correct scenario-based path.
+          for (int si = 0; si < eg_num_scenarios; si++) {
+            if (tiles_in_bag == 1) {
+              peg_eval_pass_one_scenario(
+                  args, opp_idx, unseen, ld_size, plies, shared_tt,
+                  args->thread_index_base, eg_scenario_t1[si],
+                  &eg_pass_spreads[si], &eg_pass_wins[si], false);
+            } else {
+              peg_eval_pass_one_scenario_pair(
+                  args, opp_idx, unseen, ld_size, plies, shared_tt,
+                  args->thread_index_base, eg_scenario_t1[si],
+                  eg_scenario_t2[si], &eg_pass_spreads[si],
+                  &eg_pass_wins[si], false);
+            }
+          }
+          double total = 0.0, wins = 0.0;
+          int weight = 0;
+          for (int si = 0; si < eg_num_scenarios; si++) {
+            total += eg_pass_spreads[si] * eg_scenario_counts[si];
+            wins += eg_pass_wins[si] * eg_scenario_counts[si];
+            weight += eg_scenario_counts[si];
+          }
+          c->win_pct = (weight > 0) ? wins / weight : 0.0;
+          c->expected_value = (weight > 0) ? total / weight : 0.0;
+          c->spread_known = true;
+        } else {
+          bool pruned = false;
+          c->expected_value = peg_endgame_eval_candidate(
+              eg_solvers[0], eg_results[0], base_game, &c->move,
+              mover_idx, opp_idx, plies, unseen, ld_size,
+              tiles_in_bag, args->thread_control, shared_tt,
+              args->dual_lexicon_mode, args->thread_index_base,
+              args, NULL, &c->win_pct, &pruned, false);
+          c->pruned = pruned;
+          c->spread_known = true;
+        }
+      }
     }
 
     for (int ti = 0; ti < num_threads; ti++) {
@@ -2815,6 +2985,7 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
   result->best_expected_spread = candidates[0].expected_value;
   result->stages_completed = stages_completed;
   result->candidates_remaining = num_candidates;
+  result->spread_known = candidates[0].spread_known;
 
   free(candidates);
   game_destroy(base_game);

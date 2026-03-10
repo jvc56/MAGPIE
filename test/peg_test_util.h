@@ -26,7 +26,8 @@ static inline void peg_test_print_game_position(const Game *game) {
 static inline void peg_test_progress_callback(
     int pass, int num_evaluated, const Move *top_moves,
     const double *top_values, const double *top_win_pcts,
-    const bool *top_pruned, int num_top, const Game *game, double elapsed,
+    const bool *top_pruned, const bool *top_spread_known,
+    int num_top, const Game *game, double elapsed,
     double stage_seconds, void *user_data) {
   (void)user_data;
   if (pass == 0) {
@@ -44,10 +45,14 @@ static inline void peg_test_progress_callback(
     Move m = top_moves[i];
     StringBuilder *sb = string_builder_create();
     string_builder_add_move(sb, game_get_board(game), &m, ld, false);
+    bool sk = top_spread_known[i];
     if (move_get_type(&m) == GAME_EVENT_PASS) {
       // Pass has no score/equity/leave to display.
       if (top_pruned[i]) {
         printf("  %d. %s  win%%≤%.1f%%\n", i + 1,
+               string_builder_peek(sb), top_win_pcts[i] * 100.0);
+      } else if (!sk) {
+        printf("  %d. %s  win%%=%.1f%%\n", i + 1,
                string_builder_peek(sb), top_win_pcts[i] * 100.0);
       } else {
         printf("  %d. %s  win%%=%.1f%%  spread=%+.2f\n", i + 1,
@@ -72,6 +77,9 @@ static inline void peg_test_progress_callback(
     if (top_pruned[i]) {
       printf("  %d. %s  win%%≤%.1f%%\n", i + 1,
              string_builder_peek(sb), top_win_pcts[i] * 100.0);
+    } else if (!sk) {
+      printf("  %d. %s  win%%=%.1f%%\n", i + 1,
+             string_builder_peek(sb), top_win_pcts[i] * 100.0);
     } else {
       printf("  %d. %s  win%%=%.1f%%  spread=%+.2f\n", i + 1,
              string_builder_peek(sb), top_win_pcts[i] * 100.0, top_values[i]);
@@ -88,9 +96,15 @@ static inline void peg_test_print_result(const PegResult *result,
                           false);
   const char *depth_label =
       result->stages_completed <= 1 ? "greedy" : "endgame";
-  printf("  Best move: %s  win%%=%.1f%%  spread=%.2f  depth=%d (%s)\n",
-         string_builder_peek(sb), result->best_win_pct * 100.0,
-         result->best_expected_spread, result->stages_completed, depth_label);
+  if (result->spread_known) {
+    printf("  Best move: %s  win%%=%.1f%%  spread=%.2f  depth=%d (%s)\n",
+           string_builder_peek(sb), result->best_win_pct * 100.0,
+           result->best_expected_spread, result->stages_completed, depth_label);
+  } else {
+    printf("  Best move: %s  win%%=%.1f%%  depth=%d (%s)\n",
+           string_builder_peek(sb), result->best_win_pct * 100.0,
+           result->stages_completed, depth_label);
+  }
   string_builder_destroy(sb);
 }
 

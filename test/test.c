@@ -21,6 +21,7 @@
 #include "endgame_test.h"
 #include "peg_test.h"
 #include "peg2_test.h"
+#include "peg_fw_test.h"
 #include "equity_adjustment_test.h"
 #include "equity_test.h"
 #include "game_test.h"
@@ -139,6 +140,8 @@ static TestEntry on_demand_test_table[] = {
     {"peg2", test_peg2},
     {"2peg_xi_extras_snot", test_peg2_xi_extras_snot},
     {"firstwin", test_very_deep_first_win},
+    {"pegfw", test_peg_fw},
+    {"pegfwbench", test_peg_fw_bench},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

@@ -10,6 +10,24 @@
 // Maximum number of stages (stage 0 = greedy, stages 1+ = endgame).
 enum { PEG_MAX_STAGES = 16 };
 
+// First-win optimization modes for PEG endgame stages.
+//   NEVER:  status quo — full spread search on every stage.
+//   PRUNE_ONLY:  first pass with first_win to prune losers, then re-eval
+//                survivors with full spread search.
+//   WIN_PCT_THEN_SPREAD:  use first_win for win/loss on all stages; only
+//                compute spread on the final stage for candidates with tied
+//                win% (mode 3a) or for all survivors (mode 3b).
+//   WIN_PCT_THEN_SPREAD_ALL:  first_win on all stages except the last, which
+//                gets full spread for every surviving candidate.
+//   WIN_PCT_ONLY:  first_win on all stages, never compute spread. Fastest.
+typedef enum {
+  PEG_FIRST_WIN_NEVER = 0,
+  PEG_FIRST_WIN_PRUNE_ONLY = 1,
+  PEG_FIRST_WIN_WIN_PCT_THEN_SPREAD = 2,
+  PEG_FIRST_WIN_WIN_PCT_THEN_SPREAD_ALL = 3,
+  PEG_FIRST_WIN_WIN_PCT_ONLY = 4,
+} peg_first_win_mode_t;
+
 // Default stage candidate limits: progressively fewer candidates per deeper
 // stage. stage_candidate_limits[i] is the top-K to promote from stage i to
 // stage i+1.
@@ -37,7 +55,9 @@ typedef void (*PegPerPassCallback)(int pass, int num_evaluated,
                                    const Move *top_moves,
                                    const double *top_values,
                                    const double *top_win_pcts,
-                                   const bool *top_pruned, int num_top,
+                                   const bool *top_pruned,
+                                   const bool *top_spread_known,
+                                   int num_top,
                                    const Game *game, double elapsed,
                                    double stage_seconds, void *user_data);
 
@@ -111,6 +131,14 @@ typedef struct PegArgs {
   // Useful for fast, targeted tests of specific plays.
   const char **candidate_allowlist;
   int candidate_allowlist_count;
+
+  // First-win optimization mode for endgame stages (default: NEVER).
+  // When non-NEVER, some or all endgame stages use α=-1,β=1 narrow-window
+  // search for fast win/loss detection instead of full-spread search.
+  peg_first_win_mode_t first_win_mode;
+  // For WIN_PCT_THEN_SPREAD: when true (mode 3b), compute spread for all
+  // final-stage survivors, not just those tied on win%. Default false (3a).
+  bool first_win_spread_all_final;
 } PegArgs;
 
 typedef struct PegResult {
@@ -123,6 +151,9 @@ typedef struct PegResult {
   int stages_completed;
   // Candidates remaining after the last completed pass.
   int candidates_remaining;
+  // False when the best_expected_spread is unknown (first_win modes that skip
+  // spread computation). Spread is only meaningful when this is true.
+  bool spread_known;
 } PegResult;
 
 typedef struct PegSolver PegSolver;
