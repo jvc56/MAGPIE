@@ -7,6 +7,7 @@
 #include "bag_test.h"
 #include "bai_test.h"
 #include "benchmark_endgame_test.h"
+#include "bingo_detect_test.h"
 #include "bit_rack_test.h"
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
@@ -22,6 +23,7 @@
 #include "peg_test.h"
 #include "peg2_test.h"
 #include "peg_fw_test.h"
+#include "peg2_fw_test.h"
 #include "equity_adjustment_test.h"
 #include "equity_test.h"
 #include "game_test.h"
@@ -117,6 +119,7 @@ static TestEntry test_table[] = {
     {"winpct", test_win_pct},
     {"endgame", test_endgame},
     {"peg", test_peg},
+    {"bingo", test_bingo_detect},
     {"eldar_v", test_eldar_v_stick},
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},
@@ -141,6 +144,7 @@ static TestEntry on_demand_test_table[] = {
     {"2peg_xi_extras_snot", test_peg2_xi_extras_snot},
     {"firstwin", test_very_deep_first_win},
     {"pegfwbench", test_peg_fw_bench},
+    {"peg2fwbench", test_peg2_fw_bench},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

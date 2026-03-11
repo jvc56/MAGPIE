@@ -57,6 +57,7 @@ typedef void (*PegPerPassCallback)(int pass, int num_evaluated,
                                    const double *top_win_pcts,
                                    const bool *top_pruned,
                                    const bool *top_spread_known,
+                                   const double *top_eval_seconds,
                                    int num_top,
                                    const Game *game, double elapsed,
                                    double stage_seconds, void *user_data);
@@ -132,6 +133,21 @@ typedef struct PegArgs {
   const char **candidate_allowlist;
   int candidate_allowlist_count;
 
+  // Maximum number of candidates to evaluate in the inner peg_solve when
+  // evaluating the pass candidate during the greedy stage. 0 = no limit.
+  // The inner solve finds the opponent's best response; limiting candidates
+  // speeds it up at the cost of accuracy (pass gets re-evaluated properly
+  // if it survives to endgame stages).
+  int pass_opp_candidates;
+
+  // Internal: when true, skip per-scenario oneply bingo checks in the
+  // greedy phase even for single-stage solves. Set automatically on inner
+  // pass-evaluation solves; callers should leave this at false.
+  bool skip_greedy_oneply;
+
+  // When true, print per-scenario details during greedy evaluation.
+  bool verbose_greedy;
+
   // First-win optimization mode for endgame stages (default: NEVER).
   // When non-NEVER, some or all endgame stages use α=-1,β=1 narrow-window
   // search for fast win/loss detection instead of full-spread search.
@@ -140,6 +156,16 @@ typedef struct PegArgs {
   // final-stage survivors, not just those tied on win%. Default false (3a).
   bool first_win_spread_all_final;
 } PegArgs;
+
+enum { PEG_RESULT_MAX_RANKED = 16 };
+
+typedef struct PegRankedCandidate {
+  Move move;
+  double win_pct;
+  double expected_spread;
+  bool spread_known;
+  bool pruned;
+} PegRankedCandidate;
 
 typedef struct PegResult {
   Move best_move;
@@ -154,6 +180,9 @@ typedef struct PegResult {
   // False when the best_expected_spread is unknown (first_win modes that skip
   // spread computation). Spread is only meaningful when this is true.
   bool spread_known;
+  // All final candidates in ranked order (up to PEG_RESULT_MAX_RANKED).
+  PegRankedCandidate ranked[PEG_RESULT_MAX_RANKED];
+  int num_ranked;
 } PegResult;
 
 typedef struct PegSolver PegSolver;

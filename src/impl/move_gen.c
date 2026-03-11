@@ -2300,23 +2300,22 @@ void generate_moves(const MoveGenArgs *args) {
       return; // No pass recording needed
     }
   } else if (gen->move_record_type == MOVE_RECORD_BINGO_EXISTS) {
-    // Bingo existence check: run shadow to create WMP anchors, then
-    // filter to RACK_SIZE-tile anchors only and check for valid plays.
     gen->stop_on_threshold = true;
+    if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+      // Only need the full-rack subrack for bingo detection.
+      WMPMoveGen *wgen = &gen->wmp_move_gen;
+      memset(wgen->count_by_size, 0, sizeof(wgen->count_by_size));
+      wgen->count_by_size[RACK_SIZE] = 1;
+      const int offset = subracks_get_combination_offset(RACK_SIZE);
+      wgen->nonplaythrough_infos[offset].subrack = wgen->player_bit_rack;
+      wgen->nonplaythrough_infos[offset].wmp_entry =
+          wmp_get_word_entry(wgen->wmp, &wgen->player_bit_rack, RACK_SIZE);
+      wgen->nonplaythrough_infos[offset].leave_value = 0;
+    }
     gen_shadow(gen);
     if (!gen->threshold_exceeded) {
-      // Remove non-bingo anchors from the heap.
       AnchorHeap *ah = &gen->anchor_heap;
-      int write = 0;
-      for (int i = 0; i < ah->count; i++) {
-        if (ah->anchors[i].tiles_to_play == RACK_SIZE) {
-          if (i != write)
-            ah->anchors[write] = ah->anchors[i];
-          write++;
-        }
-      }
-      ah->count = write;
-      if (write > 0) {
+      if (ah->count > 0) {
         anchor_heapify_all(ah);
         gen_record_scoring_plays(gen);
       }
@@ -2346,6 +2345,62 @@ void generate_moves(const MoveGenArgs *args) {
     gen_record_scoring_plays(gen);
   }
   gen_record_pass(gen);
+}
+
+// Recursive DAWG anagram check: can the remaining rack tiles form a valid
+// word continuing from the sibling list starting at sibling_index?
+static bool kwg_dawg_anagram_recurse(const KWG *kwg, uint32_t sibling_index,
+                                     Rack *rack, int remaining) {
+  for (uint32_t i = sibling_index;; i++) {
+    const uint32_t node = kwg_node(kwg, i);
+    const MachineLetter tile = kwg_node_tile(node);
+    if (tile > 0) {
+      const bool try_real = rack_get_letter(rack, tile) > 0;
+      const bool try_blank =
+          rack_get_letter(rack, BLANK_MACHINE_LETTER) > 0;
+      if (try_real || try_blank) {
+        if (remaining == 1) {
+          if (kwg_node_accepts(node))
+            return true;
+        } else {
+          const uint32_t child = kwg_node_arc_index(node);
+          if (child > 0) {
+            if (try_real) {
+              rack_take_letter(rack, tile);
+              if (kwg_dawg_anagram_recurse(kwg, child, rack, remaining - 1)) {
+                rack_add_letter(rack, tile);
+                return true;
+              }
+              rack_add_letter(rack, tile);
+            }
+            if (try_blank) {
+              rack_take_letter(rack, BLANK_MACHINE_LETTER);
+              if (kwg_dawg_anagram_recurse(kwg, child, rack, remaining - 1)) {
+                rack_add_letter(rack, BLANK_MACHINE_LETTER);
+                return true;
+              }
+              rack_add_letter(rack, BLANK_MACHINE_LETTER);
+            }
+          }
+        }
+      }
+    }
+    if (kwg_node_is_end(node))
+      break;
+  }
+  return false;
+}
+
+// Check if the rack tiles can anagram to a valid word of exactly
+// rack_get_total_letters(rack) length, using the DAWG.
+static bool kwg_has_anagram(const KWG *kwg, Rack *rack) {
+  const int total = rack_get_total_letters(rack);
+  if (total == 0)
+    return false;
+  const uint32_t root = kwg_get_dawg_root_node_index(kwg);
+  if (root == 0)
+    return false;
+  return kwg_dawg_anagram_recurse(kwg, root, rack, total);
 }
 
 bool has_playable_bingo(const Game *game, int thread_index) {
@@ -2385,6 +2440,20 @@ bool has_playable_or_possible_bingo(const Game *game, int thread_index) {
     // 3. Rack + 1 blank forms a valid (RACK_SIZE+1)-letter word.
     bit_rack_add_letter(&br, BLANK_MACHINE_LETTER);
     if (wmp_get_word_entry(wmp, &br, RACK_SIZE + 1) != NULL)
+      return true;
+  } else {
+    // KWG-only fallback: DAWG anagramming (slower but works without WMP).
+    const KWG *kwg = player_get_kwg(player);
+
+    // 2. Rack forms a valid RACK_SIZE-letter word.
+    Rack anag_rack;
+    rack_copy(&anag_rack, rack);
+    if (kwg_has_anagram(kwg, &anag_rack))
+      return true;
+
+    // 3. Rack + 1 blank forms a valid (RACK_SIZE+1)-letter word.
+    rack_add_letter(&anag_rack, BLANK_MACHINE_LETTER);
+    if (kwg_has_anagram(kwg, &anag_rack))
       return true;
   }
 

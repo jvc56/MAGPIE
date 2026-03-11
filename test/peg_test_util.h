@@ -27,6 +27,7 @@ static inline void peg_test_progress_callback(
     int pass, int num_evaluated, const Move *top_moves,
     const double *top_values, const double *top_win_pcts,
     const bool *top_pruned, const bool *top_spread_known,
+    const double *top_eval_seconds,
     int num_top, const Game *game, double elapsed,
     double stage_seconds, void *user_data) {
   (void)user_data;
@@ -47,23 +48,24 @@ static inline void peg_test_progress_callback(
     string_builder_add_move(sb, game_get_board(game), &m, ld, false);
     bool sk = top_spread_known[i];
     if (move_get_type(&m) == GAME_EVENT_PASS) {
-      // Pass has no score/equity/leave to display.
       if (top_pruned[i]) {
-        printf("  %d. %s  win%%≤%.1f%%\n", i + 1,
-               string_builder_peek(sb), top_win_pcts[i] * 100.0);
+        printf("  %d. %s  win%%≤%.1f%%  [%.3fs]\n", i + 1,
+               string_builder_peek(sb), top_win_pcts[i] * 100.0,
+               top_eval_seconds[i]);
       } else if (!sk) {
-        printf("  %d. %s  win%%=%.1f%%\n", i + 1,
-               string_builder_peek(sb), top_win_pcts[i] * 100.0);
+        printf("  %d. %s  win%%=%.1f%%  [%.3fs]\n", i + 1,
+               string_builder_peek(sb), top_win_pcts[i] * 100.0,
+               top_eval_seconds[i]);
       } else {
-        printf("  %d. %s  win%%=%.1f%%  spread=%+.2f\n", i + 1,
-               string_builder_peek(sb), top_win_pcts[i] * 100.0, top_values[i]);
+        printf("  %d. %s  win%%=%.1f%%  spread=%+.2f  [%.3fs]\n", i + 1,
+               string_builder_peek(sb), top_win_pcts[i] * 100.0, top_values[i],
+               top_eval_seconds[i]);
       }
       string_builder_destroy(sb);
       continue;
     }
     int score = equity_to_int(move_get_score(&top_moves[i]));
     double equity = equity_to_double(move_get_equity(&top_moves[i]));
-    // Compute leave: mover's rack minus the tiles played.
     Rack leave;
     rack_copy(&leave, mover_rack);
     for (int j = 0; j < m.tiles_length; j++) {
@@ -75,14 +77,17 @@ static inline void peg_test_progress_callback(
                                         equity);
     string_builder_add_rack(sb, &leave, ld, false);
     if (top_pruned[i]) {
-      printf("  %d. %s  win%%≤%.1f%%\n", i + 1,
-             string_builder_peek(sb), top_win_pcts[i] * 100.0);
+      printf("  %d. %s  win%%≤%.1f%%  [%.3fs]\n", i + 1,
+             string_builder_peek(sb), top_win_pcts[i] * 100.0,
+             top_eval_seconds[i]);
     } else if (!sk) {
-      printf("  %d. %s  win%%=%.1f%%\n", i + 1,
-             string_builder_peek(sb), top_win_pcts[i] * 100.0);
+      printf("  %d. %s  win%%=%.1f%%  [%.3fs]\n", i + 1,
+             string_builder_peek(sb), top_win_pcts[i] * 100.0,
+             top_eval_seconds[i]);
     } else {
-      printf("  %d. %s  win%%=%.1f%%  spread=%+.2f\n", i + 1,
-             string_builder_peek(sb), top_win_pcts[i] * 100.0, top_values[i]);
+      printf("  %d. %s  win%%=%.1f%%  spread=%+.2f  [%.3fs]\n", i + 1,
+             string_builder_peek(sb), top_win_pcts[i] * 100.0, top_values[i],
+             top_eval_seconds[i]);
     }
     string_builder_destroy(sb);
   }

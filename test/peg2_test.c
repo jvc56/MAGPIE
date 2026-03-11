@@ -45,12 +45,12 @@ static void test_peg_two_in_bag(void) {
       .stage_candidate_limits = {},
       .early_cutoff = true,
       .inner_opp_multi_tile_limit = 8,
-      .inner_opp_one_tile_limit = 8,
-      .max_non_emptying = 3,
+      .inner_opp_one_tile_limit = 3,
       .skip_phase_1b = false,
       .skip_root_pass = true,
       .per_pass_callback = peg_test_progress_callback,
       .per_pass_num_top = 128,
+      .first_win_mode = PEG_FIRST_WIN_WIN_PCT_THEN_SPREAD,
   };
 
   PegResult result;
@@ -102,7 +102,7 @@ static void test_peg2_xi_extras_snot_impl(void) {
       .stage_candidate_limits = {},
       .early_cutoff = false,
       .inner_opp_multi_tile_limit = 8,
-      .inner_opp_one_tile_limit = 8,
+      .inner_opp_one_tile_limit = 3,
       .max_non_emptying = 3,
       .skip_phase_1b = false,
       .skip_root_pass = true,
@@ -110,6 +110,7 @@ static void test_peg2_xi_extras_snot_impl(void) {
       .per_pass_num_top = 128,
       .candidate_allowlist = allowlist,
       .candidate_allowlist_count = 3,
+      .first_win_mode = PEG_FIRST_WIN_WIN_PCT_THEN_SPREAD,
   };
 
   PegResult result;

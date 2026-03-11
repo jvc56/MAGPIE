@@ -32,7 +32,7 @@ static PegResult run_peg_fw_ex(const char *cgp, peg_first_win_mode_t mode,
                                const int *stage_limits, int num_limits,
                                bool quiet, double *elapsed_out) {
   Config *config =
-      config_create_or_die("set -wmp false -s1 score -s2 score -r1 small -r2 small");
+      config_create_or_die("set -s1 score -s2 score -r1 small -r2 small");
   load_and_exec_config_or_die(config, cgp);
 
   Game *game = config_get_game(config);
@@ -112,6 +112,16 @@ void test_peg_fw_bench(void) {
   const int num_modes = (int)(sizeof(modes) / sizeof(modes[0]));
   const int num_positions = (int)(sizeof(positions) / sizeof(positions[0]));
 
+  // Print all positions once at the start.
+  for (int p = 0; p < num_positions; p++) {
+    Config *config = config_create_or_die(
+        "set -s1 score -s2 score -r1 small -r2 small");
+    load_and_exec_config_or_die(config, positions[p].cgp);
+    printf("\n=== %s ===", positions[p].label);
+    peg_test_print_game_position(config_get_game(config));
+    config_destroy(config);
+  }
+
   // Results storage
   double times[6][2];
   char move_strs[6][2][64];
@@ -134,7 +144,7 @@ void test_peg_fw_bench(void) {
 
       // Format best move string
       Config *config = config_create_or_die(
-          "set -wmp false -s1 score -s2 score -r1 small -r2 small");
+          "set -s1 score -s2 score -r1 small -r2 small");
       load_and_exec_config_or_die(config, positions[p].cgp);
       Game *game = config_get_game(config);
       StringBuilder *sb = string_builder_create();
