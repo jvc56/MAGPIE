@@ -569,27 +569,87 @@ static double peg_greedy_eval_play(EndgameSolverWorker *worker,
 }
 
 // ---------------------------------------------------------------------------
-// Scenario ordering: sort by weight descending for earlier pruning
+// Killer draws: track which draw pairs tend to produce losses across
+// candidates so they can be searched first for faster pruning.
+// ---------------------------------------------------------------------------
+
+typedef struct {
+  atomic_int losses; // candidates where this pair was a loss
+  atomic_int evals;  // candidates that evaluated this pair
+} KillerDrawEntry;
+
+#define KILLER_DRAWS_SIZE (MAX_ALPHABET_SIZE * MAX_ALPHABET_SIZE)
+
+typedef struct {
+  KillerDrawEntry entries[KILLER_DRAWS_SIZE];
+} KillerDraws;
+
+static inline void killer_draws_init(KillerDraws *kd) {
+  for (int i = 0; i < KILLER_DRAWS_SIZE; i++) {
+    atomic_init(&kd->entries[i].losses, 0);
+    atomic_init(&kd->entries[i].evals, 0);
+  }
+}
+
+static inline int killer_pair_key(MachineLetter a, MachineLetter b) {
+  if (a > b) {
+    MachineLetter t = a;
+    a = b;
+    b = t;
+  }
+  return (int)a * MAX_ALPHABET_SIZE + (int)b;
+}
+
+static inline void killer_draws_update(KillerDraws *kd, MachineLetter a,
+                                       MachineLetter b, bool is_loss) {
+  int key = killer_pair_key(a, b);
+  if (is_loss)
+    atomic_fetch_add_explicit(&kd->entries[key].losses, 1,
+                              memory_order_relaxed);
+  atomic_fetch_add_explicit(&kd->entries[key].evals, 1, memory_order_relaxed);
+}
+
+static inline double killer_draws_loss_rate(const KillerDraws *kd,
+                                            MachineLetter a, MachineLetter b) {
+  int key = killer_pair_key(a, b);
+  int e = atomic_load_explicit(&kd->entries[key].evals, memory_order_relaxed);
+  int l = atomic_load_explicit(&kd->entries[key].losses, memory_order_relaxed);
+  return (e > 0) ? (double)l / e : 0.0;
+}
+
+// ---------------------------------------------------------------------------
+// Scenario ordering: sort by killer score (loss_rate * weight) descending,
+// with weight as tiebreaker for earlier pruning.
 // ---------------------------------------------------------------------------
 
 typedef struct {
   MachineLetter t1, t2;
   int weight;
+  double sort_key;
 } PegPairScenario;
 
 static int compare_pair_scenarios_desc(const void *a, const void *b) {
-  return ((const PegPairScenario *)b)->weight -
-         ((const PegPairScenario *)a)->weight;
+  const PegPairScenario *pa = a, *pb = b;
+  if (pb->sort_key > pa->sort_key + 1e-12)
+    return 1;
+  if (pa->sort_key > pb->sort_key + 1e-12)
+    return -1;
+  return pb->weight - pa->weight;
 }
 
 typedef struct {
   MachineLetter ml;
   int count;
+  double sort_key;
 } PegSingleScenario;
 
 static int compare_single_scenarios_desc(const void *a, const void *b) {
-  return ((const PegSingleScenario *)b)->count -
-         ((const PegSingleScenario *)a)->count;
+  const PegSingleScenario *pa = a, *pb = b;
+  if (pb->sort_key > pa->sort_key + 1e-12)
+    return 1;
+  if (pa->sort_key > pb->sort_key + 1e-12)
+    return -1;
+  return pb->count - pa->count;
 }
 
 
@@ -718,6 +778,7 @@ static Game *setup_endgame_scenario_pair(const Game *base_game,
 typedef struct {
   MachineLetter a, b;
   int total_weight;
+  double sort_key;
 } RecUpair;
 
 typedef struct {
@@ -1202,7 +1263,7 @@ static double peg_endgame_eval_recursive_candidate(
     int tiles_in_bag, int tiles_drawn, const PegArgs *outer_args,
     TranspositionTable *shared_tt, int thread_index_base, int num_rc_threads,
     PegCutoff *cutoff, double *win_pct_out, bool *pruned_out,
-    bool first_win) {
+    bool first_win, KillerDraws *killer_draws) {
   (void)plies;
   (void)shared_tt;
   (void)tiles_in_bag;
@@ -1312,13 +1373,24 @@ static double peg_endgame_eval_recursive_candidate(
       int w_ba = (ia == ib) ? 0 : w_ab;
       int tw = w_ab + w_ba;
       upairs[num_upairs++] =
-          (RecUpair){(MachineLetter)ia, (MachineLetter)ib, tw};
+          (RecUpair){(MachineLetter)ia, (MachineLetter)ib, tw, 0.0};
     }
   }
-  // Sort by weight descending for earlier pruning.
+  // Compute killer draw sort keys: loss_rate * weight, with weight tiebreak.
+  for (int i = 0; i < num_upairs; i++) {
+    double lr = killer_draws
+                    ? killer_draws_loss_rate(killer_draws, upairs[i].a,
+                                            upairs[i].b)
+                    : 0.0;
+    upairs[i].sort_key = lr * upairs[i].total_weight;
+  }
+  // Sort by sort_key descending, tiebreak by total_weight descending.
   for (int i = 0; i < num_upairs - 1; i++)
     for (int j = i + 1; j < num_upairs; j++)
-      if (upairs[j].total_weight > upairs[i].total_weight) {
+      if (upairs[j].sort_key > upairs[i].sort_key + 1e-12 ||
+          (upairs[j].sort_key <= upairs[i].sort_key + 1e-12 &&
+           upairs[j].sort_key >= upairs[i].sort_key - 1e-12 &&
+           upairs[j].total_weight > upairs[i].total_weight)) {
         RecUpair tmp = upairs[i];
         upairs[i] = upairs[j];
         upairs[j] = tmp;
@@ -1392,11 +1464,16 @@ static double peg_endgame_eval_recursive_candidate(
     free(threads);
   }
 
-  // Merge per-upair results.
+  // Merge per-upair results and update killer draw statistics.
   for (int i = 0; i < num_upairs; i++) {
     total += upair_results[i].total;
     wins += upair_results[i].wins;
     weight += upair_results[i].weight;
+    if (killer_draws && upair_results[i].weight > 0) {
+      bool is_loss =
+          upair_results[i].wins / upair_results[i].weight < 0.5 - 1e-9;
+      killer_draws_update(killer_draws, upairs[i].a, upairs[i].b, is_loss);
+    }
   }
 
   // Check if intra-candidate pruning fired or post-evaluation cutoff applies.
@@ -1487,7 +1564,8 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
                                          PegCutoff *cutoff,
                                          double *win_pct_out,
                                          bool *pruned_out,
-                                         bool first_win_optim) {
+                                         bool first_win_optim,
+                                         KillerDraws *killer_draws) {
   int tiles_played = move->tiles_played;
 
   // Non-bag-emptying candidate in 2-bag: recursive sub-PEG.
@@ -1495,7 +1573,7 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
     return peg_endgame_eval_recursive_candidate(
         base_game, move, mover_idx, opp_idx, plies, unseen, ld_size,
         tiles_in_bag, tiles_played, outer_args, shared_tt, thread_index, 1,
-        cutoff, win_pct_out, pruned_out, first_win_optim);
+        cutoff, win_pct_out, pruned_out, first_win_optim, killer_draws);
   }
 
   // Bag-emptying candidate: enumerate scenarios and solve endgame directly.
@@ -1510,9 +1588,15 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
     PegSingleScenario singles[MAX_ALPHABET_SIZE];
     int num_singles = 0;
     for (int t = 0; t < ld_size; t++) {
-      if (unseen[t] > 0)
+      if (unseen[t] > 0) {
+        double lr = killer_draws
+                        ? killer_draws_loss_rate(killer_draws, (MachineLetter)t,
+                                                (MachineLetter)t)
+                        : 0.0;
         singles[num_singles++] =
-            (PegSingleScenario){(MachineLetter)t, (int)unseen[t]};
+            (PegSingleScenario){(MachineLetter)t, (int)unseen[t],
+                                lr * (int)unseen[t]};
+      }
     }
     qsort(singles, num_singles, sizeof(PegSingleScenario),
           compare_single_scenarios_desc);
@@ -1544,6 +1628,8 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
       wins +=
           ((mover_total > 0) ? 1.0 : (mover_total == 0 ? 0.5 : 0.0)) * cnt;
       weight += cnt;
+      if (killer_draws)
+        killer_draws_update(killer_draws, t, t, mover_total < 0);
       game_destroy(scenario);
     }
   } else {
@@ -1560,8 +1646,13 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
           continue;
         int w = (int)unseen[t1] *
                 (t1 == t2 ? (int)unseen[t1] - 1 : (int)unseen[t2]);
+        double lr = killer_draws
+                        ? killer_draws_loss_rate(killer_draws, (MachineLetter)t1,
+                                                (MachineLetter)t2)
+                        : 0.0;
         ep[num_ep++] =
-            (PegPairScenario){(MachineLetter)t1, (MachineLetter)t2, w};
+            (PegPairScenario){(MachineLetter)t1, (MachineLetter)t2, w,
+                              lr * w};
       }
     }
     qsort(ep, num_ep, sizeof(PegPairScenario), compare_pair_scenarios_desc);
@@ -1593,6 +1684,9 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
       wins +=
           ((mover_total > 0) ? 1.0 : (mover_total == 0 ? 0.5 : 0.0)) * cnt;
       weight += cnt;
+      if (killer_draws)
+        killer_draws_update(killer_draws, ep[pi].t1, ep[pi].t2,
+                            mover_total < 0);
       game_destroy(scenario);
     }
   }
@@ -1896,6 +1990,7 @@ typedef struct PegGreedyThreadArgs {
   bool use_oneply; // true for bingo-threatening plays (2-tile, 7 on rack)
   bool first_win;  // true to use first_win_optim in recursive candidates
   TranspositionTable *shared_tt;
+  KillerDraws *killer_draws;
 } PegGreedyThreadArgs;
 
 static void *peg_greedy_thread(void *arg) {
@@ -1917,7 +2012,7 @@ static void *peg_greedy_thread(void *arg) {
             0 /* plies=0 for greedy */, a->unseen, a->ld_size, a->tiles_in_bag,
             c->move.tiles_played, a->outer_args, a->shared_tt,
             a->thread_index, 1, a->cutoff, &c->win_pct, &c->pruned,
-            a->first_win);
+            a->first_win, a->killer_draws);
         c->spread_known = !a->first_win;
         if (!c->pruned && a->cutoff)
           peg_cutoff_update(a->cutoff, c->win_pct);
@@ -2028,6 +2123,7 @@ typedef struct PegEndgameThreadArgs {
   atomic_int *cand_weight_done; // [num_non_pass] accumulated scenario weight
   atomic_int *cand_pruned;     // [num_non_pass] 1 if pruned, 0 otherwise
   int total_scenario_weight;   // sum of all scenario weights
+  KillerDraws *killer_draws;
 } PegEndgameThreadArgs;
 
 static void *peg_endgame_thread(void *arg) {
@@ -2064,6 +2160,8 @@ static void *peg_endgame_thread(void *arg) {
         a->cand_spreads[idx] = (double)spread;
         a->cand_wins[idx] =
             (spread > 0) ? 1.0 : (spread == 0 ? 0.5 : 0.0);
+        if (a->killer_draws)
+          killer_draws_update(a->killer_draws, t, t, spread < 0);
         game_destroy(scenario);
 
         // Per-candidate cutoff tracking.
@@ -2129,7 +2227,7 @@ static void *peg_endgame_thread(void *arg) {
               a->mover_idx, a->opp_idx, a->plies, a->unseen, a->ld_size,
               a->tiles_in_bag, a->thread_control, a->shared_tt,
               a->dual_lexicon_mode, a->thread_index, a->outer_args, a->cutoff,
-              &c->win_pct, &pruned, a->first_win_optim);
+              &c->win_pct, &pruned, a->first_win_optim, a->killer_draws);
           c->pruned = pruned;
           c->spread_known = !a->first_win_optim;
           c->eval_seconds = 0.0;
@@ -2171,7 +2269,8 @@ static void *peg_endgame_thread(void *arg) {
           a->mover_idx, a->opp_idx, a->next_plies, a->unseen, a->ld_size,
           a->tiles_in_bag, a->thread_control, a->shared_tt,
           a->dual_lexicon_mode, a->thread_index, a->outer_args, NULL,
-          &c->next_win_pct, &pruned, a->next_first_win_optim);
+          &c->next_win_pct, &pruned, a->next_first_win_optim,
+          a->killer_draws);
       c->next_spread_known =
           (a->tiles_in_bag >= 2 && c->move.tiles_played < a->tiles_in_bag)
               ? true
@@ -2398,6 +2497,11 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
   // endgame stages.  Lockless hashing makes concurrent access safe.
   // Entries from shallower stages remain valid at deeper depths thanks to
   // the depth guard in the endgame solver's TT lookup (ttentry_depth >= depth).
+  // Killer draws: track which draw tiles/pairs tend to produce losses across
+  // candidates for smarter scenario ordering. Shared across all phases.
+  KillerDraws *killer_draws = malloc_or_die(sizeof(KillerDraws));
+  killer_draws_init(killer_draws);
+
   bool tt_is_owned = false;
   TranspositionTable *shared_tt = args->shared_tt;
   if (!shared_tt && args->tt_fraction_of_mem > 0) {
@@ -2612,6 +2716,7 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
           .use_oneply = false,
           .first_win = args->first_win_mode != PEG_FIRST_WIN_NEVER,
           .shared_tt = shared_tt,
+          .killer_draws = killer_draws,
       };
       cpthread_create(&greedy_threads[ti], peg_greedy_thread, &greedy_targs[ti]);
     }
@@ -2672,6 +2777,7 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
           .use_oneply = true,
           .first_win = args->first_win_mode != PEG_FIRST_WIN_NEVER,
           .shared_tt = shared_tt,
+          .killer_draws = killer_draws,
       };
       cpthread_create(&greedy_threads[ti], peg_greedy_thread, &greedy_targs[ti]);
     }
@@ -2870,7 +2976,7 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
             args->thread_index_base, num_threads,
             greedy_cutoff_active ? &greedy_cutoff : NULL,
             &c->win_pct, &c->pruned,
-            args->first_win_mode != PEG_FIRST_WIN_NEVER);
+            args->first_win_mode != PEG_FIRST_WIN_NEVER, killer_draws);
         c->spread_known = (args->first_win_mode == PEG_FIRST_WIN_NEVER);
         if (top_level) {
           StringBuilder *sb = string_builder_create();
@@ -3030,7 +3136,7 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
             0, unseen, ld_size, tiles_in_bag,
             c->move.tiles_played, args, shared_tt,
             args->thread_index_base, num_threads,
-            NULL, &c->win_pct, &c->pruned, false);
+            NULL, &c->win_pct, &c->pruned, false, killer_draws);
         c->spread_known = true;
         if (top_level) {
           StringBuilder *sb = string_builder_create();
@@ -3155,14 +3261,26 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
     double *eg_pass_spreads = malloc_or_die(max_scenarios * sizeof(double));
     double *eg_pass_wins = malloc_or_die(max_scenarios * sizeof(double));
     if (tiles_in_bag == 1) {
+      // Build and sort by killer score for better pruning order.
+      PegSingleScenario tmp_singles[MAX_ALPHABET_SIZE];
+      int n_tmp = 0;
       for (int t = 0; t < ld_size; t++) {
         if (unseen[t] > 0) {
-          eg_scenario_t1[eg_num_scenarios] = (MachineLetter)t;
-          eg_scenario_t2[eg_num_scenarios] = (MachineLetter)-1;
-          eg_scenario_counts[eg_num_scenarios] = (int)unseen[t];
-          eg_num_scenarios++;
+          double lr = killer_draws_loss_rate(killer_draws, (MachineLetter)t,
+                                            (MachineLetter)t);
+          tmp_singles[n_tmp++] =
+              (PegSingleScenario){(MachineLetter)t, (int)unseen[t],
+                                  lr * (int)unseen[t]};
         }
       }
+      qsort(tmp_singles, n_tmp, sizeof(PegSingleScenario),
+            compare_single_scenarios_desc);
+      for (int i = 0; i < n_tmp; i++) {
+        eg_scenario_t1[i] = tmp_singles[i].ml;
+        eg_scenario_t2[i] = (MachineLetter)-1;
+        eg_scenario_counts[i] = tmp_singles[i].count;
+      }
+      eg_num_scenarios = n_tmp;
     } else if (eg_pass_idx >= 0) {
       for (int t1 = 0; t1 < ld_size; t1++) {
         if (unseen[t1] == 0)
@@ -3355,6 +3473,7 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
             .cand_weight_done = eg_cand_weight_done,
             .cand_pruned = eg_cand_pruned,
             .total_scenario_weight = total_scenario_weight,
+            .killer_draws = killer_draws,
         };
         cpthread_create(&eg_threads[ti], peg_endgame_thread, &eg_targs[ti]);
       }
@@ -3741,6 +3860,7 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
 
   free(candidates);
   game_destroy(base_game);
+  free(killer_draws);
   if (tt_is_owned) {
     transposition_table_destroy(shared_tt);
   }
