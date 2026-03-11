@@ -584,8 +584,10 @@ void verify_inference_args(const InferenceArgs *args, const Game *game_dup,
   }
 
   // This is the total number of letters that are unseen from the nontarget's
-  // perspective. It is the number of tiles on the opponents rack + the number
-  // of tiles in the bag.
+  // perspective. We start with the total tiles in the bag and on both players'
+  // racks, then subtract the letters known to be on the nontarget's rack.
+  // After the loop below, this value equals: bag tiles + all tiles on the
+  // target's rack + any unknown tiles on the nontarget's rack.
   int total_unseen_count = bag_get_letters(bag) +
                            rack_get_total_letters(player0_rack) +
                            rack_get_total_letters(player1_rack);

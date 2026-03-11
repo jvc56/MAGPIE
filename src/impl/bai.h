@@ -176,7 +176,7 @@ bai_sync_data_get_next_bai_sample_index_while_locked(BAISampleArgs *args) {
     const double denominator =
         numerator + psi_jt * bai_d(emp_mean_jt, emp_var_jt, theta_bar);
     const double coin = numerator / denominator;
-    // Thread index can by anything here since this sample doesn't use
+    // Thread index can be anything here since this sample doesn't use
     // multithreading
     if (rvs_sample(args->bai_sync_data->rng, 0, 0, NULL) < coin) {
       arm_index = it;

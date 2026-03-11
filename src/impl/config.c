@@ -2404,6 +2404,9 @@ void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
                      SimResults *sim_results, ErrorStack *error_stack) {
   // Lazy load win_pcts if not already loaded
   config_load_win_pcts(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
   SimArgs args;
   const int ld_size = ld_get_size(game_get_ld(config->game));
   Rack target_played_tiles;
