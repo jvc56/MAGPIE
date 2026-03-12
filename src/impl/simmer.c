@@ -7,7 +7,6 @@
 #include "../def/sim_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
-#include "../ent/bai_result.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
 #include "../ent/move.h"
