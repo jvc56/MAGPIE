@@ -1736,15 +1736,15 @@ static void peg_eval_pass_one_scenario(
           : (both_pass_opp_spread == 0 ? 0.5 : 0.0);
   double opp_pass_expected_spread = (double)both_pass_opp_spread;
 
-  // If opp wins by passing back, skip the inner peg_solve — no tile move
-  // can beat a guaranteed win. The opponent will always pass back.
+  // Option B: opp plays a tile move, chosen via inner peg_solve.
+  // Always run this even when both_pass_opp_spread > 0, because the opp
+  // may prefer a tile move with better spread even if pass-back also wins.
   bool found_tile_play = false;
   double opp_play_expected_win = 0.0;
   double opp_play_expected_spread = 0.0;
   PegResult inner_result = {0};
 
-  if (both_pass_opp_spread <= 0) {
-    // Option B: opp plays a tile move, chosen via inner peg_solve.
+  {
     int inner_stages = plies > 0 ? plies : 1;
     PegSolver *inner_solver = peg_solver_create();
     PegArgs inner_args = {
@@ -2790,16 +2790,41 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
   // 1-bag deferred pass: evaluate scenarios sequentially with full threads.
   // This is much better than parallel single-threaded scenarios because
   // individual scenario runtimes vary wildly (some are instant, some dominate).
+  // Runs AFTER all non-pass candidates so the cutoff can prune pass early.
+  bool pass_pruned = false;
   if (onebag_defer_pass) {
     if (top_level)
       printf("[PEG] 1-bag pass: %d scenarios, %d threads each\n",
              greedy_num_scenarios, num_threads);
+    double pass_wins_accum = 0.0;
+    int pass_weight_accum = 0;
     for (int si = 0; si < greedy_num_scenarios; si++) {
+      // Check cutoff before evaluating this scenario.
+      if (greedy_cutoff_active) {
+        double threshold = peg_cutoff_get(&greedy_cutoff);
+        if (threshold >= 0 && pass_weight_accum > 0) {
+          int remaining = total_unseen - pass_weight_accum;
+          double best_possible =
+              (pass_wins_accum + remaining) / (double)total_unseen;
+          if (best_possible < threshold - 1e-9) {
+            pass_pruned = true;
+            if (top_level)
+              printf("  [pass pruned after %d/%d scenarios, "
+                     "best_possible=%.1f%% < threshold=%.1f%%]\n",
+                     si, greedy_num_scenarios, best_possible * 100.0,
+                     threshold * 100.0);
+            break;
+          }
+        }
+      }
       int64_t pass_t0 = ctimer_monotonic_ns();
       peg_eval_pass_one_scenario(
           args, opp_idx, unseen, ld_size, 0, shared_tt,
           args->thread_index_base, greedy_scenario_t1[si],
           &greedy_pass_spreads[si], &greedy_pass_wins[si], num_threads);
+      pass_wins_accum +=
+          greedy_pass_wins[si] * greedy_scenario_counts[si];
+      pass_weight_accum += greedy_scenario_counts[si];
       if (args->verbose_greedy) {
         double pass_secs = (double)(ctimer_monotonic_ns() - pass_t0) / 1e9;
         const char *wlt = greedy_pass_wins[si] > 0.5 ? "W"
@@ -2819,17 +2844,24 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
   // Aggregate pass scenario results (1-bag only; 2-bag defers pass).
   if (pass_candidate_idx >= 0 && !defer_pass) {
     PegCandidate *pass_c = &candidates[num_candidates - 1];
-    double total = 0.0, wins = 0.0;
-    int weight = 0;
-    for (int si = 0; si < greedy_num_scenarios; si++) {
-      total += greedy_pass_spreads[si] * greedy_scenario_counts[si];
-      wins += greedy_pass_wins[si] * greedy_scenario_counts[si];
-      weight += greedy_scenario_counts[si];
+    if (pass_pruned) {
+      pass_c->pruned = true;
+      pass_c->win_pct = 0.0;
+      pass_c->expected_value = 0.0;
+      pass_c->eval_seconds = 0.0;
+    } else {
+      double total = 0.0, wins = 0.0;
+      int weight = 0;
+      for (int si = 0; si < greedy_num_scenarios; si++) {
+        total += greedy_pass_spreads[si] * greedy_scenario_counts[si];
+        wins += greedy_pass_wins[si] * greedy_scenario_counts[si];
+        weight += greedy_scenario_counts[si];
+      }
+      pass_c->win_pct = (weight > 0) ? wins / weight : 0.0;
+      pass_c->expected_value = (weight > 0) ? total / weight : 0.0;
+      pass_c->pruned = false;
+      pass_c->eval_seconds = 0.0;
     }
-    pass_c->win_pct = (weight > 0) ? wins / weight : 0.0;
-    pass_c->expected_value = (weight > 0) ? total / weight : 0.0;
-    pass_c->pruned = false;
-    pass_c->eval_seconds = 0.0;
   }
 
   // -----------------------------------------------------------------------
@@ -3527,8 +3559,29 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
     // Evaluate pass scenarios sequentially with full thread count.
     // This gives better CPU utilization than dispatching them as work items,
     // because individual pass scenarios have wildly varying runtimes.
+    // Cutoff pruning: if pass can't reach the best non-pass win%, skip it.
+    bool eg_pass_pruned = false;
     if (eg_pass_idx >= 0) {
+      double pass_wins_accum = 0.0;
+      int pass_weight_accum = 0;
+      int total_scenario_weight = 0;
+      for (int si = 0; si < eg_num_pass_scenarios; si++)
+        total_scenario_weight += eg_scenario_counts[si];
+
       for (int si = 0; si < eg_num_pass_scenarios; si++) {
+        // Check cutoff before each scenario.
+        if (cutoff_ptr && pass_weight_accum > 0) {
+          double threshold = peg_cutoff_get(cutoff_ptr);
+          if (threshold >= 0) {
+            int remaining = total_scenario_weight - pass_weight_accum;
+            double best_possible =
+                (pass_wins_accum + remaining) / (double)total_scenario_weight;
+            if (best_possible < threshold - 1e-9) {
+              eg_pass_pruned = true;
+              break;
+            }
+          }
+        }
         if (tiles_in_bag == 1) {
           peg_eval_pass_one_scenario(
               args, opp_idx, unseen, ld_size, plies, shared_tt,
@@ -3540,27 +3593,37 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
               args->thread_index_base, eg_scenario_t1[si], eg_scenario_t2[si],
               &eg_pass_spreads[si], &eg_pass_wins[si], stage_first_win);
         }
+        pass_wins_accum += eg_pass_wins[si] * eg_scenario_counts[si];
+        pass_weight_accum += eg_scenario_counts[si];
       }
     }
 
     // Aggregate pass scenario results into the pass candidate.
     if (eg_pass_idx >= 0) {
       PegCandidate *pass_c = &candidates[limit - 1];
-      double total = 0.0, wins = 0.0;
-      int weight = 0;
-      for (int si = 0; si < eg_num_pass_scenarios; si++) {
-        total += eg_pass_spreads[si] * eg_scenario_counts[si];
-        wins += eg_pass_wins[si] * eg_scenario_counts[si];
-        weight += eg_scenario_counts[si];
+      if (eg_pass_pruned) {
+        pass_c->pruned = true;
+        pass_c->win_pct = 0.0;
+        pass_c->expected_value = 0.0;
+        pass_c->eval_seconds = 0.0;
+        pass_c->spread_known = false;
+      } else {
+        double total = 0.0, wins = 0.0;
+        int weight = 0;
+        for (int si = 0; si < eg_num_pass_scenarios; si++) {
+          total += eg_pass_spreads[si] * eg_scenario_counts[si];
+          wins += eg_pass_wins[si] * eg_scenario_counts[si];
+          weight += eg_scenario_counts[si];
+        }
+        pass_c->win_pct = (weight > 0) ? wins / weight : 0.0;
+        pass_c->expected_value = (weight > 0) ? total / weight : 0.0;
+        pass_c->pruned = false;
+        pass_c->eval_seconds = 0.0;
+        // For 1-bag, peg_eval_pass_one_scenario always computes full spread
+        // (never uses first_win_optim), so spread is always known.
+        // For 2-bag, peg_eval_pass_one_scenario_pair respects first_win_optim.
+        pass_c->spread_known = (tiles_in_bag == 1) || !stage_first_win;
       }
-      pass_c->win_pct = (weight > 0) ? wins / weight : 0.0;
-      pass_c->expected_value = (weight > 0) ? total / weight : 0.0;
-      pass_c->pruned = false;
-      pass_c->eval_seconds = 0.0;
-      // For 1-bag, peg_eval_pass_one_scenario always computes full spread
-      // (never uses first_win_optim), so spread is always known.
-      // For 2-bag, peg_eval_pass_one_scenario_pair respects first_win_optim.
-      pass_c->spread_known = (tiles_in_bag == 1) || !stage_first_win;
     }
 
     if (cutoff_ptr) {

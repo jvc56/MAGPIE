@@ -7,6 +7,7 @@
 #include "bag_test.h"
 #include "bai_test.h"
 #include "benchmark_endgame_test.h"
+#include "benchmark_peg_test.h"
 #include "bingo_detect_test.h"
 #include "bit_rack_test.h"
 #include "board_layout_default_test.h"
@@ -145,6 +146,9 @@ static TestEntry on_demand_test_table[] = {
     {"firstwin", test_very_deep_first_win},
     {"pegfwbench", test_peg_fw_bench},
     {"peg2fwbench", test_peg2_fw_bench},
+    {"genpeg1", test_generate_peg1_cgps},
+    {"benchpeg1", test_benchmark_peg1},
+    {"peg3dbg", test_peg3_debug},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
