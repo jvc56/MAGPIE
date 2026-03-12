@@ -542,6 +542,23 @@ int compare_simmed_plays(const void *a, const void *b) {
     if (equity_mean_a < equity_mean_b) {
       return 1;
     }
+    // When simming stuck tile endgames, a pass will sim equivalently to the
+    // best greedy sequence because the sim assumes that after passing the
+    // greedy sequence will begin, so a pass now versus later makes no
+    // difference. However, the other player will also do this and pass as well.
+    // The simmed endgame does not take into account the six pass rule, and so
+    // the game will end in a six pass. To avoid this, if a pass is tied with
+    // the best play, prefer to not pass.
+    const bool play_a_is_pass =
+        move_get_type(simmed_play_get_move(play_a)) == GAME_EVENT_PASS;
+    const game_event_t play_b_is_pass =
+        move_get_type(simmed_play_get_move(play_b)) == GAME_EVENT_PASS;
+    if (!play_a_is_pass && play_b_is_pass) {
+      return -1;
+    }
+    if (play_a_is_pass && !play_b_is_pass) {
+      return 1;
+    }
     return 0;
   }
 
@@ -610,4 +627,21 @@ bool sim_results_plays_are_similar(const SimResults *sim_results,
   SimmedPlay *sp1 = sim_results_get_simmed_play(sim_results, sp1_index);
   SimmedPlay *sp2 = sim_results_get_simmed_play(sim_results, sp2_index);
   return sim_results_simmed_plays_are_similar_internal(sim_results, sp1, sp2);
+}
+
+// Not thread safe, assumes the sim is finished.
+const Move *sim_results_get_best_move(const SimResults *sim_results) {
+  const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
+  if (num_simmed_plays == 0) {
+    return NULL;
+  }
+  const SimmedPlay *current_best_simmed_play =
+      sim_results_get_simmed_play(sim_results, 0);
+  for (int i = 1; i < num_simmed_plays; i++) {
+    const SimmedPlay *sp = sim_results_get_simmed_play(sim_results, i);
+    if (compare_simmed_plays(&sp, &current_best_simmed_play) < 0) {
+      current_best_simmed_play = sp;
+    }
+  }
+  return simmed_play_get_move(current_best_simmed_play);
 }

@@ -29,6 +29,9 @@
 #include "../ent/thread_control.h"
 #include "../ent/xoshiro.h"
 #include "../str/game_string.h"
+#include "../str/inference_string.h"
+#include "../str/move_string.h"
+#include "../str/sim_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
@@ -480,8 +483,8 @@ bool game_runner_is_game_over(GameRunner *game_runner) {
           bag_get_letters(game_get_bag(game_runner->game)) < (RACK_SIZE));
 }
 
-Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
-                                       GameRunner *game_runner) {
+const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
+                                             GameRunner *game_runner) {
   Game *game = game_runner->game;
   const int player_on_turn_index = game_get_player_on_turn_index(game);
   MoveList *move_list = autoplay_worker->move_lists[player_on_turn_index];
@@ -542,7 +545,7 @@ Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
   }
 
   ErrorStack *error_stack = autoplay_worker->error_stack;
-  Move *move = get_top_simming_move(
+  const Move *move = get_top_simming_move(
       game, autoplay_worker->worker_index, move_list, sim_args,
       &autoplay_worker->sim_ctx, autoplay_worker->sim_results, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -558,8 +561,8 @@ Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
   return move;
 }
 
-Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
-                                GameRunner *game_runner) {
+const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
+                                      GameRunner *game_runner) {
   const int player_on_turn_index =
       game_get_player_on_turn_index(game_runner->game);
   const SimArgs *sim_args = (player_on_turn_index == 0)
@@ -573,8 +576,9 @@ Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
   return game_runner_get_top_simming_move(autoplay_worker, game_runner);
 }
 
-void game_runner_play_move(AutoplayWorker *autoplay_worker,
-                           GameRunner *game_runner, Move **move) {
+// Returns the played move
+const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
+                                  GameRunner *game_runner) {
   if (game_runner_is_game_over(game_runner)) {
     log_fatal("game runner attempted to play a move when the game is over");
   }
@@ -610,15 +614,15 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     rack_copy(player_rack, &original_rack);
   }
 
-  *move = game_runner_get_best_move(autoplay_worker, game_runner);
+  const Move *move = game_runner_get_best_move(autoplay_worker, game_runner);
 
   if (lg_shared_data) {
     rack_list_add_rack(lg_shared_data->rack_list, player_rack,
-                       equity_to_double(move_get_equity(*move)));
+                       equity_to_double(move_get_equity(move)));
   }
-  get_leave_for_move(*move, game, &rare_rack_or_move_leave);
+  get_leave_for_move(move, game, &rare_rack_or_move_leave);
   autoplay_results_add_move(autoplay_worker->autoplay_results,
-                            game_runner->game, *move, &rare_rack_or_move_leave);
+                            game_runner->game, move, &rare_rack_or_move_leave);
 
   // Print board with move about to be played if requested
   if (autoplay_worker->args.print_boards) {
@@ -635,21 +639,39 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
           game_runner->pair_game_number, game_runner->turn_number + 1);
     }
     string_builder_add_game(
-        game, autoplay_worker->move_lists[player_on_turn_index],
-        autoplay_worker->args.game_string_options, NULL, output);
+        game, NULL, autoplay_worker->args.game_string_options, NULL, output);
+    string_builder_add_move(output, game_get_board(game), move,
+                            game_get_ld(game), true);
     string_builder_add_string(output, "\n");
+    const SimArgs *sim_args = (player_on_turn_index == 0)
+                                  ? &autoplay_worker->args.p1_sim_args
+                                  : &autoplay_worker->args.p2_sim_args;
+    if (sim_args->num_plies > 0) {
+      char *sim_str = sim_results_get_string(
+          game, autoplay_worker->sim_results, sim_args->max_num_display_plays,
+          sim_args->max_num_display_plies, -1, -1, NULL, 0, false, false, NULL);
+      string_builder_add_string(output, sim_str);
+      free(sim_str);
+      if (sim_args->use_inference && game_runner->turn_number > 0 &&
+          move_get_type(&game_runner->previous_move) != GAME_EVENT_PASS) {
+        string_builder_add_inference(
+            output, autoplay_worker->inference_results, game_get_ld(game),
+            sim_args->inference_args.leave_list_capacity, false);
+      }
+    }
     thread_control_print(autoplay_worker->args.thread_control,
                          string_builder_peek(output));
     string_builder_destroy(output);
   }
 
-  play_move(*move, game, NULL);
+  play_move(move, game, NULL);
   if (game_runner->game_one_move_behind && game_runner->turn_number > 0) {
     play_move(&game_runner->previous_move, game_runner->game_one_move_behind,
               NULL);
   }
-  move_copy(&game_runner->previous_move, *move);
+  move_copy(&game_runner->previous_move, move);
   game_runner->turn_number++;
+  return move;
 }
 
 void print_current_status(AutoplayWorker *autoplay_worker,
@@ -703,18 +725,18 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
   }
   bool games_are_divergent = false;
   while (true) {
-    Move *move1 = NULL;
+    const Move *move1 = NULL;
     bool game1_is_over = game_runner_is_game_over(game_runner1);
     if (!game1_is_over) {
-      game_runner_play_move(autoplay_worker, game_runner1, &move1);
+      move1 = game_runner_play_move(autoplay_worker, game_runner1);
     }
 
-    Move *move2 = NULL;
+    const Move *move2 = NULL;
     bool game2_is_over = true;
     if (game_runner2) {
       game2_is_over = game_runner_is_game_over(game_runner2);
       if (!game2_is_over) {
-        game_runner_play_move(autoplay_worker, game_runner2, &move2);
+        move2 = game_runner_play_move(autoplay_worker, game_runner2);
       }
     }
 
@@ -729,6 +751,34 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
          compare_moves_without_equity(move1, move2, true) != -1)) {
       games_are_divergent = true;
     }
+  }
+  if (autoplay_worker->args.print_boards) {
+    StringBuilder *output = string_builder_create();
+    if (game_runner1->pair_game_number == 0) {
+      string_builder_add_formatted_string(
+          output, "\n=== Game %llu (Final) ===\n",
+          (unsigned long long)game_runner1->game_number + 1);
+    } else {
+      string_builder_add_formatted_string(
+          output, "\n=== Game Pair %llu, Game %d (Final) ===\n",
+          (unsigned long long)game_runner1->game_number + 1,
+          game_runner1->pair_game_number);
+    }
+    string_builder_add_game(game_runner1->game, NULL,
+                            autoplay_worker->args.game_string_options, NULL,
+                            output);
+    if (game_runner2) {
+      string_builder_add_formatted_string(
+          output, "\n=== Game Pair %llu, Game %d (Final) ===\n",
+          (unsigned long long)game_runner2->game_number + 1,
+          game_runner2->pair_game_number);
+      string_builder_add_game(game_runner2->game, NULL,
+                              autoplay_worker->args.game_string_options, NULL,
+                              output);
+    }
+    thread_control_print(autoplay_worker->args.thread_control,
+                         string_builder_peek(output));
+    string_builder_destroy(output);
   }
   autoplay_add_game(autoplay_worker, game_runner1, games_are_divergent);
   if (game_runner2) {

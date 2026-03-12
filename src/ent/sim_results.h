@@ -88,5 +88,6 @@ bool sim_results_plays_are_similar(const SimResults *sim_results, int sp1_index,
 bool sim_results_display_plays_are_similar(const SimResults *sim_results,
                                            const int sp1_index,
                                            const int sp2_index);
+const Move *sim_results_get_best_move(const SimResults *sim_results);
 
 #endif

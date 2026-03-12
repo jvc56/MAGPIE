@@ -882,7 +882,8 @@ void generate_moves_for_game(const MoveGenArgs *args) {
                 args->game, game_get_player_on_turn_index(args->game))));
 }
 
-Move *get_top_equity_move(Game *game, int movegen_index, MoveList *move_list) {
+const Move *get_top_equity_move(Game *game, int movegen_index,
+                                MoveList *move_list) {
   const MoveGenArgs args = {.game = game,
                             .move_list = move_list,
                             .move_record_type = MOVE_RECORD_BEST,
