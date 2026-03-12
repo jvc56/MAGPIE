@@ -194,6 +194,8 @@ typedef enum {
   ARG_TOKEN_P2_THRESHOLD,
   ARG_TOKEN_P1_SAMPLING_RULE,
   ARG_TOKEN_P2_SAMPLING_RULE,
+  ARG_TOKEN_P1_INFERENCE_MARGIN,
+  ARG_TOKEN_P2_INFERENCE_MARGIN,
   ARG_TOKEN_MULTI_THREADING_MODE,
   // This must always be the last
   // token for the count to be accurate
@@ -279,6 +281,8 @@ struct Config {
   bai_threshold_t p2_threshold;
   bai_sampling_rule_t p1_sampling_rule;
   bai_sampling_rule_t p2_sampling_rule;
+  Equity p1_eq_margin_inference;
+  Equity p2_eq_margin_inference;
   multi_threading_mode_t multi_threading_mode;
   WinPct *win_pcts;
   BoardLayout *board_layout;
@@ -516,6 +520,14 @@ int config_get_print_interval(const Config *config) {
 
 Equity config_get_eq_margin_inference(const Config *config) {
   return config->eq_margin_inference;
+}
+
+Equity config_get_p1_eq_margin_inference(const Config *config) {
+  return config->p1_eq_margin_inference;
+}
+
+Equity config_get_p2_eq_margin_inference(const Config *config) {
+  return config->p2_eq_margin_inference;
 }
 
 bool config_exec_parg_is_set(const Config *config) {
@@ -1692,6 +1704,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies the BAI sampling rule for simulation for player 1 or 2 "
              "during autoplay.";
       break;
+    case ARG_TOKEN_P1_INFERENCE_MARGIN:
+    case ARG_TOKEN_P2_INFERENCE_MARGIN:
+      usages[0] = "<inference_equity_margin>";
+      text = "Specifies the maximum equity loss for an opponent's play when "
+             "running an inference for player 1 or 2 during autoplay.";
+      break;
     case ARG_TOKEN_MULTI_THREADING_MODE:
       usages[0] = "<mode>";
       examples[0] = MULTI_THREADING_MODE_PER_GAME_PARALLELISM_STRING;
@@ -1841,6 +1859,8 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_ENDGAME_TOP_K,          /* etopk */
         ARG_TOKEN_USE_GAME_PAIRS,         /* gp */
         ARG_TOKEN_INFERENCE_MARGIN,       /* imargin */
+        ARG_TOKEN_P1_INFERENCE_MARGIN,    /* im1 */
+        ARG_TOKEN_P2_INFERENCE_MARGIN,    /* im2 */
         ARG_TOKEN_MAX_ITERATIONS,         /* iterations */
         ARG_TOKEN_P1_MAX_ITERATIONS,      /* i1 */
         ARG_TOKEN_P2_MAX_ITERATIONS,      /* i2 */
@@ -2611,23 +2631,30 @@ void config_fill_autoplay_args(const Config *config,
     num_worker_threads_per_sim = config->num_threads;
   }
 
-  InferenceArgs inference_args = {0};
-  if (config->p1_sim_with_inference || config->p2_sim_with_inference) {
-    // Autoplay with inference must populate the following InferenceArgs fields
-    // that are left unset here.
-    // At startup:
-    //  - game
-    //  - parent_worker_thread_index;
-    // For each move:
-    //  - target_index
-    //  - target_score
-    //  - int target_num_exch
-    //  - target_played_tiles
-    //  - target_known_rack
-    //  - nontarget_known_rack
-    //  - previous play exists
-    infer_args_fill(&inference_args, 0, config->eq_margin_inference, NULL, NULL,
-                    num_worker_threads_per_sim, 0, config->print_interval,
+  // Autoplay with inference must populate the following InferenceArgs fields
+  // that are left unset here.
+  // At startup:
+  //  - game
+  //  - parent_worker_thread_index;
+  // For each move:
+  //  - target_index
+  //  - target_score
+  //  - int target_num_exch
+  //  - target_played_tiles
+  //  - target_known_rack
+  //  - nontarget_known_rack
+  //  - previous play exists
+  InferenceArgs p1_inference_args = {0};
+  if (config->p1_sim_with_inference) {
+    infer_args_fill(&p1_inference_args, 0, config->p1_eq_margin_inference, NULL,
+                    NULL, num_worker_threads_per_sim, 0, config->print_interval,
+                    config->thread_control, false, true, 0, 0, 0, NULL, NULL,
+                    NULL);
+  }
+  InferenceArgs p2_inference_args = {0};
+  if (config->p2_sim_with_inference) {
+    infer_args_fill(&p2_inference_args, 0, config->p2_eq_margin_inference, NULL,
+                    NULL, num_worker_threads_per_sim, 0, config->print_interval,
                     config->thread_control, false, true, 0, 0, 0, NULL, NULL,
                     NULL);
   }
@@ -2653,7 +2680,7 @@ void config_fill_autoplay_args(const Config *config,
       /*seed=*/0, config->p1_max_iterations, config->p1_min_play_iterations,
       config->p1_stop_cond_pct, config->p1_threshold,
       config->p1_time_limit_seconds, config->p1_sampling_rule, config->cutoff,
-      &inference_args, &autoplay_args->p1_sim_args);
+      &p1_inference_args, &autoplay_args->p1_sim_args);
 
   sim_args_fill(
       config->p2_sim_plies, /*move_list=*/NULL, config->p2_num_plays,
@@ -2665,7 +2692,7 @@ void config_fill_autoplay_args(const Config *config,
       /*seed=*/0, config->p2_max_iterations, config->p2_min_play_iterations,
       config->p2_stop_cond_pct, config->p2_threshold,
       config->p2_time_limit_seconds, config->p2_sampling_rule, config->cutoff,
-      &inference_args, &autoplay_args->p2_sim_args);
+      &p2_inference_args, &autoplay_args->p2_sim_args);
 }
 
 void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
@@ -6294,6 +6321,39 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     }
   }
 
+  if (config_get_parg_value(config, ARG_TOKEN_INFERENCE_MARGIN, 0) != NULL) {
+    config->p1_eq_margin_inference = config->eq_margin_inference;
+    config->p2_eq_margin_inference = config->eq_margin_inference;
+  }
+  const char *new_p1_eq_margin_inference =
+      config_get_parg_value(config, ARG_TOKEN_P1_INFERENCE_MARGIN, 0);
+  if (new_p1_eq_margin_inference) {
+    double p1_eq_margin_inference_double = 0;
+    config_load_double(config, ARG_TOKEN_P1_INFERENCE_MARGIN, 0,
+                       EQUITY_MAX_DOUBLE, &p1_eq_margin_inference_double,
+                       error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    assert(!isnan(p1_eq_margin_inference_double));
+    config->p1_eq_margin_inference =
+        double_to_equity(p1_eq_margin_inference_double);
+  }
+  const char *new_p2_eq_margin_inference =
+      config_get_parg_value(config, ARG_TOKEN_P2_INFERENCE_MARGIN, 0);
+  if (new_p2_eq_margin_inference) {
+    double p2_eq_margin_inference_double = 0;
+    config_load_double(config, ARG_TOKEN_P2_INFERENCE_MARGIN, 0,
+                       EQUITY_MAX_DOUBLE, &p2_eq_margin_inference_double,
+                       error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    assert(!isnan(p2_eq_margin_inference_double));
+    config->p2_eq_margin_inference =
+        double_to_equity(p2_eq_margin_inference_double);
+  }
+
   const char *mtmode_str =
       config_get_parg_value(config, ARG_TOKEN_MULTI_THREADING_MODE, 0);
   if (mtmode_str) {
@@ -6747,6 +6807,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_THRESHOLD, "th2", 1, 1);
   arg(ARG_TOKEN_P1_SAMPLING_RULE, "sa1", 1, 1);
   arg(ARG_TOKEN_P2_SAMPLING_RULE, "sa2", 1, 1);
+  arg(ARG_TOKEN_P1_INFERENCE_MARGIN, "im1", 1, 1);
+  arg(ARG_TOKEN_P2_INFERENCE_MARGIN, "im2", 1, 1);
   arg(ARG_TOKEN_MULTI_THREADING_MODE, "mtmode", 1, 1);
   arg(ARG_TOKEN_PRINT_BOARDS, "printboards", 1, 1);
   arg(ARG_TOKEN_BOARD_COLOR, "boardcolor", 1, 1);
@@ -6826,6 +6888,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->p2_threshold = config->threshold;
   config->p1_sampling_rule = config->sampling_rule;
   config->p2_sampling_rule = config->sampling_rule;
+  config->p1_eq_margin_inference = config->eq_margin_inference;
+  config->p2_eq_margin_inference = config->eq_margin_inference;
   config->multi_threading_mode = MULTI_THREADING_MODE_PER_GAME_PARALLELISM;
   config->use_heat_map = false;
   config->print_boards = false;
@@ -7167,6 +7231,20 @@ void config_add_settings_to_string_builder(const Config *config,
         config_add_double_setting_to_string_builder(
             config, sb, arg_token,
             equity_to_double(config->eq_margin_inference));
+      }
+      break;
+    case ARG_TOKEN_P1_INFERENCE_MARGIN:
+      if (config->p1_eq_margin_inference != 0) {
+        config_add_double_setting_to_string_builder(
+            config, sb, arg_token,
+            equity_to_double(config->p1_eq_margin_inference));
+      }
+      break;
+    case ARG_TOKEN_P2_INFERENCE_MARGIN:
+      if (config->p2_eq_margin_inference != 0) {
+        config_add_double_setting_to_string_builder(
+            config, sb, arg_token,
+            equity_to_double(config->p2_eq_margin_inference));
       }
       break;
     case ARG_TOKEN_MOVEGEN_MARGIN:

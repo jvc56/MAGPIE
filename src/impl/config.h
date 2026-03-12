@@ -80,6 +80,8 @@ const char *config_get_current_exec_name(const Config *config);
 int config_get_num_threads(const Config *config);
 int config_get_print_interval(const Config *config);
 Equity config_get_eq_margin_inference(const Config *config);
+Equity config_get_p1_eq_margin_inference(const Config *config);
+Equity config_get_p2_eq_margin_inference(const Config *config);
 
 // Entity creators
 Game *config_game_create(const Config *config);
