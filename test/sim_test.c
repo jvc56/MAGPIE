@@ -354,7 +354,7 @@ void test_sim_with_and_without_inference_helper(
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-threads 10 -plies 2 -it 2000 -minp 50 -numplays 2 "
-      "-scond none -im 0 -seed 10");
+      "-scond none -ima 0 -seed 10");
   // Load an empty CGP to create a new game.
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 

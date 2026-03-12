@@ -181,7 +181,7 @@ Config *config_create_default_test(void) {
   error_stack_destroy(error_stack);
   load_and_exec_config_or_die(
       config, "set -threads 1 -savesettings false -hr "
-              "false -numplays 15 -im 0 -minp 100 -autosave false");
+              "false -numplays 15 -ima 0 -minp 100 -autosave false");
   return config;
 }
 

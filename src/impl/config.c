@@ -5769,7 +5769,6 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
-    assert(!isnan(eq_margin_inference_double));
     config->eq_margin_inference = double_to_equity(eq_margin_inference_double);
   }
 
@@ -5782,7 +5781,6 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
-    assert(!isnan(eq_margin_movegen));
     config->eq_margin_movegen = double_to_equity(eq_margin_movegen);
   }
 
@@ -6335,7 +6333,6 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
-    assert(!isnan(p1_eq_margin_inference_double));
     config->p1_eq_margin_inference =
         double_to_equity(p1_eq_margin_inference_double);
   }
@@ -6349,7 +6346,6 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
-    assert(!isnan(p2_eq_margin_inference_double));
     config->p2_eq_margin_inference =
         double_to_equity(p2_eq_margin_inference_double);
   }
