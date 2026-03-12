@@ -422,9 +422,15 @@ static inline uint64_t move_get_similarity_key(const Move *m,
     type = 2;
   }
   move_key_set_field(&key, &shift, type, 2);
-  move_key_set_field(&key, &shift, m->dir, 1);
-  move_key_set_field(&key, &shift, m->row_start, BITS_PER_BOARD_DIM);
-  move_key_set_field(&key, &shift, m->col_start, BITS_PER_BOARD_DIM);
+  if (move_get_type(m) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    move_key_set_field(&key, &shift, m->dir, 1);
+    move_key_set_field(&key, &shift, m->row_start, BITS_PER_BOARD_DIM);
+    move_key_set_field(&key, &shift, m->col_start, BITS_PER_BOARD_DIM);
+  } else {
+    move_key_set_field(&key, &shift, 0, 1);
+    move_key_set_field(&key, &shift, 0, BITS_PER_BOARD_DIM);
+    move_key_set_field(&key, &shift, 0, BITS_PER_BOARD_DIM);
+  }
   move_key_set_field(&key, &shift, m->tiles_length, BITS_PER_BOARD_DIM);
   Rack move_tiles_played;
   rack_set_dist_size_and_reset(&move_tiles_played,
