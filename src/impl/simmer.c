@@ -66,6 +66,9 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
 
   // If the bag is empty, set sample_limit to the number of moves and
   // sample_minimum to 1 for endgame simulations
+  const uint64_t original_sample_limit = sim_args->bai_options.sample_limit;
+  const uint64_t original_sample_minimum = sim_args->bai_options.sample_minimum;
+  const int original_num_plies = sim_args->num_plies;
   if (bag_is_empty(game_get_bag(sim_args->game))) {
     sim_args->bai_options.sample_limit =
         move_list_get_count(sim_args->move_list);
@@ -120,6 +123,12 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
 
   bai(&sim_args->bai_options, (*sim_ctx)->rvs, (*sim_ctx)->rng,
       sim_args->thread_control, NULL, sim_results_get_bai_result(sim_results));
+
+  // Reset the sim args to their original values in case they were modified for
+  // endgame sims
+  sim_args->bai_options.sample_limit = original_sample_limit;
+  sim_args->bai_options.sample_minimum = original_sample_minimum;
+  sim_args->num_plies = original_num_plies;
 }
 
 void simulate_without_ctx(SimArgs *sim_args, SimResults *sim_results,
@@ -133,9 +142,10 @@ void simulate_without_ctx(SimArgs *sim_args, SimResults *sim_results,
 // but they are passed in separately because this function needs to generate
 // moves on a nonconst MoveList pointer but the SimArgs MoveList pointer is
 // const.
-Move *get_top_simming_move(Game *game, int movegen_index, MoveList *move_list,
-                           SimArgs *sim_args, SimCtx **sim_ctx,
-                           SimResults *sim_results, ErrorStack *error_stack) {
+const Move *get_top_simming_move(Game *game, int movegen_index,
+                                 MoveList *move_list, SimArgs *sim_args,
+                                 SimCtx **sim_ctx, SimResults *sim_results,
+                                 ErrorStack *error_stack) {
   const MoveGenArgs gen_args = {
       .game = game,
       .move_list = move_list,
@@ -158,7 +168,5 @@ Move *get_top_simming_move(Game *game, int movegen_index, MoveList *move_list,
     return NULL;
   }
 
-  return move_list_get_move(
-      sim_args->move_list,
-      bai_result_get_best_arm(sim_results_get_bai_result(sim_results)));
+  return sim_results_get_best_move(sim_results);
 }
