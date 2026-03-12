@@ -151,16 +151,16 @@ void test_config_load_error_cases(void) {
   test_config_load_error(config, "sim -scond F",
                          ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
                          error_stack);
-  test_config_load_error(config, "sim -im 23434.32433.4324",
+  test_config_load_error(config, "sim -ima 23434.32433.4324",
                          ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
                          error_stack);
-  test_config_load_error(config, "sim -im -3",
+  test_config_load_error(config, "sim -ima -3",
                          ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS,
                          error_stack);
-  test_config_load_error(config, "sim -im -4.5",
+  test_config_load_error(config, "sim -ima -4.5",
                          ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS,
                          error_stack);
-  test_config_load_error(config, "sim -im none",
+  test_config_load_error(config, "sim -ima none",
                          ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
                          error_stack);
   test_config_load_error(config, "sim -seed zero",
