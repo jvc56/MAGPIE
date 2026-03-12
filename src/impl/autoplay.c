@@ -270,6 +270,14 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
                                        AutoplaySharedData *shared_data) {
   AutoplayWorker *autoplay_worker = malloc_or_die(sizeof(AutoplayWorker));
   autoplay_worker->args = *args;
+  // 0 plies indicate that the player is using static equity, so the move list
+  // only needs a capacity of 1
+  if (autoplay_worker->args.p1_sim_args.num_plays == 0) {
+    autoplay_worker->args.p1_sim_args.num_plays = 1;
+  }
+  if (autoplay_worker->args.p2_sim_args.num_plays == 0) {
+    autoplay_worker->args.p2_sim_args.num_plays = 1;
+  }
   autoplay_worker->worker_index = worker_index;
   autoplay_worker->autoplay_results =
       autoplay_results_create_empty_copy(target);
@@ -281,19 +289,31 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   }
   autoplay_worker->shared_data = shared_data;
   autoplay_worker->sim_ctx = NULL;
-  autoplay_worker->sim_results = sim_results_create(args->cutoff);
-  autoplay_worker->inference_results = inference_results_create(NULL);
-  autoplay_worker->error_stack = error_stack_create();
-  rack_set_dist_size_and_reset(&autoplay_worker->target_played_tiles,
-                               ld_get_size(args->game_args->ld));
-  rack_set_dist_size_and_reset(&autoplay_worker->nontarget_known_rack,
-                               ld_get_size(args->game_args->ld));
-  rack_set_dist_size_and_reset(&autoplay_worker->target_known_rack,
-                               ld_get_size(args->game_args->ld));
+  const AutoplayArgs *ap_args = &autoplay_worker->args;
+
   autoplay_worker->move_lists[0] =
-      move_list_create(args->p1_sim_args.num_plays);
+      move_list_create(ap_args->p1_sim_args.num_plays);
   autoplay_worker->move_lists[1] =
-      move_list_create(args->p2_sim_args.num_plays);
+      move_list_create(ap_args->p2_sim_args.num_plays);
+
+  autoplay_worker->sim_results = NULL;
+  autoplay_worker->inference_results = NULL;
+  autoplay_worker->error_stack = NULL;
+
+  // Only allocate sim structs if at least one of the players running a sim.
+  if (ap_args->p1_sim_args.num_plies > 0 ||
+      ap_args->p2_sim_args.num_plies > 0) {
+    autoplay_worker->sim_results = sim_results_create(ap_args->cutoff);
+    autoplay_worker->inference_results = inference_results_create(NULL);
+    autoplay_worker->error_stack = error_stack_create();
+    rack_set_dist_size_and_reset(&autoplay_worker->target_played_tiles,
+                                 ld_get_size(ap_args->game_args->ld));
+    rack_set_dist_size_and_reset(&autoplay_worker->nontarget_known_rack,
+                                 ld_get_size(ap_args->game_args->ld));
+    rack_set_dist_size_and_reset(&autoplay_worker->target_known_rack,
+                                 ld_get_size(ap_args->game_args->ld));
+  }
+
   return autoplay_worker;
 }
 
