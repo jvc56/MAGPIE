@@ -80,7 +80,7 @@ error_code_t infer_for_test(InferenceCtx **ctx, const Config *config,
   infer_args_fill(
       &args, config_get_num_plays(config),
       config_get_eq_margin_inference(config), NULL, game,
-      config_get_num_threads(config), config_get_print_interval(config),
+      config_get_num_threads(config), 0, config_get_print_interval(config),
       config_get_thread_control(config), false, true, target_index,
       int_to_equity(target_score), target_num_exch, &target_played_tiles,
       &target_known_rack, &nontarget_known_rack);
@@ -306,6 +306,39 @@ void test_infer_exchange_not_board_is_letter_allowed_in_cross_set(void) {
   // There should now be 14 tiles in the bag
   status = infer_for_test(NULL, config, 0, 3, 1, "", "", "", inference_results);
   assert(status == ERROR_STATUS_INFERENCE_EXCHANGE_SCORE_NOT_ZERO);
+
+  const char *cgp_16_unseen =
+      "2CHIGOE3T3/3O6NAE2/3M6END2/2AY6UG1G1/2B7MO1L1/1VODKA5i1OD/2R2TANNERS1RE/"
+      "OUTA2ZA3T1IF/2I1CRoWDIE2A1/2V6FEEBS1/1NEWISHLY1LEA2/15/15/15/15 "
+      "AEEIJNX/ILOOPQR 437/289 0";
+  load_cgp_or_die(game, cgp_16_unseen);
+  load_and_exec_config_or_die(config, "s");
+  // The bag has 16, exchanges should be allowed
+  status = infer_for_test(NULL, config, 1, 0, 5, "", "", "AEEIJNX",
+                          inference_results);
+  assert(status == ERROR_STATUS_SUCCESS);
+
+  const char *cgp_14_unseen =
+      "2CHIGOE3T3/3O6NAE2/3M6END2/2AY6UG1G1/2B7MO1L1/1VODKA5i1OD/2R2TANNERS1RE/"
+      "OUTA2ZA3T1IF/2I1CRoWDIE2A1/2V6FEEBS1/1NEWISHLY1LEA2/JA13/15/15/15 "
+      "ILOOPQR/EEINTTX 289/456 0";
+  load_cgp_or_die(game, cgp_14_unseen);
+  load_and_exec_config_or_die(config, "s");
+  // The bag has 14, exchanges should be allowed
+  status = infer_for_test(NULL, config, 1, 0, 5, "", "", "ILOOPQR",
+                          inference_results);
+  assert(status == ERROR_STATUS_SUCCESS);
+
+  const char *cgp_13_unseen =
+      "2CHIGOE3T3/3O6NAE2/3M6END2/1PAY6UG1G1/2B7MO1L1/1VODKA5i1OD/"
+      "2R2TANNERS1RE/OUTA2ZA3T1IF/2I1CRoWDIE2A1/2V6FEEBS1/1NEWISHLY1LEA2/JA13/"
+      "15/15/15 EEINTTX/ILOOQRU 456/297 0";
+  load_cgp_or_die(game, cgp_13_unseen);
+  load_and_exec_config_or_die(config, "s");
+  // The bag has 13, exchanges should not be allowed
+  status = infer_for_test(NULL, config, 1, 0, 5, "", "", "EEINTTX",
+                          inference_results);
+  assert(status == ERROR_STATUS_INFERENCE_EXCHANGE_NOT_ALLOWED);
 
   inference_results_destroy(inference_results);
   config_destroy(config);

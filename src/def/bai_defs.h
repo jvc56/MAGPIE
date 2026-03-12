@@ -28,6 +28,7 @@ typedef struct BAIOptions {
   uint64_t sample_minimum;
   uint64_t time_limit_seconds;
   int num_threads;
+  int parent_worker_thread_index;
   double cutoff;
 } BAIOptions;
 

@@ -1,10 +1,13 @@
 #include "simmer.h"
 
+#include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/inference_defs.h"
+#include "../def/move_defs.h"
 #include "../def/sim_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
+#include "../ent/bai_result.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
 #include "../ent/move.h"
@@ -16,6 +19,7 @@
 #include "../util/string_util.h"
 #include "bai.h"
 #include "inference.h"
+#include "move_gen.h"
 #include "random_variable.h"
 #include <stdint.h>
 #include <stdlib.h>
@@ -123,4 +127,38 @@ void simulate_without_ctx(SimArgs *sim_args, SimResults *sim_results,
   SimCtx *ctx = NULL;
   simulate(sim_args, &ctx, sim_results, error_stack);
   sim_ctx_destroy(ctx);
+}
+
+// The move_list and sim_args->move_list are expected to be the same pointer,
+// but they are passed in separately because this function needs to generate
+// moves on a nonconst MoveList pointer but the SimArgs MoveList pointer is
+// const.
+Move *get_top_simming_move(Game *game, int movegen_index, MoveList *move_list,
+                           SimArgs *sim_args, SimCtx **sim_ctx,
+                           SimResults *sim_results, ErrorStack *error_stack) {
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .thread_index = movegen_index,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&gen_args);
+
+  if (move_list_get_count(move_list) == 1) {
+    return move_list_get_move(move_list, 0);
+  }
+
+  simulate(sim_args, sim_ctx, sim_results, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+
+  return move_list_get_move(
+      sim_args->move_list,
+      bai_result_get_best_arm(sim_results_get_bai_result(sim_results)));
 }

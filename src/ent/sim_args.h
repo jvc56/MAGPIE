@@ -15,6 +15,7 @@ typedef struct SimArgs {
   int num_plies;
   const Game *game;
   const MoveList *move_list;
+  int num_plays;
   Rack *known_opp_rack;
   WinPct *win_pcts;
   bool use_inference;
@@ -32,7 +33,7 @@ typedef struct SimArgs {
 
 static inline void
 sim_args_fill(const int num_plies, const MoveList *move_list,
-              Rack *known_opp_rack, WinPct *win_pcts,
+              const int num_plays, Rack *known_opp_rack, WinPct *win_pcts,
               InferenceResults *inference_results,
               ThreadControl *thread_control, const Game *game,
               const bool sim_with_inference, const bool use_heat_map,
@@ -45,6 +46,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
               const InferenceArgs *inference_args, SimArgs *sim_args) {
   sim_args->num_plies = num_plies;
   sim_args->move_list = move_list;
+  sim_args->num_plays = num_plays;
   sim_args->known_opp_rack = known_opp_rack;
   sim_args->win_pcts = win_pcts;
   sim_args->inference_results = inference_results;
@@ -72,6 +74,8 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->bai_options.sampling_rule = sampling_rule;
   sim_args->bai_options.num_threads = num_threads;
   sim_args->bai_options.cutoff = cutoff;
+  // This will be overwritten in autoplay
+  sim_args->bai_options.parent_worker_thread_index = 0;
 }
 
 #endif

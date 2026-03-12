@@ -324,6 +324,22 @@ void test_autoplay_wmp_correctness(void) {
   error_stack_destroy(error_stack);
 }
 
+void test_autoplay_sim(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 3 -pl1 2 -minp 2 -iter 10 -threads 10 -sinfer false");
+  load_and_exec_config_or_die(config,
+                              "autoplay games 1 -seed 1 -mtmode pgp -gp false");
+  load_and_exec_config_or_die(config,
+                              "autoplay games 1 -seed 1 -mtmode pgp -gp true");
+  load_and_exec_config_or_die(
+      config, "autoplay games 1 -seed 2 -mtmode igp -sinfer true -gp false");
+  load_and_exec_config_or_die(config,
+                              "autoplay games 2 -seed 3 -mtmode igp -np1 3 "
+                              "-np2 2 -plies 2 -gp true ");
+  config_destroy(config);
+}
+
 void test_autoplay(void) {
   test_odds_that_player_is_better();
   test_autoplay_default();
@@ -332,4 +348,5 @@ void test_autoplay(void) {
   test_autoplay_wmp_correctness();
   test_autoplay_win_pct_record();
   test_autoplay_leaves_record();
+  test_autoplay_sim();
 }

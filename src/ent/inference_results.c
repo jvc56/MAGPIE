@@ -43,9 +43,7 @@ InferenceResults *inference_results_create(AliasMethod *alias_method) {
   for (int i = 0; i < NUMBER_OF_INFER_TYPES; i++) {
     results->equity_values[i] = stat_create(false);
   }
-  // Use some dummy capacity which will be set to something else in the reset
-  // function.
-  results->leave_rack_list = leave_rack_list_create(1);
+  results->leave_rack_list = NULL;
   if (alias_method) {
     results->alias_method = alias_method;
     results->alias_method_created_internally = false;
@@ -72,13 +70,19 @@ void inference_results_destroy(InferenceResults *results) {
   free(results);
 }
 
-void inference_results_reset(InferenceResults *results, int move_capacity,
+void inference_results_reset(InferenceResults *results, int leave_list_capacity,
                              int ld_size) {
   for (int i = 0; i < NUMBER_OF_INFER_TYPES; i++) {
     stat_reset(results->equity_values[i]);
   }
   memset(results->subtotals, 0, sizeof(results->subtotals));
-  leave_rack_list_reset(results->leave_rack_list, move_capacity);
+  if (leave_list_capacity > 0) {
+    if (!results->leave_rack_list) {
+      results->leave_rack_list = leave_rack_list_create(leave_list_capacity);
+    } else {
+      leave_rack_list_reset(results->leave_rack_list, leave_list_capacity);
+    }
+  }
   rack_set_dist_size_and_reset(&results->target_played_tiles, ld_size);
   rack_set_dist_size_and_reset(&results->target_known_unplayed_tiles, ld_size);
   rack_set_dist_size_and_reset(&results->bag_as_rack, ld_size);
@@ -101,7 +105,9 @@ void inference_results_finalize(const Rack *target_played_tiles,
   rack_copy(&results->target_played_tiles, target_played_tiles);
   rack_copy(&results->target_known_unplayed_tiles, target_known_unplayed_tiles);
   rack_copy(&results->bag_as_rack, bag_as_rack);
-  leave_rack_list_sort(results->leave_rack_list);
+  if (results->leave_rack_list) {
+    leave_rack_list_sort(results->leave_rack_list);
+  }
   alias_method_generate_tables(results->alias_method);
   results->interrupted = interrupted;
   if (interrupted) {

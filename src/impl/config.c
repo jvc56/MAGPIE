@@ -64,6 +64,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <float.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <math.h>
 #include <stdbool.h>
@@ -175,6 +176,25 @@ typedef enum {
   ARG_TOKEN_SAVE_SETTINGS,
   ARG_TOKEN_AUTOSAVE_GCG,
   ARG_TOKEN_SHOW_GAME_WITH_MOVES,
+  ARG_TOKEN_P1_SIM_PLIES,
+  ARG_TOKEN_P2_SIM_PLIES,
+  ARG_TOKEN_P1_NUM_PLAYS,
+  ARG_TOKEN_P2_NUM_PLAYS,
+  ARG_TOKEN_P1_STOP_COND_PCT,
+  ARG_TOKEN_P2_STOP_COND_PCT,
+  ARG_TOKEN_P1_MAX_ITERATIONS,
+  ARG_TOKEN_P2_MAX_ITERATIONS,
+  ARG_TOKEN_P1_MIN_PLAY_ITERATIONS,
+  ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,
+  ARG_TOKEN_P1_SIM_WITH_INFERENCE,
+  ARG_TOKEN_P2_SIM_WITH_INFERENCE,
+  ARG_TOKEN_P1_TIME_LIMIT,
+  ARG_TOKEN_P2_TIME_LIMIT,
+  ARG_TOKEN_P1_THRESHOLD,
+  ARG_TOKEN_P2_THRESHOLD,
+  ARG_TOKEN_P1_SAMPLING_RULE,
+  ARG_TOKEN_P2_SAMPLING_RULE,
+  ARG_TOKEN_MULTI_THREADING_MODE,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -234,13 +254,32 @@ struct Config {
   char *record_filepath;
   char *settings_filename;
   double tt_fraction_of_mem;
-  uint64_t time_limit_seconds;
+  int time_limit_seconds;
   int num_threads;
   int print_interval;
   uint64_t seed;
   bai_sampling_rule_t sampling_rule;
   bai_threshold_t threshold;
   game_variant_t game_variant;
+  int p1_sim_plies;
+  int p2_sim_plies;
+  int p1_num_plays;
+  int p2_num_plays;
+  double p1_stop_cond_pct;
+  double p2_stop_cond_pct;
+  uint64_t p1_max_iterations;
+  uint64_t p2_max_iterations;
+  uint64_t p1_min_play_iterations;
+  uint64_t p2_min_play_iterations;
+  bool p1_sim_with_inference;
+  bool p2_sim_with_inference;
+  int p1_time_limit_seconds;
+  int p2_time_limit_seconds;
+  bai_threshold_t p1_threshold;
+  bai_threshold_t p2_threshold;
+  bai_sampling_rule_t p1_sampling_rule;
+  bai_sampling_rule_t p2_sampling_rule;
+  multi_threading_mode_t multi_threading_mode;
   WinPct *win_pcts;
   BoardLayout *board_layout;
   LetterDistribution *ld;
@@ -1599,6 +1638,70 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies whether or not to automatically save the game history "
              "as a GCG after every change.";
       break;
+    case ARG_TOKEN_P1_SIM_PLIES:
+    case ARG_TOKEN_P2_SIM_PLIES:
+      usages[0] = "<plies>";
+      text = "Specifies the number of plies to simulate for player 1 or 2 "
+             "during autoplay. A value of 0 (the default) uses static equity.";
+      break;
+    case ARG_TOKEN_P1_NUM_PLAYS:
+    case ARG_TOKEN_P2_NUM_PLAYS:
+      usages[0] = "<num_plays>";
+      text = "Specifies the number of top plays to evaluate during simulation "
+             "for player 1 or 2 during autoplay.";
+      break;
+    case ARG_TOKEN_P1_STOP_COND_PCT:
+    case ARG_TOKEN_P2_STOP_COND_PCT:
+      usages[0] = "<stop_condition_pct>";
+      text = "Specifies the stopping condition percentage for player 1 or 2 "
+             "during autoplay simulation.";
+      break;
+    case ARG_TOKEN_P1_MAX_ITERATIONS:
+    case ARG_TOKEN_P2_MAX_ITERATIONS:
+      usages[0] = "<max_iterations>";
+      text = "Specifies the maximum number of simulation iterations for player "
+             "1 or 2 during autoplay.";
+      break;
+    case ARG_TOKEN_P1_MIN_PLAY_ITERATIONS:
+    case ARG_TOKEN_P2_MIN_PLAY_ITERATIONS:
+      usages[0] = "<min_play_iterations>";
+      text = "Specifies the minimum number of iterations per play for player "
+             "1 or 2 during autoplay simulation.";
+      break;
+    case ARG_TOKEN_P1_SIM_WITH_INFERENCE:
+    case ARG_TOKEN_P2_SIM_WITH_INFERENCE:
+      usages[0] = "<true_or_false>";
+      text = "Specifies whether to use inference during simulation for player "
+             "1 or 2 during autoplay.";
+      break;
+    case ARG_TOKEN_P1_TIME_LIMIT:
+    case ARG_TOKEN_P2_TIME_LIMIT:
+      usages[0] = "<time_limit_seconds>";
+      text = "Specifies the time limit in seconds for simulation for player "
+             "1 or 2 during autoplay.";
+      break;
+    case ARG_TOKEN_P1_THRESHOLD:
+    case ARG_TOKEN_P2_THRESHOLD:
+      usages[0] = "<threshold>";
+      text = "Specifies the BAI threshold for simulation for player 1 or 2 "
+             "during autoplay.";
+      break;
+    case ARG_TOKEN_P1_SAMPLING_RULE:
+    case ARG_TOKEN_P2_SAMPLING_RULE:
+      usages[0] = "<sampling_rule>";
+      text = "Specifies the BAI sampling rule for simulation for player 1 or 2 "
+             "during autoplay.";
+      break;
+    case ARG_TOKEN_MULTI_THREADING_MODE:
+      usages[0] = "<mode>";
+      examples[0] = MULTI_THREADING_MODE_PER_GAME_PARALLELISM_STRING;
+      examples[1] = MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM_STRING;
+      text = "Specifies the multi-threading mode for autoplay with "
+             "simulation. " MULTI_THREADING_MODE_PER_GAME_PARALLELISM_STRING
+             " runs N games in parallel "
+             "(default). " MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM_STRING
+             " runs one game at a time using all threads for simulation.";
+      break;
     case NUMBER_OF_ARG_TOKENS:
       log_fatal("encountered invalid arg token in help command");
       break;
@@ -1733,27 +1836,46 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     };
     // Game Analysis Options (alphabetical by name)
     static const arg_token_t game_analysis_opts[] = {
-        ARG_TOKEN_CUTOFF,                /* cutoff */
-        ARG_TOKEN_ENDGAME_PLIES,         /* eplies */
-        ARG_TOKEN_ENDGAME_TOP_K,         /* etopk */
-        ARG_TOKEN_USE_GAME_PAIRS,        /* gp */
-        ARG_TOKEN_INFERENCE_MARGIN,      /* imargin */
-        ARG_TOKEN_MAX_ITERATIONS,        /* iterations */
-        ARG_TOKEN_MIN_PLAY_ITERATIONS,   /* minplayiterations */
-        ARG_TOKEN_MOVEGEN_MARGIN,        /* mmargin */
-        ARG_TOKEN_NUMBER_OF_PLAYS,       /* numplays */
-        ARG_TOKEN_NUMBER_OF_SMALL_PLAYS, /* numsmallplays */
-        ARG_TOKEN_PLIES,                 /* plies */
-        ARG_TOKEN_STOP_COND_PCT,         /* scondition */
-        ARG_TOKEN_SIM_WITH_INFERENCE,    /* sinfer */
-        ARG_TOKEN_USE_SMALL_PLAYS,       /* sp */
-        ARG_TOKEN_SAMPLING_RULE,         /* sr */
-        ARG_TOKEN_THRESHOLD,             /* threshold */
-        ARG_TOKEN_TIME_LIMIT,            /* tlim */
-        ARG_TOKEN_TT_FRACTION_OF_MEM,    /* ttfraction */
-        ARG_TOKEN_USE_HEAT_MAP,          /* useheatmap */
-        ARG_TOKEN_WRITE_BUFFER_SIZE,     /* wb */
-        ARG_TOKEN_WIN_PCT,               /* winpct */
+        ARG_TOKEN_CUTOFF,                 /* cutoff */
+        ARG_TOKEN_ENDGAME_PLIES,          /* eplies */
+        ARG_TOKEN_ENDGAME_TOP_K,          /* etopk */
+        ARG_TOKEN_USE_GAME_PAIRS,         /* gp */
+        ARG_TOKEN_INFERENCE_MARGIN,       /* imargin */
+        ARG_TOKEN_MAX_ITERATIONS,         /* iterations */
+        ARG_TOKEN_P1_MAX_ITERATIONS,      /* i1 */
+        ARG_TOKEN_P2_MAX_ITERATIONS,      /* i2 */
+        ARG_TOKEN_P1_MIN_PLAY_ITERATIONS, /* mi1 */
+        ARG_TOKEN_P2_MIN_PLAY_ITERATIONS, /* mi2 */
+        ARG_TOKEN_MIN_PLAY_ITERATIONS,    /* minplayiterations */
+        ARG_TOKEN_MOVEGEN_MARGIN,         /* mmargin */
+        ARG_TOKEN_MULTI_THREADING_MODE,   /* mtmode */
+        ARG_TOKEN_NUMBER_OF_PLAYS,        /* numplays */
+        ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,  /* numsmallplays */
+        ARG_TOKEN_P1_NUM_PLAYS,           /* np1 */
+        ARG_TOKEN_P2_NUM_PLAYS,           /* np2 */
+        ARG_TOKEN_P1_SIM_PLIES,           /* pl1 */
+        ARG_TOKEN_P2_SIM_PLIES,           /* pl2 */
+        ARG_TOKEN_PLIES,                  /* plies */
+        ARG_TOKEN_STOP_COND_PCT,          /* scondition */
+        ARG_TOKEN_SIM_WITH_INFERENCE,     /* sinfer */
+        ARG_TOKEN_USE_SMALL_PLAYS,        /* sp */
+        ARG_TOKEN_SAMPLING_RULE,          /* sr */
+        ARG_TOKEN_P1_STOP_COND_PCT,       /* sc1 */
+        ARG_TOKEN_P2_STOP_COND_PCT,       /* sc2 */
+        ARG_TOKEN_P1_SIM_WITH_INFERENCE,  /* si1 */
+        ARG_TOKEN_P2_SIM_WITH_INFERENCE,  /* si2 */
+        ARG_TOKEN_P1_SAMPLING_RULE,       /* sa1 */
+        ARG_TOKEN_P2_SAMPLING_RULE,       /* sa2 */
+        ARG_TOKEN_P1_THRESHOLD,           /* th1 */
+        ARG_TOKEN_P2_THRESHOLD,           /* th2 */
+        ARG_TOKEN_THRESHOLD,              /* threshold */
+        ARG_TOKEN_P1_TIME_LIMIT,          /* tl1 */
+        ARG_TOKEN_P2_TIME_LIMIT,          /* tl2 */
+        ARG_TOKEN_TIME_LIMIT,             /* tlim */
+        ARG_TOKEN_TT_FRACTION_OF_MEM,     /* ttfraction */
+        ARG_TOKEN_USE_HEAT_MAP,           /* useheatmap */
+        ARG_TOKEN_WRITE_BUFFER_SIZE,      /* wb */
+        ARG_TOKEN_WIN_PCT,                /* winpct */
     };
     // Display Options (alphabetical by name)
     static const arg_token_t display_opts[] = {
@@ -2067,7 +2189,7 @@ void config_fill_infer_args(const Config *config, bool use_game_history,
                             Rack *target_known_rack, Rack *nontarget_known_rack,
                             InferenceArgs *args) {
   infer_args_fill(args, config->num_plays, config->eq_margin_inference,
-                  config->game_history, config->game, config->num_threads,
+                  config->game_history, config->game, config->num_threads, 0,
                   config->print_interval, config->thread_control,
                   use_game_history, use_infer_cutoff_optimization, target_index,
                   target_score, target_num_exch, target_played_tiles,
@@ -2249,18 +2371,17 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
                            &inference_args);
   }
   sim_args_fill(
-      config->plies, config->move_list, known_opp_rack, config->win_pcts,
-      config->inference_results, config->thread_control, config->game,
-      config->sim_with_inference, config->use_heat_map, config->num_threads,
-      config->print_interval, config->max_num_display_plays, config->shplies,
-      config->seed, config->max_iterations, config->min_play_iterations,
-      config->stop_cond_pct, config->threshold, (int)config->time_limit_seconds,
+      config->plies, config->move_list, config->num_plays, known_opp_rack,
+      config->win_pcts, config->inference_results, config->thread_control,
+      config->game, config->sim_with_inference, config->use_heat_map,
+      config->num_threads, config->print_interval,
+      config->max_num_display_plays, config->shplies, config->seed,
+      config->max_iterations, config->min_play_iterations,
+      config->stop_cond_pct, config->threshold, config->time_limit_seconds,
       config->sampling_rule, config->cutoff, &inference_args, sim_args);
 }
 
-void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
-                     SimResults *sim_results, ErrorStack *error_stack) {
-  // Lazy load win_pcts if not already loaded
+void config_load_win_pcts(Config *config, ErrorStack *error_stack) {
   if (config->win_pcts == NULL) {
     const char *win_pct_name =
         config_get_parg_value(config, ARG_TOKEN_WIN_PCT, 0);
@@ -2277,7 +2398,15 @@ void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
       return;
     }
   }
+}
 
+void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
+                     SimResults *sim_results, ErrorStack *error_stack) {
+  // Lazy load win_pcts if not already loaded
+  config_load_win_pcts(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
   SimArgs args;
   const int ld_size = ld_get_size(game_get_ld(config->game));
   Rack target_played_tiles;
@@ -2290,13 +2419,8 @@ void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
   config_fill_sim_args(config, known_opp_rack, &target_played_tiles,
                        &nontarget_known_tiles, &target_known_inference_tiles,
                        &args);
-  if (args.use_inference &&
-      game_history_get_num_events(config->game_history) == 0) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_SIM_GAME_HISTORY_MISSING,
-        string_duplicate(
-            "cannot sim with inference with an empty game history"));
-    return;
+  if (game_history_get_num_events(config->game_history) == 0) {
+    args.use_inference = false;
   }
   if (sim_ctx) {
     simulate(&args, sim_ctx, sim_results, error_stack);
@@ -2343,8 +2467,11 @@ void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  const bool use_inference_for_this_run =
+      config->sim_with_inference &&
+      game_history_get_num_events(config->game_history) > 0;
   bool sim_results_valid = true;
-  if (config->sim_with_inference) {
+  if (use_inference_for_this_run) {
     // This will always set the state to false if it was interrupted
     inference_results_set_valid_for_current_game_state(
         config->inference_results, true);
@@ -2466,13 +2593,79 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->use_game_pairs = config_get_use_game_pairs(config);
   autoplay_args->human_readable = config_get_human_readable(config);
   autoplay_args->print_boards = config->print_boards;
-  autoplay_args->num_threads = config->num_threads;
   autoplay_args->print_interval = config->print_interval;
   autoplay_args->seed = config->seed;
   autoplay_args->thread_control = config_get_thread_control(config);
   autoplay_args->data_paths = config_get_data_paths(config);
   autoplay_args->game_string_options = config->game_string_options;
   config_fill_game_args(config, autoplay_args->game_args);
+  autoplay_args->multi_threading_mode = config->multi_threading_mode;
+  autoplay_args->cutoff = config->cutoff;
+
+  autoplay_args->num_threads = config->num_threads;
+  int num_worker_threads_per_sim = 1;
+  if (autoplay_args->multi_threading_mode ==
+          MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM &&
+      (config->p1_sim_plies > 0 || config->p2_sim_plies > 0)) {
+    autoplay_args->num_threads = 1;
+    num_worker_threads_per_sim = config->num_threads;
+  }
+
+  InferenceArgs inference_args = {0};
+  if (config->p1_sim_with_inference || config->p2_sim_with_inference) {
+    // Autoplay with inference must populate the following InferenceArgs fields
+    // that are left unset here.
+    // At startup:
+    //  - game
+    //  - parent_worker_thread_index;
+    // For each move:
+    //  - target_index
+    //  - target_score
+    //  - int target_num_exch
+    //  - target_played_tiles
+    //  - target_known_rack
+    //  - nontarget_known_rack
+    //  - previous play exists
+    infer_args_fill(&inference_args, 0, config->eq_margin_inference, NULL, NULL,
+                    num_worker_threads_per_sim, 0, config->print_interval,
+                    config->thread_control, false, true, 0, 0, 0, NULL, NULL,
+                    NULL);
+  }
+
+  // Autoplay with sims must populate the following SimArgs fields that are left
+  // unset here.
+  // At startup:
+  //  - move list
+  //  - inference results
+  //  - parent_worker_thread_index;
+  // For each game:
+  //  - seed
+  // For each move:
+  //  - game
+
+  sim_args_fill(
+      config->p1_sim_plies, /*move_list=*/NULL, config->p1_num_plays,
+      /*known_opp_rack=*/NULL, config->win_pcts, /*inference_results=*/NULL,
+      config->thread_control, /*game=*/NULL, config->p1_sim_with_inference,
+      /*use_heat_map=*/false,
+      /*num_threads=*/num_worker_threads_per_sim, /*print_interval=*/0,
+      config->p1_num_plays, config->shplies,
+      /*seed=*/0, config->p1_max_iterations, config->p1_min_play_iterations,
+      config->p1_stop_cond_pct, config->p1_threshold,
+      config->p1_time_limit_seconds, config->p1_sampling_rule, config->cutoff,
+      &inference_args, &autoplay_args->p1_sim_args);
+
+  sim_args_fill(
+      config->p2_sim_plies, /*move_list=*/NULL, config->p2_num_plays,
+      /*known_opp_rack=*/NULL, config->win_pcts, /*inference_results=*/NULL,
+      config->thread_control,
+      /*game=*/NULL, config->p2_sim_with_inference, /*use_heat_map=*/false,
+      /*num_threads=*/num_worker_threads_per_sim, /*print_interval=*/0,
+      config->p2_num_plays, config->shplies,
+      /*seed=*/0, config->p2_max_iterations, config->p2_min_play_iterations,
+      config->p2_stop_cond_pct, config->p2_threshold,
+      config->p2_time_limit_seconds, config->p2_sampling_rule, config->cutoff,
+      &inference_args, &autoplay_args->p2_sim_args);
 }
 
 void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
@@ -2494,6 +2687,13 @@ void impl_autoplay(Config *config, ErrorStack *error_stack) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
                      string_duplicate("cannot autoplay without lexicon"));
     return;
+  }
+
+  if (config->p1_sim_plies > 0 || config->p2_sim_plies > 0) {
+    config_load_win_pcts(config, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
   }
 
   autoplay_results_set_options(
@@ -4718,7 +4918,6 @@ void config_load_parsed_args(Config *config,
 
   for (int i = 0; i < number_of_input_strs; i++) {
     const char *input_str = string_splitter_get_item(cmd_split_string, i);
-
     bool is_cmd = i == 0;
     bool is_arg = string_length(input_str) > 1 && input_str[0] == '-' &&
                   !isdigit(input_str[1]);
@@ -5514,8 +5713,8 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_uint64(config, ARG_TOKEN_TIME_LIMIT, 0,
-                     &config->time_limit_seconds, error_stack);
+  config_load_int(config, ARG_TOKEN_TIME_LIMIT, 0, INT_MAX,
+                  &config->time_limit_seconds, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -5901,6 +6100,218 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       return;
     }
     config->cutoff = convert_user_cutoff_to_cutoff(user_cutoff);
+  }
+
+  // Per-player sim options (global overwrites p1/p2 if user provided it, then
+  // per-player tokens override)
+
+  if (config_get_parg_value(config, ARG_TOKEN_PLIES, 0) != NULL) {
+    config->p1_sim_plies = config->plies;
+    config->p2_sim_plies = config->plies;
+  }
+  config_load_int(config, ARG_TOKEN_P1_SIM_PLIES, 0, MAX_PLIES,
+                  &config->p1_sim_plies, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_int(config, ARG_TOKEN_P2_SIM_PLIES, 0, MAX_PLIES,
+                  &config->p2_sim_plies, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  if (config_get_parg_value(config, ARG_TOKEN_NUMBER_OF_PLAYS, 0) != NULL) {
+    config->p1_num_plays = config->num_plays;
+    config->p2_num_plays = config->num_plays;
+  }
+  config_load_int(config, ARG_TOKEN_P1_NUM_PLAYS, 1, INT_MAX,
+                  &config->p1_num_plays, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_int(config, ARG_TOKEN_P2_NUM_PLAYS, 1, INT_MAX,
+                  &config->p2_num_plays, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  if (config_get_parg_value(config, ARG_TOKEN_STOP_COND_PCT, 0) != NULL) {
+    config->p1_stop_cond_pct = config->stop_cond_pct;
+    config->p2_stop_cond_pct = config->stop_cond_pct;
+  }
+  const char *p1_stop_cond_str =
+      config_get_parg_value(config, ARG_TOKEN_P1_STOP_COND_PCT, 0);
+  if (p1_stop_cond_str && has_iprefix(p1_stop_cond_str, "none")) {
+    config->p1_stop_cond_pct = 1000;
+  } else {
+    config_load_double(config, ARG_TOKEN_P1_STOP_COND_PCT, 1e-10, 100 - 1e-10,
+                       &config->p1_stop_cond_pct, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  const char *p2_stop_cond_str =
+      config_get_parg_value(config, ARG_TOKEN_P2_STOP_COND_PCT, 0);
+  if (p2_stop_cond_str && has_iprefix(p2_stop_cond_str, "none")) {
+    config->p2_stop_cond_pct = 1000;
+  } else {
+    config_load_double(config, ARG_TOKEN_P2_STOP_COND_PCT, 1e-10, 100 - 1e-10,
+                       &config->p2_stop_cond_pct, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  if (config_get_parg_value(config, ARG_TOKEN_MAX_ITERATIONS, 0) != NULL) {
+    config->p1_max_iterations = config->max_iterations;
+    config->p2_max_iterations = config->max_iterations;
+  }
+  config_load_uint64(config, ARG_TOKEN_P1_MAX_ITERATIONS, 1,
+                     &config->p1_max_iterations, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_uint64(config, ARG_TOKEN_P2_MAX_ITERATIONS, 1,
+                     &config->p2_max_iterations, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  if (config_get_parg_value(config, ARG_TOKEN_MIN_PLAY_ITERATIONS, 0) != NULL) {
+    config->p1_min_play_iterations = config->min_play_iterations;
+    config->p2_min_play_iterations = config->min_play_iterations;
+  }
+  config_load_uint64(config, ARG_TOKEN_P1_MIN_PLAY_ITERATIONS, 1,
+                     &config->p1_min_play_iterations, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_uint64(config, ARG_TOKEN_P2_MIN_PLAY_ITERATIONS, 1,
+                     &config->p2_min_play_iterations, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  if (config_get_parg_value(config, ARG_TOKEN_SIM_WITH_INFERENCE, 0) != NULL) {
+    config->p1_sim_with_inference = config->sim_with_inference;
+    config->p2_sim_with_inference = config->sim_with_inference;
+  }
+  config_load_bool(config, ARG_TOKEN_P1_SIM_WITH_INFERENCE,
+                   &config->p1_sim_with_inference, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_bool(config, ARG_TOKEN_P2_SIM_WITH_INFERENCE,
+                   &config->p2_sim_with_inference, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  if (config_get_parg_value(config, ARG_TOKEN_TIME_LIMIT, 0) != NULL) {
+    config->p1_time_limit_seconds = config->time_limit_seconds;
+    config->p2_time_limit_seconds = config->time_limit_seconds;
+  }
+  config_load_int(config, ARG_TOKEN_P1_TIME_LIMIT, 0, INT_MAX,
+                  &config->p1_time_limit_seconds, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_int(config, ARG_TOKEN_P2_TIME_LIMIT, 0, INT_MAX,
+                  &config->p2_time_limit_seconds, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  if (config_get_parg_value(config, ARG_TOKEN_THRESHOLD, 0) != NULL) {
+    config->p1_threshold = config->threshold;
+    config->p2_threshold = config->threshold;
+  }
+  const char *p1_threshold =
+      config_get_parg_value(config, ARG_TOKEN_P1_THRESHOLD, 0);
+  if (p1_threshold) {
+    if (has_iprefix(p1_threshold, BAI_THRESHOLD_NONE_STRING)) {
+      config->p1_threshold = BAI_THRESHOLD_NONE;
+    } else if (has_iprefix(p1_threshold, BAI_THRESHOLD_GK16_STRING)) {
+      config->p1_threshold = BAI_THRESHOLD_GK16;
+    } else {
+      error_stack_push(error_stack,
+                       ERROR_STATUS_CONFIG_LOAD_MALFORMED_THRESHOLD,
+                       get_formatted_string("unrecognized threshold type: %s",
+                                            p1_threshold));
+      return;
+    }
+  }
+  const char *p2_threshold =
+      config_get_parg_value(config, ARG_TOKEN_P2_THRESHOLD, 0);
+  if (p2_threshold) {
+    if (has_iprefix(p2_threshold, BAI_THRESHOLD_NONE_STRING)) {
+      config->p2_threshold = BAI_THRESHOLD_NONE;
+    } else if (has_iprefix(p2_threshold, BAI_THRESHOLD_GK16_STRING)) {
+      config->p2_threshold = BAI_THRESHOLD_GK16;
+    } else {
+      error_stack_push(error_stack,
+                       ERROR_STATUS_CONFIG_LOAD_MALFORMED_THRESHOLD,
+                       get_formatted_string("unrecognized threshold type: %s",
+                                            p2_threshold));
+      return;
+    }
+  }
+
+  if (config_get_parg_value(config, ARG_TOKEN_SAMPLING_RULE, 0) != NULL) {
+    config->p1_sampling_rule = config->sampling_rule;
+    config->p2_sampling_rule = config->sampling_rule;
+  }
+  const char *p1_sampling_rule =
+      config_get_parg_value(config, ARG_TOKEN_P1_SAMPLING_RULE, 0);
+  if (p1_sampling_rule) {
+    if (has_iprefix(p1_sampling_rule, BAI_SAMPLING_RULE_ROUND_ROBIN_STRING)) {
+      config->p1_sampling_rule = BAI_SAMPLING_RULE_ROUND_ROBIN;
+    } else if (has_iprefix(p1_sampling_rule,
+                           BAI_SAMPLING_RULE_TOP_TWO_IDS_STRING)) {
+      config->p1_sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
+    } else {
+      error_stack_push(error_stack,
+                       ERROR_STATUS_CONFIG_LOAD_MALFORMED_SAMPLING_RULE,
+                       get_formatted_string("unrecognized sampling rule: %s",
+                                            p1_sampling_rule));
+      return;
+    }
+  }
+  const char *p2_sampling_rule =
+      config_get_parg_value(config, ARG_TOKEN_P2_SAMPLING_RULE, 0);
+  if (p2_sampling_rule) {
+    if (has_iprefix(p2_sampling_rule, BAI_SAMPLING_RULE_ROUND_ROBIN_STRING)) {
+      config->p2_sampling_rule = BAI_SAMPLING_RULE_ROUND_ROBIN;
+    } else if (has_iprefix(p2_sampling_rule,
+                           BAI_SAMPLING_RULE_TOP_TWO_IDS_STRING)) {
+      config->p2_sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
+    } else {
+      error_stack_push(error_stack,
+                       ERROR_STATUS_CONFIG_LOAD_MALFORMED_SAMPLING_RULE,
+                       get_formatted_string("unrecognized sampling rule: %s",
+                                            p2_sampling_rule));
+      return;
+    }
+  }
+
+  const char *mtmode_str =
+      config_get_parg_value(config, ARG_TOKEN_MULTI_THREADING_MODE, 0);
+  if (mtmode_str) {
+    if (has_iprefix(mtmode_str,
+                    MULTI_THREADING_MODE_PER_GAME_PARALLELISM_STRING)) {
+      config->multi_threading_mode = MULTI_THREADING_MODE_PER_GAME_PARALLELISM;
+    } else if (has_iprefix(
+                   mtmode_str,
+                   MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM_STRING)) {
+      config->multi_threading_mode =
+          MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM;
+    } else {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
+          get_formatted_string("unrecognized multi-threading mode: %s",
+                               mtmode_str));
+      return;
+    }
   }
 
   // Non-lexical player data
@@ -6318,6 +6729,25 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_SAMPLING_RULE, "sr", 1, 1);
   arg(ARG_TOKEN_THRESHOLD, "threshold", 1, 1);
   arg(ARG_TOKEN_CUTOFF, "cutoff", 1, 1);
+  arg(ARG_TOKEN_P1_SIM_PLIES, "pl1", 1, 1);
+  arg(ARG_TOKEN_P2_SIM_PLIES, "pl2", 1, 1);
+  arg(ARG_TOKEN_P1_NUM_PLAYS, "np1", 1, 1);
+  arg(ARG_TOKEN_P2_NUM_PLAYS, "np2", 1, 1);
+  arg(ARG_TOKEN_P1_STOP_COND_PCT, "sc1", 1, 1);
+  arg(ARG_TOKEN_P2_STOP_COND_PCT, "sc2", 1, 1);
+  arg(ARG_TOKEN_P1_MAX_ITERATIONS, "i1", 1, 1);
+  arg(ARG_TOKEN_P2_MAX_ITERATIONS, "i2", 1, 1);
+  arg(ARG_TOKEN_P1_MIN_PLAY_ITERATIONS, "mi1", 1, 1);
+  arg(ARG_TOKEN_P2_MIN_PLAY_ITERATIONS, "mi2", 1, 1);
+  arg(ARG_TOKEN_P1_SIM_WITH_INFERENCE, "si1", 1, 1);
+  arg(ARG_TOKEN_P2_SIM_WITH_INFERENCE, "si2", 1, 1);
+  arg(ARG_TOKEN_P1_TIME_LIMIT, "tl1", 1, 1);
+  arg(ARG_TOKEN_P2_TIME_LIMIT, "tl2", 1, 1);
+  arg(ARG_TOKEN_P1_THRESHOLD, "th1", 1, 1);
+  arg(ARG_TOKEN_P2_THRESHOLD, "th2", 1, 1);
+  arg(ARG_TOKEN_P1_SAMPLING_RULE, "sa1", 1, 1);
+  arg(ARG_TOKEN_P2_SAMPLING_RULE, "sa2", 1, 1);
+  arg(ARG_TOKEN_MULTI_THREADING_MODE, "mtmode", 1, 1);
   arg(ARG_TOKEN_PRINT_BOARDS, "printboards", 1, 1);
   arg(ARG_TOKEN_BOARD_COLOR, "boardcolor", 1, 1);
   arg(ARG_TOKEN_BOARD_TILE_GLYPHS, "boardtiles", 1, 1);
@@ -6378,6 +6808,25 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->use_small_plays = false;
   config->human_readable = true;
   config->sim_with_inference = false;
+  config->p1_sim_plies = 0;
+  config->p2_sim_plies = 0;
+  config->p1_num_plays = config->num_plays;
+  config->p2_num_plays = config->num_plays;
+  config->p1_stop_cond_pct = config->stop_cond_pct;
+  config->p2_stop_cond_pct = config->stop_cond_pct;
+  config->p1_max_iterations = config->max_iterations;
+  config->p2_max_iterations = config->max_iterations;
+  config->p1_min_play_iterations = config->min_play_iterations;
+  config->p2_min_play_iterations = config->min_play_iterations;
+  config->p1_sim_with_inference = config->sim_with_inference;
+  config->p2_sim_with_inference = config->sim_with_inference;
+  config->p1_time_limit_seconds = config->time_limit_seconds;
+  config->p2_time_limit_seconds = config->time_limit_seconds;
+  config->p1_threshold = config->threshold;
+  config->p2_threshold = config->threshold;
+  config->p1_sampling_rule = config->sampling_rule;
+  config->p2_sampling_rule = config->sampling_rule;
+  config->multi_threading_mode = MULTI_THREADING_MODE_PER_GAME_PARALLELISM;
   config->use_heat_map = false;
   config->print_boards = false;
   config->print_on_finish = false;
@@ -6460,7 +6909,7 @@ void config_add_uint64_setting_to_string_builder(const Config *config,
                                                  StringBuilder *sb,
                                                  arg_token_t arg_token,
                                                  uint64_t value) {
-  string_builder_add_formatted_string(sb, " -%s %lu",
+  string_builder_add_formatted_string(sb, " -%s %" PRIu64,
                                       config->pargs[arg_token]->name, value);
 }
 
@@ -6523,6 +6972,18 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_NOTE:
     case ARG_TOKEN_P1_NAME:
     case ARG_TOKEN_P2_NAME:
+      break;
+    case ARG_TOKEN_MULTI_THREADING_MODE:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      if (config->multi_threading_mode ==
+          MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM) {
+        string_builder_add_string(
+            sb, MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM_STRING);
+      } else {
+        string_builder_add_string(
+            sb, MULTI_THREADING_MODE_PER_GAME_PARALLELISM_STRING);
+      }
       break;
     case ARG_TOKEN_DATA_PATH:
       config_add_string_setting_to_string_builder(config, sb, arg_token,
@@ -6627,6 +7088,14 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->plies);
       break;
+    case ARG_TOKEN_P1_SIM_PLIES:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->p1_sim_plies);
+      break;
+    case ARG_TOKEN_P2_SIM_PLIES:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->p2_sim_plies);
+      break;
     case ARG_TOKEN_SHPLIES:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->shplies);
@@ -6643,6 +7112,14 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->num_plays);
       break;
+    case ARG_TOKEN_P1_NUM_PLAYS:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->p1_num_plays);
+      break;
+    case ARG_TOKEN_P2_NUM_PLAYS:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->p2_num_plays);
+      break;
     case ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->max_num_display_plays);
@@ -6655,9 +7132,35 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_uint64_setting_to_string_builder(config, sb, arg_token,
                                                   config->max_iterations);
       break;
+    case ARG_TOKEN_P1_MAX_ITERATIONS:
+      config_add_uint64_setting_to_string_builder(config, sb, arg_token,
+                                                  config->p1_max_iterations);
+      break;
+    case ARG_TOKEN_P2_MAX_ITERATIONS:
+      config_add_uint64_setting_to_string_builder(config, sb, arg_token,
+                                                  config->p2_max_iterations);
+      break;
     case ARG_TOKEN_STOP_COND_PCT:
       config_add_double_setting_to_string_builder(config, sb, arg_token,
                                                   config->stop_cond_pct);
+      break;
+    case ARG_TOKEN_P1_STOP_COND_PCT:
+      if (config->p1_stop_cond_pct >= 100.0) {
+        config_add_string_setting_to_string_builder(config, sb, arg_token,
+                                                    "none");
+      } else {
+        config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                    config->p1_stop_cond_pct);
+      }
+      break;
+    case ARG_TOKEN_P2_STOP_COND_PCT:
+      if (config->p2_stop_cond_pct >= 100.0) {
+        config_add_string_setting_to_string_builder(config, sb, arg_token,
+                                                    "none");
+      } else {
+        config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                    config->p2_stop_cond_pct);
+      }
       break;
     case ARG_TOKEN_INFERENCE_MARGIN:
       if (config->eq_margin_inference != 0) {
@@ -6676,6 +7179,14 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_uint64_setting_to_string_builder(config, sb, arg_token,
                                                   config->min_play_iterations);
       break;
+    case ARG_TOKEN_P1_MIN_PLAY_ITERATIONS:
+      config_add_uint64_setting_to_string_builder(
+          config, sb, arg_token, config->p1_min_play_iterations);
+      break;
+    case ARG_TOKEN_P2_MIN_PLAY_ITERATIONS:
+      config_add_uint64_setting_to_string_builder(
+          config, sb, arg_token, config->p2_min_play_iterations);
+      break;
     case ARG_TOKEN_USE_GAME_PAIRS:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->use_game_pairs);
@@ -6687,6 +7198,14 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_SIM_WITH_INFERENCE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->sim_with_inference);
+      break;
+    case ARG_TOKEN_P1_SIM_WITH_INFERENCE:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->p1_sim_with_inference);
+      break;
+    case ARG_TOKEN_P2_SIM_WITH_INFERENCE:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->p2_sim_with_inference);
       break;
     case ARG_TOKEN_USE_HEAT_MAP:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
@@ -6725,18 +7244,46 @@ void config_add_settings_to_string_builder(const Config *config,
                                                   config->tt_fraction_of_mem);
       break;
     case ARG_TOKEN_TIME_LIMIT:
-      config_add_uint64_setting_to_string_builder(config, sb, arg_token,
-                                                  config->time_limit_seconds);
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->time_limit_seconds);
+      break;
+    case ARG_TOKEN_P1_TIME_LIMIT:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->p1_time_limit_seconds);
+      break;
+    case ARG_TOKEN_P2_TIME_LIMIT:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->p2_time_limit_seconds);
       break;
     case ARG_TOKEN_SAMPLING_RULE:
       string_builder_add_formatted_string(sb, " -%s ",
                                           config->pargs[arg_token]->name);
       string_builder_add_sampling_rule(sb, config->sampling_rule);
       break;
+    case ARG_TOKEN_P1_SAMPLING_RULE:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_sampling_rule(sb, config->p1_sampling_rule);
+      break;
+    case ARG_TOKEN_P2_SAMPLING_RULE:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_sampling_rule(sb, config->p2_sampling_rule);
+      break;
     case ARG_TOKEN_THRESHOLD:
       string_builder_add_formatted_string(sb, " -%s ",
                                           config->pargs[arg_token]->name);
       string_builder_add_threshold(sb, config->threshold);
+      break;
+    case ARG_TOKEN_P1_THRESHOLD:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_threshold(sb, config->p1_threshold);
+      break;
+    case ARG_TOKEN_P2_THRESHOLD:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_threshold(sb, config->p2_threshold);
       break;
     case ARG_TOKEN_CUTOFF:
       config_add_double_setting_to_string_builder(

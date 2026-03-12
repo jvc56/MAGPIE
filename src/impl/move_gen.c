@@ -2065,7 +2065,7 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
     leave_map_set_current_value(&gen->leave_map, EQUITY_INITIAL_VALUE);
   }
 
-  for (int i = 0; i < (RACK_SIZE); i++) {
+  for (int i = 0; i < (RACK_SIZE + 1); i++) {
     gen->best_leaves[i] = EQUITY_INITIAL_VALUE;
   }
 
@@ -2091,7 +2091,7 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
                       (RACK_SIZE * 2);
   generate_exchange_moves(gen, &gen->leave, node_index, 0, 0, add_exchange);
   if (!check_leaves) {
-    for (int i = 0; i < RACK_SIZE; i++) {
+    for (int i = 0; i < RACK_SIZE + 1; i++) {
       gen->best_leaves[i] = 0;
     }
   }
