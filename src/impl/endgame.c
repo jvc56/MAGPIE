@@ -1339,8 +1339,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
     int pass_penalty = 0;
     if (conserve && worker->solver->forced_pass_bypass) {
       const LetterDistribution *ld = game_get_ld(worker->game_copy);
-      const Rack *own_rack = player_get_rack(
-          game_get_player(worker->game_copy, playout_on_turn));
+      const Rack *own_rack =
+          player_get_rack(game_get_player(worker->game_copy, playout_on_turn));
       const Rack *opp_rack = player_get_rack(
           game_get_player(worker->game_copy, 1 - playout_on_turn));
       pass_penalty =
