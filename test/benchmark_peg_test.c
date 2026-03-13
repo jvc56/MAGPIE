@@ -26,6 +26,7 @@
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
 #include "../src/util/string_util.h"
+#include "../src/str/endgame_string.h"
 #include "../src/str/rack_string.h"
 #include "test_util.h"
 #include <assert.h>
@@ -183,7 +184,7 @@ static char *format_endgame_pv(EndgameResults *results) {
 // PEG stage ranking tracker
 // ---------------------------------------------------------------------------
 
-enum { BENCH_TRACK_LIMIT = 64 };
+enum { BENCH_TRACK_LIMIT = 256 };
 
 typedef struct {
   char target_move_str[256];
@@ -917,10 +918,10 @@ void test_benchmark_peg1(void) {
   log_set_level(LOG_FATAL);
 
   PegBenchConfig peg = {
-      .label = "5-stg first_win",
-      .num_stages = 5,
-      .stage_limits = {16, 8, 4, 2},
-      .num_limits = 4,
+      .label = "4-stg {200,20,16}",
+      .num_stages = 4,
+      .stage_limits = {200, 20, 16},
+      .num_limits = 3,
       .first_win_mode = PEG_FIRST_WIN_WIN_PCT_THEN_SPREAD,
       .first_win_spread_all_final = true,
       .tt_fraction = 0.5,
@@ -928,8 +929,463 @@ void test_benchmark_peg1(void) {
   };
 
   // Endgame playout time budgets per scenario.
-  double soft_time = 5.0;
-  double hard_time = 5.0;
+  double soft_time = 2.0;
+  double hard_time = 2.0;
 
   run_peg1_ab_benchmark("/tmp/peg1_cgps.txt", &peg, soft_time, hard_time, 500);
+}
+
+void test_benchmark_peg1_wide(void) {
+  log_set_level(LOG_FATAL);
+
+  PegBenchConfig peg = {
+      .label = "4-stg wide {256,16,4}",
+      .num_stages = 4,
+      .stage_limits = {256, 16, 4},
+      .num_limits = 3,
+      .first_win_mode = PEG_FIRST_WIN_WIN_PCT_THEN_SPREAD,
+      .first_win_spread_all_final = true,
+      .tt_fraction = 0.5,
+      .early_cutoff = true,
+  };
+
+  double soft_time = 2.0;
+  double hard_time = 2.0;
+
+  run_peg1_ab_benchmark("/tmp/peg1_static_better_5.txt", &peg, soft_time,
+                        hard_time, 5);
+}
+
+// Format a PVLine into a string builder with move notation and end-of-game
+// annotations. '|' separates negamax-proven moves from greedy extension.
+static void format_pvline_bench(StringBuilder *sb, const PVLine *pv_line,
+                                const Game *game) {
+  const LetterDistribution *ld = game_get_ld(game);
+  Move move;
+  Game *gc = game_duplicate(game);
+  for (int i = 0; i < pv_line->num_moves; i++) {
+    small_move_to_move(&move, &(pv_line->moves[i]), game_get_board(gc));
+    string_builder_add_move(sb, game_get_board(gc), &move, ld, true);
+    play_move(&move, gc, NULL);
+    if (game_get_game_end_reason(gc) == GAME_END_REASON_STANDARD) {
+      int opp_idx = game_get_player_on_turn_index(gc);
+      const Rack *opp_rack = player_get_rack(game_get_player(gc, opp_idx));
+      int adj = equity_to_int(calculate_end_rack_points(opp_rack, ld));
+      string_builder_add_string(sb, " (");
+      string_builder_add_rack(sb, opp_rack, ld, false);
+      string_builder_add_formatted_string(sb, " +%d)", adj);
+    }
+    if (i < pv_line->num_moves - 1) {
+      if (i + 1 == pv_line->negamax_depth && pv_line->negamax_depth > 0) {
+        string_builder_add_string(sb, " |");
+      }
+      string_builder_add_string(sb, " ");
+    }
+  }
+  game_destroy(gc);
+}
+
+static void append_outcome_bench(StringBuilder *sb, const Game *game,
+                                 int32_t spread_delta) {
+  int on_turn = game_get_player_on_turn_index(game);
+  int p1 = equity_to_int(player_get_score(game_get_player(game, 0)));
+  int p2 = equity_to_int(player_get_score(game_get_player(game, 1)));
+  int final_spread =
+      (p1 - p2) + (on_turn == 0 ? spread_delta : -spread_delta);
+  if (final_spread > 0) {
+    string_builder_add_formatted_string(sb, " [P1 wins by %d]", final_spread);
+  } else if (final_spread < 0) {
+    string_builder_add_formatted_string(sb, " [P2 wins by %d]", -final_spread);
+  } else {
+    string_builder_add_string(sb, " [Tie]");
+  }
+}
+
+// Per-ply callback that prints the PV and all ranked root moves.
+static void pos6_per_ply_callback(int depth, int32_t value,
+                                  const PVLine *pv_line, const Game *game,
+                                  const PVLine *ranked_pvs,
+                                  int num_ranked_pvs, void *user_data) {
+  const Timer *timer = (const Timer *)user_data;
+  double elapsed = ctimer_elapsed_seconds(timer);
+
+  // Print best PV
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_formatted_string(
+      sb, "  depth %d: value=%d, time=%.3fs, pv=", depth, value, elapsed);
+  format_pvline_bench(sb, pv_line, game);
+  append_outcome_bench(sb, game, value);
+  printf("%s\n", string_builder_peek(sb));
+  string_builder_destroy(sb);
+
+  // Print ranked root moves
+  for (int i = 0; i < num_ranked_pvs; i++) {
+    sb = string_builder_create();
+    string_builder_add_formatted_string(sb, "    %2d. value=%d, pv=", i + 1,
+                                        ranked_pvs[i].score);
+    format_pvline_bench(sb, &ranked_pvs[i], game);
+    append_outcome_bench(sb, game, ranked_pvs[i].score);
+    printf("%s\n", string_builder_peek(sb));
+    string_builder_destroy(sb);
+  }
+  (void)fflush(stdout);
+}
+
+void test_peg_pos6_endgame(void) {
+  log_set_level(LOG_WARN);
+
+  const char *cgp =
+      "7B4T1E/5V1O3BO1n/2FEVERS3OF1A/"
+      "WREN1N1H3NU1M/4ZOA4D2O/"
+      "3JAM5I2U/4X2QUAINTER/"
+      "3CEILI3G2S/PALEST5S3/"
+      "I2L3GAWK4/TAILPIpE7/"
+      "C2I2ADORNER2/H14/E14/"
+      "D14 EEGNORY/ADIOTUY 370/452 0";
+
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -threads 8 -s1 score -s2 score -r1 small -r2 small");
+  exec_config_quiet_peg(config, "new");
+  Game *game = config_get_game(config);
+
+  ErrorStack *err = error_stack_create();
+  game_load_cgp(game, cgp, err);
+  assert(error_stack_is_empty(err));
+  error_stack_destroy(err);
+
+  int mover_idx = game_get_player_on_turn_index(game);
+  int opp_idx = 1 - mover_idx;
+  const LetterDistribution *ld = game_get_ld(game);
+  int ld_size = ld_get_size(ld);
+
+  // Drain the bag.
+  game_set_endgame_solving_mode(game);
+  game_set_backup_mode(game, BACKUP_MODE_OFF);
+  {
+    Bag *bag = game_get_bag(game);
+    for (int ml = 0; ml < ld_size; ml++)
+      while (bag_get_letter(bag, ml) > 0)
+        bag_draw_letter(bag, (MachineLetter)ml, mover_idx);
+  }
+
+  // Play 11K EYEN for mover.
+  // Generate moves and find EYEN.
+  MoveList *ml = move_list_create(512);
+  {
+    const MoveGenArgs gen_args = {
+        .game = game,
+        .move_list = ml,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .thread_index = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    generate_moves(&gen_args);
+  }
+  Move eyen_move;
+  bool found_eyen = false;
+  for (int i = 0; i < ml->count; i++) {
+    const Move *mov = move_list_get_move(ml, i);
+    char *ms = format_move(game, mov);
+    if (strstr(ms, "EYEN") && strstr(ms, "11K")) {
+      move_copy(&eyen_move, mov);
+      found_eyen = true;
+      printf("Playing: %s\n", ms);
+      free(ms);
+      break;
+    }
+    free(ms);
+  }
+  assert(found_eyen);
+  play_move(&eyen_move, game, NULL);
+
+  // Fix false game-end from playing on empty bag.
+  if (game_get_game_end_reason(game) == GAME_END_REASON_STANDARD) {
+    Equity bonus = calculate_end_rack_points(
+        player_get_rack(game_get_player(game, opp_idx)), ld);
+    player_add_to_score(game_get_player(game, mover_idx), -bonus);
+    game_set_game_end_reason(game, GAME_END_REASON_NONE);
+  }
+
+  // Set racks for draw D scenario.
+  // Unseen from mover's perspective: ADIOTUY + T = {A,D,I,O,T,T,U,Y}
+  // Draw D: mover gets D added to remaining rack (GOR -> DGOR)
+  // Opponent gets unseen - D = {A,I,O,T,T,U,Y}
+  uint8_t unseen[MAX_ALPHABET_SIZE];
+  bench_compute_unseen(game, mover_idx, unseen);
+
+  // We need to figure out the ML for 'D'.
+  MachineLetter ml_D = ld_hl_to_ml(ld, "D");
+
+  Rack *opp_rack = player_get_rack(game_get_player(game, opp_idx));
+  rack_reset(opp_rack);
+  for (int t = 0; t < ld_size; t++) {
+    int cnt = (int)unseen[t] - (t == ml_D ? 1 : 0);
+    for (int k = 0; k < cnt; k++)
+      rack_add_letter(opp_rack, (MachineLetter)t);
+  }
+  Rack *mover_rack = player_get_rack(game_get_player(game, mover_idx));
+  rack_add_letter(mover_rack, ml_D);
+
+  // Now opponent is on turn. Generate moves and find OUTPITCHED.
+  {
+    const MoveGenArgs gen_args = {
+        .game = game,
+        .move_list = ml,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .thread_index = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    generate_moves(&gen_args);
+  }
+  Move outpitched_move;
+  bool found_otp = false;
+  for (int i = 0; i < ml->count; i++) {
+    const Move *mov = move_list_get_move(ml, i);
+    char *ms = format_move(game, mov);
+    if (strstr(ms, "OUT") && strstr(ms, "PITCHED")) {
+      move_copy(&outpitched_move, mov);
+      found_otp = true;
+      printf("Playing: %s\n", ms);
+      free(ms);
+      break;
+    }
+    free(ms);
+  }
+  assert(found_otp);
+  play_move(&outpitched_move, game, NULL);
+
+  // Fix false game-end again.
+  if (game_get_game_end_reason(game) == GAME_END_REASON_STANDARD) {
+    Equity bonus = calculate_end_rack_points(
+        player_get_rack(game_get_player(game, mover_idx)), ld);
+    player_add_to_score(game_get_player(game, opp_idx), -bonus);
+    game_set_game_end_reason(game, GAME_END_REASON_NONE);
+  }
+
+  // Show the position.
+  printf("\n--- After EYEN + draw D + OUTPITCHED ---\n");
+  {
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_game(game, NULL, NULL, NULL, sb);
+    char *s = string_builder_dump(sb, NULL);
+    printf("%s", s);
+    free(s);
+    string_builder_destroy(sb);
+  }
+
+  // Generate top 20 moves for mover.
+  {
+    const MoveGenArgs gen_args = {
+        .game = game,
+        .move_list = ml,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .thread_index = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    generate_moves(&gen_args);
+  }
+  move_list_sort_moves(ml);
+  int show = ml->count < 20 ? ml->count : 20;
+  printf("\nTop %d of %d moves by equity:\n", show, ml->count);
+  for (int i = 0; i < show; i++) {
+    const Move *mov = move_list_get_move(ml, i);
+    char *ms = format_move(game, mov);
+    StringBuilder *eq_sb = string_builder_create();
+    string_builder_add_equity(eq_sb, move_get_equity(mov), "%+.2f");
+    char *eq_str = string_builder_dump(eq_sb, NULL);
+    printf("  %2d. %-24s  equity=%s  score=%d\n", i + 1, ms, eq_str,
+           equity_to_int(move_get_score(mov)));
+    free(eq_str);
+    string_builder_destroy(eq_sb);
+    free(ms);
+  }
+
+  // Endgame solve with top 20 moves and per-ply ranked output.
+  printf("\n--- Endgame Solve (top 20 variations) ---\n");
+  (void)fflush(stdout);
+
+  Timer eg_timer;
+  ctimer_start(&eg_timer);
+
+  TranspositionTable *shared_tt = transposition_table_create(0.5);
+  EndgameSolver *solver = endgame_solver_create();
+  EndgameResults *results = endgame_results_create();
+
+  EndgameArgs ea = {
+      .thread_control = config_get_thread_control(config),
+      .game = game,
+      .plies = MAX_SEARCH_DEPTH,
+      .shared_tt = shared_tt,
+      .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+      .num_threads = 8,
+      .use_heuristics = true,
+      .num_top_moves = 20,
+      .soft_time_limit = 10.0,
+      .hard_time_limit = 30.0,
+      .skip_word_pruning = true,
+      .per_ply_callback = pos6_per_ply_callback,
+      .per_ply_callback_data = &eg_timer,
+  };
+  ErrorStack *es = error_stack_create();
+  endgame_solve(solver, &ea, results, es);
+  assert(error_stack_is_empty(es));
+  error_stack_destroy(es);
+
+  char *pv_str =
+      endgame_results_get_string(results, game, NULL, true);
+  printf("%s\n", pv_str);
+  free(pv_str);
+
+  endgame_results_destroy(results);
+  endgame_solver_destroy(solver);
+
+  // --- Now play (O)D and show opponent's top moves ---
+  printf("\n=== After mover plays 6A (O)D ===\n");
+
+  // Find and play (O)D
+  {
+    const MoveGenArgs gen_args = {
+        .game = game,
+        .move_list = ml,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .thread_index = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    generate_moves(&gen_args);
+  }
+  Move od_move;
+  bool found_od = false;
+  for (int i = 0; i < ml->count; i++) {
+    const Move *mov = move_list_get_move(ml, i);
+    char *ms = format_move(game, mov);
+    if (strstr(ms, "6A") && strstr(ms, "D") && move_get_score(mov) == int_to_equity(7)) {
+      move_copy(&od_move, mov);
+      found_od = true;
+      printf("Playing: %s\n", ms);
+      free(ms);
+      break;
+    }
+    free(ms);
+  }
+  assert(found_od);
+  play_move(&od_move, game, NULL);
+
+  // Show position after (O)D
+  {
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_game(game, NULL, NULL, NULL, sb);
+    char *s = string_builder_dump(sb, NULL);
+    printf("%s", s);
+    free(s);
+    string_builder_destroy(sb);
+  }
+
+  // Generate opponent's top 20 moves
+  {
+    const MoveGenArgs gen_args = {
+        .game = game,
+        .move_list = ml,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .thread_index = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    generate_moves(&gen_args);
+  }
+  move_list_sort_moves(ml);
+  show = ml->count < 20 ? ml->count : 20;
+  printf("\nOpponent's top %d of %d moves by equity:\n", show, ml->count);
+  for (int i = 0; i < show; i++) {
+    const Move *mov = move_list_get_move(ml, i);
+    char *ms = format_move(game, mov);
+    StringBuilder *eq_sb = string_builder_create();
+    string_builder_add_equity(eq_sb, move_get_equity(mov), "%+.2f");
+    char *eq_str = string_builder_dump(eq_sb, NULL);
+    printf("  %2d. %-24s  equity=%s  score=%d\n", i + 1, ms, eq_str,
+           equity_to_int(move_get_score(mov)));
+    free(eq_str);
+    string_builder_destroy(eq_sb);
+    free(ms);
+  }
+
+  // Endgame solve from opponent's perspective with top 20
+  printf("\n--- Opponent Endgame Solve (top 20 variations) ---\n");
+  (void)fflush(stdout);
+
+  Timer eg_timer2;
+  ctimer_start(&eg_timer2);
+
+  EndgameSolver *solver2 = endgame_solver_create();
+  EndgameResults *results2 = endgame_results_create();
+
+  EndgameArgs ea2 = {
+      .thread_control = config_get_thread_control(config),
+      .game = game,
+      .plies = MAX_SEARCH_DEPTH,
+      .shared_tt = shared_tt,
+      .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+      .num_threads = 8,
+      .use_heuristics = true,
+      .num_top_moves = 20,
+      .soft_time_limit = 10.0,
+      .hard_time_limit = 30.0,
+      .skip_word_pruning = true,
+      .per_ply_callback = pos6_per_ply_callback,
+      .per_ply_callback_data = &eg_timer2,
+  };
+  ErrorStack *es2 = error_stack_create();
+  endgame_solve(solver2, &ea2, results2, es2);
+  assert(error_stack_is_empty(es2));
+  error_stack_destroy(es2);
+
+  char *pv_str2 =
+      endgame_results_get_string(results2, game, NULL, true);
+  printf("%s\n", pv_str2);
+  free(pv_str2);
+
+  endgame_results_destroy(results2);
+  endgame_solver_destroy(solver2);
+  transposition_table_destroy(shared_tt);
+  move_list_destroy(ml);
+  config_destroy(config);
+}
+
+void test_peg_pos8(void) {
+  log_set_level(LOG_FATAL);
+
+  // Write position 8 CGP to a temp file.
+  FILE *fp = fopen("/tmp/peg1_pos8.txt", "we");
+  assert(fp);
+  fprintf(fp,
+          "3RELOANED4/2J4R1HELIO1/2EW2QI7/2TA3O2C4/"
+          "3GAG1S2E4/4MONO2N4/4ODE3T4/4U1WUZ1r4/"
+          "4R1S1I1E4/VIFFS1B1N1M4/2R3E1KOA4/"
+          "HOYA1TAXYING3/2P1LITU7/1DARICS8/"
+          "VANE11 ABELTU?/DEEIIPR 296/379 0\n");
+  fclose(fp);
+
+  PegBenchConfig peg = {
+      .label = "4-stg {200,20,16}",
+      .num_stages = 4,
+      .stage_limits = {200, 20, 16},
+      .num_limits = 3,
+      .first_win_mode = PEG_FIRST_WIN_WIN_PCT_THEN_SPREAD,
+      .first_win_spread_all_final = true,
+      .tt_fraction = 0.5,
+      .early_cutoff = true,
+  };
+
+  double soft_time = 2.0;
+  double hard_time = 2.0;
+
+  run_peg1_ab_benchmark("/tmp/peg1_pos8.txt", &peg, soft_time, hard_time, 1);
 }

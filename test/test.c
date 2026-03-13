@@ -148,6 +148,9 @@ static TestEntry on_demand_test_table[] = {
     {"peg2fwbench", test_peg2_fw_bench},
     {"genpeg1", test_generate_peg1_cgps},
     {"benchpeg1", test_benchmark_peg1},
+    {"benchpeg1wide", test_benchmark_peg1_wide},
+    {"pegpos6eg", test_peg_pos6_endgame},
+    {"pegpos8", test_peg_pos8},
     {"peg3dbg", test_peg3_debug},
     {NULL, NULL} // Sentinel value to mark end of array
 };
