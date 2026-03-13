@@ -687,7 +687,7 @@ void best_small_play_recorder_test(void) {
       config_create_or_die("set -lex NWL20 -s1 score -s2 score -wmp false");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
-  Player *player = game_get_player(game, 0);
+  const Player *player = game_get_player(game, 0);
   MoveList *move_list = move_list_create_small(1);
 
   // Test 1: VS_JEREMY position — best score should be 106
