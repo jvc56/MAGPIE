@@ -225,6 +225,7 @@ struct Config {
   char *data_paths;
   arg_token_t exec_parg_token;
   bool ld_changed;
+  bool is_loading_game_history;
   exec_mode_t exec_mode;
   int bingo_bonus;
   int challenge_bonus;
@@ -4824,7 +4825,9 @@ void config_parse_gcg_string_with_parser(Config *config, GCGParser *gcg_parser,
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  config->is_loading_game_history = true;
   config_load_game_history(config, game_history, error_stack);
+  config->is_loading_game_history = false;
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -5628,6 +5631,9 @@ void config_load_lexicon_dependent_data(Config *config,
               config->inference_results, false);
           endgame_results_set_valid_for_current_game_state(
               config->endgame_results, false);
+          if (!config->is_loading_game_history) {
+            game_history_reset(config->game_history);
+          }
         }
       }
       if (error_stack_is_empty(error_stack)) {
@@ -6836,6 +6842,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
 
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
+  config->is_loading_game_history = false;
   config->exec_mode = EXEC_MODE_ASYNC;
   config->bingo_bonus = DEFAULT_BINGO_BONUS;
   config->challenge_bonus = DEFAULT_CHALLENGE_BONUS;
