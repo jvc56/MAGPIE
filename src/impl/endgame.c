@@ -1280,6 +1280,24 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
       arena_dealloc(worker->small_move_arena, sizeof(SmallMove));
       worker->move_list->count = 1;
       nplays = 1;
+    } else if (opp_stuck_frac == 0.0F) {
+      // No stuck tiles: only the highest-scoring play is needed.
+      // MOVE_RECORD_BEST_SMALL prunes during generation via shadow upper
+      // bounds, producing a SmallMove directly without full enumeration.
+      const MoveGenArgs pargs = {
+          .game = worker->game_copy,
+          .move_list = worker->move_list,
+          .move_record_type = MOVE_RECORD_BEST_SMALL,
+          .move_sort_type = MOVE_SORT_SCORE,
+          .override_kwg = solver_get_pruned_kwg(
+              worker->solver, game_get_player_on_turn_index(worker->game_copy)),
+          .thread_index = worker->thread_index,
+          .eq_margin_movegen = 0,
+          .target_equity = EQUITY_MAX_VALUE,
+          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      };
+      generate_moves(&pargs);
+      nplays = worker->move_list->count;
     } else {
       const MoveGenArgs pargs = {
           .game = worker->game_copy,
@@ -1310,8 +1328,10 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
     // Pick best move by adjusted score.
     // When opponent has stuck tiles and solving player is on turn,
     // prefer conservation: penalize playing many tiles / high-value tiles.
+    int best_idx = 0;
     int playout_on_turn = game_get_player_on_turn_index(worker->game_copy);
-    bool conserve = opp_stuck_frac > 0.0F && playout_on_turn == solving_player;
+    bool conserve =
+        opp_stuck_frac > 0.0F && playout_on_turn == solving_player;
 
     // Pre-compute voluntary pass penalty for conservation mode.
     // By passing instead of going out, the game heads toward a 6-zero
@@ -1320,8 +1340,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
     int pass_penalty = 0;
     if (conserve && worker->solver->forced_pass_bypass) {
       const LetterDistribution *ld = game_get_ld(worker->game_copy);
-      const Rack *own_rack =
-          player_get_rack(game_get_player(worker->game_copy, playout_on_turn));
+      const Rack *own_rack = player_get_rack(
+          game_get_player(worker->game_copy, playout_on_turn));
       const Rack *opp_rack = player_get_rack(
           game_get_player(worker->game_copy, 1 - playout_on_turn));
       pass_penalty =
@@ -1330,7 +1350,6 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
                 opp_stuck_frac);
     }
 
-    int best_idx = 0;
     int best_adj = INT32_MIN;
     for (int j = 0; j < nplays; j++) {
       const SmallMove *sm = worker->move_list->small_moves[j];

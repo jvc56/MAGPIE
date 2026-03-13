@@ -621,8 +621,7 @@ void small_play_recorder_test(void) {
   // TODO(olaugh): WMP doesn't support small move. Still under analysis whether
   // it would be better than recursive_gen for endgame.
   Config *config =
-      config_create_or_die("set -lex NWL20 -s1 score -s2 score -r1 small -r2 "
-                           "small -numsmallplays 100000 -wmp false");
+      config_create_or_die("set -lex NWL20 -s1 score -s2 score -wmp false");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   Player *player = game_get_player(game, 0);
@@ -678,6 +677,69 @@ void small_play_recorder_test(void) {
                 9) == 0);
 
   free(temp_small_moves);
+  small_move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void best_small_play_recorder_test(void) {
+  Config *config =
+      config_create_or_die("set -lex NWL20 -s1 score -s2 score -wmp false");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  Player *player = game_get_player(game, 0);
+  MoveList *move_list = move_list_create_small(1);
+
+  // Test 1: VS_JEREMY position — best score should be 106
+  load_cgp_or_die(game, VS_JEREMY);
+  rack_set_to_string(ld, player_get_rack(player), "DDESW??");
+  draw_to_full_rack(game, 1);
+
+  const MoveGenArgs args1 = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_BEST_SMALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .thread_index = 0,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&args1);
+
+  assert(move_list_get_count(move_list) == 1);
+  assert(small_move_get_score(move_list->small_moves[0]) == 106);
+
+  // Convert to Move and verify details match small_play_recorder_test
+  small_move_to_move(move_list->spare_move, move_list->small_moves[0],
+                     game_get_board(game));
+  assert(move_list->spare_move->col_start == 1);
+  assert(move_list->spare_move->row_start == 13);
+  assert(move_list->spare_move->dir == BOARD_HORIZONTAL_DIRECTION);
+  assert(move_list->spare_move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE);
+  assert_move_score(move_list->spare_move, 106);
+  assert(move_list->spare_move->tiles_played == 7);
+
+  // Test 2: VS_OXY position — best score should be 1780
+  load_cgp_or_die(game, VS_OXY);
+  rack_set_to_string(ld, player_get_rack(player), "ABEOPXZ");
+  draw_to_full_rack(game, 1);
+
+  const MoveGenArgs args2 = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_BEST_SMALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .thread_index = 0,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&args2);
+
+  assert(move_list_get_count(move_list) == 1);
+  assert(small_move_get_score(move_list->small_moves[0]) == 1780);
+
   small_move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);
@@ -1547,6 +1609,7 @@ void test_move_gen(void) {
   equity_test();
   top_equity_play_recorder_test();
   small_play_recorder_test();
+  best_small_play_recorder_test();
   distinct_lexica_test(false);
   distinct_lexica_test(true);
   consistent_tiebreaking_test();

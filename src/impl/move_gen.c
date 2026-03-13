@@ -209,6 +209,10 @@ static inline void gen_update_cutoff_equity_or_score(MoveGen *gen) {
     gen->cutoff_equity_or_score = (gen->move_sort_type == MOVE_SORT_EQUITY)
                                       ? move_get_equity(move)
                                       : move_get_score(move);
+    return;
+  case MOVE_RECORD_BEST_SMALL:
+    // No Move object; best_move_equity_or_score is already the best score.
+    gen->cutoff_equity_or_score = gen->best_move_equity_or_score;
   }
 }
 
@@ -297,6 +301,22 @@ static inline void update_best_move_or_insert_into_movelist(
       gen->threshold_exceeded = true;
     }
     break;
+  case MOVE_RECORD_BEST_SMALL:;
+    SmallMove *best_sm = small_move_list_get_spare_move(gen->move_list);
+    set_small_play_for_record(best_sm, move_type, leftstrip, rightstrip,
+                              score, start_row, start_col, tiles_played, dir,
+                              strip);
+    move_equity_or_score = score;
+    if (move_equity_or_score > gen->best_move_equity_or_score) {
+      need_to_update_best_move_equity_or_score = true;
+      gen->best_move_equity_or_score = move_equity_or_score;
+      // Swap spare_small_move into small_moves[0].
+      SmallMove *swap = gen->move_list->small_moves[0];
+      gen->move_list->small_moves[0] = gen->move_list->spare_small_move;
+      gen->move_list->spare_small_move = swap;
+      gen->move_list->count = 1;
+    }
+    break;
   }
 
   // In exchange cutoff mode, exchanges are recorded first and then
@@ -354,6 +374,7 @@ static inline bool better_play_has_been_found(const MoveGen *gen,
       return false;
     }
     break;
+  case MOVE_RECORD_BEST_SMALL:
   case MOVE_RECORD_BEST:
     break;
   }
@@ -378,6 +399,9 @@ static inline void record_exchange(MoveGen *gen) {
         return;
       }
     }
+    break;
+  case MOVE_RECORD_BEST_SMALL:
+    // BEST_SMALL only supports MOVE_SORT_SCORE; no exchange pruning needed.
     break;
   }
 
@@ -522,8 +546,10 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
   }
   case MOVE_RECORD_ALL_SMALL:
   case MOVE_RECORD_TILES_PLAYED:
+  case MOVE_RECORD_BEST_SMALL:
     log_fatal("update_best_move_or_insert_into_movelist_wmp called with "
-              "MOVE_RECORD_ALL_SMALL or MOVE_RECORD_TILES_PLAYED");
+              "MOVE_RECORD_ALL_SMALL, MOVE_RECORD_TILES_PLAYED, or "
+              "MOVE_RECORD_BEST_SMALL");
 #if defined(__has_builtin) && __has_builtin(__builtin_unreachable)
     __builtin_unreachable();
 #else
@@ -1348,6 +1374,32 @@ static inline void shadow_record(MoveGen *gen) {
   }
 }
 
+// Simplified shadow_record for small move types (BEST_SMALL).
+// Skips WMP, wordsmog, and leave/equity computations.
+static inline void shadow_record_small(MoveGen *gen) {
+  Equity tiles_played_score = 0;
+  for (int i = 0; i < RACK_SIZE; i++) {
+    tiles_played_score += gen->descending_tile_scores[i] *
+                          gen->descending_effective_letter_multipliers[i];
+  }
+
+  Equity bingo_bonus = 0;
+  if (gen->tiles_played == RACK_SIZE) {
+    bingo_bonus = gen->bingo_bonus;
+  }
+
+  const Equity score =
+      tiles_played_score +
+      (gen->shadow_mainword_restricted_score * gen->shadow_word_multiplier) +
+      gen->shadow_perpendicular_additional_score + bingo_bonus;
+  if (score > gen->highest_shadow_score) {
+    gen->highest_shadow_score = score;
+  }
+  if (gen->tiles_played > gen->max_tiles_to_play) {
+    gen->max_tiles_to_play = gen->tiles_played;
+  }
+}
+
 static inline void insert_unrestricted_cross_word_multiplier(MoveGen *gen,
                                                              uint8_t multiplier,
                                                              int col) {
@@ -1660,6 +1712,124 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
   maybe_recalculate_effective_multipliers(gen);
 }
 
+// Simplified shadow_play_right for small move types.
+// Skips bingo_alpha_rack and WMP operations.
+static inline void shadow_play_right_small(MoveGen *gen, bool is_unique) {
+  const Equity orig_main_restricted_score =
+      gen->shadow_mainword_restricted_score;
+  const Equity orig_perp_score = gen->shadow_perpendicular_additional_score;
+  const int orig_wordmul = gen->shadow_word_multiplier;
+
+  rack_copy(&gen->player_rack_shadow_right_copy, &gen->player_rack);
+  const uint64_t orig_rack_cross_set = gen->rack_cross_set;
+  memcpy(gen->descending_tile_scores_copy, gen->descending_tile_scores,
+         sizeof(gen->descending_tile_scores));
+  bool restricted_any_tiles = false;
+
+  const int orig_num_unrestricted_multipliers =
+      gen->num_unrestricted_multipliers;
+  memcpy(gen->desc_xw_muls_copy, gen->descending_cross_word_multipliers,
+         sizeof(gen->descending_cross_word_multipliers));
+  memcpy(gen->desc_eff_letter_muls_copy,
+         gen->descending_effective_letter_multipliers,
+         sizeof(gen->descending_effective_letter_multipliers));
+  bool changed_any_restricted_multipliers = false;
+
+  const int original_current_right_col = gen->current_right_col;
+  const int original_tiles_played = gen->tiles_played;
+
+  while (gen->current_right_col < (BOARD_DIM - 1) &&
+         gen->tiles_played < gen->number_of_letters_on_rack) {
+    gen->current_right_col++;
+    gen->tiles_played++;
+
+    const uint64_t cross_set =
+        gen_cache_get_cross_set(gen, gen->current_right_col);
+    const uint64_t current_leftx =
+        gen_cache_get_left_extension_set(gen, gen->current_right_col);
+    const uint64_t nonblank_leftx =
+        current_leftx & ~(1ULL << BLANK_MACHINE_LETTER);
+    const uint64_t nonblank_cross_set =
+        cross_set & ~(1ULL << BLANK_MACHINE_LETTER);
+    if ((nonblank_cross_set & nonblank_leftx) == 0) {
+      break;
+    }
+    const uint64_t possible_letters_here = cross_set & gen->rack_cross_set &
+                                           gen->anchor_right_extension_set &
+                                           current_leftx;
+    gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
+    if (possible_letters_here == 0) {
+      break;
+    }
+    if (gen->tiles_played == 1) {
+      gen->first_played_tile_col = gen->current_right_col;
+    }
+
+    const BonusSquare bonus_square =
+        gen_cache_get_bonus_square(gen, gen->current_right_col);
+    const Equity cross_score =
+        gen_cache_get_cross_score(gen, gen->current_right_col);
+    const int letter_multiplier =
+        bonus_square_get_letter_multiplier(bonus_square);
+    const int this_word_multiplier =
+        bonus_square_get_word_multiplier(bonus_square);
+    gen->shadow_perpendicular_additional_score +=
+        cross_score * this_word_multiplier;
+    gen->shadow_word_multiplier *= this_word_multiplier;
+
+    if (try_restrict_tile_and_accumulate_score(
+            gen, possible_letters_here, letter_multiplier, this_word_multiplier,
+            gen->current_right_col)) {
+      restricted_any_tiles = true;
+    } else {
+      insert_unrestricted_multipliers(gen, gen->current_right_col);
+      changed_any_restricted_multipliers = true;
+    }
+    if (cross_set == TRIVIAL_CROSS_SET) {
+      is_unique = true;
+    }
+    while (gen->current_right_col + 1 < BOARD_DIM) {
+      const MachineLetter next_letter =
+          gen_cache_get_letter(gen, gen->current_right_col + 1);
+      if (next_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
+        break;
+      }
+      gen->shadow_mainword_restricted_score += gen->tile_scores[next_letter];
+      gen->current_right_col++;
+    }
+
+    if (play_is_nonempty_and_nonduplicate(gen->tiles_played, is_unique)) {
+      maybe_recalculate_effective_multipliers(gen);
+      shadow_record_small(gen);
+    }
+  }
+
+  gen->shadow_mainword_restricted_score = orig_main_restricted_score;
+  gen->shadow_perpendicular_additional_score = orig_perp_score;
+  gen->shadow_word_multiplier = orig_wordmul;
+
+  if (restricted_any_tiles) {
+    rack_copy(&gen->player_rack, &gen->player_rack_shadow_right_copy);
+    gen->rack_cross_set = orig_rack_cross_set;
+    memcpy(gen->descending_tile_scores, gen->descending_tile_scores_copy,
+           sizeof(gen->descending_tile_scores));
+  }
+
+  if (changed_any_restricted_multipliers) {
+    gen->num_unrestricted_multipliers = orig_num_unrestricted_multipliers;
+    memcpy(gen->descending_cross_word_multipliers, gen->desc_xw_muls_copy,
+           sizeof(gen->descending_cross_word_multipliers));
+    memcpy(gen->descending_effective_letter_multipliers,
+           gen->desc_eff_letter_muls_copy,
+           sizeof(gen->descending_effective_letter_multipliers));
+  }
+
+  gen->current_right_col = original_current_right_col;
+  gen->tiles_played = original_tiles_played;
+
+  maybe_recalculate_effective_multipliers(gen);
+}
+
 static inline void nonplaythrough_shadow_play_left(MoveGen *gen,
                                                    bool is_unique) {
   for (;;) {
@@ -1695,6 +1865,44 @@ static inline void nonplaythrough_shadow_play_left(MoveGen *gen,
       insert_unrestricted_multipliers(gen, gen->current_left_col);
     }
     shadow_record(gen);
+  }
+}
+
+static inline void nonplaythrough_shadow_play_left_small(MoveGen *gen,
+                                                          bool is_unique) {
+  for (;;) {
+    const uint64_t possible_tiles_for_shadow_right =
+        gen->anchor_right_extension_set & gen->rack_cross_set;
+    if (possible_tiles_for_shadow_right != 0) {
+      shadow_play_right_small(gen, is_unique);
+    }
+    gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
+    if (gen->current_left_col == 0 ||
+        gen->current_left_col == gen->last_anchor_col + 1 ||
+        gen->tiles_played >= gen->number_of_letters_on_rack) {
+      return;
+    }
+    const uint64_t possible_tiles_for_shadow_left =
+        gen->anchor_left_extension_set & gen->rack_cross_set;
+    if (possible_tiles_for_shadow_left == 0) {
+      return;
+    }
+    gen->anchor_left_extension_set = TRIVIAL_CROSS_SET;
+
+    gen->current_left_col--;
+    gen->tiles_played++;
+    assert(gen->tiles_played > 1);
+    const BonusSquare bonus_square =
+        gen_cache_get_bonus_square(gen, gen->current_left_col);
+    int letter_multiplier = bonus_square_get_letter_multiplier(bonus_square);
+    int this_word_multiplier = bonus_square_get_word_multiplier(bonus_square);
+    gen->shadow_word_multiplier *= this_word_multiplier;
+    if (!try_restrict_tile_and_accumulate_score(
+            gen, possible_tiles_for_shadow_left, letter_multiplier,
+            this_word_multiplier, gen->current_left_col)) {
+      insert_unrestricted_multipliers(gen, gen->current_left_col);
+    }
+    shadow_record_small(gen);
   }
 }
 
@@ -1770,6 +1978,75 @@ static inline void playthrough_shadow_play_left(MoveGen *gen, bool is_unique) {
   }
 }
 
+static inline void playthrough_shadow_play_left_small(MoveGen *gen,
+                                                       bool is_unique) {
+  for (;;) {
+    const uint64_t possible_tiles_for_shadow_right =
+        gen->anchor_right_extension_set & gen->rack_cross_set;
+    if (possible_tiles_for_shadow_right != 0) {
+      shadow_play_right_small(gen, is_unique);
+    }
+    gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
+
+    uint64_t possible_tiles_for_shadow_left =
+        gen->anchor_left_extension_set & gen->rack_cross_set;
+    const uint64_t nonblank_leftx =
+        gen->anchor_left_extension_set & ~(1ULL << BLANK_MACHINE_LETTER);
+    gen->anchor_left_extension_set = TRIVIAL_CROSS_SET;
+
+    if (gen->current_left_col == 0 ||
+        gen->current_left_col == gen->last_anchor_col + 1 ||
+        gen->tiles_played >= gen->number_of_letters_on_rack) {
+      break;
+    }
+    if (possible_tiles_for_shadow_left == 0) {
+      break;
+    }
+    gen->current_left_col--;
+    gen->tiles_played++;
+    const uint64_t cross_set =
+        gen_cache_get_cross_set(gen, gen->current_left_col);
+    const uint64_t nonblank_cross_set =
+        cross_set & ~(1ULL << BLANK_MACHINE_LETTER);
+    if ((nonblank_cross_set & nonblank_leftx) == 0) {
+      break;
+    }
+    possible_tiles_for_shadow_left &= cross_set;
+    if (possible_tiles_for_shadow_left == 0) {
+      break;
+    }
+    if (gen->tiles_played == 1) {
+      gen->first_played_tile_col = gen->current_left_col;
+    }
+
+    const BonusSquare bonus_square =
+        gen_cache_get_bonus_square(gen, gen->current_left_col);
+    const Equity cross_score =
+        gen_cache_get_cross_score(gen, gen->current_left_col);
+    const int letter_multiplier =
+        bonus_square_get_letter_multiplier(bonus_square);
+    const int this_word_multiplier =
+        bonus_square_get_word_multiplier(bonus_square);
+    gen->shadow_perpendicular_additional_score +=
+        cross_score * this_word_multiplier;
+
+    gen->shadow_word_multiplier *= this_word_multiplier;
+    if (!try_restrict_tile_and_accumulate_score(
+            gen, possible_tiles_for_shadow_left, letter_multiplier,
+            this_word_multiplier, gen->current_left_col)) {
+      insert_unrestricted_multipliers(gen, gen->current_left_col);
+    }
+
+    if (cross_set == TRIVIAL_CROSS_SET) {
+      is_unique = true;
+    }
+
+    if (play_is_nonempty_and_nonduplicate(gen->tiles_played, is_unique)) {
+      shadow_record_small(gen);
+    }
+  }
+}
+
 static inline void shadow_start_nonplaythrough(MoveGen *gen) {
   const uint64_t cross_set =
       gen_cache_get_cross_set(gen, gen->current_left_col);
@@ -1811,6 +2088,42 @@ static inline void shadow_start_nonplaythrough(MoveGen *gen) {
   nonplaythrough_shadow_play_left(gen, !board_is_dir_vertical(gen->dir));
 }
 
+static inline void shadow_start_nonplaythrough_small(MoveGen *gen) {
+  const uint64_t cross_set =
+      gen_cache_get_cross_set(gen, gen->current_left_col);
+  gen->first_played_tile_col = gen->current_left_col;
+  const uint64_t possible_letters_here = cross_set & gen->rack_cross_set;
+  if (possible_letters_here == 0) {
+    return;
+  }
+
+  const BonusSquare bonus_square =
+      gen_cache_get_bonus_square(gen, gen->current_left_col);
+  const Equity cross_score =
+      gen_cache_get_cross_score(gen, gen->current_left_col);
+  const int letter_multiplier =
+      bonus_square_get_letter_multiplier(bonus_square);
+  const int this_word_multiplier =
+      bonus_square_get_word_multiplier(bonus_square);
+  gen->shadow_perpendicular_additional_score =
+      cross_score * this_word_multiplier;
+
+  gen->shadow_word_multiplier = 0;
+  if (!try_restrict_tile_and_accumulate_score(
+          gen, possible_letters_here, letter_multiplier, this_word_multiplier,
+          gen->current_left_col)) {
+    insert_unrestricted_multipliers(gen, gen->current_left_col);
+  }
+  gen->tiles_played++;
+  if (!board_is_dir_vertical(gen->dir)) {
+    shadow_record_small(gen);
+  }
+  gen->shadow_word_multiplier = this_word_multiplier;
+  maybe_recalculate_effective_multipliers(gen);
+
+  nonplaythrough_shadow_play_left_small(gen, !board_is_dir_vertical(gen->dir));
+}
+
 static inline void shadow_start_playthrough(MoveGen *gen,
                                             MachineLetter current_letter) {
   // Traverse the full length of the tiles on the board until hitting an
@@ -1841,6 +2154,26 @@ static inline void shadow_start_playthrough(MoveGen *gen,
   playthrough_shadow_play_left(gen, !board_is_dir_vertical(gen->dir));
 }
 
+// Simplified shadow_start_playthrough for small move types.
+// Skips bingo_alpha_rack and WMP operations.
+static inline void shadow_start_playthrough_small(MoveGen *gen,
+                                                   MachineLetter current_letter) {
+  for (;;) {
+    gen->shadow_mainword_restricted_score += gen->tile_scores[current_letter];
+    if (gen->current_left_col == 0 ||
+        gen->current_left_col == gen->last_anchor_col + 1) {
+      break;
+    }
+    gen->current_left_col--;
+    current_letter = gen_cache_get_letter(gen, gen->current_left_col);
+    if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
+      gen->current_left_col++;
+      break;
+    }
+  }
+  playthrough_shadow_play_left_small(gen, !board_is_dir_vertical(gen->dir));
+}
+
 static inline void shadow_start(MoveGen *gen) {
   const uint64_t any_extension_set =
       gen->anchor_left_extension_set | gen->anchor_right_extension_set;
@@ -1858,6 +2191,30 @@ static inline void shadow_start(MoveGen *gen) {
     shadow_start_nonplaythrough(gen);
   } else {
     shadow_start_playthrough(gen, current_letter);
+  }
+
+  gen->rack_cross_set = original_rack_cross_set;
+  rack_copy(&gen->player_rack, &gen->full_player_rack);
+}
+
+// Simplified shadow_start for small move types.
+// Skips bingo_alpha_rack copy.
+static inline void shadow_start_small(MoveGen *gen) {
+  const uint64_t any_extension_set =
+      gen->anchor_left_extension_set | gen->anchor_right_extension_set;
+  if (any_extension_set == 0) {
+    return;
+  }
+
+  const uint64_t original_rack_cross_set = gen->rack_cross_set;
+  rack_copy(&gen->full_player_rack, &gen->player_rack);
+
+  const MachineLetter current_letter =
+      gen_cache_get_letter(gen, gen->current_left_col);
+  if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
+    shadow_start_nonplaythrough_small(gen);
+  } else {
+    shadow_start_playthrough_small(gen, current_letter);
   }
 
   gen->rack_cross_set = original_rack_cross_set;
@@ -1938,6 +2295,45 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   }
 }
 
+// Simplified shadow_play_for_anchor for small move types (BEST_SMALL).
+// Skips WMP operations.
+void shadow_play_for_anchor_small(MoveGen *gen, int col) {
+  gen->current_left_col = col;
+  gen->current_right_col = col;
+
+  gen->anchor_left_extension_set = gen_cache_get_left_extension_set(gen, col);
+  gen->anchor_right_extension_set = gen_cache_get_right_extension_set(gen, col);
+
+  gen->num_unrestricted_multipliers = 0;
+  memset(gen->descending_effective_letter_multipliers, 0,
+         sizeof(gen->descending_effective_letter_multipliers));
+  gen->last_word_multiplier = 1;
+
+  memcpy(gen->descending_tile_scores, gen->full_rack_descending_tile_scores,
+         sizeof(gen->descending_tile_scores));
+  gen->shadow_mainword_restricted_score = 0;
+  gen->shadow_perpendicular_additional_score = 0;
+  gen->shadow_word_multiplier = 1;
+
+  gen->highest_shadow_score = 0;
+
+  gen->number_of_letters_on_rack = rack_get_total_letters(&gen->player_rack);
+
+  gen->current_anchor_col = col;
+
+  gen->tiles_played = 0;
+  gen->max_tiles_to_play = 0;
+
+  shadow_start_small(gen);
+  if (gen->max_tiles_to_play == 0) {
+    return;
+  }
+
+  anchor_heap_add_unheaped_anchor(
+      &gen->anchor_heap, gen->current_row_index, col, gen->last_anchor_col,
+      gen->dir, gen->highest_shadow_score, gen->highest_shadow_score);
+}
+
 void shadow_by_orientation(MoveGen *gen) {
   for (int row = 0; row < BOARD_DIM; row++) {
     gen->current_row_index = row;
@@ -1955,6 +2351,28 @@ void shadow_by_orientation(MoveGen *gen) {
         // The next anchor to search after a playthrough tile should
         // leave a gap of one square so that it will not search backwards
         // into the square adjacent to the playthrough tile.
+        if (!gen_cache_is_empty(gen, col)) {
+          gen->last_anchor_col++;
+        }
+      }
+    }
+  }
+}
+
+void shadow_by_orientation_small(MoveGen *gen) {
+  for (int row = 0; row < BOARD_DIM; row++) {
+    gen->current_row_index = row;
+    if (gen->row_number_of_anchors_cache[BOARD_DIM * gen->dir + row] == 0) {
+      continue;
+    }
+    gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+    board_copy_row_cache(gen->lanes_cache, gen->row_cache,
+                         gen->current_row_index, gen->dir);
+    for (int col = 0; col < BOARD_DIM; col++) {
+      if (gen_cache_get_is_anchor(gen, col)) {
+        shadow_play_for_anchor_small(gen, col);
+
+        gen->last_anchor_col = col;
         if (!gen_cache_is_empty(gen, col)) {
           gen->last_anchor_col++;
         }
@@ -2006,7 +2424,11 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
                     player_get_wmp(player));
 
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
-      gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
+      gen->move_record_type == MOVE_RECORD_TILES_PLAYED ||
+      override_kwg != NULL) {
+    // Disable WMP when using ALL_SMALL/TILES_PLAYED (unsupported) or when
+    // override_kwg is set (WMP data corresponds to the original KWG, not
+    // the override).
     gen->wmp_move_gen.wmp = NULL;
   }
 
@@ -2019,7 +2441,12 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
 
   // Reset the move list
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
-      gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
+      gen->move_record_type == MOVE_RECORD_TILES_PLAYED ||
+      gen->move_record_type == MOVE_RECORD_BEST_SMALL) {
+    if (gen->move_record_type == MOVE_RECORD_BEST_SMALL &&
+        gen->move_sort_type != MOVE_SORT_SCORE) {
+      log_fatal("MOVE_RECORD_BEST_SMALL only supports MOVE_SORT_SCORE");
+    }
     small_move_list_reset(gen->move_list);
   } else {
     move_list_reset(gen->move_list);
@@ -2129,6 +2556,19 @@ void gen_shadow(MoveGen *gen) {
   }
 }
 
+// Simplified gen_shadow for BEST_SMALL.
+// Skips leave_map setup and uses small shadow functions.
+void gen_shadow_small(MoveGen *gen) {
+  anchor_heap_reset(&gen->anchor_heap);
+
+  for (int dir = 0; dir < 2; dir++) {
+    gen->dir = dir;
+    shadow_by_orientation_small(gen);
+  }
+
+  anchor_heapify_all(&gen->anchor_heap);
+}
+
 void gen_record_scoring_plays_small(MoveGen *gen) {
   gen->tiles_played = 0;
   const uint32_t kwg_root_node_index = kwg_get_root_node_index(gen->kwg);
@@ -2205,7 +2645,11 @@ void gen_record_scoring_plays(MoveGen *gen) {
     gen->anchor_right_extension_set =
         gen_cache_get_right_extension_set(gen, gen->current_anchor_col);
     gen->current_anchor_highest_possible_score = anchor.highest_possible_score;
-    if (gen->is_wordsmog) {
+    if (gen->move_record_type == MOVE_RECORD_BEST_SMALL) {
+      recursive_gen_small(gen, anchor.col, kwg_root_node_index, anchor.col,
+                          anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION,
+                          0, 1, 0);
+    } else if (gen->is_wordsmog) {
       recursive_gen_alpha(gen, anchor.col, anchor.col, anchor.col,
                           gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
     } else if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
@@ -2247,6 +2691,14 @@ void gen_record_pass(MoveGen *gen) {
   case MOVE_RECORD_TILES_PLAYED:
     // Pass doesn't use any tiles — nothing to record.
     break;
+  case MOVE_RECORD_BEST_SMALL:
+    if (gen->best_move_equity_or_score < EQUITY_PASS_VALUE) {
+      // No scoring play was found; result is a pass.
+      small_move_set_as_pass(gen->move_list->small_moves[0]);
+      gen->move_list->count = 1;
+    }
+    // Otherwise small_moves[0] already holds the best scoring play.
+    break;
   }
 }
 
@@ -2279,6 +2731,11 @@ void generate_moves(const MoveGenArgs *args) {
       }
       return; // No pass recording needed
     }
+  } else if (gen->move_record_type == MOVE_RECORD_BEST_SMALL) {
+    // BEST_SMALL uses small shadow and small recursive_gen paths that skip
+    // leave_map, WMP, and wordsmog operations entirely.
+    gen_shadow_small(gen);
+    gen_record_scoring_plays(gen);
   } else {
     gen_look_up_leaves_and_record_exchanges(gen);
 

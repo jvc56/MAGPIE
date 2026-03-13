@@ -5075,9 +5075,6 @@ void config_load_record_type(Config *config, const char *record_type_str,
   } else if (has_iprefix(record_type_str, MOVE_RECORD_ALL_STRING)) {
     players_data_set_move_record_type(config->players_data, player_index,
                                       MOVE_RECORD_ALL);
-  } else if (has_iprefix(record_type_str, MOVE_RECORD_ALL_SMALL_STRING)) {
-    players_data_set_move_record_type(config->players_data, player_index,
-                                      MOVE_RECORD_ALL_SMALL);
   } else {
     error_stack_push(error_stack,
                      ERROR_STATUS_CONFIG_LOAD_MALFORMED_MOVE_RECORD_TYPE,
@@ -5099,10 +5096,9 @@ void string_builder_add_move_record_type(StringBuilder *sb,
     string_builder_add_string(sb, MOVE_RECORD_ALL_STRING);
     break;
   case MOVE_RECORD_ALL_SMALL:
-    string_builder_add_string(sb, MOVE_RECORD_ALL_SMALL_STRING);
-    break;
   case MOVE_RECORD_TILES_PLAYED:
-    break;
+  case MOVE_RECORD_BEST_SMALL:
+    log_fatal("cannot serialize internal move record type: %d", record_type);
   }
 }
 
