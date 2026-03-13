@@ -2052,6 +2052,45 @@ void test_config_anno_endgame_rack(void) {
   config_destroy(config);
 }
 
+void test_config_load_incomplete(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Game *game;
+
+  load_and_exec_config_or_die(config,
+                              "load testdata/gcgs/incomplete_after_pass");
+  load_and_exec_config_or_die(config, "goto end");
+  game = config_get_game(config);
+  assert(equity_to_int(player_get_score(game_get_player(game, 0))) == 360);
+  assert(equity_to_int(player_get_score(game_get_player(game, 1))) == 232);
+  assert_rack_equals_string(
+      game_get_ld(game), player_get_rack(game_get_player(game, 0)), "CDEEFGO");
+
+  load_and_exec_config_or_die(config,
+                              "load testdata/gcgs/incomplete_after_exchange");
+  load_and_exec_config_or_die(config, "goto end");
+  game = config_get_game(config);
+  assert(equity_to_int(player_get_score(game_get_player(game, 0))) == 0);
+  assert(equity_to_int(player_get_score(game_get_player(game, 1))) == 0);
+  assert_rack_equals_string(
+      game_get_ld(game), player_get_rack(game_get_player(game, 1)), "AAENRSZ");
+
+  load_and_exec_config_or_die(
+      config, "load testdata/gcgs/incomplete_after_five_point_challenge");
+  load_and_exec_config_or_die(config, "goto end");
+  game = config_get_game(config);
+  assert(equity_to_int(player_get_score(game_get_player(game, 0))) == 245);
+  assert(equity_to_int(player_get_score(game_get_player(game, 1))) == 398);
+  assert_rack_equals_string(
+      game_get_ld(game), player_get_rack(game_get_player(game, 0)), "AEIOOST");
+
+  assert(game_history_get_num_events(config_get_game_history(config)) > 0);
+  load_and_exec_config_or_die(config, "set -ld english_small");
+  assert(game_history_get_num_events(config_get_game_history(config)) == 0);
+
+  config_destroy(config);
+}
+
 void test_config_export(void) {
   Config *config = config_create_default_test();
   assert_config_exec_status(config, "ex",
@@ -2303,6 +2342,7 @@ void test_config(void) {
   test_config_anno();
   test_config_anno_challenge();
   test_config_anno_endgame_rack();
+  test_config_load_incomplete();
   test_config_challenge_rack();
   test_config_export();
   test_config_load_error_cases();

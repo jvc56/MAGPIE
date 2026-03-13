@@ -3359,10 +3359,6 @@ void update_game_history_with_config(Config *config) {
   game_history_set_board_layout_name(
       config->game_history, board_layout_get_name(config->board_layout));
   game_history_set_game_variant(config->game_history, config->game_variant);
-
-  for (int player_index = 0; player_index < 2; player_index++) {
-    game_history_player_reset_last_rack(config->game_history, player_index);
-  }
 }
 
 char *impl_new_game(Config *config, ErrorStack *error_stack) {
@@ -6409,6 +6405,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   if (config->ld_changed && config->game) {
     game_destroy(config->game);
     config->game = NULL;
+    game_history_reset(config->game_history);
   }
 
   // Update the game history
