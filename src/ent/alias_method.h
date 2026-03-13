@@ -66,10 +66,10 @@ static inline void alias_method_add_rack(AliasMethod *am, const Rack *rack,
   new_item_index = am->num_items;
   am->total_item_count += (uint64_t)count;
   am->num_items++;
-  cpthread_mutex_unlock(&am->mutex);
   AliasMethodItem *item = &am->items[new_item_index];
   rack_encode(rack, &item->rack);
   item->count = (uint32_t)count;
+  cpthread_mutex_unlock(&am->mutex);
 }
 
 // Returns true if there are a nonzero number of items and counts to generate
