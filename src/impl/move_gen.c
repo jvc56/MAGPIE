@@ -213,6 +213,7 @@ static inline void gen_update_cutoff_equity_or_score(MoveGen *gen) {
   case MOVE_RECORD_BEST_SMALL:
     // No Move object; best_move_equity_or_score is already the best score.
     gen->cutoff_equity_or_score = gen->best_move_equity_or_score;
+    return;
   }
 }
 
