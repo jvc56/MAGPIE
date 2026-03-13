@@ -56,20 +56,19 @@ static inline void alias_method_reset(AliasMethod *am) {
 // Thread safe
 static inline void alias_method_add_rack(AliasMethod *am, const Rack *rack,
                                          int count) {
-  int new_item_index;
   cpthread_mutex_lock(&am->mutex);
   if (am->num_items == am->capacity) {
     am->capacity *= 2;
     am->items = (AliasMethodItem *)realloc_or_die(
         am->items, sizeof(AliasMethodItem) * am->capacity);
   }
-  new_item_index = am->num_items;
+  int new_item_index = am->num_items;
   am->total_item_count += (uint64_t)count;
   am->num_items++;
-  cpthread_mutex_unlock(&am->mutex);
   AliasMethodItem *item = &am->items[new_item_index];
   rack_encode(rack, &item->rack);
   item->count = (uint32_t)count;
+  cpthread_mutex_unlock(&am->mutex);
 }
 
 // Returns true if there are a nonzero number of items and counts to generate
