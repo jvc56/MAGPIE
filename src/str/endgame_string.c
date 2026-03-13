@@ -12,16 +12,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-const char *
-game_history_get_player_name_or_default(const GameHistory *game_history,
-                                        int player_index) {
-  if (game_history) {
-    return game_history_player_get_name(game_history, player_index);
-  } else {
-    return player_index == 0 ? "Player 1" : "Player 2";
-  }
-}
-
 void string_builder_endgame_results(StringBuilder *pv_description,
                                     const EndgameResults *endgame_results,
                                     const Game *game,
@@ -66,15 +56,26 @@ void string_builder_endgame_results(StringBuilder *pv_description,
             player_get_score(game_get_player(gc, start_player_index)) -
             player_get_score(game_get_player(gc, 1 - start_player_index))) +
         endgame_value;
-    const char *start_player_name = game_history_get_player_name_or_default(
-        game_history, start_player_index);
-
+    const char *start_player_name;
+    if (game_history) {
+      start_player_name =
+          game_history_player_get_name(game_history, start_player_index);
+    } else {
+      start_player_name = start_player_index == 0 ? PLAYER_ONE_DEFAULT_NAME
+                                                  : PLAYER_TWO_DEFAULT_NAME;
+    }
     for (int i = 0; i < pv_line->num_moves; i++) {
       int curr_col = 0;
       // Set the player name
       const int player_on_turn = game_get_player_on_turn_index(gc);
-      const char *player_name =
-          game_history_get_player_name_or_default(game_history, player_on_turn);
+      const char *player_name;
+      if (game_history) {
+        player_name =
+            game_history_player_get_name(game_history, player_on_turn);
+      } else {
+        player_name = player_on_turn == 0 ? PLAYER_ONE_DEFAULT_NAME
+                                          : PLAYER_TWO_DEFAULT_NAME;
+      }
       string_grid_set_cell(sg, i, curr_col++,
                            get_formatted_string("(%s)", player_name));
 
@@ -102,7 +103,7 @@ void string_builder_endgame_results(StringBuilder *pv_description,
                                           start_player_final_score_diff);
     } else if (start_player_final_score_diff < 0) {
       string_builder_add_formatted_string(pv_description, "loses by %d.\n",
-                                          start_player_final_score_diff);
+                                          -start_player_final_score_diff);
     } else {
       string_builder_add_string(pv_description, "ties.\n");
     }
