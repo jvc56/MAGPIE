@@ -2613,4 +2613,6 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   if (!interrupted) {
     log_final_pvs(multi_pvs, num_pvs, solver, endgame_args->game, elapsed);
   }
+
+  endgame_results_stop_ctimer(results);
 }

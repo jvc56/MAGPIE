@@ -1,9 +1,11 @@
 #include "../ent/board.h"
 #include "../ent/endgame_results.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/player.h"
 #include "../impl/gameplay.h"
 #include "../str/move_string.h"
 #include "../util/io_util.h"
@@ -12,9 +14,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-static void string_builder_endgame_results(
-    StringBuilder *pv_description, const EndgameResults *endgame_results,
-    const Game *game, const GameHistory *game_history, bool add_line_breaks) {
+void string_builder_endgame_results(StringBuilder *pv_description,
+                                    const EndgameResults *endgame_results,
+                                    const Game *game,
+                                    const GameHistory *game_history,
+                                    bool add_line_breaks) {
   const int depth =
       endgame_results_get_depth(endgame_results, ENDGAME_RESULT_DISPLAY);
   if (depth < 0) {
@@ -25,11 +29,12 @@ static void string_builder_endgame_results(
   const PVLine *pv_line =
       endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_DISPLAY);
   Move move;
+  const int endgame_value =
+      endgame_results_get_value(endgame_results, ENDGAME_RESULT_DISPLAY);
   string_builder_add_formatted_string(
       pv_description,
       "Principal Variation (depth: %d, value: %d, length: %d, time: %.3fs)%c",
-      depth, endgame_results_get_value(endgame_results, ENDGAME_RESULT_DISPLAY),
-      pv_line->num_moves,
+      depth, endgame_value, pv_line->num_moves,
       endgame_results_get_display_seconds_elapsed(endgame_results),
       add_line_breaks ? '\n' : ' ');
 
@@ -47,6 +52,20 @@ static void string_builder_endgame_results(
   if (add_line_breaks) {
     StringGrid *sg = string_grid_create(pv_line->num_moves, 3, 1);
     StringBuilder *tmp_sb = string_builder_create();
+    const int start_player_index = game_get_player_on_turn_index(gc);
+    const int start_player_final_score_diff =
+        equity_to_int(
+            player_get_score(game_get_player(gc, start_player_index)) -
+            player_get_score(game_get_player(gc, 1 - start_player_index))) +
+        endgame_value;
+    const char *start_player_name;
+    if (game_history) {
+      start_player_name =
+          game_history_player_get_name(game_history, start_player_index);
+    } else {
+      start_player_name = start_player_index == 0 ? PLAYER_ONE_DEFAULT_NAME
+                                                  : PLAYER_TWO_DEFAULT_NAME;
+    }
     for (int i = 0; i < pv_line->num_moves; i++) {
       int curr_col = 0;
       // Set the player name
@@ -56,7 +75,8 @@ static void string_builder_endgame_results(
         player_name =
             game_history_player_get_name(game_history, player_on_turn);
       } else {
-        player_name = player_on_turn == 0 ? "Player 1" : "Player 2";
+        player_name = player_on_turn == 0 ? PLAYER_ONE_DEFAULT_NAME
+                                          : PLAYER_TWO_DEFAULT_NAME;
       }
       string_grid_set_cell(sg, i, curr_col++,
                            get_formatted_string("(%s)", player_name));
@@ -78,6 +98,17 @@ static void string_builder_endgame_results(
     string_builder_destroy(tmp_sb);
     string_builder_add_string_grid(pv_description, sg, false);
     string_grid_destroy(sg);
+    string_builder_add_formatted_string(pv_description, "\n%s ",
+                                        start_player_name);
+    if (start_player_final_score_diff > 0) {
+      string_builder_add_formatted_string(pv_description, "wins by %d.\n",
+                                          start_player_final_score_diff);
+    } else if (start_player_final_score_diff < 0) {
+      string_builder_add_formatted_string(pv_description, "loses by %d.\n",
+                                          -start_player_final_score_diff);
+    } else {
+      string_builder_add_string(pv_description, "ties.\n");
+    }
   } else {
     for (int i = 0; i < pv_line->num_moves; i++) {
       string_builder_add_formatted_string(pv_description, "%d: ", i + 1);
