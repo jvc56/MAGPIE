@@ -173,3 +173,7 @@ const Game *
 endgame_results_get_start_game(const EndgameResults *endgame_results) {
   return endgame_results->start_game;
 }
+
+void endgame_results_stop_ctimer(EndgameResults *endgame_results) {
+  ctimer_stop(&endgame_results->timer);
+}
