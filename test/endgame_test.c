@@ -263,10 +263,9 @@ void test_pass_first(void) {
 
 void test_nonempty_bag(void) {
   // The solver should return an error if the bag is not empty.
-  test_single_endgame(
-      "set -s1 score -s2 score -threads 6 -eplies 4",
-      "cgp " EMPTY_CGP, DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-      ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY, 0, false, 0);
+  test_single_endgame("set -s1 score -s2 score -threads 6 -eplies 4",
+                      "cgp " EMPTY_CGP, DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                      ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY, 0, false, 0);
 }
 
 void test_solve_standard(void) {
@@ -325,9 +324,8 @@ void test_endgame_interrupt(void) {
 }
 
 void test_kue(void) {
-  Config *config = config_create_or_die(
-      "set -s1 score -s2 score -eplies 14 "
-      "-ttfraction 0.5");
+  Config *config = config_create_or_die("set -s1 score -s2 score -eplies 14 "
+                                        "-ttfraction 0.5");
   load_and_exec_config_or_die(
       config, "cgp "
               "6MOO1VIRLS/1EJECTA6A1/2I2AEON4R1/2BAH6X1N1/2SLID4GIFTS/"
@@ -450,9 +448,8 @@ void test_endgame(void) {
 }
 
 void test_monster_q(void) {
-  Config *config = config_create_or_die(
-      "set -s1 score -s2 score -eplies 6 "
-      "-ttfraction 0.5");
+  Config *config = config_create_or_die("set -s1 score -s2 score -eplies 6 "
+                                        "-ttfraction 0.5");
   load_and_exec_config_or_die(config,
                               "cgp "
                               "5LEX1AFFORD/3SNOWIER1Y3/2V8T3/1DO6J1T3/1AG6OKE3/"
@@ -505,8 +502,7 @@ void test_multi_pv(void) {
   // Test multi-PV mode: solve a 4-ply endgame requesting top 5 moves.
   // Verify we get multiple PVs back with values in descending order,
   // and the best PV matches the single-PV result.
-  Config *config = config_create_or_die(
-      "set -s1 score -s2 score -eplies 4");
+  Config *config = config_create_or_die("set -s1 score -s2 score -eplies 4");
   load_and_exec_config_or_die(
       config, "cgp "
               "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"

@@ -1330,8 +1330,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
     // prefer conservation: penalize playing many tiles / high-value tiles.
     int best_idx = 0;
     int playout_on_turn = game_get_player_on_turn_index(worker->game_copy);
-    bool conserve =
-        opp_stuck_frac > 0.0F && playout_on_turn == solving_player;
+    bool conserve = opp_stuck_frac > 0.0F && playout_on_turn == solving_player;
 
     // Pre-compute voluntary pass penalty for conservation mode.
     // By passing instead of going out, the game heads toward a 6-zero

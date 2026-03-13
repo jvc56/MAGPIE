@@ -129,8 +129,8 @@ static float compute_stuck_fraction(Game *game, MoveList *move_list,
 void test_generate_stuck_cgps(void) {
   log_set_level(LOG_FATAL);
 
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -threads 1 -s1 score -s2 score");
+  Config *config =
+      config_create_or_die("set -lex CSW21 -threads 1 -s1 score -s2 score");
 
   MoveList *move_list = move_list_create(1);
   exec_config_quiet(config, "new");
@@ -250,8 +250,8 @@ void test_generate_stuck_cgps(void) {
 
 // Generate non-stuck endgame positions (stuck_fraction == 0 for both players).
 static void generate_nonstuck_cgps(uint64_t base_seed, const char *outfile) {
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -threads 1 -s1 score -s2 score");
+  Config *config =
+      config_create_or_die("set -lex CSW21 -threads 1 -s1 score -s2 score");
 
   MoveList *move_list = move_list_create(1);
   exec_config_quiet(config, "new");
@@ -327,8 +327,8 @@ static void run_ab_benchmark(const char *cgp_file, const char *label,
     return;
   }
 
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -threads 6 -s1 score -s2 score");
+  Config *config =
+      config_create_or_die("set -lex CSW21 -threads 6 -s1 score -s2 score");
   exec_config_quiet(config, "new");
   Game *game = config_get_game(config);
 
