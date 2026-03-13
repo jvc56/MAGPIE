@@ -6405,7 +6405,6 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   if (config->ld_changed && config->game) {
     game_destroy(config->game);
     config->game = NULL;
-    game_history_reset(config->game_history);
   }
 
   // Update the game history

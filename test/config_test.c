@@ -2055,7 +2055,7 @@ void test_config_anno_endgame_rack(void) {
 void test_config_load_incomplete(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
-  Game *game;
+  const Game *game;
 
   load_and_exec_config_or_die(config,
                               "load testdata/gcgs/incomplete_after_pass");
