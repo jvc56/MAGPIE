@@ -964,7 +964,7 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
       break;
     }
 
-    int plies = pass + 1;
+    int plies = pass + 1 + args->start_pass;
 
     // Reset endgame_evaluated flags for this pass.
     for (int i = 0; i < num_candidates; i++) {
@@ -1045,7 +1045,7 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
 
     passes_completed++;
     double now = ctimer_elapsed_seconds(&peg_timer);
-    invoke_per_pass_callback(args, pass + 1, evaluated, candidates,
+    invoke_per_pass_callback(args, plies, evaluated, candidates,
                              num_candidates, num_candidates, now,
                              now - prev_elapsed);
     prev_elapsed = now;

@@ -132,6 +132,53 @@ static void test_peg_straightforward(void) {
   config_destroy(config);
 }
 
+// Same position as test_peg_straightforward but skips 1-ply and goes straight
+// to 2-ply endgame using start_pass=1. Uses 4 threads and a time budget to
+// keep runtime reasonable.
+static void test_peg_skip_to_2ply(void) {
+  Config *config =
+      config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/"
+      "E1D2EF3V4/F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/"
+      "1GRADE1O1NOH3/WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex "
+      "NWL20");
+
+  Game *game = config_get_game(config);
+  assert(bag_get_letters(game_get_bag(game)) == 1);
+
+  PegSolver *solver = peg_solver_create();
+  PegArgs args = {
+      .game = game,
+      .thread_control = config_get_thread_control(config),
+      .time_budget_seconds = 5.0,
+      .num_threads = 4,
+      .tt_fraction_of_mem = 0.5,
+      .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
+      .num_passes = 1,
+      .start_pass = 1,
+      .per_pass_callback = peg_progress_callback,
+      .per_pass_num_top = 5,
+  };
+
+  PegResult result;
+  ErrorStack *error_stack = error_stack_create();
+  peg_solve(solver, &args, &result, error_stack);
+
+  assert(error_stack_is_empty(error_stack));
+  // Under the time budget, the 2-ply pass may or may not complete all
+  // candidates, but it should complete at least some.
+  printf("  [Skip1ply] passes_completed=%d\n", result.passes_completed);
+  assert(result.passes_completed <= 1);
+  assert(!small_move_is_pass(&result.best_move));
+  print_peg_result(&result, game);
+
+  peg_solver_destroy(solver);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 // Same position as test_peg_straightforward but with multiple threads.
 // Verifies that multi-threaded execution produces the same best move.
 static void test_peg_multithreaded(void) {
@@ -303,5 +350,6 @@ void test_peg(void) {
   test_peg_multithreaded();
   test_peg_time_budget();
   test_peg_straightforward();
+  test_peg_skip_to_2ply();
   test_peg_no_unseen_error();
 }

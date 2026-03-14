@@ -47,6 +47,11 @@ typedef struct PegArgs {
   int pass_candidate_limits[PEG_MAX_PASSES];
   int num_passes;
 
+  // Starting ply offset for endgame passes. Default 0 means passes start at
+  // 1-ply. Set to N to skip the first N ply levels (e.g., start_pass=1 with
+  // num_passes=1 runs a single 2-ply pass, skipping 1-ply).
+  int start_pass;
+
   // Optional progress callback (NULL to disable).
   PegPerPassCallback per_pass_callback;
   void *per_pass_callback_data;
