@@ -152,7 +152,7 @@ static void test_peg_multithreaded(void) {
       .game = game,
       .thread_control = config_get_thread_control(config),
       .time_budget_seconds = 0.0,
-      .num_threads = 16,
+      .num_threads = 4,
       .tt_fraction_of_mem = 0.5,
       .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
       .num_passes = 2,
@@ -200,15 +200,15 @@ static void test_peg_time_budget(void) {
   Game *game = config_get_game(config);
 
   PegSolver *solver = peg_solver_create();
-  // Request 10 endgame passes but with a 5s budget on 16 threads.
-  // The greedy pass alone takes ~1.5s single-threaded, so with 16 threads
+  // Request 10 endgame passes but with a 5s budget on 4 threads.
+  // The greedy pass alone takes ~1.5s single-threaded, so with 4 threads
   // and a 5s budget we should complete greedy + a few endgame passes
   // but not all 10.
   PegArgs args = {
       .game = game,
       .thread_control = config_get_thread_control(config),
       .time_budget_seconds = 5.0,
-      .num_threads = 16,
+      .num_threads = 4,
       .tt_fraction_of_mem = 0.5,
       .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
       .num_passes = 10,
@@ -266,7 +266,7 @@ static void test_peg_no_unseen_error(void) {
   config_destroy(config);
 }
 
-// Same position, 16 threads, greedy only (no endgame passes).
+// Same position, 4 threads, greedy only (no endgame passes).
 static void test_peg_mt_greedy_only(void) {
   Config *config = config_create_or_die("set -s1 score -s2 score");
   load_and_exec_config_or_die(
@@ -280,7 +280,7 @@ static void test_peg_mt_greedy_only(void) {
   PegArgs args = {
       .game = config_get_game(config),
       .thread_control = config_get_thread_control(config),
-      .num_threads = 16,
+      .num_threads = 4,
       .tt_fraction_of_mem = 0.0,
       .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
       .num_passes = 0,
