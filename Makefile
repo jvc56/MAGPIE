@@ -1,4 +1,6 @@
-NPROCS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+ifeq ($(origin NPROCS), undefined)
+NPROCS := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+endif
 MAKEFLAGS += -j$(NPROCS)
 
 SRC_DIR := src
