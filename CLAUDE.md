@@ -1,6 +1,6 @@
 # CLAUDE.md — MAGPIE
 
-MAGPIE (Macondo Accordant Game Program and Inference Engine) is a crossword game engine written in C (primarily C11, using `_Atomic` for lock-free concurrency). It supports move generation, Monte Carlo simulation, exhaustive inference, autoplay, superleave generation, and endgame solving.
+MAGPIE (Macondo Accordant Game Program and Inference Engine) is a crossword game engine written in C (primarily C99 with a small set of C11 features). It supports move generation, Monte Carlo simulation, exhaustive inference, autoplay, superleave generation, and endgame solving.
 
 ## Initial Setup (fresh clone)
 
