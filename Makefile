@@ -1,3 +1,7 @@
+NPROCS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+MAKEFLAGS += -j$(NPROCS)
+$(info Building with -j$(NPROCS))
+
 SRC_DIR := src
 TEST_DIR := test
 CMD_DIR := cmd
