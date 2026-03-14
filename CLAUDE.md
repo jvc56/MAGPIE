@@ -145,6 +145,14 @@ Register a test in `test/test.c`'s `on_demand_test_table[]`, then run it with `.
 
 When a time limit is in effect (e.g., endgame benchmarks with a fixed search budget), faster code finds better solutions in the same time. Measuring quality under a time limit is a good way to test whether optimizations pay off in the use cases we care about.
 
+### Endgame benchmarking and transposition tables
+
+When comparing two endgame solver modes, beware of transposition table (TT) contamination: the second solver benefits unfairly from the cache populated by the first. Either:
+- Use two separate TTs (one per solver), so each can still benefit from its own cache on later turns, or
+- Reset the TT between solves
+
+**Memory limits:** total TT memory must not exceed 50% of system memory. Use fraction `0.5` for a single TT, or `0.25` each when creating two TTs for benchmarking.
+
 ## Common Pitfalls (from PR history)
 
 These are recurring issues that have caused CI failures and review feedback. Pay close attention.
