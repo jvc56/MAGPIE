@@ -102,7 +102,6 @@ static void test_peg_straightforward(void) {
       .tt_fraction_of_mem = 0.5,
       .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
       .num_passes = 2,
-      .pass_candidate_limits = {32, 16},
       .per_pass_callback = peg_progress_callback,
       .per_pass_num_top = 20,
   };
@@ -156,7 +155,6 @@ static void test_peg_multithreaded(void) {
       .tt_fraction_of_mem = 0.5,
       .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
       .num_passes = 2,
-      .pass_candidate_limits = {32, 16},
       .per_pass_callback = peg_progress_callback,
       .per_pass_num_top = 5,
   };
@@ -201,9 +199,9 @@ static void test_peg_time_budget(void) {
 
   PegSolver *solver = peg_solver_create();
   // Request 10 endgame passes but with a 5s budget on 4 threads.
-  // The greedy pass alone takes ~1.5s single-threaded, so with 4 threads
-  // and a 5s budget we should complete greedy + a few endgame passes
-  // but not all 10.
+  // Each pass evaluates all candidates until time runs out.
+  // With ~625 candidates and a 5s budget, we should complete greedy
+  // + some endgame passes but not all 10.
   PegArgs args = {
       .game = game,
       .thread_control = config_get_thread_control(config),
@@ -212,7 +210,6 @@ static void test_peg_time_budget(void) {
       .tt_fraction_of_mem = 0.5,
       .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
       .num_passes = 10,
-      .pass_candidate_limits = {32, 16, 8, 8, 4, 4, 4, 4, 4, 4},
       .per_pass_callback = peg_progress_callback,
       .per_pass_num_top = 3,
   };

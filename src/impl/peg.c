@@ -44,11 +44,17 @@ typedef struct PegCandidate {
   SmallMove move;
   double win_pct;
   double expected_value;
+  // Set to true after endgame evaluation completes for this candidate.
+  // Used to distinguish evaluated candidates from those with stale greedy scores.
+  bool endgame_evaluated;
 } PegCandidate;
 
 static int compare_peg_candidates_desc(const void *a, const void *b) {
   const PegCandidate *ca = (const PegCandidate *)a;
   const PegCandidate *cb = (const PegCandidate *)b;
+  // Unevaluated candidates sort to the bottom.
+  if (ca->endgame_evaluated != cb->endgame_evaluated)
+    return ca->endgame_evaluated ? -1 : 1;
   if (cb->win_pct > ca->win_pct + 1e-9)
     return 1;
   if (ca->win_pct > cb->win_pct + 1e-9)
@@ -628,6 +634,7 @@ static void *peg_greedy_thread(void *arg) {
 typedef struct PegEndgameThreadArgs {
   PegCandidate *candidates;
   atomic_int *next_candidate;
+  atomic_int *num_evaluated;
   int num_candidates;
   EndgameSolver *endgame_solver;
   EndgameResults *endgame_results;
@@ -644,11 +651,18 @@ typedef struct PegEndgameThreadArgs {
   dual_lexicon_mode_t dual_lexicon_mode;
   const PegArgs *outer_args;
   int thread_index_base;
+  const Timer *timer;
+  double time_budget;
 } PegEndgameThreadArgs;
 
 static void *peg_endgame_thread(void *arg) {
   PegEndgameThreadArgs *a = (PegEndgameThreadArgs *)arg;
   while (true) {
+    // Check time budget before claiming next candidate.
+    if (a->time_budget > 0.0 &&
+        ctimer_elapsed_seconds(a->timer) >= a->time_budget) {
+      break;
+    }
     int idx = atomic_fetch_add(a->next_candidate, 1);
     if (idx >= a->num_candidates)
       break;
@@ -667,8 +681,10 @@ static void *peg_endgame_thread(void *arg) {
           a->thread_control, a->shared_tt, a->dual_lexicon_mode,
           a->thread_index_base, &c->win_pct);
     }
+    c->endgame_evaluated = true;
     update_best_win_millipct(a->best_win_millipct,
                              (int)(c->win_pct * 1000.0));
+    atomic_fetch_add(a->num_evaluated, 1);
   }
   return NULL;
 }
@@ -827,6 +843,7 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
       candidates[j].move = *initial_ml->small_moves[i];
       candidates[j].expected_value = 0.0;
       candidates[j].win_pct = 0.0;
+      candidates[j].endgame_evaluated = false;
       j++;
     }
     num_candidates = j;
@@ -948,19 +965,11 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
     }
 
     int plies = pass + 1;
-    int limit = args->pass_candidate_limits[pass];
-    if (limit <= 0) {
-      static const int kDefaultLimits[] = {
-          PEG_DEFAULT_PASS0_LIMIT, PEG_DEFAULT_PASS1_LIMIT,
-          PEG_DEFAULT_PASS2_LIMIT, PEG_DEFAULT_PASS3_LIMIT,
-          PEG_DEFAULT_PASS4_LIMIT,
-      };
-      int ndefaults = (int)(sizeof(kDefaultLimits) / sizeof(kDefaultLimits[0]));
-      limit =
-          (pass < ndefaults) ? kDefaultLimits[pass] : PEG_DEFAULT_PASS4_LIMIT;
+
+    // Reset endgame_evaluated flags for this pass.
+    for (int i = 0; i < num_candidates; i++) {
+      candidates[i].endgame_evaluated = false;
     }
-    if (limit > num_candidates)
-      limit = num_candidates;
 
     EndgameSolver **eg_solvers =
         malloc_or_die(num_threads * sizeof(EndgameSolver *));
@@ -975,6 +984,8 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
     atomic_init(&next_candidate, 0);
     atomic_int eg_best_win;
     atomic_init(&eg_best_win, 0);
+    atomic_int eg_num_evaluated;
+    atomic_init(&eg_num_evaluated, 0);
 
     PegEndgameThreadArgs *eg_targs =
         malloc_or_die(num_threads * sizeof(PegEndgameThreadArgs));
@@ -984,7 +995,8 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
       eg_targs[ti] = (PegEndgameThreadArgs){
           .candidates = candidates,
           .next_candidate = &next_candidate,
-          .num_candidates = limit,
+          .num_evaluated = &eg_num_evaluated,
+          .num_candidates = num_candidates,
           .endgame_solver = eg_solvers[ti],
           .endgame_results = eg_results[ti],
           .base_game = base_game,
@@ -1000,6 +1012,8 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
           .dual_lexicon_mode = args->dual_lexicon_mode,
           .outer_args = args,
           .thread_index_base = ti_offset + ti,
+          .timer = &peg_timer,
+          .time_budget = args->time_budget_seconds,
       };
       cpthread_create(&eg_threads[ti], peg_endgame_thread, &eg_targs[ti]);
     }
@@ -1016,13 +1030,24 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
     free(eg_targs);
     free(eg_threads);
 
-    qsort(candidates, limit, sizeof(PegCandidate), compare_peg_candidates_desc);
+    // Only the evaluated candidates have valid scores. The work-stealing
+    // atomic counter tells us how many were claimed, but some claimed
+    // candidates at the tail may not have been evaluated (time cutoff after
+    // claim). Use num_evaluated which is incremented only after completion.
+    int evaluated = atomic_load(&eg_num_evaluated);
+    if (evaluated == 0)
+      break;
+
+    // Sort all candidates; the comparator puts endgame_evaluated=true first,
+    // so unevaluated candidates (stale greedy scores) fall to the bottom.
+    qsort(candidates, num_candidates, sizeof(PegCandidate),
+          compare_peg_candidates_desc);
 
     passes_completed++;
-    num_candidates = limit;
     double now = ctimer_elapsed_seconds(&peg_timer);
-    invoke_per_pass_callback(args, pass + 1, limit, candidates, num_candidates,
-                             num_candidates, now, now - prev_elapsed);
+    invoke_per_pass_callback(args, pass + 1, evaluated, candidates,
+                             num_candidates, num_candidates, now,
+                             now - prev_elapsed);
     prev_elapsed = now;
   }
 
