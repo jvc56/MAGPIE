@@ -61,6 +61,12 @@ typedef struct PegArgs {
   // If non-NULL, all endgame solves share this TT instead of creating their
   // own.  The caller owns the lifetime.
   TranspositionTable *shared_tt;
+
+  // Base offset for movegen thread indices. Each thread in peg_solve uses
+  // thread_index_offset + ti to index into the global cached movegen array.
+  // Callers should leave this at 0. Set internally when peg_solve is called
+  // recursively (e.g., from pass evaluation) to avoid index collisions.
+  int thread_index_offset;
 } PegArgs;
 
 typedef struct PegResult {

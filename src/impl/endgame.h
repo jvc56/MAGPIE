@@ -66,6 +66,9 @@ typedef struct EndgameArgs {
   // own.  The caller is responsible for the lifetime of the shared TT.
   // tt_fraction_of_mem is ignored when shared_tt is set.
   TranspositionTable *shared_tt;
+  // Base offset for thread indices into the global movegen cache.
+  // Workers use thread_index_base + 0..num_threads-1.  Default 0.
+  int thread_index_base;
 } EndgameArgs;
 
 EndgameSolver *endgame_solver_create(void);
