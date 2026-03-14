@@ -37,6 +37,7 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "peg_test.h"
 #include "players_data_test.h"
 #include "rack_list_test.h"
 #include "rack_test.h"
@@ -117,6 +118,7 @@ static TestEntry test_table[] = {
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},
     {"load", test_load_gcg},
+    {"peg", test_peg},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

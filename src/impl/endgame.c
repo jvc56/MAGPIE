@@ -123,6 +123,7 @@ struct EndgameSolver {
   int threads;
   double tt_fraction_of_mem;
   TranspositionTable *transposition_table;
+  bool tt_is_external; // true when using a caller-provided shared TT
 
   // Signal for threads to stop early (0=running, 1=done)
   atomic_int search_complete;
@@ -437,20 +438,24 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   bool create_separate_kwgs =
       (es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED) && !shared_kwg;
 
-  // Generate pruned KWG(s) from the set of possible words on this board.
-  // In IGNORANT mode (or shared-KWG), one pruned KWG is used for everything.
-  // In INFORMED mode with different lexicons, each player index gets its own
-  // pruned KWG so that cross-set index i uses the pruned KWG derived from
-  // player i's lexicon.
-  for (int player_idx = 0; player_idx < (create_separate_kwgs ? 2 : 1);
-       player_idx++) {
-    const KWG *full_kwg =
-        player_get_kwg(game_get_player(endgame_args->game, player_idx));
-    DictionaryWordList *word_list = dictionary_word_list_create();
-    generate_possible_words(endgame_args->game, full_kwg, word_list);
-    es->pruned_kwgs[player_idx] = make_kwg_from_words_small(
-        word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
-    dictionary_word_list_destroy(word_list);
+  // skip_word_pruning: leave pruned_kwgs NULL so move gen uses the full KWG.
+  // Used by PEG which builds its own pruned KWGs at the root position.
+  if (!endgame_args->skip_word_pruning) {
+    // Generate pruned KWG(s) from the set of possible words on this board.
+    // In IGNORANT mode (or shared-KWG), one pruned KWG is used for everything.
+    // In INFORMED mode with different lexicons, each player index gets its own
+    // pruned KWG so that cross-set index i uses the pruned KWG derived from
+    // player i's lexicon.
+    for (int player_idx = 0; player_idx < (create_separate_kwgs ? 2 : 1);
+         player_idx++) {
+      const KWG *full_kwg =
+          player_get_kwg(game_get_player(endgame_args->game, player_idx));
+      DictionaryWordList *word_list = dictionary_word_list_create();
+      generate_possible_words(endgame_args->game, full_kwg, word_list);
+      es->pruned_kwgs[player_idx] = make_kwg_from_words_small(
+          word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
+      dictionary_word_list_destroy(word_list);
+    }
   }
 
   // Initialize ABDADA synchronization
@@ -467,15 +472,40 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->game = endgame_args->game;
   es->per_ply_callback = endgame_args->per_ply_callback;
   es->per_ply_callback_data = endgame_args->per_ply_callback_data;
-  if (endgame_args->tt_fraction_of_mem == 0) {
-    transposition_table_destroy(es->transposition_table);
-    es->transposition_table = NULL;
-  } else if (es->tt_fraction_of_mem != endgame_args->tt_fraction_of_mem) {
-    transposition_table_destroy(es->transposition_table);
-    es->transposition_table =
-        transposition_table_create(endgame_args->tt_fraction_of_mem);
+  if (endgame_args->shared_tt) {
+    // Use caller-provided TT. Free any previously owned TT.
+    if (!es->tt_is_external) {
+      transposition_table_destroy(es->transposition_table);
+    }
+    es->transposition_table = endgame_args->shared_tt;
+    es->tt_fraction_of_mem = 0;
+    es->tt_is_external = true;
+  } else {
+    if (!es->tt_is_external) {
+      if (endgame_args->tt_fraction_of_mem == 0) {
+        transposition_table_destroy(es->transposition_table);
+        es->transposition_table = NULL;
+      } else if (es->tt_fraction_of_mem !=
+                 endgame_args->tt_fraction_of_mem) {
+        transposition_table_destroy(es->transposition_table);
+        es->transposition_table =
+            transposition_table_create(endgame_args->tt_fraction_of_mem);
+      }
+    } else {
+      // Transitioning from external to owned. Don't destroy the external TT.
+      es->transposition_table = NULL;
+      if (endgame_args->tt_fraction_of_mem > 0) {
+        es->transposition_table =
+            transposition_table_create(endgame_args->tt_fraction_of_mem);
+      }
+    }
+    es->tt_fraction_of_mem = endgame_args->tt_fraction_of_mem;
+    es->tt_is_external = false;
   }
-  es->tt_fraction_of_mem = endgame_args->tt_fraction_of_mem;
+  // Disable TT optimization when no TT is available.
+  if (es->transposition_table == NULL) {
+    es->transposition_table_optim = false;
+  }
   if (es->results) {
     endgame_results_reset(es->results);
     endgame_results_set_valid_for_current_game_state(es->results, true);
@@ -509,7 +539,9 @@ void endgame_solver_destroy(EndgameSolver *es) {
   if (!es) {
     return;
   }
-  transposition_table_destroy(es->transposition_table);
+  if (!es->tt_is_external) {
+    transposition_table_destroy(es->transposition_table);
+  }
   kwg_destroy(es->pruned_kwgs[0]);
   kwg_destroy(es->pruned_kwgs[1]);
   free(es);
@@ -527,11 +559,15 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
   game_set_endgame_solving_mode(solver_worker->game_copy);
   game_set_backup_mode(solver_worker->game_copy, BACKUP_MODE_SIMULATION);
 
-  // Set override KWGs so cross-set computation uses the pruned lexicon
-  game_set_override_kwgs(solver_worker->game_copy, solver->pruned_kwgs[0],
-                         solver->pruned_kwgs[1], solver->dual_lexicon_mode);
-  // Regenerate initial cross-sets using the pruned KWGs
-  game_gen_all_cross_sets(solver_worker->game_copy);
+  // Set override KWGs so cross-set computation uses the pruned lexicon.
+  // When skip_word_pruning was used, pruned_kwgs are NULL; leave the game's
+  // existing KWGs and cross-sets in place (caller is responsible for them).
+  if (solver->pruned_kwgs[0] != NULL) {
+    game_set_override_kwgs(solver_worker->game_copy, solver->pruned_kwgs[0],
+                           solver->pruned_kwgs[1], solver->dual_lexicon_mode);
+    // Regenerate initial cross-sets using the pruned KWGs
+    game_gen_all_cross_sets(solver_worker->game_copy);
+  }
   solver_worker->move_list =
       move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
 
@@ -567,11 +603,39 @@ void solver_worker_destroy(EndgameSolverWorker *solver_worker) {
   free(solver_worker);
 }
 
+void endgame_solver_worker_destroy(EndgameSolverWorker *worker) {
+  solver_worker_destroy(worker);
+}
+
+Game *endgame_solver_worker_get_game(EndgameSolverWorker *worker) {
+  return worker->game_copy;
+}
+
+int endgame_solver_worker_get_requested_plies(
+    const EndgameSolverWorker *worker) {
+  return worker->solver->requested_plies;
+}
+
+void endgame_solver_worker_set_requested_plies(EndgameSolverWorker *worker,
+                                               int plies) {
+  worker->solver->requested_plies = plies;
+}
+
+MoveUndo *endgame_solver_worker_get_move_undo(EndgameSolverWorker *worker,
+                                              int slot) {
+  return &worker->move_undos[slot];
+}
+
 // Returns the pruned KWG for the given player index.
 // In shared-KWG mode, only pruned_kwgs[0] exists, so it is always returned.
 // In non-shared mode, each player index maps to its own pruned KWG.
+// When skip_word_pruning was used (pruned_kwgs are NULL), falls back to the
+// game's effective KWG (which respects any override KWGs set by the caller).
 static inline const KWG *solver_get_pruned_kwg(const EndgameSolver *solver,
                                                int player_index) {
+  if (solver->pruned_kwgs[0] == NULL) {
+    return game_get_effective_kwg(solver->game, player_index);
+  }
   if (solver->pruned_kwgs[1] == NULL) {
     return solver->pruned_kwgs[0];
   }
@@ -1204,7 +1268,7 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
 // pick best (with conservation bonus), compute final spread with rack
 // adjustments, unplay moves, store in TT. Returns evaluation from
 // on_turn's perspective.
-static int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
+int32_t negamax_greedy_leaf_playout(EndgameSolverWorker *worker,
                                            uint64_t node_key, int on_turn_idx,
                                            int32_t on_turn_spread, PVLine *pv,
                                            float opp_stuck_frac) {
@@ -2529,7 +2593,7 @@ static int extract_multi_pvs(const EndgameSolver *solver,
 void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack) {
   const int bag_size = bag_get_letters(game_get_bag(endgame_args->game));
-  if (bag_size != 0) {
+  if (bag_size != 0 && !endgame_args->allow_nonempty_bag) {
     error_stack_push(error_stack, ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY,
                      get_formatted_string(
                          "bag must be empty to solve an endgame, but have %d "
