@@ -34,9 +34,9 @@ Build variables: `BOARD_DIM` (default 15), `RACK_SIZE` (default 7). Parallel mak
 ./run u 21           # full test suite with BOARD_DIM=21
 ./run u movegen      # run a specific test (by name)
 ./run v              # valgrind (leak check)
-./run v movegen     # valgrind on specific test
+./run v movegen      # valgrind on specific test
 ./run g              # gdb
-./run g movegen     # gdb on specific test
+./run g movegen      # gdb on specific test
 ./run c              # coverage report (opens in browser)
 ./run s              # scan-build static analysis
 ./run r              # build and run release
